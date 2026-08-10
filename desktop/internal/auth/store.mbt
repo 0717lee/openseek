@@ -47,6 +47,9 @@ priv struct AuthSession {
 struct AuthStore {
   runtime_dir : @pathx.Path?
   env_override : ConnectorConfig?
+  // Installed package version used to keep the linked Browser bundle on the
+  // same release as this Desktop. Development builds have no release bundle.
+  app_version : String
   // The relay actor's coalescing poke channel: `DiscardOldest(1)` never
   // blocks a producer and buffers at most one pending wakeup.
   wakeups : @async.Queue[Unit]
@@ -71,6 +74,7 @@ struct AuthStore {
 pub async fn AuthStore::load(
   runtime_dir? : @pathx.Path,
   env_override? : ConnectorConfig,
+  app_version? : String = "development",
 ) -> AuthStore {
   let session = match runtime_dir {
     Some(dir) => load_session_file(dir)
@@ -79,6 +83,7 @@ pub async fn AuthStore::load(
   {
     runtime_dir,
     env_override,
+    app_version,
     wakeups: Queue(kind=DiscardOldest(1)),
     session,
     connected: false,
@@ -92,10 +97,11 @@ pub async fn AuthStore::load(
 ///|
 /// A store with nothing signed in and nothing persisted — the default for
 /// test-constructed API states.
-pub fn AuthStore::empty() -> AuthStore {
+pub fn AuthStore::empty(app_version? : String = "development") -> AuthStore {
   {
     runtime_dir: None,
     env_override: None,
+    app_version,
     wakeups: Queue(kind=DiscardOldest(1)),
     session: None,
     connected: false,
@@ -221,7 +227,7 @@ pub fn AuthStore::status(
       device: self.override_device.map(device => {
         id: device,
         name: config.device_name,
-        url: device_url(origin, device),
+        url: device_url(origin, device, app_version=self.app_version),
       }),
     }
   }
@@ -238,7 +244,11 @@ pub fn AuthStore::status(
         device: Some({
           id: session.device_id,
           name: session.device_name,
-          url: device_url(session.server_url, session.device_id),
+          url: device_url(
+            session.server_url,
+            session.device_id,
+            app_version=self.app_version,
+          ),
         }),
       }
     None =>

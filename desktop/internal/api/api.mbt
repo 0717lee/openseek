@@ -44,7 +44,7 @@ pub fn ApiState::new(
     hub: Hub::new(),
     auth: match auth {
       Some(store) => store
-      None => @auth.AuthStore::empty()
+      None => @auth.AuthStore::empty(app_version~)
     },
     app_version,
     on_finished,

@@ -42,6 +42,7 @@ fn main {
     let auth = @auth.AuthStore::load(
       runtime_dir?,
       env_override?=relay_settings(),
+      app_version~,
     )
     let state = @api.ApiState::new(
       engine~,

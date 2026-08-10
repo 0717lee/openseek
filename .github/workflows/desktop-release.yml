@@ -186,18 +186,33 @@ jobs:
             --sign "$MACOS_SIGNING_IDENTITY" \
             --notarize "$NOTARY_PROFILE"
 
-      - name: Upload signed artifacts
+      # Keep one compressed browser archive beside the desktop artifacts. The
+      # API extracts this exact archive when the release is published.
+      - name: Build browser release artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          moon -C desktop run --target native package/browser -- --release
+          test -f desktop/dist/browser/index.html
+          test -f desktop/dist/browser/browser.js
+          COPYFILE_DISABLE=1 tar \
+            -C desktop/dist \
+            -czf desktop/dist/SeekMoon.browser.tar.gz \
+            browser
+
+      - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
           name: SeekMoon-macos-arm64-v${{ steps.release.outputs.version }}
           path: |
             desktop/dist/SeekMoon.app.zip
             desktop/dist/SeekMoon.dmg
+            desktop/dist/SeekMoon.browser.tar.gz
           if-no-files-found: error
           retention-days: 14
 
-      # Upload verifies the server-computed digest before publish atomically
-      # switches the selected channel's latest.json to this version.
+      # Every artifact is uploaded once. The same publish request regenerates
+      # latest.json and extracts/selects the browser archive on the server.
       - name: Publish release
         shell: bash
         env:
@@ -209,6 +224,9 @@ jobs:
           desktop/scripts/publish-release.sh upload \
             desktop/dist/SeekMoon.dmg \
             macos-arm64-dmg
+          desktop/scripts/publish-release.sh upload \
+            desktop/dist/SeekMoon.browser.tar.gz \
+            browser
           desktop/scripts/publish-release.sh publish "v$RELEASE_VERSION"
 
       - name: Verify release manifest
@@ -222,21 +240,57 @@ jobs:
           dmg="desktop/dist/SeekMoon.dmg"
           dmg_sha256="$(shasum -a 256 "$dmg" | cut -d' ' -f1)"
           dmg_url="$OPENSEEK_API_ORIGIN/desktop/releases/v$RELEASE_VERSION/SeekMoon.dmg"
+          browser="desktop/dist/SeekMoon.browser.tar.gz"
+          browser_sha256="$(shasum -a 256 "$browser" | cut -d' ' -f1)"
+          browser_url="$OPENSEEK_API_ORIGIN/desktop/releases/v$RELEASE_VERSION/SeekMoon.browser.tar.gz"
+          browser_manifest="$(curl -fsSL "$OPENSEEK_API_ORIGIN/browser/releases/current.json")"
+          browser_base_url="$OPENSEEK_API_ORIGIN/console/releases/v$RELEASE_VERSION"
 
-          # The updater installs from the bare platform key; the `-dmg`
-          # entry is the manual installer the web console links to.
+          # The updater installs from the bare macOS platform key. The DMG and
+          # browser bundle are separate release artifacts for manual install
+          # and later browser deployment respectively.
           jq -e \
             --arg version "$RELEASE_VERSION" \
             --arg url "$archive_url" \
             --arg sha256 "$archive_sha256" \
             --arg dmg_url "$dmg_url" \
             --arg dmg_sha256 "$dmg_sha256" \
+            --arg browser_url "$browser_url" \
+            --arg browser_sha256 "$browser_sha256" \
             '.version == $version and
               .platforms["macos-arm64"].url == $url and
               .platforms["macos-arm64"].sha256 == $sha256 and
               .platforms["macos-arm64-dmg"].url == $dmg_url and
-              .platforms["macos-arm64-dmg"].sha256 == $dmg_sha256' \
+              .platforms["macos-arm64-dmg"].sha256 == $dmg_sha256 and
+              .platforms.browser.url == $browser_url and
+              .platforms.browser.sha256 == $browser_sha256' \
             <<< "$manifest"
+
+          jq -e \
+            --arg version "$RELEASE_VERSION" \
+            '.version == $version' \
+            <<< "$browser_manifest"
+
+          response_headers="$RUNNER_TEMP/openseek-console-headers"
+          curl -fsS -D "$response_headers" -o /dev/null \
+            "$OPENSEEK_API_ORIGIN/console/"
+          if ! tr -d '\r' < "$response_headers" | grep -Fqx \
+            "location: /console/releases/v${RELEASE_VERSION}/index.html"; then
+            echo "::error::/console/ did not select browser v$RELEASE_VERSION"
+            cat "$response_headers"
+            exit 1
+          fi
+
+          for file in index.html browser.js; do
+            served="$RUNNER_TEMP/openseek-browser-$file"
+            curl -fsSL "$browser_base_url/$file" -o "$served"
+            served_sha256="$(shasum -a 256 "$served" | cut -d' ' -f1)"
+            local_sha256="$(shasum -a 256 "desktop/dist/browser/$file" | cut -d' ' -f1)"
+            if [[ "$served_sha256" != "$local_sha256" ]]; then
+              echo "::error::Served $file digest does not match the release bundle"
+              exit 1
+            fi
+          done
 
           {
             echo "## Desktop $RELEASE_CHANNEL release"
@@ -246,6 +300,9 @@ jobs:
             echo "- ZIP SHA-256: \`$archive_sha256\`"
             echo "- Installer DMG: $dmg_url"
             echo "- DMG SHA-256: \`$dmg_sha256\`"
+            echo "- Browser bundle: $browser_url"
+            echo "- Browser SHA-256: \`$browser_sha256\`"
+            echo "- Browser console: $browser_base_url/"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove signing keychain
