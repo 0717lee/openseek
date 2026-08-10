@@ -26,17 +26,19 @@ priv struct FileScanEntry {
 }
 
 ///|
+/// File discovery is best-effort: a directory that disappears or becomes
+/// unreadable cannot fail the whole scan, while cancellation still stops it.
 async fn read_sorted_directory(dir : @pathx.Absolute) -> Array[FileScanEntry] {
   let listing = @fs.opendir(dir.to_string()) catch {
     error if @async.is_being_cancelled() => raise error
-    error => raise HostError("failed to list workspace directory: \{error}")
+    _ => return []
   }
   defer listing.close()
   let entries : Array[FileScanEntry] = []
   for ;; {
     let entry = listing.next() catch {
       error if @async.is_being_cancelled() => raise error
-      error => raise HostError("failed to read workspace directory: \{error}")
+      _ => None
     }
     guard entry is Some(entry) else { break }
     entries.push({ name: entry.name, is_dir: entry.is_dir })
@@ -702,6 +704,34 @@ async test "file scan uses one ordered coordinator" {
   })
   assert_eq(maximum.val, 1)
   assert_eq(snapshot.files, ["a/one.mbt", "b/one.mbt"])
+}
+
+///|
+async test "file scan skips a directory that cannot be opened" {
+  @async.with_task_group() <| group => {
+    let root = @fs.tmpdir(prefix="openseek-file-search-unreadable-")
+    group.add_defer(() => {
+      @async.protect_from_cancel(() => @fs.rmdir(root, recursive=true))
+    })
+    @fs.mkdir("\{root}/b-readable")
+    @fs.write_file(
+      "\{root}/b-readable/kept.mbt",
+      "",
+      create_mode=CreateOrTruncate,
+    )
+    let absolute = @pathx.Path(root).resolve()
+    let snapshot = scan_directory_tree(absolute, dir => {
+      if dir == absolute {
+        [
+          test_scan_entry("a-vanished", true),
+          test_scan_entry("b-readable", true),
+        ]
+      } else {
+        read_sorted_directory(dir)
+      }
+    })
+    assert_eq(snapshot.files, ["b-readable/kept.mbt"])
+  }
 }
 
 ///|
