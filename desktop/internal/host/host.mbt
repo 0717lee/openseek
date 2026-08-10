@@ -7,7 +7,7 @@
 /// transport boundary stringifies it into the error the client displays.
 pub(all) suberror HostError {
   HostError(String)
-}
+} derive(Debug)
 
 ///|
 impl Show for HostError with fn output(self, logger) {
@@ -23,7 +23,7 @@ impl Show for HostError with fn output(self, logger) {
 /// operation.
 pub(all) suberror PayloadError {
   PayloadError(String)
-}
+} derive(Debug)
 
 ///|
 impl Show for PayloadError with fn output(self, logger) {
