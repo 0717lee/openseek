@@ -1042,7 +1042,13 @@ fn tool_activity_summary(items : Array[@transcript.TranscriptItem]) -> String {
   if briefs.is_empty() {
     return tool_group_summary(items)
   }
-  let shown = briefs[:briefs.length().min(2)].to_owned()
+  let shown : Array[String] = []
+  for brief in briefs {
+    if shown.length() == 2 {
+      break
+    }
+    shown.push(brief)
+  }
   let remaining = tools - shown.length()
   if remaining > 0 {
     shown.push("+\{remaining} more")
