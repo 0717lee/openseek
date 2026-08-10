@@ -39,7 +39,7 @@ test "sandbox trusts only narrow moon source-writing commands" {
   assert_true(mode_for("moon fmt --check") is SourceReadOnly)
   assert_true(mode_for("moon check --help") is SourceReadOnly)
   assert_true(mode_for("cd pkg && moon fmt") is TrustedSourceWrite)
-  assert_true(mode_for("moon fmt && git diff") is SourceReadOnly)
+  assert_true(mode_for("moon fmt && git diff") is TrustedSourceWrite)
   assert_true(mode_for("moon fmt > main.mbt") is SourceReadOnly)
   assert_true(mode_for("moon fmt 2> main.mbt") is SourceReadOnly)
   assert_true(mode_for("moon fmt 1>> main.mbt") is SourceReadOnly)
@@ -572,7 +572,9 @@ async test "sandbox preblocks common source-writing commands" {
         "env GIT_WORK_TREE=. git restore main.mbt", "git checkout HEAD~1 -- main.mbt",
         "git restore -s HEAD~1 main.mbt", "git rebase -i main", "git rebase --exec ls main",
         "git rebase -s ours main", "git rebase --edit-todo", "git -c sequence.editor=x rebase --continue",
-        "GIT_DIR=/tmp/x git rebase main",
+        "GIT_DIR=/tmp/x git rebase main", "git merge -s evil main", "git pull --rebase=interactive",
+        "git cherry-pick --strategy=evil HEAD~1", "git bisect run ./test.sh", "git worktree move ../wt ../wt2",
+        "git worktree remove --force ../wt",
         // submodule: foreach runs arbitrary commands; forced update/deinit lose data.
          "git submodule foreach echo hi", "git submodule --quiet foreach echo hi",
         "git submodule update --force", "git submodule deinit --force path", "git -c filter.f.smudge=cmd submodule update --init",
@@ -604,16 +606,16 @@ async test "sandbox preblocks common source-writing commands" {
         real_root,
       ),
     )
-    // A custom-env object-store writer is caught in the TooComplex text path too,
+    // A custom-env worktree writer is caught in the TooComplex text path too,
     // even though the env assignment precedes the `git` word.
     let git_env_glob = "GIT_DIR=/tmp/x git checkout -- *.mbt"
     assert_true(
       dyn_tree_target(git_env_glob, real_root, Some(real_root)) is Some(_),
     )
-    // Recoverable git worktree subcommands (and dry-run clean) are not pre-blocked;
-    // they run as trusted source writers, or harmlessly sandboxed.
+    // Recognized git porcelain (and dry-run clean) is not pre-blocked; worktree
+    // writers run trusted and metadata commands remain harmlessly sandboxed.
     for
-      recoverable_git in [
+      allowed_git in [
         "git checkout -- .", "git checkout feature/foo", "git switch feature/foo",
         "git restore main.mbt", "git reset --hard", "git rm main.mbt", "git stash",
         "git clean -fdn", "git status", "git apply --check patch.diff", "git apply --stat patch.diff",
@@ -627,9 +629,7 @@ async test "sandbox preblocks common source-writing commands" {
         // bare submodule is implicit status; foreach --help bypasses preblock.
          "git submodule", "git submodule --quiet", "git submodule foreach --help",
       ] {
-      assert_true(
-        tree_target(recoverable_git, real_root, Some(real_root)) is None,
-      )
+      assert_true(tree_target(allowed_git, real_root, Some(real_root)) is None)
     }
     let find_sed_source = "find \{real_root} -name '*.mbt' -exec sed -i '' 's/42/43/' {} +"
     assert_true(
@@ -698,7 +698,7 @@ async test "sandbox preblocks common source-writing commands" {
       ),
     )
     // The same xargs-utility gap still applies to `git apply` (the one blocked
-    // git op); recoverable git subcommands are trusted and not pre-blocked.
+    // git op); recognized porcelain is trusted or not pre-blocked.
     let xargs_git_apply = "echo *.patch | xargs git apply"
     assert_true(
       is_some_path(
@@ -1354,24 +1354,26 @@ fn redirect_target(cmd : String, root : String, cwd : String?) -> String? {
 }
 
 ///|
-test "sandbox trusts recoverable git, sandboxes patch and reconfiguring git" {
-  // Recoverable worktree subcommands run unsandboxed (trusted to write source):
-  // every write they make comes from git's own object store.
+test "sandbox trusts recognized porcelain and blocks dangerous forms" {
+  // Recognized first-party porcelain that may write a worktree runs trusted.
   for
     cmd in [
       "git checkout -- main.mbt", "git checkout feature/foo", "git switch main",
       "git restore main.mbt", "git reset --hard", "git stash", "git stash pop", "git rm main.mbt",
+      "git merge main", "git pull --rebase", "git cherry-pick HEAD~1", "git revert HEAD",
+      "git clone https://example.com/repo", "git sparse-checkout set pkg", "git submodule update --init",
       "cd pkg && git checkout -- main.mbt",
     ] {
     assert_true(mode_for(cmd) is TrustedSourceWrite)
   }
-  // External-patch / store-feeder git stays sandboxed, as do `mv` (moves arbitrary
-  // worktree bytes onto the destination, not the object store) and `clean`
-  // (deletes UNTRACKED files with no object-store copy — permanent).
+  // External-patch/store-feeder git stays sandboxed, as do byte-moving `mv`,
+  // destructive clean, explicit command runners, and external merge strategies.
   for
     cmd in [
       "git apply patch.diff", "git am patch.mbox", "git update-index --cacheinfo 100644,abc,main.mbt",
       "git read-tree HEAD", "git fast-import", "git mv notes.md main.mbt", "git clean -fd",
+      "git bisect run ./test.sh", "git merge -s evil main", "git pull --rebase=interactive",
+      "git worktree move ../wt ../wt2", "git worktree remove --force ../wt",
     ] {
     assert_true(mode_for(cmd) is SourceReadOnly)
   }
@@ -1387,59 +1389,48 @@ test "sandbox trusts recoverable git, sandboxes patch and reconfiguring git" {
     ] {
     assert_true(mode_for(cmd) is SourceReadOnly)
   }
-  // Unknown / plumbing / read-only git is not granted trust (fail closed).
+  // Read/metadata porcelain does not need source-write trust on its own. Unknown
+  // plumbing, aliases, and external command runners fail closed too.
   for cmd in ["git status", "git diff", "git checkout-index -a", "git co -- ."] {
     assert_true(mode_for(cmd) is SourceReadOnly)
   }
-  // The recoverable `git worktree` verbs are trusted: `add` only creates new
-  // paths (git refuses an existing non-empty target, force included) filled
-  // from the object store, non-force `remove` deletes only tracked clean
-  // content, and `prune` touches only `$GIT_DIR/worktrees` admin data.
+  // Recognized worktree verbs compose by default; destructive move/force-remove
+  // forms were rejected above by the blocklist.
   for
     cmd in [
       "git worktree add ../wt", "git worktree add --force ../wt", "git worktree add -b feat ../wt HEAD",
       "git worktree add .worktrees/feature-x -b feature-x", "git worktree remove ../wt",
-      "git worktree remove .worktrees/feature-x", "git worktree prune",
+      "git worktree remove .worktrees/feature-x", "git worktree prune", "git worktree list",
     ] {
     assert_true(mode_for(cmd) is TrustedSourceWrite)
   }
-  // Force remove permanently deletes modified or untracked files; the other
-  // verbs (read-only `list`, byte-moving `move`, ...) fail closed, and a
-  // reconfigured or custom-environment invocation is demoted like any git.
+  // A reconfigured or custom-environment invocation is demoted like any git.
   for
     cmd in [
       "git worktree remove --force ../wt", "git worktree remove -f ../wt", "git worktree remove --fo ../wt",
-      "git worktree list", "git worktree move ../wt ../wt2", "git worktree", "git -C /tmp/x worktree add ../wt",
-      "GIT_DIR=/tmp/x git worktree add ../wt",
+      "git worktree move ../wt ../wt2", "git -C /tmp/x worktree add ../wt", "GIT_DIR=/tmp/x git worktree add ../wt",
     ] {
     assert_true(mode_for(cmd) is SourceReadOnly)
   }
 }
 
 ///|
-test "sandbox trusts restricted rebase forms, demotes the rest" {
-  // The recoverable rebase forms are trusted source writers: replayed content
-  // materializes from the object store, the pre-rebase tip stays in
-  // ORIG_HEAD/the reflog, and git refuses to overwrite untracked files during
-  // replay. Conflict resolution still flows through `edit` + sandboxed
-  // `git add`, so this opens no source-editing channel outside the tools.
+test "recognized git chains compose while dangerous rebase stays sandboxed" {
   for
     cmd in [
       "git rebase", "git rebase main", "git rebase origin/main feature", "git rebase --onto main feature~3 feature",
       "git rebase --keep-base main", "git rebase --autostash main", "git rebase --fork-point main",
       "git rebase --continue", "git rebase --abort", "git rebase --skip", "git rebase --quit",
-      "cd pkg && git rebase --continue",
+      "git rebase --rebase-merges main", "git rebase --root", "git rebase --cont",
+      "cd pkg && git rebase --continue", "git fetch origin main && git rebase origin/main 2>&1",
+      "cd /workspace && git fetch origin main && git rebase origin/main 2>&1",
     ] {
     assert_true(mode_for(cmd) is TrustedSourceWrite)
   }
-  // Anything not an exact known-safe token fails closed to the sandbox (git
-  // accepts unambiguous long-option abbreviations, and rebase's surface
-  // includes command runners), as do reconfigured or custom-environment
-  // invocations. The command-running forms are additionally pre-blocked
-  // (`should_preblock`) as the cross-platform floor.
+  // Explicit command-running forms and reconfigured/custom-environment rebases
+  // still fail closed.
   for
     cmd in [
-      "git rebase --rebase-merges main", "git rebase --root", "git rebase --cont",
       "git rebase -i main", "git rebase --exec ls main", "git rebase -s ours main",
       "git -c sequence.editor=x rebase main", "git -C /tmp/x rebase --abort", "FOO=bar git rebase main",
       "env GIT_DIR=/tmp/x git rebase --continue",

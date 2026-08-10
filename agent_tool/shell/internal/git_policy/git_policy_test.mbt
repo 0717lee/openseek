@@ -16,68 +16,30 @@ test "parse fails closed" {
 }
 
 ///|
-test "object-store-write classification excludes mv and plumbing" {
-  for sub in ["checkout", "switch", "restore", "reset", "stash", "rm"] {
-    assert_true(@git_policy.subcommand_writes_from_object_store(sub))
-  }
-  // rebase is deliberately absent: its recoverable forms are gated by args
-  // (`rebase_args_are_recoverable`), never trusted by name alone.
-  // submodule is absent too: its verbs split between recoverable writes
-  // (`update`/`deinit` without force), `.gitmodules` writers
-  // (`set-url`/`set-branch`/`add`), and command runners (`foreach`), so it is
-  // classified per-verb via `submodule_write_is_recoverable`.
+test "recognized porcelain excludes aliases, plumbing, and command runners" {
   for
     sub in [
-      "mv", "clean", "apply", "am", "status", "checkout-index", "co", "rebase", "submodule",
+      "status", "diff", "fetch", "pull", "merge", "rebase", "cherry-pick", "worktree",
     ] {
-    assert_false(@git_policy.subcommand_writes_from_object_store(sub))
+    assert_true(@git_policy.subcommand_is_recognized_porcelain(sub))
   }
-  // The custom-environment pre-blocks treat rebase as an object-store writer:
-  // repointed via GIT_DIR/GIT_CONFIG_* it could write source from another repo.
-  assert_true(@git_policy.subcommand_is_object_store_writer("rebase"))
-  assert_true(@git_policy.subcommand_is_object_store_writer("checkout"))
-  assert_false(@git_policy.subcommand_is_object_store_writer("apply"))
-  assert_false(@git_policy.subcommand_is_object_store_writer("clean"))
+  for
+    sub in ["co", "checkout-index", "commit-tree", "filter-branch", "difftool"] {
+    assert_false(@git_policy.subcommand_is_recognized_porcelain(sub))
+  }
 }
 
 ///|
-test "rebase args: plain and in-progress forms recoverable, rest fails closed" {
-  fn recoverable(args : Array[String]) -> Bool {
-    @git_policy.rebase_args_are_recoverable(args, 0, args.length())
+test "worktree-write classification separates metadata and read commands" {
+  for
+    sub in [
+      "checkout", "clone", "merge", "pull", "rebase", "restore", "submodule", "worktree",
+    ] {
+    assert_true(@git_policy.subcommand_may_write_worktree(sub))
   }
-
-  // Plain rebases and the in-progress verbs: replayed content comes from the
-  // object store and the pre-rebase tip stays in ORIG_HEAD/the reflog.
-  assert_true(recoverable([]))
-  assert_true(recoverable(["main"]))
-  assert_true(recoverable(["origin/main", "feature"]))
-  assert_true(recoverable(["-"]))
-  assert_true(recoverable(["--onto", "main", "feature~3", "feature"]))
-  assert_true(recoverable(["--onto=main", "feature"]))
-  assert_true(recoverable(["--keep-base", "main"]))
-  assert_true(recoverable(["--fork-point", "main"]))
-  assert_true(recoverable(["--no-fork-point", "main"]))
-  assert_true(recoverable(["--autostash", "main"]))
-  assert_true(recoverable(["--no-autostash", "main"]))
-  assert_true(recoverable(["--continue"]))
-  assert_true(recoverable(["--abort"]))
-  assert_true(recoverable(["--skip"]))
-  assert_true(recoverable(["--quit"]))
-  // Allowlist polarity: anything not an exact known-safe token fails closed —
-  // rebase's surface includes command runners, and git accepts unambiguous
-  // long-option abbreviations, so `--cont` is as untrusted as `--exec`.
-  assert_false(recoverable(["-i", "main"]))
-  assert_false(recoverable(["--interactive", "main"]))
-  assert_false(recoverable(["--exec", "ls", "main"]))
-  assert_false(recoverable(["-x", "ls", "main"]))
-  assert_false(recoverable(["--edit-todo"]))
-  assert_false(recoverable(["--strategy=ours", "main"]))
-  assert_false(recoverable(["--root"]))
-  assert_false(recoverable(["--rebase-merges", "main"]))
-  assert_false(recoverable(["--stat", "main"]))
-  assert_false(recoverable(["--cont"]))
-  assert_false(recoverable(["--onto"]))
-  assert_false(recoverable(["--", "main"]))
+  for sub in ["add", "commit", "diff", "fetch", "push", "status", "tag"] {
+    assert_false(@git_policy.subcommand_may_write_worktree(sub))
+  }
 }
 
 ///|
@@ -123,6 +85,42 @@ test "should_preblock: rebase command-running and reconfigured forms" {
       ["git", "rebase", "--stat", "main"],
       ["git", "rebase", "--empty=drop", "main"],
       ["git", "rebase", "--help"],
+    ] {
+    assert_false(@git_policy.should_preblock(cmd, 1))
+  }
+}
+
+///|
+test "should_preblock: external strategies, bisect run, and worktree loss" {
+  for
+    cmd in [
+      ["git", "merge", "-s", "evil", "main"],
+      ["git", "merge", "--strategy=evil", "main"],
+      ["git", "pull", "-Xtheirs"],
+      ["git", "pull", "--rebase=interactive"],
+      ["git", "pull", "--rebase=i"],
+      ["git", "cherry-pick", "--strategy=evil", "HEAD~1"],
+      ["git", "revert", "-Xtheirs", "HEAD"],
+      ["git", "bisect", "run", "./test.sh"],
+      ["git", "worktree", "move", "../wt", "../moved"],
+      ["git", "worktree", "remove", "--force", "../wt"],
+      ["git", "worktree", "remove", "--fo", "../wt"],
+      ["git", "-C", "/tmp/x", "merge", "main"],
+    ] {
+    assert_true(@git_policy.should_preblock(cmd, 1))
+  }
+  for
+    cmd in [
+      ["git", "merge", "main"],
+      ["git", "pull", "--rebase"],
+      ["git", "pull", "--rebase=merges"],
+      ["git", "cherry-pick", "-s", "HEAD~1"],
+      ["git", "revert", "-s", "HEAD"],
+      ["git", "bisect", "start", "HEAD", "HEAD~10"],
+      ["git", "worktree", "add", "../wt"],
+      ["git", "worktree", "list"],
+      ["git", "worktree", "remove", "../wt"],
+      ["git", "worktree", "remove", "--", "-f"],
     ] {
     assert_false(@git_policy.should_preblock(cmd, 1))
   }
@@ -300,37 +298,21 @@ test "text_should_preblock mirrors should_preblock on a flat word list" {
 }
 
 ///|
-test "worktree args: add and prune recoverable, remove only without force" {
-  fn recoverable(args : Array[String]) -> Bool {
-    @git_policy.worktree_args_are_recoverable(args, 0, args.length())
-  }
-
-  // `add` in any form: git itself refuses an existing non-empty target, force
-  // included, so nothing existing can be clobbered.
-  assert_true(recoverable(["add", "../wt"]))
-  assert_true(recoverable(["add", "--force", "../wt"]))
-  assert_true(recoverable(["add", "-b", "feat", "../wt", "HEAD"]))
-  assert_true(recoverable(["add", "--detach", "../wt"]))
-  // `remove` without force deletes only tracked, clean content.
-  assert_true(recoverable(["remove", "../wt"]))
-  assert_true(recoverable(["remove", "--", "../wt"]))
-  assert_true(recoverable(["prune"]))
-  assert_true(recoverable(["prune", "-n", "--expire", "1.day"]))
-  // Force remove permanently deletes modified or untracked files. Any option
-  // fails closed: git accepts unambiguous long-option abbreviations, so
-  // `--fo`/`--for` force the removal too.
-  assert_false(recoverable(["remove", "--force", "../wt"]))
-  assert_false(recoverable(["remove", "-f", "../wt"]))
-  assert_false(recoverable(["remove", "-ff", "../wt"]))
-  assert_false(recoverable(["remove", "--fo", "../wt"]))
-  assert_false(recoverable(["remove", "--quiet", "../wt"]))
-  // After `--` every word is a path: a worktree named `-f` is a plain,
-  // non-force removal.
-  assert_true(recoverable(["remove", "--", "-f"]))
-  // Everything else fails closed, including a missing verb.
-  assert_false(recoverable(["list"]))
-  assert_false(recoverable(["lock", "../wt"]))
-  assert_false(recoverable(["move", "../wt", "../wt2"]))
-  assert_false(recoverable(["repair"]))
-  assert_false(recoverable([]))
+test "text path identifies worktree-writing porcelain" {
+  let fetch = ["git", "fetch", "origin", "main"]
+  assert_false(
+    @git_policy.text_invocation_may_write_worktree(fetch, 1, fetch.length()),
+  )
+  let rebase = ["git", "rebase", "origin/main"]
+  assert_true(
+    @git_policy.text_invocation_may_write_worktree(rebase, 1, rebase.length()),
+  )
+  let plumbing = ["git", "checkout-index", "-a"]
+  assert_false(
+    @git_policy.text_invocation_may_write_worktree(
+      plumbing,
+      1,
+      plumbing.length(),
+    ),
+  )
 }
