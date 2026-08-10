@@ -956,7 +956,10 @@ fn apply_engine_event(
         activity: "",
         run: event_run_id,
       })
-      (false, { ..conv, subruns, })
+      // A lane is a row at the tail, so opening one grows the transcript: a
+      // conversation pinned to the bottom has to follow it down, or several
+      // concurrent sub-runs open entirely below the fold.
+      (true, { ..conv, subruns, })
     }
     // Closed: drop the lane and say what it cost, which is the one place
     // those numbers are ever reported.
@@ -5596,11 +5599,13 @@ fn sessions_loaded(
 /// not leave a pulsing lane behind.
 test "a lane outlives neither its run nor a missing finish bracket" {
   let conv = { ..test_conversation(), run: Open(run_id="r1", stage=Opened) }
-  let (_, opened) = apply_engine_event(
+  let (grew, opened) = apply_engine_event(
     conv,
     SubrunOpened(id="sr-1", kind="explore", label="where is X"),
     Some("r1"),
   )
+  // The lane is a row at the tail: a pinned transcript must follow it down.
+  assert_true(grew)
   inspect(opened.visible_subruns().length(), content="1")
   // The run settles without a finish bracket ever arriving.
   let settled = { ..opened, run: NoRun(ended=Some(RunFailed)) }
