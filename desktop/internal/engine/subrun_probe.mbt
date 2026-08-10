@@ -45,9 +45,15 @@ priv struct SubrunProbeState {
   /// temp file and renaming it over the record
   /// (`agent_session/store/store.mbt::write_text_atomic`), and the
   /// replacement carries the newly appended event too — so it is usually
-  /// LONGER than what was read, and a length check alone cannot see it. An
-  /// offset carried onto a different inode would skip part of the record and
-  /// splice a stale carry onto unrelated bytes.
+  /// LONGER than what was read, and a length check alone cannot see it.
+  ///
+  /// This is a resync HINT, not a correctness argument: it is a positional
+  /// continuity check, so a match means the bytes before the offset are the
+  /// ones that were read there, and a coincidental match would only mean
+  /// reading on from a boundary that looks the same. What actually keeps the
+  /// display right either way is `watermark` — every line's sequence is
+  /// checked before it counts, so re-reading is free of consequences and a
+  /// missed reset costs nothing.
   mut anchor : Bytes
   /// Bytes after the last newline: a poll can land mid-line, and half a JSON
   /// object is not news. Held as bytes, not text, so a chunk boundary inside
@@ -55,6 +61,18 @@ priv struct SubrunProbeState {
   mut carry : Bytes
   mut steps : Int
   mut activity : String
+  /// The calls the child's latest assistant item requested and has not
+  /// answered yet, as `(id, name)` in call order. A batch runs in that order,
+  /// so the FIRST of these is what is running — taking the last would name a
+  /// call that has not started, and then leave a finished call on screen for
+  /// the whole of the next one. (Concurrent-safe calls overlap, so "first" is
+  /// an approximation there; it is still one of the calls actually running.)
+  mut pending : Array[(String, String)]
+  /// The highest record sequence folded in. Every line carries one and they
+  /// are monotone, so this — not the byte offset — is what keeps a re-read
+  /// from counting anything twice. The offset is an optimization; this is
+  /// the correctness argument, and it holds however the file was replaced.
+  mut watermark : Int
 }
 
 ///|
@@ -84,11 +102,11 @@ async fn SubrunProbeState::poll(self : SubrunProbeState) -> Bool {
     self.offset = 0
     self.carry = b""
     self.anchor = b""
-    // The counters describe what was read from THIS file; recounting from
-    // its head means starting them over, or every surviving item would be
-    // counted twice.
-    self.steps = 0
-    self.activity = ""
+    // The counters are NOT reset with the offset: the watermark makes the
+    // re-read idempotent by skipping every sequence already folded in, so a
+    // repair that kept the record's history keeps the count that goes with
+    // it. Resetting here would instead double-count everything the rewrite
+    // preserved.
   }
   if size <= self.offset {
     return false
@@ -135,6 +153,18 @@ fn SubrunProbeState::consume(self : SubrunProbeState, line : BytesView) -> Bool 
   guard json is Object(fields) && fields.get("item") is Some(Object(item)) else {
     return false
   }
+  // Already folded in. This is what makes a re-read — after a repair, a
+  // replaced file, or a byte offset that turned out to be wrong — cost
+  // nothing but the reading: the same event can arrive any number of times
+  // and moves the display exactly once.
+  guard fields.get("sequence") is Some(Number(sequence, ..)) else {
+    return false
+  }
+  let sequence = sequence.to_int()
+  if sequence <= self.watermark {
+    return false
+  }
+  self.watermark = sequence
   guard item.get("kind") is Some(String(kind)) else { return false }
   match kind {
     "assistant" => {
@@ -144,23 +174,37 @@ fn SubrunProbeState::consume(self : SubrunProbeState, line : BytesView) -> Bool 
       // runs — waiting for the `tool_result` would leave the lane showing
       // the previous action for exactly the calls worth explaining.
       match item.get("payload") {
-        Some(Object(payload)) =>
-          if last_tool_call_name(payload) is Some(name) {
+        Some(Object(payload)) => {
+          self.pending = requested_calls(payload)
+          if self.pending is [(_, name), ..] {
             self.activity = name
           }
+        }
         _ => ()
       }
       true
     }
     "tool_result" => {
       guard item.get("payload") is Some(Object(payload)) else { return false }
-      let activity = match payload.get("brief") {
-        Some(String(brief)) if !brief.trim(chars=" ").is_empty() => brief
-        _ =>
-          match payload.get("tool_name") {
-            Some(String(name)) => name
-            _ => return false
-          }
+      // This call is answered; whatever else the batch requested is what the
+      // child is on now.
+      if payload.get("tool_call_id") is Some(String(answered)) {
+        self.pending = self.pending.filter(call => call.0 != answered)
+      }
+      let activity = if self.pending is [(_, next), ..] {
+        next
+      } else {
+        // Nothing left to run: the call that just finished is the truest
+        // description of where the child is until its next turn, and its own
+        // brief says it better than a bare tool name.
+        match payload.get("brief") {
+          Some(String(brief)) if !brief.trim(chars=" ").is_empty() => brief
+          _ =>
+            match payload.get("tool_name") {
+              Some(String(name)) => name
+              _ => return false
+            }
+        }
       }
       let changed = activity != self.activity
       self.activity = activity
@@ -205,17 +249,19 @@ async fn anchored_at(file : @fs.File, offset : Int64, anchor : Bytes) -> Bool {
 }
 
 ///|
-/// The name of the last tool call an assistant item requested, or `None` when
-/// it requested none (a plain message, or an item this build cannot read).
-fn last_tool_call_name(payload : Map[String, Json]) -> String? {
-  guard payload.get("tool_calls") is Some(Array(calls)) else { return None }
-  let mut name = None
+/// The calls an assistant item requested, as `(id, name)` in call order.
+/// Empty for a plain message, or for an item this build cannot read.
+fn requested_calls(payload : Map[String, Json]) -> Array[(String, String)] {
+  guard payload.get("tool_calls") is Some(Array(calls)) else { return [] }
+  let requested : Array[(String, String)] = []
   for call in calls {
-    if call is Object(fields) && fields.get("name") is Some(String(value)) {
-      name = Some(value)
+    if call is Object(fields) &&
+      fields.get("id") is Some(String(id)) &&
+      fields.get("name") is Some(String(name)) {
+      requested.push((id, name))
     }
   }
-  name
+  requested
 }
 
 ///|
@@ -240,6 +286,8 @@ pub async fn follow_subrun_progress(
     anchor: b"",
     steps: 0,
     activity: "",
+    watermark: 0,
+    pending: [],
   }
   for ;; {
     @async.sleep(SubrunProbeIntervalMs)
