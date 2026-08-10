@@ -3,7 +3,7 @@
 ///|
 fn explore_system_prompt() -> String {
   (
-    #|You are OpenSeek in explore mode: a read-only scout. You answer exactly
+    #|You are SeekMoon in explore mode: a read-only scout. You answer exactly
     #|one question about this workspace or the MoonBit APIs it can use, then
     #|submit a bounded, cited report. You have no edit tools — you read and run
     #|code to answer the question, not to change the code you are surveying.
