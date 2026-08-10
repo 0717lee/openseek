@@ -49,8 +49,8 @@ pub fn parse(argv : Array[String], arg_start : Int) -> Invocation? {
 ///|
 /// True for a git global option that repoints config, the exec path, the git
 /// dir, the namespace, or the cwd/worktree — a precursor that could make an
-/// otherwise object-store subcommand write arbitrary bytes (via a smudge filter
-/// or merge driver) or write the workspace from a different repository.
+/// otherwise recognized subcommand write arbitrary bytes (via a smudge filter
+/// or merge driver) or target the workspace from a different repository.
 pub fn global_option_reconfigures(arg : String) -> Bool {
   global_option_consumes_next(arg) ||
   global_option_with_attached_value(arg) ||
@@ -61,134 +61,95 @@ pub fn global_option_reconfigures(arg : String) -> Bool {
 }
 
 ///|
-/// Git subcommands whose every worktree change either materializes content from
-/// git's own object store (HEAD, the index, a commit/tree, or a stash) or removes
-/// a tracked file recoverable from it — reviewable through git, never sourced from
-/// an external file or stdin. Excluded: `mv` (moves arbitrary worktree bytes onto
-/// the destination) and `clean` (deletes UNTRACKED files with no object-store
-/// copy — permanent). `rm` stays: it only deletes tracked files. `rebase` also
-/// writes from the object store but is trusted only in the argument forms
-/// admitted by `rebase_args_are_recoverable`, so it is not listed here.
-/// `submodule` is not listed either: its verbs split between recoverable writes
-/// (`update`/`deinit` without force, classified per-verb by the sandbox layer),
-/// `.gitmodules` writers (`set-url`/`set-branch`/`add`), and command runners
-/// (`foreach`), so it is classified per-verb, not by name.
-pub fn subcommand_writes_from_object_store(subcommand : String) -> Bool {
+/// Whether `subcommand` is a recognized first-party porcelain command. These
+/// commands may compose with a trusted worktree-writing git command without
+/// forcing the whole shell chain back into the source-write sandbox. Aliases,
+/// plumbing, and external `git-foo` commands are deliberately absent: their
+/// behavior cannot be inferred from the command name alone.
+pub fn subcommand_is_recognized_porcelain(subcommand : String) -> Bool {
   match subcommand {
-    "checkout" | "switch" | "restore" | "reset" | "stash" | "rm" => true
+    "add"
+    | "am"
+    | "annotate"
+    | "apply"
+    | "bisect"
+    | "blame"
+    | "branch"
+    | "checkout"
+    | "cherry"
+    | "cherry-pick"
+    | "clean"
+    | "clone"
+    | "commit"
+    | "describe"
+    | "diff"
+    | "fetch"
+    | "fsck"
+    | "gc"
+    | "grep"
+    | "init"
+    | "log"
+    | "maintenance"
+    | "merge"
+    | "merge-base"
+    | "merge-tree"
+    | "mv"
+    | "notes"
+    | "pull"
+    | "push"
+    | "range-diff"
+    | "rebase"
+    | "reflog"
+    | "remote"
+    | "reset"
+    | "restore"
+    | "revert"
+    | "rm"
+    | "shortlog"
+    | "show"
+    | "show-branch"
+    | "sparse-checkout"
+    | "stash"
+    | "status"
+    | "submodule"
+    | "switch"
+    | "tag"
+    | "verify-commit"
+    | "verify-tag"
+    | "whatchanged"
+    | "worktree" => true
     _ => false
   }
 }
 
 ///|
-/// Whether `subcommand` writes the worktree from the object store: the
-/// unconditionally recoverable writers plus `rebase`, whose recoverable forms
-/// are gated by `rebase_args_are_recoverable`. Used by the custom-environment
-/// pre-blocks — any of these, repointed via `GIT_DIR`/`GIT_CONFIG_*`/`env`,
-/// could write workspace source from a different repository regardless of its
-/// arguments.
-pub fn subcommand_is_object_store_writer(subcommand : String) -> Bool {
-  subcommand == "rebase" || subcommand_writes_from_object_store(subcommand)
-}
-
-///|
-/// Whether a `git rebase` invocation's arguments (in `words[start..end)`) keep
-/// it a recoverable object-store write: replayed content materializes from
-/// commits, the pre-rebase tip stays reachable via `ORIG_HEAD` and the reflog,
-/// a dirty tree is refused up front (or stashed recoverably with
-/// `--autostash`), and git refuses to overwrite untracked files during replay.
-///
-/// Unlike the checkout guard this is an ALLOWLIST that fails closed on any
-/// unrecognized token: rebase's option surface is large and includes command
-/// runners (`--exec`, `-i`, `--edit-todo`, a `--strategy` resolved from the
-/// exec path), and git accepts unambiguous long-option abbreviations, so only
-/// exact known-safe tokens qualify — the in-progress verbs
-/// (`--continue`/`--abort`/`--skip`/`--quit`), base selection
-/// (`--onto <ref>`/`--onto=<ref>`/`--keep-base`,
-/// `--fork-point`/`--no-fork-point`), `--autostash`/`--no-autostash`, and
-/// positional revisions. Everything else falls through to the sandbox.
-///
-/// `--continue` does resume a rebase started outside the agent, including the
-/// remaining todo steps of a user-started interactive rebase; those steps are
-/// the user's own, and the agent cannot author any because the interactive
-/// forms are pre-blocked (`should_preblock`).
-pub fn rebase_args_are_recoverable(
-  words : Array[String],
-  start : Int,
-  end : Int,
-) -> Bool {
-  let mut index = start
-  while index < end {
-    match words[index] {
-      "--continue"
-      | "--abort"
-      | "--skip"
-      | "--quit"
-      | "--keep-base"
-      | "--fork-point"
-      | "--no-fork-point"
-      | "--autostash"
-      | "--no-autostash" => index += 1
-      // The `--onto` value is a committish resolved from the object store; git
-      // consumes the next word whatever it looks like, and a non-revision fails
-      // resolution before anything is written.
-      "--onto" => {
-        if index + 1 >= end {
-          return false
-        }
-        index += 2
-      }
-      arg =>
-        if arg.has_prefix("--onto=") {
-          index += 1
-        } else if arg.has_prefix("-") && arg != "-" {
-          return false
-        } else {
-          // A positional upstream/branch revision (`-` is the previous branch).
-          index += 1
-        }
-    }
-  }
-  true
-}
-
-///|
-/// Whether a `git worktree` invocation (args in `words[start..end)`, starting at
-/// the verb) is a recoverable write. `add` qualifies with any flags: git
-/// unconditionally refuses an existing non-empty (or file) target — `--force`
-/// only relaxes the branch-checked-out-elsewhere and registered-but-missing-path
-/// safeguards — so it only creates new paths whose content comes from the object
-/// store, and a `-B` branch reset is reflog-recoverable like trusted `reset`.
-/// `remove` qualifies only bare: git then refuses a worktree containing
-/// modified or untracked files, so everything deleted is tracked and clean
-/// (ignored files go silently — the same exposure as trusted `checkout`).
-/// Any option before `--` fails closed, not just `-f`/`--force`: git's option
-/// parser accepts unambiguous long-option abbreviations, so `--fo` forces the
-/// removal too (empirically, git 2.51 destroys a dirty worktree on
-/// `remove --fo`). After `--` every word is a path, so a worktree literally
-/// named `-f` stays removable. `prune` touches only `$GIT_DIR/worktrees` admin
-/// data. Everything else fails closed: `list` is read-only and runs fine
-/// sandboxed, `move` relocates arbitrary worktree bytes like the excluded `mv`.
-pub fn worktree_args_are_recoverable(
-  words : Array[String],
-  start : Int,
-  end : Int,
-) -> Bool {
-  guard start < end else { return false }
-  match words[start] {
-    "add" | "prune" => true
-    "remove" => {
-      for index in (start + 1)..<end {
-        let arg = words[index]
-        if arg == "--" {
-          break
-        }
-        if arg.has_prefix("-") {
-          return false
-        }
-      }
-      true
-    }
+/// Whether the porcelain command may update or remove files in a worktree.
+/// This is intentionally command-level, not an assertion that every invocation
+/// writes: for example `git apply --check` and `git clean -n` are harmless but
+/// share a command name with writing forms. `should_preblock` handles the
+/// dangerous argument forms before the trust classifier consults this list.
+pub fn subcommand_may_write_worktree(subcommand : String) -> Bool {
+  match subcommand {
+    "am"
+    | "apply"
+    | "bisect"
+    | "checkout"
+    | "cherry-pick"
+    | "clean"
+    | "clone"
+    | "merge"
+    | "mv"
+    | "pull"
+    | "rebase"
+    | "reset"
+    | "restore"
+    | "revert"
+    | "rm"
+    | "sparse-checkout"
+    | "stash"
+    | "submodule"
+    | "switch"
+    | "worktree" => true
     _ => false
   }
 }
@@ -196,15 +157,10 @@ pub fn worktree_args_are_recoverable(
 ///|
 /// Whether a git invocation must be pre-blocked before execution — the
 /// cross-platform guard that does not depend on the runtime sandbox. Conservative
-/// by design: block the git that mutates source but is NOT a recoverable
-/// object-store write — store feeders (`apply`/`am`/`update-index`/`read-tree`/
-/// `fast-import`), `mv` (moves arbitrary worktree bytes), non-dry-run `clean`
-/// (permanently deletes untracked files), rebase's command-running forms
-/// (`-i`/`--exec`/`--edit-todo`/a merge strategy), and any object-store writer
-/// that is reconfigured (`git -c filter=… checkout`, `-C`, `--work-tree`). The
-/// recoverable writers (`checkout`/`switch`/`restore`/`reset`/`stash`/`rm`,
-/// rebase in its `rebase_args_are_recoverable` forms) and read-only git
-/// are not pre-blocked; they run (trusted, or sandboxed where they cannot harm).
+/// by design: block the git forms that import arbitrary bytes, permanently lose
+/// untracked data, or explicitly run external commands. Recognized first-party
+/// porcelain not matched here is allowed to compose; aliases, plumbing, and
+/// external `git-foo` commands still fail closed in the trust classifier.
 pub fn should_preblock(argv : Array[String], arg_start : Int) -> Bool {
   guard parse(argv, arg_start) is Some(invocation) else { return false }
   preblock_for_subcommand(
@@ -231,22 +187,18 @@ pub fn text_should_preblock(
 }
 
 ///|
-/// Whether the git subcommand found in `words[start..end)` is an object-store
-/// writer (checkout/switch/restore/reset/stash/rm, or rebase). The text path
-/// uses this to decide whether a custom environment before `git` (which it cannot
-/// see in `words[start..]`) makes the writer unsafe and must be pre-blocked.
-pub fn text_invocation_writes_from_object_store(
+/// Whether the git subcommand found in `words[start..end)` may write a
+/// worktree. The text path uses this to decide whether a custom environment
+/// before `git` (which it cannot see in `words[start..]`) makes the invocation
+/// unsafe and must be pre-blocked.
+pub fn text_invocation_may_write_worktree(
   words : Array[String],
   start : Int,
   end : Int,
 ) -> Bool {
   match text_subcommand_index(words, start, end) {
     Some(subcommand_index) =>
-      subcommand_is_object_store_writer(words[subcommand_index]) ||
-      (
-        words[subcommand_index] == "submodule" &&
-        submodule_writes_worktree(words, subcommand_index + 1, end)
-      )
+      subcommand_may_write_worktree(words[subcommand_index])
     None => false
   }
 }
@@ -283,6 +235,25 @@ fn preblock_for_subcommand(
     "rebase" =>
       region_reconfigures(words, global_start, subcommand_index) ||
       rebase_args_run_external_commands(words, args_start, end)
+    // A merge strategy is resolved as `git-merge-<strategy>` and can run an
+    // external executable. `pull` forwards the same options to merge and also
+    // exposes an interactive rebase mode.
+    "merge" =>
+      region_reconfigures(words, global_start, subcommand_index) ||
+      merge_strategy_args_run_external_command(words, args_start, end, true)
+    "pull" =>
+      region_reconfigures(words, global_start, subcommand_index) ||
+      merge_strategy_args_run_external_command(words, args_start, end, true) ||
+      pull_args_request_interactive_rebase(words, args_start, end)
+    // Cherry-pick/revert use `-s` for signoff, so only `-X` and the long
+    // strategy spellings select a merge strategy here.
+    "cherry-pick" | "revert" =>
+      region_reconfigures(words, global_start, subcommand_index) ||
+      merge_strategy_args_run_external_command(words, args_start, end, false)
+    // `bisect run` executes the remaining argv as an arbitrary command.
+    "bisect" =>
+      region_reconfigures(words, global_start, subcommand_index) ||
+      bisect_args_run_external_command(words, args_start, end)
     // `submodule update` checks out commits from the object store (like
     // checkout), but its command-running and data-losing forms are pre-blocked:
     // `foreach` executes arbitrary shell commands in each submodule, and forced
@@ -291,9 +262,14 @@ fn preblock_for_subcommand(
     "submodule" =>
       region_reconfigures(words, global_start, subcommand_index) ||
       submodule_verb_is_unsafe(words, args_start, end)
-    // The other recoverable writers are only unsafe when reconfigured.
+    // `worktree move` relocates arbitrary bytes and forced `remove` destroys
+    // modified/untracked files. The other verbs may write but remain allowed.
+    "worktree" =>
+      region_reconfigures(words, global_start, subcommand_index) ||
+      worktree_verb_is_unsafe(words, args_start, end)
+    // Every other recognized worktree writer is unsafe when reconfigured.
     subcommand =>
-      subcommand_writes_from_object_store(subcommand) &&
+      subcommand_may_write_worktree(subcommand) &&
       region_reconfigures(words, global_start, subcommand_index)
   }
 }
@@ -396,6 +372,96 @@ fn rebase_arg_runs_external_commands(arg : String) -> Bool {
   short_cluster_has(arg, "x") ||
   short_cluster_has(arg, "s") ||
   short_cluster_has(arg, "X")
+}
+
+///|
+/// Whether merge-family arguments explicitly select a merge strategy or
+/// strategy option. Git may resolve the strategy through its exec path, so
+/// these forms can launch an external executable. For merge/pull `-s` means
+/// strategy; for cherry-pick/revert it means signoff and stays allowed.
+fn merge_strategy_args_run_external_command(
+  words : Array[String],
+  start : Int,
+  end : Int,
+  short_s_is_strategy : Bool,
+) -> Bool {
+  for index in start..<end {
+    let arg = words[index]
+    if arg == "--" {
+      return false
+    }
+    if (
+        arg.has_prefix("--") &&
+        (
+          long_option_selects(arg, "--strategy") ||
+          long_option_selects(arg, "--strategy-option")
+        )
+      ) ||
+      short_cluster_has(arg, "X") ||
+      (short_s_is_strategy && short_cluster_has(arg, "s")) {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// `git pull --rebase=interactive` enters the sequence-editor path just like an
+/// interactive rebase. Git accepts the short `i` value; prefix matching also
+/// fails closed for future/abbreviated spellings beginning with `i`.
+fn pull_args_request_interactive_rebase(
+  words : Array[String],
+  start : Int,
+  end : Int,
+) -> Bool {
+  for index in start..<end {
+    let arg = words[index]
+    if arg == "--" {
+      return false
+    }
+    if arg.has_prefix("--rebase=i") {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// `git bisect run <command>...` executes an arbitrary program repeatedly.
+fn bisect_args_run_external_command(
+  words : Array[String],
+  start : Int,
+  end : Int,
+) -> Bool {
+  start < end && words[start] == "run"
+}
+
+///|
+/// Worktree operations with unrecoverable effects: `move` relocates arbitrary
+/// bytes, while forced `remove` deletes modified and untracked files. Long
+/// force abbreviations such as `--fo` count because git accepts them.
+fn worktree_verb_is_unsafe(
+  words : Array[String],
+  start : Int,
+  end : Int,
+) -> Bool {
+  guard start < end else { return false }
+  if words[start] == "move" {
+    return true
+  }
+  if words[start] != "remove" {
+    return false
+  }
+  for index in (start + 1)..<end {
+    let arg = words[index]
+    if arg == "--" {
+      return false
+    }
+    if long_option_selects(arg, "--force") || short_cluster_has(arg, "f") {
+      return true
+    }
+  }
+  false
 }
 
 ///|
@@ -653,21 +719,4 @@ fn submodule_foreach_is_help_request(
     return false
   }
   false
-}
-
-///|
-/// Whether a `git submodule` invocation writes the worktree from its own
-/// repository state (`update`/`deinit`), for the custom-environment pre-block:
-/// repointed via `GIT_DIR`/`GIT_CONFIG_*` it could write source from a
-/// different repository. The sandbox layer mirrors this classification in its
-/// own private helpers so the public interface of this package stays stable.
-fn submodule_writes_worktree(
-  words : Array[String],
-  start : Int,
-  end : Int,
-) -> Bool {
-  guard submodule_verb_index(words, start, end) is Some(verb_index) else {
-    return false
-  }
-  words[verb_index] == "update" || words[verb_index] == "deinit"
 }

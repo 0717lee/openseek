@@ -82,19 +82,15 @@ where the shell would otherwise hide the sandbox denial from the tool output.
 Direct `mv`/`rm` source-tree operations and obvious source-writing script
 snippets are also blocked before execution, including scripts that create
 MoonBit source under `_build` and then rename it into a package directory.
-Git subcommands that mutate source but are not a recoverable object-store write
-are conservatively blocked before execution — a cross-platform guard that does
-not depend on the runtime sandbox: the external-patch/plumbing store feeders
-(`apply`/`am` including `--cached`, `update-index`, `read-tree`, `fast-import`),
-`mv` (moves arbitrary worktree bytes onto the destination), non-dry-run `clean`
-(permanently deletes untracked files), any object-store writer that is
-reconfigured by option (`git -c filter=… checkout`, `-C`, `--work-tree`) or by a
-custom environment (`GIT_DIR`/`GIT_WORK_TREE`/`GIT_CONFIG_*`, `env … git`), and
-`checkout`/`switch`/`restore` forms that can clobber an untracked file from
-another tree (`-f`/`--force`/`--source`/`--overlay`/`--ours`/`--theirs`).
+Dangerous Git forms are conservatively blocked before execution — a
+cross-platform guard that does not depend on the runtime sandbox: external-patch
+and plumbing store feeders (`apply`/`am` including `--cached`, `update-index`,
+`read-tree`, `fast-import`), `mv`, non-dry-run `clean`, forced tree replacement,
+forced worktree removal, `worktree move`, explicit command runners such as
+`rebase --exec`/interactive rebase and `bisect run`, external merge strategies,
+and worktree-writing commands reconfigured through options or environment.
 Read-only patch validation (`git apply --check`/`--stat`) and dry-run `clean`
-(`-n`) are allowed. The recoverable worktree subcommands are not blocked — see
-the trusted list below.
+(`-n`) are allowed.
 Too-complex command strings with in-place `sed` edits are rejected even when the
 source paths are indirect, as in `while read f; do sed -i ... "$f"; done`.
 Too-complex commands with visible MoonBit source creation or tree transfer
@@ -107,23 +103,16 @@ metadata run outside the source-write sandbox: `moon fmt`, `moon info`,
 moon check` is trusted, while a broad script or source rewrite through shell is
 not.
 
-Recoverable Git worktree subcommands also run outside the source-write sandbox,
-because every change they make either materializes content from git's own object
-store (HEAD, the index, a commit/tree, or a stash) or removes a tracked file
-recoverable from it — reviewable through git, never sourced from an external file
-or stdin: `checkout`, `switch`, `restore`, `reset`, `stash`, and `rm`. `mv` is
-excluded (it moves arbitrary worktree bytes onto the destination) and `clean` is
-excluded (it deletes untracked files with no object-store copy — permanent);
-`rm` stays because it only deletes tracked files. Trust is
-withheld when the invocation could reconfigure git to write from outside the
-workspace repo — a custom environment (`GIT_CONFIG_*`, `env ... git`) or a
-reconfiguring global option that repoints config (`-c`, `--config-env`), the exec
-path (`--exec-path`), the git dir (`--git-dir`, `--namespace`), or the cwd/worktree
-(`-C`, `--work-tree`) — and from the blocked store-feeders above plus any
-unrecognized subcommand or alias, which stay under the sandbox. This trusts git's
-own config: it is not a hard boundary, since a determined plumbing sequence
-(`replace`, `filter-branch`, `commit-tree`) can still seed the object store while
-`.git` is writable.
+Recognized first-party Git porcelain composes outside the source-write sandbox.
+This lets ordinary workflows such as `git fetch && git rebase`, `git pull
+--rebase`, merges, cherry-picks, and worktree operations complete without the
+second command being denied halfway through. Commands that may touch the
+worktree carry source-write trust; read/metadata commands such as `fetch` and
+`status` only inherit it when composed with one of those writers. Aliases,
+plumbing, external `git-foo` commands, reconfigured invocations, and the
+dangerous forms above fail closed. This is explicitly a convenience/safety
+tradeoff: the policy trusts recognized Git porcelain and the repository's Git
+configuration/hooks, so it is a guardrail rather than a hard security boundary.
 
 ## Arguments
 

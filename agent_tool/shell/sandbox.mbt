@@ -227,18 +227,13 @@ fn trusted_command_class(
 }
 
 ///|
-/// Classify a `git` command for the trusted-source-write path. Trust is granted
-/// only to the recoverable worktree subcommands above plus the recoverable
-/// `git worktree` verbs (`add`/non-force `remove`/`prune`, see
-/// `@git_policy.worktree_args_are_recoverable`) and the recoverable `rebase`
-/// forms (an exact-token allowlist, see
-/// `@git_policy.rebase_args_are_recoverable`), and only when the
-/// invocation cannot reconfigure git to write from somewhere other than the
-/// workspace repo's object store: a custom environment (`GIT_CONFIG_*`,
-/// `env ... git`) or a relocating global option could repoint config (enabling a
-/// smudge filter or merge driver), the git dir, the exec path, or the worktree —
-/// e.g. `git -C /tmp/x --work-tree=. checkout` would write the workspace from a
-/// different repository. Those fall through to the sandbox.
+/// Classify a `git` command for the trusted-source-write path. Recognized
+/// first-party porcelain composes by default, while aliases, plumbing, external
+/// `git-foo` commands, and the dangerous forms in `should_preblock` fail closed.
+/// Commands that may touch a worktree carry the write bit; metadata/read commands
+/// are trusted only as companions in a chain containing such a writer. A custom
+/// environment or relocating global option can repoint config, the repository,
+/// or the worktree, so those invocations remain untrusted.
 fn trusted_git_command_class(
   command : @shell_parse.SimpleCommand,
   git_index : Int,
@@ -254,31 +249,14 @@ fn trusted_git_command_class(
       return UntrustedCommand
     }
   }
-  if @git_policy.subcommand_writes_from_object_store(invocation.subcommand) {
-    TrustedCommandWrite
-  } else if invocation.subcommand == "rebase" &&
-    @git_policy.rebase_args_are_recoverable(
-      command.argv,
-      invocation.subcommand_index + 1,
-      command.argv.length(),
-    ) {
-    TrustedCommandWrite
-  } else if invocation.subcommand == "submodule" &&
-    submodule_verb_recoverable_write(
-      command.argv,
-      invocation.subcommand_index + 1,
-      command.argv.length(),
-    ) {
-    TrustedCommandWrite
-  } else if invocation.subcommand == "worktree" &&
-    @git_policy.worktree_args_are_recoverable(
-      command.argv,
-      invocation.subcommand_index + 1,
-      command.argv.length(),
-    ) {
+  if @git_policy.should_preblock(command.argv, git_index + 1) ||
+    !@git_policy.subcommand_is_recognized_porcelain(invocation.subcommand) {
+    return UntrustedCommand
+  }
+  if @git_policy.subcommand_may_write_worktree(invocation.subcommand) {
     TrustedCommandWrite
   } else {
-    UntrustedCommand
+    TrustedCommandRead
   }
 }
 
@@ -1171,9 +1149,9 @@ fn command_text_mentions_unsafe_git_source_operation(text : String) -> Bool {
       }
       // A custom environment before `git` (e.g. `GIT_DIR=… git checkout -- *.mbt`)
       // can repoint git's repo/worktree/config; the text path cannot see it from
-      // `words[index + 1..]`, so block object-store writers carrying one.
+      // `words[index + 1..]`, so block worktree writers carrying one.
       if command_text_segment_has_custom_env(words, index) &&
-        @git_policy.text_invocation_writes_from_object_store(
+        @git_policy.text_invocation_may_write_worktree(
           words,
           index + 1,
           segment_end,
@@ -3046,15 +3024,13 @@ fn source_writing_awk_target(
 }
 
 ///|
-/// Pre-block, before execution and independent of the runtime sandbox, the git
-/// that mutates source but is not a recoverable object-store write —
-/// `@git_policy.should_preblock` (store feeders, `mv`, non-dry-run `clean`, and
-/// reconfigured writers). This is the cross-platform guard; on macOS `sandbox-exec`
-/// is a second layer. The recoverable writers and read-only git are handled by
-/// the trusted-source-write path (`trusted_git_command_class`) instead. NOTE: a
-/// determined plumbing sequence (`replace`, `filter-branch`, `commit-tree`) can
-/// still seed the object store while `.git` is writable — a residual channel, not
-/// a hard boundary.
+/// Pre-block dangerous git forms before execution, independent of the runtime
+/// sandbox — `@git_policy.should_preblock` covers store feeders, permanent data
+/// loss, explicit command runners, external merge strategies, and reconfigured
+/// worktree writers. This is the cross-platform guard; on macOS `sandbox-exec`
+/// is a second layer. Recognized porcelain is handled by the trusted-command
+/// classifier instead. Git config and hooks remain trusted, so this is a
+/// guardrail rather than a hard boundary.
 async fn git_preblock_target(
   argv : Array[String],
   arg_start : Int,
@@ -3099,22 +3075,14 @@ fn git_must_preblock(
   }
   // A custom environment (`GIT_DIR`/`GIT_WORK_TREE`/`GIT_CONFIG_*`, or `env ...
   // git`) is the environment analogue of `-c`/`-C`: it can repoint git's config,
-  // git dir, or worktree, so a custom-env object-store writer can write workspace
+  // git dir, or worktree, so a custom-env worktree writer can write workspace
   // source from another repository. The trust path already demotes it, but on
   // platforms without sandbox-exec SourceReadOnly still runs unsandboxed, so it
   // must be pre-blocked too.
   has_custom_env &&
   (match @git_policy.parse(argv, arg_start) {
     Some(invocation) =>
-      @git_policy.subcommand_is_object_store_writer(invocation.subcommand) ||
-      (
-        invocation.subcommand == "submodule" &&
-        submodule_verb_writes_worktree(
-          argv,
-          invocation.subcommand_index + 1,
-          argv.length(),
-        )
-      )
+      @git_policy.subcommand_may_write_worktree(invocation.subcommand)
     None => false
   })
 }
@@ -3162,80 +3130,6 @@ fn submodule_verb_name(
 }
 
 ///|
-/// True when a `git submodule update`/`deinit` invocation carries
-/// `-f`/`--force` (also inside a short cluster). A forced update replaces
-/// untracked files in a dirty submodule with the target commit's contents, and
-/// a forced deinit removes a submodule worktree even with local changes — both
-/// permanently lose data that has no object-store copy. The scan stops at `--`,
-/// past which every word is a path.
-
-///|
-/// True when `arg` is a short option cluster (`-…`, not `--…`) containing
-/// `flag` — the sandbox-side mirror of `git_policy.short_cluster_has`.
-fn sandbox_short_cluster_has(arg : String, flag : String) -> Bool {
-  arg.has_prefix("-") &&
-  !arg.has_prefix("--") &&
-  arg != "-" &&
-  arg.contains(flag)
-}
-
-///|
-/// True when a `git submodule update`/`deinit` invocation carries
-/// `-f`/`--force` (also inside a short cluster). A forced update replaces
-/// untracked files in a dirty submodule with the target commit's contents, and
-/// a forced deinit removes a submodule worktree even with local changes — both
-/// permanently lose data that has no object-store copy. The scan stops at `--`,
-/// past which every word is a path.
-fn submodule_has_force(words : Array[String], start : Int, end : Int) -> Bool {
-  for index in start..<end {
-    let arg = words[index]
-    if arg == "--" {
-      break
-    }
-    if arg == "--force" || sandbox_short_cluster_has(arg, "f") {
-      return true
-    }
-  }
-  false
-}
-
-///|
-/// Whether a `git submodule` invocation (verb at `words[start..)`, after
-/// leading `--quiet`/`-q`) is a recoverable write eligible for trusted
-/// execution: `update` without force (materializes commits from the object
-/// store; the custom `!command` update procedure is pre-blocked separately by
-/// `submodule_update_has_custom_procedure`) and `deinit` without force (removes
-/// only clean, tracked content, like trusted `rm`). Everything else — the
-/// `.gitmodules` writers `set-url`/`set-branch`/`add`, `init`, `sync`, and
-/// unrecognized forms — fails closed to the sandbox.
-fn submodule_verb_recoverable_write(
-  words : Array[String],
-  start : Int,
-  end : Int,
-) -> Bool {
-  match submodule_verb_name(words, start, end) {
-    Some("update" | "deinit") => !submodule_has_force(words, start, end)
-    _ => false
-  }
-}
-
-///|
-/// Whether a `git submodule` invocation writes the worktree from its own
-/// repository state (`update`/`deinit`), for the custom-environment pre-block:
-/// repointed via `GIT_DIR`/`GIT_CONFIG_*` it could write source from a
-/// different repository.
-fn submodule_verb_writes_worktree(
-  words : Array[String],
-  start : Int,
-  end : Int,
-) -> Bool {
-  match submodule_verb_name(words, start, end) {
-    Some("update" | "deinit") => true
-    _ => false
-  }
-}
-
-///|
 /// Whether the `git submodule` verb is `update` — the cue for the sandbox layer
 /// to scan the git config for a custom `!command` update procedure.
 fn submodule_verb_is_update(
@@ -3250,7 +3144,7 @@ fn submodule_verb_is_update(
 /// Whether a `git submodule update` invocation would run a custom update
 /// procedure: `submodule.<name>.update` set to `!command` makes `git submodule
 /// update` execute that arbitrary shell command with the target commit ID. The
-/// submodule verb scan cannot see the config, so an otherwise-recoverable
+/// submodule verb scan cannot see the config, so an otherwise-recognized
 /// `update` is pre-blocked when `git config --get-regexp` (which resolves
 /// includes, global/system/worktree scopes, case-insensitivity, and
 /// .git/modules/*/config exactly as `git submodule update` itself would) finds
