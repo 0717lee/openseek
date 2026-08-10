@@ -36,6 +36,8 @@ pub fn skills_catalog_from_reply(@protocol.SkillsCatalogReply) -> Array[MarketSk
 
 pub fn subrun_label(String) -> String?
 
+pub fn subrun_parent(String) -> String?
+
 pub fn transcript_from_session(@protocol.LoadSessionReply) -> Array[TranscriptItem]
 
 // Errors

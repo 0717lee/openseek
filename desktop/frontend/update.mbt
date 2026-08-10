@@ -3256,8 +3256,15 @@ fn update_device_msg(
     // lane is a push that outraced (or outlived) its brackets — dropped, not
     // resurrected, since only a bracket knows a sub-run exists.
     SubrunProgressed(id~, session~, steps~, activity~) => {
-      ignore(session)
-      let conv = model.active()
+      // Route by the CHILD session id, not by the sub-run id: `sr-N` is only
+      // unique within its parent engine, so two conversations can both have
+      // an `sr-1` in flight. The conversation on screen is not necessarily
+      // the one that launched this child either — a background turn keeps
+      // running while the user reads something else.
+      guard @transcript.subrun_parent(session) is Some(parent) &&
+        model.find_conversation(channel, parent) is Some(conv) else {
+        return (@cmd.none, model)
+      }
       let subruns = conv.subruns.map(lane => {
         if lane.id == id {
           { ..lane, steps, activity }
