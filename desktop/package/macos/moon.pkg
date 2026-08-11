@@ -4,6 +4,7 @@ import {
   "openseek_desktop/package/internal/xterm_assets",
   "moonbitlang/async",
   "moonbitlang/core/argparse",
+  "moonbitlang/async/process",
   "moonbitlang/core/debug",
 }
 

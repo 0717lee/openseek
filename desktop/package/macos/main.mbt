@@ -293,6 +293,7 @@ async fn main {
   let terminal_assets = ws.build_package_inputs(release=options.release)
   ws.stage_package_inputs(terminal_assets, release=options.release)
   ws.package_with_proton(options)
+  let _ = @process.run("open", [ws.at("dist/SeekMoon.app")])
 }
 
 ///|
