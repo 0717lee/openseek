@@ -145,7 +145,7 @@ fn child_durable_session(
   workspace_root~ : String,
 ) -> (String, String)? raise {
   match matches {
-    { values: { "session": [session, ..], .. }, .. } if session.trim() != "" =>
+    { values: { "session": [session, ..], .. }, .. } if not(session.is_blank()) =>
       Some(("\{session}", session_root(matches, workspace_root~)))
     _ => None
   }
@@ -227,7 +227,7 @@ async fn dispatch_kind(
       report.map(report => report.to_json())
     }
     "review" => {
-      guard input is { "goal": String(goal), .. } && goal.trim() != "" else {
+      guard input is { "goal": String(goal), .. } && not(goal.is_blank()) else {
         @emit.emit(
           CommandError(error="subrun review requires a non-empty goal"),
         )

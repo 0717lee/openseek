@@ -60,7 +60,7 @@ fn ExploreReport::validate(self : ExploreReport) -> Array[String] {
       "schema_version must be \{current_schema_version}, got \{self.schema_version}",
     )
   }
-  if self.answer.trim() == "" {
+  if self.answer.is_blank() {
     problems.push("answer must not be empty")
   }
   if self.answer.length() > max_answer_chars {

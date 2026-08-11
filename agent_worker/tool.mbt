@@ -39,11 +39,11 @@ pub struct WorkerInput {
 /// Decode and validate the input line. `Err` names the defect — the child
 /// dispatch surfaces it as a command error rather than running unconfined.
 pub fn WorkerInput::parse(input : Json) -> Result[WorkerInput, String] {
-  guard input is { "task": String(task), .. } && task.trim() != "" else {
+  guard input is { "task": String(task), .. } && not(task.is_blank()) else {
     return Err("worker input requires a non-empty `task`")
   }
   let context : String? = match input {
-    { "context": String(context), .. } if context.trim() != "" => Some(context)
+    { "context": String(context), .. } if not(context.is_blank()) => Some(context)
     _ => None
   }
   guard input is { "worker_root": String(worker_root), .. } &&
@@ -54,7 +54,7 @@ pub fn WorkerInput::parse(input : Json) -> Result[WorkerInput, String] {
     @path.Path(worker_admin_dir).is_absolute() else {
     return Err("worker input requires an absolute `worker_admin_dir`")
   }
-  guard input is { "base_oid": String(base_oid), .. } && base_oid.trim() != "" else {
+  guard input is { "base_oid": String(base_oid), .. } && not(base_oid.is_blank()) else {
     return Err("worker input requires a non-empty `base_oid`")
   }
   let deny_roots : Array[String] = []
@@ -73,7 +73,7 @@ pub fn WorkerInput::parse(input : Json) -> Result[WorkerInput, String] {
     return Err("worker input requires a non-empty `allowed_paths` array")
   }
   for prefix in prefixes {
-    guard prefix is String(prefix) && prefix.trim() != "" else {
+    guard prefix is String(prefix) && not(prefix.is_blank()) else {
       return Err("worker input allowed_paths must be non-empty strings")
     }
     allowed_paths.push(prefix)
