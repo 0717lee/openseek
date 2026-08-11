@@ -51,7 +51,7 @@ pub fn parse_events(text : String) -> ParsedLog {
   let mut first_content_line = true
   for index, line in lines {
     let line_number = index + 1
-    if line.trim().is_empty() {
+    if line.is_blank() {
       continue
     }
     let may_be_header = first_content_line

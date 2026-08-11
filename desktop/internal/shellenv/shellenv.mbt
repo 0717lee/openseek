@@ -45,7 +45,7 @@ pub async fn apply_login_shell_env(
   }
   guard @sys.get_env_var(ResolvingGuardVar) is None else { return }
   let shell = match @sys.get_env_var("SHELL") {
-    Some(shell) if !shell.trim().is_empty() => shell
+    Some(shell) if !shell.is_blank() => shell
     _ => "/bin/sh"
   }
   let mark = "__openseek_env_\{@sys.now()}__"

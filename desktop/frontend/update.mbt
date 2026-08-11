@@ -1105,7 +1105,7 @@ fn apply_engine_event(
     // failure stops being silent, and the row's own text and actions are
     // what the user recovers with.
     SessionAppendFailed(error) => {
-      let content = if error.trim().is_empty() {
+      let content = if error.is_blank() {
         "the engine could not save an item to this session"
       } else {
         "the engine could not save an item to this session: \{error}"
@@ -1113,7 +1113,7 @@ fn apply_engine_event(
       (true, conv.append_local_notice(Assistant(is_danger=true), content))
     }
     CompactionFailed(reason) => {
-      let content = if reason.trim().is_empty() {
+      let content = if reason.is_blank() {
         "compaction failed"
       } else {
         "compaction failed: \{reason}"
@@ -1574,10 +1574,8 @@ fn update_msg(
           ..model,
           api_provider: ApiProvider::parse(provider),
           custom_api_url: custom_url.trim().to_owned(),
-          deepseek_key_saved: model.deepseek_key_saved ||
-          !api_key.trim().is_empty(),
-          custom_key_saved: model.custom_key_saved ||
-          !custom_api_key.trim().is_empty(),
+          deepseek_key_saved: model.deepseek_key_saved || !api_key.is_blank(),
+          custom_key_saved: model.custom_key_saved || !custom_api_key.is_blank(),
           settings_saves: model.settings_saves + 1,
           legacy_cleanup_pending: true,
         }
@@ -5323,7 +5321,7 @@ fn update_device_msg(
           return (@cmd.none, model)
         }
         let content = if diagnostics is Some(diagnostics) &&
-          !diagnostics.trim().is_empty() {
+          !diagnostics.is_blank() {
           "\{message}\n\n\{diagnostics}"
         } else {
           message

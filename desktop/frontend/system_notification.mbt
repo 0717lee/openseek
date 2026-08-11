@@ -32,7 +32,7 @@ fn FinishedSystemNotification::title(
 fn FinishedSystemNotification::body(
   self : FinishedSystemNotification,
 ) -> String {
-  guard self.answer is Some(answer) && !answer.trim().is_empty() else {
+  guard self.answer is Some(answer) && !answer.is_blank() else {
     return "The conversation is ready for you."
   }
   let out = StringBuilder()

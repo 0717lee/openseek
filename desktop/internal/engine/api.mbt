@@ -21,7 +21,7 @@ const SubmissionIdMaxBytes = 128
 /// outbound notification. Valid ids remain opaque — whitespace around a
 /// non-blank id is significant and therefore echoed unchanged.
 fn normalize_submission_id(submission_id : String?) -> String? {
-  guard submission_id is Some(submission_id) && !submission_id.trim().is_empty() else {
+  guard submission_id is Some(submission_id) && !submission_id.is_blank() else {
     return None
   }
   let mut byte_length = 0

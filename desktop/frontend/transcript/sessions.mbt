@@ -291,7 +291,7 @@ pub fn apply_session_item(
         items.push({
           kind: Tool(
             call_id=call.id,
-            name=if call.name.trim().is_empty() { "tool" } else { call.name },
+            name=if call.name.is_blank() { "tool" } else { call.name },
             arguments=Some(call.arguments),
             has_result=false,
             is_error=false,
@@ -325,7 +325,7 @@ pub fn apply_session_item(
         items[index] = {
           kind: Tool(
             call_id~,
-            name=if payload.tool_name.trim().is_empty() {
+            name=if payload.tool_name.is_blank() {
               call_name
             } else {
               payload.tool_name
@@ -347,7 +347,7 @@ pub fn apply_session_item(
         items.push({
           kind: Tool(
             call_id=payload.tool_call_id,
-            name=if payload.tool_name.trim().is_empty() {
+            name=if payload.tool_name.is_blank() {
               "tool"
             } else {
               payload.tool_name
@@ -363,7 +363,7 @@ pub fn apply_session_item(
       }
     }
     @desktop_protocol.RuntimeNotice(payload) =>
-      if !payload.content.trim().is_empty() {
+      if !payload.content.is_blank() {
         match goal_marker(payload.content) {
           // The set/clear/block/unblock markers are the durable goal
           // confirmations this view shows (the TUI renders the same news off

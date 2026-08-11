@@ -1253,7 +1253,7 @@ fn sidebar_row(
   child? : Bool = false,
 ) -> @html.Html {
   let selected = model.selected == Some(row.key)
-  let label = if row.first_prompt.trim().is_empty() {
+  let label = if row.first_prompt.is_blank() {
     row.id
   } else {
     row.first_prompt

@@ -462,7 +462,7 @@ pub async fn steer_run(
   manager : EngineManager,
   payload : @protocol.SteerPayload,
 ) -> SteerReply {
-  guard !payload.text.trim().is_empty() else {
+  guard !payload.text.is_blank() else {
     return { steered: false, run_id: None }
   }
   guard open_run_engine(manager, run_id?=payload.run_id) is Some(live) &&
@@ -700,7 +700,7 @@ pub async fn load_session(
   // The client's workspace hint says which registered store to read. A
   // detached workspace is rejected instead of silently probing the global
   // store, which could return a different history for the same session id.
-  let root = if payload.workspace is Some(hint) && !hint.trim().is_empty() {
+  let root = if payload.workspace is Some(hint) && !hint.is_blank() {
     guard @pathx.Absolute::from_uri_path(hint) is Some(absolute) &&
       registered_workspace(absolute) is Some(workspace) else {
       raise EngineError("\{hint} is not a registered workspace")

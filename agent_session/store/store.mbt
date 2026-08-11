@@ -213,7 +213,7 @@ fn parse_session_file(
   let segments = rest.split("\n").map(line => line.to_owned()).collect()
   let decoded : Array[@agent_session.SessionEvent] = []
   for index, line in segments {
-    if line.trim().is_empty() {
+    if line.is_blank() {
       continue
     }
     let unterminated_last = index == segments.length() - 1 && !ends_with_newline
@@ -562,7 +562,7 @@ async fn first_prompt_in_log(path : String) -> String {
   for _ in 0..<first_prompt_scan_limit {
     let next = file.read_until("\n") catch { _ => return "" }
     guard next is Some(line) else { break }
-    if line.trim().is_empty() {
+    if line.is_blank() {
       continue
     }
     let event : @agent_session.SessionEvent = @json.from_json(@json.parse(line)) catch {

@@ -11,7 +11,7 @@ fn summary_model_content(summary : SessionSummary) -> String {
 /// A status line for a non-finished turn: the bare `label` when `reason` is
 /// blank, otherwise the label followed by the reason on its own line.
 fn agent_status_message(label : String, reason : String) -> String? {
-  if reason.trim().is_empty() {
+  if reason.is_blank() {
     Some(label)
   } else {
     Some("\{label}\n\{reason}")
@@ -29,7 +29,7 @@ fn terminal_model_message(terminal : TurnTerminal) -> String? {
       // The resumed turn starts from the checkpoint summary and any
       // preserved user input alone. (Raw-log consumers still see the
       // terminal; only the model-facing projection skips it.)
-      if answer.trim().is_empty() || answer.has_prefix(ContextYieldAnswerPrefix) {
+      if answer.is_blank() || answer.has_prefix(ContextYieldAnswerPrefix) {
         None
       } else {
         Some(answer)

@@ -2417,7 +2417,7 @@ fn Model::api_ready(self : Model) -> Bool {
   match self.api_provider {
     Openseek | OpenseekStaging => true
     Deepseek => self.deepseek_key_saved
-    Custom => !self.custom_api_url.trim().is_empty()
+    Custom => !self.custom_api_url.is_blank()
   }
 }
 
@@ -2935,9 +2935,9 @@ fn Conversation::worth_keeping(self : Conversation) -> Bool {
 
 ///|
 fn Conversation::draft_empty(self : Conversation) -> Bool {
-  self.task.trim().is_empty() &&
+  self.task.is_blank() &&
   self.mentions.is_empty() &&
-  !(self.goal_edit is Some(edit) && !edit.draft.trim().is_empty()) &&
+  !(self.goal_edit is Some(edit) && !edit.draft.is_blank()) &&
   self.goal_pending is None
 }
 
@@ -2946,7 +2946,7 @@ fn Conversation::draft_empty(self : Conversation) -> Bool {
 /// Chips alone don't send — a mention is context *for* an instruction, so
 /// the instruction is required; the chips ride along in the envelope.
 fn Conversation::draft_sendable(self : Conversation) -> Bool {
-  !self.task.trim().is_empty()
+  !self.task.is_blank()
 }
 
 ///|
@@ -3669,7 +3669,7 @@ fn Conversation::archive_salvage(self : Conversation) -> ArchiveSalvage {
   for input in self.input_ledger {
     if input.kind is InitialPrompt {
       pending_initial = true
-      if !input.draft.trim().is_empty() {
+      if !input.draft.is_blank() {
         drafts.push(input.draft)
       }
       for mention in input.mentions {
@@ -3677,7 +3677,7 @@ fn Conversation::archive_salvage(self : Conversation) -> ArchiveSalvage {
       }
     }
   }
-  if !self.task.trim().is_empty() {
+  if !self.task.is_blank() {
     drafts.push(self.task)
   }
   for mention in self.mentions {
@@ -3693,11 +3693,10 @@ fn Conversation::archive_salvage(self : Conversation) -> ArchiveSalvage {
   // never have received it, and this is the only other copy. A Clearing asks
   // for nothing to stand, so it carries nothing. Neither does a goal the
   // record has already confirmed: that one is the archived record's.
-  let goal_draft = if self.goal_edit is Some(edit) &&
-    !edit.draft.trim().is_empty() {
+  let goal_draft = if self.goal_edit is Some(edit) && !edit.draft.is_blank() {
     Some(edit.draft)
   } else if self.goal_pending is Some({ request: Setting(text), .. }) &&
-    !text.trim().is_empty() {
+    !text.is_blank() {
     Some(text)
   } else {
     None
@@ -4499,7 +4498,7 @@ fn RunOutcome::label(self : RunOutcome) -> String {
     Cancelled => "Cancelled"
     MaxStepsExhausted => "Max steps exhausted"
     // An empty wire status reads as a plain finish, like `parse`'s inverse.
-    Unknown(wire) => if wire.trim().is_empty() { "Finished" } else { wire }
+    Unknown(wire) => if wire.is_blank() { "Finished" } else { wire }
   }
 }
 

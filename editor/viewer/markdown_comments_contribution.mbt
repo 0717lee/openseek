@@ -355,7 +355,7 @@ fn markdown_comment_folded_preview(
       }
     }
     let first_line = false
-    if line.trim().is_empty() {
+    if line.is_blank() {
       continue first_line, preview_line
     }
     match preview_line {

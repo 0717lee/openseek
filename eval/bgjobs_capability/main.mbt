@@ -18,7 +18,7 @@
 async fn main {
   // `DEEPSEEK` is the engine's API-key env var; blank means the engine would
   // reject it at startup, so both count as unset.
-  guard @env.get_env_var("DEEPSEEK") is Some(key) && !key.trim().is_empty() else {
+  guard @env.get_env_var("DEEPSEEK") is Some(key) && !key.is_blank() else {
     println("SKIP: DEEPSEEK is not set; this eval drives the live engine")
     return
   }

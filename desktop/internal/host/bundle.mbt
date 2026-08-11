@@ -72,7 +72,7 @@ pub async fn package_version(executable : String) -> String {
   match @json.parse(text) {
     Object(fields) =>
       match fields.get("version") {
-        Some(String(version)) if !version.trim().is_empty() => version
+        Some(String(version)) if !version.is_blank() => version
         _ => "development"
       }
     _ => "development"

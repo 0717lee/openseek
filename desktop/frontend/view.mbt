@@ -547,7 +547,7 @@ fn push_group_rows(
         // that never got a question keeps the ordinal alone — its id would
         // only repeat the parent's.
         let question = match child.title {
-          Some(title) if !title.trim().is_empty() => Some(title)
+          Some(title) if !title.is_blank() => Some(title)
           _ => None
         }
         let label = match (@transcript.subrun_label(child.id), question) {
@@ -657,7 +657,7 @@ fn project_row(
 /// session id for a conversation with no user message yet (absent or blank
 /// title).
 fn session_item_label(item : @transcript.SessionListItem) -> String {
-  if item.title is Some(title) && !title.trim().is_empty() {
+  if item.title is Some(title) && !title.is_blank() {
     title
   } else {
     item.id
@@ -1079,7 +1079,7 @@ fn tool_call_view(item : @transcript.TranscriptItem) -> @html.Html {
     return @html.text("")
   }
   let label = capitalize(
-    if brief is Some(brief) && !brief.trim().is_empty() {
+    if brief is Some(brief) && !brief.is_blank() {
       brief
     } else {
       name
@@ -1116,7 +1116,7 @@ fn tool_call_view(item : @transcript.TranscriptItem) -> @html.Html {
       )
     }
   }
-  if !item.content.trim().is_empty() {
+  if !item.content.is_blank() {
     body.push(
       @html.div(class="tool-call-section", [
         @html.div(class="tool-call-section-label", "Output"),
@@ -1843,7 +1843,7 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
         id="goal-set",
         class="icon-button send-button",
         title="Set the standing goal (Enter)",
-        disabled=editor.draft.trim().is_empty(),
+        disabled=editor.draft.is_blank(),
         on_click=dispatch(SubmitGoal),
         icon(icon_arrow_up),
       ),
@@ -2405,7 +2405,7 @@ fn settings_page(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
             // shared primary style.
             id="saveApiKey",
             class="primary",
-            disabled=!settings_loaded || model.setup_api_key.trim().is_empty(),
+            disabled=!settings_loaded || model.setup_api_key.is_blank(),
             on_click=dispatch(SaveApiKey),
             "Save API key",
           ),
@@ -2511,7 +2511,7 @@ fn installed_skill_row(
   skill : @transcript.InstalledSkillItem,
 ) -> @html.Html {
   let info : Array[@html.Html] = [@html.div(class="skill-name", skill.name)]
-  if !skill.description.trim().is_empty() {
+  if !skill.description.is_blank() {
     info.push(@html.div(class="skill-desc", skill.description))
   }
   info.push(
@@ -2562,7 +2562,7 @@ fn market_skill_row(
   let busy = model.skills_busy.contains(source)
   let installed = model.skill_installed(source)
   let info : Array[@html.Html] = [@html.div(class="skill-name", item.name)]
-  if !item.description.trim().is_empty() {
+  if !item.description.is_blank() {
     info.push(@html.div(class="skill-desc", item.description))
   }
   let meta = if item.author.is_empty() {

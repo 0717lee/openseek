@@ -567,7 +567,7 @@ pub fn Session::summary_item(
   from_sequence~ : Int,
   to_sequence~ : Int,
 ) -> SessionItem raise {
-  if content.trim().is_empty() {
+  if content.is_blank() {
     fail("summary content must not be empty")
   }
   if from_sequence <= 0 {

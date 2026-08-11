@@ -530,9 +530,7 @@ fn split_plan_checklist(content : String) -> (String, Array[String])? {
   for index, line in lines {
     if line.trim_end().has_suffix("Current plan:") {
       let steps = [
-        for step in lines[index + 1:] if !step.trim().is_empty() => {
-          step.to_owned()
-        }
+        for step in lines[index + 1:] if !step.is_blank() => step.to_owned()
       ]
       if steps.is_empty() {
         return None
@@ -882,8 +880,7 @@ fn assistant_card(
   step_label~ : String,
 ) -> @html.Html {
   let body : Array[@html.Html] = []
-  if message.reasoning_content() is Some(reasoning) &&
-    !reasoning.trim().is_empty() {
+  if message.reasoning_content() is Some(reasoning) && !reasoning.is_blank() {
     body.push(
       @html.details(class="reasoning") <| [
         @html.summary("reasoning"),
@@ -891,7 +888,7 @@ fn assistant_card(
       ],
     )
   }
-  if !message.content().trim().is_empty() {
+  if !message.content().is_blank() {
     body.push(text_block(message.content()))
   }
   let calls = message.tool_calls()
@@ -934,7 +931,7 @@ fn tool_call_view(
     @html.text("→ "),
     @html.strong(call.name),
   ]
-  if briefs.get(call.id) is Some(brief) && !brief.trim().is_empty() {
+  if briefs.get(call.id) is Some(brief) && !brief.is_blank() {
     name_row.push(@html.span(class="tool-call-brief") <| " · \{brief}")
   }
   let plan_steps = plan_call_steps(call)
@@ -1320,7 +1317,7 @@ fn terminal_card(
   let body : Array[@html.Html] = [
     @html.span(class="badge badge-\{kind}") <| kind,
   ]
-  if !message.trim().is_empty() {
+  if !message.is_blank() {
     body.push(text_block(message))
   }
   card("terminal", "Turn ended", seq, time~, body, step_label~)
@@ -1512,7 +1509,7 @@ fn terminal_projects_model_message(
     // consume a model-view label either — one extra label here shifts
     // every later timestamp/step chip after a continued yield.
     Finished(answer) =>
-      !answer.trim().is_empty() &&
+      !answer.is_blank() &&
       !answer.has_prefix(@agent_session.ContextYieldAnswerPrefix)
     Aborted(_) | Interrupted(_) | Failed(_) => true
   }
@@ -1976,8 +1973,7 @@ fn model_card(
   anchor~ : String?,
 ) -> @html.Html {
   let body : Array[@html.Html] = []
-  if message.reasoning_content is Some(reasoning) &&
-    !reasoning.trim().is_empty() {
+  if message.reasoning_content is Some(reasoning) && !reasoning.is_blank() {
     body.push(
       @html.details(class="reasoning") <| [
         @html.summary("reasoning"),
@@ -1985,7 +1981,7 @@ fn model_card(
       ],
     )
   }
-  if !message.content.trim().is_empty() {
+  if !message.content.is_blank() {
     body.push(text_block(message.content))
   }
   if !message.tool_calls.is_empty() {
@@ -2070,7 +2066,7 @@ fn card_head(
 /// A whitespace-preserving text block. Empty content renders an explicit
 /// placeholder so a card never collapses to nothing.
 fn text_block(content : String) -> @html.Html {
-  if content.trim().is_empty() {
+  if content.is_blank() {
     @html.span(class="empty") <| "(empty)"
   } else {
     @html.pre(class="content") <| content

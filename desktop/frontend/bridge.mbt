@@ -838,7 +838,7 @@ fn engine_msg(payload : @protocol.AgentEventPayload) -> DeviceMsg? {
 /// surfaces, labeled generically.
 fn error_msg(payload : @protocol.AgentErrorPayload) -> DeviceMsg? {
   let message = match payload.message {
-    Some(message) if !message.trim().is_empty() => message
+    Some(message) if !message.is_blank() => message
     _ => "error"
   }
   Some(

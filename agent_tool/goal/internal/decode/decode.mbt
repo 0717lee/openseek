@@ -21,7 +21,7 @@ pub fn decode(arguments : Json) -> GoalStatus raise {
   match arguments {
     { "status": "met", .. } => Met
     { "status": "continuing", "remaining": String(remaining), .. } =>
-      if remaining.trim().is_empty() {
+      if remaining.is_blank() {
         fail(
           "goal requires a non-blank \"remaining\" when status is \"continuing\"",
         )
@@ -31,7 +31,7 @@ pub fn decode(arguments : Json) -> GoalStatus raise {
     { "status": "continuing", .. } =>
       fail("goal requires a string \"remaining\" when status is \"continuing\"")
     { "status": "blocked", "reason": String(reason), .. } =>
-      if reason.trim().is_empty() {
+      if reason.is_blank() {
         fail("goal requires a non-blank \"reason\" when status is \"blocked\"")
       } else {
         Blocked(reason)
