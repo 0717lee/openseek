@@ -69,6 +69,17 @@ fn settings_group(
 }
 
 ///|
+/// A native select with the Settings page's own chevron. The browser-drawn
+/// indicator ignores the control's right padding, so it cannot line up with
+/// the selected text's left inset reliably across desktop webviews.
+fn setting_select(control : @html.Html) -> @html.Html {
+  @html.div(class="setting-select", [
+    control,
+    @html.span(class="setting-select-chevron", icon(icon_chevron_down)),
+  ])
+}
+
+///|
 /// The composer's model chip: this conversation's service tier, and the
 /// control that changes it. One click flips to the other tier — the choice
 /// is the conversation's, so a long refactor can sit on High while the chat
@@ -2008,7 +2019,7 @@ fn provider_select(
   selected : ApiProvider,
   disabled~ : Bool,
 ) -> @html.Html {
-  @html.select(
+  let control = @html.select(
     disabled~,
     on_change=dispatch.map(value => ProviderChanged(value)),
     attrs=@html.Attrs::build().aria_label("API endpoint"),
@@ -2031,6 +2042,7 @@ fn provider_select(
       @html.option(value="custom", selected=selected is Custom, "Custom URL"),
     ],
   )
+  setting_select(control)
 }
 
 ///|
@@ -2038,7 +2050,7 @@ fn corner_select(
   dispatch : @cmd.Emit[Msg],
   selected : NotificationCorner,
 ) -> @html.Html {
-  @html.select(
+  let control = @html.select(
     on_change=dispatch.map(value => NotificationCornerChanged(value)),
     attrs=@html.Attrs::build().aria_label("Notification corner"),
     [
@@ -2060,6 +2072,7 @@ fn corner_select(
       @html.option(value="top-left", selected=selected is TopLeft, "Top left"),
     ],
   )
+  setting_select(control)
 }
 
 ///|
@@ -2067,7 +2080,7 @@ fn tree_layout_select(
   dispatch : @cmd.Emit[Msg],
   selected : @fileeditor.TreeLayout,
 ) -> @html.Html {
-  @html.select(
+  let control = @html.select(
     on_change=dispatch.map(value => TreeLayoutChanged(value)),
     attrs=@html.Attrs::build().aria_label("File tree layout"),
     [
@@ -2083,6 +2096,7 @@ fn tree_layout_select(
       ),
     ],
   )
+  setting_select(control)
 }
 
 ///|
@@ -2407,22 +2421,24 @@ fn settings_page(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
       setting_row(
         "Theme",
         [
-          @html.select(
-            on_change=dispatch.map(value => ThemeChanged(value)),
-            attrs=@html.Attrs::build().aria_label("Theme"),
-            [
-              @html.option(
-                value="system",
-                selected=model.theme is System,
-                "System",
-              ),
-              @html.option(
-                value="light",
-                selected=model.theme is Light,
-                "Light",
-              ),
-              @html.option(value="dark", selected=model.theme is Dark, "Dark"),
-            ],
+          setting_select(
+            @html.select(
+              on_change=dispatch.map(value => ThemeChanged(value)),
+              attrs=@html.Attrs::build().aria_label("Theme"),
+              [
+                @html.option(
+                  value="system",
+                  selected=model.theme is System,
+                  "System",
+                ),
+                @html.option(
+                  value="light",
+                  selected=model.theme is Light,
+                  "Light",
+                ),
+                @html.option(value="dark", selected=model.theme is Dark, "Dark"),
+              ],
+            ),
           ),
         ],
         desc="Used by the app, editor, and terminal. System follows the OS appearance.",
