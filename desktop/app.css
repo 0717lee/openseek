@@ -3698,6 +3698,28 @@ select:focus {
   font-size: 12.5px;
 }
 
+.setting-select {
+  position: relative;
+  width: 100%;
+}
+
+.setting-select select {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 32px;
+}
+
+.setting-select-chevron {
+  position: absolute;
+  top: 50%;
+  /* The codicon path ends 3px before its 16px view box edge. */
+  right: 7px;
+  display: inline-flex;
+  color: var(--ink);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
 /* ---------- skills page ---------- */
 .skills-page {
   grid-row: 1 / -1;
