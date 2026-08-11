@@ -199,6 +199,15 @@ async fn git_base_ref(dir : String, hint? : String) -> String? {
 }
 
 ///|
+/// Whether `branch` is the repository's own default branch. The symbolic
+/// remote-tracking ref is Git's local statement of that identity; comparing
+/// names, rather than commits, keeps a feature branch made at the current
+/// default-branch tip eligible for its own pull request.
+async fn git_is_default_branch(dir : String, branch~ : String) -> Bool {
+  git_base_ref(dir) == Some("origin/\{branch}")
+}
+
+///|
 /// Where this branch's work starts, and the ref that decided it.
 ///
 /// `hint` is the branch the caller already knows this one merges into, taken
@@ -1444,6 +1453,46 @@ async fn git_test_run(dir : String, args : Array[String]) -> Unit {
   guard code == 0 else {
     let detail = (stderr.text() catch { _ => "non-UTF-8 stderr" }).trim()
     fail("Git fixture command failed: \{detail}")
+  }
+}
+
+///|
+async test "Git recognizes only origin HEAD's branch as the default" {
+  let dir = @fs.tmpdir(prefix="openseek-git-default-branch-")
+  async fn cleanup() {
+    @fs.rmdir(dir, recursive=true) catch {
+      error if @async.is_being_cancelled() => raise error
+      _ => ()
+    }
+  }
+  try {
+    git_test_run(dir, ["init", "--quiet"])
+    @fs.write_file(
+      "\{dir}/tracked.txt",
+      "first\n",
+      create_mode=CreateOrTruncate,
+    )
+    git_test_run(dir, ["add", "tracked.txt"])
+    git_test_run(dir, [
+      "-c", "user.name=OpenSeek Test", "-c", "user.email=openseek@example.invalid",
+      "-c", "commit.gpgSign=false", "commit", "--quiet", "-m", "first",
+    ])
+    // A branch spelling alone proves nothing until the remote declares its
+    // default. Once it does, only that exact name is suppressed from PR lookup.
+    assert_false(git_is_default_branch(dir, branch="main"))
+    git_test_run(dir, ["update-ref", "refs/remotes/origin/main", "HEAD"])
+    git_test_run(dir, [
+      "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main",
+    ])
+    assert_true(git_is_default_branch(dir, branch="main"))
+    assert_false(git_is_default_branch(dir, branch="feature/from-main"))
+  } catch {
+    error => {
+      cleanup()
+      raise error
+    }
+  } noraise {
+    _ => cleanup()
   }
 }
 
