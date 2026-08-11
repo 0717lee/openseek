@@ -1,9 +1,10 @@
-// The composer's pull-request chip: report the GitHub pull request for the
-// branch a conversation's working directory has checked out. Answered through
-// the `gh` CLI, so the desktop inherits the user's own GitHub authentication —
-// enterprise hosts, fork remotes, and all — instead of holding a token of its
-// own. No `gh`, no authentication, or no GitHub remote all read as "nothing to
-// show", never an error: this is decoration beside the branch name.
+// The composer's pull-request chip: report the GitHub pull request for a
+// non-default branch a conversation's working directory has checked out.
+// Answered through the `gh` CLI, so the desktop inherits the user's own GitHub
+// authentication — enterprise hosts, fork remotes, and all — instead of
+// holding a token of its own. No `gh`, no authentication, or no GitHub remote
+// all read as "nothing to show", never an error: this is decoration beside the
+// branch name.
 
 ///|
 /// Where the composer stops waiting for GitHub. A slow or unreachable API must
@@ -60,6 +61,15 @@ async fn git_pull_request_op(
   // `--head`: gh would filter for a branch by that name, find nothing, and the
   // caller would offer to open a pull request from a ref that is not one.
   guard git_symbolic_branch(base.0) is Some(head) else { return unanswered }
+  // The default branch is the destination of pull requests, not work waiting
+  // to become one. In particular, `gh pr list --head main --state all` can
+  // return an old cross-repository pull request whose fork branch was also
+  // named `main`; showing that merged request here makes the current main
+  // branch look like the historical fork. Stop before resolving gh so neither
+  // that chip nor a create-pull-request link can appear on the default branch.
+  if git_is_default_branch(base.0, branch=head) {
+    return unanswered
+  }
   guard resolve_gh() is Some(gh) else { return unanswered }
   // One deadline for the whole exchange, however many calls it takes.
   @async.with_timeout_opt(GithubRequestTimeoutMs, () => {
