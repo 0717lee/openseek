@@ -200,9 +200,9 @@ async fn session_tree(
 ///|
 /// The immutable commit a conversation's worktree branch was created from.
 /// Workspace-root conversations have no desktop-owned task boundary and
-/// therefore return `None`; their review surface retains the ordinary HEAD
-/// fallback. The registry owns this fact, so callers never infer a base from
-/// mutable branch or remote configuration.
+/// therefore return `None`; their review surface may derive a branch boundary
+/// separately. The registry owns the task fact, so callers never infer a
+/// worktree base from mutable branch or remote configuration.
 async fn session_tree_base(
   workspace : @pathx.Absolute,
   session : String,

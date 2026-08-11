@@ -46,7 +46,8 @@ pub async fn session_cwd(session : String) -> @pathx.Absolute? {
 /// workspace hint follows `resolve_in_workspace`'s trust boundary: only an
 /// attached workspace is considered, while a resumed conversation can recover
 /// its owner from the durable session record. `None` deliberately distinguishes
-/// workspace-root and scratch conversations, whose Review remains HEAD-based.
+/// workspace-root and scratch conversations; the Git host may derive their
+/// branch fork point when committed work exists.
 pub async fn session_review_base(
   session : String,
   workspace? : String,
