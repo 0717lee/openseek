@@ -713,14 +713,17 @@ pub async fn create_worktree(
   // provably THIS invocation's, which is what makes the rollback's
   // `branch -D` safe.
   ignore(git_in(dir, ["branch", branch, base]))
-  ignore(
-    git_in(dir, ["worktree", "add", "\{WorktreesDirName}/\{name}", branch]) catch {
-      error => {
-        @async.protect_from_cancel(() => rollback_worktree(dir, name, branch))
-        raise error
-      }
-    },
-  )
+  try {
+    ignore(
+      git_in(dir, ["worktree", "add", "\{WorktreesDirName}/\{name}", branch]),
+    )
+    provision_initialized_submodules(dir, target)
+  } catch {
+    error => {
+      @async.protect_from_cancel(() => rollback_worktree(dir, name, branch))
+      raise error
+    }
+  }
   entries.push({ name, branch, base, session: Some(session) })
   let mut infos : Array[WorktreeInfo] = []
   @async.protect_from_cancel(() => {
@@ -761,14 +764,44 @@ async fn restore_worktree_checkout(
   }
   ignore(git_probe(dir, ["worktree", "prune"]))
   exclude_from_git(dir, WorktreesDirName)
-  ignore(
-    git_in(dir, [
-      "worktree",
-      "add",
-      "\{WorktreesDirName}/\{entry.name}",
-      entry.branch,
-    ]),
-  )
+  let target = worktree_dir(dir, entry.name)
+  try {
+    ignore(
+      git_in(dir, [
+        "worktree",
+        "add",
+        "\{WorktreesDirName}/\{entry.name}",
+        entry.branch,
+      ]),
+    )
+    provision_initialized_submodules(dir, target)
+  } catch {
+    error => {
+      @async.protect_from_cancel(() => {
+        rollback_worktree_checkout(dir, entry.name, entry.branch)
+      })
+      raise error
+    }
+  }
+}
+
+///|
+/// Best-effort removal of an app-created checkout while preserving its branch.
+/// `git worktree remove` refuses every repository whose tree contains a
+/// gitlink, even when that submodule is uninitialized, so deletion plus prune
+/// is the only generic cleanup path.
+async fn rollback_worktree_checkout(
+  dir : @pathx.Absolute,
+  name : String,
+  branch : String,
+) -> Unit {
+  if worktree_checked_out_on(dir, name, branch) &&
+    worktree_lock_reason(dir, name) is None {
+    @fs.rmdir(worktree_dir(dir, name).to_string(), recursive=true) catch {
+      _ => ()
+    }
+  }
+  git_rollback(dir, ["worktree", "prune"])
 }
 
 ///|
@@ -784,15 +817,7 @@ async fn rollback_worktree(
   name : String,
   branch : String,
 ) -> Unit {
-  if worktree_checked_out_on(dir, name, branch) {
-    git_rollback(dir, [
-      "worktree",
-      "remove",
-      "--force",
-      "\{WorktreesDirName}/\{name}",
-    ])
-  }
-  git_rollback(dir, ["worktree", "prune"])
+  rollback_worktree_checkout(dir, name, branch)
   git_rollback(dir, ["branch", "-D", branch])
 }
 
@@ -820,6 +845,28 @@ async fn worktree_checked_out_on(
     }
   }
   false
+}
+
+///|
+/// An external `git worktree lock` must remain authoritative even on the
+/// gitlink cleanup path, where Git cannot perform the removal itself.
+async fn worktree_lock_reason(dir : @pathx.Absolute, name : String) -> String? {
+  guard git_probe(dir, ["worktree", "list", "--porcelain"]) is Some(output) else {
+    return None
+  }
+  let suffix = "/\{WorktreesDirName}/\{name}"
+  let mut at_target = false
+  for line in output.split("\n") {
+    let line = line.trim().to_owned()
+    if line.has_prefix("worktree ") {
+      at_target = line.has_suffix(suffix)
+    } else if at_target && line == "locked" {
+      return Some("")
+    } else if at_target && line.has_prefix("locked ") {
+      return Some(line.view(start_offset="locked ".length()).to_owned())
+    }
+  }
+  None
 }
 
 ///|
@@ -882,12 +929,26 @@ pub async fn remove_worktree(
         )
       }
     }
-    let args = ["worktree", "remove"]
-    if force {
-      args.push("--force")
+    if checkout_has_gitlinks(target) {
+      // Git refuses `worktree remove` for any tree containing a submodule
+      // gitlink, initialized or not. The target is app-owned and registered;
+      // the non-force path proved it clean above, while an external lock still
+      // blocks deletion.
+      guard worktree_lock_reason(dir, name) is None else {
+        raise EngineError(
+          "worktree \{name} is locked; unlock it before removal",
+        )
+      }
+      @fs.rmdir(target.to_string(), recursive=true)
+      ignore(git_in(dir, ["worktree", "prune"]))
+    } else {
+      let args = ["worktree", "remove"]
+      if force {
+        args.push("--force")
+      }
+      args.push("\{WorktreesDirName}/\{name}")
+      ignore(git_in(dir, args))
     }
-    args.push("\{WorktreesDirName}/\{name}")
-    ignore(git_in(dir, args))
   } else {
     // The checkout is already gone; drop git's stale bookkeeping for it.
     ignore(git_probe(dir, ["worktree", "prune"]))
