@@ -50,7 +50,11 @@ async fn WsClientActor::open_subscription(
   // `agent.connected` as "state may have changed, reload". Queue it before
   // any notification forwarder exists, making it this subscription's first
   // outbound frame even if the hub publishes immediately after subscribe.
-  out.put(Notify(AgentConnected({ ready: None })))
+  out.put(
+    Notify(
+      AgentConnected({ ready: None, scratch_root: @engine.scratch_root() }),
+    ),
+  )
   { out, notifications }
 }
 
@@ -357,22 +361,19 @@ fn notification_for_client(
 ) -> @protocol.Notification? {
   match notification {
     AgentEvent(payload) => {
-      // A session-less run has no store and therefore no `session.event`
-      // twin. Keep its complete semantic stream intact.
-      guard payload.session is Some(session) && !session.is_empty() else {
-        return Some(notification)
-      }
+      // Desktop starts always name a durable session. An event without one
+      // cannot be reconciled with the session transcript and is not part of
+      // the supported remote profile.
+      guard !payload.session.is_empty() else { return None }
       if payload.event.remote_lifecycle() is Some(event) {
         Some(AgentEvent({ ..payload, event, }))
       } else {
         None
       }
     }
-    AgentStarted(payload) if payload.session is Some(session) &&
-      !session.is_empty() =>
-      // The prompt itself arrives as a durable commit. Keep the field so
-      // clients with a required-string decoder still accept the frame.
-      Some(AgentStarted({ ..payload, task: Some("") }))
+    AgentStarted(payload) if !payload.session.is_empty() =>
+      Some(AgentStarted(payload))
+    AgentStarted(_) => None
     _ => Some(notification)
   }
 }
@@ -551,7 +552,7 @@ test "remote delivery omits only canonical transcript duplicates" {
       notification_for_client(
         AgentEvent({
           run_id: None,
-          session: Some("session-1"),
+          session: "session-1",
           event: { event, submission_id: None },
         }),
       )
@@ -593,7 +594,7 @@ test "remote delivery retains streaming runtime and error events" {
       notification_for_client(
         AgentEvent({
           run_id: None,
-          session: Some("session-1"),
+          session: "session-1",
           event: { event, submission_id: None },
         }),
       )
@@ -613,27 +614,21 @@ test "remote delivery retains streaming runtime and error events" {
 }
 
 ///|
-test "remote lifecycle frames keep state and trim transcript text" {
+test "remote lifecycle frames keep state without transcript text" {
   let started = expect_notification(
     notification_for_client(
       AgentStarted({
         run_id: "run-1",
-        task: Some("large prompt"),
         submission_id: None,
         engine: None,
         model: None,
         max_steps: None,
-        cwd: None,
-        session: Some("session-1"),
+        session: "session-1",
         session_root: None,
       }),
     ),
   )
-  assert_eq(started.params(), {
-    "run_id": "run-1",
-    "session": "session-1",
-    "task": "",
-  })
+  assert_eq(started.params(), { "run_id": "run-1", "session": "session-1" })
   let finished = expect_notification(
     notification_for_client(
       AgentFinished({
@@ -654,7 +649,7 @@ test "remote lifecycle frames keep state and trim transcript text" {
     notification_for_client(
       AgentEvent({
         run_id: None,
-        session: Some("session-1"),
+        session: "session-1",
         event: {
           event: CompactionFinished(
             from_sequence=1,
@@ -684,7 +679,7 @@ test "remote lifecycle frames keep state and trim transcript text" {
       notification_for_client(
         AgentEvent({
           run_id: None,
-          session: Some("session-1"),
+          session: "session-1",
           event: { event, submission_id: None },
         }),
       ),
@@ -702,51 +697,20 @@ test "remote lifecycle frames keep state and trim transcript text" {
 }
 
 ///|
-test "remote delivery preserves session-less transcript events" {
+test "remote delivery drops notifications without a session" {
   let started_notification : @protocol.Notification = AgentStarted({
     run_id: "run-ephemeral",
-    task: Some("ephemeral prompt"),
     submission_id: None,
     engine: None,
     model: None,
     max_steps: None,
-    cwd: None,
-    session: None,
+    session: "",
     session_root: None,
   })
-  let started = expect_notification(
-    notification_for_client(started_notification),
-  )
-  assert_eq(started.params(), started_notification.params())
-  let events : Array[@wire.Event] = [
-    ReasoningMessage(content="ephemeral content"),
-    AssistantMessage(content="ephemeral content"),
-    ToolResult(
-      tool_call_id="call-1",
-      tool_name="read",
-      is_error=false,
-      content="ephemeral content",
-      brief=None,
-    ),
-    AgentFinished(answer="ephemeral content"),
-    ContextYield(to_sequence=1, answer="ephemeral content"),
-  ]
-  for event in events {
-    let notification : @protocol.Notification = AgentEvent({
-      run_id: None,
-      session: None,
-      event: { event, submission_id: None },
-    })
-    let delivered = expect_notification(notification_for_client(notification))
-    assert_eq(delivered.params(), notification.params())
-  }
-}
-
-///|
-test "empty session is not treated as durable" {
-  let notification : @protocol.Notification = AgentEvent({
+  assert_true(notification_for_client(started_notification) is None)
+  let event : @protocol.AgentEventPayload = {
     run_id: None,
-    session: Some(""),
+    session: "",
     event: {
       event: ToolResult(
         tool_call_id="call-1",
@@ -757,7 +721,7 @@ test "empty session is not treated as durable" {
       ),
       submission_id: None,
     },
-  })
-  let delivered = expect_notification(notification_for_client(notification))
-  assert_eq(delivered.params(), notification.params())
+  }
+  let notification : @protocol.Notification = AgentEvent({ ..event })
+  assert_true(notification_for_client(notification) is None)
 }

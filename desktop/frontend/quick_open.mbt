@@ -35,7 +35,7 @@ fn quick_open_symbol_request(
     dispatch,
     owner,
     query,
-    workspace=model.session_workspace(owner.channel, owner.session),
+    root=quick_open_root(model, owner),
     generation~,
   )
 }
@@ -50,16 +50,14 @@ priv enum QuickOpenFileRequestKind {
 fn quick_open_file_request(
   dispatch : @cmd.Emit[Msg],
   owner : @interop.ConversationKey,
-  workspace : @common.Uri?,
+  root~ : @common.Uri?,
   cache_key : String,
   query : String,
   generation : Int,
   kind : QuickOpenFileRequestKind,
 ) -> @cmd.Cmd {
-  match workspace {
-    Some(resource) if !@resource.belongs_to(resource, owner.channel) =>
-      return @cmd.none
-    _ => ()
+  guard root is Some(root) && @resource.belongs_to(root, owner.channel) else {
+    return @cmd.none
   }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
@@ -67,8 +65,7 @@ fn quick_open_file_request(
         owner.channel,
         @commands.fs_search_files,
         {
-          session: owner.session,
-          workspace: workspace.map(value => value.path),
+          path: root.path,
           cache_key,
           query,
           max_results: match kind {
@@ -263,11 +260,14 @@ fn quick_open_with_file_candidates(
 }
 
 ///|
-fn quick_open_workspace(
+fn quick_open_root(
   model : Model,
   owner : @interop.ConversationKey,
 ) -> @common.Uri? {
-  model.session_workspace(owner.channel, owner.session)
+  guard model.find_conversation(owner.channel, owner.session) is Some(conv) else {
+    return None
+  }
+  model.conversation_root(conv)
 }
 
 ///|
@@ -290,7 +290,7 @@ fn query_active_file_cache(
   quick_open_file_request(
     dispatch,
     open.owner,
-    quick_open_workspace(model, open.owner),
+    root=quick_open_root(model, open.owner),
     cache_key,
     open.query(),
     open.generation,
@@ -309,15 +309,17 @@ fn ensure_file_query_cache(
   replace_loaded : Bool,
   query_now : Bool,
 ) -> (@cmd.Cmd, Model) {
-  let workspace = quick_open_workspace(model, open.owner)
+  let root = quick_open_root(model, open.owner)
   let previous = model.file_query_cache
-  let compatible = previous.owner == Some(open.owner) &&
-    previous.workspace == workspace
+  let compatible = previous.owner == Some(open.owner) && previous.root == root
   let cmds : Array[@cmd.Cmd] = []
   let mut cache = if compatible {
     previous
   } else {
-    if previous.owner is Some(previous_owner) {
+    // Every Host cache key is created by a request with a concrete root. A
+    // rootless entry only records that Quick Open opened before placement was
+    // available, so there is no Host cache to clear when a root later arrives.
+    if previous.root is Some(_) && previous.owner is Some(previous_owner) {
       if previous.active_key is Some(key) {
         cmds.push(clear_quick_open_file_cache(previous_owner, key))
       }
@@ -325,7 +327,7 @@ fn ensure_file_query_cache(
         cmds.push(clear_quick_open_file_cache(previous_owner, key))
       }
     }
-    { owner: Some(open.owner), workspace, active_key: None, loading_key: None }
+    { owner: Some(open.owner), root, active_key: None, loading_key: None }
   }
   if cache.loading_key is None && (cache.active_key is None || replace_loaded) {
     let cache_key = file_query_cache_key(open.owner, open.generation)
@@ -334,7 +336,7 @@ fn ensure_file_query_cache(
       quick_open_file_request(
         dispatch,
         open.owner,
-        workspace,
+        root~,
         cache_key,
         "",
         open.generation,
@@ -350,6 +352,75 @@ fn ensure_file_query_cache(
 }
 
 ///|
+/// Restart the current provider when its conversation root changes, including
+/// transitions to or from an unavailable root. The page-level update wrapper
+/// calls this after every message, so conversation creation, connection
+/// readiness, session restoration, and worktree registry broadcasts share one
+/// transition. Advancing the generation also fences replies that were already
+/// in flight against the previous root.
+fn Model::restart_quick_open_after_root_change(
+  self : Model,
+  dispatch : @cmd.Emit[Msg],
+  previous : Model,
+) -> (@cmd.Cmd, Model) {
+  guard previous.quick_open is Some(previous_open) &&
+    self.quick_open is Some(open) &&
+    open.owner == previous_open.owner else {
+    return (@cmd.none, self)
+  }
+  let previous_root = quick_open_root(previous, open.owner)
+  let current_root = quick_open_root(self, open.owner)
+  guard current_root != previous_root else { return (@cmd.none, self) }
+  let generation = self.quick_open_generation + 1
+  let restarted : QuickOpen = {
+    ..open,
+    items: [],
+    selected: 0,
+    phase: QuickOpenLoading,
+    generation,
+  }
+  let next = {
+    ..self,
+    quick_open: Some(restarted),
+    quick_open_generation: generation,
+  }
+  match restarted.mode() {
+    QuickOpenFiles => {
+      // Keep only currently open relative paths as provisional rows; Host
+      // results from the previous root must disappear immediately.
+      let projected = quick_open_with_file_candidates(
+        next,
+        restarted,
+        [],
+        QuickOpenLoading,
+      )
+      let next = { ..next, quick_open: Some(projected) }
+      let (cache_cmd, next) = ensure_file_query_cache(
+        dispatch, next, projected, true, true,
+      )
+      (
+        @cmd.batch([
+          cancel_quick_open_file_request(dispatch, self, open),
+          cache_cmd,
+        ]),
+        next,
+      )
+    }
+    QuickOpenSymbols =>
+      (
+        quick_open_symbol_request(
+          dispatch,
+          next,
+          restarted.owner,
+          restarted.query(),
+          generation,
+        ),
+        next,
+      )
+  }
+}
+
+///|
 /// Open a fresh palette for the focused conversation, or switch an existing
 /// palette's provider while retaining its query suffix. Invoking the same
 /// provider again only restores focus.
@@ -358,7 +429,7 @@ fn open_quick_open(
   model : Model,
   mode : QuickOpenMode,
 ) -> (@cmd.Cmd, Model) {
-  guard model.workspace_picker is None &&
+  guard model.project_picker is None &&
     model.archive_confirm is None &&
     !(model.update_ux is ConfirmingRestart(..)) &&
     !(model.bridge_state() is BridgeLost(_)) else {
@@ -1164,6 +1235,76 @@ test "Quick Open prefixes providers and works in both shells" {
 }
 
 ///|
+test "BridgeReady retries file and symbol Quick Open after a scratch root arrives" {
+  let dispatch = test_dispatch()
+  let base = {
+    ..test_model().with_dev(dev => { ..dev, bridge: Connecting }),
+    is_desktop: true,
+  }
+  let owner = active_quick_open_owner(base)
+  let (_, opened) = update(dispatch, QuickOpenOpen(QuickOpenFiles), base)
+  guard opened.quick_open is Some(waiting) &&
+    opened.file_query_cache.loading_key is Some(cache_key) else {
+    fail("rootless Quick Open should wait for its file cache")
+  }
+  assert_eq(opened.file_query_cache.root, None)
+  let scratch_root = @interop.ChannelId::Local.test_resource("/work/scratch")
+  let ready = BridgeReady(scratch_root~)
+  // The same message and model must produce the same plain-data state.
+  let (_, first) = update_dev(dispatch, ready, opened)
+  let (_, second) = update_dev(dispatch, ready, opened)
+  assert_true(first.file_query_cache == second.file_query_cache)
+  assert_true(first.quick_open == second.quick_open)
+  assert_true(
+    first.file_query_cache.root is Some(root) &&
+    root.path == "/work/scratch/desktop-test",
+  )
+  guard first.file_query_cache.loading_key is Some(restarted_key) else {
+    fail("BridgeReady should restart file-cache population")
+  }
+  assert_true(restarted_key != cache_key)
+  guard first.quick_open is Some(retrying) else {
+    fail("BridgeReady should leave the picker open")
+  }
+  assert_eq(retrying.generation, waiting.generation + 1)
+  assert_true(retrying.phase is QuickOpenLoading)
+  // A duplicate ready notification has no root change and must not restart.
+  let (_, duplicate) = update_dev(dispatch, ready, first)
+  assert_true(duplicate.file_query_cache == first.file_query_cache)
+  assert_true(duplicate.quick_open == first.quick_open)
+  let (_, symbol_opened) = update(
+    dispatch,
+    QuickOpenOpen(QuickOpenSymbols),
+    base,
+  )
+  guard symbol_opened.quick_open is Some(symbol_waiting) else {
+    fail("rootless symbol Quick Open should remain open")
+  }
+  let (_, symbol_first) = update_dev(dispatch, ready, symbol_opened)
+  let (_, symbol_second) = update_dev(dispatch, ready, symbol_opened)
+  assert_true(symbol_first.quick_open == symbol_second.quick_open)
+  guard symbol_first.quick_open is Some(symbol_retrying) else {
+    fail("BridgeReady should leave the symbol picker open")
+  }
+  assert_eq(symbol_retrying.generation, symbol_waiting.generation + 1)
+  assert_eq(symbol_retrying.query(), symbol_waiting.query())
+  assert_true(symbol_retrying.phase is QuickOpenLoading)
+  let (_, stale) = update(
+    dispatch,
+    QuickOpenSymbolsLoaded(
+      owner~,
+      query=symbol_waiting.query(),
+      generation=symbol_waiting.generation,
+      items=[test_workspace_symbol("stale", "src/old.mbt")],
+    ),
+    symbol_first,
+  )
+  assert_true(stale.quick_open == symbol_first.quick_open)
+  let (_, symbol_duplicate) = update_dev(dispatch, ready, symbol_first)
+  assert_true(symbol_duplicate.quick_open == symbol_first.quick_open)
+}
+
+///|
 test "file Quick Open populates a cache session before adopting ranked rows" {
   let dispatch = test_dispatch()
   let base = { ..test_model(), is_desktop: true }
@@ -1291,12 +1432,12 @@ test "file cache keeps the previous key until replacement succeeds" {
   let dispatch = test_dispatch()
   let base = { ..test_model(), is_desktop: true }
   let owner = active_quick_open_owner(base)
-  let workspace = quick_open_workspace(base, owner)
+  let root = quick_open_root(base, owner)
   let seeded = {
     ..base,
     file_query_cache: {
       owner: Some(owner),
-      workspace,
+      root,
       active_key: Some("old-cache"),
       loading_key: None,
     },

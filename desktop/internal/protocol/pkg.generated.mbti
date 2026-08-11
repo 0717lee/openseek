@@ -33,7 +33,7 @@ pub impl @json.FromJson for AgentErrorPayload
 
 pub(all) struct AgentEventPayload {
   run_id : String?
-  session : String?
+  session : String
   event : AgentStreamEvent
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
@@ -164,9 +164,11 @@ pub(all) struct CompactReply {
 
 pub(all) struct ConnectedPayload {
   ready : Bool?
+  scratch_root : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct DiagnosticsPayload {
+  root : String
   path : String
   diagnostics : Array[LspDiagnostic]
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
@@ -216,10 +218,10 @@ pub(all) struct FinishedPayload {
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct FsChangedPayload {
-  session : String?
-  root : String?
-  baseline : Bool?
-  events : Array[FsEventPayload]?
+  root : String
+  baseline : Bool
+  events : Array[FsEventPayload]
+  generation : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct FsEventPayload {
@@ -229,9 +231,9 @@ pub(all) struct FsEventPayload {
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct FsWatchFailedPayload {
-  session : String
   root : String
   message : String
+  generation : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct GitBranchPayload {
@@ -396,6 +398,7 @@ pub(all) struct LspDiagnosticsReply {
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct LspHoverPayload {
+  root : String
   path : String
   line : Int
   character : Int
@@ -412,6 +415,7 @@ pub(all) struct LspHoverReply {
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct LspOpenPayload {
+  root : String
   path : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
@@ -524,9 +528,7 @@ pub(all) struct OpenPathReply {
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct ReadDirPayload {
-  session : String
   path : String
-  workspace : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct ReadDirReply {
@@ -534,9 +536,7 @@ pub(all) struct ReadDirReply {
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct ReadFilePayload {
-  session : String
   path : String
-  workspace : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) enum ReadFileReply {
@@ -566,8 +566,7 @@ pub(all) struct RunsReply {
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct SearchFilesPayload {
-  session : String
-  workspace : String?
+  path : String
   cache_key : String
   query : String
   max_results : Int
@@ -710,7 +709,7 @@ pub(all) struct StartPayload {
   submission_id : String?
   model : String?
   max_steps : Int?
-  session : String?
+  session : String
   workspace : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
@@ -722,20 +721,16 @@ pub(all) struct StartReply {
 
 pub(all) struct StartedPayload {
   run_id : String
-  task : String?
   submission_id : String?
   engine : String?
   model : String?
   max_steps : Int?
-  cwd : String?
-  session : String?
+  session : String
   session_root : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct StatFilesPayload {
-  session : String
   paths : Array[String]
-  workspace : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct StatFilesReply {
@@ -847,10 +842,10 @@ pub(all) struct UpdateDownloadedPayload {
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct WatchWorkspacePayload {
-  session : String
-  workspace : String?
-  files : Array[String]?
-  directories : Array[String]?
+  path : String
+  files : Array[String]
+  directories : Array[String]
+  generation : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct WorkspacePayload {
@@ -858,9 +853,8 @@ pub(all) struct WorkspacePayload {
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct WorkspaceSymbolsPayload {
-  session : String
+  root : String
   query : String
-  workspace : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct WorkspaceSymbolsReply {

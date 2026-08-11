@@ -42,13 +42,14 @@ fn bridge_msg(
         FromDevice(channel, FilePanel(msg))
       })
     FsChanged(payload) => {
-      let changes : Array[@fileeditor.FileChange]? = if payload.baseline.unwrap_or(
-          false,
-        ) {
+      guard @resource.of_path(channel, payload.root) is Some(root) else {
+        return None
+      }
+      let changes : Array[@fileeditor.FileChange]? = if payload.baseline {
         None
-      } else if payload.events is Some(items) {
+      } else {
         let decoded : Array[@fileeditor.FileChange] = []
-        for item in items {
+        for item in payload.events {
           match item.kind_ {
             "modify" =>
               decoded.push(@fileeditor.Modified(@pathx.Relative(item.path)))
@@ -69,30 +70,32 @@ fn bridge_msg(
           }
         }
         Some(decoded)
-      } else {
-        // An older host sent only `{root}`; preserve its coarse refresh.
-        None
       }
       Some(
         FromDevice(
           channel,
-          FilePanel(FsChanged(session=payload.session, changes~)),
+          FilePanel(FsChanged(root~, generation=payload.generation, changes~)),
         ),
       )
     }
-    FsWatchFailed(payload) =>
+    FsWatchFailed(payload) => {
+      guard @resource.of_path(channel, payload.root) is Some(root) else {
+        return None
+      }
       Some(
         FromDevice(
           channel,
           FilePanel(
             FileWatchFailed(
-              owner={ channel, session: payload.session },
-              epoch=None,
+              channel~,
+              root~,
+              generation=payload.generation,
               message=payload.message,
             ),
           ),
         ),
       )
+    }
     TerminalOutput(payload) =>
       terminal_output_msg(channel, payload).map(msg => Terminal(msg))
     TerminalExit(payload) =>
@@ -138,7 +141,12 @@ fn device_msg(
   notification : @protocol.Notification,
 ) -> DeviceMsg? {
   match notification {
-    AgentConnected(_) => Some(BridgeReady)
+    AgentConnected(payload) => {
+      guard @resource.of_path(channel, payload.scratch_root) is Some(root) else {
+        return None
+      }
+      Some(BridgeReady(scratch_root=root))
+    }
     AgentStarted(payload) => started_msg(channel, payload)
     AgentEvent(payload) => engine_msg(payload)
     AgentError(payload) => error_msg(payload)
@@ -157,13 +165,14 @@ fn device_msg(
     SessionChanged(payload) => session_changed_msg(payload)
     WorkspaceChanged(payload) => {
       let paths : Array[@common.Uri] = []
+      // The wire contract still calls registered projects `workspaces`.
       for path in payload.workspaces {
         guard @resource.of_path(channel, path) is Some(resource) else {
           return None
         }
         paths.push(resource)
       }
-      Some(WorkspacesChanged(paths))
+      Some(ProjectsChanged(paths))
     }
     WorktreeChanged(payload) => worktree_changed_msg(channel, payload)
     SettingsChanged(payload) =>
@@ -363,31 +372,34 @@ test "file-panel pushes carry their channel; auth.changed is Local-only" {
     bridge_msg(
       channel,
       @protocol.Notification::FsChanged({
-        session: None,
-        root: None,
-        baseline: None,
-        events: None,
+        root: "/work/project",
+        baseline: true,
+        events: [],
+        generation: "page-a:7",
       }),
     )
     is Some(
-      FromDevice(Remote("d1"), FilePanel(FsChanged(session=None, changes=None)))
+      FromDevice(
+        Remote("d1"),
+        FilePanel(FsChanged(root=_, generation="page-a:7", changes=None))
+      )
     ),
   )
   assert_true(
     bridge_msg(
       channel,
       @protocol.Notification::FsChanged({
-        session: Some("s-1"),
-        root: Some("/work/project"),
-        baseline: Some(false),
-        events: Some([
+        root: "/work/project",
+        baseline: false,
+        events: [
           { kind_: "modify", path: "src/main.mbt", old_path: None },
           {
             kind_: "rename",
             path: "src/new.mbt",
             old_path: Some("src/old.mbt"),
           },
-        ]),
+        ],
+        generation: "page-a:7",
       }),
     )
     is Some(
@@ -395,7 +407,8 @@ test "file-panel pushes carry their channel; auth.changed is Local-only" {
         Remote("d1"),
         FilePanel(
           FsChanged(
-            session=Some("s-1"),
+            root=_,
+            generation="page-a:7",
             changes=Some(
               [
                 Modified(Relative("src/main.mbt")),
@@ -415,9 +428,9 @@ test "file-panel pushes carry their channel; auth.changed is Local-only" {
     bridge_msg(
       channel,
       @protocol.Notification::FsWatchFailed({
-        session: "s-1",
         root: "/work/project",
         message: "File watching stopped",
+        generation: "page-a:7",
       }),
     )
     is Some(
@@ -425,8 +438,9 @@ test "file-panel pushes carry their channel; auth.changed is Local-only" {
         Remote("d1"),
         FilePanel(
           FileWatchFailed(
-            owner={ channel: Remote("d1"), session: "s-1" },
-            epoch=None,
+            channel=Remote("d1"),
+            root=_,
+            generation="page-a:7",
             message="File watching stopped"
           )
         )
@@ -529,7 +543,7 @@ fn wire_proton_events(
 /// structured clones of the host's JSON, so the round trip back through
 /// JSON is lossless; an event without a decodable payload is dropped —
 /// except a payload-less notification, which reads as empty fields
-/// (`agent.connected` carries none).
+/// and is then accepted only if that notification's typed payload permits it.
 fn event_payload(event : @js.Value) -> Map[String, Json]? {
   guard @interop.js_prop(event, "payload") is Some(payload) else {
     return Some(Map([]))
@@ -698,26 +712,15 @@ fn started_msg(
   // `run_id`/`session`/`model`/`max_steps` are unconditional on this event
   // (the app's own start op always names a session); a payload missing one
   // — a blank model included, since no run ever ran on no model — is
-  // malformed and dropped. `cwd` and the durable `session_root` are
-  // genuinely optional, and the host resolved both itself, so this is the
-  // decode boundary where their absolute provenance is collapsed into the
-  // type.
-  guard payload.session is Some(session) &&
+  // malformed and dropped. The durable `session_root` is genuinely optional,
+  // and the host resolved it itself, so this is the decode boundary where its
+  // absolute provenance is collapsed into the type.
+  let session = payload.session
+  guard !session.is_empty() &&
     payload.model is Some(model) &&
     EngineModel::parse(model) is Some(model) &&
     payload.max_steps is Some(max_steps) else {
     return None
-  }
-  // Optional placement fields are still protocol input: if either is not a
-  // complete absolute path, reject the malformed event as a whole.
-  let cwd = match payload.cwd {
-    Some(path) => {
-      guard @resource.of_path(channel, path) is Some(absolute) else {
-        return None
-      }
-      Some(absolute)
-    }
-    None => None
   }
   let session_root = match payload.session_root {
     Some(path) => {
@@ -734,9 +737,7 @@ fn started_msg(
       session~,
       model~,
       max_steps~,
-      cwd~,
       session_root~,
-      task=payload.task,
       submission_id=payload.submission_id,
     ),
   )
@@ -750,20 +751,12 @@ fn RecoveredRun::from_started(
   channel : @interop.ChannelId,
   payload : @protocol.StartedPayload,
 ) -> RecoveredRun? {
-  guard payload.session is Some(session) &&
+  let session = payload.session
+  guard !session.is_empty() &&
     payload.model is Some(model) &&
     EngineModel::parse(model) is Some(model) &&
     payload.max_steps is Some(max_steps) else {
     return None
-  }
-  let cwd = match payload.cwd {
-    Some(path) => {
-      guard @resource.of_path(channel, path) is Some(absolute) else {
-        return None
-      }
-      Some(absolute)
-    }
-    None => None
   }
   let session_root = match payload.session_root {
     Some(path) => {
@@ -779,9 +772,7 @@ fn RecoveredRun::from_started(
     session,
     model,
     max_steps,
-    cwd,
     session_root,
-    task: payload.task,
     submission_id: payload.submission_id,
   })
 }
@@ -828,13 +819,14 @@ fn session_event_msg(payload : @protocol.SessionCommitPayload) -> DeviceMsg? {
 
 ///|
 fn engine_msg(payload : @protocol.AgentEventPayload) -> DeviceMsg? {
+  guard !payload.session.is_empty() else { return None }
   guard @transcript.decode_engine_event(payload.event) is Some(event) else {
     return None
   }
   // `run_id` is absent for events the engine emits before any run of its
   // process lifetime (a compaction on a freshly spawned engine); those still
   // route by `session`.
-  Some(Engine(payload.run_id, event, session=payload.session))
+  Some(Engine(payload.run_id, event, session=Some(payload.session)))
 }
 
 ///|
@@ -887,15 +879,16 @@ fn durable_boundary_msg(
 
 ///|
 /// A `diagnostics` push: the host re-checked a file's module. The payload
-/// carries the absolute `path` and the LSP-shaped `diagnostics` array; the
-/// update filters it to the file on screen.
+/// carries an absolute root, a root-relative path, and the LSP-shaped
+/// `diagnostics` array; the update filters it to the file on screen.
 fn diagnostics_msg(
   channel : @interop.ChannelId,
   payload : @protocol.DiagnosticsPayload,
 ) -> @fileeditor.Msg? {
-  guard @resource.of_path(channel, payload.path) is Some(absolute) else {
+  guard @resource.of_path(channel, payload.root) is Some(root) else {
     return None
   }
+  let absolute = @resource.join_relative(root, @pathx.Relative(payload.path))
   Some(
     DiagnosticsPublished(channel~, absolute~, diagnostics=payload.diagnostics),
   )
@@ -1025,8 +1018,9 @@ async fn request_agent_start(
 }
 
 ///|
-/// The start payload. Optional fields are trimmed and omitted when blank —
-/// the host documents that a present field always carries non-blank text.
+/// The start payload. Optional fields are trimmed and omitted when blank.
+/// `session` is required: every frontend conversation is minted with a
+/// durable id before it can submit a prompt, and the host rejects a blank id.
 /// It carries no `cwd` (`workspace`, the conversation's attached project,
 /// is the only placement the host takes; everything else it derives from
 /// the session id) and no credentials — the endpoint is
@@ -1045,11 +1039,7 @@ fn start_payload(
     submission_id: Some(submission_id),
     model: Some(selected_model.wire()),
     max_steps: parsed_max_steps(max_steps),
-    session: if session.is_empty() {
-      None
-    } else {
-      Some(session)
-    },
+    session,
     workspace: workspace.map(value => value.path),
   }
 }

@@ -16,7 +16,9 @@ pub(all) struct StartPayload {
   submission_id : String?
   model : String?
   max_steps : Int?
-  session : String?
+  // Every desktop run belongs to a durable conversation. The engine rejects
+  // a blank id before it acquires that conversation's record lease.
+  session : String
   // A registered workspace directory; absent means a scratch workspace. A
   // session bound to one of the workspace's worktrees (`worktree.create`
   // binds at creation) runs in that checkout — the start itself never names
@@ -209,15 +211,12 @@ pub(all) struct LaunchAppPayload {
 
 ///|
 pub(all) struct ReadDirPayload {
-  session : String
   path : String
-  workspace : String?
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
 pub(all) struct SearchFilesPayload {
-  session : String
-  workspace : String?
+  path : String
   // One Quick Open cache session. The first request populates it; subsequent
   // queries reuse it until `fs.clear_file_search_cache` retires the key.
   cache_key : String
@@ -243,24 +242,21 @@ pub(all) struct ClearFileSearchCachePayload {
 
 ///|
 pub(all) struct ReadFilePayload {
-  session : String
   path : String
-  workspace : String?
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
 pub(all) struct StatFilesPayload {
-  session : String
   paths : Array[String]
-  workspace : String?
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
 pub(all) struct WatchWorkspacePayload {
-  session : String
-  workspace : String?
-  files : Array[String]?
-  directories : Array[String]?
+  path : String
+  files : Array[String]
+  directories : Array[String]
+  // Chosen by the client for one concrete watcher configuration.
+  generation : String
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
@@ -303,11 +299,13 @@ pub(all) struct TerminalClosePayload {
 
 ///|
 pub(all) struct LspOpenPayload {
+  root : String
   path : String
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
 pub(all) struct LspHoverPayload {
+  root : String
   path : String
   line : Int
   character : Int
@@ -315,9 +313,8 @@ pub(all) struct LspHoverPayload {
 
 ///|
 pub(all) struct WorkspaceSymbolsPayload {
-  session : String
+  root : String
   query : String
-  workspace : String?
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
@@ -362,25 +359,29 @@ pub(all) struct BrowserVisiblePayload {
 ///|
 pub(all) struct ConnectedPayload {
   ready : Bool?
+  // Device-native scratch base encoded as a frontend resource path. A host
+  // cannot announce readiness without it: every Scratch conversation derives
+  // its concrete filesystem and language-server root from this value.
+  scratch_root : String
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
 pub(all) struct StartedPayload {
   run_id : String
-  task : String?
   submission_id : String?
   engine : String?
   model : String?
   max_steps : Int?
-  cwd : String?
-  session : String?
+  session : String
   session_root : String?
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
 pub(all) struct AgentEventPayload {
   run_id : String?
-  session : String?
+  // Engine events always belong to the durable session that owns the process;
+  // only `run_id` may be absent for between-turn lifecycle events.
+  session : String
   event : AgentStreamEvent
 } derive(Debug, Eq, FromJson, ToJson)
 
@@ -534,6 +535,7 @@ pub(all) struct AuthStatusPayload {
 
 ///|
 pub(all) struct DiagnosticsPayload {
+  root : String
   path : String
   diagnostics : Array[LspDiagnostic]
 } derive(Debug, Eq, FromJson, ToJson)
@@ -552,17 +554,19 @@ pub(all) struct FsEventPayload {
 
 ///|
 pub(all) struct FsChangedPayload {
-  session : String?
-  root : String?
-  baseline : Bool?
-  events : Array[FsEventPayload]?
+  root : String
+  baseline : Bool
+  events : Array[FsEventPayload]
+  // Echoes the `fs.watch` request that owns this asynchronous notification.
+  generation : String
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
 pub(all) struct FsWatchFailedPayload {
-  session : String
   root : String
   message : String
+  // Echoes the `fs.watch` request that owns this asynchronous notification.
+  generation : String
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|

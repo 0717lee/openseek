@@ -687,7 +687,8 @@ test "session load derives an old host's missing watermark from event sequences"
   let events =
     #|{"sequence":1,"item":{"kind":"user","payload":{"content":"question"}}},
     #|{"sequence":4,"item":{"kind":"terminal","payload":{"kind":"finished","message":"answer"}}}
-  let view = session_from_reply(session_reply(events))
+  let reply = session_reply(events)
+  let view = session_from_reply(reply)
   inspect(view.watermark, content="4")
   inspect(view.event_boundaries.length(), content="2")
   let (first_sequence, first_terminal, first_boundary) = view.event_boundaries[0]

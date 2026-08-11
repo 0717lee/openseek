@@ -75,10 +75,8 @@ larger than 1 MiB is closed with WebSocket code 1009; operation payloads carry
 prompts, paths, and settings, never transcript snapshots or file contents.
 
 Remote delivery trims high-volume transcript objects whose canonical form is
-delivered by `session.event`. This is the protocol baseline and applies only to
-named durable sessions. Session-less runs retain the complete legacy stream
-because they have no `session.event` source. For a durable run, the pushed
-`agent.started` remains with `task: ""`;
+delivered by `session.event`. Every Desktop API run names a durable session, so
+the pushed `agent.started` carries lifecycle identity only;
 `reasoning_message` and `assistant_message` remain as stream-settlement signals
 with `content: ""`; `tool_result`, `auto_compaction_finished`, `agent_finished`,
 and `context_yield` are omitted. The separate `agent.finished` lifecycle
@@ -102,7 +100,8 @@ The frontend combines the channel identity and path as an `openseek:` URI.
 UNC paths are unsupported: the resource URI authority belongs to the owning
 device and cannot also encode a UNC server. The host rejects them at the
 protocol boundary. Fields described as **relative paths** remain
-slash-separated workspace-relative strings. `fs.browse` request input is the
+slash-separated strings relative to their operation's explicit root.
+`fs.browse` request input is the
 one user-entry exception: its editable value may use the target host's native
 syntax, start with `~`, or repeat a URI path from the preceding browse reply;
 an absent value selects the host home directory. Its absolute reply fields
@@ -255,18 +254,18 @@ echoes.
 
 | method | params | result |
 |---|---|---|
-| `agent.start` | `{task, submission_id?, model?, max_steps?, session?, workspace?}` — no credentials or store path: the host resolves settings and durable placement; `workspace` is honored only when registered. A session bound to one of the workspace's worktrees (`worktree.create` binds at creation) runs in that checkout — the start never names or mutates worktrees | `{run_id, status, …}` — `accepted` after the complete prompt command is written; a post-`started` write failure returns `failed`, while pre-`started` failures use the error response |
+| `agent.start` | `{task, session, submission_id?, model?, max_steps?, workspace?}` — `session` is a required non-blank durable conversation id. No credentials or store path are accepted: the host resolves settings and durable placement; `workspace` is honored only when registered. A session bound to one of the workspace's worktrees (`worktree.create` binds at creation) runs in that checkout — the start never names or mutates worktrees | `{run_id, status, …}` — `accepted` after the complete prompt command is written; a post-`started` write failure returns `failed`, while pre-`started` failures use the error response |
 | `agent.cancel` | `{run_id?}` (absent = the latest run) | cancel outcome |
 | `agent.steer` | `{text, run_id?, submission_id?}` | steer outcome |
 | `agent.compact` | `{session, model?, max_steps?, workspace?}` — `agent.start` minus `task`: a conversation resumed after a restart has no live process, and compacting spawns one with these settings | compaction outcome |
-| `agent.goal` | `{session, text?, auto?, model?, max_steps?, workspace?}` — sets the session's standing goal to `text`, or clears it when `text` is absent; the engine settings match `agent.compact`'s, and a blank `session` is refused rather than falling through to the session-less slot. `auto` arms the engine's autonomous continuation and is **currently rejected**: serve announces the turns it starts with `goal_continue`, which this host does not yet fold into a run's lifecycle, so an autonomous turn would leave the engine looking idle to `agent.start` | `{delivered}` — delivery, not durability: the command reached a live engine's stdin. The goal itself is confirmed by the `[goal]` / `[goal cleared]` runtime-notice arriving as a `session.event` commit, which is also what clients should render from; the engine's `goal_updated` stream event duplicates it |
+| `agent.goal` | `{session, text?, auto?, model?, max_steps?, workspace?}` — sets the session's standing goal to `text`, or clears it when `text` is absent; the engine settings match `agent.compact`'s, and a blank `session` is refused before engine lookup. `auto` arms the engine's autonomous continuation and is **currently rejected**: serve announces the turns it starts with `goal_continue`, which this host does not yet fold into a run's lifecycle, so an autonomous turn would leave the engine looking idle to `agent.start` | `{delivered}` — delivery, not durability: the command reached a live engine's stdin. The goal itself is confirmed by the `[goal]` / `[goal cleared]` runtime-notice arriving as a `session.event` commit, which is also what clients should render from; the engine's `goal_updated` stream event duplicates it |
 | `agent.runs` | `{known?: [{session, run_id?, submission_id?}]}` — each selector must carry a run or submission id; `{}` remains valid | `{runs: […], settled: […]}` — every in-flight run's `agent.started` params plus selector-matched `{run_id, session, submission_id?, status, exit_code?, durable_sequence?}` lifecycle settlements. Normal Terminal-backed statuses are immediately replayable; abnormal statuses appear only with an exact durable sequence. Active and settled state are captured atomically |
 
 Notifications:
 
 | method | params |
 |---|---|
-| `agent.started` | `{run_id, task, submission_id?, session, engine, model, max_steps, cwd?, session_root?}` — `cwd` and `session_root` are host-derived placement facts, never client-selected paths. `task` is kept for old clients that synthesize the prompt bubble from it; current clients take the bubble from the prompt's own `session.event` commit |
+| `agent.started` | `{run_id, submission_id?, session, engine, model, max_steps, session_root?}` — `session_root` is a host-derived durable-store fact, never a client-selected path; the prompt bubble comes from its own `session.event` commit |
 | `agent.event` | `{run_id?, session, event: {…}}` — the engine's event object (`assistant_delta`, `tool_result`, `agent_finished`, …); for a correlated steer receipt the host adds its optional `submission_id`. `run_id` is absent for events emitted before any run of the engine process's lifetime (a compaction on a freshly spawned engine), which route by `session` |
 | `agent.error` | `{message, run_id?, exit_code?, diagnostics?}` |
 | `agent.finished` | `{run_id, status, answer?, exit_code?, durable_sequence?}` — `durable_sequence` is present when an abnormal process exit's follower final scan completed before lifecycle publication; it is the exact stored boundary even when the dead turn appended no Terminal |
@@ -277,7 +276,7 @@ Notifications:
 | method | params | result |
 |---|---|---|
 | `session.list` | `{}` | the session index |
-| `session.load` | `{session, workspace?}` — a non-blank workspace must still be registered; omitted/blank locates the session across registered stores, then the global store | `{session: <the durable session JSON>, watermark?}` — current hosts include `watermark`, the highest event `sequence` the snapshot contains (0 for an empty record); older hosts omit it, and clients derive the same value from the stored events' own sequences |
+| `session.load` | `{session, workspace?}` — a non-blank workspace must still be registered; omitted/blank locates the session across registered stores, then the global store | `{session: <the durable session JSON>, watermark?}` — current hosts include `watermark`, the highest event `sequence` the snapshot contains (0 for an empty record); older hosts may omit it, in which case clients derive it from the stored events' own sequences. |
 | `session.list_archived` | `{}` | the archived index |
 | `session.archive` | `{session, force?}` | success returns the archived session index (the legacy `{groups}` shape) and moves the conversation plus every sibling `<session>-sr-N` descendant transcript as one family. A dirty checkout returns `{kind:"needs_force", worktree, dirty_paths, dirty_path_count}` without changing durable state; `dirty_paths` previews up to 8 paths and `dirty_path_count` counts all status rows. Clients show a discard-confirmation dialog and retry with `force` only after explicit confirmation. On success the conversation's checkout goes with it, but its name/branch/session placement remains registered (the branch survives; a `worktree.changed` broadcast reports `present: false`). "Dirty" means tracked modifications or non-ignored untracked files; ignored files count as disposable and are removed with the checkout, matching `git worktree remove`'s own semantics |
 | `session.unarchive` | `{session}` | outcome — restores the conversation and every archived subagent descendant record together. A retained worktree placement whose checkout was removed returns as missing, so clients offer Repair before any agent, terminal, or file operation can continue |
@@ -297,9 +296,10 @@ commit exists **if and only if** its item is in the session's durable
 record, and `sequence` is the item's one-based position there — contiguous
 per session. Everything else on the wire is transient stream or lifecycle
 state: commit-aware clients may show deltas live, but full semantic messages,
-`agent.started`'s `task`, and steer receipts never append transcript items —
-their durable form arrives as a commit. A remote WebSocket receives the
-lightweight forms described above instead of duplicate full semantic payloads.
+transient lifecycle notifications, and steer receipts never append transcript
+items — their durable form arrives as a commit. A remote WebSocket receives
+the lightweight forms described above instead of duplicate full semantic
+payloads.
 
 Client algorithm, per session: keep a watermark `W`, starting at the
 snapshot's. For each `session.event`: `sequence ≤ W` → drop (re-broadcasts
@@ -446,23 +446,21 @@ Notifications:
 | `git.branch` | `{session, cwd?, base_hint?}` | `{branch?, diffstat?}` — the checked-out branch of the conversation's working directory (detached HEAD reads as its short hash), and the branch's whole line delta. `base_hint` is the branch this work merges into: the host measures from `origin/<base_hint>` when that ref exists, otherwise from `origin/HEAD`, and clients that know a pull request's base send it because nothing local can derive one. `diffstat` is `{added, removed, files, base?, partial}`, measured from where the branch left that ref all the way to the working tree — committed and uncommitted alike, untracked files included. `base` names the ref actually measured from and is absent when the repository offered none, leaving the count to cover uncommitted work alone; `partial` marks a count that stopped short of every untracked file, so it reads as a floor rather than a total. Both fields are absent when the directory is not a git repository or git is unavailable, and `diffstat` alone is absent when the diff itself failed |
 | `git.pull_request` | `{session, cwd?}` | `{pull_request?, compare_url?, branch?}` — what GitHub says about the branch that working directory has checked out, read through the user's own `gh` CLI. No `gh`, no authentication, no GitHub remote, and a detached HEAD all answer with nothing rather than an error. `branch` is the branch the host read from `HEAD`, so a checkout that moved mid-request is detectable. `pull_request` is `{number, title, state, draft, url, base, additions, deletions, changed_files, checks?}`, where `base` is the branch it merges into (the exact value for `git.branch`'s `base_hint`) and `checks` is `{passed, failed, pending}` over the head commit's rollup. `compare_url` is offered instead, for a branch with no pull request that the resolved repository already has |
 
-### fs.* — conversation-scoped file access
+### fs.* — absolute file access
 
-Paths in `fs.read_file` / `fs.read_directory` / `fs.stat_files` are relative
-to the conversation's workspace; the host derives the root from `session`
-(`workspace?` is the hint that lets a fresh conversation browse before its
-durable record exists). `fs.browse` is the exception: it lists the **host**
-filesystem for the workspace picker.
+Filesystem requests name their concrete absolute resource paths directly;
+they carry neither a conversation id nor a workspace hint. `fs.browse` keeps
+its picker-specific starting-point behavior.
 
 | method | params | result |
 |---|---|---|
-| `fs.read_file` | `{session, path, workspace?}` | `{kind: "content", content, absolute, sig}` \| `{kind: "binary"}` \| `{kind: "oversized"}` |
-| `fs.read_directory` | `{session, path, workspace?}` (`""` = workspace root) | `{entries: [{name, is_dir}]}`, directories first |
-| `fs.search_files` | `{session, workspace?, cache_key, query, max_results, generation}` | `{files: […], from_cache, limit_hit, cancelled}` — VS Code-style cache-session query; `max_results: 0` populates without returning rows, Quick Open requests at most 512 |
+| `fs.read_file` | `{path}` (absolute) | `{kind: "content", content, absolute, sig}` \| `{kind: "binary"}` \| `{kind: "oversized"}` |
+| `fs.read_directory` | `{path}` (absolute directory) | `{entries: [{name, is_dir}]}`, directories first |
+| `fs.search_files` | `{path, cache_key, query, max_results, generation}` (`path` absolute root) | `{files: […], from_cache, limit_hit, cancelled}` — VS Code-style cache-session query returning root-relative paths; `max_results: 0` populates without returning rows, Quick Open requests at most 512 |
 | `fs.cancel_search_files` | `{cache_key, generation}` | `{}` — cancels one query while allowing cache population to finish |
 | `fs.clear_file_search_cache` | `{cache_key}` | `{}` — retires one search cache session and its outstanding work |
-| `fs.stat_files` | `{session, paths, workspace?}` | `{stats: [{path, sig}]}` — `sig` is the opaque mtime signature `"{seconds}:{nanos}"`; `""` means the file is missing, retained for client compatibility |
-| `fs.watch` | `{session, workspace?, files?, directories?}` | `{}` — replaces the single workspace watcher with the open files and listed directories; each directory keeps its immediate children observable |
+| `fs.stat_files` | `{paths}` (absolute) | `{stats: [{path, sig}]}` — each `path` echoes its absolute input; `sig` is the opaque mtime signature `"{seconds}:{nanos}"`; `""` means the file is missing, retained for client compatibility |
+| `fs.watch` | `{path, files, directories, generation}` (`path` absolute; `generation` string) | `{}` — replaces the connection's single watcher; `files` and `directories` are relative to `path`, each directory keeps its immediate children observable, and clients use a page-unique namespace plus a monotonically increasing counter for `generation` |
 | `fs.unwatch` | `{}` | `{}` — stops watching when the panel is closed and it has no open tabs |
 | `fs.browse` | `{path?}` (absent = home; leading `~` expands) | `{path, parent?, entries}` — subdirectory names, sorted, dotfiles skipped |
 
@@ -470,14 +468,12 @@ Notification:
 
 | method | params |
 |---|---|
-| `fs.changed` | `{session, root, baseline, events: [{kind, path, old_path?}]}` — `baseline=true` follows watcher attachment; later batches use `modify` / `create` / `remove` / `rename` events with workspace-relative paths |
-| `fs.watch_failed` | `{session, root, message}` — the accepted watcher could not attach or later stopped; clients should fence the failure by session |
+| `fs.changed` | `{root, baseline, events: [{kind, path, old_path?}], generation}` — `root` is absolute; `baseline=true` follows watcher attachment; later batches use `modify` / `create` / `remove` / `rename` events with root-relative paths; the string `generation` echoes the owning `fs.watch` request |
+| `fs.watch_failed` | `{root, message, generation}` — the accepted watcher could not attach or later stopped; the string `generation` echoes the owning `fs.watch` request so a delayed failure cannot attach to a same-root replacement or a reloaded page that restarted its counter |
 
-`files` and `directories` are optional only for compatibility with older
-clients. When both are absent the host retains the previous pruned recursive
-watch; current clients always send both arrays, including empty arrays. A
-watcher replacement emits a baseline after it has scanned the selected paths,
-so the client can reconcile changes that raced the replacement.
+The path arrays are always present, including when empty. A watcher replacement
+emits a baseline after it has scanned the selected paths, so the client can
+reconcile changes that raced the replacement.
 
 ### terminal.* — connection-scoped PTYs
 
@@ -514,15 +510,15 @@ Notifications:
 
 | method | params | result |
 |---|---|---|
-| `lsp.open` | `{path}` (absolute) | `{diagnostics}` — the file's diagnostics from a fresh `moon check` of its module; other files' changes push as `lsp.diagnostics`. `diagnostics` absent = the check could not run; keep current markers |
-| `lsp.hover` | `{path, line, character}` (0-based) | `{value, markdown, has_range, start_line, start_character, end_line, end_character}` — empty `value` = no hover; served by `moon ide hover` |
-| `lsp.workspace_symbols` | `{session, query, workspace?}` | `{symbols: [{name, kind?, container?, path, range}]}` — served by `moon ide workspace-symbols` |
+| `lsp.open` | `{root, path}` (`root` absolute, `path` root-relative) | `{diagnostics}` — the file's diagnostics from a fresh `moon check` of its deepest containing module beneath `root`; other files' changes push as `lsp.diagnostics`. `diagnostics` absent = the check could not run; keep current markers |
+| `lsp.hover` | `{root, path, line, character}` (`root` absolute, `path` root-relative, position 0-based) | `{value, markdown, has_range, start_line, start_character, end_line, end_character}` — empty `value` = no hover; served by `moon ide hover` |
+| `lsp.workspace_symbols` | `{root, query}` (`root` absolute) | `{symbols: [{name, kind?, container?, path, range}]}` — served by `moon ide workspace-symbols`; result paths are root-relative |
 
 Notification:
 
 | method | params |
 |---|---|
-| `lsp.diagnostics` | `{path, diagnostics}` — same array shape as `lsp.open`'s reply; an empty array clears the file's markers |
+| `lsp.diagnostics` | `{root, path, diagnostics}` — `root` is absolute and `path` is root-relative; the diagnostics use the same array shape as `lsp.open`'s reply, and an empty array clears the file's markers |
 
 ### moonide.* — workspace navigation
 
@@ -698,7 +694,7 @@ changed and why:
 - **Most in-band sentinels were removed from the wire**: request `cwd` and
   reply `branch` are optional fields instead of `""`; the missing-file
   `sig: ""` reply remains for client compatibility. Stopping the watcher is `fs.unwatch`
-  instead of `fs.watch` with an empty session; `host.meta` carries no
+  instead of a sentinel `fs.watch`; `host.meta` carries no
   `capabilities` list (the method catalog is the capability surface).
 - **Device ids stopped being capabilities** (v2.1): originally the
   unguessable device id was the only barrier, minted per token by the

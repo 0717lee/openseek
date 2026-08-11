@@ -132,13 +132,13 @@ fn show_tab_impl(
           path,
           doc.name,
           range=None,
-          workspace=ctx.workspace,
+          root=ctx.root,
         ),
       ])
     TabLoaded(content~, absolute~, ..) => {
       let show = show_file_in_viewer(
         ctx.owner,
-        ctx.workspace,
+        root=ctx.root,
         doc.name,
         content,
         absolute~,
@@ -147,10 +147,19 @@ fn show_tab_impl(
         review_original?=doc.quick_diff_original(),
         unified_diff?=doc.visible_unified_diff(),
       )
-      if sync_diagnostics && language_id(doc.name) == "moonbit" {
+      if sync_diagnostics &&
+        language_id(doc.name) == "moonbit" &&
+        ctx.root is Some(root) {
         @cmd.batch([
           show,
-          request_diagnostics(dispatch, ctx.owner, ctx.request_epoch, absolute),
+          request_diagnostics(
+            dispatch,
+            ctx.owner,
+            ctx.request_epoch,
+            root,
+            path,
+            absolute,
+          ),
         ])
       } else {
         show
@@ -164,7 +173,7 @@ fn show_tab_impl(
         Some({ baseline: ReviewContent(content), .. }) =>
           show_file_in_viewer(
             ctx.owner,
-            ctx.workspace,
+            root=ctx.root,
             doc.name,
             content,
             relative=path,
@@ -192,7 +201,7 @@ fn show_tab_impl(
         doc.name,
         review_generation?=doc.review_generation(),
         range=None,
-        workspace=ctx.workspace,
+        root=ctx.root,
       ),
     ])
   } else {
@@ -268,7 +277,7 @@ fn show_activated_tab(
         doc.name,
         review_generation=working_generation,
         range=None,
-        workspace=ctx.workspace,
+        root=ctx.root,
       ),
     ]),
     next_doc,
@@ -366,7 +375,7 @@ pub fn open_document(
     name,
     range~,
     annotation?,
-    workspace=ctx.workspace,
+    root=ctx.root,
   )
   // Gaining the first active tab reveals the breadcrumb row, and the narrow
   // drill-down closing the tree reveals a hidden-measured viewer — either
@@ -482,7 +491,7 @@ pub fn open_changed_document(
         name,
         review_generation=generation,
         range=None,
-        workspace=ctx.workspace,
+        root=ctx.root,
       ),
     )
   } else {
@@ -639,7 +648,7 @@ fn reconcile_reviews_after_changes(
               path,
               doc.name,
               range=None,
-              workspace=ctx.workspace,
+              root=ctx.root,
             ),
           )
         }
@@ -767,7 +776,7 @@ fn reconcile_reviews_after_changes(
               doc.name,
               review_generation=generation,
               range=None,
-              workspace=ctx.workspace,
+              root=ctx.root,
             ),
           )
         } else if ctx.active_file == Some(path) {
@@ -785,7 +794,7 @@ fn reconcile_reviews_after_changes(
         ctx.owner,
         state.request_epoch,
         restat_paths,
-        workspace=ctx.workspace,
+        root=ctx.root,
       ),
     )
   }
@@ -1011,15 +1020,17 @@ fn active_moonbit_diagnostics(
   dispatch : @cmd.Emit[Msg],
   owner : @interop.ConversationKey,
   epoch : Int,
+  root : @common.Uri?,
   docs : Map[@pathx.Relative, Doc],
   active : @pathx.Relative?,
 ) -> @cmd.Cmd? {
-  guard active is Some(active) &&
+  guard root is Some(root) &&
+    active is Some(active) &&
     docs.get(active) is Some({ name, state: TabLoaded(absolute~, ..), .. }) &&
     language_id(name) == "moonbit" else {
     return None
   }
-  Some(request_diagnostics(dispatch, owner, epoch, absolute))
+  Some(request_diagnostics(dispatch, owner, epoch, root, active, absolute))
 }
 
 ///|
@@ -1046,6 +1057,7 @@ fn moonbit_check_input(path : @pathx.Relative) -> Bool {
 /// need. Quick Open's search cache is intentionally independent: like VS Code,
 /// it refreshes when the picker opens instead of extending watcher lifetime.
 fn State::watched_paths(self : State, ctx : Ctx) -> WatchedPaths? {
+  guard ctx.root is Some(root) else { return None }
   if ctx.checkout is None ||
     ctx.checkout is Some(@interop.MissingWorktree(_)) ||
     (!ctx.panel_open && ctx.open_files.is_empty()) ||
@@ -1064,7 +1076,14 @@ fn State::watched_paths(self : State, ctx : Ctx) -> WatchedPaths? {
     }
     directories.sort_by((left, right) => left.0.lexical_compare(right.0))
   }
-  Some({ owner: ctx.owner, workspace: ctx.workspace, files, directories })
+  Some({ owner: ctx.owner, root, files, directories })
+}
+
+///|
+/// The opaque token echoed by host watcher notifications. The namespace keeps
+/// the counter unique across frontend reloads.
+fn Ctx::watch_identity(self : Ctx, generation : Int) -> String {
+  self.watch_namespace + ":" + generation.to_string()
 }
 
 ///|
@@ -1079,6 +1098,11 @@ fn with_watch(
     (state, cmd)
   } else {
     let commands = [cmd]
+    // Every desired-configuration transition owns a fresh identity, including
+    // parking. Host pushes can be delayed beyond the ordered watch request,
+    // so root equality alone cannot tell an old same-root watcher apart.
+    let watch_generation = state.watch_generation + 1
+    let watch_identity = ctx.watch_identity(watch_generation)
     // A watcher is host-local. Moving across channels must explicitly retire
     // the old host; placing a new watch on another socket cannot replace it.
     if state.watching is Some(current) &&
@@ -1090,7 +1114,7 @@ fn with_watch(
         watch_workspace(
           dispatch,
           channel=current.owner.channel,
-          state.request_epoch,
+          watch_identity,
           None,
         ),
       )
@@ -1100,12 +1124,15 @@ fn with_watch(
         watch_workspace(
           dispatch,
           channel=next.owner.channel,
-          state.request_epoch,
+          watch_identity,
           Some(next),
         ),
       )
     }
-    ({ ..state, watching: want, watch_error: None }, @cmd.batch(commands))
+    (
+      { ..state, watching: want, watch_generation, watch_error: None },
+      @cmd.batch(commands),
+    )
   }
 }
 
@@ -1333,12 +1360,12 @@ fn refresh_changes(
 /// Reconcile the file subsystem with the active conversation after every
 /// message: rebuild the document table and drop the tree cache when the
 /// conversation changed (the dock parks/restores strip identities; this side
-/// re-seeds documents from the fresh `Ctx` projection), list the workspace
+/// re-seeds documents from the fresh `Ctx` projection), list the concrete
 /// root once its path is known, and keep the host's file watcher pointed at
-/// the right workspace. The main update runs this post-dispatch — after the
+/// that root. The main update runs this post-dispatch — after the
 /// dock's own sync, so the projection is already the new conversation's.
 /// The re-root happens whether the panel is open or closed — hidden
-/// documents and the watcher must always agree on the session — while
+/// documents and the watcher must always agree on the root — while
 /// listing the tree waits for an open panel. A no-op unless something is
 /// actually due, so it never re-fires while a request is in flight or the
 /// tree is already current.
@@ -1354,12 +1381,16 @@ pub fn sync(
   let workspace_changed = same_owner &&
     state.placement_known &&
     state.placement_workspace != ctx.workspace
+  let root_changed = same_owner &&
+    state.placement_known &&
+    state.placement_root != ctx.root
   let resolved_checkout_changed = checkout_ready &&
     same_owner &&
     state.placement_known &&
     !state.placement_parked &&
     state.placement_checkout != ctx.checkout
   let placement_identity_changed = workspace_changed ||
+    root_changed ||
     resolved_checkout_changed
   let parking_existing_owner = !checkout_ready &&
     same_owner &&
@@ -1380,6 +1411,16 @@ pub fn sync(
     state.request_epoch
   }
   let ctx = { ..ctx, request_epoch, }
+  // A placement-driven explicit unwatch can be the final desired state. Spend
+  // its watcher generation here rather than relying on `with_watch` to place
+  // a successor, which may legitimately have nothing to watch.
+  let reroot_watch_generation = if placement_identity_changed &&
+    state.watching is Some(_) {
+    state.watch_generation + 1
+  } else {
+    state.watch_generation
+  }
+  let reroot_watch_identity = ctx.watch_identity(reroot_watch_generation)
   // When the active conversation changes, drop the cached tree *and* the
   // viewer's open document — the viewer is imperative state outside the
   // model, so it would otherwise keep showing the previous conversation's
@@ -1389,7 +1430,7 @@ pub fn sync(
   // even while the panel is closed: `with_watch` follows `ctx.owner`
   // whenever open files remain, so leaving the documents rooted in the
   // previous conversation would have the next fs_changed stat their paths
-  // against the new conversation's workspace — marking hidden documents
+  // against the new conversation's root — marking hidden documents
   // deleted/stale for files that never moved.
   let (state, reroot_cmd) = if same_owner && !placement_identity_changed {
     // The real owner remains stable across an unresolved/missing checkout so
@@ -1416,7 +1457,7 @@ pub fn sync(
         watch_workspace(
           dispatch,
           channel=current.owner.channel,
-          request_epoch,
+          reroot_watch_identity,
           None,
         ),
       )
@@ -1435,7 +1476,7 @@ pub fn sync(
           path,
           basename(path),
           range=None,
-          workspace=ctx.workspace,
+          root=ctx.root,
         ),
       )
     }
@@ -1445,6 +1486,7 @@ pub fn sync(
         owner: Some(ctx.owner),
         placement_known: true,
         placement_workspace: ctx.workspace,
+        placement_root: ctx.root,
         placement_checkout: ctx.checkout,
         tree_open: state.tree_open,
         explorer_mode: state.explorer_mode,
@@ -1458,6 +1500,9 @@ pub fn sync(
         },
         request_epoch,
         review_generation: state.review_generation,
+        // Like filesystem request epochs, watcher identities must outlive the
+        // per-conversation cache or an A→B→A cycle could reuse one.
+        watch_generation: reroot_watch_generation,
         review_recovery_pending: false,
         background_review_requests: Map([]),
         placement_parked: !checkout_ready,
@@ -1515,6 +1560,7 @@ pub fn sync(
       placement_parked: true,
       placement_known: true,
       placement_workspace: ctx.workspace,
+      placement_root: ctx.root,
       placement_checkout: ctx.checkout,
       request_epoch,
     }
@@ -1539,6 +1585,7 @@ pub fn sync(
       placement_parked: true,
       placement_known: true,
       placement_workspace: ctx.workspace,
+      placement_root: ctx.root,
       placement_checkout: ctx.checkout,
     }
   }
@@ -1579,6 +1626,7 @@ pub fn sync(
         placement_parked: false,
         placement_known: true,
         placement_workspace: ctx.workspace,
+        placement_root: ctx.root,
         placement_checkout: ctx.checkout,
       },
       restore_cmd,
@@ -1590,6 +1638,7 @@ pub fn sync(
         placement_parked: false,
         placement_known: true,
         placement_workspace: ctx.workspace,
+        placement_root: ctx.root,
         placement_checkout: ctx.checkout,
       },
       @cmd.none,
@@ -1609,7 +1658,7 @@ pub fn sync(
       Some(watching) =>
         explorer_reopened ||
         watching.owner != ctx.owner ||
-        watching.workspace != ctx.workspace ||
+        ctx.root != Some(watching.root) ||
         (
           explorer_is_visible &&
           !watching.directories.contains(@pathx.Relative::root())
@@ -1641,13 +1690,12 @@ pub fn sync(
   // A closed panel re-roots (above) and keeps the watcher placed, but the tree
   // itself can wait for the reopen. Unresolved placement takes the same early
   // exit even if the dock is visible: no host path may fall back to root.
-  guard checkout_ready && ctx.panel_open else {
+  guard checkout_ready && ctx.root is Some(_) && ctx.panel_open else {
     return with_watch(dispatch, state, ctx, pending_cmd)
   }
-  // Load as soon as there is a conversation: the workspace directory is a pure
-  // function of the session id, so the host can list it without waiting for a
-  // run to report `cwd` (it reports an empty workspace until the first turn
-  // creates the directory).
+  // Load as soon as the conversation has a concrete root. Scratch roots come
+  // from the connected device; registered projects and known worktrees can
+  // likewise load before a run.
   if ctx.owner.session.is_empty() ||
     state.children.contains("") ||
     state.loading.contains("") {
@@ -1666,7 +1714,7 @@ pub fn sync(
         ctx.owner,
         ctx.request_epoch,
         @pathx.Relative::root(),
-        workspace=ctx.workspace,
+        root=ctx.root,
       ),
     ]),
   )
@@ -1680,9 +1728,8 @@ pub fn update(
   ctx : Ctx,
 ) -> (@cmd.Cmd, State) {
   // `sync` parks the old owner while placement is unresolved or its checkout
-  // is missing. Refuse every file-editor action in the meantime: even stale
-  // controls must not send the preserved conversation session without a
-  // healthy placement, where the host could otherwise resolve the wrong root.
+  // is missing. Refuse file-editor actions until there is a concrete root to
+  // put into their absolute filesystem or root-relative language addresses.
   if ctx.checkout is None || ctx.checkout is Some(@interop.MissingWorktree(_)) {
     // The explorer selection is a local panel preference and remains useful
     // while placement is broken; only the host-backed refresh must wait.
@@ -1808,7 +1855,7 @@ pub fn update(
                 ctx.owner,
                 ctx.request_epoch,
                 ancestor,
-                workspace=ctx.workspace,
+                root=ctx.root,
               ),
             )
           }
@@ -1854,7 +1901,7 @@ pub fn update(
               ctx.owner,
               ctx.request_epoch,
               path,
-              workspace=ctx.workspace,
+              root=ctx.root,
             ),
             { ..state, expanded, loading },
           )
@@ -2276,7 +2323,7 @@ pub fn update(
             Content(content~, absolute~, ..) => {
               let show = show_file_in_viewer(
                 ctx.owner,
-                ctx.workspace,
+                root=ctx.root,
                 name,
                 content,
                 absolute~,
@@ -2289,13 +2336,15 @@ pub fn update(
                 review_original?=doc.quick_diff_original(),
                 unified_diff?=next_doc.visible_unified_diff(),
               )
-              if language_id(name) == "moonbit" {
+              if language_id(name) == "moonbit" && ctx.root is Some(root) {
                 @cmd.batch([
                   show,
                   request_diagnostics(
                     dispatch,
                     ctx.owner,
                     ctx.request_epoch,
+                    root,
+                    path,
                     absolute,
                   ),
                 ])
@@ -2325,6 +2374,7 @@ pub fn update(
             dispatch,
             owner,
             state.request_epoch,
+            ctx.root,
             state.docs,
             ctx.active_file,
           ) {
@@ -2350,9 +2400,11 @@ pub fn update(
       } else {
         (@cmd.none, state)
       }
-    FsChanged(session~, changes~) =>
+    FsChanged(root~, generation~, changes~) =>
       if state.owner is Some(owner) &&
-        (session is None || session == Some(owner.session)) {
+        owner.channel == ctx.owner.channel &&
+        ctx.root == Some(root) &&
+        generation == ctx.watch_identity(state.watch_generation) {
         let reviewed_changes = match changes {
           Some(changes) =>
             state.reviewed_changes.filter(change => !change.touched_by(changes))
@@ -2406,7 +2458,7 @@ pub fn update(
               owner,
               state.request_epoch,
               stat_paths,
-              workspace=ctx.workspace,
+              root=ctx.root,
             ),
           )
         } else if moonbit_changed &&
@@ -2414,6 +2466,7 @@ pub fn update(
             dispatch,
             owner,
             state.request_epoch,
+            ctx.root,
             state.docs,
             ctx.active_file,
           )
@@ -2434,7 +2487,7 @@ pub fn update(
               owner,
               state.request_epoch,
               directory,
-              workspace=ctx.workspace,
+              root=ctx.root,
             ),
           )
         }
@@ -2549,7 +2602,7 @@ pub fn update(
                   doc.name,
                   review_generation?=working_generation,
                   range=None,
-                  workspace=ctx.workspace,
+                  root=ctx.root,
                 ),
               )
             } else {
@@ -2572,6 +2625,7 @@ pub fn update(
             dispatch,
             owner,
             state.request_epoch,
+            ctx.root,
             docs,
             ctx.active_file,
           )
@@ -2619,19 +2673,20 @@ pub fn update(
         (@cmd.none, state)
       } else if state.docs.get(path) is Some({ state: TabUnavailable(_), .. }) {
         // A stat reply already established that this path is intentionally
-        // unavailable (notably a symlink escaping the workspace). Its older
-        // untagged read failure must not replace that precise tab notice with
-        // a generic panel-wide error banner.
+        // unavailable. Its older untagged read failure must not replace that
+        // precise tab notice with a generic panel-wide error banner.
         (@cmd.none, state)
       } else {
         (@cmd.none, { ..state, error: Some(message) })
       }
-    FileWatchFailed(owner~, epoch~, message~) =>
-      if state.owner != Some(owner) ||
-        (epoch is Some(epoch) && state.request_epoch != epoch) {
-        (@cmd.none, state)
-      } else {
+    FileWatchFailed(channel~, root~, generation~, message~) =>
+      if state.owner is Some(owner) &&
+        owner.channel == channel &&
+        ctx.root == Some(root) &&
+        generation == ctx.watch_identity(state.watch_generation) {
         (@cmd.none, { ..state, watch_error: Some(message) })
+      } else {
+        (@cmd.none, state)
       }
     // Owned by the main package's update: the comment becomes a composer
     // chip there, which then clears the editor bubble through
@@ -2656,6 +2711,8 @@ fn test_ctx() -> Ctx {
   {
     owner: { channel: @interop.ChannelId::Local, session: "desktop-test" },
     request_epoch: 0,
+    watch_namespace: "test-page",
+    root: @resource.of_path(@interop.ChannelId::Local, "/work"),
     workspace: None,
     checkout: Some(@interop.WorkspaceRoot),
     dark_mode: false,
@@ -2668,12 +2725,29 @@ fn test_ctx() -> Ctx {
 }
 
 ///|
+fn Ctx::test_root(self : Ctx) -> @common.Uri raise {
+  guard self.root is Some(root) else {
+    fail("test context must carry a concrete root")
+  }
+  root
+}
+
+///|
+fn Ctx::test_resource(self : Ctx, path : String) -> @common.Uri raise {
+  guard @resource.of_path(self.owner.channel, path) is Some(resource) else {
+    fail("test resource path must be absolute")
+  }
+  resource
+}
+
+///|
 fn owned_state() -> State {
   {
     ..State::empty(),
     owner: Some(test_ctx().owner),
     placement_known: true,
     placement_workspace: test_ctx().workspace,
+    placement_root: test_ctx().root,
     placement_checkout: test_ctx().checkout,
     explorer_was_visible: true,
   }
@@ -3460,8 +3534,9 @@ test "FileLoaded settles content into its document, active or not" {
   let (_, old_watch_failure) = update(
     emit,
     FileWatchFailed(
-      owner=test_ctx().owner,
-      epoch=Some(1),
+      channel=test_ctx().owner.channel,
+      root=test_ctx().test_root(),
+      generation=test_ctx().watch_identity(1),
       message="stale watcher",
     ),
     epoch_state,
@@ -3521,7 +3596,7 @@ test "a closed panel still re-roots when the conversation switches" {
     ]),
     watching: Some({
       owner: test_ctx().owner,
-      workspace: None,
+      root: test_ctx().test_root(),
       files: [Relative("a.mbt")],
       directories: [],
     }),
@@ -3557,7 +3632,7 @@ test "a closed panel still re-roots when the conversation switches" {
     is Some(
       {
         owner: { channel: Local, session: "desktop-test" },
-        workspace: None,
+        root: _,
         files: [Relative("a.mbt")],
         directories: [],
       }
@@ -3587,6 +3662,7 @@ test "a resolved placement change reroots documents and fences old replies" {
   let state = {
     ..owned_state(),
     placement_workspace: Some(old_workspace),
+    placement_root: Some(old_workspace),
     placement_checkout: Some(@interop.WorkspaceRoot),
     changes: ChangeListReady(
       repository=true,
@@ -3604,13 +3680,14 @@ test "a resolved placement change reroots documents and fences old replies" {
     ]),
     watching: Some({
       owner: test_ctx().owner,
-      workspace: Some(old_workspace),
+      root: old_workspace,
       files: [path],
       directories: [@pathx.Relative::root()],
     }),
   }
   let worktree_ctx : Ctx = {
     ..test_ctx(),
+    root: Some(test_ctx().test_resource("/project-a/.worktrees/wt-1")),
     workspace: Some(old_workspace),
     checkout: Some(@interop.Worktree(name="wt-1")),
     open_files: [path],
@@ -3633,7 +3710,7 @@ test "a resolved placement change reroots documents and fences old replies" {
     is Some(
       {
         owner: { channel: Local, session: "desktop-test" },
-        workspace: Some(_),
+        root: _,
         files: [@pathx.Relative("reviewed.mbt")],
         directories: [@pathx.Relative("")],
       }
@@ -3681,6 +3758,7 @@ test "a resolved placement change reroots documents and fences old replies" {
   }
   let (reassigned, _) = sync(emit, state, {
     ..worktree_ctx,
+    root: Some(new_workspace),
     workspace: Some(new_workspace),
     checkout: Some(@interop.WorkspaceRoot),
   })
@@ -3716,7 +3794,7 @@ test "a missing checkout parks files and refuses editor actions until repair" {
     review_generation: 4,
     watching: Some({
       owner: present.owner,
-      workspace: None,
+      root: present.test_root(),
       files: [Relative("a.mbt")],
       directories: [@pathx.Relative::root()],
     }),
@@ -3867,7 +3945,7 @@ test "a missing checkout settles an in-flight Changes request for retry" {
     changes_generation: 1,
     watching: Some({
       owner: present.owner,
-      workspace: None,
+      root: present.test_root(),
       files: [],
       directories: [@pathx.Relative::root()],
     }),
@@ -3940,7 +4018,7 @@ test "checkout recovery restarts a review whose paired replies were parked" {
     docs,
     watching: Some({
       owner: present.owner,
-      workspace: None,
+      root: present.test_root(),
       files: [path],
       directories: [@pathx.Relative::root()],
     }),
@@ -4159,7 +4237,7 @@ test "an unresolved placement parks files and refuses editor actions" {
     docs,
     watching: Some({
       owner: present.owner,
-      workspace: None,
+      root: present.test_root(),
       files: [Relative("a.mbt")],
       directories: [@pathx.Relative::root()],
     }),
@@ -4218,7 +4296,7 @@ test "reopening Changes refreshes after the explorer is hidden" {
     ),
     watching: Some({
       owner: test_ctx().owner,
-      workspace: None,
+      root: test_ctx().test_root(),
       files: [],
       directories: [@pathx.Relative::root()],
     }),
@@ -4251,7 +4329,7 @@ test "showing a hidden explorer refreshes Changes before polling resumes" {
     ),
     watching: Some({
       owner: test_ctx().owner,
-      workspace: None,
+      root: test_ctx().test_root(),
       files: [],
       directories: [@pathx.Relative::root()],
     }),
@@ -4283,7 +4361,7 @@ test "reopening Changes latches a follow-up for an in-flight refresh" {
     explorer_was_visible: false,
     watching: Some({
       owner: test_ctx().owner,
-      workspace: None,
+      root: test_ctx().test_root(),
       files: [],
       directories: [@pathx.Relative::root()],
     }),
@@ -4306,7 +4384,7 @@ test "reopening Changes latches a follow-up for the initial load" {
     explorer_was_visible: false,
     watching: Some({
       owner: test_ctx().owner,
-      workspace: None,
+      root: test_ctx().test_root(),
       files: [],
       directories: [@pathx.Relative::root()],
     }),
@@ -4402,7 +4480,8 @@ test "watcher events latch a follow-up during the initial change load" {
   let (_, latched) = update(
     emit,
     FsChanged(
-      session=Some("desktop-test"),
+      root=test_ctx().test_root(),
+      generation=test_ctx().watch_identity(state.watch_generation),
       changes=Some([Modified(Relative("src/main.mbt"))]),
     ),
     state,
@@ -5709,7 +5788,8 @@ test "watcher refresh keeps the ready change snapshot visible" {
   let (_, refreshing) = update(
     emit,
     FsChanged(
-      session=Some("desktop-test"),
+      root=test_ctx().test_root(),
+      generation=test_ctx().watch_identity(state.watch_generation),
       changes=Some([Modified(Relative("src/main.mbt"))]),
     ),
     state,
@@ -5728,7 +5808,8 @@ test "watcher refresh keeps the ready change snapshot visible" {
   let (_, latched) = update(
     emit,
     FsChanged(
-      session=Some("desktop-test"),
+      root=test_ctx().test_root(),
+      generation=test_ctx().watch_identity(refreshing.watch_generation),
       changes=Some([Modified(Relative("src/other.mbt"))]),
     ),
     refreshing,
@@ -5806,7 +5887,11 @@ test "hidden explorer parks event-driven change refreshes until reopen" {
   let hidden = { ..test_ctx(), panel_open: false }
   let (_, after_watch) = update(
     emit,
-    FsChanged(session=Some("desktop-test"), changes=Some([])),
+    FsChanged(
+      root=test_ctx().test_root(),
+      generation=test_ctx().watch_identity(state.watch_generation),
+      changes=Some([]),
+    ),
     state,
     hidden,
   )
@@ -5928,7 +6013,7 @@ test "a hidden review accepts its file-only watch without a refresh loop" {
     explorer_was_visible: false,
     watching: Some({
       owner: test_ctx().owner,
-      workspace: None,
+      root: test_ctx().test_root(),
       files: [path],
       directories: [],
     }),
@@ -5991,7 +6076,8 @@ test "change-list failures stay isolated from file errors and watcher retries" {
   let (_, still_failed) = update(
     emit,
     FsChanged(
-      session=Some("desktop-test"),
+      root=test_ctx().test_root(),
+      generation=test_ctx().watch_identity(failed.watch_generation),
       changes=Some([Modified(Relative("src/main.mbt"))]),
     ),
     failed,
@@ -6379,7 +6465,11 @@ test "watcher baseline re-lists the root and expanded, listed directories" {
     children,
     expanded: [Relative("src"), Relative("never-listed")],
   }
-  let baseline = FsChanged(session=Some("desktop-test"), changes=None)
+  let baseline = FsChanged(
+    root=test_ctx().test_root(),
+    generation=test_ctx().watch_identity(state.watch_generation),
+    changes=None,
+  )
   let (_, next) = update(emit, baseline, state, test_ctx())
   // Both known directories are marked in flight; the never-listed one is
   // left to its own first expansion.
@@ -6404,7 +6494,8 @@ test "concrete watcher events refresh only affected listed directories" {
     expanded: [Relative("src"), Relative("docs")],
   }
   let message = FsChanged(
-    session=Some("desktop-test"),
+    root=test_ctx().test_root(),
+    generation=test_ctx().watch_identity(state.watch_generation),
     changes=Some([Created(Relative("src/new.mbt"))]),
   )
   let (_, first) = update(emit, message, state, test_ctx())
@@ -6416,7 +6507,8 @@ test "concrete watcher events refresh only affected listed directories" {
   let (_, stale) = update(
     emit,
     FsChanged(
-      session=Some("previous-session"),
+      root=test_ctx().test_resource("/previous-root"),
+      generation=test_ctx().watch_identity(state.watch_generation),
       changes=Some([Created(Relative("docs/new.md"))]),
     ),
     state,
@@ -6454,7 +6546,7 @@ test "sync reconciles the watcher with the panel and its open files" {
     is Some(
       {
         owner: { session: "desktop-test", .. },
-        workspace: None,
+        root: _,
         files: [],
         directories: [Relative("")],
       }
@@ -6499,7 +6591,12 @@ test "watcher failures are visible only in their owning conversation" {
   let owner = test_ctx().owner
   let (_, failed) = update(
     emit,
-    FileWatchFailed(owner~, epoch=Some(0), message="File watching stopped"),
+    FileWatchFailed(
+      channel=owner.channel,
+      root=test_ctx().test_root(),
+      generation=test_ctx().watch_identity(0),
+      message="File watching stopped",
+    ),
     owned_state(),
     test_ctx(),
   )
@@ -6508,11 +6605,99 @@ test "watcher failures are visible only in their owning conversation" {
     channel: @interop.ChannelId::Remote("other"),
     session: owner.session,
   }
+  let other_ctx : Ctx = { ..test_ctx(), owner: other }
   let (_, unchanged) = update(
     emit,
-    FileWatchFailed(owner=other, epoch=Some(0), message="stale failure"),
+    FileWatchFailed(
+      channel=other.channel,
+      root=other_ctx.test_resource("/work"),
+      generation=other_ctx.watch_identity(0),
+      message="stale failure",
+    ),
     failed,
     test_ctx(),
   )
   assert_true(unchanged.watch_error is Some("File watching stopped"))
+}
+
+///|
+test "same-root conversation switch fences every old watcher push" {
+  let emit = test_emit()
+  let old_generation = 4
+  let state = {
+    ..owned_state(),
+    watching: Some({
+      owner: test_ctx().owner,
+      root: test_ctx().test_root(),
+      files: [],
+      directories: [@pathx.Relative::root()],
+    }),
+    watch_generation: old_generation,
+  }
+  let next_owner : @interop.ConversationKey = {
+    channel: test_ctx().owner.channel,
+    session: "desktop-other",
+  }
+  let next_ctx : Ctx = { ..test_ctx(), owner: next_owner }
+  let (switched, _) = sync(emit, state, next_ctx)
+  assert_eq(switched.watch_generation, old_generation + 1)
+  assert_true(switched.watching is Some({ owner, .. }) && owner == next_owner)
+
+  // Both generations watch the same absolute root. Only the generation can
+  // tell a notification already queued by the outgoing watcher from one sent
+  // by the replacement.
+  let ready = {
+    ..switched,
+    children: Map([(@pathx.Relative::root(), [])]),
+    loading: [],
+  }
+  let (_, after_old_change) = update(
+    emit,
+    FsChanged(
+      root=next_ctx.test_root(),
+      generation=test_ctx().watch_identity(old_generation),
+      changes=None,
+    ),
+    ready,
+    next_ctx,
+  )
+  assert_true(after_old_change.loading.is_empty())
+  let stale_failure = FileWatchFailed(
+    channel=next_owner.channel,
+    root=next_ctx.test_root(),
+    generation=test_ctx().watch_identity(old_generation),
+    message="File watching stopped",
+  )
+  let (_, after_old_failure) = update(
+    emit, stale_failure, after_old_change, next_ctx,
+  )
+  assert_true(after_old_failure.watch_error is None)
+  // The native watcher survives a page reload while the frontend counter
+  // starts over. A page namespace keeps an equal counter from the outgoing
+  // page distinct from this page's current watcher.
+  let previous_page_ctx : Ctx = { ..next_ctx, watch_namespace: "previous-page" }
+  let (_, after_previous_page_failure) = update(
+    emit,
+    FileWatchFailed(
+      channel=next_owner.channel,
+      root=next_ctx.test_root(),
+      generation=previous_page_ctx.watch_identity(switched.watch_generation),
+      message="previous page watcher stopped",
+    ),
+    after_old_failure,
+    next_ctx,
+  )
+  assert_true(after_previous_page_failure.watch_error is None)
+  let current_failure = FileWatchFailed(
+    channel=next_owner.channel,
+    root=next_ctx.test_root(),
+    generation=next_ctx.watch_identity(switched.watch_generation),
+    message="current watcher stopped",
+  )
+  let (_, first) = update(
+    emit, current_failure, after_previous_page_failure, next_ctx,
+  )
+  let (_, second) = update(emit, current_failure, ready, next_ctx)
+  assert_eq(first.watch_error, Some("current watcher stopped"))
+  assert_true(first.watch_error == second.watch_error)
 }

@@ -341,9 +341,7 @@ priv struct RecoveredRun {
   session : String
   model : EngineModel
   max_steps : Int
-  cwd : @common.Uri?
   session_root : @common.Uri?
-  task : String?
   submission_id : String?
 }
 
@@ -418,6 +416,51 @@ pub(all) struct SubrunLane {
 } derive(Eq)
 
 ///|
+/// The directory context a conversation belongs to.
+///
+/// `Scratch` has no registered project. Its concrete directory is projected
+/// from the owning device's scratch root and this conversation's session id.
+/// `Project` names a registered project root. `Worktree` retains both its
+/// owning project and registry name; the checkout path itself remains
+/// registry-owned and is resolved only when an up-to-date row is available.
+priv enum Workspace {
+  Scratch
+  Project(root~ : @common.Uri)
+  Worktree(project~ : @common.Uri, name~ : String)
+} derive(Eq, Debug)
+
+///|
+/// Construct the conversation workspace represented by the durable session
+/// list: no registered project means Scratch; a project starts provisional
+/// until that project's worktree registry identifies a stronger placement.
+fn Workspace::from_project(project : @common.Uri?) -> Workspace {
+  if project is Some(root) {
+    Project(root~)
+  } else {
+    Scratch
+  }
+}
+
+///|
+/// The registered project that owns this workspace, if it has one.
+fn Workspace::project(self : Workspace) -> @common.Uri? {
+  match self {
+    Scratch => None
+    Project(root~) => Some(root)
+    Worktree(project~, ..) => Some(project)
+  }
+}
+
+///|
+/// The worktree registry name, present only for a worktree workspace.
+fn Workspace::worktree_name(self : Workspace) -> String? {
+  match self {
+    Worktree(name~, ..) => Some(name)
+    Scratch | Project(..) => None
+  }
+}
+
+///|
 /// One conversation's full client-side state. Each conversation maps to a
 /// durable engine session and, while running, to its own `--serve` engine
 /// process in the host — several conversations can run turns concurrently,
@@ -430,19 +473,10 @@ priv struct Conversation {
   // Durable engine session backing this conversation; consecutive runs share
   // it so the agent keeps context between prompts.
   session_id : String
-  // The project directory this conversation is attached to, `None` for a
-  // scratch conversation in the app-managed workspace. Sent with every start
-  // so the engine runs in the project and stores the session inside it. Also
-  // one of the two roots (`cwd` first) a legacy absolute chip path is
-  // relativized against before a jump.
-  workspace : @common.Uri?
-  // The worktree this conversation runs in — its execution environment,
-  // bound 1:1 at the first start. Sent with a start only until the
-  // conversation has begun — the host's registry
-  // mapping is durable from the first accepted start, and resume needs no
-  // hint. Cleared when the worktree disappears from the registry (removal
-  // unbinds host-side too).
-  worktree : String?
+  // Scratch, registered project, or project-owned worktree. One enum keeps
+  // those mutually exclusive placements from drifting apart and is the only
+  // stored source for filesystem and language-server routing.
+  workspace : Workspace
   // The composer's launch mode for a conversation that has not begun: run
   // the first prompt in a fresh host-named worktree instead of the
   // workspace root. Consumed by the create-then-start chain, which sets
@@ -496,13 +530,6 @@ priv struct Conversation {
   // started. Live-only: nothing persists a sub-run's progress, so a reload
   // mid-turn shows the tool call pending with no lane under it.
   subruns : Array[SubrunLane]
-  // The conversation's workspace directory as reported by the host's
-  // `started` event — `None` until the first run reports it. Display
-  // (topbar tooltip), the working directory for `open_path`/`launch_app`,
-  // and the preferred root for relativizing a legacy absolute chip path;
-  // the host derives it from the session id, so it is never sent back with
-  // a start request.
-  cwd : @common.Uri?
   // The git branch checked out in the workspace, reported by the host's
   // `workspace_branch` op — display only (composer chip). `None` until a probe
   // answers (or when it fails); `Some("")` when the workspace is not a
@@ -841,18 +868,19 @@ priv struct Completion {
 /// The last workspace-symbol results, cached so the `#` menu can show them
 /// without refetching while the query is unchanged. `session` records which
 /// conversation they belong to, so switching either device or session
-/// refetches rather than showing another workspace's symbols; `query` is the
-/// trigger text they answer, the key that decides whether a keystroke needs a
-/// fresh fetch.
+/// refetches rather than showing another workspace's symbols; `root` fences a
+/// worktree or project transition inside that conversation; `query` is the
+/// trigger text they answer.
 priv struct SymbolCache {
   owner : @interop.ConversationKey?
+  root : @common.Uri?
   query : String
   items : Array[CompletionItem]
 } derive(Eq)
 
 ///|
 fn empty_symbol_cache() -> SymbolCache {
-  { owner: None, query: "", items: [] }
+  { owner: None, root: None, query: "", items: [] }
 }
 
 ///|
@@ -899,18 +927,18 @@ priv enum QuickOpenPhase {
 
 ///|
 /// Frontend half of VS Code's FileQueryCacheState. `active_key` remains usable
-/// while `loading_key` warms a replacement for the same workspace. A failed
+/// while `loading_key` warms a replacement for the same root. A failed
 /// replacement therefore cannot evict the last good cache.
 priv struct FileQueryCacheState {
   owner : @interop.ConversationKey?
-  workspace : @common.Uri?
+  root : @common.Uri?
   active_key : String?
   loading_key : String?
 } derive(Eq)
 
 ///|
 fn empty_file_query_cache() -> FileQueryCacheState {
-  { owner: None, workspace: None, active_key: None, loading_key: None }
+  { owner: None, root: None, active_key: None, loading_key: None }
 }
 
 ///|
@@ -929,7 +957,7 @@ priv enum SkillsCatalog {
 /// probing for the injected bridge, connected, or given up with a reason.
 priv enum BridgeState {
   Connecting
-  Connected
+  Connected(scratch_root~ : @common.Uri)
   BridgeLost(String)
 } derive(Eq)
 
@@ -972,7 +1000,7 @@ priv struct DeviceState {
   // older reply from the same connection after a newer request was issued.
   sessions_request_generation : Int
   archived_request_generation : Int
-  workspaces_request_generation : Int
+  projects_request_generation : Int
   worktrees_request_generation : Int
   // Durable sessions known to the engine's store, newest first, refreshed
   // when the bridge connects and when a run reaches the store. A new
@@ -987,16 +1015,16 @@ priv struct DeviceState {
   // Cleared only at BridgeReady, immediately before fresh live and archived
   // lists are requested for the new connection.
   archive_overrides : Array[ArchiveOverride]
-  // Project directories attached as workspaces: the host registry's absolute
-  // paths in registration order. The sidebar shows one section per entry.
-  workspaces : Array[@common.Uri]
-  // Each workspace's worktree registry rows, refreshed with the workspace
-  // list and replaced wholesale by `worktree.changed`. The sidebar's name
+  // Registered project directories: the host registry's absolute paths in
+  // registration order. The sidebar shows one section per entry.
+  projects : Array[@common.Uri]
+  // Each project's worktree registry rows, refreshed with the project list
+  // and replaced wholesale by `worktree.changed`. The sidebar's name
   // chips read them.
-  worktrees : Array[WorkspaceWorktrees]
+  worktrees : Array[ProjectWorktrees]
   // Where "New chat" lands. `None` is the default scratch store; a project
   // placement always retains its validated absolute-path provenance.
-  active_workspace : @common.Uri?
+  active_project : @common.Uri?
 } derive(Eq)
 
 ///|
@@ -1009,14 +1037,14 @@ fn empty_device_state(channel : @interop.ChannelId) -> DeviceState {
     connection_generation: 0,
     sessions_request_generation: 0,
     archived_request_generation: 0,
-    workspaces_request_generation: 0,
+    projects_request_generation: 0,
     worktrees_request_generation: 0,
     sessions: [],
     archived: [],
     archive_overrides: [],
-    workspaces: [],
+    projects: [],
     worktrees: [],
-    active_workspace: None,
+    active_project: None,
   }
 }
 
@@ -1111,10 +1139,10 @@ priv struct Model {
   // conversations) is folded down to its heading; clicking the heading flips
   // it.
   chats_collapsed : Bool
-  // Whether the sidebar's "Workspaces" section (the attached projects and their
+  // Whether the sidebar's "Projects" section (the attached projects and their
   // nested conversations) is folded down to its heading; clicking the heading
   // flips it.
-  workspaces_collapsed : Bool
+  projects_collapsed : Bool
   // The conversations whose sub-run transcripts are unfolded in the sidebar,
   // as (device, session id) — session ids are only unique within a channel.
   // Sidebar-only view state, held for the window's lifetime and never
@@ -1135,18 +1163,18 @@ priv struct Model {
   // This lives above individual conversations so pruning, archive removal,
   // and reopening cannot reuse a token that an older host reply still carries.
   transcript_request_generation : Int
-  // A page-lifetime namespace plus monotonic counter allocate globally unique
-  // submission ids without making `update` read randomness. Different windows
-  // get independent timestamp/random namespaces; replaying the same model is
-  // deterministic.
-  submission_namespace : String
+  // A page-lifetime namespace lets independent monotonic counters become
+  // globally unique identities without making `update` read randomness.
+  // Different windows get independent timestamp/random namespaces; replaying
+  // the same model remains deterministic.
+  page_namespace : String
   submission_sequence : Int
   // Every conversation with live client state this app run: the active one,
   // those still running in the background, and those visited and kept for an
   // instant switch back. Copy-on-write, like the transcript arrays.
   conversations : Array[Conversation]
-  // The in-app folder picker behind "Add a workspace"; None while closed.
-  workspace_picker : WorkspacePicker?
+  // The in-app folder picker behind "Add a project"; None while closed.
+  project_picker : ProjectPicker?
   // Whether the transcript is scrolled to its bottom. Streaming output only
   // auto-follows while this holds — scrolling up to read history must not be
   // yanked back down by the next delta. Maintained by a DOM scroll watcher;
@@ -1206,9 +1234,10 @@ priv struct Model {
   dock : @dock.State
   // The file subsystem behind the dock's file tabs: the active
   // conversation's file tree and the document table the embedded viewer
-  // shows from. Rooted at `active().cwd`; rebuilt when the active
-  // conversation changes. Owned by the `fileeditor` package; this model only
-  // carries its state and routes `FileEditor` messages to it.
+  // shows from. Rooted at `conversation_root`; rebuilt when the active
+  // conversation changes workspace variant or concrete root. Owned by the
+  // `fileeditor` package; this model only carries its state and routes
+  // `FileEditor` messages to it.
   file_panel : @fileeditor.State
   // The browser subsystem behind the dock's Browser tabs: per-page address
   // state, keyed by page-global ids that only grow. The pages themselves
@@ -1311,7 +1340,7 @@ priv struct GoalEdit {
 /// `generation` numbers that picker's latest request. Both ride on replies,
 /// so neither a superseded navigation nor a closed picker from another
 /// device can replace the current listing.
-priv struct WorkspacePicker {
+priv struct ProjectPicker {
   channel : @interop.ChannelId
   // The last directory the host successfully listed. `None` only while the
   // initial home listing is in flight; typed go-to text stays in `input`.
@@ -1328,7 +1357,7 @@ priv struct WorkspacePicker {
 ///|
 /// A picker that just opened: nothing browsed yet, first listing (the home
 /// directory) on its way.
-fn opening_workspace_picker(channel : @interop.ChannelId) -> WorkspacePicker {
+fn opening_project_picker(channel : @interop.ChannelId) -> ProjectPicker {
   {
     channel,
     path: None,
@@ -1417,16 +1446,21 @@ priv enum Msg {
   // also carries its comment text, re-shown as an editor bubble over that
   // range.
   JumpToLocation(path~ : String, range~ : @common.Range?, annotation~ : String?)
-  // A `workspace_symbols` reply: `owner`/`query` say which request it answers
-  // so a reply that lost a device/session switch or later keystroke is dropped.
+  // A `workspace_symbols` reply: owner, root, and query say which request it
+  // answers so an overtaken device/session/root switch or keystroke is dropped.
   SymbolsLoaded(
     owner~ : @interop.ConversationKey,
+    root~ : @common.Uri,
     query~ : String,
     items~ : Array[WorkspaceSymbol]
   )
   // A failed search reads as "no symbols", so it carries no message to show —
-  // only the `owner`/`query` needed to settle the right menu.
-  SymbolsFailed(owner~ : @interop.ConversationKey, query~ : String)
+  // only the request identity needed to settle the right menu.
+  SymbolsFailed(
+    owner~ : @interop.ConversationKey,
+    root~ : @common.Uri,
+    query~ : String
+  )
   // Open unified Quick Open in the requested provider in either shell.
   QuickOpenOpen(QuickOpenMode)
   QuickOpenValueChanged(String)
@@ -1547,8 +1581,8 @@ priv enum Msg {
   ViewportResized(width~ : Int)
   // The sidebar's "Chats" heading was clicked — fold or unfold the section.
   ToggleChatsSection
-  // The sidebar's "Workspaces" heading was clicked — fold or unfold the section.
-  ToggleWorkspacesSection
+  // The sidebar's "Projects" heading was clicked — fold or unfold the section.
+  ToggleProjectsSection
   // A conversation row's disclosure was clicked — show or hide the sub-run
   // transcripts folded under it. The row's own click still opens the session,
   // so the two controls never fight over one gesture.
@@ -1590,13 +1624,13 @@ priv enum Msg {
   ExternalLinkClicked(String)
   // Open the in-app folder picker against one device's host (browsing starts
   // at that host's home directory), selecting its channel first if needed.
-  PickWorkspace(@interop.ChannelId)
+  PickProject(@interop.ChannelId)
   // Browse into a directory: a subdirectory row, the parent, or the typed
   // path field on Enter.
-  WorkspacePickerNavigate(String)
+  ProjectPickerNavigate(String)
   // One directory's listing came back from the host; `generation` names
   // the browse request it answers, so a stale reply is dropped.
-  WorkspacePickerLoaded(
+  ProjectPickerLoaded(
     channel~ : @interop.ChannelId,
     path~ : @common.Uri,
     entries~ : Array[String],
@@ -1604,22 +1638,22 @@ priv enum Msg {
   )
   // A navigation failed; the message shows in the picker and the previous
   // listing stays usable.
-  WorkspacePickerFailed(
+  ProjectPickerFailed(
     channel~ : @interop.ChannelId,
     message~ : String,
     generation~ : Int
   )
   // The picker's path field changed.
-  WorkspacePickerInput(String)
+  ProjectPickerInput(String)
   // Register the picker's current directory and close it.
-  WorkspacePickerConfirm
-  WorkspacePickerClose
-  // Detach a workspace from one device: only the registry entry goes
+  ProjectPickerConfirm
+  ProjectPickerClose
+  // Detach a project from one device: only the registry entry goes
   // away — the directory and the sessions inside it stay, so re-adding
   // restores them.
-  RemoveWorkspace(@interop.ChannelId, @common.Uri)
-  // Start a fresh conversation in a device's workspace (`None` = the default
-  // store), selecting its explicit channel first if needed.
+  RemoveProject(@interop.ChannelId, @common.Uri)
+  // Start a fresh conversation in a device's project (`None` = Scratch),
+  // selecting its explicit channel first if needed.
   NewChatIn(@interop.ChannelId, @common.Uri?)
   // Flip the composer's launch mode for a conversation that has not begun:
   // workspace root, or a fresh host-named worktree (its execution
@@ -1731,7 +1765,7 @@ priv enum Msg {
 /// `FromDevice(channel, ...)`; messages that back page-global or
 /// focused-scoped state stay on `Msg` itself.
 priv enum DeviceMsg {
-  BridgeReady
+  BridgeReady(scratch_root~ : @common.Uri)
   BridgeUnavailable(String)
   // The channel's WebSocket closed (or failed to open). The handler counts
   // the loss and schedules `ReconnectDue`, making the model's device list
@@ -1843,20 +1877,20 @@ priv enum DeviceMsg {
     steps~ : Int,
     activity~ : String
   )
-  // The registered workspaces — the reply to `workspace.list`. Both
+  // The registered projects — the reply to `workspace.list`. Both
   // generations are required: reconnect rejects a dead socket, while request
   // generation rejects an older reply from the current connection.
-  WorkspacesLoaded(
+  ProjectsLoaded(
     Array[@common.Uri],
     connection_generation~ : Int,
     request_generation~ : Int
   )
   // The host's canonical post-commit registry broadcast. Every client adopts
   // the same list in durable write order and invalidates older list replies.
-  WorkspacesChanged(Array[@common.Uri])
-  WorkspaceFailed(String)
+  ProjectsChanged(Array[@common.Uri])
+  ProjectFailed(String)
   // One workspace's worktree registry — the reply to `worktree.list`, with
-  // the same two-generation staleness fence as `WorkspacesLoaded`.
+  // the same two-generation staleness fence as `ProjectsLoaded`.
   WorktreesLoaded(
     Array[WorktreeRow],
     workspace~ : @common.Uri,
@@ -1926,16 +1960,12 @@ priv enum DeviceMsg {
   )
   // The host accepted a prompt: `session` routes the event to its
   // conversation, and everything after a `started` routes by `run_id`.
-  // `task` is the prompt text — a client that did not send it (another
-  // window, a mid-run join) has no other live source for the prompt bubble.
   Started(
     run_id~ : String,
     session~ : String,
     model~ : EngineModel,
     max_steps~ : Int,
-    cwd~ : @common.Uri?,
     session_root~ : @common.Uri?,
-    task~ : String?,
     submission_id~ : String?
   )
   // One complete `agent.runs` reply. Replayed starts and the negative-set
@@ -2046,14 +2076,13 @@ priv enum DeviceMsg {
 fn empty_conversation(
   channel : @interop.ChannelId,
   session_id : String,
-  workspace? : @common.Uri,
+  project? : @common.Uri,
   model? : EngineModel = High,
 ) -> Conversation {
   {
     device: channel,
     session_id,
-    workspace,
-    worktree: None,
+    workspace: Workspace::from_project(project),
     worktree_mode: false,
     engine_model: model,
     task: "",
@@ -2067,7 +2096,6 @@ fn empty_conversation(
     unseen_finish: false,
     usage_tokens: 0,
     subruns: [],
-    cwd: None,
     branch: None,
     diffstat: None,
     diffstat_hint: None,
@@ -2126,7 +2154,7 @@ fn initial_model() -> Model {
     Some(channel) => Some(channel)
     None => page_device.map(id => @interop.ChannelId::Remote(id))
   }
-  let preselect_workspace = match
+  let preselect_project = match
     (@interop.page_query_param("workspace"), preselect_owner) {
     (Some(path), Some(channel)) => @resource.of_path(channel, path)
     _ => None
@@ -2137,12 +2165,7 @@ fn initial_model() -> Model {
     // fills `devices` from the fetched roster (`apply_roster`).
     devices: match page_channel {
       Some(channel) =>
-        [
-          {
-            ..empty_device_state(channel),
-            active_workspace: preselect_workspace,
-          },
-        ]
+        [{ ..empty_device_state(channel), active_project: preselect_project }]
       None => []
     },
     websocket_epoch: 0,
@@ -2168,7 +2191,7 @@ fn initial_model() -> Model {
       None
     } else {
       Some(
-        empty_console_state(page_device, preselect_workspace, login_return_to~),
+        empty_console_state(page_device, preselect_project, login_return_to~),
       )
     },
     system_dark: host_prefers_dark(),
@@ -2176,15 +2199,15 @@ fn initial_model() -> Model {
     narrow,
     sidebar_open: !narrow,
     chats_collapsed: false,
-    workspaces_collapsed: false,
+    projects_collapsed: false,
     expanded_subruns: [],
     active_session: "",
     loading_conversation: None,
     transcript_request_generation: 0,
-    submission_namespace: generated_session_id() + "-submission",
+    page_namespace: generated_session_id(),
     submission_sequence: 0,
     conversations: [],
-    workspace_picker: None,
+    project_picker: None,
     archive_confirm: None,
     transcript_pinned: true,
     screen: Chat,
@@ -2270,12 +2293,9 @@ fn Model::focused_connection_generation(self : Model) -> Int {
 
 ///|
 /// Move the focused channel's "New chat" placement.
-fn Model::with_active_workspace(
-  self : Model,
-  workspace : @common.Uri?,
-) -> Model {
+fn Model::with_active_project(self : Model, project : @common.Uri?) -> Model {
   guard self.focused_device() is Some(dev) else { return self }
-  self.replace_device({ ..dev, active_workspace: workspace })
+  self.replace_device({ ..dev, active_project: project })
 }
 
 ///|
@@ -2423,7 +2443,7 @@ fn Model::display_status(self : Model) -> Status {
   match self.bridge_state() {
     Connecting => WaitingBridge
     BridgeLost(message) => Unavailable(message)
-    Connected =>
+    Connected(..) =>
       match self.active().run {
         NoRun(ended=None) => self.settings_status()
         NoRun(ended=Some(RunFailed)) => Failed
@@ -2585,11 +2605,11 @@ fn Model::subruns_expanded(
 }
 
 ///|
-/// The workspace a session belongs to on `channel`: the sidebar list's
+/// The registered project a session belongs to on `channel`: the sidebar list's
 /// grouping when the store knows the session, the live conversation's own
 /// placement otherwise (a fresh chat that has not reached the store yet).
 /// `None` = the default store.
-fn Model::session_workspace(
+fn Model::session_project(
   self : Model,
   channel : @interop.ChannelId,
   session_id : String,
@@ -2604,22 +2624,22 @@ fn Model::session_workspace(
     }
   }
   match self.find_conversation(channel, session_id) {
-    Some(conv) => conv.workspace
+    Some(conv) => conv.workspace.project()
     None => None
   }
 }
 
 ///|
-/// Resolve a host-reported durable session root back to a registered
-/// workspace. Workspace conversations live at `<workspace>/.openseek`;
+/// Resolve a host-reported durable session root back to a registered project.
+/// Project conversations live at `<project>/.openseek`;
 /// scratch conversations use the unrelated global root and therefore do not
 /// match anything here. The lexical helper normalizes Windows separators.
-fn DeviceState::workspace_for_session_root(
+fn DeviceState::project_for_session_root(
   self : DeviceState,
   session_root : @common.Uri?,
 ) -> @common.Uri? {
   guard session_root is Some(session_root) else { return None }
-  for workspace in self.workspaces {
+  for workspace in self.projects {
     if @resource.relative_to(session_root, workspace) ==
       Some(@pathx.Relative(".openseek")) {
       return Some(workspace)
@@ -3085,7 +3105,7 @@ fn Model::allocate_submission_id(self : Model) -> (Model, String) {
   let sequence = self.submission_sequence + 1
   (
     { ..self, submission_sequence: sequence },
-    self.submission_namespace + "-" + sequence.to_string(),
+    self.page_namespace + "-submission-" + sequence.to_string(),
   )
 }
 

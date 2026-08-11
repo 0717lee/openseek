@@ -47,8 +47,7 @@ priv struct ViewerHost {
   // The same file as the conversation names it — the workspace-relative path
   // the panel read it by. A comment filed on the shown document takes this
   // as its chip path, so the chip never has to reverse-engineer a relative
-  // name from the absolute one (which the frontend cannot do before the
-  // first run reports `cwd`). `None` when the viewer shows a notice or
+  // name from the absolute one. `None` when the viewer shows a notice or
   // nothing.
   mut relative : @pathx.Relative?
   // The active host/workspace route for Definition/References targets and
@@ -264,7 +263,7 @@ pub fn request_viewer_remeasure() -> @cmd.Cmd {
 /// source Viewer remains mounted.
 fn show_file_in_viewer(
   owner : @interop.ConversationKey,
-  workspace : @common.Uri?,
+  root~ : @common.Uri?,
   name : String,
   content : String,
   absolute? : @common.Uri,
@@ -353,7 +352,7 @@ fn show_file_in_viewer(
     viewer_state.relative = relative
     viewer_state.navigation = match (absolute, relative) {
       (Some(absolute), Some(relative)) =>
-        navigation_context_for_file(owner, workspace, absolute, relative)
+        navigation_context_for_file(owner, root, absolute, relative)
       _ => None
     }
     // Commenting (select → inline input → composer chip) is for real files;

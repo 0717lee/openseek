@@ -1,6 +1,6 @@
 // The workspace file watcher behind the editor panel's live updates. Each
-// client connection points its own actor at the active conversation's
-// workspace through `fs.watch` (and parks it with `fs.unwatch`); the actor
+// client connection points its own actor at an absolute root through
+// `fs.watch` (and parks it with `fs.unwatch`); the actor
 // runs one recursive `@fs.Watcher` pruned to the file editor's current open
 // files and listed directories. It pushes concrete `fs.changed` events back
 // to that connection on every change, or an
@@ -13,7 +13,7 @@
 /// One ordered actor request. Resolution happens inside the actor, after the
 /// request reaches this mailbox, so a slow `watch(A)` can never land after a
 /// later `unwatch` or `watch(B)`. The one-slot reply reports a workspace
-/// resolution error to the exact request task that asked.
+/// path error to the exact request task that asked.
 priv enum FsWatchRequest {
   Watch(WatchWorkspacePayload, reply~ : @async.Queue[String?])
   Unwatch(reply~ : @async.Queue[String?])
@@ -28,13 +28,14 @@ priv struct FsWatchActor {
 }
 
 ///|
-/// The resolved watch address plus the conversation that requested it. The
-/// session travels with asynchronous failures so a late notification cannot
-/// be shown in the next conversation.
+/// The parsed absolute watch root and its selected relative paths.
 priv struct FsWatchTarget {
-  session : String
   root : @pathx.Absolute
   interest : WatchInterest
+  // The client's identity for this exact configuration. It follows every
+  // asynchronous push so a replaced watcher cannot report against its
+  // successor, even when both use the same root.
+  generation : String
 }
 
 ///|
@@ -43,7 +44,6 @@ priv struct FsWatchTarget {
 /// additionally keeps each selected directory's immediate children so create,
 /// remove, and rename events can be discovered without descending further.
 priv struct WatchInterest {
-  legacy_full_tree : Bool
   paths : Set[@pathx.Relative]
   directories : Set[@pathx.Relative]
 }
@@ -52,22 +52,14 @@ priv struct WatchInterest {
 fn WatchInterest::WatchInterest(
   payload : WatchWorkspacePayload,
 ) -> WatchInterest {
-  let interest = {
-    legacy_full_tree: payload.files is None && payload.directories is None,
-    paths: Set([]),
-    directories: Set([]),
+  let interest = { paths: Set([]), directories: Set([]) }
+  for path in payload.files {
+    interest.remember(@pathx.Relative(path).normalize())
   }
-  if payload.files is Some(files) {
-    for path in files {
-      interest.remember(@pathx.Relative(path).normalize())
-    }
-  }
-  if payload.directories is Some(directories) {
-    for path in directories {
-      let path = @pathx.Relative(path).normalize()
-      interest.directories.add(path)
-      interest.remember(path)
-    }
+  for path in payload.directories {
+    let path = @pathx.Relative(path).normalize()
+    interest.directories.add(path)
+    interest.remember(path)
   }
   interest
 }
@@ -92,44 +84,11 @@ fn WatchInterest::remember(
 }
 
 ///|
-/// Subtrees omitted by recursive snapshots and legacy full-tree watchers.
-/// Besides build and dependency output, agent/tool state directories are
-/// omitted: they can contain large caches or nested worktrees and are not
-/// useful Quick Open results. `.worktrees` keeps worktree agents' churn out
-/// of the main workspace; a worktree session's own watcher roots inside the
-/// checkout, where relative paths never carry that segment. Explicit watcher
-/// selections do not use this policy: an opened file must remain watchable
-/// even under one of these conventional directory names.
-fn @pathx.Relative::is_ignored_watch_path(self : @pathx.Relative) -> Bool {
-  match [..self.0.split("/")] {
-    [
-      ..,
-      ".git"
-      | ".claude"
-      | ".codex"
-      | ".cursor"
-      | ".moonagent"
-      | ".openseek"
-      | "target"
-      | "_build"
-      | "node_modules"
-      | ".mooncakes"
-      | ".repos"
-      | ".worktrees",
-    ] => true
-    _ => false
-  }
-}
-
-///|
 /// Keep selected paths, their ancestors, and one level below every selected
 /// directory. A child directory is opened so its own create/remove can be
 /// observed, but its descendants are ignored unless that directory is also
 /// selected or leads to an opened file.
 fn WatchInterest::ignores(self : WatchInterest, path : @pathx.Relative) -> Bool {
-  if self.legacy_full_tree {
-    return path.is_ignored_watch_path()
-  }
   if self.paths.contains(path) {
     return false
   }
@@ -152,8 +111,8 @@ fn FsWatchActor::new() -> FsWatchActor {
 }
 
 ///|
-/// Point the watcher at `payload.session`'s workspace root. The actor owns
-/// both resolution and watcher replacement; awaiting its reply gives requests
+/// Point the watcher at `payload.path`. The actor owns both path parsing and
+/// watcher replacement; awaiting its reply gives requests
 /// one observable order even though WebSocket request tasks run concurrently.
 async fn FsWatchActor::watch(
   self : FsWatchActor,
@@ -188,26 +147,20 @@ async fn FsWatchRequest::apply(
       reply.put(None)
       None
     }
-    Watch(payload, reply~) =>
-      match
-        @engine.resolve_in_workspace(
-          payload.session,
-          "",
-          workspace?=payload.workspace,
-        ) {
-        Some(root) => {
-          reply.put(None)
-          Some({
-            session: payload.session,
-            root,
-            interest: WatchInterest(payload),
-          })
-        }
-        None => {
-          reply.put(Some("path is outside the conversation workspace"))
-          current
+    Watch(payload, reply~) => {
+      let root = WirePath::parse(payload.path) catch {
+        error => {
+          reply.put(Some("\{error}"))
+          return current
         }
       }
+      reply.put(None)
+      Some({
+        root: root.absolute,
+        interest: WatchInterest(payload),
+        generation: payload.generation,
+      })
+    }
   }
 }
 
@@ -224,18 +177,18 @@ async fn FsWatchTarget::watch(
   })
   defer watcher.close()
   emit({
-    session: self.session,
     root: self.root.resource_path(),
     baseline: true,
     events: [],
+    generation: self.generation,
   })
   for ;; {
     let events = watcher.wait()
     emit({
-      session: self.session,
       root: self.root.resource_path(),
       baseline: false,
       events: events.map(FsEventPayload::from_event),
+      generation: self.generation,
     })
   }
 }
@@ -280,14 +233,13 @@ async fn FsWatchActor::run(
             @xlog.warn(category="filesystem") <?
               {
                 "event": "watch_failed",
-                "session": target.session,
                 "root": target.root.to_string(),
                 "error": "\{error}",
               }
             emit_failed({
-              session: target.session,
               root: target.root.resource_path(),
               message,
+              generation: target.generation,
             })
           }
         }
@@ -305,10 +257,10 @@ async fn FsWatchActor::run(
 ///|
 test "watch interest retains selected files, listed children, and ancestors" {
   let payload : WatchWorkspacePayload = {
-    session: "s-1",
-    workspace: None,
-    files: Some(["src/main.mbt", "node_modules/pkg/index.js"]),
-    directories: Some(["", "docs"]),
+    path: "/work/project",
+    files: ["src/main.mbt", "node_modules/pkg/index.js"],
+    directories: ["", "docs"],
+    generation: "page-a:7",
   }
   let interest = WatchInterest(payload)
   // Root rows and one level under an expanded directory stay observable.
@@ -328,30 +280,6 @@ test "watch interest retains selected files, listed children, and ancestors" {
 }
 
 ///|
-test "legacy watch payloads retain the recursive blacklist" {
-  let payload : WatchWorkspacePayload = {
-    session: "s-1",
-    workspace: None,
-    files: None,
-    directories: None,
-  }
-  let interest = WatchInterest(payload)
-  assert_true(interest.legacy_full_tree)
-  assert_true(interest.ignores(Relative("deps/node_modules")))
-  assert_true(interest.ignores(Relative(".claude")))
-  assert_true(interest.ignores(Relative("sub/.claude")))
-  assert_true(interest.ignores(Relative("packages/app/.codex")))
-  assert_true(interest.ignores(Relative("packages/app/.cursor")))
-  assert_true(interest.ignores(Relative("packages/app/.moonagent")))
-  assert_true(interest.ignores(Relative("packages/app/.openseek")))
-  assert_true(interest.ignores(Relative(".worktrees")))
-  assert_true(interest.ignores(Relative("sub/.worktrees")))
-  // Project-owned dot-directories remain searchable/watchable by default.
-  assert_false(interest.ignores(Relative(".github/workflows/check.yml")))
-  assert_false(interest.ignores(Relative("src/main.mbt")))
-}
-
-///|
 test "host connections keep filesystem watch request mailboxes isolated" {
   let first = HostConnection::new()
   let second = HostConnection::new()
@@ -362,27 +290,41 @@ test "host connections keep filesystem watch request mailboxes isolated" {
 }
 
 ///|
-test "stat_files payload decodes with and without a workspace hint" {
+async test "watch requests retain their notification generation" {
+  let reply : @async.Queue[String?] = Queue(kind=Blocking(1))
+  let request = Watch(
+    {
+      path: "/work/project",
+      files: [],
+      directories: [],
+      generation: "page-a:9",
+    },
+    reply~,
+  )
+  guard request.apply(None) is Some(target) else {
+    fail("valid watch request did not produce a target")
+  }
+  assert_eq(target.generation, "page-a:9")
+  assert_true(reply.get() is None)
+}
+
+///|
+test "filesystem payloads carry absolute target paths" {
   let payload : StatFilesPayload = @json.from_json({
-    "session": "s-1",
-    "paths": ["a.mbt", "src/b.mbt"],
-    "workspace": "/work/project",
+    "paths": ["/work/project/a.mbt", "/work/project/src/b.mbt"],
   })
-  assert_eq(payload.session, "s-1")
-  assert_true(payload.paths == ["a.mbt", "src/b.mbt"])
-  assert_true(payload.workspace is Some("/work/project"))
+  assert_true(
+    payload.paths == ["/work/project/a.mbt", "/work/project/src/b.mbt"],
+  )
   let selected : WatchWorkspacePayload = @json.from_json({
-    "session": "s-2",
+    "path": "/work/project",
     "files": ["src/main.mbt"],
     "directories": ["", "src"],
+    "generation": "page-a:7",
   })
-  assert_true(selected.files is Some(["src/main.mbt"]))
-  assert_true(selected.directories is Some(["", "src"]))
-  let bare : WatchWorkspacePayload = @json.from_json({ "session": "s-2" })
-  assert_eq(bare.session, "s-2")
-  assert_true(bare.workspace is None)
-  assert_true(bare.files is None)
-  assert_true(bare.directories is None)
+  assert_eq(selected.files, ["src/main.mbt"])
+  assert_eq(selected.directories, ["", "src"])
+  assert_eq(selected.generation, "page-a:7")
 }
 
 ///|
