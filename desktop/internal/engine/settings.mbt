@@ -119,7 +119,7 @@ async fn load_engine_settings(runtime_dir : @pathx.Path?) -> EngineSettings {
 
 ///|
 fn settings_text(fields : Map[String, Json], key : String) -> String? {
-  guard fields.get(key) is Some(String(value)) && !value.trim().is_empty() else {
+  guard fields.get(key) is Some(String(value)) && !value.is_blank() else {
     return None
   }
   Some(value)
@@ -359,7 +359,7 @@ fn resolved_endpoint(
 /// `OPENSEEK_SERVER_URL` overrides the selection for development against a
 /// local or ad-hoc server.
 pub async fn remote_server_base(manager : EngineManager) -> String? {
-  if @env.get("OPENSEEK_SERVER_URL") is Some(base) && !base.trim().is_empty() {
+  if @env.get("OPENSEEK_SERVER_URL") is Some(base) && !base.is_blank() {
     return Some(base.trim().to_owned())
   }
   let (settings, _) = manager.settings_snapshot()

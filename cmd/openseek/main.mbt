@@ -106,7 +106,7 @@ fn reject_session_contradiction(matches : @argparse.Matches) -> Unit raise {
       values: { "session": [session, ..], .. },
       ..,
     } &&
-    !session.trim().is_empty() {
+    !session.is_blank() {
     fail("--no-session contradicts --session; pick one behavior")
   }
 }
@@ -362,7 +362,7 @@ fn sessions_target_id(
   matches : @argparse.Matches,
 ) -> @agent_session.SessionId raise {
   match matches {
-    { values: { "id": [id, ..], .. }, .. } if !id.trim().is_empty() =>
+    { values: { "id": [id, ..], .. }, .. } if !id.is_blank() =>
       SessionId(id.trim().to_owned())
     _ => fail("a session id is required (e.g. `openseek sessions show <id>`)")
   }

@@ -56,7 +56,7 @@ async fn capture_goal_baseline(workspace_root : String) -> String {
     return GoalBaselineUnavailable
   }
   let dirty = run_capture("git", ["status", "--porcelain"], workspace_root)
-    .map(status => !status.trim().is_empty())
+    .map(status => !status.is_blank())
     .unwrap_or(true)
   @agent_session.goal_baseline_notice(sha~, dirty~)
 }

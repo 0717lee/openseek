@@ -842,7 +842,7 @@ async fn first_prompt_in_log(path : String) -> String {
   for _ in 0..<first_prompt_scan_limit {
     let next = file.read_until("\n") catch { _ => return "" }
     guard next is Some(line) else { break }
-    if line.trim().is_empty() {
+    if line.is_blank() {
       continue
     }
     let event : @agent_session.SessionEvent = @json.from_json(@json.parse(line)) catch {
@@ -1319,7 +1319,7 @@ fn effective_search_dirs(matches : @argparse.Matches) -> Array[String] {
     } => []
     { values: { "search-dir": values, .. }, .. } =>
       [
-        for value in values if !value.trim().is_empty() => {
+        for value in values if !value.is_blank() => {
           value.trim().to_owned()
         }
       ]

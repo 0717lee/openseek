@@ -78,7 +78,7 @@ fn save_conversation_model(key : String, model : EngineModel) -> @cmd.Cmd {
 /// single malformed row is skipped rather than discarding the rest.
 fn parse_conversation_models(text : String) -> Array[StoredConversationModel] {
   let entries : Array[StoredConversationModel] = []
-  guard !text.trim().is_empty() else { return entries }
+  guard !text.is_blank() else { return entries }
   let json = @json.parse(text) catch { _ => return entries }
   guard json is Array(rows) else { return entries }
   for row in rows {
@@ -99,7 +99,7 @@ fn parse_conversation_models(text : String) -> Array[StoredConversationModel] {
 /// an absent or unusable value restores the safe Local default everywhere.
 fn WorkspaceDefaultMode::parse(text : String) -> WorkspaceDefaultMode {
   let mode : WorkspaceDefaultMode = { worktrees: [] }
-  guard !text.trim().is_empty() else { return mode }
+  guard !text.is_blank() else { return mode }
   let json = @json.parse(text) catch { _ => return mode }
   guard json is Array(rows) else { return mode }
   for row in rows {
@@ -186,7 +186,7 @@ fn read_legacy_engine_settings(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
     let custom_api_key = load_setting(LegacyCustomApiKeyStorageKey)
     if [provider, custom_url, api_key, custom_api_key]
       .iter()
-      .any(value => !value.trim().is_empty()) {
+      .any(value => !value.is_blank()) {
       scheduler.add(
         dispatch(
           LegacySettingsRead(provider~, custom_url~, api_key~, custom_api_key~),

@@ -274,6 +274,6 @@ fn @agent_runtime.AgentRuntime::pending_steers(
   [
     for input in runtime.drain_steers() if input
     is (Prompt(text) | Command(text) | Notice(text)) &&
-    !text.trim().is_empty() => input
+    !text.is_blank() => input
   ]
 }

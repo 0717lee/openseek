@@ -80,7 +80,7 @@ fn decode_catalog(json : Json) -> Array[MarketSkill] raise SkillMarketError {
       continue
     }
     guard item is { "metadata": { "description": String(description), .. }, .. } &&
-      !description.trim().is_empty() else {
+      !description.is_blank() else {
       continue
     }
     let package_path = if item is { "package": String(package_path), .. } {

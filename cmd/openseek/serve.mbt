@@ -171,7 +171,7 @@ fn decode_serve_command(json : Json) -> Result[ServeCommand, String] {
     Compact => Ok(Compact)
     Cancel => Ok(Cancel)
     GoalSet(text~, auto~) =>
-      if text.trim().is_empty() {
+      if text.is_blank() {
         Err("goal text must not be blank")
       } else {
         Ok(Goal(SetGoal(text, auto~)))

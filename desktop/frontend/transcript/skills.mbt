@@ -51,7 +51,7 @@ pub fn skills_catalog_from_reply(
       continue
     }
     items.push({
-      name: if entry.name.trim().is_empty() {
+      name: if entry.name.is_blank() {
         entry.module_name
       } else {
         entry.name
@@ -77,7 +77,7 @@ pub fn installed_skills_from_reply(
     guard !entry.id.is_empty() else { continue }
     items.push({
       id: entry.id,
-      name: if entry.name.trim().is_empty() {
+      name: if entry.name.is_blank() {
         entry.id
       } else {
         entry.name

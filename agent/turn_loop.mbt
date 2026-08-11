@@ -341,7 +341,7 @@ async fn AgentLoop::record_assistant(
 
 ///|
 fn AgentLoop::push_finished_message(self : Self, answer : String) -> Unit {
-  if !answer.trim().is_empty() {
+  if !answer.is_blank() {
     self.messages.push(ChatMessage(Assistant, content=answer))
   }
 }

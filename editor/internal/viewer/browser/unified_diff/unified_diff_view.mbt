@@ -272,7 +272,7 @@ fn show_line_comment_editor(
     commit()
   })
   textarea.add_event_listener("input", _ => {
-    if unified_diff_textarea_value(textarea).trim().is_empty() {
+    if unified_diff_textarea_value(textarea).is_blank() {
       submit.set_attribute("disabled", "true")
     } else {
       submit.remove_attribute("disabled")

@@ -20,7 +20,7 @@ pub fn apps_from_reply(
     guard !entry.id.is_empty() else { continue }
     items.push({
       id: entry.id,
-      name: if entry.name.trim().is_empty() {
+      name: if entry.name.is_blank() {
         entry.id
       } else {
         entry.name
