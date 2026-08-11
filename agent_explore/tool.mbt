@@ -97,7 +97,7 @@ async fn execute(
   child_session : @agent_subrun.ChildSession?,
   arguments : Json,
 ) -> @agent_tool.ToolAction {
-  guard arguments is { "query": String(query), .. } && not(query.is_blank()) else {
+  guard arguments is { "query": String(query), .. } && !query.is_blank() else {
     return @agent_tool.ToolAction::respond(
       "error: explore requires a non-empty string `query`",
       is_error=true,
@@ -110,7 +110,7 @@ async fn execute(
     )
   }
   let hints : String? = match arguments {
-    { "hints": String(hints), .. } if not(hints.is_blank()) => Some(hints)
+    { "hints": String(hints), .. } if !hints.is_blank() => Some(hints)
     _ => None
   }
   guard !(hints is Some(h) && h.length() > max_hints_chars) else {
@@ -214,11 +214,11 @@ pub async fn run_child(
   append_item? : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
   scratch_dir? : String,
 ) -> ExploreReport? {
-  guard input is { "query": String(query), .. } && not(query.is_blank()) else {
+  guard input is { "query": String(query), .. } && !query.is_blank() else {
     return None
   }
   let hints : String? = match input {
-    { "hints": String(hints), .. } if not(hints.is_blank()) => Some(hints)
+    { "hints": String(hints), .. } if !hints.is_blank() => Some(hints)
     _ => None
   }
   @agent_subrun.execute_kind(

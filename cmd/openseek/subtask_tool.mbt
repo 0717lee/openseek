@@ -132,18 +132,18 @@ async fn subtask_execute(
 ) -> @agent_tool.ToolAction {
   // Lifecycle actions first: exactly one of them may be present.
   match arguments {
-    { "continue": String(name), .. } if not(name.is_blank()) =>
+    { "continue": String(name), .. } if !name.is_blank() =>
       return subtask_continue(
         self_exe, model, workspace_root, budget, api_url, child_session, arguments,
         name,
       )
-    { "integrate": String(name), .. } if not(name.is_blank()) =>
+    { "integrate": String(name), .. } if !name.is_blank() =>
       return subtask_lifecycle(workspace_root, "integrate", name)
-    { "integrate_continue": String(name), .. } if not(name.is_blank()) =>
+    { "integrate_continue": String(name), .. } if !name.is_blank() =>
       return subtask_lifecycle(workspace_root, "integrate_continue", name)
-    { "integrate_abort": String(name), .. } if not(name.is_blank()) =>
+    { "integrate_abort": String(name), .. } if !name.is_blank() =>
       return subtask_lifecycle(workspace_root, "integrate_abort", name)
-    { "discard": String(name), .. } if not(name.is_blank()) =>
+    { "discard": String(name), .. } if !name.is_blank() =>
       return subtask_lifecycle(workspace_root, "discard", name)
     _ => ()
   }
@@ -260,19 +260,19 @@ priv struct LaunchSpec {
 /// Decode one launch object (the tool's own arguments, or one element of
 /// `slices`). `Err` carries the model-facing message.
 fn decode_launch(spec : Json) -> Result[LaunchSpec, String] {
-  guard spec is { "name": String(name), .. } && not(name.is_blank()) else {
+  guard spec is { "name": String(name), .. } && !name.is_blank() else {
     return Err(
       "subtask requires `name` (launch), `slices` (parallel launch), or one of integrate/integrate_continue/integrate_abort/discard",
     )
   }
-  guard spec is { "task": String(task), .. } && not(task.is_blank()) else {
+  guard spec is { "task": String(task), .. } && !task.is_blank() else {
     return Err("subtask launch requires a non-empty `task` for \{name}")
   }
   guard task.length() <= max_task_chars else {
     return Err("subtask task for \{name} exceeds \{max_task_chars} chars")
   }
   let context : String? = match spec {
-    { "context": String(context), .. } if not(context.is_blank()) => Some(context)
+    { "context": String(context), .. } if !context.is_blank() => Some(context)
     _ => None
   }
   guard !(context is Some(c) && c.length() > max_context_chars) else {
@@ -285,7 +285,7 @@ fn decode_launch(spec : Json) -> Result[LaunchSpec, String] {
     )
   }
   for prefix in prefixes {
-    guard prefix is String(prefix) && not(prefix.is_blank()) else {
+    guard prefix is String(prefix) && !prefix.is_blank() else {
       return Err("allowed_paths entries must be non-empty strings (\{name})")
     }
     allowed_paths.push(prefix)
@@ -566,7 +566,7 @@ async fn subtask_continue(
   arguments : Json,
   name : String,
 ) -> @agent_tool.ToolAction {
-  guard arguments is { "task": String(task), .. } && not(task.is_blank()) else {
+  guard arguments is { "task": String(task), .. } && !task.is_blank() else {
     return @agent_tool.ToolAction::respond(
       "error: subtask continue=\{name} requires a `task` — the remainder work order for the fresh worker",
       is_error=true,
@@ -581,7 +581,7 @@ async fn subtask_continue(
     )
   }
   let parent_context : String? = match arguments {
-    { "context": String(context), .. } if not(context.is_blank()) => Some(context)
+    { "context": String(context), .. } if !context.is_blank() => Some(context)
     _ => None
   }
   guard !(parent_context is Some(c) && c.length() > max_context_chars) else {
