@@ -1,0 +1,67 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "openseek_desktop/frontend/icons"
+
+import {
+  "moonbit-community/rabbita/html",
+}
+
+// Values
+pub fn icon(() -> @html.Html) -> @html.Html
+
+pub fn icon_add() -> @html.Html
+
+pub fn icon_archive() -> @html.Html
+
+pub fn icon_arrow_down() -> @html.Html
+
+pub fn icon_arrow_up() -> @html.Html
+
+pub fn icon_chevron_down() -> @html.Html
+
+pub fn icon_close() -> @html.Html
+
+pub fn icon_debug_stop() -> @html.Html
+
+pub fn icon_extensions() -> @html.Html
+
+pub fn icon_fold() -> @html.Html
+
+pub fn icon_folder() -> @html.Html
+
+pub fn icon_key() -> @html.Html
+
+pub fn icon_layout() -> @html.Html
+
+pub fn icon_layout_sidebar_left() -> @html.Html
+
+pub fn icon_layout_sidebar_right() -> @html.Html
+
+pub fn icon_link_external() -> @html.Html
+
+pub fn icon_logo() -> @html.Html
+
+pub fn icon_package() -> @html.Html
+
+pub fn icon_pull_request() -> @html.Html
+
+pub fn icon_search() -> @html.Html
+
+pub fn icon_settings_gear() -> @html.Html
+
+pub fn icon_sparkle() -> @html.Html
+
+pub fn icon_sync() -> @html.Html
+
+pub fn icon_target() -> @html.Html
+
+pub fn icon_terminal() -> @html.Html
+
+pub fn icon_worktree() -> @html.Html
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits
