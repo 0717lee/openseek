@@ -3158,8 +3158,13 @@ main {
 }
 
 .composer textarea {
+  /* Grow with wrapped or explicit lines; once the cap is reached, keep the
+     composer stable and scroll the textarea's contents instead. */
+  field-sizing: content;
+  width: 100%;
   min-height: 26px;
   max-height: 180px;
+  overflow-y: auto;
   border: 0;
   background: transparent;
   padding: 6px 6px 2px;
