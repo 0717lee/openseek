@@ -1958,6 +1958,8 @@ button.sidebar-button:not(:disabled):hover {
 
 /* ---------- main column ---------- */
 main {
+  --topbar-height: 46px;
+
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   /* Constrain the single column too: without this it defaults to `auto`
@@ -1966,6 +1968,9 @@ main {
      panel. minmax(0, …) holds it to the track and lets inner content
      wrap/scroll instead. */
   grid-template-columns: minmax(0, 1fr);
+  /* Descendants use the live main-pane height to keep the composer inside the
+     conversation row while the terminal is resized. */
+  container-type: size;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -1977,7 +1982,7 @@ main {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 46px;
+  height: var(--topbar-height);
   padding: 0 18px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
@@ -2825,6 +2830,15 @@ main {
   border-top: 1px solid var(--line);
   background: var(--paper);
   padding: 16px 24px 18px;
+}
+
+/* At the terminal's maximum height, `main` is only 180px tall. Bound the
+   complete composer to the space below the topbar so banners, a growing
+   textarea, and the toolbar remain reachable by scrolling instead of being
+   clipped by `main`. */
+.content.terminal-open .composer {
+  max-height: calc(100cqh - var(--topbar-height));
+  overflow-y: auto;
 }
 
 .composer-inner {
@@ -4383,6 +4397,10 @@ select:focus {
 }
 
 @media (max-width: 760px) {
+  main {
+    --topbar-height: 52px;
+  }
+
   .quick-open-backdrop {
     padding: 16px;
   }
