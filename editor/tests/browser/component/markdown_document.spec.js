@@ -295,7 +295,9 @@ async function expectHoverCallCancelled(page, callId) {
     .toBe(true);
 }
 
-test('uses a restrained, stable Markdown type scale', async ({ page }) => {
+test('uses the workbench UI font size with a restrained Markdown type scale', async ({
+  page,
+}) => {
   await page.goto('/browser-tests/component.html?markdownDocument=1');
   await page.waitForFunction(() =>
     Boolean(globalThis.__markdownDocumentControls),
@@ -311,20 +313,43 @@ test('uses a restrained, stable Markdown type scale', async ({ page }) => {
     }
   });
 
-  await expect(page.locator(article)).toHaveCSS('font-size', '14px');
-  await expect(page.locator(`${article} h1`)).toHaveCSS('font-size', '24.5px');
-  await expect(page.locator(`${article} h1`)).toHaveCSS('line-height', '29.4px');
+  await expect(page.locator(article)).toHaveCSS('font-size', '13px');
+  await expect(
+    page.locator(`${article} .monaco-tokenized-source`).first(),
+  ).toHaveCSS('font-size', '13px');
+  await expect(page.locator(`${article} h1`)).toHaveCSS('font-size', '22.75px');
+  await expect(page.locator(`${article} h1`)).toHaveCSS('line-height', '27.3px');
   for (const [level, fontSize] of [
-    [2, '19.25px'],
-    [3, '15.75px'],
-    [4, '14px'],
-    [5, '14px'],
-    [6, '14px'],
+    [2, '17.875px'],
+    [3, '14.625px'],
+    [4, '13px'],
+    [5, '13px'],
+    [6, '13px'],
   ]) {
     await expect(
       page.locator(`[data-type-scale-probe="${level}"]`),
     ).toHaveCSS('font-size', fontSize);
   }
+
+  await page.locator('.markdown-document-shell').evaluate((shell) => {
+    shell.style.setProperty('--ui-font-size', '12px');
+  });
+  await expect(page.locator(article)).toHaveCSS('font-size', '12px');
+  await expect(
+    page.locator(`${article} .monaco-tokenized-source`).first(),
+  ).toHaveCSS('font-size', '12px');
+  await expect(page.locator(`${article} h1`)).toHaveCSS('font-size', '21px');
+
+  await page.evaluate(() => {
+    const standalone = document.createElement('article');
+    standalone.className = 'moonbit-viewer-markdown-document-article';
+    standalone.dataset.typeScaleFallback = 'true';
+    document.body.appendChild(standalone);
+  });
+  await expect(page.locator('[data-type-scale-fallback="true"]')).toHaveCSS(
+    'font-size',
+    '14px',
+  );
 });
 
 test('uses a deliberate vertical rhythm for Markdown sections and blocks', async ({
@@ -1569,6 +1594,12 @@ test('renders and refreshes the editor-owned readonly Markdown presentation', as
       }),
     ).toBe(true);
 
+    // Seed a real scroll position before swapping presentations. At the
+    // workbench UI font size this short replacement fits the wide fixture, so
+    // use the existing narrow layout control to make the state observable.
+    await page.evaluate(() =>
+      globalThis.__markdownDocumentControls.resizeHost(360),
+    );
     await page.evaluate(() =>
       globalThis.__markdownDocumentControls.setScrollTop(60),
     );
@@ -1589,6 +1620,9 @@ test('renders and refreshes the editor-owned readonly Markdown presentation', as
     await expect(page.locator(root)).toHaveCount(1);
     await expect(page.locator(`${host} > .monaco-editor`)).toHaveCount(0);
     await expect(page.locator(article)).toContainText('replacement_answer');
+    await page.evaluate(() =>
+      globalThis.__markdownDocumentControls.resizeHost(640),
+    );
 
     // A different model with the same URI/revision/caller version still has a
     // distinct identity and attachment generation.

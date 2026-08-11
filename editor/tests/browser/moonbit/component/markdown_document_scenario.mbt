@@ -270,6 +270,9 @@ fn markdown_document_replacement_source() -> String {
     #|  7
     #|}
     #|```
+    #|
+    #|The replacement stays long enough to retain an observable scroll state
+    #|while the Viewer swaps between Markdown and code presentations.
   )
 }
 

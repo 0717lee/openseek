@@ -35,7 +35,9 @@
   box-sizing: border-box;
   min-height: 100%;
   padding: 16px 24px 64px;
-  font-size: 14px;
+  /* Match themed workbench prose to its surrounding UI while preserving the
+   * standalone Viewer baseline when an embedder provides no typography token. */
+  font-size: var(--ui-font-size, 14px);
   line-height: 1.6;
   overflow-wrap: anywhere;
 }

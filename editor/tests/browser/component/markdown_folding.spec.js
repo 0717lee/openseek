@@ -173,17 +173,15 @@ test('section fold controls occupy the left heading gutter', async ({
     const textRect = textRange.getBoundingClientRect();
     return {
       articleLeft: articleRect.left,
-      buttonBottom: buttonRect.bottom,
+      buttonCenter: buttonRect.top + buttonRect.height / 2,
       buttonHeight: buttonRect.height,
       buttonLeft: buttonRect.left,
       buttonRight: buttonRect.right,
-      buttonTop: buttonRect.top,
       buttonWidth: buttonRect.width,
-      firstLineBottom:
+      firstLineCenter:
         headingRect.top +
-        Number.parseFloat(getComputedStyle(heading).lineHeight),
+        Number.parseFloat(getComputedStyle(heading).lineHeight) / 2,
       headingLeft: headingRect.left,
-      headingTop: headingRect.top,
       textLeft: textRect.left,
     };
   });
@@ -194,10 +192,12 @@ test('section fold controls occupy the left heading gutter', async ({
     geometry.articleLeft - 0.5,
   );
   expect(geometry.buttonRight).toBeLessThanOrEqual(geometry.headingLeft + 0.5);
-  expect(geometry.buttonTop).toBeGreaterThanOrEqual(geometry.headingTop - 0.5);
-  expect(geometry.buttonBottom).toBeLessThanOrEqual(
-    geometry.firstLineBottom + 0.5,
-  );
+  // The fixed 24px pointer target can be slightly taller than a heading line
+  // at the workbench UI font size; its visual center must still track that
+  // first line.
+  expect(
+    Math.abs(geometry.buttonCenter - geometry.firstLineCenter),
+  ).toBeLessThanOrEqual(1);
   expect(geometry.textLeft).toBeCloseTo(geometry.headingLeft, 1);
 });
 
