@@ -41,8 +41,8 @@ impl Show for KimiVariant with fn to_string(self : KimiVariant) -> String {
 /// Returns the wire name for a chat model.
 pub impl Show for Model with fn to_string(self : Model) -> String {
   match self {
-    Deepseek(variant) => Show::to_string(variant)
-    Kimi(variant) => Show::to_string(variant)
+    Deepseek(variant) => "\{variant}"
+    Kimi(variant) => "\{variant}"
   }
 }
 
@@ -207,12 +207,12 @@ pub struct ChatResponse {
 ///|
 test "chat message constructor" {
   let user = ChatMessage(User, content="hello")
-  assert_eq(user.role |> Show::to_string, "user")
+  assert_eq("\{user.role}", "user")
   assert_eq(user.content, "hello")
   let assistant = ChatMessage(Assistant, content="done")
-  assert_eq(assistant.role |> Show::to_string, "assistant")
+  assert_eq("\{assistant.role}", "assistant")
   assert_eq(assistant.content, "done")
   let tool = ChatMessage(Tool("call_123"), content="tool result")
-  assert_eq(tool.role |> Show::to_string, "tool")
+  assert_eq("\{tool.role}", "tool")
   assert_eq(tool.content, "tool result")
 }
