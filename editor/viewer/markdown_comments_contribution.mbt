@@ -108,6 +108,15 @@ fn MarkdownCommentContributionState::request_all_measures(
 }
 
 ///|
+fn Viewer::sync_markdown_comment_fold_lane_width(self : Viewer) -> Unit {
+  guard self.markdown_comment_contribution() is Some(state) else { return }
+  let width = self.configuration.snapshot().layout_decorations_width().to_int()
+  for _, entry in state.rendered {
+    entry.dom.set_margin_fold_lane_width(width)
+  }
+}
+
+///|
 fn MarkdownCommentContributionState::ensure_viewport_observer(
   self : MarkdownCommentContributionState,
   dom : @markdown_comments_browser.MarkdownCommentDom,
@@ -592,10 +601,10 @@ fn Viewer::refresh_markdown_comments(
             block.line_range.start_line_number,
             block.line_range.end_line_number_exclusive,
           )
-          // Keep the gutter chevron on the code-folding column: the rendered
-          // lane is the configured `lineDecorationsWidth` plus the folding
-          // control reserve, and other contributions (e.g. agent feedback)
-          // may have widened it before this zone mounted.
+          // Seed the gutter chevron from the live code-folding lane. Runtime
+          // option changes (including agent-feedback reservation after model
+          // mount) keep existing entries synchronized through
+          // `sync_markdown_comment_fold_lane_width`.
           dom.set_margin_fold_lane_width(
             self.configuration.snapshot().layout_decorations_width().to_int(),
           )

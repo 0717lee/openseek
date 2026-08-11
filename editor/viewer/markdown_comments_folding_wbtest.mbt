@@ -190,6 +190,57 @@ test "foldable Markdown comments start collapsed and preserve state across body 
 }
 
 ///|
+test "foldable Markdown comments follow runtime gutter width changes" {
+  with_markdown_contribution_viewer(
+    "one\ntwo",
+    (viewer, _provider_blocks) => {
+      let entry = markdown_contribution_state(viewer).rendered["1:2"]
+      let gutter_toggle = markdown_contribution_test_descendant_with_class(
+        entry.dom.margin,
+        "moonbit-viewer-markdown-comment-margin-toggle",
+      )
+      assert_eq(
+        markdown_contribution_test_style(gutter_toggle, "width"),
+        "26px",
+      )
+
+      // Agent feedback reserves 18px after Desktop has mounted the model.
+      // The Markdown ViewZone must follow the same live decorations lane as
+      // ordinary code-folding `.cldr` nodes instead of retaining 26px.
+      viewer.update_options(
+        viewer.get_options().with_line_decorations_width(28),
+      )
+      assert_eq(
+        markdown_contribution_test_style(gutter_toggle, "width"),
+        "44px",
+      )
+
+      viewer.update_options(
+        viewer.get_options().with_line_decorations_width(10),
+      )
+      assert_eq(
+        markdown_contribution_test_style(gutter_toggle, "width"),
+        "26px",
+      )
+    },
+    provider_blocks=[
+      markdown_contribution_block(
+        1,
+        2,
+        (
+          #|---
+          #|
+          #|Summary line
+          #|
+          #|Full documentation
+        ),
+      ),
+    ],
+    provider_foldable=true,
+  )
+}
+
+///|
 test "separator-only and one-line foldable Markdown comments have no control" {
   with_markdown_contribution_viewer(
     (

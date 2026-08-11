@@ -248,6 +248,12 @@ extern "js" fn markdown_contribution_test_attribute(
 ) -> String = "(element, name) => element.getAttribute(name) ?? ''"
 
 ///|
+extern "js" fn markdown_contribution_test_style(
+  element : @rdom.Element,
+  name : String,
+) -> String = "(element, name) => element.style.getPropertyValue?.(name) ?? element.style[name] ?? ''"
+
+///|
 extern "js" fn markdown_contribution_test_inner_html(
   element : @rdom.Element,
 ) -> String = "element => element.innerHTML"
