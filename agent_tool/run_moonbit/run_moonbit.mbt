@@ -295,7 +295,7 @@ async fn execute(
         // PREPEND the exit status so it survives the agent loop's outer 60k
         // result clamp (which cuts the tail); the output cap is below 60k so
         // both the status line and the body are retained.
-        let body = if text.trim() == "" {
+        let body = if text.is_blank() {
           "run_moonbit: program exited \{exit_code} with no output"
         } else if exit_code != 0 {
           "[run_moonbit: exited \{exit_code}]\n\{text}"
@@ -320,7 +320,7 @@ async fn execute(
         // line stays first so it survives the outer result clamp.
         let partial = rewrite_temp_paths(read_capped(log), [real, dir])
         let head = "run_moonbit: timed out after \{RunTimeoutMs / 1000}s and was cancelled — the program did not finish (an infinite loop, or a build that never completed)."
-        let body = if partial.trim() == "" {
+        let body = if partial.is_blank() {
           head
         } else {
           "\{head}\n[partial output before the timeout]\n\{partial}"

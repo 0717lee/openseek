@@ -47,7 +47,7 @@ async fn run_review_cli(
       )
     _ => fail("missing parsed review defaults")
   }
-  if base.trim() == "" {
+  if base.is_blank() {
     @stdio.stderr.write("review failed: --base must be a non-empty git ref\n")
     @sys.exit(1)
     return

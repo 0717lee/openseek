@@ -45,7 +45,7 @@ fn WorkerReport::validate(self : WorkerReport) -> Array[String] {
       "status must be done, partial, or failed — got \{self.status}",
     )
   }
-  if self.summary.trim() == "" {
+  if self.summary.is_blank() {
     problems.push("summary must not be empty")
   }
   if self.summary.length() > max_summary_chars {
@@ -53,7 +53,7 @@ fn WorkerReport::validate(self : WorkerReport) -> Array[String] {
       "summary exceeds \{max_summary_chars} chars (\{self.summary.length()}); tighten it",
     )
   }
-  if self.verification.trim() == "" {
+  if self.verification.is_blank() {
     problems.push(
       "verification must not be empty — name the commands you ran and their outcomes",
     )

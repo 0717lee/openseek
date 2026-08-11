@@ -32,7 +32,7 @@ pub fn ReviewReport::validate(self : ReviewReport) -> Array[String] {
       "schema_version must be \{current_schema_version}, got \{self.schema_version}",
     )
   }
-  if self.summary.trim() == "" {
+  if self.summary.is_blank() {
     problems.push("summary must not be empty")
   }
   let allowed = severities()
