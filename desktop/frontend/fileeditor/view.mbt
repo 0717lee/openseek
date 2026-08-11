@@ -1026,9 +1026,28 @@ fn reveal_row_after_render(path : @pathx.Relative) -> @cmd.Cmd {
 
 ///|
 fn reveal_tree_row(path : @pathx.Relative) -> Unit {
-  match
-    @dom.document().query_selector("[data-path=\"" + path.0 + "\"]").to_option() {
-    Some(element) => element.scroll_into_view(behavior="smooth")
-    None => ()
+  let document = @dom.document()
+  guard document.get_element_by_id(ExplorerPanelId).to_option() is Some(tree) &&
+    tree.query_selector("[data-path=\"" + path.0 + "\"]") is Some(row) else {
+    return
   }
+  let tree_rect = tree.get_bounding_client_rect()
+  let row_rect = row.get_bounding_client_rect()
+  let mut scroll_top = tree.get_scroll_top()
+  if row_rect.get_top() < tree_rect.get_top() {
+    scroll_top += row_rect.get_top() - tree_rect.get_top()
+  } else if row_rect.get_bottom() > tree_rect.get_bottom() {
+    scroll_top += row_rect.get_bottom() - tree_rect.get_bottom()
+  } else {
+    // An already-visible breadcrumb target must not disturb any scroll owner.
+    return
+  }
+  // Scroll the inventory itself. `Element::scroll_into_view` also scrolls
+  // outer ancestors, including the hidden-overflow app root in Chromium.
+  let options = @js.Object::new()
+  options["top"] = scroll_top
+  options["behavior"] = "smooth"
+  let _ : @js.Value = @js.Value::cast_from(tree).apply_with_string("scrollTo", [
+    options.to_value(),
+  ])
 }
