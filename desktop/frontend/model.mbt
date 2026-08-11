@@ -3673,8 +3673,7 @@ fn Conversation::archive_salvage(self : Conversation) -> ArchiveSalvage {
   // never have received it, and this is the only other copy. A Clearing asks
   // for nothing to stand, so it carries nothing. Neither does a goal the
   // record has already confirmed: that one is the archived record's.
-  let goal_draft = if self.goal_edit is Some(edit) &&
-    !edit.draft.is_blank() {
+  let goal_draft = if self.goal_edit is Some(edit) && !edit.draft.is_blank() {
     Some(edit.draft)
   } else if self.goal_pending is Some({ request: Setting(text), .. }) &&
     !text.is_blank() {

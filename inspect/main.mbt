@@ -1319,9 +1319,7 @@ fn effective_search_dirs(matches : @argparse.Matches) -> Array[String] {
     } => []
     { values: { "search-dir": values, .. }, .. } =>
       [
-        for value in values if !value.is_blank() => {
-          value.trim().to_owned()
-        }
+        for value in values if !value.is_blank() => value.trim().to_owned()
       ]
     _ => []
   }

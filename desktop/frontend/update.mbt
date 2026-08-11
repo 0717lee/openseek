@@ -1493,10 +1493,8 @@ fn update_msg(
           ..model,
           api_provider: ApiProvider::parse(provider),
           custom_api_url: custom_url.trim().to_owned(),
-          deepseek_key_saved: model.deepseek_key_saved ||
-          !api_key.is_blank(),
-          custom_key_saved: model.custom_key_saved ||
-          !custom_api_key.is_blank(),
+          deepseek_key_saved: model.deepseek_key_saved || !api_key.is_blank(),
+          custom_key_saved: model.custom_key_saved || !custom_api_key.is_blank(),
           settings_saves: model.settings_saves + 1,
           legacy_cleanup_pending: true,
         }

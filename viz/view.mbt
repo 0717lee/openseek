@@ -530,9 +530,7 @@ fn split_plan_checklist(content : String) -> (String, Array[String])? {
   for index, line in lines {
     if line.trim_end().has_suffix("Current plan:") {
       let steps = [
-        for step in lines[index + 1:] if !step.is_blank() => {
-          step.to_owned()
-        }
+        for step in lines[index + 1:] if !step.is_blank() => step.to_owned()
       ]
       if steps.is_empty() {
         return None
@@ -882,8 +880,7 @@ fn assistant_card(
   step_label~ : String,
 ) -> @html.Html {
   let body : Array[@html.Html] = []
-  if message.reasoning_content() is Some(reasoning) &&
-    !reasoning.is_blank() {
+  if message.reasoning_content() is Some(reasoning) && !reasoning.is_blank() {
     body.push(
       @html.details(class="reasoning") <| [
         @html.summary("reasoning"),
@@ -1976,8 +1973,7 @@ fn model_card(
   anchor~ : String?,
 ) -> @html.Html {
   let body : Array[@html.Html] = []
-  if message.reasoning_content is Some(reasoning) &&
-    !reasoning.is_blank() {
+  if message.reasoning_content is Some(reasoning) && !reasoning.is_blank() {
     body.push(
       @html.details(class="reasoning") <| [
         @html.summary("reasoning"),
