@@ -99,6 +99,11 @@ fn register_tokenizers() -> Unit {
   |> ignore
   @languages.languages.set_tokens_provider("json", @lang_json.JsonTokenizer())
   |> ignore
+  @languages.languages.set_tokens_provider(
+    "moonbit-config",
+    @lang_moon_config.MoonConfigTokenizer(),
+  )
+  |> ignore
   install_moonbit_markdown_comment_provider()
 }
 
@@ -533,11 +538,14 @@ fn apply_diagnostics(
 }
 
 ///|
-/// The viewer language id for a file name. Only MoonBit, JavaScript and JSON
-/// have tokenizers; everything else falls back to unhighlighted plain text.
+/// The viewer language id for a file name. MoonBit source and manifests,
+/// JavaScript, and JSON have tokenizers; everything else falls back to
+/// unhighlighted plain text.
 fn language_id(name : String) -> String {
   let lower = name.to_lower()
-  if lower.has_suffix(".mbt") ||
+  if lower == "moon.pkg" || lower == "moon.mod" {
+    "moonbit-config"
+  } else if lower.has_suffix(".mbt") ||
     lower.has_suffix(".mbti") ||
     lower.has_suffix(".mbt.md") {
     "moonbit"

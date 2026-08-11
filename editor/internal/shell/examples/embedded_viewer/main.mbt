@@ -495,6 +495,11 @@ fn main {
     @lang_moonbit.MoonBitTokenizer(),
   )
   |> ignore
+  @languages.languages.set_tokens_provider(
+    "moonbit-config",
+    @lang_moon_config.MoonConfigTokenizer(),
+  )
+  |> ignore
   let app = @rabbita.new(() => {
     let tree_view = embed_tree().view()
     let (model, emit) = @rabbita.create_state(

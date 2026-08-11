@@ -541,6 +541,18 @@ test('highlights MoonBit sources through the registered language tokenizer', asy
   await expect(page.locator('.mtk3', { hasText: 'suberror' }).first()).toBeVisible();
 });
 
+test('highlights MoonBit manifests through the registered config tokenizer', async ({ page }) => {
+  await page.goto('/');
+  await openWorkspaceFile(page, 'moon.mod');
+
+  // Property and string colors come from lang_moon_config; the registry-miss
+  // fallback would render the complete line with default-foreground spans.
+  await expect(page.locator('.mtk4', { hasText: 'name' }).first()).toBeVisible();
+  await expect(
+    page.locator('.mtk5', { hasText: '"readonly/fixture"' }).first(),
+  ).toBeVisible();
+});
+
 test('renders unregistered languages with default/plain spans', async ({ page }) => {
   await page.goto('/');
   await openWorkspaceFile(page, 'notes.txt');

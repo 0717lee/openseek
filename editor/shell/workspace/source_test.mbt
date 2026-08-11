@@ -77,6 +77,10 @@ async test "filesystem provider rejects mismatched schemes" {
 
 ///|
 test "infers language ids from source names" {
+  assert_eq(@workspace.infer_language_id("moon.pkg"), "moonbit-config")
+  assert_eq(@workspace.infer_language_id("moon.mod"), "moonbit-config")
+  assert_eq(@workspace.infer_language_id("src/moon.pkg"), "moonbit-config")
+  assert_eq(@workspace.infer_language_id("src\\moon.mod"), "moonbit-config")
   assert_eq(@workspace.infer_language_id("main.mbt"), "moonbit")
   assert_eq(@workspace.infer_language_id("README.mbt.md"), "moonbit")
   assert_eq(@workspace.infer_language_id("main.js"), "javascript")
@@ -87,6 +91,8 @@ test "infers language ids from source names" {
   assert_eq(@workspace.infer_language_id("style.css"), "css")
   assert_eq(@workspace.infer_language_id("index.html"), "html")
   assert_eq(@workspace.infer_language_id("notes.txt"), "plaintext")
+  assert_eq(@workspace.infer_language_id("moon.mod.json"), "json")
+  assert_eq(@workspace.infer_language_id("notmoon.pkg"), "moonbit")
   assert_eq(@workspace.infer_language_id("unknown.source"), "moonbit")
 }
 

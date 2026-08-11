@@ -2,7 +2,10 @@
 /// Maps common source extensions to the language ids used by tokenizer and
 /// feature registries.
 pub fn infer_language_id(path_or_name : String) -> String {
-  if path_or_name.has_suffix(".mbt") || path_or_name.has_suffix(".mbt.md") {
+  if is_moon_config_path(path_or_name) {
+    "moonbit-config"
+  } else if path_or_name.has_suffix(".mbt") ||
+    path_or_name.has_suffix(".mbt.md") {
     "moonbit"
   } else if path_or_name.has_suffix(".js") || path_or_name.has_suffix(".mjs") {
     "javascript"
@@ -21,6 +24,17 @@ pub fn infer_language_id(path_or_name : String) -> String {
   } else {
     "moonbit"
   }
+}
+
+///|
+/// Exact current MoonBit manifest basenames, accepting either path separator.
+fn is_moon_config_path(path_or_name : String) -> Bool {
+  path_or_name == "moon.pkg" ||
+  path_or_name == "moon.mod" ||
+  path_or_name.has_suffix("/moon.pkg") ||
+  path_or_name.has_suffix("/moon.mod") ||
+  path_or_name.has_suffix("\\moon.pkg") ||
+  path_or_name.has_suffix("\\moon.mod")
 }
 
 ///|
