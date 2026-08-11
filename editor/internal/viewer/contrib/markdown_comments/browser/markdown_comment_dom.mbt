@@ -294,7 +294,8 @@ pub fn MarkdownCommentDom::pin_to_content_viewport(
 /// configured `lineDecorationsWidth` plus the folding-control reserve. The
 /// lane is right-aligned inside the margin ViewZone node, so this width keeps
 /// the chevron centered on the same column as the code-folding icons. The
-/// stylesheet default matches the default 10px + 16px reserve.
+/// stylesheet default matches the default 10px + 16px reserve; the caller
+/// reapplies the live width whenever runtime options change that reserve.
 pub fn MarkdownCommentDom::set_margin_fold_lane_width(
   self : MarkdownCommentDom,
   width_px : Int,

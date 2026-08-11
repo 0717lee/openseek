@@ -404,8 +404,19 @@ pub fn Viewer::update_options(self : Viewer, options : ViewerOptions) -> Unit {
   if previous == options {
     return
   }
+  let previous_fold_lane_width = self.configuration
+    .snapshot()
+    .layout_decorations_width()
+    .to_int()
   let event_batch = self.begin_view_event_batch()
   self.configuration.replace_options(options) |> ignore
+  // Existing Markdown ViewZones outlive option changes. Keep their gutter
+  // chevrons on the same live decorations lane as ordinary folding icons;
+  // agent feedback can widen that lane after a model has already mounted.
+  if previous_fold_lane_width !=
+    self.configuration.snapshot().layout_decorations_width().to_int() {
+    self.sync_markdown_comment_fold_lane_width()
+  }
   if previous.theme != options.theme {
     self.apply_theme()
     self.markdown_comments_on_theme_changed(options.theme)

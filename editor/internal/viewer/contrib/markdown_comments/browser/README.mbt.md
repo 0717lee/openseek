@@ -22,8 +22,9 @@ sits on the same line-decorations column (the whole margin plane is
 `aria-hidden`, Monaco parity), and an accessible in-content button that stays
 invisible until pointer hover or keyboard focus and carries the
 `aria-expanded` state. Both report through the existing size invalidation
-callback. `set_margin_fold_lane_width` pins the chevron lane to the
-configured `lineDecorationsWidth` at mount. Ordinary Markdown,
+callback. `set_margin_fold_lane_width` initializes the chevron lane from the
+configured `lineDecorationsWidth` at mount and resynchronizes it after runtime
+decorations-lane changes. Ordinary Markdown,
 separator-only blocks, and one-line API docs keep the full target and do not
 expose a fold control. The root retains the source/expanded state and renderer
 lifetimes so same-key body replacement preserves the user's choices while a

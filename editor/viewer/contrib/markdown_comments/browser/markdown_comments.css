@@ -196,7 +196,8 @@
    * zones container and intercepts the click. */
   z-index: 1;
   /* Default `lineDecorationsWidth` (10px) plus the 16px folding-control
-   * reserve; the contribution inlines the effective lane width at mount. */
+   * reserve; the contribution inlines the effective lane width at mount and
+   * resynchronizes it after runtime option changes. */
   width: 26px;
   height: var(--editor-line-height, 18px);
   display: flex;
