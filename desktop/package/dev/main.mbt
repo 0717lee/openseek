@@ -48,19 +48,11 @@ async fn Development::prepare_frontend(self : Development) -> Unit {
 }
 
 ///|
-/// Use an explicit prepared runtime when the surrounding environment already
-/// supplies one; otherwise prepare this checkout's CEF runtime and refresh its
-/// Linux or Windows Proton artifacts from the matching Lepus sources.
+/// Prepare this checkout's CEF runtime and refresh its Linux or Windows Proton
+/// artifacts from the matching Lepus sources.
 async fn Development::prepare_runtime(self : Development) -> String {
-  let runtime = match @envx.get(ProtonNativeDistEnv) {
-    Some(configured) => @packaging.absolute_path(configured)
-    None => {
-      self.workspace.prepare_checkout_proton_runtime(
-        Development::proton_cli_path(),
-      )
-      @packaging.proton_runtime_dist(self.workspace)
-    }
-  }
+  self.workspace.prepare_checkout_proton_runtime(Development::proton_cli_path())
+  let runtime = @packaging.proton_runtime_dist(self.workspace)
   let normalized = (runtime : @path.Path).normalize()
   let helper = normalized
     .join("bin")
