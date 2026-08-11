@@ -5,7 +5,6 @@
 using @icons {
   icon,
   icon_add,
-  icon_archive,
   icon_arrow_down,
   icon_arrow_up,
   icon_chevron_down,

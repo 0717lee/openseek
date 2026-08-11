@@ -1,0 +1,69 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "openseek_desktop/frontend/sidebar"
+
+import {
+  "moonbit-community/rabbita/cmd",
+  "moonbit-community/rabbita/html",
+}
+
+// Values
+
+// Errors
+
+// Types and methods
+pub(all) struct ConversationArchive {
+  title : String
+  command : @cmd.Cmd
+}
+
+pub(all) struct ConversationRow {
+  title : String
+  label : String
+  open : @cmd.Cmd
+  nested : Bool
+  subrun : Bool
+  active : Bool
+  running : Bool
+  subruns : ConversationSubruns
+  status : Array[@html.Html]
+  archive : ConversationArchive?
+}
+pub fn ConversationRow::render(Self) -> @html.Html
+
+pub(all) enum ConversationSubruns {
+  NoSubruns
+  Subruns(count~ : Int, expanded~ : Bool, toggle~ : @cmd.Cmd)
+}
+
+pub(all) struct Section {
+  label : String
+  toggle : @cmd.Cmd
+  collapsed : Bool
+  action : SectionAction?
+  selected : Bool
+}
+pub fn Section::render(Self) -> @html.Html
+
+pub(all) struct SectionAction {
+  title : String
+  command : @cmd.Cmd
+  disabled : Bool
+}
+
+pub(all) struct WorkspaceAction {
+  title : String
+  command : @cmd.Cmd
+  image : () -> @html.Html
+}
+
+pub(all) struct WorkspaceRow {
+  title : String
+  label : String
+  active : Bool
+  actions : Array[WorkspaceAction]
+}
+pub fn WorkspaceRow::render(Self) -> @html.Html
+
+// Type aliases
+
+// Traits

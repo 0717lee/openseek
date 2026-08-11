@@ -165,42 +165,8 @@ fn session_row(
       )
     _ => None
   }
-  let mut class = "conversation-row"
-  if nested {
-    class = class + " nested"
-  }
-  if subrun {
-    class = class + " subrun"
-  }
-  if active {
-    class = class + " active"
-  }
-  if running {
-    class = class + " running"
-  }
-  // Every row leads with the twisty cell, occupied or not, so titles line up
-  // whether or not a conversation delegated anything. The button stops the
-  // click from reaching the row: unfolding a conversation is not opening it.
-  let twisty = if subruns > 0 {
-    @html.button(
-      class=if expanded { "row-twisty expanded" } else { "row-twisty" },
-      type_="button",
-      title=if subruns == 1 {
-        "1 subagent run"
-      } else {
-        "\{subruns} subagent runs"
-      },
-      attrs=@html.Attrs::build().on_click(event => {
-        event.stop_propagation()
-        dispatch(ToggleSubruns(channel, session_id))
-      }),
-      icon(icon_chevron_down),
-    )
-  } else {
-    @html.span(class="row-twisty spacer", "")
-  }
-  let children = [twisty, @html.span(class="sidebar-label", label)]
-  // The trailing slot holds two right-aligned groups stacked in one cell:
+  // The shared row's trailing slot holds two right-aligned groups stacked in
+  // one cell:
   // what the row *is* (status) and what can be done to it (actions). At
   // rest the status group shows; hovering a row that has actions swaps them
   // in. Sizing is content-driven — a row with neither group has no slot at
@@ -224,33 +190,15 @@ fn session_row(
   if dot is Some(kind) {
     status.push(@html.span(class="run-dot \{kind}", ""))
   }
-  let actions : Array[@html.Html] = []
   // Archiving a running conversation would pull the durable record out from
   // under its engine, so the button waits for the turn to end.
-  if archivable && !running {
-    actions.push(
-      @html.button(
-        class="row-archive",
-        type_="button",
-        title="Archive — tuck this chat away; its files stay where they are",
-        attrs=@html.Attrs::build().on_click(event => {
-          // The row itself opens the session; the archive click must not.
-          event.stop_propagation()
-          dispatch(ArchiveSession(channel, session_id))
-        }),
-        icon(icon_archive),
-      ),
-    )
-  }
-  if status.length() > 0 || actions.length() > 0 {
-    let trailing : Array[@html.Html] = []
-    if status.length() > 0 {
-      trailing.push(@html.span(class="row-status", status))
-    }
-    if actions.length() > 0 {
-      trailing.push(@html.span(class="row-actions", actions))
-    }
-    children.push(@html.span(class="row-trailing", trailing))
+  let archive : @sidebar.ConversationArchive? = if archivable && !running {
+    Some({
+      title: "Archive — tuck this chat away; its files stay where they are",
+      command: dispatch(ArchiveSession(channel, session_id)),
+    })
+  } else {
+    None
   }
   // The row's own tooltip carries the worktree name, joined from the
   // registry (or the local binding while the first turn is still on its way
@@ -261,12 +209,26 @@ fn session_row(
   } else {
     session_id
   }
-  @html.div(
-    class~,
-    title=row_title,
-    on_click=dispatch(OpenSession(channel, session_id)),
-    children,
-  )
+  @sidebar.ConversationRow::{
+    title: row_title,
+    label,
+    open: dispatch(OpenSession(channel, session_id)),
+    nested,
+    subrun,
+    active,
+    running,
+    subruns: if subruns > 0 {
+      @sidebar.Subruns(
+        count=subruns,
+        expanded~,
+        toggle=dispatch(ToggleSubruns(channel, session_id)),
+      )
+    } else {
+      @sidebar.NoSubruns
+    },
+    status,
+    archive,
+  }.render()
 }
 
 ///|
@@ -361,14 +323,17 @@ fn device_section_rows(
   // conversations. The section headings share one style; the ＋ on each adds
   // to that section (a project, or a Scratch chat).
   rows.push(
-    section_heading(
-      dispatch,
-      "Projects",
-      PickProject(dev.channel),
-      action_title="Add a project",
-      toggle=ToggleProjectsSection,
-      collapsed=model.projects_collapsed,
-    ),
+    @sidebar.Section::{
+      label: "Projects",
+      toggle: dispatch(ToggleProjectsSection),
+      collapsed: model.projects_collapsed,
+      action: Some({
+        title: "Add a project",
+        command: dispatch(PickProject(dev.channel)),
+        disabled: false,
+      }),
+      selected: false,
+    }.render(),
   )
   if !model.projects_collapsed {
     for path in dev.projects {
@@ -395,14 +360,17 @@ fn device_section_rows(
     }
   }
   rows.push(
-    section_heading(
-      dispatch,
-      "Chats",
-      NewChatIn(dev.channel, None),
-      action_title="New Scratch chat",
-      toggle=ToggleChatsSection,
-      collapsed=model.chats_collapsed,
-    ),
+    @sidebar.Section::{
+      label: "Chats",
+      toggle: dispatch(ToggleChatsSection),
+      collapsed: model.chats_collapsed,
+      action: Some({
+        title: "New Scratch chat",
+        command: dispatch(NewChatIn(dev.channel, None)),
+        disabled: false,
+      }),
+      selected: false,
+    }.render(),
   )
   if !model.chats_collapsed {
     push_group_rows(rows, dispatch, model, dev, None, listed~, archived~)
@@ -572,45 +540,6 @@ fn push_group_rows(
 }
 
 ///|
-/// A section heading in the chat list — "Projects" or "Chats" — with a
-/// hover-revealed ＋ that adds to that section. Both sections share this one
-/// style, so the two labels always match. `toggle`, when given, makes the
-/// heading itself clickable to fold the section (the ＋ stops propagation, so
-/// it never toggles); `collapsed` picks the chevron the CSS appends.
-fn section_heading(
-  dispatch : @cmd.Emit[Msg],
-  label : String,
-  action : Msg,
-  action_title~ : String,
-  toggle? : Msg,
-  collapsed? : Bool = false,
-) -> @html.Html {
-  let class = match toggle {
-    Some(_) =>
-      if collapsed {
-        "sidebar-heading section-heading collapsible collapsed"
-      } else {
-        "sidebar-heading section-heading collapsible"
-      }
-    None => "sidebar-heading section-heading"
-  }
-  let on_click = toggle.map(msg => dispatch(msg))
-  @html.div(class~, on_click?, [
-    @html.span(class="sidebar-label", label),
-    @html.button(
-      class="row-archive",
-      type_="button",
-      title=action_title,
-      attrs=@html.Attrs::build().on_click(event => {
-        event.stop_propagation()
-        dispatch(action)
-      }),
-      icon(icon_add),
-    ),
-  ])
-}
-
-///|
 /// One attached project: a folder row (full path in the tooltip) with its
 /// conversations nested beneath it. Hover controls start a new chat in the
 /// project or detach it (registry only; the folder and its sessions stay).
@@ -622,34 +551,23 @@ fn project_row(
   dev : DeviceState,
   path : @common.Uri,
 ) -> @html.Html {
-  let mut class = "workspace-row"
-  if dev.channel == model.focused && dev.active_project == Some(path) {
-    class = class + " active"
-  }
-  @html.div(class~, title=path.path, [
-    @html.span(class="sidebar-icon", icon(icon_folder)),
-    @html.span(class="sidebar-label", @resource.label(path)),
-    @html.button(
-      class="row-archive",
-      type_="button",
-      title="Detach this project — its files and sessions stay",
-      attrs=@html.Attrs::build().on_click(event => {
-        event.stop_propagation()
-        dispatch(RemoveProject(dev.channel, path))
-      }),
-      icon(icon_close),
-    ),
-    @html.button(
-      class="row-archive",
-      type_="button",
-      title="New chat in this project",
-      attrs=@html.Attrs::build().on_click(event => {
-        event.stop_propagation()
-        dispatch(NewChatIn(dev.channel, Some(path)))
-      }),
-      icon(icon_add),
-    ),
-  ])
+  @sidebar.WorkspaceRow::{
+    title: path.path,
+    label: @resource.label(path),
+    active: dev.channel == model.focused && dev.active_project == Some(path),
+    actions: [
+      {
+        title: "Detach this project — its files and sessions stay",
+        command: dispatch(RemoveProject(dev.channel, path)),
+        image: icon_close,
+      },
+      {
+        title: "New chat in this project",
+        command: dispatch(NewChatIn(dev.channel, Some(path))),
+        image: icon_add,
+      },
+    ],
+  }.render()
 }
 
 ///|
