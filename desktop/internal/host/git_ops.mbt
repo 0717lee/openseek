@@ -242,6 +242,31 @@ async fn git_branch_base(dir : String, hint? : String) -> (String, String?) {
 }
 
 ///|
+/// The committed branch delta an ordinary (non-worktree) Review should keep
+/// visible. `head` is the full identity captured by the surrounding snapshot,
+/// rather than the mutable `HEAD` spelling, so a concurrent checkout cannot
+/// choose one branch's fork point and publish another branch's rows.
+///
+/// A branch still at its default-branch fork point returns `None`. That keeps
+/// the original porcelain status path — and its separate staged/worktree
+/// columns — until there is committed branch work to retain. With no declared
+/// default branch there is no defensible historical boundary, so Review also
+/// stays HEAD-based instead of guessing from commit ancestry.
+async fn git_review_branch_base(dir : String, head : String?) -> String? {
+  guard head is Some(head) else { return None }
+  guard git_base_ref(dir) is Some(base_ref) else { return None }
+  guard git_output_opt(dir, ["merge-base", head, base_ref]) is Some(output) else {
+    return None
+  }
+  let base = git_single_line(output)
+  if base.is_empty() || base == head {
+    None
+  } else {
+    Some(base)
+  }
+}
+
+///|
 /// Sum everything between `baseline` and the working tree: one `git diff
 /// --numstat` for what Git tracks, plus the untracked files counted one at a
 /// time. None when Git could not answer at all — the branch chip stands on its
@@ -926,17 +951,19 @@ test "Git review revisions accept only full hexadecimal object identities" {
 }
 
 ///|
-/// Read the review inventory while HEAD remains the same. Workspace-root
-/// reviews retain porcelain's HEAD status; a worktree task compares its
-/// immutable creation commit with the current working tree, so committed work
-/// remains visible. Bracket the snapshot with revision reads and retry a
-/// concurrent commit/checkout instead of relying on the next poll to self-heal.
+/// Read the review inventory while HEAD remains the same. A worktree task uses
+/// its immutable creation commit; an ordinary checkout with committed branch
+/// work uses its default-branch fork point; otherwise Review retains
+/// porcelain's HEAD status. Bracket the snapshot with revision reads and retry
+/// a concurrent commit/checkout instead of relying on the next poll to
+/// self-heal.
 async fn git_change_snapshot(
   dir : String,
   workspace_prefix : String,
-  review_base : String?,
+  pinned_review_base : String?,
   retries_left : Int,
 ) -> (
+  String?,
   String?,
   Set[String],
   Set[String],
@@ -945,6 +972,10 @@ async fn git_change_snapshot(
   Array[GitChange],
 ) {
   let head = git_revision_commit(dir, "HEAD")
+  let review_base = match pinned_review_base {
+    Some(base) => Some(base)
+    None => git_review_branch_base(dir, head)
+  }
   let index_metadata = git_index_metadata(dir)
   let known_gitlinks = parse_git_mode_paths(
     index_metadata, workspace_prefix, "160000",
@@ -1085,7 +1116,7 @@ async fn git_change_snapshot(
       return git_change_snapshot(
         dir,
         workspace_prefix,
-        review_base,
+        pinned_review_base,
         retries_left - 1,
       )
     }
@@ -1097,14 +1128,15 @@ async fn git_change_snapshot(
       return git_change_snapshot(
         dir,
         workspace_prefix,
-        review_base,
+        pinned_review_base,
         retries_left - 1,
       )
     }
     raise HostError("HEAD kept changing while Git changes were read")
   }
   (
-    head, known_gitlinks, known_symlinks, deleted_gitlinks, deleted_symlinks, changes,
+    head, review_base, known_gitlinks, known_symlinks, deleted_gitlinks, deleted_symlinks,
+    changes,
   )
 }
 
@@ -1144,7 +1176,7 @@ async fn git_changes_op(payload : GitChangesPayload) -> GitChangesReply {
     payload.session,
     workspace?=payload.workspace,
   )
-  let baseline = match recorded_base {
+  let pinned_base = match recorded_base {
     Some(base) => {
       guard valid_commit_identity(base) else {
         raise HostError("recorded Git task baseline is invalid")
@@ -1158,12 +1190,13 @@ async fn git_changes_op(payload : GitChangesPayload) -> GitChangesReply {
   }
   let (
     head,
+    baseline,
     known_gitlinks,
     known_symlinks,
     deleted_gitlinks,
     deleted_symlinks,
     changes,
-  ) = git_change_snapshot(dir, workspace_prefix, baseline, 2)
+  ) = git_change_snapshot(dir, workspace_prefix, pinned_base, 2)
   let changes = @async.all(
     [
       for change in changes => {
@@ -1497,6 +1530,72 @@ async test "Git recognizes only origin HEAD's branch as the default" {
 }
 
 ///|
+async test "ordinary checkout reviews retain committed branch changes" {
+  let dir = @fs.tmpdir(prefix="openseek-git-root-review-")
+  async fn cleanup() {
+    @fs.rmdir(dir, recursive=true) catch {
+      error if @async.is_being_cancelled() => raise error
+      _ => ()
+    }
+  }
+  try {
+    git_test_run(dir, ["init", "--quiet"])
+    @fs.write_file("\{dir}/review.txt", "first\n", create_mode=CreateOrTruncate)
+    git_test_run(dir, ["add", "review.txt"])
+    git_test_run(dir, [
+      "-c", "user.name=OpenSeek Test", "-c", "user.email=openseek@example.invalid",
+      "-c", "commit.gpgSign=false", "commit", "--quiet", "-m", "first",
+    ])
+    let first = git_revision_commit(dir, "HEAD").unwrap()
+    git_test_run(dir, ["update-ref", "refs/remotes/origin/main", first])
+    git_test_run(dir, [
+      "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main",
+    ])
+    @fs.write_file(
+      "\{dir}/review.txt",
+      "working\n",
+      create_mode=CreateOrTruncate,
+    )
+    let (before_head, before_base, _, _, _, _, before_changes) = git_change_snapshot(
+      dir,
+      "",
+      None,
+      2,
+    )
+    assert_eq(before_head, Some(first))
+    // At the fork point, preserve porcelain's staged/worktree distinction.
+    assert_eq(before_base, None)
+    assert_true(
+      before_changes
+      is [{ path: "review.txt", index_status: " ", worktree_status: "M", .. }],
+    )
+    git_test_run(dir, ["add", "review.txt"])
+    git_test_run(dir, [
+      "-c", "user.name=OpenSeek Test", "-c", "user.email=openseek@example.invalid",
+      "-c", "commit.gpgSign=false", "commit", "--quiet", "-m", "second",
+    ])
+    let second = git_revision_commit(dir, "HEAD").unwrap()
+    let (after_head, after_base, _, _, _, _, after_changes) = git_change_snapshot(
+      dir,
+      "",
+      None,
+      2,
+    )
+    assert_eq(after_head, Some(second))
+    assert_eq(after_base, Some(first))
+    // Committing must not make an ordinary checkout's Review turn empty.
+    assert_eq(after_changes, before_changes)
+  } catch {
+    error => {
+      cleanup()
+      raise error
+    }
+  } noraise {
+    _ => cleanup()
+  }
+}
+
+///|
 async test "Git snapshots pair status with HEAD and supplied revisions stay pinned" {
   let dir = @fs.tmpdir(prefix="openseek-git-review-")
   async fn cleanup() {
@@ -1527,7 +1626,7 @@ async test "Git snapshots pair status with HEAD and supplied revisions stay pinn
     @fs.symlink(target="../review.txt", "\{dir}/desktop/keep.txt")
     git_test_run(dir, ["add", "desktop/keep.txt"])
     @fs.remove("\{dir}/desktop/keep.txt")
-    let (_, _, current_symlinks, _, deleted_symlinks, type_changes) = git_change_snapshot(
+    let (_, _, _, current_symlinks, _, deleted_symlinks, type_changes) = git_change_snapshot(
       dir,
       "",
       Some(first),
@@ -1554,20 +1653,22 @@ async test "Git snapshots pair status with HEAD and supplied revisions stay pinn
       "working\n",
       create_mode=CreateOrTruncate,
     )
-    let (snapshot_head, _, _, _, _, changes) = git_change_snapshot(
+    let (snapshot_head, snapshot_base, _, _, _, _, changes) = git_change_snapshot(
       dir,
       "",
       None,
       2,
     )
     assert_eq(snapshot_head, Some(first))
+    assert_eq(snapshot_base, None)
     assert_true(changes is [{ path: "review.txt", kind: "modified", .. }])
-    let (_, _, _, _, _, task_before_commit) = git_change_snapshot(
+    let (_, task_base, _, _, _, _, task_before_commit) = git_change_snapshot(
       dir,
       "",
       Some(first),
       2,
     )
+    assert_eq(task_base, Some(first))
     git_test_run(dir, ["add", "review.txt"])
     git_test_run(dir, [
       "-c", "user.name=OpenSeek Test", "-c", "user.email=openseek@example.invalid",
@@ -1575,9 +1676,15 @@ async test "Git snapshots pair status with HEAD and supplied revisions stay pinn
     ])
     let second = git_revision_commit(dir, "HEAD").unwrap()
     assert_true(second != first)
-    let (_, _, _, _, _, head_changes) = git_change_snapshot(dir, "", None, 2)
+    let (_, head_base, _, _, _, _, head_changes) = git_change_snapshot(
+      dir,
+      "",
+      None,
+      2,
+    )
+    assert_eq(head_base, None)
     assert_true(head_changes.is_empty())
-    let (_, _, _, _, _, task_changes) = git_change_snapshot(
+    let (_, _, _, _, _, _, task_changes) = git_change_snapshot(
       dir,
       "",
       Some(first),
@@ -1615,12 +1722,15 @@ async test "Git snapshots pair status with HEAD and supplied revisions stay pinn
     git_test_run(dir, [
       "update-index", "--force-remove", "desktop/link", "desktop/vendor/lib",
     ])
-    let (nested_head, _, _, deleted_gitlinks, deleted_symlinks, nested_changes) = git_change_snapshot(
-      "\{dir}/desktop",
-      "desktop/",
-      None,
-      2,
-    )
+    let (
+      nested_head,
+      _,
+      _,
+      _,
+      deleted_gitlinks,
+      deleted_symlinks,
+      nested_changes,
+    ) = git_change_snapshot("\{dir}/desktop", "desktop/", None, 2)
     assert_eq(nested_head, Some(gitlink_head))
     assert_eq(deleted_gitlinks.length(), 1)
     assert_true(deleted_gitlinks.contains("vendor/lib"))

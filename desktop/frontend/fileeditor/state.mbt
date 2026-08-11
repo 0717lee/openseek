@@ -249,7 +249,7 @@ pub(all) struct State {
   // this value on either boundary rejects reads, listings, stats, and watcher
   // failures that outlived the checkout they addressed.
   request_epoch : Int
-  // Last settled Git comparison identity (the task base, or HEAD fallback).
+  // Last settled Git comparison identity (task/branch base, or HEAD fallback).
   // The legacy field name stays internal; `changes_head_known` distinguishes
   // a first/unborn snapshot from no snapshot yet so a comparison transition
   // can refresh every surviving review baseline precisely.
@@ -431,9 +431,9 @@ pub(all) enum Msg {
     message~ : String
   )
   // A `git.changes` reply. `head` carries the immutable comparison when the
-  // host can identify one: the task baseline when present, otherwise resolved
-  // HEAD for a modern root conversation. `None` means no commit exists or a
-  // legacy host omitted the identity. The owner fence rejects late responses.
+  // host can identify one: a task or branch baseline when present, otherwise
+  // resolved HEAD. `None` means no commit exists or a legacy host omitted the
+  // identity. The owner fence rejects late responses.
   ChangesLoaded(
     owner~ : @interop.ConversationKey,
     generation~ : Int,

@@ -32,9 +32,10 @@ fn ChangedFile::from_reply(change : @protocol.GitChange) -> ChangedFile? {
 }
 
 ///|
-/// Worktree-aware hosts return the task boundary; older/root hosts retain the
-/// immutable HEAD identity. Keeping this choice in one place prevents a later
-/// commit from silently rebasing an in-progress task review.
+/// Modern hosts return the chosen comparison boundary: a worktree's task base
+/// or an ordinary branch's fork point. Older hosts retain the immutable HEAD
+/// identity. Keeping this choice in one place prevents a later commit from
+/// silently rebasing an in-progress review.
 fn git_review_revision(reply : @protocol.GitChangesReply) -> String? {
   match reply.baseline {
     Some(baseline) => Some(baseline)
@@ -43,10 +44,11 @@ fn git_review_revision(reply : @protocol.GitChangesReply) -> String? {
 }
 
 ///|
-/// Ask the owning host for the checkout's review inventory. Worktree tasks
-/// compare their immutable creation commit with the current working tree;
-/// legacy/root conversations retain HEAD status. As with filesystem calls, a
-/// resource hint belonging to another host is rejected before bridge access.
+/// Ask the owning host for the checkout's review inventory. Worktree tasks use
+/// their immutable creation commit; ordinary branches with committed work use
+/// their default-branch fork point; otherwise the host retains HEAD status. As
+/// with filesystem calls, a resource hint belonging to another host is
+/// rejected before bridge access.
 fn list_changes(
   dispatch : @cmd.Emit[Msg],
   owner : @interop.ConversationKey,
@@ -91,8 +93,8 @@ fn list_changes(
         }
       }
       let files = reply.changes.filter_map(ChangedFile::from_reply)
-      // New worktree-aware hosts pin Review to the task's creation commit.
-      // Older hosts omit `baseline`, so keep their exact HEAD identity.
+      // New hosts pin Review to the selected comparison commit. Older hosts
+      // omit `baseline`, so keep their exact HEAD identity.
       let revision = git_review_revision(reply)
       scheduler.add(
         dispatch(

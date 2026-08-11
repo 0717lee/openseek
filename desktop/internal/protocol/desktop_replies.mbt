@@ -554,7 +554,7 @@ pub(all) struct GitPullRequestReply {
 ///|
 /// One current-path row from the active review comparison. HEAD-based
 /// inventories retain `git status --porcelain=v1 -z`'s index/worktree columns;
-/// task-base inventories put their single comparison status in the worktree
+/// baseline inventories put their single comparison status in the worktree
 /// column and never imply that committed work is staged. Codes keep Git's
 /// spellings (`" "`, `M`, `A`, `D`, `R`, …), while `kind` is one of
 /// `modified`, `added`, `deleted`, `renamed`, `copied`, `unmerged`,
@@ -570,13 +570,14 @@ pub(all) struct GitChange {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-/// The active checkout's change inventory plus the immutable task baseline
-/// available to worktree-aware review clients. When `baseline` exists the
-/// inventory compares it to the working tree, including committed work; the
-/// HEAD fallback remains ordinary staged + unstaged status. A
-/// missing Git executable and a non-repository workspace both report
-/// `repository=false`; once a repository is recognized, operational failures
-/// are request errors rather than an ambiguous empty list.
+/// The active checkout's change inventory plus its immutable comparison
+/// baseline: a worktree's task base or an ordinary branch's default-branch
+/// fork point. When `baseline` exists the inventory compares it to the working
+/// tree, including committed work; the HEAD fallback remains ordinary staged +
+/// unstaged status. A missing Git executable and a non-repository workspace
+/// both report `repository=false`; once a repository is recognized,
+/// operational failures are request errors rather than an ambiguous empty
+/// list.
 pub(all) struct GitChangesReply {
   repository : Bool
   // The commit object currently named by HEAD. `None` covers an unborn HEAD,
@@ -590,9 +591,9 @@ pub(all) struct GitChangesReply {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-/// One path's `HEAD` blob for quick diff. `Missing` is the legitimate baseline
-/// for an added/untracked file or an unborn `HEAD`; withheld blobs mirror the
-/// ordinary file reader's binary and one-megabyte policies.
+/// One path's comparison blob for quick diff. `Missing` is the legitimate
+/// baseline for an added/untracked file or an unborn `HEAD`; withheld blobs
+/// mirror the ordinary file reader's binary and one-megabyte policies.
 pub(all) enum GitOriginalFileReply {
   Missing
   BinaryOriginal
