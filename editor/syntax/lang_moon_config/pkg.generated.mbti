@@ -1,0 +1,19 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitlang/editor/syntax/lang_moon_config"
+
+import {
+  "moonbitlang/editor/syntax",
+}
+
+// Values
+
+// Errors
+
+// Types and methods
+type MoonConfigTokenizer
+pub fn MoonConfigTokenizer::MoonConfigTokenizer() -> Self
+pub impl @syntax.LineTokenizer for MoonConfigTokenizer
+
+// Type aliases
+
+// Traits

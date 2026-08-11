@@ -262,6 +262,11 @@ fn install_language_tokenizers(services : WorkbenchServices) -> Unit {
   |> ignore
   services.languages.set_tokens_provider("json", @lang_json.JsonTokenizer())
   |> ignore
+  services.languages.set_tokens_provider(
+    "moonbit-config",
+    @lang_moon_config.MoonConfigTokenizer(),
+  )
+  |> ignore
   let javascript = @lang_javascript.JavascriptTokenizer()
   services.languages.set_tokens_provider("javascript", javascript) |> ignore
   // TypeScript reads acceptably through the JavaScript rules until a

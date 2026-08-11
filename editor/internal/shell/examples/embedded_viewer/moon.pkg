@@ -8,6 +8,7 @@ import {
   "moonbitlang/editor/viewer/common/markers",
   "moonbitlang/editor/viewer/common/model",
   "moonbitlang/editor/viewer/common/quick_diff_api",
+  "moonbitlang/editor/syntax/lang_moon_config",
   "moonbitlang/editor/syntax/lang_moonbit",
   "moonbitlang/editor/internal/shell/widgets/file_tree",
   "moonbitlang/editor/shell/workspace",

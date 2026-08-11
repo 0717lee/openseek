@@ -380,12 +380,15 @@ test "child_path joins entry names onto their parent directory" {
 
 ///|
 test "language_id maps known extensions and falls back to plain text" {
+  assert_eq(language_id("moon.pkg"), "moonbit-config")
+  assert_eq(language_id("moon.mod"), "moonbit-config")
   assert_eq(language_id("main.mbt"), "moonbit")
   assert_eq(language_id("pkg.generated.mbti"), "moonbit")
   assert_eq(language_id("README.mbt.md"), "moonbit")
   assert_eq(language_id("bundle.js"), "javascript")
   assert_eq(language_id("config.mjs"), "javascript")
   assert_eq(language_id("moon.mod.json"), "json")
+  assert_eq(language_id("notmoon.pkg"), "plaintext")
   assert_eq(language_id("notes.txt"), "plaintext")
   assert_eq(language_id("LICENSE"), "plaintext")
 }

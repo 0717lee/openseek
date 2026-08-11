@@ -200,8 +200,9 @@ test "handle_change forwards the exact array it was given" {
 Helpers shared by more than one `lang_*` live in this package rather than being
 copied into each: `is_capitalized` (the identifier-is-a-type heuristic) and
 `push_token` (append a token, coalescing it into the previous one when the tag
-and offsets are contiguous). Both serve `lang_moonbit` and `lang_javascript`;
-`lang_json` uses neither.
+and offsets are contiguous). `is_capitalized` serves `lang_moonbit` and
+`lang_javascript`; `push_token` also serves `lang_moon_config`. `lang_json` uses
+neither.
 
 ```mbt check
 ///|
@@ -266,8 +267,9 @@ the top. No array representation crosses the public boundary.
 
 `lang_javascript` carries this stack directly and therefore allocates only when
 a lexical mode changes. `lang_moonbit` uses a private mutable scratch stack
-within each line and always returns the empty normal state. `lang_json` carries
-only an optional in-comment mode.
+within each line and always returns the empty normal state. `lang_moon_config`
+is also line-local and always returns the empty state. `lang_json` carries only
+an optional in-comment mode.
 
 ```mbt check
 ///|
@@ -286,10 +288,10 @@ test "the empty state is normal and stack edits preserve snapshots" {
 ## Writing a new `lang_*`
 
 Concrete lexers live in sibling packages: `syntax/lang_moonbit`,
-`syntax/lang_json`, and `syntax/lang_javascript` each expose a tokenizer
-implementing `LineTokenizer`. Concrete languages are selected by hosts, examples,
-or tests; reusable viewer core packages must not import them. There is no runtime
-grammar-loading or `setMonarchTokensProvider` equivalent.
+`syntax/lang_moon_config`, `syntax/lang_json`, and `syntax/lang_javascript` each
+expose a tokenizer implementing `LineTokenizer`. Concrete languages are selected
+by hosts, examples, or tests; reusable viewer core packages must not import them.
+There is no runtime grammar-loading or `setMonarchTokensProvider` equivalent.
 
 When translating a Monarch or CodeMirror grammar:
 
@@ -324,4 +326,5 @@ part of the public `LineTokenizer` API and are not emulated here.
 ```sh
 moon test --target js syntax
 moon test --target js syntax/lang_moonbit
+moon test --target js syntax/lang_moon_config
 ```
