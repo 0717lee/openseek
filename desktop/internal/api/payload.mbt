@@ -62,6 +62,36 @@ priv struct CodexSkillsListPayload {
 } derive(FromJson)
 
 ///|
+/// A browser-local draft uses this id only as a process-local Files/Terminal
+/// owner. It is never forwarded to app-server as a Codex thread id.
+priv struct CodexDraftPayload {
+  draft_id : String
+  cwd : String
+} derive(FromJson)
+
+///|
+priv struct CodexDraftClosePayload {
+  draft_id : String
+} derive(FromJson)
+
+///|
+/// Draft authority is reserved for ids minted by this Desktop process. The
+/// close endpoint must not accept an app-server thread id and revoke that
+/// task's independently established cwd binding.
+fn CodexDraftClosePayload::validated_id(
+  self : CodexDraftClosePayload,
+) -> String? {
+  let id = self.draft_id.trim().to_owned()
+  guard id == self.draft_id &&
+    id.has_prefix("desktop-") &&
+    !id.contains("/") &&
+    !id.contains("\\") else {
+    return None
+  }
+  Some(id)
+}
+
+///|
 test "start and steer payloads preserve submission ids" {
   let start : @protocol.StartPayload = @json.from_json({
     "task": "hello",

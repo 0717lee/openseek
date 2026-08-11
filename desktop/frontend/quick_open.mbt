@@ -1356,38 +1356,42 @@ test "file Quick Open populates a cache session before adopting ranked rows" {
     dock: { ..dock, owner: Some(owner) },
     file_panel: { ..base.file_panel, owner: Some(owner), docs },
   }
-  // Drive the public update path instead of constructing FileIndex, whose
-  // lifecycle is deliberately owned by the fileeditor package.
-  let (_, indexing) = update(
-    dispatch,
-    FileEditor(@fileeditor.EnsureFileIndex),
-    seeded,
-  )
-  let (_, opened) = update(dispatch, QuickOpenOpen(QuickOpenFiles), indexing)
+  let (_, opened) = update(dispatch, QuickOpenOpen(QuickOpenFiles), seeded)
   guard opened.quick_open is Some(loading) else { fail("palette expected") }
+  guard opened.file_query_cache.loading_key is Some(cache_key) else {
+    fail("opening should populate a cache")
+  }
+  assert_true(opened.file_query_cache.active_key is None)
   assert_true(loading.phase is QuickOpenLoading)
   assert_eq(loading.items.map(item => item.detail()), [
     "src/active.mbt", "src/open.mbt",
   ])
+  let (_, populated) = update(
+    dispatch,
+    QuickOpenFileCacheLoaded(owner~, cache_key~, generation=loading.generation),
+    opened,
+  )
+  assert_eq(populated.file_query_cache.active_key, Some(cache_key))
+  assert_true(populated.file_query_cache.loading_key is None)
   let (_, indexed) = update(
     dispatch,
-    FileEditor(
-      @fileeditor.FilesIndexed(
-        owner~,
-        epoch=0,
-        files=[
-          Relative("src/open.mbt"),
-          Relative("src/other.mbt"),
-          Relative("src/active.mbt"),
-        ],
-        truncated=true,
-      ),
+    QuickOpenFilesLoaded(
+      owner~,
+      cache_key~,
+      query="",
+      generation=loading.generation,
+      files=[
+        Relative("src/open.mbt"),
+        Relative("src/other.mbt"),
+        Relative("src/active.mbt"),
+      ],
+      from_cache=true,
+      limit_hit=false,
     ),
-    opened,
+    populated,
   )
   guard indexed.quick_open is Some(ready) else { fail("palette expected") }
   assert_true(ready.phase is QuickOpenReady)
-  assert_true(ready.truncated)
   assert_eq(ready.items.map(item => item.detail()), [
     "src/active.mbt", "src/open.mbt", "src/other.mbt",
   ])
@@ -1397,25 +1401,28 @@ test "file Quick Open populates a cache session before adopting ranked rows" {
 }
 
 ///|
-test "an initial file-index failure is visible and retryable" {
+test "an initial file cache failure is visible and retryable" {
   let dispatch = test_dispatch()
   let base = { ..test_model(), is_desktop: true }
   let owner = active_quick_open_owner(base)
-  let seeded = { ..base, file_panel: { ..base.file_panel, owner: Some(owner) } }
-  let (_, indexing) = update(
-    dispatch,
-    FileEditor(@fileeditor.EnsureFileIndex),
-    seeded,
-  )
-  let (_, opened) = update(dispatch, QuickOpenOpen(QuickOpenFiles), indexing)
+  let (_, opened) = update(dispatch, QuickOpenOpen(QuickOpenFiles), base)
+  guard opened.quick_open is Some(initial) else { fail("palette expected") }
+  guard opened.file_query_cache.loading_key is Some(cache_key) else {
+    fail("cache load expected")
+  }
   let (_, failed) = update(
     dispatch,
-    FileEditor(@fileeditor.FileIndexFailed(owner~, epoch=0)),
+    QuickOpenFileCacheRequestFailed(
+      owner~,
+      cache_key~,
+      generation=initial.generation,
+    ),
     opened,
   )
   guard failed.quick_open is Some(failure) else { fail("palette expected") }
   assert_true(failure.phase is QuickOpenFailed)
-  assert_true(failed.file_panel.index is @fileeditor.IndexFailed)
+  assert_true(failed.file_query_cache.active_key is None)
+  assert_true(failed.file_query_cache.loading_key is None)
   let (_, retrying) = update(dispatch, QuickOpenValueChanged("src"), failed)
   guard retrying.quick_open is Some(pending) else { fail("palette expected") }
   assert_true(pending.phase is QuickOpenDebouncing)

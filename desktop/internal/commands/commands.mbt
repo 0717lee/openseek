@@ -173,6 +173,15 @@ pub let worktree_remove : Command[
 pub let codex_status : Command[Json, Json] = Command("codex.status")
 
 ///|
+/// Authorize one browser-local Codex draft against its selected main project.
+/// This process-local operation does not create an app-server thread.
+pub let codex_draft_open : Command[Json, Json] = Command("codex.draft.open")
+
+///|
+/// Revoke a browser-local draft's process-local filesystem authority.
+pub let codex_draft_close : Command[Json, Json] = Command("codex.draft.close")
+
+///|
 pub let codex_server_request_list : Command[Json, Json] = Command(
   "codex.server_request.list",
 )

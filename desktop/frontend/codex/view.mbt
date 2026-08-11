@@ -281,15 +281,27 @@ pub fn State::sidebar_rows(
       projects.push(project)
     }
   }
+  if self.active_draft() is Some(draft) {
+    let root = draft.project_root.unwrap_or(draft.cwd).trim().to_owned()
+    let project = CodexProject(root)
+    if !root.is_empty() && !projects.contains(project) {
+      projects.push(project)
+    }
+  }
   for project in projects {
     let active = actions.selected &&
-      self.active
-      .map(thread => {
-        thread.project_root
-        .map(root => CodexProject(root.trim().to_owned()) == project)
-        .unwrap_or(false)
+      (match self.selection {
+        CodexDraftTask(draft) =>
+          CodexProject(
+            draft.project_root.unwrap_or(draft.cwd).trim().to_owned(),
+          ) ==
+          project
+        CodexStoredTask(thread) =>
+          thread.project_root
+          .map(root => CodexProject(root.trim().to_owned()) == project)
+          .unwrap_or(false)
+        CodexNoTask => false
       })
-      .unwrap_or(false)
     rows.push(
       (actions.workspace_row)(
         project.0,
@@ -302,6 +314,20 @@ pub fn State::sidebar_rows(
         },
       ),
     )
+    if self.active_draft() is Some(draft) &&
+      CodexProject(draft.project_root.unwrap_or(draft.cwd).trim().to_owned()) ==
+      project {
+      rows.push(
+        (actions.conversation_row)(
+          draft.cwd,
+          "New Codex thread",
+          actions.selected,
+          false,
+          actions.open,
+          None,
+        ),
+      )
+    }
     for thread in self.threads {
       if thread.project_key() == Some(project) {
         rows.push(thread.sidebar_row(self, actions))
@@ -309,13 +335,28 @@ pub fn State::sidebar_rows(
     }
   }
   let loose = self.threads.filter(thread => thread.project_key() is None)
-  if !loose.is_empty() {
+  let loose_draft = self
+    .active_draft()
+    .filter(draft => draft.project_root.unwrap_or(draft.cwd).trim().is_empty())
+  if !loose.is_empty() || loose_draft is Some(_) {
     rows.push((actions.workspace_row)("No project", "No project", false, None))
+    if loose_draft is Some(draft) {
+      rows.push(
+        (actions.conversation_row)(
+          draft.id,
+          "New Codex thread",
+          actions.selected,
+          false,
+          actions.open,
+          None,
+        ),
+      )
+    }
     for thread in loose {
       rows.push(thread.sidebar_row(self, actions))
     }
   }
-  if self.threads.is_empty() {
+  if self.threads.is_empty() && self.active_draft() is None {
     let empty = match self.connection {
       CodexStarting => "Loading Codex conversations…"
       CodexUnavailable(_) => "Codex is unavailable"
@@ -365,7 +406,7 @@ fn CodexThreadRow::sidebar_row(
   actions : SidebarActions,
 ) -> @html.Html {
   let selected = actions.selected &&
-    state.active.map(item => item.id == self.id).unwrap_or(false)
+    state.active_thread().map(item => item.id == self.id).unwrap_or(false)
   let running = selected && state.is_running()
   (actions.conversation_row)(
     self.cwd.unwrap_or(self.title),
@@ -592,10 +633,26 @@ fn State::composer_view(
   self : State,
   dispatch : @cmd.Emit[Msg],
   open_file : (String, @common.Range?, String?) -> @cmd.Cmd,
+  worktree_workspace : @common.Uri?,
 ) -> @html.Html {
   let pending : Array[@html.Html] = []
   for request in self.pending_requests {
     pending.push(request.view(dispatch))
+  }
+  let before_inner : Array[@html.Html] = [
+    @html.div(class="codex-pending", pending),
+  ]
+  if self.active_thread() is Some(active) &&
+    active.worktree is Some(worktree) &&
+    !worktree.present {
+    before_inner.push(
+      @composer.MissingWorktreeNotice::{
+        name: worktree.name,
+        conversation_noun: "task",
+        rebuild: dispatch(RepairWorktree),
+        archive: dispatch(ArchiveThread(active.id)),
+      }.render(),
+    )
   }
   let model_options : Array[@composer.ModelOption] = []
   for model in self.models {
@@ -610,6 +667,16 @@ fn State::composer_view(
       title: "Codex model",
     }.render(),
   ]
+  if worktree_workspace is Some(_) && self.active_draft() is Some(_) {
+    status.push(
+      @composer.WorktreeControl::{
+        choice: self.placement,
+        enabled: self.can_choose_worktree(),
+        command: dispatch(ToggleWorktreeMode),
+        content: icon(icon_worktree),
+      }.render(),
+    )
+  }
   if self.git_status is Some(git) &&
     git.chip(dispatch, self.git_details_open) is Some(chip) {
     status.push(chip)
@@ -631,9 +698,10 @@ fn State::composer_view(
       class_name: "icon-button send-button",
       title: "Send to Codex",
       disabled: self.loading ||
-      self.active is None ||
+      !self.can_prompt() ||
       self.input_empty() ||
-      running_elsewhere,
+      running_elsewhere ||
+      self.has_missing_worktree(),
       command: dispatch(Send),
       content: icon(icon_arrow_up),
     }
@@ -643,19 +711,22 @@ fn State::composer_view(
     mention_chips.push(mention.chip(dispatch, index, open_file))
   }
   @composer.View::{
-    before_inner: [@html.div(class="codex-pending", pending)],
+    before_inner,
     mentions: mention_chips,
     value: self.draft,
     placeholder: if local_turn is Some(_) {
       "Steer the running task — your message joins it at the next step."
+    } else if self.has_missing_worktree() {
+      "Rebuild this task's worktree before continuing."
     } else if running_elsewhere {
       "This task is running in another Codex client."
     } else {
       "Ask Codex to inspect, edit, or explain this workspace."
     },
-    disabled: self.active is None ||
+    disabled: !self.can_prompt() ||
     !(self.connection is CodexReady) ||
-    running_elsewhere,
+    running_elsewhere ||
+    self.has_missing_worktree(),
     input: dispatch.map(value => DraftChanged(value)),
     keyboard: @composer.KeyboardActions::{
       menu_open: self.completion is Some(_),
@@ -681,6 +752,7 @@ pub(all) struct PageActions {
   open_file : (String, @common.Range?, String?) -> @cmd.Cmd
   open_external : (String) -> @cmd.Cmd
   workspace_label : (@common.Uri) -> String
+  worktree_workspace : @common.Uri?
   // The root shell supplies the one transcript view shared with OpenSeek.
   // Codex owns the normalized items, but no parallel message/activity DOM.
   transcript : @html.Html
@@ -743,14 +815,17 @@ pub fn State::page(
       ),
     )
   }
-  let title = self.active.map(thread => thread.title).unwrap_or("Codex")
-  let workspace = match self.active {
-    Some(thread) => thread.workspace(channel)
-    None => None
+  let title = match self.selection {
+    CodexDraftTask(_) => "New Codex thread"
+    CodexStoredTask(thread) => thread.title
+    CodexNoTask => "Codex"
   }
-  let tooltip = self.active
-    .map(thread => thread.cwd.unwrap_or(thread.id))
-    .unwrap_or("Codex app-server")
+  let workspace = self.active_workspace(channel)
+  let tooltip = match self.selection {
+    CodexDraftTask(draft) => draft.cwd
+    CodexStoredTask(thread) => thread.cwd.unwrap_or(thread.id)
+    CodexNoTask => "Codex app-server"
+  }
   topbar.push(
     // Source selection already lives in the global sidebar. The conversation
     // title occupies the same topbar slot as an OpenSeek title instead of
@@ -800,7 +875,7 @@ pub fn State::page(
   topbar.push(
     @html.button(
       class=if terminal_open { "panel-toggle active" } else { "panel-toggle" },
-      disabled=self.active is None,
+      disabled=workspace is None,
       title=if terminal_open { "Hide terminal" } else { "Show terminal" },
       on_click=actions.toggle_terminal,
       icon(icon_terminal),
@@ -824,9 +899,20 @@ pub fn State::page(
       ),
     )
   }
-  [
+  let page : Array[@html.Html] = [
     @html.div(class="topbar codex-topbar", topbar),
     actions.transcript,
-    self.composer_view(dispatch, actions.open_file),
+    self.composer_view(dispatch, actions.open_file, actions.worktree_workspace),
   ]
+  if self.archive_confirm is Some(confirm) {
+    page.push(
+      @composer.WorktreeArchiveDialog::{
+        refusal: confirm.refusal,
+        conversation_noun: "task",
+        cancel: dispatch(CancelArchiveDiscard),
+        confirm: dispatch(ConfirmArchiveDiscard),
+      }.render(),
+    )
+  }
+  page
 }

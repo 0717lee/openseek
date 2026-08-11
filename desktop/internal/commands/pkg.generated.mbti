@@ -61,6 +61,10 @@ pub let codex_account_logout : Command[Json, Json]
 
 pub let codex_account_read : Command[Json, Json]
 
+pub let codex_draft_close : Command[Json, Json]
+
+pub let codex_draft_open : Command[Json, Json]
+
 pub let codex_file_search : Command[Json, Json]
 
 pub let codex_model_list : Command[Json, Json]

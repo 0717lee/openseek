@@ -2618,6 +2618,19 @@ fn view(
     ) {
     return console_gate_view(dispatch, console)
   }
+  let active_file_ctx = file_ctx(model)
+  let codex_active = model.codex.active_workspace(model.focused) is Some(_)
+  // Panel state survives page switches, but a Codex page only exposes it
+  // after a real task supplies the identity (and, for files, a cwd) needed by
+  // the host operation. Selecting a task makes an already-open panel reappear
+  // in that task's workspace.
+  let file_panel_visible = model.right_panel_open &&
+    (
+      model.screen is Chat ||
+      (model.screen is Codex && active_file_ctx.workspace is Some(_))
+    )
+  let terminal_panel_visible = model.terminal.is_open() &&
+    (!(model.screen is Codex) || codex_active)
   let content = match model.screen {
     Chat =>
       [
@@ -2629,7 +2642,10 @@ fn view(
           composer_view(dispatch, model)
         },
       ]
-    Codex =>
+    Codex => {
+      let worktree_workspace = model.codex.worktree_launch_workspace(
+        model.focused,
+      )
       model.codex.page(
         dispatch.map(msg => Codex(msg)),
         model.focused,
@@ -2645,9 +2661,11 @@ fn view(
           },
           open_external: url => dispatch(ExternalLinkClicked(url)),
           workspace_label: workspace => @resource.label(workspace),
+          worktree_workspace,
           transcript: transcript_html,
         },
       )
+    }
     Skills => page_with_toggle(dispatch, model, skills_page(dispatch, model))
     Settings =>
       page_with_toggle(dispatch, model, settings_page(dispatch, model))
@@ -2660,17 +2678,16 @@ fn view(
   }
   // The app is `sidebar | content`; `content` itself splits into the
   // conversation (left) and the editor (right) as two independent parts, so
-  // either side can be swapped out later. The files panel only opens over the
-  // chat; on the Skills page it stays collapsed, but the editor column (and the
-  // viewer host inside it) is still rendered so the attached viewer is never
-  // torn down.
-  let panel_open = model.right_panel_open && model.screen is Chat
-  let mut content_class = if panel_open {
+  // either side can be swapped out later. Files open over an OpenSeek or Codex
+  // conversation with a real workspace; on the other pages the editor column
+  // (and its viewer host) stays rendered so the attached viewer is never torn
+  // down.
+  let mut content_class = if file_panel_visible {
     "content panel-open"
   } else {
     "content"
   }
-  if model.terminal.is_open() {
+  if terminal_panel_visible {
     content_class = content_class + " terminal-open"
   }
   let children : Array[@html.Html] = [
@@ -2707,7 +2724,14 @@ fn view(
     children.push(project_picker_modal(dispatch, picker))
   }
   if model.archive_confirm is Some(confirm) {
-    children.push(archive_discard_modal(dispatch, confirm))
+    children.push(
+      @composer.WorktreeArchiveDialog::{
+        refusal: confirm.refusal,
+        conversation_noun: "chat",
+        cancel: dispatch(CancelArchiveDiscard),
+        confirm: dispatch(ConfirmArchiveDiscard),
+      }.render(),
+    )
   }
   if model.quick_open is Some(open) {
     children.push(quick_open_view(dispatch, open))
@@ -2930,10 +2954,11 @@ fn notifications_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
 ///|
 #warnings("-alert_unstable")
 test "archived families collapse while a live orphan child stays archivable" {
-  let archived_model = test_model().with_dev(dev => {
-    ..dev,
-    archived: [archived_item("chat"), archived_item("chat-sr-1")],
-  })
+  let archived_model = { ..test_model(), archived_chats_collapsed: false }.with_dev(dev => {
+      ..dev,
+      archived: [archived_item("chat"), archived_item("chat-sr-1")],
+    },
+  )
   let archived_dev = archived_model.dev()
   let archived_markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(
@@ -2942,7 +2967,7 @@ test "archived families collapse while a live orphan child stays archivable" {
       ),
     )
   })
-  assert_true(archived_markup.contains("Archived (1)"))
+  assert_true(archived_markup.contains("Archived chats (1)"))
   assert_true(archived_markup.contains("title=\"chat\""))
   assert_false(archived_markup.contains("chat-sr-1"))
   let orphan_model = test_model().with_dev(dev => {

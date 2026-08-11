@@ -1725,6 +1725,9 @@ priv enum Msg {
   OpenCodex
   CodexNewThread
   CodexNewThreadIn(String)
+  // The add button creates only a browser-local draft. The generated id owns
+  // Files and Terminal until the first prompt creates an app-server thread.
+  CodexDraftRotated(cwd~ : String, id~ : String)
   CodexOpenThread(String)
   CodexArchiveThread(String)
   // Codex owns every app-server-local transition; the root only wraps the

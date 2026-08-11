@@ -173,7 +173,7 @@ async test "worktree lifecycle mirrors initialized submodules" {
   let created = create_worktree(
     manager,
     repo.to_string(),
-    "s-submodules",
+    WorktreeOwner::openseek("s-submodules"),
     fn(_) {  },
     name="with-submodules",
   )
@@ -190,7 +190,7 @@ async test "worktree lifecycle mirrors initialized submodules" {
     create_worktree(
       manager,
       repo.to_string(),
-      "s-submodules",
+      WorktreeOwner::openseek("s-submodules"),
       fn(_) {  },
       name="with-submodules",
     ),

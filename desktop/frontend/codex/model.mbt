@@ -40,6 +40,25 @@ priv struct CodexThreadRow {
   title : String
   cwd : String?
   project_root : String?
+  worktree : CodexWorktree?
+} derive(Eq)
+
+///|
+/// A worktree explicitly owned by this Codex thread in SeekMoon's registry.
+/// The annotation comes from the native host; cwd shape alone never claims an
+/// external Codex App or manually-created Git worktree.
+priv struct CodexWorktree {
+  name : String
+  path : String
+  present : Bool
+} derive(Eq)
+
+///|
+/// A dirty Codex-owned checkout waits here while the shared composer dialog
+/// asks whether archiving may discard its local-only changes.
+priv struct CodexArchiveConfirm {
+  thread_id : String
+  refusal : @protocol.ArchiveNeedsForceReply
 } derive(Eq)
 
 ///|
@@ -72,11 +91,33 @@ priv struct CodexThread {
   title : String
   cwd : String?
   project_root : String?
+  worktree : CodexWorktree?
   // App-server captures this branch when the thread is created. It gives the
   // composer an immediate label while the host verifies the current checkout
   // and asks GitHub for its pull request.
   branch : String?
   turns : Array[CodexTurn]
+} derive(Eq)
+
+///|
+/// A Codex task before its first prompt. The id is client-local: it isolates
+/// Files and Terminal exactly like OpenSeek's fresh session id, but it is never
+/// sent to app-server as a thread id. `cwd` is the project chosen by the add
+/// button; the host confirms `project_root` before filesystem panels use it.
+priv struct CodexDraftTask {
+  id : String
+  cwd : String
+  project_root : String?
+} derive(Eq)
+
+///|
+/// The Codex page selects either a local draft or an app-server thread, never
+/// both. Keeping that distinction in one enum prevents an empty draft from
+/// accidentally entering resume, archive, polling, or turn APIs.
+priv enum CodexSelection {
+  CodexNoTask
+  CodexDraftTask(CodexDraftTask)
+  CodexStoredTask(CodexThread)
 } derive(Eq)
 
 ///|
@@ -116,8 +157,11 @@ priv enum CodexReplyKind {
   CodexThreadsReply
   CodexThreadReply
   CodexActivityReply
-  CodexNewThreadReply
+  CodexDraftOpenReply(String)
+  CodexDraftThreadReply
   CodexTurnReply
+  CodexWorktreeTurnReply(CodexWorktree)
+  CodexWorktreeRepairReply(CodexWorktree)
   CodexLoginReply
   CodexArchiveReply(String)
   CodexCompactReply(String)
@@ -158,9 +202,13 @@ enum Msg {
   GitLoaded(thread_id~ : String, reply~ : @protocol.GitPullRequestReply)
   ToggleGitDetails
   CloseGitDetails
-  StartThread(String)
+  ToggleWorktreeMode
+  StartDraft(id~ : String, cwd~ : String)
   OpenThread(String)
   ArchiveThread(String)
+  RepairWorktree
+  ConfirmArchiveDiscard
+  CancelArchiveDiscard
   Send
   WriterAcquired(String)
   WriterConflict(String)
@@ -190,9 +238,10 @@ pub fn Msg::poll_activity() -> Msg {
 }
 
 ///|
-/// Shell entrypoint for starting a task in an exact working directory.
-pub fn Msg::start_thread(cwd : String) -> Msg {
-  StartThread(cwd)
+/// Shell entrypoint for opening a local draft in an exact project directory.
+/// No app-server thread exists until the draft sends its first prompt.
+pub fn Msg::start_draft(id : String, cwd : String) -> Msg {
+  StartDraft(id~, cwd~)
 }
 
 ///|
@@ -238,7 +287,7 @@ struct State {
   models : Array[CodexModelOption]
   selected_model : String
   threads : Array[CodexThreadRow]
-  active : CodexThread?
+  selection : CodexSelection
   git_status : CodexGitStatus?
   git_details_open : Bool
   write_access : CodexWriteAccess
@@ -256,6 +305,8 @@ struct State {
   file_index : CodexFileIndex
   skills : CodexSkillCatalog
   symbol_search : CodexSymbolSearchCache
+  placement : @composer.WorktreeChoice
+  archive_confirm : CodexArchiveConfirm?
   pending_requests : Array[CodexPendingRequest]
   loading : Bool
   notice : String
@@ -271,7 +322,7 @@ pub fn State::State(loading? : Bool = false) -> State {
     models: [],
     selected_model: "",
     threads: [],
-    active: None,
+    selection: CodexNoTask,
     git_status: None,
     git_details_open: false,
     write_access: CodexNeedsResume,
@@ -282,6 +333,8 @@ pub fn State::State(loading? : Bool = false) -> State {
     file_index: CodexFilesEmpty,
     skills: CodexSkillsEmpty,
     symbol_search: CodexSymbolSearchCache::empty(),
+    placement: @composer.LocalCheckout,
+    archive_confirm: None,
     pending_requests: [],
     loading,
     notice: "",
@@ -305,30 +358,69 @@ pub fn State::can_start_thread(self : State) -> Bool {
 }
 
 ///|
-/// Whether a selected Codex task can own the terminal and file panels.
+/// The selected app-server task, excluding a local draft that has not sent its
+/// first prompt. Mutation APIs use this method so a draft id cannot be mistaken
+/// for an app-server thread id.
+fn State::active_thread(self : State) -> CodexThread? {
+  match self.selection {
+    CodexStoredTask(thread) => Some(thread)
+    CodexNoTask | CodexDraftTask(_) => None
+  }
+}
+
+///|
+fn State::active_draft(self : State) -> CodexDraftTask? {
+  match self.selection {
+    CodexDraftTask(draft) => Some(draft)
+    CodexNoTask | CodexStoredTask(_) => None
+  }
+}
+
+///|
+/// Whether a selected Codex task can own the terminal and file panels. A local
+/// draft has a host-authorized id/cwd pair even though app-server knows nothing
+/// about it yet.
 pub fn State::has_active(self : State) -> Bool {
-  self.active is Some(_)
+  !(self.selection is CodexNoTask)
 }
 
 ///|
-/// The selected app-server thread id used as the host-panel owner.
+/// The selected host-panel owner: an app-server thread id after first send, or
+/// the client-local draft id before it.
 pub fn State::active_id(self : State) -> String? {
-  self.active.map(thread => thread.id)
+  match self.selection {
+    CodexNoTask => None
+    CodexDraftTask(draft) => Some(draft.id)
+    CodexStoredTask(thread) => Some(thread.id)
+  }
 }
 
 ///|
-/// The selected task's exact app-server cwd. A missing cwd stays missing so
-/// the shell never guesses an OpenSeek workspace for Codex file operations.
-/// Bind the host path to the channel at this boundary: browser state must not
-/// interpret a remote host path using the local machine's filesystem rules.
+/// The selected task's exact host-authorized cwd. Stored tasks get it from
+/// app-server; local drafts get it from `codex.draft.open`. A missing cwd stays
+/// missing so the shell never guesses an OpenSeek workspace. Bind the host path
+/// to the channel here: browser state must not interpret a remote host path
+/// using the local machine's filesystem rules.
 pub fn State::active_workspace(
   self : State,
   channel : @interop.ChannelId,
 ) -> @common.Uri? {
-  match self.active {
-    Some(thread) => thread.workspace(channel)
-    None => None
+  match self.selection {
+    CodexNoTask => None
+    CodexDraftTask(draft) =>
+      draft.project_root.bind(root => @resource.of_path(channel, root))
+    CodexStoredTask(thread) => thread.workspace(channel)
   }
+}
+
+///|
+/// A retained registry row with no checkout is deliberately not a usable
+/// cwd. Files, terminal, LSP, and sending remain blocked until the explicit
+/// rebuild recreates that exact path and branch.
+fn State::has_missing_worktree(self : State) -> Bool {
+  self.active_thread() is Some(active) &&
+  active.worktree is Some(worktree) &&
+  !worktree.present
 }
 
 ///|
@@ -337,13 +429,94 @@ pub fn State::active_workspace(
 /// every later task inherit that one checkout; fall back to the exact cwd for
 /// standalone directories.
 pub fn State::new_thread_cwd(self : State) -> String {
-  match self.active {
-    Some(thread) =>
+  match self.selection {
+    CodexDraftTask(draft) => draft.project_root.unwrap_or(draft.cwd)
+    CodexStoredTask(thread) =>
       match thread.project_root {
         Some(project) => project
         None => thread.cwd.unwrap_or("")
       }
-    None => ""
+    CodexNoTask => ""
+  }
+}
+
+///|
+/// The project in which the selected local draft may create a worktree. A
+/// draft receives `project_root` only from `codex.draft.open`; the browser's
+/// original cwd is not enough to offer a filesystem-mutating launch mode.
+pub fn State::worktree_launch_workspace(
+  self : State,
+  channel : @interop.ChannelId,
+) -> @common.Uri? {
+  guard self.active_draft() is Some(draft) &&
+    draft.project_root is Some(root) &&
+    @resource.of_path(channel, root) is Some(workspace) else {
+    return None
+  }
+  Some(workspace)
+}
+
+///|
+fn State::can_choose_worktree(self : State) -> Bool {
+  self.active_draft() is Some(_) && !self.loading
+}
+
+///|
+/// A project draft must wait for the host to confirm its exact root. A draft
+/// created without any selected project can still start an ordinary cwd-less
+/// Codex thread, matching app-server's native Local behavior.
+fn State::can_prompt(self : State) -> Bool {
+  match self.selection {
+    CodexNoTask => false
+    CodexDraftTask(draft) =>
+      draft.cwd.is_empty() || draft.project_root is Some(_)
+    CodexStoredTask(_) => !self.has_missing_worktree()
+  }
+}
+
+///|
+/// Install the host-confirmed project on the same local draft that requested
+/// it. A stale reply from an abandoned draft cannot re-root the current page.
+fn State::with_open_draft(
+  self : State,
+  draft_id : String,
+  value : Json,
+) -> State {
+  guard self.active_draft() is Some(draft) &&
+    draft.id == draft_id &&
+    value is Object(fields) &&
+    @jsonx.json_text(fields, "draftId") == Some(draft_id) &&
+    @jsonx.json_text(fields, "projectRoot") is Some(project_root) else {
+    return { ..self, notice: "Malformed Codex draft workspace reply" }
+  }
+  {
+    ..self,
+    selection: CodexDraftTask({ ..draft, project_root: Some(project_root) }),
+    notice: "",
+  }
+}
+
+///|
+fn State::select_draft(self : State, id : String, cwd : String) -> State {
+  let id = id.trim().to_owned()
+  let cwd = cwd.trim().to_owned()
+  {
+    ..self,
+    selection: CodexDraftTask({ id, cwd, project_root: None }),
+    git_status: None,
+    git_details_open: false,
+    write_access: CodexWritable,
+    draft: "",
+    mentions: [],
+    completion: None,
+    completion_debounce: @composer.Debounce(),
+    file_index: CodexFilesEmpty,
+    skills: CodexSkillsEmpty,
+    symbol_search: CodexSymbolSearchCache::empty(),
+    placement: @composer.LocalCheckout,
+    archive_confirm: None,
+    loading: !cwd.is_empty(),
+    notice: "",
   }
 }
 
@@ -410,6 +583,35 @@ fn CodexTurn::decode(value : Json) -> CodexTurn? {
 }
 
 ///|
+fn CodexWorktree::decode(value : Json) -> CodexWorktree? {
+  guard value is Object(fields) &&
+    @jsonx.json_text(fields, "name") is Some(name) &&
+    @jsonx.json_text(fields, "path") is Some(path) else {
+    return None
+  }
+  Some({ name, path, present: fields.get("present") is Some(True) })
+}
+
+///|
+/// Select the exact registry row created or rebuilt for this Codex owner.
+/// The host reply is authoritative; name alone is insufficient because the
+/// same workspace can contain worktrees owned by OpenSeek conversations.
+fn CodexWorktree::from_create_reply(
+  reply : @protocol.WorktreeCreateReply,
+  thread_id : String,
+) -> CodexWorktree? {
+  for info in reply.worktrees {
+    if info.name == reply.name &&
+      info.codex_thread == Some(thread_id) &&
+      info.present &&
+      !info.path.trim().is_empty() {
+      return Some({ name: info.name, path: info.path, present: true })
+    }
+  }
+  None
+}
+
+///|
 fn CodexThread::decode(value : Json) -> CodexThread? {
   guard value is Object(fields) && @jsonx.json_text(fields, "id") is Some(id) else {
     return None
@@ -427,6 +629,7 @@ fn CodexThread::decode(value : Json) -> CodexThread? {
     title: CodexThreadRow::title(fields),
     cwd: @jsonx.json_text(fields, "cwd"),
     project_root: @jsonx.json_text(fields, "projectRoot"),
+    worktree: fields.get("openseekWorktree").bind(CodexWorktree::decode),
     branch: CodexThreadRow::branch(fields),
     turns,
   })
@@ -441,6 +644,9 @@ fn CodexThread::workspace(
   self : CodexThread,
   channel : @interop.ChannelId,
 ) -> @common.Uri? {
+  if self.worktree is Some(worktree) && !worktree.present {
+    return None
+  }
   match self.cwd {
     Some(cwd) if !cwd.trim().is_empty() => @resource.of_path(channel, cwd)
     _ => None
@@ -570,13 +776,14 @@ fn State::with_threads(self : State, value : Json) -> State {
       title: CodexThreadRow::title(thread),
       cwd: @jsonx.json_text(thread, "cwd"),
       project_root: @jsonx.json_text(thread, "projectRoot"),
+      worktree: thread.get("openseekWorktree").bind(CodexWorktree::decode),
     })
   }
   // A just-started thread may not be present in the first state-DB page yet,
   // especially when the 100-row catalog is full. Its `thread/start` reply is
   // newer and authoritative, so do not let an older list snapshot erase the
   // active row from the navigation rail.
-  let visible = if self.active is Some(active) &&
+  let visible = if self.active_thread() is Some(active) &&
     !threads.iter().any(thread => thread.id == active.id) {
     let visible : Array[CodexThreadRow] = [
       {
@@ -584,6 +791,7 @@ fn State::with_threads(self : State, value : Json) -> State {
         title: active.title,
         cwd: active.cwd,
         project_root: active.project_root,
+        worktree: active.worktree,
       },
     ]
     for thread in threads {
@@ -639,6 +847,7 @@ fn State::with_thread_reply(self : State, value : Json) -> State {
     title: active.title,
     cwd: active.cwd,
     project_root: active.project_root,
+    worktree: active.worktree,
   }
   let threads : Array[CodexThreadRow] = []
   let mut replaced = false
@@ -662,7 +871,7 @@ fn State::with_thread_reply(self : State, value : Json) -> State {
   {
     ..self,
     threads: visible,
-    active: Some(active),
+    selection: CodexStoredTask(active),
     git_status: Some({
       thread_id: active.id,
       branch: active.branch,
@@ -670,8 +879,64 @@ fn State::with_thread_reply(self : State, value : Json) -> State {
       compare_url: None,
     }),
     git_details_open: false,
+    placement: match active.worktree {
+      Some(worktree) => @composer.BoundWorktree(worktree.name)
+      None if self.placement is @composer.FreshWorktree &&
+        (
+          self.active_draft() is Some(_) ||
+          (self.active_thread() is Some(previous) && previous.id == active.id)
+        ) => @composer.FreshWorktree
+      None => @composer.LocalCheckout
+    },
     loading: false,
     notice: "",
+  }
+}
+
+///|
+/// Apply app-server's authoritative cwd update to the active task and its
+/// sidebar row without moving that row. The project root and explicit
+/// SeekMoon worktree ownership remain separate annotations.
+fn State::with_active_cwd(
+  self : State,
+  active : CodexThread,
+  cwd : String,
+) -> State {
+  let active = { ..active, cwd: Some(cwd) }
+  {
+    ..self,
+    selection: CodexStoredTask(active),
+    threads: self.threads.map(thread => {
+      if thread.id == active.id {
+        { ..thread, cwd: Some(cwd) }
+      } else {
+        thread
+      }
+    }),
+  }
+}
+
+///|
+/// Bind the just-created checkout before rendering the first turn. The host
+/// has already persisted this owner/path pair and authorized it for files,
+/// terminals, and language operations.
+fn State::with_created_worktree(
+  self : State,
+  worktree : CodexWorktree,
+) -> State {
+  guard self.active_thread() is Some(active) else { return self }
+  let active = { ..active, cwd: Some(worktree.path), worktree: Some(worktree) }
+  {
+    ..self,
+    selection: CodexStoredTask(active),
+    placement: @composer.BoundWorktree(worktree.name),
+    threads: self.threads.map(thread => {
+      if thread.id == active.id {
+        { ..thread, cwd: Some(worktree.path), worktree: Some(worktree) }
+      } else {
+        thread
+      }
+    }),
   }
 }
 
@@ -684,7 +949,7 @@ fn State::with_git_reply(
   thread_id : String,
   reply : @protocol.GitPullRequestReply,
 ) -> State {
-  guard self.active is Some(active) && active.id == thread_id else {
+  guard self.active_thread() is Some(active) && active.id == thread_id else {
     return self
   }
   {
@@ -722,21 +987,33 @@ pub fn Msg::close_git_details() -> Msg {
 
 ///|
 fn State::without_thread(self : State, thread_id : String) -> State {
+  let removing_active = self.active_thread() is Some(active) &&
+    active.id == thread_id
   {
     ..self,
     threads: self.threads.filter(thread => thread.id != thread_id),
-    active: match self.active {
-      Some(active) if active.id == thread_id => None
-      other => other
+    selection: if removing_active {
+      CodexNoTask
+    } else {
+      self.selection
     },
     git_status: match self.git_status {
       Some(status) if status.thread_id == thread_id => None
       other => other
     },
-    write_access: if self.active is Some(active) && active.id == thread_id {
+    write_access: if removing_active {
       CodexNeedsResume
     } else {
       self.write_access
+    },
+    placement: if removing_active {
+      @composer.LocalCheckout
+    } else {
+      self.placement
+    },
+    archive_confirm: match self.archive_confirm {
+      Some(confirm) if confirm.thread_id == thread_id => None
+      other => other
     },
   }
 }
@@ -753,7 +1030,7 @@ fn State::with_login(self : State, value : Json) -> State {
 
 ///|
 fn State::is_running(self : State) -> Bool {
-  guard self.active is Some(active) else { return false }
+  guard self.active_thread() is Some(active) else { return false }
   active.turns.iter().any(turn => turn.is_running())
 }
 
@@ -770,7 +1047,7 @@ fn State::is_running_elsewhere(self : State) -> Bool {
 
 ///|
 fn State::active_turn_id(self : State) -> String? {
-  guard self.active is Some(active) else { return None }
+  guard self.active_thread() is Some(active) else { return None }
   for index = active.turns.length() - 1; index >= 0; index = index - 1 {
     if active.turns[index].status == "inProgress" {
       return Some(active.turns[index].id)
@@ -881,13 +1158,13 @@ fn CodexThread::with_turn_activity(
 fn State::with_activity_reply(self : State, value : Json) -> State {
   guard value is Object(fields) &&
     @jsonx.json_text(fields, "threadId") is Some(thread_id) &&
-    self.active is Some(active) &&
+    self.active_thread() is Some(active) &&
     active.id == thread_id &&
     fields.get("turn") is Some(turn) &&
     CodexTurn::decode(turn) is Some(activity) else {
     return self
   }
-  { ..self, active: Some(active.with_turn_activity(activity)) }
+  { ..self, selection: CodexStoredTask(active.with_turn_activity(activity)) }
 }
 
 ///|
@@ -959,21 +1236,28 @@ fn State::with_notification(
     @jsonx.json_text(fields, "threadId") is Some(thread_id) {
     return self.without_thread(thread_id)
   }
-  guard self.active is Some(active) &&
+  guard self.active_thread() is Some(active) &&
     @jsonx.json_text(fields, "threadId").unwrap_or(active.id) == active.id else {
     return self
   }
   match method_ {
     "thread/name/updated" =>
       if @jsonx.json_text(fields, "name") is Some(title) {
-        { ..self, active: Some({ ..active, title, }) }
+        { ..self, selection: CodexStoredTask({ ..active, title, }) }
+      } else {
+        self
+      }
+    "thread/settings/updated" =>
+      if fields.get("threadSettings") is Some(Object(settings)) &&
+        @jsonx.json_text(settings, "cwd") is Some(cwd) {
+        self.with_active_cwd(active, cwd)
       } else {
         self
       }
     "turn/started" | "turn/completed" =>
       if fields.get("turn") is Some(value) &&
         CodexTurn::decode(value) is Some(turn) {
-        { ..self, active: Some(active.with_turn(turn)) }
+        { ..self, selection: CodexStoredTask(active.with_turn(turn)) }
       } else {
         self
       }
@@ -983,7 +1267,7 @@ fn State::with_notification(
         CodexItem::decode(value) is Some(item) {
         {
           ..self,
-          active: Some(
+          selection: CodexStoredTask(
             active.with_item(
               turn_id,
               item,
@@ -1002,7 +1286,10 @@ fn State::with_notification(
       if @jsonx.json_text(fields, "turnId") is Some(turn_id) &&
         @jsonx.json_text(fields, "itemId") is Some(item_id) &&
         @jsonx.json_text(fields, "delta") is Some(delta) {
-        { ..self, active: Some(active.with_delta(turn_id, item_id, delta)) }
+        {
+          ..self,
+          selection: CodexStoredTask(active.with_delta(turn_id, item_id, delta)),
+        }
       } else {
         self
       }
@@ -1395,7 +1682,7 @@ pub fn State::transcript_items(
       sequence: None,
     })
   }
-  if self.active is Some(active) {
+  if self.active_thread() is Some(active) {
     for turn in active.turns {
       for item in turn.items {
         items.push(item.transcript_item())
@@ -1539,7 +1826,7 @@ test "Codex archive notification closes the active thread" {
   let settled = state.with_notification("thread/archived", {
     "threadId": "thread-1",
   })
-  assert_true(settled.active is None)
+  assert_true(settled.active_thread() is None)
   assert_eq(settled.threads.length(), 0)
 }
 
@@ -1558,6 +1845,19 @@ test "Codex thread replies are visible before catalog refresh" {
   assert_eq(state.threads[0].id, "thread-1")
   assert_eq(state.threads[0].title, "Smoke test")
   assert_eq(state.threads[0].project_root, Some("/project"))
+  assert_eq(state.worktree_launch_workspace(@interop.ChannelId::Local), None)
+  let external_worktree = State().with_thread_reply({
+    "thread": {
+      "id": "thread-external",
+      "cwd": "/external/worktree",
+      "projectRoot": "/project",
+      "turns": [],
+    },
+  })
+  assert_eq(
+    external_worktree.worktree_launch_workspace(@interop.ChannelId::Local),
+    None,
+  )
   let refreshed = state.with_threads({ "data": [] })
   assert_eq(refreshed.threads.length(), 1)
   assert_eq(refreshed.threads[0].id, "thread-1")

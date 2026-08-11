@@ -190,22 +190,26 @@ fn CodexCompletionItem::from_symbol(
 
 ///|
 fn State::search_owner(self : State, query : String) -> CodexSearchOwner? {
-  guard self.active is Some(active) &&
-    active.cwd is Some(cwd) &&
-    !cwd.trim().is_empty() else {
-    return None
-  }
-  Some({ thread_id: active.id, cwd, query })
+  self
+  .file_owner()
+  .map(owner => { thread_id: owner.thread_id, cwd: owner.cwd, query })
 }
 
 ///|
 fn State::file_owner(self : State) -> CodexFileOwner? {
-  guard self.active is Some(active) &&
-    active.cwd is Some(cwd) &&
-    !cwd.trim().is_empty() else {
-    return None
+  match self.selection {
+    CodexDraftTask(draft) =>
+      draft.project_root.map(cwd => { thread_id: draft.id, cwd })
+    CodexStoredTask(active) => {
+      guard !self.has_missing_worktree() &&
+        active.cwd is Some(cwd) &&
+        !cwd.trim().is_empty() else {
+        return None
+      }
+      Some({ thread_id: active.id, cwd })
+    }
+    CodexNoTask => None
   }
-  Some({ thread_id: active.id, cwd })
 }
 
 ///|
@@ -271,9 +275,8 @@ fn CodexCompletion::for_draft(state : State, text : String) -> CodexCompletion? 
       }
     }
     CodexSkills => {
-      let (items, loading) = match state.active {
-        Some(active) if active.cwd is Some(cwd) =>
-          state.skills.search(cwd, trigger)
+      let (items, loading) = match state.file_owner() {
+        Some(owner) => state.skills.search(owner.cwd, trigger)
         _ => ([], false)
       }
       Some({
@@ -370,22 +373,14 @@ fn State::with_files(
   files : Array[@pathx.Relative],
   truncated : Bool,
 ) -> State {
-  guard self.active is Some(active) &&
-    active.id == owner.thread_id &&
-    active.cwd == Some(owner.cwd) else {
-    return self
-  }
+  guard self.file_owner() == Some(owner) else { return self }
   let next = { ..self, file_index: CodexFilesReady(owner, files, truncated) }
   { ..next, completion: CodexCompletion::for_draft(next, next.draft) }
 }
 
 ///|
 fn State::with_file_failure(self : State, owner : CodexFileOwner) -> State {
-  guard self.active is Some(active) &&
-    active.id == owner.thread_id &&
-    active.cwd == Some(owner.cwd) else {
-    return self
-  }
+  guard self.file_owner() == Some(owner) else { return self }
   // A refresh failure must not discard a usable index already shown for this
   // owner. Initial failures settle the loading menu as empty and retryable.
   let file_index = match self.file_index {
@@ -402,7 +397,7 @@ fn State::with_skills(
   cwd : String,
   skills : Array[CodexSkill],
 ) -> State {
-  guard self.active is Some(active) && active.cwd == Some(cwd) else {
+  guard self.file_owner() is Some(owner) && owner.cwd == cwd else {
     return self
   }
   let next = { ..self, skills: CodexSkillsReady(cwd, skills) }
@@ -411,7 +406,7 @@ fn State::with_skills(
 
 ///|
 fn State::with_skill_failure(self : State, cwd : String) -> State {
-  guard self.active is Some(active) && active.cwd == Some(cwd) else {
+  guard self.file_owner() is Some(owner) && owner.cwd == cwd else {
     return self
   }
   // Keep a previously rendered catalog across a transient refresh failure.
@@ -451,9 +446,9 @@ fn State::with_symbols(
   symbols : Array[@symbols.Symbol],
 ) -> State {
   guard self.completion_debounce.accepts(generation) &&
-    self.active is Some(active) &&
-    active.id == owner.thread_id &&
-    active.cwd == Some(owner.cwd) &&
+    self.file_owner() is Some(current) &&
+    current.thread_id == owner.thread_id &&
+    current.cwd == owner.cwd &&
     @composer.Trigger::parse(self.draft, inline_markers="$#@") is Some(trigger) &&
     trigger.marker() == "#" &&
     trigger.query() == owner.query &&
@@ -502,9 +497,8 @@ fn State::change_draft(
             { ..next, file_index: CodexFilesLoading(owner) },
           )
       }
-    Some(trigger) if trigger.marker() == "$" &&
-      next.active is Some(active) &&
-      active.cwd is Some(cwd) =>
+    Some(trigger) if trigger.marker() == "$" && next.file_owner() is Some(owner) => {
+      let cwd = owner.cwd
       match next.skills {
         CodexSkillsReady(current, _) if current == cwd => (@cmd.none, next)
         CodexSkillsLoading(current) if current == cwd => (@cmd.none, next)
@@ -514,6 +508,7 @@ fn State::change_draft(
             { ..next, skills: CodexSkillsLoading(cwd) },
           )
       }
+    }
     _ => (@cmd.none, next)
   }
   (
@@ -535,9 +530,9 @@ fn State::begin_completion_search(
   generation : Int,
 ) -> (@cmd.Cmd, State) {
   guard self.completion_debounce.accepts(generation) &&
-    self.active is Some(active) &&
-    active.id == owner.thread_id &&
-    active.cwd == Some(owner.cwd) &&
+    self.file_owner() is Some(current) &&
+    current.thread_id == owner.thread_id &&
+    current.cwd == owner.cwd &&
     @composer.Trigger::parse(self.draft, inline_markers="$#@") is Some(trigger) &&
     CodexCompletionKind::of_trigger(trigger) == Some(kind) &&
     trigger.query() == owner.query &&

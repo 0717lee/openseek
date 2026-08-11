@@ -77,6 +77,19 @@ async fn ProjectCatalog::resolve(
 }
 
 ///|
+/// Confirm that an add action names the main project itself, rather than one
+/// of that project's linked worktrees or an arbitrary subdirectory. A
+/// standalone non-Git directory resolves to itself and remains supported.
+pub async fn ProjectCatalog::main_project(
+  self : ProjectCatalog,
+  cwd : String,
+) -> String? {
+  let cwd = cwd.trim().to_owned()
+  guard !cwd.is_empty() && self.resolve(cwd) == Some(cwd) else { return None }
+  Some(cwd)
+}
+
+///|
 /// Add OpenSeek's `projectRoot` extension to one app-server thread object.
 /// All original app-server fields stay byte-for-byte equivalent as JSON data;
 /// an unavailable/deleted cwd is left without a project instead of being
@@ -136,6 +149,18 @@ test "Codex project catalog maps every linked worktree to the main checkout" {
     catalog.roots.get("/Users/me/.codex/worktrees/dd8c/openseek"),
     Some(Some("/Users/me/src/openseek")),
   )
+}
+
+///|
+async test "Codex draft projects accept only the main checkout" {
+  let catalog = ProjectCatalog()
+  catalog.roots["/workspace/project"] = Some("/workspace/project")
+  catalog.roots["/worktrees/a/project"] = Some("/workspace/project")
+  assert_eq(
+    catalog.main_project("/workspace/project"),
+    Some("/workspace/project"),
+  )
+  assert_true(catalog.main_project("/worktrees/a/project") is None)
 }
 
 ///|

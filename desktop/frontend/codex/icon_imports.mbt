@@ -13,4 +13,5 @@ using @icons {
   icon_link_external,
   icon_pull_request,
   icon_terminal,
+  icon_worktree,
 }

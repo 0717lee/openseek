@@ -2727,28 +2727,30 @@ fn update_msg(
           None => ""
         }
       }
-      let (cmd, codex) = @codex.update(
-        dispatch.map(msg => Codex(msg)),
-        @codex.Msg::start_thread(cwd),
-        model.codex,
-        model.focused,
-        url => open_external_link(dispatch, url),
-      )
       (
-        cmd,
+        CodexDraftRotation::{ cwd, }.rotate(dispatch),
         {
           ..model,
           screen: Codex,
           sidebar_open: model.sidebar_open && !model.narrow,
           codex_collapsed: false,
-          codex,
         },
       )
     }
-    CodexNewThreadIn(cwd) => {
+    CodexNewThreadIn(cwd) =>
+      (
+        CodexDraftRotation::{ cwd, }.rotate(dispatch),
+        {
+          ..model,
+          screen: Codex,
+          sidebar_open: model.sidebar_open && !model.narrow,
+          codex_collapsed: false,
+        },
+      )
+    CodexDraftRotated(cwd~, id~) => {
       let (cmd, codex) = @codex.update(
         dispatch.map(msg => Codex(msg)),
-        @codex.Msg::start_thread(cwd),
+        @codex.Msg::start_draft(id, cwd),
         model.codex,
         model.focused,
         url => open_external_link(dispatch, url),
@@ -18350,6 +18352,7 @@ test "file rows and location jumps cannot open while checkout placement is missi
               name: "wt",
               session: Some("desktop-test"),
               path: None,
+              codex_thread: None,
               present: false,
             },
           ],

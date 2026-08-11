@@ -61,27 +61,159 @@ pub fn State::refresh(
 }
 
 ///|
-fn State::start_thread(
+fn State::open_draft(
   self : State,
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
+  draft_id : String,
   cwd : String,
 ) -> @cmd.Cmd {
-  let fields : Map[String, Json] = Map([])
-  let model = self.selected_model.trim()
-  if !model.is_empty() {
-    fields["model"] = Json::string(model.to_owned())
+  // A queued add action may be overtaken by another project row. Only the
+  // draft still selected by the model may acquire host filesystem authority.
+  guard self.active_draft() is Some(draft) &&
+    draft.id == draft_id &&
+    draft.cwd == cwd else {
+    return @cmd.none
   }
-  let cwd = cwd.trim()
-  if !cwd.is_empty() {
-    fields["cwd"] = Json::string(cwd.to_owned())
-  }
-  CodexNewThreadReply.request(
+  CodexDraftOpenReply(draft_id).request(
     dispatch,
     channel,
-    @commands.codex_thread_start,
-    Json::object(fields),
+    @commands.codex_draft_open,
+    { "draft_id": draft_id, "cwd": cwd },
   )
+}
+
+///|
+fn State::close_draft(
+  self : State,
+  channel : @interop.ChannelId,
+  draft_id : String,
+) -> @cmd.Cmd {
+  guard self.active_draft() is Some(draft) && draft.id == draft_id else {
+    return @cmd.none
+  }
+  @cmd.custom_cmd(_scheduler => {
+    @js.async_run(() => {
+      ignore(
+        try
+          @interop.bridge_request(channel, @commands.codex_draft_close, {
+            "draft_id": draft_id,
+          })
+        catch {
+          _ => Json::object({})
+        } noraise {
+          value => value
+        },
+      )
+    })
+  })
+}
+
+///|
+/// Everything needed for the first half of Send. `thread/start` is deliberately
+/// its own command: the reply must install the real thread in the model before
+/// `turn/start` can emit notifications, otherwise those notifications could
+/// arrive while the page still selects the client-local draft and be dropped.
+priv struct CodexDraftThreadRequest {
+  draft_id : String
+  cwd : String?
+  model : String
+}
+
+///|
+fn CodexDraftThreadRequest::run(
+  self : CodexDraftThreadRequest,
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+) -> @cmd.Cmd {
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      @interop.in_ordered_lane(
+        @interop.session_command_lane(channel, self.draft_id),
+        () => {
+          let start_fields : Map[String, Json] = Map([])
+          if self.cwd is Some(cwd) {
+            start_fields["cwd"] = Json::string(cwd)
+          }
+          if !self.model.is_empty() {
+            start_fields["model"] = Json::string(self.model)
+          }
+          let thread_reply : Json = @interop.bridge_request(
+            channel,
+            @commands.codex_thread_start,
+            Json::object(start_fields),
+          ) catch {
+            error => {
+              scheduler.add(
+                dispatch(
+                  Failed(
+                    kind=CodexDraftThreadReply,
+                    message=@interop.bridge_error_text(error),
+                  ),
+                ),
+              )
+              return
+            }
+          }
+          guard thread_reply is Object(reply_fields) &&
+            reply_fields.get("thread") is Some(Object(thread_fields)) &&
+            @jsonx.json_text(thread_fields, "id") is Some(_) else {
+            scheduler.add(
+              dispatch(
+                Failed(
+                  kind=CodexDraftThreadReply,
+                  message="malformed Codex thread.start reply",
+                ),
+              ),
+            )
+            return
+          }
+          ignore(
+            try
+              @interop.bridge_request(channel, @commands.codex_draft_close, {
+                "draft_id": self.draft_id,
+              })
+            catch {
+              _ => Json::object({})
+            } noraise {
+              value => value
+            },
+          )
+          scheduler.add(
+            dispatch(Reply(kind=CodexDraftThreadReply, value=thread_reply)),
+          )
+        },
+      ) catch {
+        error =>
+          scheduler.add(
+            dispatch(
+              Failed(
+                kind=CodexDraftThreadReply,
+                message="Codex thread start failed: \{error}",
+              ),
+            ),
+          )
+      }
+    })
+  })
+}
+
+///|
+fn State::start_draft_thread(
+  self : State,
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+) -> @cmd.Cmd {
+  guard self.active_draft() is Some(draft) &&
+    (draft.cwd.is_empty() || draft.project_root is Some(_)) &&
+    !self.input_empty() else {
+    return @cmd.none
+  }
+  CodexDraftThreadRequest::{
+    draft_id: draft.id,
+    cwd: draft.project_root,
+    model: self.selected_model.trim().to_owned(),
+  }.run(dispatch, channel)
 }
 
 ///|
@@ -110,7 +242,7 @@ fn State::poll_activity(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
 ) -> @cmd.Cmd {
-  guard self.active is Some(active) else { return @cmd.none }
+  guard self.active_thread() is Some(active) else { return @cmd.none }
   CodexActivityReply.request(
     dispatch,
     channel,
@@ -129,7 +261,7 @@ fn State::refresh_git(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
 ) -> @cmd.Cmd {
-  guard self.active is Some(active) && active.cwd is Some(cwd) else {
+  guard self.active_thread() is Some(active) && active.cwd is Some(cwd) else {
     return @cmd.none
   }
   let thread_id = active.id
@@ -157,7 +289,7 @@ fn State::resume_for_send(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
 ) -> @cmd.Cmd {
-  guard self.active is Some(active) else { return @cmd.none }
+  guard self.active_thread() is Some(active) else { return @cmd.none }
   let thread_id = active.id
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
@@ -194,9 +326,9 @@ fn State::send(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
 ) -> @cmd.Cmd {
-  guard self.active is Some(active) else { return @cmd.none }
-  let text = self.prompt_text()
+  guard self.active_thread() is Some(active) else { return @cmd.none }
   guard !self.input_empty() else { return @cmd.none }
+  let text = self.prompt_text()
   let inputs : Array[Json] = []
   if !text.is_empty() {
     inputs.push({ "type": "text", "text": text })
@@ -217,6 +349,14 @@ fn State::send(
       Json::object(fields),
     )
   } else {
+    if self.placement.wants_fresh() && active.turns.is_empty() {
+      let workspace = active.project_root.unwrap_or_else(() => {
+        active.cwd.unwrap_or("")
+      })
+      return self.start_turn_in_new_worktree(
+        dispatch, channel, active, workspace, inputs,
+      )
+    }
     let model = self.selected_model.trim()
     if !model.is_empty() {
       fields["model"] = Json::string(model.to_owned())
@@ -228,6 +368,104 @@ fn State::send(
       Json::object(fields),
     )
   }
+}
+
+///|
+/// The shared first-send placement flow's Codex adapter: invoke the same
+/// owner-aware `worktree.create` used by OpenSeek, then differ only at the
+/// final backend call by starting an app-server turn with that exact cwd.
+/// The whole chain occupies this thread's ordered lane so a repeated Send
+/// cannot overtake the create or start it just requested.
+fn State::start_turn_in_new_worktree(
+  self : State,
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  active : CodexThread,
+  workspace : String,
+  inputs : Array[Json],
+) -> @cmd.Cmd {
+  let thread_id = active.id
+  let model = self.selected_model.trim().to_owned()
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      @interop.in_ordered_lane(
+        @interop.session_command_lane(channel, thread_id),
+        () => {
+          let reply : @protocol.WorktreeCreateReply = @interop.bridge_request(
+            channel,
+            @commands.worktree_create,
+            { workspace, session: None, codex_thread: Some(thread_id) },
+          ) catch {
+            error => {
+              let detail = @interop.bridge_error_text(error)
+              let message = match @interop.bridge_failure(error) {
+                Refused | Unsent => "worktree setup failed: " + detail
+                Unknown =>
+                  "worktree setup could not be confirmed (" +
+                  detail +
+                  ") — this task may already own a new worktree; the prompt was not resent"
+              }
+              scheduler.add(dispatch(Failed(kind=CodexTurnReply, message~)))
+              return
+            }
+          }
+          guard CodexWorktree::from_create_reply(reply, thread_id)
+            is Some(worktree) else {
+            scheduler.add(
+              dispatch(
+                Failed(
+                  kind=CodexTurnReply,
+                  message="malformed worktree.create reply",
+                ),
+              ),
+            )
+            return
+          }
+          let fields : Map[String, Json] = {
+            "threadId": Json::string(thread_id),
+            "input": Json::array(inputs),
+            "cwd": Json::string(worktree.path),
+          }
+          if !model.is_empty() {
+            fields["model"] = Json::string(model)
+          }
+          let value : Json = @interop.bridge_request(
+            channel,
+            @commands.codex_turn_start,
+            Json::object(fields),
+          ) catch {
+            error => {
+              scheduler.add(
+                dispatch(
+                  Failed(
+                    kind=CodexTurnReply,
+                    message=@interop.bridge_error_text(error),
+                  ),
+                ),
+              )
+              return
+            }
+          }
+          scheduler.add(
+            dispatch(Reply(kind=CodexWorktreeTurnReply(worktree), value~)),
+          )
+        },
+      ) catch {
+        // The lane only wakes its waiters and the body handles every request
+        // error. Its generic type still permits a failure, so keep an actual
+        // unexpected lane fault visible instead of dropping the draft.
+        error =>
+          scheduler.add(
+            dispatch(
+              Failed(
+                kind=CodexTurnReply,
+                message="worktree start failed: \{error}",
+              ),
+            ),
+          )
+      }
+    })
+  })
 }
 
 ///|
@@ -320,10 +558,9 @@ fn State::load_skills(
   channel : @interop.ChannelId,
   force_reload~ : Bool,
 ) -> @cmd.Cmd {
-  guard self.active is Some(active) && active.cwd is Some(cwd) else {
-    return @cmd.none
-  }
-  let thread_id = active.id
+  guard self.file_owner() is Some(owner) else { return @cmd.none }
+  let thread_id = owner.thread_id
+  let cwd = owner.cwd
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
       let value : Json = @interop.bridge_request(
@@ -373,7 +610,7 @@ fn State::compact(
   channel : @interop.ChannelId,
   original : String,
 ) -> @cmd.Cmd {
-  guard self.active is Some(active) else { return @cmd.none }
+  guard self.active_thread() is Some(active) else { return @cmd.none }
   CodexCompactReply(original).request(
     dispatch,
     channel,
@@ -389,7 +626,7 @@ fn State::review(
   channel : @interop.ChannelId,
   original : String,
 ) -> @cmd.Cmd {
-  guard self.active is Some(active) else { return @cmd.none }
+  guard self.active_thread() is Some(active) else { return @cmd.none }
   CodexReviewReply(original).request(
     dispatch,
     channel,
@@ -404,7 +641,8 @@ fn State::interrupt(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
 ) -> @cmd.Cmd {
-  guard self.active is Some(active) && self.active_turn_id() is Some(turn_id) else {
+  guard self.active_thread() is Some(active) &&
+    self.active_turn_id() is Some(turn_id) else {
     return @cmd.none
   }
   CodexMutationReply.request(
@@ -421,13 +659,67 @@ fn State::archive(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
   thread_id : String,
+  force : Bool,
 ) -> @cmd.Cmd {
   CodexArchiveReply(thread_id).request(
     dispatch,
     channel,
     @commands.codex_thread_archive,
-    { "threadId": thread_id },
+    { "threadId": thread_id, "force": force },
   )
+}
+
+///|
+/// Recreate a missing Desktop-owned checkout through the same idempotent
+/// `worktree.create` operation as the first-send path. The retained registry
+/// row selects the original name and branch; no new Codex turn is started.
+fn State::repair_worktree(
+  self : State,
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+) -> @cmd.Cmd {
+  guard self.active_thread() is Some(active) &&
+    active.worktree is Some(worktree) &&
+    !worktree.present &&
+    active.project_root is Some(workspace) else {
+    return @cmd.none
+  }
+  let thread_id = active.id
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      let reply : @protocol.WorktreeCreateReply = @interop.bridge_request(
+        channel,
+        @commands.worktree_create,
+        { workspace, session: None, codex_thread: Some(thread_id) },
+      ) catch {
+        error => {
+          scheduler.add(
+            dispatch(
+              Failed(
+                kind=CodexWorktreeRepairReply(worktree),
+                message=@interop.bridge_error_text(error),
+              ),
+            ),
+          )
+          return
+        }
+      }
+      guard CodexWorktree::from_create_reply(reply, thread_id) is Some(rebuilt) else {
+        scheduler.add(
+          dispatch(
+            Failed(
+              kind=CodexWorktreeRepairReply(worktree),
+              message="malformed worktree.create reply",
+            ),
+          ),
+        )
+        return
+      }
+      scheduler.add(
+        dispatch(Reply(kind=CodexWorktreeRepairReply(rebuilt), value={})),
+      )
+    })
+  })
 }
 
 ///|
