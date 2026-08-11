@@ -152,7 +152,7 @@ async fn read_file(
           output <+ "\{prefix}\{line}"
           remaining = remaining - prefix_budget - line_units
         } else {
-          output <+ "\{prefix}\{@utils.code_unit_prefix(line, available)}"
+          output <+ "\{prefix}\{line.clamped_view(end=available)}"
           remaining = 0
           truncated = true
           shown_lines += 1
