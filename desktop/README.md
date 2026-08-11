@@ -222,9 +222,7 @@ The launcher detects the desktop workspace, builds the frontend, engine, and
 native host with Moon's normal incremental build, prepares the checked-out
 Proton/CEF runtime, and launches the bare host. The first CEF setup may download
 a large archive; later development and platform-package runs reuse the
-validated assembled runtime without installing or invoking the Proton CLI. If
-`PROTON_NATIVE_DIST` already names a prepared runtime, the launcher uses it
-without requiring another path argument.
+validated assembled runtime without installing or invoking the Proton CLI.
 
 The executable implementation lives in `package/dev`; it accepts no path or
 build-mode arguments.
