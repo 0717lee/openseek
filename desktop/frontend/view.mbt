@@ -1763,11 +1763,10 @@ fn mention_tray(dispatch : @cmd.Emit[Msg], conv : Conversation) -> @html.Html {
 ///|
 
 ///|
-/// The console's connection banner: a permanent first child of the composer
-/// whose class flips visibility — inserting it conditionally would shift
-/// the composer-inner index and rebuild the textarea, dropping focus the
-/// moment the connection hiccups mid-typing. Desktop keeps the full-screen
-/// overlay instead and renders this hidden.
+/// The console's connection banner: a permanent first child of the composer's
+/// context row whose class flips visibility. Keeping that row stable preserves
+/// the plan panel's DOM state while the connection changes. Desktop keeps the
+/// full-screen overlay instead and renders this hidden.
 fn connection_banner(model : Model) -> @html.Html {
   let visible = model.console is Some(_) &&
     model.bridge_state() is BridgeLost(_)
@@ -1880,29 +1879,29 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
       ),
     )
   }
-  // Permanent first children (see `connection_banner`) so the later children's
-  // indices never shift when the connection drops mid-typing. The standing
-  // plan's slot is permanent for the same reason: a plan appearing or clearing
-  // mid-turn must not renumber the composer's children under the textarea.
-  let children : Array[@html.Html] = [
+  // Keep every row above the input in one permanent context container. Beside
+  // a tall terminal this is the only auxiliary vertical scroller, so plans and
+  // notices yield space before the textarea or toolbar can disappear. Its
+  // first two children remain permanent to preserve the plan panel's DOM state.
+  let context : Array[@html.Html] = [
     connection_banner(model),
     @plan.panel(conv.visible_items()),
   ]
   if !conv.pending_steers().is_empty() {
-    children.push(pending_steers_panel(conv))
+    context.push(pending_steers_panel(conv))
   }
   // The requested phase reads as compacting already: the distinction (the
   // host may still be spawning the engine) is not the user's problem.
   match conv.compaction {
     Requested | Compacting =>
-      children.push(
+      context.push(
         @html.div(class="composer-notice", [
           @html.span(class="composer-notice-icon", icon(icon_fold)),
           @html.span(class="composer-notice-text", "Compacting context…"),
         ]),
       )
     Queued =>
-      children.push(
+      context.push(
         @html.div(class="composer-notice", [
           @html.span(class="composer-notice-icon", icon(icon_fold)),
           @html.span(
@@ -1918,7 +1917,7 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   // checkout, so the composer explains that and offers both ways out.
   match checkout {
     None =>
-      children.push(
+      context.push(
         @html.div(class="composer-notice", [
           @html.span(
             class="composer-notice-text",
@@ -1934,7 +1933,7 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
         ]),
       )
     Some(@interop.MissingWorktree(name~)) =>
-      children.push(
+      context.push(
         missing_worktree_notice(dispatch, conv.device, conv.session_id, name),
       )
     Some(_) => ()
@@ -1942,7 +1941,7 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   // The goal row rides the same slot as the compaction notice: what the
   // composer is editing, or what stands. Pushed unconditionally — see
   // `goal_banner` for why it collapses instead of leaving.
-  children.push(
+  context.push(
     goal_banner(
       dispatch,
       conv.goal,
@@ -1993,7 +1992,13 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   if model.completion is Some(completion) {
     inner.push(completion_popup(dispatch, completion))
   }
-  children.push(@html.div(class="composer-inner", inner))
+  // The context and input wrappers are both permanent siblings. Conditional
+  // rows can change inside the context without renumbering or rebuilding the
+  // focus-holding textarea subtree.
+  let children : Array[@html.Html] = [
+    @html.div(class="composer-context", context),
+    @html.div(class="composer-inner", inner),
+  ]
   @html.section(class="composer", children)
 }
 
