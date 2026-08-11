@@ -30,11 +30,11 @@ pub fn Model::api_key(
 ) -> String? {
   // `trim` yields a borrowed view; the caller owns the key, so copy out.
   match (self, opts) {
-    (_, { "api-key": [k, ..], .. }) if not(k.is_blank()) =>
+    (_, { "api-key": [k, ..], .. }) if !k.is_blank() =>
       Some(k.trim().to_owned())
-    (Deepseek(_), { "deepseek-api-key": [k, ..], .. }) if not(k.is_blank()) =>
+    (Deepseek(_), { "deepseek-api-key": [k, ..], .. }) if !k.is_blank() =>
       Some(k.trim().to_owned())
-    (Kimi(_), { "kimi-api-key": [k, ..], .. }) if not(k.is_blank()) =>
+    (Kimi(_), { "kimi-api-key": [k, ..], .. }) if !k.is_blank() =>
       Some(k.trim().to_owned())
     _ => None
   }

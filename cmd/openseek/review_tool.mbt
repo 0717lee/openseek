@@ -59,7 +59,7 @@ async fn execute_review(
   arguments : Json,
 ) -> @agent_tool.ToolAction {
   let focus : String? = match arguments {
-    { "focus": String(focus), .. } if not(focus.is_blank()) => Some(focus)
+    { "focus": String(focus), .. } if !focus.is_blank() => Some(focus)
     _ => None
   }
   let (standing_goal, baseline) = context()
