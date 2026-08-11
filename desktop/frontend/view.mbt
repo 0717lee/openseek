@@ -1951,41 +1951,44 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
     ),
   )
   let inner : Array[@html.Html] = [
-    // First child, always present, so the textarea's index never shifts (which
-    // would rebuild the node and drop focus) as chips come and go.
-    mention_tray(dispatch, conv),
-    @html.textarea(
-      id="task",
-      value=if goal_editor is Some(editor) { editor.draft } else { conv.task },
-      placeholder=if goal_mode {
-        "Describe the standing goal for this conversation — Enter sets it, Esc cancels."
-      } else if conv.is_running() {
-        "Steer the running task — your message joins it at the next step."
-      } else {
-        "Ask OpenSeek to inspect, edit, or explain this workspace."
-      },
-      on_input=dispatch.map(value => {
-        if goal_mode {
-          GoalDraftEdited(value)
+    // Only this stable wrapper scrolls when a tall terminal leaves little room
+    // for the composer. The toolbar and upward-opening menus stay outside its
+    // clip, while the permanent tray keeps the textarea's own child index.
+    @html.div(class="composer-input", [
+      mention_tray(dispatch, conv),
+      @html.textarea(
+        id="task",
+        value=if goal_editor is Some(editor) { editor.draft } else { conv.task },
+        placeholder=if goal_mode {
+          "Describe the standing goal for this conversation — Enter sets it, Esc cancels."
+        } else if conv.is_running() {
+          "Steer the running task — your message joins it at the next step."
         } else {
-          TaskChanged(value)
-        }
-      }),
-      attrs=if goal_mode {
-        goal_attrs(dispatch)
-      } else {
-        task_attrs(dispatch, model.completion is Some(_))
-      },
-      "",
-    ),
+          "Ask OpenSeek to inspect, edit, or explain this workspace."
+        },
+        on_input=dispatch.map(value => {
+          if goal_mode {
+            GoalDraftEdited(value)
+          } else {
+            TaskChanged(value)
+          }
+        }),
+        attrs=if goal_mode {
+          goal_attrs(dispatch)
+        } else {
+          task_attrs(dispatch, model.completion is Some(_))
+        },
+        "",
+      ),
+    ]),
     @html.div(class="composer-toolbar", [
       @html.div(class="composer-controls", controls),
     ]),
   ]
   // The menu floats above the composer via CSS, so its DOM position does not
   // affect layout. It is appended last (not inserted before the textarea) so
-  // toggling it never shifts the textarea's child index — index-based vdom
-  // diffing would otherwise rebuild the textarea node and drop its focus.
+  // toggling it never shifts the input wrapper or toolbar — index-based vdom
+  // diffing would otherwise rebuild the textarea subtree and drop its focus.
   if model.completion is Some(completion) {
     inner.push(completion_popup(dispatch, completion))
   }
