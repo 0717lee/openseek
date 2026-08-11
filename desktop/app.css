@@ -1958,6 +1958,8 @@ button.sidebar-button:not(:disabled):hover {
 
 /* ---------- main column ---------- */
 main {
+  --topbar-height: 46px;
+
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   /* Constrain the single column too: without this it defaults to `auto`
@@ -1966,6 +1968,9 @@ main {
      panel. minmax(0, …) holds it to the track and lets inner content
      wrap/scroll instead. */
   grid-template-columns: minmax(0, 1fr);
+  /* Descendants use the live main-pane height to keep the composer inside the
+     conversation row while the terminal is resized. */
+  container-type: size;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -1977,7 +1982,7 @@ main {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 46px;
+  height: var(--topbar-height);
   padding: 0 18px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
@@ -2827,6 +2832,33 @@ main {
   padding: 16px 24px 18px;
 }
 
+/* At the terminal's maximum height, `main` is only 180px tall. Bound the
+   complete composer to the space below the topbar. Overflow remains visible
+   here so completion and git menus can open above the composer. */
+.content.terminal-open .composer {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100cqh - var(--topbar-height));
+  padding: 4px 24px;
+}
+
+/* Plans, notices, and banners give up space before the input does. Keeping
+   their scrollbar on this dedicated wrapper leaves the composer itself
+   unclipped, so menus anchored inside composer-inner can still open upward. */
+.content.terminal-open .composer-context {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* The context wrapper owns auxiliary vertical scrolling beside the terminal;
+   an expanded plan must not add a second nested scrollbar inside it. */
+.content.terminal-open .composer-context .plan-panel .plan-steps {
+  max-height: none;
+  overflow-y: visible;
+}
+
 .composer-inner {
   position: relative;
   display: grid;
@@ -2838,6 +2870,54 @@ main {
   background: var(--surface);
   padding: 8px 10px;
   box-shadow: var(--shadow);
+}
+
+.composer-input {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+/* Shrink the draft beside a tall terminal, but keep its content-sized minimum:
+   one textarea line, an optional mention row, and the toolbar. Long draft text
+   still contracts inside the remaining input space and owns its scrollbar.
+   Both upward-opening menus are siblings outside the scrolled context. */
+.content.terminal-open .composer-inner {
+  flex: 0 1 auto;
+  /* Reserve one mention row and one textarea line. The card minimum also
+     includes the fixed toolbar, gaps, border, and compact vertical padding. */
+  grid-template-rows: minmax(63px, 1fr) auto;
+  gap: 4px;
+  min-height: 112px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  width: 100%;
+}
+
+.content.terminal-open .composer-input {
+  gap: 4px;
+}
+
+.content.terminal-open .composer-input > .mention-tray {
+  flex: none;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.content.terminal-open .composer-input > .mention-tray .mention-chip {
+  flex: none;
+}
+
+.content.terminal-open .composer-input > textarea {
+  flex: 0 1 auto;
+  /* 16px mobile text at 1.6 line-height plus the vertical padding is 33.6px. */
+  min-height: 34px;
+}
+
+.content.terminal-open .composer-toolbar {
+  padding-top: 4px;
 }
 
 /* mention chips ($ skills, # symbols) above the textarea; the tray is
@@ -3158,8 +3238,13 @@ main {
 }
 
 .composer textarea {
+  /* Grow with wrapped or explicit lines; once the cap is reached, keep the
+     composer stable and scroll the textarea's contents instead. */
+  field-sizing: content;
+  width: 100%;
   min-height: 26px;
   max-height: 180px;
+  overflow-y: auto;
   border: 0;
   background: transparent;
   padding: 6px 6px 2px;
@@ -4378,6 +4463,10 @@ select:focus {
 }
 
 @media (max-width: 760px) {
+  main {
+    --topbar-height: 52px;
+  }
+
   .quick-open-backdrop {
     padding: 16px;
   }
