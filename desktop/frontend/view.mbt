@@ -1951,9 +1951,10 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
     ),
   )
   let inner : Array[@html.Html] = [
-    // Only this stable wrapper scrolls when a tall terminal leaves little room
-    // for the composer. The toolbar and upward-opening menus stay outside its
-    // clip, while the permanent tray keeps the textarea's own child index.
+    // This stable wrapper gives the textarea the height left by the permanent
+    // mention tray. Only the textarea scrolls beside a tall terminal; the
+    // toolbar and upward-opening menus stay outside it, and the textarea's
+    // child index never changes as chips come and go.
     @html.div(class="composer-input", [
       mention_tray(dispatch, conv),
       @html.textarea(

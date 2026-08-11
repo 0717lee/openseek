@@ -2833,14 +2833,14 @@ main {
 }
 
 /* At the terminal's maximum height, `main` is only 180px tall. Bound the
-   complete composer to the space below the topbar so banners, a growing
-   textarea, and the toolbar remain inside `main`. The input wrapper below is
-   the scroll container; keeping overflow visible here lets completion and git
-   menus open above the composer. */
+   complete composer to the space below the topbar and recover enough vertical
+   room for a mention row, one line of draft, and the toolbar. Overflow remains
+   visible here so completion and git menus can open above the composer. */
 .content.terminal-open .composer {
   display: flex;
   flex-direction: column;
   max-height: calc(100cqh - var(--topbar-height));
+  padding: 4px 24px;
 }
 
 .composer-inner {
@@ -2857,22 +2857,48 @@ main {
 }
 
 .composer-input {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
   min-height: 0;
 }
 
 /* Shrink only the draft area beside a tall terminal. The toolbar keeps its
-   full row, and both upward-opening menus are siblings outside this clip. */
+   full row, while the textarea below contracts inside the remaining input row
+   and owns its vertical scrollbar. Both upward-opening menus are siblings
+   outside this layout, so neither is clipped. */
 .content.terminal-open .composer-inner {
   flex: 0 1 auto;
   grid-template-rows: minmax(0, 1fr) auto;
+  gap: 6px;
   min-height: 0;
+  padding-top: 6px;
+  padding-bottom: 6px;
   width: 100%;
 }
 
 .content.terminal-open .composer-input {
-  overflow-y: auto;
+  gap: 6px;
+}
+
+.content.terminal-open .composer-input > .mention-tray {
+  flex: none;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.content.terminal-open .composer-input > .mention-tray .mention-chip {
+  flex: none;
+}
+
+.content.terminal-open .composer-input > textarea {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+.content.terminal-open .composer-toolbar {
+  padding-top: 6px;
 }
 
 /* mention chips ($ skills, # symbols) above the textarea; the tray is
