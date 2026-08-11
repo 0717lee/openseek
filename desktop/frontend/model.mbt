@@ -669,10 +669,9 @@ fn GoalRequest::settled_by(
 }
 
 ///|
-/// How a local notice may be reconciled by a later canonical User. Start RPC
-/// and steer delivery failures are indeterminate: the host may have accepted
-/// the submission before its response path failed. Only the exact id-bearing
-/// receipt may retract one; transcript text is deliberately not ownership.
+/// How a local notice may be reconciled. A steer transport failure may still
+/// receive an exact id-bearing engine receipt; transcript text is deliberately
+/// not treated as ownership. Other notices are retained.
 priv enum NoticeReconciliation {
   Retained
   Submission(String)
@@ -712,18 +711,16 @@ priv enum InputState {
 } derive(Eq)
 
 ///|
-/// One locally submitted input awaiting an id-bearing host receipt. The
-/// globally unique `submission_id` is the only ownership proof: canonical
-/// transcript text and legacy receipts without an id never settle this entry.
-/// The original draft shape is retained so a definitive refusal can restore
-/// it to the composer without exposing the serialized mention envelope.
+/// One locally submitted input awaiting the host's response. Initial prompts
+/// leave this table as soon as the host accepts them; steers remain until the
+/// running turn reports whether they were applied or dropped. The original
+/// draft shape lets a refusal restore the composer without exposing the
+/// serialized mention envelope.
 priv struct PendingInput {
   submission_id : String
   kind : InputKind
-  // The run this input belongs to once Started or the start response supplies
-  // it. Initial prompts begin as `None`; retaining their draft until a normal
-  // durable finish (not merely an stdin-write response) prevents pre-append
-  // engine failures from losing the user's text.
+  // Steers name their owning run. Initial prompts begin as `None` and are
+  // removed when their accepted response or matching Started event arrives.
   run_id : String?
   content : String
   draft : String
@@ -1963,7 +1960,7 @@ priv enum DeviceMsg {
   Engine(String?, @transcript.EngineEvent, session~ : String?)
   // The exact local start request returned its run result. `accepted` is the
   // prompt's ownership receipt and can recover a Started notification lost on
-  // the same connection; any other status leaves delivery unconfirmed.
+  // the same connection; any other status restores the prompt.
   StartResponded(
     session~ : String,
     submission_id~ : String,
@@ -1971,15 +1968,8 @@ priv enum DeviceMsg {
     status~ : String,
     exit_code~ : Int
   )
-  // The response path failed before host acceptance was knowable. Keep an
-  // exact-id unconfirmed entry; canonical transcript text cannot settle it.
-  StartUndelivered(
-    session~ : String,
-    submission_id~ : String,
-    message~ : String
-  )
-  // The host definitively refused this exact request. Restore its draft and
-  // retire the ledger entry immediately.
+  // The start request failed. Restore its draft and retire the ledger entry
+  // immediately, regardless of where the response path failed.
   StartRejected(session~ : String, submission_id~ : String, message~ : String)
   // A host error without a run (`run_id` is `None` — a pre-run failure)
   // belongs to whatever conversation the user is looking at; `diagnostics`
@@ -3143,21 +3133,10 @@ fn Conversation::goal_draft_seed(self : Conversation) -> String {
 }
 
 ///|
-/// Whether this conversation holds an outstanding intent that only the
-/// durable record can settle: a prompt whose receipt never came back, or a
-/// goal command whose reply did not. Both are answered the same way — by
-/// re-reading — so every recovery path gates on this one predicate instead
-/// of naming the kinds itself, which is how the goal request came to be
-/// eligible for the reconnect's reload and not for the session list's.
+/// Whether this conversation holds a goal command whose reply did not arrive.
+/// A durable re-read can settle that command from its stored marker.
 fn Conversation::awaits_durable_proof(self : Conversation) -> Bool {
-  self.has_recovering_initial() || self.goal_pending is Some(_)
-}
-
-///|
-fn Conversation::has_recovering_initial(self : Conversation) -> Bool {
-  self.input_ledger
-  .iter()
-  .any(input => input.kind is InitialPrompt && input.state is Unconfirmed)
+  self.goal_pending is Some(_)
 }
 
 ///|
@@ -3478,100 +3457,6 @@ fn Conversation::acknowledge_submission(
 }
 
 ///|
-/// Attach an accepted initial submission to its run without treating the
-/// host's stdin-write response as durable proof. The draft remains recoverable
-/// until the run's canonical commit path proves it reached the store.
-fn Conversation::bind_initial_submission_to_run(
-  self : Conversation,
-  submission_id : String,
-  run_id : String,
-) -> Conversation {
-  let input_ledger = self.input_ledger.copy()
-  for index, input in input_ledger {
-    if input.kind is InitialPrompt && input.submission_id == submission_id {
-      input_ledger[index] = { ..input, run_id: Some(run_id) }
-      return { ..self, input_ledger, }
-    }
-  }
-  self
-}
-
-///|
-/// A normal terminal-backed finish proves this exact run got past its durable
-/// User append. Retire the bound prompt and any provisional transport notice;
-/// transcript content itself is still never used as ownership evidence.
-fn Conversation::acknowledge_initial_for_run(
-  self : Conversation,
-  run_id : String,
-) -> Conversation {
-  let retired : Array[String] = []
-  let input_ledger = self.input_ledger.filter(input => {
-    if input.kind is InitialPrompt &&
-      input.run_id is Some(owner) &&
-      owner == run_id {
-      retired.push(input.submission_id)
-      false
-    } else {
-      true
-    }
-  })
-  if retired.is_empty() {
-    return self
-  }
-  let overlay = self.overlay.filter(notice => {
-    !(notice.reconciliation is Submission(id) && retired.contains(id))
-  })
-  { ..self, input_ledger, overlay }
-}
-
-///|
-/// An abnormal finish does not prove the initial User append succeeded. Keep
-/// the exact draft in a truthful, retractable notice instead of consuming it
-/// on the earlier stdin-write response.
-fn Conversation::mark_initial_for_run_unconfirmed(
-  self : Conversation,
-  run_id : String,
-  durable_frontier? : Int,
-  terminal_snapshot_generation? : Int,
-) -> Conversation {
-  let mut next = self
-  for input in self.input_ledger {
-    if input.kind is InitialPrompt &&
-      input.run_id is Some(owner) &&
-      owner == run_id {
-      let updated = if input.state is Awaiting {
-        let (updated, _) = next.mark_submission_unconfirmed(
-          input.submission_id,
-          "Prompt delivery could not be confirmed before the run ended — " +
-          "check the transcript before resubmitting: " +
-          input.draft,
-          true,
-          terminal_expected=false,
-          terminal_snapshot_generation?,
-        )
-        updated
-      } else {
-        next
-      }
-      next = if durable_frontier is Some(frontier) {
-        updated.anchor_submission_notice_at_durable_frontier(
-          input.submission_id,
-          frontier,
-        )
-      } else if terminal_snapshot_generation is Some(snapshot_generation) {
-        updated.anchor_submission_notice_at_snapshot_cut(
-          input.submission_id,
-          snapshot_generation,
-        )
-      } else {
-        updated
-      }
-    }
-  }
-  next
-}
-
-///|
 /// An EOF frontier of zero, with no applied or buffered commit, proves this
 /// session record was never created. This is stronger than an unsuccessful
 /// snapshot read: the host observed the writer after process exit.
@@ -3588,31 +3473,6 @@ fn Conversation::is_empty_at_durable_frontier(
   self.watermark == 0 &&
   self.messages.is_empty() &&
   reconciliation_buffer_empty
-}
-
-///|
-/// Recover the exact prompt whose run reached EOF before its first durable
-/// append. The draft returns to the composer (without overwriting newer text),
-/// exact-id ownership is retired, and the explanation becomes a retained
-/// local notice so reconnect never probes a record known not to exist.
-fn Conversation::restore_unpersisted_initial_for_run(
-  self : Conversation,
-  run_id : String,
-) -> Conversation {
-  for input in self.input_ledger {
-    if input.kind is InitialPrompt &&
-      input.run_id is Some(owner) &&
-      owner == run_id {
-      let (restored, _) = self.reject_submission(
-        input.submission_id,
-        InitialPrompt,
-        Some(run_id),
-        "The prompt was not saved before the run ended; it has been restored for resubmission.",
-      )
-      return restored
-    }
-  }
-  self
 }
 
 ///|
@@ -3638,25 +3498,12 @@ fn Conversation::restore_submission(
 }
 
 ///|
-/// Recover everything the user can still resubmit when this conversation is
-/// archived out from under the composer. Initial prompts still in the local
-/// ownership ledger come first in send order, followed by text typed since;
-/// no run or receipt state crosses into the replacement conversation.
+/// Recover unsent composer state when this conversation is archived out from
+/// under the editor. A submitted initial prompt never returns to the new
+/// conversation; ordinary request failures restore it before archive.
 fn Conversation::archive_salvage(self : Conversation) -> ArchiveSalvage {
   let drafts : Array[String] = []
   let mentions : Array[Mention] = []
-  let mut pending_initial = false
-  for input in self.input_ledger {
-    if input.kind is InitialPrompt {
-      pending_initial = true
-      if !input.draft.trim().is_empty() {
-        drafts.push(input.draft)
-      }
-      for mention in input.mentions {
-        mentions.push(mention)
-      }
-    }
-  }
   if !self.task.trim().is_empty() {
     drafts.push(self.task)
   }
@@ -3668,9 +3515,8 @@ fn Conversation::archive_salvage(self : Conversation) -> ArchiveSalvage {
   // for the goal row into a prompt.
   //
   // Unsent writing comes first, and behind it a Set still waiting on its
-  // marker: sent, but with no proof it landed, which puts its text in exactly
-  // the position of the unconfirmed initial prompts above — the record may
-  // never have received it, and this is the only other copy. A Clearing asks
+  // marker: the record may never have received it, and this is the only other
+  // copy. A Clearing asks
   // for nothing to stand, so it carries nothing. Neither does a goal the
   // record has already confirmed: that one is the archived record's.
   let goal_draft = if self.goal_edit is Some(edit) &&
@@ -3682,7 +3528,7 @@ fn Conversation::archive_salvage(self : Conversation) -> ArchiveSalvage {
   } else {
     None
   }
-  { task: drafts.join("\n\n"), mentions, goal_draft, pending_initial }
+  { task: drafts.join("\n\n"), mentions, goal_draft }
 }
 
 ///|
@@ -3691,7 +3537,6 @@ priv struct ArchiveSalvage {
   task : String
   mentions : Array[Mention]
   goal_draft : String?
-  pending_initial : Bool
 }
 
 ///|
@@ -3724,24 +3569,19 @@ fn Conversation::reject_submission(
 }
 
 ///|
-/// A connection boundary makes every response still awaiting a receipt
-/// indeterminate. Awaiting starts and steers gain exact-id provisional
-/// notices.
-fn Conversation::mark_awaiting_inputs_unconfirmed(
+/// A connection boundary makes steer responses still awaiting a receipt
+/// indeterminate. Initial prompts are settled by their accepted response,
+/// matching Started event, explicit refusal, or the runs snapshot.
+fn Conversation::mark_awaiting_steers_unconfirmed_at_snapshot(
   self : Conversation,
   snapshot_generation? : Int,
 ) -> Conversation {
   let mut conv = self
   for input in self.input_ledger {
-    if input.state is Awaiting {
-      let label = match input.kind {
-        InitialPrompt =>
-          "Prompt delivery could not be confirmed after reconnect"
-        SteerInput => "Steer delivery could not be confirmed after reconnect"
-      }
+    if input.kind is SteerInput && input.state is Awaiting {
       let (next, _) = conv.mark_submission_unconfirmed(
         input.submission_id,
-        label +
+        "Steer delivery could not be confirmed after reconnect" +
         " — check the transcript before resubmitting: " +
         input.content,
         snapshot_generation is Some(_),
@@ -3750,11 +3590,11 @@ fn Conversation::mark_awaiting_inputs_unconfirmed(
       )
       conv = next
     }
-    // A transport failure may already have changed this exact entry to
-    // Unconfirmed before the connection boundary. Re-anchor both states:
+    // A transport failure may already have changed this steer to Unconfirmed
+    // before the connection boundary. Re-anchor both states:
     // the reconnect snapshot, not the old display length, is the first safe
     // chronology fence for commits received while this page was absent.
-    if snapshot_generation is Some(generation) {
+    if input.kind is SteerInput && snapshot_generation is Some(generation) {
       conv = conv.anchor_submission_notice_at_snapshot_cut(
         input.submission_id,
         generation,
@@ -3806,39 +3646,6 @@ fn Conversation::mark_awaiting_steers_unconfirmed(
     }
   }
   conv
-}
-
-///|
-/// A different id-bearing Started event in the same session proves an older
-/// unconfirmed start can no longer acquire a receipt. Retain its truthful
-/// notice but release ownership so repeated uncertain starts cannot accumulate
-/// forever.
-fn Conversation::retire_unconfirmed_initials_before(
-  self : Conversation,
-  current_submission_id : String,
-) -> Conversation {
-  let retired : Array[String] = []
-  let input_ledger = self.input_ledger.filter(input => {
-    if input.kind is InitialPrompt &&
-      input.state is Unconfirmed &&
-      input.submission_id != current_submission_id {
-      retired.push(input.submission_id)
-      false
-    } else {
-      true
-    }
-  })
-  if retired.is_empty() {
-    return self
-  }
-  let overlay = self.overlay.map(notice => {
-    match notice.reconciliation {
-      Submission(id) if retired.contains(id) =>
-        { ..notice, reconciliation: Retained }
-      _ => notice
-    }
-  })
-  { ..self, input_ledger, overlay }
 }
 
 ///|

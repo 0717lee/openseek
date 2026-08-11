@@ -1259,8 +1259,8 @@ test "an unconfirmed delivery keeps waiting instead of handing the text back" {
     next.active().goal_pending
     is Some({ request: Setting("ship the feature"), .. }),
   )
-  // The writing is not lost either way — it rides the notice, the way an
-  // unconfirmed prompt's does.
+  // The writing is not lost either way — it rides the notice until the goal
+  // marker settles the request.
   guard next.active().overlay.last() is Some(notice) else {
     fail("the failure should be reported")
   }

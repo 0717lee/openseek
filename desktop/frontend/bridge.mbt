@@ -999,15 +999,7 @@ async fn request_agent_start(
   let reply = @interop.bridge_request(channel, @commands.agent_start, payload) catch {
     error => {
       let message = @interop.bridge_error_text(error)
-      scheduler.add(
-        dispatch(
-          if @interop.bridge_error_is_definite(error) {
-            StartRejected(session~, submission_id~, message~)
-          } else {
-            StartUndelivered(session~, submission_id~, message~)
-          },
-        ),
-      )
+      scheduler.add(dispatch(StartRejected(session~, submission_id~, message~)))
       return
     }
   }

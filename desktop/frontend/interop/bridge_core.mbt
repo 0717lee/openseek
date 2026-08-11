@@ -301,8 +301,8 @@ pub fn bridge_failure(error : Error) -> BridgeFailure {
 
 ///|
 /// Whether a failed bridge call is a definitive host refusal — the two-state
-/// view of `bridge_failure`, kept for the start and steer paths, whose
-/// unconfirmed handling already does the conservative thing with `Unsent`.
+/// view of `bridge_failure`, used by steering because only an indeterminate
+/// transport failure may still be followed by an exact engine receipt.
 pub fn bridge_error_is_definite(error : Error) -> Bool {
   bridge_failure(error) is Refused
 }

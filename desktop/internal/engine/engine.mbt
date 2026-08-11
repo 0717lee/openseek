@@ -1570,10 +1570,14 @@ async fn ServeEngine::run(
             Some(AgentAborted(_)) if engine.phase
               is Running(cancel_requested=true, ..) &&
               run_id is Some(id) => {
-              emit_error(sink, "cancelled", run_id=id)
-              emit_finished(sink, id, Cancelled)
+              // Publish Finished only after the phase agrees that the run is
+              // closed. The frontend enables archive from that notification;
+              // leaving Running visible until afterwards made an immediate
+              // archive observe stale state and reject the request.
               engine.phase = engine.phase.after_run_close()
               engine.steer_runs.record_terminal(id)
+              emit_error(sink, "cancelled", run_id=id)
+              emit_finished(sink, id, Cancelled)
             }
             Some(decoded) => {
               // Terminal failures are immediately normalized below; forwarding
