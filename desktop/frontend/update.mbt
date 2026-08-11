@@ -1379,11 +1379,23 @@ fn update(
   } else {
     model
   }
+  // The resize handle belongs to the whole right panel, even when its first
+  // active tab is a Browser page and the file body stays hidden. File-opening
+  // paths already mount it through the fileeditor package; cover every other
+  // closed-to-open transition here so a fresh project's first transcript link
+  // installs the drag listeners too.
+  let dock_mount_cmd = if !previous.dock.open && model.dock.open {
+    @fileeditor.mount_cmds(dispatch.map(msg => FileEditor(msg)))
+  } else {
+    @cmd.none
+  }
   let (model, panel_cmd) = sync_file_panel(dispatch, model)
   let (model, terminal_cmd) = sync_terminal_panel(dispatch, model)
   let (model, browser_cmd) = sync_browser_view(dispatch, model)
   (
-    @cmd.batch([cmd, quick_open_cmd, panel_cmd, terminal_cmd, browser_cmd]),
+    @cmd.batch([
+      cmd, quick_open_cmd, dock_mount_cmd, panel_cmd, terminal_cmd, browser_cmd,
+    ]),
     model,
   )
 }
