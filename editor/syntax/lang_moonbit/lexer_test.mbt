@@ -212,9 +212,11 @@ test "tokenization ignores incoming state and resets at line end" {
 }
 
 ///|
-test "longest matching distinguishes keywords from prefixed identifiers" {
+test "word classification distinguishes keywords from identifiers" {
   inspect(
-    render_tokens("let letter = true; let trueish = selfless; typealias Type"),
+    render_tokens(
+      "let letter = true; let trueish = self selfless; typealias Type",
+    ),
     content=(
       #|0-3 Keyword let
       #|4-10 Identifier letter
@@ -224,10 +226,11 @@ test "longest matching distinguishes keywords from prefixed identifiers" {
       #|19-22 Keyword let
       #|23-30 Identifier trueish
       #|31-32 Operator =
-      #|33-41 Identifier selfless
-      #|41-42 Delimiter ;
-      #|43-52 Keyword typealias
-      #|53-57 Type Type
+      #|33-37 Identifier self
+      #|38-46 Identifier selfless
+      #|46-47 Delimiter ;
+      #|48-57 Keyword typealias
+      #|58-62 Type Type
     ),
   )
 }
