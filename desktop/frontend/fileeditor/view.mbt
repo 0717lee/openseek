@@ -129,9 +129,9 @@ pub fn body_view(
   state : State,
   ctx : Ctx,
 ) -> @html.Html {
-  // The stable elements the source viewer and full-diff renderer attach their
-  // imperative DOM into; they must stay empty and never be re-keyed (see
-  // editor_panel.mbt).
+  // The stable elements the source Viewer and side-by-side DiffViewer attach
+  // their imperative DOM into; they must stay empty and never be re-keyed
+  // (see editor_panel.mbt).
   // `editor-shell` brings in the viewer's `--vscode-*` / `--editor-*` theme
   // variables (defined on that class in the bundled viewer.css); `data-theme`
   // picks the palette matching the app's own light/dark scheme (the shell's
@@ -147,7 +147,7 @@ pub fn body_view(
       .id(ViewerHostId)
       .class(
         if show_unified_diff {
-          "viewer-host editor-shell moonbit-unified-diff-surface-hidden"
+          "viewer-host editor-shell moonbit-viewer-surface-hidden"
         } else {
           "viewer-host editor-shell"
         },
@@ -157,12 +157,12 @@ pub fn body_view(
   )
   let unified_diff_host = @html.div(
     attrs=@html.Attrs::build()
-      .id(UnifiedDiffHostId)
+      .id(DiffViewerHostId)
       .class(
         if show_unified_diff {
           "viewer-host editor-shell"
         } else {
-          "viewer-host editor-shell moonbit-unified-diff-surface-hidden"
+          "viewer-host editor-shell moonbit-viewer-surface-hidden"
         },
       )
       .data_set("theme", if ctx.dark_mode { "dark" } else { "light" }),
@@ -860,7 +860,7 @@ fn review_badge(
               )
             Some({ view_mode: ReviewSource, .. }) =>
               (
-                "View full diff", "Open the full unified diff against the review baseline",
+                "View full diff", "Open the side-by-side diff against the review baseline",
                 true, false,
               )
             None => ("", "", false, false)

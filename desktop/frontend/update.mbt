@@ -1759,9 +1759,16 @@ fn update_msg(
         original_line_number~,
         modified_line_number~,
         quote~,
-        comment~
+        comment~,
+        resource~,
+        feedback_id~
       )
     ) => {
+      let clear_feedback = match (resource, feedback_id) {
+        (Some(resource), Some(feedback_id)) =>
+          @fileeditor.remove_editor_feedback(resource, feedback_id)
+        _ => @cmd.none
+      }
       let (line_number, range, side) = match modified_line_number {
         Some(line_number) if line_number >= 1 => {
           let end_column = if quote.is_empty() { 1 } else { quote.length() + 1 }
@@ -1775,7 +1782,7 @@ fn update_msg(
           match original_line_number {
             Some(line_number) if line_number >= 1 =>
               (line_number, None, @mention_context.OriginalRevision)
-            _ => return (@cmd.none, model)
+            _ => return (clear_feedback, model)
           }
       }
       let conv = model.active()
@@ -1790,7 +1797,7 @@ fn update_msg(
         ),
         range,
       })
-      (@cmd.none, model.replace_conversation({ ..conv, mentions, }))
+      (clear_feedback, model.replace_conversation({ ..conv, mentions, }))
     }
     // Intercepted like the comment above: which dock tab a tree click opens
     // is the strip's business. The dock opens (or re-activates) the tab,
@@ -14839,6 +14846,8 @@ test "UnifiedDiffCommentAdded preserves modified and original-only line identity
       modified_line_number=Some(7),
       quote="let answer = 42",
       comment="name this constant",
+      resource=None,
+      feedback_id=None,
     ),
   )
   let (_, with_added) = update(dispatch, added, test_model())
@@ -14863,6 +14872,8 @@ test "UnifiedDiffCommentAdded preserves modified and original-only line identity
       modified_line_number=None,
       quote="obsolete()",
       comment="good removal",
+      resource=None,
+      feedback_id=None,
     ),
   )
   let (_, with_deleted) = update(dispatch, deleted, with_added)

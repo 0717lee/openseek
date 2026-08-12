@@ -650,10 +650,10 @@ pub(all) enum Msg {
     comment~ : String,
     feedback_id~ : String
   )
-  // The user submitted a comment from the standalone full-diff surface.
-  // Both line domains cross the package boundary: additions/context use the
-  // modified number, while an original-only deletion remains identifiable to
-  // the composer without pretending it exists in the working document.
+  // The user submitted a comment from a full-diff surface. Both line domains
+  // cross the package boundary: additions/context use the modified number,
+  // while an original-pane selection remains identifiable to the composer
+  // without pretending it exists in the working document.
   // Like `EditorCommentAdded`, the main update intercepts this message and
   // turns it into a deduplicated annotation chip.
   UnifiedDiffCommentAdded(
@@ -661,6 +661,11 @@ pub(all) enum Msg {
     original_line_number~ : Int?,
     modified_line_number~ : Int?,
     quote~ : String,
-    comment~ : String
+    comment~ : String,
+    // Present when the comment came from the new original-side Viewer. The
+    // legacy standalone renderer has no feedback bubble and leaves both keys
+    // absent.
+    resource~ : ModelUri?,
+    feedback_id~ : String?
   )
 }

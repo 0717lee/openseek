@@ -46,7 +46,7 @@ fn Doc::quick_diff_original(self : Doc) -> String? {
 }
 
 ///|
-/// The two textual sides available to the standalone full-diff renderer.
+/// The two textual sides available to the side-by-side DiffViewer.
 /// Added files use an empty HEAD side and deleted files use an empty working
 /// side. Loading, binary, oversized, and failed reads do not invent text.
 fn Doc::unified_diff_content(self : Doc) -> (String, String)? {
@@ -70,7 +70,7 @@ fn Doc::unified_diff_content(self : Doc) -> (String, String)? {
 }
 
 ///|
-/// Diff inputs only enter the renderer while this tab's cached copy of the
+/// Diff inputs only enter the comparison while this tab's cached copy of the
 /// panel preference is unified mode. Keeping the copy on its review state also
 /// preserves it through generation-fenced source/baseline refreshes.
 fn Doc::visible_unified_diff(self : Doc) -> (String, String)? {

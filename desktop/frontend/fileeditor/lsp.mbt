@@ -45,6 +45,15 @@ fn model_uri_path(uri : @common.Uri) -> @common.Uri? {
 }
 
 ///|
+/// Desktop language features are revision-sensitive today: host operations
+/// read the live checkout named by an `openseek` URI. Restricting provider
+/// selection at the registry boundary keeps an original-revision diff model
+/// from showing actions that could only resolve against the working tree.
+fn live_moonbit_model_selector() -> @language.LanguageSelector {
+  LanguageFilter(LanguageFilter(language="moonbit", scheme=@resource.Scheme))
+}
+
+///|
 priv struct LspHoverProvider {}
 
 ///|
@@ -81,9 +90,10 @@ impl @language.HoverProvider for LspHoverProvider with fn provide_hover(
 ///|
 /// Register the hover provider on the shared language registry.
 fn register_hover_provider() -> Unit {
+  let provider = LspHoverProvider::{  }
   @languages.languages.register_hover_provider(
-    @language.LanguageSelector::LanguageId("moonbit"),
-    LspHoverProvider::{  },
+    live_moonbit_model_selector(),
+    provider,
   )
   |> ignore
 }
@@ -295,4 +305,26 @@ test "foreign uris do not parse as model paths or channels" {
   assert_true(
     model_uri_channel(@common.Uri::parse("openseek://unknown/a.bin")) is None,
   )
+}
+
+///|
+test "live language selector excludes an original revision model" {
+  let live = @model.TextModel(
+    @common.Uri::parse("openseek://local/work/main.mbt"),
+    "main.mbt",
+    "moonbit",
+    1,
+    "live",
+    "fn main {}",
+  )
+  let original = @model.TextModel(
+    @common.Uri::parse("openseek-review-original://local/work/main.mbt"),
+    "main.mbt",
+    "moonbit",
+    1,
+    "head",
+    "fn main {}",
+  )
+  assert_true(live_moonbit_model_selector().score(live) > 0)
+  assert_eq(live_moonbit_model_selector().score(original), 0)
 }

@@ -61,10 +61,41 @@ test "unified diff stays read-only when its host omits the comment callback" {
 }
 
 ///|
+test "unified diff rejects a combined UTF-16 input above its eager DOM budget" {
+  install_mounted_test_browser()
+  defer restore_mounted_test_browser()
+  let host = @rdom.document().create_element("div")
+  let view = UnifiedDiffView::create(host)
+  defer view.dispose()
+  view.set_diff("o".repeat(524289), "m".repeat(524289))
+  assert_true(
+    unified_diff_test_text(host).contains("too large to render safely"),
+  )
+  assert_eq(unified_diff_test_count(host, ".moonbit-unified-diff-line"), 0)
+}
+
+///|
+test "unified diff rejects too many eager DOM input lines" {
+  install_mounted_test_browser()
+  defer restore_mounted_test_browser()
+  let host = @rdom.document().create_element("div")
+  let view = UnifiedDiffView::create(host)
+  defer view.dispose()
+  view.set_diff("old\n".repeat(2501), "new\n".repeat(2501))
+  assert_true(
+    unified_diff_test_text(host).contains("too large to render safely"),
+  )
+  assert_eq(unified_diff_test_count(host, ".moonbit-unified-diff-line"), 0)
+}
+
+///|
 extern "js" fn unified_diff_test_count(
   host : @rdom.Element,
   selector : String,
 ) -> Int = "(host, selector) => host.querySelectorAll(selector).length"
+
+///|
+extern "js" fn unified_diff_test_text(host : @rdom.Element) -> String = "(host) => host.textContent ?? ''"
 
 ///|
 extern "js" fn unified_diff_test_click(

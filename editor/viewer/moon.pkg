@@ -12,6 +12,7 @@ import {
   "moonbitlang/editor/viewer/common/cursor",
   "moonbitlang/editor/viewer/common/editor_api",
   "moonbitlang/editor/viewer/common/core",
+  "moonbitlang/editor/viewer/common/diff",
   "moonbitlang/editor/viewer/common/model",
   "moonbitlang/editor/viewer/common/agent_feedback_api",
   "moonbitlang/editor/viewer/common/navigation_api",

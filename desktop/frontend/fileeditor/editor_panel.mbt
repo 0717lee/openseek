@@ -1,6 +1,6 @@
 // The embedded read-only code viewer (moonbitlang/editor). Rabbita has
 // no escape hatch for a foreign DOM widget, so the source viewer and full-diff
-// renderer each own a stable, never-diffed host element. The view renders both
+// comparison each own a stable, never-diffed host element. The view renders both
 // hosts empty, and after the first paint each widget attaches its imperative DOM.
 // The host elements are always rendered (merely hidden by CSS when inactive or
 // the panel is closed), so each widget attaches once and survives screen switches.
@@ -11,8 +11,16 @@
 const ViewerHostId = "viewer-host"
 
 ///|
-/// The stable sibling host reserved for the standalone full-diff renderer.
-const UnifiedDiffHostId = "unified-diff-host"
+/// The stable sibling host reserved for the side-by-side DiffViewer. The DOM
+/// id stays compatible with the former unified renderer while the imperative
+/// owner and contents migrate in place.
+const DiffViewerHostId = "unified-diff-host"
+
+///|
+/// A model in this URI scheme is a Git HEAD snapshot, not a document the
+/// current host language tools can answer for. The live provider selector is
+/// intentionally restricted to `@resource.Scheme` (see lsp.mbt).
+const OriginalRevisionScheme = "openseek-review-original"
 
 ///|
 /// The `MarkerService` owner for the language server's diagnostics — Monaco
@@ -33,8 +41,9 @@ priv struct ViewerHost {
   // reply, so by the time a document arrives the viewer exists.
   mut viewer : @viewer.Viewer?
   // Kept separate from the source Viewer so a Diff/Source toggle preserves
-  // the source model, selection, folding, and scroll state.
-  mut unified_diff : @viewer.UnifiedDiffView?
+  // the source model, selection, folding, and scroll state. The comparison
+  // itself is composed from two ordinary Viewers.
+  mut diff_viewer : @viewer.DiffViewer?
   // A positioned transcript link keeps its caret collapsed at the requested
   // column. This separate whole-line decoration makes the destination visible
   // without turning the line itself into a selection (whose active end would
@@ -78,7 +87,7 @@ priv struct ViewerHost {
 ///|
 let viewer_state : ViewerHost = {
   viewer: None,
-  unified_diff: None,
+  diff_viewer: None,
   point_range_highlight: None,
   services: None,
   absolute: None,
@@ -125,10 +134,10 @@ fn register_tokenizers() -> Unit {
 /// tokenizers and hover provider register with it). A no-op if already
 /// mounted or the host element is not in the DOM yet.
 ///
-/// Mounting also wires both comment flows into the update loop: the source
-/// Viewer's selection feedback becomes `EditorCommentAdded`, while the
-/// standalone comparison emits `UnifiedDiffCommentAdded` with both line-number
-/// domains. The main package turns either event into a composer chip.
+/// Mounting also wires both ordinary-Viewer comment flows into the update
+/// loop. Working-side feedback becomes `EditorCommentAdded`; feedback filed on
+/// the original pane becomes `UnifiedDiffCommentAdded` with original-revision
+/// identity. The main package turns either event into a composer chip.
 fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
   @cmd.custom_cmd(
     scheduler => {
@@ -161,33 +170,58 @@ fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
           viewer.create_decorations_collection(),
         )
         services.feedback.on_did_add_feedback(event => {
-          // Only user comments on a file this app put on screen (a URI it
-          // minted) become chips; anything else is not ours to carry.
           guard event.feedback.kind is @agent_feedback_api.UserReview else {
             return
           }
-          guard model_uri_path(event.feedback.resource) is Some(_) else {
+          guard viewer_state.relative is Some(file) else { return }
+          // The modified pane uses the source Viewer's live URI and exact
+          // content, so both submit the same working-document event and retain
+          // exact columns.
+          if viewer.get_model() is Some(model) &&
+            model.uri.to_string() == event.feedback.resource.to_string() {
+            scheduler.add(
+              dispatch(
+                EditorCommentAdded(
+                  resource=ModelUri(event.feedback.resource.to_string()),
+                  file~,
+                  range=event.feedback.range,
+                  quote=model.get_value_in_range(event.feedback.range),
+                  comment=event.feedback.text,
+                  feedback_id=event.feedback.id,
+                ),
+              ),
+            )
             return
           }
-          // Commenting happens through the viewer's own UI, so the feedback
-          // can only target the document on screen — the one whose
-          // workspace-relative name was recorded when it was shown. A
-          // mismatch would mean a stray event for a document already gone;
-          // there is nothing correct to attach it to.
-          guard viewer.get_model() is Some(model) &&
-            model.uri.to_string() == event.feedback.resource.to_string() &&
-            viewer_state.relative is Some(file) else {
+          // Original models use an inert revision URI, so they never enter
+          // host language providers. Their feedback still uses the ordinary
+          // Viewer UI and is projected onto the existing original-side chip
+          // contract, including a key for clearing that Viewer's bubble.
+          guard viewer_state.diff_viewer is Some(diff_viewer) &&
+            diff_viewer.get_model() is Some(diff_model) &&
+            diff_model.original.uri.to_string() ==
+            event.feedback.resource.to_string() else {
             return
           }
+          let quote = diff_model.original.get_value_in_range(
+            event.feedback.range,
+          )
           scheduler.add(
             dispatch(
-              EditorCommentAdded(
-                // Just guarded as a URI this app minted.
+              unified_diff_comment_message(
+                file,
+                {
+                  line: {
+                    kind: @unified_diff.Deletion,
+                    original_line_number: Some(
+                      event.feedback.range.start_line_number,
+                    ),
+                    modified_line_number: None,
+                    text: quote,
+                  },
+                  comment: event.feedback.text,
+                },
                 resource=ModelUri(event.feedback.resource.to_string()),
-                file~,
-                range=event.feedback.range,
-                quote=model.get_value_in_range(event.feedback.range),
-                comment=event.feedback.text,
                 feedback_id=event.feedback.id,
               ),
             ),
@@ -195,20 +229,16 @@ fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
         })
         |> ignore
       }
-      if viewer_state.unified_diff is None &&
-        @dom.document().get_element_by_id(UnifiedDiffHostId).to_option()
+      if viewer_state.diff_viewer is None &&
+        viewer_state.services is Some(services) &&
+        @dom.document().get_element_by_id(DiffViewerHostId).to_option()
         is Some(diff_host) {
-        viewer_state.unified_diff = Some(
-          @viewer.UnifiedDiffView::create(diff_host, on_comment=submission => {
-            // The renderer supplies algorithm-neutral line identity; Desktop
-            // contributes only the workspace-relative file currently shown.
-            // Schedule through the update loop so a host callback can never
-            // mutate the panel while the renderer is dismissing its editor.
-            guard viewer_state.relative is Some(file) else { return }
-            scheduler.add(
-              dispatch(unified_diff_comment_message(file, submission)),
-            )
-          }),
+        viewer_state.diff_viewer = Some(
+          @viewer.DiffViewer::create(
+            diff_host,
+            services=services.viewer_services,
+            options=@viewer.ViewerOptions(theme="light"),
+          ),
         )
       }
     },
@@ -249,6 +279,8 @@ pub fn apply_font_size(font_size : Double) -> @cmd.Cmd {
 fn unified_diff_comment_message(
   file : @pathx.Relative,
   submission : @unified_diff.UnifiedDiffLineComment,
+  resource? : ModelUri,
+  feedback_id? : String,
 ) -> Msg {
   UnifiedDiffCommentAdded(
     file~,
@@ -256,6 +288,8 @@ fn unified_diff_comment_message(
     modified_line_number=submission.line.modified_line_number,
     quote=submission.line.text,
     comment=submission.comment,
+    resource~,
+    feedback_id~,
   )
 }
 
@@ -284,9 +318,123 @@ pub fn remove_editor_feedback(
 /// changes the panel's host size without any panel message.
 pub fn request_viewer_remeasure() -> @cmd.Cmd {
   @cmd.custom_cmd(
-    _after => if viewer_state.viewer is Some(viewer) { viewer.layout() },
+    _after => {
+      if viewer_state.viewer is Some(viewer) {
+        viewer.layout()
+      }
+      if viewer_state.diff_viewer is Some(diff_viewer) {
+        diff_viewer.layout()
+      }
+    },
     kind=@cmd.after_render,
   )
+}
+
+///|
+/// Build an inert model identity for the Git HEAD side of a comparison. The
+/// path remains useful for feedback identity and display, but the distinct
+/// scheme prevents every live-checkout language selector from matching it.
+fn original_revision_model_uri(
+  owner : @interop.ConversationKey,
+  absolute : @common.Uri?,
+  relative : @pathx.Relative?,
+  fallback_name : String,
+) -> @common.Uri? {
+  let path = match (absolute, relative) {
+    (Some(absolute), _) => absolute.path
+    (None, Some(relative)) => "/" + relative.0
+    (None, None) => "/" + fallback_name
+  }
+  let uri = @common.Uri::from(
+    scheme=OriginalRevisionScheme,
+    authority=owner.channel.uri_authority(),
+    path~,
+  ) catch {
+    _ => return None
+  }
+  Some(uri)
+}
+
+///|
+/// Detach and dispose the caller-owned models currently installed in the
+/// comparison. The DiffViewer intentionally borrows models, so Desktop closes
+/// this lifetime before replacing or clearing a review.
+fn clear_diff_comparison() -> Unit {
+  guard viewer_state.diff_viewer is Some(diff_viewer) else { return }
+  let previous = diff_viewer.get_model()
+  diff_viewer.clear()
+  if previous is Some(previous) {
+    if viewer_state.services is Some(services) {
+      services.feedback.set_feedback_enabled(previous.original.uri, false)
+      services.feedback.clear_feedback(previous.original.uri)
+    }
+    previous.original.dispose()
+    if !previous.modified.same(previous.original) {
+      previous.modified.dispose()
+    }
+  }
+}
+
+///|
+/// Install one full comparison without disturbing the separately mounted
+/// source Viewer. Equal inputs retain the current pair so selection, scroll,
+/// and feedback UI survive an unchanged review refresh.
+fn show_diff_comparison(
+  owner : @interop.ConversationKey,
+  name : String,
+  modified_uri : @common.Uri,
+  absolute : @common.Uri?,
+  relative : @pathx.Relative?,
+  original_content : String,
+  modified_content : String,
+) -> Unit {
+  guard viewer_state.diff_viewer is Some(diff_viewer) &&
+    viewer_state.services is Some(services) &&
+    original_revision_model_uri(owner, absolute, relative, name)
+    is Some(original_uri) else {
+    return
+  }
+  if diff_viewer.get_model() is Some(current) &&
+    current.original.uri.to_string() == original_uri.to_string() &&
+    current.modified.uri.to_string() == modified_uri.to_string() &&
+    current.original.get_value() == original_content &&
+    current.modified.get_value() == modified_content {
+    services.feedback.set_feedback_enabled(original_uri, relative is Some(_))
+    return
+  }
+  let previous = diff_viewer.get_model()
+  if previous is Some(previous) {
+    services.feedback.set_feedback_enabled(previous.original.uri, false)
+    services.feedback.clear_feedback(previous.original.uri)
+  }
+  let model_version = viewer_state.version
+  let language = language_id(name)
+  let original_model = @model.TextModel(
+    original_uri,
+    name,
+    language,
+    model_version,
+    "head-v" + model_version.to_string(),
+    original_content,
+  )
+  let modified_model = @model.TextModel(
+    modified_uri,
+    name,
+    language,
+    model_version,
+    "diff-v" + model_version.to_string(),
+    modified_content,
+  )
+  diff_viewer.set_model(
+    Some(@viewer.DiffEditorModel(original_model, modified_model)),
+  )
+  services.feedback.set_feedback_enabled(original_uri, relative is Some(_))
+  if previous is Some(previous) {
+    previous.original.dispose()
+    if !previous.modified.same(previous.original) {
+      previous.modified.dispose()
+    }
+  }
 }
 
 ///|
@@ -305,8 +453,8 @@ pub fn request_viewer_remeasure() -> @cmd.Cmd {
 /// `review_original`, when present, is the Git HEAD baseline used by the
 /// Viewer's quick-diff contribution. An empty string is meaningful for a new
 /// file; omission clears any earlier baseline for this resource. A unified
-/// pair, when present, is rendered in the sibling full-diff surface while the
-/// source Viewer remains mounted.
+/// pair, when present, is rendered by the sibling side-by-side DiffViewer while
+/// the source Viewer remains mounted.
 fn show_file_in_viewer(
   owner : @interop.ConversationKey,
   root~ : @common.Uri?,
@@ -446,11 +594,12 @@ fn show_file_in_viewer(
         }
       }
     }
-    match (viewer_state.unified_diff, unified_diff) {
-      (Some(diff_view), Some((original, modified))) =>
-        diff_view.set_diff(original, modified)
-      (Some(diff_view), None) => diff_view.clear()
-      (None, _) => ()
+    match unified_diff {
+      Some((original, modified)) =>
+        show_diff_comparison(
+          owner, name, uri, absolute, relative, original, modified,
+        )
+      None => clear_diff_comparison()
     }
     if range is Some(range) {
       if range.is_empty() {
@@ -553,9 +702,7 @@ fn clear_viewer() -> @cmd.Cmd {
       viewer_state.navigation = None
       viewer.set_model(None)
     }
-    if viewer_state.unified_diff is Some(diff_view) {
-      diff_view.clear()
-    }
+    clear_diff_comparison()
   })
 }
 
@@ -578,9 +725,7 @@ fn clear_document() -> @cmd.Cmd {
       viewer_state.navigation = None
       viewer.set_model(None)
     }
-    if viewer_state.unified_diff is Some(diff_view) {
-      diff_view.clear()
-    }
+    clear_diff_comparison()
   })
 }
 

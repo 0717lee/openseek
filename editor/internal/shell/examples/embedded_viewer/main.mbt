@@ -141,7 +141,7 @@ fn memory_workspace() -> MemoryWorkspace {
 
 ///|
 /// A valid sub-1-MiB source pair with enough short changed lines to exercise
-/// the standalone renderer's eager-DOM safety budget.
+/// the DiffViewer's ordinary Viewer virtualization.
 fn large_diff_document(prefix : String) -> String {
   let content = StringBuilder()
   for index in 0..<2600 {
@@ -152,7 +152,7 @@ fn large_diff_document(prefix : String) -> String {
 
 ///|
 /// Each side is a single valid source line below the desktop's 1 MiB read
-/// limit, while their combined UTF-16 size exceeds the standalone diff budget.
+/// limit, while their combined UTF-16 size exceeds the legacy eager-diff budget.
 fn oversized_diff_line(fill : String) -> String {
   fill.repeat(524289)
 }
@@ -247,7 +247,7 @@ fn dispatch_embed_msg(msg : EmbedMsg) -> Unit {
 let embed_viewer_cell : Ref[@viewer.Viewer?] = Ref(None)
 
 ///|
-let embed_diff_view_cell : Ref[@viewer.UnifiedDiffView?] = Ref(None)
+let embed_diff_view_cell : Ref[@viewer.DiffViewer?] = Ref(None)
 
 ///|
 /// Resolves the embedded viewer, creating it into the shell-rendered
@@ -289,22 +289,32 @@ fn embed_viewer() -> @viewer.Viewer {
 }
 
 ///|
-/// Resolves the standalone public diff surface in its own stable host. Source
+/// Resolves the side-by-side public diff surface in its own stable host. Source
 /// and diff views are siblings so toggling never replaces the source Viewer's
 /// model, selection, or scroll state.
-fn embed_diff_view() -> @viewer.UnifiedDiffView {
+fn embed_diff_view() -> @viewer.DiffViewer {
   match embed_diff_view_cell.val {
     Some(view) => view
     None => {
       let host = @rdom.document()
-        .query_selector(".unified-diff-host")
+        .query_selector(".diff-viewer-host")
         .to_option()
         .unwrap()
-      // Keep the embed's public diff fixture interactive so browser tests
-      // cover the optional review-comment surface as an integrator sees it.
-      let view = @viewer.UnifiedDiffView::create(host, on_comment=_ => ())
+      let view = @viewer.DiffViewer::create(host)
       embed_diff_view_cell.val = Some(view)
       view
+    }
+  }
+}
+
+///|
+fn dispose_embed_diff_models(view : @viewer.DiffViewer) -> Unit {
+  let models = view.get_model()
+  view.clear()
+  if models is Some(models) {
+    models.original.dispose()
+    if !models.modified.same(models.original) {
+      models.modified.dispose()
     }
   }
 }
@@ -315,7 +325,7 @@ fn set_embed_diff_visible(visible : Bool) -> @rabbita.Cmd {
     _ => {
       if !visible {
         match embed_diff_view_cell.val {
-          Some(view) => view.clear()
+          Some(view) => dispose_embed_diff_models(view)
           None => ()
         }
         return
@@ -325,7 +335,33 @@ fn set_embed_diff_visible(visible : Bool) -> @rabbita.Cmd {
         is Some(original) else {
         return
       }
-      embed_diff_view().set_diff(original, model.get_value())
+      let diff_view = embed_diff_view()
+      dispose_embed_diff_models(diff_view)
+      let version = next_embed_model_version()
+      let original_uri = @base_common.Uri::from(
+        scheme="memory-original",
+        authority=model.uri.authority,
+        path=model.uri.path,
+      ) catch {
+        _ => return
+      }
+      let original_model = @model.TextModel(
+        original_uri,
+        model.display_name,
+        model.language_id,
+        version,
+        "original-memory-\{version.to_string()}",
+        original,
+      )
+      let modified_model = @model.TextModel(
+        model.uri,
+        model.display_name,
+        model.language_id,
+        version,
+        "modified-memory-\{version.to_string()}",
+        model.get_value(),
+      )
+      diff_view.set_model(Some(DiffEditorModel(original_model, modified_model)))
     },
     kind=@cmd.after_render,
   )
@@ -462,7 +498,7 @@ fn view_embed(
           // shell never renders vdom children into either host.
           @html.div(
             class=if model.diff_visible {
-              "viewer-host moonbit-unified-diff-surface-hidden"
+              "viewer-host moonbit-viewer-surface-hidden"
             } else {
               "viewer-host"
             },
@@ -470,9 +506,9 @@ fn view_embed(
           ),
           @html.div(
             class=if model.diff_visible {
-              "viewer-host unified-diff-host"
+              "viewer-host diff-viewer-host"
             } else {
-              "viewer-host unified-diff-host moonbit-unified-diff-surface-hidden"
+              "viewer-host diff-viewer-host moonbit-viewer-surface-hidden"
             },
             ([] : Array[@html.Html]),
           ),

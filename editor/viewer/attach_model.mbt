@@ -24,7 +24,11 @@
 /// disposed by `ModelData` teardown before a replacement can observe them.
 fn Viewer::attach_model(self : Viewer, model : @model.TextModel) -> Unit {
   let model_data_generation = self.model_slot.begin_attach_generation()
-  let presentation_kind = document_presentation_kind(model)
+  let presentation_kind = if self.force_code_presentation {
+    CodeDocument
+  } else {
+    document_presentation_kind(model)
+  }
   let listeners_to_remove : Array[@base_common.Disposable] = []
   // `data-mode-id` on the container (`cew:1758`), removed at detach.
   match self.mount {

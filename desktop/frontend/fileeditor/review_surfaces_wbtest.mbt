@@ -38,7 +38,7 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
   )
   assert_true(
     source.contains(
-      "id=\"unified-diff-host\" class=\"viewer-host editor-shell moonbit-unified-diff-surface-hidden\"",
+      "id=\"unified-diff-host\" class=\"viewer-host editor-shell moonbit-viewer-surface-hidden\"",
     ),
   )
   let source_breadcrumb = render_review_html(
@@ -66,7 +66,7 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
   let diff = render_review_html(body_view(test_emit(), diff_state, ctx))
   assert_true(
     diff.contains(
-      "id=\"viewer-host\" class=\"viewer-host editor-shell moonbit-unified-diff-surface-hidden\"",
+      "id=\"viewer-host\" class=\"viewer-host editor-shell moonbit-viewer-surface-hidden\"",
     ),
   )
   assert_true(

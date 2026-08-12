@@ -28,6 +28,20 @@ pub fn view_zone(Int, @dom.Element, after_column? : Int, after_column_affinity? 
 // Errors
 
 // Types and methods
+pub(all) struct DiffEditorModel {
+  original : @model.TextModel
+  modified : @model.TextModel
+}
+pub fn DiffEditorModel::DiffEditorModel(@model.TextModel, @model.TextModel) -> Self
+
+type DiffViewer
+pub fn DiffViewer::clear(Self) -> Unit
+pub fn DiffViewer::create(@dom.Element, services? : ViewerServices, options? : ViewerOptions) -> Self
+pub fn DiffViewer::dispose(Self) -> Unit
+pub fn DiffViewer::get_model(Self) -> DiffEditorModel?
+pub fn DiffViewer::layout(Self) -> Unit
+pub fn DiffViewer::set_model(Self, DiffEditorModel?) -> Unit
+
 type EditorDecorationsCollection
 pub fn EditorDecorationsCollection::append(Self, Array[@model.ModelDeltaDecoration]) -> Array[String]
 pub fn EditorDecorationsCollection::clear(Self) -> Unit

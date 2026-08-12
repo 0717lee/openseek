@@ -98,6 +98,13 @@ for performance investigation and perf-harness changes.
   exclusion, source-replacement cancellation, same-model reveal, a
   projection-scoped Peek overlay inside a constrained host, nested preview,
   Escape focus restoration, and replacement teardown.
+- `component.html?diffViewer=1` mounts the public phase-one `DiffViewer` over
+  original and modified MoonBit models with one shared service bundle. Its
+  Playwright spec checks two ordinary Viewer roots, line decorations, ViewZone
+  pixel alignment, vertical scroll coupling, modified-side hover and F12, and
+  absence of semantic UI on the scheme-filtered original model. Run it alone
+  with `npx playwright test tests/browser/component/diff_viewer.spec.js` after
+  `just build-browser-tests`.
 - Product observability: `__readonlyEditorEvent`, `__readonlyEditorModel`,
   `__readonlyEditorDocument`, `__readonlyEditorSource`,
   `__readonlyEditorCopiedText`, and `__readonlyEditorCopiedHtml`.
