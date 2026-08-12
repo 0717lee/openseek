@@ -112,6 +112,25 @@ test "positioned file references keep explicit destinations authoritative" {
 
 ///|
 #warnings("-alert_unstable")
+test "explicit directory destinations use the local path action" {
+  let rendered = @html.div(
+    markdown_nodes(
+      "[absolute](</Users/me/My Project/src>) [relative](./src/) [bare](src) [web](https://example.com/src)",
+      open_file=_ => @cmd.none,
+    ),
+  )
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  assert_true(markup.contains("title=\"Open /Users/me/My Project/src\""))
+  assert_true(markup.contains("title=\"Open ./src/\""))
+  // A bare word remains an ordinary link, and a web destination remains an
+  // external anchor rather than being confused for a slash-bearing path.
+  assert_false(markup.contains("title=\"Open src\""))
+  assert_true(markup.contains("href=\"src\""))
+  assert_true(markup.contains("href=\"https://example.com/src\""))
+}
+
+///|
+#warnings("-alert_unstable")
 test "local file URI destinations open decoded filesystem paths" {
   let rendered = @html.div(
     markdown_nodes(

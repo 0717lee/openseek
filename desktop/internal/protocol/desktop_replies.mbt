@@ -451,11 +451,21 @@ pub(all) struct OpenPathEditorTarget {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+pub(all) struct OpenPathDirectoryTarget {
+  // Slash-separated path relative to the conversation's resolved checkout.
+  path : String
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
 pub(all) struct OpenPathReply {
   // True only when the host handed a non-text path to the system opener.
   opened : Bool
   // Present when a viewer-sized UTF-8 file should open in the built-in editor.
   editor_target : OpenPathEditorTarget?
+  // Present when the literal path is a directory in the conversation checkout.
+  // Older hosts omit this field, so it remains an optional additive protocol
+  // extension.
+  directory_target : OpenPathDirectoryTarget?
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
