@@ -6,7 +6,7 @@ test "path activation follows the target shell's syntax" {
       "/Applications/Seek Moon/toolchain/bin",
       windows=false,
     ),
-    "export PATH='/Applications/Seek Moon/toolchain/bin':\"$PATH\"\r",
+    Some("export PATH='/Applications/Seek Moon/toolchain/bin':\"$PATH\"\r"),
   )
   assert_eq(
     @shellenv.path_prepend_command(
@@ -14,7 +14,7 @@ test "path activation follows the target shell's syntax" {
       "/tmp/it's\\moon/bin",
       windows=false,
     ),
-    "set -gx PATH '/tmp/it\\'s\\\\moon/bin' $PATH\r",
+    Some("set -gx PATH '/tmp/it\\'s\\\\moon/bin' $PATH\r"),
   )
   assert_eq(
     @shellenv.path_prepend_command(
@@ -22,7 +22,7 @@ test "path activation follows the target shell's syntax" {
       "/tmp/it's moon/bin",
       windows=false,
     ),
-    "setenv PATH '/tmp/it'\\''s moon/bin':\"$PATH\"\r",
+    Some("setenv PATH '/tmp/it'\\''s moon/bin':\"$PATH\"\r"),
   )
   assert_eq(
     @shellenv.path_prepend_command(
@@ -30,7 +30,7 @@ test "path activation follows the target shell's syntax" {
       "/tmp/it's moon/bin",
       windows=false,
     ),
-    "$env:Path = '/tmp/it''s moon/bin:' + $env:Path\r",
+    Some("$env:Path = '/tmp/it''s moon/bin:' + $env:Path\r"),
   )
   assert_eq(
     @shellenv.path_prepend_command(
@@ -38,7 +38,7 @@ test "path activation follows the target shell's syntax" {
       "C:\\Users\\Moon User\\toolchain\\bin",
       windows=true,
     ),
-    "$env:Path = 'C:\\Users\\Moon User\\toolchain\\bin;' + $env:Path\r",
+    Some("$env:Path = 'C:\\Users\\Moon User\\toolchain\\bin;' + $env:Path\r"),
   )
   assert_eq(
     @shellenv.path_prepend_command(
@@ -46,6 +46,26 @@ test "path activation follows the target shell's syntax" {
       "C:\\Users\\Moon User\\toolchain\\bin",
       windows=true,
     ),
-    "set \"Path=C:\\Users\\Moon User\\toolchain\\bin;%Path%\"\r",
+    Some("set \"Path=C:\\Users\\Moon User\\toolchain\\bin;%Path%\"\r"),
+  )
+}
+
+///|
+test "path activation leaves unknown shells untouched" {
+  assert_eq(
+    @shellenv.path_prepend_command(
+      "/opt/homebrew/bin/nu",
+      "/Applications/Seek Moon/toolchain/bin",
+      windows=false,
+    ),
+    None,
+  )
+  assert_eq(
+    @shellenv.path_prepend_command(
+      "/usr/local/bin/xonsh",
+      "/Applications/Seek Moon/toolchain/bin",
+      windows=false,
+    ),
+    None,
   )
 }

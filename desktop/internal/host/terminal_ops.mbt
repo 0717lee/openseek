@@ -70,7 +70,9 @@ async fn terminal_open_op(
   // Match the engine and language services: a packaged seed wins when present,
   // while an unbundled development host uses the first external toolchain.
   // Queue the path update after shell startup so rc/profile files cannot
-  // overwrite the selection. MOON_HOME remains the user's registry and caches.
+  // overwrite the selection. Unknown shells stay usable without receiving a
+  // command in another shell's syntax. MOON_HOME remains the user's registry
+  // and caches.
   let toolchain = @moonbit.resolve_toolchain(
     state.engine,
     runtime_dir?=state.runtime_dir,
@@ -86,12 +88,10 @@ async fn terminal_open_op(
   } else {
     @sys.get_env_var("SHELL").unwrap_or("/bin/sh")
   }
-  let activation_input = @utf8.encode(
-    @shellenv.path_prepend_command(
-      shell_command,
-      toolchain.bin_dir.to_string(),
-      windows~,
-    ),
+  let activation_command = @shellenv.path_prepend_command(
+    shell_command,
+    toolchain.bin_dir.to_string(),
+    windows~,
   )
   let id = @terminal.open_terminal(
     terminals,
@@ -102,14 +102,16 @@ async fn terminal_open_op(
     @terminal.TerminalError(message) => raise HostError(message)
     error => raise error
   }
-  @terminal.write_terminal(terminals, id~, activation_input) catch {
-    @terminal.TerminalError(message) => {
-      @terminal.close_terminal(terminals, id~)
-      raise HostError("could not activate the MoonBit toolchain: \{message}")
-    }
-    error => {
-      @terminal.close_terminal(terminals, id~)
-      raise error
+  if activation_command is Some(command) {
+    @terminal.write_terminal(terminals, id~, @utf8.encode(command)) catch {
+      @terminal.TerminalError(message) => {
+        @terminal.close_terminal(terminals, id~)
+        raise HostError("could not activate the MoonBit toolchain: \{message}")
+      }
+      error => {
+        @terminal.close_terminal(terminals, id~)
+        raise error
+      }
     }
   }
   { id, }

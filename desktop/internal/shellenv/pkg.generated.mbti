@@ -8,7 +8,7 @@ import {
 // Values
 pub async fn apply_login_shell_env(String, @xlog.Logger) -> Unit
 
-pub fn path_prepend_command(String, String, windows~ : Bool) -> String
+pub fn path_prepend_command(String, String, windows~ : Bool) -> String?
 
 pub fn print_env_json(String) -> Unit
 
