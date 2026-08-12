@@ -32,82 +32,89 @@ pub impl @syntax.LineTokenizer for MoonConfigTokenizer with fn tokenize_line(
   _state,
 ) {
   let tokens : Array[@syntax.LineToken] = []
-  for at = 0, view = line_text[:]; view.length() > 0; {
-    let rest = lexmatch view with longest {
-      (re"^[ \t]+", after=rest) => rest
+  for at = 0, view = line_text {
+    lexmatch view with longest {
+      re"^$" => break
+      (re"^[ \t]+" as s, after=rest) => continue at + s.length(), rest
       (re"^//.*" as s, after=rest) => {
-        @syntax.push_token(tokens, at, at + s.length(), Comment)
-        rest
+        let end = at + s.length()
+        @syntax.push_token(tokens, at, end, Comment)
+        continue end, rest
       }
       (re"^\"(?:\\.|[^\"\\])*\"" as s, after=rest) => {
-        @syntax.push_token(tokens, at, at + s.length(), String)
-        rest
+        let end = at + s.length()
+        @syntax.push_token(tokens, at, end, String)
+        continue end, rest
       }
       (re"^\"(?:\\.|[^\"\\])*" as s, after=rest) => {
-        @syntax.push_token(tokens, at, at + s.length(), String)
-        rest
+        let end = at + s.length()
+        @syntax.push_token(tokens, at, end, String)
+        continue end, rest
       }
       (re"^[0-9][0-9_]*" as s, after=rest) => {
-        @syntax.push_token(tokens, at, at + s.length(), Number)
-        rest
+        let end = at + s.length()
+        @syntax.push_token(tokens, at, end, Number)
+        continue end, rest
       }
       (
         re"^@[a-zA-Z_][a-zA-Z0-9_\-]*(?:/[a-zA-Z_][a-zA-Z0-9_\-]*)*" as s,
         after=rest,
       ) => {
-        @syntax.push_token(tokens, at, at + s.length(), Type)
-        rest
+        let end = at + s.length()
+        @syntax.push_token(tokens, at, end, Type)
+        continue end, rest
       }
       (re"^(?:import|for)" as s, after=rest) => {
-        @syntax.push_token(tokens, at, at + s.length(), Keyword)
-        rest
+        let end = at + s.length()
+        @syntax.push_token(tokens, at, end, Keyword)
+        continue end, rest
       }
       (re"^(?:module|package)" as s, after=rest) => {
-        @syntax.push_token(tokens, at, at + s.length(), Type)
-        rest
+        let end = at + s.length()
+        @syntax.push_token(tokens, at, end, Type)
+        continue end, rest
       }
       (re"^(?:options|rule|dev_build)" as s, after=rest) => {
-        @syntax.push_token(tokens, at, at + s.length(), Function)
-        rest
+        let end = at + s.length()
+        @syntax.push_token(tokens, at, end, Function)
+        continue end, rest
       }
       (re"^as" as s, after=rest) => {
-        @syntax.push_token(tokens, at, at + s.length(), Operator)
-        rest
+        let end = at + s.length()
+        @syntax.push_token(tokens, at, end, Operator)
+        continue end, rest
       }
       (re"^(?:true|false)" as s, after=rest) => {
-        @syntax.push_token(tokens, at, at + s.length(), Constant)
-        rest
+        let end = at + s.length()
+        @syntax.push_token(tokens, at, end, Constant)
+        continue end, rest
       }
       (re"^[a-zA-Z_][a-zA-Z0-9_\-]*" as s, after=rest) => {
-        @syntax.push_token(tokens, at, at + s.length(), Identifier)
-        rest
+        let end = at + s.length()
+        @syntax.push_token(tokens, at, end, Identifier)
+        continue end, rest
       }
       (re"^[=]", after=rest) => {
-        @syntax.push_token(tokens, at, at + 1, Operator)
-        rest
+        let end = at + 1
+        @syntax.push_token(tokens, at, end, Operator)
+        continue end, rest
       }
       (re"^[{}\[\](),:]", after=rest) => {
-        @syntax.push_token(tokens, at, at + 1, Delimiter)
-        rest
+        let end = at + 1
+        @syntax.push_token(tokens, at, end, Delimiter)
+        continue end, rest
       }
       (re"^[/;]", after=rest) => {
-        @syntax.push_token(tokens, at, at + 1, Punctuation)
-        rest
+        let end = at + 1
+        @syntax.push_token(tokens, at, end, Punctuation)
+        continue end, rest
       }
-      (re"^.", after=rest) => {
-        @syntax.push_token(
-          tokens,
-          at,
-          at + view.length() - rest.length(),
-          Punctuation,
-        )
-        rest
+      (re"^." as c, after=rest) => {
+        let end = at + c.utf16_len()
+        @syntax.push_token(tokens, at, end, Punctuation)
+        continue end, rest
       }
-      // Unreachable while `.` covers the full charset (including lone
-      // surrogates); consume the rest defensively so the driver cannot stall.
-      _ => ""[:]
     }
-    continue at + view.length() - rest.length(), rest
   }
   (tokens, moon_config_normal_state)
 }

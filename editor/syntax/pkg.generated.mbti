@@ -75,5 +75,5 @@ pub impl @debug.Debug for TokenizerState
 // Traits
 pub(open) trait LineTokenizer {
   fn initial_state(Self) -> TokenizerState
-  fn tokenize_line(Self, String, TokenizerState) -> (Array[LineToken], TokenizerState)
+  fn tokenize_line(Self, StringView, TokenizerState) -> (Array[LineToken], TokenizerState)
 }

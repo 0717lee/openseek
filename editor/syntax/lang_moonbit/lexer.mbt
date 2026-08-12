@@ -44,7 +44,7 @@ pub impl @syntax.LineTokenizer for MoonBitTokenizer with fn tokenize_line(
 ) {
   let stack : Array[Byte] = [b'n']
   let tokens : Array[@syntax.LineToken] = []
-  for at = 0, view = line_text[:]; view.length() > 0; {
+  for at = 0, view = line_text; view.length() > 0; {
     let top = stack[stack.length() - 1]
     let (op, rest) = match top {
       b's' => string_step(view)

@@ -268,8 +268,7 @@ the top. No array representation crosses the public boundary.
 `lang_javascript` carries this stack directly and therefore allocates only when
 a lexical mode changes. `lang_moonbit` uses a private mutable scratch stack
 within each line and always returns the empty normal state. `lang_moon_config`
-is also line-local and always returns the empty state. `lang_json` carries only
-an optional in-comment mode.
+and strict `lang_json` are also line-local and always return the empty state.
 
 ```mbt check
 ///|
@@ -296,18 +295,20 @@ There is no runtime grammar-loading or `setMonarchTokensProvider` equivalent.
 When translating a Monarch or CodeMirror grammar:
 
 - Use `lexmatch ... with longest`; equal-length matches choose the earliest arm.
-  Longest-match arms do not support guards, so classify a bound identifier in the
-  arm body and inspect the returned remainder for lookahead (for example
-  `lang_json`'s `colon_follows`).
+  Put keywords before the general identifier arm: a longer identifier wins by
+  length, while an exact keyword wins the equal-length tie by arm order. Keep
+  syntactic roles, such as whether a JSON string is a property name, out of the
+  lexer.
 - Carry multiline modes in `TokenizerState`; use scoped `(?i:...)` for
   case-insensitive rules. Dynamic delimiters/backreferences require a small manual
   scan because a DFA cannot encode them.
 - Regex literals use strict single-backslash escapes. Write literal braces as
   `[{]`/`[}]`; escape `-` and `]` inside classes. Single-character bindings are
   `Char`, longer bindings are `StringView`.
-- Guarantee progress with a final `(".", rest)` arm and the mandatory catch-all;
-  the catch-all must consume the remaining view. Never split a surrogate pair at
-  an emitted token boundary.
+- Match `re"^$"` explicitly to end the loop, then guarantee progress with a final
+  `re"^."` arm. Its capture is a `Char`; advance by `Char::utf16_len()` so an
+  emitted token never splits a surrogate pair. Longer captures are `StringView`s,
+  whose `length()` is already measured in UTF-16 code units.
 
 ## Boundaries and checks
 
