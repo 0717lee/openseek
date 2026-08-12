@@ -334,8 +334,9 @@ pub(all) struct State {
   // mirrors the dock strip's file tabs (`Ctx.open_files`): the root update
   // adds an entry when it opens a tab and drops it when the tab closes.
   docs : Map[@pathx.Relative, Doc]
-  // The directory a breadcrumb click most recently revealed, flashed in the
-  // tree until `HighlightCleared` fires.
+  // The directory whose immediate children are open in the breadcrumb's
+  // VS Code-style picker. The legacy field and message names remain so this
+  // presentation change does not grow the package's public API.
   highlighted : @pathx.Relative?
   // The workspace-wide file snapshot used by completion consumers.
   index : FileIndex
@@ -448,13 +449,12 @@ pub(all) struct Ctx {
 
 ///|
 pub(all) enum Msg {
-  // A breadcrumb segment was clicked: switch back to the (always-rooted)
-  // tree and reveal this directory — expanding whatever ancestors are
-  // needed to show it, then scrolling to and flashing it. `""` (the leading
-  // "Workspace" crumb) just returns to the plain tree with no highlight.
+  // Open the directory's immediate children under the breadcrumb. Selecting
+  // the already-open directory toggles the picker closed; an uncached level
+  // is listed through the same request/cache as the explorer tree.
   RevealDirectory(@pathx.Relative)
-  // A `RevealDirectory` highlight's flash delay elapsed; clears it unless a
-  // newer reveal has since replaced it.
+  // Click-away and Escape close the transient picker only when `path` still
+  // names the open directory.
   HighlightCleared(@pathx.Relative)
   // Show or hide the file-tree pane (the column right of the viewer).
   ToggleTree

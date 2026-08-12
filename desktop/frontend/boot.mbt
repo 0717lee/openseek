@@ -216,6 +216,18 @@ pub fn boot() -> Unit {
             ),
           )
         }
+        if model.file_panel.highlighted is Some(directory) {
+          subs.push(
+            dismiss_subscription(
+              "breadcrumb-picker-dismiss",
+              // Directory crumbs toggle the picker, and the picker itself
+              // supports nested folder navigation. Every other click closes
+              // it without consuming the action under the pointer.
+              trigger=".crumb-directory, .breadcrumb-picker",
+              emit.map((_ : Unit) => FileEditor(HighlightCleared(directory))),
+            ),
+          )
+        }
         @sub.batch(subs)
       },
     )

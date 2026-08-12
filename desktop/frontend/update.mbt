@@ -15173,7 +15173,7 @@ test "chip jumps relativize legacy absolute paths against the roots" {
 }
 
 ///|
-test "RevealDirectory(\"\") opens the tree pane without a highlight" {
+test "RevealDirectory(\"\") opens the workspace breadcrumb picker" {
   let dispatch = test_dispatch()
   let model = test_model()
   let owner : @interop.ConversationKey = {
@@ -15195,14 +15195,14 @@ test "RevealDirectory(\"\") opens the tree pane without a highlight" {
     FileEditor(RevealDirectory(@pathx.Relative::root())),
     { ..model, dock, file_panel: panel, right_panel_open: true },
   )
-  // The active tab stays put — revealing the tree must not close the file.
+  // The active tab and docked explorer stay put while the picker opens.
   assert_true(@dock.active_file(next.dock) is Some(Relative("README.md")))
-  assert_true(next.file_panel.tree_open)
-  assert_true(next.file_panel.highlighted is None)
+  assert_false(next.file_panel.tree_open)
+  assert_true(next.file_panel.highlighted is Some(Relative("")))
 }
 
 ///|
-test "RevealDirectory expands an uncached ancestor and highlights the target" {
+test "RevealDirectory loads an uncached breadcrumb directory" {
   let dispatch = test_dispatch()
   let model = test_model()
   let panel = {
@@ -15214,17 +15214,17 @@ test "RevealDirectory expands an uncached ancestor and highlights the target" {
     FileEditor(RevealDirectory(Relative("src/foo"))),
     { ..model, file_panel: panel },
   )
-  assert_true(next.file_panel.expanded.contains(Relative("src")))
-  assert_true(next.file_panel.loading.contains(Relative("src")))
+  assert_true(next.file_panel.expanded.is_empty())
+  assert_true(next.file_panel.loading.contains(Relative("src/foo")))
   assert_true(next.file_panel.highlighted is Some(Relative("src/foo")))
 }
 
 ///|
-test "RevealDirectory on an already-cached ancestor needs no reload" {
+test "RevealDirectory on an already-cached directory needs no reload" {
   let dispatch = test_dispatch()
   let model = test_model()
   let children : Map[@pathx.Relative, Array[@fileeditor.FileEntry]] = Map([
-    (Relative("src"), []),
+    (Relative("src/foo"), []),
   ])
   let panel = {
     ..model.file_panel,
@@ -15236,8 +15236,9 @@ test "RevealDirectory on an already-cached ancestor needs no reload" {
     FileEditor(RevealDirectory(Relative("src/foo"))),
     { ..model, file_panel: panel },
   )
-  assert_true(next.file_panel.expanded.contains(Relative("src")))
-  assert_false(next.file_panel.loading.contains(Relative("src")))
+  assert_true(next.file_panel.expanded.is_empty())
+  assert_false(next.file_panel.loading.contains(Relative("src/foo")))
+  assert_true(next.file_panel.highlighted is Some(Relative("src/foo")))
 }
 
 ///|
