@@ -17,4 +17,3 @@ pub impl @syntax.LineTokenizer for JsonTokenizer
 // Type aliases
 
 // Traits
-

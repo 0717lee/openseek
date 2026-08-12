@@ -40,4 +40,3 @@ pub fn WorkerReport::parse_validated(Json) -> Result[Self, String]
 // Type aliases
 
 // Traits
-

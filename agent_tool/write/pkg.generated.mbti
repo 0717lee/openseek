@@ -16,4 +16,3 @@ pub fn definition(workspace_root? : String, file_state? : @agent_tool.FileStateM
 // Type aliases
 
 // Traits
-

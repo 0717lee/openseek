@@ -40,4 +40,3 @@ pub async fn TextModelResolverHandle::resolve(Self, @common.Uri, @language.Cance
 // Type aliases
 
 // Traits
-

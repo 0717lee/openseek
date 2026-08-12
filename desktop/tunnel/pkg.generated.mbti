@@ -18,4 +18,3 @@ pub fn Frame::encode(Self) -> String
 // Type aliases
 
 // Traits
-

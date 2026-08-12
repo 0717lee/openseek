@@ -11,4 +11,3 @@ pub fn failure_message(String) -> String
 // Type aliases
 
 // Traits
-

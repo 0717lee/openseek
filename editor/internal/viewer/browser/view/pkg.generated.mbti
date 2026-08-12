@@ -209,4 +209,3 @@ pub fn ViewZones::refresh_hidden_area_source_visibility(Self) -> Bool
 // Type aliases
 
 // Traits
-

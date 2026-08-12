@@ -36,4 +36,3 @@ pub fn SessionStore::session_file(Self, @agent_session.SessionId) -> String rais
 // Type aliases
 
 // Traits
-

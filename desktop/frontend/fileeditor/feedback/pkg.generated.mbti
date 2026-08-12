@@ -28,4 +28,3 @@ pub fn DesktopFeedbackService::set_feedback_enabled(Self, @common.Uri, Bool) -> 
 // Type aliases
 
 // Traits
-

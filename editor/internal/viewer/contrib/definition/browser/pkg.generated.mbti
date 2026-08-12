@@ -24,4 +24,3 @@ pub fn DefinitionMessageWidget::show_at(Self, @common.Position) -> Unit
 // Type aliases
 
 // Traits
-

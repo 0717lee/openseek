@@ -40,4 +40,3 @@ pub fn MarkdownCommentViewportObserver::dispose(Self) -> Unit
 // Type aliases
 
 // Traits
-

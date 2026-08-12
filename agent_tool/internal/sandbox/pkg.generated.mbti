@@ -21,4 +21,3 @@ pub fn SandboxedCommand::program(Self) -> String
 // Type aliases
 
 // Traits
-

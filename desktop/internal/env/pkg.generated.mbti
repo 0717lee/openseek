@@ -17,4 +17,3 @@ pub fn prepend_to_path_env(String, String?) -> String
 // Type aliases
 
 // Traits
-

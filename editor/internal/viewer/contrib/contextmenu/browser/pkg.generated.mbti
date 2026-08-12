@@ -31,4 +31,3 @@ pub(all) struct ContextMenuWidgetCallbacks {
 // Type aliases
 
 // Traits
-

@@ -23,4 +23,3 @@ pub enum GoalStatus {
 // Type aliases
 
 // Traits
-

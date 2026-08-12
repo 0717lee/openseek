@@ -19,4 +19,3 @@ pub async fn nearest_project_dir(String) -> String?
 // Type aliases
 
 // Traits
-

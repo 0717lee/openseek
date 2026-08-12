@@ -41,4 +41,3 @@ pub fn ReportRow::ReportRow(index~ : Int, name~ : String, success~ : Bool, reaso
 // Type aliases
 
 // Traits
-

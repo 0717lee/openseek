@@ -15,4 +15,3 @@ pub fn definition() -> @agent_tool.AgentToolDefinition
 // Type aliases
 
 // Traits
-

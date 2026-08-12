@@ -74,4 +74,3 @@ pub fn SingleCursorState::selection(Self) -> @core.Selection
 // Type aliases
 
 // Traits
-

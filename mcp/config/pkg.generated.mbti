@@ -23,4 +23,3 @@ pub fn McpServer::name(Self) -> String
 // Type aliases
 
 // Traits
-

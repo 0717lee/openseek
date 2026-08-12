@@ -17,4 +17,3 @@ pub fn is_moon_pkg_path(String) -> Bool
 // Type aliases
 
 // Traits
-

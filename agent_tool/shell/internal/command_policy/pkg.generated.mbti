@@ -17,4 +17,3 @@ pub fn moonbit_command_policy_error_for_parse(String, @shell_parse.ParseResult) 
 // Type aliases
 
 // Traits
-

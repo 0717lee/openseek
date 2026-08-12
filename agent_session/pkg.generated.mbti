@@ -146,4 +146,3 @@ pub fn UserMessage::content(Self) -> String
 // Type aliases
 
 // Traits
-

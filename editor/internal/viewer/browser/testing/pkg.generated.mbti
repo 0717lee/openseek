@@ -57,4 +57,3 @@ pub(all) struct ViewModelBuiltObservation {
 // Type aliases
 
 // Traits
-

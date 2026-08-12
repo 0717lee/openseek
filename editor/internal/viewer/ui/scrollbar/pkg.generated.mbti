@@ -87,4 +87,3 @@ pub fn StandardWheelEvent::delta_y(Self) -> Double
 // Type aliases
 
 // Traits
-
