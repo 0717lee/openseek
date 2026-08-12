@@ -295,10 +295,10 @@ There is no runtime grammar-loading or `setMonarchTokensProvider` equivalent.
 When translating a Monarch or CodeMirror grammar:
 
 - Use `lexmatch ... with longest`; equal-length matches choose the earliest arm.
-  Put keywords before the general identifier arm: a longer identifier wins by
-  length, while an exact keyword wins the equal-length tie by arm order. Keep
-  syntactic roles, such as whether a JSON string is a property name, out of the
-  lexer.
+  For a nontrivial keyword set, match one complete identifier and classify its
+  spelling afterward. This keeps keyword-prefixed names intact without expanding
+  every keyword into the generated DFA. Keep syntactic roles, such as whether a
+  JSON string is a property name, out of the lexer.
 - Carry multiline modes in `TokenizerState`; use scoped `(?i:...)` for
   case-insensitive rules. Dynamic delimiters/backreferences require a small manual
   scan because a DFA cannot encode them.

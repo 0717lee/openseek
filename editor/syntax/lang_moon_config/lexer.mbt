@@ -7,6 +7,19 @@ struct MoonConfigTokenizer {
 }
 
 ///|
+/// Classifies one complete configuration identifier by spelling only.
+fn classify_word(word : StringView) -> @syntax.HighlightTag {
+  match word {
+    "import" | "for" => Keyword
+    "module" | "package" => Type
+    "options" | "rule" | "dev_build" => Function
+    "as" => Operator
+    "true" | "false" => Constant
+    _ => Identifier
+  }
+}
+
+///|
 /// Shared immutable normal state for MoonBit configuration files.
 let moon_config_normal_state : @syntax.TokenizerState = TokenizerState()
 
@@ -64,34 +77,9 @@ pub impl @syntax.LineTokenizer for MoonConfigTokenizer with fn tokenize_line(
         @syntax.push_token(tokens, at, end, Type)
         continue end, rest
       }
-      (re"^(?:import|for)" as s, after=rest) => {
-        let end = at + s.length()
-        @syntax.push_token(tokens, at, end, Keyword)
-        continue end, rest
-      }
-      (re"^(?:module|package)" as s, after=rest) => {
-        let end = at + s.length()
-        @syntax.push_token(tokens, at, end, Type)
-        continue end, rest
-      }
-      (re"^(?:options|rule|dev_build)" as s, after=rest) => {
-        let end = at + s.length()
-        @syntax.push_token(tokens, at, end, Function)
-        continue end, rest
-      }
-      (re"^as" as s, after=rest) => {
-        let end = at + s.length()
-        @syntax.push_token(tokens, at, end, Operator)
-        continue end, rest
-      }
-      (re"^(?:true|false)" as s, after=rest) => {
-        let end = at + s.length()
-        @syntax.push_token(tokens, at, end, Constant)
-        continue end, rest
-      }
       (re"^[a-zA-Z_][a-zA-Z0-9_\-]*" as s, after=rest) => {
         let end = at + s.length()
-        @syntax.push_token(tokens, at, end, Identifier)
+        @syntax.push_token(tokens, at, end, classify_word(s))
         continue end, rest
       }
       (re"^[=]", after=rest) => {
