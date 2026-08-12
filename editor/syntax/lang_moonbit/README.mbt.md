@@ -40,8 +40,10 @@ fn annotate(
 
 ## Lexical classes
 
-Keywords, identifiers, and numbers separate as expected; the capitalization
-heuristic (`@syntax.is_capitalized`) is what promotes an identifier to `Type`.
+Keywords, identifiers, and numbers separate as expected. Longest matching lets
+keywords be written as lexer rules before the general identifier rules: a
+keyword-prefixed identifier wins by length, while an exact keyword wins the
+equal-length tie. An ASCII-capitalized identifier matches the `Type` rule.
 
 ```mbt check
 ///|

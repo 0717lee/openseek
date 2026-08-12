@@ -109,6 +109,29 @@ test "string interpolation and escapes" {
 }
 
 ///|
+test "line-local modes track nested interpolation braces" {
+  let source =
+    #|let s = "\{{ "x": 1 }}"
+  inspect(
+    render_tokens(source),
+    content=(
+      #|0-3 Keyword let
+      #|4-5 Identifier s
+      #|6-7 Operator =
+      #|8-9 String "
+      #|9-11 StringEscape \{
+      #|11-12 Delimiter {
+      #|13-16 String "x"
+      #|16-17 Delimiter :
+      #|18-19 Number 1
+      #|20-21 Delimiter }
+      #|21-22 StringEscape }
+      #|22-23 String "
+    ),
+  )
+}
+
+///|
 test "multiline string lines" {
   let source =
     #|let text =
@@ -177,13 +200,44 @@ test "doc comments attributes numbers and package refs" {
 }
 
 ///|
-test "state carries through tokenize_line but resets at line end" {
+test "tokenization ignores incoming state and resets at line end" {
   let lexer : &@syntax.LineTokenizer = @lang_moonbit.MoonBitTokenizer()
   // Unterminated string: the line still tokenizes and the carried state
   // returns to normal because MoonBit strings never span lines.
+  let foreign_state = lexer.initial_state().push_mode(b's')
   let (_, after_unterminated) = lexer.tokenize_line(
-    "let s = \"open",
-    lexer.initial_state(),
+    "let s = \"open", foreign_state,
   )
   assert_true(after_unterminated == lexer.initial_state())
+}
+
+///|
+test "longest matching distinguishes keywords from prefixed identifiers" {
+  inspect(
+    render_tokens("let letter = true; let trueish = selfless; typealias Type"),
+    content=(
+      #|0-3 Keyword let
+      #|4-10 Identifier letter
+      #|11-12 Operator =
+      #|13-17 Constant true
+      #|17-18 Delimiter ;
+      #|19-22 Keyword let
+      #|23-30 Identifier trueish
+      #|31-32 Operator =
+      #|33-41 Identifier selfless
+      #|41-42 Delimiter ;
+      #|43-52 Keyword typealias
+      #|53-57 Type Type
+    ),
+  )
+}
+
+///|
+test "fallback punctuation preserves UTF-16 offsets" {
+  inspect(
+    render_tokens("🌟"),
+    content=(
+      #|0-2 Punctuation 🌟
+    ),
+  )
 }
