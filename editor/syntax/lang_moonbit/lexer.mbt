@@ -5,17 +5,23 @@
 /// grammar data.
 ///
 /// The carried `TokenizerState` is empty because no MoonBit string construct
-/// survives a line end. A mutable per-line scratch stack uses one byte per
-/// mode, bottom first:
-///   b'n' normal expression code (always the bottom)
-///   b's' inside a `"` string
-///   b'm' inside a `$|` multiline-string line
-///   b'i' inside a `\{ ... }` string interpolation
-///   b'b' inside a plain `{ ... }` brace pair nested in an interpolation
+/// survives a line end. A mutable per-line scratch stack records lexical modes,
+/// bottom first: normal expression code, string text, `$|` multiline-string
+/// text, string interpolation, and nested interpolation braces.
 /// No MoonBit string construct survives a line end, so every line both
-/// enters and leaves at b'n'; the stack only drives the within-line modes.
+/// enters and leaves in normal mode; the stack only drives within-line lexing.
 struct MoonBitTokenizer {
   _unit : Unit
+}
+
+///|
+/// Lexical modes used only by one `tokenize_line` invocation.
+priv enum MoonBitMode {
+  Normal
+  StringText
+  MultilineStringText
+  Interpolation
+  InterpolationBrace
 }
 
 ///|
@@ -42,12 +48,12 @@ pub impl @syntax.LineTokenizer for MoonBitTokenizer with fn tokenize_line(
   line_text,
   _state,
 ) {
-  let stack : Array[Byte] = [b'n']
+  let stack : Array[MoonBitMode] = [Normal]
   let tokens : Array[@syntax.LineToken] = []
   for at = 0, view = line_text {
     let top = stack[stack.length() - 1]
     match top {
-      b's' =>
+      StringText =>
         lexmatch view with longest {
           re"^$" => break
           (re"^\\u[{][0-9a-fA-F]+[}]" as s, after=rest) => {
@@ -58,7 +64,7 @@ pub impl @syntax.LineTokenizer for MoonBitTokenizer with fn tokenize_line(
           (re"^\\[{]", after=rest) => {
             let end = at + 2
             @syntax.push_token(tokens, at, end, StringEscape)
-            stack.push(b'i')
+            stack.push(Interpolation)
             continue end, rest
           }
           (re"^\\." as s, after=rest) => {
@@ -83,13 +89,13 @@ pub impl @syntax.LineTokenizer for MoonBitTokenizer with fn tokenize_line(
             continue end, rest
           }
         }
-      b'm' =>
+      MultilineStringText =>
         lexmatch view with longest {
           re"^$" => break
           (re"^\\[{]", after=rest) => {
             let end = at + 2
             @syntax.push_token(tokens, at, end, StringEscape)
-            stack.push(b'i')
+            stack.push(Interpolation)
             continue end, rest
           }
           (re"^\\." as s, after=rest) => {
@@ -130,7 +136,7 @@ pub impl @syntax.LineTokenizer for MoonBitTokenizer with fn tokenize_line(
           (re"^\$\|", after=rest) => {
             let end = at + 2
             @syntax.push_token(tokens, at, end, String)
-            stack.push(b'm')
+            stack.push(MultilineStringText)
             continue end, rest
           }
           (re"^#[a-zA-Z_][a-zA-Z0-9_.]*" as s, after=rest) => {
@@ -141,7 +147,7 @@ pub impl @syntax.LineTokenizer for MoonBitTokenizer with fn tokenize_line(
           (re"^b?\"" as s, after=rest) => {
             let end = at + s.length()
             @syntax.push_token(tokens, at, end, String)
-            stack.push(b's')
+            stack.push(StringText)
             continue end, rest
           }
           (re"^b?'(?:\\.|[^'\\])+'" as s, after=rest) => {
@@ -218,19 +224,19 @@ pub impl @syntax.LineTokenizer for MoonBitTokenizer with fn tokenize_line(
           (re"^[{]", after=rest) => {
             let end = at + 1
             @syntax.push_token(tokens, at, end, Delimiter)
-            if top == b'i' || top == b'b' {
-              stack.push(b'b')
+            if top is (Interpolation | InterpolationBrace) {
+              stack.push(InterpolationBrace)
             }
             continue end, rest
           }
           (re"^[}]", after=rest) => {
             let end = at + 1
-            if top == b'i' {
+            if top is Interpolation {
               @syntax.push_token(tokens, at, end, StringEscape)
               ignore(stack.pop())
             } else {
               @syntax.push_token(tokens, at, end, Delimiter)
-              if top == b'b' {
+              if top is InterpolationBrace {
                 ignore(stack.pop())
               }
             }
