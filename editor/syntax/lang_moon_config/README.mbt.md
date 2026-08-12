@@ -9,9 +9,11 @@ official `source.moonbit.config` lexical classes.
 
 ## Token roles
 
-The lexer distinguishes top-level and labeled property names from ordinary
-identifiers by looking for a following `=` or `:`. It also classifies imports,
-configuration calls, aliases, values, delimiters, and comments.
+The lexer assigns tokens from their text alone: names remain identifiers and
+quoted literals remain strings regardless of their grammatical position. It
+also classifies imports, configuration calls, aliases, constants, delimiters,
+and comments. Syntactic or semantic property highlighting can be layered on
+later without mixing parsing into this lexical pass.
 
 ```mbt check
 ///|
@@ -26,7 +28,7 @@ test "tokenizes a package manifest" {
     content=(
       #|(
       #|  [
-      #|    { start: 0, end: 17, tag: Attribute },
+      #|    { start: 0, end: 17, tag: Identifier },
       #|    { start: 18, end: 19, tag: Operator },
       #|    { start: 20, end: 24, tag: String },
       #|    { start: 25, end: 40, tag: Comment },
