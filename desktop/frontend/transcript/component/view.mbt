@@ -642,6 +642,47 @@ fn summary_card_view(
 }
 
 ///|
+/// The in-flight reasoning stream: a bounded, internally scrolling activity
+/// block, so a long thinking phase keeps showing progress without taking over
+/// the transcript. Once answer text starts, the thought remains visible but
+/// moves the streaming caret to the response bubble where new text is arriving.
+fn streaming_reasoning_view(
+  content : String,
+  streaming~ : Bool,
+  on_open : (String) -> @cmd.Cmd,
+) -> @html.Html {
+  let state_class = if streaming { " streaming" } else { "" }
+  @html.div(class="activity-row", [
+    @html.div(class="streaming-thought" + state_class, [
+      @html.div(class="streaming-thought-header", [
+        @html.span(class="streaming-thought-dot", ""),
+        @html.span(
+          class="streaming-thought-label",
+          if streaming {
+            "Thinking"
+          } else {
+            "Thought"
+          },
+        ),
+      ]),
+      @html.div(
+        class="streaming-thought-scroll",
+        attrs=@html.Attrs::build()
+          .role("region")
+          .aria_label("Live model thinking")
+          .tabindex(0),
+        [
+          @html.div(
+            class="msg-content markdown activity-thinking",
+            @markdown.markdown_nodes(content, open_file=on_open),
+          ),
+        ],
+      ),
+    ]),
+  ])
+}
+
+///|
 /// The in-flight assistant turn, rendered live from the engine's streamed
 /// deltas. The committed `assistant_message` replaces it in the transcript.
 /// The partial text is re-parsed as markdown on every delta; an unterminated

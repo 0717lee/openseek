@@ -606,6 +606,10 @@ priv struct Conversation {
   // tagged and therefore never clear a potentially newer stream. Empty means
   // not streaming.
   streaming_response : String
+  // Live thinking text from `reasoning_delta`. It remains beside a response
+  // that has begun streaming, then the ordered full semantic event clears it
+  // for the durable assistant commit to take over.
+  streaming_reasoning : String
   // Local submissions awaiting exact id-bearing host receipts. Initial prompt
   // and steer entries share the ledger; steer state is also the sole source
   // for pending UI and provisional failures. Canonical User text never claims
@@ -2258,6 +2262,7 @@ fn empty_conversation(
     pull_request_generation: 0,
     watcher_status: "",
     streaming_response: "",
+    streaming_reasoning: "",
     input_ledger: [],
     messages: [],
     watermark: 0,
@@ -3167,7 +3172,7 @@ fn Conversation::visible_subruns(
 
 ///|
 fn Conversation::clear_streams(self : Conversation) -> Conversation {
-  { ..self, streaming_response: "" }
+  { ..self, streaming_response: "", streaming_reasoning: "" }
 }
 
 ///|
