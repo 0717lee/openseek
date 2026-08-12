@@ -103,6 +103,48 @@ pub async fn apply_login_shell_env(
 }
 
 ///|
+/// Build the command an interactive terminal runs after its shell startup
+/// files have loaded, putting bin_dir first on that session's path. The
+/// command is shell-specific because activation must happen inside the shell:
+/// changing the already-running desktop process cannot update a live prompt.
+/// A carriage return matches xterm's Enter key and works for both PTYs and
+/// Windows ConPTY.
+pub fn path_prepend_command(
+  shell_command : String,
+  bin_dir : String,
+  windows~ : Bool,
+) -> String {
+  let shell = shell_command.to_lower()
+  if shell is ("pwsh" | "pwsh.exe" | "powershell" | "powershell.exe") ||
+    shell.has_suffix("/pwsh") ||
+    shell.has_suffix("/pwsh.exe") ||
+    shell.has_suffix("\\pwsh.exe") ||
+    shell.has_suffix("/powershell") ||
+    shell.has_suffix("/powershell.exe") ||
+    shell.has_suffix("\\powershell.exe") {
+    let quoted = bin_dir.replace_all(old="'", new="''")
+    let separator = if windows { ";" } else { ":" }
+    return "$env:Path = '\{quoted}\{separator}' + $env:Path\r"
+  }
+  if windows {
+    return "set \"Path=\{bin_dir};%Path%\"\r"
+  }
+  if shell == "fish" || shell.has_suffix("/fish") {
+    let quoted = bin_dir
+      .replace_all(old="\\", new="\\\\")
+      .replace_all(old="'", new="\\'")
+    return "set -gx PATH '\{quoted}' $PATH\r"
+  }
+  let quoted = bin_dir.replace_all(old="'", new="'\\''")
+  if shell is ("csh" | "tcsh") ||
+    shell.has_suffix("/csh") ||
+    shell.has_suffix("/tcsh") {
+    return "setenv PATH '\{quoted}':\"$PATH\"\r"
+  }
+  "export PATH='\{quoted}':\"$PATH\"\r"
+}
+
+///|
 /// Extract the marker-wrapped JSON environment from the probe's stdout. rc
 /// files may print arbitrary noise before and after the payload, and the
 /// payload itself can contain the mark (zsh exports `_` as the last argument
