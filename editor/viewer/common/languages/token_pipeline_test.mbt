@@ -28,7 +28,7 @@ test "JSON tokens flow from lexer spans to rendered HTML" {
       #|(
       #|  [
       #|    ("{", 0, 1, Delimiter),
-      #|    ("\"answer\"", 2, 10, Attribute),
+      #|    ("\"answer\"", 2, 10, String),
       #|    (":", 10, 11, Delimiter),
       #|    ("42", 12, 14, Number),
       #|    ("}", 15, 16, Delimiter),
@@ -63,7 +63,7 @@ test "JSON tokens flow from lexer spans to rendered HTML" {
       #|[
       #|  ("{", 0, 1, "mtk8"),
       #|  (" ", 1, 2, "mtk1"),
-      #|  ("\"answer\"", 2, 10, "mtk4"),
+      #|  ("\"answer\"", 2, 10, "mtk5"),
       #|  (":", 10, 11, "mtk8"),
       #|  (" ", 11, 12, "mtk1"),
       #|  ("42", 12, 14, "mtk6"),
@@ -89,7 +89,7 @@ test "JSON tokens flow from lexer spans to rendered HTML" {
       #|[
       #|  ("{", 1, "mtk8"),
       #|  (" ", 2, "mtk1"),
-      #|  ("\"answer\"", 10, "mtk4"),
+      #|  ("\"answer\"", 10, "mtk5"),
       #|  (":", 11, "mtk8"),
       #|  (" ", 12, "mtk1"),
       #|  ("42", 14, "mtk6"),
@@ -111,7 +111,7 @@ test "JSON tokens flow from lexer spans to rendered HTML" {
       true,
     ),
     content=(
-      #|<div><span style="color: var(--vscode-token-punctuation);">{</span><span style="color: var(--vscode-editor-foreground);"> </span><span style="color: var(--vscode-token-variable);">"answer"</span><span style="color: var(--vscode-token-punctuation);">:</span><span style="color: var(--vscode-editor-foreground);"> </span><span style="color: var(--vscode-token-number);">42</span><span style="color: var(--vscode-editor-foreground);"> </span><span style="color: var(--vscode-token-punctuation);">}</span></div>
+      #|<div><span style="color: var(--vscode-token-punctuation);">{</span><span style="color: var(--vscode-editor-foreground);"> </span><span style="color: var(--vscode-token-string);">"answer"</span><span style="color: var(--vscode-token-punctuation);">:</span><span style="color: var(--vscode-editor-foreground);"> </span><span style="color: var(--vscode-token-number);">42</span><span style="color: var(--vscode-editor-foreground);"> </span><span style="color: var(--vscode-token-punctuation);">}</span></div>
     ),
   )
 }
