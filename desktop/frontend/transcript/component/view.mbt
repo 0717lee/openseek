@@ -616,96 +616,13 @@ fn transcript_view(
   on_jump : (@mention_context.Target) -> @cmd.Cmd,
   on_jump_latest~ : @cmd.Cmd,
 ) -> @html.Html {
-  let items : Array[@html.Html] = []
-  // The durable transcript plus client-local notices, rendered through one
-  // folding pass. Live semantic events never synthesize durable-looking
-  // items here; their store commits populate the transcript.
-  let visible = input.items
-  if visible.is_empty() {
-    items.push(
-      @html.div(class="empty", [
-        @html.div(class="empty-badge", [@icons.icon(@icons.icon_logo)]),
-        @html.div(class="empty-title", "What should we build?"),
-        @html.div(
-          class="empty-sub",
-          "OpenSeek plans the work, edits files across your workspace, runs your tests, and hands back a reviewable result.",
-        ),
-      ]),
-    )
-  } else {
-    // Reasoning and tool results fold behind collapsed activity cards;
-    // everything the agent says stays out. Assistant messages break the run
-    // like user messages and error bubbles do, so a turn reads as narration,
-    // work, narration, work, answer rather than hiding the interim narration
-    // inside the fold above the final answer. The same fold renders whether
-    // the turn is still streaming or long settled, so nothing shown live
-    // vanishes or restyles when the turn lands.
-    let mut index = 0
-    while index < visible.length() {
-      guard visible[index].kind is (Tool(..) | Reasoning) else {
-        let item = visible[index]
-        let anchor = if item.kind is User {
-          Some(@transcript_overview.TurnKey::of(item, index~).anchor())
-        } else {
-          None
-        }
-        items.push(transcript_item_view(item, on_open, anchor?, on_jump~))
-        if item.kind is User {
-          items.push(turn_rule_view(ts?=item.ts))
-        }
-        index = index + 1
-        continue
-      }
-      let run : Array[@transcript.TranscriptItem] = []
-      while index < visible.length() &&
-            visible[index].kind is (Tool(..) | Reasoning) {
-        run.push(visible[index])
-        index = index + 1
-      }
-      items.push(activity_view(run, on_open))
-    }
-  }
-  if !input.streaming_response.is_empty() {
-    items.push(streaming_response_view(input.streaming_response, on_open))
-  }
-  // Sub-runs in flight sit at the tail, where the turn currently is: their
-  // tool call is what the conversation is blocked on, and it can block for
-  // forty-five minutes.
-  for lane in input.subruns {
-    items.push(subrun_lane_view(lane))
-  }
-  // Keep the rail mounted as the first child so the stream's vdom position
-  // stays stable even while a conversation grows from one turn to two.
-  let children = [
-    @transcript_overview.rail(
-      @transcript_overview.entries(visible, display=text => {
-        match @mention_context.parse(text) {
-          Some(message) => message.display_text()
-          None => text
-        }
-      }),
-      overview,
-      overview_emit,
-      clock=ms => clock_label(ms),
-    ),
-    @html.div(id="stream", class="stream", items),
-  ]
-  // Reading history unpins auto-follow (see `watch_transcript_scroll`); the
-  // floating button is the way back to the live tail. Sticky inside the
-  // scroller with zero height, so it never adds scroll length.
-  if !pinned {
-    children.push(
-      @html.div(class="jump-latest-wrap", [
-        @html.button(
-          class="jump-latest",
-          type_="button",
-          title="Jump to latest",
-          on_click=on_jump_latest,
-          @icons.icon(@icons.icon_arrow_down),
-        ),
-      ]),
-    )
-  }
+  let renderer : TranscriptRenderer = { input, on_open, on_jump }
+  let children = renderer.section_children(
+    pinned,
+    overview,
+    overview_emit,
+    on_jump_latest,
+  )
   // These identity attributes make a conversation switch observable even
   // when both conversations render identical children (notably two empty
   // chats). The component subscription reconciles its local scroll state on

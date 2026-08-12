@@ -1,4 +1,13 @@
 ///|
+/// One visible transcript item paired with the stable identity used by keyed
+/// reconciliation. The identity is opaque to the component's callers and is
+/// never emitted as a DOM id or attribute.
+pub(all) struct VisibleRow {
+  item : @transcript.TranscriptItem
+  identity : String
+} derive(Eq)
+
+///|
 /// The conversation data rendered by the component. The application computes
 /// durable chronology and active-run ownership; this package owns only the
 /// transcript subtree and its scroll behavior.
@@ -6,8 +15,9 @@ struct Input {
   focused : @interop.ChannelId
   active_session : String
   submission_generation : Int
-  items : Array[@transcript.TranscriptItem]
+  items : Array[VisibleRow]
   streaming_response : String
+  streaming_identity : String
   subruns : Array[@transcript.SubrunLane]
 } derive(Eq)
 
@@ -16,8 +26,9 @@ pub fn Input::Input(
   focused~ : @interop.ChannelId,
   active_session~ : String,
   submission_generation~ : Int,
-  items~ : Array[@transcript.TranscriptItem],
+  items~ : Array[VisibleRow],
   streaming_response~ : String,
+  streaming_identity~ : String,
   subruns~ : Array[@transcript.SubrunLane],
 ) -> Input {
   {
@@ -26,6 +37,7 @@ pub fn Input::Input(
     submission_generation,
     items,
     streaming_response,
+    streaming_identity,
     subruns,
   }
 }
@@ -451,6 +463,7 @@ test "local pinned transitions are pure" {
     submission_generation=0,
     items=[],
     streaming_response="",
+    streaming_identity="idle",
     subruns=[],
   )
   let state : Model = {
@@ -471,7 +484,12 @@ test "local pinned transitions are pure" {
   let (received, _) = first.update(
     {
       ..input,
-      items: [{ kind: User, content: "new turn", ts: None, sequence: None }],
+      items: [
+        {
+          item: { kind: User, content: "new turn", ts: None, sequence: None },
+          identity: "l0",
+        },
+      ],
     },
     ContentRendered(mounted=true),
     emit,
@@ -502,6 +520,7 @@ test "an overview click unpins and highlights inside the component" {
     submission_generation=0,
     items=[],
     streaming_response="",
+    streaming_identity="idle",
     subruns=[],
   )
   let state : Model = {
@@ -526,6 +545,7 @@ test "a conversation switch clears component-owned overview state" {
     submission_generation=0,
     items=[],
     streaming_response="",
+    streaming_identity="idle",
     subruns=[],
   )
   let state : Model = {
