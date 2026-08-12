@@ -16,6 +16,7 @@ pub(all) enum NotificationKind {
   SubrunProgress
   SessionChanged
   WorkspaceChanged
+  WorkspaceSettingsChanged
   WorktreeChanged
   SettingsChanged
   SkillsChanged
@@ -44,6 +45,7 @@ pub fn NotificationKind::wire_name(self : NotificationKind) -> String {
     SubrunProgress => "subrun.progress"
     SessionChanged => "session.changed"
     WorkspaceChanged => "workspace.changed"
+    WorkspaceSettingsChanged => "workspace.settings_changed"
     WorktreeChanged => "worktree.changed"
     SettingsChanged => "settings.changed"
     SkillsChanged => "skills.changed"
@@ -73,6 +75,7 @@ pub fn NotificationKind::all() -> Array[NotificationKind] {
     SubrunProgress,
     SessionChanged,
     WorkspaceChanged,
+    WorkspaceSettingsChanged,
     WorktreeChanged,
     SettingsChanged,
     SkillsChanged,
@@ -103,6 +106,7 @@ pub(all) enum Notification {
   SubrunProgress(SubrunProgressPayload)
   SessionChanged(SessionChangedPayload)
   WorkspaceChanged(WorkspacesChangedPayload)
+  WorkspaceSettingsChanged(WorkspaceSettingsPayload)
   WorktreeChanged(WorktreeChangedPayload)
   SettingsChanged(SettingsStatusPayload)
   SkillsChanged
@@ -144,6 +148,14 @@ pub fn Notification::from_wire(name : String, params : Json) -> Notification? {
       Some(SessionChanged(@json.from_json(params) catch { _ => return None }))
     "workspace.changed" =>
       Some(WorkspaceChanged(@json.from_json(params) catch { _ => return None }))
+    "workspace.settings_changed" =>
+      Some(
+        WorkspaceSettingsChanged(
+          @json.from_json(params) catch {
+            _ => return None
+          },
+        ),
+      )
     "worktree.changed" =>
       Some(WorktreeChanged(@json.from_json(params) catch { _ => return None }))
     "settings.changed" =>
@@ -193,6 +205,7 @@ pub fn Notification::kind(self : Notification) -> NotificationKind {
     SubrunProgress(_) => SubrunProgress
     SessionChanged(_) => SessionChanged
     WorkspaceChanged(_) => WorkspaceChanged
+    WorkspaceSettingsChanged(_) => WorkspaceSettingsChanged
     WorktreeChanged(_) => WorktreeChanged
     SettingsChanged(_) => SettingsChanged
     SkillsChanged => SkillsChanged
@@ -228,6 +241,7 @@ pub fn Notification::params(self : Notification) -> Json {
     SubrunProgress(payload) => payload.to_json()
     SessionChanged(payload) => payload.to_json()
     WorkspaceChanged(payload) => payload.to_json()
+    WorkspaceSettingsChanged(payload) => payload.to_json()
     WorktreeChanged(payload) => payload.to_json()
     SettingsChanged(payload) => payload.to_json()
     SkillsChanged => Json::empty_object()
@@ -249,6 +263,18 @@ test "desktop notifications round-trip at the wire edge" {
   guard event is Some(event) else { fail("known notification was rejected") }
   assert_eq(event.wire_name(), "terminal.exit")
   assert_eq(event.params(), { "id": 1, "code": 0 })
+  let settings = Notification::from_wire("workspace.settings_changed", {
+    "workspace": "/home/u/proj",
+    "worktree_mode": true,
+  })
+  guard settings is Some(settings) else {
+    fail("workspace settings notification was rejected")
+  }
+  assert_eq(settings.wire_name(), "workspace.settings_changed")
+  assert_eq(settings.params(), {
+    "workspace": "/home/u/proj",
+    "worktree_mode": true,
+  })
   assert_eq(Notification::from_wire("future.event", {}), None)
 }
 

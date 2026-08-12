@@ -193,6 +193,15 @@ pub fn boot() -> Unit {
             ),
           )
         }
+        if model.project_menu is Some(_) {
+          subs.push(
+            dismiss_subscription(
+              "project-menu-dismiss",
+              trigger=".workspace-menu-button",
+              emit.map((_ : Unit) => CloseProjectMenu),
+            ),
+          )
+        }
         @sub.batch(subs)
       },
     )

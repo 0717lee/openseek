@@ -171,12 +171,26 @@ fn WorkspaceAction::render(self : WorkspaceAction) -> @html.Html {
 }
 
 ///|
+/// A workspace row's overflow ("…") menu: the toggle button and, while
+/// open, the dropdown body. The owner builds the body's items and holds the
+/// open/closed state; this package keeps the button in the row's action
+/// geometry and anchors the dropdown to the row. The body is a function so
+/// each render receives a fresh virtual-DOM value.
+pub(all) struct WorkspaceMenu {
+  title : String
+  open : Bool
+  toggle : @cmd.Cmd
+  body : () -> @html.Html
+}
+
+///|
 /// A folder row shared by workspace-like conversation groups. The owner
 /// supplies actions, while this package keeps geometry and action slots equal.
 pub(all) struct WorkspaceRow {
   title : String
   label : String
   active : Bool
+  menu : WorkspaceMenu?
   actions : Array[WorkspaceAction]
 }
 
@@ -186,12 +200,40 @@ pub fn WorkspaceRow::render(self : WorkspaceRow) -> @html.Html {
   if self.active {
     class = class + " active"
   }
+  if self.menu is Some(menu) && menu.open {
+    // Keeps the hover-revealed action slots visible while the menu floats,
+    // even once the pointer moves into it.
+    class = class + " menu-open"
+  }
   let children : Array[@html.Html] = [
     @html.span(class="sidebar-icon", @icons.icon(@icons.icon_folder)),
     @html.span(class="sidebar-label", self.label),
   ]
+  if self.menu is Some(menu) {
+    children.push(
+      @html.button(
+        class=if menu.open {
+          "row-archive workspace-menu-button open"
+        } else {
+          "row-archive workspace-menu-button"
+        },
+        type_="button",
+        title=menu.title,
+        attrs=@html.Attrs::build().on_click(event => {
+          event.stop_propagation()
+          menu.toggle
+        }),
+        @icons.icon(@icons.icon_more),
+      ),
+    )
+  }
   for action in self.actions {
     children.push(action.render())
+  }
+  // The open dropdown appends after the stable children, so opening and
+  // closing it never re-keys the buttons under the pointer.
+  if self.menu is Some(menu) && menu.open {
+    children.push((menu.body)())
   }
   @html.div(class~, title=self.title, children)
 }

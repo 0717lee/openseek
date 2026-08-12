@@ -131,6 +131,18 @@ pub let workspace_remove : Command[
 ] = Command("workspace.remove")
 
 ///|
+pub let workspace_settings_get : Command[
+  @protocol.WorkspaceSettingsGetPayload,
+  @protocol.WorkspaceSettingsPayload,
+] = Command("workspace.settings_get")
+
+///|
+pub let workspace_settings_set : Command[
+  @protocol.WorkspaceSettingsSetPayload,
+  @protocol.WorkspaceSettingsPayload,
+] = Command("workspace.settings_set")
+
+///|
 pub let worktree_list : Command[
   @protocol.WorktreeListPayload,
   @protocol.WorktreesReply,

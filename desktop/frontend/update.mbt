@@ -288,10 +288,13 @@ fn adopt_projects(
   } else {
     None
   }
-  // Each workspace's worktree list refreshes with the adopted registry; a
-  // detached workspace's cached rows drop with its section. One request
-  // token covers the whole fan-out round.
+  // Each workspace's worktree list and settings mirror refresh with the
+  // adopted registry; a detached workspace's cached rows drop with its
+  // section. One request token per collection covers the whole fan-out
+  // round.
   let worktrees_request_generation = dev.worktrees_request_generation + 1
+  let workspace_settings_request_generation = dev.workspace_settings_request_generation +
+    1
   let commands : Array[@cmd.Cmd] = []
   for path in paths {
     commands.push(
@@ -303,8 +306,20 @@ fn adopt_projects(
         worktrees_request_generation,
       ),
     )
+    commands.push(
+      fetch_workspace_settings(
+        dispatch,
+        channel,
+        path,
+        dev.connection_generation,
+        workspace_settings_request_generation,
+      ),
+    )
   }
   let worktrees = dev.worktrees.filter(group => paths.contains(group.project))
+  let workspace_settings = dev.workspace_settings.filter(row => {
+    paths.contains(row.project)
+  })
   // The old whole-session snapshot can outlive the workspace commit
   // broadcast. Prune it immediately so neither the sidebar nor fallback
   // selection can retain a conversation whose store is no longer attached.
@@ -336,9 +351,23 @@ fn adopt_projects(
       active_project,
       worktrees,
       worktrees_request_generation,
+      workspace_settings,
+      workspace_settings_request_generation,
     }),
     conversations,
     loading_conversation,
+    // A detached workspace takes its open "…" menu and its settings page
+    // with it; both address a row that no longer exists.
+    project_menu: match model.project_menu {
+      Some(menu) if menu.channel == channel && !paths.contains(menu.project) =>
+        None
+      menu => menu
+    },
+    screen: match model.screen {
+      WorkspaceSettings(channel=owner, workspace~) if owner == channel &&
+        !paths.contains(workspace) => Chat
+      screen => screen
+    },
   })
   commands.push(refresh_cmd)
   if active_detached {
@@ -1491,7 +1520,7 @@ fn replace_archived_active(
     task,
     mentions,
     workspace: Workspace::from_project(workspace),
-    worktree_mode: model.workspace_default_mode.for_workspace(workspace),
+    worktree_mode: model.default_worktree_mode(channel, workspace),
     goal_edit,
   }
   let fresh = if pending_initial {
@@ -1655,8 +1684,7 @@ fn update_msg(
       tree_layout~,
       theme~,
       model=stored,
-      conversation_models=remembered,
-      workspace_default_mode=stored_workspace_default_mode
+      conversation_models=remembered
     ) => {
       let theme = Theme::parse(theme, model.theme)
       // Startup runs before any conversation exists, so adopting the stored
@@ -1674,9 +1702,6 @@ fn update_msg(
           theme,
           default_model,
           conversation_models: parse_conversation_models(remembered),
-          workspace_default_mode: WorkspaceDefaultMode::parse(
-            stored_workspace_default_mode,
-          ),
         },
       )
     }
@@ -2655,17 +2680,18 @@ fn update_msg(
       // `can_choose_launch_mode`. Two spellings of "may still choose" is how
       // the toggle stayed live through a placement chain the chip had
       // already committed to.
+      //
+      // The chip decides only THIS conversation. The workspace's default for
+      // future chats is its own durable setting, edited on the workspace
+      // settings page — a per-chat exception must not silently rewrite it.
       let conv = model.active()
-      if model.can_choose_launch_mode(conv) &&
-        conv.workspace is Project(root=workspace) {
-        let worktree_mode = !conv.worktree_mode
-        let workspace_default_mode = model.workspace_default_mode.with_mode(
-          workspace, worktree_mode,
-        )
-        let next = model.replace_conversation({ ..conv, worktree_mode, })
+      if model.can_choose_launch_mode(conv) && conv.workspace is Project(..) {
         (
-          WorkspaceDefaultMode::save(workspace, worktree_mode),
-          { ..next, workspace_default_mode, },
+          @cmd.none,
+          model.replace_conversation({
+            ..conv,
+            worktree_mode: !conv.worktree_mode,
+          }),
         )
       } else {
         (@cmd.none, model)
@@ -2767,7 +2793,7 @@ fn update_msg(
             worktree_mode: if existing is Some(existing) {
               existing.worktree_mode
             } else {
-              model.workspace_default_mode.for_workspace(dev.active_project)
+              dev.default_worktree_mode(dev.active_project)
             },
           }
         } else {
@@ -2895,10 +2921,60 @@ fn update_msg(
     ProjectPickerClose => (@cmd.none, { ..model, project_picker: None })
     RemoveProject(channel, path) =>
       if @resource.belongs_to(path, channel) {
-        (remove_project(dispatch, channel, path.path), model)
+        // Close the row's menu with the click that acted from it; the row
+        // itself leaves with the registry commit broadcast.
+        (
+          remove_project(dispatch, channel, path.path),
+          { ..model, project_menu: None },
+        )
       } else {
         (@cmd.none, model)
       }
+    ToggleProjectMenu(channel, project) => {
+      let menu : ProjectMenu = { channel, project }
+      (
+        @cmd.none,
+        {
+          ..model,
+          project_menu: if model.project_menu == Some(menu) {
+            None
+          } else {
+            Some(menu)
+          },
+        },
+      )
+    }
+    CloseProjectMenu => (@cmd.none, { ..model, project_menu: None })
+    OpenWorkspaceSettings(channel, workspace) =>
+      (
+        @cmd.none,
+        {
+          ..model,
+          screen: WorkspaceSettings(channel~, workspace~),
+          project_menu: None,
+        },
+      )
+    WorkspaceDefaultModeChosen(channel, workspace, value) => {
+      guard model.device_state(channel) is Some(dev) else {
+        return (@cmd.none, model)
+      }
+      let worktree_mode = value == "worktree"
+      // Apply optimistically under a fresh token, so a slower list reply
+      // cannot roll the page's select back; the commit broadcast lands on a
+      // newer token still. The failure path re-reads the disk state.
+      let request_generation = dev.workspace_settings_request_generation + 1
+      (
+        save_workspace_settings(dispatch, channel, workspace, worktree_mode),
+        model.replace_device({
+          ..dev.with_workspace_settings(
+            workspace,
+            worktree_mode,
+            generation=request_generation,
+          ),
+          workspace_settings_request_generation: request_generation,
+        }),
+      )
+    }
     ArchiveSession(channel, session_id) => {
       // Archiving acts on the row's own device and never moves focus.
       guard model.device_state(channel) is Some(dev) else {
@@ -3804,6 +3880,11 @@ fn update_device_msg(
         // list (or a newer `worktree.changed` broadcast) instead of trusting
         // placement cached before the disconnect.
         worktrees: [],
+        // Same rule for the settings mirror: a default changed by another
+        // client during the gap must not be copied into a chat created
+        // before this connection's re-read lands. Absent rows read as the
+        // safe Local default.
+        workspace_settings: [],
       })
       // Replies from writes issued on the dead bridge carry their captured
       // generation and are ignored below. The new host may have restarted
@@ -4258,6 +4339,81 @@ fn update_device_msg(
         model
       }
       model.notify_error(dispatch, "Workspace error: \{message}")
+    }
+    WorkspaceSettingsLoaded(
+      workspace~,
+      worktree_mode~,
+      connection_generation~,
+      request_generation~
+    ) => {
+      // The same per-workspace staleness fence as `WorktreesLoaded` — plus a
+      // registry-membership check, because pruning a detached workspace's
+      // row also discards the generation it was applied under. Without the
+      // membership check, a straggler reply issued before the detach would
+      // pass the reset (-1) fence and resurrect a row that could outlive a
+      // reattach until the fresh fan-out answers.
+      guard dev.projects.contains(workspace) &&
+        connection_generation == dev.connection_generation &&
+        request_generation > dev.workspace_settings_generation(workspace) else {
+        return (@cmd.none, model)
+      }
+      (
+        @cmd.none,
+        model.replace_device(
+          dev.with_workspace_settings(
+            workspace,
+            worktree_mode,
+            generation=request_generation,
+          ),
+        ),
+      )
+    }
+    WorkspaceSettingsChanged(workspace~, worktree_mode~) => {
+      // A broadcast can race the detach commit the same way a reply can
+      // (the hub orders them per client, so an attach is always processed
+      // before settings broadcasts that follow it).
+      guard dev.projects.contains(workspace) else { return (@cmd.none, model) }
+      // The post-commit broadcast is newer than every list request issued so
+      // far; advance the mint and stamp this workspace's row with the new
+      // token so an older reply for it can never roll the broadcast back.
+      let workspace_settings_request_generation = dev.workspace_settings_request_generation +
+        1
+      (
+        @cmd.none,
+        model.replace_device({
+          ..dev.with_workspace_settings(
+            workspace,
+            worktree_mode,
+            generation=workspace_settings_request_generation,
+          ),
+          workspace_settings_request_generation,
+        }),
+      )
+    }
+    WorkspaceSettingsSaveFailed(workspace~, message~) => {
+      // The page's optimistic value may be wrong now: alongside the toast,
+      // re-read the disk state under a fresh token.
+      let request_generation = dev.workspace_settings_request_generation + 1
+      let (toast, next) = model.notify_error(
+        dispatch,
+        "Workspace settings not saved for \{workspace.path}: \{message}",
+      )
+      (
+        @cmd.batch([
+          toast,
+          fetch_workspace_settings(
+            dispatch,
+            channel,
+            workspace,
+            dev.connection_generation,
+            request_generation,
+          ),
+        ]),
+        next.replace_device({
+          ..dev,
+          workspace_settings_request_generation: request_generation,
+        }),
+      )
     }
     WorktreesLoaded(
       rows,
@@ -12505,7 +12661,6 @@ test "loaded UI preferences parse their wire names" {
       theme="dark",
       model="deepseek-v4-flash",
       conversation_models="[{\"key\":\"local/desktop-test\",\"model\":\"deepseek-v4-pro\"}]",
-      workspace_default_mode="[\"openseek://local/proj\"]",
     ),
     test_model(),
   )
@@ -12514,11 +12669,6 @@ test "loaded UI preferences parse their wire names" {
   assert_true(restored.default_model is Low)
   // The stored conversation outranks the stored default for its own chat.
   assert_true(restored.active().engine_model is High)
-  assert_true(
-    restored.workspace_default_mode.for_workspace(
-      Some(@interop.ChannelId::Local.test_resource("/proj")),
-    ),
-  )
   // Unknown stored values fall back to the defaults.
   let (_, unknown) = update(
     dispatch,
@@ -12528,7 +12678,6 @@ test "loaded UI preferences parse their wire names" {
       theme="broken",
       model="",
       conversation_models="not json",
-      workspace_default_mode="not json",
     ),
     test_model(),
   )
@@ -12537,11 +12686,6 @@ test "loaded UI preferences parse their wire names" {
   assert_true(unknown.default_model is High)
   // A store that will not parse remembers nothing rather than wedging.
   assert_eq(unknown.conversation_models.length(), 0)
-  assert_false(
-    unknown.workspace_default_mode.for_workspace(
-      Some(@interop.ChannelId::Local.test_resource("/proj")),
-    ),
-  )
 }
 
 ///|
@@ -13680,15 +13824,14 @@ test "archive broadcast invalidates the active send target before list replies" 
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/work/archived")
   let mention : Mention = { ref_: Skill(name="draft-skill"), range: None }
-  let model = {
-    ..test_model()
+  let model = test_model()
     .replace_conversation({
       ..test_conversation(),
       task: "must not target archived session",
       mentions: [mention],
     })
     .with_dev(dev => {
-      ..dev,
+      ..dev.with_workspace_settings(workspace, true, generation=1),
       sessions: [
         {
           ..archived_item("desktop-test"),
@@ -13697,11 +13840,7 @@ test "archive broadcast invalidates the active send target before list replies" 
         },
       ],
       worktrees: [{ project: workspace, rows: [], generation: 1 }],
-    }),
-    workspace_default_mode: test_model().workspace_default_mode.with_mode(
-      workspace, true,
-    ),
-  }
+    })
   let (_, invalidated) = update_dev(
     dispatch,
     SessionsChanged(

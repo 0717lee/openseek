@@ -268,6 +268,61 @@ aside {
   visibility: visible;
 }
 
+/* The workspace row's "…" dropdown (settings, detach), anchored to the row.
+   While it is open the row keeps its hover-revealed controls visible, so
+   moving the pointer into the floating menu doesn't blank the button that
+   opened it. */
+.workspace-row {
+  position: relative;
+}
+.workspace-row.menu-open .row-archive,
+.workspace-menu-button.open {
+  visibility: visible;
+}
+.workspace-menu-button.open {
+  background: var(--color-hover-subtle);
+  color: var(--color-text-primary);
+}
+.workspace-menu {
+  position: absolute;
+  top: calc(100% + 2px);
+  right: 4px;
+  min-width: 180px;
+  padding: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  box-shadow: var(--shadow-overlay);
+  z-index: var(--z-menu);
+}
+.workspace-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-tight);
+  text-align: left;
+  cursor: pointer;
+}
+.workspace-menu-item:hover {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-strong);
+}
+.workspace-menu-item > .icon {
+  width: 14px;
+  height: 14px;
+  color: var(--color-text-muted);
+}
+.workspace-menu-item:hover > .icon {
+  color: inherit;
+}
+
 /* Worktree affordances: the sidebar row's branch glyph and the composer's
    launch-mode chip. The archive-discard confirmation reuses the shared
    modal styles. */

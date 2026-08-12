@@ -72,15 +72,6 @@ fn conversation_model_key(
 }
 
 ///|
-/// The page-local default launch mode for each workspace. Only Worktree
-/// defaults need a row: absence is the initial Local default. Workspace
-/// resource URIs include their device authority, so identical host paths on
-/// two devices remain independent preferences.
-priv struct WorkspaceDefaultMode {
-  worktrees : Array[String]
-} derive(Eq, Debug)
-
-///|
 test "engine models round-trip their wire names" {
   inspect(
     EngineModel::parse("deepseek-v4-pro").unwrap().label(),
@@ -160,15 +151,10 @@ const ConversationModelsStorageKey : String = "openseek.conversation_models"
 const ConversationModelsLimit : Int = 200
 
 ///|
-/// Workspaces whose next new conversation defaults to Worktree. Stored in
-/// the page's localStorage; the desktop webview and browser console therefore
-/// remember independently.
+/// Obsolete: each workspace's launch-mode default lives in its own
+/// `.openseek/settings.json` now. The key is kept only so startup can
+/// delete whatever old builds stored.
 const WorkspaceDefaultModeStorageKey : String = "openseek.workspace_default_mode"
-
-///|
-/// Detached workspaces keep their preference for a later reattach, but the
-/// localStorage value stays bounded like the per-conversation model list.
-const WorkspaceDefaultModeLimit : Int = 200
 
 ///|
 /// Obsolete: the update channel derives from the server selection now. The
@@ -794,14 +780,17 @@ priv struct BufferedCommit {
 } derive(Eq)
 
 ///|
-/// What the main area shows: the active conversation, the Skills page, or
-/// the Settings page. Selecting a conversation (or rotating to a new one)
-/// always returns to the chat. Settings also opens on its own while the
-/// configured endpoint is unusable, since the composer would be dead weight.
+/// What the main area shows: the active conversation, the Skills page, the
+/// Settings page, or one workspace's settings page. Selecting a conversation
+/// (or rotating to a new one) always returns to the chat. Settings also
+/// opens on its own while the configured endpoint is unusable, since the
+/// composer would be dead weight. `WorkspaceSettings` carries the project it
+/// is about; detaching that project falls back to the chat.
 priv enum Screen {
   Chat
   Skills
   Settings
+  WorkspaceSettings(channel~ : @interop.ChannelId, workspace~ : @common.Uri)
 } derive(Eq)
 
 ///|
@@ -1002,6 +991,7 @@ priv struct DeviceState {
   archived_request_generation : Int
   projects_request_generation : Int
   worktrees_request_generation : Int
+  workspace_settings_request_generation : Int
   // Durable sessions known to the engine's store, newest first, refreshed
   // when the bridge connects and when a run reaches the store. A new
   // conversation appears here once its first turn has been persisted.
@@ -1022,6 +1012,12 @@ priv struct DeviceState {
   // and replaced wholesale by `worktree.changed`. The sidebar's name
   // chips read them.
   worktrees : Array[ProjectWorktrees]
+  // Each project's desktop-owned settings mirror
+  // (`<workspace>/.openseek/settings.json`), fetched with the project list
+  // and replaced wholesale by `workspace.settings_changed`. New
+  // conversations copy their launch mode from here; an absent row (not
+  // fetched yet, or an older host without the op) is the Local default.
+  workspace_settings : Array[ProjectSettings]
   // Where "New chat" lands. `None` is the default scratch store; a project
   // placement always retains its validated absolute-path provenance.
   active_project : @common.Uri?
@@ -1039,11 +1035,13 @@ fn empty_device_state(channel : @interop.ChannelId) -> DeviceState {
     archived_request_generation: 0,
     projects_request_generation: 0,
     worktrees_request_generation: 0,
+    workspace_settings_request_generation: 0,
     sessions: [],
     archived: [],
     archive_overrides: [],
     projects: [],
     worktrees: [],
+    workspace_settings: [],
     active_project: None,
   }
 }
@@ -1075,10 +1073,6 @@ priv struct Model {
   // default an unrelated chat has moved to since. Reopening recovers from
   // here; `default_model` is only for conversations this list has never held.
   conversation_models : Array[StoredConversationModel]
-  // Where a new conversation in each workspace starts. The conversation
-  // copies this preference when it is created; later changes do not move an
-  // already-open draft or a placement request in flight.
-  workspace_default_mode : WorkspaceDefaultMode
   max_steps : String
   // Whether the host has a key stored for each keyed provider. The key text
   // itself never reaches a client — the Settings page only needs presence
@@ -1175,6 +1169,10 @@ priv struct Model {
   conversations : Array[Conversation]
   // The in-app folder picker behind "Add a project"; None while closed.
   project_picker : ProjectPicker?
+  // The one open project-row "…" menu (settings, detach); None while
+  // closed. Its click-away dismissal is mounted only while open, like the
+  // launcher's.
+  project_menu : ProjectMenu?
   // A confirmed add waiting for its registry snapshot; None otherwise.
   pending_project_adoption : ProjectAdoption?
   // Whether the transcript is scrolled to its bottom. Streaming output only
@@ -1417,8 +1415,7 @@ priv enum Msg {
     tree_layout~ : String,
     theme~ : String,
     model~ : String,
-    conversation_models~ : String,
-    workspace_default_mode~ : String
+    conversation_models~ : String
   )
   // The legacy localStorage engine settings, read at bridge time. The
   // desktop window migrates them up to the host once; a browser page only
@@ -1673,6 +1670,14 @@ priv enum Msg {
   // away — the directory and the sessions inside it stay, so re-adding
   // restores them.
   RemoveProject(@interop.ChannelId, @common.Uri)
+  // Open (or, clicked again, close) one project row's "…" menu.
+  ToggleProjectMenu(@interop.ChannelId, @common.Uri)
+  CloseProjectMenu
+  // Show the per-workspace settings page for one device's project.
+  OpenWorkspaceSettings(@interop.ChannelId, @common.Uri)
+  // The workspace settings page's launch-mode select. Carries the raw
+  // select value ("local" | "worktree"); update decides what it means.
+  WorkspaceDefaultModeChosen(@interop.ChannelId, @common.Uri, String)
   // Start a fresh conversation in a device's project (`None` = Scratch),
   // selecting its explicit channel first if needed.
   NewChatIn(@interop.ChannelId, @common.Uri?)
@@ -1933,6 +1938,22 @@ priv enum DeviceMsg {
   // list means the reply could not be read as resources.
   ProjectAddCommitted(added~ : String, paths~ : Array[@common.Uri])
   ProjectFailed(String)
+  // One workspace's desktop-owned settings — the reply to
+  // `workspace.settings_get`, fenced per workspace like `WorktreesLoaded`.
+  // A failed read dispatches nothing: an older host without the op simply
+  // keeps the Local default everywhere.
+  WorkspaceSettingsLoaded(
+    workspace~ : @common.Uri,
+    worktree_mode~ : Bool,
+    connection_generation~ : Int,
+    request_generation~ : Int
+  )
+  // The post-commit `workspace.settings_changed` broadcast for one
+  // workspace: every client adopts the committed state in write order.
+  WorkspaceSettingsChanged(workspace~ : @common.Uri, worktree_mode~ : Bool)
+  // A `workspace.settings_set` this client sent failed; the message pops as
+  // a toast and the workspace's settings are re-read.
+  WorkspaceSettingsSaveFailed(workspace~ : @common.Uri, message~ : String)
   // One workspace's worktree registry — the reply to `worktree.list`, with
   // the same two-generation staleness fence as `ProjectsLoaded`.
   WorktreesLoaded(
@@ -2216,7 +2237,6 @@ fn initial_model() -> Model {
     focused: page_channel.unwrap_or(@interop.ChannelId::Local),
     default_model: High,
     conversation_models: [],
-    workspace_default_mode: { worktrees: [] },
     max_steps: DefaultMaxSteps,
     deepseek_key_saved: false,
     custom_key_saved: false,
@@ -2252,6 +2272,7 @@ fn initial_model() -> Model {
     submission_sequence: 0,
     conversations: [],
     project_picker: None,
+    project_menu: None,
     pending_project_adoption: None,
     archive_confirm: None,
     transcript_pinned: true,

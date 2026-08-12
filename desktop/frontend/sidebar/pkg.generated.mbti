@@ -56,10 +56,18 @@ pub(all) struct WorkspaceAction {
   image : () -> @html.Html
 }
 
+pub(all) struct WorkspaceMenu {
+  title : String
+  open : Bool
+  toggle : @cmd.Cmd
+  body : () -> @html.Html
+}
+
 pub(all) struct WorkspaceRow {
   title : String
   label : String
   active : Bool
+  menu : WorkspaceMenu?
   actions : Array[WorkspaceAction]
 }
 pub fn WorkspaceRow::render(Self) -> @html.Html

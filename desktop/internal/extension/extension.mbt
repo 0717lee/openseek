@@ -64,6 +64,13 @@ let workspace_changed_event : @proton_contract.Event[
 )
 
 ///|
+let workspace_settings_changed_event : @proton_contract.Event[
+  @protocol.WorkspaceSettingsPayload,
+] = @commands.extension_contract.event(
+  @protocol.NotificationKind::WorkspaceSettingsChanged.wire_name(),
+)
+
+///|
 let worktree_changed_event : @proton_contract.Event[
   @protocol.WorktreeChangedPayload,
 ] = @commands.extension_contract.event(
@@ -194,6 +201,8 @@ async fn PageEventTarget::emit(
       self.events.emit(session_changed_event, payload)
     Hub(WorkspaceChanged(payload)) =>
       self.events.emit(workspace_changed_event, payload)
+    Hub(WorkspaceSettingsChanged(payload)) =>
+      self.events.emit(workspace_settings_changed_event, payload)
     Hub(WorktreeChanged(payload)) =>
       self.events.emit(worktree_changed_event, payload)
     Hub(SettingsChanged(payload)) =>

@@ -70,7 +70,11 @@ pub async fn unarchive_session(EngineManager, String, (String) -> Unit) -> @prot
 
 pub async fn update_settings(EngineManager, SettingsPatch, legacy_migration? : Bool, on_committed? : (@protocol.SettingsStatusPayload) -> Unit) -> @protocol.SettingsStatusPayload
 
+pub async fn update_workspace_settings(String, Bool, (@protocol.WorkspaceSettingsPayload) -> Unit) -> @protocol.WorkspaceSettingsPayload
+
 pub fn workspace_session_root(@pathx.Absolute) -> @pathx.Absolute
+
+pub async fn workspace_settings(String) -> @protocol.WorkspaceSettingsPayload
 
 // Errors
 pub(all) suberror EngineError {

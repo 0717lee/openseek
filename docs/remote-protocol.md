@@ -399,12 +399,15 @@ Notification:
 | `workspace.list` | `{}` | `{workspaces: […]}` |
 | `workspace.add` | `{path}` | the updated list |
 | `workspace.remove` | `{path}` | the updated list — refused while any conversation operation is still being prepared, or while a run/compaction in that workspace is active; idle engines and their final follower scan are drained before the registry entry is committed |
+| `workspace.settings_get` | `{workspace}` | `{workspace, worktree_mode}` — the workspace's desktop-owned settings (`<workspace>/.openseek/settings.json`); `worktree_mode` says whether a NEW conversation starts in a fresh bound git worktree instead of the workspace root, and a missing file or field reads as the Local default (`false`). Only a registered workspace may be read |
+| `workspace.settings_set` | `{workspace, worktree_mode}` | the committed `{workspace, worktree_mode}` — the write and its broadcast are one serialized commit; unknown fields a newer build stored in the file survive the rewrite |
 
 Notifications:
 
 | method | params |
 |---|---|
 | `workspace.changed` | `{workspaces: […]}` — the canonical post-commit registry list, broadcast to every client while the host still holds its registry serialization lock; recipients invalidate older `workspace.list` replies before adopting it |
+| `workspace.settings_changed` | `{workspace, worktree_mode}` — one workspace's committed settings, broadcast to every client (the requester included) after each successful `workspace.settings_set`; recipients invalidate older `workspace.settings_get` replies for that workspace before adopting it |
 
 Removing a workspace only hides its registry entry; it does not delete the
 directory or sessions. Clients keep the workspace attached to already-open

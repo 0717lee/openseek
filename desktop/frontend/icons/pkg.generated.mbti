@@ -40,6 +40,8 @@ pub fn icon_link_external() -> @html.Html
 
 pub fn icon_logo() -> @html.Html
 
+pub fn icon_more() -> @html.Html
+
 pub fn icon_package() -> @html.Html
 
 pub fn icon_pull_request() -> @html.Html

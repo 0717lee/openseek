@@ -541,10 +541,10 @@ fn push_group_rows(
 
 ///|
 /// One attached project: a folder row (full path in the tooltip) with its
-/// conversations nested beneath it. Hover controls start a new chat in the
-/// project or detach it (registry only; the folder and its sessions stay).
-/// The active project — where a plain "New chat" lands — reads as the
-/// darker label.
+/// conversations nested beneath it. Hover controls open the row's "…" menu
+/// (workspace settings, detach) or start a new chat in the project. The
+/// active project — where a plain "New chat" lands — reads as the darker
+/// label.
 fn project_row(
   dispatch : @cmd.Emit[Msg],
   model : Model,
@@ -555,12 +555,13 @@ fn project_row(
     title: path.path,
     label: @resource.label(path),
     active: dev.channel == model.focused && dev.active_project == Some(path),
+    menu: Some({
+      title: "More actions",
+      open: model.project_menu == Some({ channel: dev.channel, project: path }),
+      toggle: dispatch(ToggleProjectMenu(dev.channel, path)),
+      body: () => project_menu_body(dispatch, dev.channel, path),
+    }),
     actions: [
-      {
-        title: "Detach this project — its files and sessions stay",
-        command: dispatch(RemoveProject(dev.channel, path)),
-        image: icon_close,
-      },
       {
         title: "New chat in this project",
         command: dispatch(NewChatIn(dev.channel, Some(path))),
@@ -568,6 +569,33 @@ fn project_row(
       },
     ],
   }.render()
+}
+
+///|
+/// The project row's "…" dropdown: the workspace settings page, and the
+/// detach that used to ride the hover slot. A click away closes it (see
+/// `dismiss_subscription`).
+fn project_menu_body(
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  path : @common.Uri,
+) -> @html.Html {
+  @html.div(class="workspace-menu", [
+    @html.button(
+      class="workspace-menu-item",
+      type_="button",
+      title="Defaults for new chats in this workspace",
+      on_click=dispatch(OpenWorkspaceSettings(channel, path)),
+      [icon(icon_settings_gear), @html.span("Workspace settings")],
+    ),
+    @html.button(
+      class="workspace-menu-item",
+      type_="button",
+      title="Detach this project — its files and sessions stay",
+      on_click=dispatch(RemoveProject(channel, path)),
+      [icon(icon_close), @html.span("Detach project")],
+    ),
+  ])
 }
 
 ///|
@@ -2459,6 +2487,63 @@ fn settings_page(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
 }
 
 ///|
+/// One workspace's settings page, shown in the main area like Settings and
+/// reached from the project row's "…" menu. Its one setting today is the
+/// launch-mode default new conversations copy; the composer's chip stays
+/// the per-conversation override and never writes back here.
+fn workspace_settings_page(
+  dispatch : @cmd.Emit[Msg],
+  model : Model,
+  channel : @interop.ChannelId,
+  workspace : @common.Uri,
+) -> @html.Html {
+  // The settings mirror for this workspace; absent until the first
+  // authoritative read on this connection lands. An older host without
+  // per-workspace settings never answers, and the select stays disabled
+  // rather than pretending a choice would stick.
+  let row = match model.device_state(channel) {
+    Some(dev) => dev.workspace_settings_row(workspace)
+    None => None
+  }
+  let worktree_mode = row is Some(row) && row.worktree_mode
+  let conversation_rows : Array[@html.Html] = [
+    setting_row(
+      "New chats",
+      [
+        setting_select(
+          @html.select(
+            on_change=dispatch.map(value => {
+              WorkspaceDefaultModeChosen(channel, workspace, value)
+            }),
+            attrs=@html.Attrs::build()
+              .aria_label("New chats")
+              .data_set("focus-owner", "")
+              .disabled(row is None),
+            [
+              @html.option(value="local", selected=!worktree_mode, "Local"),
+              @html.option(value="worktree", selected=worktree_mode, "Worktree"),
+            ],
+          ),
+        ),
+      ],
+      desc="Where a new chat starts: the workspace itself, or a fresh git worktree bound to that chat. The composer's chip still changes a single chat.",
+    ),
+  ]
+  @html.section(class="settings-page", [
+    @html.div(class="settings-page-inner", [
+      @html.div(class="settings-header", [
+        @html.div(class="page-eyebrow", "Workspace"),
+        @html.h1(@resource.label(workspace)),
+        @html.div(class="settings-subtitle", workspace.path),
+      ]),
+      @html.div(class="settings", [
+        settings_group(icon_worktree, "Conversations", conversation_rows),
+      ]),
+    ]),
+  ])
+}
+
+///|
 /// One local-library row: name, description, and — for registry installs
 /// only — the source tag and the uninstall button. Hand-written skills are
 /// listed so the user sees everything the engine advertises, but the app
@@ -3216,6 +3301,12 @@ fn view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
     Skills => page_with_toggle(dispatch, model, skills_page(dispatch, model))
     Settings =>
       page_with_toggle(dispatch, model, settings_page(dispatch, model))
+    WorkspaceSettings(channel~, workspace~) =>
+      page_with_toggle(
+        dispatch,
+        model,
+        workspace_settings_page(dispatch, model, channel, workspace),
+      )
   }
   // The app is `sidebar | content`; `content` itself splits into the
   // conversation (left) and the editor (right) as two independent parts, so

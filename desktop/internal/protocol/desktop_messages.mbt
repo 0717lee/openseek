@@ -485,6 +485,32 @@ pub(all) struct WorktreeChangedPayload {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+/// `workspace.settings_get` names the workspace whose desktop-owned
+/// settings file to read.
+pub(all) struct WorkspaceSettingsGetPayload {
+  workspace : String
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
+/// `workspace.settings_set` replaces one workspace's settings; the committed
+/// state comes back in the reply and in the `workspace.settings_changed`
+/// broadcast.
+pub(all) struct WorkspaceSettingsSetPayload {
+  workspace : String
+  worktree_mode : Bool
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
+/// One workspace's desktop-owned settings: the reply to both settings
+/// methods and the `workspace.settings_changed` payload. `worktree_mode` is
+/// where a NEW conversation in this workspace starts — the workspace root,
+/// or a fresh git worktree bound to that conversation.
+pub(all) struct WorkspaceSettingsPayload {
+  workspace : String
+  worktree_mode : Bool
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
 pub(all) struct SettingsStatusPayload {
   revision : Int
   provider : String
