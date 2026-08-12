@@ -295,12 +295,7 @@ async fn archive_bound_worktree_checkout(
         return Some({ worktree: entry.name, dirty_paths, dirty_path_count })
       }
     }
-    let args = ["worktree", "remove"]
-    if force {
-      args.push("--force")
-    }
-    args.push("\{WorktreesDirName}/\{entry.name}")
-    ignore(git_in(workspace, args))
+    delete_worktree_checkout(workspace, entry.name)
   } else {
     // The checkout is already gone; drop git's stale bookkeeping for it.
     ignore(git_probe(workspace, ["worktree", "prune"]))
@@ -787,9 +782,11 @@ async fn restore_worktree_checkout(
 
 ///|
 /// Best-effort removal of an app-created checkout while preserving its branch.
-/// `git worktree remove` refuses every repository whose tree contains a
-/// gitlink, even when that submodule is uninitialized, so deletion plus prune
-/// is the only generic cleanup path.
+/// Deliberately not `git worktree remove --force`: rollback must only delete
+/// what THIS invocation provably created, and Git's validation does not
+/// check the branch — `worktree_checked_out_on` does, leaving a path another
+/// process claimed in the race window alone. Unforced removal is no
+/// alternative either: it refuses any tree containing a gitlink.
 async fn rollback_worktree_checkout(
   dir : @pathx.Absolute,
   name : String,
@@ -870,6 +867,33 @@ async fn worktree_lock_reason(dir : @pathx.Absolute, name : String) -> String? {
 }
 
 ///|
+/// Delete a registered worktree's checkout with `git worktree remove
+/// --force` — always forced, because plain `worktree remove` refuses ANY
+/// checkout containing a submodule gitlink, initialized or not, even a
+/// perfectly clean one. The caller's porcelain dirty check (and its
+/// discard-confirmation dialog) is the one cleanliness policy; Git's own
+/// would add nothing but the gitlink refusal. Everything else worth
+/// enforcing, Git still enforces under a single `--force`: it validates
+/// that the path really is this repository's linked worktree (a directory
+/// re-occupied by some other repository fails validation and survives),
+/// refuses an externally locked worktree (that takes a second `--force`,
+/// never passed here), and cleans up the checkout's admin directory —
+/// submodule clones under it included, Git's native `--force` semantics.
+async fn delete_worktree_checkout(
+  workspace : @pathx.Absolute,
+  name : String,
+) -> Unit {
+  ignore(
+    git_in(workspace, [
+      "worktree",
+      "remove",
+      "--force",
+      "\{WorktreesDirName}/\{name}",
+    ]),
+  )
+}
+
+///|
 /// Remove a worktree's checkout and registry entry. The branch
 /// `openseek/<name>` always survives — committed work is never lost by
 /// deleting a worktree; uncommitted changes are, and only behind `force`.
@@ -929,26 +953,7 @@ pub async fn remove_worktree(
         )
       }
     }
-    if checkout_has_gitlinks(target) {
-      // Git refuses `worktree remove` for any tree containing a submodule
-      // gitlink, initialized or not. The target is app-owned and registered;
-      // the non-force path proved it clean above, while an external lock still
-      // blocks deletion.
-      guard worktree_lock_reason(dir, name) is None else {
-        raise EngineError(
-          "worktree \{name} is locked; unlock it before removal",
-        )
-      }
-      @fs.rmdir(target.to_string(), recursive=true)
-      ignore(git_in(dir, ["worktree", "prune"]))
-    } else {
-      let args = ["worktree", "remove"]
-      if force {
-        args.push("--force")
-      }
-      args.push("\{WorktreesDirName}/\{name}")
-      ignore(git_in(dir, args))
-    }
+    delete_worktree_checkout(dir, name)
   } else {
     // The checkout is already gone; drop git's stale bookkeeping for it.
     ignore(git_probe(dir, ["worktree", "prune"]))
