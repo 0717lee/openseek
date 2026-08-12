@@ -727,10 +727,11 @@ async fn ApiState::codex_thread_history(self : ApiState, params : Json) -> Json 
 }
 
 ///|
-/// Return only the newest turn for live status reconciliation. Unlike
-/// `thread.status`, which is scoped to one app-server process, persisted turn
-/// timestamps are visible across Codex clients. `itemsView=summary` keeps this
-/// two-second poll bounded even for a multi-day legacy conversation.
+/// Return only the newest turn for local lifecycle reconciliation.
+/// `thread.status` is scoped to one app-server process, while legacy persisted
+/// turns can omit completion timestamps after an interruption; neither is an
+/// active-writer signal. Writer ownership is learned only from `thread/resume`.
+/// `itemsView=summary` keeps this two-second poll bounded for long histories.
 async fn ApiState::codex_thread_activity(
   self : ApiState,
   params : Json,

@@ -682,7 +682,7 @@ fn State::composer_view(
     status.push(chip)
   }
   let local_turn = self.active_turn_id()
-  let running_elsewhere = self.is_running_elsewhere()
+  let active_elsewhere = self.is_active_elsewhere()
   let action = if local_turn is Some(_) {
     @composer.Action::{
       id: "stop",
@@ -700,7 +700,7 @@ fn State::composer_view(
       disabled: self.loading ||
       !self.can_prompt() ||
       self.input_empty() ||
-      running_elsewhere ||
+      active_elsewhere ||
       self.has_missing_worktree(),
       command: dispatch(Send),
       content: icon(icon_arrow_up),
@@ -718,14 +718,14 @@ fn State::composer_view(
       "Steer the running task — your message joins it at the next step."
     } else if self.has_missing_worktree() {
       "Rebuild this task's worktree before continuing."
-    } else if running_elsewhere {
-      "This task is running in another Codex client."
+    } else if active_elsewhere {
+      "This task is active in another Codex client."
     } else {
       "Ask Codex to inspect, edit, or explain this workspace."
     },
     disabled: !self.can_prompt() ||
     !(self.connection is CodexReady) ||
-    running_elsewhere ||
+    active_elsewhere ||
     self.has_missing_worktree(),
     input: dispatch.map(value => DraftChanged(value)),
     keyboard: @composer.KeyboardActions::{
@@ -852,8 +852,7 @@ pub fn State::page(
         @html.span(class="run-text", [
           @html.span(class="codex-connection", self.connection_label()),
           @html.span(class="codex-account-label", " · " + self.account_label()),
-          if self.write_access is CodexActiveElsewhere ||
-            self.is_running_elsewhere() {
+          if self.is_active_elsewhere() {
             @html.span(
               class="codex-writer-status",
               title="Another Codex client currently owns this task's writer",

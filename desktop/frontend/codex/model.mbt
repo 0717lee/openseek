@@ -75,10 +75,9 @@ priv struct CodexItem {
 priv struct CodexTurn {
   id : String
   status : String
-  // A second app-server reconstructs another client's live turn as
-  // `interrupted`, because it cannot observe that process's runtime state.
-  // The persisted timestamps preserve the important distinction: a turn
-  // with `startedAt` but no `completedAt` is still running elsewhere.
+  // Legacy interrupted turns can retain `startedAt` without ever receiving a
+  // `completedAt`. Only app-server's explicit `inProgress` status proves that
+  // this process has a live turn; writer conflicts are tracked separately.
   started_at : Int?
   completed_at : Int?
   items : Array[CodexItem]
@@ -1036,13 +1035,12 @@ fn State::is_running(self : State) -> Bool {
 
 ///|
 fn CodexTurn::is_running(self : CodexTurn) -> Bool {
-  self.status == "inProgress" ||
-  (self.started_at is Some(_) && self.completed_at is None)
+  self.status == "inProgress"
 }
 
 ///|
-fn State::is_running_elsewhere(self : State) -> Bool {
-  self.is_running() && self.active_turn_id() is None
+fn State::is_active_elsewhere(self : State) -> Bool {
+  self.write_access is CodexActiveElsewhere
 }
 
 ///|
@@ -1728,11 +1726,11 @@ test "Codex completed items replace streamed presentation state" {
 }
 
 ///|
-test "Codex recognizes a turn still running in another client" {
-  // A read-only app-server reports the foreign process's thread as
-  // `notLoaded` and reconstructs its unfinished turn as `interrupted`.
-  // Missing `completedAt`, not that process-local status, is authoritative.
-  let running = State::from_thread_snapshot({
+test "Codex interrupted history is not an active writer signal" {
+  // Historical review parents can be interrupted after their review child
+  // completes. Older records omit `completedAt`, so timestamp absence cannot
+  // prove that another app-server still owns the writer.
+  let interrupted = State::from_thread_snapshot({
     "thread": {
       "id": "thread-1",
       "status": { "type": "notLoaded" },
@@ -1747,25 +1745,25 @@ test "Codex recognizes a turn still running in another client" {
       ],
     },
   })
-  assert_true(running.is_running())
-  assert_true(running.is_running_elsewhere())
+  assert_false(interrupted.is_running())
+  assert_false(interrupted.is_active_elsewhere())
 
-  let completed = State::from_thread_snapshot({
+  let running = State::from_thread_snapshot({
     "thread": {
       "id": "thread-1",
       "turns": [
         {
           "id": "turn-1",
-          "status": "interrupted",
+          "status": "inProgress",
           "startedAt": 100,
-          "completedAt": 120,
+          "completedAt": Json::null(),
           "items": [],
         },
       ],
     },
   })
-  assert_false(completed.is_running())
-  assert_false(completed.is_running_elsewhere())
+  assert_true(running.is_running())
+  assert_false(running.is_active_elsewhere())
 
   // Old persisted turns can lack both timestamp fields. Do not classify an
   // ordinary historical interruption as live merely because completion time

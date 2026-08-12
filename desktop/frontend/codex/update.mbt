@@ -220,17 +220,7 @@ pub fn update(
             next.load_skills(dispatch, channel, force_reload=false),
           ])
         }
-        CodexActivityReply => {
-          let was_running_elsewhere = next.is_running_elsewhere()
-          next = next.with_activity_reply(value)
-          // Once another client finishes, reload exactly once so its final
-          // messages become visible. Running polls keep only lifecycle fields.
-          if was_running_elsewhere &&
-            !next.is_running() &&
-            next.active_thread() is Some(active) {
-            cmd = next.open_thread(dispatch, channel, active.id)
-          }
-        }
+        CodexActivityReply => next = next.with_activity_reply(value)
         CodexDraftThreadReply => {
           next = next.with_thread_reply(value)
           // Install the real id before starting the turn so every app-server
@@ -698,7 +688,7 @@ test "Codex missing worktree waits for rebuild or archive confirmation" {
 }
 
 ///|
-test "Codex activity polling tracks another client's turn" {
+test "Codex activity polling follows explicit turn status" {
   let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   let state = {
     ..State::from_thread_snapshot({
@@ -725,7 +715,7 @@ test "Codex activity polling tracks another client's turn" {
       "threadId": "thread-1",
       "turn": {
         "id": "turn-2",
-        "status": "interrupted",
+        "status": "inProgress",
         "startedAt": 100,
         "completedAt": Json::null(),
         "items": [],
@@ -735,7 +725,8 @@ test "Codex activity polling tracks another client's turn" {
     @interop.ChannelId::Local,
     _ => @cmd.none,
   )
-  assert_true(running.is_running_elsewhere())
+  assert_true(running.is_running())
+  assert_false(running.is_active_elsewhere())
   assert_true(running.loading)
 
   let (_, completed) = update(
@@ -767,6 +758,40 @@ test "Codex activity polling tracks another client's turn" {
     _ => @cmd.none,
   )
   assert_true(stale == completed)
+}
+
+///|
+test "Codex writer conflict is the active-elsewhere signal" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let state = State::from_thread_snapshot({
+    "thread": { "id": "thread-1", "turns": [] },
+  })
+  let (_, first) = update(
+    dispatch,
+    WriterConflict("thread-1"),
+    state,
+    @interop.ChannelId::Local,
+    _ => @cmd.none,
+  )
+  let (_, repeated) = update(
+    dispatch,
+    WriterConflict("thread-1"),
+    state,
+    @interop.ChannelId::Local,
+    _ => @cmd.none,
+  )
+  assert_true(first.is_active_elsewhere())
+  assert_false(first.is_running())
+  assert_true(first == repeated)
+
+  let (_, stale) = update(
+    dispatch,
+    WriterConflict("thread-old"),
+    state,
+    @interop.ChannelId::Local,
+    _ => @cmd.none,
+  )
+  assert_true(stale == state)
 }
 
 ///|
