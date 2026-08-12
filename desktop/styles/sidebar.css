@@ -1,0 +1,592 @@
+
+/* ---------- sidebar ---------- */
+/* The aside carries no horizontal padding of its own: each row (header,
+   sections, footer) owns its inset, so the scrolling sessions list can
+   run its scrollbar at the sidebar's true edge instead of trapping it
+   inside a shared padding box. */
+aside {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  min-width: 0;
+  min-height: 0;
+  padding-bottom: 14px;
+  border-right: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-2);
+}
+
+/* The sidebar's own 46px header, matching the topbar so the sidebar
+   toggle sitting here (while the sidebar is open) lands at the same
+   screen position as the topbar's toggle (while it's closed), and the
+   bottom divider continues the topbar's across the two columns. */
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  height: 46px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* New chat holds the header's right edge. The -4px mirrors the
+   toggle's left pull so both icons sit the same optical distance from
+   their window edge. */
+.sidebar-header .header-new-chat {
+  margin-left: auto;
+  margin-right: -4px;
+}
+
+.sidebar-main {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  align-content: start;
+  min-width: 0;
+  min-height: 0;
+}
+
+.sidebar-section.sessions {
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+  align-content: start;
+  /* The scroll box spans to the sidebar's edge; the right inset is the
+     reserved scrollbar gutter (9px) plus 3px of clearance — 12px in
+     total, matching the other sections whether or not the bar shows. */
+  padding-right: 3px;
+  scrollbar-gutter: stable;
+}
+
+.sidebar-section {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 0 12px;
+}
+
+.sidebar-heading {
+  padding: 0 8px;
+  margin-bottom: 4px;
+  color: var(--ink-3);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  line-height: 20px;
+}
+
+/* the console's account row in the sidebar footer */
+.console-account {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  color: var(--ink-2);
+  font-size: 11.5px;
+}
+.console-avatar {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+}
+.console-login {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.console-account-action {
+  flex: none;
+  padding: 2px 6px;
+  border: none;
+  background: none;
+  color: var(--ink-3);
+  font-size: 11px;
+  cursor: pointer;
+}
+.console-account-action:hover {
+  color: var(--ink-1);
+}
+.console-account-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.console-notice {
+  padding: 2px 8px 6px;
+  color: var(--warn);
+  font-size: 11px;
+}
+
+.conversation-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.conversation-row > .sidebar-label {
+  flex: 1 1 auto;
+}
+
+.conversation-row:hover {
+  background: var(--surface-2);
+}
+
+.conversation-row.active {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.conversation-row.error {
+  color: var(--del);
+  cursor: default;
+}
+
+/* Hover-revealed archive control on a durable row. Kept in layout
+   (visibility, not display) so the label doesn't shift as it appears. */
+.row-archive {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  visibility: hidden;
+}
+.conversation-row:hover .row-archive {
+  visibility: visible;
+}
+.row-archive:hover {
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+  color: var(--ink);
+}
+/* A conversation row's trailing slot: two right-aligned groups — what the
+   row is (status glyphs) and what can be done to it (buttons) — stacked in
+   one grid cell. The cell takes the width of the wider group, so hovering
+   swaps one for the other without nudging the title, and a row with no
+   glyphs and no actions renders no slot at all (no reserved gutter). */
+.row-trailing {
+  flex: 0 0 auto;
+  display: grid;
+  align-items: center;
+  justify-items: end;
+}
+.row-trailing > * {
+  grid-area: 1 / 1;
+}
+.row-status,
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* Both groups stay in layout (visibility, not display) so the cell keeps
+   one width across the swap. Only a slot that actually has actions hides
+   its status — a running row has no archive button, and blanking its dot
+   under the cursor would leave the slot empty. */
+.conversation-row:hover .row-trailing:has(.row-actions) .row-status {
+  visibility: hidden;
+}
+
+/* The chat list's two section headings ("Workspaces", "Chats"): the
+   sidebar-heading type with a hover-revealed ＋ that adds to the
+   section, sharing the row-archive treatment. */
+.section-heading {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 0;
+  border-radius: var(--radius-sm);
+}
+.section-heading:not(:first-child) {
+  margin-top: 14px;
+}
+.section-heading > .sidebar-label {
+  flex: 1 1 auto;
+}
+.section-heading:hover .row-archive {
+  visibility: visible;
+}
+/* A foldable section ("Chats"): the heading toggles it, wearing the
+   same textual chevron as the archived group. */
+.section-heading.collapsible {
+  cursor: pointer;
+  user-select: none;
+}
+.section-heading.collapsible > .sidebar-label::after {
+  content: " ▾";
+}
+.section-heading.collapsible.collapsed > .sidebar-label::after {
+  content: " ▸";
+}
+
+/* An attached workspace: a folder row with its conversations nested
+   beneath. Not clickable itself — the hover controls do the work —
+   and the active workspace (where a plain "New chat" lands) reads as
+   the darker label. */
+.workspace-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+.workspace-row > .sidebar-label {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-row > .sidebar-icon {
+  color: var(--ink-3);
+}
+.workspace-row:hover {
+  background: var(--surface-2);
+}
+.workspace-row.active {
+  color: var(--ink);
+  font-weight: 500;
+}
+.workspace-row:hover .row-archive {
+  visibility: visible;
+}
+
+/* Worktree affordances: the sidebar row's branch glyph and the composer's
+   launch-mode chip. The archive-discard confirmation reuses the shared
+   modal styles. */
+/* The row's worktree glyph, shown when the registry mapping (or the local
+   binding) names one; the name it stands for is in the row's own tooltip,
+   which stays reachable when hover swaps this glyph out. Display only — the
+   environment lives and dies with its conversation. A fixed slot, so the
+   title keeps the rest of the row no matter how long the name is. */
+.worktree-mark {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+}
+.worktree-mark .icon {
+  width: 12px;
+  height: 12px;
+}
+/* The composer's launch-mode chip: Local ⇄ Worktree while the conversation
+   can still choose; fixed to the worktree's name once bound. */
+.composer-worktree {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+button.composer-worktree {
+  cursor: pointer;
+}
+button.composer-worktree:hover {
+  border-color: var(--accent-line);
+  color: var(--ink);
+}
+.composer-worktree.on {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.composer-worktree .icon {
+  width: 12px;
+  height: 12px;
+}
+
+/* A conversation nested under its workspace row: the twisty cell and the row
+   gap make up the rest of the indent, landing the title under its
+   workspace's. */
+.conversation-row.nested {
+  padding-left: 16px;
+}
+.conversation-row.placeholder {
+  color: var(--ink-3);
+  cursor: default;
+}
+.conversation-row.placeholder:hover {
+  background: transparent;
+}
+
+/* A sub-run in flight, at the transcript's tail: what is running, how far it
+   has gotten, and what it is doing right now. Quiet by default — it is
+   status, not content — with a pulsing dot so a stalled child still reads as
+   attached rather than as a frozen line. */
+.subrun-lane {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 2px;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+.subrun-mark {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: subrun-pulse 1.6s ease-in-out infinite;
+}
+@keyframes subrun-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.subrun-name {
+  flex: 0 0 auto;
+  color: var(--ink-2);
+  font-weight: 600;
+}
+.subrun-detail {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.subrun-step {
+  flex: 0 0 auto;
+}
+.subrun-activity {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Every conversation row leads with the twisty cell — a button when the
+   conversation folded sub-run transcripts under it, an empty box otherwise,
+   so titles line up either way. The chevron points down when open and right
+   when closed. */
+.row-twisty {
+  flex: 0 0 14px;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.row-twisty .icon {
+  width: 12px;
+  height: 12px;
+  transform: rotate(-90deg);
+  transition: transform 0.12s ease;
+}
+.row-twisty.expanded .icon {
+  transform: none;
+}
+button.row-twisty:hover {
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+  color: var(--ink);
+}
+.row-twisty.spacer {
+  cursor: inherit;
+}
+
+/* A sub-run transcript under the conversation that launched it: a step
+   further in than its parent, and quieter — it is that turn's evidence, not
+   a conversation of its own. */
+.conversation-row.subrun {
+  padding-left: 28px;
+  color: var(--ink-3);
+}
+.conversation-row.subrun.nested {
+  padding-left: 36px;
+}
+.conversation-row.subrun.active {
+  color: var(--accent-ink);
+}
+
+/* The in-app folder picker behind "Add a workspace" (extends the
+   confirmation-modal styles). */
+.picker-modal {
+  width: min(520px, calc(100vw - 48px));
+}
+.picker-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1px;
+  margin-top: 12px;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  min-height: 20px;
+}
+.picker-crumb {
+  padding: 2px 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  max-width: 160px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.picker-crumb:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+.picker-crumb.current {
+  color: var(--ink);
+  font-weight: 600;
+}
+.picker-crumb-sep {
+  color: var(--ink-3, var(--ink-2));
+  font-size: 12px;
+  user-select: none;
+}
+.picker-list {
+  margin-top: 10px;
+  height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.picker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.picker-row:hover {
+  background: var(--surface-2);
+}
+.picker-row-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--ink-2);
+}
+.picker-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.picker-empty {
+  padding: 10px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
+/* The collapsed group holding archived conversations, at the tail of
+   the chat list. */
+.sidebar-archived {
+  margin-top: 10px;
+}
+.archived-heading {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.archived-heading::-webkit-details-marker {
+  display: none;
+}
+.archived-heading::after {
+  content: " ▸";
+}
+.sidebar-archived[open] > .archived-heading::after {
+  content: " ▾";
+}
+.archived-rows {
+  display: grid;
+  gap: 4px;
+}
+.archived-rows .conversation-row {
+  color: var(--ink-3);
+}
+
+.sidebar-icon {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  color: var(--accent);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.sidebar-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-footer {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 12px;
+}
+
+.sidebar-button {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-2);
+  padding: 0 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sidebar-button .sidebar-icon {
+  color: var(--ink-3);
+}
+
+.sidebar-button.active {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+button.sidebar-button:not(:disabled):hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}

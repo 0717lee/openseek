@@ -1,0 +1,428 @@
+
+/* ---------- generic buttons ---------- */
+/* `button` below is the app-wide reset (colors only). `.secondary` /
+   `.primary` are the settings pages' opt-in button system and DO carry
+   metrics (padding, font-size) at element+class specificity — a new
+   component must define its own classes, never reuse these modifier names
+   next to its own (that ambush is how the worktree confirm buttons once
+   came out two sizes). */
+button {
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+button.secondary {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 6px 12px;
+  font-size: 12px;
+}
+button.secondary:not(:disabled):hover {
+  background: var(--surface-2);
+}
+
+/* A Device page is navigation, so it remains an anchor while matching the
+   secondary controls beside it. The desktop's delegated link handler opens it
+   in the system browser instead of navigating the app frame. */
+a.setting-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 6px 12px;
+  font-size: 12px;
+  line-height: 1.2;
+  text-decoration: none;
+}
+a.setting-link:hover {
+  background: var(--surface-2);
+}
+a.setting-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* The accent-filled call to action, button.secondary's counterpart:
+   Save API key, the self-update controls, modal confirms. As a
+   sidebar-button it keeps the sidebar's geometry, only the fill. */
+button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+button.primary:not(.sidebar-button) {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+button.primary .sidebar-icon {
+  color: #fff;
+}
+button.primary:not(:disabled):hover {
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
+  color: #fff;
+}
+button.primary:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+/* ---------- settings page ---------- */
+/* Shares the Skills page's shell — same column width, header type, and
+   section headings — so the two pages read as siblings. */
+.settings-page {
+  grid-row: 1 / -1;
+  min-height: 0;
+  overflow: auto;
+  padding: 40px 28px 28px;
+}
+
+.settings-page-inner {
+  display: grid;
+  align-content: start;
+  gap: 24px;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.page-eyebrow {
+  color: var(--ink-3);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.settings-header {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 4px;
+}
+
+.settings-header h1 {
+  font-size: 26px;
+  letter-spacing: -0.02em;
+}
+
+h1,
+h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.settings-subtitle {
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+
+.settings {
+  display: grid;
+  align-content: start;
+  gap: 26px;
+}
+
+.settings-group {
+  display: grid;
+  gap: 7px;
+}
+
+.settings-group-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.settings-group-head .icon {
+  width: 15px;
+  height: 15px;
+  color: var(--accent);
+}
+
+.settings-group-head h2 {
+  font-size: 14px;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.settings-group-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 2px 18px;
+}
+
+.setting-row {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 0;
+}
+
+.setting-row + .setting-row,
+.settings-group-card .skill-row + .skill-row {
+  border-top: 1px solid var(--line-2);
+}
+
+.setting-row.stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.setting-text {
+  flex: 1;
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.setting-name {
+  font-size: 13px;
+}
+
+.setting-desc {
+  color: var(--ink-3);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+/* A row's controls sit on one line, hugging the right edge; a lone
+   select/input still fills the column via its own width: 100%. */
+.setting-control {
+  flex-shrink: 0;
+  width: 280px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.setting-row.stack .setting-control {
+  width: auto;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+#saveApiKey {
+  align-self: flex-end;
+}
+
+/* App-wide form-control default, `width: 100%` included — settings forms
+   and the pickers rely on it. A control that must NOT fill its row (an
+   inline chip input, say) has to override these explicitly. */
+input,
+textarea,
+select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--ink);
+  padding: 9px 10px;
+  font-size: 13px;
+  letter-spacing: -0.01em;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.setting-control select,
+.setting-control input {
+  padding: 7px 10px;
+  font-size: 12.5px;
+}
+
+.setting-select {
+  position: relative;
+  width: 100%;
+}
+
+.setting-select select {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 32px;
+}
+
+.setting-select-chevron {
+  position: absolute;
+  top: 50%;
+  /* The codicon path ends 3px before its 16px view box edge. */
+  right: 7px;
+  display: inline-flex;
+  color: var(--ink);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+/* ---------- skills page ---------- */
+.skills-page {
+  grid-row: 1 / -1;
+  min-height: 0;
+  overflow: auto;
+  padding: 40px 28px 28px;
+}
+
+.skills-page-inner {
+  display: grid;
+  align-content: start;
+  gap: 20px;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.skills-header {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 4px;
+}
+
+.skills-header h1 {
+  font-size: 26px;
+  letter-spacing: -0.02em;
+}
+
+.skills-subtitle {
+  color: var(--ink-3);
+  font-size: 12.5px;
+}
+
+.skills-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 420px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 9px 13px;
+  color: var(--ink-3);
+}
+
+.skills-search:focus-within {
+  border-color: var(--accent-line);
+}
+
+.skills-search .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.skills-search input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+}
+
+.skills-search input:focus {
+  outline: none;
+}
+
+.skill-check {
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.skill-avatar {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+
+.skill-avatar .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.skill-row {
+  display: flex;
+  gap: 13px;
+  align-items: center;
+  padding: 13px 0;
+}
+
+.skill-info {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.skill-name {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.skill-desc {
+  color: var(--ink-3);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.skill-meta {
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+.skill-action {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.skills-empty,
+.skills-notice {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+.settings-group-card .skills-empty {
+  padding: 14px 0;
+}
+
+.pill {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 9px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ok {
+  color: var(--add);
+}
+.warn {
+  color: var(--warn);
+}
+.danger {
+  color: var(--del);
+}

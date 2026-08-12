@@ -229,11 +229,14 @@ build-mode arguments.
 
 Development does not use Moon's `data_dir` and does not assemble a package
 asset directory. `desktop-dev.html` is served with the repository as its asset
-root: it loads the frontend straight from `_build`, imports the editor's source
-styles as separate files, and loads xterm's upstream browser files without
-esbuild. Mermaid and xterm archives are downloaded, checksum-verified, and
-extracted once under ignored `target/` directories; they are reused until their
-pinned versions change.
+root: it loads the frontend straight from `_build`, imports the application's
+split CSS through `desktop/app.css`, imports the editor's source styles as
+separate files, and loads xterm's upstream browser files without esbuild.
+Production packagers concatenate the application sources into
+`desktop/app.generated.css` before copying it into their asset layouts.
+Mermaid and xterm archives are downloaded, checksum-verified, and extracted
+once under ignored `target/` directories; they are reused until their pinned
+versions change.
 
 The host recognizes its `_build/native/<profile>/build/openseek_desktop`
 location and derives the checkout HTML, matching engine, and worktree-local
@@ -362,7 +365,7 @@ The files come from:
 openseek-desktop.exe <- desktop/_build/native/release/build/openseek_desktop/openseek_desktop.exe
 openseek.exe         <- _build/native/release/build/cmd/openseek/openseek.exe
 assets/index.html    <- desktop/index.html
-assets/app.css       <- desktop/app.css
+assets/app.css       <- desktop/app.generated.css (assembled from desktop/app.css imports)
 assets/frontend.js   <- desktop/frontend.js
 ```
 

@@ -1,0 +1,705 @@
+
+/* ---------- composer ---------- */
+.composer {
+  border-top: 1px solid var(--line);
+  background: var(--paper);
+  padding: 16px 24px 18px;
+}
+
+/* At the terminal's maximum height, `main` is only 180px tall. Bound the
+   complete composer to the space below the topbar. Overflow remains visible
+   here so completion and git menus can open above the composer. */
+.content.terminal-open .composer {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100cqh - var(--topbar-height));
+  padding: 4px 24px;
+}
+
+/* Plans, notices, and banners give up space before the input does. Keeping
+   their scrollbar on this dedicated wrapper leaves the composer itself
+   unclipped, so menus anchored inside composer-inner can still open upward. */
+.content.terminal-open .composer-context {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* The context wrapper owns auxiliary vertical scrolling beside the terminal;
+   an expanded plan must not add a second nested scrollbar inside it. */
+.content.terminal-open .composer-context .plan-panel .plan-steps {
+  max-height: none;
+  overflow-y: visible;
+}
+
+.composer-inner {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  max-width: 820px;
+  margin: 0 auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 8px 10px;
+  box-shadow: var(--shadow);
+}
+
+.composer-input {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+/* Shrink the draft beside a tall terminal, but keep its content-sized minimum:
+   one textarea line, an optional mention row, and the toolbar. Long draft text
+   still contracts inside the remaining input space and owns its scrollbar.
+   Both upward-opening menus are siblings outside the scrolled context. */
+.content.terminal-open .composer-inner {
+  flex: 0 1 auto;
+  /* Reserve one mention row and one textarea line. The card minimum also
+     includes the fixed toolbar, gaps, border, and compact vertical padding. */
+  grid-template-rows: minmax(63px, 1fr) auto;
+  gap: 4px;
+  min-height: 112px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  width: 100%;
+}
+
+.content.terminal-open .composer-input {
+  gap: 4px;
+}
+
+.content.terminal-open .composer-input > .mention-tray {
+  flex: none;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.content.terminal-open .composer-input > .mention-tray .mention-chip {
+  flex: none;
+}
+
+.content.terminal-open .composer-input > textarea {
+  flex: 0 1 auto;
+  /* 16px mobile text at 1.6 line-height plus the vertical padding is 33.6px. */
+  min-height: 34px;
+}
+
+.content.terminal-open .composer-toolbar {
+  padding-top: 4px;
+}
+
+/* mention chips ($ skills, # symbols) above the textarea; the tray is
+   always in the DOM and collapses to nothing when there are no chips */
+.mention-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.mention-tray:empty {
+  display: none;
+}
+.mention-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 260px;
+  padding: 2px 4px 2px 8px;
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: 12px;
+}
+/* Wraps the glyph+label: a plain span for a chip with no jump target, or
+   a reset `<button>` (same layout) for one that opens the editor panel
+   at a resolved location. */
+.mention-body,
+.mention-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.mention-jump {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.mention-jump:hover .mention-label {
+  text-decoration: underline;
+}
+.mention-glyph {
+  flex: none;
+  font-family: var(--mono);
+  font-weight: 600;
+  opacity: 0.75;
+}
+.mention-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+}
+.mention-remove {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--accent-ink);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.mention-remove:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+/* chips re-rendered inside a sent message (parsed back out of its
+   <user_mentions> envelope): same chip chrome, no remove button, so the
+   padding evens out; a small gap before the typed text below */
+.user-bubble .mention-tray {
+  margin: 0 0 6px;
+}
+.user-bubble .mention-chip {
+  padding: 2px 8px;
+}
+
+/* slash/skill completion menu, floated above the composer */
+.completion-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 8px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+  z-index: 20;
+}
+.completion-hint {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line-2);
+  color: var(--ink-3);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.completion-list {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px;
+}
+.completion-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.completion-item.selected {
+  background: var(--accent-soft);
+}
+.completion-label {
+  flex: none;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+.completion-item.selected .completion-label {
+  color: var(--accent-ink);
+}
+.completion-detail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+/* state line for a # menu whose results are still loading or empty */
+.completion-empty {
+  padding: 7px 10px;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+/* transient notice docked above the composer (e.g. compaction) */
+/* the console's connection banner: a permanent composer child whose
+   class flips visibility, so the textarea's index never shifts */
+.composer-banner {
+  max-width: 820px;
+  margin: 0 auto 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--ink-1);
+  font-size: 12.5px;
+}
+.composer-banner.hidden {
+  display: none;
+}
+
+.composer-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 820px;
+  margin: 0 auto 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+.composer-notice-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+}
+/* The notice's own text/action split, used by the vanished-worktree banner:
+   the sentence takes the slack so the actions stay right-aligned. Metrics
+   live here rather than on `.secondary` — see the generic-buttons note. */
+.composer-notice-text {
+  flex: 1;
+  min-width: 0;
+}
+.composer-notice-btn {
+  flex: none;
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 4px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.composer-notice-btn:not(:disabled):hover {
+  background: var(--surface-2);
+}
+
+/* the standing plan, docked above the composer: one line naming the active
+   step, expanding to the whole checklist. The slot is always in the DOM and
+   collapses to nothing without a plan, so the textarea below keeps its child
+   index while a plan appears and clears mid-turn */
+.plan-panel-slot:empty {
+  display: none;
+}
+.plan-panel {
+  max-width: 820px;
+  margin: 0 auto 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 6px 10px 8px;
+}
+.plan-panel-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.plan-panel-summary::-webkit-details-marker {
+  display: none;
+}
+.plan-panel-summary:hover {
+  color: var(--ink);
+}
+.plan-panel-icon {
+  flex: none;
+  color: var(--accent);
+}
+.plan-panel-title {
+  flex: none;
+  font-weight: 600;
+}
+.plan-panel-active {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-panel-summary .plan-progress-track {
+  flex: 0 0 90px;
+}
+.plan-panel-caret {
+  flex: none;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+.plan-panel:not([open]) .plan-panel-caret::after {
+  content: "▸";
+}
+.plan-panel[open] .plan-panel-caret::after {
+  content: "▾";
+}
+/* The expanded checklist scrolls inside the panel rather than growing it.
+   The composer is `main`'s trailing `auto` row and the whole shell hides
+   overflow, so a near-maximum plan (the tool caps it at 20 steps, and long
+   titles wrap) would otherwise push the textarea and Send below the clipped
+   viewport with nothing left to scroll them back into reach. Capped in `vh`
+   as well as pixels so a short window keeps the composer visible. */
+.plan-panel .plan-steps {
+  max-height: min(34vh, 260px);
+  overflow-y: auto;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line-2);
+}
+
+/* steering input not yet folded into the running turn: a panel docked
+   above the composer until the engine settles it */
+.pending-steers {
+  max-width: 820px;
+  margin: 0 auto 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 4px 10px;
+}
+.pending-steer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 0;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.pending-steer-row + .pending-steer-row {
+  border-top: 1px solid var(--line-2);
+}
+.pending-steer-icon {
+  color: var(--accent);
+  flex: none;
+}
+.pending-steer-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pending-steer-state {
+  flex: none;
+  color: var(--ink-3);
+  font-size: 11px;
+  animation: caretBlink 1.4s steps(1) infinite;
+}
+
+.composer textarea {
+  /* Grow with wrapped or explicit lines; once the cap is reached, keep the
+     composer stable and scroll the textarea's contents instead. */
+  field-sizing: content;
+  width: 100%;
+  min-height: 26px;
+  max-height: 180px;
+  overflow-y: auto;
+  border: 0;
+  background: transparent;
+  padding: 6px 6px 2px;
+  resize: none;
+  color: var(--ink);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+.composer textarea:focus {
+  outline: 0;
+}
+.composer textarea::placeholder {
+  color: var(--ink-3);
+}
+
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-2);
+}
+
+.composer-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+/* The toolbar's left status group: the model chip, then the one git chip
+   (which lives here, not in the topbar). The row shares its width with the
+   send button and a resizable side panel, so both chips shrink and clip their
+   own label. Clipping is theirs and never this group's: `overflow` here would
+   also cut off the popover the git chip anchors. */
+.composer-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* The git chip. It deliberately does *not* establish a containing block: the
+   popover anchors to `.composer-inner` instead, so its width is the
+   composer's business rather than the chip's position along the row. See
+   `.composer-git-menu`. */
+.composer-git {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.composer-git-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 220px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  /* Same box as `.composer-model`, so the two chips sit at one height. */
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  padding: 4px 9px;
+  color: var(--ink-2);
+  font-size: 11.5px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+/* Same hover as the model chip beside it: two adjacent buttons that light up
+   differently read as an accident. */
+.composer-git-button:hover,
+.composer-git-button.open {
+  border-color: var(--accent);
+  color: var(--ink-1);
+}
+.composer-git-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Size the icon span, not the SVG inside it: `.icon` is a fixed 16px flex box
+   whose SVG fills it, so shrinking only the SVG leaves it parked at the box's
+   top edge instead of on the text's centre line. */
+.composer-git-glyph {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
+.composer-git-glyph .icon {
+  width: 12px;
+  height: 12px;
+}
+/* The chip is tinted by CI, which is the part that changes while nobody is
+   looking. Which pull request it is, and whether it is a draft, are in the
+   label — one mark carrying two meanings is what made the old chip unreadable. */
+.composer-git-button.passed .composer-git-glyph,
+.composer-git-glyph.passed {
+  color: var(--add);
+}
+.composer-git-button.failed .composer-git-glyph,
+.composer-git-glyph.failed {
+  color: var(--del);
+}
+.composer-git-button.pending .composer-git-glyph,
+.composer-git-glyph.pending {
+  color: var(--warn);
+}
+.composer-git-button.none .composer-git-glyph,
+.composer-git-glyph.none {
+  color: var(--ink-3);
+}
+
+/* Opens upward, from the composer's left edge: the composer sits at the bottom
+   of the window, and `main` clips anything wider than it.
+
+   Sized against the composer rather than the viewport, because the two come
+   apart — dragging the editor panel wide squeezes the chat column to its 240px
+   floor on a screen of any width, and a menu measured in `vw` would spill out
+   of it and be cut off with no way to scroll to the rest. `100%` here is the
+   composer, which by construction fits. */
+.composer-git-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  width: min(420px, 100%);
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  font-size: 11.5px;
+  line-height: 1.4;
+  z-index: 31;
+}
+.composer-git-row,
+.composer-git-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--ink-2);
+  text-decoration: none;
+}
+.composer-git-link:hover {
+  background: var(--surface-2);
+}
+.composer-git-key {
+  flex: none;
+  width: 62px;
+  color: var(--ink-3);
+}
+.composer-git-value {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+/* Secondary text is pushed to the right and gives up its width first. */
+.composer-git-note {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  color: var(--ink-3);
+}
+.composer-git-out {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  color: var(--ink-3);
+}
+.composer-git-out .icon {
+  width: 11px;
+  height: 11px;
+}
+.composer-git-rule {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--line-2);
+}
+.composer-git-diff {
+  display: inline-flex;
+  gap: 6px;
+  flex: none;
+}
+.composer-git-clean {
+  color: var(--ink-3);
+}
+.composer-diff-added,
+.composer-diff-removed {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.composer-diff-added {
+  color: var(--add);
+}
+.composer-diff-removed {
+  color: var(--del);
+}
+
+/* The model chip is the tier control: one click flips the conversation
+   between High and Low. */
+.composer-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 4px 9px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 11.5px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.composer-model:hover {
+  border-color: var(--accent);
+  color: var(--ink-1);
+}
+.composer-model > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-model::before {
+  content: "✦";
+  color: var(--accent);
+}
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-2);
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.icon-button:not(:disabled):hover {
+  background: var(--surface-2);
+}
+
+.send-button {
+  border-color: transparent;
+  background: var(--accent);
+  color: #fff;
+}
+.send-button:not(:disabled):hover {
+  background: var(--accent-ink);
+}
+.send-button:disabled {
+  background: var(--surface-2);
+  color: var(--ink-3);
+}
+
+.stop-button {
+  border-color: var(--del-line);
+  background: var(--del-bg);
+  color: var(--del);
+  font-size: 13px;
+}
+.stop-button:not(:disabled):hover {
+  background: color-mix(in srgb, var(--del-bg) 78%, var(--del));
+}

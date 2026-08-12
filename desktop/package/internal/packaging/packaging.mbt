@@ -12,9 +12,26 @@ const FrontendBundleArtifact : String = "build/openseek_desktop/frontend/desktop
 const FrontendBundleOutput : String = "frontend.js"
 
 ///|
+/// The generated application stylesheet staged by production packagers.
+/// Development keeps loading the checked-in `app.css` import manifest, while
+/// packaged layouts receive this single concatenated file under that name.
+const AppStyleOutput : String = "app.generated.css"
+
+///|
 /// The stylesheet the embedded code viewer needs, assembled from the editor
 /// dependency's CSS. `index.html` links it by this name next to `frontend.js`.
 const ViewerStyleOutput : String = "viewer.css"
+
+///|
+/// Application CSS sources in cascade order, relative to the desktop module.
+/// Keep the checked-in `app.css` development imports in the same order.
+fn app_css_sources() -> Array[String] {
+  [
+    "app_font.css", "styles/tokens.css", "styles/base.css", "styles/terminal.css",
+    "styles/file_panel.css", "styles/sidebar.css", "styles/main_header.css", "styles/transcript.css",
+    "styles/composer.css", "styles/pages.css", "styles/overlays.css", "styles/responsive.css",
+  ]
+}
 
 ///|
 /// The editor workspace member. The viewer's reusable CSS and font assets are
@@ -157,6 +174,12 @@ pub fn Workspace::repo_at(self : Workspace, relative : String) -> String {
 /// Return the staged local Mermaid runtime directory.
 pub fn Workspace::mermaid_assets(self : Workspace) -> String {
   self.at(MermaidAssetOutput)
+}
+
+///|
+/// Return the generated application stylesheet consumed by package layouts.
+pub fn Workspace::app_stylesheet(self : Workspace) -> String {
+  self.at(AppStyleOutput)
 }
 
 ///|
@@ -673,6 +696,7 @@ pub async fn build_frontend(ws : Workspace, release~ : Bool) -> Unit {
 pub async fn build_frontend_bundle(ws : Workspace, release~ : Bool) -> Unit {
   build_frontend(ws, release~)
   copy_file(ws.frontend_binary(release~), ws.at(FrontendBundleOutput))
+  build_app_stylesheet(ws)
   build_viewer_stylesheet(ws)
   build_mermaid_assets(ws)
 }
@@ -686,6 +710,51 @@ pub async fn build_mermaid_assets(ws : Workspace) -> Unit {
     ws.mermaid_assets(),
     ws.dir(),
   )
+}
+
+///|
+/// Concatenate the application CSS sources into the single stylesheet shipped
+/// by every production layout. Development loads the same sources through the
+/// checked-in `app.css` import manifest, so editing CSS needs no Moon rebuild.
+pub async fn build_app_stylesheet(ws : Workspace) -> Unit {
+  write_text(ws.app_stylesheet(), assembled_app_stylesheet(ws))
+}
+
+///|
+/// Read the application CSS in cascade order without rewriting declarations or
+/// resource URLs. `app_font.css` stays at the desktop root so its `fonts/` URL
+/// resolves identically before and after concatenation.
+async fn assembled_app_stylesheet(ws : Workspace) -> String {
+  let css = StringBuilder::new()
+  for source in app_css_sources() {
+    let absolute = ws.at(source)
+    if !@asyncfs.exists(absolute) {
+      raise PackageError("application stylesheet not found: \{absolute}")
+    }
+    let text = @asyncfs.read_file(absolute).text()
+    css.write_string(text)
+    if !text.has_suffix("\n") {
+      css.write_string("\n")
+    }
+  }
+  css.to_string()
+}
+
+///|
+async test "development app stylesheet imports every production source" {
+  let ws = locate_workspace()
+  let development = @asyncfs.read_file(ws.at("app.css")).text()
+  let imports : Array[String] = []
+  for line in development.split("\n") {
+    if line.has_prefix("@import ") {
+      imports.push(line.to_owned())
+    }
+  }
+  let expected : Array[String] = []
+  for source in app_css_sources() {
+    expected.push("@import url(\"./" + source + "\");")
+  }
+  assert_eq(imports, expected)
 }
 
 ///|
@@ -859,6 +928,7 @@ test "workspace path join preserves spaces and nested segments" {
 ///|
 test "package build paths select debug or release" {
   let ws : Workspace = { root: "/abs/repo/desktop" }
+  assert_eq(ws.app_stylesheet(), "/abs/repo/desktop/app.generated.css")
   assert_eq(
     ws.native_binary(release=false),
     "/abs/repo/_build/native/debug/build/openseek_desktop/openseek_desktop.exe",
@@ -971,6 +1041,16 @@ async test "viewer stylesheet assembles from the editor workspace member" {
   guard @asyncfs.exists(font) else {
     fail("missing workspace viewer font: \{font}")
   }
+}
+
+///|
+async test "application stylesheet assembles without development imports" {
+  let ws = locate_workspace()
+  let css = assembled_app_stylesheet(ws)
+  assert_true(css.has_prefix("/* Geist Mono is bundled"))
+  assert_true(css.contains("/* ---------- terminal panel ---------- */"))
+  assert_true(css.contains("/* ---------- narrow (phone) layout ---------- */"))
+  assert_true(!css.contains("@import"))
 }
 
 ///|

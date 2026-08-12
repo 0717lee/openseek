@@ -11,6 +11,8 @@ target/
 
 # Generated frontend bundle (built by `moon run --target native build_frontend.mbtx`)
 /frontend.js
+# Application stylesheet assembled from the checked-in development imports.
+/app.generated.css
 # Embedded viewer stylesheet, assembled from the editor dependency by the packager.
 /viewer.css
 # The codicon icon font, copied from the editor dependency next to viewer.css so

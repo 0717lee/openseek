@@ -4,6 +4,8 @@ package "openseek_desktop/package/internal/packaging"
 // Values
 pub fn absolute_path(String) -> String
 
+pub async fn build_app_stylesheet(Workspace) -> Unit
+
 pub async fn build_engine(Workspace, release~ : Bool, extra_env? : Map[String, String]) -> Unit
 
 pub async fn build_frontend(Workspace, release~ : Bool) -> Unit
@@ -54,6 +56,7 @@ pub impl Show for PackageError
 
 // Types and methods
 type Workspace
+pub fn Workspace::app_stylesheet(Self) -> String
 pub fn Workspace::at(Self, String) -> String
 pub fn Workspace::dir(Self) -> String
 pub fn Workspace::engine_binary(Self, release~ : Bool) -> String

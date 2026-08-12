@@ -1,0 +1,139 @@
+
+/* ---------- terminal panel ---------- */
+/* The emulator host remains mounted while hidden so each imperative xterm
+   instance retains its screen and scrollback. */
+.terminal-panel {
+  display: none;
+  position: relative;
+  grid-row: 2;
+  grid-column: 1;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+.terminal-panel.open {
+  display: flex;
+}
+
+.terminal-resize-handle {
+  position: absolute;
+  top: -3px;
+  right: 0;
+  left: 0;
+  z-index: 3;
+  height: 6px;
+  cursor: row-resize;
+}
+.terminal-resize-handle:hover,
+html.is-resizing-terminal .terminal-resize-handle {
+  background: var(--accent-soft);
+}
+html.is-resizing-terminal {
+  cursor: row-resize;
+}
+html.is-resizing-terminal * {
+  user-select: none !important;
+}
+
+.terminal-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line-2);
+  color: var(--ink-2);
+  font: 500 12px/1.4 var(--mono);
+}
+.terminal-title {
+  margin-right: 4px;
+  color: var(--ink);
+}
+.terminal-tab {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.terminal-tab.active {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+.terminal-tab-select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px 3px 8px;
+  border: 0;
+  background: none;
+  color: var(--ink-2);
+  font: 500 11px/1.4 var(--mono);
+  cursor: pointer;
+}
+.terminal-tab.active .terminal-tab-select {
+  color: var(--accent-ink);
+}
+.terminal-tab-failed {
+  color: var(--del);
+}
+.terminal-tab-close {
+  padding: 3px 6px 3px 2px;
+  border: 0;
+  background: none;
+  color: var(--ink-3);
+  font: 500 10px/1 var(--mono);
+  cursor: pointer;
+}
+.terminal-tab-close:hover {
+  color: var(--ink);
+}
+.terminal-new {
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--ink-3);
+  font: 500 14px/1 var(--mono);
+  cursor: pointer;
+}
+.terminal-new:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.terminal-status {
+  margin-left: auto;
+  color: var(--ink-3);
+}
+.terminal-status.terminal-error {
+  color: var(--del);
+}
+.terminal-close {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  color: var(--ink-3);
+  font: 500 12px/1 var(--mono);
+  cursor: pointer;
+}
+.terminal-close:hover {
+  color: var(--ink);
+}
+.terminal-host {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+.terminal-instance {
+  position: absolute;
+  inset: 0;
+  display: none;
+}
+/* Padding belongs to xterm itself: the fit addon measures the container's
+   full height, then subtracts the terminal element's inset. */
+.terminal-instance .xterm {
+  height: 100%;
+  padding: 8px 12px 14px;
+}
