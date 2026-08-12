@@ -9,11 +9,11 @@ official `source.moonbit.config` lexical classes.
 
 ## Token roles
 
-The lexer assigns tokens from their text alone: names remain identifiers and
-quoted literals remain strings regardless of their grammatical position. It
-also classifies imports, configuration calls, aliases, constants, delimiters,
-and comments. Syntactic or semantic property highlighting can be layered on
-later without mixing parsing into this lexical pass.
+The lexer assigns tokens from their text alone: one rule consumes each complete
+identifier, then a spelling-only classifier recognizes imports, configuration
+calls, aliases, and constants. All other names remain identifiers regardless of
+their grammatical position. Syntactic or semantic property highlighting can be
+layered on later without mixing parsing into this lexical pass.
 
 ```mbt check
 ///|

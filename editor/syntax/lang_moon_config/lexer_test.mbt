@@ -165,12 +165,36 @@ test "configuration state is always line-local" {
 }
 
 ///|
-test "longest match keeps keyword-prefixed names as identifiers" {
+test "word classification covers the configuration vocabulary" {
+  inspect(
+    render_tokens(
+      "import for module package options rule dev_build as true false other",
+    ),
+    content=(
+      #|0-6 Keyword import
+      #|7-10 Keyword for
+      #|11-17 Type module
+      #|18-25 Type package
+      #|26-33 Function options
+      #|34-38 Function rule
+      #|39-48 Function dev_build
+      #|49-51 Operator as
+      #|52-56 Constant true
+      #|57-62 Constant false
+      #|63-68 Identifier other
+    ),
+  )
+}
+
+///|
+test "word classification preserves prefixed identifiers" {
   let source =
     #|imported = true
     #|format = false
     #|module_name = "demo"
     #|options-extra = 1
+    #|dev_build-extra = 2
+    #|asymmetric = 3
   inspect(
     render_tokens(source),
     content=(
@@ -186,6 +210,12 @@ test "longest match keeps keyword-prefixed names as identifiers" {
       #|52-65 Identifier options-extra
       #|66-67 Operator =
       #|68-69 Number 1
+      #|70-85 Identifier dev_build-extra
+      #|86-87 Operator =
+      #|88-89 Number 2
+      #|90-100 Identifier asymmetric
+      #|101-102 Operator =
+      #|103-104 Number 3
     ),
   )
 }
