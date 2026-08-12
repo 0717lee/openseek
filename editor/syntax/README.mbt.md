@@ -200,10 +200,9 @@ test "handle_change forwards the exact array it was given" {
 Helpers shared by more than one `lang_*` live in this package rather than being
 copied into each: `is_capitalized` (the identifier-is-a-type heuristic) and
 `push_token` (append a token, coalescing it into the previous one when the tag
-and offsets are contiguous). `is_capitalized` serves `lang_javascript`;
-`lang_moonbit` expresses the same lexical distinction directly in its identifier
-rules. `push_token` serves those two lexers plus `lang_moon_config`. `lang_json`
-uses neither.
+and offsets are contiguous). `is_capitalized` serves `lang_javascript` and
+`lang_moonbit`. `push_token` serves those two lexers plus `lang_moon_config`.
+`lang_json` uses neither.
 
 ```mbt check
 ///|

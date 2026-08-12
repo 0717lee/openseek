@@ -40,10 +40,10 @@ fn annotate(
 
 ## Lexical classes
 
-Keywords, identifiers, and numbers separate as expected. Longest matching lets
-keywords be written as lexer rules before the general identifier rules: a
-keyword-prefixed identifier wins by length, while an exact keyword wins the
-equal-length tie. An ASCII-capitalized identifier matches the `Type` rule.
+Keywords, identifiers, and numbers separate as expected. One lexer rule
+consumes a complete identifier, then `classify_word` classifies that lexeme by
+spelling alone. Keyword-prefixed identifiers therefore remain identifiers.
+An ASCII-capitalized identifier is classified as `Type`.
 
 ```mbt check
 ///|

@@ -25,6 +25,59 @@ priv enum MoonBitMode {
 }
 
 ///|
+/// Classifies one identifier lexeme by spelling only. This is lexical
+/// classification: it does not inspect surrounding tokens or source text.
+fn classify_word(word : StringView) -> @syntax.HighlightTag {
+  match word {
+    "fn"
+    | "let"
+    | "mut"
+    | "const"
+    | "pub"
+    | "priv"
+    | "struct"
+    | "enum"
+    | "trait"
+    | "impl"
+    | "with"
+    | "derive"
+    | "type"
+    | "typealias"
+    | "traitalias"
+    | "fnalias"
+    | "suberror"
+    | "raise"
+    | "try"
+    | "catch"
+    | "noraise"
+    | "async"
+    | "test"
+    | "if"
+    | "else"
+    | "match"
+    | "guard"
+    | "while"
+    | "for"
+    | "in"
+    | "loop"
+    | "break"
+    | "continue"
+    | "return"
+    | "as"
+    | "is"
+    | "not"
+    | "using"
+    | "import"
+    | "extern"
+    | "declare"
+    | "where"
+    | "nobreak" => Keyword
+    "true" | "false" => Constant
+    _ => if @syntax.is_capitalized(word) { Type } else { Identifier }
+  }
+}
+
+///|
 /// Shared immutable normal state; MoonBit's lexer always returns to it at the
 /// end of a line.
 let moonbit_normal_state : @syntax.TokenizerState = TokenizerState()
@@ -177,32 +230,9 @@ pub impl @syntax.LineTokenizer for MoonBitTokenizer with fn tokenize_line(
             @syntax.push_token(tokens, at, end, Type)
             continue end, rest, modes
           }
-          (
-            re"^(?:fnalias|traitalias|typealias|fn|let|mut|const|pub|priv|struct|enum|trait|impl|with|derive|type|suberror|raise|try|catch|noraise|async|test|if|else|match|guard|while|for|in|loop|break|continue|return|as|is|not|using|import|extern|declare|where|nobreak)" as s,
-            after=rest,
-          ) => {
+          (re"^[a-zA-Z_][a-zA-Z0-9_]*" as s, after=rest) => {
             let end = at + s.length()
-            @syntax.push_token(tokens, at, end, Keyword)
-            continue end, rest, modes
-          }
-          (re"^(?:true|false)" as s, after=rest) => {
-            let end = at + s.length()
-            @syntax.push_token(tokens, at, end, Constant)
-            continue end, rest, modes
-          }
-          (re"^self" as s, after=rest) => {
-            let end = at + s.length()
-            @syntax.push_token(tokens, at, end, Variable)
-            continue end, rest, modes
-          }
-          (re"^[A-Z][a-zA-Z0-9_]*" as s, after=rest) => {
-            let end = at + s.length()
-            @syntax.push_token(tokens, at, end, Type)
-            continue end, rest, modes
-          }
-          (re"^[a-z_][a-zA-Z0-9_]*" as s, after=rest) => {
-            let end = at + s.length()
-            @syntax.push_token(tokens, at, end, Identifier)
+            @syntax.push_token(tokens, at, end, classify_word(s))
             continue end, rest, modes
           }
           (re"^[+\-*/%=<>!&^~?\|]+" as s, after=rest) => {
