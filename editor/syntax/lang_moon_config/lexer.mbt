@@ -32,8 +32,9 @@ pub impl @syntax.LineTokenizer for MoonConfigTokenizer with fn tokenize_line(
   _state,
 ) {
   let tokens : Array[@syntax.LineToken] = []
-  for at = 0, view = line_text; view.length() > 0; {
+  for at = 0, view = line_text {
     let rest = lexmatch view with longest {
+      re"^$" => break
       (re"^[ \t]+", after=rest) => rest
       (re"^//.*" as s, after=rest) => {
         @syntax.push_token(tokens, at, at + s.length(), Comment)
@@ -103,9 +104,6 @@ pub impl @syntax.LineTokenizer for MoonConfigTokenizer with fn tokenize_line(
         )
         rest
       }
-      // Unreachable while `.` covers the full charset (including lone
-      // surrogates); consume the rest defensively so the driver cannot stall.
-      _ => ""[:]
     }
     continue at + view.length() - rest.length(), rest
   }
