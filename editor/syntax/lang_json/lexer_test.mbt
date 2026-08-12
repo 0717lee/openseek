@@ -37,7 +37,7 @@ fn split_lines(source : String) -> Array[String] {
 }
 
 ///|
-test "object with property names values and literals" {
+test "object with strings values and literals" {
   let source =
     #|{
     #|  "name": "fixture",
@@ -50,19 +50,19 @@ test "object with property names values and literals" {
     render_tokens(source),
     content=(
       #|0-1 Delimiter {
-      #|4-10 Attribute "name"
+      #|4-10 String "name"
       #|10-11 Delimiter :
       #|12-21 String "fixture"
       #|21-22 Delimiter ,
-      #|25-31 Attribute "size"
+      #|25-31 String "size"
       #|31-32 Delimiter :
       #|33-40 Number -12.5e2
       #|40-41 Delimiter ,
-      #|44-48 Attribute "ok"
+      #|44-48 String "ok"
       #|48-49 Delimiter :
       #|50-54 Constant true
       #|54-55 Delimiter ,
-      #|58-64 Attribute "tags"
+      #|58-64 String "tags"
       #|64-65 Delimiter :
       #|66-67 Delimiter [
       #|67-70 String "a"
@@ -70,7 +70,7 @@ test "object with property names values and literals" {
       #|72-75 String "b"
       #|75-76 Delimiter ]
       #|76-77 Delimiter ,
-      #|80-86 Attribute "next"
+      #|80-86 String "next"
       #|86-87 Delimiter :
       #|88-92 Constant null
       #|93-94 Delimiter }
@@ -93,7 +93,7 @@ test "jsonc comments carry block state across lines" {
       #|15-21 Comment  multi
       #|22-27 Comment line 
       #|27-29 Comment */
-      #|30-35 Attribute "key"
+      #|30-35 String "key"
       #|35-36 Delimiter :
       #|37-38 Number 1
       #|39-40 Delimiter }
@@ -106,7 +106,9 @@ test "block comment state round-trips through TokenizerState" {
   let lexer : &@syntax.LineTokenizer = @lang_json.JsonTokenizer()
   let (_, open_state) = lexer.tokenize_line("{ /* open", lexer.initial_state())
   assert_true(open_state == @syntax.TokenizerState().push_mode(b'c'))
-  let (_, closed_state) = lexer.tokenize_line("still */ }", open_state)
+  let (_, empty_state) = lexer.tokenize_line("", open_state)
+  assert_true(empty_state == open_state)
+  let (_, closed_state) = lexer.tokenize_line("still */ }", empty_state)
   assert_true(closed_state == lexer.initial_state())
 }
 
@@ -120,6 +122,38 @@ test "bare words are invalid outside strings" {
       #|5-6 Delimiter :
       #|7-8 Number 1
       #|9-10 Delimiter }
+    ),
+  )
+}
+
+///|
+test "longest matching distinguishes literals from prefixed bare words" {
+  inspect(
+    render_tokens("[true, false, null, trueish, nullx]"),
+    content=(
+      #|0-1 Delimiter [
+      #|1-5 Constant true
+      #|5-6 Delimiter ,
+      #|7-12 Constant false
+      #|12-13 Delimiter ,
+      #|14-18 Constant null
+      #|18-19 Delimiter ,
+      #|20-27 Invalid trueish
+      #|27-28 Delimiter ,
+      #|29-34 Invalid nullx
+      #|34-35 Delimiter ]
+    ),
+  )
+}
+
+///|
+test "fallback punctuation preserves UTF-16 offsets" {
+  inspect(
+    render_tokens("[🌟]"),
+    content=(
+      #|0-1 Delimiter [
+      #|1-3 Punctuation 🌟
+      #|3-4 Delimiter ]
     ),
   )
 }

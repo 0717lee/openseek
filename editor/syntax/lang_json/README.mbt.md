@@ -27,15 +27,15 @@ fn annotate(
 }
 ```
 
-## Property names versus string values
+## Strings and literals
 
-A JSON string is tagged by its *role*, not its shape: a string followed by `:`
-is a property name, every other string is a value. The lexer decides this with
-one lookahead over the remainder of the line rather than by parsing structure.
+The lexer classifies tokens only by their lexical shape. Property names and
+string values are therefore both `String`; distinguishing their syntactic roles
+belongs in a parser or a later semantic-highlighting layer.
 
 ```mbt check
 ///|
-test "a colon after a string makes it a property name" {
+test "property names and values are both strings" {
   debug_inspect(
     annotate(@lang_json.JsonTokenizer(), [
       "{ \"name\": \"moonbit\", \"version\": 3 }",
@@ -43,11 +43,11 @@ test "a colon after a string makes it a property name" {
     content=(
       #|[
       #|  "{|Delimiter",
-      #|  "\"name\"|Attribute",
+      #|  "\"name\"|String",
       #|  ":|Delimiter",
       #|  "\"moonbit\"|String",
       #|  ",|Delimiter",
-      #|  "\"version\"|Attribute",
+      #|  "\"version\"|String",
       #|  ":|Delimiter",
       #|  "3|Number",
       #|  "}|Delimiter",
@@ -118,7 +118,7 @@ test "a block comment carries across lines through TokenizerState" {
       #|  "still inside|Comment",
       #|  "done |Comment",
       #|  "*/|Comment",
-      #|  "\"k\"|Attribute",
+      #|  "\"k\"|String",
       #|  ":|Delimiter",
       #|  "1|Number",
       #|  "}|Delimiter",
