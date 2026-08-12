@@ -850,30 +850,6 @@ test "new conversations inherit only their workspace's launch default" {
 }
 
 ///|
-test "the retired launch-default store still round-trips for migration" {
-  let local_workspace = @interop.ChannelId::Local.test_resource("/proj")
-  let remote_workspace = @interop.ChannelId::Remote("device-a").test_resource(
-    "/proj",
-  )
-  let selected = WorkspaceDefaultMode::{ worktrees: [] }
-    .with_mode(local_workspace, true)
-    .with_mode(remote_workspace, true)
-  let restored = WorkspaceDefaultMode::parse(
-    selected.worktrees.to_json().stringify(),
-  )
-  @debug.assert_eq(restored, selected)
-  // Spending a row is spelled as removal, and leaves the others intact.
-  let local_again = restored.with_mode(local_workspace, false)
-  assert_false(local_again.worktrees.contains(local_workspace.to_string()))
-  assert_true(local_again.worktrees.contains(remote_workspace.to_string()))
-  // Duplicate and malformed rows from an edited store are harmless.
-  let repaired = WorkspaceDefaultMode::parse(
-    "[\"openseek://local/proj\",17,\"openseek://local/proj\"]",
-  )
-  inspect(repaired.worktrees.length(), content="1")
-}
-
-///|
 test "a repeated rotation keeps an existing conversation's launch choice" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")

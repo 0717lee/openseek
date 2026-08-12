@@ -1684,8 +1684,7 @@ fn update_msg(
       tree_layout~,
       theme~,
       model=stored,
-      conversation_models=remembered,
-      workspace_default_mode=stored_workspace_default_mode
+      conversation_models=remembered
     ) => {
       let theme = Theme::parse(theme, model.theme)
       // Startup runs before any conversation exists, so adopting the stored
@@ -1703,9 +1702,6 @@ fn update_msg(
           theme,
           default_model,
           conversation_models: parse_conversation_models(remembered),
-          legacy_workspace_default_mode: WorkspaceDefaultMode::parse(
-            stored_workspace_default_mode,
-          ),
         },
       )
     }
@@ -3884,6 +3880,11 @@ fn update_device_msg(
         // list (or a newer `worktree.changed` broadcast) instead of trusting
         // placement cached before the disconnect.
         worktrees: [],
+        // Same rule for the settings mirror: a default changed by another
+        // client during the gap must not be copied into a chat created
+        // before this connection's re-read lands. Absent rows read as the
+        // safe Local default.
+        workspace_settings: [],
       })
       // Replies from writes issued on the dead bridge carry their captured
       // generation and are ignored below. The new host may have restarted
@@ -4350,33 +4351,16 @@ fn update_device_msg(
         request_generation > dev.workspace_settings_generation(workspace) else {
         return (@cmd.none, model)
       }
-      let next = model.replace_device(
-        dev.with_workspace_settings(
-          workspace,
-          worktree_mode,
-          generation=request_generation,
+      (
+        @cmd.none,
+        model.replace_device(
+          dev.with_workspace_settings(
+            workspace,
+            worktree_mode,
+            generation=request_generation,
+          ),
         ),
       )
-      // One-shot migration of the retired page-local default: the first
-      // authoritative disk read consumes the workspace's legacy row either
-      // way, and one that said Worktree while the disk still says Local (by
-      // absence) is pushed up as a real settings write first.
-      guard next.legacy_workspace_default_mode.worktrees.contains(
-        workspace.to_string(),
-      ) else {
-        return (@cmd.none, next)
-      }
-      let (forget_cmd, next) = forget_legacy_default_mode(next, workspace)
-      if worktree_mode {
-        (forget_cmd, next)
-      } else {
-        let (push_cmd, next) = update(
-          dispatch,
-          WorkspaceDefaultModeChosen(channel, workspace, "worktree"),
-          next,
-        )
-        (@cmd.batch([forget_cmd, push_cmd]), next)
-      }
     }
     WorkspaceSettingsChanged(workspace~, worktree_mode~) => {
       // The post-commit broadcast is newer than every list request issued so
@@ -4384,17 +4368,17 @@ fn update_device_msg(
       // token so an older reply for it can never roll the broadcast back.
       let workspace_settings_request_generation = dev.workspace_settings_request_generation +
         1
-      let next = model.replace_device({
-        ..dev.with_workspace_settings(
-          workspace,
-          worktree_mode,
-          generation=workspace_settings_request_generation,
-        ),
-        workspace_settings_request_generation,
-      })
-      // The disk state is authoritative on every client now; whatever the
-      // page's retired local preference remembered is spent.
-      forget_legacy_default_mode(next, workspace)
+      (
+        @cmd.none,
+        model.replace_device({
+          ..dev.with_workspace_settings(
+            workspace,
+            worktree_mode,
+            generation=workspace_settings_request_generation,
+          ),
+          workspace_settings_request_generation,
+        }),
+      )
     }
     WorkspaceSettingsSaveFailed(workspace~, message~) => {
       // The page's optimistic value may be wrong now: alongside the toast,
@@ -12667,7 +12651,6 @@ test "loaded UI preferences parse their wire names" {
       theme="dark",
       model="deepseek-v4-flash",
       conversation_models="[{\"key\":\"local/desktop-test\",\"model\":\"deepseek-v4-pro\"}]",
-      workspace_default_mode="[\"openseek://local/proj\"]",
     ),
     test_model(),
   )
@@ -12676,12 +12659,6 @@ test "loaded UI preferences parse their wire names" {
   assert_true(restored.default_model is Low)
   // The stored conversation outranks the stored default for its own chat.
   assert_true(restored.active().engine_model is High)
-  // The retired per-workspace store is only held for its one-shot migration.
-  assert_true(
-    restored.legacy_workspace_default_mode.worktrees.contains(
-      @interop.ChannelId::Local.test_resource("/proj").to_string(),
-    ),
-  )
   // Unknown stored values fall back to the defaults.
   let (_, unknown) = update(
     dispatch,
@@ -12691,7 +12668,6 @@ test "loaded UI preferences parse their wire names" {
       theme="broken",
       model="",
       conversation_models="not json",
-      workspace_default_mode="not json",
     ),
     test_model(),
   )
@@ -12700,7 +12676,6 @@ test "loaded UI preferences parse their wire names" {
   assert_true(unknown.default_model is High)
   // A store that will not parse remembers nothing rather than wedging.
   assert_eq(unknown.conversation_models.length(), 0)
-  assert_eq(unknown.legacy_workspace_default_mode.worktrees.length(), 0)
 }
 
 ///|

@@ -178,33 +178,9 @@ fn Model::default_worktree_mode(
   }
 }
 
-///|
-/// Spend one workspace's row of the retired page-local preference: drop it
-/// from the model and from the stored list (removal is how that store
-/// spells Local). A workspace with no row is a no-op.
-fn forget_legacy_default_mode(
-  model : Model,
-  workspace : @common.Uri,
-) -> (@cmd.Cmd, Model) {
-  guard model.legacy_workspace_default_mode.worktrees.contains(
-    workspace.to_string(),
-  ) else {
-    return (@cmd.none, model)
-  }
-  (
-    WorkspaceDefaultMode::save(workspace, false),
-    {
-      ..model,
-      legacy_workspace_default_mode: model.legacy_workspace_default_mode.with_mode(
-        workspace, false,
-      ),
-    },
-  )
-}
-
 // Tests below cover the settings mirror's staleness fences, the page's
-// optimistic write, the one-shot legacy migration, and the "…" menu and
-// settings-page navigation that ride on the mirror.
+// optimistic write, and the "…" menu and settings-page navigation that
+// ride on the mirror.
 
 ///|
 test "a settings reply lands once and an older token cannot roll it back" {
@@ -369,32 +345,10 @@ test "a failed save pops a toast and re-reads under a fresh token" {
 }
 
 ///|
-test "the retired page-local default migrates up exactly once" {
+test "a reconnect clears the settings mirror until fresh reads land" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
-  let legacy = {
-    ..test_model(),
-    legacy_workspace_default_mode: WorkspaceDefaultMode::{ worktrees: [] }.with_mode(
-      workspace, true,
-    ),
-  }
-  // Disk says Local by absence, the legacy row says Worktree: the read
-  // consumes the row and pushes the mode up as a real settings write,
-  // applied optimistically like the page's own select.
-  let (_, migrated) = update_dev(
-    dispatch,
-    WorkspaceSettingsLoaded(
-      workspace~,
-      worktree_mode=false,
-      connection_generation=0,
-      request_generation=1,
-    ),
-    legacy,
-  )
-  assert_true(migrated.default_worktree_mode(Local, Some(workspace)))
-  assert_true(migrated.legacy_workspace_default_mode.worktrees.is_empty())
-  // A workspace whose disk already says Worktree only spends the row.
-  let (_, spent) = update_dev(
+  let (_, loaded) = update_dev(
     dispatch,
     WorkspaceSettingsLoaded(
       workspace~,
@@ -402,35 +356,20 @@ test "the retired page-local default migrates up exactly once" {
       connection_generation=0,
       request_generation=1,
     ),
-    legacy,
+    test_model(),
   )
-  assert_true(spent.default_worktree_mode(Local, Some(workspace)))
-  assert_true(spent.legacy_workspace_default_mode.worktrees.is_empty())
-  // Another client's commit broadcast is just as authoritative: after it,
-  // a later Local read must not re-fire the migration.
-  let (_, broadcast) = update_dev(
+  assert_true(loaded.default_worktree_mode(Local, Some(workspace)))
+  // Settings broadcasts are not replayed across a connection gap: another
+  // client may have flipped the default while this page was away, so a
+  // chat created before the re-read lands must fall back to Local rather
+  // than copy the pre-gap value.
+  let (_, reconnected) = update_dev(
     dispatch,
-    WorkspaceSettingsChanged(workspace~, worktree_mode=true),
-    legacy,
+    BridgeReady(scratch_root=@interop.ChannelId::Local.test_resource("/tmp")),
+    loaded,
   )
-  assert_true(broadcast.legacy_workspace_default_mode.worktrees.is_empty())
-  // A different workspace's row stays for its own workspace's first read.
-  let other = @interop.ChannelId::Local.test_resource("/other")
-  let (_, unrelated) = update_dev(
-    dispatch,
-    WorkspaceSettingsLoaded(
-      workspace=other,
-      worktree_mode=false,
-      connection_generation=0,
-      request_generation=1,
-    ),
-    legacy,
-  )
-  assert_true(
-    unrelated.legacy_workspace_default_mode.worktrees.contains(
-      workspace.to_string(),
-    ),
-  )
+  assert_false(reconnected.default_worktree_mode(Local, Some(workspace)))
+  assert_true(reconnected.dev().workspace_settings.is_empty())
 }
 
 ///|
