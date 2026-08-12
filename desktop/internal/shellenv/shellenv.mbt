@@ -123,7 +123,12 @@ pub fn path_prepend_command(
   if shell_name is ("pwsh" | "pwsh.exe" | "powershell" | "powershell.exe") {
     let quoted = bin_dir.replace_all(old="'", new="''")
     let separator = if windows { ";" } else { ":" }
-    return Some("$env:Path = '\{quoted}\{separator}' + $env:Path\r")
+    // Environment names are case-sensitive outside Windows, where executable
+    // lookup reads PATH rather than the separate Path variable.
+    let path_name = if windows { "Path" } else { "PATH" }
+    return Some(
+      "$env:\{path_name} = '\{quoted}\{separator}' + $env:\{path_name}\r",
+    )
   }
   if windows {
     if shell_name is ("cmd" | "cmd.exe") {

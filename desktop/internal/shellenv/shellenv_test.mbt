@@ -30,7 +30,7 @@ test "path activation follows the target shell's syntax" {
       "/tmp/it's moon/bin",
       windows=false,
     ),
-    Some("$env:Path = '/tmp/it''s moon/bin:' + $env:Path\r"),
+    Some("$env:PATH = '/tmp/it''s moon/bin:' + $env:PATH\r"),
   )
   assert_eq(
     @shellenv.path_prepend_command(
