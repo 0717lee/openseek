@@ -787,16 +787,15 @@ test "the launch mode toggles only before the conversation begins" {
   })
   let (_, on) = update(dispatch, ToggleWorktreeMode, model)
   assert_true(on.active().worktree_mode)
-  assert_true(on.workspace_default_mode.for_workspace(Some(workspace)))
-  // Replaying the same event from the same model is pure: the preference and
-  // conversation choice are identical, while localStorage remains inside the
-  // returned command and is not touched by update itself.
+  // The chip decides only this conversation. The workspace's own default
+  // for future chats is a durable setting edited on its settings page, and
+  // the chip must not silently rewrite it.
+  assert_true(on.dev().workspace_settings.is_empty())
+  // Replaying the same event from the same model is pure.
   let (_, replayed) = update(dispatch, ToggleWorktreeMode, model)
-  @debug.assert_eq(replayed.workspace_default_mode, on.workspace_default_mode)
   assert_true(replayed.active().worktree_mode)
   let (_, off) = update(dispatch, ToggleWorktreeMode, on)
   assert_false(off.active().worktree_mode)
-  assert_false(off.workspace_default_mode.for_workspace(Some(workspace)))
   // A begun conversation keeps its environment; the toggle is inert.
   let begun = test_model().replace_conversation({
     ..test_conversation(),
@@ -808,10 +807,6 @@ test "the launch mode toggles only before the conversation begins" {
   // A scratch conversation has no workspace to fork from.
   let (_, scratch) = update(dispatch, ToggleWorktreeMode, test_model())
   assert_false(scratch.active().worktree_mode)
-  @debug.assert_eq(
-    scratch.workspace_default_mode,
-    test_model().workspace_default_mode,
-  )
 }
 
 ///|
@@ -819,13 +814,10 @@ test "new conversations inherit only their workspace's launch default" {
   let dispatch = test_dispatch()
   let preferred = @interop.ChannelId::Local.test_resource("/preferred")
   let other = @interop.ChannelId::Local.test_resource("/other")
-  let default_mode = test_model().workspace_default_mode.with_mode(
-    preferred, true,
-  )
-  let preferred_model = {
-    ..test_model().with_dev(dev => { ..dev, active_project: Some(preferred) }),
-    workspace_default_mode: default_mode,
-  }
+  let preferred_model = test_model().with_dev(dev => {
+    ..dev.with_workspace_settings(preferred, true, generation=1),
+    active_project: Some(preferred),
+  })
   let (_, inherited) = update(
     dispatch,
     SessionRotated({ channel: Local, session: "preferred-chat" }),
@@ -844,30 +836,36 @@ test "new conversations inherit only their workspace's launch default" {
   )
   assert_eq(other_chat.active().workspace, Project(root=other))
   assert_false(other_chat.active().worktree_mode)
-  // The URI authority is part of the key: the same path on another device
-  // does not inherit this Local host's preference.
+  // The mirror is per device state: the same path on a device this page
+  // does not hold answers the safe Local default.
   let remote_workspace = @interop.ChannelId::Remote("device-a").test_resource(
     "/preferred",
   )
-  assert_false(default_mode.for_workspace(Some(remote_workspace)))
+  assert_false(
+    preferred_model.default_worktree_mode(
+      @interop.ChannelId::Remote("device-a"),
+      Some(remote_workspace),
+    ),
+  )
 }
 
 ///|
-test "workspace launch defaults survive storage-shaped round trips" {
+test "the retired launch-default store still round-trips for migration" {
   let local_workspace = @interop.ChannelId::Local.test_resource("/proj")
   let remote_workspace = @interop.ChannelId::Remote("device-a").test_resource(
     "/proj",
   )
-  let selected = test_model().workspace_default_mode
+  let selected = WorkspaceDefaultMode::{ worktrees: [] }
     .with_mode(local_workspace, true)
     .with_mode(remote_workspace, true)
   let restored = WorkspaceDefaultMode::parse(
     selected.worktrees.to_json().stringify(),
   )
   @debug.assert_eq(restored, selected)
+  // Spending a row is spelled as removal, and leaves the others intact.
   let local_again = restored.with_mode(local_workspace, false)
-  assert_false(local_again.for_workspace(Some(local_workspace)))
-  assert_true(local_again.for_workspace(Some(remote_workspace)))
+  assert_false(local_again.worktrees.contains(local_workspace.to_string()))
+  assert_true(local_again.worktrees.contains(remote_workspace.to_string()))
   // Duplicate and malformed rows from an edited store are harmless.
   let repaired = WorkspaceDefaultMode::parse(
     "[\"openseek://local/proj\",17,\"openseek://local/proj\"]",
@@ -884,14 +882,12 @@ test "a repeated rotation keeps an existing conversation's launch choice" {
     workspace: Project(root=workspace),
     worktree_mode: false,
   }
-  let model = {
-    ..test_model()
+  let model = test_model()
     .replace_conversation(existing)
-    .with_dev(dev => { ..dev, active_project: Some(workspace) }),
-    workspace_default_mode: test_model().workspace_default_mode.with_mode(
-      workspace, true,
-    ),
-  }
+    .with_dev(dev => {
+      ..dev.with_workspace_settings(workspace, true, generation=1),
+      active_project: Some(workspace),
+    })
   let (_, replayed) = update(
     dispatch,
     SessionRotated({ channel: Local, session: "desktop-test" }),
@@ -1010,16 +1006,13 @@ test "a worktree the registry says is bound closes the choice" {
 test "worktree created binds the composing conversation" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
-  let model = {
-    ..test_model().replace_conversation({
+  let model = test_model()
+    .replace_conversation({
       ..test_conversation(),
       workspace: Project(root=workspace),
       worktree_mode: true,
-    }),
-    workspace_default_mode: test_model().workspace_default_mode.with_mode(
-      workspace, true,
-    ),
-  }
+    })
+    .with_dev(dev => dev.with_workspace_settings(workspace, true, generation=1))
   let (_, bound) = update_dev(
     dispatch,
     WorktreeCreated(workspace~, name="wt-1", session="desktop-test"),
@@ -1027,7 +1020,8 @@ test "worktree created binds the composing conversation" {
   )
   assert_true(bound.active().workspace.worktree_name() is Some("wt-1"))
   assert_false(bound.active().worktree_mode)
-  assert_true(bound.workspace_default_mode.for_workspace(Some(workspace)))
+  // Binding one conversation leaves the workspace's own default alone.
+  assert_true(bound.default_worktree_mode(Local, Some(workspace)))
   // A created notice for an unknown session changes nothing.
   let (_, unknown) = update_dev(
     dispatch,
@@ -1528,8 +1522,7 @@ test "a worktree commit broadcast supersedes lists and unbinds removed names" {
 test "a failed worktree setup keeps the retry eligible" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
-  let model = {
-    ..test_model()
+  let model = test_model()
     .replace_conversation({
       ..test_conversation(),
       workspace: Project(root=workspace),
@@ -1537,13 +1530,9 @@ test "a failed worktree setup keeps the retry eligible" {
       task: "go",
     })
     .with_dev(dev => {
-      ..dev,
+      ..dev.with_workspace_settings(workspace, true, generation=1),
       worktrees: [{ project: workspace, rows: [], generation: 1 }],
-    }),
-    workspace_default_mode: test_model().workspace_default_mode.with_mode(
-      workspace, true,
-    ),
-  }
+    })
   let worktrees_generation = model.dev().worktrees_request_generation
   let (_, sent) = update(dispatch, Send, model)
   guard sent.active().input_ledger is [entry] else {
@@ -1572,10 +1561,11 @@ test "a failed worktree setup keeps the retry eligible" {
     worktrees_generation + 1,
   )
   // And the escape hatch stays open: the toggle still switches the chat
-  // back to Local despite the overlay notice.
+  // back to Local despite the overlay notice — without touching the
+  // workspace's own default.
   let (_, switched) = update(dispatch, ToggleWorktreeMode, rejected)
   assert_false(switched.active().worktree_mode)
-  assert_false(switched.workspace_default_mode.for_workspace(Some(workspace)))
+  assert_true(switched.default_worktree_mode(Local, Some(workspace)))
 }
 
 ///|

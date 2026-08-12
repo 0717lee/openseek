@@ -469,6 +469,7 @@ pub(all) enum Notification {
   SubrunProgress(SubrunProgressPayload)
   SessionChanged(SessionChangedPayload)
   WorkspaceChanged(WorkspacesChangedPayload)
+  WorkspaceSettingsChanged(WorkspaceSettingsPayload)
   WorktreeChanged(WorktreeChangedPayload)
   SettingsChanged(SettingsStatusPayload)
   SkillsChanged
@@ -498,6 +499,7 @@ pub(all) enum NotificationKind {
   SubrunProgress
   SessionChanged
   WorkspaceChanged
+  WorkspaceSettingsChanged
   WorktreeChanged
   SettingsChanged
   SkillsChanged
@@ -859,6 +861,20 @@ pub(all) struct WatchWorkspacePayload {
 
 pub(all) struct WorkspacePayload {
   path : String
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct WorkspaceSettingsGetPayload {
+  workspace : String
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct WorkspaceSettingsPayload {
+  workspace : String
+  worktree_mode : Bool
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct WorkspaceSettingsSetPayload {
+  workspace : String
+  worktree_mode : Bool
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct WorkspaceSymbolsPayload {

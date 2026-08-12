@@ -54,15 +54,20 @@ test "conversation row preserves disclosure status and archive slots" {
 
 ///|
 #warnings("-alert_unstable")
-test "workspace actions retain their declared order" {
-  let html = @rabbita.render_to_string(() => {
+test "workspace menu button precedes the actions, and its body only renders open" {
+  let closed = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(
       WorkspaceRow::{
         title: "/workspace",
         label: "workspace",
         active: false,
+        menu: Some({
+          title: "More actions",
+          open: false,
+          toggle: @cmd.none,
+          body: () => @html.div(class="workspace-menu", "items"),
+        }),
         actions: [
-          { title: "Detach", command: @cmd.none, image: @icons.icon_close },
           {
             title: "New conversation",
             command: @cmd.none,
@@ -72,7 +77,28 @@ test "workspace actions retain their declared order" {
       }.render(),
     )
   })
-  let detach = html.find("title=\"Detach\"").unwrap()
-  let create = html.find("title=\"New conversation\"").unwrap()
-  assert_true(detach < create)
+  let more = closed.find("title=\"More actions\"").unwrap()
+  let create = closed.find("title=\"New conversation\"").unwrap()
+  assert_true(more < create)
+  assert_false(closed.contains("workspace-menu\""))
+  assert_false(closed.contains("menu-open"))
+  let open = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(
+      WorkspaceRow::{
+        title: "/workspace",
+        label: "workspace",
+        active: false,
+        menu: Some({
+          title: "More actions",
+          open: true,
+          toggle: @cmd.none,
+          body: () => @html.div(class="workspace-menu", "items"),
+        }),
+        actions: [],
+      }.render(),
+    )
+  })
+  assert_true(open.contains("workspace-row menu-open"))
+  assert_true(open.contains("workspace-menu-button open"))
+  assert_true(open.contains("workspace-menu\""))
 }

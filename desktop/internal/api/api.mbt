@@ -233,6 +233,22 @@ pub fn endpoints(
         error => raise error
       }
     }),
+    @endpoint.Endpoint::remote(@commands.workspace_settings_get, async fn(
+      payload,
+    ) {
+      @engine.workspace_settings(payload.workspace)
+    }),
+    @endpoint.Endpoint::remote(@commands.workspace_settings_set, async fn(
+      payload,
+    ) {
+      // The store commit and its broadcast are one shielded linearization
+      // point inside the engine, the `workspace.add` pattern.
+      @engine.update_workspace_settings(
+        payload.workspace,
+        payload.worktree_mode,
+        settings => state.hub.publish(WorkspaceSettingsChanged(settings)),
+      )
+    }),
     @endpoint.Endpoint::remote(@commands.worktree_list, async fn(payload) {
       @engine.list_worktrees(payload.workspace)
     }),
@@ -291,9 +307,11 @@ test "remote endpoint catalog has one entry per command name" {
     }
     names.push(name)
   }
-  assert_eq(names.length(), 57)
+  assert_eq(names.length(), 59)
   assert_true(names.contains("agent.start"))
   assert_true(names.contains("agent.goal"))
+  assert_true(names.contains("workspace.settings_get"))
+  assert_true(names.contains("workspace.settings_set"))
   assert_true(names.contains("app.info"))
   assert_true(names.contains("git.changes"))
   assert_true(names.contains("git.pull_request"))

@@ -174,6 +174,8 @@ fn device_msg(
       }
       Some(ProjectsChanged(paths))
     }
+    WorkspaceSettingsChanged(payload) =>
+      workspace_settings_changed_msg(channel, payload)
     WorktreeChanged(payload) => worktree_changed_msg(channel, payload)
     SettingsChanged(payload) =>
       Some(

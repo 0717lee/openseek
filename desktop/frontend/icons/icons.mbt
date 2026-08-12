@@ -94,6 +94,23 @@ pub fn icon_extensions() -> @html.Html {
 }
 
 ///|
+/// Hand-drawn (not a codicon): a horizontal ellipsis — three filled dots —
+/// for a row's overflow menu.
+pub fn icon_more() -> @html.Html {
+  @svg.svg(
+    width=16,
+    height=16,
+    view_box="0 0 16 16",
+    attrs=@svg.Attrs::build().fill("currentColor"),
+    [
+      svg_circle("3.5", "8", "1.25"),
+      svg_circle("8", "8", "1.25"),
+      svg_circle("12.5", "8", "1.25"),
+    ],
+  )
+}
+
+///|
 /// Hand-drawn (not a codicon): a git branch — two commits on a trunk with
 /// one forking off — for the workspace worktree affordance.
 pub fn icon_worktree() -> @html.Html {

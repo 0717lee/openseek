@@ -95,8 +95,11 @@ fn parse_conversation_models(text : String) -> Array[StoredConversationModel] {
 }
 
 ///|
-/// Read the workspaces that default to Worktree. Corrupt rows are ignored;
-/// an absent or unusable value restores the safe Local default everywhere.
+/// Read the retired page-local list of workspaces that defaulted to
+/// Worktree. The preference lives in each workspace's own
+/// `.openseek/settings.json` now; this store is read only so each row can
+/// migrate up once (see `WorkspaceSettingsLoaded`). Corrupt rows are
+/// ignored; an absent or unusable value has nothing left to migrate.
 fn WorkspaceDefaultMode::parse(text : String) -> WorkspaceDefaultMode {
   let mode : WorkspaceDefaultMode = { worktrees: [] }
   guard !text.is_blank() else { return mode }
@@ -111,20 +114,6 @@ fn WorkspaceDefaultMode::parse(text : String) -> WorkspaceDefaultMode {
     }
   }
   mode
-}
-
-///|
-/// The default copied into a new conversation in `workspace`. Scratch chats
-/// have no workspace and therefore always remain Local.
-fn WorkspaceDefaultMode::for_workspace(
-  self : WorkspaceDefaultMode,
-  workspace : @common.Uri?,
-) -> Bool {
-  if workspace is Some(workspace) {
-    self.worktrees.contains(workspace.to_string())
-  } else {
-    false
-  }
 }
 
 ///|
