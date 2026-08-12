@@ -613,7 +613,7 @@
 }
 
 /* Reasoning inside the work log — and the live stream before it commits
-   (`reasoning_view`): full-width muted prose, never a labelled
+   (`streaming_reasoning_view`): full-width muted prose, never a labelled
    "Thinking" row of its own. */
 .activity-thinking {
   color: var(--color-text-secondary);
