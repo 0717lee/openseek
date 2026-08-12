@@ -34,6 +34,7 @@ async fn main {
     ["build", "frontend/browser", "--target", "js", ..release_args],
     dir=ws.dir(),
   )
+  @packaging.build_app_stylesheet(ws)
   @packaging.build_viewer_stylesheet(ws)
   @packaging.build_mermaid_assets(ws)
   let esbuild_target = if @platform.linux {
@@ -56,7 +57,7 @@ async fn main {
     ws.repo_at("_build/js/\{mode}/\{BrowserBundleArtifact}"),
     ws.at(BrowserDistDir + "/browser.js"),
   )
-  @packaging.copy_file(ws.at("app.css"), ws.at(BrowserDistDir + "/app.css"))
+  @packaging.copy_file(ws.app_stylesheet(), ws.at(BrowserDistDir + "/app.css"))
   @packaging.copy_file(
     ws.at("viewer.css"),
     ws.at(BrowserDistDir + "/viewer.css"),

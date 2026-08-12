@@ -200,10 +200,13 @@ async fn @packaging.Workspace::stage_package_inputs(
   @packaging.remove_path_if_exists(self.at(PackageInputRoot))
   @packaging.ensure_dir(self.at(PackageAssetDir))
   @packaging.ensure_dir(self.at(PackageBinDir))
+  @packaging.copy_file(
+    self.app_stylesheet(),
+    self.at(PackageAssetDir + "/app.css"),
+  )
   for
     pair in [
       ("index.html", PackageAssetDir + "/index.html"),
-      ("app.css", PackageAssetDir + "/app.css"),
       ("frontend.js", PackageAssetDir + "/frontend.js"),
       ("viewer.css", PackageAssetDir + "/viewer.css"),
       ("codicon.ttf", PackageAssetDir + "/codicon.ttf"),

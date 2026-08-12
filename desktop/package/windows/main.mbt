@@ -151,7 +151,7 @@ async fn copy_bundle_files(
   @packaging.copy_file(engine_binary, ws.at(bundled_engine))
   @pe.set_windows_gui_subsystem(ws.at(bundled_engine))
   @packaging.copy_file(ws.at("index.html"), ws.at(AppAssetDir + "/index.html"))
-  @packaging.copy_file(ws.at("app.css"), ws.at(AppAssetDir + "/app.css"))
+  @packaging.copy_file(ws.app_stylesheet(), ws.at(AppAssetDir + "/app.css"))
   @packaging.copy_file(
     ws.at("frontend.js"),
     ws.at(AppAssetDir + "/frontend.js"),

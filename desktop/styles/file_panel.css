@@ -1,0 +1,851 @@
+
+/* ---------- files panel ---------- */
+/* Topbar icon toggle for the whole right panel, mirroring the left
+   sidebar toggle; `active` highlights it while the panel is open. The
+   run status's `margin-left: auto` right-aligns it, so it needs no auto
+   margin of its own. */
+.panel-toggle {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-3);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+button.panel-toggle:not(:disabled):hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.panel-toggle.active {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+/* The editor part: a tab strip of open files over the viewer, with the
+   file tree as a toggleable pane on the viewer's right. */
+.editor {
+  --editor-resize-handle-width: 6px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-left: 1px solid var(--line);
+  background: var(--surface);
+  /* Own stacking context so the opaque editor always paints above the
+     conversation column, never the other way around. */
+  position: relative;
+  z-index: 1;
+}
+
+/* The editor's top bar, the same height as the topbar so the header
+   divider runs continuously across the window: the open-file tabs on
+   the left, the whole-panel toggle hugging the right edge (matching
+   the topbar's toggle position, so it stays put as the panel
+   opens/closes). Always rendered — the editor's child order is
+   structural (see panel_view). */
+.editor-tabsbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  height: 46px;
+  padding: 0 18px 0 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+/* The tabs scroll horizontally rather than wrapping; the scrollbar is
+   hidden — the chips themselves make the overflow discoverable. */
+.editor-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.editor-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/* One open file, styled like the app's other selectable chips
+   (tree rows, panel toggles): a quiet rounded chip, accent-tinted
+   when active. */
+.editor-tab {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  max-width: 200px;
+  padding: 4px 4px 4px 10px;
+  font-size: 12px;
+  color: var(--ink-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.editor-tab:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.editor-tab.active {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+/* A tab whose file vanished from disk keeps its place, struck through
+   until the file reappears or the tab is closed. */
+.editor-tab.deleted .tab-name {
+  text-decoration: line-through;
+  color: var(--ink-3);
+}
+.tab-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tab-close {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.editor-tab .tab-close:hover {
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+  color: var(--ink);
+}
+.editor-tab.active .tab-close {
+  color: var(--accent-ink);
+}
+
+/* The viewer and the toggleable file-tree panel split the column below
+   the breadcrumb, Emacs-style: the tree docks flat along the bottom
+   and takes real layout height, the viewer keeps the rest. Both stay
+   mounted (see panel_view) so the viewer host is never re-keyed; CSS
+   alone hides the panel. */
+.editor-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* The viewer plus its notice overlay. The overlay covers the viewer
+   while the active tab has no document (deleted / binary / oversized
+   file) — panel chrome, not a synthesized source document. */
+.viewer-stack {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+.viewer-stack > .viewer-host {
+  flex: 1 1 auto;
+}
+.viewer-notice {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--ink-2);
+  background: var(--surface);
+}
+.viewer-notice.hidden {
+  display: none;
+}
+/* The file tree as a flat bottom panel, Emacs-window style: full
+   width, a 1px seam against the viewer, no chrome of its own, shown
+   and hidden instantly. Non-modal — the viewer above stays live.
+   The height is `--tree-height`, set as the user drags the handle on
+   the top seam (see tree_resize.mbt); it defaults to a third and is
+   clamped so the panel floors at 96px while the viewer keeps at
+   least 120px. The clamp also re-fits the panel on window resize
+   without any script. */
+.file-tree-pane {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 clamp(96px, var(--tree-height, 32%), calc(100% - 120px));
+  min-height: 0;
+  overflow: hidden;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+.editor:not(.tree-open) .file-tree-pane {
+  display: none;
+}
+
+/* The right-sidebar layout (a Settings choice): same DOM, the body
+   flexes as a row and the tree becomes a column on the viewer's
+   right. The width is `--tree-width`, set by the same drag handle
+   (now on the pane's left seam), clamped so the tree floors at 180px
+   while the viewer keeps at least 240px. */
+.editor.tree-right .editor-body {
+  flex-direction: row;
+}
+.editor.tree-right .file-tree-pane {
+  flex: 0 0 clamp(180px, var(--tree-width, 260px), calc(100% - 240px));
+  min-width: 0;
+  border-top: none;
+  border-left: 1px solid var(--line);
+}
+
+/* Drag-to-resize handle on the panel's viewer-facing seam — the
+   row-resize twin of .editor-resize-handle in the bottom layout, a
+   col-resize strip on the left seam in the sidebar layout. */
+.tree-resize-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 5px;
+  z-index: 2;
+  cursor: row-resize;
+}
+.editor.tree-right .tree-resize-handle {
+  right: auto;
+  bottom: 0;
+  width: 5px;
+  height: auto;
+  cursor: col-resize;
+}
+.tree-resize-handle:hover,
+html.is-resizing-row .tree-resize-handle,
+html.is-resizing-col .tree-resize-handle {
+  background: var(--accent-soft);
+}
+html.is-resizing-row {
+  cursor: row-resize;
+}
+html.is-resizing-col {
+  cursor: col-resize;
+}
+html.is-resizing-row *,
+html.is-resizing-col * {
+  user-select: none !important;
+}
+.file-panel-error.empty {
+  display: none;
+}
+
+/* Drag-to-resize handle on the editor's left edge. A thin strip floated
+   above the seam (z-index over the viewer) with a col-resize cursor; it
+   tints on hover and while dragging. Hidden when the panel is closed (the
+   editor column is then zero-width). */
+.editor-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--editor-resize-handle-width);
+  z-index: 3;
+  cursor: col-resize;
+}
+.editor-resize-handle:hover,
+html.is-resizing .editor-resize-handle {
+  background: var(--accent-soft);
+}
+.content:not(.panel-open) .editor-resize-handle {
+  display: none;
+}
+/* While dragging, keep the resize cursor everywhere and stop the drag from
+   selecting text under the pointer. */
+html.is-resizing {
+  cursor: col-resize;
+}
+html.is-resizing * {
+  user-select: none !important;
+}
+
+/* ---------- dock: browser tabs, launcher, file picker ---------- */
+/* The active tab's kind is a class on .editor (mode-file / mode-browser /
+   mode-picker / mode-launcher); every body part below the strip is always
+   rendered and CSS shows exactly one, so no imperative host is re-keyed. */
+.editor.mode-browser .viewer-breadcrumb,
+.editor.mode-browser .editor-body,
+.editor.mode-launcher .viewer-breadcrumb,
+.editor.mode-launcher .editor-body {
+  display: none;
+}
+/* The picker reuses the file chrome (tree + viewer area); the overlay
+   covers whatever document the viewer last showed. */
+.editor.mode-picker .viewer-stack::after {
+  content: "Select a file to open";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.editor.mode-picker.mode-review .viewer-stack::after {
+  content: "Select a changed file to review";
+}
+/* The strip's new-tab button and its launcher popup. The tabsbar anchors
+   the popup; a click away closes it (see `dismiss_subscription`). */
+.editor-tabsbar {
+  position: relative;
+}
+.tab-add {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.tab-add:hover {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.tab-add.hidden {
+  display: none;
+}
+.dock-menu {
+  position: absolute;
+  top: calc(100% - 6px);
+  left: 12px;
+  min-width: 260px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+  z-index: 31;
+}
+/* The empty strip's centered launcher pane, same rows as the popup. */
+.dock-launcher {
+  display: none;
+}
+.editor.mode-launcher .dock-launcher {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+}
+.dock-launcher-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 280px;
+}
+.dock-launcher-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 9px 11px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.dock-launcher-row:hover {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.dock-launcher-row .icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+}
+.dock-launcher-name {
+  font-weight: 550;
+}
+.dock-launcher-hint {
+  margin-left: auto;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+/* The browser chrome: toolbar + failure line + the pane the native web
+   contents view overlays. The pane element renders nothing itself — the
+   host places the view over its measured rectangle. */
+.browser-chrome {
+  display: none;
+}
+.editor.mode-browser .browser-chrome {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+.browser-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.browser-nav-button {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.browser-nav-button:hover {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.browser-nav-button.loading .icon svg {
+  animation: browser-reload-spin 1s linear infinite;
+}
+@keyframes browser-reload-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.icon.rotate-left svg {
+  transform: rotate(-90deg);
+}
+.icon.rotate-right svg {
+  transform: rotate(90deg);
+}
+.browser-address {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 13px;
+}
+.browser-address:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.browser-failure {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--del);
+  font-size: 12px;
+}
+.browser-failure.hidden {
+  display: none;
+}
+.browser-pane {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* Native views always paint above HTML. Keep their measured rectangle to
+     the right of the editor's resize handle so the handle remains clickable. */
+  margin-left: var(--editor-resize-handle-width);
+  background: var(--surface-2);
+}
+.file-panel-error {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--danger, #c0392b);
+  background: var(--surface-2);
+}
+
+.explorer-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 7px 8px 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.explorer-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 7px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--ink-2);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.explorer-tab:hover {
+  color: var(--ink);
+  background: var(--surface-2);
+}
+
+.explorer-tab.active {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+}
+
+.explorer-count {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  color: var(--ink-2);
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.explorer-count.hidden {
+  display: none;
+}
+
+.file-tree {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0 8px;
+}
+
+.file-panel-empty {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+  padding-right: 10px;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background-color 1.2s ease;
+}
+
+.tree-row:hover {
+  background: var(--surface-2);
+}
+
+.tree-row.selected {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+/* A breadcrumb's `RevealDirectory` target, flashed until
+   `HighlightCleared` removes the class; the transition above eases it
+   back out. */
+.tree-row.highlighted {
+  background: var(--accent-soft);
+}
+
+.change-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 4px 10px 4px 12px;
+  border: 0;
+  border-radius: 0;
+  color: var(--ink);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.change-row:hover {
+  background: var(--surface-2);
+}
+
+.change-row.disabled {
+  cursor: default;
+}
+
+.change-row.disabled:hover {
+  background: transparent;
+}
+
+.change-row.selected {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+}
+
+.change-row.reviewed .change-path {
+  color: var(--ink-2);
+}
+
+.change-row.reviewed .change-action {
+  border-color: color-mix(in srgb, var(--success, #268744) 35%, var(--line));
+  color: var(--success, #268744);
+  background: color-mix(in srgb, var(--success, #268744) 8%, transparent);
+}
+
+.review-progress-summary {
+  padding: 4px 12px 6px;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+.change-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.change-status {
+  flex: 0 0 auto;
+  width: 16px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.change-status.added {
+  color: var(--success, #268744);
+}
+
+.change-status.deleted,
+.change-status.unmerged {
+  color: var(--danger, #c0392b);
+}
+
+.change-status.renamed {
+  color: var(--accent-ink);
+}
+
+.change-status.modified {
+  color: var(--warning, #a36800);
+}
+
+.change-action {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+  border-radius: 999px;
+  color: var(--accent-ink);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.change-row:hover .change-action:not(.unavailable),
+.change-row:focus-visible .change-action:not(.unavailable) {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.change-action.unavailable {
+  border-color: var(--line);
+  color: var(--ink-3);
+  background: transparent;
+}
+
+.tree-chevron {
+  flex: 0 0 auto;
+  width: 12px;
+  color: var(--ink-2);
+  font-size: 10px;
+}
+
+.tree-dir .tree-name {
+  font-weight: 600;
+}
+
+.tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The slimmer second row under the tab bar: the active file's path,
+   with the tree-pane toggle at the right edge — the same padding as
+   the tab bar above, so it sits directly under the panel toggle.
+   Hidden while no file is open (the tree then shows unconditionally);
+   it stays in the DOM so the editor's child order never re-keys the
+   viewer host. */
+.viewer-breadcrumb.hidden {
+  display: none;
+}
+.viewer-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  height: 34px;
+  padding: 0 18px 0 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* The path crumbs grow and ellipsize. */
+.crumb-path {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Every crumb but the current one is a `BrowseDir` link. */
+.crumb {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.crumb:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+.crumb-file {
+  color: var(--ink);
+  font-weight: 500;
+  cursor: default;
+}
+.crumb-file:hover {
+  text-decoration: none;
+}
+.crumb-sep {
+  flex: 0 0 auto;
+  color: var(--ink-3);
+}
+
+/* The changed-file row is the review action; this badge names the active
+   comparison source and the typed cases where a textual HEAD diff is not
+   available. It stays compact so the path retains the breadcrumb's width. */
+.review-badge {
+  flex: 0 0 auto;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+  border-radius: 999px;
+  color: var(--accent-ink);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font-size: 10px;
+  line-height: 16px;
+}
+.review-badge.hidden {
+  display: none;
+}
+.review-navigation {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+.review-navigation.hidden {
+  display: none;
+}
+.review-nav-button {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--ink-2);
+  background: transparent;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.review-nav-button:hover:not(:disabled) {
+  border-color: var(--line);
+  color: var(--ink);
+  background: var(--surface-2);
+}
+.review-nav-button:disabled {
+  color: var(--ink-3);
+  cursor: default;
+  opacity: 0.45;
+}
+.review-nav-position {
+  min-width: 38px;
+  color: var(--ink-3);
+  font-size: 10px;
+  text-align: center;
+}
+.review-badge-action {
+  appearance: none;
+  font: inherit;
+  cursor: pointer;
+}
+.review-badge-action:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.review-progress {
+  appearance: none;
+  font: inherit;
+  cursor: pointer;
+}
+.review-progress.reviewed {
+  border-color: color-mix(in srgb, var(--success, #268744) 45%, var(--line));
+  color: var(--success, #268744);
+  background: color-mix(in srgb, var(--success, #268744) 10%, transparent);
+}
+
+.viewer-host {
+  /* The embedded viewer positions its layers absolutely; without a
+     positioning context here they escape and paint over the chat. It
+     fills the viewer pane below the breadcrumb. */
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}

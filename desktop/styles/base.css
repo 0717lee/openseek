@@ -1,0 +1,183 @@
+
+html,
+body,
+#app {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  /* The app shell never scrolls as a whole; scrolling is delegated to
+     the inner panes. Without this, any sub-pixel overflow bubbles to the
+     body and shows redundant window-level scrollbars. */
+  overflow: hidden;
+}
+
+/* Mobile browsers grow and shrink the viewport as their toolbars
+   collapse; the dynamic unit tracks the real visible height so the
+   composer stays glued to the bottom instead of floating mid-page. */
+@supports (height: 100dvh) {
+  html,
+  body,
+  #app {
+    height: 100dvh;
+  }
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 13.5px;
+  line-height: 1.55;
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+/* quiet scrollbars */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--ink) 14%, transparent);
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--ink) 26%, transparent);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Inline SVG icons (vscode-codicons); they take the surrounding
+   control's color via currentColor and size per context below. */
+.icon {
+  display: inline-flex;
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+.icon svg {
+  width: 100%;
+  height: 100%;
+}
+.sidebar-icon .icon,
+.composer-notice-icon .icon {
+  width: 14px;
+  height: 14px;
+}
+.topbar-toggle .icon,
+.panel-toggle .icon,
+.icon-button .icon,
+.jump-latest .icon {
+  width: 15px;
+  height: 15px;
+}
+.launcher-glyph .icon,
+.row-archive .icon {
+  width: 13px;
+  height: 13px;
+}
+.mention-remove .icon {
+  width: 12px;
+  height: 12px;
+}
+.launcher-caret .icon {
+  width: 9px;
+  height: 9px;
+}
+
+@keyframes pulseDot {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+@keyframes riseIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.app {
+  display: grid;
+  grid-template-columns: minmax(220px, 264px) minmax(0, 1fr);
+  /* Track #app's content box (which already accounts for any scrollbar)
+     rather than 100vh, so the two height bases can't disagree. */
+  height: 100%;
+  min-height: 0;
+}
+
+/* Collapsed: the sidebar column folds to zero and the conversation
+   takes the full width. The aside stays in the DOM (merely unmounted
+   from layout) so reopening keeps its scroll position. */
+.app.sidebar-collapsed {
+  grid-template-columns: minmax(0, 1fr);
+}
+.app.sidebar-collapsed > aside {
+  display: none;
+}
+
+/* The conversation (left) and the editor (right) live side by side as two
+   independent parts. The editor track is zero-width until the panel
+   opens, so the viewer host element stays in the DOM but takes no
+   space. */
+.content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 0;
+  grid-template-rows: minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Opening the terminal carves a resizable second row out of the conversation
+   column. The editor keeps the full height in its own column. */
+.content.terminal-open {
+  grid-template-rows:
+    minmax(0, 1fr)
+    clamp(180px, var(--terminal-height, 38%), calc(100% - 180px));
+}
+.content > main {
+  grid-row: 1;
+  grid-column: 1;
+}
+.content > .editor {
+  grid-row: 1 / -1;
+  grid-column: 2;
+}
+
+/* Open: the conversation and the editor share the content area. The
+   editor's width is `--editor-width`, set as the user drags the handle on
+   its left edge (see editor_resize.mbt); it defaults to half and is
+   clamped against the content area (`100%`, sidebar excluded) so the
+   editor floors at 360px while the conversation keeps at least 240px. The
+   clamp also re-fits the panel on window resize without any script. */
+.content.panel-open {
+  grid-template-columns:
+    minmax(0, 1fr)
+    clamp(360px, var(--editor-width, 50%), calc(100% - 240px));
+}
