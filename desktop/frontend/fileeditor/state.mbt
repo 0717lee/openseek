@@ -277,6 +277,10 @@ pub(all) struct State {
   // Advancing this value on either boundary rejects reads, listings, and
   // stats that outlived the checkout they addressed.
   request_epoch : Int
+  // Page-lifetime navigation token. Transcript file-link clicks capture it;
+  // every competing editor navigation advances it, so a slower older click
+  // cannot move the viewer after a newer user action has taken precedence.
+  file_link_generation : Int
   // Last settled Git comparison identity (task/branch base, or HEAD fallback).
   // The legacy field name stays internal; `changes_head_known` distinguishes
   // a first/unborn snapshot from no snapshot yet so a comparison transition
@@ -355,6 +359,7 @@ pub fn State::empty() -> State {
     reviewed_changes: [],
     changes_generation: 0,
     request_epoch: 0,
+    file_link_generation: 0,
     changes_head: None,
     changes_head_known: false,
     review_generation: 0,
@@ -546,29 +551,39 @@ pub(all) enum Msg {
   )
   // `file` is the decoded reply (content + address, or a withheld-file
   // case). `range`, when present, is a jumped-to symbol's one-based range,
-  // revealed in the viewer once the file loads and — unless empty —
-  // selected so the code it names reads highlighted. `annotation`, when
-  // present (an annotation chip's jump), is the user's comment text,
+  // revealed in the viewer once the file loads. A non-empty range is selected
+  // so the code it names reads highlighted; an empty range keeps its exact
+  // caret position and adds a separate whole-line destination highlight.
+  // `annotation`, when present (an annotation chip's jump), is the user's
+  // comment text,
   // re-shown as an editor bubble over `range`. A plain tree click leaves
-  // both `None`. `review_generation` is present only for the working-tree
-  // half of a changed-row open and fences repeated review clicks.
+  // both `None`. `file_link_generation` identifies the explicit editor
+  // navigation that started this read. Positioned transcript links supply the
+  // captured click generation; direct file, symbol, and mention opens use the
+  // current generation. It fences the viewer navigation while still allowing
+  // a late reply to settle a loading tab when no newer read owns that path.
+  // `review_generation` is present only for the working-tree half of a
+  // changed-row open.
   FileLoaded(
     owner~ : @interop.ConversationKey,
     epoch~ : Int,
     path~ : @pathx.Relative,
     name~ : String,
     file~ : FileContent,
+    file_link_generation~ : Int?,
     review_generation~ : Int?,
     range~ : @common.Range?,
     annotation~ : String?
   )
-  // A read failure carries the same path/generation identity as success so a
-  // stale review read cannot surface an error over a newer review or ordinary
-  // open. Ordinary reads leave `review_generation=None`.
+  // A read failure carries the same path/generation identities as success so
+  // a stale navigation read can settle its loading tab without surfacing an
+  // error, and a stale review read cannot replace its successor. Background
+  // reads leave both generation fields `None`.
   FileFailed(
     owner~ : @interop.ConversationKey,
     epoch~ : Int,
     path~ : @pathx.Relative,
+    file_link_generation~ : Int?,
     review_generation~ : Int?,
     message~ : String
   )

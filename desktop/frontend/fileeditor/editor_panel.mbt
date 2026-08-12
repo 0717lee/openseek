@@ -35,6 +35,11 @@ priv struct ViewerHost {
   // Kept separate from the source Viewer so a Diff/Source toggle preserves
   // the source model, selection, folding, and scroll state.
   mut unified_diff : @viewer.UnifiedDiffView?
+  // A positioned transcript link keeps its caret collapsed at the requested
+  // column. This separate whole-line decoration makes the destination visible
+  // without turning the line itself into a selection (whose active end would
+  // move the caret away from that column).
+  mut point_range_highlight : @viewer.EditorDecorationsCollection?
   // Desktop owns the concrete marker and feedback stores passed through the
   // Viewer's public handle API. They receive language-server diagnostics and
   // turn inline reviews into composer chips without requiring editor internals.
@@ -68,6 +73,7 @@ priv struct ViewerHost {
 let viewer_state : ViewerHost = {
   viewer: None,
   unified_diff: None,
+  point_range_highlight: None,
   services: None,
   absolute: None,
   relative: None,
@@ -141,6 +147,9 @@ fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
           ),
         )
         viewer_state.viewer = Some(viewer)
+        viewer_state.point_range_highlight = Some(
+          viewer.create_decorations_collection(),
+        )
         services.feedback.on_did_add_feedback(event => {
           // Only user comments on a file this app put on screen (a URI it
           // minted) become chips; anything else is not ours to carry.
@@ -247,10 +256,11 @@ pub fn request_viewer_remeasure() -> @cmd.Cmd {
 ///|
 /// Show a file's contents in the viewer as a fresh read-only document. A
 /// symbol jump's `range`, when present, is revealed centered once the
-/// document is set and — unless empty (a symbol placed without a range) —
-/// selected, so the named code reads highlighted. `annotation`, when present
-/// (an annotation chip's jump), is re-shown as a comment bubble over `range`
-/// — the bubble the chip replaced when the comment was filed.
+/// document is set. A non-empty range is selected so the named code reads
+/// highlighted; an empty point range keeps the caret at its requested column
+/// and draws a separate whole-line destination highlight. `annotation`, when
+/// present (an annotation chip's jump), is re-shown as a comment bubble over
+/// `range` — the bubble the chip replaced when the comment was filed.
 ///
 /// The outgoing document's scroll position is always saved under its
 /// relative path; `restore_scroll` (a tab switch or an in-place reload)
@@ -310,6 +320,12 @@ fn show_file_in_viewer(
     let restore_view_state = should_restore_view_state(
       restore_scroll, previous_uri, uri,
     )
+    // Decorations live on the current text model. Remove the previous jump's
+    // highlight before a possible model swap, then add the incoming one below
+    // only when this show carries a positioned point.
+    if viewer_state.point_range_highlight is Some(highlight) {
+      highlight.clear()
+    }
     if !same_document {
       // Park the outgoing document's scroll position for its tab's return.
       if viewer_state.relative is Some(prev) &&
@@ -401,7 +417,31 @@ fn show_file_in_viewer(
       (None, _) => ()
     }
     if range is Some(range) {
-      if !range.is_empty() {
+      if range.is_empty() {
+        // A transcript `path:line[:column]` identifies a position, not a text
+        // span. Keep the selection collapsed so its active position remains
+        // the requested column; the independent decoration supplies the
+        // visible whole-line destination without changing the caret.
+        viewer.set_position(range.get_start_position())
+        if viewer_state.point_range_highlight is Some(highlight) {
+          highlight.set([
+            {
+              range: @common.Range(
+                range.start_line_number,
+                1,
+                range.start_line_number,
+                1,
+              ),
+              options: @model.ModelDecorationOptions(
+                "rangeHighlight",
+                is_whole_line=true,
+                description="point-range-line-highlight",
+              ),
+            },
+          ])
+          |> ignore
+        }
+      } else {
         // `set_selection` never scrolls on its own (the Monaco contract), so
         // pair it with the reveal below.
         viewer.set_selection(
@@ -465,6 +505,9 @@ fn clear_viewer() -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
     viewer_state.view_states.clear()
     if viewer_state.viewer is Some(viewer) {
+      if viewer_state.point_range_highlight is Some(highlight) {
+        highlight.clear()
+      }
       if viewer_state.services is Some(services) &&
         viewer.get_model() is Some(model) {
         services.quick_diff.set_original_content(model.uri, None)
@@ -487,6 +530,9 @@ fn clear_viewer() -> @cmd.Cmd {
 fn clear_document() -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
     if viewer_state.viewer is Some(viewer) {
+      if viewer_state.point_range_highlight is Some(highlight) {
+        highlight.clear()
+      }
       if viewer_state.services is Some(services) &&
         viewer.get_model() is Some(model) {
         services.quick_diff.set_original_content(model.uri, None)

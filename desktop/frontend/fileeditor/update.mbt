@@ -294,13 +294,19 @@ fn show_activated_tab(
 /// breadcrumb row, which needs a viewer remeasure). A plain re-open of an
 /// already-loaded document shows what the table has, exactly like a
 /// tab-strip click; everything else reads the file — so a jump's
-/// `range`/`annotation` ride the reply to be revealed on arrival.
+/// `range`/`annotation` ride the reply to be revealed on arrival. A positioned
+/// Every explicit navigation is echoed through `file_link_generation` so only
+/// the newest one can apply its position to the Viewer. A transcript link
+/// supplies the generation captured before its host lookup; direct file,
+/// symbol, and mention opens use the current generation. An older reply may
+/// still finish a loading document, but without its position.
 pub fn open_document(
   dispatch : @cmd.Emit[Msg],
   state : State,
   ctx : Ctx,
   path : @pathx.Relative,
   name~ : String,
+  file_link_generation? : Int,
   range~ : @common.Range?,
   annotation? : String,
   had_active~ : Bool,
@@ -367,12 +373,20 @@ pub fn open_document(
       docs[path] = { name, state: TabLoading, review: None, stale: false }
     _ => ()
   }
+  // Direct file/symbol/mention opens arrive without a captured transcript
+  // generation, but root already advanced the same navigation token before
+  // calling us. Tag their reads too: a newer ordinary failure must remain
+  // authoritative over an older positioned success for this path.
+  let read_generation = Some(
+    file_link_generation.unwrap_or(state.file_link_generation),
+  )
   let read = read_file(
     dispatch,
     ctx.owner,
     ctx.request_epoch,
     path,
     name,
+    file_link_generation?=read_generation,
     range~,
     annotation?,
     root=ctx.root,
@@ -811,6 +825,7 @@ pub fn open_file(
   state : State,
   ctx : Ctx,
   path : @pathx.Relative,
+  file_link_generation? : Int,
   range~ : @common.Range?,
   annotation? : String,
   had_active~ : Bool,
@@ -821,6 +836,7 @@ pub fn open_file(
     ctx,
     path,
     name=basename(path),
+    file_link_generation?,
     range~,
     annotation?,
     had_active~,
@@ -1513,6 +1529,10 @@ pub fn sync(
   let checkout_ready = !(ctx.checkout is None ||
     ctx.checkout is Some(@interop.MissingWorktree(_)))
   let owner_changed = state.owner != Some(ctx.owner)
+  // The first owner claim has no previous conversation request to fence and
+  // may happen after that owner's initial transcript click. Every later owner
+  // replacement is a real navigation boundary.
+  let owner_replaced = state.owner is Some(_) && owner_changed
   let same_owner = state.owner == Some(ctx.owner)
   let workspace_changed = same_owner &&
     state.placement_known &&
@@ -1649,6 +1669,14 @@ pub fn sync(
           state.changes_generation
         },
         request_epoch,
+        // A late positioned-link reply carries only its owner and this token.
+        // Spend a generation on owner replacement and same-owner placement
+        // changes so an A→B→A cycle cannot make the old pair current again.
+        file_link_generation: if owner_replaced || placement_identity_changed {
+          state.file_link_generation + 1
+        } else {
+          state.file_link_generation
+        },
         review_generation: state.review_generation,
         // Like filesystem request epochs, watcher identities must outlive the
         // per-conversation cache or an A→B→A cycle could reuse one.
@@ -2468,15 +2496,24 @@ pub fn update(
       path~,
       name~,
       file~,
+      file_link_generation~,
       review_generation~,
       range~,
       annotation~
-    ) =>
-      // A stale read — the conversation switched, or the tab was closed
-      // while the read was in flight — must not resurrect state.
+    ) => {
+      let stale_file_link = match file_link_generation {
+        Some(generation) => state.file_link_generation != generation
+        None => false
+      }
+      // An owner/placement mismatch means the addressed document no longer
+      // belongs to this table. A stale positioned reply may finish only the
+      // loading document; a newer settled snapshot always wins.
       if state.owner != Some(owner) || state.request_epoch != epoch {
         (@cmd.none, state)
       } else if state.docs.get(path) is Some(doc) {
+        if stale_file_link && !(doc.state is TabLoading) {
+          return (@cmd.none, state)
+        }
         // A Git non-file classification invalidates every read started while
         // this path was still an ordinary file. Only an explicit reopen moves
         // the document back to `TabLoading`, where a new reply may settle.
@@ -2514,11 +2551,14 @@ pub fn update(
         }
         docs[path] = next_doc
         // Only the tab on screen touches the viewer; a background load just
-        // settles into its tab for the next activation. No content
-        // comparison happens here: whether anything actually needs redrawing
-        // is the show command's call, made against what the viewer really
-        // displays (see `show_file_in_viewer`) — this side would only be
-        // guessing from the tab cache.
+        // settles into its tab for the next activation. A stale positioned
+        // read may still own this path when the newer click went to the system
+        // opener and left the same loading tab active. Show its content, but
+        // discard the stale range and annotation so it cannot perform the old
+        // navigation. No content comparison happens here: that remains the
+        // show command's decision against what the Viewer actually displays.
+        let reveal_range = if stale_file_link { None } else { range }
+        let reveal_annotation = if stale_file_link { None } else { annotation }
         let cmd = if ctx.active_file == Some(path) {
           match file {
             // A real MoonBit file also gets a diagnostics request: the host
@@ -2535,8 +2575,8 @@ pub fn update(
                 content,
                 absolute~,
                 relative=path,
-                range~,
-                annotation?,
+                range=reveal_range,
+                annotation?=reveal_annotation,
                 // A reload of a document already on screen keeps the reading
                 // position; only a genuinely fresh document opens at the top.
                 restore_scroll=previous is TabLoaded(..),
@@ -2570,6 +2610,7 @@ pub fn update(
       } else {
         (@cmd.none, state)
       }
+    }
     RunSettled(owner~) =>
       if state.owner == Some(owner) {
         // A completed agent run can write files outside the pruned watcher.
@@ -2896,9 +2937,45 @@ pub fn update(
       } else {
         (@cmd.none, state)
       }
-    FileFailed(owner~, epoch~, path~, review_generation~, message~) =>
+    FileFailed(
+      owner~,
+      epoch~,
+      path~,
+      file_link_generation~,
+      review_generation~,
+      message~
+    ) => {
+      let stale_file_link = match file_link_generation {
+        Some(generation) => state.file_link_generation != generation
+        None => false
+      }
       if state.owner != Some(owner) || state.request_epoch != epoch {
         (@cmd.none, state)
+      } else if file_link_generation is Some(_) {
+        // A stale positioned failure may finish only the loading document. A
+        // current failure is authoritative even if an older success filled
+        // the cache first, so it replaces that snapshot with a retryable tab.
+        match state.docs.get(path) {
+          Some({ state: TabUnavailable(_), review: None, .. }) =>
+            (@cmd.none, state)
+          Some({ review: None, .. } as doc) => {
+            if stale_file_link && !(doc.state is TabLoading) {
+              return (@cmd.none, state)
+            }
+            let docs = state.docs.copy()
+            let failed = { ..doc, state: TabReadFailed(message), stale: false }
+            docs[path] = failed
+            let cmd = if !stale_file_link && ctx.active_file == Some(path) {
+              show_tab(dispatch, ctx, path, failed)
+            } else {
+              @cmd.none
+            }
+            (cmd, { ..state, docs, error: None })
+          }
+          Some({ review: Some(_), .. }) | None if stale_file_link =>
+            (@cmd.none, state)
+          _ => (@cmd.none, { ..state, error: Some(message) })
+        }
       } else if review_generation is Some(generation) {
         // Review reads are generation-fenced just like successful replies.
         // Preserve a current working-side failure without guessing that every
@@ -2929,6 +3006,7 @@ pub fn update(
       } else {
         (@cmd.none, { ..state, error: Some(message) })
       }
+    }
     FileWatchFailed(channel~, root~, generation~, message~) =>
       if state.owner is Some(owner) &&
         owner.channel == channel &&
@@ -3380,6 +3458,7 @@ test "changed-file review fences paired replies and ordinary opens leave review"
       path~,
       name="a.mbt",
       file=Content(content="pre-review working", absolute~, sig="0:18"),
+      file_link_generation=None,
       review_generation=None,
       range=None,
       annotation=None,
@@ -3405,6 +3484,7 @@ test "changed-file review fences paired replies and ordinary opens leave review"
       path~,
       name="a.mbt",
       file=Content(content="stale working", absolute~, sig="1:13"),
+      file_link_generation=None,
       review_generation=Some(1),
       range=None,
       annotation=None,
@@ -3506,6 +3586,7 @@ test "changed-file review fences paired replies and ordinary opens leave review"
       path~,
       name="a.mbt",
       file=Content(content="late review", absolute~, sig="3:11"),
+      file_link_generation=None,
       review_generation=Some(2),
       range=None,
       annotation=None,
@@ -3663,6 +3744,7 @@ test "review failures settle precisely and missing rename sources stay unavailab
       owner=ctx.owner,
       epoch=0,
       path~,
+      file_link_generation=None,
       review_generation=Some(1),
       message="file disappeared",
     ),
@@ -3799,6 +3881,7 @@ test "deleted changes preview HEAD and working-file loads retain early baselines
       path=live_path,
       name="live.mbt",
       file=Content(content="new", absolute~, sig="2:3"),
+      file_link_generation=None,
       review_generation=Some(1),
       range=None,
       annotation=None,
@@ -3947,6 +4030,7 @@ test "FileLoaded settles content into its document, active or not" {
       path=Relative("a.mbt"),
       name="a.mbt",
       file=Content(content="fn main {}", absolute~, sig="2:0"),
+      file_link_generation=None,
       review_generation=None,
       range=None,
       annotation=None,
@@ -3971,6 +4055,7 @@ test "FileLoaded settles content into its document, active or not" {
       path=Relative("gone.mbt"),
       name="gone.mbt",
       file=Content(content="", absolute=gone_absolute, sig="2:0"),
+      file_link_generation=None,
       review_generation=None,
       range=None,
       annotation=None,
@@ -3990,6 +4075,7 @@ test "FileLoaded settles content into its document, active or not" {
       path=Relative("a.mbt"),
       name="a.mbt",
       file=Binary,
+      file_link_generation=None,
       review_generation=None,
       range=None,
       annotation=None,
@@ -4024,6 +4110,7 @@ test "FileLoaded settles content into its document, active or not" {
       path=Relative("a.mbt"),
       name="a.mbt",
       file=Content(content="stale", absolute~, sig="9:0"),
+      file_link_generation=None,
       review_generation=None,
       range=None,
       annotation=None,
@@ -4109,6 +4196,7 @@ test "a closed panel still re-roots when the conversation switches" {
       directories: [],
       recursive: false,
     }),
+    file_link_generation: 4,
   }
   // The new conversation has nothing open and the panel is closed.
   let other : Ctx = {
@@ -4121,6 +4209,7 @@ test "a closed panel still re-roots when the conversation switches" {
   }
   let (parked, _) = sync(emit, state, other)
   assert_true(parked.owner is Some({ channel: Remote("other"), .. }))
+  assert_eq(parked.file_link_generation, 5)
   assert_true(parked.docs.is_empty())
   // Nothing left to track in the new conversation, so the watcher parks.
   assert_true(parked.watching is None)
@@ -4133,6 +4222,7 @@ test "a closed panel still re-roots when the conversation switches" {
     active_file: Some(Relative("a.mbt")),
   }
   let (restored, _) = sync(emit, parked, back)
+  assert_eq(restored.file_link_generation, 6)
   assert_true(
     restored.docs.get(Relative("a.mbt")) is Some({ state: TabLoading, .. }),
   )
@@ -4183,6 +4273,7 @@ test "a resolved placement change reroots documents and fences old replies" {
     changes_head: Some("root-head"),
     changes_head_known: true,
     changes_generation: 2,
+    file_link_generation: 6,
     review_generation: 4,
     docs,
     children: Map([
@@ -4213,6 +4304,7 @@ test "a resolved placement change reroots documents and fences old replies" {
   let (moved, _) = sync(emit, state, worktree_ctx)
   assert_eq(moved.request_epoch, state.request_epoch + 1)
   assert_eq(moved.changes_generation, state.changes_generation + 1)
+  assert_eq(moved.file_link_generation, state.file_link_generation + 1)
   assert_eq(moved.placement_workspace, Some(old_workspace))
   assert_true(moved.placement_checkout is Some(@interop.Worktree(name="wt-1")))
   assert_true(
@@ -4247,6 +4339,7 @@ test "a resolved placement change reroots documents and fences old replies" {
       path~,
       name="reviewed.mbt",
       file=Content(content="old root reply", absolute=old_absolute, sig="1:1"),
+      file_link_generation=None,
       review_generation=Some(4),
       range=None,
       annotation=None,
@@ -4282,6 +4375,7 @@ test "a resolved placement change reroots documents and fences old replies" {
     checkout: Some(@interop.WorkspaceRoot),
   })
   assert_eq(reassigned.request_epoch, state.request_epoch + 1)
+  assert_eq(reassigned.file_link_generation, state.file_link_generation + 1)
   assert_eq(reassigned.placement_workspace, Some(new_workspace))
   assert_true(reassigned.placement_checkout is Some(@interop.WorkspaceRoot))
   assert_true(
@@ -5267,6 +5361,7 @@ test "a review that becomes a symlink clears its cached regular-file source" {
     path~,
     name="replaced.mbt",
     file=Content(content="stale regular source", absolute~, sig="4:0"),
+    file_link_generation=None,
     review_generation=None,
     range=None,
     annotation=None,
@@ -5279,6 +5374,7 @@ test "a review that becomes a symlink clears its cached regular-file source" {
       owner=ctx.owner,
       epoch=0,
       path~,
+      file_link_generation=None,
       review_generation=None,
       message="late symlink read",
     ),
@@ -5370,6 +5466,7 @@ test "a disappearing review row hands an active reload to an ordinary read" {
       path~,
       name="committed.mbt",
       file=Content(content="stale review read", absolute~, sig="2:7"),
+      file_link_generation=None,
       review_generation=Some(3),
       range=None,
       annotation=None,
@@ -5386,6 +5483,7 @@ test "a disappearing review row hands an active reload to an ordinary read" {
       path~,
       name="committed.mbt",
       file=Content(content="current working", absolute~, sig="2:7"),
+      file_link_generation=None,
       review_generation=None,
       range=None,
       annotation=None,
@@ -5453,6 +5551,7 @@ test "a newer review reload fences an older working-tree reply" {
       path~,
       name="racing.mbt",
       file=Content(content="newest working", absolute~, sig="2:0"),
+      file_link_generation=None,
       review_generation=Some(4),
       range=None,
       annotation=None,
@@ -5479,6 +5578,7 @@ test "a newer review reload fences an older working-tree reply" {
       path~,
       name="racing.mbt",
       file=Content(content="older working", absolute~, sig="1:0"),
+      file_link_generation=None,
       review_generation=Some(3),
       range=None,
       annotation=None,
@@ -5514,6 +5614,7 @@ test "a newer review reload fences an older working-tree reply" {
       path~,
       name="racing.mbt",
       file=Content(content="pre-deletion working", absolute~, sig="2:0"),
+      file_link_generation=None,
       review_generation=Some(4),
       range=None,
       annotation=None,
@@ -5695,6 +5796,7 @@ test "HEAD refresh restarts the generation-fenced working-tree read" {
       path~,
       name="paired.mbt",
       file=Content(content="stale working", absolute~, sig="2:13"),
+      file_link_generation=None,
       review_generation=Some(3),
       range=None,
       annotation=None,
@@ -5733,6 +5835,7 @@ test "HEAD refresh restarts the generation-fenced working-tree read" {
       path~,
       name="paired.mbt",
       file=Content(content="current working", absolute~, sig="3:15"),
+      file_link_generation=None,
       review_generation=Some(4),
       range=None,
       annotation=None,
@@ -6918,6 +7021,7 @@ test "a selected deletion hands a clean restoration to an ordinary read" {
       path~,
       name="recreated.mbt",
       file=Content(content="HEAD source", absolute~, sig="3:0"),
+      file_link_generation=None,
       review_generation=None,
       range=None,
       annotation=None,
@@ -7000,6 +7104,7 @@ test "a vanished review retries a failed ordinary read" {
       path~,
       name="committed.mbt",
       file=Content(content="committed source", absolute~, sig="4:0"),
+      file_link_generation=None,
       review_generation=None,
       range=None,
       annotation=None,

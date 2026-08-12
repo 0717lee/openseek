@@ -1510,6 +1510,7 @@ fn open_file(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
   session : String,
+  generation : Int,
   cwd~ : @common.Uri?,
   path : String,
 ) -> @cmd.Cmd {
@@ -1520,20 +1521,37 @@ fn open_file(
   }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      ignore(
-        @interop.bridge_request(channel, @commands.host_open_path, {
-          session,
-          cwd: cwd.map(resource => resource.path),
-          path,
-        }) catch {
-          error => {
-            scheduler.add(
-              dispatch(HostActionFailed(@interop.bridge_error_text(error))),
-            )
-            return
-          }
-        },
-      )
+      let reply = @interop.bridge_request(channel, @commands.host_open_path, {
+        session,
+        cwd: cwd.map(resource => resource.path),
+        path,
+      }) catch {
+        error => {
+          scheduler.add(
+            dispatch(
+              OpenFileFailed(
+                owner={ channel, session },
+                generation~,
+                message=@interop.bridge_error_text(error),
+              ),
+            ),
+          )
+          return
+        }
+      }
+      if reply.editor_target is Some(target) {
+        scheduler.add(
+          dispatch(
+            OpenFileAt(
+              owner={ channel, session },
+              generation~,
+              path=target.path,
+              line=target.line,
+              column=target.column,
+            ),
+          ),
+        )
+      }
     })
   })
 }

@@ -16,11 +16,10 @@
 /// surface as JS exceptions, so `@js.Error_::wrap` is the one place a cmark
 /// crash can be contained; the fallback shows the raw text instead.
 ///
-/// `open_file`, when supplied, turns links whose destination is a local file
-/// path into clickable elements whose click runs the returned command (the
-/// frontend opens the file). Absent (tests, plain rendering), those links
-/// render as ordinary anchors. Inline code never links, even when it names a
-/// file — only an explicit markdown link opens anything.
+/// `open_file`, when supplied, turns explicit local-file links and positioned
+/// file references in prose into clickable elements whose click runs the
+/// returned command (the frontend opens the file). Absent (tests, plain
+/// rendering), explicit links remain ordinary anchors. Inline code stays inert.
 pub fn markdown_nodes(
   source : String,
   open_file? : (String) -> @cmd.Cmd,
@@ -212,7 +211,7 @@ fn MarkdownRender::push_inline(
   match inline {
     Text(node) =>
       if linkify_urls {
-        for child in linkified_text_nodes(node.v) {
+        for child in self.prose_nodes(node.v) {
           out.push(child)
         }
       } else {
@@ -227,10 +226,8 @@ fn MarkdownRender::push_inline(
         Hard => out.push(@html.br())
         Soft => out.push(@html.text(" "))
       }
-    // Inline code stays plain code even when it names a file — only an
-    // explicit markdown link (below) opens anything. Path-shaped spans used
-    // to light up too, but the guesswork misfired often enough on prose-like
-    // tokens that the feature read as noise.
+    // Inline code stays plain code even when it names a file. Positioned file
+    // references are recognized only in prose or an explicit link below.
     CodeSpan(node) => out.push(@html.code(class="inline-code", node.v.code()))
     Emphasis(node) =>
       out.push(@html.em(self.inline_nodes(node.v.inline, linkify_urls~)))
@@ -256,16 +253,18 @@ fn MarkdownRender::push_inline(
       // The label is already inside an anchor. Leaving bare-URL detection on
       // here would turn `[https://label](https://target)` into nested anchors.
       let children = self.inline_nodes(node.v.text, linkify_urls=false)
-      match self.link_destination(node.v) {
-        // A link whose destination is a local file path opens that file;
-        // external links (`scheme://…`) keep their normal anchor.
-        Some(url) =>
-          if self.open_file is Some(open) && is_file_path(url) {
-            out.push(file_link_node(open, url, children))
-          } else {
-            out.push(link_node(url, children))
-          }
-        None => out.push(@html.span(children))
+      // The destination is authoritative Markdown data; the label is only
+      // presentation and may deliberately describe another location.
+      // `file://` is deliberately handled as an app action before cmark's
+      // unsafe-scheme filter. It never becomes a browser anchor.
+      if self.open_file is Some(open) &&
+        self.file_destination(node.v) is Some(path) {
+        out.push(file_link_node(open, path, children))
+      } else {
+        match self.link_destination(node.v) {
+          Some(url) => out.push(link_node(url, children))
+          None => out.push(@html.span(children))
+        }
       }
     }
     // Images keep their alt text visible; the picture itself is only loaded
@@ -288,6 +287,11 @@ fn MarkdownRender::push_inline(
 /// them directly. The match stops at whitespace/markup delimiters; prose
 /// punctuation is separated below before the anchor is built.
 let bare_web_url_pattern : Regex = re"(?i:https?)://[^[:space:]<>]+"
+
+///|
+/// Bare prose candidates that carry an unambiguous editor position. Ordinary
+/// path-shaped words stay text to avoid reviving the old noisy linkification.
+let bare_interactive_pattern : Regex = re"(?i:https?)://[^[:space:]<>]+|[[:alnum:]_~./@+:\-\\]+\.[[:alnum:]_+\-]{1,8}(?::[[:digit:]]+(?::[[:digit:]]+)?|#L[[:digit:]]+)"
 
 ///|
 /// Remove prose punctuation from the end of a URL-shaped token. Balanced
@@ -383,10 +387,83 @@ pub fn linkified_text_nodes(source : String) -> Array[@html.Html] {
 }
 
 ///|
+/// Render ordinary transcript prose. URL behavior stays identical to the
+/// public URL-only renderer, while a configured file opener additionally
+/// turns location-bearing path tokens into file buttons.
+fn MarkdownRender::prose_nodes(
+  self : MarkdownRender,
+  source : String,
+) -> Array[@html.Html] {
+  guard self.open_file is Some(open) else {
+    return linkified_text_nodes(source)
+  }
+  let out : Array[@html.Html] = []
+  let mut rest = source.view()
+  while bare_interactive_pattern.execute(rest) is Some(matched) {
+    let before = matched.before()
+    if !before.is_empty() {
+      out.push(@html.text(before.to_owned()))
+    }
+    let candidate = matched.content().to_owned()
+    if candidate.view() =~ re"(?i:^https?://)" {
+      let (url, suffix) = trim_bare_url(candidate)
+      // Keep the URL-only renderer's contract here: prose may only create an
+      // HTTP(S) anchor when the destination has a non-empty authority. In
+      // particular, a file-shaped custom scheme must stay inert text.
+      if has_web_authority(url) {
+        out.push(link_node(url, [@html.text(url)]))
+      } else {
+        out.push(@html.text(url))
+      }
+      if !suffix.is_empty() {
+        out.push(@html.text(suffix))
+      }
+    } else if is_file_path(candidate) &&
+      // The regex cannot use look-around, so validate both sides here. A
+      // match after `%` may be the middle of `build%20/src/a.mbt:12`, while
+      // whitespace and prose delimiters establish a fresh token.
+      (before.is_empty() || before =~ re"[[:space:]<>,;!?\"'(){}\[\]]$") &&
+      // A sentence-ending dot is a boundary; `.bak` continues the same token.
+      (
+        matched.after().is_empty() ||
+        matched.after() =~ re"^[[:space:]<>,;!?\"'(){}\[\]]" ||
+        matched.after() =~ re"^\.(?:$|[[:space:]<>,;!?\"'(){}\[\]])"
+      ) {
+      out.push(file_link_node(open, candidate, [@html.text(candidate)]))
+    } else {
+      out.push(@html.text(candidate))
+    }
+    rest = matched.after()
+  }
+  if !rest.is_empty() {
+    out.push(@html.text(rest.to_owned()))
+  }
+  out
+}
+
+///|
 /// The resolved, safe destination of a link or image. `None` for unresolved
 /// references and for destinations cmark flags as unsafe (`javascript:` and
 /// friends); the caller then renders the text without linking it.
 fn MarkdownRender::link_destination(
+  self : MarkdownRender,
+  link : @cmark.InlineLink,
+) -> String? {
+  guard self.raw_link_destination(link) is Some(destination) else {
+    return None
+  }
+  if @cmark.InlineLink::is_unsafe(destination) {
+    None
+  } else {
+    Some(destination)
+  }
+}
+
+///|
+/// Resolve an inline or reference-style Markdown link without deciding how
+/// its scheme may be used. Callers must either apply cmark's unsafe-scheme
+/// filter or convert a local `file://` URI into an app-owned filesystem path.
+fn MarkdownRender::raw_link_destination(
   self : MarkdownRender,
   link : @cmark.InlineLink,
 ) -> String? {
@@ -399,12 +476,30 @@ fn MarkdownRender::link_destination(
       }
   }
   match definition {
-    Some(definition) =>
-      match definition.dest {
-        Some(dest) if !@cmark.InlineLink::is_unsafe(dest.v) => Some(dest.v)
-        _ => None
-      }
+    Some(definition) => definition.dest.map(dest => dest.v)
     None => None
+  }
+}
+
+///|
+/// A Markdown destination that the app may open as a local file. Ordinary
+/// path destinations retain the existing cmark safety check. A `file://` URI
+/// is accepted only for this machine, with no query, and is converted to a
+/// decoded filesystem path before it reaches the host.
+fn MarkdownRender::file_destination(
+  self : MarkdownRender,
+  link : @cmark.InlineLink,
+) -> String? {
+  guard self.raw_link_destination(link) is Some(destination) else {
+    return None
+  }
+  if FileReference(destination).local_file_uri_path() is Some(path) {
+    return Some(path)
+  }
+  if !@cmark.InlineLink::is_unsafe(destination) && is_file_path(destination) {
+    Some(destination)
+  } else {
+    None
   }
 }
 
@@ -433,6 +528,78 @@ fn file_link_node(
 }
 
 ///|
+/// One file reference as it appears in a link label or destination.
+priv struct FileReference(String)
+
+///|
+/// Convert a local `file://` URI into the path understood by `host.open_path`.
+/// Empty authority and `localhost` both identify this machine; other hosts are
+/// not silently treated as local paths. A fragment is retained only when it is
+/// the supported positive `#Lline` editor position.
+fn FileReference::local_file_uri_path(self : FileReference) -> String? {
+  guard self.0.view() =~ re"(?i:^file://)" else { return None }
+  let uri = @common.Uri::parse(self.0) catch { _ => return None }
+  guard uri.scheme.equal_ignore_ascii_case("file") &&
+    (
+      uri.authority.is_empty() ||
+      uri.authority.equal_ignore_ascii_case("localhost")
+    ) &&
+    uri.query.is_empty() else {
+    return None
+  }
+  let position = if uri.fragment.is_empty() {
+    ""
+  } else if uri.fragment.view() =~ re"^L[1-9][[:digit:]]*$" {
+    "#" + uri.fragment
+  } else {
+    return None
+  }
+  // `Uri::fs_path` preserves a non-empty authority as a UNC host. Normalize
+  // the conventional `localhost` spelling to the same local URI as an empty
+  // authority before asking for the platform-specific filesystem path.
+  let local_uri = if uri.authority.is_empty() {
+    uri
+  } else {
+    @common.Uri::from(scheme="file", path=uri.path) catch {
+      _ => return None
+    }
+  }
+  let path = local_uri.fs_path()
+  guard !path.is_empty() &&
+    !path.contains_any(chars="\t\r\n") &&
+    !path.has_suffix("/") else {
+    return None
+  }
+  let base = match path.rev_split_once("/") {
+    Some((_, base)) => base.to_owned()
+    None => path
+  }
+  // Spaces are valid here because URI parsing has already decoded `%20`.
+  // Unlike bare prose, an explicit `file://` destination is already clearly
+  // path-shaped, so only the same plausible-extension check is needed.
+  guard file_extension(base) is Some(_) else { return None }
+  Some(path + position)
+}
+
+///|
+/// The path before a supported editor position, when one is present.
+fn FileReference::position_path(self : FileReference) -> String? {
+  if self.0.view() =~ (re":[[:digit:]]+(?::[[:digit:]]+)?$", before=path) {
+    return Some(path.to_owned())
+  }
+  if self.0.view() =~ (re"#L[[:digit:]]+$", before=path) {
+    return Some(path.to_owned())
+  }
+  None
+}
+
+///|
+/// The suffix-free path, or the whole reference when it has no position.
+fn FileReference::path(self : FileReference) -> String {
+  self.position_path().unwrap_or(self.0)
+}
+
+///|
 /// Whether a string looks like a file path worth making clickable: a single
 /// whitespace-free token, not a URL, whose final component ends in a known
 /// source-file extension. Both `src/main.mbt` and a bare `main.mbt` qualify.
@@ -448,15 +615,19 @@ fn is_file_path(text : String) -> Bool {
   }
   // A trailing separator marks a directory, not a file.
   guard !s.has_suffix("/") else { return false }
-  let base = match s.rev_split_once("/") {
+  // Location suffixes are shape metadata, not part of the extension. Keep the
+  // original `s` for the click: the host must first check whether that literal
+  // positioned filename exists before interpreting the suffix.
+  let path = FileReference(s).path()
+  let base = match path.rev_split_once("/") {
     Some((_, base)) => base.to_owned()
-    None => s
+    None => path
   }
   guard file_extension(base) is Some(ext) else { return false }
   // A `/` makes "this is a path" unambiguous, so any real extension counts
   // (`.pptx`, `.pdf`, …). A bare token needs a recognized type to avoid
   // lighting up prose like `self.value` or `obj.method`.
-  s.contains("/") || is_known_extension(ext)
+  path.contains("/") || is_known_extension(ext)
 }
 
 ///|

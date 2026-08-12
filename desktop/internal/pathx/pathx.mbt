@@ -255,20 +255,25 @@ pub fn Absolute::contains(self : Absolute, path : Absolute) -> Bool {
 /// This path relative to the absolute directory `root`: `Some(Relative(""))`
 /// when they are the same directory, `Some(Relative("a/b"))` for a
 /// descendant, `None` for anything outside. Dot segments and redundant
-/// separators are resolved using the host's path rules. The `None` forces
-/// callers to decide what a path outside the workspace means instead of
-/// letting an absolute string flow on as if it were relative.
+/// separators are resolved using the host's path rules, including Windows'
+/// case-insensitive drive and component comparison. The `None` forces callers
+/// to decide what a path outside the workspace means instead of letting an
+/// absolute string flow on as if it were relative.
 pub fn Absolute::relative_to(self : Absolute, root~ : Absolute) -> Relative? {
-  let path = self.normalize().0
-  let root = root.normalize().0
-  if path == root {
-    return Some(Relative(""))
+  // `@path.Path::relative` owns the platform comparison rules. In particular,
+  // its Windows implementation folds path-component case before finding the
+  // common prefix; comparing our slash-normalized strings here would reject a
+  // real descendant whose drive or directory spelling used different case.
+  guard self.to_path().relative(base=root.to_path()).to_relative()
+    is Some(relative) else {
+    // Windows returns the absolute target when roots/drives differ.
+    return None
   }
-  let prefix = if root.has_suffix("/") { root } else { "\{root}/" }
-  if path.strip_prefix(prefix) is Some(rest) {
-    Some(Relative(rest.to_owned()))
-  } else {
+  let relative = relative.normalize()
+  if relative.0 == ".." || relative.0.has_prefix("../") {
     None
+  } else {
+    Some(relative)
   }
 }
 

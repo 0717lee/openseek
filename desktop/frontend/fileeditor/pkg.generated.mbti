@@ -27,13 +27,13 @@ pub fn mount_cmds(@cmd.Emit[Msg]) -> @cmd.Cmd
 
 pub fn open_changed_document(@cmd.Emit[Msg], State, Ctx, ChangedFile, had_active~ : Bool) -> (@cmd.Cmd, State)
 
-pub fn open_document(@cmd.Emit[Msg], State, Ctx, @pathx.Relative, name~ : String, range~ : @common.Range?, annotation? : String, had_active~ : Bool) -> (@cmd.Cmd, State)
+pub fn open_document(@cmd.Emit[Msg], State, Ctx, @pathx.Relative, name~ : String, file_link_generation? : Int, range~ : @common.Range?, annotation? : String, had_active~ : Bool) -> (@cmd.Cmd, State)
 
-pub fn open_file(@cmd.Emit[Msg], State, Ctx, @pathx.Relative, range~ : @common.Range?, annotation? : String, had_active~ : Bool) -> (@cmd.Cmd, State)
+pub fn open_file(@cmd.Emit[Msg], State, Ctx, @pathx.Relative, file_link_generation? : Int, range~ : @common.Range?, annotation? : String, had_active~ : Bool) -> (@cmd.Cmd, State)
 
 pub fn panel_toggle_cmds(@cmd.Emit[Msg], State, Ctx, opening~ : Bool) -> (@cmd.Cmd, State)
 
-pub fn read_file(@cmd.Emit[Msg], @interop.ConversationKey, Int, @pathx.Relative, String, review_generation? : Int, range~ : @common.Range?, annotation? : String, root~ : @common.Uri?) -> @cmd.Cmd
+pub fn read_file(@cmd.Emit[Msg], @interop.ConversationKey, Int, @pathx.Relative, String, file_link_generation? : Int, review_generation? : Int, range~ : @common.Range?, annotation? : String, root~ : @common.Uri?) -> @cmd.Cmd
 
 pub fn remove_editor_feedback(ModelUri, String) -> @cmd.Cmd
 
@@ -159,8 +159,8 @@ pub(all) enum Msg {
   GitOriginalLoaded(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, generation~ : Int, background~ : Bool, original~ : @protocol.GitOriginalFileReply)
   GitOriginalFailed(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, generation~ : Int, background~ : Bool, message~ : String)
   OpenNavigationLocation(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, range~ : @common.Range)
-  FileLoaded(owner~ : @interop.ConversationKey, epoch~ : Int, path~ : @pathx.Relative, name~ : String, file~ : FileContent, review_generation~ : Int?, range~ : @common.Range?, annotation~ : String?)
-  FileFailed(owner~ : @interop.ConversationKey, epoch~ : Int, path~ : @pathx.Relative, review_generation~ : Int?, message~ : String)
+  FileLoaded(owner~ : @interop.ConversationKey, epoch~ : Int, path~ : @pathx.Relative, name~ : String, file~ : FileContent, file_link_generation~ : Int?, review_generation~ : Int?, range~ : @common.Range?, annotation~ : String?)
+  FileFailed(owner~ : @interop.ConversationKey, epoch~ : Int, path~ : @pathx.Relative, file_link_generation~ : Int?, review_generation~ : Int?, message~ : String)
   FileWatchFailed(channel~ : @interop.ChannelId, root~ : @common.Uri, generation~ : String, message~ : String)
   FsChanged(root~ : @common.Uri, generation~ : String, changes~ : Array[FileChange]?)
   RunSettled(owner~ : @interop.ConversationKey)
@@ -206,6 +206,7 @@ pub(all) struct State {
   reviewed_changes : Array[ChangedFile]
   changes_generation : Int
   request_epoch : Int
+  file_link_generation : Int
   changes_head : String?
   changes_head_known : Bool
   review_generation : Int

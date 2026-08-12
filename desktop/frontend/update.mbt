@@ -732,6 +732,20 @@ fn conversation_relative(
 }
 
 ///|
+/// Begin a non-transcript editor navigation. Transcript links capture this
+/// page-lifetime token before their asynchronous host lookup; advancing it at
+/// every competing navigation makes the user's latest action authoritative.
+fn Model::begin_editor_navigation(self : Model) -> Model {
+  {
+    ..self,
+    file_panel: {
+      ..self.file_panel,
+      file_link_generation: self.file_panel.file_link_generation + 1,
+    },
+  }
+}
+
+///|
 /// Open (or refocus) the editor side-panel on `path`, revealing `range` when
 /// given — the shared tail of a composer chip's and a transcript chip's jump.
 /// The raw path comes from a chip or envelope; a legacy absolute one that
@@ -742,8 +756,16 @@ fn open_editor_at(
   model : Model,
   path : String,
   range : @common.Range?,
+  file_link_generation? : Int,
   annotation? : String,
 ) -> (@cmd.Cmd, Model) {
+  // A transcript host reply already carries the token its click spent. Every
+  // direct mention, Quick Open, or location jump is a newer competing action.
+  let model = if file_link_generation is Some(_) {
+    model
+  } else {
+    model.begin_editor_navigation()
+  }
   let conv = model.active()
   let placement = model.checkout_placement(conv)
   // Chip/transcript jumps call the file-editor package directly rather than
@@ -789,6 +811,7 @@ fn open_editor_at(
       review_view_mode: previous_panel.review_view_mode,
       changes_generation: previous_panel.changes_generation,
       request_epoch: previous_panel.request_epoch + 1,
+      file_link_generation: previous_panel.file_link_generation,
       review_generation: previous_panel.review_generation,
       watch_generation: previous_panel.watch_generation,
       // Preserve the old host configuration until the post-dispatch sync can
@@ -824,6 +847,7 @@ fn open_editor_at(
     panel,
     file_ctx(model),
     relative,
+    file_link_generation?,
     range~,
     annotation?,
     had_active~,
@@ -1842,6 +1866,7 @@ fn update_msg(
         placement is Some(@interop.MissingWorktree(_))) else {
         return (@cmd.none, model)
       }
+      let model = model.begin_editor_navigation()
       let had_active = @dock.active_file(model.dock) is Some(_)
       // A pick made from the active FilePicker tab fulfills it: the picker
       // is replaced in place (or the already-open tab activates and the
@@ -1873,6 +1898,7 @@ fn update_msg(
         placement is Some(@interop.MissingWorktree(_))) else {
         return (@cmd.none, model)
       }
+      let model = model.begin_editor_navigation()
       let had_active = @dock.active_file(model.dock) is Some(_)
       let dock = if model.dock.active is Some(FilePicker) {
         @dock.resolve_pick(model.dock, change.path)
@@ -1902,6 +1928,7 @@ fn update_msg(
         placement is Some(@interop.MissingWorktree(_))) else {
         return (@cmd.none, model)
       }
+      let model = model.begin_editor_navigation()
       let had_active = @dock.active_file(model.dock) is Some(_)
       let dock = @dock.open_file(model.dock, path)
       let model = { ..model, dock, }
@@ -3001,15 +3028,40 @@ fn update_msg(
       // workspace root. Absolute paths open directly; the agent surfaced it,
       // so this operation intentionally applies no workspace containment.
       let conv = model.active()
+      // Spend the token before starting host work. This synchronously makes
+      // every older host reply and positioned read stale, even if this click
+      // ultimately opens a literal path through the system instead.
+      let generation = model.file_panel.file_link_generation + 1
+      let model = {
+        ..model,
+        file_panel: { ..model.file_panel, file_link_generation: generation },
+      }
       (
         open_file(
           dispatch,
           model.focused,
           conv.session_id,
+          generation,
           cwd=model.conversation_root(conv),
           path,
         ),
         model,
+      )
+    }
+    OpenFileAt(owner~, generation~, path~, line~, column~) => {
+      let conv = model.active()
+      guard owner.channel == model.focused &&
+        owner.session == conv.session_id &&
+        generation == model.file_panel.file_link_generation else {
+        return (@cmd.none, model)
+      }
+      let column = column.unwrap_or(1)
+      open_editor_at(
+        dispatch,
+        model,
+        path,
+        Some(@common.Range::Range(line, column, line, column)),
+        file_link_generation=generation,
       )
     }
     ToggleGitDetails => {
@@ -3191,6 +3243,18 @@ fn update_msg(
       let femit = dispatch.map(msg => FileEditor(msg))
       match msg {
         TogglePanel => {
+          // Hiding the dock, or revealing an existing tab in it, is newer than
+          // a positioned transcript click. Its delayed host reply must not
+          // undo the destination the user just chose to hide or reveal. An
+          // empty dock opening has no destination and does not spend a token.
+          let presents_existing_tab = !before.open &&
+            dock.open &&
+            dock.active is Some(_)
+          let model = if (before.open && !dock.open) || presents_existing_tab {
+            model.begin_editor_navigation()
+          } else {
+            model
+          }
           let (cmd, panel) = @fileeditor.panel_toggle_cmds(
             femit,
             model.file_panel,
@@ -3204,23 +3268,29 @@ fn update_msg(
           // while the popup would overlap it.
           (@cmd.none, model)
         TabActivated(_) =>
-          if dock.active != before.active &&
-            @dock.active_file(dock) is Some(path) {
-            let cmds : Array[@cmd.Cmd] = []
-            if @dock.active_file(before) is None {
-              // The file body was CSS-hidden behind the browser pane or
-              // the picker overlay; the viewer must re-measure its host on
-              // return.
-              cmds.push(@fileeditor.request_viewer_remeasure())
+          if dock.active != before.active {
+            // A tab selection is newer than any transcript link still waiting
+            // on its host lookup, even when the selected tab is not a file.
+            let model = model.begin_editor_navigation()
+            if @dock.active_file(dock) is Some(path) {
+              let cmds : Array[@cmd.Cmd] = []
+              if @dock.active_file(before) is None {
+                // The file body was CSS-hidden behind the browser pane or
+                // the picker overlay; the viewer must re-measure its host on
+                // return.
+                cmds.push(@fileeditor.request_viewer_remeasure())
+              }
+              let (cmd, panel) = @fileeditor.activate(
+                femit,
+                model.file_panel,
+                file_ctx(model),
+                path,
+              )
+              cmds.push(cmd)
+              (@cmd.batch(cmds), { ..model, file_panel: panel })
+            } else {
+              (@cmd.none, model)
             }
-            let (cmd, panel) = @fileeditor.activate(
-              femit,
-              model.file_panel,
-              file_ctx(model),
-              path,
-            )
-            cmds.push(cmd)
-            (@cmd.batch(cmds), { ..model, file_panel: panel })
           } else {
             (@cmd.none, model)
           }
@@ -3234,6 +3304,20 @@ fn update_msg(
             // kinds activate directly.
             let next_file = @dock.active_file(dock)
             let was_active = before.active == Some(tab)
+            // Closing any file tab is newer than a pending transcript link:
+            // even an inactive tab must stay closed when that link's delayed
+            // host lookup returns. Other tab kinds compete only when closing
+            // them changes the active destination.
+            let closes_file = match tab {
+              File(_) => true
+              _ => false
+            }
+            let model = if closes_file ||
+              (was_active && dock.active != before.active) {
+              model.begin_editor_navigation()
+            } else {
+              model
+            }
             match tab {
               File(path~) => {
                 let (cmd, panel) = @fileeditor.close_document(
@@ -3298,11 +3382,13 @@ fn update_msg(
     Preview(msg) =>
       (@cmd.none, { ..model, preview: @preview.update(msg, model.preview) })
     BrowserTabRequested => {
+      let model = model.begin_editor_navigation()
       let (preview, id) = @preview.open_page(model.preview)
       let dock = @dock.close_menu(@dock.open_browser(model.dock, id))
       (focus_browser_address(), { ..model, preview, dock })
     }
     FilePickerRequested => {
+      let model = model.begin_editor_navigation()
       let dock = @dock.close_menu(@dock.open_picker(model.dock))
       let next = { ..model, dock, }
       let (cmd, file_panel) = @fileeditor.update(
@@ -3314,6 +3400,7 @@ fn update_msg(
       (cmd, { ..next, file_panel, })
     }
     ReviewRequested => {
+      let model = model.begin_editor_navigation()
       let dock = @dock.close_menu(@dock.open_picker(model.dock))
       let next = { ..model, dock, }
       let (cmd, file_panel) = @fileeditor.update(
@@ -3345,6 +3432,10 @@ fn update_msg(
         @preview.normalize_url(page.input) is Some(url) else {
         return (@cmd.none, model)
       }
+      // A committed browser navigation is newer than any pending transcript
+      // file link. Spend the token only after validation so an invalid address
+      // draft remains a pure no-op.
+      let model = model.begin_editor_navigation()
       // A blank tab's first navigation creates the native view; later ones
       // navigate the existing view.
       let (cmd, pane) = if page.url is Some(_) {
@@ -3488,6 +3579,16 @@ fn update_msg(
       }
     }
     HostActionFailed(message) => model.notify_error(dispatch, message)
+    OpenFileFailed(owner~, generation~, message~) => {
+      let conv = model.active()
+      if owner.channel == model.focused &&
+        owner.session == conv.session_id &&
+        generation == model.file_panel.file_link_generation {
+        model.notify_error(dispatch, message)
+      } else {
+        (@cmd.none, model)
+      }
+    }
     ExternalLinkClicked(url) =>
       // Web links open in the dock's Browser tabs by default — the
       // toolbar's open-external button hands the page to the system
@@ -3503,6 +3604,11 @@ fn update_msg(
       // case: it names a URL to open in a browser the user is signed in to,
       // which a native view (with its own cookie jar) is not.
       if model.is_desktop && model.screen is Chat && @preview.is_web_url(url) {
+        // Opening or reusing a Browser tab is a newer dock navigation than a
+        // transcript file link still waiting on `host.open_path`. Spend the
+        // shared token before either branch so its delayed reply cannot put a
+        // file back over the URL the user chose later.
+        let model = model.begin_editor_navigation()
         // The scan is over this strip's tabs, not the global page map: a
         // parked conversation may hold the same URL, and matching its page
         // first would shadow this strip's own tab forever.
@@ -8183,6 +8289,30 @@ test "a host action failure pops a toast" {
   )
   inspect(next.notifications.length(), content="1")
   inspect(next.notifications[0].message, content="open path failed: no opener")
+}
+
+///|
+test "a file-link host failure is visible only for the latest navigation" {
+  let dispatch = test_dispatch()
+  let model = test_model()
+  let owner : @interop.ConversationKey = {
+    channel: model.focused,
+    session: model.active().session_id,
+  }
+  let newer = model.begin_editor_navigation()
+  let (_, stale) = update(
+    dispatch,
+    OpenFileFailed(owner~, generation=0, message="old path failed"),
+    newer,
+  )
+  inspect(stale.notifications.length(), content="0")
+  let (_, current) = update(
+    dispatch,
+    OpenFileFailed(owner~, generation=1, message="current path failed"),
+    newer,
+  )
+  inspect(current.notifications.length(), content="1")
+  inspect(current.notifications[0].message, content="current path failed")
 }
 
 ///|
@@ -14343,8 +14473,378 @@ test "JumpToMention opens the editor panel and selects the mention's file" {
   let (_, next) = update(dispatch, JumpToMention(0), model)
   assert_true(next.dock.open)
   assert_true(@dock.active_file(next.dock) is Some(Relative("src/main.mbt")))
+  assert_eq(next.file_panel.file_link_generation, 1)
   // The document table follows the strip: the jumped-to file has an entry.
   assert_true(next.file_panel.docs.contains(Relative("src/main.mbt")))
+}
+
+///|
+test "update is pure: a resolved transcript position opens its owning file" {
+  let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/work/project")
+  let worktree = @interop.ChannelId::Local.test_resource(
+    "/work/project/.worktrees/wt-4",
+  )
+  let model = test_model()
+    .replace_conversation({
+      ..test_conversation(),
+      workspace: Worktree(project=workspace, name="wt-4"),
+    })
+    .with_dev(dev => {
+      ..dev,
+      projects: [workspace],
+      worktrees: [
+        {
+          project: workspace,
+          rows: [
+            {
+              name: "wt-4",
+              session: Some("desktop-test"),
+              path: Some(worktree),
+              present: true,
+            },
+          ],
+          generation: 1,
+        },
+      ],
+    })
+  let owner : @interop.ConversationKey = {
+    channel: @interop.ChannelId::Local,
+    session: "desktop-test",
+  }
+  // Spending the generation is part of the pure click transition, before the
+  // host command runs. Replaying the same input therefore produces the same
+  // token rather than consulting hidden state.
+  let (_, first_pending) = update(dispatch, OpenFile("src/main.mbt:1"), model)
+  let (_, replayed_pending) = update(
+    dispatch,
+    OpenFile("src/main.mbt:1"),
+    model,
+  )
+  assert_eq(first_pending.file_panel.file_link_generation, 1)
+  assert_eq(replayed_pending.file_panel.file_link_generation, 1)
+  let (_, latest_pending) = update(
+    dispatch,
+    OpenFile("src/main.mbt:2738:17"),
+    first_pending,
+  )
+  assert_eq(latest_pending.file_panel.file_link_generation, 2)
+  // Closing the dock is a newer user decision than the pending host lookup;
+  // its delayed reply cannot reopen the panel.
+  let open_pending = {
+    ..latest_pending,
+    dock: { ..latest_pending.dock, open: true },
+  }
+  let (_, dock_closed) = update(dispatch, Dock(TogglePanel), open_pending)
+  assert_false(dock_closed.dock.open)
+  assert_eq(dock_closed.file_panel.file_link_generation, 3)
+  let (_, after_closed_reply) = update(
+    dispatch,
+    OpenFileAt(
+      owner~,
+      generation=2,
+      path="src/main.mbt",
+      line=2738,
+      column=Some(17),
+    ),
+    dock_closed,
+  )
+  assert_false(after_closed_reply.dock.open)
+  assert_true(after_closed_reply.dock.active is None)
+  // Revealing an existing tab is also a newer dock navigation. The pending
+  // reply cannot replace the file the user chose to bring back on screen.
+  let hidden_pending = {
+    ..latest_pending,
+    dock: {
+      ..@dock.open_file(latest_pending.dock, Relative("README.md")),
+      open: false,
+    },
+  }
+  let (_, dock_opened) = update(dispatch, Dock(TogglePanel), hidden_pending)
+  assert_true(dock_opened.dock.open)
+  assert_eq(dock_opened.file_panel.file_link_generation, 3)
+  assert_true(
+    @dock.active_file(dock_opened.dock) is Some(Relative("README.md")),
+  )
+  let (_, after_opened_reply) = update(
+    dispatch,
+    OpenFileAt(
+      owner~,
+      generation=2,
+      path="src/main.mbt",
+      line=2738,
+      column=Some(17),
+    ),
+    dock_opened,
+  )
+  assert_true(
+    @dock.active_file(after_opened_reply.dock) is Some(Relative("README.md")),
+  )
+  assert_false(
+    after_opened_reply.dock.tabs.contains(
+      @dock.DockTab::File(path=Relative("src/main.mbt")),
+    ),
+  )
+  // The first host reply is stale as soon as the second click happens.
+  let (_, old_host_reply) = update(
+    dispatch,
+    OpenFileAt(owner~, generation=1, path="src/main.mbt", line=1, column=None),
+    latest_pending,
+  )
+  assert_true(old_host_reply.dock.active is None)
+  let msg = OpenFileAt(
+    owner~,
+    generation=2,
+    path="src/main.mbt",
+    line=2738,
+    column=Some(17),
+  )
+  let (_, first) = update(dispatch, msg, latest_pending)
+  let (_, second) = update(dispatch, msg, latest_pending)
+  assert_true(@dock.active_file(first.dock) is Some(Relative("src/main.mbt")))
+  assert_true(@dock.active_file(second.dock) is Some(Relative("src/main.mbt")))
+  assert_true(first.file_panel.docs.contains(Relative("src/main.mbt")))
+  assert_true(second.file_panel.docs.contains(Relative("src/main.mbt")))
+  let target = @resource.join_relative(worktree, Relative("src/main.mbt"))
+  // A later ordinary navigation of the same loading file owns its read with
+  // the same generation token. If that newer read fails first, the older
+  // positioned success cannot fill the failed tab afterward.
+  let (_, ordinary_pending) = update(
+    dispatch,
+    FileEditor(
+      @fileeditor.OpenNavigationLocation(
+        owner~,
+        path=Relative("src/main.mbt"),
+        range=@common.Range::Range(9, 1, 9, 4),
+      ),
+    ),
+    first,
+  )
+  assert_eq(ordinary_pending.file_panel.file_link_generation, 3)
+  let (_, ordinary_failed) = update(
+    dispatch,
+    FileEditor(
+      @fileeditor.FileFailed(
+        owner~,
+        epoch=ordinary_pending.file_panel.request_epoch,
+        path=Relative("src/main.mbt"),
+        file_link_generation=Some(3),
+        review_generation=None,
+        message="newer ordinary read failed",
+      ),
+    ),
+    ordinary_pending,
+  )
+  assert_true(
+    ordinary_failed.file_panel.docs.get(Relative("src/main.mbt"))
+    is Some(
+      { state: @fileeditor.TabReadFailed("newer ordinary read failed"), .. }
+    ),
+  )
+  let (_, old_after_failure) = update(
+    dispatch,
+    FileEditor(
+      @fileeditor.FileLoaded(
+        owner~,
+        epoch=ordinary_failed.file_panel.request_epoch,
+        path=Relative("src/main.mbt"),
+        name="main.mbt",
+        file=@fileeditor.Content(content="old", absolute=target, sig="1:3"),
+        file_link_generation=Some(2),
+        review_generation=None,
+        range=Some(@common.Range::Range(2738, 17, 2738, 17)),
+        annotation=None,
+      ),
+    ),
+    ordinary_failed,
+  )
+  assert_true(old_after_failure == ordinary_failed)
+  // Both host replies can arrive in click order while the corresponding file
+  // reads settle in reverse. The older read may finish the loading document,
+  // but it cannot move the Viewer back to its stale position.
+  let (_, old_file_reply) = update(
+    dispatch,
+    FileEditor(
+      @fileeditor.FileLoaded(
+        owner~,
+        epoch=first.file_panel.request_epoch,
+        path=Relative("src/main.mbt"),
+        name="main.mbt",
+        file=@fileeditor.Content(content="old", absolute=target, sig="1:3"),
+        file_link_generation=Some(1),
+        review_generation=None,
+        range=Some(@common.Range::Range(1, 1, 1, 1)),
+        annotation=None,
+      ),
+    ),
+    first,
+  )
+  assert_true(
+    old_file_reply.file_panel.docs.get(Relative("src/main.mbt"))
+    is Some({ state: @fileeditor.TabLoaded(content="old", ..), .. }),
+  )
+  // A stale failure likewise makes its loading tab retryable without raising
+  // a panel-wide error or applying the old position.
+  let (_, old_file_failure) = update(
+    dispatch,
+    FileEditor(
+      @fileeditor.FileFailed(
+        owner~,
+        epoch=first.file_panel.request_epoch,
+        path=Relative("src/main.mbt"),
+        file_link_generation=Some(1),
+        review_generation=None,
+        message="old read failed",
+      ),
+    ),
+    first,
+  )
+  assert_true(old_file_failure.file_panel.error is None)
+  assert_true(
+    old_file_failure.file_panel.docs.get(Relative("src/main.mbt"))
+    is Some({ state: @fileeditor.TabReadFailed("old read failed"), .. }),
+  )
+  // The current failure is authoritative even if the stale success filled the
+  // cache first, so the superseded snapshot cannot survive the failed read.
+  let (_, current_file_failure) = update(
+    dispatch,
+    FileEditor(
+      @fileeditor.FileFailed(
+        owner~,
+        epoch=first.file_panel.request_epoch,
+        path=Relative("src/main.mbt"),
+        file_link_generation=Some(2),
+        review_generation=None,
+        message="current read failed",
+      ),
+    ),
+    old_file_reply,
+  )
+  assert_true(current_file_failure.file_panel.error is None)
+  assert_true(
+    current_file_failure.file_panel.docs.get(Relative("src/main.mbt"))
+    is Some({ state: @fileeditor.TabReadFailed("current read failed"), .. }),
+  )
+  let (_, current_file_reply) = update(
+    dispatch,
+    FileEditor(
+      @fileeditor.FileLoaded(
+        owner~,
+        epoch=first.file_panel.request_epoch,
+        path=Relative("src/main.mbt"),
+        name="main.mbt",
+        file=@fileeditor.Content(content="new", absolute=target, sig="2:3"),
+        file_link_generation=Some(2),
+        review_generation=None,
+        range=Some(@common.Range::Range(2738, 17, 2738, 17)),
+        annotation=None,
+      ),
+    ),
+    old_file_reply,
+  )
+  assert_true(
+    current_file_reply.file_panel.docs.get(Relative("src/main.mbt"))
+    is Some({ state: @fileeditor.TabLoaded(content="new", ..), .. }),
+  )
+  // Closing an inactive file tab is also newer than a pending positioned
+  // link to that file. Its delayed host reply must not recreate the tab.
+  let (_, other_file) = update(
+    dispatch,
+    FileEditor(FileSelected(path=Relative("README.md"), name="README.md")),
+    current_file_reply,
+  )
+  assert_true(@dock.active_file(other_file.dock) is Some(Relative("README.md")))
+  let (_, inactive_pending) = update(
+    dispatch,
+    OpenFile("src/main.mbt:40"),
+    other_file,
+  )
+  let pending_generation = inactive_pending.file_panel.file_link_generation
+  let (_, inactive_closed) = update(
+    dispatch,
+    Dock(TabClosed(@dock.DockTab::File(path=Relative("src/main.mbt")))),
+    inactive_pending,
+  )
+  assert_eq(
+    inactive_closed.file_panel.file_link_generation,
+    pending_generation + 1,
+  )
+  assert_false(
+    inactive_closed.dock.tabs.contains(
+      @dock.DockTab::File(path=Relative("src/main.mbt")),
+    ),
+  )
+  let (_, after_inactive_reply) = update(
+    dispatch,
+    OpenFileAt(
+      owner~,
+      generation=pending_generation,
+      path="src/main.mbt",
+      line=40,
+      column=None,
+    ),
+    inactive_closed,
+  )
+  assert_false(
+    after_inactive_reply.dock.tabs.contains(
+      @dock.DockTab::File(path=Relative("src/main.mbt")),
+    ),
+  )
+  // A later tree pick competes with the transcript request just like a newer
+  // transcript click: it advances the same token before opening its document.
+  let (_, tree_opened) = update(
+    dispatch,
+    FileEditor(FileSelected(path=Relative("README.md"), name="README.md")),
+    latest_pending,
+  )
+  assert_eq(tree_opened.file_panel.file_link_generation, 3)
+  let (_, delayed_transcript_reply) = update(
+    dispatch,
+    OpenFileAt(
+      owner~,
+      generation=2,
+      path="src/main.mbt",
+      line=2738,
+      column=Some(17),
+    ),
+    tree_opened,
+  )
+  assert_true(
+    @dock.active_file(delayed_transcript_reply.dock)
+    is Some(Relative("README.md")),
+  )
+  assert_false(
+    delayed_transcript_reply.file_panel.docs.contains(Relative("src/main.mbt")),
+  )
+  // Mixed-version remote connections may still receive the older absolute
+  // target. Keep accepting it when it remains inside the resolved checkout.
+  let (_, legacy) = update(
+    dispatch,
+    OpenFileAt(
+      owner~,
+      generation=2,
+      path="/work/project/.worktrees/wt-4/src/main.mbt",
+      line=2738,
+      column=Some(17),
+    ),
+    latest_pending,
+  )
+  assert_true(@dock.active_file(legacy.dock) is Some(Relative("src/main.mbt")))
+  assert_true(legacy.file_panel.docs.contains(Relative("src/main.mbt")))
+  // A delayed reply from another conversation cannot open a tab here.
+  let (_, stale) = update(
+    dispatch,
+    OpenFileAt(
+      owner={ ..owner, session: "another-session" },
+      generation=2,
+      path="/work/project/src/main.mbt",
+      line=1,
+      column=None,
+    ),
+    latest_pending,
+  )
+  assert_true(stale.dock.active is None)
+  assert_false(stale.file_panel.docs.contains(Relative("src/main.mbt")))
 }
 
 ///|
@@ -16247,12 +16747,14 @@ test "file rows and location jumps cannot open while checkout placement is missi
 test "web links open (and reuse) a dock browser tab; other schemes do not" {
   let dispatch = test_dispatch()
   let model = desktop_model()
+  let generation = model.file_panel.file_link_generation
   let (_, model) = update(
     dispatch,
     ExternalLinkClicked("http://127.0.0.1:5173/"),
     model,
   )
   assert_true(model.dock.open)
+  assert_eq(model.file_panel.file_link_generation, generation + 1)
   assert_true(@dock.active_browser(model.dock) == Some(1))
   assert_true(
     @preview.page(model.preview, 1).unwrap().url ==
@@ -16266,6 +16768,7 @@ test "web links open (and reuse) a dock browser tab; other schemes do not" {
     model,
   )
   assert_eq(model.dock.tabs.length(), 2)
+  assert_eq(model.file_panel.file_link_generation, generation + 2)
   assert_true(@dock.active_browser(model.dock) == Some(2))
   assert_true(
     @preview.page(model.preview, 2).unwrap().url ==
@@ -16279,6 +16782,7 @@ test "web links open (and reuse) a dock browser tab; other schemes do not" {
   )
   assert_eq(model.dock.tabs.length(), 2)
   assert_eq(model.preview.pages.length(), 2)
+  assert_eq(model.file_panel.file_link_generation, generation + 3)
   // External sites are web pages too: they get their own tab.
   let (_, model) = update(
     dispatch,
@@ -16287,6 +16791,7 @@ test "web links open (and reuse) a dock browser tab; other schemes do not" {
   )
   assert_eq(model.dock.tabs.length(), 3)
   assert_true(@dock.active_browser(model.dock) == Some(3))
+  assert_eq(model.file_panel.file_link_generation, generation + 4)
   // A non-web scheme keeps the system handler: no tab appears.
   let (_, model) = update(
     dispatch,
@@ -16294,6 +16799,7 @@ test "web links open (and reuse) a dock browser tab; other schemes do not" {
     model,
   )
   assert_eq(model.dock.tabs.length(), 3)
+  assert_eq(model.file_panel.file_link_generation, generation + 4)
   // So does a link clicked on another screen, where the dock is not on
   // screen to show a tab — Settings' device-page link wants the browser the
   // user is signed in to anyway.
@@ -16304,6 +16810,7 @@ test "web links open (and reuse) a dock browser tab; other schemes do not" {
   )
   assert_eq(settings.dock.tabs.length(), 3)
   assert_eq(settings.preview.pages.length(), 3)
+  assert_eq(settings.file_panel.file_link_generation, generation + 4)
 }
 
 ///|
@@ -16351,11 +16858,13 @@ test "submitting the address bar normalizes the draft and commits it" {
     BrowserAddressEdited("localhost:5173"),
     model,
   )
+  let generation = model.file_panel.file_link_generation
   let (_, model) = update(dispatch, BrowserNavigateSubmitted, model)
   let page = @preview.page(model.preview, 1).unwrap()
   assert_true(page.url == Some("http://localhost:5173"))
   assert_eq(page.input, "http://localhost:5173")
   assert_true(page.loading)
+  assert_eq(model.file_panel.file_link_generation, generation + 1)
   // A non-navigable draft changes nothing — including a bare scheme, which
   // the host would reject after the URL had already been committed.
   let (_, edited) = update(dispatch, BrowserAddressEdited("two words"), model)
@@ -16364,11 +16873,19 @@ test "submitting the address bar normalizes the draft and commits it" {
     @preview.page(unchanged.preview, 1).unwrap().url ==
     Some("http://localhost:5173"),
   )
+  assert_eq(
+    unchanged.file_panel.file_link_generation,
+    model.file_panel.file_link_generation,
+  )
   let (_, edited) = update(dispatch, BrowserAddressEdited("http://"), unchanged)
   let (_, still) = update(dispatch, BrowserNavigateSubmitted, edited)
   assert_true(
     @preview.page(still.preview, 1).unwrap().url ==
     Some("http://localhost:5173"),
+  )
+  assert_eq(
+    still.file_panel.file_link_generation,
+    model.file_panel.file_link_generation,
   )
 }
 

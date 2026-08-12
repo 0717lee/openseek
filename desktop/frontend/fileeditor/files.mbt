@@ -73,15 +73,18 @@ fn list_files(
 /// Read `path` and fold its contents back as `FileLoaded`. `name` is the
 /// entry's display name, forwarded for the viewer's title and language guess.
 /// `range`, when present (a symbol jump's target), is forwarded for the
-/// viewer to reveal and select once loaded; `annotation` (an annotation
-/// chip's comment) rides along the same way, re-shown as an editor bubble
-/// over that range.
+/// viewer to reveal and select once loaded. A transcript link also carries
+/// its click generation so a late reply cannot move the viewer after a newer
+/// navigation. Its content may still settle a loading background tab so the
+/// tab is not stranded. `annotation` (an annotation chip's comment) rides
+/// along the same way, re-shown as an editor bubble over that range.
 pub fn read_file(
   dispatch : @cmd.Emit[Msg],
   owner : @interop.ConversationKey,
   epoch : Int,
   path : @pathx.Relative,
   name : String,
+  file_link_generation? : Int,
   review_generation? : Int,
   range~ : @common.Range?,
   annotation? : String,
@@ -97,6 +100,7 @@ pub fn read_file(
         owner~,
         epoch~,
         path~,
+        file_link_generation~,
         review_generation~,
         message="file root moved to another host before file read",
       ),
@@ -117,6 +121,7 @@ pub fn read_file(
                 owner~,
                 epoch~,
                 path~,
+                file_link_generation~,
                 review_generation~,
                 message=@interop.bridge_error_text(error),
               ),
@@ -135,6 +140,7 @@ pub fn read_file(
                 path~,
                 name~,
                 file~,
+                file_link_generation~,
                 review_generation~,
                 range~,
                 annotation~,
@@ -148,6 +154,7 @@ pub fn read_file(
                 owner~,
                 epoch~,
                 path~,
+                file_link_generation~,
                 review_generation~,
                 message="could not read file",
               ),
@@ -362,6 +369,7 @@ test "a cross-host file read settles through its generation-fenced failure" {
         owner={ channel: @interop.ChannelId::Remote("other"), .. },
         epoch=0,
         path=@pathx.Relative("src/main.mbt"),
+        file_link_generation=None,
         review_generation=Some(7),
         message="file root moved to another host before file read"
       )
