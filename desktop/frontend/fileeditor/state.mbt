@@ -149,6 +149,33 @@ pub(all) struct WatchedPaths {
   root : @common.Uri
   files : Array[@pathx.Relative]
   directories : Array[@pathx.Relative]
+  recursive : Bool
+} derive(Eq)
+
+///|
+/// A lazily requested snapshot of one concrete workspace root. The Host walks
+/// the root recursively, pruning churn directories and capping the result;
+/// owner/root transitions reset it with the rest of the file-panel cache.
+pub enum FileIndex {
+  // No consumer has requested this workspace root yet.
+  IndexEmpty
+  // The first request is in flight. A watcher event can arrive after the
+  // recursive watch starts but before that request settles; `refresh_again`
+  // preserves one follow-up scan across that race.
+  IndexLoading(refresh_again~ : Bool)
+  // The first request failed. A later EnsureFileIndex retries it.
+  IndexFailed
+  // `truncated` means the Host stopped at its response cap. A ready snapshot
+  // remains usable while one refresh runs; watcher bursts coalesce into at
+  // most one follow-up scan. When `refreshing` is false, `refresh_again` marks
+  // a failed refresh whose stale snapshot must be retried by the next
+  // EnsureFileIndex consumer.
+  IndexReady(
+    files~ : Array[@pathx.Relative],
+    truncated~ : Bool,
+    refreshing~ : Bool,
+    refresh_again~ : Bool
+  )
 } derive(Eq)
 
 ///|
@@ -280,17 +307,18 @@ pub(all) struct State {
   // open. Retaining this transition bit keeps Changes refresh behavior
   // independent from whether any file watcher remains active.
   explorer_was_visible : Bool
-  // The paths the host's watcher currently follows (`None` = parked). Keeping
-  // the full configuration makes opening/closing a tab or expanding/collapsing
-  // a directory replace the watch even when the conversation did not change.
+  // The effective paths most recently requested from the Host (`None` =
+  // parked). Recursive selections omit ordinary paths already covered by the
+  // workspace-wide watch, so equality means the native watch policy is truly
+  // unchanged rather than merely producing an equivalent Host filter.
   watching : WatchedPaths?
   // Monotonic counter of the most recently requested watcher configuration.
   // Combined with `Ctx.watch_namespace`, it advances on every replacement or
   // park independently of root and filesystem request epochs.
   watch_generation : Int
-  // A watcher can fail after `fs.watch` has already replied. Keep that
-  // failure separate from directory/file requests so a later successful
-  // directory listing does not hide the loss of live updates.
+  // `fs.watch` can reject activation, and an active watcher can later stop.
+  // Keep either failure separate from directory/file requests so a later
+  // successful listing does not hide the loss of live updates.
   watch_error : String?
   // Directory paths the user has expanded, and those with a `read_directory`
   // in flight; plain arrays since a workspace tree is small.
@@ -305,6 +333,8 @@ pub(all) struct State {
   // The directory a breadcrumb click most recently revealed, flashed in the
   // tree until `HighlightCleared` fires.
   highlighted : @pathx.Relative?
+  // The workspace-wide file snapshot used by completion consumers.
+  index : FileIndex
   // The last directory/file failure, surfaced in the panel header;
   // `None` while nothing has failed.
   error : String?
@@ -340,6 +370,7 @@ pub fn State::empty() -> State {
     children: Map([]),
     docs: Map([]),
     highlighted: None,
+    index: IndexEmpty,
     error: None,
   }
 }
@@ -428,6 +459,9 @@ pub(all) enum Msg {
   // Expand or collapse a directory row in the file tree; the first expansion
   // lazily lists the directory through the host.
   DirToggle(@pathx.Relative)
+  // Ensure the current workspace's file snapshot exists. Loading and ready
+  // states make this idempotent; a failed first request is retryable.
+  EnsureFileIndex
   // A `read_directory` reply: `owner`/`path` say which request it answers so a
   // reply that lost a conversation switch can be dropped.
   DirLoaded(
@@ -442,6 +476,17 @@ pub(all) enum Msg {
     path~ : @pathx.Relative,
     message~ : String
   )
+  // A workspace snapshot reply. The owner/epoch pair rejects a result that
+  // outlived a conversation or concrete-root transition.
+  FilesIndexed(
+    owner~ : @interop.ConversationKey,
+    epoch~ : Int,
+    files~ : Array[@pathx.Relative],
+    truncated~ : Bool
+  )
+  // A request failed or was cancelled. A failed background refresh keeps the
+  // previously ready snapshot; only an initial fetch becomes IndexFailed.
+  FileIndexFailed(owner~ : @interop.ConversationKey, epoch~ : Int)
   // A `git.changes` reply. `head` carries the immutable comparison when the
   // host can identify one: a task or branch baseline when present, otherwise
   // resolved HEAD. `None` means no commit exists or a legacy host omitted the

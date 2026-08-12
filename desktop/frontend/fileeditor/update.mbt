@@ -1002,6 +1002,21 @@ fn FileChange::relist_candidates(self : FileChange) -> Array[@pathx.Relative] {
 }
 
 ///|
+/// Content-only edits preserve the workspace path set. Structural changes
+/// below a directory excluded by file discovery cannot affect its snapshot;
+/// a rename still matters when either side crosses that policy boundary.
+fn FileChange::changes_file_list(self : FileChange) -> Bool {
+  match self {
+    Modified(_) => false
+    Created(path) | Removed(path) =>
+      !@file_search_policy.excludes_descendant(path.0)
+    Renamed(old~, new~) =>
+      !@file_search_policy.excludes_descendant(old.0) ||
+      !@file_search_policy.excludes_descendant(new.0)
+  }
+}
+
+///|
 /// Whether the change involves a path that feeds `moon check` — a source or
 /// interface file, or a module/package manifest. Only these can move the
 /// module's diagnostics.
@@ -1053,30 +1068,126 @@ fn moonbit_check_input(path : @pathx.Relative) -> Bool {
 }
 
 ///|
-/// Reconcile the host's workspace watcher with what the panel and open tabs
-/// need. Quick Open's search cache is intentionally independent: like VS Code,
-/// it refreshes when the picker opens instead of extending watcher lifetime.
+/// Mark a ready snapshot stale after a structural watcher event. The Bool
+/// tells the caller to start the single allowed refresh; later events only
+/// latch one follow-up while that request is in flight.
+fn FileIndex::invalidate(self : FileIndex) -> (FileIndex, Bool) {
+  match self {
+    IndexLoading(refresh_again=false) =>
+      (IndexLoading(refresh_again=true), false)
+    IndexLoading(refresh_again=true) => (self, false)
+    IndexReady(files~, truncated~, refreshing=false, ..) =>
+      (
+        IndexReady(files~, truncated~, refreshing=true, refresh_again=false),
+        true,
+      )
+    IndexReady(files~, truncated~, refreshing=true, ..) =>
+      (
+        IndexReady(files~, truncated~, refreshing=true, refresh_again=true),
+        false,
+      )
+    _ => (self, false)
+  }
+}
+
+///|
+/// Settle a successful Host scan. The Bool asks the caller to spend a watcher
+/// event that arrived while the completed request was running.
+fn FileIndex::loaded(
+  self : FileIndex,
+  files : Array[@pathx.Relative],
+  truncated : Bool,
+) -> (FileIndex, Bool) {
+  match self {
+    IndexLoading(refresh_again~) =>
+      (
+        IndexReady(
+          files~,
+          truncated~,
+          refreshing=refresh_again,
+          refresh_again=false,
+        ),
+        refresh_again,
+      )
+    IndexReady(refreshing=true, refresh_again~, ..) =>
+      (
+        IndexReady(
+          files~,
+          truncated~,
+          refreshing=refresh_again,
+          refresh_again=false,
+        ),
+        refresh_again,
+      )
+    _ => (self, false)
+  }
+}
+
+///|
+/// Settle a failed Host scan. Initial failure is retryable from empty; a
+/// background failure retains the previous snapshot and any coalesced retry.
+/// If its one immediate retry was already spent, keep a stale latch for the
+/// next consumer instead of retrying forever or making the snapshot permanent.
+fn FileIndex::failed(self : FileIndex) -> (FileIndex, Bool) {
+  match self {
+    IndexLoading(..) => (IndexFailed, false)
+    IndexReady(files~, truncated~, refreshing=true, refresh_again~) =>
+      (
+        IndexReady(
+          files~,
+          truncated~,
+          refreshing=refresh_again,
+          refresh_again=!refresh_again,
+        ),
+        refresh_again,
+      )
+    _ => (self, false)
+  }
+}
+
+///|
+/// Reconcile the Host watcher with the panel, open tabs, and the workspace
+/// snapshot. A live index asks the Host to retain non-ignored descendants even
+/// while the panel is hidden, so empty directories and paths beyond the
+/// bounded result can still invalidate the cached path set.
 fn State::watched_paths(self : State, ctx : Ctx) -> WatchedPaths? {
   guard ctx.root is Some(root) else { return None }
+  let index_live = self.index is IndexLoading(..) ||
+    self.index is IndexReady(..)
   if ctx.checkout is None ||
     ctx.checkout is Some(@interop.MissingWorktree(_)) ||
-    (!ctx.panel_open && ctx.open_files.is_empty()) ||
+    (!ctx.panel_open && ctx.open_files.is_empty() && !index_live) ||
     ctx.owner.session.is_empty() {
     return None
   }
   let files = ctx.open_files.copy()
   files.sort_by((left, right) => left.0.lexical_compare(right.0))
-  let directories : Array[@pathx.Relative] = []
-  if ctx.panel_open {
-    directories.push(@pathx.Relative::root())
+  let recursive = index_live
+  let files = if recursive {
+    files.filter(path => @file_search_policy.excludes_directory(path.0))
+  } else {
+    files
+  }
+  let directories = if ctx.panel_open {
+    let directories = []
+    if !directories.contains(@pathx.Relative::root()) {
+      directories.push(@pathx.Relative::root())
+    }
     for directory in self.expanded {
       if !directories.contains(directory) {
         directories.push(directory)
       }
     }
     directories.sort_by((left, right) => left.0.lexical_compare(right.0))
+    if recursive {
+      directories.filter(path => @file_search_policy.excludes_directory(path.0))
+    } else {
+      directories
+    }
+  } else {
+    []
   }
-  Some({ owner: ctx.owner, root, files, directories })
+  Some({ owner: ctx.owner, root, files, directories, recursive })
 }
 
 ///|
@@ -1098,9 +1209,11 @@ fn with_watch(
     (state, cmd)
   } else {
     let commands = [cmd]
-    // Every desired-configuration transition owns a fresh identity, including
-    // parking. Host pushes can be delayed beyond the ordered watch request,
-    // so root equality alone cannot tell an old same-root watcher apart.
+    // Every effective configuration gets one identity for both baseline/change
+    // events and later watcher failures. Recursive selections are normalized
+    // by `watched_paths`, so an equivalent Host watcher is never renamed while
+    // it is active. A real replacement emits a full baseline before its
+    // request succeeds, closing the old-to-new observation gap.
     let watch_generation = state.watch_generation + 1
     let watch_identity = ctx.watch_identity(watch_generation)
     // A watcher is host-local. Moving across channels must explicitly retire
@@ -1114,7 +1227,7 @@ fn with_watch(
         watch_workspace(
           dispatch,
           channel=current.owner.channel,
-          watch_identity,
+          generation=watch_identity,
           None,
         ),
       )
@@ -1124,7 +1237,7 @@ fn with_watch(
         watch_workspace(
           dispatch,
           channel=next.owner.channel,
-          watch_identity,
+          generation=watch_identity,
           Some(next),
         ),
       )
@@ -1134,6 +1247,29 @@ fn with_watch(
       @cmd.batch(commands),
     )
   }
+}
+
+///|
+/// Park this panel's watcher on its current Host connection before another
+/// device takes focus. Keeping the old owner/root state intact lets the normal
+/// sync pass retire its file-index cache at the same boundary.
+pub fn State::retire_watcher(
+  self : State,
+  dispatch : @cmd.Emit[Msg],
+  ctx : Ctx,
+) -> (State, @cmd.Cmd) {
+  guard self.watching is Some(current) else { return (self, @cmd.none) }
+  let watch_generation = self.watch_generation + 1
+  let watch_identity = ctx.watch_identity(watch_generation)
+  (
+    { ..self, watching: None, watch_generation, watch_error: None },
+    watch_workspace(
+      dispatch,
+      channel=current.owner.channel,
+      generation=watch_identity,
+      None,
+    ),
+  )
 }
 
 ///|
@@ -1400,6 +1536,20 @@ pub fn sync(
     same_owner &&
     state.placement_parked &&
     !placement_identity_changed
+  // The Host file-search service retains complete snapshots by cache key.
+  // Clear the outgoing key exactly when this panel retires its index; keeping
+  // it while BridgeReady merely replaces the connection is harmless because
+  // that new HostConnection starts with an empty service.
+  let retire_index_cmd = if (
+      owner_changed || placement_identity_changed || parking_existing_owner
+    ) &&
+    !(state.index is IndexEmpty) &&
+    state.owner is Some(old_owner) &&
+    state.placement_root is Some(old_root) {
+    @files.Request(old_owner.channel, old_owner.session, Some(old_root)).retire()
+  } else {
+    @cmd.none
+  }
   // Every filesystem request in this reconciliation carries the incarnation
   // it addresses. Compute a boundary's next epoch before scheduling any work;
   // the root projection catches up from the returned state on the next pass.
@@ -1457,7 +1607,7 @@ pub fn sync(
         watch_workspace(
           dispatch,
           channel=current.owner.channel,
-          reroot_watch_identity,
+          generation=reroot_watch_identity,
           None,
         ),
       )
@@ -1552,6 +1702,7 @@ pub fn sync(
       docs,
       children: Map([]),
       loading: [],
+      index: IndexEmpty,
       error: None,
       changes_generation: state.changes_generation + 1,
       review_generation,
@@ -1686,7 +1837,9 @@ pub fn sync(
   } else {
     (@cmd.none, state)
   }
-  let pending_cmd = @cmd.batch([reroot_cmd, restore_cmd, changes_cmd])
+  let pending_cmd = @cmd.batch([
+    retire_index_cmd, reroot_cmd, restore_cmd, changes_cmd,
+  ])
   // A closed panel re-roots (above) and keeps the watcher placed, but the tree
   // itself can wait for the reopen. Unresolved placement takes the same early
   // exit even if the dock is visible: no host path may fall back to root.
@@ -1907,6 +2060,36 @@ pub fn update(
           )
         }
       }
+    EnsureFileIndex =>
+      if state.owner != Some(ctx.owner) ||
+        state.placement_parked ||
+        ctx.root is None ||
+        ctx.checkout is None ||
+        ctx.checkout is Some(MissingWorktree(_)) ||
+        ctx.owner.session.is_empty() {
+        (@cmd.none, state)
+      } else if state.index is IndexEmpty || state.index is IndexFailed {
+        (
+          list_files(dispatch, ctx.owner, ctx.request_epoch, root=ctx.root),
+          { ..state, index: IndexLoading(refresh_again=false) },
+        )
+      } else if state.index
+        is IndexReady(files~, truncated~, refreshing=false, refresh_again=true) {
+        (
+          list_files(dispatch, ctx.owner, ctx.request_epoch, root=ctx.root),
+          {
+            ..state,
+            index: IndexReady(
+              files~,
+              truncated~,
+              refreshing=true,
+              refresh_again=false,
+            ),
+          },
+        )
+      } else {
+        (@cmd.none, state)
+      }
     DirLoaded(owner~, epoch~, path~, entries~) =>
       // Drop a reply whose conversation is no longer the panel's.
       if state.owner != Some(owner) || state.request_epoch != epoch {
@@ -1945,6 +2128,30 @@ pub fn update(
             error: Some(message),
           },
         )
+      }
+    FilesIndexed(owner~, epoch~, files~, truncated~) =>
+      if state.owner != Some(owner) || state.request_epoch != epoch {
+        (@cmd.none, state)
+      } else {
+        let (index, retry) = state.index.loaded(files, truncated)
+        let cmd = if retry {
+          list_files(dispatch, owner, epoch, root=ctx.root)
+        } else {
+          @cmd.none
+        }
+        (cmd, { ..state, index, })
+      }
+    FileIndexFailed(owner~, epoch~) =>
+      if state.owner != Some(owner) || state.request_epoch != epoch {
+        (@cmd.none, state)
+      } else {
+        let (index, retry) = state.index.failed()
+        let cmd = if retry {
+          list_files(dispatch, owner, epoch, root=ctx.root)
+        } else {
+          @cmd.none
+        }
+        (cmd, { ..state, index, })
       }
     ChangesPollDue(owner~, generation~) =>
       if state.owner == Some(owner) &&
@@ -2366,9 +2573,27 @@ pub fn update(
     RunSettled(owner~) =>
       if state.owner == Some(owner) {
         // A completed agent run can write files outside the pruned watcher.
-        // Git status alone cannot prove their content is unchanged, so review
-        // progress is conservatively reset at this authoritative boundary.
-        let state = { ..state, reviewed_changes: [] }
+        // Git status alone cannot prove their content or path set is unchanged,
+        // so review progress and a ready file index are conservatively
+        // invalidated at this authoritative boundary. FileIndex coalesces a
+        // second settled run while its refresh is still in flight.
+        let (index, start_index_refresh) = state.index.invalidate()
+        // A missing worktree root rejects watcher activation immediately. The
+        // run-settled boundary is authoritative evidence that setup may now
+        // have created it, so permit exactly one new attempt here. Ordinary
+        // sync messages retain the failed desired configuration and cannot
+        // spin an unbounded request/failure loop.
+        let watching = if state.watch_error is Some(_) {
+          None
+        } else {
+          state.watching
+        }
+        let state = { ..state, reviewed_changes: [], index, watching }
+        let index_cmd = if start_index_refresh {
+          list_files(dispatch, owner, state.request_epoch, root=ctx.root)
+        } else {
+          @cmd.none
+        }
         let diagnostics = match
           active_moonbit_diagnostics(
             dispatch,
@@ -2396,7 +2621,7 @@ pub fn update(
         } else {
           (@cmd.none, state)
         }
-        (@cmd.batch([diagnostics, changes_cmd]), next)
+        (@cmd.batch([diagnostics, changes_cmd, index_cmd]), next)
       } else {
         (@cmd.none, state)
       }
@@ -2417,6 +2642,7 @@ pub fn update(
         let cmds = []
         let stat_paths : Array[@pathx.Relative] = []
         let relist : Array[@pathx.Relative] = []
+        let mut refresh_index = false
         let mut moonbit_changed = false
         if changes is Some(changes) {
           for change in changes {
@@ -2436,6 +2662,9 @@ pub fn update(
                 relist.push(directory)
               }
             }
+            if change.changes_file_list() {
+              refresh_index = true
+            }
           }
         } else {
           for path in ctx.open_files {
@@ -2450,6 +2679,12 @@ pub fn update(
               relist.push(directory)
             }
           }
+          // Recursive selections omit shallow explorer paths already covered
+          // by the workspace-wide watcher, so those transitions issue no new
+          // request. A received baseline therefore marks an initial attach or
+          // an actual watcher replacement and must close that replacement gap.
+          refresh_index = state.index is IndexLoading(..) ||
+            state.index is IndexReady(..)
         }
         if !stat_paths.is_empty() {
           cmds.push(
@@ -2491,7 +2726,22 @@ pub fn update(
             ),
           )
         }
-        let next = { ..state, loading, reviewed_changes }
+        // Structural events change the path set. Watcher baselines latch a
+        // follow-up during the initial scan or refresh a ready snapshot after
+        // a real replacement; normalized equivalent recursive selections do
+        // not issue replacement requests. A ready snapshot stays usable during
+        // one refresh, and later structural bursts coalesce once.
+        let (index, start_refresh) = if refresh_index {
+          state.index.invalidate()
+        } else {
+          (state.index, false)
+        }
+        if start_refresh {
+          cmds.push(
+            list_files(dispatch, owner, state.request_epoch, root=ctx.root),
+          )
+        }
+        let next = { ..state, loading, reviewed_changes, index }
         // Any content event can change Git status, not just a structural one.
         // Refresh only after Changes has been requested and while its explorer
         // or a review is live; reopening performs its own full refresh. The
@@ -2684,7 +2934,20 @@ pub fn update(
         owner.channel == channel &&
         ctx.root == Some(root) &&
         generation == ctx.watch_identity(state.watch_generation) {
-        (@cmd.none, { ..state, watch_error: Some(message) })
+        // The Host reports request-time activation failures through the
+        // `fs.watch` reply and reserves this event for a watcher that stopped
+        // after it was active. Keep the failed configuration recorded so the
+        // ordinary sync pass cannot create an unbounded retry loop. A later
+        // effective configuration change starts a fresh generation.
+        // Refresh the current snapshot once because the stopped watcher opens
+        // an observation gap even though it remains useful for reads.
+        let (index, start_index_refresh) = state.index.invalidate()
+        let cmd = if start_index_refresh {
+          list_files(dispatch, owner, state.request_epoch, root=ctx.root)
+        } else {
+          @cmd.none
+        }
+        (cmd, { ..state, index, watch_error: Some(message) })
       } else {
         (@cmd.none, state)
       }
@@ -2776,6 +3039,249 @@ fn test_modified_change(path : @pathx.Relative) -> ChangedFile {
     worktree_status: "M",
     kind: ChangeModified,
   }
+}
+
+///|
+test "file index requests retry failures and fence stale replies" {
+  let emit = test_emit()
+  let ctx = test_ctx()
+  let state = owned_state()
+  let (_, loading) = update(emit, EnsureFileIndex, state, ctx)
+  assert_true(loading.index is IndexLoading(refresh_again=false))
+  let (_, duplicate) = update(emit, EnsureFileIndex, loading, ctx)
+  assert_true(duplicate == loading)
+  let (_, stale) = update(
+    emit,
+    FilesIndexed(
+      owner=ctx.owner,
+      epoch=ctx.request_epoch + 1,
+      files=[Relative("stale.mbt")],
+      truncated=false,
+    ),
+    loading,
+    ctx,
+  )
+  assert_true(stale == loading)
+  let (_, failed) = update(
+    emit,
+    FileIndexFailed(owner=ctx.owner, epoch=ctx.request_epoch),
+    loading,
+    ctx,
+  )
+  assert_true(failed.index is IndexFailed)
+  let (_, retrying) = update(emit, EnsureFileIndex, failed, ctx)
+  assert_true(retrying.index is IndexLoading(refresh_again=false))
+  let (_, ready) = update(
+    emit,
+    FilesIndexed(
+      owner=ctx.owner,
+      epoch=ctx.request_epoch,
+      files=[Relative("src/main.mbt")],
+      truncated=true,
+    ),
+    retrying,
+    ctx,
+  )
+  assert_true(
+    ready.index
+    is IndexReady(
+      files=[Relative("src/main.mbt")],
+      truncated=true,
+      refreshing=false,
+      refresh_again=false
+    ),
+  )
+  let (_, refresh_failed) = update(
+    emit,
+    FileIndexFailed(owner=ctx.owner, epoch=ctx.request_epoch),
+    ready,
+    ctx,
+  )
+  assert_true(refresh_failed == ready)
+  let refreshing = {
+    ..ready,
+    index: IndexReady(
+      files=[Relative("src/main.mbt")],
+      truncated=true,
+      refreshing=true,
+      refresh_again=false,
+    ),
+  }
+  let (_, stale) = update(
+    emit,
+    FileIndexFailed(owner=ctx.owner, epoch=ctx.request_epoch),
+    refreshing,
+    ctx,
+  )
+  assert_true(
+    stale.index is IndexReady(refreshing=false, refresh_again=true, ..),
+  )
+  let (_, retrying_stale) = update(emit, EnsureFileIndex, stale, ctx)
+  assert_true(
+    retrying_stale.index is IndexReady(refreshing=true, refresh_again=false, ..),
+  )
+}
+
+///|
+test "watcher changes during the initial file index scan schedule one follow-up" {
+  let emit = test_emit()
+  let ctx = test_ctx()
+  let (_, loading) = update(emit, EnsureFileIndex, owned_state(), ctx)
+  let changed = FsChanged(
+    root=ctx.test_root(),
+    generation=ctx.watch_identity(loading.watch_generation),
+    changes=Some([Created(Relative("src/new.mbt"))]),
+  )
+  let (_, latched) = update(emit, changed, loading, ctx)
+  assert_true(latched.index is IndexLoading(refresh_again=true))
+  let (_, following_up) = update(
+    emit,
+    FilesIndexed(
+      owner=ctx.owner,
+      epoch=ctx.request_epoch,
+      files=[Relative("src/old.mbt")],
+      truncated=false,
+    ),
+    latched,
+    ctx,
+  )
+  assert_true(
+    following_up.index is IndexReady(refreshing=true, refresh_again=false, ..),
+  )
+  let (_, settled) = update(
+    emit,
+    FilesIndexed(
+      owner=ctx.owner,
+      epoch=ctx.request_epoch,
+      files=[Relative("src/old.mbt"), Relative("src/new.mbt")],
+      truncated=false,
+    ),
+    following_up,
+    ctx,
+  )
+  assert_true(
+    settled.index
+    is IndexReady(
+      files=[Relative("src/old.mbt"), Relative("src/new.mbt")],
+      refreshing=false,
+      refresh_again=false,
+      ..
+    ),
+  )
+}
+
+///|
+test "structural watcher bursts coalesce file index refreshes" {
+  let emit = test_emit()
+  let ctx = test_ctx()
+  let ready = {
+    ..owned_state(),
+    index: IndexReady(
+      files=[Relative("src/old.mbt")],
+      truncated=false,
+      refreshing=false,
+      refresh_again=false,
+    ),
+  }
+  let changed = FsChanged(
+    root=ctx.test_root(),
+    generation=ctx.watch_identity(ready.watch_generation),
+    changes=Some([Created(Relative("src/new.mbt"))]),
+  )
+  let (_, refreshing) = update(emit, changed, ready, ctx)
+  assert_true(
+    refreshing.index is IndexReady(refreshing=true, refresh_again=false, ..),
+  )
+  let (_, coalesced) = update(emit, changed, refreshing, ctx)
+  assert_true(
+    coalesced.index is IndexReady(refreshing=true, refresh_again=true, ..),
+  )
+  let (_, following_up) = update(
+    emit,
+    FilesIndexed(
+      owner=ctx.owner,
+      epoch=ctx.request_epoch,
+      files=[Relative("src/new.mbt")],
+      truncated=false,
+    ),
+    coalesced,
+    ctx,
+  )
+  assert_true(
+    following_up.index
+    is IndexReady(
+      files=[Relative("src/new.mbt")],
+      refreshing=true,
+      refresh_again=false,
+      ..
+    ),
+  )
+  let (_, settled) = update(
+    emit,
+    FilesIndexed(
+      owner=ctx.owner,
+      epoch=ctx.request_epoch,
+      files=[Relative("src/new.mbt"), Relative("src/last.mbt")],
+      truncated=false,
+    ),
+    following_up,
+    ctx,
+  )
+  assert_true(
+    settled.index
+    is IndexReady(
+      files=[Relative("src/new.mbt"), Relative("src/last.mbt")],
+      refreshing=false,
+      refresh_again=false,
+      ..
+    ),
+  )
+}
+
+///|
+test "settled agent runs refresh the file index beyond watcher coverage" {
+  let emit = test_emit()
+  let ctx = { ..test_ctx(), panel_open: false }
+  let ready = {
+    ..owned_state(),
+    index: IndexReady(
+      files=[Relative("src/old.mbt")],
+      truncated=true,
+      refreshing=false,
+      refresh_again=false,
+    ),
+  }
+  let settled = RunSettled(owner=ctx.owner)
+  let (_, refreshing) = update(emit, settled, ready, ctx)
+  assert_true(
+    refreshing.index is IndexReady(refreshing=true, refresh_again=false, ..),
+  )
+  // The same input has the same result; the update performs no direct effect.
+  let (_, repeated_from_ready) = update(emit, settled, ready, ctx)
+  assert_true(repeated_from_ready == refreshing)
+  let (_, coalesced) = update(emit, settled, refreshing, ctx)
+  assert_true(
+    coalesced.index is IndexReady(refreshing=true, refresh_again=true, ..),
+  )
+}
+
+///|
+test "only structural watcher events change the file index path set" {
+  assert_false(Modified(Relative("src/main.mbt")).changes_file_list())
+  assert_true(Created(Relative("src/new.mbt")).changes_file_list())
+  assert_true(Removed(Relative("src/old.mbt")).changes_file_list())
+  assert_true(
+    Renamed(old=Relative("src/old.mbt"), new=Relative("src/new.mbt")).changes_file_list(),
+  )
+  assert_false(Created(Relative("node_modules/pkg/new.js")).changes_file_list())
+  assert_false(Removed(Relative("target/cache/output")).changes_file_list())
+  assert_true(Created(Relative("node_modules")).changes_file_list())
+  assert_true(
+    Renamed(
+      old=Relative("node_modules/pkg/hidden.js"),
+      new=Relative("src/visible.js"),
+    ).changes_file_list(),
+  )
 }
 
 ///|
@@ -3601,6 +4107,7 @@ test "a closed panel still re-roots when the conversation switches" {
       root: test_ctx().test_root(),
       files: [Relative("a.mbt")],
       directories: [],
+      recursive: false,
     }),
   }
   // The new conversation has nothing open and the panel is closed.
@@ -3637,6 +4144,7 @@ test "a closed panel still re-roots when the conversation switches" {
         root: _,
         files: [Relative("a.mbt")],
         directories: [],
+        recursive: false,
       }
     ),
   )
@@ -3680,11 +4188,18 @@ test "a resolved placement change reroots documents and fences old replies" {
     children: Map([
       (@pathx.Relative::root(), [{ name: "reviewed.mbt", path, is_dir: false }]),
     ]),
+    index: IndexReady(
+      files=[path],
+      truncated=false,
+      refreshing=false,
+      refresh_again=false,
+    ),
     watching: Some({
       owner: test_ctx().owner,
       root: old_workspace,
       files: [path],
       directories: [@pathx.Relative::root()],
+      recursive: true,
     }),
   }
   let worktree_ctx : Ctx = {
@@ -3705,6 +4220,7 @@ test "a resolved placement change reroots documents and fences old replies" {
     is Some({ state: TabLoading, review: None, stale: false, .. }),
   )
   assert_true(moved.children.is_empty())
+  assert_true(moved.index is IndexEmpty)
   assert_true(moved.changes is ChangeListIdle)
   assert_false(moved.changes_head_known)
   assert_true(
@@ -3715,6 +4231,7 @@ test "a resolved placement change reroots documents and fences old replies" {
         root: _,
         files: [@pathx.Relative("reviewed.mbt")],
         directories: [@pathx.Relative("")],
+        recursive: false,
       }
     ),
   )
@@ -3794,11 +4311,18 @@ test "a missing checkout parks files and refuses editor actions until repair" {
     ..owned_state(),
     docs,
     review_generation: 4,
+    index: IndexReady(
+      files=[Relative("a.mbt")],
+      truncated=false,
+      refreshing=false,
+      refresh_again=false,
+    ),
     watching: Some({
       owner: present.owner,
       root: present.test_root(),
       files: [Relative("a.mbt")],
       directories: [@pathx.Relative::root()],
+      recursive: true,
     }),
   }
   let missing : Ctx = {
@@ -3813,9 +4337,12 @@ test "a missing checkout parks files and refuses editor actions until repair" {
     parked.docs.get(Relative("a.mbt")) is Some({ state: TabLoaded(..), .. }),
   )
   assert_true(parked.children.is_empty())
+  assert_true(parked.index is IndexEmpty)
   assert_true(parked.watching is None)
   assert_true(parked.placement_parked)
   assert_eq(parked.request_epoch, state.request_epoch + 1)
+  let (_, refused_index) = update(emit, EnsureFileIndex, parked, missing)
+  assert_true(refused_index == parked)
   // Root/dock callers also use these public entry points directly, bypassing
   // the guarded message dispatcher. They enforce the same placement boundary.
   let (_, direct_open) = open_document(
@@ -3950,6 +4477,7 @@ test "a missing checkout settles an in-flight Changes request for retry" {
       root: present.test_root(),
       files: [],
       directories: [@pathx.Relative::root()],
+      recursive: false,
     }),
   }
   let missing : Ctx = {
@@ -4023,6 +4551,7 @@ test "checkout recovery restarts a review whose paired replies were parked" {
       root: present.test_root(),
       files: [path],
       directories: [@pathx.Relative::root()],
+      recursive: false,
     }),
   }
   let missing : Ctx = {
@@ -4242,6 +4771,7 @@ test "an unresolved placement parks files and refuses editor actions" {
       root: present.test_root(),
       files: [Relative("a.mbt")],
       directories: [@pathx.Relative::root()],
+      recursive: false,
     }),
   }
   let unresolved : Ctx = {
@@ -4255,6 +4785,8 @@ test "an unresolved placement parks files and refuses editor actions" {
   assert_true(parked.owner is Some({ session: "", .. }))
   assert_true(parked.docs.is_empty())
   assert_true(parked.watching is None)
+  let (_, refused_index) = update(emit, EnsureFileIndex, parked, unresolved)
+  assert_true(refused_index == parked)
   let (_, selected) = update(
     emit,
     ExplorerModeSelected(ExplorerChanges),
@@ -4286,6 +4818,33 @@ test "ToggleTree flips the pane and RevealDirectory forces it open" {
 }
 
 ///|
+test "a ready file index watches non-ignored descendants while hidden" {
+  let state = {
+    ..owned_state(),
+    index: IndexReady(
+      files=[Relative("nested/deep/file.mbt")],
+      truncated=false,
+      refreshing=false,
+      refresh_again=false,
+    ),
+  }
+  let hidden = { ..test_ctx(), panel_open: false }
+  let (watched, _) = sync(test_emit(), state, hidden)
+  assert_true(
+    watched.watching
+    is Some(
+      {
+        owner: { channel: Local, session: "desktop-test" },
+        root: _,
+        files: [],
+        directories: [],
+        recursive: true,
+      }
+    ),
+  )
+}
+
+///|
 test "reopening Changes refreshes after the explorer is hidden" {
   let state = {
     ..owned_state(),
@@ -4301,6 +4860,7 @@ test "reopening Changes refreshes after the explorer is hidden" {
       root: test_ctx().test_root(),
       files: [],
       directories: [@pathx.Relative::root()],
+      recursive: false,
     }),
   }
   let closed_ctx = { ..test_ctx(), panel_open: false }
@@ -4334,6 +4894,7 @@ test "showing a hidden explorer refreshes Changes before polling resumes" {
       root: test_ctx().test_root(),
       files: [],
       directories: [@pathx.Relative::root()],
+      recursive: false,
     }),
   }
   let (hidden, _) = sync(test_emit(), state, hidden_ctx)
@@ -4366,6 +4927,7 @@ test "reopening Changes latches a follow-up for an in-flight refresh" {
       root: test_ctx().test_root(),
       files: [],
       directories: [@pathx.Relative::root()],
+      recursive: false,
     }),
   }
   let (refreshed, _) = sync(test_emit(), state, test_ctx())
@@ -4389,6 +4951,7 @@ test "reopening Changes latches a follow-up for the initial load" {
       root: test_ctx().test_root(),
       files: [],
       directories: [@pathx.Relative::root()],
+      recursive: false,
     }),
   }
   let (refreshed, _) = sync(test_emit(), state, test_ctx())
@@ -6018,6 +6581,7 @@ test "a hidden review accepts its file-only watch without a refresh loop" {
       root: test_ctx().test_root(),
       files: [path],
       directories: [],
+      recursive: false,
     }),
     changes: ChangeListReady(
       repository=true,
@@ -6457,7 +7021,7 @@ test "a vanished review retries a failed ordinary read" {
 }
 
 ///|
-test "watcher baseline re-lists the root and expanded, listed directories" {
+test "watcher replacement baseline re-lists directories and refreshes the index" {
   let emit = test_emit()
   let children : Map[@pathx.Relative, Array[FileEntry]] = Map([])
   children[Relative("")] = []
@@ -6466,6 +7030,12 @@ test "watcher baseline re-lists the root and expanded, listed directories" {
     ..owned_state(),
     children,
     expanded: [Relative("src"), Relative("never-listed")],
+    index: IndexReady(
+      files=[Relative("src/main.mbt")],
+      truncated=false,
+      refreshing=false,
+      refresh_again=false,
+    ),
   }
   let baseline = FsChanged(
     root=test_ctx().test_root(),
@@ -6478,9 +7048,44 @@ test "watcher baseline re-lists the root and expanded, listed directories" {
   assert_true(next.loading.contains(Relative("")))
   assert_true(next.loading.contains(Relative("src")))
   assert_false(next.loading.contains(Relative("never-listed")))
+  // Equivalent recursive selections never issue a replacement. If a baseline
+  // arrives, the Host activated a new watcher and the index must close that
+  // observation gap with a refresh.
+  assert_true(
+    next.index is IndexReady(refreshing=true, refresh_again=false, ..),
+  )
   // A second push while the lists are in flight stacks nothing.
   let (_, again) = update(emit, baseline, next, test_ctx())
   assert_eq(again.loading.length(), next.loading.length())
+}
+
+///|
+test "recursive watcher configuration omits paths already covered by its index" {
+  let state = {
+    ..owned_state(),
+    expanded: [Relative("src"), Relative("node_modules/vendor")],
+    index: IndexReady(
+      files=[Relative("src/main.mbt")],
+      truncated=false,
+      refreshing=false,
+      refresh_again=false,
+    ),
+  }
+  let ctx = {
+    ..test_ctx(),
+    open_files: [
+      Relative("src/main.mbt"),
+      Relative("node_modules/pkg/index.js"),
+    ],
+  }
+  guard state.watched_paths(ctx) is Some(watched) else {
+    fail("live index did not request a recursive watcher")
+  }
+  assert_true(watched.recursive)
+  // Ordinary selections are already included by the recursive watcher. Only
+  // explicit paths under pruned directories affect its native filter.
+  assert_true(watched.files == [Relative("node_modules/pkg/index.js")])
+  assert_true(watched.directories == [Relative("node_modules/vendor")])
 }
 
 ///|
@@ -6505,6 +7110,18 @@ test "concrete watcher events refresh only affected listed directories" {
   // Rabbita purity: the same message and model produce the same state.
   let (_, second) = update(emit, message, state, test_ctx())
   assert_true(first.loading == second.loading)
+  // Another concrete batch with the current watcher identity is accepted.
+  let (_, current) = update(
+    emit,
+    FsChanged(
+      root=test_ctx().test_root(),
+      generation=test_ctx().watch_identity(state.watch_generation),
+      changes=Some([Created(Relative("docs/new.mbt"))]),
+    ),
+    state,
+    test_ctx(),
+  )
+  assert_true(current.loading == [Relative("docs")])
   // A late batch from the previous conversation is ignored.
   let (_, stale) = update(
     emit,
@@ -6551,11 +7168,13 @@ test "sync reconciles the watcher with the panel and its open files" {
         root: _,
         files: [],
         directories: [Relative("")],
+        recursive: false,
       }
     ),
   )
   // Issuing a new watch attempt retires the previous failure.
   assert_true(watched.watch_error is None)
+  let attached_generation = watched.watch_generation
   // Opening a file or expanding a directory replaces the same conversation's
   // watcher with the new exact selection.
   let selected_ctx = { ..test_ctx(), open_files: [Relative("a.mbt")] }
@@ -6571,20 +7190,35 @@ test "sync reconciles the watcher with the panel and its open files" {
       }
     ),
   )
+  assert_eq(replaced.watch_generation, attached_generation + 1)
+  let (_, after_old_failure) = update(
+    emit,
+    FileWatchFailed(
+      channel=test_ctx().owner.channel,
+      root=test_ctx().test_root(),
+      generation=test_ctx().watch_identity(attached_generation),
+      message="replaced watcher stopped",
+    ),
+    replaced,
+    selected_ctx,
+  )
+  assert_true(after_old_failure.watch_error is None)
   // Closed panel with files still open: keep watching (staleness tracking).
   let still_ctx = {
     ..test_ctx(),
     panel_open: false,
     open_files: [Relative("a.mbt")],
   }
-  let closed = { ..replaced, children: Map([]), loading: [] }
+  let closed = { ..after_old_failure, children: Map([]), loading: [] }
   let (still, _) = sync(emit, closed, still_ctx)
   assert_true(
     still.watching is Some({ files: [Relative("a.mbt")], directories: [], .. }),
   )
+  assert_eq(still.watch_generation, attached_generation + 2)
   // Closed panel, nothing open: park the watcher.
   let (parked, _) = sync(emit, still, { ..test_ctx(), panel_open: false })
   assert_true(parked.watching is None)
+  assert_eq(parked.watch_generation, attached_generation + 3)
 }
 
 ///|
@@ -6623,6 +7257,92 @@ test "watcher failures are visible only in their owning conversation" {
 }
 
 ///|
+test "a recursive watcher failure stops retries and refreshes its index" {
+  let emit = test_emit()
+  let ctx = { ..test_ctx(), panel_open: false }
+  let generation = 5
+  let watched = {
+    ..owned_state(),
+    index: IndexReady(
+      files=[Relative("src/old.mbt")],
+      truncated=false,
+      refreshing=false,
+      refresh_again=false,
+    ),
+    watching: Some({
+      owner: ctx.owner,
+      root: ctx.test_root(),
+      files: [],
+      directories: [],
+      recursive: true,
+    }),
+    watch_generation: generation,
+  }
+  let (_, failed) = update(
+    emit,
+    FileWatchFailed(
+      channel=ctx.owner.channel,
+      root=ctx.test_root(),
+      generation=ctx.watch_identity(generation),
+      message="File watching stopped",
+    ),
+    watched,
+    ctx,
+  )
+  assert_true(failed.watching is Some({ recursive: true, .. }))
+  assert_true(
+    failed.index is IndexReady(refreshing=true, refresh_again=false, ..),
+  )
+  assert_true(failed.watch_error is Some("File watching stopped"))
+  let (stopped, _) = sync(emit, failed, ctx)
+  // An unchanged desired configuration cannot create a request/failure loop.
+  assert_true(stopped.watching is Some({ recursive: true, .. }))
+  assert_eq(stopped.watch_generation, generation)
+  assert_true(stopped.watch_error is Some("File watching stopped"))
+  // A real policy change starts one fresh concrete watcher generation.
+  let retry_ctx = { ..ctx, open_files: [Relative("node_modules/pkg/index.js")] }
+  let (retried, _) = sync(emit, stopped, retry_ctx)
+  assert_true(
+    retried.watching
+    is Some({ files: [Relative("node_modules/pkg/index.js")], .. }),
+  )
+  assert_eq(retried.watch_generation, generation + 1)
+  assert_true(retried.watch_error is None)
+}
+
+///|
+test "a settled run retries one failed watcher activation" {
+  let emit = test_emit()
+  let ctx = { ..test_ctx(), panel_open: false }
+  let generation = 5
+  let watched = {
+    ..owned_state(),
+    index: IndexReady(
+      files=[],
+      truncated=false,
+      refreshing=false,
+      refresh_again=false,
+    ),
+    watching: Some({
+      owner: ctx.owner,
+      root: ctx.test_root(),
+      files: [],
+      directories: [],
+      recursive: true,
+    }),
+    watch_generation: generation,
+    watch_error: Some("watch root did not exist"),
+  }
+  let (_, settled) = update(emit, RunSettled(owner=ctx.owner), watched, ctx)
+  assert_true(settled.watching is None)
+  assert_true(settled.watch_error is Some("watch root did not exist"))
+  let (retried, _) = sync(emit, settled, ctx)
+  assert_true(retried.watching is Some({ recursive: true, .. }))
+  assert_eq(retried.watch_generation, generation + 1)
+  assert_true(retried.watch_error is None)
+}
+
+///|
 test "same-root conversation switch fences every old watcher push" {
   let emit = test_emit()
   let old_generation = 4
@@ -6633,6 +7353,7 @@ test "same-root conversation switch fences every old watcher push" {
       root: test_ctx().test_root(),
       files: [],
       directories: [@pathx.Relative::root()],
+      recursive: false,
     }),
     watch_generation: old_generation,
   }
@@ -6645,9 +7366,8 @@ test "same-root conversation switch fences every old watcher push" {
   assert_eq(switched.watch_generation, old_generation + 1)
   assert_true(switched.watching is Some({ owner, .. }) && owner == next_owner)
 
-  // Both generations watch the same absolute root. Only the generation can
-  // tell a notification already queued by the outgoing watcher from one sent
-  // by the replacement.
+  // Both watchers use the same absolute root. Placement epochs fence concrete
+  // change events; per-configuration generations independently fence failures.
   let ready = {
     ..switched,
     children: Map([(@pathx.Relative::root(), [])]),
@@ -6657,7 +7377,7 @@ test "same-root conversation switch fences every old watcher push" {
     emit,
     FsChanged(
       root=next_ctx.test_root(),
-      generation=test_ctx().watch_identity(old_generation),
+      generation=test_ctx().watch_identity(state.watch_generation),
       changes=None,
     ),
     ready,
