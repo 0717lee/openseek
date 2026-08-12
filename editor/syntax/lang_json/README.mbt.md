@@ -1,7 +1,7 @@
 # syntax/lang_json
 
-The JSON (and JSONC) lexer. It implements `@syntax.LineTokenizer` with a
-compile-time `lexmatch` DFA.
+The strict JSON lexer. It implements `@syntax.LineTokenizer` with a compile-time
+`lexmatch` DFA. JSONC comments are intentionally outside this package's scope.
 
 `JsonTokenizer` is the whole public surface. Hosts, examples, and tests select it
 explicitly; reusable viewer core packages must not import it.
@@ -87,63 +87,47 @@ test "JSON literals are Constant and bare words are Invalid" {
 }
 ```
 
-## Cross-line state
+## Per-line state
 
-This is the one lexer feature that needs state: a JSONC `/* … */` block comment
-runs past the end of a line, so the closing state must survive into the next
-`tokenize_line` call. `lang_json` does not use the shared mode stack; its state
-is a single in-comment flag.
-
-```mermaid
-stateDiagram-v2
-  [*] --> Code: initial_state()
-  Code --> InComment: line contains an unclosed /*
-  InComment --> InComment: whole line is Comment
-  InComment --> Code: line contains */
-  Code --> Code: line closes everything it opens
-```
+Strict JSON has no comments, and strings cannot continue across lines. Every
+line therefore finishes in the canonical empty tokenizer state. Comment-looking
+input is lexed according to its characters rather than accepted as JSONC.
 
 ```mbt check
 ///|
-test "a block comment carries across lines through TokenizerState" {
+test "strict JSON does not recognize comments" {
   debug_inspect(
-    annotate(@lang_json.JsonTokenizer(), [
-      "{ /* start", "still inside", "done */ \"k\": 1 }",
-    ]),
+    annotate(@lang_json.JsonTokenizer(), ["// note", "/* also not a comment */"]),
     content=(
       #|[
-      #|  "{|Delimiter",
-      #|  "/*|Comment",
-      #|  " start|Comment",
-      #|  "still inside|Comment",
-      #|  "done |Comment",
-      #|  "*/|Comment",
-      #|  "\"k\"|String",
-      #|  ":|Delimiter",
-      #|  "1|Number",
-      #|  "}|Delimiter",
+      #|  "/|Punctuation",
+      #|  "/|Punctuation",
+      #|  "note|Invalid",
+      #|  "/|Punctuation",
+      #|  "*|Punctuation",
+      #|  "also|Invalid",
+      #|  "not|Invalid",
+      #|  "a|Invalid",
+      #|  "comment|Invalid",
+      #|  "*|Punctuation",
+      #|  "/|Punctuation",
       #|]
     ),
   )
 }
 ```
 
-Because the flag is the entire state, re-lexing a line only needs to know
-whether the previous line ended inside a comment.
+Even if a caller supplies a non-empty state, strict JSON returns its normal
+state after tokenizing the line.
 
 ```mbt check
 ///|
-test "the in-comment flag is the whole state" {
+test "strict JSON is stateless" {
   let tokenizer : &@syntax.LineTokenizer = @lang_json.JsonTokenizer()
   let initial = tokenizer.initial_state()
-  let (_, opened) = tokenizer.tokenize_line("{ /* start", initial)
-  let (_, closed) = tokenizer.tokenize_line("done */", opened)
-  debug_inspect(
-    (initial, opened, closed),
-    content=(
-      #|(TokenizerState(""), TokenizerState("c"), TokenizerState(""))
-    ),
-  )
+  let foreign = initial.push_mode(b'c')
+  let (_, end_state) = tokenizer.tokenize_line("/* text", foreign)
+  assert_true(end_state == initial)
 }
 ```
 

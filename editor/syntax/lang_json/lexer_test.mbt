@@ -79,7 +79,7 @@ test "object with strings values and literals" {
 }
 
 ///|
-test "jsonc comments carry block state across lines" {
+test "strict JSON does not recognize comments" {
   let source =
     #|// heading
     #|{ /* multi
@@ -87,12 +87,16 @@ test "jsonc comments carry block state across lines" {
   inspect(
     render_tokens(source),
     content=(
-      #|0-10 Comment // heading
+      #|0-1 Punctuation /
+      #|1-2 Punctuation /
+      #|3-10 Invalid heading
       #|11-12 Delimiter {
-      #|13-15 Comment /*
-      #|15-21 Comment  multi
-      #|22-27 Comment line 
-      #|27-29 Comment */
+      #|13-14 Punctuation /
+      #|14-15 Punctuation *
+      #|16-21 Invalid multi
+      #|22-26 Invalid line
+      #|27-28 Punctuation *
+      #|28-29 Punctuation /
       #|30-35 String "key"
       #|35-36 Delimiter :
       #|37-38 Number 1
@@ -102,14 +106,12 @@ test "jsonc comments carry block state across lines" {
 }
 
 ///|
-test "block comment state round-trips through TokenizerState" {
+test "strict JSON always returns the normal state" {
   let lexer : &@syntax.LineTokenizer = @lang_json.JsonTokenizer()
-  let (_, open_state) = lexer.tokenize_line("{ /* open", lexer.initial_state())
-  assert_true(open_state == @syntax.TokenizerState().push_mode(b'c'))
-  let (_, empty_state) = lexer.tokenize_line("", open_state)
-  assert_true(empty_state == open_state)
-  let (_, closed_state) = lexer.tokenize_line("still */ }", empty_state)
-  assert_true(closed_state == lexer.initial_state())
+  let initial = lexer.initial_state()
+  let foreign_state = initial.push_mode(b'c')
+  let (_, end_state) = lexer.tokenize_line("/* not a comment", foreign_state)
+  assert_true(end_state == initial)
 }
 
 ///|
