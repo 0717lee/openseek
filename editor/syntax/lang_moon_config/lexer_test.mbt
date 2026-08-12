@@ -49,10 +49,10 @@ test "moon.mod token stream" {
   inspect(
     render_tokens(source),
     content=(
-      #|0-4 Attribute name
+      #|0-4 Identifier name
       #|5-6 Operator =
       #|7-27 String "moonbitlang/editor"
-      #|28-35 Attribute version
+      #|28-35 Identifier version
       #|36-37 Operator =
       #|38-45 String "0.4.4"
       #|46-52 Keyword import
@@ -62,7 +62,7 @@ test "moon.mod token stream" {
       #|85-86 Delimiter }
       #|87-94 Function options
       #|94-95 Delimiter (
-      #|98-116 Attribute "preferred-target"
+      #|98-116 String "preferred-target"
       #|116-117 Delimiter :
       #|118-122 String "js"
       #|122-123 Delimiter ,
@@ -95,15 +95,15 @@ test "moon.pkg token stream" {
       #|81-82 Delimiter }
       #|83-86 Keyword for
       #|87-93 String "test"
-      #|94-102 Attribute warnings
+      #|94-102 Identifier warnings
       #|103-104 Operator =
       #|105-130 String "+unnecessary_annotation"
-      #|131-148 Attribute supported_targets
+      #|131-148 Identifier supported_targets
       #|149-150 Operator =
       #|151-155 String "js"
       #|156-163 Function options
       #|163-164 Delimiter (
-      #|167-176 Attribute "is-main"
+      #|167-176 String "is-main"
       #|176-177 Delimiter :
       #|178-182 Constant true
       #|182-183 Delimiter ,
@@ -131,11 +131,11 @@ test "legacy declarations and config vocabulary" {
       #|31-34 Identifier app
       #|35-39 Function rule
       #|39-40 Delimiter (
-      #|40-47 Attribute command
+      #|40-47 Identifier command
       #|47-48 Delimiter :
       #|49-55 String "moon"
       #|55-56 Delimiter ,
-      #|57-64 Attribute targets
+      #|57-64 Identifier targets
       #|64-65 Delimiter :
       #|66-67 Delimiter [
       #|67-71 String "js"
@@ -147,7 +147,7 @@ test "legacy declarations and config vocabulary" {
       #|92-100 String "legacy"
       #|101-103 Operator as
       #|104-111 Type @legacy
-      #|112-119 Attribute enabled
+      #|112-119 Identifier enabled
       #|120-121 Operator =
       #|122-127 Constant false
     ),
@@ -162,4 +162,30 @@ test "configuration state is always line-local" {
     lexer.initial_state(),
   )
   assert_true(after_unterminated == lexer.initial_state())
+}
+
+///|
+test "longest match keeps keyword-prefixed names as identifiers" {
+  let source =
+    #|imported = true
+    #|format = false
+    #|module_name = "demo"
+    #|options-extra = 1
+  inspect(
+    render_tokens(source),
+    content=(
+      #|0-8 Identifier imported
+      #|9-10 Operator =
+      #|11-15 Constant true
+      #|16-22 Identifier format
+      #|23-24 Operator =
+      #|25-30 Constant false
+      #|31-42 Identifier module_name
+      #|43-44 Operator =
+      #|45-51 String "demo"
+      #|52-65 Identifier options-extra
+      #|66-67 Operator =
+      #|68-69 Number 1
+    ),
+  )
 }
