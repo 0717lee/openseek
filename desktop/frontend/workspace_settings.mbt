@@ -60,6 +60,20 @@ fn fetch_workspace_settings(
 }
 
 ///|
+/// The lane serializing one workspace's settings writes. Each write is
+/// desired state, so issue order is the user's order: two quick select
+/// changes sent as independent requests could acquire the engine's lock in
+/// reply order and persist the OLDER choice last. Per workspace, so saves
+/// never queue behind another workspace's write — or behind the watcher and
+/// browser ops on the shared host lane.
+fn workspace_settings_lane(
+  channel : @interop.ChannelId,
+  workspace : @common.Uri,
+) -> String {
+  "\{channel.uri_authority()}\u{0}workspace-settings\u{0}\{workspace.path}"
+}
+
+///|
 fn save_workspace_settings(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
@@ -73,10 +87,11 @@ fn save_workspace_settings(
       // Success needs no dispatch: the committed state reaches every client
       // (this one included) as the canonical `workspace.settings_changed`
       // broadcast from the store's commit seam.
-      let _ : @protocol.WorkspaceSettingsPayload = @interop.bridge_request(
+      let _ : @protocol.WorkspaceSettingsPayload = @interop.bridge_request_in_order(
         channel,
         @commands.workspace_settings_set,
         { workspace: workspace.path, worktree_mode },
+        lane=workspace_settings_lane(channel, workspace),
       ) catch {
         error => {
           scheduler.add(
