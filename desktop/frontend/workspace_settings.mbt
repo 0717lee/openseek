@@ -201,6 +201,11 @@ fn Model::default_worktree_mode(
 test "a settings reply lands once and an older token cannot roll it back" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
+  let sibling = @interop.ChannelId::Local.test_resource("/other")
+  let attached = test_model().with_dev(dev => {
+    ..dev,
+    projects: [workspace, sibling],
+  })
   let (_, loaded) = update_dev(
     dispatch,
     WorkspaceSettingsLoaded(
@@ -209,7 +214,7 @@ test "a settings reply lands once and an older token cannot roll it back" {
       connection_generation=0,
       request_generation=1,
     ),
-    test_model(),
+    attached,
   )
   assert_true(loaded.default_worktree_mode(Local, Some(workspace)))
   // An older reply for the same workspace is stale; one for a sibling
@@ -225,7 +230,6 @@ test "a settings reply lands once and an older token cannot roll it back" {
     loaded,
   )
   assert_true(stale.default_worktree_mode(Local, Some(workspace)))
-  let sibling = @interop.ChannelId::Local.test_resource("/other")
   let (_, both) = update_dev(
     dispatch,
     WorkspaceSettingsLoaded(
@@ -255,10 +259,11 @@ test "a settings reply lands once and an older token cannot roll it back" {
 test "a settings commit broadcast supersedes list replies" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
+  let attached = test_model().with_dev(dev => { ..dev, projects: [workspace] })
   let (_, changed) = update_dev(
     dispatch,
     WorkspaceSettingsChanged(workspace~, worktree_mode=true),
-    test_model(),
+    attached,
   )
   assert_true(changed.default_worktree_mode(Local, Some(workspace)))
   inspect(changed.dev().workspace_settings_request_generation, content="1")
@@ -284,6 +289,7 @@ test "the settings page select applies optimistically" {
   // the round and this workspace's reply landed under it.
   let fetched = test_model().with_dev(dev => {
     ..dev,
+    projects: [workspace],
     workspace_settings_request_generation: 1,
   })
   let (_, loaded) = update_dev(
@@ -327,10 +333,11 @@ test "the settings page select applies optimistically" {
 test "a failed save pops a toast and re-reads under a fresh token" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
+  let attached = test_model().with_dev(dev => { ..dev, projects: [workspace] })
   let (_, chosen) = update(
     dispatch,
     WorkspaceDefaultModeChosen(Local, workspace, "worktree"),
-    test_model(),
+    attached,
   )
   let minted = chosen.dev().workspace_settings_request_generation
   let (_, failed) = update_dev(
@@ -363,6 +370,7 @@ test "a failed save pops a toast and re-reads under a fresh token" {
 test "a reconnect clears the settings mirror until fresh reads land" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
+  let attached = test_model().with_dev(dev => { ..dev, projects: [workspace] })
   let (_, loaded) = update_dev(
     dispatch,
     WorkspaceSettingsLoaded(
@@ -371,7 +379,7 @@ test "a reconnect clears the settings mirror until fresh reads land" {
       connection_generation=0,
       request_generation=1,
     ),
-    test_model(),
+    attached,
   )
   assert_true(loaded.default_worktree_mode(Local, Some(workspace)))
   // Settings broadcasts are not replayed across a connection gap: another
@@ -385,6 +393,44 @@ test "a reconnect clears the settings mirror until fresh reads land" {
   )
   assert_false(reconnected.default_worktree_mode(Local, Some(workspace)))
   assert_true(reconnected.dev().workspace_settings.is_empty())
+}
+
+///|
+test "a straggler reply for a detached workspace is rejected" {
+  let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/proj")
+  let attached = test_model().with_dev(dev => { ..dev, projects: [workspace] })
+  let (_, seen) = update_dev(
+    dispatch,
+    WorkspaceSettingsChanged(workspace~, worktree_mode=true),
+    attached,
+  )
+  assert_true(seen.default_worktree_mode(Local, Some(workspace)))
+  // Detach prunes the row — and with it the generation it was applied
+  // under, so the numeric fence alone resets to -1.
+  let (_, detached) = update_dev(dispatch, ProjectsChanged([]), seen)
+  assert_true(detached.dev().workspace_settings.is_empty())
+  // A reply issued before the detach answers afterwards: registry
+  // membership, not the reset fence, keeps it from resurrecting a row
+  // that would outlive a later reattach.
+  let (_, straggler) = update_dev(
+    dispatch,
+    WorkspaceSettingsLoaded(
+      workspace~,
+      worktree_mode=true,
+      connection_generation=0,
+      request_generation=1,
+    ),
+    detached,
+  )
+  assert_true(straggler.dev().workspace_settings.is_empty())
+  // A broadcast racing the detach commit is dropped the same way.
+  let (_, ghost) = update_dev(
+    dispatch,
+    WorkspaceSettingsChanged(workspace~, worktree_mode=true),
+    detached,
+  )
+  assert_true(ghost.dev().workspace_settings.is_empty())
 }
 
 ///|

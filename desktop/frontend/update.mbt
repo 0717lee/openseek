@@ -4346,8 +4346,14 @@ fn update_device_msg(
       connection_generation~,
       request_generation~
     ) => {
-      // The same per-workspace staleness fence as `WorktreesLoaded`.
-      guard connection_generation == dev.connection_generation &&
+      // The same per-workspace staleness fence as `WorktreesLoaded` — plus a
+      // registry-membership check, because pruning a detached workspace's
+      // row also discards the generation it was applied under. Without the
+      // membership check, a straggler reply issued before the detach would
+      // pass the reset (-1) fence and resurrect a row that could outlive a
+      // reattach until the fresh fan-out answers.
+      guard dev.projects.contains(workspace) &&
+        connection_generation == dev.connection_generation &&
         request_generation > dev.workspace_settings_generation(workspace) else {
         return (@cmd.none, model)
       }
@@ -4363,6 +4369,10 @@ fn update_device_msg(
       )
     }
     WorkspaceSettingsChanged(workspace~, worktree_mode~) => {
+      // A broadcast can race the detach commit the same way a reply can
+      // (the hub orders them per client, so an attach is always processed
+      // before settings broadcasts that follow it).
+      guard dev.projects.contains(workspace) else { return (@cmd.none, model) }
       // The post-commit broadcast is newer than every list request issued so
       // far; advance the mint and stamp this workspace's row with the new
       // token so an older reply for it can never roll the broadcast back.
