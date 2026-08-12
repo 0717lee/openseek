@@ -23,4 +23,3 @@ pub fn MoonbitToolchainTarget::seed_relative_dir(Self) -> String
 // Type aliases
 
 // Traits
-

@@ -86,4 +86,3 @@ pub fn FontInfo::get_id(Self) -> String
 // Type aliases
 
 // Traits
-

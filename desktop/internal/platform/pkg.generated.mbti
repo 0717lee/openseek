@@ -17,4 +17,3 @@ pub async fn open_url(String) -> Int
 // Type aliases
 
 // Traits
-

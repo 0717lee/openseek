@@ -18,4 +18,3 @@ pub fn compute_changes(Array[String], Array[String], ignore_trim_whitespace? : B
 // Type aliases
 
 // Traits
-

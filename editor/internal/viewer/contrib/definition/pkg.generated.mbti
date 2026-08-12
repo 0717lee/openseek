@@ -36,4 +36,3 @@ pub fn DefinitionTargetFingerprint::word_range(Self) -> @common.Range
 // Type aliases
 
 // Traits
-

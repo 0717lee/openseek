@@ -17,4 +17,3 @@ pub fn value(@argparse.Matches, String) -> String raise
 // Type aliases
 
 // Traits
-

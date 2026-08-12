@@ -87,4 +87,3 @@ pub fn Tools::function_tools(Self) -> Array[@deepseek.ToolDefinition]
 // Type aliases
 
 // Traits
-

@@ -24,4 +24,3 @@ pub fn StdioConnection::shutdown(Self) -> Unit
 // Type aliases
 
 // Traits
-

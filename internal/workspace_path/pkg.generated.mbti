@@ -23,4 +23,3 @@ pub fn strip_trailing_slash(String) -> String
 // Type aliases
 
 // Traits
-

@@ -11,4 +11,3 @@ pub async fn set_windows_gui_subsystem(String) -> Unit
 // Type aliases
 
 // Traits
-

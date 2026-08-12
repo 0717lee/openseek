@@ -92,4 +92,3 @@ pub fn StandardMouseEvent::StandardMouseEvent(@dom.MouseEvent) -> Self
 // Type aliases
 
 // Traits
-

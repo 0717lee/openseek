@@ -31,4 +31,3 @@ pub fn StreamHandler::StreamHandler(on_content_delta~ : async (String) -> Unit, 
 // Type aliases
 
 // Traits
-

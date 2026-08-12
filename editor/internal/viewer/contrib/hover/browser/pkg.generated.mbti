@@ -122,4 +122,3 @@ pub(all) struct RenderedContentHover {
 // Type aliases
 
 // Traits
-

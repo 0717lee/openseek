@@ -26,4 +26,3 @@ pub struct ShellInput {
 // Type aliases
 
 // Traits
-

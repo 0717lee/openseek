@@ -42,4 +42,3 @@ pub(all) struct LinesDiffComputerOptions {
 // Type aliases
 
 // Traits
-

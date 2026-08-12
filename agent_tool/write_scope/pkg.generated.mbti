@@ -18,4 +18,3 @@ pub fn WriteScope::root(Self) -> String
 // Type aliases
 
 // Traits
-

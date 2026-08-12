@@ -28,4 +28,3 @@ pub(open) trait Transport {
   async fn recv(Self) -> Json?
   fn close(Self) -> Unit
 }
-

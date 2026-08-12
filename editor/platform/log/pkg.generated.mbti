@@ -64,4 +64,3 @@ pub(open) trait Logger {
   fn log(Self, LogEntry) -> Unit
   fn flush(Self) -> Unit
 }
-

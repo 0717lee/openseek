@@ -23,4 +23,3 @@ pub fn Skill::path(Self) -> String
 // Type aliases
 
 // Traits
-

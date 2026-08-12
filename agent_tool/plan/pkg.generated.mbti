@@ -17,4 +17,3 @@ pub fn reminder_checklist(Json) -> String?
 // Type aliases
 
 // Traits
-

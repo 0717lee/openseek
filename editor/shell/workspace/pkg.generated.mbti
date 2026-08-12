@@ -168,4 +168,3 @@ pub(open) trait WorkspaceTreeProvider {
   fn root(Self) -> @common.Uri
   async fn resolve(Self, @common.Uri) -> WorkspaceResolveResult
 }
-

@@ -24,4 +24,3 @@ pub async fn tools_for_client(String, @mcp.McpClient) -> Array[@agent_tool.Agent
 // Type aliases
 
 // Traits
-

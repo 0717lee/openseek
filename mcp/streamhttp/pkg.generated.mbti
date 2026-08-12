@@ -24,4 +24,3 @@ pub impl @jsonrpc.Transport for HttpTransport
 // Type aliases
 
 // Traits
-

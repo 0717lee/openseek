@@ -13,4 +13,3 @@ pub fn random_hex(Int) -> String?
 // Type aliases
 
 // Traits
-

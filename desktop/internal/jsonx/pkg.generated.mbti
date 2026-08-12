@@ -17,4 +17,3 @@ pub fn json_text(Map[String, Json], String) -> String?
 // Type aliases
 
 // Traits
-

@@ -26,4 +26,3 @@ pub fn EvalCase::task(Self, String) -> String
 // Type aliases
 
 // Traits
-

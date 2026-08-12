@@ -13,4 +13,3 @@ pub fn count_occurrences(String, String) -> Int
 // Type aliases
 
 // Traits
-
