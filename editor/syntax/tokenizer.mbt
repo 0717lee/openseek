@@ -92,7 +92,7 @@ pub(all) struct LineToken {
 /// into the next call. Gaps between tokens render as plain text.
 pub(open) trait LineTokenizer {
   fn initial_state(Self) -> TokenizerState
-  fn tokenize_line(Self, line_text : String, state : TokenizerState) -> (
+  fn tokenize_line(Self, line_text : StringView, state : TokenizerState) -> (
     Array[LineToken],
     TokenizerState,
   )

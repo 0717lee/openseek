@@ -51,7 +51,7 @@ pub impl @syntax.LineTokenizer for PlainTokenizer with fn tokenize_line(
       tokens.push({
         start,
         end,
-        tag: if is_keyword(line_text[start:end].to_owned()) {
+        tag: if is_keyword(line_text[start:end]) {
           Keyword
         } else {
           Identifier
@@ -77,7 +77,7 @@ pub impl @syntax.LineTokenizer for PlainTokenizer with fn tokenize_line(
 }
 
 ///|
-fn consume_string(text : String, offset : Int) -> Int {
+fn consume_string(text : StringView, offset : Int) -> Int {
   for at = offset + 1, escaped = false; at < text.length(); {
     let unit = text[at].to_int()
     if escaped {
@@ -94,7 +94,7 @@ fn consume_string(text : String, offset : Int) -> Int {
 }
 
 ///|
-fn consume_while(text : String, offset : Int, pred : (Int) -> Bool) -> Int {
+fn consume_while(text : StringView, offset : Int, pred : (Int) -> Bool) -> Int {
   for at = offset; at < text.length() && pred(text[at].to_int()); {
     continue at + 1
   } nobreak {
@@ -123,7 +123,7 @@ fn is_ident_continue(unit : Int) -> Bool {
 }
 
 ///|
-fn is_keyword(text : String) -> Bool {
+fn is_keyword(text : StringView) -> Bool {
   text
   is ("fn"
   | "let"
