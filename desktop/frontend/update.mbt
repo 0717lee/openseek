@@ -2984,6 +2984,7 @@ fn update_msg(
     JumpToLatest =>
       (scroll_transcript_after_render(), { ..model, transcript_pinned: true })
     TranscriptOverview(msg) => {
+      let previous_active = model.transcript_overview.active
       let model = {
         ..model,
         transcript_overview: @transcript_overview.update(
@@ -2997,11 +2998,22 @@ fn update_msg(
         // the view back down before the scroll watcher reports. The jump
         // command re-reports the settled at-bottom state, which restores the
         // pin when the click could not actually move a short transcript.
+        // No rail reveal here: the clicked tick is under the pointer, and
+        // scrolling the rail beneath it would hand the hover to a neighbor.
         Clicked(key) =>
           (
             scroll_turn_into_view(dispatch, key),
             { ..model, transcript_pinned: false },
           )
+        // A moved highlight also scrolls the rail's own window onto it —
+        // a rail past its height cap scrolls instead of compressing, so
+        // the reading turn can sit outside the visible run of ticks.
+        ActiveChanged(_) =>
+          if model.transcript_overview.active == previous_active {
+            (@cmd.none, model)
+          } else {
+            (reveal_active_overview_tick(), model)
+          }
         _ => (@cmd.none, model)
       }
     }
@@ -17094,7 +17106,11 @@ test "returning to Chat reinitializes the overview" {
     ..test_model(),
     screen: Skills,
     transcript_overview: {
-      hover: Some({ key: @transcript_overview.Durable(2), flip: false }),
+      hover: Some({
+        key: @transcript_overview.Durable(2),
+        flip: false,
+        anchor: 0,
+      }),
       active: Some(@transcript_overview.Durable(3)),
     },
   }
