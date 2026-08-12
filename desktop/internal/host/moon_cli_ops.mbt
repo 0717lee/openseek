@@ -259,7 +259,7 @@ async fn manifest_mtime(dir : @pathx.Absolute) -> Int64? {
 async fn lsp_hover_op(
   state : MoonCliState,
   payload : LspHoverPayload,
-) -> LspHoverReply {
+) -> HoverResult {
   let request_root = WirePath::parse(payload.root)
   let file = request_root.resolve(payload.path)
   guard moon_module_root(request_root.absolute, file) is Some(root) else {
@@ -286,7 +286,7 @@ async fn lsp_hover_op(
 async fn lsp_open_op(
   state : MoonCliState,
   payload : LspOpenPayload,
-) -> LspDiagnosticsReply {
+) -> DiagnosticsResult {
   let request_root = WirePath::parse(payload.root)
   let file = request_root.resolve(payload.path)
   guard moon_module_root(request_root.absolute, file) is Some(root) else {
@@ -450,7 +450,7 @@ fn check_tags(message : String) -> Array[Int]? {
 /// front-end consumes: the markdown sections joined under rules, and the
 /// 1-based `range` shifted to the 0-based positions the wire speaks. Anything
 /// unrecognized collapses to `no_hover`.
-fn parse_ide_hover(output : String) -> LspHoverReply {
+fn parse_ide_hover(output : String) -> HoverResult {
   let json = @json.parse(output.trim()) catch { _ => return no_hover() }
   guard json is { "contents": Array(parts), .. } else { return no_hover() }
   let sections : Array[String] = []
@@ -515,7 +515,7 @@ fn parse_position(position : StringView) -> (Int, Int)? {
 
 ///|
 /// An empty hover reply — "nothing to show here".
-fn no_hover() -> LspHoverReply {
+fn no_hover() -> HoverResult {
   {
     value: "",
     markdown: false,
@@ -676,7 +676,7 @@ test "diagnostics_pushes uses root-relative paths and clears dropped files" {
 async fn workspace_symbols_op(
   state : MoonCliState,
   payload : WorkspaceSymbolsPayload,
-) -> WorkspaceSymbolsReply {
+) -> WorkspaceSymbolResult {
   let workspace = WirePath::parse(payload.root).absolute
   let symbols : Array[SymbolItem] = []
   for root in workspace_module_roots(workspace) {

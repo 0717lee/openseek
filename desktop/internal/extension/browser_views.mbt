@@ -147,7 +147,7 @@ fn BrowserViews::view(
 fn BrowserViews::open(
   self : BrowserViews,
   payload : @protocol.BrowserOpenPayload,
-) -> @protocol.EmptyReply raise {
+) -> Unit raise {
   guard allowed_page_url(payload.url) else {
     raise BrowserViewError("Blocked non-web page URL")
   }
@@ -162,50 +162,43 @@ fn BrowserViews::open(
         ),
       )
   }
-  Acknowledged
 }
 
 ///|
 fn BrowserViews::back(
   self : BrowserViews,
   payload : @protocol.BrowserIdPayload,
-) -> @protocol.EmptyReply raise {
+) -> Unit raise {
   self.view(payload.id).back()
-  Acknowledged
 }
 
 ///|
 fn BrowserViews::forward(
   self : BrowserViews,
   payload : @protocol.BrowserIdPayload,
-) -> @protocol.EmptyReply raise {
+) -> Unit raise {
   self.view(payload.id).forward()
-  Acknowledged
 }
 
 ///|
 fn BrowserViews::reload(
   self : BrowserViews,
   payload : @protocol.BrowserIdPayload,
-) -> @protocol.EmptyReply raise {
+) -> Unit raise {
   self.view(payload.id).reload()
-  Acknowledged
 }
 
 ///|
 /// Open Chromium's developer tools for the SeekMoon frontend page itself.
-fn BrowserViews::open_app_devtools(
-  self : BrowserViews,
-) -> @protocol.EmptyReply raise {
+fn BrowserViews::open_app_devtools(self : BrowserViews) -> Unit raise {
   self.attached_window().browser().open_devtools()
-  Acknowledged
 }
 
 ///|
 fn BrowserViews::set_bounds(
   self : BrowserViews,
   payload : @protocol.BrowserBoundsPayload,
-) -> @protocol.EmptyReply raise {
+) -> Unit raise {
   self
   .view(payload.id)
   .set_bounds(
@@ -214,30 +207,27 @@ fn BrowserViews::set_bounds(
     width=payload.width,
     height=payload.height,
   )
-  Acknowledged
 }
 
 ///|
 fn BrowserViews::set_visible(
   self : BrowserViews,
   payload : @protocol.BrowserVisiblePayload,
-) -> @protocol.EmptyReply raise {
+) -> Unit raise {
   self.view(payload.id).set_visible(payload.visible)
-  Acknowledged
 }
 
 ///|
 fn BrowserViews::close(
   self : BrowserViews,
   payload : @protocol.BrowserIdPayload,
-) -> @protocol.EmptyReply raise {
+) -> Unit raise {
   // Closing a view that is already gone is not an error: the close raced a
   // page reload's `close_all`.
-  guard self.window is Some(window) else { return Acknowledged }
+  guard self.window is Some(window) else { return }
   if window.view(view_name(payload.id)) is Some(_) {
     window.remove_view(view_name(payload.id))
   }
-  Acknowledged
 }
 
 ///|
@@ -249,31 +239,130 @@ fn BrowserViews::close(
 fn browser_endpoints(views : BrowserViews) -> Array[@endpoint.Endpoint] {
   [
     @endpoint.Endpoint::window(@commands.browser_open, (_, payload) => {
-      views.open(payload)
+      try {
+        views.open(payload)
+        BrowserOpened
+      } catch {
+        error =>
+          BrowserOpenError(
+            @endpoint.Endpoint::record_failure(
+              @commands.browser_open.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::window(@commands.browser_navigate, (_, payload) => {
-      views.open(payload)
+      try {
+        views.open(payload)
+        BrowserNavigated
+      } catch {
+        error =>
+          BrowserNavigateError(
+            @endpoint.Endpoint::record_failure(
+              @commands.browser_navigate.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::window(@commands.browser_back, (_, payload) => {
-      views.back(payload)
+      try {
+        views.back(payload)
+        BrowserWentBack
+      } catch {
+        error =>
+          BrowserBackError(
+            @endpoint.Endpoint::record_failure(
+              @commands.browser_back.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::window(@commands.browser_forward, (_, payload) => {
-      views.forward(payload)
+      try {
+        views.forward(payload)
+        BrowserWentForward
+      } catch {
+        error =>
+          BrowserForwardError(
+            @endpoint.Endpoint::record_failure(
+              @commands.browser_forward.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::window(@commands.browser_reload, (_, payload) => {
-      views.reload(payload)
+      try {
+        views.reload(payload)
+        BrowserReloaded
+      } catch {
+        error =>
+          BrowserReloadError(
+            @endpoint.Endpoint::record_failure(
+              @commands.browser_reload.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::window(@commands.app_open_devtools, (_, _) => {
-      views.open_app_devtools()
+      try {
+        views.open_app_devtools()
+        DevtoolsOpened
+      } catch {
+        error =>
+          OpenDevtoolsError(
+            @endpoint.Endpoint::record_failure(
+              @commands.app_open_devtools.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::window(@commands.browser_set_bounds, (_, payload) => {
-      views.set_bounds(payload)
+      try {
+        views.set_bounds(payload)
+        BrowserBoundsSet
+      } catch {
+        error =>
+          BrowserBoundsError(
+            @endpoint.Endpoint::record_failure(
+              @commands.browser_set_bounds.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::window(@commands.browser_set_visible, (_, payload) => {
-      views.set_visible(payload)
+      try {
+        views.set_visible(payload)
+        BrowserVisibilitySet
+      } catch {
+        error =>
+          BrowserVisibilityError(
+            @endpoint.Endpoint::record_failure(
+              @commands.browser_set_visible.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::window(@commands.browser_close, (_, payload) => {
-      views.close(payload)
+      try {
+        views.close(payload)
+        BrowserClosed
+      } catch {
+        error =>
+          BrowserCloseError(
+            @endpoint.Endpoint::record_failure(
+              @commands.browser_close.name(),
+              error,
+            ),
+          )
+      }
     }),
   ]
 }
@@ -293,7 +382,7 @@ test "browser ops are absent from the relay method catalog" {
 test "browser ops refuse to run without a window; close tolerates it" {
   // The ops refuse to run without a window, which is the earliest failure
   // a headless test can observe.
-  fn raises(run : () -> @protocol.EmptyReply raise) -> Bool {
+  fn raises(run : () -> Unit raise) -> Bool {
     let _ = run() catch { _ => return true }
     false
   }
@@ -310,7 +399,7 @@ test "browser ops refuse to run without a window; close tolerates it" {
   assert_true(raises(() => views.set_visible({ id: 1, visible: true })))
   // Closing with no window (or no view) is deliberately not an error:
   // the close raced a page reload's `close_all`.
-  assert_true(views.close({ id: 1 }) is Acknowledged)
+  views.close({ id: 1 })
 }
 
 ///|

@@ -10,7 +10,7 @@ import {
 }
 
 // Values
-pub fn decode(@protocol.WorkspaceSymbolsReply) -> Array[Symbol]
+pub fn decode(@protocol.WorkspaceSymbolsSuccess) -> Array[Symbol]
 
 pub fn search(@interop.ChannelId, String, root~ : @common.Uri, loaded~ : (Array[Symbol]) -> @cmd.Cmd, failed~ : @cmd.Cmd) -> @cmd.Cmd
 

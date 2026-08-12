@@ -138,8 +138,11 @@ async fn request_moon_ide_locations(
   ],
   payload : @protocol.MoonIdeNavigationPayload,
 ) -> Array[@language.Location] {
-  let reply = @interop.bridge_request(channel, command, payload)
-  MoonIdeProjection::{ reply, channel }.to_viewer()
+  let locations = match @interop.bridge_request(channel, command, payload) {
+    Locations(locations~) => locations
+    NavigationError(message) => fail(message)
+  }
+  MoonIdeProjection::{ locations, channel }.to_viewer()
 }
 
 ///|
@@ -148,7 +151,7 @@ async fn request_moon_ide_locations(
 /// one-based protocol position, so no client-side column conversion or
 /// LSP-style shifting occurs here.
 priv struct MoonIdeProjection {
-  reply : @protocol.MoonIdeLocationsReply
+  locations : Array[@protocol.MoonIdeLocation]
   channel : @interop.ChannelId
 }
 
@@ -157,7 +160,7 @@ fn MoonIdeProjection::to_viewer(
   self : MoonIdeProjection,
 ) -> Array[@language.Location] {
   let result : Array[@language.Location] = []
-  for location in self.reply.locations {
+  for location in self.locations {
     guard !location.path.is_empty() &&
       location.start_line > 0 &&
       location.start_column > 0 &&
@@ -292,31 +295,29 @@ test "navigation root follows resource and workspace-relative paths" {
 ///|
 test "moon ide locations stay one based and channel routed" {
   let locations = MoonIdeProjection::{
-    reply: {
-      locations: [
-        {
-          path: "/ws/lib.mbt",
-          start_line: 2,
-          start_column: 3,
-          end_line: 2,
-          end_column: 9,
-        },
-        {
-          path: "/ws/bad.mbt",
-          start_line: 0,
-          start_column: 1,
-          end_line: 1,
-          end_column: 1,
-        },
-        {
-          path: "relative.mbt",
-          start_line: 1,
-          start_column: 1,
-          end_line: 1,
-          end_column: 2,
-        },
-      ],
-    },
+    locations: [
+      {
+        path: "/ws/lib.mbt",
+        start_line: 2,
+        start_column: 3,
+        end_line: 2,
+        end_column: 9,
+      },
+      {
+        path: "/ws/bad.mbt",
+        start_line: 0,
+        start_column: 1,
+        end_line: 1,
+        end_column: 1,
+      },
+      {
+        path: "relative.mbt",
+        start_line: 1,
+        start_column: 1,
+        end_line: 1,
+        end_column: 2,
+      },
+    ],
     channel: @interop.ChannelId::Remote("device"),
   }.to_viewer()
   assert_eq(locations.length(), 1)

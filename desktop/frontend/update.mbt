@@ -3374,17 +3374,32 @@ fn update_msg(
     }
     BrowserBack =>
       (
-        browser_history_for_active(dispatch, model, @commands.browser_back),
+        browser_history_for_active(dispatch, model, @commands.browser_back, reply => {
+          match reply {
+            BrowserWentBack => None
+            BrowserBackError(message) => Some(message)
+          }
+        }),
         model,
       )
     BrowserForward =>
       (
-        browser_history_for_active(dispatch, model, @commands.browser_forward),
+        browser_history_for_active(dispatch, model, @commands.browser_forward, reply => {
+          match reply {
+            BrowserWentForward => None
+            BrowserForwardError(message) => Some(message)
+          }
+        }),
         model,
       )
     BrowserReload =>
       (
-        browser_history_for_active(dispatch, model, @commands.browser_reload),
+        browser_history_for_active(dispatch, model, @commands.browser_reload, reply => {
+          match reply {
+            BrowserReloaded => None
+            BrowserReloadError(message) => Some(message)
+          }
+        }),
         model,
       )
     BrowserOpenExternal => {
@@ -3401,6 +3416,12 @@ fn update_msg(
           dispatch,
           @commands.app_open_devtools,
           @protocol.NoPayload,
+          reply => {
+            match reply {
+              DevtoolsOpened => None
+              OpenDevtoolsError(message) => Some(message)
+            }
+          },
           quiet=false,
         ),
         model,

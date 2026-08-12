@@ -43,10 +43,10 @@ pub fn market_source_label(item : MarketSkillItem) -> String {
 /// Project a `skills_catalog` reply. The native catalog adapter has already
 /// removed malformed registry rows before constructing this value.
 pub fn skills_catalog_from_reply(
-  reply : @desktop_protocol.SkillsCatalogReply,
+  skills : Array[@desktop_protocol.MarketSkill],
 ) -> Array[MarketSkillItem] {
   let items : Array[MarketSkillItem] = []
-  for entry in reply.skills {
+  for entry in skills {
     guard !entry.module_name.is_empty() && !entry.version.is_empty() else {
       continue
     }
@@ -70,10 +70,10 @@ pub fn skills_catalog_from_reply(
 ///|
 /// Project a `skills_installed` reply.
 pub fn installed_skills_from_reply(
-  reply : @desktop_protocol.InstalledSkillsReply,
+  skills : Array[@desktop_protocol.InstalledSkill],
 ) -> Array[InstalledSkillItem] {
   let items : Array[InstalledSkillItem] = []
-  for entry in reply.skills {
+  for entry in skills {
     guard !entry.id.is_empty() else { continue }
     items.push({
       id: entry.id,
@@ -91,28 +91,26 @@ pub fn installed_skills_from_reply(
 
 ///|
 test "skills catalog replies decode and skip odd entries" {
-  let items = skills_catalog_from_reply({
-    skills: [
-      {
-        name: "acme/widget",
-        module_name: "acme/widget",
-        package_path: "",
-        version: "1.0.0",
-        description: "Build widgets fast.",
-        author: "acme",
-        repository: "https://example.com/acme/widget",
-      },
-      {
-        name: "odd",
-        module_name: "",
-        package_path: "",
-        version: "1.0.0",
-        description: "",
-        author: "",
-        repository: "",
-      },
-    ],
-  })
+  let items = skills_catalog_from_reply([
+    {
+      name: "acme/widget",
+      module_name: "acme/widget",
+      package_path: "",
+      version: "1.0.0",
+      description: "Build widgets fast.",
+      author: "acme",
+      repository: "https://example.com/acme/widget",
+    },
+    {
+      name: "odd",
+      module_name: "",
+      package_path: "",
+      version: "1.0.0",
+      description: "",
+      author: "",
+      repository: "",
+    },
+  ])
   guard items is [item] else { fail("expected exactly one catalog item") }
   assert_eq(item.name, "acme/widget")
   assert_eq(item.module_name, "acme/widget")
@@ -123,19 +121,17 @@ test "skills catalog replies decode and skip odd entries" {
 
 ///|
 test "subpackage skills carry their package path in the source label" {
-  let items = skills_catalog_from_reply({
-    skills: [
-      {
-        name: "alice/alpha/cmd/run",
-        module_name: "alice/alpha",
-        package_path: "cmd/run",
-        version: "0.2.0",
-        description: "Run alpha commands",
-        author: "",
-        repository: "",
-      },
-    ],
-  })
+  let items = skills_catalog_from_reply([
+    {
+      name: "alice/alpha/cmd/run",
+      module_name: "alice/alpha",
+      package_path: "cmd/run",
+      version: "0.2.0",
+      description: "Run alpha commands",
+      author: "",
+      repository: "",
+    },
+  ])
   guard items is [item] else { fail("expected one catalog item") }
   assert_eq(market_source_label(item), "alice/alpha@0.2.0/cmd/run")
   assert_eq(item.author, "")
@@ -143,18 +139,16 @@ test "subpackage skills carry their package path in the source label" {
 
 ///|
 test "installed skill replies decode, with name falling back to id" {
-  let items = installed_skills_from_reply({
-    skills: [
-      {
-        id: "acme-widget",
-        name: "widget",
-        description: "Build widgets fast.",
-        source: "acme/widget@1.0.0",
-      },
-      { id: "handmade", name: "", description: "", source: "" },
-      { id: "", name: "no-id", description: "", source: "" },
-    ],
-  })
+  let items = installed_skills_from_reply([
+    {
+      id: "acme-widget",
+      name: "widget",
+      description: "Build widgets fast.",
+      source: "acme/widget@1.0.0",
+    },
+    { id: "handmade", name: "", description: "", source: "" },
+    { id: "", name: "no-id", description: "", source: "" },
+  ])
   guard items is [widget, handmade] else {
     fail("expected two installed items")
   }

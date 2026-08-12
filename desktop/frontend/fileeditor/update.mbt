@@ -2403,6 +2403,7 @@ pub fn update(
         return (@cmd.none, { ..state, background_review_requests, })
       }
       let review = match original {
+        @protocol.GitOriginalFileError(message) => ReviewFailed(message)
         @protocol.OriginalContent(content) => ReviewContent(content)
         @protocol.Missing => ReviewMissing
         @protocol.BinaryOriginal => ReviewBinary

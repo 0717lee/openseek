@@ -21,7 +21,7 @@ fn read_directory(
   let target = @resource.join_relative(root, path)
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply = @interop.bridge_request(
+      let response = @interop.bridge_request(
         owner.channel,
         @commands.fs_read_directory,
         { path: target.path },
@@ -40,8 +40,15 @@ fn read_directory(
           return
         }
       }
+      let wire_entries = match response {
+        DirectoryEntries(entries~) => entries
+        ReadDirectoryError(message) => {
+          scheduler.add(dispatch(DirFailed(owner~, epoch~, path~, message~)))
+          return
+        }
+      }
       let entries : Array[FileEntry] = []
-      for entry in reply.entries {
+      for entry in wire_entries {
         if FileEntry::from_reply(entry, path) is Some(entry) {
           entries.push(entry)
         }
@@ -125,6 +132,14 @@ pub fn read_file(
           return
         }
       }
+      if reply is ReadFileError(message) {
+        scheduler.add(
+          dispatch(
+            FileFailed(owner~, epoch~, path~, review_generation~, message~),
+          ),
+        )
+        return
+      }
       match FileContent::from_reply(reply, owner.channel) {
         Some(file) =>
           scheduler.add(
@@ -199,6 +214,7 @@ fn FileContent::from_reply(
   channel : @interop.ChannelId,
 ) -> FileContent? {
   match reply {
+    @protocol.ReadFileError(_) => None
     @protocol.Binary => Some(Binary)
     @protocol.Oversized => Some(Oversized)
     @protocol.Content(content~, absolute~, sig~) => {
@@ -252,15 +268,16 @@ fn stat_files(
       // Stat snapshots mutate cached document/review state. Keep their host
       // observations in issue order, while `epoch` fences a placement or
       // conversation boundary that an already-issued request outlives.
-      let reply = @interop.bridge_request_in_order(
+      let response = @interop.bridge_request_in_order(
         owner.channel,
         @commands.fs_stat_files,
         { paths: paths.map(path => @resource.join_relative(root, path).path) },
       ) catch {
         _ => return
       }
+      guard response is FileStats(stats=wire_stats) else { return }
       let stats : Array[FileStat] = []
-      for stat in reply.stats {
+      for stat in wire_stats {
         guard @resource.of_path(owner.channel, stat.path) is Some(absolute) &&
           @resource.relative_to(absolute, root) is Some(path) else {
           continue
@@ -305,29 +322,43 @@ fn watch_workspace(
           },
         )
       } else if watched is Some(watched) {
-        ignore(
-          @interop.bridge_request_in_order(channel, @commands.fs_watch, {
+        let response = @interop.bridge_request_in_order(
+          channel,
+          @commands.fs_watch,
+          {
             path: watched.root.path,
             files: watched.files.map(path => path.0),
             directories: watched.directories.map(path => path.0),
             recursive: Some(watched.recursive),
             generation,
-          }) catch {
-            error => {
-              scheduler.add(
-                dispatch(
-                  FileWatchFailed(
-                    channel=watched.owner.channel,
-                    root=watched.root,
-                    generation~,
-                    message="File watching failed: \{@interop.bridge_error_text(error)}",
-                  ),
-                ),
-              )
-              return
-            }
           },
-        )
+        ) catch {
+          error => {
+            scheduler.add(
+              dispatch(
+                FileWatchFailed(
+                  channel=watched.owner.channel,
+                  root=watched.root,
+                  generation~,
+                  message="File watching failed: \{@interop.bridge_error_text(error)}",
+                ),
+              ),
+            )
+            return
+          }
+        }
+        if response is FileWatchError(message) {
+          scheduler.add(
+            dispatch(
+              FileWatchFailed(
+                channel=watched.owner.channel,
+                root=watched.root,
+                generation~,
+                message="File watching failed: \{message}",
+              ),
+            ),
+          )
+        }
       }
     })
   })

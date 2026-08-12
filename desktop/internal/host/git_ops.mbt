@@ -12,10 +12,10 @@ async fn git_branch_op(payload : GitBranchPayload) -> GitBranchReply {
     Some(cwd) => @pathx.Absolute::from_uri_path(cwd)
     None => @engine.session_cwd(payload.session)
   }
-  guard base is Some(base) else { return { branch: None, diffstat: None } }
+  guard base is Some(base) else { return GitBranch(branch=None, diffstat=None) }
   guard git_branch(base.0) is Some(branch) else {
     // Not a repository, or no git: there is nothing to count either.
-    return { branch: None, diffstat: None }
+    return GitBranch(branch=None, diffstat=None)
   }
   let diffstat = git_diffstat(base, hint?=payload.base_hint)
   // The count takes long enough — a diff, plus one subprocess per untracked
@@ -35,12 +35,12 @@ async fn git_branch_op(payload : GitBranchPayload) -> GitBranchReply {
   // recomputes; a two-checkout round trip inside one count corrects itself at
   // the next one.
   guard git_branch(base.0) is Some(after) else {
-    return { branch: None, diffstat: None }
+    return GitBranch(branch=None, diffstat=None)
   }
   if after != branch {
-    return { branch: Some(after), diffstat: None }
+    return GitBranch(branch=Some(after), diffstat=None)
   }
-  { branch: Some(branch), diffstat }
+  GitBranch(branch=Some(branch), diffstat~)
 }
 
 ///|
@@ -1152,7 +1152,7 @@ async fn git_changes_op(payload : GitChangesPayload) -> GitChangesReply {
   }
   let dir = root.to_string()
   if git_output(dir, ["rev-parse", "--is-inside-work-tree"]) != "true" {
-    return { repository: false, head: None, baseline: None, changes: [] }
+    return NotRepository
   }
   let (prefix_code, prefix_stdout, prefix_stderr) = git_collect(dir, [
     "rev-parse", "--show-prefix",
@@ -1231,7 +1231,7 @@ async fn git_changes_op(payload : GitChangesPayload) -> GitChangesReply {
     ],
     max_concurrent=32,
   )
-  { repository: true, head, baseline, changes }
+  GitChanges(head~, baseline~, changes~)
 }
 
 ///|

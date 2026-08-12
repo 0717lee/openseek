@@ -34,6 +34,24 @@ struct Endpoint {
 }
 
 ///|
+/// Record one command failure before its handler chooses the corresponding
+/// reply variant. Endpoint owns this method because both native transports
+/// use the same command boundary and log category.
+pub fn Endpoint::record_failure(
+  operation : String,
+  error : Error,
+) -> String raise {
+  // Cancellation still controls task lifetime; it is not a command reply.
+  if @async.is_being_cancelled() {
+    raise error
+  }
+  let message = "\{error}"
+  @xlog.error(category="command") <?
+    { "operation": operation, "error": message }
+  message
+}
+
+///|
 /// Construct an endpoint shared by Proton and remote JSON-RPC.
 pub fn[Payload : @json.FromJson, Reply : ToJson] Endpoint::remote(
   command : @commands.Command[Payload, Reply],

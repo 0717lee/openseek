@@ -10,7 +10,7 @@ fn fetch_skills_catalog(
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply = @interop.bridge_request(
+      let response = @interop.bridge_request(
         channel,
         @commands.skills_catalog,
         @protocol.EmptyPayload::NoPayload,
@@ -22,9 +22,16 @@ fn fetch_skills_catalog(
           return
         }
       }
+      let skills = match response {
+        SkillsCatalog(skills~) => skills
+        SkillsCatalogError(message) => {
+          scheduler.add(dispatch(SkillsCatalogFailed(message)))
+          return
+        }
+      }
       scheduler.add(
         dispatch(
-          SkillsCatalogLoaded(@transcript.skills_catalog_from_reply(reply)),
+          SkillsCatalogLoaded(@transcript.skills_catalog_from_reply(skills)),
         ),
       )
     })
@@ -40,7 +47,7 @@ fn fetch_installed_skills(
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply = @interop.bridge_request(
+      let response = @interop.bridge_request(
         channel,
         @commands.skills_installed,
         @protocol.EmptyPayload::NoPayload,
@@ -52,9 +59,16 @@ fn fetch_installed_skills(
           return
         }
       }
+      let skills = match response {
+        InstalledSkills(skills~) => skills
+        InstalledSkillsError(message) => {
+          scheduler.add(dispatch(InstalledSkillsFailed(message)))
+          return
+        }
+      }
       scheduler.add(
         dispatch(
-          InstalledSkillsLoaded(@transcript.installed_skills_from_reply(reply)),
+          InstalledSkillsLoaded(@transcript.installed_skills_from_reply(skills)),
         ),
       )
     })
@@ -72,8 +86,10 @@ fn install_skill(
   let key = @transcript.market_source_label(item)
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      ignore(
-        @interop.bridge_request(channel, @commands.skills_install, {
+      let response = @interop.bridge_request(
+        channel,
+        @commands.skills_install,
+        {
           module_name: item.module_name,
           version: item.version,
           package_path: if item.package_path.is_empty() {
@@ -81,22 +97,26 @@ fn install_skill(
           } else {
             Some(item.package_path)
           },
-        }) catch {
-          error => {
-            scheduler.add(
-              dispatch(
-                SkillActionDone(
-                  channel~,
-                  key~,
-                  error=@interop.bridge_error_text(error),
-                ),
-              ),
-            )
-            return
-          }
         },
-      )
-      scheduler.add(dispatch(SkillActionDone(channel~, key~, error="")))
+      ) catch {
+        error => {
+          scheduler.add(
+            dispatch(
+              SkillActionDone(
+                channel~,
+                key~,
+                error=@interop.bridge_error_text(error),
+              ),
+            ),
+          )
+          return
+        }
+      }
+      let error = match response {
+        SkillInstalled(_) => ""
+        SkillInstallError(message) => message
+      }
+      scheduler.add(dispatch(SkillActionDone(channel~, key~, error~)))
     })
   })
 }
@@ -111,23 +131,29 @@ fn uninstall_skill(
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      ignore(
-        @interop.bridge_request(channel, @commands.skills_uninstall, { id, }) catch {
-          error => {
-            scheduler.add(
-              dispatch(
-                SkillActionDone(
-                  channel~,
-                  key=id,
-                  error=@interop.bridge_error_text(error),
-                ),
+      let response = @interop.bridge_request(
+        channel,
+        @commands.skills_uninstall,
+        { id, },
+      ) catch {
+        error => {
+          scheduler.add(
+            dispatch(
+              SkillActionDone(
+                channel~,
+                key=id,
+                error=@interop.bridge_error_text(error),
               ),
-            )
-            return
-          }
-        },
-      )
-      scheduler.add(dispatch(SkillActionDone(channel~, key=id, error="")))
+            ),
+          )
+          return
+        }
+      }
+      let error = match response {
+        SkillRemoved => ""
+        SkillUninstallError(message) => message
+      }
+      scheduler.add(dispatch(SkillActionDone(channel~, key=id, error~)))
     })
   })
 }

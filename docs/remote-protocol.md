@@ -60,9 +60,12 @@ JSON text, shaped as **JSON-RPC 2.0**:
 // client → host: request
 {"jsonrpc": "2.0", "id": 1, "method": "agent.start", "params": {…}}
 
-// host → client: response (exactly one per request, either form)
+// host → client: response (exactly one per request)
 {"jsonrpc": "2.0", "id": 1, "result": {…}}
-{"jsonrpc": "2.0", "id": 1, "error": {"code": -32000, "message": "…"}}
+{"jsonrpc": "2.0", "id": 1, "result": {"error": "handler diagnostic"}}
+
+// JSON-RPC errors are reserved for framing, dispatch, and invalid params
+{"jsonrpc": "2.0", "id": 1, "error": {"code": -32601, "message": "…"}}
 
 // host → client: notification (no id, no reply expected)
 {"jsonrpc": "2.0", "method": "agent.event", "params": {…}}
@@ -143,17 +146,30 @@ control-frame definitions in `desktop/tunnel`.
 
 ## Errors
 
+Every known command has one concrete reply type. Reply enums that already
+carried an error keep that variant; the others add `Failed(message)`. A success
+keeps that command's existing JSON shape. If its handler raises, the host logs
+the original error and returns that reply's error variant. Newly added
+`Failed(message)` variants encode as `result: {"error":"..."}`; an established
+variant keeps its established encoding (for example, `update.check` returns
+`{"kind":"unreachable","reason":"..."}`). Both frontends surface the message
+through their ordinary command-failure path.
+
+The JSON-RPC `error` envelope is therefore reserved for failures before a
+handler can run, plus an unexpected dispatcher failure:
+
 | code | meaning | v1 equivalent |
 |---|---|---|
 | `-32700` | unparsable frame | — |
 | `-32600` | not a valid JSON-RPC request | — |
 | `-32601` | unknown method | 404 unknown op |
 | `-32602` | params failed to decode | 400 `PayloadError` |
-| `-32000` | engine error (`EngineError` — busy conversation, spawn failure, …) | 409 |
-| `-32001` | host error (`HostError` — bad path, LSP failure, …) | 409 |
 | `-32603` | internal error | 500 |
 
-`error.message` is the user-facing text. `error.data` is unused for now.
+For a newly added `Failed` command result, `result.error` is the user-facing
+text. Established error variants retain their documented fields. For a
+JSON-RPC transport error, `error.message` is the diagnostic and `error.data` is
+unused for now.
 
 ## Connection lifecycle: reconnect = resync
 
@@ -254,7 +270,7 @@ echoes.
 
 | method | params | result |
 |---|---|---|
-| `agent.start` | `{task, session, submission_id?, model?, max_steps?, workspace?}` — `session` is a required non-blank durable conversation id. No credentials or store path are accepted: the host resolves settings and durable placement; `workspace` is honored only when registered. A session bound to one of the workspace's worktrees (`worktree.create` binds at creation) runs in that checkout — the start never names or mutates worktrees | `{run_id, status, …}` — `accepted` after the complete prompt command is written; a post-`started` write failure returns `failed`, while pre-`started` failures use the error response |
+| `agent.start` | `{task, session, submission_id?, model?, max_steps?, workspace?}` — `session` is a required non-blank durable conversation id. No credentials or store path are accepted: the host resolves settings and durable placement; `workspace` is honored only when registered. A session bound to one of the workspace's worktrees (`worktree.create` binds at creation) runs in that checkout — the start never names or mutates worktrees | `{run_id, status, …}` — `accepted` after the complete prompt command is written; a post-`started` write failure returns `failed`, while pre-`started` failures use the command's `{error}` failed result |
 | `agent.cancel` | `{run_id?}` (absent = the latest run) | cancel outcome |
 | `agent.steer` | `{text, run_id?, submission_id?}` | steer outcome |
 | `agent.compact` | `{session, model?, max_steps?, workspace?}` — `agent.start` minus `task`: a conversation resumed after a restart has no live process, and compacting spawns one with these settings | compaction outcome |
@@ -562,7 +578,7 @@ no business operating. A browser signs in with the relay directly
 | method | params | result |
 |---|---|---|
 | `auth.status` | `{}` | the status shape below |
-| `auth.connect` | `{}` | the status shape — resolves only when the loopback flow finishes (browser round-trip included), so it can take minutes; errors are the JSON-RPC error response. While signed in it runs no browser flow (an exchange mints a new device row) and only makes sure the connector runs. Refused when the selected server has no relay (`deepseek`/`custom`) or when the environment override manages the connector |
+| `auth.connect` | `{}` | the status shape — resolves only when the loopback flow finishes (browser round-trip included), so it can take minutes; handler errors use the command's `{error}` failed result. While signed in it runs no browser flow (an exchange mints a new device row) and only makes sure the connector runs. Refused when the selected server has no relay (`deepseek`/`custom`) or when the environment override manages the connector |
 | `auth.disconnect` | `{}` | the status shape — deletes the local token, best-effort revokes the device at the relay, and stops the connector. Refused in override mode |
 | `auth.cancel` | `{}` | the status shape — aborts an in-flight `auth.connect` (whose own call then fails with "the sign-in was cancelled"); a no-op when nothing is in flight |
 

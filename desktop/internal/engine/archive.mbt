@@ -325,14 +325,14 @@ pub async fn archived_sessions(
   on_migrated : (String) -> Unit,
 ) -> SessionsReply {
   migrate_legacy_archive(manager, on_migrated)
-  list_archived_sessions(manager)
+  Sessions(groups=list_archived_sessions(manager))
 }
 
 ///|
 /// List only. Archive/unarchive already committed and published their own
 /// mutation; they must not discover unrelated legacy moves while producing a
 /// potentially slow reply without the list_archived dispatcher callback.
-async fn list_archived_sessions(manager : EngineManager) -> SessionsReply {
+async fn list_archived_sessions(manager : EngineManager) -> Array[SessionGroup] {
   guard resolved_session_root() is Some(root) else {
     raise EngineError(
       "cannot determine a session root; set OPENSEEK_SESSION_ROOT",
@@ -350,7 +350,7 @@ async fn list_archived_sessions(manager : EngineManager) -> SessionsReply {
       ),
     )
   }
-  { groups, }
+  groups
 }
 
 ///|
@@ -389,7 +389,7 @@ pub async fn archive_session(
   // Listing is intentionally outside the record-move lease. Once the
   // irreversible rename is durably published, a slow/cancelled list reply
   // must not hold the conversation unavailable or suppress session.changed.
-  Archived(list_archived_sessions(manager))
+  Archived(groups=list_archived_sessions(manager))
 }
 
 ///|
@@ -437,7 +437,7 @@ pub async fn unarchive_session(
     raise EngineError("invalid session id")
   }
   unarchive_session_commit(manager, session, on_committed)
-  list_archived_sessions(manager)
+  Sessions(groups=list_archived_sessions(manager))
 }
 
 ///|

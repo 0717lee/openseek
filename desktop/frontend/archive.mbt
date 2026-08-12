@@ -18,17 +18,18 @@ fn fetch_archived(
     @js.async_run(() => {
       // A host without the op (or without a session store) just reads as an
       // empty Archived group.
-      let reply = @interop.bridge_request(
+      let response = @interop.bridge_request(
         channel,
         @commands.session_list_archived,
         @protocol.EmptyPayload::NoPayload,
       ) catch {
         _ => return
       }
+      guard response is Sessions(groups~) else { return }
       scheduler.add(
         dispatch(
           ArchivedLoaded(
-            @transcript.sessions_from_reply(reply, channel),
+            @transcript.sessions_from_reply(groups, channel),
             connection_generation~,
             request_generation~,
             fresh_session=generated_session_id(),
@@ -88,15 +89,21 @@ async fn archive_session_into(
     }
   }
   match reply {
+    ArchiveError(message) =>
+      scheduler.add(
+        dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))(
+          ArchiveFailed(message),
+        ),
+      )
     NeedsForce(refusal) =>
       scheduler.add(
         dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))(
           ArchiveNeedsForce(session~, refusal~),
         ),
       )
-    Archived(reply) =>
+    Archived(groups~) =>
       apply_archive_list_reply(
-        scheduler, dispatch, channel, reply, connection_generation, sessions_request_generation,
+        scheduler, dispatch, channel, groups, connection_generation, sessions_request_generation,
         archived_request_generation,
       )
   }
@@ -137,7 +144,7 @@ fn archive_action(
   })
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply = @interop.bridge_request(channel, command, payload) catch {
+      let response = @interop.bridge_request(channel, command, payload) catch {
         error => {
           scheduler.add(
             device_dispatch(ArchiveFailed(@interop.bridge_error_text(error))),
@@ -145,8 +152,15 @@ fn archive_action(
           return
         }
       }
+      let groups = match response {
+        Sessions(groups~) => groups
+        SessionsError(message) => {
+          scheduler.add(device_dispatch(ArchiveFailed(message)))
+          return
+        }
+      }
       apply_archive_list_reply(
-        scheduler, dispatch, channel, reply, connection_generation, sessions_request_generation,
+        scheduler, dispatch, channel, groups, connection_generation, sessions_request_generation,
         archived_request_generation,
       )
     })
@@ -160,7 +174,7 @@ async fn apply_archive_list_reply(
   scheduler : &@cmd.Scheduler,
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
-  reply : @protocol.SessionsReply,
+  groups : Array[@protocol.SessionGroup],
   connection_generation : Int,
   sessions_request_generation : Int,
   archived_request_generation : Int,
@@ -168,7 +182,7 @@ async fn apply_archive_list_reply(
   scheduler.add(
     dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))(
       ArchivedLoaded(
-        @transcript.sessions_from_reply(reply, channel),
+        @transcript.sessions_from_reply(groups, channel),
         connection_generation~,
         request_generation=archived_request_generation,
         fresh_session=generated_session_id(),

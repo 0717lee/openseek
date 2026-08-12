@@ -119,7 +119,9 @@ fn enqueue_outgoing(
 }
 
 ///|
-/// JSON-RPC error codes (docs/remote-protocol.md).
+/// JSON-RPC transport error codes (docs/remote-protocol.md). Once a known
+/// method's payload has decoded, handler failures use that command reply's
+/// established error branch instead.
 const CodeParseError = -32700
 
 ///|
@@ -133,12 +135,6 @@ const CodeInvalidParams = -32602
 
 ///|
 const CodeInternalError = -32603
-
-///|
-const CodeEngineError = -32000
-
-///|
-const CodeHostError = -32001
 
 ///|
 /// Dial and serve one announced remote client. A client hanging up mid-run
@@ -379,8 +375,9 @@ fn notification_for_client(
 }
 
 ///|
-/// Run one request through the dispatcher and shape the outcome as a
-/// JSON-RPC response, mapping each typed failure to its protocol code.
+/// Run one request through the dispatcher and shape the outcome as a JSON-RPC
+/// response. Known command handlers catch and log their own errors; only
+/// dispatch and transport failures reach the JSON-RPC error envelope here.
 async fn run_request(
   endpoints : Array[@endpoint.Endpoint],
   id : Json,
@@ -401,12 +398,6 @@ async fn run_request(
     error if @async.is_being_cancelled() => raise error
     @endpoint.InvalidEndpointPayload(message) =>
       return error_envelope(id, CodeInvalidParams, message)
-    @host.PayloadError(message) =>
-      return error_envelope(id, CodeInvalidParams, message)
-    @engine.EngineError(message) =>
-      return error_envelope(id, CodeEngineError, message)
-    @host.HostError(message) =>
-      return error_envelope(id, CodeHostError, message)
     error =>
       return error_envelope(id, CodeInternalError, "internal error: \{error}")
   }

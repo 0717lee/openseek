@@ -26,7 +26,7 @@ fn open_session(
   }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply = @interop.bridge_request(channel, @commands.terminal_open, {
+      let response = @interop.bridge_request(channel, @commands.terminal_open, {
         session,
         workspace: workspace.map(value => value.path),
         cols,
@@ -41,7 +41,14 @@ fn open_session(
           return
         }
       }
-      scheduler.add(dispatch(Opened(channel~, key~, id=reply.id)))
+      let id = match response {
+        TerminalOpened(id~) => id
+        TerminalOpenError(message) => {
+          scheduler.add(dispatch(OpenFailed(key~, message~)))
+          return
+        }
+      }
+      scheduler.add(dispatch(Opened(channel~, key~, id~)))
     })
   })
 }
@@ -57,8 +64,10 @@ fn send_input(
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      ignore(
-        @interop.bridge_request(channel, @commands.terminal_input, {
+      let response = @interop.bridge_request(
+        channel,
+        @commands.terminal_input,
+        {
           id,
           data: if binary {
             None
@@ -70,17 +79,20 @@ fn send_input(
           } else {
             None
           },
-        }) catch {
-          error => {
-            scheduler.add(
-              dispatch(
-                InputFailed(key~, message=@interop.bridge_error_text(error)),
-              ),
-            )
-            return
-          }
         },
-      )
+      ) catch {
+        error => {
+          scheduler.add(
+            dispatch(
+              InputFailed(key~, message=@interop.bridge_error_text(error)),
+            ),
+          )
+          return
+        }
+      }
+      if response is TerminalInputError(message) {
+        scheduler.add(dispatch(InputFailed(key~, message~)))
+      }
     })
   })
 }
@@ -94,15 +106,13 @@ fn send_resize(
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
     @js.async_run(() => {
-      ignore(
-        @interop.bridge_request(channel, @commands.terminal_resize, {
-          id,
-          cols,
-          rows,
-        }) catch {
-          _ => return
-        },
-      )
+      let _ = @interop.bridge_request(channel, @commands.terminal_resize, {
+        id,
+        cols,
+        rows,
+      }) catch {
+        _ => return
+      }
     })
   })
 }

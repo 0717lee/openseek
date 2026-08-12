@@ -19,15 +19,16 @@ const BrowserPaneId = "browser-pane"
 /// into the host in either order, while browser ops are sequences —
 /// create-then-place, bounds-before-visibility — whose inversion shows on
 /// screen.
-fn[Payload : ToJson] browser_op(
+fn[Payload : ToJson, Reply : @json.FromJson] browser_op(
   dispatch : @cmd.Emit[Msg],
-  command : @commands.Command[Payload, @protocol.EmptyReply],
+  command : @commands.Command[Payload, Reply],
   payload : Payload,
+  reply_error : (Reply) -> String?,
   quiet~ : Bool,
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let _ : @protocol.EmptyReply = @interop.bridge_request_in_order(
+      let reply = @interop.bridge_request_in_order(
         @interop.ChannelId::Local,
         command,
         payload,
@@ -41,6 +42,9 @@ fn[Payload : ToJson] browser_op(
           return
         }
       }
+      if reply_error(reply) is Some(message) && !quiet {
+        scheduler.add(dispatch(HostActionFailed(message)))
+      }
     })
   })
 }
@@ -49,7 +53,18 @@ fn[Payload : ToJson] browser_op(
 /// Create page `id`'s native view loading `url`. The view starts hidden;
 /// the pane sync shows and places it after the next measurement.
 fn browser_open(dispatch : @cmd.Emit[Msg], id : Int, url : String) -> @cmd.Cmd {
-  browser_op(dispatch, @commands.browser_open, { id, url }, quiet=false)
+  browser_op(
+    dispatch,
+    @commands.browser_open,
+    { id, url },
+    reply => {
+      match reply {
+        BrowserOpened => None
+        BrowserOpenError(message) => Some(message)
+      }
+    },
+    quiet=false,
+  )
 }
 
 ///|
@@ -58,23 +73,35 @@ fn browser_navigate(
   id : Int,
   url : String,
 ) -> @cmd.Cmd {
-  browser_op(dispatch, @commands.browser_navigate, { id, url }, quiet=false)
+  browser_op(
+    dispatch,
+    @commands.browser_navigate,
+    { id, url },
+    reply => {
+      match reply {
+        BrowserNavigated => None
+        BrowserNavigateError(message) => Some(message)
+      }
+    },
+    quiet=false,
+  )
 }
 
 ///|
 /// A history op on whatever Browser tab is active — a no-op when none is,
 /// or while a blank tab has no view yet.
-fn browser_history_for_active(
+fn[Reply : @json.FromJson] browser_history_for_active(
   dispatch : @cmd.Emit[Msg],
   model : Model,
-  command : @commands.Command[@protocol.BrowserIdPayload, @protocol.EmptyReply],
+  command : @commands.Command[@protocol.BrowserIdPayload, Reply],
+  reply_error : (Reply) -> String?,
 ) -> @cmd.Cmd {
   guard @dock.active_browser(model.dock) is Some(id) &&
     @preview.page(model.preview, id) is Some(page) &&
     page.url is Some(_) else {
     return @cmd.none
   }
-  browser_op(dispatch, command, { id, }, quiet=false)
+  browser_op(dispatch, command, { id, }, reply_error, quiet=false)
 }
 
 ///|
@@ -87,6 +114,12 @@ fn browser_set_bounds(
     dispatch,
     @commands.browser_set_bounds,
     { id, x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+    reply => {
+      match reply {
+        BrowserBoundsSet => None
+        BrowserBoundsError(message) => Some(message)
+      }
+    },
     quiet=true,
   )
 }
@@ -101,13 +134,30 @@ fn browser_set_visible(
     dispatch,
     @commands.browser_set_visible,
     { id, visible },
+    reply => {
+      match reply {
+        BrowserVisibilitySet => None
+        BrowserVisibilityError(message) => Some(message)
+      }
+    },
     quiet=true,
   )
 }
 
 ///|
 fn browser_close_view(dispatch : @cmd.Emit[Msg], id : Int) -> @cmd.Cmd {
-  browser_op(dispatch, @commands.browser_close, { id, }, quiet=true)
+  browser_op(
+    dispatch,
+    @commands.browser_close,
+    { id, },
+    reply => {
+      match reply {
+        BrowserClosed => None
+        BrowserCloseError(message) => Some(message)
+      }
+    },
+    quiet=true,
+  )
 }
 
 ///|

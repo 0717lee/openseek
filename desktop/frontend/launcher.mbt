@@ -8,7 +8,7 @@
 fn fetch_apps(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply = @interop.bridge_request(
+      let response = @interop.bridge_request(
         @interop.ChannelId::Local,
         @commands.app_list,
         @protocol.EmptyPayload::NoPayload,
@@ -20,9 +20,14 @@ fn fetch_apps(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
           return
         }
       }
-      scheduler.add(
-        dispatch(LauncherLoaded(@transcript.apps_from_reply(reply))),
-      )
+      let apps = match response {
+        Apps(apps~) => apps
+        AppListError(message) => {
+          scheduler.add(dispatch(LauncherFailed(message)))
+          return
+        }
+      }
+      scheduler.add(dispatch(LauncherLoaded(@transcript.apps_from_reply(apps))))
     })
   })
 }
@@ -44,20 +49,21 @@ fn launch_app(
   }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      ignore(
-        @interop.bridge_request(
-          @interop.ChannelId::Local,
-          @commands.app_launch,
-          { session, cwd: cwd.map(resource => resource.path), app },
-        ) catch {
-          error => {
-            scheduler.add(
-              dispatch(HostActionFailed(@interop.bridge_error_text(error))),
-            )
-            return
-          }
-        },
-      )
+      let response = @interop.bridge_request(
+        @interop.ChannelId::Local,
+        @commands.app_launch,
+        { session, cwd: cwd.map(resource => resource.path), app },
+      ) catch {
+        error => {
+          scheduler.add(
+            dispatch(HostActionFailed(@interop.bridge_error_text(error))),
+          )
+          return
+        }
+      }
+      if response is AppLaunchError(message) {
+        scheduler.add(dispatch(HostActionFailed(message)))
+      }
     })
   })
 }

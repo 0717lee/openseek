@@ -35,10 +35,19 @@ const GhExecutable : String = "gh.exe"
 const GhExecutable : String = "gh"
 
 ///|
+/// Internal lookup state while several `gh` calls progressively fill the
+/// command's three reply fields.
+priv struct GitPullRequestLookup {
+  pull_request : GitPullRequest?
+  compare_url : String?
+  branch : String?
+}
+
+///|
 async fn git_pull_request_op(
   payload : GitPullRequestPayload,
-) -> GitPullRequestReply {
-  let nothing : GitPullRequestReply = {
+) -> GitPullRequestLookup {
+  let nothing : GitPullRequestLookup = {
     pull_request: None,
     compare_url: None,
     branch: None,
@@ -55,7 +64,7 @@ async fn git_pull_request_op(
   // it with what was looked up instead of with what it asked for. An agent can
   // move the checkout between the two.
   guard git_branch(base.0) is Some(branch) else { return nothing }
-  let unanswered : GitPullRequestReply = { ..nothing, branch: Some(branch) }
+  let unanswered : GitPullRequestLookup = { ..nothing, branch: Some(branch) }
   // A detached checkout has no branch name to ask about. `git_branch` stands
   // a short hash in for one, which is right for the chip and wrong for
   // `--head`: gh would filter for a branch by that name, find nothing, and the
@@ -83,7 +92,7 @@ async fn branch_pull_request(
   gh : @pathx.Absolute,
   dir : @pathx.Absolute,
   branch : String,
-) -> GitPullRequestReply {
+) -> GitPullRequestLookup {
   let listing = gh_json(gh, dir, [
     "pr",
     "list",
@@ -96,7 +105,7 @@ async fn branch_pull_request(
     "--json",
     PullRequestFields,
   ])
-  let nothing : GitPullRequestReply = {
+  let nothing : GitPullRequestLookup = {
     pull_request: None,
     compare_url: None,
     branch: Some(branch),

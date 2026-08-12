@@ -82,11 +82,6 @@ type GitDiffStat = @protocol.GitDiffStat
 type GitPullRequestPayload = @protocol.GitPullRequestPayload
 
 ///|
-/// Reply to `git.pull_request`: the branch's pull request, or just the URL
-/// that would open one.
-type GitPullRequestReply = @protocol.GitPullRequestReply
-
-///|
 type GitPullRequest = @protocol.GitPullRequest
 
 ///|
@@ -138,9 +133,14 @@ type CancelSearchFilesPayload = @protocol.CancelSearchFilesPayload
 type ClearFileSearchCachePayload = @protocol.ClearFileSearchCachePayload
 
 ///|
-/// Ranked root-relative paths, capped for Quick Open. `from_cache`
-/// distinguishes a newly populated session from a reused one.
-type SearchFilesReply = @protocol.SearchFilesReply
+/// Internal state shared by the file-search cache while it builds the
+/// semantic `SearchResults` command reply.
+priv struct FileSearchResult {
+  files : Array[String]
+  from_cache : Bool
+  limit_hit : Bool
+  cancelled : Bool
+}
 
 ///|
 type ReadFilePayload = @protocol.ReadFilePayload
@@ -323,6 +323,12 @@ type MoonIdeLocation = @protocol.MoonIdeLocation
 type MoonIdeLocationsReply = @protocol.MoonIdeLocationsReply
 
 ///|
+/// Locations before the endpoint turns them into the command reply.
+priv struct MoonIdeLocationResult {
+  locations : Array[MoonIdeLocation]
+}
+
+///|
 /// `lsp_open` tells the host the editor is now showing `path` relative to the
 /// explicit absolute `root`, so it runs `moon check` over the file's module.
 /// The reply carries the file's diagnostics from that run; other files'
@@ -339,21 +345,28 @@ type LspOpenPayload = @protocol.LspOpenPayload
 type LspDiagnosticsReply = @protocol.LspDiagnosticsReply
 
 ///|
+/// The Moon checker result before the endpoint adds the command-specific
+/// error outcome.
+priv struct DiagnosticsResult {
+  diagnostics : Array[@protocol.LspDiagnostic]?
+}
+
+///|
 test "lsp_open replies distinguish no data from no problems" {
   assert_eq(
-    ToJson::to_json(({ diagnostics: Some([]) } : LspDiagnosticsReply)),
+    ToJson::to_json((Diagnostics(diagnostics=Some([])) : LspDiagnosticsReply)),
     { "diagnostics": [] },
   )
   assert_eq(
-    ToJson::to_json(({ diagnostics: None } : LspDiagnosticsReply)),
+    ToJson::to_json((Diagnostics(diagnostics=None) : LspDiagnosticsReply)),
     Json::empty_object(),
   )
   // The client reads the same distinction back: an absent field must decode
   // as "no data", not as an empty batch that would clear its markers.
   let no_problems : LspDiagnosticsReply = @json.from_json({ "diagnostics": [] })
-  assert_eq(no_problems.diagnostics, Some([]))
+  assert_true(no_problems is Diagnostics(diagnostics=Some([])))
   let no_data : LspDiagnosticsReply = @json.from_json(Json::empty_object())
-  assert_eq(no_data.diagnostics, None)
+  assert_true(no_data is Diagnostics(diagnostics=None))
 }
 
 ///|
@@ -368,10 +381,17 @@ priv struct DiagnosticsPush {
 }
 
 ///|
-/// Reply to `hover`. An empty `value` means "no hover here". `range` (the four
-/// position fields) marks the symbol the tooltip describes, valid only when
-/// `has_range` is set; the front-end maps it back to a document offset.
-type LspHoverReply = @protocol.LspHoverReply
+/// Parsed hover data before the endpoint adds the command-specific error
+/// outcome.
+priv struct HoverResult {
+  value : String
+  markdown : Bool
+  has_range : Bool
+  start_line : Int
+  start_character : Int
+  end_line : Int
+  end_character : Int
+}
 
 ///|
 /// `workspace_symbols` searches the explicit absolute `root` for `query`
@@ -393,5 +413,8 @@ type SymbolItem = @protocol.SymbolItem
 type SymbolRange = @protocol.SymbolRange
 
 ///|
-/// Reply to `workspace_symbols`: the matching symbols, capped host-side.
-type WorkspaceSymbolsReply = @protocol.WorkspaceSymbolsReply
+/// Parsed symbol rows before the endpoint adds the command-specific error
+/// outcome.
+priv struct WorkspaceSymbolResult {
+  symbols : Array[SymbolItem]
+}

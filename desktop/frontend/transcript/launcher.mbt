@@ -13,10 +13,10 @@ pub(all) struct LauncherAppItem {
 /// Project a `list_apps` reply. Entries without an id are skipped so a stale
 /// host row cannot create an unlaunchable menu item.
 pub fn apps_from_reply(
-  reply : @desktop_protocol.ListAppsReply,
+  apps : Array[@desktop_protocol.AppEntry],
 ) -> Array[LauncherAppItem] {
   let items : Array[LauncherAppItem] = []
-  for entry in reply.apps {
+  for entry in apps {
     guard !entry.id.is_empty() else { continue }
     items.push({
       id: entry.id,

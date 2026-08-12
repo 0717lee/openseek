@@ -1,9 +1,9 @@
 // The proton command extension: the desktop window's transport. Every
 // catalog method is registered as one bridge op that feeds the shared
 // dispatcher, so the webview and a remote browser speak the same names and
-// payloads (docs/remote-protocol.md) — only the envelope differs. The op
-// boundary stringifies raised errors into the rejection the webview
-// displays.
+// payloads (docs/remote-protocol.md) — only the envelope differs. Each
+// handler records an operation error and returns its command-specific error
+// variant, so the webview receives a typed reply instead of a rejection.
 
 ///|
 /// Command identities and their concrete payload/reply pairs live in
@@ -278,8 +278,18 @@ pub fn openseek_extension(
     @endpoint.Endpoint::window(@commands.host_connect, async fn(context, _) {
       // A reloaded page allocates browser ids from scratch; the previous
       // page's native views must not survive its attachment.
-      views.close_all()
-      bridge.connect(context)
+      try {
+        views.close_all()
+        bridge.connect(context)
+      } catch {
+        error =>
+          HostConnectError(
+            @endpoint.Endpoint::record_failure(
+              @commands.host_connect.name(),
+              error,
+            ),
+          )
+      }
     }),
   )
   endpoints.push(
@@ -287,7 +297,15 @@ pub fn openseek_extension(
       _,
       payload,
     ) {
-      open_external(payload)
+      open_external(payload) catch {
+        error =>
+          OpenExternalError(
+            @endpoint.Endpoint::record_failure(
+              @commands.shell_open_external.name(),
+              error,
+            ),
+          )
+      }
     }),
   )
   for endpoint in browser_endpoints(views) {
@@ -308,14 +326,14 @@ pub fn openseek_extension(
 async fn DesktopBridgeActor::connect(
   self : DesktopBridgeActor,
   context : @proton.CommandContext,
-) -> @protocol.EmptyReply {
+) -> @protocol.HostConnectReply {
   // A reloaded page has no references to the previous page's emulator
   // instances, so its PTYs must not survive the new attachment.
   self.host_connection.close_terminals()
   let reply : @async.Queue[Unit] = Queue(kind=Blocking(1))
   self.controls.put(PageConnected(context, reply))
   reply.get()
-  Acknowledged
+  HostConnected
 }
 
 ///|

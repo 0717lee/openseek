@@ -135,7 +135,7 @@ async fn SelfUpdate::check(
 ///|
 /// The immediate `update.download` reply. Completion arrives separately as
 /// `update.downloaded` or `update.download_failed` from the host-owned pump.
-type DownloadUpdateAcceptedReply = @protocol.DownloadUpdateAcceptedReply
+type DownloadUpdateReply = @protocol.DownloadUpdateReply
 
 ///|
 /// Accept one download for the app-lifetime pump, or say why not. The
@@ -145,7 +145,7 @@ type DownloadUpdateAcceptedReply = @protocol.DownloadUpdateAcceptedReply
 fn SelfUpdate::start_download(
   self : SelfUpdate,
   payload : UpdateChannelPayload,
-) -> DownloadUpdateAcceptedReply raise {
+) -> DownloadUpdateReply raise {
   guard self.work_dir is Some(_) && self.bundle_path is Some(_) else {
     raise HostError("this build cannot install updates")
   }
@@ -158,7 +158,7 @@ fn SelfUpdate::start_download(
     self.busy = false
     raise HostError("self-update is unavailable")
   }
-  { accepted: true }
+  DownloadAccepted
 }
 
 ///|
@@ -280,7 +280,7 @@ async fn SelfUpdate::apply(self : SelfUpdate) -> ApplyUpdateReply {
     self.staged = None
     @update.write_relaunch_marker(work_dir=dir, bundle_path=bundle)
   })
-  { applied: true }
+  UpdateApplied
 }
 
 ///|
@@ -293,7 +293,7 @@ test "self-update accepts one download and rejects a second" {
     staged: None,
     busy: false,
   }
-  assert_true(updates.start_download({ channel: None }).accepted)
+  assert_true(updates.start_download({ channel: None }) is DownloadAccepted)
   assert_true(updates.busy)
   assert_true(updates.downloads.try_get() is Some(_))
   let mut rejected = false

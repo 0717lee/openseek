@@ -5,7 +5,7 @@
 ///|
 async fn list_apps_op() -> ListAppsReply {
   let apps = @applauncher.list()
-  { apps: apps.map(app => { id: app.id, name: app.name, icon: app.icon }) }
+  Apps(apps=apps.map(app => { id: app.id, name: app.name, icon: app.icon }))
 }
 
 ///|
@@ -32,5 +32,5 @@ async fn launch_app_op(payload : LaunchAppPayload) -> LaunchAppReply {
     @applauncher.LauncherError(message) => raise HostError(message)
     error => raise error
   }
-  { launched: true }
+  AppLaunched
 }

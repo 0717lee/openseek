@@ -13,16 +13,16 @@ type BrowseDirectoryPayload = @protocol.BrowseDirectoryPayload
 type BrowseDirectoryReply = @protocol.BrowseDirectoryReply
 
 ///|
-/// A refusal (bad path, not a directory, unreadable) travels inside the
-/// reply: the local bridge would flatten a raised error down to
-/// "op ext:openseek/fs.browse failed".
+/// This command converts listing failures into its established `BrowseError`
+/// reply and records the original diagnostic before returning it.
 async fn browse_directory_op(
   payload : BrowseDirectoryPayload,
 ) -> BrowseDirectoryReply {
   browse_directory_listing(payload) catch {
-    error if @async.is_being_cancelled() => raise error
-    HostError(message) => BrowseError(message)
-    error => raise error
+    error =>
+      BrowseError(
+        @endpoint.Endpoint::record_failure(@commands.fs_browse.name(), error),
+      )
   }
 }
 

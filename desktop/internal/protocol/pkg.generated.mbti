@@ -51,13 +51,18 @@ pub(all) struct AppEntry {
   icon : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct AppInfoReply {
-  version : String
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum AppInfoReply {
+  AppInfo(version~ : String)
+}
+pub impl ToJson for AppInfoReply
+pub impl @json.FromJson for AppInfoReply
 
-pub(all) struct ApplyUpdateReply {
-  applied : Bool
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum ApplyUpdateReply {
+  UpdateApplied
+  UpdateApplyError(String)
+}
+pub impl ToJson for ApplyUpdateReply
+pub impl @json.FromJson for ApplyUpdateReply
 
 pub(all) struct ArchiveNeedsForceReply {
   worktree : String
@@ -66,8 +71,9 @@ pub(all) struct ArchiveNeedsForceReply {
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) enum ArchiveReply {
-  Archived(SessionsReply)
+  Archived(groups~ : Array[SessionGroup])
   NeedsForce(ArchiveNeedsForceReply)
+  ArchiveError(String)
 } derive(Eq, @debug.Debug)
 pub impl ToJson for ArchiveReply
 pub impl @json.FromJson for ArchiveReply
@@ -86,6 +92,13 @@ pub(all) struct AuthStatusPayload {
   device : AuthDevicePayload?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
+pub(all) enum AuthStatusReply {
+  AuthStatus(AuthStatusPayload)
+  AuthError(String)
+}
+pub impl ToJson for AuthStatusReply
+pub impl @json.FromJson for AuthStatusReply
+
 pub(all) struct AuthUserPayload {
   login : String
   avatar_url : String
@@ -102,6 +115,13 @@ pub(all) enum BrowseDirectoryReply {
 pub impl ToJson for BrowseDirectoryReply
 pub impl @json.FromJson for BrowseDirectoryReply
 
+pub(all) enum BrowserBackReply {
+  BrowserWentBack
+  BrowserBackError(String)
+} derive(Eq, @debug.Debug)
+pub impl ToJson for BrowserBackReply
+pub impl @json.FromJson for BrowserBackReply
+
 pub(all) struct BrowserBoundsPayload {
   id : Int
   x : Int
@@ -110,33 +130,92 @@ pub(all) struct BrowserBoundsPayload {
   height : Int
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
+pub(all) enum BrowserBoundsReply {
+  BrowserBoundsSet
+  BrowserBoundsError(String)
+} derive(Eq, @debug.Debug)
+pub impl ToJson for BrowserBoundsReply
+pub impl @json.FromJson for BrowserBoundsReply
+
+pub(all) enum BrowserCloseReply {
+  BrowserClosed
+  BrowserCloseError(String)
+} derive(Eq, @debug.Debug)
+pub impl ToJson for BrowserCloseReply
+pub impl @json.FromJson for BrowserCloseReply
+
+pub(all) enum BrowserForwardReply {
+  BrowserWentForward
+  BrowserForwardError(String)
+} derive(Eq, @debug.Debug)
+pub impl ToJson for BrowserForwardReply
+pub impl @json.FromJson for BrowserForwardReply
+
 pub(all) struct BrowserIdPayload {
   id : Int
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) enum BrowserNavigateReply {
+  BrowserNavigated
+  BrowserNavigateError(String)
+} derive(Eq, @debug.Debug)
+pub impl ToJson for BrowserNavigateReply
+pub impl @json.FromJson for BrowserNavigateReply
 
 pub(all) struct BrowserOpenPayload {
   id : Int
   url : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
+pub(all) enum BrowserOpenReply {
+  BrowserOpened
+  BrowserOpenError(String)
+} derive(Eq, @debug.Debug)
+pub impl ToJson for BrowserOpenReply
+pub impl @json.FromJson for BrowserOpenReply
+
+pub(all) enum BrowserReloadReply {
+  BrowserReloaded
+  BrowserReloadError(String)
+} derive(Eq, @debug.Debug)
+pub impl ToJson for BrowserReloadReply
+pub impl @json.FromJson for BrowserReloadReply
+
 pub(all) struct BrowserVisiblePayload {
   id : Int
   visible : Bool
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
+pub(all) enum BrowserVisibleReply {
+  BrowserVisibilitySet
+  BrowserVisibilityError(String)
+} derive(Eq, @debug.Debug)
+pub impl ToJson for BrowserVisibleReply
+pub impl @json.FromJson for BrowserVisibleReply
+
 pub(all) struct CancelPayload {
   run_id : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct CancelReply {
-  cancelled : Bool
-  run_id : String?
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum CancelReply {
+  Cancelled(run_id~ : String?)
+  NoRunToCancel
+  CancelError(String)
+}
+pub impl ToJson for CancelReply
+pub impl @json.FromJson for CancelReply
 
 pub(all) struct CancelSearchFilesPayload {
   cache_key : String
   generation : Int
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) enum CancelSearchFilesReply {
+  FileSearchCancelled
+  CancelSearchFilesError(String)
+} derive(Eq, @debug.Debug)
+pub impl ToJson for CancelSearchFilesReply
+pub impl @json.FromJson for CancelSearchFilesReply
 
 pub(all) enum CheckUpdateReply {
   UpToDate
@@ -152,6 +231,13 @@ pub(all) struct ClearFileSearchCachePayload {
   cache_key : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
+pub(all) enum ClearFileSearchCacheReply {
+  FileSearchCacheCleared
+  ClearFileSearchCacheError(String)
+} derive(Eq, @debug.Debug)
+pub impl ToJson for ClearFileSearchCacheReply
+pub impl @json.FromJson for ClearFileSearchCacheReply
+
 pub(all) struct CompactPayload {
   session : String
   model : String?
@@ -159,9 +245,12 @@ pub(all) struct CompactPayload {
   workspace : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct CompactReply {
-  compacting : Bool
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum CompactReply {
+  CompactionRequested
+  CompactError(String)
+}
+pub impl ToJson for CompactReply
+pub impl @json.FromJson for CompactReply
 
 pub(all) struct ConnectedPayload {
   ready : Bool?
@@ -179,9 +268,12 @@ pub(all) struct DirEntry {
   is_dir : Bool
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct DownloadUpdateAcceptedReply {
-  accepted : Bool
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum DownloadUpdateReply {
+  DownloadAccepted
+  DownloadError(String)
+}
+pub impl ToJson for DownloadUpdateReply
+pub impl @json.FromJson for DownloadUpdateReply
 
 pub(all) struct DurableBoundaryPayload {
   run_id : String
@@ -194,12 +286,6 @@ pub(all) enum EmptyPayload {
 } derive(Eq, @debug.Debug)
 pub impl ToJson for EmptyPayload
 pub impl @json.FromJson for EmptyPayload
-
-pub(all) enum EmptyReply {
-  Acknowledged
-} derive(Eq, @debug.Debug)
-pub impl ToJson for EmptyReply
-pub impl @json.FromJson for EmptyReply
 
 pub(all) struct ExternalLinkPayload {
   url : String
@@ -243,10 +329,12 @@ pub(all) struct GitBranchPayload {
   base_hint : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct GitBranchReply {
-  branch : String?
-  diffstat : GitDiffStat?
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum GitBranchReply {
+  GitBranch(branch~ : String?, diffstat~ : GitDiffStat?)
+  GitBranchError(String)
+}
+pub impl ToJson for GitBranchReply
+pub impl @json.FromJson for GitBranchReply
 
 pub(all) struct GitChange {
   path : String
@@ -261,12 +349,13 @@ pub(all) struct GitChangesPayload {
   workspace : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct GitChangesReply {
-  repository : Bool
-  head : String?
-  baseline : String?
-  changes : Array[GitChange]
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum GitChangesReply {
+  GitChanges(head~ : String?, baseline~ : String?, changes~ : Array[GitChange])
+  NotRepository
+  GitChangesError(String)
+}
+pub impl ToJson for GitChangesReply
+pub impl @json.FromJson for GitChangesReply
 
 pub(all) struct GitChecks {
   passed : Int
@@ -294,6 +383,7 @@ pub(all) enum GitOriginalFileReply {
   BinaryOriginal
   OversizedOriginal
   OriginalContent(String)
+  GitOriginalFileError(String)
 } derive(Eq, @debug.Debug)
 pub impl ToJson for GitOriginalFileReply
 pub impl @json.FromJson for GitOriginalFileReply
@@ -316,11 +406,12 @@ pub(all) struct GitPullRequestPayload {
   cwd : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct GitPullRequestReply {
-  pull_request : GitPullRequest?
-  compare_url : String?
-  branch : String?
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum GitPullRequestReply {
+  GitPullRequest(pull_request~ : GitPullRequest?, compare_url~ : String?, branch~ : String?)
+  GitPullRequestError(String)
+}
+pub impl ToJson for GitPullRequestReply
+pub impl @json.FromJson for GitPullRequestReply
 
 pub(all) struct GoalPayload {
   session : String
@@ -331,9 +422,19 @@ pub(all) struct GoalPayload {
   workspace : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct GoalReply {
-  delivered : Bool
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum GoalReply {
+  GoalDelivered
+  GoalError(String)
+}
+pub impl ToJson for GoalReply
+pub impl @json.FromJson for GoalReply
+
+pub(all) enum HostConnectReply {
+  HostConnected
+  HostConnectError(String)
+} derive(Eq, @debug.Debug)
+pub impl ToJson for HostConnectReply
+pub impl @json.FromJson for HostConnectReply
 
 pub(all) struct InstallSkillPayload {
   module_name : String
@@ -341,9 +442,12 @@ pub(all) struct InstallSkillPayload {
   package_path : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct InstallSkillReply {
-  installed : InstalledSkill
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum InstallSkillReply {
+  SkillInstalled(installed~ : InstalledSkill)
+  SkillInstallError(String)
+}
+pub impl ToJson for InstallSkillReply
+pub impl @json.FromJson for InstallSkillReply
 
 pub(all) struct InstalledSkill {
   id : String
@@ -352,9 +456,12 @@ pub(all) struct InstalledSkill {
   source : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct InstalledSkillsReply {
-  skills : Array[InstalledSkill]
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum InstalledSkillsReply {
+  InstalledSkills(skills~ : Array[InstalledSkill])
+  InstalledSkillsError(String)
+}
+pub impl ToJson for InstalledSkillsReply
+pub impl @json.FromJson for InstalledSkillsReply
 
 pub(all) struct KnownRunPayload {
   session : String
@@ -368,23 +475,31 @@ pub(all) struct LaunchAppPayload {
   app : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct LaunchAppReply {
-  launched : Bool
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum LaunchAppReply {
+  AppLaunched
+  AppLaunchError(String)
+}
+pub impl ToJson for LaunchAppReply
+pub impl @json.FromJson for LaunchAppReply
 
-pub(all) struct ListAppsReply {
-  apps : Array[AppEntry]
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum ListAppsReply {
+  Apps(apps~ : Array[AppEntry])
+  AppListError(String)
+}
+pub impl ToJson for ListAppsReply
+pub impl @json.FromJson for ListAppsReply
 
 pub(all) struct LoadSessionPayload {
   session : String
   workspace : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct LoadSessionReply {
-  session : SessionDocument
-  watermark : Int?
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum LoadSessionReply {
+  SessionLoaded(session~ : SessionDocument, watermark~ : Int?)
+  SessionLoadError(String)
+}
+pub impl ToJson for LoadSessionReply
+pub impl @json.FromJson for LoadSessionReply
 
 pub(all) struct LspDiagnostic {
   range : LspRange
@@ -394,9 +509,12 @@ pub(all) struct LspDiagnostic {
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 pub fn LspDiagnostic::array_from_wire(Json) -> Array[Self]
 
-pub(all) struct LspDiagnosticsReply {
-  diagnostics : Array[LspDiagnostic]?
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum LspDiagnosticsReply {
+  Diagnostics(diagnostics~ : Array[LspDiagnostic]?)
+  DiagnosticsError(String)
+}
+pub impl ToJson for LspDiagnosticsReply
+pub impl @json.FromJson for LspDiagnosticsReply
 
 pub(all) struct LspHoverPayload {
   root : String
@@ -405,15 +523,12 @@ pub(all) struct LspHoverPayload {
   character : Int
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct LspHoverReply {
-  value : String
-  markdown : Bool
-  has_range : Bool
-  start_line : Int
-  start_character : Int
-  end_line : Int
-  end_character : Int
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum LspHoverReply {
+  Hover(value~ : String, markdown~ : Bool, has_range~ : Bool, start_line~ : Int, start_character~ : Int, end_line~ : Int, end_character~ : Int)
+  HoverError(String)
+}
+pub impl ToJson for LspHoverReply
+pub impl @json.FromJson for LspHoverReply
 
 pub(all) struct LspOpenPayload {
   root : String
@@ -448,9 +563,12 @@ pub(all) struct MoonIdeLocation {
   end_column : Int
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct MoonIdeLocationsReply {
-  locations : Array[MoonIdeLocation]
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum MoonIdeLocationsReply {
+  Locations(locations~ : Array[MoonIdeLocation])
+  NavigationError(String)
+}
+pub impl ToJson for MoonIdeLocationsReply
+pub impl @json.FromJson for MoonIdeLocationsReply
 
 pub(all) struct MoonIdeNavigationPayload {
   path : String
@@ -514,9 +632,19 @@ pub(all) enum NotificationKind {
 pub fn NotificationKind::all() -> Array[Self]
 pub fn NotificationKind::wire_name(Self) -> String
 
-pub(all) struct OpenExternalReply {
-  opened : Bool
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum OpenDevtoolsReply {
+  DevtoolsOpened
+  OpenDevtoolsError(String)
+} derive(Eq, @debug.Debug)
+pub impl ToJson for OpenDevtoolsReply
+pub impl @json.FromJson for OpenDevtoolsReply
+
+pub(all) enum OpenExternalReply {
+  ExternalOpened
+  OpenExternalError(String)
+}
+pub impl ToJson for OpenExternalReply
+pub impl @json.FromJson for OpenExternalReply
 
 pub(all) struct OpenPathPayload {
   session : String
@@ -524,17 +652,23 @@ pub(all) struct OpenPathPayload {
   path : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct OpenPathReply {
-  opened : Bool
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum OpenPathReply {
+  PathOpened
+  OpenPathError(String)
+}
+pub impl ToJson for OpenPathReply
+pub impl @json.FromJson for OpenPathReply
 
 pub(all) struct ReadDirPayload {
   path : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct ReadDirReply {
-  entries : Array[DirEntry]
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum ReadDirReply {
+  DirectoryEntries(entries~ : Array[DirEntry])
+  ReadDirectoryError(String)
+}
+pub impl ToJson for ReadDirReply
+pub impl @json.FromJson for ReadDirReply
 
 pub(all) struct ReadFilePayload {
   path : String
@@ -544,6 +678,7 @@ pub(all) enum ReadFileReply {
   Binary
   Oversized
   Content(content~ : String, absolute~ : String, sig~ : String)
+  ReadFileError(String)
 } derive(Eq, @debug.Debug)
 pub impl ToJson for ReadFileReply
 pub impl @json.FromJson for ReadFileReply
@@ -561,10 +696,11 @@ pub(all) struct RunsPayload {
   known : Array[KnownRunPayload]?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct RunsReply {
-  runs : Array[StartedPayload]
-  settled : Array[RunSettlementPayload]
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum RunsReply {
+  Runs(runs~ : Array[StartedPayload], settled~ : Array[RunSettlementPayload])
+}
+pub impl ToJson for RunsReply
+pub impl @json.FromJson for RunsReply
 
 pub(all) struct SearchFilesPayload {
   path : String
@@ -574,12 +710,12 @@ pub(all) struct SearchFilesPayload {
   generation : Int
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct SearchFilesReply {
-  files : Array[String]
-  from_cache : Bool
-  limit_hit : Bool
-  cancelled : Bool
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum SearchFilesReply {
+  SearchResults(files~ : Array[String], from_cache~ : Bool, limit_hit~ : Bool, cancelled~ : Bool)
+  SearchFilesError(String)
+}
+pub impl ToJson for SearchFilesReply
+pub impl @json.FromJson for SearchFilesReply
 
 pub(all) struct SessionAssistantMessage {
   content : String
@@ -681,9 +817,12 @@ pub(all) struct SessionUserMessage {
   content : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct SessionsReply {
-  groups : Array[SessionGroup]
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum SessionsReply {
+  Sessions(groups~ : Array[SessionGroup])
+  SessionsError(String)
+}
+pub impl ToJson for SessionsReply
+pub impl @json.FromJson for SessionsReply
 
 pub(all) struct SettingsSetPayload {
   legacy_migration : Bool?
@@ -701,9 +840,19 @@ pub(all) struct SettingsStatusPayload {
   has_custom_key : Bool
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct SkillsCatalogReply {
-  skills : Array[MarketSkill]
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum SettingsStatusReply {
+  SettingsStatus(SettingsStatusPayload)
+  SettingsError(String)
+}
+pub impl ToJson for SettingsStatusReply
+pub impl @json.FromJson for SettingsStatusReply
+
+pub(all) enum SkillsCatalogReply {
+  SkillsCatalog(skills~ : Array[MarketSkill])
+  SkillsCatalogError(String)
+}
+pub impl ToJson for SkillsCatalogReply
+pub impl @json.FromJson for SkillsCatalogReply
 
 pub(all) struct StartPayload {
   task : String
@@ -714,11 +863,12 @@ pub(all) struct StartPayload {
   workspace : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct StartReply {
-  run_id : String
-  status : String
-  exit_code : Int
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum StartReply {
+  Started(run_id~ : String, status~ : String, exit_code~ : Int)
+  StartError(String)
+}
+pub impl ToJson for StartReply
+pub impl @json.FromJson for StartReply
 
 pub(all) struct StartedPayload {
   run_id : String
@@ -734,9 +884,12 @@ pub(all) struct StatFilesPayload {
   paths : Array[String]
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct StatFilesReply {
-  stats : Array[FileStat]
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum StatFilesReply {
+  FileStats(stats~ : Array[FileStat])
+  StatFilesError(String)
+}
+pub impl ToJson for StatFilesReply
+pub impl @json.FromJson for StatFilesReply
 
 pub(all) struct SteerPayload {
   text : String
@@ -744,10 +897,13 @@ pub(all) struct SteerPayload {
   submission_id : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct SteerReply {
-  steered : Bool
-  run_id : String?
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum SteerReply {
+  Steered(run_id~ : String?)
+  NothingToSteer
+  SteerError(String)
+}
+pub impl ToJson for SteerReply
+pub impl @json.FromJson for SteerReply
 
 pub(all) struct SubrunProgressPayload {
   id : String
@@ -779,9 +935,21 @@ pub(all) struct TerminalAckPayload {
   sequence : Int
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
+pub(all) enum TerminalAckReply {
+  TerminalOutputAcknowledged
+} derive(Eq, @debug.Debug)
+pub impl ToJson for TerminalAckReply
+pub impl @json.FromJson for TerminalAckReply
+
 pub(all) struct TerminalClosePayload {
   id : Int
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) enum TerminalCloseReply {
+  TerminalClosed
+} derive(Eq, @debug.Debug)
+pub impl ToJson for TerminalCloseReply
+pub impl @json.FromJson for TerminalCloseReply
 
 pub(all) struct TerminalExitPayload {
   id : Int
@@ -794,6 +962,13 @@ pub(all) struct TerminalInputPayload {
   data_base64 : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
+pub(all) enum TerminalInputReply {
+  TerminalInputAccepted
+  TerminalInputError(String)
+} derive(Eq, @debug.Debug)
+pub impl ToJson for TerminalInputReply
+pub impl @json.FromJson for TerminalInputReply
+
 pub(all) struct TerminalOpenPayload {
   session : String
   workspace : String?
@@ -801,9 +976,12 @@ pub(all) struct TerminalOpenPayload {
   rows : Int
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct TerminalOpenReply {
-  id : Int
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum TerminalOpenReply {
+  TerminalOpened(id~ : Int)
+  TerminalOpenError(String)
+}
+pub impl ToJson for TerminalOpenReply
+pub impl @json.FromJson for TerminalOpenReply
 
 pub(all) struct TerminalOutputPayload {
   id : Int
@@ -817,13 +995,30 @@ pub(all) struct TerminalResizePayload {
   rows : Int
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
+pub(all) enum TerminalResizeReply {
+  TerminalResized
+  TerminalResizeError(String)
+} derive(Eq, @debug.Debug)
+pub impl ToJson for TerminalResizeReply
+pub impl @json.FromJson for TerminalResizeReply
+
 pub(all) struct UninstallSkillPayload {
   id : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct UninstallSkillReply {
-  removed : Bool
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum UninstallSkillReply {
+  SkillRemoved
+  SkillUninstallError(String)
+}
+pub impl ToJson for UninstallSkillReply
+pub impl @json.FromJson for UninstallSkillReply
+
+pub(all) enum UnwatchReply {
+  FileWatchStopped
+  FileUnwatchError(String)
+} derive(Eq, @debug.Debug)
+pub impl ToJson for UnwatchReply
+pub impl @json.FromJson for UnwatchReply
 
 pub(all) struct UpdateChannelPayload {
   channel : String?
@@ -842,6 +1037,13 @@ pub(all) struct UpdateDownloadedPayload {
   version : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
+pub(all) enum WatchReply {
+  FileWatchStarted
+  FileWatchError(String)
+} derive(Eq, @debug.Debug)
+pub impl ToJson for WatchReply
+pub impl @json.FromJson for WatchReply
+
 pub(all) struct WatchWorkspacePayload {
   path : String
   files : Array[String]
@@ -859,9 +1061,12 @@ pub(all) struct WorkspaceSymbolsPayload {
   query : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct WorkspaceSymbolsReply {
-  symbols : Array[SymbolItem]
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum WorkspaceSymbolsReply {
+  WorkspaceSymbols(symbols~ : Array[SymbolItem])
+  WorkspaceSymbolsError(String)
+}
+pub impl ToJson for WorkspaceSymbolsReply
+pub impl @json.FromJson for WorkspaceSymbolsReply
 
 pub(all) struct WorkspacesChangedPayload {
   workspaces : Array[String]
@@ -884,10 +1089,12 @@ pub(all) struct WorktreeCreatePayload {
   session : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct WorktreeCreateReply {
-  name : String
-  worktrees : Array[WorktreeInfo]
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum WorktreeCreateReply {
+  WorktreeCreated(name~ : String, worktrees~ : Array[WorktreeInfo])
+  WorktreeCreateError(String)
+}
+pub impl ToJson for WorktreeCreateReply
+pub impl @json.FromJson for WorktreeCreateReply
 
 pub(all) struct WorktreeInfo {
   name : String
@@ -908,9 +1115,12 @@ pub(all) struct WorktreeRemovePayload {
   force : Bool?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct WorktreesReply {
-  worktrees : Array[WorktreeInfo]
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum WorktreesReply {
+  Worktrees(worktrees~ : Array[WorktreeInfo])
+  WorktreesError(String)
+}
+pub impl ToJson for WorktreesReply
+pub impl @json.FromJson for WorktreesReply
 
 // Type aliases
 

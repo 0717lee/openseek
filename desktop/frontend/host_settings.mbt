@@ -30,17 +30,18 @@ fn fetch_host_settings(
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply = @interop.bridge_request(
+      let response = @interop.bridge_request(
         channel,
         @commands.settings_get,
         @protocol.EmptyPayload::NoPayload,
       ) catch {
         _ => return
       }
+      guard response is SettingsStatus(status) else { return }
       scheduler.add(
         dispatch(
           HostSettingsLoaded(
-            HostSettings::from_status(reply),
+            HostSettings::from_status(status),
             connection_generation=Some(connection_generation),
           ),
         ),
@@ -64,7 +65,7 @@ fn push_host_settings(
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply = @interop.bridge_request(
+      let response = @interop.bridge_request(
         channel, @commands.settings_set, patch,
       ) catch {
         error => {
@@ -80,10 +81,25 @@ fn push_host_settings(
           return
         }
       }
+      let status = match response {
+        SettingsStatus(status) => status
+        SettingsError(message) => {
+          scheduler.add(
+            dispatch(
+              HostSettingsSaveFailed(
+                message,
+                connection_generation~,
+                cleans_legacy~,
+              ),
+            ),
+          )
+          return
+        }
+      }
       scheduler.add(
         dispatch(
           HostSettingsApplied(
-            HostSettings::from_status(reply),
+            HostSettings::from_status(status),
             connection_generation~,
             cleans_legacy~,
           ),

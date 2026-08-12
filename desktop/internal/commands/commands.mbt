@@ -1,6 +1,7 @@
 // The Desktop command catalog. Each value binds one stable wire name to one
-// payload type and one reply type. Native endpoint registration supplies the
-// handler; no dynamic request or response union sits between them.
+// payload type and one concrete reply type. The reply itself represents both
+// successful completion and handler failure; commands whose established reply
+// already has an error branch reuse it.
 
 ///|
 pub const ExtensionId = "openseek-desktop"
@@ -12,8 +13,8 @@ pub let extension_contract : @proton_contract.ExtensionContract = @proton_contra
 )
 
 ///|
-/// A target-neutral command identity. The type parameters prevent a caller
-/// from pairing a command name with an unrelated payload or reply.
+/// A target-neutral command identity. Reply is the complete command reply,
+/// including its command-specific failure branch.
 struct Command[Payload, Reply] {
   descriptor : @proton_contract.Command[Payload, Reply]
 }
@@ -98,13 +99,13 @@ pub let session_unarchive : Command[
 ///|
 pub let settings_get : Command[
   @protocol.EmptyPayload,
-  @protocol.SettingsStatusPayload,
+  @protocol.SettingsStatusReply,
 ] = Command("settings.get")
 
 ///|
 pub let settings_set : Command[
   @protocol.SettingsSetPayload,
-  @protocol.SettingsStatusPayload,
+  @protocol.SettingsStatusReply,
 ] = Command("settings.set")
 
 ///|
@@ -149,28 +150,26 @@ pub let worktree_remove : Command[
 ] = Command("worktree.remove")
 
 ///|
-pub let auth_status : Command[
-  @protocol.EmptyPayload,
-  @protocol.AuthStatusPayload,
-] = Command("auth.status")
+pub let auth_status : Command[@protocol.EmptyPayload, @protocol.AuthStatusReply] = Command(
+  "auth.status",
+)
 
 ///|
 pub let auth_connect : Command[
   @protocol.EmptyPayload,
-  @protocol.AuthStatusPayload,
+  @protocol.AuthStatusReply,
 ] = Command("auth.connect")
 
 ///|
 pub let auth_disconnect : Command[
   @protocol.EmptyPayload,
-  @protocol.AuthStatusPayload,
+  @protocol.AuthStatusReply,
 ] = Command("auth.disconnect")
 
 ///|
-pub let auth_cancel : Command[
-  @protocol.EmptyPayload,
-  @protocol.AuthStatusPayload,
-] = Command("auth.cancel")
+pub let auth_cancel : Command[@protocol.EmptyPayload, @protocol.AuthStatusReply] = Command(
+  "auth.cancel",
+)
 
 ///|
 pub let fs_read_file : Command[
@@ -193,13 +192,13 @@ pub let fs_search_files : Command[
 ///|
 pub let fs_cancel_search_files : Command[
   @protocol.CancelSearchFilesPayload,
-  @protocol.EmptyReply,
+  @protocol.CancelSearchFilesReply,
 ] = Command("fs.cancel_search_files")
 
 ///|
 pub let fs_clear_file_search_cache : Command[
   @protocol.ClearFileSearchCachePayload,
-  @protocol.EmptyReply,
+  @protocol.ClearFileSearchCacheReply,
 ] = Command("fs.clear_file_search_cache")
 
 ///|
@@ -211,11 +210,11 @@ pub let fs_stat_files : Command[
 ///|
 pub let fs_watch : Command[
   @protocol.WatchWorkspacePayload,
-  @protocol.EmptyReply,
+  @protocol.WatchReply,
 ] = Command("fs.watch")
 
 ///|
-pub let fs_unwatch : Command[@protocol.EmptyPayload, @protocol.EmptyReply] = Command(
+pub let fs_unwatch : Command[@protocol.EmptyPayload, @protocol.UnwatchReply] = Command(
   "fs.unwatch",
 )
 
@@ -234,25 +233,25 @@ pub let terminal_open : Command[
 ///|
 pub let terminal_input : Command[
   @protocol.TerminalInputPayload,
-  @protocol.EmptyReply,
+  @protocol.TerminalInputReply,
 ] = Command("terminal.input")
 
 ///|
 pub let terminal_resize : Command[
   @protocol.TerminalResizePayload,
-  @protocol.EmptyReply,
+  @protocol.TerminalResizeReply,
 ] = Command("terminal.resize")
 
 ///|
 pub let terminal_ack : Command[
   @protocol.TerminalAckPayload,
-  @protocol.EmptyReply,
+  @protocol.TerminalAckReply,
 ] = Command("terminal.ack")
 
 ///|
 pub let terminal_close : Command[
   @protocol.TerminalClosePayload,
-  @protocol.EmptyReply,
+  @protocol.TerminalCloseReply,
 ] = Command("terminal.close")
 
 ///|
@@ -317,7 +316,7 @@ pub let update_check : Command[
 ///|
 pub let update_download : Command[
   @protocol.UpdateChannelPayload,
-  @protocol.DownloadUpdateAcceptedReply,
+  @protocol.DownloadUpdateReply,
 ] = Command("update.download")
 
 ///|
@@ -368,69 +367,70 @@ pub let host_open_path : Command[
 ] = Command("host.open_path")
 
 ///|
-pub let host_connect : Command[@protocol.EmptyPayload, @protocol.EmptyReply] = Command(
-  "host.connect",
-)
+pub let host_connect : Command[
+  @protocol.EmptyPayload,
+  @protocol.HostConnectReply,
+] = Command("host.connect")
 
 ///|
 pub let shell_open_external : Command[
   @protocol.ExternalLinkPayload,
   @protocol.OpenExternalReply,
 ] = Command("shell.open_external")
-// The dock's browser-tab commands. Like `host.connect` and
-// `shell.open_external`, they are bound window-only: the native web
-// contents views live in the desktop window, so a relay browser has
-// nothing to command.
+
+// The dock's browser-tab commands are window-only because the native web
+// contents views belong to the desktop window.
 
 ///|
 pub let browser_open : Command[
   @protocol.BrowserOpenPayload,
-  @protocol.EmptyReply,
+  @protocol.BrowserOpenReply,
 ] = Command("browser.open")
 
 ///|
 pub let browser_navigate : Command[
   @protocol.BrowserOpenPayload,
-  @protocol.EmptyReply,
+  @protocol.BrowserNavigateReply,
 ] = Command("browser.navigate")
 
 ///|
-pub let browser_back : Command[@protocol.BrowserIdPayload, @protocol.EmptyReply] = Command(
-  "browser.back",
-)
+pub let browser_back : Command[
+  @protocol.BrowserIdPayload,
+  @protocol.BrowserBackReply,
+] = Command("browser.back")
 
 ///|
 pub let browser_forward : Command[
   @protocol.BrowserIdPayload,
-  @protocol.EmptyReply,
+  @protocol.BrowserForwardReply,
 ] = Command("browser.forward")
 
 ///|
 pub let browser_reload : Command[
   @protocol.BrowserIdPayload,
-  @protocol.EmptyReply,
+  @protocol.BrowserReloadReply,
 ] = Command("browser.reload")
 
 ///|
 pub let app_open_devtools : Command[
   @protocol.EmptyPayload,
-  @protocol.EmptyReply,
+  @protocol.OpenDevtoolsReply,
 ] = Command("app.open_devtools")
 
 ///|
 pub let browser_set_bounds : Command[
   @protocol.BrowserBoundsPayload,
-  @protocol.EmptyReply,
+  @protocol.BrowserBoundsReply,
 ] = Command("browser.set_bounds")
 
 ///|
 pub let browser_set_visible : Command[
   @protocol.BrowserVisiblePayload,
-  @protocol.EmptyReply,
+  @protocol.BrowserVisibleReply,
 ] = Command("browser.set_visible")
 
 ///|
 pub let browser_close : Command[
   @protocol.BrowserIdPayload,
-  @protocol.EmptyReply,
+  @protocol.BrowserCloseReply,
 ] = Command("browser.close")

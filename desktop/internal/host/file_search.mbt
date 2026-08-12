@@ -103,15 +103,15 @@ async fn scan_workspace_files(root : @pathx.Absolute) -> FileIndexSnapshot {
 
 ///|
 priv enum FileSearchResponse {
-  SearchSucceeded(SearchFilesReply)
+  SearchResult(FileSearchResult)
   SearchCancelled
-  SearchFailed(String)
+  SearchError(String)
 }
 
 ///|
 priv enum FileScanOutcome {
-  ScanSucceeded(FileIndexSnapshot)
-  ScanFailed(String)
+  FilesIndexed(FileIndexSnapshot)
+  FileIndexError(String)
 }
 
 ///|
@@ -132,8 +132,8 @@ priv struct FileSearchComputation {
 
 ///|
 priv enum FileRankOutcome {
-  RankSucceeded(FileSearchComputation)
-  RankFailed(String)
+  FilesRanked(FileSearchComputation)
+  FileRankError(String)
 }
 
 ///|
@@ -218,7 +218,7 @@ async fn FileSearchService::search(
   query : String,
   max_results : Int,
   request_generation : Int,
-) -> SearchFilesReply {
+) -> FileSearchResult {
   let reply : @async.Queue[FileSearchResponse] = Queue(kind=Blocking(1))
   self.requests.put(
     Search(
@@ -232,10 +232,10 @@ async fn FileSearchService::search(
     ),
   )
   match reply.get() {
-    SearchSucceeded(result) => result
+    SearchResult(result) => result
     SearchCancelled =>
       { files: [], from_cache: true, limit_hit: false, cancelled: true }
-    SearchFailed(message) => raise HostError(message)
+    SearchError(message) => raise HostError(message)
   }
 }
 
@@ -264,7 +264,7 @@ async fn FileSearchService::clear_cache(
 fn file_search_reply(
   computed : FileSearchComputation,
   from_cache : Bool,
-) -> SearchFilesReply {
+) -> FileSearchResult {
   {
     files: computed.files,
     from_cache,
@@ -349,7 +349,7 @@ async fn FileSearchService::run(self : FileSearchService) -> Unit {
     ) -> Unit {
       guard caches.get(cache_key) is Some(cache) &&
         cache.snapshot is Some(snapshot) else {
-        waiter.reply.put(SearchFailed("file search cache is not ready"))
+        waiter.reply.put(SearchError("file search cache is not ready"))
         return
       }
       let prepared = @file_search_score.PathQuery::new(waiter.query)
@@ -360,7 +360,7 @@ async fn FileSearchService::run(self : FileSearchService) -> Unit {
           inspected: 0,
         }
         waiter.reply.put(
-          SearchSucceeded(file_search_reply(computed, waiter.from_cache)),
+          SearchResult(file_search_reply(computed, waiter.from_cache)),
         )
         return
       }
@@ -385,11 +385,11 @@ async fn FileSearchService::run(self : FileSearchService) -> Unit {
       let generation = next_rank_generation
       let scan_generation = cache.scan_generation
       let task = group.spawn(no_wait=true, allow_failure=true, () => {
-        let outcome = RankSucceeded(
+        let outcome = FilesRanked(
           compute_file_search(snapshot, waiter.query, waiter.max_results),
         ) catch {
           _ if @async.is_being_cancelled() => return
-          error => RankFailed("failed to rank workspace files: \{error}")
+          error => FileRankError("failed to rank workspace files: \{error}")
         }
         self.requests.put(
           RankFinished(cache_key~, scan_generation~, generation~, outcome~),
@@ -417,7 +417,7 @@ async fn FileSearchService::run(self : FileSearchService) -> Unit {
           reply~
         ) => {
           if cache_key.is_empty() {
-            reply.put(SearchFailed("file search cache key is empty"))
+            reply.put(SearchError("file search cache key is empty"))
             continue
           }
           if cancelled_through.get(cache_key).unwrap_or(-1) >=
@@ -438,7 +438,7 @@ async fn FileSearchService::run(self : FileSearchService) -> Unit {
             Some(cache) =>
               if cache.root_key != root_key {
                 reply.put(
-                  SearchFailed("file search cache belongs to another workspace"),
+                  SearchError("file search cache belongs to another workspace"),
                 )
               } else if cache.snapshot is Some(_) {
                 launch_rank(cache_key, waiter)
@@ -448,7 +448,7 @@ async fn FileSearchService::run(self : FileSearchService) -> Unit {
                 running_scans[cache_key] = { ..running, waiters, }
               } else {
                 caches.remove(cache_key)
-                reply.put(SearchFailed("file search cache lost its scan"))
+                reply.put(SearchError("file search cache lost its scan"))
               }
             None => {
               next_scan_generation += 1
@@ -462,10 +462,10 @@ async fn FileSearchService::run(self : FileSearchService) -> Unit {
                 let outcome = try {
                   scan_permit.acquire()
                   defer scan_permit.release()
-                  ScanSucceeded((self.scan)(root))
+                  FilesIndexed((self.scan)(root))
                 } catch {
                   _ if @async.is_being_cancelled() => return
-                  error => ScanFailed("failed to index workspace: \{error}")
+                  error => FileIndexError("failed to index workspace: \{error}")
                 }
                 self.requests.put(
                   ScanFinished(cache_key~, root_key~, generation~, outcome~),
@@ -568,16 +568,16 @@ async fn FileSearchService::run(self : FileSearchService) -> Unit {
             continue
           }
           match outcome {
-            ScanSucceeded(snapshot) => {
+            FilesIndexed(snapshot) => {
               caches[cache_key] = { ..cache, snapshot: Some(snapshot) }
               for waiter in waiters {
                 launch_rank(cache_key, waiter)
               }
             }
-            ScanFailed(message) => {
+            FileIndexError(message) => {
               caches.remove(cache_key)
               for waiter in waiters {
-                waiter.reply.put(SearchFailed(message))
+                waiter.reply.put(SearchError(message))
               }
             }
           }
@@ -596,17 +596,15 @@ async fn FileSearchService::run(self : FileSearchService) -> Unit {
             continue
           }
           match outcome {
-            RankSucceeded(computed) =>
+            FilesRanked(computed) =>
               for waiter in running.waiters {
                 waiter.reply.put(
-                  SearchSucceeded(
-                    file_search_reply(computed, waiter.from_cache),
-                  ),
+                  SearchResult(file_search_reply(computed, waiter.from_cache)),
                 )
               }
-            RankFailed(message) =>
+            FileRankError(message) =>
               for waiter in running.waiters {
-                waiter.reply.put(SearchFailed(message))
+                waiter.reply.put(SearchError(message))
               }
           }
         }
@@ -619,7 +617,7 @@ async fn FileSearchService::run(self : FileSearchService) -> Unit {
 async fn search_files_op(
   service : FileSearchService,
   payload : SearchFilesPayload,
-) -> SearchFilesReply {
+) -> FileSearchResult {
   let root = WirePath::parse(payload.path).absolute
   service.search(
     root,
@@ -634,18 +632,18 @@ async fn search_files_op(
 async fn cancel_search_files_op(
   service : FileSearchService,
   payload : CancelSearchFilesPayload,
-) -> @protocol.EmptyReply {
+) -> @protocol.CancelSearchFilesReply {
   service.cancel(payload.cache_key, payload.generation)
-  Acknowledged
+  FileSearchCancelled
 }
 
 ///|
 async fn clear_file_search_cache_op(
   service : FileSearchService,
   payload : ClearFileSearchCachePayload,
-) -> @protocol.EmptyReply {
+) -> @protocol.ClearFileSearchCacheReply {
   service.clear_cache(payload.cache_key)
-  Acknowledged
+  FileSearchCacheCleared
 }
 
 ///|

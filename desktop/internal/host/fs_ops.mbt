@@ -13,7 +13,7 @@ async fn read_directory_op(payload : ReadDirPayload) -> ReadDirReply {
   // A requested root can be created lazily by the engine. Treat a missing
   // directory as empty so the panel can keep its ordinary loading behavior.
   if !@fs.exists(dir.to_string()) {
-    return { entries: [] }
+    return DirectoryEntries(entries=[])
   }
   let names = @fs.readdir(dir.to_string()) catch {
     error if @async.is_being_cancelled() => raise error
@@ -37,7 +37,7 @@ async fn read_directory_op(payload : ReadDirPayload) -> ReadDirReply {
   // group by name, and the partition preserves that order.
   let dirs = entries.filter(entry => entry.is_dir)
   let files = entries.filter(entry => !entry.is_dir)
-  { entries: dirs + files }
+  DirectoryEntries(entries=dirs + files)
 }
 
 ///|
@@ -82,7 +82,7 @@ async fn stat_files_op(payload : StatFilesPayload) -> StatFilesReply {
     let sig = file_signature(file.to_string())
     stats.push({ path, sig: sig.unwrap_or("") })
   }
-  { stats, }
+  FileStats(stats~)
 }
 
 ///|

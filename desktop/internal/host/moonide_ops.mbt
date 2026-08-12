@@ -181,7 +181,7 @@ fn moonide_result_path(
 fn parse_moonide_output(
   output : String,
   physical_workspace : @pathx.Absolute,
-) -> MoonIdeLocationsReply raise HostError {
+) -> MoonIdeLocationResult raise HostError {
   let json = @json.parse(output) catch {
     _ => raise HostError("moon ide returned malformed JSON")
   }
@@ -229,10 +229,10 @@ fn moonide_client_path(
 /// to the lexical attached root before crossing the wire. Unreadable/stale
 /// paths are dropped, while line and column numbers pass through unchanged.
 async fn canonical_moonide_locations(
-  reply : MoonIdeLocationsReply,
+  reply : MoonIdeLocationResult,
   lexical_workspace : @pathx.Absolute,
   physical_workspace : @pathx.Absolute,
-) -> MoonIdeLocationsReply {
+) -> MoonIdeLocationResult {
   let locations : Array[MoonIdeLocation] = []
   for location in reply.locations {
     let canonical = @fs.realpath(location.path) catch {
@@ -259,7 +259,7 @@ async fn moonide_navigation_op(
   state : HostState,
   query : MoonIdeQuery,
   payload : MoonIdeNavigationPayload,
-) -> MoonIdeLocationsReply {
+) -> MoonIdeLocationResult {
   let request = resolve_moonide_request(payload)
   let config = moonide_spawn_config(state)
   let args = query.args(request.relative_path, request.line, request.column)
@@ -299,7 +299,7 @@ async fn moonide_navigation_op(
 async fn moonide_definition_op(
   state : HostState,
   payload : MoonIdeNavigationPayload,
-) -> MoonIdeLocationsReply {
+) -> MoonIdeLocationResult {
   moonide_navigation_op(state, Definition, payload)
 }
 
@@ -307,7 +307,7 @@ async fn moonide_definition_op(
 async fn moonide_references_op(
   state : HostState,
   payload : MoonIdeNavigationPayload,
-) -> MoonIdeLocationsReply {
+) -> MoonIdeLocationResult {
   moonide_navigation_op(state, References, payload)
 }
 
@@ -353,38 +353,43 @@ test "Moon IDE parser expands ranges before physical security filtering" {
     ),
     workspace,
   )
-  assert_eq(ToJson::to_json(reply), {
-    "locations": [
-      {
-        "path": "/workspace/src/a.mbt",
-        "start_line": 2,
-        "start_column": 3,
-        "end_line": 4,
-        "end_column": 5,
-      },
-      {
-        "path": "/workspace/src/b.mbt",
-        "start_line": 7,
-        "start_column": 8,
-        "end_line": 7,
-        "end_column": 12,
-      },
-      {
-        "path": "/other/c.mbt",
-        "start_line": 1,
-        "start_column": 1,
-        "end_line": 1,
-        "end_column": 2,
-      },
-      {
-        "path": "/escape.mbt",
-        "start_line": 1,
-        "start_column": 1,
-        "end_line": 1,
-        "end_column": 2,
-      },
-    ],
-  })
+  assert_eq(
+    ToJson::to_json(
+      (Locations(locations=reply.locations) : MoonIdeLocationsReply),
+    ),
+    {
+      "locations": [
+        {
+          "path": "/workspace/src/a.mbt",
+          "start_line": 2,
+          "start_column": 3,
+          "end_line": 4,
+          "end_column": 5,
+        },
+        {
+          "path": "/workspace/src/b.mbt",
+          "start_line": 7,
+          "start_column": 8,
+          "end_line": 7,
+          "end_column": 12,
+        },
+        {
+          "path": "/other/c.mbt",
+          "start_line": 1,
+          "start_column": 1,
+          "end_line": 1,
+          "end_column": 2,
+        },
+        {
+          "path": "/escape.mbt",
+          "start_line": 1,
+          "start_column": 1,
+          "end_line": 1,
+          "end_column": 2,
+        },
+      ],
+    },
+  )
   assert_true(parse_moonide_output("null", workspace).locations.is_empty())
 }
 

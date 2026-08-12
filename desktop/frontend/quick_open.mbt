@@ -61,7 +61,7 @@ fn quick_open_file_request(
   }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply = @interop.bridge_request(
+      let response = @interop.bridge_request(
         owner.channel,
         @commands.fs_search_files,
         {
@@ -98,7 +98,26 @@ fn quick_open_file_request(
           return
         }
       }
-      if reply.cancelled {
+      guard response
+        is SearchResults(files~, from_cache~, limit_hit~, cancelled~) else {
+        scheduler.add(
+          dispatch(
+            match kind {
+              PopulateFileCache =>
+                QuickOpenFileCacheRequestFailed(owner~, cache_key~, generation~)
+              QueryFileCache =>
+                QuickOpenFilesRequestFailed(
+                  owner~,
+                  cache_key~,
+                  query~,
+                  generation~,
+                )
+            },
+          ),
+        )
+        return
+      }
+      if cancelled {
         return
       }
       match kind {
@@ -107,7 +126,7 @@ fn quick_open_file_request(
             dispatch(QuickOpenFileCacheLoaded(owner~, cache_key~, generation~)),
           )
         QueryFileCache => {
-          let files = reply.files.filter_map(path => {
+          let files = files.filter_map(path => {
             if path.is_empty() {
               None
             } else {
@@ -122,8 +141,8 @@ fn quick_open_file_request(
                 query~,
                 generation~,
                 files~,
-                from_cache=reply.from_cache,
-                limit_hit=reply.limit_hit,
+                from_cache~,
+                limit_hit~,
               ),
             ),
           )

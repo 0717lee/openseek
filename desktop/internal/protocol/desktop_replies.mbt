@@ -28,55 +28,35 @@ pub impl FromJson for EmptyPayload with fn from_json(json, path) {
 }
 
 ///|
-/// Object-shaped acknowledgement for methods whose successful result has no
-/// additional data.
-pub(all) enum EmptyReply {
-  Acknowledged
-} derive(Debug, Eq)
-
-///|
-pub impl ToJson for EmptyReply with fn to_json(_self) {
-  Json::empty_object()
-}
-
-///|
-pub impl FromJson for EmptyReply with fn from_json(json, path) {
-  guard json is Object(_) else {
-    raise JsonDecodeError((path, "expected empty object reply"))
-  }
-  Acknowledged
-}
-
-///|
-pub(all) struct StartReply {
+priv struct StartWire {
   run_id : String
   status : String
   exit_code : Int
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
-pub(all) struct CancelReply {
+priv struct CancelWire {
   cancelled : Bool
   run_id : String?
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
-pub(all) struct SteerReply {
+priv struct SteerWire {
   steered : Bool
   run_id : String?
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
-pub(all) struct CompactReply {
+priv struct CompactWire {
   compacting : Bool
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
-pub(all) struct GoalReply {
+priv struct GoalWire {
   // Whether the goal command reached a live engine for this conversation;
   // the durable `[goal]` marker commit is the real confirmation.
   delivered : Bool
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
 /// One reconnect-safe completion returned by `agent.runs`.
@@ -90,10 +70,10 @@ pub(all) struct RunSettlementPayload {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-pub(all) struct RunsReply {
+priv struct RunsWire {
   runs : Array[StartedPayload]
   settled : Array[RunSettlementPayload]
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
 /// The subset of `sessions list --format=json` consumed by Desktop.
@@ -131,9 +111,9 @@ pub(all) struct SessionGroup {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-pub(all) struct SessionsReply {
+priv struct SessionsWire {
   groups : Array[SessionGroup]
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
 /// The expected, recoverable refusal from `session.archive`: the bound
@@ -147,18 +127,19 @@ pub(all) struct ArchiveNeedsForceReply {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-/// `session.archive` keeps the legacy `SessionsReply` JSON shape on success so
-/// older clients can consume replies from a newer host. A dirty checkout is a
-/// normal confirmation state rather than a rejected bridge operation.
+/// `session.archive` keeps the legacy `{ "groups": [...] }` JSON shape on
+/// success so older clients can consume replies from a newer host. A dirty
+/// checkout is a normal confirmation state rather than an operation error.
 pub(all) enum ArchiveReply {
-  Archived(SessionsReply)
+  Archived(groups~ : Array[SessionGroup])
   NeedsForce(ArchiveNeedsForceReply)
+  ArchiveError(String)
 } derive(Debug, Eq)
 
 ///|
 pub impl ToJson for ArchiveReply with fn to_json(self) {
   match self {
-    Archived(reply) => reply.to_json()
+    Archived(groups~) => ToJson::to_json(({ groups, } : SessionsWire))
     NeedsForce(refusal) =>
       {
         "kind": "needs_force",
@@ -166,6 +147,7 @@ pub impl ToJson for ArchiveReply with fn to_json(self) {
         "dirty_paths": refusal.dirty_paths,
         "dirty_path_count": refusal.dirty_path_count,
       }
+    ArchiveError(message) => { "error": message }
   }
 }
 
@@ -173,6 +155,14 @@ pub impl ToJson for ArchiveReply with fn to_json(self) {
 pub impl FromJson for ArchiveReply with fn from_json(json, path) {
   guard json is Object(fields) else {
     raise JsonDecodeError((path, "expected archive reply"))
+  }
+  if fields.get("error") is Some(error) {
+    guard error is String(message) else {
+      raise JsonDecodeError(
+        (path.add_key("error"), "command error must be a string"),
+      )
+    }
+    return ArchiveError(message)
   }
   match fields.get("kind") {
     Some(String("needs_force")) => {
@@ -190,8 +180,8 @@ pub impl FromJson for ArchiveReply with fn from_json(json, path) {
     None => {
       // Success deliberately remains `{groups:[...]}`, the pre-structured-
       // refusal response shape.
-      let reply : SessionsReply = @json.from_json(json)
-      Archived(reply)
+      let reply : SessionsWire = @json.from_json(json)
+      Archived(groups=reply.groups)
     }
   }
 }
@@ -370,16 +360,15 @@ pub(all) struct SessionDocument {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-pub(all) struct LoadSessionReply {
+priv struct LoadSessionWire {
   session : SessionDocument
   watermark : Int?
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
 /// A workspace list, or a mutation's refusal reason with the registry left
-/// unchanged. Success keeps the legacy `{workspaces:[...]}` shape; the
-/// refusal rides in the reply body as `{error:"..."}` because the local
-/// bridge summarizes raised handler errors down to "op <name> failed".
+/// unchanged. The populated result keeps the legacy `{workspaces:[...]}`
+/// shape; a refusal uses `{error:"..."}`.
 pub(all) enum WorkspacesReply {
   Workspaces(Array[String])
   WorkspaceError(String)
@@ -428,27 +417,27 @@ pub(all) struct WorktreeInfo {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-pub(all) struct WorktreesReply {
+priv struct WorktreesWire {
   worktrees : Array[WorktreeInfo]
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
 /// A create's reply names the worktree it made — the client sends no name
 /// and needs the generated one to start the bound conversation.
-pub(all) struct WorktreeCreateReply {
+priv struct WorktreeCreateWire {
   name : String
   worktrees : Array[WorktreeInfo]
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
-pub(all) struct OpenPathReply {
+priv struct OpenPathWire {
   opened : Bool
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
-pub(all) struct ApplyUpdateReply {
+priv struct ApplyUpdateWire {
   applied : Bool
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
 pub(all) struct AppEntry {
@@ -458,14 +447,14 @@ pub(all) struct AppEntry {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-pub(all) struct ListAppsReply {
+priv struct ListAppsWire {
   apps : Array[AppEntry]
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
-pub(all) struct LaunchAppReply {
+priv struct LaunchAppWire {
   launched : Bool
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
 pub(all) struct MarketSkill {
@@ -487,24 +476,24 @@ pub(all) struct InstalledSkill {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-pub(all) struct SkillsCatalogReply {
+priv struct SkillsCatalogWire {
   skills : Array[MarketSkill]
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
-pub(all) struct InstalledSkillsReply {
+priv struct InstalledSkillsWire {
   skills : Array[InstalledSkill]
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
-pub(all) struct InstallSkillReply {
+priv struct InstallSkillWire {
   installed : InstalledSkill
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
-pub(all) struct UninstallSkillReply {
+priv struct UninstallSkillWire {
   removed : Bool
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
 /// This branch's whole line delta, measured locally: from where it left the
@@ -527,10 +516,10 @@ pub(all) struct GitDiffStat {
 /// git), and additionally when the diff itself failed — the branch chip is
 /// worth showing on its own. Older peers omit the field entirely, which
 /// decodes to the same absence.
-pub(all) struct GitBranchReply {
+priv struct GitBranchWire {
   branch : String?
   diffstat : GitDiffStat?
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
 /// The CI rollup for a pull request's head commit, bucketed into the three
@@ -578,11 +567,11 @@ pub(all) struct GitPullRequest {
 /// `HEAD` itself, and an agent can move the checkout in between. The client
 /// labels the answer with this rather than with its own request, so a pull
 /// request can never be shown against a branch it does not belong to.
-pub(all) struct GitPullRequestReply {
+priv struct GitPullRequestWire {
   pull_request : GitPullRequest?
   compare_url : String?
   branch : String?
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
 /// One current-path row from the active review comparison. HEAD-based
@@ -603,27 +592,6 @@ pub(all) struct GitChange {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-/// The active checkout's change inventory plus its immutable comparison
-/// baseline: a worktree's task base or an ordinary branch's default-branch
-/// fork point. When `baseline` exists the inventory compares it to the working
-/// tree, including committed work; the HEAD fallback remains ordinary staged +
-/// unstaged status. A missing Git executable and a non-repository workspace
-/// both report `repository=false`; once a repository is recognized,
-/// operational failures are request errors rather than an ambiguous empty
-/// list.
-pub(all) struct GitChangesReply {
-  repository : Bool
-  // The commit object currently named by HEAD. `None` covers an unborn HEAD,
-  // a non-repository workspace, and older hosts that predate this field.
-  head : String?
-  // The immutable commit used as the review's left side. New hosts return it
-  // whenever one exists; clients fall back to `head` when talking to an older
-  // host that omitted the field.
-  baseline : String?
-  changes : Array[GitChange]
-} derive(Debug, Eq, FromJson, ToJson)
-
-///|
 /// One path's comparison blob for quick diff. `Missing` is the legitimate
 /// baseline for an added/untracked file or an unborn `HEAD`; withheld blobs
 /// mirror the ordinary file reader's binary and one-megabyte policies.
@@ -632,6 +600,7 @@ pub(all) enum GitOriginalFileReply {
   BinaryOriginal
   OversizedOriginal
   OriginalContent(String)
+  GitOriginalFileError(String)
 } derive(Debug, Eq)
 
 ///|
@@ -641,12 +610,24 @@ pub impl ToJson for GitOriginalFileReply with fn to_json(self) {
     BinaryOriginal => { "kind": "binary" }
     OversizedOriginal => { "kind": "oversized" }
     OriginalContent(content) => { "kind": "content", "content": content }
+    GitOriginalFileError(message) => { "error": message }
   }
 }
 
 ///|
 pub impl FromJson for GitOriginalFileReply with fn from_json(json, path) {
-  guard json is Object(fields) && fields.get("kind") is Some(String(kind_)) else {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected Git original-file reply"))
+  }
+  if fields.get("error") is Some(error) {
+    guard error is String(message) else {
+      raise JsonDecodeError(
+        (path.add_key("error"), "command error must be a string"),
+      )
+    }
+    return GitOriginalFileError(message)
+  }
+  guard fields.get("kind") is Some(String(kind_)) else {
     raise JsonDecodeError((path, "expected Git original-file reply"))
   }
   match kind_ {
@@ -673,23 +654,24 @@ pub(all) struct DirEntry {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-pub(all) struct ReadDirReply {
+priv struct ReadDirWire {
   entries : Array[DirEntry]
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
-pub(all) struct SearchFilesReply {
+priv struct SearchFilesWire {
   files : Array[String]
   from_cache : Bool
   limit_hit : Bool
   cancelled : Bool
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
 pub(all) enum ReadFileReply {
   Binary
   Oversized
   Content(content~ : String, absolute~ : String, sig~ : String)
+  ReadFileError(String)
 } derive(Debug, Eq)
 
 ///|
@@ -704,12 +686,24 @@ pub impl ToJson for ReadFileReply with fn to_json(self) {
         "absolute": absolute,
         "sig": sig,
       }
+    ReadFileError(message) => { "error": message }
   }
 }
 
 ///|
 pub impl FromJson for ReadFileReply with fn from_json(json, path) {
-  guard json is Object(fields) && fields.get("kind") is Some(String(kind_)) else {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected file reply"))
+  }
+  if fields.get("error") is Some(error) {
+    guard error is String(message) else {
+      raise JsonDecodeError(
+        (path.add_key("error"), "command error must be a string"),
+      )
+    }
+    return ReadFileError(message)
+  }
+  guard fields.get("kind") is Some(String(kind_)) else {
     raise JsonDecodeError((path, "expected file reply"))
   }
   match kind_ {
@@ -735,16 +729,14 @@ pub(all) struct FileStat {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-pub(all) struct StatFilesReply {
+priv struct StatFilesWire {
   stats : Array[FileStat]
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
 /// One directory listing (`parent` is `None` at a filesystem root), or the
-/// reason there is none. Success keeps the legacy `{path,parent?,entries}`
-/// shape; the refusal rides in the reply body as `{error:"..."}` because
-/// the local bridge summarizes raised handler errors down to "op <name>
-/// failed".
+/// reason there is none. The listing keeps the legacy
+/// `{path,parent?,entries}` shape; a refusal uses `{error:"..."}`.
 pub(all) enum BrowseDirectoryReply {
   Listing(path~ : String, parent~ : String?, entries~ : Array[String])
   BrowseError(String)
@@ -799,9 +791,9 @@ pub impl FromJson for BrowseDirectoryReply with fn from_json(json, path) {
 }
 
 ///|
-pub(all) struct TerminalOpenReply {
+priv struct TerminalOpenWire {
   id : Int
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
 pub(all) struct MoonIdeLocation {
@@ -813,9 +805,9 @@ pub(all) struct MoonIdeLocation {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-pub(all) struct MoonIdeLocationsReply {
+priv struct MoonIdeLocationsWire {
   locations : Array[MoonIdeLocation]
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
 pub(all) struct LspPosition {
@@ -855,12 +847,12 @@ pub fn LspDiagnostic::array_from_wire(json : Json) -> Array[LspDiagnostic] {
 /// The field is absent when the check itself could not run — "no data", which
 /// the client answers by keeping the markers it has, distinct from the empty
 /// array's "no problems", which clears them.
-pub(all) struct LspDiagnosticsReply {
+priv struct LspDiagnosticsWire {
   diagnostics : Array[LspDiagnostic]?
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
-pub(all) struct LspHoverReply {
+priv struct LspHoverWire {
   value : String
   markdown : Bool
   has_range : Bool
@@ -868,7 +860,7 @@ pub(all) struct LspHoverReply {
   start_character : Int
   end_line : Int
   end_character : Int
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
 pub(all) struct SymbolPosition {
@@ -892,9 +884,9 @@ pub(all) struct SymbolItem {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-pub(all) struct WorkspaceSymbolsReply {
+priv struct WorkspaceSymbolsWire {
   symbols : Array[SymbolItem]
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
 pub(all) enum CheckUpdateReply {
@@ -935,7 +927,10 @@ pub impl ToJson for CheckUpdateReply with fn to_json(self) {
 
 ///|
 pub impl FromJson for CheckUpdateReply with fn from_json(json, path) {
-  guard json is Object(fields) && fields.get("kind") is Some(String(kind_)) else {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected update reply"))
+  }
+  guard fields.get("kind") is Some(String(kind_)) else {
     raise JsonDecodeError((path, "expected update reply"))
   }
   match kind_ {
@@ -980,14 +975,14 @@ pub impl FromJson for CheckUpdateReply with fn from_json(json, path) {
 }
 
 ///|
-pub(all) struct DownloadUpdateAcceptedReply {
+priv struct DownloadUpdateWire {
   accepted : Bool
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
-pub(all) struct OpenExternalReply {
+priv struct OpenExternalWire {
   opened : Bool
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(FromJson, ToJson)
 
 ///|
 /// An engine event plus Desktop's optional steer-submission correlation.

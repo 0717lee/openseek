@@ -27,39 +27,39 @@ pub let app_launch : Command[@protocol.LaunchAppPayload, @protocol.LaunchAppRepl
 
 pub let app_list : Command[@protocol.EmptyPayload, @protocol.ListAppsReply]
 
-pub let app_open_devtools : Command[@protocol.EmptyPayload, @protocol.EmptyReply]
+pub let app_open_devtools : Command[@protocol.EmptyPayload, @protocol.OpenDevtoolsReply]
 
-pub let auth_cancel : Command[@protocol.EmptyPayload, @protocol.AuthStatusPayload]
+pub let auth_cancel : Command[@protocol.EmptyPayload, @protocol.AuthStatusReply]
 
-pub let auth_connect : Command[@protocol.EmptyPayload, @protocol.AuthStatusPayload]
+pub let auth_connect : Command[@protocol.EmptyPayload, @protocol.AuthStatusReply]
 
-pub let auth_disconnect : Command[@protocol.EmptyPayload, @protocol.AuthStatusPayload]
+pub let auth_disconnect : Command[@protocol.EmptyPayload, @protocol.AuthStatusReply]
 
-pub let auth_status : Command[@protocol.EmptyPayload, @protocol.AuthStatusPayload]
+pub let auth_status : Command[@protocol.EmptyPayload, @protocol.AuthStatusReply]
 
-pub let browser_back : Command[@protocol.BrowserIdPayload, @protocol.EmptyReply]
+pub let browser_back : Command[@protocol.BrowserIdPayload, @protocol.BrowserBackReply]
 
-pub let browser_close : Command[@protocol.BrowserIdPayload, @protocol.EmptyReply]
+pub let browser_close : Command[@protocol.BrowserIdPayload, @protocol.BrowserCloseReply]
 
-pub let browser_forward : Command[@protocol.BrowserIdPayload, @protocol.EmptyReply]
+pub let browser_forward : Command[@protocol.BrowserIdPayload, @protocol.BrowserForwardReply]
 
-pub let browser_navigate : Command[@protocol.BrowserOpenPayload, @protocol.EmptyReply]
+pub let browser_navigate : Command[@protocol.BrowserOpenPayload, @protocol.BrowserNavigateReply]
 
-pub let browser_open : Command[@protocol.BrowserOpenPayload, @protocol.EmptyReply]
+pub let browser_open : Command[@protocol.BrowserOpenPayload, @protocol.BrowserOpenReply]
 
-pub let browser_reload : Command[@protocol.BrowserIdPayload, @protocol.EmptyReply]
+pub let browser_reload : Command[@protocol.BrowserIdPayload, @protocol.BrowserReloadReply]
 
-pub let browser_set_bounds : Command[@protocol.BrowserBoundsPayload, @protocol.EmptyReply]
+pub let browser_set_bounds : Command[@protocol.BrowserBoundsPayload, @protocol.BrowserBoundsReply]
 
-pub let browser_set_visible : Command[@protocol.BrowserVisiblePayload, @protocol.EmptyReply]
+pub let browser_set_visible : Command[@protocol.BrowserVisiblePayload, @protocol.BrowserVisibleReply]
 
 pub let extension_contract : @proton_contract.ExtensionContract
 
 pub let fs_browse : Command[@protocol.BrowseDirectoryPayload, @protocol.BrowseDirectoryReply]
 
-pub let fs_cancel_search_files : Command[@protocol.CancelSearchFilesPayload, @protocol.EmptyReply]
+pub let fs_cancel_search_files : Command[@protocol.CancelSearchFilesPayload, @protocol.CancelSearchFilesReply]
 
-pub let fs_clear_file_search_cache : Command[@protocol.ClearFileSearchCachePayload, @protocol.EmptyReply]
+pub let fs_clear_file_search_cache : Command[@protocol.ClearFileSearchCachePayload, @protocol.ClearFileSearchCacheReply]
 
 pub let fs_read_directory : Command[@protocol.ReadDirPayload, @protocol.ReadDirReply]
 
@@ -69,9 +69,9 @@ pub let fs_search_files : Command[@protocol.SearchFilesPayload, @protocol.Search
 
 pub let fs_stat_files : Command[@protocol.StatFilesPayload, @protocol.StatFilesReply]
 
-pub let fs_unwatch : Command[@protocol.EmptyPayload, @protocol.EmptyReply]
+pub let fs_unwatch : Command[@protocol.EmptyPayload, @protocol.UnwatchReply]
 
-pub let fs_watch : Command[@protocol.WatchWorkspacePayload, @protocol.EmptyReply]
+pub let fs_watch : Command[@protocol.WatchWorkspacePayload, @protocol.WatchReply]
 
 pub let git_branch : Command[@protocol.GitBranchPayload, @protocol.GitBranchReply]
 
@@ -81,7 +81,7 @@ pub let git_original_file : Command[@protocol.GitOriginalFilePayload, @protocol.
 
 pub let git_pull_request : Command[@protocol.GitPullRequestPayload, @protocol.GitPullRequestReply]
 
-pub let host_connect : Command[@protocol.EmptyPayload, @protocol.EmptyReply]
+pub let host_connect : Command[@protocol.EmptyPayload, @protocol.HostConnectReply]
 
 pub let host_open_path : Command[@protocol.OpenPathPayload, @protocol.OpenPathReply]
 
@@ -105,9 +105,9 @@ pub let session_load : Command[@protocol.LoadSessionPayload, @protocol.LoadSessi
 
 pub let session_unarchive : Command[@protocol.SessionPayload, @protocol.SessionsReply]
 
-pub let settings_get : Command[@protocol.EmptyPayload, @protocol.SettingsStatusPayload]
+pub let settings_get : Command[@protocol.EmptyPayload, @protocol.SettingsStatusReply]
 
-pub let settings_set : Command[@protocol.SettingsSetPayload, @protocol.SettingsStatusPayload]
+pub let settings_set : Command[@protocol.SettingsSetPayload, @protocol.SettingsStatusReply]
 
 pub let shell_open_external : Command[@protocol.ExternalLinkPayload, @protocol.OpenExternalReply]
 
@@ -119,21 +119,21 @@ pub let skills_installed : Command[@protocol.EmptyPayload, @protocol.InstalledSk
 
 pub let skills_uninstall : Command[@protocol.UninstallSkillPayload, @protocol.UninstallSkillReply]
 
-pub let terminal_ack : Command[@protocol.TerminalAckPayload, @protocol.EmptyReply]
+pub let terminal_ack : Command[@protocol.TerminalAckPayload, @protocol.TerminalAckReply]
 
-pub let terminal_close : Command[@protocol.TerminalClosePayload, @protocol.EmptyReply]
+pub let terminal_close : Command[@protocol.TerminalClosePayload, @protocol.TerminalCloseReply]
 
-pub let terminal_input : Command[@protocol.TerminalInputPayload, @protocol.EmptyReply]
+pub let terminal_input : Command[@protocol.TerminalInputPayload, @protocol.TerminalInputReply]
 
 pub let terminal_open : Command[@protocol.TerminalOpenPayload, @protocol.TerminalOpenReply]
 
-pub let terminal_resize : Command[@protocol.TerminalResizePayload, @protocol.EmptyReply]
+pub let terminal_resize : Command[@protocol.TerminalResizePayload, @protocol.TerminalResizeReply]
 
 pub let update_apply : Command[@protocol.EmptyPayload, @protocol.ApplyUpdateReply]
 
 pub let update_check : Command[@protocol.UpdateChannelPayload, @protocol.CheckUpdateReply]
 
-pub let update_download : Command[@protocol.UpdateChannelPayload, @protocol.DownloadUpdateAcceptedReply]
+pub let update_download : Command[@protocol.UpdateChannelPayload, @protocol.DownloadUpdateReply]
 
 pub let workspace_add : Command[@protocol.WorkspacePayload, @protocol.WorkspacesReply]
 

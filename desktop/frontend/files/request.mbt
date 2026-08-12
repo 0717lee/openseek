@@ -62,17 +62,21 @@ pub fn Request::run(
       // without this lane, its stale clear may overtake and cancel the current
       // A search even though the caller correctly rejects the stale reply.
       @interop.in_ordered_lane(lane_key, () => {
-        ignore(
-          @interop.bridge_request(
-            self.channel,
-            @commands.fs_clear_file_search_cache,
-            { cache_key, },
-          ),
+        let cleared = @interop.bridge_request(
+          self.channel,
+          @commands.fs_clear_file_search_cache,
+          { cache_key, },
         ) catch {
           _ => {
             scheduler.add(failed())
             return
           }
+        }
+        // A command error is a reply now, so reject it just like the old
+        // raised failure instead of scanning against an uncleared cache.
+        guard cleared is FileSearchCacheCleared else {
+          scheduler.add(failed())
+          return
         }
         let reply = @interop.bridge_request(
           self.channel,
@@ -90,18 +94,22 @@ pub fn Request::run(
             return
           }
         }
-        if reply.cancelled {
+        guard reply is SearchResults(files~, limit_hit~, cancelled~, ..) else {
           scheduler.add(failed())
           return
         }
-        let paths = reply.files.filter_map(path => {
+        if cancelled {
+          scheduler.add(failed())
+          return
+        }
+        let paths = files.filter_map(path => {
           if path.is_empty() {
             None
           } else {
             Some(@pathx.Relative(path))
           }
         })
-        scheduler.add(loaded(paths, reply.limit_hit))
+        scheduler.add(loaded(paths, limit_hit))
       }) catch {
         _ => scheduler.add(failed())
       }

@@ -248,7 +248,7 @@ fn install_proton_bridge(dispatch : @cmd.Emit[Msg], attempt : Int) -> @cmd.Cmd {
       wire_proton_events(
         scheduler, dispatch, extension_events, application_events,
       )
-      open_host_connection(scheduler, dispatch, request_api)
+      open_host_connection(scheduler, dispatch)
     }
   })
 }
@@ -260,14 +260,13 @@ fn install_proton_bridge(dispatch : @cmd.Emit[Msg], attempt : Int) -> @cmd.Cmd {
 fn open_host_connection(
   scheduler : &@cmd.Scheduler,
   dispatch : @cmd.Emit[Msg],
-  api : @js.Value,
 ) -> Unit {
   @js.async_run(() => {
-    let _ : @js.Value = @interop.js_method_promise(
-      api,
-      "host.connect",
-      @js.Object::new().to_value(),
-    ).wait() catch {
+    let response = @interop.bridge_request(
+      Local,
+      @commands.host_connect,
+      @protocol.EmptyPayload::NoPayload,
+    ) catch {
       error => {
         scheduler.add(
           dispatch(
@@ -279,6 +278,9 @@ fn open_host_connection(
         )
         return
       }
+    }
+    if response is HostConnectError(message) {
+      scheduler.add(dispatch(FromDevice(Local, BridgeUnavailable(message))))
     }
   })
 }
@@ -630,21 +632,22 @@ fn fetch_runs(
   let payload = runs_payload(frontier)
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply = @interop.bridge_request(
+      let response = @interop.bridge_request(
         channel, @commands.agent_runs, payload,
       ) catch {
         _ => return
       }
+      let Runs(runs~, settled~) = response
       let live : Array[String] = []
       let recovered : Array[RecoveredRun] = []
-      for item in reply.runs {
+      for item in runs {
         live.push(item.run_id)
         if RecoveredRun::from_started(channel, item) is Some(run) {
           recovered.push(run)
         }
       }
       let recovered_settlements : Array[RecoveredSettlement] = []
-      for item in reply.settled {
+      for item in settled {
         if RecoveredSettlement::from_reply(item) is Some(settlement) {
           recovered_settlements.push(settlement)
         }
@@ -989,7 +992,9 @@ async fn request_agent_start(
   submission_id : String,
 ) -> Unit noraise {
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
-  let reply = @interop.bridge_request(channel, @commands.agent_start, payload) catch {
+  let response = @interop.bridge_request(
+    channel, @commands.agent_start, payload,
+  ) catch {
     error => {
       let message = @interop.bridge_error_text(error)
       scheduler.add(
@@ -1004,15 +1009,16 @@ async fn request_agent_start(
       return
     }
   }
+  let (run_id, status, exit_code) = match response {
+    Started(run_id~, status~, exit_code~) => (run_id, status, exit_code)
+    StartError(message) => {
+      scheduler.add(dispatch(StartRejected(session~, submission_id~, message~)))
+      return
+    }
+  }
   scheduler.add(
     dispatch(
-      StartResponded(
-        session~,
-        submission_id~,
-        run_id=reply.run_id,
-        status=reply.status,
-        exit_code=reply.exit_code,
-      ),
+      StartResponded(session~, submission_id~, run_id~, status~, exit_code~),
     ),
   )
 }
@@ -1086,7 +1092,7 @@ async fn refresh_sessions_into(
   request_generation : Int,
 ) -> Unit noraise {
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
-  let reply = @interop.bridge_request(
+  let response = @interop.bridge_request(
     channel,
     @commands.session_list,
     @protocol.EmptyPayload::NoPayload,
@@ -1096,10 +1102,17 @@ async fn refresh_sessions_into(
       return
     }
   }
+  let groups = match response {
+    Sessions(groups~) => groups
+    SessionsError(message) => {
+      scheduler.add(dispatch(SessionsFailed(message)))
+      return
+    }
+  }
   scheduler.add(
     dispatch(
       SessionsLoaded(
-        @transcript.sessions_from_reply(reply, channel),
+        @transcript.sessions_from_reply(groups, channel),
         connection_generation~,
         request_generation~,
       ),
@@ -1198,7 +1211,7 @@ fn load_session_cmd(
   }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply = @interop.bridge_request(channel, @commands.session_load, {
+      let response = @interop.bridge_request(channel, @commands.session_load, {
         session: session_id,
         workspace: workspace.map(path => path.path),
       }) catch {
@@ -1207,7 +1220,16 @@ fn load_session_cmd(
           return
         }
       }
-      scheduler.add(on_loaded(@transcript.session_from_reply(reply)))
+      let (session, watermark) = match response {
+        SessionLoaded(session~, watermark~) => (session, watermark)
+        SessionLoadError(message) => {
+          scheduler.add(on_failed(message))
+          return
+        }
+      }
+      scheduler.add(
+        on_loaded(@transcript.session_from_reply({ session, watermark })),
+      )
     })
   })
 }
@@ -1258,12 +1280,15 @@ async fn steer_delivered(
   submission_id : String,
   run_id : String,
 ) -> Bool {
-  let reply = @interop.bridge_request(channel, @commands.agent_steer, {
+  let response = @interop.bridge_request(channel, @commands.agent_steer, {
     text,
     run_id: Some(run_id),
     submission_id: Some(submission_id),
   })
-  reply.steered
+  match response {
+    Steered(_) => true
+    NothingToSteer | SteerError(_) => false
+  }
 }
 
 ///|
@@ -1292,34 +1317,35 @@ fn compact_openseek(
     @js.async_run(() => {
       // Compaction claims the same per-session slot as start and goal, so it
       // waits behind them rather than colliding.
-      ignore(
-        @interop.bridge_request_in_order(
-          channel,
-          @commands.agent_compact,
-          {
-            session,
-            model: Some(model.wire()),
-            max_steps: parsed_max_steps(max_steps),
-            workspace: workspace.map(value => value.path),
-          },
-          lane=@interop.session_command_lane(channel, session),
-        ) catch {
-          error => {
-            // Routed by session, not as a generic Error: the rejection must
-            // also clear the conversation's queued/compacting notice, which
-            // no compaction event will ever settle now.
-            scheduler.add(
-              dispatch(
-                CompactRejected(
-                  session~,
-                  message=@interop.bridge_error_text(error),
-                ),
-              ),
-            )
-            return
-          }
+      let response = @interop.bridge_request_in_order(
+        channel,
+        @commands.agent_compact,
+        {
+          session,
+          model: Some(model.wire()),
+          max_steps: parsed_max_steps(max_steps),
+          workspace: workspace.map(value => value.path),
         },
-      )
+        lane=@interop.session_command_lane(channel, session),
+      ) catch {
+        error => {
+          // Routed by session, not as a generic Error: the rejection must
+          // also clear the conversation's queued/compacting notice, which
+          // no compaction event will ever settle now.
+          scheduler.add(
+            dispatch(
+              CompactRejected(
+                session~,
+                message=@interop.bridge_error_text(error),
+              ),
+            ),
+          )
+          return
+        }
+      }
+      if response is CompactError(message) {
+        scheduler.add(dispatch(CompactRejected(session~, message~)))
+      }
     })
   })
 }
@@ -1410,24 +1436,26 @@ async fn request_agent_goal(
   // The caller holds this session's goal lane across the whole chain, so the
   // request goes out plainly here — see `set_goal_in_new_worktree`, where the
   // ordering has to cover the worktree preflight too.
-  ignore(
-    @interop.bridge_request(channel, @commands.agent_goal, payload) catch {
-      error => {
-        let message = @interop.bridge_error_text(error)
-        scheduler.add(
-          dispatch(
-            match @interop.bridge_failure(error) {
-              Refused | Unsent =>
-                GoalRejected(session~, command~, draft=text, message~)
-              Unknown =>
-                GoalUndelivered(session~, command~, draft=text, message~)
-            },
-          ),
-        )
-        return
-      }
-    },
-  )
+  let response = @interop.bridge_request(channel, @commands.agent_goal, payload) catch {
+    error => {
+      let message = @interop.bridge_error_text(error)
+      scheduler.add(
+        dispatch(
+          match @interop.bridge_failure(error) {
+            Refused | Unsent =>
+              GoalRejected(session~, command~, draft=text, message~)
+            Unknown => GoalUndelivered(session~, command~, draft=text, message~)
+          },
+        ),
+      )
+      return
+    }
+  }
+  if response is GoalError(message) {
+    scheduler.add(
+      dispatch(GoalRejected(session~, command~, draft=text, message~)),
+    )
+  }
 }
 
 ///|
@@ -1438,23 +1466,25 @@ fn cancel_openseek(
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      ignore(
-        @interop.bridge_request(channel, @commands.agent_cancel, {
-          run_id: Some(run_id),
-        }) catch {
-          error => {
-            scheduler.add(
-              dispatch(
-                HostActionFailed(
-                  "Failed to cancel the run: " +
-                  @interop.bridge_error_text(error),
-                ),
+      let response = @interop.bridge_request(channel, @commands.agent_cancel, {
+        run_id: Some(run_id),
+      }) catch {
+        error => {
+          scheduler.add(
+            dispatch(
+              HostActionFailed(
+                "Failed to cancel the run: " + @interop.bridge_error_text(error),
               ),
-            )
-            return
-          }
-        },
-      )
+            ),
+          )
+          return
+        }
+      }
+      if response is CancelError(message) {
+        scheduler.add(
+          dispatch(HostActionFailed("Failed to cancel the run: " + message)),
+        )
+      }
     })
   })
 }
@@ -1469,21 +1499,23 @@ fn apply_update(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
     @js.async_run(() => {
       // Self-update always targets the page's own desktop host, never a
       // focused remote device.
-      ignore(
-        @interop.bridge_request(
-          Local,
-          @commands.update_apply,
-          @protocol.EmptyPayload::NoPayload,
-        ) catch {
-          error => {
-            scheduler.add(
-              dispatch(UpdateFailed(message=@interop.bridge_error_text(error))),
-            )
-            return
-          }
-        },
-      )
-      scheduler.add(dispatch(UpdateApplied))
+      let response = @interop.bridge_request(
+        Local,
+        @commands.update_apply,
+        @protocol.EmptyPayload::NoPayload,
+      ) catch {
+        error => {
+          scheduler.add(
+            dispatch(UpdateFailed(message=@interop.bridge_error_text(error))),
+          )
+          return
+        }
+      }
+      match response {
+        UpdateApplied => scheduler.add(dispatch(UpdateApplied))
+        UpdateApplyError(message) =>
+          scheduler.add(dispatch(UpdateFailed(message~)))
+      }
     })
   })
 }
@@ -1520,20 +1552,21 @@ fn open_file(
   }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      ignore(
-        @interop.bridge_request(channel, @commands.host_open_path, {
-          session,
-          cwd: cwd.map(resource => resource.path),
-          path,
-        }) catch {
-          error => {
-            scheduler.add(
-              dispatch(HostActionFailed(@interop.bridge_error_text(error))),
-            )
-            return
-          }
-        },
-      )
+      let response = @interop.bridge_request(
+        channel,
+        @commands.host_open_path,
+        { session, cwd: cwd.map(resource => resource.path), path },
+      ) catch {
+        error => {
+          scheduler.add(
+            dispatch(HostActionFailed(@interop.bridge_error_text(error))),
+          )
+          return
+        }
+      }
+      if response is OpenPathError(message) {
+        scheduler.add(dispatch(HostActionFailed(message)))
+      }
     })
   })
 }

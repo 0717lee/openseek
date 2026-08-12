@@ -54,11 +54,9 @@ fn fetch_worktrees(
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply : @protocol.WorktreesReply = @interop.bridge_request(
-        channel,
-        @commands.worktree_list,
-        { workspace: workspace.path },
-      ) catch {
+      let response = @interop.bridge_request(channel, @commands.worktree_list, {
+        workspace: workspace.path,
+      }) catch {
         error => {
           // A failed list is not an empty registry: until a real reply arrives
           // the client cannot safely decide whether a durable conversation is
@@ -76,10 +74,26 @@ fn fetch_worktrees(
           return
         }
       }
+      let worktrees = match response {
+        Worktrees(worktrees~) => worktrees
+        WorktreesError(message) => {
+          scheduler.add(
+            dispatch(
+              WorktreesFailed(
+                workspace~,
+                connection_generation~,
+                request_generation~,
+                message~,
+              ),
+            ),
+          )
+          return
+        }
+      }
       scheduler.add(
         dispatch(
           WorktreesLoaded(
-            worktree_rows(channel, reply.worktrees),
+            worktree_rows(channel, worktrees),
             workspace~,
             connection_generation~,
             request_generation~,
@@ -120,7 +134,7 @@ fn start_in_new_worktree(
         () => {
           // The session is the create's idempotency key: a retry after a lost
           // reply gets the same worktree back instead of minting a second one.
-          let reply : @protocol.WorktreeCreateReply = @interop.bridge_request(
+          let response = @interop.bridge_request(
             channel,
             @commands.worktree_create,
             { workspace: workspace.path, session },
@@ -140,9 +154,24 @@ fn start_in_new_worktree(
               return
             }
           }
+          let name = match response {
+            WorktreeCreated(name~, ..) => name
+            WorktreeCreateError(message) => {
+              scheduler.add(
+                device_dispatch(
+                  StartRejected(
+                    session~,
+                    submission_id~,
+                    message="worktree setup failed: " + message,
+                  ),
+                ),
+              )
+              return
+            }
+          }
           // The host generates the name; the reply carries it so the chain
           // knows what to bind.
-          guard !reply.name.is_empty() else {
+          guard !name.is_empty() else {
             scheduler.add(
               device_dispatch(
                 StartRejected(
@@ -160,9 +189,7 @@ fn start_in_new_worktree(
           // the commit seam, and the start itself carries no worktree — the
           // host routes the bound session's cwd through the registry.
           scheduler.add(
-            device_dispatch(
-              WorktreeCreated(workspace~, name=reply.name, session~),
-            ),
+            device_dispatch(WorktreeCreated(workspace~, name~, session~)),
           )
           let start = start_payload(
             task,
@@ -240,7 +267,7 @@ fn set_goal_in_new_worktree(
         () => {
           // The session is the create's idempotency key, exactly as on the start
           // path: a retry after a lost reply gets the same worktree back.
-          let reply : @protocol.WorktreeCreateReply = @interop.bridge_request(
+          let response = @interop.bridge_request(
             channel,
             @commands.worktree_create,
             { workspace: workspace.path, session },
@@ -269,7 +296,23 @@ fn set_goal_in_new_worktree(
               return
             }
           }
-          guard !reply.name.is_empty() else {
+          let name = match response {
+            WorktreeCreated(name~, ..) => name
+            WorktreeCreateError(message) => {
+              scheduler.add(
+                device_dispatch(
+                  GoalRejected(
+                    session~,
+                    command~,
+                    draft=text,
+                    message="worktree setup failed: " + message,
+                  ),
+                ),
+              )
+              return
+            }
+          }
+          guard !name.is_empty() else {
             scheduler.add(
               device_dispatch(
                 GoalRejected(
@@ -287,9 +330,7 @@ fn set_goal_in_new_worktree(
           // `worktree.changed`; the goal carries no worktree, because the host
           // routes a bound session's cwd through its registry.
           scheduler.add(
-            device_dispatch(
-              WorktreeCreated(workspace~, name=reply.name, session~),
-            ),
+            device_dispatch(WorktreeCreated(workspace~, name~, session~)),
           )
           let payload = goal_payload(
             session,
@@ -325,7 +366,7 @@ fn repair_worktree_cmd(
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let _ : @protocol.WorktreeCreateReply = @interop.bridge_request(
+      let response = @interop.bridge_request(
         channel,
         @commands.worktree_create,
         { workspace, session },
@@ -336,6 +377,9 @@ fn repair_worktree_cmd(
           )
           return
         }
+      }
+      if response is WorktreeCreateError(message) {
+        scheduler.add(dispatch(WorktreeFailed(message)))
       }
     })
   })

@@ -70,12 +70,10 @@ test "Git original-file replies round-trip through their manual codec" {
 
 ///|
 test "archive replies keep success compatible and encode dirty confirmation" {
-  let sessions : @protocol.SessionsReply = { groups: [] }
-  let success = @protocol.ArchiveReply::Archived(sessions)
-  @debug.assert_eq(success.to_json(), sessions.to_json())
-  let decoded_success : @protocol.ArchiveReply = @json.from_json(
-    sessions.to_json(),
-  )
+  let wire : Json = { "groups": [] }
+  let success = @protocol.ArchiveReply::Archived(groups=[])
+  @debug.assert_eq(success.to_json(), wire)
+  let decoded_success : @protocol.ArchiveReply = @json.from_json(wire)
   @debug.assert_eq(decoded_success, success)
   let refusal : @protocol.ArchiveReply = NeedsForce({
     worktree: "wt-1",
@@ -90,20 +88,24 @@ test "archive replies keep success compatible and encode dirty confirmation" {
 
 ///|
 test "Git changes replies preserve review identities and accept legacy omission" {
-  let reply : @protocol.GitChangesReply = {
-    repository: true,
-    head: Some("0123456789abcdef"),
-    baseline: Some("fedcba9876543210"),
-    changes: [],
-  }
+  let reply : @protocol.GitChangesReply = GitChanges(
+    head=Some("0123456789abcdef"),
+    baseline=Some("fedcba9876543210"),
+    changes=[],
+  )
   let decoded : @protocol.GitChangesReply = @json.from_json(reply.to_json())
-  @debug.assert_eq(decoded, reply)
+  guard decoded is GitChanges(head~, baseline~, changes=[]) else {
+    fail("expected Git changes")
+  }
+  @debug.assert_eq(head, Some("0123456789abcdef"))
+  @debug.assert_eq(baseline, Some("fedcba9876543210"))
   let legacy : @protocol.GitChangesReply = @json.from_json({
     "repository": true,
     "changes": [],
   })
-  @debug.assert_eq(legacy.head, None)
-  @debug.assert_eq(legacy.baseline, None)
+  guard legacy is GitChanges(head=None, baseline=None, changes=[]) else {
+    fail("expected legacy Git changes")
+  }
 }
 
 ///|
@@ -149,10 +151,13 @@ test "file search payload and reply round-trip at the JSON boundary" {
     "cancelled": false,
   }
   let reply : @protocol.SearchFilesReply = @json.from_json(raw_reply)
-  assert_eq(reply.files, ["src/main.mbt", "src/main_test.mbt"])
-  assert_true(reply.from_cache)
-  assert_false(reply.limit_hit)
-  assert_false(reply.cancelled)
+  guard reply is SearchResults(files~, from_cache~, limit_hit~, cancelled~) else {
+    fail("expected search results")
+  }
+  assert_eq(files, ["src/main.mbt", "src/main_test.mbt"])
+  assert_true(from_cache)
+  assert_false(limit_hit)
+  assert_false(cancelled)
   @debug.assert_eq(reply.to_json(), raw_reply)
   let raw_cancel : Json = {
     "cache_key": "quick-open:session-1:7",
@@ -209,4 +214,26 @@ test "browse replies keep success compatible and carry refusals" {
     refusal.to_json(),
   )
   @debug.assert_eq(decoded_refusal, refusal)
+}
+
+///|
+test "command-specific error variants round-trip through the wire format" {
+  let watch : @protocol.WatchReply = FileWatchError("watch command failed")
+  let archive : @protocol.ArchiveReply = ArchiveError("archive command failed")
+  let original : @protocol.GitOriginalFileReply = GitOriginalFileError(
+    "original-file command failed",
+  )
+  let read : @protocol.ReadFileReply = ReadFileError("read-file command failed")
+  let decoded_watch : @protocol.WatchReply = @json.from_json(watch.to_json())
+  let decoded_archive : @protocol.ArchiveReply = @json.from_json(
+    archive.to_json(),
+  )
+  let decoded_original : @protocol.GitOriginalFileReply = @json.from_json(
+    original.to_json(),
+  )
+  let decoded_read : @protocol.ReadFileReply = @json.from_json(read.to_json())
+  @debug.assert_eq(decoded_watch, watch)
+  @debug.assert_eq(decoded_archive, archive)
+  @debug.assert_eq(decoded_original, original)
+  @debug.assert_eq(decoded_read, read)
 }

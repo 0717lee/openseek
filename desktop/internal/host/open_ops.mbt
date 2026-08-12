@@ -27,7 +27,7 @@ async fn open_path_op(payload : OpenPathPayload) -> OpenPathReply {
     error => raise HostError("Could not open \{target.0}: \{error}")
   }
   guard code == 0 else { raise HostError("Could not open \{target.0}") }
-  { opened: true }
+  PathOpened
 }
 
 ///|

@@ -8,11 +8,11 @@
 /// so the sidebar can section them. Failed groups remain empty; invalid engine
 /// rows have already been dropped at the process adapter.
 pub fn sessions_from_reply(
-  reply : @desktop_protocol.SessionsReply,
+  groups : Array[@desktop_protocol.SessionGroup],
   channel : @interop.ChannelId,
 ) -> Array[SessionListItem] {
   let items : Array[SessionListItem] = []
-  for group in reply.groups {
+  for group in groups {
     let workspace = if group.workspace.is_empty() {
       None
     } else {
@@ -195,13 +195,19 @@ pub struct SessionLoadView {
 }
 
 ///|
+/// One durable session snapshot after the command-specific error has been
+/// handled by the caller.
+pub(all) struct SessionSnapshot {
+  session : @desktop_protocol.SessionDocument
+  watermark : Int?
+} derive(FromJson)
+
+///|
 /// Project a `load_session` reply into transcript
 /// items plus its watermark, reconstructing what the live transcript showed
 /// while the conversation was running: reasoning before the answer, tool
 /// cards, runtime updates, and error bubbles for turns that did not finish.
-pub fn session_from_reply(
-  reply : @desktop_protocol.LoadSessionReply,
-) -> SessionLoadView {
+pub fn session_from_reply(reply : SessionSnapshot) -> SessionLoadView {
   let items : Array[TranscriptItem] = []
   let event_boundaries : Array[(Int, Bool, Int)] = []
   let mut derived_watermark = 0
@@ -247,7 +253,7 @@ pub fn session_from_reply(
 ///|
 /// The items half of `session_from_reply`.
 pub fn transcript_from_session(
-  reply : @desktop_protocol.LoadSessionReply,
+  reply : SessionSnapshot,
 ) -> Array[TranscriptItem] {
   session_from_reply(reply).items
 }
@@ -576,27 +582,25 @@ fn goal_body(text : String) -> String {
 ///|
 test "session list projection preserves grouping and skips empty ids" {
   let items = sessions_from_reply(
-    {
-      groups: [
-        {
-          workspace: "",
-          name: "",
-          session_root: "/home/user/.openseek",
-          error: "",
-          sessions: [
-            { id: "desktop-b", title: Some("newest") },
-            { id: "", title: Some("no id") },
-          ],
-        },
-        {
-          workspace: "/home/user/proj",
-          name: "proj",
-          session_root: "/home/user/proj/.openseek",
-          error: "",
-          sessions: [{ id: "tui-a", title: Some("") }],
-        },
-      ],
-    },
+    [
+      {
+        workspace: "",
+        name: "",
+        session_root: "/home/user/.openseek",
+        error: "",
+        sessions: [
+          { id: "desktop-b", title: Some("newest") },
+          { id: "", title: Some("no id") },
+        ],
+      },
+      {
+        workspace: "/home/user/proj",
+        name: "proj",
+        session_root: "/home/user/proj/.openseek",
+        error: "",
+        sessions: [{ id: "tui-a", title: Some("") }],
+      },
+    ],
     @interop.ChannelId::Local,
   )
   inspect(items.length(), content="2")
@@ -698,9 +702,7 @@ test "an id that merely looks like a child keeps its row" {
 }
 
 ///|
-fn session_reply(
-  events_json : String,
-) -> @desktop_protocol.LoadSessionReply raise {
+fn session_reply(events_json : String) -> SessionSnapshot raise {
   let prefix =
     #|{"session":{"version":1,"id":"desktop-x","system_prompt":"system","events":[
   let suffix =

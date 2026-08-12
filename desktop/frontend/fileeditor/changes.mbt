@@ -36,10 +36,10 @@ fn ChangedFile::from_reply(change : @protocol.GitChange) -> ChangedFile? {
 /// or an ordinary branch's fork point. Older hosts retain the immutable HEAD
 /// identity. Keeping this choice in one place prevents a later commit from
 /// silently rebasing an in-progress review.
-fn git_review_revision(reply : @protocol.GitChangesReply) -> String? {
-  match reply.baseline {
+fn git_review_revision(head : String?, baseline? : String) -> String? {
+  match baseline {
     Some(baseline) => Some(baseline)
-    None => reply.head
+    None => head
   }
 }
 
@@ -71,7 +71,7 @@ fn list_changes(
   }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply = @interop.bridge_request(
+      let response = @interop.bridge_request(
         owner.channel,
         @commands.git_changes,
         {
@@ -92,21 +92,33 @@ fn list_changes(
           return
         }
       }
-      let files = reply.changes.filter_map(ChangedFile::from_reply)
-      // New hosts pin Review to the selected comparison commit. Older hosts
-      // omit `baseline`, so keep their exact HEAD identity.
-      let revision = git_review_revision(reply)
-      scheduler.add(
-        dispatch(
-          ChangesLoaded(
-            owner~,
-            generation~,
-            repository=reply.repository,
-            head=revision,
-            files~,
-          ),
-        ),
-      )
+      match response {
+        GitChanges(head~, baseline~, changes~) => {
+          let files = changes.filter_map(ChangedFile::from_reply)
+          // New hosts pin Review to the selected comparison commit. Older
+          // hosts omit `baseline`, so keep their exact HEAD identity.
+          let revision = git_review_revision(head, baseline?)
+          scheduler.add(
+            dispatch(
+              ChangesLoaded(
+                owner~,
+                generation~,
+                repository=true,
+                head=revision,
+                files~,
+              ),
+            ),
+          )
+        }
+        NotRepository =>
+          scheduler.add(
+            dispatch(
+              ChangesLoaded(owner~, generation~, repository=false, head=None, files=[]),
+            ),
+          )
+        GitChangesError(message) =>
+          scheduler.add(dispatch(ChangesFailed(owner~, generation~, message~)))
+      }
     })
   })
 }
@@ -300,14 +312,11 @@ test "empty changed-file paths are ignored defensively" {
 
 ///|
 test "task baselines win over moving HEAD with a legacy fallback" {
-  let task : @protocol.GitChangesReply = {
-    repository: true,
-    head: Some("new-head"),
-    baseline: Some("task-base"),
-    changes: [],
-  }
-  assert_eq(git_review_revision(task), Some("task-base"))
-  assert_eq(git_review_revision({ ..task, baseline: None }), Some("new-head"))
+  assert_eq(
+    git_review_revision(Some("new-head"), baseline="task-base"),
+    Some("task-base"),
+  )
+  assert_eq(git_review_revision(Some("new-head")), Some("new-head"))
 }
 
 ///|

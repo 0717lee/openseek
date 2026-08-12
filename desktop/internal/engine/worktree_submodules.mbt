@@ -136,7 +136,7 @@ async test "worktree lifecycle mirrors initialized submodules" {
     fn(_) {  },
     name="with-submodules",
   )
-  assert_eq(created.name, "with-submodules")
+  assert_true(created is WorktreeCreated(name="with-submodules", ..))
   let checkout = repo.join(".worktrees/with-submodules")
   assert_eq(
     git_in(checkout.join("deps/required"), ["rev-parse", "HEAD"]),
@@ -191,7 +191,7 @@ async test "worktree lifecycle mirrors initialized submodules" {
     false,
     fn(_) {  },
   )
-  assert_eq(removed.worktrees.length(), 0)
+  assert_true(removed is Worktrees(worktrees=[]))
   assert_false(@fsx.exists(checkout.to_path()))
   @fs.rmdir(root.to_string(), recursive=true)
 }

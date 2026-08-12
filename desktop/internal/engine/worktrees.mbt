@@ -525,7 +525,7 @@ pub async fn list_worktrees(workspace : String) -> WorktreesReply {
   }
   worktree_registry_lock.acquire()
   defer worktree_registry_lock.release()
-  { worktrees: worktree_infos(dir, read_worktrees_unlocked(dir)) }
+  Worktrees(worktrees=worktree_infos(dir, read_worktrees_unlocked(dir)))
 }
 
 ///|
@@ -631,14 +631,14 @@ pub async fn create_worktree(
       // `present: false` view instead of returning success invisibly.
       let infos = worktree_infos(dir, entries)
       @async.protect_from_cancel(() => on_committed(infos))
-      return { name: entry.name, worktrees: infos }
+      return WorktreeCreated(name=entry.name, worktrees=infos)
     }
     // The repair: presence is what the clients render, so the restored
     // checkout is a registry commit like any other and broadcasts as one.
     restore_worktree_checkout(dir, entry)
     let infos = worktree_infos(dir, entries)
     @async.protect_from_cancel(() => on_committed(infos))
-    return { name: entry.name, worktrees: infos }
+    return WorktreeCreated(name=entry.name, worktrees=infos)
   }
   // Binding is for conversations that are genuinely NEW — everywhere, not
   // merely in this workspace. A durable record in any store, a binding in
@@ -736,7 +736,7 @@ pub async fn create_worktree(
     infos = worktree_infos(dir, entries)
     on_committed(infos)
   })
-  { name, worktrees: infos }
+  WorktreeCreated(name~, worktrees=infos)
 }
 
 ///|
@@ -966,7 +966,7 @@ pub async fn remove_worktree(
     infos = worktree_infos(dir, remaining)
     on_committed(infos)
   })
-  { worktrees: infos }
+  Worktrees(worktrees=infos)
 }
 
 // Tests. The lifecycle tests exercise the real git binary (like the CLI's
@@ -1252,7 +1252,7 @@ async test "worktree remove refuses a running conversation without unmapping it"
       session: "s-wt-run",
       workspace: Some(ws.to_string()),
     })
-    assert_eq(reply.status, "accepted")
+    assert_true(reply is Started(status="accepted", ..))
     let committed : Ref[Bool] = Ref(false)
     let detail = try {
       ignore(
@@ -1269,7 +1269,7 @@ async test "worktree remove refuses a running conversation without unmapping it"
     assert_true(detail.contains("still running"))
     assert_false(committed.val)
     assert_true(@fsx.is_dir(ws.join(".worktrees/wt").to_path()))
-    guard list_worktrees(ws.to_string()).worktrees is [info] else {
+    guard list_worktrees(ws.to_string()) is Worktrees(worktrees=[info]) else {
       fail("expected the worktree to stay registered")
     }
     assert_eq(info.session, Some("s-wt-run"))
@@ -1349,8 +1349,9 @@ async test "worktree create provisions checkout, branch, registry, exclusion" {
     name="fix-auth",
   )
   assert_eq(committed.val, 1)
-  assert_eq(reply.name, "fix-auth")
-  guard reply.worktrees is [info] else { fail("expected one worktree") }
+  guard reply is WorktreeCreated(name="fix-auth", worktrees=[info]) else {
+    fail("expected one worktree")
+  }
   assert_eq(info.name, "fix-auth")
   assert_eq(info.branch, "openseek/fix-auth")
   assert_eq(info.base, git_in(repo, ["rev-parse", "HEAD"]))
@@ -1383,7 +1384,7 @@ async test "worktree create provisions checkout, branch, registry, exclusion" {
   let exclude = @fsx.read_text(repo.join(".git/info/exclude").to_path())
   assert_true(exclude.contains(".worktrees/"))
   assert_true(exclude.contains(".openseek/"))
-  guard list_worktrees(repo.to_string()).worktrees is [listed] else {
+  guard list_worktrees(repo.to_string()) is Worktrees(worktrees=[listed]) else {
     fail("expected one listed worktree")
   }
   assert_eq(listed.name, "fix-auth")
@@ -1430,7 +1431,7 @@ async test "a checkout deleted outside the app refuses runs and is repairable" {
   @fsx.ensure_dir(
     workspace_session_root(repo).join("sessions").join("s-vanish").to_path(),
   )
-  guard list_worktrees(repo.to_string()).worktrees is [gone] else {
+  guard list_worktrees(repo.to_string()) is Worktrees(worktrees=[gone]) else {
     fail("the registry row must survive an external deletion")
   }
   assert_false(gone.present)
@@ -1496,7 +1497,11 @@ async test "a checkout deleted outside the app refuses runs and is repairable" {
   let repaired = create_worktree(manager, repo.to_string(), "s-vanish", fn(_) {
 
   })
-  assert_eq(repaired.name, created.name)
+  guard created is WorktreeCreated(name=created_name, ..) &&
+    repaired is WorktreeCreated(name=repaired_name, ..) else {
+    fail("expected created worktrees")
+  }
+  assert_eq(repaired_name, created_name)
   assert_true(@fsx.is_dir(checkout.to_path()))
   assert_eq(
     @fsx.read_text(checkout.join("kept.txt").to_path()),
@@ -1516,11 +1521,14 @@ async test "a checkout deleted outside the app refuses runs and is repairable" {
       replayed.push(info)
     }
   })
-  assert_eq(replay.name, repaired.name)
+  guard replay is WorktreeCreated(name=replay_name, ..) else {
+    fail("expected repaired worktree replay")
+  }
+  assert_eq(replay_name, repaired_name)
   guard replayed is [replayed_info] else {
     fail("repair replay did not publish its worktree list")
   }
-  assert_eq(replayed_info.name, repaired.name)
+  assert_eq(replayed_info.name, repaired_name)
   assert_eq(replayed_info.session, Some("s-vanish"))
   assert_true(replayed_info.present)
   @fs.rmdir(root.to_string(), recursive=true)
@@ -1553,7 +1561,7 @@ async test "explicit registry removal can prune a vanished worktree" {
   // The bundled UI does not expose it for a conversation; Archive retains the
   // row so a later Unarchive still requires explicit Repair.
   let reply = remove_worktree(manager, repo.to_string(), "wt", false, fn(_) {  })
-  assert_eq(reply.worktrees.length(), 0)
+  assert_true(reply is Worktrees(worktrees=[]))
   // Unbound, the conversation runs in the workspace again — no refusal.
   assert_eq(session_run_dir(repo, "s-release").to_string(), repo.to_string())
   @fs.rmdir(root.to_string(), recursive=true)
@@ -1573,20 +1581,19 @@ async test "worktree names are host-generated and skip surviving branches" {
   ignore(add_workspace(repo.to_string(), fn(_) {  }))
   let manager = new_engine_manager("openseek")
   let first = create_worktree(manager, repo.to_string(), "s-1", fn(_) {  })
-  assert_eq(first.name, "wt-1")
+  assert_true(first is WorktreeCreated(name="wt-1", ..))
   // The session is the idempotency key: a replay (a retry after a lost
   // reply) gets the existing binding back, never a second checkout.
   let replay = create_worktree(manager, repo.to_string(), "s-1", fn(_) {  })
-  assert_eq(replay.name, "wt-1")
-  assert_eq(replay.worktrees.length(), 1)
+  assert_true(replay is WorktreeCreated(name="wt-1", worktrees=[_]))
   let second = create_worktree(manager, repo.to_string(), "s-2", fn(_) {  })
-  assert_eq(second.name, "wt-2")
+  assert_true(second is WorktreeCreated(name="wt-2", ..))
   // Removal keeps the branch, so a fresh name never resurrects wt-1: the
   // counter moves past every holder, branches included.
   ignore(remove_worktree(manager, repo.to_string(), "wt-1", false, fn(_) {  }))
   let third = create_worktree(manager, repo.to_string(), "s-3", fn(_) {  })
-  assert_eq(third.name, "wt-3")
-  guard list_worktrees(repo.to_string()).worktrees is [a, b] else {
+  assert_true(third is WorktreeCreated(name="wt-3", ..))
+  guard list_worktrees(repo.to_string()) is Worktrees(worktrees=[a, b]) else {
     fail("expected two registered worktrees")
   }
   assert_eq(a.name, "wt-2")
@@ -1801,7 +1808,7 @@ async test "archive keeps worktree placement for explicit repair after unarchive
       .to_path(),
     ),
   )
-  guard list_worktrees(repo.to_string()).worktrees is [retained] else {
+  guard list_worktrees(repo.to_string()) is Worktrees(worktrees=[retained]) else {
     fail("archived worktree placement was not retained")
   }
   assert_eq(retained.session, Some("s-arc"))
@@ -1819,16 +1826,16 @@ async test "archive keeps worktree placement for explicit repair after unarchive
     resolve_in_workspace("s-arc", "", workspace=repo.to_string()) is None,
   )
   let repaired = create_worktree(manager, repo.to_string(), "s-arc", fn(_) {  })
-  assert_eq(repaired.name, "wt-1")
+  assert_true(repaired is WorktreeCreated(name="wt-1", ..))
   assert_true(@fsx.is_dir(repo.join(".worktrees/wt-1").to_path()))
   // A clean bound worktree archives in one go, no force needed.
   ignore(create_worktree(manager, repo.to_string(), "s-arc2", fn(_) {  }))
   @fsx.ensure_dir(
     workspace_session_root(repo).join("sessions").join("s-arc2").to_path(),
   )
-  assert_true(archive_session(manager, "s-arc2", _ => ()) is Archived(_))
+  assert_true(archive_session(manager, "s-arc2", _ => ()) is Archived(groups=_))
   assert_false(@fsx.exists(repo.join(".worktrees/wt-2").to_path()))
-  guard list_worktrees(repo.to_string()).worktrees is [first, second] else {
+  guard list_worktrees(repo.to_string()) is Worktrees(worktrees=[first, second]) else {
     fail("both worktree placements must survive archive")
   }
   assert_true(first.present)
@@ -1886,13 +1893,13 @@ async test "worktree remove enforces the dirty check and keeps the branch" {
       "uncommitted changes",
     ),
   )
-  assert_eq(list_worktrees(repo.to_string()).worktrees.length(), 1)
+  assert_true(list_worktrees(repo.to_string()) is Worktrees(worktrees=[_]))
   let committed : Ref[Int] = Ref(-1)
   let forced = remove_worktree(manager, repo.to_string(), "w1", true, infos => {
     committed.val = infos.length()
   })
   assert_eq(committed.val, 0)
-  assert_eq(forced.worktrees.length(), 0)
+  assert_true(forced is Worktrees(worktrees=[]))
   assert_false(@fsx.exists(repo.join(".worktrees/w1").to_path()))
   // Committed work is never lost: the branch survives every removal.
   assert_true(
@@ -1905,7 +1912,7 @@ async test "worktree remove enforces the dirty check and keeps the branch" {
     create_worktree(manager, repo.to_string(), "s-w2", fn(_) {  }, name="w2"),
   )
   ignore(remove_worktree(manager, repo.to_string(), "w2", false, fn(_) {  }))
-  assert_eq(list_worktrees(repo.to_string()).worktrees.length(), 0)
+  assert_true(list_worktrees(repo.to_string()) is Worktrees(worktrees=[]))
   assert_true(
     git_probe(repo, [
       "show-ref", "--verify", "--quiet", "refs/heads/openseek/w2",
@@ -1938,12 +1945,12 @@ async test "worktree remove prunes an externally deleted checkout" {
     ),
   )
   @fs.rmdir(repo.join(".worktrees/gone").to_string(), recursive=true)
-  guard list_worktrees(repo.to_string()).worktrees is [listed] else {
+  guard list_worktrees(repo.to_string()) is Worktrees(worktrees=[listed]) else {
     fail("expected the deleted worktree to stay listed")
   }
   assert_false(listed.present)
   ignore(remove_worktree(manager, repo.to_string(), "gone", false, fn(_) {  }))
-  assert_eq(list_worktrees(repo.to_string()).worktrees.length(), 0)
+  assert_true(list_worktrees(repo.to_string()) is Worktrees(worktrees=[]))
   assert_false(
     git_in(repo, ["worktree", "list", "--porcelain"]).contains(
       ".worktrees/gone",

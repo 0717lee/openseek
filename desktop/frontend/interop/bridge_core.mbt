@@ -274,8 +274,8 @@ pub(all) enum BridgeFailure {
 ///|
 /// Classify a failed bridge call. Browser JSON-RPC errors carry a marker set
 /// by the response decoder; socket close / down errors do not. In the
-/// embedded proton bridge, a present method's rejected promise is the direct
-/// host answer.
+/// embedded Proton bridge, command handlers return typed reply variants; a
+/// rejected promise is reserved for failure outside that typed command path.
 ///
 /// The `openseek_api()` test is about *this* page having an embedded host,
 /// which on its own says nothing about a request that went out over a socket

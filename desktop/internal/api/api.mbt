@@ -131,33 +131,97 @@ pub fn endpoints(
 ) -> Array[@endpoint.Endpoint] {
   let endpoints = [
     @endpoint.Endpoint::remote(@commands.agent_start, async fn(payload) {
-      @engine.start_run(state.sink(), state.manager, payload)
+      @engine.start_run(state.sink(), state.manager, payload) catch {
+        error =>
+          StartError(
+            @endpoint.Endpoint::record_failure(
+              @commands.agent_start.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.agent_cancel, async fn(payload) {
-      @engine.cancel_run(state.manager, payload)
+      @engine.cancel_run(state.manager, payload) catch {
+        error =>
+          CancelError(
+            @endpoint.Endpoint::record_failure(
+              @commands.agent_cancel.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.agent_steer, async fn(payload) {
-      @engine.steer_run(state.manager, payload)
+      @engine.steer_run(state.manager, payload) catch {
+        error =>
+          SteerError(
+            @endpoint.Endpoint::record_failure(
+              @commands.agent_steer.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.agent_compact, async fn(payload) {
-      @engine.compact_run(state.manager, payload)
+      @engine.compact_run(state.manager, payload) catch {
+        error =>
+          CompactError(
+            @endpoint.Endpoint::record_failure(
+              @commands.agent_compact.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.agent_goal, async fn(payload) {
-      @engine.goal_run(state.manager, payload)
+      @engine.goal_run(state.manager, payload) catch {
+        error =>
+          GoalError(
+            @endpoint.Endpoint::record_failure(
+              @commands.agent_goal.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote_sync(@commands.agent_runs, payload => {
       state.hub.runs(known?=payload.known)
     }),
     @endpoint.Endpoint::remote(@commands.session_list, async fn(_) {
-      @engine.list_sessions(state.manager)
+      @engine.list_sessions(state.manager) catch {
+        error =>
+          SessionsError(
+            @endpoint.Endpoint::record_failure(
+              @commands.session_list.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.session_load, async fn(payload) {
-      @engine.load_session(state.manager, payload)
+      @engine.load_session(state.manager, payload) catch {
+        error =>
+          SessionLoadError(
+            @endpoint.Endpoint::record_failure(
+              @commands.session_load.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.session_list_archived, async fn(_) {
       @engine.archived_sessions(state.manager, session => {
         publish_session_changed(state, "archived", session)
-      })
+      }) catch {
+        error =>
+          SessionsError(
+            @endpoint.Endpoint::record_failure(
+              @commands.session_list_archived.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.session_archive, async fn(payload) {
       let session = payload.canonical_session()
@@ -174,67 +238,127 @@ pub fn endpoints(
         on_worktree_changed=(workspace, worktrees) => {
           publish_worktree_changed(state, workspace, worktrees)
         },
-      )
+      ) catch {
+        error =>
+          ArchiveError(
+            @endpoint.Endpoint::record_failure(
+              @commands.session_archive.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.session_unarchive, async fn(payload) {
-      let session = payload.canonical_session()
-      @engine.unarchive_session(state.manager, session, moved => {
-        publish_session_changed(state, "unarchived", moved)
-      })
+      try {
+        let session = payload.canonical_session()
+        @engine.unarchive_session(state.manager, session, moved => {
+          publish_session_changed(state, "unarchived", moved)
+        })
+      } catch {
+        error =>
+          SessionsError(
+            @endpoint.Endpoint::record_failure(
+              @commands.session_unarchive.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.settings_get, async fn(_) {
-      @engine.settings_status(state.manager)
+      SettingsStatus(@engine.settings_status(state.manager)) catch {
+        error =>
+          SettingsError(
+            @endpoint.Endpoint::record_failure(
+              @commands.settings_get.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote_sync(@commands.app_info, _ => {
-      version: state.app_version,
+      AppInfo(version=state.app_version)
     }),
     @endpoint.Endpoint::remote(@commands.settings_set, async fn(payload) {
-      // The store commit and its broadcast are one finite cancellation-
-      // shielded linearization point. `update_settings` invokes the callback
-      // while its manager-owned lock is still held, preserving revision order
-      // across concurrent clients even if the requester disconnects.
-      @async.protect_from_cancel(() => {
-        let status = @engine.update_settings(
-          state.manager,
-          payload.to_patch(),
-          legacy_migration=payload.legacy_migration == Some(true),
-          on_committed=fn(status) {
-            // Every client renders these settings; clients that did not ask
-            // must learn about the committed revision too.
-            state.hub.publish(SettingsChanged(status))
-          },
-        )
-        // Credentials belong to the server that issued them. Clear stale
-        // credentials before this request can complete or be cancelled.
-        sign_out_after_server_switch(state)
-        status
-      })
+      SettingsStatus(
+        // The store commit and its broadcast are one finite cancellation-
+        // shielded linearization point. `update_settings` invokes the callback
+        // while its manager-owned lock is still held, preserving revision order
+        // across concurrent clients even if the requester disconnects.
+        @async.protect_from_cancel(() => {
+          let status = @engine.update_settings(
+            state.manager,
+            payload.to_patch(),
+            legacy_migration=payload.legacy_migration == Some(true),
+            on_committed=fn(status) {
+              // Every client renders these settings; clients that did not ask
+              // must learn about the committed revision too.
+              state.hub.publish(SettingsChanged(status))
+            },
+          )
+          // Credentials belong to the server that issued them. Clear stale
+          // credentials before this request can complete or be cancelled.
+          sign_out_after_server_switch(state)
+          status
+        }),
+      ) catch {
+        error =>
+          SettingsError(
+            @endpoint.Endpoint::record_failure(
+              @commands.settings_set.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.workspace_list, async fn(_) {
-      @engine.list_workspaces()
+      @engine.list_workspaces() catch {
+        error =>
+          WorkspaceError(
+            @endpoint.Endpoint::record_failure(
+              @commands.workspace_list.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.workspace_add, async fn(payload) {
-      // A refusal travels inside the reply: the local bridge would flatten
-      // a raised error to "op ext:openseek/workspace.add failed".
+      // This command owns the conversion from its operation error to the
+      // established workspace reply, including the shared command log entry.
       @engine.attach_workspace(payload.path, workspaces => {
         state.hub.publish(WorkspaceChanged({ workspaces, }))
       }) catch {
-        error if @async.is_being_cancelled() => raise error
-        @engine.EngineError(message) => WorkspaceError(message)
-        error => raise error
+        error =>
+          WorkspaceError(
+            @endpoint.Endpoint::record_failure(
+              @commands.workspace_add.name(),
+              error,
+            ),
+          )
       }
     }),
     @endpoint.Endpoint::remote(@commands.workspace_remove, async fn(payload) {
       @engine.detach_workspace(state.manager, payload.path, workspaces => {
         state.hub.publish(WorkspaceChanged({ workspaces, }))
       }) catch {
-        error if @async.is_being_cancelled() => raise error
-        @engine.EngineError(message) => WorkspaceError(message)
-        error => raise error
+        error =>
+          WorkspaceError(
+            @endpoint.Endpoint::record_failure(
+              @commands.workspace_remove.name(),
+              error,
+            ),
+          )
       }
     }),
     @endpoint.Endpoint::remote(@commands.worktree_list, async fn(payload) {
-      @engine.list_worktrees(payload.workspace)
+      @engine.list_worktrees(payload.workspace) catch {
+        error =>
+          WorktreesError(
+            @endpoint.Endpoint::record_failure(
+              @commands.worktree_list.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.worktree_create, async fn(payload) {
       @engine.create_worktree(
@@ -244,7 +368,15 @@ pub fn endpoints(
         worktrees => {
           publish_worktree_changed(state, payload.workspace, worktrees)
         },
-      )
+      ) catch {
+        error =>
+          WorktreeCreateError(
+            @endpoint.Endpoint::record_failure(
+              @commands.worktree_create.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.worktree_remove, async fn(payload) {
       @engine.remove_worktree(
@@ -255,19 +387,59 @@ pub fn endpoints(
         worktrees => {
           publish_worktree_changed(state, payload.workspace, worktrees)
         },
-      )
+      ) catch {
+        error =>
+          WorktreesError(
+            @endpoint.Endpoint::record_failure(
+              @commands.worktree_remove.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.auth_status, async fn(_) {
-      auth_status(state)
+      AuthStatus(auth_status(state)) catch {
+        error =>
+          AuthError(
+            @endpoint.Endpoint::record_failure(
+              @commands.auth_status.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.auth_connect, async fn(_) {
-      auth_connect(state)
+      AuthStatus(auth_connect(state)) catch {
+        error =>
+          AuthError(
+            @endpoint.Endpoint::record_failure(
+              @commands.auth_connect.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.auth_disconnect, async fn(_) {
-      auth_disconnect(state)
+      AuthStatus(auth_disconnect(state)) catch {
+        error =>
+          AuthError(
+            @endpoint.Endpoint::record_failure(
+              @commands.auth_disconnect.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.auth_cancel, async fn(_) {
-      auth_cancel(state)
+      AuthStatus(auth_cancel(state)) catch {
+        error =>
+          AuthError(
+            @endpoint.Endpoint::record_failure(
+              @commands.auth_cancel.name(),
+              error,
+            ),
+          )
+      }
     }),
   ]
   for

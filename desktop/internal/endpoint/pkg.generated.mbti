@@ -21,6 +21,7 @@ type Endpoint
 pub fn Endpoint::bind(Self, @command.CommandRegistrar) -> Unit raise
 pub async fn Endpoint::invoke_remote(Self, Json) -> Json
 pub fn Endpoint::name(Self) -> String
+pub fn Endpoint::record_failure(String, Error) -> String raise
 pub fn[Payload : @json.FromJson, Reply : ToJson] Endpoint::remote(@commands.Command[Payload, Reply], async (Payload) -> Reply) -> Self
 pub fn[Payload : @json.FromJson, Reply : ToJson] Endpoint::remote_sync(@commands.Command[Payload, Reply], (Payload) -> Reply raise) -> Self
 pub fn Endpoint::route(Self) -> @proton_contract.ContractRoute

@@ -16,9 +16,9 @@ pub(all) struct Symbol {
 ///|
 /// Project a typed host reply into the shared UI form. Blank names are not
 /// selectable and are therefore dropped at this boundary.
-pub fn decode(reply : @protocol.WorkspaceSymbolsReply) -> Array[Symbol] {
+pub fn decode(items : Array[@protocol.SymbolItem]) -> Array[Symbol] {
   let symbols : Array[Symbol] = []
-  for item in reply.symbols {
+  for item in items {
     guard !item.name.is_empty() else { continue }
     symbols.push({
       name: item.name,
@@ -69,7 +69,7 @@ pub fn search(
   guard @resource.belongs_to(root, channel) else { return @cmd.none }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply : @protocol.WorkspaceSymbolsReply = @interop.bridge_request(
+      let response = @interop.bridge_request(
         channel,
         @commands.lsp_workspace_symbols,
         { root: root.path, query },
@@ -79,7 +79,10 @@ pub fn search(
           return
         }
       }
-      scheduler.add(loaded(decode(reply)))
+      match response {
+        WorkspaceSymbols(symbols~) => scheduler.add(loaded(decode(symbols)))
+        WorkspaceSymbolsError(_) => scheduler.add(failed)
+      }
     })
   })
 }

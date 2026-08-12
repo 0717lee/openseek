@@ -395,7 +395,7 @@ fn fetch_branch(
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply = @interop.bridge_request(channel, @commands.git_branch, {
+      let response = @interop.bridge_request(channel, @commands.git_branch, {
         session,
         cwd: cwd.map(resource => resource.path),
         base_hint,
@@ -415,12 +415,26 @@ fn fetch_branch(
           return
         }
       }
+      guard response is GitBranch(branch~, diffstat~) else {
+        scheduler.add(
+          dispatch(
+            BranchLoaded(
+              session~,
+              branch=None,
+              diffstat=None,
+              generation~,
+              base_hint~,
+            ),
+          ),
+        )
+        return
+      }
       scheduler.add(
         dispatch(
           BranchLoaded(
             session~,
-            branch=reply.branch,
-            diffstat=reply.diffstat.map(DiffStat::from_reply),
+            branch~,
+            diffstat=diffstat.map(DiffStat::from_reply),
             generation~,
             base_hint~,
           ),
@@ -658,14 +672,20 @@ fn fetch_pull_request(
         pull_request=None,
         compare_url=None,
       )
-      let reply = @interop.bridge_request(channel, @commands.git_pull_request, {
-        session,
-        cwd: cwd.map(resource => resource.path),
-      }) catch {
+      let response = @interop.bridge_request(
+        channel,
+        @commands.git_pull_request,
+        { session, cwd: cwd.map(resource => resource.path) },
+      ) catch {
         _ => {
           scheduler.add(dispatch(empty))
           return
         }
+      }
+      guard response
+        is GitPullRequest(pull_request~, compare_url~, branch=queried) else {
+        scheduler.add(dispatch(empty))
+        return
       }
       scheduler.add(
         dispatch(
@@ -673,9 +693,9 @@ fn fetch_pull_request(
             session~,
             branch~,
             generation~,
-            queried=reply.branch,
-            pull_request=reply.pull_request.bind(PullRequest::from_reply),
-            compare_url=reply.compare_url,
+            queried~,
+            pull_request=pull_request.bind(PullRequest::from_reply),
+            compare_url~,
           ),
         ),
       )

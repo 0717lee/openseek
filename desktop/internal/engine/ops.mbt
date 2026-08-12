@@ -129,10 +129,10 @@ pub async fn start_run(
       // close timeout from exposing a partial stream to a same-config start.
       live.accepts_commands = false
       retire_failed_command(manager, live, "engine write failed: \{error}")
-      return { run_id, status: "failed", exit_code: 1 }
+      return Started(run_id~, status="failed", exit_code=1)
     }
   }
-  { run_id, status: "accepted", exit_code: 0 }
+  Started(run_id~, status="accepted", exit_code=0)
 }
 
 ///|
@@ -157,7 +157,7 @@ pub async fn cancel_run(
   payload : @protocol.CancelPayload,
 ) -> CancelReply {
   guard open_run_engine(manager, run_id?=payload.run_id) is Some(live) else {
-    return { cancelled: false, run_id: None }
+    return NoRunToCancel
   }
   let mut command_started = false
   let cancelled = live.with_command_lock(() => {
@@ -199,9 +199,9 @@ pub async fn cancel_run(
     }
   }
   if !cancelled {
-    return { cancelled: false, run_id: None }
+    return NoRunToCancel
   }
-  { cancelled: true, run_id: live.latest_run }
+  Cancelled(run_id=live.latest_run)
 }
 
 ///|
@@ -340,7 +340,7 @@ pub async fn compact_run(
       raise EngineError("failed to request compaction: \{error}")
     }
   }
-  { compacting: true }
+  CompactionRequested
 }
 
 ///|
@@ -446,7 +446,7 @@ pub async fn goal_run(
       raise EngineError("failed to update the goal: \{error}")
     }
   }
-  { delivered: true }
+  GoalDelivered
 }
 
 ///|
@@ -462,12 +462,10 @@ pub async fn steer_run(
   manager : EngineManager,
   payload : @protocol.SteerPayload,
 ) -> SteerReply {
-  guard !payload.text.is_blank() else {
-    return { steered: false, run_id: None }
-  }
+  guard !payload.text.is_blank() else { return NothingToSteer }
   guard open_run_engine(manager, run_id?=payload.run_id) is Some(live) &&
     live.phase is Running(cancel_requested=false, ..) else {
-    return { steered: false, run_id: None }
+    return NothingToSteer
   }
   let command = @protocol.steer(payload.text)
   let submission_id = normalize_submission_id(payload.submission_id)
@@ -516,15 +514,15 @@ pub async fn steer_run(
         // acceptance so the client keeps exact-id ownership; the trailing
         // receipt or Finished/durable recovery settles it without restoring a
         // duplicate draft.
-        return { steered: true, run_id }
+        return Steered(run_id~)
       }
-      return { steered: false, run_id }
+      return NothingToSteer
     }
   }
   if !steered {
-    return { steered: false, run_id: None }
+    return NothingToSteer
   }
-  { steered: true, run_id: live.latest_run }
+  Steered(run_id=live.latest_run)
 }
 
 ///|
@@ -646,7 +644,7 @@ pub async fn list_sessions(manager : EngineManager) -> SessionsReply {
       session_group(manager, Some(path), workspace_session_root(path)),
     )
   }
-  { groups, }
+  Sessions(groups~)
 }
 
 ///|
@@ -720,10 +718,10 @@ pub async fn load_session(
   // about what has been committed. The reply's watermark tells the client
   // which commits its snapshot already contains.
   if follower_snapshot(manager, session, root) is Some(document) {
-    return {
-      session: document,
-      watermark: Some(session_max_sequence(document)),
-    }
+    return SessionLoaded(
+      session=document,
+      watermark=Some(session_max_sequence(document)),
+    )
   }
   // Name the missing-record states before spending an engine read that can
   // only fail with a raw file error: a stale client asks for conversations
@@ -747,7 +745,10 @@ pub async fn load_session(
   let document : @protocol.SessionDocument = @json.from_json(json) catch {
     _ => raise EngineError("engine returned a malformed session")
   }
-  { session: document, watermark: Some(session_max_sequence(document)) }
+  SessionLoaded(
+    session=document,
+    watermark=Some(session_max_sequence(document)),
+  )
 }
 
 ///|
@@ -1005,9 +1006,12 @@ async test "setup failure retires the writer before an immediate next start" {
       session,
       workspace: None,
     })
+    guard first is Started(run_id=first_run_id, ..) else {
+      fail("first run was not accepted")
+    }
     assert_true(
       @async.with_timeout_opt(3000, () => {
-        while !has_finished_run(emitted, first.run_id) {
+        while !has_finished_run(emitted, first_run_id) {
           @async.sleep(1)
         }
       })
@@ -1018,8 +1022,8 @@ async test "setup failure retires the writer before an immediate next start" {
       fail("missing first engine after setup failure")
     }
     assert_false(live.accepts_commands)
-    let cancelled = cancel_run(manager, { run_id: Some(first.run_id) })
-    assert_false(cancelled.cancelled)
+    let cancelled = cancel_run(manager, { run_id: Some(first_run_id) })
+    assert_true(cancelled is NoRunToCancel)
     let second = start_run(sink, manager, {
       task: "second",
       submission_id: None,
@@ -1028,7 +1032,9 @@ async test "setup failure retires the writer before an immediate next start" {
       session,
       workspace: None,
     })
-    assert_eq(second.status, "accepted")
+    guard second is Started(run_id=_, status="accepted", ..) else {
+      fail("second run was not accepted")
+    }
     assert_true(@fsx.exists(old_done))
     assert_false(@fsx.exists(overlapped))
     assert_true(
@@ -1042,7 +1048,7 @@ async test "setup failure retires the writer before an immediate next start" {
     assert_eq(@fs.read_file(count.to_string()).text(), "2")
     let mut first_finishes = 0
     for event in emitted {
-      if event is Finished(payload) && payload.run_id == first.run_id {
+      if event is Finished(payload) && payload.run_id == first_run_id {
         first_finishes = first_finishes + 1
       }
     }
@@ -1254,10 +1260,12 @@ async test "named session retries after its first prompt creates no record" {
       session,
       workspace: None,
     })
-    assert_eq(second.status, "accepted")
+    guard second is Started(run_id=second_run_id, status="accepted", ..) else {
+      fail("retry was not accepted")
+    }
     assert_true(
       @async.with_timeout_opt(3000, () => {
-        while !has_finished_run(emitted, second.run_id) {
+        while !has_finished_run(emitted, second_run_id) {
           @async.sleep(1)
         }
       })
@@ -1326,12 +1334,13 @@ async test "session load preserves a future item without hiding known events" {
     session: "s-future",
     workspace: None,
   })
-  guard reply.session.events is Some(events) else {
+  guard reply is SessionLoaded(session=document, watermark~) &&
+    document.events is Some(events) else {
     fail("expected session events")
   }
   assert_eq(events.length(), 3)
   assert_true(events[1].item is Unknown(_))
-  assert_eq(reply.watermark, Some(3))
+  assert_eq(watermark, Some(3))
   @fs.rmdir(dir, recursive=true)
 }
 
@@ -1431,7 +1440,7 @@ async test "workspace detach refuses a running conversation without hiding it" {
       session: "s-detach-running",
       workspace: Some(workspace.to_string()),
     })
-    assert_eq(reply.status, "accepted")
+    assert_true(reply is Started(status="accepted", ..))
     let committed : Ref[Bool] = Ref(false)
     let detail = try {
       ignore(
@@ -1517,9 +1526,10 @@ async test "workspace detach drains an idle writer and its follower first" {
       session: "s-detach-idle",
       workspace: Some(workspace.to_string()),
     })
+    guard reply is Started(run_id~, ..) else { fail("run was not accepted") }
     assert_true(
       @async.with_timeout_opt(3000, () => {
-        while !has_finished_run(events, reply.run_id) {
+        while !has_finished_run(events, run_id) {
           @async.sleep(1)
         }
       })

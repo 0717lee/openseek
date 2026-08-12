@@ -5,7 +5,6 @@ import {
   "moonbit-community/rabbita/dom",
   "moonbit-community/rabbita/js",
   "moonbitlang/core/debug",
-  "moonbitlang/core/json",
   "openseek_desktop/internal/commands",
   "openseek_desktop/internal/protocol",
 }
@@ -19,9 +18,9 @@ pub fn bridge_error_text(Error) -> String
 
 pub fn bridge_failure(Error) -> BridgeFailure
 
-pub async fn[Payload : ToJson, Reply : @json.FromJson] bridge_request(ChannelId, @commands.Command[Payload, Reply], Payload) -> Reply
+pub async fn[Payload : ToJson, Reply] bridge_request(ChannelId, @commands.Command[Payload, Reply], Payload) -> Reply
 
-pub async fn[Payload : ToJson, Reply : @json.FromJson] bridge_request_in_order(ChannelId, @commands.Command[Payload, Reply], Payload, lane? : String) -> Reply
+pub async fn[Payload : ToJson, Reply] bridge_request_in_order(ChannelId, @commands.Command[Payload, Reply], Payload, lane? : String) -> Reply
 
 pub async fn[T] in_ordered_lane(String, async () -> T) -> T
 

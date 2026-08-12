@@ -114,7 +114,7 @@ async fn terminal_open_op(
       }
     }
   }
-  { id, }
+  TerminalOpened(id~)
 }
 
 ///|

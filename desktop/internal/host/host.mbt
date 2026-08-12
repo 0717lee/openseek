@@ -195,115 +195,392 @@ pub fn endpoints(
 ) -> Array[@endpoint.Endpoint] {
   [
     @endpoint.Endpoint::remote(@commands.fs_read_file, async fn(payload) {
-      read_file_op(payload)
+      read_file_op(payload) catch {
+        error =>
+          ReadFileError(
+            @endpoint.Endpoint::record_failure(
+              @commands.fs_read_file.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.fs_read_directory, async fn(payload) {
-      read_directory_op(payload)
+      read_directory_op(payload) catch {
+        error =>
+          ReadDirectoryError(
+            @endpoint.Endpoint::record_failure(
+              @commands.fs_read_directory.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.fs_search_files, async fn(payload) {
-      search_files_op(connection.file_search, payload)
+      try {
+        let result = search_files_op(connection.file_search, payload)
+        SearchResults(
+          files=result.files,
+          from_cache=result.from_cache,
+          limit_hit=result.limit_hit,
+          cancelled=result.cancelled,
+        )
+      } catch {
+        error =>
+          SearchFilesError(
+            @endpoint.Endpoint::record_failure(
+              @commands.fs_search_files.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.fs_cancel_search_files, async fn(
       payload,
     ) {
-      cancel_search_files_op(connection.file_search, payload)
+      cancel_search_files_op(connection.file_search, payload) catch {
+        error =>
+          CancelSearchFilesError(
+            @endpoint.Endpoint::record_failure(
+              @commands.fs_cancel_search_files.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.fs_clear_file_search_cache, async fn(
       payload,
     ) {
-      clear_file_search_cache_op(connection.file_search, payload)
+      clear_file_search_cache_op(connection.file_search, payload) catch {
+        error =>
+          ClearFileSearchCacheError(
+            @endpoint.Endpoint::record_failure(
+              @commands.fs_clear_file_search_cache.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.fs_stat_files, async fn(payload) {
-      stat_files_op(payload)
+      stat_files_op(payload) catch {
+        error =>
+          StatFilesError(
+            @endpoint.Endpoint::record_failure(
+              @commands.fs_stat_files.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.fs_watch, async fn(payload) {
-      connection.fs_watch.watch(payload)
-      Acknowledged
+      try {
+        connection.fs_watch.watch(payload)
+        FileWatchStarted
+      } catch {
+        error =>
+          FileWatchError(
+            @endpoint.Endpoint::record_failure(@commands.fs_watch.name(), error),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.fs_unwatch, async fn(_) {
-      connection.fs_watch.unwatch()
-      Acknowledged
+      try {
+        connection.fs_watch.unwatch()
+        FileWatchStopped
+      } catch {
+        error =>
+          FileUnwatchError(
+            @endpoint.Endpoint::record_failure(
+              @commands.fs_unwatch.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.fs_browse, async fn(payload) {
       browse_directory_op(payload)
     }),
     @endpoint.Endpoint::remote(@commands.terminal_open, async fn(payload) {
-      terminal_open_op(state, connection.terminal, payload)
+      terminal_open_op(state, connection.terminal, payload) catch {
+        error =>
+          TerminalOpenError(
+            @endpoint.Endpoint::record_failure(
+              @commands.terminal_open.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.terminal_input, async fn(payload) {
-      terminal_input_op(connection.terminal, payload)
-      Acknowledged
+      try {
+        terminal_input_op(connection.terminal, payload)
+        TerminalInputAccepted
+      } catch {
+        error =>
+          TerminalInputError(
+            @endpoint.Endpoint::record_failure(
+              @commands.terminal_input.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote_sync(@commands.terminal_resize, payload => {
-      terminal_resize_op(connection.terminal, payload)
-      Acknowledged
+      try {
+        terminal_resize_op(connection.terminal, payload)
+        TerminalResized
+      } catch {
+        error =>
+          TerminalResizeError(
+            @endpoint.Endpoint::record_failure(
+              @commands.terminal_resize.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote_sync(@commands.terminal_ack, payload => {
       terminal_ack_op(connection.terminal, payload)
-      Acknowledged
+      TerminalOutputAcknowledged
     }),
     @endpoint.Endpoint::remote_sync(@commands.terminal_close, payload => {
       terminal_close_op(connection.terminal, payload)
-      Acknowledged
+      TerminalClosed
     }),
     @endpoint.Endpoint::remote(@commands.lsp_open, async fn(payload) {
-      lsp_open_op(state.moon, payload)
+      try {
+        let result = lsp_open_op(state.moon, payload)
+        Diagnostics(diagnostics=result.diagnostics)
+      } catch {
+        error =>
+          DiagnosticsError(
+            @endpoint.Endpoint::record_failure(@commands.lsp_open.name(), error),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.lsp_hover, async fn(payload) {
-      lsp_hover_op(state.moon, payload)
+      try {
+        let result = lsp_hover_op(state.moon, payload)
+        Hover(
+          value=result.value,
+          markdown=result.markdown,
+          has_range=result.has_range,
+          start_line=result.start_line,
+          start_character=result.start_character,
+          end_line=result.end_line,
+          end_character=result.end_character,
+        )
+      } catch {
+        error =>
+          HoverError(
+            @endpoint.Endpoint::record_failure(
+              @commands.lsp_hover.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.lsp_workspace_symbols, async fn(
       payload,
     ) {
-      workspace_symbols_op(state.moon, payload)
+      try {
+        let result = workspace_symbols_op(state.moon, payload)
+        WorkspaceSymbols(symbols=result.symbols)
+      } catch {
+        error =>
+          WorkspaceSymbolsError(
+            @endpoint.Endpoint::record_failure(
+              @commands.lsp_workspace_symbols.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.moonide_definition, async fn(payload) {
-      moonide_definition_op(state, payload)
+      try {
+        let result = moonide_definition_op(state, payload)
+        Locations(locations=result.locations)
+      } catch {
+        error =>
+          NavigationError(
+            @endpoint.Endpoint::record_failure(
+              @commands.moonide_definition.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.moonide_references, async fn(payload) {
-      moonide_references_op(state, payload)
+      try {
+        let result = moonide_references_op(state, payload)
+        Locations(locations=result.locations)
+      } catch {
+        error =>
+          NavigationError(
+            @endpoint.Endpoint::record_failure(
+              @commands.moonide_references.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.skills_catalog, async fn(_) {
-      skills_catalog_op()
+      skills_catalog_op() catch {
+        error =>
+          SkillsCatalogError(
+            @endpoint.Endpoint::record_failure(
+              @commands.skills_catalog.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.skills_installed, async fn(_) {
-      installed_skills_op()
+      installed_skills_op() catch {
+        error =>
+          InstalledSkillsError(
+            @endpoint.Endpoint::record_failure(
+              @commands.skills_installed.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.skills_install, async fn(payload) {
-      install_skill_op(payload, on_skills_changed)
+      install_skill_op(payload, on_skills_changed) catch {
+        error =>
+          SkillInstallError(
+            @endpoint.Endpoint::record_failure(
+              @commands.skills_install.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.skills_uninstall, async fn(payload) {
-      uninstall_skill_op(payload, on_skills_changed)
+      uninstall_skill_op(payload, on_skills_changed) catch {
+        error =>
+          SkillUninstallError(
+            @endpoint.Endpoint::record_failure(
+              @commands.skills_uninstall.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.update_check, async fn(payload) {
-      state.updates.check(payload)
+      state.updates.check(payload) catch {
+        error =>
+          Unreachable(
+            reason=@endpoint.Endpoint::record_failure(
+              @commands.update_check.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote_sync(@commands.update_download, payload => {
-      state.updates.start_download(payload)
+      state.updates.start_download(payload) catch {
+        error =>
+          DownloadError(
+            @endpoint.Endpoint::record_failure(
+              @commands.update_download.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.update_apply, async fn(_) {
-      state.updates.apply()
+      state.updates.apply() catch {
+        error =>
+          UpdateApplyError(
+            @endpoint.Endpoint::record_failure(
+              @commands.update_apply.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.app_list, async fn(_) {
-      list_apps_op()
+      list_apps_op() catch {
+        error =>
+          AppListError(
+            @endpoint.Endpoint::record_failure(@commands.app_list.name(), error),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.app_launch, async fn(payload) {
-      launch_app_op(payload)
+      launch_app_op(payload) catch {
+        error =>
+          AppLaunchError(
+            @endpoint.Endpoint::record_failure(
+              @commands.app_launch.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.git_branch, async fn(payload) {
-      git_branch_op(payload)
+      git_branch_op(payload) catch {
+        error =>
+          GitBranchError(
+            @endpoint.Endpoint::record_failure(
+              @commands.git_branch.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.git_pull_request, async fn(payload) {
-      git_pull_request_op(payload)
+      try {
+        let result = git_pull_request_op(payload)
+        GitPullRequest(
+          pull_request=result.pull_request,
+          compare_url=result.compare_url,
+          branch=result.branch,
+        )
+      } catch {
+        error =>
+          GitPullRequestError(
+            @endpoint.Endpoint::record_failure(
+              @commands.git_pull_request.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.git_changes, async fn(payload) {
-      git_changes_op(payload)
+      git_changes_op(payload) catch {
+        error =>
+          GitChangesError(
+            @endpoint.Endpoint::record_failure(
+              @commands.git_changes.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.git_original_file, async fn(payload) {
-      git_original_file_op(payload)
+      git_original_file_op(payload) catch {
+        error =>
+          GitOriginalFileError(
+            @endpoint.Endpoint::record_failure(
+              @commands.git_original_file.name(),
+              error,
+            ),
+          )
+      }
     }),
     @endpoint.Endpoint::remote(@commands.host_open_path, async fn(payload) {
-      open_path_op(payload)
+      open_path_op(payload) catch {
+        error =>
+          OpenPathError(
+            @endpoint.Endpoint::record_failure(
+              @commands.host_open_path.name(),
+              error,
+            ),
+          )
+      }
     }),
   ]
 }

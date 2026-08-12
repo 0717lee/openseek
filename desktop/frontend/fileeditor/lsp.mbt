@@ -116,35 +116,57 @@ priv struct HoverProjection {
 
 ///|
 fn HoverProjection::to_viewer(self : HoverProjection) -> @language.Hover? {
-  // `value` is always on the wire; the host says "no hover here" with "".
-  guard !self.reply.value.is_empty() else { return None }
-  let content = if self.reply.markdown {
-    @language.HoverContent::Markdown(self.reply.value)
-  } else {
-    @language.HoverContent::PlainText(self.reply.value)
+  guard self.reply
+    is Hover(
+      value~,
+      markdown~,
+      has_range~,
+      start_line~,
+      start_character~,
+      end_line~,
+      end_character~
+    ) else {
+    return None
   }
-  Some(@language.Hover::{ range: self.range(), contents: [content] })
+  // `value` is always on the wire; the host says "no hover here" with "".
+  guard !value.is_empty() else { return None }
+  let content = if markdown {
+    @language.HoverContent::Markdown(value)
+  } else {
+    @language.HoverContent::PlainText(value)
+  }
+  Some(@language.Hover::{
+    range: self.range(
+      has_range~,
+      start_line~,
+      start_character~,
+      end_line~,
+      end_character~,
+    ),
+    contents: [content],
+  })
 }
 
 ///|
 /// The offset range the tooltip highlights. An empty range at the document
 /// start when the reply carries none (`has_range` unset) — or when a
 /// position field is malformed, which reads the same way.
-fn HoverProjection::range(self : HoverProjection) -> @common.Range {
+fn HoverProjection::range(
+  self : HoverProjection,
+  has_range~ : Bool,
+  start_line~ : Int,
+  start_character~ : Int,
+  end_line~ : Int,
+  end_character~ : Int,
+) -> @common.Range {
   let snapshot = self.model.snapshot()
-  guard self.reply.has_range else {
+  guard has_range else {
     return snapshot.range_of(@common.OffsetRange::empty_at(0))
   }
   // The reply carries 0-based LSP positions; shift to the viewer's 1-based
   // line/column, then round-trip through offsets so the range stays clamped.
-  let start = snapshot.get_offset_at(
-    self.reply.start_line + 1,
-    self.reply.start_character + 1,
-  )
-  let end = snapshot.get_offset_at(
-    self.reply.end_line + 1,
-    self.reply.end_character + 1,
-  )
+  let start = snapshot.get_offset_at(start_line + 1, start_character + 1)
+  let end = snapshot.get_offset_at(end_line + 1, end_character + 1)
   snapshot.range_of(@common.OffsetRange::from_to(start, end))
 }
 
@@ -171,7 +193,7 @@ fn request_diagnostics(
       // An absent `diagnostics` field means the host's check could not run:
       // keep the markers we have rather than clearing them with fake "no
       // problems".
-      guard reply.diagnostics is Some(diagnostics) else { return }
+      guard reply is Some(diagnostics) else { return }
       scheduler.add(
         dispatch(DiagnosticsLoaded(owner~, epoch~, absolute~, diagnostics~)),
       )
@@ -185,11 +207,15 @@ async fn request_lsp_open(
   channel~ : @interop.ChannelId,
   root~ : @common.Uri,
   path~ : @pathx.Relative,
-) -> @protocol.LspDiagnosticsReply {
-  @interop.bridge_request(channel, @commands.lsp_open, {
-    root: root.path,
-    path: path.0,
-  })
+) -> Array[@protocol.LspDiagnostic]? {
+  match
+    @interop.bridge_request(channel, @commands.lsp_open, {
+      root: root.path,
+      path: path.0,
+    }) {
+    Diagnostics(diagnostics~) => diagnostics
+    DiagnosticsError(message) => fail(message)
+  }
 }
 
 ///|

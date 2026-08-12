@@ -225,7 +225,7 @@ fn Hub::runs(
       }
     }
   }
-  { runs, settled }
+  Runs(runs~, settled~)
 }
 
 ///|
@@ -301,11 +301,11 @@ test "a real engine connection retires old active runs before readiness" {
   hub.publish(
     AgentStarted(@json.from_json({ "run_id": "r-old", "session": "s-old" })),
   )
-  guard hub.runs().runs is [_] else {
+  guard hub.runs() is Runs(runs=[_], ..) else {
     fail("expected one active run before reconnect")
   }
   hub.engine_connected({ ready: Some(true), scratch_root: "/scratch" })
-  guard hub.runs().runs is [] else {
+  guard hub.runs() is Runs(runs=[], ..) else {
     fail("old active run survived a new engine pump")
   }
   guard subscriber.try_get() is Some(started) else {
@@ -327,13 +327,13 @@ test "an agent error does not retire a run before its finished boundary" {
   hub.publish(
     AgentError(@json.from_json({ "run_id": "r1", "message": "boom" })),
   )
-  guard hub.runs().runs is [_] else {
+  guard hub.runs() is Runs(runs=[_], ..) else {
     fail("agent.error retired a still-draining run")
   }
   hub.publish(
     AgentFinished(@json.from_json({ "run_id": "r1", "status": "failed" })),
   )
-  guard hub.runs().runs is [] else {
+  guard hub.runs() is Runs(runs=[], ..) else {
     fail("agent.finished did not retire the run")
   }
 }
@@ -368,7 +368,7 @@ test "a normal terminal-backed finish is replayable only to a matching caller" {
     // A second matching selector must not duplicate the ledger row.
     { session: "s-normal", run_id: None, submission_id: Some("sub-normal") },
   ])
-  guard reply.runs is [] && reply.settled is [settlement] else {
+  guard reply is Runs(runs=[], settled=[settlement]) else {
     fail("matching reconnect identity did not receive one settlement")
   }
   assert_eq(settlement.run_id, "r-normal")
@@ -393,7 +393,7 @@ test "a normal terminal-backed finish is replayable only to a matching caller" {
     // session's process-lifetime completion history.
     { session: "s-normal", run_id: None, submission_id: None },
   ])
-  guard mismatched.settled is [] else {
+  guard mismatched is Runs(settled=[], ..) else {
     fail("a non-matching reconnect identity received a settlement")
   }
 }
@@ -422,7 +422,7 @@ test "an abnormal finish waits for an exact durable boundary including zero" {
       submission_id: Some("sub-zero"),
     },
   ]
-  guard hub.runs(known~).settled is [] else {
+  guard hub.runs(known~) is Runs(settled=[], ..) else {
     fail("an unbounded abnormal finish was replayed")
   }
   hub.publish(
@@ -434,7 +434,7 @@ test "an abnormal finish waits for an exact durable boundary including zero" {
       }),
     ),
   )
-  guard hub.runs(known~).settled is [] else {
+  guard hub.runs(known~) is Runs(settled=[], ..) else {
     fail("a boundary from another session settled the run")
   }
   hub.publish(
@@ -442,7 +442,7 @@ test "an abnormal finish waits for an exact durable boundary including zero" {
       @json.from_json({ "run_id": "r-zero", "session": "s-zero", "sequence": 0 }),
     ),
   )
-  guard hub.runs(known~).settled is [settlement] else {
+  guard hub.runs(known~) is Runs(settled=[settlement], ..) else {
     fail("exact-zero boundary did not settle the abnormal finish")
   }
   assert_eq(settlement.durable_sequence, Some(0))
@@ -499,7 +499,7 @@ test "duplicate finish and durable boundaries never downgrade a settlement" {
       submission_id: Some("sub-dedup"),
     },
   ])
-  guard reply.settled is [settlement] else {
+  guard reply is Runs(settled=[settlement], ..) else {
     fail("deduplicated settlement missing")
   }
   assert_eq(settlement.exit_code, Some(9))
@@ -535,7 +535,7 @@ async test "agent.runs keeps old requests compatible and decodes known selectors
   let legacy : @protocol.RunsReply = @json.from_json(
     runs_endpoint.invoke_remote(Json::empty_object()),
   )
-  guard legacy is { runs: [], settled: [] } else {
+  guard legacy is Runs(runs=[], settled=[]) else {
     fail("legacy agent.runs request changed shape")
   }
   let replay : @protocol.RunsReply = @json.from_json(
@@ -545,7 +545,7 @@ async test "agent.runs keeps old requests compatible and decodes known selectors
       ],
     }),
   )
-  guard replay is { settled: [settlement], .. } else {
+  guard replay is Runs(settled=[settlement], ..) else {
     fail("agent.runs did not decode the known selector")
   }
   assert_eq(settlement.run_id, "r-api")

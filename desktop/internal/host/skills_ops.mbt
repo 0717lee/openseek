@@ -10,8 +10,8 @@ async fn skills_catalog_op() -> SkillsCatalogReply {
     @skillmarket.SkillMarketError(message) => raise HostError(message)
     error => raise error
   }
-  {
-    skills: [
+  SkillsCatalog(
+    skills=[
       for skill in skills => {
         {
           name: skill.name,
@@ -24,7 +24,7 @@ async fn skills_catalog_op() -> SkillsCatalogReply {
         }
       }
     ],
-  }
+  )
 }
 
 ///|
@@ -41,14 +41,12 @@ async fn install_skill_op(
     @skillmarket.SkillMarketError(message) => raise HostError(message)
     error => raise error
   }
-  {
-    installed: {
-      id: installed.id,
-      name: installed.name,
-      description: installed.description,
-      source: installed.source,
-    },
-  }
+  SkillInstalled(installed={
+    id: installed.id,
+    name: installed.name,
+    description: installed.description,
+    source: installed.source,
+  })
 }
 
 ///|
@@ -57,8 +55,8 @@ async fn installed_skills_op() -> InstalledSkillsReply {
     @skillmarket.SkillMarketError(message) => raise HostError(message)
     error => raise error
   }
-  {
-    skills: [
+  InstalledSkills(
+    skills=[
       for skill in skills => {
         {
           id: skill.id,
@@ -68,7 +66,7 @@ async fn installed_skills_op() -> InstalledSkillsReply {
         }
       }
     ],
-  }
+  )
 }
 
 ///|
@@ -80,5 +78,5 @@ async fn uninstall_skill_op(
     @skillmarket.SkillMarketError(message) => raise HostError(message)
     error => raise error
   }
-  { removed: true }
+  SkillRemoved
 }

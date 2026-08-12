@@ -149,14 +149,15 @@ fn Model::fetch_app_info(self : Model, dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
   guard self.is_desktop else { return @cmd.none }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply = @interop.bridge_request(
+      let response = @interop.bridge_request(
         Local,
         @commands.app_info,
         @protocol.EmptyPayload::NoPayload,
       ) catch {
         _ => return
       }
-      scheduler.add(dispatch(AppInfoLoaded(reply.version)))
+      let AppInfo(version~) = response
+      scheduler.add(dispatch(AppInfoLoaded(version)))
     })
   })
 }
@@ -198,18 +199,19 @@ fn download_update(
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      ignore(
-        @interop.bridge_request(Local, @commands.update_download, {
-          channel: Some(channel.wire()),
-        }) catch {
-          error => {
-            scheduler.add(
-              dispatch(UpdateFailed(message=@interop.bridge_error_text(error))),
-            )
-            return
-          }
-        },
-      )
+      let response = @interop.bridge_request(Local, @commands.update_download, {
+        channel: Some(channel.wire()),
+      }) catch {
+        error => {
+          scheduler.add(
+            dispatch(UpdateFailed(message=@interop.bridge_error_text(error))),
+          )
+          return
+        }
+      }
+      if response is DownloadError(message) {
+        scheduler.add(dispatch(UpdateFailed(message~)))
+      }
     })
   })
 }

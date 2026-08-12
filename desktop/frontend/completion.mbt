@@ -521,24 +521,22 @@ test "a draft of chips alone is not sendable" {
 
 ///|
 test "typed symbols retain kind and project one-based completion rows" {
-  let symbols = @symbols.decode({
-    symbols: [
-      {
-        name: "parse_hover",
-        kind: Some(12),
-        container: Some("Lsp"),
-        path: "a/b.mbt",
-        range: { start: { line: 4, col: 2 }, end: { line: 4, col: 13 } },
-      },
-      {
-        name: "",
-        kind: None,
-        container: None,
-        path: "x.mbt",
-        range: { start: { line: 0, col: 0 }, end: { line: 0, col: 0 } },
-      },
-    ],
-  })
+  let symbols = @symbols.decode([
+    {
+      name: "parse_hover",
+      kind: Some(12),
+      container: Some("Lsp"),
+      path: "a/b.mbt",
+      range: { start: { line: 4, col: 2 }, end: { line: 4, col: 13 } },
+    },
+    {
+      name: "",
+      kind: None,
+      container: None,
+      path: "x.mbt",
+      range: { start: { line: 0, col: 0 }, end: { line: 0, col: 0 } },
+    },
+  ])
   // The blank-name row is dropped; one good row remains.
   assert_eq(symbols.length(), 1)
   assert_eq(symbols[0].name, "parse_hover")
