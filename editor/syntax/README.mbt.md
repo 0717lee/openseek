@@ -268,8 +268,7 @@ the top. No array representation crosses the public boundary.
 `lang_javascript` carries this stack directly and therefore allocates only when
 a lexical mode changes. `lang_moonbit` uses a private mutable scratch stack
 within each line and always returns the empty normal state. `lang_moon_config`
-is also line-local and always returns the empty state. `lang_json` carries only
-an optional in-comment mode.
+and strict `lang_json` are also line-local and always return the empty state.
 
 ```mbt check
 ///|
