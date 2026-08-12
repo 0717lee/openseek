@@ -49,6 +49,7 @@ priv struct TerminalExitPayload {
 
 ///|
 async fn terminal_open_op(
+  state : HostState,
   terminals : @terminal.TerminalState,
   payload : TerminalOpenPayload,
 ) -> TerminalOpenReply {
@@ -66,6 +67,32 @@ async fn terminal_open_op(
     error if @async.is_being_cancelled() => raise error
     error => raise HostError("could not open the workspace directory: \{error}")
   }
+  // Match the engine and language services: a packaged seed wins when present,
+  // while an unbundled development host uses the first external toolchain.
+  // Queue the path update after shell startup so rc/profile files cannot
+  // overwrite the selection. Unknown shells stay usable without receiving a
+  // command in another shell's syntax. MOON_HOME remains the user's registry
+  // and caches.
+  let toolchain = @moonbit.resolve_toolchain(
+    state.engine,
+    runtime_dir?=state.runtime_dir,
+  ) catch {
+    error if @async.is_being_cancelled() => raise error
+    @moonbit.ToolchainUnavailable as unavailable =>
+      raise HostError("\{unavailable}")
+    error => raise HostError("could not resolve a MoonBit toolchain: \{error}")
+  }
+  let windows = @sysplatform.win32 || @sysplatform.win64
+  let shell_command = if windows {
+    @sys.get_env_var("COMSPEC").unwrap_or("cmd.exe")
+  } else {
+    @sys.get_env_var("SHELL").unwrap_or("/bin/sh")
+  }
+  let activation_command = @shellenv.path_prepend_command(
+    shell_command,
+    toolchain.bin_dir.to_string(),
+    windows~,
+  )
   let id = @terminal.open_terminal(
     terminals,
     cwd=root.to_string(),
@@ -74,6 +101,18 @@ async fn terminal_open_op(
   ) catch {
     @terminal.TerminalError(message) => raise HostError(message)
     error => raise error
+  }
+  if activation_command is Some(command) {
+    @terminal.write_terminal(terminals, id~, @utf8.encode(command)) catch {
+      @terminal.TerminalError(message) => {
+        @terminal.close_terminal(terminals, id~)
+        raise HostError("could not activate the MoonBit toolchain: \{message}")
+      }
+      error => {
+        @terminal.close_terminal(terminals, id~)
+        raise error
+      }
+    }
   }
   { id, }
 }

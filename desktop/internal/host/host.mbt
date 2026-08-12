@@ -228,7 +228,7 @@ pub fn endpoints(
       browse_directory_op(payload)
     }),
     @endpoint.Endpoint::remote(@commands.terminal_open, async fn(payload) {
-      terminal_open_op(connection.terminal, payload)
+      terminal_open_op(state, connection.terminal, payload)
     }),
     @endpoint.Endpoint::remote(@commands.terminal_input, async fn(payload) {
       terminal_input_op(connection.terminal, payload)
