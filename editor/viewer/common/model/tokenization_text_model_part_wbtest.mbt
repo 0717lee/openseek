@@ -60,7 +60,7 @@ impl @syntax.LineTokenizer for BlockCommentToy with fn tokenize_line(
 
 ///|
 fn find_marker(
-  line_text : String,
+  line_text : StringView,
   from : Int,
   first : Char,
   second : Char,

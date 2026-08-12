@@ -36,7 +36,7 @@ pub impl @syntax.LineTokenizer for JsonTokenizer with fn tokenize_line(
   state,
 ) {
   let tokens : Array[@syntax.LineToken] = []
-  let in_comment = for at = 0, view = line_text[:], in_comment = state ==
+  let in_comment = for at = 0, view = line_text, in_comment = state ==
                          json_comment_state; view.length() > 0; {
     let (op, rest) = if in_comment {
       comment_step(view)

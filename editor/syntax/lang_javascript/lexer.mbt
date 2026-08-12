@@ -42,7 +42,7 @@ pub impl @syntax.LineTokenizer for JavascriptTokenizer with fn tokenize_line(
   state,
 ) {
   let tokens : Array[@syntax.LineToken] = []
-  let end_state = for at = 0, view = line_text[:], lexer_state = state; view.length() >
+  let end_state = for at = 0, view = line_text, lexer_state = state; view.length() >
                      0; {
     let top = match lexer_state.last_mode() {
       Some(mode) => mode

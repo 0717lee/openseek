@@ -32,7 +32,7 @@ pub impl @syntax.LineTokenizer for MoonConfigTokenizer with fn tokenize_line(
   _state,
 ) {
   let tokens : Array[@syntax.LineToken] = []
-  for at = 0, view = line_text[:]; view.length() > 0; {
+  for at = 0, view = line_text; view.length() > 0; {
     let rest = lexmatch view with longest {
       (re"^[ \t]+", after=rest) => rest
       (re"^//.*" as s, after=rest) => {
