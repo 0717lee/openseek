@@ -186,9 +186,9 @@ pub fn boot() -> Unit {
             ),
           )
         }
-        // Rabbita captures its own `@html.a` nodes. Native pages hand those
-        // URLs to root update; browser pages leave their target/rel behavior
-        // to the anchors themselves.
+        // Rabbita captures its own `@html.a` nodes. The embedded Viewer owns
+        // foreign DOM below `.viewer-host`, so its anchors need the adjacent
+        // document subscription to reach the same root URL policy.
         if model.is_desktop {
           subs.push(
             @sub.on_url_request(
@@ -200,6 +200,11 @@ pub fn boot() -> Unit {
                   },
                 )
               }),
+            ),
+          )
+          subs.push(
+            viewer_external_link_subscription(
+              emit.map(url => ExternalLinkClicked(url)),
             ),
           )
         }
