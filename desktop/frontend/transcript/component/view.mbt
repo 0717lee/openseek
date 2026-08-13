@@ -186,6 +186,54 @@ fn failed_badge(failed : Int) -> @html.Html {
 }
 
 ///|
+/// Collects the exact diagram wrappers produced while one keyed transcript
+/// block renders. The owner prefix is stable for that block; each Markdown
+/// field receives its own slot so diagrams in separate fields cannot collide.
+priv struct TranscriptMarkdownRender {
+  owner : String
+  on_open : (String) -> @cmd.Cmd
+  diagrams : Array[@markdown.MarkdownDiagram]
+  mut slot : Int
+}
+
+///|
+fn TranscriptMarkdownRender::TranscriptMarkdownRender(
+  owner : String,
+  on_open : (String) -> @cmd.Cmd,
+) -> Self {
+  { owner, on_open, diagrams: [], slot: 0 }
+}
+
+///|
+fn TranscriptMarkdownRender::nodes(
+  self : Self,
+  source : String,
+) -> Array[@html.Html] {
+  let rendered = @markdown.render_markdown(
+    source,
+    diagram_owner="\{self.owner}-markdown-\{self.slot}",
+    open_file=self.on_open,
+  )
+  self.slot = self.slot + 1
+  for diagram in rendered.diagrams() {
+    self.diagrams.push(diagram)
+  }
+  rendered.nodes()
+}
+
+///|
+fn TranscriptMarkdownRender::render_nodes(
+  render : TranscriptMarkdownRender?,
+  source : String,
+  on_open : (String) -> @cmd.Cmd,
+) -> Array[@html.Html] {
+  match render {
+    Some(render) => render.nodes(source)
+    None => @markdown.markdown_nodes(source, open_file=on_open)
+  }
+}
+
+///|
 /// A stretch of a turn's work — reasoning and tool results — folded behind a
 /// single summary line ("Read moon.mod · moon test"), the way Codex folds a
 /// turn behind "Worked for 46s". Expanding shows the work log in order:
@@ -202,6 +250,7 @@ fn failed_badge(failed : Int) -> @html.Html {
 fn activity_view(
   items : Array[@transcript.TranscriptItem],
   on_open : (String) -> @cmd.Cmd,
+  markdown_render? : TranscriptMarkdownRender,
 ) -> @html.Html {
   if flatten_tool_activity(items) {
     return @html.div(class="activity-row", [tool_line_view(items)])
@@ -227,7 +276,11 @@ fn activity_view(
       log.push(
         @html.div(
           class="msg-content markdown activity-thinking",
-          @markdown.markdown_nodes(items[index].content, open_file=on_open),
+          TranscriptMarkdownRender::render_nodes(
+            markdown_render,
+            items[index].content,
+            on_open,
+          ),
         ),
       )
       index = index + 1
@@ -590,6 +643,7 @@ fn transcript_item_view(
   on_open : (String) -> @cmd.Cmd,
   anchor? : String,
   on_jump? : (@mention_context.Target) -> @cmd.Cmd,
+  markdown_render? : TranscriptMarkdownRender,
 ) -> @html.Html {
   match item.kind {
     User => user_message_view(item.content, anchor?, on_jump?)
@@ -601,7 +655,11 @@ fn transcript_item_view(
       } else {
         @html.div(
           class="msg-content markdown",
-          @markdown.markdown_nodes(item.content, open_file=on_open),
+          TranscriptMarkdownRender::render_nodes(
+            markdown_render,
+            item.content,
+            on_open,
+          ),
         )
       }
       @html.div(class="msg", [
@@ -611,9 +669,9 @@ fn transcript_item_view(
     // Unreachable in practice — the transcript loop batches every reasoning
     // and tool item into a run and builds the activity card itself — but the
     // match must cover them, so a stray item gets the same one-item card.
-    Reasoning => activity_view([item], on_open)
-    Tool(..) => activity_view([item], on_open)
-    Summary => summary_card_view(item.content, on_open)
+    Reasoning => activity_view([item], on_open, markdown_render?)
+    Tool(..) => activity_view([item], on_open, markdown_render?)
+    Summary => summary_card_view(item.content, on_open, markdown_render?)
   }
 }
 
@@ -626,6 +684,7 @@ fn transcript_item_view(
 fn summary_card_view(
   content : String,
   on_open : (String) -> @cmd.Cmd,
+  markdown_render? : TranscriptMarkdownRender,
 ) -> @html.Html {
   @html.div(class="activity-row", [
     @html.details(class="summary-card", [
@@ -635,7 +694,9 @@ fn summary_card_view(
       ]),
       @html.div(
         class="msg-content markdown summary-card-body",
-        @markdown.markdown_nodes(content, open_file=on_open),
+        TranscriptMarkdownRender::render_nodes(
+          markdown_render, content, on_open,
+        ),
       ),
     ]),
   ])
@@ -650,6 +711,7 @@ fn streaming_reasoning_view(
   content : String,
   streaming~ : Bool,
   on_open : (String) -> @cmd.Cmd,
+  markdown_render? : TranscriptMarkdownRender,
 ) -> @html.Html {
   let state_class = if streaming { " streaming" } else { "" }
   @html.div(class="activity-row", [
@@ -674,7 +736,9 @@ fn streaming_reasoning_view(
         [
           @html.div(
             class="msg-content markdown activity-thinking",
-            @markdown.markdown_nodes(content, open_file=on_open),
+            TranscriptMarkdownRender::render_nodes(
+              markdown_render, content, on_open,
+            ),
           ),
         ],
       ),
@@ -691,16 +755,51 @@ fn streaming_reasoning_view(
 fn streaming_response_view(
   content : String,
   on_open : (String) -> @cmd.Cmd,
+  markdown_render? : TranscriptMarkdownRender,
 ) -> @html.Html {
   @html.div(class="msg streaming", [
     @html.div(class="msg-body", [
       speaker_label("OpenSeek"),
       @html.div(
         class="msg-content markdown",
-        @markdown.markdown_nodes(content, open_file=on_open),
+        TranscriptMarkdownRender::render_nodes(
+          markdown_render, content, on_open,
+        ),
       ),
     ]),
   ])
+}
+
+///|
+/// Render one keyed transcript block and retain the exact diagram descriptors
+/// produced by its Markdown fields. Plain blocks naturally return no targets.
+fn TranscriptBlock::render(
+  self : TranscriptBlock,
+  on_open : (String) -> @cmd.Cmd,
+  on_jump : (@mention_context.Target) -> @cmd.Cmd,
+) -> RenderedTranscriptBlock {
+  let markdown_render = TranscriptMarkdownRender(self.diagram_owner(), on_open)
+  let html = match self.content {
+    Empty =>
+      @html.div(class="empty", [
+        @html.div(class="empty-badge", [@icons.icon(@icons.icon_logo)]),
+        @html.div(class="empty-title", "What should we build?"),
+        @html.div(
+          class="empty-sub",
+          "OpenSeek plans the work, edits files across your workspace, runs your tests, and hands back a reviewable result.",
+        ),
+      ])
+    Row(item~, anchor~) =>
+      transcript_item_view(item, on_open, anchor?, on_jump~, markdown_render~)
+    TurnRule(ts) => turn_rule_view(ts?)
+    Activity(items) => activity_view(items, on_open, markdown_render~)
+    StreamingReasoning(content~, streaming~) =>
+      streaming_reasoning_view(content, streaming~, on_open, markdown_render~)
+    StreamingResponse(content) =>
+      streaming_response_view(content, on_open, markdown_render~)
+    Subrun(lane) => subrun_lane_view(lane)
+  }
+  { key: self.wire(), html, diagrams: markdown_render.diagrams }
 }
 
 ///|
@@ -712,10 +811,15 @@ fn transcript_view(
   on_open : (String) -> @cmd.Cmd,
   on_jump : (@mention_context.Target) -> @cmd.Cmd,
   on_jump_latest~ : @cmd.Cmd,
+  stream_children? : Map[String, @html.Html],
 ) -> @html.Html {
   let renderer : TranscriptRenderer = { input, on_open, on_jump }
   let children = renderer.section_children(
-    pinned, overview, overview_emit, on_jump_latest,
+    pinned,
+    overview,
+    overview_emit,
+    on_jump_latest,
+    stream_children?,
   )
   // These identity attributes make conversation and root changes observable
   // even when the rendered children stay identical. The component subscription

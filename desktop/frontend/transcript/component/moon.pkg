@@ -5,6 +5,7 @@ import {
   "moonbit-community/rabbita/html",
   "moonbit-community/rabbita/js",
   "moonbit-community/rabbita/sub",
+  "moonbitlang/core/immut/vector" @vec,
   "moonbitlang/core/debug",
   "moonbitlang/core/json",
   "moonbitlang/editor/base/common",

@@ -171,6 +171,22 @@ test "transcript stream section key scopes equal session ids by channel" {
     TranscriptSectionKey::stream(remote).wire(),
     "stream\u{0}remote.device-a\u{0}desktop-test",
   )
+  let local_renderer : TranscriptRenderer = {
+    input: local_input,
+    on_open: _ => @cmd.none,
+    on_jump: _ => @cmd.none,
+  }
+  let remote_renderer = { ..local_renderer, input: remote }
+  // The VDOM row key is local to its channel/session-scoped stream, while the
+  // assoc key also carries that scope so component state cannot cross chats.
+  assert_eq(
+    local_renderer.blocks()[0].wire(),
+    remote_renderer.blocks()[0].wire(),
+  )
+  assert_false(
+    local_renderer.blocks()[0].assoc_key() ==
+    remote_renderer.blocks()[0].assoc_key(),
+  )
 }
 
 ///|
@@ -362,25 +378,32 @@ test "every message names its speaker to assistive technology" {
 
 ///|
 #warnings("-alert_unstable")
-test "assistant UML exposes the shared diagram viewport marker" {
-  let rendered = transcript_item_view(
-    {
-      kind: Assistant(is_danger=false),
-      content: "```uml\n@startuml\nparticipant Alice\nAlice -> Bob : hello\n@enduml\n```",
-      ts: None,
-      sequence: None,
-    },
-    _ => @cmd.none,
+test "assistant UML exposes an exact keyed diagram target" {
+  let item : @transcript.TranscriptItem = {
+    kind: Assistant(is_danger=false),
+    content: "```uml\n@startuml\nparticipant Alice\nAlice -> Bob : hello\n@enduml\n```",
+    ts: None,
+    sequence: None,
+  }
+  let block = TranscriptBlock(
+    "stream\u{0}local\u{0}desktop-test",
+    TranscriptRenderKey::row("s1\u{0}o0"),
+    Row(item~, anchor=None),
   )
-  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
-  // TranscriptObservers hands this exact wrapper to DiagramViewports. Keep
-  // both markers stable so the shared package can discover the direct SVG.
+  let rendered = block.render(_ => @cmd.none, _ => @cmd.none)
+  assert_eq(rendered.diagrams.length(), 1)
+  let dom_id = rendered.diagrams[0].dom_id()
+  let markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(rendered.html)
+  })
+  // The diagram Val branch mounts this exact wrapper after Rabbita commits it.
   assert_true(
     markup.contains(
       "class=\"chat-markdown-diagram moonbit-viewer-markdown-diagram\"",
     ),
   )
   assert_true(markup.contains("data-diagram-language=\"uml\""))
+  assert_true(markup.contains("id=\"\{dom_id}\""))
   assert_true(markup.contains("<svg"))
 }
 

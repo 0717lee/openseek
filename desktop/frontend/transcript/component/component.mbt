@@ -81,6 +81,66 @@ priv enum Msg {
 }
 
 ///|
+/// Builds one independently updating render branch for each stable transcript
+/// block key. Rabbita updates only the block whose value changed.
+priv struct TranscriptBlockFactory {
+  on_open : (String) -> @cmd.Cmd
+  on_jump : (@mention_context.Target) -> @cmd.Cmd
+}
+
+///|
+fn TranscriptBlockFactory::component(
+  self : Self,
+  _key : String,
+  block : @rabbita.Val[TranscriptBlock],
+) -> @rabbita.Val[RenderedTranscriptBlock] {
+  block.map(block => block.render(self.on_open, self.on_jump))
+}
+
+///|
+/// Creates one disposable subscription branch for an exact diagram wrapper.
+/// A source revision change replaces this branch; unrelated block updates do
+/// not touch it, so zoom, pan, and resized height remain browser-owned state.
+priv struct TranscriptDiagramFactory {
+  on_size_changed : @cmd.Cmd
+}
+
+///|
+fn TranscriptDiagramFactory::component(
+  self : Self,
+  _dom_id : String,
+  diagram : @rabbita.Val[@markdown.MarkdownDiagram],
+) -> @rabbita.Val[Bool] {
+  diagram.switch_by(
+    diagram => {
+      TranscriptDiagramBranch::{
+        diagram,
+        on_size_changed: self.on_size_changed,
+      }.component()
+    },
+    by=diagram => diagram.revision(),
+  )
+}
+
+///|
+priv struct TranscriptDiagramBranch {
+  diagram : @markdown.MarkdownDiagram
+  on_size_changed : @cmd.Cmd
+}
+
+///|
+fn TranscriptDiagramBranch::component(self : Self) -> @rabbita.Val[Bool] {
+  let (lifecycle, _) = @rabbita.create_state(
+    true,
+    update=(state, _ : Unit, _) => (state, @cmd.none),
+    subscriptions=(_, _) => {
+      transcript_diagram_subscription(self.diagram, self.on_size_changed)
+    },
+  )
+  lifecycle.map(active => active)
+}
+
+///|
 fn Model::update(
   self : Model,
   input : Input,
@@ -207,7 +267,35 @@ pub fn component(
     update=(state, input, msg, emit) => state.update(input, msg, emit),
     subscriptions=(_, _, emit) => transcript_subscription(emit),
   )
-  state.view2(input, (state, input) => {
+  let renderer = input.map(input => {
+    TranscriptRenderer::{
+      input,
+      on_open: path => (actions.open)(path),
+      on_jump: target => (actions.jump)(target),
+    }.blocks()
+  })
+  let block_factory : TranscriptBlockFactory = {
+    on_open: path => (actions.open)(path),
+    on_jump: target => (actions.jump)(target),
+  }
+  let rendered = renderer.assoc_by(
+    (key, block) => block_factory.component(key, block),
+    by=block => block.assoc_key(),
+  )
+  let diagram_targets = rendered.map(RenderedTranscriptBlock::diagram_targets)
+  let diagram_factory : TranscriptDiagramFactory = {
+    on_size_changed: emit(ContentRendered(mounted=true)),
+  }
+  let diagram_lifetimes = diagram_targets.assoc_by(
+    (dom_id, diagram) => diagram_factory.component(dom_id, diagram),
+    by=diagram => diagram.dom_id(),
+  )
+  state.view4(input, rendered, diagram_lifetimes, (
+    state,
+    input,
+    rendered,
+    _diagram_lifetimes,
+  ) => {
     transcript_view(
       input,
       pinned=state.pinned,
@@ -216,6 +304,7 @@ pub fn component(
       path => (actions.open)(path),
       target => (actions.jump)(target),
       on_jump_latest=emit(JumpToLatest),
+      stream_children=RenderedTranscriptBlock::stream_children(rendered),
     )
   })
 }
@@ -369,6 +458,73 @@ fn report_visible_turn_after_render(
 }
 
 ///|
+priv suberror TranscriptDiagramSubscription {
+  TranscriptDiagramSubscription(String, @cmd.Cmd)
+}
+
+///|
+/// Mount one generated diagram only after Rabbita has committed its wrapper.
+/// The surrounding `assoc_by` scope unloads this subscription before the
+/// wrapper is removed or its source revision is replaced.
+fn transcript_diagram_subscription(
+  diagram : @markdown.MarkdownDiagram,
+  on_size_changed : @cmd.Cmd,
+) -> @sub.Sub {
+  @sub.custom_sub(
+    "transcript-diagram-\{diagram.dom_id()}",
+    @sub.Local,
+    TranscriptDiagramSubscription(diagram.dom_id(), on_size_changed),
+    transcript_diagram_sub_loader,
+  )
+}
+
+///|
+fn transcript_diagram_sub_loader(
+  payload : Error,
+  scheduler : &@cmd.Scheduler,
+) -> @sub.RunningSub? {
+  match payload {
+    TranscriptDiagramSubscription(dom_id, on_size_changed) => {
+      let active = Ref(true)
+      let viewport : Ref[@diagram_viewport.DiagramViewport?] = Ref(None)
+      let mut on_size_changed = on_size_changed
+      scheduler.add(
+        @cmd.custom_cmd(
+          _ => {
+            guard active.val &&
+              @dom.document().get_element_by_id(dom_id).to_option()
+              is Some(wrapper) else {
+              return
+            }
+            viewport.val = @diagram_viewport.DiagramViewport::mount(wrapper, () => {
+              scheduler.add(on_size_changed)
+            })
+          },
+          kind=@cmd.after_render,
+        ),
+      )
+      Some({
+        unload: _ => {
+          active.val = false
+          if viewport.val is Some(current) {
+            current.dispose()
+          }
+          viewport.val = None
+        },
+        update_tagger: payload => {
+          guard payload is TranscriptDiagramSubscription(next_id, next) &&
+            next_id == dom_id else {
+            return
+          }
+          on_size_changed = next
+        },
+      })
+    }
+    _ => None
+  }
+}
+
+///|
 priv suberror TranscriptSubscription {
   TranscriptSubscription(@cmd.Emit[Msg])
 }
@@ -454,26 +610,16 @@ priv struct TranscriptObservers {
 
 ///|
 /// Owns the browser state borrowed from the currently mounted transcript DOM
-/// element. Diagram controls and local-image observation stay outside the
-/// Rabbita Model and are disposed before replacement or subscription unload.
+/// element. Diagram controllers belong to keyed child subscriptions; this root
+/// lifetime now observes only local images and transcript geometry.
 priv struct TranscriptDomMount {
   mut element : @dom.Element?
-  mut diagrams : @diagram_viewport.DiagramViewports?
   images : TranscriptImageObserver
-  on_size_changed : () -> Unit
 }
 
 ///|
-fn TranscriptDomMount::TranscriptDomMount(
-  on_size_changed : () -> Unit,
-  on_image : (String) -> Unit,
-) -> Self {
-  {
-    element: None,
-    diagrams: None,
-    images: TranscriptImageObserver::install(on_image),
-    on_size_changed,
-  }
+fn TranscriptDomMount::TranscriptDomMount(on_image : (String) -> Unit) -> Self {
+  { element: None, images: TranscriptImageObserver::install(on_image) }
 }
 
 ///|
@@ -489,30 +635,19 @@ fn TranscriptDomMount::is_same_element(
 }
 
 ///|
-/// Replace the borrowed transcript root. Mount the shared controller before
-/// observation resumes so its initial toolbar DOM does not feed back as a
-/// transcript content change. The image observer scans only this mounted root
-/// and requests a bounded host read once an image enters the viewport.
+/// Replace the borrowed transcript root. The image observer scans only this
+/// mounted root and requests a bounded host read once an image enters the
+/// viewport; diagram branches mount their own exact wrappers after render.
 fn TranscriptDomMount::replace(self : Self, next : @dom.Element?) -> Unit {
   self.images.disconnect()
-  if self.diagrams is Some(diagrams) {
-    diagrams.dispose()
-  }
-  self.diagrams = None
   self.element = next
   if next is Some(element) {
-    self.diagrams = Some(
-      @diagram_viewport.DiagramViewports(element, self.on_size_changed),
-    )
     self.images.scan(element)
   }
 }
 
 ///|
 fn TranscriptDomMount::refresh_content(self : Self) -> Unit {
-  if self.diagrams is Some(diagrams) {
-    diagrams.refresh()
-  }
   if self.element is Some(element) {
     self.images.scan(element)
   }
@@ -558,12 +693,11 @@ fn TranscriptObservers::install(
   on_change : (Bool) -> Unit,
   on_image : (String) -> Unit,
 ) -> Self {
-  let mount = TranscriptDomMount(() => on_change(true), on_image)
+  let mount = TranscriptDomMount(on_image)
   let resize = @dom.ResizeObserver::new((_, _) => on_change(true))
   let content = @dom.MutationObserver::new((_, observer) => {
-    // Reconciliation itself moves the SVG and installs toolbar nodes. Pause
-    // this same observer while doing that so those owned mutations cannot
-    // schedule a second component render.
+    // Image scanning updates only requested image attributes. Pause this same
+    // observer so those owned writes cannot schedule a second component pass.
     observer.disconnect()
     mount.refresh_content()
     mount.observe_content(observer)

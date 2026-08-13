@@ -877,6 +877,30 @@ test "empty wrong-language and indirect SVG targets are exact no-ops" {
 }
 
 ///|
+test "an exact wrapper owns one independently disposable viewport" {
+  with_diagram_viewport_test_harness(harness => {
+    let target = diagram_viewport_test_target(harness, "one")
+    let wrapper = target.get_children()[0]
+    guard DiagramViewport::mount(wrapper, () => ()) is Some(viewport) else {
+      fail("expected the exact diagram wrapper to mount")
+    }
+    assert_true(element_has_class(wrapper, diagram_viewport_class))
+    assert_eq(diagram_viewport_test_observer_count(harness), 1)
+    assert_eq(diagram_viewport_test_pending_frames(harness), 1)
+    diagram_viewport_test_flush_frame(harness)
+    viewport.dispose()
+    viewport.dispose()
+    assert_false(element_has_class(wrapper, diagram_viewport_class))
+    assert_eq(diagram_viewport_test_disconnect_count(harness, 0), 1)
+
+    let wrong = diagram_viewport_test_target(harness, "wrong")
+    assert_true(
+      DiagramViewport::mount(wrong.get_children()[0], () => ()) is None,
+    )
+  })
+}
+
+///|
 test "refresh mounts asynchronous Mermaid SVGs and replaces stale controllers" {
   let harness = install_diagram_viewport_test_dom()
   defer harness.dispose()

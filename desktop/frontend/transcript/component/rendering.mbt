@@ -2,11 +2,25 @@
 /// One renderer-private key for a direct child of `#stream`.
 priv struct TranscriptRenderKey {
   value : String
-}
+} derive(Eq)
 
 ///|
 fn TranscriptRenderKey::wire(self : TranscriptRenderKey) -> String {
   self.value
+}
+
+///|
+/// Encode the renderer-private key as a DOM id without leaking separators or
+/// user-controlled text into HTML syntax. Unicode scalar values are delimited,
+/// so distinct render keys cannot collapse to the same owner id.
+fn TranscriptRenderKey::diagram_owner(self : TranscriptRenderKey) -> String {
+  let owner = StringBuilder::new()
+  owner.write_string("transcript-block-")
+  for unit in self.value {
+    owner.write_string(unit.to_int().to_string(radix=16))
+    owner.write_char('-')
+  }
+  owner.to_string()
 }
 
 ///|
@@ -102,36 +116,96 @@ priv struct TranscriptRenderer {
 }
 
 ///|
-/// Build the keyed direct children of `#stream` in display order. Map insertion
-/// order determines visual order; the strings only determine node identity.
-fn TranscriptRenderer::stream_children(
-  self : TranscriptRenderer,
+/// The data needed to render one independently updating direct stream child.
+/// Its String key is shared by Rabbita's `assoc_by` branch and the keyed VDOM
+/// map, while the DOM owner is used only for exact diagram wrapper ids.
+priv struct TranscriptBlock {
+  scope : String
+  key : TranscriptRenderKey
+  content : TranscriptBlockContent
+} derive(Eq)
+
+///|
+priv enum TranscriptBlockContent {
+  Empty
+  Row(item~ : @transcript.TranscriptItem, anchor~ : String?)
+  TurnRule(Double?)
+  Activity(Array[@transcript.TranscriptItem])
+  StreamingReasoning(content~ : String, streaming~ : Bool)
+  StreamingResponse(String)
+  Subrun(@transcript.SubrunLane)
+} derive(Eq)
+
+///|
+fn TranscriptBlock::TranscriptBlock(
+  scope : String,
+  key : TranscriptRenderKey,
+  content : TranscriptBlockContent,
+) -> Self {
+  { scope, key, content }
+}
+
+///|
+fn TranscriptBlock::wire(self : TranscriptBlock) -> String {
+  self.key.wire()
+}
+
+///|
+fn TranscriptBlock::assoc_key(self : TranscriptBlock) -> String {
+  "\{self.scope}\u{0}\{self.key.wire()}"
+}
+
+///|
+fn TranscriptBlock::diagram_owner(self : TranscriptBlock) -> String {
+  TranscriptRenderKey::{ value: "\{self.scope}\u{0}\{self.key.wire()}" }.diagram_owner()
+}
+
+///|
+/// The stable keyed Html plus every exact diagram wrapper rendered inside it.
+/// Keeping this value behind the block's `assoc_by` branch prevents unrelated
+/// transcript changes from re-parsing historical Markdown.
+priv struct RenderedTranscriptBlock {
+  key : String
+  html : @html.Html
+  diagrams : Array[@markdown.MarkdownDiagram]
+} derive(Eq)
+
+///|
+fn RenderedTranscriptBlock::stream_children(
+  blocks : @vec.Vector[RenderedTranscriptBlock],
 ) -> Map[String, @html.Html] {
+  let children : Map[String, @html.Html] = Map([])
+  for block in blocks {
+    children.set(block.key, block.html)
+  }
+  children
+}
+
+///|
+fn RenderedTranscriptBlock::diagram_targets(
+  blocks : @vec.Vector[RenderedTranscriptBlock],
+) -> @vec.Vector[@markdown.MarkdownDiagram] {
+  let diagrams : Array[@markdown.MarkdownDiagram] = []
+  for block in blocks {
+    for diagram in block.diagrams {
+      diagrams.push(diagram)
+    }
+  }
+  Vector(diagrams)
+}
+
+///|
+/// Project the current transcript into stable, ordered render blocks. This is
+/// pure data: callbacks and browser objects enter only inside each component.
+fn TranscriptRenderer::blocks(
+  self : TranscriptRenderer,
+) -> @vec.Vector[TranscriptBlock] {
   let visible = self.input.items
-  let items : Map[String, @html.Html] = Map([])
-  // The durable transcript plus client-local notices, rendered through one
-  // folding pass. Live semantic events never synthesize durable-looking
-  // items here; their store commits populate the transcript.
+  let scope = TranscriptSectionKey::stream(self.input).wire()
+  let blocks : Array[TranscriptBlock] = []
   if visible.is_empty() {
-    items.set(
-      TranscriptRenderKey::empty().wire(),
-      @html.div(class="empty", [
-        @html.div(class="empty-badge", [@icons.icon(@icons.icon_logo)]),
-        @html.div(class="empty-title", "What should we build?"),
-        @html.div(
-          class="empty-sub",
-          "OpenSeek plans the work, edits files across your workspace, runs your tests, and hands back a reviewable result.",
-        ),
-      ]),
-    )
+    blocks.push(TranscriptBlock(scope, TranscriptRenderKey::empty(), Empty))
   } else {
-    // Reasoning and tool results fold behind collapsed activity cards;
-    // everything the agent says stays out. Assistant messages break the run
-    // like user messages and error bubbles do, so a turn reads as narration,
-    // work, narration, work, answer rather than hiding the interim narration
-    // inside the fold above the final answer. The same fold renders whether
-    // the turn is still streaming or long settled, so nothing shown live
-    // vanishes or restyles when the turn lands.
     let mut index = 0
     let mut left_boundary : String? = None
     while index < visible.length() {
@@ -143,19 +217,20 @@ fn TranscriptRenderer::stream_children(
         } else {
           None
         }
-        items.set(
-          TranscriptRenderKey::row(row.identity).wire(),
-          transcript_item_view(
-            item,
-            self.on_open,
-            anchor?,
-            on_jump=self.on_jump,
+        blocks.push(
+          TranscriptBlock(
+            scope,
+            TranscriptRenderKey::row(row.identity),
+            Row(item~, anchor~),
           ),
         )
         if item.kind is User {
-          items.set(
-            TranscriptRenderKey::turn_rule(row.identity).wire(),
-            turn_rule_view(ts?=item.ts),
+          blocks.push(
+            TranscriptBlock(
+              scope,
+              TranscriptRenderKey::turn_rule(row.identity),
+              TurnRule(item.ts),
+            ),
           )
         }
         left_boundary = Some(row.identity)
@@ -168,38 +243,55 @@ fn TranscriptRenderer::stream_children(
         run.push(visible[index].item)
         index = index + 1
       }
-      items.set(
-        TranscriptRenderKey::activity_after(left_boundary).wire(),
-        activity_view(run, self.on_open),
+      blocks.push(
+        TranscriptBlock(
+          scope,
+          TranscriptRenderKey::activity_after(left_boundary),
+          Activity(run),
+        ),
       )
     }
   }
-  // Reasoning and answer can briefly coexist after the first answer delta.
-  // Separate keys preserve the reasoning block (and its local scroll
-  // position) while the answer is inserted after it.
   if !self.input.streaming_reasoning.is_empty() {
-    items.set(
-      TranscriptRenderKey::streaming_reasoning(self.input.streaming_identity).wire(),
-      streaming_reasoning_view(
-        self.input.streaming_reasoning,
-        streaming=self.input.streaming_response.is_empty(),
-        self.on_open,
+    blocks.push(
+      TranscriptBlock(
+        scope,
+        TranscriptRenderKey::streaming_reasoning(self.input.streaming_identity),
+        StreamingReasoning(
+          content=self.input.streaming_reasoning,
+          streaming=self.input.streaming_response.is_empty(),
+        ),
       ),
     )
   }
   if !self.input.streaming_response.is_empty() {
-    items.set(
-      TranscriptRenderKey::streaming_response(self.input.streaming_identity).wire(),
-      streaming_response_view(self.input.streaming_response, self.on_open),
+    blocks.push(
+      TranscriptBlock(
+        scope,
+        TranscriptRenderKey::streaming_response(self.input.streaming_identity),
+        StreamingResponse(self.input.streaming_response),
+      ),
     )
   }
-  // Sub-runs in flight sit at the tail, where the turn currently is: their
-  // tool call is what the conversation is blocked on, and it can block for
-  // forty-five minutes.
   for lane in self.input.subruns {
-    items.set(TranscriptRenderKey::subrun(lane).wire(), subrun_lane_view(lane))
+    blocks.push(
+      TranscriptBlock(scope, TranscriptRenderKey::subrun(lane), Subrun(lane)),
+    )
   }
-  items
+  Vector(blocks)
+}
+
+///|
+/// Build the keyed direct children of `#stream` in display order. Map insertion
+/// order determines visual order; the strings only determine node identity.
+fn TranscriptRenderer::stream_children(
+  self : TranscriptRenderer,
+) -> Map[String, @html.Html] {
+  let rendered : Array[RenderedTranscriptBlock] = []
+  for block in self.blocks() {
+    rendered.push(block.render(self.on_open, self.on_jump))
+  }
+  RenderedTranscriptBlock::stream_children(Vector(rendered))
 }
 
 ///|
@@ -212,6 +304,7 @@ fn TranscriptRenderer::section_children(
   overview : @transcript_overview.State,
   overview_emit : @cmd.Emit[@transcript_overview.Msg],
   on_jump_latest : @cmd.Cmd,
+  stream_children? : Map[String, @html.Html],
 ) -> Map[String, @html.Html] {
   let visible_items = self.input.items.map(row => row.item)
   let children : Map[String, @html.Html] = Map([])
@@ -234,7 +327,11 @@ fn TranscriptRenderer::section_children(
   )
   children.set(
     TranscriptSectionKey::stream(self.input).wire(),
-    @html.div(id="stream", class="stream", self.stream_children()),
+    @html.div(
+      id="stream",
+      class="stream",
+      stream_children.unwrap_or_else(() => self.stream_children()),
+    ),
   )
   // Reading history unpins auto-follow (see `watch_transcript_scroll`); the
   // floating button is the way back to the live tail. Sticky inside the

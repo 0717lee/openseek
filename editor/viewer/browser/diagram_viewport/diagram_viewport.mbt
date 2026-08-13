@@ -142,6 +142,48 @@ struct DiagramViewports {
 }
 
 ///|
+/// Owns one interactive diagram viewport mounted on an exact Markdown diagram
+/// wrapper. This smaller lifetime is intended for incremental hosts whose
+/// keyed child component already knows which wrapper it rendered.
+struct DiagramViewport {
+  controller : MarkdownDiagramViewport
+}
+
+///|
+/// Mount one exact generated-diagram wrapper. Unlike `DiagramViewports`, this
+/// entry point does not walk a Markdown root: the caller identifies the
+/// wrapper after its own render and owns the returned controller for exactly
+/// as long as that rendered branch remains alive.
+pub fn DiagramViewport::mount(
+  wrapper : @rdom.Element,
+  on_size_changed : () -> Unit,
+) -> DiagramViewport? {
+  let language = element_attribute_or_empty(wrapper, "data-diagram-language")
+  guard element_has_class(wrapper, "moonbit-viewer-markdown-diagram") &&
+    (language == "diago" || language == "uml" || language == "mermaid") &&
+    !element_has_class(wrapper, diagram_viewport_class) &&
+    direct_svg_child(wrapper) is Some(_) else {
+    return None
+  }
+  let schedule_frame = (callback : () -> Unit) => {
+    let registration = @base_browser.schedule_at_next_animation_frame(callback)
+    () => registration.dispose()
+  }
+  match
+    mount_diagram_viewport(wrapper, wrapper, on_size_changed, schedule_frame) {
+    Mounted(controller) => Some({ controller, })
+    Skipped | Failed => None
+  }
+}
+
+///|
+/// Idempotently restores the wrapper and releases the exact viewport's DOM
+/// listeners, observers, animation frame, and temporary cursor ownership.
+pub fn DiagramViewport::dispose(self : DiagramViewport) -> Unit {
+  self.controller.dispose()
+}
+
+///|
 /// Synchronously mounts controls and resize handles for every matching direct
 /// Diago, UML, or Mermaid SVG. Geometry is initialized at the next
 /// animation-frame boundary. Call `refresh` after an asynchronous renderer

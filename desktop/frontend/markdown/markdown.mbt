@@ -6,6 +6,45 @@
 // text instead of being injected into the DOM.
 
 ///|
+/// One generated diagram that an incremental host can mount after rendering.
+/// The DOM id names the exact wrapper; the revision changes only when the
+/// diagram source at that position changes.
+pub struct MarkdownDiagram {
+  dom_id : String
+  revision : String
+} derive(Eq)
+
+///|
+pub fn MarkdownDiagram::dom_id(self : MarkdownDiagram) -> String {
+  self.dom_id
+}
+
+///|
+pub fn MarkdownDiagram::revision(self : MarkdownDiagram) -> String {
+  self.revision
+}
+
+///|
+/// Markdown nodes plus the exact generated diagrams contained in those nodes.
+/// Hosts that do not own diagram lifetimes can continue using `markdown_nodes`.
+pub struct RenderedMarkdown {
+  nodes : Array[@html.Html]
+  diagrams : Array[MarkdownDiagram]
+} derive(Eq)
+
+///|
+pub fn RenderedMarkdown::nodes(self : RenderedMarkdown) -> Array[@html.Html] {
+  self.nodes
+}
+
+///|
+pub fn RenderedMarkdown::diagrams(
+  self : RenderedMarkdown,
+) -> Array[MarkdownDiagram] {
+  self.diagrams
+}
+
+///|
 /// Render a markdown string to a list of block-level Rabbita nodes.
 ///
 /// The parse is guarded: cmark can panic on some inputs (observed: "Index
@@ -25,12 +64,34 @@ pub fn markdown_nodes(
   source : String,
   open_file? : (String) -> @cmd.Cmd,
 ) -> Array[@html.Html] {
+  render_markdown(source, open_file?).nodes()
+}
+
+///|
+/// Render Markdown and optionally mark generated diagram wrappers for a host
+/// that owns their DOM lifetimes. `diagram_owner` must be a stable, DOM-id-safe
+/// prefix scoped to the rendered component; diagram ordinals are appended to
+/// it in document order.
+pub fn render_markdown(
+  source : String,
+  diagram_owner? : String,
+  open_file? : (String) -> @cmd.Cmd,
+) -> RenderedMarkdown {
   @js.Error_::wrap(() => {
     let doc = @cmark.Doc::from_string(source, strict=false)
-    let render = MarkdownRender::{ defs: doc.defs, open_file }
-    @js.Value::cast_from(render.block_nodes(doc.block))
+    let render = MarkdownRender::{
+      defs: doc.defs,
+      open_file,
+      diagram_owner,
+      diagrams: [],
+    }
+    let rendered : RenderedMarkdown = {
+      nodes: render.block_nodes(doc.block),
+      diagrams: render.diagrams,
+    }
+    @js.Value::cast_from(rendered)
   }) catch {
-    _ => [@html.pre(class="markdown-fallback", source)]
+    _ => { nodes: [@html.pre(class="markdown-fallback", source)], diagrams: [] }
   }
 }
 
@@ -41,6 +102,10 @@ priv struct MarkdownRender {
   defs : Map[String, @cmark.LabelDef]
   // How to make a file path clickable; `None` renders paths inertly.
   open_file : ((String) -> @cmd.Cmd)?
+  // A keyed host supplies a stable owner prefix. The renderer records only
+  // successful generated SVGs, so code-block fallbacks never create mounts.
+  diagram_owner : String?
+  diagrams : Array[MarkdownDiagram]
 }
 
 ///|
@@ -69,7 +134,7 @@ fn MarkdownRender::push_block(
     Heading(node) => out.push(self.heading(node.v))
     BlockQuote(node) =>
       out.push(@html.blockquote(self.block_nodes(node.v.block)))
-    CodeBlock(node) | ExtMathBlock(node) => out.push(code_block(node.v))
+    CodeBlock(node) | ExtMathBlock(node) => out.push(self.code_block(node.v))
     // Raw HTML is shown as text, not injected; see the module comment.
     HtmlBlock(node) =>
       out.push(@html.pre(class="raw-html", lines_text(node.v.0)))
@@ -120,7 +185,10 @@ fn lines_text(lines : @cmark.Seq[@cmark.Node[String]]) -> String {
 
 ///|
 #warnings("-alert_xss_vulnerable")
-fn code_block(block : @cmark.CodeBlock) -> @html.Html {
+fn MarkdownRender::code_block(
+  self : MarkdownRender,
+  block : @cmark.CodeBlock,
+) -> @html.Html {
   let language = match block.info_string {
     Some(info) =>
       match @cmark.CodeBlock::language_of_info_string(info.v) {
@@ -132,14 +200,19 @@ fn code_block(block : @cmark.CodeBlock) -> @html.Html {
   let source = lines_text(block.code)
   if language == "uml" || language == "plantuml" {
     match @editor_viewer.render_uml_diagram_svg(source) {
-      Some(svg) =>
+      Some(svg) => {
+        let attrs = @html.Attrs::build().data_set("diagram-language", "uml")
+        if self.diagram_owner is Some(owner) {
+          let dom_id = "\{owner}-diagram-\{self.diagrams.length()}"
+          self.diagrams.push({ dom_id, revision: "uml\u{0}\{source}" })
+          attrs.id(dom_id) |> ignore
+        }
         return @html.div(
           class="chat-markdown-diagram moonbit-viewer-markdown-diagram",
-          attrs=@html.Attrs::build()
-            .data_set("diagram-language", "uml")
-            .inner_html(svg),
+          attrs=attrs.inner_html(svg),
           ([] : Array[@html.Html]),
         )
+      }
       None => ()
     }
   }

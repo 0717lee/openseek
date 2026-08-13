@@ -44,6 +44,29 @@ test "exact UML fences render the shared Viewer SVG" {
 
 ///|
 #warnings("-alert_unstable")
+test "owned UML fences report exact stable diagram wrappers" {
+  let rendered = render_markdown(
+    "```uml\n@startuml\nparticipant Alice\nAlice -> Bob : hello\n@enduml\n```",
+    diagram_owner="transcript-block-a-markdown-0",
+  )
+  assert_eq(rendered.diagrams().length(), 1)
+  let diagram = rendered.diagrams()[0]
+  assert_eq(diagram.dom_id(), "transcript-block-a-markdown-0-diagram-0")
+  assert_true(diagram.revision().contains("Alice -> Bob : hello"))
+  let markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(@html.div(rendered.nodes()))
+  })
+  assert_true(markup.contains("id=\"transcript-block-a-markdown-0-diagram-0\""))
+
+  let fallback = render_markdown(
+    "```uml\n@startuml\n@enduml\n```",
+    diagram_owner="transcript-block-a-markdown-1",
+  )
+  assert_true(fallback.diagrams().is_empty())
+}
+
+///|
+#warnings("-alert_unstable")
 test "invalid UML and Mermaid keep their code-block fallback" {
   let invalid = @html.div(markdown_nodes("```uml\n@startuml\n@enduml\n```"))
   let invalid_markup = @rabbita.render_to_string(() => {
