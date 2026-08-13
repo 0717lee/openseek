@@ -44,7 +44,7 @@ priv struct RenderedMarkdownComment {
   mut fold_lifetime : @base_common.Disposable?
   fold_expanded : Ref[Bool]
   source_lifetime : @base_common.Disposable
-  mut diagram_viewports : @browser_markdown.MarkdownDiagramViewports
+  mut diagram_viewports : @diagram_viewport.DiagramViewports
   size_observer : @markdown_comments_browser.MarkdownCommentSizeObserver
   mut measured_height : Double
   generation : Ref[Int]
@@ -398,9 +398,9 @@ fn render_markdown_comment_presentations(
   @browser_markdown.RenderedMarkdown,
   @browser_markdown.RenderedMarkdown?,
   @base_common.Disposable?,
-  @browser_markdown.MarkdownDiagramViewports,
+  @diagram_viewport.DiagramViewports,
 ) {
-  let diagram_viewports_slot : Ref[@browser_markdown.MarkdownDiagramViewports?] = Ref(
+  let diagram_viewports_slot : Ref[@diagram_viewport.DiagramViewports?] = Ref(
     None,
   )
   // Renderer notifications include asynchronous Mermaid commits, so reconcile
@@ -442,7 +442,7 @@ fn render_markdown_comment_presentations(
       (None, None)
     }
   }
-  let diagram_viewports = @browser_markdown.MarkdownDiagramViewports(
+  let diagram_viewports = @diagram_viewport.DiagramViewports(
     rendered_markdown.element,
     on_interaction_size_changed,
   )

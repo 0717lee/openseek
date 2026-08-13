@@ -444,13 +444,113 @@ fn transcript_sub_loader(
 /// Observe the transcript through Rabbita's typed DOM bindings. The document
 /// observer only follows mount/replacement; content and identity changes are
 /// observed directly on the current transcript, so unrelated page mutations
-/// cannot feed back into component updates. The image observer scans only the
-/// mounted transcript and requests a bounded host read once an image is seen.
+/// cannot feed back into component updates.
 priv struct TranscriptObservers {
   document : @dom.MutationObserver
   content : @dom.MutationObserver
   resize : @dom.ResizeObserver
+  mount : TranscriptDomMount
+}
+
+///|
+/// Owns the browser state borrowed from the currently mounted transcript DOM
+/// element. Diagram controls and local-image observation stay outside the
+/// Rabbita Model and are disposed before replacement or subscription unload.
+priv struct TranscriptDomMount {
+  mut element : @dom.Element?
+  mut diagrams : @diagram_viewport.DiagramViewports?
   images : TranscriptImageObserver
+  on_size_changed : () -> Unit
+}
+
+///|
+fn TranscriptDomMount::TranscriptDomMount(
+  on_size_changed : () -> Unit,
+  on_image : (String) -> Unit,
+) -> Self {
+  {
+    element: None,
+    diagrams: None,
+    images: TranscriptImageObserver::install(on_image),
+    on_size_changed,
+  }
+}
+
+///|
+fn TranscriptDomMount::is_same_element(
+  self : Self,
+  next : @dom.Element?,
+) -> Bool {
+  match (self.element, next) {
+    (None, None) => true
+    (Some(previous), Some(element)) => previous.is_same_node(element.as_node())
+    _ => false
+  }
+}
+
+///|
+/// Replace the borrowed transcript root. Mount the shared controller before
+/// observation resumes so its initial toolbar DOM does not feed back as a
+/// transcript content change. The image observer scans only this mounted root
+/// and requests a bounded host read once an image enters the viewport.
+fn TranscriptDomMount::replace(self : Self, next : @dom.Element?) -> Unit {
+  self.images.disconnect()
+  if self.diagrams is Some(diagrams) {
+    diagrams.dispose()
+  }
+  self.diagrams = None
+  self.element = next
+  if next is Some(element) {
+    self.diagrams = Some(
+      @diagram_viewport.DiagramViewports(element, self.on_size_changed),
+    )
+    self.images.scan(element)
+  }
+}
+
+///|
+fn TranscriptDomMount::refresh_content(self : Self) -> Unit {
+  if self.diagrams is Some(diagrams) {
+    diagrams.refresh()
+  }
+  if self.element is Some(element) {
+    self.images.scan(element)
+  }
+}
+
+///|
+fn TranscriptDomMount::observe_content(
+  self : Self,
+  observer : @dom.MutationObserver,
+) -> Unit {
+  if self.element is Some(element) {
+    observer.observe(
+      element.as_node(),
+      attributes=true,
+      child_list=true,
+      character_data=true,
+      subtree=true,
+      attribute_filter=[
+        "data-transcript-channel", "data-transcript-session", "data-transcript-root",
+        "data-transcript-submission",
+      ],
+    )
+  }
+}
+
+///|
+fn TranscriptDomMount::observe_resize(
+  self : Self,
+  observer : @dom.ResizeObserver,
+) -> Unit {
+  if self.element is Some(element) {
+    observer.observe(element)
+  }
+}
+
+///|
+fn TranscriptDomMount::dispose(self : Self) -> Unit {
+  self.replace(None)
 }
 
 ///|
@@ -458,46 +558,25 @@ fn TranscriptObservers::install(
   on_change : (Bool) -> Unit,
   on_image : (String) -> Unit,
 ) -> Self {
-  let mut current : @dom.Element? = None
+  let mount = TranscriptDomMount(() => on_change(true), on_image)
   let resize = @dom.ResizeObserver::new((_, _) => on_change(true))
-  let images = TranscriptImageObserver::install(on_image)
-  let content = @dom.MutationObserver::new((_, _) => {
+  let content = @dom.MutationObserver::new((_, observer) => {
+    // Reconciliation itself moves the SVG and installs toolbar nodes. Pause
+    // this same observer while doing that so those owned mutations cannot
+    // schedule a second component render.
+    observer.disconnect()
+    mount.refresh_content()
+    mount.observe_content(observer)
     on_change(true)
-    if current is Some(element) {
-      images.scan(element)
-    }
   })
   let attach = () => {
     let next = @dom.document().get_element_by_id("transcript").to_option()
-    let changed = match (current, next) {
-      (None, None) => false
-      (Some(previous), Some(element)) =>
-        !previous.is_same_node(element.as_node())
-      _ => true
-    }
-    guard changed else { return }
+    guard !mount.is_same_element(next) else { return }
     content.disconnect()
     resize.disconnect()
-    images.disconnect()
-    current = next
-    match next {
-      Some(element) => {
-        content.observe(
-          element.as_node(),
-          attributes=true,
-          child_list=true,
-          character_data=true,
-          subtree=true,
-          attribute_filter=[
-            "data-transcript-channel", "data-transcript-session", "data-transcript-root",
-            "data-transcript-submission",
-          ],
-        )
-        resize.observe(element)
-        images.scan(element)
-      }
-      None => ()
-    }
+    mount.replace(next)
+    mount.observe_content(content)
+    mount.observe_resize(resize)
     on_change(next is Some(_))
   }
   let document = @dom.MutationObserver::new((_, _) => attach())
@@ -506,7 +585,7 @@ fn TranscriptObservers::install(
   }
   // The component may already be mounted when its subscription starts.
   attach()
-  { document, content, resize, images }
+  { document, content, resize, mount }
 }
 
 ///|
@@ -514,7 +593,7 @@ fn TranscriptObservers::disconnect(self : Self) -> Unit {
   self.document.disconnect()
   self.content.disconnect()
   self.resize.disconnect()
-  self.images.disconnect()
+  self.mount.dispose()
 }
 
 ///|

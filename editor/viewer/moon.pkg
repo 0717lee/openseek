@@ -4,6 +4,7 @@ import {
   "moonbitlang/editor/language",
   "moonbitlang/editor/platform/log",
   "moonbitlang/editor/viewer/browser" @editor_browser,
+  "moonbitlang/editor/viewer/browser/diagram_viewport",
   "moonbitlang/editor/internal/viewer/browser/config" @browser_config,
   "moonbitlang/editor/internal/viewer/browser/testing" @viewer_testing,
   "moonbitlang/editor/internal/viewer/browser/view",

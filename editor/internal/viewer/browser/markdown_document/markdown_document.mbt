@@ -58,7 +58,7 @@ struct MarkdownDocumentView {
   mut theme : String
   mut projection_generation : Int
   mut rendered : @browser_markdown.RenderedMarkdown
-  mut diagram_viewports : @browser_markdown.MarkdownDiagramViewports
+  mut diagram_viewports : @diagram_viewport.DiagramViewports
   mut semantic_dom : MarkdownSemanticDomLifetime
   listeners : Array[@base_common.Disposable]
   mut on_section_fold_toggle : (Int) -> Unit
@@ -234,11 +234,8 @@ fn render_markdown_document_presentation(
   theme : String,
   article : @rdom.Element,
   on_size_changed : () -> Unit,
-) -> (
-  @browser_markdown.RenderedMarkdown,
-  @browser_markdown.MarkdownDiagramViewports,
-) {
-  let diagram_viewports_slot : Ref[@browser_markdown.MarkdownDiagramViewports?] = Ref(
+) -> (@browser_markdown.RenderedMarkdown, @diagram_viewport.DiagramViewports) {
+  let diagram_viewports_slot : Ref[@diagram_viewport.DiagramViewports?] = Ref(
     None,
   )
   let on_rendered_size_changed = () => {
@@ -251,7 +248,7 @@ fn render_markdown_document_presentation(
   let rendered = render_markdown_document(
     source, language_id, base_uri, resource_kind, theme, article, on_rendered_size_changed,
   )
-  let diagram_viewports = @browser_markdown.MarkdownDiagramViewports(
+  let diagram_viewports = @diagram_viewport.DiagramViewports(
     article, on_size_changed,
   )
   diagram_viewports_slot.val = Some(diagram_viewports)
