@@ -1355,6 +1355,7 @@ fn browser_geometry(model : Model) -> BrowserGeometry {
     sidebar_open: model.sidebar_open,
     narrow: model.narrow,
     terminal_open: model.terminal_open,
+    right_panel_expanded: model.right_panel_expanded,
     tree_layout: model.tree_layout,
   }
 }
@@ -3091,8 +3092,9 @@ fn update_msg(
     CloseGitDetails => (@cmd.none, { ..model, git_details_open: false })
     CloseLauncher =>
       (@cmd.none, { ..model, launcher: { ..model.launcher, open: false } })
-    RightPanelVisibilityChanged(open~, menu_open~) => {
+    RightPanelVisibilityChanged(open~, menu_open~, expanded~) => {
       let changed = open != model.right_panel_open
+      let expanded_changed = expanded != model.right_panel_expanded
       // Closing the panel, or reopening it onto an existing tab, is newer
       // than a positioned transcript click whose host lookup is still in
       // flight. Advance the shared navigation token before applying the
@@ -3109,6 +3111,7 @@ fn update_msg(
         ..model,
         right_panel_open: open,
         right_panel_menu_open: menu_open,
+        right_panel_expanded: expanded,
       }
       if changed {
         let (cmd, panel) = @fileeditor.panel_toggle_cmds(
@@ -3118,6 +3121,10 @@ fn update_msg(
           opening=open,
         )
         (cmd, { ..model, file_panel: panel })
+      } else if expanded_changed &&
+        open &&
+        @dock.active_file(model.dock) is Some(_) {
+        (@fileeditor.request_viewer_remeasure(), model)
       } else {
         (@cmd.none, model)
       }
@@ -13618,27 +13625,39 @@ test "every click-away menu closes without reopening on a second dismissal" {
   // because native browser visibility and file watches depend on it.
   let (_, docked) = update(
     dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false),
+    RightPanelVisibilityChanged(open=true, menu_open=false, expanded=false),
     desktop_model(),
   )
   let (_, menued) = update(
     dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=true),
+    RightPanelVisibilityChanged(open=true, menu_open=true, expanded=false),
     docked,
   )
   assert_true(menued.right_panel_menu_open)
   let (_, unmenued) = update(
     dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false),
+    RightPanelVisibilityChanged(open=true, menu_open=false, expanded=false),
     menued,
   )
   assert_false(unmenued.right_panel_menu_open)
   let (_, unmenued_twice) = update(
     dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false),
+    RightPanelVisibilityChanged(open=true, menu_open=false, expanded=false),
     unmenued,
   )
   assert_false(unmenued_twice.right_panel_menu_open)
+  let (_, expanded) = update(
+    dispatch,
+    RightPanelVisibilityChanged(open=true, menu_open=false, expanded=true),
+    unmenued_twice,
+  )
+  assert_true(expanded.right_panel_expanded)
+  let (_, restored) = update(
+    dispatch,
+    RightPanelVisibilityChanged(open=true, menu_open=false, expanded=false),
+    expanded,
+  )
+  assert_false(restored.right_panel_expanded)
 }
 
 ///|
@@ -14475,7 +14494,7 @@ test "update is pure: a resolved transcript position opens its owning file" {
   let open_pending = { ..latest_pending, right_panel_open: true }
   let (_, panel_closed) = update(
     dispatch,
-    RightPanelVisibilityChanged(open=false, menu_open=false),
+    RightPanelVisibilityChanged(open=false, menu_open=false, expanded=false),
     open_pending,
   )
   assert_false(panel_closed.right_panel_open)
@@ -14502,7 +14521,7 @@ test "update is pure: a resolved transcript position opens its owning file" {
   }
   let (_, panel_opened) = update(
     dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false),
+    RightPanelVisibilityChanged(open=true, menu_open=false, expanded=false),
     hidden_pending,
   )
   assert_true(panel_opened.right_panel_open)
@@ -16545,12 +16564,12 @@ test "launcher rows open Browse, Files, and Review destinations" {
   let model = desktop_model()
   let (_, model) = update(
     dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false),
+    RightPanelVisibilityChanged(open=true, menu_open=false, expanded=false),
     model,
   )
   let (_, model) = update(
     dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=true),
+    RightPanelVisibilityChanged(open=true, menu_open=true, expanded=false),
     model,
   )
   assert_true(model.right_panel_menu_open)
@@ -16581,7 +16600,7 @@ test "a tree pick fulfills the active picker in place" {
   let model = desktop_model()
   let (_, model) = update(
     dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false),
+    RightPanelVisibilityChanged(open=true, menu_open=false, expanded=false),
     model,
   )
   let (_, model) = update(dispatch, FilePickerRequested, model)
@@ -16602,7 +16621,7 @@ test "a changed row opens the file tab in review mode" {
   let model = desktop_model()
   let (_, model) = update(
     dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false),
+    RightPanelVisibilityChanged(open=true, menu_open=false, expanded=false),
     model,
   )
   let (_, model) = update(dispatch, FilePickerRequested, model)
@@ -16820,7 +16839,7 @@ test "submitting the address bar normalizes the draft and commits it" {
   let model = desktop_model()
   let (_, model) = update(
     dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false),
+    RightPanelVisibilityChanged(open=true, menu_open=false, expanded=false),
     model,
   )
   let (_, model) = update(dispatch, BrowserTabRequested, model)
@@ -16927,7 +16946,7 @@ test "the launcher popup and tab close both retire the shown view" {
   // The popup overlaps the pane, so the native view must hide under it.
   let (_, covered) = update(
     dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=true),
+    RightPanelVisibilityChanged(open=true, menu_open=true, expanded=false),
     model,
   )
   assert_true(covered.browser_pane.shown is None)

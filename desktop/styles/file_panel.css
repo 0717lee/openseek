@@ -276,6 +276,9 @@ html.is-resizing .editor-resize-handle {
 .content:not(.panel-open) .editor-resize-handle {
   display: none;
 }
+.content.panel-expanded .editor-resize-handle {
+  display: none;
+}
 /* While dragging, keep the resize cursor everywhere and stop the drag from
    selecting text under the pointer. */
 html.is-resizing {

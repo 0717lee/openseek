@@ -2507,6 +2507,9 @@ fn view(
   } else {
     "content"
   }
+  if panel_open && model.right_panel_expanded {
+    content_class = content_class + " panel-expanded"
+  }
   if model.terminal_open {
     content_class = content_class + " terminal-open"
   }

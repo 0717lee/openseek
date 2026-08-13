@@ -1211,6 +1211,7 @@ priv struct Model {
   // dismissal subscription, and native Browser geometry.
   right_panel_open : Bool
   right_panel_menu_open : Bool
+  right_panel_expanded : Bool
   // The terminal component owns its tabs and PTY lifecycle. This one-bit
   // projection belongs to the shell because visibility changes both the app
   // grid and the native Browser pane geometry.
@@ -1396,6 +1397,7 @@ priv struct BrowserGeometry {
   sidebar_open : Bool
   narrow : Bool
   terminal_open : Bool
+  right_panel_expanded : Bool
   tree_layout : @fileeditor.TreeLayout
 } derive(Eq)
 
@@ -1811,7 +1813,7 @@ priv enum Msg {
   // its toggle on purpose: a dismissal must never reopen what it closed.
   CloseGitDetails
   CloseLauncher
-  RightPanelVisibilityChanged(open~ : Bool, menu_open~ : Bool)
+  RightPanelVisibilityChanged(open~ : Bool, menu_open~ : Bool, expanded~ : Bool)
   LauncherLoaded(Array[@transcript.LauncherAppItem])
   LauncherFailed(String)
   // Launch one detected app (by its id) on the active conversation's workspace.
@@ -2339,6 +2341,7 @@ fn initial_model() -> Model {
     sidebar_open: !narrow,
     right_panel_open: false,
     right_panel_menu_open: false,
+    right_panel_expanded: false,
     terminal_open: false,
     chats_collapsed: false,
     projects_collapsed: false,

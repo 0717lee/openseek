@@ -16,6 +16,37 @@ fn icon_layout_sidebar_right() -> @html.Html {
 }
 
 ///|
+/// Four outward-facing corners for expanding the panel into the whole content
+/// area. The inverse glyph below points inward when the next action restores
+/// the split view.
+fn icon_expand_panel() -> @html.Html {
+  @svg.svg(
+    width=16,
+    height=16,
+    view_box="0 0 16 16",
+    attrs=@svg.Attrs::build()
+      .fill("none")
+      .stroke("currentColor")
+      .stroke_linecap("round"),
+    [@svg.path(d="M6 2.5H2.5V6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10")],
+  )
+}
+
+///|
+fn icon_restore_panel() -> @html.Html {
+  @svg.svg(
+    width=16,
+    height=16,
+    view_box="0 0 16 16",
+    attrs=@svg.Attrs::build()
+      .fill("none")
+      .stroke("currentColor")
+      .stroke_linecap("round"),
+    [@svg.path(d="M2.5 6H6V2.5M13.5 6H10V2.5M13.5 10H10v3.5M2.5 10H6v3.5")],
+  )
+}
+
+///|
 /// The add codicon (CC BY 4.0): the strip's new-tab button.
 fn icon_add() -> @html.Html {
   codicon(
@@ -169,7 +200,9 @@ pub fn tabs_bar(
   chips : Array[TabChip],
   actions : LauncherActions,
   menu_open~ : Bool,
+  expanded~ : Bool,
   toggle_menu~ : @cmd.Cmd,
+  toggle_expanded~ : @cmd.Cmd,
   toggle_panel~ : @cmd.Cmd,
 ) -> @html.Html {
   let tabs : Array[@html.Html] = []
@@ -212,6 +245,15 @@ pub fn tabs_bar(
       title="New tab",
       on_click=toggle_menu,
       icon(icon_add),
+    ),
+    @html.button(
+      class="panel-toggle panel-expand",
+      title=if expanded { "Restore panel" } else { "Expand panel" },
+      attrs=@html.Attrs::build()
+        .aria_label(if expanded { "Restore panel" } else { "Expand panel" })
+        .aria_pressed(expanded.to_string())
+        .on_click(_ => toggle_expanded),
+      icon(if expanded { icon_restore_panel } else { icon_expand_panel }),
     ),
     @html.button(
       class="panel-toggle",

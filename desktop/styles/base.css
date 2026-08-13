@@ -204,3 +204,10 @@ select {
     minmax(0, 1fr)
     clamp(360px, var(--editor-width, 50%), calc(100% - 240px));
 }
+
+/* Expanded: keep the conversation mounted in a zero-width track and hand the
+   whole content area to the editor. The saved --editor-width is untouched, so
+   restoring returns to the user's previous split. */
+.content.panel-open.panel-expanded {
+  grid-template-columns: 0 minmax(0, 1fr);
+}

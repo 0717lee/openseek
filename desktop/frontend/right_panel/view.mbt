@@ -99,7 +99,9 @@ fn panel_view(
         chips,
         launcher,
         menu_open=model.menu_open,
+        expanded=model.expanded,
         toggle_menu=emit(ToggleMenu),
+        toggle_expanded=emit(ToggleExpanded),
         toggle_panel=emit(External(TogglePanel)),
       ),
       @fileeditor.breadcrumb_view(

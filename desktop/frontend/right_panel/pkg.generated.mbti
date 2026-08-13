@@ -45,6 +45,7 @@ pub(all) enum Msg {
 pub struct Visibility {
   open : Bool
   menu_open : Bool
+  expanded : Bool
 } derive(Eq)
 
 // Type aliases

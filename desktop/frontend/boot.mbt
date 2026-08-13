@@ -202,6 +202,7 @@ pub fn boot() -> Unit {
           RightPanelVisibilityChanged(
             open=visibility.open,
             menu_open=visibility.menu_open,
+            expanded=visibility.expanded,
           )
         }),
       },
