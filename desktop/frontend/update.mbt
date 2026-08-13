@@ -16144,18 +16144,21 @@ test "reopening an active failed reload retries and preserves other local notice
     ]),
     overlay: [
       {
+        id: 1,
         kind: Assistant(is_danger=true),
         content: TranscriptRefreshFailedNotice,
         anchor: AfterMessages(1),
         reconciliation: Retained,
       },
       {
+        id: 2,
         kind: Assistant(is_danger=true),
         content: "local steer loss",
         anchor: AfterMessages(1),
         reconciliation: Retained,
       },
     ],
+    next_notice_id: 2,
   })
   let model = { ..model, transcript_request_generation: 1 }
   let (_, reopened) = update(
@@ -16443,12 +16446,14 @@ test "a durable commit never retires a same-class local notice" {
     ..test_conversation(),
     overlay: [
       {
+        id: 1,
         kind: Assistant(is_danger=true),
         content: "local-only failure",
         anchor: AfterMessages(0),
         reconciliation: Retained,
       },
     ],
+    next_notice_id: 1,
   })
   let (_, committed) = update_dev(
     dispatch,

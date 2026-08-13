@@ -642,6 +642,10 @@ priv struct Conversation {
   // arrives; some delivery failures are provisional and a later exact-id
   // receipt can retract them. Copy-on-write.
   overlay : Array[LocalNotice]
+  // Monotonic identity source for local notices. Notice positions may move as
+  // durable boundaries reconcile, but a rendered notice must keep the same DOM
+  // node throughout that move.
+  next_notice_id : Int
   // The standing goal mirrored from the durable record's `[goal]` markers:
   // seeded by each snapshot's reduction and folded forward by marker
   // commits in `apply_commit`. Nothing local writes it — goal mode only
@@ -816,6 +820,8 @@ priv struct PendingInput {
 ///|
 /// One non-durable transcript notice at a durable chronology boundary.
 priv struct LocalNotice {
+  // Renderer identity only; never serialized or compared with durable events.
+  id : Int
   kind : @transcript.ItemKind
   content : String
   anchor : NoticeAnchor
@@ -2260,6 +2266,7 @@ fn empty_conversation(
     watermark: 0,
     sync: Synced,
     overlay: [],
+    next_notice_id: 0,
     goal: None,
     goal_edit: None,
     goal_pending: None,
@@ -3173,14 +3180,16 @@ fn Conversation::append_notice(
   content : String,
   reconciliation : NoticeReconciliation,
 ) -> Conversation {
+  let id = self.next_notice_id + 1
   let overlay = self.overlay.copy()
   overlay.push({
+    id,
     kind,
     content,
     anchor: AfterMessages(self.messages.length()),
     reconciliation,
   })
-  { ..self, overlay, }
+  { ..self, overlay, next_notice_id: id }
 }
 
 ///|
@@ -3219,13 +3228,14 @@ fn Conversation::append_run_tail_notice(
   terminal_expected? : Bool = true,
   terminal_snapshot_generation? : Int,
 ) -> Conversation {
+  let id = self.next_notice_id + 1
   let overlay = self.overlay.copy()
   let anchor = self.run_tail_notice_anchor(
     terminal_expected~,
     terminal_snapshot_generation?,
   )
-  overlay.push({ kind, content, anchor, reconciliation })
-  { ..self, overlay, }
+  overlay.push({ id, kind, content, anchor, reconciliation })
+  { ..self, overlay, next_notice_id: id }
 }
 
 ///|

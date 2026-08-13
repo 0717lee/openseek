@@ -37,6 +37,7 @@ test "transcript markup exposes conversation identity" {
     submission_generation=7,
     items=[],
     streaming_response="",
+    streaming_identity="idle",
     subruns=[],
   )
   let rendered = transcript_view(
@@ -52,6 +53,106 @@ test "transcript markup exposes conversation identity" {
   assert_true(markup.contains("data-transcript-channel=\"remote.relay-a\""))
   assert_true(markup.contains("data-transcript-session=\"same-markup-chat\""))
   assert_true(markup.contains("data-transcript-submission=\"7\""))
+}
+
+///|
+test "transcript stream children use stable typed keys in display order" {
+  let first_tool : @transcript.TranscriptItem = {
+    kind: Tool(
+      call_id="c1",
+      name="shell",
+      arguments=None,
+      has_result=true,
+      is_error=false,
+      brief=Some("moon check"),
+    ),
+    content: "output",
+    ts: None,
+    sequence: Some(43),
+  }
+  let input = Input(
+    focused=@interop.ChannelId::Local,
+    active_session="desktop-test",
+    submission_generation=1,
+    items=[
+      {
+        item: { kind: User, content: "question", ts: None, sequence: Some(41) },
+        identity: "s41\u{0}o0",
+      },
+      { item: first_tool, identity: "s43\u{0}o0" },
+    ],
+    streaming_response="partial answer",
+    streaming_identity="r7",
+    subruns=[
+      {
+        id: "desktop-abc-sr-1",
+        kind: "agent",
+        label: "inspect tests",
+        steps: 1,
+        activity: "reading",
+        run: Some("r7"),
+      },
+    ],
+  )
+  let renderer : TranscriptRenderer = {
+    input,
+    on_open: _ => @cmd.none,
+    on_jump: _ => @cmd.none,
+  }
+  let keys = renderer.stream_children().to_array().map(pair => pair.0)
+  assert_eq(keys, [
+    "row\u{0}s41\u{0}o0", "rule\u{0}s41\u{0}o0", "activity\u{0}after\u{0}s41\u{0}o0",
+    "streaming\u{0}r7", "subrun\u{0}r7\u{0}desktop-abc-sr-1",
+  ])
+  // A newly discovered activity row extends the same card; it does not change
+  // the card key and therefore does not replace its browser-owned disclosure.
+  let extended = {
+    ..input,
+    items: [
+      input.items[0],
+      {
+        item: {
+          kind: Reasoning,
+          content: "thinking",
+          ts: None,
+          sequence: Some(42),
+        },
+        identity: "s42\u{0}o0",
+      },
+      input.items[1],
+    ],
+  }
+  let extended_renderer = { ..renderer, input: extended }
+  let extended_keys = extended_renderer
+    .stream_children()
+    .to_array()
+    .map(pair => pair.0)
+  assert_eq(extended_keys, keys)
+}
+
+///|
+test "transcript stream section key scopes equal session ids by channel" {
+  let local_input = Input(
+    focused=@interop.ChannelId::Local,
+    active_session="desktop-test",
+    submission_generation=0,
+    items=[],
+    streaming_response="",
+    streaming_identity="idle",
+    subruns=[],
+  )
+  let remote = {
+    ..local_input,
+    focused: @interop.ChannelId::Remote("device-a"),
+  }
+  assert_eq(
+    TranscriptSectionKey::stream(local_input).wire(),
+    "stream\u{0}local\u{0}desktop-test",
+  )
+  assert_eq(
+    TranscriptSectionKey::stream(remote).wire(),
+    "stream\u{0}remote.device-a\u{0}desktop-test",
+  )
 }
 
 ///|
