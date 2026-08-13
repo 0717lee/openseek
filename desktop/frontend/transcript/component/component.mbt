@@ -269,9 +269,7 @@ fn scroll_turn_into_view(
       let offset = bubble.get_bounding_client_rect().get_top() -
         transcript.get_bounding_client_rect().get_top()
       transcript.set_scroll_top(transcript.get_scroll_top() + offset - 10.0)
-      let client_height : Double = @js.Cast::from(transcript).get_with_string(
-        "clientHeight",
-      )
+      let client_height = transcript.get_client_height()
       let pinned = transcript.get_scroll_height() -
         transcript.get_scroll_top() -
         client_height <=
@@ -344,9 +342,7 @@ fn transcript_sub_loader(
           element.get_property("id").to_option() == Some("transcript") else {
           return
         }
-        let client_height : Double = @js.Cast::from(element).get_with_string(
-          "clientHeight",
-        )
+        let client_height = element.get_client_height()
         let pinned = element.get_scroll_height() -
           element.get_scroll_top() -
           client_height <=
@@ -363,7 +359,7 @@ fn transcript_sub_loader(
         }
       }
       target.add_event_listener_with_options("scroll", listener, capture=true)
-      let observer = install_transcript_observer(mounted => {
+      let observers = TranscriptObservers::install(mounted => {
         scheduler.add(emit(ContentRendered(mounted~)))
       })
       Some({
@@ -373,7 +369,7 @@ fn transcript_sub_loader(
             listener,
             capture=true,
           )
-          remove_transcript_observer(observer)
+          observers.disconnect()
         },
         update_tagger: payload => {
           guard payload is TranscriptSubscription(next) else { return }
@@ -386,58 +382,66 @@ fn transcript_sub_loader(
 }
 
 ///|
-/// Observe content, identity, and geometry owned by `#transcript`. The
-/// identity attributes change even when two conversations have identical
-/// markup; the document observer also follows Rabbita replacements, while the
-/// resize observer covers geometry changes that do not mutate children.
-extern "js" fn install_transcript_observer(
-  on_change : (Bool) -> Unit,
-) -> @js.Value =
-  #| (onChange) => {
-  #|   let current = null;
-  #|   const resize = new ResizeObserver(() => onChange(true));
-  #|   const attach = () => {
-  #|     const transcript = document.getElementById("transcript");
-  #|     if (transcript === current) return transcript;
-  #|     resize.disconnect();
-  #|     current = transcript;
-  #|     if (current) resize.observe(current);
-  #|     return transcript;
-  #|   };
-  #|   const mutation = new MutationObserver((records) => {
-  #|     const previous = current;
-  #|     const transcript = attach();
-  #|     if (transcript !== previous) {
-  #|       onChange(Boolean(transcript));
-  #|       return;
-  #|     }
-  #|     if (!transcript) return;
-  #|     const changed = records.some((record) =>
-  #|       record.target === transcript ||
-  #|       transcript.contains(record.target) ||
-  #|       [...record.addedNodes].some((node) =>
-  #|         node === transcript || (node.nodeType === 1 && node.contains(transcript))
-  #|       )
-  #|     );
-  #|     if (changed) onChange(true);
-  #|   });
-  #|   attach();
-  #|   mutation.observe(document.documentElement, {
-  #|     attributes: true,
-  #|     childList: true,
-  #|     characterData: true,
-  #|     subtree: true,
-  #|     attributeFilter: [
-  #|       "data-transcript-channel",
-  #|       "data-transcript-session",
-  #|       "data-transcript-submission",
-  #|     ],
-  #|   });
-  #|   return { mutation, resize };
-  #| }
+/// Observe the transcript through Rabbita's typed DOM bindings. The document
+/// observer only follows mount/replacement; content and identity changes are
+/// observed directly on the current transcript, so unrelated page mutations
+/// cannot feed back into component updates.
+priv struct TranscriptObservers {
+  document : @dom.MutationObserver
+  content : @dom.MutationObserver
+  resize : @dom.ResizeObserver
+}
 
 ///|
-extern "js" fn remove_transcript_observer(observer : @js.Value) -> Unit = "(observer) => { observer.mutation.disconnect(); observer.resize.disconnect(); }"
+fn TranscriptObservers::install(on_change : (Bool) -> Unit) -> Self {
+  let mut current : @dom.Element? = None
+  let resize = @dom.ResizeObserver::new((_, _) => on_change(true))
+  let content = @dom.MutationObserver::new((_, _) => on_change(true))
+  let attach = () => {
+    let next = @dom.document().get_element_by_id("transcript").to_option()
+    let changed = match (current, next) {
+      (None, None) => false
+      (Some(previous), Some(element)) =>
+        !previous.is_same_node(element.as_node())
+      _ => true
+    }
+    guard changed else { return }
+    content.disconnect()
+    resize.disconnect()
+    current = next
+    match next {
+      Some(element) => {
+        content.observe(
+          element.as_node(),
+          attributes=true,
+          child_list=true,
+          character_data=true,
+          subtree=true,
+          attribute_filter=[
+            "data-transcript-channel", "data-transcript-session", "data-transcript-submission",
+          ],
+        )
+        resize.observe(element)
+      }
+      None => ()
+    }
+    on_change(next is Some(_))
+  }
+  let document = @dom.MutationObserver::new((_, _) => attach())
+  if @dom.document().get_document_element() is Some(root) {
+    document.observe(root.as_node(), child_list=true, subtree=true)
+  }
+  // The component may already be mounted when its subscription starts.
+  attach()
+  { document, content, resize }
+}
+
+///|
+fn TranscriptObservers::disconnect(self : Self) -> Unit {
+  self.document.disconnect()
+  self.content.disconnect()
+  self.resize.disconnect()
+}
 
 ///|
 test "local pinned transitions are pure" {
