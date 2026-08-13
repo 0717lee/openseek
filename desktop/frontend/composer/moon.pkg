@@ -1,0 +1,12 @@
+import {
+  "moonbit-community/rabbita/cmd",
+  "moonbit-community/rabbita/dom",
+  "moonbit-community/rabbita/html",
+  "openseek_desktop/internal/protocol",
+}
+
+import {
+  "moonbitlang/core/debug",
+} for "test"
+
+supported_targets = "js"
