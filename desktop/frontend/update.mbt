@@ -805,6 +805,7 @@ fn open_editor_at(
         ..model,
         dock,
         right_panel_open: true,
+        right_panel_menu_open: false,
         file_panel: {
           ..panel,
           error: Some("\{path} is outside the conversation workspace"),
@@ -820,7 +821,13 @@ fn open_editor_at(
   } else {
     @dock.open_file(dock, relative)
   }
-  let model = { ..model, dock, file_panel: panel, right_panel_open: true }
+  let model = {
+    ..model,
+    dock,
+    file_panel: panel,
+    right_panel_open: true,
+    right_panel_menu_open: false,
+  }
   let (cmd, panel) = @fileeditor.open_file(
     femit,
     panel,
@@ -1531,12 +1538,37 @@ fn update(
   } else {
     model
   }
+  // Panel visibility is root-owned because it controls both HTML layout and
+  // host-backed editor/browser lifecycles. Reconcile every transition once
+  // here, no matter which semantic action opened or closed the panel.
+  let panel_visibility_changed = model.right_panel_open !=
+    previous.right_panel_open
+  let (panel_visibility_cmd, model) = if panel_visibility_changed {
+    let (command, file_panel) = @fileeditor.panel_toggle_cmds(
+      dispatch.map(msg => FileEditor(msg)),
+      model.file_panel,
+      file_ctx(model),
+      opening=model.right_panel_open,
+    )
+    (command, { ..model, file_panel, })
+  } else {
+    (@cmd.none, model)
+  }
   let (model, panel_cmd) = sync_file_panel(dispatch, model)
+  // The launcher menu belongs to one dock owner. Conversation changes are
+  // already explicit root transitions, so close it here instead of observing a
+  // rendered owner marker through the DOM.
+  let model = if model.right_panel_menu_open &&
+    model.dock.owner != previous.dock.owner {
+    { ..model, right_panel_menu_open: false }
+  } else {
+    model
+  }
   let (model, browser_cmd) = sync_browser_view(dispatch, model)
   (
     @cmd.batch([
-      cmd, quick_open_cmd, quick_open_restart_cmd, symbol_restart_cmd, panel_cmd,
-      browser_cmd,
+      cmd, quick_open_cmd, quick_open_restart_cmd, symbol_restart_cmd, panel_visibility_cmd,
+      panel_cmd, browser_cmd,
     ]),
     model,
   )
@@ -2997,6 +3029,8 @@ fn update_msg(
       let generation = model.file_panel.file_link_generation + 1
       let model = {
         ..model,
+        right_panel_open: true,
+        right_panel_menu_open: false,
         file_panel: { ..model.file_panel, file_link_generation: generation },
       }
       (
@@ -3052,37 +3086,28 @@ fn update_msg(
     CloseGitDetails => (@cmd.none, { ..model, git_details_open: false })
     CloseLauncher =>
       (@cmd.none, { ..model, launcher: { ..model.launcher, open: false } })
-    RightPanelVisibilityChanged(open~, menu_open~) => {
-      let changed = open != model.right_panel_open
-      // Closing the panel, or reopening it onto an existing tab, is newer
-      // than a positioned transcript click whose host lookup is still in
-      // flight. Advance the shared navigation token before applying the
-      // component-owned visibility projection.
-      let presents_existing_tab = !model.right_panel_open &&
-        open &&
-        model.dock.active is Some(_)
-      let model = if (model.right_panel_open && !open) || presents_existing_tab {
+    ToggleRightPanel => {
+      let opening = !model.right_panel_open
+      // A direct visibility toggle has no later semantic action to fence old
+      // editor replies. Actions such as OpenFile and JumpToLocation spend
+      // their own navigation generation before opening the panel.
+      let model = if !opening || model.dock.active is Some(_) {
         model.begin_editor_navigation()
       } else {
         model
       }
-      let model = {
-        ..model,
-        right_panel_open: open,
-        right_panel_menu_open: menu_open,
-      }
-      if changed {
-        let (cmd, panel) = @fileeditor.panel_toggle_cmds(
-          dispatch.map(msg => FileEditor(msg)),
-          model.file_panel,
-          file_ctx(model),
-          opening=open,
-        )
-        (cmd, { ..model, file_panel: panel })
-      } else {
-        (@cmd.none, model)
-      }
+      (
+        @cmd.none,
+        { ..model, right_panel_open: opening, right_panel_menu_open: false },
+      )
     }
+    ToggleRightPanelMenu =>
+      (
+        @cmd.none,
+        { ..model, right_panel_menu_open: !model.right_panel_menu_open },
+      )
+    CloseRightPanelMenu =>
+      (@cmd.none, { ..model, right_panel_menu_open: false })
     ToggleLauncher => {
       let opening = !model.launcher.open
       // The launcher exists only in the desktop window, whose one native
@@ -3540,14 +3565,28 @@ fn update_msg(
         match reuse {
           Some(id) => {
             let dock = @dock.open_browser(model.dock, id)
-            (@cmd.none, { ..model, dock, right_panel_open: true })
+            (
+              @cmd.none,
+              {
+                ..model,
+                dock,
+                right_panel_open: true,
+                right_panel_menu_open: false,
+              },
+            )
           }
           None => {
             let (preview, id) = @preview.open_page(model.preview, url~)
             let dock = @dock.open_browser(model.dock, id)
             (
               browser_open(dispatch, id, url),
-              { ..model, preview, dock, right_panel_open: true },
+              {
+                ..model,
+                preview,
+                dock,
+                right_panel_open: true,
+                right_panel_menu_open: false,
+              },
             )
           }
         }
@@ -13567,31 +13606,35 @@ test "every click-away menu closes without reopening on a second dismissal" {
   // Dismissing does not discard the catalog the launcher already probed, so
   // reopening it does not go back to the host for a list it has.
   assert_true(dropped.launcher.apps is AppsLoading)
-  // The right-panel component reports its local open/menu state to the root
-  // because native browser visibility and file watches depend on it.
-  let (_, docked) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false),
-    desktop_model(),
-  )
-  let (_, menued) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=true),
-    docked,
-  )
+  // Right-panel actions update the root's single visibility state directly.
+  let (_, docked) = update(dispatch, ToggleRightPanel, desktop_model())
+  let (_, menued) = update(dispatch, ToggleRightPanelMenu, docked)
   assert_true(menued.right_panel_menu_open)
-  let (_, unmenued) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false),
-    menued,
-  )
+  let (_, unmenued) = update(dispatch, CloseRightPanelMenu, menued)
   assert_false(unmenued.right_panel_menu_open)
-  let (_, unmenued_twice) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false),
-    unmenued,
-  )
+  let (_, unmenued_twice) = update(dispatch, CloseRightPanelMenu, unmenued)
   assert_false(unmenued_twice.right_panel_menu_open)
+}
+
+///|
+test "right-panel menu closes when the dock owner changes" {
+  let dispatch = test_dispatch()
+  let model = desktop_model()
+  let stale_owner : @interop.ConversationKey = {
+    channel: @interop.Local,
+    session: "stale-panel-owner",
+  }
+  let stale = {
+    ..model,
+    right_panel_open: true,
+    right_panel_menu_open: true,
+    dock: { ..model.dock, owner: Some(stale_owner) },
+  }
+  // Any root message runs the centralized dock synchronization. The owner
+  // transition closes the menu directly, with no rendered marker or observer.
+  let (_, synced) = update(dispatch, CloseLauncher, stale)
+  assert_false(synced.right_panel_menu_open)
+  assert_true(synced.dock.owner != Some(stale_owner))
 }
 
 ///|
@@ -14393,12 +14436,7 @@ test "update is pure: a resolved transcript position opens its owning file" {
   // Closing the right panel is a newer user decision than the pending host
   // lookup;
   // its delayed reply cannot reopen the panel.
-  let open_pending = { ..latest_pending, right_panel_open: true }
-  let (_, panel_closed) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=false, menu_open=false),
-    open_pending,
-  )
+  let (_, panel_closed) = update(dispatch, ToggleRightPanel, latest_pending)
   assert_false(panel_closed.right_panel_open)
   assert_eq(panel_closed.file_panel.file_link_generation, 3)
   let (_, after_closed_reply) = update(
@@ -14421,11 +14459,7 @@ test "update is pure: a resolved transcript position opens its owning file" {
     dock: @dock.open_file(latest_pending.dock, Relative("README.md")),
     right_panel_open: false,
   }
-  let (_, panel_opened) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false),
-    hidden_pending,
-  )
+  let (_, panel_opened) = update(dispatch, ToggleRightPanel, hidden_pending)
   assert_true(panel_opened.right_panel_open)
   assert_eq(panel_opened.file_panel.file_link_generation, 3)
   assert_true(
@@ -16460,16 +16494,8 @@ fn desktop_model() -> Model {
 test "launcher rows open Browse, Files, and Review destinations" {
   let dispatch = test_dispatch()
   let model = desktop_model()
-  let (_, model) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false),
-    model,
-  )
-  let (_, model) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=true),
-    model,
-  )
+  let (_, model) = update(dispatch, ToggleRightPanel, model)
+  let (_, model) = update(dispatch, ToggleRightPanelMenu, model)
   assert_true(model.right_panel_menu_open)
   let (_, model) = update(dispatch, BrowserTabRequested, model)
   assert_false(model.right_panel_menu_open)
@@ -16496,11 +16522,7 @@ test "launcher rows open Browse, Files, and Review destinations" {
 test "a tree pick fulfills the active picker in place" {
   let dispatch = test_dispatch()
   let model = desktop_model()
-  let (_, model) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false),
-    model,
-  )
+  let (_, model) = update(dispatch, ToggleRightPanel, model)
   let (_, model) = update(dispatch, FilePickerRequested, model)
   let (_, model) = update(
     dispatch,
@@ -16517,11 +16539,7 @@ test "a tree pick fulfills the active picker in place" {
 test "a changed row opens the file tab in review mode" {
   let dispatch = test_dispatch()
   let model = desktop_model()
-  let (_, model) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false),
-    model,
-  )
+  let (_, model) = update(dispatch, ToggleRightPanel, model)
   let (_, model) = update(dispatch, FilePickerRequested, model)
   let path = @pathx.Relative("src/main.mbt")
   let (_, model) = update(
@@ -16735,11 +16753,7 @@ test "a remote console routes loopback links to the system browser too" {
 test "submitting the address bar normalizes the draft and commits it" {
   let dispatch = test_dispatch()
   let model = desktop_model()
-  let (_, model) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false),
-    model,
-  )
+  let (_, model) = update(dispatch, ToggleRightPanel, model)
   let (_, model) = update(dispatch, BrowserTabRequested, model)
   let (_, model) = update(
     dispatch,
@@ -16842,11 +16856,7 @@ test "the launcher popup and tab close both retire the shown view" {
   let (_, model) = update(dispatch, BrowserPaneMeasured(rect~), model)
   assert_true(model.browser_pane.shown == Some(1))
   // The popup overlaps the pane, so the native view must hide under it.
-  let (_, covered) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=true),
-    model,
-  )
+  let (_, covered) = update(dispatch, ToggleRightPanelMenu, model)
   assert_true(covered.browser_pane.shown is None)
   // Closing the tab drops the page and the placement.
   let (_, closed) = update(

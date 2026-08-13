@@ -2,12 +2,7 @@
 /// The dock strip sits above the file breadcrumb and its permanent body hosts.
 /// Child order is structural because Rabbita diffs by index; the viewer and
 /// browser placeholders must not be re-keyed when the active tab changes.
-fn panel_view(
-  input : Input,
-  model : Model,
-  emit : @cmd.Emit[ComponentMsg],
-  actions : Actions,
-) -> @html.Html {
+fn panel_view(input : Input, actions : Actions) -> @html.Html {
   let chips : Array[@dock.TabChip] = input.dock.tabs.map(tab => {
     match tab {
       File(path~) => {
@@ -48,12 +43,12 @@ fn panel_view(
   let launcher : @dock.LauncherActions = {
     // Browser tabs need this window's native views; a remote console has none.
     browser: if input.is_desktop {
-      Some(@cmd.batch([actions.browser_tab, emit(CloseMenu)]))
+      Some(@cmd.batch([actions.browser_tab, actions.close_menu]))
     } else {
       None
     },
-    files: @cmd.batch([actions.files, emit(CloseMenu)]),
-    review: @cmd.batch([actions.review, emit(CloseMenu)]),
+    files: @cmd.batch([actions.files, actions.close_menu]),
+    review: @cmd.batch([actions.review, actions.close_menu]),
   }
   // Every body remains mounted and CSS selects the active kind. This preserves
   // the imperative Viewer and native browser attachment points.
@@ -78,19 +73,10 @@ fn panel_view(
     reload: actions.browser_reload,
     open_external: actions.browser_open_external,
   }
-  let (owner_channel, owner_session) = match input.dock.owner {
-    Some(owner) => (owner.channel.uri_authority(), owner.session)
-    None => ("", "")
-  }
   @html.div(
-    attrs=@html.Attrs::build()
-      .class(
-        @fileeditor.editor_classes(input.file_panel, input.file_ctx) +
-        " " +
-        mode,
-      )
-      .data_set("panel-owner-channel", owner_channel)
-      .data_set("panel-owner-session", owner_session),
+    class=@fileeditor.editor_classes(input.file_panel, input.file_ctx) +
+      " " +
+      mode,
     [
       @fileeditor.resize_handle_view(),
       @dock.tabs_bar(
@@ -98,9 +84,9 @@ fn panel_view(
         input.dock,
         chips,
         launcher,
-        menu_open=model.menu_open,
-        toggle_menu=emit(ToggleMenu),
-        toggle_panel=emit(External(TogglePanel)),
+        menu_open=input.menu_open,
+        toggle_menu=actions.toggle_menu,
+        toggle_panel=actions.toggle_panel,
       ),
       @fileeditor.breadcrumb_view(
         actions.file_editor,
