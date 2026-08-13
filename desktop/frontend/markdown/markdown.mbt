@@ -16,10 +16,11 @@
 /// surface as JS exceptions, so `@js.Error_::wrap` is the one place a cmark
 /// crash can be contained; the fallback shows the raw text instead.
 ///
-/// `open_file`, when supplied, turns explicit local-file links and positioned
+/// `open_file`, when supplied, turns explicit local-path links and positioned
 /// file references in prose into clickable elements whose click runs the
-/// returned command (the frontend opens the file). Absent (tests, plain
-/// rendering), explicit links remain ordinary anchors. Inline code stays inert.
+/// returned command (the frontend opens the file or reveals the directory).
+/// Absent (tests, plain rendering), explicit links remain ordinary anchors.
+/// Inline code stays inert.
 pub fn markdown_nodes(
   source : String,
   open_file? : (String) -> @cmd.Cmd,
@@ -118,6 +119,7 @@ fn lines_text(lines : @cmark.Seq[@cmark.Node[String]]) -> String {
 }
 
 ///|
+#warnings("-alert_xss_vulnerable")
 fn code_block(block : @cmark.CodeBlock) -> @html.Html {
   let language = match block.info_string {
     Some(info) =>
@@ -127,8 +129,22 @@ fn code_block(block : @cmark.CodeBlock) -> @html.Html {
       }
     None => ""
   }
+  let source = lines_text(block.code)
+  if language == "uml" || language == "plantuml" {
+    match @editor_viewer.render_uml_diagram_svg(source) {
+      Some(svg) =>
+        return @html.div(
+          class="chat-markdown-diagram moonbit-viewer-markdown-diagram",
+          attrs=@html.Attrs::build()
+            .data_set("diagram-language", "uml")
+            .inner_html(svg),
+          ([] : Array[@html.Html]),
+        )
+      None => ()
+    }
+  }
   let code_class = if language.is_empty() { "" } else { "language-" + language }
-  @html.pre([@html.code(class=code_class, lines_text(block.code))])
+  @html.pre([@html.code(class=code_class, source)])
 }
 
 ///|
@@ -482,7 +498,7 @@ fn MarkdownRender::raw_link_destination(
 }
 
 ///|
-/// A Markdown destination that the app may open as a local file. Ordinary
+/// A Markdown destination that the app may open as a local path. Ordinary
 /// path destinations retain the existing cmark safety check. A `file://` URI
 /// is accepted only for this machine, with no query, and is converted to a
 /// decoded filesystem path before it reaches the host.
@@ -496,7 +512,7 @@ fn MarkdownRender::file_destination(
   if FileReference(destination).local_file_uri_path() is Some(path) {
     return Some(path)
   }
-  if !@cmark.InlineLink::is_unsafe(destination) && is_file_path(destination) {
+  if !@cmark.InlineLink::is_unsafe(destination) && is_local_path(destination) {
     Some(destination)
   } else {
     None
@@ -597,6 +613,38 @@ fn FileReference::position_path(self : FileReference) -> String? {
 /// The suffix-free path, or the whole reference when it has no position.
 fn FileReference::path(self : FileReference) -> String {
   self.position_path().unwrap_or(self.0)
+}
+
+///|
+/// Explicit Markdown destinations that unambiguously name a local path. A
+/// slash-bearing target may be a file or directory; the host decides from the
+/// filesystem when clicked. Bare destinations stay conservative and retain
+/// the known-file-extension rule so prose-like links do not become actions.
+fn is_local_path(text : String) -> Bool {
+  let s = text.trim().to_owned()
+  guard !s.is_empty() && !s.contains_any(chars="\t\r\n") else { return false }
+  guard !s.contains("://") &&
+    !s.has_prefix("#") &&
+    !s.has_prefix("mailto:") &&
+    !s.contains("?") else {
+    return false
+  }
+  let path = FileReference(s).path()
+  guard !path.contains("#") else { return false }
+  // Colons are either a Windows drive prefix or position syntax already
+  // removed above. Rejecting other colon forms keeps custom schemes inert.
+  if path.contains(":") && !is_windows_drive_path(path) {
+    return false
+  }
+  path.contains("/") || path.contains("\\") || is_file_path(s)
+}
+
+///|
+fn is_windows_drive_path(path : String) -> Bool {
+  guard path.length() >= 3 && path[1] == ':' else { return false }
+  let drive = path[0]
+  let letter = (drive >= 'A' && drive <= 'Z') || (drive >= 'a' && drive <= 'z')
+  letter && (path[2] == '/' || path[2] == '\\')
 }
 
 ///|

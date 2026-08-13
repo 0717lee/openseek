@@ -20,6 +20,47 @@ test "markdown renders block structure" {
 }
 
 ///|
+#warnings("-alert_unstable")
+test "exact UML fences render the shared Viewer SVG" {
+  for language in ["uml", "plantuml"] {
+    let rendered = @html.div(
+      markdown_nodes(
+        "```\{language}\n@startuml\nparticipant Alice\nAlice -> Bob : hello\n@enduml\n```",
+      ),
+    )
+    let markup = @rabbita.render_to_string(() => {
+      @rabbita.Val::constant(rendered)
+    })
+    assert_true(
+      markup.contains(
+        "class=\"chat-markdown-diagram moonbit-viewer-markdown-diagram\"",
+      ),
+    )
+    assert_true(markup.contains("data-diagram-language=\"uml\""))
+    assert_true(markup.contains("<svg"))
+    assert_false(markup.contains("<code class=\"language-\{language}\">"))
+  }
+}
+
+///|
+#warnings("-alert_unstable")
+test "invalid UML and Mermaid keep their code-block fallback" {
+  let invalid = @html.div(markdown_nodes("```uml\n@startuml\n@enduml\n```"))
+  let invalid_markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(invalid)
+  })
+  assert_true(invalid_markup.contains("<code class=\"language-uml\">"))
+  assert_false(invalid_markup.contains("chat-markdown-diagram"))
+
+  let mermaid = @html.div(markdown_nodes("```mermaid\nA --> B\n```"))
+  let mermaid_markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(mermaid)
+  })
+  assert_true(mermaid_markup.contains("<code class=\"language-mermaid\">"))
+  assert_false(mermaid_markup.contains("chat-markdown-diagram"))
+}
+
+///|
 test "markdown survives streaming-truncated input" {
   // An unterminated fence parses as *something* renderable rather than
   // aborting — the streaming view re-parses partial text on every delta.
@@ -108,6 +149,25 @@ test "positioned file references keep explicit destinations authoritative" {
     markup.contains("<code class=\"inline-code\">pango/code.mbt:2:3</code>"),
   )
   assert_false(markup.contains("title=\"Open pango/code.mbt:2:3\""))
+}
+
+///|
+#warnings("-alert_unstable")
+test "explicit directory destinations use the local path action" {
+  let rendered = @html.div(
+    markdown_nodes(
+      "[absolute](</Users/me/My Project/src>) [relative](./src/) [bare](src) [web](https://example.com/src)",
+      open_file=_ => @cmd.none,
+    ),
+  )
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  assert_true(markup.contains("title=\"Open /Users/me/My Project/src\""))
+  assert_true(markup.contains("title=\"Open ./src/\""))
+  // A bare word remains an ordinary link, and a web destination remains an
+  // external anchor rather than being confused for a slash-bearing path.
+  assert_false(markup.contains("title=\"Open src\""))
+  assert_true(markup.contains("href=\"src\""))
+  assert_true(markup.contains("href=\"https://example.com/src\""))
 }
 
 ///|

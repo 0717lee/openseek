@@ -724,6 +724,46 @@ fn Model::begin_editor_navigation(self : Model) -> Model {
 }
 
 ///|
+/// Reveal a transcript-linked directory in the editor's Files tree. Keep an
+/// active file visible beside the tree; otherwise activate the picker body so
+/// the reveal has a visible home. `RevealDirectory` expands the ancestors;
+/// transcript navigation additionally expands the target itself, without
+/// toggling an already-open row closed.
+fn reveal_local_directory(
+  dispatch : @cmd.Emit[Msg],
+  model : Model,
+  path : @pathx.Relative,
+) -> (@cmd.Cmd, Model) {
+  let dock = match model.dock.active {
+    Some(File(_)) | Some(FilePicker) => model.dock
+    None | Some(Browser(_)) => @dock.open_picker(model.dock)
+  }
+  let model = {
+    ..model,
+    dock,
+    right_panel_open: true,
+    right_panel_menu_open: false,
+  }
+  let (cmd, panel) = @fileeditor.update(
+    dispatch.map(msg => FileEditor(msg)),
+    @fileeditor.RevealDirectory(path),
+    model.file_panel,
+    file_ctx(model),
+  )
+  let model = { ..model, file_panel: panel }
+  if path.is_root() || panel.expanded.contains(path) {
+    return (cmd, model)
+  }
+  let (expand_cmd, panel) = @fileeditor.update(
+    dispatch.map(msg => FileEditor(msg)),
+    @fileeditor.DirToggle(path),
+    panel,
+    file_ctx(model),
+  )
+  (@cmd.batch([cmd, expand_cmd]), { ..model, file_panel: panel })
+}
+
+///|
 /// Open (or refocus) the editor side-panel on `path`, revealing `range` when
 /// given — the shared tail of a composer chip's and a transcript chip's jump.
 /// The raw path comes from a chip or envelope; a legacy absolute one that
@@ -3138,6 +3178,15 @@ fn update_msg(
         range,
         file_link_generation=generation,
       )
+    }
+    OpenDirectoryAt(owner~, generation~, path~) => {
+      let conv = model.active()
+      guard owner.channel == model.focused &&
+        owner.session == conv.session_id &&
+        generation == model.file_panel.file_link_generation else {
+        return (@cmd.none, model)
+      }
+      reveal_local_directory(dispatch, model, Relative(path))
     }
     ToggleGitDetails => {
       let opening = !model.git_details_open
@@ -14560,6 +14609,42 @@ test "JumpToMention opens the editor panel and selects the mention's file" {
   assert_eq(next.file_panel.file_link_generation, 1)
   // The document table follows the strip: the jumped-to file has an entry.
   assert_true(next.file_panel.docs.contains(Relative("src/main.mbt")))
+}
+
+///|
+test "resolved transcript files and directories stay in the right panel" {
+  let dispatch = test_dispatch()
+  let model = test_model()
+  let owner : @interop.ConversationKey = {
+    channel: Local,
+    session: "desktop-test",
+  }
+  let (_, file_pending) = update(dispatch, OpenFile("src/main.mbt"), model)
+  let (_, file) = update(
+    dispatch,
+    OpenFileAt(
+      owner~,
+      generation=1,
+      path="src/main.mbt",
+      line=None,
+      column=None,
+    ),
+    file_pending,
+  )
+  assert_true(file.right_panel_open)
+  assert_true(@dock.active_file(file.dock) is Some(Relative("src/main.mbt")))
+
+  let (_, directory_pending) = update(dispatch, OpenFile("src"), model)
+  let directory_msg = OpenDirectoryAt(owner~, generation=1, path="src")
+  let (_, directory) = update(dispatch, directory_msg, directory_pending)
+  assert_true(directory.right_panel_open)
+  assert_true(directory.dock.active is Some(FilePicker))
+  assert_true(directory.file_panel.tree_open)
+  assert_true(directory.file_panel.highlighted is Some(Relative("src")))
+  assert_true(directory.file_panel.expanded.contains(Relative("src")))
+  // Repeating the same link is a reveal, not the row's collapse toggle.
+  let (_, repeated) = update(dispatch, directory_msg, directory)
+  assert_true(repeated.file_panel.expanded.contains(Relative("src")))
 }
 
 ///|
