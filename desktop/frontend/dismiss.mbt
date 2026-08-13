@@ -46,9 +46,25 @@ fn dismiss_sub_loader(
   match payload {
     DismissSubscription(trigger, emit) => {
       let mut emit = emit
-      let listener = add_dismiss_capture(trigger, () => scheduler.add(emit(())))
+      let target = @dom.document().as_event_target()
+      let listener : @dom.Listener = event => {
+        // Event targets can be non-elements. Those cannot be the trigger, so
+        // they dismiss just like a click anywhere else in the document.
+        if event.target().to_element() is Some(element) &&
+          element.closest(trigger) is Some(_) {
+          return
+        }
+        scheduler.add(emit(()))
+      }
+      target.add_event_listener_with_options("click", listener, capture=true)
       Some({
-        unload: _ => remove_dismiss_capture(listener),
+        unload: _ => {
+          target.remove_event_listener_with_options(
+            "click",
+            listener,
+            capture=true,
+          )
+        },
         update_tagger: payload => {
           // The trigger belongs to the subscription's identity, not to its
           // tagger: a payload naming a different one is a different menu.
@@ -63,25 +79,3 @@ fn dismiss_sub_loader(
     _ => None
   }
 }
-
-///|
-/// The listener runs in the capture phase so it sees the click before the
-/// menu's own handlers, and never calls `preventDefault`: closing is all it
-/// does. `closest` is guarded because an event target can be a text or SVG
-/// node the method does not exist on.
-extern "js" fn add_dismiss_capture(
-  trigger : String,
-  on_dismiss : () -> Unit,
-) -> @js.Value =
-  #| (trigger, onDismiss) => {
-  #|   const listener = (event) => {
-  #|     if (event.target?.closest?.(trigger)) return;
-  #|     onDismiss();
-  #|   };
-  #|   document.addEventListener("click", listener, true);
-  #|   return listener;
-  #| }
-
-///|
-extern "js" fn remove_dismiss_capture(listener : @js.Value) -> Unit =
-  #| (listener) => document.removeEventListener("click", listener, true)

@@ -7,6 +7,6 @@ fn Model::right_panel_input(self : Model) -> @right_panel.Input {
     preview=self.preview,
     file_ctx=file_ctx(self),
     is_desktop=self.is_desktop,
-    panel_available=self.screen is Chat,
+    menu_open=self.right_panel_menu_open,
   )
 }

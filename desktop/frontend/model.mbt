@@ -1206,9 +1206,9 @@ priv struct Model {
   // On the narrow layout the sidebar is a full-screen drawer instead of a
   // column, and starts closed.
   sidebar_open : Bool
-  // Cross-component layout projections reported by the right-panel component.
-  // The component owns these booleans; the shell reads them for its grid,
-  // dismissal subscription, and native Browser geometry.
+  // Right-panel visibility is shared by the shell grid, file-editor lifecycle,
+  // and native Browser geometry, so the application root is its single owner.
+  // The right-panel component receives these values as read-only input.
   right_panel_open : Bool
   right_panel_menu_open : Bool
   // The terminal component owns its tabs and PTY lifecycle. This one-bit
@@ -1811,7 +1811,12 @@ priv enum Msg {
   // its toggle on purpose: a dismissal must never reopen what it closed.
   CloseGitDetails
   CloseLauncher
-  RightPanelVisibilityChanged(open~ : Bool, menu_open~ : Bool)
+  // The right panel renders these root-owned values and reports only user
+  // actions. Keeping the transitions here avoids a component mirror and a
+  // second message that writes the same visibility back into the root.
+  ToggleRightPanel
+  ToggleRightPanelMenu
+  CloseRightPanelMenu
   LauncherLoaded(Array[@transcript.LauncherAppItem])
   LauncherFailed(String)
   // Launch one detected app (by its id) on the active conversation's workspace.
