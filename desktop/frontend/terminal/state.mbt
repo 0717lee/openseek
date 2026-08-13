@@ -53,31 +53,37 @@ priv struct Tab {
 } derive(Eq)
 
 ///|
-priv struct State {
-  open : Bool
-  next_key : Int
-  tabs : Array[Tab]
+pub struct State {
+  priv open : Bool
+  priv next_key : Int
+  priv tabs : Array[Tab]
   /// The remembered active tab per workspace group, as an association list
   /// (small; a workspace rarely has more than a handful of tabs).
-  active : Array[(WorkspaceKey, Int)]
+  priv active : Array[(WorkspaceKey, Int)]
   /// The tab whose emulator element is currently displayed (`None` while
   /// the panel is closed). Mirrors imperative DOM state so `sync` can tell
   /// when a conversation switch must re-aim the display — the switch itself
   /// produces no terminal message.
-  shown : Int?
+  priv shown : Int?
   /// Channel/session ids whose exit event beat their `terminal_open` reply.
   /// The reply is the first event that identifies the opening tab, so it
   /// consumes the pair and retires that tab instead of reviving an
   /// already-dead session.
-  exited_before_open : Array[(@interop.ChannelId, Int)]
+  priv exited_before_open : Array[(@interop.ChannelId, Int)]
   /// The color scheme last applied to every mounted emulator. Keeping this in
   /// model state lets `sync` refresh existing xterm instances exactly once
   /// when the application switches between light and dark mode.
-  synced_dark_mode : Bool?
+  priv synced_dark_mode : Bool?
+  /// Root-owned input snapshots used to retire dead channels and install each
+  /// transport generation exactly once. Keeping them beside the tabs makes
+  /// input reconciliation a normal state transition instead of a DOM
+  /// MutationObserver callback.
+  priv live_channels : Array[@interop.ChannelId]
+  priv connections : Array[Connection]
 } derive(Eq)
 
 ///|
-fn State::empty() -> State {
+pub fn State::empty() -> State {
   {
     open: false,
     next_key: 1,
@@ -86,7 +92,15 @@ fn State::empty() -> State {
     shown: None,
     exited_before_open: [],
     synced_dark_mode: None,
+    live_channels: [],
+    connections: [],
   }
+}
+
+///|
+/// Whether the shell grid should reserve the terminal row.
+pub fn State::is_open(self : State) -> Bool {
+  self.open
 }
 
 ///|
@@ -224,23 +238,8 @@ fn State::remember_active(
 pub(all) enum Msg {
   /// Show/hide the panel (every shell keeps running while hidden).
   ToggleTerminal
-  /// `terminal_output` event: base64 of raw PTY bytes plus the host-assigned
-  /// sequence echoed by the acknowledgement.
-  Output(
-    channel~ : @interop.ChannelId,
-    id~ : Int,
-    sequence~ : Int,
-    data~ : String
-  )
   /// `terminal_exit` event: the shell ended, so its tab retires.
   SessionExited(channel~ : @interop.ChannelId, id~ : Int, code~ : Int)
-}
-
-///|
-/// Browser and command callbacks stay private to the terminal component. Only
-/// the three messages accepted from the application appear in `Msg`.
-priv enum TerminalMsg {
-  External(Msg)
   /// Open one more terminal in the active conversation's workspace.
   NewTerminal
   TabSelected(key~ : Int)
@@ -267,6 +266,4 @@ priv enum TerminalMsg {
   InputFailed(message~ : String)
   /// One tab's emulator re-fit to a new grid size.
   ViewportResized(key~ : Int, cols~ : Int, rows~ : Int)
-  /// An emulator finished rendering a chunk; flow-control ack.
-  OutputRendered(channel~ : @interop.ChannelId, id~ : Int, sequence~ : Int)
 }

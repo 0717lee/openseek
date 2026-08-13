@@ -26,6 +26,11 @@ priv struct TermEntry {
 /// claiming tab.
 priv struct TermHost {
   entries : Map[Int, TermEntry]
+  /// Root-owned terminal state projected into the imperative output path.
+  /// The projection is refreshed only after terminal lifecycle transitions;
+  /// raw output reads it without publishing a Rabbita message.
+  mut owners : Map[(@interop.ChannelId, Int), Int]
+  mut opening_channels : Array[@interop.ChannelId]
   /// Output that arrived before `terminal_open` identified its tab:
   /// `(sequence, base64_data)`.
   pending : Map[(@interop.ChannelId, Int), Array[(Int, String)]]
@@ -35,6 +40,8 @@ priv struct TermHost {
 ///|
 let term_host : TermHost = {
   entries: Map([]),
+  owners: Map([]),
+  opening_channels: [],
   pending: Map([]),
   resize_wired: false,
 }
@@ -48,21 +55,40 @@ fn xterm_module() -> @js.Value? {
 
 ///|
 /// The emulator cannot consume CSS variables directly, so resolve the live
-/// typography and palette at the boundary instead of duplicating them here.
-extern "js" fn terminal_style() -> @js.Value =
-  #|() => {
-  #|  const style = getComputedStyle(document.documentElement);
-  #|  const foreground = style.getPropertyValue("--color-text-primary").trim();
-  #|  return {
-  #|    fontFamily: style.getPropertyValue("--font-family-ui").trim(),
-  #|    fontSize: Number.parseFloat(style.getPropertyValue("--font-size-md")),
-  #|    theme: {
-  #|      background: style.getPropertyValue("--color-bg-surface").trim(),
-  #|      foreground,
-  #|      cursor: foreground,
-  #|    },
-  #|  };
-  #|}
+/// typography and palette through Rabbita's DOM package before crossing the
+/// xterm object boundary.
+fn terminal_style() -> @js.Value {
+  let (font_family, font_size, background, foreground) = match
+    @dom.document().get_document_element() {
+    Some(root) => {
+      let style = @dom.window().get_computed_style(root)
+      let font_size_text = style
+        .get_property_value("--font-size-md")
+        .trim()
+        .to_owned()
+      let font_size = match font_size_text.strip_suffix("px") {
+        Some(value) => @string.parse_double(value) catch { _ => 13.0 }
+        None => 13.0
+      }
+      (
+        style.get_property_value("--font-family-ui").trim().to_owned(),
+        font_size,
+        style.get_property_value("--color-bg-surface").trim().to_owned(),
+        style.get_property_value("--color-text-primary").trim().to_owned(),
+      )
+    }
+    None => ("monospace", 13.0, "#ffffff", "#16171a")
+  }
+  let theme = @js.Object::new()
+  theme["background"] = background
+  theme["foreground"] = foreground
+  theme["cursor"] = foreground
+  let result = @js.Object::new()
+  result["fontFamily"] = font_family
+  result["fontSize"] = font_size
+  result["theme"] = theme.to_value()
+  result.to_value()
+}
 
 ///|
 fn no_args() -> Array[@js.Value] {
@@ -111,7 +137,7 @@ fn refit_visible() -> Unit {
 /// exists), make it the visible one, and report its grid size through
 /// `EmulatorReady`. Idempotent: the update loop decides whether a ready
 /// report should spawn a session, so re-reports are harmless.
-fn mount_tab(dispatch : @cmd.Emit[TerminalMsg], key : Int) -> @cmd.Cmd {
+fn mount_tab(dispatch : @cmd.Emit[Msg], key : Int) -> @cmd.Cmd {
   @cmd.custom_cmd(
     scheduler => {
       guard xterm_module() is Some(module_) else { return }
@@ -291,27 +317,51 @@ pub fn apply_font_size(font_size : Double) -> @cmd.Cmd {
 }
 
 ///|
-/// Decode one base64 output chunk into the tab's emulator and report its
-/// sequence back once xterm finished rendering it (the flow-control ack).
-/// A chunk with no emulator to land in is acknowledged outright — an
-/// unacknowledged chunk leaks the host's flow-control window and eventually
-/// stalls the session.
-fn write_to_tab(
-  dispatch : @cmd.Emit[TerminalMsg],
+/// Project the root-owned session bindings into the high-frequency output
+/// path. This command runs after terminal reconciliation, so `owners` and
+/// `opening_channels` always describe the same accepted State without making
+/// raw output enter the root update loop.
+fn State::sync_host_routes(self : State) -> @cmd.Cmd {
+  let owners : Map[(@interop.ChannelId, Int), Int] = Map([])
+  let opening_channels : Array[@interop.ChannelId] = []
+  for tab in self.tabs {
+    match tab.id {
+      Some(id) => owners[(tab.workspace.channel(), id)] = tab.key
+      None if tab.status is TabOpening => {
+        let channel = tab.workspace.channel()
+        if !opening_channels.contains(channel) {
+          opening_channels.push(channel)
+        }
+      }
+      None => ()
+    }
+  }
+  @cmd.custom_cmd(_scheduler => {
+    term_host.owners = owners
+    term_host.opening_channels = opening_channels
+  })
+}
+
+///|
+/// Write one accepted chunk to a specific emulator and acknowledge it after
+/// xterm renders it. A missing emulator still consumes the chunk: retaining
+/// its acknowledgement would stall every later chunk in the host window.
+fn TermHost::write_to_tab(
+  self : TermHost,
   channel : @interop.ChannelId,
   key : Int,
   id : Int,
   sequence : Int,
   data : String,
 ) -> @cmd.Cmd {
-  @cmd.custom_cmd(_scheduler => {
-    guard term_host.entries.get(key) is Some(entry) &&
+  @cmd.custom_cmd(scheduler => {
+    guard self.entries.get(key) is Some(entry) &&
       xterm_module() is Some(module_) else {
-      _scheduler.add(dispatch(OutputRendered(channel~, id~, sequence~)))
+      scheduler.add(TerminalAck::{ channel, id, sequence }.send())
       return
     }
     let done = (_ : @js.Value) => {
-      _scheduler.add(dispatch(OutputRendered(channel~, id~, sequence~)))
+      scheduler.add(TerminalAck::{ channel, id, sequence }.send())
     }
     let _ : @js.Value = module_.apply_with_string("writeBase64", [
       entry.term,
@@ -322,18 +372,30 @@ fn write_to_tab(
 }
 
 ///|
-/// Stash an output chunk whose session id no tab has claimed yet.
-fn buffer_pending(
+/// Decode one base64 output chunk into its emulator and acknowledge it after
+/// xterm renders it. Output that races `terminal_open` is buffered while that
+/// channel has an opening tab; an unrelated/stale session is acknowledged and
+/// dropped so it cannot consume the host's flow-control window.
+pub fn output(
   channel : @interop.ChannelId,
   id : Int,
   sequence : Int,
   data : String,
 ) -> @cmd.Cmd {
-  @cmd.custom_cmd(_scheduler => {
+  @cmd.custom_cmd(scheduler => {
     let owner = (channel, id)
-    let chunks = term_host.pending.get(owner).unwrap_or([])
-    chunks.push((sequence, data))
-    term_host.pending[owner] = chunks
+    match term_host.owners.get(owner) {
+      Some(key) =>
+        scheduler.add(term_host.write_to_tab(channel, key, id, sequence, data))
+      None =>
+        if term_host.opening_channels.contains(channel) {
+          let chunks = term_host.pending.get(owner).unwrap_or([])
+          chunks.push((sequence, data))
+          term_host.pending[owner] = chunks
+        } else {
+          scheduler.add(TerminalAck::{ channel, id, sequence }.send())
+        }
+    }
   })
 }
 
@@ -341,18 +403,15 @@ fn buffer_pending(
 /// Flush chunks buffered for `id` into the tab that just claimed it. Every
 /// flushed chunk goes through the normal write path, so each one is
 /// acknowledged as it renders.
-fn flush_pending(
-  dispatch : @cmd.Emit[TerminalMsg],
-  channel : @interop.ChannelId,
-  key : Int,
-  id : Int,
-) -> @cmd.Cmd {
+fn flush_pending(channel : @interop.ChannelId, key : Int, id : Int) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     let owner = (channel, id)
     guard term_host.pending.get(owner) is Some(chunks) else { return }
     term_host.pending.remove(owner)
     for chunk in chunks {
-      scheduler.add(write_to_tab(dispatch, channel, key, id, chunk.0, chunk.1))
+      // The accepted Opened transition supplies the key directly; its route
+      // projection is scheduled by reconciliation immediately afterward.
+      scheduler.add(term_host.write_to_tab(channel, key, id, chunk.0, chunk.1))
     }
   })
 }
@@ -360,17 +419,13 @@ fn flush_pending(
 ///|
 /// Drop any buffer for a session that ended unclaimed, acknowledging the
 /// bytes so the host's window is released before the session's teardown.
-fn drop_pending(
-  dispatch : @cmd.Emit[TerminalMsg],
-  channel : @interop.ChannelId,
-  id : Int,
-) -> @cmd.Cmd {
+fn drop_pending(channel : @interop.ChannelId, id : Int) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     let owner = (channel, id)
     guard term_host.pending.get(owner) is Some(chunks) else { return }
     term_host.pending.remove(owner)
     for chunk in chunks {
-      scheduler.add(dispatch(OutputRendered(channel~, id~, sequence=chunk.0)))
+      scheduler.add(TerminalAck::{ channel, id, sequence: chunk.0 }.send())
     }
   })
 }
@@ -384,6 +439,16 @@ fn TermHost::clear_pending(
   channel : @interop.ChannelId,
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
+    let retained : Map[(@interop.ChannelId, Int), Int] = Map([])
+    for owner, key in term_host.owners {
+      if owner.0 != channel {
+        retained[owner] = key
+      }
+    }
+    term_host.owners = retained
+    term_host.opening_channels = term_host.opening_channels.filter(existing => {
+      existing != channel
+    })
     let owners : Array[(@interop.ChannelId, Int)] = []
     for owner, _ in self.pending {
       if owner.0 == channel {
@@ -400,6 +465,13 @@ fn TermHost::clear_pending(
 /// Dispose a closed tab's emulator and remove its element.
 fn dispose_tab(key : Int) -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
+    let retained : Map[(@interop.ChannelId, Int), Int] = Map([])
+    for owner, owner_key in term_host.owners {
+      if owner_key != key {
+        retained[owner] = owner_key
+      }
+    }
+    term_host.owners = retained
     guard term_host.entries.get(key) is Some(entry) else { return }
     term_host.entries.remove(key)
     let _ : @js.Value = entry.term.apply_with_string("dispose", no_args())

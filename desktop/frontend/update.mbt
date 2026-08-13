@@ -1361,7 +1361,7 @@ fn browser_geometry(model : Model) -> BrowserGeometry {
     desired: desired_browser_view(model),
     sidebar_open: model.sidebar_open,
     narrow: model.narrow,
-    terminal_open: model.terminal_open,
+    terminal_open: model.terminal.is_open(),
     tree_layout: model.tree_layout,
   }
 }
@@ -1576,11 +1576,24 @@ fn update(
   } else {
     model
   }
+  // Terminal input changes are reconciled as part of the root transition.
+  // This replaces the component's rendered marker and MutationObserver while
+  // preserving one installation per connection generation.
+  let terminal_emit = dispatch.map(msg => Terminal(msg))
+  let terminal_input = model.terminal_input()
+  let (terminal, terminal_cmd) = model.terminal.reconcile(
+    terminal_emit,
+    terminal_input,
+    (channel, websocket_epoch) => {
+      install_bridge(dispatch, terminal_emit, channel, websocket_epoch)
+    },
+  )
+  let model = { ..model, terminal, }
   let (model, browser_cmd) = sync_browser_view(dispatch, model)
   (
     @cmd.batch([
       cmd, quick_open_cmd, quick_open_restart_cmd, symbol_restart_cmd, panel_visibility_cmd,
-      panel_cmd, browser_cmd,
+      panel_cmd, terminal_cmd, browser_cmd,
     ]),
     model,
   )
@@ -3570,8 +3583,18 @@ fn update_msg(
         { ..model, browser_pane: { ..pane, shown: Some(id), rect: Some(rect) } },
       )
     }
-    TerminalVisibilityChanged(open) =>
-      (@cmd.none, { ..model, terminal_open: open })
+    Terminal(@terminal.LinkActivated(url~)) =>
+      update_msg(dispatch, ExternalLinkClicked(url), model)
+    Terminal(@terminal.InputFailed(message~)) =>
+      model.notify_error(dispatch, message)
+    Terminal(msg) => {
+      let (cmd, terminal) = model.terminal.handle(
+        dispatch.map(next => Terminal(next)),
+        msg,
+        model.terminal_input(),
+      )
+      (cmd, { ..model, terminal, })
+    }
     HostActionFailed(message) => model.notify_error(dispatch, message)
     OpenFileFailed(owner~, generation~, message~) => {
       let conv = model.active()
@@ -16597,10 +16620,21 @@ fn desktop_model() -> Model {
   let model = { ..test_model(), is_desktop: true }
   let (_, model) = update(
     test_dispatch(),
-    TerminalVisibilityChanged(false),
+    Terminal(@terminal.TabSelected(key=0)),
     model,
   )
   model
+}
+
+///|
+test "terminal visibility changes in the root-owned terminal state" {
+  let dispatch = test_dispatch()
+  let model = test_model()
+  assert_false(model.terminal.is_open())
+  let (_, opened) = update(dispatch, Terminal(@terminal.ToggleTerminal), model)
+  assert_true(opened.terminal.is_open())
+  let (_, closed) = update(dispatch, Terminal(@terminal.ToggleTerminal), opened)
+  assert_false(closed.terminal.is_open())
 }
 
 ///|

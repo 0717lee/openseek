@@ -6,9 +6,12 @@
 // decoders below.
 
 ///|
-/// Decode one host notification into the state that owns it. Terminal output
-/// uses the terminal component's real emitter; everything else uses the app
-/// emitter. No additional Rabbita state or message-forwarding model is built.
+/// Decode one host notification into the owner that consumes it. Raw terminal
+/// output goes straight to the terminal package's emulator command: it changes
+/// neither terminal state nor application state, so sending it through either
+/// Rabbita update loop would only redraw unrelated UI. Terminal lifecycle
+/// events still use the terminal emitter because they do change its root-owned
+/// state; everything else uses the app emitter.
 fn host_notification(
   terminal : @cmd.Emit[@terminal.Msg],
   app_emit : @cmd.Emit[Msg],
@@ -17,10 +20,7 @@ fn host_notification(
 ) -> @cmd.Cmd {
   match notification {
     TerminalOutput(payload) =>
-      match terminal_output_msg(channel, payload) {
-        Some(msg) => terminal(msg)
-        None => @cmd.none
-      }
+      @terminal.output(channel, payload.id, payload.sequence, payload.data)
     TerminalExit(payload) =>
       match terminal_exit_msg(channel, payload) {
         Some(msg) => terminal(msg)
@@ -499,19 +499,15 @@ test "file-panel pushes carry their channel; auth.changed is Local-only" {
 }
 
 ///|
-test "terminal pushes retain the channel that owns their host session" {
-  let payload : @protocol.TerminalOutputPayload = {
-    id: 1,
-    sequence: 2,
-    data: "YQ==",
-  }
+test "terminal lifecycle pushes retain the channel that owns their host session" {
+  let payload : @protocol.TerminalExitPayload = { id: 1, code: 0 }
   assert_true(
-    terminal_output_msg(Local, payload)
-    is Some(Output(channel=Local, id=1, sequence=2, data="YQ==")),
+    terminal_exit_msg(Local, payload)
+    is Some(SessionExited(channel=Local, id=1, code=0)),
   )
   assert_true(
-    terminal_output_msg(Remote("d1"), payload)
-    is Some(Output(channel=Remote("d1"), id=1, sequence=2, data="YQ==")),
+    terminal_exit_msg(Remote("d1"), payload)
+    is Some(SessionExited(channel=Remote("d1"), id=1, code=0)),
   )
 }
 
@@ -931,23 +927,6 @@ fn diagnostics_msg(
   let absolute = @resource.join_relative(root, @pathx.Relative(payload.path))
   Some(
     DiagnosticsPublished(channel~, absolute~, diagnostics=payload.diagnostics),
-  )
-}
-
-///|
-/// Decode one raw PTY chunk. `data` remains base64 until xterm writes it, and
-/// `sequence` is echoed by the idempotent flow-control acknowledgement.
-fn terminal_output_msg(
-  channel : @interop.ChannelId,
-  payload : @protocol.TerminalOutputPayload,
-) -> @terminal.Msg? {
-  Some(
-    Output(
-      channel~,
-      id=payload.id,
-      sequence=payload.sequence,
-      data=payload.data,
-    ),
   )
 }
 

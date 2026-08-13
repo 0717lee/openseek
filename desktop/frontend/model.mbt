@@ -1211,10 +1211,10 @@ priv struct Model {
   // The right-panel component receives these values as read-only input.
   right_panel_open : Bool
   right_panel_menu_open : Bool
-  // The terminal component owns its tabs and PTY lifecycle. This one-bit
-  // projection belongs to the shell because visibility changes both the app
-  // grid and the native Browser pane geometry.
-  terminal_open : Bool
+  // Terminal tabs and their connection snapshots affect both the component
+  // view and root layout. The root owns the opaque state once so neither side
+  // reports a second visibility copy back to the other.
+  terminal : @terminal.State
   // Whether the sidebar's "Chats" section (the default store's loose
   // conversations) is folded down to its heading; clicking the heading flips
   // it.
@@ -1866,8 +1866,9 @@ priv enum Msg {
   // `FileSelected` (which dock tab a tree click opens is the strip's
   // business).
   FileEditor(@fileeditor.Msg)
-  // The terminal reports only the shell-layout projection of its local state.
-  TerminalVisibilityChanged(Bool)
+  // Terminal UI, host notifications, and xterm callbacks share one root-owned
+  // state machine.
+  Terminal(@terminal.Msg)
   // A message produced by one device channel's connection — its lifecycle,
   // its notification stream, and every reply fenced by its connection
   // generation — tagged with the channel it came from.
@@ -2344,7 +2345,7 @@ fn initial_model() -> Model {
     sidebar_open: !narrow,
     right_panel_open: false,
     right_panel_menu_open: false,
-    terminal_open: false,
+    terminal: @terminal.State::empty(),
     chats_collapsed: false,
     projects_collapsed: false,
     expanded_subruns: [],
