@@ -10,8 +10,6 @@ fn main {
     run_markdown_comments_test()
   } else if view_zones_requested() {
     run_view_zones_test()
-  } else if diff_viewer_requested() {
-    run_diff_viewer_test()
   } else if browser_geometry_requested() {
     run_browser_geometry_test()
   } else if cursor_input_events_requested() {
@@ -46,10 +44,6 @@ extern "js" fn markdown_folding_requested() -> Bool =
 ///|
 extern "js" fn view_zones_requested() -> Bool =
   #| () => new URLSearchParams(location.search).has('viewZones')
-
-///|
-extern "js" fn diff_viewer_requested() -> Bool =
-  #| () => new URLSearchParams(location.search).has('diffViewer')
 
 ///|
 extern "js" fn browser_geometry_requested() -> Bool =
