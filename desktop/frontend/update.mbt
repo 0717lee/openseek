@@ -1543,21 +1543,19 @@ fn update(
   // here, no matter which semantic action opened or closed the panel.
   let panel_visibility_changed = model.right_panel_open !=
     previous.right_panel_open
-  // A semantic file open already mounts the viewer and starts the new
-  // document's tagged read. When that same action also reveals the panel,
-  // activating the newly inserted document again would start an untagged
-  // duplicate read. A plain visibility toggle has no new document and still
-  // takes the generic activation path below.
-  let document_opened_with_panel = if !previous.right_panel_open &&
+  // These messages call `open_editor_at` before this reconciliation. A valid
+  // open already mounts the Viewer and either shows the cached document or
+  // starts its generation-tagged read, including when the same TabLoading
+  // document existed before the message. Activating it again here would start
+  // a second untagged read. Failed/out-of-workspace opens retain an error and
+  // still take the generic path so an older active document is restored.
+  let file_opened_with_panel = !previous.right_panel_open &&
     model.right_panel_open &&
-    @dock.active_file(model.dock) is Some(path) {
-    previous.file_panel.docs.get(path) is None &&
-    model.file_panel.docs.get(path) is Some(_)
-  } else {
-    false
-  }
+    msg.opens_file_before_panel_reconciliation() &&
+    model.file_panel.error is None &&
+    @dock.active_file(model.dock) is Some(_)
   let (panel_visibility_cmd, model) = if panel_visibility_changed &&
-    !document_opened_with_panel {
+    !file_opened_with_panel {
     let (command, file_panel) = @fileeditor.panel_toggle_cmds(
       dispatch.map(msg => FileEditor(msg)),
       model.file_panel,
@@ -1586,6 +1584,15 @@ fn update(
     ]),
     model,
   )
+}
+
+///|
+/// Whether this root message calls `open_editor_at` synchronously. `OpenFile`
+/// is deliberately absent: it only begins a host lookup, so opening the panel
+/// for that message must still restore any document already active there.
+fn Msg::opens_file_before_panel_reconciliation(self : Msg) -> Bool {
+  self
+  is (JumpToMention(_) | JumpToLocation(..) | QuickOpenPick(_) | OpenFileAt(..))
 }
 
 ///|
@@ -14375,6 +14382,26 @@ test "file editor context reports the file body actual visibility" {
   assert_false(file_ctx(launcher_model).panel_open)
   assert_false(file_ctx({ ..file_model, screen: Skills }).panel_open)
   assert_false(file_ctx({ ..file_model, screen: Settings }).panel_open)
+}
+
+///|
+test "only synchronous file-open messages suppress panel reactivation" {
+  let owner : @interop.ConversationKey = {
+    channel: Local,
+    session: "desktop-test",
+  }
+  assert_true(JumpToMention(0).opens_file_before_panel_reconciliation())
+  assert_true(
+    JumpToLocation(path="a.mbt", range=None, annotation=None).opens_file_before_panel_reconciliation(),
+  )
+  assert_true(QuickOpenPick(0).opens_file_before_panel_reconciliation())
+  assert_true(
+    OpenFileAt(owner~, generation=1, path="a.mbt", line=1, column=None).opens_file_before_panel_reconciliation(),
+  )
+  // This only starts the asynchronous host lookup. The later OpenFileAt is
+  // the message that actually opens the document.
+  assert_false(OpenFile("a.mbt").opens_file_before_panel_reconciliation())
+  assert_false(ToggleRightPanel.opens_file_before_panel_reconciliation())
 }
 
 ///|
