@@ -1522,9 +1522,10 @@ fn close_window() -> @cmd.Cmd {
 
 ///|
 /// Ask the host to route a transcript-referenced path. Viewer-sized UTF-8 text
-/// inside the checkout returns an editor target; other existing paths use the
-/// system default app. A relative path is taken against the conversation's
-/// working directory. Missing paths and outside text surface as errors.
+/// inside the checkout returns an editor target, checkout-local directories
+/// return a Files-tree target, and other existing paths use the system default
+/// app. A relative path is taken against the conversation's working directory.
+/// Missing paths and outside text surface as errors.
 fn open_file(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
@@ -1558,18 +1559,30 @@ fn open_file(
           return
         }
       }
-      if reply.editor_target is Some(target) {
-        scheduler.add(
-          dispatch(
-            OpenFileAt(
-              owner={ channel, session },
-              generation~,
-              path=target.path,
-              line=target.line,
-              column=target.column,
+      match (reply.editor_target, reply.directory_target) {
+        (Some(target), _) =>
+          scheduler.add(
+            dispatch(
+              OpenFileAt(
+                owner={ channel, session },
+                generation~,
+                path=target.path,
+                line=target.line,
+                column=target.column,
+              ),
             ),
-          ),
-        )
+          )
+        (None, Some(target)) =>
+          scheduler.add(
+            dispatch(
+              OpenDirectoryAt(
+                owner={ channel, session },
+                generation~,
+                path=target.path,
+              ),
+            ),
+          )
+        (None, None) => ()
       }
     })
   })

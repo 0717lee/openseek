@@ -1,6 +1,7 @@
 // Opening a transcript-referenced path: viewer-sized UTF-8 files inside the
-// conversation checkout go to the built-in editor; other existing paths go to
-// the platform opener. Position suffixes apply only to built-in text files.
+// conversation checkout go to the built-in editor, checkout-local directories
+// go to its Files tree, and other existing paths go to the platform opener.
+// Position suffixes apply only to built-in text files.
 
 ///|
 async fn open_path_op(payload : OpenPathPayload) -> OpenPathReply {
@@ -57,17 +58,51 @@ async fn open_path_op(payload : OpenPathPayload) -> OpenPathReply {
     return {
       opened: false,
       editor_target: Some({ path: relative.0, line, column }),
+      directory_target: None,
     }
   }
   guard resolution is SystemPath(system_path) else {
     raise HostError("Could not resolve path")
+  }
+  // A literal directory inside this conversation belongs to the built-in Files
+  // tree. Check both its lexical and real path so an in-checkout symlink cannot
+  // expose a directory outside the checkout. Files retain the upstream text
+  // classification above; other paths retain the system-opener policy.
+  if base is Some(root) &&
+    @pathx.Path(system_path).to_absolute() is Some(absolute) &&
+    absolute.relative_to(root~) is Some(relative) {
+    let kind = Some(@fs.kind(system_path)) catch {
+      error if @async.is_being_cancelled() => raise error
+      _ => None
+    }
+    if kind is Some(Directory) {
+      let real_root_text = Some(@fs.realpath(root.to_string())) catch {
+        error if @async.is_being_cancelled() => raise error
+        _ => None
+      }
+      let real_path_text = Some(@fs.realpath(system_path)) catch {
+        error if @async.is_being_cancelled() => raise error
+        _ => None
+      }
+      if real_root_text is Some(real_root_text) &&
+        real_path_text is Some(real_path_text) &&
+        @pathx.Path(real_root_text).to_absolute() is Some(real_root) &&
+        @pathx.Path(real_path_text).to_absolute() is Some(real_path) &&
+        real_path.relative_to(root=real_root) is Some(_) {
+        return {
+          opened: false,
+          editor_target: None,
+          directory_target: Some({ path: relative.0 }),
+        }
+      }
+    }
   }
   let code = @platform.open_path(system_path) catch {
     error if @async.is_being_cancelled() => raise error
     error => raise HostError("Could not open \{system_path}: \{error}")
   }
   guard code == 0 else { raise HostError("Could not open \{system_path}") }
-  { opened: true, editor_target: None }
+  { opened: true, editor_target: None, directory_target: None }
 }
 
 ///|
@@ -125,6 +160,7 @@ async test "open_path returns workspace editor positions without a system open" 
       line: Some(2738),
       column: Some(17),
     }),
+    directory_target: None,
   })
   let fragment_reply = open_path_op({
     session: "unused-for-explicit-cwd",
@@ -134,6 +170,7 @@ async test "open_path returns workspace editor positions without a system open" 
   assert_eq(fragment_reply, {
     opened: false,
     editor_target: Some({ path: "source.mbt", line: Some(5), column: None }),
+    directory_target: None,
   })
   let ordinary_reply = open_path_op({
     session: "unused-for-explicit-cwd",
@@ -143,6 +180,7 @@ async test "open_path returns workspace editor positions without a system open" 
   assert_eq(ordinary_reply, {
     opened: false,
     editor_target: Some({ path: "source.mbt", line: None, column: None }),
+    directory_target: None,
   })
   let literal = "\{file}:12"
   @fs.write_file(literal, "literal", create_mode=CreateOrTruncate)
@@ -154,6 +192,18 @@ async test "open_path returns workspace editor positions without a system open" 
   assert_eq(literal_reply, {
     opened: false,
     editor_target: Some({ path: "source.mbt:12", line: None, column: None }),
+    directory_target: None,
+  })
+  @fs.mkdir("\{dir}/src")
+  let directory_reply = open_path_op({
+    session: "unused-for-explicit-cwd",
+    cwd: Some(cwd),
+    path: "src",
+  })
+  assert_eq(directory_reply, {
+    opened: false,
+    editor_target: None,
+    directory_target: Some({ path: "src" }),
   })
 }
 

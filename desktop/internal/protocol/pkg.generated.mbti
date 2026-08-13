@@ -520,6 +520,10 @@ pub(all) struct OpenExternalReply {
   opened : Bool
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
+pub(all) struct OpenPathDirectoryTarget {
+  path : String
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
 pub(all) struct OpenPathEditorTarget {
   path : String
   line : Int?
@@ -535,6 +539,7 @@ pub(all) struct OpenPathPayload {
 pub(all) struct OpenPathReply {
   opened : Bool
   editor_target : OpenPathEditorTarget?
+  directory_target : OpenPathDirectoryTarget?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct ReadDirPayload {
