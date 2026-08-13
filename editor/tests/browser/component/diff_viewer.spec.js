@@ -37,6 +37,10 @@ test('DiffViewer aligns two ordinary Viewers and keeps language features revisio
   });
   expectMoonBitReportPassed(report, { suite: 'diff_viewer' });
   expect(report.metrics.paneCount).toBe(2);
+  expect(report.metrics.rootWidth).toBeGreaterThanOrEqual(899);
+  expect(report.metrics.rootHeight).toBeGreaterThanOrEqual(319);
+  expect(report.metrics.paneWidth).toBeGreaterThanOrEqual(449);
+  expect(report.metrics.paneHeight).toBeGreaterThanOrEqual(319);
   expect(report.metrics.changedDecorationCount).toBeGreaterThanOrEqual(2);
   expect(report.metrics.alignmentZoneCount).toBeGreaterThanOrEqual(1);
 

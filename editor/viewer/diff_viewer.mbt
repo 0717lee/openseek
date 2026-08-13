@@ -38,6 +38,7 @@ struct DiffViewer {
   original_viewer : Viewer
   modified_viewer : Viewer
   owned_services : ViewerServices?
+  mut resize_observer : @base_common.Disposable?
   scroll_disposables : Array[@base_common.Disposable]
   model_disposables : Array[@base_common.Disposable]
   mut original_decoration_ids : Array[String]
@@ -51,7 +52,10 @@ struct DiffViewer {
 /// Create an empty comparison in a stable host. An explicit service bundle is
 /// borrowed and shared by both panes; when omitted, one bundle is created and
 /// owned by the DiffViewer. Hosts can keep original-revision semantic requests
-/// inert by giving that model a URI outside their live-document selectors.
+/// inert by giving that model a URI outside their live-document selectors. The
+/// comparison observes its outer host because either child may be constructed
+/// while the caller keeps that host at `display: none`; revealing or resizing
+/// the host then remeasures both ordinary Viewer panes automatically.
 pub fn DiffViewer::create(
   host : @rdom.Element,
   services? : ViewerServices,
@@ -100,6 +104,7 @@ pub fn DiffViewer::create(
     original_viewer,
     modified_viewer,
     owned_services,
+    resize_observer: None,
     scroll_disposables: [],
     model_disposables: [],
     original_decoration_ids: [],
@@ -128,6 +133,9 @@ pub fn DiffViewer::create(
       }
     }),
   )
+  diff_viewer.resize_observer = @base_browser.observe_element_resize(host, () => {
+    diff_viewer.layout()
+  })
   diff_viewer
 }
 
@@ -211,6 +219,11 @@ pub fn DiffViewer::dispose(self : DiffViewer) -> Unit {
   if self.disposed {
     return
   }
+  match self.resize_observer {
+    Some(observer) => observer.dispose()
+    None => ()
+  }
+  self.resize_observer = None
   self.dispose_model_disposables()
   for disposable in self.scroll_disposables {
     disposable.dispose()

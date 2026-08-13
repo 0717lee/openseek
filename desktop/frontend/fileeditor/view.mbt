@@ -137,16 +137,19 @@ pub fn body_view(
   // picks the palette matching the app's own light/dark scheme (the shell's
   // default is dark, `light` overrides). The viewer's colors cascade from
   // this host.
-  let show_unified_diff = match ctx.active_file {
+  let use_unified_diff_surface = match ctx.active_file {
     Some(path) =>
-      state.docs.get(path).map(doc => doc.shows_unified_diff()).unwrap_or(false)
+      state.docs
+      .get(path)
+      .map(doc => doc.uses_unified_diff_surface())
+      .unwrap_or(false)
     None => false
   }
   let viewer_host = @html.div(
     attrs=@html.Attrs::build()
       .id(ViewerHostId)
       .class(
-        if show_unified_diff {
+        if use_unified_diff_surface {
           "viewer-host editor-shell moonbit-viewer-surface-hidden"
         } else {
           "viewer-host editor-shell"
@@ -159,7 +162,7 @@ pub fn body_view(
     attrs=@html.Attrs::build()
       .id(DiffViewerHostId)
       .class(
-        if show_unified_diff {
+        if use_unified_diff_surface {
           "viewer-host editor-shell"
         } else {
           "viewer-host editor-shell moonbit-viewer-surface-hidden"
@@ -184,9 +187,19 @@ pub fn body_view(
 /// chrome laid over the (cleared) viewer, so a notice never renders as a
 /// highlighted source document. Always in the DOM; blank and hidden otherwise.
 fn viewer_notice(state : State, ctx : Ctx) -> @html.Html {
+  let diff_pending = match ctx.active_file {
+    Some(path) =>
+      state.docs
+      .get(path)
+      .map(doc => doc.unified_diff_is_pending())
+      .unwrap_or(false)
+    None => false
+  }
   let text = match ctx.active_file {
     Some(path) =>
       match state.docs.get(path) {
+        Some(doc) if state.shows_delayed_diff_loading(doc) =>
+          "Loading diff for \{doc.name}…"
         Some(doc) =>
           match doc.state {
             TabDeleted =>
@@ -220,7 +233,16 @@ fn viewer_notice(state : State, ctx : Ctx) -> @html.Html {
     None => ""
   }
   @html.div(
-    class=if text.is_empty() { "viewer-notice hidden" } else { "viewer-notice" },
+    class=if !text.is_empty() {
+      "viewer-notice"
+    } else if diff_pending {
+      // Preserve the last complete diff for a fast replacement without
+      // letting clicks or selection reach that now-stale comparison. If the
+      // delay expires this same overlay becomes the opaque loading notice.
+      "viewer-notice diff-transition-shield"
+    } else {
+      "viewer-notice hidden"
+    },
     text,
   )
 }

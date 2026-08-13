@@ -61,12 +61,12 @@ fn viewer_css_sources() -> Array[String] {
     "viewer/browser/view_parts/decorations/decorations.css", "viewer/browser/view_parts/view_cursors/view_cursors.css",
     "viewer/browser/view_parts/margin/margin.css", "viewer/browser/view_parts/margin/lines_decorations.css",
     "viewer/browser/view_parts/view_lines/tokens.css", "viewer/browser/view_parts/view_lines/markers.css",
-    "viewer/contrib/folding/browser/folding.css", "viewer/contrib/contextmenu/browser/contextmenu.css",
-    "viewer/contrib/definition/browser/definition.css", "viewer/contrib/references/browser/references.css",
-    "viewer/contrib/hover/hover.css", "viewer/contrib/quick_diff/browser/quick_diff.css",
-    "viewer/browser/unified_diff/unified_diff.css", "viewer/contrib/agent_feedback/browser/agent_feedback.css",
-    "internal/viewer/browser/markdown/diagram_viewport.css", "viewer/contrib/markdown_comments/browser/markdown_comments.css",
-    "internal/viewer/browser/markdown_document/markdown_document.css",
+    "viewer/browser/diff_editor/diff_editor.css", "viewer/contrib/folding/browser/folding.css",
+    "viewer/contrib/contextmenu/browser/contextmenu.css", "viewer/contrib/definition/browser/definition.css",
+    "viewer/contrib/references/browser/references.css", "viewer/contrib/hover/hover.css",
+    "viewer/contrib/quick_diff/browser/quick_diff.css", "viewer/browser/unified_diff/unified_diff.css",
+    "viewer/contrib/agent_feedback/browser/agent_feedback.css", "internal/viewer/browser/markdown/diagram_viewport.css",
+    "viewer/contrib/markdown_comments/browser/markdown_comments.css", "internal/viewer/browser/markdown_document/markdown_document.css",
   ]
 }
 
@@ -1037,6 +1037,7 @@ async test "viewer stylesheet assembles from the editor workspace member" {
       "/* viewer/contrib/markdown_comments/browser/markdown_comments.css */",
     ),
   )
+  assert_true(css.contains("/* viewer/browser/diff_editor/diff_editor.css */"))
   let font = ws.repo_at("\{EditorDepRoot}/\{CodiconFontSource}")
   guard @asyncfs.exists(font) else {
     fail("missing workspace viewer font: \{font}")

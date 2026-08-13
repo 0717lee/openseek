@@ -356,9 +356,26 @@ fn original_revision_model_uri(
 }
 
 ///|
-/// Detach and dispose the caller-owned models currently installed in the
-/// comparison. The DiffViewer intentionally borrows models, so Desktop closes
-/// this lifetime before replacing or clearing a review.
+/// Dispose a pair only after every Viewer render already queued by the swap has
+/// had first chance to finish. `Viewer::set_model` synchronously detaches the
+/// outgoing presentation but its replacement paints on the animation-frame
+/// coordinator; retiring the TextModels in that same command can otherwise
+/// race token, hover, feedback, or render work that still holds the old pair.
+fn retire_diff_comparison_models(previous : @viewer.DiffEditorModel) -> Unit {
+  @base_browser.schedule_at_next_animation_frame(() => {
+    previous.original.dispose()
+    if !previous.modified.same(previous.original) {
+      previous.modified.dispose()
+    }
+  })
+  |> ignore
+}
+
+///|
+/// Detach the caller-owned models currently installed in the comparison.
+/// Ordinary source/diff toggles and file navigation deliberately do not call
+/// this: the last complete pair stays parked behind the inactive surface until
+/// its successor is ready. Hard owner/workspace boundaries clear it here.
 fn clear_diff_comparison() -> Unit {
   guard viewer_state.diff_viewer is Some(diff_viewer) else { return }
   let previous = diff_viewer.get_model()
@@ -368,10 +385,7 @@ fn clear_diff_comparison() -> Unit {
       services.feedback.set_feedback_enabled(previous.original.uri, false)
       services.feedback.clear_feedback(previous.original.uri)
     }
-    previous.original.dispose()
-    if !previous.modified.same(previous.original) {
-      previous.modified.dispose()
-    }
+    retire_diff_comparison_models(previous)
   }
 }
 
@@ -430,10 +444,7 @@ fn show_diff_comparison(
   )
   services.feedback.set_feedback_enabled(original_uri, relative is Some(_))
   if previous is Some(previous) {
-    previous.original.dispose()
-    if !previous.modified.same(previous.original) {
-      previous.modified.dispose()
-    }
+    retire_diff_comparison_models(previous)
   }
 }
 
@@ -454,7 +465,9 @@ fn show_diff_comparison(
 /// Viewer's quick-diff contribution. An empty string is meaningful for a new
 /// file; omission clears any earlier baseline for this resource. A unified
 /// pair, when present, is rendered by the sibling side-by-side DiffViewer while
-/// the source Viewer remains mounted.
+/// the source Viewer remains mounted. Every show is followed by an after-render
+/// layout pass: either sibling host may have just left `display: none`, where
+/// its child Viewer could only measure Monaco's 5px minimum.
 fn show_file_in_viewer(
   owner : @interop.ConversationKey,
   root~ : @common.Uri?,
@@ -468,7 +481,7 @@ fn show_file_in_viewer(
   review_original? : String,
   unified_diff? : (String, String),
 ) -> @cmd.Cmd {
-  @cmd.custom_cmd(_scheduler => {
+  let show = @cmd.custom_cmd(_scheduler => {
     // Reads are always batched behind a mount request whose after-render tick
     // runs before this async reply, so the viewer exists here (see
     // `ViewerHost::viewer`); the guard only drops a pathological stray.
@@ -599,7 +612,11 @@ fn show_file_in_viewer(
         show_diff_comparison(
           owner, name, uri, absolute, relative, original, modified,
         )
-      None => clear_diff_comparison()
+      // The sibling comparison is intentionally parked when the source
+      // surface is active or a replacement pair is still loading. CSS alone
+      // selects the visible surface; keeping this bounded two-model cache
+      // avoids a blank repaint and makes View file a non-destructive toggle.
+      None => ()
     }
     if range is Some(range) {
       if range.is_empty() {
@@ -639,6 +656,7 @@ fn show_file_in_viewer(
       viewer.reveal_range_in_center(range)
     }
   })
+  @cmd.batch([show, request_viewer_remeasure()])
 }
 
 ///|
@@ -707,9 +725,11 @@ fn clear_viewer() -> @cmd.Cmd {
 }
 
 ///|
-/// Show the viewer's placeholder without touching the other tabs' parked
-/// scroll positions — the last-tab-closed case, where the panel stays on
-/// this conversation.
+/// Show the source Viewer's placeholder without touching the other tabs'
+/// parked scroll positions. The comparison remains parked: transient review
+/// reads, unavailable files, ordinary navigation, and View file all hide it by
+/// CSS, while the next complete comparison replaces it atomically. Its memory
+/// stays bounded to one pair and `clear_viewer` retires it at an owner boundary.
 fn clear_document() -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
     if viewer_state.viewer is Some(viewer) {
@@ -725,7 +745,6 @@ fn clear_document() -> @cmd.Cmd {
       viewer_state.navigation = None
       viewer.set_model(None)
     }
-    clear_diff_comparison()
   })
 }
 

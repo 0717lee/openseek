@@ -57,7 +57,9 @@ fn run_diff_viewer_test() -> Unit {
   )
   let host = document.create_element("div")
   host.set_attribute("class", "viewer-host diff-viewer-host")
-  host.set_attribute("style", "position:absolute;inset:0;")
+  // Match Desktop's stable sibling-host lifecycle: the DiffViewer mounts while
+  // Source is active and this host has no box, then becomes visible later.
+  host.set_attribute("style", "position:absolute;inset:0;display:none;")
   shell.append_child(host.as_node())
   app.append_child(shell.as_node())
 
@@ -111,6 +113,10 @@ fn run_diff_viewer_test() -> Unit {
   )
   diff_viewer.set_model(Some(DiffEditorModel(original, modified)))
   @support.set_timeout(
+    () => host.set_attribute("style", "position:absolute;inset:0;"),
+    20,
+  )
+  @support.set_timeout(
     () => {
       let pane_count = @support.query_count(
         ".diff-viewer-host .moonbit-diff-editor-pane > .monaco-editor",
@@ -121,10 +127,38 @@ fn run_diff_viewer_test() -> Unit {
       let zone_count = @support.query_count(
         ".diff-viewer-host .diff-editor-alignment-zone",
       )
+      let root_size = match
+        document
+        .query_selector(".diff-viewer-host > .moonbit-diff-editor")
+        .to_option() {
+        Some(root) =>
+          (diff_viewer_client_width(root), diff_viewer_client_height(root))
+        None => (0.0, 0.0)
+      }
+      let pane_size = match
+        document
+        .query_selector(".diff-viewer-host .moonbit-diff-editor-pane")
+        .to_option() {
+        Some(pane) =>
+          (diff_viewer_client_width(pane), diff_viewer_client_height(pane))
+        None => (0.0, 0.0)
+      }
       ctx.metric_int("paneCount", pane_count)
       ctx.metric_int("changedDecorationCount", changed_count)
       ctx.metric_int("alignmentZoneCount", zone_count)
+      ctx.metric_number("rootWidth", root_size.0)
+      ctx.metric_number("rootHeight", root_size.1)
+      ctx.metric_number("paneWidth", pane_size.0)
+      ctx.metric_number("paneHeight", pane_size.1)
       ctx.assert_true(pane_count == 2, "DiffViewer did not mount two Viewers")
+      ctx.assert_true(
+        root_size.0 >= 899.0 && root_size.1 >= 319.0,
+        "DiffViewer root did not recover the revealed host size",
+      )
+      ctx.assert_true(
+        pane_size.0 >= 449.0 && pane_size.1 >= 319.0,
+        "DiffViewer pane did not recover half of the revealed host",
+      )
       ctx.assert_true(
         changed_count >= 2,
         "DiffViewer did not render both change decorations",
@@ -135,9 +169,15 @@ fn run_diff_viewer_test() -> Unit {
       )
       ctx.finish()
     },
-    180,
+    500,
   )
 }
+
+///|
+extern "js" fn diff_viewer_client_width(element : @rdom.Element) -> Double = "(element) => element.clientWidth"
+
+///|
+extern "js" fn diff_viewer_client_height(element : @rdom.Element) -> Double = "(element) => element.clientHeight"
 
 ///|
 fn diff_viewer_original_source() -> String {
