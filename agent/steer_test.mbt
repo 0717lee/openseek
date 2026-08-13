@@ -303,6 +303,22 @@ fn log_event(entry : Json) -> String {
 }
 
 ///|
+fn log_content(entry : Json, expected_event : String) -> String? {
+  match entry {
+    Object(object) =>
+      match object.get("event") {
+        Some(String(event)) if event == expected_event =>
+          match object.get("content") {
+            Some(String(content)) => Some(content)
+            _ => None
+          }
+        _ => None
+      }
+    _ => None
+  }
+}
+
+///|
 async fn reasoning_log_test_server(group : @async.TaskGroup[Unit]) -> String? {
   guard bind_test_server(
       "local TCP bind unavailable; skipping reasoning log test",
@@ -335,7 +351,7 @@ async fn reasoning_log_test_server(group : @async.TaskGroup[Unit]) -> String? {
 }
 
 ///|
-async test "streaming reasoning deltas are skipped in logs" {
+async test "streaming reasoning deltas are emitted" {
   @async.with_task_group() <| group => {
     guard reasoning_log_test_server(group) is Some(url) else { return }
     let entries : Array[Json] = []
@@ -366,10 +382,16 @@ async test "streaming reasoning deltas are skipped in logs" {
       fail("expected a completed one-step turn")
     }
     let event_names = entries.map(log_event)
-    assert_false(event_names.contains("reasoning_delta"))
+    assert_true(event_names.contains("reasoning_delta"))
     assert_true(event_names.contains("reasoning_message"))
     assert_true(event_names.contains("assistant_delta"))
     assert_true(event_names.contains("assistant_message"))
+    // Preserve the provider's fragment boundaries just like assistant_delta:
+    // clients receive each reasoning callback instead of a buffered summary.
+    assert_eq(
+      entries.filter_map(entry => log_content(entry, "reasoning_delta")),
+      ["I", " think"],
+    )
   }
 }
 

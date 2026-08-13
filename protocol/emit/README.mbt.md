@@ -100,4 +100,5 @@ it.
 That is a guard on the caller's side, not a property of this package. The real
 issue is that the stream has no identity apart from the log: it is also why
 `reasoning_delta` could be dropped for log noise and silently take the clients'
-live-thinking view with it. Giving the protocol its own sink is the fix.
+live-thinking view with it until the event path was restored. Giving the
+protocol its own sink is the fix.
