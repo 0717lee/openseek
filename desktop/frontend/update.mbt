@@ -1434,7 +1434,7 @@ fn file_ctx(model : Model) -> @fileeditor.Ctx {
         dark_mode: model.theme.is_dark(model.system_dark),
         tree_layout: model.tree_layout,
         narrow: model.narrow,
-        panel_open: model.dock.open,
+        panel_open: model.right_panel_open,
         open_files: @dock.file_paths(model.dock),
         active_file: @dock.active_file(model.dock),
       }
@@ -1503,27 +1503,27 @@ fn file_ctx(model : Model) -> @fileeditor.Ctx {
 fn terminal_ctx(model : Model) -> @terminal.Ctx {
   if model.screen is Codex {
     guard model.codex.active_id() is Some(thread_id) else {
-      return {
-        channel: model.focused,
-        session: "",
-        workspace: None,
-        checkout: None,
-        dark_mode: model.theme.is_dark(model.system_dark),
-        connected: false,
-      }
+      return @terminal.Ctx(
+        channel=model.focused,
+        session="",
+        workspace=None,
+        checkout=None,
+        dark_mode=model.theme.is_dark(model.system_dark),
+        connected=false,
+      )
     }
     let connected = match model.device_state(model.focused) {
       Some(dev) => dev.bridge is Connected(..) && dev.reconnect_failures == 0
       None => false
     }
-    return {
-      channel: model.focused,
-      session: thread_id,
-      workspace: model.codex.active_workspace(model.focused),
-      checkout: Some(@interop.WorkspaceRoot),
-      dark_mode: model.theme.is_dark(model.system_dark),
-      connected,
-    }
+    return @terminal.Ctx(
+      channel=model.focused,
+      session=thread_id,
+      workspace=model.codex.active_workspace(model.focused),
+      checkout=Some(@interop.WorkspaceRoot),
+      dark_mode=model.theme.is_dark(model.system_dark),
+      connected~,
+    )
   }
   let conv = model.active()
   let connected = match model.device_state(conv.device) {
@@ -18525,20 +18525,15 @@ test "Codex web links use the same dock browser route as OpenSeek" {
       "turns": [],
     },
   })
-  // Settle the screen switch first. In the real app this happens when the
-  // Codex row opens; the dock then belongs to that task before its PR is
-  // clicked.
-  let (_, model) = update(dispatch, TranscriptPinned(true), {
-    ..desktop_model(),
-    codex,
-    screen: Codex,
-  })
+  // The Codex row has already selected this task before its PR is clicked, so
+  // the dock operation must use the task's screen and workspace directly.
+  let model = { ..desktop_model(), codex, screen: Codex }
   let (_, model) = update(
     dispatch,
     ExternalLinkClicked("https://github.com/moonbit-community/pty/pull/18"),
     model,
   )
-  assert_true(model.dock.open)
+  assert_true(model.right_panel_open)
   assert_true(@dock.active_browser(model.dock) == Some(1))
   assert_true(
     @preview.page(model.preview, 1).unwrap().url ==

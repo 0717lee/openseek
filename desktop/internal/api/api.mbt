@@ -620,7 +620,7 @@ test "remote endpoint catalog has one entry per command name" {
   }
   // Draft open/close and the curated file/skills operations are host-owned
   // Codex endpoints; keep this exact count aligned with that catalog.
-  assert_eq(names.length(), 82)
+  assert_eq(names.length(), 84)
   assert_true(names.contains("codex.draft.open"))
   assert_true(names.contains("codex.draft.close"))
   assert_true(names.contains("codex.file.search"))

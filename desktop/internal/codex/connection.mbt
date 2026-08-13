@@ -59,7 +59,7 @@ pub async fn[X] connect(
   group : @async.TaskGroup[X],
   command~ : String,
   notification_handler~ : (String, Json) -> Unit,
-  request_handler~ : (@jsonrpc.PeerRequest) -> Bool,
+  request_handler~ : (@jsonrpc.PeerRequest) -> Bool raise,
   on_closed~ : () -> Unit,
   version~ : String,
   handshake_timeout_ms? : Int = HandshakeTimeoutMs,

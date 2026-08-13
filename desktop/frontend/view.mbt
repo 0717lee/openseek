@@ -424,7 +424,7 @@ fn device_section_rows(
                 image: icon_add,
               })
             }
-            @sidebar.WorkspaceRow::{ title, label, active, actions }.render()
+            @sidebar.WorkspaceRow::{ title, label, active, menu: None, actions }.render()
           },
           conversation_row: (title, label, active, running, open, archive) => {
             let status : Array[@html.Html] = []
