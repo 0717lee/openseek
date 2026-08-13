@@ -1788,11 +1788,21 @@ fn update_msg(
         channel: model.focused,
         session: model.active().session_id,
       }
+      let root = model.conversation_root(model.active())
+      // A root change invalidates paths even when the owner and query text are
+      // unchanged. Drop that cache before rendering the menu so the delayed
+      // request can enter its loading state instead of exposing stale rows.
+      let symbol_cache = if model.symbol_cache.root == root {
+        model.symbol_cache
+      } else {
+        empty_symbol_cache()
+      }
       let completion_debounce = model.completion_debounce.advanced()
       let command = match @composer.Trigger::parse(value, inline_markers="$#") {
         Some(trigger) if trigger.marker() == "#" &&
           (
             model.symbol_cache.owner != Some(owner) ||
+            model.symbol_cache.root != root ||
             model.symbol_cache.query != trigger.query()
           ) =>
           completion_debounce.delayed(generation => {
@@ -1804,11 +1814,12 @@ fn update_msg(
         command,
         {
           ..model.replace_conversation({ ..model.active(), task: value }),
+          symbol_cache,
           completion_debounce,
           completion: compute_completion(
             value,
             model.installed_skills,
-            model.symbol_cache,
+            symbol_cache,
             owner,
           ),
         },
@@ -10336,6 +10347,47 @@ test "an inline symbol reply rebuilds the live completion menu" {
   guard menu.menu.get(0) is Some(first) else { fail("row expected") }
   assert_eq(first.label, "parse_hover")
   assert_eq(menu.menu.draft_without_token(), "Inspect ")
+}
+
+///|
+test "typing the same symbol query after a root change drops the old cache" {
+  let dispatch = test_dispatch()
+  let owner : @interop.ConversationKey = {
+    channel: Local,
+    session: "desktop-test",
+  }
+  let old_root = owner.channel.test_resource("/scratch/desktop-test")
+  let cached = {
+    ..test_model(),
+    symbol_cache: {
+      owner: Some(owner),
+      root: Some(old_root),
+      query: "parse",
+      items: [
+        CompletionItem::symbol(
+          "parse_old_symbol",
+          container=None,
+          path="src/old.mbt",
+          range=@common.Range::Range(1, 1, 1, 1),
+        ),
+      ],
+    },
+  }
+  // No live `#` token means the root-change handler deliberately leaves the
+  // cache alone until the composer next needs it.
+  let (_, rerooted) = update_dev(
+    dispatch,
+    BridgeReady(scratch_root=owner.channel.test_resource("/next-scratch")),
+    cached,
+  )
+  assert_eq(rerooted.symbol_cache.root, Some(old_root))
+  let (_, querying) = update(dispatch, TaskChanged("#parse"), rerooted)
+  assert_true(querying.symbol_cache.owner is None)
+  guard querying.completion is Some(menu) else {
+    fail("the symbol menu should open for the new root")
+  }
+  assert_true(menu.menu.loading())
+  assert_eq(menu.menu.length(), 0)
 }
 
 ///|
