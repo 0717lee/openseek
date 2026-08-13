@@ -4,7 +4,7 @@ import {
   "moonbit-community/rabbita/dom",
   "moonbit-community/rabbita/html",
   "moonbit-community/rabbita/js",
-  "moonbit-community/rabbita/sub",
+  "moonbitlang/core/string",
   "moonbitlang/editor/base/common",
   "openseek_desktop/frontend/internal/terminal_input",
   "openseek_desktop/internal/protocol",

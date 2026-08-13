@@ -14,18 +14,11 @@ pub fn apply_font_family(String) -> @cmd.Cmd
 
 pub fn apply_font_size(Double) -> @cmd.Cmd
 
-pub fn component(@rabbita.Val[Input], Actions) -> (@rabbita.Val[@html.Html], @cmd.Emit[Msg])
+pub fn component(@rabbita.Val[Input], @rabbita.Val[State], @cmd.Emit[Msg]) -> @rabbita.Val[@html.Html]
 
 // Errors
 
 // Types and methods
-pub(all) struct Actions {
-  external_link : @cmd.Emit[String]
-  error : @cmd.Emit[String]
-  visibility : @cmd.Emit[Bool]
-  connect : (@cmd.Emit[Msg], @interop.ChannelId, Int) -> @cmd.Cmd
-}
-
 type Connection derive(Eq)
 pub fn Connection::Connection(channel~ : @interop.ChannelId, websocket_epoch~ : Int, attempt~ : Int) -> Self
 
@@ -46,7 +39,27 @@ pub(all) enum Msg {
   ToggleTerminal
   Output(channel~ : @interop.ChannelId, id~ : Int, sequence~ : Int, data~ : String)
   SessionExited(channel~ : @interop.ChannelId, id~ : Int, code~ : Int)
+  NewTerminal
+  TabSelected(key~ : Int)
+  TabClosed(key~ : Int)
+  EmulatorReady(key~ : Int, cols~ : Int, rows~ : Int)
+  Opened(channel~ : @interop.ChannelId, key~ : Int, id~ : Int)
+  OpenFailed(key~ : Int, message~ : String)
+  UserInput(key~ : Int, data~ : String)
+  LinkActivated(url~ : String)
+  BinaryInput(key~ : Int, data~ : String)
+  InputFailed(message~ : String)
+  ViewportResized(key~ : Int, cols~ : Int, rows~ : Int)
+  OutputRendered(channel~ : @interop.ChannelId, id~ : Int, sequence~ : Int)
 }
+
+pub struct State {
+  // private fields
+} derive(Eq)
+pub fn State::empty() -> Self
+pub fn State::handle(Self, @cmd.Emit[Msg], Msg, Input) -> (@cmd.Cmd, Self)
+pub fn State::is_open(Self) -> Bool
+pub fn State::reconcile(Self, @cmd.Emit[Msg], Input, (@interop.ChannelId, Int) -> @cmd.Cmd) -> (Self, @cmd.Cmd)
 
 // Type aliases
 

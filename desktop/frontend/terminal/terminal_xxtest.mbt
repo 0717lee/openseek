@@ -1,6 +1,6 @@
 ///|
 test "Windows workspace paths use their final component as the tab label" {
-  let emit : @cmd.Emit[TerminalMsg] = @cmd.Emit(_ => @cmd.none)
+  let emit : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   guard @resource.of_path(@interop.ChannelId::Local, "/C:/Users/alice/project")
     is Some(workspace) else {
     fail("Windows resource fixture was invalid")
@@ -13,7 +13,7 @@ test "Windows workspace paths use their final component as the tab label" {
     dark_mode: false,
     connected: true,
   }
-  let (_, state) = update(emit, External(ToggleTerminal), State::empty(), ctx)
+  let (_, state) = update(emit, ToggleTerminal, State::empty(), ctx)
   guard state.tabs.get(0) is Some(tab) else {
     fail("terminal tab was not opened")
   }
@@ -22,7 +22,7 @@ test "Windows workspace paths use their final component as the tab label" {
 
 ///|
 test "an exit before the open reply cannot revive a dead terminal" {
-  let emit : @cmd.Emit[TerminalMsg] = @cmd.Emit(_ => @cmd.none)
+  let emit : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   guard @resource.of_path(@interop.ChannelId::Local, "/work/project")
     is Some(workspace) else {
     fail("workspace resource fixture was invalid")
@@ -35,10 +35,10 @@ test "an exit before the open reply cannot revive a dead terminal" {
     dark_mode: false,
     connected: true,
   }
-  let (_, opening) = update(emit, External(ToggleTerminal), State::empty(), ctx)
+  let (_, opening) = update(emit, ToggleTerminal, State::empty(), ctx)
   let (_, exited) = update(
     emit,
-    External(SessionExited(channel=@interop.ChannelId::Local, id=42, code=0)),
+    SessionExited(channel=@interop.ChannelId::Local, id=42, code=0),
     opening,
     ctx,
   )
@@ -60,7 +60,7 @@ test "an exit before the open reply cannot revive a dead terminal" {
 
 ///|
 test "sync records color-scheme changes even when the shown tab is unchanged" {
-  let emit : @cmd.Emit[TerminalMsg] = @cmd.Emit(_ => @cmd.none)
+  let emit : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   let light_ctx : Ctx = {
     channel: @interop.ChannelId::Local,
     session: "theme",
@@ -79,7 +79,7 @@ test "sync records color-scheme changes even when the shown tab is unchanged" {
 
 ///|
 test "output acknowledgement messages leave terminal state unchanged" {
-  let emit : @cmd.Emit[TerminalMsg] = @cmd.Emit(_ => @cmd.none)
+  let emit : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   let ctx : Ctx = {
     channel: @interop.ChannelId::Local,
     session: "ack-purity",
@@ -107,7 +107,7 @@ test "output acknowledgement messages leave terminal state unchanged" {
 
 ///|
 test "same-numbered terminal ids on different devices stay isolated" {
-  let emit : @cmd.Emit[TerminalMsg] = @cmd.Emit(_ => @cmd.none)
+  let emit : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   guard @resource.of_path(@interop.ChannelId::Local, "/work/project")
     is Some(local_workspace) else {
     fail("local workspace resource fixture was invalid")
@@ -131,7 +131,7 @@ test "same-numbered terminal ids on different devices stay isolated" {
   }
   let (_, local_opening) = update(
     emit,
-    External(ToggleTerminal),
+    ToggleTerminal,
     State::empty(),
     local_ctx,
   )
@@ -151,7 +151,7 @@ test "same-numbered terminal ids on different devices stay isolated" {
   inspect(both_running.tabs.length(), content="2")
   let (_, remote_exited) = update(
     emit,
-    External(SessionExited(channel=remote, id=1, code=0)),
+    SessionExited(channel=remote, id=1, code=0),
     both_running,
     remote_ctx,
   )
@@ -204,6 +204,8 @@ test "a disconnected channel retires only its terminal tabs" {
     shown: Some(2),
     exited_before_open: [(remote, 9), (local_channel, 9)],
     synced_dark_mode: Some(false),
+    live_channels: [local_channel, remote],
+    connections: [],
   }
   let (_, disconnected) = disconnect(state, remote)
   inspect(disconnected.tabs.length(), content="1")
@@ -218,7 +220,7 @@ test "a disconnected channel retires only its terminal tabs" {
 
 ///|
 test "an open panel waits for a reconnected channel before replacing its PTY" {
-  let emit : @cmd.Emit[TerminalMsg] = @cmd.Emit(_ => @cmd.none)
+  let emit : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   let disconnected_ctx : Ctx = {
     channel: @interop.ChannelId::Remote("device-1"),
     session: "reconnect",
@@ -229,7 +231,7 @@ test "an open panel waits for a reconnected channel before replacing its PTY" {
   }
   let (_, opened) = update(
     emit,
-    External(ToggleTerminal),
+    ToggleTerminal,
     State::empty(),
     disconnected_ctx,
   )
@@ -250,7 +252,7 @@ test "an open panel waits for a reconnected channel before replacing its PTY" {
 
 ///|
 test "a missing checkout refuses new PTYs and retires only its conversation" {
-  let emit : @cmd.Emit[TerminalMsg] = @cmd.Emit(_ => @cmd.none)
+  let emit : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   guard @resource.of_path(@interop.ChannelId::Local, "/work/project")
     is Some(workspace) else {
     fail("workspace resource fixture was invalid")
@@ -263,7 +265,7 @@ test "a missing checkout refuses new PTYs and retires only its conversation" {
     dark_mode: false,
     connected: true,
   }
-  let (_, opening) = update(emit, External(ToggleTerminal), State::empty(), ctx)
+  let (_, opening) = update(emit, ToggleTerminal, State::empty(), ctx)
   let (_, running) = update(
     emit,
     Opened(channel=@interop.ChannelId::Local, key=1, id=7),
@@ -294,7 +296,7 @@ test "a missing checkout refuses new PTYs and retires only its conversation" {
   assert_true(still_retired == retired)
   let (_, toggle_refused) = update(
     emit,
-    External(ToggleTerminal),
+    ToggleTerminal,
     State::empty(),
     missing_ctx,
   )
@@ -305,7 +307,7 @@ test "a missing checkout refuses new PTYs and retires only its conversation" {
 
 ///|
 test "a worktree conversation never reuses the main checkout terminal group" {
-  let emit : @cmd.Emit[TerminalMsg] = @cmd.Emit(_ => @cmd.none)
+  let emit : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   guard @resource.of_path(@interop.ChannelId::Local, "/work/project")
     is Some(workspace) else {
     fail("workspace resource fixture was invalid")
@@ -318,12 +320,7 @@ test "a worktree conversation never reuses the main checkout terminal group" {
     dark_mode: false,
     connected: true,
   }
-  let (_, main_opening) = update(
-    emit,
-    External(ToggleTerminal),
-    State::empty(),
-    main,
-  )
+  let (_, main_opening) = update(emit, ToggleTerminal, State::empty(), main)
   let worktree = {
     ..main,
     session: "worktree-chat",
@@ -344,7 +341,7 @@ test "a worktree conversation never reuses the main checkout terminal group" {
 
 ///|
 test "an unresolved placement cannot reveal or create a project terminal" {
-  let emit : @cmd.Emit[TerminalMsg] = @cmd.Emit(_ => @cmd.none)
+  let emit : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   guard @resource.of_path(@interop.ChannelId::Local, "/work/project")
     is Some(workspace) else {
     fail("workspace resource fixture was invalid")
@@ -357,12 +354,7 @@ test "an unresolved placement cannot reveal or create a project terminal" {
     dark_mode: false,
     connected: true,
   }
-  let (_, project_opening) = update(
-    emit,
-    External(ToggleTerminal),
-    State::empty(),
-    main,
-  )
+  let (_, project_opening) = update(emit, ToggleTerminal, State::empty(), main)
   let unresolved : Ctx = { ..main, session: "restored-chat", checkout: None }
   // The existing project tab stays alive for its owner, but the restored
   // conversation cannot see it or create another tab under the same key.
@@ -371,7 +363,7 @@ test "an unresolved placement cannot reveal or create a project terminal" {
   assert_true(waiting.shown is None)
   let (_, toggle_refused) = update(
     emit,
-    External(ToggleTerminal),
+    ToggleTerminal,
     State::empty(),
     unresolved,
   )

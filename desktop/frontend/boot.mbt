@@ -96,6 +96,15 @@ fn app_shortcut_platform_is_apple() -> Bool {
 /// Map only the platform's exact, non-repeating command chords to the same
 /// messages used by their corresponding UI buttons.
 fn app_shortcut_message(keyboard : @dom.KeyboardEvent, is_apple : Bool) -> Msg? {
+  if keyboard.code() == "Backquote" &&
+    keyboard.ctrl_key() &&
+    !keyboard.meta_key() &&
+    !keyboard.alt_key() &&
+    !keyboard.shift_key() &&
+    !keyboard.is_composing() &&
+    !keyboard.repeat() {
+    return Some(Terminal(@terminal.ToggleTerminal))
+  }
   let command = if is_apple {
     keyboard.meta_key() && !keyboard.ctrl_key()
   } else {
@@ -133,9 +142,8 @@ pub fn boot() -> Unit {
       },
       // The narrow-layout flag must track the window: rotating a phone or
       // resizing a desktop window across the breakpoint re-lays the app out.
-      // Application command chords use a capture subscription because they
-      // must beat embedded editors and browser defaults. Ctrl+` remains with
-      // the terminal component because it changes terminal-local state.
+      // Application command chords use one capture subscription because they
+      // must beat embedded editors, xterm, and browser defaults.
       subscriptions=(model, emit) => {
         let subs : Array[@sub.Sub] = [
           @sub.on_resize(
@@ -229,14 +237,11 @@ pub fn boot() -> Unit {
       close_menu: emit(CloseRightPanelMenu),
     })
     let terminal_input = state.map(model => model.terminal_input())
-    let (terminal_html, terminal_emit) = @terminal.component(terminal_input, {
-      external_link: emit.map(url => ExternalLinkClicked(url)),
-      error: emit.map(message => HostActionFailed(message)),
-      visibility: emit.map(open => TerminalVisibilityChanged(open)),
-      connect: (terminal_emit, channel, websocket_epoch) => {
-        install_bridge(emit, terminal_emit, channel, websocket_epoch)
-      },
-    })
+    let terminal_state = state.map(model => model.terminal)
+    let terminal_emit = emit.map(msg => Terminal(msg))
+    let terminal_html = @terminal.component(
+      terminal_input, terminal_state, terminal_emit,
+    )
     let transcript_input = state.map(model => model.transcript_input())
     let transcript_html = @transcript_component.component(transcript_input, {
       open: emit.map(path => OpenFile(path)),

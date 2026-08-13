@@ -24,7 +24,7 @@ fn workspace_label(ctx : Ctx) -> String {
 /// Create a tab bound to the active conversation's workspace and mount its
 /// emulator (whose ready report spawns the session).
 fn open_new_tab(
-  dispatch : @cmd.Emit[TerminalMsg],
+  dispatch : @cmd.Emit[Msg],
   state : State,
   ctx : Ctx,
 ) -> (@cmd.Cmd, State) {
@@ -103,16 +103,39 @@ fn State::retire_missing_session(
 }
 
 ///|
+pub fn State::handle(
+  self : State,
+  dispatch : @cmd.Emit[Msg],
+  msg : Msg,
+  input : Input,
+) -> (@cmd.Cmd, State) {
+  // Replies queued by a retired connection cannot attach to a later PTY that
+  // happens to reuse the same numeric id.
+  let owner_live = match msg {
+    Opened(channel~, key=_, id=_)
+    | OutputRendered(channel~, id=_, sequence=_)
+    | Output(channel~, id=_, sequence=_, data=_)
+    | SessionExited(channel~, id=_, code=_) =>
+      input.live_channels.contains(channel)
+    _ => true
+  }
+  guard owner_live else { return (@cmd.none, self) }
+  update(dispatch, msg, self, input.ctx)
+}
+
+///|
+/// Apply one accepted terminal message. Root integration calls `State::handle`
+/// so retired channel replies are fenced before entering this state machine.
 fn update(
-  dispatch : @cmd.Emit[TerminalMsg],
-  msg : TerminalMsg,
+  dispatch : @cmd.Emit[Msg],
+  msg : Msg,
   state : State,
   ctx : Ctx,
 ) -> (@cmd.Cmd, State) {
   let checkout_ready = ctx.checkout is Some(@interop.WorkspaceRoot) ||
     ctx.checkout is Some(@interop.Worktree(_))
   match msg {
-    External(ToggleTerminal) =>
+    ToggleTerminal =>
       if state.open {
         // Hide only — every shell keeps running for the panel's return.
         (@cmd.none, { ..state, open: false })
@@ -265,7 +288,7 @@ fn update(
       } else {
         (@cmd.none, state)
       }
-    External(Output(channel~, id~, sequence~, data~)) =>
+    Output(channel~, id~, sequence~, data~) =>
       match state.tab_by_id(channel, id) {
         Some(tab) =>
           (write_to_tab(dispatch, channel, tab.key, id, sequence, data), state)
@@ -286,7 +309,7 @@ fn update(
       }
     OutputRendered(channel~, id~, sequence~) =>
       (TerminalAck::{ channel, id, sequence }.send(), state)
-    External(SessionExited(channel~, id~, code=_)) =>
+    SessionExited(channel~, id~, code=_) =>
       match state.tab_by_id(channel, id) {
         // The shell ended (Ctrl+D, `exit`, or a crash): its tab retires,
         // and the visible group's last tab takes the panel with it.
@@ -360,7 +383,7 @@ fn disconnect(state : State, channel : @interop.ChannelId) -> (@cmd.Cmd, State) 
 /// with the panel open, landing in a workspace that has no shell yet starts
 /// its first one, so every workspace greets the user with its own terminal.
 fn sync(
-  dispatch : @cmd.Emit[TerminalMsg],
+  dispatch : @cmd.Emit[Msg],
   state : State,
   ctx : Ctx,
 ) -> (State, @cmd.Cmd) {

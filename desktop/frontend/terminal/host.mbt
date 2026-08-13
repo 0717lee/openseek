@@ -48,21 +48,40 @@ fn xterm_module() -> @js.Value? {
 
 ///|
 /// The emulator cannot consume CSS variables directly, so resolve the live
-/// typography and palette at the boundary instead of duplicating them here.
-extern "js" fn terminal_style() -> @js.Value =
-  #|() => {
-  #|  const style = getComputedStyle(document.documentElement);
-  #|  const foreground = style.getPropertyValue("--color-text-primary").trim();
-  #|  return {
-  #|    fontFamily: style.getPropertyValue("--font-family-ui").trim(),
-  #|    fontSize: Number.parseFloat(style.getPropertyValue("--font-size-md")),
-  #|    theme: {
-  #|      background: style.getPropertyValue("--color-bg-surface").trim(),
-  #|      foreground,
-  #|      cursor: foreground,
-  #|    },
-  #|  };
-  #|}
+/// typography and palette through Rabbita's DOM package before crossing the
+/// xterm object boundary.
+fn terminal_style() -> @js.Value {
+  let (font_family, font_size, background, foreground) = match
+    @dom.document().get_document_element() {
+    Some(root) => {
+      let style = @dom.window().get_computed_style(root)
+      let font_size_text = style
+        .get_property_value("--font-size-md")
+        .trim()
+        .to_owned()
+      let font_size = match font_size_text.strip_suffix("px") {
+        Some(value) => @string.parse_double(value) catch { _ => 13.0 }
+        None => 13.0
+      }
+      (
+        style.get_property_value("--font-family-ui").trim().to_owned(),
+        font_size,
+        style.get_property_value("--color-bg-surface").trim().to_owned(),
+        style.get_property_value("--color-text-primary").trim().to_owned(),
+      )
+    }
+    None => ("monospace", 13.0, "#ffffff", "#16171a")
+  }
+  let theme = @js.Object::new()
+  theme["background"] = background
+  theme["foreground"] = foreground
+  theme["cursor"] = foreground
+  let result = @js.Object::new()
+  result["fontFamily"] = font_family
+  result["fontSize"] = font_size
+  result["theme"] = theme.to_value()
+  result.to_value()
+}
 
 ///|
 fn no_args() -> Array[@js.Value] {
@@ -111,7 +130,7 @@ fn refit_visible() -> Unit {
 /// exists), make it the visible one, and report its grid size through
 /// `EmulatorReady`. Idempotent: the update loop decides whether a ready
 /// report should spawn a session, so re-reports are harmless.
-fn mount_tab(dispatch : @cmd.Emit[TerminalMsg], key : Int) -> @cmd.Cmd {
+fn mount_tab(dispatch : @cmd.Emit[Msg], key : Int) -> @cmd.Cmd {
   @cmd.custom_cmd(
     scheduler => {
       guard xterm_module() is Some(module_) else { return }
@@ -297,7 +316,7 @@ pub fn apply_font_size(font_size : Double) -> @cmd.Cmd {
 /// unacknowledged chunk leaks the host's flow-control window and eventually
 /// stalls the session.
 fn write_to_tab(
-  dispatch : @cmd.Emit[TerminalMsg],
+  dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
   key : Int,
   id : Int,
@@ -342,7 +361,7 @@ fn buffer_pending(
 /// flushed chunk goes through the normal write path, so each one is
 /// acknowledged as it renders.
 fn flush_pending(
-  dispatch : @cmd.Emit[TerminalMsg],
+  dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
   key : Int,
   id : Int,
@@ -361,7 +380,7 @@ fn flush_pending(
 /// Drop any buffer for a session that ended unclaimed, acknowledging the
 /// bytes so the host's window is released before the session's teardown.
 fn drop_pending(
-  dispatch : @cmd.Emit[TerminalMsg],
+  dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
   id : Int,
 ) -> @cmd.Cmd {
