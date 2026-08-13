@@ -75,6 +75,10 @@ pub fn State::reconcile(
   state = state.close_without_devices(input.connections.length())
   let (state, sync_command) = sync(dispatch, state, input.ctx)
   commands.push(sync_command)
+  // Output bypasses Rabbita, so refresh the terminal package's imperative
+  // session-to-emulator routing after the low-frequency state transition that
+  // can change it. This is a projection of `State`, not a second state owner.
+  commands.push(state.sync_host_routes())
   (
     {
       ..state,

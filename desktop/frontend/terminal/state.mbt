@@ -238,14 +238,6 @@ fn State::remember_active(
 pub(all) enum Msg {
   /// Show/hide the panel (every shell keeps running while hidden).
   ToggleTerminal
-  /// `terminal_output` event: base64 of raw PTY bytes plus the host-assigned
-  /// sequence echoed by the acknowledgement.
-  Output(
-    channel~ : @interop.ChannelId,
-    id~ : Int,
-    sequence~ : Int,
-    data~ : String
-  )
   /// `terminal_exit` event: the shell ended, so its tab retires.
   SessionExited(channel~ : @interop.ChannelId, id~ : Int, code~ : Int)
   /// Open one more terminal in the active conversation's workspace.
@@ -274,6 +266,4 @@ pub(all) enum Msg {
   InputFailed(message~ : String)
   /// One tab's emulator re-fit to a new grid size.
   ViewportResized(key~ : Int, cols~ : Int, rows~ : Int)
-  /// An emulator finished rendering a chunk; flow-control ack.
-  OutputRendered(channel~ : @interop.ChannelId, id~ : Int, sequence~ : Int)
 }

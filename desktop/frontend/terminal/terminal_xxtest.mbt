@@ -78,34 +78,6 @@ test "sync records color-scheme changes even when the shown tab is unchanged" {
 }
 
 ///|
-test "output acknowledgement messages leave terminal state unchanged" {
-  let emit : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
-  let ctx : Ctx = {
-    channel: @interop.ChannelId::Local,
-    session: "ack-purity",
-    workspace: None,
-    checkout: Some(@interop.WorkspaceRoot),
-    dark_mode: false,
-    connected: true,
-  }
-  let state = State::empty()
-  let (_, first) = update(
-    emit,
-    OutputRendered(channel=@interop.ChannelId::Local, id=7, sequence=11),
-    state,
-    ctx,
-  )
-  let (_, second) = update(
-    emit,
-    OutputRendered(channel=@interop.ChannelId::Local, id=7, sequence=11),
-    state,
-    ctx,
-  )
-  assert_true(first == state)
-  assert_true(second == state)
-}
-
-///|
 test "same-numbered terminal ids on different devices stay isolated" {
   let emit : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   guard @resource.of_path(@interop.ChannelId::Local, "/work/project")

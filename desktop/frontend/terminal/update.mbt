@@ -112,10 +112,7 @@ pub fn State::handle(
   // Replies queued by a retired connection cannot attach to a later PTY that
   // happens to reuse the same numeric id.
   let owner_live = match msg {
-    Opened(channel~, key=_, id=_)
-    | OutputRendered(channel~, id=_, sequence=_)
-    | Output(channel~, id=_, sequence=_, data=_)
-    | SessionExited(channel~, id=_, code=_) =>
+    Opened(channel~, key=_, id=_) | SessionExited(channel~, id=_, code=_) =>
       input.live_channels.contains(channel)
     _ => true
   }
@@ -222,16 +219,16 @@ fn update(
           tab.workspace.channel() == channel &&
           tab.status is TabOpening {
           let (cmds, state) = drop_tab(state, ctx, key)
-          cmds.push(drop_pending(dispatch, channel, id))
+          cmds.push(drop_pending(channel, id))
           (@cmd.batch(cmds), state)
         } else {
-          (drop_pending(dispatch, channel, id), state)
+          (drop_pending(channel, id), state)
         }
       } else if state.tab_by_key(key) is Some(tab) &&
         tab.workspace.channel() == channel &&
         tab.status is TabOpening {
         (
-          flush_pending(dispatch, channel, key, id),
+          flush_pending(channel, key, id),
           state.replace_tab({ ..tab, id: Some(id), status: TabRunning }),
         )
       } else {
@@ -239,10 +236,7 @@ fn update(
         // belongs to nobody, so retire it on the host connection that opened
         // it, even if another device is focused now.
         (
-          @cmd.batch([
-            send_close(channel, id),
-            drop_pending(dispatch, channel, id),
-          ]),
+          @cmd.batch([send_close(channel, id), drop_pending(channel, id)]),
           state,
         )
       }
@@ -288,27 +282,6 @@ fn update(
       } else {
         (@cmd.none, state)
       }
-    Output(channel~, id~, sequence~, data~) =>
-      match state.tab_by_id(channel, id) {
-        Some(tab) =>
-          (write_to_tab(dispatch, channel, tab.key, id, sequence, data), state)
-        // No tab claims this session yet. While an open is in flight this
-        // is almost certainly its first output racing the reply, so hold
-        // the chunk for the claim; otherwise acknowledge and drop it (an
-        // unacknowledged chunk leaks the host's flow-control window).
-        None =>
-          if state.tabs
-            .iter()
-            .any(tab => {
-              tab.workspace.channel() == channel && tab.status is TabOpening
-            }) {
-            (buffer_pending(channel, id, sequence, data), state)
-          } else {
-            (TerminalAck::{ channel, id, sequence }.send(), state)
-          }
-      }
-    OutputRendered(channel~, id~, sequence~) =>
-      (TerminalAck::{ channel, id, sequence }.send(), state)
     SessionExited(channel~, id~, code=_) =>
       match state.tab_by_id(channel, id) {
         // The shell ended (Ctrl+D, `exit`, or a crash): its tab retires,
@@ -325,7 +298,7 @@ fn update(
             }) {
             let owner = (channel, id)
             (
-              drop_pending(dispatch, channel, id),
+              drop_pending(channel, id),
               if state.exited_before_open.contains(owner) {
                 state
               } else {
@@ -336,7 +309,7 @@ fn update(
               },
             )
           } else {
-            (drop_pending(dispatch, channel, id), state)
+            (drop_pending(channel, id), state)
           }
       }
   }

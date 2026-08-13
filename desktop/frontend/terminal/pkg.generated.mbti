@@ -16,6 +16,8 @@ pub fn apply_font_size(Double) -> @cmd.Cmd
 
 pub fn component(@rabbita.Val[Input], @rabbita.Val[State], @cmd.Emit[Msg]) -> @rabbita.Val[@html.Html]
 
+pub fn output(@interop.ChannelId, Int, Int, String) -> @cmd.Cmd
+
 // Errors
 
 // Types and methods
@@ -37,7 +39,6 @@ pub fn Input::Input(ctx~ : Ctx, live_channels~ : Array[@interop.ChannelId], conn
 
 pub(all) enum Msg {
   ToggleTerminal
-  Output(channel~ : @interop.ChannelId, id~ : Int, sequence~ : Int, data~ : String)
   SessionExited(channel~ : @interop.ChannelId, id~ : Int, code~ : Int)
   NewTerminal
   TabSelected(key~ : Int)
@@ -50,7 +51,6 @@ pub(all) enum Msg {
   BinaryInput(key~ : Int, data~ : String)
   InputFailed(message~ : String)
   ViewportResized(key~ : Int, cols~ : Int, rows~ : Int)
-  OutputRendered(channel~ : @interop.ChannelId, id~ : Int, sequence~ : Int)
 }
 
 pub struct State {
