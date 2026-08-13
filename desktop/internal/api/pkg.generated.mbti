@@ -5,6 +5,7 @@ import {
   "moonbitlang/async/aqueue",
   "openseek_desktop/internal/auth",
   "openseek_desktop/internal/codex",
+  "openseek_desktop/internal/dsh",
   "openseek_desktop/internal/endpoint",
   "openseek_desktop/internal/engine",
   "openseek_desktop/internal/host",
@@ -15,12 +16,15 @@ import {
 // Values
 pub fn endpoints(ApiState, @host.HostConnection) -> Array[@endpoint.Endpoint]
 
+pub fn local_endpoints(ApiState) -> Array[@endpoint.Endpoint]
+
 // Errors
 
 // Types and methods
 type ApiState
 pub fn ApiState::auth_store(Self) -> @auth.AuthStore
 pub fn ApiState::codex_actor(Self) -> @codex.Actor
+pub fn ApiState::dsh_actor(Self) -> @dsh.Actor
 pub fn ApiState::engine_actor(Self) -> @engine.EngineActor
 pub fn ApiState::host_state(Self) -> @host.HostState
 pub fn ApiState::manager(Self) -> @engine.EngineManager

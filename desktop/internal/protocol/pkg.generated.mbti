@@ -762,6 +762,10 @@ pub fn DownloadUpdateAcceptedReply::not_equal(Self, Self) -> Bool
 pub fn DownloadUpdateAcceptedReply::to_json(Self) -> Json
 pub fn DownloadUpdateAcceptedReply::to_repr(Self) -> @debug.Repr
 
+type DshWorkspaceOwner derive(Eq)
+pub fn DshWorkspaceOwner::DshWorkspaceOwner(String) -> Self
+pub fn DshWorkspaceOwner::id(Self) -> String
+
 pub(all) enum EmptyPayload {
   NoPayload
 } derive(Eq, @debug.Debug)
@@ -1395,6 +1399,8 @@ pub(all) enum Notification {
   CodexStatusChanged(Json)
   CodexNotification(Json)
   CodexServerRequest(Json)
+  DshStatusChanged(Json)
+  DshEvent(Json)
   LspDiagnostics(DiagnosticsPayload)
   FsChanged(FsChangedPayload)
   FsWatchFailed(FsWatchFailedPayload)
@@ -1430,6 +1436,8 @@ pub(all) enum NotificationKind {
   CodexStatusChanged
   CodexNotification
   CodexServerRequest
+  DshStatusChanged
+  DshEvent
   LspDiagnostics
   FsChanged
   FsWatchFailed

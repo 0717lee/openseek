@@ -186,6 +186,20 @@ fn bridge_msg(
       } else {
         None
       }
+    // dsh is a native Desktop-only source. The host never relays these
+    // notifications, but keep the Local guard explicit at the frontend edge.
+    DshStatusChanged(payload) =>
+      if channel is Local {
+        Some(Dsh(@dsh.Msg::status_changed(payload)))
+      } else {
+        None
+      }
+    DshEvent(payload) =>
+      if channel is Local {
+        Some(Dsh(@dsh.Msg::event(payload)))
+      } else {
+        None
+      }
     _ => device_msg(channel, notification).map(msg => FromDevice(channel, msg))
   }
 }
@@ -365,7 +379,7 @@ fn proton_event_methods() -> Array[@protocol.NotificationKind] {
 }
 
 ///|
-test "proton subscribes to all Codex app-server events" {
+test "proton subscribes to local Codex and dsh events" {
   assert_true(
     proton_event_methods().contains(
       @protocol.NotificationKind::CodexStatusChanged,
@@ -391,6 +405,21 @@ test "proton subscribes to all Codex app-server events" {
       }),
     )
     is Some(Codex(channel=Local, _)),
+  )
+  assert_true(
+    proton_event_methods().contains(
+      @protocol.NotificationKind::DshStatusChanged,
+    ),
+  )
+  assert_true(
+    proton_event_methods().contains(@protocol.NotificationKind::DshEvent),
+  )
+  assert_true(
+    bridge_msg(
+      Local,
+      @protocol.Notification::DshEvent({ "stream": "host", "message": {} }),
+    )
+    is Some(Dsh(_)),
   )
 }
 

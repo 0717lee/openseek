@@ -1,0 +1,18 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "openseek_desktop/internal/dsh"
+
+// Values
+
+// Errors
+
+// Types and methods
+type Actor
+pub fn Actor::Actor() -> Self
+pub async fn Actor::call(Self, method_~ : String, payload~ : Json) -> Json
+pub async fn Actor::respond(Self, Json) -> Json
+pub async fn Actor::run(Self, (String, Json) -> Unit) -> Unit
+pub fn Actor::status(Self) -> Json
+
+// Type aliases
+
+// Traits

@@ -4,6 +4,7 @@
 pub(all) enum Source {
   OpenSeek
   Codex
+  Dsh
 } derive(Eq)
 
 ///|
@@ -11,6 +12,7 @@ fn Source::wire(self : Source) -> String {
   match self {
     OpenSeek => "openseek"
     Codex => "codex"
+    Dsh => "dsh"
   }
 }
 

@@ -18,6 +18,7 @@ import {
   "openseek_desktop/internal/commands",
   "openseek_desktop/frontend/dock",
   "openseek_desktop/frontend/codex",
+  "openseek_desktop/frontend/dsh",
   "openseek_desktop/frontend/composer",
   "openseek_desktop/frontend/fileeditor",
   "openseek_desktop/frontend/files",

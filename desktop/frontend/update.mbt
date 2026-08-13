@@ -830,17 +830,17 @@ fn reveal_local_directory(
 }
 
 ///|
-/// Bring a path into the workspace shown on screen. Codex file mentions come
-/// from app-server's fuzzy search and are normally already relative; an
-/// absolute value is accepted only inside the selected Codex thread's cwd.
+/// Bring a path into the workspace shown on screen. Codex and dsh file
+/// mentions are normally already relative; an absolute value is accepted only
+/// inside the selected external conversation's resolved checkout.
 fn Model::active_relative_path(self : Model, path : String) -> @pathx.Relative? {
-  if self.screen is Codex {
+  if self.screen is Codex || self.screen is Dsh {
     guard self.active_checkout() is Some(active) &&
       active.placement is Some(placement) &&
       placement.checkout_root() is Some(workspace) else {
       return None
     }
-    if @resource.of_path(self.focused, path) is Some(absolute) {
+    if @resource.of_path(active.owner.channel, path) is Some(absolute) {
       guard @resource.relative_to(absolute, workspace) is Some(rest) &&
         !rest.is_root() else {
         return None
@@ -1254,7 +1254,7 @@ fn apply_engine_event(
 }
 
 ///|
-/// The selected OpenSeek conversation or Codex task, with its single resolved
+/// The selected OpenSeek, Codex, or dsh conversation with its single resolved
 /// directory placement. Owner identity remains separate because it fences
 /// asynchronous replies even while placement is unresolved or missing.
 priv struct ActiveCheckout {
@@ -1267,6 +1267,22 @@ priv struct ActiveCheckout {
 /// and language services. This is the only screen-dependent directory choice;
 /// downstream packages merely project roots from `placement`.
 fn Model::active_checkout(self : Model) -> ActiveCheckout? {
+  if self.screen is Dsh {
+    guard self.dsh.active_id() is Some(session) else { return None }
+    let placement = self.dsh
+      .active_workspace_path()
+      .bind(path => @resource.of_path(@interop.ChannelId::Local, path))
+      .map(root => @interop.WorkspaceRoot(root~))
+    return Some({
+      owner: {
+        channel: @interop.ChannelId::Local,
+        // Namespace the dsh session before it enters shared host services.
+        // The backend authorizes this exact owner from `workspace.list`.
+        session: @protocol.DshWorkspaceOwner(session).id(),
+      },
+      placement,
+    })
+  }
   if self.screen is Codex {
     guard self.codex.active_id() is Some(session) else { return None }
     return Some({
@@ -1324,7 +1340,11 @@ fn file_ctx(model : Model) -> @fileeditor.Ctx {
     // file body in all three cases. Report actual visibility so the file
     // subsystem parks its workspace watches and Changes refreshes off-screen.
     panel_open: model.right_panel_open &&
-    (model.screen is Codex || (model.screen is Chat && file_body_visible)),
+    (
+      model.screen is Codex ||
+      model.screen is Dsh ||
+      (model.screen is Chat && file_body_visible)
+    ),
     open_files: @dock.file_paths(model.dock),
     active_file: @dock.active_file(model.dock),
     open_history_diffs: @dock.history_diffs(model.dock),
@@ -1408,11 +1428,13 @@ fn covering_overlay(model : Model) -> Bool {
 /// launcher, the composer's git popover, and every `covering_overlay` — must
 /// hide the view rather than fight it.
 fn desired_browser_view(model : Model) -> Int? {
-  let conversation_screen = model.screen is Chat || model.screen is Codex
+  let conversation_screen = model.screen is Chat ||
+    model.screen is Codex ||
+    model.screen is Dsh
   let git_details_open = match model.screen {
     Chat => model.git_details_open
     Codex => model.codex.git_details_open()
-    Skills | Settings | WorkspaceSettings(..) => false
+    Dsh | Skills | Settings | WorkspaceSettings(..) => false
   }
   guard model.is_desktop &&
     conversation_screen &&
@@ -2960,6 +2982,95 @@ fn update_msg(
       )
       (cmd, { ..model, codex, })
     }
+    OpenDsh => {
+      let (cmd, dsh) = @dsh.update(
+        dispatch.map(msg => Dsh(msg)),
+        @dsh.Msg::refresh(),
+        model.dsh,
+      )
+      (
+        cmd,
+        {
+          ..model,
+          screen: Dsh,
+          sidebar_open: model.sidebar_open && !model.narrow,
+          dsh,
+        },
+      )
+    }
+    DshNewSession => {
+      // Prefer dsh's selected Workspace. If dsh has none yet, an explicitly
+      // selected local OpenSeek project may seed one; a remote path never can.
+      let dsh_msg = if model.dsh.preferred_workspace_id() is Some(workspace_id) {
+        @dsh.Msg::new_session(Some(workspace_id))
+      } else {
+        let local_path = model
+          .device_state(@interop.ChannelId::Local)
+          .bind(dev => dev.active_project)
+          .bind(project => {
+            @resource.path_for(project, @interop.ChannelId::Local)
+          })
+        if local_path is Some(path) {
+          @dsh.Msg::new_workspace_session(path)
+        } else {
+          @dsh.Msg::new_session(None)
+        }
+      }
+      let (cmd, dsh) = @dsh.update(
+        dispatch.map(msg => Dsh(msg)),
+        dsh_msg,
+        model.dsh,
+      )
+      (
+        cmd,
+        {
+          ..model,
+          screen: Dsh,
+          sidebar_open: model.sidebar_open && !model.narrow,
+          dsh,
+        },
+      )
+    }
+    DshNewSessionIn(workspace_id) => {
+      let (cmd, dsh) = @dsh.update(
+        dispatch.map(msg => Dsh(msg)),
+        @dsh.Msg::new_session(Some(workspace_id)),
+        model.dsh,
+      )
+      (
+        cmd,
+        {
+          ..model,
+          screen: Dsh,
+          sidebar_open: model.sidebar_open && !model.narrow,
+          dsh,
+        },
+      )
+    }
+    DshOpenSession(session_id) => {
+      let (cmd, dsh) = @dsh.update(
+        dispatch.map(msg => Dsh(msg)),
+        @dsh.Msg::open_session(session_id),
+        model.dsh,
+      )
+      (
+        cmd,
+        {
+          ..model,
+          screen: Dsh,
+          sidebar_open: model.sidebar_open && !model.narrow,
+          dsh,
+        },
+      )
+    }
+    Dsh(msg) => {
+      let (cmd, dsh) = @dsh.update(
+        dispatch.map(next => Dsh(next)),
+        msg,
+        model.dsh,
+      )
+      (cmd, { ..model, dsh, })
+    }
     ToggleSidebar => (@cmd.none, { ..model, sidebar_open: !model.sidebar_open })
     ViewportResized(width~) => {
       let narrow = width <= NarrowBreakpoint
@@ -4397,7 +4508,7 @@ fn update_msg(
       // provider. Settings' device-page link is the clearest external case:
       // it wants the browser where the user is already signed in.
       if model.is_desktop &&
-        (model.screen is Chat || model.screen is Codex) &&
+        (model.screen is Chat || model.screen is Codex || model.screen is Dsh) &&
         @preview.is_web_url(url) {
         // Opening or reusing a Browser tab is a newer dock navigation than a
         // transcript text-file link still waiting on `host.open_path`. Spend the

@@ -133,6 +133,7 @@ fn TranscriptRenderer::insert_row(
       assistant_name=match self.input.source {
         OpenSeek => "OpenSeek"
         Codex => "Codex"
+        Dsh => "DeepSeek Harness"
       },
     ),
   )
@@ -172,10 +173,17 @@ fn TranscriptRenderer::stream_children(
             match self.input.source {
               OpenSeek => @icons.icon_logo
               Codex => @icons.icon_sparkle
+              Dsh => @icons.icon_sparkle
             },
           ),
         ]),
-        @html.div(class="empty-title", "What should we build?"),
+        @html.div(
+          class="empty-title",
+          match self.input.source {
+            OpenSeek | Codex => "What should we build?"
+            Dsh => "What should DeepSeek Harness do?"
+          },
+        ),
         @html.div(
           class="empty-sub",
           match self.input.source {
@@ -183,6 +191,8 @@ fn TranscriptRenderer::stream_children(
               "SeekMoon plans the work, edits files across your workspace, runs your tests, and hands back a reviewable result."
             Codex =>
               "Codex inspects, edits, and runs this workspace with its own account, sandbox, and approvals."
+            Dsh =>
+              "DeepSeek Harness runs through its local HTTP and WebSocket API in this Desktop process."
           },
         ),
       ]),
@@ -288,6 +298,7 @@ fn TranscriptRenderer::stream_children(
         assistant_name=match self.input.source {
           OpenSeek => "OpenSeek"
           Codex => "Codex"
+          Dsh => "DeepSeek Harness"
         },
       ),
     )

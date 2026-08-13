@@ -947,6 +947,7 @@ priv struct BufferedCommit {
 priv enum Screen {
   Chat
   Codex
+  Dsh
   Skills
   Settings
   WorkspaceSettings(channel~ : @interop.ChannelId, workspace~ : @common.Uri)
@@ -1295,6 +1296,9 @@ priv struct Model {
   // its page state beside the screen selector instead of folding it into an
   // OpenSeek Conversation, whose persistence and event protocol are different.
   codex : @codex.State
+  // DeepSeek Harness owns a separate local Workspace/session model. Keep it
+  // beside Codex instead of pretending its records are OpenSeek conversations.
+  dsh : @dsh.State
   // The Skills page's own state — the registry catalog, the search filter,
   // in-flight actions, the last failure — which only that page can see.
   skills : @skills.State
@@ -1627,6 +1631,13 @@ priv enum Msg {
   // Every async Codex request and host event retains its source device. The
   // root rejects it after focus moves instead of applying it to another host.
   Codex(channel~ : @interop.ChannelId, @codex.Msg)
+  // DeepSeek Harness is process-local and therefore available only from the
+  // native Desktop surface.
+  OpenDsh
+  DshNewSession
+  DshNewSessionIn(String)
+  DshOpenSession(String)
+  Dsh(@dsh.Msg)
   ToggleSidebar
   // A Settings selection fixes the page to Light or Dark and persists it.
   ThemeChanged(String)
@@ -2339,6 +2350,7 @@ fn initial_model() -> Model {
     archived_delete_confirm: None,
     screen: Chat,
     codex: @codex.State(),
+    dsh: @dsh.State(),
     skills: @skills.State::empty(),
     installed_skills: [],
     composer_context_generation: 0,

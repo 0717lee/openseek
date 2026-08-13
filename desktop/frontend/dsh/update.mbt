@@ -1,0 +1,984 @@
+// All dsh-local transitions. Full ApiProxy envelopes and WebSocket frames are
+// decoded here, never in the root OpenSeek model.
+
+///|
+pub fn update(
+  dispatch : @cmd.Emit[Msg],
+  msg : Msg,
+  state : State,
+) -> (@cmd.Cmd, State) {
+  match msg {
+    Refresh => (state.refresh(dispatch), { ..state, loading: true, notice: "" })
+    NewSession(workspace_id) =>
+      if workspace_id is Some(workspace_id) {
+        (
+          state.create_session(dispatch, workspace_id),
+          { ..state, loading: true, notice: "" },
+        )
+      } else {
+        (
+          @cmd.none,
+          {
+            ..state,
+            loading: false,
+            notice: "Create or select a DeepSeek Harness workspace first",
+          },
+        )
+      }
+    NewWorkspaceSession(path) =>
+      if path.trim().is_empty() {
+        (
+          @cmd.none,
+          {
+            ..state,
+            loading: false,
+            notice: "Cannot create a DeepSeek Harness workspace without a path",
+          },
+        )
+      } else {
+        (
+          state.create_workspace_session(dispatch, path),
+          { ..state, loading: true, notice: "" },
+        )
+      }
+    OpenSession(session_id) =>
+      (
+        state.load_history(dispatch, session_id),
+        {
+          ..state,
+          active_id: Some(session_id),
+          events: [],
+          streaming: "",
+          loading: true,
+          notice: "",
+        },
+      )
+    DraftChanged(value) => (@cmd.none, { ..state, draft: value })
+    Send =>
+      if state.loading || state.draft.trim().is_empty() || !state.has_active() {
+        (@cmd.none, state)
+      } else {
+        (state.send(dispatch), { ..state, loading: true, notice: "" })
+      }
+    Stop =>
+      if state.loading || !state.is_running() {
+        (@cmd.none, state)
+      } else {
+        (state.cancel(dispatch), { ..state, loading: true, notice: "" })
+      }
+    ApprovalDecision(rpc_id~, outcome~) =>
+      match state.pending_for_rpc(rpc_id) {
+        Some(pending) =>
+          (
+            state.respond_approval(
+              dispatch,
+              rpc_id,
+              if outcome == "allowed-once" {
+                "allowed-once"
+              } else {
+                "rejected"
+              },
+              pending,
+            ),
+            { ..state, loading: true, notice: "" },
+          )
+        None => (@cmd.none, state)
+      }
+    QuestionOption(rpc_id~, question_id~, label~) =>
+      (@cmd.none, state.with_question_option(rpc_id, question_id, label))
+    QuestionCustom(rpc_id~, question_id~, value~) =>
+      (@cmd.none, state.with_question_custom(rpc_id, question_id, value))
+    SubmitQuestions(rpc_id) =>
+      match state.pending_for_rpc(rpc_id) {
+        Some(pending) if pending.questions_answered() =>
+          (
+            state.respond_questions(dispatch, rpc_id, pending),
+            { ..state, loading: true, notice: "" },
+          )
+        _ => (@cmd.none, state)
+      }
+    Reply(kind~, value~) => state.with_reply(dispatch, kind, value)
+    Failed(kind~, message~) =>
+      (
+        @cmd.none,
+        {
+          ..state,
+          connection: if kind is DshStatusReply {
+            DshUnavailable(message)
+          } else {
+            state.connection
+          },
+          loading: false,
+          notice: message,
+        },
+      )
+    StatusChanged(value) => state.with_status(dispatch, value)
+    Event(value) => state.with_event(dispatch, value)
+  }
+}
+
+///|
+fn State::with_reply(
+  self : State,
+  dispatch : @cmd.Emit[Msg],
+  kind : DshReplyKind,
+  reply : Json,
+) -> (@cmd.Cmd, State) {
+  if kind is DshStatusReply {
+    return self.with_status(dispatch, reply)
+  }
+  if kind is DshResponseReply(rpc_id) {
+    let receipt = DshResponseReceipt(reply)
+    guard receipt.accepted() else {
+      return (@cmd.none, { ..self, loading: false, notice: receipt.error() })
+    }
+    return (
+      @cmd.none,
+      {
+        ..self,
+        pending: self.pending.filter(item => item.rpc_id() != rpc_id),
+        loading: false,
+      },
+    )
+  }
+  let envelope = DshEnvelope(reply)
+  guard envelope.value() is Some(value) else {
+    return (@cmd.none, { ..self, loading: false, notice: envelope.error() })
+  }
+  match kind {
+    DshWorkspacesReply => {
+      let workspaces : Array[DshWorkspaceRow] = []
+      if value is Object(fields) && fields.get("items") is Some(Array(items)) {
+        for item in items {
+          if DshWorkspaceRow::decode(item) is Some(workspace) {
+            workspaces.push(workspace)
+          }
+        }
+      }
+      (
+        @cmd.none,
+        { ..self, connection: DshReady, workspaces, loading: false, notice: "" },
+      )
+    }
+    DshWorkspaceCreateReply => {
+      guard value is Object(fields) &&
+        fields.get("workspace") is Some(Object(workspace)) &&
+        @jsonx.json_text(workspace, "workspaceId") is Some(workspace_id) else {
+        return (
+          @cmd.none,
+          {
+            ..self,
+            loading: false,
+            notice: "DeepSeek Harness returned a malformed workspace.create reply",
+          },
+        )
+      }
+      (
+        @cmd.batch([
+          DshWorkspacesReply.request(dispatch, "workspace.list", {}),
+          self.create_session(dispatch, workspace_id),
+        ]),
+        { ..self, loading: true, notice: "" },
+      )
+    }
+    DshSessionsReply => {
+      let sessions : Array[DshSessionRow] = []
+      if value is Object(fields) && fields.get("items") is Some(Array(items)) {
+        for item in items {
+          if DshSessionRow::decode(item) is Some(row) {
+            sessions.push(row)
+          }
+        }
+      }
+      let active_id = match self.active_id {
+        Some(id) if sessions.iter().any(row => row.id == id) => Some(id)
+        _ => sessions.get(0).map(row => row.id)
+      }
+      let next = {
+        ..self,
+        connection: DshReady,
+        sessions,
+        active_id,
+        loading: false,
+        notice: "",
+      }
+      match active_id {
+        Some(id) if self.active_id != Some(id) =>
+          (
+            next.load_history(dispatch, id),
+            { ..next, events: [], streaming: "", loading: true },
+          )
+        _ => (@cmd.none, next)
+      }
+    }
+    DshCreateReply => {
+      guard value is Object(fields) &&
+        @jsonx.json_text(fields, "sessionId") is Some(session_id) else {
+        return (
+          @cmd.none,
+          {
+            ..self,
+            loading: false,
+            notice: "DeepSeek Harness returned a malformed session.create reply",
+          },
+        )
+      }
+      let next = {
+        ..self,
+        active_id: Some(session_id),
+        events: [],
+        streaming: "",
+        loading: true,
+        notice: "",
+      }
+      (
+        @cmd.batch([
+          DshWorkspacesReply.request(dispatch, "workspace.list", {}),
+          DshSessionsReply.request(dispatch, "session.list", {}),
+          next.load_history(dispatch, session_id),
+        ]),
+        next,
+      )
+    }
+    DshHistoryReply(session_id) => {
+      guard self.active_id == Some(session_id) else { return (@cmd.none, self) }
+      let events : Array[DshEventRecord] = []
+      if value is Object(fields) && fields.get("events") is Some(Array(entries)) {
+        for entry in entries {
+          if entry is Object(entry_fields) &&
+            entry_fields.get("event") is Some(event) &&
+            DshEventRecord::decode(event) is Some(decoded) {
+            events.push(decoded)
+          }
+        }
+      }
+      // A live WebSocket event can arrive while this HTTP snapshot is in
+      // flight. Merge by dsh's per-session seq before replacing the view so a
+      // slower history reply cannot roll that event back out of the page.
+      // Older entries absent from the newest-200 window stay absent instead
+      // of making this bounded page grow forever across refreshes.
+      let snapshot_last = events
+        .iter()
+        .fold(init=-1, (last, event) => {
+          if event.seq > last {
+            event.seq
+          } else {
+            last
+          }
+        })
+      for event in self.events {
+        if event.seq > snapshot_last &&
+          !events.iter().any(item => item.seq == event.seq) {
+          events.push(event)
+        }
+      }
+      events.sort_by((left, right) => left.seq - right.seq)
+      (
+        @cmd.none,
+        {
+          ..self,
+          streaming: DshEventLog(events).streaming_text(),
+          events,
+          loading: false,
+          notice: "",
+        },
+      )
+    }
+    DshPromptReply => {
+      let cmd = match self.active_id {
+        Some(session_id) => self.load_history(dispatch, session_id)
+        None => @cmd.none
+      }
+      (cmd, { ..self, draft: "", loading: false, notice: "" })
+    }
+    DshCancelReply => (@cmd.none, { ..self, loading: false, notice: "" })
+    DshStatusReply | DshResponseReply(_) => (@cmd.none, self)
+  }
+}
+
+///|
+fn State::with_status(
+  self : State,
+  dispatch : @cmd.Emit[Msg],
+  value : Json,
+) -> (@cmd.Cmd, State) {
+  guard value is Object(fields) &&
+    @jsonx.json_text(fields, "status") is Some(status) else {
+    return (
+      @cmd.none,
+      {
+        ..self,
+        connection: DshUnavailable("Malformed dsh status"),
+        loading: false,
+      },
+    )
+  }
+  match status {
+    "ready" =>
+      (
+        @cmd.batch([
+          DshWorkspacesReply.request(dispatch, "workspace.list", {}),
+          DshSessionsReply.request(dispatch, "session.list", {}),
+        ]),
+        { ..self, connection: DshReady, loading: true, notice: "" },
+      )
+    "starting" =>
+      (@cmd.none, { ..self, connection: DshStarting, loading: false })
+    _ => {
+      let message = @jsonx.json_text(fields, "message").unwrap_or(
+        "DeepSeek Harness is unavailable",
+      )
+      (
+        @cmd.none,
+        {
+          ..self,
+          connection: DshUnavailable(message),
+          loading: false,
+          notice: message,
+        },
+      )
+    }
+  }
+}
+
+///|
+fn State::with_event(
+  self : State,
+  dispatch : @cmd.Emit[Msg],
+  value : Json,
+) -> (@cmd.Cmd, State) {
+  guard value is Object(wrapper) &&
+    wrapper.get("message") is Some(Object(message)) &&
+    @jsonx.json_text(message, "rpcId") is Some(rpc_id) &&
+    message.get("payload") is Some(Object(payload)) &&
+    @jsonx.json_text(payload, "type") is Some(type_) else {
+    return (@cmd.none, self)
+  }
+  match type_ {
+    "session/subscribed" => {
+      // This is dsh's per-session stream baseline. Re-read the selected tail
+      // after every WebSocket generation so a reconnect repairs any events
+      // that landed between the old stream closing and the process stopping.
+      guard @jsonx.json_text(payload, "sessionId") is Some(session_id) &&
+        self.active_id == Some(session_id) else {
+        return (@cmd.none, self)
+      }
+      (self.load_history(dispatch, session_id), { ..self, loading: true })
+    }
+    "session/event" => {
+      guard @jsonx.json_text(payload, "sessionId") is Some(session_id) &&
+        payload.get("event") is Some(event_json) &&
+        DshEventRecord::decode(event_json) is Some(event) else {
+        return (@cmd.none, self)
+      }
+      let sessions = self.sessions.map(row => {
+        if row.id == session_id && row.blank {
+          { ..row, blank: false }
+        } else {
+          row
+        }
+      })
+      if self.active_id != Some(session_id) {
+        return (@cmd.none, { ..self, sessions, })
+      }
+      let events = self.events.copy()
+      if !events.iter().any(item => item.seq == event.seq) {
+        events.push(event)
+      }
+      events.sort_by((left, right) => left.seq - right.seq)
+      let streaming = DshEventLog(events).streaming_text()
+      (@cmd.none, { ..self, sessions, events, streaming })
+    }
+    "host/session-status" => {
+      guard @jsonx.json_text(payload, "sessionId") is Some(session_id) &&
+        @jsonx.json_bool(payload, "running") is Some(running) else {
+        return (@cmd.none, self)
+      }
+      let sessions = self.sessions.map(row => {
+        if row.id == session_id {
+          { ..row, running, blank: if running { false } else { row.blank } }
+        } else {
+          row
+        }
+      })
+      (@cmd.none, { ..self, sessions, loading: false })
+    }
+    "host/session-added" =>
+      (
+        @cmd.batch([
+          DshWorkspacesReply.request(dispatch, "workspace.list", {}),
+          DshSessionsReply.request(dispatch, "session.list", {}),
+        ]),
+        { ..self, loading: true },
+      )
+    "host/session-removed" => {
+      guard @jsonx.json_text(payload, "sessionId") is Some(session_id) else {
+        return (@cmd.none, self)
+      }
+      let sessions = self.sessions.filter(row => row.id != session_id)
+      let removed_active = self.active_id == Some(session_id)
+      let active_id = if removed_active {
+        sessions.get(0).map(row => row.id)
+      } else {
+        self.active_id
+      }
+      (
+        @cmd.batch([
+          DshWorkspacesReply.request(dispatch, "workspace.list", {}),
+          match active_id {
+            Some(id) if active_id != self.active_id =>
+              self.load_history(dispatch, id)
+            _ => @cmd.none
+          },
+        ]),
+        {
+          ..self,
+          sessions,
+          active_id,
+          events: if removed_active {
+            []
+          } else {
+            self.events
+          },
+          streaming: if removed_active {
+            ""
+          } else {
+            self.streaming
+          },
+          pending: self.pending.filter(item => item.session_id() != session_id),
+          loading: if removed_active {
+            active_id is Some(_)
+          } else {
+            self.loading
+          },
+        },
+      )
+    }
+    "host/agent-error" => {
+      guard @jsonx.json_text(payload, "sessionId") is Some(session_id) &&
+        self.active_id == Some(session_id) else {
+        return (@cmd.none, self)
+      }
+      let message = @jsonx.json_text(payload, "message").unwrap_or(
+        "DeepSeek Harness agent failed",
+      )
+      (@cmd.none, { ..self, loading: false, notice: message })
+    }
+    "session/projection" => {
+      guard @jsonx.json_text(payload, "sessionId") is Some(session_id) &&
+        @jsonx.json_text(payload, "key") == Some("title") &&
+        payload.get("value") is Some(String(title)) else {
+        return (@cmd.none, self)
+      }
+      let sessions = self.sessions.map(row => {
+        if row.id == session_id && !title.trim().is_empty() {
+          { ..row, title, }
+        } else {
+          row
+        }
+      })
+      (@cmd.none, { ..self, sessions, })
+    }
+    "host/workspace-changed" | "host/workspace-removed" =>
+      (
+        DshWorkspacesReply.request(dispatch, "workspace.list", {}),
+        { ..self, loading: true },
+      )
+    "approval/requested" => {
+      guard @jsonx.json_text(payload, "sessionId") is Some(session_id) &&
+        @jsonx.json_text(payload, "approvalId") is Some(approval_id) &&
+        @jsonx.json_text(payload, "toolName") is Some(tool_name) else {
+        return (@cmd.none, self)
+      }
+      let pending = self.pending.filter(item => item.rpc_id() != rpc_id)
+      pending.push(
+        DshApproval(
+          rpc_id~,
+          session_id~,
+          approval_id~,
+          tool_name~,
+          reason=@jsonx.json_text(payload, "reason").unwrap_or(""),
+        ),
+      )
+      (@cmd.none, { ..self, pending, })
+    }
+    "approval/resolved" => {
+      guard @jsonx.json_text(payload, "approvalId") is Some(approval_id) else {
+        return (@cmd.none, self)
+      }
+      (
+        @cmd.none,
+        {
+          ..self,
+          pending: self.pending.filter(item => {
+            !item.matches_approval(approval_id)
+          }),
+          loading: false,
+        },
+      )
+    }
+    "question/requested" => {
+      guard @jsonx.json_text(payload, "sessionId") is Some(session_id) &&
+        payload.get("questions") is Some(Array(values)) else {
+        return (@cmd.none, self)
+      }
+      let questions : Array[DshQuestion] = []
+      let answers : Map[String, DshQuestionAnswer] = Map([])
+      for value in values {
+        if DshQuestion::decode(value) is Some(question) {
+          answers[question.id] = DshQuestionAnswer::empty()
+          questions.push(question)
+        }
+      }
+      let pending = self.pending.filter(item => item.rpc_id() != rpc_id)
+      pending.push(DshQuestions(rpc_id~, session_id~, questions~, answers~))
+      (@cmd.none, { ..self, pending, })
+    }
+    "question/resolved" => {
+      let question_rpc_id = @jsonx.json_text(payload, "questionRpcId").unwrap_or(
+        rpc_id,
+      )
+      (
+        @cmd.none,
+        {
+          ..self,
+          pending: self.pending.filter(item => item.rpc_id() != question_rpc_id),
+          loading: false,
+        },
+      )
+    }
+    "stream/error" =>
+      (
+        @cmd.none,
+        { ..self, notice: "DeepSeek Harness event stream reported an error" },
+      )
+    _ => (@cmd.none, self)
+  }
+}
+
+///|
+fn DshEventRecord::streaming_delta(self : DshEventRecord) -> String? {
+  guard self.type_ == "assistant/chunk" &&
+    self.data is Object(data) &&
+    data.get("chunk") is Some(Object(chunk)) &&
+    @jsonx.json_text(chunk, "type") == Some("text-delta") else {
+    return None
+  }
+  @jsonx.json_text(chunk, "text")
+}
+
+///|
+priv struct DshEventLog(Array[DshEventRecord])
+
+///|
+fn DshEventLog::streaming_text(self : DshEventLog) -> String {
+  let mut text = ""
+  for event in self.0 {
+    if event.type_ == "assistant/message" && event.surface_append == Some(true) {
+      text = ""
+    } else if event.streaming_delta() is Some(delta) {
+      text += delta
+    }
+  }
+  text
+}
+
+///|
+fn DshPendingInteraction::rpc_id(self : DshPendingInteraction) -> String {
+  match self {
+    DshApproval(rpc_id~, ..) | DshQuestions(rpc_id~, ..) => rpc_id
+  }
+}
+
+///|
+fn DshPendingInteraction::session_id(self : DshPendingInteraction) -> String {
+  match self {
+    DshApproval(session_id~, ..) | DshQuestions(session_id~, ..) => session_id
+  }
+}
+
+///|
+fn DshPendingInteraction::matches_approval(
+  self : DshPendingInteraction,
+  approval_id : String,
+) -> Bool {
+  self is DshApproval(approval_id=matched, ..) && matched == approval_id
+}
+
+///|
+fn DshPendingInteraction::questions_answered(
+  self : DshPendingInteraction,
+) -> Bool {
+  guard self is DshQuestions(questions~, answers~, ..) else { return false }
+  questions
+  .iter()
+  .all(question => {
+    let answer = answers
+      .get(question.id)
+      .unwrap_or_else(() => DshQuestionAnswer::empty())
+    !answer.selected.is_empty() || !answer.custom.trim().is_empty()
+  })
+}
+
+///|
+fn State::pending_for_rpc(
+  self : State,
+  rpc_id : String,
+) -> DshPendingInteraction? {
+  self.pending.iter().find_first(item => item.rpc_id() == rpc_id)
+}
+
+///|
+fn State::with_question_option(
+  self : State,
+  rpc_id : String,
+  question_id : String,
+  label : String,
+) -> State {
+  let pending = self.pending.copy()
+  for index, item in pending {
+    guard item
+      is DshQuestions(rpc_id=matched, session_id~, questions~, answers~) &&
+      matched == rpc_id &&
+      questions.iter().find_first(question => question.id == question_id)
+      is Some(question) else {
+      continue
+    }
+    let next_answers : Map[String, DshQuestionAnswer] = Map([])
+    for id, answer in answers {
+      next_answers[id] = { ..answer, selected: answer.selected.copy() }
+    }
+    let answer = next_answers
+      .get(question_id)
+      .unwrap_or_else(() => DshQuestionAnswer::empty())
+    let selected = if question.multi_select {
+      if answer.selected.contains(label) {
+        answer.selected.filter(value => value != label)
+      } else {
+        [..answer.selected, label]
+      }
+    } else {
+      [label]
+    }
+    // dsh's single-select contract makes an option and custom text mutually
+    // exclusive. Choosing an option therefore clears a prior custom answer.
+    next_answers[question_id] = {
+      selected,
+      custom: if question.multi_select {
+        answer.custom
+      } else {
+        ""
+      },
+    }
+    pending[index] = DshQuestions(
+      rpc_id=matched,
+      session_id~,
+      questions~,
+      answers=next_answers,
+    )
+    break
+  }
+  { ..self, pending, }
+}
+
+///|
+fn State::with_question_custom(
+  self : State,
+  rpc_id : String,
+  question_id : String,
+  value : String,
+) -> State {
+  let pending = self.pending.copy()
+  for index, item in pending {
+    guard item
+      is DshQuestions(rpc_id=matched, session_id~, questions~, answers~) &&
+      matched == rpc_id &&
+      questions.iter().find_first(question => question.id == question_id)
+      is Some(question) else {
+      continue
+    }
+    let next_answers : Map[String, DshQuestionAnswer] = Map([])
+    for id, answer in answers {
+      next_answers[id] = { ..answer, selected: answer.selected.copy() }
+    }
+    let answer = next_answers
+      .get(question_id)
+      .unwrap_or_else(() => DshQuestionAnswer::empty())
+    // Entering a custom single-select answer clears the selected option, as
+    // required by dsh's QuestionResponsePayload validator.
+    next_answers[question_id] = {
+      selected: if !question.multi_select && !value.trim().is_empty() {
+        []
+      } else {
+        answer.selected
+      },
+      custom: value,
+    }
+    pending[index] = DshQuestions(
+      rpc_id=matched,
+      session_id~,
+      questions~,
+      answers=next_answers,
+    )
+    break
+  }
+  { ..self, pending, }
+}
+
+///|
+test "dsh workspace membership supplies the active editor root" {
+  let state = {
+    ..State(),
+    sessions: [
+      {
+        id: "session-1",
+        title: "First",
+        cwd: Some("/display-only"),
+        running: false,
+        blank: false,
+      },
+      {
+        id: "session-2",
+        title: "Ungrouped",
+        cwd: Some("/must-not-authorize"),
+        running: false,
+        blank: false,
+      },
+    ],
+    active_id: Some("session-1"),
+  }
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let (_, grouped) = state.with_reply(dispatch, DshWorkspacesReply, {
+    "type": "server-response",
+    "rpcId": "workspace-list-1",
+    "result": {
+      "ok": true,
+      "value": {
+        "items": [
+          {
+            "workspaceId": "workspace-1",
+            "title": "Project",
+            "path": "/canonical/project",
+            "sessionIds": ["session-1"],
+          },
+        ],
+        "archivedSessionIds": [],
+      },
+    },
+  })
+  assert_eq(grouped.preferred_workspace_id(), Some("workspace-1"))
+  assert_eq(grouped.active_workspace_path(), Some("/canonical/project"))
+  let ungrouped = { ..grouped, active_id: Some("session-2") }
+  assert_eq(ungrouped.preferred_workspace_id(), Some("workspace-1"))
+  assert_true(ungrouped.active_workspace_path() is None)
+}
+
+///|
+test "dsh session creation requires an explicit workspace id" {
+  let state = { ..State(), connection: DshReady }
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let (_, next) = update(dispatch, NewSession(None), state)
+  assert_false(next.loading)
+  assert_eq(next.notice, "Create or select a DeepSeek Harness workspace first")
+  assert_true(next.workspaces == state.workspaces)
+  assert_true(next.sessions == state.sessions)
+}
+
+///|
+test "dsh event log rebuilds only the unfinished assistant text" {
+  let events : Array[DshEventRecord] = [
+    {
+      type_: "assistant/chunk",
+      seq: 1,
+      time: None,
+      data: { "chunk": { "type": "text-delta", "text": "old" } },
+      surface_append: None,
+    },
+    {
+      type_: "assistant/message",
+      seq: 2,
+      time: None,
+      data: {},
+      surface_append: Some(true),
+    },
+    {
+      type_: "assistant/chunk",
+      seq: 3,
+      time: None,
+      data: { "chunk": { "type": "text-delta", "text": "new " } },
+      surface_append: None,
+    },
+    {
+      type_: "assistant/chunk",
+      seq: 4,
+      time: None,
+      data: { "chunk": { "type": "text-delta", "text": "text" } },
+      surface_append: None,
+    },
+  ]
+  assert_eq(DshEventLog(events).streaming_text(), "new text")
+}
+
+///|
+test "dsh history keeps post-snapshot events without retaining an old window" {
+  let state = {
+    ..State(),
+    active_id: Some("session-1"),
+    events: [
+      {
+        type_: "turn/start",
+        seq: 1,
+        time: None,
+        data: {},
+        surface_append: None,
+      },
+      {
+        type_: "assistant/chunk",
+        seq: 11,
+        time: None,
+        data: { "chunk": { "type": "text-delta", "text": "live" } },
+        surface_append: None,
+      },
+    ],
+  }
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let (_, next) = state.with_reply(dispatch, DshHistoryReply("session-1"), {
+    "type": "server-response",
+    "rpcId": "history-1",
+    "result": {
+      "ok": true,
+      "value": {
+        "events": [
+          {
+            "event": {
+              "type": "assistant/message",
+              "seq": 10,
+              "time": 10,
+              "surfaceOp": "append",
+              "data": {
+                "message": {
+                  "content": [{ "type": "text", "text": "settled" }],
+                },
+              },
+            },
+          },
+        ],
+      },
+    },
+  })
+  assert_eq(next.events.map(event => event.seq), [10, 11])
+  assert_eq(next.streaming, "live")
+}
+
+///|
+test "dsh single-select answers keep option and custom text exclusive" {
+  let answers : Map[String, DshQuestionAnswer] = Map([])
+  answers["q1"] = { selected: [], custom: "typed first" }
+  let state = {
+    ..State(),
+    pending: [
+      DshQuestions(
+        rpc_id="rpc-1",
+        session_id="session-1",
+        questions=[
+          {
+            id: "q1",
+            header: "Choice",
+            question: "Choose",
+            detail: "",
+            options: [{ label: "One", description: "" }],
+            multi_select: false,
+          },
+        ],
+        answers~,
+      ),
+    ],
+  }
+  let selected = state.with_question_option("rpc-1", "q1", "One")
+  guard selected.pending[0] is DshQuestions(answers=selected_answers, ..) else {
+    fail("expected pending dsh questions")
+  }
+  assert_eq(selected_answers["q1"].selected, ["One"])
+  assert_eq(selected_answers["q1"].custom, "")
+  let custom = selected.with_question_custom("rpc-1", "q1", "another")
+  guard custom.pending[0] is DshQuestions(answers=custom_answers, ..) else {
+    fail("expected pending dsh questions")
+  }
+  assert_eq(custom_answers["q1"].selected, [])
+  assert_eq(custom_answers["q1"].custom, "another")
+}
+
+///|
+test "dsh response receipt preserves rejected interactions" {
+  assert_true(DshResponseReceipt({ "accepted": true }).accepted())
+  let rejected = DshResponseReceipt({
+    "accepted": false,
+    "reason": "bad-response",
+  })
+  assert_false(rejected.accepted())
+  assert_eq(
+    rejected.error(),
+    "DeepSeek Harness rejected the response: bad-response",
+  )
+}
+
+///|
+test "removing a background dsh session preserves the active transcript" {
+  let state = {
+    ..State(),
+    sessions: [
+      { id: "active", title: "Active", cwd: None, running: true, blank: false },
+      {
+        id: "background",
+        title: "Background",
+        cwd: None,
+        running: false,
+        blank: false,
+      },
+    ],
+    active_id: Some("active"),
+    events: [
+      {
+        type_: "turn/start",
+        seq: 1,
+        time: None,
+        data: {},
+        surface_append: None,
+      },
+    ],
+    pending: [
+      DshApproval(
+        rpc_id="rpc-active",
+        session_id="active",
+        approval_id="approval-active",
+        tool_name="read",
+        reason="",
+      ),
+      DshApproval(
+        rpc_id="rpc-background",
+        session_id="background",
+        approval_id="approval-background",
+        tool_name="write",
+        reason="",
+      ),
+    ],
+    loading: true,
+  }
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let (_, next) = update(
+    dispatch,
+    Event({
+      "stream": "host",
+      "message": {
+        "rpcId": "host-1",
+        "payload": { "type": "host/session-removed", "sessionId": "background" },
+      },
+    }),
+    state,
+  )
+  assert_eq(next.active_id, Some("active"))
+  assert_eq(next.events.length(), 1)
+  assert_eq(next.pending.length(), 1)
+  assert_eq(next.pending[0].session_id(), "active")
+  assert_true(next.loading)
+}

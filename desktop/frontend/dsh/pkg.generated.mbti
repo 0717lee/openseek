@@ -1,0 +1,52 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "openseek_desktop/frontend/dsh"
+
+import {
+  "moonbit-community/rabbita/cmd",
+  "moonbit-community/rabbita/html",
+  "openseek_desktop/frontend/transcript",
+}
+
+// Values
+pub fn update(@cmd.Emit[Msg], Msg, State) -> (@cmd.Cmd, State)
+
+// Errors
+
+// Types and methods
+type Msg
+pub fn Msg::event(Json) -> Self
+pub fn Msg::new_session(String?) -> Self
+pub fn Msg::new_workspace_session(String) -> Self
+pub fn Msg::open_session(String) -> Self
+pub fn Msg::refresh() -> Self
+pub fn Msg::status_changed(Json) -> Self
+
+pub(all) struct PageActions {
+  toggle_sidebar : @cmd.Cmd
+  toggle_terminal : @cmd.Cmd
+  toggle_files : @cmd.Cmd
+  transcript : @html.Html
+}
+
+pub(all) struct SidebarActions {
+  selected : Bool
+  open : @cmd.Cmd
+  start_session : (String) -> @cmd.Cmd
+  open_session : (String) -> @cmd.Cmd
+}
+
+type State derive(Eq)
+pub fn State::State(loading? : Bool) -> Self
+pub fn State::active_id(Self) -> String?
+pub fn State::active_workspace_path(Self) -> String?
+pub fn State::can_create(Self) -> Bool
+pub fn State::has_active(Self) -> Bool
+pub fn State::page(Self, @cmd.Emit[Msg], Bool, Bool, Bool, PageActions) -> Array[@html.Html]
+pub fn State::preferred_workspace_id(Self) -> String?
+pub fn State::sidebar_rows(Self, SidebarActions) -> Array[@html.Html]
+pub fn State::streaming_text(Self) -> String
+pub fn State::transcript_items(Self) -> Array[@transcript.TranscriptItem]
+
+// Type aliases
+
+// Traits

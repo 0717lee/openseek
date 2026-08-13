@@ -466,6 +466,27 @@ pub impl ToJson for CreateDirectoryPayload with fn to_json(self) {
 }
 
 ///|
+/// The process-local owner id used when a dsh session asks OpenSeek's host
+/// services to operate in its Workspace. Keep the source in the identity:
+/// dsh, Codex, and OpenSeek each own their own session-id namespace, while the
+/// host authorization table is deliberately shared by all three.
+struct DshWorkspaceOwner {
+  id : String
+} derive(Eq)
+
+///|
+pub fn DshWorkspaceOwner::DshWorkspaceOwner(
+  session_id : String,
+) -> DshWorkspaceOwner {
+  { id: "dsh:" + session_id }
+}
+
+///|
+pub fn DshWorkspaceOwner::id(self : DshWorkspaceOwner) -> String {
+  self.id
+}
+
+///|
 pub(all) struct TerminalOpenPayload {
   session : String
   workspace : String?

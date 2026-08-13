@@ -356,6 +356,10 @@ fn notification_for_client(
   notification : @protocol.Notification,
 ) -> @protocol.Notification? {
   match notification {
+    // DeepSeek Harness commands are local-page-only because its sessions can
+    // run tools. Do not leak their prompts, output, or pending questions to a
+    // relay client that cannot invoke the corresponding local command set.
+    DshStatusChanged(_) | DshEvent(_) => None
     AgentEvent(payload) => {
       // Desktop starts always name a durable session. An event without one
       // cannot be reconciled with the session transcript and is not part of
@@ -560,6 +564,19 @@ test "remote delivery omits only canonical transcript duplicates" {
       is None,
     )
   }
+}
+
+///|
+test "remote delivery never exposes local dsh notifications" {
+  assert_true(
+    notification_for_client(DshStatusChanged({ "status": "ready" })) is None,
+  )
+  assert_true(
+    notification_for_client(
+      DshEvent({ "stream": "mux", "message": { "secret": "prompt" } }),
+    )
+    is None,
+  )
 }
 
 ///|

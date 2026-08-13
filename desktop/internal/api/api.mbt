@@ -14,6 +14,13 @@ struct ApiState {
   // of the OpenSeek engine actor and owns Codex account/thread state through
   // Codex's own data directory.
   codex : @codex.Actor
+  // One local dsh Web process. Desktop reuses its HTTP request endpoints and
+  // downlink WebSockets; the renderer never receives the loopback port.
+  dsh : @dsh.Actor
+  // The latest dsh Workspace/session membership accepted from dsh itself.
+  // This process-local projection lets shared host services (currently the
+  // terminal) verify an exact session/path pair without trusting the page.
+  dsh_workspaces : DshWorkspaceAuthorizations
   // App-server returns each thread cwd but not its owning local project. Keep
   // Git's worktree relationship beside the Codex actor and reuse it across
   // list/read/start replies instead of making the browser infer path names.
@@ -211,6 +218,220 @@ fn CodexWorktreeCatalog::annotate(
 }
 
 ///|
+/// One reviewed dsh call from the Desktop renderer. Workspace paths cross two
+/// path conventions at this boundary: frontend resources use slash-rooted URI
+/// paths, while dsh owns canonical paths in the current host's native form.
+priv struct DshDesktopCall {
+  method_ : String
+  payload : Json
+}
+
+///|
+/// One exact dsh session/Workspace pair obtained from dsh's successful
+/// `workspace.list` reply. The owner id is namespaced before it enters the
+/// shared host authorization table.
+priv struct DshWorkspaceBinding {
+  owner : String
+  workspace : String
+}
+
+///|
+/// The dsh-derived portion of OpenSeek's process-local Workspace authority.
+/// Calls can overlap, so replacement and stale-owner revocation are serialized
+/// independently of the dsh actor's request queue.
+priv struct DshWorkspaceAuthorizations {
+  lock : @async.Mutex
+  bindings : Map[String, String]
+}
+
+///|
+fn DshWorkspaceAuthorizations::DshWorkspaceAuthorizations() -> DshWorkspaceAuthorizations {
+  { lock: Mutex(), bindings: Map([]) }
+}
+
+///|
+fn DshDesktopCall::decode(params : Json) -> DshDesktopCall? {
+  guard params is Object(fields) &&
+    fields.get("method") is Some(String(method_)) &&
+    fields.get("payload") is Some(payload) else {
+    return None
+  }
+  Some({ method_, payload })
+}
+
+///|
+fn DshDesktopCall::is_allowed(self : DshDesktopCall) -> Bool {
+  [
+    "workspace.list", "workspace.create", "session.list", "session.create", "session.history",
+    "session.prompt", "session.cancel",
+  ].contains(self.method_)
+}
+
+///|
+/// Extract the authoritative host-native bindings only from a successful
+/// Workspace list. Other methods and dsh business errors do not change the
+/// current grants. A malformed successful list is rejected as one unit, so a
+/// partial reply can never authorize only some of its claimed membership.
+fn DshDesktopCall::workspace_bindings(
+  self : DshDesktopCall,
+  reply : Json,
+) -> Array[DshWorkspaceBinding]? raise @host.PayloadError {
+  guard self.method_ == "workspace.list" else { return None }
+  guard reply is Object(envelope) &&
+    envelope.get("result") is Some(Object(result)) &&
+    result.get("ok") is Some(True) &&
+    result.get("value") is Some(Object(value)) else {
+    return None
+  }
+  guard value.get("items") is Some(Array(items)) else {
+    raise PayloadError("dsh returned a malformed workspace.list reply")
+  }
+  let bindings : Array[DshWorkspaceBinding] = []
+  let owners : Map[String, Bool] = Map([])
+  for item in items {
+    guard item is Object(workspace) &&
+      workspace.get("path") is Some(String(path)) &&
+      @pathx.Path(path).to_absolute() is Some(_) &&
+      workspace.get("sessionIds") is Some(Array(session_ids)) else {
+      raise PayloadError("dsh returned a malformed workspace.list reply")
+    }
+    for session_id in session_ids {
+      guard session_id is String(session_id) && !session_id.trim().is_empty() else {
+        raise PayloadError("dsh returned a malformed workspace.list reply")
+      }
+      let owner = @protocol.DshWorkspaceOwner(session_id).id()
+      guard owners.get(owner) is None else {
+        raise PayloadError("dsh returned duplicate Workspace membership")
+      }
+      owners[owner] = true
+      bindings.push({ owner, workspace: path })
+    }
+  }
+  Some(bindings)
+}
+
+///|
+/// Replace all dsh-derived grants with one complete Workspace list. Revoking
+/// owners absent from the new snapshot matters when dsh archives/removes a
+/// session or removes a Workspace; merely adding the current rows would leave
+/// an old terminal capability alive until Desktop exits.
+async fn DshWorkspaceAuthorizations::replace(
+  self : DshWorkspaceAuthorizations,
+  bindings : Array[DshWorkspaceBinding],
+) -> Unit {
+  let next : Map[String, String] = Map([])
+  for binding in bindings {
+    next[binding.owner] = binding.workspace
+  }
+  self.lock.acquire()
+  defer self.lock.release()
+  for owner, _ in self.bindings {
+    if next.get(owner) is None {
+      @work_dir.revoke_host_workspace(owner)
+    }
+  }
+  for owner, workspace in next {
+    @work_dir.authorize_host_workspace(owner, workspace)
+  }
+  self.bindings.clear()
+  for owner, workspace in next {
+    self.bindings[owner] = workspace
+  }
+}
+
+///|
+/// Decode the one frontend resource path accepted by the dsh surface. dsh's
+/// Workspace registry then applies realpath canonicalization and directory
+/// validation; OpenSeek does not independently invent a Workspace identity.
+fn DshDesktopCall::host_payload(
+  self : DshDesktopCall,
+) -> Json raise @host.PayloadError {
+  guard self.method_ == "workspace.create" else { return self.payload }
+  guard self.payload is Object(fields) &&
+    fields.get("path") is Some(String(path)) &&
+    @pathx.Absolute::from_uri_path(path) is Some(absolute) else {
+    raise PayloadError("malformed dsh workspace.create payload")
+  }
+  let payload : Map[String, Json] = Map([])
+  for key, value in fields {
+    payload[key] = value
+  }
+  payload["path"] = Json::string(absolute.to_string())
+  Json::object(payload)
+}
+
+///|
+/// One dsh Workspace row whose host-native path must be projected into the
+/// resource-path convention before the renderer may use it as filesystem
+/// authority.
+priv struct DshWorkspaceJson(Json)
+
+///|
+fn DshWorkspaceJson::to_frontend(
+  self : DshWorkspaceJson,
+) -> Json raise @host.PayloadError {
+  guard self.0 is Object(fields) &&
+    fields.get("path") is Some(String(path)) &&
+    @pathx.Path(path).to_absolute() is Some(absolute) &&
+    absolute.to_uri_path() is Some(resource_path) else {
+    raise PayloadError("dsh returned a workspace with an unsupported path")
+  }
+  let workspace : Map[String, Json] = Map([])
+  for key, value in fields {
+    workspace[key] = value
+  }
+  workspace["path"] = Json::string(resource_path)
+  Json::object(workspace)
+}
+
+///|
+/// Preserve dsh's complete ApiProxy envelope and business errors. Only
+/// successful Workspace values are rewritten, so the frontend continues to
+/// render dsh's own error catalog unchanged.
+fn DshDesktopCall::frontend_reply(
+  self : DshDesktopCall,
+  reply : Json,
+) -> Json raise @host.PayloadError {
+  guard self.method_ == "workspace.list" || self.method_ == "workspace.create" else {
+    return reply
+  }
+  guard reply is Object(envelope_fields) &&
+    envelope_fields.get("result") is Some(Object(result_fields)) &&
+    result_fields.get("ok") is Some(True) &&
+    result_fields.get("value") is Some(Object(value_fields)) else {
+    return reply
+  }
+  let value : Map[String, Json] = Map([])
+  for key, field in value_fields {
+    value[key] = field
+  }
+  if self.method_ == "workspace.list" {
+    guard value_fields.get("items") is Some(Array(items)) else {
+      raise PayloadError("dsh returned a malformed workspace.list reply")
+    }
+    value["items"] = Json::array(
+      items.map(item => DshWorkspaceJson(item).to_frontend()),
+    )
+  } else {
+    guard value_fields.get("workspace") is Some(workspace) else {
+      raise PayloadError("dsh returned a malformed workspace.create reply")
+    }
+    value["workspace"] = DshWorkspaceJson(workspace).to_frontend()
+  }
+  let result : Map[String, Json] = Map([])
+  for key, field in result_fields {
+    result[key] = field
+  }
+  result["value"] = Json::object(value)
+  let envelope : Map[String, Json] = Map([])
+  for key, field in envelope_fields {
+    envelope[key] = field
+  }
+  envelope["result"] = Json::object(result)
+  Json::object(envelope)
+}
+
+///|
 fn CodexWorkspaceBinding::decode_reply(value : Json) -> CodexWorkspaceBinding? {
   guard value is Object(fields) &&
     fields.get("thread") is Some(Object(thread)) &&
@@ -265,6 +486,8 @@ pub fn ApiState::new(
   let engine_actor = @engine.new_engine_actor(engine, runtime_dir?)
   {
     codex: Actor(codex),
+    dsh: Actor(),
+    dsh_workspaces: DshWorkspaceAuthorizations(),
     codex_projects: ProjectCatalog(),
     codex_draft_threads: CodexDraftThreads(),
     engine: engine_actor,
@@ -284,6 +507,12 @@ pub fn ApiState::new(
 /// The app-lifetime owner of the Codex app-server child process.
 pub fn ApiState::codex_actor(self : ApiState) -> @codex.Actor {
   self.codex
+}
+
+///|
+/// The app-lifetime owner of the DeepSeek Harness Web child process.
+pub fn ApiState::dsh_actor(self : ApiState) -> @dsh.Actor {
+  self.dsh
 }
 
 ///|
@@ -664,6 +893,56 @@ pub fn endpoints(
 }
 
 ///|
+/// Commands available only to the packaged Desktop page. dsh sessions can
+/// execute tools in their own cwd, so relaying these methods would silently
+/// enlarge OpenSeek's remote-control surface. The native page still receives
+/// the complete dsh ApiProxy envelopes over Proton.
+pub fn local_endpoints(state : ApiState) -> Array[@endpoint.Endpoint] {
+  [
+    @endpoint.Endpoint::remote_sync(@commands.dsh_status, _ => {
+      state.dsh.status()
+    }),
+    @endpoint.Endpoint::remote(@commands.dsh_request, async fn(params) {
+      guard DshDesktopCall::decode(params) is Some(call) else {
+        raise @host.PayloadError("malformed dsh request payload")
+      }
+      // Keep the native capability small and reviewable. dsh's own Workspace
+      // registry supplies canonical local paths and session membership;
+      // credentials, settings, arbitrary path-opening, and host-control
+      // operations remain absent from the Desktop conversation page.
+      guard call.is_allowed() else {
+        raise @host.PayloadError("unsupported dsh method '\{call.method_}'")
+      }
+      let reply = state.dsh.call(
+        method_=call.method_,
+        payload=call.host_payload(),
+      )
+      // Validate the renderer projection before changing authority. Then
+      // publish the complete membership before returning it, so a terminal
+      // opened by the resulting render cannot race ahead of the grant.
+      let frontend_reply = call.frontend_reply(reply)
+      if call.workspace_bindings(reply) is Some(bindings) {
+        state.dsh_workspaces.replace(bindings)
+      }
+      frontend_reply
+    }),
+    @endpoint.Endpoint::remote(@commands.dsh_respond, async fn(params) {
+      guard params is Object(fields) &&
+        fields.get("type") is Some(String("client-response")) &&
+        fields.get("rpcId") is Some(String(rpc_id)) &&
+        !rpc_id.trim().is_empty() &&
+        fields.get("result") is Some(Object(result)) else {
+        raise @host.PayloadError("malformed dsh client-response")
+      }
+      guard result.get("ok") is Some(True) || result.get("ok") is Some(False) else {
+        raise @host.PayloadError("malformed dsh client-response")
+      }
+      state.dsh.respond(params)
+    }),
+  ]
+}
+
+///|
 /// Pair one reviewed Codex command identity with the app-server forwarding
 /// method. The command name is the Desktop method name used by
 /// `codex_request`; no second catalog can drift from the registered endpoint.
@@ -720,6 +999,123 @@ test "remote endpoint catalog has one entry per command name" {
   assert_true(names.contains("moonide.references"))
   assert_false(names.contains("host.connect"))
   assert_false(names.contains("shell.open_external"))
+}
+
+///|
+test "dsh endpoints stay in the local Desktop catalog" {
+  let state = ApiState::new(engine="unused")
+  let desktop_names = local_endpoints(state).map(endpoint => endpoint.name())
+  assert_eq(desktop_names, ["dsh.status", "dsh.request", "dsh.respond"])
+  let connection = @host.HostConnection::new()
+  let remote = endpoints(state, connection).map(endpoint => endpoint.name())
+  assert_false(remote.contains("dsh.request"))
+}
+
+///|
+test "dsh workspace paths cross the native API boundary reversibly" {
+  let resource_path = if @pathx.Absolute::from_uri_path("/work/project")
+    is Some(_) {
+    "/work/project"
+  } else {
+    "/C:/work/project"
+  }
+  let absolute = @pathx.Absolute::from_uri_path(resource_path).unwrap()
+  let create : DshDesktopCall = {
+    method_: "workspace.create",
+    payload: { "path": resource_path },
+  }
+  assert_eq(create.host_payload(), { "path": absolute.to_string() })
+  let list : DshDesktopCall = { method_: "workspace.list", payload: {} }
+  let reply : Json = {
+    "type": "server-response",
+    "rpcId": "workspace-1",
+    "result": {
+      "ok": true,
+      "value": {
+        "items": [
+          {
+            "workspaceId": "workspace-1",
+            "title": "project",
+            "path": absolute.to_string(),
+            "sessionIds": ["session-1"],
+          },
+        ],
+        "archivedSessionIds": [],
+      },
+    },
+  }
+  guard list.frontend_reply(reply) is Object(envelope) &&
+    envelope.get("result") is Some(Object(result)) &&
+    result.get("value") is Some(Object(value)) &&
+    value.get("items") is Some(Array([Object(workspace)])) else {
+    fail("expected a rewritten dsh workspace.list reply")
+  }
+  assert_eq(workspace.get("path"), Some(Json::string(resource_path)))
+}
+
+///|
+async test "dsh workspace membership authorizes and revokes its terminal owner" {
+  let resource_path = if @pathx.Absolute::from_uri_path(
+      "/openseek-dsh-terminal-authority-test",
+    )
+    is Some(_) {
+    "/openseek-dsh-terminal-authority-test"
+  } else {
+    "/C:/openseek-dsh-terminal-authority-test"
+  }
+  let absolute = @pathx.Absolute::from_uri_path(resource_path).unwrap()
+  let session_id = "workspace-authority-test-session"
+  let owner = @protocol.DshWorkspaceOwner(session_id).id()
+  let call : DshDesktopCall = { method_: "workspace.list", payload: {} }
+  let reply : Json = {
+    "type": "server-response",
+    "rpcId": "workspace-authority-1",
+    "result": {
+      "ok": true,
+      "value": {
+        "items": [
+          {
+            "workspaceId": "workspace-authority-1",
+            "title": "project",
+            "path": absolute.to_string(),
+            "sessionIds": [session_id],
+          },
+        ],
+        "archivedSessionIds": [],
+      },
+    },
+  }
+  guard call.workspace_bindings(reply) is Some(bindings) else {
+    fail("expected dsh workspace bindings")
+  }
+  let authorizations = DshWorkspaceAuthorizations()
+  authorizations.replace(bindings)
+  assert_true(
+    @work_dir.resolve_in_workspace(owner, "", workspace=resource_path)
+    is Some(_),
+  )
+  authorizations.replace([])
+  assert_true(
+    @work_dir.resolve_in_workspace(owner, "", workspace=resource_path) is None,
+  )
+}
+
+///|
+test "dsh workspace business errors remain dsh envelopes" {
+  let call : DshDesktopCall = { method_: "workspace.create", payload: {} }
+  let reply : Json = {
+    "type": "server-response",
+    "rpcId": "workspace-2",
+    "result": {
+      "ok": false,
+      "error": {
+        "code": "workspace-invalid-path",
+        "message": "missing",
+        "details": {},
+      },
+    },
+  }
+  assert_eq(call.frontend_reply(reply), reply)
 }
 
 ///|

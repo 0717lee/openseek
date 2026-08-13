@@ -26,6 +26,8 @@ pub(all) enum NotificationKind {
   CodexStatusChanged
   CodexNotification
   CodexServerRequest
+  DshStatusChanged
+  DshEvent
   LspDiagnostics
   FsChanged
   FsWatchFailed
@@ -57,6 +59,8 @@ pub fn NotificationKind::wire_name(self : NotificationKind) -> String {
     CodexStatusChanged => "codex.status_changed"
     CodexNotification => "codex.notification"
     CodexServerRequest => "codex.server_request"
+    DshStatusChanged => "dsh.status_changed"
+    DshEvent => "dsh.event"
     LspDiagnostics => "lsp.diagnostics"
     FsChanged => "fs.changed"
     FsWatchFailed => "fs.watch_failed"
@@ -89,6 +93,8 @@ pub fn NotificationKind::all() -> Array[NotificationKind] {
     CodexStatusChanged,
     CodexNotification,
     CodexServerRequest,
+    DshStatusChanged,
+    DshEvent,
     LspDiagnostics,
     FsChanged,
     FsWatchFailed,
@@ -125,6 +131,10 @@ pub(all) enum Notification {
   CodexStatusChanged(Json)
   CodexNotification(Json)
   CodexServerRequest(Json)
+  // dsh owns these ApiProxy envelopes. Desktop supplies stable event names
+  // while preserving the upstream JSON fields for the isolated dsh page.
+  DshStatusChanged(Json)
+  DshEvent(Json)
   LspDiagnostics(DiagnosticsPayload)
   FsChanged(FsChangedPayload)
   FsWatchFailed(FsWatchFailedPayload)
@@ -189,6 +199,8 @@ pub fn Notification::from_wire(name : String, params : Json) -> Notification? {
     "codex.status_changed" => Some(CodexStatusChanged(params))
     "codex.notification" => Some(CodexNotification(params))
     "codex.server_request" => Some(CodexServerRequest(params))
+    "dsh.status_changed" => Some(DshStatusChanged(params))
+    "dsh.event" => Some(DshEvent(params))
     "lsp.diagnostics" =>
       Some(LspDiagnostics(@json.from_json(params) catch { _ => return None }))
     "fs.changed" =>
@@ -227,6 +239,8 @@ pub fn Notification::kind(self : Notification) -> NotificationKind {
     CodexStatusChanged(_) => CodexStatusChanged
     CodexNotification(_) => CodexNotification
     CodexServerRequest(_) => CodexServerRequest
+    DshStatusChanged(_) => DshStatusChanged
+    DshEvent(_) => DshEvent
     LspDiagnostics(_) => LspDiagnostics
     FsChanged(_) => FsChanged
     FsWatchFailed(_) => FsWatchFailed
@@ -265,6 +279,8 @@ pub fn Notification::params(self : Notification) -> Json {
     CodexStatusChanged(payload) => payload
     CodexNotification(payload) => payload
     CodexServerRequest(payload) => payload
+    DshStatusChanged(payload) => payload
+    DshEvent(payload) => payload
     LspDiagnostics(payload) => ToJson::to_json(payload)
     FsChanged(payload) => ToJson::to_json(payload)
     FsWatchFailed(payload) => ToJson::to_json(payload)

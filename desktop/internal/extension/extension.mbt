@@ -126,6 +126,16 @@ let codex_server_request_event : @proton_contract.Event[Json] = @commands.extens
 )
 
 ///|
+let dsh_status_changed_event : @proton_contract.Event[Json] = @commands.extension_contract.event(
+  @protocol.NotificationKind::DshStatusChanged.wire_name(),
+)
+
+///|
+let dsh_event : @proton_contract.Event[Json] = @commands.extension_contract.event(
+  @protocol.NotificationKind::DshEvent.wire_name(),
+)
+
+///|
 let diagnostics_event : @proton_contract.Event[@protocol.DiagnosticsPayload] = @commands.extension_contract.event(
   @protocol.NotificationKind::LspDiagnostics.wire_name(),
 )
@@ -230,6 +240,9 @@ async fn PageEventTarget::emit(
       self.events.emit(codex_notification_event, payload)
     Hub(CodexServerRequest(payload)) =>
       self.events.emit(codex_server_request_event, payload)
+    Hub(DshStatusChanged(payload)) =>
+      self.events.emit(dsh_status_changed_event, payload)
+    Hub(DshEvent(payload)) => self.events.emit(dsh_event, payload)
     Hub(LspDiagnostics(payload)) => self.events.emit(diagnostics_event, payload)
     Hub(FsChanged(payload)) => self.events.emit(fs_changed_event, payload)
     Hub(FsWatchFailed(payload)) =>
@@ -298,6 +311,9 @@ pub fn openseek_extension(
   views : BrowserViews,
 ) -> @proton_extension.Extension {
   let endpoints = @api.endpoints(state, bridge.host_connection)
+  for endpoint in @api.local_endpoints(state) {
+    endpoints.push(endpoint)
+  }
   endpoints.push(
     @endpoint.Endpoint::window(@commands.host_connect, async fn(context, _) {
       // A reloaded page allocates browser ids from scratch; the previous

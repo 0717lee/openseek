@@ -7,6 +7,26 @@
 /// empty transcript rather than inventing one to read.
 fn Model::transcript_input(self : Model) -> @transcript_component.Input {
   match self.screen {
+    Dsh => {
+      let root = self.dsh
+        .active_workspace_path()
+        .bind(path => @resource.of_path(@interop.ChannelId::Local, path))
+      let session = self.dsh.active_id().unwrap_or("none")
+      @transcript_component.Input(
+        source=@transcript_component.Dsh,
+        focused=@interop.ChannelId::Local,
+        active_session=session,
+        root~,
+        submission_generation=0,
+        items=@transcript_component.VisibleRow::history(
+          self.dsh.transcript_items(),
+        ),
+        streaming_reasoning="",
+        streaming_response=self.dsh.streaming_text(),
+        streaming_identity=session,
+        subruns=[],
+      )
+    }
     Codex => {
       let placement = self.codex.active_placement(self.focused)
       @transcript_component.Input(

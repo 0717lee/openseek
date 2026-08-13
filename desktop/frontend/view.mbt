@@ -469,6 +469,12 @@ fn Model::sidebar_component_sections(
     action: Some({ title: "Add a project", disabled: false }),
     entries: projects,
   })
+  // dsh belongs to this native process rather than the selected OpenSeek
+  // device. Keep its section visible while a Desktop user inspects a remote
+  // device, but never expose its local commands in a browser console.
+  if self.is_desktop {
+    sections.push(self.dsh.sidebar_section(self.screen is Dsh))
+  }
   // Archived conversations fold behind a collapsed section at the end of the
   // list. Their records live in the store's `archived` twin, so they come
   // from the host's archived reply, not the live list; each row carries a
@@ -2022,22 +2028,27 @@ fn view(
     return console_gate_view(dispatch, console)
   }
   let active_file_ctx = file_ctx(model)
-  let codex_active = model.codex.active_placement(model.focused) is Some(_)
-  // Panel state survives page switches, but a Codex page only exposes it
-  // after a real task supplies the identity (and, for files, a cwd) needed by
-  // the host operation. Selecting a task makes an already-open panel reappear
-  // in that task's workspace.
+  let external_terminal_active = model
+    .active_checkout()
+    .bind(active => active.placement)
+    is Some(_)
+  // Panel state survives page switches, but an external conversation page
+  // exposes it only after its selected task/session supplies the placement
+  // required by the host operation.
   let file_panel_visible = model.right_panel_open &&
     (
       model.screen is Chat ||
       (
-        model.screen is Codex &&
+        (model.screen is Codex || model.screen is Dsh) &&
         active_file_ctx.placement is Some(placement) &&
         placement.checkout_root() is Some(_)
       )
     )
   let terminal_panel_visible = model.terminal.is_open() &&
-    (!(model.screen is Codex) || codex_active)
+    (
+      !(model.screen is Codex || model.screen is Dsh) ||
+      external_terminal_active
+    )
   let content = match model.screen {
     // The one fork that decides what the conversation column is. A chat needs
     // a conversation, and a conversation needs a project to work in, so with
@@ -2077,6 +2088,19 @@ fn view(
           composer: codex_composer_html,
         },
       )
+    Dsh =>
+      model.dsh.page(
+        dispatch.map(msg => Dsh(msg)),
+        model.sidebar_open,
+        terminal_panel_visible,
+        file_panel_visible,
+        @dsh.PageActions::{
+          toggle_sidebar: dispatch(ToggleSidebar),
+          toggle_terminal,
+          toggle_files: toggle_right_panel,
+          transcript: transcript_html,
+        },
+      )
     Skills => page_with_toggle(dispatch, model, skills_html)
     Settings =>
       page_with_toggle(dispatch, model, settings_page(dispatch, model))
@@ -2089,10 +2113,10 @@ fn view(
   }
   // The app is `sidebar | content`; `content` itself splits into the
   // conversation (left) and the editor (right) as two independent parts, so
-  // either side can be swapped out later. Files open over an OpenSeek or Codex
-  // conversation with a real workspace; on the other pages the editor column
-  // (and its viewer host) stays rendered so the attached viewer is never torn
-  // down.
+  // either side can be swapped out later. Files open over an OpenSeek, Codex,
+  // or dsh conversation with a real workspace; on the other pages the editor
+  // column (and its viewer host) stays rendered so the attached viewer is never
+  // torn down.
   let mut content_class = if file_panel_visible {
     "content panel-open"
   } else {

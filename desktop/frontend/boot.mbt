@@ -176,6 +176,7 @@ fn SidebarDispatcher::conversation_open(
     }
     "codex.live" => self.emit(CodexOpenThread(id.conversation()))
     "codex.draft" => self.emit(OpenCodex)
+    "dsh.live" => self.emit(DshOpenSession(id.conversation()))
     source => self.unroutable("open", "source \{source}")
   }
 }
@@ -246,6 +247,7 @@ fn SidebarDispatcher::project_new(
       }
       self.emit(NewChatIn(channel, Some(project)))
     }
+    "dsh.workspaces" => self.emit(DshNewSessionIn(id.root()))
     source => self.unroutable("new chat", "\{source}@\{id.channel()}")
   }
 }
@@ -289,6 +291,7 @@ fn SidebarDispatcher::section_primary(
   match id.source() {
     "openseek.projects" => self.emit(PickProject(channel))
     "openseek.chats" => self.emit(NewChatIn(channel, None))
+    "dsh" => self.emit(DshNewSession)
     source => self.unroutable("section action", "source \{source}")
   }
 }
@@ -298,7 +301,10 @@ fn SidebarDispatcher::placeholder_open(
   self : SidebarDispatcher,
   id : String,
 ) -> @cmd.Cmd {
-  self.unroutable("placeholder action", id)
+  match id {
+    "dsh.open" => self.emit(OpenDsh)
+    _ => self.unroutable("placeholder action", id)
+  }
 }
 
 ///|

@@ -103,6 +103,12 @@ pub let codex_turn_start : Command[@protocol.CodexTurnStartPayload, @protocol.Co
 
 pub let codex_turn_steer : Command[@protocol.CodexTurnSteerPayload, @protocol.CodexCommandReply[@protocol.CodexTurnReply]]
 
+pub let dsh_request : Command[Json, Json]
+
+pub let dsh_respond : Command[Json, Json]
+
+pub let dsh_status : Command[Json, Json]
+
 pub let extension_contract : @proton_contract.ExtensionContract
 
 pub let fs_browse : Command[@protocol.BrowseDirectoryPayload, @protocol.BrowseDirectoryReply]
