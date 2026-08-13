@@ -24,6 +24,23 @@ fn icon_folder() -> @html.Html {
 }
 
 ///|
+/// The file codicon used by the breadcrumb picker, from Microsoft's
+/// vscode-codicons (CC BY 4.0).
+fn icon_file() -> @html.Html {
+  @svg.svg(
+    width=16,
+    height=16,
+    view_box="0 0 16 16",
+    attrs=@svg.Attrs::build().fill("currentColor"),
+    [
+      @svg.path(
+        d="M13.85 4.44l-3.28-3.3L10.22 1H2.5l-.5.5v13l.5.5h11l.5-.5V4.8l-.15-.36zM13 14H3V2h6v3.5l.5.5H13v8zm0-9h-3V2.1L12.9 5h.1z",
+      ),
+    ],
+  )
+}
+
+///|
 const ExplorerFilesTabId = "explorer-files-tab"
 
 ///|
@@ -31,6 +48,32 @@ const ExplorerChangesTabId = "explorer-changes-tab"
 
 ///|
 const ExplorerPanelId = "explorer-inventory"
+
+///|
+const BreadcrumbPickerId = "breadcrumb-directory-picker"
+
+///|
+fn breadcrumb_entry_id(index : Int) -> String {
+  "breadcrumb-entry-\{index}"
+}
+
+///|
+fn focus_breadcrumb_entry_after_render(index : Int) -> @cmd.Cmd {
+  @cmd.custom_cmd(
+    _ => {
+      if @dom.document()
+        .get_element_by_id(breadcrumb_entry_id(index))
+        .to_option()
+        is Some(row) {
+        let _ : @js.Value = @js.Value::cast_from(row).apply_with_string(
+          "focus",
+          ([] : Array[@js.Value]),
+        )
+      }
+    },
+    kind=@cmd.after_render,
+  )
+}
 
 ///|
 fn focus_explorer_tab_after_render(id : String) -> @cmd.Cmd {
@@ -668,28 +711,30 @@ fn segments_prefix(segments : Array[String], count : Int) -> @pathx.Relative {
 }
 
 ///|
-/// The proper ancestors of `path`, nearest-root first, e.g.
-/// `ancestor_paths("src/foo/bar.mbt")` → `["src", "src/foo"]`. Excludes the
-/// workspace root and `path` itself.
-fn ancestor_paths(path : @pathx.Relative) -> Array[@pathx.Relative] {
-  let segments = path_segments(path)
-  let paths : Array[@pathx.Relative] = []
-  for count in 1..<segments.length() {
-    paths.push(segments_prefix(segments, count))
-  }
-  paths
-}
-
-///|
-/// A breadcrumb segment that reveals `path` in the tree when clicked.
+/// A breadcrumb segment that opens `path`'s immediate children in the
+/// anchored picker below the breadcrumb.
 fn crumb_link(
   dispatch : @cmd.Emit[Msg],
   label : String,
   path : @pathx.Relative,
+  open : Bool,
 ) -> @html.Html {
-  @html.span(
-    class="crumb",
-    attrs=@html.Attrs::build().on_click(_ => dispatch(RevealDirectory(path))),
+  @html.button(
+    type_="button",
+    class="crumb crumb-directory",
+    title="Show files in \{label}",
+    on_click=dispatch(RevealDirectory(path)),
+    attrs=@html.Attrs::build()
+      .aria_controls(BreadcrumbPickerId)
+      .aria_expanded(open.to_string())
+      .on_keydown(event => {
+        if open && event.key() == "Escape" {
+          event.prevent_default()
+          dispatch(HighlightCleared(path))
+        } else {
+          @cmd.none
+        }
+      }),
     label,
   )
 }
@@ -697,8 +742,9 @@ fn crumb_link(
 ///|
 /// The breadcrumb row under the tab bar: the active file's path as
 /// `dir › dir › file` (the file segment emphasized) behind a leading
-/// "Workspace" crumb. Every crumb but the last reveals that ancestor
-/// directory in the tree pane when clicked (opening the pane if needed).
+/// "Workspace" crumb. Every crumb but the last opens a VS Code-style picker
+/// of that directory's immediate children, without moving or hiding the
+/// source viewer behind it.
 /// The tree-pane toggle rides this row's right edge, directly under the tab
 /// bar's panel toggle. With no file open the whole row hides (via CSS — it
 /// stays in the DOM so the editor's child order, and thus the viewer host,
@@ -711,7 +757,14 @@ pub fn breadcrumb_view(
   let crumbs : Array[@html.Html] = []
   match ctx.active_file {
     Some(path) => {
-      crumbs.push(crumb_link(dispatch, "Workspace", @pathx.Relative::root()))
+      crumbs.push(
+        crumb_link(
+          dispatch,
+          "Workspace",
+          @pathx.Relative::root(),
+          state.highlighted == Some(@pathx.Relative::root()),
+        ),
+      )
       let segments = path_segments(path)
       for index, segment in segments {
         crumbs.push(@html.span(class="crumb-sep", "›"))
@@ -719,12 +772,32 @@ pub fn breadcrumb_view(
           crumbs.push(@html.span(class="crumb crumb-file", segment))
         } else {
           crumbs.push(
-            crumb_link(dispatch, segment, segments_prefix(segments, index + 1)),
+            crumb_link(
+              dispatch,
+              segment,
+              segments_prefix(segments, index + 1),
+              state.highlighted == Some(segments_prefix(segments, index + 1)),
+            ),
           )
         }
       }
     }
     None => crumbs.push(@html.span(class="crumb crumb-file", "Workspace"))
+  }
+  let children : Array[@html.Html] = [
+    @html.div(class="crumb-path", crumbs),
+    review_navigation(dispatch, state, ctx),
+    review_badge(dispatch, state, ctx),
+    review_progress(dispatch, state, ctx),
+    @html.button(
+      class="panel-toggle",
+      title=if state.tree_open { "Hide file tree" } else { "Show file tree" },
+      on_click=dispatch(ToggleTree),
+      icon(icon_folder),
+    ),
+  ]
+  if state.highlighted is Some(directory) {
+    children.push(breadcrumb_picker(dispatch, state, ctx, directory))
   }
   @html.div(
     class=if ctx.active_file is None {
@@ -732,16 +805,166 @@ pub fn breadcrumb_view(
     } else {
       "viewer-breadcrumb"
     },
+    children,
+  )
+}
+
+///|
+/// Floating one-level directory browser opened by a breadcrumb. It shares the
+/// explorer's cache and filesystem messages, but not its expanded/collapsed
+/// presentation, so it can stay compact over the source viewer.
+fn breadcrumb_picker(
+  dispatch : @cmd.Emit[Msg],
+  state : State,
+  ctx : Ctx,
+  directory : @pathx.Relative,
+) -> @html.Html {
+  let label = if directory.is_root() {
+    "Workspace"
+  } else {
+    basename(directory)
+  }
+  let listed = state.children.get(directory)
+  let rows : Array[@html.Html] = match listed {
+    Some(entries) if entries.is_empty() =>
+      [@html.div(class="breadcrumb-picker-empty", "This folder is empty.")]
+    Some(entries) => {
+      let rows : Array[@html.Html] = []
+      for index, entry in entries {
+        rows.push(
+          breadcrumb_picker_row(
+            dispatch,
+            ctx,
+            directory,
+            entry,
+            index,
+            entries.length(),
+          ),
+        )
+      }
+      rows
+    }
+    None if state.loading.contains(directory) =>
+      [@html.div(class="breadcrumb-picker-empty", "Loading…")]
+    None =>
+      [
+        @html.div(
+          class="breadcrumb-picker-empty breadcrumb-picker-failed",
+          match state.error {
+            Some(message) => "Could not load this folder: \{message}"
+            None => "Could not load this folder."
+          },
+        ),
+      ]
+  }
+  let count = match listed {
+    Some(entries) => entries.length().to_string()
+    None => ""
+  }
+  @html.div(
+    class="breadcrumb-picker",
+    attrs=@html.Attrs::build().id(BreadcrumbPickerId),
     [
-      @html.div(class="crumb-path", crumbs),
-      review_navigation(dispatch, state, ctx),
-      review_badge(dispatch, state, ctx),
-      review_progress(dispatch, state, ctx),
-      @html.button(
-        class="panel-toggle",
-        title=if state.tree_open { "Hide file tree" } else { "Show file tree" },
-        on_click=dispatch(ToggleTree),
-        icon(icon_folder),
+      @html.div(class="breadcrumb-picker-heading", [
+        @html.span(class="breadcrumb-picker-heading-icon", icon_folder()),
+        @html.span(class="breadcrumb-picker-title", label),
+        @html.span(class="breadcrumb-picker-count", count),
+        @html.span(
+          class=if state.loading.contains(directory) {
+            "breadcrumb-picker-loading"
+          } else {
+            "breadcrumb-picker-loading hidden"
+          },
+          "Refreshing…",
+        ),
+      ]),
+      @html.div(
+        class="breadcrumb-picker-list",
+        attrs=@html.Attrs::build().role("menu").aria_label("Files in \{label}"),
+        rows,
+      ),
+    ],
+  )
+}
+
+///|
+fn breadcrumb_picker_row(
+  dispatch : @cmd.Emit[Msg],
+  ctx : Ctx,
+  directory : @pathx.Relative,
+  entry : FileEntry,
+  index : Int,
+  total : Int,
+) -> @html.Html {
+  let selected = !entry.is_dir && ctx.active_file == Some(entry.path)
+  @html.button(
+    type_="button",
+    class=if selected {
+      "breadcrumb-picker-row selected"
+    } else {
+      "breadcrumb-picker-row"
+    },
+    title=entry.path.0,
+    on_click=if entry.is_dir {
+      dispatch(RevealDirectory(entry.path))
+    } else {
+      dispatch(FileSelected(path=entry.path, name=entry.name))
+    },
+    attrs=@html.Attrs::build()
+      .id(breadcrumb_entry_id(index))
+      .role("menuitem")
+      .data_set("path", entry.path.0)
+      .aria_current(if selected { "page" } else { "false" })
+      .on_keydown(event => {
+        match event.key() {
+          "Escape" => {
+            event.prevent_default()
+            dispatch(HighlightCleared(directory))
+          }
+          "ArrowDown" if index + 1 < total => {
+            event.prevent_default()
+            focus_breadcrumb_entry_after_render(index + 1)
+          }
+          "ArrowUp" if index > 0 => {
+            event.prevent_default()
+            focus_breadcrumb_entry_after_render(index - 1)
+          }
+          "Home" if index > 0 => {
+            event.prevent_default()
+            focus_breadcrumb_entry_after_render(0)
+          }
+          "End" if index + 1 < total => {
+            event.prevent_default()
+            focus_breadcrumb_entry_after_render(total - 1)
+          }
+          "ArrowRight" if entry.is_dir => {
+            event.prevent_default()
+            dispatch(RevealDirectory(entry.path))
+          }
+          _ => @cmd.none
+        }
+      }),
+    [
+      @html.span(
+        class=if entry.is_dir {
+          "breadcrumb-picker-icon folder"
+        } else {
+          "breadcrumb-picker-icon file"
+        },
+        if entry.is_dir {
+          icon_folder()
+        } else {
+          icon_file()
+        },
+      ),
+      @html.span(class="breadcrumb-picker-name", entry.name),
+      @html.span(
+        class=if entry.is_dir {
+          "breadcrumb-picker-chevron"
+        } else {
+          "breadcrumb-picker-chevron hidden"
+        },
+        "›",
       ),
     ],
   )
@@ -987,13 +1210,8 @@ fn tree_row(
     } else {
       "▸"
     }
-    // `data-path` is the hook `reveal_tree_row` uses to find the row in the DOM.
     @html.div(
-      class=if state.highlighted == Some(entry.path) {
-        "tree-row tree-dir highlighted"
-      } else {
-        "tree-row tree-dir"
-      },
+      class="tree-row tree-dir",
       style=[indent_style],
       on_click=dispatch(DirToggle(entry.path)),
       attrs=@html.Attrs::build().data_set("path", entry.path.0),
@@ -1015,40 +1233,4 @@ fn tree_row(
       [@html.span(class="tree-name", entry.name)],
     )
   }
-}
-
-///|
-/// Scroll a `RevealDirectory` target's tree row into view once it exists in
-/// the DOM; a no-op while its ancestors are still loading (retried once they
-/// finish, see `DirLoaded`).
-fn reveal_row_after_render(path : @pathx.Relative) -> @cmd.Cmd {
-  @cmd.custom_cmd(_ => reveal_tree_row(path), kind=@cmd.after_render)
-}
-
-///|
-fn reveal_tree_row(path : @pathx.Relative) -> Unit {
-  let document = @dom.document()
-  guard document.get_element_by_id(ExplorerPanelId).to_option() is Some(tree) &&
-    tree.query_selector("[data-path=\"" + path.0 + "\"]") is Some(row) else {
-    return
-  }
-  let tree_rect = tree.get_bounding_client_rect()
-  let row_rect = row.get_bounding_client_rect()
-  let mut scroll_top = tree.get_scroll_top()
-  if row_rect.get_top() < tree_rect.get_top() {
-    scroll_top += row_rect.get_top() - tree_rect.get_top()
-  } else if row_rect.get_bottom() > tree_rect.get_bottom() {
-    scroll_top += row_rect.get_bottom() - tree_rect.get_bottom()
-  } else {
-    // An already-visible breadcrumb target must not disturb any scroll owner.
-    return
-  }
-  // Scroll the inventory itself. `Element::scroll_into_view` also scrolls
-  // outer ancestors, including the hidden-overflow app root in Chromium.
-  let options = @js.Object::new()
-  options["top"] = scroll_top
-  options["behavior"] = "smooth"
-  let _ : @js.Value = @js.Value::cast_from(tree).apply_with_string("scrollTo", [
-    options.to_value(),
-  ])
 }
