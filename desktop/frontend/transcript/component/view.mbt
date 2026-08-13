@@ -618,10 +618,7 @@ fn transcript_view(
 ) -> @html.Html {
   let renderer : TranscriptRenderer = { input, on_open, on_jump }
   let children = renderer.section_children(
-    pinned,
-    overview,
-    overview_emit,
-    on_jump_latest,
+    pinned, overview, overview_emit, on_jump_latest,
   )
   // These identity attributes make a conversation switch observable even
   // when both conversations render identical children (notably two empty

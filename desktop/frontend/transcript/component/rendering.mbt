@@ -136,7 +136,12 @@ fn TranscriptRenderer::stream_children(
         }
         items.set(
           TranscriptRenderKey::row(row.identity).wire(),
-          transcript_item_view(item, self.on_open, anchor?, on_jump=self.on_jump),
+          transcript_item_view(
+            item,
+            self.on_open,
+            anchor?,
+            on_jump=self.on_jump,
+          ),
         )
         if item.kind is User {
           items.set(

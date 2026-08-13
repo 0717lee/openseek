@@ -76,12 +76,7 @@ test "transcript stream children use stable typed keys in display order" {
     submission_generation=1,
     items=[
       {
-        item: {
-          kind: User,
-          content: "question",
-          ts: None,
-          sequence: Some(41),
-        },
+        item: { kind: User, content: "question", ts: None, sequence: Some(41) },
         identity: "s41\u{0}o0",
       },
       { item: first_tool, identity: "s43\u{0}o0" },
