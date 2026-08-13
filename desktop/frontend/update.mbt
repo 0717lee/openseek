@@ -1543,7 +1543,21 @@ fn update(
   // here, no matter which semantic action opened or closed the panel.
   let panel_visibility_changed = model.right_panel_open !=
     previous.right_panel_open
-  let (panel_visibility_cmd, model) = if panel_visibility_changed {
+  // A semantic file open already mounts the viewer and starts the new
+  // document's tagged read. When that same action also reveals the panel,
+  // activating the newly inserted document again would start an untagged
+  // duplicate read. A plain visibility toggle has no new document and still
+  // takes the generic activation path below.
+  let document_opened_with_panel = if !previous.right_panel_open &&
+    model.right_panel_open &&
+    @dock.active_file(model.dock) is Some(path) {
+    previous.file_panel.docs.get(path) is None &&
+    model.file_panel.docs.get(path) is Some(_)
+  } else {
+    false
+  }
+  let (panel_visibility_cmd, model) = if panel_visibility_changed &&
+    !document_opened_with_panel {
     let (command, file_panel) = @fileeditor.panel_toggle_cmds(
       dispatch.map(msg => FileEditor(msg)),
       model.file_panel,
