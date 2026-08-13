@@ -260,13 +260,17 @@ fn collect_diagram_viewport_candidates(
 ) -> Unit {
   for child in root.get_children() {
     let language = element_attribute_or_empty(child, "data-diagram-language")
-    if element_has_class(child, "moonbit-viewer-markdown-diagram") &&
-      (language == "diago" || language == "uml" || language == "mermaid") &&
-      !element_has_class(child, diagram_viewport_class) &&
-      direct_svg_child(child) is Some(_) {
-      candidates.push(child)
+    if element_has_class(child, "moonbit-viewer-markdown-diagram") {
+      if (language == "diago" || language == "uml" || language == "mermaid") &&
+        !element_has_class(child, diagram_viewport_class) &&
+        direct_svg_child(child) is Some(_) {
+        candidates.push(child)
+      }
+      // A diagram wrapper owns one direct SVG. Treat it as a scan boundary so
+      // transcript refreshes never walk the generated SVG or injected controls.
+    } else {
+      collect_diagram_viewport_candidates(child, candidates)
     }
-    collect_diagram_viewport_candidates(child, candidates)
   }
 }
 

@@ -38,6 +38,7 @@ extern "js" fn install_diagram_viewport_test_dom() -> DiagramViewportTestHarness
   #|     wrappers: [],
   #|     svgMeasureTransforms: [],
   #|     throwOnObserve: false,
+  #|     childReads: 0,
   #|   };
   #|
   #|   class TestStyle {
@@ -161,7 +162,10 @@ extern "js" fn install_diagram_viewport_test_dom() -> DiagramViewportTestHarness
   #|     getAttribute(name) { return this.attributes.get(String(name).toLowerCase()) ?? null; }
   #|     hasAttribute(name) { return this.attributes.has(String(name).toLowerCase()); }
   #|     removeAttribute(name) { this.attributes.delete(String(name).toLowerCase()); }
-  #|     get children() { return this.childNodes.filter(child => child.nodeType === 1); }
+  #|     get children() {
+  #|       harness.childReads += 1;
+  #|       return this.childNodes.filter(child => child.nodeType === 1);
+  #|     }
   #|     get firstChild() { return this.childNodes[0] ?? null; }
   #|     get nextSibling() {
   #|       if (!this.parentNode) return null;
@@ -394,6 +398,16 @@ extern "js" fn diagram_viewport_test_pending_frames(
 extern "js" fn diagram_viewport_test_observer_count(
   harness : DiagramViewportTestHarness,
 ) -> Int = "harness => harness.observers.length"
+
+///|
+extern "js" fn diagram_viewport_test_reset_child_reads(
+  harness : DiagramViewportTestHarness,
+) -> Unit = "harness => { harness.childReads = 0; }"
+
+///|
+extern "js" fn diagram_viewport_test_child_reads(
+  harness : DiagramViewportTestHarness,
+) -> Int = "harness => harness.childReads"
 
 ///|
 extern "js" fn diagram_viewport_test_fail_next_observe(
@@ -928,7 +942,7 @@ test "mounts synchronous UML SVGs with UML accessibility labels" {
 }
 
 ///|
-test "refresh preserves a current diagram's interaction state" {
+test "refresh preserves current diagram state without scanning its SVG" {
   let harness = install_diagram_viewport_test_dom()
   defer harness.dispose()
   let target = diagram_viewport_test_target(harness, "uml")
@@ -940,12 +954,15 @@ test "refresh preserves a current diagram's interaction state" {
   let transform = diagram_viewport_test_transform(viewports.lifetime, 0)
 
   // A host may refresh after an unrelated transcript or Editor render. The
-  // same direct SVG keeps its controller, transform, and resize observer.
+  // same direct SVG keeps its controller, transform, and resize observer. Its
+  // wrapper is also a scan boundary: only the target's direct children are read.
+  diagram_viewport_test_reset_child_reads(harness)
   viewports.refresh()
   assert_eq(diagram_viewport_test_controller_count(viewports.lifetime), 1)
   assert_eq(diagram_viewport_test_observer_count(harness), 1)
   assert_eq(diagram_viewport_test_scale(viewports.lifetime, 0), 1.25)
   assert_eq(diagram_viewport_test_transform(viewports.lifetime, 0), transform)
+  assert_eq(diagram_viewport_test_child_reads(harness), 1)
 }
 
 ///|
