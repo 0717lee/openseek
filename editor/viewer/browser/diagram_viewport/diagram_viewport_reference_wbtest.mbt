@@ -192,6 +192,12 @@ extern "js" fn install_diagram_viewport_test_dom() -> DiagramViewportTestHarness
   #|       child.parentNode = null;
   #|       return child;
   #|     }
+  #|     contains(other) {
+  #|       for (let current = other; current; current = current.parentNode) {
+  #|         if (current === this) return true;
+  #|       }
+  #|       return false;
+  #|     }
   #|     remove() { this.parentNode?.removeChild(this); }
   #|     matchesDiagramCandidate() {
   #|       return this.classTokens().includes('moonbit-viewer-markdown-diagram') &&
@@ -942,7 +948,7 @@ test "mounts synchronous UML SVGs with UML accessibility labels" {
 }
 
 ///|
-test "refresh preserves current diagram state without scanning its SVG" {
+test "refresh preserves current state and disposes wrappers outside its target" {
   let harness = install_diagram_viewport_test_dom()
   defer harness.dispose()
   let target = diagram_viewport_test_target(harness, "uml")
@@ -963,6 +969,21 @@ test "refresh preserves current diagram state without scanning its SVG" {
   assert_eq(diagram_viewport_test_scale(viewports.lifetime, 0), 1.25)
   assert_eq(diagram_viewport_test_transform(viewports.lifetime, 0), transform)
   assert_eq(diagram_viewport_test_child_reads(harness), 1)
+
+  // Keyed hosts may remove an entire row while retaining the Markdown root.
+  // The detached wrapper still owns its content and SVG, so target membership
+  // must participate in the controller's currentness check.
+  let wrapper = viewports.lifetime.controllers[0].wrapper
+  diagram_viewport_test_retain_wrapper(harness, wrapper)
+  target.remove_child(wrapper.as_node())
+  viewports.refresh()
+  assert_eq(diagram_viewport_test_controller_count(viewports.lifetime), 0)
+  assert_eq(diagram_viewport_test_disconnect_count(harness, 0), 1)
+  assert_eq(diagram_viewport_test_window_listener_count(harness, "keydown"), 0)
+  assert_eq(
+    diagram_viewport_test_retained_wrapper_state(harness),
+    "moonbit-viewer-markdown-diagram||||auto|SVG|0",
+  )
 }
 
 ///|

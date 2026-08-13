@@ -205,7 +205,7 @@ fn MarkdownDiagramViewportLifetime::refresh(
   }
   for index in (self.controllers.length() - 1)>=..0 {
     let controller = self.controllers[index]
-    if !controller.is_current() {
+    if !controller.is_current(self.target) {
       self.controllers.remove(index) |> ignore
       controller.dispose()
     }
@@ -1137,8 +1137,16 @@ fn MarkdownDiagramViewport::finish_resize(
 }
 
 ///|
-fn MarkdownDiagramViewport::is_current(self : MarkdownDiagramViewport) -> Bool {
-  guard self.active && element_has_class(self.wrapper, diagram_viewport_class) else {
+fn MarkdownDiagramViewport::is_current(
+  self : MarkdownDiagramViewport,
+  target : @rdom.Element,
+) -> Bool {
+  // Keyed hosts may detach a complete diagram row without disturbing the
+  // wrapper/content/SVG relationship inside that subtree. Target containment
+  // is therefore part of ownership, not merely a structural sanity check.
+  guard self.active &&
+    target.contains(self.wrapper.as_node()) &&
+    element_has_class(self.wrapper, diagram_viewport_class) else {
     return false
   }
   guard self.content.get_parent_node().to_option() is Some(content_parent) &&
