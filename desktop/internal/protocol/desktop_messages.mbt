@@ -492,22 +492,25 @@ pub(all) struct WorkspaceSettingsGetPayload {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-/// `workspace.settings_set` replaces one workspace's settings; the committed
-/// state comes back in the reply and in the `workspace.settings_changed`
-/// broadcast.
+/// `workspace.settings_set` patches one workspace's settings; absent fields
+/// stay unchanged. The committed state comes back in the reply and in the
+/// `workspace.settings_changed` broadcast.
 pub(all) struct WorkspaceSettingsSetPayload {
   workspace : String
-  worktree_mode : Bool
+  worktree_mode : Bool?
+  checkout_submodules : Bool?
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
 /// One workspace's desktop-owned settings: the reply to both settings
 /// methods and the `workspace.settings_changed` payload. `worktree_mode` is
 /// where a NEW conversation in this workspace starts — the workspace root,
-/// or a fresh git worktree bound to that conversation.
+/// or a fresh git worktree bound to that conversation. The frontend and host
+/// ship together, so reply and broadcast fields evolve in lockstep.
 pub(all) struct WorkspaceSettingsPayload {
   workspace : String
   worktree_mode : Bool
+  checkout_submodules : Bool
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
