@@ -1206,16 +1206,16 @@ priv struct Model {
   // On the narrow layout the sidebar is a full-screen drawer instead of a
   // column, and starts closed.
   sidebar_open : Bool
-  // Cross-component layout projections reported by the right-panel component.
-  // The component owns these booleans; the shell reads them for its grid,
-  // dismissal subscription, and native Browser geometry.
+  // Right-panel visibility is shared by the shell grid, file-editor lifecycle,
+  // and native Browser geometry, so the application root is its single owner.
+  // The right-panel component receives these values as read-only input.
   right_panel_open : Bool
   right_panel_menu_open : Bool
   right_panel_expanded : Bool
-  // The terminal component owns its tabs and PTY lifecycle. This one-bit
-  // projection belongs to the shell because visibility changes both the app
-  // grid and the native Browser pane geometry.
-  terminal_open : Bool
+  // Terminal tabs and their connection snapshots affect both the component
+  // view and root layout. The root owns the opaque state once so neither side
+  // reports a second visibility copy back to the other.
+  terminal : @terminal.State
   // Whether the sidebar's "Chats" section (the default store's loose
   // conversations) is folded down to its heading; clicking the heading flips
   // it.
@@ -1701,9 +1701,9 @@ priv enum Msg {
   // notification extension: jump to the conversation that owned that run.
   // The native extension brings the window forward before emitting the click.
   NotificationClicked(run_id~ : String)
-  // A host-side action with no conversation of its own (opening a file in
-  // the system app, opening an external URL, launching an app) failed: pops
-  // an error toast.
+  // A host-side action with no conversation of its own (opening a non-text
+  // path in the system app, opening an external URL, launching an app) failed:
+  // pops an error toast.
   HostActionFailed(String)
   // A transcript file link's host lookup failed. Unlike other host actions,
   // this carries the click identity so a slower older failure cannot surface
@@ -1788,20 +1788,19 @@ priv enum Msg {
   // The host's dark-mode preference changed. It updates the palette only while
   // no explicit Light/Dark choice has been saved.
   ColorSchemeChanged(Bool)
-  // A file path in the transcript was clicked. The host either opens the
-  // literal path through the system or resolves its conservative position
-  // suffix for the built-in editor. Each click spends a generation before
-  // the asynchronous host request starts, so only the newest click may later
-  // steer the editor.
+  // A file path in the transcript was clicked. The host opens viewer-sized
+  // UTF-8 text in the built-in editor and hands other existing paths to the
+  // system. Each click spends a generation before the asynchronous request,
+  // so only the newest click may later steer the editor.
   OpenFile(String)
-  // The host resolved a missing `path:line[:column]` literal to this concrete
-  // workspace file. Owner and generation fence replies that arrive after a
+  // The host resolved this text file and optional position inside the
+  // checkout. Owner and generation fence replies that arrive after a
   // conversation change or a newer transcript file-link click.
   OpenFileAt(
     owner~ : @interop.ConversationKey,
     generation~ : Int,
     path~ : String,
-    line~ : Int,
+    line~ : Int?,
     column~ : Int?
   )
   // Open or close the topbar app launcher; opening it fetches the installed-app
@@ -1813,7 +1812,13 @@ priv enum Msg {
   // its toggle on purpose: a dismissal must never reopen what it closed.
   CloseGitDetails
   CloseLauncher
-  RightPanelVisibilityChanged(open~ : Bool, menu_open~ : Bool, expanded~ : Bool)
+  // The right panel renders these root-owned values and reports only user
+  // actions. Keeping the transitions here avoids a component mirror and a
+  // second message that writes the same visibility back into the root.
+  ToggleRightPanel
+  ToggleRightPanelMenu
+  ToggleRightPanelExpanded
+  CloseRightPanelMenu
   LauncherLoaded(Array[@transcript.LauncherAppItem])
   LauncherFailed(String)
   // Launch one detected app (by its id) on the active conversation's workspace.
@@ -1863,8 +1868,9 @@ priv enum Msg {
   // `FileSelected` (which dock tab a tree click opens is the strip's
   // business).
   FileEditor(@fileeditor.Msg)
-  // The terminal reports only the shell-layout projection of its local state.
-  TerminalVisibilityChanged(Bool)
+  // Terminal UI, host notifications, and xterm callbacks share one root-owned
+  // state machine.
+  Terminal(@terminal.Msg)
   // A message produced by one device channel's connection — its lifecycle,
   // its notification stream, and every reply fenced by its connection
   // generation — tagged with the channel it came from.
@@ -2342,7 +2348,7 @@ fn initial_model() -> Model {
     right_panel_open: false,
     right_panel_menu_open: false,
     right_panel_expanded: false,
-    terminal_open: false,
+    terminal: @terminal.State::empty(),
     chats_collapsed: false,
     projects_collapsed: false,
     expanded_subruns: [],

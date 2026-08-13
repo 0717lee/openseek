@@ -11,7 +11,7 @@ const AckRetryDelayMs = 100
 
 ///|
 fn open_session(
-  dispatch : @cmd.Emit[TerminalMsg],
+  dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
   key : Int,
   session : String,
@@ -48,7 +48,7 @@ fn open_session(
 
 ///|
 fn send_input(
-  dispatch : @cmd.Emit[TerminalMsg],
+  dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
   id : Int,
   data : String,

@@ -96,6 +96,15 @@ fn app_shortcut_platform_is_apple() -> Bool {
 /// Map only the platform's exact, non-repeating command chords to the same
 /// messages used by their corresponding UI buttons.
 fn app_shortcut_message(keyboard : @dom.KeyboardEvent, is_apple : Bool) -> Msg? {
+  if keyboard.code() == "Backquote" &&
+    keyboard.ctrl_key() &&
+    !keyboard.meta_key() &&
+    !keyboard.alt_key() &&
+    !keyboard.shift_key() &&
+    !keyboard.is_composing() &&
+    !keyboard.repeat() {
+    return Some(Terminal(@terminal.ToggleTerminal))
+  }
   let command = if is_apple {
     keyboard.meta_key() && !keyboard.ctrl_key()
   } else {
@@ -113,8 +122,7 @@ fn app_shortcut_message(keyboard : @dom.KeyboardEvent, is_apple : Bool) -> Msg? 
     ("KeyN", false) => Some(NewChat)
     ("KeyO", false) => Some(AddProjectRequested)
     ("KeyB", false) => Some(ToggleSidebar)
-    // The right-panel component owns Shift+B and updates its own Model.
-    ("KeyB", true) => None
+    ("KeyB", true) => Some(ToggleRightPanel)
     _ => None
   }
 }
@@ -134,9 +142,8 @@ pub fn boot() -> Unit {
       },
       // The narrow-layout flag must track the window: rotating a phone or
       // resizing a desktop window across the breakpoint re-lays the app out.
-      // Component-owned chords (Shift+B and Ctrl+`) live with their local
-      // Models. Application command chords use a separate capture subscription
-      // because they must beat embedded editors and browser defaults.
+      // Application command chords use one capture subscription because they
+      // must beat embedded editors, xterm, and browser defaults.
       subscriptions=(model, emit) => {
         let subs : Array[@sub.Sub] = [
           @sub.on_resize(
@@ -178,63 +185,68 @@ pub fn boot() -> Unit {
             ),
           )
         }
+        if model.right_panel_menu_open {
+          subs.push(
+            dismiss_subscription(
+              "right-panel-menu-dismiss",
+              trigger=".tab-add",
+              emit.map((_ : Unit) => CloseRightPanelMenu),
+            ),
+          )
+        }
+        // Rabbita captures its own `@html.a` nodes. The embedded Viewer owns
+        // foreign DOM below `.viewer-host`, so its anchors need the adjacent
+        // document subscription to reach the same root URL policy.
+        if model.is_desktop {
+          subs.push(
+            @sub.on_url_request(
+              emit.map(request => {
+                ExternalLinkClicked(
+                  match request {
+                    @url.Internal(url) => url.to_string()
+                    @url.External(url) => url
+                  },
+                )
+              }),
+            ),
+          )
+          subs.push(
+            viewer_external_link_subscription(
+              emit.map(url => ExternalLinkClicked(url)),
+            ),
+          )
+        }
         @sub.batch(subs)
       },
     )
     let right_panel_input = state.map(model => model.right_panel_input())
-    let (right_panel_html, right_panel_emit) = @right_panel.component(
-      right_panel_input,
-      {
-        dock: emit.map(msg => Dock(msg)),
-        file_editor: emit.map(msg => FileEditor(msg)),
-        browser_tab: emit(BrowserTabRequested),
-        files: emit(FilePickerRequested),
-        review: emit(ReviewRequested),
-        browser_input: emit.map(value => BrowserAddressEdited(value)),
-        browser_submit: emit(BrowserNavigateSubmitted),
-        browser_back: emit(BrowserBack),
-        browser_forward: emit(BrowserForward),
-        browser_reload: emit(BrowserReload),
-        browser_open_external: emit(BrowserOpenExternal),
-        external_link: emit.map(url => ExternalLinkClicked(url)),
-        opened: @fileeditor.mount_cmds(emit.map(msg => FileEditor(msg))),
-        visibility: emit.map(visibility => {
-          RightPanelVisibilityChanged(
-            open=visibility.open,
-            menu_open=visibility.menu_open,
-            expanded=visibility.expanded,
-          )
-        }),
-      },
-    )
-    let ui_emit : @cmd.Emit[Msg] = @cmd.Emit(msg => {
-      // Editor-bound UI messages must update the component's local visibility
-      // before the root handles them. OpenFile completes later as OpenFileAt,
-      // and QuickOpenPick covers both pointer and Enter acceptance; waiting
-      // for the root Model would desynchronize the next panel toggle from the
-      // visible layout.
-      let panel_command = match msg {
-        OpenFile(_)
-        | JumpToMention(_)
-        | JumpToLocation(..)
-        | QuickOpenPick(_) => right_panel_emit(@right_panel.OpenPanel)
-        _ => @cmd.none
-      }
-      @cmd.batch([panel_command, emit(msg)])
+    let right_panel_html = @right_panel.component(right_panel_input, {
+      dock: emit.map(msg => Dock(msg)),
+      file_editor: emit.map(msg => FileEditor(msg)),
+      browser_tab: emit(BrowserTabRequested),
+      files: emit(FilePickerRequested),
+      review: emit(ReviewRequested),
+      browser_input: emit.map(value => BrowserAddressEdited(value)),
+      browser_submit: emit(BrowserNavigateSubmitted),
+      browser_back: emit(BrowserBack),
+      browser_forward: emit(BrowserForward),
+      browser_reload: emit(BrowserReload),
+      browser_open_external: emit(BrowserOpenExternal),
+      toggle_panel: emit(ToggleRightPanel),
+      toggle_menu: emit(ToggleRightPanelMenu),
+      toggle_expanded: emit(ToggleRightPanelExpanded),
+      close_menu: emit(CloseRightPanelMenu),
     })
     let terminal_input = state.map(model => model.terminal_input())
-    let (terminal_html, terminal_emit) = @terminal.component(terminal_input, {
-      external_link: right_panel_emit.map(url => @right_panel.ExternalLink(url)),
-      error: emit.map(message => HostActionFailed(message)),
-      visibility: emit.map(open => TerminalVisibilityChanged(open)),
-      connect: (terminal_emit, channel, websocket_epoch) => {
-        install_bridge(emit, terminal_emit, channel, websocket_epoch)
-      },
-    })
+    let terminal_state = state.map(model => model.terminal)
+    let terminal_emit = emit.map(msg => Terminal(msg))
+    let terminal_html = @terminal.component(
+      terminal_input, terminal_state, terminal_emit,
+    )
     let transcript_input = state.map(model => model.transcript_input())
     let transcript_html = @transcript_component.component(transcript_input, {
-      open: ui_emit.map(path => OpenFile(path)),
-      jump: ui_emit.map(target => {
+      open: emit.map(path => OpenFile(path)),
+      jump: emit.map(target => {
         JumpToLocation(
           path=target.file,
           range=target.range,
@@ -249,9 +261,9 @@ pub fn boot() -> Unit {
       right_panel_html,
     ) => {
       view(
-        ui_emit,
+        emit,
         terminal_emit(@terminal.ToggleTerminal),
-        right_panel_emit(@right_panel.TogglePanel),
+        emit(ToggleRightPanel),
         model,
         terminal_html,
         transcript_html,

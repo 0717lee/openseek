@@ -27,9 +27,8 @@ pub async fn open_path(path : String) -> Int {
     windows_open(path)
   } else if is_darwin() {
     // Respect the file's app association, but fall back to the default text
-    // editor for types with none — source files like `.mbt` have no associated
-    // app, and plain `open` rejects them with "no application knows how to
-    // open" (exit non-zero) rather than showing their contents.
+    // editor for types with none. Oversized source files are deliberately
+    // routed here, and extensions such as `.mbt` may have no association.
     let code = @process.run("open", [path])
     if code == 0 {
       code

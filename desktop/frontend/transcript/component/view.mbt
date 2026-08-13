@@ -467,14 +467,43 @@ fn user_message_view(
 /// something sent today, the date in front of it for anything older, and
 /// nothing at all for the zero/absent stamps old stores wrote. Local time and
 /// locale order come from the viewer's own environment.
-extern "js" fn js_clock_label(unix_ms : Double) -> String =
-  #|(ms) => {
-  #|  if (!Number.isFinite(ms) || ms <= 0) return ""
-  #|  const at = new Date(ms)
-  #|  const clock = at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-  #|  if (at.toDateString() === new Date().toDateString()) return clock
-  #|  return at.toLocaleDateString([], { month: "numeric", day: "numeric" }) + " " + clock
-  #|}
+fn clock_label(unix_ms : Double) -> String {
+  guard !unix_ms.is_nan() && !unix_ms.is_inf() && unix_ms > 0.0 else {
+    return ""
+  }
+  guard @interop.js_prop(@js.globalThis, "Date") is Some(date_constructor) else {
+    return ""
+  }
+  let at : @js.Value = date_constructor.new([@js.Value::cast_from(unix_ms)])
+  let now : @js.Value = date_constructor.new(([] : Array[@js.Value]))
+  let locales = @js.Value::cast_from(([] : Array[String]))
+  let time_options = @js.Object::new()
+  time_options["hour"] = "2-digit"
+  time_options["minute"] = "2-digit"
+  let clock : String = at.apply_with_string("toLocaleTimeString", [
+    locales,
+    time_options.to_value(),
+  ])
+  let at_date : String = at.apply_with_string(
+    "toDateString",
+    ([] : Array[@js.Value]),
+  )
+  let today : String = now.apply_with_string(
+    "toDateString",
+    ([] : Array[@js.Value]),
+  )
+  if at_date == today {
+    return clock
+  }
+  let date_options = @js.Object::new()
+  date_options["month"] = "numeric"
+  date_options["day"] = "numeric"
+  let date : String = at.apply_with_string("toLocaleDateString", [
+    locales,
+    date_options.to_value(),
+  ])
+  date + " " + clock
+}
 
 ///|
 /// The hairline closing a user's turn: everything below it until the next
@@ -486,7 +515,7 @@ extern "js" fn js_clock_label(unix_ms : Double) -> String =
 fn turn_rule_view(ts? : Double) -> @html.Html {
   let children : Array[@html.Html] = []
   if ts is Some(ts) {
-    let label = js_clock_label(ts)
+    let label = clock_label(ts)
     if !label.is_empty() {
       children.push(
         @html.span(class="turn-time", [
@@ -657,7 +686,7 @@ fn transcript_view(
       }),
       overview,
       overview_emit,
-      clock=ms => js_clock_label(ms),
+      clock=ms => clock_label(ms),
     ),
     @html.div(id="stream", class="stream", items),
   ]

@@ -7,7 +7,8 @@ struct Input {
   preview : @preview.State
   file_ctx : @fileeditor.Ctx
   is_desktop : Bool
-  panel_available : Bool
+  menu_open : Bool
+  expanded : Bool
 } derive(Eq)
 
 ///|
@@ -17,18 +18,11 @@ pub fn Input::Input(
   preview~ : @preview.State,
   file_ctx~ : @fileeditor.Ctx,
   is_desktop~ : Bool,
-  panel_available~ : Bool,
+  menu_open~ : Bool,
+  expanded~ : Bool,
 ) -> Input {
-  { dock, file_panel, preview, file_ctx, is_desktop, panel_available }
+  { dock, file_panel, preview, file_ctx, is_desktop, menu_open, expanded }
 }
-
-///|
-/// The panel reports only the visibility that affects the root layout.
-pub struct Visibility {
-  open : Bool
-  menu_open : Bool
-  expanded : Bool
-} derive(Eq)
 
 ///|
 /// Commands owned by other packages are supplied explicitly. The panel never
@@ -45,207 +39,19 @@ pub(all) struct Actions {
   browser_forward : @cmd.Cmd
   browser_reload : @cmd.Cmd
   browser_open_external : @cmd.Cmd
-  external_link : @cmd.Emit[String]
-  opened : @cmd.Cmd
-  visibility : @cmd.Emit[Visibility]
+  toggle_panel : @cmd.Cmd
+  toggle_menu : @cmd.Cmd
+  toggle_expanded : @cmd.Cmd
+  close_menu : @cmd.Cmd
 }
 
 ///|
-priv struct Model {
-  open : Bool
-  menu_open : Bool
-  expanded : Bool
-  owner : @interop.ConversationKey?
-} derive(Eq)
-
-///|
-pub(all) enum Msg {
-  TogglePanel
-  OpenPanel
-  ExternalLink(String)
-}
-
-///|
-priv enum ComponentMsg {
-  External(Msg)
-  ToggleMenu
-  ToggleExpanded
-  CloseMenu
-  InputRendered
-}
-
-///|
-fn Model::update(
-  self : Model,
-  msg : ComponentMsg,
-  external_opens : Bool,
-) -> Model {
-  match msg {
-    External(TogglePanel) =>
-      if self.open {
-        { ..self, open: false, menu_open: false, expanded: false }
-      } else {
-        { ..self, open: true, menu_open: false }
-      }
-    External(OpenPanel) => { ..self, open: true, menu_open: false }
-    ToggleMenu => { ..self, menu_open: !self.menu_open }
-    ToggleExpanded =>
-      if self.open {
-        { ..self, menu_open: false, expanded: !self.expanded }
-      } else {
-        self
-      }
-    CloseMenu => { ..self, menu_open: false }
-    InputRendered => self
-    External(ExternalLink(_)) =>
-      if external_opens {
-        { ..self, open: true, menu_open: false }
-      } else {
-        self
-      }
-  }
-}
-
-///|
-/// The launcher belongs to the conversation that opened it. Durable dock data
-/// can switch owners without a panel message, so the rendered input marker
-/// closes an old owner's menu before the new conversation is shown.
-fn Model::reconcile_owner(
-  self : Model,
-  owner : @interop.ConversationKey?,
-) -> Model {
-  if self.owner == owner {
-    self
-  } else {
-    { ..self, menu_open: false, owner }
-  }
-}
-
-///|
-/// Build the local visibility state and return independently updating Html.
+/// Render the root-owned panel input directly. The panel has no local state or
+/// document listeners: app shortcuts, menu dismissal, and URL requests belong
+/// to the root application because their messages all change root state.
 pub fn component(
   input : @rabbita.Val[Input],
   actions : Actions,
-) -> (@rabbita.Val[@html.Html], @cmd.Emit[Msg]) {
-  let (state, component_emit) = @rabbita.create_state_with_input(
-    input~,
-    init=(_, input) => {
-      (
-        {
-          open: false,
-          menu_open: false,
-          expanded: false,
-          owner: input.dock.owner,
-        },
-        @cmd.none,
-      )
-    },
-    update=(state, input, msg, _) => {
-      let next = if msg is InputRendered {
-        state.reconcile_owner(input.dock.owner)
-      } else {
-        state.update(
-          msg,
-          input.is_desktop &&
-          input.panel_available &&
-          msg is External(ExternalLink(url)) &&
-          @preview.is_web_url(url),
-        )
-      }
-      let commands : Array[@cmd.Cmd] = []
-      if next.open != state.open ||
-        next.menu_open != state.menu_open ||
-        next.expanded != state.expanded {
-        commands.push(
-          (actions.visibility)({
-            open: next.open,
-            menu_open: next.menu_open,
-            expanded: next.expanded,
-          }),
-        )
-      }
-      if !state.open && next.open {
-        commands.push(actions.opened)
-      }
-      if msg is External(ExternalLink(url)) {
-        commands.push((actions.external_link)(url))
-      }
-      (next, @cmd.batch(commands))
-    },
-    subscriptions=(state, _, emit) => panel_subscriptions(state, emit),
-  )
-  (
-    state.view2(input, (state, input) => {
-      panel_view(input, state, component_emit, actions)
-    }),
-    component_emit.map(msg => External(msg)),
-  )
-}
-
-///|
-test "right-panel local state opens externally and closes with one toggle" {
-  let state : Model = {
-    open: false,
-    menu_open: false,
-    expanded: false,
-    owner: None,
-  }
-  let opened = state.update(External(OpenPanel), false)
-  let opened_again = state.update(External(OpenPanel), false)
-  assert_true(opened.open)
-  assert_true(opened_again.open)
-  let closed = opened.update(External(TogglePanel), false)
-  assert_false(closed.open)
-  let menu = opened.update(ToggleMenu, false)
-  assert_true(menu.menu_open)
-  let menu_closed = menu.update(External(TogglePanel), false)
-  assert_false(menu_closed.open)
-  assert_false(menu_closed.menu_open)
-  assert_false(menu_closed.expanded)
-  let linked = state.update(External(ExternalLink("https://example.com")), true)
-  assert_true(linked.open)
-}
-
-///|
-test "right-panel expands only while open and closing restores split mode" {
-  let closed : Model = {
-    open: false,
-    menu_open: false,
-    expanded: false,
-    owner: None,
-  }
-  assert_false(closed.update(ToggleExpanded, false).expanded)
-  let open = closed.update(External(OpenPanel), false)
-  let expanded = open.update(ToggleExpanded, false)
-  assert_true(expanded.open)
-  assert_true(expanded.expanded)
-  let restored = expanded.update(ToggleExpanded, false)
-  assert_true(restored.open)
-  assert_false(restored.expanded)
-  let hidden = expanded.update(External(TogglePanel), false)
-  assert_false(hidden.open)
-  assert_false(hidden.expanded)
-}
-
-///|
-test "right-panel launcher closes when the dock owner changes" {
-  let first : @interop.ConversationKey = {
-    channel: @interop.Local,
-    session: "first",
-  }
-  let second : @interop.ConversationKey = {
-    channel: @interop.Local,
-    session: "second",
-  }
-  let open : Model = {
-    open: true,
-    menu_open: true,
-    expanded: false,
-    owner: Some(first),
-  }
-  let unchanged = open.reconcile_owner(Some(first))
-  assert_true(unchanged.menu_open)
-  let switched = open.reconcile_owner(Some(second))
-  assert_false(switched.menu_open)
-  assert_eq(switched.owner, Some(second))
+) -> @rabbita.Val[@html.Html] {
+  input.map(input => panel_view(input, actions))
 }

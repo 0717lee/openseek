@@ -2277,12 +2277,12 @@ fn topbar_view(
   // remote device, reached through that device's WebSocket channel.
   items.push(
     @html.button(
-      class=if model.terminal_open {
+      class=if model.terminal.is_open() {
         "panel-toggle active"
       } else {
         "panel-toggle"
       },
-      title=if model.terminal_open {
+      title=if model.terminal.is_open() {
         "Hide terminal (Ctrl+`)"
       } else {
         "Show terminal (Ctrl+`)"
@@ -2510,7 +2510,7 @@ fn view(
   if panel_open && model.right_panel_expanded {
     content_class = content_class + " panel-expanded"
   }
-  if model.terminal_open {
+  if model.terminal.is_open() {
     content_class = content_class + " terminal-open"
   }
   let children : Array[@html.Html] = [

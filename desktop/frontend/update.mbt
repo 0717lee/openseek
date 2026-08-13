@@ -805,6 +805,7 @@ fn open_editor_at(
         ..model,
         dock,
         right_panel_open: true,
+        right_panel_menu_open: false,
         file_panel: {
           ..panel,
           error: Some("\{path} is outside the conversation workspace"),
@@ -820,7 +821,13 @@ fn open_editor_at(
   } else {
     @dock.open_file(dock, relative)
   }
-  let model = { ..model, dock, file_panel: panel, right_panel_open: true }
+  let model = {
+    ..model,
+    dock,
+    file_panel: panel,
+    right_panel_open: true,
+    right_panel_menu_open: false,
+  }
   let (cmd, panel) = @fileeditor.open_file(
     femit,
     panel,
@@ -1354,7 +1361,7 @@ fn browser_geometry(model : Model) -> BrowserGeometry {
     desired: desired_browser_view(model),
     sidebar_open: model.sidebar_open,
     narrow: model.narrow,
-    terminal_open: model.terminal_open,
+    terminal_open: model.terminal.is_open(),
     right_panel_expanded: model.right_panel_expanded,
     tree_layout: model.tree_layout,
   }
@@ -1532,15 +1539,74 @@ fn update(
   } else {
     model
   }
+  // Panel visibility is root-owned because it controls both HTML layout and
+  // host-backed editor/browser lifecycles. Reconcile every transition once
+  // here, no matter which semantic action opened or closed the panel.
+  let panel_visibility_changed = model.right_panel_open !=
+    previous.right_panel_open
+  // These messages call `open_editor_at` before this reconciliation. A valid
+  // open already mounts the Viewer and either shows the cached document or
+  // starts its generation-tagged read, including when the same TabLoading
+  // document existed before the message. Activating it again here would start
+  // a second untagged read. Failed/out-of-workspace opens retain an error and
+  // still take the generic path so an older active document is restored.
+  let file_opened_with_panel = !previous.right_panel_open &&
+    model.right_panel_open &&
+    msg.opens_file_before_panel_reconciliation() &&
+    model.file_panel.error is None &&
+    @dock.active_file(model.dock) is Some(_)
+  let (panel_visibility_cmd, model) = if panel_visibility_changed &&
+    !file_opened_with_panel {
+    let (command, file_panel) = @fileeditor.panel_toggle_cmds(
+      dispatch.map(msg => FileEditor(msg)),
+      model.file_panel,
+      file_ctx(model),
+      opening=model.right_panel_open,
+    )
+    (command, { ..model, file_panel, })
+  } else {
+    (@cmd.none, model)
+  }
   let (model, panel_cmd) = sync_file_panel(dispatch, model)
+  // The launcher menu belongs to one dock owner. Conversation changes are
+  // already explicit root transitions, so close it here instead of observing a
+  // rendered owner marker through the DOM.
+  let model = if model.right_panel_menu_open &&
+    model.dock.owner != previous.dock.owner {
+    { ..model, right_panel_menu_open: false }
+  } else {
+    model
+  }
+  // Terminal input changes are reconciled as part of the root transition.
+  // This replaces the component's rendered marker and MutationObserver while
+  // preserving one installation per connection generation.
+  let terminal_emit = dispatch.map(msg => Terminal(msg))
+  let terminal_input = model.terminal_input()
+  let (terminal, terminal_cmd) = model.terminal.reconcile(
+    terminal_emit,
+    terminal_input,
+    (channel, websocket_epoch) => {
+      install_bridge(dispatch, terminal_emit, channel, websocket_epoch)
+    },
+  )
+  let model = { ..model, terminal, }
   let (model, browser_cmd) = sync_browser_view(dispatch, model)
   (
     @cmd.batch([
-      cmd, quick_open_cmd, quick_open_restart_cmd, symbol_restart_cmd, panel_cmd,
-      browser_cmd,
+      cmd, quick_open_cmd, quick_open_restart_cmd, symbol_restart_cmd, panel_visibility_cmd,
+      panel_cmd, terminal_cmd, browser_cmd,
     ]),
     model,
   )
+}
+
+///|
+/// Whether this root message calls `open_editor_at` synchronously. `OpenFile`
+/// is deliberately absent: it only begins a host lookup. `OpenFileAt` opens
+/// the panel later, after the host has classified the target as editable text.
+fn Msg::opens_file_before_panel_reconciliation(self : Msg) -> Bool {
+  self
+  is (JumpToMention(_) | JumpToLocation(..) | QuickOpenPick(_) | OpenFileAt(..))
 }
 
 ///|
@@ -3028,12 +3094,12 @@ fn update_msg(
     }
     OpenFile(path) => {
       // A relative path is taken against the active conversation's projected
-      // workspace root. Absolute paths open directly; the agent surfaced it,
-      // so this operation intentionally applies no workspace containment.
+      // checkout root. The host keeps text editor targets inside that root;
+      // non-text paths may still use the system opener.
       let conv = model.active()
       // Spend the token before starting host work. This synchronously makes
       // every older host reply and positioned read stale, even if this click
-      // ultimately opens a literal path through the system instead.
+      // ultimately opens a non-text path through the system instead.
       let generation = model.file_panel.file_link_generation + 1
       let model = {
         ..model,
@@ -3058,12 +3124,18 @@ fn update_msg(
         generation == model.file_panel.file_link_generation else {
         return (@cmd.none, model)
       }
-      let column = column.unwrap_or(1)
+      let range = match line {
+        Some(line) => {
+          let column = column.unwrap_or(1)
+          Some(@common.Range::Range(line, column, line, column))
+        }
+        None => None
+      }
       open_editor_at(
         dispatch,
         model,
         path,
-        Some(@common.Range::Range(line, column, line, column)),
+        range,
         file_link_generation=generation,
       )
     }
@@ -3092,43 +3164,49 @@ fn update_msg(
     CloseGitDetails => (@cmd.none, { ..model, git_details_open: false })
     CloseLauncher =>
       (@cmd.none, { ..model, launcher: { ..model.launcher, open: false } })
-    RightPanelVisibilityChanged(open~, menu_open~, expanded~) => {
-      let changed = open != model.right_panel_open
-      let expanded_changed = expanded != model.right_panel_expanded
-      // Closing the panel, or reopening it onto an existing tab, is newer
-      // than a positioned transcript click whose host lookup is still in
-      // flight. Advance the shared navigation token before applying the
-      // component-owned visibility projection.
-      let presents_existing_tab = !model.right_panel_open &&
-        open &&
-        model.dock.active is Some(_)
-      let model = if (model.right_panel_open && !open) || presents_existing_tab {
+    ToggleRightPanel => {
+      let opening = !model.right_panel_open
+      // A direct visibility toggle has no later semantic action to fence old
+      // editor replies. Actions such as OpenFile and JumpToLocation spend
+      // their own navigation generation before opening the panel.
+      let model = if !opening || model.dock.active is Some(_) {
         model.begin_editor_navigation()
       } else {
         model
       }
       let model = {
         ..model,
-        right_panel_open: open,
-        right_panel_menu_open: menu_open,
-        right_panel_expanded: expanded,
+        right_panel_open: opening,
+        right_panel_menu_open: false,
+        right_panel_expanded: if opening {
+          model.right_panel_expanded
+        } else {
+          false
+        },
       }
-      if changed {
-        let (cmd, panel) = @fileeditor.panel_toggle_cmds(
-          dispatch.map(msg => FileEditor(msg)),
-          model.file_panel,
-          file_ctx(model),
-          opening=open,
-        )
-        (cmd, { ..model, file_panel: panel })
-      } else if expanded_changed &&
-        open &&
-        @dock.active_file(model.dock) is Some(_) {
-        (@fileeditor.request_viewer_remeasure(), model)
-      } else {
-        (@cmd.none, model)
-      }
+      (@cmd.none, model)
     }
+    ToggleRightPanelMenu =>
+      (
+        @cmd.none,
+        { ..model, right_panel_menu_open: !model.right_panel_menu_open },
+      )
+    ToggleRightPanelExpanded => {
+      guard model.right_panel_open else { return (@cmd.none, model) }
+      let model = {
+        ..model,
+        right_panel_menu_open: false,
+        right_panel_expanded: !model.right_panel_expanded,
+      }
+      let cmd = if @dock.active_file(model.dock) is Some(_) {
+        @fileeditor.request_viewer_remeasure()
+      } else {
+        @cmd.none
+      }
+      (cmd, model)
+    }
+    CloseRightPanelMenu =>
+      (@cmd.none, { ..model, right_panel_menu_open: false })
     ToggleLauncher => {
       let opening = !model.launcher.open
       // The launcher exists only in the desktop window, whose one native
@@ -3538,8 +3616,18 @@ fn update_msg(
         { ..model, browser_pane: { ..pane, shown: Some(id), rect: Some(rect) } },
       )
     }
-    TerminalVisibilityChanged(open) =>
-      (@cmd.none, { ..model, terminal_open: open })
+    Terminal(@terminal.LinkActivated(url~)) =>
+      update_msg(dispatch, ExternalLinkClicked(url), model)
+    Terminal(@terminal.InputFailed(message~)) =>
+      model.notify_error(dispatch, message)
+    Terminal(msg) => {
+      let (cmd, terminal) = model.terminal.handle(
+        dispatch.map(next => Terminal(next)),
+        msg,
+        model.terminal_input(),
+      )
+      (cmd, { ..model, terminal, })
+    }
     HostActionFailed(message) => model.notify_error(dispatch, message)
     OpenFileFailed(owner~, generation~, message~) => {
       let conv = model.active()
@@ -3567,7 +3655,7 @@ fn update_msg(
       // which a native view (with its own cookie jar) is not.
       if model.is_desktop && model.screen is Chat && @preview.is_web_url(url) {
         // Opening or reusing a Browser tab is a newer dock navigation than a
-        // transcript file link still waiting on `host.open_path`. Spend the
+        // transcript text-file link still waiting on `host.open_path`. Spend the
         // shared token before either branch so its delayed reply cannot put a
         // file back over the URL the user chose later.
         let model = model.begin_editor_navigation()
@@ -3586,14 +3674,28 @@ fn update_msg(
         match reuse {
           Some(id) => {
             let dock = @dock.open_browser(model.dock, id)
-            (@cmd.none, { ..model, dock, right_panel_open: true })
+            (
+              @cmd.none,
+              {
+                ..model,
+                dock,
+                right_panel_open: true,
+                right_panel_menu_open: false,
+              },
+            )
           }
           None => {
             let (preview, id) = @preview.open_page(model.preview, url~)
             let dock = @dock.open_browser(model.dock, id)
             (
               browser_open(dispatch, id, url),
-              { ..model, preview, dock, right_panel_open: true },
+              {
+                ..model,
+                preview,
+                dock,
+                right_panel_open: true,
+                right_panel_menu_open: false,
+              },
             )
           }
         }
@@ -13621,43 +13723,46 @@ test "every click-away menu closes without reopening on a second dismissal" {
   // Dismissing does not discard the catalog the launcher already probed, so
   // reopening it does not go back to the host for a list it has.
   assert_true(dropped.launcher.apps is AppsLoading)
-  // The right-panel component reports its local open/menu state to the root
-  // because native browser visibility and file watches depend on it.
-  let (_, docked) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false, expanded=false),
-    desktop_model(),
-  )
-  let (_, menued) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=true, expanded=false),
-    docked,
-  )
+  // Right-panel actions update the root's single visibility state directly.
+  let (_, docked) = update(dispatch, ToggleRightPanel, desktop_model())
+  let (_, menued) = update(dispatch, ToggleRightPanelMenu, docked)
   assert_true(menued.right_panel_menu_open)
-  let (_, unmenued) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false, expanded=false),
-    menued,
-  )
+  let (_, unmenued) = update(dispatch, CloseRightPanelMenu, menued)
   assert_false(unmenued.right_panel_menu_open)
-  let (_, unmenued_twice) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false, expanded=false),
-    unmenued,
-  )
+  let (_, unmenued_twice) = update(dispatch, CloseRightPanelMenu, unmenued)
   assert_false(unmenued_twice.right_panel_menu_open)
-  let (_, expanded) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false, expanded=true),
-    unmenued_twice,
-  )
+  let (_, expanded) = update(dispatch, ToggleRightPanelExpanded, unmenued_twice)
   assert_true(expanded.right_panel_expanded)
-  let (_, restored) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false, expanded=false),
-    expanded,
-  )
+  assert_false(expanded.right_panel_menu_open)
+  let (_, restored) = update(dispatch, ToggleRightPanelExpanded, expanded)
   assert_false(restored.right_panel_expanded)
+  let (_, expanded_again) = update(dispatch, ToggleRightPanelExpanded, restored)
+  let (_, hidden) = update(dispatch, ToggleRightPanel, expanded_again)
+  assert_false(hidden.right_panel_open)
+  assert_false(hidden.right_panel_expanded)
+  let (_, still_hidden) = update(dispatch, ToggleRightPanelExpanded, hidden)
+  assert_true(still_hidden == hidden)
+}
+
+///|
+test "right-panel menu closes when the dock owner changes" {
+  let dispatch = test_dispatch()
+  let model = desktop_model()
+  let stale_owner : @interop.ConversationKey = {
+    channel: @interop.Local,
+    session: "stale-panel-owner",
+  }
+  let stale = {
+    ..model,
+    right_panel_open: true,
+    right_panel_menu_open: true,
+    dock: { ..model.dock, owner: Some(stale_owner) },
+  }
+  // Any root message runs the centralized dock synchronization. The owner
+  // transition closes the menu directly, with no rendered marker or observer.
+  let (_, synced) = update(dispatch, CloseLauncher, stale)
+  assert_false(synced.right_panel_menu_open)
+  assert_true(synced.dock.owner != Some(stale_owner))
 }
 
 ///|
@@ -14419,6 +14524,26 @@ test "file editor context reports the file body actual visibility" {
 }
 
 ///|
+test "only synchronous file-open messages suppress panel reactivation" {
+  let owner : @interop.ConversationKey = {
+    channel: Local,
+    session: "desktop-test",
+  }
+  assert_true(JumpToMention(0).opens_file_before_panel_reconciliation())
+  assert_true(
+    JumpToLocation(path="a.mbt", range=None, annotation=None).opens_file_before_panel_reconciliation(),
+  )
+  assert_true(QuickOpenPick(0).opens_file_before_panel_reconciliation())
+  assert_true(
+    OpenFileAt(owner~, generation=1, path="a.mbt", line=Some(1), column=None).opens_file_before_panel_reconciliation(),
+  )
+  // This only starts the asynchronous host lookup. The later OpenFileAt is
+  // the message that actually opens the document.
+  assert_false(OpenFile("a.mbt").opens_file_before_panel_reconciliation())
+  assert_false(ToggleRightPanel.opens_file_before_panel_reconciliation())
+}
+
+///|
 test "JumpToMention opens the editor panel and selects the mention's file" {
   let dispatch = test_dispatch()
   let mention : Mention = {
@@ -14488,15 +14613,14 @@ test "update is pure: a resolved transcript position opens its owning file" {
     first_pending,
   )
   assert_eq(latest_pending.file_panel.file_link_generation, 2)
-  // Closing the right panel is a newer user decision than the pending host
-  // lookup;
-  // its delayed reply cannot reopen the panel.
-  let open_pending = { ..latest_pending, right_panel_open: true }
-  let (_, panel_closed) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=false, menu_open=false, expanded=false),
-    open_pending,
-  )
+  // Routing is asynchronous: a path that later goes to the system must not
+  // open an empty panel while the host is still classifying it.
+  assert_false(latest_pending.right_panel_open)
+  // The panel may already be showing another document while this host lookup
+  // is pending. Closing that open panel is a newer user decision; its delayed
+  // reply cannot reopen the panel.
+  let panel_open_pending = { ..latest_pending, right_panel_open: true }
+  let (_, panel_closed) = update(dispatch, ToggleRightPanel, panel_open_pending)
   assert_false(panel_closed.right_panel_open)
   assert_eq(panel_closed.file_panel.file_link_generation, 3)
   let (_, after_closed_reply) = update(
@@ -14505,7 +14629,7 @@ test "update is pure: a resolved transcript position opens its owning file" {
       owner~,
       generation=2,
       path="src/main.mbt",
-      line=2738,
+      line=Some(2738),
       column=Some(17),
     ),
     panel_closed,
@@ -14519,11 +14643,7 @@ test "update is pure: a resolved transcript position opens its owning file" {
     dock: @dock.open_file(latest_pending.dock, Relative("README.md")),
     right_panel_open: false,
   }
-  let (_, panel_opened) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false, expanded=false),
-    hidden_pending,
-  )
+  let (_, panel_opened) = update(dispatch, ToggleRightPanel, hidden_pending)
   assert_true(panel_opened.right_panel_open)
   assert_eq(panel_opened.file_panel.file_link_generation, 3)
   assert_true(
@@ -14535,7 +14655,7 @@ test "update is pure: a resolved transcript position opens its owning file" {
       owner~,
       generation=2,
       path="src/main.mbt",
-      line=2738,
+      line=Some(2738),
       column=Some(17),
     ),
     panel_opened,
@@ -14551,7 +14671,13 @@ test "update is pure: a resolved transcript position opens its owning file" {
   // The first host reply is stale as soon as the second click happens.
   let (_, old_host_reply) = update(
     dispatch,
-    OpenFileAt(owner~, generation=1, path="src/main.mbt", line=1, column=None),
+    OpenFileAt(
+      owner~,
+      generation=1,
+      path="src/main.mbt",
+      line=Some(1),
+      column=None,
+    ),
     latest_pending,
   )
   assert_true(old_host_reply.dock.active is None)
@@ -14559,12 +14685,13 @@ test "update is pure: a resolved transcript position opens its owning file" {
     owner~,
     generation=2,
     path="src/main.mbt",
-    line=2738,
+    line=Some(2738),
     column=Some(17),
   )
   let (_, first) = update(dispatch, msg, latest_pending)
   let (_, second) = update(dispatch, msg, latest_pending)
   assert_true(@dock.active_file(first.dock) is Some(Relative("src/main.mbt")))
+  assert_true(first.right_panel_open)
   assert_true(@dock.active_file(second.dock) is Some(Relative("src/main.mbt")))
   assert_true(first.file_panel.docs.contains(Relative("src/main.mbt")))
   assert_true(second.file_panel.docs.contains(Relative("src/main.mbt")))
@@ -14743,7 +14870,7 @@ test "update is pure: a resolved transcript position opens its owning file" {
       owner~,
       generation=pending_generation,
       path="src/main.mbt",
-      line=40,
+      line=Some(40),
       column=None,
     ),
     inactive_closed,
@@ -14767,7 +14894,7 @@ test "update is pure: a resolved transcript position opens its owning file" {
       owner~,
       generation=2,
       path="src/main.mbt",
-      line=2738,
+      line=Some(2738),
       column=Some(17),
     ),
     tree_opened,
@@ -14779,21 +14906,6 @@ test "update is pure: a resolved transcript position opens its owning file" {
   assert_false(
     delayed_transcript_reply.file_panel.docs.contains(Relative("src/main.mbt")),
   )
-  // Mixed-version remote connections may still receive the older absolute
-  // target. Keep accepting it when it remains inside the resolved checkout.
-  let (_, legacy) = update(
-    dispatch,
-    OpenFileAt(
-      owner~,
-      generation=2,
-      path="/work/project/.worktrees/wt-4/src/main.mbt",
-      line=2738,
-      column=Some(17),
-    ),
-    latest_pending,
-  )
-  assert_true(@dock.active_file(legacy.dock) is Some(Relative("src/main.mbt")))
-  assert_true(legacy.file_panel.docs.contains(Relative("src/main.mbt")))
   // A delayed reply from another conversation cannot open a tab here.
   let (_, stale) = update(
     dispatch,
@@ -14801,7 +14913,7 @@ test "update is pure: a resolved transcript position opens its owning file" {
       owner={ ..owner, session: "another-session" },
       generation=2,
       path="/work/project/src/main.mbt",
-      line=1,
+      line=Some(1),
       column=None,
     ),
     latest_pending,
@@ -16552,26 +16664,29 @@ fn desktop_model() -> Model {
   let model = { ..test_model(), is_desktop: true }
   let (_, model) = update(
     test_dispatch(),
-    TerminalVisibilityChanged(false),
+    Terminal(@terminal.TabSelected(key=0)),
     model,
   )
   model
 }
 
 ///|
+test "terminal visibility changes in the root-owned terminal state" {
+  let dispatch = test_dispatch()
+  let model = test_model()
+  assert_false(model.terminal.is_open())
+  let (_, opened) = update(dispatch, Terminal(@terminal.ToggleTerminal), model)
+  assert_true(opened.terminal.is_open())
+  let (_, closed) = update(dispatch, Terminal(@terminal.ToggleTerminal), opened)
+  assert_false(closed.terminal.is_open())
+}
+
+///|
 test "launcher rows open Browse, Files, and Review destinations" {
   let dispatch = test_dispatch()
   let model = desktop_model()
-  let (_, model) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false, expanded=false),
-    model,
-  )
-  let (_, model) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=true, expanded=false),
-    model,
-  )
+  let (_, model) = update(dispatch, ToggleRightPanel, model)
+  let (_, model) = update(dispatch, ToggleRightPanelMenu, model)
   assert_true(model.right_panel_menu_open)
   let (_, model) = update(dispatch, BrowserTabRequested, model)
   assert_false(model.right_panel_menu_open)
@@ -16598,11 +16713,7 @@ test "launcher rows open Browse, Files, and Review destinations" {
 test "a tree pick fulfills the active picker in place" {
   let dispatch = test_dispatch()
   let model = desktop_model()
-  let (_, model) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false, expanded=false),
-    model,
-  )
+  let (_, model) = update(dispatch, ToggleRightPanel, model)
   let (_, model) = update(dispatch, FilePickerRequested, model)
   let (_, model) = update(
     dispatch,
@@ -16619,11 +16730,7 @@ test "a tree pick fulfills the active picker in place" {
 test "a changed row opens the file tab in review mode" {
   let dispatch = test_dispatch()
   let model = desktop_model()
-  let (_, model) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false, expanded=false),
-    model,
-  )
+  let (_, model) = update(dispatch, ToggleRightPanel, model)
   let (_, model) = update(dispatch, FilePickerRequested, model)
   let path = @pathx.Relative("src/main.mbt")
   let (_, model) = update(
@@ -16837,11 +16944,7 @@ test "a remote console routes loopback links to the system browser too" {
 test "submitting the address bar normalizes the draft and commits it" {
   let dispatch = test_dispatch()
   let model = desktop_model()
-  let (_, model) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=false, expanded=false),
-    model,
-  )
+  let (_, model) = update(dispatch, ToggleRightPanel, model)
   let (_, model) = update(dispatch, BrowserTabRequested, model)
   let (_, model) = update(
     dispatch,
@@ -16944,11 +17047,7 @@ test "the launcher popup and tab close both retire the shown view" {
   let (_, model) = update(dispatch, BrowserPaneMeasured(rect~), model)
   assert_true(model.browser_pane.shown == Some(1))
   // The popup overlaps the pane, so the native view must hide under it.
-  let (_, covered) = update(
-    dispatch,
-    RightPanelVisibilityChanged(open=true, menu_open=true, expanded=false),
-    model,
-  )
+  let (_, covered) = update(dispatch, ToggleRightPanelMenu, model)
   assert_true(covered.browser_pane.shown is None)
   // Closing the tab drops the page and the placement.
   let (_, closed) = update(

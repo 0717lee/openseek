@@ -1,6 +1,7 @@
 ///|
 /// Project the active conversation and live device set into the terminal
-/// package. Terminal tabs never enter the application Model.
+/// package. The projection is read-only; the opaque terminal state itself is
+/// stored once in the application Model.
 fn Model::terminal_input(self : Model) -> @terminal.Input {
   @terminal.Input(
     ctx=terminal_ctx(self),
