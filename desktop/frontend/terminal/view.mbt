@@ -4,7 +4,11 @@
 // emulators are never torn down (see host.mbt).
 
 ///|
-fn tab_view(dispatch : @cmd.Emit[Msg], tab : Tab, active : Bool) -> @html.Html {
+fn tab_view(
+  dispatch : @cmd.Emit[TerminalMsg],
+  tab : Tab,
+  active : Bool,
+) -> @html.Html {
   let classes = StringBuilder::new()
   classes.write_string("terminal-tab")
   if active {
@@ -37,10 +41,11 @@ fn tab_view(dispatch : @cmd.Emit[Msg], tab : Tab, active : Bool) -> @html.Html {
 }
 
 ///|
-pub fn panel_view(
-  dispatch : @cmd.Emit[Msg],
+fn panel_view(
+  dispatch : @cmd.Emit[TerminalMsg],
   state : State,
   ctx : Ctx,
+  sync_key : String,
 ) -> @html.Html {
   // Always render the grab strip so its position and the terminal host's
   // sibling index remain stable across open/close renders. Its listeners are
@@ -100,7 +105,7 @@ pub fn panel_view(
     @html.button(
       class="terminal-close",
       title="Hide terminal (Ctrl+`)",
-      on_click=dispatch(ToggleTerminal),
+      on_click=dispatch(External(ToggleTerminal)),
       "✕",
     ),
   )
@@ -111,7 +116,9 @@ pub fn panel_view(
     ([] : Array[@html.Html]),
   )
   @html.div(
-    class=if state.open { "terminal-panel open" } else { "terminal-panel" },
+    attrs=@html.Attrs::build()
+      .class(if state.open { "terminal-panel open" } else { "terminal-panel" })
+      .data_set("terminal-input", sync_key),
     [resize_handle, @html.div(class="terminal-titlebar", items), host],
   )
 }
