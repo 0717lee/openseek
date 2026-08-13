@@ -644,7 +644,7 @@ fn accept_completion(
         model,
         Skill(name=item.insert.trim().to_owned()),
         range=None,
-        task=menu.task_without_token,
+        task=menu.menu.draft_without_token(),
       )
     Symbols => {
       let (file, line) = if item.path is Some(path) && item.range is Some(range) {
@@ -656,7 +656,7 @@ fn accept_completion(
         model,
         Symbol(name=item.label, file~, line~),
         range=item.range,
-        task=menu.task_without_token,
+        task=menu.menu.draft_without_token(),
       )
     }
   }
@@ -882,28 +882,37 @@ fn open_editor_at(
 }
 
 ///|
-/// The command, if any, to fetch workspace symbols for a changed draft. Fires
-/// only when the draft ends in a live `#` query whose results are not already
-/// cached for this conversation — so a fresh keystroke refetches but a repeat
-/// of the same query does not.
-fn symbol_fetch_cmd(
+/// Start a delayed workspace-symbol request only while the composer still has
+/// the exact owner, query, and draft generation that scheduled it.
+fn Model::begin_completion_symbol_request(
+  self : Model,
   dispatch : @cmd.Emit[Msg],
-  model : Model,
-  value : String,
   owner : @interop.ConversationKey,
-) -> @cmd.Cmd {
-  guard CompletionTrigger::parse(value) is Some(trigger) &&
-    trigger.kind is Symbols else {
-    return @cmd.none
+  query : String,
+  generation : Int,
+) -> (@cmd.Cmd, Model) {
+  guard self.completion_debounce.accepts(generation) &&
+    owner.channel == self.focused &&
+    owner.session == self.active().session_id &&
+    @composer.Trigger::parse(self.active().task, inline_markers="$#")
+    is Some(trigger) &&
+    trigger.marker() == "#" &&
+    trigger.query() == query &&
+    self.completion is Some(completion) &&
+    completion.kind is Symbols &&
+    completion.menu.loading() else {
+    return (@cmd.none, self)
   }
-  let query = trigger.query
-  let root = model.conversation_root(model.active())
-  if model.symbol_cache.owner == Some(owner) &&
-    model.symbol_cache.root == root &&
-    model.symbol_cache.query == query {
-    return @cmd.none
+  let root = self.conversation_root(self.active())
+  if self.symbol_cache.owner == Some(owner) &&
+    self.symbol_cache.root == root &&
+    self.symbol_cache.query == query {
+    return (@cmd.none, self)
   }
-  read_workspace_symbols(dispatch, owner, query, root~)
+  (
+    ComposerSymbolRequest(generation).search(dispatch, owner, query, root~),
+    self,
+  )
 }
 
 ///|
@@ -916,15 +925,20 @@ fn apply_symbol_reply(
   owner : @interop.ConversationKey,
   root : @common.Uri,
   query : String,
+  generation : Int,
   symbols : Array[WorkspaceSymbol],
 ) -> (@cmd.Cmd, Model) {
   let draft = model.active().task
-  guard owner.channel == model.focused &&
+  guard model.completion_debounce.accepts(generation) &&
+    owner.channel == model.focused &&
     owner.session == model.active().session_id &&
     model.conversation_root(model.active()) == Some(root) &&
-    CompletionTrigger::parse(draft) is Some(trigger) &&
-    trigger.kind is Symbols &&
-    trigger.query == query else {
+    @composer.Trigger::parse(draft, inline_markers="$#") is Some(trigger) &&
+    trigger.marker() == "#" &&
+    trigger.query() == query &&
+    model.completion is Some(completion) &&
+    completion.kind is Symbols &&
+    completion.menu.loading() else {
     return (@cmd.none, model)
   }
   let items : Array[CompletionItem] = []
@@ -970,8 +984,8 @@ fn Model::restart_symbol_search_after_root_change(
   let previous_conv = previous.active()
   guard self.conversation_root(conv) !=
     previous.conversation_root(previous_conv) &&
-    CompletionTrigger::parse(conv.task) is Some(trigger) &&
-    trigger.kind is Symbols else {
+    @composer.Trigger::parse(conv.task, inline_markers="$#") is Some(trigger) &&
+    trigger.marker() == "#" else {
     return (@cmd.none, self)
   }
   let owner : @interop.ConversationKey = {
@@ -979,9 +993,11 @@ fn Model::restart_symbol_search_after_root_change(
     session: conv.session_id,
   }
   let cache = empty_symbol_cache()
+  let completion_debounce = self.completion_debounce.advanced()
   let next = {
     ..self,
     symbol_cache: cache,
+    completion_debounce,
     completion: compute_completion(
       conv.task,
       self.installed_skills,
@@ -989,7 +1005,12 @@ fn Model::restart_symbol_search_after_root_change(
       owner,
     ),
   }
-  (symbol_fetch_cmd(dispatch, next, conv.task, owner), next)
+  (
+    completion_debounce.delayed(generation => {
+      dispatch(CompletionDue(owner~, query=trigger.query(), generation~))
+    }),
+    next,
+  )
 }
 
 ///|
@@ -1767,10 +1788,23 @@ fn update_msg(
         channel: model.focused,
         session: model.active().session_id,
       }
+      let completion_debounce = model.completion_debounce.advanced()
+      let command = match @composer.Trigger::parse(value, inline_markers="$#") {
+        Some(trigger) if trigger.marker() == "#" &&
+          (
+            model.symbol_cache.owner != Some(owner) ||
+            model.symbol_cache.query != trigger.query()
+          ) =>
+          completion_debounce.delayed(generation => {
+            dispatch(CompletionDue(owner~, query=trigger.query(), generation~))
+          })
+        _ => @cmd.none
+      }
       (
-        symbol_fetch_cmd(dispatch, model, value, owner),
+        command,
         {
           ..model.replace_conversation({ ..model.active(), task: value }),
+          completion_debounce,
           completion: compute_completion(
             value,
             model.installed_skills,
@@ -1780,9 +1814,17 @@ fn update_msg(
         },
       )
     }
+    CompletionDue(owner~, query~, generation~) =>
+      model.begin_completion_symbol_request(dispatch, owner, query, generation)
     CompletionMove(delta) =>
       if model.completion is Some(menu) {
-        (@cmd.none, { ..model, completion: Some(menu.shifted(delta)) })
+        (
+          @cmd.none,
+          {
+            ..model,
+            completion: Some({ ..menu, menu: menu.menu.shifted(delta) }),
+          },
+        )
       } else {
         (@cmd.none, model)
       }
@@ -1985,23 +2027,23 @@ fn update_msg(
       (cmd, { ..model, file_panel: panel })
     }
     CompletionAccept =>
-      if model.completion is Some(menu) && menu.current() is Some(item) {
+      if model.completion is Some(menu) && menu.menu.current() is Some(item) {
         accept_completion(dispatch, model, menu, item)
       } else {
         (@cmd.none, { ..model, completion: None })
       }
     CompletionPick(index) =>
-      if model.completion is Some(menu) && menu.items.get(index) is Some(item) {
+      if model.completion is Some(menu) && menu.menu.get(index) is Some(item) {
         accept_completion(dispatch, model, menu, item)
       } else {
         (@cmd.none, { ..model, completion: None })
       }
-    SymbolsLoaded(owner~, root~, query~, items~) =>
-      apply_symbol_reply(model, owner, root, query, items)
+    SymbolsLoaded(owner~, root~, query~, generation~, items~) =>
+      apply_symbol_reply(model, owner, root, query, generation, items)
     // A failed search reads as "no symbols": cache an empty result for the
     // query so the menu settles on "No symbols" rather than spinning.
-    SymbolsFailed(owner~, root~, query~) =>
-      apply_symbol_reply(model, owner, root, query, [])
+    SymbolsFailed(owner~, root~, query~, generation~) =>
+      apply_symbol_reply(model, owner, root, query, generation, [])
     QuickOpenOpen(mode) => open_quick_open(dispatch, model, mode)
     QuickOpenValueChanged(value) =>
       change_quick_open_value(dispatch, model, value)
@@ -2037,14 +2079,16 @@ fn update_msg(
     QuickOpenSelect(index) => select_quick_open_row(model, index)
     QuickOpenPick(index) => pick_quick_open_row(dispatch, model, index)
     QuickOpenDismiss => dismiss_quick_open(dispatch, model)
-    ToggleModel => {
-      // The chip switches the conversation on screen. The tier is pinned to
+    EngineModelChanged(value) => {
+      // The selector changes the conversation on screen. The tier is pinned to
       // that conversation right away — a chat can be given a tier and left
       // unsent for days — and becomes what the next new chat starts from.
       // (Starting a run pins it too; see `Started`.) A turn already in flight
       // keeps the model it was started with; this takes effect on the next.
+      guard EngineModel::parse(value) is Some(engine_model) else {
+        return (@cmd.none, model)
+      }
       let conv = model.active()
-      let engine_model = conv.engine_model.toggled()
       let next = model
         .replace_conversation({ ..conv, engine_model, })
         .remember_model(conv.device, conv.session_id, engine_model)
@@ -7043,6 +7087,7 @@ test "a symbol reply with the same session id but another channel is stale" {
       owner=remote_owner,
       root=remote_owner.channel.test_resource("/scratch/desktop-test"),
       query="parse",
+      generation=querying.completion_debounce.generation(),
       items~,
     ),
     querying,
@@ -7050,13 +7095,14 @@ test "a symbol reply with the same session id but another channel is stale" {
   guard stale.completion is Some(stale_menu) else {
     fail("symbol menu disappeared")
   }
-  assert_true(stale_menu.loading)
+  assert_true(stale_menu.menu.loading())
   let (_, settled) = update(
     dispatch,
     SymbolsLoaded(
       owner=local_owner,
       root=local_owner.channel.test_resource("/scratch/desktop-test"),
       query="parse",
+      generation=stale.completion_debounce.generation(),
       items~,
     ),
     stale,
@@ -7064,8 +7110,9 @@ test "a symbol reply with the same session id but another channel is stale" {
   guard settled.completion is Some(menu) else {
     fail("symbol menu disappeared")
   }
-  assert_false(menu.loading)
-  inspect(menu.items[0].label, content="parse_file")
+  assert_false(menu.menu.loading())
+  guard menu.menu.get(0) is Some(first) else { fail("row expected") }
+  inspect(first.label, content="parse_file")
 }
 
 ///|
@@ -10234,7 +10281,7 @@ test "update is pure: accepting an inline skill preserves prompt text" {
   guard drafted.completion is Some(menu) else {
     fail("the inline skill token should open completion")
   }
-  assert_eq(menu.task_without_token, "Please use ")
+  assert_eq(menu.menu.draft_without_token(), "Please use ")
   let (_, once) = update(dispatch, CompletionAccept, drafted)
   let (_, twice) = update(dispatch, CompletionAccept, drafted)
   // The same message and model always produce the same plain-data state.
@@ -10261,8 +10308,8 @@ test "an inline symbol reply rebuilds the live completion menu" {
     fail("the inline symbol token should open completion")
   }
   assert_true(pending.kind is Symbols)
-  assert_true(pending.loading)
-  assert_eq(pending.task_without_token, "Inspect ")
+  assert_true(pending.menu.loading())
+  assert_eq(pending.menu.draft_without_token(), "Inspect ")
   let item : WorkspaceSymbol = {
     name: "parse_hover",
     kind: Some(12),
@@ -10276,6 +10323,7 @@ test "an inline symbol reply rebuilds the live completion menu" {
       owner={ channel: Local, session: "desktop-test" },
       root=@interop.ChannelId::Local.test_resource("/scratch/desktop-test"),
       query="parse",
+      generation=searching.completion_debounce.generation(),
       items=[item],
     ),
     searching,
@@ -10283,10 +10331,11 @@ test "an inline symbol reply rebuilds the live completion menu" {
   guard loaded.completion is Some(menu) else {
     fail("the matching inline symbol reply should rebuild completion")
   }
-  assert_false(menu.loading)
-  assert_eq(menu.items.length(), 1)
-  assert_eq(menu.items[0].label, "parse_hover")
-  assert_eq(menu.task_without_token, "Inspect ")
+  assert_false(menu.menu.loading())
+  assert_eq(menu.menu.length(), 1)
+  guard menu.menu.get(0) is Some(first) else { fail("row expected") }
+  assert_eq(first.label, "parse_hover")
+  assert_eq(menu.menu.draft_without_token(), "Inspect ")
 }
 
 ///|
@@ -10307,14 +10356,20 @@ test "a composer symbol query restarts and fences replies when its root changes"
   let (_, querying) = update(dispatch, TaskChanged("#parse"), test_model())
   let (_, loaded) = update(
     dispatch,
-    SymbolsLoaded(owner~, root=old_root, query="parse", items=[item]),
+    SymbolsLoaded(
+      owner~,
+      root=old_root,
+      query="parse",
+      generation=querying.completion_debounce.generation(),
+      items=[item],
+    ),
     querying,
   )
   guard loaded.completion is Some(ready) else {
     fail("the first root should settle the symbol menu")
   }
-  assert_false(ready.loading)
-  assert_eq(ready.items.length(), 1)
+  assert_false(ready.menu.loading())
+  assert_eq(ready.menu.length(), 1)
 
   let connected_root = owner.channel.test_resource("/next-scratch")
   let ready_msg = BridgeReady(scratch_root=connected_root)
@@ -10326,12 +10381,18 @@ test "a composer symbol query restarts and fences replies when its root changes"
   guard rerooted.completion is Some(waiting) else {
     fail("the changed root should keep the symbol menu open")
   }
-  assert_true(waiting.loading)
-  assert_true(waiting.items.is_empty())
+  assert_true(waiting.menu.loading())
+  assert_eq(waiting.menu.length(), 0)
 
   let (_, stale) = update(
     dispatch,
-    SymbolsLoaded(owner~, root=old_root, query="parse", items=[item]),
+    SymbolsLoaded(
+      owner~,
+      root=old_root,
+      query="parse",
+      generation=querying.completion_debounce.generation(),
+      items=[item],
+    ),
     rerooted,
   )
   assert_true(stale.symbol_cache.owner is None)
@@ -10340,13 +10401,19 @@ test "a composer symbol query restarts and fences replies when its root changes"
   let new_root = owner.channel.test_resource("/next-scratch/desktop-test")
   let (_, settled) = update(
     dispatch,
-    SymbolsLoaded(owner~, root=new_root, query="parse", items=[item]),
+    SymbolsLoaded(
+      owner~,
+      root=new_root,
+      query="parse",
+      generation=stale.completion_debounce.generation(),
+      items=[item],
+    ),
     stale,
   )
   guard settled.completion is Some(current) else {
     fail("the new root should settle the symbol menu")
   }
-  assert_false(current.loading)
+  assert_false(current.menu.loading())
   assert_eq(settled.symbol_cache.root, Some(new_root))
 }
 
@@ -12652,12 +12719,16 @@ test "loaded UI preferences parse their wire names" {
 }
 
 ///|
-test "the model chip switches one conversation, not the app" {
+test "the model selector switches one conversation, not the app" {
   let dispatch = test_dispatch()
   let model = test_model().replace_conversation(
     empty_conversation(@interop.ChannelId::Local, "other-chat"),
   )
-  let (_, low) = update(dispatch, ToggleModel, model)
+  let (_, low) = update(
+    dispatch,
+    EngineModelChanged("deepseek-v4-flash"),
+    model,
+  )
   assert_true(low.active().engine_model is Low)
   // The conversation next door keeps the tier it was already on.
   guard low.find_conversation(@interop.ChannelId::Local, "other-chat")
@@ -12671,19 +12742,22 @@ test "the model chip switches one conversation, not the app" {
     low.activate(@interop.ChannelId::Local, "fresh-chat").active().engine_model
     is Low,
   )
-  // Toggling back is the same one click.
-  let (_, high) = update(dispatch, ToggleModel, low)
+  let (_, high) = update(dispatch, EngineModelChanged("deepseek-v4-pro"), low)
   assert_true(high.active().engine_model is High)
 }
 
 ///|
 test "a start never overrides the tier picked for the next turn" {
   let dispatch = test_dispatch()
-  // The chip stays live while a turn spawns, so the user can flip it for the
+  // The selector stays live while a turn spawns, so the user can change it for the
   // next turn before this one's `Started` arrives. The start is older than
   // that choice and must not undo it — the same holds for a turn another
   // client began, which says nothing about what this user means to send.
-  let (_, queued) = update(dispatch, ToggleModel, test_model())
+  let (_, queued) = update(
+    dispatch,
+    EngineModelChanged("deepseek-v4-flash"),
+    test_model(),
+  )
   assert_true(queued.active().engine_model is Low)
   let (_, ran) = update_dev(
     dispatch,
@@ -12706,10 +12780,14 @@ test "reopening a conversation recovers its own tier, not the last pick" {
   // Set the chat on screen to Low, then open a different one and put it back
   // on High. The second pick moves the default new chats inherit — it must
   // not follow the first conversation home.
-  let (_, low) = update(dispatch, ToggleModel, test_model())
+  let (_, low) = update(
+    dispatch,
+    EngineModelChanged("deepseek-v4-flash"),
+    test_model(),
+  )
   let other = low.activate(@interop.ChannelId::Local, "other-chat")
   assert_true(other.active().engine_model is Low)
-  let (_, high) = update(dispatch, ToggleModel, other)
+  let (_, high) = update(dispatch, EngineModelChanged("deepseek-v4-pro"), other)
   assert_true(high.default_model is High)
   // Reopening drops the conversation and mints it again (nothing was sent,
   // so `activate` does not retain it) — exactly the path that used to hand
@@ -12741,7 +12819,11 @@ test "a run pins an inherited tier the user never clicked for" {
   )
   // Another chat moves the page default to Low...
   let elsewhere = ran.activate(@interop.ChannelId::Local, "other-chat")
-  let (_, moved) = update(dispatch, ToggleModel, elsewhere)
+  let (_, moved) = update(
+    dispatch,
+    EngineModelChanged("deepseek-v4-flash"),
+    elsewhere,
+  )
   assert_true(moved.default_model is Low)
   // ...and the first one still comes back on the tier it ran with.
   let reopened = moved.activate(@interop.ChannelId::Local, "desktop-test")
@@ -12751,7 +12833,11 @@ test "a run pins an inherited tier the user never clicked for" {
 ///|
 test "remembered tiers survive a round trip through storage" {
   let dispatch = test_dispatch()
-  let (_, chosen) = update(dispatch, ToggleModel, test_model())
+  let (_, chosen) = update(
+    dispatch,
+    EngineModelChanged("deepseek-v4-flash"),
+    test_model(),
+  )
   let restored = parse_conversation_models(
     encoded_conversation_models(chosen.conversation_models),
   )

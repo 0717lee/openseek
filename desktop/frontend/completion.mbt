@@ -30,43 +30,16 @@ fn slash_command_items() -> Array[CompletionItem] {
 }
 
 ///|
-/// The live completion token at the end of a draft. Slash commands keep their
-/// whole-draft semantics and therefore only parse at the beginning; `$` and
-/// `#` mentions parse after any whitespace so they can follow ordinary prompt
-/// text. `task_without_token` is the exact preceding text that accepting a
-/// mention preserves.
-priv struct CompletionTrigger {
-  kind : CompletionKind
-  query : String
-  task_without_token : String
-}
-
-///|
-fn CompletionTrigger::parse(text : String) -> CompletionTrigger? {
-  if text =~ (re"^/", after=query) && query =~ re"^[^[:space:]]*$" {
-    return Some({
-      kind: SlashCommands,
-      query: query.to_owned(),
-      task_without_token: "",
-    })
+/// Map the shared trigger grammar to the providers OpenSeek exposes. Keeping
+/// provider choice here leaves the composer package independent of application
+/// commands and result types.
+fn CompletionKind::of_trigger(trigger : @composer.Trigger) -> CompletionKind? {
+  match trigger.marker() {
+    "/" => Some(SlashCommands)
+    "$" => Some(SkillMentions)
+    "#" => Some(Symbols)
+    _ => None
   }
-  // The trailing anchor skips earlier `$`/`#` text. The separate boundary
-  // check rejects a marker embedded in a word without consuming the whitespace
-  // that accepting the completion must preserve.
-  guard text =~ (re"[$#][^[:space:]]*$" as token, before=task) &&
-    (task.is_empty() || task =~ re"[[:space:]]$") &&
-    token =~ (re"^[$#]" as trigger, after=query) else {
-    return None
-  }
-  Some({
-    kind: if trigger is '$' {
-      SkillMentions
-    } else {
-      Symbols
-    },
-    query: query.to_owned(),
-    task_without_token: task.to_owned(),
-  })
 }
 
 ///|
@@ -87,28 +60,32 @@ fn compute_completion(
   symbols : SymbolCache,
   owner : @interop.ConversationKey,
 ) -> Completion? {
-  guard CompletionTrigger::parse(text) is Some(trigger) else { return None }
-  match trigger.kind {
+  guard @composer.Trigger::parse(text, inline_markers="$#") is Some(trigger) &&
+    CompletionKind::of_trigger(trigger) is Some(kind) else {
+    return None
+  }
+  match kind {
     SlashCommands => {
       let items = slash_command_items().filter(item => {
-        completion_matches(trigger.query, [item.label])
+        trigger.matches([item.label])
       })
       if items.is_empty() {
         None
       } else {
         Some({
           kind: SlashCommands,
-          items,
-          selected: 0,
-          loading: false,
-          task_without_token: trigger.task_without_token,
+          menu: @composer.Menu(
+            items,
+            loading=false,
+            draft_without_token=trigger.draft_without_token(),
+          ),
         })
       }
     }
     SkillMentions => {
       let items : Array[CompletionItem] = []
       for skill in installed {
-        if completion_matches(trigger.query, [skill.name, skill.description]) {
+        if trigger.matches([skill.name, skill.description]) {
           items.push({
             label: "$\{skill.name}",
             detail: skill.description,
@@ -124,10 +101,11 @@ fn compute_completion(
       } else {
         Some({
           kind: SkillMentions,
-          items,
-          selected: 0,
-          loading: false,
-          task_without_token: trigger.task_without_token,
+          menu: @composer.Menu(
+            items,
+            loading=false,
+            draft_without_token=trigger.draft_without_token(),
+          ),
         })
       }
     }
@@ -135,19 +113,20 @@ fn compute_completion(
       // A bare `#` lists everything — an empty query asks the server for all
       // symbols — and narrows as the user types.
       let items = symbols.items.filter(item => {
-        completion_matches(trigger.query, [item.label, item.detail])
+        trigger.matches([item.label, item.detail])
       })
       // The cache answers this exact query for this conversation only when both
       // match; otherwise a fetch is in flight (or about to be) and the menu
       // shows whatever the cache narrows to meanwhile, marked loading.
       let loading = symbols.owner != Some(owner) ||
-        symbols.query != trigger.query
+        symbols.query != trigger.query()
       Some({
         kind: Symbols,
-        items,
-        selected: 0,
-        loading,
-        task_without_token: trigger.task_without_token,
+        menu: @composer.Menu(
+          items,
+          loading~,
+          draft_without_token=trigger.draft_without_token(),
+        ),
       })
     }
   }
@@ -177,42 +156,6 @@ fn push_mention(mentions : Array[Mention], mention : Mention) -> Array[Mention] 
 /// With no chips this is just the text.
 fn compose_prompt(mentions : Array[Mention], task : String) -> String {
   @mention_context.encode(mentions.map(mention => mention.ref_), task)
-}
-
-///|
-/// Whether a menu row survives the typed query: a blank query keeps it,
-/// otherwise any of its fields must contain the query (case-insensitive). The
-/// query already had its trigger stripped, so a `/compact` row is matched
-/// against the bare "compact".
-fn completion_matches(query : String, fields : Array[String]) -> Bool {
-  let query = query.trim().to_owned().to_lower()
-  if query.is_empty() {
-    return true
-  }
-  for field in fields {
-    if field.to_lower().contains(query) {
-      return true
-    }
-  }
-  false
-}
-
-///|
-/// Move the highlighted row by `delta`, wrapping at both ends so ↑ on the
-/// first row lands on the last. A closed menu is left untouched.
-fn Completion::shifted(self : Completion, delta : Int) -> Completion {
-  let count = self.items.length()
-  if count == 0 {
-    return self
-  }
-  let next = (self.selected + delta + count) % count
-  { ..self, selected: next }
-}
-
-///|
-/// The highlighted row, or `None` for an empty menu.
-fn Completion::current(self : Completion) -> CompletionItem? {
-  self.items.get(self.selected)
 }
 
 ///|
@@ -259,16 +202,19 @@ test "slash trigger lists matching commands and filters by the typed name" {
     fail("a bare slash should open the command menu")
   }
   assert_true(all.kind is SlashCommands)
-  assert_true(all.items.length() >= 2)
-  assert_eq(all.items[0].label, "/compact")
+  assert_true(all.menu.length() >= 2)
+  guard all.menu.get(0) is Some(all_first) else { fail("row expected") }
+  assert_eq(all_first.label, "/compact")
   guard menu_for("/comp", []) is Some(match_) else {
     fail("a command prefix should keep matching rows")
   }
-  assert_eq(match_.items[0].command, "compact")
+  guard match_.menu.get(0) is Some(compact) else { fail("row expected") }
+  assert_eq(compact.command, "compact")
   guard menu_for("/go", []) is Some(goal_match) else {
     fail("the goal command should match its prefix")
   }
-  assert_eq(goal_match.items[0].command, "goal")
+  guard goal_match.menu.get(0) is Some(goal) else { fail("row expected") }
+  assert_eq(goal.command, "goal")
   // No command contains this, so the menu closes rather than showing nothing.
   assert_true(menu_for("/zzz", []) is None)
 }
@@ -289,15 +235,17 @@ test "dollar trigger lists installed skills, name or description matching" {
     fail("a bare dollar should open the skills menu")
   }
   assert_true(all.kind is SkillMentions)
-  assert_eq(all.items.length(), 2)
-  assert_eq(all.items[0].label, "$review-pr")
+  assert_eq(all.menu.length(), 2)
+  guard all.menu.get(0) is Some(first) else { fail("row expected") }
+  assert_eq(first.label, "$review-pr")
   // Insertion drops the bare name plus a space to keep typing the prompt.
-  assert_eq(all.items[0].insert, "review-pr ")
+  assert_eq(first.insert, "review-pr ")
   // Matches the description too, case-insensitively.
   guard menu_for("$TIDY", skills) is Some(desc) else {
     fail("description text should match")
   }
-  assert_eq(desc.items[0].label, "$refactor")
+  guard desc.menu.get(0) is Some(desc_first) else { fail("row expected") }
+  assert_eq(desc_first.label, "$refactor")
   // No installed skills, no menu.
   assert_true(menu_for("$x", []) is None)
 }
@@ -309,13 +257,14 @@ test "skill completion follows prompt text and preserves that text" {
     fail("a skill token after prompt text should open the menu")
   }
   assert_true(menu.kind is SkillMentions)
-  assert_eq(menu.items[0].label, "$review-pr")
-  assert_eq(menu.task_without_token, "Please use ")
+  guard menu.menu.get(0) is Some(first) else { fail("row expected") }
+  assert_eq(first.label, "$review-pr")
+  assert_eq(menu.menu.draft_without_token(), "Please use ")
   // Newlines are valid token boundaries too.
   guard menu_for("First line\n$rev", skills) is Some(after_newline) else {
     fail("a skill token after a newline should open the menu")
   }
-  assert_eq(after_newline.task_without_token, "First line\n")
+  assert_eq(after_newline.menu.draft_without_token(), "First line\n")
 }
 
 ///|
@@ -344,10 +293,10 @@ test "highlight movement wraps at both ends" {
     installed_skill("c", ""),
   ]
   guard menu_for("$", skills) is Some(menu) else { fail("menu expected") }
-  assert_eq(menu.selected, 0)
-  assert_eq(menu.shifted(-1).selected, 2)
-  assert_eq(menu.shifted(1).selected, 1)
-  assert_eq(menu.shifted(1).shifted(1).shifted(1).selected, 0)
+  assert_eq(menu.menu.selected(), 0)
+  assert_eq(menu.menu.shifted(-1).selected(), 2)
+  assert_eq(menu.menu.shifted(1).selected(), 1)
+  assert_eq(menu.menu.shifted(1).shifted(1).shifted(1).selected(), 0)
 }
 
 ///|
@@ -361,12 +310,13 @@ test "hash trigger lists cached symbols, filtered, marked not loading on match" 
   }
   assert_true(menu.kind is Symbols)
   // The cache answers this exact query/session, so the menu is settled.
-  assert_false(menu.loading)
+  assert_false(menu.menu.loading())
   // "render" is filtered out by the live query; the two parses survive.
-  assert_eq(menu.items.length(), 2)
-  assert_eq(menu.items[0].label, "parse_hover")
+  assert_eq(menu.menu.length(), 2)
+  guard menu.menu.get(0) is Some(first) else { fail("row expected") }
+  assert_eq(first.label, "parse_hover")
   // Accepting drops a backticked reference plus location into the composer.
-  assert_eq(menu.items[0].insert, "`parse_hover` — src/main.mbt:1 ")
+  assert_eq(first.insert, "`parse_hover` — src/main.mbt:1 ")
 }
 
 ///|
@@ -377,9 +327,10 @@ test "symbol completion follows prompt text and preserves that text" {
     fail("a symbol token after prompt text should open the menu")
   }
   assert_true(menu.kind is Symbols)
-  assert_false(menu.loading)
-  assert_eq(menu.items[0].label, "parse_hover")
-  assert_eq(menu.task_without_token, "Inspect ")
+  assert_false(menu.menu.loading())
+  guard menu.menu.get(0) is Some(first) else { fail("row expected") }
+  assert_eq(first.label, "parse_hover")
+  assert_eq(menu.menu.draft_without_token(), "Inspect ")
 }
 
 ///|
@@ -390,15 +341,15 @@ test "hash menu is loading until the cache catches up to the query" {
   guard compute_completion("#", [], empty_symbol_cache(), owner) is Some(bare) else {
     fail("a bare # should open the symbol menu")
   }
-  assert_true(bare.loading)
-  assert_eq(bare.items.length(), 0)
+  assert_true(bare.menu.loading())
+  assert_eq(bare.menu.length(), 0)
   // A query with no cached results yet: the menu opens empty and loading.
   guard compute_completion("#parse", [], empty_symbol_cache(), owner)
     is Some(fresh) else {
     fail("a # query should open even before results arrive")
   }
-  assert_true(fresh.loading)
-  assert_eq(fresh.items.length(), 0)
+  assert_true(fresh.menu.loading())
+  assert_eq(fresh.menu.length(), 0)
   // A cache from another conversation does not answer this one.
   let other = symbol_cache(
     { channel: Remote("other"), session: "s1" },
@@ -408,14 +359,14 @@ test "hash menu is loading until the cache catches up to the query" {
   guard compute_completion("#parse", [], other, owner) is Some(stale) else {
     fail("menu still opens")
   }
-  assert_true(stale.loading)
+  assert_true(stale.menu.loading())
   // Once the empty-query results are cached, a bare # lists them all, settled.
   let full = symbol_cache(owner, "", ["alpha", "beta"])
   guard compute_completion("#", [], full, owner) is Some(menu) else {
     fail("bare # lists the cached symbols")
   }
-  assert_false(menu.loading)
-  assert_eq(menu.items.length(), 2)
+  assert_false(menu.menu.loading())
+  assert_eq(menu.menu.length(), 2)
 }
 
 ///|

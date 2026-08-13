@@ -80,19 +80,26 @@ fn setting_select(control : @html.Html) -> @html.Html {
 }
 
 ///|
-/// The composer's model chip: this conversation's service tier, and the
-/// control that changes it. One click flips to the other tier — the choice
-/// is the conversation's, so a long refactor can sit on High while the chat
-/// beside it stays on Low.
-fn model_chip(dispatch : @cmd.Emit[Msg], conv : Conversation) -> @html.Html {
-  let other = conv.engine_model.toggled()
-  @html.button(
-    class="composer-model",
-    type_="button",
-    title="Model: \{conv.engine_model.wire()} — click for \{other.label()}",
-    on_click=dispatch(ToggleModel),
-    [@html.span(conv.engine_model.label())],
-  )
+/// The composer's model selector. OpenSeek supplies its model wire values and
+/// labels; the reusable composer package owns the control's geometry.
+fn EngineModel::composer_select(
+  self : EngineModel,
+  dispatch : @cmd.Emit[Msg],
+) -> @html.Html {
+  let options : Array[@composer.ModelOption] = [
+    { value: High.wire(), label: High.label() },
+    { value: Low.wire(), label: Low.label() },
+  ]
+  if self is Other(name) {
+    options.push({ value: name, label: name })
+  }
+  @composer.ModelSelect::{
+    options,
+    selected: self.wire(),
+    disabled: false,
+    change: dispatch.map(value => EngineModelChanged(value)),
+    title: "Model: \{self.wire()}",
+  }.render()
 }
 
 ///|
@@ -795,95 +802,32 @@ fn user_display_text(text : String) -> String {
 }
 
 ///|
-/// Composer key handling. While the completion menu is open it captures the
-/// navigation keys — ↑/↓ move the highlight, Enter/Tab accept, Escape closes —
-/// so they drive the menu instead of the textarea; everything else (and every
-/// key with the menu closed) falls through to the normal submit shortcut.
-fn task_attrs(dispatch : @cmd.Emit[Msg], menu_open : Bool) -> @html.Attrs {
-  @html.Attrs::build().on_keydown(fn(event) {
-    if menu_open {
-      match event.key() {
-        "ArrowDown" => {
-          event.prevent_default()
-          dispatch(CompletionMove(1))
-        }
-        "ArrowUp" => {
-          event.prevent_default()
-          dispatch(CompletionMove(-1))
-        }
-        "Tab" => {
-          event.prevent_default()
-          dispatch(CompletionAccept)
-        }
-        "Enter" =>
-          if !event.shift_key() && !event.is_composing() {
-            event.prevent_default()
-            dispatch(CompletionAccept)
-          } else {
-            @cmd.none
-          }
-        "Escape" => {
-          event.prevent_default()
-          dispatch(CompletionDismiss)
-        }
-        _ => @cmd.none
-      }
-    } else if is_submit_shortcut(event) {
-      event.prevent_default()
-      dispatch(Send)
-    } else {
-      @cmd.none
-    }
-  })
-}
-
-///|
 /// The completion menu floating above the composer: one row per match, the
 /// highlighted row marked for the keyboard and clickable by mouse. A pointer
 /// press accepts a row; `mousedown` (not `click`) is used so the textarea does
 /// not blur the menu away before the selection registers.
-fn completion_popup(
-  dispatch : @cmd.Emit[Msg],
-  completion : Completion,
-) -> @html.Html {
-  let rows : Array[@html.Html] = []
-  for index, item in completion.items {
-    let selected = index == completion.selected
-    let row_class = if selected {
-      "completion-item selected"
-    } else {
-      "completion-item"
-    }
-    rows.push(
-      @html.div(
-        class=row_class,
-        attrs=@html.Attrs::build().on_mousedown(fn(event) {
-          // Keep focus in the textarea; accept the row the press landed on.
-          event.prevent_default()
-          dispatch(CompletionPick(index))
-        }),
-        [
-          @html.span(class="completion-label", item.label),
-          @html.span(class="completion-detail", item.detail),
-        ],
-      ),
-    )
-  }
+fn Completion::view(self : Completion, dispatch : @cmd.Emit[Msg]) -> @html.Html {
   // A `#` menu opens before its results arrive, so an empty list is a state to
   // narrate — searching, or genuinely nothing — not an empty box.
-  if rows.is_empty() {
-    let text = if completion.loading { "Searching…" } else { "No symbols" }
-    rows.push(@html.div(class="completion-empty", text))
-  }
-  let hint = match completion.kind {
+  let hint = match self.kind {
     SlashCommands => "Commands"
     SkillMentions => "Skills"
     Symbols => "Symbols"
   }
-  @html.div(class="completion-menu", [
-    @html.div(class="completion-hint", hint),
-    @html.div(class="completion-list", rows),
-  ])
+  let rows : Array[@composer.CompletionRow] = []
+  for _, item in self.menu {
+    rows.push({ label: item.label, detail: item.detail })
+  }
+  @composer.CompletionView::{
+    rows,
+    selected: self.menu.selected(),
+    hint,
+    empty: if self.menu.loading() {
+      "Searching…"
+    } else {
+      "No symbols"
+    },
+  }.render(index => dispatch(CompletionPick(index)))
 }
 
 ///|
@@ -894,46 +838,34 @@ fn completion_popup(
 /// tray to nothing. A chip with a resolved location is also clickable,
 /// opening (or refocusing) the editor side-panel on that spot; a comment
 /// chip's tooltip is the comment itself.
-fn mention_tray(dispatch : @cmd.Emit[Msg], conv : Conversation) -> @html.Html {
+fn Conversation::mention_chips(
+  self : Conversation,
+  dispatch : @cmd.Emit[Msg],
+) -> Array[@html.Html] {
   let chips : Array[@html.Html] = []
-  for index, mention in conv.mentions {
-    let glyph = @html.span(
-      class="mention-glyph",
-      @mention_context.glyph(mention.ref_),
-    )
-    let label = @html.span(
-      class="mention-label",
-      @mention_context.label(mention.ref_),
-    )
-    let body = if @mention_context.target(mention.ref_) is Some(target) {
-      @html.button(
-        class="mention-jump",
-        type_="button",
-        title=if mention.ref_ is Annotation(comment~, ..) {
-          comment
-        } else {
-          "Jump to \{target.file}"
-        },
-        on_click=dispatch(JumpToMention(index)),
-        [glyph, label],
-      )
-    } else {
-      @html.span(class="mention-body", [glyph, label])
-    }
+  for index, mention in self.mentions {
+    let target = @mention_context.target(mention.ref_)
     chips.push(
-      @html.div(class="mention-chip", [
-        body,
-        @html.button(
-          class="mention-remove",
-          type_="button",
-          title="Remove",
-          on_click=dispatch(RemoveMention(index)),
-          icon(icon_close),
-        ),
-      ]),
+      @composer.MentionChip::{
+        glyph: @mention_context.glyph(mention.ref_),
+        label: @mention_context.label(mention.ref_),
+        title: if mention.ref_ is Annotation(comment~, ..) {
+          comment
+        } else if target is Some(target) {
+          "Jump to \{target.file}"
+        } else {
+          @mention_context.label(mention.ref_)
+        },
+        jump: if target is Some(_) {
+          Some(dispatch(JumpToMention(index)))
+        } else {
+          None
+        },
+        remove: Some((dispatch(RemoveMention(index)), icon(icon_close))),
+      }.render(),
     )
   }
-  @html.div(class="mention-tray", chips)
+  chips
 }
 
 ///|
@@ -984,34 +916,29 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   // branch's pull request, or the branch itself, tinted by CI — which opens
   // the rest (changes, base, links out) in a popover rather than spending the
   // row's remaining width on it.
-  let status : Array[@html.Html] = [model_chip(dispatch, conv)]
+  let status : Array[@html.Html] = [conv.engine_model.composer_select(dispatch)]
   if git_chip(dispatch, model, conv) is Some(chip) {
     status.push(chip)
   }
   // The launch mode: a fresh workspace conversation chooses between the
   // workspace itself and a fresh host-named worktree (its 1:1 execution
-  // environment) here, Codex-style, before its first prompt.
+  // environment) here before its first prompt.
   if worktree_mode_chip(dispatch, model, conv) is Some(chip) {
     status.push(chip)
   }
-  let controls : Array[@html.Html] = [
-    @html.div(class="composer-status", status),
-  ]
-  if goal_editor is Some(editor) {
+  let action = if goal_editor is Some(editor) {
     // Goal mode replaces the send/steer cluster: the input edits the
     // standing goal, so the only action left here is Set — cancelling rides
     // the status group's lit chip, clearing rides the banner's ✕. No
     // run/compaction gate: a goal is welcome in every engine phase.
-    controls.push(
-      @html.button(
-        id="goal-set",
-        class="icon-button send-button",
-        title="Set the standing goal (Enter)",
-        disabled=editor.draft.is_blank(),
-        on_click=dispatch(SubmitGoal),
-        icon(icon_arrow_up),
-      ),
-    )
+    @composer.Action::{
+      id: "goal-set",
+      class_name: "icon-button send-button",
+      title: "Set the standing goal (Enter)",
+      disabled: editor.draft.is_blank(),
+      command: dispatch(SubmitGoal),
+      content: icon(icon_arrow_up),
+    }
   } else if conv.is_running() {
     // One morphing button while this conversation's turn runs. It becomes a
     // steer submit only when the durable boundary is ready too; a draft must
@@ -1021,39 +948,33 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
       conv.run is Open(stage~, ..) &&
       !(stage is Cancelling)
     if !can_steer {
-      controls.push(
-        @html.button(
-          id="stop",
-          class="icon-button stop-button",
-          title="Stop",
-          disabled=!can_stop(conv),
-          on_click=dispatch(Stop),
-          icon(icon_debug_stop),
-        ),
-      )
+      @composer.Action::{
+        id: "stop",
+        class_name: "icon-button stop-button",
+        title: "Stop",
+        disabled: !can_stop(conv),
+        command: dispatch(Stop),
+        content: icon(icon_debug_stop),
+      }
     } else {
-      controls.push(
-        @html.button(
-          id="send",
-          class="icon-button send-button",
-          title="Steer the running task",
-          disabled=false,
-          on_click=dispatch(Send),
-          icon(icon_arrow_up),
-        ),
-      )
+      @composer.Action::{
+        id: "send",
+        class_name: "icon-button send-button",
+        title: "Steer the running task",
+        disabled: false,
+        command: dispatch(Send),
+        content: icon(icon_arrow_up),
+      }
     }
   } else {
-    controls.push(
-      @html.button(
-        id="send",
-        class="icon-button send-button",
-        title="Send",
-        disabled=!can_send,
-        on_click=dispatch(Send),
-        icon(icon_arrow_up),
-      ),
-    )
+    @composer.Action::{
+      id: "send",
+      class_name: "icon-button send-button",
+      title: "Send",
+      disabled: !can_send,
+      command: dispatch(Send),
+      content: icon(icon_arrow_up),
+    }
   }
   // Keep every row above the input in one permanent context container. Beside
   // a tall terminal this is the only auxiliary vertical scroller, so plans and
@@ -1110,7 +1031,12 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
       )
     Some(@interop.MissingWorktree(name~)) =>
       context.push(
-        missing_worktree_notice(dispatch, conv.device, conv.session_id, name),
+        @composer.MissingWorktreeNotice::{
+          name,
+          conversation_noun: "chat",
+          rebuild: dispatch(RepairWorktree),
+          archive: dispatch(ArchiveSession(conv.device, conv.session_id)),
+        }.render(),
       )
     Some(_) => ()
   }
@@ -1125,61 +1051,53 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
       pending=conv.goal_pending.map(pending => pending.request),
     ),
   )
-  let inner : Array[@html.Html] = [
-    // This stable wrapper gives the textarea the height left by the permanent
-    // mention tray. Only the textarea scrolls beside a tall terminal; the
-    // toolbar and upward-opening menus stay outside it, and the textarea's
-    // child index never changes as chips come and go.
-    @html.div(class="composer-input", [
-      mention_tray(dispatch, conv),
-      @html.textarea(
-        id="task",
-        value=if goal_editor is Some(editor) { editor.draft } else { conv.task },
-        placeholder=if goal_mode {
-          "Describe the standing goal for this conversation — Enter sets it, Esc cancels."
-        } else if conv.is_running() {
-          "Steer the running task — your message joins it at the next step."
-        } else {
-          "Ask OpenSeek to inspect, edit, or explain this workspace."
-        },
-        on_input=dispatch.map(value => {
-          if goal_mode {
-            GoalDraftEdited(value)
-          } else {
-            TaskChanged(value)
-          }
-        }),
-        attrs=(if goal_mode {
-          goal_attrs(dispatch)
-        } else {
-          task_attrs(dispatch, model.completion is Some(_))
-        }).data_set("focus-target", ""),
-        "",
-      ),
-    ]),
-    @html.div(class="composer-toolbar", [
-      @html.div(class="composer-controls", controls),
-    ]),
-  ]
-  // The menu floats above the composer via CSS, so its DOM position does not
-  // affect layout. It is appended last (not inserted before the textarea) so
-  // toggling it never shifts the input wrapper or toolbar — index-based vdom
-  // diffing would otherwise rebuild the textarea subtree and drop its focus.
-  if model.completion is Some(completion) {
-    inner.push(completion_popup(dispatch, completion))
-  }
-  // The context and input wrappers are both permanent siblings. Conditional
-  // rows can change inside the context without renumbering or rebuilding the
-  // focus-holding textarea subtree.
-  let children : Array[@html.Html] = [
-    @html.div(class="composer-context", context),
-    @html.div(
-      class="composer-inner",
-      attrs=@html.Attrs::build().data_set("focus-owner", ""),
-      inner,
-    ),
-  ]
-  @html.section(class="composer", children)
+  @composer.View::{
+    before_inner: context,
+    mentions: conv.mention_chips(dispatch),
+    value: if goal_editor is Some(editor) {
+      editor.draft
+    } else {
+      conv.task
+    },
+    placeholder: if goal_mode {
+      "Describe the standing goal for this conversation — Enter sets it, Esc cancels."
+    } else if conv.is_running() {
+      "Steer the running task — your message joins it at the next step."
+    } else {
+      "Ask OpenSeek to inspect, edit, or explain this workspace."
+    },
+    disabled: false,
+    input: dispatch.map(value => {
+      if goal_mode {
+        GoalDraftEdited(value)
+      } else {
+        TaskChanged(value)
+      }
+    }),
+    keyboard: @composer.KeyboardActions::{
+      menu_open: !goal_mode && model.completion is Some(_),
+      navigate: delta => dispatch(CompletionMove(delta)),
+      accept: dispatch(CompletionAccept),
+      dismiss: dispatch(CompletionDismiss),
+      submit: if goal_mode {
+        dispatch(SubmitGoal)
+      } else {
+        dispatch(Send)
+      },
+      cancel: if goal_mode {
+        Some(dispatch(CloseGoalEditor))
+      } else {
+        None
+      },
+    },
+    status,
+    action,
+    overlay: if goal_mode {
+      None
+    } else {
+      model.completion.map(completion => completion.view(dispatch))
+    },
+  }.render()
 }
 
 ///|

@@ -44,16 +44,6 @@ fn EngineModel::label(self : EngineModel) -> String {
 }
 
 ///|
-/// What clicking the chip selects. The toggle only spans the two tiers, so a
-/// conversation sitting on an unknown model enters the pair at the high one.
-fn EngineModel::toggled(self : EngineModel) -> EngineModel {
-  match self {
-    High => Low
-    Low | Other(_) => High
-  }
-}
-
-///|
 /// One conversation's remembered tier. `ConversationKey` is a frontend value
 /// that deliberately never crosses a boundary, so persistence spells the same
 /// identity out itself: the channel's stable URI authority joined to the
@@ -86,9 +76,6 @@ test "engine models round-trip their wire names" {
     content="custom-model",
   )
   assert_true(EngineModel::parse("  ") is None)
-  assert_true(High.toggled() is Low)
-  assert_true(Low.toggled() is High)
-  assert_true(Other("custom-model").toggled() is High)
 }
 
 ///|
@@ -922,10 +909,7 @@ priv struct Mention {
 /// "No symbols".
 priv struct Completion {
   kind : CompletionKind
-  items : Array[CompletionItem]
-  selected : Int
-  loading : Bool
-  task_without_token : String
+  menu : @composer.Menu[CompletionItem]
 } derive(Eq)
 
 ///|
@@ -1288,6 +1272,10 @@ priv struct Model {
   // while the query is unchanged. Recomputed on every keystroke and refetched
   // when the query or conversation changes.
   symbol_cache : SymbolCache
+  // Every draft edit advances this identity. Delayed symbol requests and their
+  // replies carry it so a newer keystroke, dismissal, or conversation switch
+  // cannot revive an obsolete completion.
+  completion_debounce : @composer.Debounce
   // Cmd/Ctrl+P/T unified Quick Open in the native window and browser console.
   // It is global UI for the focused conversation, not durable conversation
   // state. The monotonic counter fences symbol replies across close and reopen,
@@ -1508,6 +1496,13 @@ priv enum Msg {
     custom_api_key~ : String
   )
   TaskChanged(String)
+  // Start a symbol lookup only if the composer still has this exact delayed
+  // draft generation after its 150 ms pause.
+  CompletionDue(
+    owner~ : @interop.ConversationKey,
+    query~ : String,
+    generation~ : Int
+  )
   // Move the completion menu's highlight by a delta (−1 up, +1 down), wrapping
   // at the ends. Ignored when the menu is closed.
   CompletionMove(Int)
@@ -1540,6 +1535,7 @@ priv enum Msg {
     owner~ : @interop.ConversationKey,
     root~ : @common.Uri,
     query~ : String,
+    generation~ : Int,
     items~ : Array[WorkspaceSymbol]
   )
   // A failed search reads as "no symbols", so it carries no message to show —
@@ -1547,7 +1543,8 @@ priv enum Msg {
   SymbolsFailed(
     owner~ : @interop.ConversationKey,
     root~ : @common.Uri,
-    query~ : String
+    query~ : String,
+    generation~ : Int
   )
   // Open unified Quick Open in the requested provider in either shell.
   QuickOpenOpen(QuickOpenMode)
@@ -1606,9 +1603,9 @@ priv enum Msg {
   QuickOpenSelect(Int)
   QuickOpenPick(Int)
   QuickOpenDismiss
-  // The composer's model chip: flip the conversation on screen to the other
-  // service tier, and make that the tier new conversations start from.
-  ToggleModel
+  // Select the active conversation's model and make it the default for new
+  // conversations.
+  EngineModelChanged(String)
   MaxStepsChanged(String)
   SetupApiKeyChanged(String)
   ProviderChanged(String)
@@ -2381,6 +2378,7 @@ fn initial_model() -> Model {
     skills_notice: "",
     completion: None,
     symbol_cache: empty_symbol_cache(),
+    completion_debounce: @composer.Debounce(),
     quick_open: None,
     quick_open_generation: 0,
     git_request_generation: 0,

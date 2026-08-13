@@ -605,79 +605,19 @@ fn worktree_mode_chip(
     conv.messages.length() == 0 else {
     return None
   }
-  if conv.workspace is Worktree(name~, ..) {
-    return Some(
-      @html.span(
-        class="composer-worktree on",
-        title="This chat runs in worktree \{name}",
-        [icon(icon_worktree), @html.span(name)],
-      ),
-    )
-  }
-  let (class, label, title) = if conv.worktree_mode {
-    (
-      "composer-worktree on", "Worktree", "First prompt creates a git worktree and runs there — click for local",
-    )
-  } else {
-    (
-      "composer-worktree", "Local", "Runs in the workspace itself — click to run in a fresh git worktree",
-    )
-  }
-  // The choice is being exercised right now: something is out that will pin
-  // this conversation's placement, and it read the mode when it was sent.
-  // Still say which mode that was — it is about to become the answer — but
-  // as a statement rather than a control, since clicking could not change it.
-  guard model.can_choose_launch_mode(conv) else {
-    return Some(
-      @html.span(
-        class~,
-        title="Setting this chat up to run \{if conv.worktree_mode { "in a fresh git worktree" } else { "in the workspace itself" }}",
-        [icon(icon_worktree), @html.span(label)],
-      ),
-    )
+  let choice = match conv.workspace {
+    Worktree(name~, ..) => @composer.BoundWorktree(name)
+    Project(_) if conv.worktree_mode => @composer.FreshWorktree
+    Project(_) | Scratch => @composer.LocalCheckout
   }
   Some(
-    @html.button(
-      class~,
-      type_="button",
-      title~,
-      on_click=dispatch(ToggleWorktreeMode),
-      [icon(icon_worktree), @html.span(label)],
-    ),
+    @composer.WorktreeControl::{
+      choice,
+      enabled: model.can_choose_launch_mode(conv),
+      command: dispatch(ToggleWorktreeMode),
+      content: icon(icon_worktree),
+    }.render(),
   )
-}
-
-///|
-/// The banner above the composer when this conversation's worktree checkout
-/// is missing. The host refuses every workspace operation in that state, so
-/// the banner offers the two safe exits: rebuild the original checkout, or
-/// archive the conversation. Committed work stays on the surviving branch.
-fn missing_worktree_notice(
-  dispatch : @cmd.Emit[Msg],
-  channel : @interop.ChannelId,
-  session : String,
-  name : String,
-) -> @html.Html {
-  @html.div(class="composer-notice", [
-    @html.span(
-      class="composer-notice-text",
-      "Worktree \{name} has no checkout. Rebuild it to continue; commits on its branch are safe.",
-    ),
-    @html.button(
-      class="composer-notice-btn",
-      type_="button",
-      title="Check the branch out again at .worktrees/\{name}",
-      on_click=dispatch(RepairWorktree),
-      "Rebuild it",
-    ),
-    @html.button(
-      class="composer-notice-btn",
-      type_="button",
-      title="Archive this chat without rebuilding its worktree",
-      on_click=dispatch(ArchiveSession(channel, session)),
-      "Archive chat",
-    ),
-  ])
 }
 
 ///|
@@ -688,36 +628,12 @@ fn archive_discard_modal(
   dispatch : @cmd.Emit[Msg],
   confirm : ArchiveConfirm,
 ) -> @html.Html {
-  let refusal = confirm.refusal
-  let message = archive_discard_message(refusal)
-  @html.div(class="modal-backdrop", on_click=dispatch(CancelArchiveDiscard), [
-    @html.div(class="modal", [
-      @html.div(class="modal-title", "Archive this chat?"),
-      @html.div(class="modal-body", message),
-      @html.div(class="modal-actions", [
-        @html.button(on_click=dispatch(CancelArchiveDiscard), "Keep working"),
-        @html.button(
-          class="primary",
-          on_click=dispatch(ConfirmArchiveDiscard),
-          "Discard local changes and archive",
-        ),
-      ]),
-    ]),
-  ])
-}
-
-///|
-fn archive_discard_message(
-  refusal : @protocol.ArchiveNeedsForceReply,
-) -> String {
-  let preview = if refusal.dirty_paths.is_empty() {
-    ""
-  } else {
-    let remaining = refusal.dirty_path_count - refusal.dirty_paths.length()
-    let suffix = if remaining > 0 { ", and \{remaining} more" } else { "" }
-    " Changed paths: \{refusal.dirty_paths.join(", ")}\{suffix}."
-  }
-  "Worktree \{refusal.worktree} has uncommitted changes.\{preview} Archiving deletes this checkout and permanently discards its uncommitted, untracked, and ignored files. Committed work and the branch remain."
+  @composer.WorktreeArchiveDialog::{
+    refusal: confirm.refusal,
+    conversation_noun: "chat",
+    cancel: dispatch(CancelArchiveDiscard),
+    confirm: dispatch(ConfirmArchiveDiscard),
+  }.render()
 }
 
 // Tests for the worktree flow's pure pieces: the notification decoder and
@@ -1700,7 +1616,12 @@ test "a dirty archive stages the discard dialog and confirm retries forced" {
   inspect(confirm.session, content="desktop-test")
   assert_eq(confirm.refusal.worktree, "wt-1")
   assert_eq(confirm.refusal.dirty_paths[0], "desktop/lepus")
-  let warning = archive_discard_message(confirm.refusal)
+  let warning = @composer.WorktreeArchiveDialog::{
+    refusal: confirm.refusal,
+    conversation_noun: "chat",
+    cancel: @cmd.none,
+    confirm: @cmd.none,
+  }.message()
   assert_true(warning.contains("desktop/lepus"))
   assert_true(warning.contains("and 2 more"))
   // Cancel stands down without any request.

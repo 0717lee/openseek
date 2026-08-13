@@ -236,16 +236,13 @@ fn git_chip(
   }
   let open = if model.git_details_open { " open" } else { "" }
   let children : Array[@html.Html] = [
-    @html.button(
-      class="composer-git-button \{tone}\{open}",
-      type_="button",
-      title=summary,
-      on_click=dispatch(ToggleGitDetails),
-      [
-        @html.span(class="composer-git-glyph", icon(icon_pull_request)),
-        @html.span(class="composer-git-label", label),
-      ],
-    ),
+    @composer.GitChip::{
+      tone: tone + open,
+      title: summary,
+      label,
+      command: dispatch(ToggleGitDetails),
+      content: icon(icon_pull_request),
+    }.render(),
   ]
   if model.git_details_open {
     // No backdrop element: dismissal rides on `dismiss_subscription`, which

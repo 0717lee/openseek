@@ -138,29 +138,6 @@ fn goal_first_line(text : String) -> String {
 }
 
 ///|
-/// Composer key handling while editing the goal: Enter sets it, Shift+Enter
-/// keeps inserting newlines (goals may span lines), Escape cancels back to
-/// the prompt draft.
-fn goal_attrs(dispatch : @cmd.Emit[Msg]) -> @html.Attrs {
-  @html.Attrs::build().on_keydown(fn(event) {
-    match event.key() {
-      "Enter" =>
-        if !event.shift_key() && !event.is_composing() {
-          event.prevent_default()
-          dispatch(SubmitGoal)
-        } else {
-          @cmd.none
-        }
-      "Escape" => {
-        event.prevent_default()
-        dispatch(CloseGoalEditor)
-      }
-      _ => @cmd.none
-    }
-  })
-}
-
-///|
 /// A goal command in flight, under a fixed id. The id only ever separates
 /// this client's own sends from each other, so tests that never send twice
 /// can share one.

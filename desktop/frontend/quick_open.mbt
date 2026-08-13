@@ -31,12 +31,11 @@ fn quick_open_symbol_request(
   query : String,
   generation : Int,
 ) -> @cmd.Cmd {
-  read_workspace_symbols(
+  QuickOpenSymbolRequest(generation).search(
     dispatch,
     owner,
     query,
     root=quick_open_root(model, owner),
-    generation~,
   )
 }
 
