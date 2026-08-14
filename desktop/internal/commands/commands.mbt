@@ -151,7 +151,7 @@ pub let worktree_list : Command[
 ///|
 pub let worktree_create : Command[
   @protocol.WorktreeCreatePayload,
-  @protocol.WorktreeCreateReply,
+  @protocol.WorktreeCreateResult,
 ] = Command("worktree.create")
 
 ///|

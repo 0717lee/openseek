@@ -64,7 +64,7 @@ async fn provision_initialized_submodules(
     })
     is Some(_) else {
     raise EngineError(
-      "submodule checkout timed out after \{timeout_seconds} seconds",
+      "Submodules did not finish initializing within \{timeout_seconds} seconds. Increase the checkout timeout in Workspace Settings or leave submodules uninitialized.",
     )
   }
 }
@@ -113,7 +113,9 @@ async test "submodule checkout stops at its hard timeout" {
     error if @async.is_being_cancelled() => raise error
     error => "\{error}"
   }
-  assert_eq(detail, "submodule checkout timed out after 0 seconds")
+  assert_eq(
+    detail, "Submodules did not finish initializing within 0 seconds. Increase the checkout timeout in Workspace Settings or leave submodules uninitialized.",
+  )
   @fs.rmdir(root.to_string(), recursive=true)
 }
 

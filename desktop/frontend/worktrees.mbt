@@ -120,20 +120,34 @@ fn start_in_new_worktree(
         () => {
           // The session is the create's idempotency key: a retry after a lost
           // reply gets the same worktree back instead of minting a second one.
-          let reply : @protocol.WorktreeCreateReply = @interop.bridge_request(
+          let result : @protocol.WorktreeCreateResult = @interop.bridge_request(
             channel,
             @commands.worktree_create,
             { workspace: workspace.path, session },
           ) catch {
-            error => {
+            _ => {
               // Nothing started: reject the submission so the draft restores.
               scheduler.add(
                 device_dispatch(
-                  StartRejected(
+                  WorktreeSetupFailed(
                     session~,
                     submission_id~,
-                    message="worktree setup failed: " +
-                      @interop.bridge_error_text(error),
+                    message="Couldn’t create the worktree because the desktop host did not respond. Retry, or switch this chat to Local.",
+                  ),
+                ),
+              )
+              return
+            }
+          }
+          let reply = match result {
+            @protocol.WorktreeCreatedReply(reply) => reply
+            @protocol.WorktreeCreateError(message) => {
+              scheduler.add(
+                device_dispatch(
+                  WorktreeSetupFailed(
+                    session~,
+                    submission_id~,
+                    message="Couldn’t create the worktree. " + message,
                   ),
                 ),
               )
@@ -145,10 +159,10 @@ fn start_in_new_worktree(
           guard !reply.name.is_empty() else {
             scheduler.add(
               device_dispatch(
-                StartRejected(
+                WorktreeSetupFailed(
                   session~,
                   submission_id~,
-                  message="malformed worktree.create reply",
+                  message="Couldn’t create the worktree because the host returned an incomplete reply. Retry, or switch this chat to Local.",
                 ),
               ),
             )
@@ -240,12 +254,12 @@ fn set_goal_in_new_worktree(
         () => {
           // The session is the create's idempotency key, exactly as on the start
           // path: a retry after a lost reply gets the same worktree back.
-          let reply : @protocol.WorktreeCreateReply = @interop.bridge_request(
+          let result : @protocol.WorktreeCreateResult = @interop.bridge_request(
             channel,
             @commands.worktree_create,
             { workspace: workspace.path, session },
           ) catch {
-            error => {
+            _ => {
               // The goal itself definitely never went out, so its draft comes
               // back either way. What differs is the *worktree*: a create whose
               // reply was lost may well have bound this session host-side, and
@@ -253,17 +267,30 @@ fn set_goal_in_new_worktree(
               // over a durable binding — after which an ordinary start still
               // runs in that worktree. Say which happened, and let the registry
               // settle the placement (see `Model::checkout_placement`).
-              let detail = @interop.bridge_error_text(error)
-              let message = match @interop.bridge_failure(error) {
-                Refused | Unsent => "worktree setup failed: " + detail
-                Unknown =>
-                  "worktree setup could not be confirmed (" +
-                  detail +
-                  ") — this chat may already be bound to a new worktree; the goal was not sent"
-              }
               scheduler.add(
                 device_dispatch(
-                  GoalRejected(session~, command~, draft=text, message~),
+                  GoalRejected(
+                    session~,
+                    command~,
+                    draft=text,
+                    message="Couldn’t confirm worktree creation because the desktop host did not respond. This chat may already be bound to the new worktree; the goal was not sent.",
+                  ),
+                ),
+              )
+              return
+            }
+          }
+          let reply = match result {
+            @protocol.WorktreeCreatedReply(reply) => reply
+            @protocol.WorktreeCreateError(message) => {
+              scheduler.add(
+                device_dispatch(
+                  GoalRejected(
+                    session~,
+                    command~,
+                    draft=text,
+                    message="Couldn’t create the worktree. " + message,
+                  ),
                 ),
               )
               return
@@ -276,7 +303,7 @@ fn set_goal_in_new_worktree(
                   session~,
                   command~,
                   draft=text,
-                  message="malformed worktree.create reply",
+                  message="Couldn’t create the worktree because the host returned an incomplete reply. The goal was not sent.",
                 ),
               ),
             )
@@ -325,17 +352,26 @@ fn repair_worktree_cmd(
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let _ : @protocol.WorktreeCreateReply = @interop.bridge_request(
+      let result : @protocol.WorktreeCreateResult = @interop.bridge_request(
         channel,
         @commands.worktree_create,
         { workspace, session },
       ) catch {
-        error => {
+        _ => {
           scheduler.add(
-            dispatch(WorktreeFailed(@interop.bridge_error_text(error))),
+            dispatch(
+              WorktreeFailed(
+                "Couldn’t repair the worktree because the desktop host did not respond. Retry, or archive this chat.",
+              ),
+            ),
           )
           return
         }
+      }
+      if result is @protocol.WorktreeCreateError(message) {
+        scheduler.add(
+          dispatch(WorktreeFailed("Couldn’t repair the worktree. " + message)),
+        )
       }
     })
   })
@@ -1412,7 +1448,7 @@ test "a worktree commit broadcast supersedes lists and unbinds removed names" {
 }
 
 ///|
-test "a failed worktree setup keeps the retry eligible" {
+test "a failed worktree setup is an actionable toast and keeps retry eligible" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
   let model = test_model()
@@ -1431,19 +1467,33 @@ test "a failed worktree setup keeps the retry eligible" {
   guard sent.active().input_ledger is [entry] else {
     fail("expected the submission in the ledger")
   }
-  let (_, rejected) = update_dev(
-    dispatch,
-    StartRejected(
-      session="desktop-test",
-      submission_id=entry.submission_id,
-      message="worktree setup failed: boom",
-    ),
-    sent,
+  let message = "Couldn’t create the worktree. Submodules did not finish initializing within 10 seconds. Increase the checkout timeout in Workspace Settings or leave submodules uninitialized."
+  let failed = WorktreeSetupFailed(
+    session="desktop-test",
+    submission_id=entry.submission_id,
+    message~,
   )
-  // The rejection leaves a local overlay notice — which must NOT disqualify
-  // the retry: the next submit re-enters the create-then-start chain
-  // instead of silently running in the workspace root.
-  assert_true(rejected.active().overlay.length() > 0)
+  // Same input, same model: the setup handler is pure even though its command
+  // schedules toast expiry and a placement refresh.
+  let (_, repeated) = update_dev(dispatch, failed, sent)
+  let (_, rejected) = update_dev(dispatch, failed, sent)
+  assert_eq(repeated.active().task, rejected.active().task)
+  assert_eq(repeated.active().input_ledger.length(), 0)
+  assert_eq(repeated.active().overlay.length(), 0)
+  assert_eq(repeated.notifications.length(), 1)
+  assert_eq(repeated.notifications[0].message, message)
+  assert_eq(
+    repeated.dev().worktrees_request_generation,
+    rejected.dev().worktrees_request_generation,
+  )
+  // Setup never reached an agent, so the explanation is a toast rather than
+  // an agent-style transcript error. The exact prompt returns to the composer.
+  assert_eq(rejected.active().task, "go")
+  assert_eq(rejected.active().overlay.length(), 0)
+  assert_eq(rejected.notifications.length(), 1)
+  assert_eq(rejected.notifications[0].message, message)
+  // The next submit re-enters the create-then-start chain instead of silently
+  // running in the workspace root.
   assert_true(rejected.active().worktree_mode)
   assert_true(rejected.active().wants_fresh_worktree())
   // Every rejected workspace start refreshes the registry. Besides keeping a
@@ -1453,9 +1503,8 @@ test "a failed worktree setup keeps the retry eligible" {
     rejected.dev().worktrees_request_generation,
     worktrees_generation + 1,
   )
-  // And the escape hatch stays open: the toggle still switches the chat
-  // back to Local despite the overlay notice — without touching the
-  // workspace's own default.
+  // And the escape hatch stays open: the toggle still switches the chat back
+  // to Local without touching the workspace's own default.
   let (_, switched) = update(dispatch, ToggleWorktreeMode, rejected)
   assert_false(switched.active().worktree_mode)
   assert_true(switched.default_worktree_mode(Local, Some(workspace)))

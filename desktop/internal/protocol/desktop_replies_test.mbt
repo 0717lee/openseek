@@ -246,6 +246,29 @@ test "workspace replies keep success compatible and carry refusals" {
 }
 
 ///|
+test "worktree creation results keep success compatible and carry refusals" {
+  let created : @protocol.WorktreeCreateResult = WorktreeCreatedReply({
+    name: "wt-1",
+    worktrees: [],
+  })
+  @debug.assert_eq(created.to_json(), { "name": "wt-1", "worktrees": [] })
+  let decoded : @protocol.WorktreeCreateResult = @json.from_json(
+    created.to_json(),
+  )
+  @debug.assert_eq(decoded, created)
+  let refused : @protocol.WorktreeCreateResult = WorktreeCreateError(
+    "Submodules did not finish initializing within 10 seconds.",
+  )
+  @debug.assert_eq(refused.to_json(), {
+    "error": "Submodules did not finish initializing within 10 seconds.",
+  })
+  let decoded_refusal : @protocol.WorktreeCreateResult = @json.from_json(
+    refused.to_json(),
+  )
+  @debug.assert_eq(decoded_refusal, refused)
+}
+
+///|
 test "browse replies keep success compatible and carry refusals" {
   let rooted : @protocol.BrowseDirectoryReply = Listing(path="/", parent=None, entries=[
     "home",

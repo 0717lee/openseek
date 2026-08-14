@@ -923,6 +923,13 @@ pub(all) struct WorktreeCreateReply {
   worktrees : Array[WorktreeInfo]
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
+pub(all) enum WorktreeCreateResult {
+  WorktreeCreatedReply(WorktreeCreateReply)
+  WorktreeCreateError(String)
+} derive(Eq, @debug.Debug)
+pub impl ToJson for WorktreeCreateResult
+pub impl @json.FromJson for WorktreeCreateResult
+
 pub(all) struct WorktreeInfo {
   name : String
   branch : String

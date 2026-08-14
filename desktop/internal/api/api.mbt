@@ -258,14 +258,19 @@ pub fn endpoints(
       @engine.list_worktrees(payload.workspace)
     }),
     @endpoint.Endpoint::remote(@commands.worktree_create, async fn(payload) {
-      @engine.create_worktree(
+      let reply = @engine.create_worktree(
         state.manager,
         payload.workspace,
         payload.session,
         worktrees => {
           publish_worktree_changed(state, payload.workspace, worktrees)
         },
-      )
+      ) catch {
+        error if @async.is_being_cancelled() => raise error
+        @engine.EngineError(message) => return WorktreeCreateError(message)
+        error => raise error
+      }
+      WorktreeCreatedReply(reply)
     }),
     @endpoint.Endpoint::remote(@commands.worktree_remove, async fn(payload) {
       @engine.remove_worktree(
