@@ -245,11 +245,13 @@ pub fn endpoints(
       // point inside the engine, the `workspace.add` pattern.
       let worktree_mode = payload.worktree_mode
       let checkout_submodules = payload.checkout_submodules
+      let submodule_checkout_timeout_seconds = payload.submodule_checkout_timeout_seconds
       @engine.update_workspace_settings(
         payload.workspace,
         settings => state.hub.publish(WorkspaceSettingsChanged(settings)),
         worktree_mode?,
         checkout_submodules?,
+        submodule_checkout_timeout_seconds?,
       )
     }),
     @endpoint.Endpoint::remote(@commands.worktree_list, async fn(payload) {

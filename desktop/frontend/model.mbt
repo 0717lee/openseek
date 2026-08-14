@@ -1784,6 +1784,9 @@ priv enum Msg {
   // Whether new or repaired worktrees for this workspace populate the
   // top-level submodules initialized in the main checkout.
   WorkspaceSubmodulesChosen(@interop.ChannelId, @common.Uri, String)
+  // Hard bound for that submodule checkout, in seconds. Update accepts only
+  // the values rendered by the workspace settings select.
+  WorkspaceSubmoduleTimeoutChosen(@interop.ChannelId, @common.Uri, String)
   // Start a fresh conversation in a device's project (`None` = Scratch),
   // selecting its explicit channel first if needed.
   NewChatIn(@interop.ChannelId, @common.Uri?)
@@ -2053,6 +2056,7 @@ priv enum DeviceMsg {
     workspace~ : @common.Uri,
     worktree_mode~ : Bool,
     checkout_submodules~ : Bool,
+    submodule_checkout_timeout_seconds~ : Int,
     connection_generation~ : Int,
     request_generation~ : Int
   )
@@ -2061,7 +2065,8 @@ priv enum DeviceMsg {
   WorkspaceSettingsChanged(
     workspace~ : @common.Uri,
     worktree_mode~ : Bool,
-    checkout_submodules~ : Bool
+    checkout_submodules~ : Bool,
+    submodule_checkout_timeout_seconds~ : Int
   )
   // A `workspace.settings_set` this client sent failed; the message pops as
   // a toast and the workspace's settings are re-read.

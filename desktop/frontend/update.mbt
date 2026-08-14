@@ -3123,6 +3123,40 @@ fn update_msg(
         }),
       )
     }
+    WorkspaceSubmoduleTimeoutChosen(channel, workspace, value) => {
+      guard model.device_state(channel) is Some(dev) &&
+        dev.workspace_settings_row(workspace) is Some(row) else {
+        return (@cmd.none, model)
+      }
+      let submodule_checkout_timeout_seconds = match value {
+        "5" => 5
+        "10" => 10
+        "30" => 30
+        "60" => 60
+        _ => return (@cmd.none, model)
+      }
+      // Patch only the timeout and keep both neighboring workspace choices.
+      // A fresh generation prevents an older read from undoing this select.
+      let request_generation = dev.workspace_settings_request_generation + 1
+      (
+        save_workspace_settings(
+          dispatch,
+          channel,
+          workspace,
+          submodule_checkout_timeout_seconds~,
+        ),
+        model.replace_device({
+          ..dev.with_workspace_settings(
+            workspace,
+            row.worktree_mode,
+            generation=request_generation,
+            checkout_submodules=row.checkout_submodules,
+            submodule_checkout_timeout_seconds~,
+          ),
+          workspace_settings_request_generation: request_generation,
+        }),
+      )
+    }
     ArchiveSession(channel, session_id) => {
       // Archiving acts on the row's own device and never moves focus.
       guard model.device_state(channel) is Some(dev) else {
@@ -4445,6 +4479,7 @@ fn update_device_msg(
       workspace~,
       worktree_mode~,
       checkout_submodules~,
+      submodule_checkout_timeout_seconds~,
       connection_generation~,
       request_generation~
     ) => {
@@ -4467,11 +4502,17 @@ fn update_device_msg(
             worktree_mode,
             generation=request_generation,
             checkout_submodules~,
+            submodule_checkout_timeout_seconds~,
           ),
         ),
       )
     }
-    WorkspaceSettingsChanged(workspace~, worktree_mode~, checkout_submodules~) => {
+    WorkspaceSettingsChanged(
+      workspace~,
+      worktree_mode~,
+      checkout_submodules~,
+      submodule_checkout_timeout_seconds~
+    ) => {
       // A broadcast can race the detach commit the same way a reply can
       // (the hub orders them per client, so an attach is always processed
       // before settings broadcasts that follow it).
@@ -4489,6 +4530,7 @@ fn update_device_msg(
             worktree_mode,
             generation=workspace_settings_request_generation,
             checkout_submodules~,
+            submodule_checkout_timeout_seconds~,
           ),
           workspace_settings_request_generation,
         }),
