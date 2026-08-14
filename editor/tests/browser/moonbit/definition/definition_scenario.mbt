@@ -296,16 +296,8 @@ fn run_definition_browser_test() -> Unit {
     () => {
       definition_state_json(viewer, provider_calls, references_provider_calls)
     },
-    () => {
-      definition_state_json(
-        markdown_viewer, markdown_provider_calls, references_provider_calls,
-      )
-    },
     () => viewer.set_scroll_top(0.0),
-    () => viewer.focus(),
-    () => markdown_viewer.focus(),
     () => viewer.set_selection(Selection(Position(2, 11), Position(2, 27))),
-    () => viewer.layout(),
     () => provider_multiple.val = true,
     () => {
       markdown_model.set_value(
@@ -353,12 +345,8 @@ extern "js" fn install_definition_controls(
   outer_root : @rdom.Element,
   markdown_root : @rdom.Element,
   state_json : () -> String,
-  markdown_state_json : () -> String,
   reset_scroll : () -> Unit,
-  focus_outer : () -> Unit,
-  focus_markdown : () -> Unit,
   select_reference : () -> Unit,
-  layout_outer : () -> Unit,
   enable_multiple_definitions : () -> Unit,
   replace_markdown_source : () -> Unit,
 ) -> Unit =
@@ -366,12 +354,8 @@ extern "js" fn install_definition_controls(
   #|   outerRoot,
   #|   markdownRoot,
   #|   stateJson,
-  #|   markdownStateJson,
   #|   resetScroll,
-  #|   focusOuter,
-  #|   focusMarkdown,
   #|   selectReference,
-  #|   layoutOuter,
   #|   enableMultipleDefinitions,
   #|   replaceMarkdownSource,
   #| ) => {
@@ -379,12 +363,8 @@ extern "js" fn install_definition_controls(
   #|     outerRoot,
   #|     markdownRoot,
   #|     state: () => JSON.parse(stateJson()),
-  #|     markdown_state: () => JSON.parse(markdownStateJson()),
   #|     reset_scroll: resetScroll,
-  #|     focus_outer: focusOuter,
-  #|     focus_markdown: focusMarkdown,
   #|     select_reference: selectReference,
-  #|     layout_outer: layoutOuter,
   #|     enable_multiple_definitions: enableMultipleDefinitions,
   #|     replace_markdown_source: replaceMarkdownSource,
   #|   };

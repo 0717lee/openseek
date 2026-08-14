@@ -2,10 +2,6 @@ import { expect, test } from '../support/test.js';
 
 const editorSelector =
   '.render-invalidation-host > .monaco-editor.readonly-editor';
-const contentHighlightSelector =
-  '.render-invalidation-host .view-overlays .current-line';
-const marginHighlightSelector =
-  '.render-invalidation-host .margin-view-overlays .current-line-margin';
 const visibleHoverSelector =
   '.render-invalidation-host [data-content-widget="editor.contrib.resizableContentHoverWidget"] .monaco-hover:not(.hidden)';
 const contentWidgetSelector =
@@ -98,10 +94,6 @@ test('runtime whitespace and control-character options replace rendered DOM imme
   await expect(page.locator(editorSelector)).not.toContainText('[U+202E]');
 });
 
-
-
-
-
 test('spacing and token invalidations reproject only their DOM consumers', async ({
   page,
 }) => {
@@ -187,11 +179,6 @@ test('spacing and token invalidations reproject only their DOM consumers', async
   ).toBeVisible();
   await expect(widget).toBeVisible();
 });
-
-
-
-
-
 
 test('same-geometry layout_zone retains node and rereads callback in one frame', async ({
   page,

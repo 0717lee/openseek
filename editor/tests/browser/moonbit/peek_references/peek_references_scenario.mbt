@@ -33,25 +33,6 @@ fn peek_references_code_source() -> String {
     #|target again
     #|anchor here
     #|tail
-    #|overflow target 06
-    #|overflow target 07
-    #|overflow target 08
-    #|overflow target 09
-    #|overflow target 10
-    #|overflow target 11
-    #|overflow target 12
-    #|overflow target 13
-    #|overflow target 14
-    #|overflow target 15
-    #|overflow target 16
-    #|overflow target 17
-    #|overflow target 18
-    #|overflow target 19
-    #|overflow target 20
-    #|overflow target 21
-    #|overflow target 22
-    #|overflow target 23
-    #|overflow target 24
   )
 }
 
@@ -72,20 +53,6 @@ fn peek_references_other_source() -> String {
 }
 
 ///|
-fn peek_references_markdown_source() -> String {
-  (
-    #|# References
-    #|
-    #|```mbt check
-    #|let target = 1
-    #|let use = target
-    #|```
-    #|
-    #|Markdown tail.
-  )
-}
-
-///|
 fn peek_references_mode_name(mode : @navigation_api.OpenLocationMode) -> String {
   match mode {
     Current => "Current"
@@ -96,7 +63,6 @@ fn peek_references_mode_name(mode : @navigation_api.OpenLocationMode) -> String 
 ///|
 fn peek_references_state_json(
   code_viewer : @viewer.Viewer,
-  markdown_viewer : @viewer.Viewer,
   state : PeekReferencesFixtureState,
 ) -> String {
   let (code_line, code_column) = match code_viewer.get_position() {
@@ -117,7 +83,6 @@ fn peek_references_state_json(
       "column": code_column.to_json(),
     }),
     "codeHasTextFocus": code_viewer.has_text_focus().to_json(),
-    "markdownHasTextFocus": markdown_viewer.has_text_focus().to_json(),
   }).stringify()
 }
 
@@ -138,15 +103,7 @@ fn run_peek_references_browser_test() -> Unit {
   let code_host = document.create_element("div")
   code_host.set_attribute("class", "viewer-host peek-references-code-host")
   code_host.set_attribute("style", "height:360px;width:760px;")
-  let markdown_host = document.create_element("div")
-  markdown_host.set_attribute(
-    "class", "viewer-host peek-references-markdown-host",
-  )
-  markdown_host.set_attribute(
-    "style", "height:360px;width:760px;margin-top:24px;",
-  )
   shell.append_child(code_host.as_node())
-  shell.append_child(markdown_host.as_node())
   app.append_child(shell.as_node())
 
   let source_uri = try! @base_common.Uri::from(
@@ -163,11 +120,6 @@ fn run_peek_references_browser_test() -> Unit {
     scheme="inmemory",
     authority="references",
     path="/workspace/vendor/other.mbt",
-  )
-  let markdown_uri = try! @base_common.Uri::from(
-    scheme="inmemory",
-    authority="references",
-    path="/workspace/docs/references.mbt.md",
   )
   let source_model = @model.TextModel(
     source_uri,
@@ -192,14 +144,6 @@ fn run_peek_references_browser_test() -> Unit {
     1,
     "peek-references-other-rev-1",
     peek_references_other_source(),
-  )
-  let markdown_model = @model.TextModel(
-    markdown_uri,
-    "references.mbt.md",
-    "markdown",
-    1,
-    "peek-references-markdown-rev-1",
-    peek_references_markdown_source(),
   )
   let state : PeekReferencesFixtureState = {
     resolver_calls: 0,
@@ -254,14 +198,6 @@ fn run_peek_references_browser_test() -> Unit {
   code_viewer.set_model(Some(source_model))
   code_viewer.set_position(Position(4, 1))
   code_viewer.handle_initialized()
-  let markdown_viewer = @viewer.Viewer::create(
-    markdown_host,
-    services~,
-    options~,
-  )
-  markdown_viewer.set_model(Some(markdown_model))
-  markdown_viewer.handle_initialized()
-
   let code_locations : Array[@language.Location] = [
     peek_references_location(remote_uri, 1, 8, 14),
     peek_references_location(source_uri, 1, 1, 7),
@@ -270,38 +206,17 @@ fn run_peek_references_browser_test() -> Unit {
     peek_references_location(remote_uri, 2, 7, 13),
     peek_references_location(source_uri, 2, 8, 14),
   ]
-  let markdown_locations : Array[@language.Location] = [
-    peek_references_location(markdown_uri, 4, 5, 11),
-    peek_references_location(markdown_uri, 5, 11, 17),
-  ]
-  let overflow_locations : Array[@language.Location] = []
-  for line in 1..<=24 {
-    overflow_locations.push(peek_references_location(source_uri, line, 1, 2))
-  }
-  guard code_viewer.get_dom_node() is Some(code_root) else {
+  guard code_viewer.get_dom_node() is Some(_) else {
     ctx.fail("mounted Code Viewer did not expose its root")
     ctx.finish()
     return
   }
-  guard markdown_viewer.get_dom_node() is Some(markdown_root) else {
-    ctx.fail("mounted Markdown Viewer did not expose its root")
-    ctx.finish()
-    return
-  }
   install_peek_references_controls(
-    code_root,
-    markdown_root,
-    () => peek_references_state_json(code_viewer, markdown_viewer, state),
+    () => peek_references_state_json(code_viewer, state),
     () => {
       code_viewer.set_position(Position(4, 1))
       code_viewer.show_references(Position(4, 1), code_locations)
     },
-    () => code_viewer.show_references(Position(4, 2), code_locations),
-    () => code_viewer.show_references(Position(4, 1), []),
-    () => code_viewer.show_references(Position(4, 1), overflow_locations),
-    () => markdown_viewer.show_references(Position(5, 11), markdown_locations),
-    () => code_viewer.focus(),
-    () => markdown_viewer.focus(),
     () => {
       state.open_modes.clear()
       state.open_uris.clear()
@@ -320,10 +235,6 @@ fn wait_for_peek_references_fixture(
   if @support.query_count(
       ".peek-references-code-host > .monaco-editor.readonly-editor",
     ) ==
-    1 &&
-    @support.query_count(
-      ".peek-references-markdown-host > .moonbit-viewer-markdown-document",
-    ) ==
     1 {
     ctx.assert_true(
       @support.query_count(
@@ -331,13 +242,6 @@ fn wait_for_peek_references_fixture(
       ) ==
       1,
       "expected exactly one rendered Code Viewer",
-    )
-    ctx.assert_true(
-      @support.query_count(
-        ".peek-references-markdown-host > .moonbit-viewer-markdown-document",
-      ) ==
-      1,
-      "expected exactly one rendered Markdown Viewer",
     )
     ctx.finish()
     return
@@ -355,42 +259,14 @@ fn wait_for_peek_references_fixture(
 
 ///|
 extern "js" fn install_peek_references_controls(
-  code_root : @rdom.Element,
-  markdown_root : @rdom.Element,
   state_json : () -> String,
   show_code : () -> Unit,
-  show_code_other_anchor : () -> Unit,
-  show_code_empty : () -> Unit,
-  show_code_overflow : () -> Unit,
-  show_markdown : () -> Unit,
-  focus_code : () -> Unit,
-  focus_markdown : () -> Unit,
   clear_opens : () -> Unit,
 ) -> Unit =
-  #| (
-  #|   codeRoot,
-  #|   markdownRoot,
-  #|   stateJson,
-  #|   showCode,
-  #|   showCodeOtherAnchor,
-  #|   showCodeEmpty,
-  #|   showCodeOverflow,
-  #|   showMarkdown,
-  #|   focusCode,
-  #|   focusMarkdown,
-  #|   clearOpens,
-  #| ) => {
+  #| (stateJson, showCode, clearOpens) => {
   #|   globalThis.__peekReferencesControls = {
-  #|     codeRoot,
-  #|     markdownRoot,
   #|     state: () => JSON.parse(stateJson()),
   #|     show_code: showCode,
-  #|     show_code_other_anchor: showCodeOtherAnchor,
-  #|     show_code_empty: showCodeEmpty,
-  #|     show_code_overflow: showCodeOverflow,
-  #|     show_markdown: showMarkdown,
-  #|     focus_code: focusCode,
-  #|     focus_markdown: focusMarkdown,
   #|     clear_opens: clearOpens,
   #|   };
   #| }

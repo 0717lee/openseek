@@ -13,8 +13,6 @@ const preview =
   '.monaco-editor.readonly-editor';
 const markdownEditor =
   '.definition-markdown-host > .moonbit-viewer-markdown-document';
-const markdownDefinitionLink =
-  `${markdownEditor} .moonbit-viewer-markdown-definition-link`;
 const markdownPeek =
   `${markdownEditor} > .moonbit-viewer-markdown-document-overlays > ` +
   '.moonbit-viewer-references-peek-overlay';
@@ -59,12 +57,6 @@ async function mountDefinitionFixture(page, testInfo) {
 
 async function state(page) {
   return page.evaluate(() => globalThis.__definitionControls.state());
-}
-
-async function markdownState(page) {
-  return page.evaluate(
-    () => globalThis.__definitionControls.markdown_state(),
-  );
 }
 
 async function resetScroll(page) {
@@ -295,12 +287,6 @@ test('HTML context menu preserves an enclosing selection and runs Go to Definiti
   }
 });
 
-
-
-
-
-
-
 test('definition link preserves plain selection, paints only while armed, and navigates on an exact modifier click', async ({
   page,
 }, testInfo) => {
@@ -398,8 +384,6 @@ test('definition link preserves plain selection, paints only while armed, and na
   }
 });
 
-
-
 test('F4 replaces a multi-definition preview without losing preview focus', async ({
   page,
 }, testInfo) => {
@@ -470,7 +454,6 @@ test('F4 replaces a multi-definition preview without losing preview focus', asyn
     reporter.dispose();
   }
 });
-
 
 test('Alt+F12 from semantic Markdown mounts a projection-scoped Peek overlay and restores focus', async ({
   page,

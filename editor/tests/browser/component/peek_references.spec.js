@@ -11,22 +11,8 @@ const codePreview =
   `${codePeek} .moonbit-viewer-references-peek-preview > ` +
   '.monaco-editor.readonly-editor';
 const resultTree = '.moonbit-viewer-reference-results-tree';
-const resultsScrollable =
-  '.monaco-scrollable-element.moonbit-viewer-reference-results-scrollable';
 const groupRow = '[data-reference-row-kind="group"]';
 const referenceRow = '[data-reference-row-kind="reference"]';
-const markdownEditor =
-  '.peek-references-markdown-host > .moonbit-viewer-markdown-document';
-const markdownPeek =
-  `${markdownEditor} > .moonbit-viewer-markdown-document-overlays > ` +
-  '.moonbit-viewer-references-peek-overlay';
-const markdownPreview =
-  `${markdownPeek} .moonbit-viewer-references-peek-preview > ` +
-  '.moonbit-viewer-markdown-document';
-const definitionEditor =
-  '.definition-host > .monaco-editor.readonly-editor';
-const definitionPeek =
-  `${definitionEditor} .moonbit-viewer-references-peek`;
 
 async function settle(page) {
   await page.evaluate(
@@ -49,24 +35,6 @@ async function mountPeekReferencesFixture(page, testInfo) {
   });
   expectMoonBitReportPassed(report, { suite: 'peek_references' });
   await expect(page.locator(codeEditor)).toContainText('anchor here');
-  await expect(page.locator(markdownEditor)).toContainText('References');
-  await settle(page);
-  return reporter;
-}
-
-async function mountDefinitionFixture(page, testInfo) {
-  const reporter = await installMoonBitReporter(page);
-  await page.goto('/browser-tests/definition.html');
-  await page.waitForFunction(() => Boolean(globalThis.__definitionControls));
-  const report = await reporter.waitForReport(testInfo, {
-    suite: 'definition',
-    timeout: 10_000,
-    attachmentName: 'definition-moonbit-browser-report',
-  });
-  expectMoonBitReportPassed(report, { suite: 'definition' });
-  await expect(page.locator(definitionEditor)).toContainText(
-    'definition_alpha',
-  );
   await settle(page);
   return reporter;
 }

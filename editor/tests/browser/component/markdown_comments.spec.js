@@ -16,8 +16,6 @@ const diagramSvg = `${diagramContent} > svg`;
 const diagramControls = '.moonbit-viewer-markdown-diagram-controls';
 const diagramResizeHandle =
   '.moonbit-viewer-markdown-diagram-resize-handle';
-const editorScrollable =
-  `${editor} .monaco-scrollable-element.editor-scrollable`;
 const imageUrl = 'https://images.example.test/markdown-comment.svg';
 const mermaidModulePath = '/mermaid/mermaid.esm.min.mjs';
 
@@ -235,66 +233,6 @@ async function mermaidLog(page) {
   });
 }
 
-async function releaseMermaid(page, needle = '') {
-  return page.evaluate(
-    (value) => globalThis.__markdownCommentsMermaid.release(value),
-    needle,
-  );
-}
-
-async function observeMermaidCommits(page) {
-  await page.evaluate(() => {
-    globalThis.__markdownCommentsMermaidCommits = [];
-    globalThis.__markdownCommentsMermaidCommitObserver?.disconnect();
-    const recordSvg = (node) => {
-      if (!(node instanceof Element)) return;
-      const svgs = node.matches('[data-mermaid-source]')
-        ? [node]
-        : Array.from(node.querySelectorAll('[data-mermaid-source]'));
-      for (const svg of svgs) {
-        const id = svg.getAttribute('data-mermaid-id');
-        if (
-          globalThis.__markdownCommentsMermaidCommits.some(
-            (entry) => entry.id === id,
-          )
-        ) {
-          continue;
-        }
-        globalThis.__markdownCommentsMermaidCommits.push({
-          id,
-          source: svg.getAttribute('data-mermaid-source'),
-          theme: svg.getAttribute('data-mermaid-theme'),
-        });
-      }
-    };
-    globalThis.__markdownCommentsMermaidCommitObserver = new MutationObserver(
-      (records) => {
-        for (const record of records) {
-          for (const node of record.addedNodes) recordSvg(node);
-        }
-      },
-    );
-    globalThis.__markdownCommentsMermaidCommitObserver.observe(
-      document.querySelector('.markdown-comments-host'),
-      { childList: true, subtree: true },
-    );
-  });
-}
-
-async function mermaidCommits(page) {
-  return page.evaluate(() =>
-    (globalThis.__markdownCommentsMermaidCommits ?? []).map((entry) => ({
-      ...entry,
-    })),
-  );
-}
-
-async function stopObservingMermaidCommits(page) {
-  await page.evaluate(() =>
-    globalThis.__markdownCommentsMermaidCommitObserver?.disconnect(),
-  );
-}
-
 async function control(page, name, ...args) {
   return page.evaluate(
     ({ method, values }) =>
@@ -422,110 +360,6 @@ async function viewportGeometry(locator) {
 
 function expectNear(actual, expected, tolerance = 1) {
   expect(Math.abs(actual - expected)).toBeLessThanOrEqual(tolerance);
-}
-
-function relativeLuminance(color) {
-  const channels = color.map((channel) => {
-    const value = channel / 255;
-    return value <= 0.04045
-      ? value / 12.92
-      : ((value + 0.055) / 1.055) ** 2.4;
-  });
-  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
-}
-
-function contrastRatio(left, right) {
-  const first = relativeLuminance(left);
-  const second = relativeLuminance(right);
-  return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
-}
-
-async function calloutColors(locator) {
-  return locator.evaluate((element) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 1;
-    canvas.height = 1;
-    const context = canvas.getContext('2d', { willReadFrequently: true });
-    const resolveColor = (value) => {
-      context.clearRect(0, 0, 1, 1);
-      context.fillStyle = value;
-      context.fillRect(0, 0, 1, 1);
-      return Array.from(context.getImageData(0, 0, 1, 1).data.slice(0, 3));
-    };
-    const style = getComputedStyle(element);
-    return {
-      background: resolveColor(style.backgroundColor),
-      border: resolveColor(style.borderLeftColor),
-    };
-  });
-}
-
-async function markdownPalette(page, theme) {
-  await page
-    .locator('.markdown-comments-shell')
-    .evaluate((shell, value) => shell.setAttribute('data-theme', value), theme);
-  return page.locator(editor).evaluate((root) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 1;
-    canvas.height = 1;
-    const context = canvas.getContext('2d', { willReadFrequently: true });
-    const resolveColor = (value) => {
-      context.clearRect(0, 0, 1, 1);
-      context.fillStyle = value;
-      context.fillRect(0, 0, 1, 1);
-      return Array.from(context.getImageData(0, 0, 1, 1).data.slice(0, 3));
-    };
-    const color = (node, property) =>
-      resolveColor(window.getComputedStyle(node)[property]);
-    const markdown = root.querySelector('.moonbit-viewer-markdown-comment');
-    const fencedCode = root.querySelector(
-      '.moonbit-viewer-markdown-comment .monaco-tokenized-source',
-    );
-    return {
-      editor: color(root, 'backgroundColor'),
-      markdown: color(markdown, 'backgroundColor'),
-      code: color(fencedCode, 'backgroundColor'),
-      foreground: color(markdown, 'color'),
-    };
-  });
-}
-
-async function transitionFrames(page, action) {
-  return page.evaluate(async (method) => {
-    const controls = globalThis.__markdownCommentsControls;
-    const frames = [];
-    const sample = (phase) => {
-      const rawSourceVisible = Array.from(
-        document.querySelectorAll(
-          '.markdown-comments-host .view-lines .view-line',
-        ),
-      ).some((node) => node.textContent.includes('///'));
-      const replacementCount = document.querySelectorAll(
-        '.markdown-comments-host .moonbit-viewer-markdown-comment',
-      ).length;
-      frames.push({
-        phase,
-        rawSourceVisible,
-        replacementCount,
-        sourceAndReplacement: rawSourceVisible && replacementCount > 0,
-      });
-    };
-    await new Promise((resolve) =>
-      requestAnimationFrame(() => {
-        sample('before');
-        controls[method]();
-        sample('synchronous');
-        requestAnimationFrame(() => {
-          sample('first-frame');
-          requestAnimationFrame(() => {
-            sample('second-frame');
-            resolve();
-          });
-        });
-      }),
-    );
-    return frames;
-  }, action);
 }
 
 test('public Viewer replaces whole-line source with themed Markdown while model and native input stay truthful', async ({
@@ -863,32 +697,12 @@ test('public Viewer replaces whole-line source with themed Markdown while model 
     expect(geometry.visibleSourceText).not.toContain('Start comment');
 
     const initialState = await state(page);
-    expect(initialState).toMatchObject({
-      attachedKind: 'primary',
-      primaryAttachedEditors: 1,
-      replacementAttachedEditors: 0,
-      selection: {
-        anchorLine: 1,
-        anchorColumn: 1,
-        activeLine: 1,
-        activeColumn: 1,
-      },
+    expect(initialState.selection).toEqual({
+      anchorLine: 1,
+      anchorColumn: 1,
+      activeLine: 1,
+      activeColumn: 1,
     });
-    expect(initialState.attachedValue).toBe(initialState.primaryValue);
-    expect(initialState.primaryValue).toContain('/// # Start comment');
-    expect(initialState.primaryValue).toContain(
-      [
-        '/// ```diago',
-        '/// direction: down',
-        '/// viewer -> markdown: source',
-        '/// markdown -> parser: parse',
-        '/// parser -> layout: layout',
-        '/// layout -> svg: render',
-        '/// svg -> browser: mount',
-        '/// ```',
-      ].join('\n'),
-    );
-    expect(initialState.primaryValue).toContain(imageUrl);
 
     // An interactive viewport has no native diagram scroller. Ordinary wheel
     // input bubbles to the public Viewer scroll surface without changing its
@@ -1003,7 +817,6 @@ test('public Viewer replaces whole-line source with themed Markdown while model 
     reporter.dispose();
   }
 });
-
 
 test('pins Markdown to the visible viewport while long source keeps its horizontal scroll plane', async ({
   page,
@@ -1397,11 +1210,6 @@ test('interactive Diago controls pan zoom fit resize and keep sibling state inde
   }
 });
 
-
-
-
-
-
 test('renders exact Mermaid fences through the local module and rerenders them in place for Viewer themes', async ({
   page,
 }, testInfo) => {
@@ -1671,9 +1479,6 @@ test('renders exact Mermaid fences through the local module and rerenders them i
     reporter.dispose();
   }
 });
-
-
-
 
 test('keeps an offscreen Mermaid SVG and its ViewZone height synchronized across resize and reveal', async ({
   page,

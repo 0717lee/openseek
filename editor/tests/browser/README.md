@@ -29,6 +29,12 @@ for performance investigation and perf-harness changes.
   failed requests, and HTTP responses at status 400 or above, but recording
   those events alone does not fail a test; a spec must assert them when they are
   part of its contract.
+- Component coverage is capped at 43 tests. Headless Viewer tests own model,
+  view-model, contribution, provider, cancellation, and event-order state;
+  Mounted Viewer tests own fake-DOM attachment, node ownership, and controlled
+  frame/timer scheduling. Component Playwright owns only behavior that requires
+  Chromium layout, CSS, native input/focus, DOM Range, iframe ownership, or a
+  native animation frame.
 - `component.html?browserGeometry=1` is the fixed geometry oracle: it embeds
   tiny self-owned monospace and proportional TTF data URLs, awaits
   `document.fonts.ready`, and runs at deviceScaleFactor 1. Its Playwright suite
@@ -50,9 +56,10 @@ for performance investigation and perf-harness changes.
   wire offsets, returned ranges, diagnostic projection, unsafe pointer zones,
   independent Viewer owners, and stale completion rejection across
   pointer/content/theme/model/disposal boundaries.
-- Markdown-comment model-switch assertions obtain exact attachment counts from
-  an explicitly installed private browser diagnostic; no model lifecycle
-  helper is added to the public MoonBit interface.
+- Markdown-comment lifecycle, same-key reconciliation, delayed renderer
+  invalidation, and attachment counts are covered by mounted Viewer white-box
+  tests. The browser fixture exposes only the source/theme/size/input controls
+  needed by the five retained DOM, viewport, and diagram contracts.
 - `smoke/viewer.spec.js` opens `README.md` and `src/literate.mbt.md` from the
   deterministic workspace fixture through the sidebar and native protocol.
   The host supplies unchanged URI-backed models; the Viewer alone selects
@@ -94,10 +101,11 @@ for performance investigation and perf-harness changes.
   model/source/wire/range facts in `data-markdown-hover-*` attributes.
 - Definition navigation: a dedicated public-Viewer fixture drives plain clicks,
   Ctrl/Cmd definition links, goto, and Alt+F12 Peek with trusted browser input.
-  Its semantic `.mbt.md` cases assert exact projected link spans, ordinary-fence
-  exclusion, source-replacement cancellation, same-model reveal, a
-  projection-scoped Peek overlay inside a constrained host, nested preview,
-  Escape focus restoration, and replacement teardown.
+  The four retained cases cover the HTML context menu, exact modifier-link
+  gesture, F4/Shift+F4/Escape inside shared Peek, and a projection-scoped
+  semantic-Markdown Peek with replacement teardown. Request identity,
+  cancellation, empty results, and provider ordering live in the owning
+  white-box suites.
 - Product observability: `__readonlyEditorEvent`, `__readonlyEditorModel`,
   `__readonlyEditorDocument`, `__readonlyEditorSource`,
   `__readonlyEditorCopiedText`, and `__readonlyEditorCopiedHtml`.

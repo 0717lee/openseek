@@ -67,9 +67,11 @@ Use ordinary tests for DOM-free algorithms and `*_reference_test.mbt` /
 
 ### Headless Viewer tests
 
-`viewer/test_viewer_wbtest.mbt` constructs a real, unattached `Viewer`, installs
-a `TextModel`, and exercises its synchronous model/view-model/cursor/layout
-state. No browser `View`, DOM measurement, or animation frame is created.
+`viewer/test_viewer_harness_wbtest.mbt` provides the package-private fixture;
+`viewer/test_viewer_wbtest.mbt` and the owning contribution `_wbtest.mbt`
+files use it to construct a real, unattached `Viewer`, install a `TextModel`,
+and exercise synchronous model/view-model/cursor/layout state. No browser
+`View`, DOM measurement, or animation frame is created.
 
 Useful white-box seams are:
 
@@ -118,6 +120,14 @@ the failed CI attempt retains its trace in the job-local output directory; a
 deterministic regression therefore fails both attempts and still fails the
 gate.
 
+The component suite is intentionally capped at 43 tests. Its retained surface
+is limited to real font/Range/iframe geometry, native keyboard/pointer/copy
+bridges, context menus and modifier links, folding gestures, Markdown layout
+and diagram input, DOM convergence, ViewZone ownership/geometry/mouse
+suppression, and the small dedicated public-Viewer contracts. Version and
+identity matrices, provider leases/cancellation, transaction ordering, no-op
+scheduling, and node lifecycle belong to Headless or Mounted MoonBit tests.
+
 Compilation is `moon build`'s job: every js entry point declares
 `supported_targets = "js"`, so one workspace build emits all of them.
 `scripts/build-web.mbtx` assembles the production reference app and embed page,
@@ -138,8 +148,10 @@ rejects ambiguous layouts rather than risking a stale artifact from a different
 A browser-visible contract normally has two adjacent owners:
 
 - A MoonBit scenario under `tests/browser/moonbit/` constructs the product
-  through the appropriate public surface, owns deterministic setup, and emits a
-  compact JSON report. Keep DOM-free policy and synchronous state-machine
+  through the appropriate public surface, owns deterministic setup or manual
+  provider completion, reports fixture-initialization failures, and emits a
+  compact JSON report. It must not reimplement a state machine solely so
+  Playwright can inspect it. Keep DOM-free policy and synchronous state-machine
   assertions in ordinary, headless, or mounted MoonBit tests instead.
 - A Playwright spec under `tests/browser/component/` or
   `tests/browser/smoke/` supplies the browser-only evidence: real input, DOM and

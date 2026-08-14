@@ -167,18 +167,6 @@ async function clickBurst(page, point, count) {
   await settle(page);
 }
 
-async function multiClickDrag(page, start, end, count) {
-  await page.mouse.move(start.x, start.y);
-  for (let clickCount = 1; clickCount < count; clickCount += 1) {
-    await page.mouse.down({ clickCount });
-    await page.mouse.up({ clickCount });
-  }
-  await page.mouse.down({ clickCount: count });
-  await page.mouse.move(end.x, end.y, { steps: 8 });
-  await page.mouse.up({ clickCount: count });
-  await settle(page);
-}
-
 async function textPoint(page, text, occurrence = 0) {
   const point = await page.locator(`${editorSelector} .view-lines`).evaluate(
     (root, { needle, wantedOccurrence }) => {
@@ -207,38 +195,6 @@ async function textPoint(page, text, occurrence = 0) {
   expect(point).not.toBeNull();
   return point;
 }
-
-async function emptyContentPoint(page, viewLineNumber) {
-  const point = await page.locator(`${editorSelector} .view-lines`).evaluate(
-    (viewLines, wantedViewLineNumber) => {
-      const line = viewLines.querySelector(
-        `.view-line[data-line="${wantedViewLineNumber}"]`,
-      );
-      const content = line?.querySelector('.view-line-content');
-      const editor = viewLines.closest('.monaco-editor');
-      if (!line || !content || !editor) return null;
-      const lineRect = line.getBoundingClientRect();
-      const contentRect = content.getBoundingClientRect();
-      const editorRect = editor.getBoundingClientRect();
-      const x = Math.min(editorRect.right - 20, contentRect.right + 24);
-      const y = lineRect.top + lineRect.height / 2;
-      return {
-        x,
-        y,
-        isBeyondText: x > contentRect.right,
-        hitLineNumber:
-          document.elementFromPoint(x, y)?.closest('.view-line')?.dataset.line ??
-          null,
-      };
-    },
-    viewLineNumber,
-  );
-  expect(point).not.toBeNull();
-  expect(point.isBeyondText).toBe(true);
-  expect(point.hitLineNumber).toBe(String(viewLineNumber));
-  return point;
-}
-
 
 test('all 16 primary real keys prevent defaults retain focus and converge events', async ({
   page,
@@ -408,9 +364,6 @@ test('model copy stays editor-owned while ViewZone selection and keys stay nativ
   ).toBe(activationBefore + 1);
 });
 
-
-
-
 test('real single click and drag keep visible selection and mouse event pairs coherent', async ({
   page,
 }) => {
@@ -448,12 +401,6 @@ test('real single click and drag keep visible selection and mouse event pairs co
   await expect.poll(() => page.locator(`${editorSelector} .selected-text`).count()).toBeGreaterThan(0);
   await expectFocused(page);
 });
-
-
-
-
-
-
 
 test('real multi-click and gutter gestures preserve kinds and SelectAll source metadata', async ({
   page,

@@ -118,7 +118,6 @@ fn run_initial_size_test() -> Unit {
     "handle_initialized did not publish the measured stabilized token range",
   )
   initial_size_next_frame(() => {
-    ctx.metric_int("renderedNotifications", rendered_notifications.val)
     ctx.assert_true(
       rendered_notifications.val > 0,
       "the first mounted flush did not render the attached model",
