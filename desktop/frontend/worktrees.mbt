@@ -1215,7 +1215,7 @@ test "a worktree mode submit opens the run like any other" {
       ..dev,
       worktrees: [{ project: workspace, rows: [], generation: 1 }],
     })
-  let (_, sent) = update(dispatch, Send, model)
+  let (_, sent) = update(dispatch, Composer(@composer.SubmitRequested), model)
   assert_true(sent.active().run is Starting(..))
   inspect(sent.active().task, content="")
   // The mode survives until the chain's create binds a name, so a rejected
@@ -1486,7 +1486,7 @@ test "a failed worktree setup is an actionable toast and keeps retry eligible" {
       worktrees: [{ project: workspace, rows: [], generation: 1 }],
     })
   let worktrees_generation = model.dev().worktrees_request_generation
-  let (_, sent) = update(dispatch, Send, model)
+  let (_, sent) = update(dispatch, Composer(@composer.SubmitRequested), model)
   guard sent.active().input_ledger is [entry] else {
     fail("expected the submission in the ledger")
   }

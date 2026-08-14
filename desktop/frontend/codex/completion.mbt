@@ -333,6 +333,7 @@ fn State::with_context_mention(
   self : State,
   kind : CodexCompletionKind,
   item : CodexCompletionItem,
+  draft_without_token : String,
 ) -> State {
   let mention = match kind {
     CodexFiles => CodexFileMention(name=item.name, path=item.path)
@@ -347,23 +348,37 @@ fn State::with_context_mention(
   if !mentions.contains(mention) {
     mentions.push(mention)
   }
-  guard self.completion.current() is Some(completion) else {
-    return { ..self, mentions, completion: self.completion.dismissed() }
-  }
-  {
-    ..self,
-    draft: completion.menu().draft_without_token(),
-    mentions,
-    completion: self.completion.dismissed(),
-  }
+  { ..self, draft: draft_without_token, mentions }
 }
 
 ///|
-fn State::without_mention(self : State, index : Int) -> State {
-  guard self.mentions.get(index) is Some(_) else { return self }
-  let mentions = self.mentions.copy()
-  let _ = mentions.remove(index)
-  { ..self, mentions, }
+fn State::composer_controller(
+  self : State,
+) -> @composer.Controller[
+  CodexCompletionKind,
+  CodexCompletionItem,
+  CodexMention,
+] {
+  @composer.Controller(self.draft, self.mentions, self.completion)
+}
+
+///|
+/// Project the shared controller result back into Codex state. Account,
+/// thread, provider caches, and app-server lifecycle never cross this boundary.
+fn State::with_composer_controller(
+  self : State,
+  controller : @composer.Controller[
+    CodexCompletionKind,
+    CodexCompletionItem,
+    CodexMention,
+  ],
+) -> State {
+  {
+    ..self,
+    draft: controller.draft(),
+    mentions: controller.mentions(),
+    completion: controller.completion(),
+  }
 }
 
 ///|
@@ -483,21 +498,19 @@ fn State::with_symbols(
 }
 
 ///|
-fn State::change_draft(
+fn State::load_composer_provider(
   self : State,
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
   value : String,
 ) -> (@cmd.Cmd, State) {
-  let next = { ..self, draft: value }
-  let completion = self.completion.changed(next.completion_for_draft(value))
-  let next = { ..next, completion, }
+  let completion = self.completion
   let command = if @composer.Trigger::parse(value, inline_markers="$#@")
     is Some(trigger) &&
     CodexCompletionKind::of_trigger(trigger) is Some(kind) &&
-    next.search_owner(trigger.query()) is Some(owner) {
+    self.search_owner(trigger.query()) is Some(owner) {
     match kind {
-      CodexSymbols if next.symbol_search.owner != Some(owner) =>
+      CodexSymbols if self.symbol_search.owner != Some(owner) =>
         completion.delayed(generation => {
           dispatch(SymbolSearchDue(owner~, generation~))
         })
@@ -508,29 +521,29 @@ fn State::change_draft(
   }
   let (context_command, next) = match
     @composer.Trigger::parse(value, inline_markers="$#@") {
-    Some(trigger) if trigger.marker() == "@" && next.file_owner() is Some(owner) =>
-      match next.file_index {
-        CodexFilesReady(current, _, _) if current == owner => (@cmd.none, next)
-        CodexFilesLoading(current) if current == owner => (@cmd.none, next)
+    Some(trigger) if trigger.marker() == "@" && self.file_owner() is Some(owner) =>
+      match self.file_index {
+        CodexFilesReady(current, _, _) if current == owner => (@cmd.none, self)
+        CodexFilesLoading(current) if current == owner => (@cmd.none, self)
         _ =>
           (
-            next.load_files(dispatch, channel),
-            { ..next, file_index: CodexFilesLoading(owner) },
+            self.load_files(dispatch, channel),
+            { ..self, file_index: CodexFilesLoading(owner) },
           )
       }
-    Some(trigger) if trigger.marker() == "$" && next.file_owner() is Some(owner) => {
+    Some(trigger) if trigger.marker() == "$" && self.file_owner() is Some(owner) => {
       let cwd = owner.cwd
-      match next.skills {
-        CodexSkillsReady(current, _) if current == cwd => (@cmd.none, next)
-        CodexSkillsLoading(current) if current == cwd => (@cmd.none, next)
+      match self.skills {
+        CodexSkillsReady(current, _) if current == cwd => (@cmd.none, self)
+        CodexSkillsLoading(current) if current == cwd => (@cmd.none, self)
         _ =>
           (
-            next.load_skills(dispatch, channel, force_reload=false),
-            { ..next, skills: CodexSkillsLoading(cwd) },
+            self.load_skills(dispatch, channel, force_reload=false),
+            { ..self, skills: CodexSkillsLoading(cwd) },
           )
       }
     }
-    _ => (@cmd.none, next)
+    _ => (@cmd.none, self)
   }
   (@cmd.batch([command, context_command]), next)
 }
@@ -573,14 +586,13 @@ fn State::accept_completion(
   self : State,
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
+  kind : CodexCompletionKind,
   item : CodexCompletionItem,
+  draft_without_token : String,
 ) -> (@cmd.Cmd, State) {
-  guard self.completion.current() is Some(completion) else {
-    return (@cmd.none, self)
-  }
-  match completion.kind() {
+  match kind {
     CodexSkills | CodexSymbols | CodexFiles =>
-      (@cmd.none, self.with_context_mention(completion.kind(), item))
+      (@cmd.none, self.with_context_mention(kind, item, draft_without_token))
     CodexCommands => {
       let original = self.draft
       let command = match item.command {
@@ -592,12 +604,72 @@ fn State::accept_completion(
         command,
         {
           ..self,
-          completion: self.completion.dismissed(),
           loading: item.command == "compact" || item.command == "review",
           notice: "",
         },
       )
     }
+  }
+}
+
+///|
+/// Codex's adapter around the one shared input controller. Every input first
+/// crosses the same transition; typed requests are then interpreted with
+/// app-server catalogs, commands, and writer ownership.
+fn State::update_composer(
+  self : State,
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  msg : @composer.Msg,
+) -> (@cmd.Cmd, State) {
+  self
+  .composer_controller()
+  .update_parent(
+    self,
+    msg,
+    text => self.completion_for_draft(text),
+    (state, controller) => state.with_composer_controller(controller),
+    (next, request) => {
+      match request {
+        @composer.NoControllerRequest => (@cmd.none, next)
+        @composer.DraftUpdated(value) =>
+          next.load_composer_provider(dispatch, channel, value)
+        @composer.CompletionChosen(kind~, item~, draft_without_token~) =>
+          next.accept_completion(
+            dispatch, channel, kind, item, draft_without_token,
+          )
+        @composer.SubmissionRequested => next.submit_composer(dispatch, channel)
+      }
+    },
+  )
+}
+
+///|
+/// Interpret the controller's submit request through Codex writer ownership
+/// and app-server lifecycle. No input mechanics are duplicated here.
+fn State::submit_composer(
+  self : State,
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+) -> (@cmd.Cmd, State) {
+  if self.input_empty() ||
+    !self.has_active() ||
+    self.loading ||
+    !self.can_prompt() {
+    return (@cmd.none, self)
+  }
+  if self.active_draft() is Some(_) {
+    (
+      self.start_draft_thread(dispatch, channel),
+      { ..self, loading: true, notice: "" },
+    )
+  } else if self.write_access is CodexWritable {
+    (self.send(dispatch, channel), { ..self, loading: true, notice: "" })
+  } else {
+    (
+      self.resume_for_send(dispatch, channel),
+      { ..self, loading: true, notice: "" },
+    )
   }
 }
 
@@ -677,10 +749,10 @@ test "Codex catalog replies do not reopen a dismissed completion" {
   let state = State::from_thread_snapshot({
     "thread": { "id": "thread-1", "cwd": "/work/project", "turns": [] },
   })
-  let (_, searching) = state.change_draft(
+  let (_, searching) = state.update_composer(
     dispatch,
     @interop.ChannelId::Local,
-    "Open @main",
+    @composer.DraftChanged("Open @main"),
   )
   assert_true(searching.completion.current() is Some(_))
   let dismissed = { ..searching, completion: searching.completion.dismissed() }

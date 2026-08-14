@@ -454,7 +454,9 @@ fn CodexMention::chip(
     label,
     title,
     jump,
-    remove: Some((dispatch(RemoveMention(index)), icon(icon_close))),
+    remove: Some(
+      (dispatch(Composer(@composer.MentionRemoved(index))), icon(icon_close)),
+    ),
   }.render()
 }
 
@@ -487,7 +489,7 @@ fn CodexCompletionKind::view(
         CodexFiles => "No files"
       }
     },
-  }.render(index => dispatch(CompletionPick(index)))
+  }.render(index => dispatch(Composer(@composer.CompletionPicked(index))))
 }
 
 ///|
@@ -703,7 +705,7 @@ fn State::composer_view(
       self.input_empty() ||
       active_elsewhere ||
       self.has_missing_worktree(),
-      command: dispatch(Send),
+      command: dispatch(Composer(@composer.SubmitRequested)),
       content: icon(icon_arrow_up),
     }
   }
@@ -728,13 +730,13 @@ fn State::composer_view(
     !(self.connection is CodexReady) ||
     active_elsewhere ||
     self.has_missing_worktree(),
-    input: dispatch.map(value => DraftChanged(value)),
+    input: dispatch.map(value => Composer(@composer.DraftChanged(value))),
     keyboard: @composer.KeyboardActions::{
       menu_open: self.completion.current() is Some(_),
-      navigate: delta => dispatch(CompletionMove(delta)),
-      accept: dispatch(CompletionAccept),
-      dismiss: dispatch(CompletionDismiss),
-      submit: dispatch(Send),
+      navigate: delta => dispatch(Composer(@composer.CompletionMoved(delta))),
+      accept: dispatch(Composer(@composer.CompletionAccepted)),
+      dismiss: dispatch(Composer(@composer.CompletionDismissed)),
+      submit: dispatch(Composer(@composer.SubmitRequested)),
       cancel: None,
     },
     status,

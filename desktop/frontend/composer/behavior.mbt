@@ -303,3 +303,161 @@ pub fn[Kind, Item] CompletionState::delayed(
 ) -> @cmd.Cmd {
   self.debounce.delayed(command)
 }
+
+///|
+/// Input events owned by every conversation composer. Backend packages wrap
+/// this one message type instead of maintaining parallel draft, completion,
+/// mention, and submit variants.
+pub(all) enum Msg {
+  DraftChanged(String)
+  CompletionMoved(Int)
+  CompletionAccepted
+  CompletionPicked(Int)
+  CompletionDismissed
+  MentionRemoved(Int)
+  SubmitRequested
+} derive(Eq)
+
+///|
+/// A request that the common input controller cannot interpret by itself.
+/// Completion rows retain backend-specific payloads, and submission still has
+/// to pass the selected conversation's own protocol and readiness gates.
+pub(all) enum ControllerRequest[Kind, Item] {
+  NoControllerRequest
+  DraftUpdated(String)
+  CompletionChosen(kind~ : Kind, item~ : Item, draft_without_token~ : String)
+  SubmissionRequested
+} derive(Eq)
+
+///|
+/// The complete editable input state consumed by the shared controller. The
+/// owning application may store these fields together or project them from a
+/// conversation record; either way, every input event crosses this one pure
+/// transition before backend-specific work begins.
+struct Controller[Kind, Item, Mention] {
+  draft : String
+  mentions : Array[Mention]
+  completion : CompletionState[Kind, Item]
+} derive(Eq)
+
+///|
+pub fn[Kind, Item, Mention] Controller::Controller(
+  draft : String,
+  mentions : Array[Mention],
+  completion : CompletionState[Kind, Item],
+) -> Controller[Kind, Item, Mention] {
+  { draft, mentions, completion }
+}
+
+///|
+pub fn[Kind, Item, Mention] Controller::draft(
+  self : Controller[Kind, Item, Mention],
+) -> String {
+  self.draft
+}
+
+///|
+pub fn[Kind, Item, Mention] Controller::mentions(
+  self : Controller[Kind, Item, Mention],
+) -> Array[Mention] {
+  self.mentions
+}
+
+///|
+pub fn[Kind, Item, Mention] Controller::completion(
+  self : Controller[Kind, Item, Mention],
+) -> CompletionState[Kind, Item] {
+  self.completion
+}
+
+///|
+/// Apply the backend-independent half of a composer event. `complete` is a
+/// pure projection over the owning backend's current catalogs; it is supplied
+/// per update and is never retained in model state. Selected rows and submits
+/// return typed requests for the owner to interpret through its own protocol.
+/// A draft update carries the accepted text so providers never recover it by
+/// inspecting the original input message again; the controller retains the
+/// matching debounce generation in its completion state.
+pub fn[Kind, Item, Mention] Controller::update(
+  self : Controller[Kind, Item, Mention],
+  msg : Msg,
+  complete : (String) -> Completion[Kind, Item]?,
+) -> (Controller[Kind, Item, Mention], ControllerRequest[Kind, Item]) {
+  match msg {
+    DraftChanged(value) => {
+      let completion = self.completion.changed(complete(value))
+      ({ ..self, draft: value, completion }, DraftUpdated(value))
+    }
+    CompletionMoved(delta) =>
+      (
+        { ..self, completion: self.completion.shifted(delta) },
+        NoControllerRequest,
+      )
+    CompletionDismissed =>
+      ({ ..self, completion: self.completion.dismissed() }, NoControllerRequest)
+    MentionRemoved(index) => {
+      guard self.mentions.get(index) is Some(_) else {
+        return (self, NoControllerRequest)
+      }
+      let mentions = self.mentions.copy()
+      ignore(mentions.remove(index))
+      ({ ..self, mentions, }, NoControllerRequest)
+    }
+    CompletionAccepted => self.choose_completion(None)
+    CompletionPicked(index) => self.choose_completion(Some(index))
+    SubmitRequested => (self, SubmissionRequested)
+  }
+}
+
+///|
+/// Run the common transition, write its controller fields back to the parent
+/// state, and only then interpret the resulting request. Keeping this order in
+/// the composer package prevents OpenSeek and Codex from growing separate
+/// upper-level controller paths. The callbacks are used only for this update;
+/// they are never retained in application state.
+pub fn[Parent, Result, Kind, Item, Mention] Controller::update_parent(
+  self : Controller[Kind, Item, Mention],
+  parent : Parent,
+  msg : Msg,
+  complete : (String) -> Completion[Kind, Item]?,
+  put : (Parent, Controller[Kind, Item, Mention]) -> Parent,
+  respond : (Parent, ControllerRequest[Kind, Item]) -> Result,
+) -> Result {
+  let (controller, request) = self.update(msg, complete)
+  respond(put(parent, controller), request)
+}
+
+///|
+/// Resolve keyboard or pointer acceptance against the same live menu. The
+/// menu closes here exactly once; the owner receives the provider kind, row,
+/// and preserved draft prefix needed to turn the choice into a command or
+/// mention without re-reading transient controller state.
+fn[Kind, Item, Mention] Controller::choose_completion(
+  self : Controller[Kind, Item, Mention],
+  index : Int?,
+) -> (Controller[Kind, Item, Mention], ControllerRequest[Kind, Item]) {
+  guard self.completion.current() is Some(current) else {
+    return (
+      { ..self, completion: self.completion.dismissed() },
+      NoControllerRequest,
+    )
+  }
+  let item = match index {
+    Some(index) => current.menu().get(index)
+    None => current.menu().current()
+  }
+  guard item is Some(item) else {
+    return (
+      { ..self, completion: self.completion.dismissed() },
+      NoControllerRequest,
+    )
+  }
+  (
+    { ..self, completion: self.completion.dismissed() },
+    CompletionChosen(
+      kind=current.kind(),
+      item~,
+      draft_without_token=current.menu().draft_without_token(),
+    ),
+  )
+}

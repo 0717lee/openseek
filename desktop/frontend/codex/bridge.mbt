@@ -391,7 +391,7 @@ fn State::start_turn_in_new_worktree(
       @interop.in_ordered_lane(
         @interop.session_command_lane(channel, thread_id),
         () => {
-          let reply : @protocol.WorktreeCreateReply = @interop.bridge_request(
+          let result : @protocol.WorktreeCreateResult = @interop.bridge_request(
             channel,
             @commands.worktree_create,
             { workspace, session: None, codex_thread: Some(thread_id) },
@@ -406,6 +406,20 @@ fn State::start_turn_in_new_worktree(
                   ") — this task may already own a new worktree; the prompt was not resent"
               }
               scheduler.add(dispatch(Failed(kind=CodexTurnReply, message~)))
+              return
+            }
+          }
+          let reply = match result {
+            @protocol.WorktreeCreatedReply(reply) => reply
+            @protocol.WorktreeCreateError(message) => {
+              scheduler.add(
+                dispatch(
+                  Failed(
+                    kind=CodexTurnReply,
+                    message="worktree setup failed: " + message,
+                  ),
+                ),
+              )
               return
             }
           }
@@ -687,7 +701,7 @@ fn State::repair_worktree(
   let thread_id = active.id
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply : @protocol.WorktreeCreateReply = @interop.bridge_request(
+      let result : @protocol.WorktreeCreateResult = @interop.bridge_request(
         channel,
         @commands.worktree_create,
         { workspace, session: None, codex_thread: Some(thread_id) },
@@ -698,6 +712,20 @@ fn State::repair_worktree(
               Failed(
                 kind=CodexWorktreeRepairReply(worktree),
                 message=@interop.bridge_error_text(error),
+              ),
+            ),
+          )
+          return
+        }
+      }
+      let reply = match result {
+        @protocol.WorktreeCreatedReply(reply) => reply
+        @protocol.WorktreeCreateError(message) => {
+          scheduler.add(
+            dispatch(
+              Failed(
+                kind=CodexWorktreeRepairReply(worktree),
+                message="worktree setup failed: " + message,
               ),
             ),
           )

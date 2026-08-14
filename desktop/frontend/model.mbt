@@ -1520,7 +1520,10 @@ priv enum Msg {
     api_key~ : String,
     custom_api_key~ : String
   )
-  TaskChanged(String)
+  // The shared composer controller owns editable input events for both
+  // OpenSeek and Codex. This shell interprets only its completion choices and
+  // submission request through the OpenSeek engine protocol.
+  Composer(@composer.Msg)
   // Start a symbol lookup only if the composer still has this exact delayed
   // draft generation after its 150 ms pause.
   CompletionDue(
@@ -1550,18 +1553,6 @@ priv enum Msg {
     query~ : String,
     generation~ : Int
   )
-  // Move the completion menu's highlight by a delta (−1 up, +1 down), wrapping
-  // at the ends. Ignored when the menu is closed.
-  CompletionMove(Int)
-  // Accept the highlighted completion: run the slash command or insert the
-  // skill mention into the composer.
-  CompletionAccept
-  // Accept a specific completion row by index, for a mouse click on the menu.
-  CompletionPick(Int)
-  // Close the completion menu without acting (Escape, or a click away).
-  CompletionDismiss
-  // Remove a mention chip from the active conversation's draft, by index.
-  RemoveMention(Int)
   // Jump the editor side-panel to a mention chip's resolved location, by
   // index. A no-op for a chip with no `path` (a skill, or an unresolved
   // symbol).
@@ -1759,7 +1750,6 @@ priv enum Msg {
   // non-empty `error` becomes the panel's notice (success refreshes the
   // installed list instead).
   SkillActionDone(channel~ : @interop.ChannelId, key~ : String, error~ : String)
-  Send
   Stop
   NewChat
   // The channel is captured when rotation is requested, so a focus move can

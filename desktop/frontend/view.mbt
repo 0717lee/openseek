@@ -424,7 +424,15 @@ fn device_section_rows(
                 image: icon_add,
               })
             }
-            @sidebar.WorkspaceRow::{ title, label, active, menu: None, actions }.render()
+            @sidebar.WorkspaceRow::{
+              title,
+              label,
+              active,
+              collapsed: false,
+              toggle: @cmd.none,
+              menu: None,
+              actions,
+            }.render()
           },
           conversation_row: (title, label, active, running, open, archive) => {
             let status : Array[@html.Html] = []
@@ -969,7 +977,7 @@ fn CompletionKind::view(
         _ => "No symbols"
       }
     },
-  }.render(index => dispatch(CompletionPick(index)))
+  }.render(index => dispatch(Composer(@composer.CompletionPicked(index))))
 }
 
 ///|
@@ -1003,7 +1011,12 @@ fn Conversation::mention_chips(
         } else {
           None
         },
-        remove: Some((dispatch(RemoveMention(index)), icon(icon_close))),
+        remove: Some(
+          (
+            dispatch(Composer(@composer.MentionRemoved(index))),
+            icon(icon_close),
+          ),
+        ),
       }.render(),
     )
   }
@@ -1128,7 +1141,7 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
         class_name: "icon-button send-button",
         title: "Steer the running task",
         disabled: false,
-        command: dispatch(Send),
+        command: dispatch(Composer(@composer.SubmitRequested)),
         content: icon(icon_arrow_up),
       }
     }
@@ -1138,7 +1151,7 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
       class_name: "icon-button send-button",
       title: "Send",
       disabled: !can_send,
-      command: dispatch(Send),
+      command: dispatch(Composer(@composer.SubmitRequested)),
       content: icon(icon_arrow_up),
     }
   }
@@ -1237,18 +1250,18 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
       if goal_mode {
         GoalDraftEdited(value)
       } else {
-        TaskChanged(value)
+        Composer(@composer.DraftChanged(value))
       }
     }),
     keyboard: @composer.KeyboardActions::{
       menu_open: !goal_mode && model.completion.current() is Some(_),
-      navigate: delta => dispatch(CompletionMove(delta)),
-      accept: dispatch(CompletionAccept),
-      dismiss: dispatch(CompletionDismiss),
+      navigate: delta => dispatch(Composer(@composer.CompletionMoved(delta))),
+      accept: dispatch(Composer(@composer.CompletionAccepted)),
+      dismiss: dispatch(Composer(@composer.CompletionDismissed)),
       submit: if goal_mode {
         dispatch(SubmitGoal)
       } else {
-        dispatch(Send)
+        dispatch(Composer(@composer.SubmitRequested))
       },
       cancel: if goal_mode {
         Some(dispatch(CloseGoalEditor))
@@ -2195,7 +2208,7 @@ test "settings, skills, and composer declare form focus ownership" {
       @preview.toolbar_view(
         { url: None, input: "", title: "", loading: false, failure: None },
         {
-          input: dispatch.map(value => TaskChanged(value)),
+          input: dispatch.map(value => Composer(@composer.DraftChanged(value))),
           submit: @cmd.none,
           back: @cmd.none,
           forward: @cmd.none,

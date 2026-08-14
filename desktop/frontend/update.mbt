@@ -259,7 +259,7 @@ fn Model::open_archived_session_on(
     ..model.activate(channel, session_id),
     screen: Chat,
     loading_conversation: Some(owner),
-    completion: None,
+    completion: model.completion.dismissed(),
   }.with_active_project(workspace)
   if generation is Some(generation) {
     (
@@ -713,20 +713,21 @@ fn is_steer_receipt(event : @transcript.EngineEvent) -> Bool {
 }
 
 ///|
-/// Apply an accepted completion row: a slash command runs its action, while a
-/// skill, symbol, or file reference becomes a chip in the composer's mention
-/// tray (its expansion is spliced into the prompt on send). Either way the menu
-/// closes and only the typed trigger token is removed from the textarea.
+/// Interpret the row chosen by the shared controller: a slash command runs its
+/// action, while a skill, symbol, or file reference becomes a chip in the
+/// composer's mention tray. The controller has already closed the menu and
+/// preserved the draft prefix supplied here.
 fn accept_completion(
   dispatch : @cmd.Emit[Msg],
   model : Model,
-  menu : @composer.Completion[CompletionKind, CompletionItem],
+  kind : CompletionKind,
   item : CompletionItem,
+  draft_without_token : String,
 ) -> (@cmd.Cmd, Model) {
   if model.active().is_archived_read_only() {
     return (@cmd.none, { ..model, completion: model.completion.dismissed() })
   }
-  match menu.kind() {
+  match kind {
     SlashCommands => run_slash_command(dispatch, model, item.command)
     // The chip carries its envelope form directly: the skill's bare name (its
     // `insert` has a trailing space), or the symbol's name plus resolved
@@ -736,7 +737,7 @@ fn accept_completion(
         model,
         Skill(name=item.insert.trim().to_owned()),
         range=None,
-        task=menu.menu().draft_without_token(),
+        task=draft_without_token,
       )
     Symbols => {
       let (file, line) = if item.path is Some(path) && item.range is Some(range) {
@@ -748,27 +749,21 @@ fn accept_completion(
         model,
         Symbol(name=item.label, file~, line~),
         range=item.range,
-        task=menu.menu().draft_without_token(),
+        task=draft_without_token,
       )
     }
     Files =>
       if item.path is Some(path) {
-        accept_mention(
-          model,
-          File(path~),
-          range=None,
-          task=menu.menu().draft_without_token(),
-        )
+        accept_mention(model, File(path~), range=None, task=draft_without_token)
       } else {
-        (@cmd.none, { ..model, completion: model.completion.dismissed() })
+        (@cmd.none, model)
       }
   }
 }
 
 ///|
-/// Attach a mention chip to the active conversation's draft (deduplicated),
-/// remove the typed trigger token while preserving preceding prompt text, and
-/// close the menu.
+/// Attach a mention chip to the active conversation's draft (deduplicated) and
+/// replace the typed trigger token with the controller's preserved prefix.
 fn accept_mention(
   model : Model,
   ref_ : @mention_context.MentionRef,
@@ -777,13 +772,7 @@ fn accept_mention(
 ) -> (@cmd.Cmd, Model) {
   let conv = model.active()
   let mentions = push_mention(conv.mentions, { ref_, range })
-  (
-    @cmd.none,
-    {
-      ..model.replace_conversation({ ..conv, task, mentions }),
-      completion: model.completion.dismissed(),
-    },
-  )
+  (@cmd.none, { ..model.replace_conversation({ ..conv, task, mentions }) })
 }
 
 ///|
@@ -1134,7 +1123,7 @@ fn run_slash_command(
   command : String,
 ) -> (@cmd.Cmd, Model) {
   if model.active().is_archived_read_only() {
-    return (@cmd.none, { ..model, completion: None })
+    return (@cmd.none, { ..model, completion: model.completion.dismissed() })
   }
   match command {
     "compact" => {
@@ -1143,13 +1132,7 @@ fn run_slash_command(
       // would stack another behind it in the engine's pending queue (the
       // host rejects it anyway) — swallow it like any settled command.
       if !(conv.compaction is NotCompacting) {
-        (
-          @cmd.none,
-          {
-            ..model.replace_conversation({ ..conv, task: "" }),
-            completion: model.completion.dismissed(),
-          },
-        )
+        (@cmd.none, { ..model.replace_conversation({ ..conv, task: "" }) })
       } else {
         (
           compact_openseek(
@@ -1175,8 +1158,7 @@ fn run_slash_command(
               } else {
                 Requested
               },
-            }),
-            completion: model.completion.dismissed(),
+            })
           },
         )
       }
@@ -1190,12 +1172,11 @@ fn run_slash_command(
             ..conv,
             task: "",
             goal_edit: Some({ draft: conv.goal_draft_seed() }),
-          }),
-          completion: model.completion.dismissed(),
+          })
         },
       )
     }
-    _ => (@cmd.none, { ..model, completion: model.completion.dismissed() })
+    _ => (@cmd.none, model)
   }
 }
 
@@ -1843,6 +1824,252 @@ fn Msg::opens_file_before_panel_reconciliation(self : Msg) -> Bool {
 }
 
 ///|
+fn Model::composer_controller(
+  self : Model,
+) -> @composer.Controller[CompletionKind, CompletionItem, Mention] {
+  let conv = self.active()
+  @composer.Controller(conv.task, conv.mentions, self.completion)
+}
+
+///|
+/// Project the common input controller back into the selected OpenSeek
+/// conversation. Run state, delivery state, and provider caches remain owned
+/// by the application model and cannot leak into the composer package.
+fn Model::with_composer_controller(
+  self : Model,
+  controller : @composer.Controller[CompletionKind, CompletionItem, Mention],
+) -> Model {
+  let conv = self.active()
+  {
+    ..self.replace_conversation({
+      ..conv,
+      task: controller.draft(),
+      mentions: controller.mentions(),
+    }),
+    completion: controller.completion(),
+  }
+}
+
+///|
+/// Start the OpenSeek provider work requested by a completed shared draft
+/// transition. The controller already owns the new draft and generation; this
+/// adapter only selects the workspace symbol or file-index command.
+fn Model::load_composer_provider(
+  self : Model,
+  dispatch : @cmd.Emit[Msg],
+  value : String,
+) -> (@cmd.Cmd, Model) {
+  let conv = self.active()
+  let owner : @interop.ConversationKey = {
+    channel: self.focused,
+    session: conv.session_id,
+  }
+  let root = self.conversation_root(conv)
+  let command = match @composer.Trigger::parse(value, inline_markers="$#@") {
+    Some(trigger) if trigger.marker() == "#" &&
+      (
+        self.symbol_cache.owner != Some(owner) ||
+        self.symbol_cache.root != root ||
+        self.symbol_cache.query != trigger.query()
+      ) =>
+      self.completion.delayed(generation => {
+        dispatch(CompletionDue(owner~, query=trigger.query(), generation~))
+      })
+    Some(trigger) if trigger.marker() == "@" &&
+      self.file_panel.index is @fileeditor.IndexReady(truncated=true, ..) &&
+      root is Some(root) =>
+      self.completion.delayed(generation => {
+        dispatch(
+          FileCompletionDue(owner~, root~, query=trigger.query(), generation~),
+        )
+      })
+    Some(trigger) if trigger.marker() == "@" &&
+      root is Some(_) &&
+      (
+        self.file_panel.index is @fileeditor.IndexEmpty ||
+        self.file_panel.index is @fileeditor.IndexFailed
+      ) => dispatch(FileEditor(@fileeditor.EnsureFileIndex))
+    _ => @cmd.none
+  }
+  (command, self)
+}
+
+///|
+/// OpenSeek's adapter around the shared input controller. The package-owned
+/// transition handles text, menu, mention, and submit events. Like Codex, this
+/// method only interprets the typed request emitted by that transition.
+fn Model::update_composer(
+  self : Model,
+  dispatch : @cmd.Emit[Msg],
+  msg : @composer.Msg,
+) -> (@cmd.Cmd, Model) {
+  let root = self.conversation_root(self.active())
+  // A root change invalidates paths even when the owner and query text are
+  // unchanged. This invariant applies to every composer event, so no backend
+  // adapter needs to inspect the original event after the controller runs.
+  let symbol_cache = if self.symbol_cache.root != root {
+    empty_symbol_cache()
+  } else {
+    self.symbol_cache
+  }
+  let base = { ..self, symbol_cache, }
+  base
+  .composer_controller()
+  .update_parent(
+    base,
+    msg,
+    value => {
+      let (files, files_loading) = base.completion_files(value)
+      compute_completion(
+        value,
+        base.installed_skills,
+        symbol_cache,
+        { channel: base.focused, session: base.active().session_id },
+        files~,
+        files_loading~,
+      )
+    },
+    (model, controller) => model.with_composer_controller(controller),
+    (next, request) => {
+      match request {
+        @composer.DraftUpdated(value) =>
+          next.load_composer_provider(dispatch, value)
+        @composer.CompletionChosen(kind~, item~, draft_without_token~) =>
+          accept_completion(dispatch, next, kind, item, draft_without_token)
+        @composer.SubmissionRequested => next.submit_composer(dispatch)
+        @composer.NoControllerRequest => (@cmd.none, next)
+      }
+    },
+  )
+}
+
+///|
+/// Interpret the controller's submit request through OpenSeek's durable input
+/// ledger. Start, steer, worktree creation, and readiness gates belong here;
+/// they are deliberately absent from the backend-independent controller.
+fn Model::submit_composer(
+  self : Model,
+  dispatch : @cmd.Emit[Msg],
+) -> (@cmd.Cmd, Model) {
+  let conv = self.active()
+  if conv.is_archived_read_only() {
+    return (@cmd.none, self)
+  }
+  let checkout = self.conversation_placement(conv)
+  // The outgoing prompt is the typed text with the chips folded in as the
+  // `<user_mentions>` envelope. Typed text is required — chips alone are
+  // context without an instruction and stay in the composer.
+  let task = compose_prompt(conv.mentions, conv.task).trim().to_owned()
+  if !conv.draft_sendable() ||
+    !(self.bridge_state() is Connected(..)) ||
+    !self.api_ready() ||
+    checkout is None ||
+    checkout is Some(@interop.MissingWorktree(..)) {
+    return (@cmd.none, self)
+  }
+  if !(conv.sync is Synced) {
+    // A prompt or steer submitted while the durable frontier is unknown could
+    // make a delayed prior terminal look like this run's boundary.
+    return (@cmd.none, self)
+  }
+  if conv.has_unresolved_run_tail_notice() {
+    // Starting another run before the prior durable terminal is proved would
+    // make its later terminal ambiguous.
+    return (@cmd.none, self)
+  }
+  if conv.is_running() {
+    // A running turn accepts a steer only before cancellation and after its
+    // durable predecessor floor is known.
+    if conv.run is Open(run_id~, stage~) &&
+      !(stage is Cancelling) &&
+      conv.run_durable_floor is Some(_) {
+      let (model, submission_id) = self.allocate_submission_id()
+      let conv = conv.enqueue_input(
+        SteerInput,
+        submission_id,
+        Some(run_id),
+        task,
+        conv.task,
+        conv.mentions,
+      )
+      return (
+        steer_openseek(
+          dispatch,
+          model.focused,
+          conv.session_id,
+          submission_id,
+          task,
+          run_id,
+        ),
+        {
+          ..model.replace_conversation({ ..conv, task: "", mentions: [] }),
+          completion: model.completion.dismissed(),
+        },
+      )
+    }
+    return (@cmd.none, self)
+  }
+  if !(conv.compaction is NotCompacting) {
+    // A prompt queued behind compaction cannot be reached by Stop, so retain
+    // the draft until compaction settles.
+    return (@cmd.none, self)
+  }
+  let (model, submission_id) = self.allocate_submission_id()
+  // Read the requested placement before the ledger entry mutates the
+  // conversation; a rejected setup must leave the choice retryable.
+  let fresh_worktree = conv.wants_fresh_worktree()
+  let conv = conv.enqueue_input(
+    InitialPrompt,
+    submission_id,
+    None,
+    task,
+    conv.task,
+    conv.mentions,
+  )
+  let next = {
+    ..conv,
+    task: "",
+    mentions: [],
+    run: Starting(submission_id~),
+    // Only the real Started seam's causal snapshot may establish this run's
+    // predecessor terminal floor.
+    run_durable_floor: None,
+    run_floor_generation: None,
+    usage_tokens: 0,
+  }
+  let start_cmd = if fresh_worktree && conv.workspace is Project(root=workspace) {
+    start_in_new_worktree(
+      dispatch,
+      model.focused,
+      task,
+      submission_id,
+      conv.engine_model,
+      model.max_steps,
+      conv.session_id,
+      workspace,
+    )
+  } else {
+    start_openseek(
+      dispatch,
+      model.focused,
+      task,
+      submission_id,
+      conv.engine_model,
+      model.max_steps,
+      conv.session_id,
+      workspace=conv.workspace.project(),
+    )
+  }
+  (
+    start_cmd,
+    {
+      ..model.replace_conversation(next),
+      completion: model.completion.dismissed(),
+    },
+  )
+}
+
+///|
 fn update_msg(
   dispatch : @cmd.Emit[Msg],
   msg : Msg,
@@ -1956,75 +2183,7 @@ fn update_msg(
       } else {
         (clear_legacy_engine_settings(), model)
       }
-    TaskChanged(value) => {
-      if model.active().is_archived_read_only() {
-        return (@cmd.none, model)
-      }
-      let owner : @interop.ConversationKey = {
-        channel: model.focused,
-        session: model.active().session_id,
-      }
-      let root = model.conversation_root(model.active())
-      // A root change invalidates paths even when the owner and query text are
-      // unchanged. Drop that cache before rendering the menu so the delayed
-      // request can enter its loading state instead of exposing stale rows.
-      let symbol_cache = if model.symbol_cache.root == root {
-        model.symbol_cache
-      } else {
-        empty_symbol_cache()
-      }
-      let (files, files_loading) = model.completion_files(value)
-      let completion = model.completion.changed(
-        compute_completion(
-          value,
-          model.installed_skills,
-          symbol_cache,
-          owner,
-          files~,
-          files_loading~,
-        ),
-      )
-      let command = match
-        @composer.Trigger::parse(value, inline_markers="$#@") {
-        Some(trigger) if trigger.marker() == "#" &&
-          (
-            model.symbol_cache.owner != Some(owner) ||
-            model.symbol_cache.root != root ||
-            model.symbol_cache.query != trigger.query()
-          ) =>
-          completion.delayed(generation => {
-            dispatch(CompletionDue(owner~, query=trigger.query(), generation~))
-          })
-        Some(trigger) if trigger.marker() == "@" &&
-          model.file_panel.index is @fileeditor.IndexReady(truncated=true, ..) &&
-          root is Some(root) =>
-          completion.delayed(generation => {
-            dispatch(
-              FileCompletionDue(
-                owner~,
-                root~,
-                query=trigger.query(),
-                generation~,
-              ),
-            )
-          })
-        Some(trigger) if trigger.marker() == "@" &&
-          root is Some(_) &&
-          (
-            model.file_panel.index is @fileeditor.IndexEmpty ||
-            model.file_panel.index is @fileeditor.IndexFailed
-          ) => dispatch(FileEditor(@fileeditor.EnsureFileIndex))
-        _ => @cmd.none
-      }
-      (
-        command,
-        {
-          ..model.replace_conversation({ ..model.active(), task: value }),
-          symbol_cache,
-          completion,
-        },
-      )
-    }
+    Composer(msg) => model.update_composer(dispatch, msg)
     CompletionDue(owner~, query~, generation~) =>
       model.begin_completion_symbol_request(dispatch, owner, query, generation)
     FileCompletionDue(owner~, root~, query~, generation~) =>
@@ -2041,19 +2200,6 @@ fn update_msg(
       )
     FileCompletionFailed(owner~, root~, query~, generation~) =>
       model.apply_file_completion_reply(owner, root, query, generation, None)
-    CompletionMove(delta) =>
-      (@cmd.none, { ..model, completion: model.completion.shifted(delta) })
-    CompletionDismiss =>
-      (@cmd.none, { ..model, completion: model.completion.dismissed() })
-    RemoveMention(index) => {
-      let conv = model.active()
-      guard conv.mentions.get(index) is Some(_) else {
-        return (@cmd.none, model)
-      }
-      let mentions = conv.mentions.copy()
-      let _ = mentions.remove(index)
-      (@cmd.none, model.replace_conversation({ ..conv, mentions, }))
-    }
     JumpToMention(index) => {
       let conv = model.active()
       guard conv.mentions.get(index) is Some(mention) else {
@@ -2271,20 +2417,6 @@ fn update_msg(
         model.notify_error(dispatch, message)
       }
     }
-    CompletionAccept =>
-      if model.completion.current() is Some(menu) &&
-        menu.menu().current() is Some(item) {
-        accept_completion(dispatch, model, menu, item)
-      } else {
-        (@cmd.none, { ..model, completion: model.completion.dismissed() })
-      }
-    CompletionPick(index) =>
-      if model.completion.current() is Some(menu) &&
-        menu.menu().get(index) is Some(item) {
-        accept_completion(dispatch, model, menu, item)
-      } else {
-        (@cmd.none, { ..model, completion: model.completion.dismissed() })
-      }
     SymbolsLoaded(owner~, root~, query~, generation~, items~) =>
       apply_symbol_reply(model, owner, root, query, generation, items)
     // A failed search reads as "no symbols": cache an empty result for the
@@ -2942,140 +3074,6 @@ fn update_msg(
             } else {
               model.skills_notice
             },
-          },
-        )
-      }
-    }
-    Send => {
-      let conv = model.active()
-      if conv.is_archived_read_only() {
-        return (@cmd.none, model)
-      }
-      let checkout = model.conversation_placement(conv)
-      // The outgoing prompt is the typed text with the chips folded in as the
-      // `<user_mentions>` envelope. Typed text is required — chips alone are
-      // context without an instruction and stay in the composer.
-      let task = compose_prompt(conv.mentions, conv.task).trim().to_owned()
-      if !conv.draft_sendable() ||
-        !(model.bridge_state() is Connected(..)) ||
-        !model.api_ready() ||
-        checkout is None ||
-        checkout is Some(@interop.MissingWorktree(..)) {
-        (@cmd.none, model)
-      } else if !(conv.sync is Synced) {
-        // A prompt or steer submitted while the durable frontier is unknown
-        // could make a delayed prior terminal look like this run's boundary.
-        // Keep the draft until the single-flight snapshot settles.
-        (@cmd.none, model)
-      } else if conv.has_unresolved_run_tail_notice() {
-        // The previous run's durable terminal is not proved yet. Starting or
-        // steering another run would make its later terminal ambiguous.
-        (@cmd.none, model)
-      } else if conv.is_running() {
-        // Submitting while this conversation's turn runs steers it: the text
-        // is folded into the running turn at its next step boundary and
-        // echoed back as a `steer_applied` event. A turn being cancelled
-        // cannot be steered — the steer could outlive the dying turn in the
-        // engine's queue and contaminate a later prompt — so the text stays
-        // in the composer.
-        if conv.run is Open(run_id~, stage~) &&
-          !(stage is Cancelling) &&
-          conv.run_durable_floor is Some(_) {
-          let (model, submission_id) = model.allocate_submission_id()
-          let conv = conv.enqueue_input(
-            SteerInput,
-            submission_id,
-            Some(run_id),
-            task,
-            conv.task,
-            conv.mentions,
-          )
-          (
-            steer_openseek(
-              dispatch,
-              model.focused,
-              conv.session_id,
-              submission_id,
-              task,
-              run_id,
-            ),
-            {
-              ..model.replace_conversation({ ..conv, task: "", mentions: [] }),
-              completion: model.completion.dismissed(),
-            },
-          )
-        } else {
-          (@cmd.none, model)
-        }
-      } else if !(conv.compaction is NotCompacting) {
-        // A prompt submitted mid-compaction would sit in the serve engine's
-        // queue behind it, where Stop (which cancels only the compaction)
-        // cannot reach it — the user's cancel would not stop the submitted
-        // work. A queued or just-requested compaction is the same gap one
-        // step earlier: the command is on its way and compaction_started has
-        // not yet arrived. The draft stays in the composer until the
-        // compaction settles.
-        (@cmd.none, model)
-      } else {
-        let (model, submission_id) = model.allocate_submission_id()
-        // The worktree launch mode acts until a create has bound the
-        // conversation; the eligibility must survive a rejected setup
-        // attempt (see `wants_fresh_worktree`). Read before the ledger
-        // entry below mutates the conversation.
-        let fresh_worktree = conv.wants_fresh_worktree()
-        let conv = conv.enqueue_input(
-          InitialPrompt,
-          submission_id,
-          None,
-          task,
-          conv.task,
-          conv.mentions,
-        )
-        let next = {
-          ..conv,
-          task: "",
-          mentions: [],
-          run: Starting(submission_id~),
-          // The store may have advanced through an external CLI while this
-          // page was idle. Only the real Started seam's causal snapshot may
-          // establish this run's predecessor terminal floor.
-          run_durable_floor: None,
-          run_floor_generation: None,
-          usage_tokens: 0,
-        }
-        // The worktree launch mode's first submit creates the environment
-        // (the host names it, binds this conversation) and starts inside
-        // it, as one command; every other submit is a plain start — a
-        // bound session's cwd comes from the host's registry.
-        let start_cmd = if fresh_worktree &&
-          conv.workspace is Project(root=workspace) {
-          start_in_new_worktree(
-            dispatch,
-            model.focused,
-            task,
-            submission_id,
-            conv.engine_model,
-            model.max_steps,
-            conv.session_id,
-            workspace,
-          )
-        } else {
-          start_openseek(
-            dispatch,
-            model.focused,
-            task,
-            submission_id,
-            conv.engine_model,
-            model.max_steps,
-            conv.session_id,
-            workspace=conv.workspace.project(),
-          )
-        }
-        (
-          start_cmd,
-          {
-            ..model.replace_conversation(next),
-            completion: model.completion.dismissed(),
           },
         )
       }
@@ -4847,7 +4845,7 @@ fn update_device_msg(
             {
               ..updated,
               loading_conversation: Some({ channel, session: conv.session_id }),
-              completion: None,
+              completion: updated.completion.dismissed(),
             }
           } else {
             updated
@@ -5342,7 +5340,7 @@ fn update_device_msg(
               {
                 ..next,
                 loading_conversation: Some({ channel, session }),
-                completion: None,
+                completion: next.completion.dismissed(),
               }
             } else {
               next
@@ -7331,8 +7329,16 @@ fn second_run_started_before_first_response() -> (Model, String)? {
     ),
     reconciled,
   )
-  let (_, drafted) = update(dispatch, TaskChanged("second prompt"), post_finish)
-  let (_, sending) = update(dispatch, Send, drafted)
+  let (_, drafted) = update(
+    dispatch,
+    Composer(@composer.DraftChanged("second prompt")),
+    post_finish,
+  )
+  let (_, sending) = update(
+    dispatch,
+    Composer(@composer.SubmitRequested),
+    drafted,
+  )
   guard sending.active().run is Starting(submission_id=second_submission) else {
     return None
   }
@@ -7376,8 +7382,16 @@ fn second_run_started_before_first_steer_receipt() -> Model? {
     ),
     first_finished,
   )
-  let (_, drafted) = update(dispatch, TaskChanged("second prompt"), reconciled)
-  let (_, sending) = update(dispatch, Send, drafted)
+  let (_, drafted) = update(
+    dispatch,
+    Composer(@composer.DraftChanged("second prompt")),
+    reconciled,
+  )
+  let (_, sending) = update(
+    dispatch,
+    Composer(@composer.SubmitRequested),
+    drafted,
+  )
   guard sending.active().run is Starting(submission_id=second_submission) else {
     return None
   }
@@ -7831,7 +7845,11 @@ test "a symbol reply with the same session id but another channel is stale" {
     channel: Remote("d-remote"),
     session: "desktop-test",
   }
-  let (_, querying) = update(dispatch, TaskChanged("#parse"), test_model())
+  let (_, querying) = update(
+    dispatch,
+    Composer(@composer.DraftChanged("#parse")),
+    test_model(),
+  )
   let items : Array[WorkspaceSymbol] = [
     {
       name: "parse_file",
@@ -9883,8 +9901,16 @@ test "an accepted start response opens the run without Started" {
   assert_true(responded.active().sync is Reloading(generation=1, ..))
   assert_true(responded.active().run_durable_floor is None)
   assert_true(responded.active().run_floor_generation is Some(1))
-  let (_, drafted) = update(dispatch, TaskChanged("too early"), responded)
-  let (_, gated) = update(dispatch, Send, drafted)
+  let (_, drafted) = update(
+    dispatch,
+    Composer(@composer.DraftChanged("too early")),
+    responded,
+  )
+  let (_, gated) = update(
+    dispatch,
+    Composer(@composer.SubmitRequested),
+    drafted,
+  )
   inspect(gated.active().input_ledger.length(), content="1")
   inspect(gated.active().task, content="too early")
   let (_, started) = update_dev(
@@ -10180,8 +10206,12 @@ test "an old empty runs snapshot cannot close a start sent after reconnect" {
     @interop.ChannelId::Local.test_bridge_ready(),
     test_model(),
   )
-  let (_, drafted) = update(dispatch, TaskChanged("new prompt"), ready)
-  let (_, sent) = update(dispatch, Send, drafted)
+  let (_, drafted) = update(
+    dispatch,
+    Composer(@composer.DraftChanged("new prompt")),
+    ready,
+  )
+  let (_, sent) = update(dispatch, Composer(@composer.SubmitRequested), drafted)
   assert_true(sent.active().run is Starting(..))
   let (_, stale_snapshot) = update_dev(
     dispatch,
@@ -11021,8 +11051,8 @@ test "send while running queues a steer instead of a prompt" {
     ..running_conversation(),
     task: "focus on the tests",
   })
-  let (_, once) = update(dispatch, Send, model)
-  let (_, twice) = update(dispatch, Send, model)
+  let (_, once) = update(dispatch, Composer(@composer.SubmitRequested), model)
+  let (_, twice) = update(dispatch, Composer(@composer.SubmitRequested), model)
   inspect(once.active().task, content="")
   inspect(once.active().pending_steers().length(), content="1")
   inspect(once.active().pending_steers()[0], content="focus on the tests")
@@ -11041,7 +11071,7 @@ test "a cancelling turn cannot be steered; the text stays in the composer" {
     run: Open(run_id="r7", stage=Cancelling),
     task: "too late",
   })
-  let (_, next) = update(dispatch, Send, model)
+  let (_, next) = update(dispatch, Composer(@composer.SubmitRequested), model)
   inspect(next.active().task, content="too late")
   inspect(next.active().pending_steers().length(), content="0")
 }
@@ -11053,7 +11083,11 @@ test "the composer draft stays with its conversation across a switch" {
     ..empty_conversation(@interop.ChannelId::Local, "desktop-second"),
     messages: [{ kind: User, content: "earlier", ts: None, sequence: None }],
   })
-  let (_, drafted) = update(dispatch, TaskChanged("half a thought"), model)
+  let (_, drafted) = update(
+    dispatch,
+    Composer(@composer.DraftChanged("half a thought")),
+    model,
+  )
   let (_, switched) = update(
     dispatch,
     OpenSession(@interop.ChannelId::Local, "desktop-second"),
@@ -11077,13 +11111,25 @@ test "update is pure: accepting an inline skill preserves prompt text" {
     ..test_model(),
     installed_skills: [installed_skill("review-pr", "Review a pull request")],
   }
-  let (_, drafted) = update(dispatch, TaskChanged("Please use $rev"), model)
+  let (_, drafted) = update(
+    dispatch,
+    Composer(@composer.DraftChanged("Please use $rev")),
+    model,
+  )
   guard drafted.completion.current() is Some(menu) else {
     fail("the inline skill token should open completion")
   }
   assert_eq(menu.menu().draft_without_token(), "Please use ")
-  let (_, once) = update(dispatch, CompletionAccept, drafted)
-  let (_, twice) = update(dispatch, CompletionAccept, drafted)
+  let (_, once) = update(
+    dispatch,
+    Composer(@composer.CompletionAccepted),
+    drafted,
+  )
+  let (_, twice) = update(
+    dispatch,
+    Composer(@composer.CompletionAccepted),
+    drafted,
+  )
   // The same message and model always produce the same plain-data state.
   assert_eq(once.active().task, "Please use ")
   assert_eq(twice.active().task, "Please use ")
@@ -11115,7 +11161,11 @@ test "file index completion refreshes and accepts a workspace file" {
     file_ctx(base),
   )
   let model = { ..base, file_panel: loading }
-  let (_, searching) = update(dispatch, TaskChanged("Inspect @main"), model)
+  let (_, searching) = update(
+    dispatch,
+    Composer(@composer.DraftChanged("Inspect @main")),
+    model,
+  )
   guard searching.completion.current() is Some(pending) else {
     fail("the inline file token should open completion")
   }
@@ -11130,7 +11180,11 @@ test "file index completion refreshes and accepts a workspace file" {
       truncated=false,
     ),
   )
-  let (_, dismissed) = update(dispatch, CompletionDismiss, searching)
+  let (_, dismissed) = update(
+    dispatch,
+    Composer(@composer.CompletionDismissed),
+    searching,
+  )
   let (_, stayed_closed) = update(dispatch, indexed, dismissed)
   let (_, stayed_closed_again) = update(dispatch, indexed, dismissed)
   assert_true(stayed_closed.completion.current() is None)
@@ -11144,7 +11198,11 @@ test "file index completion refreshes and accepts a workspace file" {
   guard menu.menu().get(0) is Some(file) else { fail("file row expected") }
   assert_eq(file.label, "main.mbt")
   assert_eq(file.path, Some("src/main.mbt"))
-  let (_, accepted) = update(dispatch, CompletionAccept, loaded)
+  let (_, accepted) = update(
+    dispatch,
+    Composer(@composer.CompletionAccepted),
+    loaded,
+  )
   assert_eq(accepted.active().task, "Inspect ")
   assert_true(
     accepted.active().mentions ==
@@ -11183,7 +11241,11 @@ test "truncated file completion settles from the complete Host cache" {
     file_ctx(base),
   )
   let indexed = { ..base, file_panel: truncated }
-  let (_, searching) = update(dispatch, TaskChanged("Inspect @hidden"), indexed)
+  let (_, searching) = update(
+    dispatch,
+    Composer(@composer.DraftChanged("Inspect @hidden")),
+    indexed,
+  )
   guard searching.completion.current() is Some(pending) else {
     fail("truncated indexes should keep the file menu open")
   }
@@ -11212,7 +11274,7 @@ test "truncated file completion settles from the complete Host cache" {
 
   let (_, local_searching) = update(
     dispatch,
-    TaskChanged("Inspect @visible"),
+    Composer(@composer.DraftChanged("Inspect @visible")),
     indexed,
   )
   let (_, fallback) = update(
@@ -11240,7 +11302,7 @@ test "file completion settles while its checkout root is unavailable" {
   assert_true(rootless.conversation_root(rootless.active()) is None)
   let (_, searching) = update(
     dispatch,
-    TaskChanged("Inspect @missing"),
+    Composer(@composer.DraftChanged("Inspect @missing")),
     rootless,
   )
   guard searching.completion.current() is Some(menu) else {
@@ -11267,17 +11329,22 @@ test "file index failure settles an empty completion menu" {
     synced,
     file_ctx(base),
   )
-  let (_, searching) = update(dispatch, TaskChanged("Inspect @missing"), {
-    ..base,
-    file_panel: loading,
-  })
+  let (_, searching) = update(
+    dispatch,
+    Composer(@composer.DraftChanged("Inspect @missing")),
+    { ..base, file_panel: loading },
+  )
   let failed_reply = FileEditor(
     @fileeditor.FileIndexFailed(
       owner~,
       epoch=searching.file_panel.request_epoch,
     ),
   )
-  let (_, dismissed) = update(dispatch, CompletionDismiss, searching)
+  let (_, dismissed) = update(
+    dispatch,
+    Composer(@composer.CompletionDismissed),
+    searching,
+  )
   let (_, stayed_closed) = update(dispatch, failed_reply, dismissed)
   let (_, stayed_closed_again) = update(dispatch, failed_reply, dismissed)
   assert_true(stayed_closed.completion.current() is None)
@@ -11318,10 +11385,11 @@ test "a live file completion restarts when its checkout root changes" {
     loading,
     file_ctx(base),
   )
-  let (_, showing_old) = update(dispatch, TaskChanged("Inspect @old"), {
-    ..base,
-    file_panel: ready,
-  })
+  let (_, showing_old) = update(
+    dispatch,
+    Composer(@composer.DraftChanged("Inspect @old")),
+    { ..base, file_panel: ready },
+  )
   guard showing_old.completion.current() is Some(old_menu) else {
     fail("the old root should have a file completion menu")
   }
@@ -11348,7 +11416,7 @@ test "an inline symbol reply rebuilds the live completion menu" {
   let dispatch = test_dispatch()
   let (_, searching) = update(
     dispatch,
-    TaskChanged("Inspect #parse"),
+    Composer(@composer.DraftChanged("Inspect #parse")),
     test_model(),
   )
   guard searching.completion.current() is Some(pending) else {
@@ -11417,7 +11485,11 @@ test "typing the same symbol query after a root change drops the old cache" {
     cached,
   )
   assert_eq(rerooted.symbol_cache.root, Some(old_root))
-  let (_, querying) = update(dispatch, TaskChanged("#parse"), rerooted)
+  let (_, querying) = update(
+    dispatch,
+    Composer(@composer.DraftChanged("#parse")),
+    rerooted,
+  )
   assert_true(querying.symbol_cache.owner is None)
   guard querying.completion.current() is Some(menu) else {
     fail("the symbol menu should open for the new root")
@@ -11441,7 +11513,11 @@ test "a composer symbol query restarts and fences replies when its root changes"
     path: "src/old.mbt",
     range: @common.Range::Range(1, 1, 1, 1),
   }
-  let (_, querying) = update(dispatch, TaskChanged("#parse"), test_model())
+  let (_, querying) = update(
+    dispatch,
+    Composer(@composer.DraftChanged("#parse")),
+    test_model(),
+  )
   let (_, loaded) = update(
     dispatch,
     SymbolsLoaded(
@@ -12774,7 +12850,7 @@ test "send waits while the durable transcript frontier is reloading" {
     sync: test_reloading([]),
   }
   let model = running_model().replace_conversation(conv)
-  let (_, next) = update(dispatch, Send, model)
+  let (_, next) = update(dispatch, Composer(@composer.SubmitRequested), model)
   inspect(next.active().task, content="do not send yet")
   inspect(next.active().input_ledger.length(), content="0")
 }
@@ -12900,8 +12976,16 @@ test "a runs snapshot cannot retire a steer submitted after its frontier" {
   let dispatch = test_dispatch()
   let model = running_model()
   let frontier = model.run_snapshot_frontier(@interop.ChannelId::Local)
-  let (_, drafted) = update(dispatch, TaskChanged("post-snapshot steer"), model)
-  let (_, steered) = update(dispatch, Send, drafted)
+  let (_, drafted) = update(
+    dispatch,
+    Composer(@composer.DraftChanged("post-snapshot steer")),
+    model,
+  )
+  let (_, steered) = update(
+    dispatch,
+    Composer(@composer.SubmitRequested),
+    drafted,
+  )
   guard steered.active().input_ledger is [pending] else {
     fail("expected one steer awaiting its exact receipt")
   }
@@ -13033,8 +13117,12 @@ test "runs settlement releases after a causal cut and keeps exact receipt" {
   assert_true(reconciled.active().overlay[0].anchor is AfterMessages(0))
   assert_false(reconciled.active().has_unresolved_run_tail_notice())
   inspect(reconciled.active().input_ledger.length(), content="1")
-  let (_, drafted) = update(dispatch, TaskChanged("next prompt"), reconciled)
-  let (_, sent) = update(dispatch, Send, drafted)
+  let (_, drafted) = update(
+    dispatch,
+    Composer(@composer.DraftChanged("next prompt")),
+    reconciled,
+  )
+  let (_, sent) = update(dispatch, Composer(@composer.SubmitRequested), drafted)
   assert_true(sent.active().run is Starting(..))
   let (_, received) = update_dev(
     dispatch,
@@ -13522,7 +13610,11 @@ test "an exact zero abnormal EOF releases a fresh prompt for another send" {
     ),
   )
   assert_false(failed.active().has_unresolved_run_tail_notice())
-  let (_, retried) = update(dispatch, Send, failed)
+  let (_, retried) = update(
+    dispatch,
+    Composer(@composer.SubmitRequested),
+    failed,
+  )
   assert_true(retried.active().run is Starting(..))
   inspect(retried.active().task, content="")
   inspect(retried.active().input_ledger.length(), content="1")
@@ -15001,7 +15093,7 @@ test "archived transcripts reject record-changing actions in update" {
     goal_edit: Some({ draft: "must stay unset" }),
   }
   let model = test_model().replace_conversation(archived)
-  let (_, sent) = update(dispatch, Send, model)
+  let (_, sent) = update(dispatch, Composer(@composer.SubmitRequested), model)
   assert_true(sent.active().run is NoRun(ended=None))
   inspect(sent.active().task, content="must stay unsent")
   let (_, goal) = update(dispatch, SubmitGoal, model)
@@ -15180,10 +15272,10 @@ test "archive broadcast invalidates the active send target before list replies" 
   // the replacement conversation; no live state can target the archived id.
   let (_, drafted) = update(
     dispatch,
-    TaskChanged("safe replacement"),
+    Composer(@composer.DraftChanged("safe replacement")),
     invalidated,
   )
-  let (_, sent) = update(dispatch, Send, drafted)
+  let (_, sent) = update(dispatch, Composer(@composer.SubmitRequested), drafted)
   inspect(sent.active_session, content="desktop-fresh")
   inspect(sent.active().session_id, content="desktop-fresh")
   assert_true(sent.active().run is Starting(..))
@@ -16824,7 +16916,7 @@ test "a prompt submitted during compaction stays in the composer" {
     compaction: Compacting,
     task: "do the thing",
   })
-  let (_, next) = update(dispatch, Send, model)
+  let (_, next) = update(dispatch, Composer(@composer.SubmitRequested), model)
   inspect(next.active().task, content="do the thing")
   inspect(next.active().messages.length(), content="0")
 }
@@ -16862,7 +16954,7 @@ test "a mid-turn /compact stays visibly queued until compaction starts" {
     ..ended.active(),
     task: "next prompt",
   })
-  let (_, held) = update(dispatch, Send, drafted)
+  let (_, held) = update(dispatch, Composer(@composer.SubmitRequested), drafted)
   inspect(held.active().task, content="next prompt")
   // The engine reaches the queued compaction: queued flips into compacting.
   let (_, started) = update_dev(
@@ -16891,7 +16983,7 @@ test "an idle /compact holds the send gate until the engine confirms" {
     ..again.active(),
     task: "next prompt",
   })
-  let (_, held) = update(dispatch, Send, drafted)
+  let (_, held) = update(dispatch, Composer(@composer.SubmitRequested), drafted)
   inspect(held.active().task, content="next prompt")
   inspect(held.active().messages.length(), content="0")
   // The engine confirms; the session stamp routes it (no run id exists yet).
@@ -17416,7 +17508,7 @@ test "send does not show a prompt until its commit lands" {
     ..test_conversation(),
     task: "build the thing",
   })
-  let (_, sent) = update(dispatch, Send, model)
+  let (_, sent) = update(dispatch, Composer(@composer.SubmitRequested), model)
   // Starting the request changes lifecycle/composer state only.
   inspect(sent.active().messages.length(), content="0")
   inspect(sent.active().overlay.length(), content="0")

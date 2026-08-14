@@ -6,7 +6,7 @@
 
 ///|
 /// The built-in slash commands, in menu order. `command` is the id
-/// `CompletionAccept` matches to run the action; the label is what the user
+/// `@composer.CompletionAccepted` selects the action; the label is what the user
 /// both sees and types.
 fn slash_command_items() -> Array[CompletionItem] {
   [

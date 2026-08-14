@@ -78,3 +78,66 @@ test "completion state shares edit selection and dismissal transitions" {
   assert_false(dismissed.accepts(edited.generation()))
   assert_true(dismissed.refreshed(Some(menu)).current() is None)
 }
+
+///|
+test "controller owns common composer input transitions" {
+  let completion = @composer.Completion(
+    "files",
+    @composer.Menu(
+      ["src/main.mbt", "README.md"],
+      loading=false,
+      draft_without_token="Inspect ",
+    ),
+  )
+  let initial : @composer.Controller[String, String, String] = @composer.Controller(
+    "",
+    ["existing"],
+    @composer.CompletionState(),
+  )
+  let (typed, request) = initial.update(
+    @composer.DraftChanged("Inspect @main"),
+    _ => Some(completion),
+  )
+  guard request is @composer.DraftUpdated(value) else {
+    fail("draft request expected")
+  }
+  assert_eq(value, "Inspect @main")
+  inspect(typed.draft(), content="Inspect @main")
+  let (moved, _) = typed.update(@composer.CompletionMoved(1), _ => None)
+  guard moved.completion().current() is Some(current) else {
+    fail("completion should remain open")
+  }
+  inspect(current.menu().selected(), content="1")
+  let (accepted, request) = moved.update(@composer.CompletionAccepted, _ => None)
+  assert_true(accepted.completion().current() is None)
+  assert_true(
+    request
+    is @composer.CompletionChosen(
+      kind="files",
+      item="README.md",
+      draft_without_token="Inspect "
+    ),
+  )
+  let (removed, _) = accepted.update(@composer.MentionRemoved(0), _ => None)
+  assert_eq(removed.mentions(), [])
+  let (_, submit) = removed.update(@composer.SubmitRequested, _ => None)
+  assert_true(submit is @composer.SubmissionRequested)
+}
+
+///|
+test "parent controller writes shared state before interpreting requests" {
+  let initial : @composer.Controller[String, String, String] = @composer.Controller(
+    "before",
+    [],
+    @composer.CompletionState(),
+  )
+  let (result, request) = initial.update_parent(
+    "stale parent",
+    @composer.DraftChanged("after"),
+    _ => None,
+    (_parent, controller) => controller.draft(),
+    (parent, request) => (parent, request),
+  )
+  assert_eq(result, "after")
+  assert_true(request is @composer.DraftUpdated("after"))
+}

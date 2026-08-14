@@ -176,12 +176,10 @@ priv enum CodexReplyKind {
 enum Msg {
   Refresh
   PollActivity
-  DraftChanged(String)
-  CompletionMove(Int)
-  CompletionAccept
-  CompletionPick(Int)
-  CompletionDismiss
-  RemoveMention(Int)
+  // All editable input events cross the shared composer controller. Codex
+  // interprets only the resulting completion choice or submission through
+  // app-server after the common transition has settled.
+  Composer(@composer.Msg)
   SymbolSearchDue(owner~ : CodexSearchOwner, generation~ : Int)
   FilesIndexed(
     owner~ : CodexFileOwner,
@@ -208,7 +206,6 @@ enum Msg {
   RepairWorktree
   ConfirmArchiveDiscard
   CancelArchiveDiscard
-  Send
   WriterAcquired(String)
   WriterConflict(String)
   Stop

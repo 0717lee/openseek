@@ -51,6 +51,21 @@ pub(all) struct CompletionView {
 }
 pub fn CompletionView::render(Self, (Int) -> @cmd.Cmd) -> @html.Html
 
+type Controller[Kind, Item, Mention] derive(Eq)
+pub fn[Kind, Item, Mention] Controller::Controller(String, Array[Mention], CompletionState[Kind, Item]) -> Self[Kind, Item, Mention]
+pub fn[Kind, Item, Mention] Controller::completion(Self[Kind, Item, Mention]) -> CompletionState[Kind, Item]
+pub fn[Kind, Item, Mention] Controller::draft(Self[Kind, Item, Mention]) -> String
+pub fn[Kind, Item, Mention] Controller::mentions(Self[Kind, Item, Mention]) -> Array[Mention]
+pub fn[Kind, Item, Mention] Controller::update(Self[Kind, Item, Mention], Msg, (String) -> Completion[Kind, Item]?) -> (Self[Kind, Item, Mention], ControllerRequest[Kind, Item])
+pub fn[Parent, Result, Kind, Item, Mention] Controller::update_parent(Self[Kind, Item, Mention], Parent, Msg, (String) -> Completion[Kind, Item]?, (Parent, Self[Kind, Item, Mention]) -> Parent, (Parent, ControllerRequest[Kind, Item]) -> Result) -> Result
+
+pub(all) enum ControllerRequest[Kind, Item] {
+  NoControllerRequest
+  DraftUpdated(String)
+  CompletionChosen(kind~ : Kind, item~ : Item, draft_without_token~ : String)
+  SubmissionRequested
+} derive(Eq)
+
 type Debounce derive(Eq)
 pub fn Debounce::Debounce(generation? : Int) -> Self
 pub fn Debounce::accepts(Self, Int) -> Bool
@@ -117,6 +132,16 @@ pub(all) struct ModelSelect {
   title : String
 }
 pub fn ModelSelect::render(Self) -> @html.Html
+
+pub(all) enum Msg {
+  DraftChanged(String)
+  CompletionMoved(Int)
+  CompletionAccepted
+  CompletionPicked(Int)
+  CompletionDismissed
+  MentionRemoved(Int)
+  SubmitRequested
+} derive(Eq)
 
 type Trigger derive(Eq)
 pub fn Trigger::draft_without_token(Self) -> String

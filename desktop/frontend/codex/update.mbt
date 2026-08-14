@@ -14,26 +14,7 @@ pub fn update(
     Refresh =>
       (state.refresh(dispatch, channel), { ..state, loading: true, notice: "" })
     PollActivity => (state.poll_activity(dispatch, channel), state)
-    DraftChanged(value) => state.change_draft(dispatch, channel, value)
-    CompletionMove(delta) =>
-      (@cmd.none, { ..state, completion: state.completion.shifted(delta) })
-    CompletionAccept =>
-      if state.completion.current() is Some(completion) &&
-        completion.menu().current() is Some(item) {
-        state.accept_completion(dispatch, channel, item)
-      } else {
-        (@cmd.none, { ..state, completion: state.completion.dismissed() })
-      }
-    CompletionPick(index) =>
-      if state.completion.current() is Some(completion) &&
-        completion.menu().get(index) is Some(item) {
-        state.accept_completion(dispatch, channel, item)
-      } else {
-        (@cmd.none, { ..state, completion: state.completion.dismissed() })
-      }
-    CompletionDismiss =>
-      (@cmd.none, { ..state, completion: state.completion.dismissed() })
-    RemoveMention(index) => (@cmd.none, state.without_mention(index))
+    Composer(msg) => state.update_composer(dispatch, channel, msg)
     SymbolSearchDue(owner~, generation~) =>
       state.begin_completion_search(
         dispatch,
@@ -117,25 +98,6 @@ pub fn update(
         None => (@cmd.none, state)
       }
     CancelArchiveDiscard => (@cmd.none, { ..state, archive_confirm: None })
-    Send =>
-      if state.input_empty() ||
-        !state.has_active() ||
-        state.loading ||
-        !state.can_prompt() {
-        (@cmd.none, state)
-      } else if state.active_draft() is Some(_) {
-        (
-          state.start_draft_thread(dispatch, channel),
-          { ..state, loading: true, notice: "" },
-        )
-      } else if state.write_access is CodexWritable {
-        (state.send(dispatch, channel), { ..state, loading: true, notice: "" })
-      } else {
-        (
-          state.resume_for_send(dispatch, channel),
-          { ..state, loading: true, notice: "" },
-        )
-      }
     WriterAcquired(thread_id) =>
       if state.active_thread() is Some(active) && active.id == thread_id {
         let next = {
@@ -498,7 +460,7 @@ test "Codex update handlers are pure and idempotent" {
   let messages : Array[Msg] = [
     Refresh,
     PollActivity,
-    DraftChanged("next draft"),
+    Composer(@composer.DraftChanged("next draft")),
     ModelChanged("gpt-test"),
     ToggleGitDetails,
     CloseGitDetails,
@@ -509,7 +471,7 @@ test "Codex update handlers are pure and idempotent" {
     RepairWorktree,
     ConfirmArchiveDiscard,
     CancelArchiveDiscard,
-    Send,
+    Composer(@composer.SubmitRequested),
     Stop,
     Login,
     CancelLogin,
