@@ -78,6 +78,12 @@ pub let session_load : Command[
 ] = Command("session.load")
 
 ///|
+pub let session_load_archived : Command[
+  @protocol.LoadSessionPayload,
+  @protocol.LoadSessionReply,
+] = Command("session.load_archived")
+
+///|
 pub let session_list_archived : Command[
   @protocol.EmptyPayload,
   @protocol.SessionsReply,

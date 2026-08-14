@@ -472,6 +472,15 @@ priv enum Workspace {
 } derive(Eq, Debug)
 
 ///|
+/// Which durable twin owns the transcript currently represented here.
+/// Archived records may be displayed, but actions that append to a record
+/// must reject `ArchivedRecord` in update even when no composer is rendered.
+priv enum ConversationRecord {
+  LiveRecord
+  ArchivedRecord
+} derive(Eq)
+
+///|
 /// Construct the conversation workspace represented by the durable session
 /// list: no registered project means Scratch; a project starts provisional
 /// until that project's worktree registry identifies a stronger placement.
@@ -515,6 +524,9 @@ priv struct Conversation {
   // Durable engine session backing this conversation; consecutive runs share
   // it so the agent keeps context between prompts.
   session_id : String
+  // Live records accept engine mutations. An archived record is a read-only
+  // snapshot source until an unarchive notification moves it back to live.
+  record : ConversationRecord
   // Scratch, registered project, or project-owned worktree. One enum keeps
   // those mutually exclusive placements from drifting apart and is the only
   // stored source for filesystem and language-server routing.
@@ -1721,6 +1733,13 @@ priv enum Msg {
   // Open a conversation on one device's explicit channel, selecting that
   // channel first when it differs from the current one.
   OpenSession(@interop.ChannelId, String)
+  // Open a row from the archived index. Its workspace is part of the row's
+  // durable placement and selects the archived twin without restoring it.
+  OpenArchivedSession(
+    @interop.ChannelId,
+    session~ : String,
+    workspace~ : @common.Uri?
+  )
   // The user clicked the system notification posted through Proton's
   // notification extension: jump to the conversation that owned that run.
   // The native extension brings the window forward before emitting the click.
@@ -2272,6 +2291,7 @@ fn empty_conversation(
   {
     device: channel,
     session_id,
+    record: LiveRecord,
     workspace: Workspace::from_project(project),
     worktree_mode: false,
     engine_model: model,
@@ -2891,7 +2911,8 @@ fn Model::with_archive_override(
 /// them as a reload gate would turn every reconnect/reselect into three noisy
 /// `session.load` failures for an unsaved chat.
 fn Model::can_reload_transcript(self : Model, conv : Conversation) -> Bool {
-  if conv.watermark > 0 ||
+  if conv.is_archived_read_only() ||
+    conv.watermark > 0 ||
     !conv.messages.is_empty() ||
     conv.sync is ReloadFailed(..) ||
     // An outstanding command may already have been appended, and re-reading
@@ -3128,6 +3149,13 @@ fn Model::activate(
 /// conversation lives on in memory with no way back to it.
 fn Conversation::worth_keeping(self : Conversation) -> Bool {
   self.has_begun() || !self.draft_empty()
+}
+
+///|
+/// An archived transcript is display-only. Update handlers use this method
+/// as the mutation gate; the read-only view is only its visible counterpart.
+fn Conversation::is_archived_read_only(self : Conversation) -> Bool {
+  self.record is ArchivedRecord
 }
 
 ///|
