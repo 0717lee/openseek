@@ -642,7 +642,10 @@ test "Codex missing worktree waits for rebuild or archive confirmation" {
     },
   })
   assert_true(state.has_missing_worktree())
-  assert_true(state.active_workspace(@interop.ChannelId::Local) is None)
+  assert_true(
+    state.active_placement(@interop.ChannelId::Local)
+    is Some(@interop.MissingWorktree(name="wt-1", ..)),
+  )
   let (_, confirming) = update(
     dispatch,
     Reply(kind=CodexArchiveReply("thread-1"), value={
@@ -682,7 +685,10 @@ test "Codex missing worktree waits for rebuild or archive confirmation" {
   )
   assert_false(ready.has_missing_worktree())
   assert_eq(
-    ready.active_workspace(@interop.ChannelId::Local).map(uri => uri.path),
+    ready
+    .active_placement(@interop.ChannelId::Local)
+    .bind(placement => placement.checkout_root())
+    .map(uri => uri.path),
     Some("/work/project/.worktrees/wt-1"),
   )
 }

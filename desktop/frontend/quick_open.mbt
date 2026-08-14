@@ -16,8 +16,8 @@ const QuickOpenInputId : String = "quick-open-input"
 const QuickOpenListId : String = "quick-open-list"
 
 ///|
-fn active_quick_open_owner(model : Model) -> @interop.ConversationKey {
-  { channel: model.focused, session: model.active().session_id }
+fn Model::active_quick_open_owner(self : Model) -> @interop.ConversationKey? {
+  self.active_checkout().map(active => active.owner)
 }
 
 ///|
@@ -32,7 +32,7 @@ fn quick_open_symbol_request(
     dispatch,
     owner,
     query,
-    root=quick_open_root(model, owner),
+    root=model.quick_open_root(owner),
   )
 }
 
@@ -258,14 +258,17 @@ fn quick_open_with_file_candidates(
 }
 
 ///|
-fn quick_open_root(
-  model : Model,
+fn Model::quick_open_root(
+  self : Model,
   owner : @interop.ConversationKey,
 ) -> @common.Uri? {
-  guard model.find_conversation(owner.channel, owner.session) is Some(conv) else {
+  // Quick Open belongs to the conversation surface currently on screen. In
+  // particular, a Codex page must never fall back to the hidden OpenSeek chat
+  // retained in `Model::active` merely because both share this root package.
+  guard self.active_checkout() is Some(active) && active.owner == owner else {
     return None
   }
-  model.conversation_root(conv)
+  active.placement.bind(placement => placement.checkout_root())
 }
 
 ///|
@@ -288,7 +291,7 @@ fn query_active_file_cache(
   quick_open_file_request(
     dispatch,
     open.owner,
-    root=quick_open_root(model, open.owner),
+    root=model.quick_open_root(open.owner),
     cache_key,
     open.query(),
     open.generation,
@@ -307,7 +310,7 @@ fn ensure_file_query_cache(
   replace_loaded : Bool,
   query_now : Bool,
 ) -> (@cmd.Cmd, Model) {
-  let root = quick_open_root(model, open.owner)
+  let root = model.quick_open_root(open.owner)
   let previous = model.file_query_cache
   let compatible = previous.owner == Some(open.owner) && previous.root == root
   let cmds : Array[@cmd.Cmd] = []
@@ -366,8 +369,8 @@ fn Model::restart_quick_open_after_root_change(
     open.owner == previous_open.owner else {
     return (@cmd.none, self)
   }
-  let previous_root = quick_open_root(previous, open.owner)
-  let current_root = quick_open_root(self, open.owner)
+  let previous_root = previous.quick_open_root(open.owner)
+  let current_root = self.quick_open_root(open.owner)
   guard current_root != previous_root else { return (@cmd.none, self) }
   let generation = self.quick_open_generation + 1
   let restarted : QuickOpen = {
@@ -434,7 +437,9 @@ fn open_quick_open(
     !(model.bridge_state() is BridgeLost(_)) else {
     return (@cmd.none, model)
   }
-  let owner = active_quick_open_owner(model)
+  guard model.active_quick_open_owner() is Some(owner) else {
+    return (@cmd.none, model)
+  }
   if model.quick_open is Some(current) && current.owner == owner {
     let value = quick_open_value_for_mode(current.value, mode)
     if value == current.value {
@@ -865,8 +870,7 @@ fn close_stale_quick_open(
   model : Model,
 ) -> (@cmd.Cmd, Model) {
   guard model.quick_open is Some(open) else { return (@cmd.none, model) }
-  let owner = active_quick_open_owner(model)
-  if owner == open.owner {
+  if model.active_quick_open_owner() == Some(open.owner) {
     (@cmd.none, model)
   } else {
     (
@@ -1254,13 +1258,50 @@ test "Quick Open prefixes providers and works in both shells" {
 }
 
 ///|
+test "Codex Quick Open uses the selected Codex task checkout" {
+  let dispatch = test_dispatch()
+  let codex = @codex.State::from_thread_snapshot({
+    "thread": {
+      "id": "codex-thread-1",
+      "preview": "Find a file",
+      "cwd": "/work/codex-project",
+      "turns": [],
+    },
+  })
+  let base = { ..test_model(), codex, screen: Codex, is_desktop: true }
+  guard base.active_quick_open_owner() is Some(owner) else {
+    fail("the selected Codex task should own Quick Open")
+  }
+  assert_eq(owner, {
+    channel: @interop.ChannelId::Local,
+    session: "codex-thread-1",
+  })
+  let expected_root = @interop.ChannelId::Local.test_resource(
+    "/work/codex-project",
+  )
+  assert_eq(base.quick_open_root(owner), Some(expected_root))
+  let (_, first) = update(dispatch, QuickOpenOpen(QuickOpenFiles), base)
+  let (_, second) = update(dispatch, QuickOpenOpen(QuickOpenFiles), base)
+  guard first.quick_open is Some(opened) else {
+    fail("the Codex shortcut should open Quick Open")
+  }
+  assert_eq(opened.owner, owner)
+  assert_eq(first.file_query_cache.owner, Some(owner))
+  assert_eq(first.file_query_cache.root, Some(expected_root))
+  assert_true(first.quick_open == second.quick_open)
+  assert_true(first.file_query_cache == second.file_query_cache)
+}
+
+///|
 test "BridgeReady retries file and symbol Quick Open after a scratch root arrives" {
   let dispatch = test_dispatch()
   let base = {
     ..test_model().with_dev(dev => { ..dev, bridge: Connecting }),
     is_desktop: true,
   }
-  let owner = active_quick_open_owner(base)
+  guard base.active_quick_open_owner() is Some(owner) else {
+    fail("the scratch conversation should own Quick Open")
+  }
   let (_, opened) = update(dispatch, QuickOpenOpen(QuickOpenFiles), base)
   guard opened.quick_open is Some(waiting) &&
     opened.file_query_cache.loading_key is Some(cache_key) else {
@@ -1327,7 +1368,9 @@ test "BridgeReady retries file and symbol Quick Open after a scratch root arrive
 test "file Quick Open populates a cache session before adopting ranked rows" {
   let dispatch = test_dispatch()
   let base = { ..test_model(), is_desktop: true }
-  let owner = active_quick_open_owner(base)
+  guard base.active_quick_open_owner() is Some(owner) else {
+    fail("the active conversation should own Quick Open")
+  }
   let docs : Map[@pathx.Relative, @fileeditor.Doc] = Map([])
   docs[Relative("src/open.mbt")] = {
     name: "open.mbt",
@@ -1404,7 +1447,9 @@ test "file Quick Open populates a cache session before adopting ranked rows" {
 test "an initial file cache failure is visible and retryable" {
   let dispatch = test_dispatch()
   let base = { ..test_model(), is_desktop: true }
-  let owner = active_quick_open_owner(base)
+  guard base.active_quick_open_owner() is Some(owner) else {
+    fail("the active conversation should own Quick Open")
+  }
   let (_, opened) = update(dispatch, QuickOpenOpen(QuickOpenFiles), base)
   guard opened.quick_open is Some(initial) else { fail("palette expected") }
   guard opened.file_query_cache.loading_key is Some(cache_key) else {
@@ -1450,8 +1495,10 @@ test "reopening while cache population is running does not start another load" {
 test "file cache keeps the previous key until replacement succeeds" {
   let dispatch = test_dispatch()
   let base = { ..test_model(), is_desktop: true }
-  let owner = active_quick_open_owner(base)
-  let root = quick_open_root(base, owner)
+  guard base.active_quick_open_owner() is Some(owner) else {
+    fail("the active conversation should own Quick Open")
+  }
+  let root = base.quick_open_root(owner)
   let seeded = {
     ..base,
     file_query_cache: {

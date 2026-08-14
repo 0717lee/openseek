@@ -820,7 +820,9 @@ pub fn State::page(
     CodexStoredTask(thread) => thread.title
     CodexNoTask => "Codex"
   }
-  let workspace = self.active_workspace(channel)
+  let workspace = self
+    .active_placement(channel)
+    .bind(placement => placement.checkout_root())
   let tooltip = match self.selection {
     CodexDraftTask(draft) => draft.cwd
     CodexStoredTask(thread) => thread.cwd.unwrap_or(thread.id)

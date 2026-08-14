@@ -868,7 +868,9 @@ fn reveal_local_directory(
 /// absolute value is accepted only inside the selected Codex thread's cwd.
 fn Model::active_relative_path(self : Model, path : String) -> @pathx.Relative? {
   if self.screen is Codex {
-    guard self.codex.active_workspace(self.focused) is Some(workspace) else {
+    guard self.active_checkout() is Some(active) &&
+      active.placement is Some(placement) &&
+      placement.checkout_root() is Some(workspace) else {
       return None
     }
     if @resource.of_path(self.focused, path) is Some(absolute) {
@@ -909,8 +911,7 @@ fn open_editor_at(
   // passing through its guarded message dispatcher. Keep them parked too: the
   // dock must not grow a loading tab, nor may a host read start, while checkout
   // placement is unresolved or missing.
-  guard !(ctx.checkout is None ||
-    ctx.checkout is Some(@interop.MissingWorktree(_))) else {
+  guard ctx.placement is Some(placement) && placement.is_ready() else {
     return (@cmd.none, model)
   }
   let owner = ctx.owner
@@ -1415,50 +1416,42 @@ fn apply_engine_event(
 }
 
 ///|
-/// The file-editor package's view of the active conversation: which session
-/// the panel serves, the concrete checkout root its file/LSP ops address, the
-/// registered workspace its Git ops use, and the viewer's theme. Recomputed
-/// per dispatch — it is only a projection of the model. A Codex task uses its
-/// app-server thread id and cwd instead of an OpenSeek conversation.
-fn file_ctx(model : Model) -> @fileeditor.Ctx {
-  if model.screen is Codex {
-    if model.codex.active_id() is Some(thread_id) &&
-      model.codex.active_workspace(model.focused) is Some(workspace) {
-      return {
-        owner: { channel: model.focused, session: thread_id },
-        request_epoch: model.file_panel.request_epoch,
-        watch_namespace: model.page_namespace + "-watch",
-        root: Some(workspace),
-        workspace: Some(workspace),
-        checkout: Some(@interop.WorkspaceRoot),
-        dark_mode: model.theme.is_dark(model.system_dark),
-        tree_layout: model.tree_layout,
-        narrow: model.narrow,
-        panel_open: model.right_panel_open,
-        open_files: @dock.file_paths(model.dock),
-        active_file: @dock.active_file(model.dock),
-      }
-    }
-    // File RPCs require an explicit Codex cwd. Keep the panel rooted at an
-    // inert owner until app-server supplies one instead of listing a guessed
-    // OpenSeek session directory.
-    return {
-      owner: { channel: model.focused, session: "" },
-      request_epoch: model.file_panel.request_epoch,
-      watch_namespace: model.page_namespace + "-watch",
-      root: None,
-      workspace: None,
-      checkout: None,
-      dark_mode: model.theme.is_dark(model.system_dark),
-      tree_layout: model.tree_layout,
-      narrow: model.narrow,
-      panel_open: false,
-      open_files: @dock.file_paths(model.dock),
-      active_file: @dock.active_file(model.dock),
-    }
+/// The selected OpenSeek conversation or Codex task, with its single resolved
+/// directory placement. Owner identity remains separate because it fences
+/// asynchronous replies even while placement is unresolved or missing.
+priv struct ActiveCheckout {
+  owner : @interop.ConversationKey
+  placement : @interop.CheckoutPlacement?
+}
+
+///|
+/// Select the same owner and placement for transcript links, Files, Terminal,
+/// and language services. This is the only screen-dependent directory choice;
+/// downstream packages merely project roots from `placement`.
+fn Model::active_checkout(self : Model) -> ActiveCheckout? {
+  if self.screen is Codex {
+    guard self.codex.active_id() is Some(session) else { return None }
+    return Some({
+      owner: { channel: self.focused, session },
+      placement: self.codex.active_placement(self.focused),
+    })
   }
-  let conv = model.active()
-  let checkout = model.checkout_placement(conv)
+  let conv = self.active()
+  Some({
+    owner: { channel: conv.device, session: conv.session_id },
+    placement: self.conversation_placement(conv),
+  })
+}
+
+///|
+/// The file-editor package's read-only projection of the selected checkout.
+fn file_ctx(model : Model) -> @fileeditor.Ctx {
+  let active = model
+    .active_checkout()
+    .unwrap_or({
+      owner: { channel: model.focused, session: "" },
+      placement: None,
+    })
   let file_body_visible = match model.dock.active {
     Some(File(_)) | Some(FilePicker) => true
     None | Some(Browser(_)) => false
@@ -1468,15 +1461,13 @@ fn file_ctx(model : Model) -> @fileeditor.Ctx {
     // Both panel packages use the typed checkout state to park host work; the
     // stable owner lets an interrupted changed-file review resume after Repair
     // without ever treating the project root as a fallback checkout.
-    owner: { channel: model.focused, session: conv.session_id },
+    owner: active.owner,
     request_epoch: model.file_panel.request_epoch,
     // The native bridge and its watcher survive a page reload. Namespace the
     // panel's monotonic counter with this page's existing random identity so
     // a reloaded frontend cannot reuse the outgoing page's watcher token.
     watch_namespace: model.page_namespace + "-watch",
-    root: model.conversation_root(conv),
-    workspace: conv.workspace.project(),
-    checkout,
+    placement: active.placement,
     dark_mode: model.theme.is_dark(model.system_dark),
     tree_layout: model.tree_layout,
     narrow: model.narrow,
@@ -1487,8 +1478,7 @@ fn file_ctx(model : Model) -> @fileeditor.Ctx {
     // file body in all three cases. Report actual visibility so the file
     // subsystem parks its workspace watches and Changes refreshes off-screen.
     panel_open: model.right_panel_open &&
-    model.screen is Chat &&
-    file_body_visible,
+    (model.screen is Codex || (model.screen is Chat && file_body_visible)),
     open_files: @dock.file_paths(model.dock),
     active_file: @dock.active_file(model.dock),
   }
@@ -1501,40 +1491,20 @@ fn file_ctx(model : Model) -> @fileeditor.Ctx {
 /// is considered unavailable from its first socket loss because its old PTYs
 /// are torn down at that boundary, even before the page escalates to BridgeLost.
 fn terminal_ctx(model : Model) -> @terminal.Ctx {
-  if model.screen is Codex {
-    guard model.codex.active_id() is Some(thread_id) else {
-      return @terminal.Ctx(
-        channel=model.focused,
-        session="",
-        workspace=None,
-        checkout=None,
-        dark_mode=model.theme.is_dark(model.system_dark),
-        connected=false,
-      )
-    }
-    let connected = match model.device_state(model.focused) {
-      Some(dev) => dev.bridge is Connected(..) && dev.reconnect_failures == 0
-      None => false
-    }
-    return @terminal.Ctx(
-      channel=model.focused,
-      session=thread_id,
-      workspace=model.codex.active_workspace(model.focused),
-      checkout=Some(@interop.WorkspaceRoot),
-      dark_mode=model.theme.is_dark(model.system_dark),
-      connected~,
-    )
-  }
-  let conv = model.active()
-  let connected = match model.device_state(conv.device) {
+  let active = model
+    .active_checkout()
+    .unwrap_or({
+      owner: { channel: model.focused, session: "" },
+      placement: None,
+    })
+  let connected = match model.device_state(active.owner.channel) {
     Some(dev) => dev.bridge is Connected(..) && dev.reconnect_failures == 0
     None => false
   }
   @terminal.Ctx(
-    channel=conv.device,
-    session=conv.session_id,
-    workspace=conv.workspace.project(),
-    checkout=model.checkout_placement(conv),
+    channel=active.owner.channel,
+    session=active.owner.session,
+    placement=active.placement,
     dark_mode=model.theme.is_dark(model.system_dark),
     connected~,
   )
@@ -2223,9 +2193,8 @@ fn update_msg(
     // then the file subsystem loads and shows the document against the
     // fresh projection.
     FileEditor(FileSelected(path~, name~)) => {
-      let placement = file_ctx(model).checkout
-      guard !(placement is None ||
-        placement is Some(@interop.MissingWorktree(_))) else {
+      let placement = file_ctx(model).placement
+      guard placement is Some(value) && value.is_ready() else {
         return (@cmd.none, model)
       }
       let model = model.begin_editor_navigation()
@@ -2255,9 +2224,8 @@ fn update_msg(
     // row's HEAD path. Deleted rows have no working file but still use the
     // current path as their tab identity.
     FileEditor(ChangedFileSelected(change)) => {
-      let placement = file_ctx(model).checkout
-      guard !(placement is None ||
-        placement is Some(@interop.MissingWorktree(_))) else {
+      let placement = file_ctx(model).placement
+      guard placement is Some(value) && value.is_ready() else {
         return (@cmd.none, model)
       }
       let model = model.begin_editor_navigation()
@@ -2285,9 +2253,8 @@ fn update_msg(
         file_ctx(model).owner == owner else {
         return (@cmd.none, model)
       }
-      let placement = file_ctx(model).checkout
-      guard !(placement is None ||
-        placement is Some(@interop.MissingWorktree(_))) else {
+      let placement = file_ctx(model).placement
+      guard placement is Some(value) && value.is_ready() else {
         return (@cmd.none, model)
       }
       let model = model.begin_editor_navigation()
@@ -2997,7 +2964,7 @@ fn update_msg(
       if conv.is_archived_read_only() {
         return (@cmd.none, model)
       }
-      let checkout = model.checkout_placement(conv)
+      let checkout = model.conversation_placement(conv)
       // The outgoing prompt is the typed text with the chips folded in as the
       // `<user_mentions>` envelope. Typed text is required — chips alone are
       // context without an instruction and stay in the composer.
@@ -3006,7 +2973,7 @@ fn update_msg(
         !(model.bridge_state() is Connected(..)) ||
         !model.api_ready() ||
         checkout is None ||
-        checkout is Some(@interop.MissingWorktree(_)) {
+        checkout is Some(@interop.MissingWorktree(..)) {
         (@cmd.none, model)
       } else if !(conv.sync is Synced) {
         // A prompt or steer submitted while the durable frontier is unknown
@@ -3195,7 +3162,7 @@ fn update_msg(
     }
     RetryWorktreePlacement => {
       let conv = model.active()
-      guard model.checkout_placement(conv) is None &&
+      guard model.conversation_placement(conv) is None &&
         conv.workspace.project() is Some(workspace) &&
         model.device_state(conv.device) is Some(dev) else {
         return (@cmd.none, model)
@@ -3217,7 +3184,8 @@ fn update_msg(
     }
     RepairWorktree => {
       let conv = model.active()
-      guard model.checkout_placement(conv) is Some(@interop.MissingWorktree(_)) &&
+      guard model.conversation_placement(conv)
+        is Some(@interop.MissingWorktree(..)) &&
         conv.workspace is Worktree(project=workspace, ..) else {
         return (@cmd.none, model)
       }
@@ -3691,7 +3659,11 @@ fn update_msg(
       // A relative path is taken against the active conversation's projected
       // checkout root. The host keeps text editor targets inside that root;
       // non-text paths may still use the system opener.
-      let conv = model.active()
+      guard model.active_checkout() is Some(active) &&
+        active.placement is Some(placement) &&
+        placement.checkout_root() is Some(cwd) else {
+        return (@cmd.none, model)
+      }
       // Spend the token before starting host work. This synchronously makes
       // every older host reply and positioned read stale, even if this click
       // ultimately opens a non-text path through the system instead.
@@ -3703,19 +3675,18 @@ fn update_msg(
       (
         open_file(
           dispatch,
-          model.focused,
-          conv.session_id,
+          active.owner.channel,
+          active.owner.session,
           generation,
-          cwd=model.conversation_root(conv),
+          cwd=Some(cwd),
           path,
         ),
         model,
       )
     }
     OpenFileAt(owner~, generation~, path~, line~, column~) => {
-      let conv = model.active()
-      guard owner.channel == model.focused &&
-        owner.session == conv.session_id &&
+      guard model.active_checkout() is Some(active) &&
+        owner == active.owner &&
         generation == model.file_panel.file_link_generation else {
         return (@cmd.none, model)
       }
@@ -3735,9 +3706,8 @@ fn update_msg(
       )
     }
     OpenDirectoryAt(owner~, generation~, path~) => {
-      let conv = model.active()
-      guard owner.channel == model.focused &&
-        owner.session == conv.session_id &&
+      guard model.active_checkout() is Some(active) &&
+        owner == active.owner &&
         generation == model.file_panel.file_link_generation else {
         return (@cmd.none, model)
       }
@@ -4235,16 +4205,14 @@ fn update_msg(
       (cmd, { ..model, terminal, })
     }
     HostActionFailed(message) => model.notify_error(dispatch, message)
-    OpenFileFailed(owner~, generation~, message~) => {
-      let conv = model.active()
-      if owner.channel == model.focused &&
-        owner.session == conv.session_id &&
+    OpenFileFailed(owner~, generation~, message~) =>
+      if model.active_checkout() is Some(active) &&
+        owner == active.owner &&
         generation == model.file_panel.file_link_generation {
         model.notify_error(dispatch, message)
       } else {
         (@cmd.none, model)
       }
-    }
     ExternalLinkClicked(url) =>
       // Web links open in the dock's Browser tabs by default — the
       // toolbar's open-external button hands the page to the system
@@ -8291,9 +8259,7 @@ test "BridgeReady reattaches a live file index watcher" {
     ..model.file_panel,
     owner: Some(owner),
     placement_known: true,
-    placement_workspace: None,
-    placement_root: Some(root),
-    placement_checkout: Some(@interop.WorkspaceRoot),
+    placement: Some(@interop.Scratch(root~)),
     watching: Some(watched),
     watch_generation: 7,
   }
@@ -8353,9 +8319,7 @@ test "device focus retires the outgoing watcher and file index" {
     ..model.file_panel,
     owner: Some(owner),
     placement_known: true,
-    placement_workspace: None,
-    placement_root: Some(root),
-    placement_checkout: Some(@interop.WorkspaceRoot),
+    placement: Some(@interop.Scratch(root~)),
     watching: Some({ owner, root, files: [], directories: [], recursive: true }),
     watch_generation: 7,
   }
@@ -8881,7 +8845,8 @@ test "completed scratch session root comes from the connected device" {
     root.path == "/scratch/desktop-restored-scratch",
   )
   assert_true(
-    file_ctx(restored).root is Some(root) &&
+    file_ctx(restored).placement is Some(placement) &&
+    placement.checkout_root() is Some(root) &&
     root.path == "/scratch/desktop-restored-scratch",
   )
 }
@@ -9282,6 +9247,49 @@ test "a file-link host failure is visible only for the latest navigation" {
   )
   inspect(current.notifications.length(), content="1")
   inspect(current.notifications[0].message, content="current path failed")
+}
+
+///|
+test "a Codex file-link failure is fenced by the selected Codex task" {
+  let dispatch = test_dispatch()
+  let codex = @codex.State::from_thread_snapshot({
+    "thread": {
+      "id": "codex-thread-1",
+      "preview": "Open a file",
+      "cwd": "/work/codex-project",
+      "turns": [],
+    },
+  })
+  let model = { ..test_model(), codex, screen: Codex }.begin_editor_navigation()
+  let hidden_openseek : @interop.ConversationKey = {
+    channel: model.focused,
+    session: model.active().session_id,
+  }
+  let codex_owner : @interop.ConversationKey = {
+    channel: model.focused,
+    session: "codex-thread-1",
+  }
+  let (_, hidden) = update(
+    dispatch,
+    OpenFileFailed(
+      owner=hidden_openseek,
+      generation=1,
+      message="hidden OpenSeek failure",
+    ),
+    model,
+  )
+  inspect(hidden.notifications.length(), content="0")
+  let message = OpenFileFailed(
+    owner=codex_owner,
+    generation=1,
+    message="Codex path failed",
+  )
+  let (_, first) = update(dispatch, message, model)
+  let (_, second) = update(dispatch, message, model)
+  inspect(first.notifications.length(), content="1")
+  inspect(first.notifications[0].message, content="Codex path failed")
+  assert_true(first.notifications == second.notifications)
+  assert_eq(first.notification_seq, second.notification_seq)
 }
 
 ///|
@@ -15780,10 +15788,30 @@ test "Codex sidebar selection uses the main conversation screen" {
     is Some({ channel: Local, session: "codex-thread-1" }),
   )
   let workspace = @interop.ChannelId::Local.test_resource("/work/codex-project")
-  assert_eq(file_ctx(opened).workspace, Some(workspace))
+  guard opened.active_checkout() is Some(active) else {
+    fail("selected Codex task did not project an active checkout")
+  }
+  assert_eq(active.owner, {
+    channel: @interop.ChannelId::Local,
+    session: "codex-thread-1",
+  })
+  assert_eq(
+    active.placement.bind(value => value.checkout_root()),
+    Some(workspace),
+  )
+  assert_true(opened.conversation_root(opened.active()) != Some(workspace))
+  assert_true(file_ctx(opened).placement is Some(@interop.WorkspaceRoot(..)))
+  assert_eq(
+    file_ctx(opened).placement.bind(value => value.checkout_root()),
+    Some(workspace),
+  )
   let opened_terminal = terminal_ctx(opened)
   inspect(opened_terminal.session, content="codex-thread-1")
-  assert_eq(opened_terminal.workspace, Some(workspace))
+  assert_true(opened_terminal.placement is Some(@interop.WorkspaceRoot(..)))
+  assert_eq(
+    opened_terminal.placement.bind(value => value.checkout_root()),
+    Some(workspace),
+  )
   assert_true(opened_terminal.connected)
 
   // The same input and model produce the same state; the bridge call remains
@@ -15803,20 +15831,20 @@ test "Codex sidebar selection uses the main conversation screen" {
 }
 
 ///|
-test "Codex files wait for cwd while terminal keeps a scratch task" {
+test "Codex files and terminal wait for an explicit cwd" {
   let codex = @codex.State::from_thread_snapshot({
     "thread": { "id": "codex-scratch-1", "preview": "No cwd yet", "turns": [] },
   })
   let model = { ..test_model(), codex, screen: Codex }
   let files = file_ctx(model)
-  inspect(files.owner.session, content="")
-  assert_true(files.workspace is None)
+  inspect(files.owner.session, content="codex-scratch-1")
+  assert_true(files.placement is None)
 
-  // A terminal needs only an active task identity. Without a cwd it belongs
-  // to that task's scratch group instead of borrowing the OpenSeek chat.
+  // The owner remains stable for async fencing, but no directory is invented
+  // from an unrelated OpenSeek chat or from the Codex task id.
   let terminal = terminal_ctx(model)
   inspect(terminal.session, content="codex-scratch-1")
-  assert_true(terminal.workspace is None)
+  assert_true(terminal.placement is None)
   assert_true(terminal.connected)
 }
 

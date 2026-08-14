@@ -1054,7 +1054,7 @@ fn Conversation::archived_read_only_view(
 ///|
 fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   let conv = model.active()
-  let checkout = model.checkout_placement(conv)
+  let checkout = model.conversation_placement(conv)
   // Goal mode: `/goal` (or the banner's Edit) rebinds the composer's one
   // textarea to the goal draft for this conversation — the prompt draft
   // survives untouched underneath, and the same DOM node keeps focus.
@@ -1062,8 +1062,7 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   let goal_mode = goal_editor is Some(_)
   let transcript_ready = conv.sync is Synced &&
     !conv.has_unresolved_run_tail_notice()
-  let checkout_ready = checkout is Some(@interop.WorkspaceRoot) ||
-    checkout is Some(@interop.Worktree(_))
+  let checkout_ready = checkout is Some(value) && value.is_ready()
   let has_input = model.bridge_state() is Connected(..) &&
     model.api_ready() &&
     transcript_ready &&
@@ -1192,7 +1191,7 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
           ),
         ]),
       )
-    Some(@interop.MissingWorktree(name~)) =>
+    Some(@interop.MissingWorktree(name~, ..)) =>
       context.push(
         @composer.MissingWorktreeNotice::{
           name,
@@ -2619,7 +2618,7 @@ fn view(
     return console_gate_view(dispatch, console)
   }
   let active_file_ctx = file_ctx(model)
-  let codex_active = model.codex.active_workspace(model.focused) is Some(_)
+  let codex_active = model.codex.active_placement(model.focused) is Some(_)
   // Panel state survives page switches, but a Codex page only exposes it
   // after a real task supplies the identity (and, for files, a cwd) needed by
   // the host operation. Selecting a task makes an already-open panel reappear
@@ -2627,7 +2626,11 @@ fn view(
   let file_panel_visible = model.right_panel_open &&
     (
       model.screen is Chat ||
-      (model.screen is Codex && active_file_ctx.workspace is Some(_))
+      (
+        model.screen is Codex &&
+        active_file_ctx.placement is Some(placement) &&
+        placement.checkout_root() is Some(_)
+      )
     )
   let terminal_panel_visible = model.terminal.is_open() &&
     (!(model.screen is Codex) || codex_active)

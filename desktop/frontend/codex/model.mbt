@@ -395,20 +395,22 @@ pub fn State::active_id(self : State) -> String? {
 }
 
 ///|
-/// The selected task's exact host-authorized cwd. Stored tasks get it from
-/// app-server; local drafts get it from `codex.draft.open`. A missing cwd stays
-/// missing so the shell never guesses an OpenSeek workspace. Bind the host path
-/// to the channel here: browser state must not interpret a remote host path
-/// using the local machine's filesystem rules.
-pub fn State::active_workspace(
+/// The selected task's complete host-authorized placement. Stored tasks get
+/// their cwd from app-server and their managed-worktree annotation from the
+/// native host; local drafts get their project from `codex.draft.open`.
+/// Malformed or incomplete data stays unresolved so files, terminals, and LSP
+/// never guess an OpenSeek directory.
+pub fn State::active_placement(
   self : State,
   channel : @interop.ChannelId,
-) -> @common.Uri? {
+) -> @interop.CheckoutPlacement? {
   match self.selection {
     CodexNoTask => None
     CodexDraftTask(draft) =>
-      draft.project_root.bind(root => @resource.of_path(channel, root))
-    CodexStoredTask(thread) => thread.workspace(channel)
+      draft.project_root
+      .bind(root => @resource.of_path(channel, root))
+      .map(root => @interop.WorkspaceRoot(root~))
+    CodexStoredTask(thread) => thread.placement(channel)
   }
 }
 
@@ -635,20 +637,38 @@ fn CodexThread::decode(value : Json) -> CodexThread? {
 }
 
 ///|
-/// The app-server thread's working directory is the Desktop workspace for
-/// files and terminals. A missing or blank cwd is deliberately not guessed
-/// from the Codex thread id: OpenSeek's host cannot derive a Codex directory
-/// from that unrelated identifier.
-fn CodexThread::workspace(
+/// Combine app-server's cwd with the native host's managed-worktree metadata.
+/// An unannotated cwd remains an ordinary root even when app-server reports a
+/// different `projectRoot`: SeekMoon must not claim ownership of an external
+/// Codex App or manually-created Git worktree from path shape alone.
+fn CodexThread::placement(
   self : CodexThread,
   channel : @interop.ChannelId,
-) -> @common.Uri? {
-  if self.worktree is Some(worktree) && !worktree.present {
-    return None
-  }
-  match self.cwd {
-    Some(cwd) if !cwd.trim().is_empty() => @resource.of_path(channel, cwd)
-    _ => None
+) -> @interop.CheckoutPlacement? {
+  match self.worktree {
+    Some(worktree) => {
+      guard self.project_root is Some(project_path) &&
+        @resource.of_path(channel, project_path) is Some(project) else {
+        return None
+      }
+      if !worktree.present {
+        return Some(@interop.MissingWorktree(project~, name=worktree.name))
+      }
+      guard self.cwd is Some(cwd) &&
+        !cwd.trim().is_empty() &&
+        @resource.of_path(channel, cwd) is Some(root) else {
+        return None
+      }
+      Some(@interop.Worktree(project~, name=worktree.name, root~))
+    }
+    None =>
+      match self.cwd {
+        Some(cwd) if !cwd.trim().is_empty() =>
+          @resource.of_path(channel, cwd).map(root => {
+            @interop.WorkspaceRoot(root~)
+          })
+        _ => None
+      }
   }
 }
 
