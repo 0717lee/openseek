@@ -255,9 +255,9 @@ test('the pinned toc bar outlines sections and navigation expands the chain', as
   await expect(page.locator(hoverWidget)).toContainText('post-navigation hover');
   expect(await projectionGeneration(page)).toBe(generation);
 
-  // The mounted white-box suite owns the two-section visibility policy. This
-  // browser assertion owns the CSS branch: a hidden bar must not reserve the
-  // visible-TOC title clearance.
+  // This real-browser assertion owns both the two-section visibility policy
+  // and its CSS consequence: a hidden bar must not reserve the visible-TOC
+  // title clearance.
   await page.locator(tocBar).evaluate((node) =>
     node.setAttribute('data-toc-visible', 'false'),
   );

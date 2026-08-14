@@ -1,8 +1,8 @@
-// Mounted whole-line Markdown-comment fixture. The scenario constructs the
+// Real-browser whole-line Markdown-comment fixture. The scenario constructs the
 // public Viewer directly; Playwright observes the resulting projection, DOM,
 // input ownership, and real diagram sizing through the smallest deterministic
-// public-API control surface. Contribution lifecycle and reconciliation live
-// in mounted Viewer white-box tests.
+// public-API control surface. The retained Playwright cases own contribution
+// lifecycle and DOM reconciliation; DOM-free policy remains in package tests.
 
 ///|
 fn markdown_comments_initial_source() -> String {

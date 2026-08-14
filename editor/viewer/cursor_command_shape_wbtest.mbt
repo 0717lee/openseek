@@ -60,45 +60,6 @@ test "move core command accepts absent and supplied view positions" {
 }
 
 ///|
-test "omitted move command reveal type follows undefined non-None gate" {
-  with_mounted_test_viewer(long_document(40), viewer => {
-    viewer.test_set_viewport(width=800.0, height=180.0)
-    let view_model = viewer.test_view_model()
-    let browser = viewer.current_code_browser_data().unwrap()
-
-    assert_true(
-      viewer.run_move_to_core_command(
-        view_model,
-        Some(CursorMoveCommandArgs::new(position=Position(30, 1))),
-        false,
-      ),
-    )
-    assert_true(view_model.view_layout.position().scroll_top > 0.0)
-    assert_true(browser.horizontal_reveal_request is Some(_))
-
-    reset_cursor_mouse_reveal(viewer)
-    viewer.run_word_core_command(
-      view_model,
-      Some(CursorMoveCommandArgs::new(position=Position(30, 3))),
-      false,
-    )
-    |> ignore
-    assert_true(view_model.view_layout.position().scroll_top > 0.0)
-    assert_true(browser.horizontal_reveal_request is Some(_))
-
-    reset_cursor_mouse_reveal(viewer)
-    viewer.run_line_core_command(
-      view_model,
-      Some(CursorMoveCommandArgs::new(position=Position(30, 3))),
-      false,
-    )
-    |> ignore
-    assert_true(view_model.view_layout.position().scroll_top > 0.0)
-    assert_true(browser.horizontal_reveal_request is None)
-  })
-}
-
-///|
 test "view controller selection adapters preserve exact keyboard and mouse sources" {
   with_test_viewer("alpha\nbeta", viewer => {
     let sources : Array[String] = []
