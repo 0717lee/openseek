@@ -2813,6 +2813,7 @@ fn update_msg(
           None => ""
         }
       }
+      let model = model.with_project_expanded_for_path(model.focused, cwd)
       (
         CodexDraftRotation::{ cwd, }.rotate(dispatch),
         {
@@ -2823,7 +2824,8 @@ fn update_msg(
         },
       )
     }
-    CodexNewThreadIn(cwd) =>
+    CodexNewThreadIn(cwd) => {
+      let model = model.with_project_expanded_for_path(model.focused, cwd)
       (
         CodexDraftRotation::{ cwd, }.rotate(dispatch),
         {
@@ -2833,6 +2835,7 @@ fn update_msg(
           codex_collapsed: false,
         },
       )
+    }
     CodexDraftRotated(cwd~, id~) => {
       let (cmd, codex) = @codex.update(
         dispatch.map(msg => Codex(msg)),
@@ -7049,7 +7052,7 @@ test "project disclosure and chat preview state are scoped to one project" {
 }
 
 ///|
-test "new project chat unfolds its project and the Projects section" {
+test "new project conversations unfold their project and section" {
   let dispatch = test_dispatch()
   let project = @interop.ChannelId::Local.test_resource("/work/alpha")
   let model = {
@@ -7060,6 +7063,13 @@ test "new project chat unfolds its project and the Projects section" {
   let (_, opened) = update(dispatch, NewChatIn(Local, Some(project)), model)
   assert_false(opened.projects_collapsed)
   assert_false(opened.project_collapsed(Local, project))
+  let (_, codex_opened) = update(
+    dispatch,
+    CodexNewThreadIn(project.path),
+    model,
+  )
+  assert_false(codex_opened.codex_collapsed)
+  assert_false(codex_opened.project_collapsed(Local, project))
 }
 
 ///|

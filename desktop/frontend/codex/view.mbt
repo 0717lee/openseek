@@ -211,6 +211,9 @@ pub(all) struct SidebarActions {
   open_thread : (String) -> @cmd.Cmd
   archive_thread : (String) -> @cmd.Cmd
   unarchive_thread : (String) -> @cmd.Cmd
+  project_collapsed : (String) -> Bool
+  toggle_project : (String) -> @cmd.Cmd
+  project_menu : (String) -> @sidebar.WorkspaceMenu?
   project_label : (String) -> String
 }
 
@@ -221,6 +224,7 @@ fn SidebarActions::workspace_row(
   label : String,
   active : Bool,
   can_start : Bool,
+  collapsible : Bool,
 ) -> @sidebar.WorkspaceRow {
   let actions : Array[@sidebar.WorkspaceAction] = []
   if can_start {
@@ -230,7 +234,21 @@ fn SidebarActions::workspace_row(
       image: @icons.icon_add,
     })
   }
-  { title: project, label, active, disclosure: None, menu: None, actions }
+  {
+    title: project,
+    label,
+    active,
+    disclosure: if collapsible {
+      Some({
+        collapsed: (self.project_collapsed)(project),
+        toggle: (self.toggle_project)(project),
+      })
+    } else {
+      None
+    },
+    menu: (self.project_menu)(project),
+    actions,
+  }
 }
 
 ///|
@@ -356,6 +374,7 @@ pub fn State::sidebar_entries(
         project.display_label(projects, actions.project_label),
         active,
         self.can_start_thread(),
+        true,
       ),
       conversations,
       empty: None,
@@ -377,7 +396,9 @@ pub fn State::sidebar_entries(
       conversations.push(thread.sidebar_row(self, actions))
     }
     let group = @sidebar.WorkspaceGroup::{
-      workspace: actions.workspace_row("No project", "No project", false, false),
+      workspace: actions.workspace_row(
+        "No project", "No project", false, false, false,
+      ),
       conversations,
       empty: None,
     }
@@ -933,6 +954,9 @@ test "Codex archived catalog contributes restore rows" {
     open_thread: _ => @cmd.none,
     archive_thread: _ => @cmd.none,
     unarchive_thread: _ => @cmd.none,
+    project_collapsed: _ => false,
+    toggle_project: _ => @cmd.none,
+    project_menu: _ => None,
     project_label: path => path,
   })
   assert_eq(rows.length(), 1)

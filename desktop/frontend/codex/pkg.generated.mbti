@@ -46,6 +46,9 @@ pub(all) struct SidebarActions {
   open_thread : (String) -> @cmd.Cmd
   archive_thread : (String) -> @cmd.Cmd
   unarchive_thread : (String) -> @cmd.Cmd
+  project_collapsed : (String) -> Bool
+  toggle_project : (String) -> @cmd.Cmd
+  project_menu : (String) -> @sidebar.WorkspaceMenu?
   project_label : (String) -> String
 }
 

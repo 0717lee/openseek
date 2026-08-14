@@ -2875,6 +2875,25 @@ fn Model::project_chats_expanded(
 }
 
 ///|
+/// Reveal the project named by one host path before a new conversation is
+/// created inside it. OpenSeek and Codex project rows share this page-local
+/// disclosure state, so either product's create action keeps its new row
+/// visible without changing the attached-project catalog.
+fn Model::with_project_expanded_for_path(
+  self : Model,
+  channel : @interop.ChannelId,
+  path : String,
+) -> Model {
+  guard @resource.of_path(channel, path) is Some(project) else { return self }
+  {
+    ..self,
+    collapsed_projects: self.collapsed_projects.filter(entry => {
+      !(entry.0 == channel && entry.1 == project)
+    }),
+  }
+}
+
+///|
 /// The registered project a session belongs to on `channel`: the sidebar list's
 /// grouping when the store knows the session, the live conversation's own
 /// placement otherwise (a fresh chat that has not reached the store yet).

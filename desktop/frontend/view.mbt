@@ -402,8 +402,27 @@ fn device_section_rows(
     open_thread: thread_id => dispatch(CodexOpenThread(thread_id)),
     archive_thread: thread_id => dispatch(CodexArchiveThread(thread_id)),
     unarchive_thread: thread_id => dispatch(CodexUnarchiveThread(thread_id)),
+    project_collapsed: path => {
+      @resource.of_path(dev.channel, path)
+      .map(project => model.project_collapsed(dev.channel, project))
+      .unwrap_or(false)
+    },
+    toggle_project: path => {
+      @resource.of_path(dev.channel, path)
+      .map(project => dispatch(ToggleProjectSection(dev.channel, project)))
+      .unwrap_or(@cmd.none)
+    },
+    project_menu: path => {
+      @resource.of_path(dev.channel, path).bind(project => {
+        if dev.projects.contains(project) {
+          Some(model.project_menu(dispatch, dev.channel, project))
+        } else {
+          None
+        }
+      })
+    },
     project_label: path => {
-      match @resource.of_path(model.focused, path) {
+      match @resource.of_path(dev.channel, path) {
         Some(workspace) => @resource.label(workspace)
         None => path
       }
@@ -658,12 +677,7 @@ fn project_row(
       collapsed,
       toggle: dispatch(ToggleProjectSection(dev.channel, path)),
     }),
-    menu: Some({
-      title: "More actions",
-      open: model.project_menu == Some({ channel: dev.channel, project: path }),
-      toggle: dispatch(ToggleProjectMenu(dev.channel, path)),
-      body: () => project_menu_body(dispatch, dev.channel, path),
-    }),
+    menu: Some(model.project_menu(dispatch, dev.channel, path)),
     actions: [
       {
         title: "New chat in this project",
@@ -671,6 +685,24 @@ fn project_row(
         image: icon_add,
       },
     ],
+  }
+}
+
+///|
+/// The attached project's shared Settings/Detach menu. OpenSeek always owns
+/// this menu; a Codex project row receives it only when its root is attached
+/// to the same device, so a catalog-only project never offers a false Detach.
+fn Model::project_menu(
+  self : Model,
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  path : @common.Uri,
+) -> @sidebar.WorkspaceMenu {
+  {
+    title: "More actions",
+    open: self.project_menu == Some({ channel, project: path }),
+    toggle: dispatch(ToggleProjectMenu(channel, path)),
+    body: () => project_menu_body(dispatch, channel, path),
   }
 }
 
