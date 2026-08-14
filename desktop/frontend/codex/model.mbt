@@ -154,7 +154,7 @@ priv enum CodexReplyKind {
   CodexAccountReply
   CodexModelsReply
   CodexThreadsReply
-  CodexThreadReply
+  CodexThreadReply(String)
   CodexActivityReply
   CodexDraftOpenReply(String)
   CodexDraftThreadReply
@@ -284,6 +284,9 @@ struct State {
   selected_model : String
   threads : Array[CodexThreadRow]
   selection : CodexSelection
+  // The last sidebar selection awaiting a history snapshot. A reply carries
+  // the same id, so an older request can never replace a newer selection.
+  requested_thread : String?
   git_status : CodexGitStatus?
   git_details_open : Bool
   write_access : CodexWriteAccess
@@ -322,6 +325,7 @@ pub fn State::State(loading? : Bool = false) -> State {
     selected_model: "",
     threads: [],
     selection: CodexNoTask,
+    requested_thread: None,
     git_status: None,
     git_details_open: false,
     write_access: CodexNeedsResume,
@@ -363,6 +367,20 @@ fn State::active_thread(self : State) -> CodexThread? {
   match self.selection {
     CodexStoredTask(thread) => Some(thread)
     CodexNoTask | CodexDraftTask(_) => None
+  }
+}
+
+///|
+/// A sidebar selection owns its matching history reply. Reconnect refreshes
+/// have no pending selection, so they may refresh only the thread already on
+/// screen; once a newer row is clicked, that newer id is the sole owner.
+fn State::accepts_thread_reply(self : State, requested_thread : String) -> Bool {
+  if self.requested_thread is Some(latest) {
+    latest == requested_thread
+  } else if self.active_thread() is Some(active) {
+    active.id == requested_thread
+  } else {
+    false
   }
 }
 
@@ -503,6 +521,7 @@ fn State::select_draft(self : State, id : String, cwd : String) -> State {
   {
     ..self,
     selection: CodexDraftTask({ id, cwd, project_root: None }),
+    requested_thread: None,
     git_status: None,
     git_details_open: false,
     write_access: CodexWritable,
@@ -850,11 +869,22 @@ fn State::with_requests(self : State, value : Json) -> State {
 }
 
 ///|
-fn State::with_thread_reply(self : State, value : Json) -> State {
+fn State::with_thread_reply(
+  self : State,
+  value : Json,
+  requested_thread? : String,
+) -> State {
   guard value is Object(fields) &&
     fields.get("thread") is Some(thread) &&
     CodexThread::decode(thread) is Some(active) else {
     return { ..self, loading: false, notice: "Malformed Codex thread reply" }
+  }
+  if requested_thread is Some(requested) && active.id != requested {
+    return {
+      ..self,
+      loading: false,
+      notice: "Codex returned thread \{active.id} for requested thread \{requested}",
+    }
   }
   // Selecting a stored thread must not promote it to the top of the sidebar.
   // Replace its row in place; only `thread/start`, whose id is genuinely new,
@@ -889,6 +919,7 @@ fn State::with_thread_reply(self : State, value : Json) -> State {
     ..self,
     threads: visible,
     selection: CodexStoredTask(active),
+    requested_thread: None,
     git_status: Some({
       thread_id: active.id,
       branch: active.branch,
@@ -1014,6 +1045,11 @@ fn State::without_thread(self : State, thread_id : String) -> State {
     } else {
       self.selection
     },
+    requested_thread: if self.requested_thread == Some(thread_id) {
+      None
+    } else {
+      self.requested_thread
+    },
     git_status: match self.git_status {
       Some(status) if status.thread_id == thread_id => None
       other => other
@@ -1070,6 +1106,25 @@ fn State::active_turn_id(self : State) -> String? {
     }
   }
   None
+}
+
+///|
+/// A running turn is mutable only after this Desktop actor acquired the
+/// app-server writer. History and activity polling may reveal another
+/// client's turn, but that alone never grants interrupt authority.
+fn State::writable_turn_id(self : State) -> String? {
+  if self.write_access is CodexWritable {
+    self.active_turn_id()
+  } else {
+    None
+  }
+}
+
+///|
+/// A running turn discovered before writer acquisition is display-only. Idle
+/// tasks remain resumable on the next send; only a live turn is locked here.
+fn State::active_turn_is_read_only(self : State) -> Bool {
+  self.active_turn_id() is Some(_) && !(self.write_access is CodexWritable)
 }
 
 ///|
@@ -1793,6 +1848,32 @@ test "Codex interrupted history is not an active writer signal" {
     },
   })
   assert_false(legacy.is_running())
+}
+
+///|
+test "Codex interrupt authority requires the local writer" {
+  let observed = State::from_thread_snapshot({
+    "thread": {
+      "id": "thread-1",
+      "turns": [{ "id": "turn-1", "status": "inProgress", "items": [] }],
+    },
+  })
+  assert_eq(observed.active_turn_id(), Some("turn-1"))
+  assert_eq(observed.writable_turn_id(), None)
+  assert_true(observed.active_turn_is_read_only())
+
+  let owned = { ..observed, write_access: CodexWritable }
+  assert_eq(owned.writable_turn_id(), Some("turn-1"))
+  assert_false(owned.active_turn_is_read_only())
+
+  let idle = State::from_thread_snapshot({
+    "thread": {
+      "id": "thread-1",
+      "turns": [{ "id": "turn-1", "status": "completed", "items": [] }],
+    },
+  })
+  assert_eq(idle.writable_turn_id(), None)
+  assert_false(idle.active_turn_is_read_only())
 }
 
 ///|

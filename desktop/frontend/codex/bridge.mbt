@@ -226,7 +226,7 @@ fn State::open_thread(
   // The host keeps this read-only across both legacy inline histories and
   // paginated histories. Selecting a row never resumes the task or claims its
   // writer merely to render the transcript.
-  CodexThreadReply.request(
+  CodexThreadReply(thread_id).request(
     dispatch,
     channel,
     @commands.codex_thread_history_read,
@@ -302,7 +302,7 @@ fn State::resume_for_send(
           scheduler.add(
             dispatch(
               Failed(
-                kind=CodexThreadReply,
+                kind=CodexThreadReply(thread_id),
                 message=@interop.bridge_error_text(error),
               ),
             ),
@@ -656,7 +656,7 @@ fn State::interrupt(
   channel : @interop.ChannelId,
 ) -> @cmd.Cmd {
   guard self.active_thread() is Some(active) &&
-    self.active_turn_id() is Some(turn_id) else {
+    self.writable_turn_id() is Some(turn_id) else {
     return @cmd.none
   }
   CodexMutationReply.request(

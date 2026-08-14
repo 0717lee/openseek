@@ -69,6 +69,7 @@ pub fn update(
           ..state,
           git_details_open: false,
           write_access: CodexNeedsResume,
+          requested_thread: Some(thread_id),
           loading: true,
           notice: "",
         },
@@ -139,6 +140,12 @@ pub fn update(
     Respond(request_key~, decision~) =>
       (state.respond(dispatch, channel, request_key, decision), state)
     Reply(kind~, value~) => {
+      // A history request belongs to the row that launched it. Rejecting here
+      // also preserves the newer request's loading state and filesystem cwd.
+      if kind is CodexThreadReply(requested_thread) &&
+        !state.accepts_thread_reply(requested_thread) {
+        return (@cmd.none, state)
+      }
       // Activity polling is independent of user commands. Its reply must not
       // settle a simultaneous send/archive/login request's loading state.
       let mut next = if kind is CodexActivityReply {
@@ -160,15 +167,19 @@ pub fn update(
             next.load_skills(dispatch, channel, force_reload=false),
           ])
         }
-        CodexThreadReply => {
-          next = next.with_thread_reply(value)
-          next = { ..next, write_access: CodexNeedsResume }
-          next = next.loading_context(false)
-          cmd = @cmd.batch([
-            next.refresh_git(dispatch, channel),
-            next.load_files(dispatch, channel),
-            next.load_skills(dispatch, channel, force_reload=false),
-          ])
+        CodexThreadReply(requested_thread) => {
+          next = next.with_thread_reply(value, requested_thread~)
+          // A malformed or mismatched snapshot leaves the requested id in
+          // place. Only a verified selection may retarget Files/Terminal.
+          if next.requested_thread is None {
+            next = { ..next, write_access: CodexNeedsResume }
+            next = next.loading_context(false)
+            cmd = @cmd.batch([
+              next.refresh_git(dispatch, channel),
+              next.load_files(dispatch, channel),
+              next.load_skills(dispatch, channel, force_reload=false),
+            ])
+          }
         }
         CodexActivityReply => next = next.with_activity_reply(value)
         CodexDraftThreadReply => {
@@ -253,6 +264,10 @@ pub fn update(
       (cmd, next)
     }
     Failed(kind~, message~) => {
+      if kind is CodexThreadReply(requested_thread) &&
+        !state.accepts_thread_reply(requested_thread) {
+        return (@cmd.none, state)
+      }
       // A status poll is best-effort. Older app-server builds or a transient
       // read race must not replace a healthy conversation with an error banner.
       if kind is CodexActivityReply {
@@ -265,7 +280,7 @@ pub fn update(
         CodexModelsReply => "Codex models"
         CodexThreadsReply => "Codex threads"
         CodexDraftOpenReply(_) => "Codex draft"
-        CodexThreadReply | CodexDraftThreadReply => "Codex thread"
+        CodexThreadReply(_) | CodexDraftThreadReply => "Codex thread"
         CodexActivityReply => "Codex activity"
         CodexTurnReply | CodexWorktreeTurnReply(_) => "Codex turn"
         CodexWorktreeRepairReply(_) => "Codex worktree rebuild"
@@ -493,7 +508,7 @@ test "Codex update handlers are pure and idempotent" {
     }),
     Reply(kind=CodexModelsReply, value={ "data": [] }),
     Reply(kind=CodexThreadsReply, value={ "data": [] }),
-    Reply(kind=CodexThreadReply, value={
+    Reply(kind=CodexThreadReply("thread-1"), value={
       "thread": { "id": "thread-1", "turns": [] },
     }),
     Reply(kind=CodexActivityReply, value={
@@ -641,6 +656,78 @@ test "Codex missing worktree waits for rebuild or archive confirmation" {
     .map(uri => uri.path),
     Some("/work/project/.worktrees/wt-1"),
   )
+}
+
+///|
+test "Codex history replies stay with the latest selected thread" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let listed = State().with_threads({
+    "data": [
+      { "id": "thread-a", "preview": "Thread A" },
+      { "id": "thread-b", "preview": "Thread B" },
+    ],
+  })
+  let (_, waiting_a) = update(
+    dispatch,
+    OpenThread("thread-a"),
+    listed,
+    @interop.ChannelId::Local,
+    _ => @cmd.none,
+  )
+  let (_, waiting_b) = update(
+    dispatch,
+    OpenThread("thread-b"),
+    waiting_a,
+    @interop.ChannelId::Local,
+    _ => @cmd.none,
+  )
+  assert_eq(waiting_b.requested_thread, Some("thread-b"))
+
+  // A's slower success and failure both belong to the abandoned selection;
+  // neither may settle B's loading state or replace its pending target.
+  let (_, stale_success) = update(
+    dispatch,
+    Reply(kind=CodexThreadReply("thread-a"), value={
+      "thread": { "id": "thread-a", "turns": [] },
+    }),
+    waiting_b,
+    @interop.ChannelId::Local,
+    _ => @cmd.none,
+  )
+  assert_true(stale_success == waiting_b)
+  let (_, stale_failure) = update(
+    dispatch,
+    Failed(kind=CodexThreadReply("thread-a"), message="late failure"),
+    waiting_b,
+    @interop.ChannelId::Local,
+    _ => @cmd.none,
+  )
+  assert_true(stale_failure == waiting_b)
+
+  let (_, selected_b) = update(
+    dispatch,
+    Reply(kind=CodexThreadReply("thread-b"), value={
+      "thread": { "id": "thread-b", "turns": [] },
+    }),
+    waiting_b,
+    @interop.ChannelId::Local,
+    _ => @cmd.none,
+  )
+  assert_eq(selected_b.active_id(), Some("thread-b"))
+  assert_eq(selected_b.requested_thread, None)
+  assert_false(selected_b.loading)
+
+  // Once B is selected, even an A response arriving after B cannot rewind it.
+  let (_, late_a) = update(
+    dispatch,
+    Reply(kind=CodexThreadReply("thread-a"), value={
+      "thread": { "id": "thread-a", "turns": [] },
+    }),
+    selected_b,
+    @interop.ChannelId::Local,
+    _ => @cmd.none,
+  )
+  assert_true(late_a == selected_b)
 }
 
 ///|

@@ -684,9 +684,10 @@ fn State::composer_view(
     git.chip(dispatch, self.git_details_open) is Some(chip) {
     status.push(chip)
   }
-  let local_turn = self.active_turn_id()
-  let active_elsewhere = self.is_active_elsewhere()
-  let action = if local_turn is Some(_) {
+  let writable_turn = self.writable_turn_id()
+  let read_only_turn = self.active_turn_is_read_only()
+  let active_elsewhere = self.is_active_elsewhere() || read_only_turn
+  let action = if writable_turn is Some(_) {
     @composer.Action::{
       id: "stop",
       class_name: "icon-button stop-button",
@@ -717,7 +718,7 @@ fn State::composer_view(
     before_inner,
     mentions: mention_chips,
     value: self.draft,
-    placeholder: if local_turn is Some(_) {
+    placeholder: if writable_turn is Some(_) {
       "Steer the running task — your message joins it at the next step."
     } else if self.has_missing_worktree() {
       "Rebuild this task's worktree before continuing."
