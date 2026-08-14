@@ -53,8 +53,8 @@ Total: at most 43 tests.
    (`c618e169`).
 2. [x] Complete deterministic lower-layer coverage and remove the standalone
    async/reveal/set-value/whitespace browser specs and bundles.
-3. [ ] Trim the large input/navigation/Markdown/render suites to the retained
-   browser contracts above.
+3. [x] Trim the large input/navigation/Markdown/render suites to the retained
+   browser contracts above (43 tests; first zero-retry run passed).
 4. [ ] Remove dead fixtures and globals, update harness documentation, measure the
    new suite, run all gates, and delete this completed plan.
 

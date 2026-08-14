@@ -98,18 +98,3 @@ test('folding: shift-clicking a chevron folds children first, then the region, a
     reporter.dispose();
   }
 });
-
-test('folding: middle-clicking a chevron drives the same recursive toggle', async ({ page }, testInfo) => {
-  const reporter = await installMoonBitReporter(page);
-  try {
-    await page.goto('/browser-tests/folding_nested.html');
-    await expect(page.locator(editor)).toContainText('nest_leaf_a', {
-      timeout: 10_000,
-    });
-    await reporter.waitForReport(testInfo, { suite: 'folding_nested' });
-
-    await runRecursiveMatrix(page, { button: 'middle' });
-  } finally {
-    reporter.dispose();
-  }
-});

@@ -295,7 +295,7 @@ async function expectHoverCallCancelled(page, callId) {
     .toBe(true);
 }
 
-test('uses the workbench UI font size with a restrained Markdown type scale', async ({
+test('uses the workbench type scale and Markdown layout contract', async ({
   page,
 }) => {
   await page.goto('/browser-tests/component.html?markdownDocument=1');
@@ -331,6 +331,51 @@ test('uses the workbench UI font size with a restrained Markdown type scale', as
     ).toHaveCSS('font-size', fontSize);
   }
 
+  const firstHeading = page.locator(`${article} > h1`).first();
+  const firstParagraph = page.locator(`${article} > p`).first();
+  const quote = page.locator(`${article} > blockquote`).first();
+  await expect(firstHeading).toHaveCSS('margin-top', '0px');
+  await expect(firstHeading).toHaveCSS('margin-bottom', '12px');
+  await expect(firstParagraph).toHaveCSS('margin-bottom', '16px');
+  await expect(quote).toHaveCSS('border-left-width', '3px');
+  await expect(quote).toHaveCSS('border-top-right-radius', '6px');
+  await expect(quote.locator(':scope > :first-child')).toHaveCSS(
+    'margin-top',
+    '0px',
+  );
+
+  await page.evaluate(() =>
+    globalThis.__markdownDocumentControls.resizeHost(1000),
+  );
+  const measure = await page.locator(article).evaluate((articleNode) => {
+    const articleRect = articleNode.getBoundingClientRect();
+    const style = getComputedStyle(articleNode);
+    const contentLeft =
+      articleRect.left + Number.parseFloat(style.paddingLeft);
+    const contentWidth =
+      articleRect.width -
+      Number.parseFloat(style.paddingLeft) -
+      Number.parseFloat(style.paddingRight);
+    const paragraph = articleNode
+      .querySelector(':scope > p')
+      .getBoundingClientRect();
+    const code = articleNode
+      .querySelector(':scope > .moonbit-viewer-markdown-code-block')
+      .getBoundingClientRect();
+    return {
+      contentLeft,
+      contentWidth,
+      paragraphLeft: paragraph.left,
+      paragraphWidth: paragraph.width,
+      codeLeft: code.left,
+      codeWidth: code.width,
+    };
+  });
+  expect(measure.paragraphLeft).toBeCloseTo(measure.contentLeft, 1);
+  expect(measure.paragraphWidth).toBeLessThan(measure.contentWidth - 200);
+  expect(measure.codeLeft).toBeCloseTo(measure.contentLeft, 1);
+  expect(measure.codeWidth).toBeCloseTo(measure.contentWidth, 1);
+
   await page.locator('.markdown-document-shell').evaluate((shell) => {
     shell.style.setProperty('--ui-font-size', '12px');
   });
@@ -352,336 +397,8 @@ test('uses the workbench UI font size with a restrained Markdown type scale', as
   );
 });
 
-test('uses a deliberate vertical rhythm for Markdown sections and blocks', async ({
-  page,
-}) => {
-  await page.goto('/browser-tests/component.html?markdownDocument=1');
-  await page.waitForFunction(() =>
-    Boolean(globalThis.__markdownDocumentControls),
-  );
 
-  await page.locator(article).evaluate((articleNode) => {
-    const heading = document.createElement('h2');
-    heading.dataset.rhythmProbe = 'heading';
-    heading.textContent = 'Rhythm section';
-    const first = document.createElement('p');
-    first.dataset.rhythmProbe = 'first';
-    first.textContent = 'The heading stays attached to its first paragraph.';
-    const second = document.createElement('p');
-    second.dataset.rhythmProbe = 'second';
-    second.textContent = 'Adjacent prose keeps one steady reading beat.';
-    const divider = document.createElement('hr');
-    divider.dataset.rhythmProbe = 'divider';
-    const d2 = document.createElement('div');
-    d2.className =
-      'moonbit-viewer-markdown-diagram moonbit-viewer-markdown-diagram-viewport';
-    d2.dataset.rhythmProbe = 'd2';
-    const code = document.createElement('div');
-    code.className = 'moonbit-viewer-markdown-code-block';
-    code.dataset.rhythmProbe = 'wide';
-    const mermaid = document.createElement('div');
-    mermaid.className =
-      'moonbit-viewer-markdown-diagram moonbit-viewer-markdown-diagram-viewport';
-    mermaid.dataset.rhythmProbe = 'mermaid';
-    mermaid.textContent = 'nested Mermaid viewport';
-    code.appendChild(mermaid);
-    const finalHeading = document.createElement('h2');
-    finalHeading.dataset.rhythmProbe = 'final-heading';
-    finalHeading.textContent = 'Final foldable section';
-    const last = document.createElement('p');
-    last.dataset.rhythmProbe = 'last';
-    last.textContent = 'The document ends without trailing element margin.';
-    articleNode.append(
-      heading,
-      first,
-      second,
-      divider,
-      d2,
-      code,
-      finalHeading,
-      last,
-    );
-  });
 
-  const firstHeading = page.locator(`${article} > h1`).first();
-  const heading = page.locator('[data-rhythm-probe="heading"]');
-  const first = page.locator('[data-rhythm-probe="first"]');
-  const second = page.locator('[data-rhythm-probe="second"]');
-  const divider = page.locator('[data-rhythm-probe="divider"]');
-  const d2 = page.locator('[data-rhythm-probe="d2"]');
-  const code = page.locator('[data-rhythm-probe="wide"]');
-  const mermaid = page.locator('[data-rhythm-probe="mermaid"]');
-  const finalHeading = page.locator('[data-rhythm-probe="final-heading"]');
-  const last = page.locator('[data-rhythm-probe="last"]');
-
-  await expect(firstHeading).toHaveCSS('margin-top', '0px');
-  await expect(firstHeading).toHaveCSS('margin-bottom', '12px');
-  await expect(heading).toHaveCSS('margin-top', '32px');
-  await expect(heading).toHaveCSS('margin-bottom', '12px');
-  await expect(first).toHaveCSS('margin-top', '0px');
-  await expect(first).toHaveCSS('margin-bottom', '16px');
-  await expect(divider).toHaveCSS('margin-top', '0px');
-  await expect(divider).toHaveCSS('margin-bottom', '16px');
-  await expect(d2).toHaveCSS('margin-bottom', '16px');
-  await expect(code).toHaveCSS('margin-bottom', '16px');
-  await expect(mermaid).toHaveCSS('margin-bottom', '0px');
-  await expect(finalHeading).toHaveCSS('margin-bottom', '12px');
-  await expect(last).toHaveCSS('margin-bottom', '0px');
-
-  const geometry = await page.locator(article).evaluate((articleNode) => {
-    const rect = (probe) =>
-      articleNode
-        .querySelector(`[data-rhythm-probe="${probe}"]`)
-        .getBoundingClientRect();
-    const heading = rect('heading');
-    const first = rect('first');
-    const second = rect('second');
-    const divider = rect('divider');
-    return {
-      headingToFirst: first.top - heading.bottom,
-      firstToSecond: second.top - first.bottom,
-      secondToDivider: divider.top - second.bottom,
-    };
-  });
-  expect(geometry.headingToFirst).toBeCloseTo(12, 1);
-  expect(geometry.firstToSecond).toBeCloseTo(16, 1);
-  expect(geometry.secondToDivider).toBeCloseTo(16, 1);
-
-  await last.evaluate((node) =>
-    node.setAttribute('data-markdown-section-hidden', ''),
-  );
-  await expect(last).toBeHidden();
-  await expect(finalHeading).toHaveCSS('margin-bottom', '0px');
-});
-
-test('aligns prose to the content edge without narrowing wide Markdown content', async ({
-  page,
-}) => {
-  await page.goto('/browser-tests/component.html?markdownDocument=1');
-  await page.waitForFunction(() =>
-    Boolean(globalThis.__markdownDocumentControls),
-  );
-  await page.evaluate(() =>
-    globalThis.__markdownDocumentControls.resizeHost(1000),
-  );
-  await expect(page.locator(host)).toHaveCSS('width', '1000px');
-
-  await page.locator(article).evaluate((articleNode) => {
-    const quote = document.createElement('blockquote');
-    quote.dataset.measureProbe = 'quote';
-    const paragraph = document.createElement('p');
-    paragraph.textContent = 'Quoted prose remains inside the readable measure.';
-    const code = document.createElement('div');
-    code.className = 'moonbit-viewer-markdown-code-block';
-    code.dataset.measureProbe = 'quote-code';
-    code.textContent = 'wide quoted code';
-    quote.append(paragraph, code);
-    articleNode.appendChild(quote);
-  });
-
-  const geometry = await page.locator(article).evaluate((articleNode) => {
-    const articleRect = articleNode.getBoundingClientRect();
-    const articleStyle = getComputedStyle(articleNode);
-    const contentLeft = articleRect.left + Number.parseFloat(articleStyle.paddingLeft);
-    const contentWidth = articleRect.width -
-      Number.parseFloat(articleStyle.paddingLeft) -
-      Number.parseFloat(articleStyle.paddingRight);
-    const paragraph = articleNode.querySelector(':scope > p').getBoundingClientRect();
-    const heading = articleNode.querySelector(':scope > h1').getBoundingClientRect();
-    const code = articleNode.querySelector(
-      ':scope > .moonbit-viewer-markdown-code-block',
-    ).getBoundingClientRect();
-    const quote = articleNode.querySelector(
-      ':scope > [data-measure-probe="quote"]',
-    ).getBoundingClientRect();
-    const quoteStyle = getComputedStyle(articleNode.querySelector(
-      ':scope > [data-measure-probe="quote"]',
-    ));
-    const quoteContentWidth = quote.width -
-      Number.parseFloat(quoteStyle.borderLeftWidth) -
-      Number.parseFloat(quoteStyle.paddingLeft) -
-      Number.parseFloat(quoteStyle.paddingRight);
-    const quoteParagraph = articleNode.querySelector(
-      ':scope > [data-measure-probe="quote"] > p',
-    ).getBoundingClientRect();
-    const quoteCode = articleNode.querySelector(
-      ':scope > [data-measure-probe="quote"] > [data-measure-probe="quote-code"]',
-    ).getBoundingClientRect();
-    return {
-      contentLeft,
-      contentWidth,
-      paragraphLeft: paragraph.left,
-      paragraphWidth: paragraph.width,
-      headingLeft: heading.left,
-      headingWidth: heading.width,
-      codeLeft: code.left,
-      codeWidth: code.width,
-      quoteLeft: quote.left,
-      quoteWidth: quote.width,
-      quoteContentWidth,
-      quoteParagraphWidth: quoteParagraph.width,
-      quoteCodeWidth: quoteCode.width,
-    };
-  });
-
-  // The reading measure caps the line length; it never indents prose away from
-  // the left edge the full-width code and diagram blocks start at.
-  expect(geometry.paragraphWidth).toBeLessThan(geometry.contentWidth - 200);
-  expect(geometry.paragraphLeft).toBeCloseTo(geometry.contentLeft, 1);
-  expect(geometry.headingWidth).toBeCloseTo(geometry.paragraphWidth, 1);
-  expect(geometry.headingLeft).toBeCloseTo(geometry.contentLeft, 1);
-  expect(geometry.codeLeft).toBeCloseTo(geometry.contentLeft, 1);
-  expect(geometry.codeWidth).toBeCloseTo(geometry.contentWidth, 1);
-  expect(geometry.quoteLeft).toBeCloseTo(geometry.contentLeft, 1);
-  expect(geometry.quoteWidth).toBeCloseTo(geometry.paragraphWidth, 1);
-  expect(geometry.quoteParagraphWidth).toBeCloseTo(
-    geometry.quoteContentWidth,
-    1,
-  );
-  expect(geometry.quoteCodeWidth).toBeCloseTo(geometry.quoteContentWidth, 1);
-
-  // Past the figure measure the wide blocks stop growing, so a maximized
-  // workbench keeps one right edge instead of stretching code and diagrams
-  // across the window while prose stays at the reading measure.
-  await page.evaluate(() =>
-    globalThis.__markdownDocumentControls.resizeHost(1400),
-  );
-  await expect(page.locator(host)).toHaveCSS('width', '1400px');
-  const wide = await page.locator(article).evaluate((articleNode) => {
-    const articleRect = articleNode.getBoundingClientRect();
-    const articleStyle = getComputedStyle(articleNode);
-    const contentLeft = articleRect.left +
-      Number.parseFloat(articleStyle.paddingLeft);
-    const contentWidth = articleRect.width -
-      Number.parseFloat(articleStyle.paddingLeft) -
-      Number.parseFloat(articleStyle.paddingRight);
-    const code = articleNode.querySelector(
-      ':scope > .moonbit-viewer-markdown-code-block',
-    ).getBoundingClientRect();
-    return {
-      contentLeft,
-      contentWidth,
-      codeLeft: code.left,
-      codeWidth: code.width,
-    };
-  });
-  expect(wide.contentWidth).toBeGreaterThan(960);
-  expect(wide.codeWidth).toBeCloseTo(960, 1);
-  expect(wide.codeLeft).toBeCloseTo(wide.contentLeft, 1);
-
-  await page.evaluate(() =>
-    globalThis.__markdownDocumentControls.resizeHost(360),
-  );
-  await expect(page.locator(host)).toHaveCSS('width', '360px');
-  const narrowQuote = await page.locator(article).evaluate((articleNode) => {
-    const quote = articleNode.querySelector(
-      ':scope > [data-measure-probe="quote"]',
-    ).getBoundingClientRect();
-    const paragraph = articleNode.querySelector(
-      ':scope > [data-measure-probe="quote"] > p',
-    ).getBoundingClientRect();
-    return {
-      leftInset: paragraph.left - quote.left,
-      rightInset: quote.right - paragraph.right,
-    };
-  });
-  expect(narrowQuote.leftInset).toBeCloseTo(23, 1);
-  expect(narrowQuote.rightInset).toBeCloseTo(20, 1);
-});
-
-test('presents Markdown blockquotes as subtle callouts', async ({ page }) => {
-  await page.goto('/browser-tests/component.html?markdownDocument=1');
-  await page.waitForFunction(() =>
-    Boolean(globalThis.__markdownDocumentControls),
-  );
-
-  const quote = page.locator(`${article} > blockquote`);
-  await expect(quote).toHaveCSS('border-left-width', '3px');
-  await expect(quote).toHaveCSS('border-top-right-radius', '6px');
-  await expect(quote).toHaveCSS('padding-top', '12px');
-  await expect(quote.locator(':scope > :first-child')).toHaveCSS(
-    'margin-top',
-    '0px',
-  );
-  await expect(quote.locator(':scope > :last-child')).toHaveCSS(
-    'margin-bottom',
-    '0px',
-  );
-
-  await quote.evaluate((element) => {
-    const nested = document.createElement('blockquote');
-    nested.dataset.nestedCalloutProbe = 'true';
-    const paragraph = document.createElement('p');
-    paragraph.textContent = 'Nested callout';
-    nested.appendChild(paragraph);
-    element.appendChild(nested);
-  });
-  const nested = quote.locator('[data-nested-callout-probe="true"]');
-  await expect(nested).toHaveCSS('border-left-width', '3px');
-  await expect(nested).toHaveCSS('padding-left', '12px');
-
-  for (const theme of ['dark', 'light']) {
-    await page.locator('.markdown-document-shell').evaluate(
-      (shell, value) => shell.setAttribute('data-theme', value),
-      theme,
-    );
-    const colors = await calloutColors(quote);
-    expect(contrastRatio(colors.border, colors.background)).toBeGreaterThanOrEqual(
-      3,
-    );
-  }
-
-  await page.evaluate(() => {
-    for (const theme of ['dark', 'light']) {
-      const root = document.createElement('div');
-      root.className = 'moonbit-viewer-markdown-document';
-      root.dataset.theme = theme;
-      root.dataset.fallbackCalloutRoot = theme;
-      const article = document.createElement('article');
-      article.className = 'moonbit-viewer-markdown-document-article';
-      const quote = document.createElement('blockquote');
-      quote.dataset.fallbackCallout = theme;
-      quote.textContent = `${theme} fallback callout`;
-      article.appendChild(quote);
-      root.appendChild(article);
-      document.body.appendChild(root);
-    }
-  });
-  for (const theme of ['dark', 'light']) {
-    const fallback = page.locator(`[data-fallback-callout="${theme}"]`);
-    const colors = await calloutColors(fallback);
-    expect(contrastRatio(colors.border, colors.background)).toBeGreaterThanOrEqual(
-      3,
-    );
-  }
-
-  await page.evaluate(() =>
-    globalThis.__markdownDocumentControls.resizeHost(320),
-  );
-  const nestedGeometry = await quote.evaluate((element) => {
-    const nested = element.querySelector('[data-nested-callout-probe="true"]');
-    const outerRect = element.getBoundingClientRect();
-    const outerStyle = getComputedStyle(element);
-    const nestedRect = nested.getBoundingClientRect();
-    const nestedStyle = getComputedStyle(nested);
-    return {
-      availableWidth: outerRect.width -
-        Number.parseFloat(outerStyle.borderLeftWidth) -
-        Number.parseFloat(outerStyle.paddingLeft) -
-        Number.parseFloat(outerStyle.paddingRight),
-      nestedWidth: nestedRect.width,
-      nestedContentWidth: nestedRect.width -
-        Number.parseFloat(nestedStyle.borderLeftWidth) -
-        Number.parseFloat(nestedStyle.paddingLeft) -
-        Number.parseFloat(nestedStyle.paddingRight),
-    };
-  });
-  expect(nestedGeometry.nestedWidth).toBeCloseTo(
-    nestedGeometry.availableWidth,
-    1,
-  );
-  expect(nestedGeometry.nestedContentWidth).toBeGreaterThan(150);
-});
 
 test('mounts zoom and drag controls for D2, UML, and Mermaid in Markdown documents', async ({
   page,
