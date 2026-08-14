@@ -48,15 +48,12 @@ Scrollable diagram wrappers retain native wheel scrolling while they can
 consume the current delta. When neither axis can consume it, the event is
 allowed to reach the owning hover, widget, or editor scroller.
 
-`MarkdownDiagramViewports` owns the optional interactive presentation for every
-successful direct Diago, UML, or Mermaid SVG in one rendered target. It mounts
-pan, zoom, fit, and resize controls in an always-visible floating toolbar. The
-full Markdown document uses the roomier card treatment while Markdown comments
-use the same controller with a compact CSS density. The controller owns its
-listener/observer/frame lifetime and restores borrowed DOM state on disposal.
-Both consumers dispose it before replacing their renderer target. Its
-stylesheet is
-`internal/viewer/browser/markdown/diagram_viewport.css`.
+Interactive presentation for successful direct Diago, UML, and Mermaid SVGs
+lives in the public browser-only
+`viewer/browser/diagram_viewport` package. Editor Markdown documents, Markdown
+comments, and Desktop transcripts share that package's `DiagramViewports`
+lifetime and stylesheet; this renderer owns only the wrapper markup and its
+generic native-scroll fallback.
 
 `moonbit-viewer-markdown-diagram-viewport` is also an event-time ownership
 marker: while a wrapper carries it, the generic listener never stops ordinary
@@ -89,7 +86,7 @@ stale-result, target-reuse, and disposal failures retain the source fallback or
 last successful SVG.
 
 The full-document and whole-line Markdown-comment consumers also use that size
-callback to refresh their diagram-viewport owner. Successful Mermaid SVGs
+callback to refresh their shared diagram-viewport owner. Successful Mermaid SVGs
 therefore receive the same pan, zoom, fit, and resize controls as synchronous
 Diago and UML SVGs; a theme rerender disposes the controller for the replaced
 SVG and mounts a fresh one.

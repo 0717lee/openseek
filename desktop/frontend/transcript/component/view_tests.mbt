@@ -362,6 +362,30 @@ test "every message names its speaker to assistive technology" {
 
 ///|
 #warnings("-alert_unstable")
+test "assistant UML exposes the shared diagram viewport marker" {
+  let rendered = transcript_item_view(
+    {
+      kind: Assistant(is_danger=false),
+      content: "```uml\n@startuml\nparticipant Alice\nAlice -> Bob : hello\n@enduml\n```",
+      ts: None,
+      sequence: None,
+    },
+    _ => @cmd.none,
+  )
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  // TranscriptObservers hands this exact wrapper to DiagramViewports. Keep
+  // both markers stable so the shared package can discover the direct SVG.
+  assert_true(
+    markup.contains(
+      "class=\"chat-markdown-diagram moonbit-viewer-markdown-diagram\"",
+    ),
+  )
+  assert_true(markup.contains("data-diagram-language=\"uml\""))
+  assert_true(markup.contains("<svg"))
+}
+
+///|
+#warnings("-alert_unstable")
 test "user message URLs are clickable but inline code stays inert" {
   let rendered = transcript_item_view(
     {

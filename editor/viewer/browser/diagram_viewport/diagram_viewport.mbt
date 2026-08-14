@@ -134,18 +134,18 @@ priv enum DiagramViewportMountResult {
 
 ///|
 /// Owns the interactive diagram viewports mounted in one rendered Markdown
-/// target. Successful direct Diago and Mermaid SVG children are enhanced. The
+/// root. Successful direct Diago, UML, and Mermaid SVG children are enhanced. The
 /// caller retains ownership of the target and disposes this handle before
 /// replacing or removing that target.
-struct MarkdownDiagramViewports {
+struct DiagramViewports {
   lifetime : MarkdownDiagramViewportLifetime
 }
 
 ///|
 /// Synchronously mounts controls and resize handles for every matching direct
-/// Diago or Mermaid SVG. Geometry is initialized at the next animation-frame
-/// boundary. Call `refresh` after an asynchronous renderer commits or replaces
-/// a direct SVG.
+/// Diago, UML, or Mermaid SVG. Geometry is initialized at the next
+/// animation-frame boundary. Call `refresh` after an asynchronous renderer
+/// commits or replaces a direct SVG.
 /// `on_size_changed` invalidates the owning presentation whenever this
 /// component writes a new inline viewport height.
 ///
@@ -153,7 +153,7 @@ struct MarkdownDiagramViewports {
 /// direction: right
 ///
 /// group: viewport group
-/// controller: one controller per Diago or Mermaid SVG
+/// controller: one controller per Diago, UML, or Mermaid SVG
 /// wrapper: borrowed wrapper and SVG
 /// hooks: pointer, wheel, resize hooks
 /// cursor: body-cursor lease
@@ -168,10 +168,10 @@ struct MarkdownDiagramViewports {
 ///
 /// Disposal walks the owned controllers in reverse and restores every borrowed
 /// wrapper attribute and inline style before the caller replaces the target.
-pub fn MarkdownDiagramViewports::MarkdownDiagramViewports(
+pub fn DiagramViewports::DiagramViewports(
   target : @rdom.Element,
   on_size_changed : () -> Unit,
-) -> MarkdownDiagramViewports {
+) -> DiagramViewports {
   let schedule_frame = (callback : () -> Unit) => {
     let registration = @base_browser.schedule_at_next_animation_frame(callback)
     () => registration.dispose()
@@ -192,9 +192,7 @@ pub fn MarkdownDiagramViewports::MarkdownDiagramViewports(
 /// interactive viewport controllers. Existing current controllers retain
 /// their interaction state; stale controllers are disposed before replacement
 /// SVGs are mounted.
-pub fn MarkdownDiagramViewports::refresh(
-  self : MarkdownDiagramViewports,
-) -> Unit {
+pub fn DiagramViewports::refresh(self : DiagramViewports) -> Unit {
   self.lifetime.refresh()
 }
 
@@ -207,7 +205,7 @@ fn MarkdownDiagramViewportLifetime::refresh(
   }
   for index in (self.controllers.length() - 1)>=..0 {
     let controller = self.controllers[index]
-    if !controller.is_current() {
+    if !controller.is_current(self.target) {
       self.controllers.remove(index) |> ignore
       controller.dispose()
     }
@@ -235,9 +233,7 @@ fn MarkdownDiagramViewportLifetime::refresh(
 ///|
 /// Idempotently releases every viewport listener, observer, animation frame,
 /// owning-window drag, temporary cursor, and DOM reference.
-pub fn MarkdownDiagramViewports::dispose(
-  self : MarkdownDiagramViewports,
-) -> Unit {
+pub fn DiagramViewports::dispose(self : DiagramViewports) -> Unit {
   self.lifetime.dispose()
 }
 
@@ -264,13 +260,17 @@ fn collect_diagram_viewport_candidates(
 ) -> Unit {
   for child in root.get_children() {
     let language = element_attribute_or_empty(child, "data-diagram-language")
-    if element_has_class(child, "moonbit-viewer-markdown-diagram") &&
-      (language == "diago" || language == "uml" || language == "mermaid") &&
-      !element_has_class(child, diagram_viewport_class) &&
-      direct_svg_child(child) is Some(_) {
-      candidates.push(child)
+    if element_has_class(child, "moonbit-viewer-markdown-diagram") {
+      if (language == "diago" || language == "uml" || language == "mermaid") &&
+        !element_has_class(child, diagram_viewport_class) &&
+        direct_svg_child(child) is Some(_) {
+        candidates.push(child)
+      }
+      // A diagram wrapper owns one direct SVG. Treat it as a scan boundary so
+      // transcript refreshes never walk the generated SVG or injected controls.
+    } else {
+      collect_diagram_viewport_candidates(child, candidates)
     }
-    collect_diagram_viewport_candidates(child, candidates)
   }
 }
 
@@ -1137,8 +1137,16 @@ fn MarkdownDiagramViewport::finish_resize(
 }
 
 ///|
-fn MarkdownDiagramViewport::is_current(self : MarkdownDiagramViewport) -> Bool {
-  guard self.active && element_has_class(self.wrapper, diagram_viewport_class) else {
+fn MarkdownDiagramViewport::is_current(
+  self : MarkdownDiagramViewport,
+  target : @rdom.Element,
+) -> Bool {
+  // Keyed hosts may detach a complete diagram row without disturbing the
+  // wrapper/content/SVG relationship inside that subtree. Target containment
+  // is therefore part of ownership, not merely a structural sanity check.
+  guard self.active &&
+    target.contains(self.wrapper.as_node()) &&
+    element_has_class(self.wrapper, diagram_viewport_class) else {
     return false
   }
   guard self.content.get_parent_node().to_option() is Some(content_parent) &&

@@ -8,6 +8,7 @@ import {
   "moonbitlang/core/debug",
   "moonbitlang/core/json",
   "moonbitlang/editor/base/common",
+  "moonbitlang/editor/viewer/browser/diagram_viewport",
   "openseek_desktop/internal/commands",
   "openseek_desktop/internal/protocol",
   "openseek_desktop/frontend/icons",

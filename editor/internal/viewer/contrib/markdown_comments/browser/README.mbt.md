@@ -45,7 +45,7 @@ flowchart TB
   H --> ZH["the one live ViewZone height writer"]
 ```
 
-Each successful direct Diago or Mermaid SVG is enhanced independently with
+Each successful direct Diago, UML, or Mermaid SVG is enhanced independently with
 bounded pan/zoom/fit controls and a resize handle. Mermaid's asynchronous
 render and theme-rerender callbacks refresh the group: current controllers keep
 their state, while a replaced SVG's stale controller is disposed before the
@@ -81,8 +81,8 @@ Disposal disconnects observation, cancels queued frame work, and makes late
 notifications inert. The root contribution remains responsible for the shared
 viewport observer, geometry lease, generation, and zone-id freshness.
 
-The shared `MarkdownDiagramViewports` lifetime owns every successfully
-rendered direct Diago or Mermaid SVG viewport inside one Markdown-comment
+The shared `DiagramViewports` lifetime owns every successfully
+rendered direct Diago, UML, or Mermaid SVG viewport inside one Markdown-comment
 target. It mounts the transformable content, four controls, resize handle,
 listeners, animation frame, and per-wrapper `ResizeObserver`, while leaving
 the target and original wrapper caller-owned. Initial height is bounded to the
@@ -108,7 +108,7 @@ replaced or its ViewZone is removed.
 Comment-specific styles remain at
 `viewer/contrib/markdown_comments/browser/markdown_comments.css`; shared
 diagram controls are styled by
-`internal/viewer/browser/markdown/diagram_viewport.css`. Run the focused JS
+`viewer/browser/diagram_viewport/diagram_viewport.css`. Run the focused JS
 suite with:
 
 ```sh
