@@ -338,23 +338,6 @@ fn State::open_thread(
 }
 
 ///|
-/// Poll one summary turn instead of the complete history. This is the only
-/// periodic Codex request and runs only while its conversation page is visible.
-fn State::poll_activity(
-  self : State,
-  dispatch : @cmd.Emit[Msg],
-  channel : @interop.ChannelId,
-) -> @cmd.Cmd {
-  guard self.active_thread() is Some(active) else { return @cmd.none }
-  CodexActivityReply.request(
-    dispatch,
-    channel,
-    @commands.codex_thread_activity_read,
-    { "threadId": active.id },
-  )
-}
-
-///|
 /// Re-read the selected checkout's current branch and pull request. App-server
 /// `gitInfo` is creation-time metadata; this host operation is the same GitHub
 /// lookup used by OpenSeek's composer and therefore follows branch changes

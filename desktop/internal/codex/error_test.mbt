@@ -56,19 +56,19 @@ test "Codex unmaterialized task history has a narrow empty-history classificatio
 }
 
 ///|
-test "Codex unmaterialized task activity has a narrow empty-activity classification" {
+test "Codex unmaterialized task has a narrow empty-turns classification" {
   let empty : @codex.CodexError = JsonRpc(
     method_="thread/turns/list",
     code=-32600,
     message="thread abc is not materialized yet; thread/turns/list is unavailable before first user message",
     data=None,
   )
-  assert_true(empty.is_unmaterialized_thread_activity())
+  assert_true(empty.is_unmaterialized_thread_turns())
   let wrong_method : @codex.CodexError = JsonRpc(
     method_="thread/read",
     code=-32600,
     message="thread abc is not materialized yet; thread/turns/list is unavailable before first user message",
     data=None,
   )
-  assert_false(wrong_method.is_unmaterialized_thread_activity())
+  assert_false(wrong_method.is_unmaterialized_thread_turns())
 }

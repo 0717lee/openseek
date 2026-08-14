@@ -211,6 +211,7 @@ pub(all) struct SidebarActions {
   open_thread : (String) -> @cmd.Cmd
   archive_thread : (String) -> @cmd.Cmd
   unarchive_thread : (String) -> @cmd.Cmd
+  project_registered : (String) -> Bool
   project_collapsed : (String) -> Bool
   toggle_project : (String) -> @cmd.Cmd
   project_menu : (String) -> @sidebar.WorkspaceMenu?
@@ -224,7 +225,6 @@ fn SidebarActions::workspace_row(
   label : String,
   active : Bool,
   can_start : Bool,
-  collapsible : Bool,
 ) -> @sidebar.WorkspaceRow {
   let actions : Array[@sidebar.WorkspaceAction] = []
   if can_start {
@@ -238,14 +238,10 @@ fn SidebarActions::workspace_row(
     title: project,
     label,
     active,
-    disclosure: if collapsible {
-      Some({
-        collapsed: (self.project_collapsed)(project),
-        toggle: (self.toggle_project)(project),
-      })
-    } else {
-      None
-    },
+    disclosure: Some({
+      collapsed: (self.project_collapsed)(project),
+      toggle: (self.toggle_project)(project),
+    }),
     menu: (self.project_menu)(project),
     actions,
   }
@@ -255,12 +251,13 @@ fn SidebarActions::workspace_row(
 fn SidebarActions::draft_row(
   self : SidebarActions,
   title : String,
+  nested : Bool,
 ) -> @sidebar.ConversationRow {
   {
     title,
     label: "New Codex thread",
     open: self.open,
-    nested: true,
+    nested,
     subrun: false,
     active: self.selected,
     running: false,
@@ -319,10 +316,10 @@ fn CodexProject::is_separator(self : CodexProject, index : Int) -> Bool {
 
 ///|
 /// Codex contributes only its project and conversation rows to OpenSeek's
-/// global sidebar. The root shell owns the shared collapsible section heading,
-/// just as it does for Workspaces, Chats, and Archived chats. Git worktrees are
-/// execution locations, not navigation groups: all conversations belonging to
-/// the same main project appear directly below that one project row.
+/// global sidebar. Only roots registered in OpenSeek's Projects catalog own a
+/// project row; an arbitrary Codex cwd remains a direct conversation row. Git
+/// worktrees are execution locations, not navigation groups: all conversations
+/// belonging to one registered main project appear below that project row.
 pub fn State::sidebar_entries(
   self : State,
   actions : SidebarActions,
@@ -330,7 +327,9 @@ pub fn State::sidebar_entries(
   let rows : Array[@sidebar.Entry] = []
   let projects : Array[CodexProject] = []
   for thread in self.threads {
-    if thread.project_key() is Some(project) && !projects.contains(project) {
+    if thread.project_key() is Some(project) &&
+      (actions.project_registered)(project.0) &&
+      !projects.contains(project) {
       // Preserve app-server list order: the project containing the newest
       // visible thread appears first, and threads stay newest-first inside it.
       projects.push(project)
@@ -339,7 +338,9 @@ pub fn State::sidebar_entries(
   if self.active_draft() is Some(draft) {
     let root = draft.project_root.unwrap_or(draft.cwd).trim().to_owned()
     let project = CodexProject(root)
-    if !root.is_empty() && !projects.contains(project) {
+    if !root.is_empty() &&
+      (actions.project_registered)(root) &&
+      !projects.contains(project) {
       projects.push(project)
     }
   }
@@ -361,11 +362,11 @@ pub fn State::sidebar_entries(
     if self.active_draft() is Some(draft) &&
       CodexProject(draft.project_root.unwrap_or(draft.cwd).trim().to_owned()) ==
       project {
-      conversations.push(actions.draft_row(draft.cwd))
+      conversations.push(actions.draft_row(draft.cwd, true))
     }
     for thread in self.threads {
       if thread.project_key() == Some(project) {
-        conversations.push(thread.sidebar_row(self, actions))
+        conversations.push(thread.sidebar_row(self, actions, true))
       }
     }
     let group = @sidebar.WorkspaceGroup::{
@@ -374,7 +375,6 @@ pub fn State::sidebar_entries(
         project.display_label(projects, actions.project_label),
         active,
         self.can_start_thread(),
-        true,
       ),
       conversations,
       empty: None,
@@ -383,28 +383,23 @@ pub fn State::sidebar_entries(
       rows.push(entry)
     }
   }
-  let loose = self.threads.filter(thread => thread.project_key() is None)
+  let loose = self.threads.filter(thread => {
+    thread
+    .project_key()
+    .map(project => !(actions.project_registered)(project.0))
+    .unwrap_or(true)
+  })
   let loose_draft = self
     .active_draft()
-    .filter(draft => draft.project_root.unwrap_or(draft.cwd).trim().is_empty())
-  if !loose.is_empty() || loose_draft is Some(_) {
-    let conversations : Array[@sidebar.ConversationRow] = []
-    if loose_draft is Some(draft) {
-      conversations.push(actions.draft_row(draft.id))
-    }
-    for thread in loose {
-      conversations.push(thread.sidebar_row(self, actions))
-    }
-    let group = @sidebar.WorkspaceGroup::{
-      workspace: actions.workspace_row(
-        "No project", "No project", false, false, false,
-      ),
-      conversations,
-      empty: None,
-    }
-    for entry in group.entries() {
-      rows.push(entry)
-    }
+    .filter(draft => {
+      let root = draft.project_root.unwrap_or(draft.cwd).trim().to_owned()
+      root.is_empty() || !(actions.project_registered)(root)
+    })
+  if loose_draft is Some(draft) {
+    rows.push(@sidebar.Conversation(actions.draft_row(draft.id, false)))
+  }
+  for thread in loose {
+    rows.push(@sidebar.Conversation(thread.sidebar_row(self, actions, false)))
   }
   if self.threads.is_empty() && self.active_draft() is None {
     let empty = match self.connection {
@@ -492,6 +487,7 @@ fn CodexThreadRow::sidebar_row(
   self : CodexThreadRow,
   state : State,
   actions : SidebarActions,
+  nested : Bool,
 ) -> @sidebar.ConversationRow {
   let selected = actions.selected &&
     state.active_thread().map(item => item.id == self.id).unwrap_or(false)
@@ -504,7 +500,7 @@ fn CodexThreadRow::sidebar_row(
     title: self.cwd.unwrap_or(self.title),
     label: self.title,
     open: (actions.open_thread)(self.id),
-    nested: true,
+    nested,
     subrun: false,
     active: selected,
     running,
@@ -954,6 +950,7 @@ test "Codex archived catalog contributes restore rows" {
     open_thread: _ => @cmd.none,
     archive_thread: _ => @cmd.none,
     unarchive_thread: _ => @cmd.none,
+    project_registered: _ => false,
     project_collapsed: _ => false,
     toggle_project: _ => @cmd.none,
     project_menu: _ => None,

@@ -238,14 +238,6 @@ pub let codex_thread_history_read : Command[Json, Json] = Command(
 )
 
 ///|
-/// Read only the newest turn's lifecycle fields. The Codex page polls this
-/// while visible so another app-server process can start or finish a task
-/// without forcing OpenSeek to reload the complete conversation history.
-pub let codex_thread_activity_read : Command[Json, Json] = Command(
-  "codex.thread.activity.read",
-)
-
-///|
 pub let codex_thread_list : Command[Json, Json] = Command("codex.thread.list")
 
 ///|

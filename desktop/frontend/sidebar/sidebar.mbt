@@ -184,9 +184,9 @@ pub(all) struct WorkspaceMenu {
 }
 
 ///|
-/// Optional folder disclosure. OpenSeek project rows own one because their
-/// chat previews fold independently. Codex project rows use the same branch;
-/// only non-project buckets such as "No project" omit it.
+/// Optional folder disclosure. OpenSeek and Codex project rows use this same
+/// branch because their conversation previews fold below the registered root.
+/// Non-project conversation rows do not create a workspace row at all.
 pub(all) struct WorkspaceDisclosure {
   collapsed : Bool
   toggle : @cmd.Cmd

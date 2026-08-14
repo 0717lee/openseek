@@ -156,12 +156,6 @@ pub fn boot() -> Unit {
         if model.project_picker is Some(_) {
           subs.push(project_picker_capture_subscription(emit))
         }
-        if model.screen is Codex && model.codex.has_active() {
-          // App-server runtime status is process-local. Poll only the newest
-          // persisted turn while Codex is visible so work started in another
-          // Codex client appears as Running and settles without a manual open.
-          subs.push(@sub.every(2000, emit(Codex(@codex.Msg::poll_activity()))))
-        }
         // Click-away dismissal, one listener per menu and only while that menu
         // is open: a document-wide listener should not outlive what it serves.
         if model.git_details_open ||

@@ -65,9 +65,9 @@ pub fn CodexError::is_unmaterialized_thread_history(self : CodexError) -> Bool {
 }
 
 ///|
-/// The same pre-rollout task state also rejects the lightweight activity
-/// endpoint. It is an empty activity snapshot, not a periodic host failure.
-pub fn CodexError::is_unmaterialized_thread_activity(self : CodexError) -> Bool {
+/// The same pre-rollout task state also rejects `thread/turns/list`. Callers
+/// that only need to prove there is no first turn may treat it as an empty page.
+pub fn CodexError::is_unmaterialized_thread_turns(self : CodexError) -> Bool {
   match self {
     JsonRpc(method_~, code~, message~, data=_) =>
       method_ == "thread/turns/list" &&

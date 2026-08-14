@@ -21,7 +21,6 @@ pub fn Msg::archive_thread(String) -> Self
 pub fn Msg::close_git_details() -> Self
 pub fn Msg::notification(String, Json) -> Self
 pub fn Msg::open_thread(String) -> Self
-pub fn Msg::poll_activity() -> Self
 pub fn Msg::refresh() -> Self
 pub fn Msg::server_request(Json, String, Json) -> Self
 pub fn Msg::start_draft(String, String) -> Self
@@ -46,6 +45,7 @@ pub(all) struct SidebarActions {
   open_thread : (String) -> @cmd.Cmd
   archive_thread : (String) -> @cmd.Cmd
   unarchive_thread : (String) -> @cmd.Cmd
+  project_registered : (String) -> Bool
   project_collapsed : (String) -> Bool
   toggle_project : (String) -> @cmd.Cmd
   project_menu : (String) -> @sidebar.WorkspaceMenu?

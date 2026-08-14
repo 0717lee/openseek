@@ -155,7 +155,6 @@ priv enum CodexReplyKind {
   CodexModelsReply
   CodexThreadsReply(Bool)
   CodexThreadReply(String)
-  CodexActivityReply
   CodexDraftOpenReply(String)
   CodexDraftThreadReply(String)
   CodexTurnReply(String)
@@ -176,7 +175,6 @@ priv enum CodexReplyKind {
 /// mutates Codex's account, thread, turn, item, or approval state directly.
 enum Msg {
   Refresh
-  PollActivity
   // All editable input events cross the shared composer controller. Codex
   // interprets only the resulting completion choice or submission through
   // app-server after the common transition has settled.
@@ -227,12 +225,6 @@ enum Msg {
 /// Shell entrypoint for refreshing the focused Codex catalog.
 pub fn Msg::refresh() -> Msg {
   Refresh
-}
-
-///|
-/// Shell entrypoint for the selected task's lightweight activity poll.
-pub fn Msg::poll_activity() -> Msg {
-  PollActivity
 }
 
 ///|
@@ -1158,8 +1150,8 @@ fn State::active_turn_id(self : State) -> String? {
 
 ///|
 /// A running turn is mutable only after this Desktop actor acquired the
-/// app-server writer. History and activity polling may reveal another
-/// client's turn, but that alone never grants interrupt authority.
+/// app-server writer. Persisted history may contain a running turn, but that
+/// alone never grants interrupt authority.
 fn State::writable_turn_id(self : State) -> String? {
   if self.write_access is CodexWritable {
     self.active_turn_id()
@@ -1233,57 +1225,6 @@ fn CodexThread::with_turn(self : CodexThread, turn : CodexTurn) -> CodexThread {
     turns.push(turn)
   }
   { ..self, turns, }
-}
-
-///|
-/// Reconcile lifecycle fields from a summary poll without replacing complete
-/// transcript items with the summary page's abbreviated first/last items.
-fn CodexThread::with_turn_activity(
-  self : CodexThread,
-  activity : CodexTurn,
-) -> CodexThread {
-  let mut found = false
-  let turns = self.turns.map(turn => {
-    if turn.id == activity.id {
-      found = true
-      {
-        ..turn
-        // Never downgrade a locally streamed in-progress turn merely because
-        // a persisted summary has not caught up with this process's runtime
-        // event. A real completion carries `completedAt` and may settle it.
-        ,
-        status: if turn.status == "inProgress" && activity.completed_at is None {
-          turn.status
-        } else {
-          activity.status
-        },
-        started_at: activity.started_at,
-        completed_at: activity.completed_at,
-        error: activity.error,
-      }
-    } else {
-      turn
-    }
-  })
-  if !found {
-    turns.push({ ..activity, items: [] })
-  }
-  { ..self, turns, }
-}
-
-///|
-/// Apply an activity reply only to the task that requested it. A delayed poll
-/// from the previously selected task cannot alter the current conversation.
-fn State::with_activity_reply(self : State, value : Json) -> State {
-  guard value is Object(fields) &&
-    @jsonx.json_text(fields, "threadId") is Some(thread_id) &&
-    self.active_thread() is Some(active) &&
-    active.id == thread_id &&
-    fields.get("turn") is Some(turn) &&
-    CodexTurn::decode(turn) is Some(activity) else {
-    return self
-  }
-  { ..self, selection: CodexStoredTask(active.with_turn_activity(activity)) }
 }
 
 ///|

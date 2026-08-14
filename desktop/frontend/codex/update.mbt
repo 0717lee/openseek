@@ -13,7 +13,6 @@ pub fn update(
   match msg {
     Refresh =>
       (state.refresh(dispatch, channel), { ..state, loading: true, notice: "" })
-    PollActivity => (state.poll_activity(dispatch, channel), state)
     Composer(msg) => state.update_composer(dispatch, channel, msg)
     SymbolSearchDue(owner~, generation~) =>
       state.begin_completion_search(
@@ -151,13 +150,7 @@ pub fn update(
       if !state.accepts_reply(kind) {
         return (@cmd.none, state)
       }
-      // Activity polling is independent of user commands. Its reply must not
-      // settle a simultaneous send/archive/login request's loading state.
-      let mut next = if kind is CodexActivityReply {
-        state
-      } else {
-        { ..state, loading: false }
-      }
+      let mut next = { ..state, loading: false }
       let mut cmd = @cmd.none
       match kind {
         CodexStatusReply => next = next.with_status(value)
@@ -186,7 +179,6 @@ pub fn update(
             ])
           }
         }
-        CodexActivityReply => next = next.with_activity_reply(value)
         CodexDraftThreadReply(_) => {
           next = next.with_thread_reply(value)
           // Install the real id before starting the turn so every app-server
@@ -276,11 +268,6 @@ pub fn update(
       if !state.accepts_reply(kind) {
         return (@cmd.none, state)
       }
-      // A status poll is best-effort. Older app-server builds or a transient
-      // read race must not replace a healthy conversation with an error banner.
-      if kind is CodexActivityReply {
-        return (@cmd.none, state)
-      }
       let subject = match kind {
         CodexStatusReply => "Codex status"
         CodexRequestsReply => "Codex requests"
@@ -290,7 +277,6 @@ pub fn update(
         CodexThreadsReply(true) => "Archived Codex threads"
         CodexDraftOpenReply(_) => "Codex draft"
         CodexThreadReply(_) | CodexDraftThreadReply(_) => "Codex thread"
-        CodexActivityReply => "Codex activity"
         CodexTurnReply(_) | CodexWorktreeTurnReply(_, _) => "Codex turn"
         CodexWorktreeRepairReply(_) => "Codex worktree rebuild"
         CodexLoginReply => "Codex sign-in"
@@ -479,7 +465,6 @@ test "Codex update handlers are pure and idempotent" {
   }
   let messages : Array[Msg] = [
     Refresh,
-    PollActivity,
     Composer(@composer.DraftChanged("next draft")),
     ModelChanged("gpt-test"),
     ToggleGitDetails,
@@ -517,16 +502,6 @@ test "Codex update handlers are pure and idempotent" {
     Reply(kind=CodexThreadsReply(true), value={ "data": [] }),
     Reply(kind=CodexThreadReply("thread-1"), value={
       "thread": { "id": "thread-1", "turns": [] },
-    }),
-    Reply(kind=CodexActivityReply, value={
-      "threadId": "thread-1",
-      "turn": {
-        "id": "turn-1",
-        "status": "inProgress",
-        "startedAt": 100,
-        "completedAt": Json::null(),
-        "items": [],
-      },
     }),
     Reply(kind=CodexDraftThreadReply("desktop-test"), value={
       "thread": { "id": "thread-2", "turns": [] },
@@ -567,7 +542,6 @@ test "Codex update handlers are pure and idempotent" {
       }),
       message="test failure",
     ),
-    Failed(kind=CodexActivityReply, message="poll failure"),
     StatusChanged({ "status": "ready" }),
     Notification(method_="thread/name/updated", params={
       "threadId": "thread-1",
@@ -810,79 +784,6 @@ test "Codex draft and turn replies stay with their originating task" {
     _ => @cmd.none,
   )
   assert_true(stale_turn_failure == current_thread)
-}
-
-///|
-test "Codex activity polling follows explicit turn status" {
-  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
-  let state = {
-    ..State::from_thread_snapshot({
-      "thread": {
-        "id": "thread-1",
-        "turns": [
-          {
-            "id": "turn-1",
-            "status": "completed",
-            "startedAt": 80,
-            "completedAt": 90,
-            "items": [],
-          },
-        ],
-      },
-    })
-    // A background poll must not settle an unrelated user operation.
-    ,
-    loading: true,
-  }
-  let (_, running) = update(
-    dispatch,
-    Reply(kind=CodexActivityReply, value={
-      "threadId": "thread-1",
-      "turn": {
-        "id": "turn-2",
-        "status": "inProgress",
-        "startedAt": 100,
-        "completedAt": Json::null(),
-        "items": [],
-      },
-    }),
-    state,
-    @interop.ChannelId::Local,
-    _ => @cmd.none,
-  )
-  assert_true(running.is_running())
-  assert_false(running.is_active_elsewhere())
-  assert_true(running.loading)
-
-  let (_, completed) = update(
-    dispatch,
-    Reply(kind=CodexActivityReply, value={
-      "threadId": "thread-1",
-      "turn": {
-        "id": "turn-2",
-        "status": "completed",
-        "startedAt": 100,
-        "completedAt": 120,
-        "items": [],
-      },
-    }),
-    running,
-    @interop.ChannelId::Local,
-    _ => @cmd.none,
-  )
-  assert_false(completed.is_running())
-
-  let (_, stale) = update(
-    dispatch,
-    Reply(kind=CodexActivityReply, value={
-      "threadId": "thread-old",
-      "turn": { "id": "turn-stale", "status": "inProgress", "items": [] },
-    }),
-    completed,
-    @interop.ChannelId::Local,
-    _ => @cmd.none,
-  )
-  assert_true(stale == completed)
 }
 
 ///|

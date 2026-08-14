@@ -364,11 +364,6 @@ pub fn endpoints(
     ) {
       state.codex_thread_history(params)
     }),
-    @endpoint.Endpoint::remote(@commands.codex_thread_activity_read, async fn(
-      params,
-    ) {
-      state.codex_thread_activity(params)
-    }),
     state.codex_endpoint(@commands.codex_thread_list),
     state.codex_endpoint(@commands.codex_thread_archive),
     state.codex_endpoint(@commands.codex_thread_unarchive),
@@ -727,44 +722,6 @@ async fn ApiState::codex_thread_history(self : ApiState, params : Json) -> Json 
 }
 
 ///|
-/// Return only the newest turn for local lifecycle reconciliation.
-/// `thread.status` is scoped to one app-server process, while legacy persisted
-/// turns can omit completion timestamps after an interruption; neither is an
-/// active-writer signal. Writer ownership is learned only from `thread/resume`.
-/// `itemsView=summary` keeps this two-second poll bounded for long histories.
-async fn ApiState::codex_thread_activity(
-  self : ApiState,
-  params : Json,
-) -> Json {
-  guard params is Object(fields) &&
-    fields.get("threadId") is Some(String(thread_id)) else {
-    raise @host.PayloadError("malformed Codex thread activity payload")
-  }
-  let page = try
-    self.codex.call(method_="thread/turns/list", params={
-      "threadId": thread_id,
-      "limit": 1,
-      "sortDirection": "desc",
-      "itemsView": "summary",
-    })
-  catch {
-    @codex.JsonRpc(..) as error if error.is_unmaterialized_thread_activity() =>
-      Json::null()
-    error => raise error
-  } noraise {
-    value => value
-  }
-  if page is Null {
-    return { "threadId": thread_id, "turn": Json::null() }
-  }
-  guard page is Object(page_fields) &&
-    page_fields.get("data") is Some(Array(turns)) else {
-    raise @host.PayloadError("malformed Codex thread activity reply")
-  }
-  { "threadId": thread_id, "turn": turns.get(0).unwrap_or(Json::null()) }
-}
-
-///|
 /// Search only the exact cwd authorized by an app-server thread reply. The
 /// public method does not accept app-server `roots` directly, so a remote page
 /// cannot use Codex's file index as an arbitrary filesystem search.
@@ -845,8 +802,23 @@ async fn ApiState::codex_worktree_project(
       "Codex worktree requires an empty task at its main project root",
     )
   }
-  let activity = self.codex_thread_activity({ "threadId": thread_id })
-  guard activity is Object(fields) && fields.get("turn") is Some(Null) else {
+  let page = try
+    self.codex.call(method_="thread/turns/list", params={
+      "threadId": thread_id,
+      "limit": 1,
+      "sortDirection": "desc",
+      "itemsView": "summary",
+    })
+  catch {
+    @codex.JsonRpc(..) as error if error.is_unmaterialized_thread_turns() =>
+      Json::object({ "data": Json::array([]) })
+    error => raise error
+  } noraise {
+    value => value
+  }
+  guard page is Object(fields) &&
+    fields.get("data") is Some(Array(turns)) &&
+    turns.is_empty() else {
     raise @host.HostError(
       "Codex worktree can only be chosen before the first turn",
     )

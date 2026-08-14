@@ -20,8 +20,8 @@ pub(all) suberror CodexError {
   Unavailable(String)
 } derive(@debug.Debug)
 pub fn CodexError::is_active_writer(Self) -> Bool
-pub fn CodexError::is_unmaterialized_thread_activity(Self) -> Bool
 pub fn CodexError::is_unmaterialized_thread_history(Self) -> Bool
+pub fn CodexError::is_unmaterialized_thread_turns(Self) -> Bool
 pub impl Show for CodexError
 
 // Types and methods

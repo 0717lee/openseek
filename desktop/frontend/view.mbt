@@ -402,6 +402,11 @@ fn device_section_rows(
     open_thread: thread_id => dispatch(CodexOpenThread(thread_id)),
     archive_thread: thread_id => dispatch(CodexArchiveThread(thread_id)),
     unarchive_thread: thread_id => dispatch(CodexUnarchiveThread(thread_id)),
+    project_registered: path => {
+      @resource.of_path(dev.channel, path)
+      .map(project => dev.projects.contains(project))
+      .unwrap_or(false)
+    },
     project_collapsed: path => {
       @resource.of_path(dev.channel, path)
       .map(project => model.project_collapsed(dev.channel, project))
