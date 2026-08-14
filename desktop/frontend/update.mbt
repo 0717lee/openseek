@@ -625,7 +625,7 @@ fn is_steer_receipt(event : @transcript.EngineEvent) -> Bool {
 
 ///|
 /// Apply an accepted completion row: a slash command runs its action, while a
-/// skill mention or symbol reference becomes a chip in the composer's mention
+/// skill, symbol, or file reference becomes a chip in the composer's mention
 /// tray (its expansion is spliced into the prompt on send). Either way the menu
 /// closes and only the typed trigger token is removed from the textarea.
 fn accept_completion(
@@ -659,6 +659,17 @@ fn accept_completion(
         task=menu.menu.draft_without_token(),
       )
     }
+    Files =>
+      if item.path is Some(path) {
+        accept_mention(
+          model,
+          File(path~),
+          range=None,
+          task=menu.menu.draft_without_token(),
+        )
+      } else {
+        (@cmd.none, { ..model, completion: None })
+      }
   }
 }
 
@@ -1637,6 +1648,11 @@ fn update(
     (@cmd.none, model)
   }
   let (model, panel_cmd) = sync_file_panel(dispatch, model)
+  // File completion consumes the panel's shared index, so restart it only
+  // after the panel has dropped the previous root's snapshot.
+  let (file_completion_restart_cmd, model) = model.restart_file_completion_after_root_change(
+    dispatch, previous,
+  )
   // The launcher menu belongs to one dock owner. Conversation changes are
   // already explicit root transitions, so close it here instead of observing a
   // rendered owner marker through the DOM.
@@ -1663,7 +1679,7 @@ fn update(
   (
     @cmd.batch([
       cmd, quick_open_cmd, quick_open_restart_cmd, symbol_restart_cmd, panel_visibility_cmd,
-      panel_cmd, terminal_cmd, browser_cmd,
+      panel_cmd, file_completion_restart_cmd, terminal_cmd, browser_cmd,
     ]),
     model,
   )
@@ -1807,7 +1823,9 @@ fn update_msg(
         empty_symbol_cache()
       }
       let completion_debounce = model.completion_debounce.advanced()
-      let command = match @composer.Trigger::parse(value, inline_markers="$#") {
+      let (files, files_loading) = model.completion_files(value)
+      let command = match
+        @composer.Trigger::parse(value, inline_markers="$#@") {
         Some(trigger) if trigger.marker() == "#" &&
           (
             model.symbol_cache.owner != Some(owner) ||
@@ -1817,6 +1835,25 @@ fn update_msg(
           completion_debounce.delayed(generation => {
             dispatch(CompletionDue(owner~, query=trigger.query(), generation~))
           })
+        Some(trigger) if trigger.marker() == "@" &&
+          model.file_panel.index is @fileeditor.IndexReady(truncated=true, ..) &&
+          root is Some(root) =>
+          completion_debounce.delayed(generation => {
+            dispatch(
+              FileCompletionDue(
+                owner~,
+                root~,
+                query=trigger.query(),
+                generation~,
+              ),
+            )
+          })
+        Some(trigger) if trigger.marker() == "@" &&
+          root is Some(_) &&
+          (
+            model.file_panel.index is @fileeditor.IndexEmpty ||
+            model.file_panel.index is @fileeditor.IndexFailed
+          ) => dispatch(FileEditor(@fileeditor.EnsureFileIndex))
         _ => @cmd.none
       }
       (
@@ -1830,12 +1867,28 @@ fn update_msg(
             model.installed_skills,
             symbol_cache,
             owner,
+            files~,
+            files_loading~,
           ),
         },
       )
     }
     CompletionDue(owner~, query~, generation~) =>
       model.begin_completion_symbol_request(dispatch, owner, query, generation)
+    FileCompletionDue(owner~, root~, query~, generation~) =>
+      model.begin_file_completion_request(
+        dispatch, owner, root, query, generation,
+      )
+    FileCompletionLoaded(owner~, root~, query~, generation~, files~) =>
+      model.apply_file_completion_reply(
+        owner,
+        root,
+        query,
+        generation,
+        Some(files),
+      )
+    FileCompletionFailed(owner~, root~, query~, generation~) =>
+      model.apply_file_completion_reply(owner, root, query, generation, None)
     CompletionMove(delta) =>
       if model.completion is Some(menu) {
         (
@@ -3431,7 +3484,18 @@ fn update_msg(
         file_ctx(model),
       )
       let next = { ..model, file_panel: panel }
-      (cmd, next)
+      let next = match msg {
+        @fileeditor.EnsureFileIndex
+        | @fileeditor.FilesIndexed(..)
+        | @fileeditor.FileIndexFailed(..) => next.refresh_file_completion()
+        _ => next
+      }
+      let completion_cmd = match msg {
+        @fileeditor.FilesIndexed(..) | @fileeditor.FileIndexFailed(..) =>
+          next.file_completion_query_after_index(dispatch)
+        _ => @cmd.none
+      }
+      (@cmd.batch([cmd, completion_cmd]), next)
     }
     Dock(msg) => {
       // The strip machine is pure; the cross-package effects of the
@@ -10347,6 +10411,251 @@ test "update is pure: accepting an inline skill preserves prompt text" {
     twice.active().mentions[0].ref_ is Skill(name="review-pr"),
   )
   assert_true(once.completion is None && twice.completion is None)
+}
+
+///|
+test "file index completion refreshes and accepts a workspace file" {
+  let dispatch = test_dispatch()
+  let owner : @interop.ConversationKey = {
+    channel: Local,
+    session: "desktop-test",
+  }
+  let base = test_model()
+  let file_emit = dispatch.map(msg => FileEditor(msg))
+  let (synced, _) = @fileeditor.sync(file_emit, base.file_panel, file_ctx(base))
+  let (_, loading) = @fileeditor.update(
+    file_emit,
+    @fileeditor.EnsureFileIndex,
+    synced,
+    file_ctx(base),
+  )
+  let model = { ..base, file_panel: loading }
+  let (_, searching) = update(dispatch, TaskChanged("Inspect @main"), model)
+  guard searching.completion is Some(pending) else {
+    fail("the inline file token should open completion")
+  }
+  assert_true(pending.kind is Files)
+  assert_true(pending.menu.loading())
+  assert_eq(pending.menu.length(), 0)
+  let indexed = FileEditor(
+    @fileeditor.FilesIndexed(
+      owner~,
+      epoch=searching.file_panel.request_epoch,
+      files=[@pathx.Relative("src/main.mbt")],
+      truncated=false,
+    ),
+  )
+  let (_, dismissed) = update(dispatch, CompletionDismiss, searching)
+  let (_, stayed_closed) = update(dispatch, indexed, dismissed)
+  let (_, stayed_closed_again) = update(dispatch, indexed, dismissed)
+  assert_true(stayed_closed.completion is None)
+  assert_true(stayed_closed.completion == stayed_closed_again.completion)
+  let (_, loaded) = update(dispatch, indexed, searching)
+  guard loaded.completion is Some(menu) else {
+    fail("the file-index reply should rebuild completion")
+  }
+  assert_false(menu.menu.loading())
+  assert_eq(menu.menu.length(), 1)
+  guard menu.menu.get(0) is Some(file) else { fail("file row expected") }
+  assert_eq(file.label, "main.mbt")
+  assert_eq(file.path, Some("src/main.mbt"))
+  let (_, accepted) = update(dispatch, CompletionAccept, loaded)
+  assert_eq(accepted.active().task, "Inspect ")
+  assert_true(
+    accepted.active().mentions ==
+    [{ ref_: File(path="src/main.mbt"), range: None }],
+  )
+}
+
+///|
+test "truncated file completion settles from the complete Host cache" {
+  let dispatch = test_dispatch()
+  let owner : @interop.ConversationKey = {
+    channel: Local,
+    session: "desktop-test",
+  }
+  let base = test_model()
+  guard base.conversation_root(base.active()) is Some(root) else {
+    fail("test conversation should have a concrete root")
+  }
+  let file_emit = dispatch.map(msg => FileEditor(msg))
+  let (synced, _) = @fileeditor.sync(file_emit, base.file_panel, file_ctx(base))
+  let (_, loading) = @fileeditor.update(
+    file_emit,
+    @fileeditor.EnsureFileIndex,
+    synced,
+    file_ctx(base),
+  )
+  let (_, truncated) = @fileeditor.update(
+    file_emit,
+    @fileeditor.FilesIndexed(
+      owner~,
+      epoch=loading.request_epoch,
+      files=[@pathx.Relative("src/visible.mbt")],
+      truncated=true,
+    ),
+    loading,
+    file_ctx(base),
+  )
+  let indexed = { ..base, file_panel: truncated }
+  let (_, searching) = update(dispatch, TaskChanged("Inspect @hidden"), indexed)
+  guard searching.completion is Some(pending) else {
+    fail("truncated indexes should keep the file menu open")
+  }
+  assert_true(pending.kind is Files)
+  assert_true(pending.menu.loading())
+  assert_eq(pending.menu.length(), 0)
+  let (_, loaded) = update(
+    dispatch,
+    FileCompletionLoaded(
+      owner~,
+      root~,
+      query="hidden",
+      generation=searching.completion_debounce.generation(),
+      files=[@pathx.Relative("other/hidden.mbt")],
+    ),
+    searching,
+  )
+  guard loaded.completion is Some(menu) else {
+    fail("the complete cache result should settle file completion")
+  }
+  assert_false(menu.menu.loading())
+  guard menu.menu.get(0) is Some(file) else {
+    fail("a file outside the truncated snapshot should be selectable")
+  }
+  assert_eq(file.path, Some("other/hidden.mbt"))
+
+  let (_, local_searching) = update(
+    dispatch,
+    TaskChanged("Inspect @visible"),
+    indexed,
+  )
+  let (_, fallback) = update(
+    dispatch,
+    FileCompletionFailed(
+      owner~,
+      root~,
+      query="visible",
+      generation=local_searching.completion_debounce.generation(),
+    ),
+    local_searching,
+  )
+  guard fallback.completion is Some(local_menu) else {
+    fail("a failed cache query should retain bounded local matches")
+  }
+  assert_false(local_menu.menu.loading())
+  assert_eq(local_menu.menu.length(), 1)
+}
+
+///|
+test "file completion settles while its checkout root is unavailable" {
+  let dispatch = test_dispatch()
+  let base = test_model()
+  let rootless = base.replace_device({ ..base.dev(), bridge: Connecting })
+  assert_true(rootless.conversation_root(rootless.active()) is None)
+  let (_, searching) = update(
+    dispatch,
+    TaskChanged("Inspect @missing"),
+    rootless,
+  )
+  guard searching.completion is Some(menu) else {
+    fail("a rootless @ token should still expose a settled empty menu")
+  }
+  assert_true(menu.kind is Files)
+  assert_false(menu.menu.loading())
+  assert_eq(menu.menu.length(), 0)
+}
+
+///|
+test "file index failure settles an empty completion menu" {
+  let dispatch = test_dispatch()
+  let owner : @interop.ConversationKey = {
+    channel: Local,
+    session: "desktop-test",
+  }
+  let base = test_model()
+  let file_emit = dispatch.map(msg => FileEditor(msg))
+  let (synced, _) = @fileeditor.sync(file_emit, base.file_panel, file_ctx(base))
+  let (_, loading) = @fileeditor.update(
+    file_emit,
+    @fileeditor.EnsureFileIndex,
+    synced,
+    file_ctx(base),
+  )
+  let (_, searching) = update(dispatch, TaskChanged("Inspect @missing"), {
+    ..base,
+    file_panel: loading,
+  })
+  let failed_reply = FileEditor(
+    @fileeditor.FileIndexFailed(
+      owner~,
+      epoch=searching.file_panel.request_epoch,
+    ),
+  )
+  let (_, dismissed) = update(dispatch, CompletionDismiss, searching)
+  let (_, stayed_closed) = update(dispatch, failed_reply, dismissed)
+  let (_, stayed_closed_again) = update(dispatch, failed_reply, dismissed)
+  assert_true(stayed_closed.completion is None)
+  assert_true(stayed_closed.completion == stayed_closed_again.completion)
+  let (_, failed) = update(dispatch, failed_reply, searching)
+  guard failed.completion is Some(menu) else {
+    fail("a live @ token should retain its settled empty menu")
+  }
+  assert_true(menu.kind is Files)
+  assert_false(menu.menu.loading())
+  assert_eq(menu.menu.length(), 0)
+}
+
+///|
+test "a live file completion restarts when its checkout root changes" {
+  let dispatch = test_dispatch()
+  let owner : @interop.ConversationKey = {
+    channel: Local,
+    session: "desktop-test",
+  }
+  let base = test_model()
+  let file_emit = dispatch.map(msg => FileEditor(msg))
+  let (synced, _) = @fileeditor.sync(file_emit, base.file_panel, file_ctx(base))
+  let (_, loading) = @fileeditor.update(
+    file_emit,
+    @fileeditor.EnsureFileIndex,
+    synced,
+    file_ctx(base),
+  )
+  let (_, ready) = @fileeditor.update(
+    file_emit,
+    @fileeditor.FilesIndexed(
+      owner~,
+      epoch=loading.request_epoch,
+      files=[@pathx.Relative("src/old.mbt")],
+      truncated=false,
+    ),
+    loading,
+    file_ctx(base),
+  )
+  let (_, showing_old) = update(dispatch, TaskChanged("Inspect @old"), {
+    ..base,
+    file_panel: ready,
+  })
+  guard showing_old.completion is Some(old_menu) else {
+    fail("the old root should have a file completion menu")
+  }
+  assert_false(old_menu.menu.loading())
+  assert_eq(old_menu.menu.length(), 1)
+
+  let ready_msg = BridgeReady(
+    scratch_root=owner.channel.test_resource("/next-scratch"),
+  )
+  let (_, rerooted) = update_dev(dispatch, ready_msg, showing_old)
+  let (_, rerooted_again) = update_dev(dispatch, ready_msg, showing_old)
+  assert_true(rerooted.completion == rerooted_again.completion)
+  assert_true(rerooted.file_panel.index is @fileeditor.IndexEmpty)
+  guard rerooted.completion is Some(waiting) else {
+    fail("the new root should keep the file completion menu open")
+  }
+  assert_true(waiting.kind is Files)
+  assert_true(waiting.menu.loading())
+  assert_eq(waiting.menu.length(), 0)
 }
 
 ///|

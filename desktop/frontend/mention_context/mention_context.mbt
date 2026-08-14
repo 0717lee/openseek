@@ -7,16 +7,18 @@
 // jump wiring) stays with the caller — this package only owns the wire form.
 //
 // The pattern mirrors the TUI's `<user_shell_command>` envelope
-// (cmd/tui/internal/command_context): the payloads are interpolated raw, NOT
-// escaped, because the envelope is read by the *model* as natural tagged
-// context — readability of the inner text is the priority. The typed task
-// comes first (the engine titles a session by its first prompt's first
+// (cmd/tui/internal/command_context): element bodies remain verbatim because
+// the envelope is read by the *model* as natural tagged context. Attribute
+// values use the ordinary XML entities for structural characters and line
+// breaks, then `parse` decodes them back into the exact chip value. The typed
+// task comes first (the engine titles a session by its first prompt's first
 // line), then the tagged mention block:
 //
 //   look at this
 //
 //   <user_mentions>
 //   <skill name="review-pr"/>
+//   <file path="src/main.mbt"/>
 //   <symbol name="parse_hover" file="a.mbt" line="5"/>
 //   <annotation file="a.mbt" lines="12-20">
 //   <quote>
@@ -31,8 +33,8 @@
 // Tags sit alone on their own lines, flush left, and element bodies are
 // verbatim lines between them — quoted code must survive the round trip, so
 // nothing is indented or escaped. `parse` also accepts a `<symbol ...>` with
-// a body (truncated source ahead of `</symbol>`), so the encoder can start
-// embedding symbol content later without breaking older messages. We accept
+// a body (truncated source ahead of `</symbol>`), so the wire form can carry
+// truncated symbol source when available. We accept
 // that a task whose own tail happens to spell a well-formed envelope would be
 // misread on re-render; the blast radius is a cosmetic chip row on one
 // message, not corruption — the engine stores the text verbatim and never
@@ -50,6 +52,7 @@ pub(all) enum AnnotationSide {
 ///|
 pub(all) enum MentionRef {
   Skill(name~ : String)
+  File(path~ : String)
   Symbol(name~ : String, file~ : String, line~ : Int)
   Annotation(
     file~ : String,
@@ -68,6 +71,41 @@ pub struct MentionMessage {
   mentions : Array[MentionRef]
   task : String
 } derive(Debug)
+
+///|
+/// One mention-tag attribute in its wire representation. Keeping encoding and
+/// decoding on the same type makes the text protocol a matched pair: quotes,
+/// ampersands, angle brackets, and line breaks cannot terminate or reshape a
+/// tag, while ordinary paths remain readable to the model.
+priv struct MentionAttribute {
+  wire : String
+}
+
+///|
+fn MentionAttribute::encode(text : String) -> MentionAttribute {
+  {
+    wire: text
+    .replace_all(old="&", new="&amp;")
+    .replace_all(old="\"", new="&quot;")
+    .replace_all(old="<", new="&lt;")
+    .replace_all(old=">", new="&gt;")
+    .replace_all(old="\r", new="&#13;")
+    .replace_all(old="\n", new="&#10;"),
+  }
+}
+
+///|
+fn MentionAttribute::decode(wire : String) -> String {
+  wire
+  .replace_all(old="&quot;", new="\"")
+  .replace_all(old="&lt;", new="<")
+  .replace_all(old="&gt;", new=">")
+  .replace_all(old="&#13;", new="\r")
+  .replace_all(old="&#10;", new="\n")
+  // `&amp;` is decoded last so an original literal such as `&quot;` remains
+  // literal after its leading ampersand was encoded as `&amp;quot;`.
+  .replace_all(old="&amp;", new="&")
+}
 
 ///|
 /// The compact text shared by transcript previews and sidebar labels. It
@@ -99,6 +137,7 @@ pub struct Target {
 pub fn glyph(mention : MentionRef) -> String {
   match mention {
     Skill(_) => "$"
+    File(_) => "@"
     Symbol(_) => "#"
     Annotation(_) => "✎"
   }
@@ -109,6 +148,7 @@ pub fn glyph(mention : MentionRef) -> String {
 pub fn label(mention : MentionRef) -> String {
   match mention {
     Skill(name~) => name
+    File(path~) => path
     Symbol(name~, ..) => name
     Annotation(file~, start_line~, end_line~, side~, ..) => {
       let suffix = if side is OriginalRevision { " (original)" } else { "" }
@@ -122,6 +162,7 @@ pub fn label(mention : MentionRef) -> String {
 pub fn target(mention : MentionRef) -> Target? {
   match mention {
     Skill(_) => None
+    File(path~) => Some({ file: path, range: None, annotation: None })
     Symbol(file~, line~, ..) =>
       if file.is_empty() {
         None
@@ -188,15 +229,26 @@ pub fn encode(mentions : Array[MentionRef], task : String) -> String {
 ///|
 fn write_mention(parts : StringBuilder, mention : MentionRef) -> Unit {
   match mention {
-    Skill(name~) => parts <+ "<skill name=\"\{name}\"/>\n"
-    Symbol(name~, file~, line~) =>
+    Skill(name~) => {
+      let name = MentionAttribute::encode(name).wire
+      parts <+ "<skill name=\"\{name}\"/>\n"
+    }
+    File(path~) => {
+      let path = MentionAttribute::encode(path).wire
+      parts <+ "<file path=\"\{path}\"/>\n"
+    }
+    Symbol(name~, file~, line~) => {
+      let name = MentionAttribute::encode(name).wire
       if file.is_empty() {
         parts <+ "<symbol name=\"\{name}\"/>\n"
       } else {
+        let file = MentionAttribute::encode(file).wire
         parts <+
           "<symbol name=\"\{name}\" file=\"\{file}\" line=\"\{line}\"/>\n"
       }
+    }
     Annotation(file~, start_line~, end_line~, quote~, comment~, side~) => {
+      let file = MentionAttribute::encode(file).wire
       let side_attribute = match side {
         WorkingRevision => ""
         OriginalRevision => " side=\"original\""
@@ -230,7 +282,8 @@ fn write_body(parts : StringBuilder, body : String) -> Unit {
 /// message). The structure is validated strictly — the closing tag must be
 /// the last line (one trailing blank tolerated), an opener must precede it,
 /// and everything between must parse as mention elements — so a prompt that
-/// merely mentions the tags is not misread as chips.
+/// merely mentions the tags is not misread as chips. Attributes always use
+/// `MentionAttribute` encoding; there is only one wire format.
 pub fn parse(content : String) -> MentionMessage? {
   let lines = [
     for raw in content.split("\n") => raw.trim_end(chars="\r").to_owned()
@@ -257,14 +310,18 @@ pub fn parse(content : String) -> MentionMessage? {
 let skill_pattern : Regex = re"^<skill name=\"(?<name>[^\"]+)\"/>$"
 
 ///|
+/// `<file path="..."/>`, alone on its line.
+let file_pattern : Regex = re"^<file path=\"(?<path>[^\"]+)\"/>$"
+
+///|
 /// `<symbol name="..."/>` with an optional resolved location, self-closing or
 /// opening a body of truncated source (`tail` is `/>` or `>`).
 let symbol_pattern : Regex = re"^<symbol name=\"(?<name>[^\"]+)\"( file=\"(?<file>[^\"]+)\" line=\"(?<line>[0-9]+)\")?(?<tail>/>|>)$"
 
 ///|
 /// `<annotation file="..." lines="start-end">`, optionally marked as an
-/// original-revision line, opening the quote/comment body. The omitted side is
-/// the working revision for compatibility with existing stored transcripts.
+/// original-revision line, opening the quote/comment body. An omitted side
+/// denotes the working revision written by `encode`.
 let annotation_pattern : Regex = re"^<annotation file=\"(?<file>[^\"]+)\" lines=\"(?<start>[0-9]+)-(?<end>[0-9]+)\"( side=\"(?<side>original)\")?>$"
 
 ///|
@@ -279,7 +336,13 @@ fn parse_mention_block(lines : ArrayView[String]) -> Array[MentionRef]? {
     let line = lines[index]
     if skill_pattern.execute(line) is Some(matched) {
       guard matched.named_group("name") is Some(name) else { return None }
-      mentions.push(Skill(name=name.to_owned()))
+      mentions.push(Skill(name=MentionAttribute::decode(name.to_owned())))
+      index += 1
+      continue
+    }
+    if file_pattern.execute(line) is Some(matched) {
+      guard matched.named_group("path") is Some(path) else { return None }
+      mentions.push(File(path=MentionAttribute::decode(path.to_owned())))
       index += 1
       continue
     }
@@ -294,7 +357,13 @@ fn parse_mention_block(lines : ArrayView[String]) -> Array[MentionRef]? {
       } else {
         ("", 0)
       }
-      mentions.push(Symbol(name=name.to_owned(), file~, line=line_number))
+      mentions.push(
+        Symbol(
+          name=MentionAttribute::decode(name.to_owned()),
+          file=MentionAttribute::decode(file),
+          line=line_number,
+        ),
+      )
       if matched.named_group("tail") is Some(">") {
         // A body of truncated source: skipped — a chip renders from the
         // attributes alone; the content was for the model.
@@ -329,7 +398,7 @@ fn parse_mention_block(lines : ArrayView[String]) -> Array[MentionRef]? {
       }
       mentions.push(
         Annotation(
-          file=file.to_owned(),
+          file=MentionAttribute::decode(file.to_owned()),
           start_line~,
           end_line~,
           quote~,

@@ -9,6 +9,7 @@ test "encode lays out the task first, then the tagged mention block" {
   let content = @mention_context.encode(
     [
       Skill(name="review-pr"),
+      File(path="src/main.mbt"),
       Symbol(name="parse_hover", file="src/hover.mbt", line=5),
       Symbol(name="unplaced", file="", line=0),
       Annotation(
@@ -29,6 +30,7 @@ test "encode lays out the task first, then the tagged mention block" {
       #|
       #|<user_mentions>
       #|<skill name="review-pr"/>
+      #|<file path="src/main.mbt"/>
       #|<symbol name="parse_hover" file="src/hover.mbt" line="5"/>
       #|<symbol name="unplaced"/>
       #|<annotation file="src/hover.mbt" lines="12-13">
@@ -62,6 +64,7 @@ test "encode of chips alone omits the task block" {
 test "parse round-trips what encode wrote" {
   let mentions : Array[@mention_context.MentionRef] = [
     Skill(name="review-pr"),
+    File(path="src/main.mbt"),
     Symbol(name="parse_hover", file="src/hover.mbt", line=5),
     Symbol(name="unplaced", file="", line=0),
     Annotation(
@@ -79,6 +82,23 @@ test "parse round-trips what encode wrote" {
     fail("round trip failed")
   }
   assert_eq(parsed.task, task)
+  @debug.assert_eq(parsed.mentions, mentions)
+}
+
+///|
+test "attribute escaping preserves structural filename characters" {
+  let mentions : Array[@mention_context.MentionRef] = [
+    File(path="src/report\"old&amp;.mbt"),
+    Symbol(name="render<preview>", file="src/line\nbreak.mbt", line=7),
+  ]
+  let encoded = @mention_context.encode(mentions, "inspect these")
+  assert_true(
+    encoded.contains("<file path=\"src/report&quot;old&amp;amp;.mbt\"/>"),
+  )
+  assert_true(encoded.contains("file=\"src/line&#10;break.mbt\""))
+  guard @mention_context.parse(encoded) is Some(parsed) else {
+    fail("escaped attributes should remain a well-formed envelope")
+  }
   @debug.assert_eq(parsed.mentions, mentions)
 }
 
