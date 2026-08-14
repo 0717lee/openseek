@@ -16,11 +16,21 @@ fn session_snapshot_command(
   generation : Int,
   activate_on_success : Bool,
 ) -> @cmd.Cmd {
-  let workspace = model.session_project(channel, session)
+  let (workspace, archived) = match model.find_conversation(channel, session) {
+    Some(conv) => (conv.workspace.project(), conv.is_archived_read_only())
+    None => (model.session_project(channel, session), false)
+  }
   if activate_on_success {
-    open_session(dispatch, channel, session, workspace~, generation~)
+    open_session(dispatch, channel, session, workspace~, generation~, archived~)
   } else {
-    refresh_session(dispatch, channel, session, workspace~, generation~)
+    refresh_session(
+      dispatch,
+      channel,
+      session,
+      workspace~,
+      generation~,
+      archived~,
+    )
   }
 }
 
@@ -190,6 +200,67 @@ fn open_session_on(
     } else {
       (@cmd.none, next)
     }
+  }
+}
+
+///|
+/// Open one archived row against its archived durable twin. Reusing an
+/// already-open archived transcript preserves its rendered snapshot while a
+/// fresh generation catches up; a live same-id entry is replaced so no draft
+/// or run state can cross the archive boundary.
+fn Model::open_archived_session_on(
+  self : Model,
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  session_id : String,
+  workspace : @common.Uri?,
+) -> (@cmd.Cmd, Model) {
+  let owner : @interop.ConversationKey = { channel, session: session_id }
+  let known = self.find_conversation(channel, session_id)
+  let conversation = match known {
+    Some(conv) if conv.is_archived_read_only() => conv
+    _ =>
+      {
+        ..empty_conversation(
+          channel,
+          session_id,
+          project?=workspace,
+          model=self
+            .remembered_model(channel, session_id)
+            .unwrap_or(self.default_model),
+        ),
+        record: ArchivedRecord,
+      }
+  }
+  let conversation = if self.device_state(channel) is Some(dev) {
+    {
+      ..conversation,
+      record: ArchivedRecord,
+      workspace: dev.conversation_workspace(
+        workspace,
+        session_id,
+        conversation.workspace,
+      ),
+    }
+  } else {
+    { ..conversation, record: ArchivedRecord }
+  }
+  let (model, generation) = self.begin_transcript_reload(conversation)
+  let next = {
+    ..model.activate(channel, session_id),
+    screen: Chat,
+    loading_conversation: Some(owner),
+    completion: None,
+  }.with_active_project(workspace)
+  if generation is Some(generation) {
+    (
+      session_snapshot_command(
+        dispatch, channel, next, session_id, generation, true,
+      ),
+      next,
+    )
+  } else {
+    (@cmd.none, next)
   }
 }
 
@@ -513,7 +584,11 @@ fn retry_session_snapshot(
     let owner : @interop.ConversationKey = { channel, session }
     if activate_on_success && model.loading_conversation == Some(owner) {
       let (toast, next) = next.notify_error(dispatch, message)
-      let (sessions, next) = request_sessions_refresh(dispatch, channel, next)
+      let (sessions, next) = if conv.is_archived_read_only() {
+        request_archived_refresh(dispatch, channel, next)
+      } else {
+        request_sessions_refresh(dispatch, channel, next)
+      }
       (
         @cmd.batch([toast, sessions, scroll]),
         { ..next, loading_conversation: None },
@@ -574,15 +649,20 @@ fn apply_session_snapshot(
       loading_conversation: None,
       completion: None,
     }
-    let (branch_cmd, probed) = probe_branch(
-      dispatch,
-      next,
-      channel,
-      session,
-      next.conversation_root(next.active()),
-    )
-    next = probed
-    commands.push(branch_cmd)
+    // An archived transcript has no runnable checkout to inspect here. Its
+    // retained workspace placement is still available to file links, but git
+    // state is refreshed only after an unarchive turns the record live.
+    if !conv.is_archived_read_only() {
+      let (branch_cmd, probed) = probe_branch(
+        dispatch,
+        next,
+        channel,
+        session,
+        next.conversation_root(next.active()),
+      )
+      next = probed
+      commands.push(branch_cmd)
+    }
   }
   if gapped || reload_after_current {
     guard next.find_conversation(channel, session) is Some(conv) else {
@@ -634,6 +714,9 @@ fn accept_completion(
   menu : Completion,
   item : CompletionItem,
 ) -> (@cmd.Cmd, Model) {
+  if model.active().is_archived_read_only() {
+    return (@cmd.none, { ..model, completion: None })
+  }
   match menu.kind {
     SlashCommands => run_slash_command(dispatch, model, item.command)
     // The chip carries its envelope form directly: the skill's bare name (its
@@ -1033,6 +1116,9 @@ fn run_slash_command(
   model : Model,
   command : String,
 ) -> (@cmd.Cmd, Model) {
+  if model.active().is_archived_read_only() {
+    return (@cmd.none, { ..model, completion: None })
+  }
   match command {
     "compact" => {
       let conv = model.active()
@@ -1809,6 +1895,9 @@ fn update_msg(
         (clear_legacy_engine_settings(), model)
       }
     TaskChanged(value) => {
+      if model.active().is_archived_read_only() {
+        return (@cmd.none, model)
+      }
       let owner : @interop.ConversationKey = {
         channel: model.focused,
         session: model.active().session_id,
@@ -2626,6 +2715,9 @@ fn update_msg(
     }
     Send => {
       let conv = model.active()
+      if conv.is_archived_read_only() {
+        return (@cmd.none, model)
+      }
       let checkout = model.checkout_placement(conv)
       // The outgoing prompt is the typed text with the chips folded in as the
       // `<user_mentions>` envelope. Typed text is required — chips alone are
@@ -3235,6 +3327,30 @@ fn update_msg(
         let (cmd, model) = open_session_on(dispatch, channel, model, session_id)
         (@cmd.batch([focus_cmd, cmd]), model)
       }
+    OpenArchivedSession(channel, session~, workspace~) => {
+      guard !session.is_empty() && model.device_state(channel) is Some(dev) else {
+        return (@cmd.none, model)
+      }
+      // The row may have been restored while its click was queued. Re-read
+      // the current archived index and use its placement rather than opening
+      // a stale archived target or trusting an obsolete workspace hint.
+      let mut found = false
+      let mut current_workspace = workspace
+      for item in dev.archived {
+        if item.id == session {
+          found = true
+          current_workspace = item.workspace
+        }
+      }
+      guard found && !(dev.archive_override(session) is Some(false)) else {
+        return (@cmd.none, model)
+      }
+      let (focus_cmd, model) = focus_channel(dispatch, model, channel)
+      let (cmd, model) = model.open_archived_session_on(
+        dispatch, channel, session, current_workspace,
+      )
+      (@cmd.batch([focus_cmd, cmd]), model)
+    }
     ColorSchemeChanged(dark) => {
       let model = { ..model, system_dark: dark }
       match model.theme {
@@ -3427,6 +3543,9 @@ fn update_msg(
     }
     OpenGoalEditor => {
       let conv = model.active()
+      if conv.is_archived_read_only() {
+        return (@cmd.none, model)
+      }
       // Opening goal mode touches only this conversation, so an unsaved edit
       // waiting on another one is untouched — the reason the draft lives here
       // rather than in a single model-wide slot.
@@ -3448,6 +3567,9 @@ fn update_msg(
     }
     GoalDraftEdited(draft) => {
       let conv = model.active()
+      if conv.is_archived_read_only() {
+        return (@cmd.none, model)
+      }
       if conv.goal_edit is Some(_) {
         (
           @cmd.none,
@@ -3459,6 +3581,9 @@ fn update_msg(
     }
     SubmitGoal => {
       let conv = model.active()
+      if conv.is_archived_read_only() {
+        return (@cmd.none, model)
+      }
       guard conv.goal_edit is Some(edit) else { return (@cmd.none, model) }
       let text = edit.draft.trim().to_owned()
       // A blank draft has nothing to set (the button is disabled; this also
@@ -3491,6 +3616,9 @@ fn update_msg(
       // The ✕ belongs to the conversation on screen, and so does the edit it
       // closes — neither can reach a neighbour's.
       let conv = model.active()
+      if conv.is_archived_read_only() {
+        return (@cmd.none, model)
+      }
       let (model, command) = model.allocate_submission_id()
       (
         send_goal(dispatch, model, conv, command, None),
@@ -4432,6 +4560,46 @@ fn update_device_msg(
         conversations,
       }
       let commands : Array[@cmd.Cmd] = []
+      // A client can miss session.changed while disconnected. A live row from
+      // this connection is then the first proof that a cached read-only record
+      // was restored elsewhere. Reclassify it before the archived-list reply:
+      // the override admits new commits immediately, and the new transcript
+      // generation fences the archived request started by BridgeReady.
+      for conv in next.conversations {
+        if conv.device == channel &&
+          conv.is_archived_read_only() &&
+          items.iter().any(item => item.id == conv.session_id) {
+          let foreground = channel == next.focused &&
+            next.active_session == conv.session_id
+          next = next.with_archive_override(channel, conv.session_id, false)
+          let (updated, generation) = next.begin_transcript_reload({
+            ..conv,
+            record: LiveRecord,
+            sync: Synced,
+          })
+          next = if foreground {
+            {
+              ..updated,
+              loading_conversation: Some({ channel, session: conv.session_id }),
+              completion: None,
+            }
+          } else {
+            updated
+          }
+          if generation is Some(generation) {
+            commands.push(
+              session_snapshot_command(
+                dispatch,
+                channel,
+                next,
+                conv.session_id,
+                generation,
+                foreground,
+              ),
+            )
+          }
+        }
+      }
       // A start or a goal may have been accepted just before the connection
       // vanished, while the first BridgeReady load raced persistence and
       // returned empty. The session list is later durable proof that a record
@@ -4804,7 +4972,10 @@ fn update_device_msg(
       // The active conversation lives on the focused channel; another
       // device's archived list must not displace it even when a session id
       // collides across devices.
-      if channel == next.focused && archived_now(next.active_session) {
+      if channel == next.focused &&
+        archived_now(next.active_session) &&
+        next.find_conversation(channel, next.active_session) is Some(active) &&
+        !active.is_archived_read_only() {
         let mut workspace = next.session_project(channel, next.active_session)
         for item in items {
           if item.id == next.active_session {
@@ -4820,7 +4991,9 @@ fn update_device_msg(
         )
       }
       let conversations = next.conversations.filter(conv => {
-        conv.device != channel || !archived_now(conv.session_id)
+        conv.device != channel ||
+        !archived_now(conv.session_id) ||
+        conv.is_archived_read_only()
       })
       guard next.device_state(channel) is Some(ndev) else {
         return (@cmd.none, { ..next, conversations, })
@@ -4882,12 +5055,45 @@ fn update_device_msg(
           !sessions.iter().any(current => current.id == session) {
           sessions.push(item)
         }
-        return (
-          commands,
-          model
+        let next = model
           .replace_device({ ..dev, sessions, archived })
-          .with_archive_override(channel, session, false),
-        )
+          .with_archive_override(channel, session, false)
+        // Fence an archived read that was already in flight, then re-read the
+        // now-live record. The transcript stays visible while this new
+        // generation settles; only the record source and composer capability
+        // change immediately.
+        if next.find_conversation(channel, session) is Some(conv) &&
+          conv.is_archived_read_only() {
+          let (next, generation) = next.begin_transcript_reload({
+            ..conv,
+            record: LiveRecord,
+            sync: Synced,
+          })
+          if generation is Some(generation) {
+            let foreground = channel == next.focused &&
+              next.active_session == session
+            let next = if foreground {
+              {
+                ..next,
+                loading_conversation: Some({ channel, session }),
+                completion: None,
+              }
+            } else {
+              next
+            }
+            return (
+              @cmd.batch([
+                commands,
+                session_snapshot_command(
+                  dispatch, channel, next, session, generation, foreground,
+                ),
+              ]),
+              next,
+            )
+          }
+          return (commands, next)
+        }
+        return (commands, next)
       }
       if change != "archived" {
         return (commands, model)
@@ -4898,7 +5104,9 @@ fn update_device_msg(
       let workspace = model.session_project(channel, session)
       let sessions = dev.sessions.filter(item => item.id != session)
       let conversations = model.conversations.filter(conv => {
-        conv.device != channel || conv.session_id != session
+        conv.device != channel ||
+        conv.session_id != session ||
+        conv.is_archived_read_only()
       })
       let archived = dev.archived.copy()
       if !archived.iter().any(item => item.id == session) {
@@ -4931,7 +5139,9 @@ fn update_device_msg(
       }
       if channel == model.focused &&
         model.active_session == session &&
-        fresh_session is Some(fresh) {
+        fresh_session is Some(fresh) &&
+        model.find_conversation(channel, session) is Some(active) &&
+        !active.is_archived_read_only() {
         (
           commands,
           replace_archived_active(next, channel, session, fresh, workspace),
@@ -14334,6 +14544,154 @@ fn archived_item(id : String) -> @transcript.SessionListItem {
 }
 
 ///|
+test "opening an archived row creates a read-only transcript owner" {
+  let dispatch = test_dispatch()
+  let item = archived_item("desktop-archived")
+  let model = test_model().with_dev(dev => { ..dev, archived: [item] })
+  let open = OpenArchivedSession(
+    @interop.ChannelId::Local,
+    session=item.id,
+    workspace=item.workspace,
+  )
+  let (_, loading) = update(dispatch, open, model)
+  inspect(loading.active_session, content="desktop-archived")
+  assert_true(loading.active().record is ArchivedRecord)
+  guard loading.active().sync is Reloading(generation=1, attempt=1, ..) else {
+    fail("the archived transcript did not begin its first read")
+  }
+  assert_true(
+    loading.loading_conversation
+    is Some({ channel: Local, session: "desktop-archived" }),
+  )
+  // Re-selecting the same row stays single-flight; it does not mint a second
+  // generation that could overtake the first archived snapshot.
+  let (_, selected_again) = update(dispatch, open, loading)
+  guard selected_again.active().sync is Reloading(generation=1, ..) else {
+    fail("re-selecting an archived row replaced the in-flight generation")
+  }
+}
+
+///|
+test "archived transcripts reject record-changing actions in update" {
+  let dispatch = test_dispatch()
+  let archived = {
+    ..test_conversation(),
+    record: ArchivedRecord,
+    task: "must stay unsent",
+    goal_edit: Some({ draft: "must stay unset" }),
+  }
+  let model = test_model().replace_conversation(archived)
+  let (_, sent) = update(dispatch, Send, model)
+  assert_true(sent.active().run is NoRun(ended=None))
+  inspect(sent.active().task, content="must stay unsent")
+  let (_, goal) = update(dispatch, SubmitGoal, model)
+  assert_true(goal.active().goal_pending is None)
+  assert_true(goal.active().goal_edit is Some(_))
+  let (_, compacted) = run_slash_command(dispatch, model, "compact")
+  assert_true(compacted.active().compaction is NotCompacting)
+  inspect(compacted.active().task, content="must stay unsent")
+}
+
+///|
+test "an archived snapshot stays open across archived-list reconciliation" {
+  let dispatch = test_dispatch()
+  let item = archived_item("desktop-archived")
+  let model = test_model().with_dev(dev => { ..dev, archived: [item] })
+  let (_, loading) = update(
+    dispatch,
+    OpenArchivedSession(
+      @interop.ChannelId::Local,
+      session=item.id,
+      workspace=item.workspace,
+    ),
+    model,
+  )
+  let (_, loaded) = update_dev(
+    dispatch,
+    SessionLoaded(
+      goal=None,
+      goal_markers=[],
+      session=item.id,
+      items=[
+        {
+          kind: Assistant(is_danger=false),
+          content: "archived answer",
+          ts: None,
+          sequence: Some(1),
+        },
+      ],
+      watermark=1,
+      event_boundaries=[],
+      generation=1,
+    ),
+    loading,
+  )
+  assert_true(loaded.active().record is ArchivedRecord)
+  inspect(loaded.active().messages[0].content, content="archived answer")
+  let (_, reconciled) = update(dispatch, archived_loaded([item]), loaded)
+  inspect(reconciled.active_session, content="desktop-archived")
+  assert_true(reconciled.active().record is ArchivedRecord)
+  inspect(reconciled.active().messages[0].content, content="archived answer")
+}
+
+///|
+test "unarchiving an open transcript fences its archived snapshot" {
+  let dispatch = test_dispatch()
+  let item = archived_item("desktop-archived")
+  let archived = {
+    ..empty_conversation(@interop.ChannelId::Local, item.id),
+    record: ArchivedRecord,
+    messages: [
+      {
+        kind: Assistant(is_danger=false),
+        content: "visible archived answer",
+        ts: None,
+        sequence: Some(1),
+      },
+    ],
+    watermark: 1,
+  }
+  let model = {
+    ..test_model()
+    .replace_conversation(archived)
+    .with_dev(dev => { ..dev, archived: [item] }),
+    active_session: item.id,
+    transcript_request_generation: 1,
+  }
+  let (_, restoring) = update_dev(
+    dispatch,
+    SessionsChanged(change="unarchived", session=item.id, fresh_session=None),
+    model,
+  )
+  assert_true(restoring.active().record is LiveRecord)
+  guard restoring.active().sync is Reloading(generation=2, ..) else {
+    fail("unarchive did not fence the archived read with a live generation")
+  }
+  let (_, stale) = update_dev(
+    dispatch,
+    SessionLoaded(
+      goal=None,
+      goal_markers=[],
+      session=item.id,
+      items=[
+        {
+          kind: Assistant(is_danger=false),
+          content: "late archived answer",
+          ts: None,
+          sequence: Some(1),
+        },
+      ],
+      watermark=1,
+      event_boundaries=[],
+      generation=1,
+    ),
+    restoring,
+  )
+  assert_true(stale.active().record is LiveRecord)
+  inspect(stale.active().messages[0].content, content="visible archived answer")
+}
+
+///|
 test "session.changed decoder preserves archive invalidation identity" {
   guard session_changed_msg({ change: "archived", session: "desktop-old" })
     is Some(
@@ -14585,9 +14943,26 @@ test "an unarchive notification wins over a stale archived-list reply" {
 test "BridgeReady replaces archive overrides with fresh-list truth" {
   let dispatch = test_dispatch()
   let item = archived_item("desktop-old")
-  let model = test_model()
+  let archived = {
+    ..empty_conversation(@interop.ChannelId::Local, item.id),
+    record: ArchivedRecord,
+    messages: [
+      {
+        kind: Assistant(is_danger=false),
+        content: "cached archived answer",
+        ts: None,
+        sequence: Some(1),
+      },
+    ],
+    watermark: 1,
+  }
+  let model = {
+    ..test_model()
     .with_archive_override(@interop.ChannelId::Local, "desktop-old", true)
     .with_dev(dev => { ..dev, archived: [item] })
+    .replace_conversation(archived),
+    active_session: item.id,
+  }
   let (_, ready) = update_dev(
     dispatch,
     @interop.ChannelId::Local.test_bridge_ready(),
@@ -14600,6 +14975,53 @@ test "BridgeReady replaces archive overrides with fresh-list truth" {
     SessionsLoaded([item], connection_generation=1, request_generation=1),
     ready,
   )
+  guard live.find_conversation(@interop.ChannelId::Local, item.id)
+    is Some(restored) else {
+    fail("the freshly live record disappeared during reconnect")
+  }
+  assert_true(restored.record is LiveRecord)
+  assert_true(live.dev().archive_override(item.id) is Some(false))
+  guard restored.sync is Reloading(generation=2, ..) else {
+    fail("fresh live-list truth did not fence the archived reload")
+  }
+  let (_, stale_archived) = update_dev(
+    dispatch,
+    SessionRefreshed(
+      goal=None,
+      goal_markers=[],
+      session=item.id,
+      items=[
+        {
+          kind: Assistant(is_danger=false),
+          content: "late archived answer",
+          ts: None,
+          sequence: Some(1),
+        },
+      ],
+      watermark=1,
+      event_boundaries=[],
+      generation=1,
+    ),
+    live,
+  )
+  assert_true(stale_archived.active().record is LiveRecord)
+  inspect(
+    stale_archived.active().messages[0].content,
+    content="cached archived answer",
+  )
+  let (_, live_again) = update_dev(
+    dispatch,
+    SessionsLoaded([item], connection_generation=1, request_generation=1),
+    ready,
+  )
+  guard live_again.find_conversation(@interop.ChannelId::Local, item.id)
+    is Some(restored_again) else {
+    fail("the repeated live-list update dropped the restored record")
+  }
+  assert_true(restored_again.record is LiveRecord)
+  guard restored_again.sync is Reloading(generation=2, ..) else {
+    fail("the reconnect transition was not idempotent")
+  }
   let (_, reconciled) = update_dev(
     dispatch,
     ArchivedLoaded(
@@ -14608,7 +15030,7 @@ test "BridgeReady replaces archive overrides with fresh-list truth" {
       request_generation=1,
       fresh_session="desktop-unused",
     ),
-    live,
+    stale_archived,
   )
   assert_true(
     reconciled.dev().sessions.iter().any(current => current.id == item.id),

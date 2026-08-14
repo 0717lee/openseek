@@ -38,6 +38,8 @@ pub async fn list_workspaces() -> @protocol.WorkspacesReply
 
 pub async fn list_worktrees(String) -> @protocol.WorktreesReply
 
+pub async fn load_archived_session(EngineManager, @protocol.LoadSessionPayload) -> @protocol.LoadSessionReply
+
 pub async fn load_session(EngineManager, @protocol.LoadSessionPayload) -> @protocol.LoadSessionReply
 
 pub fn new_engine_actor(String, runtime_dir? : @pathx.Path) -> EngineActor

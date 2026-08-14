@@ -591,6 +591,9 @@ button.row-twisty:hover {
 .archived-rows .conversation-row {
   color: var(--color-text-muted);
 }
+.archived-rows .conversation-row.active {
+  color: var(--color-accent-strong);
+}
 
 .sidebar-icon {
   display: grid;

@@ -391,7 +391,11 @@ fn device_section_rows(
     // A parent and its archived sub-run records are one conversation. Restore
     // the root row and the host moves the complete family back together. An
     // old orphan child still owns a row and can therefore be restored.
-    archived_rows.push(archived_row(dispatch, dev.channel, row.item))
+    let active = model.focused == dev.channel &&
+      model.active_session == row.item.id &&
+      model.find_conversation(dev.channel, row.item.id) is Some(conv) &&
+      conv.is_archived_read_only()
+    archived_rows.push(archived_row(dispatch, dev.channel, row.item, active))
   }
   if archived_rows.length() > 0 {
     rows.push(
@@ -618,28 +622,39 @@ fn session_item_label(item : @transcript.SessionListItem) -> String {
 }
 
 ///|
-/// One row of the Archived group: the conversation's title and a
-/// hover-revealed restore button. The row is inert — an archived record is
-/// invisible to `load_session` until it is restored, so the click that
-/// brings it back is the unarchive control.
+/// One row of the Archived group: clicking the title opens its durable
+/// transcript read-only, while the nested restore button moves the complete
+/// conversation family back to the live store without also opening the row.
 fn archived_row(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
   item : @transcript.SessionListItem,
+  active : Bool,
 ) -> @html.Html {
-  @html.div(class="conversation-row archived", title=item.id, [
-    @html.span(class="sidebar-label", session_item_label(item)),
-    @html.button(
-      class="row-archive",
-      type_="button",
-      title="Restore this conversation to the sidebar",
-      attrs=@html.Attrs::build().on_click(event => {
-        event.stop_propagation()
-        dispatch(UnarchiveSession(channel, item.id))
-      }),
-      icon(icon_arrow_up),
+  @html.div(
+    class=if active {
+      "conversation-row archived active"
+    } else {
+      "conversation-row archived"
+    },
+    title=item.id,
+    on_click=dispatch(
+      OpenArchivedSession(channel, session=item.id, workspace=item.workspace),
     ),
-  ])
+    [
+      @html.span(class="sidebar-label", session_item_label(item)),
+      @html.button(
+        class="row-archive",
+        type_="button",
+        title="Restore this conversation to the sidebar",
+        attrs=@html.Attrs::build().on_click(event => {
+          event.stop_propagation()
+          dispatch(UnarchiveSession(channel, item.id))
+        }),
+        icon(icon_arrow_up),
+      ),
+    ],
+  )
 }
 
 ///|
@@ -890,6 +905,31 @@ fn connection_banner(model : Model) -> @html.Html {
   } else {
     @html.div(class="composer-banner hidden", "")
   }
+}
+
+///|
+/// The archived conversation's only bottom action. Keeping it separate from
+/// the live composer means there is no textarea, model selector, goal editor,
+/// Send, or Stop control for an archived durable record.
+fn Conversation::archived_read_only_view(
+  self : Conversation,
+  dispatch : @cmd.Emit[Msg],
+) -> @html.Html {
+  @html.div(class="composer archived-read-only", [
+    @html.div(class="archived-read-only-bar", [
+      @html.span(
+        class="archived-read-only-text",
+        "Archived conversation · Read only",
+      ),
+      @html.button(
+        class="archived-read-only-restore",
+        type_="button",
+        title="Restore this conversation before continuing it",
+        on_click=dispatch(UnarchiveSession(self.device, self.session_id)),
+        "Restore",
+      ),
+    ]),
+  ])
 }
 
 ///|
@@ -2066,6 +2106,21 @@ test "settings, skills, and composer declare form focus ownership" {
 }
 
 ///|
+#warnings("-alert_unstable")
+test "an archived transcript renders no live composer controls" {
+  let dispatch = test_dispatch()
+  let conv = { ..test_conversation(), record: ArchivedRecord }
+  let markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(conv.archived_read_only_view(dispatch))
+  })
+  assert_true(markup.contains("Archived conversation · Read only"))
+  assert_true(markup.contains(">Restore</button>"))
+  assert_false(markup.contains("<textarea"))
+  assert_false(markup.contains("id=\"send\""))
+  assert_false(markup.contains("id=\"stop\""))
+}
+
+///|
 fn run_indicator(model : Model) -> @html.Html {
   let status = model.display_status()
   let label = status.label()
@@ -2448,7 +2503,11 @@ fn view(
       [
         topbar_view(dispatch, toggle_terminal, toggle_right_panel, model),
         transcript_html,
-        composer_view(dispatch, model),
+        if model.active().is_archived_read_only() {
+          model.active().archived_read_only_view(dispatch)
+        } else {
+          composer_view(dispatch, model)
+        },
       ]
     Skills => page_with_toggle(dispatch, model, skills_page(dispatch, model))
     Settings =>

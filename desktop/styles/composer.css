@@ -6,6 +6,40 @@
   padding: 16px 24px 18px;
 }
 
+/* Archived transcripts occupy the composer's grid row but expose only their
+   immutable state and the explicit action that returns the record to live. */
+.archived-read-only-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  max-width: 820px;
+  margin: 0 auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  padding: 8px 10px;
+  box-shadow: var(--shadow-surface);
+}
+
+.archived-read-only-text {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.archived-read-only-restore {
+  flex: none;
+  border-color: var(--color-border);
+  background: var(--color-bg-canvas);
+  padding: 5px 10px;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.archived-read-only-restore:hover {
+  background: var(--color-bg-subtle);
+}
+
 /* At the terminal's maximum height, `main` is only 180px tall. Bound the
    complete composer to the space below the topbar. Overflow remains visible
    here so completion and git menus can open above the composer. */

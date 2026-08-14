@@ -154,6 +154,11 @@ pub fn endpoints(
     @endpoint.Endpoint::remote(@commands.session_load, async fn(payload) {
       @engine.load_session(state.manager, payload)
     }),
+    @endpoint.Endpoint::remote(@commands.session_load_archived, async fn(
+      payload,
+    ) {
+      @engine.load_archived_session(state.manager, payload)
+    }),
     @endpoint.Endpoint::remote(@commands.session_list_archived, async fn(_) {
       @engine.archived_sessions(state.manager, session => {
         publish_session_changed(state, "archived", session)
@@ -317,9 +322,10 @@ test "remote endpoint catalog has one entry per command name" {
     }
     names.push(name)
   }
-  assert_eq(names.length(), 59)
+  assert_eq(names.length(), 60)
   assert_true(names.contains("agent.start"))
   assert_true(names.contains("agent.goal"))
+  assert_true(names.contains("session.load_archived"))
   assert_true(names.contains("workspace.settings_get"))
   assert_true(names.contains("workspace.settings_set"))
   assert_true(names.contains("app.info"))
