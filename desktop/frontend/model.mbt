@@ -1706,6 +1706,7 @@ priv enum Msg {
   CodexDraftRotated(cwd~ : String, id~ : String)
   CodexOpenThread(String)
   CodexArchiveThread(String)
+  CodexUnarchiveThread(String)
   // Codex owns every app-server-local transition; the root only wraps the
   // package message so Rabbita still has one application Msg type.
   Codex(@codex.Msg)

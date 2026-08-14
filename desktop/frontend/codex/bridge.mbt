@@ -28,14 +28,114 @@ fn CodexReplyKind::request(
 }
 
 ///|
-pub fn State::refresh(
+/// Read one complete active or archived catalog. App-server deliberately
+/// pages `thread/list`; the sidebar must follow `nextCursor` instead of making
+/// old tasks disappear once an account has more than one page.
+priv struct CodexThreadCatalogRequest {
+  archived : Bool
+}
+
+///|
+fn CodexThreadCatalogRequest::run(
+  self : CodexThreadCatalogRequest,
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+) -> @cmd.Cmd {
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      let rows : Array[Json] = []
+      let seen_cursors : Array[String] = []
+      let mut cursor : String? = None
+      for ;; {
+        let fields : Map[String, Json] = {
+          "limit": Json::number(100.0),
+          "archived": Json::boolean(self.archived),
+        }
+        if cursor is Some(cursor) {
+          fields["cursor"] = Json::string(cursor)
+        }
+        let page : Json = @interop.bridge_request(
+          channel,
+          @commands.codex_thread_list,
+          Json::object(fields),
+        ) catch {
+          error => {
+            scheduler.add(
+              dispatch(
+                Failed(
+                  kind=CodexThreadsReply(self.archived),
+                  message=@interop.bridge_error_text(error),
+                ),
+              ),
+            )
+            return
+          }
+        }
+        guard page is Object(page_fields) &&
+          page_fields.get("data") is Some(Array(data)) else {
+          scheduler.add(
+            dispatch(
+              Failed(
+                kind=CodexThreadsReply(self.archived),
+                message="malformed Codex thread list page",
+              ),
+            ),
+          )
+          return
+        }
+        for row in data {
+          rows.push(row)
+        }
+        let next_cursor = match page_fields.get("nextCursor") {
+          Some(String(next)) if !next.is_empty() => Some(next)
+          _ => None
+        }
+        guard next_cursor is Some(next) else { break }
+        if seen_cursors.contains(next) {
+          scheduler.add(
+            dispatch(
+              Failed(
+                kind=CodexThreadsReply(self.archived),
+                message="Codex thread list repeated cursor " + next,
+              ),
+            ),
+          )
+          return
+        }
+        seen_cursors.push(next)
+        cursor = Some(next)
+      }
+      scheduler.add(
+        dispatch(
+          Reply(kind=CodexThreadsReply(self.archived), value={ "data": rows }),
+        ),
+      )
+    })
+  })
+}
+
+///|
+/// Refresh both halves of the Codex sidebar catalog without also reloading
+/// account and model metadata after every archive or name notification.
+fn State::refresh_catalog(
   _self : State,
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+) -> @cmd.Cmd {
+  @cmd.batch([
+    CodexThreadCatalogRequest::{ archived: false }.run(dispatch, channel),
+    CodexThreadCatalogRequest::{ archived: true }.run(dispatch, channel),
+  ])
+}
+
+///|
+pub fn State::refresh(
+  self : State,
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
 ) -> @cmd.Cmd {
   let account : Json = { "refreshToken": false }
   let models : Json = { "limit": 100, "includeHidden": false }
-  let threads : Json = { "limit": 100, "archived": false }
   // The global sidebar is the conversation switcher for both products, so it
   // shows the Codex account's interactive history instead of silently hiding
   // threads outside OpenSeek's currently selected workspace. New threads
@@ -54,9 +154,7 @@ pub fn State::refresh(
     CodexModelsReply.request(
       dispatch, channel, @commands.codex_model_list, models,
     ),
-    CodexThreadsReply.request(
-      dispatch, channel, @commands.codex_thread_list, threads,
-    ),
+    self.refresh_catalog(dispatch, channel),
   ])
 }
 
@@ -147,7 +245,7 @@ fn CodexDraftThreadRequest::run(
               scheduler.add(
                 dispatch(
                   Failed(
-                    kind=CodexDraftThreadReply,
+                    kind=CodexDraftThreadReply(self.draft_id),
                     message=@interop.bridge_error_text(error),
                   ),
                 ),
@@ -161,7 +259,7 @@ fn CodexDraftThreadRequest::run(
             scheduler.add(
               dispatch(
                 Failed(
-                  kind=CodexDraftThreadReply,
+                  kind=CodexDraftThreadReply(self.draft_id),
                   message="malformed Codex thread.start reply",
                 ),
               ),
@@ -180,7 +278,12 @@ fn CodexDraftThreadRequest::run(
             },
           )
           scheduler.add(
-            dispatch(Reply(kind=CodexDraftThreadReply, value=thread_reply)),
+            dispatch(
+              Reply(
+                kind=CodexDraftThreadReply(self.draft_id),
+                value=thread_reply,
+              ),
+            ),
           )
         },
       ) catch {
@@ -188,7 +291,7 @@ fn CodexDraftThreadRequest::run(
           scheduler.add(
             dispatch(
               Failed(
-                kind=CodexDraftThreadReply,
+                kind=CodexDraftThreadReply(self.draft_id),
                 message="Codex thread start failed: \{error}",
               ),
             ),
@@ -342,7 +445,7 @@ fn State::send(
   }
   if self.active_turn_id() is Some(turn_id) {
     fields["expectedTurnId"] = Json::string(turn_id)
-    CodexTurnReply.request(
+    CodexTurnReply(active.id).request(
       dispatch,
       channel,
       @commands.codex_turn_steer,
@@ -361,7 +464,7 @@ fn State::send(
     if !model.is_empty() {
       fields["model"] = Json::string(model.to_owned())
     }
-    CodexTurnReply.request(
+    CodexTurnReply(active.id).request(
       dispatch,
       channel,
       @commands.codex_turn_start,
@@ -405,7 +508,9 @@ fn State::start_turn_in_new_worktree(
                   detail +
                   ") — this task may already own a new worktree; the prompt was not resent"
               }
-              scheduler.add(dispatch(Failed(kind=CodexTurnReply, message~)))
+              scheduler.add(
+                dispatch(Failed(kind=CodexTurnReply(thread_id), message~)),
+              )
               return
             }
           }
@@ -415,7 +520,7 @@ fn State::start_turn_in_new_worktree(
               scheduler.add(
                 dispatch(
                   Failed(
-                    kind=CodexTurnReply,
+                    kind=CodexTurnReply(thread_id),
                     message="worktree setup failed: " + message,
                   ),
                 ),
@@ -428,7 +533,7 @@ fn State::start_turn_in_new_worktree(
             scheduler.add(
               dispatch(
                 Failed(
-                  kind=CodexTurnReply,
+                  kind=CodexTurnReply(thread_id),
                   message="malformed worktree.create reply",
                 ),
               ),
@@ -452,7 +557,7 @@ fn State::start_turn_in_new_worktree(
               scheduler.add(
                 dispatch(
                   Failed(
-                    kind=CodexTurnReply,
+                    kind=CodexTurnReply(thread_id),
                     message=@interop.bridge_error_text(error),
                   ),
                 ),
@@ -461,7 +566,9 @@ fn State::start_turn_in_new_worktree(
             }
           }
           scheduler.add(
-            dispatch(Reply(kind=CodexWorktreeTurnReply(worktree), value~)),
+            dispatch(
+              Reply(kind=CodexWorktreeTurnReply(thread_id, worktree), value~),
+            ),
           )
         },
       ) catch {
@@ -472,7 +579,7 @@ fn State::start_turn_in_new_worktree(
           scheduler.add(
             dispatch(
               Failed(
-                kind=CodexTurnReply,
+                kind=CodexTurnReply(thread_id),
                 message="worktree start failed: \{error}",
               ),
             ),
@@ -680,6 +787,21 @@ fn State::archive(
     channel,
     @commands.codex_thread_archive,
     { "threadId": thread_id, "force": force },
+  )
+}
+
+///|
+fn State::unarchive(
+  _self : State,
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  thread_id : String,
+) -> @cmd.Cmd {
+  CodexUnarchiveReply(thread_id).request(
+    dispatch,
+    channel,
+    @commands.codex_thread_unarchive,
+    { "threadId": thread_id },
   )
 }
 

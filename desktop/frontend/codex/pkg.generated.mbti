@@ -26,6 +26,7 @@ pub fn Msg::refresh() -> Self
 pub fn Msg::server_request(Json, String, Json) -> Self
 pub fn Msg::start_draft(String, String) -> Self
 pub fn Msg::status_changed(Json) -> Self
+pub fn Msg::unarchive_thread(String) -> Self
 
 pub(all) struct PageActions {
   toggle_sidebar : @cmd.Cmd
@@ -44,6 +45,7 @@ pub(all) struct SidebarActions {
   start_thread : (String) -> @cmd.Cmd
   open_thread : (String) -> @cmd.Cmd
   archive_thread : (String) -> @cmd.Cmd
+  unarchive_thread : (String) -> @cmd.Cmd
   project_label : (String) -> String
 }
 
@@ -51,6 +53,7 @@ type State derive(Eq)
 pub fn State::State(loading? : Bool) -> Self
 pub fn State::active_id(Self) -> String?
 pub fn State::active_placement(Self, @interop.ChannelId) -> @interop.CheckoutPlacement?
+pub fn State::archived_sidebar_entries(Self, SidebarActions) -> Array[@sidebar.Entry]
 pub fn State::can_start_thread(Self) -> Bool
 pub fn State::draft_text(Self) -> String
 pub fn State::from_thread_snapshot(Json) -> Self

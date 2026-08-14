@@ -395,6 +395,20 @@ fn device_section_rows(
     },
     entries: project_entries,
   })
+  let codex_actions = @codex.SidebarActions::{
+    selected: model.screen is Codex,
+    open: dispatch(OpenCodex),
+    start_thread: cwd => dispatch(CodexNewThreadIn(cwd)),
+    open_thread: thread_id => dispatch(CodexOpenThread(thread_id)),
+    archive_thread: thread_id => dispatch(CodexArchiveThread(thread_id)),
+    unarchive_thread: thread_id => dispatch(CodexUnarchiveThread(thread_id)),
+    project_label: path => {
+      match @resource.of_path(model.focused, path) {
+        Some(workspace) => @resource.label(workspace)
+        None => path
+      }
+    },
+  }
   if dev.channel == model.focused {
     sections.push({
       section: {
@@ -408,19 +422,7 @@ fn device_section_rows(
         }),
         selected: model.screen is Codex,
       },
-      entries: model.codex.sidebar_entries(@codex.SidebarActions::{
-        selected: model.screen is Codex,
-        open: dispatch(OpenCodex),
-        start_thread: cwd => dispatch(CodexNewThreadIn(cwd)),
-        open_thread: thread_id => dispatch(CodexOpenThread(thread_id)),
-        archive_thread: thread_id => dispatch(CodexArchiveThread(thread_id)),
-        project_label: path => {
-          match @resource.of_path(model.focused, path) {
-            Some(workspace) => @resource.label(workspace)
-            None => path
-          }
-        },
-      }),
+      entries: model.codex.sidebar_entries(codex_actions),
     })
   }
   let chat_rows : Array[@sidebar.ConversationRow] = []
@@ -459,6 +461,11 @@ fn device_section_rows(
     archived_rows.push(
       @sidebar.Custom(archived_row(dispatch, dev.channel, row.item, active)),
     )
+  }
+  if dev.channel == model.focused {
+    for entry in model.codex.archived_sidebar_entries(codex_actions) {
+      archived_rows.push(entry)
+    }
   }
   sections.push({
     section: {

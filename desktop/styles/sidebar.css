@@ -638,6 +638,9 @@ button.row-twisty:hover {
 .conversation-row.archived {
   color: var(--color-text-muted);
 }
+.conversation-row.archived.codex-archived {
+  cursor: default;
+}
 .sidebar-icon {
   display: grid;
   place-items: center;

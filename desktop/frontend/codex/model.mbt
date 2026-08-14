@@ -153,16 +153,17 @@ priv enum CodexReplyKind {
   CodexRequestsReply
   CodexAccountReply
   CodexModelsReply
-  CodexThreadsReply
+  CodexThreadsReply(Bool)
   CodexThreadReply(String)
   CodexActivityReply
   CodexDraftOpenReply(String)
-  CodexDraftThreadReply
-  CodexTurnReply
-  CodexWorktreeTurnReply(CodexWorktree)
+  CodexDraftThreadReply(String)
+  CodexTurnReply(String)
+  CodexWorktreeTurnReply(String, CodexWorktree)
   CodexWorktreeRepairReply(CodexWorktree)
   CodexLoginReply
   CodexArchiveReply(String)
+  CodexUnarchiveReply(String)
   CodexCompactReply(String)
   CodexReviewReply(String)
   CodexMutationReply
@@ -203,6 +204,7 @@ enum Msg {
   StartDraft(id~ : String, cwd~ : String)
   OpenThread(String)
   ArchiveThread(String)
+  UnarchiveThread(String)
   RepairWorktree
   ConfirmArchiveDiscard
   CancelArchiveDiscard
@@ -253,6 +255,12 @@ pub fn Msg::archive_thread(thread_id : String) -> Msg {
 }
 
 ///|
+/// Shell entrypoint for restoring a Codex sidebar row from archived history.
+pub fn Msg::unarchive_thread(thread_id : String) -> Msg {
+  UnarchiveThread(thread_id)
+}
+
+///|
 /// Decode-free boundary for the host's Codex readiness notification.
 pub fn Msg::status_changed(value : Json) -> Msg {
   StatusChanged(value)
@@ -283,6 +291,7 @@ struct State {
   models : Array[CodexModelOption]
   selected_model : String
   threads : Array[CodexThreadRow]
+  archived_threads : Array[CodexThreadRow]
   selection : CodexSelection
   // The last sidebar selection awaiting a history snapshot. A reply carries
   // the same id, so an older request can never replace a newer selection.
@@ -324,6 +333,7 @@ pub fn State::State(loading? : Bool = false) -> State {
     models: [],
     selected_model: "",
     threads: [],
+    archived_threads: [],
     selection: CodexNoTask,
     requested_thread: None,
     git_status: None,
@@ -381,6 +391,24 @@ fn State::accepts_thread_reply(self : State, requested_thread : String) -> Bool 
     active.id == requested_thread
   } else {
     false
+  }
+}
+
+///|
+/// Every request that can mutate the selected task carries the selection that
+/// launched it. This single gate runs before update settles loading or input,
+/// so an overtaken draft/turn reply is inert rather than partly applied.
+fn State::accepts_reply(self : State, kind : CodexReplyKind) -> Bool {
+  match kind {
+    CodexThreadReply(thread_id) => self.accepts_thread_reply(thread_id)
+    CodexDraftThreadReply(draft_id) =>
+      self.active_draft().map(draft => draft.id == draft_id).unwrap_or(false)
+    CodexTurnReply(thread_id) | CodexWorktreeTurnReply(thread_id, _) =>
+      self
+      .active_thread()
+      .map(thread => thread.id == thread_id)
+      .unwrap_or(false)
+    _ => true
   }
 }
 
@@ -798,22 +826,18 @@ fn State::with_models(self : State, value : Json) -> State {
 }
 
 ///|
-fn State::with_threads(self : State, value : Json) -> State {
+fn State::with_threads(self : State, value : Json, archived : Bool) -> State {
   guard value is Object(fields) && fields.get("data") is Some(Array(values)) else {
     return { ..self, notice: "Malformed Codex thread list" }
   }
   let threads : Array[CodexThreadRow] = []
   for value in values {
-    guard value is Object(thread) && @jsonx.json_text(thread, "id") is Some(id) else {
-      continue
+    if CodexThreadRow::decode(value) is Some(thread) {
+      threads.push(thread)
     }
-    threads.push({
-      id,
-      title: CodexThreadRow::title(thread),
-      cwd: @jsonx.json_text(thread, "cwd"),
-      project_root: @jsonx.json_text(thread, "projectRoot"),
-      worktree: thread.get("openseekWorktree").bind(CodexWorktree::decode),
-    })
+  }
+  if archived {
+    return { ..self, archived_threads: threads, notice: "" }
   }
   // A just-started thread may not be present in the first state-DB page yet,
   // especially when the 100-row catalog is full. Its `thread/start` reply is
@@ -838,6 +862,20 @@ fn State::with_threads(self : State, value : Json) -> State {
     threads
   }
   { ..self, threads: visible, notice: "" }
+}
+
+///|
+fn CodexThreadRow::decode(value : Json) -> CodexThreadRow? {
+  guard value is Object(thread) && @jsonx.json_text(thread, "id") is Some(id) else {
+    return None
+  }
+  Some({
+    id,
+    title: CodexThreadRow::title(thread),
+    cwd: @jsonx.json_text(thread, "cwd"),
+    project_root: @jsonx.json_text(thread, "projectRoot"),
+    worktree: thread.get("openseekWorktree").bind(CodexWorktree::decode),
+  })
 }
 
 ///|
@@ -1068,6 +1106,16 @@ fn State::without_thread(self : State, thread_id : String) -> State {
       Some(confirm) if confirm.thread_id == thread_id => None
       other => other
     },
+  }
+}
+
+///|
+fn State::without_archived_thread(self : State, thread_id : String) -> State {
+  {
+    ..self,
+    archived_threads: self.archived_threads.filter(thread => {
+      thread.id != thread_id
+    }),
   }
 }
 
@@ -1306,6 +1354,10 @@ fn State::with_notification(
   if method_ == "thread/archived" &&
     @jsonx.json_text(fields, "threadId") is Some(thread_id) {
     return self.without_thread(thread_id)
+  }
+  if method_ == "thread/unarchived" &&
+    @jsonx.json_text(fields, "threadId") is Some(thread_id) {
+    return self.without_archived_thread(thread_id)
   }
   guard self.active_thread() is Some(active) &&
     @jsonx.json_text(fields, "threadId").unwrap_or(active.id) == active.id else {
@@ -1928,6 +1980,26 @@ test "Codex archive notification closes the active thread" {
 }
 
 ///|
+test "Codex active and archived catalogs remain independent" {
+  let state = State()
+    .with_threads(
+      { "data": [{ "id": "thread-live", "preview": "Live" }] },
+      false,
+    )
+    .with_threads(
+      { "data": [{ "id": "thread-archived", "preview": "Archived" }] },
+      true,
+    )
+  assert_eq(state.threads.map(thread => thread.id), ["thread-live"])
+  assert_eq(state.archived_threads.map(thread => thread.id), ["thread-archived"])
+  let restored = state.with_notification("thread/unarchived", {
+    "threadId": "thread-archived",
+  })
+  assert_eq(restored.threads.map(thread => thread.id), ["thread-live"])
+  assert_true(restored.archived_threads.is_empty())
+}
+
+///|
 test "Codex thread replies are visible before catalog refresh" {
   let state = State().with_thread_reply({
     "thread": {
@@ -1955,20 +2027,23 @@ test "Codex thread replies are visible before catalog refresh" {
     external_worktree.worktree_launch_workspace(@interop.ChannelId::Local),
     None,
   )
-  let refreshed = state.with_threads({ "data": [] })
+  let refreshed = state.with_threads({ "data": [] }, false)
   assert_eq(refreshed.threads.length(), 1)
   assert_eq(refreshed.threads[0].id, "thread-1")
 }
 
 ///|
 test "opening a Codex conversation preserves its catalog position" {
-  let listed = State().with_threads({
-    "data": [
-      { "id": "thread-new", "preview": "Newest" },
-      { "id": "thread-middle", "preview": "Middle" },
-      { "id": "thread-old", "preview": "Oldest" },
-    ],
-  })
+  let listed = State().with_threads(
+    {
+      "data": [
+        { "id": "thread-new", "preview": "Newest" },
+        { "id": "thread-middle", "preview": "Middle" },
+        { "id": "thread-old", "preview": "Oldest" },
+      ],
+    },
+    false,
+  )
   let opened = listed.with_thread_reply({
     "thread": {
       "id": "thread-middle",
@@ -2011,22 +2086,25 @@ test "Codex Git status starts from app-server and accepts current checkout" {
 
 ///|
 test "Codex worktree conversations share their main project key" {
-  let state = State().with_threads({
-    "data": [
-      {
-        "id": "thread-47b9",
-        "cwd": "/Users/me/.codex/worktrees/47b9/openseek",
-        "projectRoot": "/Users/me/src/openseek",
-        "name": "Split frontend update",
-      },
-      {
-        "id": "thread-dd8c",
-        "cwd": "/Users/me/.codex/worktrees/dd8c/openseek",
-        "projectRoot": "/Users/me/src/openseek",
-        "name": "Evaluate macOS package",
-      },
-    ],
-  })
+  let state = State().with_threads(
+    {
+      "data": [
+        {
+          "id": "thread-47b9",
+          "cwd": "/Users/me/.codex/worktrees/47b9/openseek",
+          "projectRoot": "/Users/me/src/openseek",
+          "name": "Split frontend update",
+        },
+        {
+          "id": "thread-dd8c",
+          "cwd": "/Users/me/.codex/worktrees/dd8c/openseek",
+          "projectRoot": "/Users/me/src/openseek",
+          "name": "Evaluate macOS package",
+        },
+      ],
+    },
+    false,
+  )
   assert_eq(state.threads.length(), 2)
   assert_eq(
     state.threads[0].project_key(),

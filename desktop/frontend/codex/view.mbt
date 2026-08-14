@@ -210,6 +210,7 @@ pub(all) struct SidebarActions {
   start_thread : (String) -> @cmd.Cmd
   open_thread : (String) -> @cmd.Cmd
   archive_thread : (String) -> @cmd.Cmd
+  unarchive_thread : (String) -> @cmd.Cmd
   project_label : (String) -> String
 }
 
@@ -405,6 +406,43 @@ pub fn State::sidebar_entries(
     )
   }
   rows
+}
+
+///|
+/// Codex archived tasks join OpenSeek's existing Archived chats section. They
+/// stay non-selectable until restored because the live Codex page owns writer
+/// and composer state only for active app-server threads.
+pub fn State::archived_sidebar_entries(
+  self : State,
+  actions : SidebarActions,
+) -> Array[@sidebar.Entry] {
+  self.archived_threads.map(thread => {
+    @sidebar.Custom(thread.archived_sidebar_row(actions))
+  })
+}
+
+///|
+fn CodexThreadRow::archived_sidebar_row(
+  self : CodexThreadRow,
+  actions : SidebarActions,
+) -> @html.Html {
+  @html.div(
+    class="conversation-row archived codex-archived",
+    title=self.cwd.unwrap_or(self.title),
+    [
+      @html.span(class="sidebar-label", self.title),
+      @html.button(
+        class="row-archive",
+        type_="button",
+        title="Restore this Codex conversation to the sidebar",
+        attrs=@html.Attrs::build().on_click(event => {
+          event.stop_propagation()
+          (actions.unarchive_thread)(self.id)
+        }),
+        @icons.icon(@icons.icon_arrow_up),
+      ),
+    ],
+  )
 }
 
 ///|
@@ -880,4 +918,23 @@ pub fn State::page(
     )
   }
   page
+}
+
+///|
+test "Codex archived catalog contributes restore rows" {
+  let state = State().with_threads(
+    { "data": [{ "id": "thread-archived", "preview": "Archived task" }] },
+    true,
+  )
+  let rows = state.archived_sidebar_entries({
+    selected: false,
+    open: @cmd.none,
+    start_thread: _ => @cmd.none,
+    open_thread: _ => @cmd.none,
+    archive_thread: _ => @cmd.none,
+    unarchive_thread: _ => @cmd.none,
+    project_label: path => path,
+  })
+  assert_eq(rows.length(), 1)
+  assert_true(rows[0] is @sidebar.Custom(_))
 }

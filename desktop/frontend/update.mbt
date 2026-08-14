@@ -2881,6 +2881,16 @@ fn update_msg(
       )
       (cmd, { ..model, codex, })
     }
+    CodexUnarchiveThread(thread_id) => {
+      let (cmd, codex) = @codex.update(
+        dispatch.map(msg => Codex(msg)),
+        @codex.Msg::unarchive_thread(thread_id),
+        model.codex,
+        model.focused,
+        url => open_external_link(dispatch, url),
+      )
+      (cmd, { ..model, codex, })
+    }
     Codex(msg) => {
       let (cmd, codex) = @codex.update(
         dispatch.map(next => Codex(next)),
