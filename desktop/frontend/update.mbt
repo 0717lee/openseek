@@ -77,7 +77,7 @@ fn focus_channel(
       // previous device's account and conversation list before its replies
       // can be mistaken for this device's sidebar section.
       codex: @codex.State(loading=true),
-      completion: None,
+      completion: model.completion.dismissed(),
       // The old HostConnection is already parked. Preserve the remaining
       // owner/root state until the post-dispatch sync retires its file-index
       // cache and re-roots against the newly focused host.
@@ -97,7 +97,11 @@ fn open_session_on(
 ) -> (@cmd.Cmd, Model) {
   let owner : @interop.ConversationKey = { channel, session: session_id }
   if session_id == model.active_session {
-    let base = { ..model, screen: Chat, completion: None }
+    let base = {
+      ..model,
+      screen: Chat,
+      completion: model.completion.dismissed(),
+    }
     // Re-selecting is an explicit catch-up point for writes made by an
     // idle CLI or another client. It also restarts an exhausted retry
     // round; an existing request stays single-flight. A fresh chat has no
@@ -152,7 +156,7 @@ fn open_session_on(
       } else {
         None
       },
-      completion: None,
+      completion: model.completion.dismissed(),
     }.with_active_project(conv.workspace.project())
     let commands : Array[@cmd.Cmd] = []
     if generation is Some(generation) {
@@ -467,7 +471,7 @@ fn adopt_projects(
           active_session: "",
           loading_conversation: None,
           screen: Chat,
-          completion: None,
+          completion: focused.completion.dismissed(),
         },
       )
     }
@@ -512,7 +516,7 @@ fn adopt_projects(
         active_session: "",
         loading_conversation: None,
         screen: Chat,
-        completion: None,
+        completion: next.completion.dismissed(),
       },
     )
   }
@@ -652,7 +656,7 @@ fn apply_session_snapshot(
     next = {
       ..next.activate(channel, session),
       loading_conversation: None,
-      completion: None,
+      completion: next.completion.dismissed(),
     }
     // An archived transcript has no runnable checkout to inspect here. Its
     // retained workspace placement is still available to file links, but git
@@ -716,13 +720,13 @@ fn is_steer_receipt(event : @transcript.EngineEvent) -> Bool {
 fn accept_completion(
   dispatch : @cmd.Emit[Msg],
   model : Model,
-  menu : Completion,
+  menu : @composer.Completion[CompletionKind, CompletionItem],
   item : CompletionItem,
 ) -> (@cmd.Cmd, Model) {
   if model.active().is_archived_read_only() {
-    return (@cmd.none, { ..model, completion: None })
+    return (@cmd.none, { ..model, completion: model.completion.dismissed() })
   }
-  match menu.kind {
+  match menu.kind() {
     SlashCommands => run_slash_command(dispatch, model, item.command)
     // The chip carries its envelope form directly: the skill's bare name (its
     // `insert` has a trailing space), or the symbol's name plus resolved
@@ -732,7 +736,7 @@ fn accept_completion(
         model,
         Skill(name=item.insert.trim().to_owned()),
         range=None,
-        task=menu.menu.draft_without_token(),
+        task=menu.menu().draft_without_token(),
       )
     Symbols => {
       let (file, line) = if item.path is Some(path) && item.range is Some(range) {
@@ -744,7 +748,7 @@ fn accept_completion(
         model,
         Symbol(name=item.label, file~, line~),
         range=item.range,
-        task=menu.menu.draft_without_token(),
+        task=menu.menu().draft_without_token(),
       )
     }
     Files =>
@@ -753,10 +757,10 @@ fn accept_completion(
           model,
           File(path~),
           range=None,
-          task=menu.menu.draft_without_token(),
+          task=menu.menu().draft_without_token(),
         )
       } else {
-        (@cmd.none, { ..model, completion: None })
+        (@cmd.none, { ..model, completion: model.completion.dismissed() })
       }
   }
 }
@@ -777,7 +781,7 @@ fn accept_mention(
     @cmd.none,
     {
       ..model.replace_conversation({ ..conv, task, mentions }),
-      completion: None,
+      completion: model.completion.dismissed(),
     },
   )
 }
@@ -1009,16 +1013,16 @@ fn Model::begin_completion_symbol_request(
   query : String,
   generation : Int,
 ) -> (@cmd.Cmd, Model) {
-  guard self.completion_debounce.accepts(generation) &&
+  guard self.completion.accepts(generation) &&
     owner.channel == self.focused &&
     owner.session == self.active().session_id &&
     @composer.Trigger::parse(self.active().task, inline_markers="$#")
     is Some(trigger) &&
     trigger.marker() == "#" &&
     trigger.query() == query &&
-    self.completion is Some(completion) &&
-    completion.kind is Symbols &&
-    completion.menu.loading() else {
+    self.completion.current() is Some(completion) &&
+    completion.kind() is Symbols &&
+    completion.menu().loading() else {
     return (@cmd.none, self)
   }
   let root = self.conversation_root(self.active())
@@ -1047,16 +1051,16 @@ fn apply_symbol_reply(
   symbols : Array[WorkspaceSymbol],
 ) -> (@cmd.Cmd, Model) {
   let draft = model.active().task
-  guard model.completion_debounce.accepts(generation) &&
+  guard model.completion.accepts(generation) &&
     owner.channel == model.focused &&
     owner.session == model.active().session_id &&
     model.conversation_root(model.active()) == Some(root) &&
     @composer.Trigger::parse(draft, inline_markers="$#") is Some(trigger) &&
     trigger.marker() == "#" &&
     trigger.query() == query &&
-    model.completion is Some(completion) &&
-    completion.kind is Symbols &&
-    completion.menu.loading() else {
+    model.completion.current() is Some(completion) &&
+    completion.kind() is Symbols &&
+    completion.menu().loading() else {
     return (@cmd.none, model)
   }
   let items : Array[CompletionItem] = []
@@ -1074,11 +1078,8 @@ fn apply_symbol_reply(
     {
       ..model,
       symbol_cache: cache,
-      completion: compute_completion(
-        draft,
-        model.installed_skills,
-        cache,
-        owner,
+      completion: model.completion.refreshed(
+        compute_completion(draft, model.installed_skills, cache, owner),
       ),
     },
   )
@@ -1111,20 +1112,12 @@ fn Model::restart_symbol_search_after_root_change(
     session: conv.session_id,
   }
   let cache = empty_symbol_cache()
-  let completion_debounce = self.completion_debounce.advanced()
-  let next = {
-    ..self,
-    symbol_cache: cache,
-    completion_debounce,
-    completion: compute_completion(
-      conv.task,
-      self.installed_skills,
-      cache,
-      owner,
-    ),
-  }
+  let completion = self.completion.changed(
+    compute_completion(conv.task, self.installed_skills, cache, owner),
+  )
+  let next = { ..self, symbol_cache: cache, completion }
   (
-    completion_debounce.delayed(generation => {
+    completion.delayed(generation => {
       dispatch(CompletionDue(owner~, query=trigger.query(), generation~))
     }),
     next,
@@ -1154,7 +1147,7 @@ fn run_slash_command(
           @cmd.none,
           {
             ..model.replace_conversation({ ..conv, task: "" }),
-            completion: None,
+            completion: model.completion.dismissed(),
           },
         )
       } else {
@@ -1183,7 +1176,7 @@ fn run_slash_command(
                 Requested
               },
             }),
-            completion: None,
+            completion: model.completion.dismissed(),
           },
         )
       }
@@ -1198,11 +1191,11 @@ fn run_slash_command(
             task: "",
             goal_edit: Some({ draft: conv.goal_draft_seed() }),
           }),
-          completion: None,
+          completion: model.completion.dismissed(),
         },
       )
     }
-    _ => (@cmd.none, { ..model, completion: None })
+    _ => (@cmd.none, { ..model, completion: model.completion.dismissed() })
   }
 }
 
@@ -1705,7 +1698,7 @@ fn replace_archived_active(
     ..activated.replace_conversation(fresh).with_active_project(workspace),
     screen: Chat,
     loading_conversation: None,
-    completion: None,
+    completion: activated.completion.dismissed(),
   }
 }
 
@@ -1980,8 +1973,17 @@ fn update_msg(
       } else {
         empty_symbol_cache()
       }
-      let completion_debounce = model.completion_debounce.advanced()
       let (files, files_loading) = model.completion_files(value)
+      let completion = model.completion.changed(
+        compute_completion(
+          value,
+          model.installed_skills,
+          symbol_cache,
+          owner,
+          files~,
+          files_loading~,
+        ),
+      )
       let command = match
         @composer.Trigger::parse(value, inline_markers="$#@") {
         Some(trigger) if trigger.marker() == "#" &&
@@ -1990,13 +1992,13 @@ fn update_msg(
             model.symbol_cache.root != root ||
             model.symbol_cache.query != trigger.query()
           ) =>
-          completion_debounce.delayed(generation => {
+          completion.delayed(generation => {
             dispatch(CompletionDue(owner~, query=trigger.query(), generation~))
           })
         Some(trigger) if trigger.marker() == "@" &&
           model.file_panel.index is @fileeditor.IndexReady(truncated=true, ..) &&
           root is Some(root) =>
-          completion_debounce.delayed(generation => {
+          completion.delayed(generation => {
             dispatch(
               FileCompletionDue(
                 owner~,
@@ -2019,15 +2021,7 @@ fn update_msg(
         {
           ..model.replace_conversation({ ..model.active(), task: value }),
           symbol_cache,
-          completion_debounce,
-          completion: compute_completion(
-            value,
-            model.installed_skills,
-            symbol_cache,
-            owner,
-            files~,
-            files_loading~,
-          ),
+          completion,
         },
       )
     }
@@ -2048,18 +2042,9 @@ fn update_msg(
     FileCompletionFailed(owner~, root~, query~, generation~) =>
       model.apply_file_completion_reply(owner, root, query, generation, None)
     CompletionMove(delta) =>
-      if model.completion is Some(menu) {
-        (
-          @cmd.none,
-          {
-            ..model,
-            completion: Some({ ..menu, menu: menu.menu.shifted(delta) }),
-          },
-        )
-      } else {
-        (@cmd.none, model)
-      }
-    CompletionDismiss => (@cmd.none, { ..model, completion: None })
+      (@cmd.none, { ..model, completion: model.completion.shifted(delta) })
+    CompletionDismiss =>
+      (@cmd.none, { ..model, completion: model.completion.dismissed() })
     RemoveMention(index) => {
       let conv = model.active()
       guard conv.mentions.get(index) is Some(_) else {
@@ -2287,16 +2272,18 @@ fn update_msg(
       }
     }
     CompletionAccept =>
-      if model.completion is Some(menu) && menu.menu.current() is Some(item) {
+      if model.completion.current() is Some(menu) &&
+        menu.menu().current() is Some(item) {
         accept_completion(dispatch, model, menu, item)
       } else {
-        (@cmd.none, { ..model, completion: None })
+        (@cmd.none, { ..model, completion: model.completion.dismissed() })
       }
     CompletionPick(index) =>
-      if model.completion is Some(menu) && menu.menu.get(index) is Some(item) {
+      if model.completion.current() is Some(menu) &&
+        menu.menu().get(index) is Some(item) {
         accept_completion(dispatch, model, menu, item)
       } else {
-        (@cmd.none, { ..model, completion: None })
+        (@cmd.none, { ..model, completion: model.completion.dismissed() })
       }
     SymbolsLoaded(owner~, root~, query~, generation~, items~) =>
       apply_symbol_reply(model, owner, root, query, generation, items)
@@ -3014,7 +3001,7 @@ fn update_msg(
             ),
             {
               ..model.replace_conversation({ ..conv, task: "", mentions: [] }),
-              completion: None,
+              completion: model.completion.dismissed(),
             },
           )
         } else {
@@ -3084,7 +3071,13 @@ fn update_msg(
             workspace=conv.workspace.project(),
           )
         }
-        (start_cmd, { ..model.replace_conversation(next), completion: None })
+        (
+          start_cmd,
+          {
+            ..model.replace_conversation(next),
+            completion: model.completion.dismissed(),
+          },
+        )
       }
     }
     Stop => {
@@ -3271,7 +3264,7 @@ fn update_msg(
           conversations,
           screen: Chat,
           loading_conversation: None,
-          completion: None,
+          completion: activated.completion.dismissed(),
         },
       )
     }
@@ -3827,7 +3820,7 @@ fn update_msg(
             ..conv,
             goal_edit: Some({ draft: conv.goal_draft_seed() }),
           }),
-          completion: None,
+          completion: model.completion.dismissed(),
         },
       )
     }
@@ -7854,31 +7847,31 @@ test "a symbol reply with the same session id but another channel is stale" {
       owner=remote_owner,
       root=remote_owner.channel.test_resource("/scratch/desktop-test"),
       query="parse",
-      generation=querying.completion_debounce.generation(),
+      generation=querying.completion.generation(),
       items~,
     ),
     querying,
   )
-  guard stale.completion is Some(stale_menu) else {
+  guard stale.completion.current() is Some(stale_menu) else {
     fail("symbol menu disappeared")
   }
-  assert_true(stale_menu.menu.loading())
+  assert_true(stale_menu.menu().loading())
   let (_, settled) = update(
     dispatch,
     SymbolsLoaded(
       owner=local_owner,
       root=local_owner.channel.test_resource("/scratch/desktop-test"),
       query="parse",
-      generation=stale.completion_debounce.generation(),
+      generation=stale.completion.generation(),
       items~,
     ),
     stale,
   )
-  guard settled.completion is Some(menu) else {
+  guard settled.completion.current() is Some(menu) else {
     fail("symbol menu disappeared")
   }
-  assert_false(menu.menu.loading())
-  guard menu.menu.get(0) is Some(first) else { fail("row expected") }
+  assert_false(menu.menu().loading())
+  guard menu.menu().get(0) is Some(first) else { fail("row expected") }
   inspect(first.label, content="parse_file")
 }
 
@@ -11085,10 +11078,10 @@ test "update is pure: accepting an inline skill preserves prompt text" {
     installed_skills: [installed_skill("review-pr", "Review a pull request")],
   }
   let (_, drafted) = update(dispatch, TaskChanged("Please use $rev"), model)
-  guard drafted.completion is Some(menu) else {
+  guard drafted.completion.current() is Some(menu) else {
     fail("the inline skill token should open completion")
   }
-  assert_eq(menu.menu.draft_without_token(), "Please use ")
+  assert_eq(menu.menu().draft_without_token(), "Please use ")
   let (_, once) = update(dispatch, CompletionAccept, drafted)
   let (_, twice) = update(dispatch, CompletionAccept, drafted)
   // The same message and model always produce the same plain-data state.
@@ -11100,7 +11093,9 @@ test "update is pure: accepting an inline skill preserves prompt text" {
     once.active().mentions[0].ref_ is Skill(name="review-pr") &&
     twice.active().mentions[0].ref_ is Skill(name="review-pr"),
   )
-  assert_true(once.completion is None && twice.completion is None)
+  assert_true(
+    once.completion.current() is None && twice.completion.current() is None,
+  )
 }
 
 ///|
@@ -11121,12 +11116,12 @@ test "file index completion refreshes and accepts a workspace file" {
   )
   let model = { ..base, file_panel: loading }
   let (_, searching) = update(dispatch, TaskChanged("Inspect @main"), model)
-  guard searching.completion is Some(pending) else {
+  guard searching.completion.current() is Some(pending) else {
     fail("the inline file token should open completion")
   }
-  assert_true(pending.kind is Files)
-  assert_true(pending.menu.loading())
-  assert_eq(pending.menu.length(), 0)
+  assert_true(pending.kind() is Files)
+  assert_true(pending.menu().loading())
+  assert_eq(pending.menu().length(), 0)
   let indexed = FileEditor(
     @fileeditor.FilesIndexed(
       owner~,
@@ -11138,15 +11133,15 @@ test "file index completion refreshes and accepts a workspace file" {
   let (_, dismissed) = update(dispatch, CompletionDismiss, searching)
   let (_, stayed_closed) = update(dispatch, indexed, dismissed)
   let (_, stayed_closed_again) = update(dispatch, indexed, dismissed)
-  assert_true(stayed_closed.completion is None)
+  assert_true(stayed_closed.completion.current() is None)
   assert_true(stayed_closed.completion == stayed_closed_again.completion)
   let (_, loaded) = update(dispatch, indexed, searching)
-  guard loaded.completion is Some(menu) else {
+  guard loaded.completion.current() is Some(menu) else {
     fail("the file-index reply should rebuild completion")
   }
-  assert_false(menu.menu.loading())
-  assert_eq(menu.menu.length(), 1)
-  guard menu.menu.get(0) is Some(file) else { fail("file row expected") }
+  assert_false(menu.menu().loading())
+  assert_eq(menu.menu().length(), 1)
+  guard menu.menu().get(0) is Some(file) else { fail("file row expected") }
   assert_eq(file.label, "main.mbt")
   assert_eq(file.path, Some("src/main.mbt"))
   let (_, accepted) = update(dispatch, CompletionAccept, loaded)
@@ -11189,28 +11184,28 @@ test "truncated file completion settles from the complete Host cache" {
   )
   let indexed = { ..base, file_panel: truncated }
   let (_, searching) = update(dispatch, TaskChanged("Inspect @hidden"), indexed)
-  guard searching.completion is Some(pending) else {
+  guard searching.completion.current() is Some(pending) else {
     fail("truncated indexes should keep the file menu open")
   }
-  assert_true(pending.kind is Files)
-  assert_true(pending.menu.loading())
-  assert_eq(pending.menu.length(), 0)
+  assert_true(pending.kind() is Files)
+  assert_true(pending.menu().loading())
+  assert_eq(pending.menu().length(), 0)
   let (_, loaded) = update(
     dispatch,
     FileCompletionLoaded(
       owner~,
       root~,
       query="hidden",
-      generation=searching.completion_debounce.generation(),
+      generation=searching.completion.generation(),
       files=[@pathx.Relative("other/hidden.mbt")],
     ),
     searching,
   )
-  guard loaded.completion is Some(menu) else {
+  guard loaded.completion.current() is Some(menu) else {
     fail("the complete cache result should settle file completion")
   }
-  assert_false(menu.menu.loading())
-  guard menu.menu.get(0) is Some(file) else {
+  assert_false(menu.menu().loading())
+  guard menu.menu().get(0) is Some(file) else {
     fail("a file outside the truncated snapshot should be selectable")
   }
   assert_eq(file.path, Some("other/hidden.mbt"))
@@ -11226,15 +11221,15 @@ test "truncated file completion settles from the complete Host cache" {
       owner~,
       root~,
       query="visible",
-      generation=local_searching.completion_debounce.generation(),
+      generation=local_searching.completion.generation(),
     ),
     local_searching,
   )
-  guard fallback.completion is Some(local_menu) else {
+  guard fallback.completion.current() is Some(local_menu) else {
     fail("a failed cache query should retain bounded local matches")
   }
-  assert_false(local_menu.menu.loading())
-  assert_eq(local_menu.menu.length(), 1)
+  assert_false(local_menu.menu().loading())
+  assert_eq(local_menu.menu().length(), 1)
 }
 
 ///|
@@ -11248,12 +11243,12 @@ test "file completion settles while its checkout root is unavailable" {
     TaskChanged("Inspect @missing"),
     rootless,
   )
-  guard searching.completion is Some(menu) else {
+  guard searching.completion.current() is Some(menu) else {
     fail("a rootless @ token should still expose a settled empty menu")
   }
-  assert_true(menu.kind is Files)
-  assert_false(menu.menu.loading())
-  assert_eq(menu.menu.length(), 0)
+  assert_true(menu.kind() is Files)
+  assert_false(menu.menu().loading())
+  assert_eq(menu.menu().length(), 0)
 }
 
 ///|
@@ -11285,15 +11280,15 @@ test "file index failure settles an empty completion menu" {
   let (_, dismissed) = update(dispatch, CompletionDismiss, searching)
   let (_, stayed_closed) = update(dispatch, failed_reply, dismissed)
   let (_, stayed_closed_again) = update(dispatch, failed_reply, dismissed)
-  assert_true(stayed_closed.completion is None)
+  assert_true(stayed_closed.completion.current() is None)
   assert_true(stayed_closed.completion == stayed_closed_again.completion)
   let (_, failed) = update(dispatch, failed_reply, searching)
-  guard failed.completion is Some(menu) else {
+  guard failed.completion.current() is Some(menu) else {
     fail("a live @ token should retain its settled empty menu")
   }
-  assert_true(menu.kind is Files)
-  assert_false(menu.menu.loading())
-  assert_eq(menu.menu.length(), 0)
+  assert_true(menu.kind() is Files)
+  assert_false(menu.menu().loading())
+  assert_eq(menu.menu().length(), 0)
 }
 
 ///|
@@ -11327,11 +11322,11 @@ test "a live file completion restarts when its checkout root changes" {
     ..base,
     file_panel: ready,
   })
-  guard showing_old.completion is Some(old_menu) else {
+  guard showing_old.completion.current() is Some(old_menu) else {
     fail("the old root should have a file completion menu")
   }
-  assert_false(old_menu.menu.loading())
-  assert_eq(old_menu.menu.length(), 1)
+  assert_false(old_menu.menu().loading())
+  assert_eq(old_menu.menu().length(), 1)
 
   let ready_msg = BridgeReady(
     scratch_root=owner.channel.test_resource("/next-scratch"),
@@ -11340,12 +11335,12 @@ test "a live file completion restarts when its checkout root changes" {
   let (_, rerooted_again) = update_dev(dispatch, ready_msg, showing_old)
   assert_true(rerooted.completion == rerooted_again.completion)
   assert_true(rerooted.file_panel.index is @fileeditor.IndexEmpty)
-  guard rerooted.completion is Some(waiting) else {
+  guard rerooted.completion.current() is Some(waiting) else {
     fail("the new root should keep the file completion menu open")
   }
-  assert_true(waiting.kind is Files)
-  assert_true(waiting.menu.loading())
-  assert_eq(waiting.menu.length(), 0)
+  assert_true(waiting.kind() is Files)
+  assert_true(waiting.menu().loading())
+  assert_eq(waiting.menu().length(), 0)
 }
 
 ///|
@@ -11356,12 +11351,12 @@ test "an inline symbol reply rebuilds the live completion menu" {
     TaskChanged("Inspect #parse"),
     test_model(),
   )
-  guard searching.completion is Some(pending) else {
+  guard searching.completion.current() is Some(pending) else {
     fail("the inline symbol token should open completion")
   }
-  assert_true(pending.kind is Symbols)
-  assert_true(pending.menu.loading())
-  assert_eq(pending.menu.draft_without_token(), "Inspect ")
+  assert_true(pending.kind() is Symbols)
+  assert_true(pending.menu().loading())
+  assert_eq(pending.menu().draft_without_token(), "Inspect ")
   let item : WorkspaceSymbol = {
     name: "parse_hover",
     kind: Some(12),
@@ -11375,19 +11370,19 @@ test "an inline symbol reply rebuilds the live completion menu" {
       owner={ channel: Local, session: "desktop-test" },
       root=@interop.ChannelId::Local.test_resource("/scratch/desktop-test"),
       query="parse",
-      generation=searching.completion_debounce.generation(),
+      generation=searching.completion.generation(),
       items=[item],
     ),
     searching,
   )
-  guard loaded.completion is Some(menu) else {
+  guard loaded.completion.current() is Some(menu) else {
     fail("the matching inline symbol reply should rebuild completion")
   }
-  assert_false(menu.menu.loading())
-  assert_eq(menu.menu.length(), 1)
-  guard menu.menu.get(0) is Some(first) else { fail("row expected") }
+  assert_false(menu.menu().loading())
+  assert_eq(menu.menu().length(), 1)
+  guard menu.menu().get(0) is Some(first) else { fail("row expected") }
   assert_eq(first.label, "parse_hover")
-  assert_eq(menu.menu.draft_without_token(), "Inspect ")
+  assert_eq(menu.menu().draft_without_token(), "Inspect ")
 }
 
 ///|
@@ -11424,11 +11419,11 @@ test "typing the same symbol query after a root change drops the old cache" {
   assert_eq(rerooted.symbol_cache.root, Some(old_root))
   let (_, querying) = update(dispatch, TaskChanged("#parse"), rerooted)
   assert_true(querying.symbol_cache.owner is None)
-  guard querying.completion is Some(menu) else {
+  guard querying.completion.current() is Some(menu) else {
     fail("the symbol menu should open for the new root")
   }
-  assert_true(menu.menu.loading())
-  assert_eq(menu.menu.length(), 0)
+  assert_true(menu.menu().loading())
+  assert_eq(menu.menu().length(), 0)
 }
 
 ///|
@@ -11453,16 +11448,16 @@ test "a composer symbol query restarts and fences replies when its root changes"
       owner~,
       root=old_root,
       query="parse",
-      generation=querying.completion_debounce.generation(),
+      generation=querying.completion.generation(),
       items=[item],
     ),
     querying,
   )
-  guard loaded.completion is Some(ready) else {
+  guard loaded.completion.current() is Some(ready) else {
     fail("the first root should settle the symbol menu")
   }
-  assert_false(ready.menu.loading())
-  assert_eq(ready.menu.length(), 1)
+  assert_false(ready.menu().loading())
+  assert_eq(ready.menu().length(), 1)
 
   let connected_root = owner.channel.test_resource("/next-scratch")
   let ready_msg = BridgeReady(scratch_root=connected_root)
@@ -11471,11 +11466,11 @@ test "a composer symbol query restarts and fences replies when its root changes"
   assert_true(rerooted.symbol_cache == repeated.symbol_cache)
   assert_true(rerooted.completion == repeated.completion)
   assert_true(rerooted.symbol_cache.owner is None)
-  guard rerooted.completion is Some(waiting) else {
+  guard rerooted.completion.current() is Some(waiting) else {
     fail("the changed root should keep the symbol menu open")
   }
-  assert_true(waiting.menu.loading())
-  assert_eq(waiting.menu.length(), 0)
+  assert_true(waiting.menu().loading())
+  assert_eq(waiting.menu().length(), 0)
 
   let (_, stale) = update(
     dispatch,
@@ -11483,7 +11478,7 @@ test "a composer symbol query restarts and fences replies when its root changes"
       owner~,
       root=old_root,
       query="parse",
-      generation=querying.completion_debounce.generation(),
+      generation=querying.completion.generation(),
       items=[item],
     ),
     rerooted,
@@ -11498,15 +11493,15 @@ test "a composer symbol query restarts and fences replies when its root changes"
       owner~,
       root=new_root,
       query="parse",
-      generation=stale.completion_debounce.generation(),
+      generation=stale.completion.generation(),
       items=[item],
     ),
     stale,
   )
-  guard settled.completion is Some(current) else {
+  guard settled.completion.current() is Some(current) else {
     fail("the new root should settle the symbol menu")
   }
-  assert_false(current.menu.loading())
+  assert_false(current.menu().loading())
   assert_eq(settled.symbol_cache.root, Some(new_root))
 }
 

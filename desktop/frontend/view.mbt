@@ -940,27 +940,31 @@ fn user_display_text(text : String) -> String {
 /// highlighted row marked for the keyboard and clickable by mouse. A pointer
 /// press accepts a row; `mousedown` (not `click`) is used so the textarea does
 /// not blur the menu away before the selection registers.
-fn Completion::view(self : Completion, dispatch : @cmd.Emit[Msg]) -> @html.Html {
+fn CompletionKind::view(
+  self : CompletionKind,
+  menu : @composer.Menu[CompletionItem],
+  dispatch : @cmd.Emit[Msg],
+) -> @html.Html {
   // A `#` menu opens before its results arrive, so an empty list is a state to
   // narrate — searching, or genuinely nothing — not an empty box.
-  let hint = match self.kind {
+  let hint = match self {
     SlashCommands => "Commands"
     SkillMentions => "Skills"
     Symbols => "Symbols"
     Files => "Files"
   }
   let rows : Array[@composer.CompletionRow] = []
-  for _, item in self.menu {
+  for _, item in menu {
     rows.push({ label: item.label, detail: item.detail })
   }
   @composer.CompletionView::{
     rows,
-    selected: self.menu.selected(),
+    selected: menu.selected(),
     hint,
-    empty: if self.menu.loading() {
+    empty: if menu.loading() {
       "Searching…"
     } else {
-      match self.kind {
+      match self {
         Files => "No files"
         _ => "No symbols"
       }
@@ -1237,7 +1241,7 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
       }
     }),
     keyboard: @composer.KeyboardActions::{
-      menu_open: !goal_mode && model.completion is Some(_),
+      menu_open: !goal_mode && model.completion.current() is Some(_),
       navigate: delta => dispatch(CompletionMove(delta)),
       accept: dispatch(CompletionAccept),
       dismiss: dispatch(CompletionDismiss),
@@ -1258,7 +1262,9 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
     overlay: if goal_mode {
       None
     } else {
-      model.completion.map(completion => completion.view(dispatch))
+      model.completion
+      .current()
+      .map(completion => completion.kind().view(completion.menu(), dispatch))
     },
   }.render()
 }

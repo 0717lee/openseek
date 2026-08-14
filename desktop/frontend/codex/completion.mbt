@@ -35,12 +35,6 @@ priv enum CodexMention {
 } derive(Eq)
 
 ///|
-priv struct CodexCompletion {
-  kind : CodexCompletionKind
-  menu : @composer.Menu[CodexCompletionItem]
-} derive(Eq)
-
-///|
 fn CodexCompletionKind::of_trigger(
   trigger : @composer.Trigger,
 ) -> CodexCompletionKind? {
@@ -251,7 +245,10 @@ fn CodexSkillCatalog::search(
 }
 
 ///|
-fn CodexCompletion::for_draft(state : State, text : String) -> CodexCompletion? {
+fn State::completion_for_draft(
+  self : State,
+  text : String,
+) -> @composer.Completion[CodexCompletionKind, CodexCompletionItem]? {
   guard @composer.Trigger::parse(text, inline_markers="$#@") is Some(trigger) &&
     CodexCompletionKind::of_trigger(trigger) is Some(kind) else {
     return None
@@ -264,61 +261,69 @@ fn CodexCompletion::for_draft(state : State, text : String) -> CodexCompletion? 
       if items.is_empty() {
         None
       } else {
-        Some({
-          kind: CodexCommands,
-          menu: @composer.Menu(
-            items,
-            loading=false,
-            draft_without_token=trigger.draft_without_token(),
+        Some(
+          @composer.Completion(
+            CodexCommands,
+            @composer.Menu(
+              items,
+              loading=false,
+              draft_without_token=trigger.draft_without_token(),
+            ),
           ),
-        })
+        )
       }
     }
     CodexSkills => {
-      let (items, loading) = match state.file_owner() {
-        Some(owner) => state.skills.search(owner.cwd, trigger)
+      let (items, loading) = match self.file_owner() {
+        Some(owner) => self.skills.search(owner.cwd, trigger)
         _ => ([], false)
       }
-      Some({
-        kind: CodexSkills,
-        menu: @composer.Menu(
-          items,
-          loading~,
-          draft_without_token=trigger.draft_without_token(),
+      Some(
+        @composer.Completion(
+          CodexSkills,
+          @composer.Menu(
+            items,
+            loading~,
+            draft_without_token=trigger.draft_without_token(),
+          ),
         ),
-      })
+      )
     }
     CodexSymbols => {
-      let owner = state.search_owner(trigger.query())
-      let items = if owner is Some(_) && state.symbol_search.owner == owner {
-        state.symbol_search.items.filter(item => {
+      let owner = self.search_owner(trigger.query())
+      let items = if owner is Some(_) && self.symbol_search.owner == owner {
+        self.symbol_search.items.filter(item => {
           trigger.matches([item.name, item.detail, item.path])
         })
       } else {
         []
       }
-      Some({
-        kind: CodexSymbols,
-        menu: @composer.Menu(
-          items,
-          loading=owner is Some(_) && state.symbol_search.owner != owner,
-          draft_without_token=trigger.draft_without_token(),
+      Some(
+        @composer.Completion(
+          CodexSymbols,
+          @composer.Menu(
+            items,
+            loading=owner is Some(_) && self.symbol_search.owner != owner,
+            draft_without_token=trigger.draft_without_token(),
+          ),
         ),
-      })
+      )
     }
     CodexFiles => {
-      let (items, loading) = match state.file_owner() {
-        Some(owner) => state.file_index.search(owner, trigger.query())
+      let (items, loading) = match self.file_owner() {
+        Some(owner) => self.file_index.search(owner, trigger.query())
         None => ([], false)
       }
-      Some({
-        kind: CodexFiles,
-        menu: @composer.Menu(
-          items,
-          loading~,
-          draft_without_token=trigger.draft_without_token(),
+      Some(
+        @composer.Completion(
+          CodexFiles,
+          @composer.Menu(
+            items,
+            loading~,
+            draft_without_token=trigger.draft_without_token(),
+          ),
         ),
-      })
+      )
     }
   }
 }
@@ -342,14 +347,14 @@ fn State::with_context_mention(
   if !mentions.contains(mention) {
     mentions.push(mention)
   }
-  guard self.completion is Some(completion) else {
-    return { ..self, mentions, completion: None }
+  guard self.completion.current() is Some(completion) else {
+    return { ..self, mentions, completion: self.completion.dismissed() }
   }
   {
     ..self,
-    draft: completion.menu.draft_without_token(),
+    draft: completion.menu().draft_without_token(),
     mentions,
-    completion: None,
+    completion: self.completion.dismissed(),
   }
 }
 
@@ -375,7 +380,10 @@ fn State::with_files(
 ) -> State {
   guard self.file_owner() == Some(owner) else { return self }
   let next = { ..self, file_index: CodexFilesReady(owner, files, truncated) }
-  { ..next, completion: CodexCompletion::for_draft(next, next.draft) }
+  {
+    ..next,
+    completion: next.completion.refreshed(next.completion_for_draft(next.draft)),
+  }
 }
 
 ///|
@@ -388,7 +396,10 @@ fn State::with_file_failure(self : State, owner : CodexFileOwner) -> State {
     _ => CodexFilesFailed(owner)
   }
   let next = { ..self, file_index, }
-  { ..next, completion: CodexCompletion::for_draft(next, next.draft) }
+  {
+    ..next,
+    completion: next.completion.refreshed(next.completion_for_draft(next.draft)),
+  }
 }
 
 ///|
@@ -401,7 +412,10 @@ fn State::with_skills(
     return self
   }
   let next = { ..self, skills: CodexSkillsReady(cwd, skills) }
-  { ..next, completion: CodexCompletion::for_draft(next, next.draft) }
+  {
+    ..next,
+    completion: next.completion.refreshed(next.completion_for_draft(next.draft)),
+  }
 }
 
 ///|
@@ -415,7 +429,10 @@ fn State::with_skill_failure(self : State, cwd : String) -> State {
     _ => CodexSkillsFailed(cwd)
   }
   let next = { ..self, skills, }
-  { ..next, completion: CodexCompletion::for_draft(next, next.draft) }
+  {
+    ..next,
+    completion: next.completion.refreshed(next.completion_for_draft(next.draft)),
+  }
 }
 
 ///|
@@ -445,21 +462,24 @@ fn State::with_symbols(
   generation : Int,
   symbols : Array[@symbols.Symbol],
 ) -> State {
-  guard self.completion_debounce.accepts(generation) &&
+  guard self.completion.accepts(generation) &&
     self.file_owner() is Some(current) &&
     current.thread_id == owner.thread_id &&
     current.cwd == owner.cwd &&
     @composer.Trigger::parse(self.draft, inline_markers="$#@") is Some(trigger) &&
     trigger.marker() == "#" &&
     trigger.query() == owner.query &&
-    self.completion is Some(completion) &&
-    completion.kind is CodexSymbols &&
-    completion.menu.loading() else {
+    self.completion.current() is Some(completion) &&
+    completion.kind() is CodexSymbols &&
+    completion.menu().loading() else {
     return self
   }
   let items = symbols.map(symbol => CodexCompletionItem::from_symbol(symbol))
   let next = { ..self, symbol_search: { owner: Some(owner), items } }
-  { ..next, completion: CodexCompletion::for_draft(next, next.draft) }
+  {
+    ..next,
+    completion: next.completion.refreshed(next.completion_for_draft(next.draft)),
+  }
 }
 
 ///|
@@ -469,15 +489,16 @@ fn State::change_draft(
   channel : @interop.ChannelId,
   value : String,
 ) -> (@cmd.Cmd, State) {
-  let completion_debounce = self.completion_debounce.advanced()
-  let next = { ..self, draft: value, completion_debounce }
+  let next = { ..self, draft: value }
+  let completion = self.completion.changed(next.completion_for_draft(value))
+  let next = { ..next, completion, }
   let command = if @composer.Trigger::parse(value, inline_markers="$#@")
     is Some(trigger) &&
     CodexCompletionKind::of_trigger(trigger) is Some(kind) &&
     next.search_owner(trigger.query()) is Some(owner) {
     match kind {
       CodexSymbols if next.symbol_search.owner != Some(owner) =>
-        completion_debounce.delayed(generation => {
+        completion.delayed(generation => {
           dispatch(SymbolSearchDue(owner~, generation~))
         })
       _ => @cmd.none
@@ -511,10 +532,7 @@ fn State::change_draft(
     }
     _ => (@cmd.none, next)
   }
-  (
-    @cmd.batch([command, context_command]),
-    { ..next, completion: CodexCompletion::for_draft(next, value) },
-  )
+  (@cmd.batch([command, context_command]), next)
 }
 
 ///|
@@ -529,16 +547,16 @@ fn State::begin_completion_search(
   owner : CodexSearchOwner,
   generation : Int,
 ) -> (@cmd.Cmd, State) {
-  guard self.completion_debounce.accepts(generation) &&
+  guard self.completion.accepts(generation) &&
     self.file_owner() is Some(current) &&
     current.thread_id == owner.thread_id &&
     current.cwd == owner.cwd &&
     @composer.Trigger::parse(self.draft, inline_markers="$#@") is Some(trigger) &&
     CodexCompletionKind::of_trigger(trigger) == Some(kind) &&
     trigger.query() == owner.query &&
-    self.completion is Some(completion) &&
-    completion.kind == kind &&
-    completion.menu.loading() else {
+    self.completion.current() is Some(completion) &&
+    completion.kind() == kind &&
+    completion.menu().loading() else {
     return (@cmd.none, self)
   }
   let command = match kind {
@@ -557,10 +575,12 @@ fn State::accept_completion(
   channel : @interop.ChannelId,
   item : CodexCompletionItem,
 ) -> (@cmd.Cmd, State) {
-  guard self.completion is Some(completion) else { return (@cmd.none, self) }
-  match completion.kind {
+  guard self.completion.current() is Some(completion) else {
+    return (@cmd.none, self)
+  }
+  match completion.kind() {
     CodexSkills | CodexSymbols | CodexFiles =>
-      (@cmd.none, self.with_context_mention(completion.kind, item))
+      (@cmd.none, self.with_context_mention(completion.kind(), item))
     CodexCommands => {
       let original = self.draft
       let command = match item.command {
@@ -572,7 +592,7 @@ fn State::accept_completion(
         command,
         {
           ..self,
-          completion: None,
+          completion: self.completion.dismissed(),
           loading: item.command == "compact" || item.command == "review",
           notice: "",
         },
@@ -637,18 +657,39 @@ test "Codex dollar and at completion use cwd-scoped catalogs" {
       false,
     ),
   }
-  guard CodexCompletion::for_draft(state, "Use $rev") is Some(skills) else {
+  guard state.completion_for_draft("Use $rev") is Some(skills) else {
     fail("Codex skill menu expected")
   }
-  assert_true(skills.kind is CodexSkills)
-  guard skills.menu.get(0) is Some(skill) else { fail("skill row expected") }
+  assert_true(skills.kind() is CodexSkills)
+  guard skills.menu().get(0) is Some(skill) else { fail("skill row expected") }
   assert_eq(skill.label, "$review-pr")
-  guard CodexCompletion::for_draft(state, "Open @main") is Some(files) else {
+  guard state.completion_for_draft("Open @main") is Some(files) else {
     fail("Codex file menu expected")
   }
-  assert_true(files.kind is CodexFiles)
-  guard files.menu.get(0) is Some(file) else { fail("file row expected") }
+  assert_true(files.kind() is CodexFiles)
+  guard files.menu().get(0) is Some(file) else { fail("file row expected") }
   assert_eq(file.path, "src/main.mbt")
+}
+
+///|
+test "Codex catalog replies do not reopen a dismissed completion" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let state = State::from_thread_snapshot({
+    "thread": { "id": "thread-1", "cwd": "/work/project", "turns": [] },
+  })
+  let (_, searching) = state.change_draft(
+    dispatch,
+    @interop.ChannelId::Local,
+    "Open @main",
+  )
+  assert_true(searching.completion.current() is Some(_))
+  let dismissed = { ..searching, completion: searching.completion.dismissed() }
+  let loaded = dismissed.with_files(
+    { thread_id: "thread-1", cwd: "/work/project" },
+    [@pathx.Relative("src/main.mbt")],
+    false,
+  )
+  assert_true(loaded.completion.current() is None)
 }
 
 ///|

@@ -459,27 +459,28 @@ fn CodexMention::chip(
 }
 
 ///|
-fn CodexCompletion::view(
-  self : CodexCompletion,
+fn CodexCompletionKind::view(
+  self : CodexCompletionKind,
+  menu : @composer.Menu[CodexCompletionItem],
   dispatch : @cmd.Emit[Msg],
 ) -> @html.Html {
   let rows : Array[@composer.CompletionRow] = []
-  for _, item in self.menu {
+  for _, item in menu {
     rows.push({ label: item.label, detail: item.detail })
   }
   @composer.CompletionView::{
     rows,
-    selected: self.menu.selected(),
-    hint: match self.kind {
+    selected: menu.selected(),
+    hint: match self {
       CodexCommands => "Commands"
       CodexSkills => "Skills"
       CodexSymbols => "Symbols"
       CodexFiles => "Files"
     },
-    empty: if self.menu.loading() {
+    empty: if menu.loading() {
       "Searching…"
     } else {
-      match self.kind {
+      match self {
         CodexCommands => "No commands"
         CodexSkills => "No skills"
         CodexSymbols => "No symbols"
@@ -729,7 +730,7 @@ fn State::composer_view(
     self.has_missing_worktree(),
     input: dispatch.map(value => DraftChanged(value)),
     keyboard: @composer.KeyboardActions::{
-      menu_open: self.completion is Some(_),
+      menu_open: self.completion.current() is Some(_),
       navigate: delta => dispatch(CompletionMove(delta)),
       accept: dispatch(CompletionAccept),
       dismiss: dispatch(CompletionDismiss),
@@ -738,7 +739,9 @@ fn State::composer_view(
     },
     status,
     action,
-    overlay: self.completion.map(completion => completion.view(dispatch)),
+    overlay: self.completion
+    .current()
+    .map(completion => completion.kind().view(completion.menu(), dispatch)),
   }.render()
 }
 

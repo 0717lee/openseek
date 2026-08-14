@@ -916,17 +916,6 @@ priv struct Mention {
 } derive(Eq)
 
 ///|
-/// The composer's open completion menu: the trigger that opened it, the
-/// currently matching rows, which row is highlighted, and the exact draft text
-/// before the live token. Absent when the composer has no live trigger.
-/// `loading` marks a `#` query or workspace-file index still in flight, so an
-/// empty menu can distinguish "Searching…" from a settled empty provider.
-priv struct Completion {
-  kind : CompletionKind
-  menu : @composer.Menu[CompletionItem]
-} derive(Eq)
-
-///|
 /// The last workspace-symbol results, cached so the `#` menu can show them
 /// without refetching while the query is unchanged. `session` records which
 /// conversation they belong to, so switching either device or session
@@ -1307,15 +1296,11 @@ priv struct Model {
   // draft has a `/`, `$`, `#`, or `@` trigger. Lives on the model rather than the
   // conversation: it is transient UI for the on-screen composer, recomputed on
   // every keystroke and dismissed on blur, send, or conversation switch.
-  completion : Completion?
+  completion : @composer.CompletionState[CompletionKind, CompletionItem]
   // The last `#` symbol search's results, kept so the menu shows instantly
   // while the query is unchanged. Recomputed on every keystroke and refetched
   // when the query or conversation changes.
   symbol_cache : SymbolCache
-  // Every draft edit advances this identity. Delayed symbol requests and their
-  // replies carry it so a newer keystroke, dismissal, or conversation switch
-  // cannot revive an obsolete completion.
-  completion_debounce : @composer.Debounce
   // Cmd/Ctrl+P/T unified Quick Open in the native window and browser console.
   // It is global UI for the focused conversation, not durable conversation
   // state. The monotonic counter fences symbol replies across close and reopen,
@@ -2487,9 +2472,8 @@ fn initial_model() -> Model {
     skills_query: "",
     skills_busy: [],
     skills_notice: "",
-    completion: None,
+    completion: @composer.CompletionState(),
     symbol_cache: empty_symbol_cache(),
-    completion_debounce: @composer.Debounce(),
     quick_open: None,
     quick_open_generation: 0,
     git_request_generation: 0,

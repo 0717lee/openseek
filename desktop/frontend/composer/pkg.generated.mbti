@@ -22,10 +22,26 @@ pub(all) struct Action {
   content : @html.Html
 }
 
+type Completion[Kind, Item] derive(Eq)
+pub fn[Kind, Item] Completion::Completion(Kind, Menu[Item]) -> Self[Kind, Item]
+pub fn[Kind, Item] Completion::kind(Self[Kind, Item]) -> Kind
+pub fn[Kind, Item] Completion::menu(Self[Kind, Item]) -> Menu[Item]
+
 pub(all) struct CompletionRow {
   label : String
   detail : String
 }
+
+type CompletionState[Kind, Item] derive(Eq)
+pub fn[Kind, Item] CompletionState::CompletionState() -> Self[Kind, Item]
+pub fn[Kind, Item] CompletionState::accepts(Self[Kind, Item], Int) -> Bool
+pub fn[Kind, Item] CompletionState::changed(Self[Kind, Item], Completion[Kind, Item]?) -> Self[Kind, Item]
+pub fn[Kind, Item] CompletionState::current(Self[Kind, Item]) -> Completion[Kind, Item]?
+pub fn[Kind, Item] CompletionState::delayed(Self[Kind, Item], (Int) -> @cmd.Cmd) -> @cmd.Cmd
+pub fn[Kind, Item] CompletionState::dismissed(Self[Kind, Item]) -> Self[Kind, Item]
+pub fn[Kind, Item] CompletionState::generation(Self[Kind, Item]) -> Int
+pub fn[Kind, Item] CompletionState::refreshed(Self[Kind, Item], Completion[Kind, Item]?) -> Self[Kind, Item]
+pub fn[Kind, Item] CompletionState::shifted(Self[Kind, Item], Int) -> Self[Kind, Item]
 
 pub(all) struct CompletionView {
   rows : Array[CompletionRow]

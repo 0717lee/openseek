@@ -62,7 +62,7 @@ fn compute_completion(
   owner : @interop.ConversationKey,
   files? : Array[@files.Match] = [],
   files_loading? : Bool = false,
-) -> Completion? {
+) -> @composer.Completion[CompletionKind, CompletionItem]? {
   guard @composer.Trigger::parse(text, inline_markers="$#@") is Some(trigger) &&
     CompletionKind::of_trigger(trigger) is Some(kind) else {
     return None
@@ -75,14 +75,16 @@ fn compute_completion(
       if items.is_empty() {
         None
       } else {
-        Some({
-          kind: SlashCommands,
-          menu: @composer.Menu(
-            items,
-            loading=false,
-            draft_without_token=trigger.draft_without_token(),
+        Some(
+          @composer.Completion(
+            SlashCommands,
+            @composer.Menu(
+              items,
+              loading=false,
+              draft_without_token=trigger.draft_without_token(),
+            ),
           ),
-        })
+        )
       }
     }
     SkillMentions => {
@@ -102,14 +104,16 @@ fn compute_completion(
       if items.is_empty() {
         None
       } else {
-        Some({
-          kind: SkillMentions,
-          menu: @composer.Menu(
-            items,
-            loading=false,
-            draft_without_token=trigger.draft_without_token(),
+        Some(
+          @composer.Completion(
+            SkillMentions,
+            @composer.Menu(
+              items,
+              loading=false,
+              draft_without_token=trigger.draft_without_token(),
+            ),
           ),
-        })
+        )
       }
     }
     Symbols => {
@@ -123,14 +127,16 @@ fn compute_completion(
       // shows whatever the cache narrows to meanwhile, marked loading.
       let loading = symbols.owner != Some(owner) ||
         symbols.query != trigger.query()
-      Some({
-        kind: Symbols,
-        menu: @composer.Menu(
-          items,
-          loading~,
-          draft_without_token=trigger.draft_without_token(),
+      Some(
+        @composer.Completion(
+          Symbols,
+          @composer.Menu(
+            items,
+            loading~,
+            draft_without_token=trigger.draft_without_token(),
+          ),
         ),
-      })
+      )
     }
     Files => {
       let items = files.map(file => CompletionItem::{
@@ -141,14 +147,16 @@ fn compute_completion(
         path: Some(file.path.0),
         range: None,
       })
-      Some({
-        kind: Files,
-        menu: @composer.Menu(
-          items,
-          loading=files_loading,
-          draft_without_token=trigger.draft_without_token(),
+      Some(
+        @composer.Completion(
+          Files,
+          @composer.Menu(
+            items,
+            loading=files_loading,
+            draft_without_token=trigger.draft_without_token(),
+          ),
         ),
-      })
+      )
     }
   }
 }
@@ -203,7 +211,7 @@ fn Model::begin_file_completion_request(
   query : String,
   generation : Int,
 ) -> (@cmd.Cmd, Model) {
-  guard self.completion_debounce.accepts(generation) &&
+  guard self.completion.accepts(generation) &&
     owner.channel == self.focused &&
     owner.session == self.active().session_id &&
     self.conversation_root(self.active()) == Some(root) &&
@@ -212,9 +220,9 @@ fn Model::begin_file_completion_request(
     is Some(trigger) &&
     trigger.marker() == "@" &&
     trigger.query() == query &&
-    self.completion is Some(completion) &&
-    completion.kind is Files &&
-    completion.menu.loading() else {
+    self.completion.current() is Some(completion) &&
+    completion.kind() is Files &&
+    completion.menu().loading() else {
     return (@cmd.none, self)
   }
   (
@@ -245,16 +253,16 @@ fn Model::apply_file_completion_reply(
   remote_files : Array[@pathx.Relative]?,
 ) -> (@cmd.Cmd, Model) {
   let draft = self.active().task
-  guard self.completion_debounce.accepts(generation) &&
+  guard self.completion.accepts(generation) &&
     owner.channel == self.focused &&
     owner.session == self.active().session_id &&
     self.conversation_root(self.active()) == Some(root) &&
     @composer.Trigger::parse(draft, inline_markers="$#@") is Some(trigger) &&
     trigger.marker() == "@" &&
     trigger.query() == query &&
-    self.completion is Some(completion) &&
-    completion.kind is Files &&
-    completion.menu.loading() else {
+    self.completion.current() is Some(completion) &&
+    completion.kind() is Files &&
+    completion.menu().loading() else {
     return (@cmd.none, self)
   }
   let matches = match remote_files {
@@ -270,13 +278,15 @@ fn Model::apply_file_completion_reply(
     @cmd.none,
     {
       ..self,
-      completion: compute_completion(
-        draft,
-        self.installed_skills,
-        self.symbol_cache,
-        owner,
-        files=matches,
-        files_loading=false,
+      completion: self.completion.refreshed(
+        compute_completion(
+          draft,
+          self.installed_skills,
+          self.symbol_cache,
+          owner,
+          files=matches,
+          files_loading=false,
+        ),
       ),
     },
   )
@@ -292,9 +302,9 @@ fn Model::file_completion_query_after_index(
   dispatch : @cmd.Emit[Msg],
 ) -> @cmd.Cmd {
   guard self.file_panel.index is @fileeditor.IndexReady(truncated=true, ..) &&
-    self.completion is Some(completion) &&
-    completion.kind is Files &&
-    completion.menu.loading() &&
+    self.completion.current() is Some(completion) &&
+    completion.kind() is Files &&
+    completion.menu().loading() &&
     @composer.Trigger::parse(self.active().task, inline_markers="$#@")
     is Some(trigger) &&
     trigger.marker() == "@" &&
@@ -306,7 +316,7 @@ fn Model::file_completion_query_after_index(
       owner={ channel: self.focused, session: self.active().session_id },
       root~,
       query=trigger.query(),
-      generation=self.completion_debounce.generation(),
+      generation=self.completion.generation(),
     ),
   )
 }
@@ -319,8 +329,8 @@ fn Model::file_completion_query_after_index(
 /// recreate it from the still-present token.
 fn Model::refresh_file_completion(self : Model) -> Model {
   let text = self.active().task
-  guard self.completion is Some(completion) &&
-    completion.kind is Files &&
+  guard self.completion.current() is Some(completion) &&
+    completion.kind() is Files &&
     @composer.Trigger::parse(text, inline_markers="$#@") is Some(trigger) &&
     trigger.marker() == "@" else {
     return self
@@ -332,13 +342,15 @@ fn Model::refresh_file_completion(self : Model) -> Model {
   }
   {
     ..self,
-    completion: compute_completion(
-      text,
-      self.installed_skills,
-      self.symbol_cache,
-      owner,
-      files~,
-      files_loading~,
+    completion: self.completion.refreshed(
+      compute_completion(
+        text,
+        self.installed_skills,
+        self.symbol_cache,
+        owner,
+        files~,
+        files_loading~,
+      ),
     ),
   }
 }
@@ -361,8 +373,8 @@ fn Model::restart_file_completion_after_root_change(
   let previous_conv = previous.active()
   guard self.conversation_root(conv) !=
     previous.conversation_root(previous_conv) &&
-    self.completion is Some(completion) &&
-    completion.kind is Files &&
+    self.completion.current() is Some(completion) &&
+    completion.kind() is Files &&
     @composer.Trigger::parse(conv.task, inline_markers="$#@") is Some(trigger) &&
     trigger.marker() == "@" else {
     return (@cmd.none, self)
@@ -416,7 +428,7 @@ fn installed_skill(
 fn menu_for(
   text : String,
   installed : Array[@transcript.InstalledSkillItem],
-) -> Completion? {
+) -> @composer.Completion[CompletionKind, CompletionItem]? {
   compute_completion(text, installed, empty_symbol_cache(), {
     channel: Local,
     session: "",
@@ -445,19 +457,19 @@ test "slash trigger lists matching commands and filters by the typed name" {
   guard menu_for("/", []) is Some(all) else {
     fail("a bare slash should open the command menu")
   }
-  assert_true(all.kind is SlashCommands)
-  assert_true(all.menu.length() >= 2)
-  guard all.menu.get(0) is Some(all_first) else { fail("row expected") }
+  assert_true(all.kind() is SlashCommands)
+  assert_true(all.menu().length() >= 2)
+  guard all.menu().get(0) is Some(all_first) else { fail("row expected") }
   assert_eq(all_first.label, "/compact")
   guard menu_for("/comp", []) is Some(match_) else {
     fail("a command prefix should keep matching rows")
   }
-  guard match_.menu.get(0) is Some(compact) else { fail("row expected") }
+  guard match_.menu().get(0) is Some(compact) else { fail("row expected") }
   assert_eq(compact.command, "compact")
   guard menu_for("/go", []) is Some(goal_match) else {
     fail("the goal command should match its prefix")
   }
-  guard goal_match.menu.get(0) is Some(goal) else { fail("row expected") }
+  guard goal_match.menu().get(0) is Some(goal) else { fail("row expected") }
   assert_eq(goal.command, "goal")
   // No command contains this, so the menu closes rather than showing nothing.
   assert_true(menu_for("/zzz", []) is None)
@@ -478,9 +490,9 @@ test "dollar trigger lists installed skills, name or description matching" {
   guard menu_for("$", skills) is Some(all) else {
     fail("a bare dollar should open the skills menu")
   }
-  assert_true(all.kind is SkillMentions)
-  assert_eq(all.menu.length(), 2)
-  guard all.menu.get(0) is Some(first) else { fail("row expected") }
+  assert_true(all.kind() is SkillMentions)
+  assert_eq(all.menu().length(), 2)
+  guard all.menu().get(0) is Some(first) else { fail("row expected") }
   assert_eq(first.label, "$review-pr")
   // Insertion drops the bare name plus a space to keep typing the prompt.
   assert_eq(first.insert, "review-pr ")
@@ -488,7 +500,7 @@ test "dollar trigger lists installed skills, name or description matching" {
   guard menu_for("$TIDY", skills) is Some(desc) else {
     fail("description text should match")
   }
-  guard desc.menu.get(0) is Some(desc_first) else { fail("row expected") }
+  guard desc.menu().get(0) is Some(desc_first) else { fail("row expected") }
   assert_eq(desc_first.label, "$refactor")
   // No installed skills, no menu.
   assert_true(menu_for("$x", []) is None)
@@ -500,15 +512,15 @@ test "skill completion follows prompt text and preserves that text" {
   guard menu_for("Please use $rev", skills) is Some(menu) else {
     fail("a skill token after prompt text should open the menu")
   }
-  assert_true(menu.kind is SkillMentions)
-  guard menu.menu.get(0) is Some(first) else { fail("row expected") }
+  assert_true(menu.kind() is SkillMentions)
+  guard menu.menu().get(0) is Some(first) else { fail("row expected") }
   assert_eq(first.label, "$review-pr")
-  assert_eq(menu.menu.draft_without_token(), "Please use ")
+  assert_eq(menu.menu().draft_without_token(), "Please use ")
   // Newlines are valid token boundaries too.
   guard menu_for("First line\n$rev", skills) is Some(after_newline) else {
     fail("a skill token after a newline should open the menu")
   }
-  assert_eq(after_newline.menu.draft_without_token(), "First line\n")
+  assert_eq(after_newline.menu().draft_without_token(), "First line\n")
 }
 
 ///|
@@ -525,9 +537,9 @@ test "at trigger lists the same ranked workspace file matches as Ctrl+P" {
     is Some(menu) else {
     fail("an @ token should open the file menu")
   }
-  assert_true(menu.kind is Files)
-  assert_eq(menu.menu.draft_without_token(), "Inspect ")
-  guard menu.menu.get(0) is Some(file) else { fail("file row expected") }
+  assert_true(menu.kind() is Files)
+  assert_eq(menu.menu().draft_without_token(), "Inspect ")
+  guard menu.menu().get(0) is Some(file) else { fail("file row expected") }
   assert_eq(file.label, "main.mbt")
   assert_eq(file.path, Some("src/main.mbt"))
 }
@@ -558,10 +570,10 @@ test "highlight movement wraps at both ends" {
     installed_skill("c", ""),
   ]
   guard menu_for("$", skills) is Some(menu) else { fail("menu expected") }
-  assert_eq(menu.menu.selected(), 0)
-  assert_eq(menu.menu.shifted(-1).selected(), 2)
-  assert_eq(menu.menu.shifted(1).selected(), 1)
-  assert_eq(menu.menu.shifted(1).shifted(1).shifted(1).selected(), 0)
+  assert_eq(menu.menu().selected(), 0)
+  assert_eq(menu.menu().shifted(-1).selected(), 2)
+  assert_eq(menu.menu().shifted(1).selected(), 1)
+  assert_eq(menu.menu().shifted(1).shifted(1).shifted(1).selected(), 0)
 }
 
 ///|
@@ -573,12 +585,12 @@ test "hash trigger lists cached symbols, filtered, marked not loading on match" 
   guard compute_completion("#parse", [], cache, owner) is Some(menu) else {
     fail("a # query should open the symbol menu")
   }
-  assert_true(menu.kind is Symbols)
+  assert_true(menu.kind() is Symbols)
   // The cache answers this exact query/session, so the menu is settled.
-  assert_false(menu.menu.loading())
+  assert_false(menu.menu().loading())
   // "render" is filtered out by the live query; the two parses survive.
-  assert_eq(menu.menu.length(), 2)
-  guard menu.menu.get(0) is Some(first) else { fail("row expected") }
+  assert_eq(menu.menu().length(), 2)
+  guard menu.menu().get(0) is Some(first) else { fail("row expected") }
   assert_eq(first.label, "parse_hover")
   // Accepting drops a backticked reference plus location into the composer.
   assert_eq(first.insert, "`parse_hover` — src/main.mbt:1 ")
@@ -591,11 +603,11 @@ test "symbol completion follows prompt text and preserves that text" {
   guard compute_completion("Inspect #parse", [], cache, owner) is Some(menu) else {
     fail("a symbol token after prompt text should open the menu")
   }
-  assert_true(menu.kind is Symbols)
-  assert_false(menu.menu.loading())
-  guard menu.menu.get(0) is Some(first) else { fail("row expected") }
+  assert_true(menu.kind() is Symbols)
+  assert_false(menu.menu().loading())
+  guard menu.menu().get(0) is Some(first) else { fail("row expected") }
   assert_eq(first.label, "parse_hover")
-  assert_eq(menu.menu.draft_without_token(), "Inspect ")
+  assert_eq(menu.menu().draft_without_token(), "Inspect ")
 }
 
 ///|
@@ -606,15 +618,15 @@ test "hash menu is loading until the cache catches up to the query" {
   guard compute_completion("#", [], empty_symbol_cache(), owner) is Some(bare) else {
     fail("a bare # should open the symbol menu")
   }
-  assert_true(bare.menu.loading())
-  assert_eq(bare.menu.length(), 0)
+  assert_true(bare.menu().loading())
+  assert_eq(bare.menu().length(), 0)
   // A query with no cached results yet: the menu opens empty and loading.
   guard compute_completion("#parse", [], empty_symbol_cache(), owner)
     is Some(fresh) else {
     fail("a # query should open even before results arrive")
   }
-  assert_true(fresh.menu.loading())
-  assert_eq(fresh.menu.length(), 0)
+  assert_true(fresh.menu().loading())
+  assert_eq(fresh.menu().length(), 0)
   // A cache from another conversation does not answer this one.
   let other = symbol_cache(
     { channel: Remote("other"), session: "s1" },
@@ -624,14 +636,14 @@ test "hash menu is loading until the cache catches up to the query" {
   guard compute_completion("#parse", [], other, owner) is Some(stale) else {
     fail("menu still opens")
   }
-  assert_true(stale.menu.loading())
+  assert_true(stale.menu().loading())
   // Once the empty-query results are cached, a bare # lists them all, settled.
   let full = symbol_cache(owner, "", ["alpha", "beta"])
   guard compute_completion("#", [], full, owner) is Some(menu) else {
     fail("bare # lists the cached symbols")
   }
-  assert_false(menu.menu.loading())
-  assert_eq(menu.menu.length(), 2)
+  assert_false(menu.menu().loading())
+  assert_eq(menu.menu().length(), 2)
 }
 
 ///|

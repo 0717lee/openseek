@@ -160,7 +160,7 @@ test "the goal slash command opens the editor prefilled from the mirror" {
   inspect(edit.draft, content="ship the feature")
   // Whole-draft semantics, like /compact: accepting clears the typed command.
   inspect(opened.active().task, content="")
-  assert_true(opened.completion is None)
+  assert_true(opened.completion.current() is None)
 }
 
 ///|
@@ -183,11 +183,11 @@ test "the row's Edit takes the prompt's menu down with it" {
   }
   let model = {
     ..test_model().replace_conversation(conv),
-    completion: Some(menu),
+    completion: test_model().completion.changed(Some(menu)),
   }
   let (_, editing) = update(dispatch, OpenGoalEditor, model)
   assert_true(editing.active().goal_edit is Some(_))
-  assert_true(editing.completion is None)
+  assert_true(editing.completion.current() is None)
 }
 
 ///|

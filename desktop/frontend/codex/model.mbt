@@ -295,9 +295,12 @@ struct State {
   // and editor annotations use the shared mention envelope inside text inputs
   // because app-server has no structured symbol/annotation input of its own.
   mentions : Array[CodexMention]
-  completion : CodexCompletion?
-  // Shared composer debounce state for asynchronous `#` symbol lookup.
-  completion_debounce : @composer.Debounce
+  // OpenSeek and Codex keep separate values but use one completion state type
+  // for menu selection, dismissal, and asynchronous request generations.
+  completion : @composer.CompletionState[
+    CodexCompletionKind,
+    CodexCompletionItem,
+  ]
   // `@` and `$` are cwd-scoped catalogs loaded when a thread becomes active.
   // Files use the same host index and fuzzy ranking implementation as Ctrl+P;
   // skills remain the Codex app-server catalog, not OpenSeek's registry.
@@ -327,8 +330,7 @@ pub fn State::State(loading? : Bool = false) -> State {
     write_access: CodexNeedsResume,
     draft: "",
     mentions: [],
-    completion: None,
-    completion_debounce: @composer.Debounce(),
+    completion: @composer.CompletionState(),
     file_index: CodexFilesEmpty,
     skills: CodexSkillsEmpty,
     symbol_search: CodexSymbolSearchCache::empty(),
@@ -509,8 +511,7 @@ fn State::select_draft(self : State, id : String, cwd : String) -> State {
     write_access: CodexWritable,
     draft: "",
     mentions: [],
-    completion: None,
-    completion_debounce: @composer.Debounce(),
+    completion: @composer.CompletionState(),
     file_index: CodexFilesEmpty,
     skills: CodexSkillsEmpty,
     symbol_search: CodexSymbolSearchCache::empty(),

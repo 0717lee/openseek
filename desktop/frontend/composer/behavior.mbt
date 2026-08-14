@@ -140,6 +140,34 @@ pub fn[T] Menu::current(self : Menu[T]) -> T? {
 }
 
 ///|
+/// One provider-specific completion menu. Applications choose the provider
+/// kind and row payload, while this package owns the common menu shape.
+struct Completion[Kind, Item] {
+  kind : Kind
+  menu : Menu[Item]
+} derive(Eq)
+
+///|
+pub fn[Kind, Item] Completion::Completion(
+  kind : Kind,
+  menu : Menu[Item],
+) -> Completion[Kind, Item] {
+  { kind, menu }
+}
+
+///|
+pub fn[Kind, Item] Completion::kind(self : Completion[Kind, Item]) -> Kind {
+  self.kind
+}
+
+///|
+pub fn[Kind, Item] Completion::menu(
+  self : Completion[Kind, Item],
+) -> Menu[Item] {
+  self.menu
+}
+
+///|
 /// Monotonic identity for delayed composer lookups. Every draft change spends
 /// one generation, so a delayed request and its eventual reply can both be
 /// rejected after any newer keystroke, provider switch, or trigger dismissal.
@@ -176,4 +204,102 @@ pub fn Debounce::delayed(
   command : (Int) -> @cmd.Cmd,
 ) -> @cmd.Cmd {
   @cmd.delay(command(self.generation), 150)
+}
+
+///|
+/// Transient completion state shared by every conversation composer. Each
+/// composer owns a separate value, but OpenSeek and Codex now use these exact
+/// transitions for draft edits, keyboard selection, dismissal, and delayed
+/// request fencing instead of maintaining parallel state machines.
+struct CompletionState[Kind, Item] {
+  current : Completion[Kind, Item]?
+  debounce : Debounce
+} derive(Eq)
+
+///|
+pub fn[Kind, Item] CompletionState::CompletionState() -> CompletionState[
+  Kind,
+  Item,
+] {
+  { current: None, debounce: Debounce() }
+}
+
+///|
+pub fn[Kind, Item] CompletionState::current(
+  self : CompletionState[Kind, Item],
+) -> Completion[Kind, Item]? {
+  self.current
+}
+
+///|
+/// Refresh provider rows only while a menu is still open. A file-index or
+/// symbol reply may arrive after Escape; it may update its provider cache, but
+/// it must not recreate the dismissed popup from the unchanged draft token.
+pub fn[Kind, Item] CompletionState::refreshed(
+  self : CompletionState[Kind, Item],
+  current : Completion[Kind, Item]?,
+) -> CompletionState[Kind, Item] {
+  if self.current is Some(_) {
+    { ..self, current, }
+  } else {
+    self
+  }
+}
+
+///|
+/// Record a draft change. Every edit spends one generation even when it closes
+/// the menu, so delayed work scheduled by an older draft becomes stale.
+pub fn[Kind, Item] CompletionState::changed(
+  self : CompletionState[Kind, Item],
+  current : Completion[Kind, Item]?,
+) -> CompletionState[Kind, Item] {
+  { current, debounce: self.debounce.advanced() }
+}
+
+///|
+/// Close the menu and invalidate its delayed work. This is used for Escape,
+/// submission, and conversation changes where the draft itself may survive.
+pub fn[Kind, Item] CompletionState::dismissed(
+  self : CompletionState[Kind, Item],
+) -> CompletionState[Kind, Item] {
+  { current: None, debounce: self.debounce.advanced() }
+}
+
+///|
+/// Move the common keyboard selection while leaving a closed menu unchanged.
+pub fn[Kind, Item] CompletionState::shifted(
+  self : CompletionState[Kind, Item],
+  delta : Int,
+) -> CompletionState[Kind, Item] {
+  match self.current {
+    Some(current) =>
+      {
+        ..self,
+        current: Some(Completion(current.kind, current.menu.shifted(delta))),
+      }
+    None => self
+  }
+}
+
+///|
+pub fn[Kind, Item] CompletionState::generation(
+  self : CompletionState[Kind, Item],
+) -> Int {
+  self.debounce.generation()
+}
+
+///|
+pub fn[Kind, Item] CompletionState::accepts(
+  self : CompletionState[Kind, Item],
+  generation : Int,
+) -> Bool {
+  self.debounce.accepts(generation)
+}
+
+///|
+pub fn[Kind, Item] CompletionState::delayed(
+  self : CompletionState[Kind, Item],
+  command : (Int) -> @cmd.Cmd,
+) -> @cmd.Cmd {
+  self.debounce.delayed(command)
 }

@@ -16,35 +16,23 @@ pub fn update(
     PollActivity => (state.poll_activity(dispatch, channel), state)
     DraftChanged(value) => state.change_draft(dispatch, channel, value)
     CompletionMove(delta) =>
-      if state.completion is Some(completion) {
-        (
-          @cmd.none,
-          {
-            ..state,
-            completion: Some({
-              ..completion,
-              menu: completion.menu.shifted(delta),
-            }),
-          },
-        )
-      } else {
-        (@cmd.none, state)
-      }
+      (@cmd.none, { ..state, completion: state.completion.shifted(delta) })
     CompletionAccept =>
-      if state.completion is Some(completion) &&
-        completion.menu.current() is Some(item) {
+      if state.completion.current() is Some(completion) &&
+        completion.menu().current() is Some(item) {
         state.accept_completion(dispatch, channel, item)
       } else {
-        (@cmd.none, { ..state, completion: None })
+        (@cmd.none, { ..state, completion: state.completion.dismissed() })
       }
     CompletionPick(index) =>
-      if state.completion is Some(completion) &&
-        completion.menu.get(index) is Some(item) {
+      if state.completion.current() is Some(completion) &&
+        completion.menu().get(index) is Some(item) {
         state.accept_completion(dispatch, channel, item)
       } else {
-        (@cmd.none, { ..state, completion: None })
+        (@cmd.none, { ..state, completion: state.completion.dismissed() })
       }
-    CompletionDismiss => (@cmd.none, { ..state, completion: None })
+    CompletionDismiss =>
+      (@cmd.none, { ..state, completion: state.completion.dismissed() })
     RemoveMention(index) => (@cmd.none, state.without_mention(index))
     SymbolSearchDue(owner~, generation~) =>
       state.begin_completion_search(
@@ -293,7 +281,7 @@ pub fn update(
           if next.draft == original {
             next = { ..next, draft: "" }
           }
-          next = { ..next, completion: None }
+          next = { ..next, completion: next.completion.dismissed() }
         }
         CodexMutationReply => cmd = next.refresh(dispatch, channel)
         CodexApprovalReply =>
@@ -408,7 +396,7 @@ fn State::with_turn_reply(self : State, value : Json) -> State {
   } else {
     { ..self, draft: "" }
   }
-  { ..next, mentions: [], completion: None }
+  { ..next, mentions: [], completion: next.completion.dismissed() }
 }
 
 ///|

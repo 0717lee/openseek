@@ -54,3 +54,27 @@ test "debounce generations invalidate older work" {
   assert_false(second.accepts(first.generation()))
   assert_true(second.accepts(second.generation()))
 }
+
+///|
+test "completion state shares edit selection and dismissal transitions" {
+  let menu = @composer.Completion(
+    "files",
+    @composer.Menu(
+      ["a", "b", "c"],
+      loading=false,
+      draft_without_token="Inspect ",
+    ),
+  )
+  let initial : @composer.CompletionState[String, String] = @composer.CompletionState()
+  let edited = initial.changed(Some(menu))
+  assert_false(edited.accepts(initial.generation()))
+  guard edited.shifted(-1).current() is Some(wrapped) else {
+    fail("changed state should expose its menu")
+  }
+  inspect(wrapped.kind(), content="files")
+  inspect(wrapped.menu().selected(), content="2")
+  let dismissed = edited.dismissed()
+  assert_true(dismissed.current() is None)
+  assert_false(dismissed.accepts(edited.generation()))
+  assert_true(dismissed.refreshed(Some(menu)).current() is None)
+}

@@ -460,7 +460,7 @@ fn open_quick_open(
   }
   let next_base = {
     ..model,
-    completion: None,
+    completion: model.completion.dismissed(),
     launcher: { ..model.launcher, open: false },
     quick_open: Some(open),
     quick_open_generation: generation,
