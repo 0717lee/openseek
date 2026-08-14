@@ -4560,6 +4560,46 @@ fn update_device_msg(
         conversations,
       }
       let commands : Array[@cmd.Cmd] = []
+      // A client can miss session.changed while disconnected. A live row from
+      // this connection is then the first proof that a cached read-only record
+      // was restored elsewhere. Reclassify it before the archived-list reply:
+      // the override admits new commits immediately, and the new transcript
+      // generation fences the archived request started by BridgeReady.
+      for conv in next.conversations {
+        if conv.device == channel &&
+          conv.is_archived_read_only() &&
+          items.iter().any(item => item.id == conv.session_id) {
+          let foreground = channel == next.focused &&
+            next.active_session == conv.session_id
+          next = next.with_archive_override(channel, conv.session_id, false)
+          let (updated, generation) = next.begin_transcript_reload({
+            ..conv,
+            record: LiveRecord,
+            sync: Synced,
+          })
+          next = if foreground {
+            {
+              ..updated,
+              loading_conversation: Some({ channel, session: conv.session_id }),
+              completion: None,
+            }
+          } else {
+            updated
+          }
+          if generation is Some(generation) {
+            commands.push(
+              session_snapshot_command(
+                dispatch,
+                channel,
+                next,
+                conv.session_id,
+                generation,
+                foreground,
+              ),
+            )
+          }
+        }
+      }
       // A start or a goal may have been accepted just before the connection
       // vanished, while the first BridgeReady load raced persistence and
       // returned empty. The session list is later durable proof that a record
@@ -14903,9 +14943,26 @@ test "an unarchive notification wins over a stale archived-list reply" {
 test "BridgeReady replaces archive overrides with fresh-list truth" {
   let dispatch = test_dispatch()
   let item = archived_item("desktop-old")
-  let model = test_model()
+  let archived = {
+    ..empty_conversation(@interop.ChannelId::Local, item.id),
+    record: ArchivedRecord,
+    messages: [
+      {
+        kind: Assistant(is_danger=false),
+        content: "cached archived answer",
+        ts: None,
+        sequence: Some(1),
+      },
+    ],
+    watermark: 1,
+  }
+  let model = {
+    ..test_model()
     .with_archive_override(@interop.ChannelId::Local, "desktop-old", true)
     .with_dev(dev => { ..dev, archived: [item] })
+    .replace_conversation(archived),
+    active_session: item.id,
+  }
   let (_, ready) = update_dev(
     dispatch,
     @interop.ChannelId::Local.test_bridge_ready(),
@@ -14918,6 +14975,53 @@ test "BridgeReady replaces archive overrides with fresh-list truth" {
     SessionsLoaded([item], connection_generation=1, request_generation=1),
     ready,
   )
+  guard live.find_conversation(@interop.ChannelId::Local, item.id)
+    is Some(restored) else {
+    fail("the freshly live record disappeared during reconnect")
+  }
+  assert_true(restored.record is LiveRecord)
+  assert_true(live.dev().archive_override(item.id) is Some(false))
+  guard restored.sync is Reloading(generation=2, ..) else {
+    fail("fresh live-list truth did not fence the archived reload")
+  }
+  let (_, stale_archived) = update_dev(
+    dispatch,
+    SessionRefreshed(
+      goal=None,
+      goal_markers=[],
+      session=item.id,
+      items=[
+        {
+          kind: Assistant(is_danger=false),
+          content: "late archived answer",
+          ts: None,
+          sequence: Some(1),
+        },
+      ],
+      watermark=1,
+      event_boundaries=[],
+      generation=1,
+    ),
+    live,
+  )
+  assert_true(stale_archived.active().record is LiveRecord)
+  inspect(
+    stale_archived.active().messages[0].content,
+    content="cached archived answer",
+  )
+  let (_, live_again) = update_dev(
+    dispatch,
+    SessionsLoaded([item], connection_generation=1, request_generation=1),
+    ready,
+  )
+  guard live_again.find_conversation(@interop.ChannelId::Local, item.id)
+    is Some(restored_again) else {
+    fail("the repeated live-list update dropped the restored record")
+  }
+  assert_true(restored_again.record is LiveRecord)
+  guard restored_again.sync is Reloading(generation=2, ..) else {
+    fail("the reconnect transition was not idempotent")
+  }
   let (_, reconciled) = update_dev(
     dispatch,
     ArchivedLoaded(
@@ -14926,7 +15030,7 @@ test "BridgeReady replaces archive overrides with fresh-list truth" {
       request_generation=1,
       fresh_session="desktop-unused",
     ),
-    live,
+    stale_archived,
   )
   assert_true(
     reconciled.dev().sessions.iter().any(current => current.id == item.id),
