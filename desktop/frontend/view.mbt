@@ -1689,6 +1689,10 @@ fn workspace_settings_page(
   // clear that no authoritative workspace snapshot has landed yet.
   let checkout_submodules = row is None ||
     (row is Some(row) && row.checkout_submodules)
+  let submodule_checkout_timeout_seconds = match row {
+    Some(row) => row.submodule_checkout_timeout_seconds
+    None => DefaultWorkspaceSubmoduleCheckoutTimeoutSeconds
+  }
   let conversation_rows : Array[@html.Html] = [
     setting_row(
       "New chats",
@@ -1741,6 +1745,45 @@ fn workspace_settings_page(
         ),
       ],
       desc="For new or repaired worktrees in this workspace, mirror the top-level submodules already initialized in its main checkout.",
+    ),
+    setting_row(
+      "Checkout timeout",
+      [
+        setting_select(
+          @html.select(
+            on_change=dispatch.map(value => {
+              WorkspaceSubmoduleTimeoutChosen(channel, workspace, value)
+            }),
+            attrs=@html.Attrs::build()
+              .aria_label("Submodule checkout timeout")
+              .data_set("focus-owner", "")
+              .disabled(row is None),
+            [
+              @html.option(
+                value="5",
+                selected=submodule_checkout_timeout_seconds == 5,
+                "5 seconds",
+              ),
+              @html.option(
+                value="10",
+                selected=submodule_checkout_timeout_seconds == 10,
+                "10 seconds",
+              ),
+              @html.option(
+                value="30",
+                selected=submodule_checkout_timeout_seconds == 30,
+                "30 seconds",
+              ),
+              @html.option(
+                value="60",
+                selected=submodule_checkout_timeout_seconds == 60,
+                "60 seconds",
+              ),
+            ],
+          ),
+        ),
+      ],
+      desc="Stop initializing submodules if Git has not finished within this time.",
     ),
   ]
   @html.section(class="settings-page", [

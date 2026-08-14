@@ -502,6 +502,7 @@ pub(all) struct WorkspaceSettingsSetPayload {
   workspace : String
   worktree_mode : Bool?
   checkout_submodules : Bool?
+  submodule_checkout_timeout_seconds : Int?
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
@@ -514,6 +515,7 @@ pub(all) struct WorkspaceSettingsPayload {
   workspace : String
   worktree_mode : Bool
   checkout_submodules : Bool
+  submodule_checkout_timeout_seconds : Int
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|

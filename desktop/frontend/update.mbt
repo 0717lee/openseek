@@ -3123,6 +3123,40 @@ fn update_msg(
         }),
       )
     }
+    WorkspaceSubmoduleTimeoutChosen(channel, workspace, value) => {
+      guard model.device_state(channel) is Some(dev) &&
+        dev.workspace_settings_row(workspace) is Some(row) else {
+        return (@cmd.none, model)
+      }
+      let submodule_checkout_timeout_seconds = match value {
+        "5" => 5
+        "10" => 10
+        "30" => 30
+        "60" => 60
+        _ => return (@cmd.none, model)
+      }
+      // Patch only the timeout and keep both neighboring workspace choices.
+      // A fresh generation prevents an older read from undoing this select.
+      let request_generation = dev.workspace_settings_request_generation + 1
+      (
+        save_workspace_settings(
+          dispatch,
+          channel,
+          workspace,
+          submodule_checkout_timeout_seconds~,
+        ),
+        model.replace_device({
+          ..dev.with_workspace_settings(
+            workspace,
+            row.worktree_mode,
+            generation=request_generation,
+            checkout_submodules=row.checkout_submodules,
+            submodule_checkout_timeout_seconds~,
+          ),
+          workspace_settings_request_generation: request_generation,
+        }),
+      )
+    }
     ArchiveSession(channel, session_id) => {
       // Archiving acts on the row's own device and never moves focus.
       guard model.device_state(channel) is Some(dev) else {
@@ -3855,6 +3889,70 @@ fn update_msg(
 }
 
 ///|
+/// Settle one definitively refused initial prompt. Worktree setup failures
+/// happen before an agent exists, so they restore the same draft and placement
+/// state but report through the transient notification stack instead of an
+/// agent-style transcript notice.
+fn Model::reject_start(
+  self : Model,
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  session : String,
+  submission_id : String,
+  message : String,
+  report_in_transcript : Bool,
+) -> (@cmd.Cmd, Model) {
+  guard self.find_conversation(channel, session) is Some(conv) else {
+    return (@cmd.none, self)
+  }
+  let (rejected, removed) = conv.reject_submission(
+    submission_id,
+    InitialPrompt,
+    None,
+    message,
+    report_in_transcript~,
+  )
+  guard removed else { return (@cmd.none, self) }
+  let next = if conv.run is Starting(submission_id=current) &&
+    current == submission_id {
+    { ..rejected.clear_streams(), run: NoRun(ended=Some(RunFailed)) }
+  } else {
+    rejected
+  }
+  let updated = self.replace_conversation(next)
+  let (notice, updated) = if report_in_transcript {
+    (@cmd.none, updated)
+  } else {
+    updated.notify_error(dispatch, message)
+  }
+  if conv.workspace.project() is Some(workspace) &&
+    updated.device_state(channel) is Some(dev) {
+    // A checkout deleted outside the app cannot publish a registry
+    // notification. Refresh placement after every rejected workspace start;
+    // a newly missing row then exposes Repair/Archive immediately.
+    let request_generation = dev.worktrees_request_generation + 1
+    (
+      @cmd.batch([
+        notice,
+        fetch_worktrees(
+          dispatch,
+          channel,
+          workspace,
+          dev.connection_generation,
+          request_generation,
+        ),
+      ]),
+      updated.replace_device({
+        ..dev,
+        worktrees_request_generation: request_generation,
+      }),
+    )
+  } else {
+    (notice, updated)
+  }
+}
+
+///|
 /// One device channel's messages — its connection lifecycle, its
 /// notification stream, and every generation-fenced reply. The arms are
 /// the same handlers `update_msg` held before the channel split; `channel`
@@ -4445,6 +4543,7 @@ fn update_device_msg(
       workspace~,
       worktree_mode~,
       checkout_submodules~,
+      submodule_checkout_timeout_seconds~,
       connection_generation~,
       request_generation~
     ) => {
@@ -4467,11 +4566,17 @@ fn update_device_msg(
             worktree_mode,
             generation=request_generation,
             checkout_submodules~,
+            submodule_checkout_timeout_seconds~,
           ),
         ),
       )
     }
-    WorkspaceSettingsChanged(workspace~, worktree_mode~, checkout_submodules~) => {
+    WorkspaceSettingsChanged(
+      workspace~,
+      worktree_mode~,
+      checkout_submodules~,
+      submodule_checkout_timeout_seconds~
+    ) => {
       // A broadcast can race the detach commit the same way a reply can
       // (the hub orders them per client, so an attach is always processed
       // before settings broadcasts that follow it).
@@ -4489,6 +4594,7 @@ fn update_device_msg(
             worktree_mode,
             generation=workspace_settings_request_generation,
             checkout_submodules~,
+            submodule_checkout_timeout_seconds~,
           ),
           workspace_settings_request_generation,
         }),
@@ -4750,8 +4856,7 @@ fn update_device_msg(
       )
       (@cmd.batch([refresh, archived, toast]), model)
     }
-    WorktreeFailed(message) =>
-      model.notify_error(dispatch, "Worktree error: \{message}")
+    WorktreeFailed(message) => model.notify_error(dispatch, message)
     SessionsFailed(message) =>
       model.notify_error(dispatch, "Session list unavailable: \{message}")
     // Another client archived or unarchived a conversation. Both sidebar
@@ -5844,53 +5949,13 @@ fn update_device_msg(
         (@cmd.none, model)
       }
     StartRejected(session~, submission_id~, message~) =>
-      if model.find_conversation(channel, session) is Some(conv) {
-        let (rejected, removed) = conv.reject_submission(
-          submission_id,
-          InitialPrompt,
-          None,
-          message,
-        )
-        if !removed {
-          (@cmd.none, model)
-        } else {
-          let next = if conv.run is Starting(submission_id=current) &&
-            current == submission_id {
-            { ..rejected.clear_streams(), run: NoRun(ended=Some(RunFailed)) }
-          } else {
-            rejected
-          }
-          let updated = model.replace_conversation(next)
-          if conv.workspace.project() is Some(workspace) &&
-            updated.device_state(channel) is Some(dev) {
-            // A checkout deleted outside the app cannot publish a registry
-            // notification. Any rejected workspace start is a cheap, reliable
-            // point to refresh placement; a newly `present: false` row then
-            // replaces the generic refusal with Repair/Archive immediately.
-            let request_generation = dev.worktrees_request_generation + 1
-            (
-              @cmd.batch([
-                @cmd.none,
-                fetch_worktrees(
-                  dispatch,
-                  channel,
-                  workspace,
-                  dev.connection_generation,
-                  request_generation,
-                ),
-              ]),
-              updated.replace_device({
-                ..dev,
-                worktrees_request_generation: request_generation,
-              }),
-            )
-          } else {
-            (@cmd.none, updated)
-          }
-        }
-      } else {
-        (@cmd.none, model)
-      }
+      model.reject_start(
+        dispatch, channel, session, submission_id, message, true,
+      )
+    WorktreeSetupFailed(session~, submission_id~, message~) =>
+      model.reject_start(
+        dispatch, channel, session, submission_id, message, false,
+      )
     Error(run_id~, message~, diagnostics~, exit_code~) => {
       // Agent-side semantic errors are lifecycle-only here; their durable
       // status is classified by the subsequent Finished event. Process

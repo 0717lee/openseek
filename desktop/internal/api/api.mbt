@@ -245,25 +245,32 @@ pub fn endpoints(
       // point inside the engine, the `workspace.add` pattern.
       let worktree_mode = payload.worktree_mode
       let checkout_submodules = payload.checkout_submodules
+      let submodule_checkout_timeout_seconds = payload.submodule_checkout_timeout_seconds
       @engine.update_workspace_settings(
         payload.workspace,
         settings => state.hub.publish(WorkspaceSettingsChanged(settings)),
         worktree_mode?,
         checkout_submodules?,
+        submodule_checkout_timeout_seconds?,
       )
     }),
     @endpoint.Endpoint::remote(@commands.worktree_list, async fn(payload) {
       @engine.list_worktrees(payload.workspace)
     }),
     @endpoint.Endpoint::remote(@commands.worktree_create, async fn(payload) {
-      @engine.create_worktree(
+      let reply = @engine.create_worktree(
         state.manager,
         payload.workspace,
         payload.session,
         worktrees => {
           publish_worktree_changed(state, payload.workspace, worktrees)
         },
-      )
+      ) catch {
+        error if @async.is_being_cancelled() => raise error
+        @engine.EngineError(message) => return WorktreeCreateError(message)
+        error => raise error
+      }
+      WorktreeCreatedReply(reply)
     }),
     @endpoint.Endpoint::remote(@commands.worktree_remove, async fn(payload) {
       @engine.remove_worktree(

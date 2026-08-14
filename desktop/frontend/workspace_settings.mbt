@@ -1,10 +1,15 @@
 // Per-workspace desktop settings, mirrored from the workspace's own
 // `.openseek/settings.json` on its host. It controls where a NEW conversation
-// starts and whether worktree creation populates submodules. The mirror
+// starts and how worktree creation populates submodules. The mirror
 // refreshes with the project list and is replaced wholesale by the
 // `workspace.settings_changed` broadcast; the settings page edits it through
 // `workspace.settings_set`, and the composer chip stays a per-conversation
 // override that never writes here.
+
+///|
+/// Used only before an authoritative row exists or while an optimistic edit
+/// preserves a neighboring field. The host remains the persisted source.
+const DefaultWorkspaceSubmoduleCheckoutTimeoutSeconds : Int = 10
 
 ///|
 /// One project's settings mirror, keyed like `ProjectWorktrees` and fenced
@@ -14,6 +19,7 @@ priv struct ProjectSettings {
   project : @common.Uri
   worktree_mode : Bool
   checkout_submodules : Bool
+  submodule_checkout_timeout_seconds : Int
   generation : Int
 } derive(Eq)
 
@@ -52,6 +58,7 @@ fn fetch_workspace_settings(
             workspace~,
             worktree_mode=reply.worktree_mode,
             checkout_submodules=reply.checkout_submodules,
+            submodule_checkout_timeout_seconds=reply.submodule_checkout_timeout_seconds,
             connection_generation~,
             request_generation~,
           ),
@@ -82,6 +89,7 @@ fn save_workspace_settings(
   workspace : @common.Uri,
   worktree_mode? : Bool,
   checkout_submodules? : Bool,
+  submodule_checkout_timeout_seconds? : Int,
 ) -> @cmd.Cmd {
   guard @resource.belongs_to(workspace, channel) else { return @cmd.none }
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
@@ -93,7 +101,12 @@ fn save_workspace_settings(
       let _ : @protocol.WorkspaceSettingsPayload = @interop.bridge_request_in_order(
         channel,
         @commands.workspace_settings_set,
-        { workspace: workspace.path, worktree_mode, checkout_submodules },
+        {
+          workspace: workspace.path,
+          worktree_mode,
+          checkout_submodules,
+          submodule_checkout_timeout_seconds,
+        },
         lane=workspace_settings_lane(channel, workspace),
       ) catch {
         error => {
@@ -127,6 +140,7 @@ fn workspace_settings_changed_msg(
       workspace~,
       worktree_mode=payload.worktree_mode,
       checkout_submodules=payload.checkout_submodules,
+      submodule_checkout_timeout_seconds=payload.submodule_checkout_timeout_seconds,
     ),
   )
 }
@@ -138,6 +152,7 @@ fn DeviceState::with_workspace_settings(
   worktree_mode : Bool,
   generation~ : Int,
   checkout_submodules? : Bool,
+  submodule_checkout_timeout_seconds? : Int,
 ) -> DeviceState {
   let checkout_submodules = checkout_submodules.unwrap_or_else(() => {
     self
@@ -145,8 +160,21 @@ fn DeviceState::with_workspace_settings(
     .map(row => row.checkout_submodules)
     .unwrap_or(true)
   })
+  let submodule_checkout_timeout_seconds = submodule_checkout_timeout_seconds.unwrap_or_else(() => {
+      self
+      .workspace_settings_row(project)
+      .map(row => row.submodule_checkout_timeout_seconds)
+      .unwrap_or(DefaultWorkspaceSubmoduleCheckoutTimeoutSeconds)
+    },
+  )
   let rows = self.workspace_settings.filter(row => row.project != project)
-  rows.push({ project, worktree_mode, checkout_submodules, generation })
+  rows.push({
+    project,
+    worktree_mode,
+    checkout_submodules,
+    submodule_checkout_timeout_seconds,
+    generation,
+  })
   { ..self, workspace_settings: rows }
 }
 
@@ -226,6 +254,7 @@ test "a settings reply lands once and an older token cannot roll it back" {
       workspace~,
       worktree_mode=true,
       checkout_submodules=true,
+      submodule_checkout_timeout_seconds=10,
       connection_generation=0,
       request_generation=1,
     ),
@@ -240,6 +269,7 @@ test "a settings reply lands once and an older token cannot roll it back" {
       workspace~,
       worktree_mode=false,
       checkout_submodules=true,
+      submodule_checkout_timeout_seconds=10,
       connection_generation=0,
       request_generation=1,
     ),
@@ -252,6 +282,7 @@ test "a settings reply lands once and an older token cannot roll it back" {
       workspace=sibling,
       worktree_mode=true,
       checkout_submodules=false,
+      submodule_checkout_timeout_seconds=30,
       connection_generation=0,
       request_generation=1,
     ),
@@ -264,6 +295,8 @@ test "a settings reply lands once and an older token cannot roll it back" {
   }
   assert_true(primary.checkout_submodules)
   assert_false(secondary.checkout_submodules)
+  assert_eq(primary.submodule_checkout_timeout_seconds, 10)
+  assert_eq(secondary.submodule_checkout_timeout_seconds, 30)
   // A dead connection's reply is rejected outright.
   let (_, dead) = update_dev(
     dispatch,
@@ -271,6 +304,7 @@ test "a settings reply lands once and an older token cannot roll it back" {
       workspace~,
       worktree_mode=false,
       checkout_submodules=true,
+      submodule_checkout_timeout_seconds=60,
       connection_generation=7,
       request_generation=9,
     ),
@@ -290,6 +324,7 @@ test "a settings commit broadcast supersedes list replies" {
       workspace~,
       worktree_mode=true,
       checkout_submodules=true,
+      submodule_checkout_timeout_seconds=10,
     ),
     attached,
   )
@@ -302,6 +337,7 @@ test "a settings commit broadcast supersedes list replies" {
       workspace~,
       worktree_mode=false,
       checkout_submodules=true,
+      submodule_checkout_timeout_seconds=30,
       connection_generation=0,
       request_generation=1,
     ),
@@ -327,6 +363,7 @@ test "the settings page select applies optimistically" {
       workspace~,
       worktree_mode=false,
       checkout_submodules=true,
+      submodule_checkout_timeout_seconds=10,
       connection_generation=0,
       request_generation=1,
     ),
@@ -346,6 +383,7 @@ test "the settings page select applies optimistically" {
       workspace~,
       worktree_mode=false,
       checkout_submodules=true,
+      submodule_checkout_timeout_seconds=10,
       connection_generation=0,
       request_generation=1,
     ),
@@ -371,6 +409,7 @@ test "the workspace submodule select preserves its launch mode" {
       workspace~,
       worktree_mode=true,
       checkout_submodules=true,
+      submodule_checkout_timeout_seconds=10,
       connection_generation=0,
       request_generation=1,
     ),
@@ -397,6 +436,45 @@ test "the workspace submodule select preserves its launch mode" {
   }
   assert_true(unchanged.worktree_mode)
   assert_false(unchanged.checkout_submodules)
+}
+
+///|
+test "the workspace submodule timeout select preserves neighboring settings" {
+  let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/proj")
+  let attached = test_model().with_dev(dev => { ..dev, projects: [workspace] })
+  let (_, loaded) = update_dev(
+    dispatch,
+    WorkspaceSettingsLoaded(
+      workspace~,
+      worktree_mode=true,
+      checkout_submodules=false,
+      submodule_checkout_timeout_seconds=10,
+      connection_generation=0,
+      request_generation=1,
+    ),
+    attached,
+  )
+  let (_, chosen) = update(
+    dispatch,
+    WorkspaceSubmoduleTimeoutChosen(Local, workspace, "30"),
+    loaded,
+  )
+  guard chosen.dev().workspace_settings_row(workspace) is Some(row) else {
+    fail("expected the workspace settings row")
+  }
+  assert_true(row.worktree_mode)
+  assert_false(row.checkout_submodules)
+  assert_eq(row.submodule_checkout_timeout_seconds, 30)
+  let (_, unknown) = update(
+    dispatch,
+    WorkspaceSubmoduleTimeoutChosen(Local, workspace, "600"),
+    chosen,
+  )
+  guard unknown.dev().workspace_settings_row(workspace) is Some(unchanged) else {
+    fail("expected the workspace settings row")
+  }
+  assert_eq(unchanged.submodule_checkout_timeout_seconds, 30)
 }
 
 ///|
@@ -429,6 +507,7 @@ test "a failed save pops a toast and re-reads under a fresh token" {
       workspace~,
       worktree_mode=false,
       checkout_submodules=true,
+      submodule_checkout_timeout_seconds=10,
       connection_generation=0,
       request_generation=minted + 1,
     ),
@@ -448,6 +527,7 @@ test "a reconnect clears the settings mirror until fresh reads land" {
       workspace~,
       worktree_mode=true,
       checkout_submodules=true,
+      submodule_checkout_timeout_seconds=10,
       connection_generation=0,
       request_generation=1,
     ),
@@ -478,6 +558,7 @@ test "a straggler reply for a detached workspace is rejected" {
       workspace~,
       worktree_mode=true,
       checkout_submodules=true,
+      submodule_checkout_timeout_seconds=10,
     ),
     attached,
   )
@@ -495,6 +576,7 @@ test "a straggler reply for a detached workspace is rejected" {
       workspace~,
       worktree_mode=true,
       checkout_submodules=true,
+      submodule_checkout_timeout_seconds=10,
       connection_generation=0,
       request_generation=1,
     ),
@@ -508,6 +590,7 @@ test "a straggler reply for a detached workspace is rejected" {
       workspace~,
       worktree_mode=true,
       checkout_submodules=true,
+      submodule_checkout_timeout_seconds=10,
     ),
     detached,
   )
@@ -522,6 +605,7 @@ test "settings commit decoder carries the workspace identity" {
         workspace: "/proj",
         worktree_mode: true,
         checkout_submodules: false,
+        submodule_checkout_timeout_seconds: 30,
       }),
     )
     is Some(
@@ -530,7 +614,8 @@ test "settings commit decoder carries the workspace identity" {
         WorkspaceSettingsChanged(
           workspace~,
           worktree_mode~,
-          checkout_submodules~
+          checkout_submodules~,
+          submodule_checkout_timeout_seconds~
         )
       )
     ) else {
@@ -539,6 +624,7 @@ test "settings commit decoder carries the workspace identity" {
   inspect(workspace.path, content="/proj")
   assert_true(worktree_mode)
   assert_false(checkout_submodules)
+  assert_eq(submodule_checkout_timeout_seconds, 30)
 }
 
 ///|

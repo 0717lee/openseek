@@ -1784,6 +1784,9 @@ priv enum Msg {
   // Whether new or repaired worktrees for this workspace populate the
   // top-level submodules initialized in the main checkout.
   WorkspaceSubmodulesChosen(@interop.ChannelId, @common.Uri, String)
+  // Hard bound for that submodule checkout, in seconds. Update accepts only
+  // the values rendered by the workspace settings select.
+  WorkspaceSubmoduleTimeoutChosen(@interop.ChannelId, @common.Uri, String)
   // Start a fresh conversation in a device's project (`None` = Scratch),
   // selecting its explicit channel first if needed.
   NewChatIn(@interop.ChannelId, @common.Uri?)
@@ -2053,6 +2056,7 @@ priv enum DeviceMsg {
     workspace~ : @common.Uri,
     worktree_mode~ : Bool,
     checkout_submodules~ : Bool,
+    submodule_checkout_timeout_seconds~ : Int,
     connection_generation~ : Int,
     request_generation~ : Int
   )
@@ -2061,7 +2065,8 @@ priv enum DeviceMsg {
   WorkspaceSettingsChanged(
     workspace~ : @common.Uri,
     worktree_mode~ : Bool,
-    checkout_submodules~ : Bool
+    checkout_submodules~ : Bool,
+    submodule_checkout_timeout_seconds~ : Int
   )
   // A `workspace.settings_set` this client sent failed; the message pops as
   // a toast and the workspace's settings are re-read.
@@ -2188,6 +2193,14 @@ priv enum DeviceMsg {
   // The host definitively refused this exact request. Restore its draft and
   // retire the ledger entry immediately.
   StartRejected(session~ : String, submission_id~ : String, message~ : String)
+  // `worktree.create` failed before `agent.start` was sent. Restore the draft
+  // like StartRejected, but report this recoverable setup failure as a toast
+  // rather than putting an agent-style error in the transcript.
+  WorktreeSetupFailed(
+    session~ : String,
+    submission_id~ : String,
+    message~ : String
+  )
   // A host error without a run (`run_id` is `None` — a pre-run failure)
   // belongs to whatever conversation the user is looking at; `diagnostics`
   // is stderr worth appending, when the host captured any. With a run,
@@ -3905,12 +3918,15 @@ priv struct ArchiveSalvage {
 ///|
 /// Retire one definitively refused local submission, restore its composer
 /// draft, and replace any provisional notice with one retained explanation.
+/// A setup failure can suppress the transcript notice because update reports
+/// the same explanation as a transient toast instead.
 fn Conversation::reject_submission(
   self : Conversation,
   submission_id : String,
   kind : InputKind,
   run_id : String?,
   notice : String,
+  report_in_transcript? : Bool = true,
 ) -> (Conversation, Bool) {
   for index, input in self.input_ledger {
     if input.matches_receipt(submission_id, kind, run_id) {
@@ -3920,10 +3936,13 @@ fn Conversation::reject_submission(
         !(item.reconciliation is Submission(id) && id == submission_id)
       })
       let next = { ..self, input_ledger, overlay }
+      let restored = next.restore_submission(input)
       return (
-        next
-        .restore_submission(input)
-        .append_local_notice(Assistant(is_danger=true), notice),
+        if report_in_transcript {
+          restored.append_local_notice(Assistant(is_danger=true), notice)
+        } else {
+          restored
+        },
         true,
       )
     }

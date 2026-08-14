@@ -617,6 +617,7 @@ pub async fn create_worktree(
   // changing this checkout halfway through.
   let workspace_settings = workspace_settings(dir.to_string())
   let checkout_submodules = workspace_settings.checkout_submodules
+  let submodule_checkout_timeout_seconds = workspace_settings.submodule_checkout_timeout_seconds
   worktree_registry_lock.acquire()
   defer worktree_registry_lock.release()
   let entries = read_worktrees_unlocked(dir)
@@ -642,7 +643,12 @@ pub async fn create_worktree(
     }
     // The repair: presence is what the clients render, so the restored
     // checkout is a registry commit like any other and broadcasts as one.
-    restore_worktree_checkout(dir, entry, checkout_submodules~)
+    restore_worktree_checkout(
+      dir,
+      entry,
+      checkout_submodules~,
+      submodule_checkout_timeout_seconds~,
+    )
     let infos = worktree_infos(dir, entries)
     @async.protect_from_cancel(() => on_committed(infos))
     return { name: entry.name, worktrees: infos }
@@ -725,7 +731,9 @@ pub async fn create_worktree(
       git_in(dir, ["worktree", "add", "\{WorktreesDirName}/\{name}", branch]),
     )
     if checkout_submodules {
-      provision_initialized_submodules(dir, target)
+      provision_initialized_submodules(
+        dir, target, submodule_checkout_timeout_seconds,
+      )
     }
   } catch {
     error => {
@@ -760,6 +768,7 @@ async fn restore_worktree_checkout(
   dir : @pathx.Absolute,
   entry : WorktreeEntry,
   checkout_submodules~ : Bool,
+  submodule_checkout_timeout_seconds~ : Int,
 ) -> Unit {
   guard git_probe(dir, [
       "show-ref",
@@ -785,7 +794,9 @@ async fn restore_worktree_checkout(
       ]),
     )
     if checkout_submodules {
-      provision_initialized_submodules(dir, target)
+      provision_initialized_submodules(
+        dir, target, submodule_checkout_timeout_seconds,
+      )
     }
   } catch {
     error => {
