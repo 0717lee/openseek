@@ -19,6 +19,8 @@ test "Codex projects use the shared workspace disclosure" {
     project_registered: path => path == "/work/openseek",
     project_collapsed: path => path == "/work/openseek",
     toggle_project: _ => @cmd.none,
+    project_expanded: _ => false,
+    show_more_project: _ => @cmd.none,
     project_menu: _ => {
       Some({
         title: "More actions",
@@ -60,6 +62,8 @@ test "unregistered Codex roots remain direct conversation rows" {
     project_registered: _ => false,
     project_collapsed: _ => false,
     toggle_project: _ => @cmd.none,
+    project_expanded: _ => false,
+    show_more_project: _ => @cmd.none,
     project_menu: _ => None,
     project_label: path => path,
   })

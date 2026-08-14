@@ -48,6 +48,8 @@ pub(all) struct SidebarActions {
   project_registered : (String) -> Bool
   project_collapsed : (String) -> Bool
   toggle_project : (String) -> @cmd.Cmd
+  project_expanded : (String) -> Bool
+  show_more_project : (String) -> @cmd.Cmd
   project_menu : (String) -> @sidebar.WorkspaceMenu?
   project_label : (String) -> String
 }

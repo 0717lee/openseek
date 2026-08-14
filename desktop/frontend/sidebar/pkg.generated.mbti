@@ -92,6 +92,8 @@ pub(all) struct WorkspaceGroup {
   workspace : WorkspaceRow
   conversations : Array[ConversationRow]
   empty : PlaceholderRow?
+  expanded : Bool
+  show_more : @cmd.Cmd
 }
 pub fn WorkspaceGroup::entries(Self) -> Array[Entry]
 

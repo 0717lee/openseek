@@ -328,15 +328,22 @@ pub fn Entry::render(self : Entry) -> @html.Html {
 
 ///|
 /// A workspace followed by its conversations. The group inserts one shared
-/// nested placeholder when an attached workspace is empty.
+/// nested placeholder when an attached workspace is empty and owns the compact
+/// project preview used by every conversation source. `expanded` and
+/// `show_more` are controlled inputs from the application model; keeping the
+/// row selection here means OpenSeek and Codex cannot drift into different
+/// limits or accidentally separate an expanded sub-run from its parent.
 pub(all) struct WorkspaceGroup {
   workspace : WorkspaceRow
   conversations : Array[ConversationRow]
   empty : PlaceholderRow?
+  expanded : Bool
+  show_more : @cmd.Cmd
 }
 
 ///|
 pub fn WorkspaceGroup::entries(self : WorkspaceGroup) -> Array[Entry] {
+  let preview_limit = 5
   let entries : Array[Entry] = [Workspace(self.workspace)]
   // Folder disclosure owns the whole group, so callers cannot accidentally
   // leave a placeholder or conversation visible below a collapsed project.
@@ -346,8 +353,37 @@ pub fn WorkspaceGroup::entries(self : WorkspaceGroup) -> Array[Entry] {
   if self.conversations.is_empty() && self.empty is Some(empty) {
     entries.push(Placeholder(empty))
   } else {
+    let mut conversations = 0
+    let mut parent_visible = false
     for row in self.conversations {
-      entries.push(Conversation(row))
+      if row.subrun {
+        // Expanded sub-runs are part of their preceding conversation. They do
+        // not consume preview slots and disappear with a hidden parent.
+        if parent_visible {
+          entries.push(Conversation(row))
+        }
+      } else {
+        parent_visible = self.expanded ||
+          conversations < preview_limit ||
+          row.active
+        conversations = conversations + 1
+        if parent_visible {
+          entries.push(Conversation(row))
+        }
+      }
+    }
+    if !self.expanded && conversations > preview_limit {
+      entries.push(
+        Custom(
+          @html.button(
+            class="project-show-more",
+            type_="button",
+            title="Show all \{conversations} chats in this project",
+            on_click=self.show_more,
+            "Show more",
+          ),
+        ),
+      )
     }
   }
   entries

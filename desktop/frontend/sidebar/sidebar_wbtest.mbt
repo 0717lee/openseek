@@ -142,6 +142,8 @@ test "section list owns folding and empty workspace placement" {
       nested: true,
       open: None,
     }),
+    expanded: false,
+    show_more: @cmd.none,
   }
   let expanded = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(
@@ -201,6 +203,8 @@ test "section list owns folding and empty workspace placement" {
             nested: true,
             open: None,
           }),
+          expanded: false,
+          show_more: @cmd.none,
         }
         .entries()
         .map(entry => entry.render()),
@@ -211,4 +215,91 @@ test "section list owns folding and empty workspace placement" {
     workspace_collapsed.contains("workspace-row collapsible collapsed"),
   )
   assert_false(workspace_collapsed.contains("No chats yet"))
+}
+
+///|
+#warnings("-alert_unstable")
+test "workspace preview keeps five parents plus the active parent and its sub-runs" {
+  let conversations : Array[ConversationRow] = []
+  for number = 1; number <= 7; number = number + 1 {
+    conversations.push({
+      title: "parent-\{number}",
+      label: "parent-\{number}",
+      open: @cmd.none,
+      nested: true,
+      subrun: false,
+      active: number == 7,
+      running: false,
+      subruns: NoSubruns,
+      status: [],
+      archive: None,
+    })
+    if number >= 6 {
+      conversations.push({
+        title: "child-\{number}",
+        label: "child-\{number}",
+        open: @cmd.none,
+        nested: true,
+        subrun: true,
+        active: false,
+        running: false,
+        subruns: NoSubruns,
+        status: [],
+        archive: None,
+      })
+    }
+  }
+  let preview = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(
+      @html.div(
+        WorkspaceGroup::{
+          workspace: {
+            title: "/workspace",
+            label: "workspace",
+            active: false,
+            disclosure: Some({ collapsed: false, toggle: @cmd.none }),
+            menu: None,
+            actions: [],
+          },
+          conversations,
+          empty: None,
+          expanded: false,
+          show_more: @cmd.none,
+        }
+        .entries()
+        .map(entry => entry.render()),
+      ),
+    )
+  })
+  assert_true(preview.contains("parent-5"))
+  assert_false(preview.contains("parent-6"))
+  assert_false(preview.contains("child-6"))
+  assert_true(preview.contains("parent-7"))
+  assert_true(preview.contains("child-7"))
+  assert_true(preview.contains(">Show more</button>"))
+  let expanded = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(
+      @html.div(
+        WorkspaceGroup::{
+          workspace: {
+            title: "/workspace",
+            label: "workspace",
+            active: false,
+            disclosure: Some({ collapsed: false, toggle: @cmd.none }),
+            menu: None,
+            actions: [],
+          },
+          conversations,
+          empty: None,
+          expanded: true,
+          show_more: @cmd.none,
+        }
+        .entries()
+        .map(entry => entry.render()),
+      ),
+    )
+  })
+  assert_true(expanded.contains("parent-6"))
+  assert_true(expanded.contains("child-6"))
+  assert_false(expanded.contains(">Show more</button>"))
 }

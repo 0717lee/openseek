@@ -296,12 +296,6 @@ fn dim_row(text : String) -> @html.Html {
 }
 
 ///|
-/// Match the compact project preview used by Codex's sidebar: enough recent
-/// chats to resume normal work without letting one busy project bury every
-/// neighbouring project.
-const ProjectChatPreviewLimit : Int = 5
-
-///|
 /// One device's sections: conversations that only exist in this app run (no
 /// turn has reached the store yet) first, then the engine's durable
 /// sessions, newest first. Rows stay clickable while runs are active —
@@ -340,9 +334,7 @@ fn device_section_rows(
     let collapsed = model.project_collapsed(dev.channel, path)
     let expanded = model.project_chats_expanded(dev.channel, path)
     let conversations : Array[@sidebar.ConversationRow] = []
-    let total = if collapsed {
-      0
-    } else {
+    if !collapsed {
       model.push_group_conversations(
         conversations,
         dispatch,
@@ -351,7 +343,6 @@ fn device_section_rows(
         listed~,
         archived~,
         nested=true,
-        max_conversations=if expanded { 0 } else { ProjectChatPreviewLimit },
       )
     }
     let group = @sidebar.WorkspaceGroup::{
@@ -363,22 +354,11 @@ fn device_section_rows(
         nested: true,
         open: None,
       }),
+      expanded,
+      show_more: dispatch(ShowMoreProjectChats(dev.channel, path)),
     }
     for entry in group.entries() {
       project_entries.push(entry)
-    }
-    if !collapsed && total > ProjectChatPreviewLimit && !expanded {
-      project_entries.push(
-        @sidebar.Custom(
-          @html.button(
-            class="project-show-more",
-            type_="button",
-            title="Show all \{total} chats in this project",
-            on_click=dispatch(ShowMoreProjectChats(dev.channel, path)),
-            "Show more",
-          ),
-        ),
-      )
     }
   }
   sections.push({
@@ -417,6 +397,16 @@ fn device_section_rows(
       .map(project => dispatch(ToggleProjectSection(dev.channel, project)))
       .unwrap_or(@cmd.none)
     },
+    project_expanded: path => {
+      @resource.of_path(dev.channel, path)
+      .map(project => model.project_chats_expanded(dev.channel, project))
+      .unwrap_or(false)
+    },
+    show_more_project: path => {
+      @resource.of_path(dev.channel, path)
+      .map(project => dispatch(ShowMoreProjectChats(dev.channel, project)))
+      .unwrap_or(@cmd.none)
+    },
     project_menu: path => {
       @resource.of_path(dev.channel, path).bind(project => {
         if dev.projects.contains(project) {
@@ -450,7 +440,7 @@ fn device_section_rows(
     })
   }
   let chat_rows : Array[@sidebar.ConversationRow] = []
-  let _ = model.push_group_conversations(
+  model.push_group_conversations(
     chat_rows,
     dispatch,
     dev,
@@ -521,8 +511,7 @@ fn Model::push_group_conversations(
   listed~ : (String) -> Bool,
   archived~ : (String) -> Bool,
   nested? : Bool = false,
-  max_conversations? : Int = 0,
-) -> Int {
+) -> Unit {
   // Conversations worth keeping get a row, plus the one fresh "New chat" on
   // screen: it owns a row from the moment its ＋ was clicked, so the rotation
   // has visible feedback in the list; the row takes the real title at the
@@ -531,7 +520,6 @@ fn Model::push_group_conversations(
   // is kept precisely so it can be returned to, and a row is the only way
   // back to it.
   let composing = self.composing_new_chat()
-  let mut count = 0
   for conv in self.conversations.rev_iter() {
     if conv.device != dev.channel ||
       conv.workspace.project() != workspace ||
@@ -553,25 +541,21 @@ fn Model::push_group_conversations(
     if !worth_keeping && !visible_new_chat {
       continue
     }
-    let visible = max_conversations <= 0 || count < max_conversations || active
-    count = count + 1
-    if visible {
-      rows.push(
-        session_row(
-          dispatch,
-          self,
-          dev.channel,
-          conv.session_id,
-          if worth_keeping {
-            conversation_title(conv)
-          } else {
-            "New chat"
-          },
-          nested~,
-          worktree?,
-        ),
-      )
-    }
+    rows.push(
+      session_row(
+        dispatch,
+        self,
+        dev.channel,
+        conv.session_id,
+        if worth_keeping {
+          conversation_title(conv)
+        } else {
+          "New chat"
+        },
+        nested~,
+        worktree?,
+      ),
+    )
   }
   let durable : Array[@transcript.SessionListItem] = []
   for item in dev.sessions {
@@ -598,16 +582,6 @@ fn Model::push_group_conversations(
   // sweep persists enough of them to bury the real chats. The parent row's
   // twisty shows them in place, the way a tree unfolds a directory.
   for row in @transcript.session_tree(durable) {
-    // An older active conversation stays visible beside the five-row preview;
-    // otherwise notification navigation or a list refresh could leave the
-    // conversation on screen with no selected sidebar row.
-    let active = dev.channel == self.focused &&
-      row.item.id == self.active_session
-    let visible = max_conversations <= 0 || count < max_conversations || active
-    count = count + 1
-    if !visible {
-      continue
-    }
     let expanded = self.subruns_expanded(dev.channel, row.item.id)
     rows.push(
       session_row(
@@ -656,7 +630,6 @@ fn Model::push_group_conversations(
       }
     }
   }
-  count
 }
 
 ///|

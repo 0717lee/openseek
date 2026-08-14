@@ -214,6 +214,8 @@ pub(all) struct SidebarActions {
   project_registered : (String) -> Bool
   project_collapsed : (String) -> Bool
   toggle_project : (String) -> @cmd.Cmd
+  project_expanded : (String) -> Bool
+  show_more_project : (String) -> @cmd.Cmd
   project_menu : (String) -> @sidebar.WorkspaceMenu?
   project_label : (String) -> String
 }
@@ -378,6 +380,8 @@ pub fn State::sidebar_entries(
       ),
       conversations,
       empty: None,
+      expanded: (actions.project_expanded)(project.0),
+      show_more: (actions.show_more_project)(project.0),
     }
     for entry in group.entries() {
       rows.push(entry)
@@ -953,9 +957,79 @@ test "Codex archived catalog contributes restore rows" {
     project_registered: _ => false,
     project_collapsed: _ => false,
     toggle_project: _ => @cmd.none,
+    project_expanded: _ => false,
+    show_more_project: _ => @cmd.none,
     project_menu: _ => None,
     project_label: path => path,
   })
   assert_eq(rows.length(), 1)
   assert_true(rows[0] is @sidebar.Custom(_))
+}
+
+///|
+test "Codex projects use the shared compact conversation preview" {
+  let data : Array[Json] = []
+  for number = 1; number <= 6; number = number + 1 {
+    data.push({
+      "id": "thread-\{number}",
+      "projectRoot": "/work/openseek",
+      "cwd": "/work/openseek",
+      "preview": "Codex task \{number}",
+    })
+  }
+  let state = State().with_threads({ "data": data }, false)
+  let collapsed = state.sidebar_entries({
+    selected: true,
+    open: @cmd.none,
+    start_thread: _ => @cmd.none,
+    open_thread: _ => @cmd.none,
+    archive_thread: _ => @cmd.none,
+    unarchive_thread: _ => @cmd.none,
+    project_registered: _ => true,
+    project_collapsed: _ => false,
+    toggle_project: _ => @cmd.none,
+    project_expanded: _ => false,
+    show_more_project: _ => @cmd.none,
+    project_menu: _ => None,
+    project_label: _ => "openseek",
+  })
+  let mut collapsed_conversations = 0
+  let mut collapsed_show_more = false
+  for entry in collapsed {
+    match entry {
+      @sidebar.Conversation(_) =>
+        collapsed_conversations = collapsed_conversations + 1
+      @sidebar.Custom(_) => collapsed_show_more = true
+      _ => ()
+    }
+  }
+  assert_eq(collapsed_conversations, 5)
+  assert_true(collapsed_show_more)
+  let expanded = state.sidebar_entries({
+    selected: true,
+    open: @cmd.none,
+    start_thread: _ => @cmd.none,
+    open_thread: _ => @cmd.none,
+    archive_thread: _ => @cmd.none,
+    unarchive_thread: _ => @cmd.none,
+    project_registered: _ => true,
+    project_collapsed: _ => false,
+    toggle_project: _ => @cmd.none,
+    project_expanded: _ => true,
+    show_more_project: _ => @cmd.none,
+    project_menu: _ => None,
+    project_label: _ => "openseek",
+  })
+  let mut expanded_conversations = 0
+  let mut expanded_show_more = false
+  for entry in expanded {
+    match entry {
+      @sidebar.Conversation(_) =>
+        expanded_conversations = expanded_conversations + 1
+      @sidebar.Custom(_) => expanded_show_more = true
+      _ => ()
+    }
+  }
+  assert_eq(expanded_conversations, 6)
+  assert_false(expanded_show_more)
 }
