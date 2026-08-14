@@ -18640,9 +18640,13 @@ test "Codex web links use the same dock browser route as OpenSeek" {
       "turns": [],
     },
   })
-  // The Codex row has already selected this task before its PR is clicked, so
-  // the dock operation must use the task's screen and workspace directly.
-  let model = { ..desktop_model(), codex, screen: Codex }
+  // Exercise the same root transition as a sidebar click. It selects the
+  // Codex screen and, before a later PR click can arrive, reconciles the live
+  // dock strip from the OpenSeek conversation owner to this Codex task.
+  let (_, model) = update(dispatch, CodexOpenThread("codex-thread-1"), {
+    ..desktop_model(),
+    codex,
+  })
   let (_, model) = update(
     dispatch,
     ExternalLinkClicked("https://github.com/moonbit-community/pty/pull/18"),
