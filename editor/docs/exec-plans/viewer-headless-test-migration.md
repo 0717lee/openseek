@@ -18,7 +18,7 @@ tests in approximately 1.6 seconds.
 |---|---|---|
 | async hover generation, cancellation, replacement, detach, dispose | `viewer/async_model_features_wbtest.mbt` with manual scheduler and request stamps | accepted visible hover in Viewer smoke/component |
 | reveal request math, bands, cancellation, viewport scroll | `viewer/reveal_wbtest.mbt` and mounted pending-request tests | DOM Range and measured horizontal reveal in browser geometry |
-| set-value identity, content events, scroll, folding, quick diff, marker refresh | `viewer/set_value_api_wbtest.mbt` plus mounted browser-data identity | root identity contrast in model-swap browser test |
+| set-value identity, content events, scroll, folding, quick diff, marker refresh | `viewer/set_value_api_wbtest.mbt`, including mounted root/scroll/folding identity | root identity contrast in model-swap browser test |
 | whitespace/control rendering policy | render-line and Viewer option MoonBit tests | runtime DOM/CSS switch in render-invalidation |
 | cursor state and event matrices | cursor/view-model white-box suites | four native keyboard/pointer/copy bridge tests |
 | definition/reference request ownership and stale-result guards | definition and references white-box suites | four context-menu/link/Peek/Markdown browser tests |
@@ -49,12 +49,13 @@ Total: at most 43 tests.
 
 ## Milestones
 
-1. Extract reusable headless and mounted Viewer white-box harnesses.
-2. Complete deterministic lower-layer coverage and remove the standalone
+1. [x] Extract reusable headless and mounted Viewer white-box harnesses
+   (`c618e169`).
+2. [x] Complete deterministic lower-layer coverage and remove the standalone
    async/reveal/set-value/whitespace browser specs and bundles.
-3. Trim the large input/navigation/Markdown/render suites to the retained
+3. [ ] Trim the large input/navigation/Markdown/render suites to the retained
    browser contracts above.
-4. Remove dead fixtures and globals, update harness documentation, measure the
+4. [ ] Remove dead fixtures and globals, update harness documentation, measure the
    new suite, run all gates, and delete this completed plan.
 
 ## Acceptance

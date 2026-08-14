@@ -76,6 +76,53 @@ test "set_value marks mounted rendered content stale on the same browser data" {
 }
 
 ///|
+test "set_value keeps the mounted root and scroll while folding recomputes" {
+  let before =
+    #|root
+    #|  before
+    #|tail
+    #|line 4
+    #|line 5
+    #|line 6
+    #|line 7
+    #|line 8
+    #|line 9
+    #|line 10
+    #|line 11
+    #|line 12
+  let after = before.replace(old="before", new="after ")
+  with_mounted_test_viewer(before, viewer => {
+    viewer.test_set_viewport(width=400.0, height=54.0)
+    viewer.set_scroll_top(72.0)
+    let scroll_top = viewer.get_scroll_top()
+    guard viewer.current_code_view() is Some(view) else {
+      fail("mounted Viewer did not install a code view")
+    }
+    let root = view.root
+    guard viewer.folding_controller() is Some(controller) else {
+      fail("expected a folding controller")
+    }
+    guard controller.folding_model is Some(folding_before) else {
+      fail("expected a folding model before set_value")
+    }
+    assert_eq(folding_before.regions().length(), 1)
+
+    viewer.set_value(after)
+
+    guard viewer.current_code_view() is Some(updated_view) else {
+      fail("set_value detached the mounted code view")
+    }
+    assert_true(same_mounted_test_element(updated_view.root, root))
+    assert_eq(viewer.get_scroll_top(), scroll_top)
+    guard controller.folding_model is Some(folding_after) else {
+      fail("expected a folding model after set_value")
+    }
+    assert_eq(folding_after.regions().length(), 1)
+    assert_eq(viewer.get_value(), after)
+  })
+}
+
+///|
 test "set_value preserves the headless model slot without browser state" {
   with_test_viewer("one\ntwo", viewer => {
     guard viewer.model_slot.current is Some(before) else {

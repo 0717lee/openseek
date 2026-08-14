@@ -646,12 +646,6 @@ fn static_route(path : String) -> (String, String)? {
       Some(("browser-tests/perf.mjs", "text/javascript; charset=utf-8"))
     "/browser-tests/perf.mjs.map" =>
       Some(("browser-tests/perf.mjs.map", "application/json; charset=utf-8"))
-    "/browser-tests/reveal.html" =>
-      Some(("browser-tests/reveal.html", "text/html; charset=utf-8"))
-    "/browser-tests/reveal.mjs" =>
-      Some(("browser-tests/reveal.mjs", "text/javascript; charset=utf-8"))
-    "/browser-tests/reveal.mjs.map" =>
-      Some(("browser-tests/reveal.mjs.map", "application/json; charset=utf-8"))
     "/browser-tests/read_api.html" =>
       Some(("browser-tests/read_api.html", "text/html; charset=utf-8"))
     "/browser-tests/read_api.mjs" =>
@@ -659,14 +653,6 @@ fn static_route(path : String) -> (String, String)? {
     "/browser-tests/read_api.mjs.map" =>
       Some(
         ("browser-tests/read_api.mjs.map", "application/json; charset=utf-8"),
-      )
-    "/browser-tests/whitespace.html" =>
-      Some(("browser-tests/whitespace.html", "text/html; charset=utf-8"))
-    "/browser-tests/whitespace.mjs" =>
-      Some(("browser-tests/whitespace.mjs", "text/javascript; charset=utf-8"))
-    "/browser-tests/whitespace.mjs.map" =>
-      Some(
-        ("browser-tests/whitespace.mjs.map", "application/json; charset=utf-8"),
       )
     "/browser-tests/whitespace_selection.html" =>
       Some(
@@ -717,14 +703,6 @@ fn static_route(path : String) -> (String, String)? {
     "/browser-tests/quick_diff.mjs.map" =>
       Some(
         ("browser-tests/quick_diff.mjs.map", "application/json; charset=utf-8"),
-      )
-    "/browser-tests/set_value.html" =>
-      Some(("browser-tests/set_value.html", "text/html; charset=utf-8"))
-    "/browser-tests/set_value.mjs" =>
-      Some(("browser-tests/set_value.mjs", "text/javascript; charset=utf-8"))
-    "/browser-tests/set_value.mjs.map" =>
-      Some(
-        ("browser-tests/set_value.mjs.map", "application/json; charset=utf-8"),
       )
     "/browser-tests/definition.html" =>
       Some(("browser-tests/definition.html", "text/html; charset=utf-8"))
