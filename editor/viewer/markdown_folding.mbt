@@ -273,10 +273,11 @@ fn MarkdownBrowserData::apply_markdown_toc(self : MarkdownBrowserData) -> Unit {
 ///|
 /// TOC navigation: expand the target section and every collapsed ancestor
 /// (the review's reveal rule -- a reveal anchor's whole chain stays open),
-/// republish visibility, invalidate the hover bridge, then scroll the heading
-/// to the top of the viewport. Expansions are recorded as explicit reader
-/// decisions: the reader asked to see this content, so a later unrelated
-/// agent edit must not re-collapse it.
+/// republish visibility, and invalidate the hover bridge. The TOC view scrolls
+/// its own viewport after this callback returns, when the expanded heading has
+/// a current layout rectangle. Expansions are recorded as explicit reader
+/// decisions: the reader asked to see this content, so a later unrelated agent
+/// edit must not re-collapse it.
 fn MarkdownBrowserData::navigate_markdown_section(
   self : MarkdownBrowserData,
   source_offset : Int,
@@ -300,8 +301,6 @@ fn MarkdownBrowserData::navigate_markdown_section(
   if changed {
     self.apply_markdown_folding()
   }
-  // Unconditional: navigation scrolls even when no fold changed, and a
-  // pending hover must not survive the geometry change.
+  // A pending hover must not survive the geometry change.
   self.hover_bridge.layout_changed()
-  self.view.reveal_source_offset(source_offset, "start")
 }

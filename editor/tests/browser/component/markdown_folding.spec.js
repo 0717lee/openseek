@@ -381,3 +381,28 @@ test('the pinned toc bar outlines sections and navigation expands the chain', as
   await expect(page.locator(tocBar)).toBeHidden();
   await expect(page.locator(article)).toHaveCSS('padding-top', '16px');
 });
+
+test('toc navigation scrolls only the Markdown viewport', async ({
+  page,
+}, testInfo) => {
+  await openFoldingScenario(page, testInfo);
+  // Keep the Viewer below the browser viewport without pre-scrolling the page.
+  // Programmatic activation avoids Playwright scrolling the button itself.
+  await page.locator('.markdown-folding-shell').evaluate((shell) => {
+    shell.style.paddingTop = '720px';
+  });
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  const markdownScrollBefore = await page.locator(viewport).evaluate(
+    (node) => node.scrollTop,
+  );
+
+  await page.locator(tocToggle).evaluate((button) => button.click());
+  await page.locator(tocRow, { hasText: 'Deep' }).evaluate((button) =>
+    button.click(),
+  );
+
+  await expect
+    .poll(() => page.locator(viewport).evaluate((node) => node.scrollTop))
+    .toBeGreaterThan(markdownScrollBefore);
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+});

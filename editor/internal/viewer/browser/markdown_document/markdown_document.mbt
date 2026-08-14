@@ -199,6 +199,7 @@ pub fn MarkdownDocumentView::MarkdownDocumentView(
                 view.toc_nav.set_attribute("data-toc-expanded", "false")
                 view.toc_toggle.set_attribute("aria-expanded", "false")
                 (view.on_toc_navigate)(offset)
+                view.scroll_toc_entry_into_view(offset)
               }
               None => ()
             }
@@ -1009,6 +1010,26 @@ fn MarkdownDocumentView::element_for_source_offset(
     Some(element) => Some(element)
     None => first_mapped
   }
+}
+
+///|
+/// Scrolls a TOC target by changing only the Markdown viewport. Avoid
+/// `scrollIntoView` here because older WebKitGTK versions may also move the
+/// surrounding desktop page. The navigation callback runs first so folded
+/// ancestors are expanded before the target rectangle is measured.
+fn MarkdownDocumentView::scroll_toc_entry_into_view(
+  self : MarkdownDocumentView,
+  source_offset : Int,
+) -> Unit {
+  guard !self.disposed &&
+    self.element_for_source_offset(source_offset) is Some(element) else {
+    return
+  }
+  let element_top = element.get_bounding_client_rect().get_top()
+  let toc_bottom = self.toc_nav.get_bounding_client_rect().get_bottom()
+  self.viewport.set_scroll_top(
+    self.viewport.get_scroll_top() + element_top - toc_bottom,
+  )
 }
 
 ///|
