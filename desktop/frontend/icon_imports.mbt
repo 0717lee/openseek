@@ -4,7 +4,6 @@
 ///|
 using @icons {
   icon,
-  icon_add,
   icon_arrow_up,
   icon_chevron_down,
   icon_close,
@@ -19,7 +18,6 @@ using @icons {
   icon_link_external,
   icon_package,
   icon_search,
-  icon_settings_gear,
   icon_sparkle,
   icon_sync,
   icon_target,

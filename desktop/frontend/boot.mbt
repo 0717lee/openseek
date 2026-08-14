@@ -128,6 +128,171 @@ fn app_shortcut_message(keyboard : @dom.KeyboardEvent, is_apple : Bool) -> Msg? 
 }
 
 ///|
+/// Root message translation for the data-only sidebar component tree. Stable
+/// component ids contain every value needed to build a domain message, so no
+/// child component captures or stores the application model.
+priv struct SidebarDispatcher {
+  emit : @cmd.Emit[Msg]
+}
+
+///|
+fn SidebarDispatcher::emit(self : SidebarDispatcher, message : Msg) -> @cmd.Cmd {
+  (self.emit)(message)
+}
+
+///|
+fn SidebarDispatcher::conversation_open(
+  self : SidebarDispatcher,
+  id : @conversation.Id,
+) -> @cmd.Cmd {
+  guard @interop.ChannelId::from_uri_authority(id.channel()) is Some(channel) else {
+    return @cmd.none
+  }
+  match id.source() {
+    "openseek.live" => self.emit(OpenSession(channel, id.conversation()))
+    "openseek.archived" => {
+      let workspace = if id.root().is_empty() {
+        None
+      } else {
+        @resource.of_path(channel, id.root())
+      }
+      self.emit(
+        OpenArchivedSession(channel, session=id.conversation(), workspace~),
+      )
+    }
+    "codex.live" => self.emit(CodexOpenThread(id.conversation()))
+    "codex.draft" => self.emit(OpenCodex)
+    _ => @cmd.none
+  }
+}
+
+///|
+fn SidebarDispatcher::conversation_archive(
+  self : SidebarDispatcher,
+  id : @conversation.Id,
+) -> @cmd.Cmd {
+  guard @interop.ChannelId::from_uri_authority(id.channel()) is Some(channel) else {
+    return @cmd.none
+  }
+  match id.source() {
+    "openseek.live" => self.emit(ArchiveSession(channel, id.conversation()))
+    "codex.live" => self.emit(CodexArchiveThread(id.conversation()))
+    _ => @cmd.none
+  }
+}
+
+///|
+fn SidebarDispatcher::conversation_restore(
+  self : SidebarDispatcher,
+  id : @conversation.Id,
+) -> @cmd.Cmd {
+  guard @interop.ChannelId::from_uri_authority(id.channel()) is Some(channel) else {
+    return @cmd.none
+  }
+  match id.source() {
+    "openseek.archived" =>
+      self.emit(UnarchiveSession(channel, id.conversation()))
+    "codex.archived" => self.emit(CodexUnarchiveThread(id.conversation()))
+    _ => @cmd.none
+  }
+}
+
+///|
+fn SidebarDispatcher::project_new(
+  self : SidebarDispatcher,
+  id : @project.Id,
+) -> @cmd.Cmd {
+  guard @interop.ChannelId::from_uri_authority(id.channel()) is Some(channel) else {
+    return @cmd.none
+  }
+  match id.source() {
+    "codex" => self.emit(CodexNewThreadIn(id.root()))
+    "openseek.projects" =>
+      @resource.of_path(channel, id.root())
+      .map(project => self.emit(NewChatIn(channel, Some(project))))
+      .unwrap_or(@cmd.none)
+    _ => @cmd.none
+  }
+}
+
+///|
+fn SidebarDispatcher::project_settings(
+  self : SidebarDispatcher,
+  id : @project.Id,
+) -> @cmd.Cmd {
+  guard @interop.ChannelId::from_uri_authority(id.channel()) is Some(channel) &&
+    @resource.of_path(channel, id.root()) is Some(project) else {
+    return @cmd.none
+  }
+  self.emit(OpenWorkspaceSettings(channel, project))
+}
+
+///|
+fn SidebarDispatcher::project_detach(
+  self : SidebarDispatcher,
+  id : @project.Id,
+) -> @cmd.Cmd {
+  guard @interop.ChannelId::from_uri_authority(id.channel()) is Some(channel) &&
+    @resource.of_path(channel, id.root()) is Some(project) else {
+    return @cmd.none
+  }
+  self.emit(RemoveProject(channel, project))
+}
+
+///|
+fn SidebarDispatcher::section_primary(
+  self : SidebarDispatcher,
+  id : @section.Id,
+) -> @cmd.Cmd {
+  guard @interop.ChannelId::from_uri_authority(id.channel()) is Some(channel) else {
+    return @cmd.none
+  }
+  match id.source() {
+    "openseek.projects" => self.emit(PickProject(channel))
+    "openseek.chats" => self.emit(NewChatIn(channel, None))
+    "codex" => self.emit(CodexNewThread)
+    _ => @cmd.none
+  }
+}
+
+///|
+fn SidebarDispatcher::actions(self : SidebarDispatcher) -> @sidebar.Actions {
+  let conversation : @conversation.Actions = {
+    open: id => self.conversation_open(id),
+    archive: id => self.conversation_archive(id),
+    restore: id => self.conversation_restore(id),
+  }
+  let project : @project.Actions = {
+    new_conversation: id => self.project_new(id),
+    open_settings: id => self.project_settings(id),
+    detach: id => self.project_detach(id),
+    conversation,
+  }
+  let section : @section.Actions = {
+    primary: id => self.section_primary(id),
+    placeholder: id => {
+      if id == "codex.empty" {
+        self.emit(OpenCodex)
+      } else {
+        @cmd.none
+      }
+    },
+    project,
+    conversation,
+  }
+  {
+    toggle: self.emit(ToggleSidebar),
+    new_chat: self.emit(NewChat),
+    update: self.emit(UpdateClicked),
+    open_skills: self.emit(OpenSkills),
+    open_settings: self.emit(OpenSetup),
+    refresh_account: self.emit(Console(RefreshClicked)),
+    sign_out: self.emit(Console(SignOutClicked)),
+    section,
+  }
+}
+
+///|
 #warnings("-alert_unstable")
 pub fn boot() -> Unit {
   @crash_page.install()
@@ -179,15 +344,6 @@ pub fn boot() -> Unit {
               "launcher-dismiss",
               trigger=".launcher-button",
               emit.map((_ : Unit) => CloseLauncher),
-            ),
-          )
-        }
-        if model.project_menu is Some(_) {
-          subs.push(
-            dismiss_subscription(
-              "project-menu-dismiss",
-              trigger=".workspace-menu-button",
-              emit.map((_ : Unit) => CloseProjectMenu),
             ),
           )
         }
@@ -271,22 +427,29 @@ pub fn boot() -> Unit {
         )
       }),
     })
-    state.view4(terminal_html, transcript_html, right_panel_html, (
-      model,
+    let sidebar_input = state.map(model => model.sidebar_component_input())
+    let sidebar_html = @sidebar.component(
+      sidebar_input,
+      SidebarDispatcher::{ emit, }.actions(),
+    )
+    state.view5(
       terminal_html,
       transcript_html,
       right_panel_html,
-    ) => {
-      view(
-        emit,
-        terminal_emit(@terminal.ToggleTerminal),
-        emit(ToggleRightPanel),
-        model,
-        terminal_html,
-        transcript_html,
-        right_panel_html,
-      )
-    })
+      sidebar_html,
+      (model, terminal_html, transcript_html, right_panel_html, sidebar_html) => {
+        view(
+          emit,
+          terminal_emit(@terminal.ToggleTerminal),
+          emit(ToggleRightPanel),
+          model,
+          terminal_html,
+          transcript_html,
+          right_panel_html,
+          sidebar_html,
+        )
+      },
+    )
   })
   app.mount("app")
 }

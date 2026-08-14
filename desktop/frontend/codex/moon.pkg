@@ -14,7 +14,9 @@ import {
   "openseek_desktop/frontend/mention_context",
   "openseek_desktop/frontend/pathx",
   "openseek_desktop/frontend/resource",
-  "openseek_desktop/frontend/sidebar",
+  "openseek_desktop/frontend/sidebar/conversation",
+  "openseek_desktop/frontend/sidebar/project",
+  "openseek_desktop/frontend/sidebar/section",
   "openseek_desktop/frontend/symbols",
   "openseek_desktop/frontend/transcript",
 }

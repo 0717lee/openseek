@@ -4,11 +4,8 @@ import {
   "moonbit-community/rabbita/html",
   "moonbitlang/core/immut/vector",
   "openseek_desktop/frontend/icons",
-  "openseek_desktop/frontend/sidebar/section",
+  "openseek_desktop/frontend/sidebar/conversation",
+  "openseek_desktop/frontend/sidebar/project",
 }
-
-import {
-  "moonbit-community/rabbita",
-} for "wbtest"
 
 supported_targets = "js"

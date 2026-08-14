@@ -1,5 +1,5 @@
 ///|
-test "Codex projects use the shared workspace disclosure" {
+test "Codex projects use shared project component input" {
   let state = @codex.State::from_thread_snapshot({
     "thread": {
       "id": "thread-1",
@@ -9,36 +9,19 @@ test "Codex projects use the shared workspace disclosure" {
       "turns": [],
     },
   })
-  let entries = state.sidebar_entries({
+  let entries = state.sidebar_component_entries({
+    channel: "local",
     selected: true,
-    open: @cmd.none,
-    start_thread: _ => @cmd.none,
-    open_thread: _ => @cmd.none,
-    archive_thread: _ => @cmd.none,
-    unarchive_thread: _ => @cmd.none,
     project_registered: path => path == "/work/openseek",
-    project_collapsed: path => path == "/work/openseek",
-    toggle_project: _ => @cmd.none,
-    project_expanded: _ => false,
-    show_more_project: _ => @cmd.none,
-    project_menu: _ => {
-      Some({
-        title: "More actions",
-        open: false,
-        toggle: @cmd.none,
-        body: () => @html.nothing,
-      })
-    },
     project_label: _ => "openseek",
   })
   assert_eq(entries.length(), 1)
-  guard entries[0] is @sidebar.Workspace(row) &&
-    row.disclosure is Some(disclosure) else {
-    fail("expected a collapsible shared workspace row")
+  guard entries[0] is @section.Project(row) else {
+    fail("expected shared project component input")
   }
   assert_true(row.active)
-  assert_true(disclosure.collapsed)
-  assert_true(row.menu is Some(_))
+  assert_true(row.managed)
+  assert_eq(row.id().source(), "codex")
 }
 
 ///|
@@ -52,23 +35,14 @@ test "unregistered Codex roots remain direct conversation rows" {
       "turns": [],
     },
   })
-  let entries = state.sidebar_entries({
+  let entries = state.sidebar_component_entries({
+    channel: "local",
     selected: true,
-    open: @cmd.none,
-    start_thread: _ => @cmd.none,
-    open_thread: _ => @cmd.none,
-    archive_thread: _ => @cmd.none,
-    unarchive_thread: _ => @cmd.none,
     project_registered: _ => false,
-    project_collapsed: _ => false,
-    toggle_project: _ => @cmd.none,
-    project_expanded: _ => false,
-    show_more_project: _ => @cmd.none,
-    project_menu: _ => None,
     project_label: path => path,
   })
   assert_eq(entries.length(), 1)
-  guard entries[0] is @sidebar.Conversation(row) else {
+  guard entries[0] is @section.Conversation(row) else {
     fail("expected a direct Codex conversation row")
   }
   assert_false(row.nested)

@@ -1,427 +1,171 @@
-// Shared sidebar rows accept already-built commands from their owner. They are
-// transient view inputs, never application state: every render creates fresh
-// virtual-DOM nodes and commands for the owning OpenSeek or Codex model.
+///|
+pub(all) struct Account {
+  login : String
+  avatar : String
+  busy : Bool
+  notice : String?
+} derive(Debug, Eq)
 
 ///|
-/// The optional trailing action owned by one collapsible section.
-pub(all) struct SectionAction {
-  title : String
-  command : @cmd.Cmd
-  disabled : Bool
-}
+/// The complete plain input of the left sidebar component. Commands are kept
+/// in `Actions`, so this value remains comparable and can drive incremental
+/// Rabbita branches without embedding emitters in application data.
+pub(all) struct Input {
+  notices : Array[String]
+  sections : Array[@section.Input]
+  update_label : String?
+  update_enabled : Bool
+  skills_active : Bool
+  settings_active : Bool
+  account : Account?
+} derive(Debug, Eq)
 
 ///|
-/// One peer section heading in the conversation list. The whole row folds its
-/// section; an optional trailing action stops propagation before it runs, so
-/// adding a workspace or conversation never also closes the section.
-pub(all) struct Section {
-  label : String
+pub(all) struct Actions {
   toggle : @cmd.Cmd
-  collapsed : Bool
-  action : SectionAction?
-  selected : Bool
+  new_chat : @cmd.Cmd
+  update : @cmd.Cmd
+  open_skills : @cmd.Cmd
+  open_settings : @cmd.Cmd
+  refresh_account : @cmd.Cmd
+  sign_out : @cmd.Cmd
+  section : @section.Actions
 }
 
 ///|
-pub fn Section::render(self : Section) -> @html.Html {
-  let mut class = if self.collapsed {
-    "sidebar-heading section-heading collapsible collapsed"
-  } else {
-    "sidebar-heading section-heading collapsible"
-  }
-  if self.selected {
-    class = class + " active"
-  }
-  let children : Array[@html.Html] = [
-    @html.span(class="sidebar-label", self.label),
-  ]
-  if self.action is Some(action) {
-    children.push(
-      @html.button(
-        class="row-archive",
-        type_="button",
-        title=action.title,
-        disabled=action.disabled,
-        attrs=@html.Attrs::build().on_click(event => {
-          event.stop_propagation()
-          action.command
-        }),
-        @icons.icon(@icons.icon_add),
-      ),
-    )
-  }
-  @html.div(class~, on_click=self.toggle, children)
+fn Actions::section_component(
+  self : Actions,
+  _id : @section.Id,
+  input : @rabbita.Val[@section.Input],
+) -> @rabbita.Val[Array[@html.Html]] {
+  @section.component(input, self.section)
 }
 
 ///|
-/// A conversation's optional archive control.
-pub(all) struct ConversationArchive {
-  title : String
-  command : @cmd.Cmd
-}
-
-///|
-/// Every conversation keeps the same leading disclosure slot. OpenSeek fills
-/// it for subagent runs; another conversation source can retain the spacer.
-pub(all) enum ConversationSubruns {
-  NoSubruns
-  Subruns(count~ : Int, expanded~ : Bool, toggle~ : @cmd.Cmd)
-}
-
-///|
-/// One conversation row in the global sidebar. Its owner computes status and
-/// actions; this package owns the DOM order, classes, and click propagation.
-pub(all) struct ConversationRow {
-  title : String
-  label : String
-  open : @cmd.Cmd
-  nested : Bool
-  subrun : Bool
-  active : Bool
-  running : Bool
-  subruns : ConversationSubruns
-  status : Array[@html.Html]
-  archive : ConversationArchive?
-}
-
-///|
-pub fn ConversationRow::render(self : ConversationRow) -> @html.Html {
-  let mut class = "conversation-row"
-  if self.nested {
-    class = class + " nested"
-  }
-  if self.subrun {
-    class = class + " subrun"
-  }
-  if self.active {
-    class = class + " active"
-  }
-  if self.running {
-    class = class + " running"
-  }
-  let twisty = match self.subruns {
-    NoSubruns => @html.span(class="row-twisty spacer", "")
-    Subruns(count~, expanded~, toggle~) =>
-      @html.button(
-        class=if expanded { "row-twisty expanded" } else { "row-twisty" },
-        type_="button",
-        title=if count == 1 {
-          "1 subagent run"
-        } else {
-          "\{count} subagent runs"
-        },
-        attrs=@html.Attrs::build().on_click(event => {
-          event.stop_propagation()
-          toggle
-        }),
-        @icons.icon(@icons.icon_chevron_down),
-      )
-  }
-  let children : Array[@html.Html] = [
-    twisty,
-    @html.span(class="sidebar-label", self.label),
-  ]
-  if !self.status.is_empty() || self.archive is Some(_) {
-    let trailing : Array[@html.Html] = []
-    if !self.status.is_empty() {
-      trailing.push(@html.span(class="row-status", self.status))
-    }
-    if self.archive is Some(archive) {
-      trailing.push(
-        @html.span(class="row-actions", [
-          @html.button(
-            class="row-archive",
-            type_="button",
-            title=archive.title,
-            attrs=@html.Attrs::build().on_click(event => {
-              event.stop_propagation()
-              archive.command
-            }),
-            @icons.icon(@icons.icon_archive),
-          ),
+/// The whole left column is one Rabbita component. Its section vector is
+/// associated by stable section identity; each Section then associates its
+/// own Project and Conversation children in their packages.
+pub fn component(
+  input : @rabbita.Val[Input],
+  actions : Actions,
+) -> @rabbita.Val[@html.Html] {
+  let section_inputs = input.map(input => @vector.from_array(input.sections))
+  let section_rows = section_inputs.assoc_by(
+    (id, section) => actions.section_component(id, section),
+    by=section => section.id(),
+  )
+  input.view2(section_rows, (input, section_rows) => {
+    let rows : Array[@html.Html] = []
+    for notice in input.notices {
+      rows.push(
+        @html.div(class="conversation-row placeholder", [
+          @html.span(class="sidebar-label", notice),
         ]),
       )
     }
-    children.push(@html.span(class="row-trailing", trailing))
-  }
-  @html.div(class~, title=self.title, on_click=self.open, children)
-}
-
-///|
-/// One hover action belonging to a workspace row. The image is a function so
-/// each render receives a fresh virtual-DOM value rather than sharing nodes.
-pub(all) struct WorkspaceAction {
-  title : String
-  command : @cmd.Cmd
-  image : () -> @html.Html
-}
-
-///|
-fn WorkspaceAction::render(self : WorkspaceAction) -> @html.Html {
-  @html.button(
-    class="row-archive",
-    type_="button",
-    title=self.title,
-    attrs=@html.Attrs::build().on_click(event => {
-      event.stop_propagation()
-      self.command
-    }),
-    @icons.icon(self.image),
-  )
-}
-
-///|
-/// A workspace row's overflow ("…") menu: the toggle button and, while
-/// open, the dropdown body. The owner builds the body's items and holds the
-/// open/closed state; this package keeps the button in the row's action
-/// geometry and anchors the dropdown to the row. The body is a function so
-/// each render receives a fresh virtual-DOM value.
-pub(all) struct WorkspaceMenu {
-  title : String
-  open : Bool
-  toggle : @cmd.Cmd
-  body : () -> @html.Html
-}
-
-///|
-/// Optional folder disclosure. OpenSeek and Codex project rows use this same
-/// branch because their conversation previews fold below the registered root.
-/// Non-project conversation rows do not create a workspace row at all.
-pub(all) struct WorkspaceDisclosure {
-  collapsed : Bool
-  toggle : @cmd.Cmd
-}
-
-///|
-/// A folder row shared by workspace-like conversation groups. The owner
-/// supplies actions, while this package keeps geometry and action slots equal.
-pub(all) struct WorkspaceRow {
-  title : String
-  label : String
-  active : Bool
-  disclosure : WorkspaceDisclosure?
-  menu : WorkspaceMenu?
-  actions : Array[WorkspaceAction]
-}
-
-///|
-pub fn WorkspaceRow::render(self : WorkspaceRow) -> @html.Html {
-  let mut class = "workspace-row"
-  if self.disclosure is Some(disclosure) {
-    class = if disclosure.collapsed {
-      class + " collapsible collapsed"
-    } else {
-      class + " collapsible"
-    }
-  }
-  if self.active {
-    class = class + " active"
-  }
-  if self.menu is Some(menu) && menu.open {
-    // Keeps the hover-revealed action slots visible while the menu floats,
-    // even once the pointer moves into it.
-    class = class + " menu-open"
-  }
-  let children : Array[@html.Html] = match self.disclosure {
-    Some(disclosure) =>
-      [
-        @html.button(
-          class="workspace-disclosure",
-          type_="button",
-          title=self.title,
-          on_click=disclosure.toggle,
-          attrs=@html.Attrs::build().aria_expanded(
-            (!disclosure.collapsed).to_string(),
-          ),
-          [
-            @html.span(class="sidebar-icon", @icons.icon(@icons.icon_folder)),
-            @html.span(class="sidebar-label", self.label),
-          ],
-        ),
-      ]
-    None =>
-      [
-        @html.span(class="sidebar-icon", @icons.icon(@icons.icon_folder)),
-        @html.span(class="sidebar-label", self.label),
-      ]
-  }
-  if self.menu is Some(menu) {
-    children.push(
-      @html.button(
-        class=if menu.open {
-          "row-archive workspace-menu-button open"
-        } else {
-          "row-archive workspace-menu-button"
-        },
-        type_="button",
-        title=menu.title,
-        attrs=@html.Attrs::build().on_click(event => {
-          event.stop_propagation()
-          menu.toggle
-        }),
-        @icons.icon(@icons.icon_more),
-      ),
-    )
-  }
-  for action in self.actions {
-    children.push(action.render())
-  }
-  // The open dropdown appends after the stable children, so opening and
-  // closing it never re-keys the buttons under the pointer.
-  if self.menu is Some(menu) && menu.open {
-    children.push((menu.body)())
-  }
-  @html.div(class~, title=self.title, children)
-}
-
-///|
-/// A non-conversation line in a section, used for loading, empty, and
-/// unavailable states. Optional nesting keeps an empty workspace aligned with
-/// the conversations that will replace it.
-pub(all) struct PlaceholderRow {
-  label : String
-  class_name : String
-  nested : Bool
-  open : @cmd.Cmd?
-}
-
-///|
-pub fn PlaceholderRow::render(self : PlaceholderRow) -> @html.Html {
-  let mut class = "conversation-row placeholder"
-  if self.nested {
-    class = class + " nested"
-  }
-  if !self.class_name.is_empty() {
-    class = class + " " + self.class_name
-  }
-  let children : Array[@html.Html] = []
-  if self.nested {
-    children.push(@html.span(class="row-twisty spacer", ""))
-  }
-  children.push(@html.span(class="sidebar-label", self.label))
-  match self.open {
-    Some(open) => @html.div(class~, on_click=open, children)
-    None => @html.div(class~, children)
-  }
-}
-
-///|
-/// One ordered item in a collapsible sidebar section. Domain packages provide
-/// plain row values; this enum is the only place that decides how a mixed list
-/// turns into DOM.
-pub(all) enum Entry {
-  Workspace(WorkspaceRow)
-  Conversation(ConversationRow)
-  Placeholder(PlaceholderRow)
-  Custom(@html.Html)
-}
-
-///|
-pub fn Entry::render(self : Entry) -> @html.Html {
-  match self {
-    Workspace(row) => row.render()
-    Conversation(row) => row.render()
-    Placeholder(row) => row.render()
-    Custom(html) => html
-  }
-}
-
-///|
-/// A workspace followed by its conversations. The group inserts one shared
-/// nested placeholder when an attached workspace is empty and owns the compact
-/// project preview used by every conversation source. `expanded` and
-/// `show_more` are controlled inputs from the application model; keeping the
-/// row selection here means OpenSeek and Codex cannot drift into different
-/// limits or accidentally separate an expanded sub-run from its parent.
-pub(all) struct WorkspaceGroup {
-  workspace : WorkspaceRow
-  conversations : Array[ConversationRow]
-  empty : PlaceholderRow?
-  expanded : Bool
-  show_more : @cmd.Cmd
-}
-
-///|
-pub fn WorkspaceGroup::entries(self : WorkspaceGroup) -> Array[Entry] {
-  let preview_limit = 5
-  let entries : Array[Entry] = [Workspace(self.workspace)]
-  // Folder disclosure owns the whole group, so callers cannot accidentally
-  // leave a placeholder or conversation visible below a collapsed project.
-  if self.workspace.disclosure is Some(disclosure) && disclosure.collapsed {
-    return entries
-  }
-  if self.conversations.is_empty() && self.empty is Some(empty) {
-    entries.push(Placeholder(empty))
-  } else {
-    let mut conversations = 0
-    let mut parent_visible = false
-    for row in self.conversations {
-      if row.subrun {
-        // Expanded sub-runs are part of their preceding conversation. They do
-        // not consume preview slots and disappear with a hidden parent.
-        if parent_visible {
-          entries.push(Conversation(row))
-        }
-      } else {
-        parent_visible = self.expanded ||
-          conversations < preview_limit ||
-          row.active
-        conversations = conversations + 1
-        if parent_visible {
-          entries.push(Conversation(row))
-        }
+    for group in section_rows {
+      for row in group {
+        rows.push(row)
       }
     }
-    if !self.expanded && conversations > preview_limit {
-      entries.push(
-        Custom(
-          @html.button(
-            class="project-show-more",
-            type_="button",
-            title="Show all \{conversations} chats in this project",
-            on_click=self.show_more,
-            "Show more",
-          ),
+    let footer : Array[@html.Html] = []
+    if input.update_label is Some(label) {
+      footer.push(
+        @html.button(
+          class="sidebar-button primary",
+          disabled=!input.update_enabled,
+          on_click=actions.update,
+          [
+            @html.span(class="sidebar-icon", @icons.icon(@icons.icon_arrow_up)),
+            @html.span(class="sidebar-label", label),
+          ],
         ),
       )
     }
-  }
-  entries
-}
-
-///|
-/// A heading and its ordered body. Folding is implemented here once for
-/// Projects, Codex, Chats, and Archived chats instead of at every call site.
-pub(all) struct SectionList {
-  section : Section
-  entries : Array[Entry]
-}
-
-///|
-pub fn SectionList::render(self : SectionList) -> Array[@html.Html] {
-  let rows : Array[@html.Html] = [self.section.render()]
-  if !self.section.collapsed {
-    for entry in self.entries {
-      rows.push(entry.render())
+    footer.push(
+      @html.button(
+        class=if input.skills_active {
+          "sidebar-button active"
+        } else {
+          "sidebar-button"
+        },
+        on_click=actions.open_skills,
+        [
+          @html.span(class="sidebar-icon", @icons.icon(@icons.icon_extensions)),
+          @html.span(class="sidebar-label", "Skills"),
+        ],
+      ),
+    )
+    footer.push(
+      @html.button(
+        class=if input.settings_active {
+          "sidebar-button active"
+        } else {
+          "sidebar-button"
+        },
+        on_click=actions.open_settings,
+        [
+          @html.span(
+            class="sidebar-icon",
+            @icons.icon(@icons.icon_settings_gear),
+          ),
+          @html.span(class="sidebar-label", "Settings"),
+        ],
+      ),
+    )
+    if input.account is Some(account) {
+      let account_row : Array[@html.Html] = []
+      if !account.avatar.is_empty() {
+        account_row.push(
+          @html.img(
+            class="console-avatar",
+            src=account.avatar,
+            alt=account.login,
+          ),
+        )
+      }
+      account_row.push(@html.span(class="console-login", "@\{account.login}"))
+      account_row.push(
+        @html.button(
+          class="console-account-action",
+          disabled=account.busy,
+          title="Refresh the device list",
+          on_click=actions.refresh_account,
+          "Refresh",
+        ),
+      )
+      account_row.push(
+        @html.button(
+          class="console-account-action",
+          disabled=account.busy,
+          on_click=actions.sign_out,
+          "Sign out",
+        ),
+      )
+      footer.push(@html.div(class="console-account", account_row))
+      if account.notice is Some(notice) {
+        footer.push(@html.div(class="console-notice", notice))
+      }
     }
-  }
-  rows
-}
-
-///|
-/// The sidebar's peer sections in display order. Every source contributes
-/// section data; this value owns their flattening into the one scroll lane.
-pub(all) struct SidebarList {
-  sections : Array[SectionList]
-}
-
-///|
-pub fn SidebarList::render(self : SidebarList) -> Array[@html.Html] {
-  let rows : Array[@html.Html] = []
-  for section in self.sections {
-    for row in section.render() {
-      rows.push(row)
-    }
-  }
-  rows
+    @html.aside([
+      @html.div(class="sidebar-header", [
+        @html.button(
+          class="topbar-toggle",
+          title="Hide sidebar",
+          on_click=actions.toggle,
+          @icons.icon(@icons.icon_layout_sidebar_left),
+        ),
+        @html.button(
+          class="topbar-toggle header-new-chat",
+          title="New chat",
+          on_click=actions.new_chat,
+          @icons.icon(@icons.icon_add),
+        ),
+      ]),
+      @html.div(class="sidebar-main", [
+        @html.div(class="sidebar-section sessions", rows),
+      ]),
+      @html.div(class="sidebar-footer", footer),
+    ])
+  })
 }

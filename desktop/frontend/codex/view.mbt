@@ -201,75 +201,6 @@ fn CodexPendingRequest::view(
 }
 
 ///|
-/// Shell-owned navigation commands passed into the Codex sidebar. They are
-/// view inputs, never model state, and keep this package independent from the
-/// root frontend's Screen and Msg types.
-pub(all) struct SidebarActions {
-  selected : Bool
-  open : @cmd.Cmd
-  start_thread : (String) -> @cmd.Cmd
-  open_thread : (String) -> @cmd.Cmd
-  archive_thread : (String) -> @cmd.Cmd
-  unarchive_thread : (String) -> @cmd.Cmd
-  project_registered : (String) -> Bool
-  project_collapsed : (String) -> Bool
-  toggle_project : (String) -> @cmd.Cmd
-  project_expanded : (String) -> Bool
-  show_more_project : (String) -> @cmd.Cmd
-  project_menu : (String) -> @sidebar.WorkspaceMenu?
-  project_label : (String) -> String
-}
-
-///|
-fn SidebarActions::workspace_row(
-  self : SidebarActions,
-  project : String,
-  label : String,
-  active : Bool,
-  can_start : Bool,
-) -> @sidebar.WorkspaceRow {
-  let actions : Array[@sidebar.WorkspaceAction] = []
-  if can_start {
-    actions.push({
-      title: "New Codex conversation in this workspace",
-      command: (self.start_thread)(project),
-      image: @icons.icon_add,
-    })
-  }
-  {
-    title: project,
-    label,
-    active,
-    disclosure: Some({
-      collapsed: (self.project_collapsed)(project),
-      toggle: (self.toggle_project)(project),
-    }),
-    menu: (self.project_menu)(project),
-    actions,
-  }
-}
-
-///|
-fn SidebarActions::draft_row(
-  self : SidebarActions,
-  title : String,
-  nested : Bool,
-) -> @sidebar.ConversationRow {
-  {
-    title,
-    label: "New Codex thread",
-    open: self.open,
-    nested,
-    subrun: false,
-    active: self.selected,
-    running: false,
-    subruns: @sidebar.NoSubruns,
-    status: [],
-    archive: None,
-  }
-}
-
-///|
 /// The native Codex boundary resolves every linked worktree to its main local
 /// checkout. That project root, never the exact thread cwd, is the grouping
 /// identity used by the sidebar.
@@ -317,155 +248,6 @@ fn CodexProject::is_separator(self : CodexProject, index : Int) -> Bool {
 }
 
 ///|
-/// Codex contributes only its project and conversation rows to OpenSeek's
-/// global sidebar. Only roots registered in OpenSeek's Projects catalog own a
-/// project row; an arbitrary Codex cwd remains a direct conversation row. Git
-/// worktrees are execution locations, not navigation groups: all conversations
-/// belonging to one registered main project appear below that project row.
-pub fn State::sidebar_entries(
-  self : State,
-  actions : SidebarActions,
-) -> Array[@sidebar.Entry] {
-  let rows : Array[@sidebar.Entry] = []
-  let projects : Array[CodexProject] = []
-  for thread in self.threads {
-    if thread.project_key() is Some(project) &&
-      (actions.project_registered)(project.0) &&
-      !projects.contains(project) {
-      // Preserve app-server list order: the project containing the newest
-      // visible thread appears first, and threads stay newest-first inside it.
-      projects.push(project)
-    }
-  }
-  if self.active_draft() is Some(draft) {
-    let root = draft.project_root.unwrap_or(draft.cwd).trim().to_owned()
-    let project = CodexProject(root)
-    if !root.is_empty() &&
-      (actions.project_registered)(root) &&
-      !projects.contains(project) {
-      projects.push(project)
-    }
-  }
-  for project in projects {
-    let active = actions.selected &&
-      (match self.selection {
-        CodexDraftTask(draft) =>
-          CodexProject(
-            draft.project_root.unwrap_or(draft.cwd).trim().to_owned(),
-          ) ==
-          project
-        CodexStoredTask(thread) =>
-          thread.project_root
-          .map(root => CodexProject(root.trim().to_owned()) == project)
-          .unwrap_or(false)
-        CodexNoTask => false
-      })
-    let conversations : Array[@sidebar.ConversationRow] = []
-    if self.active_draft() is Some(draft) &&
-      CodexProject(draft.project_root.unwrap_or(draft.cwd).trim().to_owned()) ==
-      project {
-      conversations.push(actions.draft_row(draft.cwd, true))
-    }
-    for thread in self.threads {
-      if thread.project_key() == Some(project) {
-        conversations.push(thread.sidebar_row(self, actions, true))
-      }
-    }
-    let group = @sidebar.WorkspaceGroup::{
-      workspace: actions.workspace_row(
-        project.0,
-        project.display_label(projects, actions.project_label),
-        active,
-        self.can_start_thread(),
-      ),
-      conversations,
-      empty: None,
-      expanded: (actions.project_expanded)(project.0),
-      show_more: (actions.show_more_project)(project.0),
-    }
-    for entry in group.entries() {
-      rows.push(entry)
-    }
-  }
-  let loose = self.threads.filter(thread => {
-    thread
-    .project_key()
-    .map(project => !(actions.project_registered)(project.0))
-    .unwrap_or(true)
-  })
-  let loose_draft = self
-    .active_draft()
-    .filter(draft => {
-      let root = draft.project_root.unwrap_or(draft.cwd).trim().to_owned()
-      root.is_empty() || !(actions.project_registered)(root)
-    })
-  if loose_draft is Some(draft) {
-    rows.push(@sidebar.Conversation(actions.draft_row(draft.id, false)))
-  }
-  for thread in loose {
-    rows.push(@sidebar.Conversation(thread.sidebar_row(self, actions, false)))
-  }
-  if self.threads.is_empty() && self.active_draft() is None {
-    let empty = match self.connection {
-      CodexStarting => "Loading Codex conversations…"
-      CodexUnavailable(_) => "Codex is unavailable"
-      CodexReady =>
-        if self.account is CodexSignedOut(_) {
-          "Sign in to list Codex conversations"
-        } else {
-          "No Codex conversations yet"
-        }
-    }
-    rows.push(
-      @sidebar.Placeholder({
-        label: empty,
-        class_name: "codex-placeholder",
-        nested: false,
-        open: Some(actions.open),
-      }),
-    )
-  }
-  rows
-}
-
-///|
-/// Codex archived tasks join OpenSeek's existing Archived chats section. They
-/// stay non-selectable until restored because the live Codex page owns writer
-/// and composer state only for active app-server threads.
-pub fn State::archived_sidebar_entries(
-  self : State,
-  actions : SidebarActions,
-) -> Array[@sidebar.Entry] {
-  self.archived_threads.map(thread => {
-    @sidebar.Custom(thread.archived_sidebar_row(actions))
-  })
-}
-
-///|
-fn CodexThreadRow::archived_sidebar_row(
-  self : CodexThreadRow,
-  actions : SidebarActions,
-) -> @html.Html {
-  @html.div(
-    class="conversation-row archived codex-archived",
-    title=self.cwd.unwrap_or(self.title),
-    [
-      @html.span(class="sidebar-label", self.title),
-      @html.button(
-        class="row-archive",
-        type_="button",
-        title="Restore this Codex conversation to the sidebar",
-        attrs=@html.Attrs::build().on_click(event => {
-          event.stop_propagation()
-          (actions.unarchive_thread)(self.id)
-        }),
-        @icons.icon(@icons.icon_arrow_up),
-      ),
-    ],
-  )
-}
-
-///|
 /// A missing project root means the thread cwd was absent or its deleted
 /// worktree could no longer be resolved. Keep those records together instead
 /// of promoting an opaque worktree directory into a project row.
@@ -484,41 +266,216 @@ fn CodexThreadRow::project_key(self : CodexThreadRow) -> CodexProject? {
 }
 
 ///|
-/// Supply one Codex task's state and commands to the shared conversation row.
-/// The sidebar package owns DOM order, disclosure geometry, and trailing
-/// action behavior; this adapter supplies only task-specific state.
-fn CodexThreadRow::sidebar_row(
+/// Read-only catalog facts used while translating Codex tasks into the plain,
+/// comparable inputs consumed by the Rabbita sidebar components. Commands are
+/// intentionally absent; component actions are wired once by the app root.
+pub(all) struct SidebarInputContext {
+  channel : String
+  selected : Bool
+  project_registered : (String) -> Bool
+  project_label : (String) -> String
+}
+
+///|
+fn SidebarInputContext::draft_input(
+  self : SidebarInputContext,
+  title : String,
+  id : String,
+  nested : Bool,
+) -> @conversation.Input {
+  {
+    id: @conversation.Id(
+      source="codex.draft",
+      channel=self.channel,
+      conversation=id,
+    ),
+    title,
+    label: "New Codex thread",
+    nested,
+    subrun: false,
+    active: self.selected,
+    running: false,
+    openable: true,
+    worktree: None,
+    run_mark: @conversation.NoRunMark,
+    trailing: @conversation.NoTrailingAction,
+    children: [],
+  }
+}
+
+///|
+fn CodexThreadRow::sidebar_input(
   self : CodexThreadRow,
   state : State,
-  actions : SidebarActions,
+  context : SidebarInputContext,
   nested : Bool,
-) -> @sidebar.ConversationRow {
-  let selected = actions.selected &&
+) -> @conversation.Input {
+  let selected = context.selected &&
     state.active_thread().map(item => item.id == self.id).unwrap_or(false)
   let running = selected && state.is_running()
-  let status : Array[@html.Html] = []
-  if running {
-    status.push(@html.span(class="run-dot accent pulse", ""))
-  }
   {
+    id: @conversation.Id(
+      source="codex.live",
+      channel=context.channel,
+      conversation=self.id,
+    ),
     title: self.cwd.unwrap_or(self.title),
     label: self.title,
-    open: (actions.open_thread)(self.id),
     nested,
     subrun: false,
     active: selected,
     running,
-    subruns: @sidebar.NoSubruns,
-    status,
-    archive: if running {
-      None
+    openable: true,
+    worktree: None,
+    run_mark: if running {
+      @conversation.RunningMark
     } else {
-      Some({
-        title: "Archive Codex conversation",
-        command: (actions.archive_thread)(self.id),
-      })
+      @conversation.NoRunMark
     },
+    trailing: if running {
+      @conversation.NoTrailingAction
+    } else {
+      @conversation.Archive(title="Archive Codex conversation")
+    },
+    children: [],
   }
+}
+
+///|
+/// Codex contributes only data to the sidebar component tree. Project,
+/// conversation, and preview state are created later by their keyed Rabbita
+/// branches, so this adapter cannot accidentally share state with OpenSeek.
+pub fn State::sidebar_component_entries(
+  self : State,
+  context : SidebarInputContext,
+) -> Array[@section.Entry] {
+  let rows : Array[@section.Entry] = []
+  let projects : Array[CodexProject] = []
+  for thread in self.threads {
+    if thread.project_key() is Some(project) &&
+      (context.project_registered)(project.0) &&
+      !projects.contains(project) {
+      projects.push(project)
+    }
+  }
+  if self.active_draft() is Some(draft) {
+    let root = draft.project_root.unwrap_or(draft.cwd).trim().to_owned()
+    let project = CodexProject(root)
+    if !root.is_empty() &&
+      (context.project_registered)(root) &&
+      !projects.contains(project) {
+      projects.push(project)
+    }
+  }
+  for project in projects {
+    let active = context.selected &&
+      (match self.selection {
+        CodexDraftTask(draft) =>
+          CodexProject(
+            draft.project_root.unwrap_or(draft.cwd).trim().to_owned(),
+          ) ==
+          project
+        CodexStoredTask(thread) =>
+          thread.project_root
+          .map(root => CodexProject(root.trim().to_owned()) == project)
+          .unwrap_or(false)
+        CodexNoTask => false
+      })
+    let conversations : Array[@conversation.Input] = []
+    if self.active_draft() is Some(draft) &&
+      CodexProject(draft.project_root.unwrap_or(draft.cwd).trim().to_owned()) ==
+      project {
+      conversations.push(context.draft_input(draft.cwd, draft.id, true))
+    }
+    for thread in self.threads {
+      if thread.project_key() == Some(project) {
+        conversations.push(thread.sidebar_input(self, context, true))
+      }
+    }
+    rows.push(
+      @section.Project({
+        id: @project.Id(source="codex", channel=context.channel, root=project.0),
+        title: project.0,
+        label: project.display_label(projects, context.project_label),
+        active,
+        can_start: self.can_start_thread(),
+        managed: (context.project_registered)(project.0),
+        conversations,
+        empty_label: None,
+      }),
+    )
+  }
+  let loose = self.threads.filter(thread => {
+    thread
+    .project_key()
+    .map(project => !(context.project_registered)(project.0))
+    .unwrap_or(true)
+  })
+  let loose_draft = self
+    .active_draft()
+    .filter(draft => {
+      let root = draft.project_root.unwrap_or(draft.cwd).trim().to_owned()
+      root.is_empty() || !(context.project_registered)(root)
+    })
+  if loose_draft is Some(draft) {
+    rows.push(
+      @section.Conversation(context.draft_input(draft.cwd, draft.id, false)),
+    )
+  }
+  for thread in loose {
+    rows.push(@section.Conversation(thread.sidebar_input(self, context, false)))
+  }
+  if self.threads.is_empty() && self.active_draft() is None {
+    let empty = match self.connection {
+      CodexStarting => "Loading Codex conversations…"
+      CodexUnavailable(_) => "Codex is unavailable"
+      CodexReady =>
+        if self.account is CodexSignedOut(_) {
+          "Sign in to list Codex conversations"
+        } else {
+          "No Codex conversations yet"
+        }
+    }
+    rows.push(
+      @section.Placeholder({
+        id: "codex.empty",
+        label: empty,
+        class_name: "codex-placeholder",
+        nested: false,
+        openable: true,
+      }),
+    )
+  }
+  rows
+}
+
+///|
+pub fn State::archived_sidebar_component_entries(
+  self : State,
+  channel : String,
+) -> Array[@section.Entry] {
+  self.archived_threads.map(thread => {
+    @section.Conversation({
+      id: @conversation.Id(
+        source="codex.archived",
+        channel~,
+        conversation=thread.id,
+      ),
+      title: thread.cwd.unwrap_or(thread.title),
+      label: thread.title,
+      nested: false,
+      subrun: false,
+      active: false,
+      running: false,
+      openable: false,
+      worktree: None,
+      run_mark: @conversation.NoRunMark,
+      trailing: @conversation.Restore(
+        title="Restore this Codex conversation to the sidebar",
+      ),
+      children: [],
+    })
+  })
 }
 
 ///|
@@ -947,27 +904,17 @@ test "Codex archived catalog contributes restore rows" {
     { "data": [{ "id": "thread-archived", "preview": "Archived task" }] },
     true,
   )
-  let rows = state.archived_sidebar_entries({
-    selected: false,
-    open: @cmd.none,
-    start_thread: _ => @cmd.none,
-    open_thread: _ => @cmd.none,
-    archive_thread: _ => @cmd.none,
-    unarchive_thread: _ => @cmd.none,
-    project_registered: _ => false,
-    project_collapsed: _ => false,
-    toggle_project: _ => @cmd.none,
-    project_expanded: _ => false,
-    show_more_project: _ => @cmd.none,
-    project_menu: _ => None,
-    project_label: path => path,
-  })
+  let rows = state.archived_sidebar_component_entries("local")
   assert_eq(rows.length(), 1)
-  assert_true(rows[0] is @sidebar.Custom(_))
+  guard rows[0] is @section.Conversation(row) else {
+    fail("expected archived conversation component input")
+  }
+  assert_eq(row.id().source(), "codex.archived")
+  assert_true(row.trailing is @conversation.Restore(_))
 }
 
 ///|
-test "Codex projects use the shared compact conversation preview" {
+test "Codex projects supply the complete list to the shared preview component" {
   let data : Array[Json] = []
   for number = 1; number <= 6; number = number + 1 {
     data.push({
@@ -978,58 +925,16 @@ test "Codex projects use the shared compact conversation preview" {
     })
   }
   let state = State().with_threads({ "data": data }, false)
-  let collapsed = state.sidebar_entries({
+  let rows = state.sidebar_component_entries({
+    channel: "local",
     selected: true,
-    open: @cmd.none,
-    start_thread: _ => @cmd.none,
-    open_thread: _ => @cmd.none,
-    archive_thread: _ => @cmd.none,
-    unarchive_thread: _ => @cmd.none,
     project_registered: _ => true,
-    project_collapsed: _ => false,
-    toggle_project: _ => @cmd.none,
-    project_expanded: _ => false,
-    show_more_project: _ => @cmd.none,
-    project_menu: _ => None,
     project_label: _ => "openseek",
   })
-  let mut collapsed_conversations = 0
-  let mut collapsed_show_more = false
-  for entry in collapsed {
-    match entry {
-      @sidebar.Conversation(_) =>
-        collapsed_conversations = collapsed_conversations + 1
-      @sidebar.Custom(_) => collapsed_show_more = true
-      _ => ()
-    }
+  assert_eq(rows.length(), 1)
+  guard rows[0] is @section.Project(project) else {
+    fail("expected one Codex project component input")
   }
-  assert_eq(collapsed_conversations, 5)
-  assert_true(collapsed_show_more)
-  let expanded = state.sidebar_entries({
-    selected: true,
-    open: @cmd.none,
-    start_thread: _ => @cmd.none,
-    open_thread: _ => @cmd.none,
-    archive_thread: _ => @cmd.none,
-    unarchive_thread: _ => @cmd.none,
-    project_registered: _ => true,
-    project_collapsed: _ => false,
-    toggle_project: _ => @cmd.none,
-    project_expanded: _ => true,
-    show_more_project: _ => @cmd.none,
-    project_menu: _ => None,
-    project_label: _ => "openseek",
-  })
-  let mut expanded_conversations = 0
-  let mut expanded_show_more = false
-  for entry in expanded {
-    match entry {
-      @sidebar.Conversation(_) =>
-        expanded_conversations = expanded_conversations + 1
-      @sidebar.Custom(_) => expanded_show_more = true
-      _ => ()
-    }
-  }
-  assert_eq(expanded_conversations, 6)
-  assert_false(expanded_show_more)
+  assert_eq(project.id().source(), "codex")
+  assert_eq(project.conversations.length(), 6)
 }

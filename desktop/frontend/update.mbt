@@ -435,13 +435,6 @@ fn adopt_projects(
     }),
     conversations,
     loading_conversation,
-    // A detached workspace takes its open "…" menu and its settings page
-    // with it; both address a row that no longer exists.
-    project_menu: match model.project_menu {
-      Some(menu) if menu.channel == channel && !paths.contains(menu.project) =>
-        None
-      menu => menu
-    },
     screen: match model.screen {
       WorkspaceSettings(channel=owner, workspace~) if owner == channel &&
         !paths.contains(workspace) => Chat
@@ -2793,7 +2786,6 @@ fn update_msg(
           ..model,
           screen: Codex,
           sidebar_open: model.sidebar_open && !model.narrow,
-          codex_collapsed: false,
           codex,
         },
       )
@@ -2813,29 +2805,24 @@ fn update_msg(
           None => ""
         }
       }
-      let model = model.with_project_expanded_for_path(model.focused, cwd)
       (
         CodexDraftRotation::{ cwd, }.rotate(dispatch),
         {
           ..model,
           screen: Codex,
           sidebar_open: model.sidebar_open && !model.narrow,
-          codex_collapsed: false,
         },
       )
     }
-    CodexNewThreadIn(cwd) => {
-      let model = model.with_project_expanded_for_path(model.focused, cwd)
+    CodexNewThreadIn(cwd) =>
       (
         CodexDraftRotation::{ cwd, }.rotate(dispatch),
         {
           ..model,
           screen: Codex,
           sidebar_open: model.sidebar_open && !model.narrow,
-          codex_collapsed: false,
         },
       )
-    }
     CodexDraftRotated(cwd~, id~) => {
       let (cmd, codex) = @codex.update(
         dispatch.map(msg => Codex(msg)),
@@ -2850,7 +2837,6 @@ fn update_msg(
           ..model,
           screen: Codex,
           sidebar_open: model.sidebar_open && !model.narrow,
-          codex_collapsed: false,
           codex,
         },
       )
@@ -2869,7 +2855,6 @@ fn update_msg(
           ..model,
           screen: Codex,
           sidebar_open: model.sidebar_open && !model.narrow,
-          codex_collapsed: false,
           codex,
         },
       )
@@ -2932,56 +2917,6 @@ fn update_msg(
         // default: an open column on wide, a closed drawer on narrow.
         (cmd, { ..model, narrow, sidebar_open: !narrow })
       }
-    }
-    ToggleChatsSection =>
-      (@cmd.none, { ..model, chats_collapsed: !model.chats_collapsed })
-    ToggleProjectsSection =>
-      (@cmd.none, { ..model, projects_collapsed: !model.projects_collapsed })
-    ToggleProjectSection(channel, project) => {
-      guard @resource.belongs_to(project, channel) else {
-        return (@cmd.none, model)
-      }
-      let collapsed_projects = if model.project_collapsed(channel, project) {
-        model.collapsed_projects.filter(entry => {
-          !(entry.0 == channel && entry.1 == project)
-        })
-      } else {
-        [..model.collapsed_projects, (channel, project)]
-      }
-      (@cmd.none, { ..model, collapsed_projects, project_menu: None })
-    }
-    ShowMoreProjectChats(channel, project) => {
-      guard @resource.belongs_to(project, channel) &&
-        !model.project_chats_expanded(channel, project) else {
-        return (@cmd.none, model)
-      }
-      (
-        @cmd.none,
-        {
-          ..model,
-          expanded_project_chats: [
-            ..model.expanded_project_chats,
-            (channel, project),
-          ],
-        },
-      )
-    }
-    ToggleCodexSection =>
-      (@cmd.none, { ..model, codex_collapsed: !model.codex_collapsed })
-    ToggleArchivedChatsSection =>
-      (
-        @cmd.none,
-        { ..model, archived_chats_collapsed: !model.archived_chats_collapsed },
-      )
-    ToggleSubruns(channel, session_id) => {
-      let expanded = if model.subruns_expanded(channel, session_id) {
-        model.expanded_subruns.filter(entry => {
-          !(entry.0 == channel && entry.1 == session_id)
-        })
-      } else {
-        [..model.expanded_subruns, (channel, session_id)]
-      }
-      (@cmd.none, { ..model, expanded_subruns: expanded })
     }
     SaveApiKey => {
       guard model.host_settings_loaded() else { return (@cmd.none, model) }
@@ -3124,22 +3059,9 @@ fn update_msg(
         return (@cmd.none, model)
       }
       let (focus_cmd, model) = focus_channel(dispatch, model, channel)
-      let collapsed_projects = match workspace {
-        Some(project) =>
-          model.collapsed_projects.filter(entry => {
-            !(entry.0 == channel && entry.1 == project)
-          })
-        None => model.collapsed_projects
-      }
       (
         @cmd.batch([focus_cmd, rotate_session(dispatch, channel)]),
-        {
-          ..model.with_active_project(workspace),
-          loading_conversation: None,
-          chats_collapsed: model.chats_collapsed && workspace is Some(_),
-          projects_collapsed: model.projects_collapsed && workspace is None,
-          collapsed_projects,
-        },
+        { ..model.with_active_project(workspace), loading_conversation: None },
       )
     }
     ToggleWorktreeMode => {
@@ -3388,48 +3310,12 @@ fn update_msg(
     ProjectPickerClose => (@cmd.none, { ..model, project_picker: None })
     RemoveProject(channel, path) =>
       if @resource.belongs_to(path, channel) {
-        // Close the row's menu with the click that acted from it; the row
-        // itself leaves with the registry commit broadcast.
-        (
-          remove_project(dispatch, channel, path.path),
-          {
-            ..model,
-            project_menu: None,
-            collapsed_projects: model.collapsed_projects.filter(entry => {
-              !(entry.0 == channel && entry.1 == path)
-            }),
-            expanded_project_chats: model.expanded_project_chats.filter(entry => {
-              !(entry.0 == channel && entry.1 == path)
-            }),
-          },
-        )
+        (remove_project(dispatch, channel, path.path), model)
       } else {
         (@cmd.none, model)
       }
-    ToggleProjectMenu(channel, project) => {
-      let menu : ProjectMenu = { channel, project }
-      (
-        @cmd.none,
-        {
-          ..model,
-          project_menu: if model.project_menu == Some(menu) {
-            None
-          } else {
-            Some(menu)
-          },
-        },
-      )
-    }
-    CloseProjectMenu => (@cmd.none, { ..model, project_menu: None })
     OpenWorkspaceSettings(channel, workspace) =>
-      (
-        @cmd.none,
-        {
-          ..model,
-          screen: WorkspaceSettings(channel~, workspace~),
-          project_menu: None,
-        },
-      )
+      (@cmd.none, { ..model, screen: WorkspaceSettings(channel~, workspace~) })
     WorkspaceDefaultModeChosen(channel, workspace, value) => {
       guard model.device_state(channel) is Some(dev) else {
         return (@cmd.none, model)
@@ -7002,130 +6888,6 @@ test "sub-run completion reports only abnormal terminal status" {
     failed.overlay.map(notice => notice.content).join("; "),
     content="review sr-2: failed · 4 step(s) · 901 tok",
   )
-}
-
-///|
-test "a conversation's sub-run twisty toggles only its own row" {
-  let dispatch = test_dispatch()
-  let model = test_model()
-  assert_false(model.subruns_expanded(Local, "a"))
-  let (_, opened) = update(dispatch, ToggleSubruns(Local, "a"), model)
-  assert_true(opened.subruns_expanded(Local, "a"))
-  // A neighbour, and the same id on another device, stay folded: the state
-  // is keyed by both halves.
-  assert_false(opened.subruns_expanded(Local, "b"))
-  assert_false(opened.subruns_expanded(Remote("dev"), "a"))
-  let (_, closed) = update(dispatch, ToggleSubruns(Local, "a"), opened)
-  assert_false(closed.subruns_expanded(Local, "a"))
-}
-
-///|
-test "project disclosure and chat preview state are scoped to one project" {
-  let dispatch = test_dispatch()
-  let project = @interop.ChannelId::Local.test_resource("/work/alpha")
-  let neighbour = @interop.ChannelId::Local.test_resource("/work/beta")
-  let model = test_model()
-  assert_false(model.project_collapsed(Local, project))
-  assert_false(model.project_chats_expanded(Local, project))
-  let (_, collapsed) = update(
-    dispatch,
-    ToggleProjectSection(Local, project),
-    model,
-  )
-  assert_true(collapsed.project_collapsed(Local, project))
-  assert_false(collapsed.project_collapsed(Local, neighbour))
-  assert_false(collapsed.project_collapsed(Remote("dev"), project))
-  let (_, expanded) = update(
-    dispatch,
-    ShowMoreProjectChats(Local, project),
-    collapsed,
-  )
-  assert_true(expanded.project_chats_expanded(Local, project))
-  assert_false(expanded.project_chats_expanded(Local, neighbour))
-  let (_, reopened) = update(
-    dispatch,
-    ToggleProjectSection(Local, project),
-    expanded,
-  )
-  assert_false(reopened.project_collapsed(Local, project))
-  assert_true(reopened.project_chats_expanded(Local, project))
-}
-
-///|
-test "new project conversations unfold their project and section" {
-  let dispatch = test_dispatch()
-  let project = @interop.ChannelId::Local.test_resource("/work/alpha")
-  let model = {
-    ..test_model(),
-    projects_collapsed: true,
-    collapsed_projects: [(Local, project)],
-  }
-  let (_, opened) = update(dispatch, NewChatIn(Local, Some(project)), model)
-  assert_false(opened.projects_collapsed)
-  assert_false(opened.project_collapsed(Local, project))
-  let (_, codex_opened) = update(
-    dispatch,
-    CodexNewThreadIn(project.path),
-    model,
-  )
-  assert_false(codex_opened.codex_collapsed)
-  assert_false(codex_opened.project_collapsed(Local, project))
-}
-
-///|
-test "sidebar peer sections fold independently and purely" {
-  let dispatch = test_dispatch()
-  let model = test_model()
-
-  let (_, projects) = update(dispatch, ToggleProjectsSection, model)
-  let (_, projects_again) = update(dispatch, ToggleProjectsSection, model)
-  assert_true(projects.projects_collapsed)
-  @debug.assert_eq(
-    projects.projects_collapsed,
-    projects_again.projects_collapsed,
-  )
-  assert_false(projects.codex_collapsed)
-  assert_false(projects.chats_collapsed)
-  assert_true(projects.archived_chats_collapsed)
-  let (_, projects_open) = update(dispatch, ToggleProjectsSection, projects)
-  assert_false(projects_open.projects_collapsed)
-
-  let (_, codex) = update(dispatch, ToggleCodexSection, model)
-  let (_, codex_again) = update(dispatch, ToggleCodexSection, model)
-  assert_true(codex.codex_collapsed)
-  @debug.assert_eq(codex.codex_collapsed, codex_again.codex_collapsed)
-  assert_false(codex.projects_collapsed)
-  assert_false(codex.chats_collapsed)
-  assert_true(codex.archived_chats_collapsed)
-  let (_, codex_open) = update(dispatch, ToggleCodexSection, codex)
-  assert_false(codex_open.codex_collapsed)
-
-  let (_, chats) = update(dispatch, ToggleChatsSection, model)
-  let (_, chats_again) = update(dispatch, ToggleChatsSection, model)
-  assert_true(chats.chats_collapsed)
-  @debug.assert_eq(chats.chats_collapsed, chats_again.chats_collapsed)
-  assert_false(chats.projects_collapsed)
-  assert_false(chats.codex_collapsed)
-  assert_true(chats.archived_chats_collapsed)
-  let (_, chats_open) = update(dispatch, ToggleChatsSection, chats)
-  assert_false(chats_open.chats_collapsed)
-
-  let (_, archived) = update(dispatch, ToggleArchivedChatsSection, model)
-  let (_, archived_again) = update(dispatch, ToggleArchivedChatsSection, model)
-  assert_false(archived.archived_chats_collapsed)
-  @debug.assert_eq(
-    archived.archived_chats_collapsed,
-    archived_again.archived_chats_collapsed,
-  )
-  assert_false(archived.projects_collapsed)
-  assert_false(archived.codex_collapsed)
-  assert_false(archived.chats_collapsed)
-  let (_, archived_closed) = update(
-    dispatch,
-    ToggleArchivedChatsSection,
-    archived,
-  )
-  assert_true(archived_closed.archived_chats_collapsed)
 }
 
 ///|
@@ -15879,16 +15641,10 @@ test "Codex sidebar selection uses the main conversation screen" {
       "turns": [],
     },
   })
-  let wide = {
-    ..test_model(),
-    codex,
-    sidebar_open: true,
-    codex_collapsed: true,
-  }
+  let wide = { ..test_model(), codex, sidebar_open: true }
   let (_, opened) = update(dispatch, CodexOpenThread("codex-thread-1"), wide)
   assert_true(opened.screen is Codex)
   assert_true(opened.sidebar_open)
-  assert_false(opened.codex_collapsed)
   assert_true(opened.codex.active_id() is Some("codex-thread-1"))
   assert_true(
     opened.file_panel.owner
@@ -15963,17 +15719,14 @@ test "Codex sidebar actions close only the narrow drawer" {
     narrow: true,
     sidebar_open: true,
     screen: Chat,
-    codex_collapsed: true,
   }
   let (_, opened) = update(dispatch, OpenCodex, narrow)
   assert_true(opened.screen is Codex)
   assert_false(opened.sidebar_open)
-  assert_false(opened.codex_collapsed)
 
   let (_, creating) = update(dispatch, CodexNewThread, narrow)
   assert_true(creating.screen is Codex)
   assert_false(creating.sidebar_open)
-  assert_false(creating.codex_collapsed)
 
   // Archiving from the shared sidebar acts on that row without changing the
   // OpenSeek conversation currently occupying the main pane.

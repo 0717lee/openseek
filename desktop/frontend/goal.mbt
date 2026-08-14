@@ -853,7 +853,6 @@ test "archiving carries no goal the record already confirmed" {
 ///|
 #warnings("-alert_unstable")
 test "a kept goal draft is a conversation you can get back to" {
-  let dispatch = test_dispatch()
   // Retention without a row does not save the draft, it strands it: the
   // conversation lives on with no way to reach it again. Retention and the
   // sidebar therefore ask one predicate, not two.
@@ -875,19 +874,13 @@ test "a kept goal draft is a conversation you can get back to" {
       active_session: "desktop-test",
     }
     guard model.focused_device() is Some(dev) else { fail("no device") }
-    let rows : Array[@sidebar.ConversationRow] = []
-    let _ = model.push_group_conversations(
-      rows,
-      dispatch,
-      dev,
-      None,
-      listed=_ => false,
-      archived=_ => false,
-    )
-    let markup = @rabbita.render_to_string(() => {
-      @rabbita.Val::constant(@html.div(rows.map(row => row.render())))
+    let rows : Array[@conversation.Input] = []
+    model.push_group_component_inputs(rows, dev, None, listed=_ => false, archived=_ => {
+      false
     })
-    assert_true(markup.contains("desktop-fresh"))
+    assert_true(
+      rows.iter().any(row => row.id().conversation() == "desktop-fresh"),
+    )
   }
 }
 
