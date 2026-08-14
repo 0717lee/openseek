@@ -6,6 +6,7 @@ import {
   "moonbit-community/rabbita/html",
   "moonbitlang/editor/base/common",
   "openseek_desktop/frontend/interop",
+  "openseek_desktop/frontend/sidebar",
   "openseek_desktop/frontend/transcript",
 }
 
@@ -44,8 +45,6 @@ pub(all) struct SidebarActions {
   open_thread : (String) -> @cmd.Cmd
   archive_thread : (String) -> @cmd.Cmd
   project_label : (String) -> String
-  workspace_row : (String, String, Bool, @cmd.Cmd?) -> @html.Html
-  conversation_row : (String, String, Bool, Bool, @cmd.Cmd, @cmd.Cmd?) -> @html.Html
 }
 
 type State derive(Eq)
@@ -60,7 +59,7 @@ pub fn State::has_active(Self) -> Bool
 pub fn State::new_thread_cwd(Self) -> String
 pub fn State::page(Self, @cmd.Emit[Msg], @interop.ChannelId, Bool, Bool, Bool, PageActions) -> Array[@html.Html]
 pub fn State::refresh(Self, @cmd.Emit[Msg], @interop.ChannelId) -> @cmd.Cmd
-pub fn State::sidebar_rows(Self, SidebarActions) -> Array[@html.Html]
+pub fn State::sidebar_entries(Self, SidebarActions) -> Array[@sidebar.Entry]
 pub fn State::transcript_items(Self) -> Array[@transcript.TranscriptItem]
 pub fn State::with_editor_comment(Self, String, @common.Range, String, String) -> Self
 pub fn State::with_git_details_closed(Self) -> Self

@@ -10,8 +10,6 @@ using @icons {
   icon_folder,
   icon_layout_sidebar_left,
   icon_layout_sidebar_right,
-  icon_link_external,
-  icon_pull_request,
   icon_terminal,
   icon_worktree,
 }

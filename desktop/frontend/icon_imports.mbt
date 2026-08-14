@@ -18,7 +18,6 @@ using @icons {
   icon_layout_sidebar_right,
   icon_link_external,
   icon_package,
-  icon_pull_request,
   icon_search,
   icon_settings_gear,
   icon_sparkle,

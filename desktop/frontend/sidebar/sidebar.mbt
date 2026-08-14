@@ -184,24 +184,35 @@ pub(all) struct WorkspaceMenu {
 }
 
 ///|
+/// Optional folder disclosure. OpenSeek project rows own one because their
+/// chat previews fold independently; Codex workspace rows omit it because
+/// they are labels, not another collapsible navigation level.
+pub(all) struct WorkspaceDisclosure {
+  collapsed : Bool
+  toggle : @cmd.Cmd
+}
+
+///|
 /// A folder row shared by workspace-like conversation groups. The owner
 /// supplies actions, while this package keeps geometry and action slots equal.
 pub(all) struct WorkspaceRow {
   title : String
   label : String
   active : Bool
-  collapsed : Bool
-  toggle : @cmd.Cmd
+  disclosure : WorkspaceDisclosure?
   menu : WorkspaceMenu?
   actions : Array[WorkspaceAction]
 }
 
 ///|
 pub fn WorkspaceRow::render(self : WorkspaceRow) -> @html.Html {
-  let mut class = if self.collapsed {
-    "workspace-row collapsible collapsed"
-  } else {
-    "workspace-row collapsible"
+  let mut class = "workspace-row"
+  if self.disclosure is Some(disclosure) {
+    class = if disclosure.collapsed {
+      class + " collapsible collapsed"
+    } else {
+      class + " collapsible"
+    }
   }
   if self.active {
     class = class + " active"
@@ -211,19 +222,29 @@ pub fn WorkspaceRow::render(self : WorkspaceRow) -> @html.Html {
     // even once the pointer moves into it.
     class = class + " menu-open"
   }
-  let children : Array[@html.Html] = [
-    @html.button(
-      class="workspace-disclosure",
-      type_="button",
-      title=self.title,
-      on_click=self.toggle,
-      attrs=@html.Attrs::build().aria_expanded((!self.collapsed).to_string()),
+  let children : Array[@html.Html] = match self.disclosure {
+    Some(disclosure) =>
+      [
+        @html.button(
+          class="workspace-disclosure",
+          type_="button",
+          title=self.title,
+          on_click=disclosure.toggle,
+          attrs=@html.Attrs::build().aria_expanded(
+            (!disclosure.collapsed).to_string(),
+          ),
+          [
+            @html.span(class="sidebar-icon", @icons.icon(@icons.icon_folder)),
+            @html.span(class="sidebar-label", self.label),
+          ],
+        ),
+      ]
+    None =>
       [
         @html.span(class="sidebar-icon", @icons.icon(@icons.icon_folder)),
         @html.span(class="sidebar-label", self.label),
-      ],
-    ),
-  ]
+      ]
+  }
   if self.menu is Some(menu) {
     children.push(
       @html.button(
@@ -251,4 +272,120 @@ pub fn WorkspaceRow::render(self : WorkspaceRow) -> @html.Html {
     children.push((menu.body)())
   }
   @html.div(class~, title=self.title, children)
+}
+
+///|
+/// A non-conversation line in a section, used for loading, empty, and
+/// unavailable states. Optional nesting keeps an empty workspace aligned with
+/// the conversations that will replace it.
+pub(all) struct PlaceholderRow {
+  label : String
+  class_name : String
+  nested : Bool
+  open : @cmd.Cmd?
+}
+
+///|
+pub fn PlaceholderRow::render(self : PlaceholderRow) -> @html.Html {
+  let mut class = "conversation-row placeholder"
+  if self.nested {
+    class = class + " nested"
+  }
+  if !self.class_name.is_empty() {
+    class = class + " " + self.class_name
+  }
+  let children : Array[@html.Html] = []
+  if self.nested {
+    children.push(@html.span(class="row-twisty spacer", ""))
+  }
+  children.push(@html.span(class="sidebar-label", self.label))
+  match self.open {
+    Some(open) => @html.div(class~, on_click=open, children)
+    None => @html.div(class~, children)
+  }
+}
+
+///|
+/// One ordered item in a collapsible sidebar section. Domain packages provide
+/// plain row values; this enum is the only place that decides how a mixed list
+/// turns into DOM.
+pub(all) enum Entry {
+  Workspace(WorkspaceRow)
+  Conversation(ConversationRow)
+  Placeholder(PlaceholderRow)
+  Custom(@html.Html)
+}
+
+///|
+pub fn Entry::render(self : Entry) -> @html.Html {
+  match self {
+    Workspace(row) => row.render()
+    Conversation(row) => row.render()
+    Placeholder(row) => row.render()
+    Custom(html) => html
+  }
+}
+
+///|
+/// A workspace followed by its conversations. The group inserts one shared
+/// nested placeholder when an attached workspace is empty.
+pub(all) struct WorkspaceGroup {
+  workspace : WorkspaceRow
+  conversations : Array[ConversationRow]
+  empty : PlaceholderRow?
+}
+
+///|
+pub fn WorkspaceGroup::entries(self : WorkspaceGroup) -> Array[Entry] {
+  let entries : Array[Entry] = [Workspace(self.workspace)]
+  // Folder disclosure owns the whole group, so callers cannot accidentally
+  // leave a placeholder or conversation visible below a collapsed project.
+  if self.workspace.disclosure is Some(disclosure) && disclosure.collapsed {
+    return entries
+  }
+  if self.conversations.is_empty() && self.empty is Some(empty) {
+    entries.push(Placeholder(empty))
+  } else {
+    for row in self.conversations {
+      entries.push(Conversation(row))
+    }
+  }
+  entries
+}
+
+///|
+/// A heading and its ordered body. Folding is implemented here once for
+/// Projects, Codex, Chats, and Archived chats instead of at every call site.
+pub(all) struct SectionList {
+  section : Section
+  entries : Array[Entry]
+}
+
+///|
+pub fn SectionList::render(self : SectionList) -> Array[@html.Html] {
+  let rows : Array[@html.Html] = [self.section.render()]
+  if !self.section.collapsed {
+    for entry in self.entries {
+      rows.push(entry.render())
+    }
+  }
+  rows
+}
+
+///|
+/// The sidebar's peer sections in display order. Every source contributes
+/// section data; this value owns their flattening into the one scroll lane.
+pub(all) struct SidebarList {
+  sections : Array[SectionList]
+}
+
+///|
+pub fn SidebarList::render(self : SidebarList) -> Array[@html.Html] {
+  let rows : Array[@html.Html] = []
+  for section in self.sections {
+    for row in section.render() {
+      rows.push(row)
+    }
+  }
+  rows
 }

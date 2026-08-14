@@ -148,7 +148,7 @@ fn session_row(
   subruns? : Int = 0,
   expanded? : Bool = false,
   subrun? : Bool = false,
-) -> @html.Html {
+) -> @sidebar.ConversationRow {
   // Session ids can collide across devices, so the accent pill needs the
   // channel to agree too.
   let active = model.screen is Chat &&
@@ -218,7 +218,7 @@ fn session_row(
   } else {
     session_id
   }
-  @sidebar.ConversationRow::{
+  {
     title: row_title,
     label,
     open: dispatch(OpenSession(channel, session_id)),
@@ -237,7 +237,7 @@ fn session_row(
     },
     status,
     archive,
-  }.render()
+  }
 }
 
 ///|
@@ -312,7 +312,7 @@ fn device_section_rows(
   model : Model,
   dev : DeviceState,
 ) -> Array[@html.Html] {
-  let rows : Array[@html.Html] = []
+  let sections : Array[@sidebar.SectionList] = []
   let listed = (id : String) => {
     for item in dev.sessions {
       if item.id == id {
@@ -335,8 +335,54 @@ fn device_section_rows(
   // Four peer sections share one disclosure treatment and one scroll lane.
   // Gate OpenSeek highlights on Chat so only the visible source is selected.
   let chat_selected = model.screen is Chat && dev.channel == model.focused
-  rows.push(
-    @sidebar.Section::{
+  let project_entries : Array[@sidebar.Entry] = []
+  for path in dev.projects {
+    let collapsed = model.project_collapsed(dev.channel, path)
+    let expanded = model.project_chats_expanded(dev.channel, path)
+    let conversations : Array[@sidebar.ConversationRow] = []
+    let total = if collapsed {
+      0
+    } else {
+      model.push_group_conversations(
+        conversations,
+        dispatch,
+        dev,
+        Some(path),
+        listed~,
+        archived~,
+        nested=true,
+        max_conversations=if expanded { 0 } else { ProjectChatPreviewLimit },
+      )
+    }
+    let group = @sidebar.WorkspaceGroup::{
+      workspace: project_row(dispatch, model, dev, path, collapsed~),
+      conversations,
+      empty: Some({
+        label: "No chats yet",
+        class_name: "",
+        nested: true,
+        open: None,
+      }),
+    }
+    for entry in group.entries() {
+      project_entries.push(entry)
+    }
+    if !collapsed && total > ProjectChatPreviewLimit && !expanded {
+      project_entries.push(
+        @sidebar.Custom(
+          @html.button(
+            class="project-show-more",
+            type_="button",
+            title="Show all \{total} chats in this project",
+            on_click=dispatch(ShowMoreProjectChats(dev.channel, path)),
+            "Show more",
+          ),
+        ),
+      )
+    }
+  }
+  sections.push({
+    section: {
       label: "Projects",
       toggle: dispatch(ToggleProjectsSection),
       collapsed: model.projects_collapsed,
@@ -346,50 +392,12 @@ fn device_section_rows(
         disabled: false,
       }),
       selected: chat_selected && dev.active_project is Some(_),
-    }.render(),
-  )
-  if !model.projects_collapsed {
-    for path in dev.projects {
-      let collapsed = model.project_collapsed(dev.channel, path)
-      rows.push(project_row(dispatch, model, dev, path, collapsed~))
-      if collapsed {
-        continue
-      }
-      let expanded = model.project_chats_expanded(dev.channel, path)
-      let total = push_group_rows(
-        rows,
-        dispatch,
-        model,
-        dev,
-        Some(path),
-        listed~,
-        archived~,
-        nested=true,
-        max_conversations=if expanded { 0 } else { ProjectChatPreviewLimit },
-      )
-      if total == 0 {
-        rows.push(
-          @html.div(class="conversation-row nested placeholder", [
-            @html.span(class="row-twisty spacer", ""),
-            @html.span(class="sidebar-label", "No chats yet"),
-          ]),
-        )
-      } else if total > ProjectChatPreviewLimit && !expanded {
-        rows.push(
-          @html.button(
-            class="project-show-more",
-            type_="button",
-            title="Show all \{total} chats in this project",
-            on_click=dispatch(ShowMoreProjectChats(dev.channel, path)),
-            "Show more",
-          ),
-        )
-      }
-    }
-  }
+    },
+    entries: project_entries,
+  })
   if dev.channel == model.focused {
-    rows.push(
-      @sidebar.Section::{
+    sections.push({
+      section: {
         label: "Codex",
         toggle: dispatch(ToggleCodexSection),
         collapsed: model.codex_collapsed,
@@ -399,74 +407,33 @@ fn device_section_rows(
           disabled: !model.codex.can_start_thread(),
         }),
         selected: model.screen is Codex,
-      }.render(),
-    )
-    if !model.codex_collapsed {
-      for
-        row in model.codex.sidebar_rows(@codex.SidebarActions::{
-          selected: model.screen is Codex,
-          open: dispatch(OpenCodex),
-          start_thread: cwd => dispatch(CodexNewThreadIn(cwd)),
-          open_thread: thread_id => dispatch(CodexOpenThread(thread_id)),
-          archive_thread: thread_id => dispatch(CodexArchiveThread(thread_id)),
-          project_label: path => {
-            match @resource.of_path(model.focused, path) {
-              Some(workspace) => @resource.label(workspace)
-              None => path
-            }
-          },
-          workspace_row: (title, label, active, new_thread) => {
-            let actions : Array[@sidebar.WorkspaceAction] = []
-            if new_thread is Some(command) {
-              actions.push({
-                title: "New Codex conversation in this workspace",
-                command,
-                image: icon_add,
-              })
-            }
-            @sidebar.WorkspaceRow::{
-              title,
-              label,
-              active,
-              collapsed: false,
-              toggle: @cmd.none,
-              menu: None,
-              actions,
-            }.render()
-          },
-          conversation_row: (title, label, active, running, open, archive) => {
-            let status : Array[@html.Html] = []
-            if running {
-              status.push(@html.span(class="run-dot accent pulse", ""))
-            }
-            let row_archive = if archive is Some(command) {
-              Some(@sidebar.ConversationArchive::{
-                title: "Archive Codex conversation",
-                command,
-              })
-            } else {
-              None
-            }
-            @sidebar.ConversationRow::{
-              title,
-              label,
-              open,
-              nested: true,
-              subrun: false,
-              active,
-              running,
-              subruns: @sidebar.NoSubruns,
-              status,
-              archive: row_archive,
-            }.render()
-          },
-        }) {
-        rows.push(row)
-      }
-    }
+      },
+      entries: model.codex.sidebar_entries(@codex.SidebarActions::{
+        selected: model.screen is Codex,
+        open: dispatch(OpenCodex),
+        start_thread: cwd => dispatch(CodexNewThreadIn(cwd)),
+        open_thread: thread_id => dispatch(CodexOpenThread(thread_id)),
+        archive_thread: thread_id => dispatch(CodexArchiveThread(thread_id)),
+        project_label: path => {
+          match @resource.of_path(model.focused, path) {
+            Some(workspace) => @resource.label(workspace)
+            None => path
+          }
+        },
+      }),
+    })
   }
-  rows.push(
-    @sidebar.Section::{
+  let chat_rows : Array[@sidebar.ConversationRow] = []
+  let _ = model.push_group_conversations(
+    chat_rows,
+    dispatch,
+    dev,
+    None,
+    listed~,
+    archived~,
+  )
+  sections.push({
+    section: {
       label: "Chats",
       toggle: dispatch(ToggleChatsSection),
       collapsed: model.chats_collapsed,
@@ -476,21 +443,11 @@ fn device_section_rows(
         disabled: false,
       }),
       selected: chat_selected && dev.active_project is None,
-    }.render(),
-  )
-  if !model.chats_collapsed {
-    let _ = push_group_rows(
-      rows,
-      dispatch,
-      model,
-      dev,
-      None,
-      listed~,
-      archived~,
-    )
-  }
+    },
+    entries: chat_rows.map(row => @sidebar.Conversation(row)),
+  })
   // Archived records are a peer section backed by the store's archived twin.
-  let archived_rows : Array[@html.Html] = []
+  let archived_rows : Array[@sidebar.Entry] = []
   for row in @transcript.session_tree(dev.archived) {
     // A parent and its archived sub-run records are one conversation. Restore
     // the root row and the host moves the complete family back together. An
@@ -499,10 +456,12 @@ fn device_section_rows(
       model.active_session == row.item.id &&
       model.find_conversation(dev.channel, row.item.id) is Some(conv) &&
       conv.is_archived_read_only()
-    archived_rows.push(archived_row(dispatch, dev.channel, row.item, active))
+    archived_rows.push(
+      @sidebar.Custom(archived_row(dispatch, dev.channel, row.item, active)),
+    )
   }
-  rows.push(
-    @sidebar.Section::{
+  sections.push({
+    section: {
       label: if archived_rows.is_empty() {
         "Archived chats"
       } else {
@@ -512,24 +471,20 @@ fn device_section_rows(
       collapsed: model.archived_chats_collapsed,
       action: None,
       selected: false,
-    }.render(),
-  )
-  if !model.archived_chats_collapsed {
-    for row in archived_rows {
-      rows.push(row)
-    }
-  }
-  rows
+    },
+    entries: archived_rows,
+  })
+  @sidebar.SidebarList::{ sections, }.render()
 }
 
 ///|
 /// One store's conversation rows: the app-run-only (unlisted) conversations
 /// newest first, then the store's durable sessions in list order — the same
 /// ordering the flat sidebar always had, applied per group.
-fn push_group_rows(
-  rows : Array[@html.Html],
+fn Model::push_group_conversations(
+  self : Model,
+  rows : Array[@sidebar.ConversationRow],
   dispatch : @cmd.Emit[Msg],
-  model : Model,
   dev : DeviceState,
   workspace : @common.Uri?,
   listed~ : (String) -> Bool,
@@ -544,9 +499,9 @@ fn push_group_rows(
   // without writing anything) stay hidden — but one holding an unsent draft
   // is kept precisely so it can be returned to, and a row is the only way
   // back to it.
-  let composing = model.composing_new_chat()
+  let composing = self.composing_new_chat()
   let mut count = 0
-  for conv in model.conversations.rev_iter() {
+  for conv in self.conversations.rev_iter() {
     if conv.device != dev.channel ||
       conv.workspace.project() != workspace ||
       listed(conv.session_id) ||
@@ -561,8 +516,8 @@ fn push_group_rows(
       worktree_name_for(dev, workspace, conv.session_id)
     }
     let worth_keeping = conv.worth_keeping()
-    let active = conv.device == model.focused &&
-      conv.session_id == model.active_session
+    let active = conv.device == self.focused &&
+      conv.session_id == self.active_session
     let visible_new_chat = composing && active
     if !worth_keeping && !visible_new_chat {
       continue
@@ -573,7 +528,7 @@ fn push_group_rows(
       rows.push(
         session_row(
           dispatch,
-          model,
+          self,
           dev.channel,
           conv.session_id,
           if worth_keeping {
@@ -598,9 +553,9 @@ fn push_group_rows(
   // on screen (its title settles at the first send), and otherwise comes from
   // the host's listing.
   fn label_of(item : @transcript.SessionListItem) -> String {
-    if model.find_conversation(dev.channel, item.id) is Some(conv) &&
-      dev.channel == model.focused &&
-      item.id == model.active_session {
+    if self.find_conversation(dev.channel, item.id) is Some(conv) &&
+      dev.channel == self.focused &&
+      item.id == self.active_session {
       conversation_title(conv)
     } else {
       session_item_label(item)
@@ -615,18 +570,18 @@ fn push_group_rows(
     // An older active conversation stays visible beside the five-row preview;
     // otherwise notification navigation or a list refresh could leave the
     // conversation on screen with no selected sidebar row.
-    let active = dev.channel == model.focused &&
-      row.item.id == model.active_session
+    let active = dev.channel == self.focused &&
+      row.item.id == self.active_session
     let visible = max_conversations <= 0 || count < max_conversations || active
     count = count + 1
     if !visible {
       continue
     }
-    let expanded = model.subruns_expanded(dev.channel, row.item.id)
+    let expanded = self.subruns_expanded(dev.channel, row.item.id)
     rows.push(
       session_row(
         dispatch,
-        model,
+        self,
         dev.channel,
         row.item.id,
         label_of(row.item),
@@ -659,7 +614,7 @@ fn push_group_rows(
         rows.push(
           session_row(
             dispatch,
-            model,
+            self,
             dev.channel,
             child.id,
             label,
@@ -685,15 +640,17 @@ fn project_row(
   dev : DeviceState,
   path : @common.Uri,
   collapsed~ : Bool,
-) -> @html.Html {
-  @sidebar.WorkspaceRow::{
+) -> @sidebar.WorkspaceRow {
+  {
     title: path.path,
     label: @resource.label(path),
     active: model.screen is Chat &&
-      dev.channel == model.focused &&
-      dev.active_project == Some(path),
-    collapsed,
-    toggle: dispatch(ToggleProjectSection(dev.channel, path)),
+    dev.channel == model.focused &&
+    dev.active_project == Some(path),
+    disclosure: Some({
+      collapsed,
+      toggle: dispatch(ToggleProjectSection(dev.channel, path)),
+    }),
     menu: Some({
       title: "More actions",
       open: model.project_menu == Some({ channel: dev.channel, project: path }),
@@ -707,7 +664,7 @@ fn project_row(
         image: icon_add,
       },
     ],
-  }.render()
+  }
 }
 
 ///|

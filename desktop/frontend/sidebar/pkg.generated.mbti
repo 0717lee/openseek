@@ -35,6 +35,22 @@ pub(all) enum ConversationSubruns {
   Subruns(count~ : Int, expanded~ : Bool, toggle~ : @cmd.Cmd)
 }
 
+pub(all) enum Entry {
+  Workspace(WorkspaceRow)
+  Conversation(ConversationRow)
+  Placeholder(PlaceholderRow)
+  Custom(@html.Html)
+}
+pub fn Entry::render(Self) -> @html.Html
+
+pub(all) struct PlaceholderRow {
+  label : String
+  class_name : String
+  nested : Bool
+  open : @cmd.Cmd?
+}
+pub fn PlaceholderRow::render(Self) -> @html.Html
+
 pub(all) struct Section {
   label : String
   toggle : @cmd.Cmd
@@ -50,11 +66,34 @@ pub(all) struct SectionAction {
   disabled : Bool
 }
 
+pub(all) struct SectionList {
+  section : Section
+  entries : Array[Entry]
+}
+pub fn SectionList::render(Self) -> Array[@html.Html]
+
+pub(all) struct SidebarList {
+  sections : Array[SectionList]
+}
+pub fn SidebarList::render(Self) -> Array[@html.Html]
+
 pub(all) struct WorkspaceAction {
   title : String
   command : @cmd.Cmd
   image : () -> @html.Html
 }
+
+pub(all) struct WorkspaceDisclosure {
+  collapsed : Bool
+  toggle : @cmd.Cmd
+}
+
+pub(all) struct WorkspaceGroup {
+  workspace : WorkspaceRow
+  conversations : Array[ConversationRow]
+  empty : PlaceholderRow?
+}
+pub fn WorkspaceGroup::entries(Self) -> Array[Entry]
 
 pub(all) struct WorkspaceMenu {
   title : String
@@ -67,8 +106,7 @@ pub(all) struct WorkspaceRow {
   title : String
   label : String
   active : Bool
-  collapsed : Bool
-  toggle : @cmd.Cmd
+  disclosure : WorkspaceDisclosure?
   menu : WorkspaceMenu?
   actions : Array[WorkspaceAction]
 }

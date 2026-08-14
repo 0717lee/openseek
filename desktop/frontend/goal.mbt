@@ -875,18 +875,17 @@ test "a kept goal draft is a conversation you can get back to" {
       active_session: "desktop-test",
     }
     guard model.focused_device() is Some(dev) else { fail("no device") }
-    let rows : Array[@html.Html] = []
-    let _ = push_group_rows(
+    let rows : Array[@sidebar.ConversationRow] = []
+    let _ = model.push_group_conversations(
       rows,
       dispatch,
-      model,
       dev,
       None,
       listed=_ => false,
       archived=_ => false,
     )
     let markup = @rabbita.render_to_string(() => {
-      @rabbita.Val::constant(@html.div(rows))
+      @rabbita.Val::constant(@html.div(rows.map(row => row.render())))
     })
     assert_true(markup.contains("desktop-fresh"))
   }

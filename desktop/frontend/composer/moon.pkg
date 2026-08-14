@@ -2,11 +2,16 @@ import {
   "moonbit-community/rabbita/cmd",
   "moonbit-community/rabbita/dom",
   "moonbit-community/rabbita/html",
+  "openseek_desktop/frontend/icons",
   "openseek_desktop/internal/protocol",
 }
 
 import {
   "moonbitlang/core/debug",
 } for "test"
+
+import {
+  "moonbit-community/rabbita",
+} for "wbtest"
 
 supported_targets = "js"

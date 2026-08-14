@@ -88,32 +88,6 @@ pub fn ModelSelect::render(self : ModelSelect) -> @html.Html {
 }
 
 ///|
-/// The compact branch/PR control used by a conversation composer. Git
-/// discovery and click behavior stay caller-owned; the composer owns the one
-/// visible DOM shape beside the model selector.
-pub(all) struct GitChip {
-  tone : String
-  title : String
-  label : String
-  command : @cmd.Cmd
-  content : @html.Html
-}
-
-///|
-pub fn GitChip::render(self : GitChip) -> @html.Html {
-  @html.button(
-    class="composer-git-button \{self.tone}",
-    type_="button",
-    title=self.title,
-    on_click=self.command,
-    [
-      @html.span(class="composer-git-glyph", self.content),
-      @html.span(class="composer-git-label", self.label),
-    ],
-  )
-}
-
-///|
 /// Placement of a conversation before and after its first workspace-bound
 /// operation. The application keeps this value in its own model; the composer
 /// owns the labels, tooltips, and control shape.

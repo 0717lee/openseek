@@ -73,14 +73,24 @@ pub fn Debounce::advanced(Self) -> Self
 pub fn Debounce::delayed(Self, (Int) -> @cmd.Cmd) -> @cmd.Cmd
 pub fn Debounce::generation(Self) -> Int
 
-pub(all) struct GitChip {
-  tone : String
-  title : String
-  label : String
-  command : @cmd.Cmd
-  content : @html.Html
-}
-pub fn GitChip::render(Self) -> @html.Html
+type GitChanges derive(Eq)
+pub fn GitChanges::GitChanges(added~ : Int, removed~ : Int, files~ : Int, partial~ : Bool, base? : String) -> Self
+
+type GitChecks derive(Eq)
+pub fn GitChecks::GitChecks(passed~ : Int, failed~ : Int, pending~ : Int) -> Self
+pub fn GitChecks::summary(Self) -> String
+pub fn GitChecks::tone(Self) -> String
+
+type GitPresentation derive(Eq)
+pub fn GitPresentation::GitPresentation(branch~ : String, changes? : GitChanges, pull_request? : GitPullRequest, compare_url? : String, missing_pull_request? : String) -> Self
+pub fn GitPresentation::label(Self) -> String
+pub fn GitPresentation::render(Self, open~ : Bool, toggle~ : @cmd.Cmd) -> @html.Html
+pub fn GitPresentation::summary(Self) -> String
+pub fn GitPresentation::tone(Self) -> String
+
+type GitPullRequest derive(Eq)
+pub fn GitPullRequest::GitPullRequest(number~ : Int, title~ : String, state~ : String, draft~ : Bool, url~ : String, checks? : GitChecks) -> Self
+pub fn GitPullRequest::label(Self) -> String
 
 pub(all) struct KeyboardActions {
   menu_open : Bool

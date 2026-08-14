@@ -211,8 +211,44 @@ pub(all) struct SidebarActions {
   open_thread : (String) -> @cmd.Cmd
   archive_thread : (String) -> @cmd.Cmd
   project_label : (String) -> String
-  workspace_row : (String, String, Bool, @cmd.Cmd?) -> @html.Html
-  conversation_row : (String, String, Bool, Bool, @cmd.Cmd, @cmd.Cmd?) -> @html.Html
+}
+
+///|
+fn SidebarActions::workspace_row(
+  self : SidebarActions,
+  project : String,
+  label : String,
+  active : Bool,
+  can_start : Bool,
+) -> @sidebar.WorkspaceRow {
+  let actions : Array[@sidebar.WorkspaceAction] = []
+  if can_start {
+    actions.push({
+      title: "New Codex conversation in this workspace",
+      command: (self.start_thread)(project),
+      image: @icons.icon_add,
+    })
+  }
+  { title: project, label, active, disclosure: None, menu: None, actions }
+}
+
+///|
+fn SidebarActions::draft_row(
+  self : SidebarActions,
+  title : String,
+) -> @sidebar.ConversationRow {
+  {
+    title,
+    label: "New Codex thread",
+    open: self.open,
+    nested: true,
+    subrun: false,
+    active: self.selected,
+    running: false,
+    subruns: @sidebar.NoSubruns,
+    status: [],
+    archive: None,
+  }
 }
 
 ///|
@@ -268,11 +304,11 @@ fn CodexProject::is_separator(self : CodexProject, index : Int) -> Bool {
 /// just as it does for Workspaces, Chats, and Archived chats. Git worktrees are
 /// execution locations, not navigation groups: all conversations belonging to
 /// the same main project appear directly below that one project row.
-pub fn State::sidebar_rows(
+pub fn State::sidebar_entries(
   self : State,
   actions : SidebarActions,
-) -> Array[@html.Html] {
-  let rows : Array[@html.Html] = []
+) -> Array[@sidebar.Entry] {
+  let rows : Array[@sidebar.Entry] = []
   let projects : Array[CodexProject] = []
   for thread in self.threads {
     if thread.project_key() is Some(project) && !projects.contains(project) {
@@ -302,36 +338,29 @@ pub fn State::sidebar_rows(
           .unwrap_or(false)
         CodexNoTask => false
       })
-    rows.push(
-      (actions.workspace_row)(
-        project.0,
-        project.display_label(projects, actions.project_label),
-        active,
-        if self.can_start_thread() {
-          Some((actions.start_thread)(project.0))
-        } else {
-          None
-        },
-      ),
-    )
+    let conversations : Array[@sidebar.ConversationRow] = []
     if self.active_draft() is Some(draft) &&
       CodexProject(draft.project_root.unwrap_or(draft.cwd).trim().to_owned()) ==
       project {
-      rows.push(
-        (actions.conversation_row)(
-          draft.cwd,
-          "New Codex thread",
-          actions.selected,
-          false,
-          actions.open,
-          None,
-        ),
-      )
+      conversations.push(actions.draft_row(draft.cwd))
     }
     for thread in self.threads {
       if thread.project_key() == Some(project) {
-        rows.push(thread.sidebar_row(self, actions))
+        conversations.push(thread.sidebar_row(self, actions))
       }
+    }
+    let group = @sidebar.WorkspaceGroup::{
+      workspace: actions.workspace_row(
+        project.0,
+        project.display_label(projects, actions.project_label),
+        active,
+        self.can_start_thread(),
+      ),
+      conversations,
+      empty: None,
+    }
+    for entry in group.entries() {
+      rows.push(entry)
     }
   }
   let loose = self.threads.filter(thread => thread.project_key() is None)
@@ -339,21 +368,20 @@ pub fn State::sidebar_rows(
     .active_draft()
     .filter(draft => draft.project_root.unwrap_or(draft.cwd).trim().is_empty())
   if !loose.is_empty() || loose_draft is Some(_) {
-    rows.push((actions.workspace_row)("No project", "No project", false, None))
+    let conversations : Array[@sidebar.ConversationRow] = []
     if loose_draft is Some(draft) {
-      rows.push(
-        (actions.conversation_row)(
-          draft.id,
-          "New Codex thread",
-          actions.selected,
-          false,
-          actions.open,
-          None,
-        ),
-      )
+      conversations.push(actions.draft_row(draft.id))
     }
     for thread in loose {
-      rows.push(thread.sidebar_row(self, actions))
+      conversations.push(thread.sidebar_row(self, actions))
+    }
+    let group = @sidebar.WorkspaceGroup::{
+      workspace: actions.workspace_row("No project", "No project", false, false),
+      conversations,
+      empty: None,
+    }
+    for entry in group.entries() {
+      rows.push(entry)
     }
   }
   if self.threads.is_empty() && self.active_draft() is None {
@@ -368,11 +396,12 @@ pub fn State::sidebar_rows(
         }
     }
     rows.push(
-      @html.div(
-        class="conversation-row placeholder codex-placeholder",
-        on_click=actions.open,
-        [@html.span(class="sidebar-label", empty)],
-      ),
+      @sidebar.Placeholder({
+        label: empty,
+        class_name: "codex-placeholder",
+        nested: false,
+        open: Some(actions.open),
+      }),
     )
   }
   rows
@@ -397,29 +426,40 @@ fn CodexThreadRow::project_key(self : CodexThreadRow) -> CodexProject? {
 }
 
 ///|
-/// Supply one Codex task's state and commands to the shell-owned conversation
-/// renderer. Codex does not construct sidebar DOM, so its disclosure slot,
-/// nesting, trailing controls, and active state cannot diverge from OpenSeek.
+/// Supply one Codex task's state and commands to the shared conversation row.
+/// The sidebar package owns DOM order, disclosure geometry, and trailing
+/// action behavior; this adapter supplies only task-specific state.
 fn CodexThreadRow::sidebar_row(
   self : CodexThreadRow,
   state : State,
   actions : SidebarActions,
-) -> @html.Html {
+) -> @sidebar.ConversationRow {
   let selected = actions.selected &&
     state.active_thread().map(item => item.id == self.id).unwrap_or(false)
   let running = selected && state.is_running()
-  (actions.conversation_row)(
-    self.cwd.unwrap_or(self.title),
-    self.title,
-    selected,
+  let status : Array[@html.Html] = []
+  if running {
+    status.push(@html.span(class="run-dot accent pulse", ""))
+  }
+  {
+    title: self.cwd.unwrap_or(self.title),
+    label: self.title,
+    open: (actions.open_thread)(self.id),
+    nested: true,
+    subrun: false,
+    active: selected,
     running,
-    (actions.open_thread)(self.id),
-    if running {
+    subruns: @sidebar.NoSubruns,
+    status,
+    archive: if running {
       None
     } else {
-      Some((actions.archive_thread)(self.id))
+      Some({
+        title: "Archive Codex conversation",
+        command: (actions.archive_thread)(self.id),
+      })
     },
-  )
+  }
 }
 
 ///|
@@ -493,142 +533,60 @@ fn CodexCompletionKind::view(
 }
 
 ///|
-/// Match OpenSeek's CI tint: failed first, then still running, then passed.
-/// A branch without a pull request remains neutral.
-fn CodexGitStatus::tone(self : CodexGitStatus) -> String {
-  guard self.pull_request is Some(pull_request) &&
-    pull_request.checks is Some(checks) else {
-    return "none"
+/// Translate app-server Git data once at the package boundary. The shared
+/// presentation owns every label, tone, tooltip, row, and link after this.
+fn CodexGitStatus::presentation(
+  self : CodexGitStatus,
+) -> @composer.GitPresentation? {
+  // App-server normally returns the branch beside a pull request. Preserve
+  // the older UI's fallback if that partial reply ever omits it: the PR is
+  // still useful, and its details can name the branch as unknown.
+  let branch = match self.branch {
+    Some(branch) if !branch.is_empty() => branch
+    _ if self.pull_request is Some(_) => "Unknown"
+    _ => return None
   }
-  if checks.failed > 0 {
-    "failed"
-  } else if checks.pending > 0 {
-    "pending"
-  } else {
-    "passed"
-  }
+  Some(
+    @composer.GitPresentation(
+      branch~,
+      pull_request?=self.pull_request.map(pull_request => {
+        @composer.GitPullRequest(
+          number=pull_request.number,
+          title=pull_request.title,
+          state=pull_request.state,
+          draft=pull_request.draft,
+          url=pull_request.url,
+          checks?=pull_request.checks.map(checks => {
+            @composer.GitChecks(
+              passed=checks.passed,
+              failed=checks.failed,
+              pending=checks.pending,
+            )
+          }),
+        )
+      }),
+      compare_url?=self.compare_url,
+      missing_pull_request?=if self.pull_request is None &&
+        self.compare_url is None {
+        Some("No matching pull request")
+      } else {
+        None
+      },
+    ),
+  )
 }
 
 ///|
-fn CodexGitStatus::label(self : CodexGitStatus) -> String? {
-  if self.pull_request is Some(pull_request) {
-    let suffix = match pull_request.state {
-      "open" => if pull_request.draft { " Draft" } else { "" }
-      "merged" => " Merged"
-      "closed" => " Closed"
-      _ => ""
-    }
-    return Some("#\{pull_request.number}\{suffix}")
-  }
-  self.branch
-}
-
-///|
-fn CodexGitStatus::summary(self : CodexGitStatus) -> String {
-  if self.pull_request is Some(pull_request) {
-    let parts : Array[String] = []
-    if pull_request.checks is Some(checks) {
-      if checks.failed > 0 {
-        parts.push("\{checks.failed} failed")
-      }
-      if checks.pending > 0 {
-        parts.push("\{checks.pending} running")
-      }
-      if checks.passed > 0 {
-        parts.push("\{checks.passed} passed")
-      }
-    }
-    if parts.is_empty() {
-      pull_request.title
-    } else {
-      pull_request.title + " — CI " + parts.join(" · ")
-    }
-  } else {
-    self.branch.map(branch => "On branch " + branch).unwrap_or("")
-  }
-}
-
-///|
-/// Codex and OpenSeek supply different Git state, but the composer draws the
-/// same PR/branch pill and opens the same details surface on every click.
 fn CodexGitStatus::chip(
   self : CodexGitStatus,
   dispatch : @cmd.Emit[Msg],
   open : Bool,
 ) -> @html.Html? {
-  guard self.label() is Some(label) && !label.is_empty() else { return None }
-  let opened = if open { " open" } else { "" }
-  let children : Array[@html.Html] = [
-    @composer.GitChip::{
-      tone: self.tone() + opened,
-      title: self.summary(),
-      label,
-      command: dispatch(ToggleGitDetails),
-      content: icon(icon_pull_request),
-    }.render(),
-  ]
-  if open {
-    children.push(self.details())
-  }
-  Some(@html.div(class="composer-git", children))
-}
-
-///|
-/// The Codex Git popover uses the same rows and external-link capture as the
-/// OpenSeek composer. Even a branch without a PR explains that result instead
-/// of accepting a click and doing nothing.
-fn CodexGitStatus::details(self : CodexGitStatus) -> @html.Html {
-  let branch = self.branch.unwrap_or("Unknown")
-  let rows : Array[@html.Html] = [
-    @html.div(class="composer-git-row", [
-      @html.span(class="composer-git-key", "Branch"),
-      @html.span(class="composer-git-value", branch),
-    ]),
-  ]
-  if self.pull_request is Some(pull_request) {
-    let label = self.label().unwrap_or("Pull request")
-    rows.push(@html.div(class="composer-git-rule", @html.nothing))
-    rows.push(
-      @html.a(
-        class="composer-git-link",
-        href=pull_request.url,
-        target=Blank,
-        rel="noopener noreferrer",
-        [
-          @html.span(
-            class="composer-git-glyph \{self.tone()}",
-            icon(icon_pull_request),
-          ),
-          @html.span(class="composer-git-value", label),
-          @html.span(class="composer-git-note", pull_request.title),
-          @html.span(class="composer-git-out", icon(icon_link_external)),
-        ],
-      ),
-    )
-  } else if self.compare_url is Some(url) {
-    rows.push(@html.div(class="composer-git-rule", @html.nothing))
-    rows.push(
-      @html.a(
-        class="composer-git-link",
-        href=url,
-        target=Blank,
-        rel="noopener noreferrer",
-        [
-          @html.span(class="composer-git-glyph none", icon(icon_pull_request)),
-          @html.span(class="composer-git-value", "Create pull request"),
-          @html.span(class="composer-git-out", icon(icon_link_external)),
-        ],
-      ),
-    )
-  } else {
-    rows.push(
-      @html.div(class="composer-git-row", [
-        @html.span(class="composer-git-key", "PR"),
-        @html.span(class="composer-git-value", "No matching pull request"),
-      ]),
-    )
-  }
-  @html.div(class="composer-git-menu", rows)
+  self
+  .presentation()
+  .map(presentation => {
+    presentation.render(open~, toggle=dispatch(ToggleGitDetails))
+  })
 }
 
 ///|
