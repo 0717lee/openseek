@@ -337,6 +337,9 @@ pub let codex_turn_interrupt : Command[
 pub let dsh_status : Command[Json, Json] = Command("dsh.status")
 
 ///|
+pub let dsh_pending : Command[Json, Json] = Command("dsh.pending")
+
+///|
 pub let dsh_request : Command[Json, Json] = Command("dsh.request")
 
 ///|

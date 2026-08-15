@@ -81,13 +81,14 @@ priv enum DshPendingInteraction {
 ///|
 priv enum DshReplyKind {
   DshStatusReply
+  DshPendingReply
   DshReconnectReply
   DshWorkspacesReply
   DshWorkspaceCreateReply
   DshSessionsReply
   DshCreateReply
   DshHistoryReply(String)
-  DshPromptReply
+  DshPromptReply(session_id~ : String, draft~ : String, generation~ : Int)
   DshCancelReply
   DshResponseReply(String)
 }
@@ -154,6 +155,10 @@ struct State {
   streaming : String
   draft : String
   pending : Array[DshPendingInteraction]
+  // Actor generations order page-attach snapshots against live mux events.
+  // Prompt generations keep an older request from settling a newer send.
+  pending_generation : Int
+  prompt_generation : Int
   loading : Bool
   notice : String
 } derive(Eq)
@@ -169,6 +174,8 @@ pub fn State::State(loading? : Bool = false) -> State {
     streaming: "",
     draft: "",
     pending: [],
+    pending_generation: 0,
+    prompt_generation: 0,
     loading,
     notice: "",
   }

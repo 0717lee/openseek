@@ -58,7 +58,11 @@ pub fn update(
       if state.loading || state.draft.trim().is_empty() || !state.has_active() {
         (@cmd.none, state)
       } else {
-        (state.send(dispatch), { ..state, loading: true, notice: "" })
+        let generation = state.prompt_generation + 1
+        (
+          state.send(dispatch, generation),
+          { ..state, prompt_generation: generation, loading: true, notice: "" },
+        )
       }
     Stop =>
       if state.loading || !state.is_running() {
@@ -98,7 +102,16 @@ pub fn update(
         _ => (@cmd.none, state)
       }
     Reply(kind~, value~) => state.with_reply(dispatch, kind, value)
-    Failed(kind~, message~) =>
+    Failed(kind~, message~) => {
+      // A reply belongs to the page state that submitted it. Session changes
+      // and later sends must not clear another conversation's draft/loading.
+      if kind is DshPromptReply(session_id~, generation~, ..) &&
+        (
+          state.active_id != Some(session_id) ||
+          state.prompt_generation != generation
+        ) {
+        return (@cmd.none, state)
+      }
       (
         @cmd.none,
         {
@@ -108,7 +121,11 @@ pub fn update(
           } else {
             state.connection
           },
-          loading: false,
+          loading: if kind is DshPendingReply {
+            state.loading
+          } else {
+            false
+          },
           // Connection failures belong to the root toast queue. Other dsh
           // request failures remain attached to the dsh transcript surface.
           // A reconnect request is paired with the actor's authoritative
@@ -121,6 +138,7 @@ pub fn update(
           },
         },
       )
+    }
     StatusChanged(value) => state.with_status(dispatch, value)
     Event(value) => state.with_event(dispatch, value)
   }
@@ -135,6 +153,9 @@ fn State::with_reply(
 ) -> (@cmd.Cmd, State) {
   if kind is DshStatusReply {
     return self.with_status(dispatch, reply)
+  }
+  if kind is DshPendingReply {
+    return self.with_pending_snapshot(dispatch, reply)
   }
   if kind is DshResponseReply(rpc_id) {
     let receipt = DshResponseReceipt(reply)
@@ -166,7 +187,10 @@ fn State::with_reply(
       }
       (
         if kind is DshReconnectReply {
-          DshSessionsReply.request(dispatch, "session.list", {})
+          @cmd.batch([
+            DshSessionsReply.request(dispatch, "session.list", {}),
+            DshPendingReply.pending(dispatch),
+          ])
         } else {
           @cmd.none
         },
@@ -297,15 +321,27 @@ fn State::with_reply(
         },
       )
     }
-    DshPromptReply => {
-      let cmd = match self.active_id {
-        Some(session_id) => self.load_history(dispatch, session_id)
-        None => @cmd.none
+    DshPromptReply(session_id~, draft~, generation~) => {
+      guard self.active_id == Some(session_id) &&
+        self.prompt_generation == generation else {
+        return (@cmd.none, self)
       }
-      (cmd, { ..self, draft: "", loading: false, notice: "" })
+      (
+        self.load_history(dispatch, session_id),
+        {
+          ..self,
+          draft: if self.draft == draft {
+            ""
+          } else {
+            self.draft
+          },
+          loading: false,
+          notice: "",
+        },
+      )
     }
     DshCancelReply => (@cmd.none, { ..self, loading: false, notice: "" })
-    DshStatusReply | DshResponseReply(_) => (@cmd.none, self)
+    DshStatusReply | DshPendingReply | DshResponseReply(_) => (@cmd.none, self)
   }
 }
 
@@ -333,11 +369,15 @@ fn State::with_status(
         @cmd.batch([
           DshWorkspacesReply.request(dispatch, "workspace.list", {}),
           DshSessionsReply.request(dispatch, "session.list", {}),
+          DshPendingReply.pending(dispatch),
         ]),
         { ..self, connection: DshReady, loading: true, notice: "" },
       )
     "starting" =>
-      (@cmd.none, { ..self, connection: DshStarting, loading: false })
+      (
+        @cmd.none,
+        { ..self, connection: DshStarting, pending: [], loading: false },
+      )
     _ => {
       let message = @jsonx.json_text(fields, "message").unwrap_or(
         "DeepSeek Harness is unavailable",
@@ -347,12 +387,43 @@ fn State::with_status(
         {
           ..self,
           connection: DshUnavailable(message),
+          pending: [],
           loading: false,
           notice: "",
         },
       )
     }
   }
+}
+
+///|
+fn State::with_pending_snapshot(
+  self : State,
+  dispatch : @cmd.Emit[Msg],
+  value : Json,
+) -> (@cmd.Cmd, State) {
+  guard value is Object(fields) &&
+    @jsonx.json_int(fields, "generation") is Some(generation) &&
+    fields.get("data") is Some(Array(data)) else {
+    return (
+      @cmd.none,
+      {
+        ..self,
+        notice: "DeepSeek Harness returned malformed pending interactions",
+      },
+    )
+  }
+  if generation < self.pending_generation {
+    return (@cmd.none, self)
+  }
+  let commands : Array[@cmd.Cmd] = []
+  let mut next = { ..self, pending: [], pending_generation: generation }
+  for event in data {
+    let (command, state) = next.with_event(dispatch, event)
+    commands.push(command)
+    next = state
+  }
+  (@cmd.batch(commands), next)
 }
 
 ///|
@@ -415,7 +486,18 @@ fn State::with_event(
           row
         }
       })
-      (@cmd.none, { ..self, sessions, loading: false })
+      (
+        @cmd.none,
+        {
+          ..self,
+          sessions,
+          loading: if self.active_id == Some(session_id) {
+            false
+          } else {
+            self.loading
+          },
+        },
+      )
     }
     "host/session-added" =>
       (
@@ -503,6 +585,12 @@ fn State::with_event(
         { ..self, loading: true },
       )
     "approval/requested" => {
+      let generation = @jsonx.json_int(wrapper, "generation").unwrap_or(
+        self.pending_generation,
+      )
+      if generation < self.pending_generation {
+        return (@cmd.none, self)
+      }
       guard @jsonx.json_text(payload, "sessionId") is Some(session_id) &&
         @jsonx.json_text(payload, "approvalId") is Some(approval_id) &&
         @jsonx.json_text(payload, "toolName") is Some(tool_name) else {
@@ -518,9 +606,15 @@ fn State::with_event(
           reason=@jsonx.json_text(payload, "reason").unwrap_or(""),
         ),
       )
-      (@cmd.none, { ..self, pending, })
+      (@cmd.none, { ..self, pending, pending_generation: generation })
     }
     "approval/resolved" => {
+      let generation = @jsonx.json_int(wrapper, "generation").unwrap_or(
+        self.pending_generation,
+      )
+      if generation < self.pending_generation {
+        return (@cmd.none, self)
+      }
       guard @jsonx.json_text(payload, "approvalId") is Some(approval_id) else {
         return (@cmd.none, self)
       }
@@ -531,11 +625,18 @@ fn State::with_event(
           pending: self.pending.filter(item => {
             !item.matches_approval(approval_id)
           }),
+          pending_generation: generation,
           loading: false,
         },
       )
     }
     "question/requested" => {
+      let generation = @jsonx.json_int(wrapper, "generation").unwrap_or(
+        self.pending_generation,
+      )
+      if generation < self.pending_generation {
+        return (@cmd.none, self)
+      }
       guard @jsonx.json_text(payload, "sessionId") is Some(session_id) &&
         payload.get("questions") is Some(Array(values)) else {
         return (@cmd.none, self)
@@ -550,9 +651,15 @@ fn State::with_event(
       }
       let pending = self.pending.filter(item => item.rpc_id() != rpc_id)
       pending.push(DshQuestions(rpc_id~, session_id~, questions~, answers~))
-      (@cmd.none, { ..self, pending, })
+      (@cmd.none, { ..self, pending, pending_generation: generation })
     }
     "question/resolved" => {
+      let generation = @jsonx.json_int(wrapper, "generation").unwrap_or(
+        self.pending_generation,
+      )
+      if generation < self.pending_generation {
+        return (@cmd.none, self)
+      }
       let question_rpc_id = @jsonx.json_text(payload, "questionRpcId").unwrap_or(
         rpc_id,
       )
@@ -561,6 +668,7 @@ fn State::with_event(
         {
           ..self,
           pending: self.pending.filter(item => item.rpc_id() != question_rpc_id),
+          pending_generation: generation,
           loading: false,
         },
       )
@@ -828,6 +936,32 @@ test "dsh reconnect reply restores workspace state without transcript errors" {
   assert_eq(ready.unavailable_message(), None)
   assert_eq(ready.preferred_workspace_id(), Some("workspace-1"))
   assert_eq(ready.notice, "")
+  let (_, pending) = ready.with_reply(dispatch, DshPendingReply, {
+    "data": [
+      {
+        "stream": "mux",
+        "generation": 2,
+        "message": {
+          "rpcId": "approval-rpc",
+          "payload": {
+            "type": "approval/requested",
+            "sessionId": "session-1",
+            "approvalId": "approval-1",
+            "toolName": "write",
+          },
+        },
+      },
+    ],
+    "generation": 2,
+  })
+  assert_eq(pending.pending.map(item => item.rpc_id()), ["approval-rpc"])
+  assert_eq(pending.pending_generation, 2)
+  let (_, stale) = pending.with_reply(dispatch, DshPendingReply, {
+    "data": [],
+    "generation": 1,
+  })
+  assert_eq(stale.pending.map(item => item.rpc_id()), ["approval-rpc"])
+  assert_eq(stale.pending_generation, 2)
 }
 
 ///|
@@ -982,7 +1116,7 @@ test "dsh single-select answers keep option and custom text exclusive" {
 }
 
 ///|
-test "dsh response receipt preserves rejected interactions" {
+test "dsh response and prompt replies preserve unrelated state" {
   assert_true(DshResponseReceipt({ "accepted": true }).accepted())
   let rejected = DshResponseReceipt({
     "accepted": false,
@@ -993,6 +1127,57 @@ test "dsh response receipt preserves rejected interactions" {
     rejected.error(),
     "DeepSeek Harness rejected the response: bad-response",
   )
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let reply : Json = {
+    "type": "server-response",
+    "rpcId": "prompt-1",
+    "result": { "ok": true, "value": {} },
+  }
+  let session_b = {
+    ..State(),
+    active_id: Some("session-b"),
+    draft: "draft for B",
+    prompt_generation: 2,
+    loading: true,
+  }
+  let (_, stale_session) = session_b.with_reply(
+    dispatch,
+    DshPromptReply(
+      session_id="session-a",
+      draft="submitted for A",
+      generation=1,
+    ),
+    reply,
+  )
+  assert_eq(stale_session.draft, "draft for B")
+  assert_true(stale_session.loading)
+  let edited = {
+    ..session_b,
+    active_id: Some("session-b"),
+    draft: "edited after send",
+  }
+  let (_, preserved) = edited.with_reply(
+    dispatch,
+    DshPromptReply(
+      session_id="session-b",
+      draft="submitted for B",
+      generation=2,
+    ),
+    reply,
+  )
+  assert_eq(preserved.draft, "edited after send")
+  assert_false(preserved.loading)
+  let submitted = { ..edited, draft: "submitted for B" }
+  let (_, cleared) = submitted.with_reply(
+    dispatch,
+    DshPromptReply(
+      session_id="session-b",
+      draft="submitted for B",
+      generation=2,
+    ),
+    reply,
+  )
+  assert_eq(cleared.draft, "")
 }
 
 ///|

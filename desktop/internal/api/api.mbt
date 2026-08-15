@@ -902,6 +902,9 @@ pub fn local_endpoints(state : ApiState) -> Array[@endpoint.Endpoint] {
     @endpoint.Endpoint::remote_sync(@commands.dsh_status, _ => {
       state.dsh.status()
     }),
+    @endpoint.Endpoint::remote(@commands.dsh_pending, async fn(_) {
+      state.dsh.interactions()
+    }),
     @endpoint.Endpoint::remote(@commands.dsh_request, async fn(params) {
       guard DshDesktopCall::decode(params) is Some(call) else {
         raise @host.PayloadError("malformed dsh request payload")

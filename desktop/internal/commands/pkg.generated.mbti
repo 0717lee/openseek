@@ -103,6 +103,8 @@ pub let codex_turn_start : Command[@protocol.CodexTurnStartPayload, @protocol.Co
 
 pub let codex_turn_steer : Command[@protocol.CodexTurnSteerPayload, @protocol.CodexCommandReply[@protocol.CodexTurnReply]]
 
+pub let dsh_pending : Command[Json, Json]
+
 pub let dsh_request : Command[Json, Json]
 
 pub let dsh_respond : Command[Json, Json]

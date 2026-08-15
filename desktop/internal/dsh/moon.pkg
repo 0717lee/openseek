@@ -5,7 +5,9 @@ import {
   "moonbitlang/async/process",
   "moonbitlang/async/websocket",
   "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/debug",
   "moonbitlang/core/json",
+  "openseek_desktop/internal/jsonx",
   "tonyfettes/xlog",
 }
 

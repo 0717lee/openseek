@@ -40,6 +40,7 @@ priv enum ConnectionState {
 priv enum ActorInput {
   Call(String, Json, @async.Queue[Result[Json, DshError]])
   Respond(Json, @async.Queue[Result[Json, DshError]])
+  ListInteractions(@async.Queue[Result[Json, DshError]])
 }
 
 ///|
@@ -64,11 +65,105 @@ const DshEventCapacity : Int = 2048
 const ActorWakeCapacity : Int = 1
 
 ///|
+/// The actor owns interaction membership for the whole Desktop lifetime. Its
+/// generation orders a page-attach snapshot against live mux events, so a
+/// slower old snapshot cannot remove a newer approval or question.
+priv struct PendingInteractionRegistry {
+  mut requests : Map[String, Json]
+  mut generation : Int
+}
+
+///|
+fn PendingInteractionRegistry::PendingInteractionRegistry() -> PendingInteractionRegistry {
+  { requests: Map([]), generation: 0 }
+}
+
+///|
+fn PendingInteractionRegistry::reset(self : PendingInteractionRegistry) -> Unit {
+  self.requests = Map([])
+  self.generation = self.generation + 1
+}
+
+///|
+fn PendingInteractionRegistry::remove_rpc(
+  self : PendingInteractionRegistry,
+  rpc_id : String,
+) -> Unit {
+  guard self.requests.get(rpc_id) is Some(_) else { return }
+  self.requests.remove(rpc_id)
+  self.generation = self.generation + 1
+}
+
+///|
+fn PendingInteractionRegistry::remove_approval(
+  self : PendingInteractionRegistry,
+  approval_id : String,
+) -> Unit {
+  let matched : Array[String] = []
+  for rpc_id, request in self.requests {
+    guard request is Object(fields) &&
+      fields.get("payload") is Some(Object(payload)) &&
+      @jsonx.json_text(payload, "type") == Some("approval/requested") &&
+      @jsonx.json_text(payload, "approvalId") == Some(approval_id) else {
+      continue
+    }
+    matched.push(rpc_id)
+  }
+  for rpc_id in matched {
+    self.remove_rpc(rpc_id)
+  }
+}
+
+///|
+fn PendingInteractionRegistry::observe(
+  self : PendingInteractionRegistry,
+  message : Json,
+) -> Unit {
+  guard message is Object(fields) &&
+    @jsonx.json_text(fields, "rpcId") is Some(rpc_id) &&
+    fields.get("payload") is Some(Object(payload)) &&
+    @jsonx.json_text(payload, "type") is Some(type_) else {
+    return
+  }
+  match type_ {
+    "approval/requested" | "question/requested" => {
+      self.requests[rpc_id] = message
+      self.generation = self.generation + 1
+    }
+    "approval/resolved" =>
+      if @jsonx.json_text(payload, "approvalId") is Some(approval_id) {
+        self.remove_approval(approval_id)
+      }
+    "question/resolved" =>
+      self.remove_rpc(
+        @jsonx.json_text(payload, "questionRpcId").unwrap_or(rpc_id),
+      )
+    _ => ()
+  }
+}
+
+///|
+fn PendingInteractionRegistry::snapshot(
+  self : PendingInteractionRegistry,
+) -> Json {
+  let data : Array[Json] = []
+  for _, message in self.requests {
+    data.push({
+      "stream": "mux",
+      "message": message,
+      "generation": self.generation,
+    })
+  }
+  { "data": data, "generation": self.generation }
+}
+
+///|
 struct Actor {
   inputs : @async.Queue[ActorInput]
   wake : @async.Queue[Unit]
   mut state : ConnectionState
   mut next_rpc_id : Int
+  interactions : PendingInteractionRegistry
 }
 
 ///|
@@ -78,6 +173,7 @@ pub fn Actor::Actor() -> Actor {
     wake: Queue(kind=Blocking(ActorWakeCapacity)),
     state: Starting,
     next_rpc_id: 0,
+    interactions: PendingInteractionRegistry(),
   }
 }
 
@@ -125,6 +221,20 @@ pub async fn Actor::respond(self : Actor, message : Json) -> Json {
 }
 
 ///|
+/// List the approval and question requests still owned by the current dsh
+/// connection. A newly attached page reads this after status so it can recover
+/// interactions emitted before its Proton event subscription existed.
+pub async fn Actor::interactions(self : Actor) -> Json {
+  let reply : @async.Queue[Result[Json, DshError]] = Queue(kind=Blocking(1))
+  self.inputs.put(ListInteractions(reply))
+  self.signal()
+  match reply.get() {
+    Ok(value) => value
+    Err(error) => raise error
+  }
+}
+
+///|
 /// Own dsh for the Desktop lifetime. A failed executable or disconnected API
 /// stays quiet until the next command asks for one reconnect attempt.
 pub async fn Actor::run(self : Actor, emit : (String, Json) -> Unit) -> Unit {
@@ -148,6 +258,9 @@ async fn[G] Actor::run_connection(
   emit : (String, Json) -> Unit,
 ) -> Unit {
   self.state = Starting
+  // Requests from an older WebSocket generation cannot be answered on this
+  // connection. The new mux baseline will repopulate still-pending requests.
+  self.interactions.reset()
   emit("dsh.status_changed", self.status())
   let events : @async.Queue[DshEvent] = Queue(kind=Blocking(DshEventCapacity))
   let connection = Connection::connect(group) catch {
@@ -198,8 +311,16 @@ async fn[G] Actor::run_connection(
     }
     match next {
       Input(input) => connection.dispatch_input(group, self, input)
-      Event(Frame(stream, message)) =>
-        emit("dsh.event", { "stream": stream, "message": message })
+      Event(Frame(stream, message)) => {
+        if stream == "mux" {
+          self.interactions.observe(message)
+        }
+        emit("dsh.event", {
+          "stream": stream,
+          "message": message,
+          "generation": self.interactions.generation,
+        })
+      }
       Event(Disconnected) => break
     }
   }
@@ -229,7 +350,7 @@ async fn Actor::next_step(
 fn ActorInput::reject(self : ActorInput, error : DshError) -> Unit {
   error.log()
   match self {
-    Call(_, _, reply) | Respond(_, reply) =>
+    Call(_, _, reply) | Respond(_, reply) | ListInteractions(reply) =>
       (reply.try_put(Err(error)) catch { _ => false }) |> ignore
   }
 }
@@ -286,12 +407,55 @@ fn[G] Connection::dispatch_input(
         }
         (reply.try_put(outcome) catch { _ => false }) |> ignore
       })
+    ListInteractions(reply) =>
+      (reply.try_put(Ok(actor.interactions.snapshot())) catch { _ => false })
+      |> ignore
   }
 }
 
 ///|
-async test "dsh actor consumes a buffered command before events" {
+async test "dsh actor tracks pending interactions and consumes buffered commands" {
   let actor = Actor()
+  actor.interactions.observe({
+    "rpcId": "approval-rpc",
+    "payload": {
+      "type": "approval/requested",
+      "sessionId": "session-1",
+      "approvalId": "approval-1",
+      "toolName": "write",
+    },
+  })
+  @debug.assert_eq(actor.interactions.snapshot(), {
+    "data": [
+      {
+        "stream": "mux",
+        "message": {
+          "rpcId": "approval-rpc",
+          "payload": {
+            "type": "approval/requested",
+            "sessionId": "session-1",
+            "approvalId": "approval-1",
+            "toolName": "write",
+          },
+        },
+        "generation": 1,
+      },
+    ],
+    "generation": 1,
+  })
+  actor.interactions.observe({
+    "rpcId": "resolved-rpc",
+    "payload": {
+      "type": "approval/resolved",
+      "sessionId": "session-1",
+      "approvalId": "approval-1",
+      "outcome": "allowed-once",
+    },
+  })
+  @debug.assert_eq(actor.interactions.snapshot(), {
+    "data": [],
+    "generation": 2,
+  })
   let events : @async.Queue[DshEvent] = Queue(kind=Blocking(1))
   let reply : @async.Queue[Result[Json, DshError]] = Queue(kind=Blocking(1))
   actor.inputs.put(Call("session.list", {}, reply))

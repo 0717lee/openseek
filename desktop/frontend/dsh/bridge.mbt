@@ -94,6 +94,34 @@ fn DshReplyKind::status(
 }
 
 ///|
+/// Read the actor-owned interaction baseline after a page attaches. The actor
+/// serializes this snapshot with live mux events and supplies their generation.
+fn DshReplyKind::pending(
+  self : DshReplyKind,
+  dispatch : @cmd.Emit[Msg],
+) -> @cmd.Cmd {
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      let value : Json = @interop.bridge_request(
+        @interop.ChannelId::Local,
+        @commands.dsh_pending,
+        {},
+      ) catch {
+        error => {
+          scheduler.add(
+            dispatch(
+              Failed(kind=self, message=@interop.bridge_error_text(error)),
+            ),
+          )
+          return
+        }
+      }
+      scheduler.add(dispatch(Reply(kind=self, value~)))
+    })
+  })
+}
+
+///|
 fn DshReplyKind::respond(
   self : DshReplyKind,
   dispatch : @cmd.Emit[Msg],
@@ -165,19 +193,27 @@ fn State::load_history(
 }
 
 ///|
-fn State::send(self : State, dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
+fn State::send(
+  self : State,
+  dispatch : @cmd.Emit[Msg],
+  generation : Int,
+) -> @cmd.Cmd {
   guard self.active_id is Some(session_id) else { return @cmd.none }
   let text = self.draft.trim().to_owned()
   guard !text.is_empty() else { return @cmd.none }
-  DshPromptReply.request(dispatch, "session.prompt", {
-    "sessionId": session_id,
-    "mode": if self.is_running() {
-      "steer"
-    } else {
-      "queue"
+  DshPromptReply(session_id~, draft=self.draft, generation~).request(
+    dispatch,
+    "session.prompt",
+    {
+      "sessionId": session_id,
+      "mode": if self.is_running() {
+        "steer"
+      } else {
+        "queue"
+      },
+      "content": [{ "type": "text", "text": text }],
     },
-    "content": [{ "type": "text", "text": text }],
-  })
+  )
 }
 
 ///|
