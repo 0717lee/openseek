@@ -6,7 +6,7 @@ import {
   "moonbitlang/editor/shell/workspace",
 }
 
-supported_targets = "native+wasm"
+supported_targets = "native"
 
 import {
   "moonbitlang/async",

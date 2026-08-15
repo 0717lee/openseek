@@ -63,7 +63,10 @@ PORT := "5173"
 ASSET_DIR := "web/dist"
 MOON_COMMAND := "moon"
 BROWSE_ROOT := ""
-TARGET := "wasm"
+# Was "wasm" until moonbitlang/async 0.20.5 broke wasm linking; see the note
+# in server/moon.mod. Running the host natively needs a C toolchain, which
+# every other target in this repo already requires.
+TARGET := "native"
 
 serve:
     moon run --target {{ TARGET }} server/host/main -- \
