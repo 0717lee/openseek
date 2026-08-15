@@ -265,22 +265,29 @@ pub fn boot() -> Unit {
         )
       }),
     })
-    state.view4(terminal_html, transcript_html, right_panel_html, (
-      model,
+    let composer_input = state.map(model => model.composer_input(emit))
+    let composer_html = @composer.component(
+      composer_input,
+      emit.map(action => ComposerAction(action)),
+    )
+    state.view5(
       terminal_html,
       transcript_html,
       right_panel_html,
-    ) => {
-      view(
-        emit,
-        terminal_emit(@terminal.ToggleTerminal),
-        emit(ToggleRightPanel),
-        model,
-        terminal_html,
-        transcript_html,
-        right_panel_html,
-      )
-    })
+      composer_html,
+      (model, terminal_html, transcript_html, right_panel_html, composer_html) => {
+        view(
+          emit,
+          terminal_emit(@terminal.ToggleTerminal),
+          emit(ToggleRightPanel),
+          model,
+          terminal_html,
+          transcript_html,
+          right_panel_html,
+          composer_html,
+        )
+      },
+    )
   })
   app.mount("app")
 }
