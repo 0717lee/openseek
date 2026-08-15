@@ -192,7 +192,7 @@ async fn serve_config(
       // the durable record. Use the throwing resolver here so a retained
       // binding whose checkout vanished names that worktree instead of being
       // flattened into an unspecified missing cwd.
-    } else if workspace_of_session(session) is Some(dir) {
+    } else if @session_store.workspace_of(session) is Some(dir) {
       Some(session_run_dir(dir, session).to_path())
     } else {
       session_workspace_dir(session)
@@ -204,7 +204,7 @@ async fn serve_config(
       // A hint-less client resuming an existing workspace conversation must
       // keep using that workspace's store. Only genuinely new sessions fall
       // back to the global root; otherwise one id forks into two histories.
-      session_store_root(session)
+      @session_store.root_of(session)
     },
   }
 }

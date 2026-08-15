@@ -33,7 +33,7 @@ pub async fn start_run(
   let record_guard = manager.begin_record_op(key)
   defer manager.end_record_op(key, record_guard)
   let config = run_config(manager, payload)
-  ensure_session_not_archived(key)
+  @session_store.ensure_not_archived(key)
   let sessions = manager.serving()
   let slot = slot_for(sessions, key)
   if slot.engine is Some(live) {
@@ -260,7 +260,7 @@ pub async fn compact_run(
   let session = payload.session.trim().to_owned()
   let record_guard = manager.begin_record_op(session)
   defer manager.end_record_op(session, record_guard)
-  ensure_session_not_archived(session)
+  @session_store.ensure_not_archived(session)
   let sessions = manager.serving()
   let slot = slot_for(sessions, session)
   // Claim before anything else — even with a live engine. A start between
@@ -388,7 +388,7 @@ pub async fn goal_run(
   }
   let record_guard = manager.begin_record_op(session)
   defer manager.end_record_op(session, record_guard)
-  ensure_session_not_archived(session)
+  @session_store.ensure_not_archived(session)
   let sessions = manager.serving()
   let slot = slot_for(sessions, session)
   // Claim before looking at the engine, exactly as compact_run does: a start
@@ -709,7 +709,7 @@ pub async fn load_session(
     }
     Some(@workspaces.store_root(workspace))
   } else {
-    session_store_root(session)
+    @session_store.root_of(session)
   }
   guard root is Some(root) else {
     raise EngineError(
@@ -732,7 +732,7 @@ pub async fn load_session(
   // whose store just detached (or whose record moved to an archived twin),
   // and the answer should say that, not ENOENT.
   if !@fsx.is_dir(root.join("sessions").join(session).to_path()) {
-    if archived_record_root(session) is Some(_) {
+    if @session_store.archived_root_of(session) is Some(_) {
       raise EngineError("this conversation is archived; unarchive it first")
     }
     raise EngineError(
@@ -774,15 +774,15 @@ pub async fn load_archived_session(
       @workspaces.registered_dir(absolute) is Some(workspace) else {
       raise EngineError("\{hint} is not a registered workspace")
     }
-    Some(archived_session_root(@workspaces.store_root(workspace)))
+    Some(@session_store.archived_root(@workspaces.store_root(workspace)))
   } else {
-    match archived_record_root(session) {
-      Some(root) => Some(archived_session_root(root))
+    match @session_store.archived_root_of(session) {
+      Some(root) => Some(@session_store.archived_root(root))
       None => None
     }
   }
   guard root is Some(root) else {
-    if live_record_root(session) is Some(_) {
+    if @session_store.live_root_of(session) is Some(_) {
       raise EngineError("this conversation is not archived")
     }
     raise EngineError(
@@ -790,7 +790,7 @@ pub async fn load_archived_session(
     )
   }
   if !@fsx.is_dir(root.join("sessions").join(session).to_path()) {
-    if live_record_root(session) is Some(_) {
+    if @session_store.live_root_of(session) is Some(_) {
       raise EngineError("this conversation is not archived")
     }
     raise EngineError("no archived record for this conversation")

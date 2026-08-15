@@ -381,7 +381,7 @@ async fn WorktreeOwner::binding_unlocked(
 ) -> (@pathx.Absolute, WorktreeEntry)? {
   let workspaces = match self {
     OpenSeekSession(session) =>
-      match workspace_of_session(session) {
+      match @session_store.workspace_of(session) {
         Some(workspace) => [workspace]
         None => []
       }
@@ -669,7 +669,7 @@ pub async fn create_worktree(
   name? : String,
 ) -> WorktreeCreateReply {
   let owner_id = owner.id()
-  guard safe_workspace_id(owner_id) else {
+  guard @session_store.safe_session_id(owner_id) else {
     let detail = match owner {
       OpenSeekSession(_) =>
         "a worktree binds to a conversation; session id invalid"
@@ -699,7 +699,7 @@ pub async fn create_worktree(
   }
   require_main_worktree(dir)
   if owner is OpenSeekSession(session) {
-    ensure_session_not_archived(session)
+    @session_store.ensure_not_archived(session)
   }
   // Snapshot this workspace's setting once for the lifecycle operation. A
   // concurrent page edit applies to the next create or repair instead of
@@ -755,7 +755,7 @@ pub async fn create_worktree(
     let global_record : @pathx.Absolute? = @workspaces.global_store_root().map(root => {
       root.join("sessions").join(session)
     })
-    let has_history = if workspace_of_session(session) is Some(_) {
+    let has_history = if @session_store.workspace_of(session) is Some(_) {
       true
     } else if global_record is Some(record) {
       @fsx.is_dir(record.to_path()) catch {
@@ -2092,7 +2092,7 @@ async test "archive keeps worktree placement for explicit repair after unarchive
   )
   assert_true(
     @fsx.is_dir(
-      archived_session_root(@workspaces.store_root(repo))
+      @session_store.archived_root(@workspaces.store_root(repo))
       .join("sessions")
       .join("s-arc")
       .to_path(),

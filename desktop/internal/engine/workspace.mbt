@@ -5,34 +5,6 @@
 const WorkspaceDirName = "OpenSeek"
 
 ///|
-/// The registered workspace owning `session`, found by where the session's
-/// durable record lives (`<workspace>/.openseek/sessions/<id>`). The record's
-/// location is the mapping — there is no separate index to fall out of date.
-/// `None` for scratch conversations, whose records live in the global store.
-async fn workspace_of_session(session : String) -> @pathx.Absolute? {
-  guard safe_workspace_id(session) else { return None }
-  for workspace in @workspaces.registered() {
-    let record = @workspaces.store_root(workspace)
-      .join("sessions")
-      .join(session)
-    if @fsx.is_dir(record.to_path()) {
-      return Some(workspace)
-    }
-  }
-  None
-}
-
-///|
-/// The session store root holding `session`'s durable record: its workspace's
-/// in-project store when one claims it, otherwise the global root.
-async fn session_store_root(session : String) -> @pathx.Absolute? {
-  if workspace_of_session(session) is Some(workspace) {
-    return Some(@workspaces.store_root(workspace))
-  }
-  @workspaces.global_store_root()
-}
-
-///|
 /// Exact session-to-directory bindings learned from a host-owned source such
 /// as Codex app-server. Unlike the persisted OpenSeek workspace registry,
 /// these grants live only for this process and authorize only one session id;
@@ -61,7 +33,7 @@ async fn HostWorkspaceAuthorizations::authorize(
   let candidate = @pathx.Path(trimmed).normalize().to_absolute()
   self.lock.acquire()
   defer self.lock.release()
-  if safe_workspace_id(session) && candidate is Some(candidate) {
+  if @session_store.safe_session_id(session) && candidate is Some(candidate) {
     self.paths[session] = candidate.0
   } else {
     self.paths.remove(session)
@@ -144,13 +116,13 @@ pub async fn resolve_host_workspace_authorization(
 /// directory is known, or a bound checkout is missing. The run-config caller
 /// rejects every unavailable root instead of moving the run elsewhere.
 async fn session_workspace_dir(session : String) -> @pathx.Path? {
-  if workspace_of_session(session) is Some(workspace) {
+  if @session_store.workspace_of(session) is Some(workspace) {
     // A session bound to one of the workspace's worktrees works in that
     // checkout while it exists. A retained binding whose checkout is missing
     // refuses every workspace operation until the user rebuilds it.
     return session_tree_dir(workspace, session).map(dir => dir.to_path())
   }
-  guard safe_workspace_id(session) else { return None }
+  guard @session_store.safe_session_id(session) else { return None }
   guard workspace_root() is Some(root) else { return None }
   Some(root.join(session).normalize())
 }
@@ -185,7 +157,7 @@ pub async fn session_review_base(
     @workspaces.registered_dir(hint) is Some(workspace) {
     Some(workspace)
   } else {
-    workspace_of_session(session)
+    @session_store.workspace_of(session)
   }
   guard workspace is Some(workspace) else { return None }
   session_tree_base(workspace, session)
@@ -323,18 +295,6 @@ fn contained_path(
 }
 
 ///|
-/// Whether a session id can serve as a single path component under the
-/// workspace root. Path separators and dot segments could escape the root —
-/// those conversations work in the home directory instead.
-fn safe_workspace_id(session : String) -> Bool {
-  !session.is_empty() &&
-  session != "." &&
-  session != ".." &&
-  !session.contains("/") &&
-  !session.contains("\\")
-}
-
-///|
 /// Root for per-conversation workspaces: an `OpenSeek` folder inside the
 /// user's Documents directory — the agent's output is user-facing work, not
 /// app data, so it belongs where the user already looks for files. Where
@@ -352,27 +312,9 @@ async fn workspace_root() -> @pathx.Path? {
   Some(parent.join(WorkspaceDirName).normalize())
 }
 
-// Tests for the pure workspace-path helper. The full
-// `session_workspace_dir` / `workspace_root` chain depends on the
-// environment (HOME, an existing Documents folder), so the tests cover the
-// pure piece: which ids are allowed under the workspace root.
-
-///|
-test "session ids are accepted as workspace folder names" {
-  assert_true(safe_workspace_id("desktop-20260611-093045-123"))
-  assert_true(safe_workspace_id("my-cli-session"))
-  assert_true(safe_workspace_id("a.b"))
-}
-
-///|
-test "ids that could escape the workspace root are rejected" {
-  assert_false(safe_workspace_id(""))
-  assert_false(safe_workspace_id("."))
-  assert_false(safe_workspace_id(".."))
-  assert_false(safe_workspace_id("a/b"))
-  assert_false(safe_workspace_id("a\\b"))
-  assert_false(safe_workspace_id("../escape"))
-}
+// Tests for the pure open-target rule. The full `session_workspace_dir` /
+// `workspace_root` chain depends on the environment (HOME, an existing
+// Documents folder) and is covered by the live app.
 
 ///|
 test "absolute paths open as themselves" {
