@@ -160,6 +160,9 @@ struct State {
   // overwriting later navigation or settling a newer send.
   pending_generation : Int
   selection_generation : Int
+  // Session creation can span workspace.create and session.create. Keep that
+  // chain busy independently from status events until its final reply settles.
+  creation_pending : Bool
   prompt_generation : Int
   prompt_pending_session : String?
   // A session-status event can arrive before the HTTP response that settles an
@@ -183,6 +186,7 @@ pub fn State::State(loading? : Bool = false) -> State {
     pending: [],
     pending_generation: 0,
     selection_generation: 0,
+    creation_pending: false,
     prompt_generation: 0,
     prompt_pending_session: None,
     response_pending_rpcs: [],
@@ -202,6 +206,7 @@ pub fn State::can_create(self : State) -> Bool {
 /// accepted requests have settled.
 fn State::busy(self : State) -> Bool {
   self.loading ||
+  self.creation_pending ||
   self.prompt_pending_session is Some(_) ||
   self.pending
   .iter()

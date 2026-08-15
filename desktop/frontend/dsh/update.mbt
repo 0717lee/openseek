@@ -10,14 +10,16 @@ pub fn update(
   match msg {
     Refresh => (state.refresh(dispatch), { ..state, loading: true, notice: "" })
     NewSession(workspace_id) =>
-      if workspace_id is Some(workspace_id) {
+      if state.creation_pending {
+        (@cmd.none, state)
+      } else if workspace_id is Some(workspace_id) {
         (
           state.create_session(
             dispatch,
             workspace_id,
             state.selection_generation,
           ),
-          { ..state, loading: true, notice: "" },
+          { ..state, creation_pending: true, loading: true, notice: "" },
         )
       } else {
         (
@@ -30,7 +32,9 @@ pub fn update(
         )
       }
     NewWorkspaceSession(path) =>
-      if path.trim().is_empty() {
+      if state.creation_pending {
+        (@cmd.none, state)
+      } else if path.trim().is_empty() {
         (
           @cmd.none,
           {
@@ -42,7 +46,7 @@ pub fn update(
       } else {
         (
           state.create_workspace_session(dispatch, path),
-          { ..state, loading: true, notice: "" },
+          { ..state, creation_pending: true, loading: true, notice: "" },
         )
       }
     OpenSession(session_id) => {
@@ -189,11 +193,11 @@ pub fn update(
       }
       if kind is DshCreateReply(selection_generation) &&
         state.selection_generation != selection_generation {
-        return (@cmd.none, state)
+        return (@cmd.none, { ..state, creation_pending: false })
       }
       if kind is DshWorkspaceCreateReply(selection_generation) &&
         state.selection_generation != selection_generation {
-        return (@cmd.none, state)
+        return (@cmd.none, { ..state, creation_pending: false })
       }
       (
         @cmd.none,
@@ -218,6 +222,12 @@ pub fn update(
             DshResponseReply(rpc_id~, ..) =>
               state.response_pending_rpcs.filter(id => id != rpc_id)
             _ => state.response_pending_rpcs
+          },
+          creation_pending: if kind is DshCreateReply(_) ||
+            kind is DshWorkspaceCreateReply(_) {
+            false
+          } else {
+            state.creation_pending
           },
           // Connection failures belong to the root toast queue. Other dsh
           // request failures remain attached to the dsh transcript surface.
@@ -290,6 +300,12 @@ fn State::with_reply(
         } else {
           self.prompt_pending_session
         },
+        creation_pending: if kind is DshCreateReply(_) ||
+          kind is DshWorkspaceCreateReply(_) {
+          false
+        } else {
+          self.creation_pending
+        },
         loading: false,
         notice: envelope.error(),
       },
@@ -323,12 +339,13 @@ fn State::with_reply(
         fields.get("workspace") is Some(Object(workspace)) &&
         @jsonx.json_text(workspace, "workspaceId") is Some(workspace_id) else {
         if !current {
-          return (@cmd.none, self)
+          return (@cmd.none, { ..self, creation_pending: false })
         }
         return (
           @cmd.none,
           {
             ..self,
+            creation_pending: false,
             loading: false,
             notice: "DeepSeek Harness returned a malformed workspace.create reply",
           },
@@ -340,9 +357,9 @@ fn State::with_reply(
           self.create_session(dispatch, workspace_id, selection_generation),
         ]),
         if current {
-          { ..self, loading: true, notice: "" }
+          { ..self, creation_pending: true, loading: true, notice: "" }
         } else {
-          self
+          { ..self, creation_pending: true }
         },
       )
     }
@@ -399,12 +416,13 @@ fn State::with_reply(
       guard value is Object(fields) &&
         @jsonx.json_text(fields, "sessionId") is Some(session_id) else {
         if !activate {
-          return (@cmd.none, self)
+          return (@cmd.none, { ..self, creation_pending: false })
         }
         return (
           @cmd.none,
           {
             ..self,
+            creation_pending: false,
             loading: false,
             notice: "DeepSeek Harness returned a malformed session.create reply",
           },
@@ -424,6 +442,7 @@ fn State::with_reply(
             ..self,
             active_id: Some(session_id),
             selection_generation: self.selection_generation + 1,
+            creation_pending: false,
             draft: "",
             events: [],
             streaming: "",
@@ -431,7 +450,7 @@ fn State::with_reply(
             notice: "",
           }
         } else {
-          self
+          { ..self, creation_pending: false }
         },
       )
     }
@@ -1213,6 +1232,92 @@ test "dsh session creation requires an explicit workspace id" {
 }
 
 ///|
+test "dsh session creation remains busy through session status events" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let state = {
+    ..State(),
+    connection: DshReady,
+    sessions: [
+      {
+        id: "session-1",
+        title: "Session 1",
+        cwd: None,
+        running: true,
+        blank: false,
+      },
+    ],
+    active_id: Some("session-1"),
+  }
+  let (_, creating) = update(dispatch, NewSession(Some("workspace-1")), state)
+  assert_true(creating.creation_pending)
+  assert_true(creating.loading)
+  assert_false(creating.can_create())
+  let (_, status) = creating.with_event(dispatch, {
+    "stream": "host",
+    "message": {
+      "rpcId": "status-1",
+      "payload": {
+        "type": "host/session-status",
+        "sessionId": "session-1",
+        "running": true,
+      },
+    },
+    "generation": 1,
+  })
+  assert_true(status.creation_pending)
+  assert_false(status.loading)
+  assert_true(status.busy())
+  assert_false(status.can_create())
+  let (_, duplicate) = update(dispatch, NewSession(Some("workspace-1")), status)
+  assert_true(duplicate == status)
+  let (_, created) = duplicate.with_reply(dispatch, DshCreateReply(0), {
+    "type": "server-response",
+    "rpcId": "create-1",
+    "result": { "ok": true, "value": { "sessionId": "session-2" } },
+  })
+  assert_false(created.creation_pending)
+  assert_eq(created.active_id, Some("session-2"))
+}
+
+///|
+test "dsh workspace creation stays busy until its session is created" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let state = { ..State(), connection: DshReady }
+  let (_, creating_workspace) = update(
+    dispatch,
+    NewWorkspaceSession("/project"),
+    state,
+  )
+  assert_true(creating_workspace.creation_pending)
+  let (_, creating_session) = creating_workspace.with_reply(
+    dispatch,
+    DshWorkspaceCreateReply(0),
+    {
+      "type": "server-response",
+      "rpcId": "workspace-create-1",
+      "result": {
+        "ok": true,
+        "value": {
+          "workspace": {
+            "workspaceId": "workspace-1",
+            "title": "Project",
+            "path": "/project",
+            "sessionIds": [],
+          },
+        },
+      },
+    },
+  )
+  assert_true(creating_session.creation_pending)
+  let (_, created) = creating_session.with_reply(dispatch, DshCreateReply(0), {
+    "type": "server-response",
+    "rpcId": "session-create-1",
+    "result": { "ok": true, "value": { "sessionId": "session-1" } },
+  })
+  assert_false(created.creation_pending)
+}
+
+///|
 test "accepted dsh prompt advances transcript submission generation" {
   let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   let state = {
@@ -1384,6 +1489,7 @@ test "late dsh creation preserves newer session navigation" {
   assert_eq(navigated.draft, "")
   let current = {
     ..navigated,
+    creation_pending: true,
     events: [
       {
         type_: "assistant/message",
@@ -1404,6 +1510,7 @@ test "late dsh creation preserves newer session navigation" {
   assert_eq(preserved.streaming, "session B output")
   assert_eq(preserved.events.length(), 1)
   assert_eq(preserved.selection_generation, 1)
+  assert_false(preserved.creation_pending)
   let same_selection = { ..state, draft: "keep for A" }
   let (_, reopened) = update(dispatch, OpenSession("session-a"), same_selection)
   assert_eq(reopened.draft, "keep for A")
