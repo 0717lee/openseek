@@ -128,6 +128,184 @@ fn app_shortcut_message(keyboard : @dom.KeyboardEvent, is_apple : Bool) -> Msg? 
 }
 
 ///|
+/// Root message translation for the data-only sidebar component tree. Stable
+/// component ids contain every value needed to build a domain message, so no
+/// child component captures or stores the application model.
+priv struct SidebarDispatcher {
+  emit : @cmd.Emit[Msg]
+}
+
+///|
+fn SidebarDispatcher::emit(self : SidebarDispatcher, message : Msg) -> @cmd.Cmd {
+  (self.emit)(message)
+}
+
+///|
+/// A component id this dispatcher has no route for is a wiring defect — a
+/// source string and its dispatch arm out of sync. Surface it as an error
+/// toast rather than swallowing the click.
+fn SidebarDispatcher::unroutable(
+  self : SidebarDispatcher,
+  action : String,
+  detail : String,
+) -> @cmd.Cmd {
+  self.emit(HostActionFailed("Sidebar \{action} has no route for \{detail}"))
+}
+
+///|
+fn SidebarDispatcher::conversation_open(
+  self : SidebarDispatcher,
+  id : @conversation.Id,
+) -> @cmd.Cmd {
+  guard @interop.ChannelId::from_uri_authority(id.channel()) is Some(channel) else {
+    return self.unroutable("open", "channel \{id.channel()}")
+  }
+  match id.source() {
+    "openseek.live" => self.emit(OpenSession(channel, id.conversation()))
+    "openseek.archived" => {
+      let workspace = id.root().bind(root => @resource.of_path(channel, root))
+      self.emit(
+        OpenArchivedSession(channel, session=id.conversation(), workspace~),
+      )
+    }
+    source => self.unroutable("open", "source \{source}")
+  }
+}
+
+///|
+fn SidebarDispatcher::conversation_archive(
+  self : SidebarDispatcher,
+  id : @conversation.Id,
+) -> @cmd.Cmd {
+  guard @interop.ChannelId::from_uri_authority(id.channel()) is Some(channel) &&
+    id.source() == "openseek.live" else {
+    return self.unroutable("archive", "\{id.source()}@\{id.channel()}")
+  }
+  self.emit(ArchiveSession(channel, id.conversation()))
+}
+
+///|
+fn SidebarDispatcher::conversation_restore(
+  self : SidebarDispatcher,
+  id : @conversation.Id,
+) -> @cmd.Cmd {
+  guard @interop.ChannelId::from_uri_authority(id.channel()) is Some(channel) &&
+    id.source() == "openseek.archived" else {
+    return self.unroutable("restore", "\{id.source()}@\{id.channel()}")
+  }
+  self.emit(UnarchiveSession(channel, id.conversation()))
+}
+
+///|
+fn SidebarDispatcher::conversation_delete(
+  self : SidebarDispatcher,
+  id : @conversation.Id,
+) -> @cmd.Cmd {
+  guard @interop.ChannelId::from_uri_authority(id.channel()) is Some(channel) &&
+    id.source() == "openseek.archived" else {
+    return self.unroutable("delete", "\{id.source()}@\{id.channel()}")
+  }
+  self.emit(
+    DeleteArchivedSession(channel, {
+      session: id.conversation(),
+      workspace: id.root().bind(root => @resource.of_path(channel, root)),
+    }),
+  )
+}
+
+///|
+fn SidebarDispatcher::project_new(
+  self : SidebarDispatcher,
+  id : @project.Id,
+) -> @cmd.Cmd {
+  guard @interop.ChannelId::from_uri_authority(id.channel()) is Some(channel) &&
+    id.source() == "openseek.projects" else {
+    return self.unroutable("new chat", "\{id.source()}@\{id.channel()}")
+  }
+  // A click racing the project's detach loses its registry entry; that is a
+  // dead row on its way out, not a wiring defect.
+  guard @resource.of_path(channel, id.root()) is Some(project) else {
+    return @cmd.none
+  }
+  self.emit(NewChatIn(channel, Some(project)))
+}
+
+///|
+fn SidebarDispatcher::project_settings(
+  self : SidebarDispatcher,
+  id : @project.Id,
+) -> @cmd.Cmd {
+  guard @interop.ChannelId::from_uri_authority(id.channel()) is Some(channel) else {
+    return self.unroutable("settings", "channel \{id.channel()}")
+  }
+  guard @resource.of_path(channel, id.root()) is Some(project) else {
+    return @cmd.none
+  }
+  self.emit(OpenWorkspaceSettings(channel, project))
+}
+
+///|
+fn SidebarDispatcher::project_detach(
+  self : SidebarDispatcher,
+  id : @project.Id,
+) -> @cmd.Cmd {
+  guard @interop.ChannelId::from_uri_authority(id.channel()) is Some(channel) else {
+    return self.unroutable("detach", "channel \{id.channel()}")
+  }
+  guard @resource.of_path(channel, id.root()) is Some(project) else {
+    return @cmd.none
+  }
+  self.emit(RemoveProject(channel, project))
+}
+
+///|
+fn SidebarDispatcher::section_primary(
+  self : SidebarDispatcher,
+  id : @section.Id,
+) -> @cmd.Cmd {
+  guard @interop.ChannelId::from_uri_authority(id.channel()) is Some(channel) else {
+    return self.unroutable("section action", "channel \{id.channel()}")
+  }
+  match id.source() {
+    "openseek.projects" => self.emit(PickProject(channel))
+    "openseek.chats" => self.emit(NewChatIn(channel, None))
+    source => self.unroutable("section action", "source \{source}")
+  }
+}
+
+///|
+fn SidebarDispatcher::actions(self : SidebarDispatcher) -> @sidebar.Actions {
+  let conversation : @conversation.Actions = {
+    open: id => self.conversation_open(id),
+    archive: id => self.conversation_archive(id),
+    restore: id => self.conversation_restore(id),
+    delete: id => self.conversation_delete(id),
+  }
+  let project : @project.Actions = {
+    new_conversation: id => self.project_new(id),
+    open_settings: id => self.project_settings(id),
+    detach: id => self.project_detach(id),
+    conversation,
+  }
+  let section : @section.Actions = {
+    primary: id => self.section_primary(id),
+    placeholder: id => self.unroutable("placeholder action", id),
+    project,
+    conversation,
+  }
+  {
+    toggle: self.emit(ToggleSidebar),
+    new_chat: self.emit(NewChat),
+    update: self.emit(UpdateClicked),
+    open_skills: self.emit(OpenSkills),
+    open_settings: self.emit(OpenSetup),
+    refresh_account: self.emit(Console(RefreshClicked)),
+    sign_out: self.emit(Console(SignOutClicked)),
+    section,
+  }
+}
+
+///|
 #warnings("-alert_unstable")
 pub fn boot() -> Unit {
   @crash_page.install()
@@ -173,15 +351,6 @@ pub fn boot() -> Unit {
               "launcher-dismiss",
               trigger=".launcher-button",
               emit.map((_ : Unit) => CloseLauncher),
-            ),
-          )
-        }
-        if model.project_menu is Some(_) {
-          subs.push(
-            dismiss_subscription(
-              "project-menu-dismiss",
-              trigger=".workspace-menu-button",
-              emit.map((_ : Unit) => CloseProjectMenu),
             ),
           )
         }
@@ -270,12 +439,25 @@ pub fn boot() -> Unit {
       composer_input,
       emit.map(action => ComposerAction(action)),
     )
-    state.view5(
+    let sidebar_input = state.map(model => model.sidebar_component_input())
+    let sidebar_html = @sidebar.component(
+      sidebar_input,
+      SidebarDispatcher::{ emit, }.actions(),
+    )
+    state.view6(
       terminal_html,
       transcript_html,
       right_panel_html,
       composer_html,
-      (model, terminal_html, transcript_html, right_panel_html, composer_html) => {
+      sidebar_html,
+      (
+        model,
+        terminal_html,
+        transcript_html,
+        right_panel_html,
+        composer_html,
+        sidebar_html,
+      ) => {
         view(
           emit,
           terminal_emit(@terminal.ToggleTerminal),
@@ -285,6 +467,7 @@ pub fn boot() -> Unit {
           transcript_html,
           right_panel_html,
           composer_html,
+          sidebar_html,
         )
       },
     )

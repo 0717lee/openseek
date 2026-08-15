@@ -819,7 +819,6 @@ test "a confirmed add focuses the new project when its commit lands" {
   // own ＋ activates it.
   let (_, focused) = update_dev(dispatch, ProjectsChanged([picked]), resolved)
   assert_eq(focused.dev().active_project, Some(picked))
-  assert_true(!focused.projects_collapsed)
   // The adoption is consumed: a later broadcast adding someone else's
   // project must not move the focus again.
   let other = @interop.ChannelId::Local.test_resource("/elsewhere")

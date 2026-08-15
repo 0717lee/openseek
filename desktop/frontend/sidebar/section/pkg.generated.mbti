@@ -1,0 +1,66 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "openseek_desktop/frontend/sidebar/section"
+
+import {
+  "moonbit-community/rabbita",
+  "moonbit-community/rabbita/cmd",
+  "moonbit-community/rabbita/html",
+  "moonbitlang/core/debug",
+  "openseek_desktop/frontend/sidebar/conversation",
+  "openseek_desktop/frontend/sidebar/project",
+}
+
+// Values
+pub fn component(@rabbita.Val[Input], Actions) -> @rabbita.Val[Array[(String, @html.Html)]]
+
+// Errors
+
+// Types and methods
+pub(all) struct Action {
+  title : String
+  disabled : Bool
+} derive(Eq, @debug.Debug)
+
+pub(all) struct Actions {
+  primary : (Id) -> @cmd.Cmd
+  placeholder : (String) -> @cmd.Cmd
+  project : @project.Actions
+  conversation : @conversation.Actions
+}
+
+pub(all) enum Entry {
+  Project(@project.Input)
+  Conversation(@conversation.Input)
+  Placeholder(Placeholder)
+} derive(Eq, @debug.Debug)
+
+pub(all) struct Id {
+  source : String
+  channel : String
+} derive(Eq, Hash, @debug.Debug)
+pub fn Id::Id(source~ : String, channel~ : String) -> Self
+pub fn Id::channel(Self) -> String
+pub fn Id::key(Self) -> String
+pub fn Id::source(Self) -> String
+
+pub(all) struct Input {
+  id : Id
+  label : String
+  initially_collapsed : Bool
+  selected : Bool
+  action : Action?
+  entries : Array[Entry]
+} derive(Eq, @debug.Debug)
+pub fn Input::id(Self) -> Id
+
+pub(all) struct Placeholder {
+  id : String
+  label : String
+  class_name : String
+  nested : Bool
+  openable : Bool
+} derive(Eq, @debug.Debug)
+
+// Type aliases
+
+// Traits

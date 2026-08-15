@@ -1234,26 +1234,6 @@ priv struct Model {
   // view and root layout. The root owns the opaque state once so neither side
   // reports a second visibility copy back to the other.
   terminal : @terminal.State
-  // Whether the sidebar's "Chats" section (the default store's loose
-  // conversations) is folded down to its heading; clicking the heading flips
-  // it.
-  chats_collapsed : Bool
-  // Whether the sidebar's "Projects" section (the attached projects and their
-  // nested conversations) is folded down to its heading; clicking the heading
-  // flips it.
-  projects_collapsed : Bool
-  // Project folder rows fold independently inside the Projects section. The
-  // key includes the owning device because remote channels can expose the
-  // same filesystem spelling without referring to the same project.
-  collapsed_projects : Array[(@interop.ChannelId, @common.Uri)]
-  // Projects whose per-window chat preview was expanded through "Show more".
-  // The default absence keeps each open project to its five newest chats.
-  expanded_project_chats : Array[(@interop.ChannelId, @common.Uri)]
-  // The conversations whose sub-run transcripts are unfolded in the sidebar,
-  // as (device, session id) — session ids are only unique within a channel.
-  // Sidebar-only view state, held for the window's lifetime and never
-  // persisted; a conversation that launched no sub-run never appears here.
-  expanded_subruns : Array[(@interop.ChannelId, String)]
   // The archive-discard confirmation, staged when the host refused an
   // archive because the conversation's worktree holds uncommitted changes;
   // confirming retries the archive with force.
@@ -1284,10 +1264,6 @@ priv struct Model {
   conversations : Array[Conversation]
   // The in-app folder picker behind "Add a project"; None while closed.
   project_picker : ProjectPicker?
-  // The one open project-row "…" menu (settings, detach); None while
-  // closed. Its click-away dismissal is mounted only while open, like the
-  // launcher's.
-  project_menu : ProjectMenu?
   // A confirmed add waiting for its registry snapshot; None otherwise.
   pending_project_adoption : ProjectAdoption?
   // The Skills page: the registry catalog, the local library's contents,
@@ -1672,20 +1648,6 @@ priv enum Msg {
   FontSizeChanged(String)
   // The window was resized; `width` decides the narrow (phone) layout.
   ViewportResized(width~ : Int)
-  // The sidebar's "Chats" heading was clicked — fold or unfold the section.
-  ToggleChatsSection
-  // The sidebar's "Projects" heading was clicked — fold or unfold the section.
-  ToggleProjectsSection
-  // A project folder row was clicked — fold or unfold only that project's
-  // nested chats without changing which project receives new conversations.
-  ToggleProjectSection(@interop.ChannelId, @common.Uri)
-  // The project's "Show more" row was clicked — reveal every remaining chat
-  // for that project for the rest of this window lifetime.
-  ShowMoreProjectChats(@interop.ChannelId, @common.Uri)
-  // A conversation row's disclosure was clicked — show or hide the sub-run
-  // transcripts folded under it. The row's own click still opens the session,
-  // so the two controls never fight over one gesture.
-  ToggleSubruns(@interop.ChannelId, String)
   SaveApiKey
   OpenSkills
   SkillsQueryChanged(String)
@@ -1768,9 +1730,6 @@ priv enum Msg {
   // away — the directory and the sessions inside it stay, so re-adding
   // restores them.
   RemoveProject(@interop.ChannelId, @common.Uri)
-  // Open (or, clicked again, close) one project row's "…" menu.
-  ToggleProjectMenu(@interop.ChannelId, @common.Uri)
-  CloseProjectMenu
   // Show the per-workspace settings page for one device's project.
   OpenWorkspaceSettings(@interop.ChannelId, @common.Uri)
   // The workspace settings page's launch-mode select. Carries the raw
@@ -1808,7 +1767,8 @@ priv enum Msg {
   // Restore an archived conversation into its device's live list.
   UnarchiveSession(@interop.ChannelId, String)
   // Stage, confirm, or cancel permanent deletion of an archived conversation.
-  DeleteArchivedSession(@interop.ChannelId, ArchiveRecordKey, String)
+  // The confirmation's display title comes from the archived record itself.
+  DeleteArchivedSession(@interop.ChannelId, ArchiveRecordKey)
   ConfirmDeleteArchivedSession
   CancelDeleteArchivedSession
   // The host's dark-mode preference changed. It updates the palette only while
@@ -2411,11 +2371,6 @@ fn initial_model() -> Model {
     right_panel_open: false,
     right_panel_menu_open: false,
     terminal: @terminal.State::empty(),
-    chats_collapsed: false,
-    projects_collapsed: false,
-    collapsed_projects: [],
-    expanded_project_chats: [],
-    expanded_subruns: [],
     active_session: "",
     loading_conversation: None,
     transcript_request_generation: 0,
@@ -2423,7 +2378,6 @@ fn initial_model() -> Model {
     submission_sequence: 0,
     conversations: [],
     project_picker: None,
-    project_menu: None,
     pending_project_adoption: None,
     archive_confirm: None,
     archived_delete_confirm: None,
@@ -2807,42 +2761,6 @@ fn Model::matched_settlement_frontier(
     }
   }
   None
-}
-
-///|
-/// Whether this conversation's folded sub-run transcripts are showing.
-fn Model::subruns_expanded(
-  self : Model,
-  channel : @interop.ChannelId,
-  session_id : String,
-) -> Bool {
-  self.expanded_subruns
-  .iter()
-  .any(entry => entry.0 == channel && entry.1 == session_id)
-}
-
-///|
-/// Whether one project's nested chats are folded to its folder row.
-fn Model::project_collapsed(
-  self : Model,
-  channel : @interop.ChannelId,
-  project : @common.Uri,
-) -> Bool {
-  self.collapsed_projects
-  .iter()
-  .any(entry => entry.0 == channel && entry.1 == project)
-}
-
-///|
-/// Whether one project has revealed the chats beyond its default preview.
-fn Model::project_chats_expanded(
-  self : Model,
-  channel : @interop.ChannelId,
-  project : @common.Uri,
-) -> Bool {
-  self.expanded_project_chats
-  .iter()
-  .any(entry => entry.0 == channel && entry.1 == project)
 }
 
 ///|
