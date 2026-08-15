@@ -294,12 +294,31 @@ Notifications:
 | method | params | result |
 |---|---|---|
 | `session.list` | `{}` | the session index |
-| `session.load` | `{session, workspace?}` — a non-blank workspace must still be registered; omitted/blank locates the session across registered stores, then the global store | `{session: <the durable session JSON>, watermark?}` — current hosts include `watermark`, the highest event `sequence` the snapshot contains (0 for an empty record); older hosts may omit it, in which case clients derive it from the stored events' own sequences. |
-| `session.load_archived` | `{session, workspace?}` — the same store selection rules as `session.load`, but reads only from that store's archived twin | `{session: <the durable session JSON>, watermark?}` without restoring or otherwise changing the archived record |
+| `session.load` | `{session, workspace}` — the exact store to read, as a registered project path (see *Naming the store* below) | `{session: <the durable session JSON>, watermark?}` — current hosts include `watermark`, the highest event `sequence` the snapshot contains (0 for an empty record); older hosts may omit it, in which case clients derive it from the stored events' own sequences. |
+| `session.load_archived` | `{session, workspace}` — the same store selection as `session.load`, but reads only from that store's archived twin | `{session: <the durable session JSON>, watermark?}` without restoring or otherwise changing the archived record |
 | `session.list_archived` | `{}` | the archived index |
-| `session.archive` | `{session, force?}` | success returns the archived session index (the legacy `{groups}` shape) and moves the conversation plus every sibling `<session>-sr-N` descendant transcript as one family. A dirty checkout returns `{kind:"needs_force", worktree, dirty_paths, dirty_path_count}` without changing durable state; `dirty_paths` previews up to 8 paths and `dirty_path_count` counts all status rows. Clients show a discard-confirmation dialog and retry with `force` only after explicit confirmation. On success the conversation's checkout goes with it, but its name/branch/session placement remains registered (the branch survives; a `worktree.changed` broadcast reports `present: false`). "Dirty" means tracked modifications or non-ignored untracked files; ignored files count as disposable and are removed with the checkout, matching `git worktree remove`'s own semantics |
-| `session.unarchive` | `{session}` | outcome — restores the conversation and every archived subagent descendant record together. A retained worktree placement whose checkout was removed returns as missing, so clients offer Repair before any agent, terminal, or file operation can continue |
-| `session.delete_archived` | `{session, workspace}` | permanently deletes the archived conversation record from the exact host-listed project store and every archived subagent descendant record in that store, then returns the archived index. Its retained worktree placement is removed and broadcast, but project files and the Git branch remain. The operation refuses unknown stores, live records, and running/compacting family members |
+| `session.archive` | `{session, workspace, force?}` — `workspace` selects the store exactly, the way `session.delete_archived` does | success returns the archived session index (the legacy `{groups}` shape) and moves the conversation plus every sibling `<session>-sr-N` descendant transcript as one family. A dirty checkout returns `{kind:"needs_force", worktree, dirty_paths, dirty_path_count}` without changing durable state; `dirty_paths` previews up to 8 paths and `dirty_path_count` counts all status rows. Clients show a discard-confirmation dialog and retry with `force` only after explicit confirmation. On success the conversation's checkout goes with it, but its name/branch/session placement remains registered (the branch survives; a `worktree.changed` broadcast reports `present: false`). "Dirty" means tracked modifications or non-ignored untracked files; ignored files count as disposable and are removed with the checkout, matching `git worktree remove`'s own semantics |
+| `session.unarchive` | `{session, workspace}` — the store whose archived twin holds the record | outcome — restores the conversation and every archived subagent descendant record together. A retained worktree placement whose checkout was removed returns as missing, so clients offer Repair before any agent, terminal, or file operation can continue |
+| `session.delete_archived` | `{session, workspace}` | permanently deletes the archived conversation record from the named store and every archived subagent descendant record in that store, then returns the archived index. Its retained worktree placement is removed and broadcast, but project/scratch files and the Git branch remain. The operation refuses unknown stores, live records, and running/compacting family members |
+
+#### Naming the store
+
+A session id is unique only within one durable store, so every op above that
+addresses an existing record carries `workspace` beside the id: the
+host-reported project resource path, the same spelling `session.changed` and
+both listings report. The host
+validates a project path against its registry (a detached workspace is
+refused by name) and then selects that store exactly. It never falls back to
+searching, so a same-id record in another store can be neither read nor moved
+by mistake, and a client that guesses gets an error instead of the wrong
+conversation.
+
+This matters because `session.list` really can return two rows with one id —
+one per attached project — and a client that keeps only `session` is
+unable to tell them apart. Persist `(workspace, session)` together for
+anything you can act on later; a client that persists a workspace session
+across a host restart must send that workspace back, because the record is
+unreachable without it once the store is no longer the default.
 
 Notifications:
 
@@ -445,12 +464,10 @@ directory or sessions. Clients keep the workspace attached to already-open
 conversation state, so a stale attempt names that now-unregistered path and
 is rejected instead of silently relocating the session into the global store.
 
-That workspace hint is part of a client's resume state. A protocol client
-that persists a workspace session across a host restart must persist and send
-its `workspace` too: once the workspace is no longer registered, an omitted
-hint leaves a missing id indistinguishable from a brand-new session.
-The current wire has no persistent detached-session tombstone; the bundled
-client retains the hint and therefore gets the intended rejection.
+That workspace is part of a client's resume state — see *Naming the store*
+above, where every record-addressing op requires it. The current wire has no
+persistent detached-session tombstone; the bundled client retains the store
+and therefore gets the intended rejection instead of a silent relocation.
 
 ### worktree.*
 
