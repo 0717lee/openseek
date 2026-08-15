@@ -109,7 +109,13 @@ pub fn update(
             state.connection
           },
           loading: false,
-          notice: message,
+          // Connection failures belong to the root toast queue. Other dsh
+          // request failures remain attached to the dsh transcript surface.
+          notice: if kind is DshStatusReply {
+            ""
+          } else {
+            message
+          },
         },
       )
     StatusChanged(value) => state.with_status(dispatch, value)
@@ -310,6 +316,7 @@ fn State::with_status(
         ..self,
         connection: DshUnavailable("Malformed dsh status"),
         loading: false,
+        notice: "",
       },
     )
   }
@@ -334,7 +341,7 @@ fn State::with_status(
           ..self,
           connection: DshUnavailable(message),
           loading: false,
-          notice: message,
+          notice: "",
         },
       )
     }

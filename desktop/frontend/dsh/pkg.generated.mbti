@@ -4,6 +4,7 @@ package "openseek_desktop/frontend/dsh"
 import {
   "moonbit-community/rabbita/cmd",
   "moonbit-community/rabbita/html",
+  "openseek_desktop/frontend/sidebar/section",
   "openseek_desktop/frontend/transcript",
 }
 
@@ -28,13 +29,6 @@ pub(all) struct PageActions {
   transcript : @html.Html
 }
 
-pub(all) struct SidebarActions {
-  selected : Bool
-  open : @cmd.Cmd
-  start_session : (String) -> @cmd.Cmd
-  open_session : (String) -> @cmd.Cmd
-}
-
 type State derive(Eq)
 pub fn State::State(loading? : Bool) -> Self
 pub fn State::active_id(Self) -> String?
@@ -43,9 +37,10 @@ pub fn State::can_create(Self) -> Bool
 pub fn State::has_active(Self) -> Bool
 pub fn State::page(Self, @cmd.Emit[Msg], Bool, Bool, Bool, PageActions) -> Array[@html.Html]
 pub fn State::preferred_workspace_id(Self) -> String?
-pub fn State::sidebar_rows(Self, SidebarActions) -> Array[@html.Html]
+pub fn State::sidebar_section(Self, Bool) -> @section.Input
 pub fn State::streaming_text(Self) -> String
 pub fn State::transcript_items(Self) -> Array[@transcript.TranscriptItem]
+pub fn State::unavailable_message(Self) -> String?
 
 // Type aliases
 

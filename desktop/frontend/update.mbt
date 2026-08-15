@@ -3064,12 +3064,21 @@ fn update_msg(
       )
     }
     Dsh(msg) => {
+      let unavailable_before = model.dsh.unavailable_message()
       let (cmd, dsh) = @dsh.update(
         dispatch.map(next => Dsh(next)),
         msg,
         model.dsh,
       )
-      (cmd, { ..model, dsh, })
+      let unavailable_after = dsh.unavailable_message()
+      let next = { ..model, dsh, }
+      if unavailable_after is Some(message) &&
+        unavailable_before != unavailable_after {
+        let (toast, notified) = next.notify_error(dispatch, message)
+        (@cmd.batch([cmd, toast]), notified)
+      } else {
+        (cmd, next)
+      }
     }
     ToggleSidebar => (@cmd.none, { ..model, sidebar_open: !model.sidebar_open })
     ViewportResized(width~) => {
@@ -14507,6 +14516,31 @@ test "an archive failure pops a toast that a click or its timer dismisses" {
     expired.notifications[0].message,
     content="Archive failed: still missing",
   )
+}
+
+///|
+test "a dsh startup failure pops one toast and stays out of the transcript" {
+  let dispatch = test_dispatch()
+  let message = "DeepSeek Harness failed to start: unsupported Node.js runtime"
+  let status = @dsh.Msg::status_changed({
+    "status": "unavailable",
+    "message": message,
+  })
+  let (_, failed) = update(dispatch, Dsh(status), test_model())
+  assert_eq(failed.dsh.unavailable_message(), Some(message))
+  assert_eq(failed.notifications.length(), 1)
+  assert_eq(failed.notifications[0].message, message)
+  assert_eq(failed.dsh.transcript_items().length(), 0)
+  // A status poll can repeat the same state; it must not extend the toast
+  // stack or restart another six-second expiry timer.
+  let (_, repeated) = update(
+    dispatch,
+    Dsh(
+      @dsh.Msg::status_changed({ "status": "unavailable", "message": message }),
+    ),
+    failed,
+  )
+  assert_eq(repeated.notifications.length(), 1)
 }
 
 ///|

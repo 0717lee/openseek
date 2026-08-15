@@ -6,6 +6,9 @@
 const HandshakeTimeoutMs : Int = 60_000
 
 ///|
+const StderrDrainTimeoutMs : Int = 1_000
+
+///|
 const RequestTimeoutMs : Int = 120_000
 
 ///|
@@ -30,6 +33,45 @@ fn ReadyLine::url(self : ReadyLine) -> String? {
     Some(url)
   } else {
     None
+  }
+}
+
+///|
+/// Retain the first human-readable startup error while the stderr pump keeps
+/// draining concurrently. dsh can print a long nested stack after this line;
+/// the first `Error:` explains the failure without turning a toast into a log.
+priv struct StartupDiagnostics {
+  mut error : String?
+}
+
+///|
+fn StartupDiagnostics::StartupDiagnostics() -> StartupDiagnostics {
+  { error: None }
+}
+
+///|
+fn StartupDiagnostics::record_stderr(
+  self : StartupDiagnostics,
+  line : String,
+) -> Unit {
+  if self.error is None && line.trim().strip_prefix("Error: ") is Some(error) {
+    self.error = Some(error.to_owned())
+  }
+}
+
+///|
+fn StartupDiagnostics::failure_message(
+  self : StartupDiagnostics,
+  process : @process.Process,
+) -> String {
+  if self.error is Some(error) {
+    return "DeepSeek Harness failed to start: " + error
+  }
+  let exit_code = process.try_wait() catch { _ => None }
+  if exit_code is Some(exit_code) {
+    "DeepSeek Harness failed to start: dsh exited with code \{exit_code} before its API became ready"
+  } else {
+    "DeepSeek Harness failed to start: dsh closed stdout before its API became ready"
   }
 }
 
@@ -181,19 +223,24 @@ async fn Connection::pump(
 /// Spawn `dsh web` on an OS-assigned loopback port and wait for its readiness
 /// line. The two WebSocket pumps start only after this function returns, so a
 /// ready status always names an origin whose complete Loader tree settled.
-async fn[X] Connection::connect(group : @async.TaskGroup[X]) -> Connection? {
+async fn[X] Connection::connect(group : @async.TaskGroup[X]) -> Connection {
   let (child_stdin, stdin_writer) = @process.write_to_process() catch {
     error if @async.is_being_cancelled() => raise error
-    _ => return None
+    error =>
+      raise DshError::Unavailable(
+        "DeepSeek Harness failed to prepare dsh stdin: \{error}",
+      )
   }
   let (stdout_reader, child_stdout) = @process.read_from_process() catch {
     error if @async.is_being_cancelled() => {
       stdin_writer.close()
       raise error
     }
-    _ => {
+    error => {
       stdin_writer.close()
-      return None
+      raise DshError::Unavailable(
+        "DeepSeek Harness failed to prepare dsh stdout: \{error}",
+      )
     }
   }
   let (stderr_reader, child_stderr) = @process.read_from_process() catch {
@@ -202,10 +249,12 @@ async fn[X] Connection::connect(group : @async.TaskGroup[X]) -> Connection? {
       stdin_writer.close()
       raise error
     }
-    _ => {
+    error => {
       stdout_reader.close()
       stdin_writer.close()
-      return None
+      raise DshError::Unavailable(
+        "DeepSeek Harness failed to prepare dsh stderr: \{error}",
+      )
     }
   }
   // dsh owns its installation and Node runtime. Desktop only invokes the
@@ -228,11 +277,13 @@ async fn[X] Connection::connect(group : @async.TaskGroup[X]) -> Connection? {
       stdin_writer.close()
       raise error
     }
-    _ => {
+    error => {
       stderr_reader.close()
       stdout_reader.close()
       stdin_writer.close()
-      return None
+      raise DshError::Unavailable(
+        "DeepSeek Harness could not start dsh: \{error}",
+      )
     }
   }
   let closed : Ref[Bool] = { val: false }
@@ -245,7 +296,8 @@ async fn[X] Connection::connect(group : @async.TaskGroup[X]) -> Connection? {
       process.cancel()
     }
   }
-  group.spawn_bg(
+  let diagnostics = StartupDiagnostics()
+  let stderr_task = group.spawn(
     () => {
       for ;; {
         let line = stderr_reader.read_until("\n") catch {
@@ -253,6 +305,7 @@ async fn[X] Connection::connect(group : @async.TaskGroup[X]) -> Connection? {
           _ => None
         }
         guard line is Some(line) else { break }
+        diagnostics.record_stderr(line)
         @xlog.debug(category="dsh") <? { "event": "dsh_stderr", "line": line }
       }
     },
@@ -276,12 +329,37 @@ async fn[X] Connection::connect(group : @async.TaskGroup[X]) -> Connection? {
       @xlog.warn(category="dsh") <?
         { "event": "dsh_readiness_failed", "error": "\{error}" }
       teardown()
-      return None
+      raise DshError::Unavailable(
+        "DeepSeek Harness failed while waiting for dsh to become ready: \{error}",
+      )
     }
   }
-  guard ready is Some(Some(base_url)) else {
-    teardown()
-    return None
+  let base_url = match ready {
+    Some(Some(base_url)) => base_url
+    Some(None) => {
+      // stdout closes after the child exits. Wait for the concurrent stderr
+      // drain so the status and toast retain dsh's actual top-level error. A
+      // misbehaving child can close stdout without exiting, so this wait is
+      // bounded before teardown closes the remaining pipes.
+      ignore(
+        @async.with_timeout_opt(StderrDrainTimeoutMs, () => stderr_task.wait()) catch {
+          error if @async.is_being_cancelled() => {
+            teardown()
+            raise error
+          }
+          _ => None
+        },
+      )
+      let message = diagnostics.failure_message(process)
+      teardown()
+      raise DshError::Unavailable(message)
+    }
+    None => {
+      teardown()
+      raise DshError::Unavailable(
+        "DeepSeek Harness failed to start: dsh did not become ready within 60 seconds",
+      )
+    }
   }
   group.spawn_bg(
     () => {
@@ -297,7 +375,7 @@ async fn[X] Connection::connect(group : @async.TaskGroup[X]) -> Connection? {
     no_wait=true,
     allow_failure=true,
   )
-  Some({ base_url, teardown })
+  { base_url, teardown }
 }
 
 ///|

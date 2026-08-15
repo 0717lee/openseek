@@ -150,15 +150,20 @@ async fn[G] Actor::run_connection(
   self.state = Starting
   emit("dsh.status_changed", self.status())
   let events : @async.Queue[DshEvent] = Queue(kind=Blocking(DshEventCapacity))
-  let connection = Connection::connect(group)
-  guard connection is Some(connection) else {
-    let message = "DeepSeek Harness is unavailable: dsh could not start from PATH"
-    self.state = Unavailable(message)
-    emit("dsh.status_changed", self.status())
-    if pending is Some(input) {
-      input.reject(Unavailable(message))
+  let connection = Connection::connect(group) catch {
+    error if @async.is_being_cancelled() => raise error
+    error => {
+      // Connection startup errors already distinguish executable lookup,
+      // readiness timeout, and dsh's own stderr. Preserve that explanation
+      // for the frontend instead of misreporting every failure as PATH.
+      let message = "\{error}"
+      self.state = Unavailable(message)
+      emit("dsh.status_changed", self.status())
+      if pending is Some(input) {
+        input.reject(Unavailable(message))
+      }
+      return
     }
-    return
   }
   let receive = (stream : String, value : Json) => {
     let accepted = events.try_put(Frame(stream, value)) catch { _ => false }

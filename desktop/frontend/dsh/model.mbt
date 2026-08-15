@@ -184,6 +184,17 @@ pub fn State::has_active(self : State) -> Bool {
 }
 
 ///|
+/// The root Desktop model uses connection failures for its shared toast
+/// queue. Keeping this as plain data lets the dsh update remain pure and lets
+/// the root suppress duplicate notifications from status polling.
+pub fn State::unavailable_message(self : State) -> String? {
+  match self.connection {
+    DshUnavailable(message) => Some(message)
+    DshStarting | DshReady => None
+  }
+}
+
+///|
 /// The selected dsh session namespaces the shared keyed transcript renderer.
 pub fn State::active_id(self : State) -> String? {
   self.active_id
@@ -233,7 +244,7 @@ fn State::connection_label(self : State) -> String {
   match self.connection {
     DshStarting => "Starting DeepSeek Harness"
     DshReady => "DeepSeek Harness"
-    DshUnavailable(message) => "DeepSeek Harness unavailable: " + message
+    DshUnavailable(_) => "DeepSeek Harness unavailable"
   }
 }
 
