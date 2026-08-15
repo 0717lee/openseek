@@ -262,7 +262,7 @@ pub async fn compact_run(
   // the engine on that slot counts as this conversation's only if it writes
   // the same store. Resolved here rather than from `compact_config` because a
   // reused engine never builds one, and the store must be known either way.
-  let store = requested_store(session, workspace?=payload.workspace)
+  let store = requested_store(payload.workspace)
   let sessions = manager.serving()
   let slot = slot_for(sessions, session)
   // Claim before anything else — even with a live engine. A start between
@@ -382,7 +382,7 @@ pub async fn goal_run(
   @session_store.ensure_not_archived(session)
   // The goal is durable state of one record, so the store is resolved before
   // the slot is read — see `compact_run`.
-  let store = requested_store(session, workspace?=payload.workspace)
+  let store = requested_store(payload.workspace)
   let sessions = manager.serving()
   let slot = slot_for(sessions, session)
   // Claim before looking at the engine, exactly as compact_run does: this op
@@ -900,7 +900,7 @@ async test "start echoes the client submission id in Started" {
         thinking: None,
         max_steps: None,
         session,
-        workspace: Some(workspace),
+        workspace,
       }),
     )
     let mut echoed : String? = None
@@ -975,7 +975,7 @@ async test "a goal is delivered only once its command is on the wire" {
       model: None,
       thinking: None,
       max_steps: None,
-      workspace: Some(workspace),
+      workspace,
     })
     assert_true(delivered.delivered)
     // The reply already means the bytes left this host, so the child has them
@@ -1101,7 +1101,7 @@ async test "setup failure retires the writer before an immediate next start" {
         thinking: None,
         max_steps: None,
         session,
-        workspace: Some(workspace),
+        workspace,
       }).run_id
     assert_true(
       @async.with_timeout_opt(3000, () => {
@@ -1125,7 +1125,7 @@ async test "setup failure retires the writer before an immediate next start" {
       thinking: None,
       max_steps: None,
       session,
-      workspace: Some(workspace),
+      workspace,
     })
     assert_eq(second.status, "accepted")
     assert_true(@fsx.exists(old_done))
@@ -1220,7 +1220,7 @@ async test "a prompt bigger than the pipe still settles exactly once" {
       thinking: None,
       max_steps: None,
       session,
-      workspace: Some(workspace),
+      workspace,
     })
     assert_eq(reply.status, "accepted")
     assert_eq(started.val, Some(reply.run_id))
@@ -1314,7 +1314,7 @@ async test "named session retries after its first prompt creates no record" {
       thinking: None,
       max_steps: None,
       session,
-      workspace: Some(workspace),
+      workspace,
     })
     assert_eq(first.status, "accepted")
     assert_eq(started.val, Some(first.run_id))
@@ -1355,7 +1355,7 @@ async test "named session retries after its first prompt creates no record" {
       thinking: None,
       max_steps: None,
       session,
-      workspace: Some(workspace),
+      workspace,
     })
     assert_eq(second.status, "accepted")
     let second_run_id = second.run_id
@@ -1541,7 +1541,7 @@ async test "workspace detach refuses a running conversation without hiding it" {
       thinking: None,
       max_steps: None,
       session: "s-detach-running",
-      workspace: Some(workspace.to_string()),
+      workspace: workspace.to_string(),
     })
     assert_eq(reply.status, "accepted")
     let committed : Ref[Bool] = Ref(false)
@@ -1628,7 +1628,7 @@ async test "workspace detach drains an idle writer and its follower first" {
       thinking: None,
       max_steps: None,
       session: "s-detach-idle",
-      workspace: Some(workspace.to_string()),
+      workspace: workspace.to_string(),
     })
     let run_id = reply.run_id
     assert_true(
@@ -1683,7 +1683,7 @@ async test "a goal request is refused before it can reach the wrong engine" {
       model: None,
       thinking: None,
       max_steps: None,
-      workspace: None,
+      workspace: "",
     }).contains("autonomous goal continuation is not supported yet"),
   )
   // Manual, named: past the refusal and on to the engine, which is where a
@@ -1696,7 +1696,7 @@ async test "a goal request is refused before it can reach the wrong engine" {
       model: None,
       thinking: None,
       max_steps: None,
-      workspace: None,
+      workspace: "",
     }).contains("not supported yet"),
   )
 }

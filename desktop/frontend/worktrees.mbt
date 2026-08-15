@@ -186,6 +186,9 @@ fn start_in_new_worktree(
               WorktreeCreated(workspace~, name=reply.name, session~),
             ),
           )
+          // The store is this project: `start_in_new_worktree` accepted the
+          // workspace for this channel, and a worktree conversation records
+          // in its project's store while working in the checkout.
           let start = start_payload(
             task,
             selected_model,
@@ -193,7 +196,7 @@ fn start_in_new_worktree(
             max_steps,
             session,
             submission_id,
-            workspace~,
+            workspace=workspace.path,
           )
           request_agent_start(
             scheduler, dispatch, channel, start, session, submission_id,
@@ -332,8 +335,14 @@ fn set_goal_in_new_worktree(
               WorktreeCreated(workspace~, name=reply.name, session~),
             ),
           )
+          // The project this goal's record lives in — see the start chain.
           let payload = goal_payload(
-            session, engine_model, reasoning, max_steps, workspace, text,
+            session,
+            engine_model,
+            reasoning,
+            max_steps,
+            workspace.path,
+            text,
           )
           request_agent_goal(
             scheduler, dispatch, channel, payload, session, command, text,
@@ -1765,14 +1774,14 @@ test "a start payload never names a worktree" {
     "1000",
     "desktop-wt",
     "sub-1",
-    workspace~,
+    workspace=workspace.path,
   )
-  // The typed wire shape has no worktree field at all; the workspace hint
-  // is the only placement the start carries.
+  // The typed wire shape has no worktree field at all; the store the record
+  // lives in is the only placement the start carries.
   assert_true(
     payload.to_json() is Object(fields) && fields.get("worktree") is None,
   )
-  assert_eq(payload.workspace, Some("/proj"))
+  assert_eq(payload.workspace, "/proj")
   assert_eq(payload.thinking, Some(ThinkingMax))
   let unknown_model = start_payload(
     "go",
@@ -1781,7 +1790,7 @@ test "a start payload never names a worktree" {
     "1000",
     "desktop-kimi",
     "sub-2",
-    workspace~,
+    workspace=workspace.path,
   )
   assert_true(unknown_model.thinking is None)
 }

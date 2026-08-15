@@ -5360,9 +5360,10 @@ fn update_device_msg(
       }
       // A commit or Started broadcast can materialize a conversation before
       // session.list tells this page which durable store owns it. Reconcile
-      // that provisional placement from the list before any later send: an
-      // empty workspace hint here would otherwise fork the same session into
-      // the default store.
+      // that provisional placement from the list before any later send: the
+      // store this page believes in is the one every request names, so a
+      // provisional Scratch placement would send the next prompt to a Scratch
+      // record instead of the project one the conversation came from.
       let stores = listed_stores(items)
       let conversations = model.conversations.map(conv => {
         if conv.device == channel {
@@ -7701,6 +7702,9 @@ test "an approval notification click opens its local conversation" {
 
 ///|
 fn encoded_start_workspace(conv : Conversation) -> String? {
+  guard conv.record_key().workspace_payload(conv.device) is Some(workspace) else {
+    return None
+  }
   let payload = start_payload(
     "continue",
     High,
@@ -7708,7 +7712,7 @@ fn encoded_start_workspace(conv : Conversation) -> String? {
     "1000",
     conv.session_id,
     "test-submission",
-    workspace=conv.project(),
+    workspace~,
   )
   let json = payload.to_json()
   guard json is Object(fields) else { return None }

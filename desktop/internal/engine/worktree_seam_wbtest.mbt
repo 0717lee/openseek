@@ -216,7 +216,7 @@ async test "a bound session routes every start through its checkout" {
     thinking: None,
     max_steps: None,
     session: "s-bind",
-    workspace: Some(ws.to_string()),
+    workspace: ws.to_string(),
   })
   assert_eq(
     first.cwd.map(dir => dir.to_string()),
@@ -227,7 +227,8 @@ async test "a bound session routes every start through its checkout" {
     first.session_root.unwrap().to_string(),
     ws.join(".openseek").to_string(),
   )
-  // A hint-less resume goes through the durable record and the mapping.
+  // A resume names the same store and goes through the registry again: the
+  // binding is the registry's, not the first start's.
   @fsx.ensure_dir(ws.join(".openseek/sessions/s-bind").to_path())
   let resumed = run_config(manager, {
     task: "resume",
@@ -236,7 +237,7 @@ async test "a bound session routes every start through its checkout" {
     thinking: None,
     max_steps: None,
     session: "s-bind",
-    workspace: None,
+    workspace: ws.to_string(),
   })
   assert_eq(
     resumed.cwd.map(dir => dir.to_string()),
@@ -308,7 +309,7 @@ async test "worktree remove refuses a running conversation without unmapping it"
       thinking: None,
       max_steps: None,
       session: "s-wt-run",
-      workspace: Some(ws.to_string()),
+      workspace: ws.to_string(),
     })
     assert_eq(reply.status, "accepted")
     let committed : Ref[Bool] = Ref(false)
@@ -420,7 +421,7 @@ async test "a checkout deleted outside the app refuses runs and is repairable" {
         thinking: None,
         max_steps: None,
         session: "s-vanish",
-        workspace: Some(repo.to_string()),
+        workspace: repo.to_string(),
       }),
     )
     "no error"
@@ -430,27 +431,6 @@ async test "a checkout deleted outside the app refuses runs and is repairable" {
     error => "\{error}"
   }
   assert_true(hinted_refusal.contains("wt") && hinted_refusal.contains("gone"))
-  let resumed_refusal = try {
-    ignore(
-      run_config(manager, {
-        task: "resume",
-        submission_id: None,
-        model: None,
-        thinking: None,
-        max_steps: None,
-        session: "s-vanish",
-        workspace: None,
-      }),
-    )
-    "no error"
-  } catch {
-    EngineError(detail) => detail
-    error if @async.is_being_cancelled() => raise error
-    error => "\{error}"
-  }
-  assert_true(
-    resumed_refusal.contains("wt") && resumed_refusal.contains("gone"),
-  )
   // Recreating repairs the SAME environment: same name, same branch, and the
   // branch's commit is back in the working tree.
   let repaired = @worktree.create(

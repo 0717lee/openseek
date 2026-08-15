@@ -267,11 +267,11 @@ This is lifecycle correlation only; durable transcript items still come from
 
 | method | params | result |
 |---|---|---|
-| `agent.start` | `{task, session, submission_id?, model?, thinking?, max_steps?, workspace?}` — `session` is a required non-blank durable conversation id. `thinking`, when present, is `no`, `high`, or `max`. No credentials or store path are accepted: the host resolves settings and durable placement; `workspace` is honored only when registered. A session bound to one of the workspace's worktrees (`worktree.create` binds at creation) runs in that checkout — the start never names or mutates worktrees | `{run_id, status, …}` — `accepted` after the complete prompt command is written; a post-`started` write failure returns `failed`, while pre-`started` failures use the error response. Every reply that returns names the run it opened; the host does not deduplicate a resent `submission_id` |
+| `agent.start` | `{task, session, workspace, submission_id?, model?, thinking?, max_steps?}` — `(workspace, session)` is the record this run writes: a required non-blank conversation id, and the store holding it (see *Naming the store* below). `thinking`, when present, is `no`, `high`, or `max`. No credentials or store root are accepted — the host resolves settings, and honors `workspace` only while registered. A session bound to one of the workspace's worktrees (`worktree.create` binds at creation) runs in that checkout — the start never names or mutates worktrees | `{run_id, status, …}` — `accepted` after the complete prompt command is written; a post-`started` write failure returns `failed`, while pre-`started` failures use the error response. Every reply that returns names the run it opened; the host does not deduplicate a resent `submission_id` |
 | `agent.cancel` | `{run_id?}` (absent = the latest run) | `{run_id?}` — the run the cancellation reached, absent when no turn was open. Absence is an answer, not a failure: a Stop racing a turn that just ended wanted the run over, and it is. The call fails only when the cancellation could not be delivered, which means the turn is still running and nobody asked it to stop. Delivery is not the end of the turn — the run ends through its own `agent.finished` |
 | `agent.steer` | `{text, run_id?, submission_id?}` | steer outcome |
-| `agent.compact` | `{session, model?, thinking?, max_steps?, workspace?}` — `agent.start` minus `task`: a conversation resumed after a restart has no live process, and compacting spawns one with these settings | compaction outcome |
-| `agent.goal` | `{session, text?, auto?, model?, thinking?, max_steps?, workspace?}` — sets the session's standing goal to `text`, or clears it when `text` is absent; the engine settings match `agent.compact`'s, and a blank `session` is refused before engine lookup. `auto` arms the engine's autonomous continuation and is **currently rejected**: serve announces the turns it starts with `goal_continue`, which this host does not yet fold into a run's lifecycle, so an autonomous turn would leave the engine looking idle to `agent.start` | `{delivered}` — delivery, not durability: the command reached a live engine's stdin. The goal itself is confirmed by the `[goal]` / `[goal cleared]` runtime-notice arriving as a `session.event` commit, which is also what clients should render from; the engine's `goal_updated` stream event duplicates it |
+| `agent.compact` | `{session, workspace, model?, thinking?, max_steps?}` — `agent.start` minus `task`: the same required record identity, and a conversation resumed after a restart has no live process, so compacting spawns one with these settings | compaction outcome |
+| `agent.goal` | `{session, workspace, text?, auto?, model?, thinking?, max_steps?}` — sets the record's standing goal to `text`, or clears it when `text` is absent; the record identity and engine settings match `agent.compact`'s, and a blank `session` is refused before engine lookup. `auto` arms the engine's autonomous continuation and is **currently rejected**: serve announces the turns it starts with `goal_continue`, which this host does not yet fold into a run's lifecycle, so an autonomous turn would leave the engine looking idle to `agent.start` | `{delivered}` — delivery, not durability: the command reached a live engine's stdin. The goal itself is confirmed by the `[goal]` / `[goal cleared]` runtime-notice arriving as a `session.event` commit, which is also what clients should render from; the engine's `goal_updated` stream event duplicates it |
 | `agent.runs` | `{known?: [{session, run_id?, submission_id?}]}` — each selector must carry a run or submission id; `{}` remains valid | `{runs: […], settled: […]}` — every in-flight run's `agent.started` params plus selector-matched `{run_id, session, submission_id?, status, exit_code?}` lifecycle settlements. Every settlement a selector names is replayed, whatever its status: how much the run committed is a question the transcript read answers. Active and settled state are captured atomically |
 
 All three engine-spawning requests use the same `thinking` setting. A present
@@ -303,15 +303,16 @@ Notifications:
 
 #### Naming the store
 
-A session id is unique only within one durable store, so every op above that
-addresses an existing record carries `workspace` beside the id: the
-host-reported project resource path, the same spelling `session.changed` and
-both listings report. The host
+A session id is unique only within one durable store, so every op that
+addresses a record carries `workspace` beside the id — the `session.*` ops
+above, and `agent.start` / `agent.compact` / `agent.goal`, which write one.
+It is the host-reported project resource path, the same spelling
+`session.changed` and both listings report. The host
 validates a project path against its registry (a detached workspace is
 refused by name) and then selects that store exactly. It never falls back to
-searching, so a same-id record in another store can be neither read nor moved
-by mistake, and a client that guesses gets an error instead of the wrong
-conversation.
+searching, so a same-id record in another store can be neither read, written,
+nor moved by mistake, and a client that guesses gets an error instead of the
+wrong conversation.
 
 This matters because `session.list` really can return two rows with one id —
 one per attached project — and a client that keeps only `session` is
@@ -331,9 +332,13 @@ project directory), which is why clients must still handle them rather than
 assume they cannot occur.
 
 Because a host runs at most one engine per session id, a live engine is also
-filed under the id alone. Every lifecycle op compares its store before
-treating one as its own, so archiving a Scratch record is not refused by — and
-does not close — a project conversation that merely shares the id.
+filed under the id alone. Every op compares its store before treating one as
+its own, so archiving a Scratch record is not refused by — and does not close
+— a project conversation that merely shares the id, and a compaction or goal
+is never written to an engine serving the other store's record. When that
+engine is idle, the command replaces it (the conversation loses only a warm
+process); when it is mid-turn, the command is refused, naming the store that
+holds it.
 
 Notifications:
 

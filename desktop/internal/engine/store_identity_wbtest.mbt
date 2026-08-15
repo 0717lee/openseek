@@ -90,7 +90,7 @@ async test "a start cannot open a second record for an id another store owns" {
           thinking: None,
           max_steps: None,
           session: "s-dup",
-          workspace: Some(ws.to_string()),
+          workspace: ws.to_string(),
         }),
       )
       "no error"
@@ -113,7 +113,7 @@ async test "a start cannot open a second record for an id another store owns" {
       thinking: None,
       max_steps: None,
       session: "s-fresh",
-      workspace: Some(ws.to_string()),
+      workspace: ws.to_string(),
     })
     assert_eq(fresh.status, "accepted")
     // Now this project holds `s-dup` too — copied in by the CLI, or carried in
@@ -128,9 +128,13 @@ async test "a start cannot open a second record for an id another store owns" {
       thinking: None,
       max_steps: None,
       session: "s-dup",
-      workspace: Some(owner.to_string()),
+      workspace: owner.to_string(),
     })
     assert_eq(owned.status, "accepted")
+    guard sessions.get("s-dup") is Some(slot) && slot.engine is Some(live) else {
+      fail("the accepted start left no engine on the slot")
+    }
+    assert_true(live.writes_store(@workspaces.store_root(owner)))
     group.return_immediately(())
   })
   @fs.rmdir(root.to_string(), recursive=true)
@@ -182,7 +186,7 @@ async test "a command addressed to one store never reaches a same-id twin's engi
       thinking: None,
       max_steps: None,
       session: "s-busy",
-      workspace: Some(owner.to_string()),
+      workspace: owner.to_string(),
     })
     assert_eq(started.status, "accepted")
     let detail = try {
@@ -192,7 +196,7 @@ async test "a command addressed to one store never reaches a same-id twin's engi
           model: None,
           thinking: None,
           max_steps: None,
-          workspace: Some(other.to_string()),
+          workspace: other.to_string(),
         }),
       )
       "no error"
@@ -219,7 +223,7 @@ async test "a command addressed to one store never reaches a same-id twin's engi
         model: None,
         thinking: None,
         max_steps: None,
-        workspace: Some(owner.to_string()),
+        workspace: owner.to_string(),
       }),
     )
     ignore(
@@ -230,7 +234,7 @@ async test "a command addressed to one store never reaches a same-id twin's engi
         model: None,
         thinking: None,
         max_steps: None,
-        workspace: Some(other.to_string()),
+        workspace: other.to_string(),
       }),
     )
     guard sessions.get("s-idle") is Some(idle) && idle.engine is Some(rebound) else {
@@ -273,7 +277,7 @@ async test "archiving one store's record ignores another store's live engine" {
       thinking: None,
       max_steps: None,
       session: "s-dup",
-      workspace: Some(ws.to_string()),
+      workspace: ws.to_string(),
     })
     assert_eq(reply.status, "accepted")
     // A record with the same id in the other project, idle — the CLI could

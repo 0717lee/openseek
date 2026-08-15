@@ -195,6 +195,7 @@ test "start and steer payloads preserve submission ids" {
   let start : @protocol.StartPayload = @json.from_json({
     "task": "hello",
     "session": "s-start",
+    "workspace": "/work/project",
     "submission_id": "submission-start",
     "thinking": "high",
   })
@@ -213,6 +214,7 @@ test "start and steer payloads may omit submission ids" {
   let start : @protocol.StartPayload = @json.from_json({
     "task": "hello",
     "session": "s-start",
+    "workspace": "/work/project",
   })
   assert_true(start.submission_id is None)
   let steer : @protocol.SteerPayload = @json.from_json({ "text": "more detail" })
@@ -221,25 +223,30 @@ test "start and steer payloads may omit submission ids" {
 
 ///|
 test "client-authored session roots are ignored" {
+  // A client names its store as `workspace`, which the host validates against
+  // its registry. `session_root` is a host-derived fact it reports back, never
+  // one it accepts: a payload carrying one is decoded without it.
   let start : @protocol.StartPayload = @json.from_json({
     "task": "hello",
     "session": "s-start",
+    "workspace": "/work/project",
     "session_root": "/client/chosen/store",
   })
   assert_eq(start.session, "s-start")
-  assert_true(start.workspace is None)
+  assert_eq(start.workspace, "/work/project")
   let compact : @protocol.CompactPayload = @json.from_json({
     "session": "s-compact",
+    "workspace": "/work/project",
     "session_root": "/client/chosen/store",
   })
   assert_eq(compact.session, "s-compact")
-  assert_true(compact.workspace is None)
+  assert_eq(compact.workspace, "/work/project")
 }
 
 ///|
 test "start payload requires a session" {
   let decoded : @protocol.StartPayload? = Some(
-    @json.from_json({ "task": "hello" }),
+    @json.from_json({ "task": "hello", "workspace": "/work/project" }),
   ) catch {
     _ => None
   }
@@ -247,9 +254,35 @@ test "start payload requires a session" {
 }
 
 ///|
+test "a run payload without a store is not a valid request" {
+  // Half of a record's identity. A start, compaction, or goal that omitted it
+  // would leave the host inferring the store from the id — the search that
+  // hands one store's command to another store's record.
+  let start : @protocol.StartPayload? = Some(
+    @json.from_json({ "task": "hello", "session": "s-start" }),
+  ) catch {
+    _ => None
+  }
+  assert_true(start is None)
+  let compact : @protocol.CompactPayload? = Some(
+    @json.from_json({ "session": "s-compact" }),
+  ) catch {
+    _ => None
+  }
+  assert_true(compact is None)
+  let goal : @protocol.GoalPayload? = Some(
+    @json.from_json({ "session": "s-goal", "text": "ship it" }),
+  ) catch {
+    _ => None
+  }
+  assert_true(goal is None)
+}
+
+///|
 test "goal payload distinguishes set from clear by the text field" {
   let set : @protocol.GoalPayload = @json.from_json({
     "session": "s-goal",
+    "workspace": "/work/project",
     "text": "ship the feature",
     "model": "deepseek-v4-pro",
     "thinking": "max",
@@ -257,7 +290,10 @@ test "goal payload distinguishes set from clear by the text field" {
   assert_eq(set.text, Some("ship the feature"))
   assert_eq(set.model, Some("deepseek-v4-pro"))
   assert_eq(set.thinking, Some(ThinkingMax))
-  let clear : @protocol.GoalPayload = @json.from_json({ "session": "s-goal" })
+  let clear : @protocol.GoalPayload = @json.from_json({
+    "session": "s-goal",
+    "workspace": "/work/project",
+  })
   assert_true(clear.text is None)
 }
 
@@ -265,10 +301,10 @@ test "goal payload distinguishes set from clear by the text field" {
 test "session move payload has one canonical id and a required store" {
   let payload : SessionPayload = @json.from_json({
     "session": "  s-canonical  ",
-    "workspace": "",
+    "workspace": "/work/project",
   })
   assert_eq(payload.canonical_session(), "s-canonical")
-  assert_eq(payload.workspace, "")
+  assert_eq(payload.workspace, "/work/project")
   // The store is half the record's identity, so a payload without it is not
   // a valid move request — it would leave the host searching again.
   let storeless = try {
