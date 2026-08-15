@@ -45,6 +45,71 @@ fn ArchivedSessionPayload::canonical_session(
 }
 
 ///|
+/// Reduce Desktop's typed thread/start request to the fields owned by the
+/// app-server. The draft id exists only to prove the selected cwd below.
+fn @protocol.CodexThreadStartPayload::app_server_params(
+  self : @protocol.CodexThreadStartPayload,
+) -> Json {
+  let fields : Map[String, Json] = {
+    "serviceName": Json::string("openseek_desktop"),
+  }
+  if self.cwd is Some(cwd) {
+    fields["cwd"] = Json::string(cwd)
+  }
+  if self.model is Some(model) && !model.trim().is_empty() {
+    fields["model"] = Json::string(model)
+  }
+  Json::object(fields)
+}
+
+///|
+/// Draft authority is reserved for ids minted by this Desktop process. The
+/// close endpoint must not accept an app-server thread id and revoke that
+/// task's independently established cwd binding.
+fn @protocol.CodexDraftClosePayload::validated_id(
+  self : @protocol.CodexDraftClosePayload,
+) -> String? {
+  let id = self.draft_id.trim().to_owned()
+  guard id == self.draft_id &&
+    id.has_prefix("desktop-") &&
+    !id.contains("/") &&
+    !id.contains("\\") else {
+    return None
+  }
+  Some(id)
+}
+
+///|
+test "Codex thread start maps the Desktop envelope to app-server" {
+  let request : @protocol.CodexThreadStartPayload = @json.from_json({
+    "cwd": "/work/project",
+    "model": "gpt-test",
+    "openseekDraftId": "desktop-draft-1",
+  })
+  assert_eq(request.app_server_params(), {
+    "cwd": "/work/project",
+    "model": "gpt-test",
+    "serviceName": "openseek_desktop",
+  })
+}
+
+///|
+test "Codex turn start preserves its typed app-server fields" {
+  let request : @protocol.CodexTurnStartPayload = @json.from_json({
+    "threadId": "thread-1",
+    "cwd": "/work/project",
+    "input": [{ "type": "text", "text": "hello" }],
+    "model": "gpt-test",
+  })
+  assert_eq(ToJson::to_json(request), {
+    "threadId": "thread-1",
+    "cwd": "/work/project",
+    "input": [{ "type": "text", "text": "hello" }],
+    "model": "gpt-test",
+  })
+}
+
+///|
 test "start and steer payloads preserve submission ids" {
   let start : @protocol.StartPayload = @json.from_json({
     "task": "hello",

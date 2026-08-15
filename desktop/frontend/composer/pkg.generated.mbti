@@ -34,6 +34,29 @@ pub(all) enum Action {
   FileIndexEnsured(identity~ : Identity)
 }
 
+pub(all) struct ActionButton {
+  id : String
+  class_name : String
+  title : String
+  disabled : Bool
+  command : @cmd.Cmd
+  content : @html.Html
+}
+pub fn ActionButton::render(Self) -> @html.Html
+
+pub(all) struct CompletionRow {
+  label : String
+  detail : String
+}
+
+pub(all) struct CompletionView {
+  rows : Array[CompletionRow]
+  selected : Int
+  hint : String
+  empty : String
+}
+pub fn CompletionView::render(Self, (Int) -> @cmd.Cmd) -> @html.Html
+
 pub(all) struct Draft {
   task : String
   mentions : Array[Mention]
@@ -57,7 +80,7 @@ pub fn GitChecks::summary(Self) -> String
 pub fn GitChecks::tone(Self) -> String
 
 type GitPresentation derive(Eq)
-pub fn GitPresentation::GitPresentation(branch~ : String, changes? : GitChanges, pull_request? : GitPullRequest, compare_url? : String) -> Self
+pub fn GitPresentation::GitPresentation(branch~ : String, changes? : GitChanges, pull_request? : GitPullRequest, compare_url? : String, missing_pull_request? : String) -> Self
 pub fn GitPresentation::label(Self) -> String
 pub fn GitPresentation::render(Self, open~ : Bool, toggle~ : @cmd.Cmd) -> @html.Html
 pub fn GitPresentation::summary(Self) -> String
@@ -87,6 +110,7 @@ pub(all) struct Input {
   identity : Identity
   draft : Draft
   goal : GoalInput
+  slash_commands : Array[SlashCommand]
   root : @common.Uri?
   installed_skills : Array[@transcript.InstalledSkillItem]
   context_generation : Int
@@ -100,10 +124,28 @@ pub(all) struct Input {
   presentation : Presentation
 } derive(Eq)
 
+pub(all) struct KeyboardActions {
+  menu_open : Bool
+  navigate : (Int) -> @cmd.Cmd
+  accept : @cmd.Cmd
+  dismiss : @cmd.Cmd
+  submit : @cmd.Cmd
+  cancel : @cmd.Cmd?
+}
+
 pub(all) struct Mention {
   ref_ : @mention_context.MentionRef
   range : @common.Range?
 } derive(Eq, @debug.Debug)
+
+pub(all) struct MentionChip {
+  glyph : String
+  label : String
+  title : String
+  jump : @cmd.Cmd?
+  remove : (@cmd.Cmd, @html.Html)?
+}
+pub fn MentionChip::render(Self) -> @html.Html
 
 type Menu[T] derive(Eq)
 pub fn[T] Menu::Menu(Array[T], loading~ : Bool, draft_without_token~ : String) -> Self[T]
@@ -137,6 +179,7 @@ pub(all) struct Presentation {
   context : Array[@html.Html]
   status : Array[@html.Html]
   placeholder : String
+  disabled : Bool
   primary_action : PrimaryAction
 } derive(Eq)
 
@@ -151,12 +194,32 @@ pub(all) struct Replacement {
   archive_generation : Int
 } derive(Eq, @debug.Debug)
 
+pub(all) struct SlashCommand {
+  label : String
+  detail : String
+  command : String
+} derive(Eq, @debug.Debug)
+
 type Trigger derive(Eq)
 pub fn Trigger::draft_without_token(Self) -> String
 pub fn Trigger::marker(Self) -> String
 pub fn Trigger::matches(Self, Array[String]) -> Bool
 pub fn Trigger::parse(String, inline_markers~ : String) -> Self?
 pub fn Trigger::query(Self) -> String
+
+pub(all) struct View {
+  before_inner : Array[@html.Html]
+  mentions : Array[@html.Html]
+  value : String
+  placeholder : String
+  disabled : Bool
+  input : @cmd.Emit[String]
+  keyboard : KeyboardActions
+  status : Array[@html.Html]
+  action : ActionButton
+  overlay : @html.Html?
+}
+pub fn View::render(Self) -> @html.Html
 
 pub(all) struct WorktreeArchiveDialog {
   refusal : @protocol.ArchiveNeedsForceReply
@@ -172,6 +235,8 @@ pub(all) enum WorktreeChoice {
   FreshWorktree
   BoundWorktree(String)
 } derive(Eq, @debug.Debug)
+pub fn WorktreeChoice::toggled(Self) -> Self
+pub fn WorktreeChoice::wants_fresh(Self) -> Bool
 
 pub(all) struct WorktreeControl {
   choice : WorktreeChoice

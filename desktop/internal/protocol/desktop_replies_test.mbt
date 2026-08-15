@@ -162,6 +162,66 @@ test "archive replies keep success compatible and encode dirty confirmation" {
 }
 
 ///|
+test "worktree creation accepts exactly representable owner namespaces" {
+  let legacy : @protocol.WorktreeCreatePayload = @json.from_json({
+    "workspace": "/work/project",
+    "session": "session-1",
+  })
+  assert_eq(legacy.session, Some("session-1"))
+  assert_eq(legacy.codex_thread, None)
+  let codex : @protocol.WorktreeCreatePayload = @json.from_json({
+    "workspace": "/work/project",
+    "codex_thread": "thread-1",
+  })
+  assert_eq(codex.session, None)
+  assert_eq(codex.codex_thread, Some("thread-1"))
+  @debug.assert_eq(codex.to_json(), {
+    "workspace": "/work/project",
+    "codex_thread": "thread-1",
+  })
+  let nullable : @protocol.WorktreeCreatePayload = @json.from_json({
+    "workspace": "/work/project",
+    "session": null,
+    "codex_thread": "thread-1",
+    "futureMetadata": true,
+  })
+  assert_eq(nullable, codex)
+  let both_rejected = try {
+    let _ : @protocol.WorktreeCreatePayload = @json.from_json({
+      "workspace": "/work/project",
+      "session": "session-1",
+      "codex_thread": "thread-1",
+    })
+  } catch {
+    _ => true
+  } noraise {
+    _ => false
+  }
+  assert_true(both_rejected)
+  let missing_rejected = try {
+    let _ : @protocol.WorktreeCreatePayload = @json.from_json({
+      "workspace": "/work/project",
+    })
+  } catch {
+    _ => true
+  } noraise {
+    _ => false
+  }
+  assert_true(missing_rejected)
+  let wrong_type_rejected = try {
+    let _ : @protocol.WorktreeCreatePayload = @json.from_json({
+      "workspace": "/work/project",
+      "session": 7,
+    })
+  } catch {
+    _ => true
+  } noraise {
+    _ => false
+  }
+  assert_true(wrong_type_rejected)
+}
+
+///|
 test "Git changes replies preserve review identities and accept legacy omission" {
   let reply : @protocol.GitChangesReply = {
     repository: true,
@@ -305,4 +365,197 @@ test "browse replies keep success compatible and carry refusals" {
     refusal.to_json(),
   )
   @debug.assert_eq(decoded_refusal, refusal)
+}
+
+///|
+test "Git pull-request payload controls optional branch hints explicitly" {
+  let payload : @protocol.GitPullRequestPayload = @json.from_json({
+    "session": "thread-1",
+    "cwd": null,
+    "branch_hint": "openseek/wt-1",
+    "future_metadata": true,
+  })
+  assert_eq(payload.session, "thread-1")
+  assert_eq(payload.cwd, None)
+  assert_eq(payload.branch_hint, Some("openseek/wt-1"))
+  @debug.assert_eq(payload.to_json(), {
+    "session": "thread-1",
+    "branch_hint": "openseek/wt-1",
+  })
+  let absent : @protocol.GitPullRequestPayload = @json.from_json({
+    "session": "thread-2",
+  })
+  @debug.assert_eq(absent.to_json(), { "session": "thread-2" })
+  let missing_session = try {
+    let _ : @protocol.GitPullRequestPayload = @json.from_json({
+      "branch_hint": "openseek/wt-1",
+    })
+    false
+  } catch {
+    _ => true
+  }
+  assert_true(missing_session)
+  let malformed_hint = try {
+    let _ : @protocol.GitPullRequestPayload = @json.from_json({
+      "session": "thread-1",
+      "branch_hint": 7,
+    })
+    false
+  } catch {
+    _ => true
+  }
+  assert_true(malformed_hint)
+}
+
+///|
+test "language payload codecs require every routing coordinate" {
+  let opened : @protocol.LspOpenPayload = @json.from_json({
+    "session": "thread-1",
+    "root": "/work/project",
+    "path": "src/main.mbt",
+    "future_metadata": true,
+  })
+  @debug.assert_eq(opened.to_json(), {
+    "session": "thread-1",
+    "root": "/work/project",
+    "path": "src/main.mbt",
+  })
+  let hovered : @protocol.LspHoverPayload = @json.from_json({
+    "session": "thread-1",
+    "root": "/work/project",
+    "path": "src/main.mbt",
+    "line": 8,
+    "character": 13,
+  })
+  @debug.assert_eq(hovered.to_json(), {
+    "session": "thread-1",
+    "root": "/work/project",
+    "path": "src/main.mbt",
+    "line": 8,
+    "character": 13,
+  })
+  let symbols : @protocol.WorkspaceSymbolsPayload = @json.from_json({
+    "session": "thread-1",
+    "root": "/work/project",
+    "query": "WorktreeInfo",
+  })
+  @debug.assert_eq(symbols.to_json(), {
+    "session": "thread-1",
+    "root": "/work/project",
+    "query": "WorktreeInfo",
+  })
+  let navigation : @protocol.MoonIdeNavigationPayload = @json.from_json({
+    "session": "thread-1",
+    "root": "/work/project",
+    "path": "src/main.mbt",
+    "line": 8,
+    "column": 13,
+  })
+  @debug.assert_eq(navigation.to_json(), {
+    "session": "thread-1",
+    "root": "/work/project",
+    "path": "src/main.mbt",
+    "line": 8,
+    "column": 13,
+  })
+  let missing_root = try {
+    let _ : @protocol.LspOpenPayload = @json.from_json({
+      "session": "thread-1",
+      "path": "src/main.mbt",
+    })
+    false
+  } catch {
+    _ => true
+  }
+  assert_true(missing_root)
+  let malformed_position = try {
+    let _ : @protocol.LspHoverPayload = @json.from_json({
+      "session": "thread-1",
+      "root": "/work/project",
+      "path": "src/main.mbt",
+      "line": "eight",
+      "character": 13,
+    })
+    false
+  } catch {
+    _ => true
+  }
+  assert_true(malformed_position)
+}
+
+///|
+test "worktree replies omit absent owners and reject ambiguous ownership" {
+  let openseek : @protocol.WorktreeInfo = @json.from_json({
+    "name": "wt-1",
+    "branch": "openseek/wt-1",
+    "base": "abc",
+    "session": "session-1",
+    "codex_thread": null,
+    "path": "/work/project/.worktrees/wt-1",
+    "present": true,
+    "future_metadata": true,
+  })
+  @debug.assert_eq(openseek.to_json(), {
+    "name": "wt-1",
+    "branch": "openseek/wt-1",
+    "base": "abc",
+    "session": "session-1",
+    "path": "/work/project/.worktrees/wt-1",
+    "present": true,
+  })
+  let codex : @protocol.WorktreeInfo = @json.from_json({
+    "name": "wt-2",
+    "branch": "openseek/wt-2",
+    "base": "def",
+    "codex_thread": "thread-1",
+    "path": "/work/project/.worktrees/wt-2",
+    "present": false,
+  })
+  @debug.assert_eq(codex.to_json(), {
+    "name": "wt-2",
+    "branch": "openseek/wt-2",
+    "base": "def",
+    "codex_thread": "thread-1",
+    "path": "/work/project/.worktrees/wt-2",
+    "present": false,
+  })
+  let ownerless : @protocol.WorktreeInfo = @json.from_json({
+    "name": "legacy",
+    "branch": "openseek/legacy",
+    "base": "ghi",
+    "session": null,
+    "codex_thread": null,
+    "path": "/work/project/.worktrees/legacy",
+    "present": false,
+  })
+  assert_eq(ownerless.session, None)
+  assert_eq(ownerless.codex_thread, None)
+  let ambiguous = try {
+    let _ : @protocol.WorktreeInfo = @json.from_json({
+      "name": "ambiguous",
+      "branch": "openseek/ambiguous",
+      "base": "jkl",
+      "session": "session-1",
+      "codex_thread": "thread-1",
+      "path": "/work/project/.worktrees/ambiguous",
+      "present": true,
+    })
+    false
+  } catch {
+    _ => true
+  }
+  assert_true(ambiguous)
+  let malformed_present = try {
+    let _ : @protocol.WorktreeInfo = @json.from_json({
+      "name": "wt-3",
+      "branch": "openseek/wt-3",
+      "base": "mno",
+      "path": "/work/project/.worktrees/wt-3",
+      "present": "yes",
+    })
+    false
+  } catch {
+    _ => true
+  }
+  assert_true(malformed_present)
 }

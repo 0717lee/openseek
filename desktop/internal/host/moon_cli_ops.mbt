@@ -6,13 +6,12 @@
 // the file's module and converts the emitted diagnostics to the LSP-shaped
 // arrays the wire protocol already speaks; `lsp.workspace_symbols` fans
 // `moon ide workspace-symbols --json` across the workspace's module roots.
-// The wire protocol is unchanged, so the frontend is untouched. Hover and
-// open route by the file's absolute path — the workspace it belongs to, then
-// the deepest module root within it; symbols resolve their conversation's
-// workspace. Everything is best-effort: no module yet, a failed spawn, or a
-// file moon does not know all just yield nothing. moon serializes concurrent
-// runs on a module with its own build lock, so requests spawn directly with
-// no pooling.
+// Hover and open receive the editor's exact root plus a path relative to it,
+// then choose the deepest module root containing that file; symbols retain
+// their conversation-scoped workspace request. Everything is best-effort: no
+// module yet, a failed spawn, or a file moon does not know all just yield
+// nothing. moon serializes concurrent runs on a module with its own build
+// lock, so requests spawn directly with no pooling.
 
 ///|
 /// The most milliseconds one `moon` run may take before it is killed and the
@@ -261,6 +260,7 @@ async fn lsp_hover_op(
   state : MoonCliState,
   payload : LspHoverPayload,
 ) -> LspHoverReply {
+  ignore(LanguagePath::authorized_root(payload.session, payload.root))
   let request_root = WirePath::parse(payload.root)
   let file = request_root.resolve(payload.path)
   guard moon_module_root(request_root.absolute, file) is Some(root) else {
@@ -288,6 +288,7 @@ async fn lsp_open_op(
   state : MoonCliState,
   payload : LspOpenPayload,
 ) -> LspDiagnosticsReply {
+  ignore(LanguagePath::authorized_root(payload.session, payload.root))
   let request_root = WirePath::parse(payload.root)
   let file = request_root.resolve(payload.path)
   guard moon_module_root(request_root.absolute, file) is Some(root) else {
@@ -678,7 +679,7 @@ async fn workspace_symbols_op(
   state : MoonCliState,
   payload : WorkspaceSymbolsPayload,
 ) -> WorkspaceSymbolsReply {
-  let workspace = WirePath::parse(payload.root).absolute
+  let workspace = LanguagePath::authorized_root(payload.session, payload.root)
   let symbols : Array[SymbolItem] = []
   for root in workspace_module_roots(workspace) {
     if symbols.length() >= MaxSymbolResults {

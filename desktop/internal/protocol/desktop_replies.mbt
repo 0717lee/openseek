@@ -414,18 +414,100 @@ pub impl FromJson for WorkspacesReply with fn from_json(json, path) {
 }
 
 ///|
-/// One worktree as ops report it: the registry entry plus its derived
-/// checkout path and whether that directory still exists on disk. `session`
-/// is the one conversation this worktree is the execution environment of;
-/// `None` only between creation and the binding first start.
+/// One worktree as ops report it: the registry entry plus its derived checkout
+/// path and whether that directory still exists on disk. Exactly one of
+/// `session` and `codex_thread` identifies the conversation that owns it;
+/// ownerless rows are tolerated only for backward-compatible hand-edited
+/// registries and are never claimed by either conversation source.
 pub(all) struct WorktreeInfo {
   name : String
   branch : String
   base : String
   session : String?
+  codex_thread : String?
   path : String
   present : Bool
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
+
+///|
+pub impl FromJson for WorktreeInfo with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected worktree info"))
+  }
+  let name = match fields.get("name") {
+    Some(String(value)) => value
+    Some(_) => raise JsonDecodeError((path.add_key("name"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("name"), "missing required field"))
+  }
+  let branch = match fields.get("branch") {
+    Some(String(value)) => value
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("branch"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("branch"), "missing required field"))
+  }
+  let base = match fields.get("base") {
+    Some(String(value)) => value
+    Some(_) => raise JsonDecodeError((path.add_key("base"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("base"), "missing required field"))
+  }
+  let session = match fields.get("session") {
+    Some(String(value)) => Some(value)
+    Some(Null) | None => None
+    Some(_) =>
+      raise JsonDecodeError(
+        (path.add_key("session"), "expected string or null"),
+      )
+  }
+  let codex_thread = match fields.get("codex_thread") {
+    Some(String(value)) => Some(value)
+    Some(Null) | None => None
+    Some(_) =>
+      raise JsonDecodeError(
+        (path.add_key("codex_thread"), "expected string or null"),
+      )
+  }
+  if session is Some(_) && codex_thread is Some(_) {
+    raise JsonDecodeError(
+      (path, "worktree cannot belong to both session and codex_thread"),
+    )
+  }
+  let checkout_path = match fields.get("path") {
+    Some(String(value)) => value
+    Some(_) => raise JsonDecodeError((path.add_key("path"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("path"), "missing required field"))
+  }
+  let present = match fields.get("present") {
+    Some(True) => true
+    Some(False) => false
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("present"), "expected boolean"))
+    None =>
+      raise JsonDecodeError((path.add_key("present"), "missing required field"))
+  }
+  { name, branch, base, session, codex_thread, path: checkout_path, present }
+}
+
+///|
+pub impl ToJson for WorktreeInfo with fn to_json(self) {
+  let fields : Map[String, Json] = {
+    "name": Json::string(self.name),
+    "branch": Json::string(self.branch),
+    "base": Json::string(self.base),
+    "path": Json::string(self.path),
+    "present": Json::boolean(self.present),
+  }
+  if self.session is Some(session) {
+    fields["session"] = Json::string(session)
+  }
+  if self.codex_thread is Some(thread_id) {
+    fields["codex_thread"] = Json::string(thread_id)
+  }
+  Json::object(fields)
+}
 
 ///|
 pub(all) struct WorktreesReply {

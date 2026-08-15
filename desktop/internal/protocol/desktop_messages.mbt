@@ -127,14 +127,67 @@ pub(all) struct WorktreeListPayload {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-/// `worktree.create` names the workspace and the NEW conversation the
-/// worktree will be the execution environment of — creation is the binding,
-/// and the session doubles as the idempotency key for retries. The host
-/// generates the worktree's name and returns it in the reply.
+/// `worktree.create` names the workspace and exactly one conversation owner.
+/// Existing clients send `session`; Codex sends `codex_thread`. Creation is
+/// the binding, and that owner id doubles as the idempotency key for retries.
+/// The host generates the worktree's name and returns it in the reply.
 pub(all) struct WorktreeCreatePayload {
   workspace : String
-  session : String
-} derive(Debug, Eq, FromJson, ToJson)
+  session : String?
+  codex_thread : String?
+} derive(Debug, Eq)
+
+///|
+pub impl FromJson for WorktreeCreatePayload with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected worktree creation payload"))
+  }
+  let workspace = match fields.get("workspace") {
+    Some(String(value)) => value
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("workspace"), "expected string"))
+    None =>
+      raise JsonDecodeError(
+        (path.add_key("workspace"), "missing required field"),
+      )
+  }
+  let session = match fields.get("session") {
+    Some(String(value)) => Some(value)
+    Some(Null) | None => None
+    Some(_) =>
+      raise JsonDecodeError(
+        (path.add_key("session"), "expected string or null"),
+      )
+  }
+  let codex_thread = match fields.get("codex_thread") {
+    Some(String(value)) => Some(value)
+    Some(Null) | None => None
+    Some(_) =>
+      raise JsonDecodeError(
+        (path.add_key("codex_thread"), "expected string or null"),
+      )
+  }
+  // Unknown fields remain forward-compatible, but ownership is deliberately
+  // closed: a worktree belongs to one OpenSeek session or one Codex thread.
+  if (session is Some(_)) == (codex_thread is Some(_)) {
+    raise JsonDecodeError(
+      (path, "expected exactly one of session or codex_thread"),
+    )
+  }
+  { workspace, session, codex_thread }
+}
+
+///|
+pub impl ToJson for WorktreeCreatePayload with fn to_json(self) {
+  let fields : Map[String, Json] = { "workspace": Json::string(self.workspace) }
+  if self.session is Some(session) {
+    fields["session"] = Json::string(session)
+  }
+  if self.codex_thread is Some(codex_thread) {
+    fields["codex_thread"] = Json::string(codex_thread)
+  }
+  Json::object(fields)
+}
 
 ///|
 /// `worktree.remove` — `force` discards uncommitted changes in the checkout;
@@ -183,11 +236,55 @@ pub(all) struct GitBranchPayload {
 ///|
 /// Address the same working directory as `git.branch` — the pull request is
 /// looked up for whatever branch that directory has checked out, so the two
-/// chips can never describe different branches.
+/// chips can never describe different branches. Codex-managed worktrees are
+/// commonly detached; `branch_hint` is app-server's creation-time branch and
+/// is accepted only when that local branch still points at the current HEAD.
 pub(all) struct GitPullRequestPayload {
   session : String
   cwd : String?
-} derive(Debug, Eq, FromJson, ToJson)
+  branch_hint : String?
+} derive(Debug, Eq)
+
+///|
+pub impl FromJson for GitPullRequestPayload with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected Git pull-request payload"))
+  }
+  let session = match fields.get("session") {
+    Some(String(value)) => value
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("session"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("session"), "missing required field"))
+  }
+  let cwd = match fields.get("cwd") {
+    Some(String(value)) => Some(value)
+    Some(Null) | None => None
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("cwd"), "expected string or null"))
+  }
+  let branch_hint = match fields.get("branch_hint") {
+    Some(String(value)) => Some(value)
+    Some(Null) | None => None
+    Some(_) =>
+      raise JsonDecodeError(
+        (path.add_key("branch_hint"), "expected string or null"),
+      )
+  }
+  { session, cwd, branch_hint }
+}
+
+///|
+pub impl ToJson for GitPullRequestPayload with fn to_json(self) {
+  let fields : Map[String, Json] = { "session": Json::string(self.session) }
+  if self.cwd is Some(cwd) {
+    fields["cwd"] = Json::string(cwd)
+  }
+  if self.branch_hint is Some(branch_hint) {
+    fields["branch_hint"] = Json::string(branch_hint)
+  }
+  Json::object(fields)
+}
 
 ///|
 /// Address the Git working tree belonging to one conversation. The optional
@@ -317,30 +414,203 @@ pub(all) struct TerminalClosePayload {
 
 ///|
 pub(all) struct LspOpenPayload {
+  session : String
   root : String
   path : String
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
+
+///|
+pub impl FromJson for LspOpenPayload with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected LSP open payload"))
+  }
+  let session = match fields.get("session") {
+    Some(String(value)) => value
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("session"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("session"), "missing required field"))
+  }
+  let root = match fields.get("root") {
+    Some(String(value)) => value
+    Some(_) => raise JsonDecodeError((path.add_key("root"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("root"), "missing required field"))
+  }
+  let file_path = match fields.get("path") {
+    Some(String(value)) => value
+    Some(_) => raise JsonDecodeError((path.add_key("path"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("path"), "missing required field"))
+  }
+  { session, root, path: file_path }
+}
+
+///|
+pub impl ToJson for LspOpenPayload with fn to_json(self) {
+  { "session": self.session, "root": self.root, "path": self.path }
+}
 
 ///|
 pub(all) struct LspHoverPayload {
+  session : String
   root : String
   path : String
   line : Int
   character : Int
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
+
+///|
+pub impl FromJson for LspHoverPayload with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected LSP hover payload"))
+  }
+  let session = match fields.get("session") {
+    Some(String(value)) => value
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("session"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("session"), "missing required field"))
+  }
+  let root = match fields.get("root") {
+    Some(String(value)) => value
+    Some(_) => raise JsonDecodeError((path.add_key("root"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("root"), "missing required field"))
+  }
+  let file_path = match fields.get("path") {
+    Some(String(value)) => value
+    Some(_) => raise JsonDecodeError((path.add_key("path"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("path"), "missing required field"))
+  }
+  let line = match fields.get("line") {
+    Some(Number(value, ..)) => value.to_int()
+    Some(_) => raise JsonDecodeError((path.add_key("line"), "expected integer"))
+    None =>
+      raise JsonDecodeError((path.add_key("line"), "missing required field"))
+  }
+  let character = match fields.get("character") {
+    Some(Number(value, ..)) => value.to_int()
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("character"), "expected integer"))
+    None =>
+      raise JsonDecodeError(
+        (path.add_key("character"), "missing required field"),
+      )
+  }
+  { session, root, path: file_path, line, character }
+}
+
+///|
+pub impl ToJson for LspHoverPayload with fn to_json(self) {
+  {
+    "session": self.session,
+    "root": self.root,
+    "path": self.path,
+    "line": self.line,
+    "character": self.character,
+  }
+}
 
 ///|
 pub(all) struct WorkspaceSymbolsPayload {
+  session : String
   root : String
   query : String
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
+
+///|
+pub impl FromJson for WorkspaceSymbolsPayload with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected workspace-symbol payload"))
+  }
+  let session = match fields.get("session") {
+    Some(String(value)) => value
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("session"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("session"), "missing required field"))
+  }
+  let root = match fields.get("root") {
+    Some(String(value)) => value
+    Some(_) => raise JsonDecodeError((path.add_key("root"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("root"), "missing required field"))
+  }
+  let query = match fields.get("query") {
+    Some(String(value)) => value
+    Some(_) => raise JsonDecodeError((path.add_key("query"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("query"), "missing required field"))
+  }
+  { session, root, query }
+}
+
+///|
+pub impl ToJson for WorkspaceSymbolsPayload with fn to_json(self) {
+  { "session": self.session, "root": self.root, "query": self.query }
+}
 
 ///|
 pub(all) struct MoonIdeNavigationPayload {
+  session : String
+  root : String
   path : String
   line : Int
   column : Int
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
+
+///|
+pub impl FromJson for MoonIdeNavigationPayload with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected Moon IDE navigation payload"))
+  }
+  let session = match fields.get("session") {
+    Some(String(value)) => value
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("session"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("session"), "missing required field"))
+  }
+  let root = match fields.get("root") {
+    Some(String(value)) => value
+    Some(_) => raise JsonDecodeError((path.add_key("root"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("root"), "missing required field"))
+  }
+  let file_path = match fields.get("path") {
+    Some(String(value)) => value
+    Some(_) => raise JsonDecodeError((path.add_key("path"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("path"), "missing required field"))
+  }
+  let line = match fields.get("line") {
+    Some(Number(value, ..)) => value.to_int()
+    Some(_) => raise JsonDecodeError((path.add_key("line"), "expected integer"))
+    None =>
+      raise JsonDecodeError((path.add_key("line"), "missing required field"))
+  }
+  let column = match fields.get("column") {
+    Some(Number(value, ..)) => value.to_int()
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("column"), "expected integer"))
+    None =>
+      raise JsonDecodeError((path.add_key("column"), "missing required field"))
+  }
+  { session, root, path: file_path, line, column }
+}
+
+///|
+pub impl ToJson for MoonIdeNavigationPayload with fn to_json(self) {
+  {
+    "session": self.session,
+    "root": self.root,
+    "path": self.path,
+    "line": self.line,
+    "column": self.column,
+  }
+}
 
 ///|
 pub(all) struct ExternalLinkPayload {

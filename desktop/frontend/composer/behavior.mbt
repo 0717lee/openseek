@@ -1,6 +1,5 @@
 // Generic composer input behavior. Callers keep their result rows and send
-// protocol; this package owns trigger parsing, menu selection, and delayed
-// request generations.
+// protocol; this package owns trigger parsing and menu selection.
 
 ///|
 /// A live completion token at the end of a composer draft. The marker is `/`
@@ -74,9 +73,9 @@ pub fn Trigger::matches(self : Trigger, fields : Array[String]) -> Bool {
 }
 
 ///|
-/// The application-independent part of an open completion menu. The caller keeps
-/// its result type and provider kind; this value owns selection, loading, and
-/// the exact draft prefix restored when a row is accepted.
+/// The application-independent part of an open completion menu. The component
+/// keeps its result type and provider kind; this value owns selection, loading,
+/// and the exact draft prefix restored when a row is accepted.
 struct Menu[T] {
   items : Array[T]
   selected : Int
