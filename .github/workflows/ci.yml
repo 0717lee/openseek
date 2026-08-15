@@ -23,16 +23,9 @@ jobs:
       # native/JS split lets the two test suites run in parallel.
       fail-fast: false
       matrix:
-        moonbit-channel: [nightly, stable]
+        moonbit-channel: [stable]
         target: [native, js]
         include:
-          # Warnings are denied on stable only. Nightly adds new warnings ahead
-          # of anything we could have fixed, so denying them there turns the job
-          # red for code that is fine; stable keeps warnings out of every
-          # workspace member, including editor.
-          - moonbit-channel: nightly
-            moonbit-version: nightly
-            deny-warn: ""
           - moonbit-channel: stable
             moonbit-version: latest
             deny-warn: "--deny-warn"
@@ -153,7 +146,7 @@ jobs:
         # editor's public interfaces from the same checkout too. Ignore
         # blank-only formatter drift, but still reject content changes and new
         # `.mbti`.
-        if: matrix.moonbit-channel == 'nightly' && matrix.target == 'native'
+        if: matrix.target == 'native'
         run: |
           moon info
           untracked_mbti="$(git ls-files --others --exclude-standard -- '*.mbti')"
