@@ -1536,7 +1536,7 @@ async fn ServeEngine::run(
             Some(SubrunStarted(id~, ..)) =>
               if engine.session_root is Some(root) && probes.get(id) is None {
                 probes[id] = group.spawn(no_wait=true, allow_failure=true, () => {
-                  follow_subrun_progress(
+                  @subrun.follow_progress(
                     root=root.to_string(),
                     parent_session=engine.session_key,
                     id~,

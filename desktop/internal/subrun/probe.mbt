@@ -272,7 +272,7 @@ fn requested_calls(payload : Map[String, Json]) -> Array[(String, String)] {
 /// bracket arrives and cancels it at `subrun_finished`. Nothing here decides
 /// when a sub-run is over — the brackets already say so, and a probe that
 /// guessed from the record could only guess late.
-pub async fn follow_subrun_progress(
+pub async fn follow_progress(
   root~ : String,
   parent_session~ : String,
   id~ : String,
