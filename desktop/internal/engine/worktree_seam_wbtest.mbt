@@ -224,8 +224,8 @@ async test "a bound session routes every start through its checkout" {
   )
   // The durable record stays in the MAIN repository's store.
   assert_eq(
-    first.session_root.map(dir => dir.to_string()),
-    Some(ws.join(".openseek").to_string()),
+    first.session_root.unwrap().to_string(),
+    ws.join(".openseek").to_string(),
   )
   // A hint-less resume goes through the durable record and the mapping.
   @fsx.ensure_dir(ws.join(".openseek/sessions/s-bind").to_path())
@@ -243,8 +243,8 @@ async test "a bound session routes every start through its checkout" {
     Some(ws.join(".worktrees/wt").to_string()),
   )
   assert_eq(
-    resumed.session_root.map(dir => dir.to_string()),
-    Some(ws.join(".openseek").to_string()),
+    resumed.session_root.unwrap().to_string(),
+    ws.join(".openseek").to_string(),
   )
   @fs.rmdir(root.to_string(), recursive=true)
 }

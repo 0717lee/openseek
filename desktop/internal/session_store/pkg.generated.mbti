@@ -38,6 +38,7 @@ pub struct StoreSelection {
   workspace_token : String
 }
 pub async fn StoreSelection::from_workspace(String) -> Self
+pub fn StoreSelection::of_workspace(@pathx.Absolute) -> Self raise StoreError
 
 // Type aliases
 

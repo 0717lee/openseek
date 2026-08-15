@@ -637,10 +637,10 @@ pub async fn load_archived_session(
   let record_guard = manager.begin_record_read(session)
   defer manager.end_record_read(session, record_guard)
   // The client names the store whose archived twin to read.
-  let store = @session_store.StoreSelection::from_workspace(payload.workspace).root
-  let root = @session_store.archived_root(store)
+  let live = @session_store.StoreSelection::from_workspace(payload.workspace).root
+  let root = @session_store.archived_root(live)
   if !@fsx.is_dir(root.join("sessions").join(session).to_path()) {
-    if @fsx.is_dir(store.join("sessions").join(session).to_path()) {
+    if @fsx.is_dir(live.join("sessions").join(session).to_path()) {
       raise EngineError("this conversation is not archived")
     }
     raise EngineError(

@@ -18,9 +18,9 @@
 priv struct ServeEngine {
   // The conversation this process serves: its slot in the manager's map.
   session_key : String
-  // Canonical durable store selected from host-owned workspace state when
-  // this process was spawned. Workspace detach uses this placement to close
-  // idle writers before hiding their store, and to refuse while one is busy.
+  // The durable store selected from host-owned workspace state when this
+  // process was spawned. Workspace detach uses it to close idle writers before
+  // hiding their store, and to refuse while one is busy.
   session_root : @pathx.Absolute?
   // Fingerprint of the config this process was spawned with; a prompt whose
   // config differs cannot reuse it.
@@ -356,8 +356,7 @@ async fn ServeEngine::write_commands(self : ServeEngine) -> Unit {
 /// treating a live engine as its own. A same-id record in another store is a
 /// different conversation: blocking on its engine refuses a move that store
 /// never contended for, and closing it tears down a writer the operation was
-/// never given. An engine spawned without a durable store writes no record at
-/// all, so it belongs to no store's move.
+/// never given.
 fn ServeEngine::writes_store(
   self : ServeEngine,
   root : @pathx.Absolute,

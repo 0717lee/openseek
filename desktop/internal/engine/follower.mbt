@@ -381,9 +381,7 @@ fn EngineManager::kick_follower(self : EngineManager, session : String) -> Unit 
 /// pump's spawn path, so the follower task lives in the same task group as
 /// the engines. The returned identity is present only when this call installed
 /// a new follower; its caller owns startup rollback until the engine reader
-/// and consumer have both been scheduled. A session root can still be absent
-/// only when the durable store cannot be resolved; in that case there is no
-/// record for a follower to scan.
+/// and consumer have both been scheduled.
 async fn[G] ensure_follower(
   sink~ : EventSink,
   group~ : @async.TaskGroup[G],

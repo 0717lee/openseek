@@ -98,15 +98,12 @@ async fn ensure_new_record_is_unique(
 /// its siblings.
 priv struct SessionFamilyMove {
   manager : EngineManager
-  root : @pathx.Absolute
-  // The registered project whose store owns this family. Permanent deletion
-  // uses this exact owner to remove the retained worktree placement even if
-  // the project detaches meanwhile.
-  workspace : @pathx.Absolute
-  // Canonical protocol spelling of `workspace`. Every session.changed callback
-  // carries it so same-ID records in other stores do not inherit this family's
+  // The store holding every record this move claims. Permanent deletion uses
+  // its exact project owner to remove the retained worktree placement even if
+  // the project detaches meanwhile, and every session.changed callback carries
+  // its token so same-id records in other stores do not inherit this family's
   // disposition.
-  workspace_token : String
+  store : @session_store.StoreSelection
   members : Array[String]
   guards : Array[(String, SessionRecordGuard)]
   claims : Array[PendingClaim]
@@ -205,8 +202,6 @@ async fn EngineManager::claim_session_family_move(
       }
     }
   }
-  let workspace = selected.workspace
-  let workspace_token = selected.workspace_token
   for session_id in members {
     let record_state = manager.claim_record_move(session_id)
     guards.push((session_id, record_state))
@@ -264,16 +259,7 @@ async fn EngineManager::claim_session_family_move(
     claim.require_current(manager)
   }
   handed_off = true
-  {
-    manager,
-    root,
-    workspace,
-    workspace_token,
-    members,
-    guards,
-    claims,
-    active: true,
-  }
+  { manager, store: selected, members, guards, claims, active: true }
 }
 
 ///|
@@ -287,12 +273,12 @@ async fn SessionFamilyMove::remove_worktree_placements(
   self : SessionFamilyMove,
   on_committed? : (String, Array[WorktreeInfo]) -> Unit,
 ) -> Unit {
-  guard @worktree.drop_placements(self.workspace, self.members)
+  guard @worktree.drop_placements(self.store.workspace, self.members)
     is Some(remaining) else {
     return
   }
   if on_committed is Some(on_committed) {
-    on_committed(self.workspace_token, remaining)
+    on_committed(self.store.workspace_token, remaining)
   }
 }
 
@@ -307,8 +293,10 @@ async fn move_session_family(
   to_archive~ : Bool,
   on_committed : (String, String) -> Unit,
 ) -> Unit {
-  let live = family.root.join("sessions")
-  let archived = @session_store.archived_root(family.root).join("sessions")
+  let live = family.store.root.join("sessions")
+  let archived = @session_store.archived_root(family.store.root).join(
+    "sessions",
+  )
   let source = if to_archive { live } else { archived }
   let destination = if to_archive { archived } else { live }
   let order = if to_archive {
@@ -361,7 +349,7 @@ async fn move_session_family(
       }
     }
     for session_id in order {
-      on_committed(session_id, family.workspace_token)
+      on_committed(session_id, family.store.workspace_token)
     }
   })
 }
@@ -449,7 +437,7 @@ async fn archive_session_commit(
   let refusal = @worktree.archive_bound_checkout(
     session,
     force,
-    family.workspace,
+    family.store.workspace,
     on_committed?=on_worktree_changed,
   )
   if refusal is Some(refusal) {
@@ -551,7 +539,7 @@ async fn delete_archived_session_commit(
   // Physical erasure happens after the commit: the records are already
   // invisible, so a failed or cancelled attempt here only defers their
   // cleanup to the next sweep instead of undoing a published deletion.
-  manager.sweep_archived_deletions_in(family.root)
+  manager.sweep_archived_deletions_in(family.store.root)
 }
 
 ///|
@@ -566,8 +554,8 @@ async fn SessionFamilyMove::delete_archived_records(
   on_committed : (String, String) -> Unit,
   on_worktree_changed? : (String, Array[WorktreeInfo]) -> Unit,
 ) -> Unit {
-  let archived = @session_store.archived_root(self.root).join("sessions")
-  let deleting = @session_store.deleting_root(self.root)
+  let archived = @session_store.archived_root(self.store.root).join("sessions")
+  let deleting = @session_store.deleting_root(self.store.root)
   let order = self.members[1:].to_owned()
   order.push(self.members[0])
   for session_id in order {
@@ -620,7 +608,7 @@ async fn SessionFamilyMove::delete_archived_records(
       }
     }
     for session_id in order {
-      on_committed(session_id, self.workspace_token)
+      on_committed(session_id, self.store.workspace_token)
     }
   })
 }

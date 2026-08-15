@@ -263,7 +263,7 @@ test "a different endpoint cannot reuse a live engine process" {
     engine: "openseek",
     cwd: None,
     session: "s-fingerprint",
-    session_root: None,
+    session_root: Some(@pathx.Path("/sessions").resolve()),
   }
   let custom = {
     ..base,
@@ -429,8 +429,8 @@ async test "host chooses durable placement from workspace state" {
     workspace: None,
   })
   assert_eq(
-    config.session_root.map(root => root.to_string()),
-    Some(workspace + "/.openseek"),
+    config.session_root.map(root => root.to_string()).unwrap_or(""),
+    workspace + "/.openseek",
   )
   assert_eq(config.cwd.map(cwd => cwd.to_string()), Some(workspace))
   // A hint-less session that no attached workspace claims has nowhere to run.
@@ -465,8 +465,8 @@ async test "host chooses durable placement from workspace state" {
     workspace: Some(workspace_resource),
   })
   assert_eq(
-    attached.session_root.map(root => root.to_string()),
-    Some(workspace + "/.openseek"),
+    attached.session_root.unwrap().to_string(),
+    workspace + "/.openseek",
   )
   assert_eq(attached.cwd.map(cwd => cwd.to_string()), Some(workspace))
   @fs.rmdir(dir, recursive=true)
