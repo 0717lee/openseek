@@ -45,19 +45,30 @@ pub fn update(
           { ..state, loading: true, notice: "" },
         )
       }
-    OpenSession(session_id) =>
+    OpenSession(session_id) => {
+      let selection_changed = state.active_id != Some(session_id)
       (
         state.load_history(dispatch, session_id),
         {
           ..state,
           active_id: Some(session_id),
-          selection_generation: state.selection_generation + 1,
+          selection_generation: if selection_changed {
+            state.selection_generation + 1
+          } else {
+            state.selection_generation
+          },
+          draft: if selection_changed {
+            ""
+          } else {
+            state.draft
+          },
           events: [],
           streaming: "",
           loading: true,
           notice: "",
         },
       )
+    }
     DraftChanged(value) => (@cmd.none, { ..state, draft: value })
     Send =>
       if state.busy() || state.draft.trim().is_empty() || !state.has_active() {
@@ -144,6 +155,10 @@ pub fn update(
         state.active_id != Some(session_id) {
         return (@cmd.none, state)
       }
+      if kind is DshResponseReply(session_id~, ..) &&
+        state.active_id != Some(session_id) {
+        return (@cmd.none, state)
+      }
       if kind is DshCreateReply(selection_generation) &&
         state.selection_generation != selection_generation {
         return (@cmd.none, state)
@@ -202,17 +217,21 @@ fn State::with_reply(
   if kind is DshPendingReply {
     return self.with_pending_snapshot(dispatch, reply)
   }
-  if kind is DshResponseReply(rpc_id) {
+  if kind is DshResponseReply(rpc_id~, session_id~) {
     let receipt = DshResponseReceipt(reply)
     guard receipt.accepted() else {
-      return (@cmd.none, { ..self, loading: false, notice: receipt.error() })
+      if self.active_id == Some(session_id) {
+        return (@cmd.none, { ..self, loading: false, notice: receipt.error() })
+      }
+      return (@cmd.none, self)
     }
+    let pending = self.pending.filter(item => item.rpc_id() != rpc_id)
     return (
       @cmd.none,
-      {
-        ..self,
-        pending: self.pending.filter(item => item.rpc_id() != rpc_id),
-        loading: false,
+      if self.active_id == Some(session_id) {
+        { ..self, pending, loading: false }
+      } else {
+        { ..self, pending, }
       },
     )
   }
@@ -307,6 +326,11 @@ fn State::with_reply(
         } else {
           self.selection_generation
         },
+        draft: if selection_changed {
+          ""
+        } else {
+          self.draft
+        },
         events: if selection_changed {
           []
         } else {
@@ -356,6 +380,7 @@ fn State::with_reply(
             ..self,
             active_id: Some(session_id),
             selection_generation: self.selection_generation + 1,
+            draft: "",
             events: [],
             streaming: "",
             loading: true,
@@ -436,7 +461,7 @@ fn State::with_reply(
       } else {
         (@cmd.none, self)
       }
-    DshStatusReply | DshPendingReply | DshResponseReply(_) => (@cmd.none, self)
+    DshStatusReply | DshPendingReply | DshResponseReply(..) => (@cmd.none, self)
   }
 }
 
@@ -646,6 +671,11 @@ fn State::with_event(
             self.streaming
           },
           pending: self.pending.filter(item => item.session_id() != session_id),
+          draft: if removed_active {
+            ""
+          } else {
+            self.draft
+          },
           prompt_pending_session: if self.prompt_pending_session ==
             Some(session_id) {
             None
@@ -1165,6 +1195,7 @@ test "empty dsh session baseline clears a deleted active transcript" {
       },
     ],
     active_id: Some("session-1"),
+    draft: "draft for deleted session",
     events: [
       {
         type_: "assistant/chunk",
@@ -1185,6 +1216,7 @@ test "empty dsh session baseline clears a deleted active transcript" {
   assert_true(next.active_id is None)
   assert_true(next.events.is_empty())
   assert_eq(next.streaming, "")
+  assert_eq(next.draft, "")
   assert_false(next.loading)
 }
 
@@ -1198,8 +1230,10 @@ test "late dsh creation preserves newer session navigation" {
       { id: "session-b", title: "B", cwd: None, running: false, blank: false },
     ],
     active_id: Some("session-a"),
+    draft: "draft for A",
   }
   let (_, navigated) = update(dispatch, OpenSession("session-b"), state)
+  assert_eq(navigated.draft, "")
   let current = {
     ..navigated,
     events: [
@@ -1222,6 +1256,10 @@ test "late dsh creation preserves newer session navigation" {
   assert_eq(preserved.streaming, "session B output")
   assert_eq(preserved.events.length(), 1)
   assert_eq(preserved.selection_generation, 1)
+  let same_selection = { ..state, draft: "keep for A" }
+  let (_, reopened) = update(dispatch, OpenSession("session-a"), same_selection)
+  assert_eq(reopened.draft, "keep for A")
+  assert_eq(reopened.selection_generation, 0)
 }
 
 ///|
@@ -1252,6 +1290,52 @@ test "late dsh cancellation replies preserve the newly active session" {
   )
   assert_true(stale_failure.loading)
   assert_eq(stale_failure.notice, "current notice")
+}
+
+///|
+test "background dsh interaction receipts preserve the active page" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let pending = DshApproval(
+    rpc_id="rpc-a",
+    session_id="session-a",
+    approval_id="approval-a",
+    tool_name="write",
+    reason="needs approval",
+  )
+  let state = {
+    ..State(),
+    active_id: Some("session-b"),
+    pending: [pending],
+    loading: true,
+    notice: "session B notice",
+  }
+  let (_, accepted) = state.with_reply(
+    dispatch,
+    DshResponseReply(rpc_id="rpc-a", session_id="session-a"),
+    { "accepted": true },
+  )
+  assert_true(accepted.pending.is_empty())
+  assert_true(accepted.loading)
+  assert_eq(accepted.notice, "session B notice")
+  let (_, rejected) = state.with_reply(
+    dispatch,
+    DshResponseReply(rpc_id="rpc-a", session_id="session-a"),
+    { "accepted": false, "reason": "stale request" },
+  )
+  assert_eq(rejected.pending.length(), 1)
+  assert_true(rejected.loading)
+  assert_eq(rejected.notice, "session B notice")
+  let (_, failed) = update(
+    dispatch,
+    Failed(
+      kind=DshResponseReply(rpc_id="rpc-a", session_id="session-a"),
+      message="transport failed",
+    ),
+    state,
+  )
+  assert_eq(failed.pending.length(), 1)
+  assert_true(failed.loading)
+  assert_eq(failed.notice, "session B notice")
 }
 
 ///|

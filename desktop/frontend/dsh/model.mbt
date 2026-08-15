@@ -90,7 +90,7 @@ priv enum DshReplyKind {
   DshHistoryReply(String)
   DshPromptReply(session_id~ : String, draft~ : String, generation~ : Int)
   DshCancelReply(String)
-  DshResponseReply(String)
+  DshResponseReply(rpc_id~ : String, session_id~ : String)
 }
 
 ///|

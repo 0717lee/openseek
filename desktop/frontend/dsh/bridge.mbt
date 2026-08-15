@@ -251,7 +251,7 @@ fn State::respond_approval(
   guard pending is DshApproval(session_id~, approval_id~, ..) else {
     return @cmd.none
   }
-  DshResponseReply(rpc_id).respond(dispatch, {
+  DshResponseReply(rpc_id~, session_id~).respond(dispatch, {
     "type": "client-response",
     "rpcId": rpc_id,
     "result": {
@@ -289,7 +289,7 @@ fn State::respond_questions(
     }
     values.push(Json::object(fields))
   }
-  DshResponseReply(rpc_id).respond(dispatch, {
+  DshResponseReply(rpc_id~, session_id~).respond(dispatch, {
     "type": "client-response",
     "rpcId": rpc_id,
     "result": {
