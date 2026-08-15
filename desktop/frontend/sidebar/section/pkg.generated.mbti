@@ -11,7 +11,7 @@ import {
 }
 
 // Values
-pub fn component(@rabbita.Val[Input], Actions) -> @rabbita.Val[Array[@html.Html]]
+pub fn component(@rabbita.Val[Input], Actions) -> @rabbita.Val[Array[(String, @html.Html)]]
 
 // Errors
 
@@ -40,6 +40,7 @@ pub(all) struct Id {
 } derive(Eq, Hash, @debug.Debug)
 pub fn Id::Id(source~ : String, channel~ : String) -> Self
 pub fn Id::channel(Self) -> String
+pub fn Id::key(Self) -> String
 pub fn Id::source(Self) -> String
 
 pub(all) struct Input {

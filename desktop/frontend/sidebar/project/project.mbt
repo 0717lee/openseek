@@ -34,6 +34,13 @@ fn Id::subscription_key(self : Id) -> String {
 }
 
 ///|
+/// The DOM child key for this project's folder row inside the sidebar's one
+/// keyed container.
+pub fn Id::key(self : Id) -> String {
+  "project:\{self.source}:\{self.channel}:\{self.root}"
+}
+
+///|
 pub(all) struct Input {
   id : Id
   title : String
@@ -155,18 +162,19 @@ fn Actions::conversation_component(
   self : Actions,
   _id : @conversation.Id,
   input : @rabbita.Val[@conversation.Input],
-) -> @rabbita.Val[Array[@html.Html]] {
+) -> @rabbita.Val[Array[(String, @html.Html)]] {
   @conversation.component(input, self.conversation)
 }
 
 ///|
 /// One keyed project component owns disclosure, compact-preview, and menu
 /// state. Those values therefore cannot leak to an equal path rendered by a
-/// different sidebar source.
+/// different sidebar source. Rows are (key, node) pairs for the sidebar's one
+/// keyed container.
 pub fn component(
   input : @rabbita.Val[Input],
   actions : Actions,
-) -> @rabbita.Val[Array[@html.Html]] {
+) -> @rabbita.Val[Array[(String, @html.Html)]] {
   let (state, emit) = @rabbita.create_state_with_input(
     input~,
     init=(_, _) => {
@@ -280,18 +288,21 @@ pub fn component(
         ]),
       )
     }
-    let rows : Array[@html.Html] = [
-      @html.div(class~, title=input.title, row_children),
+    let rows : Array[(String, @html.Html)] = [
+      (input.id.key(), @html.div(class~, title=input.title, row_children)),
     ]
     if collapsed {
       return rows
     }
     if conversation_rows.length() == 0 && input.empty_label is Some(label) {
       rows.push(
-        @html.div(class="conversation-row placeholder nested", [
-          @html.span(class="row-twisty spacer", ""),
-          @html.span(class="sidebar-label", label),
-        ]),
+        (
+          "\{input.id.key()}:empty",
+          @html.div(class="conversation-row placeholder nested", [
+            @html.span(class="row-twisty spacer", ""),
+            @html.span(class="sidebar-label", label),
+          ]),
+        ),
       )
       return rows
     }
@@ -305,12 +316,15 @@ pub fn component(
     }
     if !state.preview_expanded && conversation_rows.length() > PreviewLimit {
       rows.push(
-        @html.button(
-          class="project-show-more",
-          type_="button",
-          title="Show all \{conversation_rows.length()} chats in this project",
-          on_click=emit(ShowMore),
-          "Show more",
+        (
+          "\{input.id.key()}:more",
+          @html.button(
+            class="project-show-more",
+            type_="button",
+            title="Show all \{conversation_rows.length()} chats in this project",
+            on_click=emit(ShowMore),
+            "Show more",
+          ),
         ),
       )
     }

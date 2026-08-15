@@ -20,6 +20,13 @@ pub fn Id::channel(self : Id) -> String {
 }
 
 ///|
+/// The DOM child key for this section's heading inside the sidebar's one
+/// keyed container.
+pub fn Id::key(self : Id) -> String {
+  "section:\{self.source}:\{self.channel}"
+}
+
+///|
 pub(all) struct Placeholder {
   id : String
   label : String
@@ -103,7 +110,7 @@ priv struct State {
 fn Actions::placeholder_component(
   self : Actions,
   input : @rabbita.Val[Placeholder],
-) -> @rabbita.Val[Array[@html.Html]] {
+) -> @rabbita.Val[Array[(String, @html.Html)]] {
   input.map(row => {
     let mut class = "conversation-row placeholder"
     if row.nested {
@@ -118,14 +125,17 @@ fn Actions::placeholder_component(
     }
     children.push(@html.span(class="sidebar-label", row.label))
     [
-      @html.div(
-        class~,
-        on_click=if row.openable {
-          (self.placeholder)(row.id)
-        } else {
-          @cmd.none
-        },
-        children,
+      (
+        "placeholder:\{row.id}",
+        @html.div(
+          class~,
+          on_click=if row.openable {
+            (self.placeholder)(row.id)
+          } else {
+            @cmd.none
+          },
+          children,
+        ),
       ),
     ]
   })
@@ -136,7 +146,7 @@ fn Actions::entry_component(
   self : Actions,
   _key : String,
   input : @rabbita.Val[Entry],
-) -> @rabbita.Val[Array[@html.Html]] {
+) -> @rabbita.Val[Array[(String, @html.Html)]] {
   input.switch_by(
     entry => {
       match entry {
@@ -176,10 +186,11 @@ fn Actions::entry_component(
 ///|
 /// A Section is a keyed Rabbita component, not an array fragment rebuilt by
 /// the root view. Its disclosure state survives entry insertion and reorder.
+/// Rows are (key, node) pairs for the sidebar's one keyed container.
 pub fn component(
   input : @rabbita.Val[Input],
   actions : Actions,
-) -> @rabbita.Val[Array[@html.Html]] {
+) -> @rabbita.Val[Array[(String, @html.Html)]] {
   let (state, emit) = @rabbita.create_state_with_input(
     input~,
     init=(_, input) => ({ collapsed: input.initially_collapsed }, @cmd.none),
@@ -224,8 +235,8 @@ pub fn component(
         ),
       )
     }
-    let rows : Array[@html.Html] = [
-      @html.div(class~, on_click=emit(Toggle), heading),
+    let rows : Array[(String, @html.Html)] = [
+      (input.id.key(), @html.div(class~, on_click=emit(Toggle), heading)),
     ]
     if !collapsed {
       for group in entry_rows {

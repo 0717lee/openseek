@@ -37,7 +37,7 @@ fn Actions::section_component(
   self : Actions,
   _id : @section.Id,
   input : @rabbita.Val[@section.Input],
-) -> @rabbita.Val[Array[@html.Html]] {
+) -> @rabbita.Val[Array[(String, @html.Html)]] {
   @section.component(input, self.section)
 }
 
@@ -55,17 +55,20 @@ pub fn component(
     by=section => section.id(),
   )
   input.view2(section_rows, (input, section_rows) => {
-    let rows : Array[@html.Html] = []
-    for notice in input.notices {
-      rows.push(
-        @html.div(class="conversation-row placeholder", [
-          @html.span(class="sidebar-label", notice),
-        ]),
+    // One keyed container holds every row. Child components cache their
+    // (key, node) output; keyed diffing re-pairs each cached node with its
+    // own element when neighbours appear or leave, so a row's event slots
+    // can never be re-bound to another row's element.
+    let rows : Map[String, @html.Html] = Map([])
+    for index, notice in input.notices {
+      rows["notice:\{index}"] = @html.div(
+        class="conversation-row placeholder",
+        [@html.span(class="sidebar-label", notice)],
       )
     }
     for group in section_rows {
       for row in group {
-        rows.push(row)
+        rows[row.0] = row.1
       }
     }
     let footer : Array[@html.Html] = []

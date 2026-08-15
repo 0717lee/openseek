@@ -41,6 +41,15 @@ pub fn Id::root(self : Id) -> String? {
 }
 
 ///|
+/// The DOM child key for this conversation's row. The whole sidebar renders
+/// into one keyed container, so cached component output is re-paired with its
+/// own element when neighbouring rows appear or leave — never positionally.
+pub fn Id::key(self : Id) -> String {
+  let root = self.root.unwrap_or("")
+  "conversation:\{self.source}:\{self.channel}:\{self.conversation}:\{root}"
+}
+
+///|
 pub(all) enum RunMark {
   NoRunMark
   RunningMark
@@ -121,18 +130,19 @@ fn Actions::child_component(
   self : Actions,
   _id : Id,
   input : @rabbita.Val[Input],
-) -> @rabbita.Val[Array[@html.Html]] {
+) -> @rabbita.Val[Array[(String, @html.Html)]] {
   component(input, self)
 }
 
 ///|
 /// A real Rabbita component: it is constructed once for an `assoc_by` key,
 /// owns its sub-run disclosure state, consumes incremental input, and returns
-/// an incremental DOM value.
+/// an incremental DOM value. Rows are (key, node) pairs for the sidebar's one
+/// keyed container.
 pub fn component(
   input : @rabbita.Val[Input],
   actions : Actions,
-) -> @rabbita.Val[Array[@html.Html]] {
+) -> @rabbita.Val[Array[(String, @html.Html)]] {
   let (state, emit) = @rabbita.create_state_with_input(
     input~,
     init=(_, _) => ({ children_open: false }, @cmd.none),
@@ -241,7 +251,7 @@ pub fn component(
       on_click=if input.openable { (actions.open)(input.id) } else { @cmd.none },
       children,
     )
-    let rows : Array[@html.Html] = [row]
+    let rows : Array[(String, @html.Html)] = [(input.id.key(), row)]
     if state.children_open {
       for group in child_rows {
         for child in group {
