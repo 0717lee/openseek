@@ -192,7 +192,9 @@ async test "run_turn_with_append closes failed persisted turns" {
 /// `run_turn_with_append`, which own everything for the duration of a single
 /// turn.
 ///
-/// The loop appends `task` as a user message before the first model request.
+/// The loop appends `task` as a user message before the first model request;
+/// `submission_id`, when given, is recorded on that durable `User` item so a
+/// controller can later reconcile the delivery by exact id.
 /// At each step boundary it first drains and applies pending non-blank steers.
 /// When the registry includes the `plan` tool and
 /// `plan_reminder_after_steps` model requests pass without a successful
@@ -233,6 +235,7 @@ pub async fn[X] run_turn_in_scope(
   model~ : @deepseek.Model,
   session~ : @agent_session.Session,
   task~ : String,
+  submission_id? : String,
   append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
   max_steps? : Int = unbounded_max_steps,
   thinking? : @deepseek.ThinkingMode = Max,
@@ -242,7 +245,7 @@ pub async fn[X] run_turn_in_scope(
 ) -> @agent_session.Session {
   let client = @client.Client(api_key~, model~, thinking~, api_url?)
   let summary_client = @client.Client(api_key~, model~, api_url?, thinking=No)
-  let session = session |> append_item(User(UserMessage(task)))
+  let session = session |> append_item(User(UserMessage(task, submission_id?)))
   let tools = try {
     match tools {
       Some(tools) => tools

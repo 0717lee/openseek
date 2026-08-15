@@ -82,8 +82,10 @@ pub async fn start_run(
     raise EngineError("this conversation is compacting; wait for it to finish")
   }
   let run_id = mint_run_id()
-  let command = @protocol.prompt(config.task)
   let submission_id = normalize_submission_id(payload.submission_id)
+  // The normalized tag rides the wire command so the engine records it on
+  // the durable User item this prompt appends.
+  let command = @protocol.prompt(config.task, submission_id?)
   // Submitting, opening the run and announcing it are one synchronous step,
   // with no suspension since the claim check above. That is what makes the
   // ordering hold without a lock: no other request can interleave a command

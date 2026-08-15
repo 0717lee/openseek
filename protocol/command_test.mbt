@@ -13,7 +13,8 @@ fn cmd(line : String) -> Result[@openseek_protocol.Command, String] {
 /// spelling the same command differently, which is what they did.
 fn all_commands() -> Array[@openseek_protocol.Command] {
   [
-    Prompt(text="do it"),
+    Prompt(text="do it", submission_id=None),
+    Prompt(text="do it exactly once", submission_id=Some("page-1-submission-2")),
     Steer(kind=Prompt, text="also fix docs"),
     Steer(kind=Command, text="<user_shell_command>"),
     Compact,
@@ -54,6 +55,30 @@ test "a steer without a kind is a prompt steer" {
 }
 
 ///|
+/// The tag is absent rather than null, so the line an untagged controller
+/// writes is byte for byte what every controller wrote before the field.
+test "prompt omits submission_id unless the controller tagged it" {
+  inspect(
+    (Prompt(text="do it", submission_id=None) : @openseek_protocol.Command)
+    .to_json()
+    .stringify(),
+    content=(
+      #|{"command":"prompt","text":"do it"}
+    ),
+  )
+  inspect(
+    (
+      Prompt(text="do it", submission_id=Some("page-1-submission-2")) :
+      @openseek_protocol.Command)
+    .to_json()
+    .stringify(),
+    content=(
+      #|{"command":"prompt","text":"do it","submission_id":"page-1-submission-2"}
+    ),
+  )
+}
+
+///|
 /// `auto` is absent rather than `false`, so the line a controller writes for an
 /// ordinary goal is byte for byte what the TUI has always written.
 test "goal set omits auto unless it is armed" {
@@ -88,6 +113,16 @@ test "a rejected command explains itself in the engine's own words" {
     ),
     content=(
       #|Err("expected a string \"text\" field")
+    ),
+  )
+  debug_inspect(
+    cmd(
+      (
+        #|{"command":"prompt","text":"x","submission_id":7}
+      ),
+    ),
+    content=(
+      #|Err("expected a string \"submission_id\" field")
     ),
   )
   debug_inspect(

@@ -9,9 +9,10 @@
 // asks for a prompt, not for a variant. They are now one line each.
 
 ///|
-/// Send `text` as a new turn's prompt.
-pub fn prompt(text : String) -> @wire.Command {
-  Prompt(text~)
+/// Send `text` as a new turn's prompt. `submission_id` is the client's tag
+/// for the submission, recorded on the turn's durable `User` item.
+pub fn prompt(text : String, submission_id? : String) -> @wire.Command {
+  Prompt(text~, submission_id~)
 }
 
 ///|
@@ -59,6 +60,15 @@ test "the host's commands are the protocol's" {
   assert_true(
     prompt("hello").to_json()
     is { "command": String("prompt"), "text": String("hello"), .. },
+  )
+  assert_true(
+    prompt("hello", submission_id="page-1-submission-2").to_json()
+    is {
+      "command": String("prompt"),
+      "text": String("hello"),
+      "submission_id": String("page-1-submission-2"),
+      ..
+    },
   )
   assert_true(
     steer("go left").to_json()
