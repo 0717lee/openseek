@@ -250,16 +250,6 @@ fn DshWorkspaceAuthorizations::DshWorkspaceAuthorizations() -> DshWorkspaceAutho
 }
 
 ///|
-fn DshDesktopCall::decode(params : Json) -> DshDesktopCall? {
-  guard params is Object(fields) &&
-    fields.get("method") is Some(String(method_)) &&
-    fields.get("payload") is Some(payload) else {
-    return None
-  }
-  Some({ method_, payload })
-}
-
-///|
 fn DshDesktopCall::is_allowed(self : DshDesktopCall) -> Bool {
   [
     "workspace.list", "workspace.create", "session.list", "session.create", "session.history",
@@ -900,14 +890,17 @@ pub fn endpoints(
 pub fn local_endpoints(state : ApiState) -> Array[@endpoint.Endpoint] {
   [
     @endpoint.Endpoint::remote_sync(@commands.dsh_status, _ => {
-      state.dsh.status()
+      let reply : @protocol.DshValueReply = { value: state.dsh.status() }
+      reply
     }),
     @endpoint.Endpoint::remote(@commands.dsh_pending, async fn(_) {
-      state.dsh.interactions()
+      let reply : @protocol.DshValueReply = { value: state.dsh.interactions() }
+      reply
     }),
     @endpoint.Endpoint::remote(@commands.dsh_request, async fn(params) {
-      guard DshDesktopCall::decode(params) is Some(call) else {
-        raise @host.PayloadError("malformed dsh request payload")
+      let call : DshDesktopCall = {
+        method_: params.method_,
+        payload: params.payload,
       }
       // Keep the native capability small and reviewable. dsh's own Workspace
       // registry supplies canonical local paths and session membership;
@@ -927,10 +920,12 @@ pub fn local_endpoints(state : ApiState) -> Array[@endpoint.Endpoint] {
       if call.workspace_bindings(reply) is Some(bindings) {
         state.dsh_workspaces.replace(bindings)
       }
-      frontend_reply
+      let envelope : @protocol.DshValueReply = { value: frontend_reply }
+      envelope
     }),
     @endpoint.Endpoint::remote(@commands.dsh_respond, async fn(params) {
-      guard params is Object(fields) &&
+      let message = params.message
+      guard message is Object(fields) &&
         fields.get("type") is Some(String("client-response")) &&
         fields.get("rpcId") is Some(String(rpc_id)) &&
         !rpc_id.trim().is_empty() &&
@@ -940,7 +935,10 @@ pub fn local_endpoints(state : ApiState) -> Array[@endpoint.Endpoint] {
       guard result.get("ok") is Some(True) || result.get("ok") is Some(False) else {
         raise @host.PayloadError("malformed dsh client-response")
       }
-      state.dsh.respond(params)
+      let reply : @protocol.DshValueReply = {
+        value: state.dsh.respond(message),
+      }
+      reply
     }),
   ]
 }

@@ -30,19 +30,20 @@ fn DshReplyKind::request(
       // includes the native Files/Terminal authorization update, so neither
       // native authority nor either frontend baseline can be rolled back by
       // an older reply.
-      let value : Json = try {
+      let request : @protocol.DshRequestPayload = { method_, payload }
+      let reply : @protocol.DshValueReply = try {
         if self.ordered_lane() is Some(lane) {
           @interop.bridge_request_in_order(
             @interop.ChannelId::Local,
             @commands.dsh_request,
-            { "method": method_, "payload": payload },
+            request,
             lane~,
           )
         } else {
           @interop.bridge_request(
             @interop.ChannelId::Local,
             @commands.dsh_request,
-            { "method": method_, "payload": payload },
+            request,
           )
         }
       } catch {
@@ -55,7 +56,7 @@ fn DshReplyKind::request(
           return
         }
       }
-      scheduler.add(dispatch(Reply(kind=self, value~)))
+      scheduler.add(dispatch(Reply(kind=self, value=reply.value)))
     })
   })
 }
@@ -83,10 +84,10 @@ fn DshReplyKind::status(
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let value : Json = @interop.bridge_request(
+      let reply : @protocol.DshValueReply = @interop.bridge_request(
         @interop.ChannelId::Local,
         @commands.dsh_status,
-        {},
+        @protocol.DshEmptyPayload::DshNoPayload,
       ) catch {
         error => {
           scheduler.add(
@@ -97,7 +98,7 @@ fn DshReplyKind::status(
           return
         }
       }
-      scheduler.add(dispatch(Reply(kind=self, value~)))
+      scheduler.add(dispatch(Reply(kind=self, value=reply.value)))
     })
   })
 }
@@ -111,10 +112,10 @@ fn DshReplyKind::pending(
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let value : Json = @interop.bridge_request(
+      let reply : @protocol.DshValueReply = @interop.bridge_request(
         @interop.ChannelId::Local,
         @commands.dsh_pending,
-        {},
+        @protocol.DshEmptyPayload::DshNoPayload,
       ) catch {
         error => {
           scheduler.add(
@@ -125,7 +126,7 @@ fn DshReplyKind::pending(
           return
         }
       }
-      scheduler.add(dispatch(Reply(kind=self, value~)))
+      scheduler.add(dispatch(Reply(kind=self, value=reply.value)))
     })
   })
 }
@@ -138,10 +139,11 @@ fn DshReplyKind::respond(
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let value : Json = @interop.bridge_request(
+      let request : @protocol.DshRespondPayload = { message, }
+      let reply : @protocol.DshValueReply = @interop.bridge_request(
         @interop.ChannelId::Local,
         @commands.dsh_respond,
-        message,
+        request,
       ) catch {
         error => {
           scheduler.add(
@@ -152,7 +154,7 @@ fn DshReplyKind::respond(
           return
         }
       }
-      scheduler.add(dispatch(Reply(kind=self, value~)))
+      scheduler.add(dispatch(Reply(kind=self, value=reply.value)))
     })
   })
 }

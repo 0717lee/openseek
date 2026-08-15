@@ -334,16 +334,27 @@ pub let codex_turn_interrupt : Command[
 ///|
 /// DeepSeek Harness keeps its own versioned ApiProxy payloads. These commands
 /// are registered only on the embedded Desktop page, not the remote relay.
-pub let dsh_status : Command[Json, Json] = Command("dsh.status")
+pub let dsh_status : Command[@protocol.DshEmptyPayload, @protocol.DshValueReply] = Command(
+  "dsh.status",
+)
 
 ///|
-pub let dsh_pending : Command[Json, Json] = Command("dsh.pending")
+pub let dsh_pending : Command[
+  @protocol.DshEmptyPayload,
+  @protocol.DshValueReply,
+] = Command("dsh.pending")
 
 ///|
-pub let dsh_request : Command[Json, Json] = Command("dsh.request")
+pub let dsh_request : Command[
+  @protocol.DshRequestPayload,
+  @protocol.DshValueReply,
+] = Command("dsh.request")
 
 ///|
-pub let dsh_respond : Command[Json, Json] = Command("dsh.respond")
+pub let dsh_respond : Command[
+  @protocol.DshRespondPayload,
+  @protocol.DshValueReply,
+] = Command("dsh.respond")
 
 ///|
 pub let auth_status : Command[

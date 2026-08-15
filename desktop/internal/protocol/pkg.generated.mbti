@@ -762,6 +762,31 @@ pub fn DownloadUpdateAcceptedReply::not_equal(Self, Self) -> Bool
 pub fn DownloadUpdateAcceptedReply::to_json(Self) -> Json
 pub fn DownloadUpdateAcceptedReply::to_repr(Self) -> @debug.Repr
 
+pub(all) enum DshEmptyPayload {
+  DshNoPayload
+} derive(Eq, @debug.Debug)
+pub impl ToJson for DshEmptyPayload
+pub impl @json.FromJson for DshEmptyPayload
+
+pub(all) struct DshRequestPayload {
+  method_ : String
+  payload : Json
+} derive(Eq, @debug.Debug)
+pub impl ToJson for DshRequestPayload
+pub impl @json.FromJson for DshRequestPayload
+
+pub(all) struct DshRespondPayload {
+  message : Json
+} derive(Eq, @debug.Debug)
+pub impl ToJson for DshRespondPayload
+pub impl @json.FromJson for DshRespondPayload
+
+pub(all) struct DshValueReply {
+  value : Json
+} derive(Eq, @debug.Debug)
+pub impl ToJson for DshValueReply
+pub impl @json.FromJson for DshValueReply
+
 type DshWorkspaceOwner derive(Eq)
 pub fn DshWorkspaceOwner::DshWorkspaceOwner(String) -> Self
 pub fn DshWorkspaceOwner::id(Self) -> String
