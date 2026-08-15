@@ -122,9 +122,7 @@ fn allowed_page_url(url : String) -> Bool {
 fn BrowserViews::attached_window(
   self : BrowserViews,
 ) -> @proton.WindowHandle raise BrowserViewError {
-  guard self.window is Some(window) else {
-    raise WindowNotReady
-  }
+  guard self.window is Some(window) else { raise WindowNotReady }
   window
 }
 
@@ -152,9 +150,7 @@ fn BrowserViews::open(
   self : BrowserViews,
   payload : @protocol.BrowserOpenPayload,
 ) -> @protocol.EmptyReply raise {
-  guard allowed_page_url(payload.url) else {
-    raise BlockedURL(payload.url)
-  }
+  guard allowed_page_url(payload.url) else { raise BlockedURL(payload.url) }
   let window = self.attached_window()
   match window.view(view_name(payload.id)) {
     Some(view) => view.load_url(payload.url)
