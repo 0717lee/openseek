@@ -156,6 +156,25 @@ pub fn update(
           return (@cmd.none, { ..state, prompt_pending_session: None })
         }
       }
+      // dsh reports application failures inside successful HTTP responses.
+      // Apply the same origin checks used by `Failed` before `with_reply`
+      // reaches its generic business-error envelope branch.
+      if kind is DshHistoryReply(session_id) &&
+        state.active_id != Some(session_id) {
+        return (@cmd.none, state)
+      }
+      if kind is DshCancelReply(session_id) &&
+        state.active_id != Some(session_id) {
+        return (@cmd.none, state)
+      }
+      if kind is DshCreateReply(selection_generation) &&
+        state.selection_generation != selection_generation {
+        return (@cmd.none, { ..state, creation_pending: false })
+      }
+      if kind is DshWorkspaceCreateReply(selection_generation) &&
+        state.selection_generation != selection_generation {
+        return (@cmd.none, { ..state, creation_pending: false })
+      }
       state.with_reply(dispatch, kind, value)
     }
     Failed(kind~, message~) => {
@@ -1545,6 +1564,62 @@ test "late dsh cancellation replies preserve the newly active session" {
   )
   assert_true(stale_failure.loading)
   assert_eq(stale_failure.notice, "current notice")
+}
+
+///|
+test "dsh business errors preserve newer session navigation" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let state = {
+    ..State(),
+    active_id: Some("session-b"),
+    selection_generation: 2,
+    creation_pending: true,
+    loading: true,
+    notice: "session B notice",
+  }
+  let business_error : Json = {
+    "type": "server-response",
+    "rpcId": "request-a",
+    "result": {
+      "ok": false,
+      "error": { "code": "request-failed", "message": "session A failed" },
+    },
+  }
+  let (_, stale_history) = update(
+    dispatch,
+    Reply(kind=DshHistoryReply("session-a"), value=business_error),
+    state,
+  )
+  assert_true(stale_history == state)
+  let (_, stale_cancel) = update(
+    dispatch,
+    Reply(kind=DshCancelReply("session-a"), value=business_error),
+    state,
+  )
+  assert_true(stale_cancel == state)
+  let (_, stale_create) = update(
+    dispatch,
+    Reply(kind=DshCreateReply(1), value=business_error),
+    state,
+  )
+  assert_false(stale_create.creation_pending)
+  assert_true(stale_create.loading)
+  assert_eq(stale_create.notice, "session B notice")
+  let (_, stale_workspace_create) = update(
+    dispatch,
+    Reply(kind=DshWorkspaceCreateReply(1), value=business_error),
+    state,
+  )
+  assert_false(stale_workspace_create.creation_pending)
+  assert_true(stale_workspace_create.loading)
+  assert_eq(stale_workspace_create.notice, "session B notice")
+  let (_, current_cancel) = update(
+    dispatch,
+    Reply(kind=DshCancelReply("session-b"), value=business_error),
+    state,
+  )
+  assert_false(current_cancel.loading)
+  assert_eq(current_cancel.notice, "request-failed: session A failed")
 }
 
 ///|
