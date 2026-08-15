@@ -115,7 +115,7 @@ pub async fn resolve_host_workspace_authorization(
 /// anywhere. `None` when the id is unsafe as a path component, no home
 /// directory is known, or a bound checkout is missing. The run-config caller
 /// rejects every unavailable root instead of moving the run elsewhere.
-async fn session_workspace_dir(session : String) -> @pathx.Path? {
+pub async fn of_session(session : String) -> @pathx.Path? {
   if @session_store.workspace_of(session) is Some(workspace) {
     // A session bound to one of the workspace's worktrees works in that
     // checkout while it exists. A retained binding whose checkout is missing
@@ -134,7 +134,7 @@ async fn session_workspace_dir(session : String) -> @pathx.Path? {
 /// session id, so it answers even for a resumed conversation the frontend
 /// loaded without a live `cwd`.
 pub async fn session_cwd(session : String) -> @pathx.Absolute? {
-  guard session_workspace_dir(session) is Some(dir) else { return None }
+  guard of_session(session) is Some(dir) else { return None }
   // `session_workspace_dir` is assembled from the absolute home directory.
   // Keep the validation here so that callers never regain the old `""`
   // sentinel or an unclassified string.
@@ -188,7 +188,7 @@ pub async fn resolve_in_workspace(
         None => host_workspace_authorizations.resolve(session, hint)
       }
     Some(_) => None
-    None => session_workspace_dir(session)
+    None => of_session(session)
   }
   guard root is Some(root) else { return None }
   guard root.to_absolute() is Some(root) else { return None }
@@ -302,7 +302,7 @@ fn contained_path(
 /// Documents is comes from the platform (`@userdirs.documents_dir`); when
 /// that folder does not exist (headless machines, say), the folder lives
 /// directly under the home directory.
-async fn workspace_root() -> @pathx.Path? {
+pub async fn workspace_root() -> @pathx.Path? {
   guard @home.dir() is Some(home) else { return None }
   let parent : @pathx.Path = if @userdirs.documents_dir() is Some(documents) &&
     @fsx.is_dir(documents) {

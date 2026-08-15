@@ -47,7 +47,7 @@ async fn git_pull_request_op(
   // describing different branches.
   let base = match payload.cwd {
     Some(cwd) => @pathx.Absolute::from_uri_path(cwd)
-    None => @engine.session_cwd(payload.session)
+    None => @work_dir.session_cwd(payload.session)
   }
   guard base is Some(base) else { return nothing }
   // Read from `HEAD` rather than blindly trusting the caller. Codex-managed

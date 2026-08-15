@@ -10,7 +10,7 @@ async fn git_branch_op(payload : GitBranchPayload) -> GitBranchReply {
   // `host.open_path`).
   let base = match payload.cwd {
     Some(cwd) => @pathx.Absolute::from_uri_path(cwd)
-    None => @engine.session_cwd(payload.session)
+    None => @work_dir.session_cwd(payload.session)
   }
   guard base is Some(base) else { return { branch: None, diffstat: None } }
   guard git_branch(base.0) is Some(branch) else {
@@ -1146,7 +1146,7 @@ async fn git_change_snapshot(
 
 ///|
 async fn git_changes_op(payload : GitChangesPayload) -> GitChangesReply {
-  guard @engine.resolve_in_workspace(
+  guard @work_dir.resolve_in_workspace(
       payload.session,
       "",
       workspace?=payload.workspace,
@@ -1176,7 +1176,7 @@ async fn git_changes_op(payload : GitChangesPayload) -> GitChangesReply {
       _ => raise HostError("Git returned a non-UTF-8 workspace prefix")
     },
   )
-  let recorded_base = @engine.session_review_base(
+  let recorded_base = @work_dir.session_review_base(
     payload.session,
     workspace?=payload.workspace,
   )
@@ -1324,7 +1324,7 @@ async fn git_original_file_at(
 async fn git_original_file_op(
   payload : GitOriginalFilePayload,
 ) -> GitOriginalFileReply {
-  guard @engine.resolve_in_workspace(
+  guard @work_dir.resolve_in_workspace(
       payload.session,
       "",
       workspace?=payload.workspace,

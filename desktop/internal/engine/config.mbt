@@ -195,7 +195,7 @@ async fn serve_config(
     } else if @session_store.workspace_of(session) is Some(dir) {
       Some(@worktree.run_dir(dir, session).to_path())
     } else {
-      session_workspace_dir(session)
+      @work_dir.of_session(session)
     },
     session,
     session_root: if workspace is Some(dir) {

@@ -857,7 +857,8 @@ fn @pathx.Absolute::resource_path(
 /// resource-path form the frontend binds to a channel. Readiness fails when
 /// this cannot be resolved, so `agent.connected` never carries an empty root.
 pub async fn scratch_root() -> String {
-  guard workspace_root() is Some(root) && root.to_absolute() is Some(root) else {
+  guard @work_dir.workspace_root() is Some(root) &&
+    root.to_absolute() is Some(root) else {
     raise EngineError("cannot determine the scratch workspace root")
   }
   root.resource_path()
@@ -1239,7 +1240,7 @@ async test "named session retries after its first prompt creates no record" {
   let count = root.join("serve-count")
   let first_ready = root.join("first-ready")
   let session = "s-" + mint_run_id()
-  let workspace = session_workspace_dir(session)
+  let workspace = @work_dir.of_session(session)
   prepare_fake_moonbit_seed(seed, version="0.10.0-test")
   prepare_fake_bundled_moonbit_home(
     runtime.join("toolchains/moonbit/macos-arm64"),

@@ -14,7 +14,7 @@ async fn open_path_op(payload : OpenPathPayload) -> OpenPathReply {
       }
       Some(cwd)
     }
-    None => @engine.session_cwd(payload.session)
+    None => @work_dir.session_cwd(payload.session)
   }
   let path = @pathx.Path(payload.path).expand_home()
   // Absolute system targets do not need a conversation checkout. Relative
@@ -22,7 +22,7 @@ async fn open_path_op(payload : OpenPathPayload) -> OpenPathReply {
   if base is None && !path.is_host_absolute() {
     raise HostError("This conversation has no working directory")
   }
-  let target = @engine.open_target(base, path)
+  let target = @work_dir.open_target(base, path)
   guard !target.0.is_empty() else { raise HostError("Empty path") }
   let resolution = @openpath.Reference(target.0).resolve()
   if resolution is MissingPath(path) {

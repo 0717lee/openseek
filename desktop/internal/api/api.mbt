@@ -243,8 +243,8 @@ fn CodexWorkspaceBinding::decode_reply(value : Json) -> CodexWorkspaceBinding? {
 async fn CodexWorkspaceBinding::authorize(self : CodexWorkspaceBinding) -> Unit {
   match self.workspace {
     Some(workspace) if !workspace.trim().is_empty() =>
-      @engine.authorize_host_workspace(self.session, workspace)
-    _ => @engine.revoke_host_workspace(self.session)
+      @work_dir.authorize_host_workspace(self.session, workspace)
+    _ => @work_dir.revoke_host_workspace(self.session)
   }
 }
 
@@ -384,7 +384,7 @@ pub fn endpoints(
       guard payload.validated_id() is Some(draft_id) else {
         raise @host.PayloadError("invalid Codex draft id")
       }
-      @engine.revoke_host_workspace(draft_id)
+      @work_dir.revoke_host_workspace(draft_id)
       state.codex_draft_threads.forget(draft_id)
       Acknowledged
     }),
@@ -637,7 +637,7 @@ pub fn endpoints(
           info.codex_thread == Some(thread_id) && info.name == reply.name
         })
         is Some(info) {
-        @engine.authorize_host_workspace(thread_id, info.path)
+        @work_dir.authorize_host_workspace(thread_id, info.path)
       }
       WorktreeCreatedReply(reply)
     }),
@@ -820,7 +820,7 @@ async fn ApiState::codex_file_search(
   self : ApiState,
   payload : @protocol.CodexFileSearchPayload,
 ) -> @protocol.CodexFileSearchReply {
-  guard @engine.resolve_in_workspace(
+  guard @work_dir.resolve_in_workspace(
       payload.thread_id,
       "",
       workspace=payload.cwd,
@@ -869,7 +869,7 @@ async fn ApiState::open_codex_draft(
     project_root is Some(project_root) else {
     raise @host.PayloadError("invalid Codex draft project")
   }
-  @engine.authorize_host_workspace(draft_id, project_root)
+  @work_dir.authorize_host_workspace(draft_id, project_root)
   { draft_id, cwd: project_root, project_root }
 }
 
@@ -885,7 +885,7 @@ async fn ApiState::codex_thread_start(
     (Some(cwd), Some(draft_id)) => {
       guard @protocol.CodexDraftClosePayload::{ draft_id, }.validated_id()
         is Some(validated) &&
-        @engine.resolve_host_workspace_authorization(validated, cwd)
+        @work_dir.resolve_host_workspace_authorization(validated, cwd)
         is Some(authorized) &&
         @pathx.Absolute::from_uri_path(cwd) is Some(requested) &&
         authorized.normalize() == requested.normalize() else {
@@ -917,7 +917,7 @@ async fn ApiState::codex_turn_start(
   request : @protocol.CodexTurnStartPayload,
 ) -> @protocol.CodexTurnReply {
   if request.cwd is Some(cwd) {
-    guard @engine.resolve_host_workspace_authorization(request.thread_id, cwd)
+    guard @work_dir.resolve_host_workspace_authorization(request.thread_id, cwd)
       is Some(authorized) &&
       @pathx.Absolute::from_uri_path(cwd) is Some(requested) &&
       authorized.normalize() == requested.normalize() else {
@@ -999,7 +999,7 @@ async fn ApiState::codex_skills_list(
   self : ApiState,
   payload : @protocol.CodexSkillsListPayload,
 ) -> @protocol.CodexDataReply {
-  guard @engine.resolve_in_workspace(
+  guard @work_dir.resolve_in_workspace(
       payload.thread_id,
       "",
       workspace=payload.cwd,
@@ -1137,7 +1137,7 @@ async fn ApiState::codex_request(
         publish_worktree_changed(self, workspace, worktrees)
       },
     )
-    @engine.revoke_host_workspace(request.thread_id)
+    @work_dir.revoke_host_workspace(request.thread_id)
     if refusal is Some(refusal) {
       return request.retained_worktree(refusal)
     }

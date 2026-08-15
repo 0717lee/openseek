@@ -15,10 +15,6 @@ pub async fn archived_sessions(EngineManager, (String, String) -> Unit) -> @prot
 
 pub async fn attach_workspace(String, (Array[String]) -> Unit) -> @protocol.WorkspacesReply
 
-pub async fn attached_workspace_dir(@pathx.Absolute) -> @pathx.Absolute?
-
-pub async fn authorize_host_workspace(String, String) -> Unit
-
 pub async fn cancel_run(EngineManager, @protocol.CancelPayload) -> @protocol.CancelReply
 
 pub async fn compact_run(EngineManager, @protocol.CompactPayload) -> @protocol.CompactReply
@@ -43,21 +39,9 @@ pub async fn load_session(EngineManager, @protocol.LoadSessionPayload) -> @proto
 
 pub fn new_engine_actor(String, runtime_dir? : @pathx.Path) -> EngineActor
 
-pub fn open_target(@pathx.Absolute?, @pathx.Path) -> @pathx.Path
-
 pub async fn remote_server_base(EngineManager) -> String?
 
-pub async fn resolve_host_workspace_authorization(String, String) -> @pathx.Absolute?
-
-pub async fn resolve_in_workspace(String, String, workspace? : String) -> @pathx.Absolute?
-
-pub async fn revoke_host_workspace(String) -> Unit
-
 pub async fn scratch_root() -> String
-
-pub async fn session_cwd(String) -> @pathx.Absolute?
-
-pub async fn session_review_base(String, workspace? : String) -> String?
 
 pub async fn settings_status(EngineManager) -> @protocol.SettingsStatusPayload
 

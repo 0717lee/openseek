@@ -14,7 +14,7 @@ async fn launch_app_op(payload : LaunchAppPayload) -> LaunchAppReply {
   // to the directory the session's engine runs in (same as `host.open_path`).
   let dir = match payload.cwd {
     Some(cwd) => @pathx.Absolute::from_uri_path(cwd)
-    None => @engine.session_cwd(payload.session)
+    None => @work_dir.session_cwd(payload.session)
   }
   guard dir is Some(dir) else {
     raise HostError("This conversation has no working directory yet")

@@ -81,35 +81,38 @@ async test "session workspace dir follows the worktree mapping while it exists" 
   @fsx.ensure_dir(ws.join(".worktrees/wt").to_path())
   @fsx.ensure_dir(ws.join(".worktrees/codex").to_path())
   assert_eq(
-    session_workspace_dir("s-wt").map(dir => dir.to_string()),
+    @work_dir.of_session("s-wt").map(dir => dir.to_string()),
     Some(ws.join(".worktrees/wt").to_string()),
   )
   assert_eq(
-    session_workspace_dir("s-plain").map(dir => dir.to_string()),
+    @work_dir.of_session("s-plain").map(dir => dir.to_string()),
     Some(ws.to_string()),
   )
   // The workspace hint refines to the worktree too — the FS bridge sends the
   // hint on every op.
   assert_eq(
-    resolve_in_workspace("s-wt", "src", workspace=ws.to_string()).map(dir => {
-      dir.to_string()
-    }),
+    @work_dir.resolve_in_workspace("s-wt", "src", workspace=ws.to_string()).map(dir => {
+        dir.to_string()
+      },
+    ),
     Some(ws.join(".worktrees/wt/src").to_string()),
   )
   // Terminal and file operations use the same conversation id field for
   // both products; Codex ownership must route to its registered checkout.
   assert_eq(
-    resolve_in_workspace("codex-thread-1", "", workspace=ws.to_string()).map(dir => {
-      dir.to_string()
-    }),
+    @work_dir.resolve_in_workspace(
+      "codex-thread-1",
+      "",
+      workspace=ws.to_string(),
+    ).map(dir => dir.to_string()),
     Some(ws.join(".worktrees/codex").to_string()),
   )
   // Deleting the checkout retains the binding but removes the usable root:
   // every session-scoped operation refuses until Repair recreates it.
   @fs.rmdir(ws.join(".worktrees/wt").to_string(), recursive=true)
-  assert_true(session_workspace_dir("s-wt") is None)
+  assert_true(@work_dir.of_session("s-wt") is None)
   assert_true(
-    resolve_in_workspace("s-wt", "", workspace=ws.to_string()) is None,
+    @work_dir.resolve_in_workspace("s-wt", "", workspace=ws.to_string()) is None,
   )
   @fs.rmdir(root.to_string(), recursive=true)
 }
@@ -144,24 +147,26 @@ async test "attached workspace dir resolves registered worktree paths" {
   }
   // A registered worktree path answers from the worktree root.
   assert_eq(
-    attached_workspace_dir(worktree_file).map(dir => dir.to_string()),
+    @work_dir.attached_workspace_dir(worktree_file).map(dir => dir.to_string()),
     Some(ws.join(".worktrees/wt").to_string()),
   )
   // An unregistered `.worktrees` path (a subtask slice) and a main-tree path
   // keep resolving to the workspace root.
   assert_eq(
-    attached_workspace_dir(stray_file).map(dir => dir.to_string()),
+    @work_dir.attached_workspace_dir(stray_file).map(dir => dir.to_string()),
     Some(ws.to_string()),
   )
   assert_eq(
-    attached_workspace_dir(workspace_file).map(dir => dir.to_string()),
+    @work_dir.attached_workspace_dir(workspace_file).map(dir => dir.to_string()),
     Some(ws.to_string()),
   )
   // Dot segments are cleaned before choosing the deepest owning tree. Although
   // its spelling enters a registered worktree, this file physically belongs to
   // the main workspace after `../..` is resolved.
   assert_eq(
-    attached_workspace_dir(dot_segment_file).map(dir => dir.to_string()),
+    @work_dir.attached_workspace_dir(dot_segment_file).map(dir => {
+      dir.to_string()
+    }),
     Some(ws.to_string()),
   )
   @fs.rmdir(root.to_string(), recursive=true)
@@ -356,10 +361,11 @@ async test "a checkout deleted outside the app refuses runs and is repairable" {
   // main checkout: file/terminal resolution returns no root, and a run names
   // the missing worktree.
   assert_true(@worktree.tree_dir(repo, "s-vanish") is None)
-  assert_true(session_workspace_dir("s-vanish") is None)
-  assert_true(session_cwd("s-vanish") is None)
+  assert_true(@work_dir.of_session("s-vanish") is None)
+  assert_true(@work_dir.session_cwd("s-vanish") is None)
   assert_true(
-    resolve_in_workspace("s-vanish", "", workspace=repo.to_string()) is None,
+    @work_dir.resolve_in_workspace("s-vanish", "", workspace=repo.to_string())
+    is None,
   )
   let refusal = try {
     ignore(@worktree.run_dir(repo, "s-vanish"))
@@ -551,7 +557,8 @@ async test "archive keeps worktree placement for explicit repair after unarchive
   )
   assert_true(@worktree.tree_dir(repo, "s-arc") is None)
   assert_true(
-    resolve_in_workspace("s-arc", "", workspace=repo.to_string()) is None,
+    @work_dir.resolve_in_workspace("s-arc", "", workspace=repo.to_string())
+    is None,
   )
   let repaired = @worktree.create(
     manager.worktree_host(),
