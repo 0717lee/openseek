@@ -31,6 +31,12 @@ fn sandbox_exec_args(profile : String, cmd : String) -> Array[String] {
 /// propagates. The result is cached process-wide, so later calls do not probe
 /// again.
 async fn sandbox_exec_available() -> Bool {
+  // `openseek --no-sandbox-exec` normalizes its per-process choice into this
+  // environment value before tools are built. Serve subprocesses are scoped
+  // one-to-one with desktop conversations, and their subruns inherit it.
+  if @env.get_env_var("OPENSEEK_NO_SANDBOX_EXEC") is Some("1") {
+    return false
+  }
   match sandbox_exec_available_cache.val {
     Some(value) => value
     None => {

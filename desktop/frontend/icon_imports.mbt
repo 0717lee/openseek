@@ -16,6 +16,8 @@ using @icons {
   icon_link_external,
   icon_package,
   icon_search,
+  icon_shield,
+  icon_shield_off,
   icon_sparkle,
   icon_sync,
   icon_target,

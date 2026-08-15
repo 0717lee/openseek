@@ -64,6 +64,12 @@ list` / `openseek sessions show <id>` (or the viz server) and resumable with
 `--session <id>`. Pass `--no-session` to run ephemerally; combining it with
 `--session` is rejected.
 
+`--no-sandbox-exec` (or `OPENSEEK_NO_SANDBOX_EXEC=1`) disables the macOS
+`sandbox-exec` wrapper for supported tool commands in this process's
+conversation, including its child sub-runs. It does not disable OpenSeek's
+command classification or static Git/source-write guards. The default remains
+sandboxed whenever the host can enforce the profile.
+
 Without an explicit prompt file, the CLI uses the default built-in prompt
 (`prompt/default_prompt.mbt.md`) for the supported DeepSeek and Kimi model
 names. The older base prompt remains in `prompt/base_prompt.mbt.md` for

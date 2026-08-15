@@ -1012,6 +1012,7 @@ async test "start echoes the client submission id in Started" {
         submission_id: Some("submission-start"),
         model: None,
         max_steps: None,
+        sandbox_exec: None,
         session,
         workspace: None,
       }),
@@ -1075,6 +1076,7 @@ async test "setup failure retires the writer before an immediate next start" {
       submission_id: None,
       model: None,
       max_steps: None,
+      sandbox_exec: None,
       session,
       workspace: None,
     })
@@ -1098,6 +1100,7 @@ async test "setup failure retires the writer before an immediate next start" {
       submission_id: None,
       model: None,
       max_steps: None,
+      sandbox_exec: None,
       session,
       workspace: None,
     })
@@ -1179,6 +1182,7 @@ async test "cancelling a backpressured prompt retires its partial writer" {
           submission_id: None,
           model: None,
           max_steps: None,
+          sandbox_exec: None,
           session,
           workspace: None,
         }),
@@ -1287,6 +1291,7 @@ async test "named session retries after its first prompt creates no record" {
           submission_id: None,
           model: None,
           max_steps: None,
+          sandbox_exec: None,
           session,
           workspace: None,
         }),
@@ -1324,6 +1329,7 @@ async test "named session retries after its first prompt creates no record" {
       submission_id: None,
       model: None,
       max_steps: None,
+      sandbox_exec: None,
       session,
       workspace: None,
     })
@@ -1534,6 +1540,7 @@ async test "workspace detach refuses a running conversation without hiding it" {
       submission_id: None,
       model: None,
       max_steps: None,
+      sandbox_exec: None,
       session: "s-detach-running",
       workspace: Some(workspace.to_string()),
     })
@@ -1620,6 +1627,7 @@ async test "workspace detach drains an idle writer and its follower first" {
       submission_id: None,
       model: None,
       max_steps: None,
+      sandbox_exec: None,
       session: "s-detach-idle",
       workspace: Some(workspace.to_string()),
     })
@@ -1674,6 +1682,7 @@ async test "a goal request is refused before it can reach the wrong engine" {
       auto: Some(true),
       model: None,
       max_steps: None,
+      sandbox_exec: None,
       workspace: None,
     }).contains("autonomous goal continuation is not supported yet"),
   )
@@ -1686,6 +1695,7 @@ async test "a goal request is refused before it can reach the wrong engine" {
       auto: None,
       model: None,
       max_steps: None,
+      sandbox_exec: None,
       workspace: None,
     }).contains("not supported yet"),
   )

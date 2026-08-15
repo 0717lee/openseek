@@ -22,6 +22,7 @@ priv struct RunConfig {
   api_url : String?
   model : String
   max_steps : Int
+  sandbox_exec : Bool
   engine : String
   cwd : @pathx.Path?
   session : String
@@ -81,6 +82,7 @@ async fn run_config(
     manager,
     model?=payload.model,
     max_steps?=payload.max_steps,
+    sandbox_exec?=payload.sandbox_exec,
     session~,
     workspace?=payload.workspace,
   )
@@ -101,6 +103,7 @@ async fn compact_config(
     payload.session,
     model?=payload.model,
     max_steps?=payload.max_steps,
+    sandbox_exec?=payload.sandbox_exec,
     workspace?=payload.workspace,
   )
 }
@@ -118,6 +121,7 @@ async fn goal_config(
     payload.session,
     model?=payload.model,
     max_steps?=payload.max_steps,
+    sandbox_exec?=payload.sandbox_exec,
     workspace?=payload.workspace,
   )
 }
@@ -128,13 +132,22 @@ async fn session_command_config(
   session : String,
   model? : String,
   max_steps? : Int,
+  sandbox_exec? : Bool,
   workspace? : String,
 ) -> RunConfig {
   let session = session.trim().to_owned()
   guard !session.is_empty() else {
     raise EngineError("session id must not be empty")
   }
-  serve_config("", manager, model?, max_steps?, session~, workspace?)
+  serve_config(
+    "",
+    manager,
+    model?,
+    max_steps?,
+    sandbox_exec?,
+    session~,
+    workspace?,
+  )
 }
 
 ///|
@@ -147,6 +160,7 @@ async fn serve_config(
   manager : EngineManager,
   model? : String,
   max_steps? : Int,
+  sandbox_exec? : Bool,
   session~ : String,
   workspace? : String,
 ) -> RunConfig {
@@ -180,6 +194,8 @@ async fn serve_config(
       None => @env.get("OPENSEEK_MODEL").unwrap_or(DefaultModel)
     },
     max_steps: configured_max_steps(max_steps),
+    // Older clients omit the field and retain the source-write sandbox.
+    sandbox_exec: sandbox_exec.unwrap_or(true),
     engine,
     cwd: if workspace is Some(dir) {
       // The workspace hint names the project; a session already bound to one
@@ -220,10 +236,23 @@ fn engine_fingerprint(config : RunConfig) -> String {
     config.api_url.unwrap_or(""),
     config.model,
     config.max_steps.to_string(),
+    config.sandbox_exec.to_string(),
     config.cwd.map(cwd => cwd.to_string()).unwrap_or(""),
     config.session,
     config.session_root.map(root => root.to_string()).unwrap_or(""),
   ].join("\u{0}")
+}
+
+///|
+/// Command-line arguments for the serve process dedicated to this
+/// conversation. Keeping the opt-out here makes the fingerprint field and the
+/// process flag two views of the same validated configuration.
+fn RunConfig::serve_args(self : RunConfig) -> Array[String] {
+  let args = ["serve", "--dir", "."]
+  if !self.sandbox_exec {
+    args.push("--no-sandbox-exec")
+  }
+  args
 }
 
 ///|
@@ -234,6 +263,7 @@ test "a different endpoint cannot reuse a live engine process" {
     api_url: None,
     model: "deepseek-v4-pro",
     max_steps: 1000,
+    sandbox_exec: true,
     engine: "openseek",
     cwd: None,
     session: "s-fingerprint",
@@ -251,6 +281,14 @@ test "a different endpoint cannot reuse a live engine process" {
     engine_fingerprint(base) !=
     engine_fingerprint({ ..base, cwd: Some(Path("/w/.worktrees/x")) }),
   )
+  assert_true(
+    engine_fingerprint(base) !=
+    engine_fingerprint({ ..base, sandbox_exec: false }),
+  )
+  assert_eq(base.serve_args(), ["serve", "--dir", "."])
+  assert_eq({ ..base, sandbox_exec: false }.serve_args(), [
+    "serve", "--dir", ".", "--no-sandbox-exec",
+  ])
 }
 
 ///|
@@ -303,6 +341,7 @@ async test "run config ignores OPENSEEK_API_URL in favor of the settings" {
     submission_id: None,
     model: None,
     max_steps: None,
+    sandbox_exec: None,
     session: "s-default",
     workspace: None,
   })
@@ -321,6 +360,7 @@ async test "run config rejects a blank session" {
           submission_id: None,
           model: None,
           max_steps: None,
+          sandbox_exec: None,
           session,
           workspace: None,
         }),
@@ -365,6 +405,7 @@ async test "host chooses durable placement from workspace state" {
     submission_id: None,
     model: None,
     max_steps: None,
+    sandbox_exec: None,
     session: "s-workspace",
     workspace: None,
   })
@@ -378,6 +419,7 @@ async test "host chooses durable placement from workspace state" {
     submission_id: None,
     model: None,
     max_steps: None,
+    sandbox_exec: None,
     session: "s-global",
     workspace: None,
   })
@@ -387,6 +429,7 @@ async test "host chooses durable placement from workspace state" {
     submission_id: None,
     model: None,
     max_steps: None,
+    sandbox_exec: None,
     session: "s-attached",
     workspace: Some(workspace_resource),
   })

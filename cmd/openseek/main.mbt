@@ -25,6 +25,12 @@ async fn dispatch() -> Unit {
   let argv = @env.args()[1:]
   let env = @env.get_env_vars()
   let matches = root_command().parse(argv~, env~)
+  // Normalize the CLI flag into process state before any tool is built. Child
+  // subruns inherit it, so one conversation cannot accidentally mix sandboxed
+  // parent commands with unsandboxed worker or review commands.
+  if matches.flags.get("no-sandbox-exec").unwrap_or(false) {
+    @env.set_env_var("OPENSEEK_NO_SANDBOX_EXEC", "1")
+  }
   match matches.subcommand {
     Some(("tui", m)) => @tui.run(m)
     Some(("run", m)) => run_task_command(m)
@@ -558,6 +564,19 @@ test "tui is an explicit subcommand" {
 }
 
 ///|
+test "sandbox-exec opt-out is a global per-process flag" {
+  let matches = root_command().parse(
+    argv=["serve", "--no-sandbox-exec"],
+    env=Map([]),
+  )
+  assert_true(matches.flags.get("no-sandbox-exec").unwrap_or(false))
+  guard matches.subcommand is Some(("serve", serve)) else {
+    fail("expected serve subcommand")
+  }
+  assert_true(serve.flags.get("no-sandbox-exec").unwrap_or(false))
+}
+
+///|
 fn dir_option() -> @argparse.OptionArg {
   OptionArg(
     "dir",
@@ -629,6 +648,15 @@ fn root_command() -> @argparse.Command {
     // error, not a no-op). Bare `openseek` reads UI-only options at their
     // defaults; use `openseek tui --prompt "…"` to set them.
     options=@tui.tui_shared_options(global=true),
+    flags=[
+      FlagArg(
+        "no-sandbox-exec",
+        long="no-sandbox-exec",
+        env="OPENSEEK_NO_SANDBOX_EXEC",
+        global=true,
+        about="Run this conversation's supported tool commands without macOS sandbox-exec.",
+      ),
+    ],
     subcommands=[
       Command(
         "tui",

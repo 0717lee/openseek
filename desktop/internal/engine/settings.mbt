@@ -718,6 +718,7 @@ async test "run config resolves the endpoint from the stored provider" {
       submission_id: None,
       model: None,
       max_steps: None,
+      sandbox_exec: None,
       session: "s-settings-default",
       workspace: None,
     })
@@ -735,6 +736,7 @@ async test "run config resolves the endpoint from the stored provider" {
       submission_id: None,
       model: None,
       max_steps: None,
+      sandbox_exec: None,
       session: "s-settings-custom",
       workspace: None,
     })
@@ -762,6 +764,7 @@ async test "a custom provider without a URL refuses to start" {
         submission_id: None,
         model: None,
         max_steps: None,
+        sandbox_exec: None,
         session: "s-settings-missing-url",
         workspace: None,
       })

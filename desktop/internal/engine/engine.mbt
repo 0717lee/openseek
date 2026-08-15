@@ -1421,7 +1421,7 @@ async fn[G] start_serve_engine(
   let (stderr_reader, child_stderr) = @process.read_from_process()
   let env = engine_process_env(config, manager.runtime_dir)
   let program = config.engine
-  let args = ["serve", "--dir", "."]
+  let args = config.serve_args()
   let graceful_cancel = @process.graceful_cancel(timeout=1000)
   @xlog.debug() <?
     {
@@ -2121,6 +2121,7 @@ async test "native engine env has one authoritative bundled moon path" {
     api_url: None,
     model: "m",
     max_steps: 1,
+    sandbox_exec: true,
     engine: engine.to_string(),
     cwd: None,
     session: "s-env",
@@ -2219,6 +2220,7 @@ async test "engine startup rolls back follower on pre-spawn failure" {
     api_url: None,
     model: "test",
     max_steps: 1,
+    sandbox_exec: true,
     engine: dir + "/missing/openseek",
     cwd: None,
     session: "s-startup-failure",
@@ -2334,6 +2336,7 @@ fn pump_test_config(session : String) -> RunConfig {
     api_url: None,
     model: "test",
     max_steps: 1,
+    sandbox_exec: true,
     engine: "unused",
     cwd: None,
     session,

@@ -757,6 +757,7 @@ fn follower_test_config(
     api_url: None,
     model: "test",
     max_steps: 1,
+    sandbox_exec: true,
     engine,
     cwd: None,
     session,

@@ -536,6 +536,11 @@ priv struct Conversation {
   // workspace root. Consumed by the create-then-start chain, which sets
   // `worktree` and clears this.
   worktree_mode : Bool
+  // Whether this conversation's next engine process uses macOS sandbox-exec.
+  // This is deliberately per conversation: opting one chat out must not
+  // weaken the tool execution policy of any neighbouring chat. The opt-out is
+  // not persisted; reopening the app restores the safe default.
+  sandbox_exec : Bool
   // The model this conversation's next turn runs with, chosen on the
   // composer's chip. Per conversation, not per app: a long refactor can sit
   // on the high tier while a scratch chat next to it stays cheap. Born from
@@ -1663,6 +1668,10 @@ priv enum Msg {
   // workspace root, or a fresh host-named worktree (its execution
   // environment, bound 1:1 at creation).
   ToggleWorktreeMode
+  // Flip sandbox-exec for this conversation's next engine process. A turn
+  // already running keeps the process it started with; the engine fingerprint
+  // applies this choice before the following command can execute tools.
+  ToggleSandboxExec
   // Retry the active workspace's placement list after its first request
   // failed or remained unanswered. The conversation stays blocked until a
   // real list reply or worktree commit broadcast identifies its placement.
@@ -2167,6 +2176,7 @@ fn empty_conversation(
     record: LiveRecord,
     workspace: Workspace::from_project(project),
     worktree_mode: false,
+    sandbox_exec: true,
     engine_model: model,
     task: "",
     mentions: [],

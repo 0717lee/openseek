@@ -938,6 +938,7 @@ fn run_slash_command(
             session=conv.session_id,
             model=conv.engine_model,
             max_steps=model.max_steps,
+            sandbox_exec=conv.sandbox_exec,
             workspace?=conv.workspace.project(),
           ),
           {
@@ -997,6 +998,7 @@ fn send_goal(
       workspace,
       conv.engine_model,
       model.max_steps,
+      conv.sandbox_exec,
       command,
       text,
     )
@@ -1007,6 +1009,7 @@ fn send_goal(
     session=conv.session_id,
     model=conv.engine_model,
     max_steps=model.max_steps,
+    sandbox_exec=conv.sandbox_exec,
     workspace?=conv.workspace.project(),
     command,
     text,
@@ -2280,6 +2283,13 @@ fn update_msg(
         { ..next, default_model: engine_model },
       )
     }
+    ToggleSandboxExec => {
+      let conv = model.active()
+      (
+        @cmd.none,
+        model.replace_conversation({ ..conv, sandbox_exec: !conv.sandbox_exec }),
+      )
+    }
     MaxStepsChanged(value) => (@cmd.none, { ..model, max_steps: value })
     SetupApiKeyChanged(value) => {
       guard model.host_settings_loaded() else { return (@cmd.none, model) }
@@ -2954,6 +2964,7 @@ fn update_msg(
             submission_id,
             conv.engine_model,
             model.max_steps,
+            conv.sandbox_exec,
             conv.session_id,
             workspace,
           )
@@ -2965,6 +2976,7 @@ fn update_msg(
             submission_id,
             conv.engine_model,
             model.max_steps,
+            conv.sandbox_exec,
             conv.session_id,
             workspace=conv.workspace.project(),
           )
@@ -7142,6 +7154,7 @@ fn encoded_start_workspace(conv : Conversation) -> String? {
     "continue",
     High,
     "1000",
+    conv.sandbox_exec,
     conv.session_id,
     "test-submission",
     workspace=conv.workspace.project(),
@@ -13587,6 +13600,24 @@ test "the model selector switches one conversation, not the app" {
   )
   let (_, high) = update(dispatch, EngineModelChanged("deepseek-v4-pro"), low)
   assert_true(high.active().engine_model is High)
+}
+
+///|
+test "the sandbox chip switches one conversation only" {
+  let dispatch = test_dispatch()
+  let model = test_model().replace_conversation(
+    empty_conversation(@interop.ChannelId::Local, "other-chat"),
+  )
+  assert_true(model.active().sandbox_exec)
+  let (_, disabled) = update(dispatch, ToggleSandboxExec, model)
+  assert_false(disabled.active().sandbox_exec)
+  guard disabled.find_conversation(@interop.ChannelId::Local, "other-chat")
+    is Some(other) else {
+    fail("the second conversation vanished")
+  }
+  assert_true(other.sandbox_exec)
+  let (_, restored) = update(dispatch, ToggleSandboxExec, disabled)
+  assert_true(restored.active().sandbox_exec)
 }
 
 ///|

@@ -137,6 +137,21 @@ test "start and steer payloads may omit submission ids" {
 }
 
 ///|
+test "sandbox-exec defaults are decided by the engine" {
+  let legacy : @protocol.StartPayload = @json.from_json({
+    "task": "hello",
+    "session": "s-start",
+  })
+  assert_true(legacy.sandbox_exec is None)
+  let disabled : @protocol.StartPayload = @json.from_json({
+    "task": "hello",
+    "session": "s-start",
+    "sandbox_exec": false,
+  })
+  assert_eq(disabled.sandbox_exec, Some(false))
+}
+
+///|
 test "client-authored session roots are ignored" {
   let start : @protocol.StartPayload = @json.from_json({
     "task": "hello",

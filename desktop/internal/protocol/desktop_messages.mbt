@@ -16,6 +16,9 @@ pub(all) struct StartPayload {
   submission_id : String?
   model : String?
   max_steps : Int?
+  // Whether this conversation's engine should wrap supported tool commands
+  // in macOS sandbox-exec. Absent keeps the safe default for older clients.
+  sandbox_exec : Bool?
   // Every desktop run belongs to a durable conversation. The engine rejects
   // a blank id before it acquires that conversation's record lease.
   session : String
@@ -58,6 +61,7 @@ pub(all) struct CompactPayload {
   // A resumed conversation may need a new engine process with these settings.
   model : String?
   max_steps : Int?
+  sandbox_exec : Bool?
   workspace : String?
 } derive(Debug, Eq, FromJson, ToJson)
 
@@ -76,6 +80,7 @@ pub(all) struct GoalPayload {
   // A resumed conversation may need a new engine process with these settings.
   model : String?
   max_steps : Int?
+  sandbox_exec : Bool?
   workspace : String?
 } derive(Debug, Eq, FromJson, ToJson)
 

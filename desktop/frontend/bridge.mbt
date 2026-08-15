@@ -1040,6 +1040,7 @@ fn start_openseek(
   submission_id : String,
   selected_model : EngineModel,
   max_steps : String,
+  sandbox_exec : Bool,
   session : String,
   workspace~ : @common.Uri?,
 ) -> @cmd.Cmd {
@@ -1052,6 +1053,7 @@ fn start_openseek(
     task,
     selected_model,
     max_steps,
+    sandbox_exec,
     session,
     submission_id,
     workspace~,
@@ -1130,6 +1132,7 @@ fn start_payload(
   task : String,
   selected_model : EngineModel,
   max_steps : String,
+  sandbox_exec : Bool,
   session : String,
   submission_id : String,
   workspace~ : @common.Uri?,
@@ -1140,6 +1143,7 @@ fn start_payload(
     submission_id: Some(submission_id),
     model: Some(selected_model.wire()),
     max_steps: parsed_max_steps(max_steps),
+    sandbox_exec: Some(sandbox_exec),
     session,
     workspace: workspace.map(value => value.path),
   }
@@ -1399,6 +1403,7 @@ fn compact_openseek(
   session~ : String,
   model~ : EngineModel,
   max_steps~ : String,
+  sandbox_exec~ : Bool,
   workspace? : @common.Uri,
 ) -> @cmd.Cmd {
   match workspace {
@@ -1419,6 +1424,7 @@ fn compact_openseek(
             session,
             model: Some(model.wire()),
             max_steps: parsed_max_steps(max_steps),
+            sandbox_exec: Some(sandbox_exec),
             workspace: workspace.map(value => value.path),
           },
           lane=@interop.session_command_lane(channel, session),
@@ -1456,6 +1462,7 @@ fn goal_openseek(
   session~ : String,
   model~ : EngineModel,
   max_steps~ : String,
+  sandbox_exec~ : Bool,
   workspace? : @common.Uri,
   command : String,
   text : String?,
@@ -1465,7 +1472,9 @@ fn goal_openseek(
       return @cmd.none
     _ => ()
   }
-  let payload = goal_payload(session, model, max_steps, workspace, text)
+  let payload = goal_payload(
+    session, model, max_steps, sandbox_exec, workspace, text,
+  )
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
       @interop.in_ordered_lane(
@@ -1492,6 +1501,7 @@ fn goal_payload(
   session : String,
   model : EngineModel,
   max_steps : String,
+  sandbox_exec : Bool,
   workspace : @common.Uri?,
   text : String?,
 ) -> @protocol.GoalPayload {
@@ -1507,6 +1517,7 @@ fn goal_payload(
     auto: None,
     model: Some(model.wire()),
     max_steps: parsed_max_steps(max_steps),
+    sandbox_exec: Some(sandbox_exec),
     workspace: workspace.map(value => value.path),
   }
 }

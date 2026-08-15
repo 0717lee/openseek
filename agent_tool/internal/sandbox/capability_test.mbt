@@ -49,6 +49,21 @@ async test "sandbox denies a source write and the command reports it" {
 }
 
 ///|
+/// Run this test with `OPENSEEK_NO_SANDBOX_EXEC=1` to exercise the explicit
+/// per-engine opt-out. The ordinary suite leaves the variable unset and keeps
+/// testing the host's real sandbox capability in the cases below.
+async test "the engine process can opt out of sandbox-exec" {
+  guard @env.get_env_var("OPENSEEK_NO_SANDBOX_EXEC") is Some("1") else {
+    return
+  }
+  @vfs.with_tmpdir(prefix="openseek-sandbox-disabled-", dir => {
+    assert_true(
+      @sandbox.SandboxedCommand::create_if_available(dir, Shell(":")) is None,
+    )
+  })
+}
+
+///|
 async test "a writable subtree is re-allowed; the rest stays denied" {
   @vfs.with_tmpdir(prefix="openseek-sandbox-capability-lab-", dir => {
     @fs.mkdir("\{dir}/lab")

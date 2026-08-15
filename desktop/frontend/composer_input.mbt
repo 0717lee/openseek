@@ -1,4 +1,30 @@
 ///|
+/// The sandbox-exec pill controls only this conversation. Turning it off is
+/// intentionally conspicuous because supported shell and MoonBit commands in
+/// the next engine process will run without the macOS source-write profile.
+fn Conversation::sandbox_exec_chip(
+  self : Conversation,
+  dispatch : @cmd.Emit[Msg],
+) -> @html.Html {
+  let (class, glyph, label, title) = if self.sandbox_exec {
+    (
+      "composer-sandbox", icon_shield, "Sandbox", "sandbox-exec is on for this conversation — click to turn it off for the next engine process",
+    )
+  } else {
+    (
+      "composer-sandbox off", icon_shield_off, "No sandbox", "sandbox-exec is off for this conversation — click to restore it for the next engine process",
+    )
+  }
+  @html.button(
+    class~,
+    type_="button",
+    title~,
+    on_click=dispatch(ToggleSandboxExec),
+    [icon(glyph), @html.span(label)],
+  )
+}
+
+///|
 /// Project the root application state into the composer's fixed package
 /// boundary. This method is the only place where composer availability and
 /// surrounding root-owned presentation are derived from `Model`.
@@ -41,6 +67,9 @@ fn Model::composer_input(
   if worktree_mode_chip(dispatch, self, conv) is Some(chip) {
     status.push(chip)
   }
+  // Isolation qualifies placement, so it appears immediately after the
+  // Local/Worktree pill: first where the run happens, then how confined it is.
+  status.push(conv.sandbox_exec_chip(dispatch))
   // The composer owns the stable container and goal row. These root-owned
   // panels are supplied as one ordered view slot so their internal commands
   // stay in the application package.

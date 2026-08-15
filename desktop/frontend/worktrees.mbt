@@ -104,6 +104,7 @@ fn start_in_new_worktree(
   submission_id : String,
   selected_model : EngineModel,
   max_steps : String,
+  sandbox_exec : Bool,
   session : String,
   workspace : @common.Uri,
 ) -> @cmd.Cmd {
@@ -187,6 +188,7 @@ fn start_in_new_worktree(
             task,
             selected_model,
             max_steps,
+            sandbox_exec,
             session,
             submission_id,
             workspace=Some(workspace),
@@ -240,6 +242,7 @@ fn set_goal_in_new_worktree(
   workspace : @common.Uri,
   engine_model : EngineModel,
   max_steps : String,
+  sandbox_exec : Bool,
   command : String,
   text : String?,
 ) -> @cmd.Cmd {
@@ -331,6 +334,7 @@ fn set_goal_in_new_worktree(
             session,
             engine_model,
             max_steps,
+            sandbox_exec,
             Some(workspace),
             text,
           )
@@ -1685,6 +1689,7 @@ test "a start payload never names a worktree" {
     "go",
     High,
     "1000",
+    true,
     "desktop-wt",
     "sub-1",
     workspace=Some(workspace),

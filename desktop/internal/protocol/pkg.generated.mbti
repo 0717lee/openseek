@@ -372,6 +372,7 @@ pub(all) struct CompactPayload {
   session : String
   model : String?
   max_steps : Int?
+  sandbox_exec : Bool?
   workspace : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
@@ -548,6 +549,7 @@ pub(all) struct GoalPayload {
   auto : Bool?
   model : String?
   max_steps : Int?
+  sandbox_exec : Bool?
   workspace : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
@@ -964,6 +966,7 @@ pub(all) struct StartPayload {
   submission_id : String?
   model : String?
   max_steps : Int?
+  sandbox_exec : Bool?
   session : String
   workspace : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)

@@ -157,6 +157,47 @@ pub fn icon_pull_request() -> @html.Html {
 }
 
 ///|
+/// Hand-drawn in the same style as `icon_worktree`: a shield — the composer's
+/// sandbox affordance, drawn when tool commands run inside the profile.
+pub fn icon_shield() -> @html.Html {
+  @svg.svg(
+    width=16,
+    height=16,
+    view_box="0 0 16 16",
+    attrs=@svg.Attrs::build()
+      .fill("none")
+      .stroke("currentColor")
+      .stroke_width("1.3")
+      .stroke_linecap("round")
+      .stroke_linejoin("round"),
+    [@svg.path(d=ShieldOutline)],
+  )
+}
+
+///|
+/// The same shield struck through: the sandbox is off, so tool commands reach
+/// the machine unprofiled.
+pub fn icon_shield_off() -> @html.Html {
+  @svg.svg(
+    width=16,
+    height=16,
+    view_box="0 0 16 16",
+    attrs=@svg.Attrs::build()
+      .fill("none")
+      .stroke("currentColor")
+      .stroke_width("1.3")
+      .stroke_linecap("round")
+      .stroke_linejoin("round"),
+    [@svg.path(d="\{ShieldOutline}M4 4.2 12 12.4")],
+  )
+}
+
+///|
+/// The shield both sandbox glyphs are built from: a flat top edge, straight
+/// sides, and a rounded point at the bottom.
+const ShieldOutline : String = "M8 1.9 2.9 3.9V7.6C2.9 10.6 4.9 13.2 8 14.2 11.1 13.2 13.1 10.6 13.1 7.6V3.9Z"
+
+///|
 pub fn icon_fold() -> @html.Html {
   codicon(
     "M11.8536 3.35355L8.35355 6.85355C8.15829 7.04882 7.84171 7.04882 7.64645 6.85355L4.14645 3.35355C3.95118 3.15829 3.95118 2.84171 4.14645 2.64645C4.34171 2.45118 4.65829 2.45118 4.85355 2.64645L8 5.79289L11.1464 2.64645C11.3417 2.45118 11.6583 2.45118 11.8536 2.64645C12.0488 2.84171 12.0488 3.15829 11.8536 3.35355ZM11.8536 12.6464L8.35355 9.14645C8.15829 8.95118 7.84171 8.95118 7.64645 9.14645L4.14645 12.6464C3.95118 12.8417 3.95118 13.1583 4.14645 13.3536C4.34171 13.5488 4.65829 13.5488 4.85355 13.3536L8 10.2071L11.1464 13.3536C11.3417 13.5488 11.6583 13.5488 11.8536 13.3536C12.0488 13.1583 12.0488 12.8417 11.8536 12.6464Z",

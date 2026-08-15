@@ -371,9 +371,10 @@ aside {
   width: 12px;
   height: 12px;
 }
-/* The composer's launch-mode chip: Local ⇄ Worktree while the conversation
-   can still choose; fixed to the worktree's name once bound. */
-.composer-worktree {
+/* The composer's conversation controls share one compact pill shape. Local ⇄
+   Worktree chooses placement; Sandbox independently chooses tool isolation. */
+.composer-worktree,
+.composer-sandbox {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -388,10 +389,12 @@ aside {
   line-height: var(--line-height-normal);
   white-space: nowrap;
 }
-button.composer-worktree {
+button.composer-worktree,
+button.composer-sandbox {
   cursor: pointer;
 }
-button.composer-worktree:hover {
+button.composer-worktree:hover,
+button.composer-sandbox:hover {
   border-color: var(--color-accent-border);
   color: var(--color-text-primary);
 }
@@ -400,7 +403,14 @@ button.composer-worktree:hover {
   background: var(--color-accent-soft);
   color: var(--color-accent-strong);
 }
-.composer-worktree .icon {
+.composer-sandbox.off,
+button.composer-sandbox.off:hover {
+  border-color: var(--color-danger-border);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+.composer-worktree .icon,
+.composer-sandbox .icon {
   width: 12px;
   height: 12px;
 }
