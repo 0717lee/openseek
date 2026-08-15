@@ -74,7 +74,7 @@ test "dsh snapshot replies select independent ordered lanes" {
     DshHistoryReply("session-2").ordered_lane(),
     Some("dsh-history-session-2"),
   )
-  assert_eq(DshCreateReply.ordered_lane(), None)
+  assert_eq(DshCreateReply(0).ordered_lane(), None)
 }
 
 ///|
@@ -176,19 +176,24 @@ fn State::create_session(
   _self : State,
   dispatch : @cmd.Emit[Msg],
   workspace_id : String,
+  selection_generation : Int,
 ) -> @cmd.Cmd {
-  DshCreateReply.request(dispatch, "session.create", {
+  DshCreateReply(selection_generation).request(dispatch, "session.create", {
     "workspaceId": workspace_id,
   })
 }
 
 ///|
 fn State::create_workspace_session(
-  _self : State,
+  self : State,
   dispatch : @cmd.Emit[Msg],
   path : String,
 ) -> @cmd.Cmd {
-  DshWorkspaceCreateReply.request(dispatch, "workspace.create", { "path": path })
+  DshWorkspaceCreateReply(self.selection_generation).request(
+    dispatch,
+    "workspace.create",
+    { "path": path },
+  )
 }
 
 ///|

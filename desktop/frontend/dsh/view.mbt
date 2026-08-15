@@ -271,11 +271,12 @@ pub fn State::page(
 ///|
 fn State::composer(self : State, dispatch : @cmd.Emit[Msg]) -> @html.Html {
   let interactions : Array[@html.Html] = []
+  let busy = self.busy()
   for pending in self.pending {
     // dsh can run several sessions concurrently. Keep background requests in
     // state for later, but render only cards owned by the selected session.
     if self.active_id == Some(pending.session_id()) {
-      interactions.push(pending.view(dispatch, self.loading))
+      interactions.push(pending.view(dispatch, busy))
     }
   }
   let running = self.is_running()
@@ -285,7 +286,7 @@ fn State::composer(self : State, dispatch : @cmd.Emit[Msg]) -> @html.Html {
       id: "dsh-stop",
       class_name: "stop",
       title: "Stop DeepSeek Harness",
-      disabled: self.loading,
+      disabled: busy,
       command: dispatch(Stop),
       content: @html.text("■"),
     }
@@ -294,7 +295,7 @@ fn State::composer(self : State, dispatch : @cmd.Emit[Msg]) -> @html.Html {
       id: "dsh-send",
       class_name: "send",
       title: "Send to DeepSeek Harness",
-      disabled: disabled || self.loading || self.draft.trim().is_empty(),
+      disabled: disabled || busy || self.draft.trim().is_empty(),
       command: dispatch(Send),
       content: @html.text("↑"),
     }

@@ -12,7 +12,11 @@ pub fn update(
     NewSession(workspace_id) =>
       if workspace_id is Some(workspace_id) {
         (
-          state.create_session(dispatch, workspace_id),
+          state.create_session(
+            dispatch,
+            workspace_id,
+            state.selection_generation,
+          ),
           { ..state, loading: true, notice: "" },
         )
       } else {
@@ -47,6 +51,7 @@ pub fn update(
         {
           ..state,
           active_id: Some(session_id),
+          selection_generation: state.selection_generation + 1,
           events: [],
           streaming: "",
           loading: true,
@@ -55,17 +60,23 @@ pub fn update(
       )
     DraftChanged(value) => (@cmd.none, { ..state, draft: value })
     Send =>
-      if state.loading || state.draft.trim().is_empty() || !state.has_active() {
+      if state.busy() || state.draft.trim().is_empty() || !state.has_active() {
         (@cmd.none, state)
       } else {
         let generation = state.prompt_generation + 1
         (
           state.send(dispatch, generation),
-          { ..state, prompt_generation: generation, loading: true, notice: "" },
+          {
+            ..state,
+            prompt_generation: generation,
+            prompt_pending_session: state.active_id,
+            loading: true,
+            notice: "",
+          },
         )
       }
     Stop =>
-      if state.loading || !state.is_running() {
+      if state.busy() || !state.is_running() {
         (@cmd.none, state)
       } else {
         (state.cancel(dispatch), { ..state, loading: true, notice: "" })
@@ -101,16 +112,27 @@ pub fn update(
           )
         _ => (@cmd.none, state)
       }
-    Reply(kind~, value~) => state.with_reply(dispatch, kind, value)
+    Reply(kind~, value~) => {
+      if kind is DshPromptReply(session_id~, generation~, ..) {
+        if state.prompt_generation != generation {
+          return (@cmd.none, state)
+        }
+        if state.active_id != Some(session_id) {
+          return (@cmd.none, { ..state, prompt_pending_session: None })
+        }
+      }
+      state.with_reply(dispatch, kind, value)
+    }
     Failed(kind~, message~) => {
       // A reply belongs to the page state that submitted it. Session changes
       // and later sends must not clear another conversation's draft/loading.
-      if kind is DshPromptReply(session_id~, generation~, ..) &&
-        (
-          state.active_id != Some(session_id) ||
-          state.prompt_generation != generation
-        ) {
-        return (@cmd.none, state)
+      if kind is DshPromptReply(session_id~, generation~, ..) {
+        if state.prompt_generation != generation {
+          return (@cmd.none, state)
+        }
+        if state.active_id != Some(session_id) {
+          return (@cmd.none, { ..state, prompt_pending_session: None })
+        }
       }
       // History lanes are ordered only within one session. A failure from a
       // previously open session must not clear or annotate the current page.
@@ -120,6 +142,14 @@ pub fn update(
       }
       if kind is DshCancelReply(session_id) &&
         state.active_id != Some(session_id) {
+        return (@cmd.none, state)
+      }
+      if kind is DshCreateReply(selection_generation) &&
+        state.selection_generation != selection_generation {
+        return (@cmd.none, state)
+      }
+      if kind is DshWorkspaceCreateReply(selection_generation) &&
+        state.selection_generation != selection_generation {
         return (@cmd.none, state)
       }
       (
@@ -135,6 +165,11 @@ pub fn update(
             state.loading
           } else {
             false
+          },
+          prompt_pending_session: if kind is DshPromptReply(..) {
+            None
+          } else {
+            state.prompt_pending_session
           },
           // Connection failures belong to the root toast queue. Other dsh
           // request failures remain attached to the dsh transcript surface.
@@ -183,7 +218,19 @@ fn State::with_reply(
   }
   let envelope = DshEnvelope(reply)
   guard envelope.value() is Some(value) else {
-    return (@cmd.none, { ..self, loading: false, notice: envelope.error() })
+    return (
+      @cmd.none,
+      {
+        ..self,
+        prompt_pending_session: if kind is DshPromptReply(..) {
+          None
+        } else {
+          self.prompt_pending_session
+        },
+        loading: false,
+        notice: envelope.error(),
+      },
+    )
   }
   match kind {
     DshReconnectReply | DshWorkspacesReply => {
@@ -207,10 +254,14 @@ fn State::with_reply(
         { ..self, connection: DshReady, workspaces, loading: false, notice: "" },
       )
     }
-    DshWorkspaceCreateReply => {
+    DshWorkspaceCreateReply(selection_generation) => {
+      let current = self.selection_generation == selection_generation
       guard value is Object(fields) &&
         fields.get("workspace") is Some(Object(workspace)) &&
         @jsonx.json_text(workspace, "workspaceId") is Some(workspace_id) else {
+        if !current {
+          return (@cmd.none, self)
+        }
         return (
           @cmd.none,
           {
@@ -223,9 +274,13 @@ fn State::with_reply(
       (
         @cmd.batch([
           DshWorkspacesReply.request(dispatch, "workspace.list", {}),
-          self.create_session(dispatch, workspace_id),
+          self.create_session(dispatch, workspace_id, selection_generation),
         ]),
-        { ..self, loading: true, notice: "" },
+        if current {
+          { ..self, loading: true, notice: "" }
+        } else {
+          self
+        },
       )
     }
     DshSessionsReply => {
@@ -247,6 +302,11 @@ fn State::with_reply(
         connection: DshReady,
         sessions,
         active_id,
+        selection_generation: if selection_changed {
+          self.selection_generation + 1
+        } else {
+          self.selection_generation
+        },
         events: if selection_changed {
           []
         } else {
@@ -266,9 +326,13 @@ fn State::with_reply(
         _ => (@cmd.none, next)
       }
     }
-    DshCreateReply => {
+    DshCreateReply(selection_generation) => {
+      let activate = self.selection_generation == selection_generation
       guard value is Object(fields) &&
         @jsonx.json_text(fields, "sessionId") is Some(session_id) else {
+        if !activate {
+          return (@cmd.none, self)
+        }
         return (
           @cmd.none,
           {
@@ -278,21 +342,28 @@ fn State::with_reply(
           },
         )
       }
-      let next = {
-        ..self,
-        active_id: Some(session_id),
-        events: [],
-        streaming: "",
-        loading: true,
-        notice: "",
+      let commands = [
+        DshWorkspacesReply.request(dispatch, "workspace.list", {}),
+        DshSessionsReply.request(dispatch, "session.list", {}),
+      ]
+      if activate {
+        commands.push(self.load_history(dispatch, session_id))
       }
       (
-        @cmd.batch([
-          DshWorkspacesReply.request(dispatch, "workspace.list", {}),
-          DshSessionsReply.request(dispatch, "session.list", {}),
-          next.load_history(dispatch, session_id),
-        ]),
-        next,
+        @cmd.batch(commands),
+        if activate {
+          {
+            ..self,
+            active_id: Some(session_id),
+            selection_generation: self.selection_generation + 1,
+            events: [],
+            streaming: "",
+            loading: true,
+            notice: "",
+          }
+        } else {
+          self
+        },
       )
     }
     DshHistoryReply(session_id) => {
@@ -353,6 +424,7 @@ fn State::with_reply(
           } else {
             self.draft
           },
+          prompt_pending_session: None,
           loading: false,
           notice: "",
         },
@@ -558,6 +630,11 @@ fn State::with_event(
           ..self,
           sessions,
           active_id,
+          selection_generation: if removed_active {
+            self.selection_generation + 1
+          } else {
+            self.selection_generation
+          },
           events: if removed_active {
             []
           } else {
@@ -569,6 +646,12 @@ fn State::with_event(
             self.streaming
           },
           pending: self.pending.filter(item => item.session_id() != session_id),
+          prompt_pending_session: if self.prompt_pending_session ==
+            Some(session_id) {
+            None
+          } else {
+            self.prompt_pending_session
+          },
           loading: if removed_active {
             active_id is Some(_)
           } else {
@@ -1035,6 +1118,36 @@ test "accepted dsh prompt advances transcript submission generation" {
   let (_, next) = update(dispatch, Send, state)
   assert_eq(next.submission_generation(), 1)
   assert_true(next.loading)
+  assert_true(next.busy())
+  let (_, running) = next.with_event(dispatch, {
+    "stream": "host",
+    "message": {
+      "rpcId": "status-1",
+      "payload": {
+        "type": "host/session-status",
+        "sessionId": "session-1",
+        "running": true,
+      },
+    },
+    "generation": 1,
+  })
+  assert_false(running.loading)
+  assert_true(running.busy())
+  let (_, blocked) = update(dispatch, Send, running)
+  assert_eq(blocked.prompt_generation, 1)
+  let (_, settled) = update(
+    dispatch,
+    Reply(
+      kind=DshPromptReply(session_id="session-1", draft="hello", generation=1),
+      value={
+        "type": "server-response",
+        "rpcId": "prompt-1",
+        "result": { "ok": true, "value": {} },
+      },
+    ),
+    running,
+  )
+  assert_false(settled.busy())
 }
 
 ///|
@@ -1073,6 +1186,42 @@ test "empty dsh session baseline clears a deleted active transcript" {
   assert_true(next.events.is_empty())
   assert_eq(next.streaming, "")
   assert_false(next.loading)
+}
+
+///|
+test "late dsh creation preserves newer session navigation" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let state = {
+    ..State(),
+    sessions: [
+      { id: "session-a", title: "A", cwd: None, running: false, blank: false },
+      { id: "session-b", title: "B", cwd: None, running: false, blank: false },
+    ],
+    active_id: Some("session-a"),
+  }
+  let (_, navigated) = update(dispatch, OpenSession("session-b"), state)
+  let current = {
+    ..navigated,
+    events: [
+      {
+        type_: "assistant/message",
+        seq: 8,
+        time: None,
+        data: {},
+        surface_append: None,
+      },
+    ],
+    streaming: "session B output",
+  }
+  let (_, preserved) = current.with_reply(dispatch, DshCreateReply(0), {
+    "type": "server-response",
+    "rpcId": "create-1",
+    "result": { "ok": true, "value": { "sessionId": "session-new" } },
+  })
+  assert_eq(preserved.active_id, Some("session-b"))
+  assert_eq(preserved.streaming, "session B output")
+  assert_eq(preserved.events.length(), 1)
+  assert_eq(preserved.selection_generation, 1)
 }
 
 ///|

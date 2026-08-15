@@ -84,9 +84,9 @@ priv enum DshReplyKind {
   DshPendingReply
   DshReconnectReply
   DshWorkspacesReply
-  DshWorkspaceCreateReply
+  DshWorkspaceCreateReply(Int)
   DshSessionsReply
-  DshCreateReply
+  DshCreateReply(Int)
   DshHistoryReply(String)
   DshPromptReply(session_id~ : String, draft~ : String, generation~ : Int)
   DshCancelReply(String)
@@ -156,9 +156,12 @@ struct State {
   draft : String
   pending : Array[DshPendingInteraction]
   // Actor generations order page-attach snapshots against live mux events.
-  // Prompt generations keep an older request from settling a newer send.
+  // Selection and prompt generations keep older request replies from
+  // overwriting later navigation or settling a newer send.
   pending_generation : Int
+  selection_generation : Int
   prompt_generation : Int
+  prompt_pending_session : String?
   loading : Bool
   notice : String
 } derive(Eq)
@@ -175,7 +178,9 @@ pub fn State::State(loading? : Bool = false) -> State {
     draft: "",
     pending: [],
     pending_generation: 0,
+    selection_generation: 0,
     prompt_generation: 0,
+    prompt_pending_session: None,
     loading,
     notice: "",
   }
@@ -183,7 +188,15 @@ pub fn State::State(loading? : Bool = false) -> State {
 
 ///|
 pub fn State::can_create(self : State) -> Bool {
-  self.connection is DshReady && !self.loading
+  self.connection is DshReady && !self.busy()
+}
+
+///|
+/// HTTP prompt settlement and background session lifecycle updates are
+/// independent. Keep the composer disabled until both page work and the
+/// accepted prompt request itself have settled.
+fn State::busy(self : State) -> Bool {
+  self.loading || self.prompt_pending_session is Some(_)
 }
 
 ///|
