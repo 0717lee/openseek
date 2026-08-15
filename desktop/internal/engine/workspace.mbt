@@ -120,7 +120,7 @@ async fn session_workspace_dir(session : String) -> @pathx.Path? {
     // A session bound to one of the workspace's worktrees works in that
     // checkout while it exists. A retained binding whose checkout is missing
     // refuses every workspace operation until the user rebuilds it.
-    return session_tree_dir(workspace, session).map(dir => dir.to_path())
+    return @worktree.tree_dir(workspace, session).map(dir => dir.to_path())
   }
   guard @session_store.safe_session_id(session) else { return None }
   guard workspace_root() is Some(root) else { return None }
@@ -160,7 +160,7 @@ pub async fn session_review_base(
     @session_store.workspace_of(session)
   }
   guard workspace is Some(workspace) else { return None }
-  session_tree_base(workspace, session)
+  @worktree.tree_base(workspace, session)
 }
 
 ///|
@@ -183,7 +183,8 @@ pub async fn resolve_in_workspace(
         // The hint names the workspace; a session bound to one of its
         // worktrees still roots in that checkout. A Codex thread instead
         // supplies an exact process-local cwd authorized by app-server.
-        Some(dir) => session_tree_dir(dir, session).map(root => root.to_path())
+        Some(dir) =>
+          @worktree.tree_dir(dir, session).map(root => root.to_path())
         None => host_workspace_authorizations.resolve(session, hint)
       }
     Some(_) => None
@@ -257,7 +258,7 @@ pub async fn attached_workspace_dir(path : @pathx.Absolute) -> @pathx.Absolute? 
     // workspace root: language ops routed by path alone must answer from the
     // worktree's own tree. An unregistered `.worktrees` path (a subtask
     // slice) keeps resolving to the workspace root.
-    worktree_owner_dir(workspace, resolved_absolute)
+    @worktree.owner_dir(workspace, resolved_absolute)
   } else {
     guard workspace_root() is Some(root) else { return None }
     guard root.to_absolute() is Some(root_absolute) else { return None }

@@ -72,6 +72,9 @@ type SessionGroup = @protocol.SessionGroup
 type SessionsReply = @protocol.SessionsReply
 
 ///|
+type WorktreeInfo = @protocol.WorktreeInfo
+
+///|
 type ArchiveReply = @protocol.ArchiveReply
 
 ///|

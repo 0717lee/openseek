@@ -743,6 +743,23 @@ fn EngineManager::serving(
 }
 
 ///|
+/// The three host facts a worktree lifecycle operation needs, handed to the
+/// worktree package as one value. Everything else about a checkout — the
+/// registry, git, the placement rules — is that package's own business, and
+/// nothing there may reach into the pump.
+pub fn EngineManager::worktree_host(
+  self : EngineManager,
+) -> @worktree.WorktreeHost {
+  {
+    lifecycle_lock: self.workspace_lifecycle_lock,
+    session_is_live: session => {
+      self.pump is Serving(sessions~) && sessions.get(session) is Some(_)
+    },
+    drain_sessions: sessions => self.close_engines_for_sessions(sessions),
+  }
+}
+
+///|
 /// This conversation's slot, created empty on first touch.
 fn slot_for(sessions : Map[String, SessionSlot], key : String) -> SessionSlot {
   if sessions.get(key) is Some(slot) {

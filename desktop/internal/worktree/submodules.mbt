@@ -64,7 +64,7 @@ async fn provision_initialized_submodules(
       @gitx.run(checkout, args)
     })
     is Some(_) else {
-    raise EngineError(
+    raise WorktreeError(
       "Submodules did not finish initializing within \{timeout_seconds} seconds. Increase the checkout timeout in Workspace Settings or leave submodules uninitialized.",
     )
   }
@@ -79,8 +79,8 @@ test "gitlink paths preserve exact names and deduplicate conflict stages" {
 ///|
 #cfg(not(platform="windows"))
 async test "submodule checkout stops at its hard timeout" {
-  archive_env_test_lock.acquire()
-  defer archive_env_test_lock.release()
+  worktree_env_test_lock.acquire()
+  defer worktree_env_test_lock.release()
   let root = worktree_test_root("openseek-worktree-sub-timeout-")
   let dependency = root.join("dependency")
   prepare_git_repo(dependency)
@@ -110,7 +110,7 @@ async test "submodule checkout stops at its hard timeout" {
     provision_initialized_submodules(repo, checkout, 0)
     "no error"
   } catch {
-    EngineError(detail) => detail
+    WorktreeError(detail) => detail
     error if @async.is_being_cancelled() => raise error
     error => "\{error}"
   }
@@ -123,8 +123,8 @@ async test "submodule checkout stops at its hard timeout" {
 ///|
 #cfg(not(platform="windows"))
 async test "worktree lifecycle mirrors initialized submodules" {
-  archive_env_test_lock.acquire()
-  defer archive_env_test_lock.release()
+  worktree_env_test_lock.acquire()
+  defer worktree_env_test_lock.release()
   let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
   let root = worktree_test_root("openseek-worktree-submodules-")
   @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
@@ -170,9 +170,9 @@ async test "worktree lifecycle mirrors initialized submodules" {
     @gitx.run(repo, ["submodule", "deinit", "--force", "--", "deps/optional"]),
   )
   ignore(@workspaces.add(repo.to_string(), fn(_) {  }))
-  let manager = new_engine_manager("openseek")
-  let created = create_worktree(
-    manager,
+  let host = test_host()
+  let created = create(
+    host,
     repo.to_string(),
     WorktreeOwner::openseek("s-submodules"),
     fn(_) {  },
@@ -188,8 +188,8 @@ async test "worktree lifecycle mirrors initialized submodules" {
   // Repair follows the same provisioning rule after an external deletion.
   @fs.rmdir(checkout.to_string(), recursive=true)
   ignore(
-    create_worktree(
-      manager,
+    create(
+      host,
       repo.to_string(),
       WorktreeOwner::openseek("s-submodules"),
       fn(_) {  },
@@ -210,16 +210,10 @@ async test "worktree lifecycle mirrors initialized submodules" {
     ]),
   )
   let locked_detail = try {
-    ignore(
-      remove_worktree(manager, repo.to_string(), "with-submodules", false, fn(
-        _,
-      ) {
-
-      }),
-    )
+    ignore(remove(host, repo.to_string(), "with-submodules", false, fn(_) {  }))
     "no error"
   } catch {
-    EngineError(detail) => detail
+    WorktreeError(detail) => detail
     error if @async.is_being_cancelled() => raise error
     error => "\{error}"
   }
@@ -227,13 +221,9 @@ async test "worktree lifecycle mirrors initialized submodules" {
   assert_true(@fsx.is_dir(checkout.to_path()))
   ignore(@gitx.run(repo, ["worktree", "unlock", ".worktrees/with-submodules"]))
   // Once unlocked, clean removal unregisters and deletes the checkout.
-  let removed = remove_worktree(
-    manager,
-    repo.to_string(),
-    "with-submodules",
-    false,
-    fn(_) {  },
-  )
+  let removed = remove(host, repo.to_string(), "with-submodules", false, fn(_) {
+
+  })
   assert_eq(removed.worktrees.length(), 0)
   assert_false(@fsx.exists(checkout.to_path()))
   // This workspace setting leaves even an initialized main-checkout
@@ -245,8 +235,8 @@ async test "worktree lifecycle mirrors initialized submodules" {
       checkout_submodules=false,
     ),
   )
-  let skipped = create_worktree(
-    manager,
+  let skipped = create(
+    host,
     repo.to_string(),
     WorktreeOwner::openseek("s-without-submodules"),
     fn(_) {  },
@@ -257,172 +247,5 @@ async test "worktree lifecycle mirrors initialized submodules" {
   assert_false(
     @fsx.exists(skipped_checkout.join("deps/required/.git").to_path()),
   )
-  @fs.rmdir(root.to_string(), recursive=true)
-}
-
-///|
-#cfg(not(platform="windows"))
-async test "archive deletes a submodule checkout that git worktree remove refuses" {
-  archive_env_test_lock.acquire()
-  defer archive_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  let root = worktree_test_root("openseek-worktree-sub-archive-")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
-  defer restore_session_root_env(previous)
-  @fsx.ensure_dir(root.join("global").to_path())
-  let dep = root.join("dep")
-  prepare_git_repo(dep)
-  let repo = root.join("repo")
-  prepare_git_repo(repo)
-  ignore(@gitx.run(repo, ["config", "protocol.file.allow", "always"]))
-  ignore(
-    @gitx.run(repo, [
-      "-c",
-      "protocol.file.allow=always",
-      "submodule",
-      "add",
-      "-q",
-      dep.to_string(),
-      "deps/one",
-    ]),
-  )
-  ignore(
-    @gitx.run(repo, [
-      "-c", "user.email=test@example.com", "-c", "user.name=test", "-c", "commit.gpgsign=false",
-      "commit", "-q", "-am", "add submodule",
-    ]),
-  )
-  ignore(@workspaces.add(repo.to_string(), fn(_) {  }))
-  let manager = new_engine_manager("openseek")
-  manager.pump = Serving(sessions=Map([]))
-  // A dirty checkout still confirms first, and the confirmed force retry
-  // must delete the checkout even though plain `git worktree remove`
-  // refuses over the gitlink.
-  ignore(
-    create_worktree(
-      manager,
-      repo.to_string(),
-      WorktreeOwner::openseek("s-sub-dirty"),
-      fn(_) {  },
-    ),
-  )
-  @fsx.ensure_dir(
-    @workspaces.store_root(repo).join("sessions").join("s-sub-dirty").to_path(),
-  )
-  let dirty_checkout = repo.join(".worktrees/wt-1")
-  assert_true(@fsx.exists(dirty_checkout.join("deps/one/.git").to_path()))
-  @fs.write_file(
-    dirty_checkout.join("junk.txt").to_string(),
-    b"x",
-    create_mode=CreateOrTruncate,
-  )
-  guard archive_session(manager, "s-sub-dirty", (_, _) => ())
-    is NeedsForce(refusal) else {
-    fail("dirty submodule checkout must ask for confirmation")
-  }
-  assert_eq(refusal.worktree, "wt-1")
-  assert_eq(refusal.dirty_paths, ["junk.txt"])
-  guard archive_session(manager, "s-sub-dirty", (_, _) => (), force=true)
-    is Archived(_) else {
-    fail("forced archive must delete the submodule checkout")
-  }
-  assert_false(@fsx.exists(dirty_checkout.to_path()))
-  // A clean submodule checkout archives in one go, exactly like a clean
-  // plain worktree.
-  ignore(
-    create_worktree(
-      manager,
-      repo.to_string(),
-      WorktreeOwner::openseek("s-sub-clean"),
-      fn(_) {  },
-    ),
-  )
-  @fsx.ensure_dir(
-    @workspaces.store_root(repo).join("sessions").join("s-sub-clean").to_path(),
-  )
-  let clean_checkout = repo.join(".worktrees/wt-2")
-  assert_true(@fsx.exists(clean_checkout.join("deps/one/.git").to_path()))
-  guard archive_session(manager, "s-sub-clean", (_, _) => ()) is Archived(_) else {
-    fail("clean submodule checkout must archive without confirmation")
-  }
-  assert_false(@fsx.exists(clean_checkout.to_path()))
-  // Branches and placements survive, and git's worktree bookkeeping is
-  // pruned rather than left stale.
-  assert_true(
-    @gitx.probe(repo, [
-      "show-ref", "--verify", "--quiet", "refs/heads/openseek/wt-1",
-    ])
-    is Some(_),
-  )
-  assert_false(
-    @gitx.run(repo, ["worktree", "list", "--porcelain"]).contains(".worktrees/"),
-  )
-  guard list_worktrees(repo.to_string()).worktrees is [first, second] else {
-    fail("both worktree placements must survive archive")
-  }
-  assert_false(first.present)
-  assert_false(second.present)
-  @fs.rmdir(root.to_string(), recursive=true)
-}
-
-///|
-#cfg(not(platform="windows"))
-async test "worktree deletion refuses a replaced checkout" {
-  archive_env_test_lock.acquire()
-  defer archive_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  let root = worktree_test_root("openseek-worktree-replaced-")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
-  defer restore_session_root_env(previous)
-  @fsx.ensure_dir(root.join("global").to_path())
-  let repo = root.join("repo")
-  prepare_git_repo(repo)
-  ignore(@workspaces.add(repo.to_string(), fn(_) {  }))
-  let manager = new_engine_manager("openseek")
-  manager.pump = Serving(sessions=Map([]))
-  ignore(
-    create_worktree(
-      manager,
-      repo.to_string(),
-      WorktreeOwner::openseek("s-replaced"),
-      fn(_) {  },
-    ),
-  )
-  @fsx.ensure_dir(
-    @workspaces.store_root(repo).join("sessions").join("s-replaced").to_path(),
-  )
-  // Externally delete the checkout and drop an unrelated repository with a
-  // staged gitlink at the same path. `git worktree remove --force` validates
-  // that the path is this repository's own linked worktree — a standalone
-  // repository fails that validation, so both deletion surfaces refuse and
-  // leave it untouched.
-  let target = repo.join(".worktrees/wt-1")
-  @fs.rmdir(target.to_string(), recursive=true)
-  @fsx.ensure_dir(target.to_path())
-  ignore(@gitx.run(target, ["init", "-q"]))
-  let sha = @gitx.run(repo, ["rev-parse", "HEAD"])
-  ignore(
-    @gitx.run(target, [
-      "update-index",
-      "--add",
-      "--cacheinfo",
-      "160000,\{sha},vendored",
-    ]),
-  )
-  assert_true(
-    remove_refusal(manager, repo.to_string(), "wt-1", true) != "no error",
-  )
-  let archive_detail = try {
-    ignore(archive_session(manager, "s-replaced", (_, _) => (), force=true))
-    "no error"
-  } catch {
-    EngineError(detail) => detail
-    error if @async.is_being_cancelled() => raise error
-    error => "\{error}"
-  }
-  assert_true(archive_detail != "no error")
-  // The unrelated repository survives untouched, registry entry and all.
-  assert_true(@fsx.is_dir(target.join(".git").to_path()))
-  assert_eq(list_worktrees(repo.to_string()).worktrees.length(), 1)
   @fs.rmdir(root.to_string(), recursive=true)
 }

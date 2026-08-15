@@ -152,12 +152,12 @@ fn CodexArchiveRequest::retained_worktree(
 /// used by OpenSeek conversations. App-server still owns thread data; this
 /// catalog adds only the placement that SeekMoon itself created.
 priv struct CodexWorktreeCatalog {
-  bindings : Array[@engine.CodexWorktreeBinding]
+  bindings : Array[@worktree.CodexWorktreeBinding]
 }
 
 ///|
 fn CodexWorktreeCatalog::CodexWorktreeCatalog(
-  bindings : Array[@engine.CodexWorktreeBinding],
+  bindings : Array[@worktree.CodexWorktreeBinding],
 ) -> CodexWorktreeCatalog {
   { bindings, }
 }
@@ -588,11 +588,11 @@ pub fn endpoints(
       )
     }),
     @endpoint.Endpoint::remote(@commands.worktree_list, async fn(payload) {
-      @engine.list_worktrees(payload.workspace)
+      @worktree.list(payload.workspace)
     }),
     @endpoint.Endpoint::remote(@commands.worktree_create, async fn(payload) {
       let owner = match (payload.session, payload.codex_thread) {
-        (Some(session), None) => @engine.WorktreeOwner::openseek(session)
+        (Some(session), None) => @worktree.WorktreeOwner::openseek(session)
         (None, Some(thread_id)) => {
           let workspace = state.codex_worktree_project(
             thread_id,
@@ -607,15 +607,15 @@ pub fn endpoints(
               state.hub.publish(WorkspaceChanged({ workspaces, }))
             }),
           )
-          @engine.WorktreeOwner::codex(thread_id)
+          @worktree.WorktreeOwner::codex(thread_id)
         }
         _ =>
           raise @host.PayloadError(
             "worktree.create requires exactly one conversation owner",
           )
       }
-      let reply = @engine.create_worktree(
-        state.manager,
+      let reply = @worktree.create(
+        state.manager.worktree_host(),
         payload.workspace,
         owner,
         worktrees => {
@@ -623,6 +623,7 @@ pub fn endpoints(
         },
       ) catch {
         error if @async.is_being_cancelled() => raise error
+        @worktree.WorktreeError(message) => return WorktreeCreateError(message)
         @engine.EngineError(message) => return WorktreeCreateError(message)
         error => raise error
       }
@@ -641,8 +642,8 @@ pub fn endpoints(
       WorktreeCreatedReply(reply)
     }),
     @endpoint.Endpoint::remote(@commands.worktree_remove, async fn(payload) {
-      @engine.remove_worktree(
-        state.manager,
+      @worktree.remove(
+        state.manager.worktree_host(),
         payload.workspace,
         payload.name,
         payload.force == Some(true),
@@ -954,7 +955,7 @@ async fn ApiState::codex_worktree_project(
   // operation as well as first creation. Existing tasks can have turns and an
   // app-server cwd at the missing checkout; the registry's exact owner/project
   // pair is the authority needed to recreate that same placement.
-  if @engine.list_codex_worktree_bindings()
+  if @worktree.list_codex_worktree_bindings()
     .iter()
     .any(binding => {
       binding.thread_id == thread_id && binding.workspace == requested
@@ -1055,7 +1056,7 @@ async fn ApiState::codex_request(
   // failed bridge command, so the frontend can keep the task selected.
   if archive is Some(request) &&
     !request.force &&
-    @engine.WorktreeOwner::codex(request.thread_id).archive_check()
+    @worktree.WorktreeOwner::codex(request.thread_id).archive_check()
     is Some(refusal) {
     return request.needs_force(refusal)
   }
@@ -1120,7 +1121,7 @@ async fn ApiState::codex_request(
     | "codex.thread.resume"
     | "codex.thread.read"
     | "codex.thread.list" =>
-      CodexWorktreeCatalog(@engine.list_codex_worktree_bindings()).annotate(
+      CodexWorktreeCatalog(@worktree.list_codex_worktree_bindings()).annotate(
         reply,
       )
     _ => reply
@@ -1130,7 +1131,7 @@ async fn ApiState::codex_request(
   // dirty check repeats after that write boundary; if new files appeared in
   // the small interval, retain the checkout and report the partial result.
   if archive is Some(request) {
-    let refusal = @engine.WorktreeOwner::codex(request.thread_id).archive_checkout(
+    let refusal = @worktree.WorktreeOwner::codex(request.thread_id).archive_checkout(
       request.force,
       on_committed=(workspace, worktrees) => {
         publish_worktree_changed(self, workspace, worktrees)

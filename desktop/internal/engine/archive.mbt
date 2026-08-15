@@ -281,16 +281,11 @@ async fn SessionFamilyMove::remove_worktree_placements(
   on_committed? : (String, Array[WorktreeInfo]) -> Unit,
 ) -> Unit {
   guard self.workspace is Some(workspace) else { return }
-  worktree_registry_lock.acquire()
-  defer worktree_registry_lock.release()
-  let entries = read_worktrees_unlocked(workspace)
-  let remaining = entries.filter(entry => {
-    !(entry.session is Some(bound) && self.members.contains(bound))
-  })
-  guard remaining.length() < entries.length() else { return }
-  write_worktrees(workspace, remaining)
+  guard @worktree.drop_placements(workspace, self.members) is Some(remaining) else {
+    return
+  }
   if on_committed is Some(on_committed) {
-    on_committed(self.workspace_token, worktree_infos(workspace, remaining))
+    on_committed(self.workspace_token, remaining)
   }
 }
 
@@ -454,7 +449,7 @@ async fn archive_session_commit(
   // (the next prompt respawns) — so nothing irreversible has happened yet;
   // a removal that succeeds while the record move below then fails leaves a
   // live conversation safely blocked on its retained missing placement.
-  let refusal = WorktreeOwner::openseek(session).archive_checkout(
+  let refusal = @worktree.WorktreeOwner::openseek(session).archive_checkout(
     force,
     on_committed?=on_worktree_changed,
   )
@@ -1070,74 +1065,6 @@ async test "selected archived store is revalidated after detachment" {
     @fsx.is_dir(workspace.join(".openseek/archived/sessions/chat").to_path()),
   )
   @fs.rmdir(dir, recursive=true)
-}
-
-///|
-#cfg(not(platform="windows"))
-async test "permanent archived deletion drops placement but keeps files and branch" {
-  archive_env_test_lock.acquire()
-  defer archive_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  defer restore_session_root_env(previous)
-  let root = worktree_test_root("openseek-archive-delete-worktree-")
-  let global = root.join("global")
-  let workspace = root.join("workspace")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", global.to_string())
-  prepare_git_repo(workspace)
-  ignore(@gitx.run(workspace, ["branch", "openseek/chat"]))
-  ignore(@workspaces.add(workspace.to_string(), fn(_) {  }))
-  @fs.write_file(
-    workspace.join("project-note.txt").to_string(),
-    b"keep me",
-    create_mode=CreateOrTruncate,
-  )
-  @fsx.ensure_dir(workspace.join(".openseek/archived/sessions/chat").to_path())
-  write_worktrees(workspace, [
-    {
-      name: "chat-tree",
-      branch: "openseek/chat",
-      base: @gitx.run(workspace, ["rev-parse", "HEAD"]),
-      session: Some("chat"),
-      codex_thread: None,
-    },
-    {
-      name: "other-tree",
-      branch: "openseek/other",
-      base: "abc",
-      session: Some("other"),
-      codex_thread: None,
-    },
-  ])
-  let manager = new_engine_manager("unused")
-  manager.pump = Serving(sessions=Map([]))
-  let worktree_changed = Ref(false)
-  let committed_infos : Array[WorktreeInfo] = []
-  delete_archived_session_commit(
-    manager,
-    "chat",
-    workspace.resource_path(),
-    (_, _) => (),
-    on_worktree_changed=(_, infos) => {
-      worktree_changed.val = true
-      committed_infos.clear()
-      for info in infos {
-        committed_infos.push(info)
-      }
-    },
-  )
-  let entries = read_worktrees_unlocked(workspace)
-  assert_eq(entries.length(), 1)
-  assert_eq(entries[0].session, Some("other"))
-  assert_true(worktree_changed.val)
-  assert_eq(committed_infos.length(), 1)
-  assert_eq(committed_infos[0].session, Some("other"))
-  assert_true(@fsx.exists(workspace.join("project-note.txt").to_path()))
-  assert_true(
-    @gitx.run(workspace, ["branch", "--list", "openseek/chat"]).contains(
-      "openseek/chat",
-    ),
-  )
-  @fs.rmdir(root.to_string(), recursive=true)
 }
 
 ///|
