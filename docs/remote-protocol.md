@@ -281,13 +281,14 @@ Notifications:
 | `session.list_archived` | `{}` | the archived index |
 | `session.archive` | `{session, force?}` | success returns the archived session index (the legacy `{groups}` shape) and moves the conversation plus every sibling `<session>-sr-N` descendant transcript as one family. A dirty checkout returns `{kind:"needs_force", worktree, dirty_paths, dirty_path_count}` without changing durable state; `dirty_paths` previews up to 8 paths and `dirty_path_count` counts all status rows. Clients show a discard-confirmation dialog and retry with `force` only after explicit confirmation. On success the conversation's checkout goes with it, but its name/branch/session placement remains registered (the branch survives; a `worktree.changed` broadcast reports `present: false`). "Dirty" means tracked modifications or non-ignored untracked files; ignored files count as disposable and are removed with the checkout, matching `git worktree remove`'s own semantics |
 | `session.unarchive` | `{session}` | outcome — restores the conversation and every archived subagent descendant record together. A retained worktree placement whose checkout was removed returns as missing, so clients offer Repair before any agent, terminal, or file operation can continue |
+| `session.delete_archived` | `{session, workspace}` | permanently deletes the archived conversation record from the exact host-listed project store (`workspace: ""` for Scratch) and every archived subagent descendant record in that store, then returns the archived index. Its retained worktree placement is removed and broadcast, but project/scratch files and the Git branch remain. The operation refuses unknown stores, live records, and running/compacting family members |
 
 Notifications:
 
 | method | params |
 |---|---|
 | `session.event` | `{session, sequence, event: {sequence, ts, item}}` — one durably **committed** store event, `event` verbatim as `session.load` carries it in `events`; see *The durable transcript* below |
-| `session.changed` | `{change: "archived" \| "unarchived", session}` — broadcast to every client (the requester included) when a record moves between the live and archived stores; a family archive/restore emits one fact for the parent and each descendant subagent record. Recipients apply each per-session fact immediately, keep it authoritative over already-in-flight unversioned list replies, and re-read both lists. A new connection starts a fresh list round. |
+| `session.changed` | `{change: "archived" \| "unarchived" \| "deleted", session, workspace}` — broadcast to every client (the requester included) when a record moves between stores or is permanently deleted; `workspace` is the owning project path or `""` for Scratch, so same-ID records in other stores remain untouched. A family operation emits one fact for the parent and each descendant subagent record. Recipients apply each store-qualified fact immediately, keep it authoritative over already-in-flight unversioned list replies, and re-read both lists. A new connection starts a fresh list round. |
 
 #### The durable transcript: snapshots + commits
 

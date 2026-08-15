@@ -191,7 +191,7 @@ fn device_msg(
           activity=payload.activity,
         ),
       )
-    SessionChanged(payload) => session_changed_msg(payload)
+    SessionChanged(payload) => session_changed_msg(channel, payload)
     WorkspaceChanged(payload) => {
       let paths : Array[@common.Uri] = []
       // The wire contract still calls registered projects `workspaces`.
@@ -223,14 +223,26 @@ fn device_msg(
 
 ///|
 /// Decode archive invalidation synchronously. A fresh id is allocated at the
-/// event boundary (outside `update`) so archiving the active conversation can
-/// switch immediately without a render where Send still targets the stale id.
-fn session_changed_msg(payload : @protocol.SessionChangedPayload) -> DeviceMsg? {
+/// event boundary (outside `update`) so archiving or deleting the active
+/// conversation can switch without a render where Send targets the stale id.
+fn session_changed_msg(
+  channel : @interop.ChannelId,
+  payload : @protocol.SessionChangedPayload,
+) -> DeviceMsg? {
+  guard ArchiveRecordKey::from_protocol(
+      channel,
+      payload.session,
+      payload.workspace,
+    )
+    is Some(key) else {
+    return None
+  }
   Some(
     SessionsChanged(
       change=payload.change,
-      session=payload.session,
-      fresh_session=if payload.change == "archived" {
+      key~,
+      fresh_session=if payload.change == "archived" ||
+        payload.change == "deleted" {
         Some(generated_session_id())
       } else {
         None

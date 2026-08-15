@@ -667,8 +667,8 @@ fn session_item_label(item : @transcript.SessionListItem) -> String {
 
 ///|
 /// One row of the Archived group: clicking the title opens its durable
-/// transcript read-only, while the nested restore button moves the complete
-/// conversation family back to the live store without also opening the row.
+/// transcript read-only, while the nested restore and permanent-delete
+/// buttons act on the complete family without also opening the row.
 fn archived_row(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
@@ -687,16 +687,34 @@ fn archived_row(
     ),
     [
       @html.span(class="sidebar-label", session_item_label(item)),
-      @html.button(
-        class="row-archive",
-        type_="button",
-        title="Restore this conversation to the sidebar",
-        attrs=@html.Attrs::build().on_click(event => {
-          event.stop_propagation()
-          dispatch(UnarchiveSession(channel, item.id))
-        }),
-        icon(icon_arrow_up),
-      ),
+      @html.div(class="row-actions", [
+        @html.button(
+          class="row-archive",
+          type_="button",
+          title="Restore this conversation to the sidebar",
+          attrs=@html.Attrs::build().on_click(event => {
+            event.stop_propagation()
+            dispatch(UnarchiveSession(channel, item.id))
+          }),
+          icon(icon_arrow_up),
+        ),
+        @html.button(
+          class="row-archive row-delete",
+          type_="button",
+          title="Permanently delete this archived conversation",
+          attrs=@html.Attrs::build().on_click(event => {
+            event.stop_propagation()
+            dispatch(
+              DeleteArchivedSession(
+                channel,
+                { session: item.id, workspace: item.workspace },
+                session_item_label(item),
+              ),
+            )
+          }),
+          icon(icon_close),
+        ),
+      ]),
     ],
   )
 }
@@ -2613,6 +2631,9 @@ fn view(
   }
   if model.archive_confirm is Some(confirm) {
     children.push(archive_discard_modal(dispatch, confirm))
+  }
+  if model.archived_delete_confirm is Some(confirm) {
+    children.push(archived_delete_modal(dispatch, confirm))
   }
   if model.quick_open is Some(open) {
     children.push(quick_open_view(dispatch, open))

@@ -571,6 +571,10 @@ struct EngineManager {
   // gap where the registry could disappear after validation but before the
   // writer became observable, without serializing whole turns or sessions.
   workspace_lifecycle_lock : @async.Mutex
+  // Serializes publication and physical removal of durable records under
+  // `archived/deleting`. A foreground delete and startup/list recovery may
+  // discover the same pending directory; only one may advance or erase it.
+  archive_cleanup_lock : @async.Mutex
   // Host-owned endpoint settings are a read-modify-write store shared by
   // every client. The lock covers reads too: on Windows the atomic-save
   // fallback briefly removes the target before renaming the complete temp
@@ -933,6 +937,7 @@ fn new_engine_manager(
     engine,
     runtime_dir,
     workspace_lifecycle_lock: Mutex(),
+    archive_cleanup_lock: Mutex(),
     settings_lock: Mutex(),
     settings_revision: 0,
     commands: Queue(kind=Blocking(EngineActorQueueSize)),
@@ -1141,6 +1146,10 @@ async fn EngineActor::run_generation(
   defer reset()
   emit(sink, Connected({ ready: Some(true), scratch_root: scratch_root() }))
   @async.with_task_group(group => {
+    // A permanent deletion whose physical cleanup failed or was interrupted
+    // leaves its condemned records under `archived/deleting`. Erase them once
+    // per generation; anything this pass misses waits for the next one.
+    group.spawn_bg(allow_failure=true, () => manager.sweep_archived_deletions())
     for ;; {
       match manager.commands.get() {
         SpawnEngine(claim, config, ack) => {

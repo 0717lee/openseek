@@ -102,6 +102,12 @@ pub let session_unarchive : Command[
 ] = Command("session.unarchive")
 
 ///|
+pub let session_delete_archived : Command[
+  @protocol.ArchivedSessionPayload,
+  @protocol.SessionsReply,
+] = Command("session.delete_archived")
+
+///|
 pub let settings_get : Command[
   @protocol.EmptyPayload,
   @protocol.SettingsStatusPayload,

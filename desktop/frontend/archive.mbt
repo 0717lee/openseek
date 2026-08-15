@@ -1,10 +1,24 @@
 // The sidebar's archive flow: `archive_session` asks the host to move a
 // conversation's durable record into its store's `archived` twin,
-// `unarchive_session` moves it back, and `archived_sessions` reads the
-// archived conversations back. Successful ops reply with archived groups in
+// `unarchive_session` moves it back, `delete_archived_session` permanently
+// removes its archived record, and `archived_sessions` reads the remaining
+// conversations back. Successful ops reply with archived groups in
 // the same shape as `list_sessions`; archive can instead return a structured
 // dirty-checkout confirmation state. Since the actions move records between
 // the stores the sidebar lists, both commands refresh the live list too.
+
+///|
+/// The exact archived row awaiting permanent-deletion confirmation. The
+/// visible title is captured with the identity so another render cannot make
+/// the dialog appear to authorize a different conversation.
+priv struct ArchivedDeleteConfirm {
+  channel : @interop.ChannelId
+  key : ArchiveRecordKey
+  // The parent plus every descendant visible in the same archived snapshot.
+  // Host notifications still cover a child created after that snapshot.
+  sessions : Array[String]
+  title : String
+} derive(Eq)
 
 ///|
 fn fetch_archived(
@@ -119,6 +133,87 @@ fn unarchive_session(
     connection_generation,
     sessions_request_generation,
     archived_request_generation,
+  )
+}
+
+///|
+/// Permanently delete one archived conversation. The response carries the
+/// remaining archived list; the deleted identity is kept beside it because
+/// list replies are unversioned and can race the host's notification.
+fn delete_archived_session(
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  key : ArchiveRecordKey,
+  sessions : Array[String],
+  connection_generation : Int,
+  archived_request_generation : Int,
+) -> @cmd.Cmd {
+  guard key.workspace_payload(channel) is Some(workspace) else {
+    return @cmd.none
+  }
+  let device_dispatch = dispatch.map((msg : DeviceMsg) => {
+    FromDevice(channel, msg)
+  })
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      let reply = @interop.bridge_request(
+        channel,
+        @commands.session_delete_archived,
+        { session: key.session, workspace },
+      ) catch {
+        error => {
+          scheduler.add(
+            device_dispatch(
+              DeleteArchivedFailed(@interop.bridge_error_text(error)),
+            ),
+          )
+          return
+        }
+      }
+      scheduler.add(
+        device_dispatch(
+          ArchivedDeleted(
+            key~,
+            sessions~,
+            items=@transcript.sessions_from_reply(reply, channel),
+            connection_generation~,
+            request_generation=archived_request_generation,
+            fresh_session=generated_session_id(),
+          ),
+        ),
+      )
+    })
+  })
+}
+
+///|
+/// Permanent archived-chat deletion requires a second, explicit click. The
+/// copy names what disappears and what survives so the user does not have to
+/// infer filesystem or Git consequences from the word "delete".
+fn archived_delete_modal(
+  dispatch : @cmd.Emit[Msg],
+  confirm : ArchivedDeleteConfirm,
+) -> @html.Html {
+  @html.div(
+    class="modal-backdrop",
+    on_click=dispatch(CancelDeleteArchivedSession),
+    [
+      @html.div(class="modal", [
+        @html.div(class="modal-title", "Permanently delete this chat?"),
+        @html.div(
+          class="modal-body",
+          "“\{confirm.title}” and all of its archived subagent history will be permanently deleted. This cannot be undone. Project files, scratch workspace files, and Git branches will remain.",
+        ),
+        @html.div(class="modal-actions", [
+          @html.button(on_click=dispatch(CancelDeleteArchivedSession), "Cancel"),
+          @html.button(
+            class="danger",
+            on_click=dispatch(ConfirmDeleteArchivedSession),
+            "Delete permanently",
+          ),
+        ]),
+      ]),
+    ],
   )
 }
 

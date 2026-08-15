@@ -72,6 +72,11 @@ pub(all) enum ArchiveReply {
 pub impl ToJson for ArchiveReply
 pub impl @json.FromJson for ArchiveReply
 
+pub(all) struct ArchivedSessionPayload {
+  session : String
+  workspace : String
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
 pub(all) struct AuthDevicePayload {
   id : String
   name : String
@@ -606,6 +611,7 @@ pub(all) struct SessionAssistantMessage {
 pub(all) struct SessionChangedPayload {
   change : String
   session : String
+  workspace : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct SessionCommitPayload {
