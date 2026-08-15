@@ -117,8 +117,8 @@ fn app_shortcut_message(keyboard : @dom.KeyboardEvent, is_apple : Bool) -> Msg? 
     return None
   }
   match (keyboard.code(), keyboard.shift_key()) {
-    ("KeyP", false) => Some(QuickOpenOpen(QuickOpenFiles))
-    ("KeyT", false) => Some(QuickOpenOpen(QuickOpenSymbols))
+    ("KeyP", false) => Some(QuickOpenOpen(@quick_open.Files))
+    ("KeyT", false) => Some(QuickOpenOpen(@quick_open.Symbols))
     ("KeyN", false) => Some(NewChat)
     ("KeyO", false) => Some(AddProjectRequested)
     ("KeyB", false) => Some(ToggleSidebar)
@@ -444,12 +444,17 @@ pub fn boot() -> Unit {
       sidebar_input,
       SidebarDispatcher::{ emit, }.actions(),
     )
-    state.view6(
+    let quick_open_html = @quick_open.component(
+      state.map(model => model.quick_open),
+      emit.map(msg => QuickOpen(msg)),
+    )
+    state.view7(
       terminal_html,
       transcript_html,
       right_panel_html,
       composer_html,
       sidebar_html,
+      quick_open_html,
       (
         model,
         terminal_html,
@@ -457,6 +462,7 @@ pub fn boot() -> Unit {
         right_panel_html,
         composer_html,
         sidebar_html,
+        quick_open_html,
       ) => {
         view(
           emit,
@@ -468,6 +474,7 @@ pub fn boot() -> Unit {
           right_panel_html,
           composer_html,
           sidebar_html,
+          quick_open_html,
         )
       },
     )

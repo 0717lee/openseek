@@ -1255,7 +1255,7 @@ fn covering_overlay(model : Model) -> Bool {
   model.project_picker is Some(_) ||
   model.archive_confirm is Some(_) ||
   model.archived_delete_confirm is Some(_) ||
-  model.quick_open is Some(_) ||
+  model.quick_open.is_open() ||
   model.update_ux is ConfirmingRestart(_) ||
   // Best effort: with the bridge gone the hide op may not deliver.
   model.bridge_state() is BridgeLost(_)
@@ -1466,15 +1466,15 @@ fn update(
     model
   }
   // The quick pick belongs to the focused conversation captured when it
-  // opened. Device/session switches can arrive through many messages (and
-  // background pushes), so fence it once here rather than in every branch.
-  let (quick_open_cmd, model) = close_stale_quick_open(dispatch, model)
-  // A conversation's concrete root can change through connection metadata,
-  // restored session data, or a worktree registry broadcast. Restart an open
-  // picker once here so every path gets the same stale-result fence.
-  let (quick_open_restart_cmd, model) = model.restart_quick_open_after_root_change(
-    dispatch, previous,
+  // opened, and to that conversation's concrete root. Both can change through
+  // many messages — device/session switches, background pushes, connection
+  // metadata, restored session data, a worktree registry broadcast — so the
+  // package fences the palette once here rather than in every branch.
+  let (quick_open_cmd, quick_open) = model.quick_open.reconcile(
+    dispatch.map(msg => QuickOpen(msg)),
+    model.quick_open_input(),
   )
+  let model = { ..model, quick_open, }
   // The composer's git popover belongs to the checkout that was on screen,
   // and is fenced the same way and for the same reason. It cannot rely on its
   // click-away listener here: a switch by keyboard — Cmd+N, Quick Open — makes
@@ -1550,8 +1550,7 @@ fn update(
   let (model, browser_cmd) = sync_browser_view(dispatch, model)
   (
     @cmd.batch([
-      cmd, quick_open_cmd, quick_open_restart_cmd, panel_visibility_cmd, panel_cmd,
-      terminal_cmd, browser_cmd,
+      cmd, quick_open_cmd, panel_visibility_cmd, panel_cmd, terminal_cmd, browser_cmd,
     ]),
     model,
   )
@@ -1566,7 +1565,7 @@ fn Msg::opens_file_before_panel_reconciliation(self : Msg) -> Bool {
   is (ComposerAction(@composer.MentionOpened(..))
   | JumpToMention(_)
   | JumpToLocation(..)
-  | QuickOpenPick(_)
+  | QuickOpen(@quick_open.Pick(_))
   | OpenFileAt(..))
 }
 
@@ -2097,41 +2096,8 @@ fn update_msg(
       )
       (cmd, { ..model, file_panel: panel })
     }
-    QuickOpenOpen(mode) => open_quick_open(dispatch, model, mode)
-    QuickOpenValueChanged(value) =>
-      change_quick_open_value(dispatch, model, value)
-    QuickOpenFilesDue(owner~, query~, generation~) =>
-      begin_quick_open_file_request(dispatch, model, owner, query, generation)
-    QuickOpenFileCacheLoaded(owner~, cache_key~, generation~) =>
-      apply_quick_open_file_cache_loaded(
-        dispatch, model, owner, cache_key, generation,
-      )
-    QuickOpenFileCacheRequestFailed(owner~, cache_key~, generation~) =>
-      fail_quick_open_file_cache_load(model, owner, cache_key, generation)
-    QuickOpenFilesLoaded(
-      owner~,
-      cache_key~,
-      query~,
-      generation~,
-      files~,
-      from_cache~,
-      limit_hit~
-    ) =>
-      apply_quick_open_file_result(
-        model, owner, cache_key, query, generation, files, from_cache, limit_hit,
-      )
-    QuickOpenFilesRequestFailed(owner~, cache_key~, query~, generation~) =>
-      fail_quick_open_file_request(model, owner, cache_key, query, generation)
-    QuickOpenDue(owner~, query~, generation~) =>
-      begin_quick_open_symbol_request(dispatch, model, owner, query, generation)
-    QuickOpenSymbolsLoaded(owner~, query~, generation~, items~) =>
-      apply_quick_open_symbol_result(model, owner, query, generation, items)
-    QuickOpenSymbolsRequestFailed(owner~, query~, generation~) =>
-      fail_quick_open_symbol_request(model, owner, query, generation)
-    QuickOpenMove(delta) => move_quick_open_selection(model, delta)
-    QuickOpenSelect(index) => select_quick_open_row(model, index)
-    QuickOpenPick(index) => pick_quick_open_row(dispatch, model, index)
-    QuickOpenDismiss => dismiss_quick_open(dispatch, model)
+    QuickOpenOpen(provider) => open_quick_open(dispatch, model, provider)
+    QuickOpen(msg) => update_quick_open(dispatch, model, msg)
     EngineModelChanged(value) => {
       // The selector changes the conversation on screen. The tier is pinned to
       // that conversation right away — a chat can be given a tier and left
@@ -15920,7 +15886,9 @@ test "only synchronous file-open messages suppress panel reactivation" {
   assert_true(
     JumpToLocation(path="a.mbt", range=None, annotation=None).opens_file_before_panel_reconciliation(),
   )
-  assert_true(QuickOpenPick(0).opens_file_before_panel_reconciliation())
+  assert_true(
+    QuickOpen(@quick_open.Pick(0)).opens_file_before_panel_reconciliation(),
+  )
   assert_true(
     OpenFileAt(owner~, generation=1, path="a.mbt", line=Some(1), column=None).opens_file_before_panel_reconciliation(),
   )
@@ -18575,9 +18543,9 @@ test "full-screen modals hide the native view and closing restores it" {
   assert_true(archiving.browser_pane.shown is None)
   let (_, searching) = update(
     dispatch,
-    QuickOpenOpen(QuickOpenSymbols),
+    QuickOpenOpen(@quick_open.Symbols),
     restored,
   )
-  assert_true(searching.quick_open is Some(_))
+  assert_true(searching.quick_open.is_open())
   assert_true(searching.browser_pane.shown is None)
 }

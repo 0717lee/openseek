@@ -1,5 +1,4 @@
 import {
-  "moonbit-community/fuzzy_match",
   "moonbitlang/core/cmp",
   "moonbitlang/core/debug",
   "moonbitlang/core/json",
@@ -31,8 +30,8 @@ import {
   "openseek_desktop/frontend/plan",
   "openseek_desktop/frontend/preview",
   "openseek_desktop/frontend/resource",
+  "openseek_desktop/frontend/quick_open",
   "openseek_desktop/frontend/right_panel",
-  "openseek_desktop/frontend/symbols",
   "openseek_desktop/frontend/transcript",
   "openseek_desktop/frontend/transcript/component" @transcript_component,
   "openseek_desktop/frontend/crash_page",

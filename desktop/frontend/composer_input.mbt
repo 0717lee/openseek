@@ -130,7 +130,7 @@ fn Model::composer_input(
     replacements: self.composer_entry_replacements,
     retirements: self.composer_entry_retirements,
     file_candidates: self.file_search().candidates,
-    open_files: quick_open_open_files(self),
+    open_files: self.live_editor_files(),
     active_file: @dock.active_file(self.dock),
     file_index,
     presentation: {

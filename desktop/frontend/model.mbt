@@ -888,64 +888,6 @@ priv enum Screen {
 type Mention = @composer.Mention
 
 ///|
-/// Which provider owns unified Quick Open. Files are the default provider; a
-/// leading `#` in the visible input selects workspace symbols.
-priv enum QuickOpenMode {
-  QuickOpenFiles
-  QuickOpenSymbols
-}
-
-///|
-/// One selectable row in the unified Quick Open. File rows open without a
-/// range; symbol rows retain the precise range returned by MoonIDE.
-priv enum QuickOpenItem {
-  QuickOpenFile(@pathx.Relative)
-  QuickOpenSymbol(WorkspaceSymbol)
-} derive(Eq)
-
-///|
-/// The shell's transient unified Quick Open. `value` is the exact text shown in
-/// the input, including the `#` provider prefix when symbols are active.
-/// Its owner fences results to one conversation; `generation` separates
-/// successive file and symbol queries even when their text is identical. The
-/// page-level counter lives on `Model`, so closing the palette cannot make an
-/// old reply current again.
-priv struct QuickOpen {
-  owner : @interop.ConversationKey
-  value : String
-  items : Array[QuickOpenItem]
-  selected : Int
-  phase : QuickOpenPhase
-  generation : Int
-} derive(Eq)
-
-///|
-/// File and symbol queries wait briefly while the user types. Ready deliberately
-/// includes an empty result; Failed is reserved for bridge/request failure.
-priv enum QuickOpenPhase {
-  QuickOpenDebouncing
-  QuickOpenLoading
-  QuickOpenReady
-  QuickOpenFailed
-} derive(Eq)
-
-///|
-/// Frontend half of VS Code's FileQueryCacheState. `active_key` remains usable
-/// while `loading_key` warms a replacement for the same root. A failed
-/// replacement therefore cannot evict the last good cache.
-priv struct FileQueryCacheState {
-  owner : @interop.ConversationKey?
-  root : @common.Uri?
-  active_key : String?
-  loading_key : String?
-} derive(Eq)
-
-///|
-fn empty_file_query_cache() -> FileQueryCacheState {
-  { owner: None, root: None, active_key: None, loading_key: None }
-}
-
-///|
 /// The mooncakes.io skill catalog as the Skills page sees it. One enum, so
 /// "loading", "loaded empty" and "failed" cannot be conflated.
 priv enum SkillsCatalog {
@@ -1296,20 +1238,15 @@ priv struct Model {
   composer_entry_retirements : Array[@interop.ConversationKey]
   // Cmd/Ctrl+P/T unified Quick Open in the native window and browser console.
   // It is global UI for the focused conversation, not durable conversation
-  // state. The monotonic counter fences symbol replies across close and reopen,
-  // while the optional state carries input, rows, and selection.
-  quick_open : QuickOpen?
-  quick_open_generation : Int
+  // state. Owned by the `quick_open` package: this shell only opens it, fences
+  // it against conversation changes, and opens the row it accepts.
+  quick_open : @quick_open.State
   // Every git probe's request number, minted here rather than per conversation
-  // for the same reason as `quick_open_generation`: a conversation archived and
-  // reopened is a *new* record, so a counter living on it restarts at zero and
-  // hands the old checkout's outstanding replies a number the new one accepts.
-  // Kept whole while the frontend runs, it can only ever be spent.
+  // because a conversation archived and reopened is a *new* record, so a
+  // counter living on it restarts at zero and hands the old checkout's
+  // outstanding replies a number the new one accepts. Kept whole while the
+  // frontend runs, it can only ever be spent.
   git_request_generation : Int
-  // Search-provider cache state survives closing the picker. Reopening starts
-  // a fresh cache in the background and continues using the previous key until
-  // the replacement succeeds, matching VS Code's AnythingQuickAccess state.
-  file_query_cache : FileQueryCacheState
   // The desktop topbar's app launcher. Installed apps belong to the native
   // host, not a conversation or workspace, so this catalog is probed once
   // and kept while the frontend runs.
@@ -1530,63 +1467,13 @@ priv enum Msg {
   // also carries its comment text, re-shown as an editor bubble over that
   // range.
   JumpToLocation(path~ : String, range~ : @common.Range?, annotation~ : String?)
-  // Open unified Quick Open in the requested provider in either shell.
-  QuickOpenOpen(QuickOpenMode)
-  QuickOpenValueChanged(String)
-  // A delayed file query starts only if this owner/query/generation is still
-  // the palette's current state.
-  QuickOpenFilesDue(
-    owner~ : @interop.ConversationKey,
-    query~ : String,
-    generation~ : Int
-  )
-  QuickOpenFileCacheLoaded(
-    owner~ : @interop.ConversationKey,
-    cache_key~ : String,
-    generation~ : Int
-  )
-  QuickOpenFileCacheRequestFailed(
-    owner~ : @interop.ConversationKey,
-    cache_key~ : String,
-    generation~ : Int
-  )
-  QuickOpenFilesLoaded(
-    owner~ : @interop.ConversationKey,
-    cache_key~ : String,
-    query~ : String,
-    generation~ : Int,
-    files~ : Array[@pathx.Relative],
-    from_cache~ : Bool,
-    limit_hit~ : Bool
-  )
-  QuickOpenFilesRequestFailed(
-    owner~ : @interop.ConversationKey,
-    cache_key~ : String,
-    query~ : String,
-    generation~ : Int
-  )
-  // A delayed symbol query starts only if this owner/query/generation is still
-  // the palette's current state.
-  QuickOpenDue(
-    owner~ : @interop.ConversationKey,
-    query~ : String,
-    generation~ : Int
-  )
-  QuickOpenSymbolsLoaded(
-    owner~ : @interop.ConversationKey,
-    query~ : String,
-    generation~ : Int,
-    items~ : Array[WorkspaceSymbol]
-  )
-  QuickOpenSymbolsRequestFailed(
-    owner~ : @interop.ConversationKey,
-    query~ : String,
-    generation~ : Int
-  )
-  QuickOpenMove(Int)
-  QuickOpenSelect(Int)
-  QuickOpenPick(Int)
-  QuickOpenDismiss
+  // Open unified Quick Open in the requested provider in either shell. The
+  // shortcut is the shell's because its capture-phase listener owns every
+  // application chord; whether the palette may open at all is a shell question
+  // too, since a competing modal or a lost bridge already owns the screen.
+  QuickOpenOpen(@quick_open.Provider)
+  // Everything the open palette does to itself.
+  QuickOpen(@quick_open.Msg)
   // Select the active conversation's model and make it the default for new
   // conversations.
   EngineModelChanged(String)
@@ -2396,10 +2283,8 @@ fn initial_model() -> Model {
     composer_context_generation: 0,
     composer_entry_replacements: [],
     composer_entry_retirements: [],
-    quick_open: None,
-    quick_open_generation: 0,
+    quick_open: @quick_open.State::empty(),
     git_request_generation: 0,
-    file_query_cache: empty_file_query_cache(),
     launcher: { open: false, apps: AppsNotFetched },
     git_details_open: false,
     dock: @dock.State::empty(),

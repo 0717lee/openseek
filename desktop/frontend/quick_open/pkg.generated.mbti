@@ -1,0 +1,61 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "openseek_desktop/frontend/quick_open"
+
+import {
+  "moonbit-community/rabbita",
+  "moonbit-community/rabbita/cmd",
+  "moonbit-community/rabbita/html",
+  "moonbitlang/core/debug",
+  "moonbitlang/editor/base/common",
+  "openseek_desktop/frontend/interop",
+  "openseek_desktop/frontend/pathx",
+  "openseek_desktop/frontend/symbols",
+}
+
+// Values
+pub fn component(@rabbita.Val[State], @cmd.Emit[Msg]) -> @rabbita.Val[@html.Html]
+
+// Errors
+
+// Types and methods
+pub(all) struct Accepted {
+  path : String
+  range : @common.Range?
+} derive(Eq, @debug.Debug)
+
+type Input derive(Eq)
+pub fn Input::Input(owner~ : @interop.ConversationKey, root~ : @common.Uri?, open_files~ : Array[@pathx.Relative], active_file~ : @pathx.Relative?) -> Self
+
+pub(all) enum Msg {
+  ValueChanged(String)
+  FilesDue(owner~ : @interop.ConversationKey, query~ : String, generation~ : Int)
+  FileCacheLoaded(owner~ : @interop.ConversationKey, cache_key~ : String, generation~ : Int)
+  FileCacheRequestFailed(owner~ : @interop.ConversationKey, cache_key~ : String, generation~ : Int)
+  FilesLoaded(owner~ : @interop.ConversationKey, cache_key~ : String, query~ : String, generation~ : Int, files~ : Array[@pathx.Relative], from_cache~ : Bool, limit_hit~ : Bool)
+  FilesRequestFailed(owner~ : @interop.ConversationKey, cache_key~ : String, query~ : String, generation~ : Int)
+  SymbolsDue(owner~ : @interop.ConversationKey, query~ : String, generation~ : Int)
+  SymbolsLoaded(owner~ : @interop.ConversationKey, query~ : String, generation~ : Int, items~ : Array[@symbols.Symbol])
+  SymbolsRequestFailed(owner~ : @interop.ConversationKey, query~ : String, generation~ : Int)
+  Move(Int)
+  Select(Int)
+  Pick(Int)
+  Dismiss
+}
+
+pub(all) enum Provider {
+  Files
+  Symbols
+} derive(Eq)
+
+pub struct State {
+  // private fields
+} derive(Eq)
+pub fn State::empty() -> Self
+pub fn State::handle(Self, @cmd.Emit[Msg], Msg, Input) -> (@cmd.Cmd, Self, Accepted?)
+pub fn State::is_open(Self) -> Bool
+pub fn State::open(Self, @cmd.Emit[Msg], Input, Provider) -> (@cmd.Cmd, Self)
+pub fn State::reconcile(Self, @cmd.Emit[Msg], Input) -> (@cmd.Cmd, Self)
+
+// Type aliases
+
+// Traits

@@ -1951,6 +1951,7 @@ fn view(
   right_panel_html : @html.Html,
   composer_html : @html.Html,
   sidebar_html : @html.Html,
+  quick_open_html : @html.Html,
 ) -> @html.Html {
   // A browser page is gated on both its relay session and its required
   // query-selected device. Until both exist, the console frame — sidebar,
@@ -2038,9 +2039,9 @@ fn view(
   if model.archived_delete_confirm is Some(confirm) {
     children.push(archived_delete_modal(dispatch, confirm))
   }
-  if model.quick_open is Some(open) {
-    children.push(quick_open_view(dispatch, open))
-  }
+  // Rendered whether or not the palette is open — closed it is an empty
+  // placeholder — so opening it never shifts the overlay children around it.
+  children.push(quick_open_html)
   // On the desktop a lost connection covers everything: with no event
   // stream and every API call failing, the app behind it can do nothing,
   // so an honest dead-end beats a half-broken UI. The console keeps its last
