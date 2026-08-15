@@ -1008,7 +1008,9 @@ test "remote endpoint catalog has one entry per command name" {
 test "dsh endpoints stay in the local Desktop catalog" {
   let state = ApiState::new(engine="unused")
   let desktop_names = local_endpoints(state).map(endpoint => endpoint.name())
-  assert_eq(desktop_names, ["dsh.status", "dsh.request", "dsh.respond"])
+  assert_eq(desktop_names, [
+    "dsh.status", "dsh.pending", "dsh.request", "dsh.respond",
+  ])
   let connection = @host.HostConnection::new()
   let remote = endpoints(state, connection).map(endpoint => endpoint.name())
   assert_false(remote.contains("dsh.request"))
