@@ -118,6 +118,10 @@ pub fn update(
         state.active_id != Some(session_id) {
         return (@cmd.none, state)
       }
+      if kind is DshCancelReply(session_id) &&
+        state.active_id != Some(session_id) {
+        return (@cmd.none, state)
+      }
       (
         @cmd.none,
         {
@@ -237,20 +241,28 @@ fn State::with_reply(
         Some(id) if sessions.iter().any(row => row.id == id) => Some(id)
         _ => sessions.get(0).map(row => row.id)
       }
+      let selection_changed = self.active_id != active_id
       let next = {
         ..self,
         connection: DshReady,
         sessions,
         active_id,
+        events: if selection_changed {
+          []
+        } else {
+          self.events
+        },
+        streaming: if selection_changed {
+          ""
+        } else {
+          self.streaming
+        },
         loading: false,
         notice: "",
       }
       match active_id {
-        Some(id) if self.active_id != Some(id) =>
-          (
-            next.load_history(dispatch, id),
-            { ..next, events: [], streaming: "", loading: true },
-          )
+        Some(id) if selection_changed =>
+          (next.load_history(dispatch, id), { ..next, loading: true })
         _ => (@cmd.none, next)
       }
     }
@@ -346,7 +358,12 @@ fn State::with_reply(
         },
       )
     }
-    DshCancelReply => (@cmd.none, { ..self, loading: false, notice: "" })
+    DshCancelReply(session_id) =>
+      if self.active_id == Some(session_id) {
+        (@cmd.none, { ..self, loading: false, notice: "" })
+      } else {
+        (@cmd.none, self)
+      }
     DshStatusReply | DshPendingReply | DshResponseReply(_) => (@cmd.none, self)
   }
 }
@@ -1018,6 +1035,74 @@ test "accepted dsh prompt advances transcript submission generation" {
   let (_, next) = update(dispatch, Send, state)
   assert_eq(next.submission_generation(), 1)
   assert_true(next.loading)
+}
+
+///|
+test "empty dsh session baseline clears a deleted active transcript" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let state = {
+    ..State(),
+    sessions: [
+      {
+        id: "session-1",
+        title: "Deleted",
+        cwd: None,
+        running: false,
+        blank: false,
+      },
+    ],
+    active_id: Some("session-1"),
+    events: [
+      {
+        type_: "assistant/chunk",
+        seq: 1,
+        time: None,
+        data: {},
+        surface_append: None,
+      },
+    ],
+    streaming: "stale output",
+    loading: true,
+  }
+  let (_, next) = state.with_reply(dispatch, DshSessionsReply, {
+    "type": "server-response",
+    "rpcId": "session-list",
+    "result": { "ok": true, "value": { "items": [] } },
+  })
+  assert_true(next.active_id is None)
+  assert_true(next.events.is_empty())
+  assert_eq(next.streaming, "")
+  assert_false(next.loading)
+}
+
+///|
+test "late dsh cancellation replies preserve the newly active session" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let state = {
+    ..State(),
+    active_id: Some("session-b"),
+    loading: true,
+    notice: "current notice",
+  }
+  let reply : Json = {
+    "type": "server-response",
+    "rpcId": "cancel-a",
+    "result": { "ok": true, "value": {} },
+  }
+  let (_, stale_success) = state.with_reply(
+    dispatch,
+    DshCancelReply("session-a"),
+    reply,
+  )
+  assert_true(stale_success.loading)
+  assert_eq(stale_success.notice, "current notice")
+  let (_, stale_failure) = update(
+    dispatch,
+    Failed(kind=DshCancelReply("session-a"), message="cancel failed"),
+    state,
+  )
+  assert_true(stale_failure.loading)
+  assert_eq(stale_failure.notice, "current notice")
 }
 
 ///|

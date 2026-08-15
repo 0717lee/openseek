@@ -230,7 +230,9 @@ fn State::send(
 ///|
 fn State::cancel(self : State, dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
   guard self.active_id is Some(session_id) else { return @cmd.none }
-  DshCancelReply.request(dispatch, "session.cancel", { "sessionId": session_id })
+  DshCancelReply(session_id).request(dispatch, "session.cancel", {
+    "sessionId": session_id,
+  })
 }
 
 ///|
