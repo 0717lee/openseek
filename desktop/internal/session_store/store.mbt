@@ -48,10 +48,10 @@ pub fn deleting_root(root : @pathx.Absolute) -> @pathx.Absolute {
 }
 
 ///|
-/// Every store that can own a session id — one per attached workspace.
-/// Correlation and stale-client defenses must search all of them: request
-/// hints are optional and cannot be trusted to identify where an existing
-/// record lives.
+/// Every store that can own a session id — one per attached workspace. Ops
+/// that address one record name its store and select it exactly; this is for
+/// the whole-host sweeps and for the archived-correlation defense, whose
+/// request carries no store at all.
 pub async fn known_roots() -> Array[@pathx.Absolute] {
   let roots : Array[@pathx.Absolute] = []
   for path in @workspaces.registered() {
@@ -100,19 +100,20 @@ pub async fn root_of(session : String) -> @pathx.Absolute? {
 }
 
 ///|
-/// The exact archived store selected by a host-produced sidebar row. Every
-/// durable record lives in a registered workspace's store, and paths are
-/// accepted only while that workspace is registered. Naming the store this
-/// exactly is what prevents a same-ID record in another one from being chosen
-/// by search order.
-pub struct ArchivedStore {
+/// The exact durable store a client's request names: a registered workspace's
+/// in-project store, accepted only while that workspace is registered. Every
+/// op that addresses an existing record goes through this, so a same-id record
+/// in another store can never be chosen by search order.
+pub struct StoreSelection {
   root : @pathx.Absolute
   workspace : @pathx.Absolute
   workspace_token : String
 }
 
 ///|
-pub async fn ArchivedStore::for_workspace(workspace : String) -> ArchivedStore {
+pub async fn StoreSelection::from_workspace(
+  workspace : String,
+) -> StoreSelection {
   guard @pathx.Absolute::from_uri_path(workspace) is Some(path) &&
     @workspaces.registered_dir(path) is Some(registered) else {
     raise StoreError("\{workspace} is not a registered workspace")
@@ -131,28 +132,14 @@ pub async fn ArchivedStore::for_workspace(workspace : String) -> ArchivedStore {
 }
 
 ///|
-/// The store root whose archived `sessions/<id>` holds this conversation's
-/// durable record.
+/// Any store whose `archived` twin holds this id. Unlike the ops that move or
+/// read one named record, the archived-correlation defense guarding a start
+/// has no store to go on: it guards a request that carries only an id, so it
+/// must search.
 pub async fn archived_root_of(session : String) -> @pathx.Absolute? {
   guard !session.is_empty() else { return None }
   for root in known_roots() {
     if @fsx.is_dir(archived_root(root).join("sessions").join(session).to_path()) {
-      return Some(root)
-    }
-  }
-  None
-}
-
-///|
-/// The store root whose live `sessions/<id>` holds this conversation's
-/// durable record, searched like `archived_root_of`. Archive must find the
-/// record where it actually lives: a stale client can name a conversation long
-/// after its workspace detached, and the session id alone says nothing about
-/// which store owns it.
-pub async fn live_root_of(session : String) -> @pathx.Absolute? {
-  guard !session.is_empty() else { return None }
-  for root in known_roots() {
-    if @fsx.is_dir(root.join("sessions").join(session).to_path()) {
       return Some(root)
     }
   }

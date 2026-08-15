@@ -1221,7 +1221,7 @@ pub fn KnownRunPayload::to_repr(Self) -> @debug.Repr
 
 pub(all) struct LoadSessionPayload {
   session : String
-  workspace : String?
+  workspace : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 pub fn LoadSessionPayload::equal(Self, Self) -> Bool
 pub fn LoadSessionPayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
@@ -1898,6 +1898,7 @@ pub impl @json.FromJson for SessionListEntry
 
 pub(all) struct SessionPayload {
   session : String
+  workspace : String
   force : Bool?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 pub fn SessionPayload::equal(Self, Self) -> Bool

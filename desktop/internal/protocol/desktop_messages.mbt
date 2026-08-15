@@ -125,11 +125,20 @@ pub(all) struct GoalPayload {
   workspace : String?
 } derive(Debug, Eq)
 
+// Session ids are unique only within one durable store, so every op that
+// addresses an existing record names the store beside the id: the
+// host-reported project resource path, the same spelling `session.changed`
+// and the sidebar's listings report. The host validates it against its
+// registry rather than trusting a client to name an arbitrary directory, and
+// selects that store exactly instead of searching, so a same-id record in
+// another store can never be read or moved by mistake.
+
 ///|
+/// `session.load` / `session.load_archived` read one durable record in one
+/// exact store.
 pub(all) struct LoadSessionPayload {
   session : String
-  // The workspace holding the session, when the client already knows it.
-  workspace : String?
+  workspace : String
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
@@ -168,20 +177,18 @@ pub impl ToJson for SessionExportPayload with fn to_json(self) {
 }
 
 ///|
-/// `session.archive` / `session.unarchive` address a conversation by its
-/// durable session id. Archiving takes the conversation's worktree with
-/// it; `force` (archive only) discards that checkout's uncommitted
-/// changes — the client sends it after its confirmation dialog.
+/// `session.archive` / `session.unarchive` move one durable record between
+/// one exact store and its archived twin. Archiving takes the conversation's
+/// worktree with it; `force` (archive only) discards that checkout's
+/// uncommitted changes — the client sends it after its confirmation dialog.
 pub(all) struct SessionPayload {
   session : String
+  workspace : String
   force : Bool?
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
 /// Permanent deletion addresses one archived record in one exact store.
-/// `workspace` is the host-reported project resource path; the host validates
-/// it against its registry instead of trusting the client to choose an
-/// arbitrary directory.
 pub(all) struct ArchivedSessionPayload {
   session : String
   workspace : String

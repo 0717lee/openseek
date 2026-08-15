@@ -262,9 +262,20 @@ test "goal payload distinguishes set from clear by the text field" {
 }
 
 ///|
-test "session move payload has one canonical id" {
+test "session move payload has one canonical id and a required store" {
   let payload : SessionPayload = @json.from_json({
     "session": "  s-canonical  ",
+    "workspace": "",
   })
   assert_eq(payload.canonical_session(), "s-canonical")
+  assert_eq(payload.workspace, "")
+  // The store is half the record's identity, so a payload without it is not
+  // a valid move request — it would leave the host searching again.
+  let storeless = try {
+    let decoded : SessionPayload = @json.from_json({ "session": "s-canonical" })
+    Some(decoded)
+  } catch {
+    _ => None
+  }
+  assert_true(storeless is None)
 }

@@ -65,14 +65,13 @@ async fn EngineManager::sweep_archived_deletions(self : EngineManager) -> Unit {
 priv struct SessionFamilyMove {
   manager : EngineManager
   root : @pathx.Absolute
-  // The registered project whose store owns this family, when this page's
-  // registry still holds it. Permanent deletion uses this exact owner to
-  // remove the retained worktree placement even if the project detaches
-  // meanwhile.
-  workspace : @pathx.Absolute?
-  // Canonical protocol spelling of `workspace`, "" when no registered project
-  // claims the store. Every session.changed callback carries it so same-ID
-  // records in other stores do not inherit this family's disposition.
+  // The registered project whose store owns this family. Permanent deletion
+  // uses this exact owner to remove the retained worktree placement even if
+  // the project detaches meanwhile.
+  workspace : @pathx.Absolute
+  // Canonical protocol spelling of `workspace`. Every session.changed callback
+  // carries it so same-ID records in other stores do not inherit this family's
+  // disposition.
   workspace_token : String
   members : Array[String]
   guards : Array[(String, SessionRecordGuard)]
@@ -94,15 +93,15 @@ fn SessionFamilyMove::release(self : SessionFamilyMove) -> Unit {
 }
 
 ///|
-/// Locate and exclusively claim one family in either the live or archived
-/// twin. The workspace lifecycle lock covers discovery through record and
-/// slot claims; after it is released those claims make detach and competing
-/// operations observe the move until `SessionFamilyMove::release`.
+/// Locate and exclusively claim one family in the selected store's live or
+/// archived twin. The workspace lifecycle lock covers discovery through
+/// record and slot claims; after it is released those claims make detach and
+/// competing operations observe the move until `SessionFamilyMove::release`.
 async fn EngineManager::claim_session_family_move(
   manager : EngineManager,
   session : String,
   archived~ : Bool,
-  selected? : @session_store.ArchivedStore,
+  selected~ : @session_store.StoreSelection,
 ) -> SessionFamilyMove {
   manager.workspace_lifecycle_lock.acquire()
   let mut placement_locked = true
@@ -123,60 +122,47 @@ async fn EngineManager::claim_session_family_move(
       manager.workspace_lifecycle_lock.release()
     }
   }
-  if selected is Some(selected) {
-    // `from_workspace` runs before this lock is acquired. Detach uses the
-    // same lock, so repeat the registration check here and keep the selected
-    // store stable until the record and pending-operation claims are visible.
-    guard @workspaces.registered_dir(selected.workspace) is Some(registered) &&
-      @workspaces.store_root(registered) == selected.root else {
-      raise EngineError(
-        "\{selected.workspace_token} is not a registered workspace",
-      )
-    }
+  // `from_workspace` runs before this lock is acquired. Detach uses the same
+  // lock, so repeat the registration check here and keep the selected store
+  // stable until the record and pending-operation claims are visible.
+  guard @workspaces.registered_dir(selected.workspace) is Some(registered) &&
+    @workspaces.store_root(registered) == selected.root else {
+    raise EngineError(
+      "\{selected.workspace_token} is not a registered workspace",
+    )
   }
-  let root = if selected is Some(selected) {
-    let record = if archived {
-      @session_store.archived_root(selected.root).join("sessions").join(session)
-    } else {
-      selected.root.join("sessions").join(session)
-    }
-    if @fsx.is_dir(record.to_path()) {
-      Some(selected.root)
-    } else {
-      None
-    }
-  } else if archived {
-    @session_store.archived_root_of(session)
-  } else {
-    @session_store.live_root_of(session)
-  }
-  guard root is Some(root) else {
-    if archived {
+  let root = selected.root
+  let source = if archived { @session_store.archived_root(root) } else { root }
+  guard @fsx.is_dir(source.join("sessions").join(session).to_path()) else {
+    // Name the state the caller can act on rather than reporting a bare
+    // miss. The twin in this same store is the common one — a stale client
+    // asking to archive what it already archived, or the reverse — and the
+    // record still being live elsewhere means the client named the wrong
+    // store, not that the conversation is gone.
+    if @fsx.is_dir(
+        (if archived { root } else { @session_store.archived_root(root) })
+        .join("sessions")
+        .join(session)
+        .to_path(),
+      ) {
       raise EngineError(
-        if selected is Some(_) {
-          "no archived record for this conversation in the selected store"
+        if archived {
+          "this conversation is not archived"
         } else {
-          "no archived record for this conversation"
+          "this conversation is already archived"
         },
       )
     }
-    // Name the state the caller can act on. A record already sitting in an
-    // archived twin is not "missing" — the stale client just resyncs; and a
-    // conversation whose workspace detached needs that workspace re-attached,
-    // not a hunt for a lost record.
-    if @session_store.archived_root_of(session) is Some(_) {
-      raise EngineError("this conversation is already archived")
-    }
-    guard @workspaces.global_store_root() is Some(_) else {
-      raise EngineError("cannot determine a session root: HOME is unavailable")
-    }
     raise EngineError(
-      "no durable record for this conversation in the global store or any attached workspace",
+      if archived {
+        "no archived record for this conversation in the selected store"
+      } else {
+        "no durable record for this conversation in the selected store"
+      },
     )
   }
-  let source = if archived { @session_store.archived_root(root) } else { root }
   let members = @session_store.family_in(source, session)
-  if archived && selected is Some(_) {
+  if archived {
     for session_id in members {
       guard !@fsx.is_dir(root.join("sessions").join(session_id).to_path()) else {
         raise EngineError(
@@ -185,22 +171,8 @@ async fn EngineManager::claim_session_family_move(
       }
     }
   }
-  let (workspace, workspace_token) = if selected is Some(selected) {
-    (Some(selected.workspace), selected.workspace_token)
-  } else {
-    let mut workspace : @pathx.Absolute? = None
-    for project in @workspaces.registered() {
-      if @workspaces.store_root(project) == root {
-        workspace = Some(project)
-        break
-      }
-    }
-    let workspace_token = match workspace {
-      Some(project) => project.resource_path()
-      None => ""
-    }
-    (workspace, workspace_token)
-  }
+  let workspace = selected.workspace
+  let workspace_token = selected.workspace_token
   for session_id in members {
     let record_state = manager.claim_record_move(session_id)
     guards.push((session_id, record_state))
@@ -273,8 +245,8 @@ async fn SessionFamilyMove::remove_worktree_placements(
   self : SessionFamilyMove,
   on_committed? : (String, Array[WorktreeInfo]) -> Unit,
 ) -> Unit {
-  guard self.workspace is Some(workspace) else { return }
-  guard @worktree.drop_placements(workspace, self.members) is Some(remaining) else {
+  guard @worktree.drop_placements(self.workspace, self.members)
+    is Some(remaining) else {
     return
   }
   if on_committed is Some(on_committed) {
@@ -380,10 +352,13 @@ pub async fn archived_sessions(manager : EngineManager) -> SessionsReply {
 /// the conversation in a blocked `MissingTree` state until the user rebuilds
 /// it. Committed work survives on the branch. A dirty checkout refuses unless
 /// `force`, which is how the client's discard-confirmation dialog answers;
-/// `on_worktree_changed` broadcasts the checkout's disappearance.
+/// `on_worktree_changed` broadcasts the checkout's disappearance. `workspace`
+/// names the store holding the record, so a same-id record elsewhere is never
+/// the one that moves.
 pub async fn archive_session(
   manager : EngineManager,
   session : String,
+  workspace : String,
   on_committed : (String, String) -> Unit,
   force? : Bool = false,
   on_worktree_changed? : (String, Array[WorktreeInfo]) -> Unit,
@@ -395,6 +370,7 @@ pub async fn archive_session(
   let refusal = archive_session_commit(
     manager,
     session,
+    @session_store.StoreSelection::from_workspace(workspace),
     on_committed,
     force~,
     on_worktree_changed?,
@@ -412,11 +388,16 @@ pub async fn archive_session(
 async fn archive_session_commit(
   manager : EngineManager,
   session : String,
+  selected : @session_store.StoreSelection,
   on_committed : (String, String) -> Unit,
   force? : Bool = false,
   on_worktree_changed? : (String, Array[WorktreeInfo]) -> Unit,
 ) -> ArchiveNeedsForceReply? {
-  let family = manager.claim_session_family_move(session, archived=false)
+  let family = manager.claim_session_family_move(
+    session,
+    archived=false,
+    selected~,
+  )
   defer family.release()
   // The checkout goes with the conversation. A dirty refusal
   // lands here — after the idle engine already closed, which is harmless
@@ -439,19 +420,25 @@ async fn archive_session_commit(
 
 ///|
 /// Restore one archived conversation family into its live store and return
-/// the updated archived groups. The root record is looked up across every
-/// store's `archived` twin — the global root first, then each registered
-/// workspace — and descendant records beside it move in the same operation.
+/// the updated archived groups. `workspace` names the store whose `archived`
+/// twin holds the root record; descendant records beside it move in the same
+/// operation.
 pub async fn unarchive_session(
   manager : EngineManager,
   session : String,
+  workspace : String,
   on_committed : (String, String) -> Unit,
 ) -> SessionsReply {
   let session = session.trim().to_owned()
   guard !session.is_empty() && @session_store.safe_session_id(session) else {
     raise EngineError("invalid session id")
   }
-  unarchive_session_commit(manager, session, on_committed)
+  unarchive_session_commit(
+    manager,
+    session,
+    @session_store.StoreSelection::from_workspace(workspace),
+    on_committed,
+  )
   archived_sessions(manager)
 }
 
@@ -459,9 +446,14 @@ pub async fn unarchive_session(
 async fn unarchive_session_commit(
   manager : EngineManager,
   session : String,
+  selected : @session_store.StoreSelection,
   on_committed : (String, String) -> Unit,
 ) -> Unit {
-  let family = manager.claim_session_family_move(session, archived=true)
+  let family = manager.claim_session_family_move(
+    session,
+    archived=true,
+    selected~,
+  )
   defer family.release()
   move_session_family(family, to_archive=false, on_committed)
 }
@@ -504,7 +496,7 @@ async fn delete_archived_session_commit(
   on_committed : (String, String) -> Unit,
   on_worktree_changed? : (String, Array[WorktreeInfo]) -> Unit,
 ) -> Unit {
-  let selected = @session_store.ArchivedStore::for_workspace(workspace)
+  let selected = @session_store.StoreSelection::from_workspace(workspace)
   let family = manager.claim_session_family_move(
     session,
     archived=true,
@@ -666,16 +658,19 @@ async test "archive refuses a durable record while the pump is stopped" {
   defer restore_home_env(previous)
   let dir = @fs.tmpdir(prefix="openseek-archive-stopped-")
   @sys.set_env_var("HOME", dir + "/global")
-  ignore(attach_run_workspace(Path(dir)))
+  let workspace = attach_run_workspace(Path(dir))
   let store = dir + "/ws/.openseek"
   @fsx.ensure_dir(Path(store + "/sessions/s-stopped"))
   let manager = new_engine_manager("unused")
   let committed = Ref(false)
   let detail = try {
     ignore(
-      archive_session_commit(manager, "s-stopped", (_, _) => {
-        committed.val = true
-      }),
+      archive_session_commit(
+        manager,
+        "s-stopped",
+        @session_store.StoreSelection::from_workspace(workspace),
+        (_, _) => committed.val = true,
+      ),
     )
     "no error"
   } catch {
@@ -705,7 +700,7 @@ async test "archive publishes its move before a cancelled listing reply" {
   // conversation needs a real attached one; the env root now only locates the
   // registry that `attach_run_workspace` writes.
   @sys.set_env_var("HOME", root.join("global").to_string())
-  ignore(attach_run_workspace(root))
+  let workspace = attach_run_workspace(root)
   let store = root.join("ws/.openseek")
   @fsx.ensure_dir(store.join("sessions/s-commit"))
   @fs.write_file(
@@ -720,7 +715,9 @@ async test "archive publishes its move before a cancelled listing reply" {
   @async.with_task_group(group => {
     let request = group.spawn(() => {
       ignore(
-        archive_session(manager, "  s-commit  ", (_, _) => committed.val = true),
+        archive_session(manager, "  s-commit  ", workspace, (_, _) => {
+          committed.val = true
+        }),
       )
     })
     while !@fsx.exists(Path(marker)) {
@@ -752,7 +749,7 @@ async test "archive and restore move a subagent session family together" {
   defer restore_home_env(previous)
   let dir = @fs.tmpdir(prefix="openseek-archive-family-")
   @sys.set_env_var("HOME", dir + "/global")
-  ignore(attach_run_workspace(Path(dir)))
+  let workspace = attach_run_workspace(Path(dir))
   let store = dir + "/ws/.openseek"
   let live = store + "/sessions/"
   let archived = store + "/archived/sessions/"
@@ -768,7 +765,12 @@ async test "archive and restore move a subagent session family together" {
   manager.pump = Serving(sessions=Map([]))
   let archived_events : Array[String] = []
   assert_true(
-    archive_session_commit(manager, "chat", (id, _) => archived_events.push(id))
+    archive_session_commit(
+      manager,
+      "chat",
+      @session_store.StoreSelection::from_workspace(workspace),
+      (id, _) => archived_events.push(id),
+    )
     is None,
   )
   assert_eq(archived_events.length(), family.length())
@@ -783,7 +785,12 @@ async test "archive and restore move a subagent session family together" {
   assert_true(@fsx.is_dir(Path(live + "chat-sr-x")))
   assert_true(@fsx.is_dir(Path(live + "other")))
   let restored_events : Array[String] = []
-  unarchive_session_commit(manager, "chat", (id, _) => restored_events.push(id))
+  unarchive_session_commit(
+    manager,
+    "chat",
+    @session_store.StoreSelection::from_workspace(workspace),
+    (id, _) => restored_events.push(id),
+  )
   assert_eq(restored_events.length(), family.length())
   assert_eq(restored_events[0], "chat")
   for session_id in family {
@@ -974,7 +981,7 @@ async test "selected archived store is revalidated after detachment" {
   let manager = new_engine_manager("unused")
   manager.pump = Serving(sessions=Map([]))
   let workspace_token = workspace.resource_path()
-  let selected = @session_store.ArchivedStore::for_workspace(workspace_token)
+  let selected = @session_store.StoreSelection::from_workspace(workspace_token)
   ignore(detach_workspace(manager, workspace_token, fn(_) { () }))
   let detail = try {
     let family = manager.claim_session_family_move(
@@ -1005,7 +1012,7 @@ async test "a claimed child prevents a partial family archive" {
   defer restore_home_env(previous)
   let dir = @fs.tmpdir(prefix="openseek-archive-family-busy-")
   @sys.set_env_var("HOME", dir + "/global")
-  ignore(attach_run_workspace(Path(dir)))
+  let workspace = attach_run_workspace(Path(dir))
   let store = dir + "/ws/.openseek"
   @fsx.ensure_dir(Path(store + "/sessions/chat"))
   @fsx.ensure_dir(Path(store + "/sessions/chat-sr-1"))
@@ -1019,7 +1026,14 @@ async test "a claimed child prevents a partial family archive" {
   )
   defer child_claim.release(manager)
   let detail = try {
-    ignore(archive_session_commit(manager, "chat", (_, _) => ()))
+    ignore(
+      archive_session_commit(
+        manager,
+        "chat",
+        @session_store.StoreSelection::from_workspace(workspace),
+        (_, _) => (),
+      ),
+    )
     "no error"
   } catch {
     EngineError(detail) => detail

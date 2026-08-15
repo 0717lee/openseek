@@ -562,23 +562,10 @@ pub async fn load_session(
   // B's archive after a host restart.
   let record_guard = manager.begin_record_read(session)
   defer manager.end_record_read(session, record_guard)
-  // The client's workspace hint says which registered store to read. A
-  // detached workspace is rejected instead of silently probing another
-  // store, which could return a different history for the same session id.
-  let root = if payload.workspace is Some(hint) && !hint.is_blank() {
-    guard @pathx.Absolute::from_uri_path(hint) is Some(absolute) &&
-      @workspaces.registered_dir(absolute) is Some(workspace) else {
-      raise EngineError("\{hint} is not a registered workspace")
-    }
-    Some(@workspaces.store_root(workspace))
-  } else {
-    @session_store.root_of(session)
-  }
-  guard root is Some(root) else {
-    raise EngineError(
-      "no attached workspace holds this conversation; attach its project first",
-    )
-  }
+  // The client names which store to read. A detached workspace is rejected
+  // instead of silently probing another store, which could return a
+  // different history for the same session id.
+  let root = @session_store.StoreSelection::from_workspace(payload.workspace).root
   // A followed session (a live engine is writing to it) is read through its
   // follower actor: the snapshot then comes out of the same serial loop
   // that broadcasts `session.event` commits, so the two can never disagree
@@ -590,12 +577,22 @@ pub async fn load_session(
       watermark: Some(session_max_sequence(document)),
     }
   }
-  // A record that moved to an archived twin is a different answer than one
-  // that was never written: say so, rather than reporting this store's
-  // emptiness for a conversation that does have durable content elsewhere.
-  if !@fsx.is_dir(root.join("sessions").join(session).to_path()) &&
-    @session_store.archived_root_of(session) is Some(_) {
-    raise EngineError("this conversation is archived; unarchive it first")
+  // Name the missing-record states before spending an engine read that can
+  // only fail with a raw file error: a stale client asks for a conversation
+  // whose record moved to this store's archived twin, and the answer should
+  // say that, not ENOENT.
+  if !@fsx.is_dir(root.join("sessions").join(session).to_path()) {
+    if @fsx.is_dir(
+        @session_store.archived_root(root)
+        .join("sessions")
+        .join(session)
+        .to_path(),
+      ) {
+      raise EngineError("this conversation is archived; unarchive it first")
+    }
+    raise EngineError(
+      "no durable record for this conversation in the selected store",
+    )
   }
   let document = @session_record.read_document(root, session) catch {
     error if @async.is_being_cancelled() => raise error
@@ -638,34 +635,16 @@ pub async fn load_archived_session(
   }
   let record_guard = manager.begin_record_read(session)
   defer manager.end_record_read(session, record_guard)
-  // A workspace hint selects that registered store's archived twin. Without
-  // one, find the archived record across all attached stores and the global
-  // store, matching the placement rules of the archived index.
-  let root = if payload.workspace is Some(hint) && !hint.is_blank() {
-    guard @pathx.Absolute::from_uri_path(hint) is Some(absolute) &&
-      @workspaces.registered_dir(absolute) is Some(workspace) else {
-      raise EngineError("\{hint} is not a registered workspace")
-    }
-    Some(@session_store.archived_root(@workspaces.store_root(workspace)))
-  } else {
-    match @session_store.archived_root_of(session) {
-      Some(root) => Some(@session_store.archived_root(root))
-      None => None
-    }
-  }
-  guard root is Some(root) else {
-    if @session_store.live_root_of(session) is Some(_) {
+  // The client names the store whose archived twin to read.
+  let store = @session_store.StoreSelection::from_workspace(payload.workspace).root
+  let root = @session_store.archived_root(store)
+  if !@fsx.is_dir(root.join("sessions").join(session).to_path()) {
+    if @fsx.is_dir(store.join("sessions").join(session).to_path()) {
       raise EngineError("this conversation is not archived")
     }
     raise EngineError(
-      "no archived record for this conversation in the global store or any attached workspace",
+      "no archived record for this conversation in the selected store",
     )
-  }
-  if !@fsx.is_dir(root.join("sessions").join(session).to_path()) {
-    if @session_store.live_root_of(session) is Some(_) {
-      raise EngineError("this conversation is not archived")
-    }
-    raise EngineError("no archived record for this conversation")
   }
   let document = @session_record.read_document(root, session) catch {
     error if @async.is_being_cancelled() => raise error
@@ -1361,9 +1340,9 @@ async test "session load preserves a future item without hiding known events" {
   let dir = @fs.tmpdir(prefix="openseek-load-future-item-")
   @sys.set_env_var("HOME", dir + "/global")
   defer restore_home_env(previous)
-  // A hint-less load resolves the store from where the record actually
-  // lives, so the record goes in an attached workspace's own store.
-  ignore(attach_run_workspace(Path(dir)))
+  // The load names the store it reads, so the record goes in an attached
+  // workspace's own store and the request spells that workspace.
+  let workspace = attach_run_workspace(Path(dir))
   write_session_record(
     @pathx.Path(dir + "/ws/.openseek").resolve(),
     "s-future",
@@ -1377,7 +1356,7 @@ async test "session load preserves a future item without hiding known events" {
   // read in this process.
   let reply = load_session(new_engine_manager(dir + "/engine.sh"), {
     session: "s-future",
-    workspace: None,
+    workspace,
   })
   guard reply.session.events is Some(events) else {
     fail("expected session events")
@@ -1397,9 +1376,9 @@ async test "archived session load reads without restoring the record" {
   let dir = @fs.tmpdir(prefix="openseek-load-archived-")
   @sys.set_env_var("HOME", dir + "/global")
   defer restore_home_env(previous)
-  // A hint-less load resolves the store from where the record actually
-  // lives, so the record goes in an attached workspace's own store.
-  ignore(attach_run_workspace(Path(dir)))
+  // The load names the store it reads, so the record goes in an attached
+  // workspace's own store and the request spells that workspace.
+  let workspace = attach_run_workspace(Path(dir))
   let store = dir + "/ws/.openseek"
   write_session_record(
     @pathx.Path(store + "/archived").resolve(),
@@ -1412,7 +1391,7 @@ async test "archived session load reads without restoring the record" {
   let manager = new_engine_manager(dir + "/engine.sh")
   let reply = load_archived_session(manager, {
     session: "s-archived",
-    workspace: None,
+    workspace,
   })
   guard reply.session.events is Some(events) else {
     fail("expected archived session events")
@@ -1448,7 +1427,7 @@ async test "load rejects a detached workspace hint instead of probing global" {
     ignore(
       load_session(manager, {
         session: "s-detached",
-        workspace: Some(dir + "/detached-workspace"),
+        workspace: dir + "/detached-workspace",
       }),
     )
     "no error"

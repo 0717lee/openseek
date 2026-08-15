@@ -19,8 +19,6 @@ pub async fn family_in(@pathx.Absolute, String) -> Array[String]
 
 pub async fn known_roots() -> Array[@pathx.Absolute]
 
-pub async fn live_root_of(String) -> @pathx.Absolute?
-
 pub async fn root_of(String) -> @pathx.Absolute?
 
 pub fn safe_session_id(String) -> Bool
@@ -34,12 +32,12 @@ pub suberror StoreError {
 pub fn StoreError::to_repr(Self) -> @debug.Repr
 
 // Types and methods
-pub struct ArchivedStore {
+pub struct StoreSelection {
   root : @pathx.Absolute
   workspace : @pathx.Absolute
   workspace_token : String
 }
-pub async fn ArchivedStore::for_workspace(String) -> Self
+pub async fn StoreSelection::from_workspace(String) -> Self
 
 // Type aliases
 

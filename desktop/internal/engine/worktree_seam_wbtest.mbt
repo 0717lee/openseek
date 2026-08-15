@@ -533,7 +533,8 @@ async test "archive keeps worktree placement for explicit repair after unarchive
   )
   // A dirty checkout returns a structured confirmation state before anything
   // irreversible: the record stays live and the checkout stays on disk.
-  guard archive_session(manager, "s-arc", (_, _) => ()) is NeedsForce(refusal) else {
+  guard archive_session(manager, "s-arc", repo.resource_path(), (_, _) => ())
+    is NeedsForce(refusal) else {
     fail("dirty archive returned no force confirmation")
   }
   assert_eq(refusal.worktree, "wt-1")
@@ -549,10 +550,14 @@ async test "archive keeps worktree placement for explicit repair after unarchive
   // the branch, archived history, and placement row all survive. The retained
   // row broadcasts as missing before the conversation is archived.
   let changes : Array[(String, Array[WorktreeInfo])] = []
-  guard archive_session(manager, "s-arc", (_, _) => (), force=true, on_worktree_changed=(
-      workspace,
-      rows,
-    ) => changes.push((workspace, rows)))
+  guard archive_session(
+      manager,
+      "s-arc",
+      repo.resource_path(),
+      (_, _) => (),
+      force=true,
+      on_worktree_changed=(workspace, rows) => changes.push((workspace, rows)),
+    )
     is Archived(_) else {
     fail("forced archive did not commit")
   }
@@ -586,7 +591,9 @@ async test "archive keeps worktree placement for explicit repair after unarchive
   assert_false(retained.present)
   // Unarchive restores only the durable conversation. The retained placement
   // keeps every workspace surface blocked until the user explicitly repairs.
-  ignore(unarchive_session(manager, "s-arc", (_, _) => ()))
+  ignore(
+    unarchive_session(manager, "s-arc", repo.resource_path(), (_, _) => ()),
+  )
   assert_true(
     @fsx.is_dir(
       @workspaces.store_root(repo).join("sessions").join("s-arc").to_path(),
@@ -617,7 +624,10 @@ async test "archive keeps worktree placement for explicit repair after unarchive
   @fsx.ensure_dir(
     @workspaces.store_root(repo).join("sessions").join("s-arc2").to_path(),
   )
-  assert_true(archive_session(manager, "s-arc2", (_, _) => ()) is Archived(_))
+  assert_true(
+    archive_session(manager, "s-arc2", repo.resource_path(), (_, _) => ())
+    is Archived(_),
+  )
   assert_false(@fsx.exists(repo.join(".worktrees/wt-2").to_path()))
   guard @worktree.list(repo.to_string()).worktrees is [first, second] else {
     fail("both worktree placements must survive archive")
