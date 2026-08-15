@@ -1,0 +1,27 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/viz/testkit"
+
+import {
+  "bobzhang/openseek/agent_session",
+}
+
+// Values
+pub fn clean_sample_session() -> @agent_session.Session
+
+pub fn compact_second_event(@agent_session.Session) -> @agent_session.Session raise
+
+pub fn error_tool_session() -> @agent_session.Session
+
+pub fn events_jsonl(@agent_session.Session) -> String
+
+pub fn sample_session() -> @agent_session.Session
+
+pub fn subrun_sample_session() -> @agent_session.Session
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits

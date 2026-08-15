@@ -1,0 +1,17 @@
+// The viewer's rendering assertions. Rabbita 0.15.1 renders to a string only
+// on the native backend (`App::render`), while `viz` itself ships to the
+// browser, so these live in their own native-only package: the rabbita and
+// async imports they need would otherwise be dead weight in the js build of
+// `viz`. The package holds nothing but `render_test.mbt`.
+import {
+  "bobzhang/openseek/agent_session",
+  "bobzhang/openseek/viz",
+  "bobzhang/openseek/viz/testkit",
+  "moonbit-community/rabbita",
+  "moonbit-community/rabbita/html",
+  "moonbitlang/async",
+} for "test"
+
+warnings = "+unnecessary_annotation"
+
+supported_targets = "native"

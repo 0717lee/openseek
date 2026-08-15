@@ -1,0 +1,11 @@
+// Session fixtures shared by the viewer's two test packages: the parse and
+// projection assertions that run on both backends (`viz`), and the rendering
+// assertions that can only run on native (`viz/render_test`).
+import {
+  "bobzhang/openseek/agent_session",
+  "bobzhang/openseek/viz",
+}
+
+warnings = "+unnecessary_annotation"
+
+supported_targets = "js+native"

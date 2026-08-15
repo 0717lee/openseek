@@ -8,6 +8,13 @@ import {
   "moonbitlang/core/json",
 }
 
+import {
+  "bobzhang/openseek/viz/testkit",
+} for "test"
+
 warnings = "+unnecessary_annotation"
 
-supported_targets = "js"
+// The viewer ships to the browser; native is here so `viz/render_test` can
+// render these views to strings through rabbita's server-side renderer.
+
+supported_targets = "js+native"
