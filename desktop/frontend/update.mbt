@@ -92,6 +92,32 @@ fn focus_channel(
 }
 
 ///|
+/// Where `session.list` says this conversation's record lives.
+///
+/// The list is the authority on placement only while it is unambiguous. A
+/// conversation materialized from a broadcast before the list arrived carries
+/// a provisional store, and the single row bearing its id names the real one.
+/// But the list really can carry two rows for one id — Scratch and a project
+/// — and then the conversation's own binding is the better answer: it came
+/// from the row the user clicked or from the store root a commit named,
+/// whereas picking a row by id alone would rebind the conversation to a
+/// record it never opened.
+fn listed_project(
+  items : Array[@transcript.SessionListItem],
+  conv : Conversation,
+) -> @common.Uri {
+  let current = conv.workspace.project()
+  let matches = items.filter(item => item.id == conv.session_id)
+  if matches.iter().any(item => item.workspace == current) {
+    return current
+  }
+  match matches {
+    [only] => only.workspace
+    _ => current
+  }
+}
+
+///|
 /// The OpenSession body against an explicit channel — the caller has
 /// already moved focus there, so `channel == model.focused` throughout. `key`
 /// names the durable record the clicked row stands for; an open conversation
@@ -5317,16 +5343,10 @@ fn update_device_msg(
       // the default store.
       let conversations = model.conversations.map(conv => {
         if conv.device == channel {
-          let mut project = conv.project()
-          for item in items {
-            if item.id == conv.session_id {
-              project = item.workspace
-            }
-          }
           {
             ..conv,
             workspace: dev.conversation_workspace(
-              project,
+              listed_project(items, conv),
               conv.session_id,
               conv.workspace,
             ),
@@ -5335,11 +5355,18 @@ fn update_device_msg(
           conv
         }
       })
+      // The active conversation's own placement is the store the sidebar
+      // should follow. Only when the page holds no conversation for the
+      // active id does the listing have to answer, under the same rule.
       let mut active_project = dev.active_project
       if channel == model.focused {
-        for item in items {
-          if item.id == model.active_session {
-            active_project = Some(item.workspace)
+        if model.find_conversation(channel, model.active_session)
+          is Some(active) {
+          active_project = Some(listed_project(items, active))
+        } else {
+          let matches = items.filter(item => item.id == model.active_session)
+          if matches is [only] {
+            active_project = Some(only.workspace)
           }
         }
       }
@@ -5984,9 +6011,12 @@ fn update_device_msg(
             sync: Synced,
           })
           if generation is Some(generation) {
+            // `conv` above is already the conversation bound to this exact
+            // record, so being the active id is the whole question — asking
+            // the listing again would answer for whichever store happens to
+            // list this id first.
             let foreground = channel == next.focused &&
-              next.active_session == key.session &&
-              next.session_project(channel, key.session) == Some(key.workspace)
+              next.active_session == key.session
             let next = if foreground {
               {
                 ..next,
@@ -9703,6 +9733,84 @@ test "same-id session loads are fenced by channel owner" {
     fail("remote conversation disappeared")
   }
   inspect(loaded.messages[0].content, content="remote loaded")
+}
+
+///|
+test "a session list holding one id twice never rebinds an open conversation" {
+  let dispatch = test_dispatch()
+  let first = @interop.ChannelId::Local.test_project()
+  let project = @interop.ChannelId::Local.test_resource("/work/alpha")
+  // The first project's record is the one on screen. The list then arrives
+  // carrying both stores' rows for this id — the second project last, as
+  // `list_sessions` orders it (one group per registered workspace).
+  let model = test_model()
+    .replace_conversation({
+      ..test_conversation(),
+      session_id: "desktop-shared",
+      workspace: Project(root=first),
+      messages: [
+        { kind: User, content: "first copy", ts: None, sequence: None },
+      ],
+    })
+    .with_dev(dev => { ..dev, projects: [first, project] })
+  let model = {
+    ..model.activate(@interop.ChannelId::Local, "desktop-shared", first),
+    screen: Chat,
+  }
+  let (_, listed) = update(
+    dispatch,
+    sessions_loaded([
+      {
+        id: "desktop-shared",
+        title: Some("first copy"),
+        workspace: first,
+        workspace_name: "work",
+        updated_at_ms: None,
+      },
+      {
+        id: "desktop-shared",
+        title: Some("project copy"),
+        workspace: project,
+        workspace_name: "alpha",
+        updated_at_ms: None,
+      },
+    ]),
+    model,
+  )
+  guard listed.find_conversation(@interop.ChannelId::Local, "desktop-shared")
+    is Some(conv) else {
+    fail("the open conversation disappeared")
+  }
+  // It stays bound to the first project. Adopting the last same-id row would
+  // move a transcript the user opened there into the other project's group.
+  assert_eq(conv.workspace, Project(root=first))
+  assert_eq(listed.dev().active_project, Some(first))
+  // A conversation whose store the page does NOT yet know still learns it
+  // from an unambiguous listing — that is what this reconcile is for.
+  let (_, provisional) = update(
+    dispatch,
+    sessions_loaded([
+      {
+        id: "desktop-only-there",
+        title: Some("project copy"),
+        workspace: project,
+        workspace_name: "alpha",
+        updated_at_ms: None,
+      },
+    ]),
+    listed.replace_conversation({
+      ..test_conversation(),
+      session_id: "desktop-only-there",
+    }),
+  )
+  guard provisional.find_conversation(
+      @interop.ChannelId::Local,
+      "desktop-only-there",
+    )
+    is Some(adopted) else {
+    fail("the provisional conversation disappeared")
+  }
+  assert_eq(adopted.workspace, Project(root=project))
 }
 
 ///|
