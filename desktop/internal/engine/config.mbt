@@ -163,6 +163,33 @@ async fn session_command_config(
 }
 
 ///|
+/// The store a session command addresses: the workspace it names while that
+/// workspace is registered, else the one whose store already holds the
+/// record. Every op that spawns an engine resolves it here, and so does every
+/// op that must decide whether a live engine is writing the record it names —
+/// the two answers have to agree.
+async fn requested_store(
+  session : String,
+  workspace? : String,
+) -> @pathx.Absolute {
+  if workspace is Some(path) {
+    guard @pathx.Absolute::from_uri_path(path) is Some(absolute) else {
+      raise EngineError("workspace is not a supported absolute resource path")
+    }
+    match @workspaces.registered_dir(absolute) {
+      Some(dir) => @workspaces.store_root(dir)
+      None => raise EngineError("\{path} is not a registered workspace")
+    }
+  } else if @session_store.root_of(session) is Some(root) {
+    root
+  } else {
+    raise EngineError(
+      "this conversation has no workspace; attach a project first",
+    )
+  }
+}
+
+///|
 /// The validated configuration shared by every op that can spawn a serve
 /// engine. The endpoint (provider, key, URL) comes from the host-owned
 /// settings store, never from the request — a client carries no credentials
@@ -180,27 +207,18 @@ async fn serve_config(
   let (settings, _) = manager.settings_snapshot()
   let endpoint = resolved_endpoint(settings)
   // A workspace run happens in the project directory itself, with the
-  // session's durable record in the in-project store. Only registered
-  // workspaces qualify — the registry, not the payload, decides which
-  // directories a run may work in.
-  let hinted : @pathx.Absolute? = if workspace is Some(path) {
+  // session's durable record in that project's store. The hint names one
+  // while it is registered; a hint-less client resuming an existing
+  // conversation recovers the workspace that already owns the record, so one
+  // id can never fork into two histories.
+  let dir = if workspace is Some(path) {
     guard @pathx.Absolute::from_uri_path(path) is Some(absolute) else {
       raise EngineError("workspace is not a supported absolute resource path")
     }
     match @workspaces.registered_dir(absolute) {
-      Some(dir) => Some(dir)
+      Some(dir) => dir
       None => raise EngineError("\{path} is not a registered workspace")
     }
-  } else {
-    None
-  }
-  // Every run belongs to a workspace. The hint names one; a hint-less client
-  // resuming an existing conversation recovers the workspace that already
-  // owns the durable record, so one id can never fork into two histories.
-  // With neither, there is nowhere to run — the client must attach a project
-  // rather than have the host invent a directory.
-  let dir = if hinted is Some(dir) {
-    dir
   } else if @session_store.workspace_of(session) is Some(dir) {
     dir
   } else {

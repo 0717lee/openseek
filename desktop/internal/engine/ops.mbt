@@ -177,6 +177,37 @@ async fn ensure_run_cwd(config : RunConfig) -> Unit {
 }
 
 ///|
+/// The live engine a command addressed to `store` may be written to, if any.
+///
+/// Session slots are keyed by id alone — the host runs at most one engine per
+/// id — so the engine holding this slot may be the one writing a same-id
+/// record in *another* store. Handing it the command would mutate that record
+/// and route its events into this conversation, so a mismatched engine is not
+/// returned: the caller spawns its own, which replaces it. Taking the slot
+/// from an idle conversation costs it only a warm process (the next prompt
+/// respawns, exactly as after a fingerprint change), but taking it from one
+/// mid-turn would destroy work this request never named, so that is refused.
+fn engine_writing_store(
+  slot : SessionSlot,
+  store : @pathx.Absolute,
+) -> ServeEngine? raise EngineError {
+  guard slot.live() is Some(live) else { return None }
+  if live.writes_store(store) {
+    return Some(live)
+  }
+  guard live.phase is Idle(..) else {
+    let elsewhere = match live.session_root {
+      Some(root) => root.to_string()
+      None => "another store"
+    }
+    raise EngineError(
+      "a conversation with this id is still active in \{elsewhere}; wait for it to finish",
+    )
+  }
+  None
+}
+
+///|
 /// Ask the pump to spawn (or replace) this conversation's serve engine and
 /// wait for its ack; the spawn failure, if any, is re-raised here.
 async fn request_spawn(
@@ -227,6 +258,11 @@ pub async fn compact_run(
   let record_guard = manager.begin_record_op(session)
   defer manager.end_record_op(session, record_guard)
   @session_store.ensure_not_archived(session)
+  // Which record this compaction rewrites, resolved before the slot is read:
+  // the engine on that slot counts as this conversation's only if it writes
+  // the same store. Resolved here rather than from `compact_config` because a
+  // reused engine never builds one, and the store must be known either way.
+  let store = requested_store(session, workspace?=payload.workspace)
   let sessions = manager.serving()
   let slot = slot_for(sessions, session)
   // Claim before anything else — even with a live engine. A start between
@@ -239,12 +275,13 @@ pub async fn compact_run(
   placement_locked = false
   manager.workspace_lifecycle_lock.release()
   // A changed model, reasoning choice, or endpoint replaces an idle engine
-  // before the compaction. During a turn the compact command must stay behind
-  // that turn on its current process; do not resolve new endpoint settings in
-  // that active path, because they do not configure the process accepting the
+  // before the compaction, and so does an engine writing another store's
+  // same-id record. During a turn the compact command must stay behind that
+  // turn on its current process; do not resolve new endpoint settings in that
+  // active path, because they do not configure the process accepting the
   // queued command. The next start applies the new fingerprint after both
   // settle.
-  let replacement = match slot.live() {
+  let replacement = match engine_writing_store(slot, store) {
     None => Some(compact_config(manager, payload))
     Some(live) =>
       match live.phase {
@@ -343,6 +380,9 @@ pub async fn goal_run(
   let record_guard = manager.begin_record_op(session)
   defer manager.end_record_op(session, record_guard)
   @session_store.ensure_not_archived(session)
+  // The goal is durable state of one record, so the store is resolved before
+  // the slot is read — see `compact_run`.
+  let store = requested_store(session, workspace?=payload.workspace)
   let sessions = manager.serving()
   let slot = slot_for(sessions, session)
   // Claim before looking at the engine, exactly as compact_run does: this op
@@ -352,12 +392,13 @@ pub async fn goal_run(
   defer claim.release(manager)
   placement_locked = false
   manager.workspace_lifecycle_lock.release()
-  // A goal sent while idle observes the selected engine settings immediately.
-  // Mid-turn and queued-compaction goals stay on the current process because
-  // replacing it would destroy the operation they are ordered behind. New
+  // A goal sent while idle observes the selected engine settings immediately,
+  // and replaces an engine writing another store's same-id record. Mid-turn
+  // and queued-compaction goals stay on the current process because replacing
+  // it would destroy the operation they are ordered behind. New
   // endpoint settings are therefore not resolved in that active path; the
   // next idle start applies their fingerprint.
-  let replacement = match slot.live() {
+  let replacement = match engine_writing_store(slot, store) {
     None => Some(goal_config(manager, payload))
     Some(live) =>
       match live.phase {

@@ -5,16 +5,19 @@
 //
 //   * the desktop never *adds* to that population — a start opens a record in
 //     the store it named or continues one already there, never a second twin;
-//   * lifecycle operations that address one store ignore live engines and
-//     followers serving another, even though both are filed under the id.
+//   * an operation that addresses one store — moving its record, compacting
+//     it, setting its goal — ignores live engines and followers serving
+//     another, even though both are filed under the id.
 //
 // Both are exercised against a real pump: the refusals under test are the
 // ones a live host issues, and a start that slips past them must show up as a
 // spawned engine rather than as a stalled request.
 
 ///|
-/// A host whose engine binary accepts a prompt and then holds the turn open,
-/// so a conversation can be left running while another store is acted on.
+/// A host whose engine binary accepts every command and reports nothing, so a
+/// conversation can be left mid-turn while another store is acted on. It reads
+/// until stdin closes, so an engine this host replaces exits on EOF instead of
+/// waiting out the graceful-close timeout.
 #cfg(not(platform="windows"))
 async fn store_identity_host(prefix : String) -> (@pathx.Absolute, EngineActor) {
   let root = worktree_test_root(prefix)
@@ -31,7 +34,7 @@ async fn store_identity_host(prefix : String) -> (@pathx.Absolute, EngineActor) 
   )
   @fs.write_file(
     engine.to_string(),
-    "#!/bin/sh\nif [ \"$1\" = \"sessions\" ]; then printf '%s' '{\"events\":[]}' ; exit 0; fi\nwhile IFS= read -r line; do sleep 30; done\n",
+    "#!/bin/sh\nif [ \"$1\" = \"sessions\" ]; then printf '%s' '{\"events\":[]}' ; exit 0; fi\nwhile IFS= read -r line; do :; done\n",
     create_mode=CreateOrTruncate,
   )
   assert_eq(@process.run("chmod", ["+x", engine.to_string()]), 0)
@@ -128,6 +131,112 @@ async test "a start cannot open a second record for an id another store owns" {
       workspace: Some(owner.to_string()),
     })
     assert_eq(owned.status, "accepted")
+    group.return_immediately(())
+  })
+  @fs.rmdir(root.to_string(), recursive=true)
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "a command addressed to one store never reaches a same-id twin's engine" {
+  ambient_env_test_lock.acquire()
+  defer ambient_env_test_lock.release()
+  let previous = @sys.get_env_var("HOME")
+  let (root, actor) = store_identity_host("openseek-store-command-")
+  defer restore_home_env(previous)
+  let manager = actor.manager()
+  let owner = root.join("owner")
+  let other = root.join("other")
+  @fsx.ensure_dir(owner.to_path())
+  @fsx.ensure_dir(other.to_path())
+  let sink = EventSink(fn(_) {  })
+  @async.with_task_group(group => {
+    group.spawn_bg(no_wait=true, allow_failure=true, () => {
+      actor.run(sink, fn(_) {  })
+    })
+    while manager.pump is Stopped {
+      @async.sleep(1)
+    }
+    ignore(@workspaces.add(owner.to_string(), fn(_) {  }))
+    ignore(@workspaces.add(other.to_string(), fn(_) {  }))
+    // Both projects hold a record under each id, so nothing below can be
+    // answered by which store happens to own the id.
+    for workspace in [owner, other] {
+      for session in ["s-busy", "s-idle"] {
+        @fsx.ensure_dir(
+          @workspaces.store_root(workspace)
+          .join("sessions")
+          .join(session)
+          .to_path(),
+        )
+      }
+    }
+    // `owner`'s conversation holds an open turn. Compacting `other`'s record
+    // would be written to that engine — rewriting the wrong history and
+    // reporting its progress into this conversation — so it is refused by
+    // name rather than silently steered or silently replaced.
+    let started = start_run(sink, manager, {
+      task: "keep running",
+      submission_id: None,
+      model: None,
+      thinking: None,
+      max_steps: None,
+      session: "s-busy",
+      workspace: Some(owner.to_string()),
+    })
+    assert_eq(started.status, "accepted")
+    let detail = try {
+      ignore(
+        compact_run(manager, {
+          session: "s-busy",
+          model: None,
+          thinking: None,
+          max_steps: None,
+          workspace: Some(other.to_string()),
+        }),
+      )
+      "no error"
+    } catch {
+      EngineError(detail) => detail
+      error if @async.is_being_cancelled() => raise error
+      error => "\{error}"
+    }
+    assert_true(detail.contains(@workspaces.store_root(owner).to_string()))
+    guard manager.pump is Serving(sessions~) else { fail("pump stopped") }
+    guard sessions.get("s-busy") is Some(busy) && busy.engine is Some(live) else {
+      fail("an unrelated compaction replaced the running engine")
+    }
+    assert_true(live.phase is Running(..))
+    assert_true(live.writes_store(@workspaces.store_root(owner)))
+    // An idle twin holds nothing but a warm process, so the goal takes the
+    // slot instead of being refused — and lands on an engine writing the
+    // store it named.
+    ignore(
+      goal_run(manager, {
+        session: "s-idle",
+        text: Some("owner goal"),
+        auto: None,
+        model: None,
+        thinking: None,
+        max_steps: None,
+        workspace: Some(owner.to_string()),
+      }),
+    )
+    ignore(
+      goal_run(manager, {
+        session: "s-idle",
+        text: Some("other goal"),
+        auto: None,
+        model: None,
+        thinking: None,
+        max_steps: None,
+        workspace: Some(other.to_string()),
+      }),
+    )
+    guard sessions.get("s-idle") is Some(idle) && idle.engine is Some(rebound) else {
+      fail("the goal left no engine on the slot")
+    }
+    assert_true(rebound.writes_store(@workspaces.store_root(other)))
     group.return_immediately(())
   })
   @fs.rmdir(root.to_string(), recursive=true)
