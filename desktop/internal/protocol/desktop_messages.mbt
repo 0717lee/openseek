@@ -381,6 +381,11 @@ pub(all) struct ConnectedPayload {
   // cannot announce readiness without it: every Scratch conversation derives
   // its concrete filesystem and language-server root from this value.
   scratch_root : String
+  // The global durable session store root, same encoding. Naming it on
+  // connect lets clients classify any broadcast store root exactly — equal
+  // to this value means the Scratch store, anything else a project store —
+  // even while the projects registry reply is still in flight.
+  session_root : String
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
@@ -461,6 +466,10 @@ pub(all) struct SessionCommitPayload {
   session : String
   sequence : Int
   event : SessionEvent
+  // The durable store root this commit was read from, as a frontend resource
+  // path. Session ids are not globally unique across stores, so the
+  // broadcast names the store half of the identity beside the id.
+  session_root : String
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|

@@ -171,17 +171,18 @@ fn device_msg(
 ) -> DeviceMsg? {
   match notification {
     AgentConnected(payload) => {
-      guard @resource.of_path(channel, payload.scratch_root) is Some(root) else {
+      guard @resource.of_path(channel, payload.scratch_root) is Some(root) &&
+        @resource.of_path(channel, payload.session_root) is Some(session_root) else {
         return None
       }
-      Some(BridgeReady(scratch_root=root))
+      Some(BridgeReady(scratch_root=root, session_root~))
     }
     AgentStarted(payload) => started_msg(channel, payload)
     AgentEvent(payload) => engine_msg(payload)
     AgentError(payload) => error_msg(payload)
     AgentFinished(payload) => finished_msg(payload)
     AgentDurable(payload) => durable_boundary_msg(payload)
-    SessionEvent(payload) => session_event_msg(payload)
+    SessionEvent(payload) => session_event_msg(channel, payload)
     SubrunProgress(payload) =>
       Some(
         SubrunProgressed(
@@ -854,13 +855,22 @@ fn RecoveredSettlement::from_reply(
 /// the outer notification for routing; the typed item enum is what the
 /// transcript projector consumes, with raw unknown items retained for newer
 /// Desktop versions.
-fn session_event_msg(payload : @protocol.SessionCommitPayload) -> DeviceMsg? {
+fn session_event_msg(
+  channel : @interop.ChannelId,
+  payload : @protocol.SessionCommitPayload,
+) -> DeviceMsg? {
+  // The store root is half of the commit's durable identity; an event whose
+  // root does not bind to the channel is malformed and dropped.
+  guard @resource.of_path(channel, payload.session_root) is Some(session_root) else {
+    return None
+  }
   Some(
     SessionCommitted(
       session=payload.session,
       sequence=payload.sequence,
       ts=payload.event.ts,
       item=payload.event.item,
+      session_root~,
     ),
   )
 }

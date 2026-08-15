@@ -4028,7 +4028,7 @@ fn update_device_msg(
         // device is refreshed when focus moves to it.
         (@cmd.none, model)
       }
-    BridgeReady(scratch_root~) => {
+    BridgeReady(scratch_root~, session_root~) => {
       let connection_generation = dev.connection_generation + 1
       let sessions_request_generation = dev.sessions_request_generation + 1
       let archived_request_generation = dev.archived_request_generation + 1
@@ -4108,7 +4108,7 @@ fn update_device_msg(
       })
       let model = model.replace_device({
         ..dev,
-        bridge: Connected(scratch_root~),
+        bridge: Connected(scratch_root~, session_root~),
         reconnect_failures: 0,
         connection_generation,
         sessions_request_generation,
@@ -5218,14 +5218,21 @@ fn update_device_msg(
         false,
         "failed to refresh session \{session}",
       )
-    SessionCommitted(session~, sequence~, ts~, item~) => {
+    SessionCommitted(session~, sequence~, ts~, item~, session_root~) => {
+      // The commit names its own store — the exact durable identity rather
+      // than a guess, classified against the global root the host announced
+      // on connect. Commits do not precede `agent.connected` (readiness
+      // precedes every forwarded notification), but if one ever did, the
+      // listing/live guess is safer than misreading the global store.
+      let commit_project = match dev.bridge {
+        Connected(session_root=global, ..) =>
+          dev.placement_for_store_root(global~, session_root)
+        _ => model.session_project(channel, session)
+      }
       // Archiving removes live client state after the hub's ordered final
       // commit. A stale/replayed commit seen after that local fact must not
       // resurrect the archived record as a live hidden conversation.
-      let key : ArchiveRecordKey = {
-        session,
-        workspace: model.session_project(channel, session),
-      }
+      let key : ArchiveRecordKey = { session, workspace: commit_project }
       let archived = match dev.archive_override(key) {
         Some(ArchiveStored | ArchiveDeleted) => true
         Some(ArchiveLive) => false
@@ -5234,14 +5241,23 @@ fn update_device_msg(
       if archived {
         return (@cmd.none, model)
       }
+      // The page holds at most one conversation per (channel, id), so the
+      // one this id finds may stand for another store's record — and that
+      // record's watermark says nothing about this store's commits. Only a
+      // conversation placed in the committed store can have seen them.
       let first_commit_unseen = match
         model.find_conversation(channel, session) {
-        Some(conv) => !conv.has_seen_durable_sequence(sequence)
-        None => true
+        Some(conv) if conv.workspace.project() == commit_project =>
+          !conv.has_seen_durable_sequence(sequence)
+        _ => true
       }
-      let refresh_sessions = sequence == 1 &&
-        !dev.sessions.iter().any(item => item.id == session) &&
-        first_commit_unseen
+      // The listing is store-qualified, so ask whether THIS record is listed:
+      // a same-id row from another store is a different durable record and
+      // must not suppress the reload that gives this one its sidebar row.
+      let listed = dev.sessions
+        .iter()
+        .any(item => item.id == session && item.workspace == commit_project)
+      let refresh_sessions = sequence == 1 && !listed && first_commit_unseen
       // A short foreign run can commit and finish before either the session
       // list or run resync reaches this page. Materialize hidden client state
       // from the commit itself: sequence 1 projects immediately; a later
@@ -5251,7 +5267,7 @@ fn update_device_msg(
           empty_conversation(
             channel,
             session,
-            project?=model.session_project(channel, session),
+            project?=commit_project,
             model=model
               .remembered_model(channel, session)
               .unwrap_or(model.default_model),
@@ -5442,6 +5458,17 @@ fn update_device_msg(
       session_root~,
       submission_id~
     ) => {
+      // This run's durable store, classified exactly the way a commit's root
+      // is: Started precedes the first commit, so on a fresh connection this
+      // is the placement the conversation is born with — and the projects
+      // registry it would otherwise be resolved against may still be in
+      // flight. A rootless legacy event has no store to classify.
+      let started_project = if dev.bridge is Connected(session_root=global, ..) &&
+        session_root is Some(root) {
+        dev.placement_for_store_root(global~, root)
+      } else {
+        dev.project_for_session_root(session_root)
+      }
       // A delete tombstone outranks unversioned list replies and replayed
       // commits, but it must not hide a later same-id incarnation forever.
       // Started precedes every commit of an accepted run and carries the
@@ -5449,10 +5476,7 @@ fn update_device_msg(
       // that can safely retire the tombstone. Rootless legacy events cannot
       // distinguish same-id records in different stores and leave it intact.
       let model = if session_root is Some(_) {
-        let key : ArchiveRecordKey = {
-          session,
-          workspace: dev.project_for_session_root(session_root),
-        }
+        let key : ArchiveRecordKey = { session, workspace: started_project }
         if dev.archive_override(key) is Some(ArchiveDeleted) {
           model.with_archive_override(channel, key, ArchiveLive)
         } else {
@@ -5488,7 +5512,7 @@ fn update_device_msg(
               .unwrap_or(selected_model),
           )
       }
-      let existing = match dev.project_for_session_root(session_root) {
+      let existing = match started_project {
         Some(project) =>
           {
             ..existing,
@@ -5498,6 +5522,10 @@ fn update_device_msg(
               existing.workspace,
             ),
           }
+        // Scratch is not asserted onto a conversation the page already
+        // places in a project: the run's own store is authoritative for
+        // where the record lives, but demoting a placement the user chose
+        // belongs to the session list's reconcile, not to one start.
         None => existing
       }
       let owned = submission_id is Some(id) &&
@@ -6620,16 +6648,32 @@ fn @interop.ChannelId::test_resource(
 }
 
 ///|
-/// Test-only connected state with the same required scratch root carried by a
-/// real `agent.connected` notification.
+/// Test-only connected state with the same required roots carried by a real
+/// `agent.connected` notification.
 fn @interop.ChannelId::test_connected(self : @interop.ChannelId) -> BridgeState {
-  // This literal is valid by construction; retain a total test fixture so
+  // These literals are valid by construction; retain a total test fixture so
   // every test using `test_model` does not acquire a synthetic error effect.
   let root = match @resource.of_path(self, "/scratch") {
     Some(root) => root
     None => @common.Uri::file("/scratch")
   }
-  Connected(scratch_root=root)
+  let session_root = match @resource.of_path(self, "/sessions/global") {
+    Some(root) => root
+    None => @common.Uri::file("/sessions/global")
+  }
+  Connected(scratch_root=root, session_root~)
+}
+
+///|
+/// The global durable store root `test_connected` announces — the root a
+/// test commit carries when it means the Scratch store.
+fn @interop.ChannelId::test_store_root(
+  self : @interop.ChannelId,
+) -> @common.Uri {
+  guard self.test_connected() is Connected(session_root~, ..) else {
+    return @common.Uri::file("/sessions/global")
+  }
+  session_root
 }
 
 ///|
@@ -6637,12 +6681,15 @@ fn @interop.ChannelId::test_connected(self : @interop.ChannelId) -> BridgeState 
 fn @interop.ChannelId::test_bridge_ready(
   self : @interop.ChannelId,
 ) -> DeviceMsg {
-  guard self.test_connected() is Connected(scratch_root~) else {
+  guard self.test_connected() is Connected(scratch_root~, session_root~) else {
     // `test_connected` has only one result, but spelling the match keeps this
     // constructor synchronized if BridgeState gains another test fixture.
-    return BridgeReady(scratch_root=@common.Uri::file("/scratch"))
+    return BridgeReady(
+      scratch_root=@common.Uri::file("/scratch"),
+      session_root=@common.Uri::file("/sessions/global"),
+    )
   }
-  BridgeReady(scratch_root~)
+  BridgeReady(scratch_root~, session_root~)
 }
 
 ///|
@@ -7524,6 +7571,7 @@ test "session list assigns a commit-first conversation to its durable workspace"
       sequence=1,
       ts=None,
       item=@protocol.User({ content: "arrived before the list" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     test_model(),
   )
@@ -7557,6 +7605,184 @@ test "session list assigns a commit-first conversation to its durable workspace"
   assert_eq(reconciled.workspace, Project(root=workspace))
   assert_eq(listed.dev().active_project, Some(workspace))
   assert_true(encoded_start_workspace(reconciled) is Some("/work/foreign"))
+}
+
+///|
+test "a rooted commit places its conversation without waiting for the list" {
+  let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/work/foreign")
+  let store = @interop.ChannelId::Local.test_resource("/work/foreign/.openseek")
+  let model = test_model().with_dev(dev => { ..dev, projects: [workspace] })
+  let (_, committed) = update_dev(
+    dispatch,
+    SessionCommitted(
+      session="desktop-foreign",
+      sequence=1,
+      ts=None,
+      item=@protocol.User({ content: "arrived before the list" }),
+      session_root=store,
+    ),
+    model,
+  )
+  guard committed.find_conversation(
+      @interop.ChannelId::Local,
+      "desktop-foreign",
+    )
+    is Some(placed) else {
+    fail("rooted commit did not materialize its conversation")
+  }
+  assert_eq(placed.workspace, Project(root=workspace))
+  // The global root the host announced on connect is the Scratch store,
+  // matched exactly rather than guessed from a missing listing.
+  let (_, scratch) = update_dev(
+    dispatch,
+    SessionCommitted(
+      session="desktop-global",
+      sequence=1,
+      ts=None,
+      item=@protocol.User({ content: "hi" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
+    ),
+    committed,
+  )
+  guard scratch.find_conversation(@interop.ChannelId::Local, "desktop-global")
+    is Some(global) else {
+    fail("rooted global commit did not materialize its conversation")
+  }
+  assert_true(global.workspace is Scratch)
+  // The projects registry reply may still be in flight on a fresh
+  // connection: a store outside the mirrored registry is still a project
+  // store, and its layout (`<project>/.openseek`) names the project.
+  let (_, unseen) = update_dev(
+    dispatch,
+    SessionCommitted(
+      session="desktop-unseen",
+      sequence=1,
+      ts=None,
+      item=@protocol.User({ content: "hi" }),
+      session_root=@interop.ChannelId::Local.test_resource(
+        "/work/unseen/.openseek",
+      ),
+    ),
+    scratch,
+  )
+  guard unseen.find_conversation(@interop.ChannelId::Local, "desktop-unseen")
+    is Some(pending) else {
+    fail("unregistered-store commit did not materialize its conversation")
+  }
+  assert_eq(
+    pending.workspace,
+    Project(root=@interop.ChannelId::Local.test_resource("/work/unseen")),
+  )
+}
+
+///|
+/// A same-id row from another store is a different durable record: it must
+/// not suppress the list reload that gives the committed record its own row.
+test "a commit for an unlisted store refreshes past a same-id row" {
+  let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/work/foreign")
+  let store = @interop.ChannelId::Local.test_resource("/work/foreign/.openseek")
+  let model = test_model().with_dev(dev => {
+    ..dev,
+    projects: [workspace],
+    sessions: [
+      {
+        id: "desktop-shared",
+        title: Some("scratch copy"),
+        workspace: None,
+        workspace_name: "",
+      },
+      {
+        id: "desktop-scratch-only",
+        title: Some("scratch chat"),
+        workspace: None,
+        workspace_name: "",
+      },
+    ],
+  })
+  let (_, committed) = update_dev(
+    dispatch,
+    SessionCommitted(
+      session="desktop-shared",
+      sequence=1,
+      ts=None,
+      item=@protocol.User({ content: "hi" }),
+      session_root=store,
+    ),
+    model,
+  )
+  assert_eq(committed.dev().sessions_request_generation, 1)
+  // The store that is already listed asks for nothing: this exact record has
+  // its row, and the conversation is new to the page either way.
+  let (_, same_store) = update_dev(
+    dispatch,
+    SessionCommitted(
+      session="desktop-scratch-only",
+      sequence=1,
+      ts=None,
+      item=@protocol.User({ content: "hi" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
+    ),
+    committed,
+  )
+  assert_eq(same_store.dev().sessions_request_generation, 1)
+}
+
+///|
+/// The unseen-commit gate has the same hazard as the listing check: the page
+/// holds one conversation per (channel, id), so a Scratch record that already
+/// consumed sequence one must not make a project store's first commit look
+/// like old news.
+test "a commit for an unlisted store refreshes past a same-id watermark" {
+  let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/work/foreign")
+  let store = @interop.ChannelId::Local.test_resource("/work/foreign/.openseek")
+  let model = test_model().with_dev(dev => {
+    ..dev,
+    projects: [workspace],
+    sessions: [
+      {
+        id: "desktop-shared",
+        title: Some("scratch copy"),
+        workspace: None,
+        workspace_name: "",
+      },
+    ],
+  })
+  // The Scratch record is listed and consumes its own first commit, so the
+  // page now holds a Scratch conversation at watermark one.
+  let (_, scratch) = update_dev(
+    dispatch,
+    SessionCommitted(
+      session="desktop-shared",
+      sequence=1,
+      ts=None,
+      item=@protocol.User({ content: "scratch" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
+    ),
+    model,
+  )
+  assert_eq(scratch.dev().sessions_request_generation, 0)
+  guard scratch.find_conversation(@interop.ChannelId::Local, "desktop-shared")
+    is Some(consumed) else {
+    fail("listed scratch commit did not materialize its conversation")
+  }
+  assert_eq(consumed.watermark, 1)
+  // The project store's own first commit is a different durable record: it
+  // is unlisted, and the Scratch watermark must not suppress its reload.
+  let (_, committed) = update_dev(
+    dispatch,
+    SessionCommitted(
+      session="desktop-shared",
+      sequence=1,
+      ts=None,
+      item=@protocol.User({ content: "project" }),
+      session_root=store,
+    ),
+    scratch,
+  )
+  assert_eq(committed.dev().sessions_request_generation, 1)
 }
 
 ///|
@@ -7786,6 +8012,7 @@ test "reconnect refresh is single-flight and preserves its commit buffer" {
       sequence=3,
       ts=None,
       item=@protocol.User({ content: "future" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     refreshing,
   )
@@ -8894,6 +9121,7 @@ test "run semantic errors never duplicate their terminal commit" {
     sequence=1,
     ts=None,
     item=@protocol.Terminal(@protocol.Failed("engine error")),
+    session_root=@interop.ChannelId::Local.test_store_root(),
   )
   let (_, semantic_first) = update_dev(dispatch, semantic, running_model())
   inspect(semantic_first.active().overlay.length(), content="0")
@@ -9205,6 +9433,70 @@ test "started for an unknown session materializes its conversation" {
 }
 
 ///|
+/// Started is where a foreign conversation gets its placement, and it
+/// precedes the first commit — so on a fresh connection, whose projects
+/// registry is still in flight, the run's own store root has to name the
+/// project. Otherwise terminal and file operations point at Scratch until
+/// the session list lands.
+test "started places a conversation before the registry arrives" {
+  let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/work/foreign")
+  let store = @interop.ChannelId::Local.test_resource("/work/foreign/.openseek")
+  fn start(model, session, session_root) {
+    let (_, next) = update_dev(
+      dispatch,
+      Started(
+        run_id="r9",
+        session~,
+        model=High,
+        max_steps=1000,
+        session_root~,
+        submission_id=None,
+      ),
+      model,
+    )
+    next
+  }
+
+  // The registry is empty: the store layout is the only evidence, and it
+  // names the project.
+  let unregistered = start(test_model(), "desktop-foreign", Some(store))
+  guard unregistered.find_conversation(
+      @interop.ChannelId::Local,
+      "desktop-foreign",
+    )
+    is Some(placed) else {
+    fail("expected the foreign run's conversation to materialize")
+  }
+  assert_eq(placed.workspace, Project(root=workspace))
+  // The announced global store still means Scratch.
+  let scratch = start(
+    unregistered,
+    "desktop-global",
+    Some(@interop.ChannelId::Local.test_store_root()),
+  )
+  guard scratch.find_conversation(@interop.ChannelId::Local, "desktop-global")
+    is Some(global) else {
+    fail("expected the global run's conversation to materialize")
+  }
+  assert_true(global.workspace is Scratch)
+  // A registered project resolves the same way it always did.
+  let registered = start(
+    test_model().with_dev(dev => { ..dev, projects: [workspace] }),
+    "desktop-registered",
+    Some(store),
+  )
+  guard registered.find_conversation(
+      @interop.ChannelId::Local,
+      "desktop-registered",
+    )
+    is Some(known) else {
+    fail("expected the registered run's conversation to materialize")
+  }
+  assert_eq(known.workspace, Project(root=workspace))
+}
+
+///|
 test "a distinct started id replaces a stale open run as foreign" {
   let dispatch = test_dispatch()
   let conv = with_pending_steers(
@@ -9386,6 +9678,7 @@ test "canonical User text never claims an unconfirmed start" {
       sequence=1,
       ts=None,
       item=@protocol.User({ content: "accepted prompt" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     failed,
   )
@@ -10675,6 +10968,7 @@ test "a live commit dates its row on arrival, buffered or applied straight" {
       sequence~,
       ts=Some(ts),
       item=@protocol.User({ content: "question" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     )
   }
   // The contiguous-commit path a running conversation takes: the row must
@@ -10725,6 +11019,7 @@ test "a canonical user commit never settles a local steer" {
       sequence=1,
       ts=None,
       item=@protocol.User({ content: "go left" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -10967,6 +11262,7 @@ test "run-end unconfirmed notice follows assistant and terminal before freezing"
         tool_calls: None,
         reasoning_content: None,
       }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     finished,
   )
@@ -10977,6 +11273,7 @@ test "run-end unconfirmed notice follows assistant and terminal before freezing"
       sequence=3,
       ts=None,
       item=@protocol.Terminal(@protocol.Finished("answer")),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     buffered,
   )
@@ -11012,6 +11309,7 @@ test "run-end unconfirmed notice follows assistant and terminal before freezing"
       sequence=4,
       ts=None,
       item=@protocol.User({ content: "next question" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     answered,
   )
@@ -11095,6 +11393,7 @@ test "a snapshot does not mistake a same-run steer User for the terminal boundar
       sequence=2,
       ts=None,
       item=@protocol.User({ content: "late steer" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -11114,6 +11413,7 @@ test "a snapshot does not mistake a same-run steer User for the terminal boundar
         tool_calls: None,
         reasoning_content: None,
       }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     finished,
   )
@@ -11124,6 +11424,7 @@ test "a snapshot does not mistake a same-run steer User for the terminal boundar
       sequence=4,
       ts=None,
       item=@protocol.Terminal(@protocol.Finished("answer")),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     answered,
   )
@@ -11185,6 +11486,7 @@ test "an unknown terminal before Finished still owns the run-tail notice" {
         "kind": "terminal",
         "payload": { "kind": "future_terminal", "message": "answer" },
       }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     running_model().replace_conversation(conv),
   )
@@ -11255,6 +11557,7 @@ test "a successor resolves an old terminal tail only from its causal snapshot" {
       sequence=3,
       ts=None,
       item=@protocol.Terminal(@protocol.Finished("first answer")),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -11290,6 +11593,7 @@ test "a successor resolves an old terminal tail only from its causal snapshot" {
       sequence=4,
       ts=None,
       item=@protocol.User({ content: "second question" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     started,
   )
@@ -11300,6 +11604,7 @@ test "a successor resolves an old terminal tail only from its causal snapshot" {
       sequence=5,
       ts=None,
       item=@protocol.Terminal(@protocol.Finished("second answer")),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     second_user,
   )
@@ -11604,6 +11909,7 @@ test "a foreign background run waits for a snapshot cut after Started" {
         tool_calls: None,
         reasoning_content: None,
       }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -11635,6 +11941,7 @@ test "a foreign background run waits for a snapshot cut after Started" {
       sequence=3,
       ts=None,
       item=@protocol.Terminal(@protocol.Finished("previous answer")),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     started,
   )
@@ -11645,6 +11952,7 @@ test "a foreign background run waits for a snapshot cut after Started" {
       sequence=4,
       ts=None,
       item=@protocol.User({ content: "current question" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     buffered_terminal,
   )
@@ -11723,6 +12031,7 @@ test "buffered future terminal cannot become its own run floor" {
       sequence=2,
       ts=None,
       item=@protocol.User({ content: "current question" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -11737,6 +12046,7 @@ test "buffered future terminal cannot become its own run floor" {
         tool_calls: None,
         reasoning_content: None,
       }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     user,
   )
@@ -11747,6 +12057,7 @@ test "buffered future terminal cannot become its own run floor" {
       sequence=4,
       ts=None,
       item=@protocol.Terminal(@protocol.Finished("current answer")),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     answer,
   )
@@ -11811,6 +12122,7 @@ test "a late durable EOF finalizes an unconfirmed steer without a terminal" {
         tool_calls: None,
         reasoning_content: None,
       }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     synthetic,
   )
@@ -12495,6 +12807,7 @@ test "an initial warning freezes between a snapshot and its buffered successor" 
       sequence=2,
       ts=None,
       item=@protocol.User({ content: "buffered W+1" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     finished,
   )
@@ -12820,6 +13133,7 @@ test "exact-zero recovery refuses buffered or nonzero durable frontiers" {
       sequence=1,
       ts=None,
       item=@protocol.User({ content: "durable prompt arrived" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     waiting,
   )
@@ -14608,6 +14922,7 @@ test "a new Started incarnation retires its exact deleted tombstone" {
       sequence=1,
       ts=None,
       item=@protocol.User({ content: "new incarnation" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     started,
   )
@@ -16944,6 +17259,7 @@ test "send does not show a prompt until its commit lands" {
       sequence=1,
       ts=None,
       item=@protocol.User({ content: "build the thing" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     sent,
   )
@@ -16972,6 +17288,7 @@ test "a replayed commit at or below the watermark is dropped" {
       sequence=2,
       ts=None,
       item=@protocol.User({ content: "already there" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -16993,6 +17310,7 @@ test "a commit past the frontier buffers and flips into a reload" {
       sequence=5,
       ts=None,
       item=@protocol.User({ content: "from the future" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -17020,6 +17338,7 @@ test "commits buffer while a reload is in flight" {
       sequence=3,
       ts=None,
       item=@protocol.User({ content: "mid-reload" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -17167,6 +17486,7 @@ test "background retries preserve buffered commits until a later success" {
       sequence=2,
       ts=None,
       item=@protocol.User({ content: "next" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     failed,
   )
@@ -17342,6 +17662,7 @@ test "tool decode semantics wait for their durable error tool result" {
       is_error: true,
       brief: None,
     }),
+    session_root=@interop.ChannelId::Local.test_store_root(),
   )
   let (_, semantic_first) = update_dev(dispatch, semantic, running_model())
   inspect(semantic_first.active().messages.length(), content="0")
@@ -17389,6 +17710,7 @@ test "assistant semantic events wait for their durable commit" {
         tool_calls: None,
         reasoning_content: Some("think"),
       }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     answered,
   )
@@ -17444,6 +17766,7 @@ test "a delayed assistant commit never clears a newer live delta" {
         tool_calls: None,
         reasoning_content: None,
       }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -17468,6 +17791,7 @@ test "a delayed terminal commit never clears a newer live delta" {
       sequence=2,
       ts=None,
       item=@protocol.Terminal(@protocol.Finished("older answer")),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -17493,6 +17817,7 @@ test "a fixed local notice stays before later durable turns" {
         tool_calls: None,
         reasoning_content: None,
       }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     test_model().replace_conversation(conv),
   )
@@ -17530,6 +17855,7 @@ test "a durable commit never retires a same-class local notice" {
         tool_calls: None,
         reasoning_content: None,
       }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -17556,6 +17882,7 @@ test "commit-first assistant semantics do not append again" {
         tool_calls: None,
         reasoning_content: Some("think"),
       }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     streaming,
   )
@@ -17585,6 +17912,7 @@ test "a sequence-one commit materializes an unknown hidden conversation" {
       sequence=1,
       ts=None,
       item=@protocol.User({ content: "hi" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     test_model(),
   )
@@ -17605,6 +17933,7 @@ test "a sequence-one commit materializes an unknown hidden conversation" {
       sequence=1,
       ts=None,
       item=@protocol.User({ content: "hi" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     next,
   )
@@ -17621,6 +17950,7 @@ test "a gapped commit for an unknown session materializes then reloads" {
       sequence=3,
       ts=None,
       item=@protocol.User({ content: "third" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     test_model(),
   )
@@ -17658,6 +17988,7 @@ test "a late commit cannot resurrect a locally known archived session" {
       sequence=1,
       ts=None,
       item=@protocol.User({ content: "stale" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -17683,6 +18014,7 @@ test "an archive tombstone blocks commits before the archived list refreshes" {
       sequence=1,
       ts=None,
       item=@protocol.User({ content: "stale" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
