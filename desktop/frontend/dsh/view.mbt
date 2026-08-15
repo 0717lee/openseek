@@ -110,7 +110,9 @@ pub fn State::sidebar_section(self : State, selected : Bool) -> @section.Input {
       }),
     )
   }
-  if entries.is_empty() {
+  // Retained Workspace rows are only a cached snapshot while dsh is down.
+  // Keep the openable row visible so selecting it can ask the actor to retry.
+  if entries.is_empty() || self.connection is DshUnavailable(_) {
     entries.push(
       @section.Placeholder({
         id: "dsh.open",
@@ -143,6 +145,30 @@ pub fn State::sidebar_section(self : State, selected : Bool) -> @section.Input {
     }),
     entries,
   }
+}
+
+///|
+test "unavailable dsh keeps a retry row beside retained workspaces" {
+  let state = {
+    ..State(),
+    connection: DshUnavailable("dsh stopped"),
+    workspaces: [
+      {
+        id: "workspace-1",
+        title: "OpenSeek",
+        path: "/work/openseek",
+        session_ids: [],
+      },
+    ],
+  }
+  let section = state.sidebar_section(false)
+  assert_eq(section.entries.length(), 2)
+  guard section.entries[1] is @section.Placeholder(retry) else {
+    fail("expected an unavailable retry row after the retained workspace")
+  }
+  assert_eq(retry.id, "dsh.open")
+  assert_eq(retry.label, "DeepSeek Harness is unavailable")
+  assert_true(retry.openable)
 }
 
 ///|
