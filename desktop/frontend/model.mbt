@@ -1049,7 +1049,21 @@ priv enum ArchiveDisposition {
 priv struct RecordKey {
   session : String
   workspace : @common.Uri
-} derive(Eq)
+} derive(Eq, Hash)
+
+///|
+/// The records a host listing names, for membership questions asked once per
+/// row: the sidebar re-renders on every dispatch, and scanning the live and
+/// archived listings per row is quadratic in the number of conversations.
+fn listed_records(
+  items : Array[@transcript.SessionListItem],
+) -> @hashset.HashSet[RecordKey] {
+  @hashset.HashSet::from_iter(
+    items
+    .iter()
+    .map(item => ({ session: item.id, workspace: item.workspace } : RecordKey)),
+  )
+}
 
 ///|
 fn RecordKey::matches(

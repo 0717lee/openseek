@@ -92,6 +92,33 @@ fn focus_channel(
 }
 
 ///|
+/// What a host listing says about one session id: the single store carrying
+/// it, or that several do. Session ids repeat only across stores, so this
+/// collapses to `OneStore` for every ordinary id.
+priv enum ListedStore {
+  OneStore(@common.Uri)
+  SeveralStores
+}
+
+///|
+/// Index a listing by session id, so placement reconciliation is one lookup
+/// per conversation rather than a scan of the whole listing.
+fn listed_stores(
+  items : Array[@transcript.SessionListItem],
+) -> Map[String, ListedStore] {
+  items
+  .iter()
+  .fold(init=Map([]), (index, item) => {
+    index[item.id] = match index.get(item.id) {
+      None => OneStore(item.workspace)
+      Some(OneStore(store)) if store == item.workspace => OneStore(store)
+      Some(_) => SeveralStores
+    }
+    index
+  })
+}
+
+///|
 /// Where `session.list` says this conversation's record lives.
 ///
 /// The list is the authority on placement only while it is unambiguous. A
@@ -103,17 +130,12 @@ fn focus_channel(
 /// whereas picking a row by id alone would rebind the conversation to a
 /// record it never opened.
 fn listed_project(
-  items : Array[@transcript.SessionListItem],
+  index : Map[String, ListedStore],
   conv : Conversation,
 ) -> @common.Uri {
-  let current = conv.workspace.project()
-  let matches = items.filter(item => item.id == conv.session_id)
-  if matches.iter().any(item => item.workspace == current) {
-    return current
-  }
-  match matches {
-    [only] => only.workspace
-    _ => current
+  match index.get(conv.session_id) {
+    Some(OneStore(store)) => store
+    Some(SeveralStores) | None => conv.workspace.project()
   }
 }
 
@@ -5341,12 +5363,13 @@ fn update_device_msg(
       // that provisional placement from the list before any later send: an
       // empty workspace hint here would otherwise fork the same session into
       // the default store.
+      let stores = listed_stores(items)
       let conversations = model.conversations.map(conv => {
         if conv.device == channel {
           {
             ..conv,
             workspace: dev.conversation_workspace(
-              listed_project(items, conv),
+              listed_project(stores, conv),
               conv.session_id,
               conv.workspace,
             ),
@@ -5362,12 +5385,9 @@ fn update_device_msg(
       if channel == model.focused {
         if model.find_conversation(channel, model.active_session)
           is Some(active) {
-          active_project = Some(listed_project(items, active))
-        } else {
-          let matches = items.filter(item => item.id == model.active_session)
-          if matches is [only] {
-            active_project = Some(only.workspace)
-          }
+          active_project = Some(listed_project(stores, active))
+        } else if stores.get(model.active_session) is Some(OneStore(store)) {
+          active_project = Some(store)
         }
       }
       let mut next = {

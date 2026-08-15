@@ -215,16 +215,16 @@ fn Model::push_group_component_inputs(
   rows : Array[(RowStamp, @conversation.Input)],
   dev : DeviceState,
   workspace : @common.Uri,
-  listed~ : (RecordKey) -> Bool,
-  archived~ : (RecordKey) -> Bool,
+  listed~ : @hashset.HashSet[RecordKey],
+  archived~ : @hashset.HashSet[RecordKey],
 ) -> Unit {
   let composing = self.composing_new_chat()
   for conv in self.conversations.rev_iter() {
     let key : RecordKey = { session: conv.session_id, workspace }
     if conv.device != dev.channel ||
       conv.project() != workspace ||
-      listed(key) ||
-      archived(key) {
+      listed.contains(key) ||
+      archived.contains(key) {
       continue
     }
     // A fresh worktree conversation knows its binding locally; once the
@@ -261,12 +261,10 @@ fn Model::push_group_component_inputs(
       ),
     )
   }
-  let durable : Array[@transcript.SessionListItem] = []
-  for item in dev.sessions {
-    if item.workspace == workspace && !archived({ session: item.id, workspace }) {
-      durable.push(item)
-    }
-  }
+  let durable = dev.sessions.filter(item => {
+    item.workspace == workspace &&
+    !archived.contains({ session: item.id, workspace })
+  })
   // Sub-run transcripts fold under the conversation that launched them: they
   // are that turn's evidence, not conversations of their own. They ride the
   // parent's component input, so their disclosure state lives in the
@@ -397,15 +395,11 @@ fn Model::sidebar_component_sections(
   // Both filters answer about one durable record, not one id: a record
   // archived in a project store says nothing about the Scratch record beside
   // it, and suppressing that row would read as archiving both.
-  let listed = (key : RecordKey) => {
-    dev.sessions.iter().any(item => key.matches(item))
-  }
+  let listed = listed_records(dev.sessions)
   // An archived record has moved out of its own live store, so that store's
   // live list normally cannot contain it; the filter covers the moment
   // between the archive reply and the list refetch that follows it.
-  let archived = (key : RecordKey) => {
-    dev.archived.iter().any(item => key.matches(item))
-  }
+  let archived = listed_records(dev.archived)
   let channel = dev.channel.uri_authority()
   let chat_selected = self.screen is Chat && dev.channel == self.focused
   // The activation identity handed to sections and projects: which
