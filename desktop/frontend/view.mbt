@@ -356,6 +356,16 @@ fn Model::sidebar_component_sections(
   let archived = (id : String) => dev.archived.iter().any(item => item.id == id)
   let channel = dev.channel.uri_authority()
   let chat_selected = self.screen is Chat && dev.channel == self.focused
+  // The activation identity handed to sections and projects: which
+  // conversation is on screen. A branch folded during one activation stays
+  // folded until a different one lands in it.
+  let activation = (holds_active : Bool) => {
+    if chat_selected && holds_active {
+      Some(self.active_session)
+    } else {
+      None
+    }
+  }
   let sections : Array[@section.Input] = []
   let projects : Array[@section.Entry] = []
   for path in dev.projects {
@@ -373,7 +383,7 @@ fn Model::sidebar_component_sections(
         id: @project.Id(source="openseek.projects", channel~, root=path.path),
         title: path.path,
         label: @resource.label(path),
-        active: chat_selected && dev.active_project == Some(path),
+        activation: activation(dev.active_project == Some(path)),
         can_start: true,
         managed: true,
         conversations,
@@ -385,7 +395,7 @@ fn Model::sidebar_component_sections(
     id: @section.Id(source="openseek.projects", channel~),
     label: "Projects",
     initially_collapsed: false,
-    selected: chat_selected && dev.active_project is Some(_),
+    activation: activation(dev.active_project is Some(_)),
     action: Some({ title: "Add a project", disabled: false }),
     entries: projects,
   })
@@ -395,7 +405,7 @@ fn Model::sidebar_component_sections(
     id: @section.Id(source="openseek.chats", channel~),
     label: "Chats",
     initially_collapsed: false,
-    selected: chat_selected && dev.active_project is None,
+    activation: activation(dev.active_project is None),
     action: Some({ title: "New Scratch chat", disabled: false }),
     entries: chats.map(chat => @section.Conversation(chat)),
   })
@@ -450,7 +460,9 @@ fn Model::sidebar_component_sections(
       "Archived chats (\{archived_entries.length()})"
     },
     initially_collapsed: true,
-    selected: false,
+    // Opening an archived transcript never force-reveals the section; its
+    // fold stays purely user-controlled, as before.
+    activation: None,
     action: None,
     entries: archived_entries,
   })
