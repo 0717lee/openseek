@@ -1,12 +1,13 @@
 // Where a conversation's durable record lives. Every store the desktop can
-// reach — the global Scratch root and one `.openseek` per attached workspace —
-// has the engine CLI's own layout: live records under `sessions/<id>`, archived
-// ones under `archived/sessions/<id>`, and records condemned by a committed
-// deletion under `archived/deleting/<id>`.
+// reach — one `.openseek` per attached workspace — has the engine CLI's own
+// layout: live records under `sessions/<id>`, archived ones under
+// `archived/sessions/<id>`, and records condemned by a committed deletion
+// under `archived/deleting/<id>`.
 //
 // Nothing here moves a record or decides policy; it answers where things are.
-// A session id alone says nothing about which store owns it, so every lookup
-// searches the stores rather than trusting a request hint.
+// A session id names a record only inside one store, so a request that
+// addresses a record names its store and this module selects it; the searches
+// that remain ask about the population of stores, not about one record.
 
 ///|
 /// Debug is what the host boundary logs: proton renders a failed handler's
