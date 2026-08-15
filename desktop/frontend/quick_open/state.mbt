@@ -137,7 +137,7 @@ pub fn State::handle(
     Select(index) => (@cmd.none, self.select_row(index), None)
     Pick(index) => self.pick_row(index)
     Dismiss => {
-      let (cmd, next) = self.dismiss()
+      let (cmd, next) = self.close()
       (cmd, next, None)
     }
   }
@@ -505,7 +505,10 @@ fn State::pick_row(self : State, index : Int) -> (@cmd.Cmd, State, Accepted?) {
 }
 
 ///|
-fn State::dismiss(self : State) -> (@cmd.Cmd, State) {
+/// Retire the run, abandoning whatever it has in flight. The shell calls this
+/// when it takes the screen for something else; the warm cache session is kept
+/// so the next run does not pay for it again.
+pub fn State::close(self : State) -> (@cmd.Cmd, State) {
   guard self.open is Some(open) else { return (@cmd.none, self) }
   (self.cancel_file_request(open), { ..self, open: None })
 }

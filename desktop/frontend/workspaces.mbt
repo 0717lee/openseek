@@ -549,6 +549,36 @@ test "opening a stored session joins its project and loaded worktree" {
 }
 
 ///|
+test "the two full-screen pickers never share the screen" {
+  let dispatch = test_dispatch()
+  let base = { ..test_model(), is_desktop: true }
+  // The picker's capture-phase keys would claim Enter and Escape from a
+  // palette that is painted on top of it, so opening one retires the other.
+  let (_, searching) = update(
+    dispatch,
+    QuickOpenOpen(@quick_open.Symbols),
+    base,
+  )
+  assert_true(searching.quick_open.is_open())
+  let (_, browsing) = update(
+    dispatch,
+    PickProject(@interop.ChannelId::Local),
+    searching,
+  )
+  assert_true(browsing.project_picker is Some(_))
+  assert_false(browsing.quick_open.is_open())
+  // The exclusion runs the other way as a refusal instead: the browse position
+  // is worth more than a query the user can retype.
+  let (_, still_browsing) = update(
+    dispatch,
+    QuickOpenOpen(@quick_open.Files),
+    browsing,
+  )
+  assert_false(still_browsing.quick_open.is_open())
+  assert_true(still_browsing.project_picker is Some(_))
+}
+
+///|
 test "the picker opens loading and adopts the first listing" {
   let dispatch = test_dispatch()
   let (_, opened) = update(

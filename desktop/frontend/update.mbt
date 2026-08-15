@@ -2893,13 +2893,20 @@ fn update_msg(
         return (@cmd.none, model)
       }
       let (focus_cmd, model) = focus_channel(dispatch, model, channel)
+      // Retire Quick Open first. The picker's capture-phase keys claim Enter
+      // and Escape for the browse session, so a palette left standing would
+      // paint over the picker while every keystroke went to the picker behind
+      // it. The palette holds nothing worth preserving — unlike the picker's
+      // own browse position, which is why it refuses to reopen over itself.
+      let (quick_open_cmd, quick_open) = model.quick_open.close()
       let picker = opening_project_picker(channel)
       (
         @cmd.batch([
           focus_cmd,
+          quick_open_cmd,
           browse_directory(dispatch, channel, "", generation=picker.generation),
         ]),
-        { ..model, project_picker: Some(picker) },
+        { ..model, quick_open, project_picker: Some(picker) },
       )
     }
     AddProjectRequested =>
