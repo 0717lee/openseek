@@ -30,10 +30,11 @@ async fn provision_initialized_submodules(
   timeout_seconds : Int,
 ) -> Unit {
   // Worktrees branch from HEAD, not the main checkout's staged index.
-  let tree = git_output_text(origin, ["ls-tree", "-r", "-z", "HEAD"])
+  let tree = @gitx.output(origin, ["ls-tree", "-r", "-z", "HEAD"])
   let initialized : Array[String] = []
   for path in gitlink_paths(tree) {
-    guard git_probe(origin, ["submodule", "status", "--", path]) is Some(status) &&
+    guard @gitx.probe(origin, ["submodule", "status", "--", path])
+      is Some(status) &&
       !status.is_empty() &&
       !status.has_prefix("-") else {
       continue
@@ -45,7 +46,7 @@ async fn provision_initialized_submodules(
   // `git submodule` does not forward repository-local protocol policy to the
   // clone helper. Preserve an explicit user opt-in for local submodule URLs;
   // never relax the default on the app's own authority.
-  if git_probe(origin, ["config", "--get", "protocol.file.allow"])
+  if @gitx.probe(origin, ["config", "--get", "protocol.file.allow"])
     is Some("always") {
     args.push("-c")
     args.push("protocol.file.allow=always")
@@ -60,7 +61,7 @@ async fn provision_initialized_submodules(
     args.push(path)
   }
   guard @async.with_timeout_opt(timeout_seconds * 1_000, () => {
-      git_in(checkout, args)
+      @gitx.run(checkout, args)
     })
     is Some(_) else {
     raise EngineError(
@@ -85,9 +86,9 @@ async test "submodule checkout stops at its hard timeout" {
   prepare_git_repo(dependency)
   let repo = root.join("repo")
   prepare_git_repo(repo)
-  ignore(git_in(repo, ["config", "protocol.file.allow", "always"]))
+  ignore(@gitx.run(repo, ["config", "protocol.file.allow", "always"]))
   ignore(
-    git_in(repo, [
+    @gitx.run(repo, [
       "-c",
       "protocol.file.allow=always",
       "submodule",
@@ -98,13 +99,13 @@ async test "submodule checkout stops at its hard timeout" {
     ]),
   )
   ignore(
-    git_in(repo, [
+    @gitx.run(repo, [
       "-c", "user.email=test@example.com", "-c", "user.name=test", "-c", "commit.gpgsign=false",
       "commit", "-q", "-am", "add submodule",
     ]),
   )
   let checkout = root.join("checkout")
-  ignore(git_in(repo, ["worktree", "add", "-q", checkout.to_string()]))
+  ignore(@gitx.run(repo, ["worktree", "add", "-q", checkout.to_string()]))
   let detail = try {
     provision_initialized_submodules(repo, checkout, 0)
     "no error"
@@ -136,9 +137,9 @@ async test "worktree lifecycle mirrors initialized submodules" {
   prepare_git_repo(repo)
   // Local fixture repositories keep the lifecycle test deterministic and
   // offline; production submodules retain Git's normal transport policy.
-  ignore(git_in(repo, ["config", "protocol.file.allow", "always"]))
+  ignore(@gitx.run(repo, ["config", "protocol.file.allow", "always"]))
   ignore(
-    git_in(repo, [
+    @gitx.run(repo, [
       "-c",
       "protocol.file.allow=always",
       "submodule",
@@ -149,7 +150,7 @@ async test "worktree lifecycle mirrors initialized submodules" {
     ]),
   )
   ignore(
-    git_in(repo, [
+    @gitx.run(repo, [
       "-c",
       "protocol.file.allow=always",
       "submodule",
@@ -160,15 +161,15 @@ async test "worktree lifecycle mirrors initialized submodules" {
     ]),
   )
   ignore(
-    git_in(repo, [
+    @gitx.run(repo, [
       "-c", "user.email=test@example.com", "-c", "user.name=test", "-c", "commit.gpgsign=false",
       "commit", "-q", "-am", "add submodules",
     ]),
   )
   ignore(
-    git_in(repo, ["submodule", "deinit", "--force", "--", "deps/optional"]),
+    @gitx.run(repo, ["submodule", "deinit", "--force", "--", "deps/optional"]),
   )
-  ignore(add_workspace(repo.to_string(), fn(_) {  }))
+  ignore(@workspaces.add(repo.to_string(), fn(_) {  }))
   let manager = new_engine_manager("openseek")
   let created = create_worktree(
     manager,
@@ -180,8 +181,8 @@ async test "worktree lifecycle mirrors initialized submodules" {
   assert_eq(created.name, "with-submodules")
   let checkout = repo.join(".worktrees/with-submodules")
   assert_eq(
-    git_in(checkout.join("deps/required"), ["rev-parse", "HEAD"]),
-    git_in(required, ["rev-parse", "HEAD"]),
+    @gitx.run(checkout.join("deps/required"), ["rev-parse", "HEAD"]),
+    @gitx.run(required, ["rev-parse", "HEAD"]),
   )
   assert_false(@fsx.exists(checkout.join("deps/optional/.git").to_path()))
   // Repair follows the same provisioning rule after an external deletion.
@@ -196,15 +197,15 @@ async test "worktree lifecycle mirrors initialized submodules" {
     ),
   )
   assert_eq(
-    git_in(checkout.join("deps/required"), ["rev-parse", "HEAD"]),
-    git_in(required, ["rev-parse", "HEAD"]),
+    @gitx.run(checkout.join("deps/required"), ["rev-parse", "HEAD"]),
+    @gitx.run(required, ["rev-parse", "HEAD"]),
   )
   assert_false(@fsx.exists(checkout.join("deps/optional/.git").to_path()))
   // Removal always passes a single `--force` (plain `worktree remove`
   // refuses any gitlink checkout, clean or not); an external lock takes a
   // second `--force`, so Git itself keeps refusing a locked checkout.
   ignore(
-    git_in(repo, [
+    @gitx.run(repo, [
       "worktree", "lock", "--reason", "held by test", ".worktrees/with-submodules",
     ]),
   )
@@ -224,7 +225,7 @@ async test "worktree lifecycle mirrors initialized submodules" {
   }
   assert_true(locked_detail.contains("locked"))
   assert_true(@fsx.is_dir(checkout.to_path()))
-  ignore(git_in(repo, ["worktree", "unlock", ".worktrees/with-submodules"]))
+  ignore(@gitx.run(repo, ["worktree", "unlock", ".worktrees/with-submodules"]))
   // Once unlocked, clean removal unregisters and deletes the checkout.
   let removed = remove_worktree(
     manager,
@@ -238,7 +239,7 @@ async test "worktree lifecycle mirrors initialized submodules" {
   // This workspace setting leaves even an initialized main-checkout
   // submodule untouched in subsequent worktrees.
   ignore(
-    update_workspace_settings(
+    @workspaces.update_settings(
       repo.to_string(),
       fn(_) {  },
       checkout_submodules=false,
@@ -273,9 +274,9 @@ async test "archive deletes a submodule checkout that git worktree remove refuse
   prepare_git_repo(dep)
   let repo = root.join("repo")
   prepare_git_repo(repo)
-  ignore(git_in(repo, ["config", "protocol.file.allow", "always"]))
+  ignore(@gitx.run(repo, ["config", "protocol.file.allow", "always"]))
   ignore(
-    git_in(repo, [
+    @gitx.run(repo, [
       "-c",
       "protocol.file.allow=always",
       "submodule",
@@ -286,12 +287,12 @@ async test "archive deletes a submodule checkout that git worktree remove refuse
     ]),
   )
   ignore(
-    git_in(repo, [
+    @gitx.run(repo, [
       "-c", "user.email=test@example.com", "-c", "user.name=test", "-c", "commit.gpgsign=false",
       "commit", "-q", "-am", "add submodule",
     ]),
   )
-  ignore(add_workspace(repo.to_string(), fn(_) {  }))
+  ignore(@workspaces.add(repo.to_string(), fn(_) {  }))
   let manager = new_engine_manager("openseek")
   manager.pump = Serving(sessions=Map([]))
   // A dirty checkout still confirms first, and the confirmed force retry
@@ -306,7 +307,7 @@ async test "archive deletes a submodule checkout that git worktree remove refuse
     ),
   )
   @fsx.ensure_dir(
-    workspace_session_root(repo).join("sessions").join("s-sub-dirty").to_path(),
+    @workspaces.store_root(repo).join("sessions").join("s-sub-dirty").to_path(),
   )
   let dirty_checkout = repo.join(".worktrees/wt-1")
   assert_true(@fsx.exists(dirty_checkout.join("deps/one/.git").to_path()))
@@ -337,7 +338,7 @@ async test "archive deletes a submodule checkout that git worktree remove refuse
     ),
   )
   @fsx.ensure_dir(
-    workspace_session_root(repo).join("sessions").join("s-sub-clean").to_path(),
+    @workspaces.store_root(repo).join("sessions").join("s-sub-clean").to_path(),
   )
   let clean_checkout = repo.join(".worktrees/wt-2")
   assert_true(@fsx.exists(clean_checkout.join("deps/one/.git").to_path()))
@@ -348,13 +349,13 @@ async test "archive deletes a submodule checkout that git worktree remove refuse
   // Branches and placements survive, and git's worktree bookkeeping is
   // pruned rather than left stale.
   assert_true(
-    git_probe(repo, [
+    @gitx.probe(repo, [
       "show-ref", "--verify", "--quiet", "refs/heads/openseek/wt-1",
     ])
     is Some(_),
   )
   assert_false(
-    git_in(repo, ["worktree", "list", "--porcelain"]).contains(".worktrees/"),
+    @gitx.run(repo, ["worktree", "list", "--porcelain"]).contains(".worktrees/"),
   )
   guard list_worktrees(repo.to_string()).worktrees is [first, second] else {
     fail("both worktree placements must survive archive")
@@ -376,7 +377,7 @@ async test "worktree deletion refuses a replaced checkout" {
   @fsx.ensure_dir(root.join("global").to_path())
   let repo = root.join("repo")
   prepare_git_repo(repo)
-  ignore(add_workspace(repo.to_string(), fn(_) {  }))
+  ignore(@workspaces.add(repo.to_string(), fn(_) {  }))
   let manager = new_engine_manager("openseek")
   manager.pump = Serving(sessions=Map([]))
   ignore(
@@ -388,7 +389,7 @@ async test "worktree deletion refuses a replaced checkout" {
     ),
   )
   @fsx.ensure_dir(
-    workspace_session_root(repo).join("sessions").join("s-replaced").to_path(),
+    @workspaces.store_root(repo).join("sessions").join("s-replaced").to_path(),
   )
   // Externally delete the checkout and drop an unrelated repository with a
   // staged gitlink at the same path. `git worktree remove --force` validates
@@ -398,10 +399,10 @@ async test "worktree deletion refuses a replaced checkout" {
   let target = repo.join(".worktrees/wt-1")
   @fs.rmdir(target.to_string(), recursive=true)
   @fsx.ensure_dir(target.to_path())
-  ignore(git_in(target, ["init", "-q"]))
-  let sha = git_in(repo, ["rev-parse", "HEAD"])
+  ignore(@gitx.run(target, ["init", "-q"]))
+  let sha = @gitx.run(repo, ["rev-parse", "HEAD"])
   ignore(
-    git_in(target, [
+    @gitx.run(target, [
       "update-index",
       "--add",
       "--cacheinfo",

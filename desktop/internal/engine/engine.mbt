@@ -779,7 +779,7 @@ async fn EngineManager::close_engines_for_workspace(
   workspace : @pathx.Absolute,
 ) -> Unit {
   guard self.pump is Serving(sessions~) else { return }
-  let root = workspace_session_root(workspace).to_string()
+  let root = @workspaces.store_root(workspace).to_string()
   let idle : Array[ServeEngine] = []
   for _, slot in sessions {
     if slot.pending is Some(_) {

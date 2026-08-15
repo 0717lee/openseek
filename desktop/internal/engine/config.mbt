@@ -161,7 +161,7 @@ async fn serve_config(
     guard @pathx.Absolute::from_uri_path(path) is Some(absolute) else {
       raise EngineError("workspace is not a supported absolute resource path")
     }
-    match registered_workspace(absolute) {
+    match @workspaces.registered_dir(absolute) {
       Some(dir) => Some(dir)
       None => raise EngineError("\{path} is not a registered workspace")
     }
@@ -199,7 +199,7 @@ async fn serve_config(
     },
     session,
     session_root: if workspace is Some(dir) {
-      Some(workspace_session_root(dir))
+      Some(@workspaces.store_root(dir))
     } else {
       // A hint-less client resuming an existing workspace conversation must
       // keep using that workspace's store. Only genuinely new sessions fall

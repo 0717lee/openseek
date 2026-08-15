@@ -1135,7 +1135,7 @@ async test "workspace detach drains an orphaned pending follower before commit" 
   let dir = @fs.tmpdir(prefix="openseek-detach-orphan-follower-")
   let global_root : @pathx.Absolute = @pathx.Path(dir + "/global").resolve()
   let workspace : @pathx.Absolute = @pathx.Path(dir + "/workspace").resolve()
-  let root = workspace_session_root(workspace)
+  let root = @workspaces.store_root(workspace)
   let engine_path = dir + "/engine.sh"
   let calls = dir + "/calls"
   let session = "s-detach-orphan"
@@ -1218,7 +1218,7 @@ async test "workspace detach drains an orphaned pending follower before commit" 
 async test "workspace detach refuses an idle engine whose follower cannot drain" {
   let dir = @fs.tmpdir(prefix="openseek-detach-follower-stop-")
   let workspace : @pathx.Absolute = @pathx.Path(dir + "/workspace").resolve()
-  let root = workspace_session_root(workspace)
+  let root = @workspaces.store_root(workspace)
   let engine_path = dir + "/engine.sh"
   let session = "s-detach-fail"
   let record : @pathx.Path = Path(session_store_file(root, session))

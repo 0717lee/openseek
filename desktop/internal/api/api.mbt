@@ -552,6 +552,7 @@ pub fn endpoints(
       }) catch {
         error if @async.is_being_cancelled() => raise error
         @engine.EngineError(message) => WorkspaceError(message)
+        @workspaces.WorkspaceError(message) => WorkspaceError(message)
         error => raise error
       }
     }),
@@ -561,13 +562,14 @@ pub fn endpoints(
       }) catch {
         error if @async.is_being_cancelled() => raise error
         @engine.EngineError(message) => WorkspaceError(message)
+        @workspaces.WorkspaceError(message) => WorkspaceError(message)
         error => raise error
       }
     }),
     @endpoint.Endpoint::remote(@commands.workspace_settings_get, async fn(
       payload,
     ) {
-      @engine.workspace_settings(payload.workspace)
+      @workspaces.settings(payload.workspace)
     }),
     @endpoint.Endpoint::remote(@commands.workspace_settings_set, async fn(
       payload,
@@ -577,7 +579,7 @@ pub fn endpoints(
       let worktree_mode = payload.worktree_mode
       let checkout_submodules = payload.checkout_submodules
       let submodule_checkout_timeout_seconds = payload.submodule_checkout_timeout_seconds
-      @engine.update_workspace_settings(
+      @workspaces.update_settings(
         payload.workspace,
         settings => state.hub.publish(WorkspaceSettingsChanged(settings)),
         worktree_mode?,
@@ -847,7 +849,7 @@ async fn ApiState::open_codex_draft(
     )
     is Some(requested) {
     let normalized = requested.normalize()
-    if @engine.registered_workspaces().contains(normalized) {
+    if @workspaces.registered().contains(normalized) {
       Some(normalized.to_string())
     } else {
       None

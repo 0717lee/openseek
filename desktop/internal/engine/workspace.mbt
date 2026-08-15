@@ -5,6 +5,34 @@
 const WorkspaceDirName = "OpenSeek"
 
 ///|
+/// The registered workspace owning `session`, found by where the session's
+/// durable record lives (`<workspace>/.openseek/sessions/<id>`). The record's
+/// location is the mapping — there is no separate index to fall out of date.
+/// `None` for scratch conversations, whose records live in the global store.
+async fn workspace_of_session(session : String) -> @pathx.Absolute? {
+  guard safe_workspace_id(session) else { return None }
+  for workspace in @workspaces.registered() {
+    let record = @workspaces.store_root(workspace)
+      .join("sessions")
+      .join(session)
+    if @fsx.is_dir(record.to_path()) {
+      return Some(workspace)
+    }
+  }
+  None
+}
+
+///|
+/// The session store root holding `session`'s durable record: its workspace's
+/// in-project store when one claims it, otherwise the global root.
+async fn session_store_root(session : String) -> @pathx.Absolute? {
+  if workspace_of_session(session) is Some(workspace) {
+    return Some(@workspaces.store_root(workspace))
+  }
+  @workspaces.global_store_root()
+}
+
+///|
 /// Exact session-to-directory bindings learned from a host-owned source such
 /// as Codex app-server. Unlike the persisted OpenSeek workspace registry,
 /// these grants live only for this process and authorize only one session id;
@@ -154,7 +182,7 @@ pub async fn session_review_base(
 ) -> String? {
   let workspace = if workspace is Some(hint) &&
     @pathx.Absolute::from_uri_path(hint) is Some(hint) &&
-    registered_workspace(hint) is Some(workspace) {
+    @workspaces.registered_dir(hint) is Some(workspace) {
     Some(workspace)
   } else {
     workspace_of_session(session)
@@ -179,7 +207,7 @@ pub async fn resolve_in_workspace(
 ) -> @pathx.Absolute? {
   let root = match workspace {
     Some(hint) if @pathx.Absolute::from_uri_path(hint) is Some(hint) =>
-      match registered_workspace(hint) {
+      match @workspaces.registered_dir(hint) {
         // The hint names the workspace; a session bound to one of its
         // worktrees still roots in that checkout. A Codex thread instead
         // supplies an exact process-local cwd authorized by app-server.
@@ -245,7 +273,7 @@ pub async fn attached_workspace_dir(path : @pathx.Absolute) -> @pathx.Absolute? 
     return None
   }
   let mut best : @pathx.Absolute? = None
-  for workspace in registered_workspaces() {
+  for workspace in @workspaces.registered() {
     guard workspace.contains(resolved_absolute) else { continue }
     if best is Some(current) && current.0.length() >= workspace.0.length() {
       continue

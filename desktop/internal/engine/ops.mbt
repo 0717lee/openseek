@@ -637,15 +637,15 @@ async fn session_show_stdout(
 /// store, in registration order. A group whose listing fails reports the
 /// failure in its `error` field rather than failing the whole reply.
 pub async fn list_sessions(manager : EngineManager) -> SessionsReply {
-  guard resolved_session_root() is Some(root) else {
+  guard @workspaces.global_store_root() is Some(root) else {
     raise EngineError(
       "cannot determine a session root; set OPENSEEK_SESSION_ROOT",
     )
   }
   let groups : Array[SessionGroup] = [session_group(manager, None, root)]
-  for path in registered_workspaces() {
+  for path in @workspaces.registered() {
     groups.push(
-      session_group(manager, Some(path), workspace_session_root(path)),
+      session_group(manager, Some(path), @workspaces.store_root(path)),
     )
   }
   { groups, }
@@ -704,10 +704,10 @@ pub async fn load_session(
   // store, which could return a different history for the same session id.
   let root = if payload.workspace is Some(hint) && !hint.is_blank() {
     guard @pathx.Absolute::from_uri_path(hint) is Some(absolute) &&
-      registered_workspace(absolute) is Some(workspace) else {
+      @workspaces.registered_dir(absolute) is Some(workspace) else {
       raise EngineError("\{hint} is not a registered workspace")
     }
-    Some(workspace_session_root(workspace))
+    Some(@workspaces.store_root(workspace))
   } else {
     session_store_root(session)
   }
@@ -771,10 +771,10 @@ pub async fn load_archived_session(
   // store, matching the placement rules of the archived index.
   let root = if payload.workspace is Some(hint) && !hint.is_blank() {
     guard @pathx.Absolute::from_uri_path(hint) is Some(absolute) &&
-      registered_workspace(absolute) is Some(workspace) else {
+      @workspaces.registered_dir(absolute) is Some(workspace) else {
       raise EngineError("\{hint} is not a registered workspace")
     }
-    Some(archived_session_root(workspace_session_root(workspace)))
+    Some(archived_session_root(@workspaces.store_root(workspace)))
   } else {
     match archived_record_root(session) {
       Some(root) => Some(archived_session_root(root))
@@ -869,7 +869,7 @@ pub async fn scratch_root() -> String {
 /// when it cannot be resolved, so `agent.connected` always names the store
 /// against which clients classify broadcast session roots.
 pub fn global_session_root() -> String raise EngineError {
-  guard resolved_session_root() is Some(root) else {
+  guard @workspaces.global_store_root() is Some(root) else {
     raise EngineError(
       "cannot determine a session root; set OPENSEEK_SESSION_ROOT",
     )
@@ -879,7 +879,7 @@ pub fn global_session_root() -> String raise EngineError {
 
 ///|
 pub async fn list_workspaces() -> WorkspacesReply {
-  Workspaces(registered_workspaces().map(path => path.resource_path()))
+  Workspaces(@workspaces.registered().map(path => path.resource_path()))
 }
 
 ///|
@@ -890,7 +890,7 @@ pub async fn attach_workspace(
   guard @pathx.Absolute::from_uri_path(path) is Some(absolute) else {
     raise EngineError("workspace is not a supported absolute resource path")
   }
-  let paths = add_workspace(absolute.0, paths => {
+  let paths = @workspaces.add(absolute.0, paths => {
     on_committed(paths.map(path => path.resource_path()))
   })
   Workspaces(paths.map(path => path.resource_path()))
@@ -907,9 +907,9 @@ pub async fn detach_workspace(
   }
   manager.workspace_lifecycle_lock.acquire()
   defer manager.workspace_lifecycle_lock.release()
-  let workspace = expanded_workspace_path(absolute.0)
+  let workspace = @workspaces.expanded_path(absolute.0)
   manager.close_engines_for_workspace(workspace)
-  let paths = remove_workspace(absolute.0, paths => {
+  let paths = @workspaces.remove(absolute.0, paths => {
     on_committed(paths.map(path => path.resource_path()))
   })
   Workspaces(paths.map(path => path.resource_path()))
@@ -1556,7 +1556,7 @@ async test "workspace detach refuses a running conversation without hiding it" {
     guard workspace.to_absolute() is Some(workspace_path) else {
       fail("expected an absolute workspace fixture")
     }
-    assert_true(registered_workspaces().contains(workspace_path))
+    assert_true(@workspaces.registered().contains(workspace_path))
     group.return_immediately(())
   })
   @fs.rmdir(root.to_string(), recursive=true)

@@ -34,11 +34,11 @@ fn archived_session_root(root : @pathx.Absolute) -> @pathx.Absolute {
 /// trusted to identify where an existing record lives.
 async fn known_session_roots() -> Array[@pathx.Absolute] {
   let roots : Array[@pathx.Absolute] = []
-  if resolved_session_root() is Some(root) {
+  if @workspaces.global_store_root() is Some(root) {
     roots.push(root)
   }
-  for path in registered_workspaces() {
-    roots.push(workspace_session_root(path))
+  for path in @workspaces.registered() {
+    roots.push(@workspaces.store_root(path))
   }
   roots
 }
@@ -59,7 +59,7 @@ async fn ArchivedStoreSelection::from_workspace(
   workspace : String,
 ) -> ArchivedStoreSelection {
   if workspace.is_empty() {
-    guard resolved_session_root() is Some(root) else {
+    guard @workspaces.global_store_root() is Some(root) else {
       raise EngineError(
         "cannot determine a session root; set OPENSEEK_SESSION_ROOT",
       )
@@ -67,11 +67,11 @@ async fn ArchivedStoreSelection::from_workspace(
     return { root, workspace: None, workspace_token: "" }
   }
   guard @pathx.Absolute::from_uri_path(workspace) is Some(path) &&
-    registered_workspace(path) is Some(registered) else {
+    @workspaces.registered_dir(path) is Some(registered) else {
     raise EngineError("\{workspace} is not a registered workspace")
   }
   {
-    root: workspace_session_root(registered),
+    root: @workspaces.store_root(registered),
     workspace: Some(registered),
     workspace_token: registered.resource_path(),
   }
@@ -274,8 +274,8 @@ async fn EngineManager::claim_session_family_move(
     // `from_workspace` runs before this lock is acquired. Detach uses the
     // same lock, so repeat the registration check here and keep the selected
     // store stable until the record and pending-operation claims are visible.
-    guard registered_workspace(workspace) is Some(registered) &&
-      workspace_session_root(registered) == selected.root else {
+    guard @workspaces.registered_dir(workspace) is Some(registered) &&
+      @workspaces.store_root(registered) == selected.root else {
       raise EngineError(
         "\{selected.workspace_token} is not a registered workspace",
       )
@@ -314,7 +314,7 @@ async fn EngineManager::claim_session_family_move(
     if archived_record_root(session) is Some(_) {
       raise EngineError("this conversation is already archived")
     }
-    guard resolved_session_root() is Some(_) else {
+    guard @workspaces.global_store_root() is Some(_) else {
       raise EngineError(
         "cannot determine a session root; set OPENSEEK_SESSION_ROOT",
       )
@@ -338,8 +338,8 @@ async fn EngineManager::claim_session_family_move(
     (selected.workspace, selected.workspace_token)
   } else {
     let mut workspace : @pathx.Absolute? = None
-    for project in registered_workspaces() {
-      if workspace_session_root(project) == root {
+    for project in @workspaces.registered() {
+      if @workspaces.store_root(project) == root {
         workspace = Some(project)
         break
       }
@@ -522,7 +522,7 @@ pub async fn archived_sessions(
 /// mutation; they must not discover unrelated legacy moves while producing a
 /// potentially slow reply without the list_archived dispatcher callback.
 async fn list_archived_sessions(manager : EngineManager) -> SessionsReply {
-  guard resolved_session_root() is Some(root) else {
+  guard @workspaces.global_store_root() is Some(root) else {
     raise EngineError(
       "cannot determine a session root; set OPENSEEK_SESSION_ROOT",
     )
@@ -530,12 +530,12 @@ async fn list_archived_sessions(manager : EngineManager) -> SessionsReply {
   let groups : Array[SessionGroup] = [
     session_group(manager, None, archived_session_root(root)),
   ]
-  for path in registered_workspaces() {
+  for path in @workspaces.registered() {
     groups.push(
       session_group(
         manager,
         Some(path),
-        archived_session_root(workspace_session_root(path)),
+        archived_session_root(@workspaces.store_root(path)),
       ),
     )
   }
@@ -807,7 +807,7 @@ async fn migrate_legacy_archive(
     _ => None
   }).unwrap_or("")
   guard !text.is_empty() else { return }
-  guard resolved_session_root() is Some(root) else { return }
+  guard @workspaces.global_store_root() is Some(root) else { return }
   let remaining : Array[String] = []
   for line in text.split("\n") {
     let session = line.trim().to_owned()
@@ -1091,7 +1091,7 @@ async test "permanent deletion uses the selected archived store" {
   )
   let manager = new_engine_manager("unused")
   manager.pump = Serving(sessions=Map([]))
-  let registered = registered_workspaces()
+  let registered = @workspaces.registered()
   assert_eq(registered.length(), 1)
   let workspace_token = registered[0].resource_path()
   let deleted_workspaces : Array[String] = []
@@ -1226,8 +1226,8 @@ async test "permanent archived deletion drops placement but keeps files and bran
   let workspace = root.join("workspace")
   @sys.set_env_var("OPENSEEK_SESSION_ROOT", global.to_string())
   prepare_git_repo(workspace)
-  ignore(git_in(workspace, ["branch", "openseek/chat"]))
-  ignore(add_workspace(workspace.to_string(), fn(_) {  }))
+  ignore(@gitx.run(workspace, ["branch", "openseek/chat"]))
+  ignore(@workspaces.add(workspace.to_string(), fn(_) {  }))
   @fs.write_file(
     workspace.join("project-note.txt").to_string(),
     b"keep me",
@@ -1238,7 +1238,7 @@ async test "permanent archived deletion drops placement but keeps files and bran
     {
       name: "chat-tree",
       branch: "openseek/chat",
-      base: git_in(workspace, ["rev-parse", "HEAD"]),
+      base: @gitx.run(workspace, ["rev-parse", "HEAD"]),
       session: Some("chat"),
       codex_thread: None,
     },
@@ -1275,7 +1275,7 @@ async test "permanent archived deletion drops placement but keeps files and bran
   assert_eq(committed_infos[0].session, Some("other"))
   assert_true(@fsx.exists(workspace.join("project-note.txt").to_path()))
   assert_true(
-    git_in(workspace, ["branch", "--list", "openseek/chat"]).contains(
+    @gitx.run(workspace, ["branch", "--list", "openseek/chat"]).contains(
       "openseek/chat",
     ),
   )
