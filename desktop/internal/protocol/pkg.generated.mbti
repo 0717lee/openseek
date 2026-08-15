@@ -16,7 +16,7 @@ pub fn goal_clear() -> @openseek_protocol.Command
 
 pub fn goal_set(String, auto~ : Bool) -> @openseek_protocol.Command
 
-pub fn prompt(String) -> @openseek_protocol.Command
+pub fn prompt(String, submission_id? : String) -> @openseek_protocol.Command
 
 pub fn steer(String) -> @openseek_protocol.Command
 

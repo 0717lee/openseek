@@ -155,7 +155,14 @@ test "append leaves the original session unchanged" {
       #|{
       #|  id: { value: "example" },
       #|  system_prompt: "system",
-      #|  events: <Vector: [{ sequence: 1, ts: 0, item: User({ content: "hello" }) }]>,
+      #|  events: <Vector:
+      #|    [
+      #|      {
+      #|        sequence: 1,
+      #|        ts: 0,
+      #|        item: User({ content: "hello", submission_id: None }),
+      #|      },
+      #|    ]>,
       #|  last_sequence: 1,
       #|}
     ),
@@ -175,7 +182,11 @@ test "append_event returns the durable event" {
   debug_inspect(
     event,
     content=(
-      #|{ sequence: 1, ts: 0, item: User({ content: "hello" }) }
+      #|{
+      #|  sequence: 1,
+      #|  ts: 0,
+      #|  item: User({ content: "hello", submission_id: None }),
+      #|}
     ),
   )
 }
@@ -319,7 +330,11 @@ test "summary replaces covered events in model projection only" {
       #|  system_prompt: "system",
       #|  events: <Vector:
       #|    [
-      #|      { sequence: 1, ts: 0, item: User({ content: "old user" }) },
+      #|      {
+      #|        sequence: 1,
+      #|        ts: 0,
+      #|        item: User({ content: "old user", submission_id: None }),
+      #|      },
       #|      {
       #|        sequence: 2,
       #|        ts: 0,
@@ -480,7 +495,11 @@ test "session JSON round-trips events" {
       #|  system_prompt: "system",
       #|  events: <Vector:
       #|    [
-      #|      { sequence: 1, ts: 0, item: User({ content: "hello" }) },
+      #|      {
+      #|        sequence: 1,
+      #|        ts: 0,
+      #|        item: User({ content: "hello", submission_id: None }),
+      #|      },
       #|      { sequence: 2, ts: 0, item: Terminal(Finished("done")) },
       #|    ]>,
       #|  last_sequence: 2,

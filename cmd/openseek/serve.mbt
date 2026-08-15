@@ -2,7 +2,7 @@
 /// One decoded command from the serve-mode controller (e.g. the TUI) on
 /// stdin.
 priv enum ServeCommand {
-  Prompt(String)
+  Prompt(String, submission_id~ : String?)
   Steer(@agent_runtime.SteerInput)
   Compact
   Cancel
@@ -82,7 +82,7 @@ fn should_auto_continue(
 ///|
 /// A queued serve-mode operation that must wait for active work to finish.
 priv enum PendingWork {
-  PendingPrompt(String)
+  PendingPrompt(String, submission_id~ : String?)
   PendingCompact
   // A goal marker holding its wire-order position behind a compaction: a
   // pending compaction must not cover a goal that arrived after the compact
@@ -158,7 +158,7 @@ fn decode_serve_command(json : Json) -> Result[ServeCommand, String] {
     Err(message) => return Err(message)
   }
   match command {
-    Prompt(text~) => Ok(Prompt(text))
+    Prompt(text~, submission_id~) => Ok(Prompt(text, submission_id~))
     Steer(kind~, text~) =>
       Ok(
         Steer(
@@ -184,7 +184,15 @@ fn decode_serve_command(json : Json) -> Result[ServeCommand, String] {
 test "serve commands decode and reject with actionable errors" {
   assert_true(
     decode_serve_command({ "command": "prompt", "text": "hi" })
-    is Ok(Prompt("hi")),
+    is Ok(Prompt("hi", submission_id=None)),
+  )
+  assert_true(
+    decode_serve_command({
+      "command": "prompt",
+      "text": "hi",
+      "submission_id": "page-1-submission-2",
+    })
+    is Ok(Prompt("hi", submission_id=Some("page-1-submission-2"))),
   )
   assert_true(
     decode_serve_command({ "command": "steer", "text": "left" })
@@ -287,14 +295,14 @@ test "serve commands decode and reject with actionable errors" {
 
 ///|
 fn remove_next_pending_prompt(pending : Array[PendingWork]) -> Unit {
-  if pending.search_by(work => work is PendingPrompt(_)) is Some(index) {
+  if pending.search_by(work => work is PendingPrompt(_, ..)) is Some(index) {
     ignore(pending.remove(index))
   }
 }
 
 ///|
 fn has_pending_prompt(pending : Array[PendingWork]) -> Bool {
-  pending.any(work => work is PendingPrompt(_))
+  pending.any(work => work is PendingPrompt(_, ..))
 }
 
 ///|
@@ -309,7 +317,7 @@ test "pending prompt helpers ignore queued compactions and goals" {
   pending.push(PendingCompact)
   pending.push(PendingGoal("[goal]\nship it", [], false, 1, None))
   assert_false(has_pending_prompt(pending))
-  pending.push(PendingPrompt("next"))
+  pending.push(PendingPrompt("next", submission_id=None))
   assert_true(has_pending_prompt(pending))
   // Cancel targets the next prompt, never a queued goal update.
   remove_next_pending_prompt(pending)
@@ -908,7 +916,10 @@ async fn run_serve(
       [..inputs[:boundary]]
     }
 
-    fn start_turn(task_text : String) -> @async.Task[Unit] {
+    fn start_turn(
+      task_text : String,
+      submission_id : String?,
+    ) -> @async.Task[Unit] {
       // Each turn refills the shared subrun allowance; the registry (and the
       // budget object the explore tool holds) lives across turns.
       subrun_budget.reset_turn()
@@ -920,6 +931,7 @@ async fn run_serve(
           model~,
           session~,
           task=task_text,
+          submission_id?,
           on_goal_met?,
           append_item=(current, item) => {
             let next = match store {
@@ -979,8 +991,8 @@ async fn run_serve(
       // arms (context, goal markers) keep draining in arrival order.
       while active_work is None && pending.length() > 0 {
         match pending.remove(0) {
-          PendingPrompt(text) =>
-            active_work = Some(ActiveTurn(start_turn(text)))
+          PendingPrompt(text, submission_id~) =>
+            active_work = Some(ActiveTurn(start_turn(text, submission_id)))
           PendingCompact =>
             active_work = Some(ActiveCompact(start_compaction(session)))
           // Instant work: append the goal at its ordered position and keep
@@ -1015,11 +1027,12 @@ async fn run_serve(
         _ => break serve~
       }
       match step {
-        Wire(Prompt(text)) =>
+        Wire(Prompt(text, submission_id~)) =>
           match active_work {
             // One turn at a time: extra prompts wait their wire-order turn.
-            Some(_) => pending.push(PendingPrompt(text))
-            None => active_work = Some(ActiveTurn(start_turn(text)))
+            Some(_) => pending.push(PendingPrompt(text, submission_id~))
+            None =>
+              active_work = Some(ActiveTurn(start_turn(text, submission_id)))
           }
         Wire(Steer(input)) =>
           match input {
@@ -1188,7 +1201,7 @@ async fn run_serve(
             ) {
             goal_turns_remaining -= 1
             @emit.emit(GoalContinue(remaining=goal_turns_remaining))
-            active_work = Some(ActiveTurn(start_turn(GoalContinuePrompt)))
+            active_work = Some(ActiveTurn(start_turn(GoalContinuePrompt, None)))
           } else if armed &&
             finished &&
             !shutting_down &&

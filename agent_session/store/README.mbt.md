@@ -105,7 +105,11 @@ async test "create and load a complete session" {
         #|  system_prompt: "system",
         #|  events: <Vector:
         #|    [
-        #|      { sequence: 1, ts: 0, item: User({ content: "hello" }) },
+        #|      {
+        #|        sequence: 1,
+        #|        ts: 0,
+        #|        item: User({ content: "hello", submission_id: None }),
+        #|      },
         #|      { sequence: 2, ts: 0, item: Terminal(Finished("done")) },
         #|    ]>,
         #|  last_sequence: 2,

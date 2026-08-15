@@ -97,8 +97,17 @@ pub fn SessionId::generated(
 /// A `UserMessage` is durable data, not a UI transcript item. It records the
 /// exact text that should be replayed as a user-role message in
 /// `Session::chat_messages`.
+///
+/// `submission_id` is the submitting controller's tag for this prompt,
+/// echoed from the serve `prompt` command so a delivery can be reconciled by
+/// exact id rather than by matching text (two clients can submit identical
+/// text into one session). None for untagged input: steers, TUI and one-shot
+/// prompts, and every record written before the field existed. Encoding
+/// omits it when absent, so untagged lines are byte for byte what this store
+/// has always written.
 pub struct UserMessage {
   priv content : String
+  priv submission_id : String?
 } derive(Eq, Debug, ToJson, FromJson)
 
 ///|
@@ -123,14 +132,24 @@ fn SessionToolCall::to_deepseek(self : SessionToolCall) -> @deepseek.ToolCall {
 ///
 /// The constructor does not trim, normalize, or reject empty content. Empty
 /// messages are preserved because they may be meaningful to a caller or test.
-pub fn UserMessage::UserMessage(content : String) -> UserMessage {
-  { content, }
+pub fn UserMessage::UserMessage(
+  content : String,
+  submission_id? : String,
+) -> UserMessage {
+  { content, submission_id }
 }
 
 ///|
 /// Return the prompt text exactly as stored.
 pub fn UserMessage::content(self : UserMessage) -> String {
   self.content
+}
+
+///|
+/// Return the submitting controller's tag, exactly as stored; None for
+/// untagged input.
+pub fn UserMessage::submission_id(self : UserMessage) -> String? {
+  self.submission_id
 }
 
 ///|

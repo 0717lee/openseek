@@ -50,7 +50,11 @@ test "parse round-trips every event kind" {
       #|{
       #|  header: None,
       #|  events: [
-      #|    { sequence: 1, ts: 0, item: User({ content: "list the files" }) },
+      #|    {
+      #|      sequence: 1,
+      #|      ts: 0,
+      #|      item: User({ content: "list the files", submission_id: None }),
+      #|    },
       #|    {
       #|      sequence: 2,
       #|      ts: 0,
@@ -103,7 +107,13 @@ test "parse tolerates a truncated final line" {
     content=(
       #|{
       #|  header: None,
-      #|  events: [{ sequence: 1, ts: 0, item: User({ content: "hi" }) }],
+      #|  events: [
+      #|    {
+      #|      sequence: 1,
+      #|      ts: 0,
+      #|      item: User({ content: "hi", submission_id: None }),
+      #|    },
+      #|  ],
       #|  errors: [],
       #|  partial_tail: true,
       #|}
@@ -123,7 +133,11 @@ test "parse records a bad interior line without aborting" {
     parsed.events,
     content=(
       #|[
-      #|  { sequence: 1, ts: 0, item: User({ content: "hi" }) },
+      #|  {
+      #|    sequence: 1,
+      #|    ts: 0,
+      #|    item: User({ content: "hi", submission_id: None }),
+      #|  },
       #|  { sequence: 2, ts: 0, item: Terminal(Finished("done")) },
       #|]
     ),

@@ -14,7 +14,7 @@ pub fn split_child_session_id(String) -> (String, Int)?
 
 // Types and methods
 pub(all) enum Command {
-  Prompt(text~ : String)
+  Prompt(text~ : String, submission_id~ : String?)
   Steer(kind~ : SteerKind, text~ : String)
   Compact
   Cancel

@@ -140,8 +140,9 @@ pub impl @json.FromJson for TurnTerminal
 pub struct UserMessage {
   // private fields
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
-pub fn UserMessage::UserMessage(String) -> Self
+pub fn UserMessage::UserMessage(String, submission_id? : String) -> Self
 pub fn UserMessage::content(Self) -> String
+pub fn UserMessage::submission_id(Self) -> String?
 
 // Type aliases
 

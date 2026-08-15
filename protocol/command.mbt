@@ -28,7 +28,11 @@ pub(all) enum SteerKind {
 /// One type, one encoder, one decoder — the same shape the event direction now
 /// has.
 pub(all) enum Command {
-  Prompt(text~ : String)
+  /// `submission_id` is the submitting controller's tag for this prompt. The
+  /// engine records it on the turn's durable `User` item, so a delivery can
+  /// later be reconciled by exact id rather than by matching text. Controllers
+  /// that do not reconcile deliveries (the TUI) send none.
+  Prompt(text~ : String, submission_id~ : String?)
   Steer(kind~ : SteerKind, text~ : String)
   Compact
   Cancel
@@ -43,7 +47,15 @@ pub(all) enum Command {
 /// The command as the line a controller writes.
 pub fn Command::to_json(self : Command) -> Json {
   match self {
-    Prompt(text~) => { "command": "prompt", "text": text }
+    // Like `auto` below, the tag is written only when present: omission is
+    // what an untagged prompt has always looked like on this wire, so the
+    // common line stays byte for byte what every controller has written.
+    Prompt(text~, submission_id~) =>
+      if submission_id is Some(id) {
+        { "command": "prompt", "text": text, "submission_id": id }
+      } else {
+        { "command": "prompt", "text": text }
+      }
     Steer(kind~, text~) =>
       {
         "command": "steer",
@@ -97,6 +109,10 @@ pub fn Command::to_json(self : Command) -> Json {
 ///    a `kind` it ignores, and a controller older than the field sends none —
 ///    so absent means `Prompt`, which is what every controller meant before
 ///    there was a choice. The desktop was still sending exactly that.
+///    `prompt`'s `submission_id` is the same case: it arrived long after
+///    `prompt` itself, an engine older than the field ignores the key, and a
+///    controller that does not tag its submissions sends none — absent means
+///    untagged, which is what every prompt was before there was a tag.
 /// 2. **Optional since the command shipped.** `goal`'s `auto` arrived *with*
 ///    `goal` (c8cc6ad7), so case (1) does not cover it — but the engine has
 ///    read `auto` as absent-means-false from the first line it ever decoded.
@@ -108,7 +124,15 @@ pub fn Command::to_json(self : Command) -> Json {
 /// claims.
 pub fn Command::parse(line : Json) -> Result[Command, String] {
   match line {
-    { "command": "prompt", "text": String(text), .. } => Ok(Prompt(text~))
+    { "command": "prompt", "text": String(text), .. } =>
+      match line {
+        { "submission_id": String(id), .. } =>
+          Ok(Prompt(text~, submission_id=Some(id)))
+        { "submission_id": _, .. } =>
+          Err("expected a string \"submission_id\" field")
+        // An untagged prompt: see the absence rule above.
+        _ => Ok(Prompt(text~, submission_id=None))
+      }
     { "command": "steer", .. } => parse_steer(line)
     { "command": "prompt", .. } => Err("expected a string \"text\" field")
     { "command": "compact", .. } => Ok(Compact)
