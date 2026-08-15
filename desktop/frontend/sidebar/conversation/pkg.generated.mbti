@@ -1,0 +1,67 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "openseek_desktop/frontend/sidebar/conversation"
+
+import {
+  "moonbit-community/rabbita",
+  "moonbit-community/rabbita/cmd",
+  "moonbit-community/rabbita/html",
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn component(@rabbita.Val[Input], Actions) -> @rabbita.Val[Array[@html.Html]]
+
+// Errors
+
+// Types and methods
+pub(all) struct Actions {
+  open : (Id) -> @cmd.Cmd
+  archive : (Id) -> @cmd.Cmd
+  restore : (Id) -> @cmd.Cmd
+  delete : (Id) -> @cmd.Cmd
+}
+
+pub(all) struct Id {
+  source : String
+  channel : String
+  conversation : String
+  root : String?
+} derive(Eq, Hash, @debug.Debug)
+pub fn Id::Id(source~ : String, channel~ : String, conversation~ : String, root? : String) -> Self
+pub fn Id::channel(Self) -> String
+pub fn Id::conversation(Self) -> String
+pub fn Id::root(Self) -> String?
+pub fn Id::source(Self) -> String
+
+pub(all) struct Input {
+  id : Id
+  title : String
+  label : String
+  nested : Bool
+  subrun : Bool
+  active : Bool
+  running : Bool
+  openable : Bool
+  worktree : String?
+  run_mark : RunMark
+  trailing : Array[TrailingAction]
+  children : Array[Input]
+} derive(Eq, @debug.Debug)
+pub fn Input::id(Self) -> Id
+
+pub(all) enum RunMark {
+  NoRunMark
+  RunningMark
+  CompletedMark
+  FailedMark
+} derive(Eq, @debug.Debug)
+
+pub(all) enum TrailingAction {
+  Archive(title~ : String)
+  Restore(title~ : String)
+  Delete(title~ : String)
+} derive(Eq, @debug.Debug)
+
+// Type aliases
+
+// Traits

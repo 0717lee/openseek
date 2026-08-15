@@ -24,13 +24,6 @@ priv struct ProjectSettings {
 } derive(Eq)
 
 ///|
-/// The one open project-row "…" menu (settings, detach).
-priv struct ProjectMenu {
-  channel : @interop.ChannelId
-  project : @common.Uri
-} derive(Eq, Debug)
-
-///|
 fn fetch_workspace_settings(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
@@ -628,64 +621,41 @@ test "settings commit decoder carries the workspace identity" {
 }
 
 ///|
-test "the project menu toggles, navigates to the settings page, and detaches" {
+test "project actions navigate to settings and detach" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
-  let (_, opened) = update(
-    dispatch,
-    ToggleProjectMenu(Local, workspace),
-    test_model(),
-  )
-  assert_eq(opened.project_menu, Some({ channel: Local, project: workspace }))
-  // The same click closes; a different row's click moves the menu.
-  let (_, closed) = update(
-    dispatch,
-    ToggleProjectMenu(Local, workspace),
-    opened,
-  )
-  assert_true(closed.project_menu is None)
-  let other = @interop.ChannelId::Local.test_resource("/other")
-  let (_, moved) = update(dispatch, ToggleProjectMenu(Local, other), opened)
-  assert_eq(moved.project_menu, Some({ channel: Local, project: other }))
-  let (_, dismissed) = update(dispatch, CloseProjectMenu, moved)
-  assert_true(dismissed.project_menu is None)
-  // The settings item opens the page and takes the menu with it.
   let (_, page) = update(
     dispatch,
     OpenWorkspaceSettings(Local, workspace),
-    opened,
+    test_model(),
   )
-  assert_true(
-    page.screen == WorkspaceSettings(channel=Local, workspace~) &&
-    page.project_menu is None,
+  assert_true(page.screen == WorkspaceSettings(channel=Local, workspace~))
+  let (_, detached) = update(
+    dispatch,
+    RemoveProject(Local, workspace),
+    test_model(),
   )
-  // Detach closes the menu with the click that acted from it.
-  let (_, detached) = update(dispatch, RemoveProject(Local, workspace), opened)
-  assert_true(detached.project_menu is None)
+  assert_true(detached.screen is Chat)
 }
 
 ///|
-test "detaching a workspace closes its settings page and menu" {
+test "detaching a workspace closes its settings page" {
   let dispatch = test_dispatch()
   let gone = @interop.ChannelId::Local.test_resource("/gone")
   let kept = @interop.ChannelId::Local.test_resource("/kept")
   let model = {
     ..test_model().with_dev(dev => { ..dev, projects: [gone, kept] }),
     screen: WorkspaceSettings(channel=Local, workspace=gone),
-    project_menu: Some({ channel: Local, project: gone }),
   }
   let (_, adopted) = update_dev(dispatch, ProjectsChanged([kept]), model)
   assert_true(adopted.screen is Chat)
-  assert_true(adopted.project_menu is None)
-  // A snapshot that retains the workspace leaves both alone.
+  // A snapshot that retains the workspace leaves the settings page alone.
   let staying = {
     ..test_model().with_dev(dev => { ..dev, projects: [kept] }),
     screen: WorkspaceSettings(channel=Local, workspace=kept),
-    project_menu: Some({ channel: Local, project: kept }),
   }
   let (_, retained) = update_dev(dispatch, ProjectsChanged([kept]), staying)
   assert_true(
     retained.screen == WorkspaceSettings(channel=Local, workspace=kept),
   )
-  assert_eq(retained.project_menu, Some({ channel: Local, project: kept }))
 }

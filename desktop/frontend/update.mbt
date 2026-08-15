@@ -425,13 +425,8 @@ fn adopt_projects(
     }),
     conversations,
     loading_conversation,
-    // A detached workspace takes its open "…" menu and its settings page
-    // with it; both address a row that no longer exists.
-    project_menu: match model.project_menu {
-      Some(menu) if menu.channel == channel && !paths.contains(menu.project) =>
-        None
-      menu => menu
-    },
+    // A detached workspace takes its settings page with it; the page
+    // addresses a row that no longer exists.
     screen: match model.screen {
       WorkspaceSettings(channel=owner, workspace~) if owner == channel &&
         !paths.contains(workspace) => Chat
@@ -2494,49 +2489,6 @@ fn update_msg(
         (cmd, { ..model, narrow, sidebar_open: !narrow })
       }
     }
-    ToggleChatsSection =>
-      (@cmd.none, { ..model, chats_collapsed: !model.chats_collapsed })
-    ToggleProjectsSection =>
-      (@cmd.none, { ..model, projects_collapsed: !model.projects_collapsed })
-    ToggleProjectSection(channel, project) => {
-      guard @resource.belongs_to(project, channel) else {
-        return (@cmd.none, model)
-      }
-      let collapsed_projects = if model.project_collapsed(channel, project) {
-        model.collapsed_projects.filter(entry => {
-          !(entry.0 == channel && entry.1 == project)
-        })
-      } else {
-        [..model.collapsed_projects, (channel, project)]
-      }
-      (@cmd.none, { ..model, collapsed_projects, project_menu: None })
-    }
-    ShowMoreProjectChats(channel, project) => {
-      guard @resource.belongs_to(project, channel) &&
-        !model.project_chats_expanded(channel, project) else {
-        return (@cmd.none, model)
-      }
-      (
-        @cmd.none,
-        {
-          ..model,
-          expanded_project_chats: [
-            ..model.expanded_project_chats,
-            (channel, project),
-          ],
-        },
-      )
-    }
-    ToggleSubruns(channel, session_id) => {
-      let expanded = if model.subruns_expanded(channel, session_id) {
-        model.expanded_subruns.filter(entry => {
-          !(entry.0 == channel && entry.1 == session_id)
-        })
-      } else {
-        [..model.expanded_subruns, (channel, session_id)]
-      }
-      (@cmd.none, { ..model, expanded_subruns: expanded })
-    }
     SaveApiKey => {
       guard model.host_settings_loaded() else { return (@cmd.none, model) }
       let api_key = model.setup_api_key.trim().to_owned()
@@ -2805,31 +2757,17 @@ fn update_msg(
       )
     NewChatIn(channel, workspace) => {
       // A workspace section's own "new chat": the fresh conversation lands in
-      // that project, and the workspace stays active for the next one. A new
-      // loose chat unfolds the Chats section so its row is visible; a new
-      // project chat unfolds the Projects section for the same reason.
-      // The explicit channel lets this handler move device selection before
-      // creating the chat. Current sidebar rows pass the selected channel.
+      // that project, and the workspace stays active for the next one. The
+      // sidebar components reveal the active row themselves, so no disclosure
+      // state needs unfolding here. The explicit channel lets this handler
+      // move device selection before creating the chat.
       guard model.device_state(channel) is Some(_) else {
         return (@cmd.none, model)
       }
       let (focus_cmd, model) = focus_channel(dispatch, model, channel)
-      let collapsed_projects = match workspace {
-        Some(project) =>
-          model.collapsed_projects.filter(entry => {
-            !(entry.0 == channel && entry.1 == project)
-          })
-        None => model.collapsed_projects
-      }
       (
         @cmd.batch([focus_cmd, rotate_session(dispatch, channel)]),
-        {
-          ..model.with_active_project(workspace),
-          loading_conversation: None,
-          chats_collapsed: model.chats_collapsed && workspace is Some(_),
-          projects_collapsed: model.projects_collapsed && workspace is None,
-          collapsed_projects,
-        },
+        { ..model.with_active_project(workspace), loading_conversation: None },
       )
     }
     ToggleWorktreeMode => {
@@ -3096,49 +3034,15 @@ fn update_msg(
       }
     ProjectPickerClose => (@cmd.none, { ..model, project_picker: None })
     RemoveProject(channel, path) =>
+      // The row itself leaves with the registry commit broadcast; its open
+      // "…" menu is component state and leaves with the keyed row.
       if @resource.belongs_to(path, channel) {
-        // Close the row's menu with the click that acted from it; the row
-        // itself leaves with the registry commit broadcast.
-        (
-          remove_project(dispatch, channel, path.path),
-          {
-            ..model,
-            project_menu: None,
-            collapsed_projects: model.collapsed_projects.filter(entry => {
-              !(entry.0 == channel && entry.1 == path)
-            }),
-            expanded_project_chats: model.expanded_project_chats.filter(entry => {
-              !(entry.0 == channel && entry.1 == path)
-            }),
-          },
-        )
+        (remove_project(dispatch, channel, path.path), model)
       } else {
         (@cmd.none, model)
       }
-    ToggleProjectMenu(channel, project) => {
-      let menu : ProjectMenu = { channel, project }
-      (
-        @cmd.none,
-        {
-          ..model,
-          project_menu: if model.project_menu == Some(menu) {
-            None
-          } else {
-            Some(menu)
-          },
-        },
-      )
-    }
-    CloseProjectMenu => (@cmd.none, { ..model, project_menu: None })
     OpenWorkspaceSettings(channel, workspace) =>
-      (
-        @cmd.none,
-        {
-          ..model,
-          screen: WorkspaceSettings(channel~, workspace~),
-          project_menu: None,
-        },
-      )
+      (@cmd.none, { ..model, screen: WorkspaceSettings(channel~, workspace~) })
     WorkspaceDefaultModeChosen(channel, workspace, value) => {
       guard model.device_state(channel) is Some(dev) else {
         return (@cmd.none, model)
@@ -3271,12 +3175,13 @@ fn update_msg(
         }),
       )
     }
-    DeleteArchivedSession(channel, key, title) => {
+    DeleteArchivedSession(channel, key) => {
       // Only a currently visible archived row may open the destructive dialog;
       // stale clicks cannot authorize deletion of an identity no longer shown.
       guard model.device_state(channel) is Some(dev) &&
         key.workspace_payload(channel) is Some(_) &&
-        dev.archived.iter().any(item => key.matches(item)) else {
+        dev.archived.iter().find_first(item => key.matches(item))
+        is Some(record) else {
         return (@cmd.none, model)
       }
       let sessions : Array[String] = [key.session]
@@ -3291,7 +3196,12 @@ fn update_msg(
         @cmd.none,
         {
           ..model,
-          archived_delete_confirm: Some({ channel, key, sessions, title }),
+          archived_delete_confirm: Some({
+            channel,
+            key,
+            sessions,
+            title: session_item_label(record),
+          }),
         },
       )
     }
@@ -6873,67 +6783,6 @@ test "sub-run completion reports only abnormal terminal status" {
     failed.overlay.map(notice => notice.content).join("; "),
     content="review sr-2: failed · 4 step(s) · 901 tok",
   )
-}
-
-///|
-test "a conversation's sub-run twisty toggles only its own row" {
-  let dispatch = test_dispatch()
-  let model = test_model()
-  assert_false(model.subruns_expanded(Local, "a"))
-  let (_, opened) = update(dispatch, ToggleSubruns(Local, "a"), model)
-  assert_true(opened.subruns_expanded(Local, "a"))
-  // A neighbour, and the same id on another device, stay folded: the state
-  // is keyed by both halves.
-  assert_false(opened.subruns_expanded(Local, "b"))
-  assert_false(opened.subruns_expanded(Remote("dev"), "a"))
-  let (_, closed) = update(dispatch, ToggleSubruns(Local, "a"), opened)
-  assert_false(closed.subruns_expanded(Local, "a"))
-}
-
-///|
-test "project disclosure and chat preview state are scoped to one project" {
-  let dispatch = test_dispatch()
-  let project = @interop.ChannelId::Local.test_resource("/work/alpha")
-  let neighbour = @interop.ChannelId::Local.test_resource("/work/beta")
-  let model = test_model()
-  assert_false(model.project_collapsed(Local, project))
-  assert_false(model.project_chats_expanded(Local, project))
-  let (_, collapsed) = update(
-    dispatch,
-    ToggleProjectSection(Local, project),
-    model,
-  )
-  assert_true(collapsed.project_collapsed(Local, project))
-  assert_false(collapsed.project_collapsed(Local, neighbour))
-  assert_false(collapsed.project_collapsed(Remote("dev"), project))
-  let (_, expanded) = update(
-    dispatch,
-    ShowMoreProjectChats(Local, project),
-    collapsed,
-  )
-  assert_true(expanded.project_chats_expanded(Local, project))
-  assert_false(expanded.project_chats_expanded(Local, neighbour))
-  let (_, reopened) = update(
-    dispatch,
-    ToggleProjectSection(Local, project),
-    expanded,
-  )
-  assert_false(reopened.project_collapsed(Local, project))
-  assert_true(reopened.project_chats_expanded(Local, project))
-}
-
-///|
-test "new project chat unfolds its project and the Projects section" {
-  let dispatch = test_dispatch()
-  let project = @interop.ChannelId::Local.test_resource("/work/alpha")
-  let model = {
-    ..test_model(),
-    projects_collapsed: true,
-    collapsed_projects: [(Local, project)],
-  }
-  let (_, opened) = update(dispatch, NewChatIn(Local, Some(project)), model)
-  assert_false(opened.projects_collapsed)
-  assert_false(opened.project_collapsed(Local, project))
 }
 
 ///|
@@ -14533,18 +14382,19 @@ test "archived deletion confirmation owns one visible conversation family" {
   })
   let (_, staged) = update(
     dispatch,
-    DeleteArchivedSession(
-      @interop.ChannelId::Local,
-      { session: "desktop-parent", workspace: None },
-      "Parent title",
-    ),
+    DeleteArchivedSession(@interop.ChannelId::Local, {
+      session: "desktop-parent",
+      workspace: None,
+    }),
     model,
   )
   guard staged.archived_delete_confirm is Some(confirm) else {
     fail("delete confirmation was not staged")
   }
   assert_true(confirm.key == { session: "desktop-parent", workspace: None })
-  assert_eq(confirm.title, "Parent title")
+  // The record's blank title falls back to its id: the dialog names what the
+  // archived list showed, not whatever label the click happened to carry.
+  assert_eq(confirm.title, "desktop-parent")
   assert_true(confirm.sessions.contains("desktop-parent"))
   assert_true(confirm.sessions.contains("desktop-parent-sr-1"))
   let (_, cancelled) = update(dispatch, CancelDeleteArchivedSession, staged)
@@ -14600,7 +14450,7 @@ test "archived deletion keeps same-id rows in other stores" {
   let key : ArchiveRecordKey = { session: "shared", workspace: Some(project) }
   let (_, staged) = update(
     dispatch,
-    DeleteArchivedSession(@interop.ChannelId::Local, key, "Project chat"),
+    DeleteArchivedSession(@interop.ChannelId::Local, key),
     model,
   )
   guard staged.archived_delete_confirm is Some(confirm) else {

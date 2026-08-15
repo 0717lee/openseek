@@ -224,8 +224,7 @@ aside {
 .section-heading:hover .row-archive {
   visibility: visible;
 }
-/* A foldable section ("Chats"): the heading toggles it, wearing the
-   same textual chevron as the archived group. */
+/* Every peer conversation section uses the same heading disclosure. */
 .section-heading.collapsible {
   cursor: pointer;
   user-select: none;
@@ -235,6 +234,9 @@ aside {
 }
 .section-heading.collapsible.collapsed > .sidebar-label::after {
   content: " ▸";
+}
+.section-heading.active {
+  color: var(--color-accent-strong);
 }
 
 /* An attached workspace: a folder row whose main disclosure button folds its
@@ -604,36 +606,6 @@ button.row-twisty:hover {
   padding: 10px;
   font-size: var(--font-size-md);
   color: var(--color-text-secondary);
-}
-
-/* The collapsed group holding archived conversations, at the tail of
-   the chat list. */
-.sidebar-archived {
-  margin-top: 10px;
-}
-.archived-heading {
-  cursor: pointer;
-  list-style: none;
-  user-select: none;
-}
-.archived-heading::-webkit-details-marker {
-  display: none;
-}
-.archived-heading::after {
-  content: " ▸";
-}
-.sidebar-archived[open] > .archived-heading::after {
-  content: " ▾";
-}
-.archived-rows {
-  display: grid;
-  gap: 4px;
-}
-.archived-rows .conversation-row {
-  color: var(--color-text-muted);
-}
-.archived-rows .conversation-row.active {
-  color: var(--color-accent-strong);
 }
 
 .sidebar-icon {
