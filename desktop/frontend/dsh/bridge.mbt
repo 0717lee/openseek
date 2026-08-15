@@ -3,6 +3,20 @@
 // reviewed allowlist before using the HTTP carrier.
 
 ///|
+/// Snapshot replies replace a complete frontend baseline. Keep each baseline
+/// on its own ordered lane so unrelated Workspace and session reads do not
+/// block one another, while older reads of the same baseline cannot arrive
+/// after newer ones. Reconnect uses the Workspace lane because its probe is a
+/// `workspace.list` request too.
+fn DshReplyKind::ordered_lane(self : DshReplyKind) -> String? {
+  match self {
+    DshReconnectReply | DshWorkspacesReply => Some("dsh-workspace-list")
+    DshSessionsReply => Some("dsh-session-list")
+    _ => None
+  }
+}
+
+///|
 fn DshReplyKind::request(
   self : DshReplyKind,
   dispatch : @cmd.Emit[Msg],
@@ -11,17 +25,17 @@ fn DshReplyKind::request(
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      // Workspace replies update both the page projection and the native
-      // Files/Terminal authorization table. Hold one ordered lane across the
-      // complete bridge call so an older snapshot can never arrive after and
-      // replace a newer one in either consumer.
+      // Hold list lanes across the complete bridge call. For Workspace this
+      // includes the native Files/Terminal authorization update, so neither
+      // native authority nor either frontend baseline can be rolled back by
+      // an older reply.
       let value : Json = try {
-        if method_ == "workspace.list" {
+        if self.ordered_lane() is Some(lane) {
           @interop.bridge_request_in_order(
             @interop.ChannelId::Local,
             @commands.dsh_request,
             { "method": method_, "payload": payload },
-            lane="dsh-workspace-list",
+            lane~,
           )
         } else {
           @interop.bridge_request(
@@ -43,6 +57,14 @@ fn DshReplyKind::request(
       scheduler.add(dispatch(Reply(kind=self, value~)))
     })
   })
+}
+
+///|
+test "dsh snapshot replies select independent ordered lanes" {
+  assert_eq(DshReconnectReply.ordered_lane(), Some("dsh-workspace-list"))
+  assert_eq(DshWorkspacesReply.ordered_lane(), Some("dsh-workspace-list"))
+  assert_eq(DshSessionsReply.ordered_lane(), Some("dsh-session-list"))
+  assert_eq(DshCreateReply.ordered_lane(), None)
 }
 
 ///|

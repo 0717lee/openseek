@@ -439,6 +439,10 @@ fn State::with_event(
       (
         @cmd.batch([
           DshWorkspacesReply.request(dispatch, "workspace.list", {}),
+          // A session list already in flight may still contain the removed
+          // row. Queue a fresh snapshot behind it so the session-list lane
+          // makes this event's state the final baseline.
+          DshSessionsReply.request(dispatch, "session.list", {}),
           match active_id {
             Some(id) if active_id != self.active_id =>
               self.load_history(dispatch, id)
@@ -1046,6 +1050,7 @@ test "removing a background dsh session preserves the active transcript" {
     state,
   )
   assert_eq(next.active_id, Some("active"))
+  assert_eq(next.sessions.map(row => row.id), ["active"])
   assert_eq(next.events.length(), 1)
   assert_eq(next.pending.length(), 1)
   assert_eq(next.pending[0].session_id(), "active")
