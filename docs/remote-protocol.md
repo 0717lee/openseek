@@ -320,6 +320,21 @@ anything you can act on later; a client that persists a workspace session
 across a host restart must send that workspace back, because the record is
 unreachable without it once the store is no longer the default.
 
+The host does not add to that population. `agent.start` opens a record in the
+store its `workspace` selects, or continues one already there; a start that
+would file a *second* record for an id another store owns is refused, naming
+the store that holds it — the rule `worktree.create` has always applied to a
+binding, now applied to the ordinary start path. Duplicate ids therefore
+arrive only from outside the app (the `openseek` CLI takes `--session <name>`
+verbatim under any `--session-root`, and a project's store travels inside the
+project directory), which is why clients must still handle them rather than
+assume they cannot occur.
+
+Because a host runs at most one engine per session id, a live engine is also
+filed under the id alone. Every lifecycle op compares its store before
+treating one as its own, so archiving a Scratch record is not refused by — and
+does not close — a project conversation that merely shares the id.
+
 Notifications:
 
 | method | params |

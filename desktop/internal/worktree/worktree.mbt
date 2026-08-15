@@ -33,11 +33,14 @@ impl Show for WorktreeError with fn output(self, logger) {
 /// conversation already has a slot in the running pump (binding is only for
 /// conversations that are new everywhere), and `drain_sessions` closes the
 /// engines of conversations whose checkout is about to be deleted — an idle
-/// serve process still has its cwd inside that directory.
+/// serve process still has its cwd inside that directory. It takes the store
+/// root beside the ids because engine slots are keyed by session id alone: a
+/// same-id conversation recording in another store is a different one, and
+/// draining it would tear down a writer this removal was never given.
 pub(all) struct WorktreeHost {
   lifecycle_lock : @async.Mutex
   session_is_live : (String) -> Bool
-  drain_sessions : async (Array[String]) -> Unit
+  drain_sessions : async (Array[String], @pathx.Absolute) -> Unit
 }
 
 ///|
@@ -567,14 +570,13 @@ pub async fn WorktreeOwner::archive_checkout(
 /// rediscovered from the session id: a worktree belongs to the project that
 /// owns the record being moved, and looking the id up again would find the
 /// first registered project holding it — a forced archive would then delete
-/// another project's uncommitted checkout. Scratch records own no worktree.
+/// another project's uncommitted checkout.
 pub async fn archive_bound_checkout(
   session : String,
   force : Bool,
-  workspace : @pathx.Absolute?,
+  workspace : @pathx.Absolute,
   on_committed? : (String, Array[WorktreeInfo]) -> Unit,
 ) -> ArchiveNeedsForceReply? {
-  guard workspace is Some(workspace) else { return None }
   WorktreeOwner::openseek(session).archive_checkout_within(
     [workspace],
     force,
@@ -1170,7 +1172,7 @@ pub async fn remove(
     )
   }
   if entry.session is Some(bound) {
-    (host.drain_sessions)([bound])
+    (host.drain_sessions)([bound], @workspaces.store_root(dir))
   }
   let target = worktree_dir(dir, name)
   let present = @fsx.is_dir(target.to_path()) catch {
@@ -1239,18 +1241,19 @@ fn restore_home_env(previous : String?) -> Unit {
 ///|
 /// A host with no engine behind it: `live` names the conversations the pump
 /// would report a slot for, and every drained session is appended to
-/// `drained` instead of closing a process.
+/// `drained` — with the store it was drained for — instead of closing a
+/// process.
 #cfg(not(platform="windows"))
 fn test_host(
   live? : Array[String] = [],
-  drained? : Array[String] = [],
+  drained? : Array[(String, String)] = [],
 ) -> WorktreeHost {
   {
     lifecycle_lock: Mutex(),
     session_is_live: session => live.contains(session),
-    drain_sessions: sessions => {
+    drain_sessions: (sessions, root) => {
       for session in sessions {
-        drained.push(session)
+        drained.push((session, root.to_string()))
       }
     },
   }

@@ -102,6 +102,18 @@ priv struct SessionFollower {
 }
 
 ///|
+/// Whether this actor tails a record in `root`. The follower map is keyed by
+/// session id, so a lifecycle operation on one store must ask this before
+/// draining an actor — see `ServeEngine::writes_store` for why the id alone
+/// cannot decide it.
+fn SessionFollower::tails_store(
+  self : SessionFollower,
+  root : @pathx.Absolute,
+) -> Bool {
+  self.root.to_string() == root.to_string()
+}
+
+///|
 /// The highest event sequence in a session document — what a snapshot's
 /// watermark is. 0 for a record with no events.
 fn session_max_sequence(session : @protocol.SessionDocument) -> Int {

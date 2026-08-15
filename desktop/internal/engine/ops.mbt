@@ -34,6 +34,7 @@ pub async fn start_run(
   defer manager.end_record_op(key, record_guard)
   let config = run_config(manager, payload)
   @session_store.ensure_not_archived(key)
+  ensure_new_record_is_unique(key, selected?=config.session_root)
   let sessions = manager.serving()
   let slot = slot_for(sessions, key)
   // Busy-ness is a property of the handle, not of admission: a condemned

@@ -58,6 +58,40 @@ async fn EngineManager::sweep_archived_deletions(self : EngineManager) -> Unit {
 }
 
 ///|
+/// Refuse to open a *second* record for an id another store already owns.
+///
+/// Session ids are unique only within one store, so the desktop must read and
+/// move records by `(store, id)`. That is a client-side truth it cannot
+/// impose on the format: the `openseek` CLI takes `--session <name>` verbatim
+/// under any `--session-root`, and a project's store travels inside the
+/// project directory. What the host *can* guarantee is that the app never
+/// adds to the population — every duplicate a user meets came from outside
+/// it. `worktree.create` has enforced the same rule since it began binding
+/// conversations; this is the equivalent for the ordinary start path.
+///
+/// A start whose selected store already holds the record is a continuation,
+/// not a creation, and passes untouched — including for an id that is
+/// duplicated on disk, because refusing to continue an existing record would
+/// strand the user with a conversation they can open but never answer.
+async fn ensure_new_record_is_unique(
+  session : String,
+  selected? : @pathx.Absolute,
+) -> Unit {
+  guard selected is Some(selected) else { return }
+  if @fsx.is_dir(selected.join("sessions").join(session).to_path()) {
+    return
+  }
+  for root in @session_store.known_roots() {
+    guard root.to_string() != selected.to_string() else { continue }
+    if @fsx.is_dir(root.join("sessions").join(session).to_path()) {
+      raise EngineError(
+        "this conversation already has a record in \{root}; start a new one here",
+      )
+    }
+  }
+}
+
+///|
 /// The record and engine claims held while a whole conversation family moves.
 /// Claims are acquired for every member before any writer is closed or record
 /// is renamed, so a busy child refuses the operation without partially moving
@@ -193,8 +227,15 @@ async fn EngineManager::claim_session_family_move(
   // Validate the complete family before closing any idle process. A running
   // child can be reached by opening its transcript and continuing it, even
   // though its ordinary nested sidebar row has no independent archive action.
+  //
+  // Only engines writing the selected store are this move's business. The
+  // pending claims above stay store-blind on purpose — they are held for the
+  // length of one operation, and refusing a concurrent same-id op costs a
+  // retry — but an idle engine can hold its slot for hours, so treating
+  // another store's writer as this record's would refuse a move the user can
+  // see is archivable, and then close a conversation they are still using.
   for slot in slots {
-    if slot.engine is Some(live) {
+    if slot.engine is Some(live) && live.writes_store(root) {
       match live.phase {
         Running(..) =>
           raise EngineError(
@@ -209,12 +250,13 @@ async fn EngineManager::claim_session_family_move(
     }
   }
   for slot in slots {
-    if slot.engine is Some(live) {
+    if slot.engine is Some(live) && live.writes_store(root) {
       live.close_and_wait()
     }
   }
   for session_id in members {
-    if manager.followers.get(session_id) is Some(follower) {
+    if manager.followers.get(session_id) is Some(follower) &&
+      follower.tails_store(root) {
       stop_follower_instance(manager, follower, writer_exited=true)
     }
   }
