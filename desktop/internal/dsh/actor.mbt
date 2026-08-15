@@ -46,13 +46,13 @@ priv enum ActorInput {
 ///|
 priv enum DshEvent {
   Frame(String, Json)
-  Disconnected
 }
 
 ///|
 priv enum ActorStep {
   Input(ActorInput)
   Event(DshEvent)
+  Disconnected
 }
 
 ///|
@@ -60,6 +60,9 @@ const ActorInputCapacity : Int = 256
 
 ///|
 const DshEventCapacity : Int = 2048
+
+///|
+const DshDisconnectCapacity : Int = 1
 
 ///|
 const ActorWakeCapacity : Int = 1
@@ -263,6 +266,11 @@ async fn[G] Actor::run_connection(
   self.interactions.reset()
   emit("dsh.status_changed", self.status())
   let events : @async.Queue[DshEvent] = Queue(kind=Blocking(DshEventCapacity))
+  // Disconnects cannot share `events`: queue saturation is itself one reason
+  // a pump exits, and a sentinel written back into that full queue could vanish.
+  let disconnects : @async.Queue[Unit] = Queue(
+    kind=Blocking(DshDisconnectCapacity),
+  )
   let connection = Connection::connect(group) catch {
     error if @async.is_being_cancelled() => raise error
     error => {
@@ -295,7 +303,9 @@ async fn[G] Actor::run_connection(
               "error": "\{error}",
             }
       }
-      (events.try_put(Disconnected) catch { _ => false }) |> ignore
+      // One signal is enough to tear down both pumps. A second pump may find
+      // this one-slot queue full, which means the disconnect is already owned.
+      (disconnects.try_put(()) catch { _ => false }) |> ignore
       self.signal()
     })
   }
@@ -305,7 +315,7 @@ async fn[G] Actor::run_connection(
     connection.dispatch_input(group, self, input)
   }
   for ;; {
-    let next = self.next_step(events) catch {
+    let next = self.next_step(events, disconnects) catch {
       error if @async.is_being_cancelled() => raise error
       _ => break
     }
@@ -321,7 +331,7 @@ async fn[G] Actor::run_connection(
           "generation": self.interactions.generation,
         })
       }
-      Event(Disconnected) => break
+      Disconnected => break
     }
   }
   connection.shutdown()
@@ -333,12 +343,18 @@ async fn[G] Actor::run_connection(
 async fn Actor::next_step(
   self : Actor,
   events : @async.Queue[DshEvent],
+  disconnects : @async.Queue[Unit],
 ) -> ActorStep {
   for ;; {
+    // Once either pump is gone, requests cannot rely on the complete dsh event
+    // surface. Tear down promptly and let the next input reopen both streams.
+    if (disconnects.try_get() catch { _ => None }) is Some(_) {
+      return Disconnected
+    }
     if (self.inputs.try_get() catch { _ => None }) is Some(input) {
       return Input(input)
     }
-    let event = events.try_get() catch { _ => return Event(Disconnected) }
+    let event = events.try_get() catch { _ => return Disconnected }
     if event is Some(event) {
       return Event(event)
     }
@@ -457,8 +473,14 @@ async test "dsh actor tracks pending interactions and consumes buffered commands
     "generation": 2,
   })
   let events : @async.Queue[DshEvent] = Queue(kind=Blocking(1))
+  let disconnects : @async.Queue[Unit] = Queue(kind=Blocking(1))
   let reply : @async.Queue[Result[Json, DshError]] = Queue(kind=Blocking(1))
   actor.inputs.put(Call("session.list", {}, reply))
-  let step = actor.next_step(events)
+  let step = actor.next_step(events, disconnects)
   assert_true(step is Input(Call("session.list", _, _)))
+  // A separate lane remains writable even when event backpressure is the
+  // reason a pump exits, and disconnect wins over the queued event.
+  events.put(Frame("mux", {}))
+  disconnects.put(())
+  assert_true(actor.next_step(events, disconnects) is Disconnected)
 }
