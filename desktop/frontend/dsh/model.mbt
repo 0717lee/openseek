@@ -162,6 +162,10 @@ struct State {
   selection_generation : Int
   prompt_generation : Int
   prompt_pending_session : String?
+  // A session-status event can arrive before the HTTP response that settles an
+  // approval or question. Keep the originating RPC busy independently so its
+  // card cannot submit the same response twice during that interval.
+  response_pending_rpcs : Array[String]
   loading : Bool
   notice : String
 } derive(Eq)
@@ -181,6 +185,7 @@ pub fn State::State(loading? : Bool = false) -> State {
     selection_generation: 0,
     prompt_generation: 0,
     prompt_pending_session: None,
+    response_pending_rpcs: [],
     loading,
     notice: "",
   }
@@ -192,11 +197,18 @@ pub fn State::can_create(self : State) -> Bool {
 }
 
 ///|
-/// HTTP prompt settlement and background session lifecycle updates are
-/// independent. Keep the composer disabled until both page work and the
-/// accepted prompt request itself have settled.
+/// HTTP prompt/interaction settlement and background session lifecycle updates
+/// are independent. Keep the active composer disabled until its page work and
+/// accepted requests have settled.
 fn State::busy(self : State) -> Bool {
-  self.loading || self.prompt_pending_session is Some(_)
+  self.loading ||
+  self.prompt_pending_session is Some(_) ||
+  self.pending
+  .iter()
+  .any(item => {
+    self.active_id == Some(item.session_id()) &&
+    self.response_pending_rpcs.contains(item.rpc_id())
+  })
 }
 
 ///|

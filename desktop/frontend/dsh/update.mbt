@@ -93,8 +93,13 @@ pub fn update(
         (state.cancel(dispatch), { ..state, loading: true, notice: "" })
       }
     ApprovalDecision(rpc_id~, outcome~) =>
-      match state.pending_for_rpc(rpc_id) {
-        Some(pending) =>
+      match
+        (
+          state.pending_for_rpc(rpc_id),
+          state.response_pending_rpcs.contains(rpc_id),
+        ) {
+        (_, true) => (@cmd.none, state)
+        (Some(pending), false) =>
           (
             state.respond_approval(
               dispatch,
@@ -106,20 +111,35 @@ pub fn update(
               },
               pending,
             ),
-            { ..state, loading: true, notice: "" },
+            {
+              ..state,
+              response_pending_rpcs: state.response_pending_rpcs + [rpc_id],
+              loading: true,
+              notice: "",
+            },
           )
-        None => (@cmd.none, state)
+        (None, false) => (@cmd.none, state)
       }
     QuestionOption(rpc_id~, question_id~, label~) =>
       (@cmd.none, state.with_question_option(rpc_id, question_id, label))
     QuestionCustom(rpc_id~, question_id~, value~) =>
       (@cmd.none, state.with_question_custom(rpc_id, question_id, value))
     SubmitQuestions(rpc_id) =>
-      match state.pending_for_rpc(rpc_id) {
-        Some(pending) if pending.questions_answered() =>
+      match
+        (
+          state.pending_for_rpc(rpc_id),
+          state.response_pending_rpcs.contains(rpc_id),
+        ) {
+        (_, true) => (@cmd.none, state)
+        (Some(pending), false) if pending.questions_answered() =>
           (
             state.respond_questions(dispatch, rpc_id, pending),
-            { ..state, loading: true, notice: "" },
+            {
+              ..state,
+              response_pending_rpcs: state.response_pending_rpcs + [rpc_id],
+              loading: true,
+              notice: "",
+            },
           )
         _ => (@cmd.none, state)
       }
@@ -155,9 +175,17 @@ pub fn update(
         state.active_id != Some(session_id) {
         return (@cmd.none, state)
       }
-      if kind is DshResponseReply(session_id~, ..) &&
+      if kind is DshResponseReply(rpc_id~, session_id~) &&
         state.active_id != Some(session_id) {
-        return (@cmd.none, state)
+        return (
+          @cmd.none,
+          {
+            ..state,
+            response_pending_rpcs: state.response_pending_rpcs.filter(id => {
+              id != rpc_id
+            }),
+          },
+        )
       }
       if kind is DshCreateReply(selection_generation) &&
         state.selection_generation != selection_generation {
@@ -185,6 +213,11 @@ pub fn update(
             None
           } else {
             state.prompt_pending_session
+          },
+          response_pending_rpcs: match kind {
+            DshResponseReply(rpc_id~, ..) =>
+              state.response_pending_rpcs.filter(id => id != rpc_id)
+            _ => state.response_pending_rpcs
           },
           // Connection failures belong to the root toast queue. Other dsh
           // request failures remain attached to the dsh transcript surface.
@@ -219,19 +252,30 @@ fn State::with_reply(
   }
   if kind is DshResponseReply(rpc_id~, session_id~) {
     let receipt = DshResponseReceipt(reply)
+    let response_pending_rpcs = self.response_pending_rpcs.filter(id => {
+      id != rpc_id
+    })
     guard receipt.accepted() else {
       if self.active_id == Some(session_id) {
-        return (@cmd.none, { ..self, loading: false, notice: receipt.error() })
+        return (
+          @cmd.none,
+          {
+            ..self,
+            response_pending_rpcs,
+            loading: false,
+            notice: receipt.error(),
+          },
+        )
       }
-      return (@cmd.none, self)
+      return (@cmd.none, { ..self, response_pending_rpcs, })
     }
     let pending = self.pending.filter(item => item.rpc_id() != rpc_id)
     return (
       @cmd.none,
       if self.active_id == Some(session_id) {
-        { ..self, pending, loading: false }
+        { ..self, pending, response_pending_rpcs, loading: false }
       } else {
-        { ..self, pending, }
+        { ..self, pending, response_pending_rpcs }
       },
     )
   }
@@ -543,6 +587,12 @@ fn State::with_pending_snapshot(
     commands.push(command)
     next = state
   }
+  next = {
+    ..next,
+    response_pending_rpcs: next.response_pending_rpcs.filter(rpc_id => {
+      next.pending.iter().any(item => item.rpc_id() == rpc_id)
+    }),
+  }
   (@cmd.batch(commands), next)
 }
 
@@ -612,7 +662,12 @@ fn State::with_event(
           ..self,
           sessions,
           loading: if self.active_id == Some(session_id) {
-            false
+            self.pending
+            .iter()
+            .any(item => {
+              item.session_id() == session_id &&
+              self.response_pending_rpcs.contains(item.rpc_id())
+            })
           } else {
             self.loading
           },
@@ -638,6 +693,7 @@ fn State::with_event(
       } else {
         self.active_id
       }
+      let pending = self.pending.filter(item => item.session_id() != session_id)
       (
         @cmd.batch([
           DshWorkspacesReply.request(dispatch, "workspace.list", {}),
@@ -670,7 +726,10 @@ fn State::with_event(
           } else {
             self.streaming
           },
-          pending: self.pending.filter(item => item.session_id() != session_id),
+          pending,
+          response_pending_rpcs: self.response_pending_rpcs.filter(rpc_id => {
+            pending.iter().any(item => item.rpc_id() == rpc_id)
+          }),
           draft: if removed_active {
             ""
           } else {
@@ -754,6 +813,10 @@ fn State::with_event(
       guard @jsonx.json_text(payload, "approvalId") is Some(approval_id) else {
         return (@cmd.none, self)
       }
+      let resolved = self.pending.filter(item => {
+        item.matches_approval(approval_id)
+      })
+      let resolved_rpcs = resolved.map(item => item.rpc_id())
       (
         @cmd.none,
         {
@@ -761,8 +824,17 @@ fn State::with_event(
           pending: self.pending.filter(item => {
             !item.matches_approval(approval_id)
           }),
+          response_pending_rpcs: self.response_pending_rpcs.filter(rpc_id => {
+            !resolved_rpcs.contains(rpc_id)
+          }),
           pending_generation: generation,
-          loading: false,
+          loading: if resolved
+            .iter()
+            .any(item => self.active_id == Some(item.session_id())) {
+            false
+          } else {
+            self.loading
+          },
         },
       )
     }
@@ -799,13 +871,26 @@ fn State::with_event(
       let question_rpc_id = @jsonx.json_text(payload, "questionRpcId").unwrap_or(
         rpc_id,
       )
+      let resolved_active = self.pending
+        .iter()
+        .any(item => {
+          item.rpc_id() == question_rpc_id &&
+          self.active_id == Some(item.session_id())
+        })
       (
         @cmd.none,
         {
           ..self,
           pending: self.pending.filter(item => item.rpc_id() != question_rpc_id),
+          response_pending_rpcs: self.response_pending_rpcs.filter(rpc_id => {
+            rpc_id != question_rpc_id
+          }),
           pending_generation: generation,
-          loading: false,
+          loading: if resolved_active {
+            false
+          } else {
+            self.loading
+          },
         },
       )
     }
@@ -1181,6 +1266,69 @@ test "accepted dsh prompt advances transcript submission generation" {
 }
 
 ///|
+test "dsh interaction response remains busy through session status events" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let pending = DshApproval(
+    rpc_id="approval-rpc",
+    session_id="session-1",
+    approval_id="approval-1",
+    tool_name="write",
+    reason="needs approval",
+  )
+  let state = {
+    ..State(),
+    sessions: [
+      {
+        id: "session-1",
+        title: "Session 1",
+        cwd: None,
+        running: true,
+        blank: false,
+      },
+    ],
+    active_id: Some("session-1"),
+    pending: [pending],
+  }
+  let (_, responding) = update(
+    dispatch,
+    ApprovalDecision(rpc_id="approval-rpc", outcome="allowed-once"),
+    state,
+  )
+  assert_eq(responding.response_pending_rpcs, ["approval-rpc"])
+  assert_true(responding.loading)
+  assert_true(responding.busy())
+  let (_, status) = responding.with_event(dispatch, {
+    "stream": "host",
+    "message": {
+      "rpcId": "status-1",
+      "payload": {
+        "type": "host/session-status",
+        "sessionId": "session-1",
+        "running": true,
+      },
+    },
+    "generation": 1,
+  })
+  assert_true(status.loading)
+  assert_true(status.busy())
+  let (_, duplicate) = update(
+    dispatch,
+    ApprovalDecision(rpc_id="approval-rpc", outcome="allowed-once"),
+    status,
+  )
+  assert_eq(duplicate.response_pending_rpcs, ["approval-rpc"])
+  let (_, settled) = duplicate.with_reply(
+    dispatch,
+    DshResponseReply(rpc_id="approval-rpc", session_id="session-1"),
+    { "accepted": true },
+  )
+  assert_true(settled.response_pending_rpcs.is_empty())
+  assert_true(settled.pending.is_empty())
+  assert_false(settled.loading)
+  assert_false(settled.busy())
+}
+
+///|
 test "empty dsh session baseline clears a deleted active transcript" {
   let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   let state = {
@@ -1306,6 +1454,7 @@ test "background dsh interaction receipts preserve the active page" {
     ..State(),
     active_id: Some("session-b"),
     pending: [pending],
+    response_pending_rpcs: ["rpc-a"],
     loading: true,
     notice: "session B notice",
   }
@@ -1315,6 +1464,7 @@ test "background dsh interaction receipts preserve the active page" {
     { "accepted": true },
   )
   assert_true(accepted.pending.is_empty())
+  assert_true(accepted.response_pending_rpcs.is_empty())
   assert_true(accepted.loading)
   assert_eq(accepted.notice, "session B notice")
   let (_, rejected) = state.with_reply(
@@ -1323,6 +1473,7 @@ test "background dsh interaction receipts preserve the active page" {
     { "accepted": false, "reason": "stale request" },
   )
   assert_eq(rejected.pending.length(), 1)
+  assert_true(rejected.response_pending_rpcs.is_empty())
   assert_true(rejected.loading)
   assert_eq(rejected.notice, "session B notice")
   let (_, failed) = update(
@@ -1334,6 +1485,7 @@ test "background dsh interaction receipts preserve the active page" {
     state,
   )
   assert_eq(failed.pending.length(), 1)
+  assert_true(failed.response_pending_rpcs.is_empty())
   assert_true(failed.loading)
   assert_eq(failed.notice, "session B notice")
 }
