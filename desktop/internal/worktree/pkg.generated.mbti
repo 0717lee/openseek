@@ -9,6 +9,8 @@ import {
 }
 
 // Values
+pub async fn archive_bound_checkout(String, Bool, @pathx.Absolute?, on_committed? : (String, Array[@protocol.WorktreeInfo]) -> Unit) -> @protocol.ArchiveNeedsForceReply?
+
 pub async fn create(WorktreeHost, String, WorktreeOwner, (Array[@protocol.WorktreeInfo]) -> Unit, name? : String) -> @protocol.WorktreeCreateReply
 
 pub async fn drop_placements(@pathx.Absolute, Array[String]) -> Array[@protocol.WorktreeInfo]?

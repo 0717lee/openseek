@@ -418,21 +418,17 @@ pub async fn run_dir(
 }
 
 ///|
-/// Find this owner's registry row while `worktree_registry_lock` is held.
-/// OpenSeek can start from its durable session store; Codex deliberately scans
-/// only Desktop registries, never app-server or Git path conventions.
+/// Find this owner's registry row in one of `within`, while
+/// `worktree_registry_lock` is held. The caller names those projects, because
+/// which of them may hold the row is a question about the owner: an OpenSeek
+/// record's worktree belongs to the project whose store owns it, while a Codex
+/// thread lives in no session store and is deliberately looked up only in
+/// Desktop registries, never in app-server state or Git path conventions.
 async fn WorktreeOwner::binding_unlocked(
   self : WorktreeOwner,
+  within : Array[@pathx.Absolute],
 ) -> (@pathx.Absolute, WorktreeEntry)? {
-  let workspaces = match self {
-    OpenSeekSession(session) =>
-      match @session_store.workspace_of(session) {
-        Some(workspace) => [workspace]
-        None => []
-      }
-    CodexThread(_) => @workspaces.registered()
-  }
-  for workspace in workspaces {
+  for workspace in within {
     for entry in read_worktrees_unlocked(workspace) {
       if entry.belongs_to(self) {
         return Some((workspace, entry))
@@ -446,13 +442,18 @@ async fn WorktreeOwner::binding_unlocked(
 /// Inspect whether archiving would discard uncommitted, untracked, or ignored
 /// checkout files. This preflight changes nothing; the final removal repeats
 /// the check after the backend writer has been archived, closing the race
-/// between confirmation and deletion.
+/// between confirmation and deletion. Codex archives through this preflight
+/// because its thread lives in no session store; OpenSeek's archive names the
+/// store it selected and goes straight to `archive_bound_worktree_checkout`.
 pub async fn WorktreeOwner::archive_check(
   self : WorktreeOwner,
 ) -> ArchiveNeedsForceReply? {
   worktree_registry_lock.acquire()
   defer worktree_registry_lock.release()
-  guard self.binding_unlocked() is Some((workspace, entry)) else { return None }
+  guard self.binding_unlocked(@workspaces.registered())
+    is Some((workspace, entry)) else {
+    return None
+  }
   let target = worktree_dir(workspace, entry.name)
   let present = @fsx.is_dir(target.to_path()) catch {
     error if @async.is_being_cancelled() => raise error
@@ -477,14 +478,17 @@ pub async fn WorktreeOwner::archive_check(
 /// checkout refuses; committed work stays on the branch either way. The caller
 /// must first fence its own backend writer (OpenSeek's slot claim or a
 /// successful Codex `thread/archive`). An owner without a worktree is a no-op.
-pub async fn WorktreeOwner::archive_checkout(
+async fn WorktreeOwner::archive_checkout_within(
   self : WorktreeOwner,
+  within : Array[@pathx.Absolute],
   force : Bool,
   on_committed? : (String, Array[WorktreeInfo]) -> Unit,
 ) -> ArchiveNeedsForceReply? {
   worktree_registry_lock.acquire()
   defer worktree_registry_lock.release()
-  guard self.binding_unlocked() is Some((workspace, entry)) else { return None }
+  guard self.binding_unlocked(within) is Some((workspace, entry)) else {
+    return None
+  }
   let entries = read_worktrees_unlocked(workspace)
   let target = worktree_dir(workspace, entry.name)
   let present = @fsx.is_dir(target.to_path()) catch {
@@ -540,6 +544,42 @@ pub async fn drop_placements(
   guard remaining.length() < entries.length() else { return None }
   write_worktrees(workspace, remaining)
   Some(worktree_infos(workspace, remaining))
+}
+
+///|
+/// Free the checkout of a Codex thread. A thread lives in no session store, so
+/// its registry row is looked up across Desktop's registered projects.
+pub async fn WorktreeOwner::archive_checkout(
+  self : WorktreeOwner,
+  force : Bool,
+  on_committed? : (String, Array[WorktreeInfo]) -> Unit,
+) -> ArchiveNeedsForceReply? {
+  self.archive_checkout_within(@workspaces.registered(), force, on_committed?)
+}
+
+///|
+/// Free the checkout bound to `session`, if any, while retaining its registry
+/// entry. Archiving frees the directory, but the name/branch/session row
+/// remains the durable placement needed to make a later unarchive read as
+/// `MissingTree` and offer an explicit rebuild.
+///
+/// `workspace` is the project whose store the archive selected, not a project
+/// rediscovered from the session id: a worktree belongs to the project that
+/// owns the record being moved, and looking the id up again would find the
+/// first registered project holding it — a forced archive would then delete
+/// another project's uncommitted checkout. Scratch records own no worktree.
+pub async fn archive_bound_checkout(
+  session : String,
+  force : Bool,
+  workspace : @pathx.Absolute?,
+  on_committed? : (String, Array[WorktreeInfo]) -> Unit,
+) -> ArchiveNeedsForceReply? {
+  guard workspace is Some(workspace) else { return None }
+  WorktreeOwner::openseek(session).archive_checkout_within(
+    [workspace],
+    force,
+    on_committed?,
+  )
 }
 
 ///|

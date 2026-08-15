@@ -404,8 +404,10 @@ async fn archive_session_commit(
   // (the next prompt respawns) — so nothing irreversible has happened yet;
   // a removal that succeeds while the record move below then fails leaves a
   // live conversation safely blocked on its retained missing placement.
-  let refusal = @worktree.WorktreeOwner::openseek(session).archive_checkout(
+  let refusal = @worktree.archive_bound_checkout(
+    session,
     force,
+    family.workspace,
     on_committed?=on_worktree_changed,
   )
   if refusal is Some(refusal) {
