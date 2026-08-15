@@ -165,6 +165,9 @@ struct State {
   creation_pending : Bool
   prompt_generation : Int
   prompt_pending_session : String?
+  // Cancellation settles over HTTP independently from running-status events.
+  // Keep its session busy until the matching request reply arrives.
+  cancel_pending_session : String?
   // A session-status event can arrive before the HTTP response that settles an
   // approval or question. Keep the originating RPC busy independently so its
   // card cannot submit the same response twice during that interval.
@@ -189,6 +192,7 @@ pub fn State::State(loading? : Bool = false) -> State {
     creation_pending: false,
     prompt_generation: 0,
     prompt_pending_session: None,
+    cancel_pending_session: None,
     response_pending_rpcs: [],
     loading,
     notice: "",
@@ -208,6 +212,7 @@ fn State::busy(self : State) -> Bool {
   self.loading ||
   self.creation_pending ||
   self.prompt_pending_session is Some(_) ||
+  (self.cancel_pending_session == self.active_id && self.active_id is Some(_)) ||
   self.pending
   .iter()
   .any(item => {

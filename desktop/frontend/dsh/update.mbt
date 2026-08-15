@@ -94,7 +94,15 @@ pub fn update(
       if state.busy() || !state.is_running() {
         (@cmd.none, state)
       } else {
-        (state.cancel(dispatch), { ..state, loading: true, notice: "" })
+        (
+          state.cancel(dispatch),
+          {
+            ..state,
+            cancel_pending_session: state.active_id,
+            loading: true,
+            notice: "",
+          },
+        )
       }
     ApprovalDecision(rpc_id~, outcome~) =>
       match
@@ -165,15 +173,18 @@ pub fn update(
       }
       if kind is DshCancelReply(session_id) &&
         state.active_id != Some(session_id) {
-        return (@cmd.none, state)
-      }
-      if kind is DshCreateReply(selection_generation) &&
-        state.selection_generation != selection_generation {
-        return (@cmd.none, { ..state, creation_pending: false })
-      }
-      if kind is DshWorkspaceCreateReply(selection_generation) &&
-        state.selection_generation != selection_generation {
-        return (@cmd.none, { ..state, creation_pending: false })
+        return (
+          @cmd.none,
+          {
+            ..state,
+            cancel_pending_session: if state.cancel_pending_session ==
+              Some(session_id) {
+              None
+            } else {
+              state.cancel_pending_session
+            },
+          },
+        )
       }
       state.with_reply(dispatch, kind, value)
     }
@@ -196,7 +207,18 @@ pub fn update(
       }
       if kind is DshCancelReply(session_id) &&
         state.active_id != Some(session_id) {
-        return (@cmd.none, state)
+        return (
+          @cmd.none,
+          {
+            ..state,
+            cancel_pending_session: if state.cancel_pending_session ==
+              Some(session_id) {
+              None
+            } else {
+              state.cancel_pending_session
+            },
+          },
+        )
       }
       if kind is DshResponseReply(rpc_id~, session_id~) &&
         state.active_id != Some(session_id) {
@@ -247,6 +269,11 @@ pub fn update(
             false
           } else {
             state.creation_pending
+          },
+          cancel_pending_session: if kind is DshCancelReply(_) {
+            None
+          } else {
+            state.cancel_pending_session
           },
           // Connection failures belong to the root toast queue. Other dsh
           // request failures remain attached to the dsh transcript surface.
@@ -310,6 +337,17 @@ fn State::with_reply(
   }
   let envelope = DshEnvelope(reply)
   guard envelope.value() is Some(value) else {
+    // A successful create reply still has global work to do after navigation:
+    // workspace.create must continue to session.create, and session.create
+    // must refresh the lists. Only stale business errors stop here.
+    if kind is DshCreateReply(selection_generation) &&
+      self.selection_generation != selection_generation {
+      return (@cmd.none, { ..self, creation_pending: false })
+    }
+    if kind is DshWorkspaceCreateReply(selection_generation) &&
+      self.selection_generation != selection_generation {
+      return (@cmd.none, { ..self, creation_pending: false })
+    }
     return (
       @cmd.none,
       {
@@ -324,6 +362,11 @@ fn State::with_reply(
           false
         } else {
           self.creation_pending
+        },
+        cancel_pending_session: if kind is DshCancelReply(_) {
+          None
+        } else {
+          self.cancel_pending_session
         },
         loading: false,
         notice: envelope.error(),
@@ -539,9 +582,23 @@ fn State::with_reply(
     }
     DshCancelReply(session_id) =>
       if self.active_id == Some(session_id) {
-        (@cmd.none, { ..self, loading: false, notice: "" })
+        (
+          @cmd.none,
+          { ..self, cancel_pending_session: None, loading: false, notice: "" },
+        )
       } else {
-        (@cmd.none, self)
+        (
+          @cmd.none,
+          {
+            ..self,
+            cancel_pending_session: if self.cancel_pending_session ==
+              Some(session_id) {
+              None
+            } else {
+              self.cancel_pending_session
+            },
+          },
+        )
       }
     DshStatusReply | DshPendingReply | DshResponseReply(..) => (@cmd.none, self)
   }
@@ -778,6 +835,12 @@ fn State::with_event(
             None
           } else {
             self.prompt_pending_session
+          },
+          cancel_pending_session: if self.cancel_pending_session ==
+            Some(session_id) {
+            None
+          } else {
+            self.cancel_pending_session
           },
           loading: if removed_active {
             active_id is Some(_)
@@ -1308,7 +1371,14 @@ test "dsh workspace creation stays busy until its session is created" {
     state,
   )
   assert_true(creating_workspace.creation_pending)
-  let (_, creating_session) = creating_workspace.with_reply(
+  let navigated = {
+    ..creating_workspace,
+    active_id: Some("session-b"),
+    selection_generation: 1,
+    loading: true,
+    notice: "session B notice",
+  }
+  let (_, creating_session) = navigated.with_reply(
     dispatch,
     DshWorkspaceCreateReply(0),
     {
@@ -1328,12 +1398,16 @@ test "dsh workspace creation stays busy until its session is created" {
     },
   )
   assert_true(creating_session.creation_pending)
+  assert_eq(creating_session.active_id, Some("session-b"))
+  assert_eq(creating_session.notice, "session B notice")
   let (_, created) = creating_session.with_reply(dispatch, DshCreateReply(0), {
     "type": "server-response",
     "rpcId": "session-create-1",
     "result": { "ok": true, "value": { "sessionId": "session-1" } },
   })
   assert_false(created.creation_pending)
+  assert_eq(created.active_id, Some("session-b"))
+  assert_eq(created.notice, "session B notice")
 }
 
 ///|
@@ -1542,6 +1616,7 @@ test "late dsh cancellation replies preserve the newly active session" {
   let state = {
     ..State(),
     active_id: Some("session-b"),
+    cancel_pending_session: Some("session-a"),
     loading: true,
     notice: "current notice",
   }
@@ -1550,11 +1625,12 @@ test "late dsh cancellation replies preserve the newly active session" {
     "rpcId": "cancel-a",
     "result": { "ok": true, "value": {} },
   }
-  let (_, stale_success) = state.with_reply(
+  let (_, stale_success) = update(
     dispatch,
-    DshCancelReply("session-a"),
-    reply,
+    Reply(kind=DshCancelReply("session-a"), value=reply),
+    state,
   )
+  assert_true(stale_success.cancel_pending_session is None)
   assert_true(stale_success.loading)
   assert_eq(stale_success.notice, "current notice")
   let (_, stale_failure) = update(
@@ -1562,8 +1638,61 @@ test "late dsh cancellation replies preserve the newly active session" {
     Failed(kind=DshCancelReply("session-a"), message="cancel failed"),
     state,
   )
+  assert_true(stale_failure.cancel_pending_session is None)
   assert_true(stale_failure.loading)
   assert_eq(stale_failure.notice, "current notice")
+}
+
+///|
+test "dsh cancellation remains busy through session status events" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let state = {
+    ..State(),
+    connection: DshReady,
+    sessions: [
+      {
+        id: "session-1",
+        title: "Session 1",
+        cwd: None,
+        running: true,
+        blank: false,
+      },
+    ],
+    active_id: Some("session-1"),
+    draft: "next request",
+  }
+  let (_, cancelling) = update(dispatch, Stop, state)
+  assert_eq(cancelling.cancel_pending_session, Some("session-1"))
+  assert_true(cancelling.loading)
+  assert_true(cancelling.busy())
+  let (_, stopped) = cancelling.with_event(dispatch, {
+    "stream": "host",
+    "message": {
+      "rpcId": "status-1",
+      "payload": {
+        "type": "host/session-status",
+        "sessionId": "session-1",
+        "running": false,
+      },
+    },
+    "generation": 1,
+  })
+  assert_false(stopped.loading)
+  assert_true(stopped.busy())
+  let (_, blocked) = update(dispatch, Send, stopped)
+  assert_eq(blocked.prompt_generation, 0)
+  let (_, settled) = update(
+    dispatch,
+    Reply(kind=DshCancelReply("session-1"), value={
+      "type": "server-response",
+      "rpcId": "cancel-1",
+      "result": { "ok": true, "value": {} },
+    }),
+    stopped,
+  )
+  assert_true(settled.cancel_pending_session is None)
+  assert_false(settled.loading)
+  assert_false(settled.busy())
 }
 
 ///|
