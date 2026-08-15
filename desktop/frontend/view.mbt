@@ -118,17 +118,22 @@ fn session_component_input(
   channel : @interop.ChannelId,
   session_id : String,
   label : String,
+  store : @common.Uri,
   archivable? : Bool = false,
   nested? : Bool = false,
   worktree? : String,
   subrun? : Bool = false,
-  root? : String,
   children? : Array[@conversation.Input] = [],
 ) -> @conversation.Input {
+  // Every live-state question this row asks is about the record in this
+  // group's store. A same-id conversation open against another store gets
+  // its own row there and must not light this one up.
+  let key : RecordKey = { session: session_id, workspace: store }
+  let conv = model.find_record_conversation(channel, key)
   let active = model.screen is Chat &&
     channel == model.focused &&
-    session_id == model.active_session
-  let conv = model.find_conversation(channel, session_id)
+    session_id == model.active_session &&
+    conv is Some(_)
   let running = conv is Some(conv) && conv.is_running()
   // The row's status dot: pulsing while a run is in flight, then — when the
   // run finished off screen — settling into a solid dot (accent for success,
@@ -155,12 +160,13 @@ fn session_component_input(
   {
     // The store placement rides in `root`: session ids may repeat across
     // project stores, and without it two same-id rows would collide on one
-    // key in the sidebar's keyed container.
+    // key in the sidebar's keyed container. It is also what the dispatcher
+    // reads back to name the record a click acts on.
     id: @conversation.Id(
       source="openseek.live",
       channel=channel.uri_authority(),
       conversation=session_id,
-      root?,
+      root=store.path,
     ),
     title,
     label,
@@ -213,9 +219,6 @@ fn Model::push_group_component_inputs(
   archived~ : (String) -> Bool,
 ) -> Unit {
   let composing = self.composing_new_chat()
-  // Every row in this group shares the group's store placement; it becomes
-  // the `root` half of each conversation's component id.
-  let root = workspace.path
   for conv in self.conversations.rev_iter() {
     if conv.device != dev.channel ||
       conv.project() != workspace ||
@@ -250,9 +253,9 @@ fn Model::push_group_component_inputs(
           } else {
             "New chat"
           },
+          workspace,
           nested=true,
           worktree?,
-          root~,
         ),
       ),
     )
@@ -270,7 +273,8 @@ fn Model::push_group_component_inputs(
   // is the one on screen (its title settles at the first send), and
   // otherwise comes from the host's listing.
   for tree in @transcript.session_tree(durable) {
-    let parent_label = if self.find_conversation(dev.channel, tree.item.id)
+    let parent_key : RecordKey = { session: tree.item.id, workspace }
+    let parent_label = if self.find_record_conversation(dev.channel, parent_key)
       is Some(conv) &&
       dev.channel == self.focused &&
       tree.item.id == self.active_session {
@@ -299,9 +303,9 @@ fn Model::push_group_component_inputs(
           dev.channel,
           child.id,
           child_label,
+          workspace,
           nested=true,
           subrun=true,
-          root~,
         ),
       )
     }
@@ -317,6 +321,7 @@ fn Model::push_group_component_inputs(
           dev.channel,
           tree.item.id,
           parent_label,
+          workspace,
           // Ordinary children are folded below a live parent and receive no
           // action. A child-shaped root is legacy split state (or belongs to a
           // parent in another store), so it remains independently archivable;
@@ -324,7 +329,6 @@ fn Model::push_group_component_inputs(
           archivable=true,
           nested=true,
           worktree?=worktree_name_for(dev, workspace, tree.item.id),
-          root~,
           children~,
         ),
       ),
@@ -642,7 +646,7 @@ fn Conversation::archived_read_only_view(
         class="archived-read-only-restore",
         type_="button",
         title="Restore this conversation before continuing it",
-        on_click=dispatch(UnarchiveSession(self.device, self.session_id)),
+        on_click=dispatch(UnarchiveSession(self.device, self.record_key())),
         "Restore",
       ),
     ]),
@@ -2298,6 +2302,74 @@ test "same-id records in two project stores keep distinct row keys" {
   }
   assert_eq(keys.length(), 2)
   assert_true(keys[0] != keys[1])
+}
+
+///|
+test "a same-id row lights up only for the store its conversation is bound to" {
+  let other = @interop.ChannelId::Local.test_project()
+  let project = @interop.ChannelId::Local.test_resource("/work/alpha")
+  // One open conversation, running, bound to the second project's store. The
+  // other project holds its own record under the same id.
+  let model = test_model()
+    .replace_conversation({
+      ..running_conversation(),
+      session_id: "desktop-shared",
+      workspace: Project(root=project),
+    })
+    .with_dev(dev => {
+      ..dev,
+      projects: [project, other],
+      sessions: [
+        {
+          id: "desktop-shared",
+          title: Some("project copy"),
+          workspace: project,
+          workspace_name: "alpha",
+          updated_at_ms: None,
+        },
+        {
+          id: "desktop-shared",
+          title: Some("other copy"),
+          workspace: other,
+          workspace_name: "work",
+          updated_at_ms: None,
+        },
+      ],
+    })
+  let model = {
+    ..model.activate(@interop.ChannelId::Local, "desktop-shared", project),
+    screen: Chat,
+  }
+  let mut in_project : @conversation.Input? = None
+  let mut in_other : @conversation.Input? = None
+  // Both rows are project rows now, so each is picked by the store its group
+  // renders rather than by its section kind.
+  for section in model.sidebar_component_sections(model.dev()) {
+    for entry in section.entries {
+      guard entry is @section.Project(row) else { continue }
+      for conversation in row.conversations {
+        guard conversation.id.conversation() == "desktop-shared" else {
+          continue
+        }
+        if conversation.id.root() == Some(project.path) {
+          in_project = Some(conversation)
+        } else if conversation.id.root() == Some(other.path) {
+          in_other = Some(conversation)
+        }
+      }
+    }
+  }
+  guard in_project is Some(in_project) && in_other is Some(in_other) else {
+    fail("both stores must render a row for the shared id")
+  }
+  // The run belongs to the second project's record; the other project's row
+  // is a different durable record and stays idle and unselected.
+  assert_true(in_project.running)
+  assert_true(in_project.active)
+  assert_true(in_project.run_mark is RunningMark)
+  assert_false(in_other.running)
+  assert_false(in_other.active)
+  assert_true(in_other.run_mark is NoRunMark)
 }
 
 ///|

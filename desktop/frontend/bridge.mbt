@@ -234,11 +234,7 @@ fn session_changed_msg(
   channel : @interop.ChannelId,
   payload : @protocol.SessionChangedPayload,
 ) -> DeviceMsg? {
-  guard ArchiveRecordKey::from_protocol(
-      channel,
-      payload.session,
-      payload.workspace,
-    )
+  guard RecordKey::from_protocol(channel, payload.session, payload.workspace)
     is Some(key) else {
     return None
   }
@@ -1004,13 +1000,14 @@ async fn refresh_sessions_into(
 
 ///|
 /// Load a durable session's transcript so the conversation can be resumed.
-/// `workspace` says which registered store holds it; `None` selects the
-/// default store. The protocol conversion happens only in `load_session_cmd`.
+/// `workspace` is the store holding the record — a record is addressed by
+/// `(store, session)`, never by id alone. The protocol conversion happens
+/// only in `load_session_cmd`.
 fn open_session(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
   session_id : String,
-  workspace~ : @common.Uri?,
+  workspace~ : @common.Uri,
   generation~ : Int,
   archived? : Bool = false,
 ) -> @cmd.Cmd {
@@ -1056,7 +1053,7 @@ fn refresh_session(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
   session_id : String,
-  workspace~ : @common.Uri?,
+  workspace~ : @common.Uri,
   generation~ : Int,
   archived? : Bool = false,
 ) -> @cmd.Cmd {
@@ -1088,15 +1085,14 @@ fn refresh_session(
 fn load_session_cmd(
   channel : @interop.ChannelId,
   session_id : String,
-  workspace~ : @common.Uri?,
+  workspace~ : @common.Uri,
   archived~ : Bool,
   on_loaded~ : (@transcript.SessionLoadView) -> @cmd.Cmd,
   on_failed~ : (String) -> @cmd.Cmd,
 ) -> @cmd.Cmd {
-  match workspace {
-    Some(resource) if !@resource.belongs_to(resource, channel) =>
-      return @cmd.none
-    _ => ()
+  let key : RecordKey = { session: session_id, workspace }
+  guard key.workspace_payload(channel) is Some(workspace) else {
+    return @cmd.none
   }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
@@ -1104,12 +1100,12 @@ fn load_session_cmd(
         if archived {
           @interop.bridge_request(channel, @commands.session_load_archived, {
             session: session_id,
-            workspace: workspace.map(path => path.path),
+            workspace,
           })
         } else {
           @interop.bridge_request(channel, @commands.session_load, {
             session: session_id,
-            workspace: workspace.map(path => path.path),
+            workspace,
           })
         }
       } catch {
