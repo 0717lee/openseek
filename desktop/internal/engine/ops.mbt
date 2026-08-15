@@ -20,9 +20,9 @@ pub async fn start_run(
   let mut placement_locked = true
   defer (if placement_locked { manager.workspace_lifecycle_lock.release() })
   // Acquire the persistent record lease from the request's canonical key
-  // before run_config probes live/workspace stores. Otherwise an unarchive
-  // can move the record between that probe and the archived check, leaving a
-  // stale global session_root that forks the conversation.
+  // before the record is read at all: without it an archive could move this
+  // record between the check below and the prompt, and the turn would append
+  // to a record no list still shows.
   let key = payload.session.trim().to_owned()
   // The record lease is acquired before `run_config`, so reject a blank key
   // here as well as at that standalone config boundary. There is no shared
@@ -33,7 +33,7 @@ pub async fn start_run(
   let record_guard = manager.begin_record_op(key)
   defer manager.end_record_op(key, record_guard)
   let config = run_config(manager, payload)
-  @session_store.ensure_not_archived(key)
+  @session_store.ensure_not_archived(key, config.session_root)
   ensure_new_record_is_unique(key, selected?=config.session_root)
   let sessions = manager.serving()
   let slot = slot_for(sessions, key)
@@ -257,12 +257,12 @@ pub async fn compact_run(
   let session = payload.session.trim().to_owned()
   let record_guard = manager.begin_record_op(session)
   defer manager.end_record_op(session, record_guard)
-  @session_store.ensure_not_archived(session)
   // Which record this compaction rewrites, resolved before the slot is read:
   // the engine on that slot counts as this conversation's only if it writes
   // the same store. Resolved here rather than from `compact_config` because a
   // reused engine never builds one, and the store must be known either way.
   let store = requested_store(payload.workspace)
+  @session_store.ensure_not_archived(session, Some(store))
   let sessions = manager.serving()
   let slot = slot_for(sessions, session)
   // Claim before anything else — even with a live engine. A start between
@@ -379,10 +379,10 @@ pub async fn goal_run(
   }
   let record_guard = manager.begin_record_op(session)
   defer manager.end_record_op(session, record_guard)
-  @session_store.ensure_not_archived(session)
   // The goal is durable state of one record, so the store is resolved before
   // the slot is read — see `compact_run`.
   let store = requested_store(payload.workspace)
+  @session_store.ensure_not_archived(session, Some(store))
   let sessions = manager.serving()
   let slot = slot_for(sessions, session)
   // Claim before looking at the engine, exactly as compact_run does: this op

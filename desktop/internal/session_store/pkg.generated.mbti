@@ -9,11 +9,9 @@ import {
 // Values
 pub fn archived_root(@pathx.Absolute) -> @pathx.Absolute
 
-pub async fn archived_root_of(String) -> @pathx.Absolute?
-
 pub fn deleting_root(@pathx.Absolute) -> @pathx.Absolute
 
-pub async fn ensure_not_archived(String) -> Unit
+pub async fn ensure_not_archived(String, @pathx.Absolute?) -> Unit
 
 pub async fn family_in(@pathx.Absolute, String) -> Array[String]
 

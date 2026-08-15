@@ -1,16 +1,18 @@
 // A session id names a record only inside one store, so two attached projects
 // can hold the same id — the `openseek` CLI takes `--session <name>` verbatim
 // under any `--session-root`, and a project's store travels inside the project
-// directory. Two host behaviors follow, and neither can be read off the id:
+// directory. Three host behaviors follow, and none can be read off the id:
 //
 //   * the desktop never *adds* to that population — a start opens a record in
 //     the store it named or continues one already there, never a second twin;
 //   * an operation that addresses one store — moving its record, compacting
 //     it, setting its goal — ignores live engines and followers serving
-//     another, even though both are filed under the id.
+//     another, even though both are filed under the id;
+//   * a record's own store decides whether it is archived, so an archived
+//     twin elsewhere never holds a live conversation hostage.
 //
-// Both are exercised against a real pump: the refusals under test are the
-// ones a live host issues, and a start that slips past them must show up as a
+// All are exercised against a real pump: the refusals under test are the ones
+// a live host issues, and a start that slips past them must show up as a
 // spawned engine rather than as a stalled request.
 
 ///|
@@ -135,6 +137,73 @@ async test "a start cannot open a second record for an id another store owns" {
       fail("the accepted start left no engine on the slot")
     }
     assert_true(live.writes_store(@workspaces.store_root(owner)))
+    group.return_immediately(())
+  })
+  @fs.rmdir(root.to_string(), recursive=true)
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "an archived record in another store does not block a live one" {
+  ambient_env_test_lock.acquire()
+  defer ambient_env_test_lock.release()
+  let previous = @sys.get_env_var("HOME")
+  let (root, actor) = store_identity_host("openseek-archived-twin-")
+  defer restore_home_env(previous)
+  let manager = actor.manager()
+  let other = root.join("other")
+  let ws = root.join("ws")
+  @fsx.ensure_dir(ws.to_path())
+  @fsx.ensure_dir(other.to_path())
+  let sink = EventSink(fn(_) {  })
+  @async.with_task_group(group => {
+    group.spawn_bg(no_wait=true, allow_failure=true, () => {
+      actor.run(sink, fn(_) {  })
+    })
+    while manager.pump is Stopped {
+      @async.sleep(1)
+    }
+    ignore(@workspaces.add(ws.to_string(), fn(_) {  }))
+    ignore(@workspaces.add(other.to_string(), fn(_) {  }))
+    // The other project archived its `s-twin`; this project's `s-twin` is a
+    // different conversation and is live.
+    @fsx.ensure_dir(
+      @workspaces.store_root(other).join("archived/sessions/s-twin").to_path(),
+    )
+    @fsx.ensure_dir(
+      @workspaces.store_root(ws).join("sessions/s-twin").to_path(),
+    )
+    let reply = start_run(sink, manager, {
+      task: "continue",
+      submission_id: None,
+      model: None,
+      thinking: None,
+      max_steps: None,
+      session: "s-twin",
+      workspace: ws.to_string(),
+    })
+    assert_eq(reply.status, "accepted")
+    // The store that did archive it still refuses: this is a scope, not a
+    // removal of the defense.
+    let detail = try {
+      ignore(
+        start_run(sink, manager, {
+          task: "resurrect",
+          submission_id: None,
+          model: None,
+          thinking: None,
+          max_steps: None,
+          session: "s-twin",
+          workspace: other.to_string(),
+        }),
+      )
+      "no error"
+    } catch {
+      EngineError(detail) => detail
+      error if @async.is_being_cancelled() => raise error
+      error => "\{error}"
+    }
+    assert_true(detail.contains("archived"))
     group.return_immediately(())
   })
   @fs.rmdir(root.to_string(), recursive=true)

@@ -139,23 +139,22 @@ pub fn StoreSelection::of_workspace(
 }
 
 ///|
-/// Any store whose `archived` twin holds this id. Unlike the ops that move or
-/// read one named record, the archived-correlation defense guarding a start
-/// has no store to go on: it guards a request that carries only an id, so it
-/// must search.
-pub async fn archived_root_of(session : String) -> @pathx.Absolute? {
-  guard !session.is_empty() else { return None }
-  for root in known_roots() {
-    if @fsx.is_dir(archived_root(root).join("sessions").join(session).to_path()) {
-      return Some(root)
-    }
-  }
-  None
-}
-
-///|
-pub async fn ensure_not_archived(session : String) -> Unit {
-  if archived_root_of(session) is Some(_) {
+/// Refuse to write a record its own store has archived. An archived record is
+/// a read-only snapshot, and appending to one would resurrect a conversation
+/// the user put away without it reappearing in any list.
+///
+/// The check is scoped to the store the request named, because an archived
+/// record in another store is a different conversation: searching every store
+/// would make a live conversation impossible to continue — its prompts,
+/// compactions, and goals all refused as "archived" — until an unrelated twin
+/// was restored or deleted.
+pub async fn ensure_not_archived(
+  session : String,
+  store : @pathx.Absolute?,
+) -> Unit {
+  guard !session.is_empty() && store is Some(store) else { return }
+  let archived = archived_root(store).join("sessions").join(session)
+  if @fsx.is_dir(archived.to_path()) {
     raise StoreError("session is archived; unarchive it first")
   }
 }

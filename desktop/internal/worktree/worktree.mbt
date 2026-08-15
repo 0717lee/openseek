@@ -810,7 +810,12 @@ pub async fn create(
   }
   require_main_worktree(dir)
   if owner is OpenSeekSession(session) {
-    @session_store.ensure_not_archived(session)
+    // The checkout binds to a record in this project's store; an archived
+    // record elsewhere under the same id is a different conversation.
+    @session_store.ensure_not_archived(
+      session,
+      Some(@workspaces.store_root(dir)),
+    )
   }
   // Snapshot this workspace's setting once for the lifecycle operation. A
   // concurrent page edit applies to the next create or repair instead of

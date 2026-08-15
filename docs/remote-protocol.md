@@ -321,6 +321,11 @@ anything you can act on later; a client that persists a workspace session
 across a host restart must send that workspace back, because the record is
 unreachable without it once the store is no longer the default.
 
+An archived record is read-only, so a write to one is refused ("session is
+archived") — but only when the store the request named archived it. An
+archived record under the same id in another store is a different
+conversation and does not hold this one back.
+
 The host does not add to that population. `agent.start` opens a record in the
 store its `workspace` selects, or continues one already there; a start that
 would file a *second* record for an id another store owns is refused, naming
@@ -333,8 +338,8 @@ assume they cannot occur.
 
 Because a host runs at most one engine per session id, a live engine is also
 filed under the id alone. Every op compares its store before treating one as
-its own, so archiving a Scratch record is not refused by — and does not close
-— a project conversation that merely shares the id, and a compaction or goal
+its own, so archiving one project's record is not refused by — and does not
+close — another project's conversation that merely shares the id, and a compaction or goal
 is never written to an engine serving the other store's record. When that
 engine is idle, the command replaces it (the conversation loses only a warm
 process); when it is mid-turn, the command is refused, naming the store that
