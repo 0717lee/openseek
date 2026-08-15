@@ -159,10 +159,9 @@ control-frame definitions in `desktop/tunnel`.
 
 There is no stream-resume machinery: no connection cursor and no replay of
 transient notifications. (The one sequence that exists is per durable record
-— a store-qualified session — and durable, not per-connection:
-`session.event` carries the store's own event sequence — see *The durable
-transcript* below — and a reconnect recovers missed commits by re-reading,
-never by replay.) The sole lifecycle exception is `agent.runs`'s targeted,
+and durable, not per-connection: `session.event` carries the store's own
+event sequence — see *The durable transcript* below — and a reconnect
+recovers missed commits by re-reading, never by replay.) The sole lifecycle exception is `agent.runs`'s targeted,
 process-lifetime settlement state for owners the reconnecting client names;
 it is a state query, not an event log. A connection delivers events from the
 moment it exists; whatever a client missed while disconnected it recovers by
@@ -172,7 +171,7 @@ re-reading state:
    first notification — `{ready, scratch_root, session_root}`, where
    `scratch_root` is the device-native base Scratch conversations run in and
    `session_root` is the **global durable session store root**: the value a
-   client compares a broadcast store root against to recognize the Scratch
+   client compares `agent.started`'s root against to recognize the Scratch
    store (any other store root is a project store, `<project>/.openseek`).
    The host then starts forwarding the remote delivery stream.
 2. Resync: `session.list` + `agent.runs` (and reload whatever conversation
@@ -281,19 +280,19 @@ Notifications:
 | method | params | result |
 |---|---|---|
 | `session.list` | `{}` | the session index |
-| `session.load` | `{session, workspace?}` — a non-blank workspace must still be registered; omitted/blank locates the session across registered stores, then the global store | `{session: <the durable session JSON>, watermark?}` — current hosts include `watermark`, the highest event `sequence` the snapshot contains (0 for an empty record); older hosts may omit it, in which case clients derive it from the stored events' own sequences. |
-| `session.load_archived` | `{session, workspace?}` — the same store selection rules as `session.load`, but reads only from that store's archived twin | `{session: <the durable session JSON>, watermark?}` without restoring or otherwise changing the archived record |
+| `session.load` | `{session}` — the host locates the record across registered stores, then the global store | `{session: <the durable session JSON>, watermark?}` — current hosts include `watermark`, the highest event `sequence` the snapshot contains (0 for an empty record); older hosts may omit it, in which case clients derive it from the stored events' own sequences. |
+| `session.load_archived` | `{session}` — the same lookup as `session.load`, but reads only from the archived twins | `{session: <the durable session JSON>, watermark?}` without restoring or otherwise changing the archived record |
 | `session.list_archived` | `{}` | the archived index |
 | `session.archive` | `{session, force?}` | success returns the archived session index (the legacy `{groups}` shape) and moves the conversation plus every sibling `<session>-sr-N` descendant transcript as one family. A dirty checkout returns `{kind:"needs_force", worktree, dirty_paths, dirty_path_count}` without changing durable state; `dirty_paths` previews up to 8 paths and `dirty_path_count` counts all status rows. Clients show a discard-confirmation dialog and retry with `force` only after explicit confirmation. On success the conversation's checkout goes with it, but its name/branch/session placement remains registered (the branch survives; a `worktree.changed` broadcast reports `present: false`). "Dirty" means tracked modifications or non-ignored untracked files; ignored files count as disposable and are removed with the checkout, matching `git worktree remove`'s own semantics |
 | `session.unarchive` | `{session}` | outcome — restores the conversation and every archived subagent descendant record together. A retained worktree placement whose checkout was removed returns as missing, so clients offer Repair before any agent, terminal, or file operation can continue |
-| `session.delete_archived` | `{session, workspace}` | permanently deletes the archived conversation record from the exact host-listed project store (`workspace: ""` for Scratch) and every archived subagent descendant record in that store, then returns the archived index. Its retained worktree placement is removed and broadcast, but project/scratch files and the Git branch remain. The operation refuses unknown stores, live records, and running/compacting family members |
+| `session.delete_archived` | `{session}` | permanently deletes the archived conversation record and every archived subagent descendant record beside it, then returns the archived index. Its retained worktree placement is removed and broadcast, but project/scratch files and the Git branch remain. The operation refuses missing records, live records, and running/compacting family members |
 
 Notifications:
 
 | method | params |
 |---|---|
-| `session.event` | `{session, sequence, session_root, event: {sequence, ts, item}}` — one durably **committed** store event, `event` verbatim as `session.load` carries it in `events`. `session_root` is the durable store root the commit was read from: session ids are not globally unique across stores, so the durable identity is `(session_root, session)` and a client must never merge same-id records from different stores; see *The durable transcript* below |
-| `session.changed` | `{change: "archived" \| "unarchived" \| "deleted", session, workspace}` — broadcast to every client (the requester included) when a record moves between stores or is permanently deleted; `workspace` is the owning project path or `""` for Scratch, so same-ID records in other stores remain untouched. A family operation emits one fact for the parent and each descendant subagent record. Recipients apply each store-qualified fact immediately, keep it authoritative over already-in-flight unversioned list replies, and re-read both lists. A new connection starts a fresh list round. |
+| `session.event` | `{session, sequence, event: {sequence, ts, item}}` — one durably **committed** store event, `event` verbatim as `session.load` carries it in `events`; see *The durable transcript* below |
+| `session.changed` | `{change: "archived" \| "unarchived" \| "deleted", session}` — broadcast to every client (the requester included) when a record moves between stores or is permanently deleted. A family operation emits one fact for the parent and each descendant subagent record. Recipients apply each fact immediately, keep it authoritative over already-in-flight unversioned list replies, and re-read both lists. A new connection starts a fresh list round. |
 
 #### The durable transcript: snapshots + commits
 
@@ -301,17 +300,14 @@ A conversation's durable transcript has exactly two sources: the
 `session.load` snapshot and the `session.event` commits that follow it. A
 commit exists **if and only if** its item is in the session's durable
 record, and `sequence` is the item's one-based position there — contiguous
-per store-qualified session. Everything else on the wire is transient stream
-or lifecycle
+per session. Everything else on the wire is transient stream or lifecycle
 state: commit-aware clients may show deltas live, but full semantic messages,
 transient lifecycle notifications, and steer receipts never append transcript
 items — their durable form arrives as a commit. A remote WebSocket receives
 the lightweight forms described above instead of duplicate full semantic
 payloads.
 
-Client algorithm, per store-qualified session — the `(session_root, session)`
-pair, since one id may hold independent records in Scratch and a project
-store at once: keep a watermark `W`, starting at the
+Client algorithm, per session: keep a watermark `W`, starting at the
 snapshot's. For each `session.event`: `sequence ≤ W` → drop (re-broadcasts
 and load/commit races are harmless by construction); `sequence == W + 1` →
 apply and advance; `sequence > W + 1` → a gap (missed broadcasts — a slow
@@ -339,13 +335,6 @@ for resubmission.
 Old clients ignore `session.event` and keep building the transcript from
 `agent.event` as before. Old hosts never send `session.event`, ignore the
 capability notification, and omit the top-level `session.load.watermark`.
-A separate generation of hosts predates the store-qualified contract: such
-a host omits `session_root` from both `agent.connected` and `session.event`.
-The bundled client does not interoperate with them (the desktop frontend and
-host ship in lockstep — a rootless `agent.connected` never reaches readiness
-and a rootless commit is dropped as malformed); a third-party client that
-chooses to accept them falls back to id-only identity, knowing same-id
-records from different stores become indistinguishable.
 A new client derives the watermark from the snapshot events' own `sequence`
 fields and performs one generation-tagged background `session.load` when a
 named run reaches `agent.finished`. That post-terminal snapshot is the

@@ -688,7 +688,7 @@ async fn session_group(
 ///|
 pub async fn load_session(
   manager : EngineManager,
-  payload : @protocol.LoadSessionPayload,
+  payload : @protocol.SessionRecordPayload,
 ) -> LoadSessionReply {
   let session = payload.session.trim().to_owned()
   guard !session.is_empty() else {
@@ -699,19 +699,7 @@ pub async fn load_session(
   // B's archive after a host restart.
   let record_guard = manager.begin_record_read(session)
   defer manager.end_record_read(session, record_guard)
-  // The client's workspace hint says which registered store to read. A
-  // detached workspace is rejected instead of silently probing the global
-  // store, which could return a different history for the same session id.
-  let root = if payload.workspace is Some(hint) && !hint.is_blank() {
-    guard @pathx.Absolute::from_uri_path(hint) is Some(absolute) &&
-      registered_workspace(absolute) is Some(workspace) else {
-      raise EngineError("\{hint} is not a registered workspace")
-    }
-    Some(workspace_session_root(workspace))
-  } else {
-    session_store_root(session)
-  }
-  guard root is Some(root) else {
+  guard session_store_root(session) is Some(root) else {
     raise EngineError(
       "cannot determine a session root; set OPENSEEK_SESSION_ROOT",
     )
@@ -758,7 +746,7 @@ pub async fn load_session(
 /// `load_session` makes an archive/unarchive rename wait for this snapshot.
 pub async fn load_archived_session(
   manager : EngineManager,
-  payload : @protocol.LoadSessionPayload,
+  payload : @protocol.SessionRecordPayload,
 ) -> LoadSessionReply {
   let session = payload.session.trim().to_owned()
   guard !session.is_empty() else {
@@ -766,20 +754,11 @@ pub async fn load_archived_session(
   }
   let record_guard = manager.begin_record_read(session)
   defer manager.end_record_read(session, record_guard)
-  // A workspace hint selects that registered store's archived twin. Without
-  // one, find the archived record across all attached stores and the global
-  // store, matching the placement rules of the archived index.
-  let root = if payload.workspace is Some(hint) && !hint.is_blank() {
-    guard @pathx.Absolute::from_uri_path(hint) is Some(absolute) &&
-      registered_workspace(absolute) is Some(workspace) else {
-      raise EngineError("\{hint} is not a registered workspace")
-    }
-    Some(archived_session_root(workspace_session_root(workspace)))
-  } else {
-    match archived_record_root(session) {
-      Some(root) => Some(archived_session_root(root))
-      None => None
-    }
+  // Find the archived record across all attached stores and the global store,
+  // matching the placement rules of the archived index.
+  let root = match archived_record_root(session) {
+    Some(root) => Some(archived_session_root(root))
+    None => None
   }
   guard root is Some(root) else {
     if live_record_root(session) is Some(_) {
@@ -1395,10 +1374,7 @@ async test "session load preserves a future item without hiding known events" {
     create_mode=CreateOrTruncate,
   )
   assert_eq(@process.run("chmod", ["+x", engine]), 0)
-  let reply = load_session(new_engine_manager(engine), {
-    session: "s-future",
-    workspace: None,
-  })
+  let reply = load_session(new_engine_manager(engine), { session: "s-future" })
   guard reply.session.events is Some(events) else {
     fail("expected session events")
   }
@@ -1426,10 +1402,7 @@ async test "archived session load reads without restoring the record" {
   )
   assert_eq(@process.run("chmod", ["+x", engine]), 0)
   let manager = new_engine_manager(engine)
-  let reply = load_archived_session(manager, {
-    session: "s-archived",
-    workspace: None,
-  })
+  let reply = load_archived_session(manager, { session: "s-archived" })
   guard reply.session.events is Some(events) else {
     fail("expected archived session events")
   }
@@ -1438,43 +1411,6 @@ async test "archived session load reads without restoring the record" {
   assert_true(@fsx.is_dir(Path(dir + "/archived/sessions/s-archived")))
   assert_false(@fsx.exists(Path(dir + "/sessions/s-archived")))
   assert_true(manager.record_guards.is_empty())
-  @fs.rmdir(dir, recursive=true)
-}
-
-///|
-#cfg(not(platform="windows"))
-async test "load rejects a detached workspace hint instead of probing global" {
-  archive_env_test_lock.acquire()
-  defer archive_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  let dir = @fs.tmpdir(prefix="openseek-load-detached-")
-  let marker = dir + "/engine-ran"
-  let engine = dir + "/engine.sh"
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", dir)
-  defer restore_session_root_env(previous)
-  @fsx.ensure_dir(Path(dir + "/sessions/s-detached"))
-  @fs.write_file(
-    engine,
-    "#!/bin/sh\nprintf '' > '\{marker}'\nprintf '%s' '{\"events\":[]}'\n",
-    create_mode=CreateOrTruncate,
-  )
-  assert_eq(@process.run("chmod", ["+x", engine]), 0)
-  let manager = new_engine_manager(engine)
-  let detail = try {
-    ignore(
-      load_session(manager, {
-        session: "s-detached",
-        workspace: Some(dir + "/detached-workspace"),
-      }),
-    )
-    "no error"
-  } catch {
-    EngineError(detail) => detail
-    error if @async.is_being_cancelled() => raise error
-    error => "\{error}"
-  }
-  assert_true(detail.contains("not a registered workspace"))
-  assert_false(@fsx.exists(Path(marker)))
   @fs.rmdir(dir, recursive=true)
 }
 

@@ -162,12 +162,8 @@ fn SidebarDispatcher::conversation_open(
   }
   match id.source() {
     "openseek.live" => self.emit(OpenSession(channel, id.conversation()))
-    "openseek.archived" => {
-      let workspace = id.root().bind(root => @resource.of_path(channel, root))
-      self.emit(
-        OpenArchivedSession(channel, session=id.conversation(), workspace~),
-      )
-    }
+    "openseek.archived" =>
+      self.emit(OpenArchivedSession(channel, id.conversation()))
     source => self.unroutable("open", "source \{source}")
   }
 }
@@ -205,12 +201,7 @@ fn SidebarDispatcher::conversation_delete(
     id.source() == "openseek.archived" else {
     return self.unroutable("delete", "\{id.source()}@\{id.channel()}")
   }
-  self.emit(
-    DeleteArchivedSession(channel, {
-      session: id.conversation(),
-      workspace: id.root().bind(root => @resource.of_path(channel, root)),
-    }),
-  )
+  self.emit(DeleteArchivedSession(channel, id.conversation()))
 }
 
 ///|

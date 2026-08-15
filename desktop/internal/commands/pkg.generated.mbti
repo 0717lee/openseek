@@ -97,15 +97,15 @@ pub let moonide_references : Command[@protocol.MoonIdeNavigationPayload, @protoc
 
 pub let session_archive : Command[@protocol.SessionPayload, @protocol.ArchiveReply]
 
-pub let session_delete_archived : Command[@protocol.ArchivedSessionPayload, @protocol.SessionsReply]
+pub let session_delete_archived : Command[@protocol.SessionRecordPayload, @protocol.SessionsReply]
 
 pub let session_list : Command[@protocol.EmptyPayload, @protocol.SessionsReply]
 
 pub let session_list_archived : Command[@protocol.EmptyPayload, @protocol.SessionsReply]
 
-pub let session_load : Command[@protocol.LoadSessionPayload, @protocol.LoadSessionReply]
+pub let session_load : Command[@protocol.SessionRecordPayload, @protocol.LoadSessionReply]
 
-pub let session_load_archived : Command[@protocol.LoadSessionPayload, @protocol.LoadSessionReply]
+pub let session_load_archived : Command[@protocol.SessionRecordPayload, @protocol.LoadSessionReply]
 
 pub let session_unarchive : Command[@protocol.SessionPayload, @protocol.SessionsReply]
 

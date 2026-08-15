@@ -16,21 +16,14 @@ fn session_snapshot_command(
   generation : Int,
   activate_on_success : Bool,
 ) -> @cmd.Cmd {
-  let (workspace, archived) = match model.find_conversation(channel, session) {
-    Some(conv) => (conv.workspace.project(), conv.is_archived_read_only())
-    None => (model.session_project(channel, session), false)
+  let archived = match model.find_conversation(channel, session) {
+    Some(conv) => conv.is_archived_read_only()
+    None => false
   }
   if activate_on_success {
-    open_session(dispatch, channel, session, workspace~, generation~, archived~)
+    open_session(dispatch, channel, session, generation~, archived~)
   } else {
-    refresh_session(
-      dispatch,
-      channel,
-      session,
-      workspace~,
-      generation~,
-      archived~,
-    )
+    refresh_session(dispatch, channel, session, generation~, archived~)
   }
 }
 
@@ -204,9 +197,8 @@ fn open_session_on(
 ///|
 /// Open one archived row against its archived durable twin. Reusing an
 /// already-open archived transcript preserves its rendered snapshot while a
-/// fresh generation catches up. A live same-id entry or an archived twin from
-/// another store is replaced, so neither writable state nor an in-flight
-/// snapshot can cross the store-qualified archive boundary.
+/// fresh generation catches up. A live entry for the same conversation is
+/// replaced, so writable state never survives into the archived view.
 fn Model::open_archived_session_on(
   self : Model,
   dispatch : @cmd.Emit[Msg],
@@ -217,8 +209,7 @@ fn Model::open_archived_session_on(
   let owner : @interop.ConversationKey = { channel, session: session_id }
   let known = self.find_conversation(channel, session_id)
   let conversation = match known {
-    Some(conv) if conv.is_archived_read_only() &&
-      conv.workspace.project() == workspace => conv
+    Some(conv) if conv.is_archived_read_only() => conv
     _ =>
       {
         ..empty_conversation(
@@ -2835,7 +2826,7 @@ fn update_msg(
             delete_archived_session(
               dispatch,
               confirm.channel,
-              confirm.key,
+              confirm.session,
               confirm.sessions,
               dev.connection_generation,
               archived_request_generation,
@@ -3142,18 +3133,17 @@ fn update_msg(
         }),
       )
     }
-    DeleteArchivedSession(channel, key) => {
+    DeleteArchivedSession(channel, session) => {
       // Only a currently visible archived row may open the destructive dialog;
       // stale clicks cannot authorize deletion of an identity no longer shown.
       guard model.device_state(channel) is Some(dev) &&
-        key.workspace_payload(channel) is Some(_) &&
-        dev.archived.iter().find_first(item => key.matches(item))
+        dev.archived.iter().find_first(item => item.id == session)
         is Some(record) else {
         return (@cmd.none, model)
       }
-      let sessions : Array[String] = [key.session]
+      let sessions : Array[String] = [session]
       for row in @transcript.session_tree(dev.archived) {
-        if key.matches(row.item) {
+        if row.item.id == session {
           for child in row.children {
             sessions.push(child.id)
           }
@@ -3165,7 +3155,7 @@ fn update_msg(
           ..model,
           archived_delete_confirm: Some({
             channel,
-            key,
+            session,
             sessions,
             title: session_item_label(record),
           }),
@@ -3205,21 +3195,24 @@ fn update_msg(
         let (cmd, model) = open_session_on(dispatch, channel, model, session_id)
         (@cmd.batch([focus_cmd, cmd]), model)
       }
-    OpenArchivedSession(channel, session~, workspace~) => {
+    OpenArchivedSession(channel, session) => {
       guard !session.is_empty() && model.device_state(channel) is Some(dev) else {
         return (@cmd.none, model)
       }
-      // The row may have been restored while its click was queued. Re-read
-      // the current archived index and use its placement rather than opening
-      // a stale archived target or trusting an obsolete workspace hint.
-      let key : ArchiveRecordKey = { session, workspace }
-      guard dev.archived.iter().any(item => key.matches(item)) &&
-        !(dev.archive_override(key) is Some(ArchiveLive)) else {
+      // The row may have been restored while its click was queued. Re-read the
+      // current archived index rather than opening a stale archived target,
+      // and take the placement from the row the index still shows.
+      guard dev.archived.iter().find_first(item => item.id == session)
+        is Some(row) &&
+        !(dev.archive_override(session) is Some(ArchiveLive)) else {
         return (@cmd.none, model)
       }
       let (focus_cmd, model) = focus_channel(dispatch, model, channel)
       let (cmd, model) = model.open_archived_session_on(
-        dispatch, channel, session, workspace,
+        dispatch,
+        channel,
+        session,
+        row.workspace,
       )
       (@cmd.batch([focus_cmd, cmd]), model)
     }
@@ -4371,28 +4364,24 @@ fn update_device_msg(
       // newly archived rows and retain newly unarchived rows from the current
       // model when the stale reply omitted them.
       let items = items.filter(item => {
-        let disposition = dev.archive_override({
-          session: item.id,
-          workspace: item.workspace,
-        })
+        let disposition = dev.archive_override(item.id)
         disposition != Some(ArchiveStored) &&
         disposition != Some(ArchiveDeleted)
       })
       for fact in dev.archive_overrides {
         if fact.disposition is ArchiveLive &&
-          !items.iter().any(item => fact.key.matches(item)) {
+          !items.iter().any(item => item.id == fact.session) {
           for current in dev.sessions {
-            if fact.key.matches(current) {
+            if current.id == fact.session {
               items.push(current)
             }
           }
         }
       }
       // A commit or Started broadcast can materialize a conversation before
-      // session.list tells this page which durable store owns it. Reconcile
-      // that provisional placement from the list before any later send: an
-      // empty workspace hint here would otherwise fork the same session into
-      // the default store.
+      // session.list tells this page which project owns it. Reconcile that
+      // provisional placement from the list before any later send, so the
+      // checkout its files and terminals address is the real one.
       let conversations = model.conversations.map(conv => {
         if conv.device == channel {
           let mut project = conv.workspace.project()
@@ -4432,16 +4421,16 @@ fn update_device_msg(
       // the override admits new commits immediately, and the new transcript
       // generation fences the archived request started by BridgeReady.
       for conv in next.conversations {
-        let key : ArchiveRecordKey = {
-          session: conv.session_id,
-          workspace: conv.workspace.project(),
-        }
         if conv.device == channel &&
           conv.is_archived_read_only() &&
-          items.iter().any(item => key.matches(item)) {
+          items.iter().any(item => item.id == conv.session_id) {
           let foreground = channel == next.focused &&
             next.active_session == conv.session_id
-          next = next.with_archive_override(channel, key, ArchiveLive)
+          next = next.with_archive_override(
+            channel,
+            conv.session_id,
+            ArchiveLive,
+          )
           let (updated, generation) = next.begin_transcript_reload({
             ..conv,
             record: LiveRecord,
@@ -4815,17 +4804,14 @@ fn update_device_msg(
       // a newer archive notification is supplemented from the current list
       // when that reply predates the move.
       let items = items.filter(item => {
-        let disposition = dev.archive_override({
-          session: item.id,
-          workspace: item.workspace,
-        })
+        let disposition = dev.archive_override(item.id)
         disposition != Some(ArchiveLive) && disposition != Some(ArchiveDeleted)
       })
       for fact in dev.archive_overrides {
         if fact.disposition is ArchiveStored &&
-          !items.iter().any(item => fact.key.matches(item)) {
+          !items.iter().any(item => item.id == fact.session) {
           for current in dev.archived {
-            if fact.key.matches(current) {
+            if current.id == fact.session {
               items.push(current)
             }
           }
@@ -4836,24 +4822,18 @@ fn update_device_msg(
       // so a stale live-list reply cannot reopen it in that delivery gap.
       let mut next = model
       for item in items {
-        let key : ArchiveRecordKey = {
-          session: item.id,
-          workspace: item.workspace,
-        }
-        if next.archive_override(channel, key) is None {
-          next = next.with_archive_override(channel, key, ArchiveStored)
+        if next.archive_override(channel, item.id) is None {
+          next = next.with_archive_override(channel, item.id, ArchiveStored)
         }
       }
-      let archived_now = (id : String, workspace : @common.Uri?) => {
-        items.iter().any(item => item.id == id && item.workspace == workspace)
+      let archived_now = (id : String) => {
+        items.iter().any(item => item.id == id)
       }
       // The active conversation lives on the focused channel; another
-      // device's archived list must not displace it. Its own placement also
-      // owns the store identity: a same-id sidebar row may belong to Scratch
-      // and must not hide an archived project conversation from this check.
+      // device's archived list must not displace it.
       if channel == next.focused &&
         next.find_conversation(channel, next.active_session) is Some(active) &&
-        archived_now(next.active_session, active.workspace.project()) &&
+        archived_now(next.active_session) &&
         !active.is_archived_read_only() {
         next = replace_archived_active(
           next,
@@ -4865,15 +4845,13 @@ fn update_device_msg(
       }
       let conversations = next.conversations.filter(conv => {
         conv.device != channel ||
-        !archived_now(conv.session_id, conv.workspace.project()) ||
+        !archived_now(conv.session_id) ||
         conv.is_archived_read_only()
       })
       guard next.device_state(channel) is Some(ndev) else {
         return (@cmd.none, { ..next, conversations, })
       }
-      let sessions = ndev.sessions.filter(item => {
-        !archived_now(item.id, item.workspace)
-      })
+      let sessions = ndev.sessions.filter(item => !archived_now(item.id))
       (
         @cmd.none,
         {
@@ -4883,7 +4861,6 @@ fn update_device_msg(
       )
     }
     ArchivedDeleted(
-      key~,
       sessions~,
       items~,
       connection_generation~,
@@ -4901,43 +4878,34 @@ fn update_device_msg(
       for session in sessions {
         tombstoned = tombstoned.with_archive_override(
           channel,
-          { session, workspace: key.workspace },
+          session,
           ArchiveDeleted,
         )
       }
       // Deleting the conversation currently on screen must also replace its
       // send target. Otherwise `Model::active` synthesizes a writable empty
-      // conversation under the permanently deleted id. Read the open
-      // conversation's own workspace: same-id live rows in another store do
-      // not own this transcript.
+      // conversation under the permanently deleted id.
       if channel == tombstoned.focused &&
         sessions.contains(tombstoned.active_session) &&
         tombstoned.find_conversation(channel, tombstoned.active_session)
-        is Some(active) &&
-        active.workspace.project() == key.workspace {
+        is Some(active) {
         tombstoned = replace_archived_active(
           tombstoned,
           channel,
           tombstoned.active_session,
           fresh_session,
-          key.workspace,
+          active.workspace.project(),
         )
       }
       if tombstoned.device_state(channel) is Some(ndev) {
         tombstoned = tombstoned.replace_device({
           ..ndev,
-          sessions: ndev.sessions.filter(item => {
-            item.workspace != key.workspace || !sessions.contains(item.id)
-          }),
-          archived: ndev.archived.filter(item => {
-            item.workspace != key.workspace || !sessions.contains(item.id)
-          }),
+          sessions: ndev.sessions.filter(item => !sessions.contains(item.id)),
+          archived: ndev.archived.filter(item => !sessions.contains(item.id)),
         })
       }
       let conversations = tombstoned.conversations.filter(conv => {
-        conv.device != channel ||
-        conv.workspace.project() != key.workspace ||
-        !sessions.contains(conv.session_id)
+        conv.device != channel || !sessions.contains(conv.session_id)
       })
       update_device_msg(
         dispatch,
@@ -4987,7 +4955,7 @@ fn update_device_msg(
     // Another client archived, restored, or deleted a conversation. Both
     // sidebar lists are stale, but this identity-bearing fact takes effect
     // immediately and remains authoritative over in-flight replies.
-    SessionsChanged(change~, key~, fresh_session~) => {
+    SessionsChanged(change~, session~, fresh_session~) => {
       let (sessions, model) = request_sessions_refresh(dispatch, channel, model)
       let (archived, model) = request_archived_refresh(dispatch, channel, model)
       let commands = @cmd.batch([sessions, archived])
@@ -4997,33 +4965,30 @@ fn update_device_msg(
       if change == "deleted" {
         let mut changed = model
         if channel == changed.focused &&
-          changed.active_session == key.session &&
-          changed.find_conversation(channel, key.session) is Some(active) &&
-          active.workspace.project() == key.workspace &&
+          changed.active_session == session &&
+          changed.find_conversation(channel, session) is Some(active) &&
           fresh_session is Some(fresh) {
           changed = replace_archived_active(
             changed,
             channel,
-            key.session,
+            session,
             fresh,
-            key.workspace,
+            active.workspace.project(),
           )
         }
-        let sessions = dev.sessions.filter(item => !key.matches(item))
-        let archived = dev.archived.filter(item => !key.matches(item))
+        let sessions = dev.sessions.filter(item => item.id != session)
+        let archived = dev.archived.filter(item => item.id != session)
         let conversations = changed.conversations.filter(conv => {
-          conv.device != channel ||
-          conv.session_id != key.session ||
-          conv.workspace.project() != key.workspace
+          conv.device != channel || conv.session_id != session
         })
         let confirm = match changed.archived_delete_confirm {
-          Some(confirm) if confirm.channel == channel && confirm.key == key =>
-            None
+          Some(confirm) if confirm.channel == channel &&
+            confirm.session == session => None
           other => other
         }
         let next = changed
           .replace_device({ ..dev, sessions, archived })
-          .with_archive_override(channel, key, ArchiveDeleted)
+          .with_archive_override(channel, session, ArchiveDeleted)
         return (
           commands,
           { ..next, conversations, archived_delete_confirm: confirm },
@@ -5032,25 +4997,24 @@ fn update_device_msg(
       if change == "unarchived" {
         let mut restored : @transcript.SessionListItem? = None
         for item in dev.archived {
-          if key.matches(item) {
+          if item.id == session {
             restored = Some(item)
           }
         }
-        let archived = dev.archived.filter(item => !key.matches(item))
+        let archived = dev.archived.filter(item => item.id != session)
         let sessions = dev.sessions.copy()
         if restored is Some(item) &&
-          !sessions.iter().any(current => key.matches(current)) {
+          !sessions.iter().any(current => current.id == session) {
           sessions.push(item)
         }
         let next = model
           .replace_device({ ..dev, sessions, archived })
-          .with_archive_override(channel, key, ArchiveLive)
+          .with_archive_override(channel, session, ArchiveLive)
         // Fence an archived read that was already in flight, then re-read the
         // now-live record. The transcript stays visible while this new
         // generation settles; only the record source and composer capability
         // change immediately.
-        if next.find_conversation(channel, key.session) is Some(conv) &&
-          conv.workspace.project() == key.workspace &&
+        if next.find_conversation(channel, session) is Some(conv) &&
           conv.is_archived_read_only() {
           let (next, generation) = next.begin_transcript_reload({
             ..conv,
@@ -5059,13 +5023,9 @@ fn update_device_msg(
           })
           if generation is Some(generation) {
             let foreground = channel == next.focused &&
-              next.active_session == key.session &&
-              next.session_project(channel, key.session) == key.workspace
+              next.active_session == session
             let next = if foreground {
-              {
-                ..next,
-                loading_conversation: Some({ channel, session: key.session }),
-              }
+              { ..next, loading_conversation: Some({ channel, session }) }
             } else {
               next
             }
@@ -5073,12 +5033,7 @@ fn update_device_msg(
               @cmd.batch([
                 commands,
                 session_snapshot_command(
-                  dispatch,
-                  channel,
-                  next,
-                  key.session,
-                  generation,
-                  foreground,
+                  dispatch, channel, next, session, generation, foreground,
                 ),
               ]),
               next,
@@ -5094,57 +5049,63 @@ fn update_device_msg(
       // Invalidate the live target before either async list reply. Keeping a
       // placeholder archived entry also blocks a late session.event from
       // rematerializing it during this window.
-      let sessions = dev.sessions.filter(item => !key.matches(item))
+      let sessions = dev.sessions.filter(item => item.id != session)
       let conversations = model.conversations.filter(conv => {
         conv.device != channel ||
-        conv.session_id != key.session ||
-        conv.workspace.project() != key.workspace ||
+        conv.session_id != session ||
         conv.is_archived_read_only()
       })
       let archived = dev.archived.copy()
-      if !archived.iter().any(item => key.matches(item)) {
+      if !archived.iter().any(item => item.id == session) {
         let mut item : @transcript.SessionListItem = {
-          id: key.session,
+          id: session,
           title: None,
-          workspace: key.workspace,
+          workspace: model.session_project(channel, session),
           workspace_name: "",
         }
         for live in dev.sessions {
-          if key.matches(live) {
+          if live.id == session {
             item = live
           }
         }
         archived.push(item)
       }
-      let overridden = model.with_archive_override(channel, key, ArchiveStored)
+      let overridden = model.with_archive_override(
+        channel,
+        session,
+        ArchiveStored,
+      )
       let overridden = match overridden.device_state(channel) {
         Some(ndev) => overridden.replace_device({ ..ndev, sessions, archived })
         None => overridden
       }
-      // The open conversation, not the first same-id sidebar row, says which
-      // store is losing its active send target.
-      let active_archived = channel == model.focused &&
-        model.active_session == key.session &&
-        model.find_conversation(channel, key.session) is Some(active) &&
-        active.workspace.project() == key.workspace &&
-        !active.is_archived_read_only()
+      // The open conversation says which project is losing its active send
+      // target — the row this broadcast names may not be listed yet.
+      let losing_active = if channel == model.focused &&
+        model.active_session == session &&
+        model.find_conversation(channel, session) is Some(active) &&
+        !active.is_archived_read_only() {
+        Some(active)
+      } else {
+        None
+      }
       let next = {
         ..overridden,
-        conversations: if active_archived {
+        conversations: if losing_active is Some(_) {
           model.conversations
         } else {
           conversations
         },
       }
-      if active_archived && fresh_session is Some(fresh) {
+      if losing_active is Some(active) && fresh_session is Some(fresh) {
         (
           commands,
           replace_archived_active(
             next,
             channel,
-            key.session,
+            session,
             fresh,
-            key.workspace,
+            active.workspace.project(),
           ),
         )
       } else {
@@ -5191,56 +5152,37 @@ fn update_device_msg(
         false,
         "failed to refresh session \{session}",
       )
-    SessionCommitted(session~, sequence~, ts~, item~, session_root~) => {
-      // The commit names its own store — the exact durable identity rather
-      // than a guess, classified against the global root the host announced
-      // on connect. Commits do not precede `agent.connected` (readiness
-      // precedes every forwarded notification), but if one ever did, the
-      // listing/live guess is safer than misreading the global store.
-      let commit_project = match dev.bridge {
-        Connected(session_root=global, ..) =>
-          dev.placement_for_store_root(global~, session_root)
-        _ => model.session_project(channel, session)
-      }
+    SessionCommitted(session~, sequence~, ts~, item~) => {
       // Archiving removes live client state after the hub's ordered final
       // commit. A stale/replayed commit seen after that local fact must not
       // resurrect the archived record as a live hidden conversation.
-      let key : ArchiveRecordKey = { session, workspace: commit_project }
-      let archived = match dev.archive_override(key) {
+      let archived = match dev.archive_override(session) {
         Some(ArchiveStored | ArchiveDeleted) => true
         Some(ArchiveLive) => false
-        None => dev.archived.iter().any(item => key.matches(item))
+        None => dev.archived.iter().any(item => item.id == session)
       }
       if archived {
         return (@cmd.none, model)
       }
-      // The page holds at most one conversation per (channel, id), so the
-      // one this id finds may stand for another store's record — and that
-      // record's watermark says nothing about this store's commits. Only a
-      // conversation placed in the committed store can have seen them.
       let first_commit_unseen = match
         model.find_conversation(channel, session) {
-        Some(conv) if conv.workspace.project() == commit_project =>
-          !conv.has_seen_durable_sequence(sequence)
-        _ => true
+        Some(conv) => !conv.has_seen_durable_sequence(sequence)
+        None => true
       }
-      // The listing is store-qualified, so ask whether THIS record is listed:
-      // a same-id row from another store is a different durable record and
-      // must not suppress the reload that gives this one its sidebar row.
-      let listed = dev.sessions
-        .iter()
-        .any(item => item.id == session && item.workspace == commit_project)
+      let listed = dev.sessions.iter().any(item => item.id == session)
       let refresh_sessions = sequence == 1 && !listed && first_commit_unseen
       // A short foreign run can commit and finish before either the session
       // list or run resync reaches this page. Materialize hidden client state
       // from the commit itself: sequence 1 projects immediately; a later
       // sequence exposes a gap and follows the normal snapshot recovery path.
+      // Its placement comes from whatever the page already knows; the session
+      // list reconcile below settles it.
       let model = if model.find_conversation(channel, session) is None {
         model.replace_conversation(
           empty_conversation(
             channel,
             session,
-            project?=commit_project,
+            project?=model.session_project(channel, session),
             model=model
               .remembered_model(channel, session)
               .unwrap_or(model.default_model),
@@ -5443,18 +5385,11 @@ fn update_device_msg(
         dev.project_for_session_root(session_root)
       }
       // A delete tombstone outranks unversioned list replies and replayed
-      // commits, but it must not hide a later same-id incarnation forever.
-      // Started precedes every commit of an accepted run and carries the
-      // host-selected durable store, so it is the first exact creation fact
-      // that can safely retire the tombstone. Rootless legacy events cannot
-      // distinguish same-id records in different stores and leave it intact.
-      let model = if session_root is Some(_) {
-        let key : ArchiveRecordKey = { session, workspace: started_project }
-        if dev.archive_override(key) is Some(ArchiveDeleted) {
-          model.with_archive_override(channel, key, ArchiveLive)
-        } else {
-          model
-        }
+      // commits, but it must not hide a later incarnation of the id forever.
+      // Started precedes every commit of an accepted run, so it is the first
+      // creation fact that can safely retire the tombstone.
+      let model = if dev.archive_override(session) is Some(ArchiveDeleted) {
+        model.with_archive_override(channel, session, ArchiveLive)
       } else {
         model
       }
@@ -7544,7 +7479,6 @@ test "session list assigns a commit-first conversation to its durable workspace"
       sequence=1,
       ts=None,
       item=@protocol.User({ content: "arrived before the list" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     test_model(),
   )
@@ -7578,184 +7512,6 @@ test "session list assigns a commit-first conversation to its durable workspace"
   assert_eq(reconciled.workspace, Project(root=workspace))
   assert_eq(listed.dev().active_project, Some(workspace))
   assert_true(encoded_start_workspace(reconciled) is Some("/work/foreign"))
-}
-
-///|
-test "a rooted commit places its conversation without waiting for the list" {
-  let dispatch = test_dispatch()
-  let workspace = @interop.ChannelId::Local.test_resource("/work/foreign")
-  let store = @interop.ChannelId::Local.test_resource("/work/foreign/.openseek")
-  let model = test_model().with_dev(dev => { ..dev, projects: [workspace] })
-  let (_, committed) = update_dev(
-    dispatch,
-    SessionCommitted(
-      session="desktop-foreign",
-      sequence=1,
-      ts=None,
-      item=@protocol.User({ content: "arrived before the list" }),
-      session_root=store,
-    ),
-    model,
-  )
-  guard committed.find_conversation(
-      @interop.ChannelId::Local,
-      "desktop-foreign",
-    )
-    is Some(placed) else {
-    fail("rooted commit did not materialize its conversation")
-  }
-  assert_eq(placed.workspace, Project(root=workspace))
-  // The global root the host announced on connect is the Scratch store,
-  // matched exactly rather than guessed from a missing listing.
-  let (_, scratch) = update_dev(
-    dispatch,
-    SessionCommitted(
-      session="desktop-global",
-      sequence=1,
-      ts=None,
-      item=@protocol.User({ content: "hi" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
-    ),
-    committed,
-  )
-  guard scratch.find_conversation(@interop.ChannelId::Local, "desktop-global")
-    is Some(global) else {
-    fail("rooted global commit did not materialize its conversation")
-  }
-  assert_true(global.workspace is Scratch)
-  // The projects registry reply may still be in flight on a fresh
-  // connection: a store outside the mirrored registry is still a project
-  // store, and its layout (`<project>/.openseek`) names the project.
-  let (_, unseen) = update_dev(
-    dispatch,
-    SessionCommitted(
-      session="desktop-unseen",
-      sequence=1,
-      ts=None,
-      item=@protocol.User({ content: "hi" }),
-      session_root=@interop.ChannelId::Local.test_resource(
-        "/work/unseen/.openseek",
-      ),
-    ),
-    scratch,
-  )
-  guard unseen.find_conversation(@interop.ChannelId::Local, "desktop-unseen")
-    is Some(pending) else {
-    fail("unregistered-store commit did not materialize its conversation")
-  }
-  assert_eq(
-    pending.workspace,
-    Project(root=@interop.ChannelId::Local.test_resource("/work/unseen")),
-  )
-}
-
-///|
-/// A same-id row from another store is a different durable record: it must
-/// not suppress the list reload that gives the committed record its own row.
-test "a commit for an unlisted store refreshes past a same-id row" {
-  let dispatch = test_dispatch()
-  let workspace = @interop.ChannelId::Local.test_resource("/work/foreign")
-  let store = @interop.ChannelId::Local.test_resource("/work/foreign/.openseek")
-  let model = test_model().with_dev(dev => {
-    ..dev,
-    projects: [workspace],
-    sessions: [
-      {
-        id: "desktop-shared",
-        title: Some("scratch copy"),
-        workspace: None,
-        workspace_name: "",
-      },
-      {
-        id: "desktop-scratch-only",
-        title: Some("scratch chat"),
-        workspace: None,
-        workspace_name: "",
-      },
-    ],
-  })
-  let (_, committed) = update_dev(
-    dispatch,
-    SessionCommitted(
-      session="desktop-shared",
-      sequence=1,
-      ts=None,
-      item=@protocol.User({ content: "hi" }),
-      session_root=store,
-    ),
-    model,
-  )
-  assert_eq(committed.dev().sessions_request_generation, 1)
-  // The store that is already listed asks for nothing: this exact record has
-  // its row, and the conversation is new to the page either way.
-  let (_, same_store) = update_dev(
-    dispatch,
-    SessionCommitted(
-      session="desktop-scratch-only",
-      sequence=1,
-      ts=None,
-      item=@protocol.User({ content: "hi" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
-    ),
-    committed,
-  )
-  assert_eq(same_store.dev().sessions_request_generation, 1)
-}
-
-///|
-/// The unseen-commit gate has the same hazard as the listing check: the page
-/// holds one conversation per (channel, id), so a Scratch record that already
-/// consumed sequence one must not make a project store's first commit look
-/// like old news.
-test "a commit for an unlisted store refreshes past a same-id watermark" {
-  let dispatch = test_dispatch()
-  let workspace = @interop.ChannelId::Local.test_resource("/work/foreign")
-  let store = @interop.ChannelId::Local.test_resource("/work/foreign/.openseek")
-  let model = test_model().with_dev(dev => {
-    ..dev,
-    projects: [workspace],
-    sessions: [
-      {
-        id: "desktop-shared",
-        title: Some("scratch copy"),
-        workspace: None,
-        workspace_name: "",
-      },
-    ],
-  })
-  // The Scratch record is listed and consumes its own first commit, so the
-  // page now holds a Scratch conversation at watermark one.
-  let (_, scratch) = update_dev(
-    dispatch,
-    SessionCommitted(
-      session="desktop-shared",
-      sequence=1,
-      ts=None,
-      item=@protocol.User({ content: "scratch" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
-    ),
-    model,
-  )
-  assert_eq(scratch.dev().sessions_request_generation, 0)
-  guard scratch.find_conversation(@interop.ChannelId::Local, "desktop-shared")
-    is Some(consumed) else {
-    fail("listed scratch commit did not materialize its conversation")
-  }
-  assert_eq(consumed.watermark, 1)
-  // The project store's own first commit is a different durable record: it
-  // is unlisted, and the Scratch watermark must not suppress its reload.
-  let (_, committed) = update_dev(
-    dispatch,
-    SessionCommitted(
-      session="desktop-shared",
-      sequence=1,
-      ts=None,
-      item=@protocol.User({ content: "project" }),
-      session_root=store,
-    ),
-    scratch,
-  )
-  assert_eq(committed.dev().sessions_request_generation, 1)
 }
 
 ///|
@@ -7985,7 +7741,6 @@ test "reconnect refresh is single-flight and preserves its commit buffer" {
       sequence=3,
       ts=None,
       item=@protocol.User({ content: "future" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     refreshing,
   )
@@ -9094,7 +8849,6 @@ test "run semantic errors never duplicate their terminal commit" {
     sequence=1,
     ts=None,
     item=@protocol.Terminal(@protocol.Failed("engine error")),
-    session_root=@interop.ChannelId::Local.test_store_root(),
   )
   let (_, semantic_first) = update_dev(dispatch, semantic, running_model())
   inspect(semantic_first.active().overlay.length(), content="0")
@@ -9651,7 +9405,6 @@ test "canonical User text never claims an unconfirmed start" {
       sequence=1,
       ts=None,
       item=@protocol.User({ content: "accepted prompt" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     failed,
   )
@@ -10941,7 +10694,6 @@ test "a live commit dates its row on arrival, buffered or applied straight" {
       sequence~,
       ts=Some(ts),
       item=@protocol.User({ content: "question" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     )
   }
   // The contiguous-commit path a running conversation takes: the row must
@@ -10992,7 +10744,6 @@ test "a canonical user commit never settles a local steer" {
       sequence=1,
       ts=None,
       item=@protocol.User({ content: "go left" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -11235,7 +10986,6 @@ test "run-end unconfirmed notice follows assistant and terminal before freezing"
         tool_calls: None,
         reasoning_content: None,
       }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     finished,
   )
@@ -11246,7 +10996,6 @@ test "run-end unconfirmed notice follows assistant and terminal before freezing"
       sequence=3,
       ts=None,
       item=@protocol.Terminal(@protocol.Finished("answer")),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     buffered,
   )
@@ -11282,7 +11031,6 @@ test "run-end unconfirmed notice follows assistant and terminal before freezing"
       sequence=4,
       ts=None,
       item=@protocol.User({ content: "next question" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     answered,
   )
@@ -11366,7 +11114,6 @@ test "a snapshot does not mistake a same-run steer User for the terminal boundar
       sequence=2,
       ts=None,
       item=@protocol.User({ content: "late steer" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -11386,7 +11133,6 @@ test "a snapshot does not mistake a same-run steer User for the terminal boundar
         tool_calls: None,
         reasoning_content: None,
       }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     finished,
   )
@@ -11397,7 +11143,6 @@ test "a snapshot does not mistake a same-run steer User for the terminal boundar
       sequence=4,
       ts=None,
       item=@protocol.Terminal(@protocol.Finished("answer")),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     answered,
   )
@@ -11459,7 +11204,6 @@ test "an unknown terminal before Finished still owns the run-tail notice" {
         "kind": "terminal",
         "payload": { "kind": "future_terminal", "message": "answer" },
       }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     running_model().replace_conversation(conv),
   )
@@ -11530,7 +11274,6 @@ test "a successor resolves an old terminal tail only from its causal snapshot" {
       sequence=3,
       ts=None,
       item=@protocol.Terminal(@protocol.Finished("first answer")),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -11566,7 +11309,6 @@ test "a successor resolves an old terminal tail only from its causal snapshot" {
       sequence=4,
       ts=None,
       item=@protocol.User({ content: "second question" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     started,
   )
@@ -11577,7 +11319,6 @@ test "a successor resolves an old terminal tail only from its causal snapshot" {
       sequence=5,
       ts=None,
       item=@protocol.Terminal(@protocol.Finished("second answer")),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     second_user,
   )
@@ -11882,7 +11623,6 @@ test "a foreign background run waits for a snapshot cut after Started" {
         tool_calls: None,
         reasoning_content: None,
       }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -11914,7 +11654,6 @@ test "a foreign background run waits for a snapshot cut after Started" {
       sequence=3,
       ts=None,
       item=@protocol.Terminal(@protocol.Finished("previous answer")),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     started,
   )
@@ -11925,7 +11664,6 @@ test "a foreign background run waits for a snapshot cut after Started" {
       sequence=4,
       ts=None,
       item=@protocol.User({ content: "current question" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     buffered_terminal,
   )
@@ -12004,7 +11742,6 @@ test "buffered future terminal cannot become its own run floor" {
       sequence=2,
       ts=None,
       item=@protocol.User({ content: "current question" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -12019,7 +11756,6 @@ test "buffered future terminal cannot become its own run floor" {
         tool_calls: None,
         reasoning_content: None,
       }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     user,
   )
@@ -12030,7 +11766,6 @@ test "buffered future terminal cannot become its own run floor" {
       sequence=4,
       ts=None,
       item=@protocol.Terminal(@protocol.Finished("current answer")),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     answer,
   )
@@ -12095,7 +11830,6 @@ test "a late durable EOF finalizes an unconfirmed steer without a terminal" {
         tool_calls: None,
         reasoning_content: None,
       }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     synthetic,
   )
@@ -12780,7 +12514,6 @@ test "an initial warning freezes between a snapshot and its buffered successor" 
       sequence=2,
       ts=None,
       item=@protocol.User({ content: "buffered W+1" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     finished,
   )
@@ -13106,7 +12839,6 @@ test "exact-zero recovery refuses buffered or nonzero durable frontiers" {
       sequence=1,
       ts=None,
       item=@protocol.User({ content: "durable prompt arrived" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     waiting,
   )
@@ -14373,11 +14105,7 @@ test "opening an archived row creates a read-only transcript owner" {
   let dispatch = test_dispatch()
   let item = archived_item("desktop-archived")
   let model = test_model().with_dev(dev => { ..dev, archived: [item] })
-  let open = OpenArchivedSession(
-    @interop.ChannelId::Local,
-    session=item.id,
-    workspace=item.workspace,
-  )
+  let open = OpenArchivedSession(@interop.ChannelId::Local, item.id)
   let (_, loading) = update(dispatch, open, model)
   inspect(loading.active_session, content="desktop-archived")
   assert_true(loading.active().record is ArchivedRecord)
@@ -14394,101 +14122,6 @@ test "opening an archived row creates a read-only transcript owner" {
   guard selected_again.active().sync is Reloading(generation=1, ..) else {
     fail("re-selecting an archived row replaced the in-flight generation")
   }
-}
-
-///|
-test "switching same-id archived stores fences the first transcript load" {
-  let dispatch = test_dispatch()
-  let first = @interop.ChannelId::Local.test_resource("/first")
-  let second = @interop.ChannelId::Local.test_resource("/second")
-  let first_item : @transcript.SessionListItem = {
-    ..archived_item("desktop-shared"),
-    workspace: Some(first),
-    workspace_name: "first",
-  }
-  let second_item : @transcript.SessionListItem = {
-    ..first_item,
-    workspace: Some(second),
-    workspace_name: "second",
-  }
-  let model = test_model().with_dev(dev => {
-    ..dev,
-    archived: [first_item, second_item],
-    projects: [first, second],
-  })
-  let (_, loading_first) = update(
-    dispatch,
-    OpenArchivedSession(
-      @interop.ChannelId::Local,
-      session=first_item.id,
-      workspace=first_item.workspace,
-    ),
-    model,
-  )
-  guard loading_first.active().sync is Reloading(generation=1, ..) else {
-    fail("the first archived store did not begin loading")
-  }
-  assert_eq(loading_first.active().workspace, Project(root=first))
-  let (_, loading_second) = update(
-    dispatch,
-    OpenArchivedSession(
-      @interop.ChannelId::Local,
-      session=second_item.id,
-      workspace=second_item.workspace,
-    ),
-    loading_first,
-  )
-  guard loading_second.active().sync is Reloading(generation=2, ..) else {
-    fail("the second archived store reused the first request generation")
-  }
-  assert_eq(loading_second.active().workspace, Project(root=second))
-  let (_, stale_first) = update_dev(
-    dispatch,
-    SessionLoaded(
-      session=first_item.id,
-      items=[
-        {
-          kind: Assistant(is_danger=false),
-          content: "first store answer",
-          ts: None,
-          sequence: Some(1),
-        },
-      ],
-      watermark=1,
-      event_boundaries=[],
-      goal=None,
-      goal_markers=[],
-      generation=1,
-    ),
-    loading_second,
-  )
-  inspect(stale_first.active().messages.length(), content="0")
-  assert_eq(stale_first.active().workspace, Project(root=second))
-  let (_, loaded_second) = update_dev(
-    dispatch,
-    SessionLoaded(
-      session=second_item.id,
-      items=[
-        {
-          kind: Assistant(is_danger=false),
-          content: "second store answer",
-          ts: None,
-          sequence: Some(1),
-        },
-      ],
-      watermark=1,
-      event_boundaries=[],
-      goal=None,
-      goal_markers=[],
-      generation=2,
-    ),
-    stale_first,
-  )
-  inspect(loaded_second.active().messages.length(), content="1")
-  inspect(
-    loaded_second.active().messages[0].content,
-    content="second store answer",
-  )
 }
 
 ///|
@@ -14519,11 +14152,7 @@ test "an archived snapshot stays open across archived-list reconciliation" {
   let model = test_model().with_dev(dev => { ..dev, archived: [item] })
   let (_, loading) = update(
     dispatch,
-    OpenArchivedSession(
-      @interop.ChannelId::Local,
-      session=item.id,
-      workspace=item.workspace,
-    ),
+    OpenArchivedSession(@interop.ChannelId::Local, item.id),
     model,
   )
   let (_, loaded) = update_dev(
@@ -14580,11 +14209,7 @@ test "unarchiving an open transcript fences its archived snapshot" {
   }
   let (_, restoring) = update_dev(
     dispatch,
-    SessionsChanged(
-      change="unarchived",
-      key={ session: item.id, workspace: item.workspace },
-      fresh_session=None,
-    ),
+    SessionsChanged(change="unarchived", session=item.id, fresh_session=None),
     model,
   )
   assert_true(restoring.active().record is LiveRecord)
@@ -14617,29 +14242,21 @@ test "unarchiving an open transcript fences its archived snapshot" {
 
 ///|
 test "session.changed decoder preserves archive invalidation identity" {
-  guard session_changed_msg(@interop.ChannelId::Local, {
-      change: "archived",
-      session: "desktop-old",
-      workspace: "",
-    })
+  guard session_changed_msg({ change: "archived", session: "desktop-old" })
     is Some(
       SessionsChanged(
         change="archived",
-        key={ session: "desktop-old", workspace: None },
+        session="desktop-old",
         fresh_session=Some(_)
       )
     ) else {
     fail("archive invalidation was not decoded")
   }
-  guard session_changed_msg(@interop.ChannelId::Local, {
-      change: "deleted",
-      session: "desktop-old",
-      workspace: "",
-    })
+  guard session_changed_msg({ change: "deleted", session: "desktop-old" })
     is Some(
       SessionsChanged(
         change="deleted",
-        key={ session: "desktop-old", workspace: None },
+        session="desktop-old",
         fresh_session=Some(_)
       )
     ) else {
@@ -14658,16 +14275,13 @@ test "archived deletion confirmation owns one visible conversation family" {
   })
   let (_, staged) = update(
     dispatch,
-    DeleteArchivedSession(@interop.ChannelId::Local, {
-      session: "desktop-parent",
-      workspace: None,
-    }),
+    DeleteArchivedSession(@interop.ChannelId::Local, "desktop-parent"),
     model,
   )
   guard staged.archived_delete_confirm is Some(confirm) else {
     fail("delete confirmation was not staged")
   }
-  assert_true(confirm.key == { session: "desktop-parent", workspace: None })
+  assert_eq(confirm.session, "desktop-parent")
   // The record's blank title falls back to its id: the dialog names what the
   // archived list showed, not whatever label the click happened to carry.
   assert_eq(confirm.title, "desktop-parent")
@@ -14690,69 +14304,6 @@ test "archived deletion confirmation owns one visible conversation family" {
     confirmed,
   )
   assert_eq(confirmed_twice.dev().archived_request_generation, 1)
-}
-
-///|
-test "archived deletion keeps same-id rows in other stores" {
-  let dispatch = test_dispatch()
-  let project = @interop.ChannelId::Local.test_resource("/project")
-  let scratch = archived_item("shared")
-  let project_parent : @transcript.SessionListItem = {
-    ..archived_item("shared"),
-    workspace: Some(project),
-    workspace_name: "project",
-  }
-  let project_child : @transcript.SessionListItem = {
-    ..project_parent,
-    id: "shared-sr-1",
-  }
-  // The Scratch live row deliberately comes first. Store-qualified active
-  // deletion must use the open conversation, not this same-id list row.
-  let model = {
-    ..test_model()
-    .replace_conversation({
-      ..empty_conversation(@interop.ChannelId::Local, "shared"),
-      workspace: Workspace::from_project(Some(project)),
-      record: ArchivedRecord,
-      task: "project draft",
-    })
-    .with_dev(dev => {
-      ..dev,
-      sessions: [scratch],
-      archived: [scratch, project_parent, project_child],
-    }),
-    active_session: "shared",
-  }
-  let key : ArchiveRecordKey = { session: "shared", workspace: Some(project) }
-  let (_, staged) = update(
-    dispatch,
-    DeleteArchivedSession(@interop.ChannelId::Local, key),
-    model,
-  )
-  guard staged.archived_delete_confirm is Some(confirm) else {
-    fail("delete confirmation was not staged")
-  }
-  assert_true(confirm.key == key)
-  assert_eq(confirm.sessions, ["shared", "shared-sr-1"])
-  let response_model = staged.with_dev(dev => {
-    ..dev,
-    archived_request_generation: 1,
-  })
-  let (_, deleted) = update_dev(
-    dispatch,
-    ArchivedDeleted(
-      key~,
-      sessions=confirm.sessions,
-      items=[scratch, project_parent, project_child],
-      connection_generation=0,
-      request_generation=1,
-      fresh_session="desktop-fresh",
-    ),
-    response_model,
-  )
-  assert_true(deleted.dev().archived == [scratch])
-  inspect(deleted.active_session, content="desktop-fresh")
-  inspect(deleted.active().task, content="project draft")
 }
 
 ///|
@@ -14779,7 +14330,6 @@ test "delete response tombstones a family before stale list replies" {
     active_session: "desktop-parent",
   }
   let deleted_msg = ArchivedDeleted(
-    key={ session: "desktop-parent", workspace: None },
     sessions=["desktop-parent", "desktop-parent-sr-1"],
     items=[parent, child, other],
     connection_generation=0,
@@ -14818,20 +14368,17 @@ test "delete response tombstones a family before stale list replies" {
 }
 
 ///|
-test "a new Started incarnation retires its exact deleted tombstone" {
+test "a new Started incarnation retires its deleted tombstone" {
   let dispatch = test_dispatch()
   let deleted_item = archived_item("desktop-recreated")
-  let project = @interop.ChannelId::Local.test_resource("/project")
   let model = test_model().with_dev(dev => {
     ..dev,
     archived_request_generation: 1,
     archived: [deleted_item],
-    projects: [project],
   })
   let (_, deleted) = update_dev(
     dispatch,
     ArchivedDeleted(
-      key={ session: deleted_item.id, workspace: None },
       sessions=[deleted_item.id],
       items=[deleted_item],
       connection_generation=0,
@@ -14841,32 +14388,7 @@ test "a new Started incarnation retires its exact deleted tombstone" {
     model,
   )
   assert_true(
-    deleted
-    .dev()
-    .archive_override({ session: deleted_item.id, workspace: None })
-    is Some(ArchiveDeleted),
-  )
-  // A same-id creation in another store is unrelated and cannot lift the
-  // selected Scratch tombstone.
-  let (_, unrelated) = update_dev(
-    dispatch,
-    Started(
-      run_id="unrelated-run",
-      session=deleted_item.id,
-      model=High,
-      max_steps=1000,
-      session_root=Some(
-        @interop.ChannelId::Local.test_resource("/project/.openseek"),
-      ),
-      submission_id=None,
-    ),
-    deleted,
-  )
-  assert_true(
-    unrelated
-    .dev()
-    .archive_override({ session: deleted_item.id, workspace: None })
-    is Some(ArchiveDeleted),
+    deleted.dev().archive_override(deleted_item.id) is Some(ArchiveDeleted),
   )
   let (_, started) = update_dev(
     dispatch,
@@ -14883,10 +14405,7 @@ test "a new Started incarnation retires its exact deleted tombstone" {
     deleted,
   )
   assert_true(
-    started
-    .dev()
-    .archive_override({ session: deleted_item.id, workspace: None })
-    is Some(ArchiveLive),
+    started.dev().archive_override(deleted_item.id) is Some(ArchiveLive),
   )
   let (_, committed) = update_dev(
     dispatch,
@@ -14895,7 +14414,6 @@ test "a new Started incarnation retires its exact deleted tombstone" {
       sequence=1,
       ts=None,
       item=@protocol.User({ content: "new incarnation" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     started,
   )
@@ -14936,12 +14454,7 @@ test "a new Started incarnation retires its exact deleted tombstone" {
 test "deleted broadcast is immediate and idempotent" {
   let dispatch = test_dispatch()
   let item = archived_item("desktop-gone")
-  let project = @interop.ChannelId::Local.test_resource("/project")
-  let same_id_project : @transcript.SessionListItem = {
-    ..item,
-    workspace: Some(project),
-    workspace_name: "project",
-  }
+  let other = archived_item("desktop-stays")
   let model = {
     ..test_model()
     .replace_conversation({
@@ -14949,16 +14462,12 @@ test "deleted broadcast is immediate and idempotent" {
       record: ArchivedRecord,
       task: "carry this draft",
     })
-    .with_dev(dev => {
-      ..dev,
-      sessions: [item, same_id_project],
-      archived: [item, same_id_project],
-    }),
+    .with_dev(dev => { ..dev, sessions: [item, other], archived: [item, other] }),
     active_session: "desktop-gone",
   }
   let deleted_msg = SessionsChanged(
     change="deleted",
-    key={ session: "desktop-gone", workspace: None },
+    session="desktop-gone",
     fresh_session=Some("desktop-fresh"),
   )
   let (_, deleted) = update_dev(dispatch, deleted_msg, model)
@@ -14972,94 +14481,11 @@ test "deleted broadcast is immediate and idempotent" {
   )
   assert_false(deleted.dev().sessions.contains(item))
   assert_false(deleted.dev().archived.contains(item))
-  assert_true(deleted.dev().sessions.contains(same_id_project))
-  assert_true(deleted.dev().archived.contains(same_id_project))
+  assert_true(deleted.dev().sessions.contains(other))
+  assert_true(deleted.dev().archived.contains(other))
   let (_, deleted_twice) = update_dev(dispatch, deleted_msg, deleted)
   assert_false(deleted_twice.dev().sessions.contains(item))
   assert_false(deleted_twice.dev().archived.contains(item))
-}
-
-///|
-test "deleted broadcast rotates the active conversation's exact store" {
-  let dispatch = test_dispatch()
-  let scratch = archived_item("shared")
-  let project = @interop.ChannelId::Local.test_resource("/project")
-  let project_item : @transcript.SessionListItem = {
-    ..scratch,
-    workspace: Some(project),
-    workspace_name: "project",
-  }
-  let model = {
-    ..test_model()
-    .replace_conversation({
-      ..empty_conversation(@interop.ChannelId::Local, "shared"),
-      workspace: Workspace::from_project(Some(project)),
-      record: ArchivedRecord,
-      task: "project draft",
-    })
-    .with_dev(dev => { ..dev, sessions: [scratch], archived: [project_item] }),
-    active_session: "shared",
-  }
-  let (_, deleted) = update_dev(
-    dispatch,
-    SessionsChanged(
-      change="deleted",
-      key={ session: "shared", workspace: Some(project) },
-      fresh_session=Some("desktop-fresh"),
-    ),
-    model,
-  )
-  inspect(deleted.active_session, content="desktop-fresh")
-  inspect(deleted.active().task, content="project draft")
-  assert_true(deleted.dev().sessions == [scratch])
-  assert_true(deleted.dev().archived.is_empty())
-}
-
-///|
-test "archive facts rotate the open conversation's exact store" {
-  let dispatch = test_dispatch()
-  let scratch = archived_item("shared")
-  let project = @interop.ChannelId::Local.test_resource("/project")
-  let project_item : @transcript.SessionListItem = {
-    ..scratch,
-    workspace: Some(project),
-    workspace_name: "project",
-  }
-  // Scratch deliberately comes first: session_project("shared") resolves to
-  // that row, while the conversation actually open on screen belongs to the
-  // project store being archived.
-  let model = {
-    ..test_model()
-    .replace_conversation({
-      ..empty_conversation(@interop.ChannelId::Local, "shared"),
-      workspace: Workspace::from_project(Some(project)),
-      task: "project draft",
-    })
-    .with_dev(dev => { ..dev, sessions: [scratch, project_item] }),
-    active_session: "shared",
-  }
-  let (_, notified) = update_dev(
-    dispatch,
-    SessionsChanged(
-      change="archived",
-      key={ session: "shared", workspace: Some(project) },
-      fresh_session=Some("notification-fresh"),
-    ),
-    model,
-  )
-  inspect(notified.active_session, content="notification-fresh")
-  inspect(notified.active().task, content="project draft")
-  assert_true(
-    notified.find_conversation(@interop.ChannelId::Local, "shared") is None,
-  )
-  assert_true(notified.dev().sessions == [scratch])
-  let (_, listed) = update(dispatch, archived_loaded([project_item]), model)
-  inspect(listed.active_session, content="desktop-archive-replacement")
-  inspect(listed.active().task, content="project draft")
-  assert_true(
-    listed.find_conversation(@interop.ChannelId::Local, "shared") is None,
-  )
-  assert_true(listed.dev().sessions == [scratch])
 }
 
 ///|
@@ -15091,7 +14517,7 @@ test "archive broadcast invalidates the active send target before list replies" 
     dispatch,
     SessionsChanged(
       change="archived",
-      key={ session: "desktop-test", workspace: Some(workspace) },
+      session="desktop-test",
       fresh_session=Some("desktop-fresh"),
     ),
     model,
@@ -15148,7 +14574,7 @@ test "an archive response arriving before its notification preserves the draft o
     dispatch,
     SessionsChanged(
       change="archived",
-      key={ session: "desktop-test", workspace: None },
+      session="desktop-test",
       fresh_session=Some("desktop-notification-replacement"),
     ),
     responded,
@@ -15185,7 +14611,7 @@ test "archiving a pending start restores its original composer without ownership
     dispatch,
     SessionsChanged(
       change="archived",
-      key={ session: "desktop-test", workspace: None },
+      session="desktop-test",
       fresh_session=Some("desktop-restored"),
     ),
     model,
@@ -15209,7 +14635,7 @@ test "an archive notification wins over a stale live-list reply" {
     dispatch,
     SessionsChanged(
       change="archived",
-      key={ session: "desktop-test", workspace: None },
+      session="desktop-test",
       fresh_session=Some("desktop-safe"),
     ),
     model,
@@ -15282,7 +14708,7 @@ test "an unarchive notification wins over a stale archived-list reply" {
     dispatch,
     SessionsChanged(
       change="unarchived",
-      key={ session: "desktop-old", workspace: None },
+      session="desktop-old",
       fresh_session=None,
     ),
     model,
@@ -15319,7 +14745,7 @@ test "BridgeReady replaces archive overrides with fresh-list truth" {
     ..test_model()
     .with_archive_override(
       @interop.ChannelId::Local,
-      { session: "desktop-old", workspace: None },
+      "desktop-old",
       ArchiveStored,
     )
     .with_dev(dev => { ..dev, archived: [item] })
@@ -15343,10 +14769,7 @@ test "BridgeReady replaces archive overrides with fresh-list truth" {
     fail("the freshly live record disappeared during reconnect")
   }
   assert_true(restored.record is LiveRecord)
-  assert_true(
-    live.dev().archive_override({ session: item.id, workspace: item.workspace })
-    is Some(ArchiveLive),
-  )
+  assert_true(live.dev().archive_override(item.id) is Some(ArchiveLive))
   guard restored.sync is Reloading(generation=2, ..) else {
     fail("fresh live-list truth did not fence the archived reload")
   }
@@ -17234,7 +16657,6 @@ test "send does not show a prompt until its commit lands" {
       sequence=1,
       ts=None,
       item=@protocol.User({ content: "build the thing" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     sent,
   )
@@ -17263,7 +16685,6 @@ test "a replayed commit at or below the watermark is dropped" {
       sequence=2,
       ts=None,
       item=@protocol.User({ content: "already there" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -17285,7 +16706,6 @@ test "a commit past the frontier buffers and flips into a reload" {
       sequence=5,
       ts=None,
       item=@protocol.User({ content: "from the future" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -17313,7 +16733,6 @@ test "commits buffer while a reload is in flight" {
       sequence=3,
       ts=None,
       item=@protocol.User({ content: "mid-reload" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -17461,7 +16880,6 @@ test "background retries preserve buffered commits until a later success" {
       sequence=2,
       ts=None,
       item=@protocol.User({ content: "next" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     failed,
   )
@@ -17637,7 +17055,6 @@ test "tool decode semantics wait for their durable error tool result" {
       is_error: true,
       brief: None,
     }),
-    session_root=@interop.ChannelId::Local.test_store_root(),
   )
   let (_, semantic_first) = update_dev(dispatch, semantic, running_model())
   inspect(semantic_first.active().messages.length(), content="0")
@@ -17685,7 +17102,6 @@ test "assistant semantic events wait for their durable commit" {
         tool_calls: None,
         reasoning_content: Some("think"),
       }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     answered,
   )
@@ -17741,7 +17157,6 @@ test "a delayed assistant commit never clears a newer live delta" {
         tool_calls: None,
         reasoning_content: None,
       }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -17766,7 +17181,6 @@ test "a delayed terminal commit never clears a newer live delta" {
       sequence=2,
       ts=None,
       item=@protocol.Terminal(@protocol.Finished("older answer")),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -17792,7 +17206,6 @@ test "a fixed local notice stays before later durable turns" {
         tool_calls: None,
         reasoning_content: None,
       }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     test_model().replace_conversation(conv),
   )
@@ -17830,7 +17243,6 @@ test "a durable commit never retires a same-class local notice" {
         tool_calls: None,
         reasoning_content: None,
       }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -17857,7 +17269,6 @@ test "commit-first assistant semantics do not append again" {
         tool_calls: None,
         reasoning_content: Some("think"),
       }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     streaming,
   )
@@ -17887,7 +17298,6 @@ test "a sequence-one commit materializes an unknown hidden conversation" {
       sequence=1,
       ts=None,
       item=@protocol.User({ content: "hi" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     test_model(),
   )
@@ -17908,7 +17318,6 @@ test "a sequence-one commit materializes an unknown hidden conversation" {
       sequence=1,
       ts=None,
       item=@protocol.User({ content: "hi" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     next,
   )
@@ -17925,7 +17334,6 @@ test "a gapped commit for an unknown session materializes then reloads" {
       sequence=3,
       ts=None,
       item=@protocol.User({ content: "third" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     test_model(),
   )
@@ -17963,7 +17371,6 @@ test "a late commit cannot resurrect a locally known archived session" {
       sequence=1,
       ts=None,
       item=@protocol.User({ content: "stale" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -17979,7 +17386,7 @@ test "an archive tombstone blocks commits before the archived list refreshes" {
   let dispatch = test_dispatch()
   let model = test_model().with_archive_override(
     @interop.ChannelId::Local,
-    { session: "desktop-tombstoned", workspace: None },
+    "desktop-tombstoned",
     ArchiveStored,
   )
   let (_, next) = update_dev(
@@ -17989,7 +17396,6 @@ test "an archive tombstone blocks commits before the archived list refreshes" {
       sequence=1,
       ts=None,
       item=@protocol.User({ content: "stale" }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )

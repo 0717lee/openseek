@@ -25,13 +25,11 @@ pub(all) struct Id {
   source : String
   channel : String
   conversation : String
-  root : String?
 } derive(Eq, Hash, @debug.Debug)
-pub fn Id::Id(source~ : String, channel~ : String, conversation~ : String, root? : String) -> Self
+pub fn Id::Id(source~ : String, channel~ : String, conversation~ : String) -> Self
 pub fn Id::channel(Self) -> String
 pub fn Id::conversation(Self) -> String
 pub fn Id::key(Self) -> String
-pub fn Id::root(Self) -> String?
 pub fn Id::source(Self) -> String
 
 pub(all) struct Input {

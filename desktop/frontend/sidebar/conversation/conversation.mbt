@@ -7,7 +7,6 @@ pub(all) struct Id {
   source : String
   channel : String
   conversation : String
-  root : String?
 } derive(Debug, Eq, Hash)
 
 ///|
@@ -15,9 +14,8 @@ pub fn Id::Id(
   source~ : String,
   channel~ : String,
   conversation~ : String,
-  root? : String,
 ) -> Id {
-  { source, channel, conversation, root }
+  { source, channel, conversation }
 }
 
 ///|
@@ -36,17 +34,11 @@ pub fn Id::conversation(self : Id) -> String {
 }
 
 ///|
-pub fn Id::root(self : Id) -> String? {
-  self.root
-}
-
-///|
 /// The DOM child key for this conversation's row. The whole sidebar renders
 /// into one keyed container, so cached component output is re-paired with its
 /// own element when neighbouring rows appear or leave — never positionally.
 pub fn Id::key(self : Id) -> String {
-  let root = self.root.unwrap_or("")
-  "conversation:\{self.source}:\{self.channel}:\{self.conversation}:\{root}"
+  "conversation:\{self.source}:\{self.channel}:\{self.conversation}"
 }
 
 ///|

@@ -73,13 +73,13 @@ pub let session_list : Command[@protocol.EmptyPayload, @protocol.SessionsReply] 
 
 ///|
 pub let session_load : Command[
-  @protocol.LoadSessionPayload,
+  @protocol.SessionRecordPayload,
   @protocol.LoadSessionReply,
 ] = Command("session.load")
 
 ///|
 pub let session_load_archived : Command[
-  @protocol.LoadSessionPayload,
+  @protocol.SessionRecordPayload,
   @protocol.LoadSessionReply,
 ] = Command("session.load_archived")
 
@@ -103,7 +103,7 @@ pub let session_unarchive : Command[
 
 ///|
 pub let session_delete_archived : Command[
-  @protocol.ArchivedSessionPayload,
+  @protocol.SessionRecordPayload,
   @protocol.SessionsReply,
 ] = Command("session.delete_archived")
 

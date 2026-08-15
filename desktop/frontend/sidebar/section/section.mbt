@@ -51,8 +51,7 @@ fn Entry::key(self : Entry) -> String {
     }
     Conversation(conversation) => {
       let id = conversation.id()
-      let root = id.root().unwrap_or("")
-      "conversation:\{id.source()}:\{id.channel()}:\{id.conversation()}:\{root}"
+      "conversation:\{id.source()}:\{id.channel()}:\{id.conversation()}"
     }
     Placeholder(row) => "placeholder:\{row.id}"
   }

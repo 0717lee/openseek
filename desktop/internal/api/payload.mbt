@@ -35,11 +35,13 @@ fn SessionPayload::canonical_session(self : SessionPayload) -> String {
 }
 
 ///|
-type ArchivedSessionPayload = @protocol.ArchivedSessionPayload
+/// `session.load`, `session.load_archived`, and `session.delete_archived`
+/// address one durable record by id, normalized before it reaches the engine.
+type SessionRecordPayload = @protocol.SessionRecordPayload
 
 ///|
-fn ArchivedSessionPayload::canonical_session(
-  self : ArchivedSessionPayload,
+fn SessionRecordPayload::canonical_session(
+  self : SessionRecordPayload,
 ) -> String {
   self.session.trim().to_owned()
 }

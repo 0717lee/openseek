@@ -243,15 +243,7 @@ async fn SessionFollower::scan(
   for event in commits_after(session, self.watermark) {
     emit(
       sink,
-      SessionCommit({
-        session: self.session,
-        sequence: event.sequence,
-        event,
-        // The root this follower reads from is the store half of the durable
-        // identity — broadcast it so clients place the session without
-        // guessing.
-        session_root: self.root.resource_path(),
-      }),
+      SessionCommit({ session: self.session, sequence: event.sequence, event }),
     )
     self.watermark = event.sequence
   }
@@ -1001,12 +993,11 @@ async test "nonzero durable boundary survives a failed final scan" {
     }
     guard relevant
       is [
-        SessionCommit({ sequence: 1, session_root, .. }),
+        SessionCommit({ sequence: 1, .. }),
         DurableBoundary({ sequence: 1, .. }),
       ] else {
-      fail("expected one rooted commit and one durable boundary")
+      fail("expected one commit and one durable boundary")
     }
-    assert_eq(session_root, root.resource_path())
     group.return_immediately(())
   })
   @fs.rmdir(dir, recursive=true)

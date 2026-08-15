@@ -72,11 +72,6 @@ pub(all) enum ArchiveReply {
 pub impl ToJson for ArchiveReply
 pub impl @json.FromJson for ArchiveReply
 
-pub(all) struct ArchivedSessionPayload {
-  session : String
-  workspace : String
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
-
 pub(all) struct AuthDevicePayload {
   id : String
   name : String
@@ -382,11 +377,6 @@ pub(all) struct ListAppsReply {
   apps : Array[AppEntry]
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct LoadSessionPayload {
-  session : String
-  workspace : String?
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
-
 pub(all) struct LoadSessionReply {
   session : SessionDocument
   watermark : Int?
@@ -612,14 +602,12 @@ pub(all) struct SessionAssistantMessage {
 pub(all) struct SessionChangedPayload {
   change : String
   session : String
-  workspace : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct SessionCommitPayload {
   session : String
   sequence : Int
   event : SessionEvent
-  session_root : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct SessionDocument {
@@ -666,6 +654,10 @@ pub fn SessionListEntry::array_from_wire(Json) -> Array[Self]
 pub(all) struct SessionPayload {
   session : String
   force : Bool?
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct SessionRecordPayload {
+  session : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct SessionRuntimeNotice {

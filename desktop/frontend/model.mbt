@@ -914,8 +914,8 @@ priv enum BridgeState {
 /// The latest identity-bearing storage fact this connection observed for one
 /// conversation. Deletion is distinct from both lists: encoding all three
 /// states prevents a stale unversioned reply from resurrecting a deleted row.
-/// A later Started carrying the exact durable store is the creation fact that
-/// can supersede deletion without waiting for a reconnect.
+/// A later Started is the creation fact that can supersede deletion without
+/// waiting for a reconnect.
 priv enum ArchiveDisposition {
   ArchiveLive
   ArchiveStored
@@ -923,61 +923,11 @@ priv enum ArchiveDisposition {
 } derive(Eq)
 
 ///|
-/// One durable archive identity. Session ids may repeat in Scratch and
-/// project stores, so archive actions, notifications, and tombstones always
-/// retain the host-listed workspace beside the id.
-priv struct ArchiveRecordKey {
-  session : String
-  workspace : @common.Uri?
-} derive(Eq)
-
-///|
-fn ArchiveRecordKey::matches(
-  self : ArchiveRecordKey,
-  item : @transcript.SessionListItem,
-) -> Bool {
-  item.id == self.session && item.workspace == self.workspace
-}
-
-///|
-/// Bind a host protocol workspace path to the channel that produced it.
-/// Malformed non-empty paths invalidate the notification instead of
-/// accidentally turning it into a Scratch-store tombstone.
-fn ArchiveRecordKey::from_protocol(
-  channel : @interop.ChannelId,
-  session : String,
-  workspace : String,
-) -> ArchiveRecordKey? {
-  if workspace.is_empty() {
-    Some({ session, workspace: None })
-  } else if @resource.of_path(channel, workspace) is Some(resource) {
-    Some({ session, workspace: Some(resource) })
-  } else {
-    None
-  }
-}
-
-///|
-/// Encode the selected store for a request only when its resource belongs to
-/// the channel that produced it. Scratch is the required empty workspace.
-fn ArchiveRecordKey::workspace_payload(
-  self : ArchiveRecordKey,
-  channel : @interop.ChannelId,
-) -> String? {
-  match self.workspace {
-    None => Some("")
-    Some(workspace) if @resource.belongs_to(workspace, channel) =>
-      Some(workspace.path)
-    Some(_) => None
-  }
-}
-
-///|
 /// Whole-list replies do not carry a revision and can predate a notification,
 /// so they are reconciled through this override until the next connection
 /// boundary starts a fresh authoritative list round.
 priv struct ArchiveOverride {
-  key : ArchiveRecordKey
+  session : String
   disposition : ArchiveDisposition
 } derive(Eq)
 
@@ -1561,13 +1511,9 @@ priv enum Msg {
   // Open a conversation on one device's explicit channel, selecting that
   // channel first when it differs from the current one.
   OpenSession(@interop.ChannelId, String)
-  // Open a row from the archived index. Its workspace is part of the row's
-  // durable placement and selects the archived twin without restoring it.
-  OpenArchivedSession(
-    @interop.ChannelId,
-    session~ : String,
-    workspace~ : @common.Uri?
-  )
+  // Open a row from the archived index against its archived twin, without
+  // restoring it.
+  OpenArchivedSession(@interop.ChannelId, String)
   // The user clicked the system notification posted through Proton's
   // notification extension: jump to the conversation that owned that run.
   // The native extension brings the window forward before emitting the click.
@@ -1658,7 +1604,7 @@ priv enum Msg {
   UnarchiveSession(@interop.ChannelId, String)
   // Stage, confirm, or cancel permanent deletion of an archived conversation.
   // The confirmation's display title comes from the archived record itself.
-  DeleteArchivedSession(@interop.ChannelId, ArchiveRecordKey)
+  DeleteArchivedSession(@interop.ChannelId, String)
   ConfirmDeleteArchivedSession
   CancelDeleteArchivedSession
   // The host's dark-mode preference changed. It updates the palette only while
@@ -1831,11 +1777,7 @@ priv enum DeviceMsg {
   // The host's identity-bearing `session.changed` broadcast. Archive changes
   // invalidate that exact live target immediately; both sidebar lists are
   // then re-read for their durable contents.
-  SessionsChanged(
-    change~ : String,
-    key~ : ArchiveRecordKey,
-    fresh_session~ : String?
-  )
+  SessionsChanged(change~ : String, session~ : String, fresh_session~ : String?)
   SessionLoaded(
     session~ : String,
     items~ : Array[@transcript.TranscriptItem],
@@ -1872,10 +1814,7 @@ priv enum DeviceMsg {
     // The commit's own store stamp, kept on the message so a turn dates
     // itself the moment it lands rather than only after the next reload.
     ts~ : Double?,
-    item~ : @protocol.SessionItem,
-    // The durable store root the host read this commit from — the store
-    // half of the session's identity.
-    session_root~ : @common.Uri
+    item~ : @protocol.SessionItem
   )
   // The host's `subrun.progress` broadcast: a running sub-run advanced. Not
   // durable and not lifecycle — the raw stream's brackets own the sub-run's
@@ -1964,11 +1903,10 @@ priv enum DeviceMsg {
     request_generation~ : Int,
     fresh_session~ : String
   )
-  // The successful delete reply names the identity it removed and a fresh
+  // The successful delete reply names the family it removed and a fresh
   // send target, so it can tombstone and leave an active deleted record even
   // when the broadcast arrives later.
   ArchivedDeleted(
-    key~ : ArchiveRecordKey,
     sessions~ : Array[String],
     items~ : Array[@transcript.SessionListItem],
     connection_generation~ : Int,
@@ -2726,14 +2664,13 @@ fn DeviceState::placement_for_store_root(
 }
 
 ///|
-/// The newest archive disposition this connection observed for one exact
-/// store-qualified record.
+/// The newest archive disposition this connection observed for one record.
 fn DeviceState::archive_override(
   self : DeviceState,
-  key : ArchiveRecordKey,
+  session : String,
 ) -> ArchiveDisposition? {
   for fact in self.archive_overrides {
-    if fact.key == key {
+    if fact.session == session {
       return Some(fact.disposition)
     }
   }
@@ -2741,15 +2678,15 @@ fn DeviceState::archive_override(
 }
 
 ///|
-/// One channel's archive disposition for `key` — the Model-level view
+/// One channel's archive disposition for `session` — the Model-level view
 /// of `DeviceState::archive_override`.
 fn Model::archive_override(
   self : Model,
   channel : @interop.ChannelId,
-  key : ArchiveRecordKey,
+  session : String,
 ) -> ArchiveDisposition? {
   guard self.device_state(channel) is Some(dev) else { return None }
-  dev.archive_override(key)
+  dev.archive_override(session)
 }
 
 ///|
@@ -2759,7 +2696,7 @@ fn Model::archive_override(
 fn Model::with_archive_override(
   self : Model,
   channel : @interop.ChannelId,
-  key : ArchiveRecordKey,
+  session : String,
   disposition : ArchiveDisposition,
 ) -> Model {
   guard self.device_state(channel) is Some(dev) else { return self }
@@ -2767,15 +2704,15 @@ fn Model::with_archive_override(
   // entry unaddressable, so the transition also records a retirement that
   // expires stale composer actions for this owner.
   let newly_retired = !(disposition is ArchiveLive) &&
-    dev.archive_override(key) is (None | Some(ArchiveLive))
-  let overrides = dev.archive_overrides.filter(item => item.key != key)
-  overrides.push({ key, disposition })
+    dev.archive_override(session) is (None | Some(ArchiveLive))
+  let overrides = dev.archive_overrides.filter(item => item.session != session)
+  overrides.push({ session, disposition })
   let model = self.replace_device({ ..dev, archive_overrides: overrides })
   if !newly_retired {
     return model
   }
   let composer_entry_retirements = model.composer_entry_retirements.copy()
-  composer_entry_retirements.push({ channel, session: key.session })
+  composer_entry_retirements.push({ channel, session })
   { ..model, composer_entry_retirements, }
 }
 

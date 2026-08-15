@@ -45,42 +45,24 @@ pub struct SessionTreeRow {
 } derive(Eq)
 
 ///|
-/// A session id is unique only inside one host session store. Keeping the
-/// workspace beside it prevents a child or duplicate id from folding under a
-/// parent row owned by another project.
-priv struct SessionTreeKey {
-  session : String
-  workspace : String
-} derive(Eq, Hash)
-
-///|
-fn SessionListItem::tree_key(
-  self : SessionListItem,
-  session : String,
-) -> SessionTreeKey {
-  { session, workspace: self.workspace.map(uri => uri.path).unwrap_or("") }
-}
-
-///|
-/// The outermost listed session this item folds under in its own store, and
-/// the sub-run ordinals leading down to it. A same-ID row from another store
-/// is deliberately invisible to this walk.
+/// The outermost listed session this item folds under, and the sub-run
+/// ordinals leading down to it.
 fn SessionListItem::tree_fold_target(
   self : SessionListItem,
-  listed : Map[SessionTreeKey, Bool],
-) -> (SessionTreeKey, Array[Int])? {
+  listed : Map[String, Bool],
+) -> (String, Array[Int])? {
   let path : Array[Int] = []
   let mut current = self.id
   for ;; {
     guard @protocol.split_child_session_id(current) is Some((parent, ordinal)) else {
       break
     }
-    guard listed.get(self.tree_key(parent)) is Some(_) else { break }
+    guard listed.get(parent) is Some(_) else { break }
     path.push(ordinal)
     current = parent
   }
   guard !path.is_empty() else { return None }
-  Some((self.tree_key(current), path.rev()))
+  Some((current, path.rev()))
 }
 
 ///|
@@ -101,17 +83,17 @@ fn SessionListItem::tree_fold_target(
 /// toolsets carry no sub-run tools, so it stands for a shape the sidebar
 /// should survive, not one it should design around.
 pub fn session_tree(items : Array[SessionListItem]) -> Array[SessionTreeRow] {
-  let listed : Map[SessionTreeKey, Bool] = Map([])
+  let listed : Map[String, Bool] = Map([])
   for item in items {
-    listed[item.tree_key(item.id)] = true
+    listed[item.id] = true
   }
   let rows : Array[SessionTreeRow] = []
-  let row_at : Map[SessionTreeKey, Int] = Map([])
-  let folded : Array[(Array[Int], SessionTreeKey, SessionListItem)] = []
+  let row_at : Map[String, Int] = Map([])
+  let folded : Array[(Array[Int], String, SessionListItem)] = []
   for item in items {
     match item.tree_fold_target(listed) {
       None => {
-        row_at[item.tree_key(item.id)] = rows.length()
+        row_at[item.id] = rows.length()
         rows.push({ item, children: [] })
       }
       Some((root, path)) => folded.push((path, root, item))
@@ -124,12 +106,7 @@ pub fn session_tree(items : Array[SessionListItem]) -> Array[SessionTreeRow] {
     if ordering != 0 {
       ordering
     } else {
-      let by_session = left.1.session.compare(right.1.session)
-      if by_session != 0 {
-        by_session
-      } else {
-        left.1.workspace.compare(right.1.workspace)
-      }
+      left.1.compare(right.1)
     }
   })
   for entry in folded {
@@ -670,29 +647,6 @@ test "sub-run transcripts fold under the conversation that launched them" {
     ),
     content="desktop-a[desktop-a-sr-1, desktop-a-sr-2] desktop-b",
   )
-}
-
-///|
-test "session trees never fold children across stores" {
-  guard @resource.of_path(@interop.ChannelId::Local, "/project")
-    is Some(project) else {
-    fail("test project path was invalid")
-  }
-  let scratch_parent = listed(["same"])[0]
-  let project_parent : SessionListItem = {
-    ..scratch_parent,
-    workspace: Some(project),
-    workspace_name: "project",
-  }
-  let project_child : SessionListItem = { ..project_parent, id: "same-sr-1" }
-  let rows = session_tree([scratch_parent, project_parent, project_child])
-  assert_eq(rows.length(), 2)
-  assert_true(rows[0].item.workspace is None)
-  assert_true(rows[0].children.is_empty())
-  assert_eq(rows[1].item.workspace, Some(project))
-  assert_eq(rows[1].children.length(), 1)
-  assert_eq(rows[1].children[0].id, project_child.id)
-  assert_eq(rows[1].children[0].workspace, project_child.workspace)
 }
 
 ///|

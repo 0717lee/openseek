@@ -182,7 +182,7 @@ fn device_msg(
     AgentError(payload) => error_msg(payload)
     AgentFinished(payload) => finished_msg(payload)
     AgentDurable(payload) => durable_boundary_msg(payload)
-    SessionEvent(payload) => session_event_msg(channel, payload)
+    SessionEvent(payload) => session_event_msg(payload)
     SubrunProgress(payload) =>
       Some(
         SubrunProgressed(
@@ -192,7 +192,7 @@ fn device_msg(
           activity=payload.activity,
         ),
       )
-    SessionChanged(payload) => session_changed_msg(channel, payload)
+    SessionChanged(payload) => session_changed_msg(payload)
     WorkspaceChanged(payload) => {
       let paths : Array[@common.Uri] = []
       // The wire contract still calls registered projects `workspaces`.
@@ -226,22 +226,12 @@ fn device_msg(
 /// Decode archive invalidation synchronously. A fresh id is allocated at the
 /// event boundary (outside `update`) so archiving or deleting the active
 /// conversation can switch without a render where Send targets the stale id.
-fn session_changed_msg(
-  channel : @interop.ChannelId,
-  payload : @protocol.SessionChangedPayload,
-) -> DeviceMsg? {
-  guard ArchiveRecordKey::from_protocol(
-      channel,
-      payload.session,
-      payload.workspace,
-    )
-    is Some(key) else {
-    return None
-  }
+fn session_changed_msg(payload : @protocol.SessionChangedPayload) -> DeviceMsg? {
+  guard !payload.session.is_empty() else { return None }
   Some(
     SessionsChanged(
       change=payload.change,
-      key~,
+      session=payload.session,
       fresh_session=if payload.change == "archived" ||
         payload.change == "deleted" {
         Some(generated_session_id())
@@ -855,22 +845,14 @@ fn RecoveredSettlement::from_reply(
 /// the outer notification for routing; the typed item enum is what the
 /// transcript projector consumes, with raw unknown items retained for newer
 /// Desktop versions.
-fn session_event_msg(
-  channel : @interop.ChannelId,
-  payload : @protocol.SessionCommitPayload,
-) -> DeviceMsg? {
-  // The store root is half of the commit's durable identity; an event whose
-  // root does not bind to the channel is malformed and dropped.
-  guard @resource.of_path(channel, payload.session_root) is Some(session_root) else {
-    return None
-  }
+fn session_event_msg(payload : @protocol.SessionCommitPayload) -> DeviceMsg? {
+  guard !payload.session.is_empty() else { return None }
   Some(
     SessionCommitted(
       session=payload.session,
       sequence=payload.sequence,
       ts=payload.event.ts,
       item=payload.event.item,
-      session_root~,
     ),
   )
 }
@@ -1150,13 +1132,11 @@ async fn refresh_sessions_into(
 
 ///|
 /// Load a durable session's transcript so the conversation can be resumed.
-/// `workspace` says which registered store holds it; `None` selects the
-/// default store. The protocol conversion happens only in `load_session_cmd`.
+/// The id alone addresses the record; the host locates the store holding it.
 fn open_session(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
   session_id : String,
-  workspace~ : @common.Uri?,
   generation~ : Int,
   archived? : Bool = false,
 ) -> @cmd.Cmd {
@@ -1164,7 +1144,6 @@ fn open_session(
   load_session_cmd(
     channel,
     session_id,
-    workspace~,
     archived~,
     on_loaded=view => {
       dispatch(
@@ -1203,7 +1182,6 @@ fn refresh_session(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
   session_id : String,
-  workspace~ : @common.Uri?,
   generation~ : Int,
   archived? : Bool = false,
 ) -> @cmd.Cmd {
@@ -1211,7 +1189,6 @@ fn refresh_session(
   load_session_cmd(
     channel,
     session_id,
-    workspace~,
     archived~,
     on_loaded=view => {
       dispatch(
@@ -1236,28 +1213,20 @@ fn refresh_session(
 fn load_session_cmd(
   channel : @interop.ChannelId,
   session_id : String,
-  workspace~ : @common.Uri?,
   archived~ : Bool,
   on_loaded~ : (@transcript.SessionLoadView) -> @cmd.Cmd,
   on_failed~ : (String) -> @cmd.Cmd,
 ) -> @cmd.Cmd {
-  match workspace {
-    Some(resource) if !@resource.belongs_to(resource, channel) =>
-      return @cmd.none
-    _ => ()
-  }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
       let reply = try {
         if archived {
           @interop.bridge_request(channel, @commands.session_load_archived, {
             session: session_id,
-            workspace: workspace.map(path => path.path),
           })
         } else {
           @interop.bridge_request(channel, @commands.session_load, {
             session: session_id,
-            workspace: workspace.map(path => path.path),
           })
         }
       } catch {

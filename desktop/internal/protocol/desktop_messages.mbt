@@ -80,10 +80,12 @@ pub(all) struct GoalPayload {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-pub(all) struct LoadSessionPayload {
+/// The read-only record ops — `session.load`, `session.load_archived` — and
+/// permanent deletion address a conversation by its session id alone. Ids are
+/// unique across every store, so the host locates the record itself instead of
+/// being told where to look.
+pub(all) struct SessionRecordPayload {
   session : String
-  // The workspace holding the session, when the client already knows it.
-  workspace : String?
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
@@ -94,16 +96,6 @@ pub(all) struct LoadSessionPayload {
 pub(all) struct SessionPayload {
   session : String
   force : Bool?
-} derive(Debug, Eq, FromJson, ToJson)
-
-///|
-/// Permanent deletion addresses one archived record in one exact store.
-/// `workspace` is the host-reported project resource path, or `""` for the
-/// global Scratch store; the host still validates project paths against its
-/// registry instead of trusting the client to choose an arbitrary directory.
-pub(all) struct ArchivedSessionPayload {
-  session : String
-  workspace : String
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
@@ -466,10 +458,6 @@ pub(all) struct SessionCommitPayload {
   session : String
   sequence : Int
   event : SessionEvent
-  // The durable store root this commit was read from, as a frontend resource
-  // path. Session ids are not globally unique across stores, so the
-  // broadcast names the store half of the identity beside the id.
-  session_root : String
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
@@ -490,10 +478,6 @@ pub(all) struct SubrunProgressPayload {
 pub(all) struct SessionChangedPayload {
   change : String
   session : String
-  // The project store owning this record, or "" for Scratch. Session ids are
-  // not globally unique across stores, so every invalidation carries both
-  // halves of the durable identity.
-  workspace : String
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|

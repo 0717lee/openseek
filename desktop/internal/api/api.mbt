@@ -166,8 +166,8 @@ pub fn endpoints(
       @engine.load_archived_session(state.manager, payload)
     }),
     @endpoint.Endpoint::remote(@commands.session_list_archived, async fn(_) {
-      @engine.archived_sessions(state.manager, (session, workspace) => {
-        publish_session_changed(state, "archived", session, workspace)
+      @engine.archived_sessions(state.manager, session => {
+        publish_session_changed(state, "archived", session)
       })
     }),
     @endpoint.Endpoint::remote(@commands.session_archive, async fn(payload) {
@@ -180,9 +180,7 @@ pub fn endpoints(
       @engine.archive_session(
         state.manager,
         session,
-        (moved, workspace) => {
-          publish_session_changed(state, "archived", moved, workspace)
-        },
+        moved => publish_session_changed(state, "archived", moved),
         force=payload.force == Some(true),
         on_worktree_changed=(workspace, worktrees) => {
           publish_worktree_changed(state, workspace, worktrees)
@@ -191,8 +189,8 @@ pub fn endpoints(
     }),
     @endpoint.Endpoint::remote(@commands.session_unarchive, async fn(payload) {
       let session = payload.canonical_session()
-      @engine.unarchive_session(state.manager, session, (moved, workspace) => {
-        publish_session_changed(state, "unarchived", moved, workspace)
+      @engine.unarchive_session(state.manager, session, moved => {
+        publish_session_changed(state, "unarchived", moved)
       })
     }),
     @endpoint.Endpoint::remote(@commands.session_delete_archived, async fn(
@@ -202,10 +200,7 @@ pub fn endpoints(
       @engine.delete_archived_session(
         state.manager,
         session,
-        payload.workspace,
-        (deleted, workspace) => {
-          publish_session_changed(state, "deleted", deleted, workspace)
-        },
+        deleted => publish_session_changed(state, "deleted", deleted),
         on_worktree_changed=(workspace, worktrees) => {
           publish_worktree_changed(state, workspace, worktrees)
         },
@@ -374,9 +369,8 @@ fn publish_session_changed(
   state : ApiState,
   change : String,
   session : String,
-  workspace : String,
 ) -> Unit {
-  state.hub.publish(SessionChanged({ change, session, workspace }))
+  state.hub.publish(SessionChanged({ change, session }))
 }
 
 ///|

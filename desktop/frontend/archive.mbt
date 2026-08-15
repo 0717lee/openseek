@@ -13,7 +13,7 @@
 /// the dialog appear to authorize a different conversation.
 priv struct ArchivedDeleteConfirm {
   channel : @interop.ChannelId
-  key : ArchiveRecordKey
+  session : String
   // The parent plus every descendant visible in the same archived snapshot.
   // Host notifications still cover a child created after that snapshot.
   sessions : Array[String]
@@ -143,14 +143,11 @@ fn unarchive_session(
 fn delete_archived_session(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
-  key : ArchiveRecordKey,
+  session : String,
   sessions : Array[String],
   connection_generation : Int,
   archived_request_generation : Int,
 ) -> @cmd.Cmd {
-  guard key.workspace_payload(channel) is Some(workspace) else {
-    return @cmd.none
-  }
   let device_dispatch = dispatch.map((msg : DeviceMsg) => {
     FromDevice(channel, msg)
   })
@@ -159,7 +156,7 @@ fn delete_archived_session(
       let reply = @interop.bridge_request(
         channel,
         @commands.session_delete_archived,
-        { session: key.session, workspace },
+        { session, },
       ) catch {
         error => {
           scheduler.add(
@@ -173,7 +170,6 @@ fn delete_archived_session(
       scheduler.add(
         device_dispatch(
           ArchivedDeleted(
-            key~,
             sessions~,
             items=@transcript.sessions_from_reply(reply, channel),
             connection_generation~,
