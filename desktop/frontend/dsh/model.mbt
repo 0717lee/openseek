@@ -192,6 +192,13 @@ pub fn State::has_active(self : State) -> Bool {
 }
 
 ///|
+/// The transcript component re-pins on an accepted local prompt before dsh's
+/// durable user event arrives. This generation advances only in `Send`.
+pub fn State::submission_generation(self : State) -> Int {
+  self.prompt_generation
+}
+
+///|
 /// The root Desktop model uses connection failures for its shared toast
 /// queue. Keeping this as plain data lets the dsh update remain pure and lets
 /// the root suppress duplicate notifications from status polling.

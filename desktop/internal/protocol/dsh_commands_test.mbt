@@ -62,3 +62,65 @@ test "dsh command envelopes reject missing malformed and unknown fields" {
   }
   assert_true(no_args)
 }
+
+///|
+test "dsh notification envelopes type the Desktop-owned wrapper" {
+  let status : @protocol.DshStatusNotification = @json.from_json({
+    "status": "unavailable",
+    "message": "dsh stopped",
+  })
+  @debug.assert_eq(status.to_json(), {
+    "status": "unavailable",
+    "message": "dsh stopped",
+  })
+  let event : @protocol.DshEventNotification = @json.from_json({
+    "stream": "mux",
+    "message": null,
+    "generation": 3,
+  })
+  assert_true(event.message is Null)
+  @debug.assert_eq(event.to_json(), {
+    "stream": "mux",
+    "message": null,
+    "generation": 3,
+  })
+}
+
+///|
+test "dsh notification envelopes reject malformed wrappers" {
+  let missing = try {
+    let _ : @protocol.DshEventNotification = @json.from_json({
+      "stream": "host",
+      "message": {},
+    })
+  } catch {
+    _ => true
+  } noraise {
+    _ => false
+  }
+  assert_true(missing)
+  let malformed = try {
+    let _ : @protocol.DshStatusNotification = @json.from_json({
+      "status": "unavailable",
+      "message": false,
+    })
+  } catch {
+    _ => true
+  } noraise {
+    _ => false
+  }
+  assert_true(malformed)
+  let unknown = try {
+    let _ : @protocol.DshEventNotification = @json.from_json({
+      "stream": "mux",
+      "message": {},
+      "generation": 4,
+      "future": true,
+    })
+  } catch {
+    _ => true
+  } noraise {
+    _ => false
+  }
+  assert_true(unknown)
+}

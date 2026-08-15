@@ -39,6 +39,7 @@ pub fn State::page(Self, @cmd.Emit[Msg], Bool, Bool, Bool, PageActions) -> Array
 pub fn State::preferred_workspace_id(Self) -> String?
 pub fn State::sidebar_section(Self, Bool) -> @section.Input
 pub fn State::streaming_text(Self) -> String
+pub fn State::submission_generation(Self) -> Int
 pub fn State::transcript_items(Self) -> Array[@transcript.TranscriptItem]
 pub fn State::unavailable_message(Self) -> String?
 

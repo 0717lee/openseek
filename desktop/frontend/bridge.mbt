@@ -190,13 +190,13 @@ fn bridge_msg(
     // notifications, but keep the Local guard explicit at the frontend edge.
     DshStatusChanged(payload) =>
       if channel is Local {
-        Some(Dsh(@dsh.Msg::status_changed(payload)))
+        Some(Dsh(@dsh.Msg::status_changed(payload.to_json())))
       } else {
         None
       }
     DshEvent(payload) =>
       if channel is Local {
-        Some(Dsh(@dsh.Msg::event(payload)))
+        Some(Dsh(@dsh.Msg::event(payload.to_json())))
       } else {
         None
       }
@@ -417,7 +417,11 @@ test "proton subscribes to local Codex and dsh events" {
   assert_true(
     bridge_msg(
       Local,
-      @protocol.Notification::DshEvent({ "stream": "host", "message": {} }),
+      @protocol.Notification::DshEvent({
+        stream: "host",
+        message: {},
+        generation: 0,
+      }),
     )
     is Some(Dsh(_)),
   )

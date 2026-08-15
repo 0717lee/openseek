@@ -112,6 +112,12 @@ pub fn update(
         ) {
         return (@cmd.none, state)
       }
+      // History lanes are ordered only within one session. A failure from a
+      // previously open session must not clear or annotate the current page.
+      if kind is DshHistoryReply(session_id) &&
+        state.active_id != Some(session_id) {
+        return (@cmd.none, state)
+      }
       (
         @cmd.none,
         {
@@ -992,6 +998,29 @@ test "dsh session creation requires an explicit workspace id" {
 }
 
 ///|
+test "accepted dsh prompt advances transcript submission generation" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let state = {
+    ..State(),
+    connection: DshReady,
+    sessions: [
+      {
+        id: "session-1",
+        title: "Session",
+        cwd: None,
+        running: false,
+        blank: false,
+      },
+    ],
+    active_id: Some("session-1"),
+    draft: "hello",
+  }
+  let (_, next) = update(dispatch, Send, state)
+  assert_eq(next.submission_generation(), 1)
+  assert_true(next.loading)
+}
+
+///|
 test "dsh event log rebuilds only the unfinished assistant text" {
   let events : Array[DshEventRecord] = [
     {
@@ -1178,6 +1207,22 @@ test "dsh response and prompt replies preserve unrelated state" {
     reply,
   )
   assert_eq(cleared.draft, "")
+  let history_state = {
+    ..State(),
+    active_id: Some("session-b"),
+    loading: true,
+    notice: "current notice",
+  }
+  let (_, stale_history_failure) = update(
+    dispatch,
+    Failed(
+      kind=DshHistoryReply("session-a"),
+      message="old session history failed",
+    ),
+    history_state,
+  )
+  assert_true(stale_history_failure.loading)
+  assert_eq(stale_history_failure.notice, "current notice")
 }
 
 ///|

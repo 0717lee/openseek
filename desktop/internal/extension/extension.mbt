@@ -126,12 +126,14 @@ let codex_server_request_event : @proton_contract.Event[Json] = @commands.extens
 )
 
 ///|
-let dsh_status_changed_event : @proton_contract.Event[Json] = @commands.extension_contract.event(
+let dsh_status_changed_event : @proton_contract.Event[
+  @protocol.DshStatusNotification,
+] = @commands.extension_contract.event(
   @protocol.NotificationKind::DshStatusChanged.wire_name(),
 )
 
 ///|
-let dsh_event : @proton_contract.Event[Json] = @commands.extension_contract.event(
+let dsh_event : @proton_contract.Event[@protocol.DshEventNotification] = @commands.extension_contract.event(
   @protocol.NotificationKind::DshEvent.wire_name(),
 )
 

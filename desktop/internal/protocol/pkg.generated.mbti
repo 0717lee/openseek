@@ -768,6 +768,14 @@ pub(all) enum DshEmptyPayload {
 pub impl ToJson for DshEmptyPayload
 pub impl @json.FromJson for DshEmptyPayload
 
+pub(all) struct DshEventNotification {
+  stream : String
+  message : Json
+  generation : Int
+} derive(Eq, @debug.Debug)
+pub impl ToJson for DshEventNotification
+pub impl @json.FromJson for DshEventNotification
+
 pub(all) struct DshRequestPayload {
   method_ : String
   payload : Json
@@ -780,6 +788,13 @@ pub(all) struct DshRespondPayload {
 } derive(Eq, @debug.Debug)
 pub impl ToJson for DshRespondPayload
 pub impl @json.FromJson for DshRespondPayload
+
+pub(all) struct DshStatusNotification {
+  status : String
+  message : String?
+} derive(Eq, @debug.Debug)
+pub impl ToJson for DshStatusNotification
+pub impl @json.FromJson for DshStatusNotification
 
 pub(all) struct DshValueReply {
   value : Json
@@ -1424,8 +1439,8 @@ pub(all) enum Notification {
   CodexStatusChanged(Json)
   CodexNotification(Json)
   CodexServerRequest(Json)
-  DshStatusChanged(Json)
-  DshEvent(Json)
+  DshStatusChanged(DshStatusNotification)
+  DshEvent(DshEventNotification)
   LspDiagnostics(DiagnosticsPayload)
   FsChanged(FsChangedPayload)
   FsWatchFailed(FsWatchFailedPayload)

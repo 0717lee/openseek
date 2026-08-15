@@ -131,10 +131,10 @@ pub(all) enum Notification {
   CodexStatusChanged(Json)
   CodexNotification(Json)
   CodexServerRequest(Json)
-  // dsh owns these ApiProxy envelopes. Desktop supplies stable event names
-  // while preserving the upstream JSON fields for the isolated dsh page.
-  DshStatusChanged(Json)
-  DshEvent(Json)
+  // Desktop types the outer notification wrappers; dsh still owns the nested
+  // WebSocket message carried by `DshEventNotification`.
+  DshStatusChanged(DshStatusNotification)
+  DshEvent(DshEventNotification)
   LspDiagnostics(DiagnosticsPayload)
   FsChanged(FsChangedPayload)
   FsWatchFailed(FsWatchFailedPayload)
@@ -199,8 +199,10 @@ pub fn Notification::from_wire(name : String, params : Json) -> Notification? {
     "codex.status_changed" => Some(CodexStatusChanged(params))
     "codex.notification" => Some(CodexNotification(params))
     "codex.server_request" => Some(CodexServerRequest(params))
-    "dsh.status_changed" => Some(DshStatusChanged(params))
-    "dsh.event" => Some(DshEvent(params))
+    "dsh.status_changed" =>
+      Some(DshStatusChanged(@json.from_json(params) catch { _ => return None }))
+    "dsh.event" =>
+      Some(DshEvent(@json.from_json(params) catch { _ => return None }))
     "lsp.diagnostics" =>
       Some(LspDiagnostics(@json.from_json(params) catch { _ => return None }))
     "fs.changed" =>
@@ -279,8 +281,8 @@ pub fn Notification::params(self : Notification) -> Json {
     CodexStatusChanged(payload) => payload
     CodexNotification(payload) => payload
     CodexServerRequest(payload) => payload
-    DshStatusChanged(payload) => payload
-    DshEvent(payload) => payload
+    DshStatusChanged(payload) => ToJson::to_json(payload)
+    DshEvent(payload) => ToJson::to_json(payload)
     LspDiagnostics(payload) => ToJson::to_json(payload)
     FsChanged(payload) => ToJson::to_json(payload)
     FsWatchFailed(payload) => ToJson::to_json(payload)
@@ -311,6 +313,21 @@ test "desktop notifications round-trip at the wire edge" {
     "checkout_submodules": false,
     "submodule_checkout_timeout_seconds": 30,
   })
+  let dsh = Notification::from_wire("dsh.event", {
+    "stream": "mux",
+    "message": { "type": "host/session-added" },
+    "generation": 2,
+  })
+  guard dsh is Some(dsh) else { fail("typed dsh event was rejected") }
+  assert_eq(dsh.params(), {
+    "stream": "mux",
+    "message": { "type": "host/session-added" },
+    "generation": 2,
+  })
+  assert_eq(
+    Notification::from_wire("dsh.event", { "stream": "mux", "message": {} }),
+    None,
+  )
   assert_eq(Notification::from_wire("future.event", {}), None)
 }
 

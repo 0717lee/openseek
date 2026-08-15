@@ -33,6 +33,23 @@ pub(all) struct DshValueReply {
 } derive(Debug, Eq)
 
 ///|
+/// Desktop-owned connection-state notification. `message` is omitted outside
+/// the unavailable state; explicit `null` decodes to the same absence.
+pub(all) struct DshStatusNotification {
+  status : String
+  message : String?
+} derive(Debug, Eq)
+
+///|
+/// Desktop-owned wrapper for one dsh WebSocket document. The nested message is
+/// versioned by dsh and may be any JSON value, including `null`.
+pub(all) struct DshEventNotification {
+  stream : String
+  message : Json
+  generation : Int
+} derive(Debug, Eq)
+
+///|
 pub impl FromJson for DshEmptyPayload with fn from_json(json, path) {
   guard json is Object(fields) else {
     raise JsonDecodeError((path, "expected dsh empty payload object"))
@@ -122,4 +139,88 @@ pub impl FromJson for DshValueReply with fn from_json(json, path) {
 ///|
 pub impl ToJson for DshValueReply with fn to_json(self) {
   { "value": self.value }
+}
+
+///|
+pub impl FromJson for DshStatusNotification with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected dsh status notification object"))
+  }
+  let status = match fields.get("status") {
+    Some(String(status)) => status
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("status"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("status"), "missing required field"))
+  }
+  let message = match fields.get("message") {
+    Some(String(message)) => Some(message)
+    Some(Null) | None => None
+    Some(_) =>
+      raise JsonDecodeError(
+        (path.add_key("message"), "expected string or null"),
+      )
+  }
+  for name, _ in fields {
+    if name != "status" && name != "message" {
+      raise JsonDecodeError((path.add_key(name), "unknown field"))
+    }
+  }
+  { status, message }
+}
+
+///|
+pub impl ToJson for DshStatusNotification with fn to_json(self) {
+  let fields : Map[String, Json] = Map([("status", Json::string(self.status))])
+  if self.message is Some(message) {
+    fields["message"] = Json::string(message)
+  }
+  Json::object(fields)
+}
+
+///|
+pub impl FromJson for DshEventNotification with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected dsh event notification object"))
+  }
+  let stream = match fields.get("stream") {
+    Some(String(stream)) => stream
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("stream"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("stream"), "missing required field"))
+  }
+  let message = match fields.get("message") {
+    Some(message) => message
+    None =>
+      raise JsonDecodeError((path.add_key("message"), "missing required field"))
+  }
+  let generation : Int = match fields.get("generation") {
+    Some(value) =>
+      @json.from_json(value, path=path.add_key("generation")) catch {
+        _ =>
+          raise JsonDecodeError(
+            (path.add_key("generation"), "expected integer"),
+          )
+      }
+    None =>
+      raise JsonDecodeError(
+        (path.add_key("generation"), "missing required field"),
+      )
+  }
+  for name, _ in fields {
+    if name != "stream" && name != "message" && name != "generation" {
+      raise JsonDecodeError((path.add_key(name), "unknown field"))
+    }
+  }
+  { stream, message, generation }
+}
+
+///|
+pub impl ToJson for DshEventNotification with fn to_json(self) {
+  {
+    "stream": Json::string(self.stream),
+    "message": self.message,
+    "generation": self.generation,
+  }
 }

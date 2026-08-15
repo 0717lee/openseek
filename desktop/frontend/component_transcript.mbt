@@ -17,7 +17,7 @@ fn Model::transcript_input(self : Model) -> @transcript_component.Input {
         focused=@interop.ChannelId::Local,
         active_session=session,
         root~,
-        submission_generation=0,
+        submission_generation=self.dsh.submission_generation(),
         items=@transcript_component.VisibleRow::history(
           self.dsh.transcript_items(),
         ),
