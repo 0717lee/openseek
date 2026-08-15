@@ -37,7 +37,7 @@ pub(all) struct Input {
   id : Id
   title : String
   label : String
-  active : Bool
+  activation : String?
   can_start : Bool
   managed : Bool
   conversations : Array[@conversation.Input]

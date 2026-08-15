@@ -45,7 +45,10 @@ pub(all) struct Input {
   id : Id
   title : String
   label : String
-  active : Bool
+  // The active conversation's session id while this project holds the
+  // focused chat; `None` otherwise. The value identifies the activation: a
+  // fold made during one activation holds until a different one arrives.
+  activation : String?
   can_start : Bool
   managed : Bool
   conversations : Array[@conversation.Input]
@@ -74,8 +77,17 @@ priv enum Msg {
 }
 
 ///|
+/// A fold is stamped with the activation it was made under, so revealing is
+/// edge-triggered without watching input transitions: only an activation
+/// different from the stamped one forces the branch open.
+priv enum Fold {
+  Open
+  Folded(during~ : String?)
+} derive(Eq)
+
+///|
 priv struct State {
-  collapsed : Bool
+  fold : Fold
   preview_expanded : Bool
   menu_open : Bool
 } derive(Eq)
@@ -84,13 +96,32 @@ priv struct State {
 const PreviewLimit : Int = 5
 
 ///|
-fn State::update(self : State, msg : Msg) -> State {
+fn State::update(self : State, input : Input, msg : Msg) -> State {
   match msg {
-    ToggleDisclosure => { ..self, collapsed: !self.collapsed, menu_open: false }
+    ToggleDisclosure => {
+      // Toggle the fold the user sees: a stored fold currently overridden by
+      // an activation reveal must fold on click, not silently flip to open.
+      let fold = if self.folded(input) {
+        Open
+      } else {
+        Folded(during=input.activation)
+      }
+      { ..self, fold, menu_open: false }
+    }
     ShowMore => { ..self, preview_expanded: true }
     ToggleMenu => { ..self, menu_open: !self.menu_open }
     CloseMenu => { ..self, menu_open: false }
   }
+}
+
+///|
+/// Whether the branch renders folded. A stored fold holds — including while
+/// its own activation stays current, so the disclosure button works inside
+/// the active project — and only a new activation reveals the branch:
+/// jumping into a folded project opens it to show where you are.
+fn State::folded(self : State, input : Input) -> Bool {
+  guard self.fold is Folded(during~) else { return false }
+  input.activation is None || input.activation == during
 }
 
 ///|
@@ -178,12 +209,9 @@ pub fn component(
   let (state, emit) = @rabbita.create_state_with_input(
     input~,
     init=(_, _) => {
-      (
-        { collapsed: false, preview_expanded: false, menu_open: false },
-        @cmd.none,
-      )
+      ({ fold: Open, preview_expanded: false, menu_open: false }, @cmd.none)
     },
-    update=(state, _, msg, _) => (state.update(msg), @cmd.none),
+    update=(state, input, msg, _) => (state.update(input, msg), @cmd.none),
     subscriptions=(state, input, emit) => {
       if state.menu_open {
         let dismiss : Dismiss = {
@@ -204,15 +232,13 @@ pub fn component(
     by=conversation => conversation.id(),
   )
   state.map3(input, conversation_rows, (state, input, conversation_rows) => {
-    // The active project must reveal the newly selected conversation. Keep the
-    // stored fold so leaving the project restores the user's previous choice.
-    let collapsed = state.collapsed && !input.active
+    let collapsed = state.folded(input)
     let mut class = if collapsed {
       "workspace-row collapsible collapsed"
     } else {
       "workspace-row collapsible"
     }
-    if input.active {
+    if input.activation is Some(_) {
       class = class + " active"
     }
     if state.menu_open {

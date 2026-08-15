@@ -47,7 +47,7 @@ pub(all) struct Input {
   id : Id
   label : String
   initially_collapsed : Bool
-  selected : Bool
+  activation : String?
   action : Action?
   entries : Array[Entry]
 } derive(Eq, @debug.Debug)

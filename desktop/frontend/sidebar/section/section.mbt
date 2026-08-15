@@ -78,7 +78,10 @@ pub(all) struct Input {
   id : Id
   label : String
   initially_collapsed : Bool
-  selected : Bool
+  // The active conversation's session id while this section holds the
+  // focused chat; `None` otherwise. Same contract as
+  // `@project.Input.activation`.
+  activation : String?
   action : Action?
   entries : Array[Entry]
 } derive(Debug, Eq)
@@ -102,9 +105,28 @@ priv enum Msg {
 }
 
 ///|
-priv struct State {
-  collapsed : Bool
+/// A fold is stamped with the activation it was made under, so revealing is
+/// edge-triggered without watching input transitions: only an activation
+/// different from the stamped one forces the section open.
+priv enum Fold {
+  Open
+  Folded(during~ : String?)
 } derive(Eq)
+
+///|
+priv struct State {
+  fold : Fold
+} derive(Eq)
+
+///|
+/// Whether the section renders folded. A stored fold holds — including while
+/// its own activation stays current, so the heading's toggle works inside
+/// the selected section — and only a new activation reveals it: jumping into
+/// a folded section opens it to show where you are.
+fn State::folded(self : State, input : Input) -> Bool {
+  guard self.fold is Folded(during~) else { return false }
+  input.activation is None || input.activation == during
+}
 
 ///|
 fn Actions::placeholder_component(
@@ -193,10 +215,36 @@ pub fn component(
 ) -> @rabbita.Val[Array[(String, @html.Html)]] {
   let (state, emit) = @rabbita.create_state_with_input(
     input~,
-    init=(_, input) => ({ collapsed: input.initially_collapsed }, @cmd.none),
-    update=(state, _, msg, _) => {
+    // A section born collapsed is stamped with the activation current at
+    // birth, so the initial fold is not instantly revealed by it.
+    init=(_, input) => {
+      (
+        {
+          fold: if input.initially_collapsed {
+            Folded(during=input.activation)
+          } else {
+            Open
+          },
+        },
+        @cmd.none,
+      )
+    },
+    update=(state, input, msg, _) => {
       match msg {
-        Toggle => ({ collapsed: !state.collapsed }, @cmd.none)
+        // Toggle the fold the user sees: a stored fold currently overridden
+        // by an activation reveal must fold on click, not silently flip to
+        // open.
+        Toggle =>
+          (
+            {
+              fold: if state.folded(input) {
+                Open
+              } else {
+                Folded(during=input.activation)
+              },
+            },
+            @cmd.none,
+          )
       }
     },
   )
@@ -206,15 +254,13 @@ pub fn component(
     by=entry => entry.key(),
   )
   state.map3(input, entry_rows, (state, input, entry_rows) => {
-    // Selecting a section reveals it without resetting the user's stored
-    // disclosure choice; leaving it restores the previous fold.
-    let collapsed = state.collapsed && !input.selected
+    let collapsed = state.folded(input)
     let mut class = if collapsed {
       "sidebar-heading section-heading collapsible collapsed"
     } else {
       "sidebar-heading section-heading collapsible"
     }
-    if input.selected {
+    if input.activation is Some(_) {
       class = class + " active"
     }
     let heading : Array[@html.Html] = [
