@@ -81,6 +81,7 @@ priv enum DshPendingInteraction {
 ///|
 priv enum DshReplyKind {
   DshStatusReply
+  DshReconnectReply
   DshWorkspacesReply
   DshWorkspaceCreateReply
   DshSessionsReply

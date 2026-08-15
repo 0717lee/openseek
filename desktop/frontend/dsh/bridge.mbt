@@ -11,11 +11,26 @@ fn DshReplyKind::request(
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let value : Json = @interop.bridge_request(
-        @interop.ChannelId::Local,
-        @commands.dsh_request,
-        { "method": method_, "payload": payload },
-      ) catch {
+      // Workspace replies update both the page projection and the native
+      // Files/Terminal authorization table. Hold one ordered lane across the
+      // complete bridge call so an older snapshot can never arrive after and
+      // replace a newer one in either consumer.
+      let value : Json = try {
+        if method_ == "workspace.list" {
+          @interop.bridge_request_in_order(
+            @interop.ChannelId::Local,
+            @commands.dsh_request,
+            { "method": method_, "payload": payload },
+            lane="dsh-workspace-list",
+          )
+        } else {
+          @interop.bridge_request(
+            @interop.ChannelId::Local,
+            @commands.dsh_request,
+            { "method": method_, "payload": payload },
+          )
+        }
+      } catch {
         error => {
           scheduler.add(
             dispatch(
@@ -84,8 +99,15 @@ fn DshReplyKind::respond(
 }
 
 ///|
-fn State::refresh(_self : State, dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
-  DshStatusReply.status(dispatch)
+/// A status read cannot wake the actor after startup has failed: only a queued
+/// dsh request asks it to connect again. Use the Workspace baseline as that
+/// retry request, while ordinary refreshes keep the cheap status read.
+fn State::refresh(self : State, dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
+  match self.connection {
+    DshUnavailable(_) =>
+      DshReconnectReply.request(dispatch, "workspace.list", {})
+    DshStarting | DshReady => DshStatusReply.status(dispatch)
+  }
 }
 
 ///|

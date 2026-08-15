@@ -111,7 +111,10 @@ pub fn update(
           loading: false,
           // Connection failures belong to the root toast queue. Other dsh
           // request failures remain attached to the dsh transcript surface.
-          notice: if kind is DshStatusReply {
+          // A reconnect request is paired with the actor's authoritative
+          // status notification, so its transport rejection adds no second
+          // toast or transcript error.
+          notice: if kind is DshStatusReply || kind is DshReconnectReply {
             ""
           } else {
             message
@@ -152,7 +155,7 @@ fn State::with_reply(
     return (@cmd.none, { ..self, loading: false, notice: envelope.error() })
   }
   match kind {
-    DshWorkspacesReply => {
+    DshReconnectReply | DshWorkspacesReply => {
       let workspaces : Array[DshWorkspaceRow] = []
       if value is Object(fields) && fields.get("items") is Some(Array(items)) {
         for item in items {
@@ -162,7 +165,11 @@ fn State::with_reply(
         }
       }
       (
-        @cmd.none,
+        if kind is DshReconnectReply {
+          DshSessionsReply.request(dispatch, "session.list", {})
+        } else {
+          @cmd.none
+        },
         { ..self, connection: DshReady, workspaces, loading: false, notice: "" },
       )
     }
@@ -778,6 +785,61 @@ test "dsh workspace membership supplies the active editor root" {
   let ungrouped = { ..grouped, active_id: Some("session-2") }
   assert_eq(ungrouped.preferred_workspace_id(), Some("workspace-1"))
   assert_true(ungrouped.active_workspace_path() is None)
+}
+
+///|
+test "dsh reconnect reply restores workspace state without transcript errors" {
+  let state = {
+    ..State(),
+    connection: DshUnavailable("dsh was missing"),
+    notice: "old notice",
+  }
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let (_, retrying) = update(dispatch, Refresh, state)
+  assert_true(retrying.loading)
+  assert_eq(retrying.unavailable_message(), Some("dsh was missing"))
+  assert_eq(retrying.notice, "")
+  let (_, ready) = update(
+    dispatch,
+    Reply(kind=DshReconnectReply, value={
+      "type": "server-response",
+      "rpcId": "workspace-reconnect",
+      "result": {
+        "ok": true,
+        "value": {
+          "items": [
+            {
+              "workspaceId": "workspace-1",
+              "title": "Project",
+              "path": "/canonical/project",
+              "sessionIds": ["session-1"],
+            },
+          ],
+          "archivedSessionIds": [],
+        },
+      },
+    }),
+    retrying,
+  )
+  assert_eq(ready.unavailable_message(), None)
+  assert_eq(ready.preferred_workspace_id(), Some("workspace-1"))
+  assert_eq(ready.notice, "")
+}
+
+///|
+test "dsh reconnect transport failure waits for the actor status toast" {
+  let state = {
+    ..State(),
+    connection: DshUnavailable("authoritative startup error"),
+  }
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let (_, failed) = update(
+    dispatch,
+    Failed(kind=DshReconnectReply, message="bridge request rejected"),
+    state,
+  )
+  assert_eq(failed.unavailable_message(), Some("authoritative startup error"))
+  assert_eq(failed.notice, "")
 }
 
 ///|
