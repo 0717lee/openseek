@@ -28,7 +28,7 @@ pub async fn tree_base(@pathx.Absolute, String) -> String?
 pub async fn tree_dir(@pathx.Absolute, String) -> @pathx.Absolute?
 
 // Errors
-pub(all) suberror WorktreeError {
+pub suberror WorktreeError {
   WorktreeError(String)
 } derive(@debug.Debug)
 

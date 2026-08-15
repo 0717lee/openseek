@@ -20,7 +20,7 @@ pub async fn rollback(@pathx.Absolute, Array[String]) -> Unit
 pub async fn run(@pathx.Absolute, Array[String]) -> String
 
 // Errors
-pub(all) suberror GitError {
+pub suberror GitError {
   GitError(String)
 } derive(@debug.Debug)
 

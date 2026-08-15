@@ -9,7 +9,7 @@
 /// Debug is what the host boundary logs: proton renders a failed handler's
 /// error through `Repr`, which prints only an opaque `<...: ...>` placeholder
 /// for types without it — swallowing the one string that says what failed.
-pub(all) suberror GitError {
+pub suberror GitError {
   GitError(String)
 } derive(Debug)
 

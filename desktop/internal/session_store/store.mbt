@@ -12,7 +12,7 @@
 /// Debug is what the host boundary logs: proton renders a failed handler's
 /// error through `Repr`, which prints only an opaque `<...: ...>` placeholder
 /// for types without it — swallowing the one string that says what failed.
-pub(all) suberror StoreError {
+pub suberror StoreError {
   StoreError(String)
 } derive(Debug)
 
@@ -180,7 +180,7 @@ pub async fn ensure_not_archived(session : String) -> Unit {
 /// Whether `candidate` is a sub-run transcript descended from `ancestor`.
 /// Walk the structural `-sr-N` suffixes instead of matching a textual prefix:
 /// a user-chosen id such as `chat-sr-not-an-ordinal` must remain unrelated.
-pub fn is_descendant(candidate : String, ancestor : String) -> Bool {
+fn is_descendant(candidate : String, ancestor : String) -> Bool {
   let mut current = candidate
   for ;; {
     guard @wire.split_child_session_id(current) is Some((parent, _)) else {
