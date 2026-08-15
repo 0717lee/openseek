@@ -160,8 +160,8 @@ pub fn endpoints(
       @engine.load_archived_session(state.manager, payload)
     }),
     @endpoint.Endpoint::remote(@commands.session_list_archived, async fn(_) {
-      @engine.archived_sessions(state.manager, session => {
-        publish_session_changed(state, "archived", session)
+      @engine.archived_sessions(state.manager, (session, workspace) => {
+        publish_session_changed(state, "archived", session, workspace)
       })
     }),
     @endpoint.Endpoint::remote(@commands.session_archive, async fn(payload) {
@@ -174,7 +174,9 @@ pub fn endpoints(
       @engine.archive_session(
         state.manager,
         session,
-        moved => publish_session_changed(state, "archived", moved),
+        (moved, workspace) => {
+          publish_session_changed(state, "archived", moved, workspace)
+        },
         force=payload.force == Some(true),
         on_worktree_changed=(workspace, worktrees) => {
           publish_worktree_changed(state, workspace, worktrees)
@@ -183,9 +185,25 @@ pub fn endpoints(
     }),
     @endpoint.Endpoint::remote(@commands.session_unarchive, async fn(payload) {
       let session = payload.canonical_session()
-      @engine.unarchive_session(state.manager, session, moved => {
-        publish_session_changed(state, "unarchived", moved)
+      @engine.unarchive_session(state.manager, session, (moved, workspace) => {
+        publish_session_changed(state, "unarchived", moved, workspace)
       })
+    }),
+    @endpoint.Endpoint::remote(@commands.session_delete_archived, async fn(
+      payload,
+    ) {
+      let session = payload.canonical_session()
+      @engine.delete_archived_session(
+        state.manager,
+        session,
+        payload.workspace,
+        (deleted, workspace) => {
+          publish_session_changed(state, "deleted", deleted, workspace)
+        },
+        on_worktree_changed=(workspace, worktrees) => {
+          publish_worktree_changed(state, workspace, worktrees)
+        },
+      )
     }),
     @endpoint.Endpoint::remote(@commands.settings_get, async fn(_) {
       @engine.settings_status(state.manager)
@@ -322,10 +340,11 @@ test "remote endpoint catalog has one entry per command name" {
     }
     names.push(name)
   }
-  assert_eq(names.length(), 60)
+  assert_eq(names.length(), 61)
   assert_true(names.contains("agent.start"))
   assert_true(names.contains("agent.goal"))
   assert_true(names.contains("session.load_archived"))
+  assert_true(names.contains("session.delete_archived"))
   assert_true(names.contains("workspace.settings_get"))
   assert_true(names.contains("workspace.settings_set"))
   assert_true(names.contains("app.info"))
@@ -342,15 +361,16 @@ test "remote endpoint catalog has one entry per command name" {
 }
 
 ///|
-/// Tell every client a conversation moved between the live and archived
-/// stores, so the ones that did not ask re-read both lists and drop live
-/// state for the moved record.
+/// Tell every client a conversation moved between stores or was permanently
+/// deleted, so clients that did not ask re-read both lists and drop stale
+/// state for the named record.
 fn publish_session_changed(
   state : ApiState,
   change : String,
   session : String,
+  workspace : String,
 ) -> Unit {
-  state.hub.publish(SessionChanged({ change, session }))
+  state.hub.publish(SessionChanged({ change, session, workspace }))
 }
 
 ///|

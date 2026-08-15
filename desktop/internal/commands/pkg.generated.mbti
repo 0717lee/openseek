@@ -97,6 +97,8 @@ pub let moonide_references : Command[@protocol.MoonIdeNavigationPayload, @protoc
 
 pub let session_archive : Command[@protocol.SessionPayload, @protocol.ArchiveReply]
 
+pub let session_delete_archived : Command[@protocol.ArchivedSessionPayload, @protocol.SessionsReply]
+
 pub let session_list : Command[@protocol.EmptyPayload, @protocol.SessionsReply]
 
 pub let session_list_archived : Command[@protocol.EmptyPayload, @protocol.SessionsReply]

@@ -130,13 +130,28 @@ async fn write_worktrees(
     error => raise EngineError("could not create \{store}: \{error}")
   }
   let registry : Json = { "worktrees": entries.to_json() }
-  @fsx.write_text(
-    worktrees_file(workspace).to_path(),
+  let target = worktrees_file(workspace)
+  let temp = store.join(WorktreesFile + ".tmp")
+  // A registry update may remove only one conversation's placement while
+  // retaining every unrelated row. Build the whole replacement beside the
+  // live file first: a failed or cancelled write then leaves the old registry
+  // intact instead of truncating it and orphaning all of those other rows.
+  @fs.write_file(
+    temp.to_string(),
     registry.stringify(indent=2),
+    create_mode=CreateOrTruncate,
   ) catch {
     error if @async.is_being_cancelled() => raise error
-    error => raise EngineError("could not save the worktree list: \{error}")
+    error => raise EngineError("could not stage the worktree list: \{error}")
   }
+  // `rename` replaces a present destination as one filesystem operation. A
+  // cancellation cannot interrupt this short publication step, so callers
+  // learn whether the complete old or complete new registry is authoritative.
+  @async.protect_from_cancel(() => {
+    @fs.rename(temp.to_string(), target.to_string()) catch {
+      error => raise EngineError("could not save the worktree list: \{error}")
+    }
+  })
 }
 
 ///|
@@ -1068,6 +1083,38 @@ async test "worktree registry decode drops malformed entries" {
 }
 
 ///|
+async test "failed worktree registry staging preserves every live row" {
+  let root = worktree_test_root("openseek-worktree-atomic-write-")
+  let retained : WorktreeEntry = {
+    name: "retained",
+    branch: "openseek/retained",
+    base: "abc",
+    session: Some("other-session"),
+  }
+  write_worktrees(root, [retained])
+  // A directory at the candidate path makes the next file write fail before
+  // publication, modeling an interrupted or rejected staging write.
+  let temp = workspace_session_root(root).join(WorktreesFile + ".tmp")
+  @fs.mkdir(temp.to_string())
+  let failed = try {
+    write_worktrees(root, [])
+    false
+  } catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => true
+  }
+  assert_true(failed)
+  guard read_worktrees_unlocked(root) is [after] else {
+    fail("the previous worktree registry must remain readable")
+  }
+  assert_eq(after.name, retained.name)
+  assert_eq(after.branch, retained.branch)
+  assert_eq(after.base, retained.base)
+  assert_eq(after.session, retained.session)
+  @fs.rmdir(root.to_string(), recursive=true)
+}
+
+///|
 #cfg(not(platform="windows"))
 async test "session workspace dir follows the worktree mapping while it exists" {
   archive_env_test_lock.acquire()
@@ -1788,7 +1835,7 @@ async test "archive keeps worktree placement for explicit repair after unarchive
   )
   // A dirty checkout returns a structured confirmation state before anything
   // irreversible: the record stays live and the checkout stays on disk.
-  guard archive_session(manager, "s-arc", _ => ()) is NeedsForce(refusal) else {
+  guard archive_session(manager, "s-arc", (_, _) => ()) is NeedsForce(refusal) else {
     fail("dirty archive returned no force confirmation")
   }
   assert_eq(refusal.worktree, "wt-1")
@@ -1804,7 +1851,7 @@ async test "archive keeps worktree placement for explicit repair after unarchive
   // the branch, archived history, and placement row all survive. The retained
   // row broadcasts as missing before the conversation is archived.
   let changes : Array[(String, Array[WorktreeInfo])] = []
-  guard archive_session(manager, "s-arc", _ => (), force=true, on_worktree_changed=(
+  guard archive_session(manager, "s-arc", (_, _) => (), force=true, on_worktree_changed=(
       workspace,
       rows,
     ) => changes.push((workspace, rows)))
@@ -1841,7 +1888,7 @@ async test "archive keeps worktree placement for explicit repair after unarchive
   assert_false(retained.present)
   // Unarchive restores only the durable conversation. The retained placement
   // keeps every workspace surface blocked until the user explicitly repairs.
-  ignore(unarchive_session(manager, "s-arc", _ => ()))
+  ignore(unarchive_session(manager, "s-arc", (_, _) => ()))
   assert_true(
     @fsx.is_dir(
       workspace_session_root(repo).join("sessions").join("s-arc").to_path(),
@@ -1859,7 +1906,7 @@ async test "archive keeps worktree placement for explicit repair after unarchive
   @fsx.ensure_dir(
     workspace_session_root(repo).join("sessions").join("s-arc2").to_path(),
   )
-  assert_true(archive_session(manager, "s-arc2", _ => ()) is Archived(_))
+  assert_true(archive_session(manager, "s-arc2", (_, _) => ()) is Archived(_))
   assert_false(@fsx.exists(repo.join(".worktrees/wt-2").to_path()))
   guard list_worktrees(repo.to_string()).worktrees is [first, second] else {
     fail("both worktree placements must survive archive")

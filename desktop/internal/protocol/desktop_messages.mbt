@@ -97,6 +97,16 @@ pub(all) struct SessionPayload {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+/// Permanent deletion addresses one archived record in one exact store.
+/// `workspace` is the host-reported project resource path, or `""` for the
+/// global Scratch store; the host still validates project paths against its
+/// registry instead of trusting the client to choose an arbitrary directory.
+pub(all) struct ArchivedSessionPayload {
+  session : String
+  workspace : String
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
 pub(all) struct SettingsSetPayload {
   legacy_migration : Bool?
   provider : String?
@@ -471,6 +481,10 @@ pub(all) struct SubrunProgressPayload {
 pub(all) struct SessionChangedPayload {
   change : String
   session : String
+  // The project store owning this record, or "" for Scratch. Session ids are
+  // not globally unique across stores, so every invalidation carries both
+  // halves of the durable identity.
+  workspace : String
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|

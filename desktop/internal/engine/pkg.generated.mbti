@@ -10,9 +10,9 @@ import {
 // Values
 pub async fn add_workspace(String, (Array[@pathx.Absolute]) -> Unit raise EngineError) -> Array[@pathx.Absolute]
 
-pub async fn archive_session(EngineManager, String, (String) -> Unit, force? : Bool, on_worktree_changed? : (String, Array[@protocol.WorktreeInfo]) -> Unit) -> @protocol.ArchiveReply
+pub async fn archive_session(EngineManager, String, (String, String) -> Unit, force? : Bool, on_worktree_changed? : (String, Array[@protocol.WorktreeInfo]) -> Unit) -> @protocol.ArchiveReply
 
-pub async fn archived_sessions(EngineManager, (String) -> Unit) -> @protocol.SessionsReply
+pub async fn archived_sessions(EngineManager, (String, String) -> Unit) -> @protocol.SessionsReply
 
 pub async fn attach_workspace(String, (Array[String]) -> Unit) -> @protocol.WorkspacesReply
 
@@ -23,6 +23,8 @@ pub async fn cancel_run(EngineManager, @protocol.CancelPayload) -> @protocol.Can
 pub async fn compact_run(EngineManager, @protocol.CompactPayload) -> @protocol.CompactReply
 
 pub async fn create_worktree(EngineManager, String, String, (Array[@protocol.WorktreeInfo]) -> Unit, name? : String) -> @protocol.WorktreeCreateReply
+
+pub async fn delete_archived_session(EngineManager, String, String, (String, String) -> Unit, on_worktree_changed? : (String, Array[@protocol.WorktreeInfo]) -> Unit) -> @protocol.SessionsReply
 
 pub async fn detach_workspace(EngineManager, String, (Array[String]) -> Unit) -> @protocol.WorkspacesReply
 
@@ -68,7 +70,7 @@ pub async fn start_run(EventSink, EngineManager, @protocol.StartPayload) -> @pro
 
 pub async fn steer_run(EngineManager, @protocol.SteerPayload) -> @protocol.SteerReply
 
-pub async fn unarchive_session(EngineManager, String, (String) -> Unit) -> @protocol.SessionsReply
+pub async fn unarchive_session(EngineManager, String, (String, String) -> Unit) -> @protocol.SessionsReply
 
 pub async fn update_settings(EngineManager, SettingsPatch, legacy_migration? : Bool, on_committed? : (@protocol.SettingsStatusPayload) -> Unit) -> @protocol.SettingsStatusPayload
 

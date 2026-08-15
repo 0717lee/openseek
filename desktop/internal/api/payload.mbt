@@ -35,6 +35,16 @@ fn SessionPayload::canonical_session(self : SessionPayload) -> String {
 }
 
 ///|
+type ArchivedSessionPayload = @protocol.ArchivedSessionPayload
+
+///|
+fn ArchivedSessionPayload::canonical_session(
+  self : ArchivedSessionPayload,
+) -> String {
+  self.session.trim().to_owned()
+}
+
+///|
 test "start and steer payloads preserve submission ids" {
   let start : @protocol.StartPayload = @json.from_json({
     "task": "hello",

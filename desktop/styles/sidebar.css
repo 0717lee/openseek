@@ -173,6 +173,10 @@ aside {
   background: var(--color-hover-subtle);
   color: var(--color-text-primary);
 }
+.row-archive.row-delete:hover {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
 /* A conversation row's trailing slot: two right-aligned groups — what the
    row is (status glyphs) and what can be done to it (buttons) — stacked in
    one grid cell. The cell takes the width of the wider group, so hovering

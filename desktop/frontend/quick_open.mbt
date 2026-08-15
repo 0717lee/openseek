@@ -432,6 +432,7 @@ fn open_quick_open(
 ) -> (@cmd.Cmd, Model) {
   guard model.project_picker is None &&
     model.archive_confirm is None &&
+    model.archived_delete_confirm is None &&
     !(model.update_ux is ConfirmingRestart(..)) &&
     !(model.bridge_state() is BridgeLost(_)) else {
     return (@cmd.none, model)

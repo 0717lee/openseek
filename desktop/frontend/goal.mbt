@@ -783,7 +783,7 @@ test "archiving carries the goal draft to the replacement" {
     dispatch,
     SessionsChanged(
       change="archived",
-      session="desktop-test",
+      key={ session: "desktop-test", workspace: None },
       fresh_session=Some("desktop-restored"),
     ),
     model,
@@ -813,7 +813,7 @@ test "archiving carries a goal that was sent but never confirmed" {
     dispatch,
     SessionsChanged(
       change="archived",
-      session="desktop-test",
+      key={ session: "desktop-test", workspace: None },
       fresh_session=Some("desktop-restored"),
     ),
     model,
@@ -842,7 +842,7 @@ test "archiving carries no goal the record already confirmed" {
     dispatch,
     SessionsChanged(
       change="archived",
-      session="desktop-test",
+      key={ session: "desktop-test", workspace: None },
       fresh_session=Some("desktop-restored"),
     ),
     model,
