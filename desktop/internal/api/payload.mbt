@@ -279,6 +279,86 @@ test "a run payload without a store is not a valid request" {
 }
 
 ///|
+test "a required field is not satisfied by null or a wrong type" {
+  // `null` is not a store: reading it as an absent field would leave the host
+  // guessing which store the request meant, the silent misplacement the
+  // required field exists to prevent.
+  let null_store : @protocol.SessionPayload? = Some(
+    @json.from_json({ "session": "s-move", "workspace": Json::null() }),
+  ) catch {
+    _ => None
+  }
+  assert_true(null_store is None)
+  let wrong_type : @protocol.LoadSessionPayload? = Some(
+    @json.from_json({ "session": "s-load", "workspace": 7 }),
+  ) catch {
+    _ => None
+  }
+  assert_true(wrong_type is None)
+}
+
+///|
+test "an absent optional reads the same as an explicit null" {
+  let absent : @protocol.StartPayload = @json.from_json({
+    "task": "hello",
+    "session": "s-start",
+    "workspace": "/work/project",
+  })
+  let explicit : @protocol.StartPayload = @json.from_json({
+    "task": "hello",
+    "session": "s-start",
+    "workspace": "/work/project",
+    "model": Json::null(),
+    "max_steps": Json::null(),
+    "submission_id": Json::null(),
+  })
+  assert_true(
+    absent.model is None &&
+    absent.max_steps is None &&
+    absent.submission_id is None,
+  )
+  assert_true(
+    explicit.model is None &&
+    explicit.max_steps is None &&
+    explicit.submission_id is None,
+  )
+  // A malformed optional is still refused: absence is a value, a number is a
+  // client defect.
+  let malformed : @protocol.StartPayload? = Some(
+    @json.from_json({
+      "task": "hello",
+      "session": "s-start",
+      "workspace": "/work/project",
+      "model": 7,
+    }),
+  ) catch {
+    _ => None
+  }
+  assert_true(malformed is None)
+}
+
+///|
+test "an absent optional is encoded as an absent key, never as null" {
+  let payload : @protocol.GoalPayload = {
+    session: "s-goal",
+    workspace: "/work/project",
+    text: None,
+    auto: None,
+    model: None,
+    thinking: None,
+    max_steps: None,
+  }
+  guard payload.to_json() is Object(fields) else {
+    fail("goal payload is a JSON object")
+  }
+  assert_eq(fields.get("session"), Some(Json::string("s-goal")))
+  assert_eq(fields.get("workspace"), Some(Json::string("/work/project")))
+  for name in ["text", "auto", "model", "max_steps"] {
+    assert_true(fields.get(name) is None)
+  }
+}
+
+///|
 test "goal payload distinguishes set from clear by the text field" {
   let set : @protocol.GoalPayload = @json.from_json({
     "session": "s-goal",

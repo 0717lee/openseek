@@ -1222,12 +1222,14 @@ pub fn KnownRunPayload::to_repr(Self) -> @debug.Repr
 pub(all) struct LoadSessionPayload {
   session : String
   workspace : String
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+} derive(Eq, @debug.Debug)
 pub fn LoadSessionPayload::equal(Self, Self) -> Bool
 pub fn LoadSessionPayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
 pub fn LoadSessionPayload::not_equal(Self, Self) -> Bool
 pub fn LoadSessionPayload::to_json(Self) -> Json
 pub fn LoadSessionPayload::to_repr(Self) -> @debug.Repr
+pub impl ToJson for LoadSessionPayload
+pub impl @json.FromJson for LoadSessionPayload
 
 pub(all) struct LoadSessionReply {
   session : SessionDocument
@@ -1900,12 +1902,14 @@ pub(all) struct SessionPayload {
   session : String
   workspace : String
   force : Bool?
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+} derive(Eq, @debug.Debug)
 pub fn SessionPayload::equal(Self, Self) -> Bool
 pub fn SessionPayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
 pub fn SessionPayload::not_equal(Self, Self) -> Bool
 pub fn SessionPayload::to_json(Self) -> Json
 pub fn SessionPayload::to_repr(Self) -> @debug.Repr
+pub impl ToJson for SessionPayload
+pub impl @json.FromJson for SessionPayload
 
 pub(all) struct SessionRuntimeNotice {
   content : String
