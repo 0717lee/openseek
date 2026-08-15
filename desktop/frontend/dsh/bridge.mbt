@@ -4,14 +4,15 @@
 
 ///|
 /// Snapshot replies replace a complete frontend baseline. Keep each baseline
-/// on its own ordered lane so unrelated Workspace and session reads do not
-/// block one another, while older reads of the same baseline cannot arrive
-/// after newer ones. Reconnect uses the Workspace lane because its probe is a
-/// `workspace.list` request too.
+/// on its own ordered lane so unrelated Workspace, session, and transcript
+/// reads do not block one another, while older reads of the same baseline
+/// cannot arrive after newer ones. Reconnect uses the Workspace lane because
+/// its probe is a `workspace.list` request too.
 fn DshReplyKind::ordered_lane(self : DshReplyKind) -> String? {
   match self {
     DshReconnectReply | DshWorkspacesReply => Some("dsh-workspace-list")
     DshSessionsReply => Some("dsh-session-list")
+    DshHistoryReply(session_id) => Some("dsh-history-" + session_id)
     _ => None
   }
 }
@@ -64,6 +65,14 @@ test "dsh snapshot replies select independent ordered lanes" {
   assert_eq(DshReconnectReply.ordered_lane(), Some("dsh-workspace-list"))
   assert_eq(DshWorkspacesReply.ordered_lane(), Some("dsh-workspace-list"))
   assert_eq(DshSessionsReply.ordered_lane(), Some("dsh-session-list"))
+  assert_eq(
+    DshHistoryReply("session-1").ordered_lane(),
+    Some("dsh-history-session-1"),
+  )
+  assert_eq(
+    DshHistoryReply("session-2").ordered_lane(),
+    Some("dsh-history-session-2"),
+  )
   assert_eq(DshCreateReply.ordered_lane(), None)
 }
 
