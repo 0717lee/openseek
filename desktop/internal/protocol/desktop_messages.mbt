@@ -242,7 +242,10 @@ pub(all) struct ClearFileSearchCachePayload {
 
 ///|
 pub(all) struct ReadFilePayload {
+  // Without `root`, `path` is absolute. With `root`, `root` is absolute and
+  // `path` is relative to it; the host validates that pair before opening.
   path : String
+  root : String?
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
@@ -499,6 +502,7 @@ pub(all) struct WorkspaceSettingsSetPayload {
   workspace : String
   worktree_mode : Bool?
   checkout_submodules : Bool?
+  submodule_checkout_timeout_seconds : Int?
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
@@ -511,6 +515,7 @@ pub(all) struct WorkspaceSettingsPayload {
   workspace : String
   worktree_mode : Bool
   checkout_submodules : Bool
+  submodule_checkout_timeout_seconds : Int
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|

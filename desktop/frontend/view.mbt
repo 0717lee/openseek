@@ -80,19 +80,26 @@ fn setting_select(control : @html.Html) -> @html.Html {
 }
 
 ///|
-/// The composer's model chip: this conversation's service tier, and the
-/// control that changes it. One click flips to the other tier — the choice
-/// is the conversation's, so a long refactor can sit on High while the chat
-/// beside it stays on Low.
-fn model_chip(dispatch : @cmd.Emit[Msg], conv : Conversation) -> @html.Html {
-  let other = conv.engine_model.toggled()
-  @html.button(
-    class="composer-model",
-    type_="button",
-    title="Model: \{conv.engine_model.wire()} — click for \{other.label()}",
-    on_click=dispatch(ToggleModel),
-    [@html.span(conv.engine_model.label())],
-  )
+/// The composer's model selector. OpenSeek supplies its model wire values and
+/// labels; the reusable composer package owns the control's geometry.
+fn EngineModel::composer_select(
+  self : EngineModel,
+  dispatch : @cmd.Emit[Msg],
+) -> @html.Html {
+  let options : Array[@composer.ModelOption] = [
+    { value: High.wire(), label: High.label() },
+    { value: Low.wire(), label: Low.label() },
+  ]
+  if self is Other(name) {
+    options.push({ value: name, label: name })
+  }
+  @composer.ModelSelect::{
+    options,
+    selected: self.wire(),
+    disabled: false,
+    change: dispatch.map(value => EngineModelChanged(value)),
+    title: "Model: \{self.wire()}",
+  }.render()
 }
 
 ///|
@@ -287,6 +294,12 @@ fn dim_row(text : String) -> @html.Html {
 }
 
 ///|
+/// Match the compact project preview used by Codex's sidebar: enough recent
+/// chats to resume normal work without letting one busy project bury every
+/// neighbouring project.
+const ProjectChatPreviewLimit : Int = 5
+
+///|
 /// One device's sections: conversations that only exist in this app run (no
 /// turn has reached the store yet) first, then the engine's durable
 /// sessions, newest first. Rows stay clickable while runs are active —
@@ -337,9 +350,13 @@ fn device_section_rows(
   )
   if !model.projects_collapsed {
     for path in dev.projects {
-      rows.push(project_row(dispatch, model, dev, path))
-      let before = rows.length()
-      push_group_rows(
+      let collapsed = model.project_collapsed(dev.channel, path)
+      rows.push(project_row(dispatch, model, dev, path, collapsed~))
+      if collapsed {
+        continue
+      }
+      let expanded = model.project_chats_expanded(dev.channel, path)
+      let total = push_group_rows(
         rows,
         dispatch,
         model,
@@ -348,13 +365,24 @@ fn device_section_rows(
         listed~,
         archived~,
         nested=true,
+        max_conversations=if expanded { 0 } else { ProjectChatPreviewLimit },
       )
-      if rows.length() == before {
+      if total == 0 {
         rows.push(
           @html.div(class="conversation-row nested placeholder", [
             @html.span(class="row-twisty spacer", ""),
             @html.span(class="sidebar-label", "No chats yet"),
           ]),
+        )
+      } else if total > ProjectChatPreviewLimit && !expanded {
+        rows.push(
+          @html.button(
+            class="project-show-more",
+            type_="button",
+            title="Show all \{total} chats in this project",
+            on_click=dispatch(ShowMoreProjectChats(dev.channel, path)),
+            "Show more",
+          ),
         )
       }
     }
@@ -373,7 +401,15 @@ fn device_section_rows(
     }.render(),
   )
   if !model.chats_collapsed {
-    push_group_rows(rows, dispatch, model, dev, None, listed~, archived~)
+    let _ = push_group_rows(
+      rows,
+      dispatch,
+      model,
+      dev,
+      None,
+      listed~,
+      archived~,
+    )
   }
   // Archived conversations fold behind a collapsed group at the end of the
   // list. Their records live in the store's `archived` twin, so they come
@@ -384,7 +420,11 @@ fn device_section_rows(
     // A parent and its archived sub-run records are one conversation. Restore
     // the root row and the host moves the complete family back together. An
     // old orphan child still owns a row and can therefore be restored.
-    archived_rows.push(archived_row(dispatch, dev.channel, row.item))
+    let active = model.focused == dev.channel &&
+      model.active_session == row.item.id &&
+      model.find_conversation(dev.channel, row.item.id) is Some(conv) &&
+      conv.is_archived_read_only()
+    archived_rows.push(archived_row(dispatch, dev.channel, row.item, active))
   }
   if archived_rows.length() > 0 {
     rows.push(
@@ -413,7 +453,8 @@ fn push_group_rows(
   listed~ : (String) -> Bool,
   archived~ : (String) -> Bool,
   nested? : Bool = false,
-) -> Unit {
+  max_conversations? : Int = 0,
+) -> Int {
   // Conversations worth keeping get a row, plus the one fresh "New chat" on
   // screen: it owns a row from the moment its ＋ was clicked, so the rotation
   // has visible feedback in the list; the row takes the real title at the
@@ -422,6 +463,7 @@ fn push_group_rows(
   // is kept precisely so it can be returned to, and a row is the only way
   // back to it.
   let composing = model.composing_new_chat()
+  let mut count = 0
   for conv in model.conversations.rev_iter() {
     if conv.device != dev.channel ||
       conv.workspace.project() != workspace ||
@@ -436,28 +478,27 @@ fn push_group_rows(
     } else {
       worktree_name_for(dev, workspace, conv.session_id)
     }
-    if conv.worth_keeping() {
+    let worth_keeping = conv.worth_keeping()
+    let active = conv.device == model.focused &&
+      conv.session_id == model.active_session
+    let visible_new_chat = composing && active
+    if !worth_keeping && !visible_new_chat {
+      continue
+    }
+    let visible = max_conversations <= 0 || count < max_conversations || active
+    count = count + 1
+    if visible {
       rows.push(
         session_row(
           dispatch,
           model,
           dev.channel,
           conv.session_id,
-          conversation_title(conv),
-          nested~,
-          worktree?,
-        ),
-      )
-    } else if composing &&
-      conv.device == model.focused &&
-      conv.session_id == model.active_session {
-      rows.push(
-        session_row(
-          dispatch,
-          model,
-          dev.channel,
-          conv.session_id,
-          "New chat",
+          if worth_keeping {
+            conversation_title(conv)
+          } else {
+            "New chat"
+          },
           nested~,
           worktree?,
         ),
@@ -489,6 +530,16 @@ fn push_group_rows(
   // sweep persists enough of them to bury the real chats. The parent row's
   // twisty shows them in place, the way a tree unfolds a directory.
   for row in @transcript.session_tree(durable) {
+    // An older active conversation stays visible beside the five-row preview;
+    // otherwise notification navigation or a list refresh could leave the
+    // conversation on screen with no selected sidebar row.
+    let active = dev.channel == model.focused &&
+      row.item.id == model.active_session
+    let visible = max_conversations <= 0 || count < max_conversations || active
+    count = count + 1
+    if !visible {
+      continue
+    }
     let expanded = model.subruns_expanded(dev.channel, row.item.id)
     rows.push(
       session_row(
@@ -537,6 +588,7 @@ fn push_group_rows(
       }
     }
   }
+  count
 }
 
 ///|
@@ -550,11 +602,14 @@ fn project_row(
   model : Model,
   dev : DeviceState,
   path : @common.Uri,
+  collapsed~ : Bool,
 ) -> @html.Html {
   @sidebar.WorkspaceRow::{
     title: path.path,
     label: @resource.label(path),
     active: dev.channel == model.focused && dev.active_project == Some(path),
+    collapsed,
+    toggle: dispatch(ToggleProjectSection(dev.channel, path)),
     menu: Some({
       title: "More actions",
       open: model.project_menu == Some({ channel: dev.channel, project: path }),
@@ -611,28 +666,39 @@ fn session_item_label(item : @transcript.SessionListItem) -> String {
 }
 
 ///|
-/// One row of the Archived group: the conversation's title and a
-/// hover-revealed restore button. The row is inert — an archived record is
-/// invisible to `load_session` until it is restored, so the click that
-/// brings it back is the unarchive control.
+/// One row of the Archived group: clicking the title opens its durable
+/// transcript read-only, while the nested restore button moves the complete
+/// conversation family back to the live store without also opening the row.
 fn archived_row(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
   item : @transcript.SessionListItem,
+  active : Bool,
 ) -> @html.Html {
-  @html.div(class="conversation-row archived", title=item.id, [
-    @html.span(class="sidebar-label", session_item_label(item)),
-    @html.button(
-      class="row-archive",
-      type_="button",
-      title="Restore this conversation to the sidebar",
-      attrs=@html.Attrs::build().on_click(event => {
-        event.stop_propagation()
-        dispatch(UnarchiveSession(channel, item.id))
-      }),
-      icon(icon_arrow_up),
+  @html.div(
+    class=if active {
+      "conversation-row archived active"
+    } else {
+      "conversation-row archived"
+    },
+    title=item.id,
+    on_click=dispatch(
+      OpenArchivedSession(channel, session=item.id, workspace=item.workspace),
     ),
-  ])
+    [
+      @html.span(class="sidebar-label", session_item_label(item)),
+      @html.button(
+        class="row-archive",
+        type_="button",
+        title="Restore this conversation to the sidebar",
+        attrs=@html.Attrs::build().on_click(event => {
+          event.stop_propagation()
+          dispatch(UnarchiveSession(channel, item.id))
+        }),
+        icon(icon_arrow_up),
+      ),
+    ],
+  )
 }
 
 ///|
@@ -795,145 +861,74 @@ fn user_display_text(text : String) -> String {
 }
 
 ///|
-/// Composer key handling. While the completion menu is open it captures the
-/// navigation keys — ↑/↓ move the highlight, Enter/Tab accept, Escape closes —
-/// so they drive the menu instead of the textarea; everything else (and every
-/// key with the menu closed) falls through to the normal submit shortcut.
-fn task_attrs(dispatch : @cmd.Emit[Msg], menu_open : Bool) -> @html.Attrs {
-  @html.Attrs::build().on_keydown(fn(event) {
-    if menu_open {
-      match event.key() {
-        "ArrowDown" => {
-          event.prevent_default()
-          dispatch(CompletionMove(1))
-        }
-        "ArrowUp" => {
-          event.prevent_default()
-          dispatch(CompletionMove(-1))
-        }
-        "Tab" => {
-          event.prevent_default()
-          dispatch(CompletionAccept)
-        }
-        "Enter" =>
-          if !event.shift_key() && !event.is_composing() {
-            event.prevent_default()
-            dispatch(CompletionAccept)
-          } else {
-            @cmd.none
-          }
-        "Escape" => {
-          event.prevent_default()
-          dispatch(CompletionDismiss)
-        }
-        _ => @cmd.none
-      }
-    } else if is_submit_shortcut(event) {
-      event.prevent_default()
-      dispatch(Send)
-    } else {
-      @cmd.none
-    }
-  })
-}
-
-///|
 /// The completion menu floating above the composer: one row per match, the
 /// highlighted row marked for the keyboard and clickable by mouse. A pointer
 /// press accepts a row; `mousedown` (not `click`) is used so the textarea does
 /// not blur the menu away before the selection registers.
-fn completion_popup(
-  dispatch : @cmd.Emit[Msg],
-  completion : Completion,
-) -> @html.Html {
-  let rows : Array[@html.Html] = []
-  for index, item in completion.items {
-    let selected = index == completion.selected
-    let row_class = if selected {
-      "completion-item selected"
-    } else {
-      "completion-item"
-    }
-    rows.push(
-      @html.div(
-        class=row_class,
-        attrs=@html.Attrs::build().on_mousedown(fn(event) {
-          // Keep focus in the textarea; accept the row the press landed on.
-          event.prevent_default()
-          dispatch(CompletionPick(index))
-        }),
-        [
-          @html.span(class="completion-label", item.label),
-          @html.span(class="completion-detail", item.detail),
-        ],
-      ),
-    )
-  }
+fn Completion::view(self : Completion, dispatch : @cmd.Emit[Msg]) -> @html.Html {
   // A `#` menu opens before its results arrive, so an empty list is a state to
   // narrate — searching, or genuinely nothing — not an empty box.
-  if rows.is_empty() {
-    let text = if completion.loading { "Searching…" } else { "No symbols" }
-    rows.push(@html.div(class="completion-empty", text))
-  }
-  let hint = match completion.kind {
+  let hint = match self.kind {
     SlashCommands => "Commands"
     SkillMentions => "Skills"
     Symbols => "Symbols"
+    Files => "Files"
   }
-  @html.div(class="completion-menu", [
-    @html.div(class="completion-hint", hint),
-    @html.div(class="completion-list", rows),
-  ])
+  let rows : Array[@composer.CompletionRow] = []
+  for _, item in self.menu {
+    rows.push({ label: item.label, detail: item.detail })
+  }
+  @composer.CompletionView::{
+    rows,
+    selected: self.menu.selected(),
+    hint,
+    empty: if self.menu.loading() {
+      "Searching…"
+    } else {
+      match self.kind {
+        Files => "No files"
+        _ => "No symbols"
+      }
+    },
+  }.render(index => dispatch(CompletionPick(index)))
 }
 
 ///|
 /// The chips above the textarea for the draft's mentions (`$` skills, `#`
-/// symbols, `✎` editor comments), each removable by its `×`. Always rendered
+/// symbols, `@` files, `✎` editor comments), each removable by its `×`. Always rendered
 /// (empty when there are no chips) so the textarea keeps a stable child index
 /// and never loses focus when a chip comes or goes; CSS collapses the empty
 /// tray to nothing. A chip with a resolved location is also clickable,
 /// opening (or refocusing) the editor side-panel on that spot; a comment
 /// chip's tooltip is the comment itself.
-fn mention_tray(dispatch : @cmd.Emit[Msg], conv : Conversation) -> @html.Html {
+fn Conversation::mention_chips(
+  self : Conversation,
+  dispatch : @cmd.Emit[Msg],
+) -> Array[@html.Html] {
   let chips : Array[@html.Html] = []
-  for index, mention in conv.mentions {
-    let glyph = @html.span(
-      class="mention-glyph",
-      @mention_context.glyph(mention.ref_),
-    )
-    let label = @html.span(
-      class="mention-label",
-      @mention_context.label(mention.ref_),
-    )
-    let body = if @mention_context.target(mention.ref_) is Some(target) {
-      @html.button(
-        class="mention-jump",
-        type_="button",
-        title=if mention.ref_ is Annotation(comment~, ..) {
-          comment
-        } else {
-          "Jump to \{target.file}"
-        },
-        on_click=dispatch(JumpToMention(index)),
-        [glyph, label],
-      )
-    } else {
-      @html.span(class="mention-body", [glyph, label])
-    }
+  for index, mention in self.mentions {
+    let target = @mention_context.target(mention.ref_)
     chips.push(
-      @html.div(class="mention-chip", [
-        body,
-        @html.button(
-          class="mention-remove",
-          type_="button",
-          title="Remove",
-          on_click=dispatch(RemoveMention(index)),
-          icon(icon_close),
-        ),
-      ]),
+      @composer.MentionChip::{
+        glyph: @mention_context.glyph(mention.ref_),
+        label: @mention_context.label(mention.ref_),
+        title: if mention.ref_ is Annotation(comment~, ..) {
+          comment
+        } else if target is Some(target) {
+          "Jump to \{target.file}"
+        } else {
+          @mention_context.label(mention.ref_)
+        },
+        jump: if target is Some(_) {
+          Some(dispatch(JumpToMention(index)))
+        } else {
+          None
+        },
+        remove: Some((dispatch(RemoveMention(index)), icon(icon_close))),
+      }.render(),
     )
   }
-  @html.div(class="mention-tray", chips)
+  chips
 }
 
 ///|
@@ -954,6 +949,31 @@ fn connection_banner(model : Model) -> @html.Html {
   } else {
     @html.div(class="composer-banner hidden", "")
   }
+}
+
+///|
+/// The archived conversation's only bottom action. Keeping it separate from
+/// the live composer means there is no textarea, model selector, goal editor,
+/// Send, or Stop control for an archived durable record.
+fn Conversation::archived_read_only_view(
+  self : Conversation,
+  dispatch : @cmd.Emit[Msg],
+) -> @html.Html {
+  @html.div(class="composer archived-read-only", [
+    @html.div(class="archived-read-only-bar", [
+      @html.span(
+        class="archived-read-only-text",
+        "Archived conversation · Read only",
+      ),
+      @html.button(
+        class="archived-read-only-restore",
+        type_="button",
+        title="Restore this conversation before continuing it",
+        on_click=dispatch(UnarchiveSession(self.device, self.session_id)),
+        "Restore",
+      ),
+    ]),
+  ])
 }
 
 ///|
@@ -984,34 +1004,29 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   // branch's pull request, or the branch itself, tinted by CI — which opens
   // the rest (changes, base, links out) in a popover rather than spending the
   // row's remaining width on it.
-  let status : Array[@html.Html] = [model_chip(dispatch, conv)]
+  let status : Array[@html.Html] = [conv.engine_model.composer_select(dispatch)]
   if git_chip(dispatch, model, conv) is Some(chip) {
     status.push(chip)
   }
   // The launch mode: a fresh workspace conversation chooses between the
   // workspace itself and a fresh host-named worktree (its 1:1 execution
-  // environment) here, Codex-style, before its first prompt.
+  // environment) here before its first prompt.
   if worktree_mode_chip(dispatch, model, conv) is Some(chip) {
     status.push(chip)
   }
-  let controls : Array[@html.Html] = [
-    @html.div(class="composer-status", status),
-  ]
-  if goal_editor is Some(editor) {
+  let action = if goal_editor is Some(editor) {
     // Goal mode replaces the send/steer cluster: the input edits the
     // standing goal, so the only action left here is Set — cancelling rides
     // the status group's lit chip, clearing rides the banner's ✕. No
     // run/compaction gate: a goal is welcome in every engine phase.
-    controls.push(
-      @html.button(
-        id="goal-set",
-        class="icon-button send-button",
-        title="Set the standing goal (Enter)",
-        disabled=editor.draft.is_blank(),
-        on_click=dispatch(SubmitGoal),
-        icon(icon_arrow_up),
-      ),
-    )
+    @composer.Action::{
+      id: "goal-set",
+      class_name: "icon-button send-button",
+      title: "Set the standing goal (Enter)",
+      disabled: editor.draft.is_blank(),
+      command: dispatch(SubmitGoal),
+      content: icon(icon_arrow_up),
+    }
   } else if conv.is_running() {
     // One morphing button while this conversation's turn runs. It becomes a
     // steer submit only when the durable boundary is ready too; a draft must
@@ -1021,39 +1036,33 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
       conv.run is Open(stage~, ..) &&
       !(stage is Cancelling)
     if !can_steer {
-      controls.push(
-        @html.button(
-          id="stop",
-          class="icon-button stop-button",
-          title="Stop",
-          disabled=!can_stop(conv),
-          on_click=dispatch(Stop),
-          icon(icon_debug_stop),
-        ),
-      )
+      @composer.Action::{
+        id: "stop",
+        class_name: "icon-button stop-button",
+        title: "Stop",
+        disabled: !can_stop(conv),
+        command: dispatch(Stop),
+        content: icon(icon_debug_stop),
+      }
     } else {
-      controls.push(
-        @html.button(
-          id="send",
-          class="icon-button send-button",
-          title="Steer the running task",
-          disabled=false,
-          on_click=dispatch(Send),
-          icon(icon_arrow_up),
-        ),
-      )
+      @composer.Action::{
+        id: "send",
+        class_name: "icon-button send-button",
+        title: "Steer the running task",
+        disabled: false,
+        command: dispatch(Send),
+        content: icon(icon_arrow_up),
+      }
     }
   } else {
-    controls.push(
-      @html.button(
-        id="send",
-        class="icon-button send-button",
-        title="Send",
-        disabled=!can_send,
-        on_click=dispatch(Send),
-        icon(icon_arrow_up),
-      ),
-    )
+    @composer.Action::{
+      id: "send",
+      class_name: "icon-button send-button",
+      title: "Send",
+      disabled: !can_send,
+      command: dispatch(Send),
+      content: icon(icon_arrow_up),
+    }
   }
   // Keep every row above the input in one permanent context container. Beside
   // a tall terminal this is the only auxiliary vertical scroller, so plans and
@@ -1110,7 +1119,12 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
       )
     Some(@interop.MissingWorktree(name~)) =>
       context.push(
-        missing_worktree_notice(dispatch, conv.device, conv.session_id, name),
+        @composer.MissingWorktreeNotice::{
+          name,
+          conversation_noun: "chat",
+          rebuild: dispatch(RepairWorktree),
+          archive: dispatch(ArchiveSession(conv.device, conv.session_id)),
+        }.render(),
       )
     Some(_) => ()
   }
@@ -1125,61 +1139,53 @@ fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
       pending=conv.goal_pending.map(pending => pending.request),
     ),
   )
-  let inner : Array[@html.Html] = [
-    // This stable wrapper gives the textarea the height left by the permanent
-    // mention tray. Only the textarea scrolls beside a tall terminal; the
-    // toolbar and upward-opening menus stay outside it, and the textarea's
-    // child index never changes as chips come and go.
-    @html.div(class="composer-input", [
-      mention_tray(dispatch, conv),
-      @html.textarea(
-        id="task",
-        value=if goal_editor is Some(editor) { editor.draft } else { conv.task },
-        placeholder=if goal_mode {
-          "Describe the standing goal for this conversation — Enter sets it, Esc cancels."
-        } else if conv.is_running() {
-          "Steer the running task — your message joins it at the next step."
-        } else {
-          "Ask OpenSeek to inspect, edit, or explain this workspace."
-        },
-        on_input=dispatch.map(value => {
-          if goal_mode {
-            GoalDraftEdited(value)
-          } else {
-            TaskChanged(value)
-          }
-        }),
-        attrs=(if goal_mode {
-          goal_attrs(dispatch)
-        } else {
-          task_attrs(dispatch, model.completion is Some(_))
-        }).data_set("focus-target", ""),
-        "",
-      ),
-    ]),
-    @html.div(class="composer-toolbar", [
-      @html.div(class="composer-controls", controls),
-    ]),
-  ]
-  // The menu floats above the composer via CSS, so its DOM position does not
-  // affect layout. It is appended last (not inserted before the textarea) so
-  // toggling it never shifts the input wrapper or toolbar — index-based vdom
-  // diffing would otherwise rebuild the textarea subtree and drop its focus.
-  if model.completion is Some(completion) {
-    inner.push(completion_popup(dispatch, completion))
-  }
-  // The context and input wrappers are both permanent siblings. Conditional
-  // rows can change inside the context without renumbering or rebuilding the
-  // focus-holding textarea subtree.
-  let children : Array[@html.Html] = [
-    @html.div(class="composer-context", context),
-    @html.div(
-      class="composer-inner",
-      attrs=@html.Attrs::build().data_set("focus-owner", ""),
-      inner,
-    ),
-  ]
-  @html.section(class="composer", children)
+  @composer.View::{
+    before_inner: context,
+    mentions: conv.mention_chips(dispatch),
+    value: if goal_editor is Some(editor) {
+      editor.draft
+    } else {
+      conv.task
+    },
+    placeholder: if goal_mode {
+      "Describe the standing goal for this conversation — Enter sets it, Esc cancels."
+    } else if conv.is_running() {
+      "Steer the running task — your message joins it at the next step."
+    } else {
+      "Ask OpenSeek to inspect, edit, or explain this workspace."
+    },
+    disabled: false,
+    input: dispatch.map(value => {
+      if goal_mode {
+        GoalDraftEdited(value)
+      } else {
+        TaskChanged(value)
+      }
+    }),
+    keyboard: @composer.KeyboardActions::{
+      menu_open: !goal_mode && model.completion is Some(_),
+      navigate: delta => dispatch(CompletionMove(delta)),
+      accept: dispatch(CompletionAccept),
+      dismiss: dispatch(CompletionDismiss),
+      submit: if goal_mode {
+        dispatch(SubmitGoal)
+      } else {
+        dispatch(Send)
+      },
+      cancel: if goal_mode {
+        Some(dispatch(CloseGoalEditor))
+      } else {
+        None
+      },
+    },
+    status,
+    action,
+    overlay: if goal_mode {
+      None
+    } else {
+      model.completion.map(completion => completion.view(dispatch))
+    },
+  }.render()
 }
 
 ///|
@@ -1767,6 +1773,10 @@ fn workspace_settings_page(
   // clear that no authoritative workspace snapshot has landed yet.
   let checkout_submodules = row is None ||
     (row is Some(row) && row.checkout_submodules)
+  let submodule_checkout_timeout_seconds = match row {
+    Some(row) => row.submodule_checkout_timeout_seconds
+    None => DefaultWorkspaceSubmoduleCheckoutTimeoutSeconds
+  }
   let conversation_rows : Array[@html.Html] = [
     setting_row(
       "New chats",
@@ -1819,6 +1829,45 @@ fn workspace_settings_page(
         ),
       ],
       desc="For new or repaired worktrees in this workspace, mirror the top-level submodules already initialized in its main checkout.",
+    ),
+    setting_row(
+      "Checkout timeout",
+      [
+        setting_select(
+          @html.select(
+            on_change=dispatch.map(value => {
+              WorkspaceSubmoduleTimeoutChosen(channel, workspace, value)
+            }),
+            attrs=@html.Attrs::build()
+              .aria_label("Submodule checkout timeout")
+              .data_set("focus-owner", "")
+              .disabled(row is None),
+            [
+              @html.option(
+                value="5",
+                selected=submodule_checkout_timeout_seconds == 5,
+                "5 seconds",
+              ),
+              @html.option(
+                value="10",
+                selected=submodule_checkout_timeout_seconds == 10,
+                "10 seconds",
+              ),
+              @html.option(
+                value="30",
+                selected=submodule_checkout_timeout_seconds == 30,
+                "30 seconds",
+              ),
+              @html.option(
+                value="60",
+                selected=submodule_checkout_timeout_seconds == 60,
+                "60 seconds",
+              ),
+            ],
+          ),
+        ),
+      ],
+      desc="Stop initializing submodules if Git has not finished within this time.",
     ),
   ]
   @html.section(class="settings-page", [
@@ -2098,6 +2147,21 @@ test "settings, skills, and composer declare form focus ownership" {
       }
     }
   }
+}
+
+///|
+#warnings("-alert_unstable")
+test "an archived transcript renders no live composer controls" {
+  let dispatch = test_dispatch()
+  let conv = { ..test_conversation(), record: ArchivedRecord }
+  let markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(conv.archived_read_only_view(dispatch))
+  })
+  assert_true(markup.contains("Archived conversation · Read only"))
+  assert_true(markup.contains(">Restore</button>"))
+  assert_false(markup.contains("<textarea"))
+  assert_false(markup.contains("id=\"send\""))
+  assert_false(markup.contains("id=\"stop\""))
 }
 
 ///|
@@ -2483,7 +2547,11 @@ fn view(
       [
         topbar_view(dispatch, toggle_terminal, toggle_right_panel, model),
         transcript_html,
-        composer_view(dispatch, model),
+        if model.active().is_archived_read_only() {
+          model.active().archived_read_only_view(dispatch)
+        } else {
+          composer_view(dispatch, model)
+        },
       ]
     Skills => page_with_toggle(dispatch, model, skills_page(dispatch, model))
     Settings =>
@@ -2797,6 +2865,49 @@ test "archived families collapse while a live orphan child stays archivable" {
   })
   assert_true(orphan_markup.contains("chat-sr-1"))
   assert_true(orphan_markup.contains("Archive — tuck this chat away"))
+}
+
+///|
+#warnings("-alert_unstable")
+test "project chat preview shows five rows, then expands or folds as one group" {
+  let project = @interop.ChannelId::Local.test_resource("/work/alpha")
+  let sessions : Array[@transcript.SessionListItem] = []
+  for number = 1; number <= 6; number = number + 1 {
+    sessions.push({
+      id: "chat-\{number}",
+      title: Some("Project chat \{number}"),
+      workspace: Some(project),
+      workspace_name: "alpha",
+    })
+  }
+  let model = test_model().with_dev(dev => {
+    ..dev,
+    projects: [project],
+    sessions,
+  })
+  fn render(model : Model) -> String raise {
+    let dev = model.dev()
+    @rabbita.render_to_string(() => {
+      @rabbita.Val::constant(
+        @html.div(device_section_rows(test_dispatch(), model, dev)),
+      )
+    })
+  }
+
+  let preview = render(model)
+  assert_true(preview.contains("Project chat 5"))
+  assert_false(preview.contains("Project chat 6"))
+  assert_true(preview.contains(">Show more</button>"))
+  let active = render({ ..model, active_session: "chat-6" })
+  assert_true(active.contains("Project chat 6"))
+  assert_true(active.contains(">Show more</button>"))
+  let expanded = render({ ..model, expanded_project_chats: [(Local, project)] })
+  assert_true(expanded.contains("Project chat 6"))
+  assert_false(expanded.contains(">Show more</button>"))
+  let collapsed = render({ ..model, collapsed_projects: [(Local, project)] })
+  assert_false(collapsed.contains("Project chat 1"))
+  assert_false(collapsed.contains(">Show more</button>"))
+  assert_true(collapsed.contains("aria-expanded=\"false\""))
 }
 
 ///|

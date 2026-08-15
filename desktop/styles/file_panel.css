@@ -565,7 +565,6 @@ html.is-resizing * {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: background-color 1.2s ease;
 }
 
 .tree-row:hover {
@@ -575,13 +574,6 @@ html.is-resizing * {
 .tree-row.selected {
   background: var(--color-accent-soft);
   color: var(--color-accent-strong);
-}
-
-/* A breadcrumb's `RevealDirectory` target, flashed until
-   `HighlightCleared` removes the class; the transition above eases it
-   back out. */
-.tree-row.highlighted {
-  background: var(--color-accent-soft);
 }
 
 .change-row {
@@ -715,6 +707,8 @@ html.is-resizing * {
   display: none;
 }
 .viewer-breadcrumb {
+  position: relative;
+  z-index: 4;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -725,7 +719,8 @@ html.is-resizing * {
   font-size: var(--font-size-sm);
   color: var(--color-text-muted);
   white-space: nowrap;
-  overflow: hidden;
+  overflow: visible;
+  background: var(--color-bg-surface);
 }
 
 /* The path crumbs grow and ellipsize. */
@@ -738,8 +733,13 @@ html.is-resizing * {
   overflow: hidden;
 }
 
-/* Every crumb but the current one is a `BrowseDir` link. */
+/* Every crumb but the current one opens a directory picker. */
 .crumb {
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -761,6 +761,149 @@ html.is-resizing * {
 .crumb-sep {
   flex: 0 0 auto;
   color: var(--color-text-muted);
+}
+
+/* VS Code-style breadcrumb picker: clicking a directory opens its immediate
+   children over the source viewer. It is deliberately independent from the
+   docked Explorer, but shares the Explorer's directory cache and ordering. */
+.breadcrumb-picker {
+  position: absolute;
+  top: calc(100% - 1px);
+  left: 12px;
+  z-index: 24;
+  display: flex;
+  flex-direction: column;
+  width: min(360px, calc(100% - 24px));
+  max-height: min(380px, calc(100vh - 150px));
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  background: var(--color-bg-surface);
+  box-shadow: var(--shadow-overlay);
+  color: var(--color-text-primary);
+  white-space: normal;
+}
+
+.breadcrumb-picker-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 9px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-subtle);
+  font-size: var(--font-size-xs);
+}
+
+.breadcrumb-picker-heading-icon,
+.breadcrumb-picker-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+}
+
+.breadcrumb-picker-heading-icon svg,
+.breadcrumb-picker-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.breadcrumb-picker-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.breadcrumb-picker-count {
+  margin-left: auto;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.breadcrumb-picker-loading {
+  color: var(--color-text-muted);
+}
+
+.breadcrumb-picker-loading.hidden {
+  display: none;
+}
+
+.breadcrumb-picker-list {
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+.breadcrumb-picker-row {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 0;
+  color: var(--color-text-primary);
+  background: transparent;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.breadcrumb-picker-row:hover,
+.breadcrumb-picker-row:focus-visible {
+  outline: none;
+  background: var(--color-bg-subtle);
+}
+
+.breadcrumb-picker-row.selected {
+  color: var(--color-accent-strong);
+  background: var(--color-accent-soft);
+}
+
+.breadcrumb-picker-icon {
+  color: var(--color-text-secondary);
+}
+
+.breadcrumb-picker-icon.folder {
+  color: var(--color-accent-strong);
+}
+
+.breadcrumb-picker-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.breadcrumb-picker-chevron {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-lg);
+}
+
+.breadcrumb-picker-chevron.hidden {
+  visibility: hidden;
+}
+
+.breadcrumb-picker-empty {
+  padding: 14px 12px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.breadcrumb-picker-failed {
+  color: var(--color-danger);
 }
 
 /* The changed-file row is the review action; this badge names the active

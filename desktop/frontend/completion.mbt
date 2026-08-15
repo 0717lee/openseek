@@ -1,8 +1,8 @@
 // The composer's completion menu: a leading `/` lists built-in conversation
-// commands, while a trailing `$` or `#` token lists installed skills or
-// workspace symbols after ordinary prompt text. All three filter as the user
-// types and are driven from the model so the keyboard (↑/↓, Enter/Tab, Esc)
-// and the popup view stay in sync.
+// commands, while a trailing `$`, `#`, or `@` token lists installed skills,
+// workspace symbols, or workspace files after ordinary prompt text. All four
+// filter as the user types and are driven from the model so the keyboard
+// (↑/↓, Enter/Tab, Esc) and the popup view stay in sync.
 
 ///|
 /// The built-in slash commands, in menu order. `command` is the id
@@ -30,54 +30,28 @@ fn slash_command_items() -> Array[CompletionItem] {
 }
 
 ///|
-/// The live completion token at the end of a draft. Slash commands keep their
-/// whole-draft semantics and therefore only parse at the beginning; `$` and
-/// `#` mentions parse after any whitespace so they can follow ordinary prompt
-/// text. `task_without_token` is the exact preceding text that accepting a
-/// mention preserves.
-priv struct CompletionTrigger {
-  kind : CompletionKind
-  query : String
-  task_without_token : String
-}
-
-///|
-fn CompletionTrigger::parse(text : String) -> CompletionTrigger? {
-  if text =~ (re"^/", after=query) && query =~ re"^[^[:space:]]*$" {
-    return Some({
-      kind: SlashCommands,
-      query: query.to_owned(),
-      task_without_token: "",
-    })
+/// Map the shared trigger grammar to the providers OpenSeek exposes. Keeping
+/// provider choice here leaves the composer package independent of application
+/// commands and result types.
+fn CompletionKind::of_trigger(trigger : @composer.Trigger) -> CompletionKind? {
+  match trigger.marker() {
+    "/" => Some(SlashCommands)
+    "$" => Some(SkillMentions)
+    "#" => Some(Symbols)
+    "@" => Some(Files)
+    _ => None
   }
-  // The trailing anchor skips earlier `$`/`#` text. The separate boundary
-  // check rejects a marker embedded in a word without consuming the whitespace
-  // that accepting the completion must preserve.
-  guard text =~ (re"[$#][^[:space:]]*$" as token, before=task) &&
-    (task.is_empty() || task =~ re"[[:space:]]$") &&
-    token =~ (re"^[$#]" as trigger, after=query) else {
-    return None
-  }
-  Some({
-    kind: if trigger is '$' {
-      SkillMentions
-    } else {
-      Symbols
-    },
-    query: query.to_owned(),
-    task_without_token: task.to_owned(),
-  })
 }
 
 ///|
 /// Build the composer completion menu for a draft, or `None` when the draft
 /// has no live trigger. The menu opens on a leading `/` command or a trailing
-/// `$`/`#` token after any whitespace. Once the user types whitespace past the
+/// `$`/`#`/`@` token after any whitespace. Once the user types whitespace past the
 /// token, the mention/reference is complete and the menu closes. The highlight
 /// resets to the first row on every rebuild, since filtering reorders what is
 /// shown.
 ///
-/// Symbols differ from the other two: their rows are fetched asynchronously and
+/// Symbols differ from local skill/file rows: they are fetched asynchronously and
 /// arrive via `SymbolsLoaded`, so they come from `symbols` (cached against
 /// conversation owner) rather than being computed here. The menu still opens immediately
 /// for a `#` query — empty and `loading` until the cache catches up.
@@ -86,29 +60,35 @@ fn compute_completion(
   installed : Array[@transcript.InstalledSkillItem],
   symbols : SymbolCache,
   owner : @interop.ConversationKey,
+  files? : Array[@files.Match] = [],
+  files_loading? : Bool = false,
 ) -> Completion? {
-  guard CompletionTrigger::parse(text) is Some(trigger) else { return None }
-  match trigger.kind {
+  guard @composer.Trigger::parse(text, inline_markers="$#@") is Some(trigger) &&
+    CompletionKind::of_trigger(trigger) is Some(kind) else {
+    return None
+  }
+  match kind {
     SlashCommands => {
       let items = slash_command_items().filter(item => {
-        completion_matches(trigger.query, [item.label])
+        trigger.matches([item.label])
       })
       if items.is_empty() {
         None
       } else {
         Some({
           kind: SlashCommands,
-          items,
-          selected: 0,
-          loading: false,
-          task_without_token: trigger.task_without_token,
+          menu: @composer.Menu(
+            items,
+            loading=false,
+            draft_without_token=trigger.draft_without_token(),
+          ),
         })
       }
     }
     SkillMentions => {
       let items : Array[CompletionItem] = []
       for skill in installed {
-        if completion_matches(trigger.query, [skill.name, skill.description]) {
+        if trigger.matches([skill.name, skill.description]) {
           items.push({
             label: "$\{skill.name}",
             detail: skill.description,
@@ -124,10 +104,11 @@ fn compute_completion(
       } else {
         Some({
           kind: SkillMentions,
-          items,
-          selected: 0,
-          loading: false,
-          task_without_token: trigger.task_without_token,
+          menu: @composer.Menu(
+            items,
+            loading=false,
+            draft_without_token=trigger.draft_without_token(),
+          ),
         })
       }
     }
@@ -135,22 +116,264 @@ fn compute_completion(
       // A bare `#` lists everything — an empty query asks the server for all
       // symbols — and narrows as the user types.
       let items = symbols.items.filter(item => {
-        completion_matches(trigger.query, [item.label, item.detail])
+        trigger.matches([item.label, item.detail])
       })
       // The cache answers this exact query for this conversation only when both
       // match; otherwise a fetch is in flight (or about to be) and the menu
       // shows whatever the cache narrows to meanwhile, marked loading.
       let loading = symbols.owner != Some(owner) ||
-        symbols.query != trigger.query
+        symbols.query != trigger.query()
       Some({
         kind: Symbols,
-        items,
-        selected: 0,
-        loading,
-        task_without_token: trigger.task_without_token,
+        menu: @composer.Menu(
+          items,
+          loading~,
+          draft_without_token=trigger.draft_without_token(),
+        ),
+      })
+    }
+    Files => {
+      let items = files.map(file => CompletionItem::{
+        label: file.name,
+        detail: file.path.0,
+        command: "",
+        insert: file.path.0,
+        path: Some(file.path.0),
+        range: None,
+      })
+      Some({
+        kind: Files,
+        menu: @composer.Menu(
+          items,
+          loading=files_loading,
+          draft_without_token=trigger.draft_without_token(),
+        ),
       })
     }
   }
+}
+
+///|
+/// Build the bounded file candidate set shared by composer `@` and Ctrl+P.
+/// The workspace index supplies paths; open tabs remain immediately useful
+/// while that index is loading.
+fn Model::file_search(self : Model) -> @files.Search {
+  let indexed = match self.file_panel.index {
+    @fileeditor.IndexReady(files~, ..) => files
+    _ => []
+  }
+  @files.Search(
+    indexed,
+    quick_open_open_files(self),
+    @dock.active_file(self.dock),
+  )
+}
+
+///|
+/// Rank an active `@` query through the same candidate ordering and fuzzy
+/// matcher as Ctrl+P. Other completion providers receive no file rows.
+fn Model::completion_files(
+  self : Model,
+  text : String,
+) -> (Array[@files.Match], Bool) {
+  guard @composer.Trigger::parse(text, inline_markers="$#@") is Some(trigger) &&
+    trigger.marker() == "@" else {
+    return ([], false)
+  }
+  let can_index = self.conversation_root(self.active()) is Some(_)
+  let loading = match self.file_panel.index {
+    @fileeditor.IndexEmpty | @fileeditor.IndexLoading(_) => can_index
+    @fileeditor.IndexReady(truncated=true, ..) => true
+    @fileeditor.IndexFailed | @fileeditor.IndexReady(truncated=false, ..) =>
+      false
+  }
+  (self.file_search().rank(trigger.query()), loading)
+}
+
+///|
+/// Query the complete Host file snapshot only while the delayed `@` request
+/// still names the visible conversation, root, draft, and generation. The
+/// file panel owns population of this cache; completion only needs the
+/// interactive query when that panel reports a truncated local snapshot.
+fn Model::begin_file_completion_request(
+  self : Model,
+  dispatch : @cmd.Emit[Msg],
+  owner : @interop.ConversationKey,
+  root : @common.Uri,
+  query : String,
+  generation : Int,
+) -> (@cmd.Cmd, Model) {
+  guard self.completion_debounce.accepts(generation) &&
+    owner.channel == self.focused &&
+    owner.session == self.active().session_id &&
+    self.conversation_root(self.active()) == Some(root) &&
+    self.file_panel.index is @fileeditor.IndexReady(truncated=true, ..) &&
+    @composer.Trigger::parse(self.active().task, inline_markers="$#@")
+    is Some(trigger) &&
+    trigger.marker() == "@" &&
+    trigger.query() == query &&
+    self.completion is Some(completion) &&
+    completion.kind is Files &&
+    completion.menu.loading() else {
+    return (@cmd.none, self)
+  }
+  (
+    @files.Request(owner.channel, owner.session, Some(root)).search_cached(
+      query,
+      generation,
+      (files, _limit_hit) => {
+        dispatch(
+          FileCompletionLoaded(owner~, root~, query~, generation~, files~),
+        )
+      },
+      () => dispatch(FileCompletionFailed(owner~, root~, query~, generation~)),
+    ),
+    self,
+  )
+}
+
+///|
+/// Settle the exact live `@` request with Host-ranked candidates. A failed
+/// query falls back to the bounded local snapshot instead of discarding useful
+/// rows; in both cases the spinner stops, while stale replies are ignored.
+fn Model::apply_file_completion_reply(
+  self : Model,
+  owner : @interop.ConversationKey,
+  root : @common.Uri,
+  query : String,
+  generation : Int,
+  remote_files : Array[@pathx.Relative]?,
+) -> (@cmd.Cmd, Model) {
+  let draft = self.active().task
+  guard self.completion_debounce.accepts(generation) &&
+    owner.channel == self.focused &&
+    owner.session == self.active().session_id &&
+    self.conversation_root(self.active()) == Some(root) &&
+    @composer.Trigger::parse(draft, inline_markers="$#@") is Some(trigger) &&
+    trigger.marker() == "@" &&
+    trigger.query() == query &&
+    self.completion is Some(completion) &&
+    completion.kind is Files &&
+    completion.menu.loading() else {
+    return (@cmd.none, self)
+  }
+  let matches = match remote_files {
+    Some(files) =>
+      @files.Search(
+        files,
+        quick_open_open_files(self),
+        @dock.active_file(self.dock),
+      ).rank(query)
+    None => self.file_search().rank(query)
+  }
+  (
+    @cmd.none,
+    {
+      ..self,
+      completion: compute_completion(
+        draft,
+        self.installed_skills,
+        self.symbol_cache,
+        owner,
+        files=matches,
+        files_loading=false,
+      ),
+    },
+  )
+}
+
+///|
+/// Continue a live `@` query after an index event leaves the panel with a
+/// truncated local snapshot. This covers both initial success and a failed
+/// background refresh that retains its previous snapshot. The current
+/// debounce generation is reused because no keystroke occurred meanwhile.
+fn Model::file_completion_query_after_index(
+  self : Model,
+  dispatch : @cmd.Emit[Msg],
+) -> @cmd.Cmd {
+  guard self.file_panel.index is @fileeditor.IndexReady(truncated=true, ..) &&
+    self.completion is Some(completion) &&
+    completion.kind is Files &&
+    completion.menu.loading() &&
+    @composer.Trigger::parse(self.active().task, inline_markers="$#@")
+    is Some(trigger) &&
+    trigger.marker() == "@" &&
+    self.conversation_root(self.active()) is Some(root) else {
+    return @cmd.none
+  }
+  dispatch(
+    FileCompletionDue(
+      owner={ channel: self.focused, session: self.active().session_id },
+      root~,
+      query=trigger.query(),
+      generation=self.completion_debounce.generation(),
+    ),
+  )
+}
+
+///|
+/// Rebuild a visible `@` menu after the shared file index settles. Reading the
+/// current draft again prevents a late index reply from reviving an obsolete
+/// or already accepted token. The menu itself is part of that identity: Esc
+/// dismisses it without changing the draft, so a later index reply must not
+/// recreate it from the still-present token.
+fn Model::refresh_file_completion(self : Model) -> Model {
+  let text = self.active().task
+  guard self.completion is Some(completion) &&
+    completion.kind is Files &&
+    @composer.Trigger::parse(text, inline_markers="$#@") is Some(trigger) &&
+    trigger.marker() == "@" else {
+    return self
+  }
+  let (files, files_loading) = self.completion_files(text)
+  let owner : @interop.ConversationKey = {
+    channel: self.focused,
+    session: self.active().session_id,
+  }
+  {
+    ..self,
+    completion: compute_completion(
+      text,
+      self.installed_skills,
+      self.symbol_cache,
+      owner,
+      files~,
+      files_loading~,
+    ),
+  }
+}
+
+///|
+/// Restart a visible file query when its conversation moves to a different
+/// concrete checkout root. This runs after the file panel has re-rooted, so
+/// rebuilding the menu drops paths from the previous index and the follow-up
+/// request addresses the new root. A dismissed menu remains dismissed.
+fn Model::restart_file_completion_after_root_change(
+  self : Model,
+  dispatch : @cmd.Emit[Msg],
+  previous : Model,
+) -> (@cmd.Cmd, Model) {
+  guard self.focused == previous.focused &&
+    self.active_session == previous.active_session else {
+    return (@cmd.none, self)
+  }
+  let conv = self.active()
+  let previous_conv = previous.active()
+  guard self.conversation_root(conv) !=
+    previous.conversation_root(previous_conv) &&
+    self.completion is Some(completion) &&
+    completion.kind is Files &&
+    @composer.Trigger::parse(conv.task, inline_markers="$#@") is Some(trigger) &&
+    trigger.marker() == "@" else {
+    return (@cmd.none, self)
+  }
+  let next = self.refresh_file_completion()
+  let command = match next.file_panel.index {
+    @fileeditor.IndexEmpty | @fileeditor.IndexFailed =>
+      dispatch(FileEditor(@fileeditor.EnsureFileIndex))
+    @fileeditor.IndexLoading(_) | @fileeditor.IndexReady(..) => @cmd.none
+  }
+  (command, next)
 }
 
 ///|
@@ -177,42 +400,6 @@ fn push_mention(mentions : Array[Mention], mention : Mention) -> Array[Mention] 
 /// With no chips this is just the text.
 fn compose_prompt(mentions : Array[Mention], task : String) -> String {
   @mention_context.encode(mentions.map(mention => mention.ref_), task)
-}
-
-///|
-/// Whether a menu row survives the typed query: a blank query keeps it,
-/// otherwise any of its fields must contain the query (case-insensitive). The
-/// query already had its trigger stripped, so a `/compact` row is matched
-/// against the bare "compact".
-fn completion_matches(query : String, fields : Array[String]) -> Bool {
-  let query = query.trim().to_owned().to_lower()
-  if query.is_empty() {
-    return true
-  }
-  for field in fields {
-    if field.to_lower().contains(query) {
-      return true
-    }
-  }
-  false
-}
-
-///|
-/// Move the highlighted row by `delta`, wrapping at both ends so ↑ on the
-/// first row lands on the last. A closed menu is left untouched.
-fn Completion::shifted(self : Completion, delta : Int) -> Completion {
-  let count = self.items.length()
-  if count == 0 {
-    return self
-  }
-  let next = (self.selected + delta + count) % count
-  { ..self, selected: next }
-}
-
-///|
-/// The highlighted row, or `None` for an empty menu.
-fn Completion::current(self : Completion) -> CompletionItem? {
-  self.items.get(self.selected)
 }
 
 ///|
@@ -259,16 +446,19 @@ test "slash trigger lists matching commands and filters by the typed name" {
     fail("a bare slash should open the command menu")
   }
   assert_true(all.kind is SlashCommands)
-  assert_true(all.items.length() >= 2)
-  assert_eq(all.items[0].label, "/compact")
+  assert_true(all.menu.length() >= 2)
+  guard all.menu.get(0) is Some(all_first) else { fail("row expected") }
+  assert_eq(all_first.label, "/compact")
   guard menu_for("/comp", []) is Some(match_) else {
     fail("a command prefix should keep matching rows")
   }
-  assert_eq(match_.items[0].command, "compact")
+  guard match_.menu.get(0) is Some(compact) else { fail("row expected") }
+  assert_eq(compact.command, "compact")
   guard menu_for("/go", []) is Some(goal_match) else {
     fail("the goal command should match its prefix")
   }
-  assert_eq(goal_match.items[0].command, "goal")
+  guard goal_match.menu.get(0) is Some(goal) else { fail("row expected") }
+  assert_eq(goal.command, "goal")
   // No command contains this, so the menu closes rather than showing nothing.
   assert_true(menu_for("/zzz", []) is None)
 }
@@ -289,15 +479,17 @@ test "dollar trigger lists installed skills, name or description matching" {
     fail("a bare dollar should open the skills menu")
   }
   assert_true(all.kind is SkillMentions)
-  assert_eq(all.items.length(), 2)
-  assert_eq(all.items[0].label, "$review-pr")
+  assert_eq(all.menu.length(), 2)
+  guard all.menu.get(0) is Some(first) else { fail("row expected") }
+  assert_eq(first.label, "$review-pr")
   // Insertion drops the bare name plus a space to keep typing the prompt.
-  assert_eq(all.items[0].insert, "review-pr ")
+  assert_eq(first.insert, "review-pr ")
   // Matches the description too, case-insensitively.
   guard menu_for("$TIDY", skills) is Some(desc) else {
     fail("description text should match")
   }
-  assert_eq(desc.items[0].label, "$refactor")
+  guard desc.menu.get(0) is Some(desc_first) else { fail("row expected") }
+  assert_eq(desc_first.label, "$refactor")
   // No installed skills, no menu.
   assert_true(menu_for("$x", []) is None)
 }
@@ -309,13 +501,35 @@ test "skill completion follows prompt text and preserves that text" {
     fail("a skill token after prompt text should open the menu")
   }
   assert_true(menu.kind is SkillMentions)
-  assert_eq(menu.items[0].label, "$review-pr")
-  assert_eq(menu.task_without_token, "Please use ")
+  guard menu.menu.get(0) is Some(first) else { fail("row expected") }
+  assert_eq(first.label, "$review-pr")
+  assert_eq(menu.menu.draft_without_token(), "Please use ")
   // Newlines are valid token boundaries too.
   guard menu_for("First line\n$rev", skills) is Some(after_newline) else {
     fail("a skill token after a newline should open the menu")
   }
-  assert_eq(after_newline.task_without_token, "First line\n")
+  assert_eq(after_newline.menu.draft_without_token(), "First line\n")
+}
+
+///|
+test "at trigger lists the same ranked workspace file matches as Ctrl+P" {
+  let owner : @interop.ConversationKey = { channel: Local, session: "s1" }
+  guard compute_completion(
+      "Inspect @main",
+      [],
+      empty_symbol_cache(),
+      owner,
+      files=[{ path: @pathx.Relative("src/main.mbt"), name: "main.mbt" }],
+      files_loading=false,
+    )
+    is Some(menu) else {
+    fail("an @ token should open the file menu")
+  }
+  assert_true(menu.kind is Files)
+  assert_eq(menu.menu.draft_without_token(), "Inspect ")
+  guard menu.menu.get(0) is Some(file) else { fail("file row expected") }
+  assert_eq(file.label, "main.mbt")
+  assert_eq(file.path, Some("src/main.mbt"))
 }
 
 ///|
@@ -344,10 +558,10 @@ test "highlight movement wraps at both ends" {
     installed_skill("c", ""),
   ]
   guard menu_for("$", skills) is Some(menu) else { fail("menu expected") }
-  assert_eq(menu.selected, 0)
-  assert_eq(menu.shifted(-1).selected, 2)
-  assert_eq(menu.shifted(1).selected, 1)
-  assert_eq(menu.shifted(1).shifted(1).shifted(1).selected, 0)
+  assert_eq(menu.menu.selected(), 0)
+  assert_eq(menu.menu.shifted(-1).selected(), 2)
+  assert_eq(menu.menu.shifted(1).selected(), 1)
+  assert_eq(menu.menu.shifted(1).shifted(1).shifted(1).selected(), 0)
 }
 
 ///|
@@ -361,12 +575,13 @@ test "hash trigger lists cached symbols, filtered, marked not loading on match" 
   }
   assert_true(menu.kind is Symbols)
   // The cache answers this exact query/session, so the menu is settled.
-  assert_false(menu.loading)
+  assert_false(menu.menu.loading())
   // "render" is filtered out by the live query; the two parses survive.
-  assert_eq(menu.items.length(), 2)
-  assert_eq(menu.items[0].label, "parse_hover")
+  assert_eq(menu.menu.length(), 2)
+  guard menu.menu.get(0) is Some(first) else { fail("row expected") }
+  assert_eq(first.label, "parse_hover")
   // Accepting drops a backticked reference plus location into the composer.
-  assert_eq(menu.items[0].insert, "`parse_hover` — src/main.mbt:1 ")
+  assert_eq(first.insert, "`parse_hover` — src/main.mbt:1 ")
 }
 
 ///|
@@ -377,9 +592,10 @@ test "symbol completion follows prompt text and preserves that text" {
     fail("a symbol token after prompt text should open the menu")
   }
   assert_true(menu.kind is Symbols)
-  assert_false(menu.loading)
-  assert_eq(menu.items[0].label, "parse_hover")
-  assert_eq(menu.task_without_token, "Inspect ")
+  assert_false(menu.menu.loading())
+  guard menu.menu.get(0) is Some(first) else { fail("row expected") }
+  assert_eq(first.label, "parse_hover")
+  assert_eq(menu.menu.draft_without_token(), "Inspect ")
 }
 
 ///|
@@ -390,15 +606,15 @@ test "hash menu is loading until the cache catches up to the query" {
   guard compute_completion("#", [], empty_symbol_cache(), owner) is Some(bare) else {
     fail("a bare # should open the symbol menu")
   }
-  assert_true(bare.loading)
-  assert_eq(bare.items.length(), 0)
+  assert_true(bare.menu.loading())
+  assert_eq(bare.menu.length(), 0)
   // A query with no cached results yet: the menu opens empty and loading.
   guard compute_completion("#parse", [], empty_symbol_cache(), owner)
     is Some(fresh) else {
     fail("a # query should open even before results arrive")
   }
-  assert_true(fresh.loading)
-  assert_eq(fresh.items.length(), 0)
+  assert_true(fresh.menu.loading())
+  assert_eq(fresh.menu.length(), 0)
   // A cache from another conversation does not answer this one.
   let other = symbol_cache(
     { channel: Remote("other"), session: "s1" },
@@ -408,14 +624,14 @@ test "hash menu is loading until the cache catches up to the query" {
   guard compute_completion("#parse", [], other, owner) is Some(stale) else {
     fail("menu still opens")
   }
-  assert_true(stale.loading)
+  assert_true(stale.menu.loading())
   // Once the empty-query results are cached, a bare # lists them all, settled.
   let full = symbol_cache(owner, "", ["alpha", "beta"])
   guard compute_completion("#", [], full, owner) is Some(menu) else {
     fail("bare # lists the cached symbols")
   }
-  assert_false(menu.loading)
-  assert_eq(menu.items.length(), 2)
+  assert_false(menu.menu.loading())
+  assert_eq(menu.menu.length(), 2)
 }
 
 ///|

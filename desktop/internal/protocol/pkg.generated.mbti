@@ -552,11 +552,13 @@ pub(all) struct ReadDirReply {
 
 pub(all) struct ReadFilePayload {
   path : String
+  root : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) enum ReadFileReply {
   Binary
   Oversized
+  BinaryContent(data_base64~ : String, media_type~ : String)
   Content(content~ : String, absolute~ : String, sig~ : String)
 } derive(Eq, @debug.Debug)
 pub impl ToJson for ReadFileReply
@@ -876,12 +878,14 @@ pub(all) struct WorkspaceSettingsPayload {
   workspace : String
   worktree_mode : Bool
   checkout_submodules : Bool
+  submodule_checkout_timeout_seconds : Int
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct WorkspaceSettingsSetPayload {
   workspace : String
   worktree_mode : Bool?
   checkout_submodules : Bool?
+  submodule_checkout_timeout_seconds : Int?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct WorkspaceSymbolsPayload {
@@ -918,6 +922,13 @@ pub(all) struct WorktreeCreateReply {
   name : String
   worktrees : Array[WorktreeInfo]
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) enum WorktreeCreateResult {
+  WorktreeCreatedReply(WorktreeCreateReply)
+  WorktreeCreateError(String)
+} derive(Eq, @debug.Debug)
+pub impl ToJson for WorktreeCreateResult
+pub impl @json.FromJson for WorktreeCreateResult
 
 pub(all) struct WorktreeInfo {
   name : String

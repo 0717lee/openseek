@@ -33,7 +33,7 @@ Rendering delegates to `internal/viewer/browser/markdown`. The retained
 `MarkdownDocumentProjection` is therefore the exact projection produced by the
 same cmark parse as the installed HTML. Every source or theme replacement
 advances `projection_generation` and records the source model content version.
-The view also mounts the shared `MarkdownDiagramViewports` lifetime on its
+The view also mounts the shared `DiagramViewports` lifetime on its
 article. Synchronous D2/Diago and UML SVGs, plus asynchronously committed
 Mermaid SVGs, receive pan, zoom, fit, and resize controls; replacement and
 disposal release that lifetime before the renderer mutates or removes the

@@ -31,12 +31,22 @@ test "capitalize is Unicode-safe on a non-BMP first char" {
 ///|
 #warnings("-alert_unstable")
 test "transcript markup exposes conversation identity" {
+  guard @resource.of_path(
+      @interop.ChannelId::Remote("relay-a"),
+      "/work/project",
+    )
+    is Some(root) else {
+    fail("expected a remote transcript root")
+  }
   let input = Input(
     focused=@interop.ChannelId::Remote("relay-a"),
     active_session="same-markup-chat",
+    root=Some(root),
     submission_generation=7,
     items=[],
+    streaming_reasoning="",
     streaming_response="",
+    streaming_identity="idle",
     subruns=[],
   )
   let rendered = transcript_view(
@@ -51,7 +61,116 @@ test "transcript markup exposes conversation identity" {
   let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
   assert_true(markup.contains("data-transcript-channel=\"remote.relay-a\""))
   assert_true(markup.contains("data-transcript-session=\"same-markup-chat\""))
+  assert_true(
+    markup.contains(
+      "data-transcript-root=\"openseek://remote.relay-a/work/project\"",
+    ),
+  )
   assert_true(markup.contains("data-transcript-submission=\"7\""))
+}
+
+///|
+test "transcript stream children use stable typed keys in display order" {
+  let first_tool : @transcript.TranscriptItem = {
+    kind: Tool(
+      call_id="c1",
+      name="shell",
+      arguments=None,
+      has_result=true,
+      is_error=false,
+      brief=Some("moon check"),
+    ),
+    content: "output",
+    ts: None,
+    sequence: Some(43),
+  }
+  let input = Input(
+    focused=@interop.ChannelId::Local,
+    active_session="desktop-test",
+    root=None,
+    submission_generation=1,
+    items=[
+      {
+        item: { kind: User, content: "question", ts: None, sequence: Some(41) },
+        identity: "s41\u{0}o0",
+      },
+      { item: first_tool, identity: "s43\u{0}o0" },
+    ],
+    streaming_reasoning="partial thought",
+    streaming_response="partial answer",
+    streaming_identity="r7",
+    subruns=[
+      {
+        id: "desktop-abc-sr-1",
+        kind: "agent",
+        label: "inspect tests",
+        steps: 1,
+        activity: "reading",
+        run: Some("r7"),
+      },
+    ],
+  )
+  let renderer : TranscriptRenderer = {
+    input,
+    on_open: _ => @cmd.none,
+    on_jump: _ => @cmd.none,
+  }
+  let keys = renderer.stream_children().to_array().map(pair => pair.0)
+  assert_eq(keys, [
+    "row\u{0}s41\u{0}o0", "rule\u{0}s41\u{0}o0", "activity\u{0}after\u{0}s41\u{0}o0",
+    "streaming-reasoning\u{0}r7", "streaming-response\u{0}r7", "subrun\u{0}r7\u{0}desktop-abc-sr-1",
+  ])
+  // A newly discovered activity row extends the same card; it does not change
+  // the card key and therefore does not replace its browser-owned disclosure.
+  let extended = {
+    ..input,
+    items: [
+      input.items[0],
+      {
+        item: {
+          kind: Reasoning,
+          content: "thinking",
+          ts: None,
+          sequence: Some(42),
+        },
+        identity: "s42\u{0}o0",
+      },
+      input.items[1],
+    ],
+  }
+  let extended_renderer = { ..renderer, input: extended }
+  let extended_keys = extended_renderer
+    .stream_children()
+    .to_array()
+    .map(pair => pair.0)
+  assert_eq(extended_keys, keys)
+}
+
+///|
+test "transcript stream section key scopes equal session ids by channel" {
+  let local_input = Input(
+    focused=@interop.ChannelId::Local,
+    active_session="desktop-test",
+    root=None,
+    submission_generation=0,
+    items=[],
+    streaming_reasoning="",
+    streaming_response="",
+    streaming_identity="idle",
+    subruns=[],
+  )
+  let remote = {
+    ..local_input,
+    focused: @interop.ChannelId::Remote("device-a"),
+  }
+  assert_eq(
+    TranscriptSectionKey::stream(local_input).wire(),
+    "stream\u{0}local\u{0}desktop-test",
+  )
+  assert_eq(
+    TranscriptSectionKey::stream(remote).wire(),
+    "stream\u{0}remote.device-a\u{0}desktop-test",
+  )
 }
 
 ///|
@@ -137,6 +256,29 @@ test "a completed singleton tool uses one brief disclosure" {
 
 ///|
 #warnings("-alert_unstable")
+test "a mixed activity does not repeat its singleton tool disclosure" {
+  let rendered = activity_view(
+    [
+      {
+        kind: Reasoning,
+        content: "checking the diff",
+        ts: None,
+        sequence: None,
+      },
+      tool_item("shell", brief="moon fmt · git diff"),
+    ],
+    _ => @cmd.none,
+  )
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  assert_true(
+    markup.contains("<span class=\"activity-text\">Moon fmt · git diff</span>"),
+  )
+  assert_false(markup.contains("tool-call-summary"))
+  assert_true(markup.contains("<pre class=\"tool-call-output\">output</pre>"))
+}
+
+///|
+#warnings("-alert_unstable")
 test "the turn rule dates itself only from a real stamp" {
   let render = rule => {
     @rabbita.render_to_string(() => @rabbita.Val::constant(rule))
@@ -195,6 +337,51 @@ test "every message names its speaker to assistive technology" {
   assert_true(
     streaming.contains("<span class=\"visually-hidden\">OpenSeek</span>"),
   )
+  let thinking = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(
+      streaming_reasoning_view("partial thought", streaming=true, _ => @cmd.none),
+    )
+  })
+  assert_true(thinking.contains("activity-thinking"))
+  assert_true(thinking.contains("streaming-thought streaming"))
+  assert_true(thinking.contains("streaming-thought-scroll"))
+  assert_true(thinking.contains("aria-label=\"Live model thinking\""))
+  assert_true(thinking.contains(">Thinking</span>"))
+  assert_true(thinking.contains("partial thought"))
+  let answering = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(
+      streaming_reasoning_view("finished thought", streaming=false, _ => {
+        @cmd.none
+      }),
+    )
+  })
+  assert_true(answering.contains("class=\"streaming-thought\""))
+  assert_false(answering.contains("streaming-thought streaming"))
+  assert_true(answering.contains(">Thought</span>"))
+}
+
+///|
+#warnings("-alert_unstable")
+test "assistant UML exposes the shared diagram viewport marker" {
+  let rendered = transcript_item_view(
+    {
+      kind: Assistant(is_danger=false),
+      content: "```uml\n@startuml\nparticipant Alice\nAlice -> Bob : hello\n@enduml\n```",
+      ts: None,
+      sequence: None,
+    },
+    _ => @cmd.none,
+  )
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  // TranscriptObservers hands this exact wrapper to DiagramViewports. Keep
+  // both markers stable so the shared package can discover the direct SVG.
+  assert_true(
+    markup.contains(
+      "class=\"chat-markdown-diagram moonbit-viewer-markdown-diagram\"",
+    ),
+  )
+  assert_true(markup.contains("data-diagram-language=\"uml\""))
+  assert_true(markup.contains("<svg"))
 }
 
 ///|

@@ -1,9 +1,4 @@
 ///|
-fn is_submit_shortcut(event : @dom.KeyboardEvent) -> Bool {
-  event.key() == "Enter" && !event.shift_key() && !event.is_composing()
-}
-
-///|
 /// Bring the sidebar's active project row into view on the render that
 /// applies it: the row a fresh add just activated can sit below the fold
 /// of a long sidebar. `nearest` keeps everything still when the row is

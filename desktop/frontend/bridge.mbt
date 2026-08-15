@@ -1136,12 +1136,14 @@ fn open_session(
   session_id : String,
   workspace~ : @common.Uri?,
   generation~ : Int,
+  archived? : Bool = false,
 ) -> @cmd.Cmd {
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
   load_session_cmd(
     channel,
     session_id,
     workspace~,
+    archived~,
     on_loaded=view => {
       dispatch(
         SessionLoaded(
@@ -1159,7 +1161,11 @@ fn open_session(
       dispatch(
         SessionLoadFailed(
           session=session_id,
-          message="failed to load session \{session_id}: " + detail,
+          message=if archived {
+            "failed to load archived conversation \{session_id}: " + detail
+          } else {
+            "failed to load session \{session_id}: " + detail
+          },
           generation~,
         ),
       )
@@ -1177,12 +1183,14 @@ fn refresh_session(
   session_id : String,
   workspace~ : @common.Uri?,
   generation~ : Int,
+  archived? : Bool = false,
 ) -> @cmd.Cmd {
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
   load_session_cmd(
     channel,
     session_id,
     workspace~,
+    archived~,
     on_loaded=view => {
       dispatch(
         SessionRefreshed(
@@ -1207,6 +1215,7 @@ fn load_session_cmd(
   channel : @interop.ChannelId,
   session_id : String,
   workspace~ : @common.Uri?,
+  archived~ : Bool,
   on_loaded~ : (@transcript.SessionLoadView) -> @cmd.Cmd,
   on_failed~ : (String) -> @cmd.Cmd,
 ) -> @cmd.Cmd {
@@ -1217,10 +1226,19 @@ fn load_session_cmd(
   }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
-      let reply = @interop.bridge_request(channel, @commands.session_load, {
-        session: session_id,
-        workspace: workspace.map(path => path.path),
-      }) catch {
+      let reply = try {
+        if archived {
+          @interop.bridge_request(channel, @commands.session_load_archived, {
+            session: session_id,
+            workspace: workspace.map(path => path.path),
+          })
+        } else {
+          @interop.bridge_request(channel, @commands.session_load, {
+            session: session_id,
+            workspace: workspace.map(path => path.path),
+          })
+        }
+      } catch {
         error => {
           scheduler.add(on_failed(@interop.bridge_error_text(error)))
           return

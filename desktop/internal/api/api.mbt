@@ -154,6 +154,11 @@ pub fn endpoints(
     @endpoint.Endpoint::remote(@commands.session_load, async fn(payload) {
       @engine.load_session(state.manager, payload)
     }),
+    @endpoint.Endpoint::remote(@commands.session_load_archived, async fn(
+      payload,
+    ) {
+      @engine.load_archived_session(state.manager, payload)
+    }),
     @endpoint.Endpoint::remote(@commands.session_list_archived, async fn(_) {
       @engine.archived_sessions(state.manager, session => {
         publish_session_changed(state, "archived", session)
@@ -245,25 +250,32 @@ pub fn endpoints(
       // point inside the engine, the `workspace.add` pattern.
       let worktree_mode = payload.worktree_mode
       let checkout_submodules = payload.checkout_submodules
+      let submodule_checkout_timeout_seconds = payload.submodule_checkout_timeout_seconds
       @engine.update_workspace_settings(
         payload.workspace,
         settings => state.hub.publish(WorkspaceSettingsChanged(settings)),
         worktree_mode?,
         checkout_submodules?,
+        submodule_checkout_timeout_seconds?,
       )
     }),
     @endpoint.Endpoint::remote(@commands.worktree_list, async fn(payload) {
       @engine.list_worktrees(payload.workspace)
     }),
     @endpoint.Endpoint::remote(@commands.worktree_create, async fn(payload) {
-      @engine.create_worktree(
+      let reply = @engine.create_worktree(
         state.manager,
         payload.workspace,
         payload.session,
         worktrees => {
           publish_worktree_changed(state, payload.workspace, worktrees)
         },
-      )
+      ) catch {
+        error if @async.is_being_cancelled() => raise error
+        @engine.EngineError(message) => return WorktreeCreateError(message)
+        error => raise error
+      }
+      WorktreeCreatedReply(reply)
     }),
     @endpoint.Endpoint::remote(@commands.worktree_remove, async fn(payload) {
       @engine.remove_worktree(
@@ -310,9 +322,10 @@ test "remote endpoint catalog has one entry per command name" {
     }
     names.push(name)
   }
-  assert_eq(names.length(), 59)
+  assert_eq(names.length(), 60)
   assert_true(names.contains("agent.start"))
   assert_true(names.contains("agent.goal"))
+  assert_true(names.contains("session.load_archived"))
   assert_true(names.contains("workspace.settings_get"))
   assert_true(names.contains("workspace.settings_set"))
   assert_true(names.contains("app.info"))

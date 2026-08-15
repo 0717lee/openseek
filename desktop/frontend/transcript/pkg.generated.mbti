@@ -42,6 +42,7 @@ pub fn subrun_parent(String) -> String?
 pub(all) enum EngineEvent {
   AgentStep(Int?)
   AssistantDelta(String)
+  ReasoningDelta(String)
   ReasoningMessage(String)
   AssistantMessage(String)
   RuntimeUpdate(String)

@@ -267,6 +267,7 @@ test "desktop notifications round-trip at the wire edge" {
     "workspace": "/home/u/proj",
     "worktree_mode": true,
     "checkout_submodules": false,
+    "submodule_checkout_timeout_seconds": 30,
   })
   guard settings is Some(settings) else {
     fail("workspace settings notification was rejected")
@@ -276,6 +277,7 @@ test "desktop notifications round-trip at the wire edge" {
     "workspace": "/home/u/proj",
     "worktree_mode": true,
     "checkout_submodules": false,
+    "submodule_checkout_timeout_seconds": 30,
   })
   assert_eq(Notification::from_wire("future.event", {}), None)
 }

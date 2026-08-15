@@ -441,6 +441,38 @@ pub(all) struct WorktreeCreateReply {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+/// A worktree creation either returns the existing success object or a safe
+/// domain refusal. Refusals ride in the reply body because the local Proton
+/// boundary deliberately hides arbitrary handler diagnostics.
+pub(all) enum WorktreeCreateResult {
+  WorktreeCreatedReply(WorktreeCreateReply)
+  WorktreeCreateError(String)
+} derive(Debug, Eq)
+
+///|
+pub impl ToJson for WorktreeCreateResult with fn to_json(self) {
+  match self {
+    WorktreeCreatedReply(reply) => reply.to_json()
+    WorktreeCreateError(message) => { "error": message }
+  }
+}
+
+///|
+pub impl FromJson for WorktreeCreateResult with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected a worktree creation result"))
+  }
+  match fields.get("error") {
+    Some(String(message)) => WorktreeCreateError(message)
+    Some(_) =>
+      raise JsonDecodeError(
+        (path.add_key("error"), "worktree creation error must be a string"),
+      )
+    None => WorktreeCreatedReply(@json.from_json(json))
+  }
+}
+
+///|
 pub(all) struct OpenPathEditorTarget {
   // Slash-separated path relative to the conversation's resolved checkout.
   path : String
@@ -712,6 +744,7 @@ pub(all) struct SearchFilesReply {
 pub(all) enum ReadFileReply {
   Binary
   Oversized
+  BinaryContent(data_base64~ : String, media_type~ : String)
   Content(content~ : String, absolute~ : String, sig~ : String)
 } derive(Debug, Eq)
 
@@ -720,6 +753,12 @@ pub impl ToJson for ReadFileReply with fn to_json(self) {
   match self {
     Binary => { "kind": "binary" }
     Oversized => { "kind": "oversized" }
+    BinaryContent(data_base64~, media_type~) =>
+      {
+        "kind": "binary_content",
+        "data_base64": data_base64,
+        "media_type": media_type,
+      }
     Content(content~, absolute~, sig~) =>
       {
         "kind": "content",
@@ -738,6 +777,13 @@ pub impl FromJson for ReadFileReply with fn from_json(json, path) {
   match kind_ {
     "binary" => Binary
     "oversized" => Oversized
+    "binary_content" => {
+      guard fields.get("data_base64") is Some(String(data_base64)) &&
+        fields.get("media_type") is Some(String(media_type)) else {
+        raise JsonDecodeError((path, "malformed binary file content reply"))
+      }
+      BinaryContent(data_base64~, media_type~)
+    }
     "content" => {
       guard fields.get("content") is Some(String(content)) &&
         fields.get("absolute") is Some(String(absolute)) &&

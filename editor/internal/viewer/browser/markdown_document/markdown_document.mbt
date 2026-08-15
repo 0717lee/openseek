@@ -58,7 +58,7 @@ struct MarkdownDocumentView {
   mut theme : String
   mut projection_generation : Int
   mut rendered : @browser_markdown.RenderedMarkdown
-  mut diagram_viewports : @browser_markdown.MarkdownDiagramViewports
+  mut diagram_viewports : @diagram_viewport.DiagramViewports
   mut semantic_dom : MarkdownSemanticDomLifetime
   listeners : Array[@base_common.Disposable]
   mut on_section_fold_toggle : (Int) -> Unit
@@ -199,6 +199,7 @@ pub fn MarkdownDocumentView::MarkdownDocumentView(
                 view.toc_nav.set_attribute("data-toc-expanded", "false")
                 view.toc_toggle.set_attribute("aria-expanded", "false")
                 (view.on_toc_navigate)(offset)
+                view.scroll_toc_entry_into_view(offset)
               }
               None => ()
             }
@@ -234,11 +235,8 @@ fn render_markdown_document_presentation(
   theme : String,
   article : @rdom.Element,
   on_size_changed : () -> Unit,
-) -> (
-  @browser_markdown.RenderedMarkdown,
-  @browser_markdown.MarkdownDiagramViewports,
-) {
-  let diagram_viewports_slot : Ref[@browser_markdown.MarkdownDiagramViewports?] = Ref(
+) -> (@browser_markdown.RenderedMarkdown, @diagram_viewport.DiagramViewports) {
+  let diagram_viewports_slot : Ref[@diagram_viewport.DiagramViewports?] = Ref(
     None,
   )
   let on_rendered_size_changed = () => {
@@ -251,7 +249,7 @@ fn render_markdown_document_presentation(
   let rendered = render_markdown_document(
     source, language_id, base_uri, resource_kind, theme, article, on_rendered_size_changed,
   )
-  let diagram_viewports = @browser_markdown.MarkdownDiagramViewports(
+  let diagram_viewports = @diagram_viewport.DiagramViewports(
     article, on_size_changed,
   )
   diagram_viewports_slot.val = Some(diagram_viewports)
@@ -1012,6 +1010,26 @@ fn MarkdownDocumentView::element_for_source_offset(
     Some(element) => Some(element)
     None => first_mapped
   }
+}
+
+///|
+/// Scrolls a TOC target by changing only the Markdown viewport. Avoid
+/// `scrollIntoView` here because older WebKitGTK versions may also move the
+/// surrounding desktop page. The navigation callback runs first so folded
+/// ancestors are expanded before the target rectangle is measured.
+fn MarkdownDocumentView::scroll_toc_entry_into_view(
+  self : MarkdownDocumentView,
+  source_offset : Int,
+) -> Unit {
+  guard !self.disposed &&
+    self.element_for_source_offset(source_offset) is Some(element) else {
+    return
+  }
+  let element_top = element.get_bounding_client_rect().get_top()
+  let toc_bottom = self.toc_nav.get_bounding_client_rect().get_bottom()
+  self.viewport.set_scroll_top(
+    self.viewport.get_scroll_top() + element_top - toc_bottom,
+  )
 }
 
 ///|

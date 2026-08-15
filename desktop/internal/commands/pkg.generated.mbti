@@ -103,6 +103,8 @@ pub let session_list_archived : Command[@protocol.EmptyPayload, @protocol.Sessio
 
 pub let session_load : Command[@protocol.LoadSessionPayload, @protocol.LoadSessionReply]
 
+pub let session_load_archived : Command[@protocol.LoadSessionPayload, @protocol.LoadSessionReply]
+
 pub let session_unarchive : Command[@protocol.SessionPayload, @protocol.SessionsReply]
 
 pub let settings_get : Command[@protocol.EmptyPayload, @protocol.SettingsStatusPayload]
@@ -145,7 +147,7 @@ pub let workspace_settings_get : Command[@protocol.WorkspaceSettingsGetPayload, 
 
 pub let workspace_settings_set : Command[@protocol.WorkspaceSettingsSetPayload, @protocol.WorkspaceSettingsPayload]
 
-pub let worktree_create : Command[@protocol.WorktreeCreatePayload, @protocol.WorktreeCreateReply]
+pub let worktree_create : Command[@protocol.WorktreeCreatePayload, @protocol.WorktreeCreateResult]
 
 pub let worktree_list : Command[@protocol.WorktreeListPayload, @protocol.WorktreesReply]
 

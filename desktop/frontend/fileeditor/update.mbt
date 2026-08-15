@@ -380,6 +380,7 @@ pub fn open_document(
   had_active~ : Bool,
 ) -> (@cmd.Cmd, State) {
   guard ctx.placement_ready() else { return (@cmd.none, state) }
+  let state = { ..state, highlighted: None }
   // Opening the path from Files, Quick Open, navigation, or a mention leaves
   // review mode. If the same Viewer model stays attached, the show below
   // clears its resource-keyed quick-diff baseline without replacing content.
@@ -489,6 +490,7 @@ pub fn open_changed_document(
   guard ctx.placement_ready() && change.selectable() else {
     return (@cmd.none, state)
   }
+  let state = { ..state, highlighted: None }
   let path = change.path
   // Selecting a Changes row is activation, not a manual reload. Reuse the
   // exact cached review (including one whose paired reads are still pending)
@@ -958,6 +960,7 @@ pub fn activate(
   guard ctx.placement_ready() && state.docs.get(path) is Some(doc) else {
     return (@cmd.none, state)
   }
+  let state = { ..state, highlighted: None }
   let (show, doc, review_generation) = show_activated_tab(
     dispatch,
     ctx,
@@ -1294,6 +1297,9 @@ fn State::watched_paths(self : State, ctx : Ctx) -> WatchedPaths? {
       if !directories.contains(directory) {
         directories.push(directory)
       }
+    }
+    if self.highlighted is Some(directory) && !directories.contains(directory) {
+      directories.push(directory)
     }
     directories.sort_by((left, right) => left.0.lexical_compare(right.0))
     if recursive {
@@ -2120,50 +2126,28 @@ pub fn update(
       }
     }
     RevealDirectory(path) =>
-      if path.is_root() {
-        (
-          @cmd.none,
-          {
-            ..state,
-            tree_open: true,
-            explorer_mode: ExplorerFiles,
-            highlighted: None,
-          },
-        )
+      if state.highlighted == Some(path) {
+        (@cmd.none, { ..state, highlighted: None })
       } else {
-        let expanded = state.expanded.copy()
-        let loading = state.loading.copy()
-        let cmds = []
-        for ancestor in ancestor_paths(path) {
-          if !expanded.contains(ancestor) {
-            expanded.push(ancestor)
-          }
-          if !state.children.contains(ancestor) && !loading.contains(ancestor) {
-            loading.push(ancestor)
-            cmds.push(
-              read_directory(
-                dispatch,
-                ctx.owner,
-                ctx.request_epoch,
-                ancestor,
-                root=ctx.root,
-              ),
-            )
-          }
+        let selected = { ..state, highlighted: Some(path) }
+        if state.children.contains(path) {
+          (focus_breadcrumb_entry_after_render(0), selected)
+        } else if state.loading.contains(path) {
+          (@cmd.none, selected)
+        } else {
+          let loading = state.loading.copy()
+          loading.push(path)
+          (
+            read_directory(
+              dispatch,
+              ctx.owner,
+              ctx.request_epoch,
+              path,
+              root=ctx.root,
+            ),
+            { ..selected, loading, error: None },
+          )
         }
-        cmds.push(reveal_row_after_render(path))
-        cmds.push(@cmd.delay(dispatch(HighlightCleared(path)), 1500))
-        (
-          @cmd.batch(cmds),
-          {
-            ..state,
-            tree_open: true,
-            explorer_mode: ExplorerFiles,
-            expanded,
-            loading,
-            highlighted: Some(path),
-          },
-        )
       }
     HighlightCleared(path) =>
       if state.highlighted == Some(path) {
@@ -2235,17 +2219,13 @@ pub fn update(
       } else {
         let children = state.children.copy()
         children[path] = entries
-        // A pending highlight's target row may only now exist in the DOM —
-        // this directory could be one of the ancestors `RevealDirectory` had
-        // to list first (e.g. reached via a mention jump, which never
-        // touched `expanded`/`children` itself).
-        let reveal_cmd = match state.highlighted {
-          Some(target) if ancestor_paths(target).contains(path) =>
-            reveal_row_after_render(target)
-          _ => @cmd.none
+        let breadcrumb_cmd = if state.highlighted == Some(path) {
+          focus_breadcrumb_entry_after_render(0)
+        } else {
+          @cmd.none
         }
         (
-          reveal_cmd,
+          breadcrumb_cmd,
           {
             ..state,
             children,
@@ -2808,7 +2788,11 @@ pub fn update(
             for directory in change.relist_candidates() {
               if !relist.contains(directory) &&
                 state.children.contains(directory) &&
-                (directory.is_root() || state.expanded.contains(directory)) &&
+                (
+                  directory.is_root() ||
+                  state.expanded.contains(directory) ||
+                  state.highlighted == Some(directory)
+                ) &&
                 !state.loading.contains(directory) {
                 relist.push(directory)
               }
@@ -2829,6 +2813,12 @@ pub fn update(
               !state.loading.contains(directory) {
               relist.push(directory)
             }
+          }
+          if state.highlighted is Some(directory) &&
+            state.children.contains(directory) &&
+            !state.loading.contains(directory) &&
+            !relist.contains(directory) {
+            relist.push(directory)
           }
           // Recursive selections omit shallow explorer paths already covered
           // by the workspace-wide watcher, so those transitions issue no new
@@ -5057,7 +5047,7 @@ test "an unresolved placement parks files and refuses editor actions" {
 }
 
 ///|
-test "ToggleTree flips the pane and RevealDirectory forces it open" {
+test "RevealDirectory opens the breadcrumb picker without moving the explorer" {
   let emit = test_emit()
   let (_, closed) = update(
     emit,
@@ -5066,15 +5056,66 @@ test "ToggleTree flips the pane and RevealDirectory forces it open" {
     test_ctx(),
   )
   assert_false(closed.tree_open)
-  let (_, revealed) = update(
+  let (_, opened) = update(
     emit,
     RevealDirectory(Relative("src")),
     closed,
     test_ctx(),
   )
-  assert_true(revealed.tree_open)
-  assert_true(revealed.explorer_mode is ExplorerFiles)
-  assert_true(revealed.highlighted is Some(Relative("src")))
+  assert_false(opened.tree_open)
+  assert_true(opened.explorer_mode is ExplorerChanges)
+  assert_true(opened.highlighted is Some(Relative("src")))
+  assert_true(opened.loading.contains(Relative("src")))
+}
+
+///|
+test "breadcrumb directory picker loads once, navigates cached folders, and toggles" {
+  let emit = test_emit()
+  let (_, loading) = update(
+    emit,
+    RevealDirectory(Relative("deepseek")),
+    owned_state(),
+    test_ctx(),
+  )
+  assert_true(loading.highlighted is Some(Relative("deepseek")))
+  assert_true(loading.loading.contains(Relative("deepseek")))
+  let children = loading.children.copy()
+  children[Relative("deepseek/docs")] = []
+  let cached = { ..loading, children, }
+  let (_, nested) = update(
+    emit,
+    RevealDirectory(Relative("deepseek/docs")),
+    cached,
+    test_ctx(),
+  )
+  assert_true(nested.highlighted is Some(Relative("deepseek/docs")))
+  assert_false(nested.loading.contains(Relative("deepseek/docs")))
+  let (_, closed) = update(
+    emit,
+    RevealDirectory(Relative("deepseek/docs")),
+    nested,
+    test_ctx(),
+  )
+  assert_true(closed.highlighted is None)
+}
+
+///|
+test "breadcrumb dismissal does not disturb the explorer tree" {
+  let state = {
+    ..owned_state(),
+    tree_open: false,
+    expanded: [Relative("src")],
+    highlighted: Some(Relative("deepseek")),
+  }
+  let (_, dismissed) = update(
+    test_emit(),
+    HighlightCleared(Relative("deepseek")),
+    state,
+    test_ctx(),
+  )
+  assert_true(dismissed.highlighted is None)
+  assert_false(dismissed.tree_open)
+  assert_true(dismissed.expanded == [Relative("src")])
 }
 
 ///|
@@ -7474,22 +7515,36 @@ test "sync reconciles the watcher with the panel and its open files" {
     selected_ctx,
   )
   assert_true(after_old_failure.watch_error is None)
+  // A breadcrumb list is live even when its directory was not expanded in
+  // the docked tree; dismissing it lets the next sync retire that watch.
+  let (picking, _) = sync(
+    emit,
+    { ..after_old_failure, highlighted: Some(Relative("deepseek")) },
+    selected_ctx,
+  )
+  assert_true(
+    picking.watching
+    is Some(
+      { directories: [Relative(""), Relative("deepseek"), Relative("src")], .. }
+    ),
+  )
+  assert_eq(picking.watch_generation, attached_generation + 2)
   // Closed panel with files still open: keep watching (staleness tracking).
   let still_ctx = {
     ..test_ctx(),
     panel_open: false,
     open_files: [Relative("a.mbt")],
   }
-  let closed = { ..after_old_failure, children: Map([]), loading: [] }
+  let closed = { ..picking, children: Map([]), loading: [], highlighted: None }
   let (still, _) = sync(emit, closed, still_ctx)
   assert_true(
     still.watching is Some({ files: [Relative("a.mbt")], directories: [], .. }),
   )
-  assert_eq(still.watch_generation, attached_generation + 2)
+  assert_eq(still.watch_generation, attached_generation + 3)
   // Closed panel, nothing open: park the watcher.
   let (parked, _) = sync(emit, still, { ..test_ctx(), panel_open: false })
   assert_true(parked.watching is None)
-  assert_eq(parked.watch_generation, attached_generation + 3)
+  assert_eq(parked.watch_generation, attached_generation + 4)
 }
 
 ///|

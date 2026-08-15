@@ -2,7 +2,8 @@
 // group (like the LSP and watcher pumps), it consumes `open_terminal`
 // requests and runs one task per session. The connection owner shuts down the
 // terminal state before its group ends, waking this pump and closing every
-// session; each session's `defer` then releases its PTY.
+// session. Each PTY belongs to its session's task group, which releases the
+// handles and stops the child when that session ends.
 
 ///|
 /// Read PTY output in chunks this large; a typical child burst fits in one.
@@ -27,43 +28,15 @@ pub async fn run_terminal_pump(
 }
 
 ///|
-/// POSIX closes the PTY slave when the child dies, which wakes the reader and
-/// lets the session drain before its deferred `Pty::close` runs.
-#cfg(not(platform="windows"))
+/// Stop a session through the task group that owns its PTY. PTY 0.4 closes the
+/// controlling handle when cancellation begins, gives the child five seconds
+/// to exit, and then kills the process tree if it is still running.
 async fn TerminalSession::close_when_requested(
   self : TerminalSession,
-  _output_task : @async.Task[Unit],
+  group : @async.TaskGroup[Unit],
 ) -> Unit {
   self.close_requested.get()
-  // POSIX gives negative process ids group-wide meanings. In particular,
-  // kill(-1, SIGKILL) targets nearly every process the user may signal, so a
-  // cleared or otherwise invalid PTY id must never reach hard_cancel.
-  guard self.pid > 0 else {
-    @xlog.error() <?
-      {
-        "event": "terminal_cancel_rejected",
-        "pid": self.pid,
-        "reason": "non-positive child process id",
-      }
-    return
-  }
-  let cancel = @process.hard_cancel()
-  cancel(self.pid)
-}
-
-///|
-/// Windows ConPTY keeps its output pipe open after the child dies. Cancelling
-/// the task that submitted the synchronous pipe read lets async call
-/// `CancelSynchronousIo`; closing the HANDLE from this different task does not
-/// wake that read reliably.
-#cfg(platform="windows")
-async fn TerminalSession::close_when_requested(
-  self : TerminalSession,
-  output_task : @async.Task[Unit],
-) -> Unit {
-  self.close_requested.get()
-  self.pty.cancel()
-  output_task.cancel()
+  group.return_immediately(())
 }
 
 ///|
@@ -75,6 +48,7 @@ async fn run_session(
   request : OpenRequest,
   emit : async (TerminalPush) -> Unit,
 ) -> Unit {
+  let mut opened_pty : @pty.Pty? = None
   @async.with_task_group(group => {
     if request.connection_generation != state.connection_generation {
       let message = if state.closed {
@@ -85,10 +59,16 @@ async fn run_session(
       request.reply.put(Err(message))
       return
     }
+    guard request.argv.get(0) is Some(file) else {
+      request.reply.put(Err("terminal command must not be empty"))
+      return
+    }
+    let args = request.argv[1:].map(arg => arg.view())
     let pty = @pty.spawn(
       group,
-      request.argv,
-      // pty 0.2.3 applies the working directory in the platform spawn call,
+      file.view(),
+      args,
+      // The PTY applies the working directory in the platform spawn call,
       // so neither POSIX nor Windows needs a shell command that performs cd.
       cwd=request.cwd,
       cols=request.cols,
@@ -108,7 +88,7 @@ async fn run_session(
       request.reply.put(
         Err("terminal spawn returned a non-positive process id"),
       )
-      pty.close()
+      group.return_immediately(())
       return
     }
     // Spawning suspends, so a reconnect can invalidate the request while the
@@ -120,12 +100,11 @@ async fn run_session(
         "terminal open was cancelled by reconnect"
       }
       request.reply.put(Err(message))
-      pty.close()
+      group.return_immediately(())
       return
     }
     let session : TerminalSession = {
       pty,
-      pid,
       unacked: 0,
       unacked_chunks: Map([]),
       next_output_sequence: 1,
@@ -134,10 +113,8 @@ async fn run_session(
       closing: false,
     }
     state.sessions[request.id] = session
-    defer {
-      state.sessions.remove(request.id)
-      pty.close()
-    }
+    defer state.sessions.remove(request.id)
+    opened_pty = Some(pty)
     request.reply.put(Ok(()))
     @xlog.debug() <?
       {
@@ -175,21 +152,24 @@ async fn run_session(
         }
       }
     })
-    // The session owns the platform-specific difference between waiting for a
-    // POSIX PTY EOF and cancelling a Windows synchronous pipe read.
-    group.spawn_bg(no_wait=true, () => session.close_when_requested(output_task))
+    // The PTY owns the platform-specific process and handle shutdown. The
+    // watcher only ends the task group that owns those resources.
+    group.spawn_bg(no_wait=true, () => session.close_when_requested(group))
     output_task.wait() catch {
       _ if session.closing => ()
       error => raise error
     }
-    let code = pty.wait() catch {
-      error if @async.is_being_cancelled() => raise error
-      _ => -1
-    }
-    @xlog.debug() <?
-      { "event": "terminal_exit", "id": request.id, "code": code }
-    emit(Exited(id=request.id, code~))
   })
+  guard opened_pty is Some(pty) else { return }
+  // The task group has finished, so the PTY's wait task already holds the
+  // natural or cancellation-driven exit result even though its handles are
+  // now closed.
+  let code = pty.wait() catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => -1
+  }
+  @xlog.debug() <? { "event": "terminal_exit", "id": request.id, "code": code }
+  emit(Exited(id=request.id, code~))
 }
 
 ///|

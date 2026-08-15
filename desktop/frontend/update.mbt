@@ -16,11 +16,21 @@ fn session_snapshot_command(
   generation : Int,
   activate_on_success : Bool,
 ) -> @cmd.Cmd {
-  let workspace = model.session_project(channel, session)
+  let (workspace, archived) = match model.find_conversation(channel, session) {
+    Some(conv) => (conv.workspace.project(), conv.is_archived_read_only())
+    None => (model.session_project(channel, session), false)
+  }
   if activate_on_success {
-    open_session(dispatch, channel, session, workspace~, generation~)
+    open_session(dispatch, channel, session, workspace~, generation~, archived~)
   } else {
-    refresh_session(dispatch, channel, session, workspace~, generation~)
+    refresh_session(
+      dispatch,
+      channel,
+      session,
+      workspace~,
+      generation~,
+      archived~,
+    )
   }
 }
 
@@ -190,6 +200,67 @@ fn open_session_on(
     } else {
       (@cmd.none, next)
     }
+  }
+}
+
+///|
+/// Open one archived row against its archived durable twin. Reusing an
+/// already-open archived transcript preserves its rendered snapshot while a
+/// fresh generation catches up; a live same-id entry is replaced so no draft
+/// or run state can cross the archive boundary.
+fn Model::open_archived_session_on(
+  self : Model,
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  session_id : String,
+  workspace : @common.Uri?,
+) -> (@cmd.Cmd, Model) {
+  let owner : @interop.ConversationKey = { channel, session: session_id }
+  let known = self.find_conversation(channel, session_id)
+  let conversation = match known {
+    Some(conv) if conv.is_archived_read_only() => conv
+    _ =>
+      {
+        ..empty_conversation(
+          channel,
+          session_id,
+          project?=workspace,
+          model=self
+            .remembered_model(channel, session_id)
+            .unwrap_or(self.default_model),
+        ),
+        record: ArchivedRecord,
+      }
+  }
+  let conversation = if self.device_state(channel) is Some(dev) {
+    {
+      ..conversation,
+      record: ArchivedRecord,
+      workspace: dev.conversation_workspace(
+        workspace,
+        session_id,
+        conversation.workspace,
+      ),
+    }
+  } else {
+    { ..conversation, record: ArchivedRecord }
+  }
+  let (model, generation) = self.begin_transcript_reload(conversation)
+  let next = {
+    ..model.activate(channel, session_id),
+    screen: Chat,
+    loading_conversation: Some(owner),
+    completion: None,
+  }.with_active_project(workspace)
+  if generation is Some(generation) {
+    (
+      session_snapshot_command(
+        dispatch, channel, next, session_id, generation, true,
+      ),
+      next,
+    )
+  } else {
+    (@cmd.none, next)
   }
 }
 
@@ -513,7 +584,11 @@ fn retry_session_snapshot(
     let owner : @interop.ConversationKey = { channel, session }
     if activate_on_success && model.loading_conversation == Some(owner) {
       let (toast, next) = next.notify_error(dispatch, message)
-      let (sessions, next) = request_sessions_refresh(dispatch, channel, next)
+      let (sessions, next) = if conv.is_archived_read_only() {
+        request_archived_refresh(dispatch, channel, next)
+      } else {
+        request_sessions_refresh(dispatch, channel, next)
+      }
       (
         @cmd.batch([toast, sessions, scroll]),
         { ..next, loading_conversation: None },
@@ -574,15 +649,20 @@ fn apply_session_snapshot(
       loading_conversation: None,
       completion: None,
     }
-    let (branch_cmd, probed) = probe_branch(
-      dispatch,
-      next,
-      channel,
-      session,
-      next.conversation_root(next.active()),
-    )
-    next = probed
-    commands.push(branch_cmd)
+    // An archived transcript has no runnable checkout to inspect here. Its
+    // retained workspace placement is still available to file links, but git
+    // state is refreshed only after an unarchive turns the record live.
+    if !conv.is_archived_read_only() {
+      let (branch_cmd, probed) = probe_branch(
+        dispatch,
+        next,
+        channel,
+        session,
+        next.conversation_root(next.active()),
+      )
+      next = probed
+      commands.push(branch_cmd)
+    }
   }
   if gapped || reload_after_current {
     guard next.find_conversation(channel, session) is Some(conv) else {
@@ -625,7 +705,7 @@ fn is_steer_receipt(event : @transcript.EngineEvent) -> Bool {
 
 ///|
 /// Apply an accepted completion row: a slash command runs its action, while a
-/// skill mention or symbol reference becomes a chip in the composer's mention
+/// skill, symbol, or file reference becomes a chip in the composer's mention
 /// tray (its expansion is spliced into the prompt on send). Either way the menu
 /// closes and only the typed trigger token is removed from the textarea.
 fn accept_completion(
@@ -634,6 +714,9 @@ fn accept_completion(
   menu : Completion,
   item : CompletionItem,
 ) -> (@cmd.Cmd, Model) {
+  if model.active().is_archived_read_only() {
+    return (@cmd.none, { ..model, completion: None })
+  }
   match menu.kind {
     SlashCommands => run_slash_command(dispatch, model, item.command)
     // The chip carries its envelope form directly: the skill's bare name (its
@@ -644,7 +727,7 @@ fn accept_completion(
         model,
         Skill(name=item.insert.trim().to_owned()),
         range=None,
-        task=menu.task_without_token,
+        task=menu.menu.draft_without_token(),
       )
     Symbols => {
       let (file, line) = if item.path is Some(path) && item.range is Some(range) {
@@ -656,9 +739,20 @@ fn accept_completion(
         model,
         Symbol(name=item.label, file~, line~),
         range=item.range,
-        task=menu.task_without_token,
+        task=menu.menu.draft_without_token(),
       )
     }
+    Files =>
+      if item.path is Some(path) {
+        accept_mention(
+          model,
+          File(path~),
+          range=None,
+          task=menu.menu.draft_without_token(),
+        )
+      } else {
+        (@cmd.none, { ..model, completion: None })
+      }
   }
 }
 
@@ -882,28 +976,37 @@ fn open_editor_at(
 }
 
 ///|
-/// The command, if any, to fetch workspace symbols for a changed draft. Fires
-/// only when the draft ends in a live `#` query whose results are not already
-/// cached for this conversation — so a fresh keystroke refetches but a repeat
-/// of the same query does not.
-fn symbol_fetch_cmd(
+/// Start a delayed workspace-symbol request only while the composer still has
+/// the exact owner, query, and draft generation that scheduled it.
+fn Model::begin_completion_symbol_request(
+  self : Model,
   dispatch : @cmd.Emit[Msg],
-  model : Model,
-  value : String,
   owner : @interop.ConversationKey,
-) -> @cmd.Cmd {
-  guard CompletionTrigger::parse(value) is Some(trigger) &&
-    trigger.kind is Symbols else {
-    return @cmd.none
+  query : String,
+  generation : Int,
+) -> (@cmd.Cmd, Model) {
+  guard self.completion_debounce.accepts(generation) &&
+    owner.channel == self.focused &&
+    owner.session == self.active().session_id &&
+    @composer.Trigger::parse(self.active().task, inline_markers="$#")
+    is Some(trigger) &&
+    trigger.marker() == "#" &&
+    trigger.query() == query &&
+    self.completion is Some(completion) &&
+    completion.kind is Symbols &&
+    completion.menu.loading() else {
+    return (@cmd.none, self)
   }
-  let query = trigger.query
-  let root = model.conversation_root(model.active())
-  if model.symbol_cache.owner == Some(owner) &&
-    model.symbol_cache.root == root &&
-    model.symbol_cache.query == query {
-    return @cmd.none
+  let root = self.conversation_root(self.active())
+  if self.symbol_cache.owner == Some(owner) &&
+    self.symbol_cache.root == root &&
+    self.symbol_cache.query == query {
+    return (@cmd.none, self)
   }
-  read_workspace_symbols(dispatch, owner, query, root~)
+  (
+    ComposerSymbolRequest(generation).search(dispatch, owner, query, root~),
+    self,
+  )
 }
 
 ///|
@@ -916,15 +1019,20 @@ fn apply_symbol_reply(
   owner : @interop.ConversationKey,
   root : @common.Uri,
   query : String,
+  generation : Int,
   symbols : Array[WorkspaceSymbol],
 ) -> (@cmd.Cmd, Model) {
   let draft = model.active().task
-  guard owner.channel == model.focused &&
+  guard model.completion_debounce.accepts(generation) &&
+    owner.channel == model.focused &&
     owner.session == model.active().session_id &&
     model.conversation_root(model.active()) == Some(root) &&
-    CompletionTrigger::parse(draft) is Some(trigger) &&
-    trigger.kind is Symbols &&
-    trigger.query == query else {
+    @composer.Trigger::parse(draft, inline_markers="$#") is Some(trigger) &&
+    trigger.marker() == "#" &&
+    trigger.query() == query &&
+    model.completion is Some(completion) &&
+    completion.kind is Symbols &&
+    completion.menu.loading() else {
     return (@cmd.none, model)
   }
   let items : Array[CompletionItem] = []
@@ -970,8 +1078,8 @@ fn Model::restart_symbol_search_after_root_change(
   let previous_conv = previous.active()
   guard self.conversation_root(conv) !=
     previous.conversation_root(previous_conv) &&
-    CompletionTrigger::parse(conv.task) is Some(trigger) &&
-    trigger.kind is Symbols else {
+    @composer.Trigger::parse(conv.task, inline_markers="$#") is Some(trigger) &&
+    trigger.marker() == "#" else {
     return (@cmd.none, self)
   }
   let owner : @interop.ConversationKey = {
@@ -979,9 +1087,11 @@ fn Model::restart_symbol_search_after_root_change(
     session: conv.session_id,
   }
   let cache = empty_symbol_cache()
+  let completion_debounce = self.completion_debounce.advanced()
   let next = {
     ..self,
     symbol_cache: cache,
+    completion_debounce,
     completion: compute_completion(
       conv.task,
       self.installed_skills,
@@ -989,7 +1099,12 @@ fn Model::restart_symbol_search_after_root_change(
       owner,
     ),
   }
-  (symbol_fetch_cmd(dispatch, next, conv.task, owner), next)
+  (
+    completion_debounce.delayed(generation => {
+      dispatch(CompletionDue(owner~, query=trigger.query(), generation~))
+    }),
+    next,
+  )
 }
 
 ///|
@@ -1001,6 +1116,9 @@ fn run_slash_command(
   model : Model,
   command : String,
 ) -> (@cmd.Cmd, Model) {
+  if model.active().is_archived_read_only() {
+    return (@cmd.none, { ..model, completion: None })
+  }
   match command {
     "compact" => {
       let conv = model.active()
@@ -1134,11 +1252,20 @@ fn apply_engine_event(
           { ..conv, streaming_response: conv.streaming_response + content },
         )
       }
+    ReasoningDelta(content) =>
+      if content.is_empty() {
+        (false, conv)
+      } else {
+        (
+          true,
+          { ..conv, streaming_reasoning: conv.streaming_reasoning + content },
+        )
+      }
     // Full semantic events never append transcript items: the store commit is
-    // the sole source of the durable reasoning/answer item. The current wire
-    // protocol has no live reasoning stream, while the full assistant event
-    // settles the live response.
-    ReasoningMessage(_) => (false, conv)
+    // the sole source of the durable reasoning/answer item. These events only
+    // settle the matching transient stream; the session commit supplies the
+    // permanent transcript item without duplicating it here.
+    ReasoningMessage(_) => (false, { ..conv, streaming_reasoning: "" })
     AssistantMessage(_) => (false, conv.clear_streams())
     RuntimeUpdate(content) => {
       let update = @transcript.parse_runtime_update(content)
@@ -1608,6 +1735,11 @@ fn update(
     (@cmd.none, model)
   }
   let (model, panel_cmd) = sync_file_panel(dispatch, model)
+  // File completion consumes the panel's shared index, so restart it only
+  // after the panel has dropped the previous root's snapshot.
+  let (file_completion_restart_cmd, model) = model.restart_file_completion_after_root_change(
+    dispatch, previous,
+  )
   // The launcher menu belongs to one dock owner. Conversation changes are
   // already explicit root transitions, so close it here instead of observing a
   // rendered owner marker through the DOM.
@@ -1634,7 +1766,7 @@ fn update(
   (
     @cmd.batch([
       cmd, quick_open_cmd, quick_open_restart_cmd, symbol_restart_cmd, panel_visibility_cmd,
-      panel_cmd, terminal_cmd, browser_cmd,
+      panel_cmd, file_completion_restart_cmd, terminal_cmd, browser_cmd,
     ]),
     model,
   )
@@ -1764,26 +1896,98 @@ fn update_msg(
         (clear_legacy_engine_settings(), model)
       }
     TaskChanged(value) => {
+      if model.active().is_archived_read_only() {
+        return (@cmd.none, model)
+      }
       let owner : @interop.ConversationKey = {
         channel: model.focused,
         session: model.active().session_id,
       }
+      let root = model.conversation_root(model.active())
+      // A root change invalidates paths even when the owner and query text are
+      // unchanged. Drop that cache before rendering the menu so the delayed
+      // request can enter its loading state instead of exposing stale rows.
+      let symbol_cache = if model.symbol_cache.root == root {
+        model.symbol_cache
+      } else {
+        empty_symbol_cache()
+      }
+      let completion_debounce = model.completion_debounce.advanced()
+      let (files, files_loading) = model.completion_files(value)
+      let command = match
+        @composer.Trigger::parse(value, inline_markers="$#@") {
+        Some(trigger) if trigger.marker() == "#" &&
+          (
+            model.symbol_cache.owner != Some(owner) ||
+            model.symbol_cache.root != root ||
+            model.symbol_cache.query != trigger.query()
+          ) =>
+          completion_debounce.delayed(generation => {
+            dispatch(CompletionDue(owner~, query=trigger.query(), generation~))
+          })
+        Some(trigger) if trigger.marker() == "@" &&
+          model.file_panel.index is @fileeditor.IndexReady(truncated=true, ..) &&
+          root is Some(root) =>
+          completion_debounce.delayed(generation => {
+            dispatch(
+              FileCompletionDue(
+                owner~,
+                root~,
+                query=trigger.query(),
+                generation~,
+              ),
+            )
+          })
+        Some(trigger) if trigger.marker() == "@" &&
+          root is Some(_) &&
+          (
+            model.file_panel.index is @fileeditor.IndexEmpty ||
+            model.file_panel.index is @fileeditor.IndexFailed
+          ) => dispatch(FileEditor(@fileeditor.EnsureFileIndex))
+        _ => @cmd.none
+      }
       (
-        symbol_fetch_cmd(dispatch, model, value, owner),
+        command,
         {
           ..model.replace_conversation({ ..model.active(), task: value }),
+          symbol_cache,
+          completion_debounce,
           completion: compute_completion(
             value,
             model.installed_skills,
-            model.symbol_cache,
+            symbol_cache,
             owner,
+            files~,
+            files_loading~,
           ),
         },
       )
     }
+    CompletionDue(owner~, query~, generation~) =>
+      model.begin_completion_symbol_request(dispatch, owner, query, generation)
+    FileCompletionDue(owner~, root~, query~, generation~) =>
+      model.begin_file_completion_request(
+        dispatch, owner, root, query, generation,
+      )
+    FileCompletionLoaded(owner~, root~, query~, generation~, files~) =>
+      model.apply_file_completion_reply(
+        owner,
+        root,
+        query,
+        generation,
+        Some(files),
+      )
+    FileCompletionFailed(owner~, root~, query~, generation~) =>
+      model.apply_file_completion_reply(owner, root, query, generation, None)
     CompletionMove(delta) =>
       if model.completion is Some(menu) {
-        (@cmd.none, { ..model, completion: Some(menu.shifted(delta)) })
+        (
+          @cmd.none,
+          {
+            ..model,
+            completion: Some({ ..menu, menu: menu.menu.shifted(delta) }),
+          },
+        )
       } else {
         (@cmd.none, model)
       }
@@ -1993,23 +2197,23 @@ fn update_msg(
       (cmd, { ..model, file_panel: panel })
     }
     CompletionAccept =>
-      if model.completion is Some(menu) && menu.current() is Some(item) {
+      if model.completion is Some(menu) && menu.menu.current() is Some(item) {
         accept_completion(dispatch, model, menu, item)
       } else {
         (@cmd.none, { ..model, completion: None })
       }
     CompletionPick(index) =>
-      if model.completion is Some(menu) && menu.items.get(index) is Some(item) {
+      if model.completion is Some(menu) && menu.menu.get(index) is Some(item) {
         accept_completion(dispatch, model, menu, item)
       } else {
         (@cmd.none, { ..model, completion: None })
       }
-    SymbolsLoaded(owner~, root~, query~, items~) =>
-      apply_symbol_reply(model, owner, root, query, items)
+    SymbolsLoaded(owner~, root~, query~, generation~, items~) =>
+      apply_symbol_reply(model, owner, root, query, generation, items)
     // A failed search reads as "no symbols": cache an empty result for the
     // query so the menu settles on "No symbols" rather than spinning.
-    SymbolsFailed(owner~, root~, query~) =>
-      apply_symbol_reply(model, owner, root, query, [])
+    SymbolsFailed(owner~, root~, query~, generation~) =>
+      apply_symbol_reply(model, owner, root, query, generation, [])
     QuickOpenOpen(mode) => open_quick_open(dispatch, model, mode)
     QuickOpenValueChanged(value) =>
       change_quick_open_value(dispatch, model, value)
@@ -2045,14 +2249,16 @@ fn update_msg(
     QuickOpenSelect(index) => select_quick_open_row(model, index)
     QuickOpenPick(index) => pick_quick_open_row(dispatch, model, index)
     QuickOpenDismiss => dismiss_quick_open(dispatch, model)
-    ToggleModel => {
-      // The chip switches the conversation on screen. The tier is pinned to
+    EngineModelChanged(value) => {
+      // The selector changes the conversation on screen. The tier is pinned to
       // that conversation right away — a chat can be given a tier and left
       // unsent for days — and becomes what the next new chat starts from.
       // (Starting a run pins it too; see `Started`.) A turn already in flight
       // keeps the model it was started with; this takes effect on the next.
+      guard EngineModel::parse(value) is Some(engine_model) else {
+        return (@cmd.none, model)
+      }
       let conv = model.active()
-      let engine_model = conv.engine_model.toggled()
       let next = model
         .replace_conversation({ ..conv, engine_model, })
         .remember_model(conv.device, conv.session_id, engine_model)
@@ -2397,6 +2603,35 @@ fn update_msg(
       (@cmd.none, { ..model, chats_collapsed: !model.chats_collapsed })
     ToggleProjectsSection =>
       (@cmd.none, { ..model, projects_collapsed: !model.projects_collapsed })
+    ToggleProjectSection(channel, project) => {
+      guard @resource.belongs_to(project, channel) else {
+        return (@cmd.none, model)
+      }
+      let collapsed_projects = if model.project_collapsed(channel, project) {
+        model.collapsed_projects.filter(entry => {
+          !(entry.0 == channel && entry.1 == project)
+        })
+      } else {
+        [..model.collapsed_projects, (channel, project)]
+      }
+      (@cmd.none, { ..model, collapsed_projects, project_menu: None })
+    }
+    ShowMoreProjectChats(channel, project) => {
+      guard @resource.belongs_to(project, channel) &&
+        !model.project_chats_expanded(channel, project) else {
+        return (@cmd.none, model)
+      }
+      (
+        @cmd.none,
+        {
+          ..model,
+          expanded_project_chats: [
+            ..model.expanded_project_chats,
+            (channel, project),
+          ],
+        },
+      )
+    }
     ToggleSubruns(channel, session_id) => {
       let expanded = if model.subruns_expanded(channel, session_id) {
         model.expanded_subruns.filter(entry => {
@@ -2517,6 +2752,9 @@ fn update_msg(
     }
     Send => {
       let conv = model.active()
+      if conv.is_archived_read_only() {
+        return (@cmd.none, model)
+      }
       let checkout = model.checkout_placement(conv)
       // The outgoing prompt is the typed text with the chips folded in as the
       // `<user_mentions>` envelope. Typed text is required — chips alone are
@@ -2673,6 +2911,13 @@ fn update_msg(
         return (@cmd.none, model)
       }
       let (focus_cmd, model) = focus_channel(dispatch, model, channel)
+      let collapsed_projects = match workspace {
+        Some(project) =>
+          model.collapsed_projects.filter(entry => {
+            !(entry.0 == channel && entry.1 == project)
+          })
+        None => model.collapsed_projects
+      }
       (
         @cmd.batch([focus_cmd, rotate_session(dispatch, channel)]),
         {
@@ -2680,6 +2925,7 @@ fn update_msg(
           loading_conversation: None,
           chats_collapsed: model.chats_collapsed && workspace is Some(_),
           projects_collapsed: model.projects_collapsed && workspace is None,
+          collapsed_projects,
         },
       )
     }
@@ -2932,7 +3178,16 @@ fn update_msg(
         // itself leaves with the registry commit broadcast.
         (
           remove_project(dispatch, channel, path.path),
-          { ..model, project_menu: None },
+          {
+            ..model,
+            project_menu: None,
+            collapsed_projects: model.collapsed_projects.filter(entry => {
+              !(entry.0 == channel && entry.1 == path)
+            }),
+            expanded_project_chats: model.expanded_project_chats.filter(entry => {
+              !(entry.0 == channel && entry.1 == path)
+            }),
+          },
         )
       } else {
         (@cmd.none, model)
@@ -3009,6 +3264,40 @@ fn update_msg(
             row.worktree_mode,
             generation=request_generation,
             checkout_submodules~,
+          ),
+          workspace_settings_request_generation: request_generation,
+        }),
+      )
+    }
+    WorkspaceSubmoduleTimeoutChosen(channel, workspace, value) => {
+      guard model.device_state(channel) is Some(dev) &&
+        dev.workspace_settings_row(workspace) is Some(row) else {
+        return (@cmd.none, model)
+      }
+      let submodule_checkout_timeout_seconds = match value {
+        "5" => 5
+        "10" => 10
+        "30" => 30
+        "60" => 60
+        _ => return (@cmd.none, model)
+      }
+      // Patch only the timeout and keep both neighboring workspace choices.
+      // A fresh generation prevents an older read from undoing this select.
+      let request_generation = dev.workspace_settings_request_generation + 1
+      (
+        save_workspace_settings(
+          dispatch,
+          channel,
+          workspace,
+          submodule_checkout_timeout_seconds~,
+        ),
+        model.replace_device({
+          ..dev.with_workspace_settings(
+            workspace,
+            row.worktree_mode,
+            generation=request_generation,
+            checkout_submodules=row.checkout_submodules,
+            submodule_checkout_timeout_seconds~,
           ),
           workspace_settings_request_generation: request_generation,
         }),
@@ -3092,6 +3381,30 @@ fn update_msg(
         let (cmd, model) = open_session_on(dispatch, channel, model, session_id)
         (@cmd.batch([focus_cmd, cmd]), model)
       }
+    OpenArchivedSession(channel, session~, workspace~) => {
+      guard !session.is_empty() && model.device_state(channel) is Some(dev) else {
+        return (@cmd.none, model)
+      }
+      // The row may have been restored while its click was queued. Re-read
+      // the current archived index and use its placement rather than opening
+      // a stale archived target or trusting an obsolete workspace hint.
+      let mut found = false
+      let mut current_workspace = workspace
+      for item in dev.archived {
+        if item.id == session {
+          found = true
+          current_workspace = item.workspace
+        }
+      }
+      guard found && !(dev.archive_override(session) is Some(false)) else {
+        return (@cmd.none, model)
+      }
+      let (focus_cmd, model) = focus_channel(dispatch, model, channel)
+      let (cmd, model) = model.open_archived_session_on(
+        dispatch, channel, session, current_workspace,
+      )
+      (@cmd.batch([focus_cmd, cmd]), model)
+    }
     ColorSchemeChanged(dark) => {
       let model = { ..model, system_dark: dark }
       match model.theme {
@@ -3305,6 +3618,9 @@ fn update_msg(
     }
     OpenGoalEditor => {
       let conv = model.active()
+      if conv.is_archived_read_only() {
+        return (@cmd.none, model)
+      }
       // Opening goal mode touches only this conversation, so an unsaved edit
       // waiting on another one is untouched — the reason the draft lives here
       // rather than in a single model-wide slot.
@@ -3326,6 +3642,9 @@ fn update_msg(
     }
     GoalDraftEdited(draft) => {
       let conv = model.active()
+      if conv.is_archived_read_only() {
+        return (@cmd.none, model)
+      }
       if conv.goal_edit is Some(_) {
         (
           @cmd.none,
@@ -3337,6 +3656,9 @@ fn update_msg(
     }
     SubmitGoal => {
       let conv = model.active()
+      if conv.is_archived_read_only() {
+        return (@cmd.none, model)
+      }
       guard conv.goal_edit is Some(edit) else { return (@cmd.none, model) }
       let text = edit.draft.trim().to_owned()
       // A blank draft has nothing to set (the button is disabled; this also
@@ -3369,6 +3691,9 @@ fn update_msg(
       // The ✕ belongs to the conversation on screen, and so does the edit it
       // closes — neither can reach a neighbour's.
       let conv = model.active()
+      if conv.is_archived_read_only() {
+        return (@cmd.none, model)
+      }
       let (model, command) = model.allocate_submission_id()
       (
         send_goal(dispatch, model, conv, command, None),
@@ -3396,7 +3721,18 @@ fn update_msg(
         file_ctx(model),
       )
       let next = { ..model, file_panel: panel }
-      (cmd, next)
+      let next = match msg {
+        @fileeditor.EnsureFileIndex
+        | @fileeditor.FilesIndexed(..)
+        | @fileeditor.FileIndexFailed(..) => next.refresh_file_completion()
+        _ => next
+      }
+      let completion_cmd = match msg {
+        @fileeditor.FilesIndexed(..) | @fileeditor.FileIndexFailed(..) =>
+          next.file_completion_query_after_index(dispatch)
+        _ => @cmd.none
+      }
+      (@cmd.batch([cmd, completion_cmd]), next)
     }
     Dock(msg) => {
       // The strip machine is pure; the cross-package effects of the
@@ -3752,6 +4088,70 @@ fn update_msg(
         (open_external_link(dispatch, url), model)
       }
     FromDevice(channel, msg) => update_device_msg(dispatch, channel, msg, model)
+  }
+}
+
+///|
+/// Settle one definitively refused initial prompt. Worktree setup failures
+/// happen before an agent exists, so they restore the same draft and placement
+/// state but report through the transient notification stack instead of an
+/// agent-style transcript notice.
+fn Model::reject_start(
+  self : Model,
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  session : String,
+  submission_id : String,
+  message : String,
+  report_in_transcript : Bool,
+) -> (@cmd.Cmd, Model) {
+  guard self.find_conversation(channel, session) is Some(conv) else {
+    return (@cmd.none, self)
+  }
+  let (rejected, removed) = conv.reject_submission(
+    submission_id,
+    InitialPrompt,
+    None,
+    message,
+    report_in_transcript~,
+  )
+  guard removed else { return (@cmd.none, self) }
+  let next = if conv.run is Starting(submission_id=current) &&
+    current == submission_id {
+    { ..rejected.clear_streams(), run: NoRun(ended=Some(RunFailed)) }
+  } else {
+    rejected
+  }
+  let updated = self.replace_conversation(next)
+  let (notice, updated) = if report_in_transcript {
+    (@cmd.none, updated)
+  } else {
+    updated.notify_error(dispatch, message)
+  }
+  if conv.workspace.project() is Some(workspace) &&
+    updated.device_state(channel) is Some(dev) {
+    // A checkout deleted outside the app cannot publish a registry
+    // notification. Refresh placement after every rejected workspace start;
+    // a newly missing row then exposes Repair/Archive immediately.
+    let request_generation = dev.worktrees_request_generation + 1
+    (
+      @cmd.batch([
+        notice,
+        fetch_worktrees(
+          dispatch,
+          channel,
+          workspace,
+          dev.connection_generation,
+          request_generation,
+        ),
+      ]),
+      updated.replace_device({
+        ..dev,
+        worktrees_request_generation: request_generation,
+      }),
+    )
+  } else {
+    (notice, updated)
   }
 }
 
@@ -4235,6 +4635,46 @@ fn update_device_msg(
         conversations,
       }
       let commands : Array[@cmd.Cmd] = []
+      // A client can miss session.changed while disconnected. A live row from
+      // this connection is then the first proof that a cached read-only record
+      // was restored elsewhere. Reclassify it before the archived-list reply:
+      // the override admits new commits immediately, and the new transcript
+      // generation fences the archived request started by BridgeReady.
+      for conv in next.conversations {
+        if conv.device == channel &&
+          conv.is_archived_read_only() &&
+          items.iter().any(item => item.id == conv.session_id) {
+          let foreground = channel == next.focused &&
+            next.active_session == conv.session_id
+          next = next.with_archive_override(channel, conv.session_id, false)
+          let (updated, generation) = next.begin_transcript_reload({
+            ..conv,
+            record: LiveRecord,
+            sync: Synced,
+          })
+          next = if foreground {
+            {
+              ..updated,
+              loading_conversation: Some({ channel, session: conv.session_id }),
+              completion: None,
+            }
+          } else {
+            updated
+          }
+          if generation is Some(generation) {
+            commands.push(
+              session_snapshot_command(
+                dispatch,
+                channel,
+                next,
+                conv.session_id,
+                generation,
+                foreground,
+              ),
+            )
+          }
+        }
+      }
       // A start or a goal may have been accepted just before the connection
       // vanished, while the first BridgeReady load raced persistence and
       // returned empty. The session list is later durable proof that a record
@@ -4346,6 +4786,7 @@ fn update_device_msg(
       workspace~,
       worktree_mode~,
       checkout_submodules~,
+      submodule_checkout_timeout_seconds~,
       connection_generation~,
       request_generation~
     ) => {
@@ -4368,11 +4809,17 @@ fn update_device_msg(
             worktree_mode,
             generation=request_generation,
             checkout_submodules~,
+            submodule_checkout_timeout_seconds~,
           ),
         ),
       )
     }
-    WorkspaceSettingsChanged(workspace~, worktree_mode~, checkout_submodules~) => {
+    WorkspaceSettingsChanged(
+      workspace~,
+      worktree_mode~,
+      checkout_submodules~,
+      submodule_checkout_timeout_seconds~
+    ) => {
       // A broadcast can race the detach commit the same way a reply can
       // (the hub orders them per client, so an attach is always processed
       // before settings broadcasts that follow it).
@@ -4390,6 +4837,7 @@ fn update_device_msg(
             worktree_mode,
             generation=workspace_settings_request_generation,
             checkout_submodules~,
+            submodule_checkout_timeout_seconds~,
           ),
           workspace_settings_request_generation,
         }),
@@ -4599,7 +5047,10 @@ fn update_device_msg(
       // The active conversation lives on the focused channel; another
       // device's archived list must not displace it even when a session id
       // collides across devices.
-      if channel == next.focused && archived_now(next.active_session) {
+      if channel == next.focused &&
+        archived_now(next.active_session) &&
+        next.find_conversation(channel, next.active_session) is Some(active) &&
+        !active.is_archived_read_only() {
         let mut workspace = next.session_project(channel, next.active_session)
         for item in items {
           if item.id == next.active_session {
@@ -4615,7 +5066,9 @@ fn update_device_msg(
         )
       }
       let conversations = next.conversations.filter(conv => {
-        conv.device != channel || !archived_now(conv.session_id)
+        conv.device != channel ||
+        !archived_now(conv.session_id) ||
+        conv.is_archived_read_only()
       })
       guard next.device_state(channel) is Some(ndev) else {
         return (@cmd.none, { ..next, conversations, })
@@ -4651,8 +5104,7 @@ fn update_device_msg(
       )
       (@cmd.batch([refresh, archived, toast]), model)
     }
-    WorktreeFailed(message) =>
-      model.notify_error(dispatch, "Worktree error: \{message}")
+    WorktreeFailed(message) => model.notify_error(dispatch, message)
     SessionsFailed(message) =>
       model.notify_error(dispatch, "Session list unavailable: \{message}")
     // Another client archived or unarchived a conversation. Both sidebar
@@ -4678,12 +5130,45 @@ fn update_device_msg(
           !sessions.iter().any(current => current.id == session) {
           sessions.push(item)
         }
-        return (
-          commands,
-          model
+        let next = model
           .replace_device({ ..dev, sessions, archived })
-          .with_archive_override(channel, session, false),
-        )
+          .with_archive_override(channel, session, false)
+        // Fence an archived read that was already in flight, then re-read the
+        // now-live record. The transcript stays visible while this new
+        // generation settles; only the record source and composer capability
+        // change immediately.
+        if next.find_conversation(channel, session) is Some(conv) &&
+          conv.is_archived_read_only() {
+          let (next, generation) = next.begin_transcript_reload({
+            ..conv,
+            record: LiveRecord,
+            sync: Synced,
+          })
+          if generation is Some(generation) {
+            let foreground = channel == next.focused &&
+              next.active_session == session
+            let next = if foreground {
+              {
+                ..next,
+                loading_conversation: Some({ channel, session }),
+                completion: None,
+              }
+            } else {
+              next
+            }
+            return (
+              @cmd.batch([
+                commands,
+                session_snapshot_command(
+                  dispatch, channel, next, session, generation, foreground,
+                ),
+              ]),
+              next,
+            )
+          }
+          return (commands, next)
+        }
+        return (commands, next)
       }
       if change != "archived" {
         return (commands, model)
@@ -4694,7 +5179,9 @@ fn update_device_msg(
       let workspace = model.session_project(channel, session)
       let sessions = dev.sessions.filter(item => item.id != session)
       let conversations = model.conversations.filter(conv => {
-        conv.device != channel || conv.session_id != session
+        conv.device != channel ||
+        conv.session_id != session ||
+        conv.is_archived_read_only()
       })
       let archived = dev.archived.copy()
       if !archived.iter().any(item => item.id == session) {
@@ -4727,7 +5214,9 @@ fn update_device_msg(
       }
       if channel == model.focused &&
         model.active_session == session &&
-        fresh_session is Some(fresh) {
+        fresh_session is Some(fresh) &&
+        model.find_conversation(channel, session) is Some(active) &&
+        !active.is_archived_read_only() {
         (
           commands,
           replace_archived_active(next, channel, session, fresh, workspace),
@@ -5745,53 +6234,13 @@ fn update_device_msg(
         (@cmd.none, model)
       }
     StartRejected(session~, submission_id~, message~) =>
-      if model.find_conversation(channel, session) is Some(conv) {
-        let (rejected, removed) = conv.reject_submission(
-          submission_id,
-          InitialPrompt,
-          None,
-          message,
-        )
-        if !removed {
-          (@cmd.none, model)
-        } else {
-          let next = if conv.run is Starting(submission_id=current) &&
-            current == submission_id {
-            { ..rejected.clear_streams(), run: NoRun(ended=Some(RunFailed)) }
-          } else {
-            rejected
-          }
-          let updated = model.replace_conversation(next)
-          if conv.workspace.project() is Some(workspace) &&
-            updated.device_state(channel) is Some(dev) {
-            // A checkout deleted outside the app cannot publish a registry
-            // notification. Any rejected workspace start is a cheap, reliable
-            // point to refresh placement; a newly `present: false` row then
-            // replaces the generic refusal with Repair/Archive immediately.
-            let request_generation = dev.worktrees_request_generation + 1
-            (
-              @cmd.batch([
-                @cmd.none,
-                fetch_worktrees(
-                  dispatch,
-                  channel,
-                  workspace,
-                  dev.connection_generation,
-                  request_generation,
-                ),
-              ]),
-              updated.replace_device({
-                ..dev,
-                worktrees_request_generation: request_generation,
-              }),
-            )
-          } else {
-            (@cmd.none, updated)
-          }
-        }
-      } else {
-        (@cmd.none, model)
-      }
+      model.reject_start(
+        dispatch, channel, session, submission_id, message, true,
+      )
+    WorktreeSetupFailed(session~, submission_id~, message~) =>
+      model.reject_start(
+        dispatch, channel, session, submission_id, message, false,
+      )
     Error(run_id~, message~, diagnostics~, exit_code~) => {
       // Agent-side semantic errors are lifecycle-only here; their durable
       // status is classified by the subsequent Finished event. Process
@@ -6369,6 +6818,52 @@ test "a conversation's sub-run twisty toggles only its own row" {
 }
 
 ///|
+test "project disclosure and chat preview state are scoped to one project" {
+  let dispatch = test_dispatch()
+  let project = @interop.ChannelId::Local.test_resource("/work/alpha")
+  let neighbour = @interop.ChannelId::Local.test_resource("/work/beta")
+  let model = test_model()
+  assert_false(model.project_collapsed(Local, project))
+  assert_false(model.project_chats_expanded(Local, project))
+  let (_, collapsed) = update(
+    dispatch,
+    ToggleProjectSection(Local, project),
+    model,
+  )
+  assert_true(collapsed.project_collapsed(Local, project))
+  assert_false(collapsed.project_collapsed(Local, neighbour))
+  assert_false(collapsed.project_collapsed(Remote("dev"), project))
+  let (_, expanded) = update(
+    dispatch,
+    ShowMoreProjectChats(Local, project),
+    collapsed,
+  )
+  assert_true(expanded.project_chats_expanded(Local, project))
+  assert_false(expanded.project_chats_expanded(Local, neighbour))
+  let (_, reopened) = update(
+    dispatch,
+    ToggleProjectSection(Local, project),
+    expanded,
+  )
+  assert_false(reopened.project_collapsed(Local, project))
+  assert_true(reopened.project_chats_expanded(Local, project))
+}
+
+///|
+test "new project chat unfolds its project and the Projects section" {
+  let dispatch = test_dispatch()
+  let project = @interop.ChannelId::Local.test_resource("/work/alpha")
+  let model = {
+    ..test_model(),
+    projects_collapsed: true,
+    collapsed_projects: [(Local, project)],
+  }
+  let (_, opened) = update(dispatch, NewChatIn(Local, Some(project)), model)
+  assert_false(opened.projects_collapsed)
+  assert_false(opened.project_collapsed(Local, project))
+}
+
+///|
 test "viewport resize flips the narrow flag and resets the sidebar" {
   let dispatch = test_dispatch()
   let (_, narrow) = update(dispatch, ViewportResized(width=390), test_model())
@@ -6672,6 +7167,29 @@ test "assistant deltas accumulate into the streaming response" {
 }
 
 ///|
+test "reasoning deltas accumulate beside the streaming response" {
+  let dispatch = test_dispatch()
+  let (_, first) = update_dev(
+    dispatch,
+    Engine(Some("r7"), ReasoningDelta("Let me"), session=None),
+    running_model(),
+  )
+  let (_, thinking) = update_dev(
+    dispatch,
+    Engine(Some("r7"), ReasoningDelta(" think"), session=None),
+    first,
+  )
+  let (_, answering) = update_dev(
+    dispatch,
+    Engine(Some("r7"), AssistantDelta("Answer"), session=None),
+    thinking,
+  )
+  inspect(answering.active().streaming_reasoning, content="Let me think")
+  inspect(answering.active().streaming_response, content="Answer")
+  inspect(answering.active().messages.length(), content="0")
+}
+
+///|
 test "update is pure: replaying a delta on the same model is idempotent" {
   let dispatch = test_dispatch()
   let model = running_model().replace_conversation({
@@ -6706,12 +7224,16 @@ test "deltas from an unknown run are dropped" {
 ///|
 test "reasoning message waits for its durable commit" {
   let dispatch = test_dispatch()
-  let model = running_model()
+  let model = running_model().replace_conversation({
+    ..running_conversation(),
+    streaming_reasoning: "partial thought",
+  })
   let (_, next) = update_dev(
     dispatch,
     Engine(Some("r7"), ReasoningMessage("full thought"), session=None),
     model,
   )
+  inspect(next.active().streaming_reasoning, content="")
   inspect(next.active().messages.length(), content="0")
   inspect(next.active().overlay.length(), content="0")
 }
@@ -6722,6 +7244,7 @@ test "assistant message only settles the transient response" {
   let model = running_model().replace_conversation({
     ..running_conversation(),
     streaming_response: "answ",
+    streaming_reasoning: "thought",
   })
   let (_, next) = update_dev(
     dispatch,
@@ -6729,6 +7252,7 @@ test "assistant message only settles the transient response" {
     model,
   )
   inspect(next.active().streaming_response, content="")
+  inspect(next.active().streaming_reasoning, content="")
   inspect(next.active().messages.length(), content="0")
   inspect(next.active().overlay.length(), content="0")
 }
@@ -6756,6 +7280,7 @@ test "a new agent step clears the live stream" {
   let model = running_model().replace_conversation({
     ..running_conversation(),
     streaming_response: "left",
+    streaming_reasoning: "over",
   })
   let (_, next) = update_dev(
     dispatch,
@@ -6763,6 +7288,7 @@ test "a new agent step clears the live stream" {
     model,
   )
   inspect(next.active().streaming_response, content="")
+  inspect(next.active().streaming_reasoning, content="")
 }
 
 ///|
@@ -6771,6 +7297,7 @@ test "finished run clears any leftover stream" {
   let model = running_model().replace_conversation({
     ..running_conversation(),
     streaming_response: "leftover",
+    streaming_reasoning: "unfinished thought",
   })
   let (_, next) = update_dev(
     dispatch,
@@ -6783,6 +7310,7 @@ test "finished run clears any leftover stream" {
     model,
   )
   inspect(next.active().streaming_response, content="")
+  inspect(next.active().streaming_reasoning, content="")
   inspect(next.active().is_running(), content="false")
 }
 
@@ -7072,6 +7600,7 @@ test "a symbol reply with the same session id but another channel is stale" {
       owner=remote_owner,
       root=remote_owner.channel.test_resource("/scratch/desktop-test"),
       query="parse",
+      generation=querying.completion_debounce.generation(),
       items~,
     ),
     querying,
@@ -7079,13 +7608,14 @@ test "a symbol reply with the same session id but another channel is stale" {
   guard stale.completion is Some(stale_menu) else {
     fail("symbol menu disappeared")
   }
-  assert_true(stale_menu.loading)
+  assert_true(stale_menu.menu.loading())
   let (_, settled) = update(
     dispatch,
     SymbolsLoaded(
       owner=local_owner,
       root=local_owner.channel.test_resource("/scratch/desktop-test"),
       query="parse",
+      generation=stale.completion_debounce.generation(),
       items~,
     ),
     stale,
@@ -7093,8 +7623,9 @@ test "a symbol reply with the same session id but another channel is stale" {
   guard settled.completion is Some(menu) else {
     fail("symbol menu disappeared")
   }
-  assert_false(menu.loading)
-  inspect(menu.items[0].label, content="parse_file")
+  assert_false(menu.menu.loading())
+  guard menu.menu.get(0) is Some(first) else { fail("row expected") }
+  inspect(first.label, content="parse_file")
 }
 
 ///|
@@ -10263,7 +10794,7 @@ test "update is pure: accepting an inline skill preserves prompt text" {
   guard drafted.completion is Some(menu) else {
     fail("the inline skill token should open completion")
   }
-  assert_eq(menu.task_without_token, "Please use ")
+  assert_eq(menu.menu.draft_without_token(), "Please use ")
   let (_, once) = update(dispatch, CompletionAccept, drafted)
   let (_, twice) = update(dispatch, CompletionAccept, drafted)
   // The same message and model always produce the same plain-data state.
@@ -10279,6 +10810,251 @@ test "update is pure: accepting an inline skill preserves prompt text" {
 }
 
 ///|
+test "file index completion refreshes and accepts a workspace file" {
+  let dispatch = test_dispatch()
+  let owner : @interop.ConversationKey = {
+    channel: Local,
+    session: "desktop-test",
+  }
+  let base = test_model()
+  let file_emit = dispatch.map(msg => FileEditor(msg))
+  let (synced, _) = @fileeditor.sync(file_emit, base.file_panel, file_ctx(base))
+  let (_, loading) = @fileeditor.update(
+    file_emit,
+    @fileeditor.EnsureFileIndex,
+    synced,
+    file_ctx(base),
+  )
+  let model = { ..base, file_panel: loading }
+  let (_, searching) = update(dispatch, TaskChanged("Inspect @main"), model)
+  guard searching.completion is Some(pending) else {
+    fail("the inline file token should open completion")
+  }
+  assert_true(pending.kind is Files)
+  assert_true(pending.menu.loading())
+  assert_eq(pending.menu.length(), 0)
+  let indexed = FileEditor(
+    @fileeditor.FilesIndexed(
+      owner~,
+      epoch=searching.file_panel.request_epoch,
+      files=[@pathx.Relative("src/main.mbt")],
+      truncated=false,
+    ),
+  )
+  let (_, dismissed) = update(dispatch, CompletionDismiss, searching)
+  let (_, stayed_closed) = update(dispatch, indexed, dismissed)
+  let (_, stayed_closed_again) = update(dispatch, indexed, dismissed)
+  assert_true(stayed_closed.completion is None)
+  assert_true(stayed_closed.completion == stayed_closed_again.completion)
+  let (_, loaded) = update(dispatch, indexed, searching)
+  guard loaded.completion is Some(menu) else {
+    fail("the file-index reply should rebuild completion")
+  }
+  assert_false(menu.menu.loading())
+  assert_eq(menu.menu.length(), 1)
+  guard menu.menu.get(0) is Some(file) else { fail("file row expected") }
+  assert_eq(file.label, "main.mbt")
+  assert_eq(file.path, Some("src/main.mbt"))
+  let (_, accepted) = update(dispatch, CompletionAccept, loaded)
+  assert_eq(accepted.active().task, "Inspect ")
+  assert_true(
+    accepted.active().mentions ==
+    [{ ref_: File(path="src/main.mbt"), range: None }],
+  )
+}
+
+///|
+test "truncated file completion settles from the complete Host cache" {
+  let dispatch = test_dispatch()
+  let owner : @interop.ConversationKey = {
+    channel: Local,
+    session: "desktop-test",
+  }
+  let base = test_model()
+  guard base.conversation_root(base.active()) is Some(root) else {
+    fail("test conversation should have a concrete root")
+  }
+  let file_emit = dispatch.map(msg => FileEditor(msg))
+  let (synced, _) = @fileeditor.sync(file_emit, base.file_panel, file_ctx(base))
+  let (_, loading) = @fileeditor.update(
+    file_emit,
+    @fileeditor.EnsureFileIndex,
+    synced,
+    file_ctx(base),
+  )
+  let (_, truncated) = @fileeditor.update(
+    file_emit,
+    @fileeditor.FilesIndexed(
+      owner~,
+      epoch=loading.request_epoch,
+      files=[@pathx.Relative("src/visible.mbt")],
+      truncated=true,
+    ),
+    loading,
+    file_ctx(base),
+  )
+  let indexed = { ..base, file_panel: truncated }
+  let (_, searching) = update(dispatch, TaskChanged("Inspect @hidden"), indexed)
+  guard searching.completion is Some(pending) else {
+    fail("truncated indexes should keep the file menu open")
+  }
+  assert_true(pending.kind is Files)
+  assert_true(pending.menu.loading())
+  assert_eq(pending.menu.length(), 0)
+  let (_, loaded) = update(
+    dispatch,
+    FileCompletionLoaded(
+      owner~,
+      root~,
+      query="hidden",
+      generation=searching.completion_debounce.generation(),
+      files=[@pathx.Relative("other/hidden.mbt")],
+    ),
+    searching,
+  )
+  guard loaded.completion is Some(menu) else {
+    fail("the complete cache result should settle file completion")
+  }
+  assert_false(menu.menu.loading())
+  guard menu.menu.get(0) is Some(file) else {
+    fail("a file outside the truncated snapshot should be selectable")
+  }
+  assert_eq(file.path, Some("other/hidden.mbt"))
+
+  let (_, local_searching) = update(
+    dispatch,
+    TaskChanged("Inspect @visible"),
+    indexed,
+  )
+  let (_, fallback) = update(
+    dispatch,
+    FileCompletionFailed(
+      owner~,
+      root~,
+      query="visible",
+      generation=local_searching.completion_debounce.generation(),
+    ),
+    local_searching,
+  )
+  guard fallback.completion is Some(local_menu) else {
+    fail("a failed cache query should retain bounded local matches")
+  }
+  assert_false(local_menu.menu.loading())
+  assert_eq(local_menu.menu.length(), 1)
+}
+
+///|
+test "file completion settles while its checkout root is unavailable" {
+  let dispatch = test_dispatch()
+  let base = test_model()
+  let rootless = base.replace_device({ ..base.dev(), bridge: Connecting })
+  assert_true(rootless.conversation_root(rootless.active()) is None)
+  let (_, searching) = update(
+    dispatch,
+    TaskChanged("Inspect @missing"),
+    rootless,
+  )
+  guard searching.completion is Some(menu) else {
+    fail("a rootless @ token should still expose a settled empty menu")
+  }
+  assert_true(menu.kind is Files)
+  assert_false(menu.menu.loading())
+  assert_eq(menu.menu.length(), 0)
+}
+
+///|
+test "file index failure settles an empty completion menu" {
+  let dispatch = test_dispatch()
+  let owner : @interop.ConversationKey = {
+    channel: Local,
+    session: "desktop-test",
+  }
+  let base = test_model()
+  let file_emit = dispatch.map(msg => FileEditor(msg))
+  let (synced, _) = @fileeditor.sync(file_emit, base.file_panel, file_ctx(base))
+  let (_, loading) = @fileeditor.update(
+    file_emit,
+    @fileeditor.EnsureFileIndex,
+    synced,
+    file_ctx(base),
+  )
+  let (_, searching) = update(dispatch, TaskChanged("Inspect @missing"), {
+    ..base,
+    file_panel: loading,
+  })
+  let failed_reply = FileEditor(
+    @fileeditor.FileIndexFailed(
+      owner~,
+      epoch=searching.file_panel.request_epoch,
+    ),
+  )
+  let (_, dismissed) = update(dispatch, CompletionDismiss, searching)
+  let (_, stayed_closed) = update(dispatch, failed_reply, dismissed)
+  let (_, stayed_closed_again) = update(dispatch, failed_reply, dismissed)
+  assert_true(stayed_closed.completion is None)
+  assert_true(stayed_closed.completion == stayed_closed_again.completion)
+  let (_, failed) = update(dispatch, failed_reply, searching)
+  guard failed.completion is Some(menu) else {
+    fail("a live @ token should retain its settled empty menu")
+  }
+  assert_true(menu.kind is Files)
+  assert_false(menu.menu.loading())
+  assert_eq(menu.menu.length(), 0)
+}
+
+///|
+test "a live file completion restarts when its checkout root changes" {
+  let dispatch = test_dispatch()
+  let owner : @interop.ConversationKey = {
+    channel: Local,
+    session: "desktop-test",
+  }
+  let base = test_model()
+  let file_emit = dispatch.map(msg => FileEditor(msg))
+  let (synced, _) = @fileeditor.sync(file_emit, base.file_panel, file_ctx(base))
+  let (_, loading) = @fileeditor.update(
+    file_emit,
+    @fileeditor.EnsureFileIndex,
+    synced,
+    file_ctx(base),
+  )
+  let (_, ready) = @fileeditor.update(
+    file_emit,
+    @fileeditor.FilesIndexed(
+      owner~,
+      epoch=loading.request_epoch,
+      files=[@pathx.Relative("src/old.mbt")],
+      truncated=false,
+    ),
+    loading,
+    file_ctx(base),
+  )
+  let (_, showing_old) = update(dispatch, TaskChanged("Inspect @old"), {
+    ..base,
+    file_panel: ready,
+  })
+  guard showing_old.completion is Some(old_menu) else {
+    fail("the old root should have a file completion menu")
+  }
+  assert_false(old_menu.menu.loading())
+  assert_eq(old_menu.menu.length(), 1)
+
+  let ready_msg = BridgeReady(
+    scratch_root=owner.channel.test_resource("/next-scratch"),
+  )
+  let (_, rerooted) = update_dev(dispatch, ready_msg, showing_old)
+  let (_, rerooted_again) = update_dev(dispatch, ready_msg, showing_old)
+  assert_true(rerooted.completion == rerooted_again.completion)
+  assert_true(rerooted.file_panel.index is @fileeditor.IndexEmpty)
+  guard rerooted.completion is Some(waiting) else {
+    fail("the new root should keep the file completion menu open")
+  }
+  assert_true(waiting.kind is Files)
+  assert_true(waiting.menu.loading())
+  assert_eq(waiting.menu.length(), 0)
+}
+
+///|
 test "an inline symbol reply rebuilds the live completion menu" {
   let dispatch = test_dispatch()
   let (_, searching) = update(
@@ -10290,8 +11066,8 @@ test "an inline symbol reply rebuilds the live completion menu" {
     fail("the inline symbol token should open completion")
   }
   assert_true(pending.kind is Symbols)
-  assert_true(pending.loading)
-  assert_eq(pending.task_without_token, "Inspect ")
+  assert_true(pending.menu.loading())
+  assert_eq(pending.menu.draft_without_token(), "Inspect ")
   let item : WorkspaceSymbol = {
     name: "parse_hover",
     kind: Some(12),
@@ -10305,6 +11081,7 @@ test "an inline symbol reply rebuilds the live completion menu" {
       owner={ channel: Local, session: "desktop-test" },
       root=@interop.ChannelId::Local.test_resource("/scratch/desktop-test"),
       query="parse",
+      generation=searching.completion_debounce.generation(),
       items=[item],
     ),
     searching,
@@ -10312,10 +11089,52 @@ test "an inline symbol reply rebuilds the live completion menu" {
   guard loaded.completion is Some(menu) else {
     fail("the matching inline symbol reply should rebuild completion")
   }
-  assert_false(menu.loading)
-  assert_eq(menu.items.length(), 1)
-  assert_eq(menu.items[0].label, "parse_hover")
-  assert_eq(menu.task_without_token, "Inspect ")
+  assert_false(menu.menu.loading())
+  assert_eq(menu.menu.length(), 1)
+  guard menu.menu.get(0) is Some(first) else { fail("row expected") }
+  assert_eq(first.label, "parse_hover")
+  assert_eq(menu.menu.draft_without_token(), "Inspect ")
+}
+
+///|
+test "typing the same symbol query after a root change drops the old cache" {
+  let dispatch = test_dispatch()
+  let owner : @interop.ConversationKey = {
+    channel: Local,
+    session: "desktop-test",
+  }
+  let old_root = owner.channel.test_resource("/scratch/desktop-test")
+  let cached = {
+    ..test_model(),
+    symbol_cache: {
+      owner: Some(owner),
+      root: Some(old_root),
+      query: "parse",
+      items: [
+        CompletionItem::symbol(
+          "parse_old_symbol",
+          container=None,
+          path="src/old.mbt",
+          range=@common.Range::Range(1, 1, 1, 1),
+        ),
+      ],
+    },
+  }
+  // No live `#` token means the root-change handler deliberately leaves the
+  // cache alone until the composer next needs it.
+  let (_, rerooted) = update_dev(
+    dispatch,
+    BridgeReady(scratch_root=owner.channel.test_resource("/next-scratch")),
+    cached,
+  )
+  assert_eq(rerooted.symbol_cache.root, Some(old_root))
+  let (_, querying) = update(dispatch, TaskChanged("#parse"), rerooted)
+  assert_true(querying.symbol_cache.owner is None)
+  guard querying.completion is Some(menu) else {
+    fail("the symbol menu should open for the new root")
+  }
+  assert_true(menu.menu.loading())
+  assert_eq(menu.menu.length(), 0)
 }
 
 ///|
@@ -10336,14 +11155,20 @@ test "a composer symbol query restarts and fences replies when its root changes"
   let (_, querying) = update(dispatch, TaskChanged("#parse"), test_model())
   let (_, loaded) = update(
     dispatch,
-    SymbolsLoaded(owner~, root=old_root, query="parse", items=[item]),
+    SymbolsLoaded(
+      owner~,
+      root=old_root,
+      query="parse",
+      generation=querying.completion_debounce.generation(),
+      items=[item],
+    ),
     querying,
   )
   guard loaded.completion is Some(ready) else {
     fail("the first root should settle the symbol menu")
   }
-  assert_false(ready.loading)
-  assert_eq(ready.items.length(), 1)
+  assert_false(ready.menu.loading())
+  assert_eq(ready.menu.length(), 1)
 
   let connected_root = owner.channel.test_resource("/next-scratch")
   let ready_msg = BridgeReady(scratch_root=connected_root)
@@ -10355,12 +11180,18 @@ test "a composer symbol query restarts and fences replies when its root changes"
   guard rerooted.completion is Some(waiting) else {
     fail("the changed root should keep the symbol menu open")
   }
-  assert_true(waiting.loading)
-  assert_true(waiting.items.is_empty())
+  assert_true(waiting.menu.loading())
+  assert_eq(waiting.menu.length(), 0)
 
   let (_, stale) = update(
     dispatch,
-    SymbolsLoaded(owner~, root=old_root, query="parse", items=[item]),
+    SymbolsLoaded(
+      owner~,
+      root=old_root,
+      query="parse",
+      generation=querying.completion_debounce.generation(),
+      items=[item],
+    ),
     rerooted,
   )
   assert_true(stale.symbol_cache.owner is None)
@@ -10369,13 +11200,19 @@ test "a composer symbol query restarts and fences replies when its root changes"
   let new_root = owner.channel.test_resource("/next-scratch/desktop-test")
   let (_, settled) = update(
     dispatch,
-    SymbolsLoaded(owner~, root=new_root, query="parse", items=[item]),
+    SymbolsLoaded(
+      owner~,
+      root=new_root,
+      query="parse",
+      generation=stale.completion_debounce.generation(),
+      items=[item],
+    ),
     stale,
   )
   guard settled.completion is Some(current) else {
     fail("the new root should settle the symbol menu")
   }
-  assert_false(current.loading)
+  assert_false(current.menu.loading())
   assert_eq(settled.symbol_cache.root, Some(new_root))
 }
 
@@ -12681,12 +13518,16 @@ test "loaded UI preferences parse their wire names" {
 }
 
 ///|
-test "the model chip switches one conversation, not the app" {
+test "the model selector switches one conversation, not the app" {
   let dispatch = test_dispatch()
   let model = test_model().replace_conversation(
     empty_conversation(@interop.ChannelId::Local, "other-chat"),
   )
-  let (_, low) = update(dispatch, ToggleModel, model)
+  let (_, low) = update(
+    dispatch,
+    EngineModelChanged("deepseek-v4-flash"),
+    model,
+  )
   assert_true(low.active().engine_model is Low)
   // The conversation next door keeps the tier it was already on.
   guard low.find_conversation(@interop.ChannelId::Local, "other-chat")
@@ -12700,19 +13541,22 @@ test "the model chip switches one conversation, not the app" {
     low.activate(@interop.ChannelId::Local, "fresh-chat").active().engine_model
     is Low,
   )
-  // Toggling back is the same one click.
-  let (_, high) = update(dispatch, ToggleModel, low)
+  let (_, high) = update(dispatch, EngineModelChanged("deepseek-v4-pro"), low)
   assert_true(high.active().engine_model is High)
 }
 
 ///|
 test "a start never overrides the tier picked for the next turn" {
   let dispatch = test_dispatch()
-  // The chip stays live while a turn spawns, so the user can flip it for the
+  // The selector stays live while a turn spawns, so the user can change it for the
   // next turn before this one's `Started` arrives. The start is older than
   // that choice and must not undo it — the same holds for a turn another
   // client began, which says nothing about what this user means to send.
-  let (_, queued) = update(dispatch, ToggleModel, test_model())
+  let (_, queued) = update(
+    dispatch,
+    EngineModelChanged("deepseek-v4-flash"),
+    test_model(),
+  )
   assert_true(queued.active().engine_model is Low)
   let (_, ran) = update_dev(
     dispatch,
@@ -12735,10 +13579,14 @@ test "reopening a conversation recovers its own tier, not the last pick" {
   // Set the chat on screen to Low, then open a different one and put it back
   // on High. The second pick moves the default new chats inherit — it must
   // not follow the first conversation home.
-  let (_, low) = update(dispatch, ToggleModel, test_model())
+  let (_, low) = update(
+    dispatch,
+    EngineModelChanged("deepseek-v4-flash"),
+    test_model(),
+  )
   let other = low.activate(@interop.ChannelId::Local, "other-chat")
   assert_true(other.active().engine_model is Low)
-  let (_, high) = update(dispatch, ToggleModel, other)
+  let (_, high) = update(dispatch, EngineModelChanged("deepseek-v4-pro"), other)
   assert_true(high.default_model is High)
   // Reopening drops the conversation and mints it again (nothing was sent,
   // so `activate` does not retain it) — exactly the path that used to hand
@@ -12770,7 +13618,11 @@ test "a run pins an inherited tier the user never clicked for" {
   )
   // Another chat moves the page default to Low...
   let elsewhere = ran.activate(@interop.ChannelId::Local, "other-chat")
-  let (_, moved) = update(dispatch, ToggleModel, elsewhere)
+  let (_, moved) = update(
+    dispatch,
+    EngineModelChanged("deepseek-v4-flash"),
+    elsewhere,
+  )
   assert_true(moved.default_model is Low)
   // ...and the first one still comes back on the tier it ran with.
   let reopened = moved.activate(@interop.ChannelId::Local, "desktop-test")
@@ -12780,7 +13632,11 @@ test "a run pins an inherited tier the user never clicked for" {
 ///|
 test "remembered tiers survive a round trip through storage" {
   let dispatch = test_dispatch()
-  let (_, chosen) = update(dispatch, ToggleModel, test_model())
+  let (_, chosen) = update(
+    dispatch,
+    EngineModelChanged("deepseek-v4-flash"),
+    test_model(),
+  )
   let restored = parse_conversation_models(
     encoded_conversation_models(chosen.conversation_models),
   )
@@ -13820,6 +14676,154 @@ fn archived_item(id : String) -> @transcript.SessionListItem {
 }
 
 ///|
+test "opening an archived row creates a read-only transcript owner" {
+  let dispatch = test_dispatch()
+  let item = archived_item("desktop-archived")
+  let model = test_model().with_dev(dev => { ..dev, archived: [item] })
+  let open = OpenArchivedSession(
+    @interop.ChannelId::Local,
+    session=item.id,
+    workspace=item.workspace,
+  )
+  let (_, loading) = update(dispatch, open, model)
+  inspect(loading.active_session, content="desktop-archived")
+  assert_true(loading.active().record is ArchivedRecord)
+  guard loading.active().sync is Reloading(generation=1, attempt=1, ..) else {
+    fail("the archived transcript did not begin its first read")
+  }
+  assert_true(
+    loading.loading_conversation
+    is Some({ channel: Local, session: "desktop-archived" }),
+  )
+  // Re-selecting the same row stays single-flight; it does not mint a second
+  // generation that could overtake the first archived snapshot.
+  let (_, selected_again) = update(dispatch, open, loading)
+  guard selected_again.active().sync is Reloading(generation=1, ..) else {
+    fail("re-selecting an archived row replaced the in-flight generation")
+  }
+}
+
+///|
+test "archived transcripts reject record-changing actions in update" {
+  let dispatch = test_dispatch()
+  let archived = {
+    ..test_conversation(),
+    record: ArchivedRecord,
+    task: "must stay unsent",
+    goal_edit: Some({ draft: "must stay unset" }),
+  }
+  let model = test_model().replace_conversation(archived)
+  let (_, sent) = update(dispatch, Send, model)
+  assert_true(sent.active().run is NoRun(ended=None))
+  inspect(sent.active().task, content="must stay unsent")
+  let (_, goal) = update(dispatch, SubmitGoal, model)
+  assert_true(goal.active().goal_pending is None)
+  assert_true(goal.active().goal_edit is Some(_))
+  let (_, compacted) = run_slash_command(dispatch, model, "compact")
+  assert_true(compacted.active().compaction is NotCompacting)
+  inspect(compacted.active().task, content="must stay unsent")
+}
+
+///|
+test "an archived snapshot stays open across archived-list reconciliation" {
+  let dispatch = test_dispatch()
+  let item = archived_item("desktop-archived")
+  let model = test_model().with_dev(dev => { ..dev, archived: [item] })
+  let (_, loading) = update(
+    dispatch,
+    OpenArchivedSession(
+      @interop.ChannelId::Local,
+      session=item.id,
+      workspace=item.workspace,
+    ),
+    model,
+  )
+  let (_, loaded) = update_dev(
+    dispatch,
+    SessionLoaded(
+      goal=None,
+      goal_markers=[],
+      session=item.id,
+      items=[
+        {
+          kind: Assistant(is_danger=false),
+          content: "archived answer",
+          ts: None,
+          sequence: Some(1),
+        },
+      ],
+      watermark=1,
+      event_boundaries=[],
+      generation=1,
+    ),
+    loading,
+  )
+  assert_true(loaded.active().record is ArchivedRecord)
+  inspect(loaded.active().messages[0].content, content="archived answer")
+  let (_, reconciled) = update(dispatch, archived_loaded([item]), loaded)
+  inspect(reconciled.active_session, content="desktop-archived")
+  assert_true(reconciled.active().record is ArchivedRecord)
+  inspect(reconciled.active().messages[0].content, content="archived answer")
+}
+
+///|
+test "unarchiving an open transcript fences its archived snapshot" {
+  let dispatch = test_dispatch()
+  let item = archived_item("desktop-archived")
+  let archived = {
+    ..empty_conversation(@interop.ChannelId::Local, item.id),
+    record: ArchivedRecord,
+    messages: [
+      {
+        kind: Assistant(is_danger=false),
+        content: "visible archived answer",
+        ts: None,
+        sequence: Some(1),
+      },
+    ],
+    watermark: 1,
+  }
+  let model = {
+    ..test_model()
+    .replace_conversation(archived)
+    .with_dev(dev => { ..dev, archived: [item] }),
+    active_session: item.id,
+    transcript_request_generation: 1,
+  }
+  let (_, restoring) = update_dev(
+    dispatch,
+    SessionsChanged(change="unarchived", session=item.id, fresh_session=None),
+    model,
+  )
+  assert_true(restoring.active().record is LiveRecord)
+  guard restoring.active().sync is Reloading(generation=2, ..) else {
+    fail("unarchive did not fence the archived read with a live generation")
+  }
+  let (_, stale) = update_dev(
+    dispatch,
+    SessionLoaded(
+      goal=None,
+      goal_markers=[],
+      session=item.id,
+      items=[
+        {
+          kind: Assistant(is_danger=false),
+          content: "late archived answer",
+          ts: None,
+          sequence: Some(1),
+        },
+      ],
+      watermark=1,
+      event_boundaries=[],
+      generation=1,
+    ),
+    restoring,
+  )
+  assert_true(stale.active().record is LiveRecord)
+  inspect(stale.active().messages[0].content, content="visible archived answer")
+}
+
+///|
 test "session.changed decoder preserves archive invalidation identity" {
   guard session_changed_msg({ change: "archived", session: "desktop-old" })
     is Some(
@@ -14071,9 +15075,26 @@ test "an unarchive notification wins over a stale archived-list reply" {
 test "BridgeReady replaces archive overrides with fresh-list truth" {
   let dispatch = test_dispatch()
   let item = archived_item("desktop-old")
-  let model = test_model()
+  let archived = {
+    ..empty_conversation(@interop.ChannelId::Local, item.id),
+    record: ArchivedRecord,
+    messages: [
+      {
+        kind: Assistant(is_danger=false),
+        content: "cached archived answer",
+        ts: None,
+        sequence: Some(1),
+      },
+    ],
+    watermark: 1,
+  }
+  let model = {
+    ..test_model()
     .with_archive_override(@interop.ChannelId::Local, "desktop-old", true)
     .with_dev(dev => { ..dev, archived: [item] })
+    .replace_conversation(archived),
+    active_session: item.id,
+  }
   let (_, ready) = update_dev(
     dispatch,
     @interop.ChannelId::Local.test_bridge_ready(),
@@ -14086,6 +15107,53 @@ test "BridgeReady replaces archive overrides with fresh-list truth" {
     SessionsLoaded([item], connection_generation=1, request_generation=1),
     ready,
   )
+  guard live.find_conversation(@interop.ChannelId::Local, item.id)
+    is Some(restored) else {
+    fail("the freshly live record disappeared during reconnect")
+  }
+  assert_true(restored.record is LiveRecord)
+  assert_true(live.dev().archive_override(item.id) is Some(false))
+  guard restored.sync is Reloading(generation=2, ..) else {
+    fail("fresh live-list truth did not fence the archived reload")
+  }
+  let (_, stale_archived) = update_dev(
+    dispatch,
+    SessionRefreshed(
+      goal=None,
+      goal_markers=[],
+      session=item.id,
+      items=[
+        {
+          kind: Assistant(is_danger=false),
+          content: "late archived answer",
+          ts: None,
+          sequence: Some(1),
+        },
+      ],
+      watermark=1,
+      event_boundaries=[],
+      generation=1,
+    ),
+    live,
+  )
+  assert_true(stale_archived.active().record is LiveRecord)
+  inspect(
+    stale_archived.active().messages[0].content,
+    content="cached archived answer",
+  )
+  let (_, live_again) = update_dev(
+    dispatch,
+    SessionsLoaded([item], connection_generation=1, request_generation=1),
+    ready,
+  )
+  guard live_again.find_conversation(@interop.ChannelId::Local, item.id)
+    is Some(restored_again) else {
+    fail("the repeated live-list update dropped the restored record")
+  }
+  assert_true(restored_again.record is LiveRecord)
+  guard restored_again.sync is Reloading(generation=2, ..) else {
+    fail("the reconnect transition was not idempotent")
+  }
   let (_, reconciled) = update_dev(
     dispatch,
     ArchivedLoaded(
@@ -14094,7 +15162,7 @@ test "BridgeReady replaces archive overrides with fresh-list truth" {
       request_generation=1,
       fresh_session="desktop-unused",
     ),
-    live,
+    stale_archived,
   )
   assert_true(
     reconciled.dev().sessions.iter().any(current => current.id == item.id),
@@ -15217,7 +16285,7 @@ test "chip jumps relativize legacy absolute paths against the roots" {
 }
 
 ///|
-test "RevealDirectory(\"\") opens the tree pane without a highlight" {
+test "RevealDirectory(\"\") opens the workspace breadcrumb picker" {
   let dispatch = test_dispatch()
   let model = test_model()
   let owner : @interop.ConversationKey = {
@@ -15239,14 +16307,14 @@ test "RevealDirectory(\"\") opens the tree pane without a highlight" {
     FileEditor(RevealDirectory(@pathx.Relative::root())),
     { ..model, dock, file_panel: panel, right_panel_open: true },
   )
-  // The active tab stays put — revealing the tree must not close the file.
+  // The active tab and docked explorer stay put while the picker opens.
   assert_true(@dock.active_file(next.dock) is Some(Relative("README.md")))
-  assert_true(next.file_panel.tree_open)
-  assert_true(next.file_panel.highlighted is None)
+  assert_false(next.file_panel.tree_open)
+  assert_true(next.file_panel.highlighted is Some(Relative("")))
 }
 
 ///|
-test "RevealDirectory expands an uncached ancestor and highlights the target" {
+test "RevealDirectory loads an uncached breadcrumb directory" {
   let dispatch = test_dispatch()
   let model = test_model()
   let panel = {
@@ -15258,17 +16326,17 @@ test "RevealDirectory expands an uncached ancestor and highlights the target" {
     FileEditor(RevealDirectory(Relative("src/foo"))),
     { ..model, file_panel: panel },
   )
-  assert_true(next.file_panel.expanded.contains(Relative("src")))
-  assert_true(next.file_panel.loading.contains(Relative("src")))
+  assert_true(next.file_panel.expanded.is_empty())
+  assert_true(next.file_panel.loading.contains(Relative("src/foo")))
   assert_true(next.file_panel.highlighted is Some(Relative("src/foo")))
 }
 
 ///|
-test "RevealDirectory on an already-cached ancestor needs no reload" {
+test "RevealDirectory on an already-cached directory needs no reload" {
   let dispatch = test_dispatch()
   let model = test_model()
   let children : Map[@pathx.Relative, Array[@fileeditor.FileEntry]] = Map([
-    (Relative("src"), []),
+    (Relative("src/foo"), []),
   ])
   let panel = {
     ..model.file_panel,
@@ -15280,8 +16348,9 @@ test "RevealDirectory on an already-cached ancestor needs no reload" {
     FileEditor(RevealDirectory(Relative("src/foo"))),
     { ..model, file_panel: panel },
   )
-  assert_true(next.file_panel.expanded.contains(Relative("src")))
-  assert_false(next.file_panel.loading.contains(Relative("src")))
+  assert_true(next.file_panel.expanded.is_empty())
+  assert_false(next.file_panel.loading.contains(Relative("src/foo")))
+  assert_true(next.file_panel.highlighted is Some(Relative("src/foo")))
 }
 
 ///|
@@ -16188,18 +17257,21 @@ test "reopening an active failed reload retries and preserves other local notice
     ]),
     overlay: [
       {
+        id: 1,
         kind: Assistant(is_danger=true),
         content: TranscriptRefreshFailedNotice,
         anchor: AfterMessages(1),
         reconciliation: Retained,
       },
       {
+        id: 2,
         kind: Assistant(is_danger=true),
         content: "local steer loss",
         anchor: AfterMessages(1),
         reconciliation: Retained,
       },
     ],
+    next_notice_id: 2,
   })
   let model = { ..model, transcript_request_generation: 1 }
   let (_, reopened) = update(
@@ -16487,12 +17559,14 @@ test "a durable commit never retires a same-class local notice" {
     ..test_conversation(),
     overlay: [
       {
+        id: 1,
         kind: Assistant(is_danger=true),
         content: "local-only failure",
         anchor: AfterMessages(0),
         reconciliation: Retained,
       },
     ],
+    next_notice_id: 1,
   })
   let (_, committed) = update_dev(
     dispatch,

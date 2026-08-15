@@ -38,6 +38,8 @@ pub async fn list_workspaces() -> @protocol.WorkspacesReply
 
 pub async fn list_worktrees(String) -> @protocol.WorktreesReply
 
+pub async fn load_archived_session(EngineManager, @protocol.LoadSessionPayload) -> @protocol.LoadSessionReply
+
 pub async fn load_session(EngineManager, @protocol.LoadSessionPayload) -> @protocol.LoadSessionReply
 
 pub fn new_engine_actor(String, runtime_dir? : @pathx.Path) -> EngineActor
@@ -70,7 +72,7 @@ pub async fn unarchive_session(EngineManager, String, (String) -> Unit) -> @prot
 
 pub async fn update_settings(EngineManager, SettingsPatch, legacy_migration? : Bool, on_committed? : (@protocol.SettingsStatusPayload) -> Unit) -> @protocol.SettingsStatusPayload
 
-pub async fn update_workspace_settings(String, (@protocol.WorkspaceSettingsPayload) -> Unit, worktree_mode? : Bool, checkout_submodules? : Bool) -> @protocol.WorkspaceSettingsPayload
+pub async fn update_workspace_settings(String, (@protocol.WorkspaceSettingsPayload) -> Unit, worktree_mode? : Bool, checkout_submodules? : Bool, submodule_checkout_timeout_seconds? : Int) -> @protocol.WorkspaceSettingsPayload
 
 pub fn workspace_session_root(@pathx.Absolute) -> @pathx.Absolute
 

@@ -1,0 +1,20 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitlang/editor/viewer/browser/diagram_viewport"
+
+import {
+  "moonbit-community/rabbita/dom",
+}
+
+// Values
+
+// Errors
+
+// Types and methods
+type DiagramViewports
+pub fn DiagramViewports::DiagramViewports(@dom.Element, () -> Unit) -> Self
+pub fn DiagramViewports::dispose(Self) -> Unit
+pub fn DiagramViewports::refresh(Self) -> Unit
+
+// Type aliases
+
+// Traits

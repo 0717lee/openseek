@@ -1,145 +1,210 @@
 /*
- * Theme variables for the embedded readonly editor.
+ * Theme bridge for the embedded readonly editor.
  *
  * The published moonbitlang/editor package contains the reusable viewer CSS
- * but deliberately excludes its reference shell. Keep this desktop-owned
- * bridge aligned with the editor source repository's
- * internal/shell/workbench/theme.css when updating the dependency.
+ * but deliberately excludes its reference shell, so the desktop owns this
+ * bridge. The viewer paints exclusively through the `--vscode-*` custom
+ * properties below (VS Code's `--vscode-<id>` convention with `.` replaced
+ * by `-`); binding them to the app design tokens (styles/tokens.css) makes
+ * the viewer follow the app palette — and its light/dark switch —
+ * automatically. Keep the variable list aligned with the editor source
+ * repository's internal/shell/workbench/theme.css when updating the
+ * dependency; shell-only variables the bundled viewer never reads (sideBar,
+ * titleBar, tree, list focus) are deliberately omitted.
  *
- * Color values are transcribed from VS Code's Dark Modern / Light Modern
- * theme definitions and color registry defaults (MIT licensed):
+ * Syntax highlighting is the exception: the app palette has no token colors,
+ * so the `--vscode-token-*` block (and the shadow/opacity leftovers beside
+ * it) keeps values transcribed from VS Code's Dark Modern / Light Modern
+ * themes (MIT licensed):
  *   - extensions/theme-defaults/themes/dark_modern.json, light_modern.json
- *   - extensions/theme-defaults/themes/dark_plus.json, light_plus.json
  *   - src/vs/platform/theme/common/colors/*.ts
- *
- * Variable names mirror VS Code's `--vscode-<id>` convention with `.`
- * replaced by `-`.
+ * Those are the only values that still need the [data-theme="light"] block;
+ * everything token-bound flips with the app theme on its own.
  */
 
 .editor-shell {
-  /* Dark Modern (default theme). */
-  --vscode-foreground: #cccccc;
-  --vscode-icon-foreground: #cccccc;
-  --vscode-focusBorder: #0078d4;
-  --vscode-widget-border: #313131;
-  --vscode-widget-shadow: rgb(0 0 0 / 36%);
-  --vscode-shadow-hover: rgb(0 0 0 / 36%);
-  --vscode-shadow-lg: 0 0 12px rgb(0 0 0 / 36%);
-  --vscode-cornerRadius-medium: 2px;
-  --vscode-cornerRadius-large: 4px;
-  --vscode-menu-background: #1f1f1f;
-  --vscode-menu-foreground: #cccccc;
-  --vscode-menu-selectionBackground: #0078d4;
-  --vscode-menu-selectionForeground: #ffffff;
-  --vscode-menu-separatorBackground: #cccccc33;
-  --vscode-menu-border: transparent;
+  /* Base text and chrome. */
+  --vscode-foreground: var(--color-text-primary);
+  --vscode-icon-foreground: var(--color-text-secondary);
+  --vscode-descriptionForeground: var(--color-text-secondary);
+  --vscode-focusBorder: var(--color-focus-ring);
+  --vscode-widget-border: var(--color-border);
+  /* Floating widgets and menu items round like the app's own controls. */
+  --vscode-cornerRadius-medium: var(--radius-sm);
+  --vscode-cornerRadius-large: var(--radius-md);
 
-  --vscode-editor-background: #1f1f1f;
-  --vscode-editor-foreground: #cccccc;
-  --vscode-editorLineNumber-foreground: #6e7681;
-  --vscode-editorLineNumber-activeForeground: #cccccc;
-  --vscode-editor-selectionBackground: #264f78;
-  --vscode-editor-hoverHighlightBackground: #264f7840;
-  --vscode-editor-rangeHighlightBackground: #ffffff0b;
+  /* The context menu mirrors the app menus (.workspace-menu,
+     .completion-menu): surface panel, hairline border, accent-soft
+     selection. */
+  --vscode-menu-background: var(--color-bg-surface);
+  --vscode-menu-foreground: var(--color-text-primary);
+  --vscode-menu-selectionBackground: var(--color-accent-soft);
+  --vscode-menu-selectionForeground: var(--color-accent-strong);
+  --vscode-menu-separatorBackground: var(--color-border);
+  --vscode-menu-border: var(--color-border);
+
+  /* The code surface. file_panel.css paints the surrounding editor panel
+     with --color-bg-surface; sharing it keeps the seam invisible. */
+  --vscode-editor-background: var(--color-bg-surface);
+  --vscode-editor-foreground: var(--color-code);
+  --vscode-editorLineNumber-foreground: var(--color-text-muted);
+  --vscode-editorLineNumber-activeForeground: var(--color-text-secondary);
+  --vscode-editorCursor-foreground: var(--color-text-primary);
+  --vscode-editor-selectionBackground: color-mix(
+    in srgb,
+    var(--color-accent) 22%,
+    transparent
+  );
+  --vscode-editor-hoverHighlightBackground: color-mix(
+    in srgb,
+    var(--color-accent) 12%,
+    transparent
+  );
+  /* The reveal flash (go-to line, peek result click) keeps VS Code's yellow
+     convention so it reads apart from the accent-tinted fold and hover
+     ranges. Dark derives from the app's gold warning token; the light block
+     keeps the transcribed lemon literal — a tint of the light ochre warning
+     turns tan and reads muddy on the paper surface. */
+  --vscode-editor-rangeHighlightBackground: color-mix(
+    in srgb,
+    var(--color-warning) 18%,
+    transparent
+  );
+  /* Symbol-navigation flash: VS Code's registry orange. editor.findMatch*
+     stay unset so the references peek keeps its designed fallback chain
+     (selected matches derive from the peek match color below). */
   --vscode-editor-symbolHighlightBackground: #ea5c0055;
   --vscode-editor-symbolHighlightBorder: transparent;
-  /* editor.foldBackground = transparent(editor.selectionBackground, 0.3),
-     editor.foldPlaceholderForeground = #808080,
-     editorGutter.foldingControlForeground = iconForeground
-     (foldingDecorations.ts registerColor calls). */
-  --vscode-editor-foldBackground: #264f784d;
-  --vscode-editor-foldPlaceholderForeground: #808080;
+  --vscode-editor-foldBackground: color-mix(
+    in srgb,
+    var(--color-accent) 12%,
+    transparent
+  );
+  --vscode-editor-foldPlaceholderForeground: var(--color-text-muted);
   --vscode-editorGutter-foldingControlForeground: var(
     --vscode-icon-foreground
   );
-  /* editorCursor.foreground / editor.lineHighlightBorder registry defaults
-     (editorColorRegistry.ts:16,22); Dark Modern does not override them.
-     editor.lineHighlightBackground stays null like VS Code's defaults, so the
-     current line renders as the border box, not a fill. */
-  --vscode-editorCursor-foreground: #aeafad;
-  --vscode-editor-lineHighlightBorder: #282828;
-  /* editorWhitespace.foreground registry default (editorColorRegistry.ts:28);
-     the Modern themes do not override it. */
-  --vscode-editorWhitespace-foreground: #e3e4e229;
-  --vscode-editorLink-activeForeground: #4e94ce;
-  --vscode-editorWarning-foreground: #cca700;
-  --vscode-editorError-foreground: #f14c4c;
-  --vscode-editorInfo-foreground: #59a4f9;
-  --vscode-editorHint-foreground: #eeeeeeb3;
-  --vscode-peekView-border: #59a4f9;
-  --vscode-peekViewTitle-background: #252526;
-  --vscode-peekViewTitleLabel-foreground: #ffffff;
-  --vscode-peekViewTitleDescription-foreground: #ccccccb3;
-  --vscode-peekViewResult-background: #252526;
-  --vscode-peekViewResult-lineForeground: #bbbbbb;
-  --vscode-peekViewResult-fileForeground: #ffffff;
-  --vscode-peekViewResult-selectionBackground: #3399ff33;
-  --vscode-peekViewResult-selectionForeground: #ffffff;
-  --vscode-peekViewEditor-background: #001f33;
-  --vscode-peekViewEditorGutter-background: #001f33;
+  /* editor.lineHighlightBackground stays unset like VS Code's defaults, so
+     the current line renders as the border box, not a fill. */
+  --vscode-editor-lineHighlightBorder: var(--color-border-subtle);
+  --vscode-editorWhitespace-foreground: color-mix(
+    in srgb,
+    var(--color-text-muted) 45%,
+    transparent
+  );
+  --vscode-editorLink-activeForeground: var(--color-accent-strong);
+  --vscode-editorWarning-foreground: var(--color-warning);
+  --vscode-editorError-foreground: var(--color-danger);
+  --vscode-editorInfo-foreground: var(--color-accent);
+  --vscode-editorHint-foreground: var(--color-text-muted);
+  /* editorError/Warning/Info/Hint.border are null in VS Code's normal
+     (non-HC) themes, so they stay unset here too — the visible squiggle is
+     the runtime inline-SVG background computed from the *-foreground tokens
+     above (viewer/common/markers/squiggly_theme.mbt), not this border rule.
+     The border-double/dotted CSS in markers.css is a faithful copy of the HC
+     fallback and is correctly inert (this viewer has no high-contrast
+     theme). */
+
+  /* References/definition peek. The tinted peek editor keeps VS Code's
+     intent through the app's accent-soft wash. */
+  --vscode-peekView-border: var(--color-accent);
+  --vscode-peekViewTitle-background: var(--color-bg-subtle);
+  --vscode-peekViewTitleLabel-foreground: var(--color-text-primary);
+  --vscode-peekViewTitleDescription-foreground: var(--color-text-secondary);
+  --vscode-peekViewResult-background: var(--color-bg-subtle);
+  --vscode-peekViewResult-lineForeground: var(--color-text-secondary);
+  --vscode-peekViewResult-fileForeground: var(--color-text-primary);
+  --vscode-peekViewResult-selectionBackground: var(--color-accent-soft);
+  --vscode-peekViewResult-selectionForeground: var(--color-text-primary);
+  /* Match highlights keep VS Code's vivid transcribed literals (registry
+     orange; the peek editor's light value comes from light_modern.json) —
+     see the reveal-flash note above for why warning tints don't work. */
+  --vscode-peekViewResult-matchHighlightBackground: #ea5c0055;
+  --vscode-peekViewEditor-background: var(--color-accent-soft);
+  --vscode-peekViewEditorGutter-background: var(--color-accent-soft);
   --vscode-peekViewEditor-matchHighlightBackground: #ff8f0099;
   --vscode-peekViewEditor-matchHighlightBorder: transparent;
 
-  /* editorError/Warning/Info/Hint.border are null in VS Code's normal (non-HC)
-     themes, so they stay unset here too — the visible squiggle is the runtime
-     inline-SVG background computed from the *-foreground tokens above
-     (viewer/common/markers/squiggly_theme.mbt), not this border rule. The
-     border-double/dotted CSS in markers.css is a faithful copy of the HC
-     fallback and is correctly inert (this viewer has no high-contrast theme). */
-  --vscode-editorUnnecessaryCode-opacity: 0.67;
+  /* Hover cards, peek widgets, and the agent-feedback dialogs share the app
+     popover recipe: surface panel with a hairline border. */
+  --vscode-editorHoverWidget-background: var(--color-bg-surface);
+  --vscode-editorHoverWidget-foreground: var(--color-text-primary);
+  --vscode-editorHoverWidget-border: var(--color-border);
+  --vscode-editorWidget-background: var(--color-bg-surface);
+  --vscode-editorWidget-foreground: var(--color-text-primary);
+  --vscode-editorWidget-border: var(--color-border);
 
-  --vscode-editorHoverWidget-background: #202020;
-  --vscode-editorHoverWidget-foreground: #cccccc;
-  --vscode-editorHoverWidget-border: #313131;
-  /* editorWidget/input/button: Dark Modern theme values; editorWidget.border
-     and .foreground are registry defaults (editorColors.ts:53-59 —
-     `transparent(foreground, 0.2)` and `foreground`). */
-  --vscode-editorWidget-background: #202020;
-  --vscode-editorWidget-foreground: #cccccc;
-  --vscode-editorWidget-border: #cccccc33;
-  --vscode-input-background: #313131;
-  --vscode-input-foreground: #cccccc;
-  --vscode-input-border: #3c3c3c;
-  --vscode-inputValidation-infoBorder: #007acc;
-  --vscode-button-background: #0078d4;
-  --vscode-button-foreground: #ffffff;
-  --vscode-button-hoverBackground: #026ec1;
-  --vscode-descriptionForeground: #9d9d9d;
-  /* editorGutter.commentRangeForeground / commentGlyphForeground registry
-     defaults (commentGlyphWidget.ts:18,23): `opaque(
-     listInactiveSelectionBackground, editorBackground)` and
-     `editorForeground`. */
-  --vscode-editorGutter-commentRangeForeground: #37373d;
-  --vscode-editorGutter-commentGlyphForeground: #cccccc;
-  /* editorGutter.added/modified/deletedBackground: Dark Modern overrides
-     the quickDiff.ts registry defaults (dark_modern.json:39-41). */
-  --vscode-editorGutter-addedBackground: #2ea043;
-  --vscode-editorGutter-modifiedBackground: #0078d4;
-  --vscode-editorGutter-deletedBackground: #f85149;
-  --vscode-toolbar-hoverBackground: #ffffff1a;
-  --vscode-textLink-foreground: #4e94ce;
-  --vscode-textLink-activeForeground: #4e94ce;
-  --vscode-textCodeBlock-background: #2d2d2d;
+  /* Forms inside viewer widgets mirror the app controls: bordered surface
+     inputs, accent-filled primary button, subtle-filled secondary. The
+     shared button border stays transparent so the accent fill reads like
+     button.primary. */
+  --vscode-input-background: var(--color-bg-surface);
+  --vscode-input-foreground: var(--color-text-primary);
+  --vscode-input-border: var(--color-border);
+  --vscode-input-placeholderForeground: var(--color-text-muted);
+  --vscode-inputValidation-infoBorder: var(--color-accent);
+  --vscode-button-background: var(--color-accent);
+  --vscode-button-foreground: var(--color-on-accent);
+  --vscode-button-hoverBackground: var(--color-accent-strong);
+  --vscode-button-border: transparent;
+  --vscode-button-secondaryBackground: var(--color-bg-subtle);
+  --vscode-button-secondaryForeground: var(--color-text-primary);
+  --vscode-button-secondaryHoverBackground: color-mix(
+    in srgb,
+    var(--color-text-primary) 12%,
+    transparent
+  );
 
-  --vscode-sideBar-background: #181818;
-  --vscode-sideBar-foreground: #cccccc;
-  --vscode-sideBar-border: #2b2b2b;
-  --vscode-sideBarTitle-foreground: #cccccc;
-  --vscode-sideBarSectionHeader-background: #181818;
-  --vscode-list-hoverBackground: #2a2d2e;
-  --vscode-list-activeSelectionBackground: #04395e;
-  --vscode-list-activeSelectionForeground: #ffffff;
-  --vscode-list-focusOutline: #0078d4;
-  --vscode-tree-indentGuidesStroke: #585858;
+  /* Gutter decorations: comment ranges/glyphs (agent feedback) and the
+     quick-diff change bars. */
+  --vscode-editorGutter-commentRangeForeground: var(--color-hover-subtle);
+  --vscode-editorGutter-commentGlyphForeground: var(--color-text-secondary);
+  --vscode-editorGutter-addedBackground: var(--color-success);
+  --vscode-editorGutter-modifiedBackground: var(--color-accent);
+  --vscode-editorGutter-deletedBackground: var(--color-danger);
 
-  --vscode-titleBar-activeBackground: #181818;
-  --vscode-titleBar-activeForeground: #cccccc;
-  --vscode-titleBar-border: #2b2b2b;
+  /* Toolbars, links, badges, lists. */
+  --vscode-toolbar-hoverBackground: var(--color-hover-subtle);
+  --vscode-toolbar-activeBackground: color-mix(
+    in srgb,
+    var(--color-text-primary) 14%,
+    transparent
+  );
+  --vscode-textLink-foreground: var(--color-accent);
+  --vscode-textLink-activeForeground: var(--color-accent-strong);
+  --vscode-textCodeBlock-background: var(--color-bg-subtle);
+  --vscode-badge-background: var(--color-accent-soft);
+  --vscode-badge-foreground: var(--color-accent-strong);
+  --vscode-list-hoverBackground: var(--color-hover-subtle);
+  --vscode-list-activeSelectionBackground: var(--color-accent-soft);
+  --vscode-list-activeSelectionForeground: var(--color-accent-strong);
 
-  --vscode-scrollbarSlider-background: #79797966;
-  --vscode-scrollbarSlider-hoverBackground: #646464b3;
-  --vscode-scrollbarSlider-activeBackground: #bfbfbf66;
+  /* Scrollbars derive from the muted text tone at increasing strengths. */
+  --vscode-scrollbarSlider-background: color-mix(
+    in srgb,
+    var(--color-text-muted) 45%,
+    transparent
+  );
+  --vscode-scrollbarSlider-hoverBackground: color-mix(
+    in srgb,
+    var(--color-text-muted) 65%,
+    transparent
+  );
+  --vscode-scrollbarSlider-activeBackground: color-mix(
+    in srgb,
+    var(--color-text-muted) 80%,
+    transparent
+  );
+
+  /* Per-theme leftovers (Dark Modern defaults; the shell's default theme is
+     dark). Shadows stay black-based rather than token-derived — a
+     text-colored shadow would glow in dark mode. shadow-lg follows the app
+     overlay shadow, which tokens.css already themes. */
+  --vscode-widget-shadow: rgb(0 0 0 / 36%);
+  --vscode-shadow-hover: rgb(0 0 0 / 36%);
+  --vscode-shadow-lg: var(--shadow-overlay);
   --vscode-scrollbar-shadow: rgb(0 0 0 / 50%);
+  --vscode-editorUnnecessaryCode-opacity: 0.67;
 
   --vscode-token-keyword: #569cd6;
   --vscode-token-variable: #9cdcfe;
@@ -153,7 +218,10 @@
   --vscode-token-regexp: #d16969;
   --vscode-token-invalid: #f44747;
 
-  /* VS Code editor defaults on macOS: 12px Menlo, 1.5x line height. */
+  /* VS Code editor defaults on macOS: 12px Menlo, 1.5x line height. The app
+     stylesheet loads after this one and rebinds the fonts to the app tokens
+     (tokens.css `.editor-shell` block); these serve any host that loads the
+     viewer without the app stylesheet. */
   --editor-font-family: Menlo, Monaco, "Courier New", monospace;
   --monaco-monospace-font: var(--editor-font-family);
   --editor-font-size: 12px;
@@ -165,113 +233,15 @@
 }
 
 .editor-shell[data-theme="light"] {
-  /* Light Modern. */
-  --vscode-foreground: #3b3b3b;
-  --vscode-icon-foreground: #3b3b3b;
-  --vscode-focusBorder: #005fb8;
-  --vscode-widget-border: #e5e5e5;
+  /* Light Modern syntax palette plus the highlight and shadow literals whose
+     light values differ; the token-bound variables above follow the app
+     theme by themselves. */
+  --vscode-editor-rangeHighlightBackground: #fdff0033;
+  --vscode-peekViewEditor-matchHighlightBackground: #f5d802de;
   --vscode-widget-shadow: rgb(0 0 0 / 16%);
   --vscode-shadow-hover: rgb(0 0 0 / 16%);
-  --vscode-shadow-lg: 0 0 12px rgb(0 0 0 / 16%);
-  --vscode-cornerRadius-medium: 2px;
-  --vscode-cornerRadius-large: 4px;
-  --vscode-menu-background: #ffffff;
-  --vscode-menu-foreground: #3b3b3b;
-  --vscode-menu-selectionBackground: #005fb8;
-  --vscode-menu-selectionForeground: #ffffff;
-  --vscode-menu-separatorBackground: #3b3b3b33;
-  --vscode-menu-border: #cecece;
-
-  --vscode-editor-background: #ffffff;
-  --vscode-editor-foreground: #3b3b3b;
-  --vscode-editorLineNumber-foreground: #6e7681;
-  --vscode-editorLineNumber-activeForeground: #171184;
-  --vscode-editor-selectionBackground: #add6ff;
-  --vscode-editor-hoverHighlightBackground: #add6ff26;
-  --vscode-editor-rangeHighlightBackground: #fdff0033;
-  --vscode-editor-symbolHighlightBackground: #ea5c0055;
-  --vscode-editor-symbolHighlightBorder: transparent;
-  /* See the Dark Modern block above (folding colors). */
-  --vscode-editor-foldBackground: #add6ff4d;
-  --vscode-editor-foldPlaceholderForeground: #808080;
-  --vscode-editorGutter-foldingControlForeground: var(
-    --vscode-icon-foreground
-  );
-  /* See the Dark Modern block above (light defaults: black caret, #eeeeee
-     line-highlight border). */
-  --vscode-editorCursor-foreground: #000000;
-  --vscode-editor-lineHighlightBorder: #eeeeee;
-  /* See the Dark Modern block above (light registry default). */
-  --vscode-editorWhitespace-foreground: #33333333;
-  --vscode-editorLink-activeForeground: #0000ff;
-  --vscode-editorWarning-foreground: #bf8803;
-  --vscode-editorError-foreground: #e51400;
-  --vscode-editorInfo-foreground: #0063d3;
-  --vscode-editorHint-foreground: #6c6c6c;
-  --vscode-peekView-border: #0063d3;
-  --vscode-peekViewTitle-background: #f3f3f3;
-  --vscode-peekViewTitleLabel-foreground: #000000;
-  --vscode-peekViewTitleDescription-foreground: #616161;
-  --vscode-peekViewResult-background: #f3f3f3;
-  --vscode-peekViewResult-lineForeground: #646465;
-  --vscode-peekViewResult-fileForeground: #1e1e1e;
-  --vscode-peekViewResult-selectionBackground: #3399ff33;
-  --vscode-peekViewResult-selectionForeground: #6c6c6c;
-  --vscode-peekViewEditor-background: #f2f8fc;
-  --vscode-peekViewEditorGutter-background: #f2f8fc;
-  --vscode-peekViewEditor-matchHighlightBackground: #f5d802de;
-  --vscode-peekViewEditor-matchHighlightBorder: transparent;
-
-  /* See the Dark Modern block above. */
-  --vscode-editorUnnecessaryCode-opacity: 0.47;
-
-  --vscode-editorHoverWidget-background: #f8f8f8;
-  --vscode-editorHoverWidget-foreground: #3b3b3b;
-  --vscode-editorHoverWidget-border: #e5e5e5;
-  /* See the Dark Modern block above (Light Modern theme values + registry
-     defaults). commentRangeForeground = `darken(opaque(
-     listInactiveSelectionBackground #e4e6f1, #ffffff), .05)`. */
-  --vscode-editorWidget-background: #f8f8f8;
-  --vscode-editorWidget-foreground: #3b3b3b;
-  --vscode-editorWidget-border: #3b3b3b33;
-  --vscode-input-background: #ffffff;
-  --vscode-input-foreground: #3b3b3b;
-  --vscode-input-border: #cecece;
-  --vscode-inputValidation-infoBorder: #007acc;
-  --vscode-button-background: #005fb8;
-  --vscode-button-foreground: #ffffff;
-  --vscode-button-hoverBackground: #0258a8;
-  --vscode-descriptionForeground: #3b3b3b;
-  --vscode-editorGutter-commentRangeForeground: #d5d8e9;
-  --vscode-editorGutter-commentGlyphForeground: #3b3b3b;
-  /* editorGutter.added/modified/deletedBackground (light_modern.json:39-41). */
-  --vscode-editorGutter-addedBackground: #2ea043;
-  --vscode-editorGutter-modifiedBackground: #005fb8;
-  --vscode-editorGutter-deletedBackground: #f85149;
-  --vscode-toolbar-hoverBackground: #00000014;
-  --vscode-textLink-foreground: #006ab1;
-  --vscode-textLink-activeForeground: #0000ff;
-  --vscode-textCodeBlock-background: #f3f3f3;
-
-  --vscode-sideBar-background: #f8f8f8;
-  --vscode-sideBar-foreground: #3b3b3b;
-  --vscode-sideBar-border: #e5e5e5;
-  --vscode-sideBarTitle-foreground: #3b3b3b;
-  --vscode-sideBarSectionHeader-background: #f8f8f8;
-  --vscode-list-hoverBackground: #f2f2f2;
-  --vscode-list-activeSelectionBackground: #e8e8e8;
-  --vscode-list-activeSelectionForeground: #000000;
-  --vscode-list-focusOutline: #005fb8;
-  --vscode-tree-indentGuidesStroke: #a9a9a9;
-
-  --vscode-titleBar-activeBackground: #f8f8f8;
-  --vscode-titleBar-activeForeground: #1e1e1e;
-  --vscode-titleBar-border: #e5e5e5;
-
-  --vscode-scrollbarSlider-background: #64646466;
-  --vscode-scrollbarSlider-hoverBackground: #646464b3;
-  --vscode-scrollbarSlider-activeBackground: #00000099;
   --vscode-scrollbar-shadow: rgb(0 0 0 / 20%);
+  --vscode-editorUnnecessaryCode-opacity: 0.47;
 
   --vscode-token-keyword: #0000ff;
   --vscode-token-variable: #001080;
@@ -284,5 +254,4 @@
   --vscode-token-string-escape: #ee0000;
   --vscode-token-regexp: #811f3f;
   --vscode-token-invalid: #cd3131;
-  --monaco-monospace-font: var(--editor-font-family);
 }

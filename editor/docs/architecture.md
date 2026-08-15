@@ -244,10 +244,10 @@ js-only. Concrete browser runtime packages live below the module-private
   that renders exact lowercase `diago` fences through `Milky2018/diago` while
   returning failures and every other code block to the existing fallback;
   `internal/viewer/browser/markdown` adds MoonBit-owned DOM retention,
-  URI/media policy, activation listeners, size notification, per-target
-  disposal, and the reusable pan/zoom/fit/resize diagram viewport controller.
-  Its emitted diagram-control stylesheet remains at
-  `internal/viewer/browser/markdown/diagram_viewport.css`. Narrow JS bindings
+  URI/media policy, activation listeners, size notification, and per-target
+  disposal. The public browser-only `viewer/browser/diagram_viewport` package
+  owns the reusable pan/zoom/fit/resize controller and its stylesheet at
+  `viewer/browser/diagram_viewport/diagram_viewport.css`. Narrow JS bindings
   provide inert-template parsing, browser URL resolution, realm registries,
   dynamic import, and Mermaid API calls.
   Its diagram-wheel listener rechecks wrapper classes for every event:

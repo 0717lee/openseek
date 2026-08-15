@@ -395,19 +395,30 @@
 }
 
 /* UML/PlantUML fences compile synchronously through the shared Viewer
-   renderer. Bind its VS Code-flavoured paint variables to the chat palette so
-   generated SVGs follow both explicit and system themes. */
+   renderer. Bind both generated SVGs and the shared diagram controls to the
+   chat palette so they follow explicit and system themes. */
 .msg-content.markdown .chat-markdown-diagram {
   --vscode-editor-foreground: var(--color-text-primary);
   --vscode-descriptionForeground: var(--color-text-secondary);
   --vscode-editorWidget-background: var(--color-bg-surface);
+  --vscode-editorWidget-border: var(--color-border);
   --vscode-editor-background: var(--color-bg-surface);
   --vscode-editorHoverWidget-background: var(--color-bg-subtle);
+  --vscode-focusBorder: var(--color-accent);
+  --vscode-icon-foreground: var(--color-text-secondary);
+  --vscode-toolbar-hoverBackground: var(--color-accent-soft);
+  --vscode-toolbar-activeBackground: var(--color-accent-soft);
+  --vscode-widget-border: var(--color-border);
 
   min-width: 0;
   margin: 0.7em 0;
   box-sizing: border-box;
   max-width: 100%;
+}
+.msg-content.markdown
+  .chat-markdown-diagram:not(
+    .moonbit-viewer-markdown-diagram-viewport
+  ) {
   max-height: min(50vh, 480px);
   padding: 12px;
   overflow: auto;
@@ -415,7 +426,9 @@
   border-radius: var(--radius-sm);
   background: var(--color-bg-surface);
 }
-.msg-content.markdown .chat-markdown-diagram > svg {
+.msg-content.markdown
+  .chat-markdown-diagram:not(.moonbit-viewer-markdown-diagram-viewport)
+  > svg {
   display: block;
   width: auto;
   max-width: 100%;
@@ -477,6 +490,13 @@
 .msg-content.markdown img {
   max-width: 100%;
 }
+.msg-content.markdown .transcript-image.pending {
+  min-width: 1px;
+  min-height: 1px;
+}
+.msg-content.markdown .transcript-image.unavailable {
+  color: var(--color-text-muted);
+}
 .msg-content.markdown .footnote {
   margin: 0.45em 0;
   color: var(--color-text-muted);
@@ -487,8 +507,9 @@
   color: var(--color-text-secondary);
 }
 
-/* live streaming bubble: a blinking caret after the latest text */
-.msg.streaming .msg-content::after {
+/* live streams: a blinking caret after the latest text */
+.msg.streaming .msg-content::after,
+.streaming-thought.streaming .msg-content::after {
   content: "▍";
   margin-left: 2px;
   color: var(--color-accent);
@@ -547,8 +568,8 @@
 /* One turn's work (thinking + tool calls), folded behind a single
    summary line. Flush with the agent's prose, not indented: the work is
    the agent's, and an indent under a user bubble would read as the
-   user's. Borderless on purpose: the work log is typography, not
-   chrome — prose for reasoning, gray one-liners for tool calls. */
+   user's. The summary stays borderless; once opened, a quiet guide line
+   groups the revealed work without turning it into a card. */
 .activity-row {
   min-width: 0;
   animation: riseIn 0.34s cubic-bezier(0.2, 0.7, 0.2, 1) both;
@@ -565,6 +586,25 @@
 .tool-line-summary::-webkit-details-marker,
 .tool-call-summary::-webkit-details-marker {
   display: none;
+}
+
+/* The visible guide belongs to the body, while this empty part of the native
+   summary extends its hit area over the guide. A click therefore toggles only
+   the details element that owns that line, including when disclosures nest. */
+.activity,
+.tool-line {
+  position: relative;
+}
+.activity[open] > .activity-summary::before,
+.tool-line[open] > .tool-line-summary::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  top: 1.5em;
+  bottom: 0;
+  left: -5px;
+  width: 12px;
+  cursor: pointer;
 }
 
 .activity-summary {
@@ -599,7 +639,8 @@
 .activity-body {
   display: grid;
   gap: 14px;
-  padding: 12px 0 4px;
+  padding: 12px 0 4px 16px;
+  border-left: 2px solid var(--color-border);
 }
 
 /* compaction checkpoint between turns: a quiet labeled fold with the
@@ -642,12 +683,57 @@
   color: var(--color-text-secondary);
 }
 
-/* Reasoning inside the work log — and the live stream before it commits
-   (`reasoning_view`): full-width muted prose, never a labelled
-   "Thinking" row of its own. */
+/* Reasoning inside the durable work log. */
 .activity-thinking {
   color: var(--color-text-secondary);
   font-size: var(--font-size-md);
+}
+
+/* Live reasoning stays visible without taking over the transcript. Short
+   thoughts use their natural height; long ones stop growing and follow the
+   newest fragment inside this local scroller. */
+.streaming-thought {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+}
+.streaming-thought-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-subtle);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  letter-spacing: 0.02em;
+}
+.streaming-thought-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-pill);
+  background: var(--color-text-muted);
+}
+.streaming-thought.streaming .streaming-thought-dot {
+  background: var(--color-accent);
+  animation: pulseDot 1.6s ease-out infinite;
+}
+.streaming-thought-scroll {
+  max-height: min(240px, 32vh);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 10px 12px 12px;
+}
+.streaming-thought-scroll:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+.streaming-thought .activity-thinking {
+  overflow-wrap: anywhere;
 }
 
 /* A burst of consecutive tool calls: a gray one-line summary that
@@ -672,6 +758,7 @@
   display: grid;
   gap: 4px;
   padding: 6px 0 2px 16px;
+  border-left: 2px solid var(--color-border);
 }
 
 /* One call inside a burst: its brief, expandable to recorded arguments and

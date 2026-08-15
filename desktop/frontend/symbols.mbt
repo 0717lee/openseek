@@ -6,34 +6,44 @@
 type WorkspaceSymbol = @symbols.Symbol
 
 ///|
-/// Search `query` against the conversation's workspace symbols. Without a
-/// generation the reply belongs to the composer's `#` menu; a generation
-/// routes it to Quick Open. Both retain owner/query identity so
-/// update can discard an overtaken reply.
-fn read_workspace_symbols(
+/// Which root-shell surface owns a workspace-symbol request. Each surface
+/// carries its own generation so an overtaken response cannot settle a newer
+/// query.
+priv enum SymbolRequest {
+  ComposerSymbolRequest(Int)
+  QuickOpenSymbolRequest(Int)
+}
+
+///|
+/// Search `query` and route the reply back to the exact owning surface. The
+/// shared symbols package owns transport; this method only projects its reply
+/// into the root shell's two message shapes.
+fn SymbolRequest::search(
+  self : SymbolRequest,
   dispatch : @cmd.Emit[Msg],
   owner : @interop.ConversationKey,
   query : String,
   root~ : @common.Uri?,
-  generation? : Int,
 ) -> @cmd.Cmd {
   guard root is Some(root) && @resource.belongs_to(root, owner.channel) else {
     return @cmd.none
   }
   let loaded = items => {
     dispatch(
-      match generation {
-        Some(generation) =>
+      match self {
+        ComposerSymbolRequest(generation) =>
+          SymbolsLoaded(owner~, root~, query~, generation~, items~)
+        QuickOpenSymbolRequest(generation) =>
           QuickOpenSymbolsLoaded(owner~, query~, generation~, items~)
-        None => SymbolsLoaded(owner~, root~, query~, items~)
       },
     )
   }
   let failed = dispatch(
-    match generation {
-      Some(generation) =>
+    match self {
+      ComposerSymbolRequest(generation) =>
+        SymbolsFailed(owner~, root~, query~, generation~)
+      QuickOpenSymbolRequest(generation) =>
         QuickOpenSymbolsRequestFailed(owner~, query~, generation~)
-      None => SymbolsFailed(owner~, root~, query~)
     },
   )
   @symbols.search(owner.channel, query, root~, loaded~, failed~)

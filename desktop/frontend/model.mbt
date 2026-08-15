@@ -44,16 +44,6 @@ fn EngineModel::label(self : EngineModel) -> String {
 }
 
 ///|
-/// What clicking the chip selects. The toggle only spans the two tiers, so a
-/// conversation sitting on an unknown model enters the pair at the high one.
-fn EngineModel::toggled(self : EngineModel) -> EngineModel {
-  match self {
-    High => Low
-    Low | Other(_) => High
-  }
-}
-
-///|
 /// One conversation's remembered tier. `ConversationKey` is a frontend value
 /// that deliberately never crosses a boundary, so persistence spells the same
 /// identity out itself: the channel's stable URI authority joined to the
@@ -86,9 +76,6 @@ test "engine models round-trip their wire names" {
     content="custom-model",
   )
   assert_true(EngineModel::parse("  ") is None)
-  assert_true(High.toggled() is Low)
-  assert_true(Low.toggled() is High)
-  assert_true(Other("custom-model").toggled() is High)
 }
 
 ///|
@@ -485,6 +472,15 @@ priv enum Workspace {
 } derive(Eq, Debug)
 
 ///|
+/// Which durable twin owns the transcript currently represented here.
+/// Archived records may be displayed, but actions that append to a record
+/// must reject `ArchivedRecord` in update even when no composer is rendered.
+priv enum ConversationRecord {
+  LiveRecord
+  ArchivedRecord
+} derive(Eq)
+
+///|
 /// Construct the conversation workspace represented by the durable session
 /// list: no registered project means Scratch; a project starts provisional
 /// until that project's worktree registry identifies a stronger placement.
@@ -528,6 +524,9 @@ priv struct Conversation {
   // Durable engine session backing this conversation; consecutive runs share
   // it so the agent keeps context between prompts.
   session_id : String
+  // Live records accept engine mutations. An archived record is a read-only
+  // snapshot source until an unarchive notification moves it back to live.
+  record : ConversationRecord
   // Scratch, registered project, or project-owned worktree. One enum keeps
   // those mutually exclusive placements from drifting apart and is the only
   // stored source for filesystem and language-server routing.
@@ -619,6 +618,10 @@ priv struct Conversation {
   // tagged and therefore never clear a potentially newer stream. Empty means
   // not streaming.
   streaming_response : String
+  // Live thinking text from `reasoning_delta`. It remains beside a response
+  // that has begun streaming, then the ordered full semantic event clears it
+  // for the durable assistant commit to take over.
+  streaming_reasoning : String
   // Local submissions awaiting exact id-bearing host receipts. Initial prompt
   // and steer entries share the ledger; steer state is also the sole source
   // for pending UI and provisional failures. Canonical User text never claims
@@ -642,6 +645,10 @@ priv struct Conversation {
   // arrives; some delivery failures are provisional and a later exact-id
   // receipt can retract them. Copy-on-write.
   overlay : Array[LocalNotice]
+  // Monotonic identity source for local notices. Notice positions may move as
+  // durable boundaries reconcile, but a rendered notice must keep the same DOM
+  // node throughout that move.
+  next_notice_id : Int
   // The standing goal mirrored from the durable record's `[goal]` markers:
   // seeded by each snapshot's reduction and folded forward by marker
   // commits in `apply_commit`. Nothing local writes it — goal mode only
@@ -816,6 +823,8 @@ priv struct PendingInput {
 ///|
 /// One non-durable transcript notice at a durable chronology boundary.
 priv struct LocalNotice {
+  // Renderer identity only; never serialized or compared with durable events.
+  id : Int
   kind : @transcript.ItemKind
   content : String
   anchor : NoticeAnchor
@@ -866,11 +875,13 @@ priv enum Screen {
 /// Which trigger opened the composer's completion menu: `/` lists built-in
 /// commands that act on the conversation, `$` lists installed skills whose
 /// name is inserted into the prompt, `#` lists workspace symbols (fetched
-/// through the host's symbol search) whose reference is inserted.
+/// through the host's symbol search), and `@` lists files from the shared
+/// workspace index used by Ctrl+P.
 priv enum CompletionKind {
   SlashCommands
   SkillMentions
   Symbols
+  Files
 } derive(Eq)
 
 ///|
@@ -884,12 +895,8 @@ priv struct CompletionItem {
   // skills. For a skill, `insert` carries the text dropped into the composer.
   command : String
   insert : String
-  // A symbol row's resolved location — workspace-relative path and the
-  // symbol's full range (one-based, viewer coordinates) — so the chip it
-  // becomes can jump there and select the named code. `None` for slash
-  // commands, skills, and symbols the search could not place in a file. A
-  // symbol placed without a range yields an empty range anchored at its
-  // line.
+  // A symbol or file row's workspace-relative location. Symbols also carry
+  // their full one-based range; a file row deliberately leaves `range` empty.
   path : String?
   range : @common.Range?
 } derive(Eq)
@@ -911,15 +918,11 @@ priv struct Mention {
 /// The composer's open completion menu: the trigger that opened it, the
 /// currently matching rows, which row is highlighted, and the exact draft text
 /// before the live token. Absent when the composer has no live trigger.
-/// `loading` is set only for a `#` menu whose results for the current query have
-/// not arrived yet, so the empty menu can say "Searching…" rather than
-/// "No symbols".
+/// `loading` marks a `#` query or workspace-file index still in flight, so an
+/// empty menu can distinguish "Searching…" from a settled empty provider.
 priv struct Completion {
   kind : CompletionKind
-  items : Array[CompletionItem]
-  selected : Int
-  loading : Bool
-  task_without_token : String
+  menu : @composer.Menu[CompletionItem]
 } derive(Eq)
 
 ///|
@@ -1224,6 +1227,13 @@ priv struct Model {
   // nested conversations) is folded down to its heading; clicking the heading
   // flips it.
   projects_collapsed : Bool
+  // Project folder rows fold independently inside the Projects section. The
+  // key includes the owning device because remote channels can expose the
+  // same filesystem spelling without referring to the same project.
+  collapsed_projects : Array[(@interop.ChannelId, @common.Uri)]
+  // Projects whose per-window chat preview was expanded through "Show more".
+  // The default absence keeps each open project to its five newest chats.
+  expanded_project_chats : Array[(@interop.ChannelId, @common.Uri)]
   // The conversations whose sub-run transcripts are unfolded in the sidebar,
   // as (device, session id) — session ids are only unique within a channel.
   // Sidebar-only view state, held for the window's lifetime and never
@@ -1283,6 +1293,10 @@ priv struct Model {
   // while the query is unchanged. Recomputed on every keystroke and refetched
   // when the query or conversation changes.
   symbol_cache : SymbolCache
+  // Every draft edit advances this identity. Delayed symbol requests and their
+  // replies carry it so a newer keystroke, dismissal, or conversation switch
+  // cannot revive an obsolete completion.
+  completion_debounce : @composer.Debounce
   // Cmd/Ctrl+P/T unified Quick Open in the native window and browser console.
   // It is global UI for the focused conversation, not durable conversation
   // state. The monotonic counter fences symbol replies across close and reopen,
@@ -1504,6 +1518,35 @@ priv enum Msg {
     custom_api_key~ : String
   )
   TaskChanged(String)
+  // Start a symbol lookup only if the composer still has this exact delayed
+  // draft generation after its 150 ms pause.
+  CompletionDue(
+    owner~ : @interop.ConversationKey,
+    query~ : String,
+    generation~ : Int
+  )
+  // A truncated workspace snapshot answers common `@` queries immediately,
+  // then this delayed request ranks the same query against the Host's complete
+  // cached scan. Root and generation fence conversation moves and keystrokes.
+  FileCompletionDue(
+    owner~ : @interop.ConversationKey,
+    root~ : @common.Uri,
+    query~ : String,
+    generation~ : Int
+  )
+  FileCompletionLoaded(
+    owner~ : @interop.ConversationKey,
+    root~ : @common.Uri,
+    query~ : String,
+    generation~ : Int,
+    files~ : Array[@pathx.Relative]
+  )
+  FileCompletionFailed(
+    owner~ : @interop.ConversationKey,
+    root~ : @common.Uri,
+    query~ : String,
+    generation~ : Int
+  )
   // Move the completion menu's highlight by a delta (−1 up, +1 down), wrapping
   // at the ends. Ignored when the menu is closed.
   CompletionMove(Int)
@@ -1536,6 +1579,7 @@ priv enum Msg {
     owner~ : @interop.ConversationKey,
     root~ : @common.Uri,
     query~ : String,
+    generation~ : Int,
     items~ : Array[WorkspaceSymbol]
   )
   // A failed search reads as "no symbols", so it carries no message to show —
@@ -1543,7 +1587,8 @@ priv enum Msg {
   SymbolsFailed(
     owner~ : @interop.ConversationKey,
     root~ : @common.Uri,
-    query~ : String
+    query~ : String,
+    generation~ : Int
   )
   // Open unified Quick Open in the requested provider in either shell.
   QuickOpenOpen(QuickOpenMode)
@@ -1602,9 +1647,9 @@ priv enum Msg {
   QuickOpenSelect(Int)
   QuickOpenPick(Int)
   QuickOpenDismiss
-  // The composer's model chip: flip the conversation on screen to the other
-  // service tier, and make that the tier new conversations start from.
-  ToggleModel
+  // Select the active conversation's model and make it the default for new
+  // conversations.
+  EngineModelChanged(String)
   MaxStepsChanged(String)
   SetupApiKeyChanged(String)
   ProviderChanged(String)
@@ -1670,6 +1715,12 @@ priv enum Msg {
   ToggleChatsSection
   // The sidebar's "Projects" heading was clicked — fold or unfold the section.
   ToggleProjectsSection
+  // A project folder row was clicked — fold or unfold only that project's
+  // nested chats without changing which project receives new conversations.
+  ToggleProjectSection(@interop.ChannelId, @common.Uri)
+  // The project's "Show more" row was clicked — reveal every remaining chat
+  // for that project for the rest of this window lifetime.
+  ShowMoreProjectChats(@interop.ChannelId, @common.Uri)
   // A conversation row's disclosure was clicked — show or hide the sub-run
   // transcripts folded under it. The row's own click still opens the session,
   // so the two controls never fight over one gesture.
@@ -1697,6 +1748,13 @@ priv enum Msg {
   // Open a conversation on one device's explicit channel, selecting that
   // channel first when it differs from the current one.
   OpenSession(@interop.ChannelId, String)
+  // Open a row from the archived index. Its workspace is part of the row's
+  // durable placement and selects the archived twin without restoring it.
+  OpenArchivedSession(
+    @interop.ChannelId,
+    session~ : String,
+    workspace~ : @common.Uri?
+  )
   // The user clicked the system notification posted through Proton's
   // notification extension: jump to the conversation that owned that run.
   // The native extension brings the window forward before emitting the click.
@@ -1760,6 +1818,9 @@ priv enum Msg {
   // Whether new or repaired worktrees for this workspace populate the
   // top-level submodules initialized in the main checkout.
   WorkspaceSubmodulesChosen(@interop.ChannelId, @common.Uri, String)
+  // Hard bound for that submodule checkout, in seconds. Update accepts only
+  // the values rendered by the workspace settings select.
+  WorkspaceSubmoduleTimeoutChosen(@interop.ChannelId, @common.Uri, String)
   // Start a fresh conversation in a device's project (`None` = Scratch),
   // selecting its explicit channel first if needed.
   NewChatIn(@interop.ChannelId, @common.Uri?)
@@ -2030,6 +2091,7 @@ priv enum DeviceMsg {
     workspace~ : @common.Uri,
     worktree_mode~ : Bool,
     checkout_submodules~ : Bool,
+    submodule_checkout_timeout_seconds~ : Int,
     connection_generation~ : Int,
     request_generation~ : Int
   )
@@ -2038,7 +2100,8 @@ priv enum DeviceMsg {
   WorkspaceSettingsChanged(
     workspace~ : @common.Uri,
     worktree_mode~ : Bool,
-    checkout_submodules~ : Bool
+    checkout_submodules~ : Bool,
+    submodule_checkout_timeout_seconds~ : Int
   )
   // A `workspace.settings_set` this client sent failed; the message pops as
   // a toast and the workspace's settings are re-read.
@@ -2165,6 +2228,14 @@ priv enum DeviceMsg {
   // The host definitively refused this exact request. Restore its draft and
   // retire the ledger entry immediately.
   StartRejected(session~ : String, submission_id~ : String, message~ : String)
+  // `worktree.create` failed before `agent.start` was sent. Restore the draft
+  // like StartRejected, but report this recoverable setup failure as a toast
+  // rather than putting an agent-style error in the transcript.
+  WorktreeSetupFailed(
+    session~ : String,
+    submission_id~ : String,
+    message~ : String
+  )
   // A host error without a run (`run_id` is `None` — a pre-run failure)
   // belongs to whatever conversation the user is looking at; `diagnostics`
   // is stderr worth appending, when the host captured any. With a run,
@@ -2236,6 +2307,7 @@ fn empty_conversation(
   {
     device: channel,
     session_id,
+    record: LiveRecord,
     workspace: Workspace::from_project(project),
     worktree_mode: false,
     engine_model: model,
@@ -2258,11 +2330,13 @@ fn empty_conversation(
     pull_request_generation: 0,
     watcher_status: "",
     streaming_response: "",
+    streaming_reasoning: "",
     input_ledger: [],
     messages: [],
     watermark: 0,
     sync: Synced,
     overlay: [],
+    next_notice_id: 0,
     goal: None,
     goal_edit: None,
     goal_pending: None,
@@ -2359,6 +2433,8 @@ fn initial_model() -> Model {
     terminal: @terminal.State::empty(),
     chats_collapsed: false,
     projects_collapsed: false,
+    collapsed_projects: [],
+    expanded_project_chats: [],
     expanded_subruns: [],
     active_session: "",
     loading_conversation: None,
@@ -2378,6 +2454,7 @@ fn initial_model() -> Model {
     skills_notice: "",
     completion: None,
     symbol_cache: empty_symbol_cache(),
+    completion_debounce: @composer.Debounce(),
     quick_open: None,
     quick_open_generation: 0,
     git_request_generation: 0,
@@ -2764,6 +2841,30 @@ fn Model::subruns_expanded(
 }
 
 ///|
+/// Whether one project's nested chats are folded to its folder row.
+fn Model::project_collapsed(
+  self : Model,
+  channel : @interop.ChannelId,
+  project : @common.Uri,
+) -> Bool {
+  self.collapsed_projects
+  .iter()
+  .any(entry => entry.0 == channel && entry.1 == project)
+}
+
+///|
+/// Whether one project has revealed the chats beyond its default preview.
+fn Model::project_chats_expanded(
+  self : Model,
+  channel : @interop.ChannelId,
+  project : @common.Uri,
+) -> Bool {
+  self.expanded_project_chats
+  .iter()
+  .any(entry => entry.0 == channel && entry.1 == project)
+}
+
+///|
 /// The registered project a session belongs to on `channel`: the sidebar list's
 /// grouping when the store knows the session, the live conversation's own
 /// placement otherwise (a fresh chat that has not reached the store yet).
@@ -2853,7 +2954,8 @@ fn Model::with_archive_override(
 /// them as a reload gate would turn every reconnect/reselect into three noisy
 /// `session.load` failures for an unsaved chat.
 fn Model::can_reload_transcript(self : Model, conv : Conversation) -> Bool {
-  if conv.watermark > 0 ||
+  if conv.is_archived_read_only() ||
+    conv.watermark > 0 ||
     !conv.messages.is_empty() ||
     conv.sync is ReloadFailed(..) ||
     // An outstanding command may already have been appended, and re-reading
@@ -3093,6 +3195,13 @@ fn Conversation::worth_keeping(self : Conversation) -> Bool {
 }
 
 ///|
+/// An archived transcript is display-only. Update handlers use this method
+/// as the mutation gate; the read-only view is only its visible counterpart.
+fn Conversation::is_archived_read_only(self : Conversation) -> Bool {
+  self.record is ArchivedRecord
+}
+
+///|
 fn Conversation::draft_empty(self : Conversation) -> Bool {
   self.task.is_blank() &&
   self.mentions.is_empty() &&
@@ -3166,7 +3275,7 @@ fn Conversation::visible_subruns(
 
 ///|
 fn Conversation::clear_streams(self : Conversation) -> Conversation {
-  { ..self, streaming_response: "" }
+  { ..self, streaming_response: "", streaming_reasoning: "" }
 }
 
 ///|
@@ -3177,14 +3286,16 @@ fn Conversation::append_notice(
   content : String,
   reconciliation : NoticeReconciliation,
 ) -> Conversation {
+  let id = self.next_notice_id + 1
   let overlay = self.overlay.copy()
   overlay.push({
+    id,
     kind,
     content,
     anchor: AfterMessages(self.messages.length()),
     reconciliation,
   })
-  { ..self, overlay, }
+  { ..self, overlay, next_notice_id: id }
 }
 
 ///|
@@ -3223,13 +3334,14 @@ fn Conversation::append_run_tail_notice(
   terminal_expected? : Bool = true,
   terminal_snapshot_generation? : Int,
 ) -> Conversation {
+  let id = self.next_notice_id + 1
   let overlay = self.overlay.copy()
   let anchor = self.run_tail_notice_anchor(
     terminal_expected~,
     terminal_snapshot_generation?,
   )
-  overlay.push({ kind, content, anchor, reconciliation })
-  { ..self, overlay, }
+  overlay.push({ id, kind, content, anchor, reconciliation })
+  { ..self, overlay, next_notice_id: id }
 }
 
 ///|
@@ -3877,12 +3989,15 @@ priv struct ArchiveSalvage {
 ///|
 /// Retire one definitively refused local submission, restore its composer
 /// draft, and replace any provisional notice with one retained explanation.
+/// A setup failure can suppress the transcript notice because update reports
+/// the same explanation as a transient toast instead.
 fn Conversation::reject_submission(
   self : Conversation,
   submission_id : String,
   kind : InputKind,
   run_id : String?,
   notice : String,
+  report_in_transcript? : Bool = true,
 ) -> (Conversation, Bool) {
   for index, input in self.input_ledger {
     if input.matches_receipt(submission_id, kind, run_id) {
@@ -3892,10 +4007,13 @@ fn Conversation::reject_submission(
         !(item.reconciliation is Submission(id) && id == submission_id)
       })
       let next = { ..self, input_ledger, overlay }
+      let restored = next.restore_submission(input)
       return (
-        next
-        .restore_submission(input)
-        .append_local_notice(Assistant(is_danger=true), notice),
+        if report_in_transcript {
+          restored.append_local_notice(Assistant(is_danger=true), notice)
+        } else {
+          restored
+        },
         true,
       )
     }

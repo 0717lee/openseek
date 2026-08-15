@@ -1,13 +1,27 @@
 ///|
+/// One visible transcript item paired with the stable identity used by keyed
+/// reconciliation. The identity is opaque to the component's callers and is
+/// never emitted as a DOM id or attribute.
+pub(all) struct VisibleRow {
+  item : @transcript.TranscriptItem
+  identity : String
+} derive(Eq)
+
+///|
 /// The conversation data rendered by the component. The application computes
 /// durable chronology and active-run ownership; this package owns only the
 /// transcript subtree and its scroll behavior.
 struct Input {
   focused : @interop.ChannelId
   active_session : String
+  // The concrete project or worktree root sent alongside relative Markdown
+  // image paths so the owning host, rather than the frontend, resolves them.
+  root : @common.Uri?
   submission_generation : Int
-  items : Array[@transcript.TranscriptItem]
+  items : Array[VisibleRow]
+  streaming_reasoning : String
   streaming_response : String
+  streaming_identity : String
   subruns : Array[@transcript.SubrunLane]
 } derive(Eq)
 
@@ -15,17 +29,23 @@ struct Input {
 pub fn Input::Input(
   focused~ : @interop.ChannelId,
   active_session~ : String,
+  root~ : @common.Uri?,
   submission_generation~ : Int,
-  items~ : Array[@transcript.TranscriptItem],
+  items~ : Array[VisibleRow],
+  streaming_reasoning~ : String,
   streaming_response~ : String,
+  streaming_identity~ : String,
   subruns~ : Array[@transcript.SubrunLane],
 ) -> Input {
   {
     focused,
     active_session,
+    root,
     submission_generation,
     items,
+    streaming_reasoning,
     streaming_response,
+    streaming_identity,
     subruns,
   }
 }
@@ -44,6 +64,8 @@ priv struct Model {
   overview : @transcript_overview.State
   focused : @interop.ChannelId
   active_session : String
+  image_owner : ImageOwner
+  images : ImageCache
   submission_generation : Int
   mounted : Bool
 } derive(Eq)
@@ -53,6 +75,8 @@ priv enum Msg {
   Pinned(Bool)
   JumpToLatest
   ContentRendered(mounted~ : Bool)
+  ImageRequested(String)
+  ImageResolved(ImageOwner, String, ImageReadResult)
   Overview(@transcript_overview.Msg)
 }
 
@@ -63,6 +87,15 @@ fn Model::update(
   msg : Msg,
   emit : @cmd.Emit[Msg],
 ) -> (Model, @cmd.Cmd) {
+  // A conversation switch can reach the component through input before its
+  // DOM mutation notification. Never project the previous owner's data URLs
+  // into that intermediate render.
+  let image_owner = input.image_owner()
+  let self = if self.image_owner == image_owner {
+    self
+  } else {
+    { ..self, image_owner, images: ImageCache::empty() }
+  }
   match msg {
     Pinned(pinned) => ({ ..self, pinned, }, @cmd.none)
     JumpToLatest =>
@@ -98,6 +131,8 @@ fn Model::update(
         },
         focused: input.focused,
         active_session: input.active_session,
+        image_owner,
+        images: self.images,
         submission_generation: input.submission_generation,
         mounted,
       }
@@ -108,7 +143,17 @@ fn Model::update(
       commands.push(
         report_visible_turn_after_render(emit, skip_unchanged=!navigated),
       )
+      commands.push(self.images.apply_after_render())
       (next, @cmd.batch(commands))
+    }
+    ImageRequested(path) => {
+      let (images, command) = self.images.begin_read(image_owner, path, emit)
+      ({ ..self, images, }, @cmd.batch([command, images.apply_after_render()]))
+    }
+    ImageResolved(owner, path, result) => {
+      guard owner == image_owner else { return (self, @cmd.none) }
+      let images = self.images.settle(path, result)
+      ({ ..self, images, }, images.apply_after_render())
     }
     Overview(msg) => {
       let previous_active = self.overview.active
@@ -151,6 +196,8 @@ pub fn component(
           overview: @transcript_overview.State::empty(),
           focused: input.focused,
           active_session: input.active_session,
+          image_owner: input.image_owner(),
+          images: ImageCache::empty(),
           submission_generation: input.submission_generation,
           mounted: false,
         },
@@ -180,6 +227,17 @@ fn scroll_after_render() -> @cmd.Cmd {
       // A forced tail jump must also reset the subscription's DOM cache. A
       // remounted short transcript may clamp without emitting a scroll event.
       transcript_pinned_watch.val = true
+      // Active reasoning owns a bounded local scroller. Follow its latest
+      // fragment while it is the current stream; once answer text starts the
+      // `streaming` class moves to the answer and leaves this position alone.
+      if @dom.document()
+        .query_selector(
+          ".streaming-thought.streaming .streaming-thought-scroll",
+        )
+        .to_option()
+        is Some(thought) {
+        thought.set_scroll_top(thought.get_scroll_height())
+      }
       if @dom.document().get_element_by_id("transcript").to_option()
         is Some(transcript) {
         transcript.set_scroll_top(transcript.get_scroll_height())
@@ -359,9 +417,10 @@ fn transcript_sub_loader(
         }
       }
       target.add_event_listener_with_options("scroll", listener, capture=true)
-      let observers = TranscriptObservers::install(mounted => {
-        scheduler.add(emit(ContentRendered(mounted~)))
-      })
+      let observers = TranscriptObservers::install(
+        mounted => scheduler.add(emit(ContentRendered(mounted~))),
+        path => scheduler.add(emit(ImageRequested(path))),
+      )
       Some({
         unload: _ => {
           target.remove_event_listener_with_options(
@@ -390,41 +449,134 @@ priv struct TranscriptObservers {
   document : @dom.MutationObserver
   content : @dom.MutationObserver
   resize : @dom.ResizeObserver
+  mount : TranscriptDomMount
 }
 
 ///|
-fn TranscriptObservers::install(on_change : (Bool) -> Unit) -> Self {
-  let mut current : @dom.Element? = None
+/// Owns the browser state borrowed from the currently mounted transcript DOM
+/// element. Diagram controls and local-image observation stay outside the
+/// Rabbita Model and are disposed before replacement or subscription unload.
+priv struct TranscriptDomMount {
+  mut element : @dom.Element?
+  mut diagrams : @diagram_viewport.DiagramViewports?
+  images : TranscriptImageObserver
+  on_size_changed : () -> Unit
+}
+
+///|
+fn TranscriptDomMount::TranscriptDomMount(
+  on_size_changed : () -> Unit,
+  on_image : (String) -> Unit,
+) -> Self {
+  {
+    element: None,
+    diagrams: None,
+    images: TranscriptImageObserver::install(on_image),
+    on_size_changed,
+  }
+}
+
+///|
+fn TranscriptDomMount::is_same_element(
+  self : Self,
+  next : @dom.Element?,
+) -> Bool {
+  match (self.element, next) {
+    (None, None) => true
+    (Some(previous), Some(element)) => previous.is_same_node(element.as_node())
+    _ => false
+  }
+}
+
+///|
+/// Replace the borrowed transcript root. Mount the shared controller before
+/// observation resumes so its initial toolbar DOM does not feed back as a
+/// transcript content change. The image observer scans only this mounted root
+/// and requests a bounded host read once an image enters the viewport.
+fn TranscriptDomMount::replace(self : Self, next : @dom.Element?) -> Unit {
+  self.images.disconnect()
+  if self.diagrams is Some(diagrams) {
+    diagrams.dispose()
+  }
+  self.diagrams = None
+  self.element = next
+  if next is Some(element) {
+    self.diagrams = Some(
+      @diagram_viewport.DiagramViewports(element, self.on_size_changed),
+    )
+    self.images.scan(element)
+  }
+}
+
+///|
+fn TranscriptDomMount::refresh_content(self : Self) -> Unit {
+  if self.diagrams is Some(diagrams) {
+    diagrams.refresh()
+  }
+  if self.element is Some(element) {
+    self.images.scan(element)
+  }
+}
+
+///|
+fn TranscriptDomMount::observe_content(
+  self : Self,
+  observer : @dom.MutationObserver,
+) -> Unit {
+  if self.element is Some(element) {
+    observer.observe(
+      element.as_node(),
+      attributes=true,
+      child_list=true,
+      character_data=true,
+      subtree=true,
+      attribute_filter=[
+        "data-transcript-channel", "data-transcript-session", "data-transcript-root",
+        "data-transcript-submission",
+      ],
+    )
+  }
+}
+
+///|
+fn TranscriptDomMount::observe_resize(
+  self : Self,
+  observer : @dom.ResizeObserver,
+) -> Unit {
+  if self.element is Some(element) {
+    observer.observe(element)
+  }
+}
+
+///|
+fn TranscriptDomMount::dispose(self : Self) -> Unit {
+  self.replace(None)
+}
+
+///|
+fn TranscriptObservers::install(
+  on_change : (Bool) -> Unit,
+  on_image : (String) -> Unit,
+) -> Self {
+  let mount = TranscriptDomMount(() => on_change(true), on_image)
   let resize = @dom.ResizeObserver::new((_, _) => on_change(true))
-  let content = @dom.MutationObserver::new((_, _) => on_change(true))
+  let content = @dom.MutationObserver::new((_, observer) => {
+    // Reconciliation itself moves the SVG and installs toolbar nodes. Pause
+    // this same observer while doing that so those owned mutations cannot
+    // schedule a second component render.
+    observer.disconnect()
+    mount.refresh_content()
+    mount.observe_content(observer)
+    on_change(true)
+  })
   let attach = () => {
     let next = @dom.document().get_element_by_id("transcript").to_option()
-    let changed = match (current, next) {
-      (None, None) => false
-      (Some(previous), Some(element)) =>
-        !previous.is_same_node(element.as_node())
-      _ => true
-    }
-    guard changed else { return }
+    guard !mount.is_same_element(next) else { return }
     content.disconnect()
     resize.disconnect()
-    current = next
-    match next {
-      Some(element) => {
-        content.observe(
-          element.as_node(),
-          attributes=true,
-          child_list=true,
-          character_data=true,
-          subtree=true,
-          attribute_filter=[
-            "data-transcript-channel", "data-transcript-session", "data-transcript-submission",
-          ],
-        )
-        resize.observe(element)
-      }
-      None => ()
-    }
+    mount.replace(next)
+    mount.observe_content(content)
+    mount.observe_resize(resize)
     on_change(next is Some(_))
   }
   let document = @dom.MutationObserver::new((_, _) => attach())
@@ -433,7 +585,7 @@ fn TranscriptObservers::install(on_change : (Bool) -> Unit) -> Self {
   }
   // The component may already be mounted when its subscription starts.
   attach()
-  { document, content, resize }
+  { document, content, resize, mount }
 }
 
 ///|
@@ -441,6 +593,7 @@ fn TranscriptObservers::disconnect(self : Self) -> Unit {
   self.document.disconnect()
   self.content.disconnect()
   self.resize.disconnect()
+  self.mount.dispose()
 }
 
 ///|
@@ -448,9 +601,12 @@ test "local pinned transitions are pure" {
   let input = Input(
     focused=Local,
     active_session="desktop-test",
+    root=None,
     submission_generation=0,
     items=[],
+    streaming_reasoning="",
     streaming_response="",
+    streaming_identity="idle",
     subruns=[],
   )
   let state : Model = {
@@ -458,6 +614,8 @@ test "local pinned transitions are pure" {
     overview: @transcript_overview.State::empty(),
     focused: Local,
     active_session: "desktop-test",
+    image_owner: input.image_owner(),
+    images: ImageCache::empty(),
     submission_generation: 0,
     mounted: true,
   }
@@ -471,7 +629,12 @@ test "local pinned transitions are pure" {
   let (received, _) = first.update(
     {
       ..input,
-      items: [{ kind: User, content: "new turn", ts: None, sequence: None }],
+      items: [
+        {
+          item: { kind: User, content: "new turn", ts: None, sequence: None },
+          identity: "l0",
+        },
+      ],
     },
     ContentRendered(mounted=true),
     emit,
@@ -499,9 +662,12 @@ test "an overview click unpins and highlights inside the component" {
   let input = Input(
     focused=Local,
     active_session="desktop-test",
+    root=None,
     submission_generation=0,
     items=[],
+    streaming_reasoning="",
     streaming_response="",
+    streaming_identity="idle",
     subruns=[],
   )
   let state : Model = {
@@ -509,6 +675,8 @@ test "an overview click unpins and highlights inside the component" {
     overview: @transcript_overview.State::empty(),
     focused: Local,
     active_session: "desktop-test",
+    image_owner: input.image_owner(),
+    images: ImageCache::empty(),
     submission_generation: 0,
     mounted: true,
   }
@@ -523,9 +691,12 @@ test "a conversation switch clears component-owned overview state" {
   let input = Input(
     focused=Local,
     active_session="desktop-test",
+    root=None,
     submission_generation=0,
     items=[],
+    streaming_reasoning="",
     streaming_response="",
+    streaming_identity="idle",
     subruns=[],
   )
   let state : Model = {
@@ -540,6 +711,8 @@ test "a conversation switch clears component-owned overview state" {
     },
     focused: Local,
     active_session: "desktop-test",
+    image_owner: input.image_owner(),
+    images: ImageCache::empty(),
     submission_generation: 0,
     mounted: true,
   }

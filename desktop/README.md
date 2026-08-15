@@ -70,9 +70,11 @@ refreshes when the bridge connects and after each run. Switching while runs
 are active is fine — a conversation already open in this app run switches
 back instantly with its live state intact, without replaying the store.
 
-While a turn runs, the UI renders the engine's `assistant_delta` events as a
-live answer bubble with a streaming caret; the committed `reasoning_message` /
-`assistant_message` events then land as permanent transcript items.
+While a turn runs, the UI renders `reasoning_delta` in a bounded, internally
+scrolling live Thinking block and `assistant_delta` as a live answer bubble.
+The caret follows the stream currently receiving text; the committed assistant
+session event then replaces both transient views with permanent transcript
+items.
 
 Submitting while a turn runs steers it instead of starting a new prompt: the
 text rides the serve engine's lossless steering queue and is folded into the
@@ -334,7 +336,9 @@ moon build . --target native --release
 
 On Windows, `native_link_config.mjs` passes GUI subsystem linker flags to the
 host executable so double-clicking `openseek-desktop.exe` does not open an extra
-terminal window. It detects common compiler driver styles:
+terminal window. It detects common compiler driver styles, consulting
+`vswhere` for an installed MSVC toolchain (as Moon does) before assuming a
+`clang` found on `PATH` is the linker:
 
 - `clang`/`clang++`: `-Wl,/SUBSYSTEM:WINDOWS -Wl,/ENTRY:mainCRTStartup`
 - `clang-cl`/`cl`: `/link /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup`

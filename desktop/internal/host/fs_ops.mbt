@@ -37,7 +37,11 @@ async fn read_directory_op(payload : ReadDirPayload) -> ReadDirReply {
 
 ///|
 async fn read_file_op(payload : ReadFilePayload) -> ReadFileReply {
-  let file = WirePath::parse(payload.path).absolute
+  let file = if payload.root is Some(root) {
+    WirePath::parse(root).resolve(payload.path)
+  } else {
+    WirePath::parse(payload.path).absolute
+  }
   let native = file.to_string()
   let source = @fs.open(native, mode=ReadOnly) catch {
     error if @async.is_being_cancelled() => raise error
@@ -59,11 +63,57 @@ async fn read_file_op(payload : ReadFilePayload) -> ReadFileReply {
     error if @async.is_being_cancelled() => raise error
     error => raise HostError("failed to read file: \{error}")
   }
-  // `text()` raises on invalid UTF-8 — treat that as a binary file the
-  // read-only viewer cannot render.
-  let content = data.text() catch { _ => return Binary }
-  let absolute = file.resource_path()
-  Content(content~, absolute~, sig="\{seconds}:\{nanos}")
+  // Classify the bytes already read from this handle. The shared policy trusts
+  // raster signatures rather than extensions and returns decoded text without
+  // making callers perform a second UTF-8 pass.
+  let bytes = data.binary()
+  match @filekind.classify(bytes) {
+    RasterImage(media_type~) =>
+      BinaryContent(data_base64=@base64.encode(bytes), media_type~)
+    Utf8Text(content) => {
+      let absolute = file.resource_path()
+      Content(content~, absolute~, sig="\{seconds}:\{nanos}")
+    }
+    Binary => Binary
+  }
+}
+
+///|
+async test "binary file reads expose only recognized raster signatures" {
+  let dir = "_build/host-read-file-image-test"
+  if @fs.exists(dir) {
+    @fs.rmdir(dir, recursive=true)
+  }
+  @fs.mkdir(dir, recursive=true)
+  let image = "\{dir}/image.png"
+  @fs.write_file(image, b"\x89PNG\r\n\x1a\nsmall", create_mode=CreateOrTruncate)
+  let absolute = @pathx.Path(@fs.realpath(image))
+    .to_absolute()
+    .unwrap()
+    .to_uri_path()
+    .unwrap()
+  assert_eq(
+    read_file_op({ path: absolute, root: None }),
+    BinaryContent(data_base64="iVBORw0KGgpzbWFsbA==", media_type="image/png"),
+  )
+  let root = @pathx.Path(@fs.realpath(dir))
+    .to_absolute()
+    .unwrap()
+    .to_uri_path()
+    .unwrap()
+  assert_eq(
+    read_file_op({ path: "image.png", root: Some(root) }),
+    BinaryContent(data_base64="iVBORw0KGgpzbWFsbA==", media_type="image/png"),
+  )
+  let disguised = "\{dir}/not-an-image.png"
+  @fs.write_file(disguised, b"\xffnot an image", create_mode=CreateOrTruncate)
+  let disguised_absolute = @pathx.Path(@fs.realpath(disguised))
+    .to_absolute()
+    .unwrap()
+    .to_uri_path()
+    .unwrap()
+  assert_eq(read_file_op({ path: disguised_absolute, root: None }), Binary)
+  @fs.rmdir(dir, recursive=true)
 }
 
 ///|

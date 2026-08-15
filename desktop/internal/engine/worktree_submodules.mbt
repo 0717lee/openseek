@@ -22,10 +22,12 @@ fn gitlink_paths(metadata : String) -> Array[String] {
 /// initialized in the attached main checkout. Optional, uninitialized
 /// submodules stay opt-in. `--checkout` deliberately overrides any configured
 /// `!command` update procedure; recursive children use the ordinary checkout
-/// strategy too.
+/// strategy too. The timeout is the caller's validated workspace-settings
+/// snapshot; expiry raises into the existing create-or-repair rollback path.
 async fn provision_initialized_submodules(
   origin : @pathx.Absolute,
   checkout : @pathx.Absolute,
+  timeout_seconds : Int,
 ) -> Unit {
   // Worktrees branch from HEAD, not the main checkout's staged index.
   let tree = git_output_text(origin, ["ls-tree", "-r", "-z", "HEAD"])
@@ -57,13 +59,64 @@ async fn provision_initialized_submodules(
   for path in initialized {
     args.push(path)
   }
-  ignore(git_in(checkout, args))
+  guard @async.with_timeout_opt(timeout_seconds * 1_000, () => {
+      git_in(checkout, args)
+    })
+    is Some(_) else {
+    raise EngineError(
+      "Submodules did not finish initializing within \{timeout_seconds} seconds. Increase the checkout timeout in Workspace Settings or leave submodules uninitialized.",
+    )
+  }
 }
 
 ///|
 test "gitlink paths preserve exact names and deduplicate conflict stages" {
   let index = "100644 dead 0\tplain\u{0}160000 aaa 0\tdeps/one\u{0}160000 bbb 1\twith space\u{0}160000 ccc 2\twith space\u{0}"
   assert_eq(gitlink_paths(index), ["deps/one", "with space"])
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "submodule checkout stops at its hard timeout" {
+  archive_env_test_lock.acquire()
+  defer archive_env_test_lock.release()
+  let root = worktree_test_root("openseek-worktree-sub-timeout-")
+  let dependency = root.join("dependency")
+  prepare_git_repo(dependency)
+  let repo = root.join("repo")
+  prepare_git_repo(repo)
+  ignore(git_in(repo, ["config", "protocol.file.allow", "always"]))
+  ignore(
+    git_in(repo, [
+      "-c",
+      "protocol.file.allow=always",
+      "submodule",
+      "add",
+      "-q",
+      dependency.to_string(),
+      "deps/one",
+    ]),
+  )
+  ignore(
+    git_in(repo, [
+      "-c", "user.email=test@example.com", "-c", "user.name=test", "-c", "commit.gpgsign=false",
+      "commit", "-q", "-am", "add submodule",
+    ]),
+  )
+  let checkout = root.join("checkout")
+  ignore(git_in(repo, ["worktree", "add", "-q", checkout.to_string()]))
+  let detail = try {
+    provision_initialized_submodules(repo, checkout, 0)
+    "no error"
+  } catch {
+    EngineError(detail) => detail
+    error if @async.is_being_cancelled() => raise error
+    error => "\{error}"
+  }
+  assert_eq(
+    detail, "Submodules did not finish initializing within 0 seconds. Increase the checkout timeout in Workspace Settings or leave submodules uninitialized.",
+  )
+  @fs.rmdir(root.to_string(), recursive=true)
 }
 
 ///|

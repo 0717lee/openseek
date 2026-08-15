@@ -540,6 +540,7 @@ async fn engine_stdout(manager : EngineManager, args : Array[String]) -> String 
     extra_env={ "OPENSEEK_DIR": "." },
     inherit_env=true,
     stdin=child_stdin,
+    no_console_window=true,
   ) catch {
     error if @async.is_being_cancelled() => raise error
     error => raise EngineError("failed to run engine: \{error}")
@@ -586,6 +587,7 @@ async fn session_show_output(
       stdin=child_stdin,
       stdout=child_stdout,
       stderr=child_stderr,
+      no_console_window=true,
       cancel_handler=@process.hard_cancel(),
       no_wait=false,
     )
@@ -746,6 +748,63 @@ pub async fn load_session(
   }
   let document : @protocol.SessionDocument = @json.from_json(json) catch {
     _ => raise EngineError("engine returned a malformed session")
+  }
+  { session: document, watermark: Some(session_max_sequence(document)) }
+}
+
+///|
+/// Read a durable transcript from a store's archived twin without moving it
+/// back into the live store. The same manager-global reader lease used by
+/// `load_session` makes an archive/unarchive rename wait for this snapshot.
+pub async fn load_archived_session(
+  manager : EngineManager,
+  payload : @protocol.LoadSessionPayload,
+) -> LoadSessionReply {
+  let session = payload.session.trim().to_owned()
+  guard !session.is_empty() else {
+    raise EngineError("session id must not be empty")
+  }
+  let record_guard = manager.begin_record_read(session)
+  defer manager.end_record_read(session, record_guard)
+  // A workspace hint selects that registered store's archived twin. Without
+  // one, find the archived record across all attached stores and the global
+  // store, matching the placement rules of the archived index.
+  let root = if payload.workspace is Some(hint) && !hint.is_blank() {
+    guard @pathx.Absolute::from_uri_path(hint) is Some(absolute) &&
+      registered_workspace(absolute) is Some(workspace) else {
+      raise EngineError("\{hint} is not a registered workspace")
+    }
+    Some(archived_session_root(workspace_session_root(workspace)))
+  } else {
+    match archived_record_root(session) {
+      Some(root) => Some(archived_session_root(root))
+      None => None
+    }
+  }
+  guard root is Some(root) else {
+    if live_record_root(session) is Some(_) {
+      raise EngineError("this conversation is not archived")
+    }
+    raise EngineError(
+      "no archived record for this conversation in the global store or any attached workspace",
+    )
+  }
+  if !@fsx.is_dir(root.join("sessions").join(session).to_path()) {
+    if live_record_root(session) is Some(_) {
+      raise EngineError("this conversation is not archived")
+    }
+    raise EngineError("no archived record for this conversation")
+  }
+  let output = session_show_stdout(manager, session, root) catch {
+    EngineError(detail) =>
+      raise EngineError("archived session load failed: " + detail)
+    error => raise error
+  }
+  let json = @json.parse(output) catch {
+    _ => raise EngineError("engine returned a malformed archived session")
+  }
+  let document : @protocol.SessionDocument = @json.from_json(json) catch {
+    _ => raise EngineError("engine returned a malformed archived session")
   }
   { session: document, watermark: Some(session_max_sequence(document)) }
 }
@@ -1332,6 +1391,39 @@ async test "session load preserves a future item without hiding known events" {
   assert_eq(events.length(), 3)
   assert_true(events[1].item is Unknown(_))
   assert_eq(reply.watermark, Some(3))
+  @fs.rmdir(dir, recursive=true)
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "archived session load reads without restoring the record" {
+  archive_env_test_lock.acquire()
+  defer archive_env_test_lock.release()
+  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  let dir = @fs.tmpdir(prefix="openseek-load-archived-")
+  let engine = dir + "/engine.sh"
+  @sys.set_env_var("OPENSEEK_SESSION_ROOT", dir)
+  defer restore_session_root_env(previous)
+  @fsx.ensure_dir(Path(dir + "/archived/sessions/s-archived"))
+  @fs.write_file(
+    engine,
+    "#!/bin/sh\nprintf '%s' '{\"events\":[{\"sequence\":1,\"item\":{\"kind\":\"user\",\"payload\":{\"content\":\"question\"}}},{\"sequence\":2,\"item\":{\"kind\":\"assistant\",\"payload\":{\"content\":\"answer\"}}}]}'\n",
+    create_mode=CreateOrTruncate,
+  )
+  assert_eq(@process.run("chmod", ["+x", engine]), 0)
+  let manager = new_engine_manager(engine)
+  let reply = load_archived_session(manager, {
+    session: "s-archived",
+    workspace: None,
+  })
+  guard reply.session.events is Some(events) else {
+    fail("expected archived session events")
+  }
+  assert_eq(events.length(), 2)
+  assert_eq(reply.watermark, Some(2))
+  assert_true(@fsx.is_dir(Path(dir + "/archived/sessions/s-archived")))
+  assert_false(@fsx.exists(Path(dir + "/sessions/s-archived")))
+  assert_true(manager.record_guards.is_empty())
   @fs.rmdir(dir, recursive=true)
 }
 

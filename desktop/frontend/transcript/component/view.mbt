@@ -121,6 +121,36 @@ fn flatten_tool_activity(items : Array[@transcript.TranscriptItem]) -> Bool {
 }
 
 ///|
+/// A mixed activity card already promotes its only successful tool's brief to
+/// the outer summary. Return that tool so the expanded body can show its
+/// arguments/output directly instead of repeating the same disclosure label.
+/// Keep failed and plan calls nested: their badge and progress affordances
+/// belong to the ordinary tool-card rendering.
+fn inline_singleton_tool(
+  items : Array[@transcript.TranscriptItem],
+) -> @transcript.TranscriptItem? {
+  let mut tool : @transcript.TranscriptItem? = None
+  let mut has_reasoning = false
+  for item in items {
+    match item.kind {
+      Reasoning => has_reasoning = true
+      Tool(name~, is_error~, ..) if name != "plan" && !is_error =>
+        if tool is Some(_) {
+          return None
+        } else {
+          tool = Some(item)
+        }
+      _ => return None
+    }
+  }
+  if has_reasoning {
+    tool
+  } else {
+    None
+  }
+}
+
+///|
 fn capitalize(text : String) -> String {
   // `[first, .. rest]` binds the first Unicode scalar and the true remainder.
   // The old `iter().next()` + `text[1:]` mixed a scalar with a code-unit slice:
@@ -176,6 +206,7 @@ fn activity_view(
   if flatten_tool_activity(items) {
     return @html.div(class="activity-row", [tool_line_view(items)])
   }
+  let inline_tool = inline_singleton_tool(items)
   let log : Array[@html.Html] = []
   let mut index = 0
   while index < items.length() {
@@ -185,7 +216,11 @@ fn activity_view(
         tools.push(items[index])
         index = index + 1
       }
-      log.push(tool_line_view(tools))
+      if inline_tool is Some(tool) && tools.length() == 1 {
+        log.push(inline_tool_call_view(tool))
+      } else {
+        log.push(tool_line_view(tools))
+      }
     } else {
       // Reasoning; callers never pass user messages, assistant prose, or
       // error bubbles.
@@ -255,6 +290,20 @@ fn tool_line_view(tools : Array[@transcript.TranscriptItem]) -> @html.Html {
 /// sessions may have no recorded arguments; unmatched results keep their old
 /// output-only presentation.
 fn tool_call_view(item : @transcript.TranscriptItem) -> @html.Html {
+  tool_call_view_mode(item, show_label=true)
+}
+
+///|
+/// The enclosing activity summary already names this singleton tool.
+fn inline_tool_call_view(item : @transcript.TranscriptItem) -> @html.Html {
+  tool_call_view_mode(item, show_label=false)
+}
+
+///|
+fn tool_call_view_mode(
+  item : @transcript.TranscriptItem,
+  show_label~ : Bool,
+) -> @html.Html {
   guard item.kind is Tool(name~, arguments~, is_error~, brief~, ..) else {
     return @html.text("")
   }
@@ -305,7 +354,14 @@ fn tool_call_view(item : @transcript.TranscriptItem) -> @html.Html {
     )
   }
   if body.is_empty() {
+    if !show_label {
+      return @html.text("")
+    }
     @html.div(class="tool-call-label" + error_class, label)
+  } else if !show_label {
+    // The enclosing activity disclosure already carries this one tool's
+    // label. Keep the class so the existing section/pre styling still applies.
+    @html.div(class="tool-call" + error_class, body)
   } else {
     @html.details(
       class="tool-call" + error_class,
@@ -586,6 +642,47 @@ fn summary_card_view(
 }
 
 ///|
+/// The in-flight reasoning stream: a bounded, internally scrolling activity
+/// block, so a long thinking phase keeps showing progress without taking over
+/// the transcript. Once answer text starts, the thought remains visible but
+/// moves the streaming caret to the response bubble where new text is arriving.
+fn streaming_reasoning_view(
+  content : String,
+  streaming~ : Bool,
+  on_open : (String) -> @cmd.Cmd,
+) -> @html.Html {
+  let state_class = if streaming { " streaming" } else { "" }
+  @html.div(class="activity-row", [
+    @html.div(class="streaming-thought" + state_class, [
+      @html.div(class="streaming-thought-header", [
+        @html.span(class="streaming-thought-dot", ""),
+        @html.span(
+          class="streaming-thought-label",
+          if streaming {
+            "Thinking"
+          } else {
+            "Thought"
+          },
+        ),
+      ]),
+      @html.div(
+        class="streaming-thought-scroll",
+        attrs=@html.Attrs::build()
+          .role("region")
+          .aria_label("Live model thinking")
+          .tabindex(0),
+        [
+          @html.div(
+            class="msg-content markdown activity-thinking",
+            @markdown.markdown_nodes(content, open_file=on_open),
+          ),
+        ],
+      ),
+    ]),
+  ])
+}
+
+///|
 /// The in-flight assistant turn, rendered live from the engine's streamed
 /// deltas. The committed `assistant_message` replaces it in the transcript.
 /// The partial text is re-parsed as markdown on every delta; an unterminated
@@ -616,106 +713,24 @@ fn transcript_view(
   on_jump : (@mention_context.Target) -> @cmd.Cmd,
   on_jump_latest~ : @cmd.Cmd,
 ) -> @html.Html {
-  let items : Array[@html.Html] = []
-  // The durable transcript plus client-local notices, rendered through one
-  // folding pass. Live semantic events never synthesize durable-looking
-  // items here; their store commits populate the transcript.
-  let visible = input.items
-  if visible.is_empty() {
-    items.push(
-      @html.div(class="empty", [
-        @html.div(class="empty-badge", [@icons.icon(@icons.icon_logo)]),
-        @html.div(class="empty-title", "What should we build?"),
-        @html.div(
-          class="empty-sub",
-          "OpenSeek plans the work, edits files across your workspace, runs your tests, and hands back a reviewable result.",
-        ),
-      ]),
-    )
-  } else {
-    // Reasoning and tool results fold behind collapsed activity cards;
-    // everything the agent says stays out. Assistant messages break the run
-    // like user messages and error bubbles do, so a turn reads as narration,
-    // work, narration, work, answer rather than hiding the interim narration
-    // inside the fold above the final answer. The same fold renders whether
-    // the turn is still streaming or long settled, so nothing shown live
-    // vanishes or restyles when the turn lands.
-    let mut index = 0
-    while index < visible.length() {
-      guard visible[index].kind is (Tool(..) | Reasoning) else {
-        let item = visible[index]
-        let anchor = if item.kind is User {
-          Some(@transcript_overview.TurnKey::of(item, index~).anchor())
-        } else {
-          None
-        }
-        items.push(transcript_item_view(item, on_open, anchor?, on_jump~))
-        if item.kind is User {
-          items.push(turn_rule_view(ts?=item.ts))
-        }
-        index = index + 1
-        continue
-      }
-      let run : Array[@transcript.TranscriptItem] = []
-      while index < visible.length() &&
-            visible[index].kind is (Tool(..) | Reasoning) {
-        run.push(visible[index])
-        index = index + 1
-      }
-      items.push(activity_view(run, on_open))
-    }
-  }
-  if !input.streaming_response.is_empty() {
-    items.push(streaming_response_view(input.streaming_response, on_open))
-  }
-  // Sub-runs in flight sit at the tail, where the turn currently is: their
-  // tool call is what the conversation is blocked on, and it can block for
-  // forty-five minutes.
-  for lane in input.subruns {
-    items.push(subrun_lane_view(lane))
-  }
-  // Keep the rail mounted as the first child so the stream's vdom position
-  // stays stable even while a conversation grows from one turn to two.
-  let children = [
-    @transcript_overview.rail(
-      @transcript_overview.entries(visible, display=text => {
-        match @mention_context.parse(text) {
-          Some(message) => message.display_text()
-          None => text
-        }
-      }),
-      overview,
-      overview_emit,
-      clock=ms => clock_label(ms),
-    ),
-    @html.div(id="stream", class="stream", items),
-  ]
-  // Reading history unpins auto-follow (see `watch_transcript_scroll`); the
-  // floating button is the way back to the live tail. Sticky inside the
-  // scroller with zero height, so it never adds scroll length.
-  if !pinned {
-    children.push(
-      @html.div(class="jump-latest-wrap", [
-        @html.button(
-          class="jump-latest",
-          type_="button",
-          title="Jump to latest",
-          on_click=on_jump_latest,
-          @icons.icon(@icons.icon_arrow_down),
-        ),
-      ]),
-    )
-  }
-  // These identity attributes make a conversation switch observable even
-  // when both conversations render identical children (notably two empty
-  // chats). The component subscription reconciles its local scroll state on
-  // their mutation instead of relying on incidental transcript DOM changes.
+  let renderer : TranscriptRenderer = { input, on_open, on_jump }
+  let children = renderer.section_children(
+    pinned, overview, overview_emit, on_jump_latest,
+  )
+  // These identity attributes make conversation and root changes observable
+  // even when the rendered children stay identical. The component subscription
+  // reconciles local state on their mutation instead of relying on incidental
+  // transcript DOM changes.
   @html.section(
     attrs=@html.Attrs::build()
       .id("transcript")
       .class("transcript")
       .data_set("transcript-channel", input.focused.uri_authority())
       .data_set("transcript-session", input.active_session)
+      .data_set(
+        "transcript-root",
+        input.root.map(uri => uri.to_string()).unwrap_or(""),
+      )
       .data_set(
         "transcript-submission",
         input.submission_generation.to_string(),
