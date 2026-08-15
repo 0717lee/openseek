@@ -1,0 +1,28 @@
+import {
+  "moonbit-community/fuzzy_match",
+  "moonbit-community/rabbita",
+  "moonbit-community/rabbita/cmd",
+  "moonbit-community/rabbita/dom",
+  "moonbit-community/rabbita/html",
+  "moonbit-community/rabbita/js",
+  "moonbitlang/core/debug",
+  "moonbitlang/editor/base/common",
+  "openseek_desktop/internal/commands",
+  "openseek_desktop/frontend/files",
+  "openseek_desktop/frontend/icons",
+  "openseek_desktop/frontend/interop",
+  "openseek_desktop/frontend/pathx",
+  "openseek_desktop/frontend/resource",
+  "openseek_desktop/frontend/symbols",
+}
+
+supported_targets = "js"
+
+import {
+  "moonbit-community/rabbita",
+  "moonbit-community/rabbita/cmd",
+  "moonbitlang/editor/base/common",
+  "openseek_desktop/frontend/interop",
+  "openseek_desktop/frontend/pathx",
+  "openseek_desktop/frontend/resource",
+} for "test"

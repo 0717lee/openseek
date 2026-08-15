@@ -1348,12 +1348,6 @@ test "a broadcast for one workspace never fences a sibling's reply" {
 test "a worktree commit broadcast supersedes lists and unbinds removed names" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
-  let worktree_root = @interop.ChannelId::Local.test_resource(
-    "/proj/.worktrees/wt",
-  )
-  let owner = active_quick_open_owner(test_model())
-  let generation = 7
-  let old_key = file_query_cache_key(owner, generation)
   let placed = test_model()
     .replace_conversation({
       ..test_conversation(),
@@ -1368,28 +1362,15 @@ test "a worktree commit broadcast supersedes lists and unbinds removed names" {
       ],
       worktrees_request_generation: 1,
     })
-  let model = {
-    ..placed,
-    quick_open: Some({
-      owner,
-      value: "",
-      items: [QuickOpenFile(@pathx.Relative("old-only.mbt"))],
-      selected: 0,
-      phase: QuickOpenReady,
-      generation,
-    }),
-    quick_open_generation: generation,
-    file_query_cache: {
-      owner: Some(owner),
-      root: Some(worktree_root),
-      active_key: Some(old_key),
-      loading_key: None,
-    },
-  }
+  // The durable worktree name has no registry row bound to this session, so
+  // the conversation has no live checkout yet. Open Quick Open there, giving
+  // the broadcast a running search to fence.
+  let (_, model) = update(dispatch, QuickOpenOpen(@quick_open.Files), placed)
+  assert_eq(model.conversation_root(model.active()), None)
+  assert_true(model.quick_open.is_open())
   let changed_msg = WorktreesChanged([], workspace~)
   let (_, repeated) = update_dev(dispatch, changed_msg, model)
   let (_, changed) = update_dev(dispatch, changed_msg, model)
-  assert_true(changed.file_query_cache == repeated.file_query_cache)
   assert_true(changed.quick_open == repeated.quick_open)
   inspect(changed.dev().worktrees_request_generation, content="2")
   assert_true(
@@ -1401,30 +1382,12 @@ test "a worktree commit broadcast supersedes lists and unbinds removed names" {
   // composer's branch chip) went with it.
   assert_true(changed.active().workspace is Project(_))
   assert_true(changed.active().branch is None)
-  assert_eq(changed.file_query_cache.root, Some(workspace))
-  guard changed.file_query_cache.loading_key is Some(new_key) &&
-    changed.quick_open is Some(restarted) else {
-    fail("workspace file cache should restart")
-  }
-  assert_true(new_key != old_key)
-  assert_eq(restarted.generation, generation + 1)
-  assert_true(restarted.phase is QuickOpenLoading)
-  assert_eq(restarted.items.length(), 0)
-  let (_, stale_files) = update(
-    dispatch,
-    QuickOpenFilesLoaded(
-      owner~,
-      cache_key=old_key,
-      query="",
-      generation~,
-      files=[@pathx.Relative("stale.mbt")],
-      from_cache=true,
-      limit_hit=false,
-    ),
-    changed,
-  )
-  assert_true(stale_files.file_query_cache == changed.file_query_cache)
-  assert_true(stale_files.quick_open == changed.quick_open)
+  assert_eq(changed.conversation_root(changed.active()), Some(workspace))
+  // A root arrived under the open palette, so the post-message reconciliation
+  // restarts its run against the project it can actually search. The package
+  // owns what that restart does; the shell owns only that it happens at all.
+  assert_true(changed.quick_open.is_open())
+  assert_true(changed.quick_open != model.quick_open)
   let (_, stale) = update_dev(
     dispatch,
     WorktreesLoaded(
