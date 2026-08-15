@@ -53,7 +53,7 @@ async fn terminal_open_op(
   terminals : @terminal.TerminalState,
   payload : TerminalOpenPayload,
 ) -> TerminalOpenReply {
-  guard @engine.resolve_in_workspace(
+  guard @work_dir.resolve_in_workspace(
       payload.session,
       "",
       workspace?=payload.workspace,

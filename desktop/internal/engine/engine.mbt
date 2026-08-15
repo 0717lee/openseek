@@ -743,6 +743,23 @@ fn EngineManager::serving(
 }
 
 ///|
+/// The three host facts a worktree lifecycle operation needs, handed to the
+/// worktree package as one value. Everything else about a checkout — the
+/// registry, git, the placement rules — is that package's own business, and
+/// nothing there may reach into the pump.
+pub fn EngineManager::worktree_host(
+  self : EngineManager,
+) -> @worktree.WorktreeHost {
+  {
+    lifecycle_lock: self.workspace_lifecycle_lock,
+    session_is_live: session => {
+      self.pump is Serving(sessions~) && sessions.get(session) is Some(_)
+    },
+    drain_sessions: sessions => self.close_engines_for_sessions(sessions),
+  }
+}
+
+///|
 /// This conversation's slot, created empty on first touch.
 fn slot_for(sessions : Map[String, SessionSlot], key : String) -> SessionSlot {
   if sessions.get(key) is Some(slot) {
@@ -779,7 +796,7 @@ async fn EngineManager::close_engines_for_workspace(
   workspace : @pathx.Absolute,
 ) -> Unit {
   guard self.pump is Serving(sessions~) else { return }
-  let root = workspace_session_root(workspace).to_string()
+  let root = @workspaces.store_root(workspace).to_string()
   let idle : Array[ServeEngine] = []
   for _, slot in sessions {
     if slot.pending is Some(_) {
@@ -1536,7 +1553,7 @@ async fn ServeEngine::run(
             Some(SubrunStarted(id~, ..)) =>
               if engine.session_root is Some(root) && probes.get(id) is None {
                 probes[id] = group.spawn(no_wait=true, allow_failure=true, () => {
-                  follow_subrun_progress(
+                  @subrun.follow_progress(
                     root=root.to_string(),
                     parent_session=engine.session_key,
                     id~,

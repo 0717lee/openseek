@@ -23,13 +23,13 @@ async fn LanguagePath::authorized_root(
   }
   let lexical_root = lexical_root.normalize()
   let authorized = match
-    @engine.resolve_in_workspace(
+    @work_dir.resolve_in_workspace(
       session,
       "",
       workspace=lexical_root.to_string(),
     ) {
     Some(root) => Some(root)
-    None => @engine.resolve_in_workspace(session, "")
+    None => @work_dir.resolve_in_workspace(session, "")
   }
   guard authorized is Some(authorized) && authorized.normalize() == lexical_root else {
     raise HostError("root is not authorized for this conversation")
@@ -101,7 +101,7 @@ async test "language paths accept explicit roots and reject escapes" {
     } noraise {
       rejected => rejected
     }
-    @engine.authorize_host_workspace("language-test", root)
+    @work_dir.authorize_host_workspace("language-test", root)
     let resolved = LanguagePath::resolve("language-test", root, "src/main.mbt")
     let traversal_rejected = try {
       ignore(LanguagePath::resolve("language-test", root, "../outside.mbt"))
@@ -119,7 +119,7 @@ async test "language paths accept explicit roots and reject escapes" {
     } noraise {
       rejected => rejected
     }
-    @engine.revoke_host_workspace("language-test")
+    @work_dir.revoke_host_workspace("language-test")
     @fs.rmdir(root, recursive=true)
     @fs.rmdir(outside, recursive=true)
     assert_eq(resolved.physical_relative, Relative("src/main.mbt"))
@@ -128,7 +128,7 @@ async test "language paths accept explicit roots and reject escapes" {
     assert_true(symlink_rejected)
   } catch {
     error => {
-      @engine.revoke_host_workspace("language-test") catch {
+      @work_dir.revoke_host_workspace("language-test") catch {
         _ => ()
       }
       @fs.rmdir(root, recursive=true) catch {

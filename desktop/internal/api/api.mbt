@@ -152,12 +152,12 @@ fn CodexArchiveRequest::retained_worktree(
 /// used by OpenSeek conversations. App-server still owns thread data; this
 /// catalog adds only the placement that SeekMoon itself created.
 priv struct CodexWorktreeCatalog {
-  bindings : Array[@engine.CodexWorktreeBinding]
+  bindings : Array[@worktree.CodexWorktreeBinding]
 }
 
 ///|
 fn CodexWorktreeCatalog::CodexWorktreeCatalog(
-  bindings : Array[@engine.CodexWorktreeBinding],
+  bindings : Array[@worktree.CodexWorktreeBinding],
 ) -> CodexWorktreeCatalog {
   { bindings, }
 }
@@ -243,8 +243,8 @@ fn CodexWorkspaceBinding::decode_reply(value : Json) -> CodexWorkspaceBinding? {
 async fn CodexWorkspaceBinding::authorize(self : CodexWorkspaceBinding) -> Unit {
   match self.workspace {
     Some(workspace) if !workspace.trim().is_empty() =>
-      @engine.authorize_host_workspace(self.session, workspace)
-    _ => @engine.revoke_host_workspace(self.session)
+      @work_dir.authorize_host_workspace(self.session, workspace)
+    _ => @work_dir.revoke_host_workspace(self.session)
   }
 }
 
@@ -384,7 +384,7 @@ pub fn endpoints(
       guard payload.validated_id() is Some(draft_id) else {
         raise @host.PayloadError("invalid Codex draft id")
       }
-      @engine.revoke_host_workspace(draft_id)
+      @work_dir.revoke_host_workspace(draft_id)
       state.codex_draft_threads.forget(draft_id)
       Acknowledged
     }),
@@ -552,6 +552,7 @@ pub fn endpoints(
       }) catch {
         error if @async.is_being_cancelled() => raise error
         @engine.EngineError(message) => WorkspaceError(message)
+        @workspaces.WorkspaceError(message) => WorkspaceError(message)
         error => raise error
       }
     }),
@@ -561,13 +562,14 @@ pub fn endpoints(
       }) catch {
         error if @async.is_being_cancelled() => raise error
         @engine.EngineError(message) => WorkspaceError(message)
+        @workspaces.WorkspaceError(message) => WorkspaceError(message)
         error => raise error
       }
     }),
     @endpoint.Endpoint::remote(@commands.workspace_settings_get, async fn(
       payload,
     ) {
-      @engine.workspace_settings(payload.workspace)
+      @workspaces.settings(payload.workspace)
     }),
     @endpoint.Endpoint::remote(@commands.workspace_settings_set, async fn(
       payload,
@@ -577,7 +579,7 @@ pub fn endpoints(
       let worktree_mode = payload.worktree_mode
       let checkout_submodules = payload.checkout_submodules
       let submodule_checkout_timeout_seconds = payload.submodule_checkout_timeout_seconds
-      @engine.update_workspace_settings(
+      @workspaces.update_settings(
         payload.workspace,
         settings => state.hub.publish(WorkspaceSettingsChanged(settings)),
         worktree_mode?,
@@ -586,11 +588,11 @@ pub fn endpoints(
       )
     }),
     @endpoint.Endpoint::remote(@commands.worktree_list, async fn(payload) {
-      @engine.list_worktrees(payload.workspace)
+      @worktree.list(payload.workspace)
     }),
     @endpoint.Endpoint::remote(@commands.worktree_create, async fn(payload) {
       let owner = match (payload.session, payload.codex_thread) {
-        (Some(session), None) => @engine.WorktreeOwner::openseek(session)
+        (Some(session), None) => @worktree.WorktreeOwner::openseek(session)
         (None, Some(thread_id)) => {
           let workspace = state.codex_worktree_project(
             thread_id,
@@ -605,15 +607,15 @@ pub fn endpoints(
               state.hub.publish(WorkspaceChanged({ workspaces, }))
             }),
           )
-          @engine.WorktreeOwner::codex(thread_id)
+          @worktree.WorktreeOwner::codex(thread_id)
         }
         _ =>
           raise @host.PayloadError(
             "worktree.create requires exactly one conversation owner",
           )
       }
-      let reply = @engine.create_worktree(
-        state.manager,
+      let reply = @worktree.create(
+        state.manager.worktree_host(),
         payload.workspace,
         owner,
         worktrees => {
@@ -621,6 +623,7 @@ pub fn endpoints(
         },
       ) catch {
         error if @async.is_being_cancelled() => raise error
+        @worktree.WorktreeError(message) => return WorktreeCreateError(message)
         @engine.EngineError(message) => return WorktreeCreateError(message)
         error => raise error
       }
@@ -634,13 +637,13 @@ pub fn endpoints(
           info.codex_thread == Some(thread_id) && info.name == reply.name
         })
         is Some(info) {
-        @engine.authorize_host_workspace(thread_id, info.path)
+        @work_dir.authorize_host_workspace(thread_id, info.path)
       }
       WorktreeCreatedReply(reply)
     }),
     @endpoint.Endpoint::remote(@commands.worktree_remove, async fn(payload) {
-      @engine.remove_worktree(
-        state.manager,
+      @worktree.remove(
+        state.manager.worktree_host(),
         payload.workspace,
         payload.name,
         payload.force == Some(true),
@@ -817,7 +820,7 @@ async fn ApiState::codex_file_search(
   self : ApiState,
   payload : @protocol.CodexFileSearchPayload,
 ) -> @protocol.CodexFileSearchReply {
-  guard @engine.resolve_in_workspace(
+  guard @work_dir.resolve_in_workspace(
       payload.thread_id,
       "",
       workspace=payload.cwd,
@@ -847,7 +850,7 @@ async fn ApiState::open_codex_draft(
     )
     is Some(requested) {
     let normalized = requested.normalize()
-    if @engine.registered_workspaces().contains(normalized) {
+    if @workspaces.registered().contains(normalized) {
       Some(normalized.to_string())
     } else {
       None
@@ -866,7 +869,7 @@ async fn ApiState::open_codex_draft(
     project_root is Some(project_root) else {
     raise @host.PayloadError("invalid Codex draft project")
   }
-  @engine.authorize_host_workspace(draft_id, project_root)
+  @work_dir.authorize_host_workspace(draft_id, project_root)
   { draft_id, cwd: project_root, project_root }
 }
 
@@ -882,7 +885,7 @@ async fn ApiState::codex_thread_start(
     (Some(cwd), Some(draft_id)) => {
       guard @protocol.CodexDraftClosePayload::{ draft_id, }.validated_id()
         is Some(validated) &&
-        @engine.resolve_host_workspace_authorization(validated, cwd)
+        @work_dir.resolve_host_workspace_authorization(validated, cwd)
         is Some(authorized) &&
         @pathx.Absolute::from_uri_path(cwd) is Some(requested) &&
         authorized.normalize() == requested.normalize() else {
@@ -914,7 +917,7 @@ async fn ApiState::codex_turn_start(
   request : @protocol.CodexTurnStartPayload,
 ) -> @protocol.CodexTurnReply {
   if request.cwd is Some(cwd) {
-    guard @engine.resolve_host_workspace_authorization(request.thread_id, cwd)
+    guard @work_dir.resolve_host_workspace_authorization(request.thread_id, cwd)
       is Some(authorized) &&
       @pathx.Absolute::from_uri_path(cwd) is Some(requested) &&
       authorized.normalize() == requested.normalize() else {
@@ -952,7 +955,7 @@ async fn ApiState::codex_worktree_project(
   // operation as well as first creation. Existing tasks can have turns and an
   // app-server cwd at the missing checkout; the registry's exact owner/project
   // pair is the authority needed to recreate that same placement.
-  if @engine.list_codex_worktree_bindings()
+  if @worktree.list_codex_worktree_bindings()
     .iter()
     .any(binding => {
       binding.thread_id == thread_id && binding.workspace == requested
@@ -996,7 +999,7 @@ async fn ApiState::codex_skills_list(
   self : ApiState,
   payload : @protocol.CodexSkillsListPayload,
 ) -> @protocol.CodexDataReply {
-  guard @engine.resolve_in_workspace(
+  guard @work_dir.resolve_in_workspace(
       payload.thread_id,
       "",
       workspace=payload.cwd,
@@ -1053,7 +1056,7 @@ async fn ApiState::codex_request(
   // failed bridge command, so the frontend can keep the task selected.
   if archive is Some(request) &&
     !request.force &&
-    @engine.WorktreeOwner::codex(request.thread_id).archive_check()
+    @worktree.WorktreeOwner::codex(request.thread_id).archive_check()
     is Some(refusal) {
     return request.needs_force(refusal)
   }
@@ -1118,7 +1121,7 @@ async fn ApiState::codex_request(
     | "codex.thread.resume"
     | "codex.thread.read"
     | "codex.thread.list" =>
-      CodexWorktreeCatalog(@engine.list_codex_worktree_bindings()).annotate(
+      CodexWorktreeCatalog(@worktree.list_codex_worktree_bindings()).annotate(
         reply,
       )
     _ => reply
@@ -1128,13 +1131,13 @@ async fn ApiState::codex_request(
   // dirty check repeats after that write boundary; if new files appeared in
   // the small interval, retain the checkout and report the partial result.
   if archive is Some(request) {
-    let refusal = @engine.WorktreeOwner::codex(request.thread_id).archive_checkout(
+    let refusal = @worktree.WorktreeOwner::codex(request.thread_id).archive_checkout(
       request.force,
       on_committed=(workspace, worktrees) => {
         publish_worktree_changed(self, workspace, worktrees)
       },
     )
-    @engine.revoke_host_workspace(request.thread_id)
+    @work_dir.revoke_host_workspace(request.thread_id)
     if refusal is Some(refusal) {
       return request.retained_worktree(refusal)
     }

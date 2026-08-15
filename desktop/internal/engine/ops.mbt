@@ -33,7 +33,7 @@ pub async fn start_run(
   let record_guard = manager.begin_record_op(key)
   defer manager.end_record_op(key, record_guard)
   let config = run_config(manager, payload)
-  ensure_session_not_archived(key)
+  @session_store.ensure_not_archived(key)
   let sessions = manager.serving()
   let slot = slot_for(sessions, key)
   if slot.engine is Some(live) {
@@ -260,7 +260,7 @@ pub async fn compact_run(
   let session = payload.session.trim().to_owned()
   let record_guard = manager.begin_record_op(session)
   defer manager.end_record_op(session, record_guard)
-  ensure_session_not_archived(session)
+  @session_store.ensure_not_archived(session)
   let sessions = manager.serving()
   let slot = slot_for(sessions, session)
   // Claim before anything else — even with a live engine. A start between
@@ -388,7 +388,7 @@ pub async fn goal_run(
   }
   let record_guard = manager.begin_record_op(session)
   defer manager.end_record_op(session, record_guard)
-  ensure_session_not_archived(session)
+  @session_store.ensure_not_archived(session)
   let sessions = manager.serving()
   let slot = slot_for(sessions, session)
   // Claim before looking at the engine, exactly as compact_run does: a start
@@ -637,15 +637,15 @@ async fn session_show_stdout(
 /// store, in registration order. A group whose listing fails reports the
 /// failure in its `error` field rather than failing the whole reply.
 pub async fn list_sessions(manager : EngineManager) -> SessionsReply {
-  guard resolved_session_root() is Some(root) else {
+  guard @workspaces.global_store_root() is Some(root) else {
     raise EngineError(
       "cannot determine a session root; set OPENSEEK_SESSION_ROOT",
     )
   }
   let groups : Array[SessionGroup] = [session_group(manager, None, root)]
-  for path in registered_workspaces() {
+  for path in @workspaces.registered() {
     groups.push(
-      session_group(manager, Some(path), workspace_session_root(path)),
+      session_group(manager, Some(path), @workspaces.store_root(path)),
     )
   }
   { groups, }
@@ -704,12 +704,12 @@ pub async fn load_session(
   // store, which could return a different history for the same session id.
   let root = if payload.workspace is Some(hint) && !hint.is_blank() {
     guard @pathx.Absolute::from_uri_path(hint) is Some(absolute) &&
-      registered_workspace(absolute) is Some(workspace) else {
+      @workspaces.registered_dir(absolute) is Some(workspace) else {
       raise EngineError("\{hint} is not a registered workspace")
     }
-    Some(workspace_session_root(workspace))
+    Some(@workspaces.store_root(workspace))
   } else {
-    session_store_root(session)
+    @session_store.root_of(session)
   }
   guard root is Some(root) else {
     raise EngineError(
@@ -732,7 +732,7 @@ pub async fn load_session(
   // whose store just detached (or whose record moved to an archived twin),
   // and the answer should say that, not ENOENT.
   if !@fsx.is_dir(root.join("sessions").join(session).to_path()) {
-    if archived_record_root(session) is Some(_) {
+    if @session_store.archived_root_of(session) is Some(_) {
       raise EngineError("this conversation is archived; unarchive it first")
     }
     raise EngineError(
@@ -771,18 +771,18 @@ pub async fn load_archived_session(
   // store, matching the placement rules of the archived index.
   let root = if payload.workspace is Some(hint) && !hint.is_blank() {
     guard @pathx.Absolute::from_uri_path(hint) is Some(absolute) &&
-      registered_workspace(absolute) is Some(workspace) else {
+      @workspaces.registered_dir(absolute) is Some(workspace) else {
       raise EngineError("\{hint} is not a registered workspace")
     }
-    Some(archived_session_root(workspace_session_root(workspace)))
+    Some(@session_store.archived_root(@workspaces.store_root(workspace)))
   } else {
-    match archived_record_root(session) {
-      Some(root) => Some(archived_session_root(root))
+    match @session_store.archived_root_of(session) {
+      Some(root) => Some(@session_store.archived_root(root))
       None => None
     }
   }
   guard root is Some(root) else {
-    if live_record_root(session) is Some(_) {
+    if @session_store.live_root_of(session) is Some(_) {
       raise EngineError("this conversation is not archived")
     }
     raise EngineError(
@@ -790,7 +790,7 @@ pub async fn load_archived_session(
     )
   }
   if !@fsx.is_dir(root.join("sessions").join(session).to_path()) {
-    if live_record_root(session) is Some(_) {
+    if @session_store.live_root_of(session) is Some(_) {
       raise EngineError("this conversation is not archived")
     }
     raise EngineError("no archived record for this conversation")
@@ -857,7 +857,8 @@ fn @pathx.Absolute::resource_path(
 /// resource-path form the frontend binds to a channel. Readiness fails when
 /// this cannot be resolved, so `agent.connected` never carries an empty root.
 pub async fn scratch_root() -> String {
-  guard workspace_root() is Some(root) && root.to_absolute() is Some(root) else {
+  guard @work_dir.workspace_root() is Some(root) &&
+    root.to_absolute() is Some(root) else {
     raise EngineError("cannot determine the scratch workspace root")
   }
   root.resource_path()
@@ -869,7 +870,7 @@ pub async fn scratch_root() -> String {
 /// when it cannot be resolved, so `agent.connected` always names the store
 /// against which clients classify broadcast session roots.
 pub fn global_session_root() -> String raise EngineError {
-  guard resolved_session_root() is Some(root) else {
+  guard @workspaces.global_store_root() is Some(root) else {
     raise EngineError(
       "cannot determine a session root; set OPENSEEK_SESSION_ROOT",
     )
@@ -879,7 +880,7 @@ pub fn global_session_root() -> String raise EngineError {
 
 ///|
 pub async fn list_workspaces() -> WorkspacesReply {
-  Workspaces(registered_workspaces().map(path => path.resource_path()))
+  Workspaces(@workspaces.registered().map(path => path.resource_path()))
 }
 
 ///|
@@ -890,7 +891,7 @@ pub async fn attach_workspace(
   guard @pathx.Absolute::from_uri_path(path) is Some(absolute) else {
     raise EngineError("workspace is not a supported absolute resource path")
   }
-  let paths = add_workspace(absolute.0, paths => {
+  let paths = @workspaces.add(absolute.0, paths => {
     on_committed(paths.map(path => path.resource_path()))
   })
   Workspaces(paths.map(path => path.resource_path()))
@@ -907,9 +908,9 @@ pub async fn detach_workspace(
   }
   manager.workspace_lifecycle_lock.acquire()
   defer manager.workspace_lifecycle_lock.release()
-  let workspace = expanded_workspace_path(absolute.0)
+  let workspace = @workspaces.expanded_path(absolute.0)
   manager.close_engines_for_workspace(workspace)
-  let paths = remove_workspace(absolute.0, paths => {
+  let paths = @workspaces.remove(absolute.0, paths => {
     on_committed(paths.map(path => path.resource_path()))
   })
   Workspaces(paths.map(path => path.resource_path()))
@@ -1239,7 +1240,7 @@ async test "named session retries after its first prompt creates no record" {
   let count = root.join("serve-count")
   let first_ready = root.join("first-ready")
   let session = "s-" + mint_run_id()
-  let workspace = session_workspace_dir(session)
+  let workspace = @work_dir.of_session(session)
   prepare_fake_moonbit_seed(seed, version="0.10.0-test")
   prepare_fake_bundled_moonbit_home(
     runtime.join("toolchains/moonbit/macos-arm64"),
@@ -1556,7 +1557,7 @@ async test "workspace detach refuses a running conversation without hiding it" {
     guard workspace.to_absolute() is Some(workspace_path) else {
       fail("expected an absolute workspace fixture")
     }
-    assert_true(registered_workspaces().contains(workspace_path))
+    assert_true(@workspaces.registered().contains(workspace_path))
     group.return_immediately(())
   })
   @fs.rmdir(root.to_string(), recursive=true)

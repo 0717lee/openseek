@@ -7,7 +7,7 @@
 /// absolute default under the user's home directory. The absolute fallback
 /// matters because a packaged app can run with `/` as its working directory,
 /// where the engine's relative `.openseek` default could never be created.
-fn resolved_session_root(payload_root? : @pathx.Path) -> @pathx.Absolute? {
+pub fn global_store_root(payload_root? : @pathx.Path) -> @pathx.Absolute? {
   if payload_root is Some(root) {
     return Some(root.resolve())
   }
@@ -32,7 +32,7 @@ fn home_session_root() -> @pathx.Absolute? {
 test "explicit relative session roots resolve against the host cwd" {
   let root = @pathx.Path(".openseek-test-root")
   let expected = root.resolve()
-  guard resolved_session_root(payload_root=root) is Some(actual) else {
+  guard global_store_root(payload_root=root) is Some(actual) else {
     fail("expected session root")
   }
   assert_eq(actual, expected)
@@ -42,7 +42,7 @@ test "explicit relative session roots resolve against the host cwd" {
 test "explicit absolute session roots are normalized" {
   let root = @pathx.Path(".openseek-test-root").resolve().join("..")
   let expected = root.normalize()
-  guard resolved_session_root(payload_root=root.to_path()) is Some(actual) else {
+  guard global_store_root(payload_root=root.to_path()) is Some(actual) else {
     fail("expected session root")
   }
   assert_eq(actual, expected)

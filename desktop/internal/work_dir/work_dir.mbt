@@ -33,7 +33,7 @@ async fn HostWorkspaceAuthorizations::authorize(
   let candidate = @pathx.Path(trimmed).normalize().to_absolute()
   self.lock.acquire()
   defer self.lock.release()
-  if safe_workspace_id(session) && candidate is Some(candidate) {
+  if @session_store.safe_session_id(session) && candidate is Some(candidate) {
     self.paths[session] = candidate.0
   } else {
     self.paths.remove(session)
@@ -115,14 +115,14 @@ pub async fn resolve_host_workspace_authorization(
 /// anywhere. `None` when the id is unsafe as a path component, no home
 /// directory is known, or a bound checkout is missing. The run-config caller
 /// rejects every unavailable root instead of moving the run elsewhere.
-async fn session_workspace_dir(session : String) -> @pathx.Path? {
-  if workspace_of_session(session) is Some(workspace) {
+pub async fn of_session(session : String) -> @pathx.Path? {
+  if @session_store.workspace_of(session) is Some(workspace) {
     // A session bound to one of the workspace's worktrees works in that
     // checkout while it exists. A retained binding whose checkout is missing
     // refuses every workspace operation until the user rebuilds it.
-    return session_tree_dir(workspace, session).map(dir => dir.to_path())
+    return @worktree.tree_dir(workspace, session).map(dir => dir.to_path())
   }
-  guard safe_workspace_id(session) else { return None }
+  guard @session_store.safe_session_id(session) else { return None }
   guard workspace_root() is Some(root) else { return None }
   Some(root.join(session).normalize())
 }
@@ -134,7 +134,7 @@ async fn session_workspace_dir(session : String) -> @pathx.Path? {
 /// session id, so it answers even for a resumed conversation the frontend
 /// loaded without a live `cwd`.
 pub async fn session_cwd(session : String) -> @pathx.Absolute? {
-  guard session_workspace_dir(session) is Some(dir) else { return None }
+  guard of_session(session) is Some(dir) else { return None }
   // `session_workspace_dir` is assembled from the absolute home directory.
   // Keep the validation here so that callers never regain the old `""`
   // sentinel or an unclassified string.
@@ -154,13 +154,13 @@ pub async fn session_review_base(
 ) -> String? {
   let workspace = if workspace is Some(hint) &&
     @pathx.Absolute::from_uri_path(hint) is Some(hint) &&
-    registered_workspace(hint) is Some(workspace) {
+    @workspaces.registered_dir(hint) is Some(workspace) {
     Some(workspace)
   } else {
-    workspace_of_session(session)
+    @session_store.workspace_of(session)
   }
   guard workspace is Some(workspace) else { return None }
-  session_tree_base(workspace, session)
+  @worktree.tree_base(workspace, session)
 }
 
 ///|
@@ -179,15 +179,16 @@ pub async fn resolve_in_workspace(
 ) -> @pathx.Absolute? {
   let root = match workspace {
     Some(hint) if @pathx.Absolute::from_uri_path(hint) is Some(hint) =>
-      match registered_workspace(hint) {
+      match @workspaces.registered_dir(hint) {
         // The hint names the workspace; a session bound to one of its
         // worktrees still roots in that checkout. A Codex thread instead
         // supplies an exact process-local cwd authorized by app-server.
-        Some(dir) => session_tree_dir(dir, session).map(root => root.to_path())
+        Some(dir) =>
+          @worktree.tree_dir(dir, session).map(root => root.to_path())
         None => host_workspace_authorizations.resolve(session, hint)
       }
     Some(_) => None
-    None => session_workspace_dir(session)
+    None => of_session(session)
   }
   guard root is Some(root) else { return None }
   guard root.to_absolute() is Some(root) else { return None }
@@ -245,7 +246,7 @@ pub async fn attached_workspace_dir(path : @pathx.Absolute) -> @pathx.Absolute? 
     return None
   }
   let mut best : @pathx.Absolute? = None
-  for workspace in registered_workspaces() {
+  for workspace in @workspaces.registered() {
     guard workspace.contains(resolved_absolute) else { continue }
     if best is Some(current) && current.0.length() >= workspace.0.length() {
       continue
@@ -257,7 +258,7 @@ pub async fn attached_workspace_dir(path : @pathx.Absolute) -> @pathx.Absolute? 
     // workspace root: language ops routed by path alone must answer from the
     // worktree's own tree. An unregistered `.worktrees` path (a subtask
     // slice) keeps resolving to the workspace root.
-    worktree_owner_dir(workspace, resolved_absolute)
+    @worktree.owner_dir(workspace, resolved_absolute)
   } else {
     guard workspace_root() is Some(root) else { return None }
     guard root.to_absolute() is Some(root_absolute) else { return None }
@@ -295,25 +296,13 @@ fn contained_path(
 }
 
 ///|
-/// Whether a session id can serve as a single path component under the
-/// workspace root. Path separators and dot segments could escape the root —
-/// those conversations work in the home directory instead.
-fn safe_workspace_id(session : String) -> Bool {
-  !session.is_empty() &&
-  session != "." &&
-  session != ".." &&
-  !session.contains("/") &&
-  !session.contains("\\")
-}
-
-///|
 /// Root for per-conversation workspaces: an `OpenSeek` folder inside the
 /// user's Documents directory — the agent's output is user-facing work, not
 /// app data, so it belongs where the user already looks for files. Where
 /// Documents is comes from the platform (`@userdirs.documents_dir`); when
 /// that folder does not exist (headless machines, say), the folder lives
 /// directly under the home directory.
-async fn workspace_root() -> @pathx.Path? {
+pub async fn workspace_root() -> @pathx.Path? {
   guard @home.dir() is Some(home) else { return None }
   let parent : @pathx.Path = if @userdirs.documents_dir() is Some(documents) &&
     @fsx.is_dir(documents) {
@@ -324,27 +313,9 @@ async fn workspace_root() -> @pathx.Path? {
   Some(parent.join(WorkspaceDirName).normalize())
 }
 
-// Tests for the pure workspace-path helper. The full
-// `session_workspace_dir` / `workspace_root` chain depends on the
-// environment (HOME, an existing Documents folder), so the tests cover the
-// pure piece: which ids are allowed under the workspace root.
-
-///|
-test "session ids are accepted as workspace folder names" {
-  assert_true(safe_workspace_id("desktop-20260611-093045-123"))
-  assert_true(safe_workspace_id("my-cli-session"))
-  assert_true(safe_workspace_id("a.b"))
-}
-
-///|
-test "ids that could escape the workspace root are rejected" {
-  assert_false(safe_workspace_id(""))
-  assert_false(safe_workspace_id("."))
-  assert_false(safe_workspace_id(".."))
-  assert_false(safe_workspace_id("a/b"))
-  assert_false(safe_workspace_id("a\\b"))
-  assert_false(safe_workspace_id("../escape"))
-}
+// Tests for the pure open-target rule. The full `session_workspace_dir` /
+// `workspace_root` chain depends on the environment (HOME, an existing
+// Documents folder) and is covered by the live app.
 
 ///|
 test "absolute paths open as themselves" {

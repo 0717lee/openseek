@@ -161,7 +161,7 @@ async fn serve_config(
     guard @pathx.Absolute::from_uri_path(path) is Some(absolute) else {
       raise EngineError("workspace is not a supported absolute resource path")
     }
-    match registered_workspace(absolute) {
+    match @workspaces.registered_dir(absolute) {
       Some(dir) => Some(dir)
       None => raise EngineError("\{path} is not a registered workspace")
     }
@@ -187,24 +187,24 @@ async fn serve_config(
       // hint on every turn, not only the binding one). A binding whose
       // checkout vanished refuses here rather than moving the agent into the
       // main tree behind the user's back.
-      Some(session_run_dir(dir, session).to_path())
+      Some(@worktree.run_dir(dir, session).to_path())
       // A resumed project conversation recovers its registered project from
       // the durable record. Use the throwing resolver here so a retained
       // binding whose checkout vanished names that worktree instead of being
       // flattened into an unspecified missing cwd.
-    } else if workspace_of_session(session) is Some(dir) {
-      Some(session_run_dir(dir, session).to_path())
+    } else if @session_store.workspace_of(session) is Some(dir) {
+      Some(@worktree.run_dir(dir, session).to_path())
     } else {
-      session_workspace_dir(session)
+      @work_dir.of_session(session)
     },
     session,
     session_root: if workspace is Some(dir) {
-      Some(workspace_session_root(dir))
+      Some(@workspaces.store_root(dir))
     } else {
       // A hint-less client resuming an existing workspace conversation must
       // keep using that workspace's store. Only genuinely new sessions fall
       // back to the global root; otherwise one id forks into two histories.
-      session_store_root(session)
+      @session_store.root_of(session)
     },
   }
 }
