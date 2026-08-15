@@ -215,15 +215,16 @@ fn Model::push_group_component_inputs(
   rows : Array[(RowStamp, @conversation.Input)],
   dev : DeviceState,
   workspace : @common.Uri,
-  listed~ : (String) -> Bool,
-  archived~ : (String) -> Bool,
+  listed~ : (RecordKey) -> Bool,
+  archived~ : (RecordKey) -> Bool,
 ) -> Unit {
   let composing = self.composing_new_chat()
   for conv in self.conversations.rev_iter() {
+    let key : RecordKey = { session: conv.session_id, workspace }
     if conv.device != dev.channel ||
       conv.project() != workspace ||
-      listed(conv.session_id) ||
-      archived(conv.session_id) {
+      listed(key) ||
+      archived(key) {
       continue
     }
     // A fresh worktree conversation knows its binding locally; once the
@@ -262,7 +263,7 @@ fn Model::push_group_component_inputs(
   }
   let durable : Array[@transcript.SessionListItem] = []
   for item in dev.sessions {
-    if item.workspace == workspace && !archived(item.id) {
+    if item.workspace == workspace && !archived({ session: item.id, workspace }) {
       durable.push(item)
     }
   }
@@ -393,11 +394,18 @@ fn Model::sidebar_component_sections(
   self : Model,
   dev : DeviceState,
 ) -> Array[@section.Input] {
-  let listed = (id : String) => dev.sessions.iter().any(item => item.id == id)
-  // An archived record has moved out of the live store, so the live list
-  // normally cannot contain it; the filter covers the moment between the
-  // archive reply and the list refetch that follows it.
-  let archived = (id : String) => dev.archived.iter().any(item => item.id == id)
+  // Both filters answer about one durable record, not one id: a record
+  // archived in a project store says nothing about the Scratch record beside
+  // it, and suppressing that row would read as archiving both.
+  let listed = (key : RecordKey) => {
+    dev.sessions.iter().any(item => key.matches(item))
+  }
+  // An archived record has moved out of its own live store, so that store's
+  // live list normally cannot contain it; the filter covers the moment
+  // between the archive reply and the list refetch that follows it.
+  let archived = (key : RecordKey) => {
+    dev.archived.iter().any(item => key.matches(item))
+  }
   let channel = dev.channel.uri_authority()
   let chat_selected = self.screen is Chat && dev.channel == self.focused
   // The activation identity handed to sections and projects: which
@@ -504,7 +512,11 @@ fn Model::sidebar_component_sections(
     let item = tree.item
     let active = self.focused == dev.channel &&
       self.active_session == item.id &&
-      self.find_conversation(dev.channel, item.id) is Some(conv) &&
+      self.find_record_conversation(dev.channel, {
+        session: item.id,
+        workspace: item.workspace,
+      })
+      is Some(conv) &&
       conv.is_archived_read_only()
     archived_entries.push(
       @section.Conversation({
@@ -2302,6 +2314,60 @@ test "same-id records in two project stores keep distinct row keys" {
   }
   assert_eq(keys.length(), 2)
   assert_true(keys[0] != keys[1])
+}
+
+///|
+test "archiving one store's record leaves the same id listed in the other" {
+  let other = @interop.ChannelId::Local.test_project()
+  let project = @interop.ChannelId::Local.test_resource("/work/alpha")
+  // What the sidebar shows right after one project's record is archived: the
+  // archived index holds it, and the live list still holds the other's.
+  let model = test_model().with_dev(dev => {
+    ..dev,
+    projects: [project, other],
+    sessions: [
+      {
+        id: "desktop-shared",
+        title: Some("other copy"),
+        workspace: other,
+        workspace_name: "work",
+        updated_at_ms: None,
+      },
+    ],
+    archived: [
+      {
+        id: "desktop-shared",
+        title: Some("project copy"),
+        workspace: project,
+        workspace_name: "alpha",
+        updated_at_ms: None,
+      },
+    ],
+  })
+  let live : Array[String?] = []
+  let mut archived_rows = 0
+  for section in model.sidebar_component_sections(model.dev()) {
+    for entry in section.entries {
+      match entry {
+        @section.Project(row) =>
+          for conversation in row.conversations {
+            if conversation.id.conversation() == "desktop-shared" {
+              live.push(conversation.id.root())
+            }
+          }
+        @section.Conversation(conversation) =>
+          if conversation.id.conversation() == "desktop-shared" &&
+            conversation.id.source() == "openseek.archived" {
+            archived_rows = archived_rows + 1
+          }
+        _ => ()
+      }
+    }
+  }
+  // The other project's row survives its neighbour's archive; only the
+  // selected record moved into the Archived group.
+  assert_eq(live, [Some(other.path)])
+  assert_eq(archived_rows, 1)
 }
 
 ///|

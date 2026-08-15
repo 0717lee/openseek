@@ -3018,8 +3018,12 @@ fn Model::can_reload_transcript(self : Model, conv : Conversation) -> Bool {
     conv.awaits_durable_proof() {
     return true
   }
+  // Whether THIS conversation's record is listed. A same-id record in
+  // another store is a different conversation, and reloading against it
+  // would ask the host to read a store this conversation is not bound to.
   match self.device_state(conv.device) {
-    Some(dev) => dev.sessions.iter().any(item => item.id == conv.session_id)
+    Some(dev) =>
+      dev.sessions.iter().any(item => conv.record_key().matches(item))
     None => false
   }
 }
