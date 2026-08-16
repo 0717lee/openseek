@@ -61,6 +61,7 @@ pub fn update(
       }
     OpenSession(session_id) => {
       let selection_changed = state.active_id != Some(session_id)
+      let failed_prompt = state.failed_prompts.get(session_id)
       (
         @cmd.batch([
           state.load_history(dispatch, session_id),
@@ -75,12 +76,12 @@ pub fn update(
             state.selection_generation
           },
           draft: if selection_changed {
-            ""
+            failed_prompt.map(prompt => prompt.draft.task).unwrap_or("")
           } else {
             state.draft
           },
           mentions: if selection_changed {
-            []
+            failed_prompt.map(prompt => prompt.draft.mentions).unwrap_or([])
           } else {
             state.mentions
           },
@@ -98,7 +99,11 @@ pub fn update(
             state.worktree_project
           },
           loading: true,
-          notice: "",
+          notice: if selection_changed {
+            failed_prompt.map(prompt => prompt.message).unwrap_or("")
+          } else {
+            ""
+          },
         },
       )
     }
@@ -217,6 +222,10 @@ pub fn update(
             ..state,
             prompt_generation: generation,
             prompt_pending_session: state.active_id,
+            failed_prompts: match state.active_id {
+              Some(session_id) => state.failed_prompts.remove(session_id)
+              None => state.failed_prompts
+            },
             loading: true,
             notice: "",
           },
@@ -291,12 +300,9 @@ pub fn update(
         _ => (@cmd.none, state)
       }
     Reply(kind~, value~) => {
-      if kind.prompt_origin() is Some((session_id, generation)) {
+      if kind.prompt_origin() is Some((_, generation)) {
         if state.prompt_generation != generation {
           return (@cmd.none, state)
-        }
-        if state.active_id != Some(session_id) && kind is DshPromptReply(..) {
-          return (@cmd.none, { ..state, prompt_pending_session: None })
         }
       }
       // dsh reports application failures inside successful HTTP responses.
@@ -335,6 +341,11 @@ pub fn update(
           )
         None => @cmd.none
       }
+      let failed_prompts = match kind {
+        DshPromptReply(session_id~, draft~, ..) =>
+          state.failed_prompts.put(session_id, draft, message)
+        _ => state.failed_prompts
+      }
       // A reply belongs to the page state that submitted it. Session changes
       // and later sends must not clear another conversation's draft/loading.
       if kind.prompt_origin() is Some((session_id, generation)) {
@@ -353,6 +364,7 @@ pub fn update(
               cleanup_cmd,
               {
                 ..state,
+                failed_prompts,
                 prompt_pending_session: if state.prompt_pending_session ==
                   Some(session_id) {
                   None
@@ -410,6 +422,7 @@ pub fn update(
         cleanup_cmd,
         {
           ..state,
+          failed_prompts,
           connection: if kind is DshStatusReply {
             DshUnavailable(message)
           } else {
@@ -549,10 +562,16 @@ fn State::with_reply(
       .prompt_origin()
       .map(origin => self.active_id != Some(origin.0))
       .unwrap_or(false)
+    let failed_prompts = match kind {
+      DshPromptReply(session_id~, draft~, ..) =>
+        self.failed_prompts.put(session_id, draft, envelope.error())
+      _ => self.failed_prompts
+    }
     return (
       cleanup_cmd,
       {
         ..self,
+        failed_prompts,
         prompt_pending_session: if kind.failed_worktree() is Some(_) {
           self.prompt_pending_session
         } else if kind.prompt_origin() is Some(_) {
@@ -727,6 +746,10 @@ fn State::with_reply(
         _ => sessions.get(0).map(row => row.id)
       }
       let selection_changed = self.active_id != active_id
+      let failed_prompt = match active_id {
+        Some(session_id) => self.failed_prompts.get(session_id)
+        None => None
+      }
       let next = {
         ..self,
         connection: DshReady,
@@ -738,12 +761,12 @@ fn State::with_reply(
           self.selection_generation
         },
         draft: if selection_changed {
-          ""
+          failed_prompt.map(prompt => prompt.draft.task).unwrap_or("")
         } else {
           self.draft
         },
         mentions: if selection_changed {
-          []
+          failed_prompt.map(prompt => prompt.draft.mentions).unwrap_or([])
         } else {
           self.mentions
         },
@@ -773,6 +796,11 @@ fn State::with_reply(
           self.worktree_project
         },
         loading: false,
+        notice: if selection_changed {
+          failed_prompt.map(prompt => prompt.message).unwrap_or("")
+        } else {
+          self.notice
+        },
       }
       match active_id {
         Some(id) if selection_changed =>
@@ -969,9 +997,20 @@ fn State::with_reply(
         },
       )
     DshPromptReply(session_id~, draft~, generation~) => {
-      guard self.active_id == Some(session_id) &&
-        self.prompt_generation == generation else {
+      guard self.prompt_generation == generation else {
         return (@cmd.none, self)
+      }
+      if self.active_id != Some(session_id) {
+        // A successful background submission has no visible page state to
+        // reconcile, but it still settles this session's retry snapshot.
+        return (
+          @cmd.none,
+          {
+            ..self,
+            prompt_pending_session: None,
+            failed_prompts: self.failed_prompts.remove(session_id),
+          },
+        )
       }
       let submitted_unchanged = self.draft == draft.task &&
         self.mentions == draft.mentions
@@ -990,6 +1029,7 @@ fn State::with_reply(
             self.mentions
           },
           prompt_pending_session: None,
+          failed_prompts: self.failed_prompts.remove(session_id),
           loading: false,
           notice: "",
         },
@@ -1269,6 +1309,10 @@ fn State::with_event(
       } else {
         self.active_id
       }
+      let failed_prompt = match active_id {
+        Some(id) => self.failed_prompts.get(id)
+        None => None
+      }
       let pending = self.pending.filter(item => item.session_id() != session_id)
       (
         @cmd.batch([
@@ -1341,15 +1385,16 @@ fn State::with_event(
             pending.iter().any(item => item.rpc_id() == rpc_id)
           }),
           draft: if removed_active {
-            ""
+            failed_prompt.map(prompt => prompt.draft.task).unwrap_or("")
           } else {
             self.draft
           },
           mentions: if removed_active {
-            []
+            failed_prompt.map(prompt => prompt.draft.mentions).unwrap_or([])
           } else {
             self.mentions
           },
+          failed_prompts: self.failed_prompts.remove(session_id),
           prompt_pending_session: if self.prompt_pending_session ==
             Some(session_id) {
             None
@@ -1363,6 +1408,11 @@ fn State::with_event(
             active_id is Some(_)
           } else {
             self.loading
+          },
+          notice: if removed_active {
+            failed_prompt.map(prompt => prompt.message).unwrap_or("")
+          } else {
+            self.notice
           },
         },
       )
@@ -1594,6 +1644,7 @@ fn DshEventRecord::next_streaming_text(
   // A final append replaces the chunks in the transcript, and either kind of
   // turn boundary invalidates text left behind by an interrupted response.
   if self.type_ == "turn/start" ||
+    self.type_ == "turn/end" ||
     (
       (self.type_ == "user/message" || self.type_ == "assistant/message") &&
       self.surface_append == Some(true)
@@ -2786,6 +2837,13 @@ test "dsh event log drops an interrupted turn at the next boundary" {
     ]).streaming_text(),
     "next",
   )
+  assert_eq(
+    DshEventLog([
+      old_chunk,
+      { type_: "turn/end", seq: 2, time: None, data: {}, surface_append: None },
+    ]).streaming_text(),
+    "",
+  )
 }
 
 ///|
@@ -3607,6 +3665,43 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
   assert_eq(background_failed.notice, "session 2 notice")
   assert_false(background_failed.loading)
   assert_false(background_failed.busy())
+  let (_, reopened_failed) = update(
+    dispatch,
+    OpenSession("session-1"),
+    background_failed,
+  )
+  assert_eq(reopened_failed.draft, "inspect this project")
+  assert_true(reopened_failed.mentions.is_empty())
+  assert_eq(reopened_failed.notice, "prompt transport failed")
+  let (_, background_rejected) = update(
+    dispatch,
+    Reply(
+      kind=DshPromptReply(
+        session_id="session-1",
+        draft={ task: "inspect this project", mentions: [] },
+        generation=1,
+      ),
+      value={
+        "type": "server-response",
+        "rpcId": "prompt-background-rejected",
+        "result": {
+          "ok": false,
+          "error": { "code": "request-failed", "message": "prompt rejected" },
+        },
+      },
+    ),
+    background_prompting,
+  )
+  assert_eq(background_rejected.prompt_pending_session, None)
+  assert_eq(background_rejected.draft, "draft for session 2")
+  assert_eq(background_rejected.notice, "session 2 notice")
+  let (_, reopened_rejected) = update(
+    dispatch,
+    OpenSession("session-1"),
+    background_rejected,
+  )
+  assert_eq(reopened_rejected.draft, "inspect this project")
+  assert_eq(reopened_rejected.notice, "request-failed: prompt rejected")
   let (_, moved) = registered.with_reply(
     dispatch,
     DshPromptWorkspaceReply(

@@ -154,18 +154,27 @@ fn State::apply_composer_action(
       } else {
         self.mentions
       }
-      (@cmd.none, { ..self, draft, mentions })
+      let failed_prompts = match self.active_id {
+        Some(session_id) =>
+          self.failed_prompts.with_draft(session_id, { task: draft, mentions })
+        None => self.failed_prompts
+      }
+      (@cmd.none, { ..self, draft, mentions, failed_prompts })
     }
-    @composer.RootMentionRemoved(mention~, ..) =>
-      (
-        @cmd.none,
-        {
-          ..self,
-          mentions: self.mentions.filter(existing => {
-            existing.ref_ != mention.ref_
-          }),
-        },
-      )
+    @composer.RootMentionRemoved(mention~, ..) => {
+      let mentions = self.mentions.filter(existing => {
+        existing.ref_ != mention.ref_
+      })
+      let failed_prompts = match self.active_id {
+        Some(session_id) =>
+          self.failed_prompts.with_draft(session_id, {
+            task: self.draft,
+            mentions,
+          })
+        None => self.failed_prompts
+      }
+      (@cmd.none, { ..self, mentions, failed_prompts })
+    }
     @composer.StopRequested(..) => update(dispatch, Stop, self)
     @composer.DraftPresenceChanged(..)
     | @composer.SlashCommand(..)
@@ -235,7 +244,11 @@ fn State::with_annotation(self : State, mention : @composer.Mention) -> State {
   guard self.has_active() else { return self }
   let draft : @composer.Draft = { task: self.draft, mentions: self.mentions }
   let draft = draft.with_mention(mention)
-  { ..self, draft: draft.task, mentions: draft.mentions }
+  let failed_prompts = match self.active_id {
+    Some(session_id) => self.failed_prompts.with_draft(session_id, draft)
+    None => self.failed_prompts
+  }
+  { ..self, draft: draft.task, mentions: draft.mentions, failed_prompts }
 }
 
 ///|

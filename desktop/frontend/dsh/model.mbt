@@ -141,6 +141,59 @@ priv struct DshSettledInteraction {
 } derive(Eq)
 
 ///|
+/// A rejected final prompt remains owned by its originating dsh session even
+/// if another session is visible when the reply arrives. Retain a recovery
+/// snapshot until that session retries; deliberate composer edits update it.
+priv struct DshFailedPrompt {
+  session_id : String
+  draft : @composer.Draft
+  message : String
+} derive(Eq)
+
+///|
+priv struct DshFailedPrompts(Array[DshFailedPrompt]) derive(Eq)
+
+///|
+fn DshFailedPrompts::get(
+  self : DshFailedPrompts,
+  session_id : String,
+) -> DshFailedPrompt? {
+  self.0.iter().find_first(prompt => prompt.session_id == session_id)
+}
+
+///|
+fn DshFailedPrompts::put(
+  self : DshFailedPrompts,
+  session_id : String,
+  draft : @composer.Draft,
+  message : String,
+) -> DshFailedPrompts {
+  let prompts = self.0.filter(prompt => prompt.session_id != session_id)
+  prompts.push({ session_id, draft, message })
+  DshFailedPrompts(prompts)
+}
+
+///|
+fn DshFailedPrompts::remove(
+  self : DshFailedPrompts,
+  session_id : String,
+) -> DshFailedPrompts {
+  DshFailedPrompts(self.0.filter(prompt => prompt.session_id != session_id))
+}
+
+///|
+fn DshFailedPrompts::with_draft(
+  self : DshFailedPrompts,
+  session_id : String,
+  draft : @composer.Draft,
+) -> DshFailedPrompts {
+  match self.get(session_id) {
+    Some(prompt) => self.put(session_id, draft, prompt.message)
+    None => self
+  }
+}
+
+///|
 priv enum DshReplyKind {
   DshStatusReply
   DshPendingReply
@@ -296,6 +349,9 @@ struct State {
   creation_pending : Bool
   prompt_generation : Int
   prompt_pending_session : String?
+  // Prompt transport and business errors can settle after navigation. Keep
+  // their recovery drafts separate from the visible composer.
+  failed_prompts : DshFailedPrompts
   // Cancellations settle over HTTP independently from running-status events.
   // Keep every originating session busy until its matching reply arrives;
   // navigation can start another cancellation before the first one settles.
@@ -332,6 +388,7 @@ pub fn State::State(loading? : Bool = false) -> State {
     creation_pending: false,
     prompt_generation: 0,
     prompt_pending_session: None,
+    failed_prompts: DshFailedPrompts([]),
     cancel_pending_sessions: [],
     response_pending_rpcs: [],
     loading,
