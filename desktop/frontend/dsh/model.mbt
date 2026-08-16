@@ -194,6 +194,19 @@ fn DshFailedPrompts::with_draft(
 }
 
 ///|
+/// One final prompt whose carrier reply was lost after dispatch. The dsh log
+/// is the authority: a direct user message above `after_seq` with the same
+/// immutable content proves acceptance; its absence proves the draft is safe
+/// to restore. Transport or malformed history failures prove neither.
+priv struct DshPromptReconciliation {
+  session_id : String
+  draft : @composer.Draft
+  generation : Int
+  after_seq : Int
+  transport_message : String
+} derive(Eq)
+
+///|
 priv enum DshReplyKind {
   DshStatusReply
   DshPendingReply
@@ -234,6 +247,7 @@ priv enum DshReplyKind {
     draft~ : @composer.Draft,
     generation~ : Int
   )
+  DshPromptHistoryReply(DshPromptReconciliation)
   DshCancelReply(String)
   DshResponseReply(rpc_id~ : String, session_id~ : String)
 }
@@ -273,6 +287,7 @@ enum Msg {
     generation~ : Int,
     message~ : String?
   )
+  PromptDeliveryUnknown(DshPromptReconciliation)
   Send
   Stop
   ApprovalDecision(rpc_id~ : String, outcome~ : String)
@@ -340,6 +355,11 @@ struct State {
   session_titles : Array[DshSessionTitleObservation]
   active_id : String?
   events : Array[DshEventRecord]
+  // Highest dsh sequence observed for the selected conversation, including
+  // transient assistant chunks that are deliberately absent from `events`.
+  // It deduplicates overlapping history/WebSocket delivery without making
+  // chunks consume the bounded durable transcript window.
+  event_sequence : Int
   streaming : String
   models : DshModels
   placement : @composer.WorktreeChoice
@@ -364,6 +384,14 @@ struct State {
   creation_pending : Bool
   prompt_generation : Int
   prompt_pending_session : String?
+  // Sequence of the originating conversation at Enter. A worktree pipeline
+  // can reach the final request after navigation has replaced the selected
+  // page's `event_sequence`, so reconciliation must not read that newer page.
+  prompt_after_seq : Int
+  // A lost final prompt reply is not a failed prompt. Keep its immutable
+  // submission here until session.history proves whether dsh appended it;
+  // while present the global prompt fence prevents a duplicate retry.
+  prompt_reconciliation : DshPromptReconciliation?
   // Prompt transport and business errors can settle after navigation. Keep
   // their recovery drafts separate from the visible composer.
   failed_prompts : DshFailedPrompts
@@ -390,6 +418,7 @@ pub fn State::State(loading? : Bool = false) -> State {
     session_titles: [],
     active_id: None,
     events: [],
+    event_sequence: -1,
     streaming: "",
     models: DshModelsIdle,
     placement: @composer.LocalCheckout,
@@ -403,6 +432,8 @@ pub fn State::State(loading? : Bool = false) -> State {
     creation_pending: false,
     prompt_generation: 0,
     prompt_pending_session: None,
+    prompt_after_seq: -1,
+    prompt_reconciliation: None,
     failed_prompts: DshFailedPrompts([]),
     cancel_pending_sessions: [],
     response_pending_rpcs: [],
@@ -447,6 +478,8 @@ fn DshReplyKind::prompt_origin(self : DshReplyKind) -> (String, Int)? {
     | DshPromptWorkspacesReply(session_id~, generation~, ..)
     | DshPromptReply(session_id~, generation~, ..) =>
       Some((session_id, generation))
+    DshPromptHistoryReply(reconciliation) =>
+      Some((reconciliation.session_id, reconciliation.generation))
     _ => None
   }
 }

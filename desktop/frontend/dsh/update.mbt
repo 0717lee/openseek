@@ -10,6 +10,11 @@ pub fn update(
   match msg {
     Refresh => {
       let commands = [state.refresh(dispatch)]
+      if state.prompt_reconciliation is Some(reconciliation) {
+        // Refresh is the explicit recovery gesture after a read-only history
+        // failure. Re-run the proof without releasing the submission fence.
+        commands.push(reconciliation.request(dispatch))
+      }
       if state.active_id is Some(session_id) {
         commands.push(
           state.load_worktree_binding(
@@ -99,6 +104,7 @@ pub fn update(
             state.mentions
           },
           events: [],
+          event_sequence: -1,
           streaming: "",
           models: DshModelsLoading(session_id~),
           placement: if selection_changed {
@@ -298,6 +304,29 @@ pub fn update(
         },
       )
     }
+    PromptDeliveryUnknown(reconciliation) => {
+      guard state.prompt_generation == reconciliation.generation &&
+        state.prompt_pending_session == Some(reconciliation.session_id) else {
+        return (@cmd.none, state)
+      }
+      (
+        reconciliation.request(dispatch),
+        {
+          ..state,
+          prompt_reconciliation: Some(reconciliation),
+          loading: if state.active_id == Some(reconciliation.session_id) {
+            true
+          } else {
+            state.loading
+          },
+          notice: if state.active_id == Some(reconciliation.session_id) {
+            "Verifying whether DeepSeek Harness accepted the prompt…"
+          } else {
+            state.notice
+          },
+        },
+      )
+    }
     Send =>
       if state.busy() ||
         state.submission_empty() ||
@@ -306,28 +335,31 @@ pub fn update(
         (@cmd.none, state)
       } else {
         let generation = state.prompt_generation + 1
-        let command = if state.active_blank() &&
-          state.placement.wants_fresh() &&
-          state.worktree_project is Some(project) &&
-          state.active_id is Some(session_id) {
-          state.create_worktree(dispatch, session_id, generation, project)
-        } else {
-          state.send(dispatch, generation)
-        }
-        (
-          command,
-          {
-            ..state,
-            prompt_generation: generation,
-            prompt_pending_session: state.active_id,
-            failed_prompts: match state.active_id {
-              Some(session_id) => state.failed_prompts.remove(session_id)
-              None => state.failed_prompts
-            },
-            loading: true,
-            notice: "",
+        // Build the next state before the command: a worktree pipeline may
+        // reach `send_prompt` after navigation, but the final reconciliation
+        // baseline must remain the originating conversation's sequence.
+        let sending = {
+          ..state,
+          prompt_generation: generation,
+          prompt_pending_session: state.active_id,
+          prompt_after_seq: state.event_sequence,
+          prompt_reconciliation: None,
+          failed_prompts: match state.active_id {
+            Some(session_id) => state.failed_prompts.remove(session_id)
+            None => state.failed_prompts
           },
-        )
+          loading: true,
+          notice: "",
+        }
+        let command = if sending.active_blank() &&
+          sending.placement.wants_fresh() &&
+          sending.worktree_project is Some(project) &&
+          sending.active_id is Some(session_id) {
+          sending.create_worktree(dispatch, session_id, generation, project)
+        } else {
+          sending.send(dispatch, generation)
+        }
+        (command, sending)
       }
     Stop =>
       if state.busy() || !state.is_running() {
@@ -432,6 +464,35 @@ pub fn update(
       state.with_reply(dispatch, kind, value)
     }
     Failed(kind~, message~) => {
+      if kind is DshPromptHistoryReply(reconciliation) {
+        guard state.prompt_generation == reconciliation.generation &&
+          state.prompt_pending_session == Some(reconciliation.session_id) else {
+          return (@cmd.none, state)
+        }
+        // A read failure is not evidence about prompt admission. Keep the
+        // global fence and immutable draft; Refresh repeats this safe query.
+        return (
+          @cmd.none,
+          {
+            ..state,
+            prompt_reconciliation: Some({
+              ..reconciliation,
+              transport_message: message,
+            }),
+            loading: if state.active_id == Some(reconciliation.session_id) {
+              false
+            } else {
+              state.loading
+            },
+            notice: if state.active_id == Some(reconciliation.session_id) {
+              "Could not verify whether DeepSeek Harness accepted the prompt; Refresh to retry verification: " +
+              message
+            } else {
+              state.notice
+            },
+          },
+        )
+      }
       if kind
         is DshPromptMoveReply(
           session_id~,
@@ -501,6 +562,7 @@ pub fn update(
               {
                 ..state,
                 failed_prompts,
+                prompt_reconciliation: None,
                 prompt_pending_session: if state.prompt_pending_session ==
                   Some(session_id) {
                   None
@@ -559,6 +621,11 @@ pub fn update(
         {
           ..state,
           failed_prompts,
+          prompt_reconciliation: if kind.prompt_origin() is Some(_) {
+            None
+          } else {
+            state.prompt_reconciliation
+          },
           connection: if kind is DshStatusReply {
             DshUnavailable(message)
           } else {
@@ -675,6 +742,81 @@ fn State::with_reply(
     )
   }
   let envelope = DshEnvelope(reply)
+  if kind is DshPromptHistoryReply(reconciliation) {
+    guard self.prompt_generation == reconciliation.generation &&
+      self.prompt_pending_session == Some(reconciliation.session_id) else {
+      return (@cmd.none, self)
+    }
+    guard envelope.value() is Some(history) else {
+      // A business or malformed envelope is no more authoritative than a
+      // transport failure. Preserve the draft and fence until Refresh can
+      // obtain a valid history page.
+      return (
+        @cmd.none,
+        {
+          ..self,
+          prompt_reconciliation: Some(reconciliation),
+          loading: if self.active_id == Some(reconciliation.session_id) {
+            false
+          } else {
+            self.loading
+          },
+          notice: if self.active_id == Some(reconciliation.session_id) {
+            "Could not verify whether DeepSeek Harness accepted the prompt; Refresh to retry verification: " +
+            envelope.error()
+          } else {
+            self.notice
+          },
+        },
+      )
+    }
+    match reconciliation.accepted(history) {
+      Some(true) =>
+        // The history record is the durable receipt. Reuse normal prompt
+        // settlement so draft edits/navigation retain their existing rules.
+        return { ..self, prompt_reconciliation: None }.with_reply(
+          dispatch,
+          DshPromptReply(
+            session_id=reconciliation.session_id,
+            draft=reconciliation.draft,
+            generation=reconciliation.generation,
+          ),
+          reply,
+        )
+      Some(false) =>
+        return update(
+          dispatch,
+          Failed(
+            kind=DshPromptReply(
+              session_id=reconciliation.session_id,
+              draft=reconciliation.draft,
+              generation=reconciliation.generation,
+            ),
+            message="DeepSeek Harness did not record the prompt after its reply was lost: " +
+              reconciliation.transport_message,
+          ),
+          { ..self, prompt_reconciliation: None },
+        )
+      None =>
+        return (
+          @cmd.none,
+          {
+            ..self,
+            prompt_reconciliation: Some(reconciliation),
+            loading: if self.active_id == Some(reconciliation.session_id) {
+              false
+            } else {
+              self.loading
+            },
+            notice: if self.active_id == Some(reconciliation.session_id) {
+              "DeepSeek Harness returned malformed history while verifying the prompt; Refresh to retry verification"
+            } else {
+              self.notice
+            },
+          },
+        )
+    }
+  }
   guard envelope.value() is Some(value) else {
     // A successful create reply still has global work to do after navigation:
     // workspace.create must continue to session.create, and session.create
@@ -1001,6 +1143,7 @@ fn State::with_reply(
             creation_pending: false,
             draft: "",
             events: [],
+            event_sequence: -1,
             streaming: "",
             models: DshModelsLoading(session_id~),
             placement: @composer.LocalCheckout,
@@ -1047,14 +1190,38 @@ fn State::with_reply(
         }
       }
       events.sort_by((left, right) => left.seq - right.seq)
-      // Rebuild before evicting the oldest records. A single in-progress
-      // assistant response can exceed the retained event window, while its
-      // visible text must remain complete until dsh appends the final message.
-      let streaming = DshEventLog(events).streaming_text()
+      // Rebuild from the complete snapshot before dropping transient chunks.
+      // If a newer WebSocket event arrived while history was in flight, the
+      // incremental projection already includes it and must win over the
+      // older HTTP baseline even though its chunk is not retained in events.
+      let snapshot_streaming = DshEventLog(events).streaming_text()
+      let streaming = if self.event_sequence > snapshot_last {
+        self.streaming
+      } else {
+        snapshot_streaming
+      }
+      let retained = events.filter(event => event.retained())
+      events.clear()
+      for event in retained {
+        events.push(event)
+      }
       while events.length() > DshEventWindowCapacity {
         ignore(events.remove(0))
       }
-      (@cmd.none, { ..self, streaming, events, loading: false })
+      (
+        @cmd.none,
+        {
+          ..self,
+          streaming,
+          events,
+          event_sequence: if self.event_sequence > snapshot_last {
+            self.event_sequence
+          } else {
+            snapshot_last
+          },
+          loading: false,
+        },
+      )
     }
     DshModelsReply(session_id) => {
       guard self.active_id == Some(session_id) else { return (@cmd.none, self) }
@@ -1157,6 +1324,7 @@ fn State::with_reply(
           {
             ..self,
             prompt_pending_session: None,
+            prompt_reconciliation: None,
             failed_prompts: self.failed_prompts.remove(session_id),
           },
         )
@@ -1178,6 +1346,7 @@ fn State::with_reply(
             self.mentions
           },
           prompt_pending_session: None,
+          prompt_reconciliation: None,
           failed_prompts: self.failed_prompts.remove(session_id),
           loading: false,
           notice: "",
@@ -1208,7 +1377,10 @@ fn State::with_reply(
           },
         )
       }
-    DshStatusReply | DshPendingReply | DshResponseReply(..) => (@cmd.none, self)
+    DshStatusReply
+    | DshPendingReply
+    | DshResponseReply(..)
+    | DshPromptHistoryReply(_) => (@cmd.none, self)
   }
 }
 
@@ -1395,28 +1567,24 @@ fn State::with_event(
       if self.active_id != Some(session_id) {
         return (@cmd.none, { ..self, sessions, })
       }
-      let events = self.events.copy()
-      if events.iter().any(item => item.seq == event.seq) {
+      // History and the live socket overlap intentionally. One monotonic high
+      // water mark deduplicates every event, including chunks that are absent
+      // from the retained transcript array.
+      if event.seq <= self.event_sequence {
         return (@cmd.none, { ..self, sessions, })
       }
-      let ordered = events.is_empty() ||
-        event.seq > events[events.length() - 1].seq
-      events.push(event)
-      let streaming = if ordered {
-        // WebSocket delivery is ordered in the normal path. Extend the
-        // in-progress assistant text once instead of sorting and replaying the
-        // complete event window for every text chunk.
-        event.next_streaming_text(self.streaming)
-      } else {
-        // Retain a defensive path for a future transport that can reorder
-        // messages. Rebuilding is exceptional and still bounded below.
-        events.sort_by((left, right) => left.seq - right.seq)
-        DshEventLog(events).streaming_text()
+      let events = self.events.copy()
+      let streaming = event.next_streaming_text(self.streaming)
+      if event.retained() {
+        events.push(event)
+        while events.length() > DshEventWindowCapacity {
+          ignore(events.remove(0))
+        }
       }
-      while events.length() > DshEventWindowCapacity {
-        ignore(events.remove(0))
-      }
-      (@cmd.none, { ..self, sessions, events, streaming })
+      (
+        @cmd.none,
+        { ..self, sessions, events, event_sequence: event.seq, streaming },
+      )
     }
     "host/session-status" => {
       guard @jsonx.json_text(payload, "sessionId") is Some(session_id) &&
@@ -1833,6 +2001,39 @@ fn DshEventRecord::next_streaming_text(
   } else {
     current
   }
+}
+
+///|
+/// Chunk frames are an incremental rendering transport, not transcript rows.
+/// Their text lives in `State.streaming`; retaining them here would let one
+/// verbose answer evict the user's question and tool lifecycle records.
+fn DshEventRecord::retained(self : DshEventRecord) -> Bool {
+  self.type_ != "assistant/chunk"
+}
+
+///|
+/// Decide a lost prompt only from a structurally valid history page. dsh logs
+/// the append-origin user message before acknowledging session.prompt, so an
+/// exact message above the pre-send sequence is its durable acceptance proof.
+fn DshPromptReconciliation::accepted(
+  self : DshPromptReconciliation,
+  history : Json,
+) -> Bool? {
+  guard history is Object(fields) &&
+    fields.get("events") is Some(Array(entries)) else {
+    return None
+  }
+  let expected = self.draft.prompt()
+  for entry in entries {
+    if entry is Object(entry_fields) &&
+      entry_fields.get("event") is Some(event_json) &&
+      DshEventRecord::decode(event_json) is Some(event) &&
+      event.seq > self.after_seq &&
+      event.direct_user_text() == Some(expected) {
+      return Some(true)
+    }
+  }
+  Some(false)
 }
 
 ///|
@@ -3142,21 +3343,25 @@ test "dsh event log drops an interrupted turn at the next boundary" {
 }
 
 ///|
-test "dsh live event window is bounded without truncating streaming text" {
+test "dsh chunks preserve the durable event window and streaming text" {
   let events : Array[DshEventRecord] = []
   for index in 0..<DshEventWindowCapacity {
     events.push({
-      type_: "assistant/chunk",
+      type_: "user/message",
       seq: index,
       time: None,
-      data: { "chunk": { "type": "text-delta", "text": "old" } },
-      surface_append: None,
+      data: {
+        "source": { "kind": "user" },
+        "content": [{ "type": "text", "text": "question {index}" }],
+      },
+      surface_append: Some(true),
     })
   }
   let state = {
     ..State(),
     active_id: Some("session-1"),
     events,
+    event_sequence: DshEventWindowCapacity - 1,
     streaming: "complete text before the retained window",
   }
   let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
@@ -3175,8 +3380,9 @@ test "dsh live event window is bounded without truncating streaming text" {
     },
   })
   assert_eq(next.events.length(), DshEventWindowCapacity)
-  assert_eq(next.events[0].seq, 1)
-  assert_eq(next.events[DshEventWindowCapacity - 1].seq, 200)
+  assert_eq(next.events[0].seq, 0)
+  assert_eq(next.events[DshEventWindowCapacity - 1].seq, 199)
+  assert_eq(next.event_sequence, 200)
   assert_eq(
     next.streaming,
     "complete text before the retained window plus tail",
@@ -3196,14 +3402,9 @@ test "dsh history keeps post-snapshot events without retaining an old window" {
         data: {},
         surface_append: None,
       },
-      {
-        type_: "assistant/chunk",
-        seq: 11,
-        time: None,
-        data: { "chunk": { "type": "text-delta", "text": "live" } },
-        surface_append: None,
-      },
     ],
+    event_sequence: 11,
+    streaming: "live",
   }
   let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   let (_, next) = state.with_reply(dispatch, DshHistoryReply("session-1"), {
@@ -3230,8 +3431,187 @@ test "dsh history keeps post-snapshot events without retaining an old window" {
       },
     },
   })
-  assert_eq(next.events.map(event => event.seq), [10, 11])
+  assert_eq(next.events.map(event => event.seq), [10])
+  assert_eq(next.event_sequence, 11)
   assert_eq(next.streaming, "live")
+}
+
+///|
+test "dsh history projects chunks without retaining them as transcript events" {
+  let state = { ..State(), active_id: Some("session-1"), loading: true }
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let (_, next) = state.with_reply(dispatch, DshHistoryReply("session-1"), {
+    "type": "server-response",
+    "rpcId": "history-streaming",
+    "result": {
+      "ok": true,
+      "value": {
+        "events": [
+          {
+            "event": {
+              "type": "user/message",
+              "seq": 1,
+              "surfaceOp": "append",
+              "data": {
+                "source": { "kind": "user" },
+                "content": [{ "type": "text", "text": "question" }],
+              },
+            },
+          },
+          {
+            "event": {
+              "type": "assistant/chunk",
+              "seq": 2,
+              "data": {
+                "chunk": { "type": "text-delta", "text": "partial answer" },
+              },
+            },
+          },
+        ],
+      },
+    },
+  })
+  assert_eq(next.events.map(event => event.seq), [1])
+  assert_eq(next.event_sequence, 2)
+  assert_eq(next.streaming, "partial answer")
+}
+
+///|
+test "dsh prompt reconciliation requires a newer direct user record" {
+  let reconciliation : DshPromptReconciliation = {
+    session_id: "session-1",
+    draft: { task: "inspect this", mentions: [] },
+    generation: 1,
+    after_seq: 10,
+    transport_message: "reply lost",
+  }
+  assert_eq(
+    reconciliation.accepted({
+      "events": [
+        {
+          "event": {
+            "type": "user/message",
+            "seq": 11,
+            "surfaceOp": "append",
+            "data": {
+              "source": { "kind": "user" },
+              "content": [{ "type": "text", "text": "inspect this" }],
+            },
+          },
+        },
+      ],
+    }),
+    Some(true),
+  )
+  assert_eq(
+    reconciliation.accepted({
+      "events": [
+        {
+          "event": {
+            "type": "user/message",
+            "seq": 10,
+            "surfaceOp": "append",
+            "data": {
+              "source": { "kind": "user" },
+              "content": [{ "type": "text", "text": "inspect this" }],
+            },
+          },
+        },
+        {
+          "event": {
+            "type": "user/message",
+            "seq": 12,
+            "surfaceOp": { "op": "replace", "id": "surface" },
+            "data": {
+              "source": { "kind": "user" },
+              "content": [{ "type": "text", "text": "inspect this" }],
+            },
+          },
+        },
+      ],
+    }),
+    Some(false),
+  )
+  assert_eq(reconciliation.accepted({ "events": null }), None)
+}
+
+///|
+test "dsh prompt history settles acceptance and preserves unknown read failures" {
+  let reconciliation : DshPromptReconciliation = {
+    session_id: "session-1",
+    draft: { task: "inspect this", mentions: [] },
+    generation: 1,
+    after_seq: 10,
+    transport_message: "reply lost",
+  }
+  let state = {
+    ..State(),
+    active_id: Some("session-1"),
+    draft: "inspect this",
+    prompt_generation: 1,
+    prompt_pending_session: Some("session-1"),
+    prompt_reconciliation: Some(reconciliation),
+    loading: true,
+  }
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let accepted_history : Json = {
+    "type": "server-response",
+    "rpcId": "history-accepted",
+    "result": {
+      "ok": true,
+      "value": {
+        "events": [
+          {
+            "event": {
+              "type": "user/message",
+              "seq": 11,
+              "surfaceOp": "append",
+              "data": {
+                "source": { "kind": "user" },
+                "content": [{ "type": "text", "text": "inspect this" }],
+              },
+            },
+          },
+        ],
+      },
+    },
+  }
+  let (_, settled) = state.with_reply(
+    dispatch,
+    DshPromptHistoryReply(reconciliation),
+    accepted_history,
+  )
+  assert_eq(settled.draft, "")
+  assert_eq(settled.prompt_pending_session, None)
+  assert_true(settled.prompt_reconciliation is None)
+
+  let (_, unverified) = update(
+    dispatch,
+    Failed(
+      kind=DshPromptHistoryReply(reconciliation),
+      message="history unavailable",
+    ),
+    state,
+  )
+  assert_eq(unverified.draft, "inspect this")
+  assert_eq(unverified.prompt_pending_session, Some("session-1"))
+  assert_true(unverified.prompt_reconciliation is Some(_))
+  assert_true(unverified.notice.contains("Refresh"))
+
+  let no_match : Json = {
+    "type": "server-response",
+    "rpcId": "history-missing",
+    "result": { "ok": true, "value": { "events": [] } },
+  }
+  let (_, retryable) = state.with_reply(
+    dispatch,
+    DshPromptHistoryReply(reconciliation),
+    no_match,
+  )
+  assert_eq(retryable.draft, "inspect this")
+  assert_eq(retryable.prompt_pending_session, None)
+  assert_true(retryable.prompt_reconciliation is None)
+  assert_true(retryable.failed_prompts.get("session-1") is Some(_))
 }
 
 ///|
@@ -3753,6 +4133,7 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
       routable=true,
     ),
     draft: "inspect this project",
+    event_sequence: 17,
   }
   let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   let (_, restored_binding) = update(
@@ -3780,6 +4161,7 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
   let (_, sending) = update(dispatch, Send, worktree)
   assert_eq(sending.prompt_generation, 1)
   assert_eq(sending.prompt_pending_session, Some("session-1"))
+  assert_eq(sending.prompt_after_seq, 17)
   let (_, reconciliation_deferred) = update(
     dispatch,
     WorktreeReconcile(

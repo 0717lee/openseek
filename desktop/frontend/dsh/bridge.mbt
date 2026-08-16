@@ -14,6 +14,8 @@ fn DshReplyKind::ordered_lane(self : DshReplyKind) -> String? {
       Some("dsh-workspace-list")
     DshSessionsReply(..) => Some("dsh-session-list")
     DshHistoryReply(session_id) => Some("dsh-history-" + session_id)
+    DshPromptHistoryReply(reconciliation) =>
+      Some("dsh-history-" + reconciliation.session_id)
     DshModelsReply(session_id) | DshSelectModelReply(session_id~) =>
       Some("dsh-models-" + session_id)
     _ => None
@@ -666,6 +668,20 @@ fn State::load_history(
 }
 
 ///|
+/// Re-read only the authoritative tail after a final prompt reply was lost.
+/// This operation is side-effect-free, so Refresh may repeat it until a valid
+/// history response decides whether the immutable submission was accepted.
+fn DshPromptReconciliation::request(
+  self : DshPromptReconciliation,
+  dispatch : @cmd.Emit[Msg],
+) -> @cmd.Cmd {
+  DshPromptHistoryReply(self).request(dispatch, "session.history", {
+    "sessionId": self.session_id,
+    "maxMessages": 200,
+  })
+}
+
+///|
 fn State::send(
   self : State,
   dispatch : @cmd.Emit[Msg],
@@ -688,7 +704,7 @@ fn State::send(
 /// worktree setup pipeline can call this after navigation without consulting
 /// the newly active session, draft, or running state.
 fn State::send_prompt(
-  _self : State,
+  self : State,
   dispatch : @cmd.Emit[Msg],
   session_id : String,
   draft : @composer.Draft,
@@ -697,15 +713,59 @@ fn State::send_prompt(
 ) -> @cmd.Cmd {
   let text = draft.prompt()
   guard !text.is_empty() else { return @cmd.none }
-  DshPromptReply(session_id~, draft~, generation~).request(
-    dispatch,
-    "session.prompt",
-    {
-      "sessionId": session_id,
-      "mode": mode,
-      "content": [{ "type": "text", "text": text }],
-    },
-  )
+  let reconciliation : DshPromptReconciliation = {
+    session_id,
+    draft,
+    generation,
+    after_seq: self.prompt_after_seq,
+    transport_message: "",
+  }
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      let request : @protocol.DshRequestPayload = {
+        method_: "session.prompt",
+        payload: {
+          "sessionId": session_id,
+          "mode": mode,
+          "content": [{ "type": "text", "text": text }],
+        },
+      }
+      let reply : @protocol.DshValueReply = @interop.bridge_request(
+        @interop.ChannelId::Local,
+        @commands.dsh_request,
+        request,
+      ) catch {
+        error => {
+          let message = @interop.bridge_error_text(error)
+          scheduler.add(
+            dispatch(
+              match @interop.bridge_failure(error) {
+                Refused | Unsent =>
+                  Failed(
+                    kind=DshPromptReply(session_id~, draft~, generation~),
+                    message~,
+                  )
+                Unknown =>
+                  PromptDeliveryUnknown({
+                    ..reconciliation,
+                    transport_message: message,
+                  })
+              },
+            ),
+          )
+          return
+        }
+      }
+      scheduler.add(
+        dispatch(
+          Reply(
+            kind=DshPromptReply(session_id~, draft~, generation~),
+            value=reply.value,
+          ),
+        ),
+      )
+    })
+  })
 }
 
 ///|

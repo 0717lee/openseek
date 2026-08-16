@@ -434,6 +434,17 @@ fn DshEventRecord::direct_user(self : DshEventRecord) -> Bool {
 }
 
 ///|
+/// Text of an append-origin human message. Reconciliation uses exactly the
+/// same projection as the visible transcript, so model-only replacement
+/// copies cannot be mistaken for a newly accepted Desktop prompt.
+fn DshEventRecord::direct_user_text(self : DshEventRecord) -> String? {
+  guard self.direct_user() && self.message() is Some(message) else {
+    return None
+  }
+  Some(DshContent(message).text("text"))
+}
+
+///|
 fn DshEventRecord::turn_error(self : DshEventRecord) -> String? {
   guard self.type_ == "turn/end" &&
     self.data is Object(fields) &&
