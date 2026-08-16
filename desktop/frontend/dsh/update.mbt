@@ -190,7 +190,10 @@ pub fn update(
           state.cancel(dispatch),
           {
             ..state,
-            cancel_pending_session: state.active_id,
+            cancel_pending_sessions: match state.active_id {
+              Some(id) => state.cancel_pending_sessions + [id]
+              None => state.cancel_pending_sessions
+            },
             loading: true,
             notice: "",
           },
@@ -269,12 +272,9 @@ pub fn update(
           @cmd.none,
           {
             ..state,
-            cancel_pending_session: if state.cancel_pending_session ==
-              Some(session_id) {
-              None
-            } else {
-              state.cancel_pending_session
-            },
+            cancel_pending_sessions: state.cancel_pending_sessions.filter(id => {
+              id != session_id
+            }),
           },
         )
       }
@@ -303,12 +303,9 @@ pub fn update(
           @cmd.none,
           {
             ..state,
-            cancel_pending_session: if state.cancel_pending_session ==
-              Some(session_id) {
-              None
-            } else {
-              state.cancel_pending_session
-            },
+            cancel_pending_sessions: state.cancel_pending_sessions.filter(id => {
+              id != session_id
+            }),
           },
         )
       }
@@ -366,10 +363,10 @@ pub fn update(
           } else {
             state.creation_pending
           },
-          cancel_pending_session: if kind is DshCancelReply(_) {
-            None
-          } else {
-            state.cancel_pending_session
+          cancel_pending_sessions: match kind {
+            DshCancelReply(session_id) =>
+              state.cancel_pending_sessions.filter(id => id != session_id)
+            _ => state.cancel_pending_sessions
           },
           models: if kind.model_session() is Some(session_id) {
             state.models.failed(session_id)
@@ -464,10 +461,10 @@ fn State::with_reply(
         } else {
           self.creation_pending
         },
-        cancel_pending_session: if kind is DshCancelReply(_) {
-          None
-        } else {
-          self.cancel_pending_session
+        cancel_pending_sessions: match kind {
+          DshCancelReply(session_id) =>
+            self.cancel_pending_sessions.filter(id => id != session_id)
+          _ => self.cancel_pending_sessions
         },
         models: if kind.model_session() is Some(session_id) {
           self.models.failed(session_id)
@@ -822,19 +819,23 @@ fn State::with_reply(
       if self.active_id == Some(session_id) {
         (
           @cmd.none,
-          { ..self, cancel_pending_session: None, loading: false, notice: "" },
+          {
+            ..self,
+            cancel_pending_sessions: self.cancel_pending_sessions.filter(id => {
+              id != session_id
+            }),
+            loading: false,
+            notice: "",
+          },
         )
       } else {
         (
           @cmd.none,
           {
             ..self,
-            cancel_pending_session: if self.cancel_pending_session ==
-              Some(session_id) {
-              None
-            } else {
-              self.cancel_pending_session
-            },
+            cancel_pending_sessions: self.cancel_pending_sessions.filter(id => {
+              id != session_id
+            }),
           },
         )
       }
@@ -1047,7 +1048,13 @@ fn State::with_event(
           self.list_sessions(dispatch),
           match active_id {
             Some(id) if active_id != self.active_id =>
-              self.load_history(dispatch, id)
+              // The fallback is a different conversation. Load both pieces
+              // consumed by its composer instead of waiting for the queued
+              // list to rediscover a selection that is already active.
+              @cmd.batch([
+                self.load_history(dispatch, id),
+                self.load_models(dispatch, id),
+              ])
             _ => @cmd.none
           },
         ]),
@@ -1070,6 +1077,23 @@ fn State::with_event(
           } else {
             self.streaming
           },
+          models: if removed_active && active_id is Some(id) {
+            DshModelsLoading(session_id=id)
+          } else if removed_active {
+            DshModelsIdle
+          } else {
+            self.models
+          },
+          placement: if removed_active {
+            @composer.LocalCheckout
+          } else {
+            self.placement
+          },
+          worktree_project: if removed_active {
+            None
+          } else {
+            self.worktree_project
+          },
           pending,
           session_statuses: self.session_statuses.filter(status => {
             status.session_id != session_id
@@ -1088,12 +1112,9 @@ fn State::with_event(
           } else {
             self.prompt_pending_session
           },
-          cancel_pending_session: if self.cancel_pending_session ==
-            Some(session_id) {
-            None
-          } else {
-            self.cancel_pending_session
-          },
+          cancel_pending_sessions: self.cancel_pending_sessions.filter(id => {
+            id != session_id
+          }),
           loading: if removed_active {
             active_id is Some(_)
           } else {
@@ -1960,7 +1981,7 @@ test "late dsh cancellation replies preserve the newly active session" {
   let state = {
     ..State(),
     active_id: Some("session-b"),
-    cancel_pending_session: Some("session-a"),
+    cancel_pending_sessions: ["session-a"],
     loading: true,
     notice: "current notice",
   }
@@ -1974,7 +1995,7 @@ test "late dsh cancellation replies preserve the newly active session" {
     Reply(kind=DshCancelReply("session-a"), value=reply),
     state,
   )
-  assert_true(stale_success.cancel_pending_session is None)
+  assert_eq(stale_success.cancel_pending_sessions, [])
   assert_true(stale_success.loading)
   assert_eq(stale_success.notice, "current notice")
   let (_, stale_failure) = update(
@@ -1982,7 +2003,7 @@ test "late dsh cancellation replies preserve the newly active session" {
     Failed(kind=DshCancelReply("session-a"), message="cancel failed"),
     state,
   )
-  assert_true(stale_failure.cancel_pending_session is None)
+  assert_eq(stale_failure.cancel_pending_sessions, [])
   assert_true(stale_failure.loading)
   assert_eq(stale_failure.notice, "current notice")
 }
@@ -2006,7 +2027,7 @@ test "dsh cancellation remains busy through session status events" {
     draft: "next request",
   }
   let (_, cancelling) = update(dispatch, Stop, state)
-  assert_eq(cancelling.cancel_pending_session, Some("session-1"))
+  assert_eq(cancelling.cancel_pending_sessions, ["session-1"])
   assert_true(cancelling.loading)
   assert_true(cancelling.busy())
   let (_, stopped) = cancelling.with_event(dispatch, {
@@ -2034,9 +2055,47 @@ test "dsh cancellation remains busy through session status events" {
     }),
     stopped,
   )
-  assert_true(settled.cancel_pending_session is None)
+  assert_eq(settled.cancel_pending_sessions, [])
   assert_false(settled.loading)
   assert_false(settled.busy())
+}
+
+///|
+test "dsh tracks cancellations independently across session navigation" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let sessions = [
+    { id: "session-a", title: "A", cwd: None, running: true, blank: false },
+    { id: "session-b", title: "B", cwd: None, running: true, blank: false },
+  ]
+  let state = {
+    ..State(),
+    connection: DshReady,
+    sessions,
+    active_id: Some("session-a"),
+  }
+  let (_, cancelling_a) = update(dispatch, Stop, state)
+  let ready_b = { ..cancelling_a, active_id: Some("session-b"), loading: false }
+  let (_, cancelling_b) = update(dispatch, Stop, ready_b)
+  assert_eq(cancelling_b.cancel_pending_sessions, ["session-a", "session-b"])
+  let reply : Json = {
+    "type": "server-response",
+    "rpcId": "cancel",
+    "result": { "ok": true, "value": {} },
+  }
+  let (_, settled_a) = update(
+    dispatch,
+    Reply(kind=DshCancelReply("session-a"), value=reply),
+    cancelling_b,
+  )
+  assert_eq(settled_a.cancel_pending_sessions, ["session-b"])
+  assert_true(settled_a.busy())
+  let (_, settled_b) = update(
+    dispatch,
+    Reply(kind=DshCancelReply("session-b"), value=reply),
+    settled_a,
+  )
+  assert_eq(settled_b.cancel_pending_sessions, [])
+  assert_false(settled_b.busy())
 }
 
 ///|
@@ -2455,6 +2514,72 @@ test "removing a background dsh session preserves the active transcript" {
   assert_eq(next.events.length(), 1)
   assert_eq(next.pending.length(), 1)
   assert_eq(next.pending[0].session_id(), "active")
+  assert_true(next.loading)
+}
+
+///|
+test "removing the active dsh session initializes its fallback composer" {
+  let selected : DshModelSelection = {
+    provider: "deepseek",
+    model: "chat",
+    reasoning_effort: None,
+  }
+  let state = {
+    ..State(),
+    sessions: [
+      {
+        id: "removed",
+        title: "Removed",
+        cwd: None,
+        running: false,
+        blank: true,
+      },
+      {
+        id: "fallback",
+        title: "Fallback",
+        cwd: None,
+        running: false,
+        blank: true,
+      },
+    ],
+    active_id: Some("removed"),
+    events: [
+      {
+        type_: "turn/start",
+        seq: 1,
+        time: None,
+        data: {},
+        surface_append: None,
+      },
+    ],
+    models: DshModelsReady(
+      session_id="removed",
+      options=[{ selection: selected, label: "DeepSeek / Chat" }],
+      selected~,
+      routable=true,
+    ),
+    placement: @composer.FreshWorktree,
+    worktree_project: Some("/projects/removed"),
+    draft: "removed draft",
+  }
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let (_, next) = update(
+    dispatch,
+    Event({
+      "stream": "host",
+      "message": {
+        "rpcId": "host-1",
+        "payload": { "type": "host/session-removed", "sessionId": "removed" },
+      },
+    }),
+    state,
+  )
+  assert_eq(next.active_id, Some("fallback"))
+  assert_eq(next.events.length(), 0)
+  assert_eq(next.draft, "")
+  assert_true(next.models is DshModelsLoading(session_id="fallback"))
+  assert_true(next.placement is @composer.LocalCheckout)
+  assert_eq(next.worktree_project, None)
   assert_true(next.loading)
 }
 
