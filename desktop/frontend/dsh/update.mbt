@@ -867,15 +867,14 @@ fn State::with_reply(
         }
       }
       events.sort_by((left, right) => left.seq - right.seq)
-      (
-        @cmd.none,
-        {
-          ..self,
-          streaming: DshEventLog(events).streaming_text(),
-          events,
-          loading: false,
-        },
-      )
+      // Rebuild before evicting the oldest records. A single in-progress
+      // assistant response can exceed the retained event window, while its
+      // visible text must remain complete until dsh appends the final message.
+      let streaming = DshEventLog(events).streaming_text()
+      while events.length() > DshEventWindowCapacity {
+        ignore(events.remove(0))
+      }
+      (@cmd.none, { ..self, streaming, events, loading: false })
     }
     DshModelsReply(session_id) => {
       guard self.active_id == Some(session_id) else { return (@cmd.none, self) }
@@ -1183,11 +1182,26 @@ fn State::with_event(
         return (@cmd.none, { ..self, sessions, })
       }
       let events = self.events.copy()
-      if !events.iter().any(item => item.seq == event.seq) {
-        events.push(event)
+      if events.iter().any(item => item.seq == event.seq) {
+        return (@cmd.none, { ..self, sessions, })
       }
-      events.sort_by((left, right) => left.seq - right.seq)
-      let streaming = DshEventLog(events).streaming_text()
+      let ordered = events.is_empty() ||
+        event.seq > events[events.length() - 1].seq
+      events.push(event)
+      let streaming = if ordered {
+        // WebSocket delivery is ordered in the normal path. Extend the
+        // in-progress assistant text once instead of sorting and replaying the
+        // complete event window for every text chunk.
+        event.next_streaming_text(self.streaming)
+      } else {
+        // Retain a defensive path for a future transport that can reorder
+        // messages. Rebuilding is exceptional and still bounded below.
+        events.sort_by((left, right) => left.seq - right.seq)
+        DshEventLog(events).streaming_text()
+      }
+      while events.length() > DshEventWindowCapacity {
+        ignore(events.remove(0))
+      }
       (@cmd.none, { ..self, sessions, events, streaming })
     }
     "host/session-status" => {
@@ -1573,25 +1587,39 @@ fn DshEventRecord::streaming_delta(self : DshEventRecord) -> String? {
 }
 
 ///|
+fn DshEventRecord::next_streaming_text(
+  self : DshEventRecord,
+  current : String,
+) -> String {
+  // A final append replaces the chunks in the transcript, and either kind of
+  // turn boundary invalidates text left behind by an interrupted response.
+  if self.type_ == "turn/start" ||
+    (
+      (self.type_ == "user/message" || self.type_ == "assistant/message") &&
+      self.surface_append == Some(true)
+    ) {
+    ""
+  } else if self.streaming_delta() is Some(delta) {
+    current + delta
+  } else {
+    current
+  }
+}
+
+///|
+const DshEventWindowCapacity : Int = 200
+
+///|
 priv struct DshEventLog(Array[DshEventRecord])
 
 ///|
 fn DshEventLog::streaming_text(self : DshEventLog) -> String {
   let mut text = ""
   for event in self.0 {
-    // A cancelled turn may never append a final assistant/message. Both the
-    // explicit turn boundary and its append-origin user message therefore
-    // start a fresh accumulator; the latter also covers a bounded history
-    // window whose preceding turn/start has already fallen out.
-    if event.type_ == "turn/start" ||
-      (
-        (event.type_ == "user/message" || event.type_ == "assistant/message") &&
-        event.surface_append == Some(true)
-      ) {
-      text = ""
-    } else if event.streaming_delta() is Some(delta) {
-      text += delta
-    }
+    // A bounded history window may no longer contain the turn/start that
+    // preceded its first append event. Apply the same boundary semantics used
+    // by the incremental WebSocket path to keep both projections identical.
+    text = event.next_streaming_text(text)
   }
   text
 }
@@ -2757,6 +2785,48 @@ test "dsh event log drops an interrupted turn at the next boundary" {
       new_chunk,
     ]).streaming_text(),
     "next",
+  )
+}
+
+///|
+test "dsh live event window is bounded without truncating streaming text" {
+  let events : Array[DshEventRecord] = []
+  for index in 0..<DshEventWindowCapacity {
+    events.push({
+      type_: "assistant/chunk",
+      seq: index,
+      time: None,
+      data: { "chunk": { "type": "text-delta", "text": "old" } },
+      surface_append: None,
+    })
+  }
+  let state = {
+    ..State(),
+    active_id: Some("session-1"),
+    events,
+    streaming: "complete text before the retained window",
+  }
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let (_, next) = state.with_event(dispatch, {
+    "message": {
+      "rpcId": "event-200",
+      "payload": {
+        "type": "session/event",
+        "sessionId": "session-1",
+        "event": {
+          "type": "assistant/chunk",
+          "seq": 200,
+          "data": { "chunk": { "type": "text-delta", "text": " plus tail" } },
+        },
+      },
+    },
+  })
+  assert_eq(next.events.length(), DshEventWindowCapacity)
+  assert_eq(next.events[0].seq, 1)
+  assert_eq(next.events[DshEventWindowCapacity - 1].seq, 200)
+  assert_eq(
+    next.streaming,
+    "complete text before the retained window plus tail",
   )
 }
 
