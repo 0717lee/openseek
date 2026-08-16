@@ -144,9 +144,15 @@ pub fn update(
     }
     WorktreeReady(session_id~, generation~, project~, path~) => {
       guard state.prompt_generation == generation &&
-        state.prompt_pending_session == Some(session_id) &&
-        state.active_id == Some(session_id) else {
+        state.prompt_pending_session == Some(session_id) else {
         return (@cmd.none, state)
+      }
+      // Creating the host checkout cannot be cancelled by page navigation.
+      // If its originating conversation is no longer active, abandon the
+      // remaining dsh setup but settle only that submission; newer page state
+      // such as loading, draft, and placement belongs to the active session.
+      if state.active_id != Some(session_id) {
+        return (@cmd.none, { ..state, prompt_pending_session: None })
       }
       (
         state.register_prompt_workspace(
@@ -2726,6 +2732,36 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
     sending,
   )
   assert_true(stale == sending)
+  let navigated = {
+    ..sending,
+    active_id: Some("session-2"),
+    models: DshModelsReady(
+      session_id="session-2",
+      options=[{ selection: selected, label: "DeepSeek / Chat" }],
+      selected~,
+      routable=true,
+    ),
+    placement: @composer.LocalCheckout,
+    worktree_project: None,
+    draft: "draft for session 2",
+    loading: false,
+  }
+  let (_, abandoned) = update(
+    dispatch,
+    WorktreeReady(
+      session_id="session-1",
+      generation=1,
+      project="/work/project",
+      path="/work/project/.worktrees/wt-1",
+    ),
+    navigated,
+  )
+  assert_eq(abandoned.active_id, Some("session-2"))
+  assert_eq(abandoned.prompt_pending_session, None)
+  assert_eq(abandoned.draft, "draft for session 2")
+  assert_eq(abandoned.worktree_project, None)
+  assert_false(abandoned.loading)
+  assert_false(abandoned.busy())
   let (_, registered) = update(
     dispatch,
     WorktreeReady(
