@@ -67,6 +67,13 @@ let worktree_registry_lock : @async.Mutex = Mutex()
 let removed_dsh_sessions : Map[String, Bool] = Map([])
 
 ///|
+/// Detached workspace directories remain on disk, including their Desktop
+/// worktree registries. Remember only registries that currently contain a dsh
+/// owner so a later host/session-removed event can release that row even while
+/// the workspace is absent from the visible workspace list.
+let detached_dsh_worktree_registries : Map[@pathx.Absolute, Bool] = Map([])
+
+///|
 priv struct WorktreeEntry {
   name : String
   branch : String
@@ -759,6 +766,23 @@ pub async fn list_dsh_worktree_bindings() -> Array[DshWorktreeBinding] {
 }
 
 ///|
+/// Capture a dsh-owned registry immediately before workspace detachment. The
+/// engine holds its workspace lifecycle lock around this call and the registry
+/// removal, so no worktree create can land between the scan and detach.
+pub async fn retain_dsh_registry_for_detach(
+  workspace : @pathx.Absolute,
+) -> Unit {
+  guard @workspaces.registered_dir(workspace) is Some(workspace) else { return }
+  worktree_registry_lock.acquire()
+  defer worktree_registry_lock.release()
+  if read_worktrees_unlocked(workspace)
+    .iter()
+    .any(entry => entry.dsh_session is Some(_)) {
+    detached_dsh_worktree_registries[workspace] = true
+  }
+}
+
+///|
 /// A host/session-removed event is dsh's authoritative end of one owner. Keep
 /// its checkout and branch intact, but release the registry row to the normal
 /// worktree lifecycle so a dirty checkout is never deleted automatically and
@@ -772,7 +796,13 @@ pub async fn release_dsh_session(
   worktree_registry_lock.acquire()
   defer worktree_registry_lock.release()
   removed_dsh_sessions[session_id] = true
-  for workspace in @workspaces.registered() {
+  let workspaces = @workspaces.registered()
+  for workspace in detached_dsh_worktree_registries.keys().to_array() {
+    if !workspaces.contains(workspace) {
+      workspaces.push(workspace)
+    }
+  }
+  for workspace in workspaces {
     let entries = read_worktrees_unlocked(workspace)
     let mut found = false
     let released = entries.map(entry => {
@@ -791,6 +821,9 @@ pub async fn release_dsh_session(
           worktree_infos(workspace, released),
         )
       })
+    }
+    if released.iter().all(entry => entry.dsh_session is None) {
+      detached_dsh_worktree_registries.remove(workspace)
     }
   }
 }
@@ -1803,6 +1836,47 @@ async test "worktree names are host-generated and skip surviving branches" {
   // ordinary dirty check instead of silently discarding the checkout.
   ignore(remove(host, repo.to_string(), "wt-6", false, fn(_) {  }))
   ignore(remove(host, repo.to_string(), "wt-5", false, fn(_) {  }))
+  @fs.rmdir(root.to_string(), recursive=true)
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "dsh session release updates a detached worktree registry" {
+  worktree_env_test_lock.acquire()
+  defer worktree_env_test_lock.release()
+  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  let root = worktree_test_root("openseek-worktree-dsh-detached-")
+  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
+  defer restore_session_root_env(previous)
+  let repo = root.join("repo")
+  prepare_git_repo(repo)
+  ignore(@workspaces.add(repo.to_string(), fn(_) {  }))
+  let host = test_host()
+  ignore(
+    create(
+      host,
+      repo.to_string(),
+      WorktreeOwner::dsh("session-dsh-detached"),
+      fn(_) {  },
+      name="wt",
+    ),
+  )
+  retain_dsh_registry_for_detach(repo)
+  ignore(@workspaces.remove(repo.to_string(), fn(_) {  }))
+  let released : Array[WorktreeInfo] = []
+  release_dsh_session("session-dsh-detached", (_, worktrees) => {
+    released.append(worktrees)
+  })
+  guard released is [released_row] else {
+    fail("expected the detached dsh registry to be released")
+  }
+  assert_eq(released_row.dsh_session, None)
+  ignore(@workspaces.add(repo.to_string(), fn(_) {  }))
+  guard list(repo.to_string()).worktrees is [reattached] else {
+    fail("expected the worktree after workspace reattachment")
+  }
+  assert_eq(reattached.dsh_session, None)
+  ignore(remove(host, repo.to_string(), "wt", false, fn(_) {  }))
   @fs.rmdir(root.to_string(), recursive=true)
 }
 

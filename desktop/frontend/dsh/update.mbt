@@ -1086,13 +1086,22 @@ fn State::with_status(
     return (@cmd.none, self)
   }
   match status {
-    "ready" =>
+    "ready" => {
+      let new_ready = !(self.connection is DshReady) ||
+        self.connection_status_revision != revision
+      let commands = [
+        DshWorkspacesReply.request(dispatch, "workspace.list", {}),
+        self.list_sessions(dispatch),
+        DshPendingReply.pending(dispatch),
+      ]
+      let models = if new_ready && self.active_id is Some(session_id) {
+        commands.push(self.load_models(dispatch, session_id))
+        DshModelsLoading(session_id~)
+      } else {
+        self.models
+      }
       (
-        @cmd.batch([
-          DshWorkspacesReply.request(dispatch, "workspace.list", {}),
-          self.list_sessions(dispatch),
-          DshPendingReply.pending(dispatch),
-        ]),
+        @cmd.batch(commands),
         {
           ..self,
           connection: DshReady,
@@ -1106,10 +1115,15 @@ fn State::with_status(
           } else {
             []
           },
+          // Models are dsh-owned connection state just like workspaces and
+          // sessions. Reload the selected session on every new Ready revision
+          // so provider and routing changes made while offline take effect.
+          models,
           loading: true,
           notice: "",
         },
       )
+    }
     "starting" =>
       (
         @cmd.none,
@@ -2325,7 +2339,14 @@ test "dsh reconnect ready waits for a new Workspace baseline" {
   assert_true(ready.connection is DshReady)
   assert_true(ready.workspaces.is_empty())
   assert_true(ready.active_workspace_path() is None)
+  assert_true(ready.models is DshModelsLoading(session_id="session-1"))
   assert_true(ready.loading)
+  let duplicate_source = { ..ready, models: DshModelsIdle }
+  let (_, duplicate) = duplicate_source.with_status(dispatch, {
+    "status": "ready",
+    "revision": 3,
+  })
+  assert_true(duplicate.models is DshModelsIdle)
 }
 
 ///|
