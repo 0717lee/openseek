@@ -73,7 +73,7 @@ test "dsh snapshot replies select independent ordered lanes" {
       session_id="session-1",
       generation=1,
       worktree_path="/work/project/.worktrees/wt-1",
-      draft="inspect this project",
+      draft={ task: "inspect this project", mentions: [] },
     ).ordered_lane(),
     Some("dsh-workspace-list"),
   )
@@ -97,7 +97,7 @@ test "dsh snapshot replies select independent ordered lanes" {
       project="/work/project",
       worktree_name="wt-1",
       worktree_path="/work/project/.worktrees/wt-1",
-      draft="inspect this project",
+      draft={ task: "inspect this project", mentions: [] },
     ).failed_worktree(),
     Some(("session-1", 1, "/work/project", "wt-1")),
   )
@@ -106,7 +106,7 @@ test "dsh snapshot replies select independent ordered lanes" {
       session_id="session-1",
       generation=1,
       worktree_path="/work/project/.worktrees/wt-1",
-      draft="inspect this project",
+      draft={ task: "inspect this project", mentions: [] },
     ).failed_worktree()
     is None,
   )
@@ -291,7 +291,7 @@ fn State::create_worktree(
   generation : Int,
   project : String,
 ) -> @cmd.Cmd {
-  let draft = self.draft
+  let draft : @composer.Draft = { task: self.draft, mentions: self.mentions }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
       let result : @protocol.WorktreeCreateResult = @interop.bridge_request(
@@ -376,7 +376,7 @@ fn State::register_prompt_workspace(
   project : String,
   worktree_name : String,
   worktree_path : String,
-  draft : String,
+  draft : @composer.Draft,
 ) -> @cmd.Cmd {
   DshPromptWorkspaceReply(
     session_id~,
@@ -400,7 +400,7 @@ fn State::move_prompt_session(
   worktree_name : String,
   worktree_path : String,
   workspace_id : String,
-  draft : String,
+  draft : @composer.Draft,
 ) -> @cmd.Cmd {
   DshPromptMoveReply(
     session_id~,
@@ -475,12 +475,12 @@ fn State::send(
   generation : Int,
 ) -> @cmd.Cmd {
   guard self.active_id is Some(session_id) else { return @cmd.none }
-  let text = self.draft.trim().to_owned()
-  guard !text.is_empty() else { return @cmd.none }
+  let draft : @composer.Draft = { task: self.draft, mentions: self.mentions }
+  guard !draft.prompt().is_empty() else { return @cmd.none }
   self.send_prompt(
     dispatch,
     session_id,
-    self.draft,
+    draft,
     generation,
     mode=if self.is_running() { "steer" } else { "queue" },
   )
@@ -494,11 +494,11 @@ fn State::send_prompt(
   _self : State,
   dispatch : @cmd.Emit[Msg],
   session_id : String,
-  draft : String,
+  draft : @composer.Draft,
   generation : Int,
   mode~ : String,
 ) -> @cmd.Cmd {
-  let text = draft.trim().to_owned()
+  let text = draft.prompt()
   guard !text.is_empty() else { return @cmd.none }
   DshPromptReply(session_id~, draft~, generation~).request(
     dispatch,

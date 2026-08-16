@@ -148,7 +148,7 @@ priv enum DshReplyKind {
     project~ : String,
     worktree_name~ : String,
     worktree_path~ : String,
-    draft~ : String
+    draft~ : @composer.Draft
   )
   DshPromptMoveReply(
     session_id~ : String,
@@ -156,15 +156,19 @@ priv enum DshReplyKind {
     project~ : String,
     worktree_name~ : String,
     worktree_path~ : String,
-    draft~ : String
+    draft~ : @composer.Draft
   )
   DshPromptWorkspacesReply(
     session_id~ : String,
     generation~ : Int,
     worktree_path~ : String,
-    draft~ : String
+    draft~ : @composer.Draft
   )
-  DshPromptReply(session_id~ : String, draft~ : String, generation~ : Int)
+  DshPromptReply(
+    session_id~ : String,
+    draft~ : @composer.Draft,
+    generation~ : Int
+  )
   DshCancelReply(String)
   DshResponseReply(rpc_id~ : String, session_id~ : String)
 }
@@ -184,7 +188,7 @@ enum Msg {
     project~ : String,
     name~ : String,
     path~ : String,
-    draft~ : String
+    draft~ : @composer.Draft
   )
   WorktreeCleanupFinished(
     session_id~ : String,
@@ -264,6 +268,9 @@ struct State {
   // The last root-authored submission snapshot. Unsent keystrokes live only
   // in the shared composer component and are cached there per session id.
   draft : String
+  // Structured chips are root-authored like `draft`; dsh receives their
+  // durable text envelope only when the shared composer submits.
+  mentions : Array[@composer.Mention]
   pending : Array[DshPendingInteraction]
   // Actor generations order page-attach snapshots against live mux events.
   // Selection and prompt generations keep older request replies from
@@ -303,6 +310,7 @@ pub fn State::State(loading? : Bool = false) -> State {
     placement: @composer.LocalCheckout,
     worktree_project: None,
     draft: "",
+    mentions: [],
     pending: [],
     pending_generation: 0,
     settled_interactions: [],

@@ -79,6 +79,11 @@ pub fn update(
           } else {
             state.draft
           },
+          mentions: if selection_changed {
+            []
+          } else {
+            state.mentions
+          },
           events: [],
           streaming: "",
           models: DshModelsLoading(session_id~),
@@ -192,7 +197,7 @@ pub fn update(
     }
     Send =>
       if state.busy() ||
-        state.draft.trim().is_empty() ||
+        state.submission_empty() ||
         state.active_id is None ||
         !state.models.routable(state.active_id.unwrap()) {
         (@cmd.none, state)
@@ -708,6 +713,11 @@ fn State::with_reply(
         } else {
           self.draft
         },
+        mentions: if selection_changed {
+          []
+        } else {
+          self.mentions
+        },
         events: if selection_changed {
           []
         } else {
@@ -788,6 +798,7 @@ fn State::with_reply(
             worktree_project: None,
             loading: true,
             notice: "",
+            mentions: [],
           }
         } else {
           { ..self, creation_pending: false }
@@ -934,14 +945,21 @@ fn State::with_reply(
         self.prompt_generation == generation else {
         return (@cmd.none, self)
       }
+      let submitted_unchanged = self.draft == draft.task &&
+        self.mentions == draft.mentions
       (
         self.load_history(dispatch, session_id),
         {
           ..self,
-          draft: if self.draft == draft {
+          draft: if submitted_unchanged {
             ""
           } else {
             self.draft
+          },
+          mentions: if submitted_unchanged {
+            []
+          } else {
+            self.mentions
           },
           prompt_pending_session: None,
           loading: false,
@@ -1249,6 +1267,11 @@ fn State::with_event(
             ""
           } else {
             self.draft
+          },
+          mentions: if removed_active {
+            []
+          } else {
+            self.mentions
           },
           prompt_pending_session: if self.prompt_pending_session ==
             Some(session_id) {
@@ -1938,7 +1961,11 @@ test "accepted dsh prompt advances transcript submission generation" {
   let (_, settled) = update(
     dispatch,
     Reply(
-      kind=DshPromptReply(session_id="session-1", draft="hello", generation=1),
+      kind=DshPromptReply(
+        session_id="session-1",
+        draft={ task: "hello", mentions: [] },
+        generation=1,
+      ),
       value={
         "type": "server-response",
         "rpcId": "prompt-1",
@@ -2638,7 +2665,7 @@ test "dsh response and prompt replies preserve unrelated state" {
     dispatch,
     DshPromptReply(
       session_id="session-a",
-      draft="submitted for A",
+      draft={ task: "submitted for A", mentions: [] },
       generation=1,
     ),
     reply,
@@ -2654,7 +2681,7 @@ test "dsh response and prompt replies preserve unrelated state" {
     dispatch,
     DshPromptReply(
       session_id="session-b",
-      draft="submitted for B",
+      draft={ task: "submitted for B", mentions: [] },
       generation=2,
     ),
     reply,
@@ -2666,7 +2693,7 @@ test "dsh response and prompt replies preserve unrelated state" {
     dispatch,
     DshPromptReply(
       session_id="session-b",
-      draft="submitted for B",
+      draft={ task: "submitted for B", mentions: [] },
       generation=2,
     ),
     reply,
@@ -3025,7 +3052,7 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
       project="/work/project",
       name="wt-1",
       path="/work/project/.worktrees/wt-1",
-      draft="inspect this project",
+      draft={ task: "inspect this project", mentions: [] },
     ),
     sending,
   )
@@ -3052,7 +3079,7 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
       project="/work/project",
       name="wt-1",
       path="/work/project/.worktrees/wt-1",
-      draft="inspect this project",
+      draft={ task: "inspect this project", mentions: [] },
     ),
     navigated,
   )
@@ -3070,7 +3097,7 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
       project="/work/project",
       name="wt-1",
       path="/work/project/.worktrees/wt-1",
-      draft="inspect this project",
+      draft={ task: "inspect this project", mentions: [] },
     ),
     sending,
   )
@@ -3083,7 +3110,7 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
         project="/work/project",
         worktree_name="wt-1",
         worktree_path="/work/project/.worktrees/wt-1",
-        draft="inspect this project",
+        draft={ task: "inspect this project", mentions: [] },
       ),
       message="workspace.create failed",
     ),
@@ -3138,7 +3165,7 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
         project="/work/project",
         worktree_name="wt-1",
         worktree_path="/work/project/.worktrees/wt-1",
-        draft="inspect this project",
+        draft={ task: "inspect this project", mentions: [] },
       ),
       message="move failed",
     ),
@@ -3163,7 +3190,7 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
         project="/work/project",
         worktree_name="wt-1",
         worktree_path="/work/project/.worktrees/wt-1",
-        draft="inspect this project",
+        draft={ task: "inspect this project", mentions: [] },
       ),
       value={
         "type": "server-response",
@@ -3193,7 +3220,7 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
         project="/work/project",
         worktree_name="wt-1",
         worktree_path="/work/project/.worktrees/wt-1",
-        draft="inspect this project",
+        draft={ task: "inspect this project", mentions: [] },
       ),
       value={
         "type": "server-response",
@@ -3211,7 +3238,7 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
         session_id="session-1",
         generation=1,
         worktree_path="/work/project/.worktrees/wt-1",
-        draft="inspect this project",
+        draft={ task: "inspect this project", mentions: [] },
       ),
       value={
         "type": "server-response",
@@ -3244,7 +3271,7 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
     Reply(
       kind=DshPromptReply(
         session_id="session-1",
-        draft="inspect this project",
+        draft={ task: "inspect this project", mentions: [] },
         generation=1,
       ),
       value={
@@ -3268,7 +3295,7 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
       project="/work/project",
       worktree_name="wt-1",
       worktree_path="/work/project/.worktrees/wt-1",
-      draft="inspect this project",
+      draft={ task: "inspect this project", mentions: [] },
     ),
     {
       "type": "server-response",
@@ -3295,7 +3322,7 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
       project="/work/project",
       worktree_name="wt-1",
       worktree_path="/work/project/.worktrees/wt-1",
-      draft="inspect this project",
+      draft={ task: "inspect this project", mentions: [] },
     ),
     {
       "type": "server-response",
@@ -3310,7 +3337,7 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
       session_id="session-1",
       generation=1,
       worktree_path="/work/project/.worktrees/wt-1",
-      draft="inspect this project",
+      draft={ task: "inspect this project", mentions: [] },
     ),
     {
       "type": "server-response",
@@ -3338,7 +3365,7 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
       session_id="session-1",
       generation=1,
       worktree_path="/work/project/.worktrees/wt-1",
-      draft="inspect this project",
+      draft={ task: "inspect this project", mentions: [] },
     ),
     {
       "type": "server-response",
@@ -3367,7 +3394,7 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
     dispatch,
     DshPromptReply(
       session_id="session-1",
-      draft="inspect this project",
+      draft={ task: "inspect this project", mentions: [] },
       generation=1,
     ),
     {

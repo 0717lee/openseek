@@ -3,6 +3,7 @@ import {
   "moonbit-community/rabbita/cmd",
   "moonbit-community/rabbita/html",
   "moonbit-community/rabbita/js",
+  "moonbitlang/editor/base/common",
   "openseek_desktop/internal/commands",
   "openseek_desktop/internal/jsonx",
   "openseek_desktop/internal/protocol",
@@ -12,6 +13,7 @@ import {
   "openseek_desktop/frontend/sidebar/section",
   "openseek_desktop/frontend/interop",
   "openseek_desktop/frontend/icons",
+  "openseek_desktop/frontend/mention_context",
   "openseek_desktop/frontend/transcript",
 }
 

@@ -4,7 +4,9 @@ package "openseek_desktop/frontend/dsh"
 import {
   "moonbit-community/rabbita/cmd",
   "moonbit-community/rabbita/html",
+  "moonbitlang/editor/base/common",
   "openseek_desktop/frontend/composer",
+  "openseek_desktop/frontend/mention_context",
   "openseek_desktop/frontend/sidebar/section",
   "openseek_desktop/frontend/transcript",
 }
@@ -46,6 +48,8 @@ pub fn State::streaming_text(Self) -> String
 pub fn State::submission_generation(Self) -> Int
 pub fn State::transcript_items(Self) -> Array[@transcript.TranscriptItem]
 pub fn State::unavailable_message(Self) -> String?
+pub fn State::with_diff_comment(Self, String, Int, @common.Range?, @mention_context.AnnotationSide, String, String) -> Self
+pub fn State::with_editor_comment(Self, String, @common.Range, String, String) -> Self
 
 // Type aliases
 

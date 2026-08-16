@@ -2225,6 +2225,18 @@ fn update_msg(
           },
         )
       }
+      if model.screen is Dsh {
+        // dsh owns its own shared-composer source. Route the annotation there
+        // before clearing the Viewer bubble so it cannot enter the hidden
+        // OpenSeek conversation selected on the Chat screen.
+        return (
+          @fileeditor.remove_editor_feedback(resource, feedback_id),
+          {
+            ..model,
+            dsh: model.dsh.with_editor_comment(file.0, range, comment, quote),
+          },
+        )
+      }
       guard model.active_conversation() is Some(conv) else {
         return (@cmd.none, model)
       }
@@ -2286,6 +2298,22 @@ fn update_msg(
               (line_number, None, @mention_context.OriginalRevision)
             _ => return (clear_feedback, model)
           }
+      }
+      if model.screen is Dsh {
+        return (
+          @cmd.none,
+          {
+            ..model,
+            dsh: model.dsh.with_diff_comment(
+              file.0,
+              line_number,
+              range,
+              side,
+              comment,
+              quote,
+            ),
+          },
+        )
       }
       guard model.active_conversation() is Some(conv) else {
         return (clear_feedback, model)
@@ -15504,6 +15532,31 @@ test "Codex editor comments use annotation context, not textarea text or OpenSee
   // The textarea stays untouched. Codex owns the annotation chip and sends
   // its file/range/comment/quote through the shared mention envelope.
   assert_eq(once.codex.draft_text(), "")
+}
+
+///|
+test "dsh editor comments never enter the hidden OpenSeek draft" {
+  let dispatch = test_dispatch()
+  let model = { ..test_model(), screen: Dsh }
+  let msg : Msg = FileEditor(
+    EditorCommentAdded(
+      resource=@fileeditor.ModelUri::of(
+        @interop.ChannelId::Local.test_resource("/work/project/src/main.mbt"),
+      ),
+      file=Relative("src/main.mbt"),
+      range=@common.Range::Range(5, 1, 6, 3),
+      quote="fn parse_hover() {",
+      comment="rename this",
+      feedback_id="viewer-feedback-dsh",
+    ),
+  )
+  let (_, next) = update(dispatch, msg, model)
+  // This fixture has no active dsh conversation, so the narrow dsh method is
+  // an idempotent no-op. The important root invariant is that the hidden Chat
+  // conversation never receives the annotation.
+  assert_true(next.active().mentions.is_empty())
+  assert_eq(next.active().task, model.active().task)
+  assert_true(next.dsh == model.dsh)
 }
 
 ///|

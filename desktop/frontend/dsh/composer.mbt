@@ -14,9 +14,18 @@ fn State::composer_identity(self : State) -> @composer.Identity {
 }
 
 ///|
+/// dsh receives the shared composer's durable text envelope, so an annotation
+/// chip by itself is a valid submission even when the textarea is empty.
+fn State::submission_empty(self : State) -> Bool {
+  @composer.Draft::{ task: self.draft, mentions: self.mentions }
+  .prompt()
+  .is_empty()
+}
+
+///|
 /// Project the selected dsh session into the same component contract used by
-/// OpenSeek and Codex. dsh currently accepts plain text only, so completion
-/// providers and mention sources are deliberately empty.
+/// OpenSeek and Codex. dsh accepts one text content item; structured composer
+/// chips are encoded into that durable text only at submission time.
 pub fn State::composer_input(
   self : State,
   dispatch : @cmd.Emit[Msg],
@@ -75,7 +84,7 @@ pub fn State::composer_input(
   }
   {
     identity: self.composer_identity(),
-    draft: { task: self.draft, mentions: [] },
+    draft: { task: self.draft, mentions: self.mentions },
     goal: { draft: None, standing: None, pending: None },
     slash_commands: [],
     root: None,
@@ -129,23 +138,36 @@ fn State::apply_composer_action(
   }
   match action {
     @composer.DraftSubmitted(draft~, ..) =>
-      update(dispatch, Send, { ..self, draft: draft.task })
+      update(dispatch, Send, {
+        ..self,
+        draft: draft.task,
+        mentions: draft.mentions,
+      })
     @composer.DraftPresenceChanged(
       present=false,
       cleared_source=Some(source),
       ..
-    ) =>
+    ) => {
+      let draft = if self.draft == source.task { "" } else { self.draft }
+      let mentions = if self.mentions == source.mentions {
+        []
+      } else {
+        self.mentions
+      }
+      (@cmd.none, { ..self, draft, mentions })
+    }
+    @composer.RootMentionRemoved(mention~, ..) =>
       (
         @cmd.none,
-        if self.draft == source.task {
-          { ..self, draft: "" }
-        } else {
-          self
+        {
+          ..self,
+          mentions: self.mentions.filter(existing => {
+            existing.ref_ != mention.ref_
+          }),
         },
       )
     @composer.StopRequested(..) => update(dispatch, Stop, self)
     @composer.DraftPresenceChanged(..)
-    | @composer.RootMentionRemoved(..)
     | @composer.SlashCommand(..)
     | @composer.MentionOpened(..)
     | @composer.GoalEditStarted(..)
@@ -154,6 +176,66 @@ fn State::apply_composer_action(
     | @composer.GoalSubmitted(..)
     | @composer.FileIndexEnsured(..) => (@cmd.none, self)
   }
+}
+
+///|
+/// Add a Viewer selection comment to the active dsh composer as the same
+/// structured annotation chip used by the other Desktop conversation types.
+/// The textarea remains unchanged; submission encodes the chip into dsh's text
+/// content item.
+pub fn State::with_editor_comment(
+  self : State,
+  file : String,
+  range : @common.Range,
+  comment : String,
+  quote : String,
+) -> State {
+  self.with_annotation({
+    ref_: @mention_context.Annotation(
+      file~,
+      start_line=range.start_line_number,
+      end_line=range.end_line_number,
+      quote~,
+      comment~,
+      side=@mention_context.WorkingRevision,
+    ),
+    range: Some(range),
+  })
+}
+
+///|
+/// Add a full-diff comment while retaining whether its line belongs to the
+/// working file or only to the original revision.
+pub fn State::with_diff_comment(
+  self : State,
+  file : String,
+  line : Int,
+  range : @common.Range?,
+  side : @mention_context.AnnotationSide,
+  comment : String,
+  quote : String,
+) -> State {
+  self.with_annotation({
+    ref_: @mention_context.Annotation(
+      file~,
+      start_line=line,
+      end_line=line,
+      quote~,
+      comment~,
+      side~,
+    ),
+    range,
+  })
+}
+
+///|
+/// Keep annotation insertion and deduplication private to dsh; root callers
+/// can use only the two editor-specific entry points above.
+fn State::with_annotation(self : State, mention : @composer.Mention) -> State {
+  guard self.has_active() else { return self }
+  let draft : @composer.Draft = { task: self.draft, mentions: self.mentions }
+  let draft = draft.with_mention(mention)
+  { ..self, draft: draft.task, mentions: draft.mentions }
 }
 
 ///|
@@ -200,6 +282,53 @@ test "dsh projects its selected session into the shared composer" {
   )
   assert_true(input.slash_commands.is_empty())
   assert_eq(input.presentation.status.length(), 1)
+  let annotated = state.with_editor_comment(
+    "src/main.mbt",
+    @common.Range::Range(5, 1, 6, 3),
+    "rename this",
+    "fn parse_hover() {",
+  )
+  let duplicate = annotated.with_editor_comment(
+    "src/main.mbt",
+    @common.Range::Range(5, 1, 6, 3),
+    "rename this",
+    "fn parse_hover() {",
+  )
+  let annotated_input = duplicate.composer_input(dispatch)
+  assert_eq(annotated_input.draft.task, "")
+  assert_eq(annotated_input.draft.mentions.length(), 1)
+  assert_true(
+    annotated_input.draft.mentions[0].ref_
+    is @mention_context.Annotation(
+      file="src/main.mbt",
+      start_line=5,
+      end_line=6,
+      comment="rename this",
+      side=@mention_context.WorkingRevision,
+      ..
+    ),
+  )
+  let with_diff = duplicate.with_diff_comment(
+    "src/main.mbt",
+    3,
+    None,
+    @mention_context.OriginalRevision,
+    "keep this removal",
+    "obsolete()",
+  )
+  let diff_input = with_diff.composer_input(dispatch)
+  assert_eq(diff_input.draft.mentions.length(), 2)
+  assert_true(
+    diff_input.draft.mentions[1].ref_
+    is @mention_context.Annotation(
+      file="src/main.mbt",
+      start_line=3,
+      end_line=3,
+      side=@mention_context.OriginalRevision,
+      ..
+    ),
+  )
+  assert_true(diff_input.draft.mentions[1].range is None)
 }
 
 ///|
@@ -264,4 +393,44 @@ test "dsh accepts a shared composer submission only for its active session" {
     state,
   )
   assert_true(stale == state)
+  let annotated = state.with_editor_comment(
+    "src/main.mbt",
+    @common.Range::Range(5, 1, 6, 3),
+    "rename this",
+    "fn parse_hover() {",
+  )
+  let mention_draft : @composer.Draft = {
+    task: "",
+    mentions: annotated.mentions,
+  }
+  guard @mention_context.parse(mention_draft.prompt()) is Some(encoded) else {
+    fail("expected dsh annotation prompt envelope")
+  }
+  assert_eq(encoded.mentions.length(), 1)
+  let (_, mention_submitted) = update(
+    dispatch,
+    ComposerAction(@composer.DraftSubmitted(identity~, draft=mention_draft)),
+    annotated,
+  )
+  assert_eq(mention_submitted.prompt_generation, 1)
+  assert_eq(mention_submitted.prompt_pending_session, Some("session-1"))
+  assert_eq(mention_submitted.mentions.length(), 1)
+  let (_, settled) = update(
+    dispatch,
+    Reply(
+      kind=DshPromptReply(
+        session_id="session-1",
+        draft=mention_draft,
+        generation=1,
+      ),
+      value={
+        "type": "server-response",
+        "rpcId": "prompt-annotation-1",
+        "result": { "ok": true, "value": {} },
+      },
+    ),
+    mention_submitted,
+  )
+  assert_true(settled.mentions.is_empty())
+  assert_eq(settled.draft, "")
 }
