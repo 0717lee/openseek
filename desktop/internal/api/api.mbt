@@ -241,6 +241,8 @@ priv struct DshWorkspaceBinding {
 /// independently of the dsh actor's request queue.
 priv struct DshWorkspaceAuthorizations {
   lock : @async.Mutex
+  // The oldest actor generation still allowed to publish a Workspace list.
+  // Revocation advances this past the connection that just closed.
   mut generation : Int
   bindings : Map[String, String]
 }
@@ -248,18 +250,6 @@ priv struct DshWorkspaceAuthorizations {
 ///|
 fn DshWorkspaceAuthorizations::DshWorkspaceAuthorizations() -> DshWorkspaceAuthorizations {
   { lock: Mutex(), generation: 0, bindings: Map([]) }
-}
-
-///|
-/// Capture the dsh connection generation that owns an outgoing workspace.list.
-/// A disconnect advances this value before clearing grants, so a reply that was
-/// already in flight cannot restore membership from the closed connection.
-async fn DshWorkspaceAuthorizations::current_generation(
-  self : DshWorkspaceAuthorizations,
-) -> Int {
-  self.lock.acquire()
-  defer self.lock.release()
-  self.generation
 }
 
 ///|
@@ -329,7 +319,14 @@ async fn DshWorkspaceAuthorizations::replace(
   }
   self.lock.acquire()
   defer self.lock.release()
-  guard generation == self.generation else { return }
+  guard generation >= self.generation else { return }
+  if generation > self.generation {
+    for owner, _ in self.bindings {
+      @work_dir.revoke_host_workspace(owner)
+    }
+    self.bindings.clear()
+    self.generation = generation
+  }
   for owner, _ in self.bindings {
     if next.get(owner) is None {
       @work_dir.revoke_host_workspace(owner)
@@ -349,10 +346,12 @@ async fn DshWorkspaceAuthorizations::replace(
 /// revoke the grants established by its last accepted snapshot.
 async fn DshWorkspaceAuthorizations::revoke(
   self : DshWorkspaceAuthorizations,
+  generation : Int,
 ) -> Unit {
   self.lock.acquire()
   defer self.lock.release()
-  self.generation += 1
+  guard generation >= self.generation else { return }
+  self.generation = generation + 1
   for owner, _ in self.bindings {
     @work_dir.revoke_host_workspace(owner)
   }
@@ -538,8 +537,8 @@ pub async fn ApiState::run_dsh(
   self : ApiState,
   emit : (String, Json) -> Unit,
 ) -> Unit {
-  self.dsh.run(emit, revoke_workspaces=async fn() {
-    self.dsh_workspaces.revoke()
+  self.dsh.run(emit, revoke_workspaces=async fn(generation) {
+    self.dsh_workspaces.revoke(generation)
   })
 }
 
@@ -947,12 +946,7 @@ pub fn local_endpoints(state : ApiState) -> Array[@endpoint.Endpoint] {
       guard call.is_allowed() else {
         raise @host.PayloadError("unsupported dsh method '\{call.method_}'")
       }
-      let workspace_generation = if call.method_ == "workspace.list" {
-        Some(state.dsh_workspaces.current_generation())
-      } else {
-        None
-      }
-      let reply = state.dsh.call(
+      let (reply, connection_generation) = state.dsh.call(
         method_=call.method_,
         payload=call.host_payload(),
       )
@@ -960,9 +954,8 @@ pub fn local_endpoints(state : ApiState) -> Array[@endpoint.Endpoint] {
       // publish the complete membership before returning it, so a terminal
       // opened by the resulting render cannot race ahead of the grant.
       let frontend_reply = call.frontend_reply(reply)
-      if call.workspace_bindings(reply) is Some(bindings) &&
-        workspace_generation is Some(generation) {
-        state.dsh_workspaces.replace(generation, bindings)
+      if call.workspace_bindings(reply) is Some(bindings) {
+        state.dsh_workspaces.replace(connection_generation, bindings)
       }
       let envelope : @protocol.DshValueReply = { value: frontend_reply }
       envelope
@@ -1136,13 +1129,13 @@ async test "dsh workspace membership authorizes and revokes its terminal owner" 
     fail("expected dsh workspace bindings")
   }
   let authorizations = DshWorkspaceAuthorizations()
-  let generation = authorizations.current_generation()
+  let generation = 1
   authorizations.replace(generation, bindings)
   assert_true(
     @work_dir.resolve_in_workspace(owner, "", workspace=resource_path)
     is Some(_),
   )
-  authorizations.revoke()
+  authorizations.revoke(generation)
   assert_true(
     @work_dir.resolve_in_workspace(owner, "", workspace=resource_path) is None,
   )
@@ -1152,13 +1145,13 @@ async test "dsh workspace membership authorizes and revokes its terminal owner" 
   assert_true(
     @work_dir.resolve_in_workspace(owner, "", workspace=resource_path) is None,
   )
-  let next_generation = authorizations.current_generation()
+  let next_generation = generation + 1
   authorizations.replace(next_generation, bindings)
   assert_true(
     @work_dir.resolve_in_workspace(owner, "", workspace=resource_path)
     is Some(_),
   )
-  authorizations.revoke()
+  authorizations.revoke(next_generation)
 }
 
 ///|

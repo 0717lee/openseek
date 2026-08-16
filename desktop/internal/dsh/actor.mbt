@@ -38,7 +38,7 @@ priv enum ConnectionState {
 
 ///|
 priv enum ActorInput {
-  Call(String, Json, @async.Queue[Result[Json, DshError]])
+  Call(String, Json, @async.Queue[Result[(Json, Int), DshError]])
   Respond(Json, @async.Queue[Result[Json, DshError]])
   ListInteractions(@async.Queue[Result[Json, DshError]])
 }
@@ -165,6 +165,7 @@ struct Actor {
   inputs : @async.Queue[ActorInput]
   wake : @async.Queue[Unit]
   mut state : ConnectionState
+  mut generation : Int
   mut next_rpc_id : Int
   interactions : PendingInteractionRegistry
 }
@@ -175,6 +176,7 @@ pub fn Actor::Actor() -> Actor {
     inputs: Queue(kind=Blocking(ActorInputCapacity)),
     wake: Queue(kind=Blocking(ActorWakeCapacity)),
     state: Starting,
+    generation: 0,
     next_rpc_id: 0,
     interactions: PendingInteractionRegistry(),
   }
@@ -196,13 +198,17 @@ pub fn Actor::status(self : Actor) -> Json {
 
 ///|
 /// Queue one allowlisted ApiProxy request. The API package owns the allowlist;
-/// this process owner only serializes the physical carrier envelope.
+/// this process owner only serializes the physical carrier envelope. The reply
+/// includes the connection generation that actually dispatched the HTTP call,
+/// which may differ from the generation where the input was first queued.
 pub async fn Actor::call(
   self : Actor,
   method_~ : String,
   payload~ : Json,
-) -> Json {
-  let reply : @async.Queue[Result[Json, DshError]] = Queue(kind=Blocking(1))
+) -> (Json, Int) {
+  let reply : @async.Queue[Result[(Json, Int), DshError]] = Queue(
+    kind=Blocking(1),
+  )
   self.inputs.put(Call(method_, payload, reply))
   self.signal()
   match reply.get() {
@@ -243,7 +249,7 @@ pub async fn Actor::interactions(self : Actor) -> Json {
 pub async fn Actor::run(
   self : Actor,
   emit : (String, Json) -> Unit,
-  revoke_workspaces~ : async () -> Unit,
+  revoke_workspaces~ : async (Int) -> Unit,
 ) -> Unit {
   let mut first = true
   for ;; {
@@ -265,9 +271,11 @@ async fn[G] Actor::run_connection(
   group : @async.TaskGroup[G],
   pending : ActorInput?,
   emit : (String, Json) -> Unit,
-  revoke_workspaces~ : async () -> Unit,
+  revoke_workspaces~ : async (Int) -> Unit,
 ) -> Unit {
   self.state = Starting
+  self.generation += 1
+  let generation = self.generation
   // Requests from an older WebSocket generation cannot be answered on this
   // connection. The new mux baseline will repopulate still-pending requests.
   self.interactions.reset()
@@ -319,7 +327,7 @@ async fn[G] Actor::run_connection(
   self.state = Ready
   emit("dsh.status_changed", self.status())
   if pending is Some(input) {
-    connection.dispatch_input(group, self, input)
+    connection.dispatch_input(group, self, generation, input)
   }
   for ;; {
     let next = self.next_step(events, disconnects) catch {
@@ -327,7 +335,7 @@ async fn[G] Actor::run_connection(
       _ => break
     }
     match next {
-      Input(input) => connection.dispatch_input(group, self, input)
+      Input(input) => connection.dispatch_input(group, self, generation, input)
       Event(Frame(stream, message)) => {
         if stream == "mux" {
           self.interactions.observe(message)
@@ -352,10 +360,10 @@ async fn[G] Actor::run_connection(
 async fn Actor::finish_disconnect(
   self : Actor,
   emit : (String, Json) -> Unit,
-  revoke_workspaces~ : async () -> Unit,
+  revoke_workspaces~ : async (Int) -> Unit,
 ) -> Unit {
   self.state = Unavailable("DeepSeek Harness disconnected")
-  revoke_workspaces()
+  revoke_workspaces(self.generation)
   emit("dsh.status_changed", self.status())
 }
 
@@ -386,7 +394,9 @@ async fn Actor::next_step(
 fn ActorInput::reject(self : ActorInput, error : DshError) -> Unit {
   error.log()
   match self {
-    Call(_, _, reply) | Respond(_, reply) | ListInteractions(reply) =>
+    Call(_, _, reply) =>
+      (reply.try_put(Err(error)) catch { _ => false }) |> ignore
+    Respond(_, reply) | ListInteractions(reply) =>
       (reply.try_put(Err(error)) catch { _ => false }) |> ignore
   }
 }
@@ -396,6 +406,7 @@ fn[G] Connection::dispatch_input(
   self : Connection,
   group : @async.TaskGroup[G],
   actor : Actor,
+  generation : Int,
   input : ActorInput,
 ) -> Unit {
   match input {
@@ -403,7 +414,7 @@ fn[G] Connection::dispatch_input(
       actor.next_rpc_id += 1
       let rpc_id = "openseek-desktop-\{actor.next_rpc_id}"
       group.spawn_bg(allow_failure=true, () => {
-        let outcome : Result[Json, DshError] = try
+        let outcome : Result[(Json, Int), DshError] = try
           self.request(method_~, rpc_id~, payload~)
         catch {
           error => {
@@ -420,7 +431,7 @@ fn[G] Connection::dispatch_input(
             Err(failure)
           }
         } noraise {
-          value => Ok(value)
+          value => Ok((value, generation))
         }
         (reply.try_put(outcome) catch { _ => false }) |> ignore
       })
@@ -494,7 +505,9 @@ async test "dsh actor tracks pending interactions and consumes buffered commands
   })
   let events : @async.Queue[DshEvent] = Queue(kind=Blocking(1))
   let disconnects : @async.Queue[Unit] = Queue(kind=Blocking(1))
-  let reply : @async.Queue[Result[Json, DshError]] = Queue(kind=Blocking(1))
+  let reply : @async.Queue[Result[(Json, Int), DshError]] = Queue(
+    kind=Blocking(1),
+  )
   actor.inputs.put(Call("session.list", {}, reply))
   let step = actor.next_step(events, disconnects)
   assert_true(step is Input(Call("session.list", _, _)))
@@ -509,19 +522,21 @@ async test "dsh actor tracks pending interactions and consumes buffered commands
 async test "dsh actor revokes workspaces before publishing disconnect" {
   let actor = Actor()
   actor.state = Ready
+  actor.generation = 7
   let order : Array[String] = []
   let published : Array[Json] = []
-  let revoked : @async.Queue[Unit] = Queue(kind=Blocking(1))
+  let revoked : @async.Queue[Int] = Queue(kind=Blocking(1))
   actor.finish_disconnect(
     (method_, payload) => {
       order.push(method_)
       published.push(payload)
     },
-    revoke_workspaces=async fn() {
-      revoked.put(())
+    revoke_workspaces=async fn(generation) {
+      revoked.put(generation)
       order.push("revoked")
     },
   )
+  assert_eq(revoked.get(), 7)
   assert_eq(order, ["revoked", "dsh.status_changed"])
   assert_eq(published, [
     { "status": "unavailable", "message": "DeepSeek Harness disconnected" },
