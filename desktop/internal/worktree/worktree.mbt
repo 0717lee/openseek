@@ -51,6 +51,13 @@ const WorktreesFile = "worktrees.json"
 const DetachedDshRegistriesFile = "dsh-detached-worktrees.json"
 
 ///|
+/// Session-removal cleanup is driven by a one-shot dsh event. Persist the
+/// intent separately from the detached-registry index before touching any
+/// workspace registry, so an index/read/write failure or Desktop exit leaves
+/// an operation that startup can retry.
+const PendingDshSessionReleasesFile = "dsh-pending-session-releases.json"
+
+///|
 const WorktreesDirName = ".worktrees"
 
 ///|
@@ -79,6 +86,13 @@ let removed_dsh_sessions : Map[String, Bool] = Map([])
 /// every dsh owner still lives only in that workspace's `worktrees.json`.
 priv struct DetachedDshRegistryIndex {
   workspaces : Array[@pathx.Absolute]
+}
+
+///|
+/// Durable worktree-owner releases which have not completed across every
+/// registered and detached workspace registry.
+priv struct PendingDshSessionReleases {
+  session_ids : Array[String]
 }
 
 ///|
@@ -150,6 +164,74 @@ async fn DetachedDshRegistryIndex::save(
     @fs.rename(temp.to_string(), target.to_string()) catch {
       error =>
         raise WorktreeError("could not save detached dsh registries: \{error}")
+    }
+  })
+}
+
+///|
+async fn PendingDshSessionReleases::load() -> PendingDshSessionReleases {
+  guard @workspaces.global_store_root() is Some(root) else {
+    return { session_ids: [] }
+  }
+  let text = @fsx.try_read_text(
+    root.join(PendingDshSessionReleasesFile).to_path(),
+  ) catch {
+    error if @async.is_being_cancelled() => raise error
+    error =>
+      raise WorktreeError("could not read pending dsh releases: \{error}")
+  }
+  guard text is Some(text) else { return { session_ids: [] } }
+  let json = @json.parse(text) catch {
+    error =>
+      raise WorktreeError("could not parse pending dsh releases: \{error}")
+  }
+  guard json is Object(fields) && fields.get("sessionIds") is Some(Array(items)) else {
+    raise WorktreeError("pending dsh release queue is malformed")
+  }
+  let session_ids : Array[String] = []
+  for item in items {
+    guard item is String(session_id) &&
+      @session_store.safe_session_id(session_id) else {
+      raise WorktreeError("pending dsh release session id is invalid")
+    }
+    if !session_ids.contains(session_id) {
+      session_ids.push(session_id)
+    }
+  }
+  { session_ids, }
+}
+
+///|
+/// Atomically replace the queue. A session id is removed only after all of
+/// its registry mutations commit, making a repeated drain idempotent.
+async fn PendingDshSessionReleases::save(
+  self : PendingDshSessionReleases,
+) -> Unit {
+  guard @workspaces.global_store_root() is Some(root) else {
+    raise WorktreeError(
+      "cannot determine a session root; set OPENSEEK_SESSION_ROOT",
+    )
+  }
+  @fsx.ensure_dir(root.to_path()) catch {
+    error if @async.is_being_cancelled() => raise error
+    error => raise WorktreeError("could not create \{root}: \{error}")
+  }
+  let queue : Json = { "sessionIds": self.session_ids.to_json() }
+  let target = root.join(PendingDshSessionReleasesFile)
+  let temp = root.join(PendingDshSessionReleasesFile + ".tmp")
+  @fs.write_file(
+    temp.to_string(),
+    queue.stringify(indent=2),
+    create_mode=CreateOrTruncate,
+  ) catch {
+    error if @async.is_being_cancelled() => raise error
+    error =>
+      raise WorktreeError("could not stage pending dsh releases: \{error}")
+  }
+  @async.protect_from_cancel(() => {
+    @fs.rename(temp.to_string(), target.to_string()) catch {
+      error =>
+        raise WorktreeError("could not save pending dsh releases: \{error}")
     }
   })
 }
@@ -868,19 +950,14 @@ pub async fn retain_dsh_registry_for_detach(
 }
 
 ///|
-/// A host/session-removed event is dsh's authoritative end of one owner. Keep
-/// its checkout and branch intact, but release the registry row to the normal
-/// worktree lifecycle so a dirty checkout is never deleted automatically and
-/// `worktree.remove` can apply its ordinary confirmation policy later. The
-/// same lock records the terminal session id before scanning rows, closing the
-/// validate-before-create race even when no binding exists yet.
-pub async fn release_dsh_session(
+/// Release one queued owner from every registry. The caller holds
+/// `worktree_registry_lock`, and the queue entry remains durable until this
+/// method returns and the following queue save commits.
+async fn PendingDshSessionReleases::release_one(
+  self : PendingDshSessionReleases,
   session_id : String,
   on_committed : (String, Array[WorktreeInfo]) -> Unit,
-) -> Unit {
-  worktree_registry_lock.acquire()
-  defer worktree_registry_lock.release()
-  removed_dsh_sessions[session_id] = true
+) -> PendingDshSessionReleases {
   let workspaces = @workspaces.registered()
   let detached = DetachedDshRegistryIndex::load()
   for workspace in detached.workspaces {
@@ -920,6 +997,62 @@ pub async fn release_dsh_session(
     }
     next_index.save()
   }
+  { session_ids: self.session_ids.filter(id => id != session_id) }
+}
+
+///|
+/// Drain every persisted release in order. Saving after each completed owner
+/// bounds replay after a crash while keeping later operations queued when one
+/// registry remains unavailable.
+async fn PendingDshSessionReleases::drain(
+  self : PendingDshSessionReleases,
+  on_committed : (String, Array[WorktreeInfo]) -> Unit,
+) -> Unit {
+  let mut remaining = self
+  for session_id in self.session_ids.copy() {
+    removed_dsh_sessions[session_id] = true
+    remaining = remaining.release_one(session_id, on_committed)
+    remaining.save()
+  }
+}
+
+///|
+/// A host/session-removed event is dsh's authoritative end of one owner. Keep
+/// its checkout and branch intact, but release the registry row to the normal
+/// worktree lifecycle so a dirty checkout is never deleted automatically and
+/// `worktree.remove` can apply its ordinary confirmation policy later. The
+/// intent is durable before registry access, and the same lock records the
+/// terminal session id before scanning rows, closing the validate-before-
+/// create race even when no binding exists yet.
+pub async fn release_dsh_session(
+  session_id : String,
+  on_committed : (String, Array[WorktreeInfo]) -> Unit,
+) -> Unit {
+  guard @session_store.safe_session_id(session_id) else {
+    raise WorktreeError("dsh session id invalid")
+  }
+  worktree_registry_lock.acquire()
+  defer worktree_registry_lock.release()
+  let pending = PendingDshSessionReleases::load()
+  if !pending.session_ids.contains(session_id) {
+    pending.session_ids.push(session_id)
+    // This commit precedes detached-index and worktree-registry reads. A
+    // failure from either therefore cannot consume the one-shot dsh event.
+    pending.save()
+  }
+  pending.drain(on_committed)
+}
+
+///|
+/// Retry durable releases at Desktop startup. Subsequent session removals call
+/// the same drain after enqueueing their own id, so recovery does not depend
+/// exclusively on another process restart.
+pub async fn retry_dsh_session_releases(
+  on_committed : (String, Array[WorktreeInfo]) -> Unit,
+) -> Unit {
+  worktree_registry_lock.acquire()
+  defer worktree_registry_lock.release()
+  PendingDshSessionReleases::load().drain(on_committed)
 }
 
 ///|
@@ -1979,19 +2112,22 @@ async test "dsh session release updates a detached worktree registry" {
   assert_true(malformed_detail.contains("could not parse"))
   // A failed index read is not authoritative absence: it must leave both the
   // locator file and the workspace's owner row available for a later retry.
+  // The one-shot session-removal intent was durably queued before that read.
+  assert_eq(PendingDshSessionReleases::load().session_ids, [
+    "session-dsh-detached",
+  ])
   guard read_worktrees_unlocked(repo) is [still_owned] else {
     fail("expected the detached worktree row after the failed index read")
   }
   assert_eq(still_owned.dsh_session, Some("session-dsh-detached"))
   @fsx.write_text(detached_index.to_path(), saved_index)
   let released : Array[WorktreeInfo] = []
-  release_dsh_session("session-dsh-detached", (_, worktrees) => {
-    released.append(worktrees)
-  })
+  retry_dsh_session_releases((_, worktrees) => released.append(worktrees))
   guard released is [released_row] else {
     fail("expected the detached dsh registry to be released")
   }
   assert_eq(released_row.dsh_session, None)
+  assert_true(PendingDshSessionReleases::load().session_ids.is_empty())
   assert_true(DetachedDshRegistryIndex::load().workspaces.is_empty())
   ignore(@workspaces.add(repo.to_string(), fn(_) {  }))
   guard list(repo.to_string()).worktrees is [reattached] else {

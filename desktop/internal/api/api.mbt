@@ -575,6 +575,19 @@ pub async fn ApiState::run_dsh(
   self : ApiState,
   emit : (String, Json) -> Unit,
 ) -> Unit {
+  // host/session-removed is a one-shot dsh event. Worktree cleanup persists
+  // its session id before registry access; drain leftovers before connecting
+  // so a prior Desktop exit or transient registry failure cannot orphan the
+  // owner forever. A failed drain remains queued and must not prevent dsh from
+  // starting; the next removal also retries the whole queue.
+  @worktree.retry_dsh_session_releases(fn(workspace, worktrees) {
+    publish_worktree_changed(self, workspace, worktrees)
+  }) catch {
+    error if @async.is_being_cancelled() => raise error
+    error =>
+      @xlog.error(category="dsh") <?
+        { "event": "dsh_worktree_release_retry_failed", "error": "\{error}" }
+  }
   self.dsh.run(
     emit,
     invalidate_workspaces=async fn(generation, revision) {

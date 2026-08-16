@@ -29,6 +29,8 @@ pub async fn remove(WorktreeHost, String, String, Bool, (Array[@protocol.Worktre
 
 pub async fn retain_dsh_registry_for_detach(@pathx.Absolute) -> Unit
 
+pub async fn retry_dsh_session_releases((String, Array[@protocol.WorktreeInfo]) -> Unit) -> Unit
+
 pub async fn run_dir(@pathx.Absolute, String) -> @pathx.Absolute
 
 pub async fn tree_base(@pathx.Absolute, String) -> String?

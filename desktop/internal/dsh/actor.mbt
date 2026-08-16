@@ -456,9 +456,11 @@ async fn Actor::publish_frame(
           release_worktree(session_id) catch {
             error if @async.is_being_cancelled() => raise error
             error =>
-              // Registry cleanup is best-effort at this event boundary.
-              // Losing the actor would also skip the removal event and later
-              // grant revocation, leaving subsequent requests unconsumed.
+              // The worktree package persists the session id before touching
+              // registries, so logging here does not consume the cleanup. It
+              // is retried at startup and by the next removal. Losing this
+              // actor would also skip the removal event and later grant
+              // revocation, leaving subsequent requests unconsumed.
               @xlog.error(category="dsh") <?
                 {
                   "event": "dsh_worktree_release_failed",

@@ -1209,6 +1209,17 @@ fn State::with_pending_snapshot(
     commands.push(command)
     next = state
   }
+  // dsh.pending is an authoritative list of interactions, but it is not an
+  // editor-state reset. A sibling reply can settle `loading` immediately
+  // before this snapshot lands, after the user has already changed another
+  // question card. Reattach answers only to the same RPC, session, and
+  // question ids; cards absent from the snapshot still disappear below.
+  next = {
+    ..next,
+    pending: next.pending.map(item => {
+      item.preserving_question_answers(self.pending)
+    }),
+  }
   // Once an authoritative snapshot reaches a settlement generation, its
   // absence is durable and the global generation rejects older events.
   next = {
@@ -1612,7 +1623,11 @@ fn State::with_event(
         }
       }
       let pending = self.pending.filter(item => item.rpc_id() != rpc_id)
-      pending.push(DshQuestions(rpc_id~, session_id~, questions~, answers~))
+      pending.push(
+        DshQuestions(rpc_id~, session_id~, questions~, answers~).preserving_question_answers(
+          self.pending,
+        ),
+      )
       (
         @cmd.none,
         {
@@ -1752,6 +1767,44 @@ fn DshPendingInteraction::questions_answered(
       .unwrap_or_else(() => DshQuestionAnswer::empty())
     !answer.selected.is_empty() || !answer.custom.trim().is_empty()
   })
+}
+
+///|
+/// Keep renderer-owned answer drafts when dsh replays the same pending
+/// question request. The server remains authoritative for which questions
+/// exist; only exact question ids inside the same RPC and session inherit UI
+/// state, so a replacement request starts with empty answers.
+fn DshPendingInteraction::preserving_question_answers(
+  self : DshPendingInteraction,
+  previous : Array[DshPendingInteraction],
+) -> DshPendingInteraction {
+  guard self is DshQuestions(rpc_id~, session_id~, questions~, answers~) &&
+    previous
+    .iter()
+    .find_first(item => {
+      item
+      is DshQuestions(
+        rpc_id=previous_rpc_id,
+        session_id=previous_session_id,
+        ..
+      ) &&
+      previous_rpc_id == rpc_id &&
+      previous_session_id == session_id
+    })
+    is Some(DshQuestions(answers=previous_answers, ..)) else {
+    return self
+  }
+  let merged : Map[String, DshQuestionAnswer] = Map([])
+  for question in questions {
+    merged[question.id] = match previous_answers.get(question.id) {
+      Some(answer) => { ..answer, selected: answer.selected.copy() }
+      None =>
+        answers
+        .get(question.id)
+        .unwrap_or_else(() => DshQuestionAnswer::empty())
+    }
+  }
+  DshQuestions(rpc_id~, session_id~, questions~, answers=merged)
 }
 
 ///|
@@ -3096,6 +3149,68 @@ test "dsh single-select answers keep option and custom text exclusive" {
   }
   assert_eq(custom_answers["q1"].selected, [])
   assert_eq(custom_answers["q1"].custom, "another")
+}
+
+///|
+test "dsh pending snapshots preserve answers for matching questions" {
+  let previous_answers : Map[String, DshQuestionAnswer] = Map([])
+  previous_answers["q1"] = { selected: ["One"], custom: "" }
+  previous_answers["q2"] = { selected: [], custom: "typed answer" }
+  let state = {
+    ..State(),
+    pending: [
+      DshQuestions(
+        rpc_id="rpc-questions",
+        session_id="session-1",
+        questions=[],
+        answers=previous_answers,
+      ),
+    ],
+  }
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let (_, replayed) = state.with_reply(dispatch, DshPendingReply, {
+    "generation": 2,
+    "data": [
+      {
+        "stream": "mux",
+        "generation": 2,
+        "message": {
+          "rpcId": "rpc-questions",
+          "payload": {
+            "type": "question/requested",
+            "sessionId": "session-1",
+            "questions": [
+              {
+                "id": "q1",
+                "header": "Choice",
+                "question": "Choose",
+                "options": [{ "label": "One" }],
+              },
+              {
+                "id": "q2",
+                "header": "Detail",
+                "question": "Explain",
+                "options": [],
+              },
+              {
+                "id": "q3",
+                "header": "New",
+                "question": "New question",
+                "options": [],
+              },
+            ],
+          },
+        },
+      },
+    ],
+  })
+  guard replayed.pending is [DshQuestions(answers~, ..)] else {
+    fail("expected the replayed dsh question card")
+  }
+  assert_eq(answers["q1"].selected, ["One"])
+  assert_eq(answers["q2"].custom, "typed answer")
+  assert_true(answers["q3"].selected.is_empty())
+  assert_eq(answers["q3"].custom, "")
 }
 
 ///|
