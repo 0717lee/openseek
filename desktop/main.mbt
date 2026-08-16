@@ -193,9 +193,7 @@ async fn main {
       })
     })
     group.spawn_bg(allow_failure=true, () => {
-      state
-      .dsh_actor()
-      .run((method_, params) => {
+      state.run_dsh((method_, params) => {
         if @protocol.Notification::from_wire(method_, params)
           is Some(notification) {
           state.publish(notification)

@@ -500,9 +500,17 @@ pub fn ApiState::codex_actor(self : ApiState) -> @codex.Actor {
 }
 
 ///|
-/// The app-lifetime owner of the DeepSeek Harness Web child process.
-pub fn ApiState::dsh_actor(self : ApiState) -> @dsh.Actor {
-  self.dsh
+/// Run the app-lifetime DeepSeek Harness process together with the Workspace
+/// grants derived from it. Keeping both under this one API prevents callers
+/// from starting the actor without revoking Files and Terminal access when its
+/// WebSockets close; the next authoritative workspace.list rebuilds the table.
+pub async fn ApiState::run_dsh(
+  self : ApiState,
+  emit : (String, Json) -> Unit,
+) -> Unit {
+  self.dsh.run(emit, revoke_workspaces=async fn() {
+    self.dsh_workspaces.replace([])
+  })
 }
 
 ///|

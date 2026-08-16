@@ -1022,7 +1022,15 @@ priv struct DshEventLog(Array[DshEventRecord])
 fn DshEventLog::streaming_text(self : DshEventLog) -> String {
   let mut text = ""
   for event in self.0 {
-    if event.type_ == "assistant/message" && event.surface_append == Some(true) {
+    // A cancelled turn may never append a final assistant/message. Both the
+    // explicit turn boundary and its append-origin user message therefore
+    // start a fresh accumulator; the latter also covers a bounded history
+    // window whose preceding turn/start has already fallen out.
+    if event.type_ == "turn/start" ||
+      (
+        (event.type_ == "user/message" || event.type_ == "assistant/message") &&
+        event.surface_append == Some(true)
+      ) {
       text = ""
     } else if event.streaming_delta() is Some(delta) {
       text += delta
@@ -1834,6 +1842,52 @@ test "dsh event log rebuilds only the unfinished assistant text" {
     },
   ]
   assert_eq(DshEventLog(events).streaming_text(), "new text")
+}
+
+///|
+test "dsh event log drops an interrupted turn at the next boundary" {
+  let old_chunk : DshEventRecord = {
+    type_: "assistant/chunk",
+    seq: 1,
+    time: None,
+    data: { "chunk": { "type": "text-delta", "text": "abandoned" } },
+    surface_append: None,
+  }
+  let new_chunk : DshEventRecord = {
+    type_: "assistant/chunk",
+    seq: 4,
+    time: None,
+    data: { "chunk": { "type": "text-delta", "text": "next" } },
+    surface_append: None,
+  }
+  assert_eq(
+    DshEventLog([
+      old_chunk,
+      {
+        type_: "turn/start",
+        seq: 3,
+        time: None,
+        data: {},
+        surface_append: None,
+      },
+      new_chunk,
+    ]).streaming_text(),
+    "next",
+  )
+  assert_eq(
+    DshEventLog([
+      old_chunk,
+      {
+        type_: "user/message",
+        seq: 3,
+        time: None,
+        data: { "source": { "kind": "user" }, "content": [] },
+        surface_append: Some(true),
+      },
+      new_chunk,
+    ]).streaming_text(),
+    "next",
+  )
 }
 
 ///|

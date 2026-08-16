@@ -5,7 +5,6 @@ import {
   "moonbitlang/async/aqueue",
   "openseek_desktop/internal/auth",
   "openseek_desktop/internal/codex",
-  "openseek_desktop/internal/dsh",
   "openseek_desktop/internal/endpoint",
   "openseek_desktop/internal/engine",
   "openseek_desktop/internal/host",
@@ -24,12 +23,12 @@ pub fn local_endpoints(ApiState) -> Array[@endpoint.Endpoint]
 type ApiState
 pub fn ApiState::auth_store(Self) -> @auth.AuthStore
 pub fn ApiState::codex_actor(Self) -> @codex.Actor
-pub fn ApiState::dsh_actor(Self) -> @dsh.Actor
 pub fn ApiState::engine_actor(Self) -> @engine.EngineActor
 pub fn ApiState::host_state(Self) -> @host.HostState
 pub fn ApiState::manager(Self) -> @engine.EngineManager
 pub fn ApiState::new(engine~ : String, codex? : @codex.CodexSettings, runtime_dir? : @pathx.Path, executable? : String, auth? : @auth.AuthStore, app_version? : String, on_finished? : (@protocol.FinishedPayload) -> Unit) -> Self
 pub fn ApiState::publish(Self, @protocol.Notification) -> Unit
+pub async fn ApiState::run_dsh(Self, (String, Json) -> Unit) -> Unit
 pub fn ApiState::sink(Self) -> @engine.EventSink
 pub fn ApiState::subscribe(Self) -> @aqueue.Queue[@protocol.Notification]
 pub fn ApiState::unsubscribe(Self, @aqueue.Queue[@protocol.Notification]) -> Unit

@@ -240,7 +240,11 @@ pub async fn Actor::interactions(self : Actor) -> Json {
 ///|
 /// Own dsh for the Desktop lifetime. A failed executable or disconnected API
 /// stays quiet until the next command asks for one reconnect attempt.
-pub async fn Actor::run(self : Actor, emit : (String, Json) -> Unit) -> Unit {
+pub async fn Actor::run(
+  self : Actor,
+  emit : (String, Json) -> Unit,
+  revoke_workspaces~ : async () -> Unit,
+) -> Unit {
   let mut first = true
   for ;; {
     let pending = if first {
@@ -249,7 +253,9 @@ pub async fn Actor::run(self : Actor, emit : (String, Json) -> Unit) -> Unit {
     } else {
       Some(self.inputs.get())
     }
-    @async.with_task_group(group => self.run_connection(group, pending, emit))
+    @async.with_task_group(group => {
+      self.run_connection(group, pending, emit, revoke_workspaces~)
+    })
   }
 }
 
@@ -259,6 +265,7 @@ async fn[G] Actor::run_connection(
   group : @async.TaskGroup[G],
   pending : ActorInput?,
   emit : (String, Json) -> Unit,
+  revoke_workspaces~ : async () -> Unit,
 ) -> Unit {
   self.state = Starting
   // Requests from an older WebSocket generation cannot be answered on this
@@ -335,7 +342,20 @@ async fn[G] Actor::run_connection(
     }
   }
   connection.shutdown()
+  self.finish_disconnect(emit, revoke_workspaces~)
+}
+
+///|
+/// Leave one ready WebSocket generation only after its dsh-derived Workspace
+/// grants are gone. The unavailable notification is deliberately last: once
+/// the page observes it, Files and Terminal can no longer use the old rows.
+async fn Actor::finish_disconnect(
+  self : Actor,
+  emit : (String, Json) -> Unit,
+  revoke_workspaces~ : async () -> Unit,
+) -> Unit {
   self.state = Unavailable("DeepSeek Harness disconnected")
+  revoke_workspaces()
   emit("dsh.status_changed", self.status())
 }
 
@@ -483,4 +503,27 @@ async test "dsh actor tracks pending interactions and consumes buffered commands
   events.put(Frame("mux", {}))
   disconnects.put(())
   assert_true(actor.next_step(events, disconnects) is Disconnected)
+}
+
+///|
+async test "dsh actor revokes workspaces before publishing disconnect" {
+  let actor = Actor()
+  actor.state = Ready
+  let order : Array[String] = []
+  let published : Array[Json] = []
+  let revoked : @async.Queue[Unit] = Queue(kind=Blocking(1))
+  actor.finish_disconnect(
+    (method_, payload) => {
+      order.push(method_)
+      published.push(payload)
+    },
+    revoke_workspaces=async fn() {
+      revoked.put(())
+      order.push("revoked")
+    },
+  )
+  assert_eq(order, ["revoked", "dsh.status_changed"])
+  assert_eq(published, [
+    { "status": "unavailable", "message": "DeepSeek Harness disconnected" },
+  ])
 }
