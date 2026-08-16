@@ -91,18 +91,24 @@ async fn DetachedDshRegistryIndex::load() -> DetachedDshRegistryIndex {
   }
   let text = @fsx.try_read_text(root.join(DetachedDshRegistriesFile).to_path()) catch {
     error if @async.is_being_cancelled() => raise error
-    _ => return { workspaces: [] }
+    error =>
+      raise WorktreeError("could not read detached dsh registries: \{error}")
   }
   guard text is Some(text) else { return { workspaces: [] } }
-  let json = @json.parse(text) catch { _ => return { workspaces: [] } }
+  let json = @json.parse(text) catch {
+    error =>
+      raise WorktreeError("could not parse detached dsh registries: \{error}")
+  }
   guard json is Object(fields) && fields.get("workspaces") is Some(Array(items)) else {
-    return { workspaces: [] }
+    raise WorktreeError("detached dsh registry index is malformed")
   }
   let workspaces : Array[@pathx.Absolute] = []
   for item in items {
-    guard item is String(path) &&
-      @pathx.Path(path).to_absolute() is Some(workspace) else {
-      continue
+    guard item is String(path) else {
+      raise WorktreeError("detached dsh registry path is not a string")
+    }
+    guard @pathx.Path(path).to_absolute() is Some(workspace) else {
+      raise WorktreeError("detached dsh registry path is not absolute")
     }
     if !workspaces.contains(workspace) {
       workspaces.push(workspace)
@@ -1957,6 +1963,27 @@ async test "dsh session release updates a detached worktree registry" {
     fail("expected the detached dsh registry path to be persisted")
   }
   assert_eq(persisted, repo)
+  let detached_index = root.join("global").join(DetachedDshRegistriesFile)
+  guard @fsx.try_read_text(detached_index.to_path()) is Some(saved_index) else {
+    fail("expected the persisted detached dsh registry index")
+  }
+  @fsx.write_text(detached_index.to_path(), "{ malformed")
+  let malformed_detail = try {
+    release_dsh_session("session-dsh-detached", (_, _) => ())
+    "no error"
+  } catch {
+    WorktreeError(detail) => detail
+    error if @async.is_being_cancelled() => raise error
+    error => "\{error}"
+  }
+  assert_true(malformed_detail.contains("could not parse"))
+  // A failed index read is not authoritative absence: it must leave both the
+  // locator file and the workspace's owner row available for a later retry.
+  guard read_worktrees_unlocked(repo) is [still_owned] else {
+    fail("expected the detached worktree row after the failed index read")
+  }
+  assert_eq(still_owned.dsh_session, Some("session-dsh-detached"))
+  @fsx.write_text(detached_index.to_path(), saved_index)
   let released : Array[WorktreeInfo] = []
   release_dsh_session("session-dsh-detached", (_, worktrees) => {
     released.append(worktrees)
