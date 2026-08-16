@@ -192,23 +192,19 @@ async fn Connection::pump(
     guard message.kind is Text else {
       raise DshError::RequestFailed(stream, "dsh sent a binary WebSocket frame")
     }
-    let bytes = FixedArray::make(MaxEventBytes + 1, b'\x00')
+    // Token streaming emits many small frames. Retain only their received
+    // chunks instead of reserving the complete 8 MiB safety limit per token.
+    let chunks : Array[Bytes] = []
     let mut received = 0
-    for ;; {
-      let count = message.read(
-        bytes,
-        offset=received,
-        max_len=bytes.length() - received,
-      )
-      if count == 0 {
-        break
-      }
-      received += count
+    while message.read_some(max_len=64 * 1024) is Some(chunk) {
+      received += chunk.length()
       if received > MaxEventBytes {
         raise DshError::RequestFailed(stream, "event exceeds 8 MiB")
       }
+      chunks.push(chunk)
     }
-    let text = @utf8.decode(bytes.unsafe_reinterpret_as_bytes()[:received])
+    let bytes = Bytes::from_iter(chunks.iter().flat_map(chunk => chunk.iter()))
+    let text = @utf8.decode(bytes)
     let value = @json.parse(text) catch {
       _ => raise DshError::RequestFailed(stream, "event is not JSON")
     }
