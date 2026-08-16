@@ -145,23 +145,22 @@ async fn Connection::post(
       guard response.code == 200 else {
         raise DshError::RequestFailed(path, "HTTP \{response.code}")
       }
-      let bytes = FixedArray::make(MaxResponseBytes + 1, b'\x00')
+      // Most ApiProxy replies are small. Retain the chunks actually received
+      // instead of reserving the entire 32 MiB safety limit for every
+      // concurrent history/model request.
+      let chunks : Array[Bytes] = []
       let mut received = 0
-      for ;; {
-        let count = client.read(
-          bytes,
-          offset=received,
-          max_len=bytes.length() - received,
-        )
-        if count == 0 {
-          break
-        }
-        received += count
+      while client.read_some(max_len=64 * 1024) is Some(chunk) {
+        received += chunk.length()
         if received > MaxResponseBytes {
           raise DshError::RequestFailed(path, "response exceeds 32 MiB")
         }
+        chunks.push(chunk)
       }
-      let text = @utf8.decode(bytes.unsafe_reinterpret_as_bytes()[:received])
+      let bytes = Bytes::from_iter(
+        chunks.iter().flat_map(chunk => chunk.iter()),
+      )
+      let text = @utf8.decode(bytes)
       @json.parse(text) catch {
         _ => raise DshError::RequestFailed(path, "response is not JSON")
       }

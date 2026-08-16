@@ -445,6 +445,10 @@ pub fn update(
 }
 
 ///|
+/// Settle one dsh reply without letting an independent success erase a newer
+/// diagnostic. User actions clear the preceding notice before dispatch; list,
+/// history, and model snapshots therefore preserve any notice present when
+/// they complete.
 fn State::with_reply(
   self : State,
   dispatch : @cmd.Emit[Msg],
@@ -625,7 +629,6 @@ fn State::with_reply(
             connection: DshReady,
             workspaces,
             loading: kind is DshPromptWorkspacesReply(..),
-            notice: "",
           }
         },
       )
@@ -731,7 +734,6 @@ fn State::with_reply(
           self.worktree_project
         },
         loading: false,
-        notice: "",
       }
       match active_id {
         Some(id) if selection_changed =>
@@ -832,7 +834,6 @@ fn State::with_reply(
           streaming: DshEventLog(events).streaming_text(),
           events,
           loading: false,
-          notice: "",
         },
       )
     }
@@ -848,7 +849,10 @@ fn State::with_reply(
           },
         )
       }
-      (@cmd.none, { ..self, models, notice: "" })
+      // The action that started this request already cleared the preceding
+      // notice. Preserve any diagnostic produced while this independent model
+      // snapshot was in flight; it necessarily belongs to newer work.
+      (@cmd.none, { ..self, models, })
     }
     DshSelectModelReply(session_id~) => {
       guard self.active_id == Some(session_id) else { return (@cmd.none, self) }
@@ -865,7 +869,9 @@ fn State::with_reply(
           },
         )
       }
-      (@cmd.none, { ..self, models, notice: "" })
+      // ModelChanged cleared the old notice before dispatch. A notice present
+      // now was produced concurrently and must not be erased by this reply.
+      (@cmd.none, { ..self, models, })
     }
     DshPromptWorkspaceReply(
       session_id~,
@@ -2884,6 +2890,7 @@ test "dsh model selection settles the shared composer catalog" {
     ..State(),
     connection: DshReady,
     active_id: Some("session-1"),
+    notice: "old model error",
     models: DshModelsReady(
       session_id="session-1",
       options=[
@@ -2896,10 +2903,15 @@ test "dsh model selection settles the shared composer catalog" {
   }
   let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   let (_, selecting) = update(dispatch, ModelChanged(requested.key()), state)
+  // Starting a new selection dismisses the prior diagnostic explicitly.
+  assert_eq(selecting.notice, "")
   guard selecting.models is DshModelsSelecting(requested=selection, ..) else {
     fail("expected selecting dsh model state")
   }
   assert_eq(selection, requested)
+  // An unrelated failure may arrive after the request starts. The successful
+  // selection reply must not erase that newer diagnostic.
+  let selecting = { ..selecting, notice: "newer prompt failure" }
   let (_, ready) = selecting.with_reply(
     dispatch,
     DshSelectModelReply(session_id="session-1"),
@@ -2923,6 +2935,33 @@ test "dsh model selection settles the shared composer catalog" {
   }
   assert_eq(selected, requested)
   assert_true(routable)
+  assert_eq(ready.notice, "newer prompt failure")
+  let refreshing = {
+    ..ready,
+    models: DshModelsLoading(session_id="session-1"),
+    notice: "newer interaction failure",
+  }
+  let (_, refreshed) = refreshing.with_reply(
+    dispatch,
+    DshModelsReply("session-1"),
+    {
+      "type": "server-response",
+      "rpcId": "models-1",
+      "result": {
+        "ok": true,
+        "value": {
+          "current": {
+            "provider": "deepseek",
+            "model": "reasoner",
+            "reasoningEffort": "high",
+          },
+          "routable": true,
+          "groups": [],
+        },
+      },
+    },
+  )
+  assert_eq(refreshed.notice, "newer interaction failure")
   let navigated = { ..ready, active_id: Some("session-2") }
   let (_, stale) = update(
     dispatch,
