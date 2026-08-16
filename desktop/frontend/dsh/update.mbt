@@ -342,7 +342,26 @@ pub fn update(
           return (@cmd.none, state)
         }
         if state.active_id != Some(session_id) {
-          return (cleanup_cmd, state)
+          // Worktree setup failures remain busy until their checkout cleanup
+          // settles. Every later-stage prompt failure has no cleanup receipt,
+          // so settle its global submission fence even after navigation while
+          // preserving the newly selected conversation's draft and notice.
+          return if kind.failed_worktree() is Some(_) {
+            (cleanup_cmd, state)
+          } else {
+            (
+              cleanup_cmd,
+              {
+                ..state,
+                prompt_pending_session: if state.prompt_pending_session ==
+                  Some(session_id) {
+                  None
+                } else {
+                  state.prompt_pending_session
+                },
+              },
+            )
+          }
         }
       }
       // History lanes are ordered only within one session. A failure from a
@@ -1029,6 +1048,15 @@ fn State::with_status(
           ..self,
           connection: DshReady,
           connection_status_revision: revision,
+          // A new Ready revision belongs to a new actor connection. Native
+          // grants for the old rows were already revoked before Unavailable;
+          // do not project those paths again while workspace.list is pending.
+          workspaces: if self.connection is DshReady &&
+            self.connection_status_revision == revision {
+            self.workspaces
+          } else {
+            []
+          },
           loading: true,
           notice: "",
         },
@@ -2156,6 +2184,42 @@ test "dsh status poll cannot roll back a newer notification" {
   })
   assert_true(stale.connection is DshReady)
   assert_eq(stale.connection_status_revision, 2)
+}
+
+///|
+test "dsh reconnect ready waits for a new Workspace baseline" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let state = {
+    ..State(),
+    connection: DshUnavailable("disconnected"),
+    connection_status_revision: 2,
+    workspaces: [
+      {
+        id: "workspace-old",
+        title: "Old grant",
+        path: "/work/old",
+        session_ids: ["session-1"],
+      },
+    ],
+    sessions: [
+      {
+        id: "session-1",
+        title: "Session 1",
+        cwd: Some("/work/old"),
+        running: false,
+        blank: false,
+      },
+    ],
+    active_id: Some("session-1"),
+  }
+  let (_, ready) = state.with_status(dispatch, {
+    "status": "ready",
+    "revision": 3,
+  })
+  assert_true(ready.connection is DshReady)
+  assert_true(ready.workspaces.is_empty())
+  assert_true(ready.active_workspace_path() is None)
+  assert_true(ready.loading)
 }
 
 ///|
@@ -3367,6 +3431,24 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
   assert_eq(background_settled.draft, "draft for session 2")
   assert_eq(background_settled.notice, "session 2 notice")
   assert_false(background_settled.loading)
+  let (_, background_failed) = update(
+    dispatch,
+    Failed(
+      kind=DshPromptReply(
+        session_id="session-1",
+        draft={ task: "inspect this project", mentions: [] },
+        generation=1,
+      ),
+      message="prompt transport failed",
+    ),
+    background_prompting,
+  )
+  assert_eq(background_failed.active_id, Some("session-2"))
+  assert_eq(background_failed.prompt_pending_session, None)
+  assert_eq(background_failed.draft, "draft for session 2")
+  assert_eq(background_failed.notice, "session 2 notice")
+  assert_false(background_failed.loading)
+  assert_false(background_failed.busy())
   let (_, moved) = registered.with_reply(
     dispatch,
     DshPromptWorkspaceReply(
