@@ -25,30 +25,33 @@ priv struct ServeEngine {
   // Fingerprint of the config this process was spawned with; a prompt whose
   // config differs cannot reuse it.
   spec_key : String
+  // Owned exclusively by this engine's writer task. No request ever touches
+  // it, which is what makes a partial JSONL frame impossible and stdin's
+  // close a single-owner event.
   writer : @process.WriteToProcess
-  // Every JSONL command shares one byte stream. Requests run concurrently,
-  // so the lock covers a complete write (and steer bookkeeping tied to that
-  // write) to keep commands whole and define their receipt order.
-  command_lock : @async.Mutex
+  // Every JSONL command shares one byte stream, so submission is a
+  // synchronous handoff to that one writer rather than a lock a request holds
+  // across its own write. Receipt order is enqueue order.
+  commands : @async.Queue[EngineCommand]
   process : @process.Process
   sink : EventSink
   // Exact follower generation established for this writer. Cleanup never
   // performs a session-key lookup that could stop a successor generation.
   follower : SessionFollower?
-  // Level-triggered process-exit latch. Closing stdin only asks `serve` to
-  // finish; replacement and archive wait on this state before they drain
-  // the follower or touch the durable record. The stdout consumer publishes
-  // it only after the child has really exited and its slot has been cleared.
-  exit : EngineExit
-  // The id of the run this engine saw most recently; None before the first
-  // prompt of this process's lifetime (a spawn for compaction, or events
-  // arriving before any turn opened).
-  mut latest_run : String?
+  // This engine's stdout consumer. Its completion IS retirement: it publishes
+  // every remaining lifecycle event, stops the owned follower and clears the
+  // slot before returning, so waiting on this task is the successor-admission
+  // barrier — no second hand-maintained flag needed to say the same thing.
+  // None only between building the handle and spawning the task, which has no
+  // suspension in it and so is unobservable to any request.
+  mut consumer : @async.Task[Unit]?
   mut phase : EnginePhase
-  // False as soon as a command write is interrupted/fails or shutdown begins.
-  // The handle remains in its slot until EOF proves the child is gone, but no
-  // request may reuse its potentially partial JSONL stream in that interval.
-  mut accepts_commands : Bool
+  // Set once, by `condemn`, and never cleared. It is the whole of this
+  // engine's death sentence: nothing more can be submitted, `SessionSlot::live`
+  // stops offering it to requests, and the conversation's next turn must go to
+  // a new process. The handle stays in its slot until EOF proves the child is
+  // gone, so a start joins its close barrier instead of racing it.
+  mut condemned : Bool
   steer_runs : SteerRunTracker
 }
 
@@ -62,48 +65,67 @@ const ServeCloseGraceMs = 2000
 const ServeCancelWaitMs = 3000
 
 ///|
-/// A level-triggered EOF latch: any number of current or late waiters see
-/// the same completed state. A consumable queue token would let the first
-/// waiter strand every later lifecycle operation.
-priv struct EngineExit {
-  mut process_done : Bool
-  mut done : Bool
-}
-
-///|
-async fn EngineExit::wait(self : EngineExit) -> Unit {
-  while !self.done {
-    @async.sleep(10)
+/// Wait until this engine's child is reaped.
+///
+/// The process task is the latch, so there is no second one to publish: it is
+/// level-triggered and multi-waiter, and a cancelled process task completes
+/// only once its cancellation handler has seen the child actually terminate.
+/// A failed or cancelled outcome is still termination, which is all a caller
+/// of this waits to learn.
+async fn ServeEngine::wait_process(self : ServeEngine) -> Unit {
+  ignore(self.process.wait()) catch {
+    _ => ()
   }
 }
 
 ///|
-async fn EngineExit::wait_process(self : EngineExit) -> Unit {
-  while !self.process_done {
-    @async.sleep(10)
+/// Wait until this engine is fully retired: child reaped, follower drained,
+/// lifecycle settled, slot cleared. A consumer that failed or was cancelled
+/// is still finished, which is all a successor needs to know.
+async fn ServeEngine::wait_retired(self : ServeEngine) -> Unit {
+  guard self.consumer is Some(consumer) else { return }
+  consumer.wait() catch {
+    _ => ()
+  }
+}
+
+///|
+/// The synchronous read of the same state.
+fn ServeEngine::is_retired(self : ServeEngine) -> Bool {
+  guard self.consumer is Some(consumer) else { return false }
+  // A consumer that raised is finished too, which is all a successor needs.
+  try (consumer.try_wait() is Some(_)) catch {
+    _ => true
   }
 }
 
 ///|
 /// Ask a serve process to drain normally, but never let a wedged child pin
-/// the pump or an archive forever. `exit` is published by the stdout
-/// consumer only after `Process::wait`, the owned follower's final scan, and
-/// the engine's terminal lifecycle notifications, so returning from here is
-/// the hard writer-and-event-lifetime barrier.
+/// the pump or an archive forever.
+///
+/// Closing stdin is the engine's documented shutdown protocol: the running
+/// work finishes first, then its loop drains and exits. Cancellation is only
+/// the escalation for a child that will not honour it — `serve` installs no
+/// signal handler, so a SIGTERM is a mid-turn death with no durable flush,
+/// which is why this path exists rather than a bare `Process::cancel`.
+///
+/// Returning is the hard writer-and-event-lifetime barrier: the consumer this
+/// waits on ends only after `Process::wait`, the owned follower's final scan,
+/// and every terminal lifecycle notification from this engine.
 async fn ServeEngine::close_and_wait(self : ServeEngine) -> Unit {
-  self.accepts_commands = false
-  // The grace deadline includes waiting for an in-flight command to release
-  // the lock. Otherwise a backpressured write could pin archive/replacement
-  // before their existing process-cancellation fallback is even armed.
-  if @async.with_timeout_opt(ServeCloseGraceMs, () => {
-      self.with_command_lock(() => self.writer.close())
-      self.exit.wait_process()
-    })
+  // Commands already accepted are still the writer's to flush — that is what
+  // asks it to close stdin — so this condemns without discarding.
+  self.condemn()
+  // The grace deadline includes the writer task finishing the commands it
+  // already accepted and then closing stdin. Otherwise a backpressured write
+  // could pin archive/replacement before their existing process-cancellation
+  // fallback is even armed.
+  if @async.with_timeout_opt(ServeCloseGraceMs, () => self.wait_process())
     is Some(_) {
     // The process deadline must not include the follower's O(history) final
     // scan. Once EOF is proved, wait for that correctness barrier without
     // misclassifying a long durable log as a wedged child.
-    self.exit.wait()
+    self.wait_retired()
     return
   }
   @xlog.warn() <?
@@ -114,163 +136,296 @@ async fn ServeEngine::close_and_wait(self : ServeEngine) -> Unit {
       "pid": self.process.pid,
     }
   self.process.cancel()
-  guard @async.with_timeout_opt(ServeCancelWaitMs, () => {
-      self.exit.wait_process()
-    })
+  guard @async.with_timeout_opt(ServeCancelWaitMs, () => self.wait_process())
     is Some(_) else {
     raise EngineError("serve engine did not exit after cancellation")
   }
-  self.exit.wait()
+  self.wait_retired()
 }
 
 ///|
 const FailedCommandFollowerWaitMs = 3000
 
 ///|
-/// A command failed or its caller was cancelled after mutating public state or
-/// entering a stdin write. The stream may now contain a partial JSONL frame,
-/// so this handle is made permanently unusable before cleanup can suspend.
-/// Cleanup is cancellation-protected and bounded. It settles the public
-/// lifecycle exactly once through the phase shared with the EOF consumer, but
-/// retires the follower only after `exit` proves the old child is gone; on a
-/// close timeout the slot and follower stay in place so every successor must
-/// first retry the old child's close barrier rather than overlap or reuse it.
+/// A command could not be put on the wire, so the stream may hold a partial
+/// JSONL frame and this handle is permanently unusable. Bounded cleanup:
+/// settle the public lifecycle exactly once through the phase shared with the
+/// EOF consumer, but retire the follower only after `exit` proves the old
+/// child is gone; on a close timeout the slot and follower stay in place so
+/// every successor must first retry the old child's close barrier rather than
+/// overlap or reuse it.
+///
+/// This runs on the engine's own writer task, never on a request's. That is
+/// why there is no cancellation shield: the only thing that can cancel this
+/// work is the pump going down, which is already killing the child it would
+/// otherwise be protecting.
 async fn retire_failed_command(
   manager : EngineManager,
   engine : ServeEngine,
   reason : String,
 ) -> Unit {
-  // Synchronous and outside the shield on purpose: even a cancellation already
-  // pending at this call boundary can never expose the writer as reusable.
-  engine.accepts_commands = false
-  @async.protect_from_cancel(() => {
-    let exited = try {
-      engine.close_and_wait()
-      true
-    } catch {
+  engine.condemn()
+  let exited = try {
+    engine.close_and_wait()
+    true
+  } catch {
+    error if @async.is_being_cancelled() => raise error
+    error => {
+      @xlog.warn() <?
+        {
+          "event": "desktop_engine_cancel",
+          "reason": "failed command shutdown error",
+          "session": engine.session_key,
+          "pid": engine.process.pid,
+        }
+      engine.process.cancel()
+      @xlog.debug() <?
+        {
+          "event": "desktop_failed_command_shutdown_failed",
+          "session": engine.session_key,
+          "error": "\{error}",
+        }
+      false
+    }
+  }
+  match engine.phase {
+    Running(run_id~, compact_queued~, ..) => {
+      engine.phase = engine.phase.to_idle()
+      engine.steer_runs.abandon()
+      if engine.follower is Some(follower) {
+        follower.expect_durable_finish(run_id)
+      }
+      emit_error(engine.sink, reason, run_id~, exit_code=1)
+      emit_finished(engine.sink, run_id, Failed, exit_code=1)
+      if compact_queued {
+        emit_compaction_failed(engine.sink, engine, reason)
+      }
+    }
+    Compacting(..) => {
+      engine.phase = engine.phase.to_idle()
+      emit_compaction_failed(engine.sink, engine, reason)
+    }
+    Idle(..) => ()
+  }
+  // A timed-out child may still emit old terminal events. With no current
+  // run id they remain diagnostics only and cannot settle the lifecycle a
+  // second time after the synthetic terminal above.
+  engine.phase = Idle(last_run=None)
+  if exited && engine.is_retired() && engine.follower is Some(follower) {
+    let stopped = @async.with_timeout_opt(FailedCommandFollowerWaitMs, () => {
+      stop_follower_instance(manager, follower, writer_exited=true)
+    }) catch {
+      error if @async.is_being_cancelled() => raise error
       error => {
-        @xlog.warn() <?
-          {
-            "event": "desktop_engine_cancel",
-            "reason": "failed command shutdown error",
-            "session": engine.session_key,
-            "pid": engine.process.pid,
-          }
-        engine.process.cancel()
         @xlog.debug() <?
           {
-            "event": "desktop_failed_command_shutdown_failed",
+            "event": "desktop_failed_command_follower_failed",
             "session": engine.session_key,
             "error": "\{error}",
           }
-        false
+        Some(())
       }
     }
-    match engine.phase {
-      Running(compact_queued~, ..) => {
-        engine.phase = Idle
-        engine.steer_runs.abandon()
-        if engine.latest_run is Some(run_id) {
-          if engine.follower is Some(follower) {
-            follower.expect_durable_finish(run_id)
-          }
-          emit_error(engine.sink, reason, run_id~, exit_code=1)
-          emit_finished(engine.sink, run_id, Failed, exit_code=1)
+    if stopped is None {
+      @xlog.debug() <?
+        {
+          "event": "desktop_failed_command_follower_timeout",
+          "session": engine.session_key,
         }
-        if compact_queued {
-          emit_compaction_failed(engine.sink, engine, reason)
-        }
-      }
-      Compacting => {
-        engine.phase = Idle
-        emit_compaction_failed(engine.sink, engine, reason)
-      }
-      Idle => ()
     }
-    // A timed-out child may still emit old terminal events. With no current
-    // run id they remain diagnostics only and cannot settle the lifecycle a
-    // second time after the synthetic terminal above.
-    engine.latest_run = None
-    if exited && engine.exit.done && engine.follower is Some(follower) {
-      let stopped = @async.with_timeout_opt(FailedCommandFollowerWaitMs, () => {
-        stop_follower_instance(manager, follower, writer_exited=true)
-      }) catch {
-        error => {
-          @xlog.debug() <?
-            {
-              "event": "desktop_failed_command_follower_failed",
-              "session": engine.session_key,
-              "error": "\{error}",
-            }
-          Some(())
-        }
-      }
-      if stopped is None {
-        @xlog.debug() <?
-          {
-            "event": "desktop_failed_command_follower_timeout",
-            "session": engine.session_key,
-          }
-      }
-    }
-  })
+  }
 }
 
 ///|
-/// Serialize one complete stdin action for this serve process. Besides
-/// preventing JSONL byte interleaving, keeping this as the single lock helper
-/// makes cancellation release the lock before callers enter their shutdown or
-/// rollback paths.
-async fn[T] ServeEngine::with_command_lock(
+/// One complete JSONL line for a serve engine's stdin, plus what to tell the
+/// conversation if it never gets there.
+priv struct EngineCommand {
+  line : String
+  failure_reason : String
+  // Answered once this command's fate is decided: `None` when it reached
+  // stdin, the reason otherwise.
+  //
+  // Only for senders that have no other way to learn it was dropped. A prompt
+  // or a compaction is answered by its run's lifecycle events, and a steer by
+  // its receipt or the run's durable recovery; a goal has nothing but the
+  // durable `[goal]` marker, which would simply never appear.
+  ack : @async.Queue[EngineError?]?
+}
+
+///|
+/// Report this command's fate to a sender waiting for it. Synchronous and
+/// total, so it is safe on a cancellation path, and harmless for the commands
+/// that ask for no answer.
+fn EngineCommand::settle(self : EngineCommand, outcome : EngineError?) -> Unit {
+  guard self.ack is Some(ack) else { return }
+  ignore(ack.try_put(outcome)) catch {
+    _ => ()
+  }
+}
+
+///|
+/// Hand one command to this engine's writer.
+///
+/// Synchronous and total, which is the whole point: a request decides to
+/// submit, mutates whatever public state the command implies, and announces
+/// it, all without a suspension in between. There is therefore no window in
+/// which the request can be cancelled after going public, and none in which
+/// another request can interleave a command — so no lock, no re-validation
+/// after waiting for one, and no cancellation-shielded rollback.
+///
+/// A sender may pass `ack` to learn whether its command actually reached
+/// stdin; waiting on it is only safe for a command that made nothing public
+/// first, which is exactly why prompts do not.
+///
+/// The closed queue is the refusal, not a second flag consulted beside it, so
+/// there is no ordering to get wrong here: `condemn` closes it in one
+/// synchronous step. False therefore means the engine was condemned between
+/// the caller's own `SessionSlot::live` lookup and this call, which cannot
+/// happen without an intervening suspension; it is reported rather than
+/// asserted so a future caller with one is refused rather than silently
+/// dropped.
+fn ServeEngine::submit(
   self : ServeEngine,
-  action : async () -> T,
-) -> T {
-  self.command_lock.acquire()
-  defer self.command_lock.release()
-  action()
+  line : String,
+  failure_reason~ : String,
+  ack? : @async.Queue[EngineError?],
+) -> Bool {
+  self.commands.try_put({ line, failure_reason, ack }) catch {
+    _ => false
+  }
+}
+
+///|
+/// Condemn this engine: nothing more may be submitted, and no request can find
+/// it through its slot. One synchronous step, so a request cannot read the
+/// slot as live and then enqueue behind this call. Commands already accepted
+/// stay the writer's to flush; `discard_commands` is the variant that also
+/// refuses them.
+fn ServeEngine::condemn(self : ServeEngine) -> Unit {
+  self.condemned = true
+  self.commands.close()
+}
+
+///|
+/// Condemn this engine and answer everything still queued: past this point
+/// nothing in the queue can reach stdin. Synchronous, so it is safe on a
+/// cancellation path, and idempotent, because a drained queue is empty.
+fn ServeEngine::discard_commands(self : ServeEngine, reason : String) -> Unit {
+  self.condemn()
+  for ;; {
+    let next = self.commands.try_get() catch { _ => break }
+    guard next is Some(command) else { break }
+    command.settle(Some(EngineError(reason)))
+  }
+}
+
+///|
+/// The engine's single writer, for the process's whole life.
+///
+/// Being the sole owner of stdin makes two things structural rather than
+/// coordinated: commands cannot interleave into a partial frame, and stdin is
+/// closed exactly once, on every path out of the loop. Callers ask for that
+/// close by closing the command queue — `close_and_wait` lets the already
+/// accepted commands drain first, the EOF consumer discards them.
+async fn ServeEngine::write_commands(
+  self : ServeEngine,
+  manager : EngineManager,
+) -> Unit {
+  // Whatever ends this task, cancellation included, no sender may be left
+  // waiting for an answer that can no longer come.
+  defer self.discard_commands(
+    "the engine stopped before this command was written",
+  )
+  let mut failure : String? = None
+  for ;; {
+    let command = self.commands.get() catch { _ => break }
+    self.writer.write(command.line) catch {
+      error if @async.is_being_cancelled() => raise error
+      error => {
+        let reason = "\{command.failure_reason}: \{error}"
+        command.settle(Some(EngineError(reason)))
+        failure = Some(reason)
+        break
+      }
+    }
+    command.settle(None)
+  }
+  self.writer.close()
+  if failure is Some(reason) {
+    // Answer the queued senders before retirement's bounded waits, not after
+    // them: none of their commands can reach stdin now.
+    self.discard_commands(reason)
+    retire_failed_command(manager, self, reason)
+  }
 }
 
 ///|
 /// Whether this exact writer still owns its slot in the current pump epoch.
-/// A request can find an engine, suspend on its command lock, and resume after
-/// the pump has installed a successor under the same session key; identity is
-/// the only safe commit-time check in that window.
+/// A request can find an engine, suspend on anything at all, and resume after
+/// the pump has installed a successor under the same session key; a
+/// same-config successor is indistinguishable by value, so identity is the
+/// only safe commit-time check in that window.
 fn ServeEngine::is_current(self : ServeEngine, manager : EngineManager) -> Bool {
-  guard self.accepts_commands &&
-    manager.pump is Serving(sessions~) &&
+  guard manager.pump is Serving(sessions~) &&
     sessions.get(self.session_key) is Some(slot) &&
-    slot.engine is Some(current) else {
+    slot.live() is Some(current) else {
     return false
   }
   physical_equal(current, self)
 }
 
 ///|
-/// What the serve engine is doing right now — one value instead of loose
-/// booleans, so the impossible combinations (a compaction with an open run,
-/// a cancel request with nothing to cancel) cannot be represented, and every
-/// operation names the phase it requires instead of consulting flags that
-/// can drift apart across suspension points. The steering bookkeeping stays
-/// in `SteerRunTracker`: steers deliberately settle across a phase boundary.
+/// What the serve engine is doing right now, and which run it is doing it for
+/// — one value instead of loose booleans beside a separate run id, so the
+/// impossible combinations (a compaction with an open run, a cancel request
+/// with nothing to cancel, an open turn whose id nobody recorded) cannot be
+/// represented, and every operation names the phase it requires instead of
+/// consulting fields that can drift apart across suspension points. The
+/// steering bookkeeping stays in `SteerRunTracker`: steers deliberately settle
+/// across a phase boundary.
+///
+/// The id rides along because every phase has something to say about it and
+/// they do not agree on what. An open turn always has one — that used to be a
+/// comment above an `if ... is Some(run)` that could not fail. A closed one
+/// only has the run it last opened, which is still what a late diagnostic or a
+/// compaction event should be stamped with.
 priv enum EnginePhase {
   // Between turns; nothing is writing to the durable record. The only phase
-  // that accepts a prompt, a compaction, or archiving.
-  Idle
-  // A prompt's turn is open on the wire. `cancel_requested` marks that a
-  // cancel was sent (or must be re-sent once the racing prompt lands).
-  // `compact_queued` marks a `/compact` accepted mid-turn: the command sits
-  // in the serve engine's queue behind this run, so the turn's terminal
+  // that accepts a prompt, a compaction, or archiving. `last_run` is None
+  // before this process's first prompt (a spawn for compaction, or events
+  // arriving before any turn opened).
+  Idle(last_run~ : String?)
+  // A prompt's turn is open on the wire, under `run_id`. `cancel_requested`
+  // marks that a cancel was sent (or must be re-sent once the racing prompt
+  // lands). `compact_queued` marks a `/compact` accepted mid-turn: the command
+  // sits in the serve engine's queue behind this run, so the turn's terminal
   // event must land in `Compacting`, not `Idle` — otherwise a prompt or an
   // archive slips into the gap before the engine's `compaction_started`
   // and the eventual `compaction_finished` would blindly idle it away.
-  Running(cancel_requested~ : Bool, compact_queued~ : Bool)
+  Running(run_id~ : String, cancel_requested~ : Bool, compact_queued~ : Bool)
   // A `/compact` is rewriting the durable record: no run is open, but
   // starts and archiving must wait. Entered by `compact_run` (idle send),
   // a run's terminal event with a compaction queued behind it, or the
   // engine's own `compaction_started`; left on
   // `compaction_finished`/`compaction_failed` — or on engine death, which
   // reports a synthetic failure so the frontend never sticks.
-  Compacting
+  Compacting(last_run~ : String?)
+}
+
+///|
+/// The id of the run this engine saw most recently, open or already settled.
+fn EnginePhase::latest_run(self : EnginePhase) -> String? {
+  match self {
+    Idle(last_run~) => last_run
+    Compacting(last_run~) => last_run
+    Running(run_id~, ..) => Some(run_id)
+  }
+}
+
+///|
+/// Between turns, still remembering the run this process last opened.
+fn EnginePhase::to_idle(self : EnginePhase) -> EnginePhase {
+  Idle(last_run=self.latest_run())
 }
 
 ///|
@@ -281,9 +436,9 @@ priv enum EnginePhase {
 /// a prompt or an archive could slip in ahead of it.
 fn EnginePhase::after_run_close(self : EnginePhase) -> EnginePhase {
   if self is Running(compact_queued=true, ..) {
-    Compacting
+    Compacting(last_run=self.latest_run())
   } else {
-    Idle
+    self.to_idle()
   }
 }
 
@@ -465,6 +620,23 @@ priv struct PendingClaim {
 priv struct SessionSlot {
   mut pending : PendingClaim?
   mut engine : ServeEngine?
+}
+
+///|
+/// The engine a request may be given work: present, and not condemned.
+///
+/// Every request path goes through this instead of reading `engine` directly,
+/// which is what makes "a condemned engine serves no further work" a property
+/// of the lookup rather than a check each of half a dozen callers has to
+/// remember. A late write from a condemned engine is harmless for the same
+/// one-step reason: nothing can be routed to it any more.
+///
+/// Lifecycle paths deliberately read `engine` instead — a drain, a
+/// replacement, or a post-EOF identity check must still see the condemned
+/// handle, because joining its close barrier is the whole point.
+fn SessionSlot::live(self : SessionSlot) -> ServeEngine? {
+  guard self.engine is Some(engine) && !engine.condemned else { return None }
+  Some(engine)
 }
 
 ///|
@@ -812,11 +984,11 @@ async fn EngineManager::close_engines_for_workspace(
           raise EngineError(
             "a conversation in this workspace is still running; stop it first",
           )
-        Compacting =>
+        Compacting(..) =>
           raise EngineError(
             "a conversation in this workspace is compacting; wait for it to finish",
           )
-        Idle => idle.push(engine)
+        Idle(..) => idle.push(engine)
       }
     }
   }
@@ -875,11 +1047,11 @@ async fn EngineManager::close_engines_for_sessions(
           raise EngineError(
             "a conversation in this worktree is still running; stop it first",
           )
-        Compacting =>
+        Compacting(..) =>
           raise EngineError(
             "a conversation in this worktree is compacting; wait for it to finish",
           )
-        Idle => idle.push(engine)
+        Idle(..) => idle.push(engine)
       }
     }
   }
@@ -986,11 +1158,9 @@ fn open_run_engine(manager : EngineManager, run_id? : String) -> ServeEngine? {
   guard manager.pump is Serving(sessions~) else { return None }
   if run_id is Some(id) {
     for _, slot in sessions {
-      if slot.engine is Some(engine) &&
-        engine.accepts_commands &&
-        engine.phase is Running(..) &&
-        engine.latest_run is Some(latest) &&
-        latest == id {
+      if slot.live() is Some(engine) &&
+        engine.phase is Running(run_id~, ..) &&
+        run_id == id {
         return Some(engine)
       }
     }
@@ -998,9 +1168,7 @@ fn open_run_engine(manager : EngineManager, run_id? : String) -> ServeEngine? {
   }
   let mut found : ServeEngine? = None
   for _, slot in sessions {
-    if slot.engine is Some(engine) &&
-      engine.accepts_commands &&
-      engine.phase is Running(..) {
+    if slot.live() is Some(engine) && engine.phase is Running(..) {
       if found is Some(_) {
         return None
       }
@@ -1068,7 +1236,7 @@ async fn read_engine_stdout(
 }
 
 ///|
-async fn handle_decoded_event(
+fn handle_decoded_event(
   sink : EventSink,
   run_id : String,
   decoded : @event.AgentEvent,
@@ -1281,9 +1449,7 @@ async fn[G] handle_spawn_command(
       return Some(EngineError("failed to start engine: \{error}"))
     }
   }
-  guard claim.is_current(manager) &&
-    slot.engine is Some(engine) &&
-    engine.accepts_commands else {
+  guard claim.is_current(manager) && slot.live() is Some(_) else {
     return Some(EngineError("engine host restarted before engine commit"))
   }
   None
@@ -1415,7 +1581,8 @@ async fn[G] start_serve_engine(
   // never waits on an actor in the task group being cancelled.
   defer (if !startup_committed {
     if startup_engine is Some(engine) {
-      engine.writer.close()
+      // Nothing was admitted yet; the writer task closes stdin on its way out.
+      engine.discard_commands("the engine failed to start")
       @xlog.debug() <?
         {
           "event": "desktop_engine_cancel",
@@ -1488,17 +1655,26 @@ async fn[G] start_serve_engine(
     session_root: config.session_root,
     spec_key: engine_fingerprint(config),
     writer,
-    command_lock: Mutex(),
+    // Unbounded because submission must never block: a request that could be
+    // parked here would be cancellable after it has already gone public,
+    // which is exactly the window this shape exists to remove. A child that
+    // stops reading is bounded by the close/cancel deadlines instead.
+    commands: Queue(kind=Unbounded),
     process,
     sink,
     follower: engine_follower,
-    exit: { process_done: false, done: false },
-    latest_run: None,
-    phase: Idle,
-    accepts_commands: true,
+    consumer: None,
+    phase: Idle(last_run=None),
+    condemned: false,
     steer_runs: SteerRunTracker::new(),
   }
   startup_engine = Some(engine)
+  // Spawned before the handle is reachable from any request, so stdin has an
+  // owner for the engine's whole life — including a rollback, which asks for
+  // the close by clearing the queue rather than touching the writer.
+  group.spawn_bg(no_wait=true, allow_failure=true, () => {
+    engine.write_commands(manager)
+  })
   slot.engine = Some(engine)
   let messages : @async.Queue[StreamMessage] = Queue(
     kind=Blocking(EngineStreamQueueSize),
@@ -1512,9 +1688,13 @@ async fn[G] start_serve_engine(
   group.spawn_bg(no_wait=true, allow_failure=true, () => {
     read_engine_stdout(reader, process, messages)
   })
-  group.spawn_bg(no_wait=true, allow_failure=true, () => {
-    engine.run(manager, messages, stderr_task)
-  })
+  // Kept as a handle, not a background task: everything that waits for this
+  // engine to be retired waits for exactly this task to end.
+  engine.consumer = Some(
+    group.spawn(no_wait=true, allow_failure=true, () => {
+      engine.run(manager, messages, stderr_task)
+    }),
+  )
   startup_committed = true
 }
 
@@ -1574,18 +1754,19 @@ async fn ServeEngine::run(
           // suspension; the current turn can finish its append/TurnDone, while
           // the next start is forced through the old child's close/reap barrier
           // and cancel cannot hit stale active_work.
-          // Deliberately do not wait for command_lock: an in-flight cancel/steer
-          // is exactly what must be cut off. WriteToProcess::close is an
-          // infallible synchronous handle close; a racing write observes its
-          // failure in the command's shielded retirement path.
+          // Discarded, not drained: a queued cancel/steer is exactly what
+          // must be cut off. This is synchronous, so no request can be between
+          // its admission check and its enqueue, and every dropped sender is
+          // told rather than left waiting.
           if needs_durable_scan {
-            engine.accepts_commands = false
-            engine.writer.close()
+            engine.discard_commands(
+              "the engine finished its turn before this command was written",
+            )
           }
           let (run_id, submission_id) = engine.steer_runs.route_event(
             decoded,
             stream.prompt_steer_applied,
-            engine.latest_run,
+            engine.phase.latest_run(),
           )
           // These normalized Finished events cannot carry an exact sequence
           // yet. The EOF final scan publishes the existing `agent.durable`
@@ -1597,8 +1778,7 @@ async fn ServeEngine::run(
           }
           match decoded {
             // The abort the user asked for: report it as a cancellation, the
-            // same wire status the pre-serve host used. A Running phase is
-            // only entered after a run id is recorded, so the id is present.
+            // same wire status the pre-serve host used.
             Some(AgentAborted(_)) if engine.phase
               is Running(cancel_requested=true, ..) &&
               run_id is Some(id) => {
@@ -1628,13 +1808,14 @@ async fn ServeEngine::run(
                 // the engine's own event is what flips the phase; entering
                 // from anything but Idle would clobber a run's state.
                 CompactionStarted =>
-                  if engine.phase is Idle {
-                    engine.phase = Compacting
+                  if engine.phase is Idle(last_run~) {
+                    engine.phase = Compacting(last_run~)
                   }
                 // Either way the engine is done writing the record's summary,
                 // so operations gated on compaction (starts, archiving) may
                 // proceed.
-                CompactionFinished | CompactionFailed => engine.phase = Idle
+                CompactionFinished | CompactionFailed =>
+                  engine.phase = engine.phase.to_idle()
                 _ => ()
               }
               // Terminal normalization is a state transition, not merely a raw
@@ -1662,14 +1843,17 @@ async fn ServeEngine::run(
           }
         }
         StreamReaderFailed(message) => {
-          engine.accepts_commands = false
-          emit_error(sink, message, run_id?=engine.latest_run)
+          // Nothing queued can reach a child whose stream is broken. Drop it
+          // so the writer closes stdin instead of failing into a second,
+          // redundant retirement of the lifecycle settled right here.
+          engine.discard_commands("the engine's event stream failed")
+          emit_error(sink, message, run_id?=engine.phase.latest_run())
           // A broken stream can no longer deliver compaction_finished/failed;
           // report the compaction as failed now so the frontend does not stay
           // stuck with Send disabled (the exit branch below then has nothing
           // left to report for it).
-          if engine.phase is Compacting {
-            engine.phase = Idle
+          if engine.phase is Compacting(..) {
+            engine.phase = engine.phase.to_idle()
             emit_compaction_failed(sink, engine, message)
           }
         }
@@ -1680,9 +1864,9 @@ async fn ServeEngine::run(
               "session": engine.session_key,
               "pid": engine.process.pid,
               "exit_code": code,
-              "run_id": engine.latest_run.unwrap_or(""),
+              "run_id": engine.phase.latest_run().unwrap_or(""),
             }
-          engine.accepts_commands = false
+          engine.discard_commands("the engine exited")
           // Capture ownership only if the slot still contains THIS engine by
           // identity. Correct replacement waits on this handle through final
           // drain, but pump teardown and defensive cleanup can still detach it;
@@ -1696,11 +1880,6 @@ async fn ServeEngine::run(
             owns_slot = true
             owned_follower = manager.followers.get(engine.session_key)
           }
-          // Publish raw process exit before the potentially O(history) follower
-          // scan. Close deadlines cover only child termination; successor and
-          // archive callers still wait on `done` below for the full event and
-          // durable-drain barrier.
-          engine.exit.process_done = true
           // EOF cleanup always owns an independent retirement attempt. Pending
           // replacement/archive operations join this same generation when they
           // need the drain as a barrier; if one of those callers is cancelled,
@@ -1719,8 +1898,8 @@ async fn ServeEngine::run(
                 // Move its durable obligation onto the follower before the
                 // lifecycle event; a later archive/detach Stop can then finish
                 // the failed drain after this dead serve handle leaves its slot.
-                if engine.phase is Running(..) && engine.latest_run is Some(run) {
-                  follower.expect_durable_finish(run)
+                if engine.phase is Running(run_id~, ..) {
+                  follower.expect_durable_finish(run_id)
                 }
                 @xlog.debug() <?
                   {
@@ -1734,36 +1913,32 @@ async fn ServeEngine::run(
           match engine.phase {
             // EOF with a run still open means the engine died mid-turn: close
             // that run with its only available diagnostics.
-            Running(compact_queued~, ..) => {
-              engine.phase = Idle
+            Running(run_id~, compact_queued~, ..) => {
+              engine.phase = engine.phase.to_idle()
               let diagnostics = stderr_task.wait().trim().to_owned()
               if diagnostics.is_empty() {
                 emit_error(
                   sink,
                   "engine exited without a result",
-                  run_id?=engine.latest_run,
+                  run_id~,
                   exit_code=code,
                 )
               } else {
                 emit_error(
                   sink,
                   "engine exited without a result:\n\{diagnostics}",
-                  run_id?=engine.latest_run,
+                  run_id~,
                   exit_code=code,
                   diagnostics~,
                 )
               }
-              // A Running phase is only entered after a run id is recorded,
-              // so the id is present here.
-              if engine.latest_run is Some(run) {
-                emit_finished(
-                  sink,
-                  run,
-                  Failed,
-                  exit_code=code,
-                  durable_sequence?,
-                )
-              }
+              emit_finished(
+                sink,
+                run_id,
+                Failed,
+                exit_code=code,
+                durable_sequence?,
+              )
               // A compaction queued behind the dead turn died with the engine;
               // only a terminal compaction event clears the frontend's queued
               // notice, so synthesize the failure it can no longer send.
@@ -1777,8 +1952,8 @@ async fn ServeEngine::run(
             // compacting notice on compaction_started and only a terminal
             // compaction event clears it — synthesize the failure the engine
             // can no longer send.
-            Compacting => {
-              engine.phase = Idle
+            Compacting(..) => {
+              engine.phase = engine.phase.to_idle()
               let diagnostics = stderr_task.wait().trim().to_owned()
               let reason = if diagnostics.is_empty() {
                 "engine exited during compaction"
@@ -1791,7 +1966,7 @@ async fn ServeEngine::run(
             // shutdown) reports nothing here. A pending exact boundary is
             // published below for every closed phase, including a setup failure
             // that had a compaction queued behind it.
-            Idle => ()
+            Idle(..) => ()
           }
           // Keep this exact dead handle in its slot through the final scan and
           // lifecycle publish. A concurrent start then joins `close_and_wait`
@@ -1806,10 +1981,10 @@ async fn ServeEngine::run(
             slot.engine = None
             manager.prune_slot(engine.session_key)
           }
-          // This is the successor-admission barrier, not merely a process-exit
-          // flag. Publish it only after the owned slot is clear, the final
-          // follower scan, and every lifecycle event from this engine.
-          engine.exit.done = true
+          // Returning from here is the successor-admission barrier, so this
+          // must stay the last thing the consumer does: the owned slot is
+          // clear, the final follower scan is over, and every lifecycle event
+          // from this engine has been published.
           break
         }
       }
@@ -1831,7 +2006,7 @@ async fn ServeEngine::run(
 /// to accept either spelling, so a host-made event and an engine-made one
 /// had quietly different shapes. Going through the type makes that class of
 /// claim checkable instead of aspirational.
-async fn emit_compaction_failed(
+fn emit_compaction_failed(
   sink : EventSink,
   engine : ServeEngine,
   reason : String,
@@ -1839,7 +2014,7 @@ async fn emit_compaction_failed(
   emit(
     sink,
     StreamEvent({
-      run_id: engine.latest_run,
+      run_id: engine.phase.latest_run(),
       session: engine.session_key,
       event: {
         event: (CompactionFailed(error=reason) : @wire.Event),
@@ -1914,12 +2089,12 @@ async test "context yield reports a terminal finished event" {
 ///|
 test "terminal closure preserves a queued compaction" {
   assert_true(
-    Running(cancel_requested=false, compact_queued=false).after_run_close()
-    is Idle,
+    Running(run_id="r-1", cancel_requested=false, compact_queued=false).after_run_close()
+    is Idle(last_run=Some("r-1")),
   )
   assert_true(
-    Running(cancel_requested=false, compact_queued=true).after_run_close()
-    is Compacting,
+    Running(run_id="r-1", cancel_requested=false, compact_queued=true).after_run_close()
+    is Compacting(last_run=Some("r-1")),
   )
 }
 
@@ -2418,21 +2593,5 @@ async test "cancelled spawn requester holds its claim until pump ack" {
     }
     assert_true(cancelled)
     assert_false(claim.active)
-  })
-}
-
-///|
-async test "engine exit latch wakes multiple and late waiters" {
-  let exit : EngineExit = { process_done: false, done: false }
-  @async.with_task_group(group => {
-    let first = group.spawn(() => exit.wait())
-    let second = group.spawn(() => exit.wait())
-    @async.pause()
-    exit.process_done = true
-    exit.done = true
-    first.wait()
-    second.wait()
-    // Level-triggered: completion is state, not a token consumed above.
-    exit.wait()
   })
 }
