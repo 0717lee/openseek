@@ -17,6 +17,8 @@ pub async fn list(String) -> @protocol.WorktreesReply
 
 pub async fn list_codex_worktree_bindings() -> Array[CodexWorktreeBinding]
 
+pub async fn list_dsh_worktree_bindings() -> Array[DshWorktreeBinding]
+
 pub async fn owner_dir(@pathx.Absolute, @pathx.Absolute) -> @pathx.Absolute
 
 pub async fn remove(WorktreeHost, String, String, Bool, (Array[@protocol.WorktreeInfo]) -> Unit) -> @protocol.WorktreesReply
@@ -43,6 +45,12 @@ pub fn CodexWorktreeBinding::equal(Self, Self) -> Bool
 pub fn CodexWorktreeBinding::not_equal(Self, Self) -> Bool
 pub fn CodexWorktreeBinding::to_repr(Self) -> @debug.Repr
 
+pub struct DshWorktreeBinding {
+  session_id : String
+  workspace : String
+  worktree : @protocol.WorktreeInfo
+} derive(Eq, @debug.Debug)
+
 pub(all) struct WorktreeHost {
   lifecycle_lock : @async.Mutex
   session_is_live : (String) -> Bool
@@ -53,6 +61,7 @@ type WorktreeOwner derive(Eq, @debug.Debug)
 pub async fn WorktreeOwner::archive_check(Self) -> @protocol.ArchiveNeedsForceReply?
 pub async fn WorktreeOwner::archive_checkout(Self, Bool, on_committed? : (String, Array[@protocol.WorktreeInfo]) -> Unit) -> @protocol.ArchiveNeedsForceReply?
 pub fn WorktreeOwner::codex(String) -> Self
+pub fn WorktreeOwner::dsh(String) -> Self
 pub fn WorktreeOwner::equal(Self, Self) -> Bool
 pub fn WorktreeOwner::not_equal(Self, Self) -> Bool
 pub fn WorktreeOwner::openseek(String) -> Self

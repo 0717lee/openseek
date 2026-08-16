@@ -528,7 +528,12 @@ fn State::start_turn_in_new_worktree(
           let result : @protocol.WorktreeCreateResult = @interop.bridge_request(
             channel,
             @commands.worktree_create,
-            { workspace, session: None, codex_thread: Some(thread_id) },
+            {
+              workspace,
+              session: None,
+              codex_thread: Some(thread_id),
+              dsh_session: None,
+            },
           ) catch {
             error => {
               let message = @interop.bridge_error_text(error)
@@ -818,7 +823,12 @@ fn State::repair_worktree(
       let result : @protocol.WorktreeCreateResult = @interop.bridge_request(
         channel,
         @commands.worktree_create,
-        { workspace, session: None, codex_thread: Some(thread_id) },
+        {
+          workspace,
+          session: None,
+          codex_thread: Some(thread_id),
+          dsh_session: None,
+        },
       ) catch {
         error => {
           scheduler.add(

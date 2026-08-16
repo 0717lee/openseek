@@ -64,11 +64,13 @@ priv struct WorktreeEntry {
   branch : String
   base : String
   // Old registries and OpenSeek conversations use `session`; Codex-owned
-  // worktrees use `codex_thread`. A valid app-created row has exactly one.
-  // Both absent is tolerated for a registry edited outside the app; such a
-  // row serves nobody and is cleaned up only by explicit removal.
+  // worktrees use `codex_thread`; DeepSeek Harness uses `dsh_session`. A
+  // valid app-created row has exactly one. All absent is tolerated for a
+  // registry edited outside the app; such a row serves nobody and is cleaned
+  // up only by explicit removal.
   session : String?
   codex_thread : String?
+  dsh_session : String?
 }
 
 ///|
@@ -87,17 +89,21 @@ impl ToJson for WorktreeEntry with fn to_json(self) {
   if self.codex_thread is Some(thread_id) {
     fields["codex_thread"] = Json::string(thread_id)
   }
+  if self.dsh_session is Some(session_id) {
+    fields["dsh_session"] = Json::string(session_id)
+  }
   Json::object(fields)
 }
 
 ///|
 /// The durable conversation identity that owns one Desktop worktree. Keeping
-/// the two namespaces distinct prevents a Codex UUID from entering OpenSeek's
-/// session-store, engine-drain, archive, or history checks merely because both
-/// products happen to call their durable identity a conversation id.
+/// the three namespaces distinct prevents a foreign UUID from entering
+/// OpenSeek's session-store, engine-drain, archive, or history checks merely
+/// because every product calls its durable identity a conversation id.
 enum WorktreeOwner {
   OpenSeekSession(String)
   CodexThread(String)
+  DshSession(String)
 } derive(Debug, Eq)
 
 ///|
@@ -111,9 +117,14 @@ pub fn WorktreeOwner::codex(thread_id : String) -> WorktreeOwner {
 }
 
 ///|
+pub fn WorktreeOwner::dsh(session_id : String) -> WorktreeOwner {
+  DshSession(session_id.trim().to_owned())
+}
+
+///|
 fn WorktreeOwner::id(self : WorktreeOwner) -> String {
   match self {
-    OpenSeekSession(id) | CodexThread(id) => id
+    OpenSeekSession(id) | CodexThread(id) | DshSession(id) => id
   }
 }
 
@@ -121,7 +132,7 @@ fn WorktreeOwner::id(self : WorktreeOwner) -> String {
 fn WorktreeOwner::session(self : WorktreeOwner) -> String? {
   match self {
     OpenSeekSession(id) => Some(id)
-    CodexThread(_) => None
+    CodexThread(_) | DshSession(_) => None
   }
 }
 
@@ -130,6 +141,15 @@ fn WorktreeOwner::codex_thread(self : WorktreeOwner) -> String? {
   match self {
     OpenSeekSession(_) => None
     CodexThread(id) => Some(id)
+    DshSession(_) => None
+  }
+}
+
+///|
+fn WorktreeOwner::dsh_session(self : WorktreeOwner) -> String? {
+  match self {
+    DshSession(id) => Some(id)
+    OpenSeekSession(_) | CodexThread(_) => None
   }
 }
 
@@ -141,15 +161,19 @@ fn WorktreeEntry::belongs_to(
   match owner {
     OpenSeekSession(id) => self.session == Some(id)
     CodexThread(id) => self.codex_thread == Some(id)
+    DshSession(id) => self.dsh_session == Some(id)
   }
 }
 
 ///|
 /// Files, Terminal, and language requests carry the owning conversation id.
-/// The two products store that id in distinct registry fields, but checkout
-/// resolution must recognize either field without merging their lifecycles.
+/// The three products store that id in distinct registry fields, but checkout
+/// resolution must recognize every field without merging their lifecycles.
 fn WorktreeEntry::serves_id(self : WorktreeEntry, id : String) -> Bool {
-  self.session == Some(id) || self.codex_thread == Some(id)
+  self.session == Some(id) ||
+  self.codex_thread == Some(id) ||
+  self.dsh_session.map(session => @protocol.DshWorkspaceOwner(session).id()) ==
+  Some(id)
 }
 
 ///|
@@ -176,6 +200,16 @@ type ArchiveNeedsForceReply = @protocol.ArchiveNeedsForceReply
 /// so worktrees created by Codex App or another Git client remain external.
 pub struct CodexWorktreeBinding {
   thread_id : String
+  workspace : String
+  worktree : WorktreeInfo
+} derive(Debug, Eq)
+
+///|
+/// One DeepSeek Harness session's Desktop-owned placement. The API uses this
+/// snapshot to make first-send setup idempotent after dsh has moved the blank
+/// session into its generated Workspace.
+pub struct DshWorktreeBinding {
+  session_id : String
   workspace : String
   worktree : WorktreeInfo
 } derive(Debug, Eq)
@@ -251,10 +285,19 @@ async fn read_worktrees_unlocked(
     } else {
       None
     }
-    // A row cannot be owned by both products. Drop a malformed ambiguous row
-    // instead of letting whichever lookup happens first claim its checkout.
-    guard session is None || codex_thread is None else { continue }
-    entries.push({ name, branch, base, session, codex_thread })
+    let dsh_session : String? = if fields.get("dsh_session") is Some(String(id)) &&
+      !id.is_empty() {
+      Some(id)
+    } else {
+      None
+    }
+    // A row cannot be owned by multiple products. Drop a malformed ambiguous
+    // row instead of letting whichever lookup happens first claim its checkout.
+    let owner_count = (if session is Some(_) { 1 } else { 0 }) +
+      (if codex_thread is Some(_) { 1 } else { 0 }) +
+      (if dsh_session is Some(_) { 1 } else { 0 })
+    guard owner_count <= 1 else { continue }
+    entries.push({ name, branch, base, session, codex_thread, dsh_session })
   }
   entries
 }
@@ -323,6 +366,7 @@ async fn worktree_infos(
       base: entry.base,
       session: entry.session,
       codex_thread: entry.codex_thread,
+      dsh_session: entry.dsh_session,
       path: resource_path(path),
       present,
     })
@@ -419,8 +463,9 @@ pub async fn run_dir(
 
 ///|
 /// Find this owner's registry row while `worktree_registry_lock` is held.
-/// OpenSeek can start from its durable session store; Codex deliberately scans
-/// only Desktop registries, never app-server or Git path conventions.
+/// OpenSeek can start from its durable session store; foreign conversation
+/// owners deliberately scan only Desktop registries, never their backend or
+/// Git path conventions.
 async fn WorktreeOwner::binding_unlocked(
   self : WorktreeOwner,
 ) -> (@pathx.Absolute, WorktreeEntry)? {
@@ -430,7 +475,7 @@ async fn WorktreeOwner::binding_unlocked(
         Some(workspace) => [workspace]
         None => []
       }
-    CodexThread(_) => @workspaces.registered()
+    CodexThread(_) | DshSession(_) => @workspaces.registered()
   }
   for workspace in workspaces {
     for entry in read_worktrees_unlocked(workspace) {
@@ -682,6 +727,30 @@ pub async fn list_codex_worktree_bindings() -> Array[CodexWorktreeBinding] {
 }
 
 ///|
+/// Snapshot every worktree explicitly created for a DeepSeek Harness session.
+/// Registry ownership, rather than dsh's mutable Workspace membership, is the
+/// authority for retrying first-send setup.
+pub async fn list_dsh_worktree_bindings() -> Array[DshWorktreeBinding] {
+  worktree_registry_lock.acquire()
+  defer worktree_registry_lock.release()
+  let bindings : Array[DshWorktreeBinding] = []
+  for workspace in @workspaces.registered() {
+    let entries = read_worktrees_unlocked(workspace)
+    let infos = worktree_infos(workspace, entries)
+    for info in infos {
+      if info.dsh_session is Some(session_id) {
+        bindings.push({
+          session_id,
+          workspace: resource_path(workspace),
+          worktree: info,
+        })
+      }
+    }
+  }
+  bindings
+}
+
+///|
 /// The smallest `wt-N` nobody holds: free in the registry, on disk, and as
 /// a branch. Branches survive removal, so the counter naturally skips past
 /// history instead of resurrecting an old branch.
@@ -743,6 +812,8 @@ pub async fn create(
       OpenSeekSession(_) =>
         "a worktree binds to a conversation; session id invalid"
       CodexThread(_) => "a worktree binds to a conversation; thread id invalid"
+      DshSession(_) =>
+        "a worktree binds to a conversation; dsh session id invalid"
     }
     raise WorktreeError(detail)
   }
@@ -909,6 +980,7 @@ pub async fn create(
     base,
     session: owner.session(),
     codex_thread: owner.codex_thread(),
+    dsh_session: owner.dsh_session(),
   })
   let mut infos : Array[WorktreeInfo] = []
   @async.protect_from_cancel(() => {
@@ -1129,6 +1201,11 @@ pub async fn remove(
       "this worktree belongs to a Codex task; archive that task before removing its checkout",
     )
   }
+  if entry.dsh_session is Some(_) {
+    raise WorktreeError(
+      "this worktree belongs to a DeepSeek Harness conversation; manage it from that conversation",
+    )
+  }
   if entry.session is Some(bound) {
     (host.drain_sessions)([bound])
   }
@@ -1250,6 +1327,12 @@ async test "worktree registry decode drops malformed entries" {
         "codex_thread": "thread-1",
       },
       {
+        "name": "dsh",
+        "branch": "openseek/dsh",
+        "base": "d5h",
+        "dsh_session": "session-dsh-1",
+      },
+      {
         "name": "ambiguous",
         "branch": "openseek/ambiguous",
         "base": "ghi",
@@ -1270,7 +1353,7 @@ async test "worktree registry decode drops malformed entries" {
   }
   @fsx.write_text(worktrees_file(root).to_path(), registry.stringify())
   let entries = read_worktrees_unlocked(root)
-  assert_eq(entries.length(), 3)
+  assert_eq(entries.length(), 4)
   assert_eq(entries[0].name, "ok")
   assert_eq(entries[0].branch, "openseek/ok")
   assert_eq(entries[0].base, "abc")
@@ -1279,10 +1362,15 @@ async test "worktree registry decode drops malformed entries" {
   assert_eq(entries[1].name, "codex")
   assert_eq(entries[1].session, None)
   assert_eq(entries[1].codex_thread, Some("thread-1"))
+  assert_eq(entries[2].name, "dsh")
+  assert_eq(entries[2].session, None)
+  assert_eq(entries[2].codex_thread, None)
+  assert_eq(entries[2].dsh_session, Some("session-dsh-1"))
   // A blank session self-heals to unbound rather than a phantom id.
-  assert_eq(entries[2].name, "blank")
-  assert_true(entries[2].session is None)
-  assert_true(entries[2].codex_thread is None)
+  assert_eq(entries[3].name, "blank")
+  assert_true(entries[3].session is None)
+  assert_true(entries[3].codex_thread is None)
+  assert_true(entries[3].dsh_session is None)
   @fs.rmdir(root.to_string(), recursive=true)
 }
 
@@ -1295,6 +1383,7 @@ async test "failed worktree registry staging preserves every live row" {
     base: "abc",
     session: Some("other-session"),
     codex_thread: None,
+    dsh_session: None,
   }
   write_worktrees(root, [retained])
   // A directory at the candidate path makes the next file write fail before
@@ -1528,6 +1617,42 @@ async test "worktree names are host-generated and skip surviving branches" {
   }
   assert_eq(codex_info.session, None)
   assert_eq(codex_info.codex_thread, Some("thread-1"))
+  assert_eq(codex_info.dsh_session, None)
+  // dsh shares the checkout machinery without sharing Codex or OpenSeek's
+  // owner namespace. Its generated owner id is what Files and Terminal use.
+  let dsh = create(
+    host,
+    repo.to_string(),
+    WorktreeOwner::dsh("session-dsh-1"),
+    fn(_) {  },
+  )
+  assert_eq(dsh.name, "wt-5")
+  let dsh_replay = create(
+    host,
+    repo.to_string(),
+    WorktreeOwner::dsh("session-dsh-1"),
+    fn(_) {  },
+  )
+  assert_eq(dsh_replay.name, "wt-5")
+  guard dsh_replay.worktrees.iter().find_first(info => info.name == "wt-5")
+    is Some(dsh_info) else {
+    fail("expected dsh-owned worktree row")
+  }
+  assert_eq(dsh_info.session, None)
+  assert_eq(dsh_info.codex_thread, None)
+  assert_eq(dsh_info.dsh_session, Some("session-dsh-1"))
+  assert_eq(
+    tree_base(repo, @protocol.DshWorkspaceOwner("session-dsh-1").id()),
+    Some(dsh_info.base),
+  )
+  guard list_dsh_worktree_bindings()
+    .iter()
+    .find_first(binding => binding.session_id == "session-dsh-1")
+    is Some(binding) else {
+    fail("expected durable dsh worktree binding")
+  }
+  assert_eq(binding.workspace, repo.to_string())
+  assert_eq(binding.worktree.name, "wt-5")
   @fs.rmdir(root.to_string(), recursive=true)
 }
 
@@ -1612,6 +1737,7 @@ async test "worktree create names the holder in every refusal" {
       base: "abc",
       session: Some("s-elsewhere"),
       codex_thread: None,
+      dsh_session: None,
     },
   ])
   assert_true(

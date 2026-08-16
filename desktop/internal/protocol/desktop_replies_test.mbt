@@ -411,6 +411,7 @@ test "worktree creation accepts exactly representable owner namespaces" {
   })
   assert_eq(legacy.session, Some("session-1"))
   assert_eq(legacy.codex_thread, None)
+  assert_eq(legacy.dsh_session, None)
   let codex : @protocol.WorktreeCreatePayload = @json.from_json({
     "workspace": "/work/project",
     "codex_thread": "thread-1",
@@ -420,6 +421,17 @@ test "worktree creation accepts exactly representable owner namespaces" {
   @debug.assert_eq(codex.to_json(), {
     "workspace": "/work/project",
     "codex_thread": "thread-1",
+  })
+  let dsh : @protocol.WorktreeCreatePayload = @json.from_json({
+    "workspace": "/work/project",
+    "dsh_session": "session-dsh-1",
+  })
+  assert_eq(dsh.session, None)
+  assert_eq(dsh.codex_thread, None)
+  assert_eq(dsh.dsh_session, Some("session-dsh-1"))
+  @debug.assert_eq(dsh.to_json(), {
+    "workspace": "/work/project",
+    "dsh_session": "session-dsh-1",
   })
   let nullable : @protocol.WorktreeCreatePayload = @json.from_json({
     "workspace": "/work/project",
@@ -960,6 +972,22 @@ test "worktree replies omit absent owners and reject ambiguous ownership" {
     "path": "/work/project/.worktrees/wt-2",
     "present": false,
   })
+  let dsh : @protocol.WorktreeInfo = @json.from_json({
+    "name": "wt-3",
+    "branch": "openseek/wt-3",
+    "base": "d5h",
+    "dsh_session": "session-dsh-1",
+    "path": "/work/project/.worktrees/wt-3",
+    "present": true,
+  })
+  @debug.assert_eq(dsh.to_json(), {
+    "name": "wt-3",
+    "branch": "openseek/wt-3",
+    "base": "d5h",
+    "dsh_session": "session-dsh-1",
+    "path": "/work/project/.worktrees/wt-3",
+    "present": true,
+  })
   let ownerless : @protocol.WorktreeInfo = @json.from_json({
     "name": "legacy",
     "branch": "openseek/legacy",
@@ -971,6 +999,7 @@ test "worktree replies omit absent owners and reject ambiguous ownership" {
   })
   assert_eq(ownerless.session, None)
   assert_eq(ownerless.codex_thread, None)
+  assert_eq(ownerless.dsh_session, None)
   let ambiguous = try {
     let _ : @protocol.WorktreeInfo = @json.from_json({
       "name": "ambiguous",

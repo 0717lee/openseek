@@ -2334,6 +2334,7 @@ pub(all) struct WorktreeCreatePayload {
   workspace : String
   session : String?
   codex_thread : String?
+  dsh_session : String?
 } derive(Eq, @debug.Debug)
 pub fn WorktreeCreatePayload::equal(Self, Self) -> Bool
 pub fn WorktreeCreatePayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
@@ -2371,6 +2372,7 @@ pub(all) struct WorktreeInfo {
   base : String
   session : String?
   codex_thread : String?
+  dsh_session : String?
   path : String
   present : Bool
 } derive(Eq, @debug.Debug)

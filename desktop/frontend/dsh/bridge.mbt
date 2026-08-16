@@ -10,9 +10,12 @@
 /// its probe is a `workspace.list` request too.
 fn DshReplyKind::ordered_lane(self : DshReplyKind) -> String? {
   match self {
-    DshReconnectReply | DshWorkspacesReply => Some("dsh-workspace-list")
+    DshReconnectReply | DshWorkspacesReply | DshPromptWorkspacesReply(..) =>
+      Some("dsh-workspace-list")
     DshSessionsReply(..) => Some("dsh-session-list")
     DshHistoryReply(session_id) => Some("dsh-history-" + session_id)
+    DshModelsReply(session_id) | DshSelectModelReply(session_id~) =>
+      Some("dsh-models-" + session_id)
     _ => None
   }
 }
@@ -65,6 +68,14 @@ fn DshReplyKind::request(
 test "dsh snapshot replies select independent ordered lanes" {
   assert_eq(DshReconnectReply.ordered_lane(), Some("dsh-workspace-list"))
   assert_eq(DshWorkspacesReply.ordered_lane(), Some("dsh-workspace-list"))
+  assert_eq(
+    DshPromptWorkspacesReply(
+      session_id="session-1",
+      generation=1,
+      worktree_path="/work/project/.worktrees/wt-1",
+    ).ordered_lane(),
+    Some("dsh-workspace-list"),
+  )
   assert_eq(
     DshSessionsReply(status_generation=0).ordered_lane(),
     Some("dsh-session-list"),
@@ -187,6 +198,44 @@ fn State::list_sessions(self : State, dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
 }
 
 ///|
+/// Load the model directory owned by one dsh session. The reply shares a
+/// session-specific ordered lane with selection so an older load cannot undo
+/// a choice that completed later.
+fn State::load_models(
+  _self : State,
+  dispatch : @cmd.Emit[Msg],
+  session_id : String,
+) -> @cmd.Cmd {
+  DshModelsReply(session_id).request(dispatch, "session.models", {
+    "sessionId": session_id,
+  })
+}
+
+///|
+/// Submit dsh's complete provider/model/reasoning selection; the host remains
+/// the authority for route validation and the selected value returned.
+fn State::select_model(
+  _self : State,
+  dispatch : @cmd.Emit[Msg],
+  session_id : String,
+  selection : DshModelSelection,
+) -> @cmd.Cmd {
+  let payload : Map[String, Json] = {
+    "sessionId": Json::string(session_id),
+    "provider": Json::string(selection.provider),
+    "model": Json::string(selection.model),
+  }
+  if selection.reasoning_effort is Some(reasoning_effort) {
+    payload["reasoningEffort"] = Json::string(reasoning_effort)
+  }
+  DshSelectModelReply(session_id~).request(
+    dispatch,
+    "session.selectModel",
+    Json::object(payload),
+  )
+}
+
+///|
 fn State::create_session(
   _self : State,
   dispatch : @cmd.Emit[Msg],
@@ -208,6 +257,120 @@ fn State::create_workspace_session(
     dispatch,
     "workspace.create",
     { "path": path },
+  )
+}
+
+///|
+/// Ask the Desktop host to create or recover the checkout durably owned by
+/// this dsh session. dsh sees the path only after this host operation commits.
+fn State::create_worktree(
+  self : State,
+  dispatch : @cmd.Emit[Msg],
+  session_id : String,
+  generation : Int,
+  project : String,
+) -> @cmd.Cmd {
+  let draft = self.draft
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      let result : @protocol.WorktreeCreateResult = @interop.bridge_request(
+        @interop.ChannelId::Local,
+        @commands.worktree_create,
+        {
+          workspace: project,
+          session: None,
+          codex_thread: None,
+          dsh_session: Some(session_id),
+        },
+      ) catch {
+        error => {
+          scheduler.add(
+            dispatch(
+              Failed(
+                kind=DshPromptReply(session_id~, draft~, generation~),
+                message="worktree setup failed: " +
+                  @interop.bridge_error_text(error),
+              ),
+            ),
+          )
+          return
+        }
+      }
+      let reply = match result {
+        @protocol.WorktreeCreatedReply(reply) => reply
+        @protocol.WorktreeCreateError(message) => {
+          scheduler.add(
+            dispatch(
+              Failed(
+                kind=DshPromptReply(session_id~, draft~, generation~),
+                message="worktree setup failed: " + message,
+              ),
+            ),
+          )
+          return
+        }
+      }
+      guard reply.worktrees
+        .iter()
+        .find_first(worktree => {
+          worktree.name == reply.name &&
+          worktree.dsh_session == Some(session_id) &&
+          worktree.present
+        })
+        is Some(worktree) else {
+        scheduler.add(
+          dispatch(
+            Failed(
+              kind=DshPromptReply(session_id~, draft~, generation~),
+              message="malformed worktree.create reply",
+            ),
+          ),
+        )
+        return
+      }
+      scheduler.add(
+        dispatch(
+          WorktreeReady(session_id~, generation~, project~, path=worktree.path),
+        ),
+      )
+    })
+  })
+}
+
+///|
+/// Adopt the already-created checkout into dsh's Workspace registry. This is
+/// idempotent by canonical path, so retrying a lost reply creates no duplicate.
+fn State::register_prompt_workspace(
+  _self : State,
+  dispatch : @cmd.Emit[Msg],
+  session_id : String,
+  generation : Int,
+  project : String,
+  worktree_path : String,
+) -> @cmd.Cmd {
+  DshPromptWorkspaceReply(session_id~, generation~, project~, worktree_path~).request(
+    dispatch,
+    "workspace.create",
+    { "path": worktree_path },
+  )
+}
+
+///|
+/// Move the original blank conversation instead of creating a replacement in
+/// the generated Workspace.
+fn State::move_prompt_session(
+  _self : State,
+  dispatch : @cmd.Emit[Msg],
+  session_id : String,
+  generation : Int,
+  project : String,
+  worktree_path : String,
+  workspace_id : String,
+) -> @cmd.Cmd {
+  DshPromptMoveReply(session_id~, generation~, project~, worktree_path~).request(
+    dispatch,
+    "workspace.insertSessionBefore",
+    { "workspaceId": workspace_id, "sessionId": session_id },
   )
 }
 

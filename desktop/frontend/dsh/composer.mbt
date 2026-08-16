@@ -30,7 +30,44 @@ pub fn State::composer_input(
       context.push(pending.view(dispatch, busy))
     }
   }
-  let disabled = !(self.connection is DshReady) || !self.has_active()
+  let status : Array[@html.Html] = []
+  let model_routable = if self.active_id is Some(session_id) {
+    match self.models {
+      DshModelsReady(options~, selected~, ..)
+      | DshModelsSelecting(options~, selected~, ..) => {
+        let model_options : Array[@composer.ModelOption] = options.map(option => {
+          value: option.selection.key(),
+          label: option.label,
+        })
+        status.push(
+          @composer.ModelSelect::{
+            options: model_options,
+            selected: selected.key(),
+            disabled: self.models.busy() || self.busy(),
+            change: dispatch.map(value => ModelChanged(value)),
+            title: "DeepSeek Harness model",
+          }.render(),
+        )
+      }
+      DshModelsIdle | DshModelsLoading(..) => ()
+    }
+    self.models.routable(session_id)
+  } else {
+    false
+  }
+  if self.active_blank() && self.active_workspace_path() is Some(_) {
+    status.push(
+      @composer.WorktreeControl::{
+        choice: self.placement,
+        enabled: !self.busy() && !self.is_running(),
+        command: dispatch(ToggleWorktreeMode),
+        content: @icons.icon(@icons.icon_worktree),
+      }.render(),
+    )
+  }
+  let disabled = !(self.connection is DshReady) ||
+    !self.has_active() ||
+    !model_routable
   let primary_action : @composer.PrimaryAction = if self.is_running() {
     @composer.Running(steer_available=!disabled && !busy, can_stop=!busy)
   } else {
@@ -53,7 +90,7 @@ pub fn State::composer_input(
     file_index: @composer.FileIndexEmpty(epoch=0),
     presentation: {
       context,
-      status: [],
+      status,
       placeholder: if self.has_active() {
         "Ask DeepSeek Harness…"
       } else {
@@ -135,6 +172,25 @@ test "dsh projects its selected session into the shared composer" {
       },
     ],
     active_id: Some("session-1"),
+    models: DshModelsReady(
+      session_id="session-1",
+      options=[
+        {
+          selection: {
+            provider: "deepseek",
+            model: "deepseek-chat",
+            reasoning_effort: None,
+          },
+          label: "DeepSeek / Chat",
+        },
+      ],
+      selected={
+        provider: "deepseek",
+        model: "deepseek-chat",
+        reasoning_effort: None,
+      },
+      routable=true,
+    ),
   }
   let input = state.composer_input(dispatch)
   assert_eq(input.identity.owner.session, "session-1")
@@ -143,6 +199,7 @@ test "dsh projects its selected session into the shared composer" {
     input.presentation.primary_action is @composer.Send(available=true),
   )
   assert_true(input.slash_commands.is_empty())
+  assert_eq(input.presentation.status.length(), 1)
 }
 
 ///|
@@ -161,6 +218,25 @@ test "dsh accepts a shared composer submission only for its active session" {
       },
     ],
     active_id: Some("session-1"),
+    models: DshModelsReady(
+      session_id="session-1",
+      options=[
+        {
+          selection: {
+            provider: "deepseek",
+            model: "deepseek-chat",
+            reasoning_effort: None,
+          },
+          label: "DeepSeek / Chat",
+        },
+      ],
+      selected={
+        provider: "deepseek",
+        model: "deepseek-chat",
+        reasoning_effort: None,
+      },
+      routable=true,
+    ),
   }
   let identity = state.composer_identity()
   let (_, submitted) = update(

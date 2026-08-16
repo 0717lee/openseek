@@ -681,16 +681,17 @@ pub impl FromJson for WorkspacesReply with fn from_json(json, path) {
 
 ///|
 /// One worktree as ops report it: the registry entry plus its derived checkout
-/// path and whether that directory still exists on disk. Exactly one of
-/// `session` and `codex_thread` identifies the conversation that owns it;
-/// ownerless rows are tolerated only for backward-compatible hand-edited
-/// registries and are never claimed by either conversation source.
+/// path and whether that directory still exists on disk. At most one of
+/// `session`, `codex_thread`, and `dsh_session` identifies the conversation
+/// that owns it; ownerless rows are tolerated only for backward-compatible
+/// hand-edited registries and are never claimed by a conversation source.
 pub(all) struct WorktreeInfo {
   name : String
   branch : String
   base : String
   session : String?
   codex_thread : String?
+  dsh_session : String?
   path : String
   present : Bool
 } derive(Debug, Eq)
@@ -706,15 +707,27 @@ pub impl FromJson for WorktreeInfo with fn from_json(json, path) {
   let base = object.required_string("base")
   let session = object.optional_string("session")
   let codex_thread = object.optional_string("codex_thread")
-  if session is Some(_) && codex_thread is Some(_) {
+  let dsh_session = object.optional_string("dsh_session")
+  let owner_count = (if session is Some(_) { 1 } else { 0 }) +
+    (if codex_thread is Some(_) { 1 } else { 0 }) +
+    (if dsh_session is Some(_) { 1 } else { 0 })
+  if owner_count > 1 {
     raise JsonDecodeError(
-      (path, "worktree cannot belong to both session and codex_thread"),
+      (path, "worktree cannot belong to more than one conversation source"),
     )
   }
-  let object = JsonObject::of(fields, path)
   let checkout_path = object.required_string("path")
   let present = object.required_bool("present")
-  { name, branch, base, session, codex_thread, path: checkout_path, present }
+  {
+    name,
+    branch,
+    base,
+    session,
+    codex_thread,
+    dsh_session,
+    path: checkout_path,
+    present,
+  }
 }
 
 ///|
@@ -731,6 +744,9 @@ pub impl ToJson for WorktreeInfo with fn to_json(self) {
   }
   if self.codex_thread is Some(thread_id) {
     fields["codex_thread"] = Json::string(thread_id)
+  }
+  if self.dsh_session is Some(session_id) {
+    fields["dsh_session"] = Json::string(session_id)
   }
   Json::object(fields)
 }

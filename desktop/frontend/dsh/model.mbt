@@ -39,6 +39,38 @@ priv struct DshWorkspaceRow {
 } derive(Eq)
 
 ///|
+priv struct DshModelSelection {
+  provider : String
+  model : String
+  reasoning_effort : String?
+} derive(Debug, Eq)
+
+///|
+priv struct DshModelOption {
+  selection : DshModelSelection
+  label : String
+} derive(Eq)
+
+///|
+priv enum DshModels {
+  DshModelsIdle
+  DshModelsLoading(session_id~ : String)
+  DshModelsReady(
+    session_id~ : String,
+    options~ : Array[DshModelOption],
+    selected~ : DshModelSelection,
+    routable~ : Bool
+  )
+  DshModelsSelecting(
+    session_id~ : String,
+    options~ : Array[DshModelOption],
+    selected~ : DshModelSelection,
+    routable~ : Bool,
+    requested~ : DshModelSelection
+  )
+} derive(Eq)
+
+///|
 priv struct DshEventRecord {
   type_ : String
   seq : Int
@@ -98,6 +130,25 @@ priv enum DshReplyKind {
   DshSessionsReply(status_generation~ : Int)
   DshCreateReply(Int)
   DshHistoryReply(String)
+  DshModelsReply(String)
+  DshSelectModelReply(session_id~ : String)
+  DshPromptWorkspaceReply(
+    session_id~ : String,
+    generation~ : Int,
+    project~ : String,
+    worktree_path~ : String
+  )
+  DshPromptMoveReply(
+    session_id~ : String,
+    generation~ : Int,
+    project~ : String,
+    worktree_path~ : String
+  )
+  DshPromptWorkspacesReply(
+    session_id~ : String,
+    generation~ : Int,
+    worktree_path~ : String
+  )
   DshPromptReply(session_id~ : String, draft~ : String, generation~ : Int)
   DshCancelReply(String)
   DshResponseReply(rpc_id~ : String, session_id~ : String)
@@ -110,6 +161,14 @@ enum Msg {
   NewWorkspaceSession(String)
   OpenSession(String)
   ComposerAction(@composer.Action)
+  ToggleWorktreeMode
+  ModelChanged(String)
+  WorktreeReady(
+    session_id~ : String,
+    generation~ : Int,
+    project~ : String,
+    path~ : String
+  )
   Send
   Stop
   ApprovalDecision(rpc_id~ : String, outcome~ : String)
@@ -175,6 +234,11 @@ struct State {
   active_id : String?
   events : Array[DshEventRecord]
   streaming : String
+  models : DshModels
+  placement : @composer.WorktreeChoice
+  // The main project captured when Worktree mode is chosen. Keep it through
+  // retries after dsh moves the blank session into the generated Workspace.
+  worktree_project : String?
   // The last root-authored submission snapshot. Unsent keystrokes live only
   // in the shared composer component and are cached there per session id.
   draft : String
@@ -211,6 +275,9 @@ pub fn State::State(loading? : Bool = false) -> State {
     active_id: None,
     events: [],
     streaming: "",
+    models: DshModelsIdle,
+    placement: @composer.LocalCheckout,
+    worktree_project: None,
     draft: "",
     pending: [],
     pending_generation: 0,
@@ -236,6 +303,7 @@ pub fn State::can_create(self : State) -> Bool {
 /// accepted requests have settled.
 fn State::busy(self : State) -> Bool {
   self.loading ||
+  self.models.busy() ||
   self.creation_pending ||
   self.prompt_pending_session is Some(_) ||
   (self.cancel_pending_session == self.active_id && self.active_id is Some(_)) ||
@@ -245,6 +313,30 @@ fn State::busy(self : State) -> Bool {
     self.active_id == Some(item.session_id()) &&
     self.response_pending_rpcs.contains(item.rpc_id())
   })
+}
+
+///|
+/// The worktree setup requests are one logical prompt submission. Keeping the
+/// origin on the reply type lets every stage share the same navigation and
+/// retry fence as the final session.prompt request.
+fn DshReplyKind::prompt_origin(self : DshReplyKind) -> (String, Int)? {
+  match self {
+    DshPromptWorkspaceReply(session_id~, generation~, ..)
+    | DshPromptMoveReply(session_id~, generation~, ..)
+    | DshPromptWorkspacesReply(session_id~, generation~, ..)
+    | DshPromptReply(session_id~, generation~, ..) =>
+      Some((session_id, generation))
+    _ => None
+  }
+}
+
+///|
+fn DshReplyKind::model_session(self : DshReplyKind) -> String? {
+  match self {
+    DshModelsReply(session_id) | DshSelectModelReply(session_id~) =>
+      Some(session_id)
+    _ => None
+  }
 }
 
 ///|
@@ -305,9 +397,197 @@ pub fn State::active_workspace_path(self : State) -> String? {
 }
 
 ///|
+fn DshModelSelection::key(self : DshModelSelection) -> String {
+  Json::array([
+    Json::string(self.provider),
+    Json::string(self.model),
+    match self.reasoning_effort {
+      Some(value) => Json::string(value)
+      None => Json::null()
+    },
+  ]).stringify()
+}
+
+///|
+fn DshModelSelection::decode(value : Json) -> DshModelSelection? {
+  guard value is Object(fields) &&
+    @jsonx.json_text(fields, "provider") is Some(provider) &&
+    @jsonx.json_text(fields, "model") is Some(model) else {
+    return None
+  }
+  Some({
+    provider,
+    model,
+    reasoning_effort: @jsonx.json_text(fields, "reasoningEffort"),
+  })
+}
+
+///|
+/// Fallback text for a current selection absent from dsh's advisory catalog.
+fn DshModelSelection::label(self : DshModelSelection) -> String {
+  let effort = match self.reasoning_effort {
+    Some(value) => " · " + value
+    None => ""
+  }
+  self.provider + " / " + self.model + effort
+}
+
+///|
+fn DshModels::busy(self : DshModels) -> Bool {
+  self is DshModelsLoading(..) || self is DshModelsSelecting(..)
+}
+
+///|
+fn DshModels::routable(self : DshModels, session_id : String) -> Bool {
+  match self {
+    DshModelsReady(session_id=current, routable~, ..)
+    | DshModelsSelecting(session_id=current, routable~, ..) =>
+      current == session_id && routable
+    DshModelsIdle | DshModelsLoading(..) => false
+  }
+}
+
+///|
+fn DshModels::decode(session_id : String, value : Json) -> DshModels? {
+  guard value is Object(fields) &&
+    fields.get("current") is Some(current_json) &&
+    DshModelSelection::decode(current_json) is Some(selected) &&
+    @jsonx.json_bool(fields, "routable") is Some(routable) &&
+    fields.get("groups") is Some(Array(groups)) else {
+    return None
+  }
+  let options : Array[DshModelOption] = []
+  for group in groups {
+    guard group is Object(group_fields) &&
+      @jsonx.json_text(group_fields, "id") is Some(provider) &&
+      @jsonx.json_text(group_fields, "name") is Some(provider_name) &&
+      group_fields.get("models") is Some(Array(models)) else {
+      continue
+    }
+    for model in models {
+      guard model is Object(model_fields) &&
+        @jsonx.json_text(model_fields, "id") is Some(model_id) &&
+        @jsonx.json_text(model_fields, "name") is Some(model_name) else {
+        continue
+      }
+      let base_label = provider_name + " / " + model_name
+      options.push({
+        selection: { provider, model: model_id, reasoning_effort: None },
+        label: base_label,
+      })
+      if model_fields.get("reasoning") is Some(Object(reasoning)) &&
+        reasoning.get("efforts") is Some(Array(efforts)) {
+        for effort in efforts {
+          guard effort is Object(effort_fields) &&
+            @jsonx.json_text(effort_fields, "id") is Some(effort_id) &&
+            @jsonx.json_text(effort_fields, "name") is Some(effort_name) else {
+            continue
+          }
+          options.push({
+            selection: {
+              provider,
+              model: model_id,
+              reasoning_effort: Some(effort_id),
+            },
+            label: base_label + " · " + effort_name,
+          })
+        }
+      }
+    }
+  }
+  if !options.iter().any(option => option.selection.key() == selected.key()) {
+    options.push({ selection: selected, label: selected.label() })
+  }
+  Some(DshModelsReady(session_id~, options~, selected~, routable~))
+}
+
+///|
+fn DshModels::option(
+  self : DshModels,
+  session_id : String,
+  key : String,
+) -> DshModelOption? {
+  match self {
+    DshModelsReady(session_id=current, options~, ..) =>
+      if current == session_id {
+        options.iter().find_first(option => option.selection.key() == key)
+      } else {
+        None
+      }
+    DshModelsIdle | DshModelsLoading(..) | DshModelsSelecting(..) => None
+  }
+}
+
+///|
+fn DshModels::selecting(
+  self : DshModels,
+  session_id : String,
+  requested : DshModelSelection,
+) -> DshModels {
+  match self {
+    DshModelsReady(session_id=current, options~, selected~, routable~) =>
+      if current == session_id {
+        DshModelsSelecting(
+          session_id~,
+          options~,
+          selected~,
+          routable~,
+          requested~,
+        )
+      } else {
+        self
+      }
+    _ => self
+  }
+}
+
+///|
+fn DshModels::failed(self : DshModels, session_id : String) -> DshModels {
+  match self {
+    DshModelsLoading(session_id=current) if current == session_id =>
+      DshModelsIdle
+    DshModelsSelecting(session_id=current, options~, selected~, routable~, ..) if current ==
+      session_id => DshModelsReady(session_id~, options~, selected~, routable~)
+    _ => self
+  }
+}
+
+///|
+/// A successful selection keeps the catalog that rendered the picker and
+/// replaces only dsh's authoritative current value.
+fn DshModels::selected(
+  self : DshModels,
+  session_id : String,
+  selected : DshModelSelection,
+) -> DshModels? {
+  match self {
+    DshModelsSelecting(session_id=current, options~, ..) =>
+      if current == session_id {
+        let options = options.copy()
+        if !options
+          .iter()
+          .any(option => option.selection.key() == selected.key()) {
+          options.push({ selection: selected, label: selected.label() })
+        }
+        // dsh validates the route before accepting selection, so a successful
+        // selectModel reply is routable even when the previous choice was not.
+        Some(DshModelsReady(session_id~, options~, selected~, routable=true))
+      } else {
+        None
+      }
+    _ => None
+  }
+}
+
+///|
 fn State::active_row(self : State) -> DshSessionRow? {
   guard self.active_id is Some(id) else { return None }
   self.sessions.iter().find_first(row => row.id == id)
+}
+
+///|
+fn State::active_blank(self : State) -> Bool {
+  self.active_row().map(row => row.blank).unwrap_or(false)
 }
 
 ///|
@@ -474,4 +754,43 @@ fn DshQuestion::decode(value : Json) -> DshQuestion? {
 ///|
 fn DshQuestionAnswer::empty() -> DshQuestionAnswer {
   { selected: [], custom: "" }
+}
+
+///|
+test "dsh model catalog keeps provider model and reasoning effort distinct" {
+  guard DshModels::decode("session-1", {
+      "current": {
+        "provider": "deepseek",
+        "model": "reasoner",
+        "reasoningEffort": "high",
+      },
+      "routable": true,
+      "groups": [
+        {
+          "id": "deepseek",
+          "name": "DeepSeek",
+          "models": [
+            {
+              "id": "reasoner",
+              "name": "Reasoner",
+              "reasoning": {
+                "efforts": [
+                  { "id": "low", "name": "Low" },
+                  { "id": "high", "name": "High" },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    })
+    is Some(DshModelsReady(options~, selected~, routable~, ..)) else {
+    fail("expected decoded dsh model catalog")
+  }
+  assert_true(routable)
+  assert_eq(options.length(), 3)
+  assert_eq(options[0].label, "DeepSeek / Reasoner")
+  assert_eq(options[2].label, "DeepSeek / Reasoner · High")
+  assert_eq(options[2].selection, selected)
+  assert_false(options[0].selection.key() == options[2].selection.key())
 }

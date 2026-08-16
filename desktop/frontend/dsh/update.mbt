@@ -8,7 +8,17 @@ pub fn update(
   state : State,
 ) -> (@cmd.Cmd, State) {
   match msg {
-    Refresh => (state.refresh(dispatch), { ..state, loading: true, notice: "" })
+    Refresh => {
+      let commands = [state.refresh(dispatch)]
+      let models = if state.connection is DshReady &&
+        state.active_id is Some(session_id) {
+        commands.push(state.load_models(dispatch, session_id))
+        DshModelsLoading(session_id~)
+      } else {
+        state.models
+      }
+      (@cmd.batch(commands), { ..state, models, loading: true, notice: "" })
+    }
     NewSession(workspace_id) =>
       if state.creation_pending {
         (@cmd.none, state)
@@ -52,7 +62,10 @@ pub fn update(
     OpenSession(session_id) => {
       let selection_changed = state.active_id != Some(session_id)
       (
-        state.load_history(dispatch, session_id),
+        @cmd.batch([
+          state.load_history(dispatch, session_id),
+          state.load_models(dispatch, session_id),
+        ]),
         {
           ..state,
           active_id: Some(session_id),
@@ -68,19 +81,98 @@ pub fn update(
           },
           events: [],
           streaming: "",
+          models: DshModelsLoading(session_id~),
+          placement: if selection_changed {
+            @composer.LocalCheckout
+          } else {
+            state.placement
+          },
+          worktree_project: if selection_changed {
+            None
+          } else {
+            state.worktree_project
+          },
           loading: true,
           notice: "",
         },
       )
     }
     ComposerAction(action) => state.apply_composer_action(dispatch, action)
+    ToggleWorktreeMode =>
+      if state.busy() || state.is_running() || !state.active_blank() {
+        (@cmd.none, state)
+      } else {
+        match (state.placement, state.active_workspace_path()) {
+          (@composer.LocalCheckout, Some(project)) =>
+            (
+              @cmd.none,
+              {
+                ..state,
+                placement: @composer.FreshWorktree,
+                worktree_project: Some(project),
+                notice: "",
+              },
+            )
+          (@composer.FreshWorktree, _) =>
+            (
+              @cmd.none,
+              {
+                ..state,
+                placement: @composer.LocalCheckout,
+                worktree_project: None,
+                notice: "",
+              },
+            )
+          (@composer.BoundWorktree(_), _) | (_, None) => (@cmd.none, state)
+        }
+      }
+    ModelChanged(key) => {
+      guard state.active_id is Some(session_id) &&
+        !state.busy() &&
+        !state.is_running() &&
+        state.models.option(session_id, key) is Some(option) else {
+        return (@cmd.none, state)
+      }
+      (
+        state.select_model(dispatch, session_id, option.selection),
+        {
+          ..state,
+          models: state.models.selecting(session_id, option.selection),
+          notice: "",
+        },
+      )
+    }
+    WorktreeReady(session_id~, generation~, project~, path~) => {
+      guard state.prompt_generation == generation &&
+        state.prompt_pending_session == Some(session_id) &&
+        state.active_id == Some(session_id) else {
+        return (@cmd.none, state)
+      }
+      (
+        state.register_prompt_workspace(
+          dispatch, session_id, generation, project, path,
+        ),
+        { ..state, worktree_project: Some(project), loading: true },
+      )
+    }
     Send =>
-      if state.busy() || state.draft.trim().is_empty() || !state.has_active() {
+      if state.busy() ||
+        state.draft.trim().is_empty() ||
+        state.active_id is None ||
+        !state.models.routable(state.active_id.unwrap()) {
         (@cmd.none, state)
       } else {
         let generation = state.prompt_generation + 1
+        let command = if state.active_blank() &&
+          state.placement.wants_fresh() &&
+          state.worktree_project is Some(project) &&
+          state.active_id is Some(session_id) {
+          state.create_worktree(dispatch, session_id, generation, project)
+        } else {
+          state.send(dispatch, generation)
+        }
         (
-          state.send(dispatch, generation),
+          command,
           {
             ..state,
             prompt_generation: generation,
@@ -156,7 +248,7 @@ pub fn update(
         _ => (@cmd.none, state)
       }
     Reply(kind~, value~) => {
-      if kind is DshPromptReply(session_id~, generation~, ..) {
+      if kind.prompt_origin() is Some((session_id, generation)) {
         if state.prompt_generation != generation {
           return (@cmd.none, state)
         }
@@ -191,7 +283,7 @@ pub fn update(
     Failed(kind~, message~) => {
       // A reply belongs to the page state that submitted it. Session changes
       // and later sends must not clear another conversation's draft/loading.
-      if kind is DshPromptReply(session_id~, generation~, ..) {
+      if kind.prompt_origin() is Some((session_id, generation)) {
         if state.prompt_generation != generation {
           return (@cmd.none, state)
         }
@@ -240,6 +332,10 @@ pub fn update(
         state.selection_generation != selection_generation {
         return (@cmd.none, { ..state, creation_pending: false })
       }
+      if kind.model_session() is Some(session_id) &&
+        state.active_id != Some(session_id) {
+        return (@cmd.none, state)
+      }
       (
         @cmd.none,
         {
@@ -249,12 +345,12 @@ pub fn update(
           } else {
             state.connection
           },
-          loading: if kind is DshPendingReply {
+          loading: if kind is DshPendingReply || kind.model_session() is Some(_) {
             state.loading
           } else {
             false
           },
-          prompt_pending_session: if kind is DshPromptReply(..) {
+          prompt_pending_session: if kind.prompt_origin() is Some(_) {
             None
           } else {
             state.prompt_pending_session
@@ -274,6 +370,11 @@ pub fn update(
             None
           } else {
             state.cancel_pending_session
+          },
+          models: if kind.model_session() is Some(session_id) {
+            state.models.failed(session_id)
+          } else {
+            state.models
           },
           // Connection failures belong to the root toast queue. Other dsh
           // request failures remain attached to the dsh transcript surface.
@@ -352,7 +453,7 @@ fn State::with_reply(
       @cmd.none,
       {
         ..self,
-        prompt_pending_session: if kind is DshPromptReply(..) {
+        prompt_pending_session: if kind.prompt_origin() is Some(_) {
           None
         } else {
           self.prompt_pending_session
@@ -368,13 +469,22 @@ fn State::with_reply(
         } else {
           self.cancel_pending_session
         },
-        loading: false,
+        models: if kind.model_session() is Some(session_id) {
+          self.models.failed(session_id)
+        } else {
+          self.models
+        },
+        loading: if kind.model_session() is Some(_) {
+          self.loading
+        } else {
+          false
+        },
         notice: envelope.error(),
       },
     )
   }
   match kind {
-    DshReconnectReply | DshWorkspacesReply => {
+    DshReconnectReply | DshWorkspacesReply | DshPromptWorkspacesReply(..) => {
       let workspaces : Array[DshWorkspaceRow] = []
       if value is Object(fields) && fields.get("items") is Some(Array(items)) {
         for item in items {
@@ -383,16 +493,42 @@ fn State::with_reply(
           }
         }
       }
+      if kind is DshPromptWorkspacesReply(session_id~, worktree_path~, ..) &&
+        !workspaces
+        .iter()
+        .any(workspace => {
+          workspace.path == worktree_path &&
+          workspace.session_ids.contains(session_id)
+        }) {
+        return (
+          @cmd.none,
+          {
+            ..self,
+            workspaces,
+            prompt_pending_session: None,
+            loading: false,
+            notice: "DeepSeek Harness did not move the conversation into its worktree Workspace",
+          },
+        )
+      }
       (
-        if kind is DshReconnectReply {
-          @cmd.batch([
-            self.list_sessions(dispatch),
-            DshPendingReply.pending(dispatch),
-          ])
-        } else {
-          @cmd.none
+        match kind {
+          DshReconnectReply =>
+            @cmd.batch([
+              self.list_sessions(dispatch),
+              DshPendingReply.pending(dispatch),
+            ])
+          DshPromptWorkspacesReply(generation~, ..) =>
+            self.send(dispatch, generation)
+          _ => @cmd.none
         },
-        { ..self, connection: DshReady, workspaces, loading: false, notice: "" },
+        {
+          ..self,
+          connection: DshReady,
+          workspaces,
+          loading: kind is DshPromptWorkspacesReply(..),
+          notice: "",
+        },
       )
     }
     DshWorkspaceCreateReply(selection_generation) => {
@@ -480,12 +616,33 @@ fn State::with_reply(
         } else {
           self.streaming
         },
+        models: if selection_changed && active_id is Some(session_id) {
+          DshModelsLoading(session_id~)
+        } else {
+          self.models
+        },
+        placement: if selection_changed {
+          @composer.LocalCheckout
+        } else {
+          self.placement
+        },
+        worktree_project: if selection_changed {
+          None
+        } else {
+          self.worktree_project
+        },
         loading: false,
         notice: "",
       }
       match active_id {
         Some(id) if selection_changed =>
-          (next.load_history(dispatch, id), { ..next, loading: true })
+          (
+            @cmd.batch([
+              next.load_history(dispatch, id),
+              next.load_models(dispatch, id),
+            ]),
+            { ..next, loading: true },
+          )
         _ => (@cmd.none, next)
       }
     }
@@ -512,6 +669,7 @@ fn State::with_reply(
       ]
       if activate {
         commands.push(self.load_history(dispatch, session_id))
+        commands.push(self.load_models(dispatch, session_id))
       }
       (
         @cmd.batch(commands),
@@ -524,6 +682,9 @@ fn State::with_reply(
             draft: "",
             events: [],
             streaming: "",
+            models: DshModelsLoading(session_id~),
+            placement: @composer.LocalCheckout,
+            worktree_project: None,
             loading: true,
             notice: "",
           }
@@ -576,6 +737,67 @@ fn State::with_reply(
         },
       )
     }
+    DshModelsReply(session_id) => {
+      guard self.active_id == Some(session_id) else { return (@cmd.none, self) }
+      guard DshModels::decode(session_id, value) is Some(models) else {
+        return (
+          @cmd.none,
+          {
+            ..self,
+            models: self.models.failed(session_id),
+            notice: "DeepSeek Harness returned a malformed session.models reply",
+          },
+        )
+      }
+      (@cmd.none, { ..self, models, notice: "" })
+    }
+    DshSelectModelReply(session_id~) => {
+      guard self.active_id == Some(session_id) else { return (@cmd.none, self) }
+      guard value is Object(fields) &&
+        fields.get("selected") is Some(selected_json) &&
+        DshModelSelection::decode(selected_json) is Some(selected) &&
+        self.models.selected(session_id, selected) is Some(models) else {
+        return (
+          @cmd.none,
+          {
+            ..self,
+            models: self.models.failed(session_id),
+            notice: "DeepSeek Harness returned a malformed session.selectModel reply",
+          },
+        )
+      }
+      (@cmd.none, { ..self, models, notice: "" })
+    }
+    DshPromptWorkspaceReply(session_id~, generation~, project~, worktree_path~) => {
+      guard value is Object(fields) &&
+        fields.get("workspace") is Some(Object(workspace)) &&
+        @jsonx.json_text(workspace, "workspaceId") is Some(workspace_id) else {
+        return (
+          @cmd.none,
+          {
+            ..self,
+            prompt_pending_session: None,
+            loading: false,
+            notice: "DeepSeek Harness returned a malformed workspace.create reply",
+          },
+        )
+      }
+      (
+        self.move_prompt_session(
+          dispatch, session_id, generation, project, worktree_path, workspace_id,
+        ),
+        self,
+      )
+    }
+    DshPromptMoveReply(session_id~, generation~, project~, worktree_path~) =>
+      (
+        DshPromptWorkspacesReply(session_id~, generation~, worktree_path~).request(
+          dispatch,
+          "workspace.list",
+          {},
+        ),
+        { ..self, worktree_project: Some(project), loading: true },
+      )
     DshPromptReply(session_id~, draft~, generation~) => {
       guard self.active_id == Some(session_id) &&
         self.prompt_generation == generation else {
@@ -1465,6 +1687,25 @@ test "accepted dsh prompt advances transcript submission generation" {
     ],
     active_id: Some("session-1"),
     draft: "hello",
+    models: DshModelsReady(
+      session_id="session-1",
+      options=[
+        {
+          selection: {
+            provider: "deepseek",
+            model: "deepseek-chat",
+            reasoning_effort: None,
+          },
+          label: "DeepSeek / Chat",
+        },
+      ],
+      selected={
+        provider: "deepseek",
+        model: "deepseek-chat",
+        reasoning_effort: None,
+      },
+      routable=true,
+    ),
   }
   let (_, next) = update(dispatch, Send, state)
   assert_eq(next.submission_generation(), 1)
@@ -2215,4 +2456,250 @@ test "removing a background dsh session preserves the active transcript" {
   assert_eq(next.pending.length(), 1)
   assert_eq(next.pending[0].session_id(), "active")
   assert_true(next.loading)
+}
+
+///|
+test "dsh model selection settles the shared composer catalog" {
+  let current : DshModelSelection = {
+    provider: "deepseek",
+    model: "chat",
+    reasoning_effort: None,
+  }
+  let requested : DshModelSelection = {
+    provider: "deepseek",
+    model: "reasoner",
+    reasoning_effort: Some("high"),
+  }
+  let state = {
+    ..State(),
+    connection: DshReady,
+    active_id: Some("session-1"),
+    models: DshModelsReady(
+      session_id="session-1",
+      options=[
+        { selection: current, label: "DeepSeek / Chat" },
+        { selection: requested, label: "DeepSeek / Reasoner · High" },
+      ],
+      selected=current,
+      routable=true,
+    ),
+  }
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let (_, selecting) = update(dispatch, ModelChanged(requested.key()), state)
+  guard selecting.models is DshModelsSelecting(requested=selection, ..) else {
+    fail("expected selecting dsh model state")
+  }
+  assert_eq(selection, requested)
+  let (_, ready) = selecting.with_reply(
+    dispatch,
+    DshSelectModelReply(session_id="session-1"),
+    {
+      "type": "server-response",
+      "rpcId": "model-1",
+      "result": {
+        "ok": true,
+        "value": {
+          "selected": {
+            "provider": "deepseek",
+            "model": "reasoner",
+            "reasoningEffort": "high",
+          },
+        },
+      },
+    },
+  )
+  guard ready.models is DshModelsReady(selected~, routable~, ..) else {
+    fail("expected selected dsh model state")
+  }
+  assert_eq(selected, requested)
+  assert_true(routable)
+  let navigated = { ..ready, active_id: Some("session-2") }
+  let (_, stale) = update(
+    dispatch,
+    Failed(
+      kind=DshSelectModelReply(session_id="session-1"),
+      message="late selection failure",
+    ),
+    navigated,
+  )
+  assert_true(stale == navigated)
+}
+
+///|
+test "blank dsh first prompt keeps its session while adopting a worktree" {
+  let selected : DshModelSelection = {
+    provider: "deepseek",
+    model: "chat",
+    reasoning_effort: None,
+  }
+  let state = {
+    ..State(),
+    connection: DshReady,
+    workspaces: [
+      {
+        id: "workspace-main",
+        title: "Project",
+        path: "/work/project",
+        session_ids: ["session-1"],
+      },
+    ],
+    sessions: [
+      {
+        id: "session-1",
+        title: "New conversation",
+        cwd: Some("/work/project"),
+        running: false,
+        blank: true,
+      },
+    ],
+    active_id: Some("session-1"),
+    models: DshModelsReady(
+      session_id="session-1",
+      options=[{ selection: selected, label: "DeepSeek / Chat" }],
+      selected~,
+      routable=true,
+    ),
+    draft: "inspect this project",
+  }
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let (_, worktree) = update(dispatch, ToggleWorktreeMode, state)
+  assert_true(worktree.placement is @composer.FreshWorktree)
+  assert_eq(worktree.worktree_project, Some("/work/project"))
+  let (_, sending) = update(dispatch, Send, worktree)
+  assert_eq(sending.prompt_generation, 1)
+  assert_eq(sending.prompt_pending_session, Some("session-1"))
+  let (_, stale) = update(
+    dispatch,
+    WorktreeReady(
+      session_id="session-1",
+      generation=0,
+      project="/work/project",
+      path="/work/project/.worktrees/wt-1",
+    ),
+    sending,
+  )
+  assert_true(stale == sending)
+  let (_, registered) = update(
+    dispatch,
+    WorktreeReady(
+      session_id="session-1",
+      generation=1,
+      project="/work/project",
+      path="/work/project/.worktrees/wt-1",
+    ),
+    sending,
+  )
+  let (_, moved) = registered.with_reply(
+    dispatch,
+    DshPromptWorkspaceReply(
+      session_id="session-1",
+      generation=1,
+      project="/work/project",
+      worktree_path="/work/project/.worktrees/wt-1",
+    ),
+    {
+      "type": "server-response",
+      "rpcId": "workspace-1",
+      "result": {
+        "ok": true,
+        "value": {
+          "workspace": {
+            "workspaceId": "workspace-worktree",
+            "title": "wt-1",
+            "path": "/work/project/.worktrees/wt-1",
+            "sessionIds": [],
+          },
+        },
+      },
+    },
+  )
+  assert_eq(moved.prompt_pending_session, Some("session-1"))
+  let (_, refreshing_workspaces) = moved.with_reply(
+    dispatch,
+    DshPromptMoveReply(
+      session_id="session-1",
+      generation=1,
+      project="/work/project",
+      worktree_path="/work/project/.worktrees/wt-1",
+    ),
+    {
+      "type": "server-response",
+      "rpcId": "move-1",
+      "result": { "ok": true, "value": { "workspace": {} } },
+    },
+  )
+  assert_eq(refreshing_workspaces.prompt_pending_session, Some("session-1"))
+  let (_, mismatched_workspace) = refreshing_workspaces.with_reply(
+    dispatch,
+    DshPromptWorkspacesReply(
+      session_id="session-1",
+      generation=1,
+      worktree_path="/work/project/.worktrees/wt-1",
+    ),
+    {
+      "type": "server-response",
+      "rpcId": "workspace-list-wrong",
+      "result": {
+        "ok": true,
+        "value": {
+          "items": [
+            {
+              "workspaceId": "workspace-wrong",
+              "title": "wrong",
+              "path": "/work/other",
+              "sessionIds": ["session-1"],
+            },
+          ],
+        },
+      },
+    },
+  )
+  assert_eq(mismatched_workspace.prompt_pending_session, None)
+  assert_true(mismatched_workspace.notice.contains("did not move"))
+  let (_, prompted) = refreshing_workspaces.with_reply(
+    dispatch,
+    DshPromptWorkspacesReply(
+      session_id="session-1",
+      generation=1,
+      worktree_path="/work/project/.worktrees/wt-1",
+    ),
+    {
+      "type": "server-response",
+      "rpcId": "workspace-list-1",
+      "result": {
+        "ok": true,
+        "value": {
+          "items": [
+            {
+              "workspaceId": "workspace-worktree",
+              "title": "wt-1",
+              "path": "/work/project/.worktrees/wt-1",
+              "sessionIds": ["session-1"],
+            },
+          ],
+        },
+      },
+    },
+  )
+  assert_eq(
+    prompted.active_workspace_path(),
+    Some("/work/project/.worktrees/wt-1"),
+  )
+  assert_eq(prompted.prompt_pending_session, Some("session-1"))
+  let (_, settled) = prompted.with_reply(
+    dispatch,
+    DshPromptReply(
+      session_id="session-1",
+      draft="inspect this project",
+      generation=1,
+    ),
+    {
+      "type": "server-response",
+      "rpcId": "prompt-1",
+      "result": { "ok": true, "value": {} },
+    },
+  )
+  assert_eq(settled.active_id, Some("session-1"))
+  assert_eq(settled.prompt_pending_session, None)
+  assert_eq(settled.draft, "")
 }

@@ -46,6 +46,12 @@ The browser state lives in `desktop/frontend/dsh`. It currently supports:
   registry is empty;
 - creating dsh sessions through a stable `workspaceId` rather than a loose
   `cwd`;
+- loading dsh's per-session provider/model catalog and selecting the complete
+  provider, model, and optional reasoning-effort tuple from the shared
+  composer;
+- choosing **Worktree** for a blank conversation: Desktop creates its normal
+  Git worktree, registers that existing directory as a dsh Workspace, moves
+  the same blank session into it, and only then sends the first prompt;
 - loading the newest 200 message groups for a selected session;
 - rendering user, assistant, reasoning, tool call/result, and turn-error rows
   through OpenSeek's shared transcript (model-only `surfaceOp: replace` copies
@@ -55,11 +61,12 @@ The browser state lives in `desktop/frontend/dsh`. It currently supports:
 - allowing or rejecting a tool approval once;
 - answering single-select, multi-select, and free-text questions.
 
-Only the seven dsh methods used by that page are allowlisted:
-`workspace.list`, `workspace.create`, `session.list`, `session.create`,
-`session.history`, `session.prompt`, and `session.cancel`. Settings,
-credentials, arbitrary path operations, plugin management, and other dsh APIs
-are not exposed by this integration.
+Only the ten dsh methods used by that page are allowlisted: `workspace.list`,
+`workspace.create`, `workspace.insertSessionBefore`, `session.list`,
+`session.create`, `session.history`, `session.models`, `session.selectModel`,
+`session.prompt`, and `session.cancel`. Settings, credentials, arbitrary path
+operations, plugin management, and other dsh APIs are not exposed by this
+integration.
 
 ## Local-only boundary
 
@@ -81,6 +88,12 @@ resource path to a host-native path before `workspace.create`, then converts
 dsh's canonical host-native path back for the renderer. This keeps the grant
 reversible on both POSIX and Windows instead of treating a display spelling as
 authority.
+
+A Desktop-created dsh worktree records its owner in a separate `dsh_session`
+registry field. That keeps dsh session ids out of OpenSeek's conversation store
+and Codex's thread namespace while preserving idempotent first-send retries.
+After dsh moves the session, the next `workspace.list` replaces the Files and
+Terminal grant with the generated Workspace path.
 
 ## Runtime prerequisite
 

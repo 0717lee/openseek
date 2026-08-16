@@ -164,13 +164,15 @@ pub(all) struct WorktreeListPayload {
 
 ///|
 /// `worktree.create` names the workspace and exactly one conversation owner.
-/// Existing clients send `session`; Codex sends `codex_thread`. Creation is
-/// the binding, and that owner id doubles as the idempotency key for retries.
-/// The host generates the worktree's name and returns it in the reply.
+/// OpenSeek sends `session`, Codex sends `codex_thread`, and DeepSeek Harness
+/// sends `dsh_session`. Creation is the binding, and that owner id doubles as
+/// the idempotency key for retries. The host generates the worktree's name and
+/// returns it in the reply.
 pub(all) struct WorktreeCreatePayload {
   workspace : String
   session : String?
   codex_thread : String?
+  dsh_session : String?
 } derive(Debug, Eq)
 
 ///|
@@ -182,14 +184,18 @@ pub impl FromJson for WorktreeCreatePayload with fn from_json(json, path) {
   let workspace = object.required_string("workspace")
   let session = object.optional_string("session")
   let codex_thread = object.optional_string("codex_thread")
+  let dsh_session = object.optional_string("dsh_session")
   // Unknown fields remain forward-compatible, but ownership is deliberately
-  // closed: a worktree belongs to one OpenSeek session or one Codex thread.
-  if (session is Some(_)) == (codex_thread is Some(_)) {
+  // closed: a worktree belongs to exactly one product conversation.
+  let owner_count = (if session is Some(_) { 1 } else { 0 }) +
+    (if codex_thread is Some(_) { 1 } else { 0 }) +
+    (if dsh_session is Some(_) { 1 } else { 0 })
+  if owner_count != 1 {
     raise JsonDecodeError(
-      (path, "expected exactly one of session or codex_thread"),
+      (path, "expected exactly one of session, codex_thread, or dsh_session"),
     )
   }
-  { workspace, session, codex_thread }
+  { workspace, session, codex_thread, dsh_session }
 }
 
 ///|
@@ -200,6 +206,9 @@ pub impl ToJson for WorktreeCreatePayload with fn to_json(self) {
   }
   if self.codex_thread is Some(codex_thread) {
     fields["codex_thread"] = Json::string(codex_thread)
+  }
+  if self.dsh_session is Some(dsh_session) {
+    fields["dsh_session"] = Json::string(dsh_session)
   }
   Json::object(fields)
 }

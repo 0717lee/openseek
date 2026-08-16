@@ -129,6 +129,7 @@ fn start_in_new_worktree(
               workspace: workspace.path,
               session: Some(session),
               codex_thread: None,
+              dsh_session: None,
             },
           ) catch {
             _ => {
@@ -269,6 +270,7 @@ fn set_goal_in_new_worktree(
               workspace: workspace.path,
               session: Some(session),
               codex_thread: None,
+              dsh_session: None,
             },
           ) catch {
             _ => {
@@ -363,7 +365,12 @@ fn repair_worktree_cmd(
       let result : @protocol.WorktreeCreateResult = @interop.bridge_request(
         channel,
         @commands.worktree_create,
-        { workspace, session: Some(session), codex_thread: None },
+        {
+          workspace,
+          session: Some(session),
+          codex_thread: None,
+          dsh_session: None,
+        },
       ) catch {
         _ => {
           scheduler.add(

@@ -255,7 +255,8 @@ fn DshWorkspaceAuthorizations::DshWorkspaceAuthorizations() -> DshWorkspaceAutho
 ///|
 fn DshDesktopCall::is_allowed(self : DshDesktopCall) -> Bool {
   [
-    "workspace.list", "workspace.create", "session.list", "session.create", "session.history",
+    "workspace.list", "workspace.create", "workspace.insertSessionBefore", "session.list",
+    "session.create", "session.history", "session.models", "session.selectModel",
     "session.prompt", "session.cancel",
   ].contains(self.method_)
 }
@@ -411,7 +412,9 @@ fn DshDesktopCall::frontend_reply(
   self : DshDesktopCall,
   reply : Json,
 ) -> Json raise @host.PayloadError {
-  guard self.method_ == "workspace.list" || self.method_ == "workspace.create" else {
+  guard self.method_ == "workspace.list" ||
+    self.method_ == "workspace.create" ||
+    self.method_ == "workspace.insertSessionBefore" else {
     return reply
   }
   guard reply is Object(envelope_fields) &&
@@ -433,7 +436,7 @@ fn DshDesktopCall::frontend_reply(
     )
   } else {
     guard value_fields.get("workspace") is Some(workspace) else {
-      raise PayloadError("dsh returned a malformed workspace.create reply")
+      raise PayloadError("dsh returned a malformed Workspace reply")
     }
     value["workspace"] = DshWorkspaceJson(workspace).to_frontend()
   }
@@ -836,9 +839,11 @@ pub fn endpoints(
       @worktree.list(payload.workspace)
     }),
     @endpoint.Endpoint::remote(@commands.worktree_create, async fn(payload) {
-      let owner = match (payload.session, payload.codex_thread) {
-        (Some(session), None) => @worktree.WorktreeOwner::openseek(session)
-        (None, Some(thread_id)) => {
+      let (owner, workspace) = match
+        (payload.session, payload.codex_thread, payload.dsh_session) {
+        (Some(session), None, None) =>
+          (@worktree.WorktreeOwner::openseek(session), payload.workspace)
+        (None, Some(thread_id), None) => {
           let workspace = state.codex_worktree_project(
             thread_id,
             payload.workspace,
@@ -852,7 +857,22 @@ pub fn endpoints(
               state.hub.publish(WorkspaceChanged({ workspaces, }))
             }),
           )
-          @worktree.WorktreeOwner::codex(thread_id)
+          (@worktree.WorktreeOwner::codex(thread_id), workspace)
+        }
+        (None, None, Some(session_id)) => {
+          let workspace = state.dsh_worktree_project(
+            session_id,
+            payload.workspace,
+          )
+          // A dsh Workspace need not be registered in OpenSeek. The user's
+          // Worktree choice is the explicit request to attach its main
+          // checkout before provisioning the generated directory.
+          ignore(
+            @engine.attach_workspace(workspace, workspaces => {
+              state.hub.publish(WorkspaceChanged({ workspaces, }))
+            }),
+          )
+          (@worktree.WorktreeOwner::dsh(session_id), workspace)
         }
         _ =>
           raise @host.PayloadError(
@@ -861,11 +881,9 @@ pub fn endpoints(
       }
       let reply = @worktree.create(
         state.manager.worktree_host(),
-        payload.workspace,
+        workspace,
         owner,
-        worktrees => {
-          publish_worktree_changed(state, payload.workspace, worktrees)
-        },
+        worktrees => publish_worktree_changed(state, workspace, worktrees),
       ) catch {
         error if @async.is_being_cancelled() => raise error
         @worktree.WorktreeError(message) => return WorktreeCreateError(message)
@@ -1049,6 +1067,23 @@ test "dsh endpoints stay in the local Desktop catalog" {
   let connection = @host.HostConnection::new()
   let remote = endpoints(state, connection).map(endpoint => endpoint.name())
   assert_false(remote.contains("dsh.request"))
+  let models : DshDesktopCall = { method_: "session.models", payload: {} }
+  let select_model : DshDesktopCall = {
+    method_: "session.selectModel",
+    payload: {},
+  }
+  let insert_session : DshDesktopCall = {
+    method_: "workspace.insertSessionBefore",
+    payload: {},
+  }
+  let delete_workspace : DshDesktopCall = {
+    method_: "workspace.delete",
+    payload: {},
+  }
+  assert_true(models.is_allowed())
+  assert_true(select_model.is_allowed())
+  assert_true(insert_session.is_allowed())
+  assert_false(delete_workspace.is_allowed())
 }
 
 ///|
@@ -1091,6 +1126,32 @@ test "dsh workspace paths cross the native API boundary reversibly" {
     fail("expected a rewritten dsh workspace.list reply")
   }
   assert_eq(workspace.get("path"), Some(Json::string(resource_path)))
+  let move_call : DshDesktopCall = {
+    method_: "workspace.insertSessionBefore",
+    payload: {},
+  }
+  guard move_call.frontend_reply({
+      "type": "server-response",
+      "rpcId": "workspace-move-1",
+      "result": {
+        "ok": true,
+        "value": {
+          "workspace": {
+            "workspaceId": "workspace-1",
+            "title": "project",
+            "path": absolute.to_string(),
+            "sessionIds": ["session-1"],
+          },
+        },
+      },
+    })
+    is Object(move_envelope) &&
+    move_envelope.get("result") is Some(Object(move_result)) &&
+    move_result.get("value") is Some(Object(move_value)) &&
+    move_value.get("workspace") is Some(Object(moved_workspace)) else {
+    fail("expected a rewritten dsh workspace.insertSessionBefore reply")
+  }
+  assert_eq(moved_workspace.get("path"), Some(Json::string(resource_path)))
 }
 
 ///|
@@ -1381,6 +1442,79 @@ async fn ApiState::codex_turn_start(
   @json.from_json(
     self.codex_request("codex.turn.start", request.app_server_params()),
   )
+}
+
+///|
+/// Revalidate a DeepSeek Harness first-send worktree request from dsh's own
+/// blank-session and Workspace baselines. A durable binding wins on retries:
+/// after the first attempt moves the session into the generated Workspace,
+/// its current dsh path is no longer the main checkout that owns the registry.
+async fn ApiState::dsh_worktree_project(
+  self : ApiState,
+  session_id : String,
+  requested : String,
+) -> String {
+  for binding in @worktree.list_dsh_worktree_bindings() {
+    guard binding.session_id == session_id else { continue }
+    guard requested == binding.workspace || requested == binding.worktree.path else {
+      raise @host.HostError(
+        "DeepSeek Harness worktree request does not match its existing placement",
+      )
+    }
+    return binding.workspace
+  }
+  guard @pathx.Absolute::from_uri_path(requested) is Some(requested_path) else {
+    raise @host.HostError(
+      "DeepSeek Harness worktree requires a local project root",
+    )
+  }
+  let (workspace_reply, _) = self.dsh.call(method_="workspace.list", payload={})
+  guard workspace_reply is Object(workspace_envelope) &&
+    workspace_envelope.get("result") is Some(Object(workspace_result)) &&
+    workspace_result.get("ok") is Some(True) &&
+    workspace_result.get("value") is Some(Object(workspace_value)) &&
+    workspace_value.get("items") is Some(Array(workspaces)) else {
+    raise @host.HostError(
+      "DeepSeek Harness worktree could not verify its Workspace",
+    )
+  }
+  let mut owns_requested_workspace = false
+  for workspace in workspaces {
+    guard workspace is Object(fields) &&
+      fields.get("path") == Some(Json::string(requested_path.to_string())) &&
+      fields.get("sessionIds") is Some(Array(session_ids)) else {
+      continue
+    }
+    owns_requested_workspace = session_ids
+      .iter()
+      .any(value => value == Json::string(session_id))
+    if owns_requested_workspace {
+      break
+    }
+  }
+  guard owns_requested_workspace else {
+    raise @host.HostError(
+      "DeepSeek Harness worktree requires the session's current Workspace",
+    )
+  }
+  let (session_reply, _) = self.dsh.call(method_="session.list", payload={})
+  guard session_reply is Object(session_envelope) &&
+    session_envelope.get("result") is Some(Object(session_result)) &&
+    session_result.get("ok") is Some(True) &&
+    session_result.get("value") is Some(Object(session_value)) &&
+    session_value.get("items") is Some(Array(sessions)) &&
+    sessions
+    .iter()
+    .any(value => {
+      value is Object(fields) &&
+      fields.get("sessionId") == Some(Json::string(session_id)) &&
+      fields.get("blank") == Some(Json::boolean(true))
+    }) else {
+    raise @host.HostError(
+      "DeepSeek Harness worktree can only be chosen before the first prompt",
+    )
+  }
+  requested
 }
 
 ///|
