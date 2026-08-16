@@ -48,9 +48,9 @@ priv enum ActorInput {
 }
 
 ///|
-/// The socket generation and Workspace-removal revision at which one HTTP
-/// request entered the actor. Together they prevent a list captured before a
-/// host removal event from restoring the grants that event just revoked.
+/// The socket, Workspace, and session-projection revisions at which one HTTP
+/// request entered the actor. They fence Workspace grants and order session
+/// list baselines against live running/title updates.
 pub(all) struct DshConnectionRevision {
   connection : Int
   workspaces : Int
@@ -203,7 +203,7 @@ struct Actor {
   mut status_revision : Int
   mut generation : Int
   mut workspace_revision : Int
-  // host/session-status events and session.list dispatches share this actor
+  // Session running/title events and session.list dispatches share this actor
   // clock. The captured request revision describes the exact HTTP baseline,
   // even when the renderer request waited in its ordered lane first.
   mut session_revision : Int
@@ -440,6 +440,11 @@ async fn Actor::publish_frame(
 ) -> Unit {
   if stream == "mux" {
     self.interactions.observe(message)
+  }
+  if message is Object(fields) &&
+    fields.get("payload") is Some(Object(payload)) &&
+    @jsonx.json_text(payload, "type") == Some("session/projection") {
+    self.session_revision += 1
   }
   if stream == "host" &&
     message is Object(fields) &&
@@ -711,7 +716,7 @@ async test "dsh actor releases a removed session before publishing its event" {
 }
 
 ///|
-async test "dsh actor revisions session status before publishing it" {
+async test "dsh actor revisions session projections before publishing them" {
   let actor = Actor()
   actor.session_revision = 6
   let published : Array[Json] = []
@@ -735,6 +740,27 @@ async test "dsh actor revisions session status before publishing it" {
     _ => None
   }
   assert_eq(revision, Some(7))
+  actor.publish_frame(
+    "mux",
+    {
+      "rpcId": "projection-1",
+      "payload": {
+        "type": "session/projection",
+        "sessionId": "session-1",
+        "key": "title",
+        "value": "Renamed",
+      },
+    },
+    (_, payload) => published.push(payload),
+    invalidate_workspaces=fn(_, _) {  },
+    release_worktree=fn(_) {  },
+  )
+  assert_eq(actor.session_revision, 8)
+  let projection_revision = match published.get(1) {
+    Some(Object(fields)) => @jsonx.json_int(fields, "sessionRevision")
+    _ => None
+  }
+  assert_eq(projection_revision, Some(8))
 }
 
 ///|

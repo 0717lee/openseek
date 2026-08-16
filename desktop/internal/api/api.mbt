@@ -318,14 +318,14 @@ async fn DshWorkspaceAuthorizations::replace(
   generation : Int,
   revision : Int,
   bindings : Array[DshWorkspaceBinding],
-) -> Unit {
+) -> Bool {
   let next : Map[String, String] = Map([])
   for binding in bindings {
     next[binding.owner] = binding.workspace
   }
   self.lock.acquire()
   defer self.lock.release()
-  guard generation >= self.generation else { return }
+  guard generation >= self.generation else { return false }
   if generation > self.generation {
     for owner, _ in self.bindings {
       @work_dir.revoke_host_workspace(owner)
@@ -334,7 +334,7 @@ async fn DshWorkspaceAuthorizations::replace(
     self.generation = generation
     self.revision = revision
   } else {
-    guard revision >= self.revision else { return }
+    guard revision >= self.revision else { return false }
     self.revision = revision
   }
   for owner, _ in self.bindings {
@@ -349,6 +349,7 @@ async fn DshWorkspaceAuthorizations::replace(
   for owner, workspace in next {
     self.bindings[owner] = workspace
   }
+  true
 }
 
 ///|
@@ -1006,6 +1007,7 @@ pub fn local_endpoints(state : ApiState) -> Array[@endpoint.Endpoint] {
       let reply : @protocol.DshValueReply = {
         value: state.dsh.status(),
         session_revision: None,
+        workspace_accepted: None,
       }
       reply
     }),
@@ -1013,6 +1015,7 @@ pub fn local_endpoints(state : ApiState) -> Array[@endpoint.Endpoint] {
       let reply : @protocol.DshValueReply = {
         value: state.dsh.interactions(),
         session_revision: None,
+        workspace_accepted: None,
       }
       reply
     }),
@@ -1036,18 +1039,23 @@ pub fn local_endpoints(state : ApiState) -> Array[@endpoint.Endpoint] {
       // publish the complete membership before returning it, so a terminal
       // opened by the resulting render cannot race ahead of the grant.
       let frontend_reply = call.frontend_reply(reply)
-      if call.workspace_bindings(reply) is Some(bindings) {
-        state.dsh_workspaces.replace(
-          connection_revision.connection,
-          connection_revision.workspaces,
-          bindings,
-        )
+      let workspace_accepted = match call.workspace_bindings(reply) {
+        Some(bindings) =>
+          Some(
+            state.dsh_workspaces.replace(
+              connection_revision.connection,
+              connection_revision.workspaces,
+              bindings,
+            ),
+          )
+        None => None
       }
       let envelope : @protocol.DshValueReply = {
         value: frontend_reply,
         // The actor captures this after the ordered frontend lane releases the
         // request for actual dispatch, not when the renderer queued it.
         session_revision: Some(connection_revision.sessions),
+        workspace_accepted,
       }
       envelope
     }),
@@ -1070,6 +1078,7 @@ pub fn local_endpoints(state : ApiState) -> Array[@endpoint.Endpoint] {
       let reply : @protocol.DshValueReply = {
         value: { "receipt": receipt, "generation": generation },
         session_revision: None,
+        workspace_accepted: None,
       }
       reply
     }),
@@ -1270,7 +1279,7 @@ async test "dsh workspace membership authorizes and revokes its terminal owner" 
   }
   let authorizations = DshWorkspaceAuthorizations()
   let generation = 1
-  authorizations.replace(generation, 0, bindings)
+  assert_true(authorizations.replace(generation, 0, bindings))
   assert_true(
     @work_dir.resolve_in_workspace(owner, "", workspace=resource_path)
     is Some(_),
@@ -1282,11 +1291,11 @@ async test "dsh workspace membership authorizes and revokes its terminal owner" 
   // Unlike disconnect revocation, a Workspace-removal invalidation allows the
   // same live connection's replacement snapshot to restore surviving rows.
   // A reply captured before the removal event cannot restore old membership.
-  authorizations.replace(generation, 0, bindings)
+  assert_false(authorizations.replace(generation, 0, bindings))
   assert_true(
     @work_dir.resolve_in_workspace(owner, "", workspace=resource_path) is None,
   )
-  authorizations.replace(generation, 1, bindings)
+  assert_true(authorizations.replace(generation, 1, bindings))
   assert_true(
     @work_dir.resolve_in_workspace(owner, "", workspace=resource_path)
     is Some(_),
@@ -1297,12 +1306,12 @@ async test "dsh workspace membership authorizes and revokes its terminal owner" 
   )
   // A workspace.list reply from the closed connection cannot race after the
   // revoke and restore the old session/path binding.
-  authorizations.replace(generation, 1, bindings)
+  assert_false(authorizations.replace(generation, 1, bindings))
   assert_true(
     @work_dir.resolve_in_workspace(owner, "", workspace=resource_path) is None,
   )
   let next_generation = generation + 1
-  authorizations.replace(next_generation, 0, bindings)
+  assert_true(authorizations.replace(next_generation, 0, bindings))
   assert_true(
     @work_dir.resolve_in_workspace(owner, "", workspace=resource_path)
     is Some(_),

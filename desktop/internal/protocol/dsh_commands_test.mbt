@@ -18,9 +18,16 @@ test "dsh command envelopes preserve nested versioned JSON" {
   let reply : @protocol.DshValueReply = @json.from_json({
     "value": null,
     "sessionRevision": 7,
+    "workspaceAccepted": true,
   })
   assert_true(reply.value is Null)
   assert_eq(reply.session_revision, Some(7))
+  assert_eq(reply.workspace_accepted, Some(true))
+  @debug.assert_eq(reply.to_json(), {
+    "value": null,
+    "sessionRevision": 7,
+    "workspaceAccepted": true,
+  })
 }
 
 ///|

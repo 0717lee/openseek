@@ -28,6 +28,16 @@ priv struct DshSessionStatusObservation {
 } derive(Eq)
 
 ///|
+/// One title projection newer than a possibly in-flight session.list. It uses
+/// the same actor revision as running-state observations, so a list dispatched
+/// after the projection remains authoritative without a second refresh.
+priv struct DshSessionTitleObservation {
+  session_id : String
+  title : String
+  revision : Int
+} derive(Eq)
+
+///|
 /// One durable dsh Workspace. Its canonical path and explicit session account
 /// come from `workspace.list`; the frontend never reconstructs membership from
 /// the session's display-only cwd.
@@ -255,10 +265,11 @@ struct State {
   connection_status_revision : Int
   workspaces : Array[DshWorkspaceRow]
   sessions : Array[DshSessionRow]
-  // HTTP session snapshots and WebSocket status events use independent
-  // carriers. Record the latest event per session so a late snapshot cannot
-  // roll back a status that arrived after that snapshot request began.
+  // HTTP session snapshots and WebSocket projections use independent
+  // carriers. Record the latest running/title event per session so a late
+  // snapshot cannot roll back a projection emitted after dispatch.
   session_statuses : Array[DshSessionStatusObservation]
+  session_titles : Array[DshSessionTitleObservation]
   active_id : String?
   events : Array[DshEventRecord]
   streaming : String
@@ -305,6 +316,7 @@ pub fn State::State(loading? : Bool = false) -> State {
     workspaces: [],
     sessions: [],
     session_statuses: [],
+    session_titles: [],
     active_id: None,
     events: [],
     streaming: "",

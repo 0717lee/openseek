@@ -59,6 +59,40 @@ fn DshReplyKind::request(
           return
         }
       }
+      if reply.workspace_accepted == Some(false) {
+        // The actor published a newer Workspace membership event while this
+        // list was in flight. Its replacement list is already queued on the
+        // same lane; never let the rejected rows reach the renderer. A prompt
+        // chain must still settle instead of remaining globally busy.
+        if self is DshPromptWorkspacesReply(..) {
+          scheduler.add(
+            dispatch(
+              Failed(
+                kind=self,
+                message="DeepSeek Harness Workspace changed while preparing the prompt",
+              ),
+            ),
+          )
+        }
+        return
+      }
+      if (
+          self is DshReconnectReply ||
+          self is DshWorkspacesReply ||
+          self is DshPromptWorkspacesReply(..)
+        ) &&
+        DshEnvelope(reply.value).value() is Some(_) &&
+        reply.workspace_accepted is None {
+        scheduler.add(
+          dispatch(
+            Failed(
+              kind=self,
+              message="DeepSeek Harness Workspace list omitted its authorization fence",
+            ),
+          ),
+        )
+        return
+      }
       let reply_kind = match self {
         DshSessionsReply(..) =>
           match reply.session_revision {

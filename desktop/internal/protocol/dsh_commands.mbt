@@ -32,8 +32,11 @@ pub(all) struct DshValueReply {
   value : Json
   // Present for actor-dispatched requests. session.list uses the revision
   // captured when its HTTP call actually starts to order the returned
-  // baseline against host/session-status notifications.
+  // baseline against running and title projection notifications.
   session_revision : Int?
+  // Present for workspace.list. False means the native authorization fence
+  // rejected this stale snapshot, so the renderer must not project its rows.
+  workspace_accepted : Bool?
 } derive(Debug, Eq)
 
 ///|
@@ -146,12 +149,23 @@ pub impl FromJson for DshValueReply with fn from_json(json, path) {
       )
     None => None
   }
+  let workspace_accepted : Bool? = match fields.get("workspaceAccepted") {
+    Some(True) => Some(true)
+    Some(False) => Some(false)
+    Some(_) =>
+      raise JsonDecodeError(
+        (path.add_key("workspaceAccepted"), "expected boolean"),
+      )
+    None => None
+  }
   for name, _ in fields {
-    if name != "value" && name != "sessionRevision" {
+    if name != "value" &&
+      name != "sessionRevision" &&
+      name != "workspaceAccepted" {
       raise JsonDecodeError((path.add_key(name), "unknown field"))
     }
   }
-  { value, session_revision }
+  { value, session_revision, workspace_accepted }
 }
 
 ///|
@@ -159,6 +173,9 @@ pub impl ToJson for DshValueReply with fn to_json(self) {
   let fields : Map[String, Json] = Map([("value", self.value)])
   if self.session_revision is Some(revision) {
     fields["sessionRevision"] = revision.to_json()
+  }
+  if self.workspace_accepted is Some(accepted) {
+    fields["workspaceAccepted"] = Json::boolean(accepted)
   }
   Json::object(fields)
 }

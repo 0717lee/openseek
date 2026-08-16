@@ -801,6 +801,7 @@ pub impl @json.FromJson for DshStatusNotification
 pub(all) struct DshValueReply {
   value : Json
   session_revision : Int?
+  workspace_accepted : Bool?
 } derive(Eq, @debug.Debug)
 pub impl ToJson for DshValueReply
 pub impl @json.FromJson for DshValueReply

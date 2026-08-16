@@ -708,6 +708,16 @@ fn State::with_reply(
             } else {
               row
             }
+            let row = if self.session_titles
+              .iter()
+              .find_first(title => {
+                title.session_id == row.id && title.revision > session_revision
+              })
+              is Some(title) {
+              { ..row, title: title.title }
+            } else {
+              row
+            }
             sessions.push(row)
           }
         }
@@ -1310,6 +1320,9 @@ fn State::with_event(
           session_statuses: self.session_statuses.filter(status => {
             status.session_id != session_id
           }),
+          session_titles: self.session_titles.filter(projection => {
+            projection.session_id != session_id
+          }),
           response_pending_rpcs: self.response_pending_rpcs.filter(rpc_id => {
             pending.iter().any(item => item.rpc_id() == rpc_id)
           }),
@@ -1353,17 +1366,31 @@ fn State::with_event(
     "session/projection" => {
       guard @jsonx.json_text(payload, "sessionId") is Some(session_id) &&
         @jsonx.json_text(payload, "key") == Some("title") &&
-        payload.get("value") is Some(String(title)) else {
+        payload.get("value") is Some(String(title)) &&
+        !title.trim().is_empty() &&
+        @jsonx.json_int(wrapper, "sessionRevision") is Some(session_revision) else {
+        return (@cmd.none, self)
+      }
+      if self.session_titles
+        .iter()
+        .any(projection => {
+          projection.session_id == session_id &&
+          projection.revision >= session_revision
+        }) {
         return (@cmd.none, self)
       }
       let sessions = self.sessions.map(row => {
-        if row.id == session_id && !title.trim().is_empty() {
+        if row.id == session_id {
           { ..row, title, }
         } else {
           row
         }
       })
-      (@cmd.none, { ..self, sessions, })
+      let session_titles = self.session_titles.filter(projection => {
+        projection.session_id != session_id
+      })
+      session_titles.push({ session_id, title, revision: session_revision })
+      (@cmd.none, { ..self, sessions, session_titles })
     }
     "host/workspace-changed" =>
       (
@@ -2297,6 +2324,67 @@ test "dsh session list orders running state by actor dispatch revision" {
     snapshot,
   )
   assert_eq(fresh.sessions.get(0).map(row => row.running), Some(false))
+}
+
+///|
+test "dsh session list preserves a newer title projection" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let state = {
+    ..State(),
+    sessions: [
+      {
+        id: "session-1",
+        title: "Old title",
+        cwd: None,
+        running: false,
+        blank: false,
+      },
+    ],
+    active_id: Some("session-1"),
+  }
+  let (_, renamed) = state.with_event(dispatch, {
+    "stream": "mux",
+    "message": {
+      "rpcId": "projection-1",
+      "payload": {
+        "type": "session/projection",
+        "sessionId": "session-1",
+        "key": "title",
+        "value": "New title",
+      },
+    },
+    "generation": 0,
+    "sessionRevision": 1,
+  })
+  let snapshot : Json = {
+    "type": "server-response",
+    "rpcId": "session-list-title",
+    "result": {
+      "ok": true,
+      "value": {
+        "items": [
+          {
+            "sessionId": "session-1",
+            "projections": { "values": { "title": "Old title" } },
+            "running": false,
+            "blank": false,
+          },
+        ],
+      },
+    },
+  }
+  let (_, preserved) = renamed.with_reply(
+    dispatch,
+    DshSessionsReply(session_revision=0),
+    snapshot,
+  )
+  assert_eq(preserved.sessions.get(0).map(row => row.title), Some("New title"))
+  let (_, fresh) = renamed.with_reply(
+    dispatch,
+    DshSessionsReply(session_revision=1),
+    snapshot,
+  )
+  assert_eq(fresh.sessions.get(0).map(row => row.title), Some("Old title"))
 }
 
 ///|
