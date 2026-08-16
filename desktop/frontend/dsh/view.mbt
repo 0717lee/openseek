@@ -207,6 +207,11 @@ pub fn State::page(
     ),
   )
   let workspace = self.active_workspace_row()
+  // The actor revokes host grants as soon as either dsh socket disconnects.
+  // Keep the cached Workspace label visible, but do not offer a host-backed
+  // control until a fresh authoritative workspace list restores its grant.
+  let workspace_controls_ready = self.connection is DshReady &&
+    workspace is Some(_)
   if workspace is Some(workspace) {
     topbar.push(
       @html.span(class="topbar-workspace", title=workspace.path, [
@@ -234,8 +239,10 @@ pub fn State::page(
   topbar.push(
     @html.button(
       class=if terminal_open { "panel-toggle active" } else { "panel-toggle" },
-      disabled=workspace is None,
-      title=if terminal_open {
+      disabled=!workspace_controls_ready,
+      title=if !(self.connection is DshReady) {
+        "Terminal is unavailable while DeepSeek Harness reconnects"
+      } else if terminal_open {
         "Hide terminal"
       } else if workspace is Some(_) {
         "Show terminal"
@@ -250,8 +257,10 @@ pub fn State::page(
     topbar.push(
       @html.button(
         class="panel-toggle",
-        disabled=workspace is None,
-        title=if workspace is Some(_) {
+        disabled=!workspace_controls_ready,
+        title=if !(self.connection is DshReady) {
+          "Files are unavailable while DeepSeek Harness reconnects"
+        } else if workspace is Some(_) {
           "Show files"
         } else {
           "Files require a dsh Workspace"

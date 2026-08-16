@@ -1600,6 +1600,12 @@ test "dsh workspace membership supplies the active editor root" {
   })
   assert_eq(grouped.preferred_workspace_id(), Some("workspace-1"))
   assert_eq(grouped.active_workspace_path(), Some("/canonical/project"))
+  let unavailable = {
+    ..grouped,
+    connection: DshUnavailable("dsh disconnected"),
+  }
+  assert_eq(unavailable.preferred_workspace_id(), Some("workspace-1"))
+  assert_true(unavailable.active_workspace_path() is None)
   let ungrouped = { ..grouped, active_id: Some("session-2") }
   assert_eq(ungrouped.preferred_workspace_id(), Some("workspace-1"))
   assert_true(ungrouped.active_workspace_path() is None)

@@ -411,7 +411,10 @@ pub fn State::preferred_workspace_id(self : State) -> String? {
 ///|
 /// Canonical local directory of the dsh Workspace that owns the active
 /// session. This value was normalized and membership-checked by dsh itself.
+/// A disconnected actor has already revoked its host grants, so keep the
+/// cached row for display but stop projecting it into shared host surfaces.
 pub fn State::active_workspace_path(self : State) -> String? {
+  guard self.connection is DshReady else { return None }
   self.active_workspace_row().map(workspace => workspace.path)
 }
 
