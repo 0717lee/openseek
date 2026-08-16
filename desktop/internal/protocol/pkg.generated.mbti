@@ -2370,6 +2370,24 @@ pub fn WorktreeCreateResult::to_repr(Self) -> @debug.Repr
 pub impl ToJson for WorktreeCreateResult
 pub impl @json.FromJson for WorktreeCreateResult
 
+pub(all) struct WorktreeDshBinding {
+  workspace : String
+  worktree : WorktreeInfo
+} derive(Eq, @debug.Debug)
+
+pub(all) struct WorktreeDshBindingPayload {
+  dsh_session : String
+} derive(Eq, @debug.Debug)
+pub impl ToJson for WorktreeDshBindingPayload
+pub impl @json.FromJson for WorktreeDshBindingPayload
+
+pub(all) enum WorktreeDshBindingReply {
+  WorktreeDshBindingFound(WorktreeDshBinding)
+  WorktreeDshBindingMissing
+} derive(Eq, @debug.Debug)
+pub impl ToJson for WorktreeDshBindingReply
+pub impl @json.FromJson for WorktreeDshBindingReply
+
 pub(all) struct WorktreeInfo {
   name : String
   branch : String

@@ -987,6 +987,22 @@ pub fn endpoints(
       )
       Acknowledged
     }),
+    @endpoint.Endpoint::remote(@commands.worktree_dsh_binding, async fn(
+      payload,
+    ) {
+      match
+        @worktree.dsh_worktree_binding(
+          state.manager.worktree_host(),
+          payload.dsh_session,
+        ) {
+        Some(binding) =>
+          WorktreeDshBindingFound({
+            workspace: binding.workspace,
+            worktree: binding.worktree,
+          })
+        None => WorktreeDshBindingMissing
+      }
+    }),
     @endpoint.Endpoint::remote(@commands.auth_status, async fn(_) {
       auth_status(state)
     }),
@@ -1126,6 +1142,7 @@ test "remote endpoint catalog has one entry per command name" {
     names.push(name)
   }
   assert_true(names.contains("codex.config.open"))
+  assert_true(names.contains("worktree.dsh_binding"))
   assert_true(names.contains("codex.draft.open"))
   assert_true(names.contains("codex.draft.close"))
   assert_true(names.contains("codex.file.search"))

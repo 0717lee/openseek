@@ -219,6 +219,8 @@ pub let workspace_settings_set : Command[@protocol.WorkspaceSettingsSetPayload, 
 
 pub let worktree_create : Command[@protocol.WorktreeCreatePayload, @protocol.WorktreeCreateResult]
 
+pub let worktree_dsh_binding : Command[@protocol.WorktreeDshBindingPayload, @protocol.WorktreeDshBindingReply]
+
 pub let worktree_list : Command[@protocol.WorktreeListPayload, @protocol.WorktreesReply]
 
 pub let worktree_release_dsh : Command[@protocol.WorktreeReleaseDshPayload, @protocol.EmptyReply]

@@ -10,6 +10,15 @@ pub fn update(
   match msg {
     Refresh => {
       let commands = [state.refresh(dispatch)]
+      if state.active_id is Some(session_id) {
+        commands.push(
+          state.load_worktree_binding(
+            dispatch,
+            session_id,
+            state.selection_generation,
+          ),
+        )
+      }
       let models = if state.connection is DshReady &&
         state.active_id is Some(session_id) {
         commands.push(state.load_models(dispatch, session_id))
@@ -61,20 +70,24 @@ pub fn update(
       }
     OpenSession(session_id) => {
       let selection_changed = state.active_id != Some(session_id)
+      let selection_generation = if selection_changed {
+        state.selection_generation + 1
+      } else {
+        state.selection_generation
+      }
       let failed_prompt = state.failed_prompts.get(session_id)
       (
         @cmd.batch([
           state.load_history(dispatch, session_id),
           state.load_models(dispatch, session_id),
+          state.load_worktree_binding(
+            dispatch, session_id, selection_generation,
+          ),
         ]),
         {
           ..state,
           active_id: Some(session_id),
-          selection_generation: if selection_changed {
-            state.selection_generation + 1
-          } else {
-            state.selection_generation
-          },
+          selection_generation,
           draft: if selection_changed {
             failed_prompt.map(prompt => prompt.draft.task).unwrap_or("")
           } else {
@@ -166,6 +179,91 @@ pub fn update(
         } else {
           // The immutable first-send pipeline continues for its originating
           // conversation without changing the newly selected page.
+          state
+        },
+      )
+    }
+    WorktreeBindingLoaded(session_id~, selection_generation~, binding~) => {
+      guard state.active_id == Some(session_id) &&
+        state.selection_generation == selection_generation &&
+        binding.worktree.dsh_session == Some(session_id) else {
+        return (@cmd.none, state)
+      }
+      // This durable registry fact survives renderer reloads and ambiguous
+      // create replies. It restores the Worktree choice without inventing a
+      // path grant; Files/Terminal still use dsh's accepted Workspace rows.
+      (
+        @cmd.none,
+        {
+          ..state,
+          placement: @composer.FreshWorktree,
+          worktree_project: Some(binding.workspace),
+        },
+      )
+    }
+    WorktreeReconcile(
+      session_id~,
+      generation~,
+      project~,
+      draft~,
+      attempt~,
+      message~
+    ) => {
+      guard state.prompt_generation == generation &&
+        state.prompt_pending_session == Some(session_id) else {
+        return (@cmd.none, state)
+      }
+      if attempt >= 8 {
+        let notice = "Desktop could not determine whether worktree creation committed; Refresh before retrying: " +
+          message
+        // Do not release or relabel an owner whose presence is unknown. Keep
+        // the user's Worktree choice and draft; Refresh/OpenSession repeats
+        // the durable owner read, including after a renderer reload.
+        return (
+          @cmd.none,
+          {
+            ..state,
+            placement: if state.active_id == Some(session_id) {
+              @composer.FreshWorktree
+            } else {
+              state.placement
+            },
+            worktree_project: if state.active_id == Some(session_id) {
+              Some(project)
+            } else {
+              state.worktree_project
+            },
+            failed_prompts: state.failed_prompts.put(session_id, draft, notice),
+            prompt_pending_session: None,
+            loading: if state.active_id == Some(session_id) {
+              false
+            } else {
+              state.loading
+            },
+            notice: if state.active_id == Some(session_id) {
+              notice
+            } else {
+              state.notice
+            },
+          },
+        )
+      }
+      let delay = (attempt + 1) * 100
+      (
+        @cmd.delay(
+          state.reconcile_worktree_binding(
+            dispatch, session_id, generation, project, draft, attempt,
+          ),
+          delay,
+        ),
+        if state.active_id == Some(session_id) {
+          {
+            ..state,
+            loading: true,
+            notice: "Verifying Desktop worktree ownership after a lost reply: " +
+            message,
+          }
+        } else {
           state
         },
       )
@@ -379,10 +477,10 @@ pub fn update(
           )
         None => @cmd.none
       }
-      let failed_prompts = match kind {
-        DshPromptReply(session_id~, draft~, ..) =>
+      let failed_prompts = match kind.prompt_draft() {
+        Some((session_id, draft)) =>
           state.failed_prompts.put(session_id, draft, message)
-        _ => state.failed_prompts
+        None => state.failed_prompts
       }
       // A reply belongs to the page state that submitted it. Session changes
       // and later sends must not clear another conversation's draft/loading.
@@ -396,7 +494,7 @@ pub fn update(
           // so settle its global submission fence even after navigation while
           // preserving the newly selected conversation's draft and notice.
           return if kind.failed_worktree() is Some(_) {
-            (cleanup_cmd, state)
+            (cleanup_cmd, { ..state, failed_prompts, })
           } else {
             (
               cleanup_cmd,
@@ -600,10 +698,10 @@ fn State::with_reply(
       .prompt_origin()
       .map(origin => self.active_id != Some(origin.0))
       .unwrap_or(false)
-    let failed_prompts = match kind {
-      DshPromptReply(session_id~, draft~, ..) =>
+    let failed_prompts = match kind.prompt_draft() {
+      Some((session_id, draft)) =>
         self.failed_prompts.put(session_id, draft, envelope.error())
-      _ => self.failed_prompts
+      None => self.failed_prompts
     }
     return (
       cleanup_cmd,
@@ -857,6 +955,11 @@ fn State::with_reply(
             @cmd.batch([
               next.load_history(dispatch, id),
               next.load_models(dispatch, id),
+              next.load_worktree_binding(
+                dispatch,
+                id,
+                next.selection_generation,
+              ),
             ]),
             { ..next, loading: true },
           )
@@ -1003,17 +1106,12 @@ fn State::with_reply(
         let cleanup = self.release_failed_worktree(
           dispatch, session_id, generation, project, worktree_name,
         )
+        let message = "DeepSeek Harness returned a malformed workspace.create reply"
+        let failed_prompts = self.failed_prompts.put(session_id, draft, message)
         return if self.active_id == Some(session_id) {
-          (
-            cleanup,
-            {
-              ..self,
-              loading: true,
-              notice: "DeepSeek Harness returned a malformed workspace.create reply",
-            },
-          )
+          (cleanup, { ..self, failed_prompts, loading: true, notice: message })
         } else {
-          (cleanup, self)
+          (cleanup, { ..self, failed_prompts, })
         }
       }
       (
@@ -3657,12 +3755,47 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
     draft: "inspect this project",
   }
   let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let (_, restored_binding) = update(
+    dispatch,
+    WorktreeBindingLoaded(session_id="session-1", selection_generation=0, binding={
+      workspace: "/work/project",
+      worktree: {
+        name: "wt-existing",
+        branch: "openseek/wt-existing",
+        base: "abc123",
+        session: None,
+        codex_thread: None,
+        dsh_session: Some("session-1"),
+        path: "/work/project/.worktrees/wt-existing",
+        present: true,
+      },
+    }),
+    state,
+  )
+  assert_true(restored_binding.placement is @composer.FreshWorktree)
+  assert_eq(restored_binding.worktree_project, Some("/work/project"))
   let (_, worktree) = update(dispatch, ToggleWorktreeMode, state)
   assert_true(worktree.placement is @composer.FreshWorktree)
   assert_eq(worktree.worktree_project, Some("/work/project"))
   let (_, sending) = update(dispatch, Send, worktree)
   assert_eq(sending.prompt_generation, 1)
   assert_eq(sending.prompt_pending_session, Some("session-1"))
+  let (_, reconciliation_deferred) = update(
+    dispatch,
+    WorktreeReconcile(
+      session_id="session-1",
+      generation=1,
+      project="/work/project",
+      draft={ task: "inspect this project", mentions: [] },
+      attempt=8,
+      message="host lookup unavailable",
+    ),
+    sending,
+  )
+  assert_eq(reconciliation_deferred.prompt_pending_session, None)
+  assert_true(reconciliation_deferred.placement is @composer.FreshWorktree)
+  assert_eq(reconciliation_deferred.worktree_project, Some("/work/project"))
+  assert_true(reconciliation_deferred.notice.contains("could not determine"))
   let (_, stale) = update(
     dispatch,
     WorktreeReady(
@@ -3821,6 +3954,35 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
     loading: false,
     notice: "session 2 notice",
   }
+  let (_, background_workspace_failed) = update(
+    dispatch,
+    Failed(
+      kind=DshPromptWorkspaceReply(
+        session_id="session-1",
+        generation=1,
+        project="/work/project",
+        worktree_name="wt-1",
+        worktree_path="/work/project/.worktrees/wt-1",
+        draft={ task: "inspect this project", mentions: [] },
+      ),
+      message="workspace transport failed",
+    ),
+    registered_navigated,
+  )
+  assert_eq(background_workspace_failed.active_id, Some("session-2"))
+  assert_eq(background_workspace_failed.draft, "draft for session 2")
+  let (_, background_workspace_cleaned) = update(
+    dispatch,
+    WorktreeCleanupFinished(session_id="session-1", generation=1, message=None),
+    background_workspace_failed,
+  )
+  let (_, reopened_workspace_failure) = update(
+    dispatch,
+    OpenSession("session-1"),
+    background_workspace_cleaned,
+  )
+  assert_eq(reopened_workspace_failure.draft, "inspect this project")
+  assert_eq(reopened_workspace_failure.notice, "workspace transport failed")
   let (_, background_cleaning) = update(
     dispatch,
     Failed(
@@ -3896,6 +4058,32 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
     background_moving,
   )
   assert_true(background_refreshing == registered_navigated)
+  let (_, background_verification_failed) = update(
+    dispatch,
+    Failed(
+      kind=DshPromptWorkspacesReply(
+        session_id="session-1",
+        generation=1,
+        project="/work/project",
+        worktree_name="wt-1",
+        worktree_path="/work/project/.worktrees/wt-1",
+        draft={ task: "inspect this project", mentions: [] },
+      ),
+      message="workspace verification transport failed",
+    ),
+    background_refreshing,
+  )
+  assert_eq(background_verification_failed.prompt_pending_session, None)
+  let (_, reopened_verification_failure) = update(
+    dispatch,
+    OpenSession("session-1"),
+    background_verification_failed,
+  )
+  assert_eq(reopened_verification_failure.draft, "inspect this project")
+  assert_eq(
+    reopened_verification_failure.notice,
+    "workspace verification transport failed",
+  )
   let (_, background_move_missing) = update(
     dispatch,
     Reply(

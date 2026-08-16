@@ -952,6 +952,24 @@ pub async fn list_dsh_worktree_bindings() -> Array[DshWorktreeBinding] {
 }
 
 ///|
+/// Read the one durable worktree registry row owned by `session_id`. Creation
+/// enforces owner uniqueness across registered workspaces, so finding more
+/// than one would already have required a corrupt hand-edited registry; the
+/// strict registry loader rejects that before this operation returns.
+pub async fn dsh_worktree_binding(
+  host : WorktreeHost,
+  session_id : String,
+) -> DshWorktreeBinding? {
+  // Wait for an in-flight create/repair to commit or roll back before reading
+  // the registry. Without the lifecycle lock, a fast lookup could report
+  // Missing while a reply-lost create was still provisioning its checkout.
+  host.lifecycle_lock.acquire()
+  defer host.lifecycle_lock.release()
+  let bindings = list_dsh_worktree_bindings()
+  bindings.iter().find_first(binding => binding.session_id == session_id)
+}
+
+///|
 /// Capture a dsh-owned registry immediately before workspace detachment. The
 /// engine holds its workspace lifecycle lock around this call and the registry
 /// removal, so no worktree create can land between the scan and detach.
@@ -2028,6 +2046,11 @@ async test "worktree names are host-generated and skip surviving branches" {
   }
   assert_eq(binding.workspace, repo.to_string())
   assert_eq(binding.worktree.name, "wt-5")
+  guard dsh_worktree_binding(host, "session-dsh-1") is Some(exact_binding) else {
+    fail("expected exact dsh worktree owner lookup")
+  }
+  assert_eq(exact_binding, binding)
+  assert_true(dsh_worktree_binding(host, "missing-session") is None)
   let exact_released : Array[WorktreeInfo] = []
   // A stale or forged name cannot release a different registry row.
   release_dsh_worktree(repo.to_string(), "wt-4", "session-dsh-1", worktrees => {

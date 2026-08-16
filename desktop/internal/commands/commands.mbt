@@ -181,6 +181,15 @@ pub let worktree_release_dsh : Command[
 ] = Command("worktree.release_dsh")
 
 ///|
+/// Read the durable registry owner for one dsh session. Unlike replaying
+/// creation, this command has no side effects and is safe to retry after an
+/// ambiguous host response.
+pub let worktree_dsh_binding : Command[
+  @protocol.WorktreeDshBindingPayload,
+  @protocol.WorktreeDshBindingReply,
+] = Command("worktree.dsh_binding")
+
+///|
 /// Codex commands expose SeekMoon-owned typed envelopes. Versioned nested
 /// app-server records remain JSON fields inside those envelopes.
 pub let codex_status : Command[

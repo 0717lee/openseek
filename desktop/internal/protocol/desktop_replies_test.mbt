@@ -518,6 +518,24 @@ test "dsh worktree release payload has an explicit three-field codec" {
 }
 
 ///|
+test "dsh worktree binding lookup payload has an explicit owner codec" {
+  let payload : @protocol.WorktreeDshBindingPayload = @json.from_json({
+    "dsh_session": "session-dsh-1",
+    "futureMetadata": true,
+  })
+  assert_eq(payload.dsh_session, "session-dsh-1")
+  @debug.assert_eq(payload.to_json(), { "dsh_session": "session-dsh-1" })
+  let missing_rejected = try {
+    let _ : @protocol.WorktreeDshBindingPayload = @json.from_json({})
+  } catch {
+    _ => true
+  } noraise {
+    _ => false
+  }
+  assert_true(missing_rejected)
+}
+
+///|
 test "Git changes replies preserve review identities and accept legacy omission" {
   let reply : @protocol.GitChangesReply = {
     repository: true,
@@ -795,6 +813,29 @@ test "worktree creation results keep success compatible and carry refusals" {
     refused.to_json(),
   )
   @debug.assert_eq(decoded_refusal, refused)
+}
+
+///|
+test "dsh worktree binding replies distinguish found from missing" {
+  let found : @protocol.WorktreeDshBindingReply = WorktreeDshBindingFound({
+    workspace: "/work/project",
+    worktree: {
+      name: "wt-1",
+      branch: "openseek/wt-1",
+      base: "abc123",
+      session: None,
+      codex_thread: None,
+      dsh_session: Some("session-dsh-1"),
+      path: "/work/project/.worktrees/wt-1",
+      present: true,
+    },
+  })
+  let decoded : @protocol.WorktreeDshBindingReply = @json.from_json(
+    found.to_json(),
+  )
+  assert_eq(decoded, found)
+  let missing : @protocol.WorktreeDshBindingReply = WorktreeDshBindingMissing
+  assert_eq(@json.from_json(missing.to_json()), missing)
 }
 
 ///|

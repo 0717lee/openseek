@@ -255,6 +255,19 @@ enum Msg {
     path~ : String,
     draft~ : @composer.Draft
   )
+  WorktreeBindingLoaded(
+    session_id~ : String,
+    selection_generation~ : Int,
+    binding~ : @protocol.WorktreeDshBinding
+  )
+  WorktreeReconcile(
+    session_id~ : String,
+    generation~ : Int,
+    project~ : String,
+    draft~ : @composer.Draft,
+    attempt~ : Int,
+    message~ : String
+  )
   WorktreeCleanupFinished(
     session_id~ : String,
     generation~ : Int,
@@ -434,6 +447,22 @@ fn DshReplyKind::prompt_origin(self : DshReplyKind) -> (String, Int)? {
     | DshPromptWorkspacesReply(session_id~, generation~, ..)
     | DshPromptReply(session_id~, generation~, ..) =>
       Some((session_id, generation))
+    _ => None
+  }
+}
+
+///|
+/// The immutable composer value captured by every first-send stage. Once a
+/// stage fails definitively, this snapshot belongs to its originating session
+/// even if the user selected another page while the request was in flight.
+fn DshReplyKind::prompt_draft(
+  self : DshReplyKind,
+) -> (String, @composer.Draft)? {
+  match self {
+    DshPromptWorkspaceReply(session_id~, draft~, ..)
+    | DshPromptMoveReply(session_id~, draft~, ..)
+    | DshPromptWorkspacesReply(session_id~, draft~, ..)
+    | DshPromptReply(session_id~, draft~, ..) => Some((session_id, draft))
     _ => None
   }
 }

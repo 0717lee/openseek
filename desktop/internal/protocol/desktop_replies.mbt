@@ -797,6 +797,83 @@ pub impl FromJson for WorktreeCreateResult with fn from_json(json, path) {
 }
 
 ///|
+/// One durable Desktop registry row owned by a dsh conversation. `workspace`
+/// is the main checkout whose registry contains `worktree`.
+pub(all) struct WorktreeDshBinding {
+  workspace : String
+  worktree : WorktreeInfo
+} derive(Debug, Eq)
+
+///|
+/// A binding lookup distinguishes an authoritative absence from a transport
+/// failure at the command boundary.
+pub(all) enum WorktreeDshBindingReply {
+  WorktreeDshBindingFound(WorktreeDshBinding)
+  WorktreeDshBindingMissing
+} derive(Debug, Eq)
+
+///|
+pub impl ToJson for WorktreeDshBindingReply with fn to_json(self) {
+  match self {
+    WorktreeDshBindingFound(binding) =>
+      {
+        "binding": {
+          "workspace": binding.workspace,
+          "worktree": binding.worktree.to_json(),
+        },
+      }
+    WorktreeDshBindingMissing => { "binding": Json::null() }
+  }
+}
+
+///|
+pub impl FromJson for WorktreeDshBindingReply with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected dsh worktree binding reply"))
+  }
+  match fields.get("binding") {
+    Some(Null) => WorktreeDshBindingMissing
+    Some(Object(binding)) => {
+      let workspace = match binding.get("workspace") {
+        Some(String(value)) => value
+        Some(_) =>
+          raise JsonDecodeError(
+            (path.add_key("binding").add_key("workspace"), "expected string"),
+          )
+        None =>
+          raise JsonDecodeError(
+            (
+              path.add_key("binding").add_key("workspace"),
+              "missing required field",
+            ),
+          )
+      }
+      let worktree = match binding.get("worktree") {
+        Some(value) =>
+          @json.from_json(
+            value,
+            path=path.add_key("binding").add_key("worktree"),
+          )
+        None =>
+          raise JsonDecodeError(
+            (
+              path.add_key("binding").add_key("worktree"),
+              "missing required field",
+            ),
+          )
+      }
+      WorktreeDshBindingFound({ workspace, worktree })
+    }
+    Some(_) =>
+      raise JsonDecodeError(
+        (path.add_key("binding"), "expected object or null"),
+      )
+    None =>
+      raise JsonDecodeError((path.add_key("binding"), "missing required field"))
+  }
+}
+
+///|
 pub(all) struct OpenPathEditorTarget {
   // Slash-separated path relative to the conversation's resolved checkout.
   path : String

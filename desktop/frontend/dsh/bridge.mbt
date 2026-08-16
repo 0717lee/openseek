@@ -382,13 +382,19 @@ fn State::create_worktree(
                 payload,
               ) catch {
                 retry_error => {
+                  // A second lost reply is still not a refusal: either create
+                  // may have committed the durable dsh owner. Switch to the
+                  // read-only owner query and keep the submission fence until
+                  // that query proves presence or absence.
                   scheduler.add(
                     dispatch(
-                      Failed(
-                        kind=DshPromptReply(session_id~, draft~, generation~),
-                        message="worktree setup could not be reconciled (" +
-                          @interop.bridge_error_text(retry_error) +
-                          "); the prompt was not sent",
+                      WorktreeReconcile(
+                        session_id~,
+                        generation~,
+                        project~,
+                        draft~,
+                        attempt=0,
+                        message=@interop.bridge_error_text(retry_error),
                       ),
                     ),
                   )
@@ -442,6 +448,116 @@ fn State::create_worktree(
           ),
         ),
       )
+    })
+  })
+}
+
+///|
+/// Recover the Desktop-owned placement for a selected dsh conversation. This
+/// read runs on every selection/refresh, so a renderer reload cannot hide a
+/// binding whose create reply was lost.
+fn State::load_worktree_binding(
+  _self : State,
+  dispatch : @cmd.Emit[Msg],
+  session_id : String,
+  selection_generation : Int,
+) -> @cmd.Cmd {
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      let reply : @protocol.WorktreeDshBindingReply = @interop.bridge_request(
+        @interop.ChannelId::Local,
+        @commands.worktree_dsh_binding,
+        { dsh_session: session_id },
+      ) catch {
+        // This is a read-only projection. A later Refresh/OpenSession repeats
+        // it, while the selected dsh Workspace remains the safe local default.
+        _ => return
+      }
+      if reply is @protocol.WorktreeDshBindingFound(binding) &&
+        binding.worktree.dsh_session == Some(session_id) {
+        scheduler.add(
+          dispatch(
+            WorktreeBindingLoaded(session_id~, selection_generation~, binding~),
+          ),
+        )
+      }
+    })
+  })
+}
+
+///|
+/// Resolve an ambiguous owner-aware create through the native registry read.
+/// Transport errors repeat only this side-effect-free query; an authoritative
+/// missing result is the sole path that reports creation as uncommitted.
+fn State::reconcile_worktree_binding(
+  _self : State,
+  dispatch : @cmd.Emit[Msg],
+  session_id : String,
+  generation : Int,
+  project : String,
+  draft : @composer.Draft,
+  attempt : Int,
+) -> @cmd.Cmd {
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      let reply : @protocol.WorktreeDshBindingReply = @interop.bridge_request(
+        @interop.ChannelId::Local,
+        @commands.worktree_dsh_binding,
+        { dsh_session: session_id },
+      ) catch {
+        error => {
+          scheduler.add(
+            dispatch(
+              WorktreeReconcile(
+                session_id~,
+                generation~,
+                project~,
+                draft~,
+                attempt=attempt + 1,
+                message=@interop.bridge_error_text(error),
+              ),
+            ),
+          )
+          return
+        }
+      }
+      match reply {
+        @protocol.WorktreeDshBindingFound(binding) => {
+          guard binding.workspace == project &&
+            binding.worktree.dsh_session == Some(session_id) else {
+            scheduler.add(
+              dispatch(
+                Failed(
+                  kind=DshPromptReply(session_id~, draft~, generation~),
+                  message="Desktop returned a mismatched dsh worktree owner",
+                ),
+              ),
+            )
+            return
+          }
+          scheduler.add(
+            dispatch(
+              WorktreeReady(
+                session_id~,
+                generation~,
+                project~,
+                name=binding.worktree.name,
+                path=binding.worktree.path,
+                draft~,
+              ),
+            ),
+          )
+        }
+        @protocol.WorktreeDshBindingMissing =>
+          scheduler.add(
+            dispatch(
+              Failed(
+                kind=DshPromptReply(session_id~, draft~, generation~),
+                message="Desktop verified that worktree creation did not commit",
+              ),
+            ),
+          )
+      }
     })
   })
 }

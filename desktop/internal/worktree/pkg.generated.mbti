@@ -13,6 +13,8 @@ pub async fn create(WorktreeHost, String, WorktreeOwner, (Array[@protocol.Worktr
 
 pub async fn drop_placements(@pathx.Absolute, Array[String]) -> Array[@protocol.WorktreeInfo]?
 
+pub async fn dsh_worktree_binding(WorktreeHost, String) -> DshWorktreeBinding?
+
 pub async fn list(String) -> @protocol.WorktreesReply
 
 pub async fn list_codex_worktree_bindings() -> Array[CodexWorktreeBinding]

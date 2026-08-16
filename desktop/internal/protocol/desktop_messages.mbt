@@ -276,6 +276,35 @@ pub impl ToJson for WorktreeReleaseDshPayload with fn to_json(self) {
 }
 
 ///|
+/// Look up the durable Desktop worktree owner for one dsh conversation. This
+/// read is the reconciliation authority after a create reply is lost.
+pub(all) struct WorktreeDshBindingPayload {
+  dsh_session : String
+} derive(Debug, Eq)
+
+///|
+pub impl FromJson for WorktreeDshBindingPayload with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected dsh worktree binding payload"))
+  }
+  let dsh_session = match fields.get("dsh_session") {
+    Some(String(value)) => value
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("dsh_session"), "expected string"))
+    None =>
+      raise JsonDecodeError(
+        (path.add_key("dsh_session"), "missing required field"),
+      )
+  }
+  { dsh_session, }
+}
+
+///|
+pub impl ToJson for WorktreeDshBindingPayload with fn to_json(self) {
+  { "dsh_session": self.dsh_session }
+}
+
+///|
 pub(all) struct InstallSkillPayload {
   module_name : String
   version : String
