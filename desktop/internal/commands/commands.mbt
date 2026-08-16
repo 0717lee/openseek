@@ -173,6 +173,14 @@ pub let worktree_remove : Command[
 ] = Command("worktree.remove")
 
 ///|
+/// Release a failed dsh first-send binding without deleting its checkout or
+/// branch. The endpoint verifies the exact workspace/name/session registry row.
+pub let worktree_release_dsh : Command[
+  @protocol.WorktreeReleaseDshPayload,
+  @protocol.EmptyReply,
+] = Command("worktree.release_dsh")
+
+///|
 /// Codex commands expose SeekMoon-owned typed envelopes. Versioned nested
 /// app-server records remain JSON fields inside those envelopes.
 pub let codex_status : Command[

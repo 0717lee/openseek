@@ -2393,6 +2393,14 @@ pub fn WorktreeListPayload::not_equal(Self, Self) -> Bool
 pub fn WorktreeListPayload::to_json(Self) -> Json
 pub fn WorktreeListPayload::to_repr(Self) -> @debug.Repr
 
+pub(all) struct WorktreeReleaseDshPayload {
+  workspace : String
+  name : String
+  dsh_session : String
+} derive(Eq, @debug.Debug)
+pub impl ToJson for WorktreeReleaseDshPayload
+pub impl @json.FromJson for WorktreeReleaseDshPayload
+
 pub(all) struct WorktreeRemovePayload {
   workspace : String
   name : String

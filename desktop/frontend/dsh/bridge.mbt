@@ -90,6 +90,26 @@ test "dsh snapshot replies select independent ordered lanes" {
     Some("dsh-history-session-2"),
   )
   assert_eq(DshCreateReply(0).ordered_lane(), None)
+  assert_eq(
+    DshPromptWorkspaceReply(
+      session_id="session-1",
+      generation=1,
+      project="/work/project",
+      worktree_name="wt-1",
+      worktree_path="/work/project/.worktrees/wt-1",
+      draft="inspect this project",
+    ).failed_worktree(),
+    Some(("session-1", 1, "/work/project", "wt-1")),
+  )
+  assert_true(
+    DshPromptWorkspacesReply(
+      session_id="session-1",
+      generation=1,
+      worktree_path="/work/project/.worktrees/wt-1",
+      draft="inspect this project",
+    ).failed_worktree()
+    is None,
+  )
 }
 
 ///|
@@ -335,6 +355,7 @@ fn State::create_worktree(
             session_id~,
             generation~,
             project~,
+            name=reply.name,
             path=worktree.path,
             draft~,
           ),
@@ -353,6 +374,7 @@ fn State::register_prompt_workspace(
   session_id : String,
   generation : Int,
   project : String,
+  worktree_name : String,
   worktree_path : String,
   draft : String,
 ) -> @cmd.Cmd {
@@ -360,6 +382,7 @@ fn State::register_prompt_workspace(
     session_id~,
     generation~,
     project~,
+    worktree_name~,
     worktree_path~,
     draft~,
   ).request(dispatch, "workspace.create", { "path": worktree_path })
@@ -374,15 +397,63 @@ fn State::move_prompt_session(
   session_id : String,
   generation : Int,
   project : String,
+  worktree_name : String,
   worktree_path : String,
   workspace_id : String,
   draft : String,
 ) -> @cmd.Cmd {
-  DshPromptMoveReply(session_id~, generation~, project~, worktree_path~, draft~).request(
-    dispatch,
-    "workspace.insertSessionBefore",
-    { "workspaceId": workspace_id, "sessionId": session_id },
-  )
+  DshPromptMoveReply(
+    session_id~,
+    generation~,
+    project~,
+    worktree_name~,
+    worktree_path~,
+    draft~,
+  ).request(dispatch, "workspace.insertSessionBefore", {
+    "workspaceId": workspace_id,
+    "sessionId": session_id,
+  })
+}
+
+///|
+/// Release the exact host registry binding after dsh rejects setup before the
+/// conversation move completes. The checkout and branch stay available for
+/// ordinary worktree removal.
+fn State::release_failed_worktree(
+  _self : State,
+  dispatch : @cmd.Emit[Msg],
+  session_id : String,
+  generation : Int,
+  project : String,
+  name : String,
+) -> @cmd.Cmd {
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      let _ : @protocol.EmptyReply = @interop.bridge_request(
+        @interop.ChannelId::Local,
+        @commands.worktree_release_dsh,
+        { workspace: project, name, dsh_session: session_id },
+      ) catch {
+        error => {
+          scheduler.add(
+            dispatch(
+              WorktreeCleanupFinished(
+                session_id~,
+                generation~,
+                message=Some(@interop.bridge_error_text(error)),
+              ),
+            ),
+          )
+          return
+        }
+      }
+      scheduler.add(
+        dispatch(
+          WorktreeCleanupFinished(session_id~, generation~, message=None),
+        ),
+      )
+    })
+  })
 }
 
 ///|

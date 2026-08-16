@@ -146,6 +146,7 @@ priv enum DshReplyKind {
     session_id~ : String,
     generation~ : Int,
     project~ : String,
+    worktree_name~ : String,
     worktree_path~ : String,
     draft~ : String
   )
@@ -153,6 +154,7 @@ priv enum DshReplyKind {
     session_id~ : String,
     generation~ : Int,
     project~ : String,
+    worktree_name~ : String,
     worktree_path~ : String,
     draft~ : String
   )
@@ -180,8 +182,14 @@ enum Msg {
     session_id~ : String,
     generation~ : Int,
     project~ : String,
+    name~ : String,
     path~ : String,
     draft~ : String
+  )
+  WorktreeCleanupFinished(
+    session_id~ : String,
+    generation~ : Int,
+    message~ : String?
   )
   Send
   Stop
@@ -345,6 +353,27 @@ fn DshReplyKind::prompt_origin(self : DshReplyKind) -> (String, Int)? {
     | DshPromptWorkspacesReply(session_id~, generation~, ..)
     | DshPromptReply(session_id~, generation~, ..) =>
       Some((session_id, generation))
+    _ => None
+  }
+}
+
+///|
+/// Only failures before dsh confirms the session move abandon the host binding.
+/// Later Workspace-list or prompt failures leave an already-adopted checkout
+/// attached so the original conversation can retry normally.
+fn DshReplyKind::failed_worktree(
+  self : DshReplyKind,
+) -> (String, Int, String, String)? {
+  match self {
+    DshPromptWorkspaceReply(
+      session_id~,
+      generation~,
+      project~,
+      worktree_name~,
+      ..
+    )
+    | DshPromptMoveReply(session_id~, generation~, project~, worktree_name~, ..) =>
+      Some((session_id, generation, project, worktree_name))
     _ => None
   }
 }

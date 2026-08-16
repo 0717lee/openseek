@@ -785,6 +785,40 @@ pub async fn release_dsh_session(
 }
 
 ///|
+/// Release one exact dsh-owned registry row when first-send Workspace setup
+/// fails after `worktree.create` commits. A stale or replayed request is an
+/// idempotent no-op and cannot release a row owned by another conversation.
+/// Files, checkout, and branch survive for ordinary worktree cleanup.
+pub async fn release_dsh_worktree(
+  workspace : String,
+  name : String,
+  session_id : String,
+  on_committed : (Array[WorktreeInfo]) -> Unit,
+) -> Unit {
+  guard @pathx.Absolute::from_uri_path(workspace) is Some(absolute) &&
+    @workspaces.registered_dir(absolute) is Some(dir) else {
+    raise WorktreeError("\{workspace} is not a registered workspace")
+  }
+  worktree_registry_lock.acquire()
+  defer worktree_registry_lock.release()
+  let entries = read_worktrees_unlocked(dir)
+  let mut found = false
+  let released = entries.map(entry => {
+    if entry.name == name && entry.dsh_session == Some(session_id) {
+      found = true
+      { ..entry, dsh_session: None }
+    } else {
+      entry
+    }
+  })
+  guard found else { return }
+  @async.protect_from_cancel(() => {
+    write_worktrees(dir, released)
+    on_committed(worktree_infos(dir, released))
+  })
+}
+
+///|
 /// The smallest `wt-N` nobody holds: free in the registry, on disk, and as
 /// a branch. Branches survive removal, so the counter naturally skips past
 /// history instead of resurrecting an old branch.
@@ -1687,6 +1721,29 @@ async test "worktree names are host-generated and skip surviving branches" {
   }
   assert_eq(binding.workspace, repo.to_string())
   assert_eq(binding.worktree.name, "wt-5")
+  let exact_released : Array[WorktreeInfo] = []
+  // A stale or forged name cannot release a different registry row.
+  release_dsh_worktree(repo.to_string(), "wt-4", "session-dsh-1", worktrees => {
+    exact_released.append(worktrees)
+  })
+  assert_eq(exact_released, [])
+  release_dsh_worktree(repo.to_string(), "wt-5", "session-dsh-1", worktrees => {
+    exact_released.append(worktrees)
+  })
+  guard exact_released.iter().find_first(info => info.name == "wt-5")
+    is Some(exact_row) else {
+    fail("expected exact dsh worktree release")
+  }
+  assert_eq(exact_row.dsh_session, None)
+  // The actor-level session cleanup remains independently covered after a
+  // later retry binds this conversation to a fresh checkout.
+  let rebound = create(
+    host,
+    repo.to_string(),
+    WorktreeOwner::dsh("session-dsh-1"),
+    fn(_) {  },
+  )
+  assert_eq(rebound.name, "wt-6")
   let released_workspaces : Array[String] = []
   let released : Array[WorktreeInfo] = []
   release_dsh_session("session-dsh-1", (workspace, worktrees) => {
@@ -1694,7 +1751,7 @@ async test "worktree names are host-generated and skip surviving branches" {
     released.append(worktrees)
   })
   assert_eq(released_workspaces, [repo.to_string()])
-  guard released.iter().find_first(info => info.name == "wt-5")
+  guard released.iter().find_first(info => info.name == "wt-6")
     is Some(released_dsh) else {
     fail("expected released dsh worktree row")
   }
@@ -1707,6 +1764,7 @@ async test "worktree names are host-generated and skip surviving branches" {
   )
   // Releasing ownership preserves files and routes later cleanup through the
   // ordinary dirty check instead of silently discarding the checkout.
+  ignore(remove(host, repo.to_string(), "wt-6", false, fn(_) {  }))
   ignore(remove(host, repo.to_string(), "wt-5", false, fn(_) {  }))
   @fs.rmdir(root.to_string(), recursive=true)
 }

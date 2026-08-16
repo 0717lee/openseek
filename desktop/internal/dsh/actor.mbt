@@ -38,10 +38,23 @@ priv enum ConnectionState {
 
 ///|
 priv enum ActorInput {
-  Call(String, Json, @async.Queue[Result[(Json, Int), DshError]])
+  Call(
+    String,
+    Json,
+    @async.Queue[Result[(Json, DshConnectionRevision), DshError]]
+  )
   Respond(Json, @async.Queue[Result[(Json, Int), DshError]])
   ListInteractions(@async.Queue[Result[Json, DshError]])
 }
+
+///|
+/// The socket generation and Workspace-removal revision at which one HTTP
+/// request entered the actor. Together they prevent a list captured before a
+/// host removal event from restoring the grants that event just revoked.
+pub(all) struct DshConnectionRevision {
+  connection : Int
+  workspaces : Int
+} derive(Debug, Eq)
 
 ///|
 priv enum DshEvent {
@@ -184,6 +197,7 @@ struct Actor {
   wake : @async.Queue[Unit]
   mut state : ConnectionState
   mut generation : Int
+  mut workspace_revision : Int
   mut next_rpc_id : Int
   interactions : PendingInteractionRegistry
 }
@@ -195,6 +209,7 @@ pub fn Actor::Actor() -> Actor {
     wake: Queue(kind=Blocking(ActorWakeCapacity)),
     state: Starting,
     generation: 0,
+    workspace_revision: 0,
     next_rpc_id: 0,
     interactions: PendingInteractionRegistry(),
   }
@@ -223,8 +238,8 @@ pub async fn Actor::call(
   self : Actor,
   method_~ : String,
   payload~ : Json,
-) -> (Json, Int) {
-  let reply : @async.Queue[Result[(Json, Int), DshError]] = Queue(
+) -> (Json, DshConnectionRevision) {
+  let reply : @async.Queue[Result[(Json, DshConnectionRevision), DshError]] = Queue(
     kind=Blocking(1),
   )
   self.inputs.put(Call(method_, payload, reply))
@@ -271,6 +286,7 @@ pub async fn Actor::interactions(self : Actor) -> Json {
 pub async fn Actor::run(
   self : Actor,
   emit : (String, Json) -> Unit,
+  invalidate_workspaces~ : async (Int, Int) -> Unit,
   revoke_workspaces~ : async (Int) -> Unit,
   release_worktree~ : async (String) -> Unit,
 ) -> Unit {
@@ -287,6 +303,7 @@ pub async fn Actor::run(
         group,
         pending,
         emit,
+        invalidate_workspaces~,
         revoke_workspaces~,
         release_worktree~,
       )
@@ -300,11 +317,13 @@ async fn[G] Actor::run_connection(
   group : @async.TaskGroup[G],
   pending : ActorInput?,
   emit : (String, Json) -> Unit,
+  invalidate_workspaces~ : async (Int, Int) -> Unit,
   revoke_workspaces~ : async (Int) -> Unit,
   release_worktree~ : async (String) -> Unit,
 ) -> Unit {
   self.state = Starting
   self.generation += 1
+  self.workspace_revision = 0
   let generation = self.generation
   // Requests from an older WebSocket generation cannot be answered on this
   // connection. The new mux baseline will repopulate still-pending requests.
@@ -367,7 +386,13 @@ async fn[G] Actor::run_connection(
     match next {
       Input(input) => connection.dispatch_input(group, self, generation, input)
       Event(Frame(stream, message)) =>
-        self.publish_frame(stream, message, emit, release_worktree~)
+        self.publish_frame(
+          stream,
+          message,
+          emit,
+          invalidate_workspaces~,
+          release_worktree~,
+        )
       Disconnected => break
     }
   }
@@ -378,13 +403,15 @@ async fn[G] Actor::run_connection(
 ///|
 /// Apply host-owned lifecycle effects before the renderer observes a frame.
 /// A removed dsh conversation releases its Desktop worktree row without
-/// deleting the checkout, making later explicit cleanup use the normal dirty
-/// confirmation path.
+/// deleting the checkout. A removed Workspace immediately invalidates the
+/// current generation's dsh grants; the following workspace.list may restore
+/// only the memberships that remain.
 async fn Actor::publish_frame(
   self : Actor,
   stream : String,
   message : Json,
   emit : (String, Json) -> Unit,
+  invalidate_workspaces~ : async (Int, Int) -> Unit,
   release_worktree~ : async (String) -> Unit,
 ) -> Unit {
   if stream == "mux" {
@@ -392,21 +419,32 @@ async fn Actor::publish_frame(
   }
   if stream == "host" &&
     message is Object(fields) &&
-    fields.get("payload") is Some(Object(payload)) &&
-    @jsonx.json_text(payload, "type") == Some("host/session-removed") &&
-    @jsonx.json_text(payload, "sessionId") is Some(session_id) {
-    release_worktree(session_id) catch {
-      error if @async.is_being_cancelled() => raise error
-      error =>
-        // Registry cleanup is best-effort at this event boundary. Losing the
-        // actor would also skip the removal event and later Workspace grant
-        // revocation, leaving every subsequent request without a consumer.
-        @xlog.error(category="dsh") <?
-          {
-            "event": "dsh_worktree_release_failed",
-            "session_id": session_id,
-            "error": "\{error}",
+    fields.get("payload") is Some(Object(payload)) {
+    match @jsonx.json_text(payload, "type") {
+      Some("host/session-removed") => {
+        if @jsonx.json_text(payload, "sessionId") is Some(session_id) {
+          release_worktree(session_id) catch {
+            error if @async.is_being_cancelled() => raise error
+            error =>
+              // Registry cleanup is best-effort at this event boundary.
+              // Losing the actor would also skip the removal event and later
+              // grant revocation, leaving subsequent requests unconsumed.
+              @xlog.error(category="dsh") <?
+                {
+                  "event": "dsh_worktree_release_failed",
+                  "session_id": session_id,
+                  "error": "\{error}",
+                }
           }
+        }
+        self.workspace_revision += 1
+        invalidate_workspaces(self.generation, self.workspace_revision)
+      }
+      Some("host/workspace-removed") => {
+        self.workspace_revision += 1
+        invalidate_workspaces(self.generation, self.workspace_revision)
+      }
+      _ => ()
     }
   }
   emit("dsh.event", {
@@ -457,7 +495,9 @@ async fn Actor::next_step(
 fn ActorInput::reject(self : ActorInput, error : DshError) -> Unit {
   error.log()
   match self {
-    Call(_, _, reply) | Respond(_, reply) =>
+    Call(_, _, reply) =>
+      (reply.try_put(Err(error)) catch { _ => false }) |> ignore
+    Respond(_, reply) =>
       (reply.try_put(Err(error)) catch { _ => false }) |> ignore
     ListInteractions(reply) =>
       (reply.try_put(Err(error)) catch { _ => false }) |> ignore
@@ -476,8 +516,12 @@ fn[G] Connection::dispatch_input(
     Call(method_, payload, reply) => {
       actor.next_rpc_id += 1
       let rpc_id = "openseek-desktop-\{actor.next_rpc_id}"
+      let revision : DshConnectionRevision = {
+        connection: generation,
+        workspaces: actor.workspace_revision,
+      }
       group.spawn_bg(allow_failure=true, () => {
-        let outcome : Result[(Json, Int), DshError] = try
+        let outcome : Result[(Json, DshConnectionRevision), DshError] = try
           self.request(method_~, rpc_id~, payload~)
         catch {
           error => {
@@ -494,7 +538,7 @@ fn[G] Connection::dispatch_input(
             Err(failure)
           }
         } noraise {
-          value => Ok((value, generation))
+          value => Ok((value, revision))
         }
         (reply.try_put(outcome) catch { _ => false }) |> ignore
       })
@@ -575,7 +619,7 @@ async test "dsh actor tracks pending interactions and consumes buffered commands
   })
   let events : @async.Queue[DshEvent] = Queue(kind=Blocking(1))
   let disconnects : @async.Queue[Unit] = Queue(kind=Blocking(1))
-  let reply : @async.Queue[Result[(Json, Int), DshError]] = Queue(
+  let reply : @async.Queue[Result[(Json, DshConnectionRevision), DshError]] = Queue(
     kind=Blocking(1),
   )
   actor.inputs.put(Call("session.list", {}, reply))
@@ -614,8 +658,10 @@ test "dsh actor removes only interactions with accepted response receipts" {
 ///|
 async test "dsh actor releases a removed session before publishing its event" {
   let actor = Actor()
+  actor.generation = 4
   let order : Array[String] = []
   let released : @async.Queue[String] = Queue(kind=Blocking(1))
+  let invalidated : @async.Queue[(Int, Int)] = Queue(kind=Blocking(1))
   actor.publish_frame(
     "host",
     {
@@ -623,13 +669,18 @@ async test "dsh actor releases a removed session before publishing its event" {
       "payload": { "type": "host/session-removed", "sessionId": "session-1" },
     },
     (method_, _) => order.push(method_),
+    invalidate_workspaces=async fn(generation, revision) {
+      invalidated.put((generation, revision))
+      order.push("invalidated")
+    },
     release_worktree=async fn(session_id) {
       released.put(session_id)
       order.push("released:" + session_id)
     },
   )
   assert_eq(released.get(), "session-1")
-  assert_eq(order, ["released:session-1", "dsh.event"])
+  assert_eq(invalidated.get(), (4, 1))
+  assert_eq(order, ["released:session-1", "invalidated", "dsh.event"])
 }
 
 ///|
@@ -643,11 +694,38 @@ async test "dsh actor publishes session removal after worktree release failure" 
       "payload": { "type": "host/session-removed", "sessionId": "session-1" },
     },
     (method_, _) => published.push(method_),
+    invalidate_workspaces=fn(_, _) {  },
     release_worktree=_ => {
       raise RequestFailed("release-worktree", "registry is read-only")
     },
   )
   assert_eq(published, ["dsh.event"])
+}
+
+///|
+async test "dsh actor invalidates grants before publishing workspace removal" {
+  let actor = Actor()
+  actor.generation = 9
+  let order : Array[String] = []
+  let invalidated : @async.Queue[(Int, Int)] = Queue(kind=Blocking(1))
+  actor.publish_frame(
+    "host",
+    {
+      "rpcId": "host-workspace-1",
+      "payload": {
+        "type": "host/workspace-removed",
+        "workspaceId": "workspace-1",
+      },
+    },
+    (method_, _) => order.push(method_),
+    invalidate_workspaces=async fn(generation, revision) {
+      invalidated.put((generation, revision))
+      order.push("invalidated:\{generation}:\{revision}")
+    },
+    release_worktree=fn(_) {  },
+  )
+  assert_eq(invalidated.get(), (9, 1))
+  assert_eq(order, ["invalidated:9:1", "dsh.event"])
 }
 
 ///|

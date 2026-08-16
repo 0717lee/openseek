@@ -476,6 +476,48 @@ test "worktree creation accepts exactly representable owner namespaces" {
 }
 
 ///|
+test "dsh worktree release payload has an explicit three-field codec" {
+  let raw : Json = {
+    "workspace": "/work/project",
+    "name": "wt-1",
+    "dsh_session": "session-dsh-1",
+    "futureMetadata": true,
+  }
+  let payload : @protocol.WorktreeReleaseDshPayload = @json.from_json(raw)
+  assert_eq(payload.workspace, "/work/project")
+  assert_eq(payload.name, "wt-1")
+  assert_eq(payload.dsh_session, "session-dsh-1")
+  @debug.assert_eq(payload.to_json(), {
+    "workspace": "/work/project",
+    "name": "wt-1",
+    "dsh_session": "session-dsh-1",
+  })
+  let null_rejected = try {
+    let _ : @protocol.WorktreeReleaseDshPayload = @json.from_json({
+      "workspace": "/work/project",
+      "name": "wt-1",
+      "dsh_session": null,
+    })
+  } catch {
+    _ => true
+  } noraise {
+    _ => false
+  }
+  assert_true(null_rejected)
+  let missing_rejected = try {
+    let _ : @protocol.WorktreeReleaseDshPayload = @json.from_json({
+      "workspace": "/work/project",
+      "name": "wt-1",
+    })
+  } catch {
+    _ => true
+  } noraise {
+    _ => false
+  }
+  assert_true(missing_rejected)
+}
+
+///|
 test "Git changes replies preserve review identities and accept legacy omission" {
   let reply : @protocol.GitChangesReply = {
     repository: true,
