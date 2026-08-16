@@ -334,6 +334,40 @@ pub fn update(
       state.with_reply(dispatch, kind, value)
     }
     Failed(kind~, message~) => {
+      if kind
+        is DshPromptMoveReply(
+          session_id~,
+          generation~,
+          worktree_path~,
+          draft~,
+          ..
+        ) {
+        if state.prompt_generation != generation {
+          return (@cmd.none, state)
+        }
+        // A lost HTTP response does not say whether dsh committed the move.
+        // Re-read its authoritative Workspace membership: the existing
+        // prompt-workspaces stage continues the prompt when the session is in
+        // this checkout, and conservatively retains the host owner otherwise.
+        let verify = DshPromptWorkspacesReply(
+          session_id~,
+          generation~,
+          worktree_path~,
+          draft~,
+        ).request(dispatch, "workspace.list", {})
+        return (
+          verify,
+          if state.active_id == Some(session_id) {
+            {
+              ..state,
+              loading: true,
+              notice: "Verifying whether DeepSeek Harness moved the conversation…",
+            }
+          } else {
+            state
+          },
+        )
+      }
       let cleanup_cmd = match kind.failed_worktree() {
         Some((session_id, generation, project, name)) =>
           state.release_failed_worktree(
@@ -3588,6 +3622,52 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
   assert_eq(cleanup_failed.prompt_pending_session, None)
   assert_false(cleanup_failed.loading)
   assert_true(cleanup_failed.notice.contains("worktree release also failed"))
+  let (_, verifying_lost_move_reply) = update(
+    dispatch,
+    Failed(
+      kind=DshPromptMoveReply(
+        session_id="session-1",
+        generation=1,
+        project="/work/project",
+        worktree_name="wt-1",
+        worktree_path="/work/project/.worktrees/wt-1",
+        draft={ task: "inspect this project", mentions: [] },
+      ),
+      message="move response was lost",
+    ),
+    registered,
+  )
+  assert_eq(
+    verifying_lost_move_reply.notice,
+    "Verifying whether DeepSeek Harness moved the conversation…",
+  )
+  assert_eq(verifying_lost_move_reply.prompt_pending_session, Some("session-1"))
+  assert_true(verifying_lost_move_reply.loading)
+  let (_, rejected_move) = update(
+    dispatch,
+    Reply(
+      kind=DshPromptMoveReply(
+        session_id="session-1",
+        generation=1,
+        project="/work/project",
+        worktree_name="wt-1",
+        worktree_path="/work/project/.worktrees/wt-1",
+        draft={ task: "inspect this project", mentions: [] },
+      ),
+      value={
+        "type": "server-response",
+        "rpcId": "move-rejected",
+        "result": {
+          "ok": false,
+          "error": { "code": "move-rejected", "message": "not movable" },
+        },
+      },
+    ),
+    registered,
+  )
+  assert_eq(rejected_move.notice, "move-rejected: not movable")
+  assert_eq(rejected_move.prompt_pending_session, Some("session-1"))
+  assert_true(rejected_move.loading)
   let registered_navigated = {
     ..registered,
     active_id: Some("session-2"),

@@ -437,9 +437,10 @@ fn DshReplyKind::prompt_origin(self : DshReplyKind) -> (String, Int)? {
 }
 
 ///|
-/// Only failures before dsh confirms the session move abandon the host binding.
-/// Later Workspace-list or prompt failures leave an already-adopted checkout
-/// attached so the original conversation can retry normally.
+/// Only definitive dsh business failures before the session move abandon the
+/// host binding. `update` intercepts an ambiguous move transport failure and
+/// verifies Workspace membership first; later Workspace-list or prompt
+/// failures leave the checkout attached so the conversation can retry.
 fn DshReplyKind::failed_worktree(
   self : DshReplyKind,
 ) -> (String, Int, String, String)? {
