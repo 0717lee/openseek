@@ -462,13 +462,24 @@ fn State::with_reply(
       }
       return (@cmd.none, { ..self, response_pending_rpcs, })
     }
+    let generation = receipt.generation().unwrap()
     let pending = self.pending.filter(item => item.rpc_id() != rpc_id)
+    let settled_interactions = self.settled_interactions.filter(item => {
+      item.rpc_id != rpc_id
+    })
+    settled_interactions.push({ rpc_id, generation })
     return (
       @cmd.none,
       if self.active_id == Some(session_id) {
-        { ..self, pending, response_pending_rpcs, loading: false }
+        {
+          ..self,
+          pending,
+          settled_interactions,
+          response_pending_rpcs,
+          loading: false,
+        }
       } else {
-        { ..self, pending, response_pending_rpcs }
+        { ..self, pending, settled_interactions, response_pending_rpcs }
       },
     )
   }
@@ -960,8 +971,13 @@ fn State::with_pending_snapshot(
     commands.push(command)
     next = state
   }
+  // Once an authoritative snapshot reaches a settlement generation, its
+  // absence is durable and the global generation rejects older events.
   next = {
     ..next,
+    settled_interactions: next.settled_interactions.filter(item => {
+      item.generation > generation
+    }),
     response_pending_rpcs: next.response_pending_rpcs.filter(rpc_id => {
       next.pending.iter().any(item => item.rpc_id() == rpc_id)
     }),
@@ -1199,6 +1215,11 @@ fn State::with_event(
       if generation < self.pending_generation {
         return (@cmd.none, self)
       }
+      if self.settled_interactions
+        .iter()
+        .any(item => item.rpc_id == rpc_id && generation <= item.generation) {
+        return (@cmd.none, self)
+      }
       guard @jsonx.json_text(payload, "sessionId") is Some(session_id) &&
         @jsonx.json_text(payload, "approvalId") is Some(approval_id) &&
         @jsonx.json_text(payload, "toolName") is Some(tool_name) else {
@@ -1214,7 +1235,17 @@ fn State::with_event(
           reason=@jsonx.json_text(payload, "reason").unwrap_or(""),
         ),
       )
-      (@cmd.none, { ..self, pending, pending_generation: generation })
+      (
+        @cmd.none,
+        {
+          ..self,
+          pending,
+          pending_generation: generation,
+          settled_interactions: self.settled_interactions.filter(item => {
+            item.rpc_id != rpc_id
+          }),
+        },
+      )
     }
     "approval/resolved" => {
       let generation = @jsonx.json_int(wrapper, "generation").unwrap_or(
@@ -1258,6 +1289,11 @@ fn State::with_event(
       if generation < self.pending_generation {
         return (@cmd.none, self)
       }
+      if self.settled_interactions
+        .iter()
+        .any(item => item.rpc_id == rpc_id && generation <= item.generation) {
+        return (@cmd.none, self)
+      }
       guard @jsonx.json_text(payload, "sessionId") is Some(session_id) &&
         payload.get("questions") is Some(Array(values)) else {
         return (@cmd.none, self)
@@ -1272,7 +1308,17 @@ fn State::with_event(
       }
       let pending = self.pending.filter(item => item.rpc_id() != rpc_id)
       pending.push(DshQuestions(rpc_id~, session_id~, questions~, answers~))
-      (@cmd.none, { ..self, pending, pending_generation: generation })
+      (
+        @cmd.none,
+        {
+          ..self,
+          pending,
+          pending_generation: generation,
+          settled_interactions: self.settled_interactions.filter(item => {
+            item.rpc_id != rpc_id
+          }),
+        },
+      )
     }
     "question/resolved" => {
       let generation = @jsonx.json_int(wrapper, "generation").unwrap_or(
@@ -1857,12 +1903,40 @@ test "dsh interaction response remains busy through session status events" {
   let (_, settled) = duplicate.with_reply(
     dispatch,
     DshResponseReply(rpc_id="approval-rpc", session_id="session-1"),
-    { "accepted": true },
+    { "receipt": { "accepted": true }, "generation": 2 },
   )
   assert_true(settled.response_pending_rpcs.is_empty())
   assert_true(settled.pending.is_empty())
   assert_false(settled.loading)
   assert_false(settled.busy())
+  // A snapshot captured before acceptance cannot recreate the answered card.
+  let (_, stale_snapshot) = settled.with_reply(dispatch, DshPendingReply, {
+    "data": [
+      {
+        "stream": "mux",
+        "generation": 1,
+        "message": {
+          "rpcId": "approval-rpc",
+          "payload": {
+            "type": "approval/requested",
+            "sessionId": "session-1",
+            "approvalId": "approval-1",
+            "toolName": "write",
+          },
+        },
+      },
+    ],
+    "generation": 1,
+  })
+  assert_true(stale_snapshot.pending.is_empty())
+  assert_eq(stale_snapshot.settled_interactions.length(), 1)
+  let (_, current_snapshot) = stale_snapshot.with_reply(
+    dispatch,
+    DshPendingReply,
+    { "data": [], "generation": 2 },
+  )
+  assert_true(current_snapshot.settled_interactions.is_empty())
+  assert_eq(current_snapshot.pending_generation, 2)
 }
 
 ///|
@@ -2229,7 +2303,7 @@ test "background dsh interaction receipts preserve the active page" {
   let (_, accepted) = state.with_reply(
     dispatch,
     DshResponseReply(rpc_id="rpc-a", session_id="session-a"),
-    { "accepted": true },
+    { "receipt": { "accepted": true }, "generation": 3 },
   )
   assert_true(accepted.pending.is_empty())
   assert_true(accepted.response_pending_rpcs.is_empty())
@@ -2238,7 +2312,10 @@ test "background dsh interaction receipts preserve the active page" {
   let (_, rejected) = state.with_reply(
     dispatch,
     DshResponseReply(rpc_id="rpc-a", session_id="session-a"),
-    { "accepted": false, "reason": "stale request" },
+    {
+      "receipt": { "accepted": false, "reason": "stale request" },
+      "generation": 2,
+    },
   )
   assert_eq(rejected.pending.length(), 1)
   assert_true(rejected.response_pending_rpcs.is_empty())
@@ -2430,10 +2507,12 @@ test "dsh single-select answers keep option and custom text exclusive" {
 
 ///|
 test "dsh response and prompt replies preserve unrelated state" {
-  assert_true(DshResponseReceipt({ "accepted": true }).accepted())
+  assert_true(
+    DshResponseReceipt({ "receipt": { "accepted": true }, "generation": 4 }).accepted(),
+  )
   let rejected = DshResponseReceipt({
-    "accepted": false,
-    "reason": "bad-response",
+    "receipt": { "accepted": false, "reason": "bad-response" },
+    "generation": 4,
   })
   assert_false(rejected.accepted())
   assert_eq(

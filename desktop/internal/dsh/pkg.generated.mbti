@@ -10,7 +10,7 @@ type Actor
 pub fn Actor::Actor() -> Self
 pub async fn Actor::call(Self, method_~ : String, payload~ : Json) -> (Json, Int)
 pub async fn Actor::interactions(Self) -> Json
-pub async fn Actor::respond(Self, Json) -> Json
+pub async fn Actor::respond(Self, Json) -> (Json, Int)
 pub async fn Actor::run(Self, (String, Json) -> Unit, revoke_workspaces~ : async (Int) -> Unit, release_worktree~ : async (String) -> Unit) -> Unit
 pub fn Actor::status(Self) -> Json
 

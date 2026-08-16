@@ -765,7 +765,43 @@ pub(all) struct WorktreeCreateReply {
   // repaired its checkout); clients must not treat that row as newly orphaned.
   created : Bool
   worktrees : Array[WorktreeInfo]
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
+
+///|
+pub impl FromJson for WorktreeCreateReply with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected worktree create reply"))
+  }
+  let name = match fields.get("name") {
+    Some(String(value)) => value
+    Some(_) => raise JsonDecodeError((path.add_key("name"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("name"), "missing required field"))
+  }
+  let created = match fields.get("created") {
+    Some(True) => true
+    Some(False) => false
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("created"), "expected boolean"))
+    None =>
+      raise JsonDecodeError((path.add_key("created"), "missing required field"))
+  }
+  let worktrees : Array[WorktreeInfo] = match fields.get("worktrees") {
+    Some(value) => @json.from_json(value, path=path.add_key("worktrees"))
+    None =>
+      raise JsonDecodeError(
+        (path.add_key("worktrees"), "missing required field"),
+      )
+  }
+  // Reply objects tolerate unknown metadata, but every field this frontend
+  // consumes remains required and type-checked above.
+  { name, created, worktrees }
+}
+
+///|
+pub impl ToJson for WorktreeCreateReply with fn to_json(self) {
+  { "name": self.name, "created": self.created, "worktrees": self.worktrees }
+}
 
 ///|
 /// A worktree creation either returns the existing success object or a safe

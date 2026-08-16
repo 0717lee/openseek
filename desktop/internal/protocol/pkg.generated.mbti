@@ -2348,12 +2348,14 @@ pub(all) struct WorktreeCreateReply {
   name : String
   created : Bool
   worktrees : Array[WorktreeInfo]
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+} derive(Eq, @debug.Debug)
 pub fn WorktreeCreateReply::equal(Self, Self) -> Bool
 pub fn WorktreeCreateReply::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
 pub fn WorktreeCreateReply::not_equal(Self, Self) -> Bool
 pub fn WorktreeCreateReply::to_json(Self) -> Json
 pub fn WorktreeCreateReply::to_repr(Self) -> @debug.Repr
+pub impl ToJson for WorktreeCreateReply
+pub impl @json.FromJson for WorktreeCreateReply
 
 pub(all) enum WorktreeCreateResult {
   WorktreeCreatedReply(WorktreeCreateReply)
@@ -2398,7 +2400,9 @@ pub(all) struct WorktreeReleaseDshPayload {
   workspace : String
   name : String
   dsh_session : String
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+} derive(Eq, @debug.Debug)
+pub impl ToJson for WorktreeReleaseDshPayload
+pub impl @json.FromJson for WorktreeReleaseDshPayload
 
 pub(all) struct WorktreeRemovePayload {
   workspace : String

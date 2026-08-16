@@ -121,6 +121,16 @@ priv enum DshPendingInteraction {
 } derive(Eq)
 
 ///|
+/// One accepted response and the actor interaction generation created after
+/// removing it. Until the frontend receives an equally new authoritative
+/// snapshot, this per-RPC marker rejects only stale copies of that interaction
+/// without hiding unrelated requests from the same older snapshot.
+priv struct DshSettledInteraction {
+  rpc_id : String
+  generation : Int
+} derive(Eq)
+
+///|
 priv enum DshReplyKind {
   DshStatusReply
   DshPendingReply
@@ -254,6 +264,7 @@ struct State {
   // Selection and prompt generations keep older request replies from
   // overwriting later navigation or settling a newer send.
   pending_generation : Int
+  settled_interactions : Array[DshSettledInteraction]
   selection_generation : Int
   // Session creation can span workspace.create and session.create. Keep that
   // chain busy independently from status events until its final reply settles.
@@ -289,6 +300,7 @@ pub fn State::State(loading? : Bool = false) -> State {
     draft: "",
     pending: [],
     pending_generation: 0,
+    settled_interactions: [],
     selection_generation: 0,
     creation_pending: false,
     prompt_generation: 0,
@@ -628,15 +640,28 @@ priv struct DshResponseReceipt(Json)
 
 ///|
 fn DshResponseReceipt::accepted(self : DshResponseReceipt) -> Bool {
-  self.0 is Object(fields) && fields.get("accepted") is Some(True)
+  self.0 is Object(fields) &&
+  @jsonx.json_int(fields, "generation") is Some(_) &&
+  fields.get("receipt") is Some(Object(receipt)) &&
+  receipt.get("accepted") is Some(True)
+}
+
+///|
+fn DshResponseReceipt::generation(self : DshResponseReceipt) -> Int? {
+  guard self.0 is Object(fields) else { return None }
+  @jsonx.json_int(fields, "generation")
 }
 
 ///|
 fn DshResponseReceipt::error(self : DshResponseReceipt) -> String {
-  guard self.0 is Object(fields) else {
+  guard self.0 is Object(fields) &&
+    @jsonx.json_int(fields, "generation") is Some(_) &&
+    fields.get("receipt") is Some(Object(receipt)) else {
     return "DeepSeek Harness returned a malformed response receipt"
   }
-  let reason = @jsonx.json_text(fields, "reason").unwrap_or("response-rejected")
+  let reason = @jsonx.json_text(receipt, "reason").unwrap_or(
+    "response-rejected",
+  )
   "DeepSeek Harness rejected the response: " + reason
 }
 

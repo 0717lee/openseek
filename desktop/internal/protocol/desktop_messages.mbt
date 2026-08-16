@@ -230,7 +230,50 @@ pub(all) struct WorktreeReleaseDshPayload {
   workspace : String
   name : String
   dsh_session : String
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
+
+///|
+pub impl FromJson for WorktreeReleaseDshPayload with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected dsh worktree release payload"))
+  }
+  let workspace = match fields.get("workspace") {
+    Some(String(value)) => value
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("workspace"), "expected string"))
+    None =>
+      raise JsonDecodeError(
+        (path.add_key("workspace"), "missing required field"),
+      )
+  }
+  let name = match fields.get("name") {
+    Some(String(value)) => value
+    Some(_) => raise JsonDecodeError((path.add_key("name"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("name"), "missing required field"))
+  }
+  let dsh_session = match fields.get("dsh_session") {
+    Some(String(value)) => value
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("dsh_session"), "expected string"))
+    None =>
+      raise JsonDecodeError(
+        (path.add_key("dsh_session"), "missing required field"),
+      )
+  }
+  // Unknown fields are deliberately ignored; these three required fields
+  // completely identify the non-destructive release operation.
+  { workspace, name, dsh_session }
+}
+
+///|
+pub impl ToJson for WorktreeReleaseDshPayload with fn to_json(self) {
+  {
+    "workspace": self.workspace,
+    "name": self.name,
+    "dsh_session": self.dsh_session,
+  }
+}
 
 ///|
 pub(all) struct InstallSkillPayload {

@@ -1011,8 +1011,12 @@ pub fn local_endpoints(state : ApiState) -> Array[@endpoint.Endpoint] {
       guard result.get("ok") is Some(True) || result.get("ok") is Some(False) else {
         raise @host.PayloadError("malformed dsh client-response")
       }
+      let (receipt, generation) = state.dsh.respond(message)
+      // Couple the receipt to the post-response interaction generation. A
+      // pending snapshot captured before acceptance must not recreate controls
+      // after the frontend removes the accepted interaction.
       let reply : @protocol.DshValueReply = {
-        value: state.dsh.respond(message),
+        value: { "receipt": receipt, "generation": generation },
       }
       reply
     }),

@@ -39,7 +39,7 @@ priv enum ConnectionState {
 ///|
 priv enum ActorInput {
   Call(String, Json, @async.Queue[Result[(Json, Int), DshError]])
-  Respond(Json, @async.Queue[Result[Json, DshError]])
+  Respond(Json, @async.Queue[Result[(Json, Int), DshError]])
   ListInteractions(@async.Queue[Result[Json, DshError]])
 }
 
@@ -237,8 +237,12 @@ pub async fn Actor::call(
 
 ///|
 /// Queue one complete client-response for a pending dsh approval or question.
-pub async fn Actor::respond(self : Actor, message : Json) -> Json {
-  let reply : @async.Queue[Result[Json, DshError]] = Queue(kind=Blocking(1))
+/// The returned registry generation is captured after an accepted response
+/// removes its interaction, so the page can reject an older in-flight snapshot.
+pub async fn Actor::respond(self : Actor, message : Json) -> (Json, Int) {
+  let reply : @async.Queue[Result[(Json, Int), DshError]] = Queue(
+    kind=Blocking(1),
+  )
   self.inputs.put(Respond(message, reply))
   self.signal()
   match reply.get() {
@@ -441,9 +445,9 @@ async fn Actor::next_step(
 fn ActorInput::reject(self : ActorInput, error : DshError) -> Unit {
   error.log()
   match self {
-    Call(_, _, reply) =>
+    Call(_, _, reply) | Respond(_, reply) =>
       (reply.try_put(Err(error)) catch { _ => false }) |> ignore
-    Respond(_, reply) | ListInteractions(reply) =>
+    ListInteractions(reply) =>
       (reply.try_put(Err(error)) catch { _ => false }) |> ignore
   }
 }
@@ -485,7 +489,9 @@ fn[G] Connection::dispatch_input(
     }
     Respond(message, reply) =>
       group.spawn_bg(allow_failure=true, () => {
-        let outcome : Result[Json, DshError] = try self.respond(message) catch {
+        let outcome : Result[(Json, Int), DshError] = try
+          self.respond(message)
+        catch {
           error => {
             let detail = if @async.is_being_cancelled() {
               "dsh connection closed"
@@ -501,7 +507,7 @@ fn[G] Connection::dispatch_input(
             // Publish removal before returning the accepted receipt so a page
             // attach cannot replay controls that dsh has already consumed.
             actor.interactions.remove_accepted_response(message, value)
-            Ok(value)
+            Ok((value, actor.interactions.generation))
           }
         }
         (reply.try_put(outcome) catch { _ => false }) |> ignore
