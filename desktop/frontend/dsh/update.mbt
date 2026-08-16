@@ -665,14 +665,9 @@ fn State::with_reply(
         },
         if kind is DshPromptWorkspacesReply(session_id~, ..) &&
           self.active_id != Some(session_id) {
-          { ..self, connection: DshReady, workspaces }
+          { ..self, workspaces, }
         } else {
-          {
-            ..self,
-            connection: DshReady,
-            workspaces,
-            loading: kind is DshPromptWorkspacesReply(..),
-          }
+          { ..self, workspaces, loading: kind is DshPromptWorkspacesReply(..) }
         },
       )
     }
@@ -752,7 +747,6 @@ fn State::with_reply(
       }
       let next = {
         ..self,
-        connection: DshReady,
         sessions,
         active_id,
         selection_generation: if selection_changed {
@@ -1833,8 +1827,11 @@ fn State::with_question_custom(
 
 ///|
 test "dsh workspace membership supplies the active editor root" {
+  // Workspace baselines project paths only inside an already Ready
+  // connection; the list reply itself is not a connection transition.
   let state = {
     ..State(),
+    connection: DshReady,
     sessions: [
       {
         id: "session-1",
@@ -1886,7 +1883,7 @@ test "dsh workspace membership supplies the active editor root" {
 }
 
 ///|
-test "dsh reconnect reply restores workspace state without transcript errors" {
+test "dsh reconnect status restores workspace state without transcript errors" {
   let state = {
     ..State(),
     connection: DshUnavailable("dsh was missing"),
@@ -1897,6 +1894,13 @@ test "dsh reconnect reply restores workspace state without transcript errors" {
   assert_true(retrying.loading)
   assert_eq(retrying.unavailable_message(), Some("dsh was missing"))
   assert_eq(retrying.notice, "")
+  // Connection state belongs exclusively to the revisioned status stream.
+  // The workspace reply may fill its baseline, but must never manufacture a
+  // Ready transition after a later disconnect.
+  let (_, connected) = retrying.with_status(dispatch, {
+    "status": "ready",
+    "revision": 1,
+  })
   let (_, ready) = update(
     dispatch,
     Reply(kind=DshReconnectReply, value={
@@ -1917,7 +1921,7 @@ test "dsh reconnect reply restores workspace state without transcript errors" {
         },
       },
     }),
-    retrying,
+    connected,
   )
   assert_eq(ready.unavailable_message(), None)
   assert_eq(ready.preferred_workspace_id(), Some("workspace-1"))
@@ -1948,6 +1952,68 @@ test "dsh reconnect reply restores workspace state without transcript errors" {
   })
   assert_eq(stale.pending.map(item => item.rpc_id()), ["approval-rpc"])
   assert_eq(stale.pending_generation, 2)
+}
+
+///|
+test "late dsh list replies cannot restore a disconnected page" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let (_, ready) = State().with_status(dispatch, {
+    "status": "ready",
+    "revision": 1,
+  })
+  let (_, disconnected) = ready.with_status(dispatch, {
+    "status": "unavailable",
+    "message": "socket closed",
+    "revision": 2,
+  })
+  let (_, workspace_reply) = disconnected.with_reply(
+    dispatch,
+    DshWorkspacesReply,
+    {
+      "type": "server-response",
+      "rpcId": "late-workspaces",
+      "result": {
+        "ok": true,
+        "value": {
+          "items": [
+            {
+              "workspaceId": "workspace-1",
+              "title": "Project",
+              "path": "/work/project",
+              "sessionIds": ["session-1"],
+            },
+          ],
+          "archivedSessionIds": [],
+        },
+      },
+    },
+  )
+  assert_eq(workspace_reply.unavailable_message(), Some("socket closed"))
+  assert_true(workspace_reply.active_workspace_path() is None)
+  let (_, session_reply) = workspace_reply.with_reply(
+    dispatch,
+    DshSessionsReply(session_revision=0),
+    {
+      "type": "server-response",
+      "rpcId": "late-sessions",
+      "result": {
+        "ok": true,
+        "value": {
+          "items": [
+            {
+              "sessionId": "session-1",
+              "title": "Session 1",
+              "cwd": "/work/project",
+              "running": false,
+              "blank": false,
+            },
+          ],
+        },
+      },
+    },
+  )
+  assert_eq(session_reply.unavailable_message(), Some("socket closed"))
+  assert_true(session_reply.active_workspace_path() is None)
 }
 
 ///|

@@ -44,6 +44,13 @@ pub(all) struct WorktreeHost {
 const WorktreesFile = "worktrees.json"
 
 ///|
+/// Detached workspaces remain user-owned directories, so the only durable
+/// locator Desktop needs is the path of a registry that still contains a dsh
+/// owner. Keeping that small index beside `workspaces.json` lets a later
+/// session-removal event find the registry after a Desktop restart.
+const DetachedDshRegistriesFile = "dsh-detached-worktrees.json"
+
+///|
 const WorktreesDirName = ".worktrees"
 
 ///|
@@ -67,11 +74,79 @@ let worktree_registry_lock : @async.Mutex = Mutex()
 let removed_dsh_sessions : Map[String, Bool] = Map([])
 
 ///|
-/// Detached workspace directories remain on disk, including their Desktop
-/// worktree registries. Remember only registries that currently contain a dsh
-/// owner so a later host/session-removed event can release that row even while
-/// the workspace is absent from the visible workspace list.
-let detached_dsh_worktree_registries : Map[@pathx.Absolute, Bool] = Map([])
+/// The persisted registry locations that remain relevant while their
+/// workspaces are detached. This is an index, not a second ownership record:
+/// every dsh owner still lives only in that workspace's `worktrees.json`.
+priv struct DetachedDshRegistryIndex {
+  workspaces : Array[@pathx.Absolute]
+}
+
+///|
+/// Load the detached index at each lifecycle operation. Avoiding a process
+/// cache is intentional: a Desktop restart must not hide a detached registry
+/// from a later host/session-removed event.
+async fn DetachedDshRegistryIndex::load() -> DetachedDshRegistryIndex {
+  guard @workspaces.global_store_root() is Some(root) else {
+    return { workspaces: [] }
+  }
+  let text = @fsx.try_read_text(root.join(DetachedDshRegistriesFile).to_path()) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => return { workspaces: [] }
+  }
+  guard text is Some(text) else { return { workspaces: [] } }
+  let json = @json.parse(text) catch { _ => return { workspaces: [] } }
+  guard json is Object(fields) && fields.get("workspaces") is Some(Array(items)) else {
+    return { workspaces: [] }
+  }
+  let workspaces : Array[@pathx.Absolute] = []
+  for item in items {
+    guard item is String(path) &&
+      @pathx.Path(path).to_absolute() is Some(workspace) else {
+      continue
+    }
+    if !workspaces.contains(workspace) {
+      workspaces.push(workspace)
+    }
+  }
+  { workspaces, }
+}
+
+///|
+/// Publish one complete detached index atomically. A failed or cancelled
+/// staging write leaves the previous locator set intact.
+async fn DetachedDshRegistryIndex::save(
+  self : DetachedDshRegistryIndex,
+) -> Unit {
+  guard @workspaces.global_store_root() is Some(root) else {
+    raise WorktreeError(
+      "cannot determine a session root; set OPENSEEK_SESSION_ROOT",
+    )
+  }
+  @fsx.ensure_dir(root.to_path()) catch {
+    error if @async.is_being_cancelled() => raise error
+    error => raise WorktreeError("could not create \{root}: \{error}")
+  }
+  let registry : Json = {
+    "workspaces": self.workspaces.map(path => path.0).to_json(),
+  }
+  let target = root.join(DetachedDshRegistriesFile)
+  let temp = root.join(DetachedDshRegistriesFile + ".tmp")
+  @fs.write_file(
+    temp.to_string(),
+    registry.stringify(indent=2),
+    create_mode=CreateOrTruncate,
+  ) catch {
+    error if @async.is_being_cancelled() => raise error
+    error =>
+      raise WorktreeError("could not stage detached dsh registries: \{error}")
+  }
+  @async.protect_from_cancel(() => {
+    @fs.rename(temp.to_string(), target.to_string()) catch {
+      error =>
+        raise WorktreeError("could not save detached dsh registries: \{error}")
+    }
+  })
+}
 
 ///|
 priv struct WorktreeEntry {
@@ -778,7 +853,11 @@ pub async fn retain_dsh_registry_for_detach(
   if read_worktrees_unlocked(workspace)
     .iter()
     .any(entry => entry.dsh_session is Some(_)) {
-    detached_dsh_worktree_registries[workspace] = true
+    let index = DetachedDshRegistryIndex::load()
+    if !index.workspaces.contains(workspace) {
+      index.workspaces.push(workspace)
+      index.save()
+    }
   }
 }
 
@@ -797,11 +876,13 @@ pub async fn release_dsh_session(
   defer worktree_registry_lock.release()
   removed_dsh_sessions[session_id] = true
   let workspaces = @workspaces.registered()
-  for workspace in detached_dsh_worktree_registries.keys().to_array() {
+  let detached = DetachedDshRegistryIndex::load()
+  for workspace in detached.workspaces {
     if !workspaces.contains(workspace) {
       workspaces.push(workspace)
     }
   }
+  let retained_detached : Array[@pathx.Absolute] = []
   for workspace in workspaces {
     let entries = read_worktrees_unlocked(workspace)
     let mut found = false
@@ -822,9 +903,16 @@ pub async fn release_dsh_session(
         )
       })
     }
-    if released.iter().all(entry => entry.dsh_session is None) {
-      detached_dsh_worktree_registries.remove(workspace)
+    if detached.workspaces.contains(workspace) &&
+      released.iter().any(entry => entry.dsh_session is Some(_)) {
+      retained_detached.push(workspace)
     }
+  }
+  if retained_detached != detached.workspaces {
+    let next_index : DetachedDshRegistryIndex = {
+      workspaces: retained_detached,
+    }
+    next_index.save()
   }
 }
 
@@ -1863,6 +1951,12 @@ async test "dsh session release updates a detached worktree registry" {
   )
   retain_dsh_registry_for_detach(repo)
   ignore(@workspaces.remove(repo.to_string(), fn(_) {  }))
+  // The release operation below reloads this file instead of consulting a
+  // process cache, which is the same lookup path used after Desktop restarts.
+  guard DetachedDshRegistryIndex::load().workspaces is [persisted] else {
+    fail("expected the detached dsh registry path to be persisted")
+  }
+  assert_eq(persisted, repo)
   let released : Array[WorktreeInfo] = []
   release_dsh_session("session-dsh-detached", (_, worktrees) => {
     released.append(worktrees)
@@ -1871,6 +1965,7 @@ async test "dsh session release updates a detached worktree registry" {
     fail("expected the detached dsh registry to be released")
   }
   assert_eq(released_row.dsh_session, None)
+  assert_true(DetachedDshRegistryIndex::load().workspaces.is_empty())
   ignore(@workspaces.add(repo.to_string(), fn(_) {  }))
   guard list(repo.to_string()).worktrees is [reattached] else {
     fail("expected the worktree after workspace reattachment")
