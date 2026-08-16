@@ -124,6 +124,8 @@ test "dsh snapshot replies select independent ordered lanes" {
     DshPromptWorkspacesReply(
       session_id="session-1",
       generation=1,
+      project="/work/project",
+      worktree_name="wt-1",
       worktree_path="/work/project/.worktrees/wt-1",
       draft={ task: "inspect this project", mentions: [] },
     ).ordered_lane(),
@@ -157,6 +159,8 @@ test "dsh snapshot replies select independent ordered lanes" {
     DshPromptWorkspacesReply(
       session_id="session-1",
       generation=1,
+      project="/work/project",
+      worktree_name="wt-1",
       worktree_path="/work/project/.worktrees/wt-1",
       draft={ task: "inspect this project", mentions: [] },
     ).failed_worktree()
@@ -342,27 +346,56 @@ fn State::create_worktree(
   let draft : @composer.Draft = { task: self.draft, mentions: self.mentions }
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
+      let payload : @protocol.WorktreeCreatePayload = {
+        workspace: project,
+        session: None,
+        codex_thread: None,
+        dsh_session: Some(session_id),
+      }
       let result : @protocol.WorktreeCreateResult = @interop.bridge_request(
         @interop.ChannelId::Local,
         @commands.worktree_create,
-        {
-          workspace: project,
-          session: None,
-          codex_thread: None,
-          dsh_session: Some(session_id),
-        },
+        payload,
       ) catch {
         error => {
-          scheduler.add(
-            dispatch(
-              Failed(
-                kind=DshPromptReply(session_id~, draft~, generation~),
-                message="worktree setup failed: " +
-                  @interop.bridge_error_text(error),
-              ),
-            ),
-          )
-          return
+          let detail = @interop.bridge_error_text(error)
+          match @interop.bridge_failure(error) {
+            Refused | Unsent => {
+              scheduler.add(
+                dispatch(
+                  Failed(
+                    kind=DshPromptReply(session_id~, draft~, generation~),
+                    message="worktree setup failed: " + detail,
+                  ),
+                ),
+              )
+              return
+            }
+            Unknown =>
+              // The host may have committed before its reply was lost. Repeat
+              // the same owner-aware operation as a reconciliation read: the
+              // native registry uses dsh session id as its idempotency key and
+              // returns the existing checkout instead of creating another.
+              @interop.bridge_request(
+                @interop.ChannelId::Local,
+                @commands.worktree_create,
+                payload,
+              ) catch {
+                retry_error => {
+                  scheduler.add(
+                    dispatch(
+                      Failed(
+                        kind=DshPromptReply(session_id~, draft~, generation~),
+                        message="worktree setup could not be reconciled (" +
+                          @interop.bridge_error_text(retry_error) +
+                          "); the prompt was not sent",
+                      ),
+                    ),
+                  )
+                  return
+                }
+              }
+          }
         }
       }
       let reply = match result {

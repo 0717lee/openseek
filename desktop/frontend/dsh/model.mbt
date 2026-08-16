@@ -224,6 +224,8 @@ priv enum DshReplyKind {
   DshPromptWorkspacesReply(
     session_id~ : String,
     generation~ : Int,
+    project~ : String,
+    worktree_name~ : String,
     worktree_path~ : String,
     draft~ : @composer.Draft
   )
@@ -439,8 +441,9 @@ fn DshReplyKind::prompt_origin(self : DshReplyKind) -> (String, Int)? {
 ///|
 /// Only definitive dsh business failures before the session move abandon the
 /// host binding. `update` intercepts an ambiguous move transport failure and
-/// verifies Workspace membership first; later Workspace-list or prompt
-/// failures leave the checkout attached so the conversation can retry.
+/// verifies Workspace membership first. A successful list that proves absence
+/// releases directly; list transport/business errors and later prompt failures
+/// leave the checkout attached so the conversation can retry.
 fn DshReplyKind::failed_worktree(
   self : DshReplyKind,
 ) -> (String, Int, String, String)? {

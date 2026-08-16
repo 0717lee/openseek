@@ -338,9 +338,10 @@ pub fn update(
         is DshPromptMoveReply(
           session_id~,
           generation~,
+          project~,
+          worktree_name~,
           worktree_path~,
-          draft~,
-          ..
+          draft~
         ) {
         if state.prompt_generation != generation {
           return (@cmd.none, state)
@@ -348,10 +349,13 @@ pub fn update(
         // A lost HTTP response does not say whether dsh committed the move.
         // Re-read its authoritative Workspace membership: the existing
         // prompt-workspaces stage continues the prompt when the session is in
-        // this checkout, and conservatively retains the host owner otherwise.
+        // this checkout, and releases the host owner only when the list proves
+        // the move did not happen.
         let verify = DshPromptWorkspacesReply(
           session_id~,
           generation~,
+          project~,
+          worktree_name~,
           worktree_path~,
           draft~,
         ).request(dispatch, "workspace.list", {})
@@ -658,26 +662,36 @@ fn State::with_reply(
           }
         }
       }
-      if kind is DshPromptWorkspacesReply(session_id~, worktree_path~, ..) &&
+      if kind
+        is DshPromptWorkspacesReply(
+          session_id~,
+          generation~,
+          project~,
+          worktree_name~,
+          worktree_path~,
+          ..
+        ) &&
         !workspaces
         .iter()
         .any(workspace => {
           workspace.path == worktree_path &&
           workspace.session_ids.contains(session_id)
         }) {
+        let cleanup = self.release_failed_worktree(
+          dispatch, session_id, generation, project, worktree_name,
+        )
         return if self.active_id == Some(session_id) {
           (
-            @cmd.none,
+            cleanup,
             {
               ..self,
               workspaces,
-              prompt_pending_session: None,
-              loading: false,
+              loading: true,
               notice: "DeepSeek Harness did not move the conversation into its worktree Workspace",
             },
           )
         } else {
-          (@cmd.none, { ..self, workspaces, prompt_pending_session: None })
+          (cleanup, { ..self, workspaces, })
         }
       }
       (
@@ -1007,7 +1021,7 @@ fn State::with_reply(
       session_id~,
       generation~,
       project~,
-      worktree_name=_,
+      worktree_name~,
       worktree_path~,
       draft~
     ) =>
@@ -1015,6 +1029,8 @@ fn State::with_reply(
         DshPromptWorkspacesReply(
           session_id~,
           generation~,
+          project~,
+          worktree_name~,
           worktree_path~,
           draft~,
         ).request(dispatch, "workspace.list", {}),
@@ -3879,6 +3895,8 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
       kind=DshPromptWorkspacesReply(
         session_id="session-1",
         generation=1,
+        project="/work/project",
+        worktree_name="wt-1",
         worktree_path="/work/project/.worktrees/wt-1",
         draft={ task: "inspect this project", mentions: [] },
       ),
@@ -4033,6 +4051,8 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
     DshPromptWorkspacesReply(
       session_id="session-1",
       generation=1,
+      project="/work/project",
+      worktree_name="wt-1",
       worktree_path="/work/project/.worktrees/wt-1",
       draft={ task: "inspect this project", mentions: [] },
     ),
@@ -4054,13 +4074,23 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
       },
     },
   )
-  assert_eq(mismatched_workspace.prompt_pending_session, None)
+  assert_eq(mismatched_workspace.prompt_pending_session, Some("session-1"))
+  assert_true(mismatched_workspace.loading)
   assert_true(mismatched_workspace.notice.contains("did not move"))
+  let (_, mismatched_cleaned) = update(
+    dispatch,
+    WorktreeCleanupFinished(session_id="session-1", generation=1, message=None),
+    mismatched_workspace,
+  )
+  assert_eq(mismatched_cleaned.prompt_pending_session, None)
+  assert_false(mismatched_cleaned.loading)
   let (_, prompted) = refreshing_workspaces.with_reply(
     dispatch,
     DshPromptWorkspacesReply(
       session_id="session-1",
       generation=1,
+      project="/work/project",
+      worktree_name="wt-1",
       worktree_path="/work/project/.worktrees/wt-1",
       draft={ task: "inspect this project", mentions: [] },
     ),

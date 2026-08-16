@@ -252,6 +252,13 @@ priv struct WorktreeEntry {
 }
 
 ///|
+/// One decoded registry. Ordinary UI listing may still treat a damaged file
+/// as empty for compatibility, but ownership-changing operations load this
+/// type directly and therefore cannot confuse a read or schema failure with
+/// authoritative absence.
+priv struct WorktreeRegistry(Array[WorktreeEntry])
+
+///|
 /// Persist only concrete owner fields. Registry reads deliberately accept
 /// missing owner fields for hand-edited legacy rows, so writing `null` would
 /// introduce a second representation for the same ownerless state.
@@ -421,21 +428,23 @@ fn valid_worktree_name(name : String) -> Bool {
 }
 
 ///|
-/// The registered worktrees of `workspace`, dropping anything malformed: an
-/// entry without a valid name, branch, and base string self-heals to absent
-/// rather than poisoning every later operation. A missing or unreadable
-/// registry reads as "no worktrees".
-async fn read_worktrees_unlocked(
+/// Decode the registered worktrees of `workspace`. Individual malformed rows
+/// still self-heal to absent, but file read, JSON parse, and top-level schema
+/// errors propagate so a caller changing ownership cannot erase its retry
+/// record on an invented empty baseline.
+async fn WorktreeRegistry::load(
   workspace : @pathx.Absolute,
-) -> Array[WorktreeEntry] {
+) -> WorktreeRegistry {
   let text = @fsx.try_read_text(worktrees_file(workspace).to_path()) catch {
     error if @async.is_being_cancelled() => raise error
-    _ => return []
+    error => raise WorktreeError("could not read worktree registry: \{error}")
   }
-  guard text is Some(text) else { return [] }
-  let json = @json.parse(text) catch { _ => return [] }
+  guard text is Some(text) else { return WorktreeRegistry([]) }
+  let json = @json.parse(text) catch {
+    error => raise WorktreeError("could not parse worktree registry: \{error}")
+  }
   guard json is Object(fields) && fields.get("worktrees") is Some(Array(items)) else {
-    return []
+    raise WorktreeError("worktree registry is malformed")
   }
   let entries : Array[WorktreeEntry] = []
   for item in items {
@@ -477,7 +486,21 @@ async fn read_worktrees_unlocked(
     guard owner_count <= 1 else { continue }
     entries.push({ name, branch, base, session, codex_thread, dsh_session })
   }
-  entries
+  WorktreeRegistry(entries)
+}
+
+///|
+/// Compatibility read for ordinary projections and older registry repair:
+/// malformed individual rows are already dropped by `WorktreeRegistry`; a
+/// damaged whole file remains invisible here but is never used by dsh owner
+/// release or ambiguous-create reconciliation.
+async fn read_worktrees_unlocked(
+  workspace : @pathx.Absolute,
+) -> Array[WorktreeEntry] {
+  WorktreeRegistry::load(workspace).0 catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => []
+  }
 }
 
 ///|
@@ -913,7 +936,7 @@ pub async fn list_dsh_worktree_bindings() -> Array[DshWorktreeBinding] {
   defer worktree_registry_lock.release()
   let bindings : Array[DshWorktreeBinding] = []
   for workspace in @workspaces.registered() {
-    let entries = read_worktrees_unlocked(workspace)
+    let entries = WorktreeRegistry::load(workspace).0
     let infos = worktree_infos(workspace, entries)
     for info in infos {
       if info.dsh_session is Some(session_id) {
@@ -938,7 +961,7 @@ pub async fn retain_dsh_registry_for_detach(
   guard @workspaces.registered_dir(workspace) is Some(workspace) else { return }
   worktree_registry_lock.acquire()
   defer worktree_registry_lock.release()
-  if read_worktrees_unlocked(workspace)
+  if WorktreeRegistry::load(workspace).0
     .iter()
     .any(entry => entry.dsh_session is Some(_)) {
     let index = DetachedDshRegistryIndex::load()
@@ -967,7 +990,7 @@ async fn PendingDshSessionReleases::release_one(
   }
   let retained_detached : Array[@pathx.Absolute] = []
   for workspace in workspaces {
-    let entries = read_worktrees_unlocked(workspace)
+    let entries = WorktreeRegistry::load(workspace).0
     let mut found = false
     let released = entries.map(entry => {
       if entry.dsh_session == Some(session_id) {
@@ -1072,7 +1095,7 @@ pub async fn release_dsh_worktree(
   }
   worktree_registry_lock.acquire()
   defer worktree_registry_lock.release()
-  let entries = read_worktrees_unlocked(dir)
+  let entries = WorktreeRegistry::load(dir).0
   let mut found = false
   let released = entries.map(entry => {
     if entry.name == name && entry.dsh_session == Some(session_id) {
@@ -1194,7 +1217,14 @@ pub async fn create(
       "this dsh conversation was removed before worktree creation",
     )
   }
-  let entries = read_worktrees_unlocked(dir)
+  let entries = if owner is DshSession(_) {
+    // A retry after an ambiguous create must never replace a temporarily
+    // unreadable registry with a new row and lose the placement it is trying
+    // to reconcile.
+    WorktreeRegistry::load(dir).0
+  } else {
+    read_worktrees_unlocked(dir)
+  }
   // This conversation already holds its environment. Two shapes land here:
   // the idempotent replay of a create whose reply was lost, and the repair
   // of a checkout deleted outside the app. The registry keeps the branch,
@@ -2121,6 +2151,26 @@ async test "dsh session release updates a detached worktree registry" {
   }
   assert_eq(still_owned.dsh_session, Some("session-dsh-detached"))
   @fsx.write_text(detached_index.to_path(), saved_index)
+  guard @fsx.try_read_text(worktrees_file(repo).to_path())
+    is Some(saved_registry) else {
+    fail("expected the detached worktree registry")
+  }
+  @fsx.write_text(worktrees_file(repo).to_path(), "{ malformed")
+  let registry_failure = try {
+    retry_dsh_session_releases((_, _) => ())
+    "no error"
+  } catch {
+    WorktreeError(detail) => detail
+    error if @async.is_being_cancelled() => raise error
+    error => "\{error}"
+  }
+  assert_true(registry_failure.contains("could not parse worktree registry"))
+  // A damaged owner registry is not proof that the owner disappeared. Keep
+  // the durable operation queued until that exact registry is readable.
+  assert_eq(PendingDshSessionReleases::load().session_ids, [
+    "session-dsh-detached",
+  ])
+  @fsx.write_text(worktrees_file(repo).to_path(), saved_registry)
   let released : Array[WorktreeInfo] = []
   retry_dsh_session_releases((_, worktrees) => released.append(worktrees))
   guard released is [released_row] else {
