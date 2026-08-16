@@ -14,6 +14,42 @@ fn State::composer_identity(self : State) -> @composer.Identity {
 }
 
 ///|
+/// Resolve a deliberate mention-chip click against the dsh conversation that
+/// still owns the composer entry. The root Desktop page owns Files, so dsh
+/// exposes only the validated editor target instead of its internal action.
+pub fn State::opened_mention(
+  self : State,
+  msg : Msg,
+) -> (String, @common.Range?, String?)? {
+  guard msg is ComposerAction(@composer.MentionOpened(identity~, mention~)) &&
+    self.has_active() &&
+    self.composer_identity() == identity &&
+    @mention_context.target(mention.ref_) is Some(target) else {
+    return None
+  }
+  Some(
+    (
+      target.file,
+      // A draft chip retains the exact selection; the reference target is only
+      // the fallback for durable envelopes that predate range preservation.
+      if mention.range is Some(_) {
+        mention.range
+      } else {
+        target.range
+      },
+      target.annotation,
+    ),
+  )
+}
+
+///|
+/// Whether this dsh message deliberately opens Files during the root update.
+/// The shell uses this only to avoid issuing a duplicate panel activation.
+pub fn Msg::opens_editor(self : Msg) -> Bool {
+  self is ComposerAction(@composer.MentionOpened(..))
+}
+
+///|
 /// dsh receives the shared composer's durable text envelope, so an annotation
 /// chip by itself is a valid submission even when the textarea is empty.
 fn State::submission_empty(self : State) -> Bool {
@@ -381,6 +417,28 @@ test "dsh accepts a shared composer submission only for its active session" {
     ),
   }
   let identity = state.composer_identity()
+  let exact_range = @common.Range::Range(5, 2, 6, 4)
+  guard state.opened_mention(
+      Msg::composer_action(
+        @composer.MentionOpened(identity~, mention={
+          ref_: @mention_context.File(path="src/main.mbt"),
+          range: Some(exact_range),
+        }),
+      ),
+    )
+    is Some(opened) else {
+    fail("expected the active dsh mention to resolve")
+  }
+  assert_eq(opened.0, "src/main.mbt")
+  assert_eq(opened.1, Some(exact_range))
+  assert_true(
+    Msg::composer_action(
+      @composer.MentionOpened(identity~, mention={
+        ref_: @mention_context.File(path="src/main.mbt"),
+        range: Some(exact_range),
+      }),
+    ).opens_editor(),
+  )
   let (_, submitted) = update(
     dispatch,
     ComposerAction(
@@ -395,6 +453,17 @@ test "dsh accepts a shared composer submission only for its active session" {
     ..identity,
     owner: { ..identity.owner, session: "session-2" },
   }
+  assert_true(
+    state.opened_mention(
+      Msg::composer_action(
+        @composer.MentionOpened(identity=stale_identity, mention={
+          ref_: @mention_context.File(path="src/main.mbt"),
+          range: None,
+        }),
+      ),
+    )
+    is None,
+  )
   let (_, stale) = update(
     dispatch,
     ComposerAction(

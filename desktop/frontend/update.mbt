@@ -1739,6 +1739,9 @@ fn update(
 /// is deliberately absent: it only begins a host lookup. `OpenFileAt` opens
 /// the panel later, after the host has classified the target as editable text.
 fn Msg::opens_file_before_panel_reconciliation(self : Msg) -> Bool {
+  if self is Dsh(msg) {
+    return msg.opens_editor()
+  }
   self
   is (ComposerAction(@composer.MentionOpened(..))
   | CodexComposerAction(@composer.MentionOpened(..))
@@ -3092,6 +3095,13 @@ fn update_msg(
       )
     }
     Dsh(msg) => {
+      if model.screen is Dsh &&
+        model.dsh.opened_mention(msg) is Some((path, range, annotation)) {
+        // Files belongs to the root Desktop page. dsh validates the component
+        // owner and returns only the resolved location, mirroring the Codex
+        // page adapter without exposing dsh's internal composer transition.
+        return open_editor_at(dispatch, model, path, range, annotation?)
+      }
       let unavailable_before = model.dsh.unavailable_message()
       let (cmd, dsh) = @dsh.update(
         dispatch.map(next => Dsh(next)),
@@ -14947,6 +14957,16 @@ test "only synchronous file-open messages suppress panel reactivation" {
         ref_: File(path="a.mbt"),
         range: None,
       }),
+    ).opens_file_before_panel_reconciliation(),
+  )
+  assert_true(
+    Msg::Dsh(
+      @dsh.Msg::composer_action(
+        @composer.MentionOpened(identity~, mention={
+          ref_: File(path="a.mbt"),
+          range: None,
+        }),
+      ),
     ).opens_file_before_panel_reconciliation(),
   )
   assert_true(

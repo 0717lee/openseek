@@ -669,7 +669,7 @@ fn State::with_reply(
           project~,
           worktree_name~,
           worktree_path~,
-          ..
+          draft~
         ) &&
         !workspaces
         .iter()
@@ -677,6 +677,12 @@ fn State::with_reply(
           workspace.path == worktree_path &&
           workspace.session_ids.contains(session_id)
         }) {
+        let message = "DeepSeek Harness did not move the conversation into its worktree Workspace"
+        // The verification failure belongs to the immutable first-send owner,
+        // even if another conversation is visible by the time workspace.list
+        // returns. Preserve both the draft and its diagnostic before cleanup
+        // settles the global submission fence so reopening can recover them.
+        let failed_prompts = self.failed_prompts.put(session_id, draft, message)
         let cleanup = self.release_failed_worktree(
           dispatch, session_id, generation, project, worktree_name,
         )
@@ -686,12 +692,13 @@ fn State::with_reply(
             {
               ..self,
               workspaces,
+              failed_prompts,
               loading: true,
-              notice: "DeepSeek Harness did not move the conversation into its worktree Workspace",
+              notice: message,
             },
           )
         } else {
-          (cleanup, { ..self, workspaces, })
+          (cleanup, { ..self, workspaces, failed_prompts })
         }
       }
       (
@@ -3889,6 +3896,47 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
     background_moving,
   )
   assert_true(background_refreshing == registered_navigated)
+  let (_, background_move_missing) = update(
+    dispatch,
+    Reply(
+      kind=DshPromptWorkspacesReply(
+        session_id="session-1",
+        generation=1,
+        project="/work/project",
+        worktree_name="wt-1",
+        worktree_path="/work/project/.worktrees/wt-1",
+        draft={ task: "inspect this project", mentions: [] },
+      ),
+      value={
+        "type": "server-response",
+        "rpcId": "workspace-list-background-missing",
+        "result": { "ok": true, "value": { "items": [] } },
+      },
+    ),
+    background_refreshing,
+  )
+  // A background verification failure must not replace the visible page, but
+  // its immutable first-send draft remains recoverable after cleanup settles.
+  assert_eq(background_move_missing.active_id, Some("session-2"))
+  assert_eq(background_move_missing.draft, "draft for session 2")
+  assert_eq(background_move_missing.notice, "session 2 notice")
+  let (_, background_move_cleaned) = update(
+    dispatch,
+    WorktreeCleanupFinished(session_id="session-1", generation=1, message=None),
+    background_move_missing,
+  )
+  assert_eq(background_move_cleaned.prompt_pending_session, None)
+  let (_, reopened_missing_move) = update(
+    dispatch,
+    OpenSession("session-1"),
+    background_move_cleaned,
+  )
+  assert_eq(reopened_missing_move.draft, "inspect this project")
+  assert_true(reopened_missing_move.mentions.is_empty())
+  assert_eq(
+    reopened_missing_move.notice,
+    "DeepSeek Harness did not move the conversation into its worktree Workspace",
+  )
   let (_, background_prompting) = update(
     dispatch,
     Reply(
