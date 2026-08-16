@@ -487,6 +487,9 @@ pub fn State::transcript_items(
         })
       }
     } else if event.type_ == "tool/call" &&
+      // Missing surface metadata is the durable append form used by older
+      // histories. Only an explicit replacement marks a model-context copy.
+      event.surface_append != Some(false) &&
       event.data is Object(fields) &&
       @jsonx.json_text(fields, "callId") is Some(call_id) {
       let name = @jsonx.json_text(fields, "name").unwrap_or("tool")
@@ -604,9 +607,16 @@ test "dsh history maps user, assistant, and tool events to shared transcript row
         surface_append: None,
       },
       {
-        type_: "tool/result",
+        type_: "tool/call",
         seq: 4,
         time: Some(40.0),
+        data: { "callId": "c1", "name": "read", "arguments": "{}" },
+        surface_append: Some(false),
+      },
+      {
+        type_: "tool/result",
+        seq: 5,
+        time: Some(50.0),
         data: {
           "message": {
             "content": [
@@ -622,8 +632,8 @@ test "dsh history maps user, assistant, and tool events to shared transcript row
       },
       {
         type_: "assistant/message",
-        seq: 5,
-        time: Some(50.0),
+        seq: 6,
+        time: Some(60.0),
         data: {
           "message": { "content": [{ "type": "text", "text": "model copy" }] },
         },
