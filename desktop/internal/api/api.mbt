@@ -1003,11 +1003,17 @@ pub fn endpoints(
 pub fn local_endpoints(state : ApiState) -> Array[@endpoint.Endpoint] {
   [
     @endpoint.Endpoint::remote_sync(@commands.dsh_status, _ => {
-      let reply : @protocol.DshValueReply = { value: state.dsh.status() }
+      let reply : @protocol.DshValueReply = {
+        value: state.dsh.status(),
+        session_revision: None,
+      }
       reply
     }),
     @endpoint.Endpoint::remote(@commands.dsh_pending, async fn(_) {
-      let reply : @protocol.DshValueReply = { value: state.dsh.interactions() }
+      let reply : @protocol.DshValueReply = {
+        value: state.dsh.interactions(),
+        session_revision: None,
+      }
       reply
     }),
     @endpoint.Endpoint::remote(@commands.dsh_request, async fn(params) {
@@ -1037,7 +1043,12 @@ pub fn local_endpoints(state : ApiState) -> Array[@endpoint.Endpoint] {
           bindings,
         )
       }
-      let envelope : @protocol.DshValueReply = { value: frontend_reply }
+      let envelope : @protocol.DshValueReply = {
+        value: frontend_reply,
+        // The actor captures this after the ordered frontend lane releases the
+        // request for actual dispatch, not when the renderer queued it.
+        session_revision: Some(connection_revision.sessions),
+      }
       envelope
     }),
     @endpoint.Endpoint::remote(@commands.dsh_respond, async fn(params) {
@@ -1058,6 +1069,7 @@ pub fn local_endpoints(state : ApiState) -> Array[@endpoint.Endpoint] {
       // after the frontend removes the accepted interaction.
       let reply : @protocol.DshValueReply = {
         value: { "receipt": receipt, "generation": generation },
+        session_revision: None,
       }
       reply
     }),

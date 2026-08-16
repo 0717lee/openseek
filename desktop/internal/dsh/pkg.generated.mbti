@@ -21,6 +21,7 @@ pub fn Actor::status(Self) -> Json
 pub(all) struct DshConnectionRevision {
   connection : Int
   workspaces : Int
+  sessions : Int
 } derive(Eq, @debug.Debug)
 
 // Type aliases

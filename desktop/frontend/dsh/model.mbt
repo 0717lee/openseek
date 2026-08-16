@@ -18,13 +18,13 @@ priv struct DshSessionRow {
 } derive(Eq)
 
 ///|
-/// One WebSocket running-state observation and the local reducer generation
-/// that received it. session.list replies use this to retain only events that
-/// arrived after their request began.
+/// One WebSocket running-state observation and the actor revision that emitted
+/// it. session.list replies use the revision captured at actual HTTP dispatch
+/// to retain only events newer than their returned baseline.
 priv struct DshSessionStatusObservation {
   session_id : String
   running : Bool
-  generation : Int
+  revision : Int
 } derive(Eq)
 
 ///|
@@ -137,7 +137,7 @@ priv enum DshReplyKind {
   DshReconnectReply
   DshWorkspacesReply
   DshWorkspaceCreateReply(Int)
-  DshSessionsReply(status_generation~ : Int)
+  DshSessionsReply(session_revision~ : Int)
   DshCreateReply(Int)
   DshHistoryReply(String)
   DshModelsReply(String)
@@ -250,13 +250,15 @@ pub fn Msg::event(value : Json) -> Msg {
 ///|
 struct State {
   connection : DshConnection
+  // Status polls and notifications carry the same actor-owned revision. This
+  // rejects a poll response that arrives after a newer transition event.
+  connection_status_revision : Int
   workspaces : Array[DshWorkspaceRow]
   sessions : Array[DshSessionRow]
   // HTTP session snapshots and WebSocket status events use independent
   // carriers. Record the latest event per session so a late snapshot cannot
   // roll back a status that arrived after that snapshot request began.
   session_statuses : Array[DshSessionStatusObservation]
-  session_status_generation : Int
   active_id : String?
   events : Array[DshEventRecord]
   streaming : String
@@ -299,10 +301,10 @@ struct State {
 pub fn State::State(loading? : Bool = false) -> State {
   {
     connection: DshStarting,
+    connection_status_revision: 0,
     workspaces: [],
     sessions: [],
     session_statuses: [],
-    session_status_generation: 0,
     active_id: None,
     events: [],
     streaming: "",

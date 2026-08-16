@@ -14553,6 +14553,7 @@ test "a dsh startup failure pops one toast and stays out of the transcript" {
   let status = @dsh.Msg::status_changed({
     "status": "unavailable",
     "message": message,
+    "revision": 1,
   })
   let (_, failed) = update(dispatch, Dsh(status), test_model())
   assert_eq(failed.dsh.unavailable_message(), Some(message))
@@ -14564,7 +14565,11 @@ test "a dsh startup failure pops one toast and stays out of the transcript" {
   let (_, repeated) = update(
     dispatch,
     Dsh(
-      @dsh.Msg::status_changed({ "status": "unavailable", "message": message }),
+      @dsh.Msg::status_changed({
+        "status": "unavailable",
+        "message": message,
+        "revision": 1,
+      }),
     ),
     failed,
   )

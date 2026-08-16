@@ -54,6 +54,7 @@ priv enum ActorInput {
 pub(all) struct DshConnectionRevision {
   connection : Int
   workspaces : Int
+  sessions : Int
 } derive(Debug, Eq)
 
 ///|
@@ -196,8 +197,16 @@ struct Actor {
   inputs : @async.Queue[ActorInput]
   wake : @async.Queue[Unit]
   mut state : ConnectionState
+  // Every connection-state transition receives a process-lifetime revision.
+  // Both status polls and notifications carry it, so renderer delivery order
+  // cannot let an older poll roll back a newer notification.
+  mut status_revision : Int
   mut generation : Int
   mut workspace_revision : Int
+  // host/session-status events and session.list dispatches share this actor
+  // clock. The captured request revision describes the exact HTTP baseline,
+  // even when the renderer request waited in its ordered lane first.
+  mut session_revision : Int
   mut next_rpc_id : Int
   interactions : PendingInteractionRegistry
 }
@@ -208,8 +217,10 @@ pub fn Actor::Actor() -> Actor {
     inputs: Queue(kind=Blocking(ActorInputCapacity)),
     wake: Queue(kind=Blocking(ActorWakeCapacity)),
     state: Starting,
+    status_revision: 0,
     generation: 0,
     workspace_revision: 0,
+    session_revision: 0,
     next_rpc_id: 0,
     interactions: PendingInteractionRegistry(),
   }
@@ -223,10 +234,23 @@ fn Actor::signal(self : Actor) -> Unit {
 ///|
 pub fn Actor::status(self : Actor) -> Json {
   match self.state {
-    Starting => { "status": "starting" }
-    Ready => { "status": "ready" }
-    Unavailable(message) => { "status": "unavailable", "message": message }
+    Starting => { "status": "starting", "revision": self.status_revision }
+    Ready => { "status": "ready", "revision": self.status_revision }
+    Unavailable(message) =>
+      {
+        "status": "unavailable",
+        "message": message,
+        "revision": self.status_revision,
+      }
   }
+}
+
+///|
+/// Move the actor to one observable connection state and advance the revision
+/// before either a status poll or notification can read it.
+fn Actor::set_connection_state(self : Actor, state : ConnectionState) -> Unit {
+  self.state = state
+  self.status_revision += 1
 }
 
 ///|
@@ -321,7 +345,7 @@ async fn[G] Actor::run_connection(
   revoke_workspaces~ : async (Int) -> Unit,
   release_worktree~ : async (String) -> Unit,
 ) -> Unit {
-  self.state = Starting
+  self.set_connection_state(Starting)
   self.generation += 1
   self.workspace_revision = 0
   let generation = self.generation
@@ -342,7 +366,7 @@ async fn[G] Actor::run_connection(
       // readiness timeout, and dsh's own stderr. Preserve that explanation
       // for the frontend instead of misreporting every failure as PATH.
       let message = "\{error}"
-      self.state = Unavailable(message)
+      self.set_connection_state(Unavailable(message))
       emit("dsh.status_changed", self.status())
       if pending is Some(input) {
         input.reject(Unavailable(message))
@@ -373,7 +397,7 @@ async fn[G] Actor::run_connection(
       self.signal()
     })
   }
-  self.state = Ready
+  self.set_connection_state(Ready)
   emit("dsh.status_changed", self.status())
   if pending is Some(input) {
     connection.dispatch_input(group, self, generation, input)
@@ -421,6 +445,7 @@ async fn Actor::publish_frame(
     message is Object(fields) &&
     fields.get("payload") is Some(Object(payload)) {
     match @jsonx.json_text(payload, "type") {
+      Some("host/session-status") => self.session_revision += 1
       Some("host/session-removed") => {
         if @jsonx.json_text(payload, "sessionId") is Some(session_id) {
           release_worktree(session_id) catch {
@@ -451,6 +476,7 @@ async fn Actor::publish_frame(
     "stream": stream,
     "message": message,
     "generation": self.interactions.generation,
+    "sessionRevision": self.session_revision,
   })
 }
 
@@ -463,7 +489,7 @@ async fn Actor::finish_disconnect(
   emit : (String, Json) -> Unit,
   revoke_workspaces~ : async (Int) -> Unit,
 ) -> Unit {
-  self.state = Unavailable("DeepSeek Harness disconnected")
+  self.set_connection_state(Unavailable("DeepSeek Harness disconnected"))
   revoke_workspaces(self.generation)
   emit("dsh.status_changed", self.status())
 }
@@ -519,6 +545,7 @@ fn[G] Connection::dispatch_input(
       let revision : DshConnectionRevision = {
         connection: generation,
         workspaces: actor.workspace_revision,
+        sessions: actor.session_revision,
       }
       group.spawn_bg(allow_failure=true, () => {
         let outcome : Result[(Json, DshConnectionRevision), DshError] = try
@@ -684,6 +711,33 @@ async test "dsh actor releases a removed session before publishing its event" {
 }
 
 ///|
+async test "dsh actor revisions session status before publishing it" {
+  let actor = Actor()
+  actor.session_revision = 6
+  let published : Array[Json] = []
+  actor.publish_frame(
+    "host",
+    {
+      "rpcId": "status-1",
+      "payload": {
+        "type": "host/session-status",
+        "sessionId": "session-1",
+        "running": true,
+      },
+    },
+    (_, payload) => published.push(payload),
+    invalidate_workspaces=fn(_, _) {  },
+    release_worktree=fn(_) {  },
+  )
+  assert_eq(actor.session_revision, 7)
+  let revision = match published.get(0) {
+    Some(Object(fields)) => @jsonx.json_int(fields, "sessionRevision")
+    _ => None
+  }
+  assert_eq(revision, Some(7))
+}
+
+///|
 async test "dsh actor publishes session removal after worktree release failure" {
   let actor = Actor()
   let published : Array[String] = []
@@ -769,6 +823,10 @@ async test "dsh actor revokes workspaces before publishing disconnect" {
   assert_eq(revoked.get(), 7)
   assert_eq(order, ["revoked", "dsh.status_changed"])
   assert_eq(published, [
-    { "status": "unavailable", "message": "DeepSeek Harness disconnected" },
+    {
+      "status": "unavailable",
+      "message": "DeepSeek Harness disconnected",
+      "revision": 1,
+    },
   ])
 }

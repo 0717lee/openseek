@@ -15,8 +15,12 @@ test "dsh command envelopes preserve nested versioned JSON" {
   @debug.assert_eq(response.to_json(), {
     "message": { "type": "client-response", "result": { "ok": true } },
   })
-  let reply : @protocol.DshValueReply = @json.from_json({ "value": null })
+  let reply : @protocol.DshValueReply = @json.from_json({
+    "value": null,
+    "sessionRevision": 7,
+  })
   assert_true(reply.value is Null)
+  assert_eq(reply.session_revision, Some(7))
 }
 
 ///|
@@ -68,21 +72,25 @@ test "dsh notification envelopes type the Desktop-owned wrapper" {
   let status : @protocol.DshStatusNotification = @json.from_json({
     "status": "unavailable",
     "message": "dsh stopped",
+    "revision": 4,
   })
   @debug.assert_eq(status.to_json(), {
     "status": "unavailable",
     "message": "dsh stopped",
+    "revision": 4,
   })
   let event : @protocol.DshEventNotification = @json.from_json({
     "stream": "mux",
     "message": null,
     "generation": 3,
+    "sessionRevision": 9,
   })
   assert_true(event.message is Null)
   @debug.assert_eq(event.to_json(), {
     "stream": "mux",
     "message": null,
     "generation": 3,
+    "sessionRevision": 9,
   })
 }
 
@@ -103,6 +111,7 @@ test "dsh notification envelopes reject malformed wrappers" {
     let _ : @protocol.DshStatusNotification = @json.from_json({
       "status": "unavailable",
       "message": false,
+      "revision": 1,
     })
   } catch {
     _ => true
@@ -115,6 +124,7 @@ test "dsh notification envelopes reject malformed wrappers" {
       "stream": "mux",
       "message": {},
       "generation": 4,
+      "sessionRevision": 5,
       "future": true,
     })
   } catch {

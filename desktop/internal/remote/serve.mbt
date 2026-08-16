@@ -570,13 +570,18 @@ test "remote delivery omits only canonical transcript duplicates" {
 test "remote delivery never exposes local dsh notifications" {
   assert_true(
     notification_for_client(
-      DshStatusChanged({ status: "ready", message: None }),
+      DshStatusChanged({ status: "ready", message: None, revision: 1 }),
     )
     is None,
   )
   assert_true(
     notification_for_client(
-      DshEvent({ stream: "mux", message: { "secret": "prompt" }, generation: 1 }),
+      DshEvent({
+        stream: "mux",
+        message: { "secret": "prompt" },
+        generation: 1,
+        session_revision: 0,
+      }),
     )
     is None,
   )

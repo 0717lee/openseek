@@ -668,7 +668,7 @@ fn State::with_reply(
         },
       )
     }
-    DshSessionsReply(status_generation~) => {
+    DshSessionsReply(session_revision~) => {
       let sessions : Array[DshSessionRow] = []
       if value is Object(fields) && fields.get("items") is Some(Array(items)) {
         for item in items {
@@ -677,7 +677,7 @@ fn State::with_reply(
               .iter()
               .find_first(status => {
                 status.session_id == row.id &&
-                status.generation > status_generation
+                status.revision > session_revision
               })
               is Some(status) {
               let blank = self.sessions
@@ -1002,6 +1002,7 @@ fn State::with_status(
   value : Json,
 ) -> (@cmd.Cmd, State) {
   guard value is Object(fields) &&
+    @jsonx.json_int(fields, "revision") is Some(revision) &&
     @jsonx.json_text(fields, "status") is Some(status) else {
     return (
       @cmd.none,
@@ -1013,6 +1014,9 @@ fn State::with_status(
       },
     )
   }
+  if revision < self.connection_status_revision {
+    return (@cmd.none, self)
+  }
   match status {
     "ready" =>
       (
@@ -1021,12 +1025,24 @@ fn State::with_status(
           self.list_sessions(dispatch),
           DshPendingReply.pending(dispatch),
         ]),
-        { ..self, connection: DshReady, loading: true, notice: "" },
+        {
+          ..self,
+          connection: DshReady,
+          connection_status_revision: revision,
+          loading: true,
+          notice: "",
+        },
       )
     "starting" =>
       (
         @cmd.none,
-        { ..self, connection: DshStarting, pending: [], loading: false },
+        {
+          ..self,
+          connection: DshStarting,
+          connection_status_revision: revision,
+          pending: [],
+          loading: false,
+        },
       )
     _ => {
       let message = @jsonx.json_text(fields, "message").unwrap_or(
@@ -1037,6 +1053,7 @@ fn State::with_status(
         {
           ..self,
           connection: DshUnavailable(message),
+          connection_status_revision: revision,
           pending: [],
           loading: false,
           notice: "",
@@ -1137,7 +1154,18 @@ fn State::with_event(
     }
     "host/session-status" => {
       guard @jsonx.json_text(payload, "sessionId") is Some(session_id) &&
-        @jsonx.json_bool(payload, "running") is Some(running) else {
+        @jsonx.json_bool(payload, "running") is Some(running) &&
+        @jsonx.json_int(wrapper, "sessionRevision") is Some(session_revision) else {
+        return (@cmd.none, self)
+      }
+      // The native hub preserves actor order, but the revision also makes this
+      // reducer safe if a future transport delivers two notifications out of
+      // order. Never replace a newer observation with an older duplicate.
+      if self.session_statuses
+        .iter()
+        .any(status => {
+          status.session_id == session_id && status.revision >= session_revision
+        }) {
         return (@cmd.none, self)
       }
       let sessions = self.sessions.map(row => {
@@ -1147,22 +1175,16 @@ fn State::with_event(
           row
         }
       })
-      let status_generation = self.session_status_generation + 1
       let session_statuses = self.session_statuses.filter(status => {
         status.session_id != session_id
       })
-      session_statuses.push({
-        session_id,
-        running,
-        generation: status_generation,
-      })
+      session_statuses.push({ session_id, running, revision: session_revision })
       (
         @cmd.none,
         {
           ..self,
           sessions,
           session_statuses,
-          session_status_generation: status_generation,
           loading: if self.active_id == Some(session_id) {
             self.pending
             .iter()
@@ -1839,6 +1861,7 @@ test "dsh session creation remains busy through session status events" {
       },
     },
     "generation": 1,
+    "sessionRevision": 1,
   })
   assert_true(status.creation_pending)
   assert_false(status.loading)
@@ -1956,6 +1979,7 @@ test "accepted dsh prompt advances transcript submission generation" {
       },
     },
     "generation": 1,
+    "sessionRevision": 1,
   })
   assert_false(running.loading)
   assert_true(running.busy())
@@ -2023,6 +2047,7 @@ test "dsh interaction response remains busy through session status events" {
       },
     },
     "generation": 1,
+    "sessionRevision": 1,
   })
   assert_true(status.loading)
   assert_true(status.busy())
@@ -2101,7 +2126,7 @@ test "empty dsh session baseline clears a deleted active transcript" {
   }
   let (_, next) = state.with_reply(
     dispatch,
-    DshSessionsReply(status_generation=0),
+    DshSessionsReply(session_revision=0),
     {
       "type": "server-response",
       "rpcId": "session-list",
@@ -2116,7 +2141,25 @@ test "empty dsh session baseline clears a deleted active transcript" {
 }
 
 ///|
-test "dsh session list preserves newer WebSocket running state" {
+test "dsh status poll cannot roll back a newer notification" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let state = State()
+  let (_, ready) = state.with_status(dispatch, {
+    "status": "ready",
+    "revision": 2,
+  })
+  assert_true(ready.connection is DshReady)
+  assert_eq(ready.connection_status_revision, 2)
+  let (_, stale) = ready.with_reply(dispatch, DshStatusReply, {
+    "status": "starting",
+    "revision": 1,
+  })
+  assert_true(stale.connection is DshReady)
+  assert_eq(stale.connection_status_revision, 2)
+}
+
+///|
+test "dsh session list orders running state by actor dispatch revision" {
   let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   let state = {
     ..State(),
@@ -2131,7 +2174,6 @@ test "dsh session list preserves newer WebSocket running state" {
     ],
     active_id: Some("session-1"),
   }
-  let request_generation = state.session_status_generation
   let (_, running) = state.with_event(dispatch, {
     "stream": "host",
     "message": {
@@ -2143,7 +2185,22 @@ test "dsh session list preserves newer WebSocket running state" {
       },
     },
     "generation": 1,
+    "sessionRevision": 1,
   })
+  let (_, stale_event) = running.with_event(dispatch, {
+    "stream": "host",
+    "message": {
+      "rpcId": "status-0",
+      "payload": {
+        "type": "host/session-status",
+        "sessionId": "session-1",
+        "running": false,
+      },
+    },
+    "generation": 1,
+    "sessionRevision": 0,
+  })
+  assert_eq(stale_event.sessions.get(0).map(row => row.running), Some(true))
   let snapshot : Json = {
     "type": "server-response",
     "rpcId": "session-list-1",
@@ -2163,14 +2220,16 @@ test "dsh session list preserves newer WebSocket running state" {
   }
   let (_, preserved) = running.with_reply(
     dispatch,
-    DshSessionsReply(status_generation=request_generation),
+    DshSessionsReply(session_revision=0),
     snapshot,
   )
   assert_eq(preserved.sessions.get(0).map(row => row.running), Some(true))
   assert_eq(preserved.sessions.get(0).map(row => row.blank), Some(false))
   let (_, fresh) = running.with_reply(
     dispatch,
-    DshSessionsReply(status_generation=running.session_status_generation),
+    // A list dispatched after revision 1 is newer than that notification even
+    // if the frontend command had waited behind an earlier ordered request.
+    DshSessionsReply(session_revision=1),
     snapshot,
   )
   assert_eq(fresh.sessions.get(0).map(row => row.running), Some(false))
@@ -2286,6 +2345,7 @@ test "dsh cancellation remains busy through session status events" {
       },
     },
     "generation": 1,
+    "sessionRevision": 1,
   })
   assert_false(stopped.loading)
   assert_true(stopped.busy())

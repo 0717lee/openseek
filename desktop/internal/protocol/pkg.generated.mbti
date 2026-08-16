@@ -772,6 +772,7 @@ pub(all) struct DshEventNotification {
   stream : String
   message : Json
   generation : Int
+  session_revision : Int
 } derive(Eq, @debug.Debug)
 pub impl ToJson for DshEventNotification
 pub impl @json.FromJson for DshEventNotification
@@ -792,12 +793,14 @@ pub impl @json.FromJson for DshRespondPayload
 pub(all) struct DshStatusNotification {
   status : String
   message : String?
+  revision : Int
 } derive(Eq, @debug.Debug)
 pub impl ToJson for DshStatusNotification
 pub impl @json.FromJson for DshStatusNotification
 
 pub(all) struct DshValueReply {
   value : Json
+  session_revision : Int?
 } derive(Eq, @debug.Debug)
 pub impl ToJson for DshValueReply
 pub impl @json.FromJson for DshValueReply

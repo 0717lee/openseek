@@ -59,7 +59,25 @@ fn DshReplyKind::request(
           return
         }
       }
-      scheduler.add(dispatch(Reply(kind=self, value=reply.value)))
+      let reply_kind = match self {
+        DshSessionsReply(..) =>
+          match reply.session_revision {
+            Some(revision) => DshSessionsReply(session_revision=revision)
+            None => {
+              scheduler.add(
+                dispatch(
+                  Failed(
+                    kind=self,
+                    message="DeepSeek Harness session list omitted its dispatch revision",
+                  ),
+                ),
+              )
+              return
+            }
+          }
+        _ => self
+      }
+      scheduler.add(dispatch(Reply(kind=reply_kind, value=reply.value)))
     })
   })
 }
@@ -78,7 +96,7 @@ test "dsh snapshot replies select independent ordered lanes" {
     Some("dsh-workspace-list"),
   )
   assert_eq(
-    DshSessionsReply(status_generation=0).ordered_lane(),
+    DshSessionsReply(session_revision=-1).ordered_lane(),
     Some("dsh-session-list"),
   )
   assert_eq(
@@ -207,15 +225,11 @@ fn State::refresh(self : State, dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
 }
 
 ///|
-/// Capture the last reduced WebSocket status generation at the beginning of a
-/// session.list request. Its reply can then merge only observations that are
-/// newer than this particular snapshot.
-fn State::list_sessions(self : State, dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
-  DshSessionsReply(status_generation=self.session_status_generation).request(
-    dispatch,
-    "session.list",
-    {},
-  )
+/// The native actor attaches the host/session-status revision captured when
+/// this request actually dispatches. `-1` marks the frontend request kind and
+/// is replaced before the reply reaches the reducer.
+fn State::list_sessions(_self : State, dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
+  DshSessionsReply(session_revision=-1).request(dispatch, "session.list", {})
 }
 
 ///|

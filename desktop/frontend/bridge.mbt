@@ -421,6 +421,7 @@ test "proton subscribes to local Codex and dsh events" {
         stream: "host",
         message: {},
         generation: 0,
+        session_revision: 0,
       }),
     )
     is Some(Dsh(_)),

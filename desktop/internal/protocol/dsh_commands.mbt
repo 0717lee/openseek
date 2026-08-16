@@ -30,6 +30,10 @@ pub(all) struct DshRespondPayload {
 /// `null`; malformed JSON is rejected by the transport before this codec runs.
 pub(all) struct DshValueReply {
   value : Json
+  // Present for actor-dispatched requests. session.list uses the revision
+  // captured when its HTTP call actually starts to order the returned
+  // baseline against host/session-status notifications.
+  session_revision : Int?
 } derive(Debug, Eq)
 
 ///|
@@ -38,6 +42,7 @@ pub(all) struct DshValueReply {
 pub(all) struct DshStatusNotification {
   status : String
   message : String?
+  revision : Int
 } derive(Debug, Eq)
 
 ///|
@@ -47,6 +52,7 @@ pub(all) struct DshEventNotification {
   stream : String
   message : Json
   generation : Int
+  session_revision : Int
 } derive(Debug, Eq)
 
 ///|
@@ -128,17 +134,33 @@ pub impl FromJson for DshValueReply with fn from_json(json, path) {
     None =>
       raise JsonDecodeError((path.add_key("value"), "missing required field"))
   }
+  let session_revision : Int? = match fields.get("sessionRevision") {
+    Some(value) =>
+      Some(
+        @json.from_json(value, path=path.add_key("sessionRevision")) catch {
+          _ =>
+            raise JsonDecodeError(
+              (path.add_key("sessionRevision"), "expected integer"),
+            )
+        },
+      )
+    None => None
+  }
   for name, _ in fields {
-    if name != "value" {
+    if name != "value" && name != "sessionRevision" {
       raise JsonDecodeError((path.add_key(name), "unknown field"))
     }
   }
-  { value, }
+  { value, session_revision }
 }
 
 ///|
 pub impl ToJson for DshValueReply with fn to_json(self) {
-  { "value": self.value }
+  let fields : Map[String, Json] = Map([("value", self.value)])
+  if self.session_revision is Some(revision) {
+    fields["sessionRevision"] = revision.to_json()
+  }
+  Json::object(fields)
 }
 
 ///|
@@ -161,17 +183,31 @@ pub impl FromJson for DshStatusNotification with fn from_json(json, path) {
         (path.add_key("message"), "expected string or null"),
       )
   }
+  let revision : Int = match fields.get("revision") {
+    Some(value) =>
+      @json.from_json(value, path=path.add_key("revision")) catch {
+        _ =>
+          raise JsonDecodeError((path.add_key("revision"), "expected integer"))
+      }
+    None =>
+      raise JsonDecodeError(
+        (path.add_key("revision"), "missing required field"),
+      )
+  }
   for name, _ in fields {
-    if name != "status" && name != "message" {
+    if name != "status" && name != "message" && name != "revision" {
       raise JsonDecodeError((path.add_key(name), "unknown field"))
     }
   }
-  { status, message }
+  { status, message, revision }
 }
 
 ///|
 pub impl ToJson for DshStatusNotification with fn to_json(self) {
-  let fields : Map[String, Json] = Map([("status", Json::string(self.status))])
+  let fields : Map[String, Json] = Map([
+    ("status", Json::string(self.status)),
+    ("revision", self.revision.to_json()),
+  ])
   if self.message is Some(message) {
     fields["message"] = Json::string(message)
   }
@@ -208,12 +244,28 @@ pub impl FromJson for DshEventNotification with fn from_json(json, path) {
         (path.add_key("generation"), "missing required field"),
       )
   }
+  let session_revision : Int = match fields.get("sessionRevision") {
+    Some(value) =>
+      @json.from_json(value, path=path.add_key("sessionRevision")) catch {
+        _ =>
+          raise JsonDecodeError(
+            (path.add_key("sessionRevision"), "expected integer"),
+          )
+      }
+    None =>
+      raise JsonDecodeError(
+        (path.add_key("sessionRevision"), "missing required field"),
+      )
+  }
   for name, _ in fields {
-    if name != "stream" && name != "message" && name != "generation" {
+    if name != "stream" &&
+      name != "message" &&
+      name != "generation" &&
+      name != "sessionRevision" {
       raise JsonDecodeError((path.add_key(name), "unknown field"))
     }
   }
-  { stream, message, generation }
+  { stream, message, generation, session_revision }
 }
 
 ///|
@@ -222,5 +274,6 @@ pub impl ToJson for DshEventNotification with fn to_json(self) {
     "stream": Json::string(self.stream),
     "message": self.message,
     "generation": self.generation,
+    "sessionRevision": self.session_revision,
   }
 }

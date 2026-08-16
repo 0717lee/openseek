@@ -317,12 +317,14 @@ test "desktop notifications round-trip at the wire edge" {
     "stream": "mux",
     "message": { "type": "host/session-added" },
     "generation": 2,
+    "sessionRevision": 3,
   })
   guard dsh is Some(dsh) else { fail("typed dsh event was rejected") }
   assert_eq(dsh.params(), {
     "stream": "mux",
     "message": { "type": "host/session-added" },
     "generation": 2,
+    "sessionRevision": 3,
   })
   assert_eq(
     Notification::from_wire("dsh.event", { "stream": "mux", "message": {} }),
