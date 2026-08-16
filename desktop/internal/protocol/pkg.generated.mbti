@@ -2346,16 +2346,13 @@ pub impl @json.FromJson for WorktreeCreatePayload
 
 pub(all) struct WorktreeCreateReply {
   name : String
-  created : Bool
   worktrees : Array[WorktreeInfo]
-} derive(Eq, @debug.Debug)
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 pub fn WorktreeCreateReply::equal(Self, Self) -> Bool
 pub fn WorktreeCreateReply::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
 pub fn WorktreeCreateReply::not_equal(Self, Self) -> Bool
 pub fn WorktreeCreateReply::to_json(Self) -> Json
 pub fn WorktreeCreateReply::to_repr(Self) -> @debug.Repr
-pub impl ToJson for WorktreeCreateReply
-pub impl @json.FromJson for WorktreeCreateReply
 
 pub(all) enum WorktreeCreateResult {
   WorktreeCreatedReply(WorktreeCreateReply)
@@ -2395,14 +2392,6 @@ pub fn WorktreeListPayload::from_json(Json, @json.JsonPath) -> Self raise @json.
 pub fn WorktreeListPayload::not_equal(Self, Self) -> Bool
 pub fn WorktreeListPayload::to_json(Self) -> Json
 pub fn WorktreeListPayload::to_repr(Self) -> @debug.Repr
-
-pub(all) struct WorktreeReleaseDshPayload {
-  workspace : String
-  name : String
-  dsh_session : String
-} derive(Eq, @debug.Debug)
-pub impl ToJson for WorktreeReleaseDshPayload
-pub impl @json.FromJson for WorktreeReleaseDshPayload
 
 pub(all) struct WorktreeRemovePayload {
   workspace : String

@@ -146,18 +146,21 @@ priv enum DshReplyKind {
     session_id~ : String,
     generation~ : Int,
     project~ : String,
-    worktree_path~ : String
+    worktree_path~ : String,
+    draft~ : String
   )
   DshPromptMoveReply(
     session_id~ : String,
     generation~ : Int,
     project~ : String,
-    worktree_path~ : String
+    worktree_path~ : String,
+    draft~ : String
   )
   DshPromptWorkspacesReply(
     session_id~ : String,
     generation~ : Int,
-    worktree_path~ : String
+    worktree_path~ : String,
+    draft~ : String
   )
   DshPromptReply(session_id~ : String, draft~ : String, generation~ : Int)
   DshCancelReply(String)
@@ -177,14 +180,8 @@ enum Msg {
     session_id~ : String,
     generation~ : Int,
     project~ : String,
-    name~ : String,
-    created~ : Bool,
-    path~ : String
-  )
-  WorktreeReleaseFailed(
-    visible_session~ : String?,
-    generation~ : Int,
-    message~ : String
+    path~ : String,
+    draft~ : String
   )
   Send
   Stop
@@ -319,8 +316,9 @@ pub fn State::can_create(self : State) -> Bool {
 
 ///|
 /// HTTP prompt/interaction settlement and background session lifecycle updates
-/// are independent. Keep the active composer disabled until its page work and
-/// accepted requests have settled.
+/// are independent. A worktree first-send remains globally busy after page
+/// navigation: starting another prompt would advance the one shared generation
+/// and invalidate that immutable setup pipeline before it reaches dsh.
 fn State::busy(self : State) -> Bool {
   self.loading ||
   self.models.busy() ||
@@ -337,8 +335,9 @@ fn State::busy(self : State) -> Bool {
 
 ///|
 /// The worktree setup requests are one logical prompt submission. Keeping the
-/// origin on the reply type lets every stage share the same navigation and
-/// retry fence as the final session.prompt request.
+/// origin on the reply type lets every stage share one retry fence; setup
+/// stages may continue after navigation, while the final reply settles only
+/// the page that submitted the prompt.
 fn DshReplyKind::prompt_origin(self : DshReplyKind) -> (String, Int)? {
   match self {
     DshPromptWorkspaceReply(session_id~, generation~, ..)

@@ -73,6 +73,7 @@ test "dsh snapshot replies select independent ordered lanes" {
       session_id="session-1",
       generation=1,
       worktree_path="/work/project/.worktrees/wt-1",
+      draft="inspect this project",
     ).ordered_lane(),
     Some("dsh-workspace-list"),
   )
@@ -334,49 +335,11 @@ fn State::create_worktree(
             session_id~,
             generation~,
             project~,
-            name=reply.name,
-            created=reply.created,
             path=worktree.path,
+            draft~,
           ),
         ),
       )
-    })
-  })
-}
-
-///|
-/// Give an abandoned first-send checkout back to the ordinary worktree
-/// lifecycle. This changes only the exact registry owner returned by the
-/// preceding create; the host preserves the checkout and its branch.
-fn State::release_abandoned_worktree(
-  _self : State,
-  dispatch : @cmd.Emit[Msg],
-  session_id : String,
-  visible_session : String?,
-  generation : Int,
-  project : String,
-  name : String,
-) -> @cmd.Cmd {
-  @cmd.custom_cmd(scheduler => {
-    @js.async_run(() => {
-      let _ : @protocol.EmptyReply = @interop.bridge_request(
-        @interop.ChannelId::Local,
-        @commands.worktree_release_dsh,
-        { workspace: project, name, dsh_session: session_id },
-      ) catch {
-        error => {
-          scheduler.add(
-            dispatch(
-              WorktreeReleaseFailed(
-                visible_session~,
-                generation~,
-                message=@interop.bridge_error_text(error),
-              ),
-            ),
-          )
-          return
-        }
-      }
     })
   })
 }
@@ -391,12 +354,15 @@ fn State::register_prompt_workspace(
   generation : Int,
   project : String,
   worktree_path : String,
+  draft : String,
 ) -> @cmd.Cmd {
-  DshPromptWorkspaceReply(session_id~, generation~, project~, worktree_path~).request(
-    dispatch,
-    "workspace.create",
-    { "path": worktree_path },
-  )
+  DshPromptWorkspaceReply(
+    session_id~,
+    generation~,
+    project~,
+    worktree_path~,
+    draft~,
+  ).request(dispatch, "workspace.create", { "path": worktree_path })
 }
 
 ///|
@@ -410,8 +376,9 @@ fn State::move_prompt_session(
   project : String,
   worktree_path : String,
   workspace_id : String,
+  draft : String,
 ) -> @cmd.Cmd {
-  DshPromptMoveReply(session_id~, generation~, project~, worktree_path~).request(
+  DshPromptMoveReply(session_id~, generation~, project~, worktree_path~, draft~).request(
     dispatch,
     "workspace.insertSessionBefore",
     { "workspaceId": workspace_id, "sessionId": session_id },
@@ -439,16 +406,35 @@ fn State::send(
   guard self.active_id is Some(session_id) else { return @cmd.none }
   let text = self.draft.trim().to_owned()
   guard !text.is_empty() else { return @cmd.none }
-  DshPromptReply(session_id~, draft=self.draft, generation~).request(
+  self.send_prompt(
+    dispatch,
+    session_id,
+    self.draft,
+    generation,
+    mode=if self.is_running() { "steer" } else { "queue" },
+  )
+}
+
+///|
+/// Send the immutable submission captured when the user pressed Enter. The
+/// worktree setup pipeline can call this after navigation without consulting
+/// the newly active session, draft, or running state.
+fn State::send_prompt(
+  _self : State,
+  dispatch : @cmd.Emit[Msg],
+  session_id : String,
+  draft : String,
+  generation : Int,
+  mode~ : String,
+) -> @cmd.Cmd {
+  let text = draft.trim().to_owned()
+  guard !text.is_empty() else { return @cmd.none }
+  DshPromptReply(session_id~, draft~, generation~).request(
     dispatch,
     "session.prompt",
     {
       "sessionId": session_id,
-      "mode": if self.is_running() {
-        "steer"
-      } else {
-        "queue"
-      },
+      "mode": mode,
       "content": [{ "type": "text", "text": text }],
     },
   )

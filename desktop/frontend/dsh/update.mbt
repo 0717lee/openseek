@@ -142,49 +142,22 @@ pub fn update(
         },
       )
     }
-    WorktreeReady(session_id~, generation~, project~, name~, created~, path~) => {
+    WorktreeReady(session_id~, generation~, project~, path~, draft~) => {
       guard state.prompt_generation == generation &&
         state.prompt_pending_session == Some(session_id) else {
         return (@cmd.none, state)
       }
-      // Creating the host checkout cannot be cancelled by page navigation.
-      // If its originating conversation is no longer active, abandon the
-      // remaining dsh setup but settle only that submission; newer page state
-      // such as loading, draft, and placement belongs to the active session.
-      if state.active_id != Some(session_id) {
-        return (
-          if created {
-            state.release_abandoned_worktree(
-              dispatch,
-              session_id,
-              state.active_id,
-              generation,
-              project,
-              name,
-            )
-          } else {
-            @cmd.none
-          },
-          { ..state, prompt_pending_session: None },
-        )
-      }
       (
         state.register_prompt_workspace(
-          dispatch, session_id, generation, project, path,
+          dispatch, session_id, generation, project, path, draft,
         ),
-        { ..state, worktree_project: Some(project), loading: true },
-      )
-    }
-    WorktreeReleaseFailed(visible_session~, generation~, message~) => {
-      // Cleanup belongs to the page that was visible when navigation abandoned
-      // setup. A later navigation or send must not annotate unrelated state.
-      guard state.active_id == visible_session &&
-        state.prompt_generation == generation else {
-        return (@cmd.none, state)
-      }
-      (
-        @cmd.none,
-        { ..state, notice: "failed to release abandoned worktree: " + message },
+        if state.active_id == Some(session_id) {
+          { ..state, worktree_project: Some(project), loading: true }
+        } else {
+          // The immutable first-send pipeline continues for its originating
+          // conversation without changing the newly selected page.
+          state
+        },
       )
     }
     Send =>
@@ -287,7 +260,7 @@ pub fn update(
         if state.prompt_generation != generation {
           return (@cmd.none, state)
         }
-        if state.active_id != Some(session_id) {
+        if state.active_id != Some(session_id) && kind is DshPromptReply(..) {
           return (@cmd.none, { ..state, prompt_pending_session: None })
         }
       }
@@ -496,6 +469,10 @@ fn State::with_reply(
       self.selection_generation != selection_generation {
       return (@cmd.none, { ..self, creation_pending: false })
     }
+    let background_prompt = kind
+      .prompt_origin()
+      .map(origin => self.active_id != Some(origin.0))
+      .unwrap_or(false)
     return (
       @cmd.none,
       {
@@ -521,12 +498,16 @@ fn State::with_reply(
         } else {
           self.models
         },
-        loading: if kind.model_session() is Some(_) {
+        loading: if background_prompt || kind.model_session() is Some(_) {
           self.loading
         } else {
           false
         },
-        notice: envelope.error(),
+        notice: if background_prompt {
+          self.notice
+        } else {
+          envelope.error()
+        },
       },
     )
   }
@@ -547,16 +528,20 @@ fn State::with_reply(
           workspace.path == worktree_path &&
           workspace.session_ids.contains(session_id)
         }) {
-        return (
-          @cmd.none,
-          {
-            ..self,
-            workspaces,
-            prompt_pending_session: None,
-            loading: false,
-            notice: "DeepSeek Harness did not move the conversation into its worktree Workspace",
-          },
-        )
+        return if self.active_id == Some(session_id) {
+          (
+            @cmd.none,
+            {
+              ..self,
+              workspaces,
+              prompt_pending_session: None,
+              loading: false,
+              notice: "DeepSeek Harness did not move the conversation into its worktree Workspace",
+            },
+          )
+        } else {
+          (@cmd.none, { ..self, workspaces, prompt_pending_session: None })
+        }
       }
       (
         match kind {
@@ -565,16 +550,27 @@ fn State::with_reply(
               self.list_sessions(dispatch),
               DshPendingReply.pending(dispatch),
             ])
-          DshPromptWorkspacesReply(generation~, ..) =>
-            self.send(dispatch, generation)
+          DshPromptWorkspacesReply(session_id~, generation~, draft~, ..) =>
+            self.send_prompt(
+              dispatch,
+              session_id,
+              draft,
+              generation,
+              mode="queue",
+            )
           _ => @cmd.none
         },
-        {
-          ..self,
-          connection: DshReady,
-          workspaces,
-          loading: kind is DshPromptWorkspacesReply(..),
-          notice: "",
+        if kind is DshPromptWorkspacesReply(session_id~, ..) &&
+          self.active_id != Some(session_id) {
+          { ..self, connection: DshReady, workspaces }
+        } else {
+          {
+            ..self,
+            connection: DshReady,
+            workspaces,
+            loading: kind is DshPromptWorkspacesReply(..),
+            notice: "",
+          }
         },
       )
     }
@@ -815,35 +811,57 @@ fn State::with_reply(
       }
       (@cmd.none, { ..self, models, notice: "" })
     }
-    DshPromptWorkspaceReply(session_id~, generation~, project~, worktree_path~) => {
+    DshPromptWorkspaceReply(
+      session_id~,
+      generation~,
+      project~,
+      worktree_path~,
+      draft~
+    ) => {
       guard value is Object(fields) &&
         fields.get("workspace") is Some(Object(workspace)) &&
         @jsonx.json_text(workspace, "workspaceId") is Some(workspace_id) else {
-        return (
-          @cmd.none,
-          {
-            ..self,
-            prompt_pending_session: None,
-            loading: false,
-            notice: "DeepSeek Harness returned a malformed workspace.create reply",
-          },
-        )
+        return if self.active_id == Some(session_id) {
+          (
+            @cmd.none,
+            {
+              ..self,
+              prompt_pending_session: None,
+              loading: false,
+              notice: "DeepSeek Harness returned a malformed workspace.create reply",
+            },
+          )
+        } else {
+          (@cmd.none, { ..self, prompt_pending_session: None })
+        }
       }
       (
         self.move_prompt_session(
           dispatch, session_id, generation, project, worktree_path, workspace_id,
+          draft,
         ),
         self,
       )
     }
-    DshPromptMoveReply(session_id~, generation~, project~, worktree_path~) =>
+    DshPromptMoveReply(
+      session_id~,
+      generation~,
+      project~,
+      worktree_path~,
+      draft~
+    ) =>
       (
-        DshPromptWorkspacesReply(session_id~, generation~, worktree_path~).request(
-          dispatch,
-          "workspace.list",
-          {},
-        ),
-        { ..self, worktree_project: Some(project), loading: true },
+        DshPromptWorkspacesReply(
+          session_id~,
+          generation~,
+          worktree_path~,
+          draft~,
+        ).request(dispatch, "workspace.list", {}),
+        if self.active_id == Some(session_id) {
+          { ..self, worktree_project: Some(project), loading: true }
+        } else {
+          self
+        },
       )
     DshPromptReply(session_id~, draft~, generation~) => {
       guard self.active_id == Some(session_id) &&
@@ -2832,9 +2850,8 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
       session_id="session-1",
       generation=0,
       project="/work/project",
-      name="wt-1",
-      created=true,
       path="/work/project/.worktrees/wt-1",
+      draft="inspect this project",
     ),
     sending,
   )
@@ -2853,36 +2870,153 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
     draft: "draft for session 2",
     loading: false,
   }
-  let (_, abandoned) = update(
+  let (_, background_setup) = update(
     dispatch,
     WorktreeReady(
       session_id="session-1",
       generation=1,
       project="/work/project",
-      name="wt-1",
-      created=true,
       path="/work/project/.worktrees/wt-1",
+      draft="inspect this project",
     ),
     navigated,
   )
-  assert_eq(abandoned.active_id, Some("session-2"))
-  assert_eq(abandoned.prompt_pending_session, None)
-  assert_eq(abandoned.draft, "draft for session 2")
-  assert_eq(abandoned.worktree_project, None)
-  assert_false(abandoned.loading)
-  assert_false(abandoned.busy())
+  assert_eq(background_setup.active_id, Some("session-2"))
+  assert_eq(background_setup.prompt_pending_session, Some("session-1"))
+  assert_eq(background_setup.draft, "draft for session 2")
+  assert_eq(background_setup.worktree_project, None)
+  assert_false(background_setup.loading)
+  assert_true(background_setup.busy())
   let (_, registered) = update(
     dispatch,
     WorktreeReady(
       session_id="session-1",
       generation=1,
       project="/work/project",
-      name="wt-1",
-      created=true,
       path="/work/project/.worktrees/wt-1",
+      draft="inspect this project",
     ),
     sending,
   )
+  let registered_navigated = {
+    ..registered,
+    active_id: Some("session-2"),
+    models: DshModelsReady(
+      session_id="session-2",
+      options=[{ selection: selected, label: "DeepSeek / Chat" }],
+      selected~,
+      routable=true,
+    ),
+    placement: @composer.LocalCheckout,
+    worktree_project: None,
+    draft: "draft for session 2",
+    loading: false,
+    notice: "session 2 notice",
+  }
+  let (_, background_moving) = update(
+    dispatch,
+    Reply(
+      kind=DshPromptWorkspaceReply(
+        session_id="session-1",
+        generation=1,
+        project="/work/project",
+        worktree_path="/work/project/.worktrees/wt-1",
+        draft="inspect this project",
+      ),
+      value={
+        "type": "server-response",
+        "rpcId": "workspace-background",
+        "result": {
+          "ok": true,
+          "value": {
+            "workspace": {
+              "workspaceId": "workspace-worktree",
+              "title": "wt-1",
+              "path": "/work/project/.worktrees/wt-1",
+              "sessionIds": [],
+            },
+          },
+        },
+      },
+    ),
+    registered_navigated,
+  )
+  assert_true(background_moving == registered_navigated)
+  let (_, background_refreshing) = update(
+    dispatch,
+    Reply(
+      kind=DshPromptMoveReply(
+        session_id="session-1",
+        generation=1,
+        project="/work/project",
+        worktree_path="/work/project/.worktrees/wt-1",
+        draft="inspect this project",
+      ),
+      value={
+        "type": "server-response",
+        "rpcId": "move-background",
+        "result": { "ok": true, "value": { "workspace": {} } },
+      },
+    ),
+    background_moving,
+  )
+  assert_true(background_refreshing == registered_navigated)
+  let (_, background_prompting) = update(
+    dispatch,
+    Reply(
+      kind=DshPromptWorkspacesReply(
+        session_id="session-1",
+        generation=1,
+        worktree_path="/work/project/.worktrees/wt-1",
+        draft="inspect this project",
+      ),
+      value={
+        "type": "server-response",
+        "rpcId": "workspace-list-background",
+        "result": {
+          "ok": true,
+          "value": {
+            "items": [
+              {
+                "workspaceId": "workspace-worktree",
+                "title": "wt-1",
+                "path": "/work/project/.worktrees/wt-1",
+                "sessionIds": ["session-1"],
+              },
+            ],
+          },
+        },
+      },
+    ),
+    background_refreshing,
+  )
+  assert_eq(background_prompting.active_id, Some("session-2"))
+  assert_eq(background_prompting.draft, "draft for session 2")
+  assert_eq(background_prompting.worktree_project, None)
+  assert_eq(background_prompting.notice, "session 2 notice")
+  assert_false(background_prompting.loading)
+  assert_eq(background_prompting.prompt_pending_session, Some("session-1"))
+  let (_, background_settled) = update(
+    dispatch,
+    Reply(
+      kind=DshPromptReply(
+        session_id="session-1",
+        draft="inspect this project",
+        generation=1,
+      ),
+      value={
+        "type": "server-response",
+        "rpcId": "prompt-background",
+        "result": { "ok": true, "value": {} },
+      },
+    ),
+    background_prompting,
+  )
+  assert_eq(background_settled.active_id, Some("session-2"))
+  assert_eq(background_settled.prompt_pending_session, None)
+  assert_eq(background_settled.draft, "draft for session 2")
+  assert_eq(background_settled.notice, "session 2 notice")
+  assert_false(background_settled.loading)
   let (_, moved) = registered.with_reply(
     dispatch,
     DshPromptWorkspaceReply(
@@ -2890,6 +3024,7 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
       generation=1,
       project="/work/project",
       worktree_path="/work/project/.worktrees/wt-1",
+      draft="inspect this project",
     ),
     {
       "type": "server-response",
@@ -2915,6 +3050,7 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
       generation=1,
       project="/work/project",
       worktree_path="/work/project/.worktrees/wt-1",
+      draft="inspect this project",
     ),
     {
       "type": "server-response",
@@ -2929,6 +3065,7 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
       session_id="session-1",
       generation=1,
       worktree_path="/work/project/.worktrees/wt-1",
+      draft="inspect this project",
     ),
     {
       "type": "server-response",
@@ -2956,6 +3093,7 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
       session_id="session-1",
       generation=1,
       worktree_path="/work/project/.worktrees/wt-1",
+      draft="inspect this project",
     ),
     {
       "type": "server-response",

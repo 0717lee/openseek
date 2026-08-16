@@ -221,8 +221,6 @@ pub let worktree_create : Command[@protocol.WorktreeCreatePayload, @protocol.Wor
 
 pub let worktree_list : Command[@protocol.WorktreeListPayload, @protocol.WorktreesReply]
 
-pub let worktree_release_dsh : Command[@protocol.WorktreeReleaseDshPayload, @protocol.EmptyReply]
-
 pub let worktree_remove : Command[@protocol.WorktreeRemovePayload, @protocol.WorktreesReply]
 
 // Errors
