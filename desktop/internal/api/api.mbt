@@ -540,9 +540,17 @@ pub async fn ApiState::run_dsh(
   self : ApiState,
   emit : (String, Json) -> Unit,
 ) -> Unit {
-  self.dsh.run(emit, revoke_workspaces=async fn(generation) {
-    self.dsh_workspaces.revoke(generation)
-  })
+  self.dsh.run(
+    emit,
+    revoke_workspaces=async fn(generation) {
+      self.dsh_workspaces.revoke(generation)
+    },
+    release_worktree=async fn(session_id) {
+      @worktree.release_dsh_session(session_id, fn(workspace, worktrees) {
+        publish_worktree_changed(self, workspace, worktrees)
+      })
+    },
+  )
 }
 
 ///|

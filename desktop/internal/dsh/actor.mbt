@@ -268,6 +268,7 @@ pub async fn Actor::run(
   self : Actor,
   emit : (String, Json) -> Unit,
   revoke_workspaces~ : async (Int) -> Unit,
+  release_worktree~ : async (String) -> Unit,
 ) -> Unit {
   let mut first = true
   for ;; {
@@ -278,7 +279,13 @@ pub async fn Actor::run(
       Some(self.inputs.get())
     }
     @async.with_task_group(group => {
-      self.run_connection(group, pending, emit, revoke_workspaces~)
+      self.run_connection(
+        group,
+        pending,
+        emit,
+        revoke_workspaces~,
+        release_worktree~,
+      )
     })
   }
 }
@@ -290,6 +297,7 @@ async fn[G] Actor::run_connection(
   pending : ActorInput?,
   emit : (String, Json) -> Unit,
   revoke_workspaces~ : async (Int) -> Unit,
+  release_worktree~ : async (String) -> Unit,
 ) -> Unit {
   self.state = Starting
   self.generation += 1
@@ -354,21 +362,42 @@ async fn[G] Actor::run_connection(
     }
     match next {
       Input(input) => connection.dispatch_input(group, self, generation, input)
-      Event(Frame(stream, message)) => {
-        if stream == "mux" {
-          self.interactions.observe(message)
-        }
-        emit("dsh.event", {
-          "stream": stream,
-          "message": message,
-          "generation": self.interactions.generation,
-        })
-      }
+      Event(Frame(stream, message)) =>
+        self.publish_frame(stream, message, emit, release_worktree~)
       Disconnected => break
     }
   }
   connection.shutdown()
   self.finish_disconnect(emit, revoke_workspaces~)
+}
+
+///|
+/// Apply host-owned lifecycle effects before the renderer observes a frame.
+/// A removed dsh conversation releases its Desktop worktree row without
+/// deleting the checkout, making later explicit cleanup use the normal dirty
+/// confirmation path.
+async fn Actor::publish_frame(
+  self : Actor,
+  stream : String,
+  message : Json,
+  emit : (String, Json) -> Unit,
+  release_worktree~ : async (String) -> Unit,
+) -> Unit {
+  if stream == "mux" {
+    self.interactions.observe(message)
+  }
+  if stream == "host" &&
+    message is Object(fields) &&
+    fields.get("payload") is Some(Object(payload)) &&
+    @jsonx.json_text(payload, "type") == Some("host/session-removed") &&
+    @jsonx.json_text(payload, "sessionId") is Some(session_id) {
+    release_worktree(session_id)
+  }
+  emit("dsh.event", {
+    "stream": stream,
+    "message": message,
+    "generation": self.interactions.generation,
+  })
 }
 
 ///|
@@ -562,6 +591,27 @@ test "dsh actor removes only interactions with accepted response receipts" {
   assert_eq(interactions.generation, 1)
   interactions.remove_accepted_response(request, { "accepted": true })
   @debug.assert_eq(interactions.snapshot(), { "data": [], "generation": 2 })
+}
+
+///|
+async test "dsh actor releases a removed session before publishing its event" {
+  let actor = Actor()
+  let order : Array[String] = []
+  let released : @async.Queue[String] = Queue(kind=Blocking(1))
+  actor.publish_frame(
+    "host",
+    {
+      "rpcId": "host-1",
+      "payload": { "type": "host/session-removed", "sessionId": "session-1" },
+    },
+    (method_, _) => order.push(method_),
+    release_worktree=async fn(session_id) {
+      released.put(session_id)
+      order.push("released:" + session_id)
+    },
+  )
+  assert_eq(released.get(), "session-1")
+  assert_eq(order, ["released:session-1", "dsh.event"])
 }
 
 ///|

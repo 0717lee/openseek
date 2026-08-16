@@ -751,6 +751,40 @@ pub async fn list_dsh_worktree_bindings() -> Array[DshWorktreeBinding] {
 }
 
 ///|
+/// A host/session-removed event is dsh's authoritative end of one owner. Keep
+/// its checkout and branch intact, but release the registry row to the normal
+/// worktree lifecycle so a dirty checkout is never deleted automatically and
+/// `worktree.remove` can apply its ordinary confirmation policy later.
+pub async fn release_dsh_session(
+  session_id : String,
+  on_committed : (String, Array[WorktreeInfo]) -> Unit,
+) -> Unit {
+  worktree_registry_lock.acquire()
+  defer worktree_registry_lock.release()
+  for workspace in @workspaces.registered() {
+    let entries = read_worktrees_unlocked(workspace)
+    let mut found = false
+    let released = entries.map(entry => {
+      if entry.dsh_session == Some(session_id) {
+        found = true
+        { ..entry, dsh_session: None }
+      } else {
+        entry
+      }
+    })
+    if found {
+      @async.protect_from_cancel(() => {
+        write_worktrees(workspace, released)
+        on_committed(
+          resource_path(workspace),
+          worktree_infos(workspace, released),
+        )
+      })
+    }
+  }
+}
+
+///|
 /// The smallest `wt-N` nobody holds: free in the registry, on disk, and as
 /// a branch. Branches survive removal, so the counter naturally skips past
 /// history instead of resurrecting an old branch.
@@ -1653,6 +1687,27 @@ async test "worktree names are host-generated and skip surviving branches" {
   }
   assert_eq(binding.workspace, repo.to_string())
   assert_eq(binding.worktree.name, "wt-5")
+  let released_workspaces : Array[String] = []
+  let released : Array[WorktreeInfo] = []
+  release_dsh_session("session-dsh-1", (workspace, worktrees) => {
+    released_workspaces.push(workspace)
+    released.append(worktrees)
+  })
+  assert_eq(released_workspaces, [repo.to_string()])
+  guard released.iter().find_first(info => info.name == "wt-5")
+    is Some(released_dsh) else {
+    fail("expected released dsh worktree row")
+  }
+  assert_eq(released_dsh.dsh_session, None)
+  assert_true(released_dsh.present)
+  assert_false(
+    list_dsh_worktree_bindings()
+    .iter()
+    .any(binding => binding.session_id == "session-dsh-1"),
+  )
+  // Releasing ownership preserves files and routes later cleanup through the
+  // ordinary dirty check instead of silently discarding the checkout.
+  ignore(remove(host, repo.to_string(), "wt-5", false, fn(_) {  }))
   @fs.rmdir(root.to_string(), recursive=true)
 }
 
