@@ -395,7 +395,19 @@ async fn Actor::publish_frame(
     fields.get("payload") is Some(Object(payload)) &&
     @jsonx.json_text(payload, "type") == Some("host/session-removed") &&
     @jsonx.json_text(payload, "sessionId") is Some(session_id) {
-    release_worktree(session_id)
+    release_worktree(session_id) catch {
+      error if @async.is_being_cancelled() => raise error
+      error =>
+        // Registry cleanup is best-effort at this event boundary. Losing the
+        // actor would also skip the removal event and later Workspace grant
+        // revocation, leaving every subsequent request without a consumer.
+        @xlog.error(category="dsh") <?
+          {
+            "event": "dsh_worktree_release_failed",
+            "session_id": session_id,
+            "error": "\{error}",
+          }
+    }
   }
   emit("dsh.event", {
     "stream": stream,
@@ -618,6 +630,24 @@ async test "dsh actor releases a removed session before publishing its event" {
   )
   assert_eq(released.get(), "session-1")
   assert_eq(order, ["released:session-1", "dsh.event"])
+}
+
+///|
+async test "dsh actor publishes session removal after worktree release failure" {
+  let actor = Actor()
+  let published : Array[String] = []
+  actor.publish_frame(
+    "host",
+    {
+      "rpcId": "host-1",
+      "payload": { "type": "host/session-removed", "sessionId": "session-1" },
+    },
+    (method_, _) => published.push(method_),
+    release_worktree=_ => {
+      raise RequestFailed("release-worktree", "registry is read-only")
+    },
+  )
+  assert_eq(published, ["dsh.event"])
 }
 
 ///|
