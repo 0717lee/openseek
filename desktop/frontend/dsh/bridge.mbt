@@ -330,9 +330,53 @@ fn State::create_worktree(
       }
       scheduler.add(
         dispatch(
-          WorktreeReady(session_id~, generation~, project~, path=worktree.path),
+          WorktreeReady(
+            session_id~,
+            generation~,
+            project~,
+            name=reply.name,
+            created=reply.created,
+            path=worktree.path,
+          ),
         ),
       )
+    })
+  })
+}
+
+///|
+/// Give an abandoned first-send checkout back to the ordinary worktree
+/// lifecycle. This changes only the exact registry owner returned by the
+/// preceding create; the host preserves the checkout and its branch.
+fn State::release_abandoned_worktree(
+  _self : State,
+  dispatch : @cmd.Emit[Msg],
+  session_id : String,
+  visible_session : String?,
+  generation : Int,
+  project : String,
+  name : String,
+) -> @cmd.Cmd {
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      let _ : @protocol.EmptyReply = @interop.bridge_request(
+        @interop.ChannelId::Local,
+        @commands.worktree_release_dsh,
+        { workspace: project, name, dsh_session: session_id },
+      ) catch {
+        error => {
+          scheduler.add(
+            dispatch(
+              WorktreeReleaseFailed(
+                visible_session~,
+                generation~,
+                message=@interop.bridge_error_text(error),
+              ),
+            ),
+          )
+          return
+        }
+      }
     })
   })
 }

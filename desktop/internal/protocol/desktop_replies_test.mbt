@@ -736,9 +736,14 @@ test "workspace replies keep success compatible and carry refusals" {
 test "worktree creation results keep success compatible and carry refusals" {
   let created : @protocol.WorktreeCreateResult = WorktreeCreatedReply({
     name: "wt-1",
+    created: true,
     worktrees: [],
   })
-  @debug.assert_eq(created.to_json(), { "name": "wt-1", "worktrees": [] })
+  @debug.assert_eq(created.to_json(), {
+    "name": "wt-1",
+    "created": true,
+    "worktrees": [],
+  })
   let decoded : @protocol.WorktreeCreateResult = @json.from_json(
     created.to_json(),
   )

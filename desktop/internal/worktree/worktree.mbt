@@ -785,6 +785,40 @@ pub async fn release_dsh_session(
 }
 
 ///|
+/// Release one exact dsh-owned registry row when the renderer navigates away
+/// after `worktree.create` commits but before dsh adopts the checkout. A stale
+/// or replayed request is an idempotent no-op; it can never release a row that
+/// belongs to another dsh conversation. Files, checkout, and branch survive.
+pub async fn release_dsh_worktree(
+  workspace : String,
+  name : String,
+  session_id : String,
+  on_committed : (Array[WorktreeInfo]) -> Unit,
+) -> Unit {
+  guard @pathx.Absolute::from_uri_path(workspace) is Some(absolute) &&
+    @workspaces.registered_dir(absolute) is Some(dir) else {
+    raise WorktreeError("\{workspace} is not a registered workspace")
+  }
+  worktree_registry_lock.acquire()
+  defer worktree_registry_lock.release()
+  let entries = read_worktrees_unlocked(dir)
+  let mut found = false
+  let released = entries.map(entry => {
+    if entry.name == name && entry.dsh_session == Some(session_id) {
+      found = true
+      { ..entry, dsh_session: None }
+    } else {
+      entry
+    }
+  })
+  guard found else { return }
+  @async.protect_from_cancel(() => {
+    write_worktrees(dir, released)
+    on_committed(worktree_infos(dir, released))
+  })
+}
+
+///|
 /// The smallest `wt-N` nobody holds: free in the registry, on disk, and as
 /// a branch. Branches survive removal, so the counter naturally skips past
 /// history instead of resurrecting an old branch.
@@ -902,7 +936,7 @@ pub async fn create(
       // `present: false` view instead of returning success invisibly.
       let infos = worktree_infos(dir, entries)
       @async.protect_from_cancel(() => on_committed(infos))
-      return { name: entry.name, worktrees: infos }
+      return { name: entry.name, created: false, worktrees: infos }
     }
     // The repair: presence is what the clients render, so the restored
     // checkout is a registry commit like any other and broadcasts as one.
@@ -914,7 +948,7 @@ pub async fn create(
     )
     let infos = worktree_infos(dir, entries)
     @async.protect_from_cancel(() => on_committed(infos))
-    return { name: entry.name, worktrees: infos }
+    return { name: entry.name, created: false, worktrees: infos }
   }
   // OpenSeek owns its session store and in-flight engine slots, so it can
   // prove that placement is chosen before any durable history. Codex owns its
@@ -1025,7 +1059,7 @@ pub async fn create(
     infos = worktree_infos(dir, entries)
     on_committed(infos)
   })
-  { name, worktrees: infos }
+  { name, created: true, worktrees: infos }
 }
 
 ///|
@@ -1689,8 +1723,13 @@ async test "worktree names are host-generated and skip surviving branches" {
   assert_eq(binding.worktree.name, "wt-5")
   let released_workspaces : Array[String] = []
   let released : Array[WorktreeInfo] = []
-  release_dsh_session("session-dsh-1", (workspace, worktrees) => {
-    released_workspaces.push(workspace)
+  // A stale or forged name cannot release a different registry row.
+  release_dsh_worktree(repo.to_string(), "wt-4", "session-dsh-1", worktrees => {
+    released.append(worktrees)
+  })
+  assert_eq(released, [])
+  release_dsh_worktree(repo.to_string(), "wt-5", "session-dsh-1", worktrees => {
+    released_workspaces.push(repo.to_string())
     released.append(worktrees)
   })
   assert_eq(released_workspaces, [repo.to_string()])

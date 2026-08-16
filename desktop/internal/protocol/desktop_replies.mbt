@@ -761,6 +761,9 @@ pub(all) struct WorktreesReply {
 /// and needs the generated one to start the bound conversation.
 pub(all) struct WorktreeCreateReply {
   name : String
+  // False means this call recovered an existing owner binding (and may have
+  // repaired its checkout); clients must not treat that row as newly orphaned.
+  created : Bool
   worktrees : Array[WorktreeInfo]
 } derive(Debug, Eq, FromJson, ToJson)
 

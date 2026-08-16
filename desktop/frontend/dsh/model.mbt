@@ -167,7 +167,14 @@ enum Msg {
     session_id~ : String,
     generation~ : Int,
     project~ : String,
+    name~ : String,
+    created~ : Bool,
     path~ : String
+  )
+  WorktreeReleaseFailed(
+    visible_session~ : String?,
+    generation~ : Int,
+    message~ : String
   )
   Send
   Stop

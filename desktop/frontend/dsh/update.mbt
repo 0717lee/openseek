@@ -142,7 +142,7 @@ pub fn update(
         },
       )
     }
-    WorktreeReady(session_id~, generation~, project~, path~) => {
+    WorktreeReady(session_id~, generation~, project~, name~, created~, path~) => {
       guard state.prompt_generation == generation &&
         state.prompt_pending_session == Some(session_id) else {
         return (@cmd.none, state)
@@ -152,13 +152,39 @@ pub fn update(
       // remaining dsh setup but settle only that submission; newer page state
       // such as loading, draft, and placement belongs to the active session.
       if state.active_id != Some(session_id) {
-        return (@cmd.none, { ..state, prompt_pending_session: None })
+        return (
+          if created {
+            state.release_abandoned_worktree(
+              dispatch,
+              session_id,
+              state.active_id,
+              generation,
+              project,
+              name,
+            )
+          } else {
+            @cmd.none
+          },
+          { ..state, prompt_pending_session: None },
+        )
       }
       (
         state.register_prompt_workspace(
           dispatch, session_id, generation, project, path,
         ),
         { ..state, worktree_project: Some(project), loading: true },
+      )
+    }
+    WorktreeReleaseFailed(visible_session~, generation~, message~) => {
+      // Cleanup belongs to the page that was visible when navigation abandoned
+      // setup. A later navigation or send must not annotate unrelated state.
+      guard state.active_id == visible_session &&
+        state.prompt_generation == generation else {
+        return (@cmd.none, state)
+      }
+      (
+        @cmd.none,
+        { ..state, notice: "failed to release abandoned worktree: " + message },
       )
     }
     Send =>
@@ -2727,6 +2753,8 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
       session_id="session-1",
       generation=0,
       project="/work/project",
+      name="wt-1",
+      created=true,
       path="/work/project/.worktrees/wt-1",
     ),
     sending,
@@ -2752,6 +2780,8 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
       session_id="session-1",
       generation=1,
       project="/work/project",
+      name="wt-1",
+      created=true,
       path="/work/project/.worktrees/wt-1",
     ),
     navigated,
@@ -2768,6 +2798,8 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
       session_id="session-1",
       generation=1,
       project="/work/project",
+      name="wt-1",
+      created=true,
       path="/work/project/.worktrees/wt-1",
     ),
     sending,

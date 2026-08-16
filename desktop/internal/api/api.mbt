@@ -923,6 +923,19 @@ pub fn endpoints(
         },
       )
     }),
+    @endpoint.Endpoint::remote(@commands.worktree_release_dsh, async fn(
+      payload,
+    ) {
+      @worktree.release_dsh_worktree(
+        payload.workspace,
+        payload.name,
+        payload.dsh_session,
+        worktrees => {
+          publish_worktree_changed(state, payload.workspace, worktrees)
+        },
+      )
+      Acknowledged
+    }),
     @endpoint.Endpoint::remote(@commands.auth_status, async fn(_) {
       auth_status(state)
     }),

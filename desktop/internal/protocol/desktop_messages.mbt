@@ -223,6 +223,16 @@ pub(all) struct WorktreeRemovePayload {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+/// Release one dsh conversation's ownership of a host-created worktree after
+/// the renderer abandons first-send setup. The checkout and branch remain;
+/// all three fields identify the exact registry row whose owner may change.
+pub(all) struct WorktreeReleaseDshPayload {
+  workspace : String
+  name : String
+  dsh_session : String
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
 pub(all) struct InstallSkillPayload {
   module_name : String
   version : String
