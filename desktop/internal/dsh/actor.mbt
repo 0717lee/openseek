@@ -98,6 +98,24 @@ fn PendingInteractionRegistry::remove_rpc(
 }
 
 ///|
+/// An accepted HTTP receipt is authoritative even if the independent mux
+/// resolution event has not arrived yet. Remove only the request named by a
+/// well-formed client response; rejected or malformed receipts remain pending.
+fn PendingInteractionRegistry::remove_accepted_response(
+  self : PendingInteractionRegistry,
+  message : Json,
+  receipt : Json,
+) -> Unit {
+  guard receipt is Object(receipt_fields) &&
+    receipt_fields.get("accepted") is Some(True) &&
+    message is Object(message_fields) &&
+    @jsonx.json_text(message_fields, "rpcId") is Some(rpc_id) else {
+    return
+  }
+  self.remove_rpc(rpc_id)
+}
+
+///|
 fn PendingInteractionRegistry::remove_approval(
   self : PendingInteractionRegistry,
   approval_id : String,
@@ -450,7 +468,12 @@ fn[G] Connection::dispatch_input(
             Err(failure)
           }
         } noraise {
-          value => Ok(value)
+          value => {
+            // Publish removal before returning the accepted receipt so a page
+            // attach cannot replay controls that dsh has already consumed.
+            actor.interactions.remove_accepted_response(message, value)
+            Ok(value)
+          }
         }
         (reply.try_put(outcome) catch { _ => false }) |> ignore
       })
@@ -516,6 +539,29 @@ async test "dsh actor tracks pending interactions and consumes buffered commands
   events.put(Frame("mux", {}))
   disconnects.put(())
   assert_true(actor.next_step(events, disconnects) is Disconnected)
+}
+
+///|
+test "dsh actor removes only interactions with accepted response receipts" {
+  let interactions = PendingInteractionRegistry()
+  let request : Json = {
+    "rpcId": "question-rpc",
+    "payload": {
+      "type": "question/requested",
+      "sessionId": "session-1",
+      "questions": [],
+    },
+  }
+  interactions.observe(request)
+  interactions.remove_accepted_response(request, { "accepted": false })
+  @debug.assert_eq(interactions.snapshot(), {
+    "data": [{ "stream": "mux", "message": request, "generation": 1 }],
+    "generation": 1,
+  })
+  interactions.remove_accepted_response({}, { "accepted": true })
+  assert_eq(interactions.generation, 1)
+  interactions.remove_accepted_response(request, { "accepted": true })
+  @debug.assert_eq(interactions.snapshot(), { "data": [], "generation": 2 })
 }
 
 ///|
