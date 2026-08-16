@@ -1,6 +1,8 @@
 // App-lifetime owner of one dsh Web process. Requests enter a bounded command
-// queue; the two downlink WebSockets enter a separate bounded event queue so
-// a stalled Desktop page cannot block dsh's event producers indefinitely.
+// queue; high-volume downlink frames enter a separate bounded event queue so
+// a stalled Desktop page cannot block dsh's producers indefinitely. One-shot
+// host lifecycle frames use a low-volume unbounded lane and cannot be mistaken
+// for replayable token traffic when that bounded queue overflows.
 
 ///|
 priv suberror DshError {
@@ -60,6 +62,23 @@ pub(all) struct DshConnectionRevision {
 ///|
 priv enum DshEvent {
   Frame(String, Json)
+}
+
+///|
+/// These host events change Desktop-owned authority or durable ownership and
+/// are not reconstructible from the mux replay after an overflow reconnect.
+/// Keep them out of the lossy token/event lane.
+fn DshEvent::must_deliver(self : DshEvent) -> Bool {
+  guard self is Frame("host", Object(fields)) &&
+    fields.get("payload") is Some(Object(payload)) else {
+    return false
+  }
+  match @jsonx.json_text(payload, "type") {
+    Some("host/session-removed")
+    | Some("host/workspace-changed")
+    | Some("host/workspace-removed") => true
+    _ => false
+  }
 }
 
 ///|
@@ -354,6 +373,7 @@ async fn[G] Actor::run_connection(
   self.interactions.reset()
   emit("dsh.status_changed", self.status())
   let events : @async.Queue[DshEvent] = Queue(kind=Blocking(DshEventCapacity))
+  let lifecycle_events : @async.Queue[DshEvent] = Queue(kind=Unbounded)
   // Disconnects cannot share `events`: queue saturation is itself one reason
   // a pump exits, and a sentinel written back into that full queue could vanish.
   let disconnects : @async.Queue[Unit] = Queue(
@@ -375,7 +395,16 @@ async fn[G] Actor::run_connection(
     }
   }
   let receive = (stream : String, value : Json) => {
-    let accepted = events.try_put(Frame(stream, value)) catch { _ => false }
+    let event = Frame(stream, value)
+    let accepted = if event.must_deliver() {
+      lifecycle_events.try_put(event) catch {
+        _ => false
+      }
+    } else {
+      events.try_put(event) catch {
+        _ => false
+      }
+    }
     self.signal()
     accepted
   }
@@ -403,7 +432,7 @@ async fn[G] Actor::run_connection(
     connection.dispatch_input(group, self, generation, input)
   }
   for ;; {
-    let next = self.next_step(events, disconnects) catch {
+    let next = self.next_step(events, lifecycle_events, disconnects) catch {
       error if @async.is_being_cancelled() => raise error
       _ => break
     }
@@ -505,9 +534,15 @@ async fn Actor::finish_disconnect(
 async fn Actor::next_step(
   self : Actor,
   events : @async.Queue[DshEvent],
+  lifecycle_events : @async.Queue[DshEvent],
   disconnects : @async.Queue[Unit],
 ) -> ActorStep {
   for ;; {
+    // A lifecycle frame already accepted from the socket must commit before
+    // an unrelated bounded-queue overflow tears this connection down.
+    if (lifecycle_events.try_get() catch { _ => None }) is Some(event) {
+      return Event(event)
+    }
     // Once either pump is gone, requests cannot rely on the complete dsh event
     // surface. Tear down promptly and let the next input reopen both streams.
     if (disconnects.try_get() catch { _ => None }) is Some(_) {
@@ -652,18 +687,37 @@ async test "dsh actor tracks pending interactions and consumes buffered commands
     "generation": 2,
   })
   let events : @async.Queue[DshEvent] = Queue(kind=Blocking(1))
+  let lifecycle_events : @async.Queue[DshEvent] = Queue(kind=Unbounded)
   let disconnects : @async.Queue[Unit] = Queue(kind=Blocking(1))
   let reply : @async.Queue[Result[(Json, DshConnectionRevision), DshError]] = Queue(
     kind=Blocking(1),
   )
   actor.inputs.put(Call("session.list", {}, reply))
-  let step = actor.next_step(events, disconnects)
+  let step = actor.next_step(events, lifecycle_events, disconnects)
   assert_true(step is Input(Call("session.list", _, _)))
   // A separate lane remains writable even when event backpressure is the
   // reason a pump exits, and disconnect wins over the queued event.
   events.put(Frame("mux", {}))
   disconnects.put(())
-  assert_true(actor.next_step(events, disconnects) is Disconnected)
+  assert_true(
+    actor.next_step(events, lifecycle_events, disconnects) is Disconnected,
+  )
+  let removal = Frame("host", {
+    "payload": { "type": "host/session-removed", "sessionId": "session-1" },
+  })
+  assert_true(removal.must_deliver())
+  assert_false(Frame("mux", {}).must_deliver())
+  lifecycle_events.put(removal)
+  disconnects.put(())
+  // An accepted lifecycle frame commits before a simultaneous overflow
+  // disconnect; the next loop observes the disconnect afterward.
+  assert_true(
+    actor.next_step(events, lifecycle_events, disconnects)
+    is Event(Frame("host", _)),
+  )
+  assert_true(
+    actor.next_step(events, lifecycle_events, disconnects) is Disconnected,
+  )
 }
 
 ///|
