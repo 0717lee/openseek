@@ -266,6 +266,13 @@ pub fn update(
         state.active_id != Some(session_id) {
         return (@cmd.none, state)
       }
+      // Model requests use per-session lanes. Their successful values already
+      // guard inside `with_reply`; apply that same guard before a business
+      // error can reach the generic notice branch.
+      if kind.model_session() is Some(session_id) &&
+        state.active_id != Some(session_id) {
+        return (@cmd.none, state)
+      }
       if kind is DshCancelReply(session_id) &&
         state.active_id != Some(session_id) {
         return (
@@ -2123,6 +2130,21 @@ test "dsh business errors preserve newer session navigation" {
     state,
   )
   assert_true(stale_history == state)
+  let (_, stale_models) = update(
+    dispatch,
+    Reply(kind=DshModelsReply("session-a"), value=business_error),
+    state,
+  )
+  assert_true(stale_models == state)
+  let (_, stale_model_selection) = update(
+    dispatch,
+    Reply(
+      kind=DshSelectModelReply(session_id="session-a"),
+      value=business_error,
+    ),
+    state,
+  )
+  assert_true(stale_model_selection == state)
   let (_, stale_cancel) = update(
     dispatch,
     Reply(kind=DshCancelReply("session-a"), value=business_error),
