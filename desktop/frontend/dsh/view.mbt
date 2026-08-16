@@ -177,12 +177,12 @@ pub(all) struct PageActions {
   toggle_terminal : @cmd.Cmd
   toggle_files : @cmd.Cmd
   transcript : @html.Html
+  composer : @html.Html
 }
 
 ///|
 pub fn State::page(
   self : State,
-  dispatch : @cmd.Emit[Msg],
   sidebar_open : Bool,
   terminal_open : Bool,
   file_panel_open : Bool,
@@ -264,69 +264,8 @@ pub fn State::page(
   [
     @html.div(class="topbar dsh-topbar", topbar),
     actions.transcript,
-    self.composer(dispatch),
+    actions.composer,
   ]
-}
-
-///|
-fn State::composer(self : State, dispatch : @cmd.Emit[Msg]) -> @html.Html {
-  let interactions : Array[@html.Html] = []
-  let busy = self.busy()
-  for pending in self.pending {
-    // dsh can run several sessions concurrently. Keep background requests in
-    // state for later, but render only cards owned by the selected session.
-    if self.active_id == Some(pending.session_id()) {
-      interactions.push(pending.view(dispatch, busy))
-    }
-  }
-  let running = self.is_running()
-  let disabled = !(self.connection is DshReady) || !self.has_active()
-  let action = if running {
-    @composer.ActionButton::{
-      id: "dsh-stop",
-      class_name: "stop",
-      title: "Stop DeepSeek Harness",
-      disabled: busy,
-      command: dispatch(Stop),
-      content: @html.text("■"),
-    }
-  } else {
-    @composer.ActionButton::{
-      id: "dsh-send",
-      class_name: "send",
-      title: "Send to DeepSeek Harness",
-      disabled: disabled || busy || self.draft.trim().is_empty(),
-      command: dispatch(Send),
-      content: @html.text("↑"),
-    }
-  }
-  @composer.View::{
-    before_inner: interactions,
-    mentions: [],
-    value: self.draft,
-    placeholder: if self.has_active() {
-      "Ask DeepSeek Harness…"
-    } else {
-      "Create or select a dsh conversation"
-    },
-    disabled,
-    input: dispatch.map(value => DraftChanged(value)),
-    keyboard: @composer.KeyboardActions::{
-      menu_open: false,
-      navigate: _ => @cmd.none,
-      accept: @cmd.none,
-      dismiss: @cmd.none,
-      submit: dispatch(Send),
-      cancel: if running {
-        Some(dispatch(Stop))
-      } else {
-        None
-      },
-    },
-    status: [],
-    action,
-    overlay: None,
-  }.render()
 }
 
 ///|

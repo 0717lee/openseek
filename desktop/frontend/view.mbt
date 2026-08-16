@@ -2012,6 +2012,7 @@ fn view(
   right_panel_html : @html.Html,
   composer_html : @html.Html,
   codex_composer_html : @html.Html,
+  dsh_composer_html : @html.Html,
   sidebar_html : @html.Html,
   quick_open_html : @html.Html,
   skills_html : @html.Html,
@@ -2090,7 +2091,6 @@ fn view(
       )
     Dsh =>
       model.dsh.page(
-        dispatch.map(msg => Dsh(msg)),
         model.sidebar_open,
         terminal_panel_visible,
         file_panel_visible,
@@ -2099,6 +2099,7 @@ fn view(
           toggle_terminal,
           toggle_files: toggle_right_panel,
           transcript: transcript_html,
+          composer: dsh_composer_html,
         },
       )
     Skills => page_with_toggle(dispatch, model, skills_html)

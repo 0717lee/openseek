@@ -73,7 +73,7 @@ pub fn update(
         },
       )
     }
-    DraftChanged(value) => (@cmd.none, { ..state, draft: value })
+    ComposerAction(action) => state.apply_composer_action(dispatch, action)
     Send =>
       if state.busy() || state.draft.trim().is_empty() || !state.has_active() {
         (@cmd.none, state)

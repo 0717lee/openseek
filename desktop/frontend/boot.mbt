@@ -507,6 +507,14 @@ pub fn boot() -> Unit {
       codex_composer_input,
       emit.map(action => CodexComposerAction(action)),
     )
+    let dsh_emit = emit.map(msg => Dsh(msg))
+    let dsh_composer_input = state.map(model => {
+      model.dsh.composer_input(dsh_emit)
+    })
+    let dsh_composer_html = @composer.component(
+      dsh_composer_input,
+      emit.map(action => Dsh(@dsh.Msg::composer_action(action))),
+    )
     let sidebar_input = state.map(model => model.sidebar_component_input())
     let sidebar_html = @sidebar.component(
       sidebar_input,
@@ -527,6 +535,7 @@ pub fn boot() -> Unit {
       right_panel_html,
       composer_html,
       codex_composer_html,
+      dsh_composer_html,
       sidebar_html,
       quick_open_html,
       skills_html,
@@ -537,6 +546,7 @@ pub fn boot() -> Unit {
         right_panel_html,
         composer_html,
         codex_composer_html,
+        dsh_composer_html,
         sidebar_html,
         quick_open_html,
         skills_html,
@@ -551,6 +561,7 @@ pub fn boot() -> Unit {
           right_panel_html,
           composer_html,
           codex_composer_html,
+          dsh_composer_html,
           sidebar_html,
           quick_open_html,
           skills_html,

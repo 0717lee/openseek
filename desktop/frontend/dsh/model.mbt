@@ -99,7 +99,7 @@ enum Msg {
   NewSession(String?)
   NewWorkspaceSession(String)
   OpenSession(String)
-  DraftChanged(String)
+  ComposerAction(@composer.Action)
   Send
   Stop
   ApprovalDecision(rpc_id~ : String, outcome~ : String)
@@ -136,6 +136,13 @@ pub fn Msg::open_session(session_id : String) -> Msg {
 }
 
 ///|
+/// Route the shared composer's deliberate operations back into dsh. Raw
+/// keystrokes and completion navigation remain inside the composer package.
+pub fn Msg::composer_action(action : @composer.Action) -> Msg {
+  ComposerAction(action)
+}
+
+///|
 pub fn Msg::status_changed(value : Json) -> Msg {
   StatusChanged(value)
 }
@@ -153,6 +160,8 @@ struct State {
   active_id : String?
   events : Array[DshEventRecord]
   streaming : String
+  // The last root-authored submission snapshot. Unsent keystrokes live only
+  // in the shared composer component and are cached there per session id.
   draft : String
   pending : Array[DshPendingInteraction]
   // Actor generations order page-attach snapshots against live mux events.

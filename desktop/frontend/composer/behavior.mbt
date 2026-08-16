@@ -5,18 +5,18 @@
 /// A live completion token at the end of a composer draft. The marker is `/`
 /// for a whole-draft command or one of the inline markers accepted by the
 /// caller. The text before an inline token is retained verbatim for insertion.
-struct Trigger {
+priv struct Trigger {
   marker : String
   query : String
   draft_without_token : String
-} derive(Eq)
+}
 
 ///|
 /// Parse the completion grammar used by conversation composers. Slash
 /// commands only apply to the whole draft; `$`, `#`, and `@` are trailing,
 /// whitespace-delimited tokens, with the caller selecting which inline
 /// markers it supports.
-pub fn Trigger::parse(text : String, inline_markers~ : String) -> Trigger? {
+fn Trigger::parse(text : String, inline_markers~ : String) -> Trigger? {
   if text =~ (re"^/", after=query) && query =~ re"^[^[:space:]]*$" {
     return Some({
       marker: "/",
@@ -42,24 +42,24 @@ pub fn Trigger::parse(text : String, inline_markers~ : String) -> Trigger? {
 }
 
 ///|
-pub fn Trigger::marker(self : Trigger) -> String {
+fn Trigger::marker(self : Trigger) -> String {
   self.marker
 }
 
 ///|
-pub fn Trigger::query(self : Trigger) -> String {
+fn Trigger::query(self : Trigger) -> String {
   self.query
 }
 
 ///|
-pub fn Trigger::draft_without_token(self : Trigger) -> String {
+fn Trigger::draft_without_token(self : Trigger) -> String {
   self.draft_without_token
 }
 
 ///|
 /// Whether a result row survives this trigger's query. A blank query keeps
 /// every row; otherwise any supplied field may contain it, case-insensitively.
-pub fn Trigger::matches(self : Trigger, fields : Array[String]) -> Bool {
+fn Trigger::matches(self : Trigger, fields : Array[String]) -> Bool {
   let query = self.query.trim().to_owned().to_lower()
   if query.is_empty() {
     return true
@@ -76,7 +76,7 @@ pub fn Trigger::matches(self : Trigger, fields : Array[String]) -> Bool {
 /// The application-independent part of an open completion menu. The component
 /// keeps its result type and provider kind; this value owns selection, loading,
 /// and the exact draft prefix restored when a row is accepted.
-struct Menu[T] {
+priv struct Menu[T] {
   items : Array[T]
   selected : Int
   loading : Bool
@@ -84,7 +84,7 @@ struct Menu[T] {
 } derive(Eq)
 
 ///|
-pub fn[T] Menu::Menu(
+fn[T] Menu::Menu(
   items : Array[T],
   loading~ : Bool,
   draft_without_token~ : String,
@@ -93,7 +93,7 @@ pub fn[T] Menu::Menu(
 }
 
 ///|
-pub fn[T] Menu::selected(self : Menu[T]) -> Int {
+fn[T] Menu::selected(self : Menu[T]) -> Int {
   self.selected
 }
 
@@ -125,7 +125,7 @@ fn[T] Menu::iter2(self : Menu[T]) -> Iter2[Int, T] {
 ///|
 /// Move the highlighted row by `delta`, wrapping at both ends. An empty menu
 /// is left unchanged so keyboard navigation remains safe while loading.
-pub fn[T] Menu::shifted(self : Menu[T], delta : Int) -> Menu[T] {
+fn[T] Menu::shifted(self : Menu[T], delta : Int) -> Menu[T] {
   let count = self.items.length()
   if count == 0 {
     return self
@@ -134,7 +134,7 @@ pub fn[T] Menu::shifted(self : Menu[T], delta : Int) -> Menu[T] {
 }
 
 ///|
-pub fn[T] Menu::current(self : Menu[T]) -> T? {
+fn[T] Menu::current(self : Menu[T]) -> T? {
   self.items.get(self.selected)
 }
 

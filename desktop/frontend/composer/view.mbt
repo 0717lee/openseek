@@ -1,8 +1,8 @@
 ///|
-/// The primary action at the right edge of a conversation composer. The caller
-/// decides whether the action sends, steers, or stops; this package
-/// owns the button DOM so those states retain identical geometry.
-pub(all) struct ActionButton {
+/// The primary action at the right edge of a conversation composer. This stays
+/// private so every consumer reaches it through `component` and retains the
+/// same send, steer, and stop presentation.
+priv struct ActionButton {
   id : String
   class_name : String
   title : String
@@ -12,7 +12,7 @@ pub(all) struct ActionButton {
 }
 
 ///|
-pub fn ActionButton::render(self : ActionButton) -> @html.Html {
+fn ActionButton::render(self : ActionButton) -> @html.Html {
   @html.button(
     id=self.id,
     class=self.class_name,
@@ -304,9 +304,9 @@ pub fn WorktreeArchiveDialog::render(
 }
 
 ///|
-/// One removable context chip. The caller supplies meaning and commands; this
-/// package owns the exact DOM shape.
-pub(all) struct MentionChip {
+/// One removable context chip. The component supplies meaning and commands;
+/// this private value owns the exact DOM shape.
+priv struct MentionChip {
   glyph : String
   label : String
   title : String
@@ -315,7 +315,7 @@ pub(all) struct MentionChip {
 }
 
 ///|
-pub fn MentionChip::render(self : MentionChip) -> @html.Html {
+fn MentionChip::render(self : MentionChip) -> @html.Html {
   let glyph = @html.span(class="mention-glyph", self.glyph)
   let label = @html.span(class="mention-label", self.label)
   let body = match self.jump {
@@ -345,11 +345,10 @@ pub fn MentionChip::render(self : MentionChip) -> @html.Html {
 }
 
 ///|
-/// A reusable input composer. The caller owns its draft, completion results,
-/// model control, and commands; this view-only
-/// value owns the textarea, mention tray, toolbar, primary action, stable DOM
-/// order, and all surrounding chrome.
-pub(all) struct View {
+/// The component's private DOM projection. Keeping it unconstructible outside
+/// this package prevents a business page from bypassing component-local draft,
+/// completion, keyboard, and action behavior while reusing only the shell.
+priv struct View {
   before_inner : Array[@html.Html]
   mentions : Array[@html.Html]
   value : String
@@ -363,7 +362,7 @@ pub(all) struct View {
 }
 
 ///|
-pub fn View::render(self : View) -> @html.Html {
+fn View::render(self : View) -> @html.Html {
   let inner : Array[@html.Html] = [
     // Keep the input wrapper and its two children permanently mounted. Rabbita
     // diffs array children by position, so chips appearing must not replace
@@ -477,18 +476,15 @@ fn elapsed_label(span_ms : Double) -> String {
 }
 
 ///|
-/// One caller-owned completion row rendered inside the composer popup. The
-/// caller keeps the row's action and payload; this view-only value contains
-/// only its two visible strings.
-pub(all) struct CompletionRow {
+/// One component-owned completion row rendered inside the composer popup.
+priv struct CompletionRow {
   label : String
   detail : String
 }
 
 ///|
-/// A reusable completion popup. `empty` describes a caller-specific
-/// empty/loading state such as "Searching..." or "No files".
-pub(all) struct CompletionView {
+/// The component's private completion popup projection.
+priv struct CompletionView {
   rows : Array[CompletionRow]
   selected : Int
   hint : String
@@ -498,7 +494,7 @@ pub(all) struct CompletionView {
 ///|
 /// Render one completion popup. A row uses `mousedown` so choosing it keeps
 /// focus in the textarea while the owning source updates its draft.
-pub fn CompletionView::render(
+fn CompletionView::render(
   self : CompletionView,
   pick : (Int) -> @cmd.Cmd,
 ) -> @html.Html {
@@ -532,10 +528,10 @@ pub fn CompletionView::render(
 }
 
 ///|
-/// Caller-owned commands for a composer's keyboard behavior.
+/// Component-owned commands for a composer's keyboard behavior.
 /// When the menu is open it captures navigation and acceptance; otherwise
 /// Enter follows the ordinary submit rule below.
-pub(all) struct KeyboardActions {
+priv struct KeyboardActions {
   menu_open : Bool
   navigate : (Int) -> @cmd.Cmd
   accept : @cmd.Cmd
