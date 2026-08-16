@@ -403,9 +403,9 @@ async fn[G] Actor::run_connection(
 ///|
 /// Apply host-owned lifecycle effects before the renderer observes a frame.
 /// A removed dsh conversation releases its Desktop worktree row without
-/// deleting the checkout. A removed Workspace immediately invalidates the
-/// current generation's dsh grants; the following workspace.list may restore
-/// only the memberships that remain.
+/// deleting the checkout. A changed or removed Workspace immediately
+/// invalidates the current generation's dsh grants; the following
+/// workspace.list may restore only the memberships that remain.
 async fn Actor::publish_frame(
   self : Actor,
   stream : String,
@@ -440,7 +440,7 @@ async fn Actor::publish_frame(
         self.workspace_revision += 1
         invalidate_workspaces(self.generation, self.workspace_revision)
       }
-      Some("host/workspace-removed") => {
+      Some("host/workspace-changed") | Some("host/workspace-removed") => {
         self.workspace_revision += 1
         invalidate_workspaces(self.generation, self.workspace_revision)
       }
@@ -703,7 +703,7 @@ async test "dsh actor publishes session removal after worktree release failure" 
 }
 
 ///|
-async test "dsh actor invalidates grants before publishing workspace removal" {
+async test "dsh actor invalidates grants before publishing workspace changes" {
   let actor = Actor()
   actor.generation = 9
   let order : Array[String] = []
@@ -726,6 +726,26 @@ async test "dsh actor invalidates grants before publishing workspace removal" {
   )
   assert_eq(invalidated.get(), (9, 1))
   assert_eq(order, ["invalidated:9:1", "dsh.event"])
+  actor.publish_frame(
+    "host",
+    {
+      "rpcId": "host-workspace-2",
+      "payload": {
+        "type": "host/workspace-changed",
+        "workspaceId": "workspace-2",
+      },
+    },
+    (method_, _) => order.push(method_),
+    invalidate_workspaces=async fn(generation, revision) {
+      invalidated.put((generation, revision))
+      order.push("invalidated:\{generation}:\{revision}")
+    },
+    release_worktree=fn(_) {  },
+  )
+  assert_eq(invalidated.get(), (9, 2))
+  assert_eq(order, [
+    "invalidated:9:1", "dsh.event", "invalidated:9:2", "dsh.event",
+  ])
 }
 
 ///|

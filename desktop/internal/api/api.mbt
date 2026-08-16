@@ -244,8 +244,9 @@ priv struct DshWorkspaceAuthorizations {
   // The oldest actor generation still allowed to publish a Workspace list.
   // Revocation advances this past the connection that just closed.
   mut generation : Int
-  // Host Workspace-removal events increment this within one live connection.
-  // A list dispatched before the event cannot restore its revoked bindings.
+  // Host Workspace membership events increment this within one live
+  // connection. A list dispatched before the event cannot restore its revoked
+  // bindings.
   mut revision : Int
   bindings : Map[String, String]
 }
@@ -352,9 +353,9 @@ async fn DshWorkspaceAuthorizations::replace(
 
 ///|
 /// Revoke the grants owned by one still-open dsh connection after its host
-/// stream reports an authoritative Workspace removal. Keep the generation
-/// eligible so the replacement workspace.list from this same connection can
-/// restore only the memberships that still exist.
+/// stream reports an authoritative Workspace membership change. Keep the
+/// generation eligible so the replacement workspace.list from this same
+/// connection can restore only the memberships that still exist.
 async fn DshWorkspaceAuthorizations::invalidate(
   self : DshWorkspaceAuthorizations,
   generation : Int,

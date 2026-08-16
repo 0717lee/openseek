@@ -1318,7 +1318,10 @@ fn State::with_event(
     "host/workspace-changed" =>
       (
         DshWorkspacesReply.request(dispatch, "workspace.list", {}),
-        { ..self, loading: true },
+        // Membership can move a live session to another path. The actor has
+        // already revoked the old grants, so hide cached rows until this
+        // revision's replacement snapshot succeeds.
+        { ..self, workspaces: [], loading: true },
       )
     "host/workspace-removed" =>
       (
@@ -2791,7 +2794,7 @@ test "removing a background dsh session preserves the active transcript" {
 }
 
 ///|
-test "removed dsh Workspace hides cached host roots before refresh" {
+test "changed or removed dsh Workspace hides cached host roots before refresh" {
   let state = {
     ..State(),
     connection: DshReady,
@@ -2833,6 +2836,23 @@ test "removed dsh Workspace hides cached host roots before refresh" {
   assert_true(next.workspaces.is_empty())
   assert_true(next.active_workspace_path() is None)
   assert_true(next.loading)
+  let (_, changed) = update(
+    dispatch,
+    Event({
+      "stream": "host",
+      "message": {
+        "rpcId": "host-workspace-2",
+        "payload": {
+          "type": "host/workspace-changed",
+          "workspaceId": "workspace-1",
+        },
+      },
+    }),
+    state,
+  )
+  assert_true(changed.workspaces.is_empty())
+  assert_true(changed.active_workspace_path() is None)
+  assert_true(changed.loading)
 }
 
 ///|

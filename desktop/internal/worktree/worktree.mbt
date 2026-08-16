@@ -59,6 +59,14 @@ const WorktreeBranchPrefix = "openseek/"
 let worktree_registry_lock : @async.Mutex = Mutex()
 
 ///|
+/// dsh session ids are process-unique. Once its authoritative removal event
+/// arrives, remember that terminal state under `worktree_registry_lock` so a
+/// request that validated just before the event cannot create a new owned row
+/// afterward. Existing creation already holding the lock commits first and is
+/// then released by the event; removal holding it first makes creation refuse.
+let removed_dsh_sessions : Map[String, Bool] = Map([])
+
+///|
 priv struct WorktreeEntry {
   name : String
   branch : String
@@ -754,13 +762,16 @@ pub async fn list_dsh_worktree_bindings() -> Array[DshWorktreeBinding] {
 /// A host/session-removed event is dsh's authoritative end of one owner. Keep
 /// its checkout and branch intact, but release the registry row to the normal
 /// worktree lifecycle so a dirty checkout is never deleted automatically and
-/// `worktree.remove` can apply its ordinary confirmation policy later.
+/// `worktree.remove` can apply its ordinary confirmation policy later. The
+/// same lock records the terminal session id before scanning rows, closing the
+/// validate-before-create race even when no binding exists yet.
 pub async fn release_dsh_session(
   session_id : String,
   on_committed : (String, Array[WorktreeInfo]) -> Unit,
 ) -> Unit {
   worktree_registry_lock.acquire()
   defer worktree_registry_lock.release()
+  removed_dsh_sessions[session_id] = true
   for workspace in @workspaces.registered() {
     let entries = read_worktrees_unlocked(workspace)
     let mut found = false
@@ -917,6 +928,12 @@ pub async fn create(
   let submodule_checkout_timeout_seconds = workspace_settings.submodule_checkout_timeout_seconds
   worktree_registry_lock.acquire()
   defer worktree_registry_lock.release()
+  if owner is DshSession(session_id) &&
+    removed_dsh_sessions.get(session_id) is Some(_) {
+    raise WorktreeError(
+      "this dsh conversation was removed before worktree creation",
+    )
+  }
   let entries = read_worktrees_unlocked(dir)
   // This conversation already holds its environment. Two shapes land here:
   // the idempotent replay of a create whose reply was lost, and the repair
@@ -1757,6 +1774,26 @@ async test "worktree names are host-generated and skip surviving branches" {
   }
   assert_eq(released_dsh.dsh_session, None)
   assert_true(released_dsh.present)
+  assert_false(
+    list_dsh_worktree_bindings()
+    .iter()
+    .any(binding => binding.session_id == "session-dsh-1"),
+  )
+  let removed_create_detail = try {
+    ignore(
+      create(host, repo.to_string(), WorktreeOwner::dsh("session-dsh-1"), fn(
+        _,
+      ) {
+
+      }),
+    )
+    "no error"
+  } catch {
+    WorktreeError(detail) => detail
+    error if @async.is_being_cancelled() => raise error
+    error => "\{error}"
+  }
+  assert_true(removed_create_detail.contains("dsh conversation was removed"))
   assert_false(
     list_dsh_worktree_bindings()
     .iter()
