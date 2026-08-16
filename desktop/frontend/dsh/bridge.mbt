@@ -11,7 +11,7 @@
 fn DshReplyKind::ordered_lane(self : DshReplyKind) -> String? {
   match self {
     DshReconnectReply | DshWorkspacesReply => Some("dsh-workspace-list")
-    DshSessionsReply => Some("dsh-session-list")
+    DshSessionsReply(..) => Some("dsh-session-list")
     DshHistoryReply(session_id) => Some("dsh-history-" + session_id)
     _ => None
   }
@@ -65,7 +65,10 @@ fn DshReplyKind::request(
 test "dsh snapshot replies select independent ordered lanes" {
   assert_eq(DshReconnectReply.ordered_lane(), Some("dsh-workspace-list"))
   assert_eq(DshWorkspacesReply.ordered_lane(), Some("dsh-workspace-list"))
-  assert_eq(DshSessionsReply.ordered_lane(), Some("dsh-session-list"))
+  assert_eq(
+    DshSessionsReply(status_generation=0).ordered_lane(),
+    Some("dsh-session-list"),
+  )
   assert_eq(
     DshHistoryReply("session-1").ordered_lane(),
     Some("dsh-history-session-1"),
@@ -169,6 +172,18 @@ fn State::refresh(self : State, dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
       DshReconnectReply.request(dispatch, "workspace.list", {})
     DshStarting | DshReady => DshStatusReply.status(dispatch)
   }
+}
+
+///|
+/// Capture the last reduced WebSocket status generation at the beginning of a
+/// session.list request. Its reply can then merge only observations that are
+/// newer than this particular snapshot.
+fn State::list_sessions(self : State, dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
+  DshSessionsReply(status_generation=self.session_status_generation).request(
+    dispatch,
+    "session.list",
+    {},
+  )
 }
 
 ///|

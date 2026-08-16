@@ -386,7 +386,7 @@ fn State::with_reply(
       (
         if kind is DshReconnectReply {
           @cmd.batch([
-            DshSessionsReply.request(dispatch, "session.list", {}),
+            self.list_sessions(dispatch),
             DshPendingReply.pending(dispatch),
           ])
         } else {
@@ -425,11 +425,27 @@ fn State::with_reply(
         },
       )
     }
-    DshSessionsReply => {
+    DshSessionsReply(status_generation~) => {
       let sessions : Array[DshSessionRow] = []
       if value is Object(fields) && fields.get("items") is Some(Array(items)) {
         for item in items {
           if DshSessionRow::decode(item) is Some(row) {
+            let row = if self.session_statuses
+              .iter()
+              .find_first(status => {
+                status.session_id == row.id &&
+                status.generation > status_generation
+              })
+              is Some(status) {
+              let blank = self.sessions
+                .iter()
+                .find_first(current => current.id == row.id)
+                .map(current => current.blank)
+                .unwrap_or(if status.running { false } else { row.blank })
+              { ..row, running: status.running, blank }
+            } else {
+              row
+            }
             sessions.push(row)
           }
         }
@@ -492,7 +508,7 @@ fn State::with_reply(
       }
       let commands = [
         DshWorkspacesReply.request(dispatch, "workspace.list", {}),
-        DshSessionsReply.request(dispatch, "session.list", {}),
+        self.list_sessions(dispatch),
       ]
       if activate {
         commands.push(self.load_history(dispatch, session_id))
@@ -627,7 +643,7 @@ fn State::with_status(
       (
         @cmd.batch([
           DshWorkspacesReply.request(dispatch, "workspace.list", {}),
-          DshSessionsReply.request(dispatch, "session.list", {}),
+          self.list_sessions(dispatch),
           DshPendingReply.pending(dispatch),
         ]),
         { ..self, connection: DshReady, loading: true, notice: "" },
@@ -751,11 +767,22 @@ fn State::with_event(
           row
         }
       })
+      let status_generation = self.session_status_generation + 1
+      let session_statuses = self.session_statuses.filter(status => {
+        status.session_id != session_id
+      })
+      session_statuses.push({
+        session_id,
+        running,
+        generation: status_generation,
+      })
       (
         @cmd.none,
         {
           ..self,
           sessions,
+          session_statuses,
+          session_status_generation: status_generation,
           loading: if self.active_id == Some(session_id) {
             self.pending
             .iter()
@@ -773,7 +800,7 @@ fn State::with_event(
       (
         @cmd.batch([
           DshWorkspacesReply.request(dispatch, "workspace.list", {}),
-          DshSessionsReply.request(dispatch, "session.list", {}),
+          self.list_sessions(dispatch),
         ]),
         { ..self, loading: true },
       )
@@ -795,7 +822,7 @@ fn State::with_event(
           // A session list already in flight may still contain the removed
           // row. Queue a fresh snapshot behind it so the session-list lane
           // makes this event's state the final baseline.
-          DshSessionsReply.request(dispatch, "session.list", {}),
+          self.list_sessions(dispatch),
           match active_id {
             Some(id) if active_id != self.active_id =>
               self.load_history(dispatch, id)
@@ -822,6 +849,9 @@ fn State::with_event(
             self.streaming
           },
           pending,
+          session_statuses: self.session_statuses.filter(status => {
+            status.session_id != session_id
+          }),
           response_pending_rpcs: self.response_pending_rpcs.filter(rpc_id => {
             pending.iter().any(item => item.rpc_id() == rpc_id)
           }),
@@ -1562,16 +1592,81 @@ test "empty dsh session baseline clears a deleted active transcript" {
     streaming: "stale output",
     loading: true,
   }
-  let (_, next) = state.with_reply(dispatch, DshSessionsReply, {
-    "type": "server-response",
-    "rpcId": "session-list",
-    "result": { "ok": true, "value": { "items": [] } },
-  })
+  let (_, next) = state.with_reply(
+    dispatch,
+    DshSessionsReply(status_generation=0),
+    {
+      "type": "server-response",
+      "rpcId": "session-list",
+      "result": { "ok": true, "value": { "items": [] } },
+    },
+  )
   assert_true(next.active_id is None)
   assert_true(next.events.is_empty())
   assert_eq(next.streaming, "")
   assert_eq(next.draft, "")
   assert_false(next.loading)
+}
+
+///|
+test "dsh session list preserves newer WebSocket running state" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let state = {
+    ..State(),
+    sessions: [
+      {
+        id: "session-1",
+        title: "Session 1",
+        cwd: None,
+        running: false,
+        blank: true,
+      },
+    ],
+    active_id: Some("session-1"),
+  }
+  let request_generation = state.session_status_generation
+  let (_, running) = state.with_event(dispatch, {
+    "stream": "host",
+    "message": {
+      "rpcId": "status-1",
+      "payload": {
+        "type": "host/session-status",
+        "sessionId": "session-1",
+        "running": true,
+      },
+    },
+    "generation": 1,
+  })
+  let snapshot : Json = {
+    "type": "server-response",
+    "rpcId": "session-list-1",
+    "result": {
+      "ok": true,
+      "value": {
+        "items": [
+          {
+            "sessionId": "session-1",
+            "projections": { "values": { "title": "Session 1" } },
+            "running": false,
+            "blank": true,
+          },
+        ],
+      },
+    },
+  }
+  let (_, preserved) = running.with_reply(
+    dispatch,
+    DshSessionsReply(status_generation=request_generation),
+    snapshot,
+  )
+  assert_eq(preserved.sessions.get(0).map(row => row.running), Some(true))
+  assert_eq(preserved.sessions.get(0).map(row => row.blank), Some(false))
+  let (_, fresh) = running.with_reply(
+    dispatch,
+    DshSessionsReply(status_generation=running.session_status_generation),
+    snapshot,
+  )
+  assert_eq(fresh.sessions.get(0).map(row => row.running), Some(false))
 }
 
 ///|

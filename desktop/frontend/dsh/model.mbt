@@ -18,6 +18,16 @@ priv struct DshSessionRow {
 } derive(Eq)
 
 ///|
+/// One WebSocket running-state observation and the local reducer generation
+/// that received it. session.list replies use this to retain only events that
+/// arrived after their request began.
+priv struct DshSessionStatusObservation {
+  session_id : String
+  running : Bool
+  generation : Int
+} derive(Eq)
+
+///|
 /// One durable dsh Workspace. Its canonical path and explicit session account
 /// come from `workspace.list`; the frontend never reconstructs membership from
 /// the session's display-only cwd.
@@ -85,7 +95,7 @@ priv enum DshReplyKind {
   DshReconnectReply
   DshWorkspacesReply
   DshWorkspaceCreateReply(Int)
-  DshSessionsReply
+  DshSessionsReply(status_generation~ : Int)
   DshCreateReply(Int)
   DshHistoryReply(String)
   DshPromptReply(session_id~ : String, draft~ : String, generation~ : Int)
@@ -157,6 +167,11 @@ struct State {
   connection : DshConnection
   workspaces : Array[DshWorkspaceRow]
   sessions : Array[DshSessionRow]
+  // HTTP session snapshots and WebSocket status events use independent
+  // carriers. Record the latest event per session so a late snapshot cannot
+  // roll back a status that arrived after that snapshot request began.
+  session_statuses : Array[DshSessionStatusObservation]
+  session_status_generation : Int
   active_id : String?
   events : Array[DshEventRecord]
   streaming : String
@@ -191,6 +206,8 @@ pub fn State::State(loading? : Bool = false) -> State {
     connection: DshStarting,
     workspaces: [],
     sessions: [],
+    session_statuses: [],
+    session_status_generation: 0,
     active_id: None,
     events: [],
     streaming: "",
