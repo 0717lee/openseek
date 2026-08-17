@@ -27,6 +27,8 @@ fn load_saved_settings(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
           font_size=load_setting(AppFontSizeStorageKey),
           model=load_setting(ModelStorageKey),
           conversation_models=load_setting(ConversationModelsStorageKey),
+          agent=load_setting(AgentStorageKey),
+          codex_model=load_setting(CodexModelStorageKey),
         ),
       ),
     )
@@ -47,6 +49,18 @@ fn save_tree_layout(layout : @fileeditor.TreeLayout) -> @cmd.Cmd {
 /// Persist the tier new conversations start from.
 fn save_default_model(model : EngineModel) -> @cmd.Cmd {
   @cmd.custom_cmd(_ => save_setting(ModelStorageKey, model.wire()))
+}
+
+///|
+/// Persist the agent new conversations start with.
+fn save_default_agent(agent : AgentChoice) -> @cmd.Cmd {
+  @cmd.custom_cmd(_ => save_setting(AgentStorageKey, agent.wire()))
+}
+
+///|
+/// Persist the Codex model the next thread or turn starts with.
+fn save_codex_model(id : String) -> @cmd.Cmd {
+  @cmd.custom_cmd(_ => save_setting(CodexModelStorageKey, id))
 }
 
 ///|

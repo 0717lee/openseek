@@ -227,6 +227,7 @@ enum Msg {
   CloseGitDetails
   ToggleWorktreeMode
   StartDraft(id~ : String, cwd~ : String)
+  AbandonDraft
   OpenThread(String)
   ArchiveThread(String)
   UnarchiveThread(String)
@@ -276,6 +277,21 @@ pub fn Msg::composer_action(action : @composer.Action) -> Msg {
 /// No app-server thread exists until the draft sends its first prompt.
 pub fn Msg::start_draft(id : String, cwd : String) -> Msg {
   StartDraft(id~, cwd~)
+}
+
+///|
+/// Shell entrypoint for the unified model chip: adopt a Codex model id for
+/// the next thread start or turn. The root persists the preference; this
+/// package only carries the current pick.
+pub fn Msg::model_changed(id : String) -> Msg {
+  ModelChanged(id)
+}
+
+///|
+/// Shell entrypoint for dropping a composing draft: the unified model chip
+/// switched the fresh conversation to another agent before its first send.
+pub fn Msg::abandon_draft() -> Msg {
+  AbandonDraft
 }
 
 ///|
@@ -416,6 +432,81 @@ pub fn State::from_thread_snapshot(value : Json) -> State {
 /// request state remain Codex-owned policy.
 pub fn State::can_start_thread(self : State) -> Bool {
   self.connection is CodexReady && !self.loading
+}
+
+///|
+/// Whether the page is composing a local draft that has not created its
+/// app-server thread yet — the only Codex surface where the unified model
+/// chip may still switch the conversation to another agent.
+pub fn State::composing_draft(self : State) -> Bool {
+  self.selection is CodexDraftTask(_)
+}
+
+///|
+/// What the unified model chip can offer for Codex right now. The chip is
+/// root-owned; this value keeps catalog, selection, and availability policy
+/// inside the package that fetched them.
+pub enum CodexModelListing {
+  /// The fetched catalog and the id the next thread start or turn would use.
+  CodexModels(Array[@composer.ModelOption], selected~ : String)
+  /// No usable catalog; the label explains why. Picking the row is a request
+  /// to open the Codex page, where sign-in and connection state live.
+  CodexModelsUnavailable(String)
+}
+
+///|
+pub fn State::model_listing(self : State) -> CodexModelListing {
+  if !self.models.is_empty() {
+    let options : Array[@composer.ModelOption] = []
+    for model in self.models {
+      options.push({ value: model.id, label: model.label })
+    }
+    // `with_models` never leaves an empty selection beside a non-empty
+    // catalog, so this selected id names a real option.
+    return CodexModels(options, selected=self.selected_model)
+  }
+  match self.connection {
+    CodexStarting => CodexModelsUnavailable("Codex — connecting…")
+    CodexUnavailable(_) => CodexModelsUnavailable("Codex unavailable")
+    CodexReady =>
+      if self.account is CodexSignedOut(_) {
+        CodexModelsUnavailable("Sign in to Codex…")
+      } else {
+        CodexModelsUnavailable("Codex — loading models…")
+      }
+  }
+}
+
+///|
+test "the model listing follows catalog and account state" {
+  guard State().model_listing() is CodexModelsUnavailable(connecting) else {
+    fail("a starting connection should have no usable catalog")
+  }
+  inspect(connecting, content="Codex — connecting…")
+  let signed_out = {
+    ..State(),
+    connection: CodexReady,
+    account: CodexSignedOut(true),
+  }
+  guard signed_out.model_listing() is CodexModelsUnavailable(sign_in) else {
+    fail("a signed-out account should have no usable catalog")
+  }
+  inspect(sign_in, content="Sign in to Codex…")
+  let listed = State().with_models({
+    "data": [
+      { "id": "gpt-5.4", "displayName": "GPT-5.4" },
+      {
+        "id": "gpt-5.4-codex",
+        "displayName": "GPT-5.4 Codex",
+        "isDefault": true,
+      },
+    ],
+  })
+  guard listed.model_listing() is CodexModels(options, selected~) else {
+    fail("a fetched catalog should list its models")
+  }
+  assert_eq(options.length(), 2)
+  inspect(selected, content="gpt-5.4-codex")
 }
 
 ///|

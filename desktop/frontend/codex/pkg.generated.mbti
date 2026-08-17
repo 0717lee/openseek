@@ -8,6 +8,7 @@ import {
   "openseek_desktop/frontend/composer",
   "openseek_desktop/frontend/interop",
   "openseek_desktop/frontend/pathx",
+  "openseek_desktop/frontend/sidebar/conversation",
   "openseek_desktop/frontend/sidebar/section",
   "openseek_desktop/frontend/transcript",
 }
@@ -18,8 +19,14 @@ pub fn update(@cmd.Emit[Msg], Msg, State, @interop.ChannelId, (String) -> @cmd.C
 // Errors
 
 // Types and methods
+pub enum CodexModelListing {
+  CodexModels(Array[@composer.ModelOption], selected~ : String)
+  CodexModelsUnavailable(String)
+}
+
 pub(all) struct ComposerContext {
   channel : @interop.ChannelId
+  model_chip : @html.Html
   file_candidates : Array[@pathx.Relative]
   open_files : Array[@pathx.Relative]
   active_file : @pathx.Relative?
@@ -27,9 +34,11 @@ pub(all) struct ComposerContext {
 }
 
 type Msg
+pub fn Msg::abandon_draft() -> Self
 pub fn Msg::archive_thread(String) -> Self
 pub fn Msg::close_git_details() -> Self
 pub fn Msg::composer_action(@composer.Action) -> Self
+pub fn Msg::model_changed(String) -> Self
 pub fn Msg::notification(String, Json, Int) -> Self
 pub fn Msg::open_thread(String) -> Self
 pub fn Msg::refresh() -> Self
@@ -62,14 +71,18 @@ pub fn State::active_placement(Self, @interop.ChannelId) -> @interop.CheckoutPla
 pub fn State::archived_sidebar_entries(Self, @interop.ChannelId) -> Array[@section.Entry]
 pub fn State::can_start_thread(Self) -> Bool
 pub fn State::composer_input(Self, @cmd.Emit[Msg], ComposerContext) -> @composer.Input
+pub fn State::composing_draft(Self) -> Bool
 pub fn State::draft_text(Self) -> String
 pub fn State::from_thread_snapshot(Json) -> Self
 pub fn State::git_details_open(Self) -> Bool
 pub fn State::has_active(Self) -> Bool
+pub fn State::loose_entries(Self, SidebarContext) -> Array[@section.Entry]
+pub fn State::model_listing(Self) -> CodexModelListing
 pub fn State::new_thread_cwd(Self) -> String
 pub fn State::page(Self, @cmd.Emit[Msg], @interop.ChannelId, Bool, Bool, Bool, PageActions) -> Array[@html.Html]
+pub fn State::project_activation(Self, SidebarContext, String) -> String?
+pub fn State::project_conversations(Self, SidebarContext, String) -> Array[@conversation.Input]
 pub fn State::refresh(Self, @cmd.Emit[Msg], @interop.ChannelId) -> (@cmd.Cmd, Self)
-pub fn State::sidebar_section(Self, SidebarContext) -> @section.Input
 pub fn State::transcript_items(Self) -> Array[@transcript.TranscriptItem]
 pub fn State::with_editor_comment(Self, String, @common.Range, String, String) -> Self
 pub fn State::with_git_details_closed(Self) -> Self

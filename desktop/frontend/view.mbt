@@ -80,29 +80,6 @@ fn setting_select(control : @html.Html) -> @html.Html {
 }
 
 ///|
-/// The composer's model selector. OpenSeek supplies its model wire values and
-/// labels; the reusable composer package owns the control's geometry.
-fn EngineModel::composer_select(
-  self : EngineModel,
-  dispatch : @cmd.Emit[Msg],
-) -> @html.Html {
-  let options : Array[@composer.ModelOption] = [
-    { value: High.wire(), label: High.label() },
-    { value: Low.wire(), label: Low.label() },
-  ]
-  if self is Other(name) {
-    options.push({ value: name, label: name })
-  }
-  @composer.ModelSelect::{
-    options,
-    selected: self.wire(),
-    disabled: false,
-    change: dispatch.map(value => EngineModelChanged(value)),
-    title: "Model: \{self.wire()}",
-  }.render()
-}
-
-///|
 fn conversation_title(conv : Conversation) -> String {
   // Titles follow the committed user transcript. Client-local failure notices
   // are visible too but never qualify as a title.
@@ -376,6 +353,25 @@ fn Model::sidebar_component_sections(
     }
   }
   let sections : Array[@section.Input] = []
+  // Codex conversations share the Projects section instead of owning one:
+  // its threads nest under the same project rows, grouped by the registered
+  // root. Codex state mirrors the focused device only, so other devices'
+  // rows are OpenSeek's alone.
+  let codex_context : @codex.SidebarContext? = if dev.channel == self.focused {
+    let registered_projects : Array[String] = []
+    for project in dev.projects {
+      if @resource.path_for(project, dev.channel) is Some(path) {
+        registered_projects.push(path)
+      }
+    }
+    Some({
+      channel: dev.channel,
+      selected: self.screen is Codex,
+      registered_projects,
+    })
+  } else {
+    None
+  }
   let projects : Array[@section.Entry] = []
   for path in dev.projects {
     let conversations : Array[@conversation.Input] = []
@@ -386,12 +382,27 @@ fn Model::sidebar_component_sections(
       listed~,
       archived~,
     )
+    let mut codex_activation : String? = None
+    if codex_context is Some(context) &&
+      @resource.path_for(path, dev.channel) is Some(root) {
+      for row in self.codex.project_conversations(context, root) {
+        conversations.push(row)
+      }
+      codex_activation = self.codex.project_activation(context, root)
+    }
+    let openseek_activation = activation(dev.active_project == Some(path))
     projects.push(
       @section.Project({
         id: @project.Id(source="openseek.projects", channel~, root=path.path),
         title: path.path,
         label: @resource.label(path),
-        activation: activation(dev.active_project == Some(path)),
+        // The Chat and Codex screens are exclusive, so at most one side
+        // claims the row's activation.
+        activation: if openseek_activation is Some(_) {
+          openseek_activation
+        } else {
+          codex_activation
+        },
         can_start: true,
         managed: true,
         conversations,
@@ -399,29 +410,28 @@ fn Model::sidebar_component_sections(
       }),
     )
   }
+  if codex_context is Some(context) {
+    // Codex threads in unregistered roots keep top-level rows at the end of
+    // the section, as they did in the retired Codex section.
+    for entry in self.codex.loose_entries(context) {
+      projects.push(entry)
+    }
+  }
+  let openseek_section_activation = activation(dev.active_project is Some(_))
   sections.push({
     id: @section.Id(source="openseek.projects", channel~),
     label: "Projects",
     initially_collapsed: false,
-    activation: activation(dev.active_project is Some(_)),
+    activation: if openseek_section_activation is Some(_) {
+      openseek_section_activation
+    } else if codex_context is Some(context) && context.selected {
+      self.codex.active_id()
+    } else {
+      None
+    },
     action: Some({ title: "Add a project", disabled: false }),
     entries: projects,
   })
-  if dev.channel == self.focused {
-    let registered_projects : Array[String] = []
-    for project in dev.projects {
-      if @resource.path_for(project, dev.channel) is Some(path) {
-        registered_projects.push(path)
-      }
-    }
-    sections.push(
-      self.codex.sidebar_section({
-        channel: dev.channel,
-        selected: self.screen is Codex,
-        registered_projects,
-      }),
-    )
-  }
   // Archived conversations fold behind a collapsed section at the end of the
   // list. Their records live in the store's `archived` twin, so they come
   // from the host's archived reply, not the live list; each row carries a
