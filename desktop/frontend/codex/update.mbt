@@ -44,6 +44,32 @@ pub fn update(
       }
       (@cmd.batch(commands), next)
     }
+    AbandonDraft => {
+      guard state.active_draft() is Some(draft) else {
+        return (@cmd.none, state)
+      }
+      // The unified model chip moved this fresh conversation to another
+      // agent. Release the host-side draft authorization and deselect, so
+      // the sidebar drops its "New Codex thread" row instead of keeping a
+      // stale draft the user has already walked away from.
+      let commands : Array[@cmd.Cmd] = []
+      if !draft.cwd.is_empty() {
+        commands.push(state.close_draft(channel, draft.id))
+      }
+      (
+        @cmd.batch(commands),
+        {
+          ..state,
+          selection: CodexNoTask,
+          draft: "",
+          mentions: [],
+          placement: @composer.LocalCheckout,
+          foreground: None,
+          loading: false,
+          notice: "",
+        },
+      )
+    }
     OpenThread(thread_id) =>
       if state.active_thread() is Some(active) &&
         active.id == thread_id &&
@@ -530,6 +556,39 @@ test "Codex project add stays local until the first prompt" {
   assert_true(adopted.active_thread() is Some(_))
   assert_true(adopted.placement is @composer.FreshWorktree)
   assert_true(adopted.loading)
+}
+
+///|
+test "abandoning a draft deselects it and clears its composer state" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let open_external = (_ : String) => @cmd.none
+  let (_, drafting) = update(
+    dispatch,
+    StartDraft(id="desktop-draft-1", cwd="/work/project"),
+    State(),
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  let typed = { ..drafting, draft: "half a prompt" }
+  let (_, dropped) = update(
+    dispatch,
+    AbandonDraft,
+    typed,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  assert_false(dropped.composing_draft())
+  assert_eq(dropped.active_id(), None)
+  inspect(dropped.draft_text(), content="")
+  // Without a draft there is nothing to abandon; the message is a no-op.
+  let (_, unchanged) = update(
+    dispatch,
+    AbandonDraft,
+    State(),
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  assert_true(unchanged.active_id() is None)
 }
 
 ///|

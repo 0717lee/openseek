@@ -177,9 +177,12 @@ fn State::loading_context(self : State, force_skills : Bool) -> State {
 ///|
 /// Root-owned file-index facts needed by the shared composer. Codex adds only
 /// its channel identity; the component performs the same file and symbol
-/// searches as OpenSeek and Ctrl+P.
+/// searches as OpenSeek and Ctrl+P. The model chip is root-built because it
+/// is the one control that can leave this package: on a composing draft it
+/// offers the other agent's models too.
 pub(all) struct ComposerContext {
   channel : @interop.ChannelId
+  model_chip : @html.Html
   file_candidates : Array[@pathx.Relative]
   open_files : Array[@pathx.Relative]
   active_file : @pathx.Relative?
@@ -240,19 +243,7 @@ pub fn State::composer_input(
       }.render(),
     )
   }
-  let model_options : Array[@composer.ModelOption] = []
-  for model in self.models {
-    model_options.push({ value: model.id, label: model.label })
-  }
-  let status : Array[@html.Html] = [
-    @composer.ModelSelect::{
-      options: model_options,
-      selected: self.selected_model,
-      disabled: self.models.is_empty(),
-      change: dispatch.map(value => ModelChanged(value)),
-      title: "Codex model",
-    }.render(),
-  ]
+  let status : Array[@html.Html] = [context.model_chip]
   if self.worktree_launch_workspace(context.channel) is Some(_) &&
     self.active_draft() is Some(_) {
     status.push(
@@ -469,6 +460,7 @@ test "Codex projects app-server facts into the shared composer contract" {
   let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   let input = state.composer_input(dispatch, {
     channel: @interop.ChannelId::Local,
+    model_chip: @html.nothing,
     file_candidates: [@pathx.Relative("src/main.mbt")],
     open_files: [],
     active_file: None,

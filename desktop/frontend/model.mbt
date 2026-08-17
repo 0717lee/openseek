@@ -133,6 +133,16 @@ const AppFontSizeStorageKey : String = "openseek.font_size"
 const ModelStorageKey : String = "openseek.model"
 
 ///|
+/// The agent the next "New chat" starts with — whichever provider group the
+/// unified model chip was last picked from.
+const AgentStorageKey : String = "openseek.agent"
+
+///|
+/// The Codex model id the next Codex thread or turn starts with. Codex's own
+/// catalog default applies when this is absent or no longer listed.
+const CodexModelStorageKey : String = "openseek.codex_model"
+
+///|
 /// Every conversation whose tier the user has chosen, so reopening one
 /// recovers its own tier instead of inheriting whatever was picked last in
 /// some unrelated chat. Page-local like the rest of this file: the desktop
@@ -1086,6 +1096,10 @@ priv struct Model {
   // the composer, persisted page-locally. The model a turn actually runs
   // with is the conversation's own `engine_model`, never this.
   default_model : EngineModel
+  // The agent a new conversation is born with: whichever provider group the
+  // unified model chip was last picked from, persisted page-locally. An
+  // existing conversation never reads this — its agent is fixed at creation.
+  default_agent : AgentChoice
   // Each conversation's pinned tier, newest first and capped at
   // `ConversationModelsLimit`. A conversation is pinned when the chip gives
   // it a tier and when a run makes it durable — an inherited tier that was
@@ -1427,7 +1441,9 @@ priv enum Msg {
     font~ : String,
     font_size~ : String,
     model~ : String,
-    conversation_models~ : String
+    conversation_models~ : String,
+    agent~ : String,
+    codex_model~ : String
   )
   // The legacy localStorage engine settings, read at bridge time. The
   // desktop window migrates them up to the host once; a browser page only
@@ -1467,9 +1483,12 @@ priv enum Msg {
   QuickOpenOpen(@quick_open.Provider)
   // Everything the open palette does to itself.
   QuickOpen(@quick_open.Msg)
-  // Select the active conversation's model and make it the default for new
-  // conversations.
-  EngineModelChanged(String)
+  // A pick in the unified model chip, as a `ModelChoice` wire value. Within
+  // the visible conversation's own agent it selects that conversation's
+  // model; on a composing conversation a cross-agent pick hands the fresh
+  // chat to the other agent instead. Either way the pick becomes the default
+  // agent and model for new conversations.
+  ModelPicked(String)
   MaxStepsChanged(String)
   SetupApiKeyChanged(String)
   ProviderChanged(String)
@@ -1525,8 +1544,6 @@ priv enum Msg {
   // Open the app-server-backed Codex page and refresh its authoritative
   // account, model, and thread catalogs.
   OpenCodex
-  CodexNewThread
-  CodexNewThreadIn(String)
   // The add button creates only a browser-local draft. The generated id owns
   // Files and Terminal until the first prompt creates an app-server thread.
   CodexDraftRotated(cwd~ : String, id~ : String)
@@ -2245,6 +2262,7 @@ fn initial_model() -> Model {
     websocket_epoch: 0,
     focused: page_channel.unwrap_or(@interop.ChannelId::Local),
     default_model: High,
+    default_agent: OpenSeekAgent,
     conversation_models: [],
     max_steps: DefaultMaxSteps,
     deepseek_key_saved: false,

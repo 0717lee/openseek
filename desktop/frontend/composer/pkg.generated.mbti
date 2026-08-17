@@ -161,13 +161,18 @@ pub(all) struct MissingWorktreeNotice {
 }
 pub fn MissingWorktreeNotice::render(Self) -> @html.Html
 
+pub(all) struct ModelGroup {
+  label : String
+  options : Array[ModelOption]
+}
+
 pub(all) struct ModelOption {
   value : String
   label : String
 }
 
 pub(all) struct ModelSelect {
-  options : Array[ModelOption]
+  groups : Array[ModelGroup]
   selected : String
   disabled : Bool
   change : @cmd.Emit[String]
