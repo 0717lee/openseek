@@ -49,6 +49,31 @@ priv struct DshWorkspaceRow {
 } derive(Eq)
 
 ///|
+/// The worktree name when this Workspace is one Desktop cut from `project`,
+/// whose path is `<project>/.worktrees/<name>`.
+///
+/// dsh has no concept of this relationship — a worktree has to be its own
+/// Workspace for a conversation to run there at all, and dsh files every
+/// Workspace as a peer. The sidebar reconstructs it from the path convention
+/// that created the checkout, so a worktree conversation appears under the
+/// project it was cut from with a worktree mark, rather than as a project of
+/// its own. Paths here are the renderer's slash-rooted resource spelling, so
+/// this comparison does not vary by platform.
+fn DshWorkspaceRow::worktree_of(
+  self : DshWorkspaceRow,
+  project : DshWorkspaceRow,
+) -> String? {
+  guard project.id != self.id else { return None }
+  let prefix = project.path + "/.worktrees/"
+  guard self.path.has_prefix(prefix) else { return None }
+  let name = self.path[prefix.length():].to_owned()
+  // Only a direct child is this project's worktree. A deeper path is some
+  // other directory that happens to live inside one.
+  guard !name.is_empty() && !name.contains("/") else { return None }
+  Some(name)
+}
+
+///|
 priv struct DshModelSelection {
   provider : String
   model : String

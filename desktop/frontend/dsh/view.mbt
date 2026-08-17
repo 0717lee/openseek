@@ -10,6 +10,7 @@ fn DshSessionRow::sidebar_input(
   state : State,
   nested : Bool,
   selected : Bool,
+  worktree? : String,
 ) -> @conversation.Input {
   let active = selected && state.active_id == Some(self.id)
   {
@@ -25,7 +26,7 @@ fn DshSessionRow::sidebar_input(
     active,
     running: self.running,
     openable: true,
-    worktree: None,
+    worktree,
     run_mark: if self.running {
       @conversation.RunningMark
     } else {
@@ -44,8 +45,26 @@ fn DshSessionRow::sidebar_input(
 pub fn State::sidebar_section(self : State, selected : Bool) -> @section.Input {
   let entries : Array[@section.Entry] = []
   let accounted : Array[String] = []
+  // A Workspace Desktop generated for a worktree is not a project of its own:
+  // its conversations belong under the project it was cut from, marked with
+  // the checkout they run in. A worktree whose project dsh no longer lists
+  // keeps a row of its own, because there is nothing left to nest it under.
+  let worktrees : Map[String, (DshWorkspaceRow, String)] = Map([])
   for workspace in self.workspaces {
+    for project in self.workspaces {
+      if workspace.worktree_of(project) is Some(name) {
+        worktrees[workspace.id] = (project, name)
+        break
+      }
+    }
+  }
+  for workspace in self.workspaces {
+    guard worktrees.get(workspace.id) is None else { continue }
     let conversations : Array[@conversation.Input] = []
+    let mut holds_active = self
+      .active_workspace_row()
+      .map(item => item.id == workspace.id)
+      .unwrap_or(false)
     for session_id in workspace.session_ids {
       accounted.push(session_id)
       if self.sessions.iter().find_first(row => row.id == session_id)
@@ -53,11 +72,28 @@ pub fn State::sidebar_section(self : State, selected : Bool) -> @section.Input {
         conversations.push(session.sidebar_input(self, true, selected))
       }
     }
-    let active = selected &&
-      self
-      .active_workspace_row()
-      .map(item => item.id == workspace.id)
-      .unwrap_or(false)
+    for row in self.workspaces {
+      guard worktrees.get(row.id) is Some((project, name)) &&
+        project.id == workspace.id else {
+        continue
+      }
+      if self
+        .active_workspace_row()
+        .map(item => item.id == row.id)
+        .unwrap_or(false) {
+        holds_active = true
+      }
+      for session_id in row.session_ids {
+        accounted.push(session_id)
+        if self.sessions.iter().find_first(item => item.id == session_id)
+          is Some(session) {
+          conversations.push(
+            session.sidebar_input(self, true, selected, worktree=name),
+          )
+        }
+      }
+    }
+    let active = selected && holds_active
     entries.push(
       @section.Project({
         id: @project.Id(
@@ -145,6 +181,91 @@ pub fn State::sidebar_section(self : State, selected : Bool) -> @section.Input {
     }),
     entries,
   }
+}
+
+///|
+/// A worktree has to be its own dsh Workspace for a conversation to run in it,
+/// but it is not a project. It belongs under the one it was cut from, with the
+/// checkout named on the conversation row the way OpenSeek marks its own.
+test "a dsh worktree appears under its project rather than beside it" {
+  let state = {
+    ..State(),
+    connection: DshReady,
+    workspaces: [
+      {
+        id: "workspace-main",
+        title: "rapidhash",
+        path: "/work/rapidhash",
+        session_ids: ["session-main"],
+      },
+      {
+        id: "workspace-wt",
+        title: "wt-2",
+        path: "/work/rapidhash/.worktrees/wt-2",
+        session_ids: ["session-wt"],
+      },
+      // A worktree whose project dsh no longer lists has nothing to nest
+      // under, so it keeps a row of its own.
+      {
+        id: "workspace-orphan",
+        title: "wt-9",
+        path: "/work/elsewhere/.worktrees/wt-9",
+        session_ids: [],
+      },
+    ],
+    sessions: [
+      {
+        id: "session-main",
+        title: "in the project",
+        cwd: Some("/work/rapidhash"),
+        running: false,
+        blank: false,
+      },
+      {
+        id: "session-wt",
+        title: "hello",
+        cwd: Some("/work/rapidhash/.worktrees/wt-2"),
+        running: false,
+        blank: false,
+      },
+    ],
+    active_id: Some("session-wt"),
+  }
+  let section = state.sidebar_section(true)
+  guard section.entries is [@section.Project(project), @section.Project(orphan)] else {
+    fail("expected the project and the unattachable worktree only")
+  }
+  assert_eq(project.label, "rapidhash")
+  assert_eq(orphan.label, "wt-9")
+  // Both conversations live under the project, and only the one running in a
+  // checkout carries its name.
+  guard project.conversations is [main, worktree] else {
+    fail("expected the project's own conversation and its worktree's")
+  }
+  assert_eq(main.label, "in the project")
+  assert_eq(main.worktree, None)
+  assert_eq(worktree.label, "hello")
+  assert_eq(worktree.worktree, Some("wt-2"))
+  // Selecting a conversation inside the worktree activates its project row.
+  assert_eq(project.activation, Some("session-wt"))
+  // A path deeper inside `.worktrees` is some other directory, not this
+  // project's worktree, so it is not folded in.
+  let nested = {
+    ..state,
+    workspaces: [
+      state.workspaces[0],
+      {
+        id: "workspace-deep",
+        title: "deep",
+        path: "/work/rapidhash/.worktrees/wt-2/packages/api",
+        session_ids: [],
+      },
+    ],
+  }
+  guard nested.sidebar_section(true).entries[1] is @section.Project(deep) else {
+    fail("expected the deeper directory to keep its own row")
+  }
+  assert_eq(deep.label, "deep")
 }
 
 ///|
