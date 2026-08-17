@@ -367,6 +367,19 @@ pub fn update(
         CodexLogoutReply => "Codex sign-out"
         CodexApprovalReply => "Codex response"
       }
+      // A writer-lock refusal is an environment condition, not a protocol
+      // fault: some process — typically a previous SeekMoon instance that
+      // never fully exited, still owning its codex app-server — holds the
+      // thread's writer lock. Name the condition and the way out instead of
+      // quoting the raw JSON-RPC error.
+      let message = if (
+          kind is CodexArchiveReply(_) || kind is CodexUnarchiveReply(_)
+        ) &&
+        message.contains("already has an active writer") {
+        "another process still holds this task's writer — usually a previous SeekMoon instance that never fully exited. Quit it, then try again."
+      } else {
+        message
+      }
       let owns_foreground = state.owns_foreground(kind)
       let settled = state.settle_foreground(kind)
       let next = if kind is CodexTurnReconcileReply(_) && owns_foreground {
@@ -589,6 +602,36 @@ test "abandoning a draft deselects it and clears its composer state" {
     open_external,
   )
   assert_true(unchanged.active_id() is None)
+}
+
+///|
+test "a writer-locked archive failure reads as a condition, not a dump" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let open_external = (_ : String) => @cmd.none
+  let raw = "HandlerFailed(name=\"ext:openseek/codex.thread.archive\", detail=\"JsonRpc(method_=\\\"thread/archive\\\", code=-32600, message=\\\"thread 01a0 already has an active writer\\\", data=None)\")"
+  let (_, held) = update(
+    dispatch,
+    Failed(kind=CodexArchiveReply("thread-1"), message=raw),
+    State(),
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  inspect(
+    held.transcript_items()[0].content,
+    content="Codex archive: another process still holds this task's writer — usually a previous SeekMoon instance that never fully exited. Quit it, then try again.",
+  )
+  // Every other archive failure keeps its exact wording.
+  let (_, other) = update(
+    dispatch,
+    Failed(kind=CodexArchiveReply("thread-1"), message="thread not found"),
+    State(),
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  inspect(
+    other.transcript_items()[0].content,
+    content="Codex archive: thread not found",
+  )
 }
 
 ///|
