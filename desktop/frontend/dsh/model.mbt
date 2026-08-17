@@ -261,6 +261,8 @@ priv enum DshReplyKind {
   DshPromptHistoryReply(DshPromptReconciliation)
   DshCancelReply(String)
   DshResponseReply(rpc_id~ : String, session_id~ : String)
+  DshArchiveReply(session_id~ : String)
+  DshWorkspaceDeleteReply
 }
 
 ///|
@@ -286,6 +288,8 @@ enum Msg {
   QuestionOption(rpc_id~ : String, question_id~ : String, label~ : String)
   QuestionCustom(rpc_id~ : String, question_id~ : String, value~ : String)
   SubmitQuestions(String)
+  ArchiveSession(String)
+  RemoveWorkspace(String)
   Reply(kind~ : DshReplyKind, value~ : Json)
   Failed(kind~ : DshReplyKind, message~ : String)
   StatusChanged(Json)
@@ -316,6 +320,21 @@ pub fn Msg::open_session(session_id : String) -> Msg {
 }
 
 ///|
+/// Hide one conversation from every dsh grouping surface. dsh keeps its log
+/// and its slot in the Workspace account, so this is reversible from dsh
+/// itself; this page offers no way back.
+pub fn Msg::archive_session(session_id : String) -> Msg {
+  ArchiveSession(session_id)
+}
+
+///|
+/// Drop one Workspace registration. The directory and every session log
+/// survive — dsh only stops grouping them.
+pub fn Msg::remove_workspace(workspace_id : String) -> Msg {
+  RemoveWorkspace(workspace_id)
+}
+
+///|
 /// Route the shared composer's deliberate operations back into dsh. Raw
 /// keystrokes and completion navigation remain inside the composer package.
 pub fn Msg::composer_action(action : @composer.Action) -> Msg {
@@ -339,6 +358,10 @@ struct State {
   // rejects a poll response that arrives after a newer transition event.
   connection_status_revision : Int
   workspaces : Array[DshWorkspaceRow]
+  // dsh's registry-global archive set, carried on every `workspace.list`. An
+  // archived conversation keeps its slot in its Workspace's account, so this
+  // is the only thing that hides it from the sidebar.
+  archived_session_ids : Array[String]
   sessions : Array[DshSessionRow]
   // HTTP session snapshots and WebSocket projections use independent
   // carriers. Record the latest running/title event per session so a late
@@ -405,6 +428,7 @@ pub fn State::State(loading? : Bool = false) -> State {
     connection: DshStarting,
     connection_status_revision: 0,
     workspaces: [],
+    archived_session_ids: [],
     sessions: [],
     session_statuses: [],
     session_titles: [],

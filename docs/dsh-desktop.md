@@ -41,7 +41,10 @@ after which dsh replays subscription baselines and still-pending interactions.
 The browser state lives in `desktop/frontend/dsh`. It currently supports:
 
 - listing dsh Workspaces and grouping sessions by each Workspace's explicit
-  `sessionIds` account;
+  `sessionIds` account, minus the registry-global archive set; a Workspace
+  Desktop generated for a worktree is presented under the project it was cut
+  from rather than beside it, reconstructed from the `<project>/.worktrees/`
+  path convention because dsh files every Workspace as a peer;
 - adopting the selected local OpenSeek project into dsh when its Workspace
   registry is empty;
 - creating dsh sessions through a stable `workspaceId` rather than a loose
@@ -65,13 +68,20 @@ The browser state lives in `desktop/frontend/dsh`. It currently supports:
 - allowing or rejecting a tool approval once;
 - answering single-select, multi-select, and free-text questions.
 
-Only the nine dsh methods used by that page are allowlisted: `workspace.list`,
-`workspace.create`, `session.list`, `session.create`, `session.history`,
-`session.models`, `session.selectModel`, `session.prompt`, and
-`session.cancel`. Settings, credentials, arbitrary path operations, plugin
-management, the remaining Workspace mutations (`rename`, `delete`,
-`insertSessionBefore`, `archiveSession`), and other dsh APIs are not exposed by
-this integration.
+Only the eleven dsh methods used by that page are allowlisted:
+`workspace.list`, `workspace.create`, `workspace.delete`,
+`workspace.archiveSession`, `session.list`, `session.create`,
+`session.history`, `session.models`, `session.selectModel`, `session.prompt`,
+and `session.cancel`. Settings, credentials, arbitrary path operations, plugin
+management, `workspace.rename`, `workspace.insertSessionBefore`, and other dsh
+APIs are not exposed by this integration.
+
+Archiving and removing a Workspace registration are the page's only cleanup
+verbs, and dsh gives no others: it has no session deletion at all. Archiving
+hides a conversation from every grouping surface while dsh keeps its log and
+its slot in the Workspace account, so it is reversible from dsh itself but not
+from here. Removing a Workspace registration keeps the directory and every
+session log; the conversations it grouped become ungrouped.
 
 ## Local-only boundary
 
@@ -106,10 +116,10 @@ Two consequences follow, both accepted:
 
 - **Removal asks instead of remembering.** `worktree.remove` queries dsh's
   current `workspace.list` and refuses while any unarchived conversation works
-  in that checkout or anywhere inside it. `force` overrides that refusal, and
-  has to: dsh exposes no way to end a conversation — it has no delete, and
-  this integration allowlists no archive — so an occupied checkout would
-  otherwise be unremovable for the rest of that conversation's life, which is
+  in that checkout or anywhere inside it. Archiving the conversation is the
+  ordinary way to satisfy that; `force` overrides it anyway, and has to, since
+  dsh has no session deletion and an unarchivable occupant would otherwise
+  make the checkout unremovable for the rest of that conversation's life —
   the failure this design exists to prevent. When dsh is not connected the
   removal proceeds without asking: no conversation can be executing without
   the process that would run it. A connected dsh that cannot answer refuses
@@ -123,9 +133,9 @@ Two consequences follow, both accepted:
 
 `worktree.create` still carries `dsh_session`, but only to authorize the
 request: the host revalidates it against dsh's own blank-session and Workspace
-baselines before attaching a directory. After dsh moves the session, the next
-`workspace.list` replaces the Files and Terminal grant with the generated
-Workspace path.
+baselines before attaching a directory. Once the conversation exists in the
+generated Workspace, the next `workspace.list` extends the Files and Terminal
+grant to that path.
 
 ## Runtime prerequisite
 

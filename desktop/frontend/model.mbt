@@ -1637,6 +1637,8 @@ priv enum Msg {
   DshNewSession
   DshNewSessionIn(String)
   DshOpenSession(String)
+  DshArchiveSession(String)
+  DshRemoveWorkspace(String)
   Dsh(@dsh.Msg)
   ToggleSidebar
   // A Settings selection fixes the page to Light or Dark and persists it.

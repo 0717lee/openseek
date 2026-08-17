@@ -259,8 +259,9 @@ fn DshWorkspaceAuthorizations::DshWorkspaceAuthorizations() -> DshWorkspaceAutho
 ///|
 fn DshDesktopCall::is_allowed(self : DshDesktopCall) -> Bool {
   [
-    "workspace.list", "workspace.create", "session.list", "session.create", "session.history",
-    "session.models", "session.selectModel", "session.prompt", "session.cancel",
+    "workspace.list", "workspace.create", "workspace.delete", "workspace.archiveSession",
+    "session.list", "session.create", "session.history", "session.models", "session.selectModel",
+    "session.prompt", "session.cancel",
   ].contains(self.method_)
 }
 
@@ -1166,23 +1167,34 @@ test "dsh endpoints stay in the local Desktop catalog" {
     method_: "session.create",
     payload: {},
   }
-  // dsh cannot move a conversation between directories, so the Worktree flow
-  // starts one in the generated Workspace instead of reordering an existing
-  // account. Neither the reorder nor any other unused Workspace mutation is
-  // reachable from this page.
-  let insert_session : DshDesktopCall = {
-    method_: "workspace.insertSessionBefore",
+  // Archiving a conversation and removing a Workspace registration are the
+  // two ways this page cleans up after itself; both keep every file and log.
+  let archive_session : DshDesktopCall = {
+    method_: "workspace.archiveSession",
     payload: {},
   }
   let delete_workspace : DshDesktopCall = {
     method_: "workspace.delete",
     payload: {},
   }
+  // dsh cannot move a conversation between directories, so the Worktree flow
+  // starts one in the generated Workspace instead of reordering an existing
+  // account. The reorder stays unreachable from this page.
+  let insert_session : DshDesktopCall = {
+    method_: "workspace.insertSessionBefore",
+    payload: {},
+  }
+  let rename_workspace : DshDesktopCall = {
+    method_: "workspace.rename",
+    payload: {},
+  }
   assert_true(models.is_allowed())
   assert_true(select_model.is_allowed())
   assert_true(create_session.is_allowed())
+  assert_true(archive_session.is_allowed())
+  assert_true(delete_workspace.is_allowed())
   assert_false(insert_session.is_allowed())
-  assert_false(delete_workspace.is_allowed())
+  assert_false(rename_workspace.is_allowed())
 }
 
 ///|

@@ -32,7 +32,11 @@ fn DshSessionRow::sidebar_input(
     } else {
       @conversation.NoRunMark
     },
-    trailing: [],
+    trailing: [
+      // Archiving is this page's only cleanup verb: dsh has no delete, and the
+      // conversation keeps its log and its Workspace slot either way.
+      @conversation.Archive(title="Archive"),
+    ],
     children: [],
   }
 }
@@ -67,6 +71,9 @@ pub fn State::sidebar_section(self : State, selected : Bool) -> @section.Input {
       .unwrap_or(false)
     for session_id in workspace.session_ids {
       accounted.push(session_id)
+      // An archived conversation keeps its slot in dsh's account; hiding it
+      // from every grouping surface is the whole of what archiving does.
+      guard !self.archived_session_ids.contains(session_id) else { continue }
       if self.sessions.iter().find_first(row => row.id == session_id)
         is Some(session) {
         conversations.push(session.sidebar_input(self, true, selected))
@@ -85,6 +92,7 @@ pub fn State::sidebar_section(self : State, selected : Bool) -> @section.Input {
       }
       for session_id in row.session_ids {
         accounted.push(session_id)
+        guard !self.archived_session_ids.contains(session_id) else { continue }
         if self.sessions.iter().find_first(item => item.id == session_id)
           is Some(session) {
           conversations.push(
@@ -116,7 +124,8 @@ pub fn State::sidebar_section(self : State, selected : Bool) -> @section.Input {
     )
   }
   let ungrouped = self.sessions.filter(session => {
-    !accounted.contains(session.id)
+    !accounted.contains(session.id) &&
+    !self.archived_session_ids.contains(session.id)
   })
   if !ungrouped.is_empty() {
     let conversations = ungrouped.map(session => {

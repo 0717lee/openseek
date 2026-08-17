@@ -192,6 +192,7 @@ fn SidebarDispatcher::conversation_archive(
   match id.source() {
     "openseek.live" => self.emit(ArchiveSession(channel, id.conversation()))
     "codex.live" => self.emit(CodexArchiveThread(id.conversation()))
+    "dsh.live" => self.emit(DshArchiveSession(id.conversation()))
     source => self.unroutable("archive", "\{source}@\{id.channel()}")
   }
 }
@@ -273,6 +274,12 @@ fn SidebarDispatcher::project_detach(
 ) -> @cmd.Cmd {
   guard @interop.ChannelId::from_uri_authority(id.channel()) is Some(channel) else {
     return self.unroutable("detach", "channel \{id.channel()}")
+  }
+  // A dsh row is keyed by Workspace id rather than by path: dsh owns that
+  // registry, and detaching there means forgetting the grouping, not the
+  // directory.
+  if id.source() == "dsh.workspaces" {
+    return self.emit(DshRemoveWorkspace(id.root()))
   }
   guard @resource.of_path(channel, id.root()) is Some(project) else {
     return @cmd.none

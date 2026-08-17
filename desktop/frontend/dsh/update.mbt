@@ -301,6 +301,24 @@ pub fn update(
           )
         _ => (@cmd.none, state)
       }
+    ArchiveSession(session_id) =>
+      if state.busy() {
+        (@cmd.none, state)
+      } else {
+        (
+          state.archive_session(dispatch, session_id),
+          { ..state, loading: true, notice: "" },
+        )
+      }
+    RemoveWorkspace(workspace_id) =>
+      if state.busy() {
+        (@cmd.none, state)
+      } else {
+        (
+          state.remove_workspace(dispatch, workspace_id),
+          { ..state, loading: true, notice: "" },
+        )
+      }
     Reply(kind~, value~) => {
       if kind.prompt_origin() is Some((_, generation)) {
         if state.prompt_generation != generation {
@@ -698,10 +716,22 @@ fn State::with_reply(
   match kind {
     DshReconnectReply | DshWorkspacesReply => {
       let workspaces : Array[DshWorkspaceRow] = []
-      if value is Object(fields) && fields.get("items") is Some(Array(items)) {
-        for item in items {
-          if DshWorkspaceRow::decode(item) is Some(workspace) {
-            workspaces.push(workspace)
+      let archived_session_ids : Array[String] = []
+      if value is Object(fields) {
+        if fields.get("items") is Some(Array(items)) {
+          for item in items {
+            if DshWorkspaceRow::decode(item) is Some(workspace) {
+              workspaces.push(workspace)
+            }
+          }
+        }
+        // The archive set is registry-global and travels with every list, so
+        // it replaces the page's copy whole rather than merging.
+        if fields.get("archivedSessionIds") is Some(Array(ids)) {
+          for id in ids {
+            if id is String(session_id) {
+              archived_session_ids.push(session_id)
+            }
           }
         }
       }
@@ -714,7 +744,7 @@ fn State::with_reply(
         } else {
           @cmd.none
         },
-        { ..self, workspaces, },
+        { ..self, workspaces, archived_session_ids },
       )
     }
     DshWorkspaceCreateReply(selection_generation) => {
@@ -1171,6 +1201,65 @@ fn State::with_reply(
           },
         )
       }
+    DshArchiveReply(session_id~) => {
+      // dsh answers with its complete new archive set. Take it whole, and
+      // leave the conversation the user was reading only when it is the one
+      // that just went away.
+      let archived_session_ids : Array[String] = []
+      if value is Object(fields) &&
+        fields.get("archivedSessionIds") is Some(Array(ids)) {
+        for id in ids {
+          if id is String(archived) {
+            archived_session_ids.push(archived)
+          }
+        }
+      }
+      let left = self.active_id == Some(session_id)
+      (
+        self.list_sessions(dispatch),
+        {
+          ..self,
+          archived_session_ids,
+          active_id: if left {
+            None
+          } else {
+            self.active_id
+          },
+          events: if left {
+            []
+          } else {
+            self.events
+          },
+          event_sequence: if left {
+            -1
+          } else {
+            self.event_sequence
+          },
+          streaming: if left {
+            ""
+          } else {
+            self.streaming
+          },
+          models: if left {
+            DshModelsIdle
+          } else {
+            self.models
+          },
+          loading: false,
+          notice: "",
+        },
+      )
+    }
+    DshWorkspaceDeleteReply =>
+      // The registration is gone; its sessions are ungrouped rather than
+      // removed. Both baselines have to be re-read to show that.
+      (
+        @cmd.batch([
+          DshWorkspacesReply.request(dispatch, "workspace.list", {}),
+          self.list_sessions(dispatch),
+        ]),
+        { ..self, loading: true, notice: "" },
+      )
     DshStatusReply
     | DshPendingReply
     | DshResponseReply(..)
@@ -4102,4 +4191,100 @@ test "a Worktree first send starts the conversation inside the new checkout" {
     )
     assert_true(after_workspace == ended)
   }
+}
+
+///|
+/// Archiving is this page's only cleanup verb — dsh has no delete — and it is
+/// what makes a first-send leftover, or a checkout someone still occupies,
+/// disposable at all.
+test "archiving a dsh conversation hides it and releases the page" {
+  let state = {
+    ..State(),
+    connection: DshReady,
+    workspaces: [
+      {
+        id: "workspace-main",
+        title: "project",
+        path: "/work/project",
+        session_ids: ["session-1", "session-2"],
+      },
+    ],
+    sessions: [
+      {
+        id: "session-1",
+        title: "keep",
+        cwd: Some("/work/project"),
+        running: false,
+        blank: false,
+      },
+      {
+        id: "session-2",
+        title: "leftover",
+        cwd: Some("/work/project"),
+        running: false,
+        blank: true,
+      },
+    ],
+    active_id: Some("session-2"),
+    events: [
+      {
+        type_: "user/message",
+        seq: 4,
+        time: None,
+        data: {},
+        surface_append: None,
+      },
+    ],
+    event_sequence: 4,
+    streaming: "partial",
+  }
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let (_, archiving) = update(dispatch, ArchiveSession("session-2"), state)
+  assert_true(archiving.loading)
+  let (_, archived) = archiving.with_reply(
+    dispatch,
+    DshArchiveReply(session_id="session-2"),
+    {
+      "type": "server-response",
+      "rpcId": "archive-1",
+      "result": { "ok": true, "value": { "archivedSessionIds": ["session-2"] } },
+    },
+  )
+  assert_eq(archived.archived_session_ids, ["session-2"])
+  // The conversation the user was reading is the one that went away, so the
+  // page lets go of it rather than rendering a hidden transcript.
+  assert_eq(archived.active_id, None)
+  assert_true(archived.events.is_empty())
+  assert_eq(archived.streaming, "")
+  assert_false(archived.loading)
+  // dsh keeps the session in its Workspace account; the sidebar is what
+  // stops showing it.
+  guard archived.sidebar_section(true).entries[0] is @section.Project(project) else {
+    fail("expected the project row")
+  }
+  guard project.conversations is [kept] else {
+    fail("expected only the unarchived conversation")
+  }
+  assert_eq(kept.label, "keep")
+  // Archiving a conversation the user is not reading leaves the page alone.
+  let (_, other) = { ..archived, active_id: Some("session-1") }.with_reply(
+    dispatch,
+    DshArchiveReply(session_id="session-2"),
+    {
+      "type": "server-response",
+      "rpcId": "archive-2",
+      "result": { "ok": true, "value": { "archivedSessionIds": ["session-2"] } },
+    },
+  )
+  assert_eq(other.active_id, Some("session-1"))
+  // Removing a Workspace registration re-reads both baselines: its sessions
+  // become ungrouped rather than disappearing.
+  let (_, removing) = update(dispatch, RemoveWorkspace("workspace-main"), state)
+  assert_true(removing.loading)
+  let (_, removed) = removing.with_reply(dispatch, DshWorkspaceDeleteReply, {
+    "type": "server-response",
+    "rpcId": "delete-1",
+    "result": { "ok": true, "value": { "deleted": true } },
+  })
+  assert_true(removed.loading)
 }

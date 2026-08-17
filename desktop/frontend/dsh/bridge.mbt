@@ -549,6 +549,32 @@ fn State::send_prompt(
 }
 
 ///|
+/// Hide one conversation. dsh answers with its complete new archive set, so
+/// the reply replaces the page's copy rather than editing it.
+fn State::archive_session(
+  _self : State,
+  dispatch : @cmd.Emit[Msg],
+  session_id : String,
+) -> @cmd.Cmd {
+  DshArchiveReply(session_id~).request(dispatch, "workspace.archiveSession", {
+    "sessionId": session_id,
+  })
+}
+
+///|
+/// Drop one Workspace registration. dsh keeps the directory and every session
+/// log; the sessions it grouped become ungrouped rather than disappearing.
+fn State::remove_workspace(
+  _self : State,
+  dispatch : @cmd.Emit[Msg],
+  workspace_id : String,
+) -> @cmd.Cmd {
+  DshWorkspaceDeleteReply.request(dispatch, "workspace.delete", {
+    "workspaceId": workspace_id,
+  })
+}
+
+///|
 fn State::cancel(self : State, dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
   guard self.active_id is Some(session_id) else { return @cmd.none }
   DshCancelReply(session_id).request(dispatch, "session.cancel", {

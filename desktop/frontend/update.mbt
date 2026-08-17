@@ -3078,6 +3078,22 @@ fn update_msg(
         },
       )
     }
+    DshArchiveSession(session_id) => {
+      let (cmd, dsh) = @dsh.update(
+        dispatch.map(msg => Dsh(msg)),
+        @dsh.Msg::archive_session(session_id),
+        model.dsh,
+      )
+      (cmd, { ..model, dsh, })
+    }
+    DshRemoveWorkspace(workspace_id) => {
+      let (cmd, dsh) = @dsh.update(
+        dispatch.map(msg => Dsh(msg)),
+        @dsh.Msg::remove_workspace(workspace_id),
+        model.dsh,
+      )
+      (cmd, { ..model, dsh, })
+    }
     DshOpenSession(session_id) => {
       let (cmd, dsh) = @dsh.update(
         dispatch.map(msg => Dsh(msg)),
