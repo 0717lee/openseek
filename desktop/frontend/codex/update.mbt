@@ -50,7 +50,7 @@ pub fn update(
       }
       // The unified model chip moved this fresh conversation to another
       // agent. Release the host-side draft authorization and deselect, so
-      // the sidebar drops its "New Codex thread" row instead of keeping a
+      // the sidebar drops its composing "New chat" row instead of keeping a
       // stale draft the user has already walked away from.
       let commands : Array[@cmd.Cmd] = []
       if !draft.cwd.is_empty() {
