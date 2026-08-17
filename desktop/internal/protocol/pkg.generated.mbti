@@ -897,8 +897,10 @@ pub impl @json.FromJson for SessionItem
 pub(all) struct SessionListEntry {
   id : String
   title : String?
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+  updated_at_ms : Double?
+} derive(Eq, ToJson, @debug.Debug)
 pub fn SessionListEntry::array_from_wire(Json) -> Array[Self]
+pub impl @json.FromJson for SessionListEntry
 
 pub(all) struct SessionPayload {
   session : String

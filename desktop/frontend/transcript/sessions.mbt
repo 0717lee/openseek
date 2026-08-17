@@ -26,6 +26,7 @@ pub fn sessions_from_reply(
         title: entry.title,
         workspace,
         workspace_name: group.name,
+        updated_at_ms: entry.updated_at_ms,
       })
     }
   }
@@ -607,8 +608,8 @@ test "session list projection preserves grouping and skips empty ids" {
           session_root: "/home/user/first/.openseek",
           error: "",
           sessions: [
-            { id: "desktop-b", title: Some("newest") },
-            { id: "", title: Some("no id") },
+            { id: "desktop-b", title: Some("newest"), updated_at_ms: Some(2.0) },
+            { id: "", title: Some("no id"), updated_at_ms: None },
           ],
         },
         {
@@ -616,7 +617,7 @@ test "session list projection preserves grouping and skips empty ids" {
           name: "proj",
           session_root: "/home/user/proj/.openseek",
           error: "",
-          sessions: [{ id: "tui-a", title: Some("") }],
+          sessions: [{ id: "tui-a", title: Some(""), updated_at_ms: None }],
         },
       ],
     },
@@ -625,6 +626,7 @@ test "session list projection preserves grouping and skips empty ids" {
   inspect(items.length(), content="2")
   inspect(items[0].id, content="desktop-b")
   assert_true(items[0].title is Some("newest"))
+  assert_true(items[0].updated_at_ms is Some(2.0))
   inspect(items[0].workspace.path, content="/home/user/first")
   inspect(items[1].id, content="tui-a")
   // The engine always writes `title`; "" is its value for a session with no
@@ -644,7 +646,9 @@ test "a group naming no readable workspace contributes no rows" {
           name: "",
           session_root: "/home/user/.openseek",
           error: "",
-          sessions: [{ id: "desktop-b", title: Some("newest") }],
+          sessions: [
+            { id: "desktop-b", title: Some("newest"), updated_at_ms: None },
+          ],
         },
       ],
     },
@@ -671,6 +675,7 @@ fn listed(ids : Array[String]) -> Array[SessionListItem] {
     title: None,
     workspace: listed_workspace("/work"),
     workspace_name: "work",
+    updated_at_ms: None,
   })
 }
 

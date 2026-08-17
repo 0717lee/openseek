@@ -258,29 +258,52 @@ fn CodexDraftTask::grouping_root(self : CodexDraftTask) -> String {
 }
 
 ///|
-/// The Codex rows that join a registered project's row in the shared
-/// Projects section: the composing draft first, then this project's threads
-/// in app-server order (newest first). Codex no longer owns a section of its
-/// own — its conversations live beside OpenSeek's, distinguished only by
-/// their row identity.
+/// One Codex thread's contribution to a shared project row: the component
+/// input plus the app-server activity stamp the root needs to interleave it
+/// with OpenSeek's own conversations by recency.
+pub(all) struct CodexProjectRow {
+  input : @conversation.Input
+  updated_at_ms : Double?
+}
+
+///|
+/// The composing draft's row when it belongs to this registered project.
+/// The root pins it with the other this-session composing rows instead of
+/// ranking it by a stamp it cannot have yet.
+pub fn State::project_draft(
+  self : State,
+  context : SidebarContext,
+  root : String,
+) -> @conversation.Input? {
+  guard context.project_registered(root) &&
+    self.active_draft() is Some(draft) &&
+    CodexProject(draft.grouping_root()) == CodexProject(root) else {
+    return None
+  }
+  Some(context.draft_input(draft, true))
+}
+
+///|
+/// This registered project's Codex threads, in app-server order. Codex no
+/// longer owns a sidebar section — its conversations live beside OpenSeek's
+/// in the shared Projects section, distinguished only by their row identity.
 pub fn State::project_conversations(
   self : State,
   context : SidebarContext,
   root : String,
-) -> Array[@conversation.Input] {
+) -> Array[CodexProjectRow] {
   // A thread is either nested here or a loose top-level row — never both.
   // `loose_entries` claims every unregistered root, so this side must refuse
   // them even if a caller passes one.
   guard context.project_registered(root) else { return [] }
   let project = CodexProject(root)
-  let conversations : Array[@conversation.Input] = []
-  if self.active_draft() is Some(draft) &&
-    CodexProject(draft.grouping_root()) == project {
-    conversations.push(context.draft_input(draft, true))
-  }
+  let conversations : Array[CodexProjectRow] = []
   for thread in self.threads {
     if thread.project_key() == Some(project) {
-      conversations.push(thread.sidebar_input(self, context, true))
+      conversations.push({
+        input: thread.sidebar_input(self, context, true),
+        updated_at_ms: thread.updated_at_ms,
+      })
     }
   }
   conversations
@@ -710,7 +733,7 @@ test "Codex threads join their registered project's shared row" {
   }
   let conversations = state.project_conversations(context, "/work/openseek")
   assert_eq(conversations.length(), 6)
-  assert_true(conversations[0].nested)
+  assert_true(conversations[0].input.nested)
   assert_eq(state.project_conversations(context, "/work/other").length(), 0)
   assert_eq(state.loose_entries(context).length(), 0)
 }

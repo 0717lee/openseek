@@ -5592,6 +5592,7 @@ fn update_device_msg(
           title: None,
           workspace: key.workspace,
           workspace_name: "",
+          updated_at_ms: None,
         }
         for live in dev.sessions {
           if key.matches(live) {
@@ -7253,6 +7254,7 @@ fn Model::with_listed(self : Model, ids : Array[String]) -> Model raise {
           title: Some(""),
           workspace: @interop.ChannelId::Local.test_project(),
           workspace_name: "work",
+          updated_at_ms: None,
         } : @transcript.SessionListItem)
     }),
   })
@@ -8075,6 +8077,7 @@ test "sessions loaded replaces the sidebar list" {
       title: Some("first question"),
       workspace: @interop.ChannelId::Local.test_project(),
       workspace_name: "",
+      updated_at_ms: None,
     },
   ]
   let (_, once) = update(dispatch, sessions_loaded(items), test_model())
@@ -8121,6 +8124,7 @@ test "session list assigns a commit-first conversation to its durable workspace"
           title: Some("arrived before the list"),
           workspace,
           workspace_name: "foreign",
+          updated_at_ms: None,
         },
       ],
       request_generation=committed.dev().sessions_request_generation,
@@ -8232,12 +8236,14 @@ test "a commit for an unlisted store refreshes past a same-id row" {
         title: Some("listed copy"),
         workspace: listed,
         workspace_name: "work",
+        updated_at_ms: None,
       },
       {
         id: "desktop-listed-only",
         title: Some("listed chat"),
         workspace: listed,
         workspace_name: "work",
+        updated_at_ms: None,
       },
     ],
   })
@@ -8288,6 +8294,7 @@ test "a commit for an unlisted store refreshes past a same-id watermark" {
         title: Some("listed copy"),
         workspace: listed,
         workspace_name: "work",
+        updated_at_ms: None,
       },
     ],
   })
@@ -8362,6 +8369,7 @@ test "a background session list updates only its channel's same-id workspace" {
             title: Some("remote"),
             workspace: remote.test_resource("/remote-new"),
             workspace_name: "remote-new",
+            updated_at_ms: None,
           },
         ],
         connection_generation=0,
@@ -8422,6 +8430,7 @@ test "session list assigns a Started-first conversation to its durable workspace
         title: Some("arrived before the list"),
         workspace,
         workspace_name: "started-first",
+        updated_at_ms: None,
       },
     ]),
     started,
@@ -9092,6 +9101,7 @@ test "SessionsLoaded retries an unconfirmed start after an empty recovery" {
         title: Some("persisted"),
         workspace: @interop.ChannelId::Local.test_project(),
         workspace_name: "",
+        updated_at_ms: None,
       },
     ]),
     empty,
@@ -9177,6 +9187,7 @@ test "a restored session keeps the placement its listing named" {
         title: Some("restored"),
         workspace: @interop.ChannelId::Local.test_project(),
         workspace_name: "work",
+        updated_at_ms: None,
       },
     ]),
     test_model(),
@@ -9306,6 +9317,7 @@ test "reselecting a synced active session reloads idle external writes" {
         title: Some(""),
         workspace: @interop.ChannelId::Local.test_project(),
         workspace_name: "",
+        updated_at_ms: None,
       },
     ],
   })
@@ -9798,6 +9810,7 @@ test "session loaded swaps the active conversation onto the stored session" {
           title: Some("stored"),
           workspace: @interop.ChannelId::Local.test_project(),
           workspace_name: "work",
+          updated_at_ms: None,
         },
       ],
     })
@@ -14089,10 +14102,29 @@ test "Codex threads share the Projects section's project rows" {
       "cwd": "/work",
       "projectRoot": "/work",
       "preview": "Codex task",
+      "updatedAt": 2000,
       "turns": [],
     },
   })
-  let model = { ..test_model(), codex, screen: Codex }
+  let model = { ..test_model(), codex, screen: Codex }.with_dev(dev => {
+    ..dev,
+    sessions: [
+      {
+        id: "desktop-newer",
+        title: Some("after the Codex task"),
+        workspace: @interop.ChannelId::Local.test_project(),
+        workspace_name: "work",
+        updated_at_ms: Some(3_000_000.0),
+      },
+      {
+        id: "desktop-older",
+        title: Some("before the Codex task"),
+        workspace: @interop.ChannelId::Local.test_project(),
+        workspace_name: "work",
+        updated_at_ms: Some(1_000_000.0),
+      },
+    ],
+  })
   let sections = model.sidebar_component_sections(model.dev())
   // The Projects section and the Archived section — no Codex section.
   assert_eq(sections.length(), 2)
@@ -14100,11 +14132,15 @@ test "Codex threads share the Projects section's project rows" {
   guard sections[0].entries[0] is @section.Project(project) else {
     fail("expected the fixture project's row")
   }
-  let codex_rows = project.conversations.filter(row => {
-    row.id.source() == "codex.live"
-  })
-  assert_eq(codex_rows.length(), 1)
-  assert_true(codex_rows[0].nested)
+  // Rows interleave by recency across both sources: the fixture's unsent
+  // "New chat" husk leads as this session's composing row, then stamped
+  // history newest-first regardless of which agent owns each row.
+  let order = project.conversations.map(row => row.id.conversation())
+  assert_eq(order, [
+    "desktop-test", "desktop-newer", "codex-thread-1", "desktop-older",
+  ])
+  assert_true(project.conversations[2].id.source() == "codex.live")
+  assert_true(project.conversations[2].nested)
   // With the Codex page on screen, its active task claims the activation.
   assert_eq(sections[0].activation, Some("codex-thread-1"))
 }
@@ -15157,6 +15193,7 @@ fn archived_item(
     title: Some(""),
     workspace: channel.test_project(),
     workspace_name: "work",
+    updated_at_ms: None,
   }
 }
 
@@ -15169,6 +15206,7 @@ fn placed_archived_item(id : String) -> @transcript.SessionListItem {
     title: Some(""),
     workspace: @interop.ChannelId::Local.test_project(),
     workspace_name: "work",
+    updated_at_ms: None,
   }
 }
 
@@ -15209,11 +15247,13 @@ test "switching same-id archived stores fences the first transcript load" {
     ..archived_item("desktop-shared"),
     workspace: first,
     workspace_name: "first",
+    updated_at_ms: None,
   }
   let second_item : @transcript.SessionListItem = {
     ..first_item,
     workspace: second,
     workspace_name: "second",
+    updated_at_ms: None,
   }
   let model = test_model().with_dev(dev => {
     ..dev,
@@ -15520,6 +15560,7 @@ test "archived deletion keeps same-id rows in other stores" {
     ..archived_item("shared"),
     workspace: project,
     workspace_name: "project",
+    updated_at_ms: None,
   }
   let project_child : @transcript.SessionListItem = {
     ..project_parent,
@@ -15785,6 +15826,7 @@ test "deleted broadcast is immediate and idempotent" {
     ..item,
     workspace: project,
     workspace_name: "project",
+    updated_at_ms: None,
   }
   let model = {
     ..test_model()
@@ -15839,6 +15881,7 @@ test "deleted broadcast rotates the active conversation's exact store" {
     ..unplaced,
     workspace: project,
     workspace_name: "project",
+    updated_at_ms: None,
   }
   let model = {
     ..test_model()
@@ -15879,6 +15922,7 @@ test "archive facts rotate the open conversation's exact store" {
     ..unplaced,
     workspace: project,
     workspace_name: "project",
+    updated_at_ms: None,
   }
   // The other store's row deliberately comes first: session_project("shared")
   // resolves to it, while the conversation actually open on screen belongs to
@@ -15942,6 +15986,7 @@ test "archive broadcast invalidates the active send target before list replies" 
           ..placed_archived_item("desktop-test"),
           workspace,
           workspace_name: "archived",
+          updated_at_ms: None,
         },
       ],
       worktrees: [{ project: workspace, rows: [], generation: 1 }],
@@ -16298,6 +16343,7 @@ test "an older same-connection live list cannot replace a newer reply" {
     title: Some("old title"),
     workspace: @interop.ChannelId::Local.test_project(),
     workspace_name: "",
+    updated_at_ms: None,
   }
   let current = { ..old, title: Some("current title") }
   let model = test_model().with_dev(dev => {
@@ -16326,6 +16372,7 @@ test "an older same-connection archived list cannot replace a newer reply" {
     title: Some("old title"),
     workspace: @interop.ChannelId::Local.test_project(),
     workspace_name: "",
+    updated_at_ms: None,
   }
   let current = { ..old, title: Some("current title") }
   let model = test_model().with_dev(dev => {
@@ -19010,6 +19057,7 @@ test "a late commit cannot resurrect a locally known archived session" {
         title: Some("archived"),
         workspace: @interop.ChannelId::Local.test_project(),
         workspace_name: "",
+        updated_at_ms: None,
       },
     ],
   })
