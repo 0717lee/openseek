@@ -392,7 +392,7 @@ pub fn component(
           @html.button(
             class="project-show-more",
             type_="button",
-            title="Show up to 7 more chats in this project",
+            title="Show more chats in this project",
             on_click=emit(ShowMore),
             "Show more",
           ),
