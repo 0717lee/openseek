@@ -231,6 +231,8 @@ pub fn update(
             next.load_skills(dispatch, channel, force_reload=false),
           ])
         }
+        CodexThreadMetaReply(thread_id) =>
+          next = next.with_thread_meta(value, thread_id)
         CodexThreadReply(requested_thread) => {
           next = next.with_thread_reply(value, requested_thread~)
           // A malformed or mismatched snapshot leaves the requested id in
@@ -352,7 +354,9 @@ pub fn update(
         CodexThreadsReply(false, _) => "Codex threads"
         CodexThreadsReply(true, _) => "Archived Codex threads"
         CodexDraftOpenReply(_) => "Codex draft"
-        CodexThreadReply(_) | CodexDraftThreadReply(_) => "Codex thread"
+        CodexThreadReply(_)
+        | CodexThreadMetaReply(_)
+        | CodexDraftThreadReply(_) => "Codex thread"
         CodexTurnReply(_) | CodexWorktreeTurnReply(_, _) => "Codex turn"
         CodexTurnReconcileReply(_) => "Codex turn reconciliation"
         CodexWorktreeRepairReply(_, _) => "Codex worktree rebuild"
@@ -462,12 +466,16 @@ pub fn update(
         // Re-read through the host so a cwd change cannot retarget Files,
         // Terminal, or language services from an unvalidated notification.
         // If a turn reply is also missing, the same read must first settle
-        // that delivery frontier before Send can become available.
+        // that delivery frontier before Send can become available. The
+        // ordinary case applies the read metadata-only: the first turn of a
+        // fresh thread fires this notification while it is still streaming,
+        // and a full `open_thread` replacement would blank the transcript
+        // with a snapshot that predates the turn.
         if next.pending_turn_delivery is Some(pending) &&
           pending.thread_id == active.id {
           next.reconcile_turn_delivery(dispatch, channel, active.id)
         } else {
-          next.open_thread(dispatch, channel, active.id)
+          next.refresh_thread_meta(dispatch, channel, active.id)
         }
       } else if method_ == "turn/completed" {
         // A turn may check out another branch or create a PR. Refresh the same
@@ -602,6 +610,61 @@ test "abandoning a draft deselects it and clears its composer state" {
     open_external,
   )
   assert_true(unchanged.active_id() is None)
+}
+
+///|
+test "a settings-updated re-read keeps the streaming turns" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let open_external = (_ : String) => @cmd.none
+  // A fresh thread's first turn fires `thread/settings/updated` while it is
+  // still streaming; the snapshot read it triggers may predate that turn.
+  let state = State::from_thread_snapshot({
+    "thread": {
+      "id": "thread-1",
+      "cwd": "/work/project",
+      "preview": "hello",
+      "turns": [{ "id": "turn-1", "status": "inProgress", "items": [] }],
+    },
+  })
+  guard state.active_thread() is Some(before) else {
+    fail("fixture thread should be active")
+  }
+  assert_eq(before.turns.length(), 1)
+  let (_, refreshed) = update(
+    dispatch,
+    Reply(kind=CodexThreadMetaReply("thread-1"), value={
+      "thread": {
+        "id": "thread-1",
+        "name": "Renamed",
+        "cwd": "/work/project",
+        "turns": [],
+      },
+    }),
+    state,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  guard refreshed.active_thread() is Some(after) else {
+    fail("the metadata read must not deselect the thread")
+  }
+  // Metadata adopted, turn history preserved.
+  inspect(after.title, content="Renamed")
+  assert_eq(after.turns.length(), 1)
+  // A read for some other thread changes nothing.
+  let (_, unchanged) = update(
+    dispatch,
+    Reply(kind=CodexThreadMetaReply("thread-other"), value={
+      "thread": { "id": "thread-other", "turns": [] },
+    }),
+    state,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  guard unchanged.active_thread() is Some(kept) else {
+    fail("a mismatched read must not deselect the thread")
+  }
+  assert_eq(kept.id, "thread-1")
+  assert_eq(kept.turns.length(), 1)
 }
 
 ///|

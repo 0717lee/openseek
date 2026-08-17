@@ -174,6 +174,10 @@ priv enum CodexReplyKind {
   CodexModelsReply
   CodexThreadsReply(Bool, Int)
   CodexThreadReply(String)
+  // The same snapshot read as `CodexThreadReply`, applied metadata-only:
+  // the local turns survive, because this read races turns that the item
+  // notifications are still building.
+  CodexThreadMetaReply(String)
   CodexWriterReply(String)
   CodexDraftOpenReply(String)
   CodexDraftThreadReply(String)
@@ -591,6 +595,11 @@ fn State::accepts_reply(self : State, kind : CodexReplyKind) -> Bool {
     CodexThreadsReply(true, generation) =>
       generation == self.archived_catalog_generation
     CodexThreadReply(thread_id) => self.accepts_thread_reply(thread_id)
+    CodexThreadMetaReply(thread_id) =>
+      self
+      .active_thread()
+      .map(thread => thread.id == thread_id)
+      .unwrap_or(false)
     CodexWriterReply(thread_id) =>
       self
       .active_thread()
@@ -640,6 +649,7 @@ fn CodexReplyKind::foreground(self : CodexReplyKind) -> CodexForeground? {
     | CodexAccountReply
     | CodexModelsReply
     | CodexThreadsReply(_, _)
+    | CodexThreadMetaReply(_)
     | CodexInterruptReply
     | CodexApprovalReply => None
   }
@@ -1308,6 +1318,29 @@ fn State::with_requests(self : State, value : Json) -> State {
     pending_requests.push({ ..decoded, answers, })
   }
   { ..self, pending_requests, request_generation: generation }
+}
+
+///|
+/// Adopt a thread snapshot's metadata onto the active selection while
+/// keeping the locally accumulated turns. `thread/settings/updated` only
+/// invalidates settings-derived facts (cwd, worktree, branch, title); the
+/// item notifications remain the authoritative turn lifecycle, and a
+/// snapshot read while the first turn streams may not contain that turn at
+/// all — wholesale replacement would blank the transcript mid-turn.
+fn State::with_thread_meta(
+  self : State,
+  value : Json,
+  thread_id : String,
+) -> State {
+  guard value is Object(fields) &&
+    fields.get("thread") is Some(thread) &&
+    CodexThread::decode(thread) is Some(read) &&
+    read.id == thread_id &&
+    self.active_thread() is Some(active) &&
+    active.id == thread_id else {
+    return self
+  }
+  { ..self, selection: CodexStoredTask({ ..read, turns: active.turns }) }
 }
 
 ///|
