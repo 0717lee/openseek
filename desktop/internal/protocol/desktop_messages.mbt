@@ -19,8 +19,8 @@ pub(all) struct StartPayload {
   // Every desktop run belongs to a durable conversation. The engine rejects
   // a blank id before it acquires that conversation's record lease.
   session : String
-  // A registered workspace directory; absent means a scratch workspace. A
-  // session bound to one of the workspace's worktrees (`worktree.create`
+  // The registered workspace directory this conversation works in. A
+  // session bound to one of that workspace's worktrees (`worktree.create`
   // binds at creation) runs in that checkout — the start itself never names
   // or mutates worktrees.
   workspace : String?
@@ -97,6 +97,16 @@ pub(all) struct SessionPayload {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+/// Permanent deletion addresses one archived record in one exact store.
+/// `workspace` is the host-reported project resource path; the host validates
+/// it against its registry instead of trusting the client to choose an
+/// arbitrary directory.
+pub(all) struct ArchivedSessionPayload {
+  session : String
+  workspace : String
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
 pub(all) struct SettingsSetPayload {
   legacy_migration : Bool?
   provider : String?
@@ -117,14 +127,67 @@ pub(all) struct WorktreeListPayload {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-/// `worktree.create` names the workspace and the NEW conversation the
-/// worktree will be the execution environment of — creation is the binding,
-/// and the session doubles as the idempotency key for retries. The host
-/// generates the worktree's name and returns it in the reply.
+/// `worktree.create` names the workspace and exactly one conversation owner.
+/// Existing clients send `session`; Codex sends `codex_thread`. Creation is
+/// the binding, and that owner id doubles as the idempotency key for retries.
+/// The host generates the worktree's name and returns it in the reply.
 pub(all) struct WorktreeCreatePayload {
   workspace : String
-  session : String
-} derive(Debug, Eq, FromJson, ToJson)
+  session : String?
+  codex_thread : String?
+} derive(Debug, Eq)
+
+///|
+pub impl FromJson for WorktreeCreatePayload with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected worktree creation payload"))
+  }
+  let workspace = match fields.get("workspace") {
+    Some(String(value)) => value
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("workspace"), "expected string"))
+    None =>
+      raise JsonDecodeError(
+        (path.add_key("workspace"), "missing required field"),
+      )
+  }
+  let session = match fields.get("session") {
+    Some(String(value)) => Some(value)
+    Some(Null) | None => None
+    Some(_) =>
+      raise JsonDecodeError(
+        (path.add_key("session"), "expected string or null"),
+      )
+  }
+  let codex_thread = match fields.get("codex_thread") {
+    Some(String(value)) => Some(value)
+    Some(Null) | None => None
+    Some(_) =>
+      raise JsonDecodeError(
+        (path.add_key("codex_thread"), "expected string or null"),
+      )
+  }
+  // Unknown fields remain forward-compatible, but ownership is deliberately
+  // closed: a worktree belongs to one OpenSeek session or one Codex thread.
+  if (session is Some(_)) == (codex_thread is Some(_)) {
+    raise JsonDecodeError(
+      (path, "expected exactly one of session or codex_thread"),
+    )
+  }
+  { workspace, session, codex_thread }
+}
+
+///|
+pub impl ToJson for WorktreeCreatePayload with fn to_json(self) {
+  let fields : Map[String, Json] = { "workspace": Json::string(self.workspace) }
+  if self.session is Some(session) {
+    fields["session"] = Json::string(session)
+  }
+  if self.codex_thread is Some(codex_thread) {
+    fields["codex_thread"] = Json::string(codex_thread)
+  }
+  Json::object(fields)
+}
 
 ///|
 /// `worktree.remove` — `force` discards uncommitted changes in the checkout;
@@ -173,11 +236,55 @@ pub(all) struct GitBranchPayload {
 ///|
 /// Address the same working directory as `git.branch` — the pull request is
 /// looked up for whatever branch that directory has checked out, so the two
-/// chips can never describe different branches.
+/// chips can never describe different branches. Codex-managed worktrees are
+/// commonly detached; `branch_hint` is app-server's creation-time branch and
+/// is accepted only when that local branch still points at the current HEAD.
 pub(all) struct GitPullRequestPayload {
   session : String
   cwd : String?
-} derive(Debug, Eq, FromJson, ToJson)
+  branch_hint : String?
+} derive(Debug, Eq)
+
+///|
+pub impl FromJson for GitPullRequestPayload with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected Git pull-request payload"))
+  }
+  let session = match fields.get("session") {
+    Some(String(value)) => value
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("session"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("session"), "missing required field"))
+  }
+  let cwd = match fields.get("cwd") {
+    Some(String(value)) => Some(value)
+    Some(Null) | None => None
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("cwd"), "expected string or null"))
+  }
+  let branch_hint = match fields.get("branch_hint") {
+    Some(String(value)) => Some(value)
+    Some(Null) | None => None
+    Some(_) =>
+      raise JsonDecodeError(
+        (path.add_key("branch_hint"), "expected string or null"),
+      )
+  }
+  { session, cwd, branch_hint }
+}
+
+///|
+pub impl ToJson for GitPullRequestPayload with fn to_json(self) {
+  let fields : Map[String, Json] = { "session": Json::string(self.session) }
+  if self.cwd is Some(cwd) {
+    fields["cwd"] = Json::string(cwd)
+  }
+  if self.branch_hint is Some(branch_hint) {
+    fields["branch_hint"] = Json::string(branch_hint)
+  }
+  Json::object(fields)
+}
 
 ///|
 /// Address the Git working tree belonging to one conversation. The optional
@@ -307,30 +414,203 @@ pub(all) struct TerminalClosePayload {
 
 ///|
 pub(all) struct LspOpenPayload {
+  session : String
   root : String
   path : String
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
+
+///|
+pub impl FromJson for LspOpenPayload with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected LSP open payload"))
+  }
+  let session = match fields.get("session") {
+    Some(String(value)) => value
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("session"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("session"), "missing required field"))
+  }
+  let root = match fields.get("root") {
+    Some(String(value)) => value
+    Some(_) => raise JsonDecodeError((path.add_key("root"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("root"), "missing required field"))
+  }
+  let file_path = match fields.get("path") {
+    Some(String(value)) => value
+    Some(_) => raise JsonDecodeError((path.add_key("path"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("path"), "missing required field"))
+  }
+  { session, root, path: file_path }
+}
+
+///|
+pub impl ToJson for LspOpenPayload with fn to_json(self) {
+  { "session": self.session, "root": self.root, "path": self.path }
+}
 
 ///|
 pub(all) struct LspHoverPayload {
+  session : String
   root : String
   path : String
   line : Int
   character : Int
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
+
+///|
+pub impl FromJson for LspHoverPayload with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected LSP hover payload"))
+  }
+  let session = match fields.get("session") {
+    Some(String(value)) => value
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("session"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("session"), "missing required field"))
+  }
+  let root = match fields.get("root") {
+    Some(String(value)) => value
+    Some(_) => raise JsonDecodeError((path.add_key("root"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("root"), "missing required field"))
+  }
+  let file_path = match fields.get("path") {
+    Some(String(value)) => value
+    Some(_) => raise JsonDecodeError((path.add_key("path"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("path"), "missing required field"))
+  }
+  let line = match fields.get("line") {
+    Some(Number(value, ..)) => value.to_int()
+    Some(_) => raise JsonDecodeError((path.add_key("line"), "expected integer"))
+    None =>
+      raise JsonDecodeError((path.add_key("line"), "missing required field"))
+  }
+  let character = match fields.get("character") {
+    Some(Number(value, ..)) => value.to_int()
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("character"), "expected integer"))
+    None =>
+      raise JsonDecodeError(
+        (path.add_key("character"), "missing required field"),
+      )
+  }
+  { session, root, path: file_path, line, character }
+}
+
+///|
+pub impl ToJson for LspHoverPayload with fn to_json(self) {
+  {
+    "session": self.session,
+    "root": self.root,
+    "path": self.path,
+    "line": self.line,
+    "character": self.character,
+  }
+}
 
 ///|
 pub(all) struct WorkspaceSymbolsPayload {
+  session : String
   root : String
   query : String
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
+
+///|
+pub impl FromJson for WorkspaceSymbolsPayload with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected workspace-symbol payload"))
+  }
+  let session = match fields.get("session") {
+    Some(String(value)) => value
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("session"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("session"), "missing required field"))
+  }
+  let root = match fields.get("root") {
+    Some(String(value)) => value
+    Some(_) => raise JsonDecodeError((path.add_key("root"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("root"), "missing required field"))
+  }
+  let query = match fields.get("query") {
+    Some(String(value)) => value
+    Some(_) => raise JsonDecodeError((path.add_key("query"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("query"), "missing required field"))
+  }
+  { session, root, query }
+}
+
+///|
+pub impl ToJson for WorkspaceSymbolsPayload with fn to_json(self) {
+  { "session": self.session, "root": self.root, "query": self.query }
+}
 
 ///|
 pub(all) struct MoonIdeNavigationPayload {
+  session : String
+  root : String
   path : String
   line : Int
   column : Int
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
+
+///|
+pub impl FromJson for MoonIdeNavigationPayload with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected Moon IDE navigation payload"))
+  }
+  let session = match fields.get("session") {
+    Some(String(value)) => value
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("session"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("session"), "missing required field"))
+  }
+  let root = match fields.get("root") {
+    Some(String(value)) => value
+    Some(_) => raise JsonDecodeError((path.add_key("root"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("root"), "missing required field"))
+  }
+  let file_path = match fields.get("path") {
+    Some(String(value)) => value
+    Some(_) => raise JsonDecodeError((path.add_key("path"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("path"), "missing required field"))
+  }
+  let line = match fields.get("line") {
+    Some(Number(value, ..)) => value.to_int()
+    Some(_) => raise JsonDecodeError((path.add_key("line"), "expected integer"))
+    None =>
+      raise JsonDecodeError((path.add_key("line"), "missing required field"))
+  }
+  let column = match fields.get("column") {
+    Some(Number(value, ..)) => value.to_int()
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("column"), "expected integer"))
+    None =>
+      raise JsonDecodeError((path.add_key("column"), "missing required field"))
+  }
+  { session, root, path: file_path, line, column }
+}
+
+///|
+pub impl ToJson for MoonIdeNavigationPayload with fn to_json(self) {
+  {
+    "session": self.session,
+    "root": self.root,
+    "path": self.path,
+    "line": self.line,
+    "column": self.column,
+  }
+}
 
 ///|
 pub(all) struct ExternalLinkPayload {
@@ -365,13 +645,69 @@ pub(all) struct BrowserVisiblePayload {
 // Notification payloads.
 
 ///|
+/// How much of the host is up behind an `agent.connected`. Both spellings
+/// ask the client for the same thing — this connection is live, re-read your
+/// state — and differ only in whether a run can start yet.
+pub(all) enum ConnectedStage {
+  /// A transport accepted this client. The engine pump may still be between
+  /// generations, so a start can be refused until `Serving` follows.
+  Accepted
+  /// The engine pump entered a serving generation and accepts runs.
+  Serving
+} derive(Debug, Eq)
+
+///|
+pub impl ToJson for ConnectedStage with fn to_json(self) {
+  match self {
+    Accepted => "accepted"
+    Serving => "serving"
+  }
+}
+
+///|
+/// The stage is a bare string, and an unrecognized one is refused rather than
+/// read as the weaker of the two: a client acts on this field to decide
+/// whether a start can be refused, and a spelling this build does not know is
+/// a host it cannot reason about. Host and clients ship together, so a third
+/// stage arrives with the code that understands it.
+pub impl FromJson for ConnectedStage with fn from_json(json, path) {
+  guard json is String(stage) else {
+    raise JsonDecodeError((path, "expected connected stage"))
+  }
+  match stage {
+    "accepted" => Accepted
+    "serving" => Serving
+    _ => raise JsonDecodeError((path, "unknown connected stage"))
+  }
+}
+
+///|
+/// `agent.connected` is a signal rather than a description: every client
+/// answers it by re-reading its state. `stage` says how much of the host is
+/// up, which is all a client can act on beyond that.
 pub(all) struct ConnectedPayload {
-  ready : Bool?
-  // Device-native scratch base encoded as a frontend resource path. A host
-  // cannot announce readiness without it: every Scratch conversation derives
-  // its concrete filesystem and language-server root from this value.
-  scratch_root : String
-} derive(Debug, Eq, FromJson, ToJson)
+  stage : ConnectedStage
+} derive(Debug, Eq)
+
+///|
+pub impl ToJson for ConnectedPayload with fn to_json(self) {
+  { "stage": self.stage.to_json() }
+}
+
+///|
+/// `stage` is the whole payload: a notification carrying none, or one this
+/// build cannot read, says nothing a client can act on, so it is refused
+/// rather than guessed at — `Notification::from_wire` drops it. Fields this
+/// build does not know are ignored, leaving the wire room to grow.
+pub impl FromJson for ConnectedPayload with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected connected payload"))
+  }
+  guard fields.get("stage") is Some(stage) else {
+    raise JsonDecodeError((path.add_key("stage"), "missing required field"))
+  }
+  { stage: @json.from_json(stage, path=path.add_key("stage")) }
+}
 
 ///|
 pub(all) struct StartedPayload {
@@ -451,6 +787,10 @@ pub(all) struct SessionCommitPayload {
   session : String
   sequence : Int
   event : SessionEvent
+  // The durable store root this commit was read from, as a frontend resource
+  // path. Session ids are not globally unique across stores, so the
+  // broadcast names the store half of the identity beside the id.
+  session_root : String
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
@@ -471,6 +811,10 @@ pub(all) struct SubrunProgressPayload {
 pub(all) struct SessionChangedPayload {
   change : String
   session : String
+  // The project store owning this record. Session ids are not globally
+  // unique across stores, so every invalidation carries both halves of the
+  // durable identity.
+  workspace : String
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|

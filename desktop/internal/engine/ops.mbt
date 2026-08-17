@@ -5,12 +5,12 @@
 /// Submit one prompt to the conversation's serve engine, spawning or
 /// replacing the process first when the config demands it. Only this
 /// conversation must be idle — other sessions' engines run their own turns
-/// concurrently. Returns as soon as the prompt is on the wire; the engine's
-/// consumer task reports progress and completion through events, exactly as
-/// the frontend already expects. The op only rejects for failures before the
-/// run's Started event goes out — once the run is public, a failure is
-/// reported through its error and finished events and the op returns
-/// normally (status "failed"), never both.
+/// concurrently. Returns as soon as the prompt is queued for the engine's
+/// writer; the engine's consumer task reports progress and completion through
+/// events, exactly as the frontend already expects. The op rejects only for
+/// failures before the run's Started event goes out. Everything after that —
+/// including a stdin write that fails — is reported through the run's error
+/// and finished events, never as both an event and a rejection.
 pub async fn start_run(
   sink : EventSink,
   manager : EngineManager,
@@ -33,22 +33,25 @@ pub async fn start_run(
   let record_guard = manager.begin_record_op(key)
   defer manager.end_record_op(key, record_guard)
   let config = run_config(manager, payload)
-  ensure_session_not_archived(key)
+  @session_store.ensure_not_archived(key)
   let sessions = manager.serving()
   let slot = slot_for(sessions, key)
-  if slot.engine is Some(live) {
-    match live.phase {
+  // Busy-ness is a property of the handle, not of admission: a condemned
+  // engine whose turn has not settled yet still owns this conversation's
+  // durable record, so this reads the slot rather than `live`.
+  if slot.engine is Some(engine) {
+    match engine.phase {
       Running(..) =>
         raise EngineError(
           "an OpenSeek run is still active in this conversation",
         )
       // A prompt accepted now would queue behind the compaction, where a
       // Stop (which cancels only the compaction) could not reach it.
-      Compacting =>
+      Compacting(..) =>
         raise EngineError(
           "this conversation is compacting; wait for it to finish",
         )
-      Idle => ()
+      Idle(..) => ()
     }
   }
   let claim = slot.claim(sessions, key, StartPending)
@@ -59,8 +62,8 @@ pub async fn start_run(
   placement_locked = false
   manager.workspace_lifecycle_lock.release()
   ensure_run_cwd(config)
-  let need_spawn = if slot.engine is Some(live) {
-    !live.accepts_commands || live.spec_key != engine_fingerprint(config)
+  let need_spawn = if slot.live() is Some(live) {
+    live.spec_key != engine_fingerprint(config)
   } else {
     true
   }
@@ -68,70 +71,42 @@ pub async fn start_run(
     request_spawn(manager, claim, config)
   }
   claim.require_current(manager)
-  guard slot.engine is Some(live) else {
+  guard slot.live() is Some(live) else {
     raise EngineError("engine failed to start")
   }
   // The cwd/spawn waits above are suspension points: a compaction accepted
   // during one of them holds the engine now, and the Running transition
   // below would silently clobber it. Re-check on the engine this run will
   // actually use.
-  if live.phase is Compacting {
+  if live.phase is Compacting(..) {
     raise EngineError("this conversation is compacting; wait for it to finish")
   }
   let run_id = mint_run_id()
   let command = @protocol.prompt(config.task)
   let submission_id = normalize_submission_id(payload.submission_id)
-  let mut started_emitted = false
-  // Publish the run and write its prompt while holding the engine's one
-  // command lock. A remote peer may steer as soon as it sees Started; making
-  // the phase visible only after this task owns the lock guarantees that steer
-  // (and cancel/compact) lands after the complete prompt on stdin, while the
-  // Started notification still precedes every event the prompt can produce.
-  live.with_command_lock(() => {
-    claim.require_current(manager)
-    guard live.accepts_commands &&
-      slot.engine is Some(current) &&
-      physical_equal(current, live) else {
-      raise EngineError("engine changed before the prompt was submitted")
-    }
-    live.latest_run = Some(run_id)
-    live.phase = Running(cancel_requested=false, compact_queued=false)
-    live.steer_runs.begin_run()
-    started_emitted = true
-    emit(
-      sink,
-      Started({
-        run_id,
-        submission_id,
-        engine: Some(config.engine),
-        model: Some(config.model),
-        max_steps: Some(config.max_steps),
-        session: config.session,
-        session_root: config.session_root.map(root => root.resource_path()),
-      }),
-    )
-    live.writer.write(command.to_jsonl())
-  }) catch {
-    error if @async.is_being_cancelled() => {
-      if started_emitted {
-        live.accepts_commands = false
-        retire_failed_command(
-          manager, live, "request cancelled while writing to the engine",
-        )
-      }
-      raise error
-    }
-    error if !started_emitted => raise error
-    error => {
-      // Started is already public, so settle it through the same bounded,
-      // cancellation-shielded cleanup as an interrupted command. Marking the
-      // writer unusable before that cleanup prevents a second cancellation or
-      // close timeout from exposing a partial stream to a same-config start.
-      live.accepts_commands = false
-      retire_failed_command(manager, live, "engine write failed: \{error}")
-      return { run_id, status: "failed", exit_code: 1 }
-    }
+  // Submitting, opening the run and announcing it are one synchronous step,
+  // with no suspension since the claim check above. That is what makes the
+  // ordering hold without a lock: no other request can interleave a command
+  // between the prompt and the phase it opens, a remote peer that steers on
+  // seeing Started necessarily lands behind the complete prompt, and this
+  // task cannot be cancelled after Started is public.
+  guard live.submit(command.to_jsonl(), failure_reason="engine write failed") else {
+    raise EngineError("engine changed before the prompt was submitted")
   }
+  live.phase = Running(run_id~, cancel_requested=false, compact_queued=false)
+  live.steer_runs.begin_run()
+  emit(
+    sink,
+    Started({
+      run_id,
+      submission_id,
+      engine: Some(config.engine),
+      model: Some(config.model),
+      max_steps: Some(config.max_steps),
+      session: config.session,
+      session_root: config.session_root.map(root => root.resource_path()),
+    }),
+  )
   { run_id, status: "accepted", exit_code: 0 }
 }
 
@@ -152,56 +127,33 @@ fn mint_run_id() -> String raise EngineError {
 /// process itself stays alive for the next prompt. The run is addressed by
 /// id across all conversations; with no matching open run there is nothing
 /// to cancel.
-pub async fn cancel_run(
+pub fn cancel_run(
   manager : EngineManager,
   payload : @protocol.CancelPayload,
 ) -> CancelReply {
   guard open_run_engine(manager, run_id?=payload.run_id) is Some(live) else {
     return { cancelled: false, run_id: None }
   }
-  let mut command_started = false
-  let cancelled = live.with_command_lock(() => {
-    // The run can finish while this request waits behind a prompt or steer.
-    // Revalidate under the command lock so a late cancel is not written into
-    // the next idle boundary.
-    guard live.is_current(manager) else { return false }
-    guard live.phase is Running(compact_queued~, ..) else { return false }
-    if payload.run_id is Some(expected) && live.latest_run != Some(expected) {
-      return false
-    }
-    // A compaction queued behind the dying turn survives the cancel: the
-    // engine's pending queue keeps it (cancel only aborts the active turn), so
-    // the flag must ride along or the terminal event would idle past it.
-    live.phase = Running(cancel_requested=true, compact_queued~)
-    command_started = true
-    live.writer.write(@protocol.cancel().to_jsonl())
-    true
-  }) catch {
-    error if @async.is_being_cancelled() => {
-      if command_started {
-        live.accepts_commands = false
-        retire_failed_command(
-          manager, live, "request cancelled while writing cancellation to the engine",
-        )
-      }
-      raise error
-    }
-    error => {
-      if command_started {
-        live.accepts_commands = false
-        retire_failed_command(
-          manager,
-          live,
-          "failed to write cancellation to the engine: \{error}",
-        )
-      }
-      raise error
-    }
-  }
-  if !cancelled {
+  guard live.is_current(manager) else {
     return { cancelled: false, run_id: None }
   }
-  { cancelled: true, run_id: live.latest_run }
+  guard live.phase is Running(run_id~, compact_queued~, ..) else {
+    return { cancelled: false, run_id: None }
+  }
+  if payload.run_id is Some(expected) && run_id != expected {
+    return { cancelled: false, run_id: None }
+  }
+  guard live.submit(
+    @protocol.cancel().to_jsonl(),
+    failure_reason="failed to write cancellation to the engine",
+  ) else {
+    return { cancelled: false, run_id: None }
+  }
+  // A compaction queued behind the dying turn survives the cancel: the
+  // engine's pending queue keeps it (cancel only aborts the active turn), so
+  // the flag must ride along or the terminal event would idle past it.
+  live.phase = Running(run_id~, cancel_requested=true, compact_queued~)
+  { cancelled: true, run_id: Some(run_id) }
 }
 
 ///|
@@ -260,7 +212,7 @@ pub async fn compact_run(
   let session = payload.session.trim().to_owned()
   let record_guard = manager.begin_record_op(session)
   defer manager.end_record_op(session, record_guard)
-  ensure_session_not_archived(session)
+  @session_store.ensure_not_archived(session)
   let sessions = manager.serving()
   let slot = slot_for(sessions, session)
   // Claim before anything else — even with a live engine. A start between
@@ -272,74 +224,45 @@ pub async fn compact_run(
   defer claim.release(manager)
   placement_locked = false
   manager.workspace_lifecycle_lock.release()
-  let live = if slot.engine is Some(live) && live.accepts_commands {
+  let live = if slot.live() is Some(live) {
     live
   } else {
     let config = compact_config(manager, payload)
     ensure_run_cwd(config)
     request_spawn(manager, claim, config)
     claim.require_current(manager)
-    guard slot.engine is Some(live) else {
+    guard slot.live() is Some(live) else {
       raise EngineError("engine failed to start")
     }
     live
   }
-  match live.phase {
-    Compacting => raise EngineError("this conversation is already compacting")
+  // Deciding the phase this command implies is also how it is admitted, so
+  // there is exactly one place that classifies the current phase instead of
+  // the two matching ones a lock-then-revalidate shape needed.
+  let compacting_phase = match live.phase {
+    Compacting(..) =>
+      raise EngineError("this conversation is already compacting")
     Running(compact_queued=true, ..) =>
       raise EngineError(
         "a compaction is already queued behind the running turn",
       )
-    Running(compact_queued=false, ..) | Idle => ()
+    // Sent mid-turn, the command queues behind the open run; the flag makes
+    // the turn's terminal event land in Compacting so nothing slips into the
+    // gap before the engine's own compaction_started.
+    Running(run_id~, cancel_requested~, compact_queued=false) =>
+      Running(run_id~, cancel_requested~, compact_queued=true)
+    Idle(last_run~) => Compacting(last_run~)
   }
-  let command = @protocol.compact()
-  let mut command_started = false
-  live.with_command_lock(() => {
-    claim.require_current(manager)
-    guard live.accepts_commands &&
-      slot.engine is Some(current) &&
-      physical_equal(current, live) else {
-      raise EngineError("engine changed before compaction was submitted")
-    }
-    match live.phase {
-      Compacting => raise EngineError("this conversation is already compacting")
-      Running(compact_queued=true, ..) =>
-        raise EngineError(
-          "a compaction is already queued behind the running turn",
-        )
-      // Sent mid-turn, the command queues behind the open run; the flag makes
-      // the turn's terminal event land in Compacting so nothing slips into
-      // the gap before the engine's own compaction_started. Set before the
-      // potentially suspending write so the consumer already sees it.
-      Running(cancel_requested~, compact_queued=false) =>
-        live.phase = Running(cancel_requested~, compact_queued=true)
-      // Likewise, enter Compacting before the write so a short compaction's
-      // terminal event cannot be overwritten by this request resuming later.
-      Idle => live.phase = Compacting
-    }
-    command_started = true
-    live.writer.write(command.to_jsonl())
-  }) catch {
-    error if @async.is_being_cancelled() => {
-      if command_started {
-        live.accepts_commands = false
-        retire_failed_command(
-          manager, live, "request cancelled while writing the compaction command",
-        )
-      }
-      raise error
-    }
-    error if !command_started => raise error
-    error => {
-      live.accepts_commands = false
-      retire_failed_command(
-        manager,
-        live,
-        "failed to write the compaction command: \{error}",
-      )
-      raise EngineError("failed to request compaction: \{error}")
-    }
+  // Submitting and entering the phase are one synchronous step, so the
+  // classification above still holds and the consumer sees the new phase
+  // before any event the command can produce.
+  guard live.submit(
+    @protocol.compact().to_jsonl(),
+    failure_reason="failed to write the compaction command",
+  ) else {
+    raise EngineError("engine changed before compaction was submitted")
   }
+  live.phase = compacting_phase
   { compacting: true }
 }
 
@@ -352,7 +275,7 @@ pub async fn compact_run(
 /// idle, steers it into an open turn at a batch-safe boundary, and holds its
 /// wire-order position behind a queued compaction — so this op never gates on
 /// phase. The engine confirms through the durable `[goal]` marker commit;
-/// this op only confirms the command reached a live engine.
+/// this op only confirms the command was accepted by a live engine's writer.
 pub async fn goal_run(
   manager : EngineManager,
   payload : @protocol.GoalPayload,
@@ -388,24 +311,24 @@ pub async fn goal_run(
   }
   let record_guard = manager.begin_record_op(session)
   defer manager.end_record_op(session, record_guard)
-  ensure_session_not_archived(session)
+  @session_store.ensure_not_archived(session)
   let sessions = manager.serving()
   let slot = slot_for(sessions, session)
-  // Claim before looking at the engine, exactly as compact_run does: a start
-  // accepted between this op's validation and its locked write could replace
+  // Claim before looking at the engine, exactly as compact_run does: this op
+  // may have to spawn one, and a start accepted during that wait could replace
   // the live process and lose the command in the dying engine's stdin.
   let claim = slot.claim(sessions, session, GoalPending)
   defer claim.release(manager)
   placement_locked = false
   manager.workspace_lifecycle_lock.release()
-  let live = if slot.engine is Some(live) && live.accepts_commands {
+  let live = if slot.live() is Some(live) {
     live
   } else {
     let config = goal_config(manager, payload)
     ensure_run_cwd(config)
     request_spawn(manager, claim, config)
     claim.require_current(manager)
-    guard slot.engine is Some(live) else {
+    guard slot.live() is Some(live) else {
       raise EngineError("engine failed to start")
     }
     live
@@ -415,36 +338,24 @@ pub async fn goal_run(
   } else {
     @protocol.goal_clear()
   }
-  let mut command_started = false
-  live.with_command_lock(() => {
-    claim.require_current(manager)
-    guard live.accepts_commands &&
-      slot.engine is Some(current) &&
-      physical_equal(current, live) else {
-      raise EngineError("engine changed before the goal was submitted")
-    }
-    command_started = true
-    live.writer.write(command.to_jsonl())
-  }) catch {
-    error if @async.is_being_cancelled() => {
-      if command_started {
-        live.accepts_commands = false
-        retire_failed_command(
-          manager, live, "request cancelled while writing the goal command",
-        )
-      }
-      raise error
-    }
-    error if !command_started => raise error
-    error => {
-      live.accepts_commands = false
-      retire_failed_command(
-        manager,
-        live,
-        "failed to write the goal command: \{error}",
-      )
-      raise EngineError("failed to update the goal: \{error}")
-    }
+  // The one command that must be acknowledged. A prompt or a compaction that
+  // never reaches stdin is reported by its run's lifecycle events, and a steer
+  // by its receipt or the run's durable recovery; a goal has neither. Its only
+  // other confirmation is the durable `[goal]` marker, so a dropped goal would
+  // leave the client believing a set or clear succeeded that never happened.
+  let ack : @async.Queue[EngineError?] = Queue(kind=Blocking(1))
+  guard live.submit(
+    command.to_jsonl(),
+    failure_reason="failed to write the goal command",
+    ack~,
+  ) else {
+    raise EngineError("engine changed before the goal was submitted")
+  }
+  // Affordable precisely because nothing above went public: no phase
+  // transition, no event. A cancellation landing on this wait leaves nothing
+  // to unwind, which is why a prompt cannot do the same.
+  if ack.get() is Some(error) {
+    raise error
   }
   { delivered: true }
 }
@@ -458,7 +369,7 @@ pub async fn goal_run(
 /// outlive the dying turn in the engine's queue and contaminate a later
 /// prompt. Blank text is refused too: the engine filters blanks without
 /// emitting any settling event, which would leave a phantom acknowledgment.
-pub async fn steer_run(
+pub fn steer_run(
   manager : EngineManager,
   payload : @protocol.SteerPayload,
 ) -> SteerReply {
@@ -466,65 +377,34 @@ pub async fn steer_run(
     return { steered: false, run_id: None }
   }
   guard open_run_engine(manager, run_id?=payload.run_id) is Some(live) &&
-    live.phase is Running(cancel_requested=false, ..) else {
+    live.phase is Running(run_id~, cancel_requested=false, ..) else {
     return { steered: false, run_id: None }
   }
-  let command = @protocol.steer(payload.text)
+  guard live.is_current(manager) else {
+    return { steered: false, run_id: None }
+  }
+  if payload.run_id is Some(expected) && run_id != expected {
+    return { steered: false, run_id: None }
+  }
   let submission_id = normalize_submission_id(payload.submission_id)
-  let mut entry : TrackedSteer? = None
-  let steered = live.with_command_lock(() => {
-    // Concurrent steer requests wait here in their actual stdin order. The
-    // run may finish (or be cancelled) while this one waits, so validate again
-    // before recording an entry that would otherwise never receive a receipt.
-    guard live.is_current(manager) else { return false }
-    guard live.phase is Running(cancel_requested=false, ..) else {
-      return false
-    }
-    if payload.run_id is Some(expected) && live.latest_run != Some(expected) {
-      return false
-    }
-    // Record immediately before this locked write: if the terminal event is
-    // processed while write suspends, record_terminal can still pin the entry
-    // to the finishing run. Identity, not text, drives rollback so equal
-    // steering strings retain distinct submission ids.
-    let sent = live.steer_runs.record_sent(payload.text, submission_id)
-    entry = Some(sent)
-    live.writer.write(command.to_jsonl())
-    true
-  }) catch {
-    error if @async.is_being_cancelled() => {
-      if entry is Some(_) {
-        live.accepts_commands = false
-        retire_failed_command(
-          manager, live, "request cancelled while writing steering to the engine",
-        )
-      }
-      raise error
-    }
-    error => {
-      let run_id = live.latest_run
-      if entry is Some(_) {
-        live.accepts_commands = false
-        retire_failed_command(
-          manager,
-          live,
-          "failed to write steering to the engine: \{error}",
-        )
-        // A write error after record_sent is not a definitive refusal: a
-        // complete frame may already be in the pipe and can still produce a
-        // durable User plus steer_applied before EOF. Report provisional
-        // acceptance so the client keeps exact-id ownership; the trailing
-        // receipt or Finished/durable recovery settles it without restoring a
-        // duplicate draft.
-        return { steered: true, run_id }
-      }
-      return { steered: false, run_id }
-    }
+  guard live.submit(
+    @protocol.steer(payload.text).to_jsonl(),
+    failure_reason="failed to write steering to the engine",
+  ) else {
+    return { steered: false, run_id: Some(run_id) }
   }
-  if !steered {
-    return { steered: false, run_id: None }
-  }
-  { steered: true, run_id: live.latest_run }
+  // Recorded in the same synchronous step as the submission, so the entry
+  // exists before any event this steer can produce and a terminal event that
+  // arrives first can still pin it to the finishing run. Identity, not text,
+  // drives rollback so equal steering strings retain distinct submission ids.
+  //
+  // Once submitted the steer is provisionally accepted even if the writer
+  // later fails: a complete frame may already be in the pipe and can still
+  // produce a durable User plus steer_applied before EOF. The client keeps
+  // exact-id ownership, and the trailing receipt or Finished/durable recovery
+  // settles it without restoring a duplicate draft.
+  live.steer_runs.record_sent(payload.text, submission_id) |> ignore
+  { steered: true, run_id: Some(run_id) }
 }
 
 ///|
@@ -632,21 +512,14 @@ async fn session_show_stdout(
 }
 
 ///|
-/// The sidebar's conversations, one group per session store: the global root
-/// first (scratch conversations), then each registered workspace's in-project
-/// store, in registration order. A group whose listing fails reports the
-/// failure in its `error` field rather than failing the whole reply.
+/// The sidebar's conversations, one group per registered workspace's
+/// in-project store, in registration order. A group whose listing fails
+/// reports the failure in its `error` field rather than failing the whole
+/// reply.
 pub async fn list_sessions(manager : EngineManager) -> SessionsReply {
-  guard resolved_session_root() is Some(root) else {
-    raise EngineError(
-      "cannot determine a session root; set OPENSEEK_SESSION_ROOT",
-    )
-  }
-  let groups : Array[SessionGroup] = [session_group(manager, None, root)]
-  for path in registered_workspaces() {
-    groups.push(
-      session_group(manager, Some(path), workspace_session_root(path)),
-    )
+  let groups : Array[SessionGroup] = []
+  for path in @workspaces.registered() {
+    groups.push(session_group(manager, path, @workspaces.store_root(path)))
   }
   { groups, }
 }
@@ -654,14 +527,11 @@ pub async fn list_sessions(manager : EngineManager) -> SessionsReply {
 ///|
 async fn session_group(
   manager : EngineManager,
-  workspace : @pathx.Absolute?,
+  workspace : @pathx.Absolute,
   root : @pathx.Absolute,
 ) -> SessionGroup {
-  let (workspace, name) = match workspace {
-    Some(workspace) =>
-      (workspace.resource_path(), workspace.to_path().basename().to_owned())
-    None => ("", "")
-  }
+  let name = workspace.to_path().basename().to_owned()
+  let workspace = workspace.resource_path()
   let native_root = root.to_string()
   let root = root.resource_path()
   fn failed(error : String) -> SessionGroup {
@@ -700,20 +570,20 @@ pub async fn load_session(
   let record_guard = manager.begin_record_read(session)
   defer manager.end_record_read(session, record_guard)
   // The client's workspace hint says which registered store to read. A
-  // detached workspace is rejected instead of silently probing the global
+  // detached workspace is rejected instead of silently probing another
   // store, which could return a different history for the same session id.
   let root = if payload.workspace is Some(hint) && !hint.is_blank() {
     guard @pathx.Absolute::from_uri_path(hint) is Some(absolute) &&
-      registered_workspace(absolute) is Some(workspace) else {
+      @workspaces.registered_dir(absolute) is Some(workspace) else {
       raise EngineError("\{hint} is not a registered workspace")
     }
-    Some(workspace_session_root(workspace))
+    Some(@workspaces.store_root(workspace))
   } else {
-    session_store_root(session)
+    @session_store.root_of(session)
   }
   guard root is Some(root) else {
     raise EngineError(
-      "cannot determine a session root; set OPENSEEK_SESSION_ROOT",
+      "no attached workspace holds this conversation; attach its project first",
     )
   }
   // A followed session (a live engine is writing to it) is read through its
@@ -732,11 +602,11 @@ pub async fn load_session(
   // whose store just detached (or whose record moved to an archived twin),
   // and the answer should say that, not ENOENT.
   if !@fsx.is_dir(root.join("sessions").join(session).to_path()) {
-    if archived_record_root(session) is Some(_) {
+    if @session_store.archived_root_of(session) is Some(_) {
       raise EngineError("this conversation is archived; unarchive it first")
     }
     raise EngineError(
-      "no durable record for this conversation in the global store or any attached workspace",
+      "no durable record for this conversation in any attached workspace",
     )
   }
   let output = session_show_stdout(manager, session, root) catch {
@@ -771,18 +641,18 @@ pub async fn load_archived_session(
   // store, matching the placement rules of the archived index.
   let root = if payload.workspace is Some(hint) && !hint.is_blank() {
     guard @pathx.Absolute::from_uri_path(hint) is Some(absolute) &&
-      registered_workspace(absolute) is Some(workspace) else {
+      @workspaces.registered_dir(absolute) is Some(workspace) else {
       raise EngineError("\{hint} is not a registered workspace")
     }
-    Some(archived_session_root(workspace_session_root(workspace)))
+    Some(@session_store.archived_root(@workspaces.store_root(workspace)))
   } else {
-    match archived_record_root(session) {
-      Some(root) => Some(archived_session_root(root))
+    match @session_store.archived_root_of(session) {
+      Some(root) => Some(@session_store.archived_root(root))
       None => None
     }
   }
   guard root is Some(root) else {
-    if live_record_root(session) is Some(_) {
+    if @session_store.live_root_of(session) is Some(_) {
       raise EngineError("this conversation is not archived")
     }
     raise EngineError(
@@ -790,7 +660,7 @@ pub async fn load_archived_session(
     )
   }
   if !@fsx.is_dir(root.join("sessions").join(session).to_path()) {
-    if live_record_root(session) is Some(_) {
+    if @session_store.live_root_of(session) is Some(_) {
       raise EngineError("this conversation is not archived")
     }
     raise EngineError("no archived record for this conversation")
@@ -853,19 +723,8 @@ fn @pathx.Absolute::resource_path(
 }
 
 ///|
-/// Device-native base for Scratch conversation directories, encoded in the
-/// resource-path form the frontend binds to a channel. Readiness fails when
-/// this cannot be resolved, so `agent.connected` never carries an empty root.
-pub async fn scratch_root() -> String {
-  guard workspace_root() is Some(root) && root.to_absolute() is Some(root) else {
-    raise EngineError("cannot determine the scratch workspace root")
-  }
-  root.resource_path()
-}
-
-///|
 pub async fn list_workspaces() -> WorkspacesReply {
-  Workspaces(registered_workspaces().map(path => path.resource_path()))
+  Workspaces(@workspaces.registered().map(path => path.resource_path()))
 }
 
 ///|
@@ -876,7 +735,7 @@ pub async fn attach_workspace(
   guard @pathx.Absolute::from_uri_path(path) is Some(absolute) else {
     raise EngineError("workspace is not a supported absolute resource path")
   }
-  let paths = add_workspace(absolute.0, paths => {
+  let paths = @workspaces.add(absolute.0, paths => {
     on_committed(paths.map(path => path.resource_path()))
   })
   Workspaces(paths.map(path => path.resource_path()))
@@ -893,9 +752,9 @@ pub async fn detach_workspace(
   }
   manager.workspace_lifecycle_lock.acquire()
   defer manager.workspace_lifecycle_lock.release()
-  let workspace = expanded_workspace_path(absolute.0)
+  let workspace = @workspaces.expanded_path(absolute.0)
   manager.close_engines_for_workspace(workspace)
-  let paths = remove_workspace(absolute.0, paths => {
+  let paths = @workspaces.remove(absolute.0, paths => {
     on_committed(paths.map(path => path.resource_path()))
   })
   Workspaces(paths.map(path => path.resource_path()))
@@ -952,10 +811,40 @@ fn has_finished_run(events : Array[EngineEvent], run_id : String) -> Bool {
 }
 
 ///|
+/// A workspace fixture for the run tests: `<root>/ws` attached as the only
+/// registered workspace, with the registry itself under `<root>/global`.
+/// Every run belongs to a workspace now, so a test that starts one registers
+/// a real directory rather than relying on the removed scratch fallback.
+/// Returns the path to send as the start payload's workspace hint.
+async fn attach_run_workspace(root : @pathx.Path) -> String {
+  let workspace = root.join("ws")
+  @fsx.ensure_dir(workspace)
+  let global = root.join("global")
+  @fsx.ensure_dir(global)
+  @fs.write_file(
+    global.join("workspaces.json").to_string(),
+    ({ "workspaces": [workspace.to_string()] } : Json).stringify(),
+    create_mode=CreateOrTruncate,
+  )
+  workspace.to_string()
+}
+
+///|
 #cfg(not(platform="windows"))
 async test "start echoes the client submission id in Started" {
   let dir = @fs.tmpdir(prefix="openseek-start-submission-")
   let root : @pathx.Path = Path(dir)
+  // A run is handed the global skills library under `HOME`. Own it, so this
+  // test neither races one that moves `HOME` nor reads the developer's own.
+  ambient_env_test_lock.acquire()
+  defer ambient_env_test_lock.release()
+  let previous_home = @sys.get_env_var("HOME")
+  @sys.set_env_var("HOME", root.join("home").to_string())
+  defer restore_home_env(previous_home)
+  let previous_session_root = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
+  defer restore_session_root_env(previous_session_root)
+  let workspace = attach_run_workspace(root)
   let engine = root.join("bin/engine.sh")
   let seed = root.join("bin/toolchains/moonbit/macos-arm64")
   let runtime = root.join("runtime")
@@ -981,8 +870,8 @@ async test "start echoes the client submission id in Started" {
     }),
   )
   let emitted : Array[EngineEvent] = []
-  // Starts are durable now, so each test owns a fresh conversation record and
-  // scratch directory instead of sharing a fixed id across test processes.
+  // Starts are durable now, so each test owns a fresh conversation record
+  // instead of sharing a fixed id across test processes.
   let session = "s-" + mint_run_id()
   let sink = EventSink(fn(event) { emitted.push(event) })
   @async.with_task_group(group => {
@@ -999,7 +888,7 @@ async test "start echoes the client submission id in Started" {
         model: None,
         max_steps: None,
         session,
-        workspace: None,
+        workspace: Some(workspace),
       }),
     )
     let mut echoed : String? = None
@@ -1015,10 +904,153 @@ async test "start echoes the client submission id in Started" {
 }
 
 ///|
+/// A goal is the one command with no lifecycle event behind it, so its reply
+/// is only truthful if it waits for the writer. Both halves matter: the reply
+/// must arrive when the command reaches stdin — otherwise the op hangs — and
+/// must not arrive when it does not.
+#cfg(not(platform="windows"))
+async test "a goal is delivered only once its command is on the wire" {
+  let dir = @fs.tmpdir(prefix="openseek-goal-ack-")
+  let root : @pathx.Path = Path(dir)
+  // A run is handed the global skills library under `HOME`. Own it, so this
+  // test neither races one that moves `HOME` nor reads the developer's own.
+  ambient_env_test_lock.acquire()
+  defer ambient_env_test_lock.release()
+  let previous_home = @sys.get_env_var("HOME")
+  @sys.set_env_var("HOME", root.join("home").to_string())
+  defer restore_home_env(previous_home)
+  let previous_session_root = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
+  defer restore_session_root_env(previous_session_root)
+  let workspace = attach_run_workspace(root)
+  let engine = root.join("bin/engine.sh")
+  let seed = root.join("bin/toolchains/moonbit/macos-arm64")
+  let runtime = root.join("runtime")
+  let received = root.join("received")
+  prepare_fake_moonbit_seed(seed, version="0.10.0-test")
+  prepare_fake_bundled_moonbit_home(
+    runtime.join("toolchains/moonbit/macos-arm64"),
+    version="0.10.0-test",
+  )
+  // Echoes every command it reads back into a file, so the test can check the
+  // goal really left the host rather than only that the op returned.
+  @fs.write_file(
+    engine.to_string(),
+    "#!/bin/sh\nif [ \"$1\" = \"sessions\" ]; then printf '%s' '{\"events\":[]}'; exit 0; fi\nwhile IFS= read -r line; do printf '%s\\n' \"$line\" >> '\{received}'; done\n",
+    create_mode=CreateOrTruncate,
+  )
+  assert_eq(@process.run("chmod", ["+x", engine.to_string()]), 0)
+  let actor = new_engine_actor(engine.to_string(), runtime_dir=runtime)
+  let manager = actor.manager()
+  ignore(
+    update_settings(manager, {
+      provider: Some("custom"),
+      custom_api_url: Some("https://example.invalid/chat/completions"),
+      deepseek_api_key: None,
+      custom_api_key: None,
+    }),
+  )
+  let session = "s-" + mint_run_id()
+  let sink = EventSink(fn(_) { () })
+  @async.with_task_group(group => {
+    group.spawn_bg(no_wait=true, allow_failure=true, () => {
+      actor.run(sink, fn(_) { () })
+    })
+    while manager.pump is Stopped {
+      @async.sleep(1)
+    }
+    let delivered = goal_run(manager, {
+      session,
+      text: Some("keep the build green"),
+      auto: None,
+      model: None,
+      max_steps: None,
+      workspace: Some(workspace),
+    })
+    assert_true(delivered.delivered)
+    // The reply already means the bytes left this host, so the child has them
+    // or is about to; only its append is asynchronous.
+    assert_true(
+      @async.with_timeout_opt(3000, () => {
+        while !@fsx.exists(received) {
+          @async.sleep(1)
+        }
+      })
+      is Some(_),
+    )
+    assert_true(
+      @fs.read_file(received.to_string())
+      .text()
+      .contains("keep the build green"),
+    )
+    group.return_immediately(())
+  })
+  @fs.rmdir(dir, recursive=true)
+}
+
+///|
+/// The other half: a command discarded before it could be written answers its
+/// sender rather than leaving it waiting for an acknowledgement that can no
+/// longer come. This is what a queued goal hits when an earlier write fails or
+/// the child exits.
+#cfg(not(platform="windows"))
+async test "a discarded command answers its sender" {
+  @async.with_task_group(group => {
+    let (child_stdin, writer) = @process.write_to_process()
+    let process = @process.spawn(
+      group,
+      "/bin/sh",
+      ["-c", "sleep 30"],
+      stdin=child_stdin,
+      cancel_handler=@process.graceful_cancel(timeout=10),
+      no_wait=true,
+    )
+    let engine : ServeEngine = {
+      session_key: "s-discard",
+      session_root: None,
+      spec_key: "test",
+      writer,
+      commands: Queue(kind=Unbounded),
+      process,
+      sink: EventSink(fn(_) { () }),
+      follower: None,
+      consumer: None,
+      phase: Idle(last_run=None),
+      condemned: false,
+      steer_runs: SteerRunTracker::new(),
+    }
+    let ack : @async.Queue[EngineError?] = Queue(kind=Blocking(1))
+    assert_true(
+      engine.submit("{}\n", failure_reason="failed to write the goal", ack~),
+    )
+    engine.discard_commands("the engine exited")
+    guard ack.try_get() is Some(Some(EngineError(reason))) else {
+      fail("expected the discarded command to answer its sender")
+    }
+    assert_eq(reason, "the engine exited")
+    // Discarding also condemns the engine, in the same synchronous step.
+    assert_true(engine.condemned)
+    assert_false(engine.submit("{}\n", failure_reason="unreachable"))
+    group.return_immediately(())
+  })
+}
+
+///|
 #cfg(not(platform="windows"))
 async test "setup failure retires the writer before an immediate next start" {
   let dir = @fs.tmpdir(prefix="openseek-setup-failed-seam-")
   let root : @pathx.Path = Path(dir)
+  // A run is handed the global skills library under `HOME`. Own it, so this
+  // test neither races one that moves `HOME` nor reads the developer's own.
+  ambient_env_test_lock.acquire()
+  defer ambient_env_test_lock.release()
+  let previous_home = @sys.get_env_var("HOME")
+  @sys.set_env_var("HOME", root.join("home").to_string())
+  defer restore_home_env(previous_home)
+  let previous_session_root = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
+  defer restore_session_root_env(previous_session_root)
+  let workspace = attach_run_workspace(root)
   let engine = root.join("bin/engine.sh")
   let seed = root.join("bin/toolchains/moonbit/macos-arm64")
   let runtime = root.join("runtime")
@@ -1062,7 +1094,7 @@ async test "setup failure retires the writer before an immediate next start" {
       model: None,
       max_steps: None,
       session,
-      workspace: None,
+      workspace: Some(workspace),
     })
     assert_true(
       @async.with_timeout_opt(3000, () => {
@@ -1073,10 +1105,13 @@ async test "setup failure retires the writer before an immediate next start" {
       is Some(_),
     )
     guard manager.serving().get(session) is Some(slot) &&
-      slot.engine is Some(live) else {
+      slot.engine is Some(old) else {
       fail("missing first engine after setup failure")
     }
-    assert_false(live.accepts_commands)
+    // Still in its slot, so the next start must join its close barrier — but
+    // condemned, so nothing can be routed to it in the meantime.
+    assert_true(old.condemned)
+    assert_true(slot.live() is None)
     let cancelled = cancel_run(manager, { run_id: Some(first.run_id) })
     assert_false(cancelled.cancelled)
     let second = start_run(sink, manager, {
@@ -1085,7 +1120,7 @@ async test "setup failure retires the writer before an immediate next start" {
       model: None,
       max_steps: None,
       session,
-      workspace: None,
+      workspace: Some(workspace),
     })
     assert_eq(second.status, "accepted")
     assert_true(@fsx.exists(old_done))
@@ -1112,10 +1147,26 @@ async test "setup failure retires the writer before an immediate next start" {
 }
 
 ///|
+/// The prompt is far larger than the pipe buffer and the child never reads,
+/// so the write is still in flight when the child dies. Submission itself
+/// never waits for it — that is what removed the cancel-after-public window
+/// this test used to cover — and the run is still settled exactly once,
+/// whether the writer's failure or the consumer's EOF gets there first.
 #cfg(not(platform="windows"))
-async test "cancelling a backpressured prompt retires its partial writer" {
+async test "a prompt bigger than the pipe still settles exactly once" {
   let dir = @fs.tmpdir(prefix="openseek-backpressured-command-")
   let root : @pathx.Path = Path(dir)
+  // A run is handed the global skills library under `HOME`. Own it, so this
+  // test neither races one that moves `HOME` nor reads the developer's own.
+  ambient_env_test_lock.acquire()
+  defer ambient_env_test_lock.release()
+  let previous_home = @sys.get_env_var("HOME")
+  @sys.set_env_var("HOME", root.join("home").to_string())
+  defer restore_home_env(previous_home)
+  let previous_session_root = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
+  defer restore_session_root_env(previous_session_root)
+  let workspace = attach_run_workspace(root)
   let engine = root.join("bin/engine.sh")
   let seed = root.join("bin/toolchains/moonbit/macos-arm64")
   let runtime = root.join("runtime")
@@ -1124,11 +1175,12 @@ async test "cancelling a backpressured prompt retires its partial writer" {
     runtime.join("toolchains/moonbit/macos-arm64"),
     version="0.10.0-test",
   )
-  // Deliberately never read stdin: a prompt much larger than the pipe buffer
-  // suspends inside WriteToProcess after Started is already public.
+  // Deliberately never read stdin, then die with the prompt still half
+  // written: the JSONL frame on the wire is partial, so the handle must
+  // become unusable and the run must be reported as failed.
   @fs.write_file(
     engine.to_string(),
-    "#!/bin/sh\nif [ \"$1\" = \"sessions\" ]; then printf '%s' '{\"events\":[]}'; exit 0; fi\nsleep 30\n",
+    "#!/bin/sh\nif [ \"$1\" = \"sessions\" ]; then printf '%s' '{\"events\":[]}'; exit 0; fi\nsleep 1\n",
     create_mode=CreateOrTruncate,
   )
   assert_eq(@process.run("chmod", ["+x", engine.to_string()]), 0)
@@ -1158,36 +1210,28 @@ async test "cancelling a backpressured prompt retires its partial writer" {
     while manager.pump is Stopped {
       @async.sleep(1)
     }
-    let request = group.spawn(() => {
-      ignore(
-        start_run(sink, manager, {
-          task: "x".repeat(4_000_000),
-          submission_id: None,
-          model: None,
-          max_steps: None,
-          session,
-          workspace: None,
-        }),
-      )
+    // Returns without waiting for the 4MB to reach the child.
+    let reply = start_run(sink, manager, {
+      task: "x".repeat(4_000_000),
+      submission_id: None,
+      model: None,
+      max_steps: None,
+      session,
+      workspace: Some(workspace),
     })
+    assert_eq(reply.status, "accepted")
+    assert_eq(started.val, Some(reply.run_id))
+    let run_id = reply.run_id
     assert_true(
-      @async.with_timeout_opt(3000, () => {
-        while started.val is None {
+      @async.with_timeout_opt(10_000, () => {
+        while !has_finished_run(emitted, run_id) {
           @async.sleep(1)
         }
       })
       is Some(_),
     )
-    request.cancel()
-    let cancelled = try {
-      request.wait()
-      false
-    } catch {
-      error if @async.is_cancellation_error(error) => true
-      _ => false
-    }
-    assert_true(cancelled)
-    guard started.val is Some(run_id) else { fail("missing Started") }
+    // Both the writer's failed write and the consumer's EOF want to settle
+    // this run; they share the engine's phase, so only one of them does.
     let mut finishes = 0
     for event in emitted {
       if event is Finished(payload) && payload.run_id == run_id {
@@ -1204,40 +1248,37 @@ async test "cancelling a backpressured prompt retires its partial writer" {
 ///|
 #cfg(not(platform="windows"))
 async test "named session retries after its first prompt creates no record" {
-  archive_env_test_lock.acquire()
-  defer archive_env_test_lock.release()
+  ambient_env_test_lock.acquire()
+  defer ambient_env_test_lock.release()
   let dir = @fs.tmpdir(prefix="openseek-first-prompt-retry-")
   let root : @pathx.Path = Path(dir)
   let previous_home = @sys.get_env_var("HOME")
   @sys.set_env_var("HOME", root.join("home").to_string())
-  defer (if previous_home is Some(home) {
-    @sys.set_env_var("HOME", home)
-  } else {
-    @sys.unset_env_var("HOME")
-  })
+  defer restore_home_env(previous_home)
   let engine = root.join("bin/engine.sh")
   let seed = root.join("bin/toolchains/moonbit/macos-arm64")
   let runtime = root.join("runtime")
-  let store = root.join("store")
   let previous_session_root = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", store.to_string())
+  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
   defer restore_session_root_env(previous_session_root)
+  let workspace = attach_run_workspace(root)
+  // The conversation's record lives in its workspace's in-project store.
+  let store = root.join("ws/.openseek")
   let count = root.join("serve-count")
   let first_ready = root.join("first-ready")
   let session = "s-" + mint_run_id()
-  let workspace = session_workspace_dir(session)
   prepare_fake_moonbit_seed(seed, version="0.10.0-test")
   prepare_fake_bundled_moonbit_home(
     runtime.join("toolchains/moonbit/macos-arm64"),
     version="0.10.0-test",
   )
   // `sessions show` reports the missing first-turn record. The first serve
-  // process creates only the session directory and never reads stdin, so a
-  // large prompt is cancelled while its JSONL frame is still partial. The
-  // successor accepts a normal prompt and finishes it.
+  // process creates only the session directory, never reads stdin, and dies
+  // with the large prompt's JSONL frame still partial. The successor accepts
+  // a normal prompt and finishes it.
   @fs.write_file(
     engine.to_string(),
-    "#!/bin/sh\nif [ \"$1\" = \"sessions\" ]; then\n  printf '%s\\n' 'session record does not exist' >&2\n  exit 7\nfi\nn=0\nif [ -f '\{count}' ]; then n=$(cat '\{count}'); fi\nn=$((n + 1))\nprintf '%s' \"$n\" > '\{count}'\nif [ \"$n\" -eq 1 ]; then\n  mkdir -p '\{store}/sessions/\{session}'\n  printf '' > '\{first_ready}'\n  exec sleep 30\nfi\nwhile IFS= read -r line; do\n  printf '%s\\n' '{\"event\":\"agent_finished\",\"answer\":\"ok\"}'\ndone\n",
+    "#!/bin/sh\nif [ \"$1\" = \"sessions\" ]; then\n  printf '%s\\n' 'session record does not exist' >&2\n  exit 7\nfi\nn=0\nif [ -f '\{count}' ]; then n=$(cat '\{count}'); fi\nn=$((n + 1))\nprintf '%s' \"$n\" > '\{count}'\nif [ \"$n\" -eq 1 ]; then\n  mkdir -p '\{store}/sessions/\{session}'\n  printf '' > '\{first_ready}'\n  exec sleep 1\nfi\nwhile IFS= read -r line; do\n  printf '%s\\n' '{\"event\":\"agent_finished\",\"answer\":\"ok\"}'\ndone\n",
     create_mode=CreateOrTruncate,
   )
   assert_eq(@process.run("chmod", ["+x", engine.to_string()]), 0)
@@ -1266,21 +1307,19 @@ async test "named session retries after its first prompt creates no record" {
     while manager.pump is Stopped {
       @async.sleep(1)
     }
-    let first_request = group.spawn(() => {
-      ignore(
-        start_run(sink, manager, {
-          task: "x".repeat(4_000_000),
-          submission_id: None,
-          model: None,
-          max_steps: None,
-          session,
-          workspace: None,
-        }),
-      )
+    let first = start_run(sink, manager, {
+      task: "x".repeat(4_000_000),
+      submission_id: None,
+      model: None,
+      max_steps: None,
+      session,
+      workspace: Some(workspace),
     })
+    assert_eq(first.status, "accepted")
+    assert_eq(started.val, Some(first.run_id))
     assert_true(
       @async.with_timeout_opt(3000, () => {
-        while started.val is None || !@fsx.exists(first_ready) {
+        while !@fsx.exists(first_ready) {
           @async.sleep(1)
         }
       })
@@ -1290,20 +1329,23 @@ async test "named session retries after its first prompt creates no record" {
     assert_false(
       @fsx.exists(Path(session_store_file(store.resolve(), session))),
     )
-    first_request.cancel()
-    let cancelled = try {
-      first_request.wait()
-      false
-    } catch {
-      error if @async.is_cancellation_error(error) => true
-      _ => false
-    }
-    assert_true(cancelled)
-    guard started.val is Some(first_run_id) else {
-      fail("missing first Started")
-    }
-    assert_true(has_finished_run(emitted, first_run_id))
-    assert_true(manager.followers.get(session) is None)
+    let first_run_id = first.run_id
+    assert_true(
+      @async.with_timeout_opt(10_000, () => {
+        while !has_finished_run(emitted, first_run_id) {
+          @async.sleep(1)
+        }
+      })
+      is Some(_),
+    )
+    assert_true(
+      @async.with_timeout_opt(10_000, () => {
+        while manager.followers.get(session) is Some(_) {
+          @async.sleep(1)
+        }
+      })
+      is Some(_),
+    )
 
     let second = start_run(sink, manager, {
       task: "retry",
@@ -1311,7 +1353,7 @@ async test "named session retries after its first prompt creates no record" {
       model: None,
       max_steps: None,
       session,
-      workspace: None,
+      workspace: Some(workspace),
     })
     assert_eq(second.status, "accepted")
     assert_true(
@@ -1325,11 +1367,6 @@ async test "named session retries after its first prompt creates no record" {
     assert_eq(@fs.read_file(count.to_string()).text(), "2")
     group.return_immediately(())
   })
-  if workspace is Some(workspace) {
-    @fs.rmdir(workspace.to_string(), recursive=true) catch {
-      _ => ()
-    }
-  }
   @fs.rmdir(dir, recursive=true)
 }
 
@@ -1367,14 +1404,17 @@ async test "timed out sessions show is killed and the next read can run" {
 ///|
 #cfg(not(platform="windows"))
 async test "session load preserves a future item without hiding known events" {
-  archive_env_test_lock.acquire()
-  defer archive_env_test_lock.release()
+  ambient_env_test_lock.acquire()
+  defer ambient_env_test_lock.release()
   let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
   let dir = @fs.tmpdir(prefix="openseek-load-future-item-")
   let engine = dir + "/engine.sh"
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", dir)
+  @sys.set_env_var("OPENSEEK_SESSION_ROOT", dir + "/global")
   defer restore_session_root_env(previous)
-  @fsx.ensure_dir(Path(dir + "/sessions/s-future"))
+  // A hint-less load resolves the store from where the record actually
+  // lives, so the record goes in an attached workspace's own store.
+  ignore(attach_run_workspace(Path(dir)))
+  @fsx.ensure_dir(Path(dir + "/ws/.openseek/sessions/s-future"))
   @fs.write_file(
     engine,
     "#!/bin/sh\nprintf '%s' '{\"events\":[{\"sequence\":1,\"item\":{\"kind\":\"user\",\"payload\":{\"content\":\"question\"}}},{\"sequence\":2,\"item\":{\"kind\":\"future_item\",\"payload\":{\"value\":42}}},{\"sequence\":3,\"item\":{\"kind\":\"assistant\",\"payload\":{\"content\":\"answer\"}}}]}'\n",
@@ -1397,14 +1437,18 @@ async test "session load preserves a future item without hiding known events" {
 ///|
 #cfg(not(platform="windows"))
 async test "archived session load reads without restoring the record" {
-  archive_env_test_lock.acquire()
-  defer archive_env_test_lock.release()
+  ambient_env_test_lock.acquire()
+  defer ambient_env_test_lock.release()
   let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
   let dir = @fs.tmpdir(prefix="openseek-load-archived-")
   let engine = dir + "/engine.sh"
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", dir)
+  @sys.set_env_var("OPENSEEK_SESSION_ROOT", dir + "/global")
   defer restore_session_root_env(previous)
-  @fsx.ensure_dir(Path(dir + "/archived/sessions/s-archived"))
+  // A hint-less load resolves the store from where the record actually
+  // lives, so the record goes in an attached workspace's own store.
+  ignore(attach_run_workspace(Path(dir)))
+  let store = dir + "/ws/.openseek"
+  @fsx.ensure_dir(Path(store + "/archived/sessions/s-archived"))
   @fs.write_file(
     engine,
     "#!/bin/sh\nprintf '%s' '{\"events\":[{\"sequence\":1,\"item\":{\"kind\":\"user\",\"payload\":{\"content\":\"question\"}}},{\"sequence\":2,\"item\":{\"kind\":\"assistant\",\"payload\":{\"content\":\"answer\"}}}]}'\n",
@@ -1421,8 +1465,8 @@ async test "archived session load reads without restoring the record" {
   }
   assert_eq(events.length(), 2)
   assert_eq(reply.watermark, Some(2))
-  assert_true(@fsx.is_dir(Path(dir + "/archived/sessions/s-archived")))
-  assert_false(@fsx.exists(Path(dir + "/sessions/s-archived")))
+  assert_true(@fsx.is_dir(Path(store + "/archived/sessions/s-archived")))
+  assert_false(@fsx.exists(Path(store + "/sessions/s-archived")))
   assert_true(manager.record_guards.is_empty())
   @fs.rmdir(dir, recursive=true)
 }
@@ -1430,8 +1474,8 @@ async test "archived session load reads without restoring the record" {
 ///|
 #cfg(not(platform="windows"))
 async test "load rejects a detached workspace hint instead of probing global" {
-  archive_env_test_lock.acquire()
-  defer archive_env_test_lock.release()
+  ambient_env_test_lock.acquire()
+  defer ambient_env_test_lock.release()
   let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
   let dir = @fs.tmpdir(prefix="openseek-load-detached-")
   let marker = dir + "/engine-ran"
@@ -1467,8 +1511,8 @@ async test "load rejects a detached workspace hint instead of probing global" {
 ///|
 #cfg(not(platform="windows"))
 async test "workspace detach refuses a running conversation without hiding it" {
-  archive_env_test_lock.acquire()
-  defer archive_env_test_lock.release()
+  ambient_env_test_lock.acquire()
+  defer ambient_env_test_lock.release()
   let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
   // The registry canonicalizes workspace paths, so build the fixture from
   // the tmpdir's physical spelling (`/tmp` is a symlink on macOS).
@@ -1542,7 +1586,7 @@ async test "workspace detach refuses a running conversation without hiding it" {
     guard workspace.to_absolute() is Some(workspace_path) else {
       fail("expected an absolute workspace fixture")
     }
-    assert_true(registered_workspaces().contains(workspace_path))
+    assert_true(@workspaces.registered().contains(workspace_path))
     group.return_immediately(())
   })
   @fs.rmdir(root.to_string(), recursive=true)
@@ -1551,8 +1595,8 @@ async test "workspace detach refuses a running conversation without hiding it" {
 ///|
 #cfg(not(platform="windows"))
 async test "workspace detach drains an idle writer and its follower first" {
-  archive_env_test_lock.acquire()
-  defer archive_env_test_lock.release()
+  ambient_env_test_lock.acquire()
+  defer ambient_env_test_lock.release()
   let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
   // The registry canonicalizes workspace paths, so build the fixture from
   // the tmpdir's physical spelling (`/tmp` is a symlink on macOS).

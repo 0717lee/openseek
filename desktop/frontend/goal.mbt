@@ -1,6 +1,6 @@
 // The standing goal's UI: one row above the composer input carrying both
 // the goal-editing mode behind `/goal` and the goal the durable `[goal]`
-// markers left standing (see `composer_view`). The mirror itself lives on
+// markers left standing (see `@composer.component`). The mirror itself lives on
 // `Conversation.goal` and is written only by durable commits/snapshots —
 // see `apply_commit` — so nothing here ever claims a goal the engine has
 // not persisted.
@@ -25,6 +25,7 @@ fn goal_banner(
   goal : @transcript.GoalStanding?,
   editing~ : GoalEdit?,
   pending~ : GoalRequest?,
+  cancel_edit? : @cmd.Cmd,
 ) -> @html.Html {
   // Editing wins over the mirror: while the composer is the goal's editor,
   // what it is about to write matters more than what stands today, and two
@@ -47,7 +48,7 @@ fn goal_banner(
         class="composer-goal-action",
         type_="button",
         title="Stop editing the standing goal — the goal itself is left alone (Esc)",
-        on_click=dispatch(CloseGoalEditor),
+        on_click=cancel_edit.unwrap_or(dispatch(CloseGoalEditor)),
         icon(icon_close),
       ),
     ])
@@ -160,34 +161,6 @@ test "the goal slash command opens the editor prefilled from the mirror" {
   inspect(edit.draft, content="ship the feature")
   // Whole-draft semantics, like /compact: accepting clears the typed command.
   inspect(opened.active().task, content="")
-  assert_true(opened.completion is None)
-}
-
-///|
-test "the row's Edit takes the prompt's menu down with it" {
-  let dispatch = test_dispatch()
-  let conv : Conversation = {
-    ..test_conversation(),
-    goal: Some({ text: "ship the feature", blocked: None }),
-    task: "/",
-  }
-  // The `/` menu belongs to the prompt draft. A goal draft has no slash
-  // commands to offer, so leaving it up would let a stale row replace the
-  // goal being written — or run something else entirely.
-  guard compute_completion(conv.task, [], empty_symbol_cache(), {
-      channel: conv.device,
-      session: conv.session_id,
-    })
-    is Some(menu) else {
-    fail("the slash menu should be open")
-  }
-  let model = {
-    ..test_model().replace_conversation(conv),
-    completion: Some(menu),
-  }
-  let (_, editing) = update(dispatch, OpenGoalEditor, model)
-  assert_true(editing.active().goal_edit is Some(_))
-  assert_true(editing.completion is None)
 }
 
 ///|
@@ -230,6 +203,7 @@ test "only the matching set marker settles the pending text" {
         sequence~,
         ts=None,
         item=@protocol.RuntimeNotice({ content, }),
+        session_root=@interop.ChannelId::Local.test_store_root(),
       ),
       model,
     )
@@ -319,6 +293,7 @@ test "a clear waits for its tombstone, not for any goal marker" {
         sequence~,
         ts=None,
         item=@protocol.RuntimeNotice({ content, }),
+        session_root=@interop.ChannelId::Local.test_store_root(),
       ),
       model,
     )
@@ -345,7 +320,11 @@ test "each conversation owns its own goal edit" {
   // draft waiting next door — the reason the draft lives on the conversation
   // rather than in one model-wide slot.
   let neighbour : Conversation = {
-    ..empty_conversation(@interop.ChannelId::Local, "desktop-other"),
+    ..empty_conversation(
+      @interop.ChannelId::Local,
+      "desktop-other",
+      @interop.ChannelId::Local.test_project(),
+    ),
     goal: Some({ text: "the visible goal", blocked: None }),
   }
   let model = {
@@ -382,6 +361,7 @@ test "goal marker commits write the mirror and render cards" {
       sequence=1,
       ts=None,
       item=@protocol.RuntimeNotice({ content: "[goal]\nship the feature" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     test_model(),
   )
@@ -400,6 +380,7 @@ test "goal marker commits write the mirror and render cards" {
       item=@protocol.RuntimeNotice({
         content: "[goal blocked]\nneeds a decision",
       }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     set,
   )
@@ -414,6 +395,7 @@ test "goal marker commits write the mirror and render cards" {
       sequence=3,
       ts=None,
       item=@protocol.RuntimeNotice({ content: "[goal cleared]" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     blocked,
   )
@@ -566,6 +548,7 @@ test "a clear over an unconfirmed set waits for a goal to actually go away" {
         sequence~,
         ts=None,
         item=@protocol.RuntimeNotice({ content, }),
+        session_root=@interop.ChannelId::Local.test_store_root(),
       ),
       model,
     )
@@ -605,6 +588,7 @@ test "a tombstone over an empty mirror still ends the clear" {
       sequence=1,
       ts=None,
       item=@protocol.RuntimeNotice({ content: "[goal cleared]" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -633,6 +617,7 @@ test "re-asserting an unchanged goal waits for its own marker too" {
         sequence~,
         ts=None,
         item=@protocol.RuntimeNotice({ content, }),
+        session_root=@interop.ChannelId::Local.test_store_root(),
       ),
       model,
     )
@@ -648,7 +633,7 @@ test "re-asserting an unchanged goal waits for its own marker too" {
   // reduced state reads exactly as it did before the request, so the snapshot
   // has to carry the marker itself. Above the request's frontier it answers;
   // at or below it, it is the record agreeing rather than answering.
-  fn reload(model : Model, goal_markers) {
+  fn reload(model : Model, goal_markers) raise {
     let (_, next) = update_dev(
       dispatch,
       SessionRefreshed(
@@ -746,6 +731,7 @@ test "re-asserting a blocked goal waits for its own marker" {
         sequence~,
         ts=None,
         item=@protocol.RuntimeNotice({ content, }),
+        session_root=@interop.ChannelId::Local.test_store_root(),
       ),
       model,
     )
@@ -778,12 +764,15 @@ test "archiving carries the goal draft to the replacement" {
       task: "a prompt typed too",
       goal_edit: Some({ draft: "a goal still being written" }),
     })
-    .with_dev(dev => { ..dev, sessions: [archived_item("desktop-test")] })
+    .with_dev(dev => { ..dev, sessions: [placed_archived_item("desktop-test")] })
   let (_, next) = update_dev(
     dispatch,
     SessionsChanged(
       change="archived",
-      session="desktop-test",
+      key={
+        session: "desktop-test",
+        workspace: @interop.ChannelId::Local.test_project(),
+      },
       fresh_session=Some("desktop-restored"),
     ),
     model,
@@ -808,12 +797,15 @@ test "archiving carries a goal that was sent but never confirmed" {
       ..test_conversation(),
       goal_pending: Some(test_goal_command(Setting("a goal still in flight"))),
     })
-    .with_dev(dev => { ..dev, sessions: [archived_item("desktop-test")] })
+    .with_dev(dev => { ..dev, sessions: [placed_archived_item("desktop-test")] })
   let (_, next) = update_dev(
     dispatch,
     SessionsChanged(
       change="archived",
-      session="desktop-test",
+      key={
+        session: "desktop-test",
+        workspace: @interop.ChannelId::Local.test_project(),
+      },
       fresh_session=Some("desktop-restored"),
     ),
     model,
@@ -837,12 +829,15 @@ test "archiving carries no goal the record already confirmed" {
       ..test_conversation(),
       goal: Some({ text: "the goal on record", blocked: None }),
     })
-    .with_dev(dev => { ..dev, sessions: [archived_item("desktop-test")] })
+    .with_dev(dev => { ..dev, sessions: [placed_archived_item("desktop-test")] })
   let (_, next) = update_dev(
     dispatch,
     SessionsChanged(
       change="archived",
-      session="desktop-test",
+      key={
+        session: "desktop-test",
+        workspace: @interop.ChannelId::Local.test_project(),
+      },
       fresh_session=Some("desktop-restored"),
     ),
     model,
@@ -853,11 +848,14 @@ test "archiving carries no goal the record already confirmed" {
 ///|
 #warnings("-alert_unstable")
 test "a kept goal draft is a conversation you can get back to" {
-  let dispatch = test_dispatch()
   // Retention without a row does not save the draft, it strands it: the
   // conversation lives on with no way to reach it again. Retention and the
   // sidebar therefore ask one predicate, not two.
-  let fresh = empty_conversation(@interop.ChannelId::Local, "desktop-fresh")
+  let fresh = empty_conversation(
+    @interop.ChannelId::Local,
+    "desktop-fresh",
+    @interop.ChannelId::Local.test_project(),
+  )
   assert_false(fresh.worth_keeping())
   // A blank editor is not writing: an untouched `/goal` still lets the husk go.
   assert_false({ ..fresh, goal_edit: Some({ draft: "   " }) }.worth_keeping())
@@ -875,20 +873,17 @@ test "a kept goal draft is a conversation you can get back to" {
       active_session: "desktop-test",
     }
     guard model.focused_device() is Some(dev) else { fail("no device") }
-    let rows : Array[@html.Html] = []
-    let _ = push_group_rows(
+    let rows : Array[@conversation.Input] = []
+    model.push_group_component_inputs(
       rows,
-      dispatch,
-      model,
       dev,
-      None,
+      @interop.ChannelId::Local.test_project(),
       listed=_ => false,
       archived=_ => false,
     )
-    let markup = @rabbita.render_to_string(() => {
-      @rabbita.Val::constant(@html.div(rows))
-    })
-    assert_true(markup.contains("desktop-fresh"))
+    assert_true(
+      rows.iter().any(row => row.id().conversation() == "desktop-fresh"),
+    )
   }
 }
 
@@ -944,7 +939,11 @@ test "a request in flight is reason enough to re-read the record" {
   // An otherwise-empty conversation has nothing else worth reloading for, so
   // without this the reconnect that follows a lost reply would never ask the
   // record the one question the transport could not answer.
-  let fresh = empty_conversation(@interop.ChannelId::Local, "desktop-fresh")
+  let fresh = empty_conversation(
+    @interop.ChannelId::Local,
+    "desktop-fresh",
+    @interop.ChannelId::Local.test_project(),
+  )
   let model = test_model()
   assert_false(model.can_reload_transcript(fresh))
   assert_true(
@@ -991,8 +990,8 @@ test "a request in flight is reason enough to re-read the record" {
       {
         id: "desktop-test",
         title: Some("persisted"),
-        workspace: None,
-        workspace_name: "",
+        workspace: @interop.ChannelId::Local.test_project(),
+        workspace_name: "work",
       },
     ]),
     empty,
@@ -1103,6 +1102,7 @@ test "an undelivered reply goes quiet once its send has been settled" {
       sequence=1,
       ts=None,
       item=@protocol.RuntimeNotice({ content: "[goal]\nship the feature" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -1162,6 +1162,7 @@ test "a rejection that arrives after the record has spoken only reports" {
       sequence=1,
       ts=None,
       item=@protocol.RuntimeNotice({ content: "[goal]\nthe goal that won" }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
   )
@@ -1284,7 +1285,7 @@ test "a reload settles a request the transport never answered" {
     next
   }
 
-  fn reloading(model : Model) {
+  fn reloading(model : Model) raise {
     { ..model, conversations: [{ ..model.active(), sync: test_reloading([]) }] }
   }
 
@@ -1353,7 +1354,11 @@ test "a fresh conversation survives on its goal draft alone" {
   // `/goal` moves the text out of `task`, so retention must count the goal
   // halves — otherwise activating a neighbour prunes the conversation and
   // takes the only copy of the draft with it.
-  let fresh = empty_conversation(@interop.ChannelId::Local, "desktop-fresh")
+  let fresh = empty_conversation(
+    @interop.ChannelId::Local,
+    "desktop-fresh",
+    @interop.ChannelId::Local.test_project(),
+  )
   assert_true(fresh.draft_empty())
   assert_false(
     { ..fresh, goal_edit: Some({ draft: "still writing" }) }.draft_empty(),
@@ -1370,11 +1375,19 @@ test "a fresh conversation survives on its goal draft alone" {
     ..test_model(),
     conversations: [
       { ..fresh, goal_edit: Some({ draft: "a goal still being written" }) },
-      empty_conversation(@interop.ChannelId::Local, "desktop-other"),
+      empty_conversation(
+        @interop.ChannelId::Local,
+        "desktop-other",
+        @interop.ChannelId::Local.test_project(),
+      ),
     ],
     active_session: "desktop-fresh",
   }
-  let switched = model.activate(@interop.ChannelId::Local, "desktop-other")
+  let switched = model.activate(
+    @interop.ChannelId::Local,
+    "desktop-other",
+    @interop.ChannelId::Local.test_project(),
+  )
   assert_true(
     switched.find_conversation(@interop.ChannelId::Local, "desktop-fresh")
     is Some(_),

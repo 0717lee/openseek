@@ -50,11 +50,7 @@ async fn WsClientActor::open_subscription(
   // `agent.connected` as "state may have changed, reload". Queue it before
   // any notification forwarder exists, making it this subscription's first
   // outbound frame even if the hub publishes immediately after subscribe.
-  out.put(
-    Notify(
-      AgentConnected({ ready: None, scratch_root: @engine.scratch_root() }),
-    ),
-  )
+  out.put(Notify(AgentConnected({ stage: Accepted })))
   { out, notifications }
 }
 
@@ -432,6 +428,7 @@ async test "readiness precedes the first forwarded hub notification" {
       session: "session-1",
       sequence: 1,
       event: { sequence: 1, ts: None, item: User({ content: "test" }) },
+      session_root: "/sessions/global",
     }),
   )
   let notification = subscription.notifications.get()
@@ -608,6 +605,7 @@ test "remote delivery retains streaming runtime and error events" {
         session: "session-1",
         sequence: 1,
         event: { sequence: 1, ts: None, item: User({ content: "test" }) },
+        session_root: "/sessions/global",
       }),
     )
     is Some(_),

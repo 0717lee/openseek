@@ -117,13 +117,223 @@ fn app_shortcut_message(keyboard : @dom.KeyboardEvent, is_apple : Bool) -> Msg? 
     return None
   }
   match (keyboard.code(), keyboard.shift_key()) {
-    ("KeyP", false) => Some(QuickOpenOpen(QuickOpenFiles))
-    ("KeyT", false) => Some(QuickOpenOpen(QuickOpenSymbols))
+    ("KeyP", false) => Some(QuickOpenOpen(@quick_open.Files))
+    ("KeyT", false) => Some(QuickOpenOpen(@quick_open.Symbols))
     ("KeyN", false) => Some(NewChat)
     ("KeyO", false) => Some(AddProjectRequested)
     ("KeyB", false) => Some(ToggleSidebar)
     ("KeyB", true) => Some(ToggleRightPanel)
     _ => None
+  }
+}
+
+///|
+/// Root message translation for the data-only sidebar component tree. Stable
+/// component ids contain every value needed to build a domain message, so no
+/// child component captures or stores the application model.
+priv struct SidebarDispatcher {
+  emit : @cmd.Emit[Msg]
+}
+
+///|
+fn SidebarDispatcher::emit(self : SidebarDispatcher, message : Msg) -> @cmd.Cmd {
+  (self.emit)(message)
+}
+
+///|
+/// A component id this dispatcher has no route for is a wiring defect — a
+/// source string and its dispatch arm out of sync. Surface it as an error
+/// toast rather than swallowing the click.
+fn SidebarDispatcher::unroutable(
+  self : SidebarDispatcher,
+  action : String,
+  detail : String,
+) -> @cmd.Cmd {
+  self.emit(HostActionFailed("Sidebar \{action} has no route for \{detail}"))
+}
+
+///|
+fn SidebarDispatcher::conversation_open(
+  self : SidebarDispatcher,
+  id : @conversation.Id,
+) -> @cmd.Cmd {
+  guard @interop.ChannelId::from_uri_authority(id.channel()) is Some(channel) else {
+    return self.unroutable("open", "channel \{id.channel()}")
+  }
+  match id.source() {
+    "openseek.live" => self.emit(OpenSession(channel, id.conversation()))
+    "openseek.archived" => {
+      // The row carries the store its record lives in; without one the click
+      // would name a session id in no particular store.
+      guard id.root() is Some(root) &&
+        @resource.of_path(channel, root) is Some(workspace) else {
+        return self.unroutable("open", "archived row with no store")
+      }
+      self.emit(
+        OpenArchivedSession(channel, session=id.conversation(), workspace~),
+      )
+    }
+    "codex.live" => self.emit(CodexOpenThread(id.conversation()))
+    "codex.draft" => self.emit(OpenCodex)
+    source => self.unroutable("open", "source \{source}")
+  }
+}
+
+///|
+fn SidebarDispatcher::conversation_archive(
+  self : SidebarDispatcher,
+  id : @conversation.Id,
+) -> @cmd.Cmd {
+  guard @interop.ChannelId::from_uri_authority(id.channel()) is Some(channel) else {
+    return self.unroutable("archive", "channel \{id.channel()}")
+  }
+  match id.source() {
+    "openseek.live" => self.emit(ArchiveSession(channel, id.conversation()))
+    "codex.live" => self.emit(CodexArchiveThread(id.conversation()))
+    source => self.unroutable("archive", "\{source}@\{id.channel()}")
+  }
+}
+
+///|
+fn SidebarDispatcher::conversation_restore(
+  self : SidebarDispatcher,
+  id : @conversation.Id,
+) -> @cmd.Cmd {
+  guard @interop.ChannelId::from_uri_authority(id.channel()) is Some(channel) else {
+    return self.unroutable("restore", "channel \{id.channel()}")
+  }
+  match id.source() {
+    "openseek.archived" =>
+      self.emit(UnarchiveSession(channel, id.conversation()))
+    "codex.archived" => self.emit(CodexUnarchiveThread(id.conversation()))
+    source => self.unroutable("restore", "\{source}@\{id.channel()}")
+  }
+}
+
+///|
+fn SidebarDispatcher::conversation_delete(
+  self : SidebarDispatcher,
+  id : @conversation.Id,
+) -> @cmd.Cmd {
+  // The row carries the store its record lives in; a delete that could not
+  // name one would address every same-id record at once.
+  guard @interop.ChannelId::from_uri_authority(id.channel()) is Some(channel) &&
+    id.source() == "openseek.archived" &&
+    id.root() is Some(root) &&
+    @resource.of_path(channel, root) is Some(workspace) else {
+    return self.unroutable("delete", "\{id.source()}@\{id.channel()}")
+  }
+  self.emit(
+    DeleteArchivedSession(channel, { session: id.conversation(), workspace }),
+  )
+}
+
+///|
+fn SidebarDispatcher::project_new(
+  self : SidebarDispatcher,
+  id : @project.Id,
+) -> @cmd.Cmd {
+  guard @interop.ChannelId::from_uri_authority(id.channel()) is Some(channel) else {
+    return self.unroutable("new chat", "channel \{id.channel()}")
+  }
+  match id.source() {
+    "openseek.projects" => {
+      // A click racing the project's detach loses its registry entry; that is
+      // a dead row on its way out, not a wiring defect.
+      guard @resource.of_path(channel, id.root()) is Some(project) else {
+        return @cmd.none
+      }
+      self.emit(NewChatIn(channel, Some(project)))
+    }
+    "codex.projects" => self.emit(CodexNewThreadIn(id.root()))
+    source => self.unroutable("new chat", "\{source}@\{id.channel()}")
+  }
+}
+
+///|
+fn SidebarDispatcher::project_settings(
+  self : SidebarDispatcher,
+  id : @project.Id,
+) -> @cmd.Cmd {
+  guard @interop.ChannelId::from_uri_authority(id.channel()) is Some(channel) else {
+    return self.unroutable("settings", "channel \{id.channel()}")
+  }
+  guard @resource.of_path(channel, id.root()) is Some(project) else {
+    return @cmd.none
+  }
+  self.emit(OpenWorkspaceSettings(channel, project))
+}
+
+///|
+fn SidebarDispatcher::project_detach(
+  self : SidebarDispatcher,
+  id : @project.Id,
+) -> @cmd.Cmd {
+  guard @interop.ChannelId::from_uri_authority(id.channel()) is Some(channel) else {
+    return self.unroutable("detach", "channel \{id.channel()}")
+  }
+  guard @resource.of_path(channel, id.root()) is Some(project) else {
+    return @cmd.none
+  }
+  self.emit(RemoveProject(channel, project))
+}
+
+///|
+fn SidebarDispatcher::section_primary(
+  self : SidebarDispatcher,
+  id : @section.Id,
+) -> @cmd.Cmd {
+  guard @interop.ChannelId::from_uri_authority(id.channel()) is Some(channel) else {
+    return self.unroutable("section action", "channel \{id.channel()}")
+  }
+  match id.source() {
+    "openseek.projects" => self.emit(PickProject(channel))
+    "openseek.chats" => self.emit(NewChatIn(channel, None))
+    "codex" => self.emit(CodexNewThread)
+    source => self.unroutable("section action", "source \{source}")
+  }
+}
+
+///|
+fn SidebarDispatcher::placeholder_open(
+  self : SidebarDispatcher,
+  id : String,
+) -> @cmd.Cmd {
+  match id {
+    "codex.open" => self.emit(OpenCodex)
+    _ => self.unroutable("placeholder action", id)
+  }
+}
+
+///|
+fn SidebarDispatcher::actions(self : SidebarDispatcher) -> @sidebar.Actions {
+  let conversation : @conversation.Actions = {
+    open: id => self.conversation_open(id),
+    archive: id => self.conversation_archive(id),
+    restore: id => self.conversation_restore(id),
+    delete: id => self.conversation_delete(id),
+  }
+  let project : @project.Actions = {
+    new_conversation: id => self.project_new(id),
+    open_settings: id => self.project_settings(id),
+    detach: id => self.project_detach(id),
+    conversation,
+  }
+  let section : @section.Actions = {
+    primary: id => self.section_primary(id),
+    placeholder: id => self.placeholder_open(id),
+    project,
+    conversation,
+  }
+  {
+    toggle: self.emit(ToggleSidebar),
+    new_chat: self.emit(NewChat),
+    update: self.emit(UpdateClicked),
+    open_skills: self.emit(OpenSkills),
+    open_settings: self.emit(OpenSetup),
+    refresh_account: self.emit(Console(RefreshClicked)),
+    sign_out: self.emit(Console(SignOutClicked)),
+    section,
   }
 }
 
@@ -158,12 +368,20 @@ pub fn boot() -> Unit {
         }
         // Click-away dismissal, one listener per menu and only while that menu
         // is open: a document-wide listener should not outlive what it serves.
-        if model.git_details_open {
+        if model.git_details_open ||
+          (model.screen is Codex && model.codex.git_details_open()) {
+          let close = if model.screen is Codex {
+            emit.map((_ : Unit) => {
+              Codex(channel=model.focused, @codex.Msg::close_git_details())
+            })
+          } else {
+            emit.map((_ : Unit) => CloseGitDetails)
+          }
           subs.push(
             dismiss_subscription(
               "composer-git-dismiss",
               trigger=".composer-git-button",
-              emit.map((_ : Unit) => CloseGitDetails),
+              close,
             ),
           )
         }
@@ -173,15 +391,6 @@ pub fn boot() -> Unit {
               "launcher-dismiss",
               trigger=".launcher-button",
               emit.map((_ : Unit) => CloseLauncher),
-            ),
-          )
-        }
-        if model.project_menu is Some(_) {
-          subs.push(
-            dismiss_subscription(
-              "project-menu-dismiss",
-              trigger=".workspace-menu-button",
-              emit.map((_ : Unit) => CloseProjectMenu),
             ),
           )
         }
@@ -228,6 +437,18 @@ pub fn boot() -> Unit {
             ),
           )
         }
+        // The changed-file inventory has no push channel for index-only
+        // operations, so it keeps a low-rate fallback refresh. Its lifetime is
+        // declared from the panel's own state instead of being chained from
+        // each reply, which is what stops a hidden explorer or a switched
+        // conversation from leaving an orphaned timer behind.
+        subs.push(
+          @fileeditor.changes_poll_subscription(
+            model.file_panel,
+            file_ctx(model),
+            emit.map(msg => FileEditor(msg)),
+          ),
+        )
         @sub.batch(subs)
       },
     )
@@ -266,22 +487,60 @@ pub fn boot() -> Unit {
         )
       }),
     })
-    state.view4(terminal_html, transcript_html, right_panel_html, (
-      model,
+    let composer_input = state.map(model => model.composer_input(emit))
+    let composer_html = @composer.component(
+      composer_input,
+      emit.map(action => ComposerAction(action)),
+    )
+    let codex_composer_input = state.map(model => {
+      model.codex_composer_input(emit)
+    })
+    let codex_composer_html = @composer.component(
+      codex_composer_input,
+      emit.map(action => CodexComposerAction(action)),
+    )
+    let sidebar_input = state.map(model => model.sidebar_component_input())
+    let sidebar_html = @sidebar.component(
+      sidebar_input,
+      SidebarDispatcher::{ emit, }.actions(),
+    )
+    let quick_open_html = @quick_open.component(
+      state.map(model => model.quick_open),
+      emit.map(msg => QuickOpen(msg)),
+    )
+    state.view8(
       terminal_html,
       transcript_html,
       right_panel_html,
-    ) => {
-      view(
-        emit,
-        terminal_emit(@terminal.ToggleTerminal),
-        emit(ToggleRightPanel),
+      composer_html,
+      codex_composer_html,
+      sidebar_html,
+      quick_open_html,
+      (
         model,
         terminal_html,
         transcript_html,
         right_panel_html,
-      )
-    })
+        composer_html,
+        codex_composer_html,
+        sidebar_html,
+        quick_open_html,
+      ) => {
+        view(
+          emit,
+          terminal_emit(@terminal.ToggleTerminal),
+          emit(ToggleRightPanel),
+          model,
+          terminal_html,
+          transcript_html,
+          right_panel_html,
+          composer_html,
+          codex_composer_html,
+          sidebar_html,
+          quick_open_html,
+        )
+      },
+    )
   })
   app.mount("app")
 }

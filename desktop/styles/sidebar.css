@@ -38,17 +38,13 @@ aside {
 
 .sidebar-main {
   display: grid;
-  grid-template-rows: minmax(0, 1fr);
+  /* One scroll lane holds every peer section. Independent folds keep a long
+     source manageable without turning Codex and OpenSeek into nested panes. */
   align-content: start;
   min-width: 0;
   min-height: 0;
-}
-
-.sidebar-section.sessions {
   overflow-y: auto;
   overflow-x: hidden;
-  min-height: 0;
-  align-content: start;
   /* The scroll box spans to the sidebar's edge; the right inset is the
      reserved scrollbar gutter (9px) plus 3px of clearance — 12px in
      total, matching the other sections whether or not the bar shows. */
@@ -60,7 +56,10 @@ aside {
   display: grid;
   gap: 4px;
   min-width: 0;
-  padding: 0 12px;
+  /* The outer scroll lane already reserves the 12px right inset through its
+     stable scrollbar gutter and clearance. Keep only the matching left inset
+     here so nested sections do not double the empty space on the right. */
+  padding: 0 0 0 12px;
 }
 
 .sidebar-heading {
@@ -132,6 +131,9 @@ aside {
 }
 .conversation-row > .sidebar-label {
   flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .conversation-row:hover {
@@ -172,6 +174,10 @@ aside {
 .row-archive:hover {
   background: var(--color-hover-subtle);
   color: var(--color-text-primary);
+}
+.row-archive.row-delete:hover {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
 }
 /* A conversation row's trailing slot: two right-aligned groups — what the
    row is (status glyphs) and what can be done to it (buttons) — stacked in
@@ -220,8 +226,7 @@ aside {
 .section-heading:hover .row-archive {
   visibility: visible;
 }
-/* A foldable section ("Chats"): the heading toggles it, wearing the
-   same textual chevron as the archived group. */
+/* Every peer conversation section uses the same heading disclosure. */
 .section-heading.collapsible {
   cursor: pointer;
   user-select: none;
@@ -231,6 +236,9 @@ aside {
 }
 .section-heading.collapsible.collapsed > .sidebar-label::after {
   content: " ▸";
+}
+.section-heading.active {
+  color: var(--color-accent-strong);
 }
 
 /* An attached workspace: a folder row whose main disclosure button folds its
@@ -600,36 +608,6 @@ button.row-twisty:hover {
   padding: 10px;
   font-size: var(--font-size-md);
   color: var(--color-text-secondary);
-}
-
-/* The collapsed group holding archived conversations, at the tail of
-   the chat list. */
-.sidebar-archived {
-  margin-top: 10px;
-}
-.archived-heading {
-  cursor: pointer;
-  list-style: none;
-  user-select: none;
-}
-.archived-heading::-webkit-details-marker {
-  display: none;
-}
-.archived-heading::after {
-  content: " ▸";
-}
-.sidebar-archived[open] > .archived-heading::after {
-  content: " ▾";
-}
-.archived-rows {
-  display: grid;
-  gap: 4px;
-}
-.archived-rows .conversation-row {
-  color: var(--color-text-muted);
-}
-.archived-rows .conversation-row.active {
-  color: var(--color-accent-strong);
 }
 
 .sidebar-icon {

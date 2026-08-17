@@ -53,19 +53,13 @@ async fn terminal_open_op(
   terminals : @terminal.TerminalState,
   payload : TerminalOpenPayload,
 ) -> TerminalOpenReply {
-  guard @engine.resolve_in_workspace(
+  guard @work_dir.resolve_in_workspace(
       payload.session,
       "",
       workspace?=payload.workspace,
     )
     is Some(root) else {
     raise HostError("terminal requires a conversation workspace")
-  }
-  // Scratch workspaces are created lazily by the first engine run. Opening a
-  // terminal is also a valid first action, so create that directory here.
-  @fsx.ensure_dir(root.to_path()) catch {
-    error if @async.is_being_cancelled() => raise error
-    error => raise HostError("could not open the workspace directory: \{error}")
   }
   // Match the engine and language services: a packaged seed wins when present,
   // while an unbundled development host uses the first external toolchain.

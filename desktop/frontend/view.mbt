@@ -118,26 +118,31 @@ fn conversation_title(conv : Conversation) -> String {
   }
   let task = conv.task.trim().to_owned()
   if task.is_empty() {
-    "SeekMoon"
+    // The live draft text is component-local, so the root knows only that it
+    // exists. Keep the row's pre-submit label truthful without mirroring the
+    // text on every key; the durable User item supplies the real title.
+    if conv.composer_draft_present {
+      "New chat"
+    } else {
+      "SeekMoon"
+    }
   } else {
     task
   }
 }
 
 ///|
-/// One sidebar row. A conversation with a turn in flight gets a pulsing dot,
-/// so background work stays visible while another conversation is on screen.
-/// A durable, idle row also carries a hover-revealed archive button; the row
-/// itself is a div (not a button) so that control can nest inside it.
-/// `subruns` is how many sub-run transcripts this conversation folded under
-/// it: above zero the row leads with a twisty that shows or hides them
-/// (`expanded` says which way it points). `subrun` marks the row as one of
-/// those children — indented a step. Nested children have no independent
-/// archive action because archiving their parent moves the whole family; a
-/// legacy orphan that surfaces as a root row does get the action so old split
-/// state remains repairable.
-fn session_row(
-  dispatch : @cmd.Emit[Msg],
+/// One sidebar row's component input. A conversation with a turn in flight
+/// gets a pulsing dot, so background work stays visible while another
+/// conversation is on screen. A durable, idle row also carries a
+/// hover-revealed archive button. `children` holds the sub-run transcripts
+/// this conversation folded under it; the conversation component owns their
+/// disclosure. `subrun` marks the row as one of those children — indented a
+/// step. Nested children have no independent archive action because
+/// archiving their parent moves the whole family; a legacy orphan that
+/// surfaces as a root row does get the action so old split state remains
+/// repairable.
+fn session_component_input(
   model : Model,
   channel : @interop.ChannelId,
   session_id : String,
@@ -145,518 +150,74 @@ fn session_row(
   archivable? : Bool = false,
   nested? : Bool = false,
   worktree? : String,
-  subruns? : Int = 0,
-  expanded? : Bool = false,
   subrun? : Bool = false,
-) -> @html.Html {
-  // Session ids can collide across devices, so the accent pill needs the
-  // channel to agree too.
-  let active = channel == model.focused && session_id == model.active_session
+  root? : String,
+  children? : Array[@conversation.Input] = [],
+) -> @conversation.Input {
+  let active = model.screen is Chat &&
+    channel == model.focused &&
+    session_id == model.active_session
   let conv = model.find_conversation(channel, session_id)
   let running = conv is Some(conv) && conv.is_running()
   // The row's status dot: pulsing while a run is in flight, then — when the
   // run finished off screen — settling into a solid dot (accent for success,
   // warn otherwise) until the conversation is opened (`Model::activate`
   // clears the mark).
-  let dot = match conv {
-    Some(conv) if conv.is_running() => Some("accent pulse")
+  let run_mark = match conv {
+    Some(conv) if conv.is_running() => @conversation.RunningMark
     Some(conv) if conv.unseen_finish && !active =>
-      // Success wears accent (continuity with the running pulse), any other
-      // ending warn — the same success/other split `Status::kind` draws.
-      Some(
-        if conv.run is NoRun(ended=Some(RunFinished(Completed))) {
-          "accent"
-        } else {
-          "warn"
-        },
-      )
-    _ => None
-  }
-  // The shared row's trailing slot holds two right-aligned groups stacked in
-  // one cell:
-  // what the row *is* (status) and what can be done to it (actions). At
-  // rest the status group shows; hovering a row that has actions swaps them
-  // in. Sizing is content-driven — a row with neither group has no slot at
-  // all, so idle rows carry no reserved gutter.
-  let status : Array[@html.Html] = []
-  // A worktree conversation wears a branch glyph — display only: the
-  // environment lives and dies with the conversation; archiving removes it.
-  // The name it stands for is on the row, not on the glyph: the pointer
-  // that would rest on the glyph to read a tooltip is already hovering the
-  // row, which swaps the glyph away.
-  if worktree is Some(name) {
-    status.push(
-      @html.span(
-        class="worktree-mark",
-        attrs=@html.Attrs::build().aria_label("Runs in worktree \{name}"),
-        icon(icon_worktree),
-      ),
-    )
-  }
-  // The dot goes last, so the rightmost glyph is always the run state.
-  if dot is Some(kind) {
-    status.push(@html.span(class="run-dot \{kind}", ""))
-  }
-  // Archiving a running conversation would pull the durable record out from
-  // under its engine, so the button waits for the turn to end.
-  let archive : @sidebar.ConversationArchive? = if archivable && !running {
-    Some({
-      title: "Archive — tuck this chat away; its files stay where they are",
-      command: dispatch(ArchiveSession(channel, session_id)),
-    })
-  } else {
-    None
+      if conv.run is NoRun(ended=Some(RunFinished(Completed))) {
+        @conversation.CompletedMark
+      } else {
+        @conversation.FailedMark
+      }
+    _ => @conversation.NoRunMark
   }
   // The row's own tooltip carries the worktree name, joined from the
   // registry (or the local binding while the first turn is still on its way
-  // to the store). Anywhere on the row reaches it, including the half of
-  // the row the archive button covers.
-  let row_title = if worktree is Some(name) {
+  // to the store).
+  let title = if worktree is Some(name) {
     "\{session_id}\nRuns in worktree \{name}; archiving removes its checkout but keeps the branch for Repair"
   } else {
     session_id
   }
-  @sidebar.ConversationRow::{
-    title: row_title,
+  {
+    // The store placement rides in `root`: session ids may repeat across
+    // project stores, and without it two same-id rows would collide on one
+    // key in the sidebar's keyed container.
+    id: @conversation.Id(
+      source="openseek.live",
+      channel=channel.uri_authority(),
+      conversation=session_id,
+      root?,
+    ),
+    title,
     label,
-    open: dispatch(OpenSession(channel, session_id)),
     nested,
     subrun,
     active,
     running,
-    subruns: if subruns > 0 {
-      @sidebar.Subruns(
-        count=subruns,
-        expanded~,
-        toggle=dispatch(ToggleSubruns(channel, session_id)),
-      )
+    openable: true,
+    worktree,
+    // Archiving a running conversation would pull the durable record out
+    // from under its engine, so the button waits for the turn to end.
+    run_mark,
+    trailing: if archivable && !running {
+      [
+        @conversation.Archive(
+          title="Archive — tuck this chat away; its files stay where they are",
+        ),
+      ]
     } else {
-      @sidebar.NoSubruns
+      []
     },
-    status,
-    archive,
-  }.render()
-}
-
-///|
-/// Sidebar rows. Both the desktop window and browser console render only the
-/// sections for one selected device channel. In the browser, `?device=` makes
-/// that selection a page/tab boundary: another device belongs in another page,
-/// not in this scroll box. Device identity and account controls stay outside it.
-fn session_rows(dispatch : @cmd.Emit[Msg], model : Model) -> Array[@html.Html] {
-  match model.console {
-    None => {
-      let dev = model
-        .focused_device()
-        .unwrap_or(empty_device_state(model.focused))
-      device_section_rows(dispatch, model, dev)
-    }
-    Some(console) => console_session_rows(dispatch, model, console)
+    children,
   }
 }
 
 ///|
-/// The console sidebar for this page/tab's query-selected device channel.
-/// Roster loading and failure states only replace the sections when that
-/// channel has no connected device state; an existing device remains usable
-/// while a refresh is in flight.
-fn console_session_rows(
-  dispatch : @cmd.Emit[Msg],
-  model : Model,
-  console : ConsoleState,
-) -> Array[@html.Html] {
-  if model.focused_device() is Some(dev) {
-    return device_section_rows(dispatch, model, dev)
-  }
-  let rows : Array[@html.Html] = []
-  match console.roster_sync {
-    RosterLoading => rows.push(dim_row("Loading device…"))
-    RosterFailed(message) => rows.push(dim_row(message))
-    RosterReady =>
-      if console.roster.is_empty() {
-        rows.push(
-          dim_row(
-            "No devices yet — open SeekMoon and sign in under Settings → Remote access.",
-          ),
-        )
-      } else {
-        rows.push(dim_row("No online device — reconnecting…"))
-      }
-  }
-  rows
-}
-
-///|
-fn dim_row(text : String) -> @html.Html {
-  @html.div(class="conversation-row placeholder", [
-    @html.span(class="sidebar-label", text),
-  ])
-}
-
-///|
-/// Match the compact project preview used by Codex's sidebar: enough recent
-/// chats to resume normal work without letting one busy project bury every
-/// neighbouring project.
-const ProjectChatPreviewLimit : Int = 5
-
-///|
-/// One device's sections: conversations that only exist in this app run (no
-/// turn has reached the store yet) first, then the engine's durable
-/// sessions, newest first. Rows stay clickable while runs are active —
-/// switching between conversations mid-run is the point of keeping them
-/// concurrent.
-fn device_section_rows(
-  dispatch : @cmd.Emit[Msg],
-  model : Model,
-  dev : DeviceState,
-) -> Array[@html.Html] {
-  let rows : Array[@html.Html] = []
-  let listed = (id : String) => {
-    for item in dev.sessions {
-      if item.id == id {
-        return true
-      }
-    }
-    false
-  }
-  // An archived record has moved out of the live store, so the live list
-  // normally cannot contain it; the filter covers the moment between the
-  // archive reply and the list refetch that follows it.
-  let archived = (id : String) => {
-    for item in dev.archived {
-      if item.id == id {
-        return true
-      }
-    }
-    false
-  }
-  // Two sections, matching the projects-then-chats shape chat apps settled
-  // on: "Projects" lists each attached project as a folder row with its
-  // conversations nested beneath, "Chats" holds the default store's loose
-  // conversations. The section headings share one style; the ＋ on each adds
-  // to that section (a project, or a Scratch chat).
-  rows.push(
-    @sidebar.Section::{
-      label: "Projects",
-      toggle: dispatch(ToggleProjectsSection),
-      collapsed: model.projects_collapsed,
-      action: Some({
-        title: "Add a project",
-        command: dispatch(PickProject(dev.channel)),
-        disabled: false,
-      }),
-      selected: false,
-    }.render(),
-  )
-  if !model.projects_collapsed {
-    for path in dev.projects {
-      let collapsed = model.project_collapsed(dev.channel, path)
-      rows.push(project_row(dispatch, model, dev, path, collapsed~))
-      if collapsed {
-        continue
-      }
-      let expanded = model.project_chats_expanded(dev.channel, path)
-      let total = push_group_rows(
-        rows,
-        dispatch,
-        model,
-        dev,
-        Some(path),
-        listed~,
-        archived~,
-        nested=true,
-        max_conversations=if expanded { 0 } else { ProjectChatPreviewLimit },
-      )
-      if total == 0 {
-        rows.push(
-          @html.div(class="conversation-row nested placeholder", [
-            @html.span(class="row-twisty spacer", ""),
-            @html.span(class="sidebar-label", "No chats yet"),
-          ]),
-        )
-      } else if total > ProjectChatPreviewLimit && !expanded {
-        rows.push(
-          @html.button(
-            class="project-show-more",
-            type_="button",
-            title="Show all \{total} chats in this project",
-            on_click=dispatch(ShowMoreProjectChats(dev.channel, path)),
-            "Show more",
-          ),
-        )
-      }
-    }
-  }
-  rows.push(
-    @sidebar.Section::{
-      label: "Chats",
-      toggle: dispatch(ToggleChatsSection),
-      collapsed: model.chats_collapsed,
-      action: Some({
-        title: "New Scratch chat",
-        command: dispatch(NewChatIn(dev.channel, None)),
-        disabled: false,
-      }),
-      selected: false,
-    }.render(),
-  )
-  if !model.chats_collapsed {
-    let _ = push_group_rows(
-      rows,
-      dispatch,
-      model,
-      dev,
-      None,
-      listed~,
-      archived~,
-    )
-  }
-  // Archived conversations fold behind a collapsed group at the end of the
-  // list. Their records live in the store's `archived` twin, so they come
-  // from the host's archived reply, not the live list; each row carries a
-  // restore control instead of the archive one.
-  let archived_rows : Array[@html.Html] = []
-  for row in @transcript.session_tree(dev.archived) {
-    // A parent and its archived sub-run records are one conversation. Restore
-    // the root row and the host moves the complete family back together. An
-    // old orphan child still owns a row and can therefore be restored.
-    let active = model.focused == dev.channel &&
-      model.active_session == row.item.id &&
-      model.find_conversation(dev.channel, row.item.id) is Some(conv) &&
-      conv.is_archived_read_only()
-    archived_rows.push(archived_row(dispatch, dev.channel, row.item, active))
-  }
-  if archived_rows.length() > 0 {
-    rows.push(
-      @html.details(class="sidebar-archived", [
-        @html.summary(
-          class="sidebar-heading archived-heading",
-          "Archived (\{archived_rows.length()})",
-        ),
-        @html.div(class="archived-rows", archived_rows),
-      ]),
-    )
-  }
-  rows
-}
-
-///|
-/// One store's conversation rows: the app-run-only (unlisted) conversations
-/// newest first, then the store's durable sessions in list order — the same
-/// ordering the flat sidebar always had, applied per group.
-fn push_group_rows(
-  rows : Array[@html.Html],
-  dispatch : @cmd.Emit[Msg],
-  model : Model,
-  dev : DeviceState,
-  workspace : @common.Uri?,
-  listed~ : (String) -> Bool,
-  archived~ : (String) -> Bool,
-  nested? : Bool = false,
-  max_conversations? : Int = 0,
-) -> Int {
-  // Conversations worth keeping get a row, plus the one fresh "New chat" on
-  // screen: it owns a row from the moment its ＋ was clicked, so the rotation
-  // has visible feedback in the list; the row takes the real title at the
-  // first send. Empty husks (a fresh chat the user navigated away from
-  // without writing anything) stay hidden — but one holding an unsent draft
-  // is kept precisely so it can be returned to, and a row is the only way
-  // back to it.
-  let composing = model.composing_new_chat()
-  let mut count = 0
-  for conv in model.conversations.rev_iter() {
-    if conv.device != dev.channel ||
-      conv.workspace.project() != workspace ||
-      listed(conv.session_id) ||
-      archived(conv.session_id) {
-      continue
-    }
-    // A fresh worktree conversation knows its binding locally; once the
-    // first turn is durable the registry mapping takes over.
-    let worktree = if conv.workspace.worktree_name() is Some(name) {
-      Some(name)
-    } else {
-      worktree_name_for(dev, workspace, conv.session_id)
-    }
-    let worth_keeping = conv.worth_keeping()
-    let active = conv.device == model.focused &&
-      conv.session_id == model.active_session
-    let visible_new_chat = composing && active
-    if !worth_keeping && !visible_new_chat {
-      continue
-    }
-    let visible = max_conversations <= 0 || count < max_conversations || active
-    count = count + 1
-    if visible {
-      rows.push(
-        session_row(
-          dispatch,
-          model,
-          dev.channel,
-          conv.session_id,
-          if worth_keeping {
-            conversation_title(conv)
-          } else {
-            "New chat"
-          },
-          nested~,
-          worktree?,
-        ),
-      )
-    }
-  }
-  let durable : Array[@transcript.SessionListItem] = []
-  for item in dev.sessions {
-    if item.workspace != workspace || archived(item.id) {
-      continue
-    }
-    durable.push(item)
-  }
-  // A conversation's label follows the live conversation while it is the one
-  // on screen (its title settles at the first send), and otherwise comes from
-  // the host's listing.
-  fn label_of(item : @transcript.SessionListItem) -> String {
-    if model.find_conversation(dev.channel, item.id) is Some(conv) &&
-      dev.channel == model.focused &&
-      item.id == model.active_session {
-      conversation_title(conv)
-    } else {
-      session_item_label(item)
-    }
-  }
-
-  // Sub-run transcripts fold under the conversation that launched them: they
-  // are that turn's evidence, not conversations of their own, and one worker
-  // sweep persists enough of them to bury the real chats. The parent row's
-  // twisty shows them in place, the way a tree unfolds a directory.
-  for row in @transcript.session_tree(durable) {
-    // An older active conversation stays visible beside the five-row preview;
-    // otherwise notification navigation or a list refresh could leave the
-    // conversation on screen with no selected sidebar row.
-    let active = dev.channel == model.focused &&
-      row.item.id == model.active_session
-    let visible = max_conversations <= 0 || count < max_conversations || active
-    count = count + 1
-    if !visible {
-      continue
-    }
-    let expanded = model.subruns_expanded(dev.channel, row.item.id)
-    rows.push(
-      session_row(
-        dispatch,
-        model,
-        dev.channel,
-        row.item.id,
-        label_of(row.item),
-        // Ordinary children are folded below a live parent and receive no
-        // action. A child-shaped root is legacy split state (or belongs to a
-        // parent in another store), so it remains independently archivable;
-        // once beside its archived parent, family restore picks it up.
-        archivable=true,
-        nested~,
-        worktree?=worktree_name_for(dev, workspace, row.item.id),
-        subruns=row.children.length(),
-        expanded~,
-      ),
-    )
-    if expanded {
-      for child in row.children {
-        // The ordinal leads the row: it is what the transcript's sub-run
-        // lines name, and it orders runs whose questions read alike. A child
-        // that never got a question keeps the ordinal alone — its id would
-        // only repeat the parent's.
-        let question = match child.title {
-          Some(title) if !title.is_blank() => Some(title)
-          _ => None
-        }
-        let label = match (@transcript.subrun_label(child.id), question) {
-          (Some(ordinal), Some(title)) => "\{ordinal} · \{title}"
-          (Some(ordinal), None) => ordinal
-          (None, _) => session_item_label(child)
-        }
-        rows.push(
-          session_row(
-            dispatch,
-            model,
-            dev.channel,
-            child.id,
-            label,
-            nested~,
-            subrun=true,
-          ),
-        )
-      }
-    }
-  }
-  count
-}
-
-///|
-/// One attached project: a folder row (full path in the tooltip) with its
-/// conversations nested beneath it. Hover controls open the row's "…" menu
-/// (workspace settings, detach) or start a new chat in the project. The
-/// active project — where a plain "New chat" lands — reads as the darker
-/// label.
-fn project_row(
-  dispatch : @cmd.Emit[Msg],
-  model : Model,
-  dev : DeviceState,
-  path : @common.Uri,
-  collapsed~ : Bool,
-) -> @html.Html {
-  @sidebar.WorkspaceRow::{
-    title: path.path,
-    label: @resource.label(path),
-    active: dev.channel == model.focused && dev.active_project == Some(path),
-    collapsed,
-    toggle: dispatch(ToggleProjectSection(dev.channel, path)),
-    menu: Some({
-      title: "More actions",
-      open: model.project_menu == Some({ channel: dev.channel, project: path }),
-      toggle: dispatch(ToggleProjectMenu(dev.channel, path)),
-      body: () => project_menu_body(dispatch, dev.channel, path),
-    }),
-    actions: [
-      {
-        title: "New chat in this project",
-        command: dispatch(NewChatIn(dev.channel, Some(path))),
-        image: icon_add,
-      },
-    ],
-  }.render()
-}
-
-///|
-/// The project row's "…" dropdown: the workspace settings page, and the
-/// detach that used to ride the hover slot. A click away closes it (see
-/// `dismiss_subscription`).
-fn project_menu_body(
-  dispatch : @cmd.Emit[Msg],
-  channel : @interop.ChannelId,
-  path : @common.Uri,
-) -> @html.Html {
-  @html.div(class="workspace-menu", [
-    @html.button(
-      class="workspace-menu-item",
-      type_="button",
-      title="Defaults for new chats in this workspace",
-      on_click=dispatch(OpenWorkspaceSettings(channel, path)),
-      [icon(icon_settings_gear), @html.span("Workspace settings")],
-    ),
-    @html.button(
-      class="workspace-menu-item",
-      type_="button",
-      title="Detach this project — its files and sessions stay",
-      on_click=dispatch(RemoveProject(channel, path)),
-      [icon(icon_close), @html.span("Detach project")],
-    ),
-  ])
-}
-
-///|
-/// A sidebar entry's display label: its engine-reported title, or the
-/// session id for a conversation with no user message yet (absent or blank
-/// title).
+/// A sidebar entry's display label: its engine-reported title, or the session
+/// id when the durable record has no user-authored title yet.
 fn session_item_label(item : @transcript.SessionListItem) -> String {
   if item.title is Some(title) && !title.is_blank() {
     title
@@ -666,168 +227,325 @@ fn session_item_label(item : @transcript.SessionListItem) -> String {
 }
 
 ///|
-/// One row of the Archived group: clicking the title opens its durable
-/// transcript read-only, while the nested restore button moves the complete
-/// conversation family back to the live store without also opening the row.
-fn archived_row(
-  dispatch : @cmd.Emit[Msg],
-  channel : @interop.ChannelId,
-  item : @transcript.SessionListItem,
-  active : Bool,
-) -> @html.Html {
-  @html.div(
-    class=if active {
-      "conversation-row archived active"
+/// One group's conversation inputs: the app-run-only (unlisted) conversations
+/// newest first, then the store's durable sessions in list order — the same
+/// ordering the flat sidebar always had, applied per group. Conversations
+/// worth keeping get a row, plus the one fresh "New chat" on screen; an empty
+/// husk holding an unsent draft keeps its row because that row is the only
+/// way back to the draft.
+fn Model::push_group_component_inputs(
+  self : Model,
+  rows : Array[@conversation.Input],
+  dev : DeviceState,
+  workspace : @common.Uri,
+  listed~ : (String) -> Bool,
+  archived~ : (String) -> Bool,
+) -> Unit {
+  let composing = self.composing_new_chat()
+  // Every row in this group shares the group's store placement; it becomes
+  // the `root` half of each conversation's component id.
+  let root = workspace.path
+  for conv in self.conversations.rev_iter() {
+    if conv.device != dev.channel ||
+      conv.project() != workspace ||
+      listed(conv.session_id) ||
+      archived(conv.session_id) {
+      continue
+    }
+    // A fresh worktree conversation knows its binding locally; once the
+    // first turn is durable the registry mapping takes over.
+    let worktree = if conv.worktree_name() is Some(name) {
+      Some(name)
     } else {
-      "conversation-row archived"
-    },
-    title=item.id,
-    on_click=dispatch(
-      OpenArchivedSession(channel, session=item.id, workspace=item.workspace),
-    ),
-    [
-      @html.span(class="sidebar-label", session_item_label(item)),
-      @html.button(
-        class="row-archive",
-        type_="button",
-        title="Restore this conversation to the sidebar",
-        attrs=@html.Attrs::build().on_click(event => {
-          event.stop_propagation()
-          dispatch(UnarchiveSession(channel, item.id))
-        }),
-        icon(icon_arrow_up),
+      worktree_name_for(dev, workspace, conv.session_id)
+    }
+    let worth_keeping = conv.worth_keeping()
+    let active = conv.device == self.focused &&
+      conv.session_id == self.active_session
+    if !worth_keeping && !(composing && active) {
+      continue
+    }
+    rows.push(
+      session_component_input(
+        self,
+        dev.channel,
+        conv.session_id,
+        if worth_keeping {
+          conversation_title(conv)
+        } else {
+          "New chat"
+        },
+        nested=true,
+        worktree?,
+        root~,
       ),
-    ],
-  )
-}
-
-///|
-fn sidebar_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
-  let sessions_section : Array[@html.Html] = []
-  for row in session_rows(dispatch, model) {
-    sessions_section.push(row)
+    )
   }
-  // A 46px header matching the content column's topbar, so the sidebar
-  // toggle rides the window's left edge here while the sidebar is open and
-  // at the same screen position while it's closed — the topbar's left on
-  // Chat, a floating button on Skills/Settings (see `page_with_toggle`) —
-  // mirroring how the right-panel toggle stays put (topbar-right when
-  // closed, breadcrumb-right when open). New chat rides the header's right
-  // edge on every screen — rotating a session lands back on Chat regardless.
-  let header_children : Array[@html.Html] = [
-    @html.button(
-      class="topbar-toggle",
-      title="Hide sidebar",
-      on_click=dispatch(ToggleSidebar),
-      icon(icon_layout_sidebar_left),
-    ),
-  ]
-  header_children.push(
-    @html.button(
-      class="topbar-toggle header-new-chat",
-      title="New chat",
-      on_click=dispatch(NewChat),
-      icon(icon_add),
-    ),
-  )
-  @html.aside([
-    @html.div(class="sidebar-header", header_children),
-    @html.div(class="sidebar-main", [
-      @html.div(class="sidebar-section sessions", sessions_section),
-    ]),
-    @html.div(class="sidebar-footer", sidebar_footer_buttons(dispatch, model)),
-  ])
+  let durable : Array[@transcript.SessionListItem] = []
+  for item in dev.sessions {
+    if item.workspace == workspace && !archived(item.id) {
+      durable.push(item)
+    }
+  }
+  // Sub-run transcripts fold under the conversation that launched them: they
+  // are that turn's evidence, not conversations of their own. They ride the
+  // parent's component input, so their disclosure state lives in the
+  // conversation component. A label follows the live conversation while it
+  // is the one on screen (its title settles at the first send), and
+  // otherwise comes from the host's listing.
+  for tree in @transcript.session_tree(durable) {
+    let parent_label = if self.find_conversation(dev.channel, tree.item.id)
+      is Some(conv) &&
+      dev.channel == self.focused &&
+      tree.item.id == self.active_session {
+      conversation_title(conv)
+    } else {
+      session_item_label(tree.item)
+    }
+    let children : Array[@conversation.Input] = []
+    for child in tree.children {
+      // The ordinal leads the row: it is what the transcript's sub-run
+      // lines name, and it orders runs whose questions read alike. A child
+      // that never got a question keeps the ordinal alone — its id would
+      // only repeat the parent's.
+      let question = match child.title {
+        Some(title) if !title.is_blank() => Some(title)
+        _ => None
+      }
+      let child_label = match (@transcript.subrun_label(child.id), question) {
+        (Some(ordinal), Some(title)) => "\{ordinal} · \{title}"
+        (Some(ordinal), None) => ordinal
+        (None, _) => session_item_label(child)
+      }
+      children.push(
+        session_component_input(
+          self,
+          dev.channel,
+          child.id,
+          child_label,
+          nested=true,
+          subrun=true,
+          root~,
+        ),
+      )
+    }
+    rows.push(
+      session_component_input(
+        self,
+        dev.channel,
+        tree.item.id,
+        parent_label,
+        // Ordinary children are folded below a live parent and receive no
+        // action. A child-shaped root is legacy split state (or belongs to a
+        // parent in another store), so it remains independently archivable;
+        // once beside its archived parent, family restore picks it up.
+        archivable=true,
+        nested=true,
+        worktree?=worktree_name_for(dev, workspace, tree.item.id),
+        root~,
+        children~,
+      ),
+    )
+  }
 }
 
 ///|
-/// The sidebar footer: Skills and Settings, and — while an installable
-/// release is on offer — the accent Update button above them, tracking the
-/// download so its progress stays visible from any screen.
-fn sidebar_footer_buttons(
-  dispatch : @cmd.Emit[Msg],
-  model : Model,
-) -> Array[@html.Html] {
-  let buttons : Array[@html.Html] = []
-  let update_label : String? = match model.update_ux {
+/// One device's sections: each attached project as a folder row with its
+/// conversations nested beneath it, and the archived group at the tail. Rows
+/// stay clickable while runs are active — switching between conversations
+/// mid-run is the point of keeping them concurrent.
+fn Model::sidebar_component_sections(
+  self : Model,
+  dev : DeviceState,
+) -> Array[@section.Input] {
+  let listed = (id : String) => dev.sessions.iter().any(item => item.id == id)
+  // An archived record has moved out of the live store, so the live list
+  // normally cannot contain it; the filter covers the moment between the
+  // archive reply and the list refetch that follows it.
+  let archived = (id : String) => dev.archived.iter().any(item => item.id == id)
+  let channel = dev.channel.uri_authority()
+  let chat_selected = self.screen is Chat && dev.channel == self.focused
+  // The activation identity handed to sections and projects: which
+  // conversation is on screen. A branch folded during one activation stays
+  // folded until a different one lands in it.
+  let activation = (holds_active : Bool) => {
+    if chat_selected && holds_active {
+      Some(self.active_session)
+    } else {
+      None
+    }
+  }
+  let sections : Array[@section.Input] = []
+  let projects : Array[@section.Entry] = []
+  for path in dev.projects {
+    let conversations : Array[@conversation.Input] = []
+    self.push_group_component_inputs(
+      conversations,
+      dev,
+      path,
+      listed~,
+      archived~,
+    )
+    projects.push(
+      @section.Project({
+        id: @project.Id(source="openseek.projects", channel~, root=path.path),
+        title: path.path,
+        label: @resource.label(path),
+        activation: activation(dev.active_project == Some(path)),
+        can_start: true,
+        managed: true,
+        conversations,
+        empty_label: Some("No chats yet"),
+      }),
+    )
+  }
+  sections.push({
+    id: @section.Id(source="openseek.projects", channel~),
+    label: "Projects",
+    initially_collapsed: false,
+    activation: activation(dev.active_project is Some(_)),
+    action: Some({ title: "Add a project", disabled: false }),
+    entries: projects,
+  })
+  if dev.channel == self.focused {
+    let registered_projects : Array[String] = []
+    for project in dev.projects {
+      if @resource.path_for(project, dev.channel) is Some(path) {
+        registered_projects.push(path)
+      }
+    }
+    sections.push(
+      self.codex.sidebar_section({
+        channel: dev.channel,
+        selected: self.screen is Codex,
+        registered_projects,
+      }),
+    )
+  }
+  // Archived conversations fold behind a collapsed section at the end of the
+  // list. Their records live in the store's `archived` twin, so they come
+  // from the host's archived reply, not the live list; each row carries a
+  // restore control and the permanent delete instead of the archive one.
+  // A parent and its archived sub-run records are one conversation: restore
+  // or delete the root row and the host moves the complete family together.
+  // An old orphan child still owns a row and can therefore be restored.
+  let archived_entries : Array[@section.Entry] = []
+  for tree in @transcript.session_tree(dev.archived) {
+    let item = tree.item
+    let active = self.focused == dev.channel &&
+      self.active_session == item.id &&
+      self.find_conversation(dev.channel, item.id) is Some(conv) &&
+      conv.is_archived_read_only()
+    archived_entries.push(
+      @section.Conversation({
+        id: @conversation.Id(
+          source="openseek.archived",
+          channel~,
+          conversation=item.id,
+          root=item.workspace.path,
+        ),
+        title: item.id,
+        label: session_item_label(item),
+        nested: false,
+        subrun: false,
+        active,
+        running: false,
+        openable: true,
+        worktree: None,
+        run_mark: @conversation.NoRunMark,
+        trailing: [
+          @conversation.Restore(
+            title="Restore this conversation to the sidebar",
+          ),
+          @conversation.Delete(
+            title="Permanently delete this archived conversation",
+          ),
+        ],
+        children: [],
+      }),
+    )
+  }
+  if dev.channel == self.focused {
+    for entry in self.codex.archived_sidebar_entries(dev.channel) {
+      archived_entries.push(entry)
+    }
+  }
+  sections.push({
+    id: @section.Id(source="archived", channel~),
+    label: if archived_entries.is_empty() {
+      "Archived chats"
+    } else {
+      "Archived chats (\{archived_entries.length()})"
+    },
+    initially_collapsed: true,
+    // Opening an archived transcript never force-reveals the section; its
+    // fold stays purely user-controlled, as before.
+    activation: None,
+    action: None,
+    entries: archived_entries,
+  })
+  sections
+}
+
+///|
+/// The sole root-to-sidebar projection. This method is data-only and is
+/// mapped into `Val[Input]` once in `boot`; the sidebar package owns all DOM
+/// composition and child state after that boundary. Both the desktop window
+/// and browser console project only the sections for one selected device
+/// channel. In the browser, `?device=` makes that selection a page/tab
+/// boundary: another device belongs in another page, not in this scroll box.
+/// Roster loading and failure states only replace the sections when that
+/// channel has no connected device state; an existing device remains usable
+/// while a refresh is in flight.
+fn Model::sidebar_component_input(self : Model) -> @sidebar.Input {
+  let notices : Array[String] = []
+  let sections = match self.focused_device() {
+    Some(dev) => self.sidebar_component_sections(dev)
+    None => {
+      match self.console {
+        Some(console) =>
+          match console.roster_sync {
+            RosterLoading => notices.push("Loading device…")
+            RosterFailed(message) => notices.push(message)
+            RosterReady =>
+              if console.roster.is_empty() {
+                notices.push(
+                  "No devices yet — open SeekMoon and sign in under Settings → Remote access.",
+                )
+              } else {
+                notices.push("No online device — reconnecting…")
+              }
+          }
+        None => ()
+      }
+      []
+    }
+  }
+  // The footer's Update button tracks the download so its progress stays
+  // visible from any screen.
+  let update_label : String? = match self.update_ux {
     UpdateAvailable(installable=true, ..) | ConfirmingRestart(..) =>
       Some("Update")
     DownloadingUpdate(progress~, ..) => Some(progress.sidebar_label())
     RestartingForUpdate(..) => Some("Restarting…")
     _ => None
   }
-  if update_label is Some(label) {
-    buttons.push(
-      @html.button(
-        class="sidebar-button primary",
-        disabled=!(model.update_ux is UpdateAvailable(..)),
-        on_click=dispatch(UpdateClicked),
-        [
-          @html.span(class="sidebar-icon", icon(icon_arrow_up)),
-          @html.span(class="sidebar-label", label),
-        ],
-      ),
-    )
-  }
-  buttons.push(
-    @html.button(
-      class=if model.screen is Skills {
-        "sidebar-button active"
-      } else {
-        "sidebar-button"
-      },
-      on_click=dispatch(OpenSkills),
-      [
-        @html.span(class="sidebar-icon", icon(icon_extensions)),
-        @html.span(class="sidebar-label", "Skills"),
-      ],
-    ),
-  )
-  buttons.push(
-    @html.button(
-      class=if model.screen is Settings {
-        "sidebar-button active"
-      } else {
-        "sidebar-button"
-      },
-      on_click=dispatch(OpenSetup),
-      [
-        @html.span(class="sidebar-icon", icon(icon_settings_gear)),
-        @html.span(class="sidebar-label", "Settings"),
-      ],
-    ),
-  )
   // The console's account row: who is signed in, a roster refresh, and the
   // sign-out — with the last account-level failure inline beneath it.
-  if model.console is Some(console) &&
-    console.auth is AuthSignedIn(login~, avatar~) {
-    let account : Array[@html.Html] = []
-    if !avatar.is_empty() {
-      account.push(@html.img(class="console-avatar", src=avatar, alt=login))
-    }
-    account.push(@html.span(class="console-login", "@\{login}"))
-    account.push(
-      @html.button(
-        class="console-account-action",
-        disabled=console.busy,
-        title="Refresh the device list",
-        on_click=dispatch(Console(RefreshClicked)),
-        "Refresh",
-      ),
-    )
-    account.push(
-      @html.button(
-        class="console-account-action",
-        disabled=console.busy,
-        on_click=dispatch(Console(SignOutClicked)),
-        "Sign out",
-      ),
-    )
-    buttons.push(@html.div(class="console-account", account))
-    if console.notice is Some(notice) {
-      buttons.push(@html.div(class="console-notice", notice))
-    }
+  let account : @sidebar.Account? = match self.console {
+    Some(console) if console.auth is AuthSignedIn(login~, avatar~) =>
+      Some({ login, avatar, busy: console.busy, notice: console.notice })
+    _ => None
   }
-  buttons
+  {
+    notices,
+    sections,
+    update_label,
+    update_enabled: self.update_ux is UpdateAvailable(..),
+    skills_active: self.screen is Skills,
+    settings_active: self.screen is Settings,
+    account,
+  }
 }
 
 ///|
@@ -859,79 +577,6 @@ fn user_display_text(text : String) -> String {
   guard @mention_context.parse(text) is Some(parsed) else { return text }
   parsed.display_text()
 }
-
-///|
-/// The completion menu floating above the composer: one row per match, the
-/// highlighted row marked for the keyboard and clickable by mouse. A pointer
-/// press accepts a row; `mousedown` (not `click`) is used so the textarea does
-/// not blur the menu away before the selection registers.
-fn Completion::view(self : Completion, dispatch : @cmd.Emit[Msg]) -> @html.Html {
-  // A `#` menu opens before its results arrive, so an empty list is a state to
-  // narrate — searching, or genuinely nothing — not an empty box.
-  let hint = match self.kind {
-    SlashCommands => "Commands"
-    SkillMentions => "Skills"
-    Symbols => "Symbols"
-    Files => "Files"
-  }
-  let rows : Array[@composer.CompletionRow] = []
-  for _, item in self.menu {
-    rows.push({ label: item.label, detail: item.detail })
-  }
-  @composer.CompletionView::{
-    rows,
-    selected: self.menu.selected(),
-    hint,
-    empty: if self.menu.loading() {
-      "Searching…"
-    } else {
-      match self.kind {
-        Files => "No files"
-        _ => "No symbols"
-      }
-    },
-  }.render(index => dispatch(CompletionPick(index)))
-}
-
-///|
-/// The chips above the textarea for the draft's mentions (`$` skills, `#`
-/// symbols, `@` files, `✎` editor comments), each removable by its `×`. Always rendered
-/// (empty when there are no chips) so the textarea keeps a stable child index
-/// and never loses focus when a chip comes or goes; CSS collapses the empty
-/// tray to nothing. A chip with a resolved location is also clickable,
-/// opening (or refocusing) the editor side-panel on that spot; a comment
-/// chip's tooltip is the comment itself.
-fn Conversation::mention_chips(
-  self : Conversation,
-  dispatch : @cmd.Emit[Msg],
-) -> Array[@html.Html] {
-  let chips : Array[@html.Html] = []
-  for index, mention in self.mentions {
-    let target = @mention_context.target(mention.ref_)
-    chips.push(
-      @composer.MentionChip::{
-        glyph: @mention_context.glyph(mention.ref_),
-        label: @mention_context.label(mention.ref_),
-        title: if mention.ref_ is Annotation(comment~, ..) {
-          comment
-        } else if target is Some(target) {
-          "Jump to \{target.file}"
-        } else {
-          @mention_context.label(mention.ref_)
-        },
-        jump: if target is Some(_) {
-          Some(dispatch(JumpToMention(index)))
-        } else {
-          None
-        },
-        remove: Some((dispatch(RemoveMention(index)), icon(icon_close))),
-      }.render(),
-    )
-  }
-  chips
-}
-
-///|
 
 ///|
 /// The console's connection banner: a permanent first child of the composer's
@@ -974,218 +619,6 @@ fn Conversation::archived_read_only_view(
       ),
     ]),
   ])
-}
-
-///|
-fn composer_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
-  let conv = model.active()
-  let checkout = model.checkout_placement(conv)
-  // Goal mode: `/goal` (or the banner's Edit) rebinds the composer's one
-  // textarea to the goal draft for this conversation — the prompt draft
-  // survives untouched underneath, and the same DOM node keeps focus.
-  let goal_editor = conv.goal_edit
-  let goal_mode = goal_editor is Some(_)
-  let transcript_ready = conv.sync is Synced &&
-    !conv.has_unresolved_run_tail_notice()
-  let checkout_ready = checkout is Some(@interop.WorkspaceRoot) ||
-    checkout is Some(@interop.Worktree(_))
-  let has_input = model.bridge_state() is Connected(..) &&
-    model.api_ready() &&
-    transcript_ready &&
-    checkout_ready &&
-    conv.draft_sendable()
-  // A compacting conversation cannot accept a prompt either: the serve
-  // engine would queue it behind the compaction, where Stop cannot reach it.
-  // Every unsettled phase — requested, queued, or running — holds the gate.
-  let can_send = !conv.is_running() &&
-    conv.compaction is NotCompacting &&
-    has_input
-  // The left status group: the conversation's model, then one git chip — the
-  // branch's pull request, or the branch itself, tinted by CI — which opens
-  // the rest (changes, base, links out) in a popover rather than spending the
-  // row's remaining width on it.
-  let status : Array[@html.Html] = [conv.engine_model.composer_select(dispatch)]
-  if git_chip(dispatch, model, conv) is Some(chip) {
-    status.push(chip)
-  }
-  // The launch mode: a fresh workspace conversation chooses between the
-  // workspace itself and a fresh host-named worktree (its 1:1 execution
-  // environment) here before its first prompt.
-  if worktree_mode_chip(dispatch, model, conv) is Some(chip) {
-    status.push(chip)
-  }
-  let action = if goal_editor is Some(editor) {
-    // Goal mode replaces the send/steer cluster: the input edits the
-    // standing goal, so the only action left here is Set — cancelling rides
-    // the status group's lit chip, clearing rides the banner's ✕. No
-    // run/compaction gate: a goal is welcome in every engine phase.
-    @composer.Action::{
-      id: "goal-set",
-      class_name: "icon-button send-button",
-      title: "Set the standing goal (Enter)",
-      disabled: editor.draft.is_blank(),
-      command: dispatch(SubmitGoal),
-      content: icon(icon_arrow_up),
-    }
-  } else if conv.is_running() {
-    // One morphing button while this conversation's turn runs. It becomes a
-    // steer submit only when the durable boundary is ready too; a draft must
-    // never hide Stop behind a disabled Send during reload/reconciliation.
-    let can_steer = has_input &&
-      conv.run_durable_floor is Some(_) &&
-      conv.run is Open(stage~, ..) &&
-      !(stage is Cancelling)
-    if !can_steer {
-      @composer.Action::{
-        id: "stop",
-        class_name: "icon-button stop-button",
-        title: "Stop",
-        disabled: !can_stop(conv),
-        command: dispatch(Stop),
-        content: icon(icon_debug_stop),
-      }
-    } else {
-      @composer.Action::{
-        id: "send",
-        class_name: "icon-button send-button",
-        title: "Steer the running task",
-        disabled: false,
-        command: dispatch(Send),
-        content: icon(icon_arrow_up),
-      }
-    }
-  } else {
-    @composer.Action::{
-      id: "send",
-      class_name: "icon-button send-button",
-      title: "Send",
-      disabled: !can_send,
-      command: dispatch(Send),
-      content: icon(icon_arrow_up),
-    }
-  }
-  // Keep every row above the input in one permanent context container. Beside
-  // a tall terminal this is the only auxiliary vertical scroller, so plans and
-  // notices yield space before the textarea or toolbar can disappear. Its
-  // first two children remain permanent to preserve the plan panel's DOM state.
-  let context : Array[@html.Html] = [
-    connection_banner(model),
-    @plan.panel(conv.visible_items()),
-  ]
-  if !conv.pending_steers().is_empty() {
-    context.push(pending_steers_panel(conv))
-  }
-  // The requested phase reads as compacting already: the distinction (the
-  // host may still be spawning the engine) is not the user's problem.
-  match conv.compaction {
-    Requested | Compacting =>
-      context.push(
-        @html.div(class="composer-notice", [
-          @html.span(class="composer-notice-icon", icon(icon_fold)),
-          @html.span(class="composer-notice-text", "Compacting context…"),
-        ]),
-      )
-    Queued =>
-      context.push(
-        @html.div(class="composer-notice", [
-          @html.span(class="composer-notice-icon", icon(icon_fold)),
-          @html.span(
-            class="composer-notice-text",
-            "Compaction queued — starts when the current turn ends",
-          ),
-        ]),
-      )
-    NotCompacting => ()
-  }
-  // The conversation's execution environment vanished under it. The host
-  // refuses to run it rather than silently falling back to the main
-  // checkout, so the composer explains that and offers both ways out.
-  match checkout {
-    None =>
-      context.push(
-        @html.div(class="composer-notice", [
-          @html.span(
-            class="composer-notice-text",
-            "Waiting for workspace placement…",
-          ),
-          @html.button(
-            class="composer-notice-btn",
-            type_="button",
-            title="Request this workspace's worktree list again",
-            on_click=dispatch(RetryWorktreePlacement),
-            "Retry",
-          ),
-        ]),
-      )
-    Some(@interop.MissingWorktree(name~)) =>
-      context.push(
-        @composer.MissingWorktreeNotice::{
-          name,
-          conversation_noun: "chat",
-          rebuild: dispatch(RepairWorktree),
-          archive: dispatch(ArchiveSession(conv.device, conv.session_id)),
-        }.render(),
-      )
-    Some(_) => ()
-  }
-  // The goal row rides the same slot as the compaction notice: what the
-  // composer is editing, or what stands. Pushed unconditionally — see
-  // `goal_banner` for why it collapses instead of leaving.
-  context.push(
-    goal_banner(
-      dispatch,
-      conv.goal,
-      editing=goal_editor,
-      pending=conv.goal_pending.map(pending => pending.request),
-    ),
-  )
-  @composer.View::{
-    before_inner: context,
-    mentions: conv.mention_chips(dispatch),
-    value: if goal_editor is Some(editor) {
-      editor.draft
-    } else {
-      conv.task
-    },
-    placeholder: if goal_mode {
-      "Describe the standing goal for this conversation — Enter sets it, Esc cancels."
-    } else if conv.is_running() {
-      "Steer the running task — your message joins it at the next step."
-    } else {
-      "Ask OpenSeek to inspect, edit, or explain this workspace."
-    },
-    disabled: false,
-    input: dispatch.map(value => {
-      if goal_mode {
-        GoalDraftEdited(value)
-      } else {
-        TaskChanged(value)
-      }
-    }),
-    keyboard: @composer.KeyboardActions::{
-      menu_open: !goal_mode && model.completion is Some(_),
-      navigate: delta => dispatch(CompletionMove(delta)),
-      accept: dispatch(CompletionAccept),
-      dismiss: dispatch(CompletionDismiss),
-      submit: if goal_mode {
-        dispatch(SubmitGoal)
-      } else {
-        dispatch(Send)
-      },
-      cancel: if goal_mode {
-        Some(dispatch(CloseGoalEditor))
-      } else {
-        None
-      },
-    },
-    status,
-    action,
-    overlay: if goal_mode {
-      None
-    } else {
-      model.completion.map(completion => completion.view(dispatch))
-    },
-  }.render()
 }
 
 ///|
@@ -2088,7 +1521,7 @@ fn skills_page(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
 
 ///|
 #warnings("-alert_unstable")
-test "settings, skills, and composer declare form focus ownership" {
+test "settings and skills declare form focus ownership" {
   let dispatch = test_dispatch()
   let settings_markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(settings_page(dispatch, test_model()))
@@ -2103,18 +1536,12 @@ test "settings, skills, and composer declare form focus ownership" {
   assert_true(skills_markup.contains("class=\"skills-search\""))
   assert_true(skills_markup.contains("data-focus-owner=\"\""))
   assert_true(skills_markup.contains("data-focus-target=\"\""))
-  let composer_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(composer_view(dispatch, test_model()))
-  })
-  assert_true(composer_markup.contains("class=\"composer-inner\""))
-  assert_true(composer_markup.contains("data-focus-owner=\"\""))
-  assert_true(composer_markup.contains("data-focus-target=\"\""))
   let address_markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(
       @preview.toolbar_view(
         { url: None, input: "", title: "", loading: false, failure: None },
         {
-          input: dispatch.map(value => TaskChanged(value)),
+          input: dispatch.map(value => BrowserAddressEdited(value)),
           submit: @cmd.none,
           back: @cmd.none,
           forward: @cmd.none,
@@ -2130,8 +1557,7 @@ test "settings, skills, and composer declare form focus ownership" {
   // Every rendered form element must choose one side of the contract. A
   // composite also has a separate owner on its wrapper, which is why counting
   // markers alone would not prove that the nested control was marked.
-  for
-    markup in [settings_markup, skills_markup, composer_markup, address_markup] {
+  for markup in [settings_markup, skills_markup, address_markup] {
     for tag in ["<input", "<textarea", "<select"] {
       let parts = markup.split(tag).collect()
       for index, part in parts {
@@ -2165,10 +1591,41 @@ test "an archived transcript renders no live composer controls" {
 }
 
 ///|
-fn run_indicator(model : Model) -> @html.Html {
+/// The two halves of the top-level fork, from the model each one stands for.
+#warnings("-alert_unstable")
+test "onboarding stands in for the chat until a project holds one" {
+  let dispatch = test_dispatch()
+  fn markup(model : Model) {
+    @rabbita.render_to_string(() => {
+      @rabbita.Val::constant(onboarding_view(dispatch, model))
+    })
+  }
+
+  // Connected with no project: attaching one is the only way forward, so it
+  // is the only thing offered.
+  let empty = { ..test_model(), conversations: [], active_session: "" }
+  let bare = empty.with_dev(dev => { ..dev, projects: [], worktrees: [] })
+  assert_true(bare.active_conversation() is None)
+  assert_true(markup(bare).contains("Add a project"))
+  // Connected with projects but between conversations: the rotation that
+  // opens one is a message away, and offering to add a project here would
+  // answer a question the user did not ask.
+  assert_true(empty.active_conversation() is None)
+  assert_false(markup(empty).contains("Add a project"))
+  // Before the bridge answers, this page knows nothing about the host's
+  // projects and says only that.
+  let connecting = bare.with_dev(dev => { ..dev, bridge: Connecting })
+  assert_true(markup(connecting).contains("Connecting"))
+  assert_false(markup(connecting).contains("Add a project"))
+  // With a conversation on screen the fork takes its other branch.
+  assert_true(test_model().active_conversation() is Some(_))
+}
+
+///|
+fn run_indicator(model : Model, conv : Conversation) -> @html.Html {
   let status = model.display_status()
   let label = status.label()
-  if model.active().is_running() {
+  if conv.is_running() {
     @html.div(class="run-status accent", [
       @html.span(class="run-dot accent pulse", ""),
       @html.span(class="run-text", label),
@@ -2246,10 +1703,13 @@ fn launcher_menu(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
 /// The topbar app launcher: a button that opens a dropdown of installed apps,
 /// each opening the active conversation's workspace. A click away closes it
 /// (see `dismiss_subscription`).
-fn launcher_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
+fn launcher_view(
+  dispatch : @cmd.Emit[Msg],
+  model : Model,
+  conv : Conversation,
+) -> @html.Html {
   // A conversation's workspace exists only once it has run; a fresh chat with
   // no turn yet has nothing to open, so the launcher is disabled until then.
-  let conv = model.active()
   let ready = !conv.visible_items().is_empty() || conv.is_running()
   let children : Array[@html.Html] = [
     @html.button(
@@ -2290,8 +1750,8 @@ fn topbar_view(
   toggle_terminal : @cmd.Cmd,
   toggle_right_panel : @cmd.Cmd,
   model : Model,
+  conv : Conversation,
 ) -> @html.Html {
-  let conv = model.active()
   let items : Array[@html.Html] = []
   // The sidebar toggle rides the window's left edge. While the sidebar is open
   // it lives in the sidebar's own header; only when the sidebar is closed does
@@ -2314,17 +1774,16 @@ fn topbar_view(
       conversation_title(conv),
     ),
   )
-  // The conversation's attached project; a scratch conversation has no chip.
-  // The git branch is not shown here — it lives in the composer's status row.
-  if conv.workspace.project() is Some(workspace) {
-    items.push(
-      @html.span(class="topbar-workspace", title=workspace.path, [
-        icon(icon_folder),
-        @html.text(@resource.label(workspace)),
-      ]),
-    )
-  }
-  items.push(run_indicator(model))
+  // The project this conversation works in. The git branch is not shown here
+  // — it lives in the composer's status row.
+  let workspace = conv.project()
+  items.push(
+    @html.span(class="topbar-workspace", title=workspace.path, [
+      icon(icon_folder),
+      @html.text(@resource.label(workspace)),
+    ]),
+  )
+  items.push(run_indicator(model, conv))
   if conv.usage_tokens > 0 {
     items.push(@html.span(class="pill", token_label(conv.usage_tokens)))
   }
@@ -2335,7 +1794,7 @@ fn topbar_view(
   // something when the page IS that machine's desktop window; from a remote
   // browser the launched app would appear on a screen the user is not at.
   if model.is_desktop {
-    items.push(launcher_view(dispatch, model))
+    items.push(launcher_view(dispatch, model, conv))
   }
   // A browser terminal is rendered locally but its PTY lives on the focused
   // remote device, reached through that device's WebSocket channel.
@@ -2370,6 +1829,41 @@ fn topbar_view(
     )
   }
   @html.div(class="topbar", items)
+}
+
+///|
+/// The conversation column while no conversation is on screen. A chat happens
+/// inside a project, so this is what the app shows before it knows of one:
+/// while the host's registry is still in flight, and when no project is
+/// attached at all. Attaching one is the only way out, so it is the only
+/// action offered — the sidebar's own "Add a project" opens the same picker.
+fn onboarding_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
+  let card : Array[@html.Html] = [@html.h2("Open a project")]
+  match (model.bridge_state(), model.focused_device()) {
+    (Connected, Some(dev)) if dev.projects.is_empty() => {
+      card.push(
+        @html.p(
+          "OpenSeek works inside a project directory. Add one and its first chat opens here.",
+        ),
+      )
+      card.push(
+        @html.button(
+          class="primary",
+          type_="button",
+          on_click=dispatch(PickProject(dev.channel)),
+          "Add a project",
+        ),
+      )
+    }
+    // A connected device with projects is between conversations: the session
+    // rotation that opens one is a message away.
+    (Connected, Some(_)) => card.push(@html.p("Opening a chat…"))
+    // Until the bridge answers, this page knows nothing about the host's
+    // projects. Offering to add one here would be a guess that the very next
+    // message contradicts.
+    _ => card.push(@html.p("Connecting to this device…"))
+  }
+  @html.section(class="onboarding", [@html.div(class="onboarding-card", card)])
 }
 
 ///|
@@ -2530,6 +2024,10 @@ fn view(
   terminal_html : @html.Html,
   transcript_html : @html.Html,
   right_panel_html : @html.Html,
+  composer_html : @html.Html,
+  codex_composer_html : @html.Html,
+  sidebar_html : @html.Html,
+  quick_open_html : @html.Html,
 ) -> @html.Html {
   // A browser page is gated on both its relay session and its required
   // query-selected device. Until both exist, the console frame — sidebar,
@@ -2542,17 +2040,63 @@ fn view(
     ) {
     return console_gate_view(dispatch, console)
   }
+  let active_file_ctx = file_ctx(model)
+  let codex_active = model.codex.active_placement(model.focused) is Some(_)
+  // Panel state survives page switches, but a Codex page only exposes it
+  // after a real task supplies the identity (and, for files, a cwd) needed by
+  // the host operation. Selecting a task makes an already-open panel reappear
+  // in that task's workspace.
+  let file_panel_visible = model.right_panel_open &&
+    (
+      model.screen is Chat ||
+      (
+        model.screen is Codex &&
+        active_file_ctx.placement is Some(placement) &&
+        placement.checkout_root() is Some(_)
+      )
+    )
+  let terminal_panel_visible = model.terminal.is_open() &&
+    (!(model.screen is Codex) || codex_active)
   let content = match model.screen {
+    // The one fork that decides what the conversation column is. A chat needs
+    // a conversation, and a conversation needs a project to work in, so with
+    // none on screen — the registry has not arrived, or no project is
+    // attached — the column is onboarding instead. Everything below this
+    // point in the Chat branch has both.
     Chat =>
-      [
-        topbar_view(dispatch, toggle_terminal, toggle_right_panel, model),
-        transcript_html,
-        if model.active().is_archived_read_only() {
-          model.active().archived_read_only_view(dispatch)
-        } else {
-          composer_view(dispatch, model)
+      match model.active_conversation() {
+        None =>
+          page_with_toggle(dispatch, model, onboarding_view(dispatch, model))
+        Some(conv) =>
+          [
+            topbar_view(
+              dispatch, toggle_terminal, toggle_right_panel, model, conv,
+            ),
+            transcript_html,
+            if conv.is_archived_read_only() {
+              conv.archived_read_only_view(dispatch)
+            } else {
+              composer_html
+            },
+          ]
+      }
+    Codex =>
+      model.codex.page(
+        dispatch.map(msg => Codex(channel=model.focused, msg)),
+        model.focused,
+        model.sidebar_open,
+        terminal_panel_visible,
+        file_panel_visible,
+        @codex.PageActions::{
+          toggle_sidebar: dispatch(ToggleSidebar),
+          toggle_terminal,
+          toggle_files: toggle_right_panel,
+          open_external: url => dispatch(ExternalLinkClicked(url)),
+          workspace_label: workspace => @resource.label(workspace),
+          transcript: transcript_html,
+          composer: codex_composer_html,
         },
-      ]
+      )
     Skills => page_with_toggle(dispatch, model, skills_page(dispatch, model))
     Settings =>
       page_with_toggle(dispatch, model, settings_page(dispatch, model))
@@ -2565,24 +2109,23 @@ fn view(
   }
   // The app is `sidebar | content`; `content` itself splits into the
   // conversation (left) and the editor (right) as two independent parts, so
-  // either side can be swapped out later. The files panel only opens over the
-  // chat; on the Skills page it stays collapsed, but the editor column (and the
-  // viewer host inside it) is still rendered so the attached viewer is never
-  // torn down.
-  let panel_open = model.right_panel_open && model.screen is Chat
-  let mut content_class = if panel_open {
+  // either side can be swapped out later. Files open over an OpenSeek or Codex
+  // conversation with a real workspace; on the other pages the editor column
+  // (and its viewer host) stays rendered so the attached viewer is never torn
+  // down.
+  let mut content_class = if file_panel_visible {
     "content panel-open"
   } else {
     "content"
   }
-  if panel_open && model.right_panel_expanded {
+  if file_panel_visible && model.right_panel_expanded {
     content_class = content_class + " panel-expanded"
   }
-  if model.terminal.is_open() {
+  if terminal_panel_visible {
     content_class = content_class + " terminal-open"
   }
   let children : Array[@html.Html] = [
-    sidebar_view(dispatch, model),
+    sidebar_html,
     @html.div(class=content_class, [
       @html.main_(content),
       right_panel_html,
@@ -2615,11 +2158,21 @@ fn view(
     children.push(project_picker_modal(dispatch, picker))
   }
   if model.archive_confirm is Some(confirm) {
-    children.push(archive_discard_modal(dispatch, confirm))
+    children.push(
+      @composer.WorktreeArchiveDialog::{
+        refusal: confirm.refusal,
+        conversation_noun: "chat",
+        cancel: dispatch(CancelArchiveDiscard),
+        confirm: dispatch(ConfirmArchiveDiscard),
+      }.render(),
+    )
   }
-  if model.quick_open is Some(open) {
-    children.push(quick_open_view(dispatch, open))
+  if model.archived_delete_confirm is Some(confirm) {
+    children.push(archived_delete_modal(dispatch, confirm))
   }
+  // Rendered whether or not the palette is open — closed it is an empty
+  // placeholder — so opening it never shifts the overlay children around it.
+  children.push(quick_open_html)
   // On the desktop a lost connection covers everything: with no event
   // stream and every API call failing, the app behind it can do nothing,
   // so an honest dead-end beats a half-broken UI. The console keeps its last
@@ -2836,47 +2389,65 @@ fn notifications_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
 }
 
 ///|
-#warnings("-alert_unstable")
 test "archived families collapse while a live orphan child stays archivable" {
   let archived_model = test_model().with_dev(dev => {
     ..dev,
     archived: [archived_item("chat"), archived_item("chat-sr-1")],
   })
-  let archived_dev = archived_model.dev()
-  let archived_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(
-      @html.div(
-        device_section_rows(test_dispatch(), archived_model, archived_dev),
-      ),
-    )
-  })
-  assert_true(archived_markup.contains("Archived (1)"))
-  assert_true(archived_markup.contains("title=\"chat\""))
-  assert_false(archived_markup.contains("chat-sr-1"))
+  let archived_sections = archived_model.sidebar_component_sections(
+    archived_model.dev(),
+  )
+  let mut archived_entries : Array[@section.Entry] = []
+  for section in archived_sections {
+    if section.id().source() == "archived" {
+      archived_entries = section.entries
+    }
+  }
+  assert_eq(archived_entries.length(), 1)
+  guard archived_entries[0] is @section.Conversation(archived) else {
+    fail("expected archived parent conversation")
+  }
+  assert_eq(archived.id().conversation(), "chat")
+  assert_true(
+    archived.trailing is [@conversation.Restore(_), @conversation.Delete(_)],
+  )
   let orphan_model = test_model().with_dev(dev => {
     ..dev,
-    sessions: [archived_item("chat-sr-1")],
+    sessions: [placed_archived_item("chat-sr-1")],
   })
-  let orphan_dev = orphan_model.dev()
-  let orphan_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(
-      @html.div(device_section_rows(test_dispatch(), orphan_model, orphan_dev)),
-    )
-  })
-  assert_true(orphan_markup.contains("chat-sr-1"))
-  assert_true(orphan_markup.contains("Archive — tuck this chat away"))
+  let orphan_sections = orphan_model.sidebar_component_sections(
+    orphan_model.dev(),
+  )
+  // Live rows hang under their project's folder row.
+  let mut orphan : @conversation.Input? = None
+  for section in orphan_sections {
+    guard section.id().source() == "openseek.projects" else { continue }
+    for entry in section.entries {
+      guard entry is @section.Project(project) else { continue }
+      for row in project.conversations {
+        if row.id().conversation() == "chat-sr-1" {
+          orphan = Some(row)
+        }
+      }
+    }
+  }
+  guard orphan is Some(orphan) else {
+    fail("expected live orphan conversation")
+  }
+  assert_eq(orphan.id().conversation(), "chat-sr-1")
+  assert_true(orphan.trailing is [@conversation.Archive(_)])
 }
 
 ///|
 #warnings("-alert_unstable")
-test "project chat preview shows five rows, then expands or folds as one group" {
+test "project component receives the complete conversation list" {
   let project = @interop.ChannelId::Local.test_resource("/work/alpha")
   let sessions : Array[@transcript.SessionListItem] = []
   for number = 1; number <= 6; number = number + 1 {
     sessions.push({
       id: "chat-\{number}",
       title: Some("Project chat \{number}"),
-      workspace: Some(project),
+      workspace: project,
       workspace_name: "alpha",
     })
   }
@@ -2885,29 +2456,68 @@ test "project chat preview shows five rows, then expands or folds as one group" 
     projects: [project],
     sessions,
   })
-  fn render(model : Model) -> String raise {
-    let dev = model.dev()
-    @rabbita.render_to_string(() => {
-      @rabbita.Val::constant(
-        @html.div(device_section_rows(test_dispatch(), model, dev)),
-      )
-    })
+  let sections = model.sidebar_component_sections(model.dev())
+  let mut project : @project.Input? = None
+  for section in sections {
+    if section.id().source() == "openseek.projects" {
+      for entry in section.entries {
+        if entry is @section.Project(value) {
+          project = Some(value)
+        }
+      }
+    }
   }
+  guard project is Some(project) else { fail("missing project input") }
+  assert_eq(project.conversations.length(), 6)
+  assert_eq(project.conversations[4].label, "Project chat 5")
+  assert_eq(project.conversations[5].label, "Project chat 6")
+}
 
-  let preview = render(model)
-  assert_true(preview.contains("Project chat 5"))
-  assert_false(preview.contains("Project chat 6"))
-  assert_true(preview.contains(">Show more</button>"))
-  let active = render({ ..model, active_session: "chat-6" })
-  assert_true(active.contains("Project chat 6"))
-  assert_true(active.contains(">Show more</button>"))
-  let expanded = render({ ..model, expanded_project_chats: [(Local, project)] })
-  assert_true(expanded.contains("Project chat 6"))
-  assert_false(expanded.contains(">Show more</button>"))
-  let collapsed = render({ ..model, collapsed_projects: [(Local, project)] })
-  assert_false(collapsed.contains("Project chat 1"))
-  assert_false(collapsed.contains(">Show more</button>"))
-  assert_true(collapsed.contains("aria-expanded=\"false\""))
+///|
+/// Durable identities are store-qualified, so one session id may hold a
+/// record in two project stores at once. Both rows must survive the sidebar's
+/// keyed container — colliding keys would silently drop one.
+test "same-id records in two project stores keep distinct row keys" {
+  let alpha = @interop.ChannelId::Local.test_resource("/alpha")
+  let beta = @interop.ChannelId::Local.test_resource("/beta")
+  let model = test_model().with_dev(dev => {
+    ..dev,
+    projects: [alpha, beta],
+    sessions: [
+      {
+        id: "desktop-shared",
+        title: Some("alpha copy"),
+        workspace: alpha,
+        workspace_name: "alpha",
+      },
+      {
+        id: "desktop-shared",
+        title: Some("beta copy"),
+        workspace: beta,
+        workspace_name: "beta",
+      },
+    ],
+  })
+  let keys : Array[String] = []
+  for section in model.sidebar_component_sections(model.dev()) {
+    for entry in section.entries {
+      match entry {
+        @section.Project(project) =>
+          for conversation in project.conversations {
+            if conversation.id.conversation() == "desktop-shared" {
+              keys.push(conversation.id.key())
+            }
+          }
+        @section.Conversation(conversation) =>
+          if conversation.id.conversation() == "desktop-shared" {
+            keys.push(conversation.id.key())
+          }
+        _ => ()
+      }
+    }
+  }
+  assert_eq(keys.length(), 2)
+  assert_true(keys[0] != keys[1])
 }
 
 ///|

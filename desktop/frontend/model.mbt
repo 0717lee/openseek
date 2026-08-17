@@ -1,6 +1,6 @@
 ///|
-/// Which model a conversation's turns run with. The composer's chip toggles
-/// between the two service tiers; `Other` retains a wire name this build does
+/// Which model a conversation's turns run with. The composer's shared selector
+/// offers the two service tiers; `Other` retains a wire name this build does
 /// not know — a run started with `OPENSEEK_MODEL` set, or a newer engine's
 /// model echoed back by `agent.started` — so the chip reports what the engine
 /// actually ran instead of a tier it never used.
@@ -458,15 +458,15 @@ priv enum SettlementFrontierMatch {
 }
 
 ///|
-/// The directory context a conversation belongs to.
+/// The directory context a conversation belongs to. `Project` names a
+/// registered project root. `Worktree` retains both its owning project and
+/// registry name; the checkout path itself remains registry-owned and is
+/// resolved only when an up-to-date row is available.
 ///
-/// `Scratch` has no registered project. Its concrete directory is projected
-/// from the owning device's scratch root and this conversation's session id.
-/// `Project` names a registered project root. `Worktree` retains both its
-/// owning project and registry name; the checkout path itself remains
-/// registry-owned and is resolved only when an up-to-date row is available.
+/// Every conversation has one. Which *directory* it resolves to can still be
+/// unknown while the worktree registry is in flight — that is
+/// `Model::conversation_placement`'s option, not this one.
 priv enum Workspace {
-  Scratch
   Project(root~ : @common.Uri)
   Worktree(project~ : @common.Uri, name~ : String)
 } derive(Eq, Debug)
@@ -481,24 +481,11 @@ priv enum ConversationRecord {
 } derive(Eq)
 
 ///|
-/// Construct the conversation workspace represented by the durable session
-/// list: no registered project means Scratch; a project starts provisional
-/// until that project's worktree registry identifies a stronger placement.
-fn Workspace::from_project(project : @common.Uri?) -> Workspace {
-  if project is Some(root) {
-    Project(root~)
-  } else {
-    Scratch
-  }
-}
-
-///|
-/// The registered project that owns this workspace, if it has one.
-fn Workspace::project(self : Workspace) -> @common.Uri? {
+/// The registered project that owns this workspace.
+fn Workspace::project(self : Workspace) -> @common.Uri {
   match self {
-    Scratch => None
-    Project(root~) => Some(root)
-    Worktree(project~, ..) => Some(project)
+    Project(root~) => root
+    Worktree(project~, ..) => project
   }
 }
 
@@ -507,7 +494,7 @@ fn Workspace::project(self : Workspace) -> @common.Uri? {
 fn Workspace::worktree_name(self : Workspace) -> String? {
   match self {
     Worktree(name~, ..) => Some(name)
-    Scratch | Project(..) => None
+    Project(..) => None
   }
 }
 
@@ -527,9 +514,9 @@ priv struct Conversation {
   // Live records accept engine mutations. An archived record is a read-only
   // snapshot source until an unarchive notification moves it back to live.
   record : ConversationRecord
-  // Scratch, registered project, or project-owned worktree. One enum keeps
-  // those mutually exclusive placements from drifting apart and is the only
-  // stored source for filesystem and language-server routing.
+  // Registered project or project-owned worktree. One value keeps those
+  // mutually exclusive placements from drifting apart and is the only stored
+  // source for filesystem and language-server routing.
   workspace : Workspace
   // The composer's launch mode for a conversation that has not begun: run
   // the first prompt in a fresh host-named worktree instead of the
@@ -538,19 +525,25 @@ priv struct Conversation {
   worktree_mode : Bool
   // The model this conversation's next turn runs with, chosen on the
   // composer's chip. Per conversation, not per app: a long refactor can sit
-  // on the high tier while a scratch chat next to it stays cheap. Born from
+  // on the high tier while a quick question beside it stays cheap. Born from
   // the page's `default_model` — or, for a conversation the page first meets
   // through a live run, from that run's tier. Nothing but the chip changes it
   // afterwards: a start is always older than the composer, so echoing one
   // back would undo a choice the user has already made for the next turn.
   engine_model : EngineModel
-  // Composer draft, kept per conversation so switching away (and back)
-  // neither loses the text nor sends it to the wrong session.
+  // Root-authored prompt snapshot for submission and delivery recovery. The
+  // live textarea value is component-local and is copied here atomically only
+  // when the user submits; a rejection may write recovered text back here.
   task : String
-  // Mention chips attached to the draft (`$` skills, `#` symbols), part of the
-  // draft and so likewise per conversation. Expanded into the prompt on send,
-  // then cleared with the text.
+  // Root-authored mention snapshot paired with `task`. Editor comments and
+  // recovery can add chips here; ordinary local chip edits stay in the
+  // component until submission.
   mentions : Array[Mention]
+  // Whether the component-local composer currently holds unsent writing.
+  // Only empty/non-empty transitions update this flag; the text itself stays
+  // outside the root Model. It keeps a fresh conversation reachable when the
+  // user switches away without putting every keystroke through root update.
+  composer_draft_present : Bool
   // Where this conversation's run stands; see `RunPhase`. Replaces the old
   // `running`/`active_run_id`/`status` trio, whose redundant encodings could
   // drift apart (running with no id was "starting" only by convention).
@@ -866,39 +859,10 @@ priv struct BufferedCommit {
 /// is about; detaching that project falls back to the chat.
 priv enum Screen {
   Chat
+  Codex
   Skills
   Settings
   WorkspaceSettings(channel~ : @interop.ChannelId, workspace~ : @common.Uri)
-} derive(Eq)
-
-///|
-/// Which trigger opened the composer's completion menu: `/` lists built-in
-/// commands that act on the conversation, `$` lists installed skills whose
-/// name is inserted into the prompt, `#` lists workspace symbols (fetched
-/// through the host's symbol search), and `@` lists files from the shared
-/// workspace index used by Ctrl+P.
-priv enum CompletionKind {
-  SlashCommands
-  SkillMentions
-  Symbols
-  Files
-} derive(Eq)
-
-///|
-/// One row of the composer completion menu.
-priv struct CompletionItem {
-  // The primary label shown in the row (e.g. "/compact" or "$review-pr").
-  label : String
-  // A short description shown next to the label.
-  detail : String
-  // For a slash command, the id its accepted action dispatches on; empty for
-  // skills. For a skill, `insert` carries the text dropped into the composer.
-  command : String
-  insert : String
-  // A symbol or file row's workspace-relative location. Symbols also carry
-  // their full one-based range; a file row deliberately leaves `range` empty.
-  path : String?
-  range : @common.Range?
 } derive(Eq)
 
 ///|
@@ -909,98 +873,7 @@ priv struct CompletionItem {
 /// for dedup. `range` keeps the full resolved range the envelope's
 /// `file:line` cannot carry, so a draft chip's jump still selects the exact
 /// span (`None` for a skill or an unplaced symbol).
-priv struct Mention {
-  ref_ : @mention_context.MentionRef
-  range : @common.Range?
-} derive(Eq)
-
-///|
-/// The composer's open completion menu: the trigger that opened it, the
-/// currently matching rows, which row is highlighted, and the exact draft text
-/// before the live token. Absent when the composer has no live trigger.
-/// `loading` marks a `#` query or workspace-file index still in flight, so an
-/// empty menu can distinguish "Searching…" from a settled empty provider.
-priv struct Completion {
-  kind : CompletionKind
-  menu : @composer.Menu[CompletionItem]
-} derive(Eq)
-
-///|
-/// The last workspace-symbol results, cached so the `#` menu can show them
-/// without refetching while the query is unchanged. `session` records which
-/// conversation they belong to, so switching either device or session
-/// refetches rather than showing another workspace's symbols; `root` fences a
-/// worktree or project transition inside that conversation; `query` is the
-/// trigger text they answer.
-priv struct SymbolCache {
-  owner : @interop.ConversationKey?
-  root : @common.Uri?
-  query : String
-  items : Array[CompletionItem]
-} derive(Eq)
-
-///|
-fn empty_symbol_cache() -> SymbolCache {
-  { owner: None, root: None, query: "", items: [] }
-}
-
-///|
-/// Which provider owns unified Quick Open. Files are the default provider; a
-/// leading `#` in the visible input selects workspace symbols.
-priv enum QuickOpenMode {
-  QuickOpenFiles
-  QuickOpenSymbols
-}
-
-///|
-/// One selectable row in the unified Quick Open. File rows open without a
-/// range; symbol rows retain the precise range returned by MoonIDE.
-priv enum QuickOpenItem {
-  QuickOpenFile(@pathx.Relative)
-  QuickOpenSymbol(WorkspaceSymbol)
-} derive(Eq)
-
-///|
-/// The shell's transient unified Quick Open. `value` is the exact text shown in
-/// the input, including the `#` provider prefix when symbols are active.
-/// Its owner fences results to one conversation; `generation` separates
-/// successive file and symbol queries even when their text is identical. The
-/// page-level counter lives on `Model`, so closing the palette cannot make an
-/// old reply current again.
-priv struct QuickOpen {
-  owner : @interop.ConversationKey
-  value : String
-  items : Array[QuickOpenItem]
-  selected : Int
-  phase : QuickOpenPhase
-  generation : Int
-} derive(Eq)
-
-///|
-/// File and symbol queries wait briefly while the user types. Ready deliberately
-/// includes an empty result; Failed is reserved for bridge/request failure.
-priv enum QuickOpenPhase {
-  QuickOpenDebouncing
-  QuickOpenLoading
-  QuickOpenReady
-  QuickOpenFailed
-} derive(Eq)
-
-///|
-/// Frontend half of VS Code's FileQueryCacheState. `active_key` remains usable
-/// while `loading_key` warms a replacement for the same root. A failed
-/// replacement therefore cannot evict the last good cache.
-priv struct FileQueryCacheState {
-  owner : @interop.ConversationKey?
-  root : @common.Uri?
-  active_key : String?
-  loading_key : String?
-} derive(Eq)
-
-///|
-fn empty_file_query_cache() -> FileQueryCacheState {
-  { owner: None, root: None, active_key: None, loading_key: None }
-}
+type Mention = @composer.Mention
 
 ///|
 /// The mooncakes.io skill catalog as the Skills page sees it. One enum, so
@@ -1018,18 +891,75 @@ priv enum SkillsCatalog {
 /// probing for the injected bridge, connected, or given up with a reason.
 priv enum BridgeState {
   Connecting
-  Connected(scratch_root~ : @common.Uri)
+  Connected
   BridgeLost(String)
 } derive(Eq)
 
 ///|
-/// The latest identity-bearing archive fact this connection observed for one
-/// session. Whole-list replies do not carry a revision and can predate that
-/// notification, so they are reconciled through this override until the next
-/// connection boundary starts a fresh authoritative list round.
-priv struct ArchiveOverride {
+/// The latest identity-bearing storage fact this connection observed for one
+/// conversation. Deletion is distinct from both lists: encoding all three
+/// states prevents a stale unversioned reply from resurrecting a deleted row.
+/// A later Started carrying the exact durable store is the creation fact that
+/// can supersede deletion without waiting for a reconnect.
+priv enum ArchiveDisposition {
+  ArchiveLive
+  ArchiveStored
+  ArchiveDeleted
+} derive(Eq)
+
+///|
+/// One durable archive identity. Session ids may repeat across project
+/// stores, so archive actions, notifications, and tombstones always retain
+/// the host-listed workspace beside the id.
+priv struct ArchiveRecordKey {
   session : String
-  archived : Bool
+  workspace : @common.Uri
+} derive(Eq)
+
+///|
+fn ArchiveRecordKey::matches(
+  self : ArchiveRecordKey,
+  item : @transcript.SessionListItem,
+) -> Bool {
+  item.id == self.session && item.workspace == self.workspace
+}
+
+///|
+/// Bind a host protocol workspace path to the channel that produced it. A
+/// blank or malformed path invalidates the notification: every durable
+/// record belongs to a workspace store, so a key without one names nothing.
+fn ArchiveRecordKey::from_protocol(
+  channel : @interop.ChannelId,
+  session : String,
+  workspace : String,
+) -> ArchiveRecordKey? {
+  guard @resource.of_path(channel, workspace) is Some(resource) else {
+    return None
+  }
+  Some({ session, workspace: resource })
+}
+
+///|
+/// Encode the selected store for a request only when its resource belongs to
+/// the channel that produced it.
+fn ArchiveRecordKey::workspace_payload(
+  self : ArchiveRecordKey,
+  channel : @interop.ChannelId,
+) -> String? {
+  if @resource.belongs_to(self.workspace, channel) {
+    Some(self.workspace.path)
+  } else {
+    None
+  }
+}
+
+///|
+/// Whole-list replies do not carry a revision and can predate a notification,
+/// so they are reconciled through this override until the next connection
+/// boundary starts a fresh authoritative list round.
+priv struct ArchiveOverride {
+  key : ArchiveRecordKey
+  disposition : ArchiveDisposition
 } derive(Eq)
 
 ///|
@@ -1093,8 +1023,10 @@ priv struct DeviceState {
   // conversations copy their launch mode from here; an absent row that has
   // not been fetched yet is the Local default.
   workspace_settings : Array[ProjectSettings]
-  // Where "New chat" lands. `None` is the default scratch store; a project
-  // placement always retains its validated absolute-path provenance.
+  // The project the user last selected — where "New chat" lands. `None`
+  // means nothing has been selected on this device yet, not that a chat has
+  // nowhere to go: see `target_project`. A placement always retains its
+  // validated absolute-path provenance.
   active_project : @common.Uri?
 } derive(Eq)
 
@@ -1121,6 +1053,18 @@ fn empty_device_state(channel : @interop.ChannelId) -> DeviceState {
     active_project: None,
   }
 }
+
+///|
+/// One active conversation replaced after it was archived. The root records
+/// every identity handoff so the composer can move all local entries that
+/// accumulate before its next subscription tick.
+type ComposerEntryReplacement = @composer.Replacement
+
+///|
+/// The owner key plus the archive-fact cursor at which its component entry
+/// was created. A reused session id can therefore name a new entry without
+/// intercepting commands that were already queued by the archived entry.
+type ComposerActionIdentity = @composer.Identity
 
 ///|
 priv struct Model {
@@ -1219,30 +1163,13 @@ priv struct Model {
   // view and root layout. The root owns the opaque state once so neither side
   // reports a second visibility copy back to the other.
   terminal : @terminal.State
-  // Whether the sidebar's "Chats" section (the default store's loose
-  // conversations) is folded down to its heading; clicking the heading flips
-  // it.
-  chats_collapsed : Bool
-  // Whether the sidebar's "Projects" section (the attached projects and their
-  // nested conversations) is folded down to its heading; clicking the heading
-  // flips it.
-  projects_collapsed : Bool
-  // Project folder rows fold independently inside the Projects section. The
-  // key includes the owning device because remote channels can expose the
-  // same filesystem spelling without referring to the same project.
-  collapsed_projects : Array[(@interop.ChannelId, @common.Uri)]
-  // Projects whose per-window chat preview was expanded through "Show more".
-  // The default absence keeps each open project to its five newest chats.
-  expanded_project_chats : Array[(@interop.ChannelId, @common.Uri)]
-  // The conversations whose sub-run transcripts are unfolded in the sidebar,
-  // as (device, session id) — session ids are only unique within a channel.
-  // Sidebar-only view state, held for the window's lifetime and never
-  // persisted; a conversation that launched no sub-run never appears here.
-  expanded_subruns : Array[(@interop.ChannelId, String)]
   // The archive-discard confirmation, staged when the host refused an
   // archive because the conversation's worktree holds uncommitted changes;
   // confirming retries the archive with force.
   archive_confirm : ArchiveConfirm?
+  // Permanent archived-chat deletion has its own explicit confirmation. It
+  // never shares the worktree-discard dialog because the data at risk differs.
+  archived_delete_confirm : ArchivedDeleteConfirm?
   // The conversation on screen; always present in `conversations` once the
   // startup session rotation lands.
   active_session : String
@@ -1266,10 +1193,6 @@ priv struct Model {
   conversations : Array[Conversation]
   // The in-app folder picker behind "Add a project"; None while closed.
   project_picker : ProjectPicker?
-  // The one open project-row "…" menu (settings, detach); None while
-  // closed. Its click-away dismissal is mounted only while open, like the
-  // launcher's.
-  project_menu : ProjectMenu?
   // A confirmed add waiting for its registry snapshot; None otherwise.
   pending_project_adoption : ProjectAdoption?
   // The Skills page: the registry catalog, the local library's contents,
@@ -1279,40 +1202,39 @@ priv struct Model {
   // and kept for the app run; the installed list refreshes on open and
   // after every successful action.
   screen : Screen
+  // Codex app-server has an independent durable thread/turn/item model. Keep
+  // its page state beside the screen selector instead of folding it into an
+  // OpenSeek Conversation, whose persistence and event protocol are different.
+  codex : @codex.State
   skills_catalog : SkillsCatalog
   installed_skills : Array[@transcript.InstalledSkillItem]
   skills_query : String
   skills_busy : Array[String]
   skills_notice : String
-  // The composer completion menu, open only while the active conversation's
-  // draft begins with a `/` or `$` trigger. Lives on the model rather than the
-  // conversation: it is transient UI for the on-screen composer, recomputed on
-  // every keystroke and dismissed on blur, send, or conversation switch.
-  completion : Completion?
-  // The last `#` symbol search's results, kept so the menu shows instantly
-  // while the query is unchanged. Recomputed on every keystroke and refetched
-  // when the query or conversation changes.
-  symbol_cache : SymbolCache
-  // Every draft edit advances this identity. Delayed symbol requests and their
-  // replies carry it so a newer keystroke, dismissal, or conversation switch
-  // cannot revive an obsolete completion.
-  completion_debounce : @composer.Debounce
+  // Advances only when navigation changes which composer is visible. Local
+  // component entries use it to dismiss an old completion menu while keeping
+  // each conversation's unsent draft; textarea edits never touch this field or
+  // any other part of the root Model.
+  composer_context_generation : Int
+  // Every archive rotation appends its identity handoff. Component-local draft
+  // text remains in the component; this ordered page-lifetime log keeps two
+  // rotations between subscription ticks from overwriting each other.
+  composer_entry_replacements : Array[ComposerEntryReplacement]
+  // Every newly observed archive appends its exact owner. The composer consumes
+  // this page-lifetime log in order, so a background session cannot regain an
+  // old component-local draft when the same session id is later unarchived.
+  composer_entry_retirements : Array[@interop.ConversationKey]
   // Cmd/Ctrl+P/T unified Quick Open in the native window and browser console.
   // It is global UI for the focused conversation, not durable conversation
-  // state. The monotonic counter fences symbol replies across close and reopen,
-  // while the optional state carries input, rows, and selection.
-  quick_open : QuickOpen?
-  quick_open_generation : Int
+  // state. Owned by the `quick_open` package: this shell only opens it, fences
+  // it against conversation changes, and opens the row it accepts.
+  quick_open : @quick_open.State
   // Every git probe's request number, minted here rather than per conversation
-  // for the same reason as `quick_open_generation`: a conversation archived and
-  // reopened is a *new* record, so a counter living on it restarts at zero and
-  // hands the old checkout's outstanding replies a number the new one accepts.
-  // Kept whole while the frontend runs, it can only ever be spent.
+  // because a conversation archived and reopened is a *new* record, so a
+  // counter living on it restarts at zero and hands the old checkout's
+  // outstanding replies a number the new one accepts. Kept whole while the
+  // frontend runs, it can only ever be spent.
   git_request_generation : Int
-  // Search-provider cache state survives closing the picker. Reopening starts
-  // a fresh cache in the background and continues using the previous key until
-  // the replacement succeeds, matching VS Code's AnythingQuickAccess state.
-  file_query_cache : FileQueryCacheState
   // The desktop topbar's app launcher. Installed apps belong to the native
   // host, not a conversation or workspace, so this catalog is probed once
   // and kept while the frontend runs.
@@ -1517,48 +1439,13 @@ priv enum Msg {
     api_key~ : String,
     custom_api_key~ : String
   )
-  TaskChanged(String)
-  // Start a symbol lookup only if the composer still has this exact delayed
-  // draft generation after its 150 ms pause.
-  CompletionDue(
-    owner~ : @interop.ConversationKey,
-    query~ : String,
-    generation~ : Int
-  )
-  // A truncated workspace snapshot answers common `@` queries immediately,
-  // then this delayed request ranks the same query against the Host's complete
-  // cached scan. Root and generation fence conversation moves and keystrokes.
-  FileCompletionDue(
-    owner~ : @interop.ConversationKey,
-    root~ : @common.Uri,
-    query~ : String,
-    generation~ : Int
-  )
-  FileCompletionLoaded(
-    owner~ : @interop.ConversationKey,
-    root~ : @common.Uri,
-    query~ : String,
-    generation~ : Int,
-    files~ : Array[@pathx.Relative]
-  )
-  FileCompletionFailed(
-    owner~ : @interop.ConversationKey,
-    root~ : @common.Uri,
-    query~ : String,
-    generation~ : Int
-  )
-  // Move the completion menu's highlight by a delta (−1 up, +1 down), wrapping
-  // at the ends. Ignored when the menu is closed.
-  CompletionMove(Int)
-  // Accept the highlighted completion: run the slash command or insert the
-  // skill mention into the composer.
-  CompletionAccept
-  // Accept a specific completion row by index, for a mouse click on the menu.
-  CompletionPick(Int)
-  // Close the completion menu without acting (Escape, or a click away).
-  CompletionDismiss
-  // Remove a mention chip from the active conversation's draft, by index.
-  RemoveMention(Int)
+  // Deliberate actions emitted by the component-local input composer. Raw
+  // keystrokes never enter this root message loop.
+  ComposerAction(@composer.Action)
+  // Codex renders a second instance of the same composer component. Keep its
+  // action route distinct so an identical thread/session-shaped id can never
+  // be mistaken for an OpenSeek conversation owned by the root store.
+  CodexComposerAction(@composer.Action)
   // Jump the editor side-panel to a mention chip's resolved location, by
   // index. A no-op for a chip with no `path` (a skill, or an unresolved
   // symbol).
@@ -1573,80 +1460,13 @@ priv enum Msg {
   // also carries its comment text, re-shown as an editor bubble over that
   // range.
   JumpToLocation(path~ : String, range~ : @common.Range?, annotation~ : String?)
-  // A `workspace_symbols` reply: owner, root, and query say which request it
-  // answers so an overtaken device/session/root switch or keystroke is dropped.
-  SymbolsLoaded(
-    owner~ : @interop.ConversationKey,
-    root~ : @common.Uri,
-    query~ : String,
-    generation~ : Int,
-    items~ : Array[WorkspaceSymbol]
-  )
-  // A failed search reads as "no symbols", so it carries no message to show —
-  // only the request identity needed to settle the right menu.
-  SymbolsFailed(
-    owner~ : @interop.ConversationKey,
-    root~ : @common.Uri,
-    query~ : String,
-    generation~ : Int
-  )
-  // Open unified Quick Open in the requested provider in either shell.
-  QuickOpenOpen(QuickOpenMode)
-  QuickOpenValueChanged(String)
-  // A delayed file query starts only if this owner/query/generation is still
-  // the palette's current state.
-  QuickOpenFilesDue(
-    owner~ : @interop.ConversationKey,
-    query~ : String,
-    generation~ : Int
-  )
-  QuickOpenFileCacheLoaded(
-    owner~ : @interop.ConversationKey,
-    cache_key~ : String,
-    generation~ : Int
-  )
-  QuickOpenFileCacheRequestFailed(
-    owner~ : @interop.ConversationKey,
-    cache_key~ : String,
-    generation~ : Int
-  )
-  QuickOpenFilesLoaded(
-    owner~ : @interop.ConversationKey,
-    cache_key~ : String,
-    query~ : String,
-    generation~ : Int,
-    files~ : Array[@pathx.Relative],
-    from_cache~ : Bool,
-    limit_hit~ : Bool
-  )
-  QuickOpenFilesRequestFailed(
-    owner~ : @interop.ConversationKey,
-    cache_key~ : String,
-    query~ : String,
-    generation~ : Int
-  )
-  // A delayed symbol query starts only if this owner/query/generation is still
-  // the palette's current state.
-  QuickOpenDue(
-    owner~ : @interop.ConversationKey,
-    query~ : String,
-    generation~ : Int
-  )
-  QuickOpenSymbolsLoaded(
-    owner~ : @interop.ConversationKey,
-    query~ : String,
-    generation~ : Int,
-    items~ : Array[WorkspaceSymbol]
-  )
-  QuickOpenSymbolsRequestFailed(
-    owner~ : @interop.ConversationKey,
-    query~ : String,
-    generation~ : Int
-  )
-  QuickOpenMove(Int)
-  QuickOpenSelect(Int)
-  QuickOpenPick(Int)
-  QuickOpenDismiss
+  // Open unified Quick Open in the requested provider in either shell. The
+  // shortcut is the shell's because its capture-phase listener owns every
+  // application chord; whether the palette may open at all is a shell question
+  // too, since a competing modal or a lost bridge already owns the screen.
+  QuickOpenOpen(@quick_open.Provider)
+  // Everything the open palette does to itself.
+  QuickOpen(@quick_open.Msg)
   // Select the active conversation's model and make it the default for new
   // conversations.
   EngineModelChanged(String)
@@ -1702,6 +1522,22 @@ priv enum Msg {
   // The host swapped the bundle; close the window so `main` can relaunch.
   UpdateApplied
   OpenSetup
+  // Open the app-server-backed Codex page and refresh its authoritative
+  // account, model, and thread catalogs.
+  OpenCodex
+  CodexNewThread
+  CodexNewThreadIn(String)
+  // The add button creates only a browser-local draft. The generated id owns
+  // Files and Terminal until the first prompt creates an app-server thread.
+  CodexDraftRotated(cwd~ : String, id~ : String)
+  CodexOpenThread(String)
+  CodexArchiveThread(String)
+  CodexUnarchiveThread(String)
+  // Codex owns every app-server-local transition; the root only wraps the
+  // package message so Rabbita still has one application Msg type.
+  // Every async Codex request and host event retains its source device. The
+  // root rejects it after focus moves instead of applying it to another host.
+  Codex(channel~ : @interop.ChannelId, @codex.Msg)
   ToggleSidebar
   // A Settings selection fixes the page to Light or Dark and persists it.
   ThemeChanged(String)
@@ -1711,20 +1547,6 @@ priv enum Msg {
   FontSizeChanged(String)
   // The window was resized; `width` decides the narrow (phone) layout.
   ViewportResized(width~ : Int)
-  // The sidebar's "Chats" heading was clicked — fold or unfold the section.
-  ToggleChatsSection
-  // The sidebar's "Projects" heading was clicked — fold or unfold the section.
-  ToggleProjectsSection
-  // A project folder row was clicked — fold or unfold only that project's
-  // nested chats without changing which project receives new conversations.
-  ToggleProjectSection(@interop.ChannelId, @common.Uri)
-  // The project's "Show more" row was clicked — reveal every remaining chat
-  // for that project for the rest of this window lifetime.
-  ShowMoreProjectChats(@interop.ChannelId, @common.Uri)
-  // A conversation row's disclosure was clicked — show or hide the sub-run
-  // transcripts folded under it. The row's own click still opens the session,
-  // so the two controls never fight over one gesture.
-  ToggleSubruns(@interop.ChannelId, String)
   SaveApiKey
   OpenSkills
   SkillsQueryChanged(String)
@@ -1753,7 +1575,7 @@ priv enum Msg {
   OpenArchivedSession(
     @interop.ChannelId,
     session~ : String,
-    workspace~ : @common.Uri?
+    workspace~ : @common.Uri
   )
   // The user clicked the system notification posted through Proton's
   // notification extension: jump to the conversation that owned that run.
@@ -1807,9 +1629,6 @@ priv enum Msg {
   // away — the directory and the sessions inside it stay, so re-adding
   // restores them.
   RemoveProject(@interop.ChannelId, @common.Uri)
-  // Open (or, clicked again, close) one project row's "…" menu.
-  ToggleProjectMenu(@interop.ChannelId, @common.Uri)
-  CloseProjectMenu
   // Show the per-workspace settings page for one device's project.
   OpenWorkspaceSettings(@interop.ChannelId, @common.Uri)
   // The workspace settings page's launch-mode select. Carries the raw
@@ -1821,8 +1640,8 @@ priv enum Msg {
   // Hard bound for that submodule checkout, in seconds. Update accepts only
   // the values rendered by the workspace settings select.
   WorkspaceSubmoduleTimeoutChosen(@interop.ChannelId, @common.Uri, String)
-  // Start a fresh conversation in a device's project (`None` = Scratch),
-  // selecting its explicit channel first if needed.
+  // Start a fresh conversation in a device's project, selecting its explicit
+  // channel first if needed. `None` leaves the device's own selection alone.
   NewChatIn(@interop.ChannelId, @common.Uri?)
   // Flip the composer's launch mode for a conversation that has not begun:
   // workspace root, or a fresh host-named worktree (its execution
@@ -1846,6 +1665,11 @@ priv enum Msg {
   ArchiveSession(@interop.ChannelId, String)
   // Restore an archived conversation into its device's live list.
   UnarchiveSession(@interop.ChannelId, String)
+  // Stage, confirm, or cancel permanent deletion of an archived conversation.
+  // The confirmation's display title comes from the archived record itself.
+  DeleteArchivedSession(@interop.ChannelId, ArchiveRecordKey)
+  ConfirmDeleteArchivedSession
+  CancelDeleteArchivedSession
   // The host's dark-mode preference changed. It updates the palette only while
   // no explicit Light/Dark choice has been saved.
   ColorSchemeChanged(Bool)
@@ -1931,11 +1755,10 @@ priv enum Msg {
   // measurer or the pane's ResizeObserver; drives view bounds/visibility.
   BrowserPaneMeasured(rect~ : @preview.Rect)
   // The file subsystem's own messages (tree, viewer, diagnostics,
-  // comments), routed to the `fileeditor` package's update. Two exceptions
-  // this update intercepts: `EditorCommentAdded` (the comment becomes a chip
-  // on the composer draft, which only the app model knows about) and
-  // `FileSelected` (which dock tab a tree click opens is the strip's
-  // business).
+  // comments), normally routed to the `fileeditor` package's update. The root
+  // intercepts messages that cross package ownership: comments become
+  // composer chips, file/navigation selections update the dock strip, and a
+  // `LanguageRequestFailed` uses the app-owned toast rail.
   FileEditor(@fileeditor.Msg)
   // Terminal UI, host notifications, and xterm callbacks share one root-owned
   // state machine.
@@ -1953,7 +1776,7 @@ priv enum Msg {
 /// `FromDevice(channel, ...)`; messages that back page-global or
 /// focused-scoped state stay on `Msg` itself.
 priv enum DeviceMsg {
-  BridgeReady(scratch_root~ : @common.Uri)
+  BridgeReady
   BridgeUnavailable(String)
   // The channel's WebSocket closed (or failed to open). The handler counts
   // the loss and schedules `ReconnectDue`, making the model's device list
@@ -2017,7 +1840,11 @@ priv enum DeviceMsg {
   // The host's identity-bearing `session.changed` broadcast. Archive changes
   // invalidate that exact live target immediately; both sidebar lists are
   // then re-read for their durable contents.
-  SessionsChanged(change~ : String, session~ : String, fresh_session~ : String?)
+  SessionsChanged(
+    change~ : String,
+    key~ : ArchiveRecordKey,
+    fresh_session~ : String?
+  )
   SessionLoaded(
     session~ : String,
     items~ : Array[@transcript.TranscriptItem],
@@ -2054,7 +1881,10 @@ priv enum DeviceMsg {
     // The commit's own store stamp, kept on the message so a turn dates
     // itself the moment it lands rather than only after the next reload.
     ts~ : Double?,
-    item~ : @protocol.SessionItem
+    item~ : @protocol.SessionItem,
+    // The durable store root the host read this commit from — the store
+    // half of the session's identity.
+    session_root~ : @common.Uri
   )
   // The host's `subrun.progress` broadcast: a running sub-run advanced. Not
   // durable and not lifecycle — the raw stream's brackets own the sub-run's
@@ -2143,7 +1973,19 @@ priv enum DeviceMsg {
     request_generation~ : Int,
     fresh_session~ : String
   )
+  // The successful delete reply names the identity it removed and a fresh
+  // send target, so it can tombstone and leave an active deleted record even
+  // when the broadcast arrives later.
+  ArchivedDeleted(
+    key~ : ArchiveRecordKey,
+    sessions~ : Array[String],
+    items~ : Array[@transcript.SessionListItem],
+    connection_generation~ : Int,
+    request_generation~ : Int,
+    fresh_session~ : String
+  )
   ArchiveFailed(String)
+  DeleteArchivedFailed(String)
   // A rebuild of a missing worktree failed. The canonical rows still arrive
   // as `worktree.changed`, so this only reports the refusal.
   WorktreeFailed(String)
@@ -2295,24 +2137,28 @@ priv enum DeviceMsg {
 }
 
 ///|
-/// A workspace registry token ("" = the default store) as a typed root.
-/// Registry and session JSON are input boundaries, so malformed non-empty
-/// spellings are rejected here before they enter frontend state.
+/// A conversation with nothing in it yet, in the project that owns it. The
+/// project is required because a conversation is where work happens: it
+/// names the store its record lives in and the directory every run, file,
+/// and terminal request resolves against. A caller whose session is bound to
+/// one of that project's worktrees narrows `workspace` afterwards, once the
+/// registry row that proves the binding is in hand.
 fn empty_conversation(
   channel : @interop.ChannelId,
   session_id : String,
-  project? : @common.Uri,
+  project : @common.Uri,
   model? : EngineModel = High,
 ) -> Conversation {
   {
     device: channel,
     session_id,
     record: LiveRecord,
-    workspace: Workspace::from_project(project),
+    workspace: Project(root=project),
     worktree_mode: false,
     engine_model: model,
     task: "",
     mentions: [],
+    composer_draft_present: false,
     run: NoRun(ended=None),
     last_run_id: None,
     last_terminal_sequence: 0,
@@ -2431,11 +2277,6 @@ fn initial_model() -> Model {
     right_panel_menu_open: false,
     right_panel_expanded: false,
     terminal: @terminal.State::empty(),
-    chats_collapsed: false,
-    projects_collapsed: false,
-    collapsed_projects: [],
-    expanded_project_chats: [],
-    expanded_subruns: [],
     active_session: "",
     loading_conversation: None,
     transcript_request_generation: 0,
@@ -2443,22 +2284,21 @@ fn initial_model() -> Model {
     submission_sequence: 0,
     conversations: [],
     project_picker: None,
-    project_menu: None,
     pending_project_adoption: None,
     archive_confirm: None,
+    archived_delete_confirm: None,
     screen: Chat,
+    codex: @codex.State(),
     skills_catalog: CatalogIdle,
     installed_skills: [],
     skills_query: "",
     skills_busy: [],
     skills_notice: "",
-    completion: None,
-    symbol_cache: empty_symbol_cache(),
-    completion_debounce: @composer.Debounce(),
-    quick_open: None,
-    quick_open_generation: 0,
+    composer_context_generation: 0,
+    composer_entry_replacements: [],
+    composer_entry_retirements: [],
+    quick_open: @quick_open.State::empty(),
     git_request_generation: 0,
-    file_query_cache: empty_file_query_cache(),
     launcher: { open: false, apps: AppsNotFetched },
     git_details_open: false,
     dock: @dock.State::empty(),
@@ -2532,6 +2372,19 @@ fn Model::focused_connection_generation(self : Model) -> Int {
 fn Model::with_active_project(self : Model, project : @common.Uri?) -> Model {
   guard self.focused_device() is Some(dev) else { return self }
   self.replace_device({ ..dev, active_project: project })
+}
+
+///|
+/// Where a new conversation lands on this device: the project last selected,
+/// or the first registered one when nothing has been selected yet — the
+/// state a freshly connected page is in, and the reason the app opens a chat
+/// instead of waiting for the user to pick a project first. `None` only when
+/// the device has no project at all, which is the onboarding state.
+fn DeviceState::target_project(self : DeviceState) -> @common.Uri? {
+  match self.active_project {
+    Some(project) => Some(project)
+    None => self.projects.get(0)
+  }
 }
 
 ///|
@@ -2679,16 +2532,18 @@ fn Model::display_status(self : Model) -> Status {
   match self.bridge_state() {
     Connecting => WaitingBridge
     BridgeLost(message) => Unavailable(message)
-    Connected(..) =>
-      match self.active().run {
-        NoRun(ended=None) => self.settings_status()
-        NoRun(ended=Some(RunFailed)) => Failed
-        NoRun(ended=Some(RunErrored)) => Errored
-        NoRun(ended=Some(RunFinished(outcome))) => Finished(outcome)
-        Starting(..) => Starting
-        Open(stage=Opened, ..) => Running
-        Open(stage=AtStep(step), ..) => Step(step)
-        Open(stage=Cancelling, ..) => Cancelling
+    // Onboarding has no conversation and therefore no run of its own; the
+    // settings-derived readiness is the whole of what can be reported.
+    Connected =>
+      match self.active_conversation().map(conv => conv.run) {
+        None | Some(NoRun(ended=None)) => self.settings_status()
+        Some(NoRun(ended=Some(RunFailed))) => Failed
+        Some(NoRun(ended=Some(RunErrored))) => Errored
+        Some(NoRun(ended=Some(RunFinished(outcome)))) => Finished(outcome)
+        Some(Starting(..)) => Starting
+        Some(Open(stage=Opened, ..)) => Running
+        Some(Open(stage=AtStep(step), ..)) => Step(step)
+        Some(Open(stage=Cancelling, ..)) => Cancelling
       }
   }
 }
@@ -2829,46 +2684,11 @@ fn Model::matched_settlement_frontier(
 }
 
 ///|
-/// Whether this conversation's folded sub-run transcripts are showing.
-fn Model::subruns_expanded(
-  self : Model,
-  channel : @interop.ChannelId,
-  session_id : String,
-) -> Bool {
-  self.expanded_subruns
-  .iter()
-  .any(entry => entry.0 == channel && entry.1 == session_id)
-}
-
-///|
-/// Whether one project's nested chats are folded to its folder row.
-fn Model::project_collapsed(
-  self : Model,
-  channel : @interop.ChannelId,
-  project : @common.Uri,
-) -> Bool {
-  self.collapsed_projects
-  .iter()
-  .any(entry => entry.0 == channel && entry.1 == project)
-}
-
-///|
-/// Whether one project has revealed the chats beyond its default preview.
-fn Model::project_chats_expanded(
-  self : Model,
-  channel : @interop.ChannelId,
-  project : @common.Uri,
-) -> Bool {
-  self.expanded_project_chats
-  .iter()
-  .any(entry => entry.0 == channel && entry.1 == project)
-}
-
-///|
 /// The registered project a session belongs to on `channel`: the sidebar list's
 /// grouping when the store knows the session, the live conversation's own
 /// placement otherwise (a fresh chat that has not reached the store yet).
-/// `None` = the default store.
+/// `None` when this page knows of neither — an id from a store it has not
+/// listed, which nothing here can place.
 fn Model::session_project(
   self : Model,
   channel : @interop.ChannelId,
@@ -2880,20 +2700,17 @@ fn Model::session_project(
   }
   for item in sessions {
     if item.id == session_id {
-      return item.workspace
+      return Some(item.workspace)
     }
   }
-  match self.find_conversation(channel, session_id) {
-    Some(conv) => conv.workspace.project()
-    None => None
-  }
+  self.find_conversation(channel, session_id).map(conv => conv.project())
 }
 
 ///|
 /// Resolve a host-reported durable session root back to a registered project.
-/// Project conversations live at `<project>/.openseek`;
-/// scratch conversations use the unrelated global root and therefore do not
-/// match anything here. The lexical helper normalizes Windows separators.
+/// Project conversations live at `<project>/.openseek`; a root outside every
+/// registered project matches nothing here. The lexical helper normalizes
+/// Windows separators.
 fn DeviceState::project_for_session_root(
   self : DeviceState,
   session_root : @common.Uri?,
@@ -2909,43 +2726,78 @@ fn DeviceState::project_for_session_root(
 }
 
 ///|
-/// The newest archive disposition this connection observed for `session`,
-/// if any. `true` means archived and `false` means live.
-fn DeviceState::archive_override(self : DeviceState, session : String) -> Bool? {
+/// Classify a broadcast durable store root into its owning project. Every
+/// store belongs to one: the registry names it when that mirror has already
+/// arrived, and the store layout (`<project>/.openseek`) names it until then,
+/// so the classification is correct even while the projects reply is in
+/// flight. `None` is a foreign writer with an unexpected layout: nothing
+/// here can say where that record lives, so the event carrying it is dropped
+/// rather than attached to a guessed directory.
+fn DeviceState::placement_for_store_root(
+  self : DeviceState,
+  root : @common.Uri,
+) -> @common.Uri? {
+  if self.project_for_session_root(Some(root)) is Some(project) {
+    return Some(project)
+  }
+  if @common.ext_uri.basename(root) == ".openseek" {
+    return Some(@common.ext_uri.dirname(root))
+  }
+  None
+}
+
+///|
+/// The newest archive disposition this connection observed for one exact
+/// store-qualified record.
+fn DeviceState::archive_override(
+  self : DeviceState,
+  key : ArchiveRecordKey,
+) -> ArchiveDisposition? {
   for fact in self.archive_overrides {
-    if fact.session == session {
-      return Some(fact.archived)
+    if fact.key == key {
+      return Some(fact.disposition)
     }
   }
   None
 }
 
 ///|
-/// One channel's archive disposition for `session` — the Model-level view
+/// One channel's archive disposition for `key` — the Model-level view
 /// of `DeviceState::archive_override`.
 fn Model::archive_override(
   self : Model,
   channel : @interop.ChannelId,
-  session : String,
-) -> Bool? {
+  key : ArchiveRecordKey,
+) -> ArchiveDisposition? {
   guard self.device_state(channel) is Some(dev) else { return None }
-  dev.archive_override(session)
+  dev.archive_override(key)
 }
 
 ///|
 /// Record one archive notification as the sole current override for its
-/// session on `channel`. This copy-on-write replacement is what lets every
+/// record on `channel`. This copy-on-write replacement is what lets every
 /// later list or commit handler consult the same monotonic fact.
 fn Model::with_archive_override(
   self : Model,
   channel : @interop.ChannelId,
-  session : String,
-  archived : Bool,
+  key : ArchiveRecordKey,
+  disposition : ArchiveDisposition,
 ) -> Model {
   guard self.device_state(channel) is Some(dev) else { return self }
-  let overrides = dev.archive_overrides.filter(item => item.session != session)
-  overrides.push({ session, archived })
-  self.replace_device({ ..dev, archive_overrides: overrides })
+  // Leaving the live state — stored or deleted — makes the composer's cached
+  // entry unaddressable, so the transition also records a retirement that
+  // expires stale composer actions for this owner.
+  let newly_retired = !(disposition is ArchiveLive) &&
+    dev.archive_override(key) is (None | Some(ArchiveLive))
+  let overrides = dev.archive_overrides.filter(item => item.key != key)
+  overrides.push({ key, disposition })
+  let model = self.replace_device({ ..dev, archive_overrides: overrides })
+  if !newly_retired {
+    return model
+  }
+  let composer_entry_retirements = model.composer_entry_retirements.copy()
+  composer_entry_retirements.push({ channel, session: key.session })
+  { ..model, composer_entry_retirements, }
 }
 
 ///|
@@ -3030,21 +2882,47 @@ fn remembered_with(
 }
 
 ///|
-/// The conversation on screen. Until the startup session rotation lands the
-/// model has no conversations yet; an empty placeholder keeps the view (and
-/// every handler reading the active conversation) total.
-fn Model::active(self : Model) -> Conversation {
-  if self.find_conversation(self.focused, self.active_session) is Some(conv) {
-    conv
-  } else {
-    empty_conversation(
-      self.focused,
-      self.active_session,
-      model=self
-        .remembered_model(self.focused, self.active_session)
-        .unwrap_or(self.default_model),
-    )
+/// The conversation on screen, when there is one. `None` is the state the app
+/// starts in and returns to whenever no project can hold a chat: the registry
+/// has not arrived yet, or every project was detached. A conversation is
+/// created only inside a project, so this is also the proof that the one on
+/// screen has a workspace — the view forks here, and the onboarding branch is
+/// the only place with no conversation to render.
+fn Model::active_conversation(self : Model) -> Conversation? {
+  self.find_conversation(self.focused, self.active_session)
+}
+
+///|
+/// Resolve a component action against the conversation that currently owns
+/// its local entry. A command queued just before archive replacement still
+/// names the archived owner, so that one identity maps to the fresh record.
+fn Model::conversation_for_composer_action(
+  self : Model,
+  identity : ComposerActionIdentity,
+) -> Conversation? {
+  let mut owner = identity.owner
+  // Follow only archive facts appended after this entry was born. An active
+  // archive has an exact handoff for its fact; a background archive has none,
+  // so its old actions expire instead of reaching a later unarchived record.
+  for
+    index in identity.archive_generation..<self.composer_entry_retirements.length() {
+    if self.composer_entry_retirements[index] == owner {
+      let archive_generation = index + 1
+      let mut transferred = false
+      for replacement in self.composer_entry_replacements {
+        if replacement.archived == owner &&
+          replacement.archive_generation == archive_generation {
+          owner = replacement.fresh
+          transferred = true
+          break
+        }
+      }
+      if !transferred {
+        return None
+      }
+    }
   }
+  self.find_conversation(owner.channel, owner.session)
 }
 
 ///|
@@ -3053,7 +2931,7 @@ fn Model::active(self : Model) -> Conversation {
 /// "New chat" sidebar row in its workspace's group, taking a real title at
 /// the first send.
 fn Model::composing_new_chat(self : Model) -> Bool {
-  let conv = self.active()
+  guard self.active_conversation() is Some(conv) else { return false }
   if conv.has_begun() {
     return false
   }
@@ -3138,15 +3016,21 @@ fn Model::conversation_by_pending_steer(
 }
 
 ///|
-/// Make `session_id` the on-screen conversation, creating its entry when it
-/// has none, and drop conversations with nothing worth keeping. Exact input
-/// ownership is retained even after lifecycle recovery closes a run: a late
-/// id-bearing receipt or rejection may still retract a warning or restore its
-/// draft. Abandoned "New chat" husks die here instead of accumulating.
+/// Make `session_id` the on-screen conversation, creating its entry in
+/// `project` when it has none, and drop conversations with nothing worth
+/// keeping. Exact input ownership is retained even after lifecycle recovery
+/// closes a run: a late id-bearing receipt or rejection may still retract a
+/// warning or restore its draft. Abandoned "New chat" husks die here instead
+/// of accumulating.
+///
+/// `project` places only a conversation this page has never held. One that
+/// already exists keeps the workspace it was placed in, which may be a
+/// worktree of that same project.
 fn Model::activate(
   self : Model,
   channel : @interop.ChannelId,
   session_id : String,
+  project : @common.Uri,
 ) -> Model {
   let conversations : Array[Conversation] = []
   let mut found = false
@@ -3164,6 +3048,7 @@ fn Model::activate(
       empty_conversation(
         channel,
         session_id,
+        project,
         model=self
           .remembered_model(channel, session_id)
           .unwrap_or(self.default_model),
@@ -3195,6 +3080,21 @@ fn Conversation::worth_keeping(self : Conversation) -> Bool {
 }
 
 ///|
+/// The registered project this conversation works in — its own root, or the
+/// project that owns its worktree. Naming the project is not the same as
+/// having a directory: a worktree's checkout is resolved from the registry
+/// by `Model::conversation_placement`, which is what path-based work waits on.
+fn Conversation::project(self : Conversation) -> @common.Uri {
+  self.workspace.project()
+}
+
+///|
+/// This conversation's worktree registry name, when it is bound to one.
+fn Conversation::worktree_name(self : Conversation) -> String? {
+  self.workspace.worktree_name()
+}
+
+///|
 /// An archived transcript is display-only. Update handlers use this method
 /// as the mutation gate; the read-only view is only its visible counterpart.
 fn Conversation::is_archived_read_only(self : Conversation) -> Bool {
@@ -3205,6 +3105,7 @@ fn Conversation::is_archived_read_only(self : Conversation) -> Bool {
 fn Conversation::draft_empty(self : Conversation) -> Bool {
   self.task.is_blank() &&
   self.mentions.is_empty() &&
+  !self.composer_draft_present &&
   !(self.goal_edit is Some(edit) && !edit.draft.is_blank()) &&
   self.goal_pending is None
 }

@@ -22,7 +22,7 @@ pub fn mount_cmds(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
 /// through `update`, so each one must enforce the same placement boundary as
 /// the message dispatcher.
 fn Ctx::placement_ready(self : Ctx) -> Bool {
-  !(self.checkout is None || self.checkout is Some(@interop.MissingWorktree(_)))
+  self.checkout_ready()
 }
 
 ///|
@@ -200,13 +200,13 @@ fn show_tab_impl(
           path,
           doc.name,
           range=None,
-          root=ctx.root,
+          root=ctx.root(),
         ),
       ])
     TabLoaded(content~, absolute~, ..) => {
       let show = show_file_in_viewer(
         ctx.owner,
-        root=ctx.root,
+        root=ctx.root(),
         doc.name,
         content,
         absolute~,
@@ -217,7 +217,7 @@ fn show_tab_impl(
       )
       if sync_diagnostics &&
         language_id(doc.name) == "moonbit" &&
-        ctx.root is Some(root) {
+        ctx.root() is Some(root) {
         @cmd.batch([
           show,
           request_diagnostics(
@@ -241,7 +241,7 @@ fn show_tab_impl(
         Some({ baseline: ReviewContent(content), .. }) =>
           show_file_in_viewer(
             ctx.owner,
-            root=ctx.root,
+            root=ctx.root(),
             doc.name,
             content,
             relative=path,
@@ -269,7 +269,7 @@ fn show_tab_impl(
         doc.name,
         review_generation?=doc.review_generation(),
         range=None,
-        root=ctx.root,
+        root=ctx.root(),
       ),
     ])
   } else {
@@ -345,7 +345,7 @@ fn show_activated_tab(
         doc.name,
         review_generation=working_generation,
         range=None,
-        root=ctx.root,
+        root=ctx.root(),
       ),
     ]),
     next_doc,
@@ -458,7 +458,7 @@ pub fn open_document(
     file_link_generation?=read_generation,
     range~,
     annotation?,
-    root=ctx.root,
+    root=ctx.root(),
   )
   // Gaining the first active tab reveals the breadcrumb row, and the narrow
   // drill-down closing the tree reveals a hidden-measured viewer — either
@@ -579,7 +579,7 @@ pub fn open_changed_document(
         source,
         generation,
         revision=state.changes_head,
-        workspace=ctx.workspace,
+        workspace=ctx.workspace(),
       ),
     )
   }
@@ -607,7 +607,7 @@ pub fn open_changed_document(
         name,
         review_generation=generation,
         range=None,
-        root=ctx.root,
+        root=ctx.root(),
       ),
     )
   } else {
@@ -765,7 +765,7 @@ fn reconcile_reviews_after_changes(
               path,
               doc.name,
               range=None,
-              root=ctx.root,
+              root=ctx.root(),
             ),
           )
         }
@@ -869,7 +869,7 @@ fn reconcile_reviews_after_changes(
               source,
               generation,
               revision=head,
-              workspace=ctx.workspace,
+              workspace=ctx.workspace(),
             ),
           )
         }
@@ -893,7 +893,7 @@ fn reconcile_reviews_after_changes(
               doc.name,
               review_generation=generation,
               range=None,
-              root=ctx.root,
+              root=ctx.root(),
             ),
           )
         } else if ctx.active_file == Some(path) {
@@ -911,7 +911,7 @@ fn reconcile_reviews_after_changes(
         ctx.owner,
         state.request_epoch,
         restat_paths,
-        root=ctx.root,
+        root=ctx.root(),
       ),
     )
   }
@@ -1271,11 +1271,11 @@ fn FileIndex::failed(self : FileIndex) -> (FileIndex, Bool) {
 /// while the panel is hidden, so empty directories and paths beyond the
 /// bounded result can still invalidate the cached path set.
 fn State::watched_paths(self : State, ctx : Ctx) -> WatchedPaths? {
-  guard ctx.root is Some(root) else { return None }
+  guard ctx.root() is Some(root) else { return None }
   let index_live = self.index is IndexLoading(..) ||
     self.index is IndexReady(..)
-  if ctx.checkout is None ||
-    ctx.checkout is Some(@interop.MissingWorktree(_)) ||
+  if ctx.placement is None ||
+    ctx.placement is Some(@interop.MissingWorktree(..)) ||
     (!ctx.panel_open && ctx.open_files.is_empty() && !index_live) ||
     ctx.owner.session.is_empty() {
     return None
@@ -1396,7 +1396,7 @@ pub fn State::retire_watcher(
 }
 
 ///|
-const ChangesPollDelayMilliseconds = 3000
+const ChangesPollIntervalMilliseconds = 3000
 
 ///|
 fn explorer_visible(state : State, ctx : Ctx) -> Bool {
@@ -1423,6 +1423,41 @@ fn changes_live(state : State, ctx : Ctx) -> Bool {
     }
   }
   false
+}
+
+///|
+/// Whether the fallback poll should be running: a settled repository inventory
+/// of the current conversation, addressing a checkout that still exists, that
+/// something on screen still consumes. This is the sole staleness rule for the
+/// poll — it decides both whether the interval exists and whether a tick
+/// already in the queue may still act.
+///
+/// A parked checkout keeps its snapshot and its open reviews on screen so the
+/// user can read them until Repair, which is exactly why availability has to be
+/// asked separately: a retained inventory is not permission to keep addressing
+/// the host that lost it.
+fn changes_poll_wanted(state : State, ctx : Ctx) -> Bool {
+  ctx.checkout_ready() &&
+  state.owner == Some(ctx.owner) &&
+  !ctx.owner.session.is_empty() &&
+  changes_live(state, ctx) &&
+  state.changes is ChangeListReady(repository=true, refreshing=false, ..)
+}
+
+///|
+/// The low-rate fallback refresh of the changed-file inventory, declared rather
+/// than chained. A request issued by a tick flips the snapshot to `refreshing`,
+/// which retires this subscription until the reply settles — so the interval
+/// restarts from each settle exactly as the old per-settle timer did, and a
+/// conversation switch, a hidden explorer, or a superseded request cannot leave
+/// a timer running behind the state that armed it.
+pub fn changes_poll_subscription(
+  state : State,
+  ctx : Ctx,
+  dispatch : @cmd.Emit[Msg],
+) -> @sub.Sub {
+  guard changes_poll_wanted(state, ctx) else { return @sub.none }
+  @sub.every(ChangesPollIntervalMilliseconds, dispatch(ChangesPollDue))
 }
 
 ///|
@@ -1528,23 +1563,11 @@ fn refresh_unknown_head_reviews(
         generation,
         background=true,
         revision=None,
-        workspace=ctx.workspace,
+        workspace=ctx.workspace(),
       ),
     )
   }
   (cmds, docs, review_generation, background_review_requests)
-}
-
-///|
-fn changes_poll_after_settle(
-  dispatch : @cmd.Emit[Msg],
-  owner : @interop.ConversationKey,
-  generation : Int,
-) -> @cmd.Cmd {
-  @cmd.delay(
-    dispatch(ChangesPollDue(owner~, generation~)),
-    ChangesPollDelayMilliseconds,
-  )
 }
 
 ///|
@@ -1588,7 +1611,12 @@ fn refresh_changes(
       } else {
         let generation = state.changes_generation + 1
         (
-          list_changes(dispatch, ctx.owner, generation, workspace=ctx.workspace),
+          list_changes(
+            dispatch,
+            ctx.owner,
+            generation,
+            workspace=ctx.workspace(),
+          ),
           {
             ..state,
             changes_generation: generation,
@@ -1604,7 +1632,7 @@ fn refresh_changes(
     ChangeListIdle | ChangeListFailed(_) => {
       let generation = state.changes_generation + 1
       (
-        list_changes(dispatch, ctx.owner, generation, workspace=ctx.workspace),
+        list_changes(dispatch, ctx.owner, generation, workspace=ctx.workspace()),
         {
           ..state,
           changes: ChangeListLoading(refresh_again=false),
@@ -1633,35 +1661,33 @@ pub fn sync(
   state : State,
   ctx : Ctx,
 ) -> (State, @cmd.Cmd) {
-  let checkout_ready = !(ctx.checkout is None ||
-    ctx.checkout is Some(@interop.MissingWorktree(_)))
+  let checkout_ready = ctx.checkout_ready()
   let owner_changed = state.owner != Some(ctx.owner)
   // The first owner claim has no previous conversation request to fence and
   // may happen after that owner's initial transcript click. Every later owner
   // replacement is a real navigation boundary.
   let owner_replaced = state.owner is Some(_) && owner_changed
   let same_owner = state.owner == Some(ctx.owner)
-  let workspace_changed = same_owner &&
-    state.placement_known &&
-    state.placement_workspace != ctx.workspace
-  let root_changed = same_owner &&
-    state.placement_known &&
-    state.placement_root != ctx.root
-  let resolved_checkout_changed = checkout_ready &&
-    same_owner &&
-    state.placement_known &&
-    !state.placement_parked &&
-    state.placement_checkout != ctx.checkout
-  let placement_identity_changed = workspace_changed ||
-    root_changed ||
-    resolved_checkout_changed
+  // Missing/unresolved are availability changes, not automatically a new
+  // checkout. A live managed worktree and its missing form share the same
+  // project/name identity so reviews and dock documents can park and recover;
+  // two live values with different roots still force a hard reroot. The
+  // comparison reads the retained identity, which a gap keeps (see
+  // `ReconciledPlacement`), so a conversation that comes back as a different
+  // checkout — another client unbound its worktree while this connection was
+  // down — reroots instead of restoring the previous checkout's documents.
+  let placement_identity_changed = same_owner &&
+    (match (state.placement.identity(), ctx.placement) {
+      (Some(previous), Some(current)) => !previous.same_identity(current)
+      (None, _) | (Some(_), None) => false
+    })
   let parking_existing_owner = !checkout_ready &&
     same_owner &&
     !placement_identity_changed &&
-    !state.placement_parked
+    !state.placement.is_parked()
   let restoring_existing_owner = checkout_ready &&
     same_owner &&
-    state.placement_parked &&
+    state.placement.is_parked() &&
     !placement_identity_changed
   // The Host file-search service retains complete snapshots by cache key.
   // Clear the outgoing key exactly when this panel retires its index; keeping
@@ -1672,7 +1698,8 @@ pub fn sync(
     ) &&
     !(state.index is IndexEmpty) &&
     state.owner is Some(old_owner) &&
-    state.placement_root is Some(old_root) {
+    state.placement.identity().bind(value => value.checkout_root())
+    is Some(old_root) {
     @files.Request(old_owner.channel, old_owner.session, Some(old_root)).retire()
   } else {
     @cmd.none
@@ -1753,7 +1780,7 @@ pub fn sync(
           path,
           basename(path),
           range=None,
-          root=ctx.root,
+          root=ctx.root(),
         ),
       )
     }
@@ -1761,10 +1788,9 @@ pub fn sync(
       {
         ..State::empty(),
         owner: Some(ctx.owner),
-        placement_known: true,
-        placement_workspace: ctx.workspace,
-        placement_root: ctx.root,
-        placement_checkout: ctx.checkout,
+        // A new incarnation must not inherit the identity it replaced, so this
+        // reconciles from `PlacementUnknown` rather than the outgoing value.
+        placement: PlacementUnknown.reconcile(ctx.placement),
         tree_open: state.tree_open,
         explorer_mode: state.explorer_mode,
         review_view_mode: state.review_view_mode,
@@ -1790,7 +1816,6 @@ pub fn sync(
         watch_generation: reroot_watch_generation,
         review_recovery_pending: false,
         background_review_requests: Map([]),
-        placement_parked: !checkout_ready,
         // Preserve the last host configuration long enough for `with_watch`
         // to retire or replace it on the way out.
         watching: if placement_identity_changed {
@@ -1843,11 +1868,7 @@ pub fn sync(
       review_generation,
       review_recovery_pending,
       background_review_requests: Map([]),
-      placement_parked: true,
-      placement_known: true,
-      placement_workspace: ctx.workspace,
-      placement_root: ctx.root,
-      placement_checkout: ctx.checkout,
+      placement: state.placement.reconcile(ctx.placement),
       request_epoch,
     }
     match state.changes {
@@ -1866,14 +1887,7 @@ pub fn sync(
       _ => state
     }
   } else {
-    {
-      ..state,
-      placement_parked: true,
-      placement_known: true,
-      placement_workspace: ctx.workspace,
-      placement_root: ctx.root,
-      placement_checkout: ctx.checkout,
-    }
+    { ..state, placement: state.placement.reconcile(ctx.placement) }
   }
   // `clear_viewer` ran when the checkout disappeared. Once the same owner is
   // repaired, put its active tab back on screen and revalidate every cached
@@ -1909,24 +1923,13 @@ pub fn sync(
         ..state,
         docs,
         review_generation,
-        placement_parked: false,
-        placement_known: true,
-        placement_workspace: ctx.workspace,
-        placement_root: ctx.root,
-        placement_checkout: ctx.checkout,
+        placement: state.placement.reconcile(ctx.placement),
       },
       restore_cmd,
     )
   } else if checkout_ready {
     (
-      {
-        ..state,
-        placement_parked: false,
-        placement_known: true,
-        placement_workspace: ctx.workspace,
-        placement_root: ctx.root,
-        placement_checkout: ctx.checkout,
-      },
+      { ..state, placement: state.placement.reconcile(ctx.placement) },
       @cmd.none,
     )
   } else {
@@ -1944,7 +1947,7 @@ pub fn sync(
       Some(watching) =>
         explorer_reopened ||
         watching.owner != ctx.owner ||
-        ctx.root != Some(watching.root) ||
+        ctx.root() != Some(watching.root) ||
         (
           explorer_is_visible &&
           !watching.directories.contains(@pathx.Relative::root())
@@ -1978,12 +1981,11 @@ pub fn sync(
   // A closed panel re-roots (above) and keeps the watcher placed, but the tree
   // itself can wait for the reopen. Unresolved placement takes the same early
   // exit even if the dock is visible: no host path may fall back to root.
-  guard checkout_ready && ctx.root is Some(_) && ctx.panel_open else {
+  guard checkout_ready && ctx.root() is Some(_) && ctx.panel_open else {
     return with_watch(dispatch, state, ctx, pending_cmd)
   }
-  // Load as soon as the conversation has a concrete root. Scratch roots come
-  // from the connected device; registered projects and known worktrees can
-  // likewise load before a run.
+  // Load as soon as the conversation has a concrete root: registered
+  // projects and known worktrees can both load before a run.
   if ctx.owner.session.is_empty() ||
     state.children.contains("") ||
     state.loading.contains("") {
@@ -2002,7 +2004,7 @@ pub fn sync(
         ctx.owner,
         ctx.request_epoch,
         @pathx.Relative::root(),
-        root=ctx.root,
+        root=ctx.root(),
       ),
     ]),
   )
@@ -2018,7 +2020,7 @@ pub fn update(
   // `sync` parks the old owner while placement is unresolved or its checkout
   // is missing. Refuse file-editor actions until there is a concrete root to
   // put into their absolute filesystem or root-relative language addresses.
-  if ctx.checkout is None || ctx.checkout is Some(@interop.MissingWorktree(_)) {
+  if !ctx.checkout_ready() {
     // The explorer selection is a local panel preference and remains useful
     // while placement is broken; only the host-backed refresh must wait.
     return match msg {
@@ -2110,18 +2112,9 @@ pub fn update(
             // lets the normal fallback poll catch index-only changes.
             refresh_changes(dispatch, selected, ctx)
           } else {
-            match selected.changes {
-              ChangeListReady(repository=true, refreshing=false, ..) =>
-                (
-                  changes_poll_after_settle(
-                    dispatch,
-                    ctx.owner,
-                    selected.changes_generation,
-                  ),
-                  selected,
-                )
-              _ => (@cmd.none, selected)
-            }
+            // A ready snapshot needs nothing here: selecting Changes makes the
+            // inventory live again, which is what declares the fallback poll.
+            (@cmd.none, selected)
           }
       }
     }
@@ -2143,7 +2136,7 @@ pub fn update(
               ctx.owner,
               ctx.request_epoch,
               path,
-              root=ctx.root,
+              root=ctx.root(),
             ),
             { ..selected, loading, error: None },
           )
@@ -2176,7 +2169,7 @@ pub fn update(
               ctx.owner,
               ctx.request_epoch,
               path,
-              root=ctx.root,
+              root=ctx.root(),
             ),
             { ..state, expanded, loading },
           )
@@ -2184,21 +2177,20 @@ pub fn update(
       }
     EnsureFileIndex =>
       if state.owner != Some(ctx.owner) ||
-        state.placement_parked ||
-        ctx.root is None ||
-        ctx.checkout is None ||
-        ctx.checkout is Some(MissingWorktree(_)) ||
+        state.placement.is_parked() ||
+        ctx.root() is None ||
+        !ctx.checkout_ready() ||
         ctx.owner.session.is_empty() {
         (@cmd.none, state)
       } else if state.index is IndexEmpty || state.index is IndexFailed {
         (
-          list_files(dispatch, ctx.owner, ctx.request_epoch, root=ctx.root),
+          list_files(dispatch, ctx.owner, ctx.request_epoch, root=ctx.root()),
           { ..state, index: IndexLoading(refresh_again=false) },
         )
       } else if state.index
         is IndexReady(files~, truncated~, refreshing=false, refresh_again=true) {
         (
-          list_files(dispatch, ctx.owner, ctx.request_epoch, root=ctx.root),
+          list_files(dispatch, ctx.owner, ctx.request_epoch, root=ctx.root()),
           {
             ..state,
             index: IndexReady(
@@ -2253,7 +2245,7 @@ pub fn update(
       } else {
         let (index, retry) = state.index.loaded(files, truncated)
         let cmd = if retry {
-          list_files(dispatch, owner, epoch, root=ctx.root)
+          list_files(dispatch, owner, epoch, root=ctx.root())
         } else {
           @cmd.none
         }
@@ -2265,17 +2257,18 @@ pub fn update(
       } else {
         let (index, retry) = state.index.failed()
         let cmd = if retry {
-          list_files(dispatch, owner, epoch, root=ctx.root)
+          list_files(dispatch, owner, epoch, root=ctx.root())
         } else {
           @cmd.none
         }
         (cmd, { ..state, index, })
       }
-    ChangesPollDue(owner~, generation~) =>
-      if state.owner == Some(owner) &&
-        state.changes_generation == generation &&
-        changes_live(state, ctx) &&
-        state.changes is ChangeListReady(repository=true, refreshing=false, ..) {
+    // The subscription is only re-derived when a message is processed, so a
+    // tick can still be waiting in the queue behind the message that retired
+    // it. Re-check the same predicate rather than latch a redundant follow-up
+    // onto a request that started meanwhile.
+    ChangesPollDue =>
+      if changes_poll_wanted(state, ctx) {
         refresh_changes(dispatch, state, ctx)
       } else {
         (@cmd.none, state)
@@ -2353,10 +2346,8 @@ pub fn update(
             dispatch,
             owner,
             next_generation,
-            workspace=ctx.workspace,
+            workspace=ctx.workspace(),
           )
-        } else if repository && changes_live(state, ctx) {
-          changes_poll_after_settle(dispatch, owner, generation)
         } else {
           @cmd.none
         }
@@ -2417,7 +2408,7 @@ pub fn update(
                   dispatch,
                   owner,
                   next_generation,
-                  workspace=ctx.workspace,
+                  workspace=ctx.workspace(),
                 ),
                 {
                   ..state,
@@ -2440,7 +2431,7 @@ pub fn update(
                   dispatch,
                   owner,
                   next_generation,
-                  workspace=ctx.workspace,
+                  workspace=ctx.workspace(),
                 ),
                 {
                   ..state,
@@ -2454,15 +2445,11 @@ pub fn update(
                 },
               )
             } else {
+              // Clearing the in-flight bit restores the settled shape that
+              // declares the fallback poll, so a transient bridge/Git error
+              // resumes polling while retaining the last usable snapshot.
               (
-                if repository && changes_live(state, ctx) {
-                  // The failed request consumed the previous timer. Keep the
-                  // low-frequency fallback alive after a transient bridge/Git
-                  // error while retaining the last usable snapshot.
-                  changes_poll_after_settle(dispatch, owner, generation)
-                } else {
-                  @cmd.none
-                },
+                @cmd.none,
                 {
                   ..state,
                   changes: ChangeListReady(
@@ -2660,7 +2647,7 @@ pub fn update(
             Content(content~, absolute~, ..) => {
               let show = show_file_in_viewer(
                 ctx.owner,
-                root=ctx.root,
+                root=ctx.root(),
                 name,
                 content,
                 absolute~,
@@ -2673,7 +2660,7 @@ pub fn update(
                 review_original?=doc.quick_diff_original(),
                 unified_diff?=next_doc.visible_unified_diff(),
               )
-              if language_id(name) == "moonbit" && ctx.root is Some(root) {
+              if language_id(name) == "moonbit" && ctx.root() is Some(root) {
                 @cmd.batch([
                   show,
                   request_diagnostics(
@@ -2721,7 +2708,7 @@ pub fn update(
         }
         let state = { ..state, reviewed_changes: [], index, watching }
         let index_cmd = if start_index_refresh {
-          list_files(dispatch, owner, state.request_epoch, root=ctx.root)
+          list_files(dispatch, owner, state.request_epoch, root=ctx.root())
         } else {
           @cmd.none
         }
@@ -2730,7 +2717,7 @@ pub fn update(
             dispatch,
             owner,
             state.request_epoch,
-            ctx.root,
+            ctx.root(),
             state.docs,
             ctx.active_file,
           ) {
@@ -2759,7 +2746,7 @@ pub fn update(
     FsChanged(root~, generation~, changes~) =>
       if state.owner is Some(owner) &&
         owner.channel == ctx.owner.channel &&
-        ctx.root == Some(root) &&
+        ctx.root() == Some(root) &&
         generation == ctx.watch_identity(state.watch_generation) {
         let reviewed_changes = match changes {
           Some(changes) =>
@@ -2834,7 +2821,7 @@ pub fn update(
               owner,
               state.request_epoch,
               stat_paths,
-              root=ctx.root,
+              root=ctx.root(),
             ),
           )
         } else if moonbit_changed &&
@@ -2842,7 +2829,7 @@ pub fn update(
             dispatch,
             owner,
             state.request_epoch,
-            ctx.root,
+            ctx.root(),
             state.docs,
             ctx.active_file,
           )
@@ -2863,7 +2850,7 @@ pub fn update(
               owner,
               state.request_epoch,
               directory,
-              root=ctx.root,
+              root=ctx.root(),
             ),
           )
         }
@@ -2879,7 +2866,7 @@ pub fn update(
         }
         if start_refresh {
           cmds.push(
-            list_files(dispatch, owner, state.request_epoch, root=ctx.root),
+            list_files(dispatch, owner, state.request_epoch, root=ctx.root()),
           )
         }
         let next = { ..state, loading, reviewed_changes, index }
@@ -2993,7 +2980,7 @@ pub fn update(
                   doc.name,
                   review_generation?=working_generation,
                   range=None,
-                  root=ctx.root,
+                  root=ctx.root(),
                 ),
               )
             } else {
@@ -3016,7 +3003,7 @@ pub fn update(
             dispatch,
             owner,
             state.request_epoch,
-            ctx.root,
+            ctx.root(),
             docs,
             ctx.active_file,
           )
@@ -3037,6 +3024,11 @@ pub fn update(
       } else {
         (@cmd.none, state)
       }
+    // The root app owns the toast rail and intercepts this message. If an
+    // embedding delegates it here instead, leaving panel state unchanged is
+    // safer than persisting an error that a later successful request cannot
+    // explicitly clear.
+    LanguageRequestFailed(..) => (@cmd.none, state)
     FileFailed(
       owner~,
       epoch~,
@@ -3110,7 +3102,7 @@ pub fn update(
     FileWatchFailed(channel~, root~, generation~, message~) =>
       if state.owner is Some(owner) &&
         owner.channel == channel &&
-        ctx.root == Some(root) &&
+        ctx.root() == Some(root) &&
         generation == ctx.watch_identity(state.watch_generation) {
         // The Host reports request-time activation failures through the
         // `fs.watch` reply and reserves this event for a watcher that stopped
@@ -3121,7 +3113,7 @@ pub fn update(
         // an observation gap even though it remains useful for reads.
         let (index, start_index_refresh) = state.index.invalidate()
         let cmd = if start_index_refresh {
-          list_files(dispatch, owner, state.request_epoch, root=ctx.root)
+          list_files(dispatch, owner, state.request_epoch, root=ctx.root())
         } else {
           @cmd.none
         }
@@ -3153,9 +3145,9 @@ fn test_ctx() -> Ctx {
     owner: { channel: @interop.ChannelId::Local, session: "desktop-test" },
     request_epoch: 0,
     watch_namespace: "test-page",
-    root: @resource.of_path(@interop.ChannelId::Local, "/work"),
-    workspace: None,
-    checkout: Some(@interop.WorkspaceRoot),
+    placement: @resource.of_path(@interop.ChannelId::Local, "/work").map(root => {
+      @interop.WorkspaceRoot(root~)
+    }),
     dark_mode: false,
     tree_layout: BottomPanel,
     narrow: false,
@@ -3167,7 +3159,7 @@ fn test_ctx() -> Ctx {
 
 ///|
 fn Ctx::test_root(self : Ctx) -> @common.Uri raise {
-  guard self.root is Some(root) else {
+  guard self.root() is Some(root) else {
     fail("test context must carry a concrete root")
   }
   root
@@ -3182,14 +3174,26 @@ fn Ctx::test_resource(self : Ctx, path : String) -> @common.Uri raise {
 }
 
 ///|
+/// Put a test context in a live managed worktree whose project and checkout
+/// share the fixture root. Tests that park it as missing then change only
+/// availability, matching the production registry transition.
+fn Ctx::test_worktree(self : Ctx, name : String) -> Ctx raise {
+  let root = self.test_root()
+  { ..self, placement: Some(@interop.Worktree(project=root, name~, root~)) }
+}
+
+///|
 fn owned_state() -> State {
+  owned_state_at(test_ctx())
+}
+
+///|
+/// A state the shared test owner has already reconciled against `ctx`.
+fn owned_state_at(ctx : Ctx) -> State {
   {
     ..State::empty(),
     owner: Some(test_ctx().owner),
-    placement_known: true,
-    placement_workspace: test_ctx().workspace,
-    placement_root: test_ctx().root,
-    placement_checkout: test_ctx().checkout,
+    placement: PlacementUnknown.reconcile(ctx.placement),
     explorer_was_visible: true,
   }
 }
@@ -3460,6 +3464,20 @@ test "only structural watcher events change the file index path set" {
       new=Relative("src/visible.js"),
     ).changes_file_list(),
   )
+}
+
+///|
+test "language request failures remain a pure no-op below the root toast owner" {
+  let emit = test_emit()
+  let state = owned_state()
+  let msg = LanguageRequestFailed(
+    owner=test_ctx().owner,
+    message="definition failed",
+  )
+  let (_, first) = update(emit, msg, state, test_ctx())
+  let (_, second) = update(emit, msg, state, test_ctx())
+  assert_true(first == state)
+  assert_true(second == state)
 }
 
 ///|
@@ -4282,6 +4300,18 @@ test "FileLoaded settles content into its document, active or not" {
     ctx,
   )
   assert_true(old_listing == epoch_state)
+  let (_, old_index) = update(
+    emit,
+    FilesIndexed(
+      owner=test_ctx().owner,
+      epoch=1,
+      files=[Relative("stale.mbt")],
+      truncated=false,
+    ),
+    epoch_state,
+    ctx,
+  )
+  assert_true(old_index == epoch_state)
   let (_, old_watch_failure) = update(
     emit,
     FileWatchFailed(
@@ -4417,9 +4447,7 @@ test "a resolved placement change reroots documents and fences old replies" {
   }
   let state = {
     ..owned_state(),
-    placement_workspace: Some(old_workspace),
-    placement_root: Some(old_workspace),
-    placement_checkout: Some(@interop.WorkspaceRoot),
+    placement: PlacementLive(@interop.WorkspaceRoot(root=old_workspace)),
     changes: ChangeListReady(
       repository=true,
       files=[test_modified_change(path)],
@@ -4451,9 +4479,13 @@ test "a resolved placement change reroots documents and fences old replies" {
   }
   let worktree_ctx : Ctx = {
     ..test_ctx(),
-    root: Some(test_ctx().test_resource("/project-a/.worktrees/wt-1")),
-    workspace: Some(old_workspace),
-    checkout: Some(@interop.Worktree(name="wt-1")),
+    placement: Some(
+      @interop.Worktree(
+        project=old_workspace,
+        name="wt-1",
+        root=test_ctx().test_resource("/project-a/.worktrees/wt-1"),
+      ),
+    ),
     open_files: [path],
     active_file: Some(path),
   }
@@ -4461,8 +4493,13 @@ test "a resolved placement change reroots documents and fences old replies" {
   assert_eq(moved.request_epoch, state.request_epoch + 1)
   assert_eq(moved.changes_generation, state.changes_generation + 1)
   assert_eq(moved.file_link_generation, state.file_link_generation + 1)
-  assert_eq(moved.placement_workspace, Some(old_workspace))
-  assert_true(moved.placement_checkout is Some(@interop.Worktree(name="wt-1")))
+  assert_true(
+    moved.placement.identity() is Some(@interop.Worktree(name="wt-1", ..)),
+  )
+  assert_eq(
+    moved.placement.identity().bind(value => value.project_root()),
+    Some(old_workspace),
+  )
   assert_true(
     moved.docs.get(path)
     is Some({ state: TabLoading, review: None, stale: false, .. }),
@@ -4526,14 +4563,17 @@ test "a resolved placement change reroots documents and fences old replies" {
   }
   let (reassigned, _) = sync(emit, state, {
     ..worktree_ctx,
-    root: Some(new_workspace),
-    workspace: Some(new_workspace),
-    checkout: Some(@interop.WorkspaceRoot),
+    placement: Some(@interop.WorkspaceRoot(root=new_workspace)),
   })
   assert_eq(reassigned.request_epoch, state.request_epoch + 1)
   assert_eq(reassigned.file_link_generation, state.file_link_generation + 1)
-  assert_eq(reassigned.placement_workspace, Some(new_workspace))
-  assert_true(reassigned.placement_checkout is Some(@interop.WorkspaceRoot))
+  assert_true(
+    reassigned.placement.identity() is Some(@interop.WorkspaceRoot(..)),
+  )
+  assert_eq(
+    reassigned.placement.identity().bind(value => value.checkout_root()),
+    Some(new_workspace),
+  )
   assert_true(
     reassigned.docs.get(path)
     is Some({ state: TabLoading, review: None, stale: false, .. }),
@@ -4543,7 +4583,7 @@ test "a resolved placement change reroots documents and fences old replies" {
 ///|
 test "a missing checkout parks files and refuses editor actions until repair" {
   let emit = test_emit()
-  let present = test_ctx()
+  let present = test_ctx().test_worktree("wt")
   let docs : Map[@pathx.Relative, Doc] = Map([])
   docs[Relative("a.mbt")] = loaded_doc("a.mbt")
   docs[Relative("b.mbt")] = {
@@ -4558,7 +4598,7 @@ test "a missing checkout parks files and refuses editor actions until repair" {
     stale: true,
   }
   let state = {
-    ..owned_state(),
+    ..owned_state_at(present),
     docs,
     review_generation: 4,
     index: IndexReady(
@@ -4577,7 +4617,9 @@ test "a missing checkout parks files and refuses editor actions until repair" {
   }
   let missing : Ctx = {
     ..present,
-    checkout: Some(@interop.MissingWorktree(name="wt")),
+    placement: Some(
+      @interop.MissingWorktree(project=present.test_root(), name="wt"),
+    ),
     open_files: [Relative("a.mbt"), Relative("b.mbt")],
     active_file: Some(Relative("a.mbt")),
   }
@@ -4589,7 +4631,7 @@ test "a missing checkout parks files and refuses editor actions until repair" {
   assert_true(parked.children.is_empty())
   assert_true(parked.index is IndexEmpty)
   assert_true(parked.watching is None)
-  assert_true(parked.placement_parked)
+  assert_true(parked.placement.is_parked())
   assert_eq(parked.request_epoch, state.request_epoch + 1)
   let (_, refused_index) = update(emit, EnsureFileIndex, parked, missing)
   assert_true(refused_index == parked)
@@ -4663,7 +4705,7 @@ test "a missing checkout parks files and refuses editor actions until repair" {
     restored.docs.get(Relative("a.mbt"))
     is Some({ state: TabLoaded(..), stale: true, .. }),
   )
-  assert_false(restored.placement_parked)
+  assert_false(restored.placement.is_parked())
   assert_eq(restored.request_epoch, parked.request_epoch)
 }
 
@@ -4689,10 +4731,13 @@ test "opening after a hidden checkout repair restores a stale reviewed tab" {
     open_files: [path],
     active_file: Some(path),
   }
-  let state = { ..owned_state(), docs, review_generation: 4 }
+  let present = present.test_worktree("wt")
+  let state = { ..owned_state_at(present), docs, review_generation: 4 }
   let missing : Ctx = {
     ..present,
-    checkout: Some(@interop.MissingWorktree(name="wt")),
+    placement: Some(
+      @interop.MissingWorktree(project=present.test_root(), name="wt"),
+    ),
   }
   let (parked, _) = sync(emit, state, missing)
   let (restored, _) = sync(emit, parked, present)
@@ -4714,11 +4759,97 @@ test "opening after a hidden checkout repair restores a stale reviewed tab" {
 }
 
 ///|
+test "an unresolved gap retains identity so same-checkout recovery restores" {
+  let emit = test_emit()
+  let path = @pathx.Relative("reviewed.mbt")
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[path] = {
+    ..loaded_doc("reviewed.mbt"),
+    review: Some({
+      generation: 4,
+      working_generation: 4,
+      baseline: ReviewContent("before\n"),
+      view_mode: ReviewSource,
+      selected: test_modified_change(path),
+    }),
+  }
+  let present : Ctx = {
+    ..test_ctx(),
+    panel_open: false,
+    open_files: [path],
+    active_file: Some(path),
+  }
+  let present = present.test_worktree("wt")
+  let state = { ..owned_state_at(present), docs, review_generation: 4 }
+  // BridgeReady clears the registry: the projection is unresolved, not moved.
+  let unresolved : Ctx = { ..present, placement: None }
+  let (parked, _) = sync(emit, state, unresolved)
+  // The gap must not erase the last known identity.
+  assert_true(
+    parked.placement
+    is PlacementParked(last_known=Some(@interop.Worktree(name="wt", ..))),
+  )
+  // The refreshed registry reports the same worktree: an availability change,
+  // so the review survives for revalidation instead of a hard reroot.
+  let (restored, _) = sync(emit, parked, present)
+  assert_false(restored.placement.is_parked())
+  assert_eq(restored.request_epoch, parked.request_epoch)
+  assert_true(
+    restored.docs.get(path)
+    is Some({ review: Some({ working_generation: 4, .. }), stale: true, .. }),
+  )
+}
+
+///|
+test "recovery from an unresolved gap into another checkout reroots" {
+  let emit = test_emit()
+  let path = @pathx.Relative("reviewed.mbt")
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[path] = {
+    ..loaded_doc("reviewed.mbt"),
+    review: Some({
+      generation: 4,
+      working_generation: 4,
+      baseline: ReviewContent("before\n"),
+      view_mode: ReviewSource,
+      selected: test_modified_change(path),
+    }),
+  }
+  let present : Ctx = {
+    ..test_ctx(),
+    open_files: [path],
+    active_file: Some(path),
+  }
+  let present = present.test_worktree("wt")
+  let state = { ..owned_state_at(present), docs, review_generation: 4 }
+  let (parked, _) = sync(emit, state, { ..present, placement: None })
+  assert_true(
+    parked.placement
+    is PlacementParked(last_known=Some(@interop.Worktree(name="wt", ..))),
+  )
+  // Another client unbound the worktree during the gap; the conversation now
+  // resolves to the project's main checkout. The retained identity exposes
+  // the move, so the old checkout's documents and baselines must not be
+  // restored against files read from the new root.
+  let recovered : Ctx = {
+    ..present,
+    placement: Some(@interop.WorkspaceRoot(root=present.test_root())),
+  }
+  let (rerooted, _) = sync(emit, parked, recovered)
+  assert_true(rerooted.placement is PlacementLive(@interop.WorkspaceRoot(..)))
+  assert_eq(rerooted.request_epoch, parked.request_epoch + 1)
+  assert_true(
+    rerooted.docs.get(path)
+    is Some({ state: TabLoading, review: None, stale: false, .. }),
+  )
+}
+
+///|
 test "a missing checkout settles an in-flight Changes request for retry" {
   let emit = test_emit()
-  let present = test_ctx()
+  let present = test_ctx().test_worktree("wt")
   let state = {
-    ..owned_state(),
+    ..owned_state_at(present),
     explorer_mode: ExplorerChanges,
     changes: ChangeListLoading(refresh_again=true),
     changes_generation: 1,
@@ -4732,7 +4863,9 @@ test "a missing checkout settles an in-flight Changes request for retry" {
   }
   let missing : Ctx = {
     ..present,
-    checkout: Some(@interop.MissingWorktree(name="wt")),
+    placement: Some(
+      @interop.MissingWorktree(project=present.test_root(), name="wt"),
+    ),
   }
   let (parked, _) = sync(emit, state, missing)
   assert_true(parked.changes is ChangeListIdle)
@@ -4761,7 +4894,7 @@ test "a missing checkout settles an in-flight Changes request for retry" {
 ///|
 test "checkout recovery restarts a review whose paired replies were parked" {
   let emit = test_emit()
-  let present = test_ctx()
+  let present = test_ctx().test_worktree("wt")
   let path = @pathx.Relative("reviewed.mbt")
   let change : ChangedFile = {
     path,
@@ -4784,7 +4917,7 @@ test "checkout recovery restarts a review whose paired replies were parked" {
     stale: false,
   }
   let state = {
-    ..owned_state(),
+    ..owned_state_at(present),
     changes: ChangeListReady(
       repository=true,
       files=[change],
@@ -4806,7 +4939,9 @@ test "checkout recovery restarts a review whose paired replies were parked" {
   }
   let missing : Ctx = {
     ..present,
-    checkout: Some(@interop.MissingWorktree(name="wt")),
+    placement: Some(
+      @interop.MissingWorktree(project=present.test_root(), name="wt"),
+    ),
     open_files: [path],
     active_file: Some(path),
   }
@@ -4815,7 +4950,7 @@ test "checkout recovery restarts a review whose paired replies were parked" {
     parked.changes is ChangeListReady(refreshing=false, refresh_again=false, ..),
   )
   assert_true(parked.review_recovery_pending)
-  assert_true(parked.placement_parked)
+  assert_true(parked.placement.is_parked())
   assert_eq(parked.request_epoch, state.request_epoch + 1)
   assert_eq(parked.review_generation, 4)
   let (restored, _) = sync(emit, parked, {
@@ -4829,12 +4964,12 @@ test "checkout recovery restarts a review whose paired replies were parked" {
   )
   assert_true(restored.changes_generation == 3)
   assert_true(restored.review_recovery_pending)
-  assert_false(restored.placement_parked)
+  assert_false(restored.placement.is_parked())
   assert_eq(restored.request_epoch, parked.request_epoch)
   // A second disappearance before the recovery snapshot settles is still a
   // fresh placement boundary: pending review recovery is not the parked flag.
   let (parked_again, _) = sync(emit, restored, missing)
-  assert_true(parked_again.placement_parked)
+  assert_true(parked_again.placement.is_parked())
   assert_eq(parked_again.request_epoch, restored.request_epoch + 1)
   let (_, restarted) = update(
     emit,
@@ -4865,7 +5000,7 @@ test "checkout recovery restarts a review whose paired replies were parked" {
 ///|
 test "hidden checkout recovery retries failed Changes once before parking" {
   let emit = test_emit()
-  let present = test_ctx()
+  let present = test_ctx().test_worktree("wt")
   let path = @pathx.Relative("reviewed.mbt")
   let change : ChangedFile = {
     path,
@@ -4888,7 +5023,7 @@ test "hidden checkout recovery retries failed Changes once before parking" {
     stale: false,
   }
   let state = {
-    ..owned_state(),
+    ..owned_state_at(present),
     tree_open: false,
     changes: ChangeListFailed("transient Git failure"),
     changes_generation: 1,
@@ -4899,7 +5034,9 @@ test "hidden checkout recovery retries failed Changes once before parking" {
   }
   let missing : Ctx = {
     ..present,
-    checkout: Some(@interop.MissingWorktree(name="wt")),
+    placement: Some(
+      @interop.MissingWorktree(project=present.test_root(), name="wt"),
+    ),
     open_files: [path],
     active_file: Some(path),
   }
@@ -5027,7 +5164,7 @@ test "an unresolved placement parks files and refuses editor actions" {
   let unresolved : Ctx = {
     ..present,
     owner: { ..present.owner, session: "" },
-    checkout: None,
+    placement: None,
     open_files: [],
     active_file: None,
   }
@@ -6122,12 +6259,7 @@ test "legacy Changes replies without HEAD refresh baseline-bearing reviews" {
   // that request's generation live rather than launch a replacement that
   // would fence the first reply forever.
   let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
-  let (_, polling) = update(
-    test_emit(),
-    ChangesPollDue(owner=test_ctx().owner, generation=1),
-    settled,
-    ctx,
-  )
+  let (_, polling) = update(test_emit(), ChangesPollDue, settled, ctx)
   assert_true(polling.changes_generation == 2)
   let (_, coalesced) = update(
     test_emit(),
@@ -6528,43 +6660,185 @@ test "only a visible settled Changes snapshot accepts its polling fallback" {
     ),
     changes_generation: 4,
   }
-  let (_, refreshing) = update(
-    emit,
-    ChangesPollDue(owner=test_ctx().owner, generation=4),
-    state,
-    test_ctx(),
-  )
+  let (_, refreshing) = update(emit, ChangesPollDue, state, test_ctx())
   assert_true(refreshing.changes_generation == 5)
   assert_true(refreshing.changes is ChangeListReady(refreshing=true, ..))
-  let (_, stale) = update(
-    emit,
-    ChangesPollDue(owner=test_ctx().owner, generation=4),
-    refreshing,
-    test_ctx(),
-  )
+  let (_, stale) = update(emit, ChangesPollDue, refreshing, test_ctx())
   assert_true(stale == refreshing)
-  let (_, hidden) = update(
-    emit,
-    ChangesPollDue(owner=test_ctx().owner, generation=4),
-    state,
-    { ..test_ctx(), panel_open: false },
-  )
+  let (_, hidden) = update(emit, ChangesPollDue, state, {
+    ..test_ctx(),
+    panel_open: false,
+  })
   assert_true(hidden == state)
   let (_, hidden_tree) = update(
     emit,
-    ChangesPollDue(owner=test_ctx().owner, generation=4),
+    ChangesPollDue,
     { ..state, tree_open: false },
     { ..test_ctx(), active_file: Some(Relative("open.mbt")) },
   )
   assert_true(hidden_tree == { ..state, tree_open: false })
   let (_, files_mode) = update(
     emit,
-    ChangesPollDue(owner=test_ctx().owner, generation=4),
+    ChangesPollDue,
     { ..state, explorer_mode: ExplorerFiles },
     test_ctx(),
   )
   assert_true(files_mode.explorer_mode is ExplorerFiles)
   assert_true(files_mode.changes_generation == 4)
+}
+
+///|
+test "the fallback poll is declared only for a settled live inventory" {
+  let ready = {
+    ..owned_state(),
+    explorer_mode: ExplorerChanges,
+    changes: ChangeListReady(
+      repository=true,
+      files=[],
+      refreshing=false,
+      refresh_again=false,
+    ),
+  }
+  assert_true(changes_poll_wanted(ready, test_ctx()))
+  // A request already in flight owns the next refresh. Retiring the interval
+  // here is what makes it restart from that reply instead of from a fixed
+  // wall-clock cadence running underneath it.
+  assert_false(
+    changes_poll_wanted(
+      {
+        ..ready,
+        changes: ChangeListReady(
+          repository=true,
+          files=[],
+          refreshing=true,
+          refresh_again=false,
+        ),
+      },
+      test_ctx(),
+    ),
+  )
+  // Outside a repository, and before an inventory exists, there is nothing to
+  // poll for.
+  assert_false(
+    changes_poll_wanted(
+      {
+        ..ready,
+        changes: ChangeListReady(
+          repository=false,
+          files=[],
+          refreshing=false,
+          refresh_again=false,
+        ),
+      },
+      test_ctx(),
+    ),
+  )
+  assert_false(
+    changes_poll_wanted({ ..ready, changes: ChangeListIdle }, test_ctx()),
+  )
+  // No consumer on screen: another explorer mode, a closed panel, or a panel
+  // the conversation switch has not handed over yet.
+  assert_false(
+    changes_poll_wanted({ ..ready, explorer_mode: ExplorerFiles }, test_ctx()),
+  )
+  assert_false(changes_poll_wanted(ready, { ..test_ctx(), panel_open: false }))
+  assert_false(changes_poll_wanted({ ..ready, owner: None }, test_ctx()))
+  // An open changed-file review consumes the inventory even off-screen, so it
+  // keeps the fallback alive on its own.
+  let path = @pathx.Relative("src/reviewed.mbt")
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[path] = {
+    ..loaded_doc(path.0),
+    review: Some({
+      generation: 2,
+      working_generation: 2,
+      baseline: ReviewContent("old HEAD"),
+      view_mode: ReviewSource,
+      selected: test_modified_change(path),
+    }),
+  }
+  assert_true(
+    changes_poll_wanted({ ..ready, docs, }, {
+      ..test_ctx(),
+      panel_open: false,
+      open_files: [path],
+      active_file: Some(path),
+    }),
+  )
+}
+
+///|
+test "a parked checkout stops the fallback poll until repair" {
+  let emit = test_emit()
+  let present = test_ctx().test_worktree("wt")
+  let path = @pathx.Relative("reviewed.mbt")
+  let change = test_modified_change(path)
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[path] = {
+    ..loaded_doc(path.0),
+    review: Some({
+      generation: 3,
+      working_generation: 3,
+      baseline: ReviewContent("old HEAD"),
+      view_mode: ReviewSource,
+      selected: change,
+    }),
+  }
+  let reviewing : Ctx = {
+    ..present,
+    open_files: [path],
+    active_file: Some(path),
+  }
+  let state = {
+    ..owned_state_at(present),
+    explorer_mode: ExplorerChanges,
+    changes: ChangeListReady(
+      repository=true,
+      files=[change],
+      refreshing=false,
+      refresh_again=false,
+    ),
+    changes_generation: 1,
+    changes_head: Some("same-head"),
+    changes_head_known: true,
+    review_generation: 3,
+    docs,
+  }
+  assert_true(changes_poll_wanted(state, reviewing))
+  let missing : Ctx = {
+    ..reviewing,
+    placement: Some(
+      @interop.MissingWorktree(project=present.test_root(), name="wt"),
+    ),
+  }
+  // The parked panel keeps its settled inventory and its open review readable,
+  // so every other axis of the predicate still holds. Only the lost checkout
+  // stops the interval, and a tick that outlived the park is refused too.
+  let (parked, _) = sync(emit, state, missing)
+  assert_true(
+    parked.changes is ChangeListReady(repository=true, refreshing=false, ..),
+  )
+  assert_true(changes_live(parked, missing))
+  assert_false(changes_poll_wanted(parked, missing))
+  let (_, after_tick) = update(emit, ChangesPollDue, parked, missing)
+  assert_true(after_tick == parked)
+  // Repair restores it: its own refresh settles, and the settled shape is what
+  // declares the poll again.
+  let (restored, _) = sync(emit, parked, reviewing)
+  assert_true(restored.changes is ChangeListReady(refreshing=true, ..))
+  let (_, settled) = update(
+    emit,
+    ChangesLoaded(
+      owner=present.owner,
+      generation=restored.changes_generation,
+      repository=true,
+      head=Some("same-head"),
+      files=[change],
+    ),
+    restored,
+    reviewing,
+  )
+  assert_true(changes_poll_wanted(settled, reviewing))
 }
 
 ///|
@@ -6821,12 +7095,7 @@ test "hidden explorer keeps Git refresh live for an open review" {
   )
   assert_true(after_run.changes_generation == 5)
   assert_true(after_run.changes is ChangeListReady(refreshing=true, ..))
-  let (_, after_poll) = update(
-    test_emit(),
-    ChangesPollDue(owner=test_ctx().owner, generation=4),
-    state,
-    hidden,
-  )
+  let (_, after_poll) = update(test_emit(), ChangesPollDue, state, hidden)
   assert_true(after_poll.changes_generation == 5)
   assert_true(after_poll.changes is ChangeListReady(refreshing=true, ..))
 }

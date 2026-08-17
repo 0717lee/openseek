@@ -156,6 +156,36 @@ fn bridge_msg(
       } else {
         None
       }
+    // The Desktop process owns one Codex app-server. The shell wraps these
+    // notifications, while the Codex package decodes and applies their state.
+    CodexStatusChanged(payload) =>
+      Some(Codex(channel~, @codex.Msg::status_changed(payload)))
+    CodexNotification(payload) =>
+      if payload is Object(fields) &&
+        @jsonx.json_text(fields, "method") is Some(method_) &&
+        fields.get("params") is Some(params) &&
+        @jsonx.json_int(fields, "generation") is Some(generation) {
+        Some(
+          Codex(channel~, @codex.Msg::notification(method_, params, generation)),
+        )
+      } else {
+        None
+      }
+    CodexServerRequest(payload) =>
+      if payload is Object(fields) &&
+        fields.get("request_id") is Some(request_id) &&
+        @jsonx.json_text(fields, "method") is Some(method_) &&
+        fields.get("params") is Some(params) &&
+        @jsonx.json_int(fields, "generation") is Some(generation) {
+        Some(
+          Codex(
+            channel~,
+            @codex.Msg::server_request(request_id, method_, params, generation),
+          ),
+        )
+      } else {
+        None
+      }
     _ => device_msg(channel, notification).map(msg => FromDevice(channel, msg))
   }
 }
@@ -170,18 +200,15 @@ fn device_msg(
   notification : @protocol.Notification,
 ) -> DeviceMsg? {
   match notification {
-    AgentConnected(payload) => {
-      guard @resource.of_path(channel, payload.scratch_root) is Some(root) else {
-        return None
-      }
-      Some(BridgeReady(scratch_root=root))
-    }
+    // The payload's stage says how much of the host is up; every stage asks
+    // this client for the same resync, so the signal alone is the message.
+    AgentConnected(_) => Some(BridgeReady)
     AgentStarted(payload) => started_msg(channel, payload)
     AgentEvent(payload) => engine_msg(payload)
     AgentError(payload) => error_msg(payload)
     AgentFinished(payload) => finished_msg(payload)
     AgentDurable(payload) => durable_boundary_msg(payload)
-    SessionEvent(payload) => session_event_msg(payload)
+    SessionEvent(payload) => session_event_msg(channel, payload)
     SubrunProgress(payload) =>
       Some(
         SubrunProgressed(
@@ -191,7 +218,7 @@ fn device_msg(
           activity=payload.activity,
         ),
       )
-    SessionChanged(payload) => session_changed_msg(payload)
+    SessionChanged(payload) => session_changed_msg(channel, payload)
     WorkspaceChanged(payload) => {
       let paths : Array[@common.Uri] = []
       // The wire contract still calls registered projects `workspaces`.
@@ -223,14 +250,26 @@ fn device_msg(
 
 ///|
 /// Decode archive invalidation synchronously. A fresh id is allocated at the
-/// event boundary (outside `update`) so archiving the active conversation can
-/// switch immediately without a render where Send still targets the stale id.
-fn session_changed_msg(payload : @protocol.SessionChangedPayload) -> DeviceMsg? {
+/// event boundary (outside `update`) so archiving or deleting the active
+/// conversation can switch without a render where Send targets the stale id.
+fn session_changed_msg(
+  channel : @interop.ChannelId,
+  payload : @protocol.SessionChangedPayload,
+) -> DeviceMsg? {
+  guard ArchiveRecordKey::from_protocol(
+      channel,
+      payload.session,
+      payload.workspace,
+    )
+    is Some(key) else {
+    return None
+  }
   Some(
     SessionsChanged(
       change=payload.change,
-      session=payload.session,
-      fresh_session=if payload.change == "archived" {
+      key~,
+      fresh_session=if payload.change == "archived" ||
+        payload.change == "deleted" {
         Some(generated_session_id())
       } else {
         None
@@ -324,6 +363,36 @@ fn open_host_connection(
 /// notification callback, so the listeners derive from the shared catalog.
 fn proton_event_methods() -> Array[@protocol.NotificationKind] {
   @protocol.NotificationKind::all()
+}
+
+///|
+test "proton subscribes to all Codex app-server events" {
+  assert_true(
+    proton_event_methods().contains(
+      @protocol.NotificationKind::CodexStatusChanged,
+    ),
+  )
+  assert_true(
+    proton_event_methods().contains(
+      @protocol.NotificationKind::CodexNotification,
+    ),
+  )
+  assert_true(
+    proton_event_methods().contains(
+      @protocol.NotificationKind::CodexServerRequest,
+    ),
+  )
+  assert_true(
+    bridge_msg(
+      Local,
+      @protocol.Notification::CodexNotification({
+        "method": "turn/completed",
+        "params": { "threadId": "t1" },
+        "generation": 1,
+      }),
+    )
+    is Some(Codex(channel=Local, _)),
+  )
 }
 
 ///|
@@ -842,13 +911,22 @@ fn RecoveredSettlement::from_reply(
 /// the outer notification for routing; the typed item enum is what the
 /// transcript projector consumes, with raw unknown items retained for newer
 /// Desktop versions.
-fn session_event_msg(payload : @protocol.SessionCommitPayload) -> DeviceMsg? {
+fn session_event_msg(
+  channel : @interop.ChannelId,
+  payload : @protocol.SessionCommitPayload,
+) -> DeviceMsg? {
+  // The store root is half of the commit's durable identity; an event whose
+  // root does not bind to the channel is malformed and dropped.
+  guard @resource.of_path(channel, payload.session_root) is Some(session_root) else {
+    return None
+  }
   Some(
     SessionCommitted(
       session=payload.session,
       sequence=payload.sequence,
       ts=payload.event.ts,
       item=payload.event.item,
+      session_root~,
     ),
   )
 }
@@ -959,13 +1037,9 @@ fn start_openseek(
   selected_model : EngineModel,
   max_steps : String,
   session : String,
-  workspace~ : @common.Uri?,
+  workspace~ : @common.Uri,
 ) -> @cmd.Cmd {
-  match workspace {
-    Some(resource) if !@resource.belongs_to(resource, channel) =>
-      return @cmd.none
-    _ => ()
-  }
+  guard @resource.belongs_to(workspace, channel) else { return @cmd.none }
   let payload = start_payload(
     task,
     selected_model,
@@ -1050,7 +1124,7 @@ fn start_payload(
   max_steps : String,
   session : String,
   submission_id : String,
-  workspace~ : @common.Uri?,
+  workspace~ : @common.Uri,
 ) -> @protocol.StartPayload {
   let session = session.trim().to_owned()
   {
@@ -1059,7 +1133,7 @@ fn start_payload(
     model: Some(selected_model.wire()),
     max_steps: parsed_max_steps(max_steps),
     session,
-    workspace: workspace.map(value => value.path),
+    workspace: Some(workspace.path),
   }
 }
 
@@ -1317,13 +1391,9 @@ fn compact_openseek(
   session~ : String,
   model~ : EngineModel,
   max_steps~ : String,
-  workspace? : @common.Uri,
+  workspace~ : @common.Uri,
 ) -> @cmd.Cmd {
-  match workspace {
-    Some(resource) if !@resource.belongs_to(resource, channel) =>
-      return @cmd.none
-    _ => ()
-  }
+  guard @resource.belongs_to(workspace, channel) else { return @cmd.none }
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
@@ -1337,7 +1407,7 @@ fn compact_openseek(
             session,
             model: Some(model.wire()),
             max_steps: parsed_max_steps(max_steps),
-            workspace: workspace.map(value => value.path),
+            workspace: Some(workspace.path),
           },
           lane=@interop.session_command_lane(channel, session),
         ) catch {
@@ -1374,15 +1444,11 @@ fn goal_openseek(
   session~ : String,
   model~ : EngineModel,
   max_steps~ : String,
-  workspace? : @common.Uri,
+  workspace~ : @common.Uri,
   command : String,
   text : String?,
 ) -> @cmd.Cmd {
-  match workspace {
-    Some(resource) if !@resource.belongs_to(resource, channel) =>
-      return @cmd.none
-    _ => ()
-  }
+  guard @resource.belongs_to(workspace, channel) else { return @cmd.none }
   let payload = goal_payload(session, model, max_steps, workspace, text)
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
@@ -1410,7 +1476,7 @@ fn goal_payload(
   session : String,
   model : EngineModel,
   max_steps : String,
-  workspace : @common.Uri?,
+  workspace : @common.Uri,
   text : String?,
 ) -> @protocol.GoalPayload {
   {
@@ -1425,7 +1491,7 @@ fn goal_payload(
     auto: None,
     model: Some(model.wire()),
     max_steps: parsed_max_steps(max_steps),
-    workspace: workspace.map(value => value.path),
+    workspace: Some(workspace.path),
   }
 }
 

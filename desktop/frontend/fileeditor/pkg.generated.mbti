@@ -4,6 +4,7 @@ package "openseek_desktop/frontend/fileeditor"
 import {
   "moonbit-community/rabbita/cmd",
   "moonbit-community/rabbita/html",
+  "moonbit-community/rabbita/sub",
   "moonbitlang/editor/base/common",
   "openseek_desktop/frontend/interop",
   "openseek_desktop/frontend/pathx",
@@ -22,6 +23,8 @@ pub fn basename(@pathx.Relative) -> String
 pub fn body_view(@cmd.Emit[Msg], State, Ctx) -> @html.Html
 
 pub fn breadcrumb_view(@cmd.Emit[Msg], State, Ctx) -> @html.Html
+
+pub fn changes_poll_subscription(State, Ctx, @cmd.Emit[Msg]) -> @sub.Sub
 
 pub fn close_document(@cmd.Emit[Msg], State, Ctx, @pathx.Relative, next~ : @pathx.Relative?, was_active~ : Bool) -> (@cmd.Cmd, State)
 
@@ -83,9 +86,7 @@ pub(all) struct Ctx {
   owner : @interop.ConversationKey
   request_epoch : Int
   watch_namespace : String
-  root : @common.Uri?
-  workspace : @common.Uri?
-  checkout : @interop.CheckoutPlacement?
+  placement : @interop.CheckoutPlacement?
   dark_mode : Bool
   tree_layout : TreeLayout
   narrow : Bool
@@ -153,7 +154,7 @@ pub(all) enum Msg {
   FileIndexFailed(owner~ : @interop.ConversationKey, epoch~ : Int)
   ChangesLoaded(owner~ : @interop.ConversationKey, generation~ : Int, repository~ : Bool, head~ : String?, files~ : Array[ChangedFile])
   ChangesFailed(owner~ : @interop.ConversationKey, generation~ : Int, message~ : String)
-  ChangesPollDue(owner~ : @interop.ConversationKey, generation~ : Int)
+  ChangesPollDue
   FileSelected(path~ : @pathx.Relative, name~ : String)
   ChangedFileSelected(ChangedFile)
   ToggleReviewDiff
@@ -169,9 +170,19 @@ pub(all) enum Msg {
   StatsLoaded(owner~ : @interop.ConversationKey, epoch~ : Int, stats~ : Array[FileStat])
   DiagnosticsLoaded(owner~ : @interop.ConversationKey, epoch~ : Int, absolute~ : @common.Uri, diagnostics~ : Array[@protocol.LspDiagnostic])
   DiagnosticsPublished(channel~ : @interop.ChannelId, absolute~ : @common.Uri, diagnostics~ : Array[@protocol.LspDiagnostic])
+  LanguageRequestFailed(owner~ : @interop.ConversationKey, message~ : String)
   EditorCommentAdded(resource~ : ModelUri, file~ : @pathx.Relative, range~ : @common.Range, quote~ : String, comment~ : String, feedback_id~ : String)
   UnifiedDiffCommentAdded(file~ : @pathx.Relative, original_line_number~ : Int?, modified_line_number~ : Int?, quote~ : String, comment~ : String)
 }
+
+pub(all) enum ReconciledPlacement {
+  PlacementUnknown
+  PlacementLive(@interop.CheckoutPlacement)
+  PlacementParked(last_known~ : @interop.CheckoutPlacement?)
+} derive(Eq)
+pub fn ReconciledPlacement::identity(Self) -> @interop.CheckoutPlacement?
+pub fn ReconciledPlacement::is_parked(Self) -> Bool
+pub fn ReconciledPlacement::reconcile(Self, @interop.CheckoutPlacement?) -> Self
 
 pub(all) enum ReviewBaseline {
   ReviewLoading
@@ -197,10 +208,7 @@ pub(all) enum ReviewViewMode {
 
 pub(all) struct State {
   owner : @interop.ConversationKey?
-  placement_known : Bool
-  placement_workspace : @common.Uri?
-  placement_root : @common.Uri?
-  placement_checkout : @interop.CheckoutPlacement?
+  placement : ReconciledPlacement
   tree_open : Bool
   explorer_mode : ExplorerMode
   review_view_mode : ReviewViewMode
@@ -214,7 +222,6 @@ pub(all) struct State {
   review_generation : Int
   review_recovery_pending : Bool
   background_review_requests : Map[@pathx.Relative, Int]
-  placement_parked : Bool
   explorer_was_visible : Bool
   watching : WatchedPaths?
   watch_generation : Int

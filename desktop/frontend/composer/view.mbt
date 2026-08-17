@@ -2,7 +2,7 @@
 /// The primary action at the right edge of a conversation composer. The caller
 /// decides whether the action sends, steers, or stops; this package
 /// owns the button DOM so those states retain identical geometry.
-pub(all) struct Action {
+pub(all) struct ActionButton {
   id : String
   class_name : String
   title : String
@@ -12,7 +12,7 @@ pub(all) struct Action {
 }
 
 ///|
-fn Action::render(self : Action) -> @html.Html {
+pub fn ActionButton::render(self : ActionButton) -> @html.Html {
   @html.button(
     id=self.id,
     class=self.class_name,
@@ -83,32 +83,6 @@ pub fn ModelSelect::render(self : ModelSelect) -> @html.Html {
           .data_set("focus-target", ""),
         choices,
       ),
-    ],
-  )
-}
-
-///|
-/// The compact branch/PR control used by a conversation composer. Git
-/// discovery and click behavior stay caller-owned; the composer owns the one
-/// visible DOM shape beside the model selector.
-pub(all) struct GitChip {
-  tone : String
-  title : String
-  label : String
-  command : @cmd.Cmd
-  content : @html.Html
-}
-
-///|
-pub fn GitChip::render(self : GitChip) -> @html.Html {
-  @html.button(
-    class="composer-git-button \{self.tone}",
-    type_="button",
-    title=self.title,
-    on_click=self.command,
-    [
-      @html.span(class="composer-git-glyph", self.content),
-      @html.span(class="composer-git-label", self.label),
     ],
   )
 }
@@ -312,7 +286,7 @@ pub(all) struct View {
   input : @cmd.Emit[String]
   keyboard : KeyboardActions
   status : Array[@html.Html]
-  action : Action
+  action : ActionButton
   overlay : @html.Html?
 }
 

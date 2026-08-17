@@ -1,6 +1,5 @@
 // Generic composer input behavior. Callers keep their result rows and send
-// protocol; this package owns trigger parsing, menu selection, and delayed
-// request generations.
+// protocol; this package owns trigger parsing and menu selection.
 
 ///|
 /// A live completion token at the end of a composer draft. The marker is `/`
@@ -74,9 +73,9 @@ pub fn Trigger::matches(self : Trigger, fields : Array[String]) -> Bool {
 }
 
 ///|
-/// The application-independent part of an open completion menu. The caller keeps
-/// its result type and provider kind; this value owns selection, loading, and
-/// the exact draft prefix restored when a row is accepted.
+/// The application-independent part of an open completion menu. The component
+/// keeps its result type and provider kind; this value owns selection, loading,
+/// and the exact draft prefix restored when a row is accepted.
 struct Menu[T] {
   items : Array[T]
   selected : Int
@@ -99,27 +98,27 @@ pub fn[T] Menu::selected(self : Menu[T]) -> Int {
 }
 
 ///|
-pub fn[T] Menu::loading(self : Menu[T]) -> Bool {
+fn[T] Menu::loading(self : Menu[T]) -> Bool {
   self.loading
 }
 
 ///|
-pub fn[T] Menu::draft_without_token(self : Menu[T]) -> String {
+fn[T] Menu::draft_without_token(self : Menu[T]) -> String {
   self.draft_without_token
 }
 
 ///|
-pub fn[T] Menu::length(self : Menu[T]) -> Int {
+fn[T] Menu::length(self : Menu[T]) -> Int {
   self.items.length()
 }
 
 ///|
-pub fn[T] Menu::get(self : Menu[T], index : Int) -> T? {
+fn[T] Menu::get(self : Menu[T], index : Int) -> T? {
   self.items.get(index)
 }
 
 ///|
-pub fn[T] Menu::iter2(self : Menu[T]) -> Iter2[Int, T] {
+fn[T] Menu::iter2(self : Menu[T]) -> Iter2[Int, T] {
   self.items.iter2()
 }
 
@@ -137,43 +136,4 @@ pub fn[T] Menu::shifted(self : Menu[T], delta : Int) -> Menu[T] {
 ///|
 pub fn[T] Menu::current(self : Menu[T]) -> T? {
   self.items.get(self.selected)
-}
-
-///|
-/// Monotonic identity for delayed composer lookups. Every draft change spends
-/// one generation, so a delayed request and its eventual reply can both be
-/// rejected after any newer keystroke, provider switch, or trigger dismissal.
-struct Debounce {
-  generation : Int
-} derive(Eq)
-
-///|
-pub fn Debounce::Debounce(generation? : Int = 0) -> Debounce {
-  { generation, }
-}
-
-///|
-pub fn Debounce::advanced(self : Debounce) -> Debounce {
-  { generation: self.generation + 1 }
-}
-
-///|
-pub fn Debounce::generation(self : Debounce) -> Int {
-  self.generation
-}
-
-///|
-pub fn Debounce::accepts(self : Debounce, generation : Int) -> Bool {
-  self.generation == generation
-}
-
-///|
-/// Delay a lookup using the same 150 ms pause as workspace symbol Quick Open.
-/// The caller carries this generation in its own message and checks `accepts`
-/// before starting work or adopting a reply.
-pub fn Debounce::delayed(
-  self : Debounce,
-  command : (Int) -> @cmd.Cmd,
-) -> @cmd.Cmd {
-  @cmd.delay(command(self.generation), 150)
 }

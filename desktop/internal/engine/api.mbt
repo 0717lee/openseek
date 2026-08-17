@@ -61,15 +61,17 @@ type GoalReply = @protocol.GoalReply
 
 ///|
 /// One sidebar group of `list_sessions`: the conversations stored under one
-/// session root. `workspace` is the project directory ("" for the default
-/// group of scratch conversations) and `name` its display label (the folder's
-/// basename). A group whose listing failed carries the engine's message in
-/// `error` and an empty `sessions` — one broken workspace must not take the
-/// whole sidebar down.
+/// session root. `workspace` is the project directory and `name` its display
+/// label (the folder's basename). A group whose listing failed carries the
+/// engine's message in `error` and an empty `sessions` — one broken workspace
+/// must not take the whole sidebar down.
 type SessionGroup = @protocol.SessionGroup
 
 ///|
 type SessionsReply = @protocol.SessionsReply
+
+///|
+type WorktreeInfo = @protocol.WorktreeInfo
 
 ///|
 type ArchiveReply = @protocol.ArchiveReply
@@ -128,7 +130,16 @@ pub(all) enum EngineEvent {
 }
 
 ///|
-pub(all) struct EventSink(async (EngineEvent) -> Unit)
+/// Where this package publishes everything a client can observe.
+///
+/// Deliberately not `async`: an event handed to the sink is public the moment
+/// the call returns, so a suspension inside it would let a cancellation land
+/// between "the observer saw Started" and "the caller believes nothing
+/// happened". Delivery is a synchronous handoff to whatever fan-out the host
+/// installed — the real one buffers per subscriber and evicts a wedged reader
+/// rather than backpressuring lifecycle code — which is what lets the engine's
+/// lifecycle transitions and their announcements be one uninterruptible step.
+pub(all) struct EventSink((EngineEvent) -> Unit)
 
 ///|
 priv enum RunStatus {
@@ -153,12 +164,12 @@ fn RunStatus::wire(self : RunStatus) -> String {
 }
 
 ///|
-async fn emit(sink : EventSink, event : EngineEvent) -> Unit {
+fn emit(sink : EventSink, event : EngineEvent) -> Unit {
   sink(event)
 }
 
 ///|
-async fn emit_error(
+fn emit_error(
   sink : EventSink,
   message : String,
   run_id? : String,
@@ -169,7 +180,7 @@ async fn emit_error(
 }
 
 ///|
-async fn emit_finished(
+fn emit_finished(
   sink : EventSink,
   run_id : String,
   status : RunStatus,
@@ -190,7 +201,7 @@ async fn emit_finished(
 }
 
 ///|
-async fn emit_durable_boundary(
+fn emit_durable_boundary(
   sink : EventSink,
   run_id : String,
   session : String,

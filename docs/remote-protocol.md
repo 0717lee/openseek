@@ -158,8 +158,8 @@ control-frame definitions in `desktop/tunnel`.
 ## Connection lifecycle: reconnect = resync
 
 There is no stream-resume machinery: no connection cursor and no replay of
-transient notifications. (The one sequence that exists is per-session and
-durable, not per-connection:
+transient notifications. (The one sequence that exists is per durable record
+— a store-qualified session — and durable, not per-connection:
 `session.event` carries the store's own event sequence — see *The durable
 transcript* below — and a reconnect recovers missed commits by re-reading,
 never by replay.) The sole lifecycle exception is `agent.runs`'s targeted,
@@ -169,7 +169,13 @@ moment it exists; whatever a client missed while disconnected it recovers by
 re-reading state:
 
 1. Connect the WebSocket. The host sends `agent.connected` as the connection's
-   first notification, then starts forwarding the remote delivery stream.
+   first notification — `{stage}`, where `stage` is `"accepted"` (the
+   transport took this client; the engine pump may still be between
+   generations) or `"serving"` (the pump entered a serving generation and
+   accepts runs). Both mean the same thing to a client: re-read your state.
+   Every conversation belongs to a registered workspace, so a broadcast store
+   root names its own project (`<project>/.openseek`) and needs no anchor
+   value here. The host then starts forwarding the remote delivery stream.
 2. Resync: `session.list` + `agent.runs` (and reload whatever conversation
    is open via `session.load`). The client gives `agent.runs` the exact owners
    from its request-time frontier: `{session, run_id}` after Started, or
@@ -281,13 +287,14 @@ Notifications:
 | `session.list_archived` | `{}` | the archived index |
 | `session.archive` | `{session, force?}` | success returns the archived session index (the legacy `{groups}` shape) and moves the conversation plus every sibling `<session>-sr-N` descendant transcript as one family. A dirty checkout returns `{kind:"needs_force", worktree, dirty_paths, dirty_path_count}` without changing durable state; `dirty_paths` previews up to 8 paths and `dirty_path_count` counts all status rows. Clients show a discard-confirmation dialog and retry with `force` only after explicit confirmation. On success the conversation's checkout goes with it, but its name/branch/session placement remains registered (the branch survives; a `worktree.changed` broadcast reports `present: false`). "Dirty" means tracked modifications or non-ignored untracked files; ignored files count as disposable and are removed with the checkout, matching `git worktree remove`'s own semantics |
 | `session.unarchive` | `{session}` | outcome — restores the conversation and every archived subagent descendant record together. A retained worktree placement whose checkout was removed returns as missing, so clients offer Repair before any agent, terminal, or file operation can continue |
+| `session.delete_archived` | `{session, workspace}` | permanently deletes the archived conversation record from the exact host-listed project store and every archived subagent descendant record in that store, then returns the archived index. Its retained worktree placement is removed and broadcast, but project files and the Git branch remain. The operation refuses unknown stores, live records, and running/compacting family members |
 
 Notifications:
 
 | method | params |
 |---|---|
-| `session.event` | `{session, sequence, event: {sequence, ts, item}}` — one durably **committed** store event, `event` verbatim as `session.load` carries it in `events`; see *The durable transcript* below |
-| `session.changed` | `{change: "archived" \| "unarchived", session}` — broadcast to every client (the requester included) when a record moves between the live and archived stores; a family archive/restore emits one fact for the parent and each descendant subagent record. Recipients apply each per-session fact immediately, keep it authoritative over already-in-flight unversioned list replies, and re-read both lists. A new connection starts a fresh list round. |
+| `session.event` | `{session, sequence, session_root, event: {sequence, ts, item}}` — one durably **committed** store event, `event` verbatim as `session.load` carries it in `events`. `session_root` is the durable store root the commit was read from: session ids are not globally unique across stores, so the durable identity is `(session_root, session)` and a client must never merge same-id records from different stores; see *The durable transcript* below |
+| `session.changed` | `{change: "archived" \| "unarchived" \| "deleted", session, workspace}` — broadcast to every client (the requester included) when a record moves between stores or is permanently deleted; `workspace` is the owning project path, so same-ID records in other project stores remain untouched. A family operation emits one fact for the parent and each descendant subagent record. Recipients apply each store-qualified fact immediately, keep it authoritative over already-in-flight unversioned list replies, and re-read both lists. A new connection starts a fresh list round. |
 
 #### The durable transcript: snapshots + commits
 
@@ -295,14 +302,17 @@ A conversation's durable transcript has exactly two sources: the
 `session.load` snapshot and the `session.event` commits that follow it. A
 commit exists **if and only if** its item is in the session's durable
 record, and `sequence` is the item's one-based position there — contiguous
-per session. Everything else on the wire is transient stream or lifecycle
+per store-qualified session. Everything else on the wire is transient stream
+or lifecycle
 state: commit-aware clients may show deltas live, but full semantic messages,
 transient lifecycle notifications, and steer receipts never append transcript
 items — their durable form arrives as a commit. A remote WebSocket receives
 the lightweight forms described above instead of duplicate full semantic
 payloads.
 
-Client algorithm, per session: keep a watermark `W`, starting at the
+Client algorithm, per store-qualified session — the `(session_root, session)`
+pair, since one id may hold independent records in two project stores at
+once: keep a watermark `W`, starting at the
 snapshot's. For each `session.event`: `sequence ≤ W` → drop (re-broadcasts
 and load/commit races are harmless by construction); `sequence == W + 1` →
 apply and advance; `sequence > W + 1` → a gap (missed broadcasts — a slow
@@ -330,6 +340,13 @@ for resubmission.
 Old clients ignore `session.event` and keep building the transcript from
 `agent.event` as before. Old hosts never send `session.event`, ignore the
 capability notification, and omit the top-level `session.load.watermark`.
+A separate generation of hosts predates the store-qualified contract: such
+a host omits `session_root` from both `agent.connected` and `session.event`.
+The bundled client does not interoperate with them (the desktop frontend and
+host ship in lockstep — a rootless `agent.connected` never reaches readiness
+and a rootless commit is dropped as malformed); a third-party client that
+chooses to accept them falls back to id-only identity, knowing same-id
+records from different stores become indistinguishable.
 A new client derives the watermark from the snapshot events' own `sequence`
 fields and performs one generation-tagged background `session.load` when a
 named run reaches `agent.finished`. That post-terminal snapshot is the
@@ -418,7 +435,7 @@ is rejected instead of silently relocating the session into the global store.
 That workspace hint is part of a client's resume state. A protocol client
 that persists a workspace session across a host restart must persist and send
 its `workspace` too: once the workspace is no longer registered, an omitted
-hint leaves a missing id indistinguishable from a brand-new scratch session.
+hint leaves a missing id indistinguishable from a brand-new session.
 The current wire has no persistent detached-session tombstone; the bundled
 client retains the hint and therefore gets the intended rejection.
 
@@ -498,7 +515,7 @@ connection has an independent terminal-id namespace.
 
 | method | params | result |
 |---|---|---|
-| `terminal.open` | `{session, workspace?, cols, rows}` — resolves the conversation's workspace on the host and creates it if this scratch session has not run yet | `{id}` |
+| `terminal.open` | `{session, workspace?, cols, rows}` — resolves the conversation's workspace on the host — a session no attached workspace owns is refused rather than given a directory | `{id}` |
 | `terminal.input` | `{id, data}` \| `{id, data_base64}` | `{}` |
 | `terminal.resize` | `{id, cols, rows}` | `{}` |
 | `terminal.ack` | `{id, sequence}` | `{}` |
@@ -527,20 +544,21 @@ Notification:
 
 ### moonide.* — workspace navigation
 
-Both methods accept an absolute source `path` plus positive, one-based `line`
-and `column` numbers. The host passes those values unchanged to `moon ide
---loc`, after resolving the path to its attached workspace, and runs the
-bundled `moon` from that workspace root (`moon` on `PATH` only for a bare
-development host without a packaged toolchain seed). Result paths are
-canonicalized for physical containment, then mapped back under the attached
-workspace's lexical root so they match existing file/model identities. The
-CLI's line and column values are returned unchanged; malformed or
-workspace-escaping locations are omitted.
+Both methods accept an absolute editor `root`, a source `path` relative to that
+root, and positive, one-based `line` and `column` numbers. The root is the
+actual main checkout, linked worktree, or Codex cwd displayed by the editor;
+it need not be an attached OpenSeek workspace. The host passes the position to
+`moon ide --loc`, and runs the bundled `moon` from that root (`moon` on `PATH`
+only for a bare development host without a packaged toolchain seed). Result
+paths are canonicalized for physical containment, then mapped back under the
+supplied root's lexical spelling so they match existing file/model identities.
+The CLI's line and column values are returned unchanged; malformed or
+root-escaping locations are omitted.
 
 | method | params | result |
 |---|---|---|
-| `moonide.definition` | `{path, line, column}` (absolute path; positive 1-based position) | `{locations: [{path, start_line, start_column, end_line, end_column}]}` — absolute paths under the attached lexical workspace root, with Moon IDE's numeric ranges |
-| `moonide.references` | `{path, line, column}` (absolute path; positive 1-based position) | `{locations: [{path, start_line, start_column, end_line, end_column}]}` — absolute paths under the attached lexical workspace root, with Moon IDE's numeric ranges |
+| `moonide.definition` | `{root, path, line, column}` (`root` absolute, `path` relative; positive 1-based position) | `{locations: [{path, start_line, start_column, end_line, end_column}]}` — absolute paths under the supplied lexical root, with Moon IDE's numeric ranges |
+| `moonide.references` | `{root, path, line, column}` (`root` absolute, `path` relative; positive 1-based position) | `{locations: [{path, start_line, start_column, end_line, end_column}]}` — absolute paths under the supplied lexical root, with Moon IDE's numeric ranges |
 
 ### skills.*
 

@@ -233,6 +233,62 @@ pub(all) enum ChangeList {
 } derive(Eq)
 
 ///|
+/// The checkout placement a sync pass settled on for `State::owner`.
+/// Availability and identity are one value: parking keeps the identity the
+/// panel had before the gap, so recovery can tell the same checkout coming
+/// back from another checkout taking its place.
+pub(all) enum ReconciledPlacement {
+  // No owner has been claimed yet, so nothing has been reconciled.
+  PlacementUnknown
+  // A ready checkout. Filesystem requests may address it.
+  PlacementLive(@interop.CheckoutPlacement)
+  // Placement is unresolved or missing, so host-backed work stays suspended.
+  // `last_known` is the identity from before the gap, and `None` only when the
+  // owner was claimed while placement was already unresolved. Parking is
+  // tracked here rather than folded into review recovery because a repaired
+  // review may still be awaiting its authoritative Changes snapshot when
+  // placement disappears a second time.
+  PlacementParked(last_known~ : @interop.CheckoutPlacement?)
+} derive(Eq)
+
+///|
+/// The checkout identity this panel is reconciled against, live or retained
+/// across a gap. Identity comparisons and cache retirement read through this;
+/// a value here does not mean the checkout is currently usable.
+pub fn ReconciledPlacement::identity(
+  self : ReconciledPlacement,
+) -> @interop.CheckoutPlacement? {
+  match self {
+    PlacementUnknown => None
+    PlacementLive(value) => Some(value)
+    PlacementParked(last_known~) => last_known
+  }
+}
+
+///|
+/// Whether reconciliation has parked this panel.
+pub fn ReconciledPlacement::is_parked(self : ReconciledPlacement) -> Bool {
+  self is PlacementParked(_)
+}
+
+///|
+/// Settle a freshly projected placement against the retained one: a ready
+/// value goes live and anything else parks. An unresolved projection keeps the
+/// retained identity, because a gap must not erase what recovery compares
+/// against. A new incarnation reconciles from `PlacementUnknown` instead, so
+/// the checkout it replaced is not carried into it.
+pub fn ReconciledPlacement::reconcile(
+  self : ReconciledPlacement,
+  current : @interop.CheckoutPlacement?,
+) -> ReconciledPlacement {
+  match current {
+    Some(value) if value.is_ready() => PlacementLive(value)
+    Some(value) => PlacementParked(last_known=Some(value))
+    None => PlacementParked(last_known=self.identity())
+  }
+}
+
+///|
 /// The file subsystem's state: a lazily-loaded file tree of the active
 /// conversation's workspace and the document table behind the dock's open
 /// file tabs. Keyed entirely by workspace-relative paths; `owner` records
@@ -243,15 +299,12 @@ pub(all) enum ChangeList {
 /// file list arrives through `Ctx`.
 pub(all) struct State {
   owner : @interop.ConversationKey?
-  // The workspace and resolved checkout incarnation last reconciled for
-  // `owner`. A conversation can move from its project root into a newly
-  // created worktree without changing owner or passing through a missing
-  // placement; retaining both identities makes that transition a hard cache
-  // and request boundary instead of letting root-checkout data survive it.
-  placement_known : Bool
-  placement_workspace : @common.Uri?
-  placement_root : @common.Uri?
-  placement_checkout : @interop.CheckoutPlacement?
+  // The placement incarnation last reconciled for `owner`, including whether
+  // it is currently parked. A conversation can move from its project root into
+  // a newly-created worktree without changing owner; retaining the complete
+  // value makes that transition a hard cache and request boundary without
+  // storing independently drifting roots.
+  placement : ReconciledPlacement
   // Whether the file-tree pane (the toggleable column right of the viewer)
   // is shown. A panel preference, not per-conversation state, so it
   // survives conversation switches.
@@ -305,10 +358,6 @@ pub(all) struct State {
   // HEAD read is in flight; recording that request by path prevents a slow
   // read from being superseded by every Changes poll.
   background_review_requests : Map[@pathx.Relative, Int]
-  // Whether checkout placement is currently unresolved/missing. Kept separate
-  // from review recovery because a repaired review may still be awaiting its
-  // authoritative Changes snapshot when placement disappears a second time.
-  placement_parked : Bool
   // Whether the explorer pane was visible on the preceding sync pass. This is
   // stricter than the enclosing dock being open: with a file active the tree
   // toggle (and narrow drill-down) can hide the explorer while the dock stays
@@ -353,10 +402,7 @@ pub(all) struct State {
 pub fn State::empty() -> State {
   {
     owner: None,
-    placement_known: false,
-    placement_workspace: None,
-    placement_root: None,
-    placement_checkout: None,
+    placement: PlacementUnknown,
     tree_open: true,
     explorer_mode: ExplorerFiles,
     review_view_mode: ReviewUnifiedDiff,
@@ -371,7 +417,6 @@ pub fn State::empty() -> State {
     diff_loading_generation: None,
     review_recovery_pending: false,
     background_review_requests: Map([]),
-    placement_parked: false,
     explorer_was_visible: false,
     watching: None,
     watch_generation: 0,
@@ -418,9 +463,7 @@ pub fn TreeLayout::wire(self : TreeLayout) -> String {
 ///|
 /// The active conversation's identity, passed in by the main package on every
 /// `update`/`sync`/`panel_view` call: which conversation the panel serves, its
-/// concrete root its file/LSP ops address, its attached workspace (still used
-/// by Git operations), where that conversation is placed, whether the app is
-/// in dark mode (drives the
+/// complete directory placement, whether the app is in dark mode (drives the
 /// embedded viewer's theme attribute), and the Settings choice of where the
 /// file tree docks.
 pub(all) struct Ctx {
@@ -430,12 +473,10 @@ pub(all) struct Ctx {
   // Page-unique prefix for watcher identities. The native watcher outlives a
   // page reload, so the counter alone is not enough to prevent reuse.
   watch_namespace : String
-  root : @common.Uri?
-  workspace : @common.Uri?
   // `None` while this connection has not loaded the conversation's placement.
   // Unknown and missing placements both block filesystem requests so neither
   // can be resolved against the registered project's main checkout.
-  checkout : @interop.CheckoutPlacement?
+  placement : @interop.CheckoutPlacement?
   dark_mode : Bool
   tree_layout : TreeLayout
   // The app's phone-narrow layout flag. Narrow, the tree and the viewer
@@ -451,6 +492,24 @@ pub(all) struct Ctx {
   open_files : Array[@pathx.Relative]
   active_file : @pathx.Relative?
 } derive(Eq)
+
+///|
+/// The concrete root used by file and language-service requests.
+fn Ctx::root(self : Ctx) -> @common.Uri? {
+  self.placement.bind(value => value.checkout_root())
+}
+
+///|
+/// The registered project used by Git and worktree requests.
+fn Ctx::workspace(self : Ctx) -> @common.Uri? {
+  self.placement.bind(value => value.project_root())
+}
+
+///|
+/// Whether this context currently names a concrete checkout directory.
+fn Ctx::checkout_ready(self : Ctx) -> Bool {
+  self.placement is Some(value) && value.is_ready()
+}
 
 ///|
 pub(all) enum Msg {
@@ -516,7 +575,10 @@ pub(all) enum Msg {
   // A low-frequency fallback while Changes is visible. The selective file
   // watcher intentionally follows only open/listed paths, so polling also
   // catches nested external edits and index-only staging operations.
-  ChangesPollDue(owner~ : @interop.ConversationKey, generation~ : Int)
+  // The tick carries no owner or request token: `changes_poll_wanted` decides
+  // from live state whether the interval exists at all, so a tick can only be
+  // delivered for the conversation and snapshot that currently want one.
+  ChangesPollDue
   // A file row was clicked: read it and show it in the viewer. `name` is the
   // entry's display name, kept for the viewer's title and language guess.
   FileSelected(path~ : @pathx.Relative, name~ : String)
@@ -645,6 +707,10 @@ pub(all) enum Msg {
     absolute~ : @common.Uri,
     diagnostics~ : Array[@protocol.LspDiagnostic]
   )
+  // A user-invoked Definition/References request reached the host but failed.
+  // The root app intercepts this message and shows its transient toast; the
+  // owner prevents a late reply from surfacing over another conversation.
+  LanguageRequestFailed(owner~ : @interop.ConversationKey, message~ : String)
   // The user commented on a selection in the editor viewer (the
   // agent-feedback inline input). NOT handled by this package's `update`:
   // the comment becomes a chip on the main package's composer draft, so the

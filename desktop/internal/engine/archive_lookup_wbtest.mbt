@@ -7,8 +7,8 @@
 ///|
 #cfg(not(platform="windows"))
 async test "archive names the missing store after a workspace detach" {
-  archive_env_test_lock.acquire()
-  defer archive_env_test_lock.release()
+  ambient_env_test_lock.acquire()
+  defer ambient_env_test_lock.release()
   let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
   defer restore_session_root_env(previous)
   let dir = @fs.tmpdir(prefix="openseek-archive-detach-")
@@ -32,7 +32,7 @@ async test "archive names the missing store after a workspace detach" {
   // reports the record as unreachable instead of pretending it never
   // existed.
   let detail = try {
-    ignore(archive_session(manager, "s-ws", _ => ()))
+    ignore(archive_session(manager, "s-ws", (_, _) => ()))
     "no error"
   } catch {
     EngineError(detail) => detail
@@ -53,7 +53,7 @@ async test "archive names the missing store after a workspace detach" {
   guard manager.pump is Serving(sessions~) else { fail("pump stopped") }
   assert_true(sessions.get("s-ws") is None)
   let second = try {
-    ignore(archive_session(manager, "s-ws", _ => ()))
+    ignore(archive_session(manager, "s-ws", (_, _) => ()))
     "no error"
   } catch {
     EngineError(detail) => detail
@@ -72,8 +72,8 @@ async test "archive names the missing store after a workspace detach" {
 ///|
 #cfg(not(platform="windows"))
 async test "archive reports a workspace record whose directory vanished" {
-  archive_env_test_lock.acquire()
-  defer archive_env_test_lock.release()
+  ambient_env_test_lock.acquire()
+  defer ambient_env_test_lock.release()
   let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
   defer restore_session_root_env(previous)
   let dir = @fs.tmpdir(prefix="openseek-archive-gone-")
@@ -93,7 +93,7 @@ async test "archive reports a workspace record whose directory vanished" {
   // its dead entry addressable, so the sidebar still shows the workspace.
   @fs.rmdir(workspace, recursive=true)
   let detail = try {
-    ignore(archive_session(manager, "s-ws", _ => ()))
+    ignore(archive_session(manager, "s-ws", (_, _) => ()))
     "no error"
   } catch {
     EngineError(detail) => detail
@@ -112,8 +112,8 @@ async test "archive reports a workspace record whose directory vanished" {
 ///|
 #cfg(not(platform="windows"))
 async test "loading a conversation from a detached workspace names that state" {
-  archive_env_test_lock.acquire()
-  defer archive_env_test_lock.release()
+  ambient_env_test_lock.acquire()
+  defer ambient_env_test_lock.release()
   let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
   defer restore_session_root_env(previous)
   let dir = @fs.tmpdir(prefix="openseek-load-detached-")
@@ -145,7 +145,7 @@ async test "loading a conversation from a detached workspace names that state" {
   debug_inspect(
     detail,
     content=(
-      #|"no durable record for this conversation in the global store or any attached workspace"
+      #|"no attached workspace holds this conversation; attach its project first"
     ),
   )
   @fs.rmdir(dir, recursive=true)
@@ -154,17 +154,19 @@ async test "loading a conversation from a detached workspace names that state" {
 ///|
 #cfg(not(platform="windows"))
 async test "archiving an already-archived conversation names that state" {
-  archive_env_test_lock.acquire()
-  defer archive_env_test_lock.release()
+  ambient_env_test_lock.acquire()
+  defer ambient_env_test_lock.release()
   let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
   defer restore_session_root_env(previous)
   let dir = @fs.tmpdir(prefix="openseek-archive-again-")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", dir)
-  @fsx.ensure_dir(Path(dir + "/archived/sessions/s-done"))
+  @sys.set_env_var("OPENSEEK_SESSION_ROOT", dir + "/global")
+  ignore(attach_run_workspace(Path(dir)))
+  let store = dir + "/ws/.openseek"
+  @fsx.ensure_dir(Path(store + "/archived/sessions/s-done"))
   let manager = new_engine_manager("unused")
   manager.pump = Serving(sessions=Map([]))
   let detail = try {
-    ignore(archive_session(manager, "s-done", _ => ()))
+    ignore(archive_session(manager, "s-done", (_, _) => ()))
     "no error"
   } catch {
     EngineError(detail) => detail
@@ -177,6 +179,6 @@ async test "archiving an already-archived conversation names that state" {
       #|"this conversation is already archived"
     ),
   )
-  assert_true(@fsx.is_dir(Path(dir + "/archived/sessions/s-done")))
+  assert_true(@fsx.is_dir(Path(store + "/archived/sessions/s-done")))
   @fs.rmdir(dir, recursive=true)
 }

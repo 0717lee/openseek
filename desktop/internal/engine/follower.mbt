@@ -78,8 +78,9 @@ priv struct FollowerLoadRequest {
 ///|
 /// A lifecycle Finished that was published before the follower could prove
 /// the matching durable frontier. The actor retains published entries until
-/// retirement as an idempotence ledger: a concurrent producer cannot enqueue
-/// the same run again while another boundary emission is suspended.
+/// retirement as an idempotence ledger: a producer that registers the same run
+/// again across the semantic-terminal and failed-command paths cannot make it
+/// be announced twice.
 priv struct PendingDurableFinish {
   run_id : String
   mut published : Bool
@@ -137,14 +138,12 @@ fn SessionFollower::expect_durable_finish(
 
 ///|
 /// Publish every retained boundary at the frontier proved by this successful
-/// final scan. Keep successful entries as the actor's dedupe ledger; failed
-/// emissions stay pending and make the Stop fail so a later caller retries.
-async fn SessionFollower::publish_durable_finishes(
+/// final scan, and keep the entries as the actor's dedupe ledger. Publishing
+/// is total, so this is the seam's only outcome.
+fn SessionFollower::publish_durable_finishes(
   self : SessionFollower,
   sink : EventSink,
 ) -> Unit {
-  // Emission suspends, so a concurrent failed-command path can append while
-  // this loop runs. Re-read the length to include it before retirement.
   let mut index = 0
   while index < self.durable_finishes.length() {
     let pending = self.durable_finishes[index]
@@ -243,7 +242,15 @@ async fn SessionFollower::scan(
   for event in commits_after(session, self.watermark) {
     emit(
       sink,
-      SessionCommit({ session: self.session, sequence: event.sequence, event }),
+      SessionCommit({
+        session: self.session,
+        sequence: event.sequence,
+        event,
+        // The root this follower reads from is the store half of the durable
+        // identity — broadcast it so clients place the session without
+        // guessing.
+        session_root: self.root.resource_path(),
+      }),
     )
     self.watermark = event.sequence
   }
@@ -349,7 +356,7 @@ async fn SessionFollower::run(
           }
         }
         Stop(final_scan~, writer_exited~, generation~) => {
-          let mut failure = if final_scan {
+          let failure = if final_scan {
             try {
               // Everything the departed writer persisted is broadcast
               // before this generation can retire successfully.
@@ -391,16 +398,9 @@ async fn SessionFollower::run(
           }
           // Both a readable snapshot and the exact-zero proof above are
           // successful drains. Publish pending lifecycle boundaries at this
-          // single seam before retirement; a sink failure keeps the actor
-          // installed so another Stop can retry the unacknowledged entries.
+          // single seam before retirement.
           if final_scan && failure is None {
-            failure = try {
-              follower.publish_durable_finishes(sink)
-              None
-            } catch {
-              error if @async.is_being_cancelled() => raise error
-              error => Some("\{error}")
-            }
+            follower.publish_durable_finishes(sink)
           }
           if failure is Some(detail) {
             // A failed final scan is not a drain. Keep the actor installed
@@ -991,13 +991,14 @@ async test "nonzero durable boundary survives a failed final scan" {
         _ => ()
       }
     }
-    assert_true(
-      relevant
+    guard relevant
       is [
-        SessionCommit({ sequence: 1, .. }),
+        SessionCommit({ sequence: 1, session_root, .. }),
         DurableBoundary({ sequence: 1, .. }),
-      ],
-    )
+      ] else {
+      fail("expected one rooted commit and one durable boundary")
+    }
+    assert_eq(session_root, root.resource_path())
     group.return_immediately(())
   })
   @fs.rmdir(dir, recursive=true)
@@ -1057,14 +1058,17 @@ async test "abrupt EOF retains a failed final drain for later boundary retry" {
       session_root: Some(root),
       spec_key: "test",
       writer,
-      command_lock: Mutex(),
+      commands: Queue(kind=Unbounded),
       process,
       sink,
       follower: Some(follower),
-      exit: { process_done: false, done: false },
-      latest_run: Some("r-abrupt-eof"),
-      phase: Running(cancel_requested=false, compact_queued=false),
-      accepts_commands: true,
+      consumer: None,
+      phase: Running(
+        run_id="r-abrupt-eof",
+        cancel_requested=false,
+        compact_queued=false,
+      ),
+      condemned: false,
       steer_runs: SteerRunTracker::new(),
     }
     let sessions : Map[String, SessionSlot] = Map([])
@@ -1078,7 +1082,8 @@ async test "abrupt EOF retains a failed final drain for later boundary retry" {
     let stderr_task = group.spawn(no_wait=true, () => "")
     engine.run(manager, messages, stderr_task)
 
-    assert_true(engine.exit.done)
+    // `run` returning is retirement: the slot is clear and every lifecycle
+    // event this engine owed has been published.
     assert_true(slot.engine is None)
     assert_true(
       follower.durable_finishes
@@ -1120,13 +1125,13 @@ async test "abrupt EOF retains a failed final drain for later boundary retry" {
 ///|
 #cfg(not(platform="windows"))
 async test "workspace detach drains an orphaned pending follower before commit" {
-  archive_env_test_lock.acquire()
-  defer archive_env_test_lock.release()
+  ambient_env_test_lock.acquire()
+  defer ambient_env_test_lock.release()
   let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
   let dir = @fs.tmpdir(prefix="openseek-detach-orphan-follower-")
   let global_root : @pathx.Absolute = @pathx.Path(dir + "/global").resolve()
   let workspace : @pathx.Absolute = @pathx.Path(dir + "/workspace").resolve()
-  let root = workspace_session_root(workspace)
+  let root = @workspaces.store_root(workspace)
   let engine_path = dir + "/engine.sh"
   let calls = dir + "/calls"
   let session = "s-detach-orphan"
@@ -1209,7 +1214,7 @@ async test "workspace detach drains an orphaned pending follower before commit" 
 async test "workspace detach refuses an idle engine whose follower cannot drain" {
   let dir = @fs.tmpdir(prefix="openseek-detach-follower-stop-")
   let workspace : @pathx.Absolute = @pathx.Path(dir + "/workspace").resolve()
-  let root = workspace_session_root(workspace)
+  let root = @workspaces.store_root(workspace)
   let engine_path = dir + "/engine.sh"
   let session = "s-detach-fail"
   let record : @pathx.Path = Path(session_store_file(root, session))
@@ -1236,12 +1241,16 @@ async test "workspace detach refuses an idle engine whose follower cannot drain"
       fail("expected follower")
     }
     let (child_stdin, writer) = @process.write_to_process()
+    // The real EOF consumer reaches this state after its first failed final
+    // scan: the child is gone and the consumer with it, but the follower is
+    // still live. Detach must retry it and propagate the failure again — so
+    // the fixture's child exits on its own and its close barrier is the
+    // process task, exactly as it would be in production.
     let process = @process.spawn(
       group,
       "/bin/sh",
-      ["-c", "sleep 30"],
+      ["-c", "exit 0"],
       stdin=child_stdin,
-      cancel_handler=@process.graceful_cancel(timeout=10),
       no_wait=true,
     )
     let engine : ServeEngine = {
@@ -1249,16 +1258,13 @@ async test "workspace detach refuses an idle engine whose follower cannot drain"
       session_root: Some(root),
       spec_key: "test",
       writer,
-      command_lock: Mutex(),
+      commands: Queue(kind=Unbounded),
       process,
       sink,
       follower: Some(follower),
-      // The real EOF consumer reaches this state after its first failed final
-      // scan. Detach must retry the still-live follower and propagate again.
-      exit: { process_done: true, done: true },
-      latest_run: Some("r-detach-fail"),
-      phase: Idle,
-      accepts_commands: false,
+      consumer: None,
+      phase: Idle(last_run=Some("r-detach-fail")),
+      condemned: true,
       steer_runs: SteerRunTracker::new(),
     }
     let sessions : Map[String, SessionSlot] = Map([])
@@ -1451,7 +1457,11 @@ fn follower_state_fixture(session : String) -> SessionFollower {
 
 ///|
 #cfg(not(platform="windows"))
-async test "failed command stays unusable through close timeout and repeated cancel" {
+/// Retirement no longer runs on a request's task, so there is nothing left to
+/// shield it from; what still has to hold is that a child which honours
+/// neither stdin EOF nor cancellation cannot strand the conversation. Both
+/// deadlines are spent here, which is why this test is slow.
+async test "failed command stays unusable through a close timeout" {
   let manager = new_engine_manager("unused")
   let emitted : Array[EngineEvent] = []
   let sink = EventSink(fn(event) { emitted.push(event) })
@@ -1459,12 +1469,21 @@ async test "failed command stays unusable through close timeout and repeated can
   manager.followers["s-timeout"] = follower
   @async.with_task_group(group => {
     let (child_stdin, writer) = @process.write_to_process()
+    // A child that honours neither stdin EOF nor cancellation: it ignores the
+    // closed pipe, and its cancellation handler does not manage to kill it
+    // until after the cancel deadline has passed. The process task is the
+    // close barrier, so this is the only way to spend that second deadline —
+    // a handler that terminates the child promptly would not.
+    let late_cancel = @process.graceful_cancel(timeout=10)
     let process = @process.spawn(
       group,
       "/bin/sh",
       ["-c", "sleep 30"],
       stdin=child_stdin,
-      cancel_handler=@process.graceful_cancel(timeout=10),
+      cancel_handler=CancellationHandler(pid => {
+        @async.sleep(ServeCancelWaitMs + 500)
+        late_cancel(pid)
+      }),
       no_wait=true,
     )
     let engine : ServeEngine = {
@@ -1472,42 +1491,33 @@ async test "failed command stays unusable through close timeout and repeated can
       session_root: None,
       spec_key: "test",
       writer,
-      command_lock: Mutex(),
+      commands: Queue(kind=Unbounded),
       process,
       sink,
       follower: Some(follower),
-      exit: { process_done: false, done: false },
-      latest_run: Some("r-timeout"),
-      phase: Running(cancel_requested=false, compact_queued=false),
-      accepts_commands: true,
+      consumer: None,
+      phase: Running(
+        run_id="r-timeout",
+        cancel_requested=false,
+        compact_queued=false,
+      ),
+      condemned: false,
       steer_runs: SteerRunTracker::new(),
     }
     let sessions : Map[String, SessionSlot] = Map([])
     let slot = slot_for(sessions, "s-timeout")
     slot.engine = Some(engine)
     manager.pump = Serving(sessions~)
-    let cleanup = group.spawn(() => {
-      retire_failed_command(manager, engine, "partial command")
-    })
-    @async.sleep(20)
-    cleanup.cancel()
-    @async.sleep(20)
-    cleanup.cancel()
-    let cancelled = try {
-      cleanup.wait()
-      false
-    } catch {
-      error if @async.is_cancellation_error(error) => true
-      _ => false
-    }
-    assert_true(cancelled)
-    assert_false(engine.accepts_commands)
-    assert_true(engine.phase is Idle)
-    assert_true(engine.latest_run is None)
+    retire_failed_command(manager, engine, "partial command")
+    assert_true(engine.condemned)
+    assert_true(slot.live() is None)
+    assert_true(engine.phase is Idle(last_run=None))
     assert_true(
       follower.durable_finishes is [{ run_id: "r-timeout", published: false }],
     )
-    assert_false(engine.exit.done)
+    // The child was never proved gone, so the slot and follower stay in place
+    // and every successor must retry this close barrier rather than reuse it.
+    assert_false(engine.is_retired())
     assert_true(slot.engine is Some(current) && physical_equal(current, engine))
     assert_true(
       manager.followers.get("s-timeout") is Some(current) &&
