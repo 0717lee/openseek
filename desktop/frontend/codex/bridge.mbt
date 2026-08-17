@@ -903,7 +903,11 @@ fn State::login(
     @commands.codex_account_login_start,
     {
       kind_: "chatgpt",
-      use_hosted_login_success_page: true,
+      // The hosted success page is chatgpt.com's "open the Codex app"
+      // bounce; SeekMoon is the app the user should return to, so keep the
+      // local loopback page, which ends with "you can close this tab" and
+      // navigates nowhere.
+      use_hosted_login_success_page: false,
       app_brand: "codex",
     },
   )
