@@ -222,20 +222,12 @@ priv enum DshReplyKind {
     session_id~ : String,
     generation~ : Int,
     project~ : String,
-    worktree_path~ : String,
     draft~ : @composer.Draft
   )
-  DshPromptMoveReply(
+  DshPromptSessionReply(
     session_id~ : String,
     generation~ : Int,
     project~ : String,
-    worktree_path~ : String,
-    draft~ : @composer.Draft
-  )
-  DshPromptWorkspacesReply(
-    session_id~ : String,
-    generation~ : Int,
-    worktree_path~ : String,
     draft~ : @composer.Draft
   )
   DshPromptReply(
@@ -451,8 +443,7 @@ fn State::busy(self : State) -> Bool {
 fn DshReplyKind::prompt_origin(self : DshReplyKind) -> (String, Int)? {
   match self {
     DshPromptWorkspaceReply(session_id~, generation~, ..)
-    | DshPromptMoveReply(session_id~, generation~, ..)
-    | DshPromptWorkspacesReply(session_id~, generation~, ..)
+    | DshPromptSessionReply(session_id~, generation~, ..)
     | DshPromptReply(session_id~, generation~, ..) =>
       Some((session_id, generation))
     DshPromptHistoryReply(reconciliation) =>
@@ -470,8 +461,7 @@ fn DshReplyKind::prompt_draft(
 ) -> (String, @composer.Draft)? {
   match self {
     DshPromptWorkspaceReply(session_id~, draft~, ..)
-    | DshPromptMoveReply(session_id~, draft~, ..)
-    | DshPromptWorkspacesReply(session_id~, draft~, ..)
+    | DshPromptSessionReply(session_id~, draft~, ..)
     | DshPromptReply(session_id~, draft~, ..) => Some((session_id, draft))
     _ => None
   }

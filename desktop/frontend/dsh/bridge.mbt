@@ -10,8 +10,7 @@
 /// its probe is a `workspace.list` request too.
 fn DshReplyKind::ordered_lane(self : DshReplyKind) -> String? {
   match self {
-    DshReconnectReply | DshWorkspacesReply | DshPromptWorkspacesReply(..) =>
-      Some("dsh-workspace-list")
+    DshReconnectReply | DshWorkspacesReply => Some("dsh-workspace-list")
     DshSessionsReply(..) => Some("dsh-session-list")
     DshHistoryReply(session_id) => Some("dsh-history-" + session_id)
     DshPromptHistoryReply(reconciliation) =>
@@ -64,25 +63,10 @@ fn DshReplyKind::request(
       if reply.workspace_accepted == Some(false) {
         // The actor published a newer Workspace membership event while this
         // list was in flight. Its replacement list is already queued on the
-        // same lane; never let the rejected rows reach the renderer. A prompt
-        // chain must still settle instead of remaining globally busy.
-        if self is DshPromptWorkspacesReply(..) {
-          scheduler.add(
-            dispatch(
-              Failed(
-                kind=self,
-                message="DeepSeek Harness Workspace changed while preparing the prompt",
-              ),
-            ),
-          )
-        }
+        // same lane; never let the rejected rows reach the renderer.
         return
       }
-      if (
-          self is DshReconnectReply ||
-          self is DshWorkspacesReply ||
-          self is DshPromptWorkspacesReply(..)
-        ) &&
+      if (self is DshReconnectReply || self is DshWorkspacesReply) &&
         DshEnvelope(reply.value).value() is Some(_) &&
         reply.workspace_accepted is None {
         scheduler.add(
@@ -123,15 +107,6 @@ test "dsh snapshot replies select independent ordered lanes" {
   assert_eq(DshReconnectReply.ordered_lane(), Some("dsh-workspace-list"))
   assert_eq(DshWorkspacesReply.ordered_lane(), Some("dsh-workspace-list"))
   assert_eq(
-    DshPromptWorkspacesReply(
-      session_id="session-1",
-      generation=1,
-      worktree_path="/work/project/.worktrees/wt-1",
-      draft={ task: "inspect this project", mentions: [] },
-    ).ordered_lane(),
-    Some("dsh-workspace-list"),
-  )
-  assert_eq(
     DshSessionsReply(session_revision=-1).ordered_lane(),
     Some("dsh-session-list"),
   )
@@ -149,7 +124,6 @@ test "dsh snapshot replies select independent ordered lanes" {
       session_id="session-1",
       generation=1,
       project="/work/project",
-      worktree_path="/work/project/.worktrees/wt-1",
       draft={ task: "inspect this project", mentions: [] },
     ).ordered_lane(),
     None,
@@ -426,32 +400,42 @@ fn State::register_prompt_workspace(
   worktree_path : String,
   draft : @composer.Draft,
 ) -> @cmd.Cmd {
-  DshPromptWorkspaceReply(
-    session_id~,
-    generation~,
-    project~,
-    worktree_path~,
-    draft~,
-  ).request(dispatch, "workspace.create", { "path": worktree_path })
+  DshPromptWorkspaceReply(session_id~, generation~, project~, draft~).request(
+    dispatch,
+    "workspace.create",
+    { "path": worktree_path },
+  )
 }
 
 ///|
-/// Move the original blank conversation instead of creating a replacement in
-/// the generated Workspace.
-fn State::move_prompt_session(
+/// Start the conversation inside the generated Workspace.
+///
+/// dsh has no operation that moves an existing conversation to another
+/// directory. A session's cwd is fixed in its header when it is created, and
+/// Workspace membership is derived from that cwd rather than stored:
+/// `sessionIds` filters on `sessionPath(id) == record.path`, `attachSession`
+/// refuses a session whose cwd resolves elsewhere, and `insertSessionBefore`
+/// only reorders sessions a Workspace already accounts for. Creating the
+/// session against `workspaceId` is what makes it belong here — dsh takes its
+/// cwd from the Workspace path and attaches it in the same call.
+///
+/// `session_id` remains on the reply as the submission's origin: the composer
+/// fence, the draft snapshot, and every failure message stay keyed to the
+/// conversation the user typed in, even though the prompt goes to the session
+/// this call creates. That blank conversation keeps its own directory.
+fn State::create_prompt_session(
   _self : State,
   dispatch : @cmd.Emit[Msg],
   session_id : String,
   generation : Int,
   project : String,
-  worktree_path : String,
   workspace_id : String,
   draft : @composer.Draft,
 ) -> @cmd.Cmd {
-  DshPromptMoveReply(session_id~, generation~, project~, worktree_path~, draft~).request(
+  DshPromptSessionReply(session_id~, generation~, project~, draft~).request(
     dispatch,
-    "workspace.insertSessionBefore",
-    { "workspaceId": workspace_id, "sessionId": session_id },
+    "session.create",
+    { "workspaceId": workspace_id },
   )
 }
 

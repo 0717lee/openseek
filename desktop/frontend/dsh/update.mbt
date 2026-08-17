@@ -366,40 +366,6 @@ pub fn update(
           },
         )
       }
-      if kind
-        is DshPromptMoveReply(
-          session_id~,
-          generation~,
-          worktree_path~,
-          draft~,
-          ..
-        ) {
-        if state.prompt_generation != generation {
-          return (@cmd.none, state)
-        }
-        // A lost HTTP response does not say whether dsh committed the move.
-        // Re-read its authoritative Workspace membership: the prompt continues
-        // when the session is in this checkout, and settles with the draft
-        // preserved when the list proves the move did not happen.
-        let verify = DshPromptWorkspacesReply(
-          session_id~,
-          generation~,
-          worktree_path~,
-          draft~,
-        ).request(dispatch, "workspace.list", {})
-        return (
-          verify,
-          if state.active_id == Some(session_id) {
-            {
-              ..state,
-              loading: true,
-              notice: "Verifying whether DeepSeek Harness moved the conversation…",
-            }
-          } else {
-            state
-          },
-        )
-      }
       let failed_prompts = match kind.prompt_draft() {
         Some((session_id, draft)) =>
           state.failed_prompts.put(session_id, draft, message)
@@ -731,7 +697,7 @@ fn State::with_reply(
     )
   }
   match kind {
-    DshReconnectReply | DshWorkspacesReply | DshPromptWorkspacesReply(..) => {
+    DshReconnectReply | DshWorkspacesReply => {
       let workspaces : Array[DshWorkspaceRow] = []
       if value is Object(fields) && fields.get("items") is Some(Array(items)) {
         for item in items {
@@ -740,61 +706,16 @@ fn State::with_reply(
           }
         }
       }
-      if kind
-        is DshPromptWorkspacesReply(session_id~, worktree_path~, draft~, ..) &&
-        !workspaces
-        .iter()
-        .any(workspace => {
-          workspace.path == worktree_path &&
-          workspace.session_ids.contains(session_id)
-        }) {
-        let message = "DeepSeek Harness did not move the conversation into its worktree Workspace"
-        // The verification failure belongs to the immutable first-send owner,
-        // even if another conversation is visible by the time workspace.list
-        // returns. Preserve both the draft and its diagnostic, and settle the
-        // global submission fence here: the generated checkout stays as an
-        // ordinary unowned worktree the user can keep or remove.
-        let failed_prompts = self.failed_prompts.put(session_id, draft, message)
-        let settled = {
-          ..self,
-          workspaces,
-          failed_prompts,
-          prompt_pending_session: if self.prompt_pending_session ==
-            Some(session_id) {
-            None
-          } else {
-            self.prompt_pending_session
-          },
-        }
-        return if self.active_id == Some(session_id) {
-          (@cmd.none, { ..settled, loading: false, notice: message })
-        } else {
-          (@cmd.none, settled)
-        }
-      }
       (
-        match kind {
-          DshReconnectReply =>
-            @cmd.batch([
-              self.list_sessions(dispatch),
-              DshPendingReply.pending(dispatch),
-            ])
-          DshPromptWorkspacesReply(session_id~, generation~, draft~, ..) =>
-            self.send_prompt(
-              dispatch,
-              session_id,
-              draft,
-              generation,
-              mode="queue",
-            )
-          _ => @cmd.none
-        },
-        if kind is DshPromptWorkspacesReply(session_id~, ..) &&
-          self.active_id != Some(session_id) {
-          { ..self, workspaces, }
+        if kind is DshReconnectReply {
+          @cmd.batch([
+            self.list_sessions(dispatch),
+            DshPendingReply.pending(dispatch),
+          ])
         } else {
-          { ..self, workspaces, loading: kind is DshPromptWorkspacesReply(..) }
+          @cmd.none
         },
+        { ..self, workspaces, },
       )
     }
     DshWorkspaceCreateReply(selection_generation) => {
@@ -1085,13 +1006,7 @@ fn State::with_reply(
       // now was produced concurrently and must not be erased by this reply.
       (@cmd.none, { ..self, models, })
     }
-    DshPromptWorkspaceReply(
-      session_id~,
-      generation~,
-      project~,
-      worktree_path~,
-      draft~
-    ) => {
+    DshPromptWorkspaceReply(session_id~, generation~, project~, draft~) => {
       guard value is Object(fields) &&
         fields.get("workspace") is Some(Object(workspace)) &&
         @jsonx.json_text(workspace, "workspaceId") is Some(workspace_id) else {
@@ -1114,33 +1029,68 @@ fn State::with_reply(
         }
       }
       (
-        self.move_prompt_session(
-          dispatch, session_id, generation, project, worktree_path, workspace_id,
-          draft,
+        self.create_prompt_session(
+          dispatch, session_id, generation, project, workspace_id, draft,
         ),
         self,
       )
     }
-    DshPromptMoveReply(
-      session_id~,
-      generation~,
-      project~,
-      worktree_path~,
-      draft~
-    ) =>
-      (
-        DshPromptWorkspacesReply(
-          session_id~,
-          generation~,
-          worktree_path~,
-          draft~,
-        ).request(dispatch, "workspace.list", {}),
-        if self.active_id == Some(session_id) {
-          { ..self, worktree_project: Some(project), loading: true }
+    DshPromptSessionReply(session_id~, generation~, project~, draft~) => {
+      guard value is Object(fields) &&
+        @jsonx.json_text(fields, "sessionId") is Some(created) else {
+        let message = "DeepSeek Harness returned a malformed session.create reply"
+        let failed_prompts = self.failed_prompts.put(session_id, draft, message)
+        let settled = {
+          ..self,
+          failed_prompts,
+          prompt_pending_session: if self.prompt_pending_session ==
+            Some(session_id) {
+            None
+          } else {
+            self.prompt_pending_session
+          },
+        }
+        return if self.active_id == Some(session_id) {
+          (@cmd.none, { ..settled, loading: false, notice: message })
         } else {
-          self
+          (@cmd.none, settled)
+        }
+      }
+      // The prompt belongs to the session dsh just created in the worktree,
+      // so the submission fence moves with it. The originating blank
+      // conversation keeps its own directory and its place in the sidebar.
+      let follow = self.active_id == Some(session_id)
+      let commands = [
+        self.send_prompt(dispatch, created, draft, generation, mode="queue"),
+        // The grant table is rebuilt only from workspace.list, so Files and
+        // Terminal reach the new checkout only after this refresh; the session
+        // list is what shows the created conversation under it.
+        DshWorkspacesReply.request(dispatch, "workspace.list", {}),
+        self.list_sessions(dispatch),
+      ]
+      if follow {
+        commands.push(self.load_models(dispatch, created))
+      }
+      (
+        @cmd.batch(commands),
+        if follow {
+          {
+            ..self,
+            active_id: Some(created),
+            selection_generation: self.selection_generation + 1,
+            prompt_pending_session: Some(created),
+            worktree_project: Some(project),
+            events: [],
+            event_sequence: -1,
+            streaming: "",
+            models: DshModelsLoading(session_id=created),
+            loading: true,
+          }
+        } else {
+          { ..self, prompt_pending_session: Some(created) }
         },
       )
+    }
     DshPromptReply(session_id~, draft~, generation~) => {
       guard self.prompt_generation == generation else {
         return (@cmd.none, self)
@@ -3928,7 +3878,12 @@ test "dsh model selection settles the shared composer catalog" {
 }
 
 ///|
-test "blank dsh first prompt keeps its session while adopting a worktree" {
+/// The Worktree first-send pipeline. dsh cannot move a conversation between
+/// directories, so choosing Worktree provisions a checkout, registers it as a
+/// dsh Workspace, and starts a NEW conversation inside it. The blank one the
+/// user typed in keeps its own directory; only the submission — its fence,
+/// its draft, and its diagnostics — follows the created session.
+test "a Worktree first send starts the conversation inside the new checkout" {
   let selected : DshModelSelection = {
     provider: "deepseek",
     model: "chat",
@@ -3965,6 +3920,7 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
     event_sequence: 17,
   }
   let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let draft : @composer.Draft = { task: "inspect this project", mentions: [] }
   let (_, worktree) = update(dispatch, ToggleWorktreeMode, state)
   assert_true(worktree.placement is @composer.FreshWorktree)
   assert_eq(worktree.worktree_project, Some("/work/project"))
@@ -3972,6 +3928,7 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
   assert_eq(sending.prompt_generation, 1)
   assert_eq(sending.prompt_pending_session, Some("session-1"))
   assert_eq(sending.prompt_after_seq, 17)
+  // A completion from an older submission cannot restart the pipeline.
   let (_, stale) = update(
     dispatch,
     WorktreeReady(
@@ -3979,42 +3936,11 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
       generation=0,
       project="/work/project",
       path="/work/project/.worktrees/wt-1",
-      draft={ task: "inspect this project", mentions: [] },
+      draft~,
     ),
     sending,
   )
   assert_true(stale == sending)
-  let navigated = {
-    ..sending,
-    active_id: Some("session-2"),
-    models: DshModelsReady(
-      session_id="session-2",
-      options=[{ selection: selected, label: "DeepSeek / Chat" }],
-      selected~,
-      routable=true,
-    ),
-    placement: @composer.LocalCheckout,
-    worktree_project: None,
-    draft: "draft for session 2",
-    loading: false,
-  }
-  let (_, background_setup) = update(
-    dispatch,
-    WorktreeReady(
-      session_id="session-1",
-      generation=1,
-      project="/work/project",
-      path="/work/project/.worktrees/wt-1",
-      draft={ task: "inspect this project", mentions: [] },
-    ),
-    navigated,
-  )
-  assert_eq(background_setup.active_id, Some("session-2"))
-  assert_eq(background_setup.prompt_pending_session, Some("session-1"))
-  assert_eq(background_setup.draft, "draft for session 2")
-  assert_eq(background_setup.worktree_project, None)
-  assert_false(background_setup.loading)
-  assert_true(background_setup.busy())
   let (_, registered) = update(
     dispatch,
     WorktreeReady(
@@ -4022,474 +3948,118 @@ test "blank dsh first prompt keeps its session while adopting a worktree" {
       generation=1,
       project="/work/project",
       path="/work/project/.worktrees/wt-1",
-      draft={ task: "inspect this project", mentions: [] },
+      draft~,
     ),
     sending,
   )
-  // A setup stage that fails after the checkout exists settles immediately:
-  // there is no cleanup to wait for, and the generated checkout stays as an
-  // ordinary unowned worktree.
-  let (_, failed_setup) = update(
-    dispatch,
-    Failed(
-      kind=DshPromptWorkspaceReply(
-        session_id="session-1",
-        generation=1,
-        project="/work/project",
-        worktree_path="/work/project/.worktrees/wt-1",
-        draft={ task: "inspect this project", mentions: [] },
-      ),
-      message="workspace.create failed",
-    ),
-    registered,
-  )
-  assert_eq(failed_setup.prompt_pending_session, None)
-  assert_false(failed_setup.busy())
-  assert_false(failed_setup.loading)
-  assert_eq(failed_setup.notice, "workspace.create failed")
-  let (_, reopened_failed_setup) = update(dispatch, OpenSession("session-1"), {
-    ..failed_setup,
-    active_id: Some("session-2"),
-    draft: "elsewhere",
-  })
-  assert_eq(reopened_failed_setup.draft, "inspect this project")
-  let (_, verifying_lost_move_reply) = update(
-    dispatch,
-    Failed(
-      kind=DshPromptMoveReply(
-        session_id="session-1",
-        generation=1,
-        project="/work/project",
-        worktree_path="/work/project/.worktrees/wt-1",
-        draft={ task: "inspect this project", mentions: [] },
-      ),
-      message="move response was lost",
-    ),
-    registered,
-  )
-  assert_eq(
-    verifying_lost_move_reply.notice,
-    "Verifying whether DeepSeek Harness moved the conversation…",
-  )
-  assert_eq(verifying_lost_move_reply.prompt_pending_session, Some("session-1"))
-  assert_true(verifying_lost_move_reply.loading)
-  let (_, rejected_move) = update(
-    dispatch,
-    Reply(
-      kind=DshPromptMoveReply(
-        session_id="session-1",
-        generation=1,
-        project="/work/project",
-        worktree_path="/work/project/.worktrees/wt-1",
-        draft={ task: "inspect this project", mentions: [] },
-      ),
-      value={
-        "type": "server-response",
-        "rpcId": "move-rejected",
-        "result": {
-          "ok": false,
-          "error": { "code": "move-rejected", "message": "not movable" },
+  let workspace_created : Json = {
+    "type": "server-response",
+    "rpcId": "workspace-1",
+    "result": {
+      "ok": true,
+      "value": {
+        "workspace": {
+          "workspaceId": "workspace-worktree",
+          "title": "wt-1",
+          "path": "/work/project/.worktrees/wt-1",
+          "sessionIds": [],
         },
       },
-    ),
-    registered,
-  )
-  // dsh definitively refused the move: the composer is released with its
-  // draft, and the generated checkout is left to the ordinary worktree UI.
-  assert_eq(rejected_move.notice, "move-rejected: not movable")
-  assert_eq(rejected_move.prompt_pending_session, None)
-  assert_false(rejected_move.loading)
-  let registered_navigated = {
-    ..registered,
-    active_id: Some("session-2"),
-    models: DshModelsReady(
-      session_id="session-2",
-      options=[{ selection: selected, label: "DeepSeek / Chat" }],
-      selected~,
-      routable=true,
-    ),
-    placement: @composer.LocalCheckout,
-    worktree_project: None,
-    draft: "draft for session 2",
-    loading: false,
-    notice: "session 2 notice",
+    },
   }
-  let (_, background_workspace_failed) = update(
+  let workspace_reply = DshPromptWorkspaceReply(
+    session_id="session-1",
+    generation=1,
+    project="/work/project",
+    draft~,
+  )
+  let session_reply = DshPromptSessionReply(
+    session_id="session-1",
+    generation=1,
+    project="/work/project",
+    draft~,
+  )
+  let (_, adopting) = registered.with_reply(
+    dispatch, workspace_reply, workspace_created,
+  )
+  // Registering the directory changes nothing the page renders; the fence
+  // still belongs to the conversation the user submitted from.
+  assert_eq(adopting.prompt_pending_session, Some("session-1"))
+  let session_created : Json = {
+    "type": "server-response",
+    "rpcId": "session-1",
+    "result": { "ok": true, "value": { "sessionId": "session-wt" } },
+  }
+  let (_, started) = adopting.with_reply(
+    dispatch, session_reply, session_created,
+  )
+  // The prompt now belongs to the created session, and so does the page.
+  assert_eq(started.active_id, Some("session-wt"))
+  assert_eq(started.prompt_pending_session, Some("session-wt"))
+  assert_eq(started.worktree_project, Some("/work/project"))
+  assert_eq(started.selection_generation, state.selection_generation + 1)
+  assert_true(started.models is DshModelsLoading(session_id="session-wt"))
+  assert_true(started.events.is_empty())
+  assert_eq(started.streaming, "")
+  assert_true(started.busy())
+  let (_, settled) = started.with_reply(
     dispatch,
-    Failed(
-      kind=DshPromptWorkspaceReply(
-        session_id="session-1",
-        generation=1,
-        project="/work/project",
-        worktree_path="/work/project/.worktrees/wt-1",
-        draft={ task: "inspect this project", mentions: [] },
-      ),
-      message="workspace transport failed",
-    ),
-    registered_navigated,
-  )
-  assert_eq(background_workspace_failed.active_id, Some("session-2"))
-  assert_eq(background_workspace_failed.draft, "draft for session 2")
-  assert_eq(background_workspace_failed.prompt_pending_session, None)
-  let (_, reopened_workspace_failure) = update(
-    dispatch,
-    OpenSession("session-1"),
-    background_workspace_failed,
-  )
-  assert_eq(reopened_workspace_failure.draft, "inspect this project")
-  assert_eq(reopened_workspace_failure.notice, "workspace transport failed")
-  let (_, background_move_failed) = update(
-    dispatch,
-    Failed(
-      kind=DshPromptMoveReply(
-        session_id="session-1",
-        generation=1,
-        project="/work/project",
-        worktree_path="/work/project/.worktrees/wt-1",
-        draft={ task: "inspect this project", mentions: [] },
-      ),
-      message="move failed",
-    ),
-    registered_navigated,
-  )
-  // A lost move reply is ambiguous about where the conversation now lives, so
-  // it still verifies against dsh's Workspace list before settling. The
-  // visible page is untouched while that verification runs.
-  assert_true(background_move_failed == registered_navigated)
-  let (_, background_moving) = update(
-    dispatch,
-    Reply(
-      kind=DshPromptWorkspaceReply(
-        session_id="session-1",
-        generation=1,
-        project="/work/project",
-        worktree_path="/work/project/.worktrees/wt-1",
-        draft={ task: "inspect this project", mentions: [] },
-      ),
-      value={
-        "type": "server-response",
-        "rpcId": "workspace-background",
-        "result": {
-          "ok": true,
-          "value": {
-            "workspace": {
-              "workspaceId": "workspace-worktree",
-              "title": "wt-1",
-              "path": "/work/project/.worktrees/wt-1",
-              "sessionIds": [],
-            },
-          },
-        },
-      },
-    ),
-    registered_navigated,
-  )
-  assert_true(background_moving == registered_navigated)
-  let (_, background_refreshing) = update(
-    dispatch,
-    Reply(
-      kind=DshPromptMoveReply(
-        session_id="session-1",
-        generation=1,
-        project="/work/project",
-        worktree_path="/work/project/.worktrees/wt-1",
-        draft={ task: "inspect this project", mentions: [] },
-      ),
-      value={
-        "type": "server-response",
-        "rpcId": "move-background",
-        "result": { "ok": true, "value": { "workspace": {} } },
-      },
-    ),
-    background_moving,
-  )
-  assert_true(background_refreshing == registered_navigated)
-  let (_, background_verification_failed) = update(
-    dispatch,
-    Failed(
-      kind=DshPromptWorkspacesReply(
-        session_id="session-1",
-        generation=1,
-        worktree_path="/work/project/.worktrees/wt-1",
-        draft={ task: "inspect this project", mentions: [] },
-      ),
-      message="workspace verification transport failed",
-    ),
-    background_refreshing,
-  )
-  assert_eq(background_verification_failed.prompt_pending_session, None)
-  let (_, reopened_verification_failure) = update(
-    dispatch,
-    OpenSession("session-1"),
-    background_verification_failed,
-  )
-  assert_eq(reopened_verification_failure.draft, "inspect this project")
-  assert_eq(
-    reopened_verification_failure.notice,
-    "workspace verification transport failed",
-  )
-  let (_, background_move_missing) = update(
-    dispatch,
-    Reply(
-      kind=DshPromptWorkspacesReply(
-        session_id="session-1",
-        generation=1,
-        worktree_path="/work/project/.worktrees/wt-1",
-        draft={ task: "inspect this project", mentions: [] },
-      ),
-      value={
-        "type": "server-response",
-        "rpcId": "workspace-list-background-missing",
-        "result": { "ok": true, "value": { "items": [] } },
-      },
-    ),
-    background_refreshing,
-  )
-  // A background verification failure must not replace the visible page, but
-  // its immutable first-send draft remains recoverable, and the submission
-  // fence settles with the reply that proved the move did not happen.
-  assert_eq(background_move_missing.active_id, Some("session-2"))
-  assert_eq(background_move_missing.draft, "draft for session 2")
-  assert_eq(background_move_missing.notice, "session 2 notice")
-  assert_eq(background_move_missing.prompt_pending_session, None)
-  let (_, reopened_missing_move) = update(
-    dispatch,
-    OpenSession("session-1"),
-    background_move_missing,
-  )
-  assert_eq(reopened_missing_move.draft, "inspect this project")
-  assert_true(reopened_missing_move.mentions.is_empty())
-  assert_eq(
-    reopened_missing_move.notice,
-    "DeepSeek Harness did not move the conversation into its worktree Workspace",
-  )
-  let (_, background_prompting) = update(
-    dispatch,
-    Reply(
-      kind=DshPromptWorkspacesReply(
-        session_id="session-1",
-        generation=1,
-        worktree_path="/work/project/.worktrees/wt-1",
-        draft={ task: "inspect this project", mentions: [] },
-      ),
-      value={
-        "type": "server-response",
-        "rpcId": "workspace-list-background",
-        "result": {
-          "ok": true,
-          "value": {
-            "items": [
-              {
-                "workspaceId": "workspace-worktree",
-                "title": "wt-1",
-                "path": "/work/project/.worktrees/wt-1",
-                "sessionIds": ["session-1"],
-              },
-            ],
-          },
-        },
-      },
-    ),
-    background_refreshing,
-  )
-  assert_eq(background_prompting.active_id, Some("session-2"))
-  assert_eq(background_prompting.draft, "draft for session 2")
-  assert_eq(background_prompting.worktree_project, None)
-  assert_eq(background_prompting.notice, "session 2 notice")
-  assert_false(background_prompting.loading)
-  assert_eq(background_prompting.prompt_pending_session, Some("session-1"))
-  let (_, background_settled) = update(
-    dispatch,
-    Reply(
-      kind=DshPromptReply(
-        session_id="session-1",
-        draft={ task: "inspect this project", mentions: [] },
-        generation=1,
-      ),
-      value={
-        "type": "server-response",
-        "rpcId": "prompt-background",
-        "result": { "ok": true, "value": {} },
-      },
-    ),
-    background_prompting,
-  )
-  assert_eq(background_settled.active_id, Some("session-2"))
-  assert_eq(background_settled.prompt_pending_session, None)
-  assert_eq(background_settled.draft, "draft for session 2")
-  assert_eq(background_settled.notice, "session 2 notice")
-  assert_false(background_settled.loading)
-  let (_, background_failed) = update(
-    dispatch,
-    Failed(
-      kind=DshPromptReply(
-        session_id="session-1",
-        draft={ task: "inspect this project", mentions: [] },
-        generation=1,
-      ),
-      message="prompt transport failed",
-    ),
-    background_prompting,
-  )
-  assert_eq(background_failed.active_id, Some("session-2"))
-  assert_eq(background_failed.prompt_pending_session, None)
-  assert_eq(background_failed.draft, "draft for session 2")
-  assert_eq(background_failed.notice, "session 2 notice")
-  assert_false(background_failed.loading)
-  assert_false(background_failed.busy())
-  let (_, reopened_failed) = update(
-    dispatch,
-    OpenSession("session-1"),
-    background_failed,
-  )
-  assert_eq(reopened_failed.draft, "inspect this project")
-  assert_true(reopened_failed.mentions.is_empty())
-  assert_eq(reopened_failed.notice, "prompt transport failed")
-  let (_, background_rejected) = update(
-    dispatch,
-    Reply(
-      kind=DshPromptReply(
-        session_id="session-1",
-        draft={ task: "inspect this project", mentions: [] },
-        generation=1,
-      ),
-      value={
-        "type": "server-response",
-        "rpcId": "prompt-background-rejected",
-        "result": {
-          "ok": false,
-          "error": { "code": "request-failed", "message": "prompt rejected" },
-        },
-      },
-    ),
-    background_prompting,
-  )
-  assert_eq(background_rejected.prompt_pending_session, None)
-  assert_eq(background_rejected.draft, "draft for session 2")
-  assert_eq(background_rejected.notice, "session 2 notice")
-  let (_, reopened_rejected) = update(
-    dispatch,
-    OpenSession("session-1"),
-    background_rejected,
-  )
-  assert_eq(reopened_rejected.draft, "inspect this project")
-  assert_eq(reopened_rejected.notice, "request-failed: prompt rejected")
-  let (_, moved) = registered.with_reply(
-    dispatch,
-    DshPromptWorkspaceReply(
-      session_id="session-1",
-      generation=1,
-      project="/work/project",
-      worktree_path="/work/project/.worktrees/wt-1",
-      draft={ task: "inspect this project", mentions: [] },
-    ),
-    {
-      "type": "server-response",
-      "rpcId": "workspace-1",
-      "result": {
-        "ok": true,
-        "value": {
-          "workspace": {
-            "workspaceId": "workspace-worktree",
-            "title": "wt-1",
-            "path": "/work/project/.worktrees/wt-1",
-            "sessionIds": [],
-          },
-        },
-      },
-    },
-  )
-  assert_eq(moved.prompt_pending_session, Some("session-1"))
-  let (_, refreshing_workspaces) = moved.with_reply(
-    dispatch,
-    DshPromptMoveReply(
-      session_id="session-1",
-      generation=1,
-      project="/work/project",
-      worktree_path="/work/project/.worktrees/wt-1",
-      draft={ task: "inspect this project", mentions: [] },
-    ),
-    {
-      "type": "server-response",
-      "rpcId": "move-1",
-      "result": { "ok": true, "value": { "workspace": {} } },
-    },
-  )
-  assert_eq(refreshing_workspaces.prompt_pending_session, Some("session-1"))
-  let (_, mismatched_workspace) = refreshing_workspaces.with_reply(
-    dispatch,
-    DshPromptWorkspacesReply(
-      session_id="session-1",
-      generation=1,
-      worktree_path="/work/project/.worktrees/wt-1",
-      draft={ task: "inspect this project", mentions: [] },
-    ),
-    {
-      "type": "server-response",
-      "rpcId": "workspace-list-wrong",
-      "result": {
-        "ok": true,
-        "value": {
-          "items": [
-            {
-              "workspaceId": "workspace-wrong",
-              "title": "wrong",
-              "path": "/work/other",
-              "sessionIds": ["session-1"],
-            },
-          ],
-        },
-      },
-    },
-  )
-  assert_eq(mismatched_workspace.prompt_pending_session, None)
-  assert_false(mismatched_workspace.loading)
-  assert_true(mismatched_workspace.notice.contains("did not move"))
-  let (_, prompted) = refreshing_workspaces.with_reply(
-    dispatch,
-    DshPromptWorkspacesReply(
-      session_id="session-1",
-      generation=1,
-      worktree_path="/work/project/.worktrees/wt-1",
-      draft={ task: "inspect this project", mentions: [] },
-    ),
-    {
-      "type": "server-response",
-      "rpcId": "workspace-list-1",
-      "result": {
-        "ok": true,
-        "value": {
-          "items": [
-            {
-              "workspaceId": "workspace-worktree",
-              "title": "wt-1",
-              "path": "/work/project/.worktrees/wt-1",
-              "sessionIds": ["session-1"],
-            },
-          ],
-        },
-      },
-    },
-  )
-  assert_eq(
-    prompted.active_workspace_path(),
-    Some("/work/project/.worktrees/wt-1"),
-  )
-  assert_eq(prompted.prompt_pending_session, Some("session-1"))
-  let (_, settled) = prompted.with_reply(
-    dispatch,
-    DshPromptReply(
-      session_id="session-1",
-      draft={ task: "inspect this project", mentions: [] },
-      generation=1,
-    ),
+    DshPromptReply(session_id="session-wt", draft~, generation=1),
     {
       "type": "server-response",
       "rpcId": "prompt-1",
       "result": { "ok": true, "value": {} },
     },
   )
-  assert_eq(settled.active_id, Some("session-1"))
+  assert_eq(settled.active_id, Some("session-wt"))
   assert_eq(settled.prompt_pending_session, None)
   assert_eq(settled.draft, "")
+  // The submission fence is released; the page stays busy only until the
+  // created session's own model catalog arrives.
+  assert_true(settled.models is DshModelsLoading(session_id="session-wt"))
+  // Navigating away before the session exists leaves the visible page alone,
+  // but the prompt still reaches the conversation dsh created for it.
+  let navigated = {
+    ..adopting,
+    active_id: Some("session-2"),
+    placement: @composer.LocalCheckout,
+    worktree_project: None,
+    draft: "draft for session 2",
+    loading: false,
+    notice: "session 2 notice",
+  }
+  let (_, background_started) = navigated.with_reply(
+    dispatch, session_reply, session_created,
+  )
+  assert_eq(background_started.active_id, Some("session-2"))
+  assert_eq(background_started.draft, "draft for session 2")
+  assert_eq(background_started.notice, "session 2 notice")
+  assert_eq(background_started.prompt_pending_session, Some("session-wt"))
+  // Every stage that can fail settles the fence and keeps the draft, because
+  // no stage leaves cleanup work behind: the checkout it may already have
+  // created is an ordinary worktree the user can remove.
+  for
+    failure in [
+      Failed(kind=workspace_reply, message="workspace.create failed"),
+      Failed(kind=session_reply, message="session.create failed"),
+    ] {
+    let (_, failed) = update(dispatch, failure, adopting)
+    assert_eq(failed.prompt_pending_session, None)
+    assert_false(failed.busy())
+    assert_false(failed.loading)
+    let (_, reopened) = update(dispatch, OpenSession("session-1"), {
+      ..failed,
+      active_id: Some("session-2"),
+      draft: "elsewhere",
+    })
+    assert_eq(reopened.draft, "inspect this project")
+  }
+  // A malformed success is a failure of the same shape.
+  let (_, malformed) = adopting.with_reply(dispatch, session_reply, {
+    "type": "server-response",
+    "rpcId": "session-2",
+    "result": { "ok": true, "value": {} },
+  })
+  assert_eq(malformed.prompt_pending_session, None)
+  assert_true(malformed.notice.contains("malformed session.create reply"))
 }

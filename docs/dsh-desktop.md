@@ -50,8 +50,12 @@ The browser state lives in `desktop/frontend/dsh`. It currently supports:
   provider, model, and optional reasoning-effort tuple from the shared
   composer;
 - choosing **Worktree** for a blank conversation: Desktop creates its normal
-  Git worktree, registers that existing directory as a dsh Workspace, moves
-  the same blank session into it, and only then sends the first prompt;
+  Git worktree, registers that directory as a dsh Workspace, starts a new
+  conversation inside it, and sends the first prompt there. dsh has no
+  operation that moves a conversation between directories — a session's cwd is
+  fixed in its header at creation and Workspace membership is derived from that
+  cwd — so the blank conversation the user typed in keeps its own directory and
+  stays in the sidebar; only the submission moves;
 - loading the newest 200 message groups for a selected session;
 - rendering user, assistant, reasoning, tool call/result, and turn-error rows
   through OpenSeek's shared transcript (model-only `surfaceOp: replace` copies
@@ -61,12 +65,13 @@ The browser state lives in `desktop/frontend/dsh`. It currently supports:
 - allowing or rejecting a tool approval once;
 - answering single-select, multi-select, and free-text questions.
 
-Only the ten dsh methods used by that page are allowlisted: `workspace.list`,
-`workspace.create`, `workspace.insertSessionBefore`, `session.list`,
-`session.create`, `session.history`, `session.models`, `session.selectModel`,
-`session.prompt`, and `session.cancel`. Settings, credentials, arbitrary path
-operations, plugin management, and other dsh APIs are not exposed by this
-integration.
+Only the nine dsh methods used by that page are allowlisted: `workspace.list`,
+`workspace.create`, `session.list`, `session.create`, `session.history`,
+`session.models`, `session.selectModel`, `session.prompt`, and
+`session.cancel`. Settings, credentials, arbitrary path operations, plugin
+management, the remaining Workspace mutations (`rename`, `delete`,
+`insertSessionBefore`, `archiveSession`), and other dsh APIs are not exposed by
+this integration.
 
 ## Local-only boundary
 

@@ -259,9 +259,8 @@ fn DshWorkspaceAuthorizations::DshWorkspaceAuthorizations() -> DshWorkspaceAutho
 ///|
 fn DshDesktopCall::is_allowed(self : DshDesktopCall) -> Bool {
   [
-    "workspace.list", "workspace.create", "workspace.insertSessionBefore", "session.list",
-    "session.create", "session.history", "session.models", "session.selectModel",
-    "session.prompt", "session.cancel",
+    "workspace.list", "workspace.create", "session.list", "session.create", "session.history",
+    "session.models", "session.selectModel", "session.prompt", "session.cancel",
   ].contains(self.method_)
 }
 
@@ -447,9 +446,7 @@ fn DshDesktopCall::frontend_reply(
   self : DshDesktopCall,
   reply : Json,
 ) -> Json raise @host.PayloadError {
-  guard self.method_ == "workspace.list" ||
-    self.method_ == "workspace.create" ||
-    self.method_ == "workspace.insertSessionBefore" else {
+  guard self.method_ == "workspace.list" || self.method_ == "workspace.create" else {
     return reply
   }
   guard reply is Object(envelope_fields) &&
@@ -1145,6 +1142,14 @@ test "dsh endpoints stay in the local Desktop catalog" {
     method_: "session.selectModel",
     payload: {},
   }
+  let create_session : DshDesktopCall = {
+    method_: "session.create",
+    payload: {},
+  }
+  // dsh cannot move a conversation between directories, so the Worktree flow
+  // starts one in the generated Workspace instead of reordering an existing
+  // account. Neither the reorder nor any other unused Workspace mutation is
+  // reachable from this page.
   let insert_session : DshDesktopCall = {
     method_: "workspace.insertSessionBefore",
     payload: {},
@@ -1155,7 +1160,8 @@ test "dsh endpoints stay in the local Desktop catalog" {
   }
   assert_true(models.is_allowed())
   assert_true(select_model.is_allowed())
-  assert_true(insert_session.is_allowed())
+  assert_true(create_session.is_allowed())
+  assert_false(insert_session.is_allowed())
   assert_false(delete_workspace.is_allowed())
 }
 
@@ -1199,13 +1205,13 @@ test "dsh workspace paths cross the native API boundary reversibly" {
     fail("expected a rewritten dsh workspace.list reply")
   }
   assert_eq(workspace.get("path"), Some(Json::string(resource_path)))
-  let move_call : DshDesktopCall = {
-    method_: "workspace.insertSessionBefore",
+  let create_call : DshDesktopCall = {
+    method_: "workspace.create",
     payload: {},
   }
-  guard move_call.frontend_reply({
+  guard create_call.frontend_reply({
       "type": "server-response",
-      "rpcId": "workspace-move-1",
+      "rpcId": "workspace-create-1",
       "result": {
         "ok": true,
         "value": {
@@ -1218,13 +1224,13 @@ test "dsh workspace paths cross the native API boundary reversibly" {
         },
       },
     })
-    is Object(move_envelope) &&
-    move_envelope.get("result") is Some(Object(move_result)) &&
-    move_result.get("value") is Some(Object(move_value)) &&
-    move_value.get("workspace") is Some(Object(moved_workspace)) else {
-    fail("expected a rewritten dsh workspace.insertSessionBefore reply")
+    is Object(create_envelope) &&
+    create_envelope.get("result") is Some(Object(create_result)) &&
+    create_result.get("value") is Some(Object(create_value)) &&
+    create_value.get("workspace") is Some(Object(created_workspace)) else {
+    fail("expected a rewritten dsh workspace.create reply")
   }
-  assert_eq(moved_workspace.get("path"), Some(Json::string(resource_path)))
+  assert_eq(created_workspace.get("path"), Some(Json::string(resource_path)))
 }
 
 ///|
