@@ -73,6 +73,11 @@ async fn EngineManager::sweep_archived_deletions(self : EngineManager) -> Unit {
 /// not a creation, and passes untouched — including for an id that is
 /// duplicated on disk, because refusing to continue an existing record would
 /// strand the user with a conversation they can open but never answer.
+///
+/// Another store's *archived* record counts too. It is one unarchive away from
+/// being live beside this one, so treating the id as free here would create
+/// the very duplicate this guard promises the app never makes — and the user
+/// would meet it only later, when restoring the record they had put away.
 async fn ensure_new_record_is_unique(
   session : String,
   selected? : @pathx.Absolute,
@@ -86,6 +91,16 @@ async fn ensure_new_record_is_unique(
     if @fsx.is_dir(root.join("sessions").join(session).to_path()) {
       raise EngineError(
         "this conversation already has a record in \{root}; start a new one here",
+      )
+    }
+    if @fsx.is_dir(
+        @session_store.archived_root(root)
+        .join("sessions")
+        .join(session)
+        .to_path(),
+      ) {
+      raise EngineError(
+        "this conversation has an archived record in \{root}; start a new one here",
       )
     }
   }

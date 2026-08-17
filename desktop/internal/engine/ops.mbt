@@ -263,6 +263,10 @@ pub async fn compact_run(
   // reused engine never builds one, and the store must be known either way.
   let store = requested_store(payload.workspace)
   @session_store.ensure_not_archived(session, Some(store))
+  // A compaction with no live engine spawns one, and a spawn writes the
+  // record: without this the command would open a second record for an id
+  // another store already owns, which `start_run` refuses.
+  ensure_new_record_is_unique(session, selected=store)
   let sessions = manager.serving()
   let slot = slot_for(sessions, session)
   // Claim before anything else — even with a live engine. A start between
@@ -383,6 +387,9 @@ pub async fn goal_run(
   // the slot is read — see `compact_run`.
   let store = requested_store(payload.workspace)
   @session_store.ensure_not_archived(session, Some(store))
+  // A goal is reachable before the first prompt, and its spawn writes the
+  // record just as a start's does — see `compact_run`.
+  ensure_new_record_is_unique(session, selected=store)
   let sessions = manager.serving()
   let slot = slot_for(sessions, session)
   // Claim before looking at the engine, exactly as compact_run does: this op

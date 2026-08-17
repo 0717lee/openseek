@@ -144,6 +144,91 @@ async test "a start cannot open a second record for an id another store owns" {
 
 ///|
 #cfg(not(platform="windows"))
+async test "no command opens a second record for an id another store owns" {
+  ambient_env_test_lock.acquire()
+  defer ambient_env_test_lock.release()
+  let previous = @sys.get_env_var("HOME")
+  let (root, actor) = store_identity_host("openseek-unique-commands-")
+  defer restore_home_env(previous)
+  let manager = actor.manager()
+  let owner = root.join("owner")
+  let ws = root.join("ws")
+  @fsx.ensure_dir(ws.to_path())
+  @fsx.ensure_dir(owner.to_path())
+  let sink = EventSink(fn(_) {  })
+  @async.with_task_group(group => {
+    group.spawn_bg(no_wait=true, allow_failure=true, () => {
+      actor.run(sink, fn(_) {  })
+    })
+    while manager.pump is Stopped {
+      @async.sleep(1)
+    }
+    ignore(@workspaces.add(owner.to_string(), fn(_) {  }))
+    ignore(@workspaces.add(ws.to_string(), fn(_) {  }))
+    // The first project owns `s-live`. A goal is reachable before the first
+    // prompt, and its spawn writes a record, so it must refuse for the same
+    // reason a start does rather than filing the second twin itself.
+    @fsx.ensure_dir(
+      @workspaces.store_root(owner).join("sessions/s-live").to_path(),
+    )
+    let goal_refusal = try {
+      ignore(
+        goal_run(manager, {
+          session: "s-live",
+          workspace: ws.to_string(),
+          text: Some("ship it"),
+          auto: None,
+          model: None,
+          thinking: None,
+          max_steps: None,
+        }),
+      )
+      "no error"
+    } catch {
+      EngineError(detail) => detail
+      error if @async.is_being_cancelled() => raise error
+      error => "\{error}"
+    }
+    assert_true(goal_refusal.has_suffix("; start a new one here"))
+    guard manager.pump is Serving(sessions~) else { fail("pump stopped") }
+    assert_true(sessions.get("s-live") is None)
+    // An *archived* record in the other store counts as well: it is one
+    // unarchive away from standing beside whatever this start would create.
+    @fsx.ensure_dir(
+      @workspaces.store_root(owner)
+      .join("archived/sessions/s-put-away")
+      .to_path(),
+    )
+    let start_refusal = try {
+      ignore(
+        start_run(sink, manager, {
+          task: "fork me",
+          submission_id: None,
+          model: None,
+          thinking: None,
+          max_steps: None,
+          session: "s-put-away",
+          workspace: ws.to_string(),
+        }),
+      )
+      "no error"
+    } catch {
+      EngineError(detail) => detail
+      error if @async.is_being_cancelled() => raise error
+      error => "\{error}"
+    }
+    assert_true(start_refusal.contains("archived record"))
+    assert_true(
+      start_refusal.contains(@workspaces.store_root(owner).to_string()),
+    )
+    assert_true(sessions.get("s-put-away") is None)
+    group.return_immediately(())
+  })
+  @fs.rmdir(root.to_string(), recursive=true)
+}
+
+///|
+#cfg(not(platform="windows"))
 async test "an archived record in another store does not block a live one" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
