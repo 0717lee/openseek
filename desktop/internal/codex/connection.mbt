@@ -62,6 +62,7 @@ pub async fn[X] connect(
   request_handler~ : (@jsonrpc.PeerRequest) -> Bool raise,
   on_closed~ : () -> Unit,
   version~ : String,
+  home~ : @pathx.Path?,
   handshake_timeout_ms? : Int = HandshakeTimeoutMs,
 ) -> Connection? {
   let (child_stdin, stdin_writer) = @process.write_to_process() catch {
@@ -90,11 +91,20 @@ pub async fn[X] connect(
       return None
     }
   }
+  // The Desktop's isolated CODEX_HOME must win over anything the login-shell
+  // environment inherited. Every process the app-server later spawns inherits
+  // it too, so nested codex calls, sandbox approvals, and tool runs agree
+  // with the app-server on auth and config.
+  let env : Map[String, String] = match home {
+    Some(home) => Map([("CODEX_HOME", home.to_string())])
+    None => Map([])
+  }
   let process = @process.spawn(
     group,
     command,
     ["app-server"],
     inherit_env=true,
+    extra_env=env,
     stdin=child_stdin,
     stdout=child_stdout,
     stderr=child_stderr,

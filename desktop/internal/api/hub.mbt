@@ -508,7 +508,7 @@ test "duplicate finish and durable boundaries never downgrade a settlement" {
 
 ///|
 async test "agent.runs keeps old requests compatible and decodes known selectors" {
-  let state = ApiState::new(engine="unused")
+  let state = ApiState::new(engine="unused", codex_home=None)
   let connection = @host.HostConnection::new()
   state.hub.publish(
     AgentStarted(
