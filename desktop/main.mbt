@@ -31,17 +31,20 @@ async fn main {
   let frontend_entry = @host.frontend_entry_path(executable)
   let engine = @engine.engine_command(executable)
   let app_version = @host.package_version(executable)
-  let codex = @codex.command()
   log.info() <? { "message": "host process start" }
   log.info() <? { "message": "frontend entry", "path": frontend_entry }
   log.info() <? { "message": "engine", "path": engine }
-  log.info() <? { "message": "codex", "path": codex }
+  log.info() <? { "message": "codex", "path": @codex.command() }
   log.info() <? { "message": "app version", "version": app_version }
   let runtime_dir = @host.prepared_runtime_dir(executable)
   let codex_home = match runtime_dir {
     Some(dir) => @codex.prepared_home(dir)
     None => None
   }
+  let codex = @codex.CodexSettings::new(
+    command=@codex.command(),
+    home=codex_home,
+  )
   log.info() <?
     {
       "message": "codex home",
@@ -99,7 +102,6 @@ async fn main {
   let state = @api.ApiState::new(
     engine~,
     codex~,
-    codex_home~,
     runtime_dir?,
     executable~,
     auth~,
