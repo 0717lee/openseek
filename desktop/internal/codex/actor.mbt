@@ -221,8 +221,7 @@ const ActorWakeCapacity : Int = 1
 /// One per Desktop process. `run` owns its child; `call` and `respond` are the
 /// only request-side handles shared with API dispatch tasks.
 struct Actor {
-  command : String
-  home : @pathx.Path?
+  settings : CodexSettings
   inputs : @async.Queue[ActorInput]
   // Inputs and connection events signal after they are safely queued. The
   // single slot deliberately coalesces wakes: the actor drains real queues,
@@ -233,10 +232,9 @@ struct Actor {
 }
 
 ///|
-pub fn Actor::Actor(command : String, home~ : @pathx.Path?) -> Actor {
+pub fn Actor::Actor(settings : CodexSettings) -> Actor {
   {
-    command,
-    home,
+    settings,
     inputs: Queue(kind=Blocking(ActorInputCapacity)),
     wake: Queue(kind=Blocking(ActorWakeCapacity)),
     state: Starting,
@@ -344,8 +342,8 @@ async fn[G] Actor::run_connection(
   )
   let connection = connect(
     group,
-    command=self.command,
-    home=self.home,
+    command=self.settings.command,
+    home=self.settings.home,
     version="0.1.0",
     notification_handler=(method_, params) => {
       if !(events.try_put(Notification(method_, params)) catch { _ => false }) {
@@ -565,7 +563,7 @@ fn[G] Connection::dispatch_input(
 
 ///|
 async test "Codex actor consumes a buffered API command before events" {
-  let actor = Actor("codex", home=None)
+  let actor = Actor(CodexSettings::default())
   let events : @async.Queue[AppServerEvent] = Queue(kind=Blocking(1))
   let reply : @async.Queue[Result[Json, CodexError]] = Queue(kind=Blocking(1))
   actor.inputs.put(ListRequests(reply))
@@ -576,7 +574,7 @@ async test "Codex actor consumes a buffered API command before events" {
 ///|
 async test "Codex actor wakes for an API command without racing queue reads" {
   @async.with_task_group(group => {
-    let actor = Actor("codex", home=None)
+    let actor = Actor(CodexSettings::default())
     let events : @async.Queue[AppServerEvent] = Queue(kind=Blocking(1))
     let waiting = group.spawn(() => actor.next_step(events))
     let reply : @async.Queue[Result[Json, CodexError]] = Queue(kind=Blocking(1))

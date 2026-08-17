@@ -420,7 +420,7 @@ fn error_envelope(id : Json, code : Int, message : String) -> Json {
 
 ///|
 async test "readiness precedes the first forwarded hub notification" {
-  let state = @api.ApiState::new(engine="unused", codex_home=None)
+  let state = @api.ApiState::new(engine="unused")
   let subscription = WsClientActor::new(state, "unused").open_subscription()
   defer state.unsubscribe(subscription.notifications)
   state.publish(

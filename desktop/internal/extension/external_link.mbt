@@ -60,7 +60,7 @@ test "external link policy allows browser schemes only" {
 
 ///|
 test "external link opener is absent from the relay method catalog" {
-  let state = @api.ApiState::new(engine="unused", codex_home=None)
+  let state = @api.ApiState::new(engine="unused")
   let connection = @host.HostConnection::new()
   assert_false(
     @api.endpoints(state, connection)

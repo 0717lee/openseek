@@ -255,8 +255,7 @@ async fn CodexWorkspaceBinding::authorize(self : CodexWorkspaceBinding) -> Unit 
 /// announcement).
 pub fn ApiState::new(
   engine~ : String,
-  codex? : String = "codex",
-  codex_home~ : @pathx.Path?,
+  codex? : @codex.CodexSettings = @codex.CodexSettings::default(),
   runtime_dir? : @pathx.Path,
   executable? : String,
   auth? : @auth.AuthStore,
@@ -265,7 +264,7 @@ pub fn ApiState::new(
 ) -> ApiState {
   let engine_actor = @engine.new_engine_actor(engine, runtime_dir?)
   {
-    codex: Actor(codex, home=codex_home),
+    codex: Actor(codex),
     codex_projects: ProjectCatalog(),
     codex_draft_threads: CodexDraftThreads(),
     engine: engine_actor,
@@ -677,7 +676,7 @@ fn[Payload : FromJson + ToJson, Reply : FromJson + ToJson] ApiState::codex_endpo
 
 ///|
 test "remote endpoint catalog has one entry per command name" {
-  let state = ApiState::new(engine="unused", codex_home=None)
+  let state = ApiState::new(engine="unused")
   let connection = @host.HostConnection::new()
   let names : Array[String] = []
   for endpoint in endpoints(state, connection) {

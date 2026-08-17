@@ -280,7 +280,7 @@ fn browser_endpoints(views : BrowserViews) -> Array[@endpoint.Endpoint] {
 
 ///|
 test "browser ops are absent from the relay method catalog" {
-  let state = @api.ApiState::new(engine="unused", codex_home=None)
+  let state = @api.ApiState::new(engine="unused")
   let connection = @host.HostConnection::new()
   let catalog = @api.endpoints(state, connection)
   for endpoint in browser_endpoints(BrowserViews::new()) {
