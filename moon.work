@@ -16,6 +16,8 @@ members = [
   "./desktop/lepus/sys/global_hotkey",
   "./desktop/lepus/sys/keepawake",
   "./desktop/lepus/sys/microphone",
+  "./desktop/lepus/sys/power_monitor",
+  "./desktop/lepus/sys/process",
   "./desktop/lepus/sys/shell",
   "./desktop/lepus/sys/tray",
   "./desktop/lepus/updater",
