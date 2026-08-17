@@ -836,7 +836,11 @@ pub async fn create(
   let submodule_checkout_timeout_seconds = workspace_settings.submodule_checkout_timeout_seconds
   worktree_registry_lock.acquire()
   defer worktree_registry_lock.release()
-  let entries = read_worktrees_unlocked(dir)
+  // Read strictly: this operation ends in a whole-file write, so a registry
+  // that is momentarily unreadable must stop the create rather than become an
+  // empty baseline that the write below makes permanent — that would drop
+  // every other conversation's placement in this workspace.
+  let entries = WorktreeRegistry::load(dir).0
   // This conversation already holds its environment. Two shapes land here:
   // the idempotent replay of a create whose reply was lost, and the repair
   // of a checkout deleted outside the app. The registry keeps the branch,
@@ -1152,11 +1156,13 @@ async fn delete_worktree_checkout(
 /// whose directory is already gone is pruned — the self-heal for a
 /// worktree deleted outside the app.
 ///
-/// `dsh_occupancy` is asked under the lifecycle lock, before anything is
-/// deleted: DeepSeek Harness placement lives in dsh's Workspace registry, so
-/// protecting its checkouts is a question this package cannot answer alone.
-/// It is a required parameter rather than a `WorktreeHost` field with a
-/// default, so that a new caller cannot drop the protection by omission.
+/// `dsh_occupancy` answers whether a DeepSeek Harness conversation is working
+/// in this checkout. dsh placement lives in dsh's own Workspace registry, so
+/// this package cannot answer it alone; the callback is a required parameter
+/// rather than a `WorktreeHost` field with a default, so a new caller cannot
+/// drop the protection by omission. It is asked BEFORE the lifecycle lock is
+/// taken — the answer costs a cross-process round trip, and that lock also
+/// serializes workspace attach/detach and every create in the app.
 pub async fn remove(
   host : WorktreeHost,
   workspace : String,
@@ -1166,14 +1172,51 @@ pub async fn remove(
   dsh_occupancy : async (@pathx.Absolute) -> DshOccupancy,
 ) -> WorktreesReply {
   let name = name.trim().to_owned()
+  guard @pathx.Absolute::from_uri_path(workspace) is Some(absolute) else {
+    raise WorktreeError("\{workspace} is not a registered workspace")
+  }
+  // `None` records that the question was not worth asking, not an answer.
+  // Only an unowned checkout that still exists can be running a dsh
+  // conversation: an owned row belongs to OpenSeek or Codex, and a directory
+  // already gone has nothing left to protect — that is the registry-only
+  // prune below, which must stay reachable while dsh still lists the path.
+  let occupancy : DshOccupancy? = {
+    let probe = if @workspaces.registered_dir(absolute) is Some(dir) {
+      let row = {
+        worktree_registry_lock.acquire()
+        defer worktree_registry_lock.release()
+        read_worktrees_unlocked(dir)
+        .iter()
+        .find_first(entry => entry.name == name)
+      }
+      let target = worktree_dir(dir, name)
+      let present = @fsx.is_dir(target.to_path()) catch {
+        error if @async.is_being_cancelled() => raise error
+        _ => false
+      }
+      if row is Some(row) &&
+        row.session is None &&
+        row.codex_thread is None &&
+        present {
+        Some(target)
+      } else {
+        None
+      }
+    } else {
+      None
+    }
+    match probe {
+      Some(target) => Some(dsh_occupancy(target))
+      None => None
+    }
+  }
   // The lifecycle lock excludes concurrent creates and workspace
   // detachments for the whole removal — the registration check below runs
   // under it, so a detach that wins the lock cannot leave this op deleting
   // a checkout from an already-detached workspace.
   host.lifecycle_lock.acquire()
   defer host.lifecycle_lock.release()
-  guard @pathx.Absolute::from_uri_path(workspace) is Some(absolute) &&
-    @workspaces.registered_dir(absolute) is Some(dir) else {
+  guard @workspaces.registered_dir(absolute) is Some(dir) else {
     raise WorktreeError("\{workspace} is not a registered workspace")
   }
   let entry = {
@@ -1199,20 +1242,18 @@ pub async fn remove(
   }
   let target = worktree_dir(dir, name)
   // dsh placement is asked, never remembered. The registry holds no dsh
-  // identity, so the only truthful answer comes from dsh itself, now: a
-  // conversation may have been moved here, moved away, or archived since the
-  // checkout was made. An offline dsh cannot be running anything anywhere,
-  // which is why it does not block removal.
-  match dsh_occupancy(target) {
-    DshOccupied(count) =>
-      raise WorktreeError(
-        if count == 1 {
-          "a DeepSeek Harness conversation is working in \{name}; move or archive it before removing its checkout"
-        } else {
-          "\{count} DeepSeek Harness conversations are working in \{name}; move or archive them before removing its checkout"
-        },
-      )
-    DshVacant | DshOffline => ()
+  // identity, so the only truthful answer comes from dsh itself: a
+  // conversation may have started here, or been archived, since the checkout
+  // was made. An offline dsh cannot be running anything anywhere, which is
+  // why it does not block removal.
+  if occupancy is Some(DshOccupied(count)) {
+    raise WorktreeError(
+      if count == 1 {
+        "a DeepSeek Harness conversation is working in \{name}; archive it before removing its checkout"
+      } else {
+        "\{count} DeepSeek Harness conversations are working in \{name}; archive them before removing its checkout"
+      },
+    )
   }
   if entry.session is Some(bound) {
     (host.drain_sessions)([bound])
@@ -1957,6 +1998,63 @@ async test "worktree remove prunes an externally deleted checkout" {
       ".worktrees/gone",
     ),
   )
+  @fs.rmdir(root.to_string(), recursive=true)
+}
+
+///|
+/// Asking dsh costs a cross-process round trip, so removal asks only when the
+/// answer can change the outcome: an unowned checkout that still exists. An
+/// owned row already has an exclusive conversation, and a directory that is
+/// gone has nothing left to protect — that prune must stay reachable even
+/// while dsh still lists the vanished path as one of its Workspaces.
+#cfg(not(platform="windows"))
+async test "worktree removal asks dsh only about a live unowned checkout" {
+  worktree_env_test_lock.acquire()
+  defer worktree_env_test_lock.release()
+  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  let root = worktree_test_root("openseek-worktree-occupancy-")
+  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
+  defer restore_session_root_env(previous)
+  let repo = root.join("repo")
+  prepare_git_repo(repo)
+  ignore(@workspaces.add(repo.to_string(), fn(_) {  }))
+  let host = test_host()
+  let asked : Ref[Int] = Ref(0)
+  // Refusing every time it is consulted makes an unwanted question visible as
+  // a failed removal rather than as a silent extra round trip.
+  let counting : async (@pathx.Absolute) -> DshOccupancy = fn(_) {
+    asked.val = asked.val + 1
+    DshOccupied(1)
+  }
+  ignore(
+    create(
+      host,
+      repo.to_string(),
+      fn(_) {  },
+      owner=WorktreeOwner::openseek("s-owned"),
+      name="owned",
+    ),
+  )
+  ignore(remove(host, repo.to_string(), "owned", false, fn(_) {  }, counting))
+  assert_eq(asked.val, 0)
+  ignore(create(host, repo.to_string(), fn(_) {  }, name="unowned"))
+  @fs.rmdir(repo.join(".worktrees/unowned").to_string(), recursive=true)
+  ignore(remove(host, repo.to_string(), "unowned", false, fn(_) {  }, counting))
+  assert_eq(asked.val, 0)
+  assert_eq(list(repo.to_string()).worktrees.length(), 0)
+  // A live unowned checkout is the one case worth a round trip.
+  ignore(create(host, repo.to_string(), fn(_) {  }, name="live"))
+  let refusal = try {
+    ignore(remove(host, repo.to_string(), "live", false, fn(_) {  }, counting))
+    "no error"
+  } catch {
+    WorktreeError(detail) => detail
+    error if @async.is_being_cancelled() => raise error
+    error => "\{error}"
+  }
+  assert_eq(asked.val, 1)
+  assert_true(refusal.contains("conversation is working in live"))
+  ignore(remove(host, repo.to_string(), "live", false, fn(_) {  }, dsh_offline))
   @fs.rmdir(root.to_string(), recursive=true)
 }
 

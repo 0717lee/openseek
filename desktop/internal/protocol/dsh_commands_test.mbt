@@ -141,3 +141,93 @@ test "dsh notification envelopes reject malformed wrappers" {
   }
   assert_true(unknown)
 }
+
+///|
+test "dsh workspace list decodes strictly and tolerates only a missing archive set" {
+  let list : @protocol.DshWorkspaceList = @json.from_json({
+    "items": [
+      {
+        "workspaceId": "workspace-1",
+        "title": "project",
+        "path": "/work/project",
+        "sessionIds": ["session-1", "session-2"],
+        "createdAt": "2026-08-17T00:00:00.000Z",
+      },
+    ],
+    "archivedSessionIds": ["session-2"],
+    "futureMetadata": true,
+  })
+  guard list.items is [workspace] else { fail("expected one Workspace row") }
+  assert_eq(workspace.workspace_id, "workspace-1")
+  assert_eq(workspace.path, "/work/project")
+  assert_eq(workspace.session_ids, ["session-1", "session-2"])
+  // An archived session keeps its slot, so only the live one counts.
+  assert_eq(workspace.live_session_count(list.archived_session_ids), 1)
+  assert_eq(workspace.live_session_count([]), 2)
+  @debug.assert_eq(
+    (@json.from_json(list.to_json()) : @protocol.DshWorkspaceList),
+    list,
+  )
+  // dsh added `archivedSessionIds` after the first release of this document.
+  // Reading its absence as "nothing is archived" can only count MORE sessions
+  // as live, which is the refusing direction for every caller.
+  let older : @protocol.DshWorkspaceList = @json.from_json({
+    "items": [
+      {
+        "workspaceId": "workspace-1",
+        "title": "project",
+        "path": "/work/project",
+        "sessionIds": ["session-1"],
+      },
+    ],
+  })
+  assert_true(older.archived_session_ids.is_empty())
+  // Everything else is a decode failure rather than a skipped row: a reader
+  // that cannot parse a Workspace must not conclude that it holds nobody.
+  for
+    malformed in [
+      (
+        { "items": [{ "title": "project", "path": "/p", "sessionIds": [] }] } :
+        Json),
+      { "items": [{ "workspaceId": "w", "path": "/p", "sessionIds": [] }] },
+      { "items": [{ "workspaceId": "w", "title": "p", "sessionIds": [] }] },
+      {
+        "items": [
+          { "workspaceId": "w", "title": "p", "path": 7, "sessionIds": [] },
+        ],
+      },
+      { "items": [{ "workspaceId": "w", "title": "p", "path": "/p" }] },
+      {
+        "items": [
+          { "workspaceId": "w", "title": "p", "path": "/p", "sessionIds": {} },
+        ],
+      },
+      {
+        "items": [
+          { "workspaceId": "w", "title": "p", "path": "/p", "sessionIds": [7] },
+        ],
+      },
+      {
+        "items": [
+          {
+            "workspaceId": "w",
+            "title": "p",
+            "path": "/p",
+            "sessionIds": [" "],
+          },
+        ],
+      },
+      { "items": {} },
+      { "archivedSessionIds": [] },
+      { "items": [], "archivedSessionIds": [7] },
+    ] {
+    let rejected = try {
+      let _ : @protocol.DshWorkspaceList = @json.from_json(malformed)
+    } catch {
+      _ => true
+    } noraise {
+      _ => false
+    }
+    assert_true(rejected)
+  }
+}

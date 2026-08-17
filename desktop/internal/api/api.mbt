@@ -265,43 +265,63 @@ fn DshDesktopCall::is_allowed(self : DshDesktopCall) -> Bool {
 }
 
 ///|
+/// The successful value of a `workspace.list` reply, or `None` when this reply
+/// is not one. Envelope shape and dsh business errors are not this function's
+/// business; only a successful list carries a document to read.
+fn dsh_workspace_list_value(reply : Json) -> Json? {
+  guard reply is Object(envelope) &&
+    envelope.get("result") is Some(Object(result)) &&
+    result.get("ok") is Some(True) &&
+    result.get("value") is Some(value) else {
+    return None
+  }
+  Some(value)
+}
+
+///|
+/// Decode dsh's Workspace list once, for every native reader of it. Rejecting
+/// a malformed document as one unit is what keeps a partial reply from
+/// authorizing only some of its claimed membership — and what keeps the three
+/// readers (grants, worktree removal, first-send placement) from disagreeing
+/// about what a damaged row means. Paths are checked here rather than in the
+/// codec because absoluteness is this layer's rule, not dsh's schema.
+fn decode_dsh_workspace_list(
+  value : Json,
+) -> @protocol.DshWorkspaceList raise @host.PayloadError {
+  let list : @protocol.DshWorkspaceList = @json.from_json(value) catch {
+    error =>
+      raise PayloadError(
+        "dsh returned a malformed workspace.list reply: \{error}",
+      )
+  }
+  for workspace in list.items {
+    guard @pathx.Path(workspace.path).to_absolute() is Some(_) else {
+      raise PayloadError("dsh returned a Workspace path that is not absolute")
+    }
+  }
+  list
+}
+
+///|
 /// Extract the authoritative host-native bindings only from a successful
 /// Workspace list. Other methods and dsh business errors do not change the
-/// current grants. A malformed successful list is rejected as one unit, so a
-/// partial reply can never authorize only some of its claimed membership.
+/// current grants.
 fn DshDesktopCall::workspace_bindings(
   self : DshDesktopCall,
   reply : Json,
 ) -> Array[DshWorkspaceBinding]? raise @host.PayloadError {
   guard self.method_ == "workspace.list" else { return None }
-  guard reply is Object(envelope) &&
-    envelope.get("result") is Some(Object(result)) &&
-    result.get("ok") is Some(True) &&
-    result.get("value") is Some(Object(value)) else {
-    return None
-  }
-  guard value.get("items") is Some(Array(items)) else {
-    raise PayloadError("dsh returned a malformed workspace.list reply")
-  }
+  guard dsh_workspace_list_value(reply) is Some(value) else { return None }
   let bindings : Array[DshWorkspaceBinding] = []
   let owners : Map[String, Bool] = Map([])
-  for item in items {
-    guard item is Object(workspace) &&
-      workspace.get("path") is Some(String(path)) &&
-      @pathx.Path(path).to_absolute() is Some(_) &&
-      workspace.get("sessionIds") is Some(Array(session_ids)) else {
-      raise PayloadError("dsh returned a malformed workspace.list reply")
-    }
-    for session_id in session_ids {
-      guard session_id is String(session_id) && !session_id.trim().is_empty() else {
-        raise PayloadError("dsh returned a malformed workspace.list reply")
-      }
+  for workspace in decode_dsh_workspace_list(value).items {
+    for session_id in workspace.session_ids {
       let owner = @protocol.DshWorkspaceOwner(session_id).id()
       guard owners.get(owner) is None else {
         raise PayloadError("dsh returned duplicate Workspace membership")
       }
       owners[owner] = true
-      bindings.push({ owner, workspace: path })
+      bindings.push({ owner, workspace: workspace.path })
     }
   }
   Some(bindings)
@@ -1234,6 +1254,94 @@ test "dsh workspace paths cross the native API boundary reversibly" {
 }
 
 ///|
+/// Every native reader of `workspace.list` — the grant table, the worktree
+/// removal question, and the first-send placement check — goes through one
+/// decode, so a document none of them can parse fails all three the same way
+/// instead of one of them reading it as "this checkout is free".
+test "a damaged dsh workspace list fails every native reader alike" {
+  let call : DshDesktopCall = { method_: "workspace.list", payload: {} }
+  let envelope = fn(value : Json) -> Json {
+    {
+      "type": "server-response",
+      "rpcId": "list-1",
+      "result": { "ok": true, "value": value },
+    }
+  }
+  for
+    damaged in [
+      (
+        { "items": [{ "workspaceId": "w", "title": "t", "sessionIds": [] }] } :
+        Json),
+      { "items": [{ "workspaceId": "w", "title": "t", "path": "/p" }] },
+      {
+        "items": [
+          { "workspaceId": "w", "title": "t", "path": "/p", "sessionIds": [7] },
+        ],
+      },
+      // Absoluteness is this layer's rule rather than dsh's schema, so it is
+      // enforced beside the codec and refuses on the same terms.
+      {
+        "items": [
+          {
+            "workspaceId": "w",
+            "title": "t",
+            "path": "relative",
+            "sessionIds": [],
+          },
+        ],
+      },
+    ] {
+    let rejected = try {
+      ignore(call.workspace_bindings(envelope(damaged)))
+      false
+    } catch {
+      PayloadError(_) => true
+    }
+    assert_true(rejected)
+  }
+  // A dsh business error is not a damaged document: it changes no grants.
+  assert_true(
+    call.workspace_bindings({
+      "type": "server-response",
+      "rpcId": "list-2",
+      "result": {
+        "ok": false,
+        "error": { "code": "internal", "message": "no" },
+      },
+    })
+    is None,
+  )
+  // One session cannot be accounted by two Workspaces at once.
+  let duplicated = try {
+    ignore(
+      call.workspace_bindings(
+        envelope({
+          "items": [
+            {
+              "workspaceId": "w1",
+              "title": "one",
+              "path": "/work/one",
+              "sessionIds": ["session-1"],
+            },
+            {
+              "workspaceId": "w2",
+              "title": "two",
+              "path": "/work/two",
+              "sessionIds": ["session-1"],
+            },
+          ],
+          "archivedSessionIds": [],
+        }),
+      ),
+    )
+    false
+  } catch {
+    PayloadError(_) => true
+  }
+  assert_true(duplicated)
+}
+
+///|
 async test "dsh workspace membership authorizes and revokes its terminal owner" {
   let resource_path = if @pathx.Absolute::from_uri_path(
       "/openseek-dsh-terminal-authority-test",
@@ -1557,29 +1665,17 @@ async fn ApiState::dsh_worktree_project(
     )
   }
   let (workspace_reply, _) = self.dsh.call(method_="workspace.list", payload={})
-  guard workspace_reply is Object(workspace_envelope) &&
-    workspace_envelope.get("result") is Some(Object(workspace_result)) &&
-    workspace_result.get("ok") is Some(True) &&
-    workspace_result.get("value") is Some(Object(workspace_value)) &&
-    workspace_value.get("items") is Some(Array(workspaces)) else {
+  guard dsh_workspace_list_value(workspace_reply) is Some(workspace_value) else {
     raise @host.HostError(
       "DeepSeek Harness worktree could not verify its Workspace",
     )
   }
-  let mut owns_requested_workspace = false
-  for workspace in workspaces {
-    guard workspace is Object(fields) &&
-      fields.get("path") == Some(Json::string(requested_path.to_string())) &&
-      fields.get("sessionIds") is Some(Array(session_ids)) else {
-      continue
-    }
-    owns_requested_workspace = session_ids
-      .iter()
-      .any(value => value == Json::string(session_id))
-    if owns_requested_workspace {
-      break
-    }
-  }
+  let owns_requested_workspace = decode_dsh_workspace_list(workspace_value).items
+    .iter()
+    .any(workspace => {
+      workspace.path == requested_path.to_string() &&
+      workspace.session_ids.contains(session_id)
+    })
   guard owns_requested_workspace else {
     raise @host.HostError(
       "DeepSeek Harness worktree requires the session's current Workspace",
@@ -1623,44 +1719,29 @@ async fn ApiState::dsh_occupancy(
 ) -> @worktree.DshOccupancy {
   guard self.dsh.is_available() else { return DshOffline }
   let (reply, _) = self.dsh.call(method_="workspace.list", payload={})
-  guard reply is Object(envelope) &&
-    envelope.get("result") is Some(Object(result)) &&
-    result.get("ok") is Some(True) &&
-    result.get("value") is Some(Object(value)) &&
-    value.get("items") is Some(Array(items)) else {
+  guard dsh_workspace_list_value(reply) is Some(value) else {
     raise @host.HostError(
       "DeepSeek Harness could not report which conversations use this checkout",
     )
   }
-  // An archived session keeps its slot in `sessionIds`, so the registry-global
-  // archive set is what separates a live conversation from a hidden one.
-  let archived : Map[String, Bool] = Map([])
-  if value.get("archivedSessionIds") is Some(Array(ids)) {
-    for id in ids {
-      if id is String(id) {
-        archived[id] = true
-      }
-    }
-  }
+  // The shared decode is what makes an unreadable answer an error here. A row
+  // this function could not parse used to be skipped, which reported the
+  // checkout as free — the one outcome this whole path exists to prevent.
+  let list = decode_dsh_workspace_list(value)
   let canonical = canonical_dir(checkout)
   let mut working = 0
-  for item in items {
-    guard item is Object(fields) &&
-      fields.get("path") is Some(String(path)) &&
-      fields.get("sessionIds") is Some(Array(session_ids)) else {
+  for workspace in list.items {
+    // dsh stamps its Workspace path with `fs.realpath`. Compare the cheap
+    // spelling first and resolve only a candidate that could still match, so
+    // an unrelated Workspace costs no syscall.
+    guard @pathx.Path(workspace.path).to_absolute() is Some(dir) else {
       continue
     }
-    // dsh stamps its Workspace path with `fs.realpath`; compare on the same
-    // footing so a symlinked project root is not read as a different tree.
-    guard @pathx.Path(path).to_absolute() is Some(workspace) &&
-      canonical_dir(workspace) == canonical else {
+    let normalized = dir.normalize().to_string()
+    guard normalized == canonical || canonical_dir(dir) == canonical else {
       continue
     }
-    for session_id in session_ids {
-      if session_id is String(session_id) && archived.get(session_id) is None {
-        working += 1
-      }
-    }
+    working += workspace.live_session_count(list.archived_session_ids)
   }
   if working == 0 {
     DshVacant

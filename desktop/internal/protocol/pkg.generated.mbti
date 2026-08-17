@@ -806,9 +806,26 @@ pub(all) struct DshValueReply {
 pub impl ToJson for DshValueReply
 pub impl @json.FromJson for DshValueReply
 
+pub(all) struct DshWorkspaceList {
+  items : Array[DshWorkspaceView]
+  archived_session_ids : Array[String]
+} derive(Eq, @debug.Debug)
+pub impl ToJson for DshWorkspaceList
+pub impl @json.FromJson for DshWorkspaceList
+
 type DshWorkspaceOwner derive(Eq)
 pub fn DshWorkspaceOwner::DshWorkspaceOwner(String) -> Self
 pub fn DshWorkspaceOwner::id(Self) -> String
+
+pub(all) struct DshWorkspaceView {
+  workspace_id : String
+  title : String
+  path : String
+  session_ids : Array[String]
+} derive(Eq, @debug.Debug)
+pub fn DshWorkspaceView::live_session_count(Self, Array[String]) -> Int
+pub impl ToJson for DshWorkspaceView
+pub impl @json.FromJson for DshWorkspaceView
 
 pub(all) enum EmptyPayload {
   NoPayload
