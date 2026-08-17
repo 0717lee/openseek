@@ -19,16 +19,8 @@ fn smoke_bundles() -> Array[BrowserBundle] {
       title: "MoonBit Viewer Component Test",
     },
     BrowserBundle::{
-      name: "reveal",
-      title: "MoonBit Viewer Reveal Test",
-    },
-    BrowserBundle::{
       name: "read_api",
       title: "MoonBit Viewer Read API Test",
-    },
-    BrowserBundle::{
-      name: "whitespace",
-      title: "MoonBit Viewer Whitespace Test",
     },
     BrowserBundle::{
       name: "whitespace_selection",
@@ -53,10 +45,6 @@ fn smoke_bundles() -> Array[BrowserBundle] {
     BrowserBundle::{
       name: "quick_diff",
       title: "MoonBit Viewer Quick Diff Test",
-    },
-    BrowserBundle::{
-      name: "set_value",
-      title: "MoonBit Viewer Set Value Test",
     },
     BrowserBundle::{
       name: "definition",

@@ -54,24 +54,41 @@ test "set_value without a model is a no-op (cew:490-492)" {
 }
 
 ///|
-extern "js" fn same_test_model_browser_data(
-  left : CodeBrowserData,
-  right : CodeBrowserData,
-) -> Bool = "(left, right) => left === right"
+test "set_value keeps headless scroll while folding recomputes" {
+  let before =
+    #|root
+    #|  before
+    #|tail
+    #|line 4
+    #|line 5
+    #|line 6
+    #|line 7
+    #|line 8
+    #|line 9
+    #|line 10
+    #|line 11
+    #|line 12
+  let after = before.replace(old="before", new="after ")
+  with_test_viewer(before, viewer => {
+    viewer.test_set_viewport(width=400.0, height=54.0)
+    viewer.set_scroll_top(72.0)
+    let scroll_top = viewer.get_scroll_top()
+    guard viewer.folding_controller() is Some(controller) else {
+      fail("expected a folding controller")
+    }
+    guard controller.folding_model is Some(folding_before) else {
+      fail("expected a folding model before set_value")
+    }
+    assert_eq(folding_before.regions().length(), 1)
 
-///|
-test "set_value marks mounted rendered content stale on the same browser data" {
-  with_mounted_test_viewer("one\ntwo", viewer => {
-    let browser = viewer.current_code_browser_data().unwrap()
-    browser.rendered_window = Some({ start: 1, end: 2 })
-    viewer.set_value("a")
-    assert_true(browser.rendered_window is None)
-    assert_true(
-      same_test_model_browser_data(
-        viewer.current_code_browser_data().unwrap(),
-        browser,
-      ),
-    )
+    viewer.set_value(after)
+
+    assert_eq(viewer.get_scroll_top(), scroll_top)
+    guard controller.folding_model is Some(folding_after) else {
+      fail("expected a folding model after set_value")
+    }
+    assert_eq(folding_after.regions().length(), 1)
+    assert_eq(viewer.get_value(), after)
   })
 }
 

@@ -73,12 +73,6 @@ fn render_invalidation_position_json(viewer : @viewer.Viewer) -> String {
 }
 
 ///|
-fn render_invalidation_layout_json(viewer : @viewer.Viewer) -> String {
-  let info = viewer.get_layout_info()
-  "{\"width\":\{info.width},\"lineNumbersWidth\":\{info.line_numbers_width},\"decorationsWidth\":\{info.decorations_width},\"contentLeft\":\{info.content_left},\"contentWidth\":\{info.content_width}}"
-}
-
-///|
 fn run_render_invalidation_test() -> Unit {
   let ctx = @support.BrowserTestContext("render_invalidation")
   let document = @rdom.document()
@@ -201,65 +195,6 @@ fn run_render_invalidation_test() -> Unit {
         viewer.get_options().with_render_control_characters(enabled),
       )
     },
-    mode => {
-      match mode {
-        "none" =>
-          viewer.update_options(
-            viewer.get_options().with_render_line_highlight(None),
-          )
-        "gutter" =>
-          viewer.update_options(
-            viewer.get_options().with_render_line_highlight(Gutter),
-          )
-        "line" =>
-          viewer.update_options(
-            viewer.get_options().with_render_line_highlight(Line),
-          )
-        "all" =>
-          viewer.update_options(
-            viewer.get_options().with_render_line_highlight(All),
-          )
-        _ => ()
-      }
-    },
-    enabled => {
-      viewer.update_options(
-        viewer.get_options().with_render_line_highlight_only_when_focus(enabled),
-      )
-    },
-    mode => {
-      match mode {
-        "editable" =>
-          viewer.update_options(
-            viewer.get_options().with_render_validation_decorations(Editable),
-          )
-        "on" =>
-          viewer.update_options(
-            viewer.get_options().with_render_validation_decorations(On),
-          )
-        "off" =>
-          viewer.update_options(
-            viewer.get_options().with_render_validation_decorations(Off),
-          )
-        _ => ()
-      }
-    },
-    tab_size => {
-      viewer.update_options(viewer.get_options().with_tab_size(tab_size))
-    },
-    enabled => {
-      viewer.update_options(viewer.get_options().with_soft_wrap(enabled))
-    },
-    () => {
-      let original = viewer.get_options()
-      viewer.update_options(original.with_render_whitespace(All))
-      viewer.update_options(original)
-    },
-    (line, column) => {
-      let position : @base_common.Position = Position(line, column)
-      viewer.set_position(position)
-      viewer.reveal_position(position)
-    },
     () => {
       if spacing_ids.val.length() > 0 {
         viewer.remove_decorations(spacing_ids.val)
@@ -280,43 +215,8 @@ fn run_render_invalidation_test() -> Unit {
       viewer.remove_decorations(spacing_ids.val)
       spacing_ids.val = []
     },
-    () => {
-      let ids = viewer.delta_decorations([], [
-        {
-          range: Range(1, 1, 1, 7),
-          options: ModelDecorationOptions(
-            "",
-            inline_class_name="render-invalidation-spacing",
-            inline_class_name_affects_letter_spacing=true,
-            description="render invalidation spacing round trip",
-          ),
-        },
-      ])
-      viewer.remove_decorations(ids)
-    },
     () => render_invalidation_position_json(viewer),
     () => viewer.focus(),
-    () => {
-      viewer.update_options(
-        viewer
-        .get_options()
-        .with_line_numbers_min_chars(4)
-        .with_line_decorations_width(17),
-      )
-    },
-    () => render_invalidation_layout_json(viewer),
-    min_chars => {
-      viewer.update_options(
-        viewer.get_options().with_line_numbers_min_chars(min_chars),
-      )
-    },
-    line_count => {
-      let lines : Array[String] = []
-      for index in 1..<=line_count {
-        lines.push("line \{index.to_string()}")
-      }
-      viewer.set_value(lines.join("\n"))
-    },
     () => {
       zone_generation.val += 1
       let generation = zone_generation.val
@@ -366,8 +266,6 @@ fn poll_render_invalidation_ready(
       root_class is Some(class_name) && class_name.contains("readonly-editor"),
       "viewer root did not finish mounting",
     )
-    ctx.metric_int("initialLines", line_count)
-    ctx.metric_int("initialValidationDecorations", validation_count)
     ctx.finish()
   } else if remaining <= 0 {
     ctx.fail("timed out waiting for render-invalidation fixture")
@@ -385,32 +283,17 @@ extern "js" fn install_render_invalidation_controls(
   root : @rdom.Element,
   set_whitespace : (String) -> Unit,
   set_control : (Bool) -> Unit,
-  set_highlight : (String) -> Unit,
-  set_focus_only : (Bool) -> Unit,
-  set_validation : (String) -> Unit,
-  set_tab_size : (Int) -> Unit,
-  set_wrap : (Bool) -> Unit,
-  whitespace_round_trip : () -> Unit,
-  set_position : (Int, Int) -> Unit,
   add_spacing_decoration : () -> Unit,
   remove_spacing_decoration : () -> Unit,
-  decoration_round_trip : () -> Unit,
   position_json : () -> String,
   focus : () -> Unit,
-  set_compensated_layout : () -> Unit,
-  layout_json : () -> String,
-  set_min_chars : (Int) -> Unit,
-  set_line_count : (Int) -> Unit,
   replace_zone : () -> Unit,
   zone_counts_json : () -> String,
   recolor_tokens : () -> Unit,
 ) -> Unit =
-  #| (root, setWhitespace, setControl, setHighlight, setFocusOnly,
-  #|  setValidation, setTabSize, setWrap, whitespaceRoundTrip,
-  #|  setPosition, addSpacingDecoration, removeSpacingDecoration,
-  #|  decorationRoundTrip, positionJson, focus, setCompensatedLayout,
-  #|  layoutJson, setMinChars, setLineCount, replaceZone, zoneCountsJson,
-  #|  recolorTokens) => {
+  #| (root, setWhitespace, setControl, addSpacingDecoration,
+  #|  removeSpacingDecoration, positionJson, focus, replaceZone,
+  #|  zoneCountsJson, recolorTokens) => {
   #|   let originalRequestAnimationFrame = null;
   #|   let animationFrameCount = 0;
   #|   let mutationCount = 0;
@@ -443,29 +326,15 @@ extern "js" fn install_render_invalidation_controls(
   #|     return result;
   #|   };
   #|   globalThis.__renderInvalidationControls = {
-  #|     root,
   #|     set_whitespace: setWhitespace,
   #|     set_control: setControl,
-  #|     set_highlight: setHighlight,
-  #|     set_focus_only: setFocusOnly,
-  #|     set_validation: setValidation,
-  #|     set_tab_size: setTabSize,
-  #|     set_wrap: setWrap,
-  #|     whitespace_round_trip: whitespaceRoundTrip,
-  #|     set_position: setPosition,
   #|     add_spacing_decoration: addSpacingDecoration,
   #|     remove_spacing_decoration: removeSpacingDecoration,
-  #|     decoration_round_trip: decorationRoundTrip,
   #|     position: () => JSON.parse(positionJson()),
-  #|     layout: () => JSON.parse(layoutJson()),
   #|     focus,
-  #|     set_compensated_layout: setCompensatedLayout,
-  #|     set_min_chars: setMinChars,
-  #|     set_line_count: setLineCount,
   #|     replace_zone: replaceZone,
   #|     zone_counts: () => JSON.parse(zoneCountsJson()),
   #|     recolor_tokens: recolorTokens,
-  #|     blur: () => root.blur(),
   #|     start_probe: () => {
   #|       if (originalRequestAnimationFrame || observer) stopProbe();
   #|       animationFrameCount = 0;

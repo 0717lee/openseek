@@ -45,16 +45,6 @@ fn markdown_folding_source() -> String {
 }
 
 ///|
-/// The same document after an agent rewrote Beta's fence: Beta's fingerprint
-/// changes, every other section is untouched.
-fn markdown_folding_replacement_source() -> String {
-  markdown_folding_source().replace(
-    old="fn beta_answer() -> Int { 42 }",
-    new="fn beta_answer() -> Int { 43 } // rewritten",
-  )
-}
-
-///|
 fn markdown_folding_facts_json(
   viewer : @viewer.Viewer,
   source : () -> String,
@@ -95,13 +85,13 @@ fn run_markdown_folding_test() -> Unit {
   host.set_attribute("style", "height:420px;width:720px;")
   shell.append_child(host.as_node())
   app.append_child(shell.as_node())
-  let token_registration = @syntax.tokenization_registry.register(
+  let _token_registration = @syntax.tokenization_registry.register(
     "moonbit",
     @lang_moonbit.MoonBitTokenizer(),
   )
   let hover_harness = MarkdownDocumentHoverHarness::new()
   let languages = @languages.Languages()
-  let hover_registration = languages.register_hover_provider(
+  let _hover_registration = languages.register_hover_provider(
     LanguageId("moonbit"),
     MarkdownDocumentHoverProvider::{ harness: hover_harness },
   )
@@ -131,15 +121,8 @@ fn run_markdown_folding_test() -> Unit {
   viewer.handle_initialized()
   install_markdown_folding_controls(
     () => markdown_folding_facts_json(viewer, () => model.get_value()),
-    offset => viewer.toggle_markdown_section_at(offset),
-    () => model.set_value(markdown_folding_replacement_source()),
     () => hover_harness.calls_json(),
     (call_id, outcome) => hover_harness.release(call_id, outcome),
-    () => {
-      viewer.dispose()
-      hover_registration.dispose()
-      token_registration.dispose()
-    },
   )
   // The initial seeded state is part of the report so the spec separates
   // "policy seeded wrongly" from "a later interaction broke it".
@@ -157,26 +140,13 @@ fn run_markdown_folding_test() -> Unit {
 ///|
 extern "js" fn install_markdown_folding_controls(
   get_fold_facts : () -> String,
-  toggle_at_offset : (Int) -> Bool,
-  replace_source : () -> Unit,
   get_hover_calls : () -> String,
   release_hover : (Int, String) -> Bool,
-  dispose : () -> Unit,
 ) -> Unit =
-  #| (
-  #|   getFoldFacts,
-  #|   toggleAtOffset,
-  #|   replaceSource,
-  #|   getHoverCalls,
-  #|   releaseHover,
-  #|   dispose,
-  #| ) => {
+  #| (getFoldFacts, getHoverCalls, releaseHover) => {
   #|   globalThis.__markdownFoldingControls = {
   #|     getFoldFacts: () => JSON.parse(getFoldFacts()),
-  #|     toggleAtOffset: (offset) => toggleAtOffset(offset | 0),
-  #|     replaceSource: () => replaceSource(),
   #|     getHoverCalls: () => JSON.parse(getHoverCalls()),
   #|     releaseHover: (id, outcome) => releaseHover(id | 0, String(outcome)),
-  #|     dispose: () => dispose(),
   #|   };
   #| }

@@ -1,8 +1,9 @@
 # Harness
 
-Use the lowest layer that can observe the behavior. Browser tests are for DOM,
-pointer, browser-layout, and full-shell behavior—not for state that a MoonBit
-test can assert directly.
+Public Viewer integration behavior has two test layers. Headless MoonBit tests
+own state that can be asserted without a browser; real Playwright tests own
+DOM, pointer, browser-layout, animation-frame, and full-shell behavior. There
+is no fake-DOM mounted Viewer layer between them.
 
 ## Commands
 
@@ -67,9 +68,11 @@ Use ordinary tests for DOM-free algorithms and `*_reference_test.mbt` /
 
 ### Headless Viewer tests
 
-`viewer/test_viewer_wbtest.mbt` constructs a real, unattached `Viewer`, installs
-a `TextModel`, and exercises its synchronous model/view-model/cursor/layout
-state. No browser `View`, DOM measurement, or animation frame is created.
+`viewer/test_viewer_harness_wbtest.mbt` provides the package-private fixture;
+`viewer/test_viewer_wbtest.mbt` and the owning contribution `_wbtest.mbt`
+files use it to construct a real, unattached `Viewer`, install a `TextModel`,
+and exercise synchronous model/view-model/cursor/layout state. No browser
+`View`, DOM measurement, or animation frame is created.
 
 Useful white-box seams are:
 
@@ -81,22 +84,6 @@ Useful white-box seams are:
 
 Use this layer for positions, selections, wrapping, model/view conversion,
 visible windows, scroll/reveal math, decoration inputs, and contribution state.
-
-### Mounted Viewer white-box tests
-
-`with_mounted_test_viewer` is a package-private `_wbtest` fixture, not a public
-Viewer or host API. It installs the smallest fake DOM/browser runtime and holds
-the animation-frame queue so MoonBit tests can inspect synchronous
-model-browser ownership, render/reveal requests, and lifecycle ordering before
-a flush consumes them. Use Playwright component tests instead for real DOM
-layout, focus, pointer input, and native animation-frame behavior.
-
-`viewer/references_peek_wbtest.mbt` uses this layer for the public
-`show_references` guards, copied input, lazy per-group and selected-preview
-resolver slots, exact lease counts, stale/wrong-URI rejection, Definition-intent
-cancellation, reentrant teardown, and mode-neutral opening.
-`viewer/definition_navigation_wbtest.mbt` retains the corresponding
-Definition-provider and shared-Peek regression matrix.
 
 ### Browser suites
 
@@ -118,6 +105,15 @@ the failed CI attempt retains its trace in the job-local output directory; a
 deterministic regression therefore fails both attempts and still fails the
 gate.
 
+The component suite is intentionally capped at 43 tests. Its retained surface
+is limited to real font/Range/iframe geometry, native keyboard/pointer/copy
+bridges, context menus and modifier links, folding gestures, Markdown layout
+and diagram input, DOM convergence, ViewZone ownership/geometry/mouse
+suppression, and the small dedicated public-Viewer contracts. Version and
+identity matrices, provider cancellation, transaction ordering, and semantic
+no-op behavior belong to Headless MoonBit tests. Attachment, node ownership,
+render scheduling, and browser-widget lifecycle belong to Playwright.
+
 Compilation is `moon build`'s job: every js entry point declares
 `supported_targets = "js"`, so one workspace build emits all of them.
 `scripts/build-web.mbtx` assembles the production reference app and embed page,
@@ -138,9 +134,11 @@ rejects ambiguous layouts rather than risking a stale artifact from a different
 A browser-visible contract normally has two adjacent owners:
 
 - A MoonBit scenario under `tests/browser/moonbit/` constructs the product
-  through the appropriate public surface, owns deterministic setup, and emits a
-  compact JSON report. Keep DOM-free policy and synchronous state-machine
-  assertions in ordinary, headless, or mounted MoonBit tests instead.
+  through the appropriate public surface, owns deterministic setup or manual
+  provider completion, reports fixture-initialization failures, and emits a
+  compact JSON report. It must not reimplement a state machine solely so
+  Playwright can inspect it. Keep DOM-free policy and synchronous state-machine
+  assertions in ordinary or headless MoonBit tests instead.
 - A Playwright spec under `tests/browser/component/` or
   `tests/browser/smoke/` supplies the browser-only evidence: real input, DOM and
   layout observations, host integration, and the final assertions. Use a

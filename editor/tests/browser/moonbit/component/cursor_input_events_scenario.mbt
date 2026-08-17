@@ -219,7 +219,6 @@ fn run_cursor_input_events_test() -> Unit {
         ),
       )
     },
-    value => viewer.set_value(value),
     height => {
       host.set_attribute("style", "height:\{height}px;width:260px;")
       viewer.layout()
@@ -298,12 +297,11 @@ extern "js" fn install_cursor_input_controls(
   state_json : () -> String,
   set_position : (Int, Int) -> Unit,
   set_selection : (Int, Int, Int, Int) -> Unit,
-  set_value : (String) -> Unit,
   resize : (Int) -> Unit,
   show_zone : () -> Unit,
   focus : () -> Unit,
 ) -> Unit =
-  #| (root, zoneText, zoneLink, stateJson, setPosition, setSelection, setValue, resize, showZone, focus) => {
+  #| (root, zoneText, zoneLink, stateJson, setPosition, setSelection, resize, showZone, focus) => {
   #|   globalThis.__cursorInputEventLog = [];
   #|   const keyLog = [];
   #|   const propagationLog = [];
@@ -311,8 +309,6 @@ extern "js" fn install_cursor_input_controls(
   #|   const pointerLog = [];
   #|   const copyLog = [];
   #|   let zoneLinkActivations = 0;
-  #|   let originalRequestAnimationFrame = null;
-  #|   let animationFrameCount = 0;
   #|   root.addEventListener('keydown', (event) => {
   #|     keyLog.push({
   #|       key: event.key,
@@ -394,24 +390,6 @@ extern "js" fn install_cursor_input_controls(
   #|       return document.activeElement === zoneLink;
   #|     },
   #|     zone_link_activations: () => zoneLinkActivations,
-  #|     start_raf_probe: () => {
-  #|       if (!originalRequestAnimationFrame) {
-  #|         originalRequestAnimationFrame = window.requestAnimationFrame.bind(window);
-  #|         window.requestAnimationFrame = (callback) => {
-  #|           animationFrameCount += 1;
-  #|           return originalRequestAnimationFrame(callback);
-  #|         };
-  #|       }
-  #|       animationFrameCount = 0;
-  #|     },
-  #|     stop_raf_probe: () => {
-  #|       const count = animationFrameCount;
-  #|       if (originalRequestAnimationFrame) {
-  #|         window.requestAnimationFrame = originalRequestAnimationFrame;
-  #|         originalRequestAnimationFrame = null;
-  #|       }
-  #|       return count;
-  #|     },
   #|     clear: () => {
   #|       globalThis.__cursorInputEventLog.length = 0;
   #|       keyLog.length = 0;
@@ -422,30 +400,9 @@ extern "js" fn install_cursor_input_controls(
   #|     },
   #|     set_position: setPosition,
   #|     set_selection: setSelection,
-  #|     set_value: setValue,
   #|     resize,
   #|     show_zone: showZone,
   #|     focus,
-  #|     focus_hover: () => {
-  #|       const wrapper = document.querySelector('.monaco-resizable-hover');
-  #|       if (!wrapper) return false;
-  #|       wrapper.style.display = 'block';
-  #|       wrapper.setAttribute('tabindex', '-1');
-  #|       wrapper.addEventListener('keydown', (event) => {
-  #|         keyLog.push({
-  #|           key: event.key,
-  #|           altKey: event.altKey,
-  #|           ctrlKey: event.ctrlKey,
-  #|           metaKey: event.metaKey,
-  #|           shiftKey: event.shiftKey,
-  #|           defaultPrevented: event.defaultPrevented,
-  #|           activeIsRoot: false,
-  #|           scope: 'hover',
-  #|         });
-  #|       }, { once: true });
-  #|       wrapper.focus();
-  #|       return document.activeElement === wrapper;
-  #|     },
   #|     root,
   #|   };
   #| }

@@ -426,7 +426,9 @@ retained per-line boundary maps and a DOM descendant check, so hidden-but-
 hit-testable content would produce hovers on text the reader cannot see. The
 browser ownership and accessibility contract lives in
 `internal/viewer/browser/markdown_document/README.mbt.md`; root state and
-reconciliation are pinned by `viewer/markdown_folding_wbtest.mbt`.
+reconciliation are exercised through the real-browser Markdown-folding
+component contract, while section discovery and auto-fold policy remain in
+this package's headless tests.
 
 Browser DOM policy, URI rewriting, listeners, target reuse, and disposal live
 in `internal/viewer/browser/markdown`.
