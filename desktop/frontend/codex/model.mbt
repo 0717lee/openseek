@@ -299,6 +299,48 @@ pub fn Msg::abandon_draft() -> Msg {
 }
 
 ///|
+/// Shell entrypoints for the Settings page's Codex account group; the
+/// login/logout flows themselves stay inside this package.
+pub fn Msg::login() -> Msg {
+  Login
+}
+
+///|
+pub fn Msg::cancel_login() -> Msg {
+  CancelLogin
+}
+
+///|
+pub fn Msg::logout() -> Msg {
+  Logout
+}
+
+///|
+/// Whether a ChatGPT account is signed in on the app-server.
+pub fn State::signed_in(self : State) -> Bool {
+  self.account is CodexSignedIn(..)
+}
+
+///|
+/// Whether the app-server is waiting for a sign-in before Codex can work.
+pub fn State::sign_in_required(self : State) -> Bool {
+  self.account is CodexSignedOut(true)
+}
+
+///|
+/// The browser sign-in page of a login attempt still in flight.
+pub fn State::pending_auth_url(self : State) -> String? {
+  self.auth_url
+}
+
+///|
+/// Whether an app-server request is in flight; the Settings account buttons
+/// disable on it exactly like the old topbar ones did.
+pub fn State::is_busy(self : State) -> Bool {
+  self.loading
+}
+
+///|
 /// Shell entrypoint for selecting a Codex sidebar row.
 pub fn Msg::open_thread(thread_id : String) -> Msg {
   OpenThread(thread_id)

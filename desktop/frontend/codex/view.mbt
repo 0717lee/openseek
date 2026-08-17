@@ -2,7 +2,9 @@
 // reverse requests directly; no raw JSON-RPC method editor is exposed.
 
 ///|
-fn State::connection_label(self : State) -> String {
+/// Display strings for the topbar status and the Settings page's Codex
+/// account group; both render the same connection and account facts.
+pub fn State::connection_label(self : State) -> String {
   match self.connection {
     CodexStarting => "Starting Codex…"
     CodexReady => if self.is_running() { "Running" } else { "Connected" }
@@ -11,7 +13,7 @@ fn State::connection_label(self : State) -> String {
 }
 
 ///|
-fn State::account_label(self : State) -> String {
+pub fn State::account_label(self : State) -> String {
   match self.account {
     CodexAccountUnknown => "Checking account…"
     CodexSignedOut(requires_auth) =>
@@ -526,7 +528,6 @@ pub(all) struct PageActions {
   toggle_sidebar : @cmd.Cmd
   toggle_terminal : @cmd.Cmd
   toggle_files : @cmd.Cmd
-  open_external : (String) -> @cmd.Cmd
   workspace_label : (@common.Uri) -> String
   // The root shell supplies the one transcript view shared with OpenSeek.
   // Codex owns the normalized items, but no parallel message/activity DOM.
@@ -549,39 +550,8 @@ pub fn State::page(
   file_panel_open : Bool,
   actions : PageActions,
 ) -> Array[@html.Html] {
-  let account_actions : Array[@html.Html] = []
-  match self.account {
-    CodexSignedOut(true) =>
-      account_actions.push(
-        @html.button(
-          class="primary",
-          disabled=self.loading,
-          on_click=dispatch(Login),
-          "Sign in with ChatGPT",
-        ),
-      )
-    CodexSignedIn(..) =>
-      account_actions.push(
-        @html.button(
-          disabled=self.loading,
-          on_click=dispatch(Logout),
-          "Sign out",
-        ),
-      )
-    _ => ()
-  }
-  if self.auth_url is Some(url) {
-    account_actions.push(
-      @html.button(on_click=(actions.open_external)(url), "Open sign-in page"),
-    )
-    account_actions.push(
-      @html.button(
-        disabled=self.loading,
-        on_click=dispatch(CancelLogin),
-        "Cancel sign-in",
-      ),
-    )
-  }
+  // Account actions (sign in/out, the pending sign-in page) live in the
+  // Settings page's Codex group; the topbar keeps only the status label.
   let topbar : Array[@html.Html] = []
   if !sidebar_open {
     topbar.push(
@@ -645,9 +615,6 @@ pub fn State::page(
       ],
     ),
   )
-  for action in account_actions {
-    topbar.push(action)
-  }
   // These are OpenSeek's existing host panels, re-rooted by `file_ctx` and
   // `terminal_ctx` to the selected app-server thread. They stay in this one
   // topbar instead of creating a nested Codex application frame.
