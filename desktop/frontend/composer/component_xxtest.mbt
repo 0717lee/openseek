@@ -373,6 +373,10 @@ test "draft prompt encoding belongs to composer" {
   assert_true(draft.prompt().contains("inspect this"))
 }
 
+// The focus-ownership markers the composer renders (`data-focus-owner` /
+// `data-focus-target` on `composer-inner`) are browser-only assertions now:
+// rabbita 0.15.1 removed the js-target `render_to_string`.
+
 ///|
 test "a mention-only draft is a submit-ready prompt" {
   let input = {
@@ -404,17 +408,67 @@ test "a mention-only draft is a submit-ready prompt" {
 }
 
 ///|
-#warnings("-alert_unstable")
-test "composer declares form focus ownership" {
-  let input = Input::fixture("")
-  let markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(
-      Model(input)
-      .active(input)
-      .view(Msg::test_emit(), Action::test_emit(), input),
-    )
-  })
-  assert_true(markup.contains("class=\"composer-inner\""))
-  assert_true(markup.contains("data-focus-owner=\"\""))
-  assert_true(markup.contains("data-focus-target=\"\""))
+test "a goal request in flight never strands the row" {
+  // A set whose reply was lost and which the engine never appended has no
+  // event coming that could retire it. If the row withheld its actions while
+  // waiting, that would be a state with no exit; Edit is here, so the user
+  // can always overwrite or clear their way out.
+  guard GoalInput::{
+      draft: None,
+      standing: None,
+      pending: Some(GoalSetting("ship the feature")),
+    }.row()
+    is Some((class_, text, title, editable)) else {
+    fail("a request in flight must show a row")
+  }
+  assert_eq(class_, "composer-goal pending")
+  assert_eq(text, "Setting goal: ship the feature")
+  assert_eq(title, "ship the feature")
+  assert_true(editable)
+  // A clear has no text to edit into, so it offers the one action that can
+  // still end it — sending the clear again.
+  guard GoalInput::{ draft: None, standing: None, pending: Some(GoalClearing) }.row()
+    is Some((_, clearing, _, clearing_editable)) else {
+    fail("a clear in flight must show a row")
+  }
+  assert_eq(clearing, "Clearing goal…")
+  assert_false(clearing_editable)
+  // Nothing standing and nothing in flight is the hidden row.
+  assert_true(
+    GoalInput::{ draft: None, standing: None, pending: None }.row() is None,
+  )
+}
+
+///|
+test "a blocked goal says what stopped it, keeping the goal in its tooltip" {
+  guard GoalInput::{
+      draft: None,
+      standing: Some({
+        text: "ship the feature",
+        blocked: Some("upstream API is down"),
+      }),
+      pending: None,
+    }.row()
+    is Some((class_, text, title, editable)) else {
+    fail("a standing goal must show a row")
+  }
+  assert_eq(class_, "composer-goal blocked")
+  assert_eq(text, "Goal blocked: upstream API is down")
+  assert_eq(title, "Goal: ship the feature\n\nBlocked: upstream API is down")
+  assert_true(editable)
+  // Only the first line rides the row; the whole wording stays in the tooltip.
+  guard GoalInput::{
+      draft: None,
+      standing: Some({
+        text: "ship the feature\nwith tests passing",
+        blocked: None,
+      }),
+      pending: None,
+    }.row()
+    is Some((plain_class, plain_text, plain_title, _)) else {
+    fail("a standing goal must show a row")
+  }
+  assert_eq(plain_class, "composer-goal")
+  assert_eq(plain_text, "Goal: ship the feature")
+  assert_eq(plain_title, "ship the feature\nwith tests passing")
 }

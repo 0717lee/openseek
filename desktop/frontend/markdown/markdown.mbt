@@ -119,6 +119,16 @@ fn lines_text(lines : @cmark.Seq[@cmark.Node[String]]) -> String {
 }
 
 ///|
+/// The diagram a fenced block renders as, when its fence names a diagram
+/// language this build draws and the renderer accepts the source. Anything
+/// else — another language, or a body the renderer rejects — keeps the
+/// ordinary code-block fallback.
+fn diagram_svg(language : String, source : String) -> String? {
+  guard language == "uml" || language == "plantuml" else { return None }
+  @editor_viewer.render_uml_diagram_svg(source)
+}
+
+///|
 #warnings("-alert_xss_vulnerable")
 fn code_block(block : @cmark.CodeBlock) -> @html.Html {
   let language = match block.info_string {
@@ -130,18 +140,14 @@ fn code_block(block : @cmark.CodeBlock) -> @html.Html {
     None => ""
   }
   let source = lines_text(block.code)
-  if language == "uml" || language == "plantuml" {
-    match @editor_viewer.render_uml_diagram_svg(source) {
-      Some(svg) =>
-        return @html.div(
-          class="chat-markdown-diagram moonbit-viewer-markdown-diagram",
-          attrs=@html.Attrs::build()
-            .data_set("diagram-language", "uml")
-            .inner_html(svg),
-          ([] : Array[@html.Html]),
-        )
-      None => ()
-    }
+  if diagram_svg(language, source) is Some(svg) {
+    return @html.div(
+      class="chat-markdown-diagram moonbit-viewer-markdown-diagram",
+      attrs=@html.Attrs::build()
+        .data_set("diagram-language", "uml")
+        .inner_html(svg),
+      ([] : Array[@html.Html]),
+    )
   }
   let code_class = if language.is_empty() { "" } else { "language-" + language }
   @html.pre([@html.code(class=code_class, source)])
@@ -525,6 +531,13 @@ fn MarkdownRender::file_destination(
   guard self.raw_link_destination(link) is Some(destination) else {
     return None
   }
+  local_file_path(destination)
+}
+
+///|
+/// The filesystem path a Markdown destination names, if any — the decision
+/// `file_destination` applies once the link's destination is resolved.
+fn local_file_path(destination : String) -> String? {
   if FileReference(destination).local_file_uri_path() is Some(path) {
     return Some(path)
   }
@@ -547,6 +560,13 @@ fn MarkdownRender::local_image_destination(
   guard self.raw_link_destination(link) is Some(destination) else {
     return None
   }
+  local_image_path(destination)
+}
+
+///|
+/// The local raster image a destination names, if any — the decision
+/// `local_image_destination` applies once the link's destination is resolved.
+fn local_image_path(destination : String) -> String? {
   if FileReference(destination).local_file_uri_path() is Some(path) {
     return if LocalImagePath(path).has_raster_extension() {
       Some(path)

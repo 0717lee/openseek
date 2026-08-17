@@ -1,5 +1,6 @@
-// The rail's public contract: the entry projection, the key round trip, the
-// pure state machine, and the rendered markup's shape.
+// The rail's public contract: the entry projection, the key round trip, and
+// the pure state machine. What `rail` draws from that state is browser-only
+// now — rabbita 0.15.1 removed the js-target `render_to_string`.
 
 ///|
 fn item(
@@ -135,85 +136,19 @@ test "hover opens on enter, survives a click, and closes on leaving the rail" {
 }
 
 ///|
-fn two_entries() -> Array[@transcript_overview.Entry] {
-  [
-    {
-      key: @transcript_overview.Durable(1),
-      text: "first question",
-      ts: Some(1781144351123),
-      reply: Some("first answer"),
-    },
-    {
-      key: @transcript_overview.Durable(4),
-      text: "second question",
-      ts: None,
-      reply: None,
-    },
-  ]
-}
-
-///|
-#warnings("-alert_unstable")
-fn render(
-  entries : Array[@transcript_overview.Entry],
-  state : @transcript_overview.State,
-) -> String {
-  @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(
-      @transcript_overview.rail(entries, state, @cmd.Emit(_ => @cmd.none), clock=_ => {
-        "10:00"
-      }),
-    )
-  })
-}
-
-///|
-test "the rail hides below two turns" {
-  let entries = two_entries()
-  let one = render([entries[0]], @transcript_overview.State::empty())
-  assert_true(one.contains("hidden"))
-  let two = render(entries, @transcript_overview.State::empty())
-  assert_false(two.contains("hidden"))
-}
-
-///|
-test "the active turn's tick is marked and the popover renders only hovered" {
-  let plain = render(two_entries(), @transcript_overview.State::empty())
-  assert_false(plain.contains("overview-tick active"))
-  assert_false(plain.contains("overview-preview"))
-  let state : @transcript_overview.State = {
-    hover: Some({
-      key: @transcript_overview.Durable(1),
-      flip: false,
-      anchor: 24,
-    }),
-    active: Some(@transcript_overview.Durable(4)),
-  }
-  let marked = render(two_entries(), state)
-  assert_true(marked.contains("overview-tick active"))
-  assert_true(marked.contains("overview-tick hovered"))
-  assert_true(marked.contains("first question"))
-  assert_true(marked.contains("10:00"))
-  assert_true(marked.contains("overview-preview-reply"))
-  assert_true(marked.contains("first answer"))
-  assert_false(marked.contains("overview-preview flip"))
-  // The popover carries its enter-time anchor: it renders outside the
-  // scrollable rail, so the tick's position cannot place it.
-  assert_true(marked.contains("--overview-preview-anchor: 24px"))
-  // The unhovered second turn renders no popover of its own.
-  assert_false(marked.contains("second question</div>"))
-}
-
-///|
-test "a hover measured out of downward room opens its preview upward" {
-  let state : @transcript_overview.State = {
-    hover: Some({
-      key: @transcript_overview.Durable(1),
-      flip: true,
-      anchor: 300,
-    }),
-    active: None,
-  }
-  let markup = render(two_entries(), state)
-  assert_true(markup.contains("overview-preview flip"))
+test "a hover carries the measurements the popover is placed from" {
+  // The rail renders its popover outside the scrollable list, so the tick's
+  // own position cannot place it: the enter-time anchor and flip decision
+  // ride on the hover and must survive every later transition.
+  let key = @transcript_overview.Durable(1)
+  let entered = @transcript_overview.update(
+    @transcript_overview.Entered(key, flip=true, anchor=300),
+    @transcript_overview.State::empty(),
+  )
+  @debug.assert_eq(entered.hover, Some({ key, flip: true, anchor: 300 }))
+  let re_entered = @transcript_overview.update(
+    @transcript_overview.Entered(key, flip=false, anchor=24),
+    entered,
+  )
+  @debug.assert_eq(re_entered.hover, Some({ key, flip: false, anchor: 24 }))
 }

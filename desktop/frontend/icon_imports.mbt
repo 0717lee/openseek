@@ -5,7 +5,6 @@
 using @icons {
   icon,
   icon_chevron_down,
-  icon_close,
   icon_extensions,
   icon_fold,
   icon_folder,
@@ -18,7 +17,6 @@ using @icons {
   icon_search,
   icon_sparkle,
   icon_sync,
-  icon_target,
   icon_terminal,
   icon_worktree,
 }

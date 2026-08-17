@@ -157,6 +157,17 @@ pub fn GitPresentation::summary(self : GitPresentation) -> String {
 }
 
 ///|
+/// The chip's class list: its tone, plus the marker the stylesheet uses to
+/// keep the button lit while its popover floats.
+fn GitPresentation::button_class(
+  self : GitPresentation,
+  open~ : Bool,
+) -> String {
+  let opened = if open { " open" } else { "" }
+  "composer-git-button \{self.tone()}\{opened}"
+}
+
+///|
 /// Render the complete Git affordance. Conditional popover content is appended
 /// after the stable button so opening it never replaces the node under the
 /// pointer in Rabbita's positional renderer.
@@ -165,10 +176,9 @@ pub fn GitPresentation::render(
   open~ : Bool,
   toggle~ : @cmd.Cmd,
 ) -> @html.Html {
-  let opened = if open { " open" } else { "" }
   let children : Array[@html.Html] = [
     @html.button(
-      class="composer-git-button \{self.tone()}\{opened}",
+      class=self.button_class(open~),
       type_="button",
       title=self.summary(),
       on_click=toggle,

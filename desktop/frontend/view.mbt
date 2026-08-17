@@ -965,29 +965,6 @@ fn remote_access_rows(
 }
 
 ///|
-#warnings("-alert_unstable")
-test "remote access device page renders an external link" {
-  let model = {
-    ..test_model(),
-    remote_access: Some({
-      server_url: Some("https://relay.example"),
-      connected: true,
-      managed_by_env: false,
-      user_login: Some("octocat"),
-      device_name: Some("My Mac"),
-      device_url: Some("https://relay.example/d/d_abc/"),
-    }),
-  }
-  let rendered = @html.div(remote_access_rows(test_dispatch(), model))
-  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
-  assert_true(markup.contains("href=\"https://relay.example/d/d_abc/\""))
-  assert_true(markup.contains("target=\"_blank\""))
-  assert_true(markup.contains("rel=\"noopener noreferrer\""))
-  assert_true(markup.contains("class=\"setting-link\""))
-  assert_true(markup.contains("<span>Open</span>"))
-}
-
-///|
 /// The Settings check-for-updates row: the last check's outcome — status
 /// text, or the accent Update button once an installable release is found —
 /// on the left, the Check button on the right.
@@ -1732,103 +1709,37 @@ fn skills_page(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
 }
 
 ///|
-#warnings("-alert_unstable")
-test "settings and skills declare form focus ownership" {
-  let dispatch = test_dispatch()
-  let settings_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(settings_page(dispatch, test_model()))
-  })
-  // Settings fields own their existing borders directly; there is no nested
-  // target that could draw a second frame.
-  assert_true(settings_markup.contains("data-focus-owner=\"\""))
-  assert_false(settings_markup.contains("data-focus-target=\"\""))
-  let skills_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(skills_page(dispatch, test_model()))
-  })
-  assert_true(skills_markup.contains("class=\"skills-search\""))
-  assert_true(skills_markup.contains("data-focus-owner=\"\""))
-  assert_true(skills_markup.contains("data-focus-target=\"\""))
-  let address_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(
-      @preview.toolbar_view(
-        { url: None, input: "", title: "", loading: false, failure: None },
-        {
-          input: dispatch.map(value => BrowserAddressEdited(value)),
-          submit: @cmd.none,
-          back: @cmd.none,
-          forward: @cmd.none,
-          reload: @cmd.none,
-          open_external: @cmd.none,
-        },
-      ),
-    )
-  })
-  assert_true(address_markup.contains("class=\"browser-address\""))
-  assert_true(address_markup.contains("data-focus-owner=\"\""))
-  assert_false(address_markup.contains("data-focus-target=\"\""))
-  // Every rendered form element must choose one side of the contract. A
-  // composite also has a separate owner on its wrapper, which is why counting
-  // markers alone would not prove that the nested control was marked.
-  for markup in [settings_markup, skills_markup, address_markup] {
-    for tag in ["<input", "<textarea", "<select"] {
-      let parts = markup.split(tag).collect()
-      for index, part in parts {
-        if index > 0 {
-          guard part.split_once(">") is Some((opening, _)) else {
-            fail("unterminated form element in rendered markup")
-          }
-          assert_true(
-            opening.contains("data-focus-owner") ||
-            opening.contains("data-focus-target"),
-          )
-        }
-      }
-    }
-  }
-}
-
-///|
-#warnings("-alert_unstable")
-test "an archived transcript renders no live composer controls" {
-  let dispatch = test_dispatch()
-  let conv = { ..test_conversation(), record: ArchivedRecord }
-  let markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(conv.archived_read_only_view(dispatch))
-  })
-  assert_true(markup.contains("Archived conversation · Read only"))
-  assert_true(markup.contains(">Restore</button>"))
-  assert_false(markup.contains("<textarea"))
-  assert_false(markup.contains("id=\"send\""))
-  assert_false(markup.contains("id=\"stop\""))
+test "an archived transcript is read only" {
+  // The chat screen swaps the composer for the restore banner on this
+  // predicate alone, so nothing else decides whether an archived record can
+  // still be typed into.
+  assert_true(
+    { ..test_conversation(), record: ArchivedRecord }.is_archived_read_only(),
+  )
+  assert_false(test_conversation().is_archived_read_only())
 }
 
 ///|
 /// The two halves of the top-level fork, from the model each one stands for.
-#warnings("-alert_unstable")
+/// Which of the three cards `onboarding_view` then draws is the one decision
+/// it makes, so the decision is what is pinned; the markup is browser-only
+/// (rabbita 0.15.1 removed the js-target `render_to_string`).
 test "onboarding stands in for the chat until a project holds one" {
-  let dispatch = test_dispatch()
-  fn markup(model : Model) {
-    @rabbita.render_to_string(() => {
-      @rabbita.Val::constant(onboarding_view(dispatch, model))
-    })
-  }
-
   // Connected with no project: attaching one is the only way forward, so it
   // is the only thing offered.
   let empty = { ..test_model(), conversations: [], active_session: "" }
   let bare = empty.with_dev(dev => { ..dev, projects: [], worktrees: [] })
   assert_true(bare.active_conversation() is None)
-  assert_true(markup(bare).contains("Add a project"))
+  assert_true(bare.onboarding() is NeedsProject(_))
   // Connected with projects but between conversations: the rotation that
   // opens one is a message away, and offering to add a project here would
   // answer a question the user did not ask.
   assert_true(empty.active_conversation() is None)
-  assert_false(markup(empty).contains("Add a project"))
+  assert_true(empty.onboarding() is OpeningChat)
   // Before the bridge answers, this page knows nothing about the host's
   // projects and says only that.
   let connecting = bare.with_dev(dev => { ..dev, bridge: Connecting })
-  assert_true(markup(connecting).contains("Connecting"))
-  assert_false(markup(connecting).contains("Add a project"))
+  assert_true(connecting.onboarding() is AwaitingBridge)
   // With a conversation on screen the fork takes its other branch.
   assert_true(test_model().active_conversation() is Some(_))
 }
@@ -2051,8 +1962,8 @@ fn topbar_view(
 /// action offered — the sidebar's own "Add a project" opens the same picker.
 fn onboarding_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   let card : Array[@html.Html] = [@html.h2("Open a project")]
-  match (model.bridge_state(), model.focused_device()) {
-    (Connected, Some(dev)) if dev.projects.is_empty() => {
+  match model.onboarding() {
+    NeedsProject(channel) => {
       card.push(
         @html.p(
           "SeekMoon works inside a project directory. Add one and its first chat opens here.",
@@ -2062,18 +1973,13 @@ fn onboarding_view(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
         @html.button(
           class="primary",
           type_="button",
-          on_click=dispatch(PickProject(dev.channel)),
+          on_click=dispatch(PickProject(channel)),
           "Add a project",
         ),
       )
     }
-    // A connected device with projects is between conversations: the session
-    // rotation that opens one is a message away.
-    (Connected, Some(_)) => card.push(@html.p("Opening a chat…"))
-    // Until the bridge answers, this page knows nothing about the host's
-    // projects. Offering to add one here would be a guess that the very next
-    // message contradicts.
-    _ => card.push(@html.p("Connecting to this device…"))
+    OpeningChat => card.push(@html.p("Opening a chat…"))
+    AwaitingBridge => card.push(@html.p("Connecting to this device…"))
   }
   @html.section(class="onboarding", [@html.div(class="onboarding-card", card)])
 }

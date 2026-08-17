@@ -115,9 +115,22 @@ fn key_attrs(emit : @cmd.Emit[Msg], selected : Int?) -> @html.Attrs {
 }
 
 ///|
-fn empty_view(open : Open) -> @html.Html {
-  let provider = open.provider()
-  let (class, message) = match open.phase {
+/// The wording a provider gives its dialog: the aria label naming it, the
+/// input's placeholder, and the heading above its rows.
+fn Provider::labels(self : Provider) -> (String, String, String) {
+  match self {
+    Files => ("Search workspace files", "Search files", "Files")
+    Symbols => ("Search workspace symbols", "Search symbols", "Symbols")
+  }
+}
+
+///|
+/// What a run with no rows says, as (class, message). A search that failed
+/// reads as an error; one still running and one that finished empty are both
+/// ordinary states of the same list.
+fn Open::empty_state(self : Open) -> (String, String) {
+  let provider = self.provider()
+  match self.phase {
     Debouncing | Loading =>
       (
         "quick-open-empty",
@@ -146,6 +159,11 @@ fn empty_view(open : Open) -> @html.Html {
         },
       )
   }
+}
+
+///|
+fn empty_view(open : Open) -> @html.Html {
+  let (class, message) = open.empty_state()
   @html.div(
     class~,
     attrs=@html.Attrs::build().role("status").aria_live("polite"),
@@ -170,17 +188,7 @@ fn dialog_view(emit : @cmd.Emit[Msg], open : Open) -> @html.Html {
   } else {
     ""
   }
-  let dialog_label = if provider is Files {
-    "Search workspace files"
-  } else {
-    "Search workspace symbols"
-  }
-  let placeholder = if provider is Files {
-    "Search files"
-  } else {
-    "Search symbols"
-  }
-  let group_label = if provider is Files { "Files" } else { "Symbols" }
+  let (dialog_label, placeholder, group_label) = provider.labels()
   let selected = if open.current() is Some(_) {
     Some(open.selected)
   } else {

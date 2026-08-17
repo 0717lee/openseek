@@ -1,5 +1,7 @@
-// The contract: what a payload decodes to, what counts as the standing plan,
-// and what each of the three renderings puts on screen.
+// The contract: what a payload decodes to and what counts as the standing
+// plan. What the three renderings put on screen is asserted against the pure
+// helpers behind them in `plan_wbtest.mbt` — rabbita 0.15.1 removed the
+// js-target `render_to_string`, so the markup itself is browser-only now.
 
 ///|
 /// A recorded `plan` call, as the transcript stores one.
@@ -50,12 +52,6 @@ fn plan_json(steps : Array[(String, String)]) -> String {
     for step in steps => "{\"title\":\"\{step.0}\",\"status\":\"\{step.1}\"}"
   ]
   "{\"steps\":[\{entries.join(",")}]}"
-}
-
-///|
-#warnings("-alert_unstable")
-fn markup(html : @html.Html) -> String {
-  @rabbita.render_to_string(() => @rabbita.Val::constant(html))
 }
 
 ///|
@@ -280,127 +276,4 @@ test "a call whose result never landed is not the standing plan" {
     fail("expected the applied plan to survive an unresolved clear")
   }
   assert_eq(surviving[0].title, "one")
-}
-
-///|
-test "a card renders the meter over the checklist" {
-  guard @plan.decode(
-      plan_json([
-        ("read the failing test", "completed"),
-        ("fix the parser", "completed"),
-        ("run moon test", "in_progress"),
-        ("update the mbti", "pending"),
-      ]),
-    )
-    is Some(steps) else {
-    fail("expected a plan")
-  }
-  let rendered = markup(@plan.card(steps))
-  // Two of four completed, with the in-progress step's own slice of the bar.
-  assert_true(rendered.contains("plan-progress-count\">2/4"))
-  assert_true(rendered.contains("--plan-progress-width: 50.0%"))
-  assert_true(rendered.contains("plan-progress-fill active"))
-  // Every step is a row, in the order the call recorded them.
-  assert_true(rendered.contains("plan-step completed"))
-  assert_true(rendered.contains("plan-step in_progress"))
-  assert_true(rendered.contains("plan-step pending"))
-  assert_true(rendered.contains("update the mbti"))
-}
-
-///|
-test "a cleared plan says so instead of rendering an empty checklist" {
-  guard @plan.decode("{\"steps\":[]}") is Some(steps) else {
-    fail("expected a plan")
-  }
-  let rendered = markup(@plan.card(steps))
-  assert_true(rendered.contains("plan cleared"))
-  assert_false(rendered.contains("plan-steps"))
-}
-
-///|
-test "a large plan's smallest share still draws" {
-  // `decode` tolerates plans well past the tool's own cap so a newer engine
-  // still renders. A whole-percent width truncated one step of those to
-  // nothing, drawing an active plan as an empty track.
-  let many = [
-    ("one", "completed"),
-    ("two", "in_progress"),
-    ..[
-      for index in 0..<198 => ("step \{index}", "pending")
-    ],
-  ]
-  guard @plan.decode(plan_json(many)) is Some(steps) else {
-    fail("expected a plan")
-  }
-  let rendered = markup(@plan.card(steps))
-  // 1/200 completed and one step in progress: both draw at 0.5%, not 0%.
-  assert_true(rendered.contains("plan-progress-count\">1/200"))
-  assert_false(rendered.contains("--plan-progress-width: 0.0%"))
-  assert_true(rendered.contains("--plan-progress-width: 0.5%"))
-}
-
-///|
-test "a completed plan turns the meter green" {
-  guard @plan.decode(plan_json([("one", "completed"), ("two", "completed")]))
-    is Some(steps) else {
-    fail("expected a plan")
-  }
-  let rendered = markup(@plan.card(steps))
-  assert_true(rendered.contains("plan-progress-fill complete"))
-  assert_false(rendered.contains("plan-progress-fill active"))
-}
-
-///|
-test "an unknown status shows its word rather than a pending ring" {
-  guard @plan.decode(plan_json([("wait on upstream", "blocked")]))
-    is Some(steps) else {
-    fail("expected a plan")
-  }
-  let rendered = markup(@plan.card(steps))
-  assert_true(rendered.contains("step-status\">blocked"))
-  assert_true(rendered.contains("plan-step other"))
-}
-
-///|
-test "the fold meter reports the run's last plan, or nothing" {
-  let items = [
-    plan_call("c1", plan_json([("one", "completed"), ("two", "pending")])),
-    plan_call("c2", plan_json([("one", "completed"), ("two", "in_progress")])),
-  ]
-  let rendered = markup(@plan.fold_progress(items))
-  assert_true(rendered.contains("plan-progress mini"))
-  assert_true(rendered.contains("plan-progress-count\">1/2"))
-  // The tooltip names the step the run left in progress.
-  assert_true(rendered.contains("plan 1/2 · two"))
-  assert_eq(markup(@plan.fold_progress([])), "")
-}
-
-///|
-test "the panel names the active step and keeps its slot when empty" {
-  let items = [
-    plan_call(
-      "c1",
-      plan_json([
-        ("read the failing test", "completed"),
-        ("fix the parser", "in_progress"),
-        ("run moon test", "pending"),
-      ]),
-    ),
-  ]
-  let rendered = markup(@plan.panel(items))
-  assert_true(rendered.contains("plan-panel-summary"))
-  assert_true(rendered.contains("fix the parser"))
-  assert_true(rendered.contains("plan-progress-count\">1/3"))
-  // With no plan the slot still renders, so the composer's children keep a
-  // fixed shape as a plan appears and clears mid-turn.
-  let empty = markup(@plan.panel([]))
-  assert_true(empty.contains("plan-panel-slot"))
-  assert_false(empty.contains("plan-panel-summary"))
-}
-
-///|
-test "the panel reads a finished plan as done" {
-  let items = [plan_call("c1", plan_json([("one", "completed")]))]
-  let rendered = markup(@plan.panel(items))
-  assert_true(rendered.contains("all steps done"))
 }

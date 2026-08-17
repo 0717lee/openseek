@@ -42,9 +42,10 @@ Two source files:
   `extern "js"` DOM glue.
 
 Everything is private. The parse + render logic (session text → typed events →
-`@html.Html`) lives in the `viz` package, where it is snapshot-tested headlessly
-via `@rabbita.render_to_string`; this package is the browser shell around it —
-state, fetching, and DOM wiring.
+`@html.Html`) lives in the `viz` package, where the parse and projection sides
+are tested headlessly (rabbita 0.15.1 removed the js `render_to_string`, so the
+rendered markup is verified in the browser); this package is the browser shell
+around it — state, fetching, and DOM wiring.
 
 ## Data sources
 

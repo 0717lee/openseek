@@ -2434,6 +2434,31 @@ fn Model::bridge_state(self : Model) -> BridgeState {
 }
 
 ///|
+/// What the onboarding card offers when no conversation holds the screen.
+priv enum Onboarding {
+  /// A connected device with no project. Attaching one is the only way
+  /// forward, so the card carries the channel to attach it to.
+  NeedsProject(@interop.ChannelId)
+  /// A connected device that has projects is between conversations: the
+  /// session rotation that opens one is a message away.
+  OpeningChat
+  /// Until the bridge answers, this page knows nothing about the host's
+  /// projects. Offering to add one here would be a guess that the very next
+  /// message contradicts.
+  AwaitingBridge
+}
+
+///|
+fn Model::onboarding(self : Model) -> Onboarding {
+  match (self.bridge_state(), self.focused_device()) {
+    (Connected, Some(dev)) if dev.projects.is_empty() =>
+      NeedsProject(dev.channel)
+    (Connected, Some(_)) => OpeningChat
+    _ => AwaitingBridge
+  }
+}
+
+///|
 /// Whether a catalog entry (identified by its source label) is already in
 /// the local library — at that exact version; an older install keeps the
 /// Install button alive as the upgrade path.

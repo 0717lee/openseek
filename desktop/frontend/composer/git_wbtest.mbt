@@ -1,5 +1,4 @@
 ///|
-#warnings("-alert_unstable")
 test "Git presentation owns chip and popover rendering" {
   let presentation = GitPresentation(
     branch="feature/shared-git",
@@ -19,14 +18,18 @@ test "Git presentation owns chip and popover rendering" {
     presentation.summary(),
     "Share Git presentation — CI 1 running · 4 passed",
   )
-  let html = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(presentation.render(open=true, toggle=@cmd.none))
-  })
-  assert_true(html.contains("composer-git-button pending open"))
-  assert_true(html.contains(">Branch</span>"))
-  assert_true(html.contains(">Changes</span>"))
-  assert_true(html.contains("+12"))
-  assert_true(html.contains("−3"))
-  assert_true(html.contains("#42 Draft"))
-  assert_true(html.contains(">CI</span>"))
+  // The chip stays lit while its popover floats. (What the popover itself
+  // draws is browser-only: rabbita 0.15.1 removed the js `render_to_string`.)
+  assert_eq(
+    presentation.button_class(open=true),
+    "composer-git-button pending open",
+  )
+  assert_eq(
+    presentation.button_class(open=false),
+    "composer-git-button pending",
+  )
+  guard presentation.changes is Some(changes) else {
+    fail("expected recorded changes")
+  }
+  assert_eq(changes.file_count(), "2 files")
 }

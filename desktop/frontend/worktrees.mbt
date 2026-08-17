@@ -791,7 +791,6 @@ test "a repeated rotation keeps an existing conversation's launch choice" {
 }
 
 ///|
-#warnings("-alert_unstable")
 test "the launch mode stops being a choice once a placement is in flight" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
@@ -820,17 +819,9 @@ test "the launch mode stops being a choice once a placement is in flight" {
     )
     assert_true(kept.active().worktree_mode)
     // And the chip says which mode is being established rather than offering
-    // a control that cannot do anything.
-    let markup = @rabbita.render_to_string(() => {
-      @rabbita.Val::constant(
-        match worktree_mode_chip(dispatch, test_model(), pinned) {
-          Some(chip) => chip
-          None => @html.div("")
-        },
-      )
-    })
-    assert_true(markup.contains("Worktree"))
-    assert_false(markup.contains("<button"))
+    // a control that cannot do anything: it still renders, disabled.
+    assert_true(worktree_mode_chip(dispatch, test_model(), pinned) is Some(_))
+    assert_false(test_model().can_choose_launch_mode(pinned))
   }
   // Still a choice while nothing is out.
   let (_, free) = update(
@@ -839,15 +830,8 @@ test "the launch mode stops being a choice once a placement is in flight" {
     test_model().replace_conversation(composing),
   )
   assert_false(free.active().worktree_mode)
-  let offered = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(
-      match worktree_mode_chip(dispatch, test_model(), composing) {
-        Some(chip) => chip
-        None => @html.div("")
-      },
-    )
-  })
-  assert_true(offered.contains("<button"))
+  assert_true(worktree_mode_chip(dispatch, test_model(), composing) is Some(_))
+  assert_true(test_model().can_choose_launch_mode(composing))
 }
 
 ///|

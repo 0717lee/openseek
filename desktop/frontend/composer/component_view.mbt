@@ -69,6 +69,55 @@ fn GoalInput::first_line(_self : GoalInput, text : String) -> String {
 }
 
 ///|
+/// What the goal row says, when it says anything: its class, the one-line
+/// text, the tooltip carrying the full wording, and whether the row offers
+/// Edit. `None` is the hidden row — nothing standing and nothing in flight.
+///
+/// A command that is sent but not yet confirmed keeps its actions. Withholding
+/// them reads as the safer choice — a second command over the first only earns
+/// the host's `GoalPending` refusal — but it would make this row a state the
+/// user cannot leave except by an event that, for a command whose reply was
+/// lost and which the engine never appended, does not exist. A clear in flight
+/// is the one row with no text to edit into.
+fn GoalInput::row(self : GoalInput) -> (String, String, String, Bool)? {
+  if self.pending is Some(pending) {
+    return Some(
+      match pending {
+        GoalSetting(text) =>
+          (
+            "composer-goal pending",
+            "Setting goal: \{self.first_line(text)}",
+            text,
+            true,
+          )
+        GoalClearing =>
+          (
+            "composer-goal pending", "Clearing goal…", "Waiting for the engine to record it",
+            false,
+          )
+      },
+    )
+  }
+  guard self.standing is Some(goal) else { return None }
+  // The goal at a glance, warning-styled while the agent has durably declared
+  // it blocked. The full text (and the blocked reason) ride the tooltip.
+  if goal.blocked is Some(reason) {
+    Some(
+      (
+        "composer-goal blocked",
+        "Goal blocked: \{self.first_line(reason)}",
+        "Goal: \{goal.text}\n\nBlocked: \{reason}",
+        true,
+      ),
+    )
+  } else {
+    Some(
+      ("composer-goal", "Goal: \{self.first_line(goal.text)}", goal.text, true),
+    )
+  }
+}
+
+///|
 /// Render the stable standing-goal row. All user operations leave the package
 /// as owner-bound actions instead of dispatching root messages directly.
 fn GoalInput::view(
@@ -93,35 +142,8 @@ fn GoalInput::view(
       ),
     ])
   }
-  let (row_class, text, title, editable) = if self.pending is Some(pending) {
-    match pending {
-      GoalSetting(text) =>
-        (
-          "composer-goal pending",
-          "Setting goal: \{self.first_line(text)}",
-          text,
-          true,
-        )
-      GoalClearing =>
-        (
-          "composer-goal pending", "Clearing goal…", "Waiting for the engine to record it",
-          false,
-        )
-    }
-  } else {
-    guard self.standing is Some(goal) else {
-      return @html.div(class="composer-goal hidden", "")
-    }
-    if goal.blocked is Some(reason) {
-      (
-        "composer-goal blocked",
-        "Goal blocked: \{self.first_line(reason)}",
-        "Goal: \{goal.text}\n\nBlocked: \{reason}",
-        true,
-      )
-    } else {
-      ("composer-goal", "Goal: \{self.first_line(goal.text)}", goal.text, true)
-    }
+  guard self.row() is Some((row_class, text, title, editable)) else {
+    return @html.div(class="composer-goal hidden", "")
   }
   let edit : Array[@html.Html] = if editable {
     [
