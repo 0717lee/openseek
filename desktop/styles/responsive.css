@@ -65,7 +65,8 @@
 
   /* The files panel covers the whole app instead of splitting the
      content; the conversation keeps the full width underneath. */
-  .content.panel-open {
+  .content.panel-open,
+  .content.panel-open.panel-expanded {
     grid-template-columns: minmax(0, 1fr) 0;
   }
   .content.panel-open .editor {
@@ -89,6 +90,11 @@
   .editor-resize-handle,
   .tree-resize-handle {
     display: none !important;
+  }
+  /* The panel already covers the viewport on phones, so expand/restore has no
+     distinct action there. */
+  .panel-expand {
+    display: none;
   }
 
   /* Settings and Skills: one column — label and description above,

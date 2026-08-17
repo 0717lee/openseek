@@ -2118,6 +2118,9 @@ fn view(
   } else {
     "content"
   }
+  if file_panel_visible && model.right_panel_expanded {
+    content_class = content_class + " panel-expanded"
+  }
   if terminal_panel_visible {
     content_class = content_class + " terminal-open"
   }

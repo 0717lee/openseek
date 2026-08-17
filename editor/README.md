@@ -25,7 +25,7 @@ openseek: OpenSeek desktop file editor — primary product host
 
 repo: this repository {
   viewer: viewer — reusable workspace module {
-    facade: Viewer facade
+    facade: Viewer + DiffViewer facades
     common: viewer/common — DOM-free
     browser: browser runtime + contributions
   }

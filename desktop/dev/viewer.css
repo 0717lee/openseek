@@ -17,6 +17,7 @@
 @import url("../../editor/viewer/browser/view_parts/margin/lines_decorations.css");
 @import url("../../editor/viewer/browser/view_parts/view_lines/tokens.css");
 @import url("../../editor/viewer/browser/view_parts/view_lines/markers.css");
+@import url("../../editor/viewer/browser/diff_editor/diff_editor.css");
 @import url("../../editor/viewer/contrib/folding/browser/folding.css");
 @import url("../../editor/viewer/contrib/contextmenu/browser/contextmenu.css");
 @import url("../../editor/viewer/contrib/definition/browser/definition.css");

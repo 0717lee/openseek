@@ -467,6 +467,7 @@ pub fn boot() -> Unit {
       browser_open_external: emit(BrowserOpenExternal),
       toggle_panel: emit(ToggleRightPanel),
       toggle_menu: emit(ToggleRightPanelMenu),
+      toggle_expanded: emit(ToggleRightPanelExpanded),
       close_menu: emit(CloseRightPanelMenu),
     })
     let terminal_input = state.map(model => model.terminal_input())

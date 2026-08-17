@@ -12,6 +12,10 @@
 /// into the element passed to `attach`.
 struct Viewer {
   services : ViewerServices
+  /// Diff-editor panes always use the code presentation even for `.md`
+  /// resources, matching Monaco's two CodeEditorWidget composition. Ordinary
+  /// public Viewers keep automatic Markdown-document routing.
+  force_code_presentation : Bool
   /// Private embedding role. A Peek preview borrows the same public services
   /// but cannot recursively create another Peek widget.
   role : ViewerRole
@@ -147,6 +151,7 @@ fn Viewer::Viewer(
   options? : ViewerOptions = ViewerOptions::default(),
   initial_container? : @rdom.Element,
   role? : ViewerRole = OuterViewer,
+  force_code_presentation? : Bool = false,
 ) -> Viewer {
   let (services, owns_services) = match services {
     Some(services) => (services, false)
@@ -161,6 +166,7 @@ fn Viewer::Viewer(
   }
   let viewer : Viewer = {
     services,
+    force_code_presentation,
     role,
     owns_services,
     disposed: false,

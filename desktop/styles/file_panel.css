@@ -174,6 +174,10 @@ button.panel-toggle:not(:disabled):hover {
   color: var(--color-text-secondary);
   background: var(--color-bg-surface);
 }
+.viewer-notice.diff-transition-shield {
+  color: transparent;
+  background: transparent;
+}
 .viewer-notice.hidden {
   display: none;
 }
@@ -270,6 +274,9 @@ html.is-resizing .editor-resize-handle {
   background: var(--color-accent-soft);
 }
 .content:not(.panel-open) .editor-resize-handle {
+  display: none;
+}
+.content.panel-expanded .editor-resize-handle {
   display: none;
 }
 /* While dragging, keep the resize cursor everywhere and stop the drag from

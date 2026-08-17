@@ -46,7 +46,7 @@ fn Doc::quick_diff_original(self : Doc) -> String? {
 }
 
 ///|
-/// The two textual sides available to the standalone full-diff renderer.
+/// The two textual sides available to the side-by-side DiffViewer.
 /// Added files use an empty HEAD side and deleted files use an empty working
 /// side. Loading, binary, oversized, and failed reads do not invent text.
 fn Doc::unified_diff_content(self : Doc) -> (String, String)? {
@@ -70,7 +70,7 @@ fn Doc::unified_diff_content(self : Doc) -> (String, String)? {
 }
 
 ///|
-/// Diff inputs only enter the renderer while this tab's cached copy of the
+/// Diff inputs only enter the comparison while this tab's cached copy of the
 /// panel preference is unified mode. Keeping the copy on its review state also
 /// preserves it through generation-fenced source/baseline refreshes.
 fn Doc::visible_unified_diff(self : Doc) -> (String, String)? {
@@ -83,6 +83,74 @@ fn Doc::visible_unified_diff(self : Doc) -> (String, String)? {
 ///|
 fn Doc::shows_unified_diff(self : Doc) -> Bool {
   self.visible_unified_diff() is Some(_)
+}
+
+///|
+/// Whether a requested full diff is still waiting for one textual side. Keep
+/// this distinct from `shows_unified_diff`: the comparison has no model yet,
+/// but revealing the source Viewer while either read settles produces a
+/// source-to-diff flash.
+fn Doc::unified_diff_is_pending(self : Doc) -> Bool {
+  guard self.review is Some(review) && review.view_mode is ReviewUnifiedDiff else {
+    return false
+  }
+  match (review.baseline, self.state) {
+    (ReviewLoading, TabLoading | TabLoaded(..) | TabDeleted) => true
+    (ReviewContent(_) | ReviewMissing, TabLoading) => true
+    _ => false
+  }
+}
+
+///|
+/// The surface selected for the current render. A full comparison owns the
+/// diff host from the moment it is requested, including its loading interval;
+/// a settled unavailable comparison falls back to the ordinary file surface.
+fn Doc::uses_unified_diff_surface(self : Doc) -> Bool {
+  self.shows_unified_diff() || self.unified_diff_is_pending()
+}
+
+///|
+fn ReviewState::diff_loading_generation(self : ReviewState) -> Int {
+  if self.generation >= self.working_generation {
+    self.generation
+  } else {
+    self.working_generation
+  }
+}
+
+///|
+fn Doc::unified_diff_pending_generation(self : Doc) -> Int? {
+  guard self.unified_diff_is_pending() && self.review is Some(review) else {
+    return None
+  }
+  Some(review.diff_loading_generation())
+}
+
+///|
+fn State::shows_delayed_diff_loading(self : State, doc : Doc) -> Bool {
+  guard doc.unified_diff_pending_generation() is Some(generation) else {
+    return false
+  }
+  self.diff_loading_generation == Some(generation)
+}
+
+///|
+const DiffLoadingDelayMilliseconds = 200
+
+///|
+fn delayed_diff_loading(
+  dispatch : @cmd.Emit[Msg],
+  owner : @interop.ConversationKey,
+  path : @pathx.Relative,
+  doc : Doc,
+) -> @cmd.Cmd {
+  guard doc.unified_diff_pending_generation() is Some(generation) else {
+    return @cmd.none
+  }
+  @cmd.delay(
+    dispatch(DiffLoadingDue(owner~, path~, generation~)),
+    DiffLoadingDelayMilliseconds,
+  )
 }
 
 ///|
@@ -424,6 +492,38 @@ pub fn open_changed_document(
   }
   let state = { ..state, highlighted: None }
   let path = change.path
+  // Selecting a Changes row is activation, not a manual reload. Reuse the
+  // exact cached review (including one whose paired reads are still pending)
+  // so repeated clicks cannot replace its generation, clear its DiffViewer
+  // models, and briefly paint an empty comparison. Exact row identity matters:
+  // Git can legitimately expose two different reviews for the same path.
+  if state.docs.get(path) is Some(doc) &&
+    doc.review is Some({ selected, .. }) &&
+    selected == change {
+    let (show, next_doc, review_generation) = show_activated_tab(
+      dispatch,
+      ctx,
+      path,
+      doc,
+      state.review_generation,
+    )
+    let docs = state.docs.copy()
+    docs[path] = next_doc
+    let cmds = [show, delayed_diff_loading(dispatch, ctx.owner, path, next_doc)]
+    if !had_active || (state.tree_open && ctx.narrow) {
+      cmds.push(request_viewer_remeasure())
+    }
+    return (
+      @cmd.batch(cmds),
+      {
+        ..state,
+        docs,
+        review_generation,
+        error: None,
+        tree_open: state.tree_open && !ctx.narrow,
+      },
+    )
+  }
   let name = basename(path)
   let generation = state.review_generation + 1
   let docs = state.docs.copy()
@@ -515,6 +615,7 @@ pub fn open_changed_document(
     // Viewer until the HEAD side settles.
     cmds.push(clear_document())
   }
+  cmds.push(delayed_diff_loading(dispatch, ctx.owner, path, review_doc))
   if !had_active || (state.tree_open && ctx.narrow) {
     cmds.push(request_viewer_remeasure())
   }
@@ -1935,6 +2036,15 @@ pub fn update(
       let opening = !state.tree_open
       (request_viewer_remeasure(), { ..state, tree_open: opening })
     }
+    DiffLoadingDue(owner~, path~, generation~) =>
+      if state.owner == Some(owner) &&
+        ctx.active_file == Some(path) &&
+        state.docs.get(path) is Some(doc) &&
+        doc.unified_diff_pending_generation() == Some(generation) {
+        (@cmd.none, { ..state, diff_loading_generation: Some(generation) })
+      } else {
+        (@cmd.none, state)
+      }
     ToggleReviewDiff => {
       guard ctx.active_file is Some(path) &&
         state.docs.get(path) is Some(doc) &&
@@ -3443,13 +3553,24 @@ test "changed-file review fences paired replies and ordinary opens leave review"
       }
     ),
   )
-  // A repeated row click owns a newer generation; its predecessor cannot
-  // replace the baseline even though owner and path still match.
-  let (_, second) = open_changed_document(
+  // Re-selecting the exact active row is idempotent: it keeps the in-flight
+  // pair and does not let click cadence continuously supersede its reads.
+  let (_, repeated) = open_changed_document(
     emit,
     first,
     ctx,
     change,
+    had_active=true,
+  )
+  assert_true(repeated == first)
+  // A genuinely different Git row for the same path still owns a new pair;
+  // its predecessor cannot replace the baseline even though owner/path match.
+  let different_row = { ..change, index_status: "M", worktree_status: " " }
+  let (_, second) = open_changed_document(
+    emit,
+    repeated,
+    ctx,
+    different_row,
     had_active=true,
   )
   guard @resource.of_path(@interop.ChannelId::Local, "/work/a.mbt")
@@ -3557,7 +3678,7 @@ test "changed-file review fences paired replies and ordinary opens leave review"
       working_generation: 2,
       baseline: ReviewContent("old two"),
       view_mode: ReviewSource,
-      selected: change,
+      selected: different_row,
     }),
   }
   // A symbol/annotation jump starts a fresh ordinary read instead of taking
@@ -3603,6 +3724,51 @@ test "changed-file review fences paired replies and ordinary opens leave review"
     ctx,
   )
   assert_true(review_after_ordinary == ordinary)
+}
+
+///|
+test "reselecting a settled review keeps its cached comparison generation" {
+  let path = @pathx.Relative("settled.mbt")
+  let change = test_modified_change(path)
+  let doc = {
+    ..loaded_doc(path.0),
+    review: Some({
+      generation: 7,
+      working_generation: 7,
+      baseline: ReviewContent("HEAD source"),
+      view_mode: ReviewUnifiedDiff,
+      selected: change,
+    }),
+  }
+  let docs = owned_state().docs.copy()
+  docs[path] = doc
+  let state = { ..owned_state(), review_generation: 7, docs }
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  let (_, reselected) = open_changed_document(
+    test_emit(),
+    state,
+    ctx,
+    change,
+    had_active=true,
+  )
+  assert_true(reselected == state)
+  assert_true(
+    reselected.docs.get(path)
+    is Some(
+      {
+        state: TabLoaded(..),
+        review: Some(
+          {
+            generation: 7,
+            working_generation: 7,
+            baseline: ReviewContent("HEAD source"),
+            ..,
+          }
+        ),
+        ..,
+      }
+    ),
+  )
 }
 
 ///|

@@ -8,6 +8,7 @@ struct Input {
   file_ctx : @fileeditor.Ctx
   is_desktop : Bool
   menu_open : Bool
+  expanded : Bool
 } derive(Eq)
 
 ///|
@@ -18,8 +19,9 @@ pub fn Input::Input(
   file_ctx~ : @fileeditor.Ctx,
   is_desktop~ : Bool,
   menu_open~ : Bool,
+  expanded~ : Bool,
 ) -> Input {
-  { dock, file_panel, preview, file_ctx, is_desktop, menu_open }
+  { dock, file_panel, preview, file_ctx, is_desktop, menu_open, expanded }
 }
 
 ///|
@@ -39,6 +41,7 @@ pub(all) struct Actions {
   browser_open_external : @cmd.Cmd
   toggle_panel : @cmd.Cmd
   toggle_menu : @cmd.Cmd
+  toggle_expanded : @cmd.Cmd
   close_menu : @cmd.Cmd
 }
 

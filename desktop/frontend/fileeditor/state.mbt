@@ -344,6 +344,10 @@ pub(all) struct State {
   // Each side records its current token in `ReviewState`; it outlives
   // conversation re-roots for the same A→B→A reason as `changes_generation`.
   review_generation : Int
+  // The pending comparison whose loading notice has survived the reveal
+  // delay. A newer review generation does not inherit this value, so rapid
+  // file changes cannot flash an older timer's notice.
+  diff_loading_generation : Int?
   // A missing checkout can discard either half of an in-flight review. Mark
   // that boundary explicitly so the first authoritative snapshot after
   // recovery restarts only incomplete requests once; ordinary polling must
@@ -410,6 +414,7 @@ pub fn State::empty() -> State {
     changes_head: None,
     changes_head_known: false,
     review_generation: 0,
+    diff_loading_generation: None,
     review_recovery_pending: false,
     background_review_requests: Map([]),
     explorer_was_visible: false,
@@ -580,6 +585,13 @@ pub(all) enum Msg {
   // A Changes row was clicked. The full decoded row carries the original path
   // needed by renames/copies and whether a working-tree read is possible.
   ChangedFileSelected(ChangedFile)
+  // Reveal a still-pending full-diff notice only after its short grace period.
+  // Owner, path, and request generation fence timers that outlive navigation.
+  DiffLoadingDue(
+    owner~ : @interop.ConversationKey,
+    path~ : @pathx.Relative,
+    generation~ : Int
+  )
   // Switch the active changed-file review between the ordinary source Viewer
   // and its full unified diff. Unavailable/loading reviews ignore the action.
   ToggleReviewDiff
@@ -716,10 +728,10 @@ pub(all) enum Msg {
     comment~ : String,
     feedback_id~ : String
   )
-  // The user submitted a comment from the standalone full-diff surface.
-  // Both line domains cross the package boundary: additions/context use the
-  // modified number, while an original-only deletion remains identifiable to
-  // the composer without pretending it exists in the working document.
+  // The user submitted a comment from a full-diff surface. Both line domains
+  // cross the package boundary: additions/context use the modified number,
+  // while an original-pane selection remains identifiable to the composer
+  // without pretending it exists in the working document.
   // Like `EditorCommentAdded`, the main update intercepts this message and
   // turns it into a deduplicated annotation chip.
   UnifiedDiffCommentAdded(
@@ -727,6 +739,11 @@ pub(all) enum Msg {
     original_line_number~ : Int?,
     modified_line_number~ : Int?,
     quote~ : String,
-    comment~ : String
+    comment~ : String,
+    // Present when the comment came from the new original-side Viewer. The
+    // legacy standalone renderer has no feedback bubble and leaves both keys
+    // absent.
+    resource~ : ModelUri?,
+    feedback_id~ : String?
   )
 }

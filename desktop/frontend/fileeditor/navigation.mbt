@@ -171,11 +171,11 @@ fn register_moon_ide_navigation_providers(
   let provider = MoonIdeNavigationProvider::{ on_error, }
   [
     @languages.languages.register_definition_provider(
-      @language.LanguageSelector::LanguageId("moonbit"),
+      live_moonbit_model_selector(),
       provider,
     ),
     @languages.languages.register_references_provider(
-      @language.LanguageSelector::LanguageId("moonbit"),
+      live_moonbit_model_selector(),
       provider,
     ),
   ]

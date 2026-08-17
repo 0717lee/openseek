@@ -170,6 +170,16 @@ fn compile_external_viewer_api_contract(
   require_contract_element(viewer.get_container_dom_node())
   require_contract_optional_element(viewer.get_dom_node())
 
+  // The diff facade is the same external composition over two borrowed
+  // models and one optionally shared service bundle.
+  let diff_host = @rdom.document().create_element("div")
+  let diff_viewer = @viewer.DiffViewer::create(diff_host, services~, options~)
+  diff_viewer.set_model(Some(DiffEditorModel(model, model)))
+  diff_viewer.get_model() |> ignore
+  diff_viewer.layout()
+  diff_viewer.clear()
+  diff_viewer.dispose()
+
   // Explicit bundles and concrete backings remain caller-owned.
   services.dispose()
   marker_decorations.dispose()

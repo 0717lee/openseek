@@ -200,19 +200,26 @@ js-only. Concrete browser runtime packages live below the module-private
   generated interfaces may reference language/common values, browser
   contracts, and common capability handles, never private view or contribution
   implementations.
-- `viewer` also exposes the independent opaque `UnifiedDiffView` facade.
-  `UnifiedDiffView::create` borrows one stable caller-owned host and owns only
-  its installed subtree. Hosts may supply an optional typed line-comment
-  callback; omitting it keeps the surface read-only. `clear` retains the host
-  binding and idempotent `dispose` removes the subtree without removing the
-  host. `set_diff` accepts
-  caller-owned strings, bounds their combined UTF-16 size before snapshot
-  allocation and their logical line count before diff computation, then routes
-  through the replaceable `viewer/common/unified_diff` seam. Its concrete DOM
-  renderer remains under `internal/viewer/browser/unified_diff`, while the
-  public stylesheet source is
-  `viewer/browser/unified_diff/unified_diff.css` and is assembled into
-  `viewer.css` for hosts to ship and size.
+- `viewer` also exposes opaque `DiffViewer` and `DiffEditorModel` facades. A
+  DiffViewer installs two ordinary child Viewers into one stable caller-owned
+  host, borrows the two caller-owned models, and shares one explicit
+  `ViewerServices` bundle. The root coordinator is the only owner of diff
+  mappings, whole-line decoration ids, alignment ViewZone ids, model-change
+  subscriptions, and coupled scroll subscriptions. Phase one fixes both child
+  panes to unwrapped, unfolded code presentations (including raw `.md` source);
+  the corresponding height deficit from each `viewer/common/diff` mapping
+  becomes a ViewZone after the shorter range. Language and feedback behavior
+  stays model-scoped in the ordinary Viewer path. Hosts own revision routing:
+  a historical model must not match a provider that can answer only for the
+  live checkout. The stylesheet source is
+  `viewer/browser/diff_editor/diff_editor.css`.
+- `viewer` retains the independent opaque `UnifiedDiffView` compatibility
+  facade. It accepts bounded caller-owned strings and eagerly renders the
+  `viewer/common/unified_diff` result through
+  `internal/viewer/browser/unified_diff`; its stylesheet remains
+  `viewer/browser/unified_diff/unified_diff.css`. It does not participate in
+  the two-Viewer composition and is no longer OpenSeek's primary review
+  surface.
 - `viewer/browser` owns canonical editor mouse events, target kinds, DOM
   coordinates, the mutable live ViewZone descriptor/opaque accessor contract, and
   the opaque unmanaged overlay-widget handle.

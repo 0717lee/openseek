@@ -85,7 +85,9 @@ fn panel_view(input : Input, actions : Actions) -> @html.Html {
         chips,
         launcher,
         menu_open=input.menu_open,
+        expanded=input.expanded,
         toggle_menu=actions.toggle_menu,
+        toggle_expanded=actions.toggle_expanded,
         toggle_panel=actions.toggle_panel,
       ),
       @fileeditor.breadcrumb_view(

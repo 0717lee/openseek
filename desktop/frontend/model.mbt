@@ -1158,6 +1158,7 @@ priv struct Model {
   // The right-panel component receives these values as read-only input.
   right_panel_open : Bool
   right_panel_menu_open : Bool
+  right_panel_expanded : Bool
   // Terminal tabs and their connection snapshots affect both the component
   // view and root layout. The root owns the opaque state once so neither side
   // reports a second visibility copy back to the other.
@@ -1332,6 +1333,7 @@ priv struct BrowserGeometry {
   sidebar_open : Bool
   narrow : Bool
   terminal_open : Bool
+  right_panel_expanded : Bool
   tree_layout : @fileeditor.TreeLayout
 } derive(Eq)
 
@@ -1708,6 +1710,7 @@ priv enum Msg {
   // second message that writes the same visibility back into the root.
   ToggleRightPanel
   ToggleRightPanelMenu
+  ToggleRightPanelExpanded
   CloseRightPanelMenu
   LauncherLoaded(Array[@transcript.LauncherAppItem])
   LauncherFailed(String)
@@ -2272,6 +2275,7 @@ fn initial_model() -> Model {
     sidebar_open: !narrow,
     right_panel_open: false,
     right_panel_menu_open: false,
+    right_panel_expanded: false,
     terminal: @terminal.State::empty(),
     active_session: "",
     loading_conversation: None,

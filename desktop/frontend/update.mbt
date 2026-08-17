@@ -1391,6 +1391,7 @@ fn browser_geometry(model : Model) -> BrowserGeometry {
     sidebar_open: model.sidebar_open,
     narrow: model.narrow,
     terminal_open: model.terminal.is_open(),
+    right_panel_expanded: model.right_panel_expanded,
     tree_layout: model.tree_layout,
   }
 }
@@ -2155,9 +2156,16 @@ fn update_msg(
         original_line_number~,
         modified_line_number~,
         quote~,
-        comment~
+        comment~,
+        resource~,
+        feedback_id~
       )
     ) => {
+      let clear_feedback = match (resource, feedback_id) {
+        (Some(resource), Some(feedback_id)) =>
+          @fileeditor.remove_editor_feedback(resource, feedback_id)
+        _ => @cmd.none
+      }
       let (line_number, range, side) = match modified_line_number {
         Some(line_number) if line_number >= 1 => {
           let end_column = if quote.is_empty() { 1 } else { quote.length() + 1 }
@@ -2171,11 +2179,11 @@ fn update_msg(
           match original_line_number {
             Some(line_number) if line_number >= 1 =>
               (line_number, None, @mention_context.OriginalRevision)
-            _ => return (@cmd.none, model)
+            _ => return (clear_feedback, model)
           }
       }
       guard model.active_conversation() is Some(conv) else {
-        return (@cmd.none, model)
+        return (clear_feedback, model)
       }
       let mentions = @composer.Draft::{
           task: conv.task,
@@ -2191,7 +2199,7 @@ fn update_msg(
           ),
           range,
         }).mentions
-      (@cmd.none, model.replace_conversation({ ..conv, mentions, }))
+      (clear_feedback, model.replace_conversation({ ..conv, mentions, }))
     }
     // Intercepted like the comment above: which dock tab a tree click opens
     // is the strip's business. The dock opens (or re-activates) the tab,
@@ -3689,16 +3697,37 @@ fn update_msg(
       } else {
         model
       }
-      (
-        @cmd.none,
-        { ..model, right_panel_open: opening, right_panel_menu_open: false },
-      )
+      let model = {
+        ..model,
+        right_panel_open: opening,
+        right_panel_menu_open: false,
+        right_panel_expanded: if opening {
+          model.right_panel_expanded
+        } else {
+          false
+        },
+      }
+      (@cmd.none, model)
     }
     ToggleRightPanelMenu =>
       (
         @cmd.none,
         { ..model, right_panel_menu_open: !model.right_panel_menu_open },
       )
+    ToggleRightPanelExpanded => {
+      guard model.right_panel_open else { return (@cmd.none, model) }
+      let model = {
+        ..model,
+        right_panel_menu_open: false,
+        right_panel_expanded: !model.right_panel_expanded,
+      }
+      let cmd = if @dock.active_file(model.dock) is Some(_) {
+        @fileeditor.request_viewer_remeasure()
+      } else {
+        @cmd.none
+      }
+      (cmd, model)
+    }
     CloseRightPanelMenu =>
       (@cmd.none, { ..model, right_panel_menu_open: false })
     ToggleLauncher => {
@@ -14869,6 +14898,17 @@ test "every click-away menu closes without reopening on a second dismissal" {
   assert_false(unmenued.right_panel_menu_open)
   let (_, unmenued_twice) = update(dispatch, CloseRightPanelMenu, unmenued)
   assert_false(unmenued_twice.right_panel_menu_open)
+  let (_, expanded) = update(dispatch, ToggleRightPanelExpanded, unmenued_twice)
+  assert_true(expanded.right_panel_expanded)
+  assert_false(expanded.right_panel_menu_open)
+  let (_, restored) = update(dispatch, ToggleRightPanelExpanded, expanded)
+  assert_false(restored.right_panel_expanded)
+  let (_, expanded_again) = update(dispatch, ToggleRightPanelExpanded, restored)
+  let (_, hidden) = update(dispatch, ToggleRightPanel, expanded_again)
+  assert_false(hidden.right_panel_open)
+  assert_false(hidden.right_panel_expanded)
+  let (_, still_hidden) = update(dispatch, ToggleRightPanelExpanded, hidden)
+  assert_true(still_hidden == hidden)
 }
 
 ///|
@@ -17132,6 +17172,8 @@ test "UnifiedDiffCommentAdded preserves modified and original-only line identity
       modified_line_number=Some(7),
       quote="let answer = 42",
       comment="name this constant",
+      resource=None,
+      feedback_id=None,
     ),
   )
   let (_, with_added) = update(dispatch, added, test_model())
@@ -17156,6 +17198,8 @@ test "UnifiedDiffCommentAdded preserves modified and original-only line identity
       modified_line_number=None,
       quote="obsolete()",
       comment="good removal",
+      resource=None,
+      feedback_id=None,
     ),
   )
   let (_, with_deleted) = update(dispatch, deleted, with_added)

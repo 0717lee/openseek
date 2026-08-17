@@ -1,5 +1,9 @@
 /* The island root owns a Monaco-shaped view tree. Clipping belongs to
    .overflow-guard so future overflowing widget slots can escape it. */
+.moonbit-viewer-surface-hidden {
+  display: none !important;
+}
+
 .moonbit-viewer.readonly-editor {
   position: absolute;
   inset: 0;
