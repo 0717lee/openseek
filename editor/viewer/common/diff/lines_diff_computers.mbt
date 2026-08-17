@@ -4,7 +4,7 @@
 //
 // Parity ledger: `getDefault` — PORTED (package-level fn; the viewer has no
 // namespace object). `getLegacy` — N-A (the legacy engine is not ported; the
-// default computer is piediff-backed, see
+// default computer is Core-diff-backed, see
 // `default_lines_diff_computer.mbt`).
 
 ///|

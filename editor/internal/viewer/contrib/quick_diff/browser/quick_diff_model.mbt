@@ -5,7 +5,7 @@
 // recompute, provider merge, `compareChanges` sort) collapses to
 // `compute_changes` — the `_diff` method's pipeline (`quickDiffModel.ts:348`:
 // `editorWorkerService.computeDiff` → `toLineChanges(DiffState.
-// fromDiffResult(result))`) over the piediff-backed default computer.
+// fromDiffResult(result))`) over the Core-diff-backed default computer.
 //
 // Parity ledger: `QuickDiffModel._diff` + the `toLineChanges` conversion it
 // applies (`diffEditorWidget.ts:759`) — PORTED (`charChanges` — DEFERRED,

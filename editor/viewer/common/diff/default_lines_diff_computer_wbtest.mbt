@@ -1,4 +1,4 @@
-// White-box behavior tests for the piediff-backed `DefaultLinesDiffComputer`.
+// White-box behavior tests for the Core-diff-backed `DefaultLinesDiffComputer`.
 //
 // The engine deviates from Monaco's by design (see the impl file header), so
 // unlike the `*_reference_test.mbt` suites these do NOT byte-compare against
@@ -110,7 +110,7 @@ test "repeated equal lines still yield a valid separated script" {
 
 ///|
 test "default computation budget still yields a correct script" {
-  // A non-zero budget takes piediff's default cutoff path
+  // A non-zero budget takes Core diff's default cutoff path
   // (suboptimal-but-correct); correctness must hold regardless.
   let original : Array[String] = []
   let modified : Array[String] = []
