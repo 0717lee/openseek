@@ -1546,6 +1546,11 @@ priv enum Msg {
   // Open the app-server-backed Codex page and refresh its authoritative
   // account, model, and thread catalogs.
   OpenCodex
+  // The Settings page's "Open config.toml" button: the host ensures and
+  // opens the Codex home's configuration with the platform opener. A
+  // failure comes back as the toast message below.
+  OpenCodexConfig
+  CodexConfigOpenFailed(String)
   // The add button creates only a browser-local draft. The generated id owns
   // Files and Terminal until the first prompt creates an app-server thread.
   CodexDraftRotated(cwd~ : String, id~ : String)

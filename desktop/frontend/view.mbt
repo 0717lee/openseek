@@ -849,6 +849,19 @@ fn codex_account_rows(
       ),
     )
   }
+  rows.push(
+    setting_row(
+      "Configuration",
+      [
+        @html.button(
+          class="secondary",
+          on_click=dispatch(OpenCodexConfig),
+          "Open config.toml",
+        ),
+      ],
+      desc="config.toml in this desktop's Codex home, created empty if missing. The app-server reads it at startup, so edits apply after the desktop restarts.",
+    ),
+  )
   rows
 }
 

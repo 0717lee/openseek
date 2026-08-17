@@ -2758,6 +2758,8 @@ fn update_msg(
       // Reopening cancels the dismissal — otherwise the next settled
       // snapshot would close the modal the user just asked for.
       (@cmd.none, { ..model, api_setup_open: true, api_setup_dismissed: false })
+    OpenCodexConfig => (open_codex_config(dispatch, model.focused), model)
+    CodexConfigOpenFailed(message) => model.notify_error(dispatch, message)
     OpenCodex => {
       let (cmd, codex) = @codex.update(
         dispatch.map(msg => Codex(channel=model.focused, msg)),

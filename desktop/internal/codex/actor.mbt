@@ -232,6 +232,13 @@ struct Actor {
 }
 
 ///|
+/// The isolated `CODEX_HOME` this actor spawns the app-server with, or
+/// `None` when the inherited environment applies.
+pub fn Actor::config_home(self : Actor) -> @pathx.Path? {
+  self.settings.home
+}
+
+///|
 pub fn Actor::Actor(settings : CodexSettings) -> Actor {
   {
     settings,
