@@ -255,7 +255,7 @@ async fn CodexWorkspaceBinding::authorize(self : CodexWorkspaceBinding) -> Unit 
 /// announcement).
 pub fn ApiState::new(
   engine~ : String,
-  codex? : String = "codex",
+  codex? : @codex.CodexSettings = @codex.CodexSettings::default(),
   runtime_dir? : @pathx.Path,
   executable? : String,
   auth? : @auth.AuthStore,

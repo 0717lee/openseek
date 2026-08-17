@@ -3,9 +3,12 @@ import {
   "moonbitlang/async",
   "moonbitlang/async/fs",
   "moonbitlang/async/io",
+  "moonbitlang/async/os_error",
   "moonbitlang/async/process",
   "moonbitlang/core/debug",
   "moonbitlang/core/json",
+  "openseek_desktop/internal/pathx",
+  "tonyfettes/platform",
   "tonyfettes/xlog",
 }
 
