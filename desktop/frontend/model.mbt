@@ -1266,6 +1266,10 @@ priv struct Model {
   // Permanent archived-chat deletion has its own explicit confirmation. It
   // never shares the worktree-discard dialog because the data at risk differs.
   archived_delete_confirm : ArchivedDeleteConfirm?
+  // Archiving a dsh conversation is irreversible in dsh itself, so it asks
+  // first. Separate from the two above: nothing is deleted and no worktree is
+  // discarded, which is exactly what its copy has to explain.
+  dsh_archive_confirm : DshArchiveConfirm?
   // The conversation on screen; always present in `conversations` once the
   // startup session rotation lands.
   active_session : String
@@ -1638,6 +1642,8 @@ priv enum Msg {
   DshNewSessionIn(String)
   DshOpenSession(String)
   DshArchiveSession(String)
+  CancelDshArchive
+  ConfirmDshArchive
   DshRemoveWorkspace(String)
   Dsh(@dsh.Msg)
   ToggleSidebar
@@ -2350,6 +2356,7 @@ fn initial_model() -> Model {
     pending_project_adoption: None,
     archive_confirm: None,
     archived_delete_confirm: None,
+    dsh_archive_confirm: None,
     screen: Chat,
     codex: @codex.State(),
     dsh: @dsh.State(),

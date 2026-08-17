@@ -574,6 +574,16 @@ pub fn State::active_id(self : State) -> String? {
 }
 
 ///|
+/// The sidebar label for one conversation, so a root-owned prompt can name
+/// what it is about to do. `None` once dsh stops listing that session.
+pub fn State::session_title(self : State, session_id : String) -> String? {
+  self.sessions
+  .iter()
+  .find_first(session => session.id == session_id)
+  .map(session => session.title)
+}
+
+///|
 fn State::active_workspace_row(self : State) -> DshWorkspaceRow? {
   guard self.active_id is Some(session_id) else { return None }
   self.workspaces

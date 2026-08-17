@@ -1413,6 +1413,7 @@ fn covering_overlay(model : Model) -> Bool {
   model.project_picker is Some(_) ||
   model.archive_confirm is Some(_) ||
   model.archived_delete_confirm is Some(_) ||
+  model.dsh_archive_confirm is Some(_) ||
   model.quick_open.is_open() ||
   model.update_ux is ConfirmingRestart(_) ||
   // Best effort: with the bridge gone the hide op may not deliver.
@@ -3079,12 +3080,24 @@ fn update_msg(
       )
     }
     DshArchiveSession(session_id) => {
+      // Nothing in dsh can unarchive, so the row's action only stages the
+      // question; the request itself waits for an explicit confirmation.
+      guard model.dsh.session_title(session_id) is Some(title) else {
+        return (@cmd.none, model)
+      }
+      (@cmd.none, { ..model, dsh_archive_confirm: Some({ session_id, title }) })
+    }
+    CancelDshArchive => (@cmd.none, { ..model, dsh_archive_confirm: None })
+    ConfirmDshArchive => {
+      guard model.dsh_archive_confirm is Some(confirm) else {
+        return (@cmd.none, model)
+      }
       let (cmd, dsh) = @dsh.update(
         dispatch.map(msg => Dsh(msg)),
-        @dsh.Msg::archive_session(session_id),
+        @dsh.Msg::archive_session(confirm.session_id),
         model.dsh,
       )
-      (cmd, { ..model, dsh, })
+      (cmd, { ..model, dsh, dsh_archive_confirm: None })
     }
     DshRemoveWorkspace(workspace_id) => {
       let (cmd, dsh) = @dsh.update(
@@ -17924,4 +17937,34 @@ test "full-screen modals hide the native view and closing restores it" {
   )
   assert_true(searching.quick_open.is_open())
   assert_true(searching.browser_pane.shown is None)
+}
+
+///|
+/// Archiving a dsh conversation cannot be undone by any dsh client, so the
+/// sidebar action only asks; nothing leaves for dsh until the confirmation.
+test "archiving a dsh conversation asks before it happens" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let asking = {
+    ..test_model(),
+    dsh_archive_confirm: Some({ session_id: "session-1", title: "leftover" }),
+  }
+  // It covers the app like every other modal: the palette must not open
+  // behind it, and native views have to stay hidden underneath.
+  assert_true(covering_overlay(asking))
+  let (_, cancelled) = update(dispatch, CancelDshArchive, asking)
+  assert_eq(cancelled.dsh_archive_confirm, None)
+  let (_, confirmed) = update(dispatch, ConfirmDshArchive, asking)
+  assert_eq(confirmed.dsh_archive_confirm, None)
+  // Confirming with nothing staged cannot send an archive for whatever was
+  // selected last.
+  let (_, stray) = update(dispatch, ConfirmDshArchive, test_model())
+  assert_eq(stray.dsh_archive_confirm, None)
+  // A session dsh no longer lists has no title to name, so the row's action
+  // stages nothing rather than asking about a blank.
+  let (_, unknown) = update(
+    dispatch,
+    DshArchiveSession("session-gone"),
+    test_model(),
+  )
+  assert_eq(unknown.dsh_archive_confirm, None)
 }

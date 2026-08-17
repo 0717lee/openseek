@@ -187,6 +187,40 @@ fn delete_archived_session(
 }
 
 ///|
+/// The confirmation staged before archiving a DeepSeek Harness conversation.
+/// dsh's archive set is append-only — no client, dsh's own included, can bring
+/// one back — so this is the same class of decision as a permanent delete,
+/// even though the transcript stays on disk.
+priv struct DshArchiveConfirm {
+  session_id : String
+  title : String
+} derive(Debug, Eq)
+
+///|
+fn dsh_archive_modal(
+  dispatch : @cmd.Emit[Msg],
+  confirm : DshArchiveConfirm,
+) -> @html.Html {
+  @html.div(class="modal-backdrop", on_click=dispatch(CancelDshArchive), [
+    @html.div(class="modal", [
+      @html.div(class="modal-title", "Archive this conversation?"),
+      @html.div(
+        class="modal-body",
+        "“\{confirm.title}” disappears from DeepSeek Harness for good: nothing in dsh can bring an archived conversation back. Its transcript stays on disk, and project files and Git branches remain.",
+      ),
+      @html.div(class="modal-actions", [
+        @html.button(on_click=dispatch(CancelDshArchive), "Cancel"),
+        @html.button(
+          class="danger",
+          on_click=dispatch(ConfirmDshArchive),
+          "Archive",
+        ),
+      ]),
+    ]),
+  ])
+}
+
+///|
 /// Permanent archived-chat deletion requires a second, explicit click. The
 /// copy names what disappears and what survives so the user does not have to
 /// infer filesystem or Git consequences from the word "delete".

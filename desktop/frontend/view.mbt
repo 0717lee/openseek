@@ -2182,6 +2182,9 @@ fn view(
   if model.archived_delete_confirm is Some(confirm) {
     children.push(archived_delete_modal(dispatch, confirm))
   }
+  if model.dsh_archive_confirm is Some(confirm) {
+    children.push(dsh_archive_modal(dispatch, confirm))
+  }
   // Rendered whether or not the palette is open — closed it is an empty
   // placeholder — so opening it never shifts the overlay children around it.
   children.push(quick_open_html)
