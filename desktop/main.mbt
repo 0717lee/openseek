@@ -38,6 +38,17 @@ async fn main {
   log.info() <? { "message": "codex", "path": codex }
   log.info() <? { "message": "app version", "version": app_version }
   let runtime_dir = @host.prepared_runtime_dir(executable)
+  let codex_home = match runtime_dir {
+    Some(dir) => @codex.prepared_home(dir)
+    None => None
+  }
+  log.info() <?
+    {
+      "message": "codex home",
+      "path": codex_home
+      .map(p => p.to_string())
+      .unwrap_or("(inherited environment)"),
+    }
   // A fresh install has no workspaces at all. Attach the default one before
   // anything can serve a workspace list, so the first page to connect
   // already has somewhere to work. This runs exactly once per registry: a
@@ -88,6 +99,7 @@ async fn main {
   let state = @api.ApiState::new(
     engine~,
     codex~,
+    codex_home~,
     runtime_dir?,
     executable~,
     auth~,

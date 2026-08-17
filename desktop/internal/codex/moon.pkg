@@ -6,6 +6,8 @@ import {
   "moonbitlang/async/process",
   "moonbitlang/core/debug",
   "moonbitlang/core/json",
+  "openseek_desktop/internal/pathx",
+  "tonyfettes/platform",
   "tonyfettes/xlog",
 }
 

@@ -35,8 +35,11 @@ page requests.
   All Desktop and relay clients share that connection and Codex account.
 - Every run resolves `codex` from the user's login-shell `PATH`. SeekMoon does
   not download, install, update, or bundle a Codex runtime.
-- App-server reads its own `CODEX_HOME` and authentication state. OpenSeek does
-  not read, copy, persist, or relay an API key or ChatGPT token.
+- App-server receives an isolated `CODEX_HOME` under the per-user runtime
+  directory (see "Isolated Codex home" below). It never touches the CLI's
+  `~/.codex`. OpenSeek does not read, copy, persist, or relay an API key or
+  ChatGPT token; the token stays inside the isolated home's `auth.json`,
+  protected by the OS keychain.
 - A disconnect drops streamed presentation state. After reconnect, the page
   calls `thread/resume` and then `thread/read` with `includeTurns: true`; the
   read reply is the authoritative history snapshot.
@@ -72,6 +75,39 @@ a project instead of being presented as a project root.
 
 `codex.thread.start` sets `serviceName: "openseek_desktop"` and otherwise
 preserves Codex's configured sandbox and approval defaults.
+
+## Isolated Codex home
+
+OpenSeek Desktop gives its app-server a dedicated `CODEX_HOME` instead of
+sharing the CLI's `~/.codex`:
+
+- macOS: `~/Library/Application Support/SeekMoon/codex`
+- Linux and other POSIX: `~/.openseek-desktop/codex`
+- development (unbundled Moon host): `<checkout>/desktop/target/dev-state/codex`
+
+The directory is created at startup and restricted to its owner with mode
+`0700` on POSIX hosts. The spawn sets `CODEX_HOME` explicitly, so it wins over
+any value the login-shell environment inherited; every process the app-server
+later starts inherits the same home, so nested codex calls, sandbox approvals,
+and tool runs agree with the app-server on auth and config. If the home cannot
+be determined or created, the Desktop logs a warning and falls back to the
+inherited environment — the pre-isolation behavior.
+
+Isolation is deliberate, and its costs are accepted:
+
+- **Separate login.** `auth.json` lives in the home, so a user who is signed
+  in to the CLI or VS Code must sign in once in the Desktop. Logout, token
+  rotation, and revocation apply per home.
+- **Default configuration.** The home starts empty, so `config.toml` defaults
+  apply — sandbox mode, approval policy, MCP servers, and model settings from
+  the CLI config are not inherited.
+- **Separate history and worktrees.** The sidebar lists only threads in the
+  Desktop's own `state.db`, and managed worktrees are checked out under the
+  isolated home, not the CLI's.
+
+Because the home lives under the app's per-user runtime directory, clearing
+that directory removes every Codex artifact the Desktop ever created — the
+CLI's `~/.codex` is never part of that scope.
 
 ## Workspace panels
 
@@ -147,8 +183,9 @@ preventing OpenSeek conversations from working.
 
 SeekMoon deliberately does not probe private Codex App state or copy its
 runtime. Installing and updating the Codex CLI remains the user's or system
-administrator's responsibility; the discovered command keeps using its own
-`CODEX_HOME`, account, configuration, sandbox, and approvals.
+administrator's responsibility. The discovered command runs against the
+Desktop's isolated `CODEX_HOME` — its own account, configuration, sandbox,
+and approvals — never the CLI's `~/.codex` state.
 
 ## Verification
 
@@ -159,7 +196,9 @@ question-id response shapes. A release smoke test requires a compatible
 `codex` on the login-shell `PATH` and should additionally:
 
 1. launch the packaged app and select a Codex conversation in the left sidebar;
-2. confirm account and model state loads without exposing credentials;
+2. confirm account and model state loads without exposing credentials (the
+   first run needs a Desktop-side sign-in: the isolated home has its own
+   `auth.json`);
 3. create a thread in a disposable workspace and run a short turn;
 4. exercise one approval or user-input request;
 5. reload the page during an active request and confirm the request reappears;
