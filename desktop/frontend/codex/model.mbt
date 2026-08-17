@@ -41,6 +41,10 @@ priv struct CodexThreadRow {
   cwd : String?
   project_root : String?
   worktree : CodexWorktree?
+  // App-server last-activity stamp, converted to milliseconds so it is
+  // directly comparable with OpenSeek's session mtimes when the shared
+  // sidebar interleaves the two sources by recency.
+  updated_at_ms : Double?
 } derive(Eq)
 
 ///|
@@ -1180,6 +1184,16 @@ fn State::with_threads(self : State, value : Json, archived : Bool) -> State {
   let visible = if self.active_thread() is Some(active) &&
     !threads.iter().any(thread => thread.id == active.id) &&
     !self.archived_threads.iter().any(thread => thread.id == active.id) {
+    // The list snapshot has no stamp for this thread; carry the one its
+    // previous row held (the `thread/start` reply's), so the fresh thread
+    // does not sink below stamped history until the next refresh.
+    let mut carried_ms : Double? = None
+    for existing in self.threads {
+      if existing.id == active.id {
+        carried_ms = existing.updated_at_ms
+        break
+      }
+    }
     let visible : Array[CodexThreadRow] = [
       {
         id: active.id,
@@ -1187,6 +1201,7 @@ fn State::with_threads(self : State, value : Json, archived : Bool) -> State {
         cwd: active.cwd,
         project_root: active.project_root,
         worktree: active.worktree,
+        updated_at_ms: carried_ms,
       },
     ]
     for thread in threads {
@@ -1204,12 +1219,18 @@ fn CodexThreadRow::decode(value : Json) -> CodexThreadRow? {
   guard value is Object(thread) && @jsonx.json_text(thread, "id") is Some(id) else {
     return None
   }
+  let updated_at_ms = match thread.get("updatedAt") {
+    // The app-server stamps threads in unix seconds.
+    Some(Number(seconds, ..)) => Some(seconds * 1000.0)
+    _ => None
+  }
   Some({
     id,
     title: CodexThreadRow::title(thread),
     cwd: @jsonx.json_text(thread, "cwd"),
     project_root: @jsonx.json_text(thread, "projectRoot"),
     worktree: thread.get("openseekWorktree").bind(CodexWorktree::decode),
+    updated_at_ms,
   })
 }
 
@@ -1267,21 +1288,38 @@ fn State::with_thread_reply(
   // Selecting a stored thread must not promote it to the top of the sidebar.
   // Replace its row in place; only `thread/start`, whose id is genuinely new,
   // is prepended until the authoritative catalog refresh arrives.
+  let reply_stamp_ms = match thread {
+    Object(thread_fields) =>
+      match thread_fields.get("updatedAt") {
+        Some(Number(seconds, ..)) => Some(seconds * 1000.0)
+        _ => None
+      }
+    _ => None
+  }
   let row : CodexThreadRow = {
     id: active.id,
     title: active.title,
     cwd: active.cwd,
     project_root: active.project_root,
     worktree: active.worktree,
+    updated_at_ms: reply_stamp_ms,
   }
   let threads : Array[CodexThreadRow] = []
   let mut replaced = false
-  for thread in self.threads {
-    if thread.id == active.id {
-      threads.push(row)
+  for existing in self.threads {
+    if existing.id == active.id {
+      // A reply without a stamp must not erase the catalog's; keep the row
+      // where the list already had it.
+      threads.push(
+        if reply_stamp_ms is Some(_) {
+          row
+        } else {
+          { ..row, updated_at_ms: existing.updated_at_ms }
+        },
+      )
       replaced = true
     } else {
-      threads.push(thread)
+      threads.push(existing)
     }
   }
   let visible = if replaced {

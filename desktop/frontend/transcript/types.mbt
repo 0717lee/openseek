@@ -84,4 +84,8 @@ pub(all) struct SessionListItem {
   title : String?
   workspace : @common.Uri
   workspace_name : String
+  // Engine last-activity stamp (session file mtime, milliseconds). `None`
+  // for a damaged directory the engine could not stat; such rows keep their
+  // listing but sort after stamped ones, same as the engine's own ordering.
+  updated_at_ms : Double?
 } derive(Eq)

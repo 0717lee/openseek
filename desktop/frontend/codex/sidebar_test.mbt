@@ -16,7 +16,7 @@ test "Codex threads nest under their registered project row" {
   }
   let conversations = state.project_conversations(context, "/work/openseek")
   assert_eq(conversations.length(), 1)
-  assert_true(conversations[0].nested)
+  assert_true(conversations[0].input.nested)
   assert_eq(
     state.project_activation(context, "/work/openseek"),
     Some("thread-1"),

@@ -118,6 +118,7 @@ pub(all) struct SessionListItem {
   title : String?
   workspace : @common.Uri
   workspace_name : String
+  updated_at_ms : Double?
 } derive(Eq)
 
 pub struct SessionLoadView {

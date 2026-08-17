@@ -212,7 +212,7 @@ fn session_item_label(item : @transcript.SessionListItem) -> String {
 /// way back to the draft.
 fn Model::push_group_component_inputs(
   self : Model,
-  rows : Array[@conversation.Input],
+  rows : Array[(RowStamp, @conversation.Input)],
   dev : DeviceState,
   workspace : @common.Uri,
   listed~ : (String) -> Bool,
@@ -243,18 +243,23 @@ fn Model::push_group_component_inputs(
       continue
     }
     rows.push(
-      session_component_input(
-        self,
-        dev.channel,
-        conv.session_id,
-        if worth_keeping {
-          conversation_title(conv)
-        } else {
-          "New chat"
-        },
-        nested=true,
-        worktree?,
-        root~,
+      (
+        // An in-memory conversation the durable listing does not hold yet is
+        // this session's own work; it leads the stamped history below.
+        ComposingNow,
+        session_component_input(
+          self,
+          dev.channel,
+          conv.session_id,
+          if worth_keeping {
+            conversation_title(conv)
+          } else {
+            "New chat"
+          },
+          nested=true,
+          worktree?,
+          root~,
+        ),
       ),
     )
   }
@@ -306,24 +311,79 @@ fn Model::push_group_component_inputs(
         ),
       )
     }
+    let stamp = match tree.item.updated_at_ms {
+      Some(ms) => ActiveAt(ms)
+      None => Unstamped
+    }
     rows.push(
-      session_component_input(
-        self,
-        dev.channel,
-        tree.item.id,
-        parent_label,
-        // Ordinary children are folded below a live parent and receive no
-        // action. A child-shaped root is legacy split state (or belongs to a
-        // parent in another store), so it remains independently archivable;
-        // once beside its archived parent, family restore picks it up.
-        archivable=true,
-        nested=true,
-        worktree?=worktree_name_for(dev, workspace, tree.item.id),
-        root~,
-        children~,
+      (
+        stamp,
+        session_component_input(
+          self,
+          dev.channel,
+          tree.item.id,
+          parent_label,
+          // Ordinary children are folded below a live parent and receive no
+          // action. A child-shaped root is legacy split state (or belongs to a
+          // parent in another store), so it remains independently archivable;
+          // once beside its archived parent, family restore picks it up.
+          archivable=true,
+          nested=true,
+          worktree?=worktree_name_for(dev, workspace, tree.item.id),
+          root~,
+          children~,
+        ),
       ),
     )
   }
+}
+
+///|
+/// When one project row holds conversations from two sources, recency is the
+/// only shared ordering. This session's still-composing rows lead (nothing
+/// durable stamps them yet), stamped rows follow newest-first, and rows whose
+/// stamp could not be read keep the tail — the same place the engine's own
+/// listing puts them.
+priv enum RowStamp {
+  ComposingNow
+  ActiveAt(Double)
+  Unstamped
+}
+
+///|
+fn RowStamp::rank(self : RowStamp) -> Int {
+  match self {
+    ComposingNow => 0
+    ActiveAt(_) => 1
+    Unstamped => 2
+  }
+}
+
+///|
+/// Order one project's rows for display. Equal ranks and equal stamps keep
+/// the assembly order — OpenSeek's composing rows, its durable listing, then
+/// Codex's — so the sort is stable across both sources.
+fn ordered_by_recency(
+  rows : Array[(RowStamp, @conversation.Input)],
+) -> Array[@conversation.Input] {
+  let keyed : Array[(Int, RowStamp, @conversation.Input)] = []
+  for index, row in rows {
+    keyed.push((index, row.0, row.1))
+  }
+  keyed.sort_by((a, b) => {
+    let (a_index, a_stamp, _) = a
+    let (b_index, b_stamp, _) = b
+    if a_stamp.rank() != b_stamp.rank() {
+      a_stamp.rank().compare(b_stamp.rank())
+    } else if a_stamp is ActiveAt(a_ms) &&
+      b_stamp is ActiveAt(b_ms) &&
+      a_ms != b_ms {
+      b_ms.compare(a_ms)
+    } else {
+      a_index.compare(b_index)
+    }
+  })
+  keyed.map(row => row.2)
 }
 
 ///|
@@ -374,22 +434,24 @@ fn Model::sidebar_component_sections(
   }
   let projects : Array[@section.Entry] = []
   for path in dev.projects {
-    let conversations : Array[@conversation.Input] = []
-    self.push_group_component_inputs(
-      conversations,
-      dev,
-      path,
-      listed~,
-      archived~,
-    )
+    let stamped : Array[(RowStamp, @conversation.Input)] = []
+    self.push_group_component_inputs(stamped, dev, path, listed~, archived~)
     let mut codex_activation : String? = None
     if codex_context is Some(context) &&
       @resource.path_for(path, dev.channel) is Some(root) {
+      if self.codex.project_draft(context, root) is Some(draft) {
+        stamped.push((ComposingNow, draft))
+      }
       for row in self.codex.project_conversations(context, root) {
-        conversations.push(row)
+        let stamp = match row.updated_at_ms {
+          Some(ms) => ActiveAt(ms)
+          None => Unstamped
+        }
+        stamped.push((stamp, row.input))
       }
       codex_activation = self.codex.project_activation(context, root)
     }
+    let conversations = ordered_by_recency(stamped)
     let openseek_activation = activation(dev.active_project == Some(path))
     projects.push(
       @section.Project({
@@ -2542,6 +2604,7 @@ test "project component receives the complete conversation list" {
       title: Some("Project chat \{number}"),
       workspace: project,
       workspace_name: "alpha",
+      updated_at_ms: None,
     })
   }
   let model = test_model().with_dev(dev => {
@@ -2582,12 +2645,14 @@ test "same-id records in two project stores keep distinct row keys" {
         title: Some("alpha copy"),
         workspace: alpha,
         workspace_name: "alpha",
+        updated_at_ms: None,
       },
       {
         id: "desktop-shared",
         title: Some("beta copy"),
         workspace: beta,
         workspace_name: "beta",
+        updated_at_ms: None,
       },
     ],
   })

@@ -24,6 +24,11 @@ pub enum CodexModelListing {
   CodexModelsUnavailable(String)
 }
 
+pub(all) struct CodexProjectRow {
+  input : @conversation.Input
+  updated_at_ms : Double?
+}
+
 pub(all) struct ComposerContext {
   channel : @interop.ChannelId
   model_chip : @html.Html
@@ -81,7 +86,8 @@ pub fn State::model_listing(Self) -> CodexModelListing
 pub fn State::new_thread_cwd(Self) -> String
 pub fn State::page(Self, @cmd.Emit[Msg], @interop.ChannelId, Bool, Bool, Bool, PageActions) -> Array[@html.Html]
 pub fn State::project_activation(Self, SidebarContext, String) -> String?
-pub fn State::project_conversations(Self, SidebarContext, String) -> Array[@conversation.Input]
+pub fn State::project_conversations(Self, SidebarContext, String) -> Array[CodexProjectRow]
+pub fn State::project_draft(Self, SidebarContext, String) -> @conversation.Input?
 pub fn State::refresh(Self, @cmd.Emit[Msg], @interop.ChannelId) -> (@cmd.Cmd, Self)
 pub fn State::transcript_items(Self) -> Array[@transcript.TranscriptItem]
 pub fn State::with_editor_comment(Self, String, @common.Range, String, String) -> Self
