@@ -716,7 +716,7 @@ fn State::with_reply(
   match kind {
     DshReconnectReply | DshWorkspacesReply => {
       let workspaces : Array[DshWorkspaceRow] = []
-      let archived_session_ids : Array[String] = []
+      let archived_session_ids : Set[String] = Set([])
       if value is Object(fields) {
         if fields.get("items") is Some(Array(items)) {
           for item in items {
@@ -730,7 +730,7 @@ fn State::with_reply(
         if fields.get("archivedSessionIds") is Some(Array(ids)) {
           for id in ids {
             if id is String(session_id) {
-              archived_session_ids.push(session_id)
+              archived_session_ids.add(session_id)
             }
           }
         }
@@ -744,7 +744,9 @@ fn State::with_reply(
         } else {
           @cmd.none
         },
-        { ..self, workspaces, archived_session_ids },
+        // Another dsh client may have archived the conversation on screen;
+        // this list is where that arrives.
+        { ..self, workspaces, archived_session_ids }.release_archived_active(),
       )
     }
     DshWorkspaceCreateReply(selection_generation) => {
@@ -812,9 +814,15 @@ fn State::with_reply(
           }
         }
       }
+      // Fall back only to a conversation the sidebar is willing to show. An
+      // archived session is still in this listing, and selecting one would
+      // put a conversation on screen that no row leads back to.
+      let selectable = sessions.filter(session => {
+        !self.archived_session_ids.contains(session.id)
+      })
       let active_id = match self.active_id {
-        Some(id) if sessions.iter().any(row => row.id == id) => Some(id)
-        _ => sessions.get(0).map(row => row.id)
+        Some(id) if selectable.iter().any(row => row.id == id) => Some(id)
+        _ => selectable.get(0).map(row => row.id)
       }
       let selection_changed = self.active_id != active_id
       let failed_prompt = match active_id {
@@ -1201,54 +1209,21 @@ fn State::with_reply(
           },
         )
       }
-    DshArchiveReply(session_id~) => {
-      // dsh answers with its complete new archive set. Take it whole, and
-      // leave the conversation the user was reading only when it is the one
-      // that just went away.
-      let archived_session_ids : Array[String] = []
+    DshArchiveReply => {
+      // dsh answers with its complete new archive set. Take it whole; the page
+      // then lets go of the conversation on screen when that is the one which
+      // just went away.
+      let archived_session_ids : Set[String] = Set([])
       if value is Object(fields) &&
         fields.get("archivedSessionIds") is Some(Array(ids)) {
         for id in ids {
           if id is String(archived) {
-            archived_session_ids.push(archived)
+            archived_session_ids.add(archived)
           }
         }
       }
-      let left = self.active_id == Some(session_id)
-      (
-        self.list_sessions(dispatch),
-        {
-          ..self,
-          archived_session_ids,
-          active_id: if left {
-            None
-          } else {
-            self.active_id
-          },
-          events: if left {
-            []
-          } else {
-            self.events
-          },
-          event_sequence: if left {
-            -1
-          } else {
-            self.event_sequence
-          },
-          streaming: if left {
-            ""
-          } else {
-            self.streaming
-          },
-          models: if left {
-            DshModelsIdle
-          } else {
-            self.models
-          },
-          loading: false,
-          notice: "",
-        },
-      )
+      let next = { ..self, archived_session_ids, }.release_archived_active()
+      (self.list_sessions(dispatch), { ..next, loading: false, notice: "" })
     }
     DshWorkspaceDeleteReply =>
       // The registration is gone; its sessions are ungrouped rather than
@@ -1530,7 +1505,10 @@ fn State::with_event(
       let sessions = self.sessions.filter(row => row.id != session_id)
       let removed_active = self.active_id == Some(session_id)
       let active_id = if removed_active {
-        sessions.get(0).map(row => row.id)
+        sessions
+        .filter(row => !self.archived_session_ids.contains(row.id))
+        .get(0)
+        .map(row => row.id)
       } else {
         self.active_id
       }
@@ -4241,16 +4219,13 @@ test "archiving a dsh conversation hides it and releases the page" {
   let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   let (_, archiving) = update(dispatch, ArchiveSession("session-2"), state)
   assert_true(archiving.loading)
-  let (_, archived) = archiving.with_reply(
-    dispatch,
-    DshArchiveReply(session_id="session-2"),
-    {
-      "type": "server-response",
-      "rpcId": "archive-1",
-      "result": { "ok": true, "value": { "archivedSessionIds": ["session-2"] } },
-    },
-  )
-  assert_eq(archived.archived_session_ids, ["session-2"])
+  let (_, archived) = archiving.with_reply(dispatch, DshArchiveReply, {
+    "type": "server-response",
+    "rpcId": "archive-1",
+    "result": { "ok": true, "value": { "archivedSessionIds": ["session-2"] } },
+  })
+  assert_true(archived.archived_session_ids.contains("session-2"))
+  assert_eq(archived.archived_session_ids.length(), 1)
   // The conversation the user was reading is the one that went away, so the
   // page lets go of it rather than rendering a hidden transcript.
   assert_eq(archived.active_id, None)
@@ -4266,10 +4241,43 @@ test "archiving a dsh conversation hides it and releases the page" {
     fail("expected only the unarchived conversation")
   }
   assert_eq(kept.label, "keep")
+  // dsh keeps serving an archived session from `session.list` — only its
+  // Workspace grouping hides it — so the refresh that follows must not hand
+  // the page back the conversation it just let go of.
+  let (_, refreshed) = archived.with_reply(
+    dispatch,
+    DshSessionsReply(session_revision=0),
+    {
+      "type": "server-response",
+      "rpcId": "sessions-after-archive",
+      "result": {
+        "ok": true,
+        "value": {
+          "items": [
+            {
+              "sessionId": "session-2",
+              "title": "leftover",
+              "cwd": "/work/project",
+              "running": false,
+              "blank": true,
+            },
+            {
+              "sessionId": "session-1",
+              "title": "keep",
+              "cwd": "/work/project",
+              "running": false,
+              "blank": false,
+            },
+          ],
+        },
+      },
+    },
+  )
+  assert_eq(refreshed.active_id, Some("session-1"))
   // Archiving a conversation the user is not reading leaves the page alone.
   let (_, other) = { ..archived, active_id: Some("session-1") }.with_reply(
     dispatch,
-    DshArchiveReply(session_id="session-2"),
+    DshArchiveReply,
     {
       "type": "server-response",
       "rpcId": "archive-2",

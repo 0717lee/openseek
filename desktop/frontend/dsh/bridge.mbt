@@ -556,7 +556,7 @@ fn State::archive_session(
   dispatch : @cmd.Emit[Msg],
   session_id : String,
 ) -> @cmd.Cmd {
-  DshArchiveReply(session_id~).request(dispatch, "workspace.archiveSession", {
+  DshArchiveReply.request(dispatch, "workspace.archiveSession", {
     "sessionId": session_id,
   })
 }

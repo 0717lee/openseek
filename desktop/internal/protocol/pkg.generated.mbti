@@ -5,6 +5,7 @@ import {
   "bobzhang/openseek_protocol",
   "moonbitlang/core/debug",
   "moonbitlang/core/json",
+  "moonbitlang/core/set",
 }
 
 // Values
@@ -823,7 +824,7 @@ pub(all) struct DshWorkspaceView {
   path : String
   session_ids : Array[String]
 } derive(Eq, @debug.Debug)
-pub fn DshWorkspaceView::live_session_count(Self, Array[String]) -> Int
+pub fn DshWorkspaceView::live_session_count(Self, @set.Set[String]) -> Int
 pub impl ToJson for DshWorkspaceView
 pub impl @json.FromJson for DshWorkspaceView
 

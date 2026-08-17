@@ -261,7 +261,7 @@ priv enum DshReplyKind {
   DshPromptHistoryReply(DshPromptReconciliation)
   DshCancelReply(String)
   DshResponseReply(rpc_id~ : String, session_id~ : String)
-  DshArchiveReply(session_id~ : String)
+  DshArchiveReply
   DshWorkspaceDeleteReply
 }
 
@@ -366,8 +366,9 @@ struct State {
   workspaces : Array[DshWorkspaceRow]
   // dsh's registry-global archive set, carried on every `workspace.list`. An
   // archived conversation keeps its slot in its Workspace's account, so this
-  // is the only thing that hides it from the sidebar.
-  archived_session_ids : Array[String]
+  // is the only thing that hides it from the sidebar. Membership is the only
+  // question ever asked of it; dsh's archive order means nothing here.
+  archived_session_ids : Set[String]
   sessions : Array[DshSessionRow]
   // HTTP session snapshots and WebSocket projections use independent
   // carriers. Record the latest running/title event per session so a late
@@ -434,7 +435,7 @@ pub fn State::State(loading? : Bool = false) -> State {
     connection: DshStarting,
     connection_status_revision: 0,
     workspaces: [],
-    archived_session_ids: [],
+    archived_session_ids: Set([]),
     sessions: [],
     session_statuses: [],
     session_titles: [],
@@ -571,6 +572,38 @@ pub fn State::unavailable_message(self : State) -> String? {
 /// The selected dsh session namespaces the shared keyed transcript renderer.
 pub fn State::active_id(self : State) -> String? {
   self.active_id
+}
+
+///|
+/// The conversations this page may show or select.
+///
+/// `session.list` is not filtered by the archive set — dsh hides an archived
+/// session from its Workspace grouping, not from the session listing — so
+/// every consumer that picks or renders a conversation has to subtract it
+/// here. Selecting one would put a conversation on screen that the sidebar
+/// deliberately no longer lists.
+fn State::visible_sessions(self : State) -> Array[DshSessionRow] {
+  self.sessions.filter(session => {
+    !self.archived_session_ids.contains(session.id)
+  })
+}
+
+///|
+/// Let go of the conversation on screen once it is archived, whoever archived
+/// it: this page, or another dsh client whose change arrived on a list.
+fn State::release_archived_active(self : State) -> State {
+  guard self.active_id is Some(session_id) &&
+    self.archived_session_ids.contains(session_id) else {
+    return self
+  }
+  {
+    ..self,
+    active_id: None,
+    events: [],
+    event_sequence: -1,
+    streaming: "",
+    models: DshModelsIdle,
+  }
 }
 
 ///|

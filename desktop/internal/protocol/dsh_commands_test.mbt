@@ -162,8 +162,13 @@ test "dsh workspace list decodes strictly except for its archive set" {
   assert_eq(workspace.path, "/work/project")
   assert_eq(workspace.session_ids, ["session-1", "session-2"])
   // An archived session keeps its slot, so only the live one counts.
-  assert_eq(workspace.live_session_count(list.archived_session_ids), 1)
-  assert_eq(workspace.live_session_count([]), 2)
+  assert_eq(
+    workspace.live_session_count(
+      Set::from_iter(list.archived_session_ids.iter()),
+    ),
+    1,
+  )
+  assert_eq(workspace.live_session_count(Set([])), 2)
   @debug.assert_eq(
     (@json.from_json(list.to_json()) : @protocol.DshWorkspaceList),
     list,

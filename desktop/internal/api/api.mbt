@@ -1740,6 +1740,7 @@ async fn ApiState::dsh_occupancy(
   // this function could not parse used to be skipped, which reported the
   // checkout as free — the one outcome this whole path exists to prevent.
   let list = decode_dsh_workspace_list(value)
+  let archived = Set::from_iter(list.archived_session_ids.iter())
   let canonical = canonical_dir(checkout)
   let mut working = 0
   for workspace in list.items {
@@ -1766,7 +1767,7 @@ async fn ApiState::dsh_occupancy(
       .unwrap_or(false) else {
       continue
     }
-    working += workspace.live_session_count(list.archived_session_ids)
+    working += workspace.live_session_count(archived)
   }
   if working == 0 {
     DshVacant

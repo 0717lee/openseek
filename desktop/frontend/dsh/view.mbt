@@ -49,6 +49,7 @@ fn DshSessionRow::sidebar_input(
 pub fn State::sidebar_section(self : State, selected : Bool) -> @section.Input {
   let entries : Array[@section.Entry] = []
   let accounted : Array[String] = []
+  let visible = self.visible_sessions()
   // A Workspace Desktop generated for a worktree is not a project of its own:
   // its conversations belong under the project it was cut from, marked with
   // the checkout they run in. A worktree whose project dsh no longer lists
@@ -70,12 +71,11 @@ pub fn State::sidebar_section(self : State, selected : Bool) -> @section.Input {
       .map(item => item.id == workspace.id)
       .unwrap_or(false)
     for session_id in workspace.session_ids {
-      accounted.push(session_id)
       // An archived conversation keeps its slot in dsh's account; hiding it
-      // from every grouping surface is the whole of what archiving does.
-      guard !self.archived_session_ids.contains(session_id) else { continue }
-      if self.sessions.iter().find_first(row => row.id == session_id)
-        is Some(session) {
+      // from every grouping surface is the whole of what archiving does. It
+      // still counts as accounted, so it cannot reappear as ungrouped.
+      accounted.push(session_id)
+      if visible.iter().find_first(row => row.id == session_id) is Some(session) {
         conversations.push(session.sidebar_input(self, true, selected))
       }
     }
@@ -92,8 +92,7 @@ pub fn State::sidebar_section(self : State, selected : Bool) -> @section.Input {
       }
       for session_id in row.session_ids {
         accounted.push(session_id)
-        guard !self.archived_session_ids.contains(session_id) else { continue }
-        if self.sessions.iter().find_first(item => item.id == session_id)
+        if visible.iter().find_first(item => item.id == session_id)
           is Some(session) {
           conversations.push(
             session.sidebar_input(self, true, selected, worktree=name),
@@ -123,10 +122,7 @@ pub fn State::sidebar_section(self : State, selected : Bool) -> @section.Input {
       }),
     )
   }
-  let ungrouped = self.sessions.filter(session => {
-    !accounted.contains(session.id) &&
-    !self.archived_session_ids.contains(session.id)
-  })
+  let ungrouped = visible.filter(session => !accounted.contains(session.id))
   if !ungrouped.is_empty() {
     let conversations = ungrouped.map(session => {
       session.sidebar_input(self, true, selected)

@@ -147,12 +147,13 @@ pub impl ToJson for DshWorkspaceList with fn to_json(self) {
 }
 
 ///|
-/// Whether this Workspace still holds a conversation the user can return to.
-/// An archived session keeps its slot in `session_ids`, so the archive set has
-/// to be subtracted rather than assumed absent.
+/// How many conversations here the user can still return to. An archived
+/// session keeps its slot in `session_ids`, so the archive set is subtracted
+/// rather than assumed absent. It arrives as a list because that is its wire
+/// shape; membership is all this asks of it, so the caller hands over a set.
 pub fn DshWorkspaceView::live_session_count(
   self : DshWorkspaceView,
-  archived : Array[String],
+  archived : Set[String],
 ) -> Int {
   let mut live = 0
   for session_id in self.session_ids {
