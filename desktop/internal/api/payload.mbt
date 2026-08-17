@@ -338,6 +338,52 @@ test "an absent optional reads the same as an explicit null" {
 }
 
 ///|
+test "a step count that is not an integer is refused, not truncated" {
+  // `1.9` is a malformed request, not a request for one step: running a
+  // different limit than the client sent is the silent divergence the
+  // explicit codec exists to prevent.
+  let start : @protocol.StartPayload? = Some(
+    @json.from_json({
+      "task": "hello",
+      "session": "s-start",
+      "workspace": "/work/project",
+      "max_steps": 1.9,
+    }),
+  ) catch {
+    _ => None
+  }
+  assert_true(start is None)
+  let compact : @protocol.CompactPayload? = Some(
+    @json.from_json({
+      "session": "s-compact",
+      "workspace": "/work/project",
+      "max_steps": 1.9,
+    }),
+  ) catch {
+    _ => None
+  }
+  assert_true(compact is None)
+  let goal : @protocol.GoalPayload? = Some(
+    @json.from_json({
+      "session": "s-goal",
+      "workspace": "/work/project",
+      "max_steps": 1.9,
+    }),
+  ) catch {
+    _ => None
+  }
+  assert_true(goal is None)
+  // A whole number written as JSON still decodes; only the fractional part is
+  // the defect.
+  let whole : @protocol.CompactPayload = @json.from_json({
+    "session": "s-compact",
+    "workspace": "/work/project",
+    "max_steps": 1000,
+  })
+  assert_eq(whole.max_steps, Some(1000))
+}
+
+///|
 test "an absent optional is encoded as an absent key, never as null" {
   let payload : @protocol.GoalPayload = {
     session: "s-goal",
