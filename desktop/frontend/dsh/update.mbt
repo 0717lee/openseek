@@ -160,13 +160,12 @@ pub fn update(
       )
     }
     WorktreeReady(session_id~, generation~, project~, path~, draft~) => {
-      guard state.prompt_generation == generation &&
-        state.prompt_pending_session == Some(session_id) else {
+      guard state.owns_submission(session_id, generation) else {
         return (@cmd.none, state)
       }
       (
         state.register_prompt_workspace(
-          dispatch, session_id, generation, project, path, draft,
+          dispatch, session_id, generation, path, draft,
         ),
         if state.active_id == Some(session_id) {
           { ..state, worktree_project: Some(project), loading: true }
@@ -1006,7 +1005,14 @@ fn State::with_reply(
       // now was produced concurrently and must not be erased by this reply.
       (@cmd.none, { ..self, models, })
     }
-    DshPromptWorkspaceReply(session_id~, generation~, project~, draft~) => {
+    DshPromptWorkspaceReply(session_id~, generation~, draft~) => {
+      // Every setup stage carries the submission it belongs to, and each one
+      // is a durable side effect on dsh — a Workspace, then a conversation.
+      // A stage whose submission is already over must not continue building
+      // for it, so an abandoned pipeline stops at the stage it reached.
+      guard self.owns_submission(session_id, generation) else {
+        return (@cmd.none, self)
+      }
       guard value is Object(fields) &&
         fields.get("workspace") is Some(Object(workspace)) &&
         @jsonx.json_text(workspace, "workspaceId") is Some(workspace_id) else {
@@ -1030,12 +1036,15 @@ fn State::with_reply(
       }
       (
         self.create_prompt_session(
-          dispatch, session_id, generation, project, workspace_id, draft,
+          dispatch, session_id, generation, workspace_id, draft,
         ),
         self,
       )
     }
-    DshPromptSessionReply(session_id~, generation~, project~, draft~) => {
+    DshPromptSessionReply(session_id~, generation~, draft~) => {
+      guard self.owns_submission(session_id, generation) else {
+        return (@cmd.none, self)
+      }
       guard value is Object(fields) &&
         @jsonx.json_text(fields, "sessionId") is Some(created) else {
         let message = "DeepSeek Harness returned a malformed session.create reply"
@@ -1056,40 +1065,46 @@ fn State::with_reply(
           (@cmd.none, settled)
         }
       }
-      // The prompt belongs to the session dsh just created in the worktree,
-      // so the submission fence moves with it. The originating blank
-      // conversation keeps its own directory and its place in the sidebar.
+      // The prompt belongs to the session dsh just created in the worktree, so
+      // the submission fence moves with it. The originating blank conversation
+      // keeps its own directory and its place in the sidebar. Build the state
+      // before the commands: `send_prompt` reads the reconciliation baseline
+      // off it, and that baseline now belongs to a conversation with no events.
       let follow = self.active_id == Some(session_id)
+      let next = if follow {
+        {
+          ..self,
+          active_id: Some(created),
+          selection_generation: self.selection_generation + 1,
+          prompt_pending_session: Some(created),
+          // Selecting the created session resets placement the way every
+          // other selection does. Leaving Worktree armed on a conversation
+          // that already lives in one would make its next message provision a
+          // second checkout as soon as a list reply reports it blank again.
+          placement: @composer.LocalCheckout,
+          worktree_project: None,
+          events: [],
+          event_sequence: -1,
+          prompt_after_seq: -1,
+          streaming: "",
+          models: DshModelsLoading(session_id=created),
+          loading: true,
+        }
+      } else {
+        { ..self, prompt_pending_session: Some(created), prompt_after_seq: -1 }
+      }
       let commands = [
-        self.send_prompt(dispatch, created, draft, generation, mode="queue"),
+        next.send_prompt(dispatch, created, draft, generation, mode="queue"),
         // The grant table is rebuilt only from workspace.list, so Files and
         // Terminal reach the new checkout only after this refresh; the session
         // list is what shows the created conversation under it.
         DshWorkspacesReply.request(dispatch, "workspace.list", {}),
-        self.list_sessions(dispatch),
+        next.list_sessions(dispatch),
       ]
       if follow {
-        commands.push(self.load_models(dispatch, created))
+        commands.push(next.load_models(dispatch, created))
       }
-      (
-        @cmd.batch(commands),
-        if follow {
-          {
-            ..self,
-            active_id: Some(created),
-            selection_generation: self.selection_generation + 1,
-            prompt_pending_session: Some(created),
-            worktree_project: Some(project),
-            events: [],
-            event_sequence: -1,
-            streaming: "",
-            models: DshModelsLoading(session_id=created),
-            loading: true,
-          }
-        } else {
-          { ..self, prompt_pending_session: Some(created) }
-        },
-      )
+      (@cmd.batch(commands), next)
     }
     DshPromptReply(session_id~, draft~, generation~) => {
       guard self.prompt_generation == generation else {
@@ -3970,13 +3985,11 @@ test "a Worktree first send starts the conversation inside the new checkout" {
   let workspace_reply = DshPromptWorkspaceReply(
     session_id="session-1",
     generation=1,
-    project="/work/project",
     draft~,
   )
   let session_reply = DshPromptSessionReply(
     session_id="session-1",
     generation=1,
-    project="/work/project",
     draft~,
   )
   let (_, adopting) = registered.with_reply(
@@ -3996,8 +4009,15 @@ test "a Worktree first send starts the conversation inside the new checkout" {
   // The prompt now belongs to the created session, and so does the page.
   assert_eq(started.active_id, Some("session-wt"))
   assert_eq(started.prompt_pending_session, Some("session-wt"))
-  assert_eq(started.worktree_project, Some("/work/project"))
   assert_eq(started.selection_generation, state.selection_generation + 1)
+  // Placement resets like any other selection change. Leaving it armed would
+  // make this conversation's next message provision a second checkout as soon
+  // as a session list reported it blank again.
+  assert_true(started.placement is @composer.LocalCheckout)
+  assert_eq(started.worktree_project, None)
+  // The reconciliation baseline belongs to the created conversation, which
+  // has no events, not to the one the draft was typed in.
+  assert_eq(started.prompt_after_seq, -1)
   assert_true(started.models is DshModelsLoading(session_id="session-wt"))
   assert_true(started.events.is_empty())
   assert_eq(started.streaming, "")
@@ -4062,4 +4082,24 @@ test "a Worktree first send starts the conversation inside the new checkout" {
   })
   assert_eq(malformed.prompt_pending_session, None)
   assert_true(malformed.notice.contains("malformed session.create reply"))
+  // Each stage commits durable state in dsh, so a stage whose submission has
+  // already ended — a newer Send, or a fence released by failure or by dsh
+  // dropping the originating session — must build nothing further. Without
+  // this the session stage would seize the visible conversation and re-send a
+  // draft under a generation whose own reply is then discarded.
+  for
+    ended in [
+      ({ ..adopting, prompt_pending_session: None } : State),
+      { ..adopting, prompt_pending_session: Some("session-9") },
+      { ..adopting, prompt_generation: adopting.prompt_generation + 1 },
+    ] {
+    let (_, after_session) = ended.with_reply(
+      dispatch, session_reply, session_created,
+    )
+    assert_true(after_session == ended)
+    let (_, after_workspace) = ended.with_reply(
+      dispatch, workspace_reply, workspace_created,
+    )
+    assert_true(after_workspace == ended)
+  }
 }

@@ -268,8 +268,14 @@ pub fn Actor::status(self : Actor) -> Json {
 /// Whether dsh can answer a question right now. A caller that needs dsh's own
 /// account of the world — rather than one of its notifications — uses this to
 /// tell "dsh says no" apart from "there is no dsh to ask".
-pub fn Actor::is_available(self : Actor) -> Bool {
-  !(self.state is Unavailable(_))
+///
+/// `Starting` deliberately answers false. It is the window before the first
+/// connection resolves, so a request made in it waits out the readiness
+/// timeout and may pay a second connect attempt before failing; nothing can
+/// be executing yet either, which is what makes the negative answer true
+/// rather than merely convenient.
+pub fn Actor::is_ready(self : Actor) -> Bool {
+  self.state is Ready
 }
 
 ///|

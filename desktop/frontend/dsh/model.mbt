@@ -221,13 +221,11 @@ priv enum DshReplyKind {
   DshPromptWorkspaceReply(
     session_id~ : String,
     generation~ : Int,
-    project~ : String,
     draft~ : @composer.Draft
   )
   DshPromptSessionReply(
     session_id~ : String,
     generation~ : Int,
-    project~ : String,
     draft~ : @composer.Draft
   )
   DshPromptReply(
@@ -433,6 +431,21 @@ fn State::busy(self : State) -> Bool {
     self.active_id == Some(item.session_id()) &&
     self.response_pending_rpcs.contains(item.rpc_id())
   })
+}
+
+///|
+/// Whether this page is still running the submission a reply belongs to.
+/// Setup stages continue across navigation — the user may look elsewhere
+/// while a checkout is provisioned — but each one commits durable state in
+/// dsh, so a stage whose submission has already ended (a newer Send, or the
+/// fence released by a failure or a removed session) must build nothing more.
+fn State::owns_submission(
+  self : State,
+  session_id : String,
+  generation : Int,
+) -> Bool {
+  self.prompt_generation == generation &&
+  self.prompt_pending_session == Some(session_id)
 }
 
 ///|

@@ -120,12 +120,10 @@ test "dsh snapshot replies select independent ordered lanes" {
   )
   assert_eq(DshCreateReply(0).ordered_lane(), None)
   assert_eq(
-    DshPromptWorkspaceReply(
-      session_id="session-1",
-      generation=1,
-      project="/work/project",
-      draft={ task: "inspect this project", mentions: [] },
-    ).ordered_lane(),
+    DshPromptWorkspaceReply(session_id="session-1", generation=1, draft={
+      task: "inspect this project",
+      mentions: [],
+    }).ordered_lane(),
     None,
   )
 }
@@ -396,11 +394,10 @@ fn State::register_prompt_workspace(
   dispatch : @cmd.Emit[Msg],
   session_id : String,
   generation : Int,
-  project : String,
   worktree_path : String,
   draft : @composer.Draft,
 ) -> @cmd.Cmd {
-  DshPromptWorkspaceReply(session_id~, generation~, project~, draft~).request(
+  DshPromptWorkspaceReply(session_id~, generation~, draft~).request(
     dispatch,
     "workspace.create",
     { "path": worktree_path },
@@ -428,11 +425,10 @@ fn State::create_prompt_session(
   dispatch : @cmd.Emit[Msg],
   session_id : String,
   generation : Int,
-  project : String,
   workspace_id : String,
   draft : @composer.Draft,
 ) -> @cmd.Cmd {
-  DshPromptSessionReply(session_id~, generation~, project~, draft~).request(
+  DshPromptSessionReply(session_id~, generation~, draft~).request(
     dispatch,
     "session.create",
     { "workspaceId": workspace_id },

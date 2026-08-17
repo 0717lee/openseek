@@ -106,9 +106,16 @@ Two consequences follow, both accepted:
 
 - **Removal asks instead of remembering.** `worktree.remove` queries dsh's
   current `workspace.list` and refuses while any unarchived conversation works
-  in that checkout. When dsh is not running the removal proceeds: no
-  conversation can be executing without the process that would run it. A dsh
-  that is running but cannot answer refuses the removal rather than guessing.
+  in that checkout or anywhere inside it. `force` overrides that refusal, and
+  has to: dsh exposes no way to end a conversation — it has no delete, and
+  this integration allowlists no archive — so an occupied checkout would
+  otherwise be unremovable for the rest of that conversation's life, which is
+  the failure this design exists to prevent. When dsh is not connected the
+  removal proceeds without asking: no conversation can be executing without
+  the process that would run it. A connected dsh that cannot answer refuses
+  the removal rather than guessing. The question is asked before the workspace
+  lifecycle lock is taken, and only about a checkout that is both unowned and
+  still on disk, so a slow dsh cannot stall unrelated workspace operations.
 - **First-send creation is not idempotent.** With no owner to key on, a lost
   `worktree.create` reply is reported as a failure instead of retried; any
   checkout that call may have made is an ordinary unowned worktree the user can

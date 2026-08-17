@@ -1709,15 +1709,15 @@ async fn ApiState::dsh_worktree_project(
 /// in-memory detach rather than the end of a conversation, so any durable copy
 /// of this fact would be wrong sooner or later.
 ///
-/// An unavailable dsh answers `DshOffline` and does not block removal: no
-/// conversation can be executing when the process that would run it is gone.
-/// A dsh that is present but cannot answer raises instead, so an unreadable
-/// reply never reads as "nobody is using this".
+/// A dsh that is not connected answers `DshOffline` and does not block
+/// removal: no conversation can be executing when the process that would run
+/// it is not there. A connected dsh that cannot answer raises instead, so an
+/// unreadable reply never reads as "nobody is using this".
 async fn ApiState::dsh_occupancy(
   self : ApiState,
   checkout : @pathx.Absolute,
 ) -> @worktree.DshOccupancy {
-  guard self.dsh.is_available() else { return DshOffline }
+  guard self.dsh.is_ready() else { return DshOffline }
   let (reply, _) = self.dsh.call(method_="workspace.list", payload={})
   guard dsh_workspace_list_value(reply) is Some(value) else {
     raise @host.HostError(
@@ -1737,8 +1737,21 @@ async fn ApiState::dsh_occupancy(
     guard @pathx.Path(workspace.path).to_absolute() is Some(dir) else {
       continue
     }
-    let normalized = dir.normalize().to_string()
-    guard normalized == canonical || canonical_dir(dir) == canonical else {
+    let resolved = if dir.normalize().to_string() == canonical {
+      canonical
+    } else {
+      canonical_dir(dir)
+    }
+    // A Workspace rooted anywhere INSIDE the checkout is working in it just as
+    // much as one rooted at it — deleting the tree takes both away.
+    guard resolved == canonical ||
+      @pathx.Path(canonical)
+      .to_absolute()
+      .map(root => {
+        @pathx.Path(resolved).to_absolute() is Some(nested) &&
+        root.contains(nested)
+      })
+      .unwrap_or(false) else {
       continue
     }
     working += workspace.live_session_count(list.archived_session_ids)

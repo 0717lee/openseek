@@ -143,7 +143,7 @@ test "dsh notification envelopes reject malformed wrappers" {
 }
 
 ///|
-test "dsh workspace list decodes strictly and tolerates only a missing archive set" {
+test "dsh workspace list decodes strictly except for its archive set" {
   let list : @protocol.DshWorkspaceList = @json.from_json({
     "items": [
       {
@@ -182,6 +182,20 @@ test "dsh workspace list decodes strictly and tolerates only a missing archive s
     ],
   })
   assert_true(older.archived_session_ids.is_empty())
+  // The archive set is the one field read leniently. Only the occupancy count
+  // consults it, while this document also carries the Files/Terminal grants,
+  // so a shape this build does not recognize must not cost the page its path
+  // authority — and reading it as empty only ever counts more sessions live.
+  let reshaped : @protocol.DshWorkspaceList = @json.from_json({
+    "items": [],
+    "archivedSessionIds": [{ "id": "session-1", "at": "2026-08-17" }],
+  })
+  assert_true(reshaped.archived_session_ids.is_empty())
+  let renamed : @protocol.DshWorkspaceList = @json.from_json({
+    "items": [],
+    "archived": ["session-1"],
+  })
+  assert_true(renamed.archived_session_ids.is_empty())
   // Everything else is a decode failure rather than a skipped row: a reader
   // that cannot parse a Workspace must not conclude that it holds nobody.
   for
@@ -219,7 +233,6 @@ test "dsh workspace list decodes strictly and tolerates only a missing archive s
       },
       { "items": {} },
       { "archivedSessionIds": [] },
-      { "items": [], "archivedSessionIds": [7] },
     ] {
     let rejected = try {
       let _ : @protocol.DshWorkspaceList = @json.from_json(malformed)

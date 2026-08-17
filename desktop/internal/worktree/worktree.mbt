@@ -1246,12 +1246,18 @@ pub async fn remove(
   // conversation may have started here, or been archived, since the checkout
   // was made. An offline dsh cannot be running anything anywhere, which is
   // why it does not block removal.
-  if occupancy is Some(DshOccupied(count)) {
+  // `force` is the escape hatch, and it has to be one: dsh exposes no way to
+  // end a conversation — it has no delete, and this integration allowlists no
+  // archive — so an occupied checkout would otherwise be unremovable for the
+  // rest of that conversation's life, which is the exact failure this whole
+  // design set out to delete. Refusing by default still makes the deletion a
+  // deliberate act rather than a surprise.
+  if occupancy is Some(DshOccupied(count)) && !force {
     raise WorktreeError(
       if count == 1 {
-        "a DeepSeek Harness conversation is working in \{name}; archive it before removing its checkout"
+        "a DeepSeek Harness conversation is working in \{name}; force removal deletes the checkout it is using"
       } else {
-        "\{count} DeepSeek Harness conversations are working in \{name}; archive them before removing its checkout"
+        "\{count} DeepSeek Harness conversations are working in \{name}; force removal deletes the checkout they are using"
       },
     )
   }
@@ -2054,7 +2060,12 @@ async test "worktree removal asks dsh only about a live unowned checkout" {
   }
   assert_eq(asked.val, 1)
   assert_true(refusal.contains("conversation is working in live"))
-  ignore(remove(host, repo.to_string(), "live", false, fn(_) {  }, dsh_offline))
+  // `force` has to override it. dsh exposes no way to end a conversation, so
+  // a checkout that answers occupied would otherwise be unremovable for the
+  // rest of that conversation's life.
+  ignore(remove(host, repo.to_string(), "live", true, fn(_) {  }, counting))
+  assert_eq(asked.val, 2)
+  assert_eq(list(repo.to_string()).worktrees.length(), 0)
   @fs.rmdir(root.to_string(), recursive=true)
 }
 
