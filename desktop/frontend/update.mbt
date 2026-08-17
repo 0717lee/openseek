@@ -2451,9 +2451,10 @@ fn update_msg(
           }
         }
         CodexUnavailablePick =>
-          // The Codex group's placeholder row: not a model, a doorway. The
-          // Codex page owns sign-in and connection state.
-          update_msg(dispatch, OpenCodex, model)
+          // The Codex group's placeholder row: not a model, a doorway.
+          // Sign-in and connection state live in the Settings page's Codex
+          // group.
+          update_msg(dispatch, OpenSetup, model)
       }
     }
     MaxStepsChanged(value) => (@cmd.none, { ..model, max_steps: value })
@@ -14117,14 +14118,15 @@ test "an OpenSeek pick on a composing Codex draft hands the chat back" {
 }
 
 ///|
-test "the Codex group's placeholder row opens the Codex page" {
+test "the Codex group's placeholder row opens Settings" {
   let dispatch = test_dispatch()
   let (_, opened) = update(
     dispatch,
     ModelPicked("codex.unavailable"),
     test_model(),
   )
-  assert_true(opened.screen is Codex)
+  // Sign-in and connection state live in the Settings page's Codex group.
+  assert_true(opened.screen is Settings)
   // A placeholder pick is a doorway, not a model: nothing was selected.
   assert_true(opened.default_agent is OpenSeekAgent)
 }

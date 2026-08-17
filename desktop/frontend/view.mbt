@@ -776,6 +776,83 @@ fn tree_layout_select(
 }
 
 ///|
+/// The Codex group's rows: connection and account state, and the account
+/// actions themselves. Sign-in and sign-out live here rather than on the
+/// Codex conversation topbar — Settings is where the desktop manages every
+/// account it holds.
+fn codex_account_rows(
+  dispatch : @cmd.Emit[Msg],
+  model : Model,
+) -> Array[@html.Html] {
+  let codex = model.codex
+  let channel = model.focused
+  let rows : Array[@html.Html] = [
+    setting_row(
+      "Status",
+      [],
+      desc="\{codex.connection_label()} · \{codex.account_label()}",
+    ),
+  ]
+  if codex.signed_in() {
+    rows.push(
+      setting_row(
+        "Account",
+        [
+          @html.button(
+            class="secondary",
+            disabled=codex.is_busy(),
+            on_click=dispatch(Codex(channel~, @codex.Msg::logout())),
+            "Sign out",
+          ),
+        ],
+        desc="Signing out removes the ChatGPT credentials this desktop's Codex uses.",
+      ),
+    )
+  } else if codex.sign_in_required() {
+    rows.push(
+      setting_row(
+        "Sign in",
+        [
+          @html.button(
+            class="primary",
+            disabled=codex.is_busy(),
+            on_click=dispatch(Codex(channel~, @codex.Msg::login())),
+            "Sign in with ChatGPT",
+          ),
+        ],
+        desc="Codex conversations run with your ChatGPT account.",
+      ),
+    )
+  }
+  if codex.pending_auth_url() is Some(url) {
+    rows.push(
+      setting_row(
+        "Sign-in page",
+        [
+          // The shared external-link listener keeps the desktop webview in
+          // place and hands this URL to the system browser.
+          @html.a(
+            class="setting-link",
+            href=url,
+            target=Blank,
+            rel="noopener noreferrer",
+            [icon(icon_link_external), @html.span("Open")],
+          ),
+          @html.button(
+            class="secondary",
+            disabled=codex.is_busy(),
+            on_click=dispatch(Codex(channel~, @codex.Msg::cancel_login())),
+            "Cancel sign-in",
+          ),
+        ],
+        desc="Finish signing in on the browser page, or cancel the attempt.",
+      ),
+    )
+  }
+  rows
+}
+
+///|
 /// The Remote access group's rows: sign-in state against the SeekMoon
 /// relay. The relay no longer depends on the chat provider — only the
 /// hosted chat proxy was retired — so it is always available.
@@ -1154,6 +1231,11 @@ fn settings_page(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
   let groups : Array[@html.Html] = [
     settings_group(icon_sparkle, "Engine", engine_rows),
     settings_group(icon_key, "API", api_rows),
+    settings_group(
+      icon_extensions,
+      "Codex",
+      codex_account_rows(dispatch, model),
+    ),
     settings_group(icon_layout, "Interface", [
       setting_row(
         "Theme",
@@ -2208,7 +2290,6 @@ fn view(
           toggle_sidebar: dispatch(ToggleSidebar),
           toggle_terminal,
           toggle_files: toggle_right_panel,
-          open_external: url => dispatch(ExternalLinkClicked(url)),
           workspace_label: workspace => @resource.label(workspace),
           transcript: transcript_html,
           composer: codex_composer_html,
