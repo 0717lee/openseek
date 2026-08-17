@@ -101,13 +101,17 @@ priv enum ListedStore {
 }
 
 ///|
-/// Index a listing by session id, so placement reconciliation is one lookup
-/// per conversation rather than a scan of the whole listing.
+/// Index the listings by session id, so placement reconciliation is one lookup
+/// per conversation rather than a scan of the whole listing. Live and archived
+/// rows go in together: both say a store holds a record under that id, which
+/// is the only question this index answers.
 fn listed_stores(
   items : Array[@transcript.SessionListItem],
+  archived : Array[@transcript.SessionListItem],
 ) -> Map[String, ListedStore] {
   items
   .iter()
+  .concat(archived.iter())
   .fold(init=Map([]), (index, item) => {
     index[item.id] = match index.get(item.id) {
       None => OneStore(item.workspace)
@@ -121,14 +125,20 @@ fn listed_stores(
 ///|
 /// Where `session.list` says this conversation's record lives.
 ///
-/// The list is the authority on placement only while it is unambiguous. A
-/// conversation materialized from a broadcast before the list arrived carries
-/// a provisional store, and the single row bearing its id names the real one.
-/// But the list really can carry two rows for one id — Scratch and a project
-/// — and then the conversation's own binding is the better answer: it came
-/// from the row the user clicked or from the store root a commit named,
-/// whereas picking a row by id alone would rebind the conversation to a
-/// record it never opened.
+/// The listings are the authority on placement only while they are
+/// unambiguous. A conversation materialized from a broadcast before they
+/// arrived carries a provisional store, and the single row bearing its id
+/// names the real one. But a host really can hold two records under one id —
+/// one per attached project — and then the conversation's own binding is the
+/// better answer: it came from the row the user clicked or from the store root
+/// a commit named, whereas picking a row by id alone would rebind the
+/// conversation to a record it never opened.
+///
+/// Both listings count, because a record that left the live list did not move
+/// stores — records never do — it was archived where it already was. Reading
+/// the live list alone would see one remaining row, call that unambiguous, and
+/// move the conversation onto a stranger's record while its own sat in its
+/// store's archived twin.
 fn listed_project(
   index : Map[String, ListedStore],
   conv : Conversation,
@@ -5364,7 +5374,7 @@ fn update_device_msg(
       // store this page believes in is the one every request names, so a
       // provisional Scratch placement would send the next prompt to a Scratch
       // record instead of the project one the conversation came from.
-      let stores = listed_stores(items)
+      let stores = listed_stores(items, dev.archived)
       let conversations = model.conversations.map(conv => {
         if conv.device == channel {
           {
@@ -9757,6 +9767,59 @@ test "same-id session loads are fenced by channel owner" {
     fail("remote conversation disappeared")
   }
   inspect(loaded.messages[0].content, content="remote loaded")
+}
+
+///|
+test "an archived twin keeps its conversation from adopting the other store" {
+  let dispatch = test_dispatch()
+  let mine = @interop.ChannelId::Local.test_project()
+  let other = @interop.ChannelId::Local.test_resource("/work/alpha")
+  // Archived while this page was away: the conversation is bound to its own
+  // project, whose record now sits in that store's archived twin, and the
+  // live list that comes back holds only the other project's same-id row.
+  let model = test_model()
+    .replace_conversation({
+      ..test_conversation(),
+      session_id: "desktop-shared",
+      workspace: Project(root=mine),
+      messages: [
+        { kind: User, content: "my transcript", ts: None, sequence: None },
+      ],
+    })
+    .with_dev(dev => {
+      ..dev,
+      projects: [mine, other],
+      archived: [
+        {
+          id: "desktop-shared",
+          title: Some("my transcript"),
+          workspace: mine,
+          workspace_name: "work",
+          updated_at_ms: None,
+        },
+      ],
+    })
+  let (_, listed) = update(
+    dispatch,
+    sessions_loaded([
+      {
+        id: "desktop-shared",
+        title: Some("their copy"),
+        workspace: other,
+        workspace_name: "alpha",
+        updated_at_ms: None,
+      },
+    ]),
+    model,
+  )
+  guard listed.find_conversation(@interop.ChannelId::Local, "desktop-shared")
+    is Some(conv) else {
+    fail("the open conversation disappeared")
+  }
+  // One live row is not a relocation: records never change store, so the
+  // conversation stays on its own — where the archived reply can still
+  // recognize it — instead of writing through the other project's record.
+  assert_eq(conv.workspace, Project(root=mine))
 }
 
 ///|
