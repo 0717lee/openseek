@@ -29,13 +29,88 @@ fn test_input(activation? : String) -> Input {
 }
 
 ///|
+fn test_conversations(
+  count : Int,
+  active_index? : Int,
+) -> Array[@conversation.Input] {
+  let conversations : Array[@conversation.Input] = []
+  for index = 0; index < count; index = index + 1 {
+    let id = index.to_string()
+    conversations.push({
+      id: @conversation.Id(
+        source="openseek.projects",
+        channel="local",
+        conversation=id,
+      ),
+      title: id,
+      label: "Chat \{id}",
+      nested: true,
+      subrun: false,
+      active: active_index == Some(index),
+      running: false,
+      openable: true,
+      worktree: None,
+      run_mark: @conversation.NoRunMark,
+      trailing: [],
+      children: [],
+    })
+  }
+  conversations
+}
+
+///|
 test "the project component state owns its compact preview" {
-  let state : State = { fold: Open, preview_expanded: false, menu_open: false }
+  let state : State = {
+    fold: Open,
+    preview_limit: PreviewLimit,
+    menu_open: false,
+  }
   assert_true(state.conversation_visible(4, false))
   assert_false(state.conversation_visible(5, false))
   assert_true(state.conversation_visible(5, true))
-  let expanded = state.update(test_input(), ShowMore)
-  assert_true(expanded.conversation_visible(5, false))
+  let input = { ..test_input(), conversations: test_conversations(20) }
+  let shown_once = state.update(input, ShowMore)
+  assert_eq(shown_once.preview_limit, 12)
+  assert_true(shown_once.conversation_visible(11, false))
+  assert_false(shown_once.conversation_visible(12, false))
+  let shown_twice = shown_once.update(input, ShowMore)
+  assert_eq(shown_twice.preview_limit, 19)
+  assert_true(shown_twice.conversation_visible(18, false))
+  assert_false(shown_twice.conversation_visible(19, false))
+}
+
+///|
+test "show more skips an active chat that was already visible" {
+  let state : State = {
+    fold: Open,
+    preview_limit: PreviewLimit,
+    menu_open: false,
+  }
+  let input = {
+    ..test_input(),
+    conversations: test_conversations(20, active_index=7),
+  }
+  assert_true(state.conversation_visible(7, true))
+  let shown_more = state.update(input, ShowMore)
+  assert_eq(shown_more.preview_limit, 13)
+}
+
+///|
+test "folding a project resets its compact preview" {
+  let state : State = {
+    fold: Open,
+    preview_limit: PreviewLimit,
+    menu_open: false,
+  }
+  let input = { ..test_input(), conversations: test_conversations(20) }
+  let shown_more = state.update(input, ShowMore)
+  assert_true(shown_more.conversation_visible(11, false))
+  let folded = shown_more.update(input, ToggleDisclosure)
+  assert_true(folded.folded(test_input()))
+  let reopened = folded.update(input, ToggleDisclosure)
+  assert_false(reopened.folded(test_input()))
+  assert_true(reopened.conversation_visible(4, false))
+  assert_false(reopened.conversation_visible(5, false))
 }
 
 ///|
@@ -43,7 +118,11 @@ test "the project component state owns its compact preview" {
 /// inside must take effect immediately, not silently arm a fold that fires
 /// when the activation later moves away.
 test "folding the active project folds it immediately and stays put" {
-  let open : State = { fold: Open, preview_expanded: false, menu_open: false }
+  let open : State = {
+    fold: Open,
+    preview_limit: PreviewLimit,
+    menu_open: false,
+  }
   let folded = open.update(test_input(activation="desktop-a"), ToggleDisclosure)
   assert_true(folded.folded(test_input(activation="desktop-a")))
   // Leaving the branch, and returning to the same conversation, both respect
@@ -56,7 +135,11 @@ test "folding the active project folds it immediately and stays put" {
 
 ///|
 test "a fold made outside the branch is revealed by any activation" {
-  let open : State = { fold: Open, preview_expanded: false, menu_open: false }
+  let open : State = {
+    fold: Open,
+    preview_limit: PreviewLimit,
+    menu_open: false,
+  }
   let folded = open.update(test_input(), ToggleDisclosure)
   assert_true(folded.folded(test_input()))
   assert_false(folded.folded(test_input(activation="desktop-a")))
@@ -64,7 +147,11 @@ test "a fold made outside the branch is revealed by any activation" {
 
 ///|
 test "toggling a revealed branch folds what the user sees" {
-  let open : State = { fold: Open, preview_expanded: false, menu_open: false }
+  let open : State = {
+    fold: Open,
+    preview_limit: PreviewLimit,
+    menu_open: false,
+  }
   // Folded while inactive, then revealed by an activation…
   let folded = open.update(test_input(), ToggleDisclosure)
   let revealed_input = test_input(activation="desktop-a")
