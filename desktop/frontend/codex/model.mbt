@@ -85,8 +85,25 @@ priv struct CodexTurn {
   started_at : Int?
   completed_at : Int?
   items : Array[CodexItem]
+  // App-server's own statement of how complete `items` is: "full" is the
+  // whole history, while "summary" (a `turn/completed` envelope drops the
+  // user message, observed live against 0.147) and "notLoaded" (start
+  // reply, `turn/started`) are partial by contract. `None` is an app-server
+  // that predates the field.
+  items_view : String?
   error : String?
 } derive(Eq)
+
+///|
+/// Whether this turn envelope's `items` may replace what the client already
+/// accumulated. Only the explicit "full" view is the complete list; absent
+/// means an older app-server whose envelopes carried full items.
+fn CodexTurn::items_authoritative(self : CodexTurn) -> Bool {
+  match self.items_view {
+    Some(view) => view == "full"
+    None => true
+  }
+}
 
 ///|
 priv struct CodexThread {
@@ -985,6 +1002,7 @@ fn CodexTurn::decode(value : Json) -> CodexTurn? {
     started_at: @jsonx.json_int(fields, "startedAt"),
     completed_at: @jsonx.json_int(fields, "completedAt"),
     items,
+    items_view: @jsonx.json_text(fields, "itemsView"),
     error,
   })
 }
@@ -1714,7 +1732,11 @@ fn CodexThread::with_turn(self : CodexThread, turn : CodexTurn) -> CodexThread {
   let turns = self.turns.map(existing => {
     if existing.id == turn.id {
       found = true
-      turn
+      if turn.items_authoritative() {
+        turn
+      } else {
+        turn.merged_onto(existing)
+      }
     } else {
       existing
     }
@@ -1723,6 +1745,36 @@ fn CodexThread::with_turn(self : CodexThread, turn : CodexTurn) -> CodexThread {
     turns.push(turn)
   }
   { ..self, turns, }
+}
+
+///|
+/// Adopt a partial-view turn envelope over what this client accumulated.
+/// The envelope is authoritative for the turn's status, timestamps, and
+/// error; its `items` are declaredly incomplete (`itemsView` "summary" or
+/// "notLoaded"), so items merge by id instead of replacing: an incoming
+/// item wins its slot, an accumulated one survives an envelope that lacks
+/// it, and genuinely new items append in the envelope's order. Observed
+/// live against app-server 0.147: `turn/completed` carries a "summary"
+/// view holding only the agent message — replacing wholesale erased the
+/// user's own bubble from the transcript.
+fn CodexTurn::merged_onto(self : CodexTurn, existing : CodexTurn) -> CodexTurn {
+  let items : Array[CodexItem] = []
+  for item in existing.items {
+    let mut merged = item
+    for incoming in self.items {
+      if incoming.id == item.id {
+        merged = incoming
+        break
+      }
+    }
+    items.push(merged)
+  }
+  for incoming in self.items {
+    if !existing.items.iter().any(item => item.id == incoming.id) {
+      items.push(incoming)
+    }
+  }
+  { ..self, items, }
 }
 
 ///|
@@ -1748,6 +1800,9 @@ fn CodexThread::with_item(
       started_at: None,
       completed_at: None,
       items: [item],
+      // Locally minted to hold an early item; the server never stated an
+      // items view for it.
+      items_view: None,
       error: None,
     })
   }
@@ -2316,6 +2371,7 @@ test "Codex completed items replace streamed presentation state" {
     started_at: None,
     completed_at: None,
     items: [started],
+    items_view: None,
     error: None,
   }
   let streamed = turn.with_delta("item-1", "partial")
@@ -2459,6 +2515,88 @@ test "Codex account snapshots settle browser login state" {
   assert_eq(settled.login_id, None)
   assert_eq(settled.auth_url, None)
   assert_true(settled.account is CodexSignedIn(..))
+}
+
+///|
+test "a summary turn/completed keeps the streamed user message" {
+  // The exact envelope sequence observed live against app-server 0.147:
+  // the start reply and turn/started carry `itemsView: "notLoaded"`, the
+  // user and agent messages arrive only as items, and turn/completed's
+  // "summary" view lists the agent message alone.
+  let state = State()
+    .with_thread_reply({ "thread": { "id": "thread-1", "turns": [] } })
+    .with_notification(
+      "turn/started",
+      {
+        "threadId": "thread-1",
+        "turn": {
+          "id": "turn-1",
+          "items": [],
+          "itemsView": "notLoaded",
+          "status": "inProgress",
+        },
+      },
+      0,
+    )
+    .with_notification(
+      "item/completed",
+      {
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "item": {
+          "type": "userMessage",
+          "id": "user-1",
+          "content": [{ "type": "text", "text": "hello" }],
+        },
+      },
+      0,
+    )
+    .with_notification(
+      "item/completed",
+      {
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "item": { "type": "agentMessage", "id": "agent-1", "text": "hi" },
+      },
+      0,
+    )
+  let settled = state.with_notification(
+    "turn/completed",
+    {
+      "threadId": "thread-1",
+      "turn": {
+        "id": "turn-1",
+        "items": [{ "type": "agentMessage", "id": "agent-1", "text": "hi" }],
+        "itemsView": "summary",
+        "status": "completed",
+      },
+    },
+    0,
+  )
+  guard settled.active_thread() is Some(thread) else {
+    fail("the turn envelope must not deselect the thread")
+  }
+  assert_eq(thread.turns.length(), 1)
+  assert_eq(thread.turns[0].status, "completed")
+  assert_eq(thread.turns[0].items.map(item => item.id), ["user-1", "agent-1"])
+  // A declared-full view is authoritative and does replace.
+  let replaced = settled.with_notification(
+    "turn/completed",
+    {
+      "threadId": "thread-1",
+      "turn": {
+        "id": "turn-1",
+        "items": [{ "type": "agentMessage", "id": "item-2", "text": "hi" }],
+        "itemsView": "full",
+        "status": "completed",
+      },
+    },
+    0,
+  )
+  guard replaced.active_thread() is Some(full) else {
+    fail("the full envelope must not deselect the thread")
+  }
+  assert_eq(full.turns[0].items.map(item => item.id), ["item-2"])
 }
 
 ///|
