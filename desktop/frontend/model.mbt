@@ -154,7 +154,7 @@ const ConversationModelsLimit : Int = 200
 const WorkspaceDefaultModeStorageKey : String = "openseek.workspace_default_mode"
 
 ///|
-/// Obsolete: the update channel derives from the server selection now. The
+/// Obsolete: the update channel is gone — there is one release stream. The
 /// key is kept only so startup can delete whatever old builds stored.
 const UpdateChannelStorageKey : String = "openseek.update_channel"
 
@@ -281,16 +281,16 @@ fn AppFontSize::pixels(self : AppFontSize) -> Double {
 }
 
 ///|
-/// Which chat-completions endpoint the engine talks to. `Openseek` is the
-/// zero-config default — the proxy does not validate API keys. `Deepseek` is
-/// the official endpoint and needs the user's own key. `Custom` is any other
-/// DeepSeek-compatible endpoint; whether it needs a key is the endpoint's
-/// business, so the key is optional there. The setting (and its
-/// credentials) live on the host; this mirror is what `settings.get`/`set`
-/// replies and the `settings.changed` broadcast last reported.
+/// Which chat-completions endpoint the engine talks to. SeekMoon runs are
+/// bring-your-own-key only: the hosted proxy is retired. `Deepseek` is the
+/// official endpoint and needs the user's own key; `Custom` is any other
+/// OpenAI-compatible endpoint, whose key is optional. The retired hosted
+/// names (`openseek` / `openseek-staging`) parse as `Deepseek` so old
+/// stores and old clients land on the BYOK default instead of wedging.
+/// The setting (and its credentials) live on the host; this mirror is what
+/// `settings.get`/`set` replies and the `settings.changed` broadcast last
+/// reported.
 priv enum ApiProvider {
-  Openseek
-  OpenseekStaging
   Deepseek
   Custom
 } derive(Eq)
@@ -298,8 +298,6 @@ priv enum ApiProvider {
 ///|
 fn ApiProvider::wire(self : ApiProvider) -> String {
   match self {
-    Openseek => "openseek"
-    OpenseekStaging => "openseek-staging"
     Deepseek => "deepseek"
     Custom => "custom"
   }
@@ -307,25 +305,13 @@ fn ApiProvider::wire(self : ApiProvider) -> String {
 
 ///|
 /// Unknown stored values fall back to the default provider, so a downgrade
-/// (or a corrupted store) degrades to the zero-config endpoint instead of
-/// wedging the app.
+/// (or a corrupted store) degrades to the BYOK default instead of wedging
+/// the app.
 fn ApiProvider::parse(value : String) -> ApiProvider {
   match value.trim().to_owned() {
-    "openseek-staging" => OpenseekStaging
-    "deepseek" => Deepseek
+    "openseek" | "openseek-staging" | "deepseek" => Deepseek
     "custom" => Custom
-    _ => Openseek
-  }
-}
-
-///|
-/// The update channel the server selection implies: the staging server
-/// serves staging builds, everything else follows production. The channel
-/// stopped being its own setting when the server choice became one.
-fn ApiProvider::update_channel(self : ApiProvider) -> UpdateChannel {
-  match self {
-    OpenseekStaging => Staging
-    Openseek | Deepseek | Custom => Production
+    _ => Deepseek
   }
 }
 
@@ -853,10 +839,11 @@ priv struct BufferedCommit {
 ///|
 /// What the main area shows: the active conversation, the Skills page, the
 /// Settings page, or one workspace's settings page. Selecting a conversation
-/// (or rotating to a new one) always returns to the chat. Settings also
-/// opens on its own while the configured endpoint is unusable, since the
-/// composer would be dead weight. `WorkspaceSettings` carries the project it
-/// is about; detaching that project falls back to the chat.
+/// (or rotating to a new one) always returns to the chat. While the
+/// configured endpoint is unusable the chat stays reachable, the API-setup
+/// modal takes over until dismissed, and the composer keeps Send disabled.
+/// `WorkspaceSettings` carries the project it is about; detaching that
+/// project falls back to the chat.
 priv enum Screen {
   Chat
   Codex
@@ -1119,6 +1106,16 @@ priv struct Model {
   // A legacy localStorage migration's push is in flight; its success is
   // what deletes the migrated secrets from localStorage.
   legacy_cleanup_pending : Bool
+  // Whether the API-setup modal is up. Every settled settings snapshot
+  // decides it through `settle_api_setup` — the one place that opens it —
+  // and it closes the moment a usable endpoint arrives.
+  api_setup_open : Bool
+  // The user answered "Not now" to the setup modal. Held until a usable
+  // endpoint re-arms the announcement, and deliberately not part of the
+  // host-settings mirror: a reconnect or focus switch clears the mirror but
+  // must not turn a dismissal back into a fresh popup. Session-local — the
+  // next cold start without a key prompts again.
+  api_setup_dismissed : Bool
   // Whether this page is the desktop window (the proton webview) rather than
   // a browser reached through a relay. Probed once at startup. Gates the
   // self-update flow: applying an update swaps the
@@ -1276,8 +1273,9 @@ priv struct Model {
   tree_layout : @fileeditor.TreeLayout
   // Where the self-update flow stands, from "never checked" through the
   // download to the restart. One enum, so "checking", "downloading" and
-  // "confirming" cannot overlap. (The channel it checks derives from the
-  // server selection — `ApiProvider::update_channel`.)
+  // "confirming" cannot overlap. The channel is always production: the
+  // update manifest lives on the SeekMoon origin and no longer derives
+  // from the chat provider.
   update_ux : UpdateUx
   // The host's relay sign-in mirror (`auth.status` reply / `auth.changed`
   // broadcast), None until the first reply. Desktop-window-only UI.
@@ -1522,6 +1520,10 @@ priv enum Msg {
   // The host swapped the bundle; close the window so `main` can relaunch.
   UpdateApplied
   OpenSetup
+  // The API-setup modal's "Not now" button and its backdrop click.
+  DismissApiSetup
+  // The composer's BYOK notice reopens the modal a dismissal closed.
+  OpenApiSetup
   // Open the app-server-backed Codex page and refresh its authoritative
   // account, model, and thread catalogs.
   OpenCodex
@@ -2250,7 +2252,7 @@ fn initial_model() -> Model {
     deepseek_key_saved: false,
     custom_key_saved: false,
     setup_api_key: "",
-    api_provider: Openseek,
+    api_provider: Deepseek,
     custom_api_url: "",
     settings_saves: 0,
     host_settings_revision: -1,
@@ -2310,6 +2312,8 @@ fn initial_model() -> Model {
     notification_corner: BottomRight,
     tree_layout: RightSidebar,
     update_ux: UpdateUnknown,
+    api_setup_open: false,
+    api_setup_dismissed: false,
     remote_access: None,
     remote_connecting: false,
     remote_error: None,
@@ -2398,7 +2402,7 @@ fn Model::focused_device_name(self : Model) -> String {
       }
     }
   }
-  "OpenSeek"
+  "SeekMoon"
 }
 
 ///|
@@ -2436,11 +2440,15 @@ fn Model::host_settings_loaded(self : Model) -> Bool {
 /// Forget every value owned by the focused host before fetching another
 /// snapshot. The neutral values are deliberately not actionable while the
 /// revision remains negative; this prevents a failed or delayed `settings.get`
-/// from exposing one device's configuration on another device.
+/// from exposing one device's configuration on another device. The setup
+/// modal closes with the mirror it was rendering — an open modal over the
+/// loading sentinel would show default data with every control disabled —
+/// and the next authoritative snapshot reopens it if still warranted.
 fn Model::clear_host_settings(self : Model) -> Model {
   {
     ..self,
-    api_provider: Openseek,
+    api_setup_open: false,
+    api_provider: Deepseek,
     custom_api_url: "",
     deepseek_key_saved: false,
     custom_key_saved: false,
@@ -2453,12 +2461,13 @@ fn Model::clear_host_settings(self : Model) -> Model {
 }
 
 ///|
-/// Fold one host settings payload into the mirror. The default provider
-/// needs no setup, so the Settings page only takes over when the settings
-/// are incomplete (official endpoint without a key, custom endpoint without
-/// a URL); it never navigates away on its own.
+/// Fold one host settings payload into the mirror. Whether the result is
+/// usable — and how loudly to say so when it is not — is the update
+/// handlers' call (the API-setup modal, the Settings guide); this fold only
+/// mirrors the store, so a payload applied from a deferred flush can never
+/// yank the screen around on its own.
 fn Model::apply_host_settings(self : Model, settings : HostSettings) -> Model {
-  let next = {
+  {
     ..self,
     host_settings_revision: settings.revision,
     deferred_host_settings: None,
@@ -2467,7 +2476,6 @@ fn Model::apply_host_settings(self : Model, settings : HostSettings) -> Model {
     deepseek_key_saved: settings.has_deepseek_key,
     custom_key_saved: settings.has_custom_key,
   }
-  { ..next, screen: if next.api_ready() { next.screen } else { Settings } }
 }
 
 ///|
@@ -2489,25 +2497,72 @@ fn Model::defer_host_settings(self : Model, settings : HostSettings) -> Model {
 /// Apply the newest deferred status once optimistic writes no longer protect
 /// the form. A lower revision is discarded; equal is deliberately accepted
 /// so a failed optimistic edit can be restored by an authoritative `get`.
+/// The settled mirror then decides the setup modal like any other snapshot —
+/// a deferred first snapshot (the legacy migration races it here) must be
+/// able to open the modal, not just retire it.
 fn Model::flush_host_settings(self : Model) -> Model {
-  match self.deferred_host_settings {
+  let next = match self.deferred_host_settings {
     Some(settings) if settings.revision >= self.host_settings_revision =>
       self.apply_host_settings(settings)
     _ => { ..self, deferred_host_settings: None }
   }
+  next.settle_api_setup()
 }
 
 ///|
-/// Whether the configured endpoint is usable as it stands: the default
-/// OpenSeek proxy always is, the official endpoint needs a key stored on
-/// the host, and a custom endpoint needs at least a URL. The credentials
-/// themselves live on the host; a start carries none.
+/// Whether the composer should carry the BYOK reminder — the durable surface
+/// once the setup modal was dismissed, because a greyed Send with no
+/// explanation anywhere in the UI is the state the modal exists to prevent.
+/// Gated on the loaded mirror so a reconnect's loading sentinel cannot flash
+/// it, and shown regardless of the dismissal: quiet must not mean lost.
+fn Model::api_setup_banner_visible(self : Model) -> Bool {
+  self.bridge_state() is Connected &&
+  self.host_settings_loaded() &&
+  !self.api_ready()
+}
+
+///|
+/// The one rule for the API-setup modal, applied whenever the settings
+/// mirror settles: a usable endpoint retires the modal and re-arms the
+/// announcement for the next break; an explicit "Not now" holds until then;
+/// the Settings page stays modal-free (its guide already says what is
+/// missing); otherwise an unusable endpoint keeps the modal up — the key is
+/// the one thing SeekMoon cannot run without, so a dismissible toast is not
+/// loud enough.
+fn Model::settle_api_setup(self : Model) -> Model {
+  // The loading sentinel's neutral values are not a verdict on the endpoint;
+  // a flush with nothing applied (a failed save before any snapshot) must
+  // not announce them.
+  guard self.host_settings_loaded() else { return self }
+  if self.api_ready() {
+    { ..self, api_setup_open: false, api_setup_dismissed: false }
+  } else if self.api_setup_dismissed || self.screen is Settings {
+    { ..self, api_setup_open: false }
+  } else {
+    { ..self, api_setup_open: true }
+  }
+}
+
+///|
+/// Whether the configured endpoint is usable as it stands: the official
+/// endpoint needs a key stored on the host, and a custom endpoint needs a
+/// plausible URL. The credentials themselves live on the host; a start
+/// carries none.
 fn Model::api_ready(self : Model) -> Bool {
   match self.api_provider {
-    Openseek | OpenseekStaging => true
     Deepseek => self.deepseek_key_saved
-    Custom => !self.custom_api_url.is_blank()
+    Custom => plausible_endpoint_url(self.custom_api_url)
   }
+}
+
+///|
+/// Whether a custom endpoint URL is complete enough to try: an http(s)
+/// scheme followed by at least one host character. The URL is pushed to the
+/// host per keystroke, so a prefix the user is still typing must not read
+/// as usable — that would retire the setup modal mid-word and arm Send
+/// against an endpoint every run fails on.
+fn plausible_endpoint_url(url : String) -> Bool {
+  url.trim() =~ re"^https?://[^/]"
 }
 
 ///|
