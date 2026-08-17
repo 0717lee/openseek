@@ -32,22 +32,19 @@ pub fn home_dir(runtime_dir : @pathx.Path) -> @pathx.Path {
 /// which is the pre-isolation behavior.
 pub async fn prepared_home(runtime_dir : @pathx.Path) -> @pathx.Path? {
   let home = home_dir(runtime_dir)
-  let exists = (@fs.kind(home.to_string()) is Directory) catch {
+  // Recursive mkdir on an existing directory raises EEXIST; the steady
+  // state is "created by an earlier launch", not an error.
+  @fs.mkdir(home.to_string(), recursive=true) catch {
     error if @async.is_being_cancelled() => raise error
-    _ => false
-  }
-  if !exists {
-    @fs.mkdir(home.to_string(), recursive=true) catch {
-      error if @async.is_being_cancelled() => raise error
-      error => {
-        @xlog.warn(category="codex") <?
-          {
-            "event": "codex_home_mkdir_failed",
-            "path": home.to_string(),
-            "error": "\{error}",
-          }
-        return None
-      }
+    @os_error.OSError(_) as os_error if os_error.is_EEXIST() => ()
+    error => {
+      @xlog.warn(category="codex") <?
+        {
+          "event": "codex_home_mkdir_failed",
+          "path": home.to_string(),
+          "error": "\{error}",
+        }
+      return None
     }
   }
   // `auth.json` is encrypted by the OS keychain, but the home also holds
@@ -82,5 +79,10 @@ async test "prepared codex home creates the directory" {
   guard home is Some(home) else { fail("codex home was not prepared") }
   assert_eq(home, home_dir(root))
   assert_true(@fs.kind(home.to_string()) is Directory)
+  // Preparing an existing home must succeed too: that is the steady state
+  // of every launch after the first.
+  guard prepared_home(root) is Some(_) else {
+    fail("codex home was not prepared again")
+  }
   @fs.rmdir(root.to_string(), recursive=true)
 }
