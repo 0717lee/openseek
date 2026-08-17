@@ -2417,10 +2417,11 @@ fn update_msg(
             (persist, { ..model, codex, default_agent: CodexAgent })
           } else {
             // Only a composing OpenSeek chat's chip offers the Codex group;
-            // the pick hands the fresh conversation to Codex. The unstarted
-            // OpenSeek husk stays behind: with a typed draft it keeps its
-            // sidebar row (and the text survives a switch back), otherwise
-            // it evaporates on its own.
+            // the pick hands the fresh conversation to Codex. One composing
+            // row at a time: an empty husk that was only ever the "New chat"
+            // placeholder is deactivated so its row vanishes with the
+            // switch; a husk holding typed writing keeps its row (and the
+            // text survives a switch back).
             guard model.composing_new_chat() &&
               model.active_conversation() is Some(conv) else {
               return (@cmd.none, model)
@@ -2428,6 +2429,11 @@ fn update_msg(
             let cwd = @resource.path_for(conv.project(), model.focused).unwrap_or(
               "",
             )
+            let active_session = if conv.worth_keeping() {
+              model.active_session
+            } else {
+              ""
+            }
             (
               @cmd.batch([
                 persist,
@@ -2438,6 +2444,7 @@ fn update_msg(
                 codex,
                 default_agent: CodexAgent,
                 screen: Codex,
+                active_session,
                 sidebar_open: model.sidebar_open && !model.narrow,
               },
             )
@@ -14055,8 +14062,18 @@ test "a Codex pick hands a fresh chat to Codex" {
   )
   assert_true(switched.screen is Codex)
   assert_true(switched.default_agent is CodexAgent)
-  // The unstarted OpenSeek husk stays behind — switching back finds it.
-  assert_true(switched.active_conversation() is Some(_))
+  // One composing row at a time: the empty husk was only ever the "New
+  // chat" placeholder, so it deactivates and its sidebar row goes with it.
+  assert_true(switched.active_conversation() is None)
+  // A husk holding typed writing keeps its row instead — switching back
+  // finds the text.
+  let typed = test_model().replace_conversation({
+    ..test_conversation(),
+    composer_draft_present: true,
+  })
+  let (_, kept) = update(dispatch, ModelPicked("codex:gpt-5.4-codex"), typed)
+  assert_true(kept.screen is Codex)
+  assert_true(kept.active_conversation() is Some(_))
 }
 
 ///|

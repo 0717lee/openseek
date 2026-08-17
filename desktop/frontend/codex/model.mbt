@@ -1041,7 +1041,7 @@ fn CodexThreadRow::title(fields : Map[String, Json]) -> String {
     .trim()
     .to_owned()
   if preview.is_empty() {
-    "New Codex thread"
+    "New chat"
   } else {
     preview
   }

@@ -233,7 +233,10 @@ fn SidebarContext::draft_input(
       root?=if root.is_empty() { None } else { Some(root) },
     ),
     title: draft.cwd,
-    label: "New Codex thread",
+    // The same label an unsent OpenSeek chat's row carries: the two agents'
+    // composing rows are one concept in the shared sidebar, and the model
+    // chip already names which agent the chat will start with.
+    label: "New chat",
     nested,
     subrun: false,
     active: self.selected,
@@ -591,7 +594,7 @@ pub fn State::page(
     )
   }
   let title = match self.selection {
-    CodexDraftTask(_) => "New Codex thread"
+    CodexDraftTask(_) => "New chat"
     CodexStoredTask(thread) => thread.title
     CodexNoTask => "Codex"
   }
