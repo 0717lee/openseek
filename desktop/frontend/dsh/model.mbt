@@ -320,9 +320,15 @@ pub fn Msg::open_session(session_id : String) -> Msg {
 }
 
 ///|
-/// Hide one conversation from every dsh grouping surface. dsh keeps its log
-/// and its slot in the Workspace account, so this is reversible from dsh
-/// itself; this page offers no way back.
+/// Hide one conversation from every dsh grouping surface.
+///
+/// This does not come back. dsh's archive set is append-only — nothing in dsh
+/// removes an id from it, and its own API calls unarchive "a future" — so the
+/// conversation is invisible to every dsh client from here on, including
+/// dsh's. Its log stays on disk and its slot in the Workspace account is kept
+/// for that future, which is the whole of what "archive rather than delete"
+/// buys today. The sidebar's Restore action has nothing to call, so dsh rows
+/// do not offer it.
 pub fn Msg::archive_session(session_id : String) -> Msg {
   ArchiveSession(session_id)
 }

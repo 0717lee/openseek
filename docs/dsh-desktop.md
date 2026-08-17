@@ -77,11 +77,19 @@ management, `workspace.rename`, `workspace.insertSessionBefore`, and other dsh
 APIs are not exposed by this integration.
 
 Archiving and removing a Workspace registration are the page's only cleanup
-verbs, and dsh gives no others: it has no session deletion at all. Archiving
-hides a conversation from every grouping surface while dsh keeps its log and
-its slot in the Workspace account, so it is reversible from dsh itself but not
-from here. Removing a Workspace registration keeps the directory and every
-session log; the conversations it grouped become ungrouped.
+verbs, and dsh gives no others: it has no session deletion at all.
+
+Archiving hides a conversation from every grouping surface and **cannot be
+undone**. dsh's archive set is append-only — no operation removes an id from
+it, and dsh's own API documents unarchive as "a future" capability — so an
+archived conversation is invisible to every dsh client from then on, dsh's own
+included. Its log stays on disk and it keeps its slot in the Workspace
+account, which is what that future unarchive would restore. OpenSeek's sidebar
+has a Restore action and routes it for OpenSeek and Codex rows; dsh rows do
+not offer it, because there is no dsh operation behind it.
+
+Removing a Workspace registration keeps the directory and every session log;
+the conversations it grouped become ungrouped rather than disappearing.
 
 ## Local-only boundary
 
