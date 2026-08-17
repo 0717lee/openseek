@@ -303,11 +303,14 @@ async test "worktree remove refuses a running conversation without unmapping it"
     let committed : Ref[Bool] = Ref(false)
     let detail = try {
       ignore(
-        @worktree.remove(manager.worktree_host(), ws.to_string(), "wt", false, fn(
-          _,
-        ) {
-          committed.val = true
-        }),
+        @worktree.remove(
+          manager.worktree_host(),
+          ws.to_string(),
+          "wt",
+          false,
+          fn(_) { committed.val = true },
+          fn(_) { DshOffline },
+        ),
       )
       "no error"
     } catch {
@@ -353,8 +356,8 @@ async test "a checkout deleted outside the app refuses runs and is repairable" {
   let created = @worktree.create(
     manager.worktree_host(),
     repo.to_string(),
-    @worktree.WorktreeOwner::openseek("s-vanish"),
     fn(_) {  },
+    owner=@worktree.WorktreeOwner::openseek("s-vanish"),
     name="wt",
   )
   let checkout = repo.join(".worktrees/wt")
@@ -445,8 +448,8 @@ async test "a checkout deleted outside the app refuses runs and is repairable" {
   let repaired = @worktree.create(
     manager.worktree_host(),
     repo.to_string(),
-    @worktree.WorktreeOwner::openseek("s-vanish"),
     fn(_) {  },
+    owner=@worktree.WorktreeOwner::openseek("s-vanish"),
   )
   assert_eq(repaired.name, created.name)
   assert_true(@fsx.is_dir(checkout.to_path()))
@@ -469,12 +472,12 @@ async test "a checkout deleted outside the app refuses runs and is repairable" {
   let replay = @worktree.create(
     manager.worktree_host(),
     repo.to_string(),
-    @worktree.WorktreeOwner::openseek("s-vanish"),
     infos => {
       for info in infos {
         replayed.push(info)
       }
     },
+    owner=@worktree.WorktreeOwner::openseek("s-vanish"),
   )
   assert_eq(replay.name, repaired.name)
   guard replayed is [replayed_info] else {
@@ -505,8 +508,8 @@ async test "archive keeps worktree placement for explicit repair after unarchive
     @worktree.create(
       manager.worktree_host(),
       repo.to_string(),
-      @worktree.WorktreeOwner::openseek("s-arc"),
       fn(_) {  },
+      owner=@worktree.WorktreeOwner::openseek("s-arc"),
     ),
   )
   // The first turn has landed: the durable record now exists in the
@@ -589,8 +592,8 @@ async test "archive keeps worktree placement for explicit repair after unarchive
   let repaired = @worktree.create(
     manager.worktree_host(),
     repo.to_string(),
-    @worktree.WorktreeOwner::openseek("s-arc"),
     fn(_) {  },
+    owner=@worktree.WorktreeOwner::openseek("s-arc"),
   )
   assert_eq(repaired.name, "wt-1")
   assert_true(@fsx.is_dir(repo.join(".worktrees/wt-1").to_path()))
@@ -599,8 +602,8 @@ async test "archive keeps worktree placement for explicit repair after unarchive
     @worktree.create(
       manager.worktree_host(),
       repo.to_string(),
-      @worktree.WorktreeOwner::openseek("s-arc2"),
       fn(_) {  },
+      owner=@worktree.WorktreeOwner::openseek("s-arc2"),
     ),
   )
   @fsx.ensure_dir(
@@ -620,8 +623,8 @@ async test "archive keeps worktree placement for explicit repair after unarchive
   let codex = @worktree.create(
     manager.worktree_host(),
     repo.to_string(),
-    codex_owner,
     fn(_) {  },
+    owner=codex_owner,
   )
   @fs.write_file(
     repo.join(".worktrees/\{codex.name}/local.txt").to_string(),

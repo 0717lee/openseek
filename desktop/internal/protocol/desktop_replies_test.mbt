@@ -411,7 +411,6 @@ test "worktree creation accepts exactly representable owner namespaces" {
   })
   assert_eq(legacy.session, Some("session-1"))
   assert_eq(legacy.codex_thread, None)
-  assert_eq(legacy.dsh_session, None)
   let codex : @protocol.WorktreeCreatePayload = @json.from_json({
     "workspace": "/work/project",
     "codex_thread": "thread-1",
@@ -422,6 +421,8 @@ test "worktree creation accepts exactly representable owner namespaces" {
     "workspace": "/work/project",
     "codex_thread": "thread-1",
   })
+  // dsh names the conversation that asks — the host authorizes the directory
+  // with it — even though the resulting checkout is recorded unowned.
   let dsh : @protocol.WorktreeCreatePayload = @json.from_json({
     "workspace": "/work/project",
     "dsh_session": "session-dsh-1",
@@ -473,66 +474,6 @@ test "worktree creation accepts exactly representable owner namespaces" {
     _ => false
   }
   assert_true(wrong_type_rejected)
-}
-
-///|
-test "dsh worktree release payload has an explicit three-field codec" {
-  let raw : Json = {
-    "workspace": "/work/project",
-    "name": "wt-1",
-    "dsh_session": "session-dsh-1",
-    "futureMetadata": true,
-  }
-  let payload : @protocol.WorktreeReleaseDshPayload = @json.from_json(raw)
-  assert_eq(payload.workspace, "/work/project")
-  assert_eq(payload.name, "wt-1")
-  assert_eq(payload.dsh_session, "session-dsh-1")
-  @debug.assert_eq(payload.to_json(), {
-    "workspace": "/work/project",
-    "name": "wt-1",
-    "dsh_session": "session-dsh-1",
-  })
-  let null_rejected = try {
-    let _ : @protocol.WorktreeReleaseDshPayload = @json.from_json({
-      "workspace": "/work/project",
-      "name": "wt-1",
-      "dsh_session": null,
-    })
-  } catch {
-    _ => true
-  } noraise {
-    _ => false
-  }
-  assert_true(null_rejected)
-  let missing_rejected = try {
-    let _ : @protocol.WorktreeReleaseDshPayload = @json.from_json({
-      "workspace": "/work/project",
-      "name": "wt-1",
-    })
-  } catch {
-    _ => true
-  } noraise {
-    _ => false
-  }
-  assert_true(missing_rejected)
-}
-
-///|
-test "dsh worktree binding lookup payload has an explicit owner codec" {
-  let payload : @protocol.WorktreeDshBindingPayload = @json.from_json({
-    "dsh_session": "session-dsh-1",
-    "futureMetadata": true,
-  })
-  assert_eq(payload.dsh_session, "session-dsh-1")
-  @debug.assert_eq(payload.to_json(), { "dsh_session": "session-dsh-1" })
-  let missing_rejected = try {
-    let _ : @protocol.WorktreeDshBindingPayload = @json.from_json({})
-  } catch {
-    _ => true
-  } noraise {
-    _ => false
-  }
-  assert_true(missing_rejected)
 }
 
 ///|
@@ -816,29 +757,6 @@ test "worktree creation results keep success compatible and carry refusals" {
 }
 
 ///|
-test "dsh worktree binding replies distinguish found from missing" {
-  let found : @protocol.WorktreeDshBindingReply = WorktreeDshBindingFound({
-    workspace: "/work/project",
-    worktree: {
-      name: "wt-1",
-      branch: "openseek/wt-1",
-      base: "abc123",
-      session: None,
-      codex_thread: None,
-      dsh_session: Some("session-dsh-1"),
-      path: "/work/project/.worktrees/wt-1",
-      present: true,
-    },
-  })
-  let decoded : @protocol.WorktreeDshBindingReply = @json.from_json(
-    found.to_json(),
-  )
-  assert_eq(decoded, found)
-  let missing : @protocol.WorktreeDshBindingReply = WorktreeDshBindingMissing
-  assert_eq(@json.from_json(missing.to_json()), missing)
-}
-
-///|
 test "browse replies keep success compatible and carry refusals" {
   let rooted : @protocol.BrowseDirectoryReply = Listing(path="/", parent=None, entries=[
     "home",
@@ -1055,7 +973,9 @@ test "worktree replies omit absent owners and reject ambiguous ownership" {
     "path": "/work/project/.worktrees/wt-2",
     "present": false,
   })
-  let dsh : @protocol.WorktreeInfo = @json.from_json({
+  // A row an older build owned by a dsh session reads back unowned, which is
+  // what a DeepSeek Harness checkout is now.
+  let legacy_dsh : @protocol.WorktreeInfo = @json.from_json({
     "name": "wt-3",
     "branch": "openseek/wt-3",
     "base": "d5h",
@@ -1063,11 +983,10 @@ test "worktree replies omit absent owners and reject ambiguous ownership" {
     "path": "/work/project/.worktrees/wt-3",
     "present": true,
   })
-  @debug.assert_eq(dsh.to_json(), {
+  @debug.assert_eq(legacy_dsh.to_json(), {
     "name": "wt-3",
     "branch": "openseek/wt-3",
     "base": "d5h",
-    "dsh_session": "session-dsh-1",
     "path": "/work/project/.worktrees/wt-3",
     "present": true,
   })
@@ -1082,7 +1001,6 @@ test "worktree replies omit absent owners and reject ambiguous ownership" {
   })
   assert_eq(ownerless.session, None)
   assert_eq(ownerless.codex_thread, None)
-  assert_eq(ownerless.dsh_session, None)
   let ambiguous = try {
     let _ : @protocol.WorktreeInfo = @json.from_json({
       "name": "ambiguous",

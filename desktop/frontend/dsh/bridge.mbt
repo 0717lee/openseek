@@ -126,8 +126,6 @@ test "dsh snapshot replies select independent ordered lanes" {
     DshPromptWorkspacesReply(
       session_id="session-1",
       generation=1,
-      project="/work/project",
-      worktree_name="wt-1",
       worktree_path="/work/project/.worktrees/wt-1",
       draft={ task: "inspect this project", mentions: [] },
     ).ordered_lane(),
@@ -151,22 +149,10 @@ test "dsh snapshot replies select independent ordered lanes" {
       session_id="session-1",
       generation=1,
       project="/work/project",
-      worktree_name="wt-1",
       worktree_path="/work/project/.worktrees/wt-1",
       draft={ task: "inspect this project", mentions: [] },
-    ).failed_worktree(),
-    Some(("session-1", 1, "/work/project", "wt-1")),
-  )
-  assert_true(
-    DshPromptWorkspacesReply(
-      session_id="session-1",
-      generation=1,
-      project="/work/project",
-      worktree_name="wt-1",
-      worktree_path="/work/project/.worktrees/wt-1",
-      draft={ task: "inspect this project", mentions: [] },
-    ).failed_worktree()
-    is None,
+    ).ordered_lane(),
+    None,
   )
 }
 
@@ -336,8 +322,10 @@ fn State::create_workspace_session(
 }
 
 ///|
-/// Ask the Desktop host to create or recover the checkout durably owned by
-/// this dsh session. dsh sees the path only after this host operation commits.
+/// Ask the Desktop host for a fresh checkout to run this conversation in. The
+/// session id authorizes the request against dsh's own Workspace list; the
+/// resulting checkout is recorded with no owner, so there is nothing here to
+/// reconcile, release, or leak.
 fn State::create_worktree(
   self : State,
   dispatch : @cmd.Emit[Msg],
@@ -360,50 +348,27 @@ fn State::create_worktree(
         payload,
       ) catch {
         error => {
+          // An unowned create has no idempotency key, so repeating it after a
+          // lost reply would provision a second checkout rather than recover
+          // the first. Report the failure instead and say so plainly: whatever
+          // this call may have created is an ordinary spare checkout the user
+          // can remove from the worktree list.
           let detail = @interop.bridge_error_text(error)
-          match @interop.bridge_failure(error) {
-            Refused | Unsent => {
-              scheduler.add(
-                dispatch(
-                  Failed(
-                    kind=DshPromptReply(session_id~, draft~, generation~),
-                    message="worktree setup failed: " + detail,
-                  ),
-                ),
-              )
-              return
-            }
-            Unknown =>
-              // The host may have committed before its reply was lost. Repeat
-              // the same owner-aware operation as a reconciliation read: the
-              // native registry uses dsh session id as its idempotency key and
-              // returns the existing checkout instead of creating another.
-              @interop.bridge_request(
-                @interop.ChannelId::Local,
-                @commands.worktree_create,
-                payload,
-              ) catch {
-                retry_error => {
-                  // A second lost reply is still not a refusal: either create
-                  // may have committed the durable dsh owner. Switch to the
-                  // read-only owner query and keep the submission fence until
-                  // that query proves presence or absence.
-                  scheduler.add(
-                    dispatch(
-                      WorktreeReconcile(
-                        session_id~,
-                        generation~,
-                        project~,
-                        draft~,
-                        attempt=0,
-                        message=@interop.bridge_error_text(retry_error),
-                      ),
-                    ),
-                  )
-                  return
-                }
-              }
+          let message = if @interop.bridge_failure(error) is Unknown {
+            "worktree setup did not confirm; check the worktree list for an unused checkout: " +
+            detail
+          } else {
+            "worktree setup failed: " + detail
           }
+          scheduler.add(
+            dispatch(
+              Failed(
+                kind=DshPromptReply(session_id~, draft~, generation~),
+                message~,
+              ),
+            ),
+          )
+          return
         }
       }
       let reply = match result {
@@ -422,11 +387,7 @@ fn State::create_worktree(
       }
       guard reply.worktrees
         .iter()
-        .find_first(worktree => {
-          worktree.name == reply.name &&
-          worktree.dsh_session == Some(session_id) &&
-          worktree.present
-        })
+        .find_first(worktree => worktree.name == reply.name && worktree.present)
         is Some(worktree) else {
         scheduler.add(
           dispatch(
@@ -444,122 +405,11 @@ fn State::create_worktree(
             session_id~,
             generation~,
             project~,
-            name=reply.name,
             path=worktree.path,
             draft~,
           ),
         ),
       )
-    })
-  })
-}
-
-///|
-/// Recover the Desktop-owned placement for a selected dsh conversation. This
-/// read runs on every selection/refresh, so a renderer reload cannot hide a
-/// binding whose create reply was lost.
-fn State::load_worktree_binding(
-  _self : State,
-  dispatch : @cmd.Emit[Msg],
-  session_id : String,
-  selection_generation : Int,
-) -> @cmd.Cmd {
-  @cmd.custom_cmd(scheduler => {
-    @js.async_run(() => {
-      let reply : @protocol.WorktreeDshBindingReply = @interop.bridge_request(
-        @interop.ChannelId::Local,
-        @commands.worktree_dsh_binding,
-        { dsh_session: session_id },
-      ) catch {
-        // This is a read-only projection. A later Refresh/OpenSession repeats
-        // it, while the selected dsh Workspace remains the safe local default.
-        _ => return
-      }
-      if reply is @protocol.WorktreeDshBindingFound(binding) &&
-        binding.worktree.dsh_session == Some(session_id) {
-        scheduler.add(
-          dispatch(
-            WorktreeBindingLoaded(session_id~, selection_generation~, binding~),
-          ),
-        )
-      }
-    })
-  })
-}
-
-///|
-/// Resolve an ambiguous owner-aware create through the native registry read.
-/// Transport errors repeat only this side-effect-free query; an authoritative
-/// missing result is the sole path that reports creation as uncommitted.
-fn State::reconcile_worktree_binding(
-  _self : State,
-  dispatch : @cmd.Emit[Msg],
-  session_id : String,
-  generation : Int,
-  project : String,
-  draft : @composer.Draft,
-  attempt : Int,
-) -> @cmd.Cmd {
-  @cmd.custom_cmd(scheduler => {
-    @js.async_run(() => {
-      let reply : @protocol.WorktreeDshBindingReply = @interop.bridge_request(
-        @interop.ChannelId::Local,
-        @commands.worktree_dsh_binding,
-        { dsh_session: session_id },
-      ) catch {
-        error => {
-          scheduler.add(
-            dispatch(
-              WorktreeReconcile(
-                session_id~,
-                generation~,
-                project~,
-                draft~,
-                attempt=attempt + 1,
-                message=@interop.bridge_error_text(error),
-              ),
-            ),
-          )
-          return
-        }
-      }
-      match reply {
-        @protocol.WorktreeDshBindingFound(binding) => {
-          guard binding.workspace == project &&
-            binding.worktree.dsh_session == Some(session_id) else {
-            scheduler.add(
-              dispatch(
-                Failed(
-                  kind=DshPromptReply(session_id~, draft~, generation~),
-                  message="Desktop returned a mismatched dsh worktree owner",
-                ),
-              ),
-            )
-            return
-          }
-          scheduler.add(
-            dispatch(
-              WorktreeReady(
-                session_id~,
-                generation~,
-                project~,
-                name=binding.worktree.name,
-                path=binding.worktree.path,
-                draft~,
-              ),
-            ),
-          )
-        }
-        @protocol.WorktreeDshBindingMissing =>
-          scheduler.add(
-            dispatch(
-              Failed(
-                kind=DshPromptReply(session_id~, draft~, generation~),
-                message="Desktop verified that worktree creation did not commit",
-              ),
-            ),
-          )
-      }
     })
   })
 }
@@ -573,7 +423,6 @@ fn State::register_prompt_workspace(
   session_id : String,
   generation : Int,
   project : String,
-  worktree_name : String,
   worktree_path : String,
   draft : @composer.Draft,
 ) -> @cmd.Cmd {
@@ -581,7 +430,6 @@ fn State::register_prompt_workspace(
     session_id~,
     generation~,
     project~,
-    worktree_name~,
     worktree_path~,
     draft~,
   ).request(dispatch, "workspace.create", { "path": worktree_path })
@@ -596,63 +444,15 @@ fn State::move_prompt_session(
   session_id : String,
   generation : Int,
   project : String,
-  worktree_name : String,
   worktree_path : String,
   workspace_id : String,
   draft : @composer.Draft,
 ) -> @cmd.Cmd {
-  DshPromptMoveReply(
-    session_id~,
-    generation~,
-    project~,
-    worktree_name~,
-    worktree_path~,
-    draft~,
-  ).request(dispatch, "workspace.insertSessionBefore", {
-    "workspaceId": workspace_id,
-    "sessionId": session_id,
-  })
-}
-
-///|
-/// Release the exact host registry binding after dsh rejects setup before the
-/// conversation move completes. The checkout and branch stay available for
-/// ordinary worktree removal.
-fn State::release_failed_worktree(
-  _self : State,
-  dispatch : @cmd.Emit[Msg],
-  session_id : String,
-  generation : Int,
-  project : String,
-  name : String,
-) -> @cmd.Cmd {
-  @cmd.custom_cmd(scheduler => {
-    @js.async_run(() => {
-      let _ : @protocol.EmptyReply = @interop.bridge_request(
-        @interop.ChannelId::Local,
-        @commands.worktree_release_dsh,
-        { workspace: project, name, dsh_session: session_id },
-      ) catch {
-        error => {
-          scheduler.add(
-            dispatch(
-              WorktreeCleanupFinished(
-                session_id~,
-                generation~,
-                message=Some(@interop.bridge_error_text(error)),
-              ),
-            ),
-          )
-          return
-        }
-      }
-      scheduler.add(
-        dispatch(
-          WorktreeCleanupFinished(session_id~, generation~, message=None),
-        ),
-      )
-    })
-  })
+  DshPromptMoveReply(session_id~, generation~, project~, worktree_path~, draft~).request(
+    dispatch,
+    "workspace.insertSessionBefore",
+    { "workspaceId": workspace_id, "sessionId": session_id },
+  )
 }
 
 ///|

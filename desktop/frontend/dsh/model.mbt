@@ -222,7 +222,6 @@ priv enum DshReplyKind {
     session_id~ : String,
     generation~ : Int,
     project~ : String,
-    worktree_name~ : String,
     worktree_path~ : String,
     draft~ : @composer.Draft
   )
@@ -230,15 +229,12 @@ priv enum DshReplyKind {
     session_id~ : String,
     generation~ : Int,
     project~ : String,
-    worktree_name~ : String,
     worktree_path~ : String,
     draft~ : @composer.Draft
   )
   DshPromptWorkspacesReply(
     session_id~ : String,
     generation~ : Int,
-    project~ : String,
-    worktree_name~ : String,
     worktree_path~ : String,
     draft~ : @composer.Draft
   )
@@ -265,27 +261,8 @@ enum Msg {
     session_id~ : String,
     generation~ : Int,
     project~ : String,
-    name~ : String,
     path~ : String,
     draft~ : @composer.Draft
-  )
-  WorktreeBindingLoaded(
-    session_id~ : String,
-    selection_generation~ : Int,
-    binding~ : @protocol.WorktreeDshBinding
-  )
-  WorktreeReconcile(
-    session_id~ : String,
-    generation~ : Int,
-    project~ : String,
-    draft~ : @composer.Draft,
-    attempt~ : Int,
-    message~ : String
-  )
-  WorktreeCleanupFinished(
-    session_id~ : String,
-    generation~ : Int,
-    message~ : String?
   )
   PromptDeliveryUnknown(DshPromptReconciliation)
   Send
@@ -496,29 +473,6 @@ fn DshReplyKind::prompt_draft(
     | DshPromptMoveReply(session_id~, draft~, ..)
     | DshPromptWorkspacesReply(session_id~, draft~, ..)
     | DshPromptReply(session_id~, draft~, ..) => Some((session_id, draft))
-    _ => None
-  }
-}
-
-///|
-/// Only definitive dsh business failures before the session move abandon the
-/// host binding. `update` intercepts an ambiguous move transport failure and
-/// verifies Workspace membership first. A successful list that proves absence
-/// releases directly; list transport/business errors and later prompt failures
-/// leave the checkout attached so the conversation can retry.
-fn DshReplyKind::failed_worktree(
-  self : DshReplyKind,
-) -> (String, Int, String, String)? {
-  match self {
-    DshPromptWorkspaceReply(
-      session_id~,
-      generation~,
-      project~,
-      worktree_name~,
-      ..
-    )
-    | DshPromptMoveReply(session_id~, generation~, project~, worktree_name~, ..) =>
-      Some((session_id, generation, project, worktree_name))
     _ => None
   }
 }

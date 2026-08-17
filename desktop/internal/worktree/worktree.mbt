@@ -41,21 +41,21 @@ pub(all) struct WorktreeHost {
 }
 
 ///|
+/// What DeepSeek Harness reports about one checkout at the moment its removal
+/// is attempted. Asking beats remembering: dsh owns which conversation works
+/// where, that mapping changes without Desktop's involvement, and dsh has no
+/// event that durably means "this conversation ended".
+pub(all) enum DshOccupancy {
+  /// dsh is not running, so no conversation can be executing in any checkout.
+  DshOffline
+  /// dsh is running and reports no conversation working in this directory.
+  DshVacant
+  /// dsh is running and reports this many unarchived conversations here.
+  DshOccupied(Int)
+} derive(Debug, Eq)
+
+///|
 const WorktreesFile = "worktrees.json"
-
-///|
-/// Detached workspaces remain user-owned directories, so the only durable
-/// locator Desktop needs is the path of a registry that still contains a dsh
-/// owner. Keeping that small index beside `workspaces.json` lets a later
-/// session-removal event find the registry after a Desktop restart.
-const DetachedDshRegistriesFile = "dsh-detached-worktrees.json"
-
-///|
-/// Session-removal cleanup is driven by a one-shot dsh event. Persist the
-/// intent separately from the detached-registry index before touching any
-/// workspace registry, so an index/read/write failure or Desktop exit leaves
-/// an operation that startup can retry.
-const PendingDshSessionReleasesFile = "dsh-pending-session-releases.json"
 
 ///|
 const WorktreesDirName = ".worktrees"
@@ -73,182 +73,17 @@ const WorktreeBranchPrefix = "openseek/"
 let worktree_registry_lock : @async.Mutex = Mutex()
 
 ///|
-/// dsh session ids are process-unique. Once its authoritative removal event
-/// arrives, remember that terminal state under `worktree_registry_lock` so a
-/// request that validated just before the event cannot create a new owned row
-/// afterward. Existing creation already holding the lock commits first and is
-/// then released by the event; removal holding it first makes creation refuse.
-let removed_dsh_sessions : Map[String, Bool] = Map([])
-
-///|
-/// The persisted registry locations that remain relevant while their
-/// workspaces are detached. This is an index, not a second ownership record:
-/// every dsh owner still lives only in that workspace's `worktrees.json`.
-priv struct DetachedDshRegistryIndex {
-  workspaces : Array[@pathx.Absolute]
-}
-
-///|
-/// Durable worktree-owner releases which have not completed across every
-/// registered and detached workspace registry.
-priv struct PendingDshSessionReleases {
-  session_ids : Array[String]
-}
-
-///|
-/// Load the detached index at each lifecycle operation. Avoiding a process
-/// cache is intentional: a Desktop restart must not hide a detached registry
-/// from a later host/session-removed event.
-async fn DetachedDshRegistryIndex::load() -> DetachedDshRegistryIndex {
-  guard @workspaces.global_store_root() is Some(root) else {
-    return { workspaces: [] }
-  }
-  let text = @fsx.try_read_text(root.join(DetachedDshRegistriesFile).to_path()) catch {
-    error if @async.is_being_cancelled() => raise error
-    error =>
-      raise WorktreeError("could not read detached dsh registries: \{error}")
-  }
-  guard text is Some(text) else { return { workspaces: [] } }
-  let json = @json.parse(text) catch {
-    error =>
-      raise WorktreeError("could not parse detached dsh registries: \{error}")
-  }
-  guard json is Object(fields) && fields.get("workspaces") is Some(Array(items)) else {
-    raise WorktreeError("detached dsh registry index is malformed")
-  }
-  let workspaces : Array[@pathx.Absolute] = []
-  for item in items {
-    guard item is String(path) else {
-      raise WorktreeError("detached dsh registry path is not a string")
-    }
-    guard @pathx.Path(path).to_absolute() is Some(workspace) else {
-      raise WorktreeError("detached dsh registry path is not absolute")
-    }
-    if !workspaces.contains(workspace) {
-      workspaces.push(workspace)
-    }
-  }
-  { workspaces, }
-}
-
-///|
-/// Publish one complete detached index atomically. A failed or cancelled
-/// staging write leaves the previous locator set intact.
-async fn DetachedDshRegistryIndex::save(
-  self : DetachedDshRegistryIndex,
-) -> Unit {
-  guard @workspaces.global_store_root() is Some(root) else {
-    raise WorktreeError(
-      "cannot determine a session root; set OPENSEEK_SESSION_ROOT",
-    )
-  }
-  @fsx.ensure_dir(root.to_path()) catch {
-    error if @async.is_being_cancelled() => raise error
-    error => raise WorktreeError("could not create \{root}: \{error}")
-  }
-  let registry : Json = {
-    "workspaces": self.workspaces.map(path => path.0).to_json(),
-  }
-  let target = root.join(DetachedDshRegistriesFile)
-  let temp = root.join(DetachedDshRegistriesFile + ".tmp")
-  @fs.write_file(
-    temp.to_string(),
-    registry.stringify(indent=2),
-    create_mode=CreateOrTruncate,
-  ) catch {
-    error if @async.is_being_cancelled() => raise error
-    error =>
-      raise WorktreeError("could not stage detached dsh registries: \{error}")
-  }
-  @async.protect_from_cancel(() => {
-    @fs.rename(temp.to_string(), target.to_string()) catch {
-      error =>
-        raise WorktreeError("could not save detached dsh registries: \{error}")
-    }
-  })
-}
-
-///|
-async fn PendingDshSessionReleases::load() -> PendingDshSessionReleases {
-  guard @workspaces.global_store_root() is Some(root) else {
-    return { session_ids: [] }
-  }
-  let text = @fsx.try_read_text(
-    root.join(PendingDshSessionReleasesFile).to_path(),
-  ) catch {
-    error if @async.is_being_cancelled() => raise error
-    error =>
-      raise WorktreeError("could not read pending dsh releases: \{error}")
-  }
-  guard text is Some(text) else { return { session_ids: [] } }
-  let json = @json.parse(text) catch {
-    error =>
-      raise WorktreeError("could not parse pending dsh releases: \{error}")
-  }
-  guard json is Object(fields) && fields.get("sessionIds") is Some(Array(items)) else {
-    raise WorktreeError("pending dsh release queue is malformed")
-  }
-  let session_ids : Array[String] = []
-  for item in items {
-    guard item is String(session_id) &&
-      @session_store.safe_session_id(session_id) else {
-      raise WorktreeError("pending dsh release session id is invalid")
-    }
-    if !session_ids.contains(session_id) {
-      session_ids.push(session_id)
-    }
-  }
-  { session_ids, }
-}
-
-///|
-/// Atomically replace the queue. A session id is removed only after all of
-/// its registry mutations commit, making a repeated drain idempotent.
-async fn PendingDshSessionReleases::save(
-  self : PendingDshSessionReleases,
-) -> Unit {
-  guard @workspaces.global_store_root() is Some(root) else {
-    raise WorktreeError(
-      "cannot determine a session root; set OPENSEEK_SESSION_ROOT",
-    )
-  }
-  @fsx.ensure_dir(root.to_path()) catch {
-    error if @async.is_being_cancelled() => raise error
-    error => raise WorktreeError("could not create \{root}: \{error}")
-  }
-  let queue : Json = { "sessionIds": self.session_ids.to_json() }
-  let target = root.join(PendingDshSessionReleasesFile)
-  let temp = root.join(PendingDshSessionReleasesFile + ".tmp")
-  @fs.write_file(
-    temp.to_string(),
-    queue.stringify(indent=2),
-    create_mode=CreateOrTruncate,
-  ) catch {
-    error if @async.is_being_cancelled() => raise error
-    error =>
-      raise WorktreeError("could not stage pending dsh releases: \{error}")
-  }
-  @async.protect_from_cancel(() => {
-    @fs.rename(temp.to_string(), target.to_string()) catch {
-      error =>
-        raise WorktreeError("could not save pending dsh releases: \{error}")
-    }
-  })
-}
-
-///|
 priv struct WorktreeEntry {
   name : String
   branch : String
   base : String
   // Old registries and OpenSeek conversations use `session`; Codex-owned
-  // worktrees use `codex_thread`; DeepSeek Harness uses `dsh_session`. A
-  // valid app-created row has exactly one. All absent is tolerated for a
-  // registry edited outside the app; such a row serves nobody and is cleaned
-  // up only by explicit removal.
+  // worktrees use `codex_thread`. A valid app-created row has at most one:
+  // both absent is the ordinary state of a checkout nobody claims, including
+  // every checkout generated for a DeepSeek Harness conversation — dsh owns
+  // its own placement, so this registry never records a dsh identity.
   session : String?
   codex_thread : String?
-  dsh_session : String?
 }
 
 ///|
@@ -274,21 +109,23 @@ impl ToJson for WorktreeEntry with fn to_json(self) {
   if self.codex_thread is Some(thread_id) {
     fields["codex_thread"] = Json::string(thread_id)
   }
-  if self.dsh_session is Some(session_id) {
-    fields["dsh_session"] = Json::string(session_id)
-  }
   Json::object(fields)
 }
 
 ///|
 /// The durable conversation identity that owns one Desktop worktree. Keeping
-/// the three namespaces distinct prevents a foreign UUID from entering
+/// the two namespaces distinct prevents a foreign UUID from entering
 /// OpenSeek's session-store, engine-drain, archive, or history checks merely
 /// because every product calls its durable identity a conversation id.
+///
+/// DeepSeek Harness deliberately has no variant here. Its checkouts are
+/// created unowned: dsh's Workspace registry is the only authority on which
+/// conversation works where, and a durable copy of that fact could only ever
+/// go stale — dsh has no session-deletion API, and `host/session-removed`
+/// reports an in-memory detach rather than the end of a conversation.
 enum WorktreeOwner {
   OpenSeekSession(String)
   CodexThread(String)
-  DshSession(String)
 } derive(Debug, Eq)
 
 ///|
@@ -302,14 +139,9 @@ pub fn WorktreeOwner::codex(thread_id : String) -> WorktreeOwner {
 }
 
 ///|
-pub fn WorktreeOwner::dsh(session_id : String) -> WorktreeOwner {
-  DshSession(session_id.trim().to_owned())
-}
-
-///|
 fn WorktreeOwner::id(self : WorktreeOwner) -> String {
   match self {
-    OpenSeekSession(id) | CodexThread(id) | DshSession(id) => id
+    OpenSeekSession(id) | CodexThread(id) => id
   }
 }
 
@@ -317,7 +149,7 @@ fn WorktreeOwner::id(self : WorktreeOwner) -> String {
 fn WorktreeOwner::session(self : WorktreeOwner) -> String? {
   match self {
     OpenSeekSession(id) => Some(id)
-    CodexThread(_) | DshSession(_) => None
+    CodexThread(_) => None
   }
 }
 
@@ -326,15 +158,6 @@ fn WorktreeOwner::codex_thread(self : WorktreeOwner) -> String? {
   match self {
     OpenSeekSession(_) => None
     CodexThread(id) => Some(id)
-    DshSession(_) => None
-  }
-}
-
-///|
-fn WorktreeOwner::dsh_session(self : WorktreeOwner) -> String? {
-  match self {
-    DshSession(id) => Some(id)
-    OpenSeekSession(_) | CodexThread(_) => None
   }
 }
 
@@ -346,19 +169,17 @@ fn WorktreeEntry::belongs_to(
   match owner {
     OpenSeekSession(id) => self.session == Some(id)
     CodexThread(id) => self.codex_thread == Some(id)
-    DshSession(id) => self.dsh_session == Some(id)
   }
 }
 
 ///|
 /// Files, Terminal, and language requests carry the owning conversation id.
-/// The three products store that id in distinct registry fields, but checkout
-/// resolution must recognize every field without merging their lifecycles.
+/// The two products store that id in distinct registry fields, but checkout
+/// resolution must recognize both without merging their lifecycles. A dsh
+/// conversation is absent by construction: its directory comes from the dsh
+/// Workspace grant table, never from this registry.
 fn WorktreeEntry::serves_id(self : WorktreeEntry, id : String) -> Bool {
-  self.session == Some(id) ||
-  self.codex_thread == Some(id) ||
-  self.dsh_session.map(session => @protocol.DshWorkspaceOwner(session).id()) ==
-  Some(id)
+  self.session == Some(id) || self.codex_thread == Some(id)
 }
 
 ///|
@@ -385,16 +206,6 @@ type ArchiveNeedsForceReply = @protocol.ArchiveNeedsForceReply
 /// so worktrees created by Codex App or another Git client remain external.
 pub struct CodexWorktreeBinding {
   thread_id : String
-  workspace : String
-  worktree : WorktreeInfo
-} derive(Debug, Eq)
-
-///|
-/// One DeepSeek Harness session's Desktop-owned placement. The API uses this
-/// snapshot to make first-send setup idempotent after dsh has moved the blank
-/// session into its generated Workspace.
-pub struct DshWorktreeBinding {
-  session_id : String
   workspace : String
   worktree : WorktreeInfo
 } derive(Debug, Eq)
@@ -472,19 +283,14 @@ async fn WorktreeRegistry::load(
     } else {
       None
     }
-    let dsh_session : String? = if fields.get("dsh_session") is Some(String(id)) &&
-      !id.is_empty() {
-      Some(id)
-    } else {
-      None
-    }
     // A row cannot be owned by multiple products. Drop a malformed ambiguous
     // row instead of letting whichever lookup happens first claim its checkout.
+    // A `dsh_session` field left by an older build is not read: that row
+    // decodes as the unowned checkout it now is.
     let owner_count = (if session is Some(_) { 1 } else { 0 }) +
-      (if codex_thread is Some(_) { 1 } else { 0 }) +
-      (if dsh_session is Some(_) { 1 } else { 0 })
+      (if codex_thread is Some(_) { 1 } else { 0 })
     guard owner_count <= 1 else { continue }
-    entries.push({ name, branch, base, session, codex_thread, dsh_session })
+    entries.push({ name, branch, base, session, codex_thread })
   }
   WorktreeRegistry(entries)
 }
@@ -567,7 +373,6 @@ async fn worktree_infos(
       base: entry.base,
       session: entry.session,
       codex_thread: entry.codex_thread,
-      dsh_session: entry.dsh_session,
       path: resource_path(path),
       present,
     })
@@ -676,7 +481,7 @@ async fn WorktreeOwner::binding_unlocked(
         Some(workspace) => [workspace]
         None => []
       }
-    CodexThread(_) | DshSession(_) => @workspaces.registered()
+    CodexThread(_) => @workspaces.registered()
   }
   for workspace in workspaces {
     for entry in read_worktrees_unlocked(workspace) {
@@ -928,209 +733,6 @@ pub async fn list_codex_worktree_bindings() -> Array[CodexWorktreeBinding] {
 }
 
 ///|
-/// Snapshot every worktree explicitly created for a DeepSeek Harness session.
-/// Registry ownership, rather than dsh's mutable Workspace membership, is the
-/// authority for retrying first-send setup.
-pub async fn list_dsh_worktree_bindings() -> Array[DshWorktreeBinding] {
-  worktree_registry_lock.acquire()
-  defer worktree_registry_lock.release()
-  let bindings : Array[DshWorktreeBinding] = []
-  for workspace in @workspaces.registered() {
-    let entries = WorktreeRegistry::load(workspace).0
-    let infos = worktree_infos(workspace, entries)
-    for info in infos {
-      if info.dsh_session is Some(session_id) {
-        bindings.push({
-          session_id,
-          workspace: resource_path(workspace),
-          worktree: info,
-        })
-      }
-    }
-  }
-  bindings
-}
-
-///|
-/// Read the one durable worktree registry row owned by `session_id`. Creation
-/// enforces owner uniqueness across registered workspaces, so finding more
-/// than one would already have required a corrupt hand-edited registry; the
-/// strict registry loader rejects that before this operation returns.
-pub async fn dsh_worktree_binding(
-  host : WorktreeHost,
-  session_id : String,
-) -> DshWorktreeBinding? {
-  // Wait for an in-flight create/repair to commit or roll back before reading
-  // the registry. Without the lifecycle lock, a fast lookup could report
-  // Missing while a reply-lost create was still provisioning its checkout.
-  host.lifecycle_lock.acquire()
-  defer host.lifecycle_lock.release()
-  let bindings = list_dsh_worktree_bindings()
-  bindings.iter().find_first(binding => binding.session_id == session_id)
-}
-
-///|
-/// Capture a dsh-owned registry immediately before workspace detachment. The
-/// engine holds its workspace lifecycle lock around this call and the registry
-/// removal, so no worktree create can land between the scan and detach.
-pub async fn retain_dsh_registry_for_detach(
-  workspace : @pathx.Absolute,
-) -> Unit {
-  guard @workspaces.registered_dir(workspace) is Some(workspace) else { return }
-  worktree_registry_lock.acquire()
-  defer worktree_registry_lock.release()
-  if WorktreeRegistry::load(workspace).0
-    .iter()
-    .any(entry => entry.dsh_session is Some(_)) {
-    let index = DetachedDshRegistryIndex::load()
-    if !index.workspaces.contains(workspace) {
-      index.workspaces.push(workspace)
-      index.save()
-    }
-  }
-}
-
-///|
-/// Release one queued owner from every registry. The caller holds
-/// `worktree_registry_lock`, and the queue entry remains durable until this
-/// method returns and the following queue save commits.
-async fn PendingDshSessionReleases::release_one(
-  self : PendingDshSessionReleases,
-  session_id : String,
-  on_committed : (String, Array[WorktreeInfo]) -> Unit,
-) -> PendingDshSessionReleases {
-  let workspaces = @workspaces.registered()
-  let detached = DetachedDshRegistryIndex::load()
-  for workspace in detached.workspaces {
-    if !workspaces.contains(workspace) {
-      workspaces.push(workspace)
-    }
-  }
-  let retained_detached : Array[@pathx.Absolute] = []
-  for workspace in workspaces {
-    let entries = WorktreeRegistry::load(workspace).0
-    let mut found = false
-    let released = entries.map(entry => {
-      if entry.dsh_session == Some(session_id) {
-        found = true
-        { ..entry, dsh_session: None }
-      } else {
-        entry
-      }
-    })
-    if found {
-      @async.protect_from_cancel(() => {
-        write_worktrees(workspace, released)
-        on_committed(
-          resource_path(workspace),
-          worktree_infos(workspace, released),
-        )
-      })
-    }
-    if detached.workspaces.contains(workspace) &&
-      released.iter().any(entry => entry.dsh_session is Some(_)) {
-      retained_detached.push(workspace)
-    }
-  }
-  if retained_detached != detached.workspaces {
-    let next_index : DetachedDshRegistryIndex = {
-      workspaces: retained_detached,
-    }
-    next_index.save()
-  }
-  { session_ids: self.session_ids.filter(id => id != session_id) }
-}
-
-///|
-/// Drain every persisted release in order. Saving after each completed owner
-/// bounds replay after a crash while keeping later operations queued when one
-/// registry remains unavailable.
-async fn PendingDshSessionReleases::drain(
-  self : PendingDshSessionReleases,
-  on_committed : (String, Array[WorktreeInfo]) -> Unit,
-) -> Unit {
-  let mut remaining = self
-  for session_id in self.session_ids.copy() {
-    removed_dsh_sessions[session_id] = true
-    remaining = remaining.release_one(session_id, on_committed)
-    remaining.save()
-  }
-}
-
-///|
-/// A host/session-removed event is dsh's authoritative end of one owner. Keep
-/// its checkout and branch intact, but release the registry row to the normal
-/// worktree lifecycle so a dirty checkout is never deleted automatically and
-/// `worktree.remove` can apply its ordinary confirmation policy later. The
-/// intent is durable before registry access, and the same lock records the
-/// terminal session id before scanning rows, closing the validate-before-
-/// create race even when no binding exists yet.
-pub async fn release_dsh_session(
-  session_id : String,
-  on_committed : (String, Array[WorktreeInfo]) -> Unit,
-) -> Unit {
-  guard @session_store.safe_session_id(session_id) else {
-    raise WorktreeError("dsh session id invalid")
-  }
-  worktree_registry_lock.acquire()
-  defer worktree_registry_lock.release()
-  let pending = PendingDshSessionReleases::load()
-  if !pending.session_ids.contains(session_id) {
-    pending.session_ids.push(session_id)
-    // This commit precedes detached-index and worktree-registry reads. A
-    // failure from either therefore cannot consume the one-shot dsh event.
-    pending.save()
-  }
-  pending.drain(on_committed)
-}
-
-///|
-/// Retry durable releases at Desktop startup. Subsequent session removals call
-/// the same drain after enqueueing their own id, so recovery does not depend
-/// exclusively on another process restart.
-pub async fn retry_dsh_session_releases(
-  on_committed : (String, Array[WorktreeInfo]) -> Unit,
-) -> Unit {
-  worktree_registry_lock.acquire()
-  defer worktree_registry_lock.release()
-  PendingDshSessionReleases::load().drain(on_committed)
-}
-
-///|
-/// Release one exact dsh-owned registry row when first-send Workspace setup
-/// fails after `worktree.create` commits. A stale or replayed request is an
-/// idempotent no-op and cannot release a row owned by another conversation.
-/// Files, checkout, and branch survive for ordinary worktree cleanup.
-pub async fn release_dsh_worktree(
-  workspace : String,
-  name : String,
-  session_id : String,
-  on_committed : (Array[WorktreeInfo]) -> Unit,
-) -> Unit {
-  guard @pathx.Absolute::from_uri_path(workspace) is Some(absolute) &&
-    @workspaces.registered_dir(absolute) is Some(dir) else {
-    raise WorktreeError("\{workspace} is not a registered workspace")
-  }
-  worktree_registry_lock.acquire()
-  defer worktree_registry_lock.release()
-  let entries = WorktreeRegistry::load(dir).0
-  let mut found = false
-  let released = entries.map(entry => {
-    if entry.name == name && entry.dsh_session == Some(session_id) {
-      found = true
-      { ..entry, dsh_session: None }
-    } else {
-      entry
-    }
-  })
-  guard found else { return }
-  @async.protect_from_cancel(() => {
-    write_worktrees(dir, released)
-    on_committed(worktree_infos(dir, released))
-  })
-}
-
-///|
 /// The smallest `wt-N` nobody holds: free in the registry, on disk, and as
 /// a branch. Branches survive removal, so the counter naturally skips past
 /// history instead of resurrecting an old branch.
@@ -1179,23 +781,28 @@ async fn fresh_worktree_name(
 /// registry write and `on_committed` broadcast are one shielded commit,
 /// the `add_workspace` pattern, with cancellation rolling the fresh
 /// checkout back best-effort (it holds no user data yet).
+///
+/// An absent `owner` creates the checkout unowned, the shape DeepSeek Harness
+/// uses: there is no id to key idempotency on, so a lost reply leaves an
+/// ordinary spare checkout the user can remove — deliberately preferred over
+/// a durable binding that nothing can reliably release.
 pub async fn create(
   host : WorktreeHost,
   workspace : String,
-  owner : WorktreeOwner,
   on_committed : (Array[WorktreeInfo]) -> Unit,
+  owner? : WorktreeOwner,
   name? : String,
 ) -> WorktreeCreateReply {
-  let owner_id = owner.id()
-  guard @session_store.safe_session_id(owner_id) else {
-    let detail = match owner {
-      OpenSeekSession(_) =>
-        "a worktree binds to a conversation; session id invalid"
-      CodexThread(_) => "a worktree binds to a conversation; thread id invalid"
-      DshSession(_) =>
-        "a worktree binds to a conversation; dsh session id invalid"
+  if owner is Some(owner) {
+    guard @session_store.safe_session_id(owner.id()) else {
+      let detail = match owner {
+        OpenSeekSession(_) =>
+          "a worktree binds to a conversation; session id invalid"
+        CodexThread(_) =>
+          "a worktree binds to a conversation; thread id invalid"
+      }
+      raise WorktreeError(detail)
     }
-    raise WorktreeError(detail)
   }
   let explicit : String? = if name is Some(name) {
     let name = name.trim().to_owned()
@@ -1218,7 +825,7 @@ pub async fn create(
     raise WorktreeError("\{workspace} is not a registered workspace")
   }
   require_main_worktree(dir)
-  if owner is OpenSeekSession(session) {
+  if owner is Some(OpenSeekSession(session)) {
     @session_store.ensure_not_archived(session)
   }
   // Snapshot this workspace's setting once for the lifecycle operation. A
@@ -1229,27 +836,15 @@ pub async fn create(
   let submodule_checkout_timeout_seconds = workspace_settings.submodule_checkout_timeout_seconds
   worktree_registry_lock.acquire()
   defer worktree_registry_lock.release()
-  if owner is DshSession(session_id) &&
-    removed_dsh_sessions.get(session_id) is Some(_) {
-    raise WorktreeError(
-      "this dsh conversation was removed before worktree creation",
-    )
-  }
-  let entries = if owner is DshSession(_) {
-    // A retry after an ambiguous create must never replace a temporarily
-    // unreadable registry with a new row and lose the placement it is trying
-    // to reconcile.
-    WorktreeRegistry::load(dir).0
-  } else {
-    read_worktrees_unlocked(dir)
-  }
+  let entries = read_worktrees_unlocked(dir)
   // This conversation already holds its environment. Two shapes land here:
   // the idempotent replay of a create whose reply was lost, and the repair
   // of a checkout deleted outside the app. The registry keeps the branch,
   // and the branch keeps every commit, so the repair restores the real
-  // environment rather than an empty lookalike.
+  // environment rather than an empty lookalike. An unowned create has no
+  // identity to match, so it always provisions a new checkout.
   for entry in entries {
-    guard entry.belongs_to(owner) else { continue }
+    guard owner is Some(owner) && entry.belongs_to(owner) else { continue }
     let present = @fsx.is_dir(worktree_dir(dir, entry.name).to_path()) catch {
       error if @async.is_being_cancelled() => raise error
       _ => false
@@ -1279,7 +874,7 @@ pub async fn create(
   // prove that placement is chosen before any durable history. Codex owns its
   // thread store in app-server; its thread already exists here, and the caller
   // chooses placement before the first `turn/start` instead.
-  if owner is OpenSeekSession(session) {
+  if owner is Some(OpenSeekSession(session)) {
     if (host.session_is_live)(session) {
       raise WorktreeError(
         "this conversation is already starting; a worktree binds before its first prompt",
@@ -1304,13 +899,15 @@ pub async fn create(
       )
     }
   }
-  for path in @workspaces.registered() {
-    guard path.0 != dir.to_string() else { continue }
-    for entry in read_worktrees_unlocked(path) {
-      if entry.belongs_to(owner) {
-        raise WorktreeError(
-          "this conversation already runs in worktree \{entry.name} of \{path.0}",
-        )
+  if owner is Some(owner) {
+    for path in @workspaces.registered() {
+      guard path.0 != dir.to_string() else { continue }
+      for entry in read_worktrees_unlocked(path) {
+        if entry.belongs_to(owner) {
+          raise WorktreeError(
+            "this conversation already runs in worktree \{entry.name} of \{path.0}",
+          )
+        }
       }
     }
   }
@@ -1371,9 +968,8 @@ pub async fn create(
     name,
     branch,
     base,
-    session: owner.session(),
-    codex_thread: owner.codex_thread(),
-    dsh_session: owner.dsh_session(),
+    session: owner.bind(owner => owner.session()),
+    codex_thread: owner.bind(owner => owner.codex_thread()),
   })
   let mut infos : Array[WorktreeInfo] = []
   @async.protect_from_cancel(() => {
@@ -1555,12 +1151,19 @@ async fn delete_worktree_checkout(
 /// plain workspace conversation with its history intact. A registry entry
 /// whose directory is already gone is pruned — the self-heal for a
 /// worktree deleted outside the app.
+///
+/// `dsh_occupancy` is asked under the lifecycle lock, before anything is
+/// deleted: DeepSeek Harness placement lives in dsh's Workspace registry, so
+/// protecting its checkouts is a question this package cannot answer alone.
+/// It is a required parameter rather than a `WorktreeHost` field with a
+/// default, so that a new caller cannot drop the protection by omission.
 pub async fn remove(
   host : WorktreeHost,
   workspace : String,
   name : String,
   force : Bool,
   on_committed : (Array[WorktreeInfo]) -> Unit,
+  dsh_occupancy : async (@pathx.Absolute) -> DshOccupancy,
 ) -> WorktreesReply {
   let name = name.trim().to_owned()
   // The lifecycle lock excludes concurrent creates and workspace
@@ -1594,15 +1197,26 @@ pub async fn remove(
       "this worktree belongs to a Codex task; archive that task before removing its checkout",
     )
   }
-  if entry.dsh_session is Some(_) {
-    raise WorktreeError(
-      "this worktree belongs to a DeepSeek Harness conversation; manage it from that conversation",
-    )
+  let target = worktree_dir(dir, name)
+  // dsh placement is asked, never remembered. The registry holds no dsh
+  // identity, so the only truthful answer comes from dsh itself, now: a
+  // conversation may have been moved here, moved away, or archived since the
+  // checkout was made. An offline dsh cannot be running anything anywhere,
+  // which is why it does not block removal.
+  match dsh_occupancy(target) {
+    DshOccupied(count) =>
+      raise WorktreeError(
+        if count == 1 {
+          "a DeepSeek Harness conversation is working in \{name}; move or archive it before removing its checkout"
+        } else {
+          "\{count} DeepSeek Harness conversations are working in \{name}; move or archive them before removing its checkout"
+        },
+      )
+    DshVacant | DshOffline => ()
   }
   if entry.session is Some(bound) {
     (host.drain_sessions)([bound])
   }
-  let target = worktree_dir(dir, name)
   let present = @fsx.is_dir(target.to_path()) catch {
     error if @async.is_being_cancelled() => raise error
     _ => false
@@ -1667,6 +1281,11 @@ fn restore_session_root_env(previous : String?) -> Unit {
 }
 
 ///|
+/// These fixtures run no DeepSeek Harness process, which is the answer an
+/// offline dsh gives: nothing can be executing in any checkout.
+let dsh_offline : async (@pathx.Absolute) -> DshOccupancy = fn(_) { DshOffline }
+
+///|
 /// A host with no engine behind it: `live` names the conversations the pump
 /// would report a slot for, and every drained session is appended to
 /// `drained` instead of closing a process.
@@ -1720,8 +1339,8 @@ async test "worktree registry decode drops malformed entries" {
         "codex_thread": "thread-1",
       },
       {
-        "name": "dsh",
-        "branch": "openseek/dsh",
+        "name": "legacy-dsh",
+        "branch": "openseek/legacy-dsh",
         "base": "d5h",
         "dsh_session": "session-dsh-1",
       },
@@ -1755,15 +1374,15 @@ async test "worktree registry decode drops malformed entries" {
   assert_eq(entries[1].name, "codex")
   assert_eq(entries[1].session, None)
   assert_eq(entries[1].codex_thread, Some("thread-1"))
-  assert_eq(entries[2].name, "dsh")
+  // A `dsh_session` row written by an older build keeps its checkout and
+  // becomes the unowned row it now is, rather than being dropped.
+  assert_eq(entries[2].name, "legacy-dsh")
   assert_eq(entries[2].session, None)
   assert_eq(entries[2].codex_thread, None)
-  assert_eq(entries[2].dsh_session, Some("session-dsh-1"))
   // A blank session self-heals to unbound rather than a phantom id.
   assert_eq(entries[3].name, "blank")
   assert_true(entries[3].session is None)
   assert_true(entries[3].codex_thread is None)
-  assert_true(entries[3].dsh_session is None)
   @fs.rmdir(root.to_string(), recursive=true)
 }
 
@@ -1776,7 +1395,6 @@ async test "failed worktree registry staging preserves every live row" {
     base: "abc",
     session: Some("other-session"),
     codex_thread: None,
-    dsh_session: None,
   }
   write_worktrees(root, [retained])
   // A directory at the candidate path makes the next file write fail before
@@ -1867,8 +1485,8 @@ async test "worktree create provisions checkout, branch, registry, exclusion" {
   let reply = create(
     host,
     repo.to_string(),
-    WorktreeOwner::openseek("s-fix-auth"),
     infos => committed.val = infos.length(),
+    owner=WorktreeOwner::openseek("s-fix-auth"),
     name="fix-auth",
   )
   assert_eq(committed.val, 1)
@@ -1925,8 +1543,8 @@ async test "explicit registry removal can prune a vanished worktree" {
     create(
       host,
       repo.to_string(),
-      WorktreeOwner::openseek("s-release"),
       fn(_) {  },
+      owner=WorktreeOwner::openseek("s-release"),
       name="wt",
     ),
   )
@@ -1934,7 +1552,14 @@ async test "explicit registry removal can prune a vanished worktree" {
   // The low-level protocol operation remains available for orphan cleanup.
   // The bundled UI does not expose it for a conversation; Archive retains the
   // row so a later Unarchive still requires explicit Repair.
-  let reply = remove(host, repo.to_string(), "wt", false, fn(_) {  })
+  let reply = remove(
+    host,
+    repo.to_string(),
+    "wt",
+    false,
+    fn(_) {  },
+    dsh_offline,
+  )
   assert_eq(reply.worktrees.length(), 0)
   // Unbound, the conversation runs in the workspace again — no refusal.
   assert_eq(run_dir(repo, "s-release").to_string(), repo.to_string())
@@ -1954,35 +1579,39 @@ async test "worktree names are host-generated and skip surviving branches" {
   prepare_git_repo(repo)
   ignore(@workspaces.add(repo.to_string(), fn(_) {  }))
   let host = test_host()
-  let first = create(host, repo.to_string(), WorktreeOwner::openseek("s-1"), fn(
-    _,
-  ) {
-
-  })
+  let first = create(
+    host,
+    repo.to_string(),
+    fn(_) {  },
+    owner=WorktreeOwner::openseek("s-1"),
+  )
   assert_eq(first.name, "wt-1")
   // The session is the idempotency key: a replay (a retry after a lost
   // reply) gets the existing binding back, never a second checkout.
-  let replay = create(host, repo.to_string(), WorktreeOwner::openseek("s-1"), fn(
-    _,
-  ) {
-
-  })
+  let replay = create(
+    host,
+    repo.to_string(),
+    fn(_) {  },
+    owner=WorktreeOwner::openseek("s-1"),
+  )
   assert_eq(replay.name, "wt-1")
   assert_eq(replay.worktrees.length(), 1)
-  let second = create(host, repo.to_string(), WorktreeOwner::openseek("s-2"), fn(
-    _,
-  ) {
-
-  })
+  let second = create(
+    host,
+    repo.to_string(),
+    fn(_) {  },
+    owner=WorktreeOwner::openseek("s-2"),
+  )
   assert_eq(second.name, "wt-2")
   // Removal keeps the branch, so a fresh name never resurrects wt-1: the
   // counter moves past every holder, branches included.
-  ignore(remove(host, repo.to_string(), "wt-1", false, fn(_) {  }))
-  let third = create(host, repo.to_string(), WorktreeOwner::openseek("s-3"), fn(
-    _,
-  ) {
-
-  })
+  ignore(remove(host, repo.to_string(), "wt-1", false, fn(_) {  }, dsh_offline))
+  let third = create(
+    host,
+    repo.to_string(),
+    fn(_) {  },
+    owner=WorktreeOwner::openseek("s-3"),
+  )
   assert_eq(third.name, "wt-3")
   guard list(repo.to_string()).worktrees is [a, b] else {
     fail("expected two registered worktrees")
@@ -1991,17 +1620,18 @@ async test "worktree names are host-generated and skip surviving branches" {
   assert_eq(b.name, "wt-3")
   // Codex uses the same registry, name allocator, and idempotency contract,
   // but its owner remains in a distinct field from OpenSeek sessions.
-  let codex = create(host, repo.to_string(), WorktreeOwner::codex("thread-1"), fn(
-    _,
-  ) {
-
-  })
+  let codex = create(
+    host,
+    repo.to_string(),
+    fn(_) {  },
+    owner=WorktreeOwner::codex("thread-1"),
+  )
   assert_eq(codex.name, "wt-4")
   let codex_replay = create(
     host,
     repo.to_string(),
-    WorktreeOwner::codex("thread-1"),
     fn(_) {  },
+    owner=WorktreeOwner::codex("thread-1"),
   )
   assert_eq(codex_replay.name, "wt-4")
   guard codex_replay.worktrees.iter().find_first(info => info.name == "wt-4")
@@ -2010,94 +1640,32 @@ async test "worktree names are host-generated and skip surviving branches" {
   }
   assert_eq(codex_info.session, None)
   assert_eq(codex_info.codex_thread, Some("thread-1"))
-  assert_eq(codex_info.dsh_session, None)
-  // dsh shares the checkout machinery without sharing Codex or OpenSeek's
-  // owner namespace. Its generated owner id is what Files and Terminal use.
-  let dsh = create(
-    host,
-    repo.to_string(),
-    WorktreeOwner::dsh("session-dsh-1"),
-    fn(_) {  },
-  )
+  // DeepSeek Harness takes the same checkout machinery with no owner at all.
+  // Nothing keys off its identity here, so a replayed create cannot be
+  // recognized and provisions a second checkout — the accepted cost of
+  // keeping dsh placement out of this registry.
+  let dsh = create(host, repo.to_string(), fn(_) {  })
   assert_eq(dsh.name, "wt-5")
-  let dsh_replay = create(
-    host,
-    repo.to_string(),
-    WorktreeOwner::dsh("session-dsh-1"),
-    fn(_) {  },
-  )
-  assert_eq(dsh_replay.name, "wt-5")
-  guard dsh_replay.worktrees.iter().find_first(info => info.name == "wt-5")
+  let dsh_again = create(host, repo.to_string(), fn(_) {  })
+  assert_eq(dsh_again.name, "wt-6")
+  guard dsh_again.worktrees.iter().find_first(info => info.name == "wt-5")
     is Some(dsh_info) else {
-    fail("expected dsh-owned worktree row")
+    fail("expected the unowned worktree row")
   }
   assert_eq(dsh_info.session, None)
   assert_eq(dsh_info.codex_thread, None)
-  assert_eq(dsh_info.dsh_session, Some("session-dsh-1"))
+  // An unowned row is not a conversation's checkout, so the session-scoped
+  // lookups that serve Files and Terminal must not claim it.
   assert_eq(
     tree_base(repo, @protocol.DshWorkspaceOwner("session-dsh-1").id()),
-    Some(dsh_info.base),
+    None,
   )
-  guard list_dsh_worktree_bindings()
-    .iter()
-    .find_first(binding => binding.session_id == "session-dsh-1")
-    is Some(binding) else {
-    fail("expected durable dsh worktree binding")
-  }
-  assert_eq(binding.workspace, repo.to_string())
-  assert_eq(binding.worktree.name, "wt-5")
-  guard dsh_worktree_binding(host, "session-dsh-1") is Some(exact_binding) else {
-    fail("expected exact dsh worktree owner lookup")
-  }
-  assert_eq(exact_binding, binding)
-  assert_true(dsh_worktree_binding(host, "missing-session") is None)
-  let exact_released : Array[WorktreeInfo] = []
-  // A stale or forged name cannot release a different registry row.
-  release_dsh_worktree(repo.to_string(), "wt-4", "session-dsh-1", worktrees => {
-    exact_released.append(worktrees)
-  })
-  assert_eq(exact_released, [])
-  release_dsh_worktree(repo.to_string(), "wt-5", "session-dsh-1", worktrees => {
-    exact_released.append(worktrees)
-  })
-  guard exact_released.iter().find_first(info => info.name == "wt-5")
-    is Some(exact_row) else {
-    fail("expected exact dsh worktree release")
-  }
-  assert_eq(exact_row.dsh_session, None)
-  // The actor-level session cleanup remains independently covered after a
-  // later retry binds this conversation to a fresh checkout.
-  let rebound = create(
-    host,
-    repo.to_string(),
-    WorktreeOwner::dsh("session-dsh-1"),
-    fn(_) {  },
-  )
-  assert_eq(rebound.name, "wt-6")
-  let released_workspaces : Array[String] = []
-  let released : Array[WorktreeInfo] = []
-  release_dsh_session("session-dsh-1", (workspace, worktrees) => {
-    released_workspaces.push(workspace)
-    released.append(worktrees)
-  })
-  assert_eq(released_workspaces, [repo.to_string()])
-  guard released.iter().find_first(info => info.name == "wt-6")
-    is Some(released_dsh) else {
-    fail("expected released dsh worktree row")
-  }
-  assert_eq(released_dsh.dsh_session, None)
-  assert_true(released_dsh.present)
-  assert_false(
-    list_dsh_worktree_bindings()
-    .iter()
-    .any(binding => binding.session_id == "session-dsh-1"),
-  )
-  let removed_create_detail = try {
+  // Removal asks dsh instead of the registry. An occupied answer refuses,
+  // and both the vacant and offline answers let the ordinary policy apply.
+  let occupied_detail = try {
     ignore(
-      create(host, repo.to_string(), WorktreeOwner::dsh("session-dsh-1"), fn(
-        _,
-      ) {
-
+      remove(host, repo.to_string(), "wt-6", false, fn(_) {  }, fn(_) {
+        DshOccupied(1)
       }),
     )
     "no error"
@@ -2106,108 +1674,13 @@ async test "worktree names are host-generated and skip surviving branches" {
     error if @async.is_being_cancelled() => raise error
     error => "\{error}"
   }
-  assert_true(removed_create_detail.contains("dsh conversation was removed"))
-  assert_false(
-    list_dsh_worktree_bindings()
-    .iter()
-    .any(binding => binding.session_id == "session-dsh-1"),
-  )
-  // Releasing ownership preserves files and routes later cleanup through the
-  // ordinary dirty check instead of silently discarding the checkout.
-  ignore(remove(host, repo.to_string(), "wt-6", false, fn(_) {  }))
-  ignore(remove(host, repo.to_string(), "wt-5", false, fn(_) {  }))
-  @fs.rmdir(root.to_string(), recursive=true)
-}
-
-///|
-#cfg(not(platform="windows"))
-async test "dsh session release updates a detached worktree registry" {
-  worktree_env_test_lock.acquire()
-  defer worktree_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  let root = worktree_test_root("openseek-worktree-dsh-detached-")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
-  defer restore_session_root_env(previous)
-  let repo = root.join("repo")
-  prepare_git_repo(repo)
-  ignore(@workspaces.add(repo.to_string(), fn(_) {  }))
-  let host = test_host()
+  assert_true(occupied_detail.contains("conversation is working in wt-6"))
   ignore(
-    create(
-      host,
-      repo.to_string(),
-      WorktreeOwner::dsh("session-dsh-detached"),
-      fn(_) {  },
-      name="wt",
-    ),
+    remove(host, repo.to_string(), "wt-6", false, fn(_) {  }, fn(_) {
+      DshVacant
+    }),
   )
-  retain_dsh_registry_for_detach(repo)
-  ignore(@workspaces.remove(repo.to_string(), fn(_) {  }))
-  // The release operation below reloads this file instead of consulting a
-  // process cache, which is the same lookup path used after Desktop restarts.
-  guard DetachedDshRegistryIndex::load().workspaces is [persisted] else {
-    fail("expected the detached dsh registry path to be persisted")
-  }
-  assert_eq(persisted, repo)
-  let detached_index = root.join("global").join(DetachedDshRegistriesFile)
-  guard @fsx.try_read_text(detached_index.to_path()) is Some(saved_index) else {
-    fail("expected the persisted detached dsh registry index")
-  }
-  @fsx.write_text(detached_index.to_path(), "{ malformed")
-  let malformed_detail = try {
-    release_dsh_session("session-dsh-detached", (_, _) => ())
-    "no error"
-  } catch {
-    WorktreeError(detail) => detail
-    error if @async.is_being_cancelled() => raise error
-    error => "\{error}"
-  }
-  assert_true(malformed_detail.contains("could not parse"))
-  // A failed index read is not authoritative absence: it must leave both the
-  // locator file and the workspace's owner row available for a later retry.
-  // The one-shot session-removal intent was durably queued before that read.
-  assert_eq(PendingDshSessionReleases::load().session_ids, [
-    "session-dsh-detached",
-  ])
-  guard read_worktrees_unlocked(repo) is [still_owned] else {
-    fail("expected the detached worktree row after the failed index read")
-  }
-  assert_eq(still_owned.dsh_session, Some("session-dsh-detached"))
-  @fsx.write_text(detached_index.to_path(), saved_index)
-  guard @fsx.try_read_text(worktrees_file(repo).to_path())
-    is Some(saved_registry) else {
-    fail("expected the detached worktree registry")
-  }
-  @fsx.write_text(worktrees_file(repo).to_path(), "{ malformed")
-  let registry_failure = try {
-    retry_dsh_session_releases((_, _) => ())
-    "no error"
-  } catch {
-    WorktreeError(detail) => detail
-    error if @async.is_being_cancelled() => raise error
-    error => "\{error}"
-  }
-  assert_true(registry_failure.contains("could not parse worktree registry"))
-  // A damaged owner registry is not proof that the owner disappeared. Keep
-  // the durable operation queued until that exact registry is readable.
-  assert_eq(PendingDshSessionReleases::load().session_ids, [
-    "session-dsh-detached",
-  ])
-  @fsx.write_text(worktrees_file(repo).to_path(), saved_registry)
-  let released : Array[WorktreeInfo] = []
-  retry_dsh_session_releases((_, worktrees) => released.append(worktrees))
-  guard released is [released_row] else {
-    fail("expected the detached dsh registry to be released")
-  }
-  assert_eq(released_row.dsh_session, None)
-  assert_true(PendingDshSessionReleases::load().session_ids.is_empty())
-  assert_true(DetachedDshRegistryIndex::load().workspaces.is_empty())
-  ignore(@workspaces.add(repo.to_string(), fn(_) {  }))
-  guard list(repo.to_string()).worktrees is [reattached] else {
-    fail("expected the worktree after workspace reattachment")
-  }
-  assert_eq(reattached.dsh_session, None)
-  ignore(remove(host, repo.to_string(), "wt", false, fn(_) {  }))
+  ignore(remove(host, repo.to_string(), "wt-5", false, fn(_) {  }, dsh_offline))
   @fs.rmdir(root.to_string(), recursive=true)
 }
 
@@ -2224,8 +1697,8 @@ async fn create_refusal(
       create(
         host,
         workspace,
-        WorktreeOwner::openseek(session),
         fn(_) {  },
+        owner=WorktreeOwner::openseek(session),
         name~,
       ),
     )
@@ -2292,7 +1765,6 @@ async test "worktree create names the holder in every refusal" {
       base: "abc",
       session: Some("s-elsewhere"),
       codex_thread: None,
-      dsh_session: None,
     },
   ])
   assert_true(
@@ -2311,8 +1783,8 @@ async test "worktree create names the holder in every refusal" {
     create(
       host,
       repo.to_string(),
-      WorktreeOwner::openseek("s-dup"),
       fn(_) {  },
+      owner=WorktreeOwner::openseek("s-dup"),
       name="dup",
     ),
   )
@@ -2365,7 +1837,7 @@ async fn remove_refusal(
   force : Bool,
 ) -> String {
   try {
-    ignore(remove(host, workspace, name, force, fn(_) {  }))
+    ignore(remove(host, workspace, name, force, fn(_) {  }, dsh_offline))
     "no error"
   } catch {
     WorktreeError(detail) => detail
@@ -2396,8 +1868,8 @@ async test "worktree remove enforces the dirty check and keeps the branch" {
     create(
       host,
       repo.to_string(),
-      WorktreeOwner::openseek("s-w1"),
       fn(_) {  },
+      owner=WorktreeOwner::openseek("s-w1"),
       name="w1",
     ),
   )
@@ -2413,9 +1885,14 @@ async test "worktree remove enforces the dirty check and keeps the branch" {
   )
   assert_eq(list(repo.to_string()).worktrees.length(), 1)
   let committed : Ref[Int] = Ref(-1)
-  let forced = remove(host, repo.to_string(), "w1", true, infos => {
-    committed.val = infos.length()
-  })
+  let forced = remove(
+    host,
+    repo.to_string(),
+    "w1",
+    true,
+    infos => committed.val = infos.length(),
+    dsh_offline,
+  )
   assert_eq(committed.val, 0)
   assert_eq(forced.worktrees.length(), 0)
   assert_false(@fsx.exists(repo.join(".worktrees/w1").to_path()))
@@ -2430,12 +1907,12 @@ async test "worktree remove enforces the dirty check and keeps the branch" {
     create(
       host,
       repo.to_string(),
-      WorktreeOwner::openseek("s-w2"),
       fn(_) {  },
+      owner=WorktreeOwner::openseek("s-w2"),
       name="w2",
     ),
   )
-  ignore(remove(host, repo.to_string(), "w2", false, fn(_) {  }))
+  ignore(remove(host, repo.to_string(), "w2", false, fn(_) {  }, dsh_offline))
   assert_eq(list(repo.to_string()).worktrees.length(), 0)
   assert_true(
     @gitx.probe(repo, [
@@ -2463,8 +1940,8 @@ async test "worktree remove prunes an externally deleted checkout" {
     create(
       host,
       repo.to_string(),
-      WorktreeOwner::openseek("s-gone"),
       fn(_) {  },
+      owner=WorktreeOwner::openseek("s-gone"),
       name="gone",
     ),
   )
@@ -2473,7 +1950,7 @@ async test "worktree remove prunes an externally deleted checkout" {
     fail("expected the deleted worktree to stay listed")
   }
   assert_false(listed.present)
-  ignore(remove(host, repo.to_string(), "gone", false, fn(_) {  }))
+  ignore(remove(host, repo.to_string(), "gone", false, fn(_) {  }, dsh_offline))
   assert_eq(list(repo.to_string()).worktrees.length(), 0)
   assert_false(
     @gitx.run(repo, ["worktree", "list", "--porcelain"]).contains(

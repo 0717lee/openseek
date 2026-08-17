@@ -163,11 +163,14 @@ pub(all) struct WorktreeListPayload {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-/// `worktree.create` names the workspace and exactly one conversation owner.
-/// OpenSeek sends `session`, Codex sends `codex_thread`, and DeepSeek Harness
-/// sends `dsh_session`. Creation is the binding, and that owner id doubles as
-/// the idempotency key for retries. The host generates the worktree's name and
-/// returns it in the reply.
+/// `worktree.create` names the workspace and exactly one requesting
+/// conversation. OpenSeek sends `session` and Codex sends `codex_thread`: for
+/// those two, creation IS the binding, and the id doubles as the idempotency
+/// key for retries. DeepSeek Harness sends `dsh_session`, which authorizes the
+/// request — the host validates it against dsh's own Workspace list before
+/// attaching a directory — but is deliberately never recorded as an owner, so
+/// a dsh checkout is created unowned and its create is not idempotent. The
+/// host generates the worktree's name and returns it in the reply.
 pub(all) struct WorktreeCreatePayload {
   workspace : String
   session : String?
@@ -185,12 +188,12 @@ pub impl FromJson for WorktreeCreatePayload with fn from_json(json, path) {
   let session = object.optional_string("session")
   let codex_thread = object.optional_string("codex_thread")
   let dsh_session = object.optional_string("dsh_session")
-  // Unknown fields remain forward-compatible, but ownership is deliberately
-  // closed: a worktree belongs to exactly one product conversation.
-  let owner_count = (if session is Some(_) { 1 } else { 0 }) +
+  // Unknown fields remain forward-compatible, but the requester is
+  // deliberately closed: exactly one product conversation asks for a checkout.
+  let requester_count = (if session is Some(_) { 1 } else { 0 }) +
     (if codex_thread is Some(_) { 1 } else { 0 }) +
     (if dsh_session is Some(_) { 1 } else { 0 })
-  if owner_count != 1 {
+  if requester_count != 1 {
     raise JsonDecodeError(
       (path, "expected exactly one of session, codex_thread, or dsh_session"),
     )
@@ -221,88 +224,6 @@ pub(all) struct WorktreeRemovePayload {
   name : String
   force : Bool?
 } derive(Debug, Eq, FromJson, ToJson)
-
-///|
-/// Release one dsh conversation's ownership after first-send Workspace setup
-/// fails. The checkout and branch remain; all three required fields identify
-/// the exact registry row whose owner may change.
-pub(all) struct WorktreeReleaseDshPayload {
-  workspace : String
-  name : String
-  dsh_session : String
-} derive(Debug, Eq)
-
-///|
-pub impl FromJson for WorktreeReleaseDshPayload with fn from_json(json, path) {
-  guard json is Object(fields) else {
-    raise JsonDecodeError((path, "expected dsh worktree release payload"))
-  }
-  let workspace = match fields.get("workspace") {
-    Some(String(value)) => value
-    Some(_) =>
-      raise JsonDecodeError((path.add_key("workspace"), "expected string"))
-    None =>
-      raise JsonDecodeError(
-        (path.add_key("workspace"), "missing required field"),
-      )
-  }
-  let name = match fields.get("name") {
-    Some(String(value)) => value
-    Some(_) => raise JsonDecodeError((path.add_key("name"), "expected string"))
-    None =>
-      raise JsonDecodeError((path.add_key("name"), "missing required field"))
-  }
-  let dsh_session = match fields.get("dsh_session") {
-    Some(String(value)) => value
-    Some(_) =>
-      raise JsonDecodeError((path.add_key("dsh_session"), "expected string"))
-    None =>
-      raise JsonDecodeError(
-        (path.add_key("dsh_session"), "missing required field"),
-      )
-  }
-  // Unknown fields are deliberately ignored; these three required fields
-  // completely identify the non-destructive release operation.
-  { workspace, name, dsh_session }
-}
-
-///|
-pub impl ToJson for WorktreeReleaseDshPayload with fn to_json(self) {
-  {
-    "workspace": self.workspace,
-    "name": self.name,
-    "dsh_session": self.dsh_session,
-  }
-}
-
-///|
-/// Look up the durable Desktop worktree owner for one dsh conversation. This
-/// read is the reconciliation authority after a create reply is lost.
-pub(all) struct WorktreeDshBindingPayload {
-  dsh_session : String
-} derive(Debug, Eq)
-
-///|
-pub impl FromJson for WorktreeDshBindingPayload with fn from_json(json, path) {
-  guard json is Object(fields) else {
-    raise JsonDecodeError((path, "expected dsh worktree binding payload"))
-  }
-  let dsh_session = match fields.get("dsh_session") {
-    Some(String(value)) => value
-    Some(_) =>
-      raise JsonDecodeError((path.add_key("dsh_session"), "expected string"))
-    None =>
-      raise JsonDecodeError(
-        (path.add_key("dsh_session"), "missing required field"),
-      )
-  }
-  { dsh_session, }
-}
-
-///|
-pub impl ToJson for WorktreeDshBindingPayload with fn to_json(self) {
-  { "dsh_session": self.dsh_session }
-}
 
 ///|
 pub(all) struct InstallSkillPayload {

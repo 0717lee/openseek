@@ -265,6 +265,14 @@ pub fn Actor::status(self : Actor) -> Json {
 }
 
 ///|
+/// Whether dsh can answer a question right now. A caller that needs dsh's own
+/// account of the world — rather than one of its notifications — uses this to
+/// tell "dsh says no" apart from "there is no dsh to ask".
+pub fn Actor::is_available(self : Actor) -> Bool {
+  !(self.state is Unavailable(_))
+}
+
+///|
 /// Move the actor to one observable connection state and advance the revision
 /// before either a status poll or notification can read it.
 fn Actor::set_connection_state(self : Actor, state : ConnectionState) -> Unit {
@@ -331,7 +339,6 @@ pub async fn Actor::run(
   emit : (String, Json) -> Unit,
   invalidate_workspaces~ : async (Int, Int) -> Unit,
   revoke_workspaces~ : async (Int) -> Unit,
-  release_worktree~ : async (String) -> Unit,
 ) -> Unit {
   let mut first = true
   for ;; {
@@ -348,7 +355,6 @@ pub async fn Actor::run(
         emit,
         invalidate_workspaces~,
         revoke_workspaces~,
-        release_worktree~,
       )
     })
   }
@@ -362,7 +368,6 @@ async fn[G] Actor::run_connection(
   emit : (String, Json) -> Unit,
   invalidate_workspaces~ : async (Int, Int) -> Unit,
   revoke_workspaces~ : async (Int) -> Unit,
-  release_worktree~ : async (String) -> Unit,
 ) -> Unit {
   self.set_connection_state(Starting)
   self.generation += 1
@@ -439,13 +444,7 @@ async fn[G] Actor::run_connection(
     match next {
       Input(input) => connection.dispatch_input(group, self, generation, input)
       Event(Frame(stream, message)) =>
-        self.publish_frame(
-          stream,
-          message,
-          emit,
-          invalidate_workspaces~,
-          release_worktree~,
-        )
+        self.publish_frame(stream, message, emit, invalidate_workspaces~)
       Disconnected => break
     }
   }
@@ -455,17 +454,18 @@ async fn[G] Actor::run_connection(
 
 ///|
 /// Apply host-owned lifecycle effects before the renderer observes a frame.
-/// A removed dsh conversation releases its Desktop worktree row without
-/// deleting the checkout. A changed or removed Workspace immediately
-/// invalidates the current generation's dsh grants; the following
-/// workspace.list may restore only the memberships that remain.
+/// A changed or removed Workspace immediately invalidates the current
+/// generation's dsh grants; the following workspace.list may restore only the
+/// memberships that remain. `host/session-removed` reports that dsh dropped a
+/// session from memory, not that the conversation ended — dsh has no deletion
+/// API and still lists it from persistence — so it invalidates grants and
+/// nothing else. No durable Desktop state may be keyed on it.
 async fn Actor::publish_frame(
   self : Actor,
   stream : String,
   message : Json,
   emit : (String, Json) -> Unit,
   invalidate_workspaces~ : async (Int, Int) -> Unit,
-  release_worktree~ : async (String) -> Unit,
 ) -> Unit {
   if stream == "mux" {
     self.interactions.observe(message)
@@ -480,28 +480,9 @@ async fn Actor::publish_frame(
     fields.get("payload") is Some(Object(payload)) {
     match @jsonx.json_text(payload, "type") {
       Some("host/session-status") => self.session_revision += 1
-      Some("host/session-removed") => {
-        if @jsonx.json_text(payload, "sessionId") is Some(session_id) {
-          release_worktree(session_id) catch {
-            error if @async.is_being_cancelled() => raise error
-            error =>
-              // The worktree package persists the session id before touching
-              // registries, so logging here does not consume the cleanup. It
-              // is retried at startup and by the next removal. Losing this
-              // actor would also skip the removal event and later grant
-              // revocation, leaving subsequent requests unconsumed.
-              @xlog.error(category="dsh") <?
-                {
-                  "event": "dsh_worktree_release_failed",
-                  "session_id": session_id,
-                  "error": "\{error}",
-                }
-          }
-        }
-        self.workspace_revision += 1
-        invalidate_workspaces(self.generation, self.workspace_revision)
-      }
-      Some("host/workspace-changed") | Some("host/workspace-removed") => {
+      Some("host/session-removed")
+      | Some("host/workspace-changed")
+      | Some("host/workspace-removed") => {
         self.workspace_revision += 1
         invalidate_workspaces(self.generation, self.workspace_revision)
       }
@@ -744,11 +725,10 @@ test "dsh actor removes only interactions with accepted response receipts" {
 }
 
 ///|
-async test "dsh actor releases a removed session before publishing its event" {
+async test "dsh actor invalidates grants for a removed session, and nothing else" {
   let actor = Actor()
   actor.generation = 4
   let order : Array[String] = []
-  let released : @async.Queue[String] = Queue(kind=Blocking(1))
   let invalidated : @async.Queue[(Int, Int)] = Queue(kind=Blocking(1))
   actor.publish_frame(
     "host",
@@ -761,14 +741,11 @@ async test "dsh actor releases a removed session before publishing its event" {
       invalidated.put((generation, revision))
       order.push("invalidated")
     },
-    release_worktree=async fn(session_id) {
-      released.put(session_id)
-      order.push("released:" + session_id)
-    },
   )
-  assert_eq(released.get(), "session-1")
   assert_eq(invalidated.get(), (4, 1))
-  assert_eq(order, ["released:session-1", "invalidated", "dsh.event"])
+  // Removal is a detach, not a deletion: the frame revokes the grants derived
+  // from the old snapshot and reaches the renderer. Nothing durable moves.
+  assert_eq(order, ["invalidated", "dsh.event"])
 }
 
 ///|
@@ -788,7 +765,6 @@ async test "dsh actor revisions session projections before publishing them" {
     },
     (_, payload) => published.push(payload),
     invalidate_workspaces=fn(_, _) {  },
-    release_worktree=fn(_) {  },
   )
   assert_eq(actor.session_revision, 7)
   let revision = match published.get(0) {
@@ -809,7 +785,6 @@ async test "dsh actor revisions session projections before publishing them" {
     },
     (_, payload) => published.push(payload),
     invalidate_workspaces=fn(_, _) {  },
-    release_worktree=fn(_) {  },
   )
   assert_eq(actor.session_revision, 8)
   let projection_revision = match published.get(1) {
@@ -817,25 +792,6 @@ async test "dsh actor revisions session projections before publishing them" {
     _ => None
   }
   assert_eq(projection_revision, Some(8))
-}
-
-///|
-async test "dsh actor publishes session removal after worktree release failure" {
-  let actor = Actor()
-  let published : Array[String] = []
-  actor.publish_frame(
-    "host",
-    {
-      "rpcId": "host-1",
-      "payload": { "type": "host/session-removed", "sessionId": "session-1" },
-    },
-    (method_, _) => published.push(method_),
-    invalidate_workspaces=fn(_, _) {  },
-    release_worktree=_ => {
-      raise RequestFailed("release-worktree", "registry is read-only")
-    },
-  )
-  assert_eq(published, ["dsh.event"])
 }
 
 ///|
@@ -858,7 +814,6 @@ async test "dsh actor invalidates grants before publishing workspace changes" {
       invalidated.put((generation, revision))
       order.push("invalidated:\{generation}:\{revision}")
     },
-    release_worktree=fn(_) {  },
   )
   assert_eq(invalidated.get(), (9, 1))
   assert_eq(order, ["invalidated:9:1", "dsh.event"])
@@ -876,7 +831,6 @@ async test "dsh actor invalidates grants before publishing workspace changes" {
       invalidated.put((generation, revision))
       order.push("invalidated:\{generation}:\{revision}")
     },
-    release_worktree=fn(_) {  },
   )
   assert_eq(invalidated.get(), (9, 2))
   assert_eq(order, [

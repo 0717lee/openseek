@@ -12,6 +12,7 @@ import {
   "openseek_desktop/internal/workspaces",
   "openseek_desktop/internal/worktree",
   "moonbitlang/async",
+  "moonbitlang/async/fs",
   "moonbitlang/core/json",
   "tonyfettes/xlog",
 }

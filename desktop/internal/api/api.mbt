@@ -575,19 +575,6 @@ pub async fn ApiState::run_dsh(
   self : ApiState,
   emit : (String, Json) -> Unit,
 ) -> Unit {
-  // host/session-removed is a one-shot dsh event. Worktree cleanup persists
-  // its session id before registry access; drain leftovers before connecting
-  // so a prior Desktop exit or transient registry failure cannot orphan the
-  // owner forever. A failed drain remains queued and must not prevent dsh from
-  // starting; the next removal also retries the whole queue.
-  @worktree.retry_dsh_session_releases(fn(workspace, worktrees) {
-    publish_worktree_changed(self, workspace, worktrees)
-  }) catch {
-    error if @async.is_being_cancelled() => raise error
-    error =>
-      @xlog.error(category="dsh") <?
-        { "event": "dsh_worktree_release_retry_failed", "error": "\{error}" }
-  }
   self.dsh.run(
     emit,
     invalidate_workspaces=async fn(generation, revision) {
@@ -595,11 +582,6 @@ pub async fn ApiState::run_dsh(
     },
     revoke_workspaces=async fn(generation) {
       self.dsh_workspaces.revoke(generation)
-    },
-    release_worktree=async fn(session_id) {
-      @worktree.release_dsh_session(session_id, fn(workspace, worktrees) {
-        publish_worktree_changed(self, workspace, worktrees)
-      })
     },
   )
 }
@@ -898,10 +880,13 @@ pub fn endpoints(
       @worktree.list(payload.workspace)
     }),
     @endpoint.Endpoint::remote(@commands.worktree_create, async fn(payload) {
-      let (owner, workspace) = match
+      // The requester authorizes the operation; only OpenSeek and Codex also
+      // become the checkout's recorded owner. dsh keeps placement in its own
+      // Workspace registry, so its checkout is created unowned.
+      let (owner, workspace) : (@worktree.WorktreeOwner?, String) = match
         (payload.session, payload.codex_thread, payload.dsh_session) {
         (Some(session), None, None) =>
-          (@worktree.WorktreeOwner::openseek(session), payload.workspace)
+          (Some(@worktree.WorktreeOwner::openseek(session)), payload.workspace)
         (None, Some(thread_id), None) => {
           let workspace = state.codex_worktree_project(
             thread_id,
@@ -916,7 +901,7 @@ pub fn endpoints(
               state.hub.publish(WorkspaceChanged({ workspaces, }))
             }),
           )
-          (@worktree.WorktreeOwner::codex(thread_id), workspace)
+          (Some(@worktree.WorktreeOwner::codex(thread_id)), workspace)
         }
         (None, None, Some(session_id)) => {
           let workspace = state.dsh_worktree_project(
@@ -931,18 +916,18 @@ pub fn endpoints(
               state.hub.publish(WorkspaceChanged({ workspaces, }))
             }),
           )
-          (@worktree.WorktreeOwner::dsh(session_id), workspace)
+          (None, workspace)
         }
         _ =>
           raise @host.PayloadError(
-            "worktree.create requires exactly one conversation owner",
+            "worktree.create requires exactly one requesting conversation",
           )
       }
       let reply = @worktree.create(
         state.manager.worktree_host(),
         workspace,
-        owner,
         worktrees => publish_worktree_changed(state, workspace, worktrees),
+        owner?,
       ) catch {
         error if @async.is_being_cancelled() => raise error
         @worktree.WorktreeError(message) => return WorktreeCreateError(message)
@@ -972,36 +957,8 @@ pub fn endpoints(
         worktrees => {
           publish_worktree_changed(state, payload.workspace, worktrees)
         },
+        checkout => state.dsh_occupancy(checkout),
       )
-    }),
-    @endpoint.Endpoint::remote(@commands.worktree_release_dsh, async fn(
-      payload,
-    ) {
-      @worktree.release_dsh_worktree(
-        payload.workspace,
-        payload.name,
-        payload.dsh_session,
-        worktrees => {
-          publish_worktree_changed(state, payload.workspace, worktrees)
-        },
-      )
-      Acknowledged
-    }),
-    @endpoint.Endpoint::remote(@commands.worktree_dsh_binding, async fn(
-      payload,
-    ) {
-      match
-        @worktree.dsh_worktree_binding(
-          state.manager.worktree_host(),
-          payload.dsh_session,
-        ) {
-        Some(binding) =>
-          WorktreeDshBindingFound({
-            workspace: binding.workspace,
-            worktree: binding.worktree,
-          })
-        None => WorktreeDshBindingMissing
-      }
     }),
     @endpoint.Endpoint::remote(@commands.auth_status, async fn(_) {
       auth_status(state)
@@ -1142,7 +1099,6 @@ test "remote endpoint catalog has one entry per command name" {
     names.push(name)
   }
   assert_true(names.contains("codex.config.open"))
-  assert_true(names.contains("worktree.dsh_binding"))
   assert_true(names.contains("codex.draft.open"))
   assert_true(names.contains("codex.draft.close"))
   assert_true(names.contains("codex.file.search"))
@@ -1163,7 +1119,6 @@ test "remote endpoint catalog has one entry per command name" {
   assert_true(names.contains("git.pull_request"))
   assert_true(names.contains("git.original_file"))
   assert_true(names.contains("terminal.close"))
-  assert_true(names.contains("worktree.release_dsh"))
   assert_true(names.contains("fs.search_files"))
   assert_true(names.contains("fs.cancel_search_files"))
   assert_true(names.contains("fs.clear_file_search_cache"))
@@ -1580,23 +1535,16 @@ async fn ApiState::codex_turn_start(
 
 ///|
 /// Revalidate a DeepSeek Harness first-send worktree request from dsh's own
-/// blank-session and Workspace baselines. A durable binding wins on retries:
-/// after the first attempt moves the session into the generated Workspace,
-/// its current dsh path is no longer the main checkout that owns the registry.
+/// blank-session and Workspace baselines. dsh is the only authority consulted:
+/// Desktop keeps no record of which conversation works where, so a request is
+/// authorized entirely by what dsh reports right now. A session that already
+/// moved into a generated Workspace is no longer blank, and the refusal below
+/// is what stops a retry from provisioning a second checkout.
 async fn ApiState::dsh_worktree_project(
   self : ApiState,
   session_id : String,
   requested : String,
 ) -> String {
-  for binding in @worktree.list_dsh_worktree_bindings() {
-    guard binding.session_id == session_id else { continue }
-    guard requested == binding.workspace || requested == binding.worktree.path else {
-      raise @host.HostError(
-        "DeepSeek Harness worktree request does not match its existing placement",
-      )
-    }
-    return binding.workspace
-  }
   guard @pathx.Absolute::from_uri_path(requested) is Some(requested_path) else {
     raise @host.HostError(
       "DeepSeek Harness worktree requires a local project root",
@@ -1649,6 +1597,82 @@ async fn ApiState::dsh_worktree_project(
     )
   }
   requested
+}
+
+///|
+/// Ask dsh which conversations are working in one checkout right now. This is
+/// the whole of Desktop's protection for a DeepSeek Harness checkout, and it
+/// is deliberately a question rather than a record: dsh moves sessions between
+/// Workspaces on its own, and its `host/session-removed` frame reports an
+/// in-memory detach rather than the end of a conversation, so any durable copy
+/// of this fact would be wrong sooner or later.
+///
+/// An unavailable dsh answers `DshOffline` and does not block removal: no
+/// conversation can be executing when the process that would run it is gone.
+/// A dsh that is present but cannot answer raises instead, so an unreadable
+/// reply never reads as "nobody is using this".
+async fn ApiState::dsh_occupancy(
+  self : ApiState,
+  checkout : @pathx.Absolute,
+) -> @worktree.DshOccupancy {
+  guard self.dsh.is_available() else { return DshOffline }
+  let (reply, _) = self.dsh.call(method_="workspace.list", payload={})
+  guard reply is Object(envelope) &&
+    envelope.get("result") is Some(Object(result)) &&
+    result.get("ok") is Some(True) &&
+    result.get("value") is Some(Object(value)) &&
+    value.get("items") is Some(Array(items)) else {
+    raise @host.HostError(
+      "DeepSeek Harness could not report which conversations use this checkout",
+    )
+  }
+  // An archived session keeps its slot in `sessionIds`, so the registry-global
+  // archive set is what separates a live conversation from a hidden one.
+  let archived : Map[String, Bool] = Map([])
+  if value.get("archivedSessionIds") is Some(Array(ids)) {
+    for id in ids {
+      if id is String(id) {
+        archived[id] = true
+      }
+    }
+  }
+  let canonical = canonical_dir(checkout)
+  let mut working = 0
+  for item in items {
+    guard item is Object(fields) &&
+      fields.get("path") is Some(String(path)) &&
+      fields.get("sessionIds") is Some(Array(session_ids)) else {
+      continue
+    }
+    // dsh stamps its Workspace path with `fs.realpath`; compare on the same
+    // footing so a symlinked project root is not read as a different tree.
+    guard @pathx.Path(path).to_absolute() is Some(workspace) &&
+      canonical_dir(workspace) == canonical else {
+      continue
+    }
+    for session_id in session_ids {
+      if session_id is String(session_id) && archived.get(session_id) is None {
+        working += 1
+      }
+    }
+  }
+  if working == 0 {
+    DshVacant
+  } else {
+    DshOccupied(working)
+  }
+}
+
+///|
+/// The resolved spelling of `dir`, or its lexical form when the directory no
+/// longer exists — a checkout deleted outside the app still has to be
+/// comparable against the Workspace rows that remember it.
+async fn canonical_dir(dir : @pathx.Absolute) -> String {
+  let resolved = @fs.realpath(dir.to_string()) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => return dir.normalize().to_string()
+  }
+  @pathx.Path(resolved).to_absolute().unwrap_or(dir).normalize().to_string()
 }
 
 ///|

@@ -174,8 +174,8 @@ async test "worktree lifecycle mirrors initialized submodules" {
   let created = create(
     host,
     repo.to_string(),
-    WorktreeOwner::openseek("s-submodules"),
     fn(_) {  },
+    owner=WorktreeOwner::openseek("s-submodules"),
     name="with-submodules",
   )
   assert_eq(created.name, "with-submodules")
@@ -191,8 +191,8 @@ async test "worktree lifecycle mirrors initialized submodules" {
     create(
       host,
       repo.to_string(),
-      WorktreeOwner::openseek("s-submodules"),
       fn(_) {  },
+      owner=WorktreeOwner::openseek("s-submodules"),
       name="with-submodules",
     ),
   )
@@ -210,7 +210,16 @@ async test "worktree lifecycle mirrors initialized submodules" {
     ]),
   )
   let locked_detail = try {
-    ignore(remove(host, repo.to_string(), "with-submodules", false, fn(_) {  }))
+    ignore(
+      remove(
+        host,
+        repo.to_string(),
+        "with-submodules",
+        false,
+        fn(_) {  },
+        dsh_offline,
+      ),
+    )
     "no error"
   } catch {
     WorktreeError(detail) => detail
@@ -221,9 +230,14 @@ async test "worktree lifecycle mirrors initialized submodules" {
   assert_true(@fsx.is_dir(checkout.to_path()))
   ignore(@gitx.run(repo, ["worktree", "unlock", ".worktrees/with-submodules"]))
   // Once unlocked, clean removal unregisters and deletes the checkout.
-  let removed = remove(host, repo.to_string(), "with-submodules", false, fn(_) {
-
-  })
+  let removed = remove(
+    host,
+    repo.to_string(),
+    "with-submodules",
+    false,
+    fn(_) {  },
+    dsh_offline,
+  )
   assert_eq(removed.worktrees.length(), 0)
   assert_false(@fsx.exists(checkout.to_path()))
   // This workspace setting leaves even an initialized main-checkout
@@ -238,8 +252,8 @@ async test "worktree lifecycle mirrors initialized submodules" {
   let skipped = create(
     host,
     repo.to_string(),
-    WorktreeOwner::openseek("s-without-submodules"),
     fn(_) {  },
+    owner=WorktreeOwner::openseek("s-without-submodules"),
     name="without-submodules",
   )
   assert_eq(skipped.name, "without-submodules")

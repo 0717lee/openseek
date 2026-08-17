@@ -726,10 +726,9 @@ pub async fn detach_workspace(
   defer manager.workspace_lifecycle_lock.release()
   let workspace = @workspaces.expanded_path(absolute.0)
   manager.close_engines_for_workspace(workspace)
-  // Detach preserves the directory and its worktree registry. Retain dsh
-  // registry ownership before removing workspace authority so an eventual
-  // dsh session-removal event can still release the orphan-prevention fence.
-  @worktree.retain_dsh_registry_for_detach(workspace)
+  // Detach preserves the directory and its worktree registry, so nothing here
+  // needs to chase ownership: a detached registry keeps whatever it recorded,
+  // and reattaching the workspace brings those rows back unchanged.
   let paths = @workspaces.remove(absolute.0, paths => {
     on_committed(paths.map(path => path.resource_path()))
   })

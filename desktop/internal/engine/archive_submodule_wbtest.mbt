@@ -44,8 +44,8 @@ async test "archive deletes a submodule checkout that git worktree remove refuse
     @worktree.create(
       manager.worktree_host(),
       repo.to_string(),
-      @worktree.WorktreeOwner::openseek("s-sub-dirty"),
       fn(_) {  },
+      owner=@worktree.WorktreeOwner::openseek("s-sub-dirty"),
     ),
   )
   @fsx.ensure_dir(
@@ -75,8 +75,8 @@ async test "archive deletes a submodule checkout that git worktree remove refuse
     @worktree.create(
       manager.worktree_host(),
       repo.to_string(),
-      @worktree.WorktreeOwner::openseek("s-sub-clean"),
       fn(_) {  },
+      owner=@worktree.WorktreeOwner::openseek("s-sub-clean"),
     ),
   )
   @fsx.ensure_dir(
@@ -126,8 +126,8 @@ async test "worktree deletion refuses a replaced checkout" {
     @worktree.create(
       manager.worktree_host(),
       repo.to_string(),
-      @worktree.WorktreeOwner::openseek("s-replaced"),
       fn(_) {  },
+      owner=@worktree.WorktreeOwner::openseek("s-replaced"),
     ),
   )
   @fsx.ensure_dir(
@@ -159,6 +159,7 @@ async test "worktree deletion refuses a replaced checkout" {
         "wt-1",
         true,
         fn(_) {  },
+        fn(_) { DshOffline },
       ),
     )
     "no error"

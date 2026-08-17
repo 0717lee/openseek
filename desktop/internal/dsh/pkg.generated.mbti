@@ -14,8 +14,9 @@ type Actor
 pub fn Actor::Actor() -> Self
 pub async fn Actor::call(Self, method_~ : String, payload~ : Json) -> (Json, DshConnectionRevision)
 pub async fn Actor::interactions(Self) -> Json
+pub fn Actor::is_available(Self) -> Bool
 pub async fn Actor::respond(Self, Json) -> (Json, Int)
-pub async fn Actor::run(Self, (String, Json) -> Unit, invalidate_workspaces~ : async (Int, Int) -> Unit, revoke_workspaces~ : async (Int) -> Unit, release_worktree~ : async (String) -> Unit) -> Unit
+pub async fn Actor::run(Self, (String, Json) -> Unit, invalidate_workspaces~ : async (Int, Int) -> Unit, revoke_workspaces~ : async (Int) -> Unit) -> Unit
 pub fn Actor::status(Self) -> Json
 
 pub(all) struct DshConnectionRevision {

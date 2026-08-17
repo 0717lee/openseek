@@ -89,11 +89,31 @@ dsh's canonical host-native path back for the renderer. This keeps the grant
 reversible on both POSIX and Windows instead of treating a display spelling as
 authority.
 
-A Desktop-created dsh worktree records its owner in a separate `dsh_session`
-registry field. That keeps dsh session ids out of OpenSeek's conversation store
-and Codex's thread namespace while preserving idempotent first-send retries.
-After dsh moves the session, the next `workspace.list` replaces the Files and
-Terminal grant with the generated Workspace path.
+A Desktop-created dsh worktree records **no owner** in the worktree registry.
+This is deliberate. dsh's Workspace registry decides which conversation works
+where, that mapping changes without Desktop's involvement, and dsh has no
+operation that durably means "this conversation ended" — `host/session-removed`
+reports that dsh dropped a session from memory, while `session.list` keeps
+serving it from persistence. A recorded owner could therefore only go stale,
+and a stale owner is what makes a checkout impossible to clean up.
+
+Two consequences follow, both accepted:
+
+- **Removal asks instead of remembering.** `worktree.remove` queries dsh's
+  current `workspace.list` and refuses while any unarchived conversation works
+  in that checkout. When dsh is not running the removal proceeds: no
+  conversation can be executing without the process that would run it. A dsh
+  that is running but cannot answer refuses the removal rather than guessing.
+- **First-send creation is not idempotent.** With no owner to key on, a lost
+  `worktree.create` reply is reported as a failure instead of retried; any
+  checkout that call may have made is an ordinary unowned worktree the user can
+  remove. Retrying would create a second checkout, which is worse.
+
+`worktree.create` still carries `dsh_session`, but only to authorize the
+request: the host revalidates it against dsh's own blank-session and Workspace
+baselines before attaching a directory. After dsh moves the session, the next
+`workspace.list` replaces the Files and Terminal grant with the generated
+Workspace path.
 
 ## Runtime prerequisite
 
