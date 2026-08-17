@@ -252,7 +252,6 @@ fn poll_rendered(
       @support.query_count(".monaco-editor.readonly-editor .view-line"),
       "line numbers did not track model-line-starting view lines",
     )
-    ctx.metric_int("renderedNotifications", rendered_count.val)
     ctx.metric_int("renderedLines", rendered_lines.val)
     ctx.metric_int("viewLines", view_lines.val)
     ctx.metric_int("modelLines", model_lines)

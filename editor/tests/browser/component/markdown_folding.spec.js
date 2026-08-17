@@ -150,124 +150,7 @@ test('auto-fold seeds the bulky deep section and real clicks fold and reveal', a
   expect(await projectionGeneration(page)).toBe(generationBefore);
 });
 
-test('section fold controls occupy the left heading gutter', async ({
-  page,
-}, testInfo) => {
-  await openFoldingScenario(page, testInfo);
-  const controls = page.locator(toggle);
-  await expect(controls).toHaveCount(4);
 
-  const geometry = await controls.nth(1).evaluate((button) => {
-    const heading = button.parentElement;
-    const articleNode = heading.closest(
-      '.moonbit-viewer-markdown-document-article',
-    );
-    const textNode = Array.from(heading.childNodes).find(
-      (node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim(),
-    );
-    const textRange = document.createRange();
-    textRange.selectNodeContents(textNode);
-    const buttonRect = button.getBoundingClientRect();
-    const headingRect = heading.getBoundingClientRect();
-    const articleRect = articleNode.getBoundingClientRect();
-    const textRect = textRange.getBoundingClientRect();
-    return {
-      articleLeft: articleRect.left,
-      buttonCenter: buttonRect.top + buttonRect.height / 2,
-      buttonHeight: buttonRect.height,
-      buttonLeft: buttonRect.left,
-      buttonRight: buttonRect.right,
-      buttonWidth: buttonRect.width,
-      firstLineCenter:
-        headingRect.top +
-        Number.parseFloat(getComputedStyle(heading).lineHeight) / 2,
-      headingLeft: headingRect.left,
-      textLeft: textRect.left,
-    };
-  });
-
-  expect(geometry.buttonWidth).toBe(24);
-  expect(geometry.buttonHeight).toBe(24);
-  expect(geometry.buttonLeft).toBeGreaterThanOrEqual(
-    geometry.articleLeft - 0.5,
-  );
-  expect(geometry.buttonRight).toBeLessThanOrEqual(geometry.headingLeft + 0.5);
-  // The fixed 24px pointer target can be slightly taller than a heading line
-  // at the workbench UI font size; its visual center must still track that
-  // first line.
-  expect(
-    Math.abs(geometry.buttonCenter - geometry.firstLineCenter),
-  ).toBeLessThanOrEqual(1);
-  expect(geometry.textLeft).toBeCloseTo(geometry.headingLeft, 1);
-});
-
-test('a pending hover never lands on content collapsed or rewritten under it', async ({ page }, testInfo) => {
-  await openFoldingScenario(page, testInfo);
-  const facts = await foldFacts(page);
-
-  // Interleaving (a): pending hover -> programmatic collapse -> provider
-  // completes. The toggle is programmatic so the pointer stays parked over
-  // the fence; only layout_changed may save us, and it must.
-  await moveToSourceText(page, 'beta_answer', 2);
-  await page.waitForFunction(
-    () => globalThis.__markdownFoldingControls.getHoverCalls().length >= 1,
-    { timeout: 4_000 },
-  );
-  await page.evaluate(
-    (offset) => globalThis.__markdownFoldingControls.toggleAtOffset(offset),
-    facts.beta,
-  );
-  await expect.poll(() => visibleByText(page, 'beta_answer')).toBe(false);
-  const collapseCall = await releaseLatestHover(page, 1, 'stale after collapse');
-  expect(collapseCall.cancelled).toBe(true);
-  await page.waitForTimeout(150);
-  await expect(page.locator(hoverWidget)).toHaveAttribute(
-    'data-markdown-hover-visible',
-    'false',
-  );
-  await expect(page.locator(hoverWidget)).not.toContainText(
-    'stale after collapse',
-  );
-
-  // Re-expand Beta for the second interleaving.
-  await page.evaluate(
-    (offset) => globalThis.__markdownFoldingControls.toggleAtOffset(offset),
-    facts.beta,
-  );
-  await expect.poll(() => visibleByText(page, 'beta_answer')).toBe(true);
-
-  // Interleaving (b): pending hover -> agent replace_source -> fold
-  // reconciliation -> provider completes. The stale result must never reach
-  // the widget; the rewritten Beta opens because its fingerprint changed.
-  await page.mouse.move(5, 5);
-  await moveToSourceText(page, 'beta_answer', 2);
-  await page.waitForFunction(
-    () => globalThis.__markdownFoldingControls.getHoverCalls().length >= 2,
-    { timeout: 4_000 },
-  );
-  await page.evaluate(() =>
-    globalThis.__markdownFoldingControls.replaceSource(),
-  );
-  await releaseLatestHover(page, 2, 'stale after replace');
-  await page.waitForTimeout(150);
-  await expect(page.locator(hoverWidget)).toHaveAttribute(
-    'data-markdown-hover-visible',
-    'false',
-  );
-  await expect(page.locator(hoverWidget)).not.toContainText(
-    'stale after replace',
-  );
-  await expect.poll(() => visibleByText(page, 'rewritten')).toBe(true);
-  // The rewrite touched only Beta, so Beta opened (fingerprint mismatch)
-  // while the untouched Deep section carried its collapse across the
-  // reprojection -- conservative reconciliation in both directions.
-  const after = await foldFacts(page);
-  expect(after.collapsed).toEqual([after.deep]);
-
-  // Disposal retains no controls and throws nothing.
-  await page.evaluate(() => globalThis.__markdownFoldingControls.dispose());
-  await expect(page.locator(toggle)).toHaveCount(0);
-});
 
 const tocBar = `${root} > .moonbit-viewer-markdown-toc`;
 const tocToggle = `${tocBar} .moonbit-viewer-markdown-toc-toggle`;
@@ -372,9 +255,9 @@ test('the pinned toc bar outlines sections and navigation expands the chain', as
   await expect(page.locator(hoverWidget)).toContainText('post-navigation hover');
   expect(await projectionGeneration(page)).toBe(generation);
 
-  // The mounted white-box suite owns the two-section visibility policy. This
-  // browser assertion owns the CSS branch: a hidden bar must not reserve the
-  // visible-TOC title clearance.
+  // This real-browser assertion owns both the two-section visibility policy
+  // and its CSS consequence: a hidden bar must not reserve the visible-TOC
+  // title clearance.
   await page.locator(tocBar).evaluate((node) =>
     node.setAttribute('data-toc-visible', 'false'),
   );

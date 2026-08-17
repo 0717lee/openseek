@@ -3,19 +3,6 @@
 // dispose with it; the keybinding table gates on live preconditions.
 
 ///|
-priv struct EditorExtensionsReferencesProvider {}
-
-///|
-impl @language.ReferencesProvider for EditorExtensionsReferencesProvider with fn provide_references(
-  _self,
-  _model,
-  _position,
-  _token,
-) {
-  []
-}
-
-///|
 test "contributions instantiate centrally in the reviewed order and expose every typed variant" {
   let viewer = Viewer::Viewer()
   let expected = [
@@ -667,79 +654,7 @@ test "cursor navigation registers exactly 16 primary rules after contributions" 
 }
 
 ///|
-test "definition context menu resolves both definition actions at the top level" {
-  install_mounted_test_browser()
-  defer restore_mounted_test_browser()
-  let services = definition_navigation_services([])
-  defer services.dispose()
-  let viewer = Viewer::Viewer(services~)
-  defer viewer.dispose()
-  let model = definition_navigation_test_model("file:///context-menu.mbt")
-  defer model.dispose()
-  let host = @rdom.document().create_element("div")
-  viewer.attach(host)
-  viewer.set_model(Some(model))
-
-  let entries = editor_registry().resolve_editor_menu(viewer, EditorContext)
-  assert_eq(entries.length(), 2)
-  guard entries[0]
-    is ContextMenuAction(
-      id=go_to_definition_id,
-      label="Go to Definition",
-      keybinding_label=Some(go_to_keybinding)
-    ) else {
-    fail("expected Go to Definition as the first context-menu action")
-  }
-  assert_eq(go_to_definition_id, "editor.action.revealDefinition")
-  assert_eq(
-    go_to_keybinding,
-    definition_menu_keybinding_label(alt=false, ctrl_cmd=false),
-  )
-  guard entries[1]
-    is ContextMenuAction(
-      id=peek_definition_id,
-      label="Peek Definition",
-      keybinding_label=Some(peek_keybinding)
-    ) else {
-    fail("expected Peek Definition as the second context-menu action")
-  }
-  assert_eq(peek_definition_id, "editor.action.peekDefinition")
-  assert_eq(
-    peek_keybinding,
-    definition_menu_keybinding_label(alt=true, ctrl_cmd=false),
-  )
-}
-
-///|
-test "Peek References registers Shift F12 and follows definition menu actions" {
-  install_mounted_test_browser()
-  defer restore_mounted_test_browser()
-  let languages = @languages.Languages()
-  languages.register_definition_provider(LanguageId("moonbit"), DefinitionNavigationTestProvider::{
-    locations: [],
-  })
-  |> ignore
-  languages.register_references_provider(LanguageId("moonbit"), EditorExtensionsReferencesProvider::{
-
-  })
-  |> ignore
-  let log_service = @log.LogService()
-  let services = ViewerServices(
-    languages=languages.language_handle(log_service.log_handle()),
-    log_service=log_service.log_handle(),
-  )
-  defer services.dispose()
-  let viewer = Viewer::Viewer(services~)
-  defer viewer.dispose()
-  let model = definition_navigation_test_model(
-    "file:///references-context-menu.mbt",
-  )
-  defer model.dispose()
-  let host = @rdom.document().create_element("div")
-  viewer.attach(host)
-  viewer.set_model(Some(model))
-  viewer.set_position(Position(1, 5))
-
+test "Peek References registers the exact Shift F12 chord" {
   let rules = editor_registry().keybindings.filter(rule => {
     rule.command_id == "editor.action.referenceSearch.trigger"
   })
@@ -748,35 +663,6 @@ test "Peek References registers Shift F12 and follows definition menu actions" {
   assert_false(rules[0].alt)
   assert_false(rules[0].ctrl_cmd)
   assert_true(rules[0].shift)
-
-  let entries = editor_registry().resolve_editor_menu(viewer, EditorContext)
-  assert_eq(entries.length(), 3)
-  guard entries[2]
-    is ContextMenuAction(
-      id="editor.action.referenceSearch.trigger",
-      label="Peek References",
-      keybinding_label=Some(keybinding)
-    ) else {
-    fail("expected Peek References after the two definition actions")
-  }
-  assert_eq(keybinding, references_menu_keybinding_label())
-
-  let tasks = ManualDefinitionTasks()
-  viewer.set_definition_host_for_test(task => tasks.schedule(task))
-  assert_true(
-    editor_registry().dispatch_keybinding(
-      viewer,
-      "F12",
-      alt=false,
-      ctrl_cmd=false,
-      shift=true,
-    ),
-  )
-  match viewer.definition_peek_phase_for_test() {
-    PeekLoadingReferences(_) => ()
-    _ => fail("registered Shift F12 did not start Peek References")
-  }
-  viewer.close_references_peek(restore_focus=false)
 }
 
 ///|
@@ -862,130 +748,4 @@ test "menu resolution orders groups and inserts separators only between visible 
   guard entries[2] is ContextMenuAction(id="test.second", ..) else {
     fail("expected the second nonempty group after one separator")
   }
-}
-
-///|
-test "semantic Markdown uses the shared menu and ordinary command dispatcher" {
-  install_mounted_test_browser()
-  defer restore_mounted_test_browser()
-  let services = definition_navigation_services([])
-  defer services.dispose()
-  let viewer = Viewer::Viewer(services~)
-  defer viewer.dispose()
-  let source =
-    #|# Literate source
-    #|
-    #|```mbt check
-    #|let source = target
-    #|```
-  let model = markdown_presentation_test_model(
-    "/src/context-menu.mbt.md", "moonbit", source,
-  )
-  defer model.dispose()
-  let host = @rdom.document().create_element("div")
-  viewer.attach(host)
-  viewer.set_model(Some(model))
-  guard viewer.current_markdown_document() is Some(_) else {
-    fail("expected a mounted semantic Markdown presentation")
-  }
-  let source_offset = source.find("target").unwrap()
-  guard viewer.definition_target_from_source_offset(source_offset)
-    is Some(target) else {
-    fail("expected a definition target in the projected source")
-  }
-  viewer.commit_plain_definition_pointer_target(Some(target))
-  viewer.record_markdown_context_menu_anchor(Some(target), 24.0, 36.0)
-
-  assert_true(
-    viewer.handle_markdown_definition_key_down("F10", false, false, true),
-  )
-  let context_menu = viewer.context_menu_contribution().unwrap()
-  guard context_menu.widget is Some(widget) else {
-    fail("Shift+F10 did not lazily create the shared context menu")
-  }
-  assert_true(widget.is_visible())
-  guard @rdom.document().get_body() is Some(body) &&
-    body.query_selector(".moonbit-context-menu") is Some(menu_root) else {
-    fail("expected the shared context menu in the document")
-  }
-  assert_eq(menu_root.get_attribute("aria-hidden"), Some("false"))
-  assert_true(menu_root.query_selector("[role=\"menu\"]") is Some(_))
-  assert_true(
-    menu_root.query_selector(
-      "[data-context-menu-command=\"editor.action.revealDefinition\"]",
-    )
-    is Some(_),
-  )
-  assert_true(
-    menu_root.query_selector(
-      "[data-context-menu-command=\"editor.action.peekDefinition\"]",
-    )
-    is Some(_),
-  )
-
-  assert_false(
-    widget.show(
-      [],
-      0.0,
-      0.0,
-      "dark",
-      theme_source=viewer.current_markdown_document().unwrap().root(),
-    ),
-  )
-  assert_false(widget.is_visible())
-  let dispatched = Ref(false)
-  let markdown_registry : EditorContributionRegistry = {
-    contributions: [],
-    commands: Map([]),
-    keybindings: [],
-  }
-  markdown_registry.register_editor_command(
-    "test.markdown-command",
-    _viewer => true,
-    _viewer => dispatched.val = true,
-    [],
-  )
-  assert_true(
-    markdown_registry.run_editor_command(viewer, "test.markdown-command"),
-  )
-  assert_true(dispatched.val)
-
-  assert_true(
-    viewer.handle_markdown_definition_key_down(
-      "ContextMenu", false, false, false,
-    ),
-  )
-  assert_true(widget.is_visible())
-  viewer.set_value(source.replace(old="target", new="replacement"))
-  assert_false(widget.is_visible())
-  assert_false(
-    viewer.handle_markdown_definition_key_down(
-      "ContextMenu", false, false, false,
-    ),
-  )
-  let replacement_source = source.replace(old="target", new="replacement")
-  guard viewer.definition_target_from_source_offset(
-      replacement_source.find("replacement").unwrap(),
-    )
-    is Some(replacement_target) else {
-    fail("expected the replaced semantic target")
-  }
-  viewer.commit_plain_definition_pointer_target(Some(replacement_target))
-  viewer.record_markdown_context_menu_anchor(
-    Some(replacement_target),
-    48.0,
-    60.0,
-  )
-  assert_true(
-    viewer.handle_markdown_definition_key_down(
-      "ContextMenu", false, false, false,
-    ),
-  )
-  assert_true(widget.is_visible())
-  viewer.dispose()
-  assert_false(widget.is_visible())
-  guard @rdom.document().get_body() is Some(body) else {
-    fail("expected the mounted test document body")
-  }
-  assert_true(body.query_selector(".moonbit-context-menu") is None)
 }

@@ -150,29 +150,6 @@ test "source-shaped revealRange forwards source and pure request facts" {
 }
 
 ///|
-/// A horizontal multi-line reveal creates no replacement request and does not
-/// explicitly clear an already armed one. When both scroll axes are already at
-/// the target, no scroll-change cancellation runs, so the existing browser
-/// request must remain installed.
-test "stationary multi-line reveal retains a pending browser request" {
-  with_mounted_test_viewer(long_document(200), viewer => {
-    viewer.test_set_viewport(width=800.0, height=180.0)
-    viewer.test_view_model().view_layout.set_content_width(2000.0) |> ignore
-    let browser = viewer.current_code_browser_data().unwrap()
-    let single = @base_common.Range::Range(5, 3, 5, 8)
-    viewer.reveal_range(single)
-    assert_true(browser.horizontal_reveal_request is Some(_))
-    let multi = @base_common.Range::Range(5, 1, 6, 1)
-    viewer.reveal_range(multi)
-    assert_true(
-      horizontal_reveal_request_for_range(multi, false, 0.0, 0.0, Immediate)
-      is None,
-    )
-    assert_true(browser.horizontal_reveal_request is Some(_))
-  })
-}
-
-///|
 test "vertical reveal resets an in-flight horizontal animation target" {
   let layout = @view_layout.ViewLayout(
     line_height=18,

@@ -9,9 +9,9 @@ ownership and lifecycle rules that are not obvious from signatures.
 > The code blocks on this page are `mbt nocheck`. This package is js-only and a
 > `Viewer` needs a live DOM host element, which `moon test` (Node, no DOM)
 > cannot provide. The executable proofs for this surface are the Playwright
-> component scenarios under `tests/browser/component/` and the headless or
-> mounted white-box suites under `viewer/`; see `docs/harness.md` for how to
-> pick a layer.
+> component scenarios under `tests/browser/component/` and the headless
+> white-box suites under `viewer/`; see `docs/harness.md` for the two-layer
+> boundary.
 
 ## The shortest embedding
 
