@@ -88,7 +88,7 @@ priv enum Fold {
 ///|
 priv struct State {
   fold : Fold
-  preview_expanded : Bool
+  preview_limit : Int
   menu_open : Bool
 } derive(Eq)
 
@@ -96,19 +96,27 @@ priv struct State {
 const PreviewLimit : Int = 5
 
 ///|
+const PreviewStep : Int = 7
+
+///|
 fn State::update(self : State, input : Input, msg : Msg) -> State {
   match msg {
-    ToggleDisclosure => {
+    ToggleDisclosure =>
       // Toggle the fold the user sees: a stored fold currently overridden by
       // an activation reveal must fold on click, not silently flip to open.
-      let fold = if self.folded(input) {
-        Open
+      if self.folded(input) {
+        { ..self, fold: Open, menu_open: false }
       } else {
-        Folded(during=input.activation)
+        // Folding ends the current preview session. Opening the project again
+        // starts from the compact five-chat view, even after several Show
+        // more clicks.
+        {
+          fold: Folded(during=input.activation),
+          preview_limit: PreviewLimit,
+          menu_open: false,
+        }
       }
-      { ..self, fold, menu_open: false }
-    }
-    ShowMore => { ..self, preview_expanded: true }
+    ShowMore => { ..self, preview_limit: self.next_preview_limit(input) }
     ToggleMenu => { ..self, menu_open: !self.menu_open }
     CloseMenu => { ..self, menu_open: false }
   }
@@ -130,7 +138,35 @@ fn State::conversation_visible(
   index : Int,
   active : Bool,
 ) -> Bool {
-  self.preview_expanded || index < PreviewLimit || active
+  index < self.preview_limit || active
+}
+
+///|
+/// Advance past seven conversations that are actually hidden. The active
+/// chat may already be visible beyond the compact prefix; skipping it here
+/// means one click still reveals seven new rows rather than six.
+fn State::next_preview_limit(self : State, input : Input) -> Int {
+  let mut limit = self.preview_limit
+  let mut revealed = 0
+  while limit < input.conversations.length() && revealed < PreviewStep {
+    if !input.conversations[limit].active {
+      revealed = revealed + 1
+    }
+    limit = limit + 1
+  }
+  limit
+}
+
+///|
+fn State::has_hidden_conversation(self : State, input : Input) -> Bool {
+  for index = self.preview_limit
+      index < input.conversations.length()
+      index = index + 1 {
+    if !input.conversations[index].active {
+      return true
+    }
+  }
+  false
 }
 
 ///|
@@ -209,7 +245,7 @@ pub fn component(
   let (state, emit) = @rabbita.create_state_with_input(
     input~,
     init=(_, _) => {
-      ({ fold: Open, preview_expanded: false, menu_open: false }, @cmd.none)
+      ({ fold: Open, preview_limit: PreviewLimit, menu_open: false }, @cmd.none)
     },
     update=(state, input, msg, _) => (state.update(input, msg), @cmd.none),
     subscriptions=(state, input, emit) => {
@@ -252,7 +288,16 @@ pub fn component(
         on_click=emit(ToggleDisclosure),
         attrs=@html.Attrs::build().aria_expanded((!collapsed).to_string()),
         [
-          @html.span(class="sidebar-icon", @icons.icon(@icons.icon_folder)),
+          @html.span(
+            class="sidebar-icon",
+            @icons.icon(
+              if collapsed {
+                @icons.icon_folder
+              } else {
+                @icons.icon_folder_opened
+              },
+            ),
+          ),
           @html.span(class="sidebar-label", input.label),
         ],
       ),
@@ -340,14 +385,14 @@ pub fn component(
         }
       }
     }
-    if !state.preview_expanded && conversation_rows.length() > PreviewLimit {
+    if state.has_hidden_conversation(input) {
       rows.push(
         (
           "\{input.id.key()}:more",
           @html.button(
             class="project-show-more",
             type_="button",
-            title="Show all \{conversation_rows.length()} chats in this project",
+            title="Show more chats in this project",
             on_click=emit(ShowMore),
             "Show more",
           ),

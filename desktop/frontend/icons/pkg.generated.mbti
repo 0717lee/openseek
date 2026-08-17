@@ -28,6 +28,8 @@ pub fn icon_fold() -> @html.Html
 
 pub fn icon_folder() -> @html.Html
 
+pub fn icon_folder_opened() -> @html.Html
+
 pub fn icon_key() -> @html.Html
 
 pub fn icon_layout() -> @html.Html
