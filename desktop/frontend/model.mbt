@@ -607,10 +607,14 @@ priv struct Conversation {
   // tagged and therefore never clear a potentially newer stream. Empty means
   // not streaming.
   streaming_response : String
-  // Live thinking text from `reasoning_delta`. It remains beside a response
-  // that has begun streaming, then the ordered full semantic event clears it
-  // for the durable assistant commit to take over.
-  streaming_reasoning : String
+  // Whether this turn has emitted reasoning. Reasoning text is intentionally
+  // not accumulated: the transcript exposes only its Thinking/Thought state.
+  streaming_reasoning_visible : Bool
+  // Whether the visible reasoning status has completed (through its semantic
+  // event or the first answer text). A durable commit replaces the status in
+  // one render; a final Terminal-backed turn retains an empty Reasoning marker
+  // so its Thought status keeps the right chronology.
+  streaming_reasoning_complete : Bool
   // Local submissions awaiting exact id-bearing host receipts. Initial prompt
   // and steer entries share the ledger; steer state is also the sole source
   // for pending UI and provisional failures. Canonical User text never claims
@@ -2200,7 +2204,8 @@ fn empty_conversation(
     pull_request_generation: 0,
     watcher_status: "",
     streaming_response: "",
-    streaming_reasoning: "",
+    streaming_reasoning_visible: false,
+    streaming_reasoning_complete: false,
     input_ledger: [],
     messages: [],
     watermark: 0,
@@ -3254,7 +3259,77 @@ fn Conversation::visible_subruns(
 
 ///|
 fn Conversation::clear_streams(self : Conversation) -> Conversation {
-  { ..self, streaming_response: "", streaming_reasoning: "" }
+  {
+    ..self,
+    streaming_response: "",
+    streaming_reasoning_visible: false,
+    streaming_reasoning_complete: false,
+  }
+}
+
+///|
+/// Finish the transient streams without losing a completed final-answer
+/// Thought status. Intermediate responses already have an Assistant commit
+/// carrying a Reasoning row; a tool-less final response is durably a Terminal
+/// instead, so retain an empty local Reasoning marker before clearing the live
+/// fields. The fixed message boundary keeps it before the terminal's answer
+/// whether that commit arrived just before or just after Finished.
+fn Conversation::settle_streams_at_finish(self : Conversation) -> Conversation {
+  guard self.streaming_reasoning_complete &&
+    self.streaming_reasoning_visible &&
+    !self.has_durable_reasoning() else {
+    return self.clear_streams()
+  }
+  let mut boundary = self.messages.length()
+  match self.run_durable_floor {
+    Some(floor) if self.last_terminal_sequence > floor =>
+      for index in 0..<self.messages.length() {
+        if self.messages[index].sequence == Some(self.last_terminal_sequence) {
+          boundary = index
+          break
+        }
+      }
+    _ => ()
+  }
+  for notice in self.overlay {
+    if notice.kind is Reasoning &&
+      notice.anchor is AfterMessages(existing_boundary) &&
+      existing_boundary == boundary {
+      return self.clear_streams()
+    }
+  }
+  let id = self.next_notice_id + 1
+  let overlay = self.overlay.copy()
+  overlay.push({
+    id,
+    kind: Reasoning,
+    content: "",
+    anchor: AfterMessages(boundary),
+    reconciliation: Retained,
+  })
+  {
+    ..self,
+    streaming_response: "",
+    streaming_reasoning_visible: false,
+    streaming_reasoning_complete: false,
+    overlay,
+    next_notice_id: id,
+  }
+}
+
+///|
+/// Whether this run's durable transcript already contains a Reasoning row. A
+/// store commit can overtake its semantic engine event, so the later semantic
+/// event must not resurrect a second transient status beside it.
+fn Conversation::has_durable_reasoning(self : Conversation) -> Bool {
+  let floor = self.run_durable_floor.unwrap_or(self.last_terminal_sequence)
+  self.messages
+  .iter()
+  .any(item => {
+    item.kind is Reasoning &&
+    item.sequence is Some(sequence) &&
+    sequence > floor
+  })
 }
 
 ///|
@@ -4385,6 +4460,49 @@ fn Conversation::apply_commit(
   // It is not a run boundary: the same kind also stores in-run steering.
   let messages = self.messages.copy()
   let changed = @transcript.apply_session_item(messages, item, ts?, sequence~)
+  let durable_reasoning = match item {
+    @protocol.Assistant(payload) =>
+      payload.reasoning_content is Some(reasoning) && !reasoning.is_blank()
+    _ => false
+  }
+  // The semantic reasoning event and the durable session commit are separate
+  // notifications. Retire the transient status when a current-run commit
+  // carries reasoning; doing it here inserts the permanent row in the very
+  // render that removes the live row, instead of flashing through an empty
+  // transcript. A delayed commit from before this run's durable floor cannot
+  // clear the current status.
+  let floor = self.run_durable_floor.unwrap_or(self.last_terminal_sequence)
+  let reasoning_committed = sequence > floor &&
+    durable_reasoning &&
+    self.streaming_reasoning_visible
+  // A final-answer fallback is local only because the current Terminal store
+  // has no reasoning field. If a newer engine does supply reasoning in an
+  // Assistant commit, let that durable row take over atomically instead
+  // of rendering both. Restrict the match to this run's message boundary so an
+  // older Thought cannot be retired by a later turn.
+  let current_run_start = match self.run_durable_floor {
+    Some(floor) => {
+      let mut start = self.messages.length()
+      for index in 0..<self.messages.length() {
+        if self.messages[index].sequence is Some(item_sequence) &&
+          item_sequence > floor {
+          start = index
+          break
+        }
+      }
+      Some(start)
+    }
+    None => None
+  }
+  let overlay = match (durable_reasoning, current_run_start) {
+    (true, Some(start)) =>
+      self.overlay.filter(notice => {
+        !(notice.kind is Reasoning &&
+        notice.anchor is AfterMessages(boundary) &&
+        boundary >= start)
+      })
+    _ => self.overlay
+  }
   // Unknown terminal payloads render nothing but still close the durable run.
   let terminal = item.is_terminal()
   // A `[goal]` marker commit is the durable confirmation of a goal
@@ -4402,7 +4520,18 @@ fn Conversation::apply_commit(
   let conv = {
     ..self,
     messages,
+    overlay,
     goal,
+    streaming_reasoning_visible: if reasoning_committed {
+      false
+    } else {
+      self.streaming_reasoning_visible
+    },
+    streaming_reasoning_complete: if reasoning_committed {
+      false
+    } else {
+      self.streaming_reasoning_complete
+    },
     // Settled by what this commit made the record say, not by whose command
     // it was — see `GoalRequest::settled_by`.
     goal_pending: if self.goal_pending is Some(pending) &&

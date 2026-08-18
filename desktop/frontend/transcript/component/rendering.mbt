@@ -191,16 +191,12 @@ fn TranscriptRenderer::stream_children(
     }
   }
   // Reasoning and answer can briefly coexist after the first answer delta.
-  // Separate keys preserve the reasoning block (and its local scroll
-  // position) while the answer is inserted after it.
-  if !self.input.streaming_reasoning.is_empty() {
+  // Separate keys preserve the status row while the answer is inserted after
+  // it; neither reasoning deltas nor completed reasoning enter the DOM.
+  if self.input.streaming_reasoning_visible {
     items.set(
       TranscriptRenderKey::streaming_reasoning(self.input.streaming_identity).wire(),
-      streaming_reasoning_view(
-        self.input.streaming_reasoning,
-        streaming=self.input.streaming_response.is_empty(),
-        self.on_open,
-      ),
+      streaming_reasoning_view(complete=self.input.streaming_reasoning_complete),
     )
   }
   if !self.input.streaming_response.is_empty() {

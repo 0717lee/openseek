@@ -188,21 +188,23 @@ fn failed_badge(failed : Int) -> @html.Html {
 ///|
 /// A stretch of a turn's work — reasoning and tool results — folded behind a
 /// single summary line ("Read moon.mod · moon test"), the way Codex folds a
-/// turn behind "Worked for 46s". Expanding shows the work log in order:
-/// reasoning as muted prose — never a labelled "Thinking" row of its own —
-/// each burst of tool calls as a one-line sublist. A stretch that only
-/// thought folds behind a plain "Thought" line. Failures never force the fold
+/// turn behind "Worked for 46s". Reasoning itself is deliberately private in
+/// this UI: a reasoning-only stretch becomes the inert `Thought` status, while
+/// a mixed stretch exposes only its tool log. Failures never force the fold
 /// open; they badge the summary instead. The open state is the browser's
-/// (`<details>`), so a reader's toggle survives re-renders and the run
-/// growing while live.
+/// (`<details>`), so a reader's toggle survives re-renders and the run growing
+/// while live.
 ///
 /// Assistant prose is never in here: every assistant message is its own
 /// visible bubble, so a turn reads as narration, work, narration, work,
 /// answer — the agent's own words are never behind a fold.
 fn activity_view(
   items : Array[@transcript.TranscriptItem],
-  on_open : (String) -> @cmd.Cmd,
+  _on_open : (String) -> @cmd.Cmd,
 ) -> @html.Html {
+  if !items.is_empty() && items.all(item => item.kind is Reasoning) {
+    return thought_status_view(complete=true)
+  }
   if flatten_tool_activity(items) {
     return @html.div(class="activity-row", [tool_line_view(items)])
   }
@@ -222,14 +224,8 @@ fn activity_view(
         log.push(tool_line_view(tools))
       }
     } else {
-      // Reasoning; callers never pass user messages, assistant prose, or
-      // error bubbles.
-      log.push(
-        @html.div(
-          class="msg-content markdown activity-thinking",
-          @markdown.markdown_nodes(items[index].content, open_file=on_open),
-        ),
-      )
+      // Reasoning is intentionally represented only by the surrounding
+      // Thinking/Thought state; never put its content in the DOM.
       index = index + 1
     }
   }
@@ -643,44 +639,27 @@ fn summary_card_view(
 }
 
 ///|
-/// The in-flight reasoning stream: a bounded, internally scrolling activity
-/// block, so a long thinking phase keeps showing progress without taking over
-/// the transcript. Once answer text starts, the thought remains visible but
-/// moves the streaming caret to the response bubble where new text is arriving.
-fn streaming_reasoning_view(
-  content : String,
-  streaming~ : Bool,
-  on_open : (String) -> @cmd.Cmd,
-) -> @html.Html {
-  let state_class = if streaming { " streaming" } else { "" }
-  @html.div(class="activity-row", [
-    @html.div(class="streaming-thought" + state_class, [
-      @html.div(class="streaming-thought-header", [
-        @html.span(class="streaming-thought-dot", ""),
-        @html.span(
-          class="streaming-thought-label",
-          if streaming {
-            "Thinking"
-          } else {
-            "Thought"
-          },
-        ),
-      ]),
-      @html.div(
-        class="streaming-thought-scroll",
-        attrs=@html.Attrs::build()
-          .role("region")
-          .aria_label("Live model thinking")
-          .tabindex(0),
-        [
-          @html.div(
-            class="msg-content markdown activity-thinking",
-            @markdown.markdown_nodes(content, open_file=on_open),
-          ),
-        ],
-      ),
-    ]),
+/// The only reasoning UI: an inert, polite status. Reasoning content is never
+/// accumulated for this view or inserted into the DOM.
+fn thought_status_view(complete~ : Bool) -> @html.Html {
+  let class_name = if complete {
+    "thought-status complete"
+  } else {
+    "thought-status thinking"
+  }
+  let label = if complete { "Thought" } else { "Thinking…" }
+  @html.div(class="activity-row thought-row", [
+    @html.div(
+      class=class_name,
+      attrs=@html.Attrs::build().role("status").aria_live("polite"),
+      label,
+    ),
   ])
+}
+
+///|
+fn streaming_reasoning_view(complete~ : Bool) -> @html.Html {
+  thought_status_view(complete~)
 }
 
 ///|

@@ -70,11 +70,12 @@ refreshes when the bridge connects and after each run. Switching while runs
 are active is fine — a conversation already open in this app run switches
 back instantly with its live state intact, without replaying the store.
 
-While a turn runs, the UI renders `reasoning_delta` in a bounded, internally
-scrolling live Thinking block and `assistant_delta` as a live answer bubble.
-The caret follows the stream currently receiving text; the committed assistant
-session event then replaces both transient views with permanent transcript
-items.
+While a turn runs, `reasoning_delta` appears only as a compact gray
+**Thinking…** status, so progress is visible without exposing or repeatedly
+laying out unfinished reasoning. Completion replaces it with **Thought**. Both
+states are inert labels: neither the deltas nor the completed reasoning are put
+in the DOM. The matching committed session event replaces the transient state
+without an empty frame between them.
 
 Submitting while a turn runs steers it instead of starting a new prompt: the
 text rides the serve engine's lossless steering queue and is folded into the

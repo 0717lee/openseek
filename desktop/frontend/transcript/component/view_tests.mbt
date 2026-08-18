@@ -45,7 +45,8 @@ test "transcript markup exposes conversation identity" {
     root=Some(root),
     submission_generation=7,
     items=[],
-    streaming_reasoning="",
+    streaming_reasoning_visible=false,
+    streaming_reasoning_complete=false,
     streaming_response="",
     streaming_identity="idle",
     subruns=[],
@@ -98,7 +99,8 @@ test "transcript stream children use stable typed keys in display order" {
       },
       { item: first_tool, identity: "s43\u{0}o0" },
     ],
-    streaming_reasoning="partial thought",
+    streaming_reasoning_visible=true,
+    streaming_reasoning_complete=false,
     streaming_response="partial answer",
     streaming_identity="r7",
     subruns=[
@@ -157,7 +159,8 @@ test "transcript stream section key scopes equal session ids by channel" {
     root=None,
     submission_generation=0,
     items=[],
-    streaming_reasoning="",
+    streaming_reasoning_visible=false,
+    streaming_reasoning_complete=false,
     streaming_response="",
     streaming_identity="idle",
     subruns=[],
@@ -278,6 +281,7 @@ test "a mixed activity does not repeat its singleton tool disclosure" {
   )
   assert_false(markup.contains("tool-call-summary"))
   assert_true(markup.contains("<pre class=\"tool-call-output\">output</pre>"))
+  assert_false(markup.contains("checking the diff"))
 }
 
 ///|
@@ -341,26 +345,37 @@ test "every message names its speaker to assistive technology" {
     streaming.contains("<span class=\"visually-hidden\">OpenSeek</span>"),
   )
   let thinking = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(streaming_reasoning_view(complete=false))
+  })
+  assert_true(thinking.contains("class=\"thought-status thinking\""))
+  assert_true(thinking.contains("role=\"status\""))
+  assert_true(thinking.contains("aria-live=\"polite\""))
+  assert_true(thinking.contains(">Thinking…</div>"))
+  assert_false(thinking.contains("<details"))
+  let completed = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(streaming_reasoning_view(complete=true))
+  })
+  assert_true(completed.contains("class=\"thought-status complete\""))
+  assert_true(completed.contains(">Thought</div>"))
+  assert_false(completed.contains("<details"))
+  let durable = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(
-      streaming_reasoning_view("partial thought", streaming=true, _ => @cmd.none),
+      activity_view(
+        [
+          {
+            kind: Reasoning,
+            content: "durable private reasoning",
+            ts: None,
+            sequence: Some(1),
+          },
+        ],
+        _ => @cmd.none,
+      ),
     )
   })
-  assert_true(thinking.contains("activity-thinking"))
-  assert_true(thinking.contains("streaming-thought streaming"))
-  assert_true(thinking.contains("streaming-thought-scroll"))
-  assert_true(thinking.contains("aria-label=\"Live model thinking\""))
-  assert_true(thinking.contains(">Thinking</span>"))
-  assert_true(thinking.contains("partial thought"))
-  let answering = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(
-      streaming_reasoning_view("finished thought", streaming=false, _ => {
-        @cmd.none
-      }),
-    )
-  })
-  assert_true(answering.contains("class=\"streaming-thought\""))
-  assert_false(answering.contains("streaming-thought streaming"))
-  assert_true(answering.contains(">Thought</span>"))
+  assert_true(durable.contains("class=\"thought-status complete\""))
+  assert_true(durable.contains(">Thought</div>"))
+  assert_false(durable.contains("durable private reasoning"))
 }
 
 ///|

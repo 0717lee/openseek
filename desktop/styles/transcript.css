@@ -507,9 +507,8 @@
   color: var(--color-text-secondary);
 }
 
-/* live streams: a blinking caret after the latest text */
-.msg.streaming .msg-content::after,
-.streaming-thought.streaming .msg-content::after {
+/* live answer stream: a blinking caret after the latest text */
+.msg.streaming .msg-content::after {
   content: "▍";
   margin-left: 2px;
   color: var(--color-accent);
@@ -681,56 +680,16 @@
   color: var(--color-text-secondary);
 }
 
-/* Reasoning inside the durable work log. */
-.activity-thinking {
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-md);
+/* Reasoning is represented only by a compact gray lifecycle status. The row
+   does not replay its entrance animation when a transient Thinking… becomes a
+   durable Thought, and no reasoning content is present to expand. */
+.activity-row.thought-row {
+  animation: none;
 }
-
-/* Live reasoning stays visible without taking over the transcript. Short
-   thoughts use their natural height; long ones stop growing and follow the
-   newest fragment inside this local scroller. */
-.streaming-thought {
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-surface);
-}
-.streaming-thought-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-bg-subtle);
+.thought-status {
   color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
-}
-.streaming-thought-dot {
-  width: 6px;
-  height: 6px;
-  flex: 0 0 auto;
-  border-radius: var(--radius-pill);
-  background: var(--color-text-muted);
-}
-.streaming-thought.streaming .streaming-thought-dot {
-  background: var(--color-accent);
-  animation: pulseDot 1.6s ease-out infinite;
-}
-.streaming-thought-scroll {
-  max-height: min(240px, 32vh);
-  overflow: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-  padding: 10px 12px 12px;
-}
-.streaming-thought-scroll:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: -2px;
-}
-.streaming-thought .activity-thinking {
-  overflow-wrap: anywhere;
+  font-size: var(--font-size-md);
+  line-height: 1.5;
 }
 
 /* A burst of consecutive tool calls: a gray one-line summary that

@@ -1065,24 +1065,69 @@ fn apply_engine_event(
       } else {
         (
           true,
-          { ..conv, streaming_response: conv.streaming_response + content },
+          {
+            ..conv,
+            streaming_response: conv.streaming_response + content,
+            // Answer text is an unambiguous fallback boundary even if an
+            // older provider omitted the full reasoning semantic event.
+            streaming_reasoning_complete: conv.streaming_reasoning_visible ||
+            conv.streaming_reasoning_complete,
+          },
         )
       }
     ReasoningDelta(content) =>
       if content.is_empty() {
         (false, conv)
+      } else if conv.streaming_reasoning_visible &&
+        !conv.streaming_reasoning_complete {
+        // Further deltas do not change the status-only UI.
+        (false, conv)
       } else {
         (
           true,
-          { ..conv, streaming_reasoning: conv.streaming_reasoning + content },
+          {
+            ..conv,
+            streaming_reasoning_visible: true,
+            streaming_reasoning_complete: false,
+          },
         )
       }
-    // Full semantic events never append transcript items: the store commit is
-    // the sole source of the durable reasoning/answer item. These events only
-    // settle the matching transient stream; the session commit supplies the
-    // permanent transcript item without duplicating it here.
-    ReasoningMessage(_) => (false, { ..conv, streaming_reasoning: "" })
-    AssistantMessage(_) => (false, conv.clear_streams())
+    // Full semantic events never append durable transcript items or retain
+    // their text. They only mark the reasoning status complete; an Assistant
+    // commit replaces intermediate Thoughts, while a final Terminal-backed
+    // Thought is retained as a chronology-anchored empty marker at finish.
+    ReasoningMessage(content) =>
+      if conv.has_durable_reasoning() {
+        (
+          false,
+          {
+            ..conv,
+            streaming_reasoning_visible: false,
+            streaming_reasoning_complete: false,
+          },
+        )
+      } else if !content.is_empty() || conv.streaming_reasoning_visible {
+        (
+          false,
+          {
+            ..conv,
+            streaming_reasoning_visible: true,
+            streaming_reasoning_complete: true,
+          },
+        )
+      } else {
+        (false, conv)
+      }
+    AssistantMessage(_) =>
+      (
+        false,
+        {
+          ..conv,
+          streaming_response: "",
+          streaming_reasoning_complete: conv.streaming_reasoning_visible ||
+          conv.streaming_reasoning_complete,
+        },
+      )
     RuntimeUpdate(content) => {
       let update = @transcript.parse_runtime_update(content)
       (false, { ..conv, watcher_status: update.status })
@@ -1137,11 +1182,15 @@ fn apply_engine_event(
     // The turn loop records this as an error `tool_result`; its commit is the
     // one canonical transcript source, just like a successful tool result.
     ToolCallDecodeError(..) => (false, conv)
+    // The raw terminal event precedes the host's authoritative
+    // `agent.finished` notification. Preserve a completed Thought at this
+    // first boundary; clearing here would leave the later lifecycle message
+    // with no reasoning left to settle into the transcript.
     AgentFinished(_)
     | ContextYield(_)
     | AgentAborted(_)
-    | AgentSetupFailed(_) => (false, conv.clear_streams())
-    MaxStepsExhausted => (false, conv.clear_streams())
+    | AgentSetupFailed(_) => (false, conv.settle_streams_at_finish())
+    MaxStepsExhausted => (false, conv.settle_streams_at_finish())
     // The steer took effect at a step boundary. Its durable user item arrives
     // through `session.event`; the live event only settles pending UI.
     SteerApplied(content~, submission_id~) => {
@@ -6914,7 +6963,7 @@ fn update_device_msg(
           )
         }
         let settled_inputs = conv
-          .clear_streams()
+          .settle_streams_at_finish()
           .mark_awaiting_steers_unconfirmed(
             durable_frontier?,
             owner_run_id=run_id,
@@ -7672,7 +7721,7 @@ test "assistant deltas accumulate into the streaming response" {
 }
 
 ///|
-test "reasoning deltas accumulate beside the streaming response" {
+test "reasoning deltas expose only a Thinking status beside the response" {
   let dispatch = test_dispatch()
   let (_, first) = update_dev(
     dispatch,
@@ -7684,14 +7733,35 @@ test "reasoning deltas accumulate beside the streaming response" {
     Engine(Some("r7"), ReasoningDelta(" think"), session=None),
     first,
   )
+  assert_true(thinking.active().streaming_reasoning_visible)
+  assert_false(thinking.active().streaming_reasoning_complete)
   let (_, answering) = update_dev(
     dispatch,
     Engine(Some("r7"), AssistantDelta("Answer"), session=None),
     thinking,
   )
-  inspect(answering.active().streaming_reasoning, content="Let me think")
+  assert_true(answering.active().streaming_reasoning_visible)
   inspect(answering.active().streaming_response, content="Answer")
+  assert_true(answering.active().streaming_reasoning_complete)
   inspect(answering.active().messages.length(), content="0")
+}
+
+///|
+test "later reasoning deltas do not change the status-only transcript" {
+  let (first_changed, first) = apply_engine_event(
+    running_conversation(),
+    ReasoningDelta("private fragment one"),
+    Some("r7"),
+  )
+  let (second_changed, second) = apply_engine_event(
+    first,
+    ReasoningDelta("private fragment two"),
+    Some("r7"),
+  )
+  assert_true(first_changed)
+  assert_false(second_changed)
+  assert_true(second.streaming_reasoning_visible)
+  assert_false(second.streaming_reasoning_complete)
 }
 
 ///|
@@ -7727,29 +7797,31 @@ test "deltas from an unknown run are dropped" {
 }
 
 ///|
-test "reasoning message waits for its durable commit" {
+test "reasoning message becomes Thought while waiting for its durable commit" {
   let dispatch = test_dispatch()
   let model = running_model().replace_conversation({
     ..running_conversation(),
-    streaming_reasoning: "partial thought",
+    streaming_reasoning_visible: true,
   })
   let (_, next) = update_dev(
     dispatch,
     Engine(Some("r7"), ReasoningMessage("full thought"), session=None),
     model,
   )
-  inspect(next.active().streaming_reasoning, content="")
+  assert_true(next.active().streaming_reasoning_visible)
+  assert_true(next.active().streaming_reasoning_complete)
   inspect(next.active().messages.length(), content="0")
   inspect(next.active().overlay.length(), content="0")
 }
 
 ///|
-test "assistant message only settles the transient response" {
+test "assistant message settles the response but keeps Thought until commit" {
   let dispatch = test_dispatch()
   let model = running_model().replace_conversation({
     ..running_conversation(),
     streaming_response: "answ",
-    streaming_reasoning: "thought",
+    streaming_reasoning_visible: true,
+    streaming_reasoning_complete: true,
   })
   let (_, next) = update_dev(
     dispatch,
@@ -7757,9 +7829,52 @@ test "assistant message only settles the transient response" {
     model,
   )
   inspect(next.active().streaming_response, content="")
-  inspect(next.active().streaming_reasoning, content="")
+  assert_true(next.active().streaming_reasoning_visible)
+  assert_true(next.active().streaming_reasoning_complete)
   inspect(next.active().messages.length(), content="0")
   inspect(next.active().overlay.length(), content="0")
+}
+
+///|
+test "raw agent finish retains completed Thought for the lifecycle finish" {
+  let dispatch = test_dispatch()
+  let model = running_model().replace_conversation({
+    ..running_conversation(),
+    messages: [{ kind: User, content: "question", ts: None, sequence: Some(1) }],
+    watermark: 1,
+    streaming_response: "answer",
+    streaming_reasoning_visible: true,
+    streaming_reasoning_complete: true,
+  })
+  let (_, semantic_finish) = update_dev(
+    dispatch,
+    Engine(Some("r7"), AgentFinished("answer"), session=None),
+    model,
+  )
+  assert_false(semantic_finish.active().streaming_reasoning_visible)
+  inspect(semantic_finish.active().overlay.length(), content="1")
+  assert_true(semantic_finish.active().is_running())
+  let (_, lifecycle_finish) = update_dev(
+    dispatch,
+    Finished(
+      run_id="r7",
+      status="finished",
+      answer=Some("answer"),
+      durable_sequence=None,
+    ),
+    semantic_finish,
+  )
+  inspect(lifecycle_finish.active().overlay.length(), content="1")
+  assert_false(lifecycle_finish.active().is_running())
+  let (_, committed) = lifecycle_finish
+    .active()
+    .apply_commit(2, @protocol.Terminal(@protocol.Finished("answer")))
+  let visible = committed.visible_items()
+  inspect(visible.length(), content="3")
+  guard visible[1].kind is Reasoning &&
+    visible[2].kind is Assistant(is_danger=false) else {
+    fail("expected Thought to survive until the terminal answer")
+  }
 }
 
 ///|
@@ -7785,7 +7900,7 @@ test "a new agent step clears the live stream" {
   let model = running_model().replace_conversation({
     ..running_conversation(),
     streaming_response: "left",
-    streaming_reasoning: "over",
+    streaming_reasoning_visible: true,
   })
   let (_, next) = update_dev(
     dispatch,
@@ -7793,7 +7908,7 @@ test "a new agent step clears the live stream" {
     model,
   )
   inspect(next.active().streaming_response, content="")
-  inspect(next.active().streaming_reasoning, content="")
+  assert_false(next.active().streaming_reasoning_visible)
 }
 
 ///|
@@ -7802,7 +7917,7 @@ test "finished run clears any leftover stream" {
   let model = running_model().replace_conversation({
     ..running_conversation(),
     streaming_response: "leftover",
-    streaming_reasoning: "unfinished thought",
+    streaming_reasoning_visible: true,
   })
   let (_, next) = update_dev(
     dispatch,
@@ -7815,8 +7930,93 @@ test "finished run clears any leftover stream" {
     model,
   )
   inspect(next.active().streaming_response, content="")
-  inspect(next.active().streaming_reasoning, content="")
+  assert_false(next.active().streaming_reasoning_visible)
   inspect(next.active().is_running(), content="false")
+}
+
+///|
+test "completed final Thought stays before a later terminal answer" {
+  let base = {
+    ..running_conversation(),
+    messages: [{ kind: User, content: "question", ts: None, sequence: Some(1) }],
+    watermark: 1,
+    run_durable_floor: Some(0),
+    streaming_response: "answer",
+    streaming_reasoning_visible: true,
+    streaming_reasoning_complete: true,
+  }
+  let settled = base.settle_streams_at_finish()
+  inspect(settled.streaming_response, content="")
+  assert_false(settled.streaming_reasoning_visible)
+  assert_false(settled.streaming_reasoning_complete)
+  let before_commit = settled.visible_items()
+  inspect(before_commit.length(), content="2")
+  guard before_commit[1].kind is Reasoning else {
+    fail("expected retained reasoning before terminal commit")
+  }
+  inspect(before_commit[1].content, content="")
+  let (_, committed) = settled.apply_commit(
+    2,
+    @protocol.Terminal(@protocol.Finished("answer")),
+  )
+  let visible = committed.visible_items()
+  inspect(visible.length(), content="3")
+  guard visible[0].kind is User &&
+    visible[1].kind is Reasoning &&
+    visible[2].kind is Assistant(is_danger=false) else {
+    fail("expected user, Thought, answer ordering")
+  }
+  inspect(visible[1].content, content="")
+  inspect(visible[2].content, content="answer")
+}
+
+///|
+test "completed final Thought moves before an already committed answer" {
+  let base = {
+    ..running_conversation(),
+    messages: [{ kind: User, content: "question", ts: None, sequence: Some(1) }],
+    watermark: 1,
+    run_durable_floor: Some(0),
+    streaming_reasoning_visible: true,
+    streaming_reasoning_complete: true,
+  }
+  let (_, terminal_first) = base.apply_commit(
+    2,
+    @protocol.Terminal(@protocol.Finished("answer")),
+  )
+  let settled = terminal_first.settle_streams_at_finish()
+  let visible = settled.visible_items()
+  inspect(visible.length(), content="3")
+  guard visible[0].kind is User &&
+    visible[1].kind is Reasoning &&
+    visible[2].kind is Assistant(is_danger=false) else {
+    fail("expected Thought to be inserted before the committed answer")
+  }
+  inspect(visible[1].content, content="")
+  inspect(visible[2].content, content="answer")
+}
+
+///|
+test "final Thoughts from separate turns keep separate statuses" {
+  let first_base = {
+    ..running_conversation(),
+    messages: [{ kind: User, content: "first", ts: None, sequence: Some(1) }],
+    watermark: 1,
+    streaming_reasoning_visible: true,
+    streaming_reasoning_complete: true,
+  }
+  let first = first_base.settle_streams_at_finish()
+  let messages = first.messages.copy()
+  messages.push({ kind: User, content: "second", ts: None, sequence: Some(2) })
+  let second = {
+    ..first,
+    messages,
+    streaming_reasoning_visible: true,
+    streaming_reasoning_complete: true,
+  }.settle_streams_at_finish()
+  inspect(second.overlay.length(), content="2")
+  assert_true(second.overlay[0].anchor is AfterMessages(1))
+  assert_true(second.overlay[1].anchor is AfterMessages(2))
 }
 
 ///|
@@ -19121,6 +19321,8 @@ test "assistant semantic events wait for their durable commit" {
   )
   inspect(answered.active().messages.length(), content="0")
   inspect(answered.active().overlay.length(), content="0")
+  assert_true(answered.active().streaming_reasoning_visible)
+  assert_true(answered.active().streaming_reasoning_complete)
   let (_, committed) = update_dev(
     dispatch,
     SessionCommitted(
@@ -19140,6 +19342,8 @@ test "assistant semantic events wait for their durable commit" {
   inspect(committed.active().messages.length(), content="2")
   inspect(committed.active().overlay.length(), content="0")
   inspect(committed.active().watermark, content="1")
+  assert_false(committed.active().streaming_reasoning_visible)
+  assert_false(committed.active().streaming_reasoning_complete)
 }
 
 ///|
@@ -19193,6 +19397,34 @@ test "a delayed assistant commit never clears a newer live delta" {
     model,
   )
   inspect(committed.active().streaming_response, content="newer turn fragment")
+}
+
+///|
+test "a reasoning commit before this run's floor never clears its Thought" {
+  let dispatch = test_dispatch()
+  let model = running_model().replace_conversation({
+    ..running_conversation(),
+    run_durable_floor: Some(1),
+    streaming_reasoning_visible: true,
+    streaming_reasoning_complete: true,
+  })
+  let (_, committed) = update_dev(
+    dispatch,
+    SessionCommitted(
+      session="desktop-test",
+      sequence=1,
+      ts=None,
+      item=@protocol.Assistant({
+        content: "older committed answer",
+        tool_calls: None,
+        reasoning_content: Some("older thought"),
+      }),
+      session_root=@interop.ChannelId::Local.test_store_root(),
+    ),
+    model,
+  )
+  assert_true(committed.active().streaming_reasoning_visible)
+  assert_true(committed.active().streaming_reasoning_complete)
 }
 
 ///|
@@ -19322,6 +19554,8 @@ test "commit-first assistant semantics do not append again" {
   inspect(answered.active().overlay.length(), content="0")
   inspect(answered.active().watermark, content="1")
   inspect(answered.active().streaming_response, content="")
+  assert_false(answered.active().streaming_reasoning_visible)
+  assert_false(answered.active().streaming_reasoning_complete)
 }
 
 ///|

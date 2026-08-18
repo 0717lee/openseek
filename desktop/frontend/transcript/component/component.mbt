@@ -58,7 +58,8 @@ struct Input {
   root : @common.Uri?
   submission_generation : Int
   items : Array[VisibleRow]
-  streaming_reasoning : String
+  streaming_reasoning_visible : Bool
+  streaming_reasoning_complete : Bool
   streaming_response : String
   streaming_identity : String
   subruns : Array[@transcript.SubrunLane]
@@ -72,7 +73,8 @@ pub fn Input::Input(
   root~ : @common.Uri?,
   submission_generation~ : Int,
   items~ : Array[VisibleRow],
-  streaming_reasoning~ : String,
+  streaming_reasoning_visible~ : Bool,
+  streaming_reasoning_complete~ : Bool,
   streaming_response~ : String,
   streaming_identity~ : String,
   subruns~ : Array[@transcript.SubrunLane],
@@ -84,7 +86,8 @@ pub fn Input::Input(
     root,
     submission_generation,
     items,
-    streaming_reasoning,
+    streaming_reasoning_visible,
+    streaming_reasoning_complete,
     streaming_response,
     streaming_identity,
     subruns,
@@ -272,17 +275,6 @@ fn scroll_after_render() -> @cmd.Cmd {
       // A forced tail jump must also reset the subscription's DOM cache. A
       // remounted short transcript may clamp without emitting a scroll event.
       transcript_pinned_watch.val = true
-      // Active reasoning owns a bounded local scroller. Follow its latest
-      // fragment while it is the current stream; once answer text starts the
-      // `streaming` class moves to the answer and leaves this position alone.
-      if @dom.document()
-        .query_selector(
-          ".streaming-thought.streaming .streaming-thought-scroll",
-        )
-        .to_option()
-        is Some(thought) {
-        thought.set_scroll_top(thought.get_scroll_height())
-      }
       if @dom.document().get_element_by_id("transcript").to_option()
         is Some(transcript) {
         transcript.set_scroll_top(transcript.get_scroll_height())
@@ -650,7 +642,8 @@ test "local pinned transitions are pure" {
     root=None,
     submission_generation=0,
     items=[],
-    streaming_reasoning="",
+    streaming_reasoning_visible=false,
+    streaming_reasoning_complete=false,
     streaming_response="",
     streaming_identity="idle",
     subruns=[],
@@ -713,7 +706,8 @@ test "an overview click unpins and highlights inside the component" {
     root=None,
     submission_generation=0,
     items=[],
-    streaming_reasoning="",
+    streaming_reasoning_visible=false,
+    streaming_reasoning_complete=false,
     streaming_response="",
     streaming_identity="idle",
     subruns=[],
@@ -744,7 +738,8 @@ test "a conversation switch clears component-owned overview state" {
     root=None,
     submission_generation=0,
     items=[],
-    streaming_reasoning="",
+    streaming_reasoning_visible=false,
+    streaming_reasoning_complete=false,
     streaming_response="",
     streaming_identity="idle",
     subruns=[],
