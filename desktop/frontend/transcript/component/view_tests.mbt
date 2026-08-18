@@ -45,7 +45,6 @@ test "transcript markup exposes conversation identity" {
     root=Some(root),
     submission_generation=7,
     items=[],
-    streaming_reasoning="",
     streaming_response="",
     streaming_identity="idle",
     subruns=[],
@@ -98,7 +97,6 @@ test "transcript stream children use stable typed keys in display order" {
       },
       { item: first_tool, identity: "s43\u{0}o0" },
     ],
-    streaming_reasoning="partial thought",
     streaming_response="partial answer",
     streaming_identity="r7",
     subruns=[
@@ -120,7 +118,7 @@ test "transcript stream children use stable typed keys in display order" {
   let keys = renderer.stream_children().to_array().map(pair => pair.0)
   assert_eq(keys, [
     "row\u{0}s41\u{0}o0", "rule\u{0}s41\u{0}o0", "activity\u{0}after\u{0}s41\u{0}o0",
-    "streaming-reasoning\u{0}r7", "streaming-response\u{0}r7", "subrun\u{0}r7\u{0}desktop-abc-sr-1",
+    "streaming\u{0}r7", "subrun\u{0}r7\u{0}desktop-abc-sr-1",
   ])
   // A newly discovered activity row extends the same card; it does not change
   // the card key and therefore does not replace its browser-owned disclosure.
@@ -157,7 +155,6 @@ test "transcript stream section key scopes equal session ids by channel" {
     root=None,
     submission_generation=0,
     items=[],
-    streaming_reasoning="",
     streaming_response="",
     streaming_identity="idle",
     subruns=[],
@@ -340,27 +337,6 @@ test "every message names its speaker to assistive technology" {
   assert_true(
     streaming.contains("<span class=\"visually-hidden\">OpenSeek</span>"),
   )
-  let thinking = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(
-      streaming_reasoning_view("partial thought", streaming=true, _ => @cmd.none),
-    )
-  })
-  assert_true(thinking.contains("activity-thinking"))
-  assert_true(thinking.contains("streaming-thought streaming"))
-  assert_true(thinking.contains("streaming-thought-scroll"))
-  assert_true(thinking.contains("aria-label=\"Live model thinking\""))
-  assert_true(thinking.contains(">Thinking</span>"))
-  assert_true(thinking.contains("partial thought"))
-  let answering = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(
-      streaming_reasoning_view("finished thought", streaming=false, _ => {
-        @cmd.none
-      }),
-    )
-  })
-  assert_true(answering.contains("class=\"streaming-thought\""))
-  assert_false(answering.contains("streaming-thought streaming"))
-  assert_true(answering.contains(">Thought</span>"))
 }
 
 ///|

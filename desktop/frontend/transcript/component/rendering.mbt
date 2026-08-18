@@ -33,17 +33,8 @@ fn TranscriptRenderKey::activity_after(
 }
 
 ///|
-fn TranscriptRenderKey::streaming_reasoning(
-  identity : String,
-) -> TranscriptRenderKey {
-  { value: "streaming-reasoning\u{0}\{identity}" }
-}
-
-///|
-fn TranscriptRenderKey::streaming_response(
-  identity : String,
-) -> TranscriptRenderKey {
-  { value: "streaming-response\u{0}\{identity}" }
+fn TranscriptRenderKey::streaming(identity : String) -> TranscriptRenderKey {
+  { value: "streaming\u{0}\{identity}" }
 }
 
 ///|
@@ -190,22 +181,9 @@ fn TranscriptRenderer::stream_children(
       )
     }
   }
-  // Reasoning and answer can briefly coexist after the first answer delta.
-  // Separate keys preserve the reasoning block (and its local scroll
-  // position) while the answer is inserted after it.
-  if !self.input.streaming_reasoning.is_empty() {
-    items.set(
-      TranscriptRenderKey::streaming_reasoning(self.input.streaming_identity).wire(),
-      streaming_reasoning_view(
-        self.input.streaming_reasoning,
-        streaming=self.input.streaming_response.is_empty(),
-        self.on_open,
-      ),
-    )
-  }
   if !self.input.streaming_response.is_empty() {
     items.set(
-      TranscriptRenderKey::streaming_response(self.input.streaming_identity).wire(),
+      TranscriptRenderKey::streaming(self.input.streaming_identity).wire(),
       streaming_response_view(
         self.input.streaming_response,
         self.on_open,

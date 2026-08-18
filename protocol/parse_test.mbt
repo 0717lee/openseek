@@ -21,16 +21,6 @@ test "decodes a streaming delta" {
       #|Some(AssistantDelta(content="Hel"))
     ),
   )
-  debug_inspect(
-    decode(
-      (
-        #|{"timestamp":"t","level":"INFO","source":"s","event":"reasoning_delta","content":"Think"}
-      ),
-    ),
-    content=(
-      #|Some(ReasoningDelta(content="Think"))
-    ),
-  )
 }
 
 ///|

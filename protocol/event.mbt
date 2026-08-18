@@ -20,7 +20,6 @@ pub(all) enum Event {
   MaxStepsExhausted
   TurnFailed(error~ : String)
   AssistantDelta(content~ : String)
-  ReasoningDelta(content~ : String)
   AssistantMessage(content~ : String)
   ReasoningMessage(content~ : String)
   Usage(usage~ : Usage)
