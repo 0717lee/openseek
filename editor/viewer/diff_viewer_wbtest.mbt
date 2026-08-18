@@ -54,10 +54,7 @@ test "diff presentation separates non-empty character ranges by side" {
     {
       original: LineRange(3, 5),
       modified: LineRange(3, 5),
-      inner_changes: Some([
-        (original, modified),
-        (@base_common.Range(4, 1, 4, 1), inserted),
-      ]),
+      inner_changes: Some([(original, modified), (Range(4, 1, 4, 1), inserted)]),
     },
   ])
   assert_eq(presentation.original_inner_changed, [original])

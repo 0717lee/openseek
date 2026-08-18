@@ -36,15 +36,12 @@ fn empty_line_range_anchor(
   line_number : Int,
 ) -> @base_common.Position {
   if lines.is_empty() {
-    @base_common.Position(1, 1)
+    Position(1, 1)
   } else if line_number <= lines.length() {
-    @base_common.Position(line_number.max(1), 1)
+    Position(line_number.max(1), 1)
   } else {
     let last_line_number = lines.length()
-    @base_common.Position(
-      last_line_number,
-      lines[last_line_number - 1].length() + 1,
-    )
+    Position(last_line_number, lines[last_line_number - 1].length() + 1)
   }
 }
 
@@ -63,11 +60,11 @@ fn flatten_inner_diff_sequence(
     for character in line {
       values.push(character.to_int())
       column += character.utf16_len()
-      boundaries.push(@base_common.Position(line_number, column))
+      boundaries.push(Position(line_number, column))
     }
     if line_number + 1 < range.end_line_number_exclusive {
       values.push('\n'.to_int())
-      boundaries.push(@base_common.Position(line_number + 1, 1))
+      boundaries.push(Position(line_number + 1, 1))
     }
   }
   { values, boundaries }
