@@ -146,10 +146,8 @@ fn moondiff_inner_ranges(line : @tokdiff.DiffLine) -> Array[@base_common.Range] 
   let mut column = 1
   for segment in line.segments {
     let end_column = column + segment.text.length()
-    if segment.kind is @tokdiff.DiffSegmentKind::Changed && end_column > column {
-      ranges.push(
-        @base_common.Range(line.index + 1, column, line.index + 1, end_column),
-      )
+    if segment.kind is Changed && end_column > column {
+      ranges.push(Range(line.index + 1, column, line.index + 1, end_column))
     }
     column = end_column
   }
@@ -162,8 +160,8 @@ fn moondiff_paired_change(
   modified : @tokdiff.DiffLine,
 ) -> DiffLineChange {
   {
-    original: @base_common.LineRange(original.index + 1, original.index + 2),
-    modified: @base_common.LineRange(modified.index + 1, modified.index + 2),
+    original: LineRange(original.index + 1, original.index + 2),
+    modified: LineRange(modified.index + 1, modified.index + 2),
     original_inner_changed: moondiff_inner_ranges(original),
     modified_inner_changed: moondiff_inner_ranges(modified),
   }
@@ -175,8 +173,8 @@ fn moondiff_old_only_change(
   modified_cursor : Int,
 ) -> DiffLineChange {
   {
-    original: @base_common.LineRange(original.index + 1, original.index + 2),
-    modified: @base_common.LineRange(modified_cursor + 1, modified_cursor + 1),
+    original: LineRange(original.index + 1, original.index + 2),
+    modified: LineRange(modified_cursor + 1, modified_cursor + 1),
     original_inner_changed: moondiff_inner_ranges(original),
     modified_inner_changed: [],
   }
@@ -188,8 +186,8 @@ fn moondiff_new_only_change(
   original_cursor : Int,
 ) -> DiffLineChange {
   {
-    original: @base_common.LineRange(original_cursor + 1, original_cursor + 1),
-    modified: @base_common.LineRange(modified.index + 1, modified.index + 2),
+    original: LineRange(original_cursor + 1, original_cursor + 1),
+    modified: LineRange(modified.index + 1, modified.index + 2),
     original_inner_changed: [],
     modified_inner_changed: moondiff_inner_ranges(modified),
   }
@@ -209,7 +207,7 @@ fn append_moondiff_rows(
   let mut new_cursor = modified_cursor
   for row in rows {
     match row {
-      @tokdiff.DiffRow::Paired(original, modified) => {
+      Paired(original, modified) => {
         if !valid_moondiff_line(original, old_cursor, original_lines) ||
           !valid_moondiff_line(modified, new_cursor, modified_lines) {
           return None
@@ -220,7 +218,7 @@ fn append_moondiff_rows(
         old_cursor += 1
         new_cursor += 1
       }
-      @tokdiff.DiffRow::OldOnly(original) => {
+      OldOnly(original) => {
         if !valid_moondiff_line(original, old_cursor, original_lines) {
           return None
         }
@@ -229,7 +227,7 @@ fn append_moondiff_rows(
         }
         old_cursor += 1
       }
-      @tokdiff.DiffRow::NewOnly(modified) => {
+      NewOnly(modified) => {
         if !valid_moondiff_line(modified, new_cursor, modified_lines) {
           return None
         }
@@ -271,7 +269,7 @@ fn moondiff_document_changes(
     let mut new_cursor = hunk.new_start
     for block in hunk.blocks {
       match block {
-        @tokdiff.DiffBlock::ContextBlock(lines) =>
+        ContextBlock(lines) =>
           for line in lines {
             if line.old_index != old_cursor ||
               line.new_index != new_cursor ||
@@ -284,7 +282,7 @@ fn moondiff_document_changes(
             old_cursor += 1
             new_cursor += 1
           }
-        @tokdiff.DiffBlock::ChangeBlock(rows) =>
+        ChangeBlock(rows) =>
           match
             append_moondiff_rows(
               rows, true, original_lines, modified_lines, old_cursor, new_cursor,
@@ -296,7 +294,7 @@ fn moondiff_document_changes(
             }
             None => return None
           }
-        @tokdiff.DiffBlock::IgnoredBlock(rows) =>
+        IgnoredBlock(rows) =>
           match
             append_moondiff_rows(
               rows, false, original_lines, modified_lines, old_cursor, new_cursor,

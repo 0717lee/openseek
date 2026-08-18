@@ -203,13 +203,8 @@ test "invalid token document is rejected at the standard fallback boundary" {
         new_start: 0,
         new_len: 0,
         blocks: [
-          @tokdiff.DiffBlock::ChangeBlock([
-            @tokdiff.DiffRow::OldOnly({
-              index: 4,
-              segments: [
-                { kind: @tokdiff.DiffSegmentKind::Changed, text: "old" },
-              ],
-            }),
+          ChangeBlock([
+            OldOnly({ index: 4, segments: [{ kind: Changed, text: "old" }] }),
           ]),
         ],
       },
@@ -221,7 +216,7 @@ test "invalid token document is rejected at the standard fallback boundary" {
 ///|
 test "moondiff controls are limited to exact mbt paths" {
   fn model(path : String) -> @model.TextModel {
-    @model.TextModel(
+    TextModel(
       try! @base_common.Uri::from(scheme="memory", path~),
       path,
       "moonbit",
