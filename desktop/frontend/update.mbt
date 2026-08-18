@@ -1068,20 +1068,11 @@ fn apply_engine_event(
           { ..conv, streaming_response: conv.streaming_response + content },
         )
       }
-    ReasoningDelta(content) =>
-      if content.is_empty() {
-        (false, conv)
-      } else {
-        (
-          true,
-          { ..conv, streaming_reasoning: conv.streaming_reasoning + content },
-        )
-      }
     // Full semantic events never append transcript items: the store commit is
-    // the sole source of the durable reasoning/answer item. These events only
-    // settle the matching transient stream; the session commit supplies the
-    // permanent transcript item without duplicating it here.
-    ReasoningMessage(_) => (false, { ..conv, streaming_reasoning: "" })
+    // the sole source of the durable reasoning/answer item. The current wire
+    // protocol has no live reasoning stream, while the full assistant event
+    // settles the live response.
+    ReasoningMessage(_) => (false, conv)
     AssistantMessage(_) => (false, conv.clear_streams())
     RuntimeUpdate(content) => {
       let update = @transcript.parse_runtime_update(content)
@@ -7672,29 +7663,6 @@ test "assistant deltas accumulate into the streaming response" {
 }
 
 ///|
-test "reasoning deltas accumulate beside the streaming response" {
-  let dispatch = test_dispatch()
-  let (_, first) = update_dev(
-    dispatch,
-    Engine(Some("r7"), ReasoningDelta("Let me"), session=None),
-    running_model(),
-  )
-  let (_, thinking) = update_dev(
-    dispatch,
-    Engine(Some("r7"), ReasoningDelta(" think"), session=None),
-    first,
-  )
-  let (_, answering) = update_dev(
-    dispatch,
-    Engine(Some("r7"), AssistantDelta("Answer"), session=None),
-    thinking,
-  )
-  inspect(answering.active().streaming_reasoning, content="Let me think")
-  inspect(answering.active().streaming_response, content="Answer")
-  inspect(answering.active().messages.length(), content="0")
-}
-
-///|
 test "update is pure: replaying a delta on the same model is idempotent" {
   let dispatch = test_dispatch()
   let model = running_model().replace_conversation({
@@ -7729,16 +7697,12 @@ test "deltas from an unknown run are dropped" {
 ///|
 test "reasoning message waits for its durable commit" {
   let dispatch = test_dispatch()
-  let model = running_model().replace_conversation({
-    ..running_conversation(),
-    streaming_reasoning: "partial thought",
-  })
+  let model = running_model()
   let (_, next) = update_dev(
     dispatch,
     Engine(Some("r7"), ReasoningMessage("full thought"), session=None),
     model,
   )
-  inspect(next.active().streaming_reasoning, content="")
   inspect(next.active().messages.length(), content="0")
   inspect(next.active().overlay.length(), content="0")
 }
@@ -7749,7 +7713,6 @@ test "assistant message only settles the transient response" {
   let model = running_model().replace_conversation({
     ..running_conversation(),
     streaming_response: "answ",
-    streaming_reasoning: "thought",
   })
   let (_, next) = update_dev(
     dispatch,
@@ -7757,7 +7720,6 @@ test "assistant message only settles the transient response" {
     model,
   )
   inspect(next.active().streaming_response, content="")
-  inspect(next.active().streaming_reasoning, content="")
   inspect(next.active().messages.length(), content="0")
   inspect(next.active().overlay.length(), content="0")
 }
@@ -7785,7 +7747,6 @@ test "a new agent step clears the live stream" {
   let model = running_model().replace_conversation({
     ..running_conversation(),
     streaming_response: "left",
-    streaming_reasoning: "over",
   })
   let (_, next) = update_dev(
     dispatch,
@@ -7793,7 +7754,6 @@ test "a new agent step clears the live stream" {
     model,
   )
   inspect(next.active().streaming_response, content="")
-  inspect(next.active().streaming_reasoning, content="")
 }
 
 ///|
@@ -7802,7 +7762,6 @@ test "finished run clears any leftover stream" {
   let model = running_model().replace_conversation({
     ..running_conversation(),
     streaming_response: "leftover",
-    streaming_reasoning: "unfinished thought",
   })
   let (_, next) = update_dev(
     dispatch,
@@ -7815,7 +7774,6 @@ test "finished run clears any leftover stream" {
     model,
   )
   inspect(next.active().streaming_response, content="")
-  inspect(next.active().streaming_reasoning, content="")
   inspect(next.active().is_running(), content="false")
 }
 
