@@ -1355,8 +1355,9 @@ priv struct GoalEdit {
 } derive(Eq)
 
 ///|
-/// The in-app folder picker's state: the host directory currently shown and
-/// its subdirectories. `loading` marks a browse in flight; a failed
+/// The in-app folder picker's state: the host location currently shown and
+/// the rows inside it — a directory's subdirectories, or the Windows drive
+/// list's drives. `loading` marks a browse in flight; a failed
 /// navigation pops a toast while the previous listing stays usable.
 /// `channel` owns every browse and the eventual project mutation;
 /// `generation` numbers that picker's latest request. Both ride on replies,
@@ -1364,21 +1365,28 @@ priv struct GoalEdit {
 /// device can replace the current listing.
 priv struct ProjectPicker {
   channel : @interop.ChannelId
-  // The last directory the host successfully listed. `None` only while the
+  // The last location the host successfully listed. `None` only while the
   // initial home listing is in flight.
-  path : @common.Uri?
+  location : PickerLocation?
   entries : Array[String]
   loading : Bool
   generation : Int
 } derive(Eq)
 
 ///|
+/// Where the picker's current listing was taken: a real host directory —
+/// the only thing Confirm can register — or the Windows-only virtual level
+/// above the drive roots, whose rows are the drives themselves.
+priv enum PickerLocation {
+  Directory(@common.Uri)
+  DriveList
+} derive(Eq)
 
 ///|
 /// A picker that just opened: nothing browsed yet, first listing (the home
 /// directory) on its way.
 fn opening_project_picker(channel : @interop.ChannelId) -> ProjectPicker {
-  { channel, path: None, entries: [], loading: true, generation: 1 }
+  { channel, location: None, entries: [], loading: true, generation: 1 }
 }
 
 ///|
@@ -1627,11 +1635,12 @@ priv enum Msg {
   // Browse into a directory: a subdirectory row, a breadcrumb ancestor, or
   // a path pasted while the picker is open.
   ProjectPickerNavigate(String)
-  // One directory's listing came back from the host; `generation` names
-  // the browse request it answers, so a stale reply is dropped.
+  // One location's listing came back from the host — a directory, or the
+  // Windows drive list; `generation` names the browse request it answers,
+  // so a stale reply is dropped.
   ProjectPickerLoaded(
     channel~ : @interop.ChannelId,
-    path~ : @common.Uri,
+    location~ : PickerLocation,
     entries~ : Array[String],
     generation~ : Int
   )

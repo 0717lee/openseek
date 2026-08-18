@@ -2478,7 +2478,9 @@ fn api_setup_modal(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
 /// The in-app folder picker behind the sidebar's "Add a project", shaped
 /// like a system chooser: a clickable breadcrumb for the current directory
 /// (each segment navigates up to that level — there is no ".." row) and a
-/// folder list that navigates on click. The keyboard surface lives in the
+/// folder list that navigates on click. On a Windows host the trail roots
+/// at "This PC", whose listing is the drive letters — the way to another
+/// drive. The keyboard surface lives in the
 /// document-level capture pair (`project_picker_keys.mbt`): Enter adds the
 /// browsed directory, Escape closes, and a pasted path jumps straight to
 /// that location (a path that names no directory pops a toast). It renders
@@ -2491,8 +2493,11 @@ fn project_picker_modal(
 ) -> @html.Html {
   let rows : Array[@html.Html] = []
   for name in picker.entries {
-    let target = match picker.path {
-      Some(path) => path.picker_child_path(name)
+    let target = match picker.location {
+      Some(Directory(path)) => path.picker_child_path(name)
+      // A drive row ("C:") enters that drive's root; the trailing slash is
+      // the drive root's canonical resource spelling ("/C:/").
+      Some(DriveList) => "/" + name + "/"
       None => name
     }
     rows.push(
@@ -2528,13 +2533,15 @@ fn project_picker_modal(
       @html.button(on_click=dispatch(ProjectPickerClose), "Cancel"),
       @html.button(
         class="primary",
-        // While a navigation is in flight the shown listing is stale;
-        // update refuses the confirm too, this just says so visually.
-        disabled=picker.loading,
+        // While a navigation is in flight the shown listing is stale, and
+        // the drive list is not a directory anyone can register; update
+        // refuses the confirm too, this just says so visually.
+        disabled=picker.loading || !(picker.location is Some(Directory(_))),
         on_click=dispatch(ProjectPickerConfirm),
-        match picker.path {
-          None => "Add this folder"
-          Some(path) => "Add \u{201c}\{@resource.label(path)}\u{201d}"
+        match picker.location {
+          Some(Directory(path)) =>
+            "Add \u{201c}\{@resource.label(path)}\u{201d}"
+          _ => "Add this folder"
         },
       ),
     ]),
@@ -2552,16 +2559,29 @@ fn project_picker_modal(
 }
 
 ///|
-/// The current directory as a clickable trail: every ancestor is a button
+/// The current location as a clickable trail: every ancestor is a button
 /// that navigates back up to it, the way a system chooser's path bar works.
-/// Windows resource paths keep `/C:/` as their drive root; POSIX paths root
-/// at `/`. UNC never reaches this UI because the backend rejects it.
+/// POSIX paths root at `/`; Windows resource paths keep `/C:/` as their
+/// drive root and root at the drive list ("This PC"), which is how another
+/// drive letter is reached. UNC never reaches this UI because the backend
+/// rejects it.
 fn picker_breadcrumbs(
   dispatch : @cmd.Emit[Msg],
   picker : ProjectPicker,
 ) -> @html.Html {
   let crumbs : Array[@html.Html] = []
-  guard picker.path is Some(resource) else {
+  guard picker.location is Some(location) else {
+    return @html.div(class="picker-crumbs", crumbs)
+  }
+  guard location is Directory(resource) else {
+    // The drive list is the trail's whole content while it is shown.
+    crumbs.push(
+      @html.button(
+        class="picker-crumb current",
+        on_click=dispatch(ProjectPickerNavigate("/")),
+        "This PC",
+      ),
+    )
     return @html.div(class="picker-crumbs", crumbs)
   }
   let path = resource.path
@@ -2576,19 +2596,21 @@ fn picker_breadcrumbs(
     [drive, ..] if drive.length() == 2 && drive.has_suffix(":") => Some(drive)
     _ => None
   }
-  if drive_root is None {
-    crumbs.push(
-      @html.button(
-        class=if segments.length() == 0 {
-          "picker-crumb current"
-        } else {
-          "picker-crumb"
-        },
-        on_click=dispatch(ProjectPickerNavigate("/")),
-        "/",
-      ),
-    )
-  }
+  crumbs.push(
+    @html.button(
+      class=if segments.length() == 0 {
+        "picker-crumb current"
+      } else {
+        "picker-crumb"
+      },
+      on_click=dispatch(ProjectPickerNavigate("/")),
+      if drive_root is Some(_) {
+        "This PC"
+      } else {
+        "/"
+      },
+    ),
+  )
   let mut prefix = ""
   for index, segment in segments {
     prefix = if drive_root is Some(_) && index == 0 {

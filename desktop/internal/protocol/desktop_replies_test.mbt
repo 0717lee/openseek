@@ -393,6 +393,12 @@ test "browse replies keep success compatible and carry refusals" {
     refusal.to_json(),
   )
   @debug.assert_eq(decoded_refusal, refusal)
+  let drives : @protocol.BrowseDirectoryReply = Drives(entries=["C:", "D:"])
+  @debug.assert_eq(drives.to_json(), { "drives": ["C:", "D:"] })
+  let decoded_drives : @protocol.BrowseDirectoryReply = @json.from_json(
+    drives.to_json(),
+  )
+  @debug.assert_eq(decoded_drives, drives)
 }
 
 ///|
