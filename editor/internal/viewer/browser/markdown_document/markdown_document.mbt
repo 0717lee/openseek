@@ -1035,6 +1035,11 @@ fn MarkdownDocumentView::scroll_toc_entry_into_view(
 ///|
 /// Reveals the nearest retained source anchor. Horizontal source columns do
 /// not synthesize code-editor scrolling; browser layout owns the native block.
+/// The scroll is applied to the Markdown viewport alone: `scrollIntoView`
+/// would also move every scrollable ancestor (older WebKitGTK builds move the
+/// surrounding desktop page), so only the viewport's `scrollTop` changes.
+/// The overlaid TOC panel, when visible, acts as the top padding for
+/// `start`/`nearest` landing, mirroring the viewport's `scroll-padding-top`.
 pub fn MarkdownDocumentView::reveal_source_offset(
   self : MarkdownDocumentView,
   source_offset : Int,
@@ -1044,11 +1049,35 @@ pub fn MarkdownDocumentView::reveal_source_offset(
     self.element_for_source_offset(source_offset) is Some(element) else {
     return
   }
-  element.scroll_into_view_with_options(
-    behavior="auto",
-    block=vertical_alignment,
-    inline="nearest",
-  )
+  let element_rect = element.get_bounding_client_rect()
+  let viewport_rect = self.viewport.get_bounding_client_rect()
+  let viewport_top = viewport_rect.get_top()
+  let viewport_bottom = viewport_rect.get_bottom()
+  // The panel is `display: none` unless the document has at least three
+  // sections; a hidden panel measures a zero rect, contributing no offset.
+  let panel_bottom = self.toc_nav.get_bounding_client_rect().get_bottom()
+  let padded_top = if panel_bottom > viewport_top {
+    panel_bottom
+  } else {
+    viewport_top
+  }
+  let delta = match vertical_alignment {
+    "center" =>
+      element_rect.get_top() +
+      element_rect.get_height() / 2.0 -
+      (viewport_top + viewport_rect.get_height() / 2.0)
+    "end" => element_rect.get_bottom() - viewport_bottom
+    "nearest" =>
+      if element_rect.get_top() < padded_top {
+        element_rect.get_top() - padded_top
+      } else if element_rect.get_bottom() > viewport_bottom {
+        element_rect.get_bottom() - viewport_bottom
+      } else {
+        0.0
+      }
+    _ => element_rect.get_top() - padded_top
+  }
+  self.viewport.set_scroll_top(self.viewport.get_scroll_top() + delta)
 }
 
 ///|
