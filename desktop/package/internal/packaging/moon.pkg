@@ -2,10 +2,12 @@ import {
   "moonbitlang/editor/scripts/mermaid_assets",
   "moonbitlang/async",
   "moonbitlang/async/fs" @asyncfs,
+  "moonbitlang/async/os_error",
   "moonbitlang/async/process",
   "moonbitlang/core/json",
   "moonbitlang/core/string",
   "moonbitlang/x/path",
+  "openseek_desktop/internal/pathx",
   "tonyfettes/platform",
 }
 

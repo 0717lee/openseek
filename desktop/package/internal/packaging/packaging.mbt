@@ -339,11 +339,13 @@ pub async fn ensure_cef_runtime(
 }
 
 ///|
-/// Read the absolute Proton runtime dist directory from `.proton/runtime.json`,
-/// the manifest `cef setup` writes. Raises when the manifest is missing or
-/// malformed.
-pub async fn proton_runtime_dist(ws : Workspace) -> String {
-  ws.proton_project_at(ws.proton_runtime_field("dist"))
+/// Read the Proton runtime dist directory from `.proton/runtime.json`, the
+/// manifest `cef setup` writes. Current Proton CLIs record an absolute path
+/// into the user-level runtime cache, while older manifests recorded a path
+/// relative to the Proton project root; both classify to an absolute path
+/// here. Raises when the manifest is missing or malformed.
+pub async fn proton_runtime_dist(ws : Workspace) -> @pathx.Absolute {
+  ws.proton_runtime_path_field("dist")
 }
 
 ///|
@@ -351,14 +353,44 @@ pub async fn proton_runtime_dist(ws : Workspace) -> String {
 /// records an absolute path because the cache may live in the shared user-level
 /// `~/.proton/cache/cef` directory or a `PROTON_CEF_CACHE` override; consumers
 /// must not reconstruct the older project-local cache layout.
-async fn Workspace::proton_cef_root(self : Workspace) -> String {
-  self.proton_runtime_field("cef")
+async fn Workspace::proton_cef_root(self : Workspace) -> @pathx.Absolute {
+  self.proton_runtime_path_field("cef")
+}
+
+///|
+/// The Proton project checkout as a typed absolute root. The workspace root is
+/// absolute by construction, so resolving restates that invariant in the type
+/// instead of consulting the working directory.
+fn Workspace::proton_project_root(self : Workspace) -> @pathx.Absolute {
+  @pathx.Path(self.proton_project_dir()).resolve()
+}
+
+///|
+/// Classify a path recorded in a Proton manifest. The Proton CLI records
+/// absolute cache paths, while older manifests recorded paths relative to the
+/// Proton project root; a relative spelling therefore resolves against that
+/// checkout rather than the working directory.
+fn Workspace::proton_manifest_path(
+  self : Workspace,
+  fields : Map[String, Json],
+  manifest : String,
+  field : String,
+) -> @pathx.Absolute raise PackageError {
+  let path = @pathx.Path(
+    Workspace::proton_manifest_string(fields, manifest, field),
+  )
+  if path.to_relative() is Some(relative) {
+    self.proton_project_root().join(relative)
+  } else {
+    // Already host-absolute, so resolving only restates the classification.
+    path.resolve()
+  }
 }
 
 ///|
 /// Read one Proton JSON manifest as an object. Keeping parsing here lets the
-/// reuse check compare the active, assembled, and checked-in manifests without
-/// running the Proton CLI.
+/// reuse check compare the active and checked-in manifests without running
+/// the Proton CLI.
 async fn Workspace::read_proton_manifest(
   manifest : String,
 ) -> Map[String, Json] {
@@ -388,14 +420,14 @@ fn Workspace::proton_manifest_string(
 }
 
 ///|
-/// Read a string field from the active runtime manifest written by `cef setup`.
-async fn Workspace::proton_runtime_field(
+/// Read a path field from the active runtime manifest written by `cef setup`.
+async fn Workspace::proton_runtime_path_field(
   self : Workspace,
   field : String,
-) -> String {
+) -> @pathx.Absolute {
   let manifest = self.proton_project_at(".proton/runtime.json")
   let fields = Workspace::read_proton_manifest(manifest)
-  Workspace::proton_manifest_string(fields, manifest, field)
+  self.proton_manifest_path(fields, manifest, field)
 }
 
 ///|
@@ -445,10 +477,16 @@ fn Workspace::proton_runtime_required_files(
 
 ///|
 /// Resolve and validate the existing runtime without installing or invoking
-/// the Proton CLI. The active and assembled manifests must agree, the active
-/// platform must match this packager, the checked-in prebuilt must have the
-/// same Proton version, and every runtime file consumed by Proton must exist.
-async fn Workspace::validated_proton_runtime_dist(self : Workspace) -> String {
+/// the Proton CLI. The active platform must match this packager, the
+/// checked-in prebuilt must have the same Proton version, every runtime file
+/// consumed by Proton must exist, and on macOS the runtime must still carry
+/// the exact bytes of the checked-in prebuilt artifacts. The runtime carries
+/// no manifest of its own: `cef setup` names the dist directory after the
+/// prebuilt and CEF identities, so the active manifest is the one record of
+/// its location.
+async fn Workspace::validated_proton_runtime_dist(
+  self : Workspace,
+) -> @pathx.Absolute {
   let active_path = self.proton_project_at(".proton/runtime.json")
   let active = Workspace::read_proton_manifest(active_path)
   let platform = Workspace::proton_manifest_string(
@@ -483,36 +521,72 @@ async fn Workspace::validated_proton_runtime_dist(self : Workspace) -> String {
       "Proton runtime version mismatch: expected \{prebuilt_version}, got \{active_version}",
     )
   }
-  let relative_dist = Workspace::proton_manifest_string(
-    active, active_path, "dist",
-  )
-  let dist = self.proton_project_at(relative_dist)
-  let assembled_path = join_path(dist, "manifest.json")
-  let assembled = Workspace::read_proton_manifest(assembled_path)
-  for field in ["platform", "proton_version", "cef_version", "dist"] {
-    let active_value = Workspace::proton_manifest_string(
-      active, active_path, field,
+  let dist = self.proton_manifest_path(active, active_path, "dist")
+  // Linux and Windows rebuild libproton from source into the runtime dist
+  // (`rebuild_libproton`), so their runtime copies legitimately differ from
+  // the checked-in prebuilt. macOS ships the prebuilt bytes unmodified, and a
+  // routine prebuilt refresh keeps the Proton version, so only a content
+  // comparison can spot the stale runtime there.
+  if platform == "darwin-arm64" {
+    Workspace::require_fresh_prebuilt_artifacts(
+      prebuilt,
+      prebuilt_path,
+      self.proton_project_root().join(Relative("proton/prebuilt/\{platform}")),
+      dist,
     )
-    let assembled_value = Workspace::proton_manifest_string(
-      assembled, assembled_path, field,
-    )
-    if active_value != assembled_value {
-      raise PackageError(
-        "Proton runtime manifest mismatch for \"\{field}\": active has \"\{active_value}\", assembled runtime has \"\{assembled_value}\"",
-      )
-    }
   }
-  let cef_root = Workspace::proton_manifest_string(active, active_path, "cef")
-  if !@asyncfs.exists(cef_root) {
+  let cef_root = self.proton_manifest_path(active, active_path, "cef")
+  if !@asyncfs.exists(cef_root.0) {
     raise PackageError("Proton CEF cache not found: \{cef_root}")
   }
   for relative in Workspace::proton_runtime_required_files(platform) {
-    let required = join_path(dist, relative)
-    if !@asyncfs.exists(required) {
+    let required = dist.join(Relative(relative))
+    if !@asyncfs.exists(required.0) {
       raise PackageError("Proton runtime file not found: \{required}")
     }
   }
   dist
+}
+
+///|
+/// Require every artifact the prebuilt manifest declares to be byte-identical
+/// between the checked-in prebuilt and the assembled runtime. `cef setup`
+/// copies these files verbatim, so any difference means the runtime predates
+/// the current prebuilt and must be reassembled.
+async fn Workspace::require_fresh_prebuilt_artifacts(
+  prebuilt : Map[String, Json],
+  prebuilt_path : String,
+  prebuilt_root : @pathx.Absolute,
+  dist : @pathx.Absolute,
+) -> Unit {
+  guard prebuilt.get("artifacts") is Some(Object(artifacts)) else {
+    raise PackageError(
+      "Proton prebuilt manifest has no \"artifacts\" object: \{prebuilt_path}",
+    )
+  }
+  for name, value in artifacts {
+    guard value is String(spelled) else {
+      raise PackageError(
+        "Proton prebuilt artifact \"\{name}\" is not a string path: \{prebuilt_path}",
+      )
+    }
+    guard @pathx.Path(spelled).to_relative() is Some(relative) else {
+      raise PackageError(
+        "Proton prebuilt artifact \"\{name}\" is not a relative path: \{prebuilt_path}",
+      )
+    }
+    let shipped = prebuilt_root.join(relative)
+    let assembled = dist.join(relative)
+    if !@asyncfs.exists(assembled.0) {
+      raise PackageError("Proton runtime file not found: \{assembled}")
+    }
+    if @asyncfs.read_file(shipped.0).binary() !=
+      @asyncfs.read_file(assembled.0).binary() {
+      raise PackageError(
+        "Proton runtime is stale: \{assembled} differs from prebuilt \{shipped}",
+      )
+    }
+  }
 }
 
 ///|
@@ -541,7 +615,7 @@ pub async fn rebuild_libproton(
   extra_env? : Map[String, String] = Map([]),
 ) -> Unit {
   let cef_root = ws.proton_cef_root()
-  if !@asyncfs.exists(cef_root) {
+  if !@asyncfs.exists(cef_root.0) {
     raise PackageError(
       "CEF distribution cache not found: \{cef_root} (run cef setup)",
     )
@@ -557,7 +631,7 @@ pub async fn rebuild_libproton(
   }
   configure_args.push("-DBUILD_TESTING=OFF")
   configure_args.push("-DPROTON_WITH_ENGINE=ON")
-  configure_args.push("-DPROTON_ENGINE_ROOT=" + cef_root)
+  configure_args.push("-DPROTON_ENGINE_ROOT=" + cef_root.0)
   run_checked("cmake", configure_args, dir=ws.dir(), extra_env~)
   run_checked(
     "cmake",
@@ -568,11 +642,11 @@ pub async fn rebuild_libproton(
   let dist = proton_runtime_dist(ws)
   for artifact in artifacts {
     let (built, shipped) = artifact
-    copy_file(join_path(build_dir, built), join_path(dist, shipped))
+    copy_file(join_path(build_dir, built), dist.join(Relative(shipped)).0)
   }
   copy_file(
     ws.at("lepus/native/include/proton_native.h"),
-    join_path(dist, "include/proton_native.h"),
+    dist.join(Relative("include/proton_native.h")).0,
   )
 }
 
@@ -824,9 +898,10 @@ pub async fn build_native_host(
   runtime_dist? : String,
 ) -> Unit {
   // Resolve the read-only runtime prerequisite before starting the build.
-  let runtime_dist = match runtime_dist {
-    Some(path) => path
-    None => proton_runtime_dist(ws)
+  let runtime_dist = if runtime_dist is Some(path) {
+    path
+  } else {
+    proton_runtime_dist(ws).0
   }
   // The assembled runtime lives under the checked-out Proton project, not
   // necessarily above Moon's process cwd. Pass it explicitly so the prebuild
@@ -885,8 +960,14 @@ pub async fn write_text(path : String, content : String) -> Unit {
 ///|
 /// Create a directory and any missing parents if the path does not exist.
 pub async fn ensure_dir(path : String) -> Unit {
-  if !@asyncfs.exists(path) {
-    @asyncfs.mkdir(path, recursive=true)
+  if @asyncfs.exists(path) {
+    return
+  }
+  @asyncfs.mkdir(path, recursive=true) catch {
+    // A concurrent caller can win the creation race on this directory or a
+    // shared ancestor between the existence check and mkdir.
+    @os_error.OSError(_) as error if error.is_EEXIST() => ()
+    error => raise error
   }
 }
 
@@ -966,7 +1047,7 @@ async test "Proton CEF root follows the active runtime manifest" {
     manifest,
     Json::object({ "cef": Json::string(cef_root) }).stringify(),
   )
-  assert_eq(fixture.proton_cef_root(), cef_root)
+  assert_eq(fixture.proton_cef_root().0, cef_root)
   remove_path_if_exists(fixture_root)
 }
 
@@ -1004,27 +1085,88 @@ async test "matching Proton runtime is reused without invoking setup" {
     Json::object({
       "platform": Json::string(platform),
       "proton_version": Json::string(version),
+      "artifacts": Json::object({
+        "header": Json::string("include/proton_native.h"),
+      }),
     }).stringify(),
   )
-  let assembled_path = join_path(dist, "manifest.json")
-  ensure_dir((assembled_path : @path.Path).dirname().to_string())
-  write_text(
-    assembled_path,
-    Json::object({
-      "schema_version": Json::number(1),
-      "platform": Json::string(platform),
-      "proton_version": Json::string(version),
-      "cef_version": Json::string("cef-test"),
-      "dist": Json::string(relative_dist),
-    }).stringify(),
+  let shipped_header = fixture.proton_project_at(
+    "proton/prebuilt/\{platform}/include/proton_native.h",
   )
+  ensure_dir((shipped_header : @path.Path).dirname().to_string())
+  write_text(shipped_header, "fixture")
   for relative in Workspace::proton_runtime_required_files(platform) {
     let required = join_path(dist, relative)
     ensure_dir((required : @path.Path).dirname().to_string())
     write_text(required, "fixture")
   }
   ensure_cef_runtime(fixture, "setup-must-not-run")
-  assert_eq(proton_runtime_dist(fixture), dist)
+  assert_eq(proton_runtime_dist(fixture).0, dist)
+  remove_path_if_exists(fixture_root)
+}
+
+///|
+/// A prebuilt refresh that keeps the Proton version (a routine native rebuild)
+/// must still invalidate the assembled runtime; only the artifact bytes reveal
+/// the difference.
+async test "refreshed prebuilt bytes invalidate the assembled runtime" {
+  let ws = locate_workspace()
+  let fixture_root = ws.at("target/proton-prebuilt-stale-test")
+  remove_path_if_exists(fixture_root)
+  let fixture : Workspace = { root: fixture_root }
+  let prebuilt_root = fixture.proton_project_at("proton/prebuilt/test-platform")
+  let prebuilt_path = join_path(prebuilt_root, "manifest.json")
+  let prebuilt : Map[String, Json] = {
+    "artifacts": Json::object({
+      "header": Json::string("include/proton_native.h"),
+    }),
+  }
+  let dist = fixture.at("runtime-dist")
+  let shipped = join_path(prebuilt_root, "include/proton_native.h")
+  let assembled = join_path(dist, "include/proton_native.h")
+  ensure_dir((shipped : @path.Path).dirname().to_string())
+  ensure_dir((assembled : @path.Path).dirname().to_string())
+  write_text(shipped, "prebuilt-v2")
+  write_text(assembled, "prebuilt-v1")
+  try
+    Workspace::require_fresh_prebuilt_artifacts(
+      prebuilt,
+      prebuilt_path,
+      @pathx.Path(prebuilt_root).resolve(),
+      @pathx.Path(dist).resolve(),
+    )
+  catch {
+    error => assert_true(error.to_string().contains("Proton runtime is stale"))
+  } noraise {
+    _ => fail("expected differing prebuilt artifact bytes to fail validation")
+  }
+  write_text(assembled, "prebuilt-v2")
+  Workspace::require_fresh_prebuilt_artifacts(
+    prebuilt,
+    prebuilt_path,
+    @pathx.Path(prebuilt_root).resolve(),
+    @pathx.Path(dist).resolve(),
+  )
+  remove_path_if_exists(fixture_root)
+}
+
+///|
+/// Newer Proton CLIs record the runtime dist as an absolute path into the
+/// user-level cache; the packager must consume it verbatim instead of joining
+/// it below the Proton project root.
+async test "absolute runtime dist paths pass through unchanged" {
+  let ws = locate_workspace()
+  let fixture_root = ws.at("target/proton-absolute-dist-test")
+  remove_path_if_exists(fixture_root)
+  let fixture : Workspace = { root: fixture_root }
+  let dist = fixture.at("user-cache/runtimes/test-platform/test-runtime")
+  let active_path = fixture.proton_project_at(".proton/runtime.json")
+  ensure_dir((active_path : @path.Path).dirname().to_string())
+  write_text(
+    active_path,
+    Json::object({ "dist": Json::string(dist) }).stringify(),
+  )
+  assert_eq(proton_runtime_dist(fixture).0, dist)
   remove_path_if_exists(fixture_root)
 }
 

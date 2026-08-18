@@ -100,7 +100,7 @@ async fn copy_bundle_files(
   // shared library, bin/cef_process, resources). AppRun adds its lib dir to
   // LD_LIBRARY_PATH. The exact layout/rpath needs validation on Linux.
   @packaging.copy_tree(
-    @packaging.proton_runtime_dist(ws),
+    @packaging.proton_runtime_dist(ws).0,
     ws.at(UsrBinPath + "/proton"),
   )
 }

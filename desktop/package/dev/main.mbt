@@ -62,7 +62,7 @@ async fn Development::prepare_frontend(self : Development) -> Unit {
 /// artifacts from the matching Lepus sources.
 async fn Development::prepare_runtime(self : Development) -> String {
   self.workspace.prepare_checkout_proton_runtime(Development::proton_cli_path())
-  let runtime = @packaging.proton_runtime_dist(self.workspace)
+  let runtime = @packaging.proton_runtime_dist(self.workspace).0
   let normalized = (runtime : @path.Path).normalize()
   let helper = normalized
     .join("bin")
