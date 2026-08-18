@@ -1,28 +1,14 @@
 ///|
 test "changes_to_decorations maps the three change types (quickDiffDecorator.ts:140)" {
-  let decorations = changes_to_decorations([
-    // Add: modified lines 2..3
-    {
-      original_start_line_number: 1,
-      original_end_line_number: 0,
-      modified_start_line_number: 2,
-      modified_end_line_number: 3,
-    },
-    // Modify: modified line 5
-    {
-      original_start_line_number: 4,
-      original_end_line_number: 4,
-      modified_start_line_number: 5,
-      modified_end_line_number: 5,
-    },
-    // Delete after modified line 6
-    {
-      original_start_line_number: 6,
-      original_end_line_number: 7,
-      modified_start_line_number: 6,
-      modified_end_line_number: 0,
-    },
-  ])
+  let added = compute_changes(["1", "4"], ["1", "2", "3", "4"])[0]
+  let modified = compute_changes(["1", "2", "3", "4", "old"], [
+      "1", "2", "3", "4", "new",
+    ])[0]
+  let deleted = compute_changes(
+      ["1", "2", "3", "4", "5", "6", "old 1", "old 2"],
+      ["1", "2", "3", "4", "5", "6"],
+    )[0]
+  let decorations = changes_to_decorations([added, modified, deleted])
   assert_eq(decorations.length(), 3)
 
   // Add: whole-line, columns 1..1 over the modified span.

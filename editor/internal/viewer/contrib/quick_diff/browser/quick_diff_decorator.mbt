@@ -76,37 +76,39 @@ let deleted_options : @model.ModelDecorationOptions = create_decoration(
 /// modified line span whole-line, deletions pin a zero-width marker to the
 /// end of the line the deleted block follows.
 pub fn changes_to_decorations(
-  changes : Array[@diff.Change],
+  changes : Array[@diff.DetailedLineRangeMapping],
 ) -> Array[@model.ModelDeltaDecoration] {
   let decorations : Array[@model.ModelDeltaDecoration] = []
   for change in changes {
-    let start_line_number = change.modified_start_line_number
-    let end_line_number = if change.modified_end_line_number == 0 {
-      start_line_number
-    } else {
-      change.modified_end_line_number
-    }
     match @quick_diff.get_change_type(change) {
-      Add =>
+      Add => {
+        let start_line_number = change.modified.start_line_number
+        let end_line_number = change.modified.end_line_number_exclusive - 1
         decorations.push({
           range: Range(start_line_number, 1, end_line_number, 1),
           options: added_options,
         })
-      Delete =>
+      }
+      Delete => {
+        let anchor_line_number = change.modified.start_line_number - 1
         decorations.push({
           range: Range(
-            start_line_number,
+            anchor_line_number,
             MAX_COLUMN,
-            start_line_number,
+            anchor_line_number,
             MAX_COLUMN,
           ),
           options: deleted_options,
         })
-      Modify =>
+      }
+      Modify => {
+        let start_line_number = change.modified.start_line_number
+        let end_line_number = change.modified.end_line_number_exclusive - 1
         decorations.push({
           range: Range(start_line_number, 1, end_line_number, 1),
           options: modified_options,
         })
+      }
     }
   }
   decorations

@@ -16,8 +16,6 @@
 // - `lineRangeMappingFromRangeMappings`/`getLineRangeMapping` — DEFERRED
 //   (only the char-level refinement pipeline builds line mappings from range
 //   mappings; the viewer's computer emits line mappings directly).
-// - `lineRangeMappingFromChange` — DEFERRED (no consumer; the viewer converts
-//   the other direction, see `to_line_changes` in the quick-diff contrib).
 
 ///|
 /// Maps a line range in the original text model to a line range in the
