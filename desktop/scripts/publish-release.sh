@@ -19,7 +19,7 @@
 set -euo pipefail
 
 usage() {
-  sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 desktop_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -65,28 +65,8 @@ case "${1:-}" in
       # as SeekMoon.app.zip, which do not encode the target platform.
       url="$url?platform=$platform"
     fi
-    echo "uploading $artifact"
-    echo "       to $url"
-    curl_status=0
-    response="$(curl -sS --fail-with-body -T "$artifact" \
-      -H "Authorization: Bearer $token" "$url")" || curl_status=$?
-    if ((curl_status != 0)); then
-      if [[ -n "$response" ]]; then
-        echo "$response" >&2
-      fi
-      exit "$curl_status"
-    fi
-    echo "$response"
-    local_sha="$(shasum -a 256 "$artifact" | cut -d' ' -f1)"
-    if [[ "$response" != *"\"sha256\":\"$local_sha\""* ]]; then
-      echo "DIGEST MISMATCH: local sha256 is $local_sha — do not publish" >&2
-      exit 1
-    fi
-    # Clients download from OSS behind the CDN once the server's
-    # OPENSEEK_RELEASES_BASE_URL points there, so every artifact the API
-    # accepts is mirrored to the same version path on OSS. The API upload
-    # above is the immutability gate — it rejects re-uploads of a published
-    # version — so the mirror can only ever rewrite an unpublished file.
+    # Resolve the OSS mirror destination up front, so a missing or wrong
+    # configuration fails before the slow API upload rather than after it.
     oss_bucket="${OPENSEEK_OSS_BUCKET:?set OPENSEEK_OSS_BUCKET}"
     oss_region="${OPENSEEK_OSS_REGION:?set OPENSEEK_OSS_REGION}"
     if [[ -n "${OPENSEEK_OSS_PREFIX:-}" ]]; then
@@ -111,8 +91,31 @@ case "${1:-}" in
       content_type="application/x-apple-diskimage"
     fi
     oss_destination="oss://$oss_bucket/$oss_prefix/v$version/$release_name"
+    echo "uploading $artifact"
+    echo "       to $url"
+    curl_status=0
+    response="$(curl -sS --fail-with-body -T "$artifact" \
+      -H "Authorization: Bearer $token" "$url")" || curl_status=$?
+    if ((curl_status != 0)); then
+      if [[ -n "$response" ]]; then
+        echo "$response" >&2
+      fi
+      exit "$curl_status"
+    fi
+    echo "$response"
+    local_sha="$(shasum -a 256 "$artifact" | cut -d' ' -f1)"
+    if [[ "$response" != *"\"sha256\":\"$local_sha\""* ]]; then
+      echo "DIGEST MISMATCH: local sha256 is $local_sha — do not publish" >&2
+      exit 1
+    fi
+    # Clients download from OSS behind the CDN once the server's
+    # OPENSEEK_RELEASES_BASE_URL points there, so every artifact the API
+    # accepts is mirrored to the same version path on OSS. The API upload
+    # above is the immutability gate — it rejects re-uploads of a published
+    # version — so the mirror can only ever rewrite an unpublished file;
+    # --force keeps that rewrite from asking for confirmation in CI.
     echo "mirroring to $oss_destination"
-    ossutil cp --region "$oss_region" \
+    ossutil cp --force --region "$oss_region" \
       --content-type "$content_type" \
       --cache-control "public, max-age=31536000, immutable" \
       "$artifact" "$oss_destination"

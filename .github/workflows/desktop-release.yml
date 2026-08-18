@@ -178,6 +178,8 @@ jobs:
           set -euo pipefail
           curl -fsSL -o "$RUNNER_TEMP/ossutil.zip" \
             "https://gosspublic.alicdn.com/ossutil/v2/2.3.0/ossutil-2.3.0-mac-arm64.zip"
+          echo "058fd048f321f8c80def8b748030531646eefe3a82837bf16b581ba7d9c84ac7  $RUNNER_TEMP/ossutil.zip" \
+            | shasum -a 256 -c -
           unzip -q "$RUNNER_TEMP/ossutil.zip" -d "$RUNNER_TEMP/ossutil"
           sudo install -m 755 \
             "$RUNNER_TEMP/ossutil/ossutil-2.3.0-mac-arm64/ossutil" \
