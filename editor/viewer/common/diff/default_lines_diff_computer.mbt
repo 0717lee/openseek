@@ -2,9 +2,9 @@
 // `vscode/src/vs/editor/common/diff/defaultLinesDiffComputer/
 // defaultLinesDiffComputer.ts` (checked-in vscode submodule) over a different engine.
 //
-// DEVIATION (by decision, 2026-07-09): the computation is delegated to the
-// `moonbit-community/piediff` library (a GNU-diffutils-style bidirectional
-// Myers) instead of porting Monaco's Myers + refinement pipeline. Only the
+// DEVIATION (by decision, 2026-07-09): the computation is delegated to Core's
+// `diff` package (a GNU-diffutils-style bidirectional Myers) instead of porting
+// Monaco's Myers + refinement pipeline. Only the
 // source method contract, the result types, and the two trivial-input branches
 // are 1:1;
 // everything the source computes beyond a minimal line-level edit script is
@@ -14,11 +14,11 @@
 //   `removeVeryShortMatching*`) — `inner_changes` is always `None`;
 // - move detection (`computeMovedLines`) — the result field is not exposed and
 //   `options.compute_moves` is ignored;
-// - the timeout protocol — piediff's `cutoff` bounds the search *depth*, not
+// - the timeout protocol — Core diff's `cutoff` bounds the search *depth*, not
 //   wall-clock time, and degrades silently to a correct-but-suboptimal
 //   script, so `hit_timeout` is always `false`.
 //   `options.max_computation_time_ms == 0` (Monaco's `InfiniteTimeout`) maps
-//   to an effectively-unbounded cutoff; any other value keeps piediff's
+//   to an effectively-unbounded cutoff; any other value keeps Core diff's
 //   default `~sqrt(n+m)` heuristic.
 // Line-range boundaries may therefore differ from Monaco's output by
 // tie-breaking among equal adjacent lines; tests assert diff *validity*
@@ -27,11 +27,11 @@
 // Parity ledger (source members): `computeDiff` trivial-equal branch (:28)
 // and one-side-empty-document branch (:33) — PORTED; the remainder of
 // `computeDiff` plus `refineDiff` and the assertion harness — N-A (replaced
-// by the piediff engine per the deviation above).
+// by the Core diff engine per the deviation above).
 
 ///|
 /// `DefaultLinesDiffComputer` (`defaultLinesDiffComputer.ts:26`), engine
-/// swapped for piediff (see the file header).
+/// swapped for Core diff (see the file header).
 struct DefaultLinesDiffComputer {
   _unit : Unit
 } derive(Eq, Debug)
@@ -86,7 +86,7 @@ pub fn DefaultLinesDiffComputer::compute_diff(
     }
   }
 
-  // Engine: piediff over the (optionally trimmed) line arrays. Trimming
+  // Engine: Core diff over the (optionally trimmed) line arrays. Trimming
   // before hashing is how the source's `ignoreTrimWhitespace` line equality
   // behaves at line granularity (`defaultLinesDiffComputer.ts:60`).
   let old_input = if options.ignore_trim_whitespace {
@@ -104,13 +104,13 @@ pub fn DefaultLinesDiffComputer::compute_diff(
   } else {
     None
   }
-  let d = @piediff.Diff::Diff(old=old_input[:], new=new_input[:], cutoff?)
+  let d = @core_diff.Diff::Diff(old=old_input[:], new=new_input[:], cutoff?)
 
   // Convert the flat edit script into hunks: each maximal run of
   // consecutive `Delete`/`Insert` edits (separated by `Equal` runs) is one
-  // `DetailedLineRangeMapping`. piediff emits at most one `Delete` followed
+  // `DetailedLineRangeMapping`. Core diff emits at most one `Delete` followed
   // by at most one `Insert` per hunk, but the converter tolerates any run.
-  let edits = d.edits
+  let edits = d.edits()
   let changes : Array[DetailedLineRangeMapping] = []
   let mut i = 0
   while i < edits.length() {
@@ -130,14 +130,14 @@ pub fn DefaultLinesDiffComputer::compute_diff(
         while i < edits.length() {
           match edits[i] {
             Equal(..) => break
-            Delete(old_index~, new_index~, len~) => {
+            Delete(old_index~, old_len~, new_index~) => {
               old_start = old_start.min(old_index)
-              old_end = old_end.max(old_index + len)
+              old_end = old_end.max(old_index + old_len)
               anchor_new = new_index
             }
-            Insert(old_index~, new_index~, len~) => {
+            Insert(old_index~, new_index~, new_len~) => {
               new_start = new_start.min(new_index)
-              new_end = new_end.max(new_index + len)
+              new_end = new_end.max(new_index + new_len)
               anchor_old = old_index
             }
           }

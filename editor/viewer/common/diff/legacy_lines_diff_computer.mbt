@@ -7,7 +7,7 @@
 // I-prefix is dropped tree-wide). `ICharChange`, `ILineChange`,
 // `IDiffComputationResult`, `ILinesDiff`, the `LegacyLinesDiffComputer` /
 // `DiffComputer` machinery and its helpers — N-A (the legacy Myers engine is
-// superseded; the viewer's default computer is piediff-backed, see
+// superseded; the viewer's default computer is Core-diff-backed, see
 // `default_lines_diff_computer.mbt`).
 
 ///|

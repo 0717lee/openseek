@@ -113,9 +113,9 @@ test "ignore_trim_whitespace can ignore re-indentation" {
 ## Boundaries and checks
 
 The mapping shapes follow `vs/editor/common/diff/`. Computation delegates to
-`moonbit-community/piediff`; `max_computation_time_ms` preserves the bounded
-work contract callers depend on. Internal mapping helpers and constructors are
-not part of the package interface.
+`moonbitlang/core/diff`; `max_computation_time_ms` preserves the bounded work
+contract callers depend on. Internal mapping helpers and constructors are not
+part of the package interface.
 
 ```sh
 moon test --target js viewer/common/diff
