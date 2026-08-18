@@ -1,30 +1,27 @@
 ///|
-fn change_str(change : @diff.Change) -> String {
-  "(\{change.original_start_line_number},\{change.original_end_line_number})->(\{change.modified_start_line_number},\{change.modified_end_line_number})"
+fn change_str(change : @diff.DetailedLineRangeMapping) -> String {
+  "\{change.original.to_string()}->\{change.modified.to_string()}"
 }
 
 ///|
-test "compute_changes re-encodes the three change shapes (diffEditorWidget.ts:759)" {
-  // Modification: exclusive ends become inclusive.
+test "compute_changes preserves the three detailed line-mapping shapes" {
   assert_eq(
     change_str(
       compute_changes(["a", "old 1", "old 2", "tail"], ["a", "new", "tail"])[0],
     ),
-    "(2,3)->(2,2)",
+    "[2,4)->[2,3)",
   )
-  // Insertion: empty original side → start-1 / 0.
   assert_eq(
     change_str(
       compute_changes(["a", "tail"], ["a", "new 1", "new 2", "tail"])[0],
     ),
-    "(1,0)->(2,3)",
+    "[2,2)->[2,4)",
   )
-  // Deletion: empty modified side → start-1 / 0.
   assert_eq(
     change_str(
       compute_changes(["a", "old 1", "old 2", "tail"], ["a", "tail"])[0],
     ),
-    "(2,3)->(1,0)",
+    "[2,4)->[2,2)",
   )
 }
 
@@ -34,9 +31,9 @@ test "compute_changes runs the full pipeline over line arrays" {
     "a", "new", "b", "inserted", "tail",
   ])
   assert_eq(changes.length(), 2)
-  assert_eq(change_str(changes[0]), "(2,2)->(2,2)")
+  assert_eq(change_str(changes[0]), "[2,3)->[2,3)")
   assert_eq(@quick_diff.get_change_type(changes[0]), Modify)
-  assert_eq(change_str(changes[1]), "(3,0)->(4,4)")
+  assert_eq(change_str(changes[1]), "[4,4)->[4,5)")
   assert_eq(@quick_diff.get_change_type(changes[1]), Add)
 }
 

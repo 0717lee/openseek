@@ -3,9 +3,8 @@
 // registry.
 //
 // Parity ledger: `getDefault` — PORTED (package-level fn; the viewer has no
-// namespace object). `getLegacy` — N-A (the legacy engine is not ported; the
-// default computer is Core-diff-backed, see
-// `default_lines_diff_computer.mbt`).
+// namespace object). The other source registry entries are N-A; this package
+// exposes one Core-diff-backed computer.
 
 ///|
 /// `linesDiffComputers.getDefault()` (`linesDiffComputers.ts:11`).

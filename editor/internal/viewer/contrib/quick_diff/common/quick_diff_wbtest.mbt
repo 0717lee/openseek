@@ -1,25 +1,25 @@
 ///|
 fn test_change(
-  original_start : Int,
-  original_end : Int,
-  modified_start : Int,
-  modified_end : Int,
-) -> @diff.Change {
-  {
-    original_start_line_number: original_start,
-    original_end_line_number: original_end,
-    modified_start_line_number: modified_start,
-    modified_end_line_number: modified_end,
-  }
+  original : Array[String],
+  modified : Array[String],
+) -> @diff.DetailedLineRangeMapping raise {
+  let changes = @diff.get_default().compute_diff(original, modified, {
+      ignore_trim_whitespace: false,
+      max_computation_time_ms: 0,
+      compute_moves: false,
+    }).changes
+  assert_eq(changes.length(), 1)
+  changes[0]
 }
 
 ///|
 test "get_change_type mirrors quickDiff.ts:121" {
-  // originalEndLineNumber === 0 → Add
-  assert_eq(get_change_type(test_change(1, 0, 2, 3)), Add)
-  // modifiedEndLineNumber === 0 → Delete
-  assert_eq(get_change_type(test_change(2, 4, 1, 0)), Delete)
-  assert_eq(get_change_type(test_change(2, 2, 2, 2)), Modify)
+  assert_eq(get_change_type(test_change(["a", "c"], ["a", "b", "c"])), Add)
+  assert_eq(get_change_type(test_change(["a", "b", "c"], ["a", "c"])), Delete)
+  assert_eq(
+    get_change_type(test_change(["a", "old", "c"], ["a", "new", "c"])),
+    Modify,
+  )
 }
 
 ///|

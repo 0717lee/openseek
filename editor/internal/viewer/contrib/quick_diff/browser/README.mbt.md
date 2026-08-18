@@ -1,8 +1,8 @@
 # internal/viewer/contrib/quick_diff/browser
 
 The JS-target quick-diff calculation and decoration implementation. It
-converts detailed line mappings into model changes, computes line diffs, and
-maps changes to editor decorations consumed by the root Viewer.
+computes detailed line mappings and maps them directly to editor decorations
+consumed by the root Viewer.
 
 > The code blocks on this page are `mbt nocheck`. This package is js-only and
 > its values need a live DOM, which `moon test` (Node, no DOM) cannot provide.
@@ -13,7 +13,7 @@ maps changes to editor decorations consumed by the root Viewer.
 flowchart LR
   BASE["quick_diff/common<br>baseline per URI"] --> D["viewer/common/diff"]
   MODEL["current model text"] --> D
-  D -->|"Change[] → ChangeType"| G["gutter decorations"]
+  D -->|"DetailedLineRangeMapping[] → ChangeType"| G["gutter decorations"]
 ```
 
 ```mbt nocheck

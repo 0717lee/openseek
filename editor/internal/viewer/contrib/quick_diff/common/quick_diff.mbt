@@ -27,11 +27,12 @@ pub(all) enum ChangeType {
 } derive(Eq, Debug)
 
 ///|
-/// `getChangeType` (`quickDiff.ts:121`).
-pub fn get_change_type(change : @diff.Change) -> ChangeType {
-  if change.original_end_line_number == 0 {
+/// `getChangeType` (`quickDiff.ts:121`), expressed over the modern line-range
+/// mapping already returned by the diff computer.
+pub fn get_change_type(change : @diff.DetailedLineRangeMapping) -> ChangeType {
+  if change.original.is_empty() {
     Add
-  } else if change.modified_end_line_number == 0 {
+  } else if change.modified.is_empty() {
     Delete
   } else {
     Modify

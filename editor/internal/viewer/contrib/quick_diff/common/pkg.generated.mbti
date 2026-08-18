@@ -8,7 +8,7 @@ import {
 }
 
 // Values
-pub fn get_change_type(@diff.Change) -> ChangeType
+pub fn get_change_type(@diff.DetailedLineRangeMapping) -> ChangeType
 
 // Errors
 

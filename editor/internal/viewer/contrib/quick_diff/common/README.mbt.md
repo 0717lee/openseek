@@ -9,7 +9,7 @@ flowchart LR
   H["host / source control"] -->|set_original_content| S["QuickDiffService<br>baseline per URI"]
   S -->|quick_diff_handle| API["viewer/common/quick_diff_api<br>QuickDiffHandle"]
   API --> V["root Viewer"]
-  D["viewer/common/diff<br>Change"] -->|get_change_type| K["ChangeType<br>Add / Modify / Delete"]
+  D["viewer/common/diff<br>DetailedLineRangeMapping"] -->|get_change_type| K["ChangeType<br>Add / Modify / Delete"]
   K --> B["…/quick_diff/browser<br>gutter decorations"]
 ```
 
@@ -85,31 +85,33 @@ test "the exported handle reads the same baseline state" {
 
 ## Change classification
 
-`get_change_type` reduces a `viewer/common/diff.Change` to the three kinds a
+`get_change_type` reduces a detailed line-range mapping to the three kinds a
 gutter can draw. The rule is which side is empty: an empty original is an
 addition, an empty modified is a deletion, and anything else is a modification.
 
 ```mbt check
 ///|
 test "an empty side decides between Add, Delete, and Modify" {
-  let added : @diff.Change = {
-    original_start_line_number: 2,
-    original_end_line_number: 1,
-    modified_start_line_number: 2,
-    modified_end_line_number: 3,
+  let options : @diff.LinesDiffComputerOptions = {
+    ignore_trim_whitespace: false,
+    max_computation_time_ms: 0,
+    compute_moves: false,
   }
-  let deleted : @diff.Change = {
-    original_start_line_number: 2,
-    original_end_line_number: 3,
-    modified_start_line_number: 2,
-    modified_end_line_number: 1,
-  }
-  let modified : @diff.Change = {
-    original_start_line_number: 2,
-    original_end_line_number: 3,
-    modified_start_line_number: 2,
-    modified_end_line_number: 3,
-  }
+  let added = @diff.get_default().compute_diff(
+      ["a", "c"],
+      ["a", "b", "c"],
+      options,
+    ).changes[0]
+  let deleted = @diff.get_default().compute_diff(
+      ["a", "b", "c"],
+      ["a", "c"],
+      options,
+    ).changes[0]
+  let modified = @diff.get_default().compute_diff(
+      ["a", "old", "c"],
+      ["a", "new", "c"],
+      options,
+    ).changes[0]
   debug_inspect(
     (
       @common.get_change_type(added),
@@ -117,7 +119,7 @@ test "an empty side decides between Add, Delete, and Modify" {
       @common.get_change_type(modified),
     ),
     content=(
-      #|(Modify, Modify, Modify)
+      #|(Add, Delete, Modify)
     ),
   )
 }
