@@ -266,6 +266,78 @@ test('renders character changes inside the line-level diff', async ({ page }) =>
   await expect(modifiedPane.locator('.diff-editor-line-insert')).toHaveCount(1);
 });
 
+test('switches standard token and tree diff only for mbt comparisons', async ({ page }) => {
+  await page.goto('/embed.html');
+  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
+  await page.locator('[data-action="toggle-diff"]').click();
+
+  const diff = page.locator('.diff-viewer-host > .moonbit-diff-editor');
+  const toolbar = diff.locator('.moonbit-diff-editor-toolbar');
+  const standard = toolbar.getByRole('button', { name: 'Standard diff' });
+  const token = toolbar.getByRole('button', { name: 'Token diff' });
+  const tree = toolbar.getByRole('button', { name: 'Tree diff' });
+  await expect(toolbar).toBeVisible();
+  await expect(standard).toHaveAttribute('aria-pressed', 'true');
+  await expect(diff).toHaveAttribute('data-diff-renderer', 'standard');
+
+  await token.click();
+  await expect(token).toHaveAttribute('aria-pressed', 'true');
+  await expect(diff).toHaveAttribute('data-diff-mode', 'token');
+  await expect(diff).toHaveAttribute('data-diff-renderer', 'token');
+  await expect(diff).not.toHaveAttribute('data-diff-fallback', 'true');
+
+  await tree.click();
+  await expect(tree).toHaveAttribute('aria-pressed', 'true');
+  await expect(diff).toHaveAttribute('data-diff-mode', 'tree');
+  await expect(diff).toHaveAttribute('data-diff-renderer', 'tree');
+  await expect(diff).not.toHaveAttribute('data-diff-fallback', 'true');
+
+  await standard.click();
+  await expect(standard).toHaveAttribute('aria-pressed', 'true');
+  await expect(diff).toHaveAttribute('data-diff-renderer', 'standard');
+
+  // Manifests and other non-.mbt files continue to use the existing diff and
+  // do not expose language-specific choices.
+  await page.locator('[data-action="toggle-diff"]').click();
+  await page.locator(workspaceItem('moon.mod')).click();
+  await page.locator('[data-action="toggle-diff"]').click();
+  await expect(diff).toBeVisible();
+  await expect(toolbar).toBeHidden();
+  await expect(diff).not.toHaveAttribute('data-moondiff-available', 'true');
+  await expect(diff).toHaveAttribute('data-diff-renderer', 'standard');
+});
+
+test('falls back to standard diff when tree diff cannot parse a model', async ({ page }) => {
+  await page.goto('/embed.html');
+  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
+  await page.locator(workspaceItem('broken.mbt')).click();
+  await expect(page.locator(sourceEditor)).toContainText('fn okay');
+  await page.locator('[data-action="toggle-diff"]').click();
+
+  const diff = page.locator('.diff-viewer-host > .moonbit-diff-editor');
+  const toolbar = diff.locator('.moonbit-diff-editor-toolbar');
+  const standard = toolbar.getByRole('button', { name: 'Standard diff' });
+  const token = toolbar.getByRole('button', { name: 'Token diff' });
+  const tree = toolbar.getByRole('button', { name: 'Tree diff' });
+  await tree.click();
+  await expect(tree).toHaveAttribute('aria-pressed', 'true');
+  await expect(diff).toHaveAttribute('data-diff-mode', 'tree');
+  await expect(diff).toHaveAttribute('data-diff-renderer', 'standard');
+  await expect(diff).toHaveAttribute('data-diff-fallback', 'true');
+  await expect(toolbar.locator('.moonbit-diff-editor-mode-status')).toHaveText(
+    'Tree diff unavailable — showing standard diff',
+  );
+
+  // Token mode does not require a parseable tree, and leaving the failed
+  // mode clears the fallback notice.
+  await token.click();
+  await expect(diff).toHaveAttribute('data-diff-renderer', 'token');
+  await expect(diff).not.toHaveAttribute('data-diff-fallback', 'true');
+  await expect(toolbar.locator('.moonbit-diff-editor-mode-status')).toBeHidden();
+  await standard.click();
+  await expect(diff).toHaveAttribute('data-diff-renderer', 'standard');
+});
+
 test('renders a wide single-line comparison without eager row expansion', async ({ page }) => {
   await page.goto('/embed.html');
   await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');

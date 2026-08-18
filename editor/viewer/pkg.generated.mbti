@@ -45,11 +45,19 @@ type DiffViewer
 pub fn DiffViewer::clear(Self) -> Unit
 pub fn DiffViewer::create(@dom.Element, services? : ViewerServices, options? : ViewerOptions, render_mode? : DiffEditorRenderMode) -> Self
 pub fn DiffViewer::dispose(Self) -> Unit
+pub fn DiffViewer::get_diff_mode(Self) -> DiffViewerMode
 pub fn DiffViewer::get_model(Self) -> DiffEditorModel?
 pub fn DiffViewer::get_render_mode(Self) -> DiffEditorRenderMode
 pub fn DiffViewer::layout(Self) -> Unit
+pub fn DiffViewer::set_diff_mode(Self, DiffViewerMode) -> Unit
 pub fn DiffViewer::set_model(Self, DiffEditorModel?) -> Unit
 pub fn DiffViewer::set_render_mode(Self, DiffEditorRenderMode) -> Unit
+
+pub(all) enum DiffViewerMode {
+  StandardDiff
+  TokenDiff
+  TreeDiff
+} derive(Eq)
 
 type EditorDecorationsCollection
 pub fn EditorDecorationsCollection::append(Self, Array[@model.ModelDeltaDecoration]) -> Array[String]

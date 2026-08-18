@@ -64,6 +64,7 @@ fn memory_workspace() -> MemoryWorkspace {
   let directories : Map[String, Array[@workspace.WorkspaceStat]] = Map([])
   directories[memory_root] = [
     memory_dir("src", "src"),
+    memory_file("broken.mbt", "broken.mbt"),
     memory_file("large.mbt", "large.mbt"),
     memory_file("tabbed-deletion.mbt", "tabbed-deletion.mbt"),
     memory_file("oversized-line.mbt", "oversized-line.mbt"),
@@ -78,6 +79,7 @@ fn memory_workspace() -> MemoryWorkspace {
     memory_file("src/lib/util.mbt", "util.mbt"),
   ]
   let documents : Map[String, String] = Map([])
+  documents["\{memory_root}/broken.mbt"] = "fn okay() {}\n"
   documents["\{memory_root}/large.mbt"] = large_diff_document("modified")
   documents["\{memory_root}/tabbed-deletion.mbt"] = "let retained = 1\n"
   documents["\{memory_root}/oversized-line.mbt"] = oversized_diff_line("m")
@@ -106,6 +108,7 @@ fn memory_workspace() -> MemoryWorkspace {
     #|
   )
   let original_documents : Map[String, String] = Map([])
+  original_documents["\{memory_root}/broken.mbt"] = "fn broken( {\n"
   original_documents["\{memory_root}/large.mbt"] = large_diff_document(
     "original",
   )

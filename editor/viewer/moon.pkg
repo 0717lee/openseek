@@ -42,6 +42,8 @@ import {
   "moonbitlang/editor/internal/viewer/ui/scrollbar",
   "moonbitlang/editor/viewer/common/view_layout",
   "moonbitlang/editor/viewer/common/view_model",
+  "moonbit-community/moondiff/mbtdiff",
+  "moonbit-community/moondiff/tokdiff",
   "moonbit-community/rabbita/dom" @rdom,
   "moonbit-community/rabbita/js",
 }
