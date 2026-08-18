@@ -6,11 +6,10 @@
 // decorations, alignment ViewZones, and vertical/horizontal scroll
 // synchronization.
 //
-// Phase-one exclusions are explicit: no character-level inner changes, moved
-// blocks, inline mode, revert actions, unchanged-region collapsing, or
-// overview ruler. Soft wrapping and folding are disabled in the child panes
-// because fixed-height logical lines are the invariant behind the current
-// ViewZone alignment algorithm.
+// Remaining exclusions are explicit: no moved blocks, inline mode, revert
+// actions, unchanged-region collapsing, or overview ruler. Soft wrapping and
+// folding are disabled in the child panes because fixed-height logical lines
+// are the invariant behind the current ViewZone alignment algorithm.
 
 ///|
 /// The two caller-owned text models displayed by a DiffViewer. Like Monaco's
@@ -289,27 +288,44 @@ fn DiffViewer::refresh_diff(self : DiffViewer) -> Unit {
   let changes : Array[DiffLineChange] = diff.changes.map(change => {
     original: change.original,
     modified: change.modified,
+    inner_changes: change.get_inner_changes(),
   })
   let presentation = diff_presentation(changes)
+  let original_decorations = line_decorations(
+    diff_model.original,
+    presentation.original_changed,
+    "diff-editor-line-delete",
+    "diff-editor-gutter-delete",
+    "diff-editor-original-line",
+  )
+  original_decorations.append(
+    inline_decorations(
+      presentation.original_inner_changed,
+      "diff-editor-char-delete",
+      "diff-editor-original-character",
+    ),
+  )
   self.original_decoration_ids = self.original_viewer.delta_decorations(
     [],
-    line_decorations(
-      diff_model.original,
-      presentation.original_changed,
-      "diff-editor-line-delete",
-      "diff-editor-gutter-delete",
-      "diff-editor-original-line",
+    original_decorations,
+  )
+  let modified_decorations = line_decorations(
+    diff_model.modified,
+    presentation.modified_changed,
+    "diff-editor-line-insert",
+    "diff-editor-gutter-insert",
+    "diff-editor-modified-line",
+  )
+  modified_decorations.append(
+    inline_decorations(
+      presentation.modified_inner_changed,
+      "diff-editor-char-insert",
+      "diff-editor-modified-character",
     ),
   )
   self.modified_decoration_ids = self.modified_viewer.delta_decorations(
     [],
-    line_decorations(
-      diff_model.modified,
-      presentation.modified_changed,
-      "diff-editor-line-insert",
-      "diff-editor-gutter-insert",
-      "diff-editor-modified-line",
-    ),
+    modified_decorations,
   )
   self.original_zone_ids = install_alignment_zones(
     self.original_viewer,
@@ -347,12 +363,15 @@ priv struct DiffSpacer {
 priv struct DiffLineChange {
   original : @base_common.LineRange
   modified : @base_common.LineRange
+  inner_changes : Array[(@base_common.Range, @base_common.Range)]?
 }
 
 ///|
 priv struct DiffPresentation {
   original_changed : Array[@base_common.LineRange]
   modified_changed : Array[@base_common.LineRange]
+  original_inner_changed : Array[@base_common.Range]
+  modified_inner_changed : Array[@base_common.Range]
   original_spacers : Array[DiffSpacer]
   modified_spacers : Array[DiffSpacer]
 }
@@ -365,6 +384,8 @@ priv struct DiffPresentation {
 fn diff_presentation(changes : Array[DiffLineChange]) -> DiffPresentation {
   let original_changed = []
   let modified_changed = []
+  let original_inner_changed = []
+  let modified_inner_changed = []
   let original_spacers = []
   let modified_spacers = []
   for change in changes {
@@ -373,6 +394,19 @@ fn diff_presentation(changes : Array[DiffLineChange]) -> DiffPresentation {
     }
     if !change.modified.is_empty() {
       modified_changed.push(change.modified)
+    }
+    match change.inner_changes {
+      Some(inner_changes) =>
+        for inner_change in inner_changes {
+          let (original, modified) = inner_change
+          if !original.is_empty() {
+            original_inner_changed.push(original)
+          }
+          if !modified.is_empty() {
+            modified_inner_changed.push(modified)
+          }
+        }
+      None => ()
     }
     let original_length = change.original.length()
     let modified_length = change.modified.length()
@@ -388,7 +422,14 @@ fn diff_presentation(changes : Array[DiffLineChange]) -> DiffPresentation {
       })
     }
   }
-  { original_changed, modified_changed, original_spacers, modified_spacers }
+  {
+    original_changed,
+    modified_changed,
+    original_inner_changed,
+    modified_inner_changed,
+    original_spacers,
+    modified_spacers,
+  }
 }
 
 ///|
@@ -425,6 +466,22 @@ fn line_decorations(
     })
   }
   decorations
+}
+
+///|
+fn inline_decorations(
+  ranges : Array[@base_common.Range],
+  inline_class : String,
+  description : String,
+) -> Array[@model.ModelDeltaDecoration] {
+  ranges.map(range => {
+    range,
+    options: ModelDecorationOptions(
+      "",
+      inline_class_name=inline_class,
+      description~,
+    ),
+  })
 }
 
 ///|

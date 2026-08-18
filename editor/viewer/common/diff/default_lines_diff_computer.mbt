@@ -4,14 +4,12 @@
 //
 // DEVIATION (by decision, 2026-07-09): the computation is delegated to Core's
 // `diff` package (a GNU-diffutils-style bidirectional Myers) instead of porting
-// Monaco's Myers + refinement pipeline. Only the
-// source method contract, the result types, and the two trivial-input branches
-// are 1:1;
-// everything the source computes beyond a minimal line-level edit script is
-// not produced:
-// - char-level inner changes (`refineDiff`, `optimizeSequenceDiffs`,
-//   `extendDiffsToEntireWordIfAppropriate`, `removeShortMatches`,
-//   `removeVeryShortMatching*`) — `inner_changes` is always `None`;
+// Monaco's Myers + refinement pipeline. The source method contract, the result
+// types, and the two trivial-input branches are 1:1. Character-level inner
+// changes are computed with a bounded Core-diff scalar pass, but Monaco's
+// refinement heuristics (`optimizeSequenceDiffs`,
+// `extendDiffsToEntireWordIfAppropriate`, `removeShortMatches`,
+// `removeVeryShortMatching*`) are not ported;
 // - move detection (`computeMovedLines`) — the result field is not exposed and
 //   `options.compute_moves` is ignored;
 // - the timeout protocol — Core diff's `cutoff` bounds the search *depth*, not
@@ -64,22 +62,12 @@ pub fn DefaultLinesDiffComputer::compute_diff(
         DetailedLineRangeMapping(
           LineRange(1, original_lines.length() + 1),
           LineRange(1, modified_lines.length() + 1),
-          Some([
-            RangeMapping(
-              Range(
-                1,
-                1,
-                original_lines.length(),
-                original_lines[original_lines.length() - 1].length() + 1,
-              ),
-              Range(
-                1,
-                1,
-                modified_lines.length(),
-                modified_lines[modified_lines.length() - 1].length() + 1,
-              ),
-            ),
-          ]),
+          compute_inner_changes(
+            original_lines,
+            modified_lines,
+            LineRange(1, original_lines.length() + 1),
+            LineRange(1, modified_lines.length() + 1),
+          ),
         ),
       ],
       hit_timeout: false,
@@ -153,7 +141,15 @@ pub fn DefaultLinesDiffComputer::compute_diff(
         } else {
           LineRange(anchor_new + 1, anchor_new + 1)
         }
-        changes.push(DetailedLineRangeMapping(original, modified, None))
+        changes.push(
+          DetailedLineRangeMapping(
+            original,
+            modified,
+            compute_inner_changes(
+              original_lines, modified_lines, original, modified,
+            ),
+          ),
+        )
       }
     }
   }
