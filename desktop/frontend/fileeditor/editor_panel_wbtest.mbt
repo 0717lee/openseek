@@ -28,6 +28,7 @@ test "symbol navigation highlights the exact target without a selection" {
     "symbol-navigate-action-highlight",
   )
   assert_false(target.decoration.options.is_whole_line)
+  assert_true(target.is_transient)
 }
 
 ///|
@@ -38,4 +39,5 @@ test "point navigation keeps its column and highlights the whole line" {
   assert_eq(target.decoration.options.class_name, "rangeHighlight")
   assert_eq(target.decoration.options.description, "point-range-line-highlight")
   assert_true(target.decoration.options.is_whole_line)
+  assert_false(target.is_transient)
 }

@@ -44,10 +44,11 @@ priv struct ViewerHost {
   // the source model, selection, folding, and scroll state. The comparison
   // itself is composed from two ordinary Viewers.
   mut diff_viewer : @viewer.DiffViewer?
-  // Programmatic navigation keeps its caret collapsed at the target start.
-  // This separate decoration makes either a point line or symbol range visible
-  // without turning the destination into a selection and opening Comment UI.
-  mut navigation_target_highlight : @viewer.EditorDecorationsCollection?
+  // A positioned transcript link keeps its caret collapsed at the requested
+  // column. This persistent whole-line decoration makes the destination visible
+  // without turning the line into a selection and opening Comment UI. Symbol
+  // navigation uses a fresh, short-lived collection instead (see below).
+  mut point_range_highlight : @viewer.EditorDecorationsCollection?
   // Desktop owns the concrete marker and feedback stores passed through the
   // Viewer's public handle API. They receive language-server diagnostics and
   // turn inline reviews into composer chips without requiring editor internals.
@@ -87,7 +88,7 @@ priv struct ViewerHost {
 let viewer_state : ViewerHost = {
   viewer: None,
   diff_viewer: None,
-  navigation_target_highlight: None,
+  point_range_highlight: None,
   services: None,
   absolute: None,
   relative: None,
@@ -168,7 +169,7 @@ fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
           ),
         )
         viewer_state.viewer = Some(viewer)
-        viewer_state.navigation_target_highlight = Some(
+        viewer_state.point_range_highlight = Some(
           viewer.create_decorations_collection(),
         )
         services.feedback.on_did_add_feedback(event => {
@@ -459,6 +460,7 @@ fn show_diff_comparison(
 priv struct NavigationTargetPresentation {
   position : @common.Position
   decoration : @model.ModelDeltaDecoration
+  is_transient : Bool
 }
 
 ///|
@@ -466,7 +468,8 @@ fn navigation_target_presentation(
   range : @common.Range,
 ) -> NavigationTargetPresentation {
   let position = range.get_start_position()
-  let decoration : @model.ModelDeltaDecoration = if range.is_empty() {
+  let point = range.is_empty()
+  let decoration : @model.ModelDeltaDecoration = if point {
     {
       range: @common.Range(
         range.start_line_number,
@@ -489,15 +492,40 @@ fn navigation_target_presentation(
       ),
     }
   }
-  { position, decoration }
+  { position, decoration, is_transient: !point }
+}
+
+///|
+/// Match the reusable Viewer's Definition/References target feedback: keep an
+/// exact symbol highlight for 350ms, then clear it only while the Viewer still
+/// owns the model that received it. A fresh collection prevents an older timer
+/// from clearing a newer navigation target.
+fn show_transient_navigation_target_highlight(
+  viewer : @viewer.Viewer,
+  target_model : @model.TextModel,
+  decoration : @model.ModelDeltaDecoration,
+) -> Unit {
+  let decorations = viewer.create_decorations_collection(decorations=[
+    decoration,
+  ])
+  @base_browser.schedule_timeout(
+    () => {
+      match viewer.get_model() {
+        Some(current) if current.same(target_model) => decorations.clear()
+        _ => ()
+      }
+    },
+    350,
+  )
+  |> ignore
 }
 
 ///|
 /// Show a file's contents in the viewer as a fresh read-only document. A
 /// symbol jump's `range`, when present, is revealed centered once the
 /// document is set. The caret stays collapsed at the range start while an
-/// independent decoration highlights either the exact symbol or a point's
-/// whole line. `annotation`, when
+/// independent decoration highlights either the exact symbol for 350ms or a
+/// point's whole line until the next document show. `annotation`, when
 /// present (an annotation chip's jump), is re-shown as a comment bubble over
 /// `range` — the bubble the chip replaced when the comment was filed.
 ///
@@ -561,10 +589,10 @@ fn show_file_in_viewer(
     let restore_view_state = should_restore_view_state(
       restore_scroll, previous_uri, uri,
     )
-    // Decorations live on the current text model. Remove the previous jump's
-    // highlight before a possible model swap, then add the incoming one below
-    // only when this show carries a positioned point.
-    if viewer_state.navigation_target_highlight is Some(highlight) {
+    // Decorations live on the current text model. Remove the previous
+    // persistent point highlight before a possible model swap. Symbol jumps
+    // use fresh transient collections that retire themselves after 350ms.
+    if viewer_state.point_range_highlight is Some(highlight) {
       highlight.clear()
     }
     if !same_document {
@@ -665,7 +693,15 @@ fn show_file_in_viewer(
     if range is Some(range) {
       let target = navigation_target_presentation(range)
       viewer.set_position(target.position)
-      if viewer_state.navigation_target_highlight is Some(highlight) {
+      if target.is_transient {
+        if viewer.get_model() is Some(target_model) {
+          show_transient_navigation_target_highlight(
+            viewer,
+            target_model,
+            target.decoration,
+          )
+        }
+      } else if viewer_state.point_range_highlight is Some(highlight) {
         highlight.set([target.decoration]) |> ignore
       }
       viewer.reveal_range_in_center(range)
@@ -723,7 +759,7 @@ fn clear_viewer() -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
     viewer_state.view_states.clear()
     if viewer_state.viewer is Some(viewer) {
-      if viewer_state.navigation_target_highlight is Some(highlight) {
+      if viewer_state.point_range_highlight is Some(highlight) {
         highlight.clear()
       }
       if viewer_state.services is Some(services) &&
@@ -748,7 +784,7 @@ fn clear_viewer() -> @cmd.Cmd {
 fn clear_document() -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
     if viewer_state.viewer is Some(viewer) {
-      if viewer_state.navigation_target_highlight is Some(highlight) {
+      if viewer_state.point_range_highlight is Some(highlight) {
         highlight.clear()
       }
       if viewer_state.services is Some(services) &&
