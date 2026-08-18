@@ -8,6 +8,7 @@ import {
   "bobzhang/openseek/cmd/openseek/internal/subtask",
   "bobzhang/openseek/agent_runtime",
   "bobzhang/openseek/agent_tool",
+  "bobzhang/openseek/agent_tool/web_search",
   "bobzhang/openseek/mcp/config" @mcpconfig,
   "bobzhang/openseek/mcp/tools" @mcptools,
   "moonbitlang/core/json",

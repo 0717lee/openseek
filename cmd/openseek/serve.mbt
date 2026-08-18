@@ -676,6 +676,10 @@ async fn run_serve(
           child_session?,
         ),
       ]
+    if web_search_api_key(model, api_key, api_url, matches)
+      is Some(web_search_key) {
+      extra_tools.push(@web_search.definition(api_key=web_search_key))
+    }
     // The advisory goal-met gate (--review-gate): built once, shared by
     // every turn; engine-initiated, so it runs on its own allowance
     // rather than the model's per-turn subrun budget.

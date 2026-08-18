@@ -214,6 +214,36 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
 }
 
 ///|
+/// The DeepSeek API key the `web_search` tool should use, if any. A DeepSeek
+/// model run reuses the turn's own key; any other provider needs the dedicated
+/// `--deepseek-api-key`/`$DEEPSEEK` credential, because native web search rides
+/// DeepSeek's Anthropic-compatible endpoint regardless of the chat provider.
+/// `None` simply leaves the tool unregistered — a run without a DeepSeek key
+/// keeps working, minus web search.
+///
+/// A custom `--api-url` disables the tool entirely: with a custom chat
+/// endpoint in effect, the key in hand is whatever THAT endpoint accepts —
+/// often a gateway credential, and the desktop host exports the custom key as
+/// `$DEEPSEEK` too — so every credential this function could reach may belong
+/// to a third party, and web search always POSTs to the official
+/// `api.deepseek.com` Messages endpoint. Not registering is the only option
+/// that cannot ship someone else's token there.
+fn web_search_api_key(
+  model : @deepseek.Model,
+  api_key : String,
+  api_url : String?,
+  matches : @argparse.Matches,
+) -> String? {
+  guard api_url is None else { return None }
+  match (model, matches.values) {
+    (Deepseek(_), _) => Some(api_key)
+    (_, { "deepseek-api-key": [key, ..], .. }) if !key.is_blank() =>
+      Some(key.trim().to_owned())
+    _ => None
+  }
+}
+
+///|
 /// One headless turn with its own runtime, task group, and tool registry —
 /// including any configured MCP servers' tools, exactly as `serve` wires them.
 /// The MCP connections live on the turn's task group and are torn down when the
@@ -275,6 +305,10 @@ async fn run_task_turn(
           child_session?,
         ),
       ]
+    if web_search_api_key(model, api_key, api_url, matches)
+      is Some(web_search_key) {
+      extra_tools.push(@web_search.definition(api_key=web_search_key))
+    }
     let tools = @agent.build_tools(runtime, scope, extra_tools~)
     let on_goal_met = if review_gate_enabled(matches) {
       Some(
@@ -1383,6 +1417,47 @@ test "cli uses KIMI only for Kimi models" {
   // caller sees `None` and reports it.
   let deepseek_model : @deepseek.Model = Deepseek(V4Pro)
   assert_true(deepseek_model.api_key(deepseek.values) is None)
+}
+
+///|
+test "web_search_api_key reuses the DeepSeek key only for official-endpoint runs" {
+  let matches = run_matches(argv=["task"], env={ "DEEPSEEK": " dk " })
+  // DeepSeek model on the official endpoint: reuse the turn's key.
+  assert_eq(
+    web_search_api_key(Deepseek(V4Pro), "turn-key", None, matches),
+    Some("turn-key"),
+  )
+  // A custom chat endpoint disables the tool regardless of provider: the key
+  // in hand (and the desktop-exported $DEEPSEEK) may be a gateway credential
+  // that must not reach the official search endpoint.
+  assert_true(
+    web_search_api_key(
+      Deepseek(V4Pro),
+      "gateway-token",
+      Some("https://gateway.example/v1"),
+      matches,
+    )
+    is None,
+  )
+  assert_true(
+    web_search_api_key(
+      Kimi(K27Code),
+      "kimi-key",
+      Some("https://gateway.example/v1"),
+      matches,
+    )
+    is None,
+  )
+  // A Kimi run falls back to the dedicated $DEEPSEEK credential, trimmed.
+  assert_eq(
+    web_search_api_key(Kimi(K27Code), "kimi-key", None, matches),
+    Some("dk"),
+  )
+  // Without any DeepSeek credential the tool is simply not registered.
+  let keyless = run_matches(argv=["task"], env=Map([]))
+  assert_true(
+    web_search_api_key(Kimi(K27Code), "kimi-key", None, keyless) is None,
+  )
 }
 
 ///|

@@ -1,0 +1,17 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "bobzhang/openseek/agent_tool/web_search"
+
+import {
+  "bobzhang/openseek/agent_tool",
+}
+
+// Values
+pub fn definition(api_key~ : String, base_url? : String, model? : String, max_results? : Int, max_uses? : Int, max_tokens? : Int, timeout_ms? : Int) -> @agent_tool.AgentToolDefinition
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits
