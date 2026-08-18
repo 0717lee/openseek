@@ -65,6 +65,7 @@ fn memory_workspace() -> MemoryWorkspace {
   directories[memory_root] = [
     memory_dir("src", "src"),
     memory_file("large.mbt", "large.mbt"),
+    memory_file("tabbed-deletion.mbt", "tabbed-deletion.mbt"),
     memory_file("oversized-line.mbt", "oversized-line.mbt"),
     memory_file("README.md", "README.md"),
     memory_file("moon.mod", "moon.mod"),
@@ -78,6 +79,7 @@ fn memory_workspace() -> MemoryWorkspace {
   ]
   let documents : Map[String, String] = Map([])
   documents["\{memory_root}/large.mbt"] = large_diff_document("modified")
+  documents["\{memory_root}/tabbed-deletion.mbt"] = "let retained = 1\n"
   documents["\{memory_root}/oversized-line.mbt"] = oversized_diff_line("m")
   documents["\{memory_root}/README.md"] = (
     #|# Embedded Markdown document
@@ -107,6 +109,8 @@ fn memory_workspace() -> MemoryWorkspace {
   original_documents["\{memory_root}/large.mbt"] = large_diff_document(
     "original",
   )
+  original_documents["\{memory_root}/tabbed-deletion.mbt"] = "\t".repeat(160) +
+    "deleted_tail\n"
   original_documents["\{memory_root}/oversized-line.mbt"] = oversized_diff_line(
     "o",
   )

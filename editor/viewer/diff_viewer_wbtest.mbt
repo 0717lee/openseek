@@ -97,3 +97,10 @@ test "unified deleted zones precede replacement and deletion anchors" {
     0,
   )
 }
+
+///|
+test "unified deleted width follows tab stops and wide characters" {
+  assert_eq(deleted_line_visual_columns("\t", 4), 4)
+  assert_eq(deleted_line_visual_columns("a\tb", 4), 5)
+  assert_eq(deleted_line_visual_columns("中🙂", 4), 4)
+}

@@ -176,6 +176,67 @@ test('virtualizes a legal-size large diff through ordinary Viewer panes', async 
   ).toHaveCount(2);
   await expect(diff.locator('.view-line').first()).toBeVisible();
   expect(await diff.locator('.view-line').count()).toBeLessThan(200);
+
+  // ViewZone insertion/removal changes content-space scroll offsets. Switching
+  // layouts must retain the same modified model line at the same viewport
+  // pixel instead of keeping a now-displaced numeric scrollTop.
+  const modifiedPane = diff.locator('.moonbit-diff-editor-modified');
+  const modifiedScrollable = modifiedPane.locator(
+    '.monaco-scrollable-element.editor-scrollable',
+  );
+  await modifiedScrollable.hover();
+  await page.mouse.wheel(0, 18_000);
+  await expect
+    .poll(async () => (await firstFullyVisibleModelLine(modifiedPane))?.text ?? '')
+    .toContain('modified_');
+  const splitAnchor = await firstFullyVisibleModelLine(modifiedPane);
+  expect(splitAnchor).not.toBeNull();
+
+  const layoutToggle = page.locator('[data-action="toggle-diff-layout"]');
+  await layoutToggle.click();
+  await expect(diff).toHaveAttribute('data-render-mode', 'unified');
+  await expect
+    .poll(async () => firstFullyVisibleModelLine(modifiedPane))
+    .toEqual(splitAnchor);
+
+  await layoutToggle.click();
+  await expect(diff).toHaveAttribute('data-render-mode', 'side-by-side');
+  await expect
+    .poll(async () => firstFullyVisibleModelLine(modifiedPane))
+    .toEqual(splitAnchor);
+});
+
+test('keeps tab-expanded unified deletions inside the horizontal scroll extent', async ({
+  page,
+}) => {
+  await page.goto('/embed.html');
+  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
+
+  await page.locator(workspaceItem('tabbed-deletion.mbt')).click();
+  await page.locator('[data-action="toggle-diff"]').click();
+  await page.locator('[data-action="toggle-diff-layout"]').click();
+
+  const modifiedPane = page.locator(
+    '.diff-viewer-host .moonbit-diff-editor-modified',
+  );
+  const deletedLine = modifiedPane.locator(
+    '.diff-editor-unified-deleted-line',
+  );
+  await expect(deletedLine).toContainText('deleted_tail');
+  const widths = await modifiedPane.evaluate((pane) => {
+    const rail = pane.querySelector('.view-zones');
+    const line = pane.querySelector('.diff-editor-unified-deleted-line');
+    const viewport = pane.querySelector(
+      '.monaco-scrollable-element.editor-scrollable',
+    );
+    return {
+      rail: Number.parseFloat(rail.style.width),
+      deleted: line.scrollWidth,
+      viewport: viewport.clientWidth,
+    };
+  });
+  expect(widths.deleted).toBeGreaterThan(widths.viewport + 500);
+  expect(widths.rail + 1).toBeGreaterThanOrEqual(widths.deleted);
 });
 
 test('renders character changes inside the line-level diff', async ({ page }) => {
@@ -278,4 +339,27 @@ test('drops a stale host-ready rAF after a rapid model swap', async ({ page }) =
 
 function workspaceItem(path) {
   return workspaceSelector(path, { root: 'memory://workspace' });
+}
+
+async function firstFullyVisibleModelLine(pane) {
+  return pane.evaluate((root) => {
+    const viewport = root.querySelector(
+      '.monaco-scrollable-element.editor-scrollable',
+    );
+    if (!viewport) return null;
+    const viewportRect = viewport.getBoundingClientRect();
+    const line = Array.from(root.querySelectorAll('.view-line')).find((row) => {
+      const rect = row.getBoundingClientRect();
+      return (
+        rect.top >= viewportRect.top - 0.5 &&
+        rect.bottom <= viewportRect.bottom + 0.5
+      );
+    });
+    if (!line) return null;
+    const rect = line.getBoundingClientRect();
+    return {
+      text: line.textContent,
+      offset: Math.round((rect.top - viewportRect.top) * 10) / 10,
+    };
+  });
 }

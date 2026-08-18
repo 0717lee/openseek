@@ -21,6 +21,15 @@ pub(all) enum DiffEditorRenderMode {
 } derive(Eq, Debug)
 
 ///|
+/// A model-line viewport anchor retained while coordinator-owned ViewZones are
+/// rebuilt. Content-space line tops change between render modes, while this
+/// line's pixel position relative to the viewport must not.
+priv struct DiffViewportAnchor {
+  line_number : Int
+  viewport_offset : Double
+}
+
+///|
 /// The two caller-owned text models displayed by a DiffViewer. Like Monaco's
 /// `IDiffEditorModel`, the comparison owns neither model and never disposes
 /// them.
@@ -50,6 +59,7 @@ struct DiffViewer {
   owned_services : ViewerServices?
   mut render_mode : DiffEditorRenderMode
   mut resize_observer : @base_common.Disposable?
+  mut viewport_restore_frame : @base_common.Disposable?
   scroll_disposables : Array[@base_common.Disposable]
   model_disposables : Array[@base_common.Disposable]
   mut original_decoration_ids : Array[String]
@@ -120,6 +130,7 @@ pub fn DiffViewer::create(
     owned_services,
     render_mode,
     resize_observer: None,
+    viewport_restore_frame: None,
     scroll_disposables: [],
     model_disposables: [],
     original_decoration_ids: [],
@@ -181,6 +192,7 @@ pub fn DiffViewer::set_model(
   if self.disposed {
     return
   }
+  self.cancel_modified_viewport_restore()
   self.dispose_model_disposables()
   self.clear_diff_artifacts()
   match diff_model {
@@ -227,6 +239,70 @@ pub fn DiffViewer::get_render_mode(self : DiffViewer) -> DiffEditorRenderMode {
 }
 
 ///|
+fn DiffViewer::capture_modified_viewport_anchor(
+  self : DiffViewer,
+) -> DiffViewportAnchor? {
+  let visible_ranges = self.modified_viewer.get_visible_ranges()
+  guard !visible_ranges.is_empty() else { return None }
+  let line_number = visible_ranges[0].start_line_number
+  let line_top = self.modified_viewer.get_top_for_line_number(line_number)
+  let scroll_top = self.modified_viewer.get_scroll_top()
+  guard line_top >= 0.0 && scroll_top >= 0.0 else { return None }
+  Some({ line_number, viewport_offset: line_top - scroll_top })
+}
+
+///|
+fn DiffViewer::restore_modified_viewport_anchor(
+  self : DiffViewer,
+  anchor : DiffViewportAnchor?,
+) -> Unit {
+  guard anchor is Some(anchor) else { return }
+  let line_top = self.modified_viewer.get_top_for_line_number(
+    anchor.line_number,
+  )
+  guard line_top >= 0.0 else { return }
+  self.modified_viewer.set_scroll_top(
+    (line_top - anchor.viewport_offset).max(0.0),
+  )
+}
+
+///|
+fn DiffViewer::cancel_modified_viewport_restore(self : DiffViewer) -> Unit {
+  match self.viewport_restore_frame {
+    Some(frame) => frame.dispose()
+    None => ()
+  }
+  self.viewport_restore_frame = None
+}
+
+///|
+/// ViewZone mutations enter the ViewModel queue synchronously but reach
+/// ViewLayout during the Viewer's priority-100 render. Restore later in the
+/// same native frame so the browser never paints the displaced numeric
+/// scrollTop. A later model or mode change cancels this anchor.
+fn DiffViewer::schedule_modified_viewport_restore(
+  self : DiffViewer,
+  anchor : DiffViewportAnchor?,
+) -> Unit {
+  guard anchor is Some(anchor) else { return }
+  let expected_render_mode = self.render_mode
+  self.viewport_restore_frame = Some(
+    @base_browser.run_at_this_or_schedule_at_next_animation_frame(
+      () => {
+        self.viewport_restore_frame = None
+        if self.disposed || self.render_mode != expected_render_mode {
+          return
+        }
+        self.restore_modified_viewport_anchor(Some(anchor))
+      },
+      // Viewer render runs at 100; restoring at 0 observes the committed zone
+      // geometry and still runs before the browser paints this native frame.
+      priority=0,
+    ),
+  )
+}
+
+///|
 /// Switch the existing comparison between two panes and one interleaved pane.
 /// Models, services, selections, and the modified Viewer's scroll state stay
 /// installed. Rebuilding only coordinator-owned decorations and ViewZones also
@@ -238,10 +314,13 @@ pub fn DiffViewer::set_render_mode(
   if self.disposed || self.render_mode == render_mode {
     return
   }
+  self.cancel_modified_viewport_restore()
+  let viewport_anchor = self.capture_modified_viewport_anchor()
   self.render_mode = render_mode
   self.apply_render_mode_dom()
   self.layout()
   self.refresh_diff()
+  self.schedule_modified_viewport_restore(viewport_anchor)
   if render_mode == SideBySide {
     self.sync_scroll_top_to(
       self.original_viewer,
@@ -276,6 +355,7 @@ pub fn DiffViewer::dispose(self : DiffViewer) -> Unit {
   if self.disposed {
     return
   }
+  self.cancel_modified_viewport_restore()
   match self.resize_observer {
     Some(observer) => observer.dispose()
     None => ()
@@ -732,16 +812,26 @@ fn unified_deleted_zone_anchor(change : DiffLineChange) -> Int {
 }
 
 ///|
+fn deleted_line_visual_columns(text : String, tab_size : Int) -> Int {
+  @core.visible_column_from_column(text, text.length() + 1, tab_size.max(1))
+}
+
+///|
 fn deleted_block_min_width(
   model : @model.TextModel,
   range : @base_common.LineRange,
-  font_size : Double,
+  tab_size : Int,
+  typical_halfwidth_character_width : Double,
 ) -> Double {
-  let mut longest = 0
+  let mut longest_visual_columns = 0
   for line_number in range.start_line_number..<range.end_line_number_exclusive {
-    longest = longest.max(model.get_line_content(line_number).length())
+    longest_visual_columns = longest_visual_columns.max(
+      deleted_line_visual_columns(model.get_line_content(line_number), tab_size),
+    )
   }
-  (longest.to_double() * font_size * 0.62 + 24.0).min(1000000.0)
+  (longest_visual_columns.to_double() *
+  typical_halfwidth_character_width.max(1.0) +
+  24.0).min(1000000.0)
 }
 
 ///|
@@ -751,7 +841,8 @@ fn install_unified_deleted_zones(
   changes : Array[DiffLineChange],
 ) -> Array[String] {
   let ids : Array[String] = []
-  let options = viewer.get_options()
+  let configuration = viewer.configuration.snapshot()
+  let options = configuration.options
   viewer.change_view_zones(accessor => {
     for ordinal, change in changes {
       guard !change.original.is_empty() else { continue }
@@ -809,7 +900,8 @@ fn install_unified_deleted_zones(
             min_width_in_px=deleted_block_min_width(
               original_model,
               change.original,
-              options.font_size,
+              options.tab_size,
+              configuration.font_info.typical_halfwidth_character_width,
             ),
             margin_dom_node=margin,
           ),
