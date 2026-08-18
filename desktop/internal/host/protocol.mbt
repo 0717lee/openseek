@@ -21,8 +21,11 @@ type OpenPathPayload = @protocol.OpenPathPayload
 
 ///|
 /// Reply to `open_path`: either an existing non-text path was handed to the
-/// system opener, or a checkout-relative text file and optional position
-/// should open in the built-in editor.
+/// system opener, a checkout-relative text file and optional position should
+/// open in the built-in editor, or a refusal travels in `error` with its
+/// user-facing reason (missing path, text outside the checkout, opener
+/// failure). Refusals ride the reply because the local bridge would flatten a
+/// raised error to the generic "op ext:openseek/host.open_path failed".
 type OpenPathReply = @protocol.OpenPathReply
 
 ///|

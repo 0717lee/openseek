@@ -151,16 +151,19 @@ test "open-path replies distinguish system, editor, and directory targets" {
     opened: true,
     editor_target: None,
     directory_target: None,
+    error: None,
   })
   let system : @protocol.OpenPathReply = {
     opened: true,
     editor_target: None,
     directory_target: None,
+    error: None,
   }
   let ordinary : @protocol.OpenPathReply = {
     opened: false,
     editor_target: Some({ path: "README.md", line: None, column: None }),
     directory_target: None,
+    error: None,
   }
   let positioned : @protocol.OpenPathReply = {
     opened: false,
@@ -170,13 +173,21 @@ test "open-path replies distinguish system, editor, and directory targets" {
       column: Some(17),
     }),
     directory_target: None,
+    error: None,
   }
   let directory : @protocol.OpenPathReply = {
     opened: false,
     editor_target: None,
     directory_target: Some({ path: "src" }),
+    error: None,
   }
-  for reply in [system, ordinary, positioned, directory] {
+  let refused : @protocol.OpenPathReply = {
+    opened: false,
+    editor_target: None,
+    directory_target: None,
+    error: Some("File does not exist: nope.mbt"),
+  }
+  for reply in [system, ordinary, positioned, directory, refused] {
     let decoded : @protocol.OpenPathReply = @json.from_json(reply.to_json())
     @debug.assert_eq(decoded, reply)
   }

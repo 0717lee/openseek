@@ -1696,7 +1696,22 @@ fn open_file(
               ),
             ),
           )
-        (None, None) => ()
+        (None, None) =>
+          // A refusal travels inside the reply as `error`; the bridge's own
+          // catch above only covers transport-level failures.
+          match reply.error {
+            Some(message) =>
+              scheduler.add(
+                dispatch(
+                  OpenFileFailed(
+                    owner={ channel, session },
+                    generation~,
+                    message~,
+                  ),
+                ),
+              )
+            None => ()
+          }
       }
     })
   })

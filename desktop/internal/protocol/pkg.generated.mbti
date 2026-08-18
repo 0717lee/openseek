@@ -783,6 +783,7 @@ pub(all) struct OpenPathReply {
   opened : Bool
   editor_target : OpenPathEditorTarget?
   directory_target : OpenPathDirectoryTarget?
+  error : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct ReadDirPayload {

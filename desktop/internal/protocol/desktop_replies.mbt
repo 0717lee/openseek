@@ -603,6 +603,12 @@ pub(all) struct OpenPathReply {
   // Older hosts omit this field, so it remains an optional additive protocol
   // extension.
   directory_target : OpenPathDirectoryTarget?
+  // Present when the open was refused: the user-facing reason (missing path,
+  // text file outside the checkout, opener failure). The frontend shows this
+  // message instead of the bridge's generic `op … failed` text. Like
+  // `directory_target`, this is an optional additive extension older hosts
+  // omit.
+  error : String?
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
