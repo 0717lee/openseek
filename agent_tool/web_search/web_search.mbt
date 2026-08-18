@@ -169,15 +169,35 @@ async fn execute(
       return @agent_tool.ToolAction::respond(
         "error: web_search failed: \{error}",
         is_error=true,
-        brief=@agent_tool.brief_line("web_search \{query} (failed)"),
+        brief=failure_brief(query),
       )
   }
   @agent_tool.ToolAction::respond(
     format_output(outcome),
-    brief=@agent_tool.brief_line(
-      "web_search \{query} · \{outcome.sources.length()} source(s)",
-    ),
+    brief=success_brief(query, outcome.sources.length()),
   )
+}
+
+///|
+/// Briefs cap the query segment FIRST (well under `brief_line`'s overall
+/// 72-char cap), so the discriminating suffix — `· N source(s)` vs `(failed)`
+/// — survives for long queries instead of both briefs truncating identically.
+fn success_brief(query : String, count : Int) -> String {
+  let capped = @agent_tool.brief_line(query, limit=40)
+  @agent_tool.brief_line("web_search \{capped} · \{count} source(s)")
+}
+
+///|
+fn failure_brief(query : String) -> String {
+  let capped = @agent_tool.brief_line(query, limit=40)
+  @agent_tool.brief_line("web_search \{capped} (failed)")
+}
+
+///|
+/// Escape the square brackets markdown link labels delimit, so a
+/// provider-controlled title cannot break the `[label](url)` shape.
+fn markdown_label(text : String) -> String {
+  text.replace_all(old="[", new="\\[").replace_all(old="]", new="\\]")
 }
 
 ///|
@@ -291,10 +311,24 @@ fn parse_search_response(
   }
   let mut found_result_block = false
   let sources : Array[WebSource] = []
+  let error_codes : Array[String] = []
   let mut dropped = false
   for block in blocks {
     guard block is { "type": "web_search_tool_result", .. } else { continue }
     found_result_block = true
+    // A server-side search failure arrives as an OBJECT content
+    // (`{"type":"web_search_tool_result_error","error_code":...}`) instead of
+    // the item array. Collect the code rather than skipping, so an all-error
+    // response raises below instead of rendering as a clean "No results
+    // found." the model would trust.
+    if block is { "content": { .. } as error_content, .. } {
+      let code = match error_content {
+        { "error_code": String(code), .. } => code
+        _ => "unknown error"
+      }
+      error_codes.push(code)
+      continue
+    }
     guard block is { "content": Array(items), .. } else { continue }
     for item in items {
       guard item is { "type": "web_search_result", "url": String(url), .. } &&
@@ -324,6 +358,13 @@ fn parse_search_response(
       "DeepSeek returned no web_search_tool_result blocks; the request may not have triggered native web search",
     )
   }
+  // Partial failures (one errored search among successful ones) still return
+  // the gathered sources; only an all-error response is a tool error.
+  if sources.is_empty() && !error_codes.is_empty() {
+    raise SearchFailure(
+      "DeepSeek native web search failed server-side: \{error_codes.join(", ")}",
+    )
+  }
   { sources, truncated: dropped }
 }
 
@@ -337,16 +378,24 @@ fn format_output(outcome : SearchOutcome) -> String {
   if outcome.sources.length() > 0 {
     let lines = [
       for source in outcome.sources => {
-        let label = match source.title {
-          Some(title) => title
-          None => host_label(source.url)
-        }
+        // Provider-controlled text: collapse to one line and cap each field
+        // (only the source COUNT is bounded upstream), and escape the square
+        // brackets markdown link labels delimit — otherwise a title or
+        // excerpt can break the `- [label](url) — meta` line shape or flood
+        // the transcript.
+        let label = markdown_label(
+          match source.title {
+            Some(title) => @agent_tool.brief_line(title, limit=120)
+            None => host_label(source.url)
+          },
+        )
         let meta : Array[String] = []
         if source.snippet is Some(snippet) {
-          meta.push(snippet)
+          meta.push(@agent_tool.brief_line(snippet, limit=300))
         }
         if source.published_at is Some(published) {
-          meta.push("(\{published})")
+          let capped = @agent_tool.brief_line(published, limit=40)
+          meta.push("(\{capped})")
         }
         let suffix = if meta.length() > 0 {
           " — \{meta.join(" ")}"
@@ -384,6 +433,12 @@ fn host_label(url : String) -> String {
   }
   if authority =~ (re"@", after~) {
     authority = after
+  }
+  // A bracketed IPv6 literal is the whole host; the port (if any) follows the
+  // closing bracket, so the first-`:` port strip below must not see it.
+  if authority =~ (re"^\[", after~) {
+    guard after =~ (re"\]", before~) else { return url }
+    return "[\{before}]"
   }
   if authority =~ (re":", before~) {
     authority = before
@@ -524,4 +579,115 @@ test "error_detail extracts the provider message and caps raw bodies" {
   let capped = error_detail("<html>" + "x".repeat(400) + "</html>")
   assert_true(capped.length() <= 201)
   assert_true(capped.has_suffix("…"))
+}
+
+///|
+test "parse_search_response raises on an all-error result block" {
+  let _ = parse_search_response(
+    {
+      "content": [
+        {
+          "type": "web_search_tool_result",
+          "content": {
+            "type": "web_search_tool_result_error",
+            "error_code": "max_uses_exceeded",
+          },
+        },
+      ],
+    },
+    max_results=8,
+  ) catch {
+    error => {
+      assert_true("\{error}".contains("failed server-side: max_uses_exceeded"))
+      return
+    }
+  }
+  fail("expected the error block to raise")
+}
+
+///|
+test "parse_search_response keeps sources from a partially errored response" {
+  let outcome = parse_search_response(
+    {
+      "content": [
+        {
+          "type": "web_search_tool_result",
+          "content": {
+            "type": "web_search_tool_result_error",
+            "error_code": "too_many_requests",
+          },
+        },
+        {
+          "type": "web_search_tool_result",
+          "content": [
+            {
+              "type": "web_search_result",
+              "url": "https://example.com/a",
+              "title": "Example A",
+            },
+          ],
+        },
+      ],
+    },
+    max_results=8,
+  )
+  assert_eq(outcome.sources.length(), 1)
+  assert_false(outcome.truncated)
+}
+
+///|
+test "host_label keeps bracketed IPv6 hosts whole" {
+  assert_eq(host_label("https://[::1]:8080/x"), "[::1]")
+  assert_eq(host_label("http://[2001:db8::1]/path"), "[2001:db8::1]")
+  assert_eq(host_label("https://[broken"), "https://[broken")
+}
+
+///|
+test "format_output collapses, caps, and escapes provider text" {
+  let outcome : SearchOutcome = {
+    sources: [
+      {
+        url: "https://example.com/a",
+        title: Some("Release [v2.0] notes"),
+        snippet: Some("line one\nline two"),
+        published_at: None,
+      },
+    ],
+    truncated: false,
+  }
+  let rendered = format_output(outcome)
+  assert_true(
+    rendered.contains(
+      "- [Release \\[v2.0\\] notes](https://example.com/a) — line one line two",
+    ),
+  )
+}
+
+///|
+test "format_output caps runaway snippets" {
+  let outcome : SearchOutcome = {
+    sources: [
+      {
+        url: "https://example.com/a",
+        title: None,
+        snippet: Some("s".repeat(1000)),
+        published_at: None,
+      },
+    ],
+    truncated: false,
+  }
+  let rendered = format_output(outcome)
+  // The 300-char field cap (plus ellipsis) keeps the whole render bounded.
+  assert_true(rendered.length() < 500)
+  assert_true(rendered.contains("…"))
+}
+
+///|
+test "success and failure briefs stay distinguishable for long queries" {
+  let long_query = "q".repeat(80)
+  let ok = success_brief(long_query, 8)
+  let bad = failure_brief(long_query)
+  assert_true(ok != bad)
+  assert_true(ok.contains("source(s)"))
+  assert_true(bad.contains("(failed)"))
 }
