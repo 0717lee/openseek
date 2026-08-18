@@ -151,6 +151,76 @@ test "transcript stream children use stable typed keys in display order" {
 }
 
 ///|
+#warnings("-alert_unstable")
+test "retained final Thought stays separate from preceding tool activity" {
+  let input = Input(
+    source=OpenSeek,
+    focused=@interop.ChannelId::Local,
+    active_session="desktop-test",
+    root=None,
+    submission_generation=1,
+    items=[
+      {
+        item: { kind: User, content: "question", ts: None, sequence: Some(1) },
+        identity: "s1\u{0}o0",
+      },
+      {
+        item: {
+          kind: Reasoning,
+          content: "private intermediate reasoning",
+          ts: None,
+          sequence: Some(2),
+        },
+        identity: "s2\u{0}o0",
+      },
+      { item: tool_item("shell", brief="pwd"), identity: "s2\u{0}o1" },
+      {
+        item: { kind: Reasoning, content: "", ts: None, sequence: None },
+        identity: "n1",
+      },
+      {
+        item: {
+          kind: Assistant(is_danger=false),
+          content: "final answer",
+          ts: None,
+          sequence: Some(4),
+        },
+        identity: "s4\u{0}o0",
+      },
+    ],
+    streaming_reasoning_visible=false,
+    streaming_reasoning_complete=false,
+    streaming_response="",
+    streaming_identity="r7",
+    subruns=[],
+  )
+  let renderer : TranscriptRenderer = {
+    input,
+    on_open: _ => @cmd.none,
+    on_jump: _ => @cmd.none,
+  }
+  assert_eq(renderer.stream_children().to_array().map(pair => pair.0), [
+    "row\u{0}s1\u{0}o0", "rule\u{0}s1\u{0}o0", "activity\u{0}after\u{0}s1\u{0}o0",
+    "row\u{0}n1", "row\u{0}s4\u{0}o0",
+  ])
+  let rendered = transcript_view(
+    input,
+    pinned=true,
+    overview=@transcript_overview.State::empty(),
+    overview_emit=@cmd.Emit(_ => @cmd.none),
+    _ => @cmd.none,
+    _ => @cmd.none,
+    on_jump_latest=@cmd.none,
+  )
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  assert_true(markup.contains("<span class=\"activity-text\">Pwd</span>"))
+  assert_true(markup.contains("class=\"thought-status complete\""))
+  assert_true(markup.contains(">Thought</div>"))
+  assert_true(markup.contains("final answer"))
+  assert_false(markup.contains("private intermediate reasoning"))
+}
+
+///|
 test "transcript stream section key scopes equal session ids by channel" {
   let local_input = Input(
     source=OpenSeek,

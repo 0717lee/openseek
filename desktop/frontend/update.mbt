@@ -1076,48 +1076,73 @@ fn apply_engine_event(
         )
       }
     ReasoningDelta(content) =>
-      if content.is_empty() {
-        (false, conv)
-      } else if conv.streaming_reasoning_visible &&
-        !conv.streaming_reasoning_complete {
-        // Further deltas do not change the status-only UI.
+      if content.is_empty() || conv.streaming_reasoning_visible {
         (false, conv)
       } else {
+        let response = conv.reasoning_semantic_responses + 1
+        if conv.reasoning_durable_responses >= response {
+          // The durable commit overtook its transient event stream. Its
+          // permanent Thought already represents this response.
+          return (false, conv)
+        }
+        // The first delta is the only one that changes the status-only UI.
+        // Answer text is a monotonic completion boundary: a provider may put
+        // content before reasoning in one chunk, or send a late reasoning
+        // fragment, but Thought must never regress to Thinking.
         (
           true,
           {
             ..conv,
             streaming_reasoning_visible: true,
-            streaming_reasoning_complete: false,
+            streaming_reasoning_complete: !conv.streaming_response.is_empty(),
+            streaming_reasoning_response: Some(response),
           },
         )
       }
     // Full semantic events never append durable transcript items or retain
-    // their text. They only mark the reasoning status complete; an Assistant
-    // commit replaces intermediate Thoughts, while a final Terminal-backed
-    // Thought is retained as a chronology-anchored empty marker at finish.
-    ReasoningMessage(content) =>
-      if conv.has_durable_reasoning() {
+    // their text. They close one ordered reasoning response; the matching
+    // Assistant commit may arrive on the independent session stream before or
+    // after this event, so only equal response ordinals reconcile each other.
+    ReasoningMessage(_) => {
+      let response = conv.reasoning_semantic_responses + 1
+      if conv.reasoning_durable_responses >= response {
+        let active_matches = conv.streaming_reasoning_response is Some(active) &&
+          active == response
         (
           false,
           {
             ..conv,
-            streaming_reasoning_visible: false,
-            streaming_reasoning_complete: false,
+            reasoning_semantic_responses: response,
+            streaming_reasoning_visible: if active_matches {
+              false
+            } else {
+              conv.streaming_reasoning_visible
+            },
+            streaming_reasoning_complete: if active_matches {
+              false
+            } else {
+              conv.streaming_reasoning_complete
+            },
+            streaming_reasoning_response: if active_matches {
+              None
+            } else {
+              conv.streaming_reasoning_response
+            },
           },
         )
-      } else if !content.is_empty() || conv.streaming_reasoning_visible {
+      } else {
         (
           false,
           {
             ..conv,
             streaming_reasoning_visible: true,
             streaming_reasoning_complete: true,
+            streaming_reasoning_response: Some(response),
+            reasoning_semantic_responses: response,
           },
         )
-      } else {
-        (false, conv)
       }
+    }
     AssistantMessage(_) =>
       (
         false,
@@ -3131,7 +3156,7 @@ fn update_msg(
           conv.mentions,
         )
         let next = {
-          ..conv,
+          ..conv.reset_reasoning_run(),
           task: "",
           mentions: [],
           composer_draft_present: false,
@@ -6173,6 +6198,11 @@ fn update_device_msg(
       } else {
         conv.sync
       }
+      let conv = if !stale_terminal && !same_open {
+        conv.reset_reasoning_run()
+      } else {
+        conv
+      }
       let conv = {
         ..conv,
         run,
@@ -7765,6 +7795,46 @@ test "later reasoning deltas do not change the status-only transcript" {
 }
 
 ///|
+test "answer text makes reasoning completion monotonic" {
+  let (_, thinking) = apply_engine_event(
+    running_conversation(),
+    ReasoningDelta("private fragment one"),
+    Some("r7"),
+  )
+  let (_, answering) = apply_engine_event(
+    thinking,
+    AssistantDelta("answer"),
+    Some("r7"),
+  )
+  let (changed, later_delta) = apply_engine_event(
+    answering,
+    ReasoningDelta("late private fragment"),
+    Some("r7"),
+  )
+  assert_false(changed)
+  assert_true(later_delta.streaming_reasoning_visible)
+  assert_true(later_delta.streaming_reasoning_complete)
+  assert_true(later_delta.streaming_reasoning_response is Some(1))
+}
+
+///|
+test "reasoning first observed after answer text is already Thought" {
+  let (_, answering) = apply_engine_event(
+    running_conversation(),
+    AssistantDelta("answer fragment"),
+    Some("r7"),
+  )
+  let (_, reasoned) = apply_engine_event(
+    answering,
+    ReasoningDelta("same provider chunk"),
+    Some("r7"),
+  )
+  assert_true(reasoned.streaming_reasoning_visible)
+  assert_true(reasoned.streaming_reasoning_complete)
+  assert_true(reasoned.streaming_reasoning_response is Some(1))
+}
+
+///|
 test "update is pure: replaying a delta on the same model is idempotent" {
   let dispatch = test_dispatch()
   let model = running_model().replace_conversation({
@@ -7802,6 +7872,7 @@ test "reasoning message becomes Thought while waiting for its durable commit" {
   let model = running_model().replace_conversation({
     ..running_conversation(),
     streaming_reasoning_visible: true,
+    streaming_reasoning_response: Some(1),
   })
   let (_, next) = update_dev(
     dispatch,
@@ -7822,6 +7893,8 @@ test "assistant message settles the response but keeps Thought until commit" {
     streaming_response: "answ",
     streaming_reasoning_visible: true,
     streaming_reasoning_complete: true,
+    streaming_reasoning_response: Some(1),
+    reasoning_semantic_responses: 1,
   })
   let (_, next) = update_dev(
     dispatch,
@@ -7836,6 +7909,233 @@ test "assistant message settles the response but keeps Thought until commit" {
 }
 
 ///|
+test "an earlier step's durable Thought cannot suppress the final Thought" {
+  let base = { ..running_conversation(), run_durable_floor: Some(0) }
+  let (_, first_thinking) = apply_engine_event(
+    base,
+    ReasoningDelta("first private response"),
+    Some("r7"),
+  )
+  let (_, first_thought) = apply_engine_event(
+    first_thinking,
+    ReasoningMessage("first private response"),
+    Some("r7"),
+  )
+  let (_, first_committed) = first_thought.apply_commit(
+    1,
+    @protocol.Assistant({
+      content: "",
+      tool_calls: None,
+      reasoning_content: Some("first private response"),
+    }),
+  )
+  assert_false(first_committed.streaming_reasoning_visible)
+  inspect(first_committed.reasoning_semantic_responses, content="1")
+  inspect(first_committed.reasoning_durable_responses, content="1")
+  let (_, second_step) = apply_engine_event(
+    first_committed,
+    AgentStep(Some(2)),
+    Some("r7"),
+  )
+  let (_, final_thinking) = apply_engine_event(
+    second_step,
+    ReasoningDelta("final private response"),
+    Some("r7"),
+  )
+  let (_, final_answering) = apply_engine_event(
+    final_thinking,
+    AssistantDelta("final answer"),
+    Some("r7"),
+  )
+  let (_, final_thought) = apply_engine_event(
+    final_answering,
+    ReasoningMessage("final private response"),
+    Some("r7"),
+  )
+  assert_true(final_thought.streaming_reasoning_visible)
+  assert_true(final_thought.streaming_reasoning_complete)
+  assert_true(final_thought.streaming_reasoning_response is Some(2))
+  let settled = final_thought.settle_streams_at_finish()
+  inspect(settled.overlay.length(), content="1")
+  assert_true(
+    settled.overlay[0].reconciliation is ReasoningResponse(response) &&
+    response == 2,
+  )
+}
+
+///|
+test "a delayed earlier-step commit preserves the current reasoning status" {
+  let base = { ..running_conversation(), run_durable_floor: Some(0) }
+  let (_, first_thought) = apply_engine_event(
+    base,
+    ReasoningMessage("first private response"),
+    Some("r7"),
+  )
+  let (_, second_step) = apply_engine_event(
+    first_thought,
+    AgentStep(Some(2)),
+    Some("r7"),
+  )
+  let (_, second_thinking) = apply_engine_event(
+    second_step,
+    ReasoningDelta("second private response"),
+    Some("r7"),
+  )
+  let (_, delayed_commit) = second_thinking.apply_commit(
+    1,
+    @protocol.Assistant({
+      content: "",
+      tool_calls: None,
+      reasoning_content: Some("first private response"),
+    }),
+  )
+  assert_true(delayed_commit.streaming_reasoning_visible)
+  assert_false(delayed_commit.streaming_reasoning_complete)
+  assert_true(delayed_commit.streaming_reasoning_response is Some(2))
+  inspect(delayed_commit.reasoning_durable_responses, content="1")
+}
+
+///|
+test "a delayed earlier-step commit preserves the final Thought notice" {
+  let base = { ..running_conversation(), run_durable_floor: Some(0) }
+  let (_, first_thought) = apply_engine_event(
+    base,
+    ReasoningMessage("first private response"),
+    Some("r7"),
+  )
+  let (_, second_step) = apply_engine_event(
+    first_thought,
+    AgentStep(Some(2)),
+    Some("r7"),
+  )
+  let (_, final_thought) = apply_engine_event(
+    second_step,
+    ReasoningMessage("final private response"),
+    Some("r7"),
+  )
+  let settled = final_thought.settle_streams_at_finish()
+  inspect(settled.overlay.length(), content="1")
+  let (_, delayed_commit) = settled.apply_commit(
+    1,
+    @protocol.Assistant({
+      content: "",
+      tool_calls: None,
+      reasoning_content: Some("first private response"),
+    }),
+  )
+  inspect(delayed_commit.overlay.length(), content="1")
+  assert_true(
+    delayed_commit.overlay[0].reconciliation is ReasoningResponse(response) &&
+    response == 2,
+  )
+}
+
+///|
+test "a matching durable response replaces the retained final Thought" {
+  let base = { ..running_conversation(), run_durable_floor: Some(0) }
+  let (_, final_thought) = apply_engine_event(
+    base,
+    ReasoningMessage("final private response"),
+    Some("r7"),
+  )
+  let settled = final_thought.settle_streams_at_finish()
+  inspect(settled.overlay.length(), content="1")
+  let (_, committed) = settled.apply_commit(
+    1,
+    @protocol.Assistant({
+      content: "answer",
+      tool_calls: None,
+      reasoning_content: Some("final private response"),
+    }),
+  )
+  inspect(committed.overlay.length(), content="0")
+  inspect(committed.reasoning_durable_responses, content="1")
+  assert_true(committed.messages[0].kind is Reasoning)
+}
+
+///|
+test "a snapshot that overtakes reasoning does not resurrect its status" {
+  let (_, thinking) = apply_engine_event(
+    { ..running_conversation(), run_durable_floor: Some(0) },
+    ReasoningDelta("private response"),
+    Some("r7"),
+  )
+  let loading = {
+    ..thinking,
+    sync: Reloading(
+      generation=1,
+      attempt=1,
+      buffered=[],
+      reload_after_current=false,
+    ),
+  }
+  let (snapshotted, gapped) = loading.adopt_snapshot(
+    [
+      {
+        kind: Reasoning,
+        content: "private response",
+        ts: None,
+        sequence: Some(1),
+      },
+    ],
+    1,
+    [(1, false, 1)],
+    goal=None,
+    goal_markers=[],
+  )
+  assert_false(gapped)
+  inspect(snapshotted.reasoning_durable_responses, content="1")
+  inspect(snapshotted.reasoning_semantic_responses, content="0")
+  assert_false(snapshotted.streaming_reasoning_visible)
+  let (_, semantic) = apply_engine_event(
+    snapshotted,
+    ReasoningMessage("private response"),
+    Some("r7"),
+  )
+  inspect(semantic.reasoning_semantic_responses, content="1")
+  assert_false(semantic.streaming_reasoning_visible)
+}
+
+///|
+test "a mid-run snapshot baselines reasoning responses already completed" {
+  let loading = {
+    ..running_conversation(),
+    run_durable_floor: Some(0),
+    sync: Reloading(
+      generation=1,
+      attempt=1,
+      buffered=[],
+      reload_after_current=false,
+    ),
+  }
+  let (snapshotted, gapped) = loading.adopt_snapshot(
+    [
+      {
+        kind: Reasoning,
+        content: "earlier response",
+        ts: None,
+        sequence: Some(1),
+      },
+    ],
+    1,
+    [(1, false, 1)],
+    goal=None,
+    goal_markers=[],
+  )
+  assert_false(gapped)
+  inspect(snapshotted.reasoning_durable_responses, content="1")
+  inspect(snapshotted.reasoning_semantic_responses, content="1")
+  let (_, next_response) = apply_engine_event(
+    snapshotted,
+    ReasoningMessage("current response"),
+    Some("r7"),
+  )
+  assert_true(next_response.streaming_reasoning_visible)
+  assert_true(next_response.streaming_reasoning_complete)
+  assert_true(next_response.streaming_reasoning_response is Some(2))
+}
+
+///|
 test "raw agent finish retains completed Thought for the lifecycle finish" {
   let dispatch = test_dispatch()
   let model = running_model().replace_conversation({
@@ -7845,6 +8145,8 @@ test "raw agent finish retains completed Thought for the lifecycle finish" {
     streaming_response: "answer",
     streaming_reasoning_visible: true,
     streaming_reasoning_complete: true,
+    streaming_reasoning_response: Some(1),
+    reasoning_semantic_responses: 1,
   })
   let (_, semantic_finish) = update_dev(
     dispatch,
@@ -7901,6 +8203,7 @@ test "a new agent step clears the live stream" {
     ..running_conversation(),
     streaming_response: "left",
     streaming_reasoning_visible: true,
+    streaming_reasoning_response: Some(1),
   })
   let (_, next) = update_dev(
     dispatch,
@@ -7918,6 +8221,7 @@ test "finished run clears any leftover stream" {
     ..running_conversation(),
     streaming_response: "leftover",
     streaming_reasoning_visible: true,
+    streaming_reasoning_response: Some(1),
   })
   let (_, next) = update_dev(
     dispatch,
@@ -7944,6 +8248,8 @@ test "completed final Thought stays before a later terminal answer" {
     streaming_response: "answer",
     streaming_reasoning_visible: true,
     streaming_reasoning_complete: true,
+    streaming_reasoning_response: Some(1),
+    reasoning_semantic_responses: 1,
   }
   let settled = base.settle_streams_at_finish()
   inspect(settled.streaming_response, content="")
@@ -7979,6 +8285,8 @@ test "completed final Thought moves before an already committed answer" {
     run_durable_floor: Some(0),
     streaming_reasoning_visible: true,
     streaming_reasoning_complete: true,
+    streaming_reasoning_response: Some(1),
+    reasoning_semantic_responses: 1,
   }
   let (_, terminal_first) = base.apply_commit(
     2,
@@ -8004,15 +8312,19 @@ test "final Thoughts from separate turns keep separate statuses" {
     watermark: 1,
     streaming_reasoning_visible: true,
     streaming_reasoning_complete: true,
+    streaming_reasoning_response: Some(1),
+    reasoning_semantic_responses: 1,
   }
   let first = first_base.settle_streams_at_finish()
   let messages = first.messages.copy()
   messages.push({ kind: User, content: "second", ts: None, sequence: Some(2) })
   let second = {
-    ..first,
+    ..first.reset_reasoning_run(),
     messages,
     streaming_reasoning_visible: true,
     streaming_reasoning_complete: true,
+    streaming_reasoning_response: Some(1),
+    reasoning_semantic_responses: 1,
   }.settle_streams_at_finish()
   inspect(second.overlay.length(), content="2")
   assert_true(second.overlay[0].anchor is AfterMessages(1))
@@ -19407,6 +19719,8 @@ test "a reasoning commit before this run's floor never clears its Thought" {
     run_durable_floor: Some(1),
     streaming_reasoning_visible: true,
     streaming_reasoning_complete: true,
+    streaming_reasoning_response: Some(1),
+    reasoning_semantic_responses: 1,
   })
   let (_, committed) = update_dev(
     dispatch,

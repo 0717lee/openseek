@@ -147,6 +147,23 @@ fn TranscriptRenderer::stream_children(
     let mut index = 0
     let mut left_boundary : String? = None
     while index < visible.length() {
+      // A completed final response has no durable Assistant reasoning row:
+      // the application retains one empty, client-local Reasoning marker at
+      // the terminal boundary instead. Keep that marker out of a preceding
+      // mixed tool run. Otherwise `Reasoning, Tool, <marker>` folds into one
+      // tool card and the final Thought status disappears even though the
+      // marker survived reconciliation correctly.
+      if visible[index].item.kind is Reasoning &&
+        visible[index].item.content.is_empty() {
+        let row = visible[index]
+        items.set(
+          TranscriptRenderKey::row(row.identity).wire(),
+          activity_view([row.item], self.on_open),
+        )
+        left_boundary = Some(row.identity)
+        index = index + 1
+        continue
+      }
       guard visible[index].item.kind is (Tool(..) | Reasoning) else {
         let row = visible[index]
         let item = row.item
@@ -180,7 +197,9 @@ fn TranscriptRenderer::stream_children(
       }
       let run : Array[@transcript.TranscriptItem] = []
       while index < visible.length() &&
-            visible[index].item.kind is (Tool(..) | Reasoning) {
+            visible[index].item.kind is (Tool(..) | Reasoning) &&
+            !(visible[index].item.kind is Reasoning &&
+            visible[index].item.content.is_empty()) {
         run.push(visible[index].item)
         index = index + 1
       }

@@ -615,6 +615,16 @@ priv struct Conversation {
   // one render; a final Terminal-backed turn retains an empty Reasoning marker
   // so its Thought status keeps the right chronology.
   streaming_reasoning_complete : Bool
+  // The ordered reasoning-bearing response represented by the transient
+  // status. Semantic events and durable commits travel through independent
+  // producers, so booleans alone cannot distinguish a delayed prior-step
+  // commit from the response currently streaming.
+  streaming_reasoning_response : Int?
+  // Ordered counts for the two producers. Pairing the Nth ReasoningMessage
+  // with the Nth reasoning-bearing Assistant commit keeps reconciliation
+  // response-local even when either notification overtakes the other.
+  reasoning_semantic_responses : Int
+  reasoning_durable_responses : Int
   // Local submissions awaiting exact id-bearing host receipts. Initial prompt
   // and steer entries share the ledger; steer state is also the sole source
   // for pending UI and provisional failures. Canonical User text never claims
@@ -759,6 +769,9 @@ priv enum NoticeReconciliation {
   Retained
   Submission(String)
   RunDiagnostic(String)
+  // A terminal-backed Thought has no durable twin in the current store. If a
+  // future engine does commit one, only the matching response may retire it.
+  ReasoningResponse(Int)
 } derive(Eq)
 
 ///|
@@ -2206,6 +2219,9 @@ fn empty_conversation(
     streaming_response: "",
     streaming_reasoning_visible: false,
     streaming_reasoning_complete: false,
+    streaming_reasoning_response: None,
+    reasoning_semantic_responses: 0,
+    reasoning_durable_responses: 0,
     input_ledger: [],
     messages: [],
     watermark: 0,
@@ -3264,7 +3280,41 @@ fn Conversation::clear_streams(self : Conversation) -> Conversation {
     streaming_response: "",
     streaming_reasoning_visible: false,
     streaming_reasoning_complete: false,
+    streaming_reasoning_response: None,
   }
+}
+
+///|
+/// Reset response correlation at the one boundary that starts a new run.
+/// AgentStep deliberately uses `clear_streams` instead: earlier steps must
+/// remain in the two producer counts so their delayed commits cannot claim a
+/// later response.
+fn Conversation::reset_reasoning_run(self : Conversation) -> Conversation {
+  {
+    ..self.clear_streams(),
+    reasoning_semantic_responses: 0,
+    reasoning_durable_responses: 0,
+  }
+}
+
+///|
+/// Count durable reasoning-bearing responses after this run's exclusive
+/// terminal floor. One Assistant event projects exactly one Reasoning row, so
+/// the transcript sequence retains the response ordering needed to reconcile
+/// a snapshot with the live semantic stream.
+fn durable_reasoning_response_count(
+  items : Array[@transcript.TranscriptItem],
+  floor : Int,
+) -> Int {
+  let mut count = 0
+  for item in items {
+    if item.kind is Reasoning &&
+      item.sequence is Some(sequence) &&
+      sequence > floor {
+      count = count + 1
+    }
+  }
+  count
 }
 
 ///|
@@ -3275,9 +3325,12 @@ fn Conversation::clear_streams(self : Conversation) -> Conversation {
 /// fields. The fixed message boundary keeps it before the terminal's answer
 /// whether that commit arrived just before or just after Finished.
 fn Conversation::settle_streams_at_finish(self : Conversation) -> Conversation {
+  guard self.streaming_reasoning_response is Some(reasoning_response) else {
+    return self.clear_streams()
+  }
   guard self.streaming_reasoning_complete &&
     self.streaming_reasoning_visible &&
-    !self.has_durable_reasoning() else {
+    self.reasoning_durable_responses < reasoning_response else {
     return self.clear_streams()
   }
   let mut boundary = self.messages.length()
@@ -3305,31 +3358,17 @@ fn Conversation::settle_streams_at_finish(self : Conversation) -> Conversation {
     kind: Reasoning,
     content: "",
     anchor: AfterMessages(boundary),
-    reconciliation: Retained,
+    reconciliation: ReasoningResponse(reasoning_response),
   })
   {
     ..self,
     streaming_response: "",
     streaming_reasoning_visible: false,
     streaming_reasoning_complete: false,
+    streaming_reasoning_response: None,
     overlay,
     next_notice_id: id,
   }
-}
-
-///|
-/// Whether this run's durable transcript already contains a Reasoning row. A
-/// store commit can overtake its semantic engine event, so the later semantic
-/// event must not resurrect a second transient status beside it.
-fn Conversation::has_durable_reasoning(self : Conversation) -> Bool {
-  let floor = self.run_durable_floor.unwrap_or(self.last_terminal_sequence)
-  self.messages
-  .iter()
-  .any(item => {
-    item.kind is Reasoning &&
-    item.sequence is Some(sequence) &&
-    sequence > floor
-  })
 }
 
 ///|
@@ -4466,15 +4505,21 @@ fn Conversation::apply_commit(
     _ => false
   }
   // The semantic reasoning event and the durable session commit are separate
-  // notifications. Retire the transient status when a current-run commit
-  // carries reasoning; doing it here inserts the permanent row in the very
-  // render that removes the live row, instead of flashing through an empty
-  // transcript. A delayed commit from before this run's durable floor cannot
-  // clear the current status.
+  // ordered streams. Give each current-run reasoning commit its response
+  // ordinal; only an equal transient ordinal may be retired. This inserts the
+  // permanent row in the same render without letting a delayed earlier step
+  // clear the response currently streaming.
   let floor = self.run_durable_floor.unwrap_or(self.last_terminal_sequence)
-  let reasoning_committed = sequence > floor &&
-    durable_reasoning &&
-    self.streaming_reasoning_visible
+  let durable_reasoning_response = if sequence > floor && durable_reasoning {
+    Some(self.reasoning_durable_responses + 1)
+  } else {
+    None
+  }
+  let reasoning_committed = match
+    (durable_reasoning_response, self.streaming_reasoning_response) {
+    (Some(durable), Some(streaming)) => durable == streaming
+    _ => false
+  }
   // A final-answer fallback is local only because the current Terminal store
   // has no reasoning field. If a newer engine does supply reasoning in an
   // Assistant commit, let that durable row take over atomically instead
@@ -4494,10 +4539,12 @@ fn Conversation::apply_commit(
     }
     None => None
   }
-  let overlay = match (durable_reasoning, current_run_start) {
-    (true, Some(start)) =>
+  let overlay = match (durable_reasoning_response, current_run_start) {
+    (Some(response), Some(start)) =>
       self.overlay.filter(notice => {
         !(notice.kind is Reasoning &&
+        notice.reconciliation is ReasoningResponse(existing) &&
+        existing == response &&
         notice.anchor is AfterMessages(boundary) &&
         boundary >= start)
       })
@@ -4532,6 +4579,14 @@ fn Conversation::apply_commit(
     } else {
       self.streaming_reasoning_complete
     },
+    streaming_reasoning_response: if reasoning_committed {
+      None
+    } else {
+      self.streaming_reasoning_response
+    },
+    reasoning_durable_responses: durable_reasoning_response.unwrap_or(
+      self.reasoning_durable_responses,
+    ),
     // Settled by what this commit made the record say, not by whose command
     // it was — see `GoalRequest::settled_by`.
     goal_pending: if self.goal_pending is Some(pending) &&
@@ -4775,6 +4830,44 @@ fn Conversation::adopt_snapshot(
     }
     .freeze_run_tail_notices_from_snapshot(event_boundaries, generation)
     .freeze_durable_tail_notices_from_snapshot(event_boundaries)
+  // A session snapshot can overtake either live producer. Rebuild the durable
+  // response count from its authoritative transcript, clear only the matching
+  // active response, and align an idle semantic baseline for pages that joined
+  // mid-run. When a delta is active, keep its semantic ordinal so a delayed
+  // ReasoningMessage can still pair with the snapshot that overtook it.
+  let snapshot_reasoning_responses = match reconciled.run_durable_floor {
+    Some(floor) => durable_reasoning_response_count(items, floor)
+    None => reconciled.reasoning_durable_responses
+  }
+  let had_active_reasoning = reconciled.streaming_reasoning_response is Some(_)
+  let snapshot_replaces_reasoning = reconciled.streaming_reasoning_response
+    is Some(response) &&
+    snapshot_reasoning_responses >= response
+  let reconciled = {
+    ..reconciled,
+    reasoning_durable_responses: snapshot_reasoning_responses,
+    reasoning_semantic_responses: if !had_active_reasoning &&
+      snapshot_reasoning_responses > reconciled.reasoning_semantic_responses {
+      snapshot_reasoning_responses
+    } else {
+      reconciled.reasoning_semantic_responses
+    },
+    streaming_reasoning_visible: if snapshot_replaces_reasoning {
+      false
+    } else {
+      reconciled.streaming_reasoning_visible
+    },
+    streaming_reasoning_complete: if snapshot_replaces_reasoning {
+      false
+    } else {
+      reconciled.streaming_reasoning_complete
+    },
+    streaming_reasoning_response: if snapshot_replaces_reasoning {
+      None
+    } else {
+      reconciled.streaming_reasoning_response
+    },
+  }
   let overlay = reconciled.overlay.filter(item => {
     item.content != TranscriptRefreshFailedNotice
   })
