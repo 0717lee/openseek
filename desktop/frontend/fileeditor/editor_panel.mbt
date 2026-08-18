@@ -44,11 +44,10 @@ priv struct ViewerHost {
   // the source model, selection, folding, and scroll state. The comparison
   // itself is composed from two ordinary Viewers.
   mut diff_viewer : @viewer.DiffViewer?
-  // A positioned transcript link keeps its caret collapsed at the requested
-  // column. This separate whole-line decoration makes the destination visible
-  // without turning the line itself into a selection (whose active end would
-  // move the caret away from that column).
-  mut point_range_highlight : @viewer.EditorDecorationsCollection?
+  // Programmatic navigation keeps its caret collapsed at the target start.
+  // This separate decoration makes either a point line or symbol range visible
+  // without turning the destination into a selection and opening Comment UI.
+  mut navigation_target_highlight : @viewer.EditorDecorationsCollection?
   // Desktop owns the concrete marker and feedback stores passed through the
   // Viewer's public handle API. They receive language-server diagnostics and
   // turn inline reviews into composer chips without requiring editor internals.
@@ -88,7 +87,7 @@ priv struct ViewerHost {
 let viewer_state : ViewerHost = {
   viewer: None,
   diff_viewer: None,
-  point_range_highlight: None,
+  navigation_target_highlight: None,
   services: None,
   absolute: None,
   relative: None,
@@ -169,7 +168,7 @@ fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
           ),
         )
         viewer_state.viewer = Some(viewer)
-        viewer_state.point_range_highlight = Some(
+        viewer_state.navigation_target_highlight = Some(
           viewer.create_decorations_collection(),
         )
         services.feedback.on_did_add_feedback(event => {
@@ -452,11 +451,53 @@ fn show_diff_comparison(
 }
 
 ///|
+/// The collapsed caret and decoration used for one programmatic navigation.
+/// Point locations highlight their whole line; non-empty symbol locations use
+/// the same exact-range feedback as the Viewer's same-resource Definition
+/// path. Neither presentation creates a selection, so navigation cannot open
+/// the selection-driven Comment UI.
+priv struct NavigationTargetPresentation {
+  position : @common.Position
+  decoration : @model.ModelDeltaDecoration
+}
+
+///|
+fn navigation_target_presentation(
+  range : @common.Range,
+) -> NavigationTargetPresentation {
+  let position = range.get_start_position()
+  let decoration : @model.ModelDeltaDecoration = if range.is_empty() {
+    {
+      range: @common.Range(
+        range.start_line_number,
+        1,
+        range.start_line_number,
+        1,
+      ),
+      options: @model.ModelDecorationOptions(
+        "rangeHighlight",
+        is_whole_line=true,
+        description="point-range-line-highlight",
+      ),
+    }
+  } else {
+    {
+      range,
+      options: @model.ModelDecorationOptions(
+        "symbolHighlight",
+        description="symbol-navigate-action-highlight",
+      ),
+    }
+  }
+  { position, decoration }
+}
+
+///|
 /// Show a file's contents in the viewer as a fresh read-only document. A
 /// symbol jump's `range`, when present, is revealed centered once the
-/// document is set. A non-empty range is selected so the named code reads
-/// highlighted; an empty point range keeps the caret at its requested column
-/// and draws a separate whole-line destination highlight. `annotation`, when
+/// document is set. The caret stays collapsed at the range start while an
+/// independent decoration highlights either the exact symbol or a point's
+/// whole line. `annotation`, when
 /// present (an annotation chip's jump), is re-shown as a comment bubble over
 /// `range` — the bubble the chip replaced when the comment was filed.
 ///
@@ -523,7 +564,7 @@ fn show_file_in_viewer(
     // Decorations live on the current text model. Remove the previous jump's
     // highlight before a possible model swap, then add the incoming one below
     // only when this show carries a positioned point.
-    if viewer_state.point_range_highlight is Some(highlight) {
+    if viewer_state.navigation_target_highlight is Some(highlight) {
       highlight.clear()
     }
     if !same_document {
@@ -622,39 +663,10 @@ fn show_file_in_viewer(
       None => ()
     }
     if range is Some(range) {
-      if range.is_empty() {
-        // A transcript `path:line[:column]` identifies a position, not a text
-        // span. Keep the selection collapsed so its active position remains
-        // the requested column; the independent decoration supplies the
-        // visible whole-line destination without changing the caret.
-        viewer.set_position(range.get_start_position())
-        if viewer_state.point_range_highlight is Some(highlight) {
-          highlight.set([
-            {
-              range: @common.Range(
-                range.start_line_number,
-                1,
-                range.start_line_number,
-                1,
-              ),
-              options: @model.ModelDecorationOptions(
-                "rangeHighlight",
-                is_whole_line=true,
-                description="point-range-line-highlight",
-              ),
-            },
-          ])
-          |> ignore
-        }
-      } else {
-        // `set_selection` never scrolls on its own (the Monaco contract), so
-        // pair it with the reveal below.
-        viewer.set_selection(
-          @core.Selection::from_positions(
-            range.get_start_position(),
-            @common.Position(range.end_line_number, range.end_column),
-          ),
-        )
+      let target = navigation_target_presentation(range)
+      viewer.set_position(target.position)
+      if viewer_state.navigation_target_highlight is Some(highlight) {
+        highlight.set([target.decoration]) |> ignore
       }
       viewer.reveal_range_in_center(range)
     }
@@ -711,7 +723,7 @@ fn clear_viewer() -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
     viewer_state.view_states.clear()
     if viewer_state.viewer is Some(viewer) {
-      if viewer_state.point_range_highlight is Some(highlight) {
+      if viewer_state.navigation_target_highlight is Some(highlight) {
         highlight.clear()
       }
       if viewer_state.services is Some(services) &&
@@ -736,7 +748,7 @@ fn clear_viewer() -> @cmd.Cmd {
 fn clear_document() -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
     if viewer_state.viewer is Some(viewer) {
-      if viewer_state.point_range_highlight is Some(highlight) {
+      if viewer_state.navigation_target_highlight is Some(highlight) {
         highlight.clear()
       }
       if viewer_state.services is Some(services) &&
