@@ -4,13 +4,16 @@
 // Position suffixes apply only to built-in text files.
 
 ///|
+/// Refusals travel inside the reply as `Refused(message)` rather than as a
+/// raised error: the local bridge flattens a raise to the generic
+/// "op ext:openseek/host.open_path failed" and hides the reason.
 async fn open_path_op(payload : OpenPathPayload) -> OpenPathReply {
   // A live run hands us its cwd; a resumed conversation has none, so fall back
   // to the directory the session's engine runs in.
   let base = match payload.cwd {
     Some(cwd) => {
       guard @pathx.Absolute::from_uri_path(cwd) is Some(cwd) else {
-        raise HostError("Invalid working directory")
+        return refusal("Invalid working directory")
       }
       Some(cwd)
     }
@@ -20,17 +23,17 @@ async fn open_path_op(payload : OpenPathPayload) -> OpenPathReply {
   // Absolute system targets do not need a conversation checkout. Relative
   // paths still need one so they never fall back to the host process's cwd.
   if base is None && !path.is_host_absolute() {
-    raise HostError("This conversation has no working directory")
+    return refusal("This conversation has no working directory")
   }
   let target = @work_dir.open_target(base, path)
-  guard !target.0.is_empty() else { raise HostError("Empty path") }
+  guard !target.0.is_empty() else { return refusal("Empty path") }
   let resolution = @openpath.Reference(target.0).resolve()
   if resolution is MissingPath(path) {
-    raise HostError("File does not exist: \{path}")
+    return refusal("File does not exist: \{path}")
   }
   if resolution is EditorPath(path~, line~, column~) {
     guard base is Some(root) else {
-      raise HostError("This conversation has no working directory")
+      return refusal("This conversation has no working directory")
     }
     // The built-in editor is checkout-rooted. Return the relative path we
     // already proved belongs to this exact cwd. Check both the lexical path
@@ -39,30 +42,26 @@ async fn open_path_op(payload : OpenPathPayload) -> OpenPathReply {
     guard @pathx.Path(path).to_absolute() is Some(absolute) &&
       absolute.relative_to(root~) is Some(relative) &&
       !relative.is_root() else {
-      raise HostError("Text file is outside the conversation checkout: \{path}")
+      return refusal("Text file is outside the conversation checkout: \{path}")
     }
     let real_root_text = @fs.realpath(root.to_string()) catch {
       error if @async.is_being_cancelled() => raise error
-      error => raise HostError("Could not resolve working directory: \{error}")
+      error => return refusal("Could not resolve working directory: \{error}")
     }
     let real_path_text = @fs.realpath(path) catch {
       error if @async.is_being_cancelled() => raise error
-      error => raise HostError("Could not resolve file: \{error}")
+      error => return refusal("Could not resolve file: \{error}")
     }
     guard @pathx.Path(real_root_text).to_absolute() is Some(real_root) &&
       @pathx.Path(real_path_text).to_absolute() is Some(real_path) &&
       real_path.relative_to(root=real_root) is Some(real_relative) &&
       !real_relative.is_root() else {
-      raise HostError("Text file is outside the conversation checkout: \{path}")
+      return refusal("Text file is outside the conversation checkout: \{path}")
     }
-    return {
-      opened: false,
-      editor_target: Some({ path: relative.0, line, column }),
-      directory_target: None,
-    }
+    return Editor({ path: relative.0, line, column })
   }
   guard resolution is SystemPath(system_path) else {
-    raise HostError("Could not resolve path")
+    return refusal("Could not resolve path")
   }
   // A literal directory inside this conversation belongs to the built-in Files
   // tree. Check both its lexical and real path so an in-checkout symlink cannot
@@ -89,51 +88,58 @@ async fn open_path_op(payload : OpenPathPayload) -> OpenPathReply {
         @pathx.Path(real_root_text).to_absolute() is Some(real_root) &&
         @pathx.Path(real_path_text).to_absolute() is Some(real_path) &&
         real_path.relative_to(root=real_root) is Some(_) {
-        return {
-          opened: false,
-          editor_target: None,
-          directory_target: Some({ path: relative.0 }),
-        }
+        return Directory({ path: relative.0 })
       }
     }
   }
   let code = @platform.open_path(system_path) catch {
     error if @async.is_being_cancelled() => raise error
-    error => raise HostError("Could not open \{system_path}: \{error}")
+    error => return refusal("Could not open \{system_path}: \{error}")
   }
-  guard code == 0 else { raise HostError("Could not open \{system_path}") }
-  { opened: true, editor_target: None, directory_target: None }
+  guard code == 0 else { return refusal("Could not open \{system_path}") }
+  Opened
+}
+
+///|
+/// A refusal travels inside the reply instead of raising: the local bridge
+/// flattens a raised host error to the generic
+/// "op ext:openseek/host.open_path failed" and hides this message.
+fn refusal(message : String) -> OpenPathReply {
+  Refused(message)
 }
 
 ///|
 async test "open_path only requires a working directory for relative or editor paths" {
   let root = @fs.tmpdir(prefix="openseek-host-open-without-cwd-")
   let missing_path = "\{root}/missing.bin"
-  let mut absolute_was_resolved = false
-  ignore(open_path_op({ session: "", cwd: None, path: missing_path })) catch {
-    HostError(message) =>
-      absolute_was_resolved = message.has_prefix("File does not exist:")
-    _ => ()
-  }
-  assert_true(absolute_was_resolved)
-  let mut relative_requires_cwd = false
-  ignore(open_path_op({ session: "", cwd: None, path: "missing.bin" })) catch {
-    HostError(message) =>
-      relative_requires_cwd = message ==
-        "This conversation has no working directory"
-    _ => ()
-  }
-  assert_true(relative_requires_cwd)
+  // The absolute target reached the existence check (not the working-
+  // directory gate), proving it was treated as an absolute system path.
+  let absolute_missing = open_path_op({
+    session: "",
+    cwd: None,
+    path: missing_path,
+  })
+  assert_eq(absolute_missing, Refused("File does not exist: \{missing_path}"))
+  let relative_missing = open_path_op({
+    session: "",
+    cwd: None,
+    path: "missing.bin",
+  })
+  assert_eq(
+    relative_missing,
+    Refused("This conversation has no working directory"),
+  )
   let text_path = "\{root}/source.mbt"
   @fs.write_file(text_path, "fn main {}", create_mode=CreateOrTruncate)
-  let mut editor_requires_cwd = false
-  ignore(open_path_op({ session: "", cwd: None, path: text_path })) catch {
-    HostError(message) =>
-      editor_requires_cwd = message ==
-        "This conversation has no working directory"
-    _ => ()
-  }
-  assert_true(editor_requires_cwd)
+  let editor_without_cwd = open_path_op({
+    session: "",
+    cwd: None,
+    path: text_path,
+  })
+  assert_eq(
+    editor_without_cwd,
+    Refused("This conversation has no working directory"),
+  )
 }
 
 ///|
@@ -153,35 +159,28 @@ async test "open_path returns workspace editor positions without a system open" 
     cwd: Some(cwd),
     path: "source.mbt:2738:17",
   })
-  assert_eq(reply, {
-    opened: false,
-    editor_target: Some({
-      path: "source.mbt",
-      line: Some(2738),
-      column: Some(17),
-    }),
-    directory_target: None,
-  })
+  assert_eq(
+    reply,
+    Editor({ path: "source.mbt", line: Some(2738), column: Some(17) }),
+  )
   let fragment_reply = open_path_op({
     session: "unused-for-explicit-cwd",
     cwd: Some(cwd),
     path: "source.mbt#L5",
   })
-  assert_eq(fragment_reply, {
-    opened: false,
-    editor_target: Some({ path: "source.mbt", line: Some(5), column: None }),
-    directory_target: None,
-  })
+  assert_eq(
+    fragment_reply,
+    Editor({ path: "source.mbt", line: Some(5), column: None }),
+  )
   let ordinary_reply = open_path_op({
     session: "unused-for-explicit-cwd",
     cwd: Some(cwd),
     path: "source.mbt",
   })
-  assert_eq(ordinary_reply, {
-    opened: false,
-    editor_target: Some({ path: "source.mbt", line: None, column: None }),
-    directory_target: None,
-  })
+  assert_eq(
+    ordinary_reply,
+    Editor({ path: "source.mbt", line: None, column: None }),
+  )
   let literal = "\{file}:12"
   @fs.write_file(literal, "literal", create_mode=CreateOrTruncate)
   let literal_reply = open_path_op({
@@ -189,22 +188,17 @@ async test "open_path returns workspace editor positions without a system open" 
     cwd: Some(cwd),
     path: "source.mbt:12",
   })
-  assert_eq(literal_reply, {
-    opened: false,
-    editor_target: Some({ path: "source.mbt:12", line: None, column: None }),
-    directory_target: None,
-  })
+  assert_eq(
+    literal_reply,
+    Editor({ path: "source.mbt:12", line: None, column: None }),
+  )
   @fs.mkdir("\{dir}/src")
   let directory_reply = open_path_op({
     session: "unused-for-explicit-cwd",
     cwd: Some(cwd),
     path: "src",
   })
-  assert_eq(directory_reply, {
-    opened: false,
-    editor_target: None,
-    directory_target: Some({ path: "src" }),
-  })
+  assert_eq(directory_reply, Directory({ path: "src" }))
 }
 
 ///|
@@ -217,36 +211,26 @@ async test "open_path rejects missing and outside text files" {
     .unwrap()
     .to_uri_path()
     .unwrap()
-  let mut missing = false
-  ignore(
-    open_path_op({
-      session: "unused-for-explicit-cwd",
-      cwd: Some(cwd),
-      path: "missing.mbt:12",
-    }),
-  ) catch {
-    HostError(message) => missing = message.has_prefix("File does not exist:")
-    _ => ()
-  }
-  assert_true(missing)
+  let missing = open_path_op({
+    session: "unused-for-explicit-cwd",
+    cwd: Some(cwd),
+    path: "missing.mbt:12",
+  })
+  assert_true(
+    missing is Refused(message) && message.has_prefix("File does not exist:"),
+  )
   let outside = "\{root}/outside.txt"
   @fs.write_file(outside, "outside", create_mode=CreateOrTruncate)
   let outside = @fs.realpath(outside)
-  let mut escaped = false
-  ignore(
-    open_path_op({
-      session: "unused-for-explicit-cwd",
-      cwd: Some(cwd),
-      path: outside,
-    }),
-  ) catch {
-    HostError(message) =>
-      escaped = message.has_prefix(
-        "Text file is outside the conversation checkout:",
-      )
-    _ => ()
-  }
-  assert_true(escaped)
+  let escaped = open_path_op({
+    session: "unused-for-explicit-cwd",
+    cwd: Some(cwd),
+    path: outside,
+  })
+  assert_true(
+    escaped is Refused(message) &&
+    message.has_prefix("Text file is outside the conversation checkout:"),
+  )
 }
 
 ///|

@@ -1673,8 +1673,8 @@ fn open_file(
           return
         }
       }
-      match (reply.editor_target, reply.directory_target) {
-        (Some(target), _) =>
+      match reply {
+        Editor(target) =>
           scheduler.add(
             dispatch(
               OpenFileAt(
@@ -1686,7 +1686,7 @@ fn open_file(
               ),
             ),
           )
-        (None, Some(target)) =>
+        Directory(target) =>
           scheduler.add(
             dispatch(
               OpenDirectoryAt(
@@ -1696,7 +1696,14 @@ fn open_file(
               ),
             ),
           )
-        (None, None) => ()
+        Refused(message) =>
+          scheduler.add(
+            dispatch(
+              OpenFileFailed(owner={ channel, session }, generation~, message~),
+            ),
+          )
+        // The host already handed the path to the system opener.
+        Opened => ()
       }
     })
   })

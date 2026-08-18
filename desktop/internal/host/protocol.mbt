@@ -20,9 +20,11 @@ type UninstallSkillPayload = @protocol.UninstallSkillPayload
 type OpenPathPayload = @protocol.OpenPathPayload
 
 ///|
-/// Reply to `open_path`: either an existing non-text path was handed to the
-/// system opener, or a checkout-relative text file and optional position
-/// should open in the built-in editor.
+/// Reply to `open_path`: the route one transcript-referenced path took —
+/// `Opened` (system opener), `Editor` (built-in editor, optional position),
+/// `Directory` (built-in Files tree), or `Refused` with its user-facing
+/// reason. Refusals ride the reply because the local bridge would flatten a
+/// raised error to the generic "op ext:openseek/host.open_path failed".
 type OpenPathReply = @protocol.OpenPathReply
 
 ///|
