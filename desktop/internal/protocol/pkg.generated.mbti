@@ -779,12 +779,14 @@ pub(all) struct OpenPathPayload {
   path : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
-pub(all) struct OpenPathReply {
-  opened : Bool
-  editor_target : OpenPathEditorTarget?
-  directory_target : OpenPathDirectoryTarget?
-  error : String?
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub(all) enum OpenPathReply {
+  Opened
+  Editor(OpenPathEditorTarget)
+  Directory(OpenPathDirectoryTarget)
+  Refused(String)
+} derive(Eq, @debug.Debug)
+pub impl ToJson for OpenPathReply
+pub impl @json.FromJson for OpenPathReply
 
 pub(all) struct ReadDirPayload {
   path : String

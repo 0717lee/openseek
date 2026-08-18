@@ -594,22 +594,68 @@ pub(all) struct OpenPathDirectoryTarget {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-pub(all) struct OpenPathReply {
-  // True only when the host handed a non-text path to the system opener.
-  opened : Bool
-  // Present when a viewer-sized UTF-8 file should open in the built-in editor.
-  editor_target : OpenPathEditorTarget?
-  // Present when the literal path is a directory in the conversation checkout.
-  // Older hosts omit this field, so it remains an optional additive protocol
-  // extension.
-  directory_target : OpenPathDirectoryTarget?
-  // Present when the open was refused: the user-facing reason (missing path,
-  // text file outside the checkout, opener failure). The frontend shows this
-  // message instead of the bridge's generic `op … failed` text. Like
-  // `directory_target`, this is an optional additive extension older hosts
-  // omit.
-  error : String?
-} derive(Debug, Eq, FromJson, ToJson)
+/// Reply to `open_path`: the route one transcript-referenced path took. The
+/// variants are exhaustive — the frontend matches on them directly instead of
+/// re-deriving the route from which optional field is present. The wire
+/// contract stays shape-compatible: `Opened` is the pre-structured
+/// `{opened: true}`, and the targets and the refusal ride the same optional
+/// fields the previous struct used, so older bundled hosts and frontends keep
+/// decoding every reply.
+pub(all) enum OpenPathReply {
+  // The host handed a non-text path (or any path outside the checkout's
+  // built-in text/directory policy) to the system opener.
+  Opened
+  // A viewer-sized UTF-8 file inside the checkout, with optional position.
+  Editor(OpenPathEditorTarget)
+  // A literal directory inside the conversation checkout, for the built-in
+  // Files tree.
+  Directory(OpenPathDirectoryTarget)
+  // The open was refused: the user-facing reason (missing path, text file
+  // outside the checkout, opener failure). The frontend shows this message
+  // instead of the bridge's generic `op … failed` text.
+  Refused(String)
+} derive(Debug, Eq)
+
+///|
+pub impl ToJson for OpenPathReply with fn to_json(self) {
+  match self {
+    Opened => { "opened": true }
+    Editor(target) => { "opened": false, "editor_target": target.to_json() }
+    Directory(target) =>
+      { "opened": false, "directory_target": target.to_json() }
+    Refused(message) => { "opened": false, "error": message }
+  }
+}
+
+///|
+/// Decode prefers the same route the frontend acted on: an editor target wins
+/// over a directory target, which wins over a refusal, which wins over the
+/// legacy bare `{opened: true}`. A reply that names no route at all is
+/// rejected rather than decoded to an invented outcome.
+pub impl FromJson for OpenPathReply with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected an open_path reply"))
+  }
+  if fields.get("editor_target") is Some(target) && target is Object(_) {
+    Editor(@json.from_json(target))
+  } else if fields.get("directory_target") is Some(target) &&
+    target is Object(_) {
+    Directory(@json.from_json(target))
+  } else {
+    match fields.get("error") {
+      Some(String(message)) => Refused(message)
+      Some(_) =>
+        raise JsonDecodeError(
+          (path.add_key("error"), "open_path refusal must be a string"),
+        )
+      None =>
+        match fields.get("opened") {
+          Some(True) => Opened
+          _ => raise JsonDecodeError((path, "open_path reply names no route"))
+        }
+    }
+  }
+}
 
 ///|
 pub(all) struct ApplyUpdateReply {

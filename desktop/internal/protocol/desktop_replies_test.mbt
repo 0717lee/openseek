@@ -147,46 +147,22 @@ test "file reads use one absolute path and may return image bytes" {
 ///|
 test "open-path replies distinguish system, editor, and directory targets" {
   let legacy : @protocol.OpenPathReply = @json.from_json({ "opened": true })
-  @debug.assert_eq(legacy, {
-    opened: true,
-    editor_target: None,
-    directory_target: None,
-    error: None,
+  @debug.assert_eq(legacy, Opened)
+  let system : @protocol.OpenPathReply = Opened
+  let ordinary : @protocol.OpenPathReply = Editor({
+    path: "README.md",
+    line: None,
+    column: None,
   })
-  let system : @protocol.OpenPathReply = {
-    opened: true,
-    editor_target: None,
-    directory_target: None,
-    error: None,
-  }
-  let ordinary : @protocol.OpenPathReply = {
-    opened: false,
-    editor_target: Some({ path: "README.md", line: None, column: None }),
-    directory_target: None,
-    error: None,
-  }
-  let positioned : @protocol.OpenPathReply = {
-    opened: false,
-    editor_target: Some({
-      path: "src/main.mbt",
-      line: Some(2738),
-      column: Some(17),
-    }),
-    directory_target: None,
-    error: None,
-  }
-  let directory : @protocol.OpenPathReply = {
-    opened: false,
-    editor_target: None,
-    directory_target: Some({ path: "src" }),
-    error: None,
-  }
-  let refused : @protocol.OpenPathReply = {
-    opened: false,
-    editor_target: None,
-    directory_target: None,
-    error: Some("File does not exist: nope.mbt"),
-  }
+  let positioned : @protocol.OpenPathReply = Editor({
+    path: "src/main.mbt",
+    line: Some(2738),
+    column: Some(17),
+  })
+  let directory : @protocol.OpenPathReply = Directory({ path: "src" })
+  let refused : @protocol.OpenPathReply = Refused(
+    "File does not exist: nope.mbt",
+  )
   for reply in [system, ordinary, positioned, directory, refused] {
     let decoded : @protocol.OpenPathReply = @json.from_json(reply.to_json())
     @debug.assert_eq(decoded, reply)
