@@ -3,43 +3,43 @@
 /// included (`/messages` is appended). This is NOT the chat-completions base
 /// the agent's own client talks to (`https://api.deepseek.com`), so the tool
 /// deliberately does not reuse `--api-url` — only the API key is shared.
-pub let default_base_url : String = "https://api.deepseek.com/anthropic/v1"
+const DefaultBaseUrl : String = "https://api.deepseek.com/anthropic/v1"
 
 ///|
 /// Default Anthropic-format model name for the auxiliary search call. The
 /// flash tier: the call exists to trigger native search and return result
 /// blocks, not to think.
-let default_search_model : String = "deepseek-v4-flash"
+const DefaultSearchModel : String = "deepseek-v4-flash"
 
 ///|
 /// `anthropic-version` header value sent on every request.
-let anthropic_version : String = "2023-06-01"
+const AnthropicVersion : String = "2023-06-01"
 
 ///|
 /// Upper bound on generated tokens for the Messages request. The searching
 /// model's prose is discarded (only result blocks and citations survive), so
 /// this caps cost, not quality.
-let default_max_tokens : Int = 4096
+const DefaultMaxTokens : Int = 4096
 
 ///|
 /// Maximum native `web_search` server-tool uses per request.
-let default_max_uses : Int = 5
+const DefaultMaxUses : Int = 5
 
 ///|
 /// Upper bound on sources returned to the model. Owned by this consumer, not
 /// the provider: the model just asks a question; the product controls how
 /// much context comes back.
-let default_max_results : Int = 8
+const DefaultMaxResults : Int = 8
 
 ///|
 /// Wall bound on one whole search call. Server-side search runs a model turn
 /// with up to `max_uses` searches, so it is bounded like a chat request, not
 /// like a plain HTTP fetch.
-let default_timeout_ms : Int = 120_000
+const DefaultTimeoutMs : Int = 120_000
 
 ///|
 /// Input cap: a query is a question, not a document.
-let max_query_chars : Int = 2_000
+const MaxQueryChars : Int = 2_000
 
 ///|
 /// One citeable source parsed out of a `web_search_tool_result` block.
@@ -82,7 +82,7 @@ impl Show for SearchFailure with fn output(
 ///
 /// ## Arguments
 /// - `query` (string, required): the search query; non-blank, at most
-///   `max_query_chars` characters.
+///   `MaxQueryChars` characters.
 ///
 /// ## Result
 /// - `Respond` with a markdown source list (`- [title](url) — snippet
@@ -97,15 +97,15 @@ impl Show for SearchFailure with fn output(
 /// but returns structured result blocks; absence of those blocks is an error
 /// rather than a prose-scraping fallback. Only the DeepSeek API key is shared
 /// with the agent's own client — the endpoint base is separate (see
-/// `default_base_url`), so `--api-url` proxies are not consulted.
+/// `DefaultBaseUrl`), so `--api-url` proxies are not consulted.
 pub fn definition(
   api_key~ : String,
-  base_url? : String = default_base_url,
-  model? : String = default_search_model,
-  max_results? : Int = default_max_results,
-  max_uses? : Int = default_max_uses,
-  max_tokens? : Int = default_max_tokens,
-  timeout_ms? : Int = default_timeout_ms,
+  base_url? : String = DefaultBaseUrl,
+  model? : String = DefaultSearchModel,
+  max_results? : Int = DefaultMaxResults,
+  max_uses? : Int = DefaultMaxUses,
+  max_tokens? : Int = DefaultMaxTokens,
+  timeout_ms? : Int = DefaultTimeoutMs,
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
     name="web_search",
@@ -147,9 +147,9 @@ async fn execute(
       is_error=true,
     )
   }
-  guard query.length() <= max_query_chars else {
+  guard query.length() <= MaxQueryChars else {
     return @agent_tool.ToolAction::respond(
-      "error: web_search query exceeds \{max_query_chars} chars — ask one focused question",
+      "error: web_search query exceeds \{MaxQueryChars} chars — ask one focused question",
       is_error=true,
     )
   }
@@ -242,7 +242,7 @@ async fn perform_search(
       "Content-Type": "application/json",
       "X-Api-Key": api_key,
       "Authorization": "Bearer \{api_key}",
-      "Anthropic-Version": anthropic_version,
+      "Anthropic-Version": AnthropicVersion,
     })
   }
   guard @async.with_timeout_opt(timeout_ms, attempt) is Some((resp, data)) else {
