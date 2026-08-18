@@ -3,12 +3,13 @@
 // types a lines-diff result is expressed in.
 //
 // Parity ledger (source members):
-// - `LineRangeMapping` — DEFERRED (there is no consumer until the diff editor's
-//   inner-change plumbing is ported).
+// - `LineRangeMapping` — DEFERRED (the current computer emits detailed line
+//   mappings directly, so the base-only mapping has no consumer).
 // - `DetailedLineRangeMapping` — PORTED as a flat struct (MoonBit has no
 //   class inheritance; it repeats `original`/`modified` beside
-//   `inner_changes`). `toTextEdit`/`fromRangeMappings`/
-//   `withInnerChangesFromLineRanges` — DEFERRED (need TextEdit /
+//   `inner_changes`). The default computer now fills character-level mappings
+//   and exposes them as public range pairs; `toTextEdit`/`fromRangeMappings`/
+//   `withInnerChangesFromLineRanges` remain DEFERRED (need TextEdit /
 //   `LineRange.fromRangeInclusive` / `toRangeMapping`).
 // - `RangeMapping` originalRange/modifiedRange/ctor/toString/flip/join —
 //   PORTED. Statics `fromEdit`/`fromEditJoin`/`toTextEdit` — DEFERRED (no
@@ -38,6 +39,19 @@ fn DetailedLineRangeMapping::DetailedLineRangeMapping(
   inner_changes : Array[RangeMapping]?,
 ) -> DetailedLineRangeMapping {
   { original: original_range, modified: modified_range, inner_changes }
+}
+
+///|
+/// Character-level changes inside this line mapping, or `None` when the
+/// refinement budget was exceeded. Returning public range pairs keeps the
+/// package-private `RangeMapping` representation out of the public API while
+/// allowing DiffViewer to render the computed refinement.
+pub fn DetailedLineRangeMapping::get_inner_changes(
+  self : DetailedLineRangeMapping,
+) -> Array[(@base_common.Range, @base_common.Range)]? {
+  self.inner_changes.map(changes => {
+    changes.map(change => (change.original_range, change.modified_range))
+  })
 }
 
 ///|

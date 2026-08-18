@@ -27,6 +27,62 @@ fn compute(
 }
 
 ///|
+test "character refinement keeps unchanged text outside the inner ranges" {
+  let result = compute(["return 1"], ["return 20"])
+  assert_eq(result.changes.length(), 1)
+  guard result.changes[0].get_inner_changes() is Some(changes) else {
+    fail("expected character-level changes")
+  }
+  assert_eq(changes.length(), 1)
+  let (original, modified) = changes[0]
+  assert_eq(original, Range(1, 8, 1, 9))
+  assert_eq(modified, Range(1, 8, 1, 10))
+}
+
+///|
+test "character refinement anchors pure insertions and deletions" {
+  let insertion = compute(["abc"], ["abXYc"])
+  guard insertion.changes[0].get_inner_changes() is Some(insertions) else {
+    fail("expected insertion refinement")
+  }
+  assert_eq(insertions.length(), 1)
+  let (empty_original, inserted) = insertions[0]
+  assert_eq(empty_original, Range(1, 3, 1, 3))
+  assert_eq(inserted, Range(1, 3, 1, 5))
+
+  let deletion = compute(["abXYc"], ["abc"])
+  guard deletion.changes[0].get_inner_changes() is Some(deletions) else {
+    fail("expected deletion refinement")
+  }
+  assert_eq(deletions.length(), 1)
+  let (deleted, empty_modified) = deletions[0]
+  assert_eq(deleted, Range(1, 3, 1, 5))
+  assert_eq(empty_modified, Range(1, 3, 1, 3))
+}
+
+///|
+test "character refinement keeps supplementary characters atomic" {
+  let result = compute(["x😀y"], ["x😃y"])
+  assert_eq(result.changes.length(), 1)
+  guard result.changes[0].get_inner_changes() is Some(changes) else {
+    fail("expected character-level changes")
+  }
+  assert_eq(changes.length(), 1)
+  let (original, modified) = changes[0]
+  assert_eq(original, Range(1, 2, 1, 4))
+  assert_eq(modified, Range(1, 2, 1, 4))
+}
+
+///|
+test "oversized character refinement falls back to line changes" {
+  let original = "a".repeat(MaxInnerDiffCodeUnits + 1)
+  let modified = "b".repeat(MaxInnerDiffCodeUnits + 1)
+  let result = compute([original], [modified])
+  assert_eq(result.changes.length(), 1)
+  assert_true(result.changes[0].get_inner_changes() is None)
+}
+
+///|
 /// Applies `changes` to `original`: copy unchanged original lines, splice in
 /// the modified side of each hunk.
 fn apply_changes(

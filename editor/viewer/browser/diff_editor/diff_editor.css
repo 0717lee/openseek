@@ -29,6 +29,14 @@
   background: var(--vscode-diffEditor-insertedLineBackground, #9bb95533);
 }
 
+.moonbit-diff-editor .diff-editor-char-delete {
+  background: var(--vscode-diffEditor-removedTextBackground, #ff000066);
+}
+
+.moonbit-diff-editor .diff-editor-char-insert {
+  background: var(--vscode-diffEditor-insertedTextBackground, #9bb95566);
+}
+
 .moonbit-diff-editor .diff-editor-gutter-delete {
   background: var(--vscode-diffEditor-removedLineBackground, #ff000055);
 }

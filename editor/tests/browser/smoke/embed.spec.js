@@ -152,6 +152,24 @@ test('virtualizes a legal-size large diff through ordinary Viewer panes', async 
   expect(await diff.locator('.view-line').count()).toBeLessThan(200);
 });
 
+test('renders character changes inside the line-level diff', async ({ page }) => {
+  await page.goto('/embed.html');
+  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
+
+  await page.locator(workspaceItem('src/lib')).click();
+  await page.locator(workspaceItem('src/lib/util.mbt')).click();
+  await expect(page.locator(sourceEditor)).toContainText('42');
+  await page.locator('[data-action="toggle-diff"]').click();
+
+  const diff = page.locator('.diff-viewer-host > .moonbit-diff-editor');
+  const originalPane = diff.locator('.moonbit-diff-editor-original');
+  const modifiedPane = diff.locator('.moonbit-diff-editor-modified');
+  await expect(originalPane.locator('.diff-editor-char-delete')).toHaveText('1');
+  await expect(modifiedPane.locator('.diff-editor-char-insert')).toHaveText('2');
+  await expect(originalPane.locator('.diff-editor-line-delete')).toHaveCount(1);
+  await expect(modifiedPane.locator('.diff-editor-line-insert')).toHaveCount(1);
+});
+
 test('renders a wide single-line comparison without eager row expansion', async ({ page }) => {
   await page.goto('/embed.html');
   await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
@@ -165,6 +183,8 @@ test('renders a wide single-line comparison without eager row expansion', async 
     diff.locator('.moonbit-diff-editor-pane > .monaco-editor'),
   ).toHaveCount(2);
   await expect(diff.locator('.view-line')).toHaveCount(2);
+  await expect(diff.locator('.diff-editor-char-delete')).toHaveCount(0);
+  await expect(diff.locator('.diff-editor-char-insert')).toHaveCount(0);
 });
 
 test('drops a stale host-ready rAF after a rapid model swap', async ({ page }) => {
