@@ -214,6 +214,26 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
 }
 
 ///|
+/// The DeepSeek API key the `web_search` tool should use, if any. A DeepSeek
+/// model run reuses the turn's own key; any other provider needs the dedicated
+/// `--deepseek-api-key`/`$DEEPSEEK` credential, because native web search rides
+/// DeepSeek's Anthropic-compatible endpoint regardless of the chat provider.
+/// `None` simply leaves the tool unregistered — a run without a DeepSeek key
+/// keeps working, minus web search.
+fn web_search_api_key(
+  model : @deepseek.Model,
+  api_key : String,
+  matches : @argparse.Matches,
+) -> String? {
+  match (model, matches.values) {
+    (Deepseek(_), _) => Some(api_key)
+    (_, { "deepseek-api-key": [key, ..], .. }) if !key.is_blank() =>
+      Some(key.trim().to_owned())
+    _ => None
+  }
+}
+
+///|
 /// One headless turn with its own runtime, task group, and tool registry —
 /// including any configured MCP servers' tools, exactly as `serve` wires them.
 /// The MCP connections live on the turn's task group and are torn down when the
@@ -275,6 +295,9 @@ async fn run_task_turn(
           child_session?,
         ),
       ]
+    if web_search_api_key(model, api_key, matches) is Some(web_search_key) {
+      extra_tools.push(@web_search.definition(api_key=web_search_key))
+    }
     let tools = @agent.build_tools(runtime, scope, extra_tools~)
     let on_goal_met = if review_gate_enabled(matches) {
       Some(
