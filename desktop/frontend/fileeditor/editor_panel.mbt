@@ -45,9 +45,9 @@ priv struct ViewerHost {
   // itself is composed from two ordinary Viewers.
   mut diff_viewer : @viewer.DiffViewer?
   // A positioned transcript link keeps its caret collapsed at the requested
-  // column. This separate whole-line decoration makes the destination visible
-  // without turning the line itself into a selection (whose active end would
-  // move the caret away from that column).
+  // column. This persistent whole-line decoration makes the destination visible
+  // without turning the line into a selection and opening Comment UI. Symbol
+  // navigation uses a fresh, short-lived collection instead (see below).
   mut point_range_highlight : @viewer.EditorDecorationsCollection?
   // Desktop owns the concrete marker and feedback stores passed through the
   // Viewer's public handle API. They receive language-server diagnostics and
@@ -452,11 +452,80 @@ fn show_diff_comparison(
 }
 
 ///|
+/// The collapsed caret and decoration used for one programmatic navigation.
+/// Point locations highlight their whole line; non-empty symbol locations use
+/// the same exact-range feedback as the Viewer's same-resource Definition
+/// path. Neither presentation creates a selection, so navigation cannot open
+/// the selection-driven Comment UI.
+priv struct NavigationTargetPresentation {
+  position : @common.Position
+  decoration : @model.ModelDeltaDecoration
+  is_transient : Bool
+}
+
+///|
+fn navigation_target_presentation(
+  range : @common.Range,
+) -> NavigationTargetPresentation {
+  let position = range.get_start_position()
+  let point = range.is_empty()
+  let decoration : @model.ModelDeltaDecoration = if point {
+    {
+      range: @common.Range(
+        range.start_line_number,
+        1,
+        range.start_line_number,
+        1,
+      ),
+      options: @model.ModelDecorationOptions(
+        "rangeHighlight",
+        is_whole_line=true,
+        description="point-range-line-highlight",
+      ),
+    }
+  } else {
+    {
+      range,
+      options: @model.ModelDecorationOptions(
+        "symbolHighlight",
+        description="symbol-navigate-action-highlight",
+      ),
+    }
+  }
+  { position, decoration, is_transient: !point }
+}
+
+///|
+/// Match the reusable Viewer's Definition/References target feedback: keep an
+/// exact symbol highlight for 350ms, then clear it only while the Viewer still
+/// owns the model that received it. A fresh collection prevents an older timer
+/// from clearing a newer navigation target.
+fn show_transient_navigation_target_highlight(
+  viewer : @viewer.Viewer,
+  target_model : @model.TextModel,
+  decoration : @model.ModelDeltaDecoration,
+) -> Unit {
+  let decorations = viewer.create_decorations_collection(decorations=[
+    decoration,
+  ])
+  @base_browser.schedule_timeout(
+    () => {
+      match viewer.get_model() {
+        Some(current) if current.same(target_model) => decorations.clear()
+        _ => ()
+      }
+    },
+    350,
+  )
+  |> ignore
+}
+
+///|
 /// Show a file's contents in the viewer as a fresh read-only document. A
 /// symbol jump's `range`, when present, is revealed centered once the
-/// document is set. A non-empty range is selected so the named code reads
-/// highlighted; an empty point range keeps the caret at its requested column
-/// and draws a separate whole-line destination highlight. `annotation`, when
+/// document is set. The caret stays collapsed at the range start while an
+/// independent decoration highlights either the exact symbol for 350ms or a
+/// point's whole line until the next document show. `annotation`, when
 /// present (an annotation chip's jump), is re-shown as a comment bubble over
 /// `range` — the bubble the chip replaced when the comment was filed.
 ///
@@ -520,9 +589,9 @@ fn show_file_in_viewer(
     let restore_view_state = should_restore_view_state(
       restore_scroll, previous_uri, uri,
     )
-    // Decorations live on the current text model. Remove the previous jump's
-    // highlight before a possible model swap, then add the incoming one below
-    // only when this show carries a positioned point.
+    // Decorations live on the current text model. Remove the previous
+    // persistent point highlight before a possible model swap. Symbol jumps
+    // use fresh transient collections that retire themselves after 350ms.
     if viewer_state.point_range_highlight is Some(highlight) {
       highlight.clear()
     }
@@ -622,39 +691,18 @@ fn show_file_in_viewer(
       None => ()
     }
     if range is Some(range) {
-      if range.is_empty() {
-        // A transcript `path:line[:column]` identifies a position, not a text
-        // span. Keep the selection collapsed so its active position remains
-        // the requested column; the independent decoration supplies the
-        // visible whole-line destination without changing the caret.
-        viewer.set_position(range.get_start_position())
-        if viewer_state.point_range_highlight is Some(highlight) {
-          highlight.set([
-            {
-              range: @common.Range(
-                range.start_line_number,
-                1,
-                range.start_line_number,
-                1,
-              ),
-              options: @model.ModelDecorationOptions(
-                "rangeHighlight",
-                is_whole_line=true,
-                description="point-range-line-highlight",
-              ),
-            },
-          ])
-          |> ignore
+      let target = navigation_target_presentation(range)
+      viewer.set_position(target.position)
+      if target.is_transient {
+        if viewer.get_model() is Some(target_model) {
+          show_transient_navigation_target_highlight(
+            viewer,
+            target_model,
+            target.decoration,
+          )
         }
-      } else {
-        // `set_selection` never scrolls on its own (the Monaco contract), so
-        // pair it with the reveal below.
-        viewer.set_selection(
-          @core.Selection::from_positions(
-            range.get_start_position(),
-            @common.Position(range.end_line_number, range.end_column),
-          ),
-        )
+      } else if viewer_state.point_range_highlight is Some(highlight) {
+        highlight.set([target.decoration]) |> ignore
       }
       viewer.reveal_range_in_center(range)
     }

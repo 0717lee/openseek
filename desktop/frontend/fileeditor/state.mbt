@@ -625,9 +625,9 @@ pub(all) enum Msg {
   )
   // `file` is the decoded reply (content + address, or a withheld-file
   // case). `range`, when present, is a jumped-to symbol's one-based range,
-  // revealed in the viewer once the file loads. A non-empty range is selected
-  // so the code it names reads highlighted; an empty range keeps its exact
-  // caret position and adds a separate whole-line destination highlight.
+  // revealed in the viewer once the file loads. The caret stays collapsed at
+  // its start while an independent exact-symbol or whole-line decoration makes
+  // the destination visible without opening selection-driven Comment UI.
   // `annotation`, when present (an annotation chip's jump), is the user's
   // comment text,
   // re-shown as an editor bubble over `range`. A plain tree click leaves

@@ -10,7 +10,6 @@ import {
   "moonbitlang/editor/language",
   "moonbitlang/editor/viewer",
   "moonbitlang/editor/viewer/common/agent_feedback_api",
-  "moonbitlang/editor/viewer/common/core",
   "moonbitlang/editor/viewer/common/languages",
   "moonbitlang/editor/viewer/common/markers",
   "moonbitlang/editor/viewer/common/model",
