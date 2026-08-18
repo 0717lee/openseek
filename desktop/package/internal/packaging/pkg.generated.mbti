@@ -1,6 +1,10 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "openseek_desktop/package/internal/packaging"
 
+import {
+  "openseek_desktop/internal/pathx",
+}
+
 // Values
 pub fn absolute_path(String) -> String
 
@@ -36,7 +40,7 @@ pub async fn locate_workspace() -> Workspace
 
 pub fn posix_proton_cli() -> String
 
-pub async fn proton_runtime_dist(Workspace) -> String
+pub async fn proton_runtime_dist(Workspace) -> @pathx.Absolute
 
 pub async fn rebuild_libproton(Workspace, Array[(String, String)], extra_env? : Map[String, String]) -> Unit
 

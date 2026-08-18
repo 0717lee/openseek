@@ -194,7 +194,7 @@ async fn copy_bundle_files(
 /// (with `locales\`) under the same root — so flattening `bin\` into the
 /// bundle root keeps those defaults working too.
 async fn stage_proton_runtime(ws : @packaging.Workspace) -> Unit {
-  let dist = @packaging.proton_runtime_dist(ws)
+  let dist = @packaging.proton_runtime_dist(ws).0
   let bin = dist + "/bin"
   for entry in @asyncfs.readdir(bin, sort=true) {
     let source = "\{bin}/\{entry}"

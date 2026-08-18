@@ -250,7 +250,7 @@ async fn @packaging.Workspace::package_with_proton(
     "PROTON_MACOS_ENTITLEMENTS": self.at(SigningEntitlementsPath),
     // The OpenSeek moon.work root is above this embedded Proton checkout, so
     // package cannot discover the runtime manifest by walking the workspace.
-    "PROTON_NATIVE_DIST": @packaging.proton_runtime_dist(self),
+    "PROTON_NATIVE_DIST": @packaging.proton_runtime_dist(self).0,
   }
   match options.sign.identity {
     Some(identity) => package_env["PROTON_MACOS_SIGNING_IDENTITY"] = identity
