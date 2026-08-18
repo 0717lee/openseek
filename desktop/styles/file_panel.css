@@ -975,6 +975,44 @@ html.is-resizing * {
   background: color-mix(in srgb, var(--color-accent) 18%, transparent);
 }
 
+.review-layout-toggle {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  min-width: 24px;
+  max-width: none;
+  height: 22px;
+  padding: 0;
+}
+
+.review-layout-icon {
+  position: relative;
+  display: block;
+  box-sizing: border-box;
+  width: 12px;
+  height: 10px;
+  border: 1px solid currentColor;
+  border-radius: 1px;
+}
+
+.review-layout-icon.split::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 50%;
+  border-left: 1px solid currentColor;
+}
+
+.review-layout-icon.unified::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  left: 2px;
+  height: 1px;
+  background: currentColor;
+  box-shadow: 0 2px 0 currentColor, 0 4px 0 currentColor;
+}
+
 .review-progress {
   appearance: none;
   font: inherit;

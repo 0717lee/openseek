@@ -60,3 +60,40 @@ test "diff presentation separates non-empty character ranges by side" {
   assert_eq(presentation.original_inner_changed, [original])
   assert_eq(presentation.modified_inner_changed, [modified, inserted])
 }
+
+///|
+test "unified deleted lines keep UTF-16 character intervals per row" {
+  let ranges = [@base_common.Range(2, 3, 2, 6), Range(3, 5, 5, 3)]
+  let first = deleted_inline_intervals_for_line(ranges, 2, 8)
+  assert_eq(first.length(), 1)
+  assert_eq(first[0].start_offset, 2)
+  assert_eq(first[0].end_offset, 5)
+  let middle = deleted_inline_intervals_for_line(ranges, 4, 7)
+  assert_eq(middle.length(), 1)
+  assert_eq(middle[0].start_offset, 0)
+  assert_eq(middle[0].end_offset, 7)
+  let ending = deleted_inline_intervals_for_line(ranges, 5, 6)
+  assert_eq(ending.length(), 1)
+  assert_eq(ending[0].start_offset, 0)
+  assert_eq(ending[0].end_offset, 2)
+}
+
+///|
+test "unified deleted zones precede replacement and deletion anchors" {
+  assert_eq(
+    unified_deleted_zone_anchor({
+      original: LineRange(4, 6),
+      modified: LineRange(4, 5),
+      inner_changes: None,
+    }),
+    3,
+  )
+  assert_eq(
+    unified_deleted_zone_anchor({
+      original: LineRange(1, 3),
+      modified: LineRange(1, 1),
+      inner_changes: None,
+    }),
+    0,
+  )
+}

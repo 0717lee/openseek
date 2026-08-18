@@ -32,6 +32,9 @@ test('runs the viewer and tree from in-memory providers without a server', async
   // toggles sibling surfaces, preserving the ordinary source Viewer's model
   // and scroll while the comparison owns two ordinary Viewer panes.
   const diffToggle = page.locator('[data-action=\"toggle-diff\"]');
+  const layoutToggle = page.locator('[data-action="toggle-diff-layout"]');
+  await expect(layoutToggle).toBeDisabled();
+  await expect(layoutToggle).toHaveAccessibleName('Unified diff layout');
   await expect(diffToggle).toHaveAccessibleName('Full diff');
   await diffToggle.click();
   await expect(diffToggle).toHaveAttribute('aria-pressed', 'true');
@@ -51,6 +54,29 @@ test('runs the viewer and tree from in-memory providers without a server', async
   );
   await expect(originalPane.locator('.diff-editor-line-delete')).toHaveCount(1);
   await expect(modifiedPane.locator('.diff-editor-line-insert')).toHaveCount(1);
+
+  // Render-mode switching keeps the same model pair. Unified mode hides only
+  // the original child presentation and interleaves its deleted line as a
+  // tokenized ViewZone in the still-interactive modified Viewer.
+  await expect(layoutToggle).toBeEnabled();
+  await expect(layoutToggle).toHaveAttribute('aria-pressed', 'false');
+  await layoutToggle.click();
+  await expect(layoutToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(diff).toHaveAttribute('data-render-mode', 'unified');
+  await expect(originalPane).toBeHidden();
+  await expect(modifiedPane).toBeVisible();
+  const deletedBlock = modifiedPane.locator(
+    '.diff-editor-unified-deleted-block',
+  );
+  await expect(deletedBlock).toContainText('println("hello")');
+  await expect(
+    modifiedPane.locator('.diff-editor-unified-deleted-line-number'),
+  ).toContainText('3');
+  await expect(modifiedPane.locator('.diff-editor-line-insert')).toHaveCount(1);
+  await layoutToggle.click();
+  await expect(layoutToggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(diff).toHaveAttribute('data-render-mode', 'side-by-side');
+  await expect(originalPane).toBeVisible();
 
   // Desktop can place the changed-file tree beside this surface. Both panes
   // must remain within a substantially narrower caller-owned host.
@@ -160,13 +186,22 @@ test('renders character changes inside the line-level diff', async ({ page }) =>
   await page.locator(workspaceItem('src/lib/util.mbt')).click();
   await expect(page.locator(sourceEditor)).toContainText('42');
   await page.locator('[data-action="toggle-diff"]').click();
+  await page.locator('[data-action="toggle-diff-layout"]').click();
 
   const diff = page.locator('.diff-viewer-host > .moonbit-diff-editor');
   const originalPane = diff.locator('.moonbit-diff-editor-original');
   const modifiedPane = diff.locator('.moonbit-diff-editor-modified');
-  await expect(originalPane.locator('.diff-editor-char-delete')).toHaveText('1');
+  await expect(diff).toHaveAttribute('data-render-mode', 'unified');
+  await expect(originalPane).toBeHidden();
+  await expect(
+    modifiedPane.locator(
+      '.diff-editor-unified-deleted-line .diff-editor-char-delete',
+    ),
+  ).toHaveText('1');
   await expect(modifiedPane.locator('.diff-editor-char-insert')).toHaveText('2');
-  await expect(originalPane.locator('.diff-editor-line-delete')).toHaveCount(1);
+  await expect(
+    modifiedPane.locator('.diff-editor-unified-deleted-line'),
+  ).toHaveCount(1);
   await expect(modifiedPane.locator('.diff-editor-line-insert')).toHaveCount(1);
 });
 

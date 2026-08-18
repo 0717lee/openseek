@@ -47,6 +47,7 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
   assert_true(source_breadcrumb.contains("aria-label=\"Full diff\""))
   assert_true(source_breadcrumb.contains("aria-pressed=\"false\""))
   assert_true(source_breadcrumb.contains(">View full diff</button>"))
+  assert_false(source_breadcrumb.contains("aria-label=\"Unified diff layout\""))
   assert_true(source_breadcrumb.contains(">Mark reviewed</button>"))
   assert_true(
     source_breadcrumb.contains("aria-label=\"Changed file navigation\""),
@@ -78,6 +79,22 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
   assert_true(diff_breadcrumb.contains("aria-label=\"Full diff\""))
   assert_true(diff_breadcrumb.contains("aria-pressed=\"true\""))
   assert_true(diff_breadcrumb.contains(">View file</button>"))
+  assert_true(diff_breadcrumb.contains("aria-label=\"Unified diff layout\""))
+  assert_true(diff_breadcrumb.contains("aria-pressed=\"false\""))
+  assert_true(diff_breadcrumb.contains("data-layout=\"split\""))
+  assert_true(diff_breadcrumb.contains("review-layout-icon split"))
+
+  let unified_breadcrumb = render_review_html(
+    breadcrumb_view(
+      test_emit(),
+      { ..diff_state, review_diff_layout: ReviewUnified },
+      ctx,
+    ),
+  )
+  assert_true(unified_breadcrumb.contains("aria-label=\"Unified diff layout\""))
+  assert_true(unified_breadcrumb.contains("aria-pressed=\"true\""))
+  assert_true(unified_breadcrumb.contains("data-layout=\"unified\""))
+  assert_true(unified_breadcrumb.contains("review-layout-icon unified"))
 
   let reviewed_state = { ..diff_state, reviewed_changes: [selected] }
   let reviewed_breadcrumb = render_review_html(
