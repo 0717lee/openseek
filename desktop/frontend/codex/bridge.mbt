@@ -355,6 +355,24 @@ fn State::open_thread(
 }
 
 ///|
+/// Re-read one task's metadata after `thread/settings/updated`. The same
+/// snapshot read as `open_thread`, but its reply kind applies metadata-only,
+/// so a read racing a live turn cannot blank the transcript.
+fn State::refresh_thread_meta(
+  _self : State,
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  thread_id : String,
+) -> @cmd.Cmd {
+  CodexThreadMetaReply(thread_id).request(
+    dispatch,
+    channel,
+    @commands.codex_thread_history_read,
+    { thread_id, },
+  )
+}
+
+///|
 /// Re-read one task after a start/steer reply was lost. This uses a distinct
 /// reply kind so ordinary selection loading cannot clear the preserved input
 /// or enable Send before the request-time frontier has been compared.
@@ -903,7 +921,11 @@ fn State::login(
     @commands.codex_account_login_start,
     {
       kind_: "chatgpt",
-      use_hosted_login_success_page: true,
+      // The hosted success page is chatgpt.com's "open the Codex app"
+      // bounce; SeekMoon is the app the user should return to, so keep the
+      // local loopback page, which ends with "you can close this tab" and
+      // navigates nowhere.
+      use_hosted_login_success_page: false,
       app_brand: "codex",
     },
   )

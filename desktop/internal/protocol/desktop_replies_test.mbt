@@ -1,4 +1,17 @@
 ///|
+test "session list rows decode activity stamps and tolerate the engine's null" {
+  let rows = @protocol.SessionListEntry::array_from_wire([
+    { "id": "desktop-a", "title": "stamped", "updated_at_ms": 1500.0 },
+    { "id": "desktop-b", "title": "husk", "updated_at_ms": null },
+    { "id": "desktop-c", "title": "old engine without the field" },
+  ])
+  assert_eq(rows.length(), 3)
+  assert_eq(rows[0].updated_at_ms, Some(1500.0))
+  assert_eq(rows[1].updated_at_ms, None)
+  assert_eq(rows[2].updated_at_ms, None)
+}
+
+///|
 test "unknown session items preserve their complete wire object" {
   let raw : Json = {
     "kind": "future_item",

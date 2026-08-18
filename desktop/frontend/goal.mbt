@@ -873,7 +873,7 @@ test "a kept goal draft is a conversation you can get back to" {
       active_session: "desktop-test",
     }
     guard model.focused_device() is Some(dev) else { fail("no device") }
-    let rows : Array[@conversation.Input] = []
+    let rows : Array[(RowStamp, @conversation.Input)] = []
     model.push_group_component_inputs(
       rows,
       dev,
@@ -882,7 +882,7 @@ test "a kept goal draft is a conversation you can get back to" {
       archived=_ => false,
     )
     assert_true(
-      rows.iter().any(row => row.id().conversation() == "desktop-fresh"),
+      rows.iter().any(row => row.1.id().conversation() == "desktop-fresh"),
     )
   }
 }
@@ -992,6 +992,7 @@ test "a request in flight is reason enough to re-read the record" {
         title: Some("persisted"),
         workspace: @interop.ChannelId::Local.test_project(),
         workspace_name: "work",
+        updated_at_ms: None,
       },
     ]),
     empty,

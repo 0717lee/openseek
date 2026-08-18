@@ -1730,7 +1730,9 @@ fn update_msg(
       font~,
       font_size~,
       model=stored,
-      conversation_models=remembered
+      conversation_models=remembered,
+      agent~,
+      codex_model~
     ) => {
       let theme = Theme::parse(theme, model.theme)
       let app_font = AppFont::parse(font, model.app_font)
@@ -1741,11 +1743,30 @@ fn update_msg(
       let default_model = EngineModel::parse(stored).unwrap_or(
         model.default_model,
       )
+      let default_agent = AgentChoice::parse(agent).unwrap_or(
+        model.default_agent,
+      )
+      // The stored Codex pick seeds Codex's own selection state. When the
+      // catalog arrives, `with_models` keeps this id if it is still listed
+      // and otherwise falls back to the catalog default — exactly the
+      // semantics a stale stored preference should have.
+      let (codex_cmd, codex) = if codex_model.is_blank() {
+        (@cmd.none, model.codex)
+      } else {
+        @codex.update(
+          dispatch.map(msg => Codex(channel=model.focused, msg)),
+          @codex.Msg::model_changed(codex_model.trim().to_owned()),
+          model.codex,
+          model.focused,
+          url => open_external_link(dispatch, url),
+        )
+      }
       (
         @cmd.batch([
           theme.apply(model.system_dark),
           app_font.apply(),
           app_font_size.apply(),
+          codex_cmd,
         ]),
         {
           ..model,
@@ -1755,7 +1776,9 @@ fn update_msg(
           app_font,
           app_font_size,
           default_model,
+          default_agent,
           conversation_models: parse_conversation_models(remembered),
+          codex,
         },
       )
     }
@@ -2301,31 +2324,138 @@ fn update_msg(
     }
     QuickOpenOpen(provider) => open_quick_open(dispatch, model, provider)
     QuickOpen(msg) => update_quick_open(dispatch, model, msg)
-    EngineModelChanged(value) => {
-      // The selector changes the conversation on screen. The tier is pinned to
-      // that conversation right away — a chat can be given a tier and left
-      // unsent for days — and becomes what the next new chat starts from.
-      // (Starting a run pins it too; see `Started`.) A turn already in flight
-      // keeps the model it was started with; this takes effect on the next.
-      guard EngineModel::parse(value) is Some(engine_model) else {
+    ModelPicked(value) => {
+      guard ModelChoice::parse(value) is Some(choice) else {
         return (@cmd.none, model)
       }
-      guard model.active_conversation() is Some(conv) else {
-        return (@cmd.none, model)
+      match choice {
+        OpenSeekModel(engine_model) =>
+          if model.screen is Codex {
+            // Only a composing draft's chip offers the OpenSeek group; the
+            // pick hands the fresh conversation back to OpenSeek. The draft
+            // is abandoned and a fresh OpenSeek chat rotates into the
+            // draft's project (or whatever project is active when the draft
+            // never resolved one).
+            guard model.codex.composing_draft() else {
+              return (@cmd.none, model)
+            }
+            let root = model.codex.new_thread_cwd()
+            let (abandon_cmd, codex) = @codex.update(
+              dispatch.map(msg => Codex(channel=model.focused, msg)),
+              @codex.Msg::abandon_draft(),
+              model.codex,
+              model.focused,
+              url => open_external_link(dispatch, url),
+            )
+            let next = {
+              ..model,
+              codex,
+              default_model: engine_model,
+              default_agent: OpenSeekAgent,
+              loading_conversation: None,
+            }
+            let next = if !root.is_empty() &&
+              @resource.of_path(model.focused, root) is Some(workspace) {
+              next.with_active_project(Some(workspace))
+            } else {
+              next
+            }
+            (
+              @cmd.batch([
+                abandon_cmd,
+                save_default_model(engine_model),
+                save_default_agent(OpenSeekAgent),
+                rotate_session(dispatch, next.focused),
+              ]),
+              next,
+            )
+          } else {
+            // The selector changes the conversation on screen. The tier is
+            // pinned to that conversation right away — a chat can be given a
+            // tier and left unsent for days — and becomes what the next new
+            // chat starts from. (Starting a run pins it too; see `Started`.)
+            // A turn already in flight keeps the model it was started with;
+            // this takes effect on the next.
+            guard model.active_conversation() is Some(conv) else {
+              return (@cmd.none, model)
+            }
+            let next = model
+              .replace_conversation({ ..conv, engine_model, })
+              .remember_model(conv.device, conv.session_id, engine_model)
+            (
+              @cmd.batch([
+                save_default_model(engine_model),
+                save_default_agent(OpenSeekAgent),
+                save_conversation_model(
+                  conversation_model_key(conv.device, conv.session_id),
+                  engine_model,
+                ),
+              ]),
+              {
+                ..next,
+                default_model: engine_model,
+                default_agent: OpenSeekAgent,
+              },
+            )
+          }
+        CodexModel(id) => {
+          let (model_cmd, codex) = @codex.update(
+            dispatch.map(msg => Codex(channel=model.focused, msg)),
+            @codex.Msg::model_changed(id),
+            model.codex,
+            model.focused,
+            url => open_external_link(dispatch, url),
+          )
+          let persist = @cmd.batch([
+            model_cmd,
+            save_codex_model(id),
+            save_default_agent(CodexAgent),
+          ])
+          if model.screen is Codex {
+            // A pick within the Codex group: the next thread start or turn
+            // uses it, on the draft and stored-thread surfaces alike.
+            (persist, { ..model, codex, default_agent: CodexAgent })
+          } else {
+            // Only a composing OpenSeek chat's chip offers the Codex group;
+            // the pick hands the fresh conversation to Codex. One composing
+            // row at a time: an empty husk that was only ever the "New chat"
+            // placeholder is deactivated so its row vanishes with the
+            // switch; a husk holding typed writing keeps its row (and the
+            // text survives a switch back).
+            guard model.composing_new_chat() &&
+              model.active_conversation() is Some(conv) else {
+              return (@cmd.none, model)
+            }
+            let cwd = @resource.path_for(conv.project(), model.focused).unwrap_or(
+              "",
+            )
+            let active_session = if conv.worth_keeping() {
+              model.active_session
+            } else {
+              ""
+            }
+            (
+              @cmd.batch([
+                persist,
+                CodexDraftRotation::{ cwd, }.rotate(dispatch),
+              ]),
+              {
+                ..model,
+                codex,
+                default_agent: CodexAgent,
+                screen: Codex,
+                active_session,
+                sidebar_open: model.sidebar_open && !model.narrow,
+              },
+            )
+          }
+        }
+        CodexUnavailablePick =>
+          // The Codex group's placeholder row: not a model, a doorway.
+          // Sign-in and connection state live in the Settings page's Codex
+          // group.
+          update_msg(dispatch, OpenSetup, model)
       }
-      let next = model
-        .replace_conversation({ ..conv, engine_model, })
-        .remember_model(conv.device, conv.session_id, engine_model)
-      (
-        @cmd.batch([
-          save_default_model(engine_model),
-          save_conversation_model(
-            conversation_model_key(conv.device, conv.session_id),
-            engine_model,
-          ),
-        ]),
-        { ..next, default_model: engine_model },
-      )
     }
     MaxStepsChanged(value) => (@cmd.none, { ..model, max_steps: value })
     SetupApiKeyChanged(value) => {
@@ -2628,6 +2758,8 @@ fn update_msg(
       // Reopening cancels the dismissal — otherwise the next settled
       // snapshot would close the modal the user just asked for.
       (@cmd.none, { ..model, api_setup_open: true, api_setup_dismissed: false })
+    OpenCodexConfig => (open_codex_config(dispatch, model.focused), model)
+    CodexConfigOpenFailed(message) => model.notify_error(dispatch, message)
     OpenCodex => {
       let (cmd, codex) = @codex.update(
         dispatch.map(msg => Codex(channel=model.focused, msg)),
@@ -2646,39 +2778,6 @@ fn update_msg(
         },
       )
     }
-    CodexNewThread => {
-      let selected = model.codex.new_thread_cwd()
-      let cwd = if !selected.is_empty() {
-        selected
-      } else {
-        match model.focused_device() {
-          Some(dev) =>
-            match dev.active_project {
-              Some(project) =>
-                @resource.path_for(project, model.focused).unwrap_or("")
-              None => ""
-            }
-          None => ""
-        }
-      }
-      (
-        CodexDraftRotation::{ cwd, }.rotate(dispatch),
-        {
-          ..model,
-          screen: Codex,
-          sidebar_open: model.sidebar_open && !model.narrow,
-        },
-      )
-    }
-    CodexNewThreadIn(cwd) =>
-      (
-        CodexDraftRotation::{ cwd, }.rotate(dispatch),
-        {
-          ..model,
-          screen: Codex,
-          sidebar_open: model.sidebar_open && !model.narrow,
-        },
-      )
     CodexDraftRotated(cwd~, id~) => {
       let (cmd, codex) = @codex.update(
         dispatch.map(msg => Codex(channel=model.focused, msg)),
@@ -3045,11 +3144,20 @@ fn update_msg(
     NewChat =>
       // A fresh conversation can start at any time: the current one keeps
       // running in the background and stays one sidebar click away. It lands
-      // in the active workspace — the one the on-screen conversation uses.
-      (
-        rotate_session(dispatch, model.focused),
-        { ..model, loading_conversation: None },
-      )
+      // in the active workspace — the one the on-screen conversation uses —
+      // and starts with whichever agent the model chip was last picked from.
+      if model.default_agent is CodexAgent {
+        new_codex_chat(
+          dispatch,
+          model,
+          model.focused_device().bind(dev => dev.active_project),
+        )
+      } else {
+        (
+          rotate_session(dispatch, model.focused),
+          { ..model, loading_conversation: None },
+        )
+      }
     NewChatIn(channel, workspace) => {
       // A workspace section's own "new chat": the fresh conversation lands in
       // that project, and the workspace stays active for the next one. The
@@ -3060,10 +3168,16 @@ fn update_msg(
         return (@cmd.none, model)
       }
       let (focus_cmd, model) = focus_channel(dispatch, model, channel)
-      (
-        @cmd.batch([focus_cmd, rotate_session(dispatch, channel)]),
-        { ..model.with_active_project(workspace), loading_conversation: None },
-      )
+      let model = {
+        ..model.with_active_project(workspace),
+        loading_conversation: None,
+      }
+      let (start_cmd, model) = if model.default_agent is CodexAgent {
+        new_codex_chat(dispatch, model, workspace)
+      } else {
+        (rotate_session(dispatch, channel), model)
+      }
+      (@cmd.batch([focus_cmd, start_cmd]), model)
     }
     ToggleWorktreeMode => {
       // One predicate with the chip that offers this — see
@@ -5484,6 +5598,7 @@ fn update_device_msg(
           title: None,
           workspace: key.workspace,
           workspace_name: "",
+          updated_at_ms: None,
         }
         for live in dev.sessions {
           if key.matches(live) {
@@ -7150,6 +7265,7 @@ fn Model::with_listed(self : Model, ids : Array[String]) -> Model raise {
           title: Some(""),
           workspace: @interop.ChannelId::Local.test_project(),
           workspace_name: "work",
+          updated_at_ms: None,
         } : @transcript.SessionListItem)
     }),
   })
@@ -7972,6 +8088,7 @@ test "sessions loaded replaces the sidebar list" {
       title: Some("first question"),
       workspace: @interop.ChannelId::Local.test_project(),
       workspace_name: "",
+      updated_at_ms: None,
     },
   ]
   let (_, once) = update(dispatch, sessions_loaded(items), test_model())
@@ -8018,6 +8135,7 @@ test "session list assigns a commit-first conversation to its durable workspace"
           title: Some("arrived before the list"),
           workspace,
           workspace_name: "foreign",
+          updated_at_ms: None,
         },
       ],
       request_generation=committed.dev().sessions_request_generation,
@@ -8129,12 +8247,14 @@ test "a commit for an unlisted store refreshes past a same-id row" {
         title: Some("listed copy"),
         workspace: listed,
         workspace_name: "work",
+        updated_at_ms: None,
       },
       {
         id: "desktop-listed-only",
         title: Some("listed chat"),
         workspace: listed,
         workspace_name: "work",
+        updated_at_ms: None,
       },
     ],
   })
@@ -8185,6 +8305,7 @@ test "a commit for an unlisted store refreshes past a same-id watermark" {
         title: Some("listed copy"),
         workspace: listed,
         workspace_name: "work",
+        updated_at_ms: None,
       },
     ],
   })
@@ -8259,6 +8380,7 @@ test "a background session list updates only its channel's same-id workspace" {
             title: Some("remote"),
             workspace: remote.test_resource("/remote-new"),
             workspace_name: "remote-new",
+            updated_at_ms: None,
           },
         ],
         connection_generation=0,
@@ -8319,6 +8441,7 @@ test "session list assigns a Started-first conversation to its durable workspace
         title: Some("arrived before the list"),
         workspace,
         workspace_name: "started-first",
+        updated_at_ms: None,
       },
     ]),
     started,
@@ -8989,6 +9112,7 @@ test "SessionsLoaded retries an unconfirmed start after an empty recovery" {
         title: Some("persisted"),
         workspace: @interop.ChannelId::Local.test_project(),
         workspace_name: "",
+        updated_at_ms: None,
       },
     ]),
     empty,
@@ -9074,6 +9198,7 @@ test "a restored session keeps the placement its listing named" {
         title: Some("restored"),
         workspace: @interop.ChannelId::Local.test_project(),
         workspace_name: "work",
+        updated_at_ms: None,
       },
     ]),
     test_model(),
@@ -9203,6 +9328,7 @@ test "reselecting a synced active session reloads idle external writes" {
         title: Some(""),
         workspace: @interop.ChannelId::Local.test_project(),
         workspace_name: "",
+        updated_at_ms: None,
       },
     ],
   })
@@ -9695,6 +9821,7 @@ test "session loaded swaps the active conversation onto the stored session" {
           title: Some("stored"),
           workspace: @interop.ChannelId::Local.test_project(),
           workspace_name: "work",
+          updated_at_ms: None,
         },
       ],
     })
@@ -13734,6 +13861,8 @@ test "loaded UI preferences parse their wire names" {
       font_size="large",
       model="deepseek-v4-flash",
       conversation_models="[{\"key\":\"local/desktop-test\",\"model\":\"deepseek-v4-pro\"}]",
+      agent="codex",
+      codex_model="gpt-5.4-codex",
     ),
     test_model(),
   )
@@ -13742,6 +13871,7 @@ test "loaded UI preferences parse their wire names" {
   assert_true(restored.app_font is Menlo)
   assert_true(restored.app_font_size is Large)
   assert_true(restored.default_model is Low)
+  assert_true(restored.default_agent is CodexAgent)
   // The stored conversation outranks the stored default for its own chat.
   assert_true(restored.active().engine_model is High)
   // Unknown stored values fall back to the defaults.
@@ -13755,6 +13885,8 @@ test "loaded UI preferences parse their wire names" {
       font_size="broken",
       model="",
       conversation_models="not json",
+      agent="broken",
+      codex_model="",
     ),
     test_model(),
   )
@@ -13763,6 +13895,7 @@ test "loaded UI preferences parse their wire names" {
   assert_true(unknown.app_font is GeistMono)
   assert_true(unknown.app_font_size is Medium)
   assert_true(unknown.default_model is High)
+  assert_true(unknown.default_agent is OpenSeekAgent)
   // A store that will not parse remembers nothing rather than wedging.
   assert_eq(unknown.conversation_models.length(), 0)
 }
@@ -13779,7 +13912,7 @@ test "the model selector switches one conversation, not the app" {
   )
   let (_, low) = update(
     dispatch,
-    EngineModelChanged("deepseek-v4-flash"),
+    ModelPicked("openseek:deepseek-v4-flash"),
     model,
   )
   assert_true(low.active().engine_model is Low)
@@ -13787,7 +13920,7 @@ test "the model selector switches one conversation, not the app" {
   // the same selected/default/stored model state.
   let (_, low_again) = update(
     dispatch,
-    EngineModelChanged("deepseek-v4-flash"),
+    ModelPicked("openseek:deepseek-v4-flash"),
     model,
   )
   @debug.assert_eq(low.active().engine_model, low_again.active().engine_model)
@@ -13811,7 +13944,7 @@ test "the model selector switches one conversation, not the app" {
     .active().engine_model
     is Low,
   )
-  let (_, high) = update(dispatch, EngineModelChanged("deepseek-v4-pro"), low)
+  let (_, high) = update(dispatch, ModelPicked("openseek:deepseek-v4-pro"), low)
   assert_true(high.active().engine_model is High)
 }
 
@@ -13824,7 +13957,7 @@ test "a start never overrides the tier picked for the next turn" {
   // client began, which says nothing about what this user means to send.
   let (_, queued) = update(
     dispatch,
-    EngineModelChanged("deepseek-v4-flash"),
+    ModelPicked("openseek:deepseek-v4-flash"),
     test_model(),
   )
   assert_true(queued.active().engine_model is Low)
@@ -13851,7 +13984,7 @@ test "reopening a conversation recovers its own tier, not the last pick" {
   // not follow the first conversation home.
   let (_, low) = update(
     dispatch,
-    EngineModelChanged("deepseek-v4-flash"),
+    ModelPicked("openseek:deepseek-v4-flash"),
     test_model(),
   )
   let other = low.activate(
@@ -13860,7 +13993,11 @@ test "reopening a conversation recovers its own tier, not the last pick" {
     @interop.ChannelId::Local.test_project(),
   )
   assert_true(other.active().engine_model is Low)
-  let (_, high) = update(dispatch, EngineModelChanged("deepseek-v4-pro"), other)
+  let (_, high) = update(
+    dispatch,
+    ModelPicked("openseek:deepseek-v4-pro"),
+    other,
+  )
   assert_true(high.default_model is High)
   // Reopening drops the conversation and mints it again (nothing was sent,
   // so `activate` does not retain it) — exactly the path that used to hand
@@ -13902,7 +14039,7 @@ test "a run pins an inherited tier the user never clicked for" {
   )
   let (_, moved) = update(
     dispatch,
-    EngineModelChanged("deepseek-v4-flash"),
+    ModelPicked("openseek:deepseek-v4-flash"),
     elsewhere,
   )
   assert_true(moved.default_model is Low)
@@ -13916,11 +14053,143 @@ test "a run pins an inherited tier the user never clicked for" {
 }
 
 ///|
+test "a Codex pick hands a fresh chat to Codex" {
+  let dispatch = test_dispatch()
+  // The fixture chat has sent nothing, so its chip still offers both agent
+  // groups. Picking a Codex model switches the surface and the defaults; the
+  // real draft arrives via the rotation command's `CodexDraftRotated`.
+  let (_, switched) = update(
+    dispatch,
+    ModelPicked("codex:gpt-5.4-codex"),
+    test_model(),
+  )
+  assert_true(switched.screen is Codex)
+  assert_true(switched.default_agent is CodexAgent)
+  // One composing row at a time: the empty husk was only ever the "New
+  // chat" placeholder, so it deactivates and its sidebar row goes with it.
+  assert_true(switched.active_conversation() is None)
+  // A husk holding typed writing keeps its row instead — switching back
+  // finds the text.
+  let typed = test_model().replace_conversation({
+    ..test_conversation(),
+    composer_draft_present: true,
+  })
+  let (_, kept) = update(dispatch, ModelPicked("codex:gpt-5.4-codex"), typed)
+  assert_true(kept.screen is Codex)
+  assert_true(kept.active_conversation() is Some(_))
+}
+
+///|
+test "a begun conversation never changes agents" {
+  let dispatch = test_dispatch()
+  let (_, ran) = update_dev(
+    dispatch,
+    Started(
+      run_id="r1",
+      session="desktop-test",
+      model=High,
+      max_steps=1000,
+      session_root=None,
+      submission_id=None,
+    ),
+    test_model(),
+  )
+  let (_, unchanged) = update(dispatch, ModelPicked("codex:gpt-5.4-codex"), ran)
+  assert_true(unchanged.screen is Chat)
+  assert_true(unchanged.default_agent is OpenSeekAgent)
+}
+
+///|
+test "an OpenSeek pick on a composing Codex draft hands the chat back" {
+  let dispatch = test_dispatch()
+  let (_, drafting) = update(
+    dispatch,
+    CodexDraftRotated(cwd="/work", id="desktop-draft-1"),
+    test_model(),
+  )
+  assert_true(drafting.screen is Codex)
+  assert_true(drafting.codex.composing_draft())
+  let (_, back) = update(
+    dispatch,
+    ModelPicked("openseek:deepseek-v4-flash"),
+    drafting,
+  )
+  assert_false(back.codex.composing_draft())
+  assert_true(back.default_agent is OpenSeekAgent)
+  assert_true(back.default_model is Low)
+}
+
+///|
+test "the Codex group's placeholder row opens Settings" {
+  let dispatch = test_dispatch()
+  let (_, opened) = update(
+    dispatch,
+    ModelPicked("codex.unavailable"),
+    test_model(),
+  )
+  // Sign-in and connection state live in the Settings page's Codex group.
+  assert_true(opened.screen is Settings)
+  // A placeholder pick is a doorway, not a model: nothing was selected.
+  assert_true(opened.default_agent is OpenSeekAgent)
+}
+
+///|
+test "Codex threads share the Projects section's project rows" {
+  let codex = @codex.State::from_thread_snapshot({
+    "thread": {
+      "id": "codex-thread-1",
+      "cwd": "/work",
+      "projectRoot": "/work",
+      "preview": "Codex task",
+      "updatedAt": 2000,
+      "turns": [],
+    },
+  })
+  let model = { ..test_model(), codex, screen: Codex }.with_dev(dev => {
+    ..dev,
+    sessions: [
+      {
+        id: "desktop-newer",
+        title: Some("after the Codex task"),
+        workspace: @interop.ChannelId::Local.test_project(),
+        workspace_name: "work",
+        updated_at_ms: Some(3_000_000.0),
+      },
+      {
+        id: "desktop-older",
+        title: Some("before the Codex task"),
+        workspace: @interop.ChannelId::Local.test_project(),
+        workspace_name: "work",
+        updated_at_ms: Some(1_000_000.0),
+      },
+    ],
+  })
+  let sections = model.sidebar_component_sections(model.dev())
+  // The Projects section and the Archived section — no Codex section.
+  assert_eq(sections.length(), 2)
+  inspect(sections[0].label, content="Projects")
+  guard sections[0].entries[0] is @section.Project(project) else {
+    fail("expected the fixture project's row")
+  }
+  // Rows interleave by recency across both sources: the fixture's unsent
+  // "New chat" husk leads as this session's composing row, then stamped
+  // history newest-first regardless of which agent owns each row.
+  let order = project.conversations.map(row => row.id.conversation())
+  assert_eq(order, [
+    "desktop-test", "desktop-newer", "codex-thread-1", "desktop-older",
+  ])
+  assert_true(project.conversations[2].id.source() == "codex.live")
+  assert_true(project.conversations[2].nested)
+  // With the Codex page on screen, its active task claims the activation.
+  assert_eq(sections[0].activation, Some("codex-thread-1"))
+}
+
+///|
 test "remembered tiers survive a round trip through storage" {
   let dispatch = test_dispatch()
   let (_, chosen) = update(
     dispatch,
-    EngineModelChanged("deepseek-v4-flash"),
+    ModelPicked("openseek:deepseek-v4-flash"),
     test_model(),
   )
   let restored = parse_conversation_models(
@@ -15267,6 +15536,7 @@ fn archived_item(
     title: Some(""),
     workspace: channel.test_project(),
     workspace_name: "work",
+    updated_at_ms: None,
   }
 }
 
@@ -15279,6 +15549,7 @@ fn placed_archived_item(id : String) -> @transcript.SessionListItem {
     title: Some(""),
     workspace: @interop.ChannelId::Local.test_project(),
     workspace_name: "work",
+    updated_at_ms: None,
   }
 }
 
@@ -15319,11 +15590,13 @@ test "switching same-id archived stores fences the first transcript load" {
     ..archived_item("desktop-shared"),
     workspace: first,
     workspace_name: "first",
+    updated_at_ms: None,
   }
   let second_item : @transcript.SessionListItem = {
     ..first_item,
     workspace: second,
     workspace_name: "second",
+    updated_at_ms: None,
   }
   let model = test_model().with_dev(dev => {
     ..dev,
@@ -15630,6 +15903,7 @@ test "archived deletion keeps same-id rows in other stores" {
     ..archived_item("shared"),
     workspace: project,
     workspace_name: "project",
+    updated_at_ms: None,
   }
   let project_child : @transcript.SessionListItem = {
     ..project_parent,
@@ -15895,6 +16169,7 @@ test "deleted broadcast is immediate and idempotent" {
     ..item,
     workspace: project,
     workspace_name: "project",
+    updated_at_ms: None,
   }
   let model = {
     ..test_model()
@@ -15949,6 +16224,7 @@ test "deleted broadcast rotates the active conversation's exact store" {
     ..unplaced,
     workspace: project,
     workspace_name: "project",
+    updated_at_ms: None,
   }
   let model = {
     ..test_model()
@@ -15989,6 +16265,7 @@ test "archive facts rotate the open conversation's exact store" {
     ..unplaced,
     workspace: project,
     workspace_name: "project",
+    updated_at_ms: None,
   }
   // The other store's row deliberately comes first: session_project("shared")
   // resolves to it, while the conversation actually open on screen belongs to
@@ -16052,6 +16329,7 @@ test "archive broadcast invalidates the active send target before list replies" 
           ..placed_archived_item("desktop-test"),
           workspace,
           workspace_name: "archived",
+          updated_at_ms: None,
         },
       ],
       worktrees: [{ project: workspace, rows: [], generation: 1 }],
@@ -16408,6 +16686,7 @@ test "an older same-connection live list cannot replace a newer reply" {
     title: Some("old title"),
     workspace: @interop.ChannelId::Local.test_project(),
     workspace_name: "",
+    updated_at_ms: None,
   }
   let current = { ..old, title: Some("current title") }
   let model = test_model().with_dev(dev => {
@@ -16436,6 +16715,7 @@ test "an older same-connection archived list cannot replace a newer reply" {
     title: Some("old title"),
     workspace: @interop.ChannelId::Local.test_project(),
     workspace_name: "",
+    updated_at_ms: None,
   }
   let current = { ..old, title: Some("current title") }
   let model = test_model().with_dev(dev => {
@@ -16801,7 +17081,17 @@ test "Codex sidebar actions close only the narrow drawer" {
   assert_true(opened.screen is Codex)
   assert_false(opened.sidebar_open)
 
-  let (_, creating) = update(dispatch, CodexNewThread, narrow)
+  // A "New chat" while Codex is the default agent routes there too — and
+  // still closes only the narrow drawer.
+  let (_, ready) = update(
+    dispatch,
+    Codex(
+      channel=narrow.focused,
+      @codex.Msg::status_changed({ "status": "ready" }),
+    ),
+    { ..narrow, default_agent: CodexAgent },
+  )
+  let (_, creating) = update(dispatch, NewChat, ready)
   assert_true(creating.screen is Codex)
   assert_false(creating.sidebar_open)
 
@@ -19110,6 +19400,7 @@ test "a late commit cannot resurrect a locally known archived session" {
         title: Some("archived"),
         workspace: @interop.ChannelId::Local.test_project(),
         workspace_name: "",
+        updated_at_ms: None,
       },
     ],
   })

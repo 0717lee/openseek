@@ -97,10 +97,33 @@ pub(all) struct RunsReply {
 
 ///|
 /// The subset of `sessions list --format=json` consumed by Desktop.
+/// `updated_at_ms` is the engine's last-activity stamp (session file mtime in
+/// milliseconds); the engine sends an explicit `null` for a damaged directory
+/// it cannot stat, so decoding accepts absent, `null`, and number alike.
 pub(all) struct SessionListEntry {
   id : String
   title : String?
-} derive(Debug, Eq, FromJson, ToJson)
+  updated_at_ms : Double?
+} derive(Debug, Eq, ToJson)
+
+///|
+pub impl FromJson for SessionListEntry with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "session list entry must be an object"))
+  }
+  let title = match fields.get("title") {
+    Some(String(title)) => Some(title)
+    _ => None
+  }
+  let updated_at_ms = match fields.get("updated_at_ms") {
+    Some(Number(value, ..)) => Some(value)
+    _ => None
+  }
+  guard fields.get("id") is Some(String(id)) else {
+    raise JsonDecodeError((path, "session list entry needs a string id"))
+  }
+  { id, title, updated_at_ms }
+}
 
 ///|
 /// Decode the engine's session-list rows at the process adapter. A malformed

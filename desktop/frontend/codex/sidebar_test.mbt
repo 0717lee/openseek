@@ -1,5 +1,5 @@
 ///|
-test "Codex projects use the shared project component input" {
+test "Codex threads nest under their registered project row" {
   let state = @codex.State::from_thread_snapshot({
     "thread": {
       "id": "thread-1",
@@ -9,19 +9,20 @@ test "Codex projects use the shared project component input" {
       "turns": [],
     },
   })
-  let section = state.sidebar_section({
+  let context : @codex.SidebarContext = {
     channel: @interop.ChannelId::Local,
     selected: true,
     registered_projects: ["/work/openseek"],
-  })
-  assert_eq(section.entries.length(), 1)
-  guard section.entries[0] is @section.Project(project) else {
-    fail("expected a shared project component input")
   }
-  assert_eq(project.activation, Some("thread-1"))
-  assert_true(project.managed)
-  assert_eq(project.conversations.length(), 1)
-  assert_true(project.conversations[0].nested)
+  let conversations = state.project_conversations(context, "/work/openseek")
+  assert_eq(conversations.length(), 1)
+  assert_true(conversations[0].input.nested)
+  assert_eq(
+    state.project_activation(context, "/work/openseek"),
+    Some("thread-1"),
+  )
+  assert_eq(state.project_activation(context, "/work/other"), None)
+  assert_eq(state.loose_entries(context).length(), 0)
 }
 
 ///|
@@ -35,13 +36,15 @@ test "unregistered Codex roots remain direct conversation inputs" {
       "turns": [],
     },
   })
-  let section = state.sidebar_section({
+  let context : @codex.SidebarContext = {
     channel: @interop.ChannelId::Local,
     selected: true,
     registered_projects: [],
-  })
-  assert_eq(section.entries.length(), 1)
-  guard section.entries[0] is @section.Conversation(row) else {
+  }
+  assert_eq(state.project_conversations(context, "/work/scratch").length(), 0)
+  let entries = state.loose_entries(context)
+  assert_eq(entries.length(), 1)
+  guard entries[0] is @section.Conversation(row) else {
     fail("expected a direct Codex conversation input")
   }
   assert_false(row.nested)

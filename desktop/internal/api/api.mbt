@@ -255,7 +255,7 @@ async fn CodexWorkspaceBinding::authorize(self : CodexWorkspaceBinding) -> Unit 
 /// announcement).
 pub fn ApiState::new(
   engine~ : String,
-  codex? : String = "codex",
+  codex? : @codex.CodexSettings = @codex.CodexSettings::default(),
   runtime_dir? : @pathx.Path,
   executable? : String,
   auth? : @auth.AuthStore,
@@ -363,6 +363,10 @@ pub fn endpoints(
         state.codex.status(),
       )
       reply
+    }),
+    @endpoint.Endpoint::remote(@commands.codex_config_open, async fn(_) {
+      @host.open_codex_config(state.codex.config_home())
+      Acknowledged
     }),
     @endpoint.Endpoint::remote(@commands.codex_draft_open, async fn(payload) {
       state.open_codex_draft(payload)
@@ -689,7 +693,8 @@ test "remote endpoint catalog has one entry per command name" {
   // Draft open/close and the curated file/skills operations are host-owned
   // Codex endpoints. The archived-session delete endpoint added on main is
   // part of the same exact catalog, so keep this count aligned with both.
-  assert_eq(names.length(), 85)
+  assert_eq(names.length(), 86)
+  assert_true(names.contains("codex.config.open"))
   assert_true(names.contains("codex.draft.open"))
   assert_true(names.contains("codex.draft.close"))
   assert_true(names.contains("codex.file.search"))

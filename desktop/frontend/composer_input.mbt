@@ -40,7 +40,7 @@ fn Model::composer_input(
   } else {
     @composer.Send(available=root_ready && conv.compaction is NotCompacting)
   }
-  let status : Array[@html.Html] = [conv.engine_model.composer_select(dispatch)]
+  let status : Array[@html.Html] = [self.openseek_model_chip(dispatch, conv)]
   if git_chip(dispatch, self, conv) is Some(chip) {
     status.push(chip)
   }
@@ -220,6 +220,9 @@ fn Model::codex_composer_input(
     dispatch.map(msg => Codex(channel=self.focused, msg)),
     {
       channel: self.focused,
+      // The chip is root-built with the root's own dispatch: a cross-agent
+      // pick on a composing draft leaves the Codex package entirely.
+      model_chip: self.codex_model_chip(dispatch),
       file_candidates: search.candidates,
       open_files: if workspace_ready {
         self.live_editor_files()

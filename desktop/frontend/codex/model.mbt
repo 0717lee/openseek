@@ -41,6 +41,10 @@ priv struct CodexThreadRow {
   cwd : String?
   project_root : String?
   worktree : CodexWorktree?
+  // App-server last-activity stamp, converted to milliseconds so it is
+  // directly comparable with OpenSeek's session mtimes when the shared
+  // sidebar interleaves the two sources by recency.
+  updated_at_ms : Double?
 } derive(Eq)
 
 ///|
@@ -81,8 +85,25 @@ priv struct CodexTurn {
   started_at : Int?
   completed_at : Int?
   items : Array[CodexItem]
+  // App-server's own statement of how complete `items` is: "full" is the
+  // whole history, while "summary" (a `turn/completed` envelope drops the
+  // user message, observed live against 0.147) and "notLoaded" (start
+  // reply, `turn/started`) are partial by contract. `None` is an app-server
+  // that predates the field.
+  items_view : String?
   error : String?
 } derive(Eq)
+
+///|
+/// Whether this turn envelope's `items` may replace what the client already
+/// accumulated. Only the explicit "full" view is the complete list; absent
+/// means an older app-server whose envelopes carried full items.
+fn CodexTurn::items_authoritative(self : CodexTurn) -> Bool {
+  match self.items_view {
+    Some(view) => view == "full"
+    None => true
+  }
+}
 
 ///|
 priv struct CodexThread {
@@ -170,6 +191,10 @@ priv enum CodexReplyKind {
   CodexModelsReply
   CodexThreadsReply(Bool, Int)
   CodexThreadReply(String)
+  // The same snapshot read as `CodexThreadReply`, applied metadata-only:
+  // the local turns survive, because this read races turns that the item
+  // notifications are still building.
+  CodexThreadMetaReply(String)
   CodexWriterReply(String)
   CodexDraftOpenReply(String)
   CodexDraftThreadReply(String)
@@ -227,6 +252,7 @@ enum Msg {
   CloseGitDetails
   ToggleWorktreeMode
   StartDraft(id~ : String, cwd~ : String)
+  AbandonDraft
   OpenThread(String)
   ArchiveThread(String)
   UnarchiveThread(String)
@@ -276,6 +302,63 @@ pub fn Msg::composer_action(action : @composer.Action) -> Msg {
 /// No app-server thread exists until the draft sends its first prompt.
 pub fn Msg::start_draft(id : String, cwd : String) -> Msg {
   StartDraft(id~, cwd~)
+}
+
+///|
+/// Shell entrypoint for the unified model chip: adopt a Codex model id for
+/// the next thread start or turn. The root persists the preference; this
+/// package only carries the current pick.
+pub fn Msg::model_changed(id : String) -> Msg {
+  ModelChanged(id)
+}
+
+///|
+/// Shell entrypoint for dropping a composing draft: the unified model chip
+/// switched the fresh conversation to another agent before its first send.
+pub fn Msg::abandon_draft() -> Msg {
+  AbandonDraft
+}
+
+///|
+/// Shell entrypoints for the Settings page's Codex account group; the
+/// login/logout flows themselves stay inside this package.
+pub fn Msg::login() -> Msg {
+  Login
+}
+
+///|
+pub fn Msg::cancel_login() -> Msg {
+  CancelLogin
+}
+
+///|
+pub fn Msg::logout() -> Msg {
+  Logout
+}
+
+///|
+/// Whether a ChatGPT account is signed in on the app-server.
+pub fn State::signed_in(self : State) -> Bool {
+  self.account is CodexSignedIn(..)
+}
+
+///|
+/// Whether the app-server is waiting for a sign-in before Codex can work.
+pub fn State::sign_in_required(self : State) -> Bool {
+  self.account is CodexSignedOut(true)
+}
+
+///|
+/// The browser sign-in page of a login attempt still in flight.
+pub fn State::pending_auth_url(self : State) -> String? {
+  self.auth_url
+}
+
+///|
+/// Whether an app-server request is in flight; the Settings account buttons
+/// disable on it exactly like the old topbar ones did.
+pub fn State::is_busy(self : State) -> Bool {
+  self.loading
 }
 
 ///|
@@ -419,6 +502,81 @@ pub fn State::can_start_thread(self : State) -> Bool {
 }
 
 ///|
+/// Whether the page is composing a local draft that has not created its
+/// app-server thread yet — the only Codex surface where the unified model
+/// chip may still switch the conversation to another agent.
+pub fn State::composing_draft(self : State) -> Bool {
+  self.selection is CodexDraftTask(_)
+}
+
+///|
+/// What the unified model chip can offer for Codex right now. The chip is
+/// root-owned; this value keeps catalog, selection, and availability policy
+/// inside the package that fetched them.
+pub enum CodexModelListing {
+  /// The fetched catalog and the id the next thread start or turn would use.
+  CodexModels(Array[@composer.ModelOption], selected~ : String)
+  /// No usable catalog; the label explains why. Picking the row is a request
+  /// to open the Codex page, where sign-in and connection state live.
+  CodexModelsUnavailable(String)
+}
+
+///|
+pub fn State::model_listing(self : State) -> CodexModelListing {
+  if !self.models.is_empty() {
+    let options : Array[@composer.ModelOption] = []
+    for model in self.models {
+      options.push({ value: model.id, label: model.label })
+    }
+    // `with_models` never leaves an empty selection beside a non-empty
+    // catalog, so this selected id names a real option.
+    return CodexModels(options, selected=self.selected_model)
+  }
+  match self.connection {
+    CodexStarting => CodexModelsUnavailable("Codex — connecting…")
+    CodexUnavailable(_) => CodexModelsUnavailable("Codex unavailable")
+    CodexReady =>
+      if self.account is CodexSignedOut(_) {
+        CodexModelsUnavailable("Sign in to Codex…")
+      } else {
+        CodexModelsUnavailable("Codex — loading models…")
+      }
+  }
+}
+
+///|
+test "the model listing follows catalog and account state" {
+  guard State().model_listing() is CodexModelsUnavailable(connecting) else {
+    fail("a starting connection should have no usable catalog")
+  }
+  inspect(connecting, content="Codex — connecting…")
+  let signed_out = {
+    ..State(),
+    connection: CodexReady,
+    account: CodexSignedOut(true),
+  }
+  guard signed_out.model_listing() is CodexModelsUnavailable(sign_in) else {
+    fail("a signed-out account should have no usable catalog")
+  }
+  inspect(sign_in, content="Sign in to Codex…")
+  let listed = State().with_models({
+    "data": [
+      { "id": "gpt-5.4", "displayName": "GPT-5.4" },
+      {
+        "id": "gpt-5.4-codex",
+        "displayName": "GPT-5.4 Codex",
+        "isDefault": true,
+      },
+    ],
+  })
+  guard listed.model_listing() is CodexModels(options, selected~) else {
+    fail("a fetched catalog should list its models")
+  }
+  assert_eq(options.length(), 2)
+  inspect(selected, content="gpt-5.4-codex")
+}
+
+///|
 /// The selected app-server task, excluding a local draft that has not sent its
 /// first prompt. Mutation APIs use this method so a draft id cannot be mistaken
 /// for an app-server thread id.
@@ -454,6 +612,11 @@ fn State::accepts_reply(self : State, kind : CodexReplyKind) -> Bool {
     CodexThreadsReply(true, generation) =>
       generation == self.archived_catalog_generation
     CodexThreadReply(thread_id) => self.accepts_thread_reply(thread_id)
+    CodexThreadMetaReply(thread_id) =>
+      self
+      .active_thread()
+      .map(thread => thread.id == thread_id)
+      .unwrap_or(false)
     CodexWriterReply(thread_id) =>
       self
       .active_thread()
@@ -503,6 +666,7 @@ fn CodexReplyKind::foreground(self : CodexReplyKind) -> CodexForeground? {
     | CodexAccountReply
     | CodexModelsReply
     | CodexThreadsReply(_, _)
+    | CodexThreadMetaReply(_)
     | CodexInterruptReply
     | CodexApprovalReply => None
   }
@@ -838,6 +1002,7 @@ fn CodexTurn::decode(value : Json) -> CodexTurn? {
     started_at: @jsonx.json_int(fields, "startedAt"),
     completed_at: @jsonx.json_int(fields, "completedAt"),
     items,
+    items_view: @jsonx.json_text(fields, "itemsView"),
     error,
   })
 }
@@ -946,7 +1111,7 @@ fn CodexThreadRow::title(fields : Map[String, Json]) -> String {
     .trim()
     .to_owned()
   if preview.is_empty() {
-    "New Codex thread"
+    "New chat"
   } else {
     preview
   }
@@ -1089,6 +1254,16 @@ fn State::with_threads(self : State, value : Json, archived : Bool) -> State {
   let visible = if self.active_thread() is Some(active) &&
     !threads.iter().any(thread => thread.id == active.id) &&
     !self.archived_threads.iter().any(thread => thread.id == active.id) {
+    // The list snapshot has no stamp for this thread; carry the one its
+    // previous row held (the `thread/start` reply's), so the fresh thread
+    // does not sink below stamped history until the next refresh.
+    let mut carried_ms : Double? = None
+    for existing in self.threads {
+      if existing.id == active.id {
+        carried_ms = existing.updated_at_ms
+        break
+      }
+    }
     let visible : Array[CodexThreadRow] = [
       {
         id: active.id,
@@ -1096,6 +1271,7 @@ fn State::with_threads(self : State, value : Json, archived : Bool) -> State {
         cwd: active.cwd,
         project_root: active.project_root,
         worktree: active.worktree,
+        updated_at_ms: carried_ms,
       },
     ]
     for thread in threads {
@@ -1113,12 +1289,18 @@ fn CodexThreadRow::decode(value : Json) -> CodexThreadRow? {
   guard value is Object(thread) && @jsonx.json_text(thread, "id") is Some(id) else {
     return None
   }
+  let updated_at_ms = match thread.get("updatedAt") {
+    // The app-server stamps threads in unix seconds.
+    Some(Number(seconds, ..)) => Some(seconds * 1000.0)
+    _ => None
+  }
   Some({
     id,
     title: CodexThreadRow::title(thread),
     cwd: @jsonx.json_text(thread, "cwd"),
     project_root: @jsonx.json_text(thread, "projectRoot"),
     worktree: thread.get("openseekWorktree").bind(CodexWorktree::decode),
+    updated_at_ms,
   })
 }
 
@@ -1157,6 +1339,29 @@ fn State::with_requests(self : State, value : Json) -> State {
 }
 
 ///|
+/// Adopt a thread snapshot's metadata onto the active selection while
+/// keeping the locally accumulated turns. `thread/settings/updated` only
+/// invalidates settings-derived facts (cwd, worktree, branch, title); the
+/// item notifications remain the authoritative turn lifecycle, and a
+/// snapshot read while the first turn streams may not contain that turn at
+/// all — wholesale replacement would blank the transcript mid-turn.
+fn State::with_thread_meta(
+  self : State,
+  value : Json,
+  thread_id : String,
+) -> State {
+  guard value is Object(fields) &&
+    fields.get("thread") is Some(thread) &&
+    CodexThread::decode(thread) is Some(read) &&
+    read.id == thread_id &&
+    self.active_thread() is Some(active) &&
+    active.id == thread_id else {
+    return self
+  }
+  { ..self, selection: CodexStoredTask({ ..read, turns: active.turns }) }
+}
+
+///|
 fn State::with_thread_reply(
   self : State,
   value : Json,
@@ -1176,21 +1381,38 @@ fn State::with_thread_reply(
   // Selecting a stored thread must not promote it to the top of the sidebar.
   // Replace its row in place; only `thread/start`, whose id is genuinely new,
   // is prepended until the authoritative catalog refresh arrives.
+  let reply_stamp_ms = match thread {
+    Object(thread_fields) =>
+      match thread_fields.get("updatedAt") {
+        Some(Number(seconds, ..)) => Some(seconds * 1000.0)
+        _ => None
+      }
+    _ => None
+  }
   let row : CodexThreadRow = {
     id: active.id,
     title: active.title,
     cwd: active.cwd,
     project_root: active.project_root,
     worktree: active.worktree,
+    updated_at_ms: reply_stamp_ms,
   }
   let threads : Array[CodexThreadRow] = []
   let mut replaced = false
-  for thread in self.threads {
-    if thread.id == active.id {
-      threads.push(row)
+  for existing in self.threads {
+    if existing.id == active.id {
+      // A reply without a stamp must not erase the catalog's; keep the row
+      // where the list already had it.
+      threads.push(
+        if reply_stamp_ms is Some(_) {
+          row
+        } else {
+          { ..row, updated_at_ms: existing.updated_at_ms }
+        },
+      )
       replaced = true
     } else {
-      threads.push(thread)
+      threads.push(existing)
     }
   }
   let visible = if replaced {
@@ -1510,7 +1732,11 @@ fn CodexThread::with_turn(self : CodexThread, turn : CodexTurn) -> CodexThread {
   let turns = self.turns.map(existing => {
     if existing.id == turn.id {
       found = true
-      turn
+      if turn.items_authoritative() {
+        turn
+      } else {
+        turn.merged_onto(existing)
+      }
     } else {
       existing
     }
@@ -1519,6 +1745,36 @@ fn CodexThread::with_turn(self : CodexThread, turn : CodexTurn) -> CodexThread {
     turns.push(turn)
   }
   { ..self, turns, }
+}
+
+///|
+/// Adopt a partial-view turn envelope over what this client accumulated.
+/// The envelope is authoritative for the turn's status, timestamps, and
+/// error; its `items` are declaredly incomplete (`itemsView` "summary" or
+/// "notLoaded"), so items merge by id instead of replacing: an incoming
+/// item wins its slot, an accumulated one survives an envelope that lacks
+/// it, and genuinely new items append in the envelope's order. Observed
+/// live against app-server 0.147: `turn/completed` carries a "summary"
+/// view holding only the agent message — replacing wholesale erased the
+/// user's own bubble from the transcript.
+fn CodexTurn::merged_onto(self : CodexTurn, existing : CodexTurn) -> CodexTurn {
+  let items : Array[CodexItem] = []
+  for item in existing.items {
+    let mut merged = item
+    for incoming in self.items {
+      if incoming.id == item.id {
+        merged = incoming
+        break
+      }
+    }
+    items.push(merged)
+  }
+  for incoming in self.items {
+    if !existing.items.iter().any(item => item.id == incoming.id) {
+      items.push(incoming)
+    }
+  }
+  { ..self, items, }
 }
 
 ///|
@@ -1544,6 +1800,9 @@ fn CodexThread::with_item(
       started_at: None,
       completed_at: None,
       items: [item],
+      // Locally minted to hold an early item; the server never stated an
+      // items view for it.
+      items_view: None,
       error: None,
     })
   }
@@ -2112,6 +2371,7 @@ test "Codex completed items replace streamed presentation state" {
     started_at: None,
     completed_at: None,
     items: [started],
+    items_view: None,
     error: None,
   }
   let streamed = turn.with_delta("item-1", "partial")
@@ -2255,6 +2515,88 @@ test "Codex account snapshots settle browser login state" {
   assert_eq(settled.login_id, None)
   assert_eq(settled.auth_url, None)
   assert_true(settled.account is CodexSignedIn(..))
+}
+
+///|
+test "a summary turn/completed keeps the streamed user message" {
+  // The exact envelope sequence observed live against app-server 0.147:
+  // the start reply and turn/started carry `itemsView: "notLoaded"`, the
+  // user and agent messages arrive only as items, and turn/completed's
+  // "summary" view lists the agent message alone.
+  let state = State()
+    .with_thread_reply({ "thread": { "id": "thread-1", "turns": [] } })
+    .with_notification(
+      "turn/started",
+      {
+        "threadId": "thread-1",
+        "turn": {
+          "id": "turn-1",
+          "items": [],
+          "itemsView": "notLoaded",
+          "status": "inProgress",
+        },
+      },
+      0,
+    )
+    .with_notification(
+      "item/completed",
+      {
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "item": {
+          "type": "userMessage",
+          "id": "user-1",
+          "content": [{ "type": "text", "text": "hello" }],
+        },
+      },
+      0,
+    )
+    .with_notification(
+      "item/completed",
+      {
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "item": { "type": "agentMessage", "id": "agent-1", "text": "hi" },
+      },
+      0,
+    )
+  let settled = state.with_notification(
+    "turn/completed",
+    {
+      "threadId": "thread-1",
+      "turn": {
+        "id": "turn-1",
+        "items": [{ "type": "agentMessage", "id": "agent-1", "text": "hi" }],
+        "itemsView": "summary",
+        "status": "completed",
+      },
+    },
+    0,
+  )
+  guard settled.active_thread() is Some(thread) else {
+    fail("the turn envelope must not deselect the thread")
+  }
+  assert_eq(thread.turns.length(), 1)
+  assert_eq(thread.turns[0].status, "completed")
+  assert_eq(thread.turns[0].items.map(item => item.id), ["user-1", "agent-1"])
+  // A declared-full view is authoritative and does replace.
+  let replaced = settled.with_notification(
+    "turn/completed",
+    {
+      "threadId": "thread-1",
+      "turn": {
+        "id": "turn-1",
+        "items": [{ "type": "agentMessage", "id": "item-2", "text": "hi" }],
+        "itemsView": "full",
+        "status": "completed",
+      },
+    },
+    0,
+  )
+  guard replaced.active_thread() is Some(full) else {
+    fail("the full envelope must not deselect the thread")
+  }
+  assert_eq(full.turns[0].items.map(item => item.id), ["item-2"])
 }
 
 ///|

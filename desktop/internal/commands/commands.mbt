@@ -181,6 +181,13 @@ pub let codex_status : Command[
 ] = Command("codex.status")
 
 ///|
+/// Ensure and open the Codex home's `config.toml` with the platform opener.
+pub let codex_config_open : Command[
+  @protocol.EmptyPayload,
+  @protocol.EmptyReply,
+] = Command("codex.config.open")
+
+///|
 /// Authorize one browser-local Codex draft against its selected main project.
 /// This process-local operation does not create an app-server thread.
 pub let codex_draft_open : Command[

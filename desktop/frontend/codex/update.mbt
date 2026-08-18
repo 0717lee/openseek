@@ -44,6 +44,32 @@ pub fn update(
       }
       (@cmd.batch(commands), next)
     }
+    AbandonDraft => {
+      guard state.active_draft() is Some(draft) else {
+        return (@cmd.none, state)
+      }
+      // The unified model chip moved this fresh conversation to another
+      // agent. Release the host-side draft authorization and deselect, so
+      // the sidebar drops its composing "New chat" row instead of keeping a
+      // stale draft the user has already walked away from.
+      let commands : Array[@cmd.Cmd] = []
+      if !draft.cwd.is_empty() {
+        commands.push(state.close_draft(channel, draft.id))
+      }
+      (
+        @cmd.batch(commands),
+        {
+          ..state,
+          selection: CodexNoTask,
+          draft: "",
+          mentions: [],
+          placement: @composer.LocalCheckout,
+          foreground: None,
+          loading: false,
+          notice: "",
+        },
+      )
+    }
     OpenThread(thread_id) =>
       if state.active_thread() is Some(active) &&
         active.id == thread_id &&
@@ -205,6 +231,8 @@ pub fn update(
             next.load_skills(dispatch, channel, force_reload=false),
           ])
         }
+        CodexThreadMetaReply(thread_id) =>
+          next = next.with_thread_meta(value, thread_id)
         CodexThreadReply(requested_thread) => {
           next = next.with_thread_reply(value, requested_thread~)
           // A malformed or mismatched snapshot leaves the requested id in
@@ -326,7 +354,9 @@ pub fn update(
         CodexThreadsReply(false, _) => "Codex threads"
         CodexThreadsReply(true, _) => "Archived Codex threads"
         CodexDraftOpenReply(_) => "Codex draft"
-        CodexThreadReply(_) | CodexDraftThreadReply(_) => "Codex thread"
+        CodexThreadReply(_)
+        | CodexThreadMetaReply(_)
+        | CodexDraftThreadReply(_) => "Codex thread"
         CodexTurnReply(_) | CodexWorktreeTurnReply(_, _) => "Codex turn"
         CodexTurnReconcileReply(_) => "Codex turn reconciliation"
         CodexWorktreeRepairReply(_, _) => "Codex worktree rebuild"
@@ -340,6 +370,19 @@ pub fn update(
         CodexCancelLoginReply(_) => "Codex sign-in cancellation"
         CodexLogoutReply => "Codex sign-out"
         CodexApprovalReply => "Codex response"
+      }
+      // A writer-lock refusal is an environment condition, not a protocol
+      // fault: some process — typically a previous SeekMoon instance that
+      // never fully exited, still owning its codex app-server — holds the
+      // thread's writer lock. Name the condition and the way out instead of
+      // quoting the raw JSON-RPC error.
+      let message = if (
+          kind is CodexArchiveReply(_) || kind is CodexUnarchiveReply(_)
+        ) &&
+        message.contains("already has an active writer") {
+        "another process still holds this task's writer — usually a previous SeekMoon instance that never fully exited. Quit it, then try again."
+      } else {
+        message
       }
       let owns_foreground = state.owns_foreground(kind)
       let settled = state.settle_foreground(kind)
@@ -423,12 +466,16 @@ pub fn update(
         // Re-read through the host so a cwd change cannot retarget Files,
         // Terminal, or language services from an unvalidated notification.
         // If a turn reply is also missing, the same read must first settle
-        // that delivery frontier before Send can become available.
+        // that delivery frontier before Send can become available. The
+        // ordinary case applies the read metadata-only: the first turn of a
+        // fresh thread fires this notification while it is still streaming,
+        // and a full `open_thread` replacement would blank the transcript
+        // with a snapshot that predates the turn.
         if next.pending_turn_delivery is Some(pending) &&
           pending.thread_id == active.id {
           next.reconcile_turn_delivery(dispatch, channel, active.id)
         } else {
-          next.open_thread(dispatch, channel, active.id)
+          next.refresh_thread_meta(dispatch, channel, active.id)
         }
       } else if method_ == "turn/completed" {
         // A turn may check out another branch or create a PR. Refresh the same
@@ -530,6 +577,124 @@ test "Codex project add stays local until the first prompt" {
   assert_true(adopted.active_thread() is Some(_))
   assert_true(adopted.placement is @composer.FreshWorktree)
   assert_true(adopted.loading)
+}
+
+///|
+test "abandoning a draft deselects it and clears its composer state" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let open_external = (_ : String) => @cmd.none
+  let (_, drafting) = update(
+    dispatch,
+    StartDraft(id="desktop-draft-1", cwd="/work/project"),
+    State(),
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  let typed = { ..drafting, draft: "half a prompt" }
+  let (_, dropped) = update(
+    dispatch,
+    AbandonDraft,
+    typed,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  assert_false(dropped.composing_draft())
+  assert_eq(dropped.active_id(), None)
+  inspect(dropped.draft_text(), content="")
+  // Without a draft there is nothing to abandon; the message is a no-op.
+  let (_, unchanged) = update(
+    dispatch,
+    AbandonDraft,
+    State(),
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  assert_true(unchanged.active_id() is None)
+}
+
+///|
+test "a settings-updated re-read keeps the streaming turns" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let open_external = (_ : String) => @cmd.none
+  // A fresh thread's first turn fires `thread/settings/updated` while it is
+  // still streaming; the snapshot read it triggers may predate that turn.
+  let state = State::from_thread_snapshot({
+    "thread": {
+      "id": "thread-1",
+      "cwd": "/work/project",
+      "preview": "hello",
+      "turns": [{ "id": "turn-1", "status": "inProgress", "items": [] }],
+    },
+  })
+  guard state.active_thread() is Some(before) else {
+    fail("fixture thread should be active")
+  }
+  assert_eq(before.turns.length(), 1)
+  let (_, refreshed) = update(
+    dispatch,
+    Reply(kind=CodexThreadMetaReply("thread-1"), value={
+      "thread": {
+        "id": "thread-1",
+        "name": "Renamed",
+        "cwd": "/work/project",
+        "turns": [],
+      },
+    }),
+    state,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  guard refreshed.active_thread() is Some(after) else {
+    fail("the metadata read must not deselect the thread")
+  }
+  // Metadata adopted, turn history preserved.
+  inspect(after.title, content="Renamed")
+  assert_eq(after.turns.length(), 1)
+  // A read for some other thread changes nothing.
+  let (_, unchanged) = update(
+    dispatch,
+    Reply(kind=CodexThreadMetaReply("thread-other"), value={
+      "thread": { "id": "thread-other", "turns": [] },
+    }),
+    state,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  guard unchanged.active_thread() is Some(kept) else {
+    fail("a mismatched read must not deselect the thread")
+  }
+  assert_eq(kept.id, "thread-1")
+  assert_eq(kept.turns.length(), 1)
+}
+
+///|
+test "a writer-locked archive failure reads as a condition, not a dump" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let open_external = (_ : String) => @cmd.none
+  let raw = "HandlerFailed(name=\"ext:openseek/codex.thread.archive\", detail=\"JsonRpc(method_=\\\"thread/archive\\\", code=-32600, message=\\\"thread 01a0 already has an active writer\\\", data=None)\")"
+  let (_, held) = update(
+    dispatch,
+    Failed(kind=CodexArchiveReply("thread-1"), message=raw),
+    State(),
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  inspect(
+    held.transcript_items()[0].content,
+    content="Codex archive: another process still holds this task's writer — usually a previous SeekMoon instance that never fully exited. Quit it, then try again.",
+  )
+  // Every other archive failure keeps its exact wording.
+  let (_, other) = update(
+    dispatch,
+    Failed(kind=CodexArchiveReply("thread-1"), message="thread not found"),
+    State(),
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  inspect(
+    other.transcript_items()[0].content,
+    content="Codex archive: thread not found",
+  )
 }
 
 ///|

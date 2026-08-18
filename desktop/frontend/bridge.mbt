@@ -1605,6 +1605,36 @@ fn close_window() -> @cmd.Cmd {
 }
 
 ///|
+/// Ask the host to ensure and open the Codex home's `config.toml` with the
+/// platform opener. Success needs no reply handling; a failure surfaces as
+/// an error toast.
+fn open_codex_config(
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+) -> @cmd.Cmd {
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      let _ : @protocol.EmptyReply = @interop.bridge_request(
+        channel,
+        @commands.codex_config_open,
+        @protocol.EmptyPayload::NoPayload,
+      ) catch {
+        error => {
+          scheduler.add(
+            dispatch(
+              CodexConfigOpenFailed(
+                "Codex config: " + @interop.bridge_error_text(error),
+              ),
+            ),
+          )
+          return
+        }
+      }
+    })
+  })
+}
+
+///|
 /// Ask the host to route a transcript-referenced path. Viewer-sized UTF-8 text
 /// inside the checkout returns an editor target, checkout-local directories
 /// return a Files-tree target, and other existing paths use the system default

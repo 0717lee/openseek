@@ -61,6 +61,8 @@ pub let codex_account_logout : Command[@protocol.EmptyPayload, @protocol.EmptyRe
 
 pub let codex_account_read : Command[@protocol.CodexAccountReadPayload, @protocol.CodexAccountReply]
 
+pub let codex_config_open : Command[@protocol.EmptyPayload, @protocol.EmptyReply]
+
 pub let codex_draft_close : Command[@protocol.CodexDraftClosePayload, @protocol.EmptyReply]
 
 pub let codex_draft_open : Command[@protocol.CodexDraftOpenPayload, @protocol.CodexDraftOpenReply]

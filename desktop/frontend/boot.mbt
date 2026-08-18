@@ -245,7 +245,6 @@ fn SidebarDispatcher::project_new(
       }
       self.emit(NewChatIn(channel, Some(project)))
     }
-    "codex.projects" => self.emit(CodexNewThreadIn(id.root()))
     source => self.unroutable("new chat", "\{source}@\{id.channel()}")
   }
 }
@@ -289,7 +288,6 @@ fn SidebarDispatcher::section_primary(
   match id.source() {
     "openseek.projects" => self.emit(PickProject(channel))
     "openseek.chats" => self.emit(NewChatIn(channel, None))
-    "codex" => self.emit(CodexNewThread)
     source => self.unroutable("section action", "source \{source}")
   }
 }
@@ -299,10 +297,7 @@ fn SidebarDispatcher::placeholder_open(
   self : SidebarDispatcher,
   id : String,
 ) -> @cmd.Cmd {
-  match id {
-    "codex.open" => self.emit(OpenCodex)
-    _ => self.unroutable("placeholder action", id)
-  }
+  self.unroutable("placeholder action", id)
 }
 
 ///|

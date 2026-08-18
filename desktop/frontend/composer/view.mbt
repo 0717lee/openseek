@@ -33,11 +33,20 @@ pub(all) struct ModelOption {
 }
 
 ///|
+/// One provider's options in the composer's model selector. A single-group
+/// select renders flat; several groups become native `optgroup`s, so the
+/// platform menu shows the provider boundaries itself.
+pub(all) struct ModelGroup {
+  label : String
+  options : Array[ModelOption]
+}
+
+///|
 /// A compact model pill. A transparent native
 /// select covers the visible label, preserving platform menu behavior without
 /// letting the longest option determine the pill's width.
 pub(all) struct ModelSelect {
-  options : Array[ModelOption]
+  groups : Array[ModelGroup]
   selected : String
   disabled : Bool
   change : @cmd.Emit[String]
@@ -48,17 +57,28 @@ pub(all) struct ModelSelect {
 pub fn ModelSelect::render(self : ModelSelect) -> @html.Html {
   let choices : Array[@html.Html] = []
   let mut selected_label = self.selected
-  for option in self.options {
-    if option.value == self.selected {
-      selected_label = option.label
+  let flat = self.groups.length() <= 1
+  for group in self.groups {
+    let options : Array[@html.Html] = []
+    for option in group.options {
+      if option.value == self.selected {
+        selected_label = option.label
+      }
+      options.push(
+        @html.option(
+          value=option.value,
+          selected=option.value == self.selected,
+          option.label,
+        ),
+      )
     }
-    choices.push(
-      @html.option(
-        value=option.value,
-        selected=option.value == self.selected,
-        option.label,
-      ),
-    )
+    if flat {
+      for option in options {
+        choices.push(option)
+      }
+    } else {
+      choices.push(@html.optgroup(label=group.label, options))
+    }
   }
   @html.div(
     class=if self.disabled {

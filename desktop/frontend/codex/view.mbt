@@ -2,7 +2,9 @@
 // reverse requests directly; no raw JSON-RPC method editor is exposed.
 
 ///|
-fn State::connection_label(self : State) -> String {
+/// Display strings for the topbar status and the Settings page's Codex
+/// account group; both render the same connection and account facts.
+pub fn State::connection_label(self : State) -> String {
   match self.connection {
     CodexStarting => "Starting Codex…"
     CodexReady => if self.is_running() { "Running" } else { "Connected" }
@@ -11,7 +13,7 @@ fn State::connection_label(self : State) -> String {
 }
 
 ///|
-fn State::account_label(self : State) -> String {
+pub fn State::account_label(self : State) -> String {
   match self.account {
     CodexAccountUnknown => "Checking account…"
     CodexSignedOut(requires_auth) =>
@@ -219,16 +221,6 @@ fn SidebarContext::project_registered(
 }
 
 ///|
-fn SidebarContext::project_label(
-  self : SidebarContext,
-  path : String,
-) -> String {
-  @resource.of_path(self.channel, path)
-  .map(project => @resource.label(project))
-  .unwrap_or(path)
-}
-
-///|
 fn SidebarContext::draft_input(
   self : SidebarContext,
   draft : CodexDraftTask,
@@ -243,7 +235,10 @@ fn SidebarContext::draft_input(
       root?=if root.is_empty() { None } else { Some(root) },
     ),
     title: draft.cwd,
-    label: "New Codex thread",
+    // The same label an unsent OpenSeek chat's row carries: the two agents'
+    // composing rows are one concept in the shared sidebar, and the model
+    // chip already names which agent the chat will start with.
+    label: "New chat",
     nested,
     subrun: false,
     active: self.selected,
@@ -263,179 +258,118 @@ fn SidebarContext::draft_input(
 priv struct CodexProject(String) derive(Debug, Eq)
 
 ///|
-/// Keep the short basename when it is unique. When several project roots share
-/// it, add the parent directory so the sidebar does not show multiple
-/// indistinguishable "openseek" folders; the full path remains the tooltip.
-fn CodexProject::display_label(
-  self : CodexProject,
-  projects : Array[CodexProject],
-  context : SidebarContext,
-) -> String {
-  let short = context.project_label(self.0)
-  let duplicate = projects
-    .iter()
-    .any(project => project != self && context.project_label(project.0) == short)
-  if !duplicate {
-    return short
-  }
-  let mut end = self.0.length()
-  while end > 0 && self.is_separator(end - 1) {
-    end = end - 1
-  }
-  let mut start = end
-  while start > 0 && !self.is_separator(start - 1) {
-    start = start - 1
-  }
-  let mut parent_end = start
-  while parent_end > 0 && self.is_separator(parent_end - 1) {
-    parent_end = parent_end - 1
-  }
-  if parent_end == 0 {
-    return self.0
-  }
-  let parent = self.0.view(end_offset=parent_end).to_owned()
-  context.project_label(parent) + " / " + short
+fn CodexDraftTask::grouping_root(self : CodexDraftTask) -> String {
+  self.project_root.unwrap_or(self.cwd).trim().to_owned()
 }
 
 ///|
-fn CodexProject::is_separator(self : CodexProject, index : Int) -> Bool {
-  let unit = self.0.code_unit_at(index)
-  unit == 47 || unit == 92 // '/' or '\\'
+/// One Codex thread's contribution to a shared project row: the component
+/// input plus the app-server activity stamp the root needs to interleave it
+/// with OpenSeek's own conversations by recency.
+pub(all) struct CodexProjectRow {
+  input : @conversation.Input
+  updated_at_ms : Double?
 }
 
 ///|
-/// Codex contributes one plain Section input to the shared sidebar component.
-/// Registered project roots become project inputs; standalone cwds remain
-/// direct conversation inputs. The project and section components own fold,
-/// menu, and compact-preview state, so Codex never keeps a parallel UI state.
-pub fn State::sidebar_section(
+/// The composing draft's row when it belongs to this registered project.
+/// The root pins it with the other this-session composing rows instead of
+/// ranking it by a stamp it cannot have yet.
+pub fn State::project_draft(
   self : State,
   context : SidebarContext,
-) -> @section.Input {
-  let entries : Array[@section.Entry] = []
-  let projects : Array[CodexProject] = []
+  root : String,
+) -> @conversation.Input? {
+  guard context.project_registered(root) &&
+    self.active_draft() is Some(draft) &&
+    CodexProject(draft.grouping_root()) == CodexProject(root) else {
+    return None
+  }
+  Some(context.draft_input(draft, true))
+}
+
+///|
+/// This registered project's Codex threads, in app-server order. Codex no
+/// longer owns a sidebar section — its conversations live beside OpenSeek's
+/// in the shared Projects section, distinguished only by their row identity.
+pub fn State::project_conversations(
+  self : State,
+  context : SidebarContext,
+  root : String,
+) -> Array[CodexProjectRow] {
+  // A thread is either nested here or a loose top-level row — never both.
+  // `loose_entries` claims every unregistered root, so this side must refuse
+  // them even if a caller passes one.
+  guard context.project_registered(root) else { return [] }
+  let project = CodexProject(root)
+  let conversations : Array[CodexProjectRow] = []
   for thread in self.threads {
-    if thread.project_key() is Some(project) &&
-      context.project_registered(project.0) &&
-      !projects.contains(project) {
-      // Preserve app-server list order: the project containing the newest
-      // visible thread appears first, and threads stay newest-first inside it.
-      projects.push(project)
-    }
-  }
-  if self.active_draft() is Some(draft) {
-    let root = draft.project_root.unwrap_or(draft.cwd).trim().to_owned()
-    let project = CodexProject(root)
-    if !root.is_empty() &&
-      context.project_registered(root) &&
-      !projects.contains(project) {
-      projects.push(project)
-    }
-  }
-  for project in projects {
-    let active = context.selected &&
-      (match self.selection {
-        CodexDraftTask(draft) =>
-          CodexProject(
-            draft.project_root.unwrap_or(draft.cwd).trim().to_owned(),
-          ) ==
-          project
-        CodexStoredTask(thread) =>
-          thread.project_root
-          .map(root => CodexProject(root.trim().to_owned()) == project)
-          .unwrap_or(false)
-        CodexNoTask => false
+    if thread.project_key() == Some(project) {
+      conversations.push({
+        input: thread.sidebar_input(self, context, true),
+        updated_at_ms: thread.updated_at_ms,
       })
-    let conversations : Array[@conversation.Input] = []
-    if self.active_draft() is Some(draft) &&
-      CodexProject(draft.project_root.unwrap_or(draft.cwd).trim().to_owned()) ==
-      project {
-      conversations.push(context.draft_input(draft, true))
     }
-    for thread in self.threads {
-      if thread.project_key() == Some(project) {
-        conversations.push(thread.sidebar_input(self, context, true))
-      }
-    }
-    entries.push(
-      @section.Project({
-        id: @project.Id(
-          source="codex.projects",
-          channel=context.channel.uri_authority(),
-          root=project.0,
-        ),
-        title: project.0,
-        label: project.display_label(projects, context),
-        activation: if active {
-          self.active_id()
-        } else {
-          None
-        },
-        can_start: self.can_start_thread(),
-        // Only registered OpenSeek projects reach this branch, so the shared
-        // settings and detach menu is valid for a Codex project row too.
-        managed: true,
-        conversations,
-        empty_label: None,
-      }),
-    )
   }
-  let loose = self.threads.filter(thread => {
-    thread
-    .project_key()
-    .map(project => !context.project_registered(project.0))
-    .unwrap_or(true)
-  })
+  conversations
+}
+
+///|
+/// Which conversation id activates a project row on the Codex side: the
+/// active draft or thread while the Codex page is on screen. The shared
+/// section component uses activation to reveal a folded branch when a new
+/// conversation lands in it.
+pub fn State::project_activation(
+  self : State,
+  context : SidebarContext,
+  root : String,
+) -> String? {
+  guard context.selected else { return None }
+  let project = CodexProject(root)
+  let holds = match self.selection {
+    CodexDraftTask(draft) => CodexProject(draft.grouping_root()) == project
+    CodexStoredTask(thread) =>
+      thread.project_root
+      .map(root => CodexProject(root.trim().to_owned()) == project)
+      .unwrap_or(false)
+    CodexNoTask => false
+  }
+  if holds {
+    self.active_id()
+  } else {
+    None
+  }
+}
+
+///|
+/// Codex conversations whose project root is missing or not a registered
+/// project. They keep top-level rows at the end of the shared Projects
+/// section, exactly as they did in the retired Codex section.
+pub fn State::loose_entries(
+  self : State,
+  context : SidebarContext,
+) -> Array[@section.Entry] {
+  let entries : Array[@section.Entry] = []
   let loose_draft = self
     .active_draft()
     .filter(draft => {
-      let root = draft.project_root.unwrap_or(draft.cwd).trim().to_owned()
+      let root = draft.grouping_root()
       root.is_empty() || !context.project_registered(root)
     })
   if loose_draft is Some(draft) {
     entries.push(@section.Conversation(context.draft_input(draft, false)))
   }
-  for thread in loose {
-    entries.push(
-      @section.Conversation(thread.sidebar_input(self, context, false)),
-    )
-  }
-  if self.threads.is_empty() && self.active_draft() is None {
-    let empty = match self.connection {
-      CodexStarting => "Loading Codex conversations…"
-      CodexUnavailable(_) => "Codex is unavailable"
-      CodexReady =>
-        if self.account is CodexSignedOut(_) {
-          "Sign in to list Codex conversations"
-        } else {
-          "No Codex conversations yet"
-        }
+  for thread in self.threads {
+    if thread
+      .project_key()
+      .map(project => !context.project_registered(project.0))
+      .unwrap_or(true) {
+      entries.push(
+        @section.Conversation(thread.sidebar_input(self, context, false)),
+      )
     }
-    entries.push(
-      @section.Placeholder({
-        id: "codex.open",
-        label: empty,
-        class_name: "codex-placeholder",
-        nested: false,
-        openable: true,
-      }),
-    )
   }
-  {
-    id: @section.Id(source="codex", channel=context.channel.uri_authority()),
-    label: "Codex",
-    initially_collapsed: false,
-    activation: if context.selected {
-      self.active_id()
-    } else {
-      None
-    },
-    action: Some({
-      title: "New Codex conversation",
-      disabled: !self.can_start_thread(),
-    }),
-    entries,
-  }
+  entries
 }
 
 ///|
@@ -594,7 +528,6 @@ pub(all) struct PageActions {
   toggle_sidebar : @cmd.Cmd
   toggle_terminal : @cmd.Cmd
   toggle_files : @cmd.Cmd
-  open_external : (String) -> @cmd.Cmd
   workspace_label : (@common.Uri) -> String
   // The root shell supplies the one transcript view shared with OpenSeek.
   // Codex owns the normalized items, but no parallel message/activity DOM.
@@ -617,39 +550,8 @@ pub fn State::page(
   file_panel_open : Bool,
   actions : PageActions,
 ) -> Array[@html.Html] {
-  let account_actions : Array[@html.Html] = []
-  match self.account {
-    CodexSignedOut(true) =>
-      account_actions.push(
-        @html.button(
-          class="primary",
-          disabled=self.loading,
-          on_click=dispatch(Login),
-          "Sign in with ChatGPT",
-        ),
-      )
-    CodexSignedIn(..) =>
-      account_actions.push(
-        @html.button(
-          disabled=self.loading,
-          on_click=dispatch(Logout),
-          "Sign out",
-        ),
-      )
-    _ => ()
-  }
-  if self.auth_url is Some(url) {
-    account_actions.push(
-      @html.button(on_click=(actions.open_external)(url), "Open sign-in page"),
-    )
-    account_actions.push(
-      @html.button(
-        disabled=self.loading,
-        on_click=dispatch(CancelLogin),
-        "Cancel sign-in",
-      ),
-    )
-  }
+  // Account actions (sign in/out, the pending sign-in page) live in the
+  // Settings page's Codex group; the topbar keeps only the status label.
   let topbar : Array[@html.Html] = []
   if !sidebar_open {
     topbar.push(
@@ -662,7 +564,7 @@ pub fn State::page(
     )
   }
   let title = match self.selection {
-    CodexDraftTask(_) => "New Codex thread"
+    CodexDraftTask(_) => "New chat"
     CodexStoredTask(thread) => thread.title
     CodexNoTask => "Codex"
   }
@@ -713,9 +615,6 @@ pub fn State::page(
       ],
     ),
   )
-  for action in account_actions {
-    topbar.push(action)
-  }
   // These are OpenSeek's existing host panels, re-rooted by `file_ctx` and
   // `terminal_ctx` to the selected app-server thread. They stay in this one
   // topbar instead of creating a nested Codex application frame.
@@ -786,7 +685,7 @@ test "Codex archived catalog contributes restore inputs" {
 }
 
 ///|
-test "Codex projects feed every conversation to the shared project component" {
+test "Codex threads join their registered project's shared row" {
   let data : Array[Json] = []
   for number = 1; number <= 6; number = number + 1 {
     data.push({
@@ -797,15 +696,14 @@ test "Codex projects feed every conversation to the shared project component" {
     })
   }
   let state = State().with_threads({ "data": data }, false)
-  let section = state.sidebar_section({
+  let context : SidebarContext = {
     channel: @interop.ChannelId::Local,
     selected: true,
     registered_projects: ["/work/openseek"],
-  })
-  assert_eq(section.entries.length(), 1)
-  guard section.entries[0] is @section.Project(project) else {
-    fail("expected a Codex project input")
   }
-  assert_true(project.managed)
-  assert_eq(project.conversations.length(), 6)
+  let conversations = state.project_conversations(context, "/work/openseek")
+  assert_eq(conversations.length(), 6)
+  assert_true(conversations[0].input.nested)
+  assert_eq(state.project_conversations(context, "/work/other").length(), 0)
+  assert_eq(state.loose_entries(context).length(), 0)
 }
