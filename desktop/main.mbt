@@ -122,21 +122,24 @@ async fn main {
   let app = @proton.asset("SeekMoon", frontend_entry, width=1120, height=760).debug_level(
     1,
   )
-  // Proton keeps its standard App/Edit/Window menus around custom menus,
-  // so adding Developer does not remove native editing shortcuts. The
+  // Proton auto-fills only the Application menu; Edit and Window must be
+  // declared or macOS loses their key equivalents (Cmd+A/C/V/X/Z, Cmd+W/M),
+  // which is what dispatches editing shortcuts to every text field. The
   // Windows engine has no native app menus and fails the run on any menu
-  // bar, so the Developer menu stays macOS/Linux-only.
+  // bar, so the menu bar stays macOS/Linux-only.
   let app = if @platform.win32 || @platform.win64 {
     app
   } else {
     app.menu(
       @proton.MenuBar::new(menus=[
+        @proton.Menu::role(Edit),
         @proton.Menu::new("Developer", items=[
           @proton.MenuItem::command(
             @commands.app_open_devtools.name(),
             "Open Developer Tools",
           ),
         ]),
+        @proton.Menu::role(Window),
       ]),
     )
   }
