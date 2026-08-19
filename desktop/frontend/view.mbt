@@ -603,8 +603,8 @@ fn Model::sidebar_component_input(self : Model) -> @sidebar.Input {
 /// (`steer_applied` commits it as a real user message).
 fn pending_steers_panel(conv : Conversation) -> @html.Html {
   let rows : Array[@html.Html] = []
-  for text in conv.pending_steers() {
-    let shown = user_display_text(text)
+  for steer in conv.pending_steers {
+    let shown = user_display_text(steer.content)
     rows.push(
       @html.div(class="pending-steer-row", title=shown, [
         @html.span(class="pending-steer-icon", "⤷"),

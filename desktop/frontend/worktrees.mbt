@@ -1432,7 +1432,7 @@ test "a failed worktree setup is an actionable toast and keeps retry eligible" {
   let (_, repeated) = update_dev(dispatch, failed, sent)
   let (_, rejected) = update_dev(dispatch, failed, sent)
   assert_eq(repeated.active().task, rejected.active().task)
-  assert_eq(repeated.active().input_ledger.length(), 0)
+  assert_eq(repeated.active().pending_steers.length(), 0)
   assert_eq(repeated.active().overlay.length(), 0)
   assert_eq(repeated.notifications.length(), 1)
   assert_eq(repeated.notifications[0].message, message)

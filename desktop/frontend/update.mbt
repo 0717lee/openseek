@@ -1141,7 +1141,7 @@ fn apply_engine_event(
     SteerApplied(content~, submission_id~) => {
       ignore(content)
       if submission_id is Some(submission_id) {
-        let (next, _) = conv.acknowledge_submission(submission_id, event_run_id)
+        let (next, _) = conv.acknowledge_steer(submission_id, event_run_id)
         (false, next)
       } else {
         // Legacy receipt: lifecycle information only. Text is not ownership
@@ -1153,7 +1153,7 @@ fn apply_engine_event(
     // text must not vanish silently.
     SteerDropped(content~, submission_id~) =>
       if submission_id is Some(submission_id) {
-        let (next, removed) = conv.reject_submission(
+        let (next, removed) = conv.reject_steer(
           submission_id,
           event_run_id,
           steer_dropped_notice(content),
@@ -2998,7 +2998,7 @@ fn update_msg(
           !(stage is Cancelling) &&
           conv.run_durable_floor is Some(_) {
           let (model, submission_id) = model.allocate_submission_id()
-          let conv = conv.enqueue_input(
+          let conv = conv.enqueue_steer(
             submission_id,
             Some(run_id),
             task,
@@ -3039,8 +3039,8 @@ fn update_msg(
         let (model, submission_id) = model.allocate_submission_id()
         // The worktree launch mode acts until a create has bound the
         // conversation; the eligibility must survive a rejected setup
-        // attempt (see `wants_fresh_worktree`). Read before the ledger
-        // entry below mutates the conversation.
+        // attempt (see `wants_fresh_worktree`). Read before the pending
+        // prompt below mutates the conversation.
         let fresh_worktree = conv.wants_fresh_worktree()
         let conv = {
           ..conv,
@@ -4822,7 +4822,7 @@ fn update_device_msg(
       // at: the entry ends, and the transcript says what actually happened.
       ignore(text)
       if model.find_conversation(channel, session) is Some(conv) {
-        let (next, changed) = conv.acknowledge_submission(
+        let (next, changed) = conv.acknowledge_steer(
           submission_id,
           Some(run_id),
         )
@@ -4836,10 +4836,10 @@ fn update_device_msg(
       }
     }
     SteerRejected(session~, submission_id~, text~, run_id~) =>
-      // A concrete `steered:false` cannot later commit. Retire the ledger entry
+      // A concrete `steered:false` cannot later commit. Retire the queue entry
       // and restore its exact draft; a later same-text submission is unrelated.
       if model.find_conversation(channel, session) is Some(conv) {
-        let (next, removed) = conv.reject_submission(
+        let (next, removed) = conv.reject_steer(
           submission_id,
           Some(run_id),
           steer_dropped_notice(text),
@@ -6030,7 +6030,7 @@ fn update_device_msg(
         Open(run_id=current, ..) if current == run_id => (conv, false, false)
         Open(run_id=previous_run, ..) =>
           (
-            conv.clear_streams().forget_inputs_for_run(previous_run),
+            conv.clear_streams().forget_steers_for_run(previous_run),
             true,
             false,
           )
@@ -6306,7 +6306,7 @@ fn update_device_msg(
                 // no longer acquire a receipt, so they end with it; the
                 // transcript, not a local notice, says what the run recorded.
                 {
-                  ..conv.clear_streams().forget_inputs_for_run(run_id),
+                  ..conv.clear_streams().forget_steers_for_run(run_id),
                   run: NoRun(ended=None),
                   last_run_id: Some(run_id),
                 }
@@ -6316,7 +6316,7 @@ fn update_device_msg(
                 // The run this conversation last owned is idle at the host,
                 // so nothing it carried is still in flight.
                 ignore(captured.steer_ids)
-                conv.forget_inputs_for_run(run_id)
+                conv.forget_steers_for_run(run_id)
               }
               SnapshotStarting(submission_id~) if conv.run
                 is Starting(submission_id=current) &&
@@ -6365,7 +6365,7 @@ fn update_device_msg(
       } else if is_steer_receipt(event) && run_id is Some(id) {
         // Host settling receipts may intentionally trail the terminal event;
         // an even newer Started can already have replaced last_run_id. Prefer
-        // the exact local ownership ledger before the legacy run fallback.
+        // the exact pending-steer match before the legacy run fallback.
         let exact = match event {
           SteerApplied(submission_id=Some(submission_id), ..) =>
             model.conversation_by_pending_steer(channel, submission_id, id)
@@ -6419,7 +6419,7 @@ fn update_device_msg(
         let (conv, _) = conv.settle_pending_prompt(submission_id)
         return (@cmd.none, model.replace_conversation(conv))
       }
-      // The id-bearing reply always settles its exact ledger entry, even when
+      // The id-bearing reply always settles its exact submission, even when
       // Finished A and Started B overtook A's RPC response. Only lifecycle
       // mutation remains conditional on A still owning the conversation.
       let owns_lifecycle = match conv.run {
@@ -6514,7 +6514,7 @@ fn update_device_msg(
         ignore(status)
         ignore(exit_code)
         let closed = if owns_lifecycle {
-          conv.forget_inputs_for_run(run_id)
+          conv.forget_steers_for_run(run_id)
         } else {
           conv
         }
@@ -6772,7 +6772,7 @@ fn update_device_msg(
             terminal_snapshot_generation?,
           )
         }
-        let settled_inputs = conv.clear_streams().forget_inputs_for_run(run_id)
+        let settled_inputs = conv.clear_streams().forget_steers_for_run(run_id)
         let base = {
           ..settled_inputs,
           run: NoRun(ended=Some(RunFinished(RunOutcome::parse(status)))),
@@ -7301,7 +7301,7 @@ fn with_pending_steers(
 ) -> Conversation {
   let mut next = conv
   for index, text in texts {
-    next = next.enqueue_input(
+    next = next.enqueue_steer(
       "test-steer-" + index.to_string(),
       Some(run_id),
       text,
@@ -8788,7 +8788,7 @@ test "an explicit rejected fresh start does not force reconnect reloads" {
     ),
     test_model().replace_conversation(conv),
   )
-  inspect(rejected.active().input_ledger.length(), content="0")
+  inspect(rejected.active().pending_steers.length(), content="0")
   let (_, reconnected) = update_dev(dispatch, BridgeReady, rejected)
   assert_true(reconnected.active().sync is Synced)
   inspect(reconnected.transcript_request_generation, content="0")
@@ -9829,7 +9829,7 @@ test "a distinct started id replaces a stale open run as foreign" {
     fail("expected the new run to replace the stale id")
   }
   inspect(next.active().streaming_response, content="")
-  inspect(next.active().pending_steers().length(), content="0")
+  inspect(next.active().pending_steers.length(), content="0")
   // The replaced run took its pending input with it and left no placeholder:
   // what the turn actually recorded is in the transcript.
   inspect(next.active().overlay.length(), content="0")
@@ -9869,8 +9869,8 @@ test "a repeated started id is idempotent" {
     fail("a repeated start reset the live run stage")
   }
   inspect(next.active().streaming_response, content="current fragment")
-  inspect(next.active().pending_steers().length(), content="1")
-  inspect(next.active().pending_steers()[0], content="current steer")
+  inspect(next.active().pending_steers.length(), content="1")
+  inspect(next.active().pending_steers[0].content, content="current steer")
   inspect(next.transcript_request_generation, content="0")
   assert_true(next.active().sync is Synced)
 }
@@ -9916,8 +9916,11 @@ test "a start failure cannot close a run opened by a winning push" {
     fail("the local failure closed the already-open run")
   }
   inspect(failed.active().streaming_response, content="foreign fragment")
-  inspect(failed.active().pending_steers().length(), content="1")
-  inspect(failed.active().pending_steers()[0], content="steer for foreign run")
+  inspect(failed.active().pending_steers.length(), content="1")
+  inspect(
+    failed.active().pending_steers[0].content,
+    content="steer for foreign run",
+  )
   inspect(failed.active().task, content="my competing prompt")
   inspect(failed.active().overlay.length(), content="1")
   inspect(failed.active().overlay[0].content, content="start was rejected")
@@ -9988,7 +9991,7 @@ test "a matching Started establishes the run after an undelivered response" {
   // that arrives anyway is still the run's exact identity.
   assert_true(started.active().run is Open(run_id="r-recovered", ..))
   inspect(started.active().overlay.length(), content="0")
-  inspect(started.active().input_ledger.length(), content="0")
+  inspect(started.active().pending_steers.length(), content="0")
 }
 
 ///|
@@ -10011,7 +10014,7 @@ test "a duplicate start response retires the draft and opens no run" {
     test_model().replace_conversation(conv),
   )
   // The prompt is in the record, so the recoverable copy has done its job.
-  inspect(responded.active().input_ledger.length(), content="0")
+  inspect(responded.active().pending_steers.length(), content="0")
   inspect(responded.active().overlay.length(), content="0")
   // No run was opened, so nothing may claim the lifecycle either way: the
   // conversation is left exactly as the reply found it.
@@ -10041,7 +10044,7 @@ test "an accepted start response opens the run without Started" {
   assert_true(responded.active().run is Open(run_id="r-response", ..))
   assert_true(responded.active().last_run_id is Some("r-response"))
   // The reply is the entry's last consumer: a prompt is sent once.
-  inspect(responded.active().input_ledger.length(), content="0")
+  inspect(responded.active().pending_steers.length(), content="0")
   assert_true(responded.active().sync is Reloading(generation=1, ..))
   assert_true(responded.active().run_durable_floor is None)
   assert_true(responded.active().run_floor_generation is Some(1))
@@ -10051,7 +10054,7 @@ test "an accepted start response opens the run without Started" {
   })
   let (_, gated) = update(dispatch, Send, drafted)
   // Send is refused while the run is open, so it neither sends nor records.
-  inspect(gated.active().input_ledger.length(), content="0")
+  inspect(gated.active().pending_steers.length(), content="0")
   inspect(gated.active().task, content="too early")
   let (_, started) = update_dev(
     dispatch,
@@ -10099,7 +10102,7 @@ test "an accepted start response opens the run without Started" {
   assert_true(loaded.active().sync is Synced)
   assert_true(loaded.active().run_durable_floor is Some(3))
   assert_true(loaded.active().run_floor_generation is None)
-  inspect(loaded.active().input_ledger.length(), content="0")
+  inspect(loaded.active().pending_steers.length(), content="0")
 }
 
 ///|
@@ -10138,7 +10141,7 @@ test "an old-host Started without an id is settled by the exact start response" 
   )
   // The id-less Started could not settle the entry; the exact response can.
   assert_true(responded.active().run is Open(run_id="r-old-host", ..))
-  inspect(responded.active().input_ledger.length(), content="0")
+  inspect(responded.active().pending_steers.length(), content="0")
   inspect(responded.active().overlay.length(), content="0")
 }
 
@@ -10272,7 +10275,7 @@ test "reconnect runs snapshot settles only its captured Starting submission" {
     test_model().replace_conversation(conv),
   )
   // The gap ended the entry: no receipt can cross it.
-  inspect(bridged.active().input_ledger.length(), content="0")
+  inspect(bridged.active().pending_steers.length(), content="0")
   let (_, settled) = update_dev(
     dispatch,
     RunsSettled(
@@ -10617,7 +10620,7 @@ test "a failed response after durable Finished cannot resurrect its prompt" {
     finished,
   )
   assert_true(failed.active().run is NoRun(ended=Some(RunFinished(Completed))))
-  inspect(failed.active().input_ledger.length(), content="0")
+  inspect(failed.active().pending_steers.length(), content="0")
   inspect(failed.active().overlay.length(), content="0")
   let (_, empty) = update_dev(
     dispatch,
@@ -10633,7 +10636,7 @@ test "a failed response after durable Finished cannot resurrect its prompt" {
     failed,
   )
   assert_true(empty.active().run is NoRun(ended=Some(RunFinished(Completed))))
-  inspect(empty.active().input_ledger.length(), content="0")
+  inspect(empty.active().pending_steers.length(), content="0")
   inspect(empty.active().overlay.length(), content="0")
 }
 
@@ -10663,7 +10666,7 @@ test "an accepted response consumes a fast-finished prompt without reopening" {
   assert_true(
     accepted.active().run is NoRun(ended=Some(RunFinished(Completed))),
   )
-  inspect(accepted.active().input_ledger.length(), content="0")
+  inspect(accepted.active().pending_steers.length(), content="0")
   inspect(accepted.active().overlay.length(), content="0")
 }
 
@@ -10740,13 +10743,16 @@ test "send while running queues a steer instead of a prompt" {
   let (_, once) = update(dispatch, Send, model)
   let (_, twice) = update(dispatch, Send, model)
   inspect(once.active().task, content="")
-  inspect(once.active().pending_steers().length(), content="1")
-  inspect(once.active().pending_steers()[0], content="focus on the tests")
+  inspect(once.active().pending_steers.length(), content="1")
+  inspect(once.active().pending_steers[0].content, content="focus on the tests")
   // The steer is pending, not part of the transcript yet.
   inspect(once.active().messages.length(), content="0")
   inspect(once.active().is_running(), content="true")
-  inspect(twice.active().pending_steers().length(), content="1")
-  inspect(twice.active().pending_steers()[0], content="focus on the tests")
+  inspect(twice.active().pending_steers.length(), content="1")
+  inspect(
+    twice.active().pending_steers[0].content,
+    content="focus on the tests",
+  )
 }
 
 ///|
@@ -10759,7 +10765,7 @@ test "a cancelling turn cannot be steered; the text stays in the composer" {
   })
   let (_, next) = update(dispatch, Send, model)
   inspect(next.active().task, content="too late")
-  inspect(next.active().pending_steers().length(), content="0")
+  inspect(next.active().pending_steers.length(), content="0")
 }
 
 ///|
@@ -10777,7 +10783,7 @@ test "steer_applied only settles pending UI until its commit" {
     ),
     model,
   )
-  inspect(next.active().pending_steers().length(), content="0")
+  inspect(next.active().pending_steers.length(), content="0")
   inspect(next.active().messages.length(), content="0")
   inspect(next.active().overlay.length(), content="0")
 }
@@ -10797,8 +10803,8 @@ test "a legacy text-only steer receipt cannot claim local ownership" {
     ),
     model,
   )
-  inspect(next.active().pending_steers().length(), content="1")
-  inspect(next.active().input_ledger.length(), content="1")
+  inspect(next.active().pending_steers.length(), content="1")
+  inspect(next.active().pending_steers.length(), content="1")
 }
 
 ///|
@@ -10862,8 +10868,8 @@ test "a canonical user commit never settles a local steer" {
     model,
   )
   inspect(committed.active().messages.length(), content="1")
-  inspect(committed.active().pending_steers().length(), content="1")
-  inspect(committed.active().input_ledger.length(), content="1")
+  inspect(committed.active().pending_steers.length(), content="1")
+  inspect(committed.active().pending_steers.length(), content="1")
 }
 
 ///|
@@ -10892,8 +10898,8 @@ test "a snapshot never settles a local steer by text" {
     ),
     model,
   )
-  inspect(loaded.active().pending_steers().length(), content="1")
-  inspect(loaded.active().input_ledger.length(), content="1")
+  inspect(loaded.active().pending_steers.length(), content="1")
+  inspect(loaded.active().pending_steers.length(), content="1")
 }
 
 ///|
@@ -10911,7 +10917,7 @@ test "steer_dropped settles the pending steer with a visible notice" {
     ),
     model,
   )
-  inspect(next.active().pending_steers().length(), content="0")
+  inspect(next.active().pending_steers.length(), content="0")
   inspect(next.active().overlay.length(), content="1")
   inspect(next.active().task, content="go left")
   guard next.active().overlay[0].kind is Assistant(is_danger=true) else {
@@ -10935,9 +10941,9 @@ test "an identical-text settle removes exactly one pending entry" {
     ),
     model,
   )
-  inspect(next.active().pending_steers().length(), content="1")
-  inspect(next.active().pending_steers()[0], content="again")
-  inspect(next.active().input_ledger[0].submission_id, content="test-steer-1")
+  inspect(next.active().pending_steers.length(), content="1")
+  inspect(next.active().pending_steers[0].content, content="again")
+  inspect(next.active().pending_steers[0].submission_id, content="test-steer-1")
   inspect(next.active().overlay.length(), content="0")
 }
 
@@ -10966,8 +10972,8 @@ test "a late exact applied receipt retracts a run-end unconfirmed notice" {
     ),
     finished,
   )
-  inspect(next.active().pending_steers().length(), content="0")
-  inspect(next.active().input_ledger.length(), content="0")
+  inspect(next.active().pending_steers.length(), content="0")
+  inspect(next.active().pending_steers.length(), content="0")
   inspect(next.active().overlay.length(), content="0")
 }
 
@@ -10988,7 +10994,7 @@ test "a trailing applied receipt for run A settles after run B Started" {
   )
   assert_true(next.active().run is Open(run_id="r8", ..))
   assert_true(next.active().last_run_id is Some("r8"))
-  inspect(next.active().input_ledger.length(), content="0")
+  inspect(next.active().pending_steers.length(), content="0")
   assert_true(next.active().pending_prompt is Some(_))
   inspect(next.active().overlay.length(), content="0")
 }
@@ -11013,7 +11019,7 @@ test "a trailing dropped receipt for run A cannot close run B" {
   // disturb B.
   assert_true(next.active().run is Open(run_id="r8", ..))
   assert_true(next.active().last_run_id is Some("r8"))
-  inspect(next.active().input_ledger.length(), content="0")
+  inspect(next.active().pending_steers.length(), content="0")
   assert_true(next.active().pending_prompt is Some(_))
   inspect(next.active().task, content="")
   inspect(next.active().overlay.length(), content="0")
@@ -11321,7 +11327,7 @@ test "send waits while the durable transcript frontier is reloading" {
   let model = running_model().replace_conversation(conv)
   let (_, next) = update(dispatch, Send, model)
   inspect(next.active().task, content="do not send yet")
-  inspect(next.active().input_ledger.length(), content="0")
+  inspect(next.active().pending_steers.length(), content="0")
 }
 
 ///|
@@ -11345,7 +11351,7 @@ test "a trailing applied receipt settles after an empty runs snapshot" {
     ),
     settled,
   )
-  inspect(applied.active().input_ledger.length(), content="0")
+  inspect(applied.active().pending_steers.length(), content="0")
   inspect(applied.active().overlay.length(), content="0")
 }
 
@@ -11372,7 +11378,7 @@ test "a trailing dropped receipt after an empty runs snapshot changes nothing" {
   )
   // The snapshot already ended the run and its pending steer; a receipt that
   // trails it owns nothing.
-  inspect(dropped.active().input_ledger.length(), content="0")
+  inspect(dropped.active().pending_steers.length(), content="0")
   inspect(dropped.active().task, content="")
   inspect(dropped.active().overlay.length(), content="0")
 }
@@ -14006,7 +14012,7 @@ test "archiving a pending start restores its original composer without ownership
   inspect(next.active().task, content="original draft\n\ntyped afterward")
   inspect(next.active().mentions.length(), content="2")
   assert_true(next.active().run is NoRun(ended=None))
-  inspect(next.active().input_ledger.length(), content="0")
+  inspect(next.active().pending_steers.length(), content="0")
   inspect(next.active().overlay.length(), content="1")
   inspect(next.active().overlay[0].content, content=ArchivedPendingInputNotice)
   assert_true(next.active().overlay[0].reconciliation is Retained)

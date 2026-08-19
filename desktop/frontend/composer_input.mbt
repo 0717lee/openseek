@@ -77,7 +77,7 @@ fn Model::composer_input(
       ]),
     )
   }
-  if !conv.pending_steers().is_empty() {
+  if !conv.pending_steers.is_empty() {
     context.push(pending_steers_panel(conv))
   }
   match conv.compaction {

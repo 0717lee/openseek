@@ -363,8 +363,8 @@ priv enum RunPhase {
   NoRun(ended~ : RunEnd?)
   // Send accepted: this exact submission's start op is in flight and no run
   // id exists yet. Keeping the id in the phase prevents an older reconnect
-  // snapshot from adjudicating a newer start merely because both ids remain
-  // in the reconciliation ledger.
+  // snapshot from adjudicating a newer start merely because both were once
+  // in flight.
   Starting(submission_id~ : String)
   // The host's `started` event opened run `run_id`.
   Open(run_id~ : String, stage~ : TurnStage)
@@ -445,9 +445,9 @@ priv struct RunSnapshotFrontier {
 }
 
 ///|
-/// How a recovered settlement matched the request-time owner. Submission
-/// matches must first bind the host's run id into the local input ledger;
-/// run matches already have that identity.
+/// How a recovered settlement matched the request-time owner: by the run it
+/// names, or by the submission of a prompt still in flight when the request
+/// began.
 priv enum SettlementFrontierMatch {
   SettlementByRun
   SettlementBySubmission(String)
@@ -612,12 +612,12 @@ priv struct Conversation {
   // tagged and therefore never clear a potentially newer stream. Empty means
   // not streaming.
   streaming_response : String
-  // Steers submitted into an open run and not yet acknowledged. This is the
-  // queue the composer renders as pending; entries leave it on their exact
-  // id-bearing receipt, or with the run they belong to. Canonical User text
-  // never claims ownership, so identical steers from multiple clients cannot
-  // collide.
-  input_ledger : Array[PendingInput]
+  // Steers submitted into an open run and not yet acknowledged — the queue
+  // the composer renders as pending, and never a second text queue beside
+  // it. Entries leave on their exact id-bearing receipt, or with the run
+  // they belong to. Canonical User text never claims ownership, so identical
+  // steers from multiple clients cannot collide.
+  pending_steers : Array[PendingSteer]
   // The one prompt in flight: submitted, no answer yet. There is at most one
   // — Send is refused while a run is open — so this is a field, not a queue.
   //
@@ -793,7 +793,7 @@ priv enum NoticeAnchor {
 /// transcript text and legacy receipts without an id never settle this entry.
 /// The original draft shape is retained so a definitive refusal can restore
 /// it to the composer without exposing the serialized mention envelope.
-priv struct PendingInput {
+priv struct PendingSteer {
   submission_id : String
   // The run this steer was sent into. A receipt names it too, which is what
   // stops a late echo from settling an entry belonging to a newer run.
@@ -1826,8 +1826,9 @@ priv enum DeviceMsg {
   // Another client changed this host's library; the focused client re-reads
   // it so the Skills page and `$` completion share the new contents.
   SkillsChanged
-  // The steer RPC failed before its outcome was known. The host may already
-  // have accepted it, so its notice/ledger entry stays provisional.
+  // The steer RPC failed before its outcome was known. Whether the host took
+  // it is unknowable here, so the queue entry ends rather than being guessed
+  // at.
   SteerUndelivered(
     session~ : String,
     submission_id~ : String,
@@ -1835,7 +1836,7 @@ priv enum DeviceMsg {
     run_id~ : String
   )
   // The host definitively returned `steered:false`; no canonical User can
-  // follow, so both pending UI and its ledger entry retire immediately.
+  // follow, so the queue entry retires and its draft comes back.
   SteerRejected(
     session~ : String,
     submission_id~ : String,
@@ -2082,7 +2083,7 @@ priv enum DeviceMsg {
     message~ : String
   )
   // The host definitively refused this exact request. Restore its draft and
-  // retire the ledger entry immediately.
+  // retire the prompt in flight immediately.
   StartRejected(session~ : String, submission_id~ : String, message~ : String)
   // `worktree.create` failed before `agent.start` was sent. Restore the draft
   // like StartRejected, but report this recoverable setup failure as a toast
@@ -2191,7 +2192,7 @@ fn empty_conversation(
     pull_request_generation: 0,
     watcher_status: "",
     streaming_response: "",
-    input_ledger: [],
+    pending_steers: [],
     pending_prompt: None,
     messages: [],
     watermark: 0,
@@ -2649,7 +2650,7 @@ fn Model::run_snapshot_frontier(
       _ => None
     }
     if steer_owner is Some(run_id) {
-      for input in conv.input_ledger {
+      for input in conv.pending_steers {
         if input.run_id is Some(owner) && owner == run_id {
           steer_ids.push(input.submission_id)
         }
@@ -3053,7 +3054,7 @@ fn Model::conversation_by_pending_steer(
   run_id : String,
 ) -> Conversation? {
   for conv in self.conversations.filter(conv => conv.device == channel) {
-    for input in conv.input_ledger {
+    for input in conv.pending_steers {
       if input.submission_id == submission_id &&
         input.run_id is Some(owner) &&
         owner == run_id {
@@ -3200,7 +3201,7 @@ fn Conversation::has_begun(self : Conversation) -> Bool {
   self.is_running() ||
   self.messages.length() > 0 ||
   self.overlay.length() > 0 ||
-  !self.input_ledger.is_empty()
+  !self.pending_steers.is_empty()
 }
 
 ///|
@@ -3358,7 +3359,7 @@ fn Model::allocate_submission_id(self : Model) -> (Model, String) {
 }
 
 ///|
-fn Conversation::enqueue_input(
+fn Conversation::enqueue_steer(
   self : Conversation,
   submission_id : String,
   run_id : String?,
@@ -3366,23 +3367,15 @@ fn Conversation::enqueue_input(
   draft : String,
   mentions : Array[Mention],
 ) -> Conversation {
-  let input_ledger = self.input_ledger.copy()
-  input_ledger.push({
+  let pending_steers = self.pending_steers.copy()
+  pending_steers.push({
     submission_id,
     run_id,
     content,
     draft,
     mentions: mentions.copy(),
   })
-  { ..self, input_ledger, }
-}
-
-///|
-/// Pending steer UI is a projection of the ownership ledger, never a second
-/// text queue. An entry leaves this panel when its receipt arrives, or when
-/// the run it belongs to ends without one.
-fn Conversation::pending_steers(self : Conversation) -> Array[String] {
-  self.input_ledger.map(input => input.content)
+  { ..self, pending_steers, }
 }
 
 ///|
@@ -3421,7 +3414,7 @@ fn Conversation::has_initial_submission(
 
 ///|
 /// Place a retained process diagnostic at the exact EOF frontier supplied by
-/// Finished/agent.durable. Unlike submission notices, it has no ledger entry
+/// Finished/agent.durable. It belongs to its run rather than to a submission,
 /// and is never retracted.
 fn Conversation::anchor_run_diagnostics_at_durable_frontier(
   self : Conversation,
@@ -3473,8 +3466,8 @@ fn Conversation::anchor_run_diagnostics_at_finish(
 ///|
 /// Whether this exact id-bearing receipt owns this entry. The run must match
 /// too: a late echo from a finished run cannot consume a newer run's steer.
-fn PendingInput::matches_receipt(
-  self : PendingInput,
+fn PendingSteer::matches_receipt(
+  self : PendingSteer,
   submission_id : String,
   run_id : String?,
 ) -> Bool {
@@ -3485,16 +3478,16 @@ fn PendingInput::matches_receipt(
 }
 
 ///|
-fn Conversation::acknowledge_submission(
+fn Conversation::acknowledge_steer(
   self : Conversation,
   submission_id : String,
   run_id : String?,
 ) -> (Conversation, Bool) {
-  for index, input in self.input_ledger {
+  for index, input in self.pending_steers {
     if input.matches_receipt(submission_id, run_id) {
-      let input_ledger = self.input_ledger.copy()
-      let _ = input_ledger.remove(index)
-      return ({ ..self, input_ledger, }, true)
+      let pending_steers = self.pending_steers.copy()
+      let _ = pending_steers.remove(index)
+      return ({ ..self, pending_steers, }, true)
     }
   }
   (self, false)
@@ -3546,9 +3539,9 @@ fn Conversation::restore_submission(
 
 ///|
 /// Recover everything the user can still resubmit when this conversation is
-/// archived out from under the composer. Initial prompts still in the local
-/// ownership ledger come first in send order, followed by text typed since;
-/// no run or receipt state crosses into the replacement conversation.
+/// archived out from under the composer. A prompt still in flight comes first
+/// in send order, followed by text typed since; no run or receipt state
+/// crosses into the replacement conversation.
 fn Conversation::archive_salvage(self : Conversation) -> ArchiveSalvage {
   let drafts : Array[String] = []
   let mentions : Array[Mention] = []
@@ -3602,18 +3595,18 @@ priv struct ArchiveSalvage {
 /// draft, and replace any provisional notice with one retained explanation.
 /// A setup failure can suppress the transcript notice because update reports
 /// the same explanation as a transient toast instead.
-fn Conversation::reject_submission(
+fn Conversation::reject_steer(
   self : Conversation,
   submission_id : String,
   run_id : String?,
   notice : String,
   report_in_transcript? : Bool = true,
 ) -> (Conversation, Bool) {
-  for index, input in self.input_ledger {
+  for index, input in self.pending_steers {
     if input.matches_receipt(submission_id, run_id) {
-      let input_ledger = self.input_ledger.copy()
-      let _ = input_ledger.remove(index)
-      let next = { ..self, input_ledger, }
+      let pending_steers = self.pending_steers.copy()
+      let _ = pending_steers.remove(index)
+      let next = { ..self, pending_steers, }
       let restored = next.restore_submission(input.draft, input.mentions)
       return (
         if report_in_transcript {
@@ -3683,27 +3676,27 @@ fn Conversation::settle_pending_prompt(
 /// confirmed" adds nothing the transcript does not already show, and cannot
 /// be retracted correctly when it is wrong.
 fn Conversation::forget_awaiting_inputs(self : Conversation) -> Conversation {
-  if self.input_ledger.is_empty() && self.pending_prompt is None {
+  if self.pending_steers.is_empty() && self.pending_prompt is None {
     return self
   }
-  let input_ledger : Array[PendingInput] = []
-  { ..self, input_ledger, pending_prompt: None }
+  let pending_steers : Array[PendingSteer] = []
+  { ..self, pending_steers, pending_prompt: None }
 }
 
 ///|
 /// Forget every submission this exact run owned, whatever it was waiting for.
 /// See `forget_awaiting_inputs` for why nothing is retained.
-fn Conversation::forget_inputs_for_run(
+fn Conversation::forget_steers_for_run(
   self : Conversation,
   run_id : String,
 ) -> Conversation {
-  let input_ledger = self.input_ledger.filter(input => {
+  let pending_steers = self.pending_steers.filter(input => {
     !(input.run_id is Some(owner) && owner == run_id)
   })
-  if input_ledger.length() == self.input_ledger.length() {
+  if pending_steers.length() == self.pending_steers.length() {
     return self
   }
-  { ..self, input_ledger, }
+  { ..self, pending_steers, }
 }
 
 ///|
