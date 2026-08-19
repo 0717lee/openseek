@@ -112,11 +112,14 @@ test "annotation-only composer submission starts its conversation" {
   assert_true(submitted.active().run is Starting(..))
   assert_true(submitted.active().task.is_empty())
   assert_true(submitted.active().mentions.is_empty())
-  guard submitted.active().input_ledger is [pending] else {
-    fail("expected the annotation-only submission in the input ledger")
+  guard submitted.active().pending_prompt is Some(pending) else {
+    fail("expected the annotation-only submission to be in flight")
   }
-  assert_true(pending.content.contains("<user_mentions>"))
-  assert_true(pending.content.contains("bench/bench.mbt"))
+  // The chips alone make a non-empty prompt: the envelope is itself valid
+  // content, which is what lets an annotation be sent with no typed text.
+  let sent = @composer.Draft::{ task: "", mentions: [mention] }.prompt()
+  assert_true(sent.contains("<user_mentions>"))
+  assert_true(sent.contains("bench/bench.mbt"))
   assert_true(pending.mentions == [mention])
 }
 

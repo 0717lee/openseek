@@ -1141,11 +1141,7 @@ fn apply_engine_event(
     SteerApplied(content~, submission_id~) => {
       ignore(content)
       if submission_id is Some(submission_id) {
-        let (next, _) = conv.acknowledge_submission(
-          submission_id,
-          SteerInput,
-          event_run_id,
-        )
+        let (next, _) = conv.acknowledge_submission(submission_id, event_run_id)
         (false, next)
       } else {
         // Legacy receipt: lifecycle information only. Text is not ownership
@@ -1159,7 +1155,6 @@ fn apply_engine_event(
       if submission_id is Some(submission_id) {
         let (next, removed) = conv.reject_submission(
           submission_id,
-          SteerInput,
           event_run_id,
           steer_dropped_notice(content),
         )
@@ -3004,7 +2999,6 @@ fn update_msg(
           conv.run_durable_floor is Some(_) {
           let (model, submission_id) = model.allocate_submission_id()
           let conv = conv.enqueue_input(
-            SteerInput,
             submission_id,
             Some(run_id),
             task,
@@ -3048,14 +3042,14 @@ fn update_msg(
         // attempt (see `wants_fresh_worktree`). Read before the ledger
         // entry below mutates the conversation.
         let fresh_worktree = conv.wants_fresh_worktree()
-        let conv = conv.enqueue_input(
-          InitialPrompt,
-          submission_id,
-          None,
-          task,
-          conv.task,
-          conv.mentions,
-        )
+        let conv = {
+          ..conv,
+          pending_prompt: Some({
+            submission_id,
+            draft: conv.task,
+            mentions: conv.mentions.copy(),
+          }),
+        }
         let next = {
           ..conv,
           task: "",
@@ -4417,10 +4411,8 @@ fn Model::reject_start(
   guard self.find_conversation(channel, session) is Some(conv) else {
     return (@cmd.none, self)
   }
-  let (rejected, removed) = conv.reject_submission(
+  let (rejected, removed) = conv.reject_pending_prompt(
     submission_id,
-    InitialPrompt,
-    None,
     message,
     report_in_transcript~,
   )
@@ -4832,7 +4824,6 @@ fn update_device_msg(
       if model.find_conversation(channel, session) is Some(conv) {
         let (next, changed) = conv.acknowledge_submission(
           submission_id,
-          SteerInput,
           Some(run_id),
         )
         if changed {
@@ -4850,7 +4841,6 @@ fn update_device_msg(
       if model.find_conversation(channel, session) is Some(conv) {
         let (next, removed) = conv.reject_submission(
           submission_id,
-          SteerInput,
           Some(run_id),
           steer_dropped_notice(text),
         )
@@ -6028,14 +6018,7 @@ fn update_device_msg(
         current == id
       let same_open = existing.run is Open(run_id=current, ..) &&
         current == run_id
-      // Started establishes exact run ownership. The entry outlives the reply
-      // only when the reply is lost, and this binding is what lets the run's
-      // end find it.
-      let conv = if owned && submission_id is Some(id) {
-        existing.bind_initial_submission_to_run(id, run_id)
-      } else {
-        existing
-      }
+      let conv = existing
       let successor_snapshot_generation = model.transcript_request_generation +
         1
       let (conv, foreign, stale_terminal) = match conv.run {
@@ -6243,12 +6226,11 @@ fn update_device_msg(
         }
         if owner is SettlementBySubmission(submission_id) &&
           next.find_conversation(channel, settlement.session) is Some(conv) {
-          let bound = conv.bind_initial_submission_to_run(
-            submission_id,
-            settlement.run_id,
-          )
+          // The settlement names the run this submission opened, so the
+          // prompt in flight finally has its answer.
+          let (settled, _) = conv.settle_pending_prompt(submission_id)
           next = next.replace_conversation({
-            ..bound,
+            ..settled,
             run: Open(run_id=settlement.run_id, stage=Opened),
             run_durable_floor: None,
             run_floor_generation: None,
@@ -6342,11 +6324,7 @@ fn update_device_msg(
                 // The host has no record of this start, so the prompt never
                 // opened a run. Close the local lifecycle and let the entry
                 // go with it.
-                let (settled, _) = conv.acknowledge_submission(
-                  submission_id,
-                  InitialPrompt,
-                  None,
-                )
+                let (settled, _) = conv.settle_pending_prompt(submission_id)
                 { ..settled.clear_streams(), run: NoRun(ended=None) }
               }
               _ => conv
@@ -6438,11 +6416,7 @@ fn update_device_msg(
       // delivered — retire the recoverable draft — and there is no lifecycle
       // to open, because whatever turn wrote it is not this call's to own.
       guard run_id is Some(run_id) else {
-        let (conv, _) = conv.acknowledge_submission(
-          submission_id,
-          InitialPrompt,
-          None,
-        )
+        let (conv, _) = conv.settle_pending_prompt(submission_id)
         return (@cmd.none, model.replace_conversation(conv))
       }
       // The id-bearing reply always settles its exact ledger entry, even when
@@ -6456,11 +6430,7 @@ fn update_device_msg(
       // A prompt is sent once. Whatever the host answered, this submission's
       // entry has served its purpose — it existed to recognize this reply —
       // and nothing downstream reconciles it against the record.
-      let (conv, _) = conv.acknowledge_submission(
-        submission_id,
-        InitialPrompt,
-        None,
-      )
+      let (conv, _) = conv.settle_pending_prompt(submission_id)
       if status == "accepted" {
         let missed_started = owns_lifecycle &&
           conv.run is Starting(submission_id=current) &&
@@ -6593,11 +6563,7 @@ fn update_device_msg(
         // ends and the reload below shows what the record actually holds.
         ignore(message)
         let owns_submission = conv.has_initial_submission(submission_id)
-        let (settled, changed) = conv.acknowledge_submission(
-          submission_id,
-          InitialPrompt,
-          None,
-        )
+        let (settled, changed) = conv.settle_pending_prompt(submission_id)
         if !owns_submission {
           (@cmd.none, model)
         } else {
@@ -7336,7 +7302,6 @@ fn with_pending_steers(
   let mut next = conv
   for index, text in texts {
     next = next.enqueue_input(
-      SteerInput,
       "test-steer-" + index.to_string(),
       Some(run_id),
       text,
@@ -7348,12 +7313,15 @@ fn with_pending_steers(
 }
 
 ///|
-fn with_initial_submission(
+fn with_pending_prompt(
   conv : Conversation,
   id : String,
   text : String,
 ) -> Conversation {
-  conv.enqueue_input(InitialPrompt, id, None, text, text, [])
+  {
+    ..conv,
+    pending_prompt: Some({ submission_id: id, draft: text, mentions: [] }),
+  }
 }
 
 ///|
@@ -7361,7 +7329,7 @@ fn with_initial_submission(
 /// has already been sent and announced on the same conversation.
 fn second_run_started_before_first_response() -> (Model, String)? {
   let dispatch = test_dispatch()
-  let first = with_initial_submission(
+  let first = with_pending_prompt(
     { ..test_conversation(), run: Starting(submission_id="first-start") },
     "first-start",
     "first prompt",
@@ -8806,7 +8774,7 @@ test "late reconnect ticks cannot act on removed or re-added devices" {
 ///|
 test "an explicit rejected fresh start does not force reconnect reloads" {
   let dispatch = test_dispatch()
-  let conv = with_initial_submission(
+  let conv = with_pending_prompt(
     { ..test_conversation(), run: Starting(submission_id="rejected-id") },
     "rejected-id",
     "try this",
@@ -9910,7 +9878,7 @@ test "a repeated started id is idempotent" {
 ///|
 test "a start failure cannot close a run opened by a winning push" {
   let dispatch = test_dispatch()
-  let starting_conv = with_initial_submission(
+  let starting_conv = with_pending_prompt(
     { ..test_conversation(), run: Starting(submission_id="mine") },
     "mine",
     "my competing prompt",
@@ -9961,7 +9929,7 @@ test "a start failure cannot close a run opened by a winning push" {
 ///|
 test "a start failure closes only a still-starting run" {
   let dispatch = test_dispatch()
-  let conv = with_initial_submission(
+  let conv = with_pending_prompt(
     {
       ..test_conversation(),
       run: Starting(submission_id="prompt-id"),
@@ -9990,7 +9958,7 @@ test "a start failure closes only a still-starting run" {
 ///|
 test "a matching Started establishes the run after an undelivered response" {
   let dispatch = test_dispatch()
-  let conv = with_initial_submission(
+  let conv = with_pending_prompt(
     { ..test_conversation(), run: Starting(submission_id="prompt-id") },
     "prompt-id",
     "accepted prompt",
@@ -10026,7 +9994,7 @@ test "a matching Started establishes the run after an undelivered response" {
 ///|
 test "a duplicate start response retires the draft and opens no run" {
   let dispatch = test_dispatch()
-  let conv = with_initial_submission(
+  let conv = with_pending_prompt(
     { ..test_conversation(), run: Starting(submission_id="prompt-id") },
     "prompt-id",
     "prompt",
@@ -10054,7 +10022,7 @@ test "a duplicate start response retires the draft and opens no run" {
 ///|
 test "an accepted start response opens the run without Started" {
   let dispatch = test_dispatch()
-  let conv = with_initial_submission(
+  let conv = with_pending_prompt(
     { ..test_conversation(), run: Starting(submission_id="prompt-id") },
     "prompt-id",
     "prompt",
@@ -10137,7 +10105,7 @@ test "an accepted start response opens the run without Started" {
 ///|
 test "an old-host Started without an id is settled by the exact start response" {
   let dispatch = test_dispatch()
-  let conv = with_initial_submission(
+  let conv = with_pending_prompt(
     { ..test_conversation(), run: Starting(submission_id="prompt-id") },
     "prompt-id",
     "prompt",
@@ -10155,7 +10123,7 @@ test "an old-host Started without an id is settled by the exact start response" 
     test_model().replace_conversation(conv),
   )
   assert_true(started.active().run is Open(run_id="r-old-host", ..))
-  inspect(started.active().input_ledger.length(), content="1")
+  assert_true(started.active().pending_prompt is Some(_))
   inspect(started.active().overlay.length(), content="0")
   let (_, responded) = update_dev(
     dispatch,
@@ -10194,11 +10162,10 @@ test "a late accepted response settles run A without replacing open run B" {
   )
   assert_true(responded.active().run is Open(run_id="r-second", ..))
   assert_true(responded.active().last_run_id is Some("r-second"))
-  inspect(responded.active().input_ledger.length(), content="1")
-  inspect(
-    responded.active().input_ledger[0].submission_id,
-    content=second_submission,
-  )
+  guard responded.active().pending_prompt is Some(still_pending) else {
+    fail("the late reply consumed the newer submission")
+  }
+  inspect(still_pending.submission_id, content=second_submission)
 }
 
 ///|
@@ -10221,11 +10188,10 @@ test "a late failed response for durable run A cannot disturb open run B" {
   )
   assert_true(responded.active().run is Open(run_id="r-second", ..))
   assert_true(responded.active().last_run_id is Some("r-second"))
-  inspect(responded.active().input_ledger.length(), content="1")
-  inspect(
-    responded.active().input_ledger[0].submission_id,
-    content=second_submission,
-  )
+  guard responded.active().pending_prompt is Some(still_pending) else {
+    fail("the late reply consumed the newer submission")
+  }
+  inspect(still_pending.submission_id, content=second_submission)
   inspect(responded.active().overlay.length(), content="0")
 }
 
@@ -10295,7 +10261,7 @@ test "runs settled closes runs the host no longer has, sparing live and starting
 ///|
 test "reconnect runs snapshot settles only its captured Starting submission" {
   let dispatch = test_dispatch()
-  let conv = with_initial_submission(
+  let conv = with_pending_prompt(
     { ..test_conversation(), run: Starting(submission_id="pre-gap-start") },
     "pre-gap-start",
     "maybe accepted",
@@ -10358,12 +10324,12 @@ test "an old empty runs snapshot cannot close a start sent after reconnect" {
 ///|
 test "an older start rejection cannot close the current start" {
   let dispatch = test_dispatch()
-  let old = with_initial_submission(
+  let old = with_pending_prompt(
     test_conversation(),
     "older-start",
     "older prompt",
   )
-  let current = with_initial_submission(
+  let current = with_pending_prompt(
     { ..old, run: Starting(submission_id="current-start") },
     "current-start",
     "current prompt",
@@ -10378,8 +10344,10 @@ test "an older start rejection cannot close the current start" {
     test_model().replace_conversation(current),
   )
   assert_true(next.active().run is Starting(submission_id="current-start"))
-  inspect(next.active().input_ledger.length(), content="1")
-  inspect(next.active().input_ledger[0].submission_id, content="current-start")
+  guard next.active().pending_prompt is Some(pending) else {
+    fail("the older rejection consumed the current submission")
+  }
+  inspect(pending.submission_id, content="current-start")
 }
 
 ///|
@@ -10457,7 +10425,7 @@ test "a stale runs snapshot cannot replay a foreign run after BridgeReady" {
 ///|
 test "a settlement captured for an older Starting owner cannot close its successor" {
   let dispatch = test_dispatch()
-  let old = with_initial_submission(
+  let old = with_pending_prompt(
     { ..test_conversation(), run: Starting(submission_id="old-owner") },
     "old-owner",
     "old prompt",
@@ -10465,7 +10433,7 @@ test "a settlement captured for an older Starting owner cannot close its success
   let frontier = test_model()
     .replace_conversation(old)
     .run_snapshot_frontier(@interop.ChannelId::Local)
-  let current = with_initial_submission(
+  let current = with_pending_prompt(
     { ..old, run: Starting(submission_id="new-owner") },
     "new-owner",
     "new prompt",
@@ -10491,7 +10459,7 @@ test "a settlement captured for an older Starting owner cannot close its success
     model,
   )
   assert_true(unchanged.active().run is Starting(submission_id="new-owner"))
-  inspect(unchanged.active().input_ledger.length(), content="2")
+  assert_true(unchanged.active().pending_prompt is Some(_))
 }
 
 ///|
@@ -10606,7 +10574,7 @@ test "Finished after RunsSettled fills the last run outcome idempotently" {
 ///|
 test "a failed response after durable Finished cannot resurrect its prompt" {
   let dispatch = test_dispatch()
-  let conv = with_initial_submission(
+  let conv = with_pending_prompt(
     { ..test_conversation(), run: Starting(submission_id="fast-start") },
     "fast-start",
     "fast prompt",
@@ -10623,7 +10591,7 @@ test "a failed response after durable Finished cannot resurrect its prompt" {
     ),
     test_model().replace_conversation(conv),
   )
-  inspect(started.active().input_ledger.length(), content="1")
+  assert_true(started.active().pending_prompt is Some(_))
   let (_, finished) = update_dev(
     dispatch,
     Finished(
@@ -10672,7 +10640,7 @@ test "a failed response after durable Finished cannot resurrect its prompt" {
 ///|
 test "an accepted response consumes a fast-finished prompt without reopening" {
   let dispatch = test_dispatch()
-  let conv = with_initial_submission(
+  let conv = with_pending_prompt(
     {
       ..test_conversation(),
       run: NoRun(ended=Some(RunFinished(Completed))),
@@ -11020,8 +10988,8 @@ test "a trailing applied receipt for run A settles after run B Started" {
   )
   assert_true(next.active().run is Open(run_id="r8", ..))
   assert_true(next.active().last_run_id is Some("r8"))
-  inspect(next.active().input_ledger.length(), content="1")
-  assert_true(next.active().input_ledger[0].kind is InitialPrompt)
+  inspect(next.active().input_ledger.length(), content="0")
+  assert_true(next.active().pending_prompt is Some(_))
   inspect(next.active().overlay.length(), content="0")
 }
 
@@ -11045,8 +11013,8 @@ test "a trailing dropped receipt for run A cannot close run B" {
   // disturb B.
   assert_true(next.active().run is Open(run_id="r8", ..))
   assert_true(next.active().last_run_id is Some("r8"))
-  inspect(next.active().input_ledger.length(), content="1")
-  assert_true(next.active().input_ledger[0].kind is InitialPrompt)
+  inspect(next.active().input_ledger.length(), content="0")
+  assert_true(next.active().pending_prompt is Some(_))
   inspect(next.active().task, content="")
   inspect(next.active().overlay.length(), content="0")
 }
@@ -14006,14 +13974,14 @@ test "archiving a pending start restores its original composer without ownership
   let dispatch = test_dispatch()
   let sent_mention : Mention = { ref_: Skill(name="sent-skill"), range: None }
   let newer_mention : Mention = { ref_: Skill(name="newer-skill"), range: None }
-  let pending = test_conversation().enqueue_input(
-    InitialPrompt,
-    "pending-start",
-    None,
-    "serialized prompt",
-    "original draft",
-    [sent_mention],
-  )
+  let pending = {
+    ..test_conversation(),
+    pending_prompt: Some({
+      submission_id: "pending-start",
+      draft: "original draft",
+      mentions: [sent_mention],
+    }),
+  }
   let model = test_model()
     .replace_conversation({
       ..pending,

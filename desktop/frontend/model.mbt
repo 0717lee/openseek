@@ -612,11 +612,21 @@ priv struct Conversation {
   // tagged and therefore never clear a potentially newer stream. Empty means
   // not streaming.
   streaming_response : String
-  // Local submissions awaiting exact id-bearing host receipts. Initial prompt
-  // and steer entries share the ledger; steer state is also the sole source
-  // for pending UI and provisional failures. Canonical User text never claims
-  // ownership, so identical submissions from multiple clients cannot collide.
+  // Steers submitted into an open run and not yet acknowledged. This is the
+  // queue the composer renders as pending; entries leave it on their exact
+  // id-bearing receipt, or with the run they belong to. Canonical User text
+  // never claims ownership, so identical steers from multiple clients cannot
+  // collide.
   input_ledger : Array[PendingInput]
+  // The one prompt in flight: submitted, no answer yet. There is at most one
+  // — Send is refused while a run is open — so this is a field, not a queue.
+  //
+  // It exists for a single outcome: a definite refusal, which returns the
+  // draft to the composer with its mention chips intact. Every other ending
+  // just clears it. It deliberately outlives `run: Starting(..)`, because a
+  // competing run replaces that phase and the refusal that competition causes
+  // arrives after it.
+  pending_prompt : PendingPrompt?
   // The durable transcript: exactly what `session.load` snapshots and
   // `session.event` commits said, nothing else. Copy-on-write.
   messages : Array[@transcript.TranscriptItem]
@@ -778,26 +788,26 @@ priv enum NoticeAnchor {
 } derive(Eq)
 
 ///|
-priv enum InputKind {
-  InitialPrompt
-  SteerInput
-} derive(Eq)
-
-///|
-/// One locally submitted input awaiting an id-bearing host receipt. The
-/// globally unique `submission_id` is the only ownership proof: canonical
+/// One steer submitted into an open run and awaiting its id-bearing receipt.
+/// The globally unique `submission_id` is the only ownership proof: canonical
 /// transcript text and legacy receipts without an id never settle this entry.
 /// The original draft shape is retained so a definitive refusal can restore
 /// it to the composer without exposing the serialized mention envelope.
 priv struct PendingInput {
   submission_id : String
-  kind : InputKind
-  // The run this input belongs to once Started or the start response supplies
-  // it. Initial prompts begin as `None`; retaining their draft until a normal
-  // durable finish (not merely an stdin-write response) prevents pre-append
-  // engine failures from losing the user's text.
+  // The run this steer was sent into. A receipt names it too, which is what
+  // stops a late echo from settling an entry belonging to a newer run.
   run_id : String?
   content : String
+  draft : String
+  mentions : Array[Mention]
+} derive(Eq)
+
+///|
+/// The prompt half of the same idea, minus the queue: see
+/// `Conversation::pending_prompt`.
+priv struct PendingPrompt {
+  submission_id : String
   draft : String
   mentions : Array[Mention]
 } derive(Eq)
@@ -2182,6 +2192,7 @@ fn empty_conversation(
     watcher_status: "",
     streaming_response: "",
     input_ledger: [],
+    pending_prompt: None,
     messages: [],
     watermark: 0,
     sync: Synced,
@@ -2628,10 +2639,8 @@ fn Model::run_snapshot_frontier(
       Open(run_id~, ..) => SnapshotOpen(run_id~)
     }
     let initial_ids : Array[String] = []
-    for input in conv.input_ledger {
-      if input.kind is InitialPrompt && input.run_id is None {
-        initial_ids.push(input.submission_id)
-      }
+    if conv.pending_prompt is Some(pending) {
+      initial_ids.push(pending.submission_id)
     }
     let steer_ids : Array[String] = []
     let steer_owner = match state {
@@ -2641,9 +2650,7 @@ fn Model::run_snapshot_frontier(
     }
     if steer_owner is Some(run_id) {
       for input in conv.input_ledger {
-        if input.kind is SteerInput &&
-          input.run_id is Some(owner) &&
-          owner == run_id {
+        if input.run_id is Some(owner) && owner == run_id {
           steer_ids.push(input.submission_id)
         }
       }
@@ -2715,13 +2722,7 @@ fn Model::matched_settlement_frontier(
           if conv.run is NoRun(..) &&
             settlement.submission_id is Some(submission_id) &&
             captured.initial_ids.contains(submission_id) &&
-            conv.input_ledger
-            .iter()
-            .any(input => {
-              input.kind is InitialPrompt &&
-              input.submission_id == submission_id &&
-              input.run_id is None
-            }) {
+            conv.has_initial_submission(submission_id) {
             Some(SettlementBySubmission(submission_id))
           } else {
             None
@@ -3053,8 +3054,7 @@ fn Model::conversation_by_pending_steer(
 ) -> Conversation? {
   for conv in self.conversations.filter(conv => conv.device == channel) {
     for input in conv.input_ledger {
-      if input.kind is SteerInput &&
-        input.submission_id == submission_id &&
+      if input.submission_id == submission_id &&
         input.run_id is Some(owner) &&
         owner == run_id {
         return Some(conv)
@@ -3360,7 +3360,6 @@ fn Model::allocate_submission_id(self : Model) -> (Model, String) {
 ///|
 fn Conversation::enqueue_input(
   self : Conversation,
-  kind : InputKind,
   submission_id : String,
   run_id : String?,
   content : String,
@@ -3370,7 +3369,6 @@ fn Conversation::enqueue_input(
   let input_ledger = self.input_ledger.copy()
   input_ledger.push({
     submission_id,
-    kind,
     run_id,
     content,
     draft,
@@ -3384,13 +3382,7 @@ fn Conversation::enqueue_input(
 /// text queue. An entry leaves this panel when its receipt arrives, or when
 /// the run it belongs to ends without one.
 fn Conversation::pending_steers(self : Conversation) -> Array[String] {
-  let pending : Array[String] = []
-  for input in self.input_ledger {
-    if input.kind is SteerInput {
-      pending.push(input.content)
-    }
-  }
-  pending
+  self.input_ledger.map(input => input.content)
 }
 
 ///|
@@ -3424,11 +3416,7 @@ fn Conversation::has_initial_submission(
   self : Conversation,
   submission_id : String,
 ) -> Bool {
-  self.input_ledger
-  .iter()
-  .any(input => {
-    input.kind is InitialPrompt && input.submission_id == submission_id
-  })
+  self.pending_prompt is Some(pending) && pending.submission_id == submission_id
 }
 
 ///|
@@ -3483,34 +3471,27 @@ fn Conversation::anchor_run_diagnostics_at_finish(
 }
 
 ///|
-/// Remove one exact id-bearing receipt's ledger entry and provisional notice.
-/// `kind` prevents a malformed cross-kind echo from consuming an entry.
+/// Whether this exact id-bearing receipt owns this entry. The run must match
+/// too: a late echo from a finished run cannot consume a newer run's steer.
 fn PendingInput::matches_receipt(
   self : PendingInput,
   submission_id : String,
-  kind : InputKind,
   run_id : String?,
 ) -> Bool {
-  guard self.submission_id == submission_id else { return false }
-  match kind {
-    InitialPrompt => self.kind is InitialPrompt
-    SteerInput =>
-      self.kind is SteerInput &&
-      run_id is Some(run_id) &&
-      self.run_id is Some(owner) &&
-      owner == run_id
-  }
+  self.submission_id == submission_id &&
+  run_id is Some(run_id) &&
+  self.run_id is Some(owner) &&
+  owner == run_id
 }
 
 ///|
 fn Conversation::acknowledge_submission(
   self : Conversation,
   submission_id : String,
-  kind : InputKind,
   run_id : String?,
 ) -> (Conversation, Bool) {
   for index, input in self.input_ledger {
-    if input.matches_receipt(submission_id, kind, run_id) {
+    if input.matches_receipt(submission_id, run_id) {
       let input_ledger = self.input_ledger.copy()
       let _ = input_ledger.remove(index)
       return ({ ..self, input_ledger, }, true)
@@ -3520,23 +3501,6 @@ fn Conversation::acknowledge_submission(
 }
 
 ///|
-/// Attach an accepted initial submission to its run without treating the
-/// host's stdin-write response as durable proof. The draft remains recoverable
-/// until the run's canonical commit path proves it reached the store.
-fn Conversation::bind_initial_submission_to_run(
-  self : Conversation,
-  submission_id : String,
-  run_id : String,
-) -> Conversation {
-  let input_ledger = self.input_ledger.copy()
-  for index, input in input_ledger {
-    if input.kind is InitialPrompt && input.submission_id == submission_id {
-      input_ledger[index] = { ..input, run_id: Some(run_id) }
-      return { ..self, input_ledger, }
-    }
-  }
-  self
-}
 
 ///|
 /// An EOF frontier of zero, with no applied or buffered commit, proves this
@@ -3563,16 +3527,17 @@ fn Conversation::is_empty_at_durable_frontier(
 /// followed by the newer draft; mention chips retain both submissions' order.
 fn Conversation::restore_submission(
   self : Conversation,
-  submission : PendingInput,
+  draft : String,
+  submitted_mentions : Array[Mention],
 ) -> Conversation {
   let task = if self.task.is_empty() {
-    submission.draft
-  } else if submission.draft.is_empty() || self.task == submission.draft {
+    draft
+  } else if draft.is_empty() || self.task == draft {
     self.task
   } else {
-    submission.draft + "\n\n" + self.task
+    draft + "\n\n" + self.task
   }
-  let mentions = submission.mentions.copy()
+  let mentions = submitted_mentions.copy()
   for mention in self.mentions {
     mentions.push(mention)
   }
@@ -3587,16 +3552,13 @@ fn Conversation::restore_submission(
 fn Conversation::archive_salvage(self : Conversation) -> ArchiveSalvage {
   let drafts : Array[String] = []
   let mentions : Array[Mention] = []
-  let mut pending_initial = false
-  for input in self.input_ledger {
-    if input.kind is InitialPrompt {
-      pending_initial = true
-      if !input.draft.is_blank() {
-        drafts.push(input.draft)
-      }
-      for mention in input.mentions {
-        mentions.push(mention)
-      }
+  let pending_initial = self.pending_prompt is Some(_)
+  if self.pending_prompt is Some(pending) {
+    if !pending.draft.is_blank() {
+      drafts.push(pending.draft)
+    }
+    for mention in pending.mentions {
+      mentions.push(mention)
     }
   }
   if !self.task.is_blank() {
@@ -3643,17 +3605,16 @@ priv struct ArchiveSalvage {
 fn Conversation::reject_submission(
   self : Conversation,
   submission_id : String,
-  kind : InputKind,
   run_id : String?,
   notice : String,
   report_in_transcript? : Bool = true,
 ) -> (Conversation, Bool) {
   for index, input in self.input_ledger {
-    if input.matches_receipt(submission_id, kind, run_id) {
+    if input.matches_receipt(submission_id, run_id) {
       let input_ledger = self.input_ledger.copy()
       let _ = input_ledger.remove(index)
       let next = { ..self, input_ledger, }
-      let restored = next.restore_submission(input)
+      let restored = next.restore_submission(input.draft, input.mentions)
       return (
         if report_in_transcript {
           restored.append_local_notice(Assistant(is_danger=true), notice)
@@ -3668,6 +3629,50 @@ fn Conversation::reject_submission(
 }
 
 ///|
+/// Retire the prompt in flight because the host definitively refused it, and
+/// put its draft back in the composer. The prompt was not written, so this is
+/// news rather than a guess — the one outcome `pending_prompt` exists for.
+fn Conversation::reject_pending_prompt(
+  self : Conversation,
+  submission_id : String,
+  notice : String,
+  report_in_transcript? : Bool = true,
+) -> (Conversation, Bool) {
+  guard self.pending_prompt is Some(pending) &&
+    pending.submission_id == submission_id else {
+    return (self, false)
+  }
+  let restored = { ..self, pending_prompt: None }.restore_submission(
+    pending.draft,
+    pending.mentions,
+  )
+  (
+    if report_in_transcript {
+      restored.append_local_notice(Assistant(is_danger=true), notice)
+    } else {
+      restored
+    },
+    true,
+  )
+}
+
+///|
+/// Retire the prompt in flight without recovering anything. Every ending that
+/// is not a definite refusal comes here: the host answered, or the answer can
+/// no longer arrive. Either way the draft's job is done — see
+/// `Conversation::pending_prompt`.
+fn Conversation::settle_pending_prompt(
+  self : Conversation,
+  submission_id : String,
+) -> (Conversation, Bool) {
+  guard self.pending_prompt is Some(pending) &&
+    pending.submission_id == submission_id else {
+    return (self, false)
+  }
+  ({ ..self, pending_prompt: None }, true)
+}
+
+///|
 /// Forget every submission still waiting for a receipt.
 ///
 /// A submitted input is sent once. The composer keeps its entry only until
@@ -3678,11 +3683,11 @@ fn Conversation::reject_submission(
 /// confirmed" adds nothing the transcript does not already show, and cannot
 /// be retracted correctly when it is wrong.
 fn Conversation::forget_awaiting_inputs(self : Conversation) -> Conversation {
-  if self.input_ledger.is_empty() {
+  if self.input_ledger.is_empty() && self.pending_prompt is None {
     return self
   }
   let input_ledger : Array[PendingInput] = []
-  { ..self, input_ledger, }
+  { ..self, input_ledger, pending_prompt: None }
 }
 
 ///|

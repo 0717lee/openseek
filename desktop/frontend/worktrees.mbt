@@ -1418,8 +1418,8 @@ test "a failed worktree setup is an actionable toast and keeps retry eligible" {
     })
   let worktrees_generation = model.dev().worktrees_request_generation
   let (_, sent) = update(dispatch, Send, model)
-  guard sent.active().input_ledger is [entry] else {
-    fail("expected the submission in the ledger")
+  guard sent.active().pending_prompt is Some(entry) else {
+    fail("expected the submission to be in flight")
   }
   let message = "Couldn’t create the worktree. Submodules did not finish initializing within 10 seconds. Increase the checkout timeout in Workspace Settings or leave submodules uninitialized."
   let failed = WorktreeSetupFailed(
