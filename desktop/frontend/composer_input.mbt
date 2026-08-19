@@ -51,10 +51,10 @@ fn Model::composer_input(
   // stay in the application package.
   let context : Array[@html.Html] = [
     connection_banner(self),
-    @plan.panel(conv.visible_items()),
     // Sub-runs dock here rather than at the transcript's tail: a child turn's
     // progress is live run status that no durable event describes, and the
-    // scroller shows only what the record can place.
+    // scroller shows only what the record can place. The plan is the mirror
+    // image: it is durable, so it stays in the transcript.
     @subrun.dock(conv.visible_subruns()),
   ]
   // The BYOK reminder: readiness is otherwise folded silently into Send's

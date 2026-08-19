@@ -50,7 +50,7 @@
   padding: 4px 24px;
 }
 
-/* Plans, notices, and banners give up space before the input does. Keeping
+/* Notices and banners give up space before the input does. Keeping
    their scrollbar on this dedicated wrapper leaves the composer itself
    unclipped, so menus anchored inside composer-inner can still open upward. */
 .content.terminal-open .composer-context {
@@ -58,13 +58,6 @@
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-}
-
-/* The context wrapper owns auxiliary vertical scrolling beside the terminal;
-   an expanded plan must not add a second nested scrollbar inside it. */
-.content.terminal-open .composer-context .plan-panel .plan-steps {
-  max-height: none;
-  overflow-y: visible;
 }
 
 .composer-inner {
@@ -369,80 +362,6 @@
 }
 .composer-notice-btn:not(:disabled):hover {
   background: var(--color-bg-subtle);
-}
-
-/* the standing plan, docked above the composer: one line naming the active
-   step, expanding to the whole checklist. The slot is always in the DOM and
-   collapses to nothing without a plan, so the textarea below keeps its child
-   index while a plan appears and clears mid-turn */
-.plan-panel-slot:empty {
-  display: none;
-}
-.plan-panel {
-  max-width: 820px;
-  margin: 0 auto 8px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-subtle);
-  padding: 6px 10px 8px;
-}
-.plan-panel-summary {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-md);
-  cursor: pointer;
-  list-style: none;
-  user-select: none;
-}
-.plan-panel-summary::-webkit-details-marker {
-  display: none;
-}
-.plan-panel-summary:hover {
-  color: var(--color-text-primary);
-}
-.plan-panel-icon {
-  flex: none;
-  color: var(--color-accent);
-}
-.plan-panel-title {
-  flex: none;
-  font-weight: 600;
-}
-.plan-panel-active {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.plan-panel-summary .plan-progress-track {
-  flex: 0 0 90px;
-}
-.plan-panel-caret {
-  flex: none;
-  color: var(--color-text-muted);
-  font-size: var(--font-size-xs);
-}
-.plan-panel:not([open]) .plan-panel-caret::after {
-  content: "▸";
-}
-.plan-panel[open] .plan-panel-caret::after {
-  content: "▾";
-}
-/* The expanded checklist scrolls inside the panel rather than growing it.
-   The composer is `main`'s trailing `auto` row and the whole shell hides
-   overflow, so a near-maximum plan (the tool caps it at 20 steps, and long
-   titles wrap) would otherwise push the textarea and Send below the clipped
-   viewport with nothing left to scroll them back into reach. Capped in `vh`
-   as well as pixels so a short window keeps the composer visible. */
-.plan-panel .plan-steps {
-  max-height: min(34vh, 260px);
-  overflow-y: auto;
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid var(--color-border-subtle);
 }
 
 /* steering input not yet folded into the running turn: a panel docked

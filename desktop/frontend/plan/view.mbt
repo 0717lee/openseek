@@ -1,7 +1,11 @@
-// Three renderings of the same checklist, at three altitudes: a meter on a
-// folded run, the full card inside an expanded `plan` call, and the standing
-// plan docked above the composer. They share the row and meter builders below
-// so the three cannot drift apart.
+// Two renderings of the same checklist, at two altitudes: a meter on a folded
+// run, and the full card inside an expanded `plan` call. They share the row
+// and meter builders below so the two cannot drift apart.
+//
+// There is deliberately no third, standing rendering. A plan is a durable
+// tool call and reads as one, in the turn that made it; hoisting the latest
+// one into permanent chrome showed the same checklist twice and put a copy of
+// the transcript somewhere the transcript is not.
 
 ///|
 /// The card body for a `plan` tool call: a progress meter over the checklist,
@@ -36,46 +40,6 @@ pub fn card(steps : Array[Step]) -> @html.Html {
 pub fn fold_progress(items : Array[@transcript.TranscriptItem]) -> @html.Html {
   guard latest(items) is Some(steps) else { return @html.nothing }
   progress_view(steps, mini=true)
-}
-
-///|
-/// The standing plan, docked above the composer: one line naming the active
-/// step, expanding to the whole checklist. Where a card reports one recorded
-/// call, this reports the conversation's — the last call that applied.
-///
-/// The slot renders even with no plan to show, so the composer's child list
-/// keeps a fixed shape while a plan appears and clears mid-turn; an empty slot
-/// collapses in CSS. The `details` carries no `open` attribute, so whether the
-/// reader expanded it is DOM state that survives every re-render.
-pub fn panel(items : Array[@transcript.TranscriptItem]) -> @html.Html {
-  guard latest(items) is Some(steps) else {
-    return @html.div(class="plan-panel-slot", ([] : Array[@html.Html]))
-  }
-  let completed = completed_count(steps)
-  let (glyph, active) = if active_step(steps) is Some(step) {
-    ("◐", step.title)
-  } else if completed == steps.length() {
-    ("✓", "all steps done")
-  } else {
-    ("○", "no step in progress")
-  }
-  let rows : Array[@html.Html] = [
-    for index, step in steps => {
-      step_row(status=step.status, number="\{index + 1}.", title=step.title)
-    }
-  ]
-  @html.div(class="plan-panel-slot", [
-    @html.details(class="plan-panel", [
-      @html.summary(class="plan-panel-summary", [
-        @html.span(class="plan-panel-icon", glyph),
-        @html.span(class="plan-panel-title", "Plan"),
-        @html.span(class="plan-panel-active", title=active, active),
-        progress_view(steps, mini=true),
-        @html.span(class="plan-panel-caret", ""),
-      ]),
-      @html.ul(class="plan-steps", rows),
-    ]),
-  ])
 }
 
 ///|
@@ -135,7 +99,7 @@ fn fill_width(part : Int, total : Int) -> String {
 }
 
 ///|
-/// One checklist row, shared by the card and the panel so they cannot drift:
+/// One checklist row, used by the card so both altitudes cannot drift:
 /// a status cell, the step number, and the title. The status doubles as the
 /// row's CSS class.
 fn step_row(status~ : Status, number~ : String, title~ : String) -> @html.Html {
