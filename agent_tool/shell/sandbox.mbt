@@ -5509,9 +5509,13 @@ fn direct_source_blocked_content(operation : String, target : String) -> String 
 fn append_shell_sandbox_feedback_if_needed(
   content : String,
   agent_output : AgentShellOutput,
+  parsed : @shell_parse.ParseResult,
 ) -> String {
   if agent_output_has_shell_sandbox_denial(agent_output) {
-    insert_before_system_footer(content, SandboxSourceWriteFeedback)
+    insert_before_system_footer(
+      content,
+      shell_sandbox_denial_feedback(parsed, agent_output.output.text),
+    )
   } else {
     content
   }

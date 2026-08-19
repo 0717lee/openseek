@@ -439,6 +439,7 @@ async fn shell(
   let content = append_shell_sandbox_feedback_if_needed(
     response.content,
     agent_output,
+    parsed_command,
   )
   let content = append_moon_command_check_summary(
     parsed_command,
