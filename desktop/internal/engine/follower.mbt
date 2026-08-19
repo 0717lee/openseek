@@ -593,9 +593,21 @@ test "session_max_sequence is the snapshot's watermark" {
     id: Some("s"),
     system_prompt: None,
     events: Some([
-      { sequence: 5, ts: None, item: User({ content: "five" }) },
-      { sequence: 9, ts: None, item: User({ content: "nine" }) },
-      { sequence: 7, ts: None, item: User({ content: "seven" }) },
+      {
+        sequence: 5,
+        ts: None,
+        item: User({ content: "five", submission_id: None }),
+      },
+      {
+        sequence: 9,
+        ts: None,
+        item: User({ content: "nine", submission_id: None }),
+      },
+      {
+        sequence: 7,
+        ts: None,
+        item: User({ content: "seven", submission_id: None }),
+      },
     ]),
   }
   inspect(session_max_sequence(session), content="9")

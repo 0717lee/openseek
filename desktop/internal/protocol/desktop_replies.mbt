@@ -227,8 +227,17 @@ pub(all) struct SessionToolCall {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+/// A durable user prompt as the store recorded it.
+///
+/// `submission_id` mirrors the durable `UserMessage` tag: the submitting
+/// controller's id for this prompt, echoed from the serve `prompt` command,
+/// or None for untagged input (steers, TUI and one-shot prompts, and every
+/// record written before the field existed). It is what lets a delivery be
+/// reconciled by exact id instead of by matching text, since two clients can
+/// submit identical text into one session.
 pub(all) struct SessionUserMessage {
   content : String
+  submission_id : String?
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|

@@ -1714,6 +1714,7 @@ pub fn SessionToolResult::to_repr(Self) -> @debug.Repr
 
 pub(all) struct SessionUserMessage {
   content : String
+  submission_id : String?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 pub fn SessionUserMessage::equal(Self, Self) -> Bool
 pub fn SessionUserMessage::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
