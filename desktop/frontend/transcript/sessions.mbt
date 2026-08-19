@@ -461,12 +461,10 @@ pub fn apply_session_item(
               ts,
               sequence,
             })
-          // The remaining goal-family notices are transport (the baseline
-          // pairing record) or model-directed text (reminders, checks) —
-          // never display cards. Local prefix check: this js-only package
-          // cannot depend on agent_session's parsers.
+          // What is left is either model-directed text — never a display
+          // card — or a background job's runtime update, which is.
           None =>
-            if !payload.content.has_prefix("[goal") {
+            if !is_model_directed_notice(payload.content) {
               let update = parse_runtime_update(payload.content)
               if !update.status.is_empty() || update.diagnostics.length() > 0 {
                 items.push({
@@ -1091,6 +1089,21 @@ test "transcript mapping renders goal markers as cards and reduces the standing 
   assert_true(
     view.goal_markers.iter().all(entry => entry.0 != 1 && entry.0 != 3),
   )
+}
+
+///|
+test "transcript mapping drops the plan reminder instead of carding it" {
+  // The reminder is durable and carries no metadata assignments, so without
+  // an explicit exclusion every one of its lines reads as a `moon_check`
+  // diagnostic. The live path drops the matching `plan_reminder` event.
+  let events =
+    #|{"sequence":1,"item":{"kind":"runtime_notice","payload":{"content":"[plan reminder]\nUpdate the plan before continuing."}}},
+    #|{"sequence":2,"item":{"kind":"runtime_notice","payload":{"content":"[moon_check update]\nstatus=passed"}}}
+  let items = transcript_from_session(session_reply(events))
+  inspect(items.length(), content="1")
+  guard items[0].kind is Tool(name="moon_check passed", ..) else {
+    fail("expected only the runtime update card")
+  }
 }
 
 ///|

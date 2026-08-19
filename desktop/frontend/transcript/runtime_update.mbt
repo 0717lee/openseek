@@ -5,6 +5,24 @@ let runtime_metadata_keys : Array[String] = [
 ]
 
 ///|
+/// Whether this durable runtime notice is text the engine wrote for the
+/// model rather than news for the reader: the goal family (markers, the
+/// baseline pairing record, reminders, checks) and the plan cadence's
+/// turn-boundary reminder.
+///
+/// The live event path already drops these — `decode_engine_event` has no
+/// `plan_reminder` case — and the durable path has to agree, or the same
+/// text surfaces here as a bogus `moon_check` card: `parse_runtime_update`
+/// classifies every line it does not recognize as metadata as a diagnostic,
+/// so any prose at all clears the render threshold.
+///
+/// Local prefix check: this js-only package cannot depend on
+/// `agent_session`'s constants.
+fn is_model_directed_notice(content : String) -> Bool {
+  content.has_prefix("[goal") || content.has_prefix("[plan reminder]")
+}
+
+///|
 /// Split a `runtime_update` notice (the engine's `moon_check --watch`
 /// stream) into the watcher status and the diagnostic lines, dropping the
 /// metadata assignments the engine prepends.
