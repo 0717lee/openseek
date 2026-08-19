@@ -73,14 +73,14 @@ async test "foreground runs through the execution model" {
 
 ///|
 #cfg(not(platform="windows"))
-async test "wired foreground reports binary output as a tool error" {
+async test "wired foreground reports binary output as lossy text with encoding warning" {
   @async.with_task_group(group => {
     let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
-    // The wired path (through ShellExecution) must match the per-call path:
-    // non-UTF-8 output is a tool error, not replacement characters as success.
+    // Non-UTF-8 output is no longer a hard tool error: the platform shell
+    // sets UTF-8 encoding (Windows: chcp 65001), so remaining binary output
+    // is returned as lossy-decoded text with an encoding warning.
     let output = run_shell_wired(bg, { "cmd": "printf '\\377'" })
-    assert_true(output.is_error)
-    assert_true(output.content.contains("Malformed"))
+    assert_true(output.content.contains("encoding=lossy"))
   })
 }
 
@@ -561,22 +561,20 @@ async test "shell does not split four-byte utf8 characters on Unix" {
 
 ///|
 #cfg(platform="windows")
-async test "shell reports binary output as a tool error on Windows" {
+async test "shell reports binary output as lossy text on Windows" {
   let output = run_shell({
     "cmd": "[Console]::OpenStandardOutput().WriteByte(255)",
   })
-  assert_true(output.is_error)
-  assert_true(output.content.contains("error running shell:"))
-  assert_true(output.content.contains("Malformed"))
+  assert_false(output.is_error)
+  assert_true(output.content.contains("exit=0"))
 }
 
 ///|
 #cfg(not(platform="windows"))
-async test "shell reports binary output as a tool error on Unix" {
+async test "shell reports binary output as lossy text on Unix" {
   let output = run_shell({ "cmd": "printf '\\377'" })
-  assert_true(output.is_error)
-  assert_true(output.content.contains("error running shell:"))
-  assert_true(output.content.contains("Malformed"))
+  assert_false(output.is_error)
+  assert_true(output.content.contains("exit=0"))
 }
 
 ///|
