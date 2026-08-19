@@ -748,13 +748,12 @@ fn GoalRequest::settled_by(
 }
 
 ///|
-/// How a local notice may be reconciled by a later canonical User. Start RPC
-/// and steer delivery failures are indeterminate: the host may have accepted
-/// the submission before its response path failed. Only the exact id-bearing
-/// receipt may retract one; transcript text is deliberately not ownership.
+/// What a local notice belongs to. `Retained` notices are final text with no
+/// owner; a `RunDiagnostic` follows its run so an exact durable frontier can
+/// place it. No notice is tied to a submission any more — a submitted input
+/// is sent once and the transcript, not a placeholder, reports its fate.
 priv enum NoticeReconciliation {
   Retained
-  Submission(String)
   RunDiagnostic(String)
 } derive(Eq)
 
@@ -785,12 +784,6 @@ priv enum InputKind {
 } derive(Eq)
 
 ///|
-priv enum InputState {
-  Awaiting
-  Unconfirmed
-} derive(Eq)
-
-///|
 /// One locally submitted input awaiting an id-bearing host receipt. The
 /// globally unique `submission_id` is the only ownership proof: canonical
 /// transcript text and legacy receipts without an id never settle this entry.
@@ -807,7 +800,6 @@ priv struct PendingInput {
   content : String
   draft : String
   mentions : Array[Mention]
-  state : InputState
 } derive(Eq)
 
 ///|
@@ -3383,19 +3375,18 @@ fn Conversation::enqueue_input(
     content,
     draft,
     mentions: mentions.copy(),
-    state: Awaiting,
   })
   { ..self, input_ledger, }
 }
 
 ///|
 /// Pending steer UI is a projection of the ownership ledger, never a second
-/// text queue. An unconfirmed steer leaves this panel and instead gets a
-/// truthful transcript notice until an id-bearing receipt settles it.
+/// text queue. An entry leaves this panel when its receipt arrives, or when
+/// the run it belongs to ends without one.
 fn Conversation::pending_steers(self : Conversation) -> Array[String] {
   let pending : Array[String] = []
   for input in self.input_ledger {
-    if input.kind is SteerInput && input.state is Awaiting {
+    if input.kind is SteerInput {
       pending.push(input.content)
     }
   }
@@ -3420,20 +3411,12 @@ fn Conversation::goal_draft_seed(self : Conversation) -> String {
 
 ///|
 /// Whether this conversation holds an outstanding intent that only the
-/// durable record can settle: a prompt whose receipt never came back, or a
-/// goal command whose reply did not. Both are answered the same way — by
-/// re-reading — so every recovery path gates on this one predicate instead
-/// of naming the kinds itself, which is how the goal request came to be
-/// eligible for the reconnect's reload and not for the session list's.
+/// durable record can settle. A goal command is the one left: its reply
+/// carries no result, so the `[goal]` marker commit is the only place its
+/// outcome appears. Prompts are not here — a prompt is sent once and the
+/// transcript shows what became of it.
 fn Conversation::awaits_durable_proof(self : Conversation) -> Bool {
-  self.has_recovering_initial() || self.goal_pending is Some(_)
-}
-
-///|
-fn Conversation::has_recovering_initial(self : Conversation) -> Bool {
-  self.input_ledger
-  .iter()
-  .any(input => input.kind is InitialPrompt && input.state is Unconfirmed)
+  self.goal_pending is Some(_)
 }
 
 ///|
@@ -3446,101 +3429,6 @@ fn Conversation::has_initial_submission(
   .any(input => {
     input.kind is InitialPrompt && input.submission_id == submission_id
   })
-}
-
-///|
-fn Conversation::has_notice_for_input(self : Conversation, id : String) -> Bool {
-  self.overlay
-  .iter()
-  .any(notice => notice.reconciliation is Submission(existing) && existing == id)
-}
-
-///|
-/// Move one exact submission notice to the abnormal process exit's durable
-/// frontier. An already-applied frontier has a known display boundary now;
-/// an in-flight one stays sequence-addressed until its buffer/snapshot lands.
-fn Conversation::anchor_submission_notice_at_durable_frontier(
-  self : Conversation,
-  submission_id : String,
-  frontier : Int,
-) -> Conversation {
-  let anchor = if frontier == self.watermark {
-    AfterMessages(self.messages.length())
-  } else {
-    DurableTail(frontier)
-  }
-  let overlay = self.overlay.map(notice => {
-    match notice.reconciliation {
-      Submission(id) if id == submission_id => { ..notice, anchor, }
-      _ => notice
-    }
-  })
-  { ..self, overlay, }
-}
-
-///|
-/// Move one exact submission warning to a causal snapshot observation cut.
-/// This is used when no terminal/EOF sequence is available; it never claims
-/// that an anonymous item in the snapshot belongs to the submission.
-fn Conversation::anchor_submission_notice_at_snapshot_cut(
-  self : Conversation,
-  submission_id : String,
-  snapshot_generation : Int,
-) -> Conversation {
-  let overlay = self.overlay.map(notice => {
-    match (notice.anchor, notice.reconciliation) {
-      (AfterMessages(_), Submission(id)) | (UncertainTail, Submission(id)) if id ==
-        submission_id => { ..notice, anchor: SnapshotCut(snapshot_generation~) }
-      _ => notice
-    }
-  })
-  { ..self, overlay, }
-}
-
-///|
-/// A failed command may emit lifecycle Finished before its process can be
-/// reaped. When EOF later supplies the final sequence, move the already-
-/// unconfirmed steer notices for that exact run onto the proven boundary.
-fn Conversation::anchor_unconfirmed_steers_at_durable_frontier(
-  self : Conversation,
-  run_id : String,
-  frontier : Int,
-) -> Conversation {
-  let mut next = self
-  for input in self.input_ledger {
-    if input.kind is SteerInput &&
-      input.state is Unconfirmed &&
-      input.run_id is Some(owner) &&
-      owner == run_id {
-      next = next.anchor_submission_notice_at_durable_frontier(
-        input.submission_id,
-        frontier,
-      )
-    }
-  }
-  next
-}
-
-///|
-/// Whether an exact input owned by `run_id` is waiting on a causal snapshot
-/// cut. Runs resync uses this cross-reference instead of treating every local
-/// notice as belonging to the lifecycle row it just settled.
-fn Conversation::has_submission_at_snapshot_cut_for_run(
-  self : Conversation,
-  run_id : String,
-) -> Bool {
-  for input in self.input_ledger {
-    if input.run_id is Some(owner) && owner == run_id {
-      for notice in self.overlay {
-        if notice.anchor is SnapshotCut(..) &&
-          notice.reconciliation is Submission(id) &&
-          id == input.submission_id {
-          return true
-        }
-      }
-    }
-  }
-  false
 }
 
 ///|
@@ -3595,125 +3483,6 @@ fn Conversation::anchor_run_diagnostics_at_finish(
 }
 
 ///|
-/// `agent.runs` may close a run and mark its steers Unconfirmed before that
-/// run's exact Finished notification arrives. Reclassify those existing
-/// uncertain notices by exact owner id so the later lifecycle truth can
-/// upgrade a normal finish to its post-Finished snapshot proof without
-/// touching another run's ledger entries. An abnormal duplicate cannot
-/// downgrade an already-armed snapshot cut; every other anchor is already
-/// stronger or in flight and remains idempotent across duplicate Finished.
-fn Conversation::anchor_unconfirmed_steers_at_run_finish(
-  self : Conversation,
-  run_id : String,
-  terminal_expected : Bool,
-  terminal_snapshot_generation? : Int,
-) -> Conversation {
-  let owned : Array[String] = []
-  for input in self.input_ledger {
-    if input.kind is SteerInput &&
-      input.state is Unconfirmed &&
-      input.run_id is Some(owner) &&
-      owner == run_id {
-      owned.push(input.submission_id)
-    }
-  }
-  if owned.is_empty() {
-    return self
-  }
-  let anchor = self.run_tail_notice_anchor(
-    terminal_expected~,
-    terminal_snapshot_generation?,
-  )
-  let overlay = self.overlay.map(notice => {
-    let replace = notice.anchor is UncertainTail ||
-      (terminal_expected && notice.anchor is SnapshotCut(..))
-    if replace {
-      match notice.reconciliation {
-        Submission(id) if owned.contains(id) => { ..notice, anchor, }
-        _ => notice
-      }
-    } else {
-      notice
-    }
-  })
-  { ..self, overlay, }
-}
-
-///|
-/// Arm only the exact steers captured by one lifecycle frontier. The future
-/// snapshot is an observation fence, not evidence that any anonymous User or
-/// Terminal belongs to this run; exact receipts may still retract the notice.
-fn Conversation::arm_unconfirmed_steers_at_snapshot_cut(
-  self : Conversation,
-  submission_ids : Array[String],
-  owner_run_id : String,
-  snapshot_generation : Int,
-) -> Conversation {
-  let owned : Array[String] = []
-  for input in self.input_ledger {
-    if input.kind is SteerInput &&
-      input.state is Unconfirmed &&
-      input.run_id is Some(owner) &&
-      owner == owner_run_id &&
-      submission_ids.contains(input.submission_id) {
-      owned.push(input.submission_id)
-    }
-  }
-  if owned.is_empty() {
-    return self
-  }
-  let overlay = self.overlay.map(notice => {
-    match (notice.anchor, notice.reconciliation) {
-      (UncertainTail, Submission(id)) if owned.contains(id) =>
-        { ..notice, anchor: SnapshotCut(snapshot_generation~) }
-      _ => notice
-    }
-  })
-  { ..self, overlay, }
-}
-
-///|
-/// Mark one exact local submission unconfirmed. Legacy receipts have no id and
-/// therefore never enter here. The linked notice remains retractable by a late
-/// id-bearing receipt, but canonical transcript text cannot claim ownership.
-fn Conversation::mark_submission_unconfirmed(
-  self : Conversation,
-  submission_id : String,
-  content : String,
-  run_tail : Bool,
-  terminal_expected? : Bool = true,
-  terminal_snapshot_generation? : Int,
-) -> (Conversation, Bool) {
-  for index, input in self.input_ledger {
-    if input.submission_id == submission_id && input.state is Awaiting {
-      let input_ledger = self.input_ledger.copy()
-      input_ledger[index] = { ..input, state: Unconfirmed }
-      let next = { ..self, input_ledger, }
-      if next.has_notice_for_input(submission_id) {
-        return (next, true)
-      }
-      let next = if run_tail {
-        next.append_run_tail_notice(
-          Assistant(is_danger=true),
-          content,
-          Submission(submission_id),
-          terminal_expected~,
-          terminal_snapshot_generation?,
-        )
-      } else {
-        next.append_notice(
-          Assistant(is_danger=true),
-          content,
-          Submission(submission_id),
-        )
-      }
-      return (next, true)
-    }
-  }
-  (self, false)
-}
-
-///|
 /// Remove one exact id-bearing receipt's ledger entry and provisional notice.
 /// `kind` prevents a malformed cross-kind echo from consuming an entry.
 fn PendingInput::matches_receipt(
@@ -3744,10 +3513,7 @@ fn Conversation::acknowledge_submission(
     if input.matches_receipt(submission_id, kind, run_id) {
       let input_ledger = self.input_ledger.copy()
       let _ = input_ledger.remove(index)
-      let overlay = self.overlay.filter(notice => {
-        !(notice.reconciliation is Submission(id) && id == submission_id)
-      })
-      return ({ ..self, input_ledger, overlay }, true)
+      return ({ ..self, input_ledger, }, true)
     }
   }
   (self, false)
@@ -3773,81 +3539,6 @@ fn Conversation::bind_initial_submission_to_run(
 }
 
 ///|
-/// A normal terminal-backed finish proves this exact run got past its durable
-/// User append. Retire the bound prompt and any provisional transport notice;
-/// transcript content itself is still never used as ownership evidence.
-fn Conversation::acknowledge_initial_for_run(
-  self : Conversation,
-  run_id : String,
-) -> Conversation {
-  let retired : Array[String] = []
-  let input_ledger = self.input_ledger.filter(input => {
-    if input.kind is InitialPrompt &&
-      input.run_id is Some(owner) &&
-      owner == run_id {
-      retired.push(input.submission_id)
-      false
-    } else {
-      true
-    }
-  })
-  if retired.is_empty() {
-    return self
-  }
-  let overlay = self.overlay.filter(notice => {
-    !(notice.reconciliation is Submission(id) && retired.contains(id))
-  })
-  { ..self, input_ledger, overlay }
-}
-
-///|
-/// An abnormal finish does not prove the initial User append succeeded. Keep
-/// the exact draft in a truthful, retractable notice instead of consuming it
-/// on the earlier stdin-write response.
-fn Conversation::mark_initial_for_run_unconfirmed(
-  self : Conversation,
-  run_id : String,
-  durable_frontier? : Int,
-  terminal_snapshot_generation? : Int,
-) -> Conversation {
-  let mut next = self
-  for input in self.input_ledger {
-    if input.kind is InitialPrompt &&
-      input.run_id is Some(owner) &&
-      owner == run_id {
-      let updated = if input.state is Awaiting {
-        let (updated, _) = next.mark_submission_unconfirmed(
-          input.submission_id,
-          "Prompt delivery could not be confirmed before the run ended — " +
-          "check the transcript before resubmitting: " +
-          input.draft,
-          true,
-          terminal_expected=false,
-          terminal_snapshot_generation?,
-        )
-        updated
-      } else {
-        next
-      }
-      next = if durable_frontier is Some(frontier) {
-        updated.anchor_submission_notice_at_durable_frontier(
-          input.submission_id,
-          frontier,
-        )
-      } else if terminal_snapshot_generation is Some(snapshot_generation) {
-        updated.anchor_submission_notice_at_snapshot_cut(
-          input.submission_id,
-          snapshot_generation,
-        )
-      } else {
-        updated
-      }
-    }
-  }
-  next
-}
-
-///|
 /// An EOF frontier of zero, with no applied or buffered commit, proves this
 /// session record was never created. This is stronger than an unsuccessful
 /// snapshot read: the host observed the writer after process exit.
@@ -3864,31 +3555,6 @@ fn Conversation::is_empty_at_durable_frontier(
   self.watermark == 0 &&
   self.messages.is_empty() &&
   reconciliation_buffer_empty
-}
-
-///|
-/// Recover the exact prompt whose run reached EOF before its first durable
-/// append. The draft returns to the composer (without overwriting newer text),
-/// exact-id ownership is retired, and the explanation becomes a retained
-/// local notice so reconnect never probes a record known not to exist.
-fn Conversation::restore_unpersisted_initial_for_run(
-  self : Conversation,
-  run_id : String,
-) -> Conversation {
-  for input in self.input_ledger {
-    if input.kind is InitialPrompt &&
-      input.run_id is Some(owner) &&
-      owner == run_id {
-      let (restored, _) = self.reject_submission(
-        input.submission_id,
-        InitialPrompt,
-        Some(run_id),
-        "The prompt was not saved before the run ended; it has been restored for resubmission.",
-      )
-      return restored
-    }
-  }
-  self
 }
 
 ///|
@@ -3986,10 +3652,7 @@ fn Conversation::reject_submission(
     if input.matches_receipt(submission_id, kind, run_id) {
       let input_ledger = self.input_ledger.copy()
       let _ = input_ledger.remove(index)
-      let overlay = self.overlay.filter(item => {
-        !(item.reconciliation is Submission(id) && id == submission_id)
-      })
-      let next = { ..self, input_ledger, overlay }
+      let next = { ..self, input_ledger, }
       let restored = next.restore_submission(input)
       return (
         if report_in_transcript {
@@ -4005,121 +3668,37 @@ fn Conversation::reject_submission(
 }
 
 ///|
-/// A connection boundary makes every response still awaiting a receipt
-/// indeterminate. Awaiting starts and steers gain exact-id provisional
-/// notices.
-fn Conversation::mark_awaiting_inputs_unconfirmed(
-  self : Conversation,
-  snapshot_generation? : Int,
-) -> Conversation {
-  let mut conv = self
-  for input in self.input_ledger {
-    if input.state is Awaiting {
-      let label = match input.kind {
-        InitialPrompt =>
-          "Prompt delivery could not be confirmed after reconnect"
-        SteerInput => "Steer delivery could not be confirmed after reconnect"
-      }
-      let (next, _) = conv.mark_submission_unconfirmed(
-        input.submission_id,
-        label +
-        " — check the transcript before resubmitting: " +
-        input.content,
-        snapshot_generation is Some(_),
-        terminal_expected=false,
-        terminal_snapshot_generation?=snapshot_generation,
-      )
-      conv = next
-    }
-    // A transport failure may already have changed this exact entry to
-    // Unconfirmed before the connection boundary. Re-anchor both states:
-    // the reconnect snapshot, not the old display length, is the first safe
-    // chronology fence for commits received while this page was absent.
-    if snapshot_generation is Some(generation) {
-      conv = conv.anchor_submission_notice_at_snapshot_cut(
-        input.submission_id,
-        generation,
-      )
-    }
-  }
-  conv
-}
-
-///|
-/// A run ended before every steer receipt reached this client. Do not guess
-/// whether those steers landed: move each awaiting entry to an exact-id,
-/// retractable unconfirmed notice that follows the durable run tail. An
-/// abnormal EOF supplies an exact sequence because it may have no terminal.
-fn Conversation::mark_awaiting_steers_unconfirmed(
-  self : Conversation,
-  durable_frontier? : Int,
-  submission_ids? : Array[String],
-  owner_run_id? : String,
-  terminal_expected? : Bool = true,
-  terminal_snapshot_generation? : Int,
-) -> Conversation {
-  let mut conv = self
-  for input in self.input_ledger {
-    let included = match submission_ids {
-      Some(ids) => ids.contains(input.submission_id)
-      None => true
-    }
-    let owned = match owner_run_id {
-      Some(run_id) => input.run_id is Some(owner) && owner == run_id
-      None => true
-    }
-    if included && owned && input.kind is SteerInput && input.state is Awaiting {
-      let (next, _) = conv.mark_submission_unconfirmed(
-        input.submission_id,
-        steer_unconfirmed_notice(input.content),
-        true,
-        terminal_expected~,
-        terminal_snapshot_generation?,
-      )
-      conv = if durable_frontier is Some(frontier) {
-        next.anchor_submission_notice_at_durable_frontier(
-          input.submission_id,
-          frontier,
-        )
-      } else {
-        next
-      }
-    }
-  }
-  conv
-}
-
-///|
-/// A different id-bearing Started event in the same session proves an older
-/// unconfirmed start can no longer acquire a receipt. Retain its truthful
-/// notice but release ownership so repeated uncertain starts cannot accumulate
-/// forever.
-fn Conversation::retire_unconfirmed_initials_before(
-  self : Conversation,
-  current_submission_id : String,
-) -> Conversation {
-  let retired : Array[String] = []
-  let input_ledger = self.input_ledger.filter(input => {
-    if input.kind is InitialPrompt &&
-      input.state is Unconfirmed &&
-      input.submission_id != current_submission_id {
-      retired.push(input.submission_id)
-      false
-    } else {
-      true
-    }
-  })
-  if retired.is_empty() {
+/// Forget every submission still waiting for a receipt.
+///
+/// A submitted input is sent once. The composer keeps its entry only until
+/// the host answers, and a boundary that makes the answer unobtainable — a
+/// reconnect, a run ending without the commit — ends the entry rather than
+/// converting it into a guess about the record. The record is authoritative
+/// and the client can read it; a notice that says "delivery could not be
+/// confirmed" adds nothing the transcript does not already show, and cannot
+/// be retracted correctly when it is wrong.
+fn Conversation::forget_awaiting_inputs(self : Conversation) -> Conversation {
+  if self.input_ledger.is_empty() {
     return self
   }
-  let overlay = self.overlay.map(notice => {
-    match notice.reconciliation {
-      Submission(id) if retired.contains(id) =>
-        { ..notice, reconciliation: Retained }
-      _ => notice
-    }
+  let input_ledger : Array[PendingInput] = []
+  { ..self, input_ledger, }
+}
+
+///|
+/// Forget every submission this exact run owned, whatever it was waiting for.
+/// See `forget_awaiting_inputs` for why nothing is retained.
+fn Conversation::forget_inputs_for_run(
+  self : Conversation,
+  run_id : String,
+) -> Conversation {
+  let input_ledger = self.input_ledger.filter(input => {
+    !(input.run_id is Some(owner) && owner == run_id)
   })
-  { ..self, input_ledger, overlay }
+  if input_ledger.length() == self.input_ledger.length() {
+    return self
+  }
+  { ..self, input_ledger, }
 }
 
 ///|
@@ -4709,14 +4288,6 @@ fn Conversation::adopt_snapshot(
 /// vanish silently.
 fn steer_dropped_notice(text : String) -> String {
   "Input was not delivered (the task ended as you sent it) — submit it again: \{text}"
-}
-
-///|
-/// The truthful notice for a steer whose receipt was lost at a run boundary.
-/// It intentionally does not claim the steer was dropped: a later exact-id
-/// receipt may still prove either outcome.
-fn steer_unconfirmed_notice(text : String) -> String {
-  "Steer delivery could not be confirmed — check the transcript before resubmitting: \{text}"
 }
 
 ///|

@@ -4580,19 +4580,13 @@ fn update_device_msg(
       // onto stale text. Compaction has no wire resync in this protocol: an
       // local queued/requested/in-flight marker is released here so a missed
       // terminal event cannot disable Send forever. Any receipt still pending
-      // at this boundary becomes truthful `delivery unconfirmed` state; an
-      // exact late id can still retract it. If the host still compacts, its
-      // next prompt rejection is a transient, visible local failure.
-      let reconnect_snapshot_generation = model.transcript_request_generation +
-        1
+      // at this boundary can no longer arrive, so its entry ends here. If the
+      // host still compacts, its next prompt rejection is a transient,
+      // visible local failure.
       let conversations = model.conversations.map(conv => {
         if conv.device == channel {
           {
-            ..conv
-            .clear_streams()
-            .mark_awaiting_inputs_unconfirmed(
-              snapshot_generation=reconnect_snapshot_generation,
-            ),
+            ..conv.clear_streams().forget_awaiting_inputs(),
             compaction: NotCompacting,
           }
         } else {
@@ -4830,37 +4824,26 @@ fn update_device_msg(
       }
       (@cmd.batch(commands), notified)
     }
-    SteerUndelivered(session~, submission_id~, text~, run_id~) =>
-      // The response path failed, but the host may have accepted the steer;
-      // keep its exact-id ledger entry and let only a late id-bearing receipt
-      // retract the truthful unconfirmed notice.
+    SteerUndelivered(session~, submission_id~, text~, run_id~) => {
+      // The response path failed and the host may or may not have taken the
+      // steer. Neither answer is knowable here and neither is worth guessing
+      // at: the entry ends, and the transcript says what actually happened.
+      ignore(text)
       if model.find_conversation(channel, session) is Some(conv) {
-        let changed = conv.input_ledger
-          .iter()
-          .any(input => {
-            input.submission_id == submission_id &&
-            input.kind is SteerInput &&
-            input.run_id is Some(owner) &&
-            owner == run_id &&
-            input.state is Awaiting
-          })
-        let (next, _) = if changed {
-          conv.mark_submission_unconfirmed(
-            submission_id,
-            steer_unconfirmed_notice(text),
-            false,
-          )
-        } else {
-          (conv, false)
-        }
-        if !changed {
-          (@cmd.none, model)
-        } else {
+        let (next, changed) = conv.acknowledge_submission(
+          submission_id,
+          SteerInput,
+          Some(run_id),
+        )
+        if changed {
           (@cmd.none, model.replace_conversation(next))
+        } else {
+          (@cmd.none, model)
         }
       } else {
         (@cmd.none, model)
       }
+    }
     SteerRejected(session~, submission_id~, text~, run_id~) =>
       // A concrete `steered:false` cannot later commit. Retire the ledger entry
       // and restore its exact draft; a later same-text submission is unrelated.
@@ -6045,15 +6028,9 @@ fn update_device_msg(
         current == id
       let same_open = existing.run is Open(run_id=current, ..) &&
         current == run_id
-      // A competing Started while an older start request is still in flight
-      // does not retire that request's exact receipt path: its late rejection
-      // must still be able to restore the draft. An already-open predecessor,
-      // by contrast, is conclusively replaced by this lifecycle boundary.
-      let can_retire_previous_initial = current_start ||
-        !(existing.run is Starting(..))
-      // Started establishes exact run ownership, but neither it nor the start
-      // response proves the engine persisted its User item. Keep the draft in
-      // the ledger until a terminal-backed normal finish proves that append.
+      // Started establishes exact run ownership. The entry outlives the reply
+      // only when the reply is lost, and this binding is what lets the run's
+      // end find it.
       let conv = if owned && submission_id is Some(id) {
         existing.bind_initial_submission_to_run(id, run_id)
       } else {
@@ -6063,28 +6040,14 @@ fn update_device_msg(
         1
       let (conv, foreign, stale_terminal) = match conv.run {
         Starting(..) if owned && current_start => (conv, false, false)
-        Starting(..) =>
-          (
-            conv.mark_awaiting_inputs_unconfirmed(
-              snapshot_generation=successor_snapshot_generation,
-            ),
-            true,
-            false,
-          )
+        // A foreign run starting says nothing about this client's own start,
+        // which is still in flight and still owns its receipt path — a late
+        // rejection must remain able to restore that draft.
+        Starting(..) => (conv, true, false)
         Open(run_id=current, ..) if current == run_id => (conv, false, false)
         Open(run_id=previous_run, ..) =>
           (
-            conv
-            .clear_streams()
-            .mark_awaiting_steers_unconfirmed(
-              owner_run_id=previous_run,
-              terminal_expected=false,
-              terminal_snapshot_generation=successor_snapshot_generation,
-            )
-            .mark_initial_for_run_unconfirmed(
-              previous_run,
-              terminal_snapshot_generation=successor_snapshot_generation,
-            ),
+            conv.clear_streams().forget_inputs_for_run(previous_run),
             true,
             false,
           )
@@ -6094,15 +6057,6 @@ fn update_device_msg(
       }
       let conv = if foreign {
         conv.prepare_tail_notices_for_successor(successor_snapshot_generation)
-      } else {
-        conv
-      }
-      // Settle and anchor the predecessor before releasing an older prompt's
-      // exact-id ownership. BridgeReady may already have made that prompt
-      // Unconfirmed; retiring it first would leave its notice fixed ahead of
-      // durable predecessor output that lands with this successor snapshot.
-      let conv = if can_retire_previous_initial && submission_id is Some(id) {
-        conv.retire_unconfirmed_initials_before(id)
       } else {
         conv
       }
@@ -6356,7 +6310,6 @@ fn update_device_msg(
       // exactly matches this request's per-session frontier may settle; live
       // Started/Finished transitions received meanwhile are newer truth.
       let boundary_reloads : Array[String] = []
-      let snapshot_generation = model.transcript_request_generation + 1
       let settled = model.conversations.map(conv => {
         if conv.device != channel {
           return conv
@@ -6366,97 +6319,35 @@ fn update_device_msg(
             return match captured.state {
               SnapshotOpen(run_id~) if conv.run is Open(run_id=current, ..) &&
                 current == run_id &&
-                !live.contains(run_id) => {
-                // The runs reply may be slower than a steer the user sent
-                // after this request began. Close the captured lifecycle, but
-                // only adjudicate submissions that existed at the request's
-                // own frontier; later exact receipts keep their ownership.
-                let unconfirmed = conv
-                  .clear_streams()
-                  .mark_awaiting_steers_unconfirmed(
-                    submission_ids=captured.steer_ids,
-                    owner_run_id=run_id,
-                    terminal_expected=false,
-                    terminal_snapshot_generation=snapshot_generation,
-                  )
-                  .arm_unconfirmed_steers_at_snapshot_cut(
-                    captured.steer_ids,
-                    run_id,
-                    snapshot_generation,
-                  )
-                  .mark_initial_for_run_unconfirmed(
-                    run_id,
-                    terminal_snapshot_generation=snapshot_generation,
-                  )
-                let needs_boundary_reload = unconfirmed.has_submission_at_snapshot_cut_for_run(
-                  run_id,
-                )
-                if needs_boundary_reload {
-                  boundary_reloads.push(conv.session_id)
-                }
+                !live.contains(run_id) =>
+                // The runs reply proves this run is over. Its submissions can
+                // no longer acquire a receipt, so they end with it; the
+                // transcript, not a local notice, says what the run recorded.
                 {
-                  ..unconfirmed,
+                  ..conv.clear_streams().forget_inputs_for_run(run_id),
                   run: NoRun(ended=None),
                   last_run_id: Some(run_id),
                 }
-              }
               SnapshotIdle(last_run_id=Some(run_id)) if conv.run is NoRun(..) &&
                 conv.last_run_id is Some(current) &&
                 current == run_id => {
-                // A prior abnormal finish may have crossed a disconnect after
-                // its lifecycle notification but before its exact EOF
-                // boundary. Negative idle resync cannot replay that boundary,
-                // so arm only the exact steer ids captured with this request
-                // for a post-reply snapshot observation cut.
-                let armed = conv.arm_unconfirmed_steers_at_snapshot_cut(
-                  captured.steer_ids,
-                  run_id,
-                  snapshot_generation,
-                )
-                let armed = armed.mark_initial_for_run_unconfirmed(
-                  run_id,
-                  terminal_snapshot_generation=snapshot_generation,
-                )
-                let needs_boundary_reload = armed.has_submission_at_snapshot_cut_for_run(
-                  run_id,
-                )
-                if needs_boundary_reload {
-                  boundary_reloads.push(conv.session_id)
-                }
-                armed
+                // The run this conversation last owned is idle at the host,
+                // so nothing it carried is still in flight.
+                ignore(captured.steer_ids)
+                conv.forget_inputs_for_run(run_id)
               }
               SnapshotStarting(submission_id~) if conv.run
                 is Starting(submission_id=current) &&
                 current == submission_id => {
-                let mut prompt = ""
-                for input in conv.input_ledger {
-                  if input.kind is InitialPrompt &&
-                    input.submission_id == submission_id {
-                    prompt = input.draft
-                  }
-                }
-                let (unconfirmed, _) = conv.mark_submission_unconfirmed(
+                // The host has no record of this start, so the prompt never
+                // opened a run. Close the local lifecycle and let the entry
+                // go with it.
+                let (settled, _) = conv.acknowledge_submission(
                   submission_id,
-                  "Prompt delivery could not be confirmed after run resync — " +
-                  "check the transcript before resubmitting: " +
-                  prompt,
-                  true,
-                  terminal_expected=false,
-                  terminal_snapshot_generation=snapshot_generation,
+                  InitialPrompt,
+                  None,
                 )
-                let unconfirmed = unconfirmed.anchor_submission_notice_at_snapshot_cut(
-                  submission_id, snapshot_generation,
-                )
-                if unconfirmed.overlay
-                  .iter()
-                  .any(notice => {
-                    notice.anchor is SnapshotCut(..) &&
-                    notice.reconciliation is Submission(id) &&
-                    id == submission_id
-                  }) {
-                  boundary_reloads.push(conv.session_id)
-                }
-                { ..unconfirmed.clear_streams(), run: NoRun(ended=None) }
+                { ..settled.clear_streams(), run: NoRun(ended=None) }
               }
               _ => conv
             }
@@ -6562,7 +6453,14 @@ fn update_device_msg(
         Open(run_id=current, ..) => current == run_id
         NoRun(..) => conv.last_run_id is Some(last) && last == run_id
       }
-      let conv = conv.bind_initial_submission_to_run(submission_id, run_id)
+      // A prompt is sent once. Whatever the host answered, this submission's
+      // entry has served its purpose — it existed to recognize this reply —
+      // and nothing downstream reconciles it against the record.
+      let (conv, _) = conv.acknowledge_submission(
+        submission_id,
+        InitialPrompt,
+        None,
+      )
       if status == "accepted" {
         let missed_started = owns_lifecycle &&
           conv.run is Starting(submission_id=current) &&
@@ -6573,26 +6471,7 @@ fn update_device_msg(
           !(conv.run is NoRun(ended=Some(RunFinished(outcome))) &&
           outcome is (Completed | ContextYield | MaxStepsExhausted))
         let snapshot_generation = model.transcript_request_generation + 1
-        // `accepted` proves only that the JSONL command reached the child
-        // writer. Keep the recoverable prompt until a terminal-backed finish
-        // proves its User append; a pre-append engine failure must not erase
-        // the user's text. A response that trails such a normal finish can
-        // retire it now because the exact run binding is finally known.
-        let settled = if conv.run is NoRun(ended=Some(RunFinished(outcome))) &&
-          conv.last_run_id is Some(owner) &&
-          owner == run_id &&
-          outcome is (Completed | ContextYield | MaxStepsExhausted) {
-          conv.acknowledge_initial_for_run(run_id)
-        } else if conv.run is NoRun(..) &&
-          conv.last_run_id is Some(owner) &&
-          owner == run_id {
-          conv.mark_initial_for_run_unconfirmed(
-            run_id,
-            terminal_snapshot_generation=snapshot_generation,
-          )
-        } else {
-          conv
-        }
+        let settled = conv
         // The reply still opens the lifecycle when its Started notification
         // was delayed. A very short run may already be finished; never
         // resurrect that settled phase.
@@ -6659,52 +6538,28 @@ fn update_device_msg(
         }
         (@cmd.batch(commands), updated)
       } else {
-        // The process result closes a still-live run, but does not prove that
-        // its User or Terminal append reached the store. Preserve the exact
-        // prompt as unconfirmed until durable recovery or a definitive reject.
-        let snapshot_generation = model.transcript_request_generation + 1
-        let mut prompt = ""
-        for input in conv.input_ledger {
-          if input.kind is InitialPrompt && input.submission_id == submission_id {
-            prompt = input.draft
-          }
-        }
-        let (unconfirmed, _) = conv.mark_submission_unconfirmed(
-          submission_id,
-          "Prompt delivery could not be confirmed (host returned " +
-          status +
-          ", exit code " +
-          exit_code.to_string() +
-          ") — check the transcript before resubmitting: " +
-          prompt,
-          true,
-          terminal_expected=false,
-          terminal_snapshot_generation=snapshot_generation,
-        )
-        let unconfirmed = unconfirmed.anchor_submission_notice_at_snapshot_cut(
-          submission_id, snapshot_generation,
-        )
-        let unconfirmed = if owns_lifecycle {
-          unconfirmed.mark_awaiting_steers_unconfirmed(
-            owner_run_id=run_id,
-            terminal_expected=false,
-            terminal_snapshot_generation=snapshot_generation,
-          )
+        // The process result closes a still-live run. Whether its User append
+        // reached the store is the record's question, not this reply's, and
+        // the reload below is what answers it.
+        ignore(status)
+        ignore(exit_code)
+        let closed = if owns_lifecycle {
+          conv.forget_inputs_for_run(run_id)
         } else {
-          unconfirmed
+          conv
         }
         let next = if owns_lifecycle {
-          match unconfirmed.run {
+          match closed.run {
             Starting(..) | Open(..) =>
               {
-                ..unconfirmed.clear_streams(),
+                ..closed.clear_streams(),
                 run: NoRun(ended=Some(RunFailed)),
                 last_run_id: Some(run_id),
               }
-            NoRun(..) => unconfirmed
+            NoRun(..) => closed
           }
         } else {
-          unconfirmed
+          closed
         }
         let (model, generation) = model.ensure_transcript_reload_after_current(
           next,
@@ -6733,31 +6588,26 @@ fn update_device_msg(
     }
     StartUndelivered(session~, submission_id~, message~) =>
       if model.find_conversation(channel, session) is Some(conv) {
+        // The response path failed, so whether the host took this prompt is
+        // unknowable here. Nothing guesses on the client's behalf: the entry
+        // ends and the reload below shows what the record actually holds.
+        ignore(message)
         let owns_submission = conv.has_initial_submission(submission_id)
-        let mut prompt = ""
-        for input in conv.input_ledger {
-          if input.kind is InitialPrompt && input.submission_id == submission_id {
-            prompt = input.draft
-          }
-        }
-        let (unconfirmed, changed) = conv.mark_submission_unconfirmed(
+        let (settled, changed) = conv.acknowledge_submission(
           submission_id,
-          "Prompt delivery could not be confirmed (" +
-          message +
-          ") — check the transcript before resubmitting: " +
-          prompt,
-          false,
+          InitialPrompt,
+          None,
         )
         if !owns_submission {
           (@cmd.none, model)
         } else {
           let next = if conv.run is Starting(submission_id=current) &&
             current == submission_id {
-            { ..unconfirmed.clear_streams(), run: NoRun(ended=Some(RunFailed)) }
+            { ..settled.clear_streams(), run: NoRun(ended=Some(RunFailed)) }
           } else {
             // A Started push/response for another run won the race. An
             // uncorrelated transport failure must never close that open run.
-            unconfirmed
+            settled
           }
           let updated = model.replace_conversation(next)
           let (sessions, updated) = request_sessions_refresh(
@@ -6944,43 +6794,19 @@ fn update_device_msg(
         let terminal_snapshot_generation = Some(
           model.transcript_request_generation + 1,
         )
-        let conv = if terminal_expected {
-          // A successful terminal path can only occur after this run's User
-          // append. This is the durable proof that finally retires the prompt
-          // kept past the earlier stdin-write response.
-          conv.acknowledge_initial_for_run(run_id)
-        } else {
-          conv.mark_initial_for_run_unconfirmed(
-            run_id,
-            durable_frontier?,
-            terminal_snapshot_generation?,
-          )
-        }
+        // The run is over, so nothing it carried can still acquire a receipt.
+        // Whether each submission reached the store is the record's question;
+        // the transcript answers it without a local placeholder.
         let conv = if durable_frontier is Some(frontier) {
-          conv
-          .anchor_unconfirmed_steers_at_durable_frontier(run_id, frontier)
-          .anchor_run_diagnostics_at_durable_frontier(run_id, frontier)
+          conv.anchor_run_diagnostics_at_durable_frontier(run_id, frontier)
         } else {
-          conv
-          .anchor_unconfirmed_steers_at_run_finish(
-            run_id,
-            terminal_expected,
-            terminal_snapshot_generation?,
-          )
-          .anchor_run_diagnostics_at_finish(
+          conv.anchor_run_diagnostics_at_finish(
             run_id,
             terminal_expected,
             terminal_snapshot_generation?,
           )
         }
-        let settled_inputs = conv
-          .clear_streams()
-          .mark_awaiting_steers_unconfirmed(
-            durable_frontier?,
-            owner_run_id=run_id,
-            terminal_expected~,
-            terminal_snapshot_generation?,
-          )
+        let settled_inputs = conv.clear_streams().forget_inputs_for_run(run_id)
         let base = {
           ..settled_inputs,
           run: NoRun(ended=Some(RunFinished(RunOutcome::parse(status)))),
@@ -6999,11 +6825,7 @@ fn update_device_msg(
         let exact_empty_eof = !terminal_expected &&
           durable_frontier is Some(frontier) &&
           base.is_empty_at_durable_frontier(frontier)
-        let base = if exact_empty_eof {
-          { ..base.restore_unpersisted_initial_for_run(run_id), sync: Synced }
-        } else {
-          base
-        }
+        let base = if exact_empty_eof { { ..base, sync: Synced } } else { base }
         // The finished run just appended to the durable store, so the
         // sidebar list (and this conversation's title) may have changed —
         // and the turn may have created the repository or switched branches.
@@ -7090,16 +6912,15 @@ fn update_device_msg(
       if model.find_conversation(channel, session) is Some(conv) &&
         conv.last_run_id is Some(owner) &&
         owner == run_id {
-        let anchored = conv
-          .mark_initial_for_run_unconfirmed(run_id, durable_frontier=sequence)
-          .anchor_unconfirmed_steers_at_durable_frontier(run_id, sequence)
-          .anchor_run_diagnostics_at_durable_frontier(run_id, sequence)
-        let exact_empty_eof = anchored.is_empty_at_durable_frontier(sequence)
-        let anchored = if exact_empty_eof {
-          {
-            ..anchored.restore_unpersisted_initial_for_run(run_id),
-            sync: Synced,
-          }
+        let anchored = conv.anchor_run_diagnostics_at_durable_frontier(
+          run_id, sequence,
+        )
+        // An exact zero frontier proves the run created no record at all, so
+        // the speculative reload it would otherwise wait on has nothing to
+        // read. Nothing else is inferred from it: the run's submissions ended
+        // with the run.
+        let anchored = if anchored.is_empty_at_durable_frontier(sequence) {
+          { ..anchored, sync: Synced }
         } else {
           anchored
         }
@@ -7127,24 +6948,6 @@ fn update_device_msg(
         } else {
           (@cmd.none, model.replace_conversation(anchored))
         }
-        // Finished removes the run from the host's active set before a
-        // failed final follower scan can publish this boundary. An earlier
-        // runs snapshot may therefore have closed `Starting` without ever
-        // learning the run id. The host records the boundary before this
-        // notification reaches us; ask once more with the still-exact
-        // submission selector so its now-replayable settlement can bind the
-        // run and apply the frontier (including exact zero).
-      } else if model.find_conversation(channel, session) is Some(conv) &&
-        conv.has_recovering_initial() {
-        (
-          fetch_runs(
-            dispatch,
-            channel,
-            model.run_snapshot_frontier(channel),
-            dev.connection_generation,
-          ),
-          model,
-        )
       } else {
         (@cmd.none, model)
       }
@@ -7551,34 +7354,6 @@ fn with_initial_submission(
   text : String,
 ) -> Conversation {
   conv.enqueue_input(InitialPrompt, id, None, text, text, [])
-}
-
-///|
-/// Drive one new-chat prompt through its id-bearing Started boundary. The
-/// resulting causal transcript read is deliberately left in flight.
-fn fresh_started_model(
-  submission_id : String,
-  run_id : String,
-  prompt : String,
-) -> Model {
-  let conv = with_initial_submission(
-    { ..test_conversation(), run: Starting(submission_id~) },
-    submission_id,
-    prompt,
-  )
-  let (_, started) = update_dev(
-    test_dispatch(),
-    Started(
-      run_id~,
-      session="desktop-test",
-      model=High,
-      max_steps=1000,
-      session_root=None,
-      submission_id=Some(submission_id),
-    ),
-    test_model().replace_conversation(conv),
-  )
-  started
 }
 
 ///|
@@ -9029,122 +8804,6 @@ test "late reconnect ticks cannot act on removed or re-added devices" {
 }
 
 ///|
-test "BridgeReady fences an awaiting initial after disconnected canonical items" {
-  let dispatch = test_dispatch()
-  let conv = with_initial_submission(
-    {
-      ..test_conversation(),
-      run: Starting(submission_id="reconnect-prompt"),
-      messages: [
-        { kind: User, content: "before disconnect", ts: None, sequence: None },
-      ],
-      watermark: 1,
-    },
-    "reconnect-prompt",
-    "prompt sent near disconnect",
-  )
-  let (_, reconnected) = update_dev(
-    dispatch,
-    BridgeReady,
-    test_model().replace_conversation(conv),
-  )
-  assert_true(reconnected.active().input_ledger[0].state is Unconfirmed)
-  assert_true(
-    reconnected.active().overlay[0].anchor is SnapshotCut(snapshot_generation=1),
-  )
-  assert_true(reconnected.active().sync is Reloading(generation=1, ..))
-  let (_, reconciled) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[
-        { kind: User, content: "before disconnect", ts: None, sequence: None },
-        {
-          kind: User,
-          content: "canonical prompt from the gap",
-          ts: None,
-          sequence: None,
-        },
-        {
-          kind: Assistant(is_danger=false),
-          content: "canonical answer from the gap",
-          ts: None,
-          sequence: None,
-        },
-      ],
-      watermark=3,
-      event_boundaries=[(1, false, 1), (2, false, 2), (3, false, 3)],
-      generation=1,
-    ),
-    reconnected,
-  )
-  assert_true(reconciled.active().overlay[0].anchor is AfterMessages(3))
-  let visible = reconciled.active().visible_items()
-  inspect(visible.length(), content="4")
-  inspect(visible[2].content, content="canonical answer from the gap")
-  assert_true(visible[3].content.contains("prompt sent near disconnect"))
-}
-
-///|
-test "BridgeReady fences an awaiting steer after disconnected canonical items" {
-  let dispatch = test_dispatch()
-  let conv = with_pending_steers(
-    {
-      ..running_conversation(),
-      messages: [
-        { kind: User, content: "before disconnect", ts: None, sequence: None },
-      ],
-      watermark: 1,
-    },
-    ["steer sent near disconnect"],
-  )
-  let (_, reconnected) = update_dev(
-    dispatch,
-    BridgeReady,
-    running_model().replace_conversation(conv),
-  )
-  assert_true(reconnected.active().input_ledger[0].state is Unconfirmed)
-  assert_true(
-    reconnected.active().overlay[0].anchor is SnapshotCut(snapshot_generation=1),
-  )
-  assert_true(reconnected.active().sync is Reloading(generation=1, ..))
-  let (_, reconciled) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[
-        { kind: User, content: "before disconnect", ts: None, sequence: None },
-        {
-          kind: User,
-          content: "canonical steer from the gap",
-          ts: None,
-          sequence: None,
-        },
-        {
-          kind: Assistant(is_danger=false),
-          content: "canonical output from the gap",
-          ts: None,
-          sequence: None,
-        },
-      ],
-      watermark=3,
-      event_boundaries=[(1, false, 1), (2, false, 2), (3, false, 3)],
-      generation=1,
-    ),
-    reconnected,
-  )
-  assert_true(reconciled.active().overlay[0].anchor is AfterMessages(3))
-  let visible = reconciled.active().visible_items()
-  inspect(visible.length(), content="4")
-  inspect(visible[2].content, content="canonical output from the gap")
-  assert_true(visible[3].content.contains("steer sent near disconnect"))
-}
-
-///|
 test "an explicit rejected fresh start does not force reconnect reloads" {
   let dispatch = test_dispatch()
   let conv = with_initial_submission(
@@ -9165,77 +8824,6 @@ test "an explicit rejected fresh start does not force reconnect reloads" {
   let (_, reconnected) = update_dev(dispatch, BridgeReady, rejected)
   assert_true(reconnected.active().sync is Synced)
   inspect(reconnected.transcript_request_generation, content="0")
-}
-
-///|
-test "an unconfirmed empty start forces reconnect recovery" {
-  let dispatch = test_dispatch()
-  let conv = with_initial_submission(
-    { ..test_conversation(), run: Starting(submission_id="unknown-id") },
-    "unknown-id",
-    "maybe accepted",
-  )
-  let (_, uncertain) = update_dev(
-    dispatch,
-    StartUndelivered(
-      session="desktop-test",
-      submission_id="unknown-id",
-      message="connection lost",
-    ),
-    test_model().replace_conversation(conv),
-  )
-  let (_, reconnected) = update_dev(dispatch, BridgeReady, uncertain)
-  guard reconnected.active().sync is Reloading(generation=1, ..) else {
-    fail("unconfirmed start did not force a durable reload")
-  }
-}
-
-///|
-test "SessionsLoaded retries an unconfirmed start after an empty recovery" {
-  let dispatch = test_dispatch()
-  let conv = with_initial_submission(
-    { ..test_conversation(), run: NoRun(ended=Some(RunFailed)) },
-    "unknown-id",
-    "maybe accepted",
-  )
-  let (conv, _) = conv.mark_submission_unconfirmed(
-    "unknown-id", "delivery unconfirmed", false,
-  )
-  let model = {
-    ..test_model().replace_conversation({ ..conv, sync: test_reloading([]) }),
-    transcript_request_generation: 1,
-  }
-  let (_, empty) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[],
-      watermark=0,
-      event_boundaries=[],
-      generation=1,
-    ),
-    model,
-  )
-  assert_true(empty.active().sync is Synced)
-  inspect(empty.active().input_ledger.length(), content="1")
-  let (_, proved) = update(
-    dispatch,
-    sessions_loaded([
-      {
-        id: "desktop-test",
-        title: Some("persisted"),
-        workspace: @interop.ChannelId::Local.test_project(),
-        workspace_name: "",
-        updated_at_ms: None,
-      },
-    ]),
-    empty,
-  )
-  guard proved.active().sync is Reloading(generation=2, ..) else {
-    fail("durable session-list proof did not retry the recovery")
-  }
 }
 
 ///|
@@ -10274,8 +9862,9 @@ test "a distinct started id replaces a stale open run as foreign" {
   }
   inspect(next.active().streaming_response, content="")
   inspect(next.active().pending_steers().length(), content="0")
-  inspect(next.active().overlay.length(), content="1")
-  assert_true(next.active().overlay[0].content.contains("old steer"))
+  // The replaced run took its pending input with it and left no placeholder:
+  // what the turn actually recorded is in the transcript.
+  inspect(next.active().overlay.length(), content="0")
   guard next.active().sync is Reloading(generation=1, attempt=1, ..) else {
     fail("a foreign replacement did not refresh the transcript")
   }
@@ -10399,48 +9988,7 @@ test "a start failure closes only a still-starting run" {
 }
 
 ///|
-test "canonical User text never claims an unconfirmed start" {
-  let dispatch = test_dispatch()
-  let conv = with_initial_submission(
-    test_conversation(),
-    "prompt-id",
-    "accepted prompt",
-  )
-  let model = test_model().replace_conversation({
-    ..conv,
-    run: Starting(submission_id="prompt-id"),
-  })
-  let (_, failed) = update_dev(
-    dispatch,
-    StartUndelivered(
-      session="desktop-test",
-      submission_id="prompt-id",
-      message="response transport closed",
-    ),
-    model,
-  )
-  assert_true(failed.active().run is NoRun(ended=Some(RunFailed)))
-  inspect(failed.active().overlay.length(), content="1")
-  inspect(failed.active().input_ledger.length(), content="1")
-  let (_, committed) = update_dev(
-    dispatch,
-    SessionCommitted(
-      session="desktop-test",
-      sequence=1,
-      ts=None,
-      item=@protocol.User({ content: "accepted prompt", submission_id: None }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
-    ),
-    failed,
-  )
-  assert_true(committed.active().run is NoRun(ended=Some(RunFailed)))
-  inspect(committed.active().overlay.length(), content="1")
-  inspect(committed.active().input_ledger.length(), content="1")
-  inspect(committed.active().messages.length(), content="1")
-}
-
-///|
-test "a matching Started establishes the run without consuming its prompt" {
+test "a matching Started establishes the run after an undelivered response" {
   let dispatch = test_dispatch()
   let conv = with_initial_submission(
     { ..test_conversation(), run: Starting(submission_id="prompt-id") },
@@ -10468,12 +10016,11 @@ test "a matching Started establishes the run without consuming its prompt" {
     ),
     failed,
   )
+  // The lost response ended the entry and left no notice behind; a Started
+  // that arrives anyway is still the run's exact identity.
   assert_true(started.active().run is Open(run_id="r-recovered", ..))
-  inspect(started.active().overlay.length(), content="1")
-  assert_true(started.active().overlay[0].content.contains("accepted prompt"))
-  inspect(started.active().input_ledger.length(), content="1")
-  inspect(started.active().input_ledger[0].submission_id, content="prompt-id")
-  assert_true(started.active().input_ledger[0].state is Unconfirmed)
+  inspect(started.active().overlay.length(), content="0")
+  inspect(started.active().input_ledger.length(), content="0")
 }
 
 ///|
@@ -10525,8 +10072,8 @@ test "an accepted start response opens the run without Started" {
   )
   assert_true(responded.active().run is Open(run_id="r-response", ..))
   assert_true(responded.active().last_run_id is Some("r-response"))
-  inspect(responded.active().input_ledger.length(), content="1")
-  assert_true(responded.active().input_ledger[0].run_id is Some("r-response"))
+  // The reply is the entry's last consumer: a prompt is sent once.
+  inspect(responded.active().input_ledger.length(), content="0")
   assert_true(responded.active().sync is Reloading(generation=1, ..))
   assert_true(responded.active().run_durable_floor is None)
   assert_true(responded.active().run_floor_generation is Some(1))
@@ -10535,7 +10082,8 @@ test "an accepted start response opens the run without Started" {
     task: "too early",
   })
   let (_, gated) = update(dispatch, Send, drafted)
-  inspect(gated.active().input_ledger.length(), content="1")
+  // Send is refused while the run is open, so it neither sends nor records.
+  inspect(gated.active().input_ledger.length(), content="0")
   inspect(gated.active().task, content="too early")
   let (_, started) = update_dev(
     dispatch,
@@ -10583,66 +10131,7 @@ test "an accepted start response opens the run without Started" {
   assert_true(loaded.active().sync is Synced)
   assert_true(loaded.active().run_durable_floor is Some(3))
   assert_true(loaded.active().run_floor_generation is None)
-  inspect(loaded.active().input_ledger.length(), content="1")
-}
-
-///|
-test "accepted start remains recoverable when the engine fails before User append" {
-  let dispatch = test_dispatch()
-  let conv = with_initial_submission(
-    { ..test_conversation(), run: Starting(submission_id="prompt-id") },
-    "prompt-id",
-    "must not disappear",
-  )
-  let (_, accepted) = update_dev(
-    dispatch,
-    StartResponded(
-      session="desktop-test",
-      submission_id="prompt-id",
-      run_id=Some("r-failed"),
-      status="accepted",
-      exit_code=0,
-    ),
-    test_model().replace_conversation(conv),
-  )
-  let (_, failed) = update_dev(
-    dispatch,
-    Finished(
-      run_id="r-failed",
-      status="failed",
-      answer=None,
-      durable_sequence=None,
-    ),
-    accepted,
-  )
-  inspect(failed.active().input_ledger.length(), content="1")
-  assert_true(failed.active().input_ledger[0].state is Unconfirmed)
-  assert_true(failed.active().overlay[0].content.contains("must not disappear"))
-  let (_, external_snapshot) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[
-        {
-          kind: User,
-          content: "external writer only",
-          ts: None,
-          sequence: None,
-        },
-      ],
-      watermark=1,
-      event_boundaries=[(1, false, 1)],
-      generation=1,
-    ),
-    failed,
-  )
-  // Unrelated durable text is not ownership proof for this exact prompt.
-  inspect(external_snapshot.active().input_ledger.length(), content="1")
-  assert_true(
-    external_snapshot.active().overlay[0].content.contains("must not disappear"),
-  )
+  inspect(loaded.active().input_ledger.length(), content="0")
 }
 
 ///|
@@ -10667,7 +10156,7 @@ test "an old-host Started without an id is settled by the exact start response" 
   )
   assert_true(started.active().run is Open(run_id="r-old-host", ..))
   inspect(started.active().input_ledger.length(), content="1")
-  inspect(started.active().overlay.length(), content="1")
+  inspect(started.active().overlay.length(), content="0")
   let (_, responded) = update_dev(
     dispatch,
     StartResponded(
@@ -10679,10 +10168,10 @@ test "an old-host Started without an id is settled by the exact start response" 
     ),
     started,
   )
+  // The id-less Started could not settle the entry; the exact response can.
   assert_true(responded.active().run is Open(run_id="r-old-host", ..))
-  inspect(responded.active().input_ledger.length(), content="1")
-  assert_true(responded.active().input_ledger[0].run_id is Some("r-old-host"))
-  inspect(responded.active().overlay.length(), content="1")
+  inspect(responded.active().input_ledger.length(), content="0")
+  inspect(responded.active().overlay.length(), content="0")
 }
 
 ///|
@@ -10710,7 +10199,6 @@ test "a late accepted response settles run A without replacing open run B" {
     responded.active().input_ledger[0].submission_id,
     content=second_submission,
   )
-  assert_true(responded.active().input_ledger[0].state is Awaiting)
 }
 
 ///|
@@ -10738,7 +10226,6 @@ test "a late failed response for durable run A cannot disturb open run B" {
     responded.active().input_ledger[0].submission_id,
     content=second_submission,
   )
-  assert_true(responded.active().input_ledger[0].state is Awaiting)
   inspect(responded.active().overlay.length(), content="0")
 }
 
@@ -10818,7 +10305,8 @@ test "reconnect runs snapshot settles only its captured Starting submission" {
     BridgeReady,
     test_model().replace_conversation(conv),
   )
-  assert_true(bridged.active().input_ledger[0].state is Unconfirmed)
+  // The gap ended the entry: no receipt can cross it.
+  inspect(bridged.active().input_ledger.length(), content="0")
   let (_, settled) = update_dev(
     dispatch,
     RunsSettled(
@@ -10865,38 +10353,6 @@ test "an old empty runs snapshot cannot close a start sent after reconnect" {
     sent,
   )
   assert_true(stale_snapshot.active().run is Starting(..))
-}
-
-///|
-test "an older recovered ledger entry cannot adjudicate the current start" {
-  let dispatch = test_dispatch()
-  let old = with_initial_submission(
-    test_conversation(),
-    "pre-gap-start",
-    "older prompt",
-  )
-  let (old, _) = old.mark_submission_unconfirmed(
-    "pre-gap-start", "older delivery unconfirmed", false,
-  )
-  let current = with_initial_submission(
-    { ..old, run: Starting(submission_id="current-start") },
-    "current-start",
-    "current prompt",
-  )
-  let (_, next) = update_dev(
-    dispatch,
-    RunsSettled(live=[], frontier=[
-      {
-        session: "desktop-test",
-        state: SnapshotStarting(submission_id="pre-gap-start"),
-        initial_ids: ["pre-gap-start"],
-        steer_ids: [],
-      },
-    ]),
-    test_model().replace_conversation(current),
-  )
-  assert_true(next.active().run is Starting(submission_id="current-start"))
-  inspect(next.active().input_ledger.length(), content="2")
 }
 
 ///|
@@ -10996,270 +10452,6 @@ test "a stale runs snapshot cannot replay a foreign run after BridgeReady" {
   )
   inspect(once.dev().connection_generation, content="2")
   inspect(twice.dev().connection_generation, content="2")
-}
-
-///|
-test "runs settlement restores a Starting prompt that reached exact-zero EOF offline" {
-  let dispatch = test_dispatch()
-  let submission_id = "offline-start"
-  let before = test_model().replace_conversation(
-    with_initial_submission(
-      { ..test_conversation(), run: Starting(submission_id~), task: "" },
-      submission_id,
-      "restore after reconnect",
-    ),
-  )
-  let frontier = before.run_snapshot_frontier(@interop.ChannelId::Local)
-  let (_, bridged) = update_dev(dispatch, BridgeReady, before)
-  assert_true(bridged.active().sync is Reloading(..))
-  let (_, recovered) = update_dev(
-    dispatch,
-    RunsLoaded(
-      runs=[],
-      settled=[
-        {
-          run_id: "run-offline-zero",
-          session: "desktop-test",
-          submission_id: Some(submission_id),
-          status: "failed",
-          durable_sequence: Some(0),
-        },
-      ],
-      live=[],
-      frontier~,
-      connection_generation=bridged.dev().connection_generation,
-    ),
-    bridged,
-  )
-  assert_true(
-    recovered.active().run is NoRun(ended=Some(RunFinished(RunFailed))),
-  )
-  assert_true(recovered.active().sync is Synced)
-  inspect(recovered.active().task, content="restore after reconnect")
-  inspect(recovered.active().input_ledger.length(), content="0")
-  assert_true(recovered.active().overlay[0].reconciliation is Retained)
-}
-
-///|
-test "a late durable boundary refetches a Starting settlement hidden by the first runs snapshot" {
-  let dispatch = test_dispatch()
-  let submission_id = "late-boundary-start"
-  let before = test_model().replace_conversation(
-    with_initial_submission(
-      { ..test_conversation(), run: Starting(submission_id~), task: "" },
-      submission_id,
-      "restore after the boundary",
-    ),
-  )
-  let first_frontier = before.run_snapshot_frontier(@interop.ChannelId::Local)
-  // Finished has already removed the run, but its failed final scan has not
-  // made the abnormal settlement replayable yet.
-  let (_, absent) = update_dev(
-    dispatch,
-    RunsLoaded(
-      runs=[],
-      settled=[],
-      live=[],
-      frontier=first_frontier,
-      connection_generation=before.dev().connection_generation,
-    ),
-    before,
-  )
-  assert_true(absent.active().run is NoRun(ended=None))
-  assert_true(absent.active().last_run_id is None)
-  assert_true(absent.active().has_recovering_initial())
-
-  // The boundary cannot route by run id yet. It keeps the exact local owner
-  // unchanged and schedules another current-generation agent.runs query.
-  let (_, after_boundary) = update_dev(
-    dispatch,
-    DurableBoundary(
-      run_id="run-late-boundary",
-      session="desktop-test",
-      sequence=0,
-    ),
-    absent,
-  )
-  assert_true(after_boundary.active().last_run_id is None)
-  let second_frontier = after_boundary.run_snapshot_frontier(
-    @interop.ChannelId::Local,
-  )
-  guard second_frontier is [captured] else {
-    fail("late boundary lost the settlement selector")
-  }
-  assert_true(captured.initial_ids.contains(submission_id))
-
-  // The host recorded agent.durable before broadcasting it, so that query
-  // returns the newly replayable settlement and restores exact-zero input.
-  let (_, recovered) = update_dev(
-    dispatch,
-    RunsLoaded(
-      runs=[],
-      settled=[
-        {
-          run_id: "run-late-boundary",
-          session: "desktop-test",
-          submission_id: Some(submission_id),
-          status: "failed",
-          durable_sequence: Some(0),
-        },
-      ],
-      live=[],
-      frontier=second_frontier,
-      connection_generation=after_boundary.dev().connection_generation,
-    ),
-    after_boundary,
-  )
-  assert_true(recovered.active().sync is Synced)
-  inspect(recovered.active().task, content="restore after the boundary")
-  inspect(recovered.active().input_ledger.length(), content="0")
-  assert_true(recovered.active().overlay[0].reconciliation is Retained)
-}
-
-///|
-test "runs settlement recovers a transport-undelivered prompt by submission id" {
-  let dispatch = test_dispatch()
-  let submission_id = "socket-lost-start"
-  let starting = test_model().replace_conversation(
-    with_initial_submission(
-      { ..test_conversation(), run: Starting(submission_id~), task: "" },
-      submission_id,
-      "restore after socket loss",
-    ),
-  )
-  let (_, undelivered) = update_dev(
-    dispatch,
-    StartUndelivered(
-      session="desktop-test",
-      submission_id~,
-      message="connection closed",
-    ),
-    starting,
-  )
-  assert_true(undelivered.active().run is NoRun(ended=Some(RunFailed)))
-  assert_true(undelivered.active().input_ledger[0].run_id is None)
-  let frontier = undelivered.run_snapshot_frontier(@interop.ChannelId::Local)
-  let selectors = runs_payload(frontier).to_json()
-  assert_true(
-    selectors
-    is {
-      "known": Array(
-        [
-          {
-            "session": "desktop-test",
-            "submission_id": "socket-lost-start",
-            ..
-          },
-        ]
-      ),
-      ..
-    },
-  )
-  let (_, bridged) = update_dev(dispatch, BridgeReady, undelivered)
-  let (_, recovered) = update_dev(
-    dispatch,
-    RunsLoaded(
-      runs=[],
-      settled=[
-        {
-          run_id: "run-socket-lost-zero",
-          session: "desktop-test",
-          submission_id: Some(submission_id),
-          status: "failed",
-          durable_sequence: Some(0),
-        },
-      ],
-      live=[],
-      frontier~,
-      connection_generation=bridged.dev().connection_generation,
-    ),
-    bridged,
-  )
-  assert_true(recovered.active().sync is Synced)
-  inspect(recovered.active().task, content="restore after socket loss")
-  inspect(recovered.active().input_ledger.length(), content="0")
-  assert_true(recovered.active().overlay[0].reconciliation is Retained)
-}
-
-///|
-test "runs settlement restores an Open prompt whose zero boundary was missed" {
-  let dispatch = test_dispatch()
-  let before = fresh_started_model(
-    "offline-open", "run-offline-open", "restore open after reconnect",
-  )
-  let frontier = before.run_snapshot_frontier(@interop.ChannelId::Local)
-  let (_, bridged) = update_dev(dispatch, BridgeReady, before)
-  let (_, recovered) = update_dev(
-    dispatch,
-    RunsLoaded(
-      runs=[],
-      settled=[
-        {
-          run_id: "run-offline-open",
-          session: "desktop-test",
-          submission_id: Some("offline-open"),
-          status: "failed",
-          durable_sequence: Some(0),
-        },
-      ],
-      live=[],
-      frontier~,
-      connection_generation=bridged.dev().connection_generation,
-    ),
-    bridged,
-  )
-  assert_true(recovered.active().sync is Synced)
-  inspect(recovered.active().task, content="restore open after reconnect")
-  inspect(recovered.active().input_ledger.length(), content="0")
-}
-
-///|
-test "one runs snapshot keeps an active successor after settling its predecessor" {
-  let dispatch = test_dispatch()
-  let before = fresh_started_model(
-    "old-submission", "run-predecessor", "restore predecessor prompt",
-  )
-  let frontier = before.run_snapshot_frontier(@interop.ChannelId::Local)
-  let (_, next) = update_dev(
-    dispatch,
-    RunsLoaded(
-      runs=[
-        {
-          run_id: "run-successor",
-          session: "desktop-test",
-          model: High,
-          max_steps: 1000,
-          session_root: None,
-          submission_id: Some("foreign-submission"),
-        },
-      ],
-      settled=[
-        {
-          run_id: "run-predecessor",
-          session: "desktop-test",
-          submission_id: Some("old-submission"),
-          status: "failed",
-          durable_sequence: Some(0),
-        },
-      ],
-      live=["run-successor"],
-      frontier~,
-      connection_generation=before.dev().connection_generation,
-    ),
-    before,
-  )
-  assert_true(next.active().run is Open(run_id="run-successor", ..))
-  assert_true(next.active().last_run_id is Some("run-successor"))
-  inspect(next.active().task, content="restore predecessor prompt")
-  inspect(next.active().input_ledger.length(), content="0")
-  assert_true(
-    next.active().overlay
-    .iter()
-    .any(notice => {
-      notice.reconciliation is Retained &&
-      notice.content.contains("restored for resubmission")
-    }),
-  )
 }
 
 ///|
@@ -11412,77 +10604,6 @@ test "Finished after RunsSettled fills the last run outcome idempotently" {
 }
 
 ///|
-test "a failed start response keeps its prompt through an empty snapshot" {
-  let dispatch = test_dispatch()
-  let conv = {
-    ..test_conversation(),
-    run: Starting(submission_id="failed-start"),
-  }.enqueue_input(
-    InitialPrompt,
-    "failed-start",
-    None,
-    "<user_mentions>serialized context</user_mentions>\nprompt",
-    "prompt",
-    [],
-  )
-  let (_, failed) = update_dev(
-    dispatch,
-    StartResponded(
-      session="desktop-test",
-      submission_id="failed-start",
-      run_id=Some("r-failed"),
-      status="failed",
-      exit_code=1,
-    ),
-    test_model().replace_conversation(conv),
-  )
-  assert_true(failed.active().run is NoRun(ended=Some(RunFailed)))
-  assert_true(failed.active().sync is Reloading(..))
-  inspect(failed.active().input_ledger.length(), content="1")
-  assert_true(failed.active().input_ledger[0].state is Unconfirmed)
-  inspect(failed.active().input_ledger[0].draft, content="prompt")
-  inspect(failed.active().overlay.length(), content="1")
-  assert_true(failed.active().overlay[0].content.contains("prompt"))
-  assert_false(failed.active().overlay[0].content.contains("<user_mentions>"))
-  let (_, empty) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[],
-      watermark=0,
-      event_boundaries=[],
-      generation=1,
-    ),
-    failed,
-  )
-  inspect(empty.active().input_ledger.length(), content="1")
-  assert_true(empty.active().input_ledger[0].state is Unconfirmed)
-  inspect(empty.active().visible_items().length(), content="1")
-  assert_true(empty.active().visible_items()[0].content.contains("prompt"))
-  let (_, late_started) = update_dev(
-    dispatch,
-    Started(
-      run_id="r-failed",
-      session="desktop-test",
-      model=High,
-      max_steps=1000,
-      session_root=None,
-      submission_id=Some("failed-start"),
-    ),
-    empty,
-  )
-  assert_true(late_started.active().run is NoRun(ended=Some(RunFailed)))
-  // Lifecycle events do not change conversation placement: the conversation
-  // still works in the project that owns it.
-  assert_true(
-    late_started.conversation_root(late_started.active()) is Some(resource) &&
-    resource.path == "/work",
-  )
-}
-
-///|
 test "a failed response after durable Finished cannot resurrect its prompt" {
   let dispatch = test_dispatch()
   let conv = with_initial_submission(
@@ -11560,9 +10681,6 @@ test "an accepted response consumes a fast-finished prompt without reopening" {
     "fast-start",
     "fast prompt",
   )
-  let (conv, _) = conv.mark_submission_unconfirmed(
-    "fast-start", "delivery unconfirmed: fast prompt", false,
-  )
   let (_, accepted) = update_dev(
     dispatch,
     StartResponded(
@@ -11579,40 +10697,6 @@ test "an accepted response consumes a fast-finished prompt without reopening" {
   )
   inspect(accepted.active().input_ledger.length(), content="0")
   inspect(accepted.active().overlay.length(), content="0")
-}
-
-///|
-test "a newer Started retires an older unconfirmed start ledger entry" {
-  let dispatch = test_dispatch()
-  let old = with_initial_submission(
-    { ..test_conversation(), run: NoRun(ended=Some(RunFailed)) },
-    "old-start",
-    "old prompt",
-  )
-  let (old, _) = old.mark_submission_unconfirmed(
-    "old-start", "old delivery unconfirmed", false,
-  )
-  let current = with_initial_submission(
-    { ..old, run: Starting(submission_id="new-start") },
-    "new-start",
-    "new prompt",
-  )
-  let (_, started) = update_dev(
-    dispatch,
-    Started(
-      run_id="r-new",
-      session="desktop-test",
-      model=High,
-      max_steps=1000,
-      session_root=None,
-      submission_id=Some("new-start"),
-    ),
-    test_model().replace_conversation(current),
-  )
-  inspect(started.active().input_ledger.length(), content="1")
-  inspect(started.active().input_ledger[0].submission_id, content="new-start")
-  inspect(started.active().overlay.length(), content="1")
-  assert_true(started.active().overlay[0].reconciliation is Retained)
 }
 
 ///|
@@ -11890,57 +10974,6 @@ test "an identical-text settle removes exactly one pending entry" {
 }
 
 ///|
-test "an undelivered steer is reported instead of vanishing" {
-  let dispatch = test_dispatch()
-  let model = running_model().replace_conversation(
-    with_pending_steers(running_conversation(), ["lost"]),
-  )
-  let (_, next) = update_dev(
-    dispatch,
-    SteerUndelivered(
-      session="desktop-test",
-      submission_id="test-steer-0",
-      text="lost",
-      run_id="r7",
-    ),
-    model,
-  )
-  inspect(next.active().pending_steers().length(), content="0")
-  inspect(next.active().input_ledger.length(), content="1")
-  assert_true(next.active().input_ledger[0].state is Unconfirmed)
-  inspect(next.active().overlay.length(), content="1")
-  guard next.active().overlay[0].kind is Assistant(is_danger=true) else {
-    fail("expected an error bubble")
-  }
-  assert_true(next.active().overlay[0].content.contains("lost"))
-}
-
-///|
-test "a run that ends with steers in flight marks delivery unconfirmed" {
-  let dispatch = test_dispatch()
-  let model = running_model().replace_conversation(
-    with_pending_steers(running_conversation(), ["orphaned"]),
-  )
-  let (_, next) = update_dev(
-    dispatch,
-    Finished(
-      run_id="r7",
-      status="finished",
-      answer=Some(""),
-      durable_sequence=None,
-    ),
-    model,
-  )
-  inspect(next.active().pending_steers().length(), content="0")
-  inspect(next.active().input_ledger.length(), content="1")
-  inspect(next.active().is_running(), content="false")
-  guard next.active().overlay[0].kind is Assistant(is_danger=true) else {
-    fail("expected an error bubble")
-  }
-  assert_true(next.active().overlay[0].content.contains("orphaned"))
-}
-
-///|
 test "a late exact applied receipt retracts a run-end unconfirmed notice" {
   let dispatch = test_dispatch()
   let model = running_model().replace_conversation(
@@ -11993,7 +11026,7 @@ test "a trailing applied receipt for run A settles after run B Started" {
 }
 
 ///|
-test "a trailing dropped receipt for run A restores input without closing run B" {
+test "a trailing dropped receipt for run A cannot close run B" {
   let dispatch = test_dispatch()
   guard second_run_started_before_first_steer_receipt() is Some(started) else {
     fail("expected the second prompt to be starting")
@@ -12007,611 +11040,15 @@ test "a trailing dropped receipt for run A restores input without closing run B"
     ),
     started,
   )
+  // Run A ended when B replaced it, taking A's pending steer with it, so the
+  // trailing receipt has nothing left to settle. What it must not do is
+  // disturb B.
   assert_true(next.active().run is Open(run_id="r8", ..))
   assert_true(next.active().last_run_id is Some("r8"))
   inspect(next.active().input_ledger.length(), content="1")
   assert_true(next.active().input_ledger[0].kind is InitialPrompt)
-  inspect(next.active().task, content="late steer")
-  inspect(next.active().overlay.length(), content="1")
-  assert_true(next.active().overlay[0].content.contains("late steer"))
-}
-
-///|
-test "run-end unconfirmed notice follows assistant and terminal before freezing" {
-  let dispatch = test_dispatch()
-  let conv = with_pending_steers(
-    {
-      ..running_conversation(),
-      messages: [{ kind: User, content: "question", ts: None, sequence: None }],
-      watermark: 1,
-    },
-    ["late steer"],
-  )
-  let (_, finished) = update_dev(
-    dispatch,
-    Finished(
-      run_id="r7",
-      status="finished",
-      answer=Some("answer"),
-      durable_sequence=None,
-    ),
-    running_model().replace_conversation(conv),
-  )
-  let (_, buffered) = update_dev(
-    dispatch,
-    SessionCommitted(
-      session="desktop-test",
-      sequence=2,
-      ts=None,
-      item=@protocol.Assistant({
-        content: "answer",
-        tool_calls: None,
-        reasoning_content: None,
-      }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
-    ),
-    finished,
-  )
-  let (_, buffered_terminal) = update_dev(
-    dispatch,
-    SessionCommitted(
-      session="desktop-test",
-      sequence=3,
-      ts=None,
-      item=@protocol.Terminal(@protocol.Finished("answer")),
-      session_root=@interop.ChannelId::Local.test_store_root(),
-    ),
-    buffered,
-  )
-  let (_, answered) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[
-        { kind: User, content: "question", ts: None, sequence: None },
-        {
-          kind: Assistant(is_danger=false),
-          content: "answer",
-          ts: None,
-          sequence: None,
-        },
-      ],
-      watermark=3,
-      event_boundaries=[(3, true, 2)],
-      generation=1,
-    ),
-    buffered_terminal,
-  )
-  let visible = answered.active().visible_items()
-  inspect(visible.length(), content="3")
-  inspect(visible[1].content, content="answer")
-  assert_true(visible[2].content.contains("late steer"))
-  let (_, next_turn) = update_dev(
-    dispatch,
-    SessionCommitted(
-      session="desktop-test",
-      sequence=4,
-      ts=None,
-      item=@protocol.User({ content: "next question", submission_id: None }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
-    ),
-    answered,
-  )
-  let visible = next_turn.active().visible_items()
-  inspect(visible.length(), content="4")
-  inspect(visible[1].content, content="answer")
-  assert_true(visible[2].content.contains("late steer"))
-  inspect(visible[3].content, content="next question")
-}
-
-///|
-test "a snapshot freezes a prior run-tail notice before its next turn" {
-  let dispatch = test_dispatch()
-  let conv = with_pending_steers(
-    {
-      ..running_conversation(),
-      messages: [{ kind: User, content: "question", ts: None, sequence: None }],
-      watermark: 1,
-    },
-    ["late steer"],
-  )
-  let (_, finished) = update_dev(
-    dispatch,
-    Finished(run_id="r7", status="finished", answer=None, durable_sequence=None),
-    running_model().replace_conversation(conv),
-  )
-  let (_, loaded) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[
-        { kind: User, content: "question", ts: None, sequence: None },
-        {
-          kind: Assistant(is_danger=false),
-          content: "first answer",
-          ts: None,
-          sequence: None,
-        },
-        { kind: User, content: "next question", ts: None, sequence: None },
-        {
-          kind: Assistant(is_danger=false),
-          content: "next answer",
-          ts: None,
-          sequence: None,
-        },
-      ],
-      watermark=7,
-      event_boundaries=[(3, true, 2), (7, true, 4)],
-      generation=1,
-    ),
-    finished,
-  )
-  let visible = loaded.active().visible_items()
-  inspect(visible.length(), content="5")
-  inspect(visible[0].content, content="question")
-  inspect(visible[1].content, content="first answer")
-  assert_true(visible[2].content.contains("late steer"))
-  inspect(visible[3].content, content="next question")
-  inspect(visible[4].content, content="next answer")
-}
-
-///|
-test "a snapshot does not mistake a same-run steer User for the terminal boundary" {
-  let dispatch = test_dispatch()
-  let conv = with_pending_steers(
-    {
-      ..running_conversation(),
-      messages: [{ kind: User, content: "question", ts: None, sequence: None }],
-      watermark: 1,
-      sync: test_reloading([]),
-    },
-    ["late steer"],
-  )
-  let model = running_model().replace_conversation(conv)
-  let (_, steer_buffered) = update_dev(
-    dispatch,
-    SessionCommitted(
-      session="desktop-test",
-      sequence=2,
-      ts=None,
-      item=@protocol.User({ content: "late steer", submission_id: None }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
-    ),
-    model,
-  )
-  let (_, finished) = update_dev(
-    dispatch,
-    Finished(run_id="r7", status="finished", answer=None, durable_sequence=None),
-    steer_buffered,
-  )
-  let (_, answered) = update_dev(
-    dispatch,
-    SessionCommitted(
-      session="desktop-test",
-      sequence=3,
-      ts=None,
-      item=@protocol.Assistant({
-        content: "answer",
-        tool_calls: None,
-        reasoning_content: None,
-      }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
-    ),
-    finished,
-  )
-  let (_, terminal) = update_dev(
-    dispatch,
-    SessionCommitted(
-      session="desktop-test",
-      sequence=4,
-      ts=None,
-      item=@protocol.Terminal(@protocol.Finished("answer")),
-      session_root=@interop.ChannelId::Local.test_store_root(),
-    ),
-    answered,
-  )
-  let (_, loaded) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[
-        { kind: User, content: "question", ts: None, sequence: None },
-        { kind: User, content: "late steer", ts: None, sequence: None },
-        {
-          kind: Assistant(is_danger=false),
-          content: "answer",
-          ts: None,
-          sequence: None,
-        },
-      ],
-      watermark=4,
-      event_boundaries=[(4, true, 3)],
-      generation=1,
-    ),
-    terminal,
-  )
-  let visible = loaded.active().visible_items()
-  inspect(visible.length(), content="4")
-  inspect(visible[1].content, content="late steer")
-  inspect(visible[2].content, content="answer")
-  assert_true(visible[3].content.contains("late steer"))
-}
-
-///|
-test "an unknown terminal before Finished still owns the run-tail notice" {
-  let dispatch = test_dispatch()
-  let conv = with_pending_steers(
-    {
-      ..running_conversation(),
-      messages: [
-        { kind: User, content: "question", ts: None, sequence: None },
-        {
-          kind: Assistant(is_danger=false),
-          content: "answer",
-          ts: None,
-          sequence: None,
-        },
-      ],
-      watermark: 2,
-    },
-    ["late steer"],
-  )
-  let (_, committed) = update_dev(
-    dispatch,
-    SessionCommitted(
-      session="desktop-test",
-      sequence=3,
-      ts=None,
-      item=@protocol.UnknownTerminal({
-        "kind": "terminal",
-        "payload": { "kind": "future_terminal", "message": "answer" },
-      }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
-    ),
-    running_model().replace_conversation(conv),
-  )
-  inspect(committed.active().last_terminal_sequence, content="3")
-  let (_, finished) = update_dev(
-    dispatch,
-    Finished(run_id="r7", status="finished", answer=None, durable_sequence=None),
-    committed,
-  )
-  let (_, loaded) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[
-        { kind: User, content: "question", ts: None, sequence: None },
-        {
-          kind: Assistant(is_danger=false),
-          content: "answer",
-          ts: None,
-          sequence: None,
-        },
-      ],
-      watermark=3,
-      event_boundaries=[(3, true, 2)],
-      generation=1,
-    ),
-    finished,
-  )
-  let visible = loaded.active().visible_items()
-  inspect(visible.length(), content="3")
-  inspect(visible[1].content, content="answer")
-  assert_true(visible[2].content.contains("late steer"))
-}
-
-///|
-test "a successor resolves an old terminal tail only from its causal snapshot" {
-  let dispatch = test_dispatch()
-  let conv = with_pending_steers(
-    {
-      ..running_conversation(),
-      messages: [
-        { kind: User, content: "first question", ts: None, sequence: None },
-        {
-          kind: Assistant(is_danger=false),
-          content: "first answer",
-          ts: None,
-          sequence: None,
-        },
-      ],
-      watermark: 2,
-      run_durable_floor: Some(0),
-      sync: test_reloading([]),
-    },
-    ["late steer"],
-  )
-  let model = {
-    ..running_model().replace_conversation(conv),
-    transcript_request_generation: 1,
-  }
-  // The old terminal commit beat Finished, so no future live commit can be
-  // assumed to be the boundary for the notice Finished is about to create.
-  let (_, committed) = update_dev(
-    dispatch,
-    SessionCommitted(
-      session="desktop-test",
-      sequence=3,
-      ts=None,
-      item=@protocol.Terminal(@protocol.Finished("first answer")),
-      session_root=@interop.ChannelId::Local.test_store_root(),
-    ),
-    model,
-  )
-  let (_, finished) = update_dev(
-    dispatch,
-    Finished(run_id="r7", status="finished", answer=None, durable_sequence=None),
-    committed,
-  )
-  assert_true(
-    finished.active().overlay[0].anchor
-    is PriorTerminalTail(floor=0, snapshot_generation=2),
-  )
-  let (_, started) = update_dev(
-    dispatch,
-    Started(
-      run_id="r8",
-      session="desktop-test",
-      model=High,
-      max_steps=1000,
-      session_root=None,
-      submission_id=None,
-    ),
-    finished,
-  )
-  assert_true(
-    started.active().overlay[0].anchor
-    is PriorTerminalTail(floor=0, snapshot_generation=2),
-  )
-  let (_, second_user) = update_dev(
-    dispatch,
-    SessionCommitted(
-      session="desktop-test",
-      sequence=4,
-      ts=None,
-      item=@protocol.User({ content: "second question", submission_id: None }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
-    ),
-    started,
-  )
-  let (_, second_terminal) = update_dev(
-    dispatch,
-    SessionCommitted(
-      session="desktop-test",
-      sequence=5,
-      ts=None,
-      item=@protocol.Terminal(@protocol.Finished("second answer")),
-      session_root=@interop.ChannelId::Local.test_store_root(),
-    ),
-    second_user,
-  )
-  // Generation 1 predates Finished and Started. It drains both runs' buffered
-  // terminals, but neither anonymous live commit may place the notice.
-  let (_, old_cut) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[
-        { kind: User, content: "first question", ts: None, sequence: None },
-        {
-          kind: Assistant(is_danger=false),
-          content: "first answer",
-          ts: None,
-          sequence: None,
-        },
-      ],
-      watermark=2,
-      event_boundaries=[(1, false, 1), (2, false, 2)],
-      generation=1,
-    ),
-    second_terminal,
-  )
-  assert_true(old_cut.active().sync is Reloading(generation=2, ..))
-  assert_true(old_cut.active().overlay[0].anchor is PriorTerminalTail(..))
-  let (_, causal) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[
-        { kind: User, content: "first question", ts: None, sequence: None },
-        {
-          kind: Assistant(is_danger=false),
-          content: "first answer",
-          ts: None,
-          sequence: None,
-        },
-        { kind: User, content: "second question", ts: None, sequence: None },
-        {
-          kind: Assistant(is_danger=false),
-          content: "second answer",
-          ts: None,
-          sequence: None,
-        },
-      ],
-      watermark=5,
-      event_boundaries=[
-        (1, false, 1),
-        (2, false, 2),
-        (3, true, 2),
-        (4, false, 3),
-        (5, true, 4),
-      ],
-      generation=2,
-    ),
-    old_cut,
-  )
-  assert_true(causal.active().overlay[0].anchor is AfterMessages(2))
-  let visible = causal.active().visible_items()
-  inspect(visible.length(), content="5")
-  assert_true(visible[2].content.contains("late steer"))
-  inspect(visible[3].content, content="second question")
-}
-
-///|
-test "a successor terminal cannot claim a setup-failed run's snapshot cut" {
-  let dispatch = test_dispatch()
-  let conv = with_pending_steers(
-    {
-      ..running_conversation(),
-      watermark: 1,
-      last_terminal_sequence: 1,
-      run_durable_floor: Some(1),
-    },
-    ["late steer"],
-  )
-  let (_, setup_failed) = update_dev(
-    dispatch,
-    Error(
-      run_id=Some("r7"),
-      message="agent setup failed: boom",
-      diagnostics=None,
-      exit_code=None,
-    ),
-    running_model().replace_conversation(conv),
-  )
-  inspect(setup_failed.active().overlay.length(), content="0")
-  let (_, finished) = update_dev(
-    dispatch,
-    Finished(run_id="r7", status="failed", answer=None, durable_sequence=None),
-    setup_failed,
-  )
-  assert_true(
-    finished.active().overlay[0].anchor is SnapshotCut(snapshot_generation=1),
-  )
-  let (_, started) = update_dev(
-    dispatch,
-    Started(
-      run_id="r8",
-      session="desktop-test",
-      model=High,
-      max_steps=1000,
-      session_root=None,
-      submission_id=None,
-    ),
-    finished,
-  )
-  assert_true(
-    started.active().overlay[0].anchor is SnapshotCut(snapshot_generation=2),
-  )
-  let (_, old_cut) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[],
-      watermark=1,
-      event_boundaries=[(1, true, 0)],
-      generation=1,
-    ),
-    started,
-  )
-  assert_true(old_cut.active().sync is Reloading(generation=2, ..))
-  assert_true(
-    old_cut.active().overlay[0].anchor is SnapshotCut(snapshot_generation=2),
-  )
-  let (_, causal) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[
-        { kind: User, content: "next question", ts: None, sequence: None },
-        {
-          kind: Assistant(is_danger=false),
-          content: "next answer",
-          ts: None,
-          sequence: None,
-        },
-      ],
-      watermark=3,
-      event_boundaries=[(1, true, 0), (2, false, 1), (3, true, 2)],
-      generation=2,
-    ),
-    old_cut,
-  )
-  assert_true(causal.active().overlay[0].anchor is AfterMessages(2))
-  assert_false(causal.active().has_unresolved_run_tail_notice())
-  let visible = causal.active().visible_items()
-  inspect(visible.length(), content="3")
-  inspect(visible[0].content, content="next question")
-  inspect(visible[1].content, content="next answer")
-  assert_true(visible[2].content.contains("late steer"))
-}
-
-///|
-test "an offline successor snapshot fences without claiming its terminal" {
-  let dispatch = test_dispatch()
-  let conv = with_pending_steers(
-    {
-      ..running_conversation(),
-      watermark: 1,
-      last_terminal_sequence: 1,
-      run_durable_floor: Some(1),
-    },
-    ["unconfirmed steer"],
-  )
-  let (_, finished) = update_dev(
-    dispatch,
-    Finished(run_id="r7", status="failed", answer=None, durable_sequence=None),
-    running_model().replace_conversation(conv),
-  )
-  // This page missed every lifecycle event for r8 while it was offline. The
-  // snapshot's terminal therefore has no identity tying it to r7.
-  let (_, loaded) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[
-        { kind: User, content: "offline successor", ts: None, sequence: None },
-        {
-          kind: Assistant(is_danger=false),
-          content: "successor answer",
-          ts: None,
-          sequence: None,
-        },
-      ],
-      watermark=3,
-      event_boundaries=[(1, true, 0), (2, false, 1), (3, true, 2)],
-      generation=1,
-    ),
-    finished,
-  )
-  assert_true(loaded.active().overlay[0].anchor is AfterMessages(2))
-  assert_false(loaded.active().has_unresolved_run_tail_notice())
-}
-
-///|
-test "failure and abort statuses never assume a durable terminal" {
-  let dispatch = test_dispatch()
-  for status in ["failed", "aborted", "cancelled", "future_failure"] {
-    let conv = with_pending_steers(running_conversation(), ["unconfirmed"])
-    let (_, finished) = update_dev(
-      dispatch,
-      Finished(run_id="r7", status~, answer=None, durable_sequence=None),
-      running_model().replace_conversation(conv),
-    )
-    guard finished.active().overlay is [notice] else {
-      fail("expected one notice for " + status)
-    }
-    assert_true(notice.anchor is SnapshotCut(snapshot_generation=1))
-  }
+  inspect(next.active().task, content="")
+  inspect(next.active().overlay.length(), content="0")
 }
 
 ///|
@@ -12871,90 +11308,6 @@ test "buffered future terminal cannot become its own run floor" {
 }
 
 ///|
-test "a late durable EOF finalizes an unconfirmed steer without a terminal" {
-  let dispatch = test_dispatch()
-  let conv = with_pending_steers(
-    {
-      ..running_conversation(),
-      watermark: 1,
-      last_terminal_sequence: 1,
-      run_durable_floor: Some(1),
-    },
-    ["late steer"],
-  )
-  let (_, errored) = update_dev(
-    dispatch,
-    Error(
-      run_id=Some("r7"),
-      message="engine exited without a result",
-      diagnostics=None,
-      exit_code=Some(1),
-    ),
-    test_model().replace_conversation(conv),
-  )
-  let (_, synthetic) = update_dev(
-    dispatch,
-    Finished(run_id="r7", status="failed", answer=None, durable_sequence=None),
-    errored,
-  )
-  guard synthetic.active().overlay is [_, steer_notice] else {
-    fail("expected the process error and unconfirmed steer notices")
-  }
-  assert_true(steer_notice.anchor is SnapshotCut(snapshot_generation=1))
-  let (_, partial) = update_dev(
-    dispatch,
-    SessionCommitted(
-      session="desktop-test",
-      sequence=2,
-      ts=None,
-      item=@protocol.Assistant({
-        content: "partial answer",
-        tool_calls: None,
-        reasoning_content: None,
-      }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
-    ),
-    synthetic,
-  )
-  // The real EOF consumer publishes a non-lifecycle boundary only after its
-  // final scan, carrying the exact last sequence even though no Terminal was
-  // appended.
-  let (_, finalized) = update_dev(
-    dispatch,
-    DurableBoundary(run_id="r7", session="desktop-test", sequence=2),
-    partial,
-  )
-  assert_true(finalized.active().overlay[1].anchor is DurableTail(2))
-  let (_, loaded) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[
-        {
-          kind: Assistant(is_danger=false),
-          content: "partial answer",
-          ts: None,
-          sequence: None,
-        },
-      ],
-      watermark=2,
-      event_boundaries=[(1, true, 0), (2, false, 1)],
-      generation=1,
-    ),
-    finalized,
-  )
-  assert_true(loaded.active().overlay[1].anchor is AfterMessages(1))
-  assert_false(loaded.active().has_unresolved_run_tail_notice())
-  let visible = loaded.active().visible_items()
-  inspect(visible.length(), content="3")
-  inspect(visible[0].content, content="partial answer")
-  assert_true(visible[1].content.contains("engine exited"))
-  assert_true(visible[2].content.contains("late steer"))
-}
-
-///|
 test "two run-tail notice groups freeze only at their own terminals" {
   let first = { ..test_conversation(), run_durable_floor: Some(1) }.append_run_tail_notice(
     Assistant(is_danger=true),
@@ -13004,25 +11357,6 @@ test "send waits while the durable transcript frontier is reloading" {
 }
 
 ///|
-test "runs settled keeps exact steer ownership without notice growth" {
-  let dispatch = test_dispatch()
-  let model = running_model().replace_conversation(
-    with_pending_steers(running_conversation(), ["lost"]),
-  )
-  let frontier = model.run_snapshot_frontier(@interop.ChannelId::Local)
-  let (_, once) = update_dev(dispatch, RunsSettled(live=[], frontier~), model)
-  inspect(once.active().input_ledger.length(), content="1")
-  assert_true(once.active().input_ledger[0].state is Unconfirmed)
-  inspect(once.active().overlay.length(), content="1")
-  assert_true(
-    once.active().overlay[0].reconciliation is Submission("test-steer-0"),
-  )
-  let (_, twice) = update_dev(dispatch, RunsSettled(live=[], frontier~), once)
-  inspect(twice.active().input_ledger.length(), content="1")
-  inspect(twice.active().overlay.length(), content="1")
-}
-
-///|
 test "a trailing applied receipt settles after an empty runs snapshot" {
   let dispatch = test_dispatch()
   let model = running_model().replace_conversation(
@@ -13048,7 +11382,7 @@ test "a trailing applied receipt settles after an empty runs snapshot" {
 }
 
 ///|
-test "a trailing dropped receipt restores input after an empty runs snapshot" {
+test "a trailing dropped receipt after an empty runs snapshot changes nothing" {
   let dispatch = test_dispatch()
   let model = running_model().replace_conversation(
     with_pending_steers(running_conversation(), ["late dropped"]),
@@ -13068,908 +11402,11 @@ test "a trailing dropped receipt restores input after an empty runs snapshot" {
     ),
     settled,
   )
+  // The snapshot already ended the run and its pending steer; a receipt that
+  // trails it owns nothing.
   inspect(dropped.active().input_ledger.length(), content="0")
-  inspect(dropped.active().task, content="late dropped")
-  inspect(dropped.active().overlay.length(), content="1")
-  assert_true(dropped.active().overlay[0].content.contains("late dropped"))
-}
-
-///|
-test "a successor step cannot retire an older steer before its RPC rejection" {
-  let dispatch = test_dispatch()
-  let model = running_model().replace_conversation(
-    with_pending_steers(running_conversation(), ["late rejection"]),
-  )
-  let frontier = model.run_snapshot_frontier(@interop.ChannelId::Local)
-  let (_, settled) = update_dev(
-    dispatch,
-    RunsSettled(live=[], frontier~),
-    model,
-  )
-  let (_, started) = update_dev(
-    dispatch,
-    Started(
-      run_id="r8",
-      session="desktop-test",
-      model=High,
-      max_steps=1000,
-      session_root=None,
-      submission_id=None,
-    ),
-    settled,
-  )
-  let (_, stepped) = update_dev(
-    dispatch,
-    Engine(Some("r8"), AgentStep(Some(1)), session=None),
-    started,
-  )
-  inspect(stepped.active().input_ledger.length(), content="1")
-  let (_, rejected) = update_dev(
-    dispatch,
-    SteerRejected(
-      session="desktop-test",
-      submission_id="test-steer-0",
-      text="late rejection",
-      run_id="r7",
-    ),
-    stepped,
-  )
-  assert_true(rejected.active().run is Open(run_id="r8", ..))
-  inspect(rejected.active().input_ledger.length(), content="0")
-  inspect(rejected.active().task, content="late rejection")
-}
-
-///|
-test "a runs snapshot cannot retire a steer submitted after its frontier" {
-  let dispatch = test_dispatch()
-  let model = running_model()
-  let frontier = model.run_snapshot_frontier(@interop.ChannelId::Local)
-  let drafted = model.replace_conversation({
-    ..model.active(),
-    task: "post-snapshot steer",
-  })
-  let (_, steered) = update(dispatch, Send, drafted)
-  guard steered.active().input_ledger is [pending] else {
-    fail("expected one steer awaiting its exact receipt")
-  }
-  let submission_id = pending.submission_id
-  assert_true(pending.state is Awaiting)
-  let (_, settled) = update_dev(
-    dispatch,
-    RunsSettled(live=[], frontier~),
-    steered,
-  )
-  assert_true(settled.active().run is NoRun(ended=None))
-  guard settled.active().input_ledger is [still_pending] else {
-    fail("the older runs reply retired a newer steer")
-  }
-  assert_eq(still_pending.submission_id, submission_id)
-  assert_true(still_pending.state is Awaiting)
-  let (_, r2_started) = update_dev(
-    dispatch,
-    Started(
-      run_id="r8",
-      session="desktop-test",
-      model=High,
-      max_steps=1000,
-      session_root=None,
-      submission_id=None,
-    ),
-    settled,
-  )
-  let (_, after_r2) = update_dev(
-    dispatch,
-    Finished(run_id="r8", status="finished", answer=None, durable_sequence=None),
-    r2_started,
-  )
-  guard after_r2.active().input_ledger is [still_r1] else {
-    fail("the successor finish consumed an older run's steer")
-  }
-  assert_eq(still_r1.submission_id, submission_id)
-  assert_true(still_r1.state is Awaiting)
-  inspect(after_r2.active().overlay.length(), content="0")
-  // With no transcript, draft, overlay, or live run, exact ownership is the
-  // only reason this conversation survives a switch.
-  let other = {
-    ..empty_conversation(
-      @interop.ChannelId::Local,
-      "desktop-other",
-      @interop.ChannelId::Local.test_project(),
-    ),
-    messages: [
-      { kind: User, content: "other conversation", ts: None, sequence: None },
-    ],
-  }
-  let (_, switched) = update(
-    dispatch,
-    OpenSession(@interop.ChannelId::Local, "desktop-other"),
-    after_r2.replace_conversation(other),
-  )
-  guard switched.find_conversation(@interop.ChannelId::Local, "desktop-test")
-    is Some(retained) else {
-    fail("switching conversations pruned exact steer ownership")
-  }
-  assert_true(retained.has_begun())
-  let (_, rejected) = update_dev(
-    dispatch,
-    SteerRejected(
-      session="desktop-test",
-      submission_id~,
-      text="post-snapshot steer",
-      run_id="r7",
-    ),
-    switched,
-  )
-  guard rejected.find_conversation(@interop.ChannelId::Local, "desktop-test")
-    is Some(restored) else {
-    fail("late rejection lost its conversation")
-  }
-  inspect(restored.input_ledger.length(), content="0")
-  inspect(restored.task, content="post-snapshot steer")
-}
-
-///|
-test "runs settlement releases after a causal cut and keeps exact receipt" {
-  let dispatch = test_dispatch()
-  let conv = with_pending_steers(
-    {
-      ..running_conversation(),
-      watermark: 2,
-      last_terminal_sequence: 2,
-      run_durable_floor: Some(2),
-      sync: test_reloading([]),
-    },
-    ["captured steer"],
-  )
-  let model = {
-    ..running_model().replace_conversation(conv),
-    transcript_request_generation: 1,
-  }
-  let frontier = model.run_snapshot_frontier(@interop.ChannelId::Local)
-  let (_, snapshot_first) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[],
-      watermark=3,
-      event_boundaries=[(3, true, 0)],
-      generation=1,
-    ),
-    model,
-  )
-  assert_true(snapshot_first.active().sync is Synced)
-  let (_, settled) = update_dev(
-    dispatch,
-    RunsSettled(live=[], frontier~),
-    snapshot_first,
-  )
-  assert_true(settled.active().sync is Reloading(generation=2, ..))
-  assert_true(settled.active().has_unresolved_run_tail_notice())
-  let (_, reconciled) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[],
-      watermark=3,
-      event_boundaries=[(3, true, 0)],
-      generation=2,
-    ),
-    settled,
-  )
-  assert_true(reconciled.active().sync is Synced)
-  assert_true(reconciled.active().overlay[0].anchor is AfterMessages(0))
-  assert_false(reconciled.active().has_unresolved_run_tail_notice())
-  inspect(reconciled.active().input_ledger.length(), content="1")
-  let drafted = reconciled.replace_conversation({
-    ..reconciled.active(),
-    task: "next prompt",
-  })
-  let (_, sent) = update(dispatch, Send, drafted)
-  assert_true(sent.active().run is Starting(..))
-  let (_, received) = update_dev(
-    dispatch,
-    Engine(
-      Some("r7"),
-      SteerApplied(content="captured steer", submission_id=Some("test-steer-0")),
-      session=None,
-    ),
-    sent,
-  )
-  assert_false(received.active().has_unresolved_run_tail_notice())
-  inspect(received.active().overlay.length(), content="0")
-  inspect(received.active().input_ledger.length(), content="1")
-}
-
-///|
-test "a late normal Finished upgrades a runs-settled uncertain steer" {
-  let dispatch = test_dispatch()
-  let conv = with_pending_steers(
-    {
-      ..running_conversation(),
-      watermark: 1,
-      last_terminal_sequence: 1,
-      run_durable_floor: Some(1),
-    },
-    ["captured steer"],
-  )
-  let model = running_model().replace_conversation(conv)
-  let frontier = model.run_snapshot_frontier(@interop.ChannelId::Local)
-  let (_, settled) = update_dev(
-    dispatch,
-    RunsSettled(live=[], frontier~),
-    model,
-  )
-  assert_true(
-    settled.active().overlay[0].anchor is SnapshotCut(snapshot_generation=1),
-  )
-  let finish : DeviceMsg = Finished(
-    run_id="r7",
-    status="finished",
-    answer=None,
-    durable_sequence=None,
-  )
-  let (_, finished) = update_dev(dispatch, finish, settled)
-  assert_true(
-    finished.active().overlay[0].anchor
-    is PriorTerminalTail(floor=1, snapshot_generation=2),
-  )
-  let (_, duplicate) = update_dev(dispatch, finish, finished)
-  assert_true(
-    duplicate.active().overlay[0].anchor
-    is PriorTerminalTail(floor=1, snapshot_generation=2),
-  )
-  let (_, old_cut) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[],
-      watermark=1,
-      event_boundaries=[(1, true, 0)],
-      generation=1,
-    ),
-    duplicate,
-  )
-  assert_true(old_cut.active().sync is Reloading(generation=2, ..))
-  assert_true(old_cut.active().overlay[0].anchor is PriorTerminalTail(..))
-  let (_, causal) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[
-        {
-          kind: Assistant(is_danger=false),
-          content: "answer",
-          ts: None,
-          sequence: None,
-        },
-      ],
-      watermark=2,
-      event_boundaries=[(1, true, 0), (2, true, 1)],
-      generation=2,
-    ),
-    old_cut,
-  )
-  assert_true(causal.active().overlay[0].anchor is AfterMessages(1))
-  assert_false(causal.active().has_unresolved_run_tail_notice())
-  let (_, after_duplicate) = update_dev(dispatch, finish, causal)
-  assert_true(after_duplicate.active().overlay[0].anchor is AfterMessages(1))
-  assert_false(after_duplicate.active().has_unresolved_run_tail_notice())
-}
-
-///|
-test "a late failed Finished preserves a runs-settled snapshot cut" {
-  let dispatch = test_dispatch()
-  let conv = with_pending_steers(running_conversation(), ["captured steer"])
-  let model = running_model().replace_conversation(conv)
-  let frontier = model.run_snapshot_frontier(@interop.ChannelId::Local)
-  let (_, settled) = update_dev(
-    dispatch,
-    RunsSettled(live=[], frontier~),
-    model,
-  )
-  let finish : DeviceMsg = Finished(
-    run_id="r7",
-    status="failed",
-    answer=None,
-    durable_sequence=None,
-  )
-  let (_, finished) = update_dev(dispatch, finish, settled)
-  assert_true(
-    finished.active().overlay[0].anchor is SnapshotCut(snapshot_generation=1),
-  )
-  assert_true(finished.active().has_unresolved_run_tail_notice())
-  let (_, finalized) = update_dev(
-    dispatch,
-    DurableBoundary(run_id="r7", session="desktop-test", sequence=1),
-    finished,
-  )
-  assert_true(finalized.active().overlay[0].anchor is DurableTail(1))
-  let (_, duplicate) = update_dev(dispatch, finish, finalized)
-  assert_true(duplicate.active().overlay[0].anchor is DurableTail(1))
-  assert_true(duplicate.active().has_unresolved_run_tail_notice())
-}
-
-///|
-test "runs settlement follows an older in-flight transcript cut" {
-  let dispatch = test_dispatch()
-  let conv = with_pending_steers(
-    { ..running_conversation(), sync: test_reloading([]) },
-    ["captured steer"],
-  )
-  let model = {
-    ..running_model().replace_conversation(conv),
-    transcript_request_generation: 1,
-  }
-  let frontier = model.run_snapshot_frontier(@interop.ChannelId::Local)
-  let (_, settled) = update_dev(
-    dispatch,
-    RunsSettled(live=[], frontier~),
-    model,
-  )
-  assert_true(
-    settled.active().sync
-    is Reloading(generation=1, reload_after_current=true, ..),
-  )
-  let (_, first_cut) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[],
-      watermark=1,
-      event_boundaries=[(1, true, 0)],
-      generation=1,
-    ),
-    settled,
-  )
-  assert_true(first_cut.active().sync is Reloading(generation=2, ..))
-}
-
-///|
-test "duplicate abnormal Finished keeps an initial prompt on one causal cut" {
-  let dispatch = test_dispatch()
-  let conv = with_initial_submission(
-    running_conversation(),
-    "prompt-id",
-    "recover this prompt",
-  ).bind_initial_submission_to_run("prompt-id", "r7")
-  let finish : DeviceMsg = Finished(
-    run_id="r7",
-    status="failed",
-    answer=None,
-    durable_sequence=None,
-  )
-  let (_, once) = update_dev(
-    dispatch,
-    finish,
-    running_model().replace_conversation(conv),
-  )
-  guard once.active().overlay is [first_notice] else {
-    fail("the failed run should leave one recoverable prompt notice")
-  }
-  assert_true(first_notice.anchor is SnapshotCut(snapshot_generation=1))
-  assert_true(once.active().sync is Reloading(generation=1, ..))
-  let (_, twice) = update_dev(dispatch, finish, once)
-  guard twice.active().overlay is [duplicate_notice] else {
-    fail("duplicate Finished must not grow the prompt notice set")
-  }
-  assert_true(duplicate_notice.anchor is SnapshotCut(snapshot_generation=1))
-  assert_true(twice.active().sync is Reloading(generation=1, ..))
-  let (_, reconciled) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[],
-      watermark=0,
-      event_boundaries=[],
-      generation=1,
-    ),
-    twice,
-  )
-  assert_true(reconciled.active().sync is Synced)
-  assert_true(reconciled.active().overlay[0].anchor is AfterMessages(0))
-  assert_false(reconciled.active().has_unresolved_run_tail_notice())
-  inspect(reconciled.active().input_ledger.length(), content="1")
-  assert_true(reconciled.active().input_ledger[0].state is Unconfirmed)
-}
-
-///|
-test "runs settlement causally freezes bound initial prompts from open and idle frontiers" {
-  let dispatch = test_dispatch()
-  let open_conv = with_initial_submission(
-    running_conversation(),
-    "open-prompt",
-    "prompt from the open run",
-  ).bind_initial_submission_to_run("open-prompt", "r7")
-  let open_model = running_model().replace_conversation(open_conv)
-  let (_, open_settled) = update_dev(
-    dispatch,
-    RunsSettled(
-      live=[],
-      frontier=open_model.run_snapshot_frontier(@interop.ChannelId::Local),
-    ),
-    open_model,
-  )
-  assert_true(open_settled.active().run is NoRun(ended=None))
-  assert_true(open_settled.active().input_ledger[0].state is Unconfirmed)
-  assert_true(
-    open_settled.active().overlay[0].anchor
-    is SnapshotCut(snapshot_generation=1),
-  )
-  assert_true(open_settled.active().sync is Reloading(generation=1, ..))
-  let (_, open_frozen) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[
-        {
-          kind: User,
-          content: "open-run durable tail",
-          ts: None,
-          sequence: None,
-        },
-      ],
-      watermark=1,
-      event_boundaries=[(1, false, 1)],
-      generation=1,
-    ),
-    open_settled,
-  )
-  assert_true(open_frozen.active().overlay[0].anchor is AfterMessages(1))
-  assert_false(open_frozen.active().has_unresolved_run_tail_notice())
-  inspect(open_frozen.active().input_ledger.length(), content="1")
-
-  let idle_bound = with_initial_submission(
-    { ..test_conversation(), run: NoRun(ended=None), last_run_id: Some("r7") },
-    "idle-prompt",
-    "prompt from the idle run",
-  ).bind_initial_submission_to_run("idle-prompt", "r7")
-  let (idle_conv, marked) = idle_bound.mark_submission_unconfirmed(
-    "idle-prompt", "existing uncertain prompt notice", false,
-  )
-  assert_true(marked)
-  let idle_model = test_model().replace_conversation(idle_conv)
-  let (_, idle_settled) = update_dev(
-    dispatch,
-    RunsSettled(
-      live=[],
-      frontier=idle_model.run_snapshot_frontier(@interop.ChannelId::Local),
-    ),
-    idle_model,
-  )
-  assert_true(idle_settled.active().input_ledger[0].state is Unconfirmed)
-  assert_true(
-    idle_settled.active().overlay[0].anchor
-    is SnapshotCut(snapshot_generation=1),
-  )
-  assert_true(idle_settled.active().sync is Reloading(generation=1, ..))
-  let (_, idle_frozen) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[
-        {
-          kind: Assistant(is_danger=false),
-          content: "idle-run durable tail",
-          ts: None,
-          sequence: None,
-        },
-      ],
-      watermark=1,
-      event_boundaries=[(1, false, 1)],
-      generation=1,
-    ),
-    idle_settled,
-  )
-  assert_true(idle_frozen.active().overlay[0].anchor is AfterMessages(1))
-  assert_false(idle_frozen.active().has_unresolved_run_tail_notice())
-  inspect(idle_frozen.active().input_ledger.length(), content="1")
-}
-
-///|
-test "an initial warning freezes between a snapshot and its buffered successor" {
-  let dispatch = test_dispatch()
-  let conv = with_initial_submission(
-    running_conversation(),
-    "prompt-id",
-    "prompt awaiting proof",
-  ).bind_initial_submission_to_run("prompt-id", "r7")
-  let (_, finished) = update_dev(
-    dispatch,
-    Finished(run_id="r7", status="failed", answer=None, durable_sequence=None),
-    running_model().replace_conversation(conv),
-  )
-  let (_, buffered) = update_dev(
-    dispatch,
-    SessionCommitted(
-      session="desktop-test",
-      sequence=2,
-      ts=None,
-      item=@protocol.User({ content: "buffered W+1", submission_id: None }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
-    ),
-    finished,
-  )
-  guard buffered.active().sync is Reloading(buffered=commits, ..) else {
-    fail("the post-cut commit should wait behind the snapshot")
-  }
-  inspect(commits.length(), content="1")
-  let (_, reconciled) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[{ kind: User, content: "snapshot W", ts: None, sequence: None }],
-      watermark=1,
-      event_boundaries=[(1, false, 1)],
-      generation=1,
-    ),
-    buffered,
-  )
-  assert_true(reconciled.active().sync is Synced)
-  assert_true(reconciled.active().overlay[0].anchor is AfterMessages(1))
-  inspect(reconciled.active().watermark, content="2")
-  let visible = reconciled.active().visible_items()
-  inspect(visible.length(), content="3")
-  inspect(visible[0].content, content="snapshot W")
-  assert_true(visible[1].content.contains("prompt awaiting proof"))
-  inspect(visible[2].content, content="buffered W+1")
-}
-
-///|
-test "foreign Started reanchors a reconnected initial before retiring its ownership" {
-  let dispatch = test_dispatch()
-  let conv = with_initial_submission(
-    running_conversation(),
-    "old-prompt",
-    "old prompt",
-  ).bind_initial_submission_to_run("old-prompt", "r7")
-  let (_, bridged) = update_dev(
-    dispatch,
-    BridgeReady,
-    running_model().replace_conversation(conv),
-  )
-  assert_true(bridged.active().input_ledger[0].state is Unconfirmed)
-  assert_true(
-    bridged.active().overlay[0].anchor is SnapshotCut(snapshot_generation=1),
-  )
-  assert_true(bridged.active().sync is Reloading(generation=1, ..))
-  let (_, started) = update_dev(
-    dispatch,
-    Started(
-      run_id="r8",
-      session="desktop-test",
-      model=High,
-      max_steps=1000,
-      session_root=None,
-      submission_id=Some("foreign-prompt"),
-    ),
-    bridged,
-  )
-  inspect(started.active().input_ledger.length(), content="0")
-  guard started.active().overlay is [retired_notice] else {
-    fail("the old prompt warning should survive as a retained notice")
-  }
-  assert_true(retired_notice.reconciliation is Retained)
-  assert_true(retired_notice.anchor is SnapshotCut(snapshot_generation=2))
-  assert_true(
-    started.active().sync
-    is Reloading(generation=1, reload_after_current=true, ..),
-  )
-  let (_, old_cut) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[
-        { kind: User, content: "old durable prompt", ts: None, sequence: None },
-      ],
-      watermark=1,
-      event_boundaries=[(1, false, 1)],
-      generation=1,
-    ),
-    started,
-  )
-  assert_true(old_cut.active().sync is Reloading(generation=2, ..))
-  assert_true(
-    old_cut.active().overlay[0].anchor is SnapshotCut(snapshot_generation=2),
-  )
-  let (_, causal) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[
-        { kind: User, content: "old durable prompt", ts: None, sequence: None },
-      ],
-      watermark=1,
-      event_boundaries=[(1, false, 1)],
-      generation=2,
-    ),
-    old_cut,
-  )
-  assert_true(causal.active().sync is Synced)
-  assert_true(causal.active().overlay[0].anchor is AfterMessages(1))
-  let visible = causal.active().visible_items()
-  inspect(visible.length(), content="2")
-  inspect(visible[0].content, content="old durable prompt")
-  assert_true(visible[1].content.contains("old prompt"))
-}
-
-///|
-test "an exact zero abnormal EOF releases a fresh prompt for another send" {
-  let dispatch = test_dispatch()
-  let conv = with_initial_submission(
-    { ..test_conversation(), run: Starting(submission_id="fresh-prompt") },
-    "fresh-prompt",
-    "prompt before setup failure",
-  )
-  let (_, started) = update_dev(
-    dispatch,
-    Started(
-      run_id="r-fresh",
-      session="desktop-test",
-      model=High,
-      max_steps=1000,
-      session_root=None,
-      submission_id=Some("fresh-prompt"),
-    ),
-    test_model().replace_conversation(conv),
-  )
-  assert_true(started.active().sync is Reloading(generation=1, ..))
-  let (_, failed) = update_dev(
-    dispatch,
-    Finished(
-      run_id="r-fresh",
-      status="failed",
-      answer=None,
-      durable_sequence=Some(0),
-    ),
-    started,
-  )
-  assert_true(failed.active().sync is Synced)
-  assert_true(failed.active().run is NoRun(ended=Some(RunFinished(RunFailed))))
-  inspect(failed.active().input_ledger.length(), content="0")
-  inspect(failed.active().task, content="prompt before setup failure")
-  assert_true(failed.active().overlay[0].anchor is AfterMessages(0))
-  assert_true(failed.active().overlay[0].reconciliation is Retained)
-  assert_true(
-    failed.active().visible_items()[0].content.contains(
-      "restored for resubmission",
-    ),
-  )
-  assert_false(failed.active().has_unresolved_run_tail_notice())
-  let (_, retried) = update(dispatch, Send, failed)
-  assert_true(retried.active().run is Starting(..))
-  inspect(retried.active().task, content="")
-  inspect(retried.active().input_ledger.length(), content="1")
-}
-
-///|
-test "late start responses cannot reopen an exact-zero recovery read" {
-  let dispatch = test_dispatch()
-  let started = fresh_started_model(
-    "late-response-prompt", "r-late-response", "restore before the response",
-  )
-  let (_, recovered) = update_dev(
-    dispatch,
-    Finished(
-      run_id="r-late-response",
-      status="failed",
-      answer=None,
-      durable_sequence=Some(0),
-    ),
-    started,
-  )
-  assert_true(recovered.active().sync is Synced)
-  inspect(recovered.active().input_ledger.length(), content="0")
-  let generation = recovered.transcript_request_generation
-  let (_, accepted) = update_dev(
-    dispatch,
-    StartResponded(
-      session="desktop-test",
-      submission_id="late-response-prompt",
-      run_id=Some("r-late-response"),
-      status="accepted",
-      exit_code=0,
-    ),
-    recovered,
-  )
-  assert_true(accepted.active().sync is Synced)
-  assert_eq(accepted.transcript_request_generation, generation)
-  inspect(accepted.active().task, content="restore before the response")
-  inspect(accepted.active().input_ledger.length(), content="0")
-  let (_, failed) = update_dev(
-    dispatch,
-    StartResponded(
-      session="desktop-test",
-      submission_id="late-response-prompt",
-      run_id=Some("r-late-response"),
-      status="failed",
-      exit_code=1,
-    ),
-    recovered,
-  )
-  assert_true(failed.active().sync is Synced)
-  assert_eq(failed.transcript_request_generation, generation)
-  inspect(failed.active().task, content="restore before the response")
-  inspect(failed.active().input_ledger.length(), content="0")
-}
-
-///|
-test "BridgeReady does not probe a record disproved by exact-zero EOF" {
-  let dispatch = test_dispatch()
-  let started = fresh_started_model(
-    "reconnect-zero-prompt", "r-reconnect-zero", "restore across reconnect",
-  )
-  let (_, recovered) = update_dev(
-    dispatch,
-    Finished(
-      run_id="r-reconnect-zero",
-      status="failed",
-      answer=None,
-      durable_sequence=Some(0),
-    ),
-    started,
-  )
-  let generation = recovered.transcript_request_generation
-  let (_, reconnected) = update_dev(dispatch, BridgeReady, recovered)
-  assert_true(reconnected.active().sync is Synced)
-  assert_eq(reconnected.transcript_request_generation, generation)
-  inspect(reconnected.active().task, content="restore across reconnect")
-  inspect(reconnected.active().input_ledger.length(), content="0")
-  assert_true(reconnected.active().overlay[0].reconciliation is Retained)
-}
-
-///|
-test "a late exact-zero durable boundary recovers from active and failed reloads" {
-  let dispatch = test_dispatch()
-  let reloading_started = fresh_started_model(
-    "reloading-zero-prompt", "r-reloading-zero", "restore from reloading",
-  )
-  let (_, reloading) = update_dev(
-    dispatch,
-    Finished(
-      run_id="r-reloading-zero",
-      status="failed",
-      answer=None,
-      durable_sequence=None,
-    ),
-    reloading_started,
-  )
-  assert_true(reloading.active().sync is Reloading(..))
-  let (_, recovered_reloading) = update_dev(
-    dispatch,
-    DurableBoundary(
-      run_id="r-reloading-zero",
-      session="desktop-test",
-      sequence=0,
-    ),
-    reloading,
-  )
-  assert_true(recovered_reloading.active().sync is Synced)
-  inspect(recovered_reloading.active().task, content="restore from reloading")
-  inspect(recovered_reloading.active().input_ledger.length(), content="0")
-  assert_true(
-    recovered_reloading.active().overlay[0].reconciliation is Retained,
-  )
-
-  let failed_started = fresh_started_model(
-    "failed-zero-prompt", "r-failed-zero", "restore from failed reload",
-  )
-  let (_, waiting) = update_dev(
-    dispatch,
-    Finished(
-      run_id="r-failed-zero",
-      status="failed",
-      answer=None,
-      durable_sequence=None,
-    ),
-    failed_started,
-  )
-  let failed_reload = waiting.replace_conversation({
-    ..waiting.active(),
-    sync: ReloadFailed(generation=1, buffered=[]),
-  })
-  let (_, recovered_failed) = update_dev(
-    dispatch,
-    DurableBoundary(run_id="r-failed-zero", session="desktop-test", sequence=0),
-    failed_reload,
-  )
-  assert_true(recovered_failed.active().sync is Synced)
-  inspect(recovered_failed.active().task, content="restore from failed reload")
-  inspect(recovered_failed.active().input_ledger.length(), content="0")
-  assert_true(recovered_failed.active().overlay[0].reconciliation is Retained)
-}
-
-///|
-test "exact-zero recovery refuses buffered or nonzero durable frontiers" {
-  let dispatch = test_dispatch()
-  let buffered_started = fresh_started_model(
-    "buffered-zero-prompt", "r-buffered-zero", "keep buffered ownership",
-  )
-  let (_, waiting) = update_dev(
-    dispatch,
-    Finished(
-      run_id="r-buffered-zero",
-      status="failed",
-      answer=None,
-      durable_sequence=None,
-    ),
-    buffered_started,
-  )
-  let (_, buffered) = update_dev(
-    dispatch,
-    SessionCommitted(
-      session="desktop-test",
-      sequence=1,
-      ts=None,
-      item=@protocol.User({
-        content: "durable prompt arrived",
-        submission_id: None,
-      }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
-    ),
-    waiting,
-  )
-  let (_, zero_with_buffer) = update_dev(
-    dispatch,
-    DurableBoundary(
-      run_id="r-buffered-zero",
-      session="desktop-test",
-      sequence=0,
-    ),
-    buffered,
-  )
-  guard zero_with_buffer.active().sync is Reloading(buffered=commits, ..) else {
-    fail("a buffered commit must keep transcript reconciliation active")
-  }
-  inspect(commits.length(), content="1")
-  inspect(zero_with_buffer.active().task, content="")
-  inspect(zero_with_buffer.active().input_ledger.length(), content="1")
-  assert_true(
-    zero_with_buffer.active().overlay[0].reconciliation
-    is Submission("buffered-zero-prompt"),
-  )
-
-  let nonzero_started = fresh_started_model(
-    "nonzero-prompt", "r-nonzero", "keep nonzero ownership",
-  )
-  let (_, nonzero) = update_dev(
-    dispatch,
-    Finished(
-      run_id="r-nonzero",
-      status="failed",
-      answer=None,
-      durable_sequence=Some(1),
-    ),
-    nonzero_started,
-  )
-  assert_true(nonzero.active().sync is Reloading(..))
-  inspect(nonzero.active().task, content="")
-  inspect(nonzero.active().input_ledger.length(), content="1")
-  assert_true(nonzero.active().overlay[0].anchor is DurableTail(1))
-  assert_true(
-    nonzero.active().overlay[0].reconciliation is Submission("nonzero-prompt"),
-  )
+  inspect(dropped.active().task, content="")
+  inspect(dropped.active().overlay.length(), content="0")
 }
 
 ///|
