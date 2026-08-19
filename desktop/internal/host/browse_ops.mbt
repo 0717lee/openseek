@@ -31,6 +31,13 @@ async fn browse_directory_listing(
   payload : BrowseDirectoryPayload,
 ) -> BrowseDirectoryReply {
   let requested = payload.path.unwrap_or("").trim().to_owned()
+  // The resource-path root "/" is a real location in every listing's URI
+  // space, but on Windows no directory lives there: the level above the
+  // drive roots is the drive list, and answering it is what lets the picker
+  // reach another drive letter.
+  if requested == "/" && (@sysplatform.win32 || @sysplatform.win64) {
+    return Drives(entries=windows_drive_list())
+  }
   let target : @pathx.Absolute = if requested.is_empty() {
     guard @home.dir() is Some(home) else {
       raise HostError("cannot determine the home directory")
@@ -95,6 +102,25 @@ async fn browse_directory_listing(
 }
 
 ///|
+/// The mounted Windows drives, by probing every letter: 26 stats are cheap
+/// next to the listing's readdir, and a letter without media simply fails
+/// the probe. Spellings are bare ("C:") because they are the drive list's
+/// row names; the frontend enters a drive through its resource path.
+async fn windows_drive_list() -> Array[String] {
+  let drives : Array[String] = []
+  for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ" {
+    let kind = @fs.kind("\{letter}:\\") catch {
+      error if @async.is_being_cancelled() => raise error
+      _ => continue
+    }
+    if kind is Directory {
+      drives.push("\{letter}:")
+    }
+  }
+  drives
+}
+
+///|
 async test "directory browsing accepts native input and returns URI paths" {
   let dir = @fs.tmpdir(prefix="openseek-browse-path-")
   @fsx.ensure_dir(Path(dir + "/child"))
@@ -110,6 +136,20 @@ async test "directory browsing accepts native input and returns URI paths" {
   }
   assert_eq(again, path)
   @fs.rmdir(dir, recursive=true)
+}
+
+///|
+async test "the resource root stays a real listing on POSIX hosts" {
+  // On Windows the same address answers the drive list; POSIX hosts must
+  // keep serving the filesystem root as an ordinary directory.
+  if @sysplatform.win32 || @sysplatform.win64 {
+    return
+  }
+  guard browse_directory_op({ path: Some("/") }) is Listing(path~, parent~, ..) else {
+    fail("expected the filesystem root to list")
+  }
+  assert_eq(path, "/")
+  assert_true(parent is None)
 }
 
 ///|

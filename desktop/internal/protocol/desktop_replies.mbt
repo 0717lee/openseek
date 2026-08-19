@@ -966,13 +966,17 @@ pub(all) struct StatFilesReply {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-/// One directory listing (`parent` is `None` at a filesystem root), or the
-/// reason there is none. Success keeps the legacy `{path,parent?,entries}`
-/// shape; the refusal rides in the reply body as `{error:"..."}` because
-/// the local bridge summarizes raised handler errors down to "op <name>
-/// failed".
+/// One directory listing (`parent` is `None` at a filesystem root), the
+/// Windows drive list, or the reason there is none. Success keeps the
+/// legacy `{path,parent?,entries}` shape; the refusal rides in the reply
+/// body as `{error:"..."}` because the local bridge summarizes raised
+/// handler errors down to "op <name> failed".
 pub(all) enum BrowseDirectoryReply {
   Listing(path~ : String, parent~ : String?, entries~ : Array[String])
+  // Windows only: the virtual level above the drive roots, reached by
+  // browsing the resource-path root "/". Entries are drive spellings such
+  // as "C:"; the drive root itself is the resource path "/C:/".
+  Drives(entries~ : Array[String])
   BrowseError(String)
 } derive(Debug, Eq)
 
@@ -989,6 +993,7 @@ pub impl ToJson for BrowseDirectoryReply with fn to_json(self) {
       }
       Json::object(fields)
     }
+    Drives(entries~) => { "drives": entries.to_json() }
     BrowseError(message) => { "error": message }
   }
 }
@@ -1005,6 +1010,9 @@ pub impl FromJson for BrowseDirectoryReply with fn from_json(json, path) {
         (path.add_key("error"), "browse error must be a string"),
       )
     None => {
+      if fields.get("drives") is Some(drives) {
+        return Drives(entries=@json.from_json(drives))
+      }
       guard fields.get("path") is Some(String(listed)) else {
         raise JsonDecodeError((path, "expected a directory path"))
       }

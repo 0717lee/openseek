@@ -102,6 +102,7 @@ pub(all) struct BrowseDirectoryPayload {
 
 pub(all) enum BrowseDirectoryReply {
   Listing(path~ : String, parent~ : String?, entries~ : Array[String])
+  Drives(entries~ : Array[String])
   BrowseError(String)
 } derive(Eq, @debug.Debug)
 pub impl ToJson for BrowseDirectoryReply

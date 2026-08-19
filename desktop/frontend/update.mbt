@@ -3381,7 +3381,7 @@ fn update_msg(
         }
         None => (@cmd.none, model)
       }
-    ProjectPickerLoaded(channel~, path~, entries~, generation~) =>
+    ProjectPickerLoaded(channel~, location~, entries~, generation~) =>
       // A listing for a picker the user already closed — or one answering
       // a navigation that has since been superseded — is dropped.
       match model.project_picker {
@@ -3393,7 +3393,7 @@ fn update_msg(
               ..model,
               project_picker: Some({
                 channel,
-                path: Some(path),
+                location: Some(location),
                 entries,
                 loading: false,
                 generation,
@@ -3426,8 +3426,10 @@ fn update_msg(
         // navigates (and validates) first. While a navigation is in flight
         // the shown listing is stale, so Enter must wait: confirming then
         // would attach the previous directory, not the destination. The
-        // pending adoption later focuses the project the add committed.
-        Some(picker) if picker.path is Some(path) && !picker.loading => {
+        // Windows drive list is not a directory and cannot be registered.
+        // The pending adoption later focuses the project the add committed.
+        Some(picker) if picker.location is Some(Directory(path)) &&
+          !picker.loading => {
           let known = match model.device_state(picker.channel) {
             Some(dev) => dev.projects.copy()
             None => []
