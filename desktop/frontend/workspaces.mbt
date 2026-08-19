@@ -561,7 +561,6 @@ test "opening a stored session joins its project and loaded worktree" {
       session="desktop-w",
       items=[],
       watermark=0,
-      event_boundaries=[],
       goal=None,
       goal_markers=[],
       generation=1,

@@ -625,7 +625,6 @@ fn apply_session_snapshot(
   session : String,
   items : Array[@transcript.TranscriptItem],
   watermark : Int,
-  event_boundaries : Array[(Int, Bool, Int)],
   goal : @transcript.GoalStanding?,
   goal_markers : Array[(Int, @transcript.GoalMarker)],
   generation : Int,
@@ -650,7 +649,6 @@ fn apply_session_snapshot(
   let (conv, gapped) = conv.adopt_snapshot(
     items,
     watermark,
-    event_boundaries,
     goal~,
     goal_markers~,
   )
@@ -1170,7 +1168,7 @@ fn apply_engine_event(
     SteerDropped(content=_, submission_id~) =>
       if submission_id is Some(submission_id) {
         let (next, removed) = conv.reject_steer(submission_id, event_run_id)
-        (if removed { Some(steer_dropped_notice()) } else { None }, next)
+        (if removed { Some(SteerDroppedNotice) } else { None }, next)
       } else {
         (None, conv)
       }
@@ -4834,7 +4832,7 @@ fn update_device_msg(
         if removed {
           model
           .replace_conversation(next)
-          .notify_error(dispatch, steer_dropped_notice())
+          .notify_error(dispatch, SteerDroppedNotice)
         } else {
           (@cmd.none, model)
         }
@@ -5636,27 +5634,25 @@ fn update_device_msg(
       session~,
       items~,
       watermark~,
-      event_boundaries~,
       goal~,
       goal_markers~,
       generation~
     ) =>
       apply_session_snapshot(
-        dispatch, channel, model, session, items, watermark, event_boundaries, goal,
-        goal_markers, generation, true,
+        dispatch, channel, model, session, items, watermark, goal, goal_markers,
+        generation, true,
       )
     SessionRefreshed(
       session~,
       items~,
       watermark~,
-      event_boundaries~,
       goal~,
       goal_markers~,
       generation~
     ) =>
       apply_session_snapshot(
-        dispatch, channel, model, session, items, watermark, event_boundaries, goal,
-        goal_markers, generation, false,
+        dispatch, channel, model, session, items, watermark, goal, goal_markers,
+        generation, false,
       )
     SessionLoadFailed(session~, message~, generation~) =>
       retry_session_snapshot(
@@ -7263,7 +7259,6 @@ fn second_run_started_before_first_response() -> (Model, String)? {
       session="desktop-test",
       items=[],
       watermark=1,
-      event_boundaries=[(1, true, 0)],
       generation=1,
     ),
     first_finished,
@@ -7276,7 +7271,6 @@ fn second_run_started_before_first_response() -> (Model, String)? {
       session="desktop-test",
       items=[],
       watermark=1,
-      event_boundaries=[(1, true, 0)],
       generation=2,
     ),
     reconciled,
@@ -7326,7 +7320,6 @@ fn second_run_started_before_first_steer_receipt() -> Model? {
       session="desktop-test",
       items=[],
       watermark=1,
-      event_boundaries=[(1, true, 0)],
       generation=1,
     ),
     first_finished,
@@ -7606,7 +7599,6 @@ test "finished run reloads the named durable session for an old host" {
         },
       ],
       watermark=3,
-      event_boundaries=[(3, true, 2)],
       generation=1,
     ),
     finished,
@@ -7653,7 +7645,6 @@ test "Finished queues one follow-up behind an older in-flight snapshot" {
       session="desktop-test",
       items=[],
       watermark=0,
-      event_boundaries=[],
       generation=1,
     ),
     duplicate,
@@ -8749,7 +8740,6 @@ test "open session tracks the latest load and ignores stale replies" {
       session="desktop-a",
       items=a_items,
       watermark=0,
-      event_boundaries=[],
       generation=1,
     ),
     loading_b,
@@ -8770,7 +8760,6 @@ test "open session tracks the latest load and ignores stale replies" {
       session="desktop-b",
       items=b_items,
       watermark=0,
-      event_boundaries=[],
       generation=2,
     ),
     after_a,
@@ -8815,7 +8804,6 @@ test "a restored session keeps the placement its listing named" {
       session~,
       items=[],
       watermark=0,
-      event_boundaries=[],
       goal=None,
       goal_markers=[],
       generation=1,
@@ -8893,7 +8881,6 @@ test "same-id session loads are fenced by channel owner" {
           },
         ],
         watermark=1,
-        event_boundaries=[],
         generation=1,
       ),
     ),
@@ -8963,7 +8950,6 @@ test "reselecting a synced active session reloads idle external writes" {
         },
       ],
       watermark=1,
-      event_boundaries=[],
       generation=1,
     ),
     still_single_flight,
@@ -9038,7 +9024,6 @@ test "pruning and reopening cannot reuse a transcript request token" {
         { kind: User, content: "late old snapshot", ts: None, sequence: None },
       ],
       watermark=9,
-      event_boundaries=[],
       generation=1,
     ),
     reopened,
@@ -9064,7 +9049,6 @@ test "pruning and reopening cannot reuse a transcript request token" {
         { kind: User, content: "fresh snapshot", ts: None, sequence: None },
       ],
       watermark=1,
-      event_boundaries=[],
       generation=2,
     ),
     stale,
@@ -9121,7 +9105,6 @@ test "archive removal and reopening cannot reuse a transcript request token" {
         },
       ],
       watermark=4,
-      event_boundaries=[],
       generation=1,
     ),
     reopened,
@@ -9444,7 +9427,6 @@ test "session loaded swaps the active conversation onto the stored session" {
       session="desktop-stored",
       items~,
       watermark=0,
-      event_boundaries=[],
       generation=1,
     ),
     loading,
@@ -9457,7 +9439,6 @@ test "session loaded swaps the active conversation onto the stored session" {
       session="desktop-stored",
       items~,
       watermark=0,
-      event_boundaries=[],
       generation=1,
     ),
     loading,
@@ -9497,7 +9478,6 @@ test "session loaded adopts the store transcript and keeps live run state" {
       session="desktop-stored",
       items~,
       watermark=0,
-      event_boundaries=[],
       generation=1,
     ),
     loading_other,
@@ -9530,7 +9510,6 @@ test "session loaded adopts the store transcript and keeps live run state" {
       session="desktop-test",
       items~,
       watermark=0,
-      event_boundaries=[],
       generation=1,
     ),
     loading_same,
@@ -10050,12 +10029,6 @@ test "an accepted start response opens the run without Started" {
         { kind: User, content: "prompt", ts: None, sequence: None },
       ],
       watermark=4,
-      event_boundaries=[
-        (1, false, 1),
-        (2, false, 2),
-        (3, true, 2),
-        (4, false, 3),
-      ],
       generation=1,
     ),
     started,
@@ -10591,7 +10564,6 @@ test "a failed response after durable Finished cannot resurrect its prompt" {
       session="desktop-test",
       items=[],
       watermark=0,
-      event_boundaries=[],
       generation=1,
     ),
     failed,
@@ -10797,7 +10769,6 @@ test "a live commit dates its row on arrival, buffered or applied straight" {
       session="desktop-test",
       items=[],
       watermark=0,
-      event_boundaries=[],
       generation=1,
       goal=None,
       goal_markers=[],
@@ -10850,7 +10821,6 @@ test "a snapshot never settles a local steer by text" {
       session="desktop-test",
       items=[{ kind: User, content: "same", ts: None, sequence: None }],
       watermark=1,
-      event_boundaries=[],
       generation=1,
     ),
     model,
@@ -10986,7 +10956,6 @@ test "a foreign background run schedules one causal read after Started" {
       @interop.ChannelId::Local.test_project(),
     ),
     watermark: 1,
-    last_terminal_sequence: 1,
     sync: test_reloading([]),
   }
   let model = {
@@ -11059,7 +11028,6 @@ test "a foreign background run schedules one causal read after Started" {
       session~,
       items=[],
       watermark=1,
-      event_boundaries=[(1, true, 0)],
       goal=None,
       goal_markers=[],
       generation=1,
@@ -11071,7 +11039,6 @@ test "a foreign background run schedules one causal read after Started" {
     fail("missing conversation after old snapshot")
   }
   assert_true(after_old.sync is Reloading(generation=2, ..))
-  inspect(after_old.last_terminal_sequence, content="3")
   let (_, causal) = update_dev(
     dispatch,
     SessionRefreshed(
@@ -11086,12 +11053,6 @@ test "a foreign background run schedules one causal read after Started" {
         { kind: User, content: "current question", ts: None, sequence: None },
       ],
       watermark=4,
-      event_boundaries=[
-        (1, true, 0),
-        (2, false, 1),
-        (3, true, 1),
-        (4, false, 2),
-      ],
       goal=None,
       goal_markers=[],
       generation=2,
@@ -11112,7 +11073,6 @@ test "buffered commits are delivery, not applied chronology" {
   let conv = {
     ..running_conversation(),
     watermark: 1,
-    last_terminal_sequence: 1,
     sync: test_reloading([]),
   }
   let model = test_model().replace_conversation(conv)
@@ -11153,8 +11113,10 @@ test "buffered commits are delivery, not applied chronology" {
     ),
     answer,
   )
-  // Buffered state is delivery, not applied chronology.
-  inspect(terminal.active().last_terminal_sequence, content="1")
+  // Buffered state is delivery, not applied chronology: three commits have
+  // arrived and none of them has moved the transcript.
+  inspect(terminal.active().watermark, content="1")
+  inspect(terminal.active().messages.length(), content="0")
   let (_, loaded) = update_dev(
     dispatch,
     SessionRefreshed(
@@ -11163,12 +11125,14 @@ test "buffered commits are delivery, not applied chronology" {
       session="desktop-test",
       items=[],
       watermark=1,
-      event_boundaries=[(1, true, 0)],
       generation=1,
     ),
     terminal,
   )
-  inspect(loaded.active().last_terminal_sequence, content="4")
+  // The snapshot lands and the ordered buffer drains on top of it. The
+  // terminal projects no row of its own.
+  inspect(loaded.active().watermark, content="4")
+  inspect(loaded.active().messages.length(), content="2")
 }
 
 ///|
@@ -13063,7 +13027,6 @@ test "switching same-id archived stores fences the first transcript load" {
         },
       ],
       watermark=1,
-      event_boundaries=[],
       goal=None,
       goal_markers=[],
       generation=1,
@@ -13085,7 +13048,6 @@ test "switching same-id archived stores fences the first transcript load" {
         },
       ],
       watermark=1,
-      event_boundaries=[],
       goal=None,
       goal_markers=[],
       generation=2,
@@ -13149,7 +13111,6 @@ test "an archived snapshot stays open across archived-list reconciliation" {
         },
       ],
       watermark=1,
-      event_boundaries=[],
       generation=1,
     ),
     loading,
@@ -13218,7 +13179,6 @@ test "unarchiving an open transcript fences its archived snapshot" {
         },
       ],
       watermark=1,
-      event_boundaries=[],
       generation=1,
     ),
     restoring,
@@ -13563,7 +13523,6 @@ test "a new Started incarnation retires its exact deleted tombstone" {
       session=deleted_item.id,
       items=[],
       watermark=0,
-      event_boundaries=[],
       goal=None,
       goal_markers=[],
       generation~,
@@ -14050,7 +14009,6 @@ test "BridgeReady replaces archive overrides with fresh-list truth" {
         },
       ],
       watermark=1,
-      event_boundaries=[],
       generation=1,
     ),
     live,
@@ -16112,7 +16070,6 @@ test "a snapshot drains buffered commits in sequence order" {
         },
       ],
       watermark=2,
-      event_boundaries=[],
       generation=1,
     ),
     model,
@@ -16148,7 +16105,6 @@ test "a snapshot already containing the buffered commits drops them" {
         { kind: User, content: "dup", ts: None, sequence: None },
       ],
       watermark=2,
-      event_boundaries=[],
       generation=1,
     ),
     model,
@@ -16179,7 +16135,6 @@ test "a snapshot with a still-gapped buffer keeps reloading" {
       session="desktop-test",
       items=[{ kind: User, content: "one", ts: None, sequence: None }],
       watermark=2,
-      event_boundaries=[],
       generation=1,
     ),
     model,
@@ -16250,7 +16205,6 @@ test "background retries preserve buffered commits until a later success" {
       session="desktop-test",
       items=[{ kind: User, content: "kept", ts: None, sequence: None }],
       watermark=1,
-      event_boundaries=[],
       generation=2,
     ),
     retrying,
@@ -16300,7 +16254,6 @@ test "reopening an active failed reload restarts it and keeps the buffer" {
       session="desktop-test",
       items=[{ kind: User, content: "kept", ts: None, sequence: None }],
       watermark=1,
-      event_boundaries=[],
       generation=2,
     ),
     reopened,
@@ -16343,7 +16296,6 @@ test "stale and lower-watermark snapshots cannot overwrite current state" {
         { kind: User, content: "stale generation", ts: None, sequence: None },
       ],
       watermark=9,
-      event_boundaries=[],
       generation=1,
     ),
     model,
@@ -16364,7 +16316,6 @@ test "stale and lower-watermark snapshots cannot overwrite current state" {
         { kind: User, content: "older snapshot", ts: None, sequence: None },
       ],
       watermark=4,
-      event_boundaries=[],
       generation=2,
     ),
     stale,

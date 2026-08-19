@@ -100,7 +100,6 @@ pub(all) struct SessionListItem {
 pub struct SessionLoadView {
   items : Array[TranscriptItem]
   watermark : Int
-  event_boundaries : Array[(Int, Bool, Int)]
   goal : GoalStanding?
   goal_markers : Array[(Int, GoalMarker)]
 }

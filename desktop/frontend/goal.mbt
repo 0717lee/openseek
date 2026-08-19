@@ -642,7 +642,6 @@ test "re-asserting an unchanged goal waits for its own marker too" {
         session="desktop-test",
         items=[],
         watermark=9,
-        event_boundaries=[],
         generation=1,
       ),
       {
@@ -699,7 +698,6 @@ test "a set is recorded even when the record has moved on since" {
       session="desktop-test",
       items=[],
       watermark=9,
-      event_boundaries=[],
       generation=1,
     ),
     model,
@@ -970,7 +968,6 @@ test "a request in flight is reason enough to re-read the record" {
       session="desktop-test",
       items=[],
       watermark=0,
-      event_boundaries=[],
       generation=1,
     ),
     {
@@ -1272,7 +1269,6 @@ test "a reload settles a request the transport never answered" {
         session="desktop-test",
         items=[],
         watermark=9,
-        event_boundaries=[],
         generation=1,
       ),
       model,

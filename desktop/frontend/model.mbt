@@ -90,6 +90,13 @@ const DefaultMaxSteps : String = "1000"
 const TranscriptRefreshFailedNotice : String = "Transcript refresh failed repeatedly. New commits are buffered; reopen the conversation or wait for the next update to retry."
 
 ///|
+/// The report for steering input that never reached the turn — whether the
+/// engine rejected it (it raced the turn's end through the pipes) or the run
+/// died with it unsettled. Either way the text must not vanish silently, and
+/// it does not: the refusal puts it back in the composer.
+const SteerDroppedNotice : String = "Input was not delivered (the task ended as you sent it) — it is back in the composer."
+
+///|
 /// Legacy localStorage keys from when the page stored the engine endpoint
 /// settings itself. Those now live on the host (`settings.get`/`set`); the
 /// keys remain only so the desktop window can migrate stored values up once
@@ -577,10 +584,6 @@ priv struct Conversation {
   // engine events arrive stamped with this id once the run phase is already
   // back to `NoRun`; routing them needs the retained id.
   last_run_id : String?
-  // Highest durable terminal sequence already known for this conversation.
-  // A locally steerable run freezes its own floor at start; a later terminal
-  // can therefore be recognized even if its commit beats `Finished` to UI.
-  last_terminal_sequence : Int
   // Where this conversation's compaction stands; see `CompactionPhase`.
   compaction : CompactionPhase
   // A run finished while this conversation was off screen and the user has
@@ -1824,7 +1827,6 @@ priv enum DeviceMsg {
     session~ : String,
     items~ : Array[@transcript.TranscriptItem],
     watermark~ : Int,
-    event_boundaries~ : Array[(Int, Bool, Int)],
     goal~ : @transcript.GoalStanding?,
     goal_markers~ : Array[(Int, @transcript.GoalMarker)],
     generation~ : Int
@@ -1839,7 +1841,6 @@ priv enum DeviceMsg {
     session~ : String,
     items~ : Array[@transcript.TranscriptItem],
     watermark~ : Int,
-    event_boundaries~ : Array[(Int, Bool, Int)],
     goal~ : @transcript.GoalStanding?,
     goal_markers~ : Array[(Int, @transcript.GoalMarker)],
     generation~ : Int
@@ -2139,7 +2140,6 @@ fn empty_conversation(
     composer_draft_present: false,
     run: NoRun(ended=None),
     last_run_id: None,
-    last_terminal_sequence: 0,
     compaction: NotCompacting,
     unseen_finish: false,
     run_started_ms: None,
@@ -3519,8 +3519,6 @@ fn Conversation::apply_commit(
   // It is not a run boundary: the same kind also stores in-run steering.
   let messages = self.messages.copy()
   let changed = @transcript.apply_session_item(messages, item, ts?, sequence~)
-  // Unknown terminal payloads render nothing but still close the durable run.
-  let terminal = item.is_terminal()
   // A `[goal]` marker commit is the durable confirmation of a goal
   // set/clear/block — the only writer of the mirror the banner renders.
   let goal_marker = if item is @protocol.RuntimeNotice(notice) {
@@ -3545,12 +3543,6 @@ fn Conversation::apply_commit(
       None
     } else {
       self.goal_pending
-    },
-    last_terminal_sequence: if terminal &&
-      sequence > self.last_terminal_sequence {
-      sequence
-    } else {
-      self.last_terminal_sequence
     },
   }
   (changed, conv)
@@ -3692,7 +3684,6 @@ fn Conversation::adopt_snapshot(
   self : Conversation,
   items : Array[@transcript.TranscriptItem],
   watermark : Int,
-  event_boundaries : Array[(Int, Bool, Int)],
   goal~ : @transcript.GoalStanding?,
   goal_markers~ : Array[(Int, @transcript.GoalMarker)],
 ) -> (Conversation, Bool) {
@@ -3702,19 +3693,12 @@ fn Conversation::adopt_snapshot(
   }
   // Sequence order, whatever the arrival order was.
   pending.sort_by((a, b) => a.sequence - b.sequence)
-  let mut last_terminal_sequence = self.last_terminal_sequence
-  for boundary in event_boundaries {
-    let (sequence, is_terminal, _) = boundary
-    if is_terminal && sequence > last_terminal_sequence {
-      last_terminal_sequence = sequence
-    }
-  }
   let reconciled = {
-    ..self,
-    last_terminal_sequence,
+    ..self
     // The snapshot's reduced standing goal replaces the mirror wholesale;
     // buffered commits newer than the snapshot fold on top below through
     // `apply_commit`.
+    ,
     goal,
     // A complete durable read is as good a settling point as a marker: if
     // the goal it reduces to is already what a request in flight asked
@@ -3757,15 +3741,6 @@ fn Conversation::adopt_snapshot(
   } else {
     ({ ..conv, sync: ReloadFailed(generation~, buffered=leftover) }, true)
   }
-}
-
-///|
-/// The report for steering input that never reached the turn — whether the
-/// engine rejected it (it raced the turn's end through the pipes) or the run
-/// died with it unsettled. Either way the text must not vanish silently, and
-/// it does not: the refusal puts it back in the composer.
-fn steer_dropped_notice() -> String {
-  "Input was not delivered (the task ended as you sent it) — it is back in the composer."
 }
 
 ///|

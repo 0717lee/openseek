@@ -18,3 +18,8 @@ target/
 # The codicon icon font, copied from the editor dependency next to viewer.css so
 # proton serves it at the site root (`/codicon.ttf`).
 /codicon.ttf
+# The empty file redirected into one-shot child runs as stdin. It normally
+# lives in the per-user runtime dir; with no runtime dir (tests, and any bare
+# invocation) `prepare_engine_stdin` falls back to `<program>.stdin` beside the
+# program, which lands here.
+*.stdin

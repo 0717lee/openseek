@@ -197,11 +197,6 @@ fn compare_subrun_path(left : Array[Int], right : Array[Int]) -> Int {
 pub struct SessionLoadView {
   items : Array[TranscriptItem]
   watermark : Int
-  // Durable event boundaries retained alongside the display projection.
-  // Each tuple is `(event sequence, is terminal, projected item count after
-  // the event)`. An event may add no bubble, so an exact lifecycle/EOF
-  // boundary cannot be reconstructed from `items` alone.
-  event_boundaries : Array[(Int, Bool, Int)]
   // The standing goal the snapshot's `[goal]` markers reduce to — the seed
   // the client's live marker commits then fold on top of.
   goal : GoalStanding?
@@ -227,7 +222,6 @@ pub fn session_from_reply(
   reply : @desktop_protocol.LoadSessionReply,
 ) -> SessionLoadView {
   let items : Array[TranscriptItem] = []
-  let event_boundaries : Array[(Int, Bool, Int)] = []
   let mut derived_watermark = 0
   let mut goal : GoalStanding? = None
   let goal_markers : Array[(Int, GoalMarker)] = []
@@ -255,14 +249,10 @@ pub fn session_from_reply(
       goal = apply_goal_marker(goal, marker)
       goal_markers.push((event.sequence, marker))
     }
-    event_boundaries.push(
-      (event.sequence, event.item.is_terminal(), items.length()),
-    )
   }
   {
     items,
     watermark: reply.watermark.unwrap_or(derived_watermark),
-    event_boundaries,
     goal,
     goal_markers,
   }
@@ -797,15 +787,7 @@ test "session load derives an old host's missing watermark from event sequences"
   let reply = session_reply(events)
   let view = session_from_reply(reply)
   inspect(view.watermark, content="4")
-  inspect(view.event_boundaries.length(), content="2")
-  let (first_sequence, first_terminal, first_boundary) = view.event_boundaries[0]
-  inspect(first_sequence, content="1")
-  assert_false(first_terminal)
-  inspect(first_boundary, content="1")
-  let (sequence, is_terminal, boundary) = view.event_boundaries[1]
-  inspect(sequence, content="4")
-  assert_true(is_terminal)
-  inspect(boundary, content="2")
+  inspect(view.items.length(), content="2")
 }
 
 ///|
@@ -845,7 +827,6 @@ test "an explicit session watermark remains authoritative" {
   let reply = session_reply(event)
   let view = session_from_reply({ ..reply, watermark: Some(7) })
   inspect(view.watermark, content="7")
-  inspect(view.event_boundaries.length(), content="1")
 }
 
 ///|
@@ -857,24 +838,21 @@ test "session load keeps unknown items without hiding known transcript" {
   let reply = session_reply(events)
   let view = session_from_reply(reply)
   inspect(view.watermark, content="3")
-  inspect(view.event_boundaries.length(), content="3")
   inspect(view.items.length(), content="2")
   inspect(view.items[0].content, content="question")
   inspect(view.items[1].content, content="answer")
 }
 
 ///|
-test "session load keeps unknown terminal payloads as terminal boundaries" {
+test "a terminal payload this build cannot read projects no row" {
   let events =
     #|{"sequence":1,"item":{"kind":"user","payload":{"content":"question"}}},
     #|{"sequence":2,"item":{"kind":"terminal","payload":{"kind":"future_terminal","message":"later"}}}
   let view = session_from_reply(session_reply(events))
   inspect(view.items.length(), content="1")
-  inspect(view.event_boundaries.length(), content="2")
-  let (sequence, is_terminal, boundary) = view.event_boundaries[1]
-  inspect(sequence, content="2")
-  assert_true(is_terminal)
-  inspect(boundary, content="1")
+  // It is still durable content, so it still moves the watermark: the client
+  // must not re-read the record looking for an event it already has.
+  inspect(view.watermark, content="2")
 }
 
 ///|
@@ -911,11 +889,6 @@ test "tool results fill calls by id without changing call order" {
   let view = session_from_reply(session_reply(events))
   let items = view.items
   inspect(items.length(), content="2")
-  // Result events update the existing calls, so every durable boundary after
-  // the assistant event stays after the same two display rows.
-  inspect(view.event_boundaries[0].2, content="2")
-  inspect(view.event_boundaries[1].2, content="2")
-  inspect(view.event_boundaries[2].2, content="2")
   guard items[0].kind
     is Tool(
       call_id="c1",
@@ -955,9 +928,6 @@ test "duplicate tool results preserve every durable event" {
   inspect(items.length(), content="2")
   // The first result fills the call in place; the duplicate result appends at
   // its own durable boundary instead of replacing the completed call.
-  inspect(view.event_boundaries[0].2, content="1")
-  inspect(view.event_boundaries[1].2, content="1")
-  inspect(view.event_boundaries[2].2, content="2")
   guard items[0].kind
     is Tool(
       call_id="d",
@@ -984,8 +954,6 @@ test "duplicate tool call ids keep their result unpaired" {
   inspect(items.length(), content="3")
   // Both calls stay pending because their shared id cannot identify which one
   // produced the result; the result is preserved at its own durable boundary.
-  inspect(view.event_boundaries[0].2, content="2")
-  inspect(view.event_boundaries[1].2, content="3")
   guard items[0].kind
     is Tool(
       call_id="dup",
