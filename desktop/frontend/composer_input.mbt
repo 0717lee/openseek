@@ -32,7 +32,7 @@ fn Model::composer_input(
   let primary_action : @composer.PrimaryAction = if conv.is_running() {
     @composer.Running(
       steer_available=root_ready &&
-        conv.run_durable_floor is Some(_) &&
+        conv.turn.durable_floor is Some(_) &&
         conv.run is Open(stage~, ..) &&
         !(stage is Cancelling),
       can_stop=can_stop(conv),

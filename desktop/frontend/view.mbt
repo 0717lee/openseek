@@ -1765,8 +1765,8 @@ fn topbar_view(
     ]),
   )
   items.push(run_indicator(model, conv))
-  if conv.usage_tokens > 0 {
-    items.push(@html.span(class="pill", token_label(conv.usage_tokens)))
+  if conv.turn.usage_tokens > 0 {
+    items.push(@html.span(class="pill", token_label(conv.turn.usage_tokens)))
   }
   if !conv.watcher_status.is_empty() {
     items.push(@html.span(class="pill", "moon_check \{conv.watcher_status}"))

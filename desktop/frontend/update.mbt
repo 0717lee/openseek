@@ -1068,7 +1068,13 @@ fn apply_engine_event(
       } else {
         (
           true,
-          { ..conv, streaming_response: conv.streaming_response + content },
+          {
+            ..conv,
+            turn: {
+              ..conv.turn,
+              streaming_response: conv.turn.streaming_response + content,
+            },
+          },
         )
       }
     // Full semantic events never append transcript items: the store commit is
@@ -1085,7 +1091,7 @@ fn apply_engine_event(
     // minutes it blocks for read as activity rather than silence. A repeated
     // id (a reconnect replaying the bracket) refreshes rather than doubles.
     SubrunOpened(id~, kind~, label~) => {
-      let subruns = conv.subruns.filter(lane => lane.id != id)
+      let subruns = conv.turn.subruns.filter(lane => lane.id != id)
       subruns.push({
         id,
         kind,
@@ -1097,7 +1103,7 @@ fn apply_engine_event(
       // A lane is a row at the tail, so opening one grows the transcript: a
       // conversation pinned to the bottom has to follow it down, or several
       // concurrent sub-runs open entirely below the fold.
-      (true, { ..conv, subruns, })
+      (true, { ..conv, turn: { ..conv.turn, subruns, } })
     }
     // Closed: always drop the lane. A captured sub-run already settles as the
     // durable tool brief, so repeating its status here would leave two
@@ -1107,8 +1113,14 @@ fn apply_engine_event(
     // the enclosing run starts a snapshot whose `adopt_snapshot` replaces
     // `messages` wholesale, which would erase a non-durable error bubble.
     SubrunClosed(id~, status~, steps~, tokens~) => {
-      let closed = conv.subruns.filter(lane => lane.id == id)
-      let conv = { ..conv, subruns: conv.subruns.filter(lane => lane.id != id) }
+      let closed = conv.turn.subruns.filter(lane => lane.id == id)
+      let conv = {
+        ..conv,
+        turn: {
+          ..conv.turn,
+          subruns: conv.turn.subruns.filter(lane => lane.id != id),
+        },
+      }
       if status == "captured" {
         (true, conv)
       } else {
@@ -1126,7 +1138,13 @@ fn apply_engine_event(
       }
     }
     Usage(prompt_tokens~, completion_tokens~) =>
-      (false, { ..conv, usage_tokens: prompt_tokens + completion_tokens })
+      (
+        false,
+        {
+          ..conv,
+          turn: { ..conv.turn, usage_tokens: prompt_tokens + completion_tokens },
+        },
+      )
     ToolResult(..) => (false, conv)
     // The turn loop records this as an error `tool_result`; its commit is the
     // one canonical transcript source, just like a successful tool result.
@@ -2996,7 +3014,7 @@ fn update_msg(
         // in the composer.
         if conv.run is Open(run_id~, stage~) &&
           !(stage is Cancelling) &&
-          conv.run_durable_floor is Some(_) {
+          conv.turn.durable_floor is Some(_) {
           let (model, submission_id) = model.allocate_submission_id()
           let conv = conv.enqueue_steer(
             submission_id,
@@ -3056,12 +3074,11 @@ fn update_msg(
           mentions: [],
           composer_draft_present: false,
           run: Starting(submission_id~),
-          // The store may have advanced through an external CLI while this
-          // page was idle. Only the real Started seam's causal snapshot may
-          // establish this run's predecessor terminal floor.
-          run_durable_floor: None,
-          run_floor_generation: None,
-          usage_tokens: 0,
+          // A turn starts from nothing observed. That includes the terminal
+          // floor: the store may have advanced through an external CLI while
+          // this page was idle, so only the real Started seam's causal
+          // snapshot may establish this run's predecessor terminal.
+          turn: RunState::empty(),
           // The submit is the moment this run began as far as the user is
           // concerned: the wait they are watching starts here, not at the
           // host's `started`.
@@ -4495,17 +4512,20 @@ fn update_device_msg(
         model.find_conversation(channel, parent) is Some(conv) else {
         return (@cmd.none, model)
       }
-      let subruns = conv.subruns.map(lane => {
+      let subruns = conv.turn.subruns.map(lane => {
         if lane.id == id {
           { ..lane, steps, activity }
         } else {
           lane
         }
       })
-      if subruns == conv.subruns {
+      if subruns == conv.turn.subruns {
         (@cmd.none, model)
       } else {
-        (@cmd.none, model.replace_conversation({ ..conv, subruns, }))
+        (
+          @cmd.none,
+          model.replace_conversation({ ..conv, turn: { ..conv.turn, subruns, } }),
+        )
       }
     }
     SkillsChanged =>
@@ -6069,18 +6089,18 @@ fn update_device_msg(
           _ => Open(run_id~, stage=Opened)
         }
       }
-      let run_durable_floor = if stale_terminal || same_open {
-        conv.run_durable_floor
+      let durable_floor = if stale_terminal || same_open {
+        conv.turn.durable_floor
       } else {
         // Lifecycle and durable commits are independent producers. A new run
         // cannot trust this client's apparently-synced terminal frontier: its
         // Started may have overtaken the previous run's terminal commit.
         None
       }
-      let run_floor_generation = if refresh {
+      let floor_generation = if refresh {
         Some(successor_snapshot_generation)
       } else {
-        conv.run_floor_generation
+        conv.turn.floor_generation
       }
       let sync = if refresh &&
         conv.sync
@@ -6088,6 +6108,16 @@ fn update_device_msg(
         Reloading(generation~, attempt~, buffered~, reload_after_current=true)
       } else {
         conv.sync
+      }
+      // A Started that opens a different run starts its turn from nothing:
+      // the fragment, sub-run lanes and token count the previous turn
+      // accumulated belong to that turn, not this one. The two floors are the
+      // only facts computed here for the new one. A repeat of the open run's
+      // Started, or a late one for a run already settled, keeps what it has.
+      let turn : RunState = if stale_terminal || same_open {
+        { ..conv.turn, durable_floor, floor_generation }
+      } else {
+        { ..RunState::empty(), durable_floor, floor_generation }
       }
       // `foreign` is exactly the question the elapsed span needs answered: a
       // run this page did not submit and wait for has an age that started
@@ -6098,8 +6128,7 @@ fn update_device_msg(
       let conv = {
         ..conv,
         run,
-        run_durable_floor,
-        run_floor_generation,
+        turn,
         run_started_ms,
         sync,
         // The tier is deliberately NOT re-established from the run. A start
@@ -6232,8 +6261,7 @@ fn update_device_msg(
           next = next.replace_conversation({
             ..settled,
             run: Open(run_id=settlement.run_id, stage=Opened),
-            run_durable_floor: None,
-            run_floor_generation: None,
+            turn: RunState::empty(),
             last_run_id: Some(settlement.run_id),
           })
         }
@@ -6480,8 +6508,11 @@ fn update_device_msg(
         let next = if missed_started {
           {
             ..next,
-            run_durable_floor: None,
-            run_floor_generation: Some(snapshot_generation),
+            turn: {
+              ..next.turn,
+              durable_floor: None,
+              floor_generation: Some(snapshot_generation),
+            },
           }
         } else {
           next
@@ -7013,7 +7044,7 @@ fn running_conversation() -> Conversation {
   {
     ..test_conversation(),
     run: Open(run_id="r7", stage=Opened),
-    run_durable_floor: Some(0),
+    turn: { ..test_conversation().turn, durable_floor: Some(0) },
   }
 }
 
@@ -7470,7 +7501,7 @@ test "assistant deltas accumulate into the streaming response" {
     Engine(Some("r7"), AssistantDelta(", world"), session=None),
     first,
   )
-  inspect(second.active().streaming_response, content="Hello, world")
+  inspect(second.active().turn.streaming_response, content="Hello, world")
   inspect(second.active().messages.length(), content="0")
 }
 
@@ -7479,7 +7510,7 @@ test "update is pure: replaying a delta on the same model is idempotent" {
   let dispatch = test_dispatch()
   let model = running_model().replace_conversation({
     ..running_conversation(),
-    streaming_response: "partial",
+    turn: { ..running_conversation().turn, streaming_response: "partial" },
   })
   let (_, once) = update_dev(
     dispatch,
@@ -7491,8 +7522,8 @@ test "update is pure: replaying a delta on the same model is idempotent" {
     Engine(Some("r7"), AssistantDelta("!"), session=None),
     model,
   )
-  inspect(once.active().streaming_response, content="partial!")
-  inspect(twice.active().streaming_response, content="partial!")
+  inspect(once.active().turn.streaming_response, content="partial!")
+  inspect(twice.active().turn.streaming_response, content="partial!")
 }
 
 ///|
@@ -7503,7 +7534,7 @@ test "deltas from an unknown run are dropped" {
     Engine(Some("r99"), AssistantDelta("stale"), session=None),
     running_model(),
   )
-  inspect(next.active().streaming_response, content="")
+  inspect(next.active().turn.streaming_response, content="")
 }
 
 ///|
@@ -7570,7 +7601,7 @@ test "the run heartbeat carries only the facts the page actually has" {
   let full = {
     ..running_conversation(),
     run_started_ms: Some(1_000.0),
-    usage_tokens: 12_345,
+    turn: { ..running_conversation().turn, usage_tokens: 12_345 },
   }
   assert_eq(
     full.run_heartbeat(),
@@ -7607,14 +7638,14 @@ test "assistant message only settles the transient response" {
   let dispatch = test_dispatch()
   let model = running_model().replace_conversation({
     ..running_conversation(),
-    streaming_response: "answ",
+    turn: { ..running_conversation().turn, streaming_response: "answ" },
   })
   let (_, next) = update_dev(
     dispatch,
     Engine(Some("r7"), AssistantMessage("answer"), session=None),
     model,
   )
-  inspect(next.active().streaming_response, content="")
+  inspect(next.active().turn.streaming_response, content="")
   inspect(next.active().messages.length(), content="0")
   inspect(next.active().overlay.length(), content="0")
 }
@@ -7624,14 +7655,17 @@ test "agent setup failure is lifecycle-only until its durable terminal" {
   let dispatch = test_dispatch()
   let model = running_model().replace_conversation({
     ..running_conversation(),
-    streaming_response: "partial answer",
+    turn: {
+      ..running_conversation().turn,
+      streaming_response: "partial answer",
+    },
   })
   let (_, next) = update_dev(
     dispatch,
     Engine(Some("r7"), AgentSetupFailed("could not initialize"), session=None),
     model,
   )
-  inspect(next.active().streaming_response, content="")
+  inspect(next.active().turn.streaming_response, content="")
   inspect(next.active().messages.length(), content="0")
   inspect(next.active().overlay.length(), content="0")
 }
@@ -7641,14 +7675,14 @@ test "a new agent step clears the live stream" {
   let dispatch = test_dispatch()
   let model = running_model().replace_conversation({
     ..running_conversation(),
-    streaming_response: "left",
+    turn: { ..running_conversation().turn, streaming_response: "left" },
   })
   let (_, next) = update_dev(
     dispatch,
     Engine(Some("r7"), AgentStep(Some(2)), session=None),
     model,
   )
-  inspect(next.active().streaming_response, content="")
+  inspect(next.active().turn.streaming_response, content="")
 }
 
 ///|
@@ -7656,7 +7690,7 @@ test "finished run clears any leftover stream" {
   let dispatch = test_dispatch()
   let model = running_model().replace_conversation({
     ..running_conversation(),
-    streaming_response: "leftover",
+    turn: { ..running_conversation().turn, streaming_response: "leftover" },
   })
   let (_, next) = update_dev(
     dispatch,
@@ -7668,7 +7702,7 @@ test "finished run clears any leftover stream" {
     ),
     model,
   )
-  inspect(next.active().streaming_response, content="")
+  inspect(next.active().turn.streaming_response, content="")
   inspect(next.active().is_running(), content="false")
 }
 
@@ -7882,7 +7916,7 @@ test "session rotation activates a fresh conversation, keeping the old one" {
   )
   inspect(next.active_session, content="desktop-fresh")
   inspect(next.active().messages.length(), content="0")
-  inspect(next.active().usage_tokens, content="0")
+  inspect(next.active().turn.usage_tokens, content="0")
   assert_true(next.display_status() is Ready)
   // The previous conversation keeps running in the background.
   guard next.find_conversation(@interop.ChannelId::Local, "desktop-test")
@@ -8386,10 +8420,17 @@ test "open session keeps live state on screen while re-reading the store" {
       @interop.ChannelId::Local.test_project(),
     ),
     run: Open(run_id="r9", stage=Opened),
-    streaming_response: "mid-stream",
     messages: [
       { kind: User, content: "background task", ts: None, sequence: None },
     ],
+    turn: {
+      ..empty_conversation(
+        @interop.ChannelId::Local,
+        "desktop-bg",
+        @interop.ChannelId::Local.test_project(),
+      ).turn,
+      streaming_response: "mid-stream",
+    },
   }
   let model = running_model().replace_conversation(background)
   let (_, once) = update(
@@ -8405,7 +8446,7 @@ test "open session keeps live state on screen while re-reading the store" {
   inspect(once.active_session, content="desktop-bg")
   // The live state stays on screen; the store re-read happens behind it
   // (this client may have been absent for part of this conversation).
-  inspect(once.active().streaming_response, content="mid-stream")
+  inspect(once.active().turn.streaming_response, content="mid-stream")
   inspect(once.active().is_running(), content="true")
   assert_true(
     once.loading_conversation is Some({ channel: Local, session: "desktop-bg" }),
@@ -8456,8 +8497,8 @@ test "BridgeReady clears every non-replayable stream and compaction phase" {
   let dispatch = test_dispatch()
   let active = {
     ..test_conversation(),
-    streaming_response: "old answer",
     compaction: Queued,
+    turn: { ..test_conversation().turn, streaming_response: "old answer" },
   }
   let background = {
     ..empty_conversation(
@@ -8465,15 +8506,22 @@ test "BridgeReady clears every non-replayable stream and compaction phase" {
       "desktop-bg",
       @interop.ChannelId::Local.test_project(),
     ),
-    streaming_response: "background answer",
     compaction: Compacting,
+    turn: {
+      ..empty_conversation(
+        @interop.ChannelId::Local,
+        "desktop-bg",
+        @interop.ChannelId::Local.test_project(),
+      ).turn,
+      streaming_response: "background answer",
+    },
   }
   let model = test_model()
     .replace_conversation(active)
     .replace_conversation(background)
   let (_, next) = update_dev(dispatch, BridgeReady, model)
   for conv in next.conversations {
-    inspect(conv.streaming_response, content="")
+    inspect(conv.turn.streaming_response, content="")
     assert_true(conv.compaction is NotCompacting)
   }
 }
@@ -8624,13 +8672,23 @@ test "BridgeReady resets only conversations owned by its channel" {
       "shared",
       @interop.ChannelId::Local.test_project(),
     ),
-    streaming_response: "local answer",
     compaction: Queued,
+    turn: {
+      ..empty_conversation(
+        @interop.ChannelId::Local,
+        "shared",
+        @interop.ChannelId::Local.test_project(),
+      ).turn,
+      streaming_response: "local answer",
+    },
   }
   let remote = {
     ..empty_conversation(background, "shared", background.test_project()),
-    streaming_response: "remote answer",
     compaction: Compacting,
+    turn: {
+      ..empty_conversation(background, "shared", background.test_project()).turn,
+      streaming_response: "remote answer",
+    },
   }
   let model = {
     ..test_model(),
@@ -8647,9 +8705,9 @@ test "BridgeReady resets only conversations owned by its channel" {
     next.find_conversation(background, "shared") is Some(reset) else {
     fail("same-id conversations were not preserved")
   }
-  inspect(kept.streaming_response, content="local answer")
+  inspect(kept.turn.streaming_response, content="local answer")
   assert_true(kept.compaction is Queued)
-  inspect(reset.streaming_response, content="")
+  inspect(reset.turn.streaming_response, content="")
   assert_true(reset.compaction is NotCompacting)
 }
 
@@ -9478,10 +9536,13 @@ test "session loaded swaps the active conversation onto the stored session" {
   let model = test_model()
     .replace_conversation({
       ..test_conversation(),
-      usage_tokens: 42,
       watcher_status: "running",
-      streaming_response: "leftover",
       messages: [{ kind: User, content: "old chat", ts: None, sequence: None }],
+      turn: {
+        ..test_conversation().turn,
+        usage_tokens: 42,
+        streaming_response: "leftover",
+      },
     })
     // The stored session is opened from its sidebar row, which is what
     // names the store it is read from.
@@ -9540,8 +9601,8 @@ test "session loaded swaps the active conversation onto the stored session" {
   inspect(once.active_session, content="desktop-stored")
   inspect(once.active().messages.length(), content="2")
   inspect(once.active().messages[0].content, content="stored question")
-  inspect(once.active().streaming_response, content="")
-  inspect(once.active().usage_tokens, content="0")
+  inspect(once.active().turn.streaming_response, content="")
+  inspect(once.active().turn.usage_tokens, content="0")
   inspect(once.active().watcher_status, content="")
   assert_eq(
     once.active().workspace,
@@ -9588,7 +9649,7 @@ test "session loaded adopts the store transcript and keeps live run state" {
   // run state (phase, streaming buffers) rides across untouched.
   let streaming = running_model().replace_conversation({
     ..running_conversation(),
-    streaming_response: "mid-step",
+    turn: { ..running_conversation().turn, streaming_response: "mid-step" },
   })
   let loading_same = {
     ..streaming.replace_conversation({
@@ -9613,7 +9674,7 @@ test "session loaded adopts the store transcript and keeps live run state" {
   inspect(same.active().messages.length(), content="1")
   inspect(same.active().messages[0].content, content="stored")
   inspect(same.active().is_running(), content="true")
-  inspect(same.active().streaming_response, content="mid-step")
+  inspect(same.active().turn.streaming_response, content="mid-step")
 }
 
 ///|
@@ -9800,13 +9861,61 @@ test "started places a conversation before the registry arrives" {
 }
 
 ///|
+test "a run boundary discards the previous turn's live state whole" {
+  let dispatch = test_dispatch()
+  let lane : @transcript.SubrunLane = {
+    id: "sub-1",
+    kind: "task",
+    label: "sub-run",
+    steps: 2,
+    activity: "running",
+    run: Some("r-old"),
+  }
+  let conv = {
+    ..running_conversation(),
+    run: Open(run_id="r-old", stage=AtStep(Some(3))),
+    turn: {
+      streaming_response: "old answer fragment",
+      subruns: [lane],
+      usage_tokens: 4200,
+      durable_floor: Some(7),
+      floor_generation: None,
+    },
+  }
+  let (_, next) = update_dev(
+    dispatch,
+    Started(
+      run_id="r-new",
+      session="desktop-test",
+      model=High,
+      max_steps=1000,
+      session_root=None,
+      submission_id=None,
+    ),
+    running_model().replace_conversation(conv),
+  )
+  // Nothing the previous turn accumulated belongs to this one, and none of it
+  // has to be cleared field by field to stay out.
+  guard next.active().run is Open(run_id="r-new", ..) else {
+    fail("expected the new run to replace the old id")
+  }
+  inspect(next.active().turn.streaming_response, content="")
+  inspect(next.active().turn.subruns.length(), content="0")
+  inspect(next.active().turn.usage_tokens, content="0")
+  assert_true(next.active().turn.durable_floor is None)
+}
+
+///|
 test "a distinct started id replaces a stale open run as foreign" {
   let dispatch = test_dispatch()
   let conv = with_pending_steers(
     {
       ..running_conversation(),
       run: Open(run_id="r-old", stage=AtStep(Some(3))),
-      streaming_response: "old answer fragment",
+      turn: {
+        ..running_conversation().turn,
+        streaming_response: "old answer fragment",
+      },
       run_started_ms: Some(1_000.0),
     },
     ["old steer"],
@@ -9828,7 +9937,7 @@ test "a distinct started id replaces a stale open run as foreign" {
   guard next.active().run is Open(run_id="r-new", stage=Opened) else {
     fail("expected the new run to replace the stale id")
   }
-  inspect(next.active().streaming_response, content="")
+  inspect(next.active().turn.streaming_response, content="")
   inspect(next.active().pending_steers.length(), content="0")
   // The replaced run took its pending input with it and left no placeholder:
   // what the turn actually recorded is in the transcript.
@@ -9848,7 +9957,10 @@ test "a repeated started id is idempotent" {
     {
       ..running_conversation(),
       run: Open(run_id="r7", stage=AtStep(Some(4))),
-      streaming_response: "current fragment",
+      turn: {
+        ..running_conversation().turn,
+        streaming_response: "current fragment",
+      },
     },
     ["current steer"],
   )
@@ -9868,7 +9980,7 @@ test "a repeated started id is idempotent" {
   guard next.active().run is Open(run_id="r7", stage=AtStep(Some(4))) else {
     fail("a repeated start reset the live run stage")
   }
-  inspect(next.active().streaming_response, content="current fragment")
+  inspect(next.active().turn.streaming_response, content="current fragment")
   inspect(next.active().pending_steers.length(), content="1")
   inspect(next.active().pending_steers[0].content, content="current steer")
   inspect(next.transcript_request_generation, content="0")
@@ -9898,7 +10010,10 @@ test "a start failure cannot close a run opened by a winning push" {
   )
   let opened = opened.replace_conversation(
     with_pending_steers(
-      { ..opened.active(), streaming_response: "foreign fragment" },
+      {
+        ..opened.active(),
+        turn: { ..opened.active().turn, streaming_response: "foreign fragment" },
+      },
       ["steer for foreign run"],
       run_id="r-foreign",
     ),
@@ -9915,7 +10030,7 @@ test "a start failure cannot close a run opened by a winning push" {
   guard failed.active().run is Open(run_id="r-foreign", stage=Opened) else {
     fail("the local failure closed the already-open run")
   }
-  inspect(failed.active().streaming_response, content="foreign fragment")
+  inspect(failed.active().turn.streaming_response, content="foreign fragment")
   inspect(failed.active().pending_steers.length(), content="1")
   inspect(
     failed.active().pending_steers[0].content,
@@ -9936,7 +10051,7 @@ test "a start failure closes only a still-starting run" {
     {
       ..test_conversation(),
       run: Starting(submission_id="prompt-id"),
-      streaming_response: "partial",
+      turn: { ..test_conversation().turn, streaming_response: "partial" },
     },
     "prompt-id",
     "prompt",
@@ -9952,7 +10067,7 @@ test "a start failure closes only a still-starting run" {
     model,
   )
   assert_true(failed.active().run is NoRun(ended=Some(RunFailed)))
-  inspect(failed.active().streaming_response, content="")
+  inspect(failed.active().turn.streaming_response, content="")
   inspect(failed.active().overlay.length(), content="1")
   inspect(failed.active().task, content="prompt")
   inspect(failed.transcript_request_generation, content="0")
@@ -10046,8 +10161,8 @@ test "an accepted start response opens the run without Started" {
   // The reply is the entry's last consumer: a prompt is sent once.
   inspect(responded.active().pending_steers.length(), content="0")
   assert_true(responded.active().sync is Reloading(generation=1, ..))
-  assert_true(responded.active().run_durable_floor is None)
-  assert_true(responded.active().run_floor_generation is Some(1))
+  assert_true(responded.active().turn.durable_floor is None)
+  assert_true(responded.active().turn.floor_generation is Some(1))
   let drafted = responded.replace_conversation({
     ..responded.active(),
     task: "too early",
@@ -10071,7 +10186,7 @@ test "an accepted start response opens the run without Started" {
   // The delayed Started is idempotent with the response-first recovery: it
   // neither drops nor queues a second generation.
   assert_true(started.active().sync is Reloading(generation=1, ..))
-  assert_true(started.active().run_floor_generation is Some(1))
+  assert_true(started.active().turn.floor_generation is Some(1))
   let (_, loaded) = update_dev(
     dispatch,
     SessionRefreshed(
@@ -10100,8 +10215,8 @@ test "an accepted start response opens the run without Started" {
     started,
   )
   assert_true(loaded.active().sync is Synced)
-  assert_true(loaded.active().run_durable_floor is Some(3))
-  assert_true(loaded.active().run_floor_generation is None)
+  assert_true(loaded.active().turn.durable_floor is Some(3))
+  assert_true(loaded.active().turn.floor_generation is None)
   inspect(loaded.active().pending_steers.length(), content="0")
 }
 
@@ -10210,7 +10325,14 @@ test "runs settled closes runs the host no longer has, sparing live and starting
       @interop.ChannelId::Local.test_project(),
     ),
     run: Open(run_id="r9", stage=AtStep(Some(4))),
-    streaming_response: "mid-step",
+    turn: {
+      ..empty_conversation(
+        @interop.ChannelId::Local,
+        "desktop-stale",
+        @interop.ChannelId::Local.test_project(),
+      ).turn,
+      streaming_response: "mid-step",
+    },
   }
   // A send still in flight has no run id yet; its own `started` (or
   // failure) is coming and must be the one to settle it.
@@ -10250,7 +10372,7 @@ test "runs settled closes runs the host no longer has, sparing live and starting
     fail("expected the stale conversation")
   }
   inspect(settled.is_running(), content="false")
-  inspect(settled.streaming_response, content="")
+  inspect(settled.turn.streaming_response, content="")
   guard settled.run is NoRun(ended=None) else {
     fail("expected the stale run to settle without a verdict")
   }
@@ -10688,12 +10810,12 @@ test "concurrent conversations keep their streams apart" {
     model,
   )
   // Run 8 belongs to the background conversation; the active one is untouched.
-  inspect(next.active().streaming_response, content="")
+  inspect(next.active().turn.streaming_response, content="")
   guard next.find_conversation(@interop.ChannelId::Local, "desktop-second")
     is Some(bg) else {
     fail("expected the background conversation")
   }
-  inspect(bg.streaming_response, content="for B")
+  inspect(bg.turn.streaming_response, content="for B")
 }
 
 ///|
@@ -11054,7 +11176,7 @@ test "a foreign run gains a floor only after snapshot data follows the prior ter
     ),
     test_model().replace_conversation(conv),
   )
-  assert_true(started.active().run_durable_floor is None)
+  assert_true(started.active().turn.durable_floor is None)
   let (_, loaded) = update_dev(
     dispatch,
     SessionRefreshed(
@@ -11076,7 +11198,7 @@ test "a foreign run gains a floor only after snapshot data follows the prior ter
     ),
     started,
   )
-  assert_true(loaded.active().run_durable_floor is Some(2))
+  assert_true(loaded.active().turn.durable_floor is Some(2))
 }
 
 ///|
@@ -11130,8 +11252,8 @@ test "a foreign background run waits for a snapshot cut after Started" {
     is Some(started_conv) else {
     fail("missing background conversation")
   }
-  assert_true(started_conv.run_durable_floor is None)
-  assert_true(started_conv.run_floor_generation is Some(2))
+  assert_true(started_conv.turn.durable_floor is None)
+  assert_true(started_conv.turn.floor_generation is Some(2))
   assert_true(
     started_conv.sync is Reloading(generation=1, reload_after_current=true, ..),
   )
@@ -11176,8 +11298,8 @@ test "a foreign background run waits for a snapshot cut after Started" {
     is Some(after_old) else {
     fail("missing conversation after old snapshot")
   }
-  assert_true(after_old.run_durable_floor is None)
-  assert_true(after_old.run_floor_generation is Some(2))
+  assert_true(after_old.turn.durable_floor is None)
+  assert_true(after_old.turn.floor_generation is Some(2))
   assert_true(after_old.sync is Reloading(generation=2, ..))
   inspect(after_old.last_terminal_sequence, content="3")
   let (_, causal) = update_dev(
@@ -11210,8 +11332,8 @@ test "a foreign background run waits for a snapshot cut after Started" {
     is Some(current) else {
     fail("missing conversation after causal snapshot")
   }
-  assert_true(current.run_durable_floor is Some(3))
-  assert_true(current.run_floor_generation is None)
+  assert_true(current.turn.durable_floor is Some(3))
+  assert_true(current.turn.floor_generation is None)
 }
 
 ///|
@@ -11221,8 +11343,8 @@ test "buffered future terminal cannot become its own run floor" {
     ..running_conversation(),
     watermark: 1,
     last_terminal_sequence: 1,
-    run_durable_floor: None,
     sync: test_reloading([]),
+    turn: { ..running_conversation().turn, durable_floor: None },
   }
   let model = test_model().replace_conversation(conv)
   let (_, user) = update_dev(
@@ -11277,18 +11399,17 @@ test "buffered future terminal cannot become its own run floor" {
     ),
     terminal,
   )
-  assert_true(loaded.active().run_durable_floor is Some(1))
+  assert_true(loaded.active().turn.durable_floor is Some(1))
   inspect(loaded.active().last_terminal_sequence, content="4")
 }
 
 ///|
 test "two run-tail notice groups freeze only at their own terminals" {
-  let first = { ..test_conversation(), run_durable_floor: Some(1) }.append_run_tail_notice(
-    Assistant(is_danger=true),
-    "first",
-    Retained,
-  )
-  let second = { ..first, run_durable_floor: Some(5) }.append_run_tail_notice(
+  let first = {
+    ..test_conversation(),
+    turn: { ..test_conversation().turn, durable_floor: Some(1) },
+  }.append_run_tail_notice(Assistant(is_danger=true), "first", Retained)
+  let second = { ..first, turn: { ..first.turn, durable_floor: Some(5) } }.append_run_tail_notice(
     Assistant(is_danger=true),
     "second",
     Retained,
@@ -11303,7 +11424,10 @@ test "two run-tail notice groups freeze only at their own terminals" {
 
 ///|
 test "only a causal gap-free snapshot may abandon a missing prior terminal" {
-  let prior = { ..test_conversation(), run_durable_floor: Some(1) }
+  let prior = {
+      ..test_conversation(),
+      turn: { ..test_conversation().turn, durable_floor: Some(1) },
+    }
     .append_run_tail_notice(Assistant(is_danger=true), "old notice", Retained)
     .prepare_tail_notices_for_successor(2)
   let old_cut = prior
@@ -14464,7 +14588,7 @@ test "a transcript stream grows without application-owned scroll state" {
     Engine(Some("r7"), AssistantDelta("more"), session=None),
     running_model(),
   )
-  inspect(next.active().streaming_response, content="more")
+  inspect(next.active().turn.streaming_response, content="more")
 }
 
 ///|
@@ -15620,7 +15744,7 @@ test "update is pure: automatic checkpoint waits for its commit" {
   let dispatch = test_dispatch()
   let model = running_model().replace_conversation({
     ..running_conversation(),
-    streaming_response: "partial",
+    turn: { ..running_conversation().turn, streaming_response: "partial" },
   })
   let (_, once) = update_dev(
     dispatch,
@@ -15635,8 +15759,8 @@ test "update is pure: automatic checkpoint waits for its commit" {
   inspect(model.active().overlay.length(), content="0")
   inspect(once.active().overlay.length(), content="0")
   inspect(twice.active().overlay.length(), content="0")
-  inspect(once.active().streaming_response, content="partial")
-  inspect(twice.active().streaming_response, content="partial")
+  inspect(once.active().turn.streaming_response, content="partial")
+  inspect(twice.active().turn.streaming_response, content="partial")
   assert_true(
     once.active().compaction is NotCompacting &&
     twice.active().compaction is NotCompacting,
@@ -15652,7 +15776,7 @@ test "update is pure: context yield waits for its commit" {
   let answer = "[context ceiling] continue in a new turn"
   let model = running_model().replace_conversation({
     ..running_conversation(),
-    streaming_response: "partial",
+    turn: { ..running_conversation().turn, streaming_response: "partial" },
   })
   let (_, once) = update_dev(
     dispatch,
@@ -15667,8 +15791,8 @@ test "update is pure: context yield waits for its commit" {
   inspect(model.active().overlay.length(), content="0")
   inspect(once.active().overlay.length(), content="0")
   inspect(twice.active().overlay.length(), content="0")
-  inspect(once.active().streaming_response, content="")
-  inspect(twice.active().streaming_response, content="")
+  inspect(once.active().turn.streaming_response, content="")
+  inspect(twice.active().turn.streaming_response, content="")
   assert_true(once.active().is_running() && twice.active().is_running())
 }
 
@@ -16661,7 +16785,10 @@ test "a delayed assistant commit never clears a newer live delta" {
   let dispatch = test_dispatch()
   let model = running_model().replace_conversation({
     ..running_conversation(),
-    streaming_response: "newer turn fragment",
+    turn: {
+      ..running_conversation().turn,
+      streaming_response: "newer turn fragment",
+    },
   })
   let (_, committed) = update_dev(
     dispatch,
@@ -16678,7 +16805,10 @@ test "a delayed assistant commit never clears a newer live delta" {
     ),
     model,
   )
-  inspect(committed.active().streaming_response, content="newer turn fragment")
+  inspect(
+    committed.active().turn.streaming_response,
+    content="newer turn fragment",
+  )
 }
 
 ///|
@@ -16690,7 +16820,10 @@ test "a delayed terminal commit never clears a newer live delta" {
       { kind: User, content: "older prompt", ts: None, sequence: None },
     ],
     watermark: 1,
-    streaming_response: "next turn fragment",
+    turn: {
+      ..running_conversation().turn,
+      streaming_response: "next turn fragment",
+    },
   })
   let (_, committed) = update_dev(
     dispatch,
@@ -16703,7 +16836,10 @@ test "a delayed terminal commit never clears a newer live delta" {
     ),
     model,
   )
-  inspect(committed.active().streaming_response, content="next turn fragment")
+  inspect(
+    committed.active().turn.streaming_response,
+    content="next turn fragment",
+  )
 }
 
 ///|
@@ -16777,7 +16913,7 @@ test "commit-first assistant semantics do not append again" {
   let dispatch = test_dispatch()
   let streaming = running_model().replace_conversation({
     ..running_conversation(),
-    streaming_response: "answer",
+    turn: { ..running_conversation().turn, streaming_response: "answer" },
   })
   let (_, committed) = update_dev(
     dispatch,
@@ -16807,7 +16943,7 @@ test "commit-first assistant semantics do not append again" {
   inspect(answered.active().messages.length(), content="2")
   inspect(answered.active().overlay.length(), content="0")
   inspect(answered.active().watermark, content="1")
-  inspect(answered.active().streaming_response, content="")
+  inspect(answered.active().turn.streaming_response, content="")
 }
 
 ///|

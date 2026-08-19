@@ -495,6 +495,49 @@ fn Workspace::worktree_name(self : Workspace) -> String? {
 }
 
 ///|
+/// Everything that belongs to one turn and to nothing outside it.
+///
+/// It is replaced wholesale when a run opens, so a fragment, token count, or
+/// terminal floor left by the previous turn cannot survive into this one by
+/// being forgotten - the reset is one assignment rather than five. Only the
+/// `agent.*` lifecycle and stream events write it; durable commits never do.
+priv struct RunState {
+  // Live text of the in-flight assistant turn, accumulated from
+  // `assistant_delta` events and cleared by ordered full semantic, step,
+  // run-lifecycle, or reconnect boundaries. Follower commits are not run/step
+  // tagged and therefore never clear a potentially newer stream. Empty means
+  // not streaming.
+  streaming_response : String
+  // Sub-runs this turn has in flight, in the order they started. Live-only:
+  // nothing persists a sub-run's progress, so a reload mid-turn shows the
+  // tool call pending with no lane under it.
+  subruns : Array[@transcript.SubrunLane]
+  usage_tokens : Int
+  // Exclusive lower bound for this run's terminal. `None` means the run began
+  // while transcript history was unresolved; steering stays gated rather than
+  // attaching a local notice to an unprovable boundary.
+  durable_floor : Int?
+  // The first snapshot generation issued after a foreign Started. An older
+  // in-flight snapshot may drain commits but cannot establish the new run's
+  // floor; only this causal read (or a later one) may release commit-based
+  // floor discovery.
+  floor_generation : Int?
+} derive(Eq)
+
+///|
+/// The state a turn starts from. A conversation with no run open holds one
+/// too: every field means "nothing observed".
+fn RunState::empty() -> RunState {
+  {
+    streaming_response: "",
+    subruns: [],
+    usage_tokens: 0,
+    durable_floor: None,
+    floor_generation: None,
+  }
+}
+
+///|
 /// One conversation's full client-side state. Each conversation maps to a
 /// durable engine session and, while running, to its own `--serve` engine
 /// process in the host — several conversations can run turns concurrently,
@@ -553,31 +596,17 @@ priv struct Conversation {
   // A locally steerable run freezes its own floor at start; a later terminal
   // can therefore be recognized even if its commit beats `Finished` to UI.
   last_terminal_sequence : Int
-  // Exclusive lower bound for the current run's terminal. `None` means the
-  // run began while transcript history was unresolved; steering stays gated
-  // rather than attaching a local notice to an unprovable boundary.
-  run_durable_floor : Int?
-  // The first snapshot generation issued after a foreign Started. An older
-  // in-flight snapshot may drain commits but cannot establish the new run's
-  // floor; only this causal read (or a later one) may release commit-based
-  // floor discovery.
-  run_floor_generation : Int?
   // Where this conversation's compaction stands; see `CompactionPhase`.
   compaction : CompactionPhase
   // A run finished while this conversation was off screen and the user has
   // not looked since: the sidebar's running pulse settles into a solid dot
   // (accent for success, warn otherwise) until the conversation is opened.
   unseen_finish : Bool
-  usage_tokens : Int
   // When this page saw the current run begin, for the composer row's elapsed
   // span. `None` whenever that moment is not this page's to know — a run
   // adopted from a reconnect started before we were watching, and guessing
   // from the moment we noticed would report a wrong, always-too-short age.
   run_started_ms : Double?
-  // Sub-runs this conversation's open turn has in flight, in the order they
-  // started. Live-only: nothing persists a sub-run's progress, so a reload
-  // mid-turn shows the tool call pending with no lane under it.
-  subruns : Array[@transcript.SubrunLane]
   // The git branch checked out in the workspace, reported by the host's
   // `workspace_branch` op — display only (composer chip). `None` until a probe
   // answers (or when it fails); `Some("")` when the workspace is not a
@@ -606,12 +635,8 @@ priv struct Conversation {
   // probe must not rewind it — see `Conversation::forget_pull_request`.
   pull_request_generation : Int
   watcher_status : String
-  // Live text of the in-flight assistant turn, accumulated from
-  // `assistant_delta` events and cleared by ordered full semantic, step,
-  // run-lifecycle, or reconnect boundaries. Follower commits are not run/step
-  // tagged and therefore never clear a potentially newer stream. Empty means
-  // not streaming.
-  streaming_response : String
+  // Everything belonging to the turn in flight; see `RunState`.
+  turn : RunState
   // Steers submitted into an open run and not yet acknowledged — the queue
   // the composer renders as pending, and never a second text queue beside
   // it. Entries leave on their exact id-bearing receipt, or with the run
@@ -2177,13 +2202,9 @@ fn empty_conversation(
     run: NoRun(ended=None),
     last_run_id: None,
     last_terminal_sequence: 0,
-    run_durable_floor: None,
-    run_floor_generation: None,
     compaction: NotCompacting,
     unseen_finish: false,
-    usage_tokens: 0,
     run_started_ms: None,
-    subruns: [],
     branch: None,
     diffstat: None,
     diffstat_hint: None,
@@ -2191,7 +2212,7 @@ fn empty_conversation(
     pull_request: None,
     pull_request_generation: 0,
     watcher_status: "",
-    streaming_response: "",
+    turn: RunState::empty(),
     pending_steers: [],
     pending_prompt: None,
     messages: [],
@@ -3220,7 +3241,7 @@ fn Conversation::visible_subruns(
   self : Conversation,
 ) -> Array[@transcript.SubrunLane] {
   guard self.run is Open(run_id~, ..) else { return [] }
-  self.subruns.filter(lane => lane.run is Some(owner) && owner == run_id)
+  self.turn.subruns.filter(lane => lane.run is Some(owner) && owner == run_id)
 }
 
 ///|
@@ -3246,12 +3267,16 @@ fn Conversation::run_heartbeat(self : Conversation) -> @composer.RunHeartbeat? {
     Open(stage=AtStep(None), ..) => Working
     Open(stage=Cancelling, ..) => Stopping
   }
-  Some({ stage, started_ms: self.run_started_ms, tokens: self.usage_tokens })
+  Some({
+    stage,
+    started_ms: self.run_started_ms,
+    tokens: self.turn.usage_tokens,
+  })
 }
 
 ///|
 fn Conversation::clear_streams(self : Conversation) -> Conversation {
-  { ..self, streaming_response: "" }
+  { ..self, turn: { ..self.turn, streaming_response: "" } }
 }
 
 ///|
@@ -3285,11 +3310,11 @@ fn Conversation::run_tail_notice_anchor(
   terminal_snapshot_generation? : Int,
 ) -> NoticeAnchor {
   if terminal_expected {
-    match (self.run_durable_floor, terminal_snapshot_generation) {
+    match (self.turn.durable_floor, terminal_snapshot_generation) {
       (Some(floor), Some(snapshot_generation)) =>
         PriorTerminalTail(floor~, snapshot_generation~)
       (None, Some(snapshot_generation)) => SnapshotCut(snapshot_generation~)
-      _ => TerminalTail(self.run_durable_floor)
+      _ => TerminalTail(self.turn.durable_floor)
     }
   } else {
     match terminal_snapshot_generation {
@@ -3993,13 +4018,16 @@ fn Conversation::apply_commit(
     } else {
       self.goal_pending
     },
-    run_durable_floor: if !(self.run is NoRun(..)) &&
-      self.run_durable_floor is None &&
-      self.run_floor_generation is None &&
-      !terminal {
-      Some(self.last_terminal_sequence)
-    } else {
-      self.run_durable_floor
+    turn: {
+      ..self.turn,
+      durable_floor: if !(self.run is NoRun(..)) &&
+        self.turn.durable_floor is None &&
+        self.turn.floor_generation is None &&
+        !terminal {
+        Some(self.last_terminal_sequence)
+      } else {
+        self.turn.durable_floor
+      },
     },
     last_terminal_sequence: if terminal &&
       sequence > self.last_terminal_sequence {
@@ -4183,7 +4211,7 @@ fn Conversation::adopt_snapshot(
       }
     }
   }
-  let floor_snapshot_is_causal = match self.run_floor_generation {
+  let floor_snapshot_is_causal = match self.turn.floor_generation {
     Some(required) => generation >= required
     None => true
   }
@@ -4211,18 +4239,21 @@ fn Conversation::adopt_snapshot(
       // becomes steerable only when the snapshot visibly has current-run data
       // after its last terminal; a snapshot ending at a terminal may instead
       // have beaten the lifecycle Finished event and proves no open floor.
-      run_durable_floor: if !(self.run is NoRun(..)) &&
-        self.run_durable_floor is None &&
-        floor_snapshot_is_causal &&
-        items.length() > snapshot_terminal_boundary {
-        Some(snapshot_terminal_sequence)
-      } else {
-        self.run_durable_floor
-      },
-      run_floor_generation: if floor_snapshot_is_causal {
-        None
-      } else {
-        self.run_floor_generation
+      turn: {
+        ..self.turn,
+        durable_floor: if !(self.run is NoRun(..)) &&
+          self.turn.durable_floor is None &&
+          floor_snapshot_is_causal &&
+          items.length() > snapshot_terminal_boundary {
+          Some(snapshot_terminal_sequence)
+        } else {
+          self.turn.durable_floor
+        },
+        floor_generation: if floor_snapshot_is_causal {
+          None
+        } else {
+          self.turn.floor_generation
+        },
       },
     }
     .freeze_run_tail_notices_from_snapshot(event_boundaries, generation)
@@ -4267,10 +4298,13 @@ fn Conversation::adopt_snapshot(
     let conv = if !(conv.run is NoRun(..)) {
       {
         ..conv,
-        run_durable_floor: None,
-        // The incomplete cut cannot establish this open run's predecessor.
-        // The retry generation is necessarily newer than this one.
-        run_floor_generation: Some(generation + 1),
+        turn: {
+          ..conv.turn,
+          durable_floor: None,
+          // The incomplete cut cannot establish this open run's predecessor.
+          // The retry generation is necessarily newer than this one.
+          floor_generation: Some(generation + 1),
+        },
       }
     } else {
       conv

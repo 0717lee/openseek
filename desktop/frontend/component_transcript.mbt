@@ -47,7 +47,7 @@ fn Model::transcript_input(self : Model) -> @transcript_component.Input {
               .bind(value => value.checkout_root()),
             submission_generation=self.submission_sequence,
             items=conversation.visible_transcript_rows(),
-            streaming_response=conversation.streaming_response,
+            streaming_response=conversation.turn.streaming_response,
             streaming_identity=conversation.streaming_render_identity(),
             subruns=conversation.visible_subruns(),
           )
