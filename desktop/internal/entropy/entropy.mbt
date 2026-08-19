@@ -1,20 +1,13 @@
-// OS cryptographic entropy, read through a small C stub because
-// moonbitlang/async's fs cannot open /dev/urandom (see entropy_native.c).
-
-///|
-extern "C" fn os_entropy(n : Int) -> Bytes = "openseek_os_entropy"
+// OS cryptographic entropy via moonbitlang/core/env's @env.rand, which reads
+// the platform entropy source (the runtime on native, WASI random_get on wasm)
+// and returns `None` where no such source exists.
 
 ///|
 /// `byte_count` bytes of OS entropy, or `None` when the platform's random
 /// source could not be read. Never invents weak randomness — callers that
 /// need a value fail loudly and ask the operator for an explicit one.
 pub fn random_bytes(byte_count : Int) -> Bytes? {
-  let bytes = os_entropy(byte_count)
-  if bytes.length() < byte_count {
-    None
-  } else {
-    Some(bytes)
-  }
+  @env.rand(byte_count)
 }
 
 ///|
