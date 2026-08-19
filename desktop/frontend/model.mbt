@@ -2035,7 +2035,7 @@ priv enum DeviceMsg {
   StartResponded(
     session~ : String,
     submission_id~ : String,
-    run_id~ : String?,
+    run_id~ : String,
     status~ : String,
     exit_code~ : Int
   )

@@ -6382,14 +6382,6 @@ fn update_device_msg(
         conv.has_initial_submission(submission_id) else {
         return (@cmd.none, model)
       }
-      // No run means the host recognized this submission in the durable
-      // record and declined to write it twice. The prompt is therefore
-      // delivered — retire the recoverable draft — and there is no lifecycle
-      // to open, because whatever turn wrote it is not this call's to own.
-      guard run_id is Some(run_id) else {
-        let (conv, _) = conv.settle_pending_prompt(submission_id)
-        return (@cmd.none, model.replace_conversation(conv))
-      }
       // The id-bearing reply always settles its exact submission, even when
       // Finished A and Started B overtook A's RPC response. Only lifecycle
       // mutation remains conditional on A still owning the conversation.
@@ -9947,33 +9939,6 @@ test "a matching Started establishes the run after an undelivered response" {
 }
 
 ///|
-test "a duplicate start response retires the draft and opens no run" {
-  let dispatch = test_dispatch()
-  let conv = with_pending_prompt(
-    { ..test_conversation(), run: Starting(submission_id="prompt-id") },
-    "prompt-id",
-    "prompt",
-  )
-  let (_, responded) = update_dev(
-    dispatch,
-    StartResponded(
-      session="desktop-test",
-      submission_id="prompt-id",
-      run_id=None,
-      status="duplicate",
-      exit_code=0,
-    ),
-    test_model().replace_conversation(conv),
-  )
-  // The prompt is in the record, so the recoverable copy has done its job.
-  inspect(responded.active().pending_steers.length(), content="0")
-  // No run was opened, so nothing may claim the lifecycle either way: the
-  // conversation is left exactly as the reply found it.
-  assert_true(responded.active().run is Starting(submission_id="prompt-id"))
-  assert_true(responded.active().last_run_id is None)
-}
-
-///|
 test "an accepted start response opens the run without Started" {
   let dispatch = test_dispatch()
   let conv = with_pending_prompt(
@@ -9986,7 +9951,7 @@ test "an accepted start response opens the run without Started" {
     StartResponded(
       session="desktop-test",
       submission_id="prompt-id",
-      run_id=Some("r-response"),
+      run_id="r-response",
       status="accepted",
       exit_code=0,
     ),
@@ -10064,7 +10029,7 @@ test "an old-host Started without an id is settled by the exact start response" 
     StartResponded(
       session="desktop-test",
       submission_id="prompt-id",
-      run_id=Some("r-old-host"),
+      run_id="r-old-host",
       status="accepted",
       exit_code=0,
     ),
@@ -10087,7 +10052,7 @@ test "a late accepted response settles run A without replacing open run B" {
     StartResponded(
       session="desktop-test",
       submission_id="first-start",
-      run_id=Some("r-first"),
+      run_id="r-first",
       status="accepted",
       exit_code=0,
     ),
@@ -10113,7 +10078,7 @@ test "a late failed response for durable run A cannot disturb open run B" {
     StartResponded(
       session="desktop-test",
       submission_id="first-start",
-      run_id=Some("r-first"),
+      run_id="r-first",
       status="failed",
       exit_code=1,
     ),
@@ -10548,7 +10513,7 @@ test "a failed response after durable Finished cannot resurrect its prompt" {
     StartResponded(
       session="desktop-test",
       submission_id="fast-start",
-      run_id=Some("r-fast"),
+      run_id="r-fast",
       status="failed",
       exit_code=1,
     ),
@@ -10589,7 +10554,7 @@ test "an accepted response consumes a fast-finished prompt without reopening" {
     StartResponded(
       session="desktop-test",
       submission_id="fast-start",
-      run_id=Some("r-fast"),
+      run_id="r-fast",
       status="accepted",
       exit_code=0,
     ),

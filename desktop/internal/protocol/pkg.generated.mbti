@@ -1781,7 +1781,7 @@ pub fn StartPayload::to_json(Self) -> Json
 pub fn StartPayload::to_repr(Self) -> @debug.Repr
 
 pub(all) struct StartReply {
-  run_id : String?
+  run_id : String
   status : String
   exit_code : Int
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
