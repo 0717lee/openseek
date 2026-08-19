@@ -6262,7 +6262,6 @@ fn update_device_msg(
       // `BridgeReady`, the rest when opened. Only a lifecycle state that still
       // exactly matches this request's per-session frontier may settle; live
       // Started/Finished transitions received meanwhile are newer truth.
-      let boundary_reloads : Array[String] = []
       let settled = model.conversations.map(conv => {
         if conv.device != channel {
           return conv
@@ -6283,12 +6282,10 @@ fn update_device_msg(
                 }
               SnapshotIdle(last_run_id=Some(run_id)) if conv.run is NoRun(..) &&
                 conv.last_run_id is Some(current) &&
-                current == run_id => {
+                current == run_id =>
                 // The run this conversation last owned is idle at the host,
                 // so nothing it carried is still in flight.
-                ignore(captured.steer_ids)
                 conv.forget_steers_for_run(run_id)
-              }
               SnapshotStarting(submission_id~) if conv.run
                 is Starting(submission_id=current) &&
                 current == submission_id => {
@@ -6304,24 +6301,7 @@ fn update_device_msg(
         }
         conv
       })
-      let commands : Array[@cmd.Cmd] = []
-      let mut next = { ..model, conversations: settled }
-      for session in boundary_reloads {
-        if next.find_conversation(channel, session) is Some(conv) {
-          let (updated, generation) = next.ensure_transcript_reload_after_current(
-            conv,
-          )
-          next = updated
-          if generation is Some(generation) {
-            commands.push(
-              session_snapshot_command(
-                dispatch, channel, next, session, generation, false,
-              ),
-            )
-          }
-        }
-      }
-      (@cmd.batch(commands), next)
+      (@cmd.none, { ..model, conversations: settled })
     }
     Engine(run_id, event, session~) => {
       // Compaction and background notices happen between turns, so their
@@ -10140,13 +10120,11 @@ test "runs settled closes runs the host no longer has, sparing live and starting
         session: "desktop-test",
         state: SnapshotOpen(run_id="r7"),
         initial_ids: [],
-        steer_ids: [],
       },
       {
         session: "desktop-stale",
         state: SnapshotOpen(run_id="r9"),
         initial_ids: [],
-        steer_ids: [],
       },
     ]),
     model,
@@ -10705,7 +10683,6 @@ test "a legacy text-only steer receipt cannot claim local ownership" {
     model,
   )
   inspect(next.active().pending_steers.length(), content="1")
-  inspect(next.active().pending_steers.length(), content="1")
 }
 
 ///|
@@ -10769,7 +10746,6 @@ test "a canonical user commit never settles a local steer" {
   )
   inspect(committed.active().messages.length(), content="1")
   inspect(committed.active().pending_steers.length(), content="1")
-  inspect(committed.active().pending_steers.length(), content="1")
 }
 
 ///|
@@ -10797,7 +10773,6 @@ test "a snapshot never settles a local steer by text" {
     ),
     model,
   )
-  inspect(loaded.active().pending_steers.length(), content="1")
   inspect(loaded.active().pending_steers.length(), content="1")
 }
 
@@ -10867,7 +10842,6 @@ test "a late exact applied receipt retracts a run-end unconfirmed notice" {
     ),
     finished,
   )
-  inspect(next.active().pending_steers.length(), content="0")
   inspect(next.active().pending_steers.length(), content="0")
 }
 

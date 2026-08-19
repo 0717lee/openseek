@@ -61,7 +61,6 @@ pub async fn start_run(
   // global placement critical section and continue concurrently.
   placement_locked = false
   manager.workspace_lifecycle_lock.release()
-  let submission_id = normalize_submission_id(payload.submission_id)
   ensure_run_cwd(config)
   let need_spawn = if slot.live() is Some(live) {
     live.spec_key != engine_fingerprint(config)
@@ -83,9 +82,11 @@ pub async fn start_run(
     raise EngineError("this conversation is compacting; wait for it to finish")
   }
   let run_id = mint_run_id()
-  // The normalized tag rides the wire command so the engine records it on
-  // the durable User item this prompt appends — which is also what makes the
-  // idempotence check above able to recognize this submission later.
+  // The normalized tag rides the wire command so the engine records it on the
+  // durable User item this prompt appends. That is what lets a client
+  // recognize its own prompt in the record — the host itself never reads it
+  // back.
+  let submission_id = normalize_submission_id(payload.submission_id)
   let command = @protocol.prompt(config.task, submission_id?)
   // Submitting, opening the run and announcing it are one synchronous step,
   // with no suspension since the claim check above. That is what makes the

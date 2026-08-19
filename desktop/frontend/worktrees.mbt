@@ -1431,7 +1431,9 @@ test "a failed worktree setup is an actionable toast and keeps retry eligible" {
   let (_, repeated) = update_dev(dispatch, failed, sent)
   let (_, rejected) = update_dev(dispatch, failed, sent)
   assert_eq(repeated.active().task, rejected.active().task)
-  assert_eq(repeated.active().pending_steers.length(), 0)
+  // The draft came back *and* the submission is no longer in flight: a setup
+  // that never reached `agent.start` leaves nothing waiting for a receipt.
+  assert_true(repeated.active().pending_prompt is None)
   assert_eq(repeated.notifications.length(), 1)
   assert_eq(repeated.notifications[0].message, message)
   assert_eq(

@@ -431,9 +431,7 @@ priv struct RecoveredSettlement {
 /// The exact per-session lifecycle state at the instant an `agent.runs`
 /// request starts. An unversioned positive row is safe to replay only while
 /// the session still has this state; a live Started or Finished received
-/// meanwhile takes precedence over the older snapshot. `steer_ids` freezes
-/// the local inputs that existed at that same cut, so a slower negative reply
-/// cannot adjudicate a steer submitted after the request began.
+/// meanwhile takes precedence over the older snapshot.
 priv enum RunSnapshotState {
   SnapshotIdle(last_run_id~ : String?)
   SnapshotStarting(submission_id~ : String)
@@ -448,7 +446,6 @@ priv struct RunSnapshotFrontier {
   // Their submission id is still an exact owner and must survive the
   // lifecycle's transition to SnapshotIdle for reconnect settlement lookup.
   initial_ids : Array[String]
-  steer_ids : Array[String]
 }
 
 ///|
@@ -2036,10 +2033,8 @@ priv enum DeviceMsg {
   Engine(String?, @transcript.EngineEvent, session~ : String?)
   // The exact local start request returned its run result. `accepted` is the
   // prompt's ownership receipt and can recover a Started notification lost on
-  // the same connection; any other status leaves delivery unconfirmed.
-  // `run_id` is absent when the call opened no run — the host answered
-  // `duplicate`, meaning this submission is already in the durable record and
-  // must not be sent again.
+  // the same connection; any other status leaves delivery unconfirmed. A
+  // reply that returns always names the run it opened.
   StartResponded(
     session~ : String,
     submission_id~ : String,
@@ -2047,8 +2042,9 @@ priv enum DeviceMsg {
     status~ : String,
     exit_code~ : Int
   )
-  // The response path failed before host acceptance was knowable. Keep an
-  // exact-id unconfirmed entry; canonical transcript text cannot settle it.
+  // The response path failed before host acceptance was knowable. Nothing
+  // guesses on the client's behalf: the prompt in flight settles and a reload
+  // shows what the record actually holds.
   StartUndelivered(
     session~ : String,
     submission_id~ : String,
@@ -2609,20 +2605,7 @@ fn Model::run_snapshot_frontier(
     if conv.pending_prompt is Some(pending) {
       initial_ids.push(pending.submission_id)
     }
-    let steer_ids : Array[String] = []
-    let steer_owner = match state {
-      SnapshotOpen(run_id~) => Some(run_id)
-      SnapshotIdle(last_run_id=Some(run_id)) => Some(run_id)
-      _ => None
-    }
-    if steer_owner is Some(run_id) {
-      for input in conv.pending_steers {
-        if input.run_id is Some(owner) && owner == run_id {
-          steer_ids.push(input.submission_id)
-        }
-      }
-    }
-    { session: conv.session_id, state, initial_ids, steer_ids }
+    { session: conv.session_id, state, initial_ids }
   })
 }
 

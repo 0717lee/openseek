@@ -50,11 +50,10 @@ pub impl FromJson for EmptyReply with fn from_json(json, path) {
 ///|
 /// The result of one `agent.start`.
 ///
-/// `run_id` names the turn this call opened, and is absent exactly when it
-/// opened none: `status` is then `duplicate`, meaning the submission was
-/// already on a durable `User` item, so the prompt was not written a second
-/// time and there is no new turn to address. Whether some *other* turn is
-/// running is a separate question, answered by `agent.runs`.
+/// `run_id` names the turn this call opened. Every reply that returns names
+/// one — the host does not deduplicate a resent `submission_id`, and a start
+/// that opens no turn raises instead. A client that resends a prompt it could
+/// not confirm risks a second copy of the text; read the record first.
 pub(all) struct StartReply {
   run_id : String
   status : String

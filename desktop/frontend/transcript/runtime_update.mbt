@@ -38,7 +38,11 @@ pub fn parse_runtime_update(content : String) -> RuntimeUpdateView {
       let key = key.to_owned()
       if runtime_metadata_keys.contains(key) {
         if key == "status" {
-          status = Some(value.to_owned())
+          // `status=` with nothing after it names no state. It still counts
+          // as metadata — the line is not a diagnostic — but it must not
+          // become a chip reading "moon_check " with a blank status.
+          let value = value.trim().to_owned()
+          status = if value.is_empty() { None } else { Some(value) }
         }
         true
       } else {
@@ -72,6 +76,13 @@ test "parse runtime update strips moon_check metadata" {
     update.diagnostics.join("|"),
     content="Warning: unused variable x|Finished.",
   )
+}
+
+///|
+test "a blank status assignment names no watcher state" {
+  let update = parse_runtime_update("[moon_check update]\nstatus=\nFinished.")
+  assert_eq(update.status, None)
+  inspect(update.diagnostics.join("|"), content="Finished.")
 }
 
 ///|
