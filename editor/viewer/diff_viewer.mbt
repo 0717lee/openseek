@@ -47,6 +47,16 @@ pub fn DiffEditorModel::DiffEditorModel(
 }
 
 ///|
+/// The comparison strategy used by a DiffViewer. `StandardDiff` is the
+/// editor's general-purpose line/character algorithm. The MoonBit-aware modes
+/// are offered only when the modified model's URI ends in `.mbt`.
+pub(all) enum DiffViewerMode {
+  StandardDiff
+  TokenDiff
+  TreeDiff
+} derive(Eq)
+
+///|
 /// A switchable diff surface composed from two ordinary Viewer instances.
 /// The caller owns `host` and must keep it stable and otherwise child-free.
 struct DiffViewer {
@@ -54,6 +64,9 @@ struct DiffViewer {
   root : @rdom.Element
   original_host : @rdom.Element
   modified_host : @rdom.Element
+  toolbar : @rdom.Element
+  mode_status : @rdom.Element
+  mode_buttons : Array[(DiffViewerMode, @rdom.Element)]
   original_viewer : Viewer
   modified_viewer : Viewer
   owned_services : ViewerServices?
@@ -66,6 +79,7 @@ struct DiffViewer {
   mut modified_decoration_ids : Array[String]
   mut original_zone_ids : Array[String]
   mut modified_zone_ids : Array[String]
+  mut diff_mode : DiffViewerMode
   mut disposed : Bool
 }
 
@@ -88,6 +102,40 @@ pub fn DiffViewer::create(
   root.set_attribute("class", "moonbit-diff-editor")
   root.set_attribute("role", "region")
   root.set_attribute("aria-label", "File comparison")
+  let toolbar = document.create_element("div")
+  toolbar.set_attribute("class", "moonbit-diff-editor-toolbar")
+  toolbar.set_attribute("role", "toolbar")
+  toolbar.set_attribute("aria-label", "Diff mode")
+  toolbar.set_attribute("hidden", "")
+  let toolbar_label = document.create_element("span")
+  toolbar_label.set_attribute("class", "moonbit-diff-editor-toolbar-label")
+  toolbar_label.set_inner_html("Diff")
+  toolbar.append_child(toolbar_label.as_node())
+  let mode_group = document.create_element("div")
+  mode_group.set_attribute("class", "moonbit-diff-editor-mode-group")
+  mode_group.set_attribute("role", "group")
+  mode_group.set_attribute("aria-label", "Comparison algorithm")
+  let mode_buttons : Array[(DiffViewerMode, @rdom.Element)] = []
+  for mode in [StandardDiff, TokenDiff, TreeDiff] {
+    let button = document.create_element("button")
+    button.set_attribute("type", "button")
+    button.set_attribute("class", "moonbit-diff-editor-mode")
+    button.set_attribute("data-diff-mode", mode.attribute_name())
+    button.set_attribute("aria-label", mode.accessible_label())
+    button.set_attribute("title", mode.title())
+    button.set_attribute("aria-pressed", "false")
+    button.set_inner_html(mode.visible_label())
+    mode_group.append_child(button.as_node())
+    mode_buttons.push((mode, button))
+  }
+  toolbar.append_child(mode_group.as_node())
+  let mode_status = document.create_element("span")
+  mode_status.set_attribute("class", "moonbit-diff-editor-mode-status")
+  mode_status.set_attribute("aria-live", "polite")
+  mode_status.set_attribute("hidden", "")
+  toolbar.append_child(mode_status.as_node())
+  let panes = document.create_element("div")
+  panes.set_attribute("class", "moonbit-diff-editor-panes")
   let original_host = document.create_element("div")
   original_host.set_attribute(
     "class", "moonbit-diff-editor-pane moonbit-diff-editor-original",
@@ -100,8 +148,10 @@ pub fn DiffViewer::create(
   )
   modified_host.set_attribute("role", "group")
   modified_host.set_attribute("aria-label", "Modified file")
-  root.append_child(original_host.as_node())
-  root.append_child(modified_host.as_node())
+  panes.append_child(original_host.as_node())
+  panes.append_child(modified_host.as_node())
+  root.append_child(toolbar.as_node())
+  root.append_child(panes.as_node())
   host.append_child(root.as_node())
 
   let (shared_services, owned_services) = match services {
@@ -125,6 +175,9 @@ pub fn DiffViewer::create(
     root,
     original_host,
     modified_host,
+    toolbar,
+    mode_status,
+    mode_buttons,
     original_viewer,
     modified_viewer,
     owned_services,
@@ -137,9 +190,23 @@ pub fn DiffViewer::create(
     modified_decoration_ids: [],
     original_zone_ids: [],
     modified_zone_ids: [],
+    diff_mode: StandardDiff,
     disposed: false,
   }
   diff_viewer.apply_render_mode_dom()
+  for entry in diff_viewer.mode_buttons {
+    let (mode, button) = entry
+    button.add_event_listener("click", event => {
+      event.prevent_default()
+      event.stop_propagation()
+      diff_viewer.set_diff_mode(mode)
+    })
+  }
+  diff_viewer.update_diff_mode_controls(
+    specialized_available=false,
+    effective_mode=StandardDiff,
+    fell_back=false,
+  )
   diff_viewer.scroll_disposables.push(
     original_viewer.on_did_scroll_change(event => {
       if diff_viewer.render_mode == SideBySide && event.scroll_top_changed {
@@ -199,6 +266,11 @@ pub fn DiffViewer::set_model(
     None => {
       self.original_viewer.set_model(None)
       self.modified_viewer.set_model(None)
+      self.update_diff_mode_controls(
+        specialized_available=false,
+        effective_mode=StandardDiff,
+        fell_back=false,
+      )
     }
     Some(diff_model) => {
       self.original_viewer.set_model(Some(diff_model.original))
@@ -334,6 +406,29 @@ pub fn DiffViewer::set_render_mode(
 }
 
 ///|
+/// Select a comparison strategy. MoonBit-aware modes remain selected while a
+/// non-`.mbt` model is open, but that model is rendered with `StandardDiff`
+/// and the specialized controls stay hidden.
+pub fn DiffViewer::set_diff_mode(
+  self : DiffViewer,
+  mode : DiffViewerMode,
+) -> Unit {
+  if self.disposed || self.diff_mode == mode {
+    return
+  }
+  self.diff_mode = mode
+  self.refresh_diff()
+}
+
+///|
+/// The user's selected strategy. The effective renderer can temporarily be
+/// `StandardDiff` for non-`.mbt` files or after a specialized calculation
+/// fails.
+pub fn DiffViewer::get_diff_mode(self : DiffViewer) -> DiffViewerMode {
+  self.diff_mode
+}
+
+///|
 /// Clear the comparison while retaining the reusable two-pane surface.
 pub fn DiffViewer::clear(self : DiffViewer) -> Unit {
   self.set_model(None)
@@ -430,26 +525,120 @@ fn DiffViewer::sync_scroll_left_to(
 }
 
 ///|
+fn DiffViewerMode::attribute_name(self : DiffViewerMode) -> String {
+  match self {
+    StandardDiff => "standard"
+    TokenDiff => "token"
+    TreeDiff => "tree"
+  }
+}
+
+///|
+fn DiffViewerMode::visible_label(self : DiffViewerMode) -> String {
+  match self {
+    StandardDiff => "Standard"
+    TokenDiff => "Token"
+    TreeDiff => "Tree"
+  }
+}
+
+///|
+fn DiffViewerMode::accessible_label(self : DiffViewerMode) -> String {
+  match self {
+    StandardDiff => "Standard diff"
+    TokenDiff => "Token diff"
+    TreeDiff => "Tree diff"
+  }
+}
+
+///|
+fn DiffViewerMode::title(self : DiffViewerMode) -> String {
+  match self {
+    StandardDiff => "Use the standard line and character diff"
+    TokenDiff => "Compare MoonBit tokens with moondiff"
+    TreeDiff => "Compare MoonBit syntax trees with moondiff"
+  }
+}
+
+///|
+fn DiffViewer::update_diff_mode_controls(
+  self : DiffViewer,
+  specialized_available~ : Bool,
+  effective_mode~ : DiffViewerMode,
+  fell_back~ : Bool,
+) -> Unit {
+  let selected_mode = if specialized_available {
+    self.diff_mode
+  } else {
+    StandardDiff
+  }
+  if specialized_available {
+    self.toolbar.remove_attribute("hidden")
+    self.root.set_attribute("data-moondiff-available", "true")
+  } else {
+    self.toolbar.set_attribute("hidden", "")
+    self.root.remove_attribute("data-moondiff-available")
+  }
+  self.root.set_attribute("data-diff-mode", selected_mode.attribute_name())
+  self.root.set_attribute("data-diff-renderer", effective_mode.attribute_name())
+  for entry in self.mode_buttons {
+    let (mode, button) = entry
+    let active = mode == selected_mode
+    button.set_attribute(
+      "class",
+      if active {
+        "moonbit-diff-editor-mode active"
+      } else {
+        "moonbit-diff-editor-mode"
+      },
+    )
+    button.set_attribute("aria-pressed", active.to_string())
+  }
+  if fell_back {
+    self.root.set_attribute("data-diff-fallback", "true")
+    self.mode_status.remove_attribute("hidden")
+    let message = match (self.diff_mode, effective_mode) {
+      (TokenDiff, StandardDiff) =>
+        "Token diff unavailable — showing standard diff"
+      (TreeDiff, TokenDiff) => "Tree diff unavailable — showing token diff"
+      (TreeDiff, StandardDiff) =>
+        "Tree diff unavailable — showing standard diff"
+      _ => ""
+    }
+    self.mode_status.set_attribute("title", message)
+    self.mode_status.set_inner_html(message)
+  } else {
+    self.root.remove_attribute("data-diff-fallback")
+    self.mode_status.set_attribute("hidden", "")
+    self.mode_status.remove_attribute("title")
+    self.mode_status.set_inner_html("")
+  }
+}
+
+///|
 fn DiffViewer::refresh_diff(self : DiffViewer) -> Unit {
   if self.disposed {
     return
   }
   guard self.get_model() is Some(diff_model) else { return }
   self.clear_diff_artifacts()
-  let diff = @diff.get_default().compute_diff(
-    diff_model.original.get_lines_content(),
-    diff_model.modified.get_lines_content(),
-    {
-      ignore_trim_whitespace: false,
-      max_computation_time_ms: 5000,
-      compute_moves: false,
-    },
+  let original_lines = diff_model.original.get_lines_content()
+  let modified_lines = diff_model.modified.get_lines_content()
+  let specialized_available = diff_model.supports_moondiff()
+  let calculation = calculate_diff_changes(
+    self.diff_mode,
+    specialized_available,
+    original_lines,
+    modified_lines,
+    diff_model.original.get_value(),
+    diff_model.modified.get_value(),
   )
-  let changes : Array[DiffLineChange] = diff.changes.map(change => {
-    original: change.original,
-    modified: change.modified,
-    inner_changes: change.get_inner_changes(),
-  })
+  self.update_diff_mode_controls(
+    specialized_available~,
+    effective_mode=calculation.effective_mode,
+    fell_back=calculation.fell_back,
+  )
+  let changes = calculation.changes
   let presentation = diff_presentation(changes)
   let modified_decorations = line_decorations(
     diff_model.modified,
@@ -533,7 +722,8 @@ priv struct DiffSpacer {
 priv struct DiffLineChange {
   original : @base_common.LineRange
   modified : @base_common.LineRange
-  inner_changes : Array[(@base_common.Range, @base_common.Range)]?
+  original_inner_changed : Array[@base_common.Range]
+  modified_inner_changed : Array[@base_common.Range]
 }
 
 ///|
@@ -565,18 +755,15 @@ fn diff_presentation(changes : Array[DiffLineChange]) -> DiffPresentation {
     if !change.modified.is_empty() {
       modified_changed.push(change.modified)
     }
-    match change.inner_changes {
-      Some(inner_changes) =>
-        for inner_change in inner_changes {
-          let (original, modified) = inner_change
-          if !original.is_empty() {
-            original_inner_changed.push(original)
-          }
-          if !modified.is_empty() {
-            modified_inner_changed.push(modified)
-          }
-        }
-      None => ()
+    for original in change.original_inner_changed {
+      if !original.is_empty() {
+        original_inner_changed.push(original)
+      }
+    }
+    for modified in change.modified_inner_changed {
+      if !modified.is_empty() {
+        modified_inner_changed.push(modified)
+      }
     }
     let original_length = change.original.length()
     let modified_length = change.modified.length()
@@ -793,15 +980,10 @@ fn append_deleted_line_tokens(
 ///|
 fn original_inner_ranges(change : DiffLineChange) -> Array[@base_common.Range] {
   let ranges = []
-  match change.inner_changes {
-    Some(inner_changes) =>
-      for inner_change in inner_changes {
-        let (original, _modified) = inner_change
-        if !original.is_empty() {
-          ranges.push(original)
-        }
-      }
-    None => ()
+  for original in change.original_inner_changed {
+    if !original.is_empty() {
+      ranges.push(original)
+    }
   }
   ranges
 }

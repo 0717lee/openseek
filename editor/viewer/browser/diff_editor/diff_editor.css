@@ -2,10 +2,102 @@
   position: absolute;
   inset: 0;
   display: flex;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
   background: var(--vscode-editor-background);
+}
+
+.moonbit-diff-editor-toolbar {
+  z-index: 1;
+  display: flex;
+  flex: 0 0 32px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 10px;
+  border-bottom: 1px solid
+    var(--vscode-diffEditor-border, var(--vscode-editorWidget-border));
+  color: var(--vscode-foreground, #3b3b3b);
+  background: var(--vscode-editorWidget-background, #f8f8f8);
+  font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, sans-serif);
+  font-size: 12px;
+}
+
+.moonbit-diff-editor-toolbar[hidden] {
+  display: none;
+}
+
+.moonbit-diff-editor-toolbar-label {
+  flex: 0 0 auto;
+  color: var(--vscode-descriptionForeground, #6b6b6b);
+  font-weight: 600;
+}
+
+.moonbit-diff-editor-mode-group {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid
+    var(--vscode-editorWidget-border, rgba(127, 127, 127, 0.35));
+  border-radius: 5px;
+}
+
+.moonbit-diff-editor-mode {
+  height: 22px;
+  padding: 0 9px;
+  border: 0;
+  border-right: 1px solid
+    var(--vscode-editorWidget-border, rgba(127, 127, 127, 0.35));
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  line-height: 22px;
+  cursor: pointer;
+}
+
+.moonbit-diff-editor-mode:last-child {
+  border-right: 0;
+}
+
+.moonbit-diff-editor-mode:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(127, 127, 127, 0.12));
+}
+
+.moonbit-diff-editor-mode:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: -1px;
+}
+
+.moonbit-diff-editor-mode.active {
+  color: var(--vscode-button-foreground, #ffffff);
+  background: var(--vscode-button-background, #0e639c);
+}
+
+.moonbit-diff-editor-mode-status {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--vscode-descriptionForeground, #6b6b6b);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.moonbit-diff-editor-mode-status[hidden] {
+  display: none;
+}
+
+.moonbit-diff-editor-panes {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .moonbit-diff-editor-pane {
