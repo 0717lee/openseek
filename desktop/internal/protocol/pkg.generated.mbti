@@ -875,6 +875,18 @@ pub fn GitChecks::not_equal(Self, Self) -> Bool
 pub fn GitChecks::to_json(Self) -> Json
 pub fn GitChecks::to_repr(Self) -> @debug.Repr
 
+pub(all) struct GitCommitChangesPayload {
+  session : String
+  workspace : String?
+  commit : String
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct GitCommitChangesReply {
+  commit : String
+  parent : String?
+  changes : Array[GitHistoricalChange]
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
 pub(all) struct GitDiffStat {
   added : Int
   removed : Int
@@ -887,6 +899,49 @@ pub fn GitDiffStat::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDeco
 pub fn GitDiffStat::not_equal(Self, Self) -> Bool
 pub fn GitDiffStat::to_json(Self) -> Json
 pub fn GitDiffStat::to_repr(Self) -> @debug.Repr
+
+pub(all) struct GitHistoricalChange {
+  path : String
+  original_path : String?
+  status : String
+  kind : String
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct GitHistoryCommit {
+  id : String
+  parent_ids : Array[String]
+  subject : String
+  author : String
+  authored_at : String
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct GitHistoryPayload {
+  session : String
+  workspace : String?
+  snapshot : GitHistorySnapshot?
+  skip : Int
+  limit : Int
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct GitHistoryRef {
+  name : String
+  revision : String
+  kind : String
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct GitHistoryReply {
+  repository : Bool
+  snapshot : GitHistorySnapshot
+  commits : Array[GitHistoryCommit]
+  has_more : Bool
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+
+pub(all) struct GitHistorySnapshot {
+  head : String?
+  branch : String?
+  refs : Array[GitHistoryRef]
+  tips : Array[String]
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct GitOriginalFilePayload {
   session : String

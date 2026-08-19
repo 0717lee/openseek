@@ -755,3 +755,62 @@ test "worktree replies omit absent owners and reject ambiguous ownership" {
   }
   assert_true(malformed_present)
 }
+
+///|
+test "Git history and commit-change protocol round-trip immutable identities" {
+  let snapshot : @protocol.GitHistorySnapshot = {
+    head: Some("1111111111111111111111111111111111111111"),
+    branch: Some("feature/graph"),
+    refs: [
+      {
+        name: "feature/graph",
+        revision: "1111111111111111111111111111111111111111",
+        kind: "current",
+      },
+    ],
+    tips: ["1111111111111111111111111111111111111111"],
+  }
+  let history : @protocol.GitHistoryReply = {
+    repository: true,
+    snapshot,
+    commits: [
+      {
+        id: "1111111111111111111111111111111111111111",
+        parent_ids: ["0000000000000000000000000000000000000000"],
+        subject: "Add graph",
+        author: "OpenSeek",
+        authored_at: "2026-08-19T10:00:00+08:00",
+      },
+    ],
+    has_more: true,
+  }
+  let decoded : @protocol.GitHistoryReply = @json.from_json(history.to_json())
+  assert_eq(decoded, history)
+  let payload : @protocol.GitHistoryPayload = {
+    session: "s1",
+    workspace: Some("/workspace"),
+    snapshot: Some(snapshot),
+    skip: 50,
+    limit: 50,
+  }
+  let decoded_payload : @protocol.GitHistoryPayload = @json.from_json(
+    payload.to_json(),
+  )
+  assert_eq(decoded_payload, payload)
+  let changes : @protocol.GitCommitChangesReply = {
+    commit: "1111111111111111111111111111111111111111",
+    parent: Some("0000000000000000000000000000000000000000"),
+    changes: [
+      {
+        path: "src/new.mbt",
+        original_path: Some("src/old.mbt"),
+        status: "renamed",
+        kind: "file",
+      },
+    ],
+  }
+  let decoded_changes : @protocol.GitCommitChangesReply = @json.from_json(
+    changes.to_json(),
+  )
+  assert_eq(decoded_changes, changes)
+}
