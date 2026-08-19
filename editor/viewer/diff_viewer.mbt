@@ -597,10 +597,13 @@ fn DiffViewer::update_diff_mode_controls(
   if fell_back {
     self.root.set_attribute("data-diff-fallback", "true")
     self.mode_status.remove_attribute("hidden")
-    let message = match self.diff_mode {
-      TokenDiff => "Token diff unavailable — showing standard diff"
-      TreeDiff => "Tree diff unavailable — showing standard diff"
-      StandardDiff => ""
+    let message = match (self.diff_mode, effective_mode) {
+      (TokenDiff, StandardDiff) =>
+        "Token diff unavailable — showing standard diff"
+      (TreeDiff, TokenDiff) => "Tree diff unavailable — showing token diff"
+      (TreeDiff, StandardDiff) =>
+        "Tree diff unavailable — showing standard diff"
+      _ => ""
     }
     self.mode_status.set_attribute("title", message)
     self.mode_status.set_inner_html(message)

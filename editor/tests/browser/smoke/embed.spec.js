@@ -307,7 +307,7 @@ test('switches standard token and tree diff only for mbt comparisons', async ({ 
   await expect(diff).toHaveAttribute('data-diff-renderer', 'standard');
 });
 
-test('falls back to standard diff when tree diff cannot parse a model', async ({ page }) => {
+test('uses moondiff token fallback when tree diff cannot parse a model', async ({ page }) => {
   await page.goto('/embed.html');
   await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
   await page.locator(workspaceItem('broken.mbt')).click();
@@ -322,10 +322,10 @@ test('falls back to standard diff when tree diff cannot parse a model', async ({
   await tree.click();
   await expect(tree).toHaveAttribute('aria-pressed', 'true');
   await expect(diff).toHaveAttribute('data-diff-mode', 'tree');
-  await expect(diff).toHaveAttribute('data-diff-renderer', 'standard');
+  await expect(diff).toHaveAttribute('data-diff-renderer', 'token');
   await expect(diff).toHaveAttribute('data-diff-fallback', 'true');
   await expect(toolbar.locator('.moonbit-diff-editor-mode-status')).toHaveText(
-    'Tree diff unavailable — showing standard diff',
+    'Tree diff unavailable — showing token diff',
   );
 
   // Token mode does not require a parseable tree, and leaving the failed

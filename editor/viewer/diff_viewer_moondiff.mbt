@@ -1,7 +1,8 @@
 ///|
 /// The selected algorithm plus the line mappings consumed by the existing
-/// decoration/alignment renderer. `fell_back` is true only when a requested
-/// moondiff calculation was rejected and the standard editor diff was used.
+/// decoration/alignment renderer. `effective_mode` records the algorithm that
+/// produced those mappings when moondiff degrades Tree to Token or validation
+/// rejects a specialized document and returns to Standard.
 priv struct DiffChangeCalculation {
   changes : Array[DiffLineChange]
   effective_mode : DiffViewerMode
@@ -64,8 +65,7 @@ fn calculate_diff_changes(
     moondiff_changes(
       requested_mode, original_lines, modified_lines, original_source, modified_source,
     ) {
-    Some(changes) =>
-      { changes, effective_mode: requested_mode, fell_back: false }
+    Some(calculation) => calculation
     None =>
       {
         changes: standard_diff_changes(original_lines, modified_lines),
@@ -82,15 +82,19 @@ fn moondiff_changes(
   modified_lines : Array[String],
   original_source : String,
   modified_source : String,
-) -> Array[DiffLineChange]? {
-  let document = match mode {
+) -> DiffChangeCalculation? {
+  let (document, effective_mode, fell_back) = match mode {
     StandardDiff => return None
     TokenDiff =>
-      @tokdiff.diff(
-        old=original_lines,
-        new=modified_lines,
-        context=0,
-        line_cleanup=true,
+      (
+        @tokdiff.diff(
+          old=original_lines,
+          new=modified_lines,
+          context=0,
+          line_cleanup=true,
+        ),
+        TokenDiff,
+        false,
       )
     TreeDiff => {
       let result = @mbtdiff.diff(
@@ -98,14 +102,18 @@ fn moondiff_changes(
         modified_source,
         options=@mbtdiff.DiffOptions::new(context_lines=0),
       )
-      // moondiff can internally degrade a failed tree calculation to its
-      // lexical renderer. The DiffViewer contract is stricter: any typed
-      // parse/graph/computation fallback returns to the editor's standard
-      // algorithm instead.
-      if result.has_fallback() {
-        return None
-      }
-      result.document()
+      let fell_back = result.has_fallback()
+      // A typed Tree fallback already contains moondiff's lexical document.
+      // Keep that result instead of calculating an unrelated Standard diff.
+      (
+        result.document(),
+        if fell_back {
+          TokenDiff
+        } else {
+          TreeDiff
+        },
+        fell_back,
+      )
     }
   }
   guard moondiff_document_changes(document, original_lines, modified_lines)
@@ -114,12 +122,12 @@ fn moondiff_changes(
   }
   // Token diff has no typed error channel. Treat a non-identical pair with an
   // empty or malformed renderer-neutral document as a failed calculation.
-  if mode is TokenDiff &&
+  if effective_mode is TokenDiff &&
     original_source != modified_source &&
     changes.is_empty() {
     None
   } else {
-    Some(changes)
+    Some({ changes, effective_mode, fell_back })
   }
 }
 

@@ -177,7 +177,7 @@ test "tree diff uses structural moondiff output without fallback" {
 }
 
 ///|
-test "tree parse failure falls back to the standard editor diff" {
+test "tree parse failure keeps moondiff's token fallback" {
   let original = "fn broken( {"
   let modified = "fn okay() {}"
   let calculation = calculate_diff_changes(
@@ -188,7 +188,7 @@ test "tree parse failure falls back to the standard editor diff" {
     original,
     modified,
   )
-  assert_true(calculation.effective_mode is StandardDiff)
+  assert_true(calculation.effective_mode is TokenDiff)
   assert_true(calculation.fell_back)
   assert_false(calculation.changes.is_empty())
 }
