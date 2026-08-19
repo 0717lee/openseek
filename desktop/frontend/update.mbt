@@ -1038,19 +1038,19 @@ fn send_goal(
 }
 
 ///|
-/// Fold one engine event into its conversation. Returns whether the
-/// transcript visibly grew (the caller turns that into a scroll command only
-/// when this conversation is the one on screen) and the new conversation.
+/// Fold one engine event into its conversation. Returns the new conversation
+/// and, when the event reported a failure the durable record will never carry,
+/// the text to raise as a toast — the caller owns the dispatch a toast needs.
 fn apply_engine_event(
   conv : Conversation,
   event : @transcript.EngineEvent,
   event_run_id : String?,
-) -> (Bool, Conversation) {
+) -> (String?, Conversation) {
   match event {
     AgentStep(step) => {
       let conv = conv.clear_streams()
       (
-        false,
+        None,
         // A step can only advance an open, uncancelled turn: after a Stop the
         // stage stays Cancelling (steering a dying turn is refused, so the
         // display must not flip the gate back open), and a stray step for a
@@ -1064,10 +1064,10 @@ fn apply_engine_event(
     }
     AssistantDelta(content) =>
       if content.is_empty() {
-        (false, conv)
+        (None, conv)
       } else {
         (
-          true,
+          None,
           {
             ..conv,
             turn: {
@@ -1081,15 +1081,17 @@ fn apply_engine_event(
     // the sole source of the durable reasoning/answer item. The current wire
     // protocol has no live reasoning stream, while the full assistant event
     // settles the live response.
-    ReasoningMessage(_) => (false, conv)
-    AssistantMessage(_) => (false, conv.clear_streams())
+    ReasoningMessage(_) => (None, conv)
+    AssistantMessage(_) => (None, conv.clear_streams())
     RuntimeUpdate(content) => {
       let update = @transcript.parse_runtime_update(content)
-      (false, { ..conv, watcher_status: update.status })
+      (None, { ..conv, watcher_status: update.status })
     }
     // A sub-run opened: the lane replaces the notice this used to be, so the
     // minutes it blocks for read as activity rather than silence. A repeated
     // id (a reconnect replaying the bracket) refreshes rather than doubles.
+    // The lane docks above the composer, so opening one does not grow the
+    // transcript and must not drag a pinned conversation down.
     SubrunOpened(id~, kind~, label~) => {
       let subruns = conv.turn.subruns.filter(lane => lane.id != id)
       subruns.push({
@@ -1100,10 +1102,7 @@ fn apply_engine_event(
         activity: "",
         run: event_run_id,
       })
-      // A lane is a row at the tail, so opening one grows the transcript: a
-      // conversation pinned to the bottom has to follow it down, or several
-      // concurrent sub-runs open entirely below the fold.
-      (true, { ..conv, turn: { ..conv.turn, subruns, } })
+      (None, { ..conv, turn: { ..conv.turn, subruns, } })
     }
     // Closed: always drop the lane. A captured sub-run already settles as the
     // durable tool brief, so repeating its status here would leave two
@@ -1122,67 +1121,66 @@ fn apply_engine_event(
         },
       }
       if status == "captured" {
-        (true, conv)
+        (None, conv)
       } else {
         let kind = match closed {
           [lane, ..] => lane.kind
           [] => "subrun"
         }
         (
-          true,
-          conv.append_local_notice(
-            Assistant(is_danger=true),
+          Some(
             "\{kind} \{id}: \{status} · \{steps} step(s) · \{@labels.compact_count(tokens)} tok",
           ),
+          conv,
         )
       }
     }
     Usage(prompt_tokens~, completion_tokens~) =>
       (
-        false,
+        None,
         {
           ..conv,
           turn: { ..conv.turn, usage_tokens: prompt_tokens + completion_tokens },
         },
       )
-    ToolResult(..) => (false, conv)
+    ToolResult(..) => (None, conv)
     // The turn loop records this as an error `tool_result`; its commit is the
     // one canonical transcript source, just like a successful tool result.
-    ToolCallDecodeError(..) => (false, conv)
+    ToolCallDecodeError(..) => (None, conv)
     AgentFinished(_)
     | ContextYield(_)
     | AgentAborted(_)
-    | AgentSetupFailed(_) => (false, conv.clear_streams())
-    MaxStepsExhausted => (false, conv.clear_streams())
+    | AgentSetupFailed(_) => (None, conv.clear_streams())
+    MaxStepsExhausted => (None, conv.clear_streams())
     // The steer took effect at a step boundary. Its durable user item arrives
     // through `session.event`; the live event only settles pending UI.
     SteerApplied(content~, submission_id~) => {
       ignore(content)
       if submission_id is Some(submission_id) {
         let (next, _) = conv.acknowledge_steer(submission_id, event_run_id)
-        (false, next)
+        (None, next)
       } else {
         // Legacy receipt: lifecycle information only. Text is not ownership
         // in a multi-client session, even when it happens to match.
-        (false, conv)
+        (None, conv)
       }
     }
     // The steer raced the turn's end through the pipes and was rejected; the
     // text must not vanish silently.
     SteerDropped(content~, submission_id~) =>
       if submission_id is Some(submission_id) {
-        let (next, removed) = conv.reject_steer(
+        let (next, _) = conv.reject_steer(
           submission_id,
           event_run_id,
           steer_dropped_notice(content),
         )
-        (removed, next)
+        (None, next)
       } else {
-        (false, conv)
+        (None, conv)
       }
-    AutoCompactionFinished(_) => (false, conv)
-    CompactionStarted => (false, { ..conv, compaction: Compacting })
-    CompactionFinished(_) => (false, { ..conv, compaction: NotCompacting })
+    AutoCompactionFinished(_) => (None, conv)
+    CompactionStarted => (None, { ..conv, compaction: Compacting })
+    CompactionFinished(_) => (None, { ..conv, compaction: NotCompacting })
     // An idle-time append the engine could not persist. It names what failed
     // but not which command asked for it, so nothing is settled on it — a
     // pending goal keeps waiting, since this may have been some other item's
@@ -1195,7 +1193,7 @@ fn apply_engine_event(
       } else {
         "the engine could not save an item to this session: \{error}"
       }
-      (true, conv.append_local_notice(Assistant(is_danger=true), content))
+      (Some(content), conv)
     }
     CompactionFailed(reason) => {
       let content = if reason.is_blank() {
@@ -1203,13 +1201,7 @@ fn apply_engine_event(
       } else {
         "compaction failed: \{reason}"
       }
-      (
-        true,
-        { ..conv, compaction: NotCompacting }.append_local_notice(
-          Assistant(is_danger=true),
-          content,
-        ),
-      )
+      (Some(content), { ..conv, compaction: NotCompacting })
     }
   }
 }
@@ -6388,15 +6380,13 @@ fn update_device_msg(
         None
       }
       if conv is Some(conv) {
-        let (transcript_grew, next) = apply_engine_event(conv, event, run_id)
-        (
-          if transcript_grew {
-            @cmd.none
-          } else {
-            @cmd.none
-          },
-          model.replace_conversation(next),
-        )
+        let (report, next) = apply_engine_event(conv, event, run_id)
+        let updated = model.replace_conversation(next)
+        if report is Some(text) {
+          updated.notify_error(dispatch, text)
+        } else {
+          (@cmd.none, updated)
+        }
       } else {
         (@cmd.none, model)
       }
@@ -7060,13 +7050,11 @@ fn sessions_loaded(
 /// not leave a pulsing lane behind.
 test "a lane outlives neither its run nor a missing finish bracket" {
   let conv = { ..test_conversation(), run: Open(run_id="r1", stage=Opened) }
-  let (grew, opened) = apply_engine_event(
+  let (_, opened) = apply_engine_event(
     conv,
     SubrunOpened(id="sr-1", kind="explore", label="where is X"),
     Some("r1"),
   )
-  // The lane is a row at the tail: a pinned transcript must follow it down.
-  assert_true(grew)
   inspect(opened.visible_subruns().length(), content="1")
   // The run settles without a finish bracket ever arriving.
   let settled = { ..opened, run: NoRun(ended=Some(RunFailed)) }
@@ -7078,8 +7066,9 @@ test "a lane outlives neither its run nor a missing finish bracket" {
 
 ///|
 /// A captured sub-run already has a durable tool brief, so closing its live
-/// lane must not add a second completion row. An abnormal close has no
-/// successful tool brief to explain it and remains visible as a local notice.
+/// lane must not report a second completion. An abnormal close has no
+/// successful tool brief to explain it, and no durable event of its own, so it
+/// is reported to the user directly.
 test "sub-run completion reports only abnormal terminal status" {
   let conv = { ..test_conversation(), run: Open(run_id="r1", stage=Opened) }
   let (_, opened) = apply_engine_event(
@@ -7087,12 +7076,12 @@ test "sub-run completion reports only abnormal terminal status" {
     SubrunOpened(id="sr-1", kind="explore", label="where is X"),
     Some("r1"),
   )
-  let (grew, closed) = apply_engine_event(
+  let (captured_report, closed) = apply_engine_event(
     opened,
     SubrunClosed(id="sr-1", status="captured", steps=37, tokens=12_449),
     Some("r1"),
   )
-  assert_true(grew)
+  assert_true(captured_report is None)
   inspect(closed.visible_subruns().length(), content="0")
   // The successful tool brief is the only completion row.
   inspect(closed.messages.length(), content="0")
@@ -7102,18 +7091,17 @@ test "sub-run completion reports only abnormal terminal status" {
     SubrunOpened(id="sr-2", kind="review", label="check the change"),
     Some("r1"),
   )
-  let (failure_grew, failed) = apply_engine_event(
+  let (failure_report, failed) = apply_engine_event(
     reopened,
     SubrunClosed(id="sr-2", status="failed", steps=4, tokens=901),
     Some("r1"),
   )
-  assert_true(failure_grew)
   inspect(failed.visible_subruns().length(), content="0")
-  // The failed tool has no successful brief, so its terminal state survives
-  // in the retained overlay.
-  inspect(
-    failed.overlay.map(notice => notice.content).join("; "),
-    content="review sr-2: failed · 4 step(s) · 901 tok",
+  // The failed tool has no successful brief and no durable event of its own,
+  // so the failure is reported as a toast rather than as a transcript row.
+  inspect(failed.overlay.length(), content="0")
+  assert_true(
+    failure_report is Some("review sr-2: failed · 4 step(s) · 901 tok"),
   )
 }
 
@@ -9781,7 +9769,7 @@ test "started places a conversation before the registry arrives" {
 ///|
 test "a run boundary discards the previous turn's live state whole" {
   let dispatch = test_dispatch()
-  let lane : @transcript.SubrunLane = {
+  let lane : @subrun.Lane = {
     id: "sub-1",
     kind: "task",
     label: "sub-run",
@@ -15710,7 +15698,8 @@ test "compaction_failed settles a still-queued compaction" {
     model,
   )
   assert_true(next.active().compaction is NotCompacting)
-  inspect(next.active().overlay.length(), content="1")
+  inspect(next.active().overlay.length(), content="0")
+  inspect(next.notifications.length(), content="1")
 }
 
 ///|

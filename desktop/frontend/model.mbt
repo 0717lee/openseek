@@ -511,7 +511,7 @@ priv struct RunState {
   // Sub-runs this turn has in flight, in the order they started. Live-only:
   // nothing persists a sub-run's progress, so a reload mid-turn shows the
   // tool call pending with no lane under it.
-  subruns : Array[@transcript.SubrunLane]
+  subruns : Array[@subrun.Lane]
   usage_tokens : Int
 } derive(Eq)
 
@@ -3194,11 +3194,9 @@ fn Conversation::is_running(self : Conversation) -> Bool {
 /// right now. An idle conversation shows none, and a lane stranded by a
 /// missing finish bracket cannot outlive its turn — the next run's lanes
 /// carry the next run's id.
-fn Conversation::visible_subruns(
-  self : Conversation,
-) -> Array[@transcript.SubrunLane] {
+fn Conversation::visible_subruns(self : Conversation) -> Array[@subrun.Lane] {
   guard self.run is Open(run_id~, ..) else { return [] }
-  self.turn.subruns.filter(lane => lane.run is Some(owner) && owner == run_id)
+  @subrun.owned_by(self.turn.subruns, run_id)
 }
 
 ///|

@@ -20,7 +20,6 @@ fn Model::transcript_input(self : Model) -> @transcript_component.Input {
         ),
         streaming_response="",
         streaming_identity="idle",
-        subruns=[],
       )
     }
     _ =>
@@ -35,7 +34,6 @@ fn Model::transcript_input(self : Model) -> @transcript_component.Input {
             items=[],
             streaming_response="",
             streaming_identity="",
-            subruns=[],
           )
         Some(conversation) =>
           @transcript_component.Input(
@@ -49,7 +47,6 @@ fn Model::transcript_input(self : Model) -> @transcript_component.Input {
             items=conversation.visible_transcript_rows(),
             streaming_response=conversation.turn.streaming_response,
             streaming_identity=conversation.streaming_render_identity(),
-            subruns=conversation.visible_subruns(),
           )
       }
   }

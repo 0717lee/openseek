@@ -60,7 +60,6 @@ struct Input {
   items : Array[VisibleRow]
   streaming_response : String
   streaming_identity : String
-  subruns : Array[@transcript.SubrunLane]
 } derive(Eq)
 
 ///|
@@ -73,7 +72,6 @@ pub fn Input::Input(
   items~ : Array[VisibleRow],
   streaming_response~ : String,
   streaming_identity~ : String,
-  subruns~ : Array[@transcript.SubrunLane],
 ) -> Input {
   {
     source,
@@ -84,7 +82,6 @@ pub fn Input::Input(
     items,
     streaming_response,
     streaming_identity,
-    subruns,
   }
 }
 
@@ -638,7 +635,6 @@ test "local pinned transitions are pure" {
     items=[],
     streaming_response="",
     streaming_identity="idle",
-    subruns=[],
   )
   let state : Model = {
     pinned: true,
@@ -700,7 +696,6 @@ test "an overview click unpins and highlights inside the component" {
     items=[],
     streaming_response="",
     streaming_identity="idle",
-    subruns=[],
   )
   let state : Model = {
     pinned: true,
@@ -730,7 +725,6 @@ test "a conversation switch clears component-owned overview state" {
     items=[],
     streaming_response="",
     streaming_identity="idle",
-    subruns=[],
   )
   let state : Model = {
     pinned: false,

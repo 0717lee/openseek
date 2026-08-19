@@ -700,34 +700,3 @@ fn transcript_view(
     children,
   )
 }
-
-///|
-/// One sub-run in flight: what it was asked, how far it has gotten, and what
-/// it is doing right now.
-///
-/// The step count and activity come from the host reading the child's own
-/// record, so they appear only once the child has written something — and
-/// never at all for a conversation with no durable session. The lane still
-/// renders: that a sub-run is running is worth showing even when its
-/// progress is not readable.
-fn subrun_lane_view(lane : @transcript.SubrunLane) -> @html.Html {
-  let detail : Array[@html.Html] = []
-  if lane.steps > 0 {
-    detail.push(@html.span(class="subrun-step", "step \{lane.steps}"))
-  }
-  if !lane.activity.is_empty() {
-    detail.push(@html.span(class="subrun-activity", lane.activity))
-  }
-  if detail.is_empty() {
-    detail.push(@html.span(class="subrun-activity", "starting…"))
-  }
-  @html.div(
-    class="subrun-lane",
-    title="\{lane.kind} \{lane.id}: \{lane.label}",
-    [
-      @html.span(class="subrun-mark", ""),
-      @html.span(class="subrun-name", "\{lane.kind} \{lane.id}"),
-      @html.span(class="subrun-detail", detail),
-    ],
-  )
-}

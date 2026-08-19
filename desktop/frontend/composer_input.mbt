@@ -52,6 +52,10 @@ fn Model::composer_input(
   let context : Array[@html.Html] = [
     connection_banner(self),
     @plan.panel(conv.visible_items()),
+    // Sub-runs dock here rather than at the transcript's tail: a child turn's
+    // progress is live run status that no durable event describes, and the
+    // scroller shows only what the record can place.
+    @subrun.dock(conv.visible_subruns()),
   ]
   // The BYOK reminder: readiness is otherwise folded silently into Send's
   // availability, and the top-bar status is owned by the run state — without

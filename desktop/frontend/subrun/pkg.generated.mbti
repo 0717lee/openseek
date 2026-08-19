@@ -1,0 +1,28 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "openseek_desktop/frontend/subrun"
+
+import {
+  "moonbit-community/rabbita/html",
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn dock(Array[Lane]) -> @html.Html
+
+pub fn owned_by(Array[Lane], String) -> Array[Lane]
+
+// Errors
+
+// Types and methods
+pub(all) struct Lane {
+  id : String
+  kind : String
+  label : String
+  steps : Int
+  activity : String
+  run : String?
+} derive(Eq, @debug.Debug)
+
+// Type aliases
+
+// Traits
