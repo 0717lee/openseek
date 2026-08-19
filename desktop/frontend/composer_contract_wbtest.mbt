@@ -62,6 +62,48 @@ test "composer submission stays bound to its originating conversation" {
 }
 
 ///|
+test "annotation-only composer submission starts its conversation" {
+  let model = test_model()
+  let identity : @composer.Identity = {
+    owner: {
+      channel: @interop.ChannelId::Local,
+      session: model.active().session_id,
+    },
+    archive_generation: 0,
+  }
+  let mention : Mention = {
+    ref_: @mention_context.Annotation(
+      file="bench/bench.mbt",
+      start_line=69,
+      end_line=69,
+      quote="bench()",
+      comment="inspect this selection",
+      side=@mention_context.WorkingRevision,
+    ),
+    range: Some(@common.Range::Range(69, 1, 69, 1)),
+  }
+  let (_, submitted) = update(
+    test_dispatch(),
+    ComposerAction(
+      @composer.DraftSubmitted(identity~, draft={
+        task: "",
+        mentions: [mention],
+      }),
+    ),
+    model,
+  )
+  assert_true(submitted.active().run is Starting(..))
+  assert_true(submitted.active().task.is_empty())
+  assert_true(submitted.active().mentions.is_empty())
+  guard submitted.active().input_ledger is [pending] else {
+    fail("expected the annotation-only submission in the input ledger")
+  }
+  assert_true(pending.content.contains("<user_mentions>"))
+  assert_true(pending.content.contains("bench/bench.mbt"))
+  assert_true(pending.mentions == [mention])
+}
+
+///|
 test "archive cursor separates transferred actions from a reopened id" {
   let archived : @interop.ConversationKey = {
     channel: @interop.ChannelId::Local,
