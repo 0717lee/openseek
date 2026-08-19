@@ -2062,10 +2062,13 @@ priv enum DeviceMsg {
   // The exact local start request returned its run result. `accepted` is the
   // prompt's ownership receipt and can recover a Started notification lost on
   // the same connection; any other status leaves delivery unconfirmed.
+  // `run_id` is absent when the call opened no run — the host answered
+  // `duplicate`, meaning this submission is already in the durable record and
+  // must not be sent again.
   StartResponded(
     session~ : String,
     submission_id~ : String,
-    run_id~ : String,
+    run_id~ : String?,
     status~ : String,
     exit_code~ : Int
   )

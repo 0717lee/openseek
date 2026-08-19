@@ -61,6 +61,22 @@ pub async fn start_run(
   // global placement critical section and continue concurrently.
   placement_locked = false
   manager.workspace_lifecycle_lock.release()
+  let submission_id = normalize_submission_id(payload.submission_id)
+  // Idempotence, checked here rather than under the placement lock because
+  // it reads the store: a submission already on a durable `User` item is
+  // never written again. That is what lets a controller resend a prompt it
+  // could not confirm — an RPC that never answered, a run that ended before
+  // its commit, a host that died between the write and the reply — without
+  // risking a second copy of the same text.
+  //
+  // A run still active in this conversation was rejected above, so reaching
+  // here with a duplicate means the earlier turn is over (or belongs to a
+  // dead host): there is no run to name.
+  if submission_id is Some(id) &&
+    config.session_root is Some(root) &&
+    durable_submission_recorded(manager, config.session, root, id) {
+    return { run_id: None, status: "duplicate", exit_code: 0 }
+  }
   ensure_run_cwd(config)
   let need_spawn = if slot.live() is Some(live) {
     live.spec_key != engine_fingerprint(config)
@@ -82,9 +98,9 @@ pub async fn start_run(
     raise EngineError("this conversation is compacting; wait for it to finish")
   }
   let run_id = mint_run_id()
-  let submission_id = normalize_submission_id(payload.submission_id)
   // The normalized tag rides the wire command so the engine records it on
-  // the durable User item this prompt appends.
+  // the durable User item this prompt appends — which is also what makes the
+  // idempotence check above able to recognize this submission later.
   let command = @protocol.prompt(config.task, submission_id?)
   // Submitting, opening the run and announcing it are one synchronous step,
   // with no suspension since the claim check above. That is what makes the
@@ -109,7 +125,61 @@ pub async fn start_run(
       session_root: config.session_root.map(root => root.resource_path()),
     }),
   )
-  { run_id, status: "accepted", exit_code: 0 }
+  { run_id: Some(run_id), status: "accepted", exit_code: 0 }
+}
+
+///|
+/// Whether this session's durable record already carries `submission_id` on a
+/// `User` item.
+///
+/// The answer comes out of the record rather than a host-lifetime ledger, so
+/// it survives the case a resend exists for: a host that died between writing
+/// the prompt and answering the controller. A live follower answers through
+/// its actor — the same serial loop that broadcasts commits, so a User item
+/// found here is published in the act of being found — and an idle session
+/// reads the store directly.
+///
+/// An unreadable record answers `false`. The alternative is refusing the
+/// prompt over a transient store error, which costs every caller a rejection
+/// to protect the rare resend; a duplicate prompt is visible and recoverable,
+/// a prompt that will not send is neither.
+async fn durable_submission_recorded(
+  manager : EngineManager,
+  session : String,
+  root : @pathx.Absolute,
+  submission_id : String,
+) -> Bool {
+  let document = try {
+    if follower_snapshot(manager, session, root) is Some(document) {
+      Some(document)
+    } else if @fsx.is_dir(root.join("sessions").join(session).to_path()) {
+      let output = session_show_stdout(manager, session, root)
+      Some(@json.from_json(@json.parse(output)))
+    } else {
+      // No record yet: this session's first prompt cannot be a duplicate.
+      None
+    }
+  } catch {
+    error if @async.is_being_cancelled() => raise error
+    error => {
+      @xlog.debug() <?
+        {
+          "event": "desktop_submission_probe_failed",
+          "session": session,
+          "error": "\{error}",
+        }
+      None
+    }
+  }
+  guard document is Some(document) else { return false }
+  for event in document.events.unwrap_or([]) {
+    if event.item is User(payload) && payload.submission_id is Some(recorded) {
+      if recorded == submission_id {
+        return true
+      }
+    }
+  }
+  false
 }
 
 ///|
@@ -710,6 +780,18 @@ fn restore_openseek_dir(previous : String?) -> Unit {
 }
 
 ///|
+/// The run a start opened. A reply with no run answered `duplicate`, which
+/// the tests below never provoke — reaching that here is a test bug, not a
+/// case to branch on.
+#cfg(not(platform="windows"))
+fn opened_run_id(reply : StartReply) -> String raise {
+  guard reply.run_id is Some(run_id) else {
+    fail("start opened no run (status \{reply.status})")
+  }
+  run_id
+}
+
+///|
 #cfg(not(platform="windows"))
 fn has_finished_run(events : Array[EngineEvent], run_id : String) -> Bool {
   for event in events {
@@ -808,6 +890,109 @@ async test "start echoes the client submission id in Started" {
       }
     }
     assert_eq(echoed, Some("submission-start"))
+    group.return_immediately(())
+  })
+  @fs.rmdir(dir, recursive=true)
+}
+
+///|
+/// A prompt is written once. A controller that could not confirm delivery —
+/// an RPC that never answered, a host that died between the write and the
+/// reply — resends the same submission id, and the second call has to
+/// recognize its own text in the record instead of appending a second copy.
+#cfg(not(platform="windows"))
+async test "a submission already in the record is not sent twice" {
+  let dir = @fs.tmpdir(prefix="openseek-start-duplicate-")
+  let root : @pathx.Path = Path(dir)
+  // A run is handed the global skills library under `HOME`. Own it, so this
+  // test neither races one that moves `HOME` nor reads the developer's own.
+  ambient_env_test_lock.acquire()
+  defer ambient_env_test_lock.release()
+  let previous_home = @sys.get_env_var("HOME")
+  @sys.set_env_var("HOME", root.join("home").to_string())
+  defer restore_home_env(previous_home)
+  let previous_session_root = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
+  defer restore_session_root_env(previous_session_root)
+  let workspace = attach_run_workspace(root)
+  let engine = root.join("bin/engine.sh")
+  let seed = root.join("bin/toolchains/moonbit/macos-arm64")
+  let runtime = root.join("runtime")
+  prepare_fake_moonbit_seed(seed, version="0.10.0-test")
+  prepare_fake_bundled_moonbit_home(
+    runtime.join("toolchains/moonbit/macos-arm64"),
+    version="0.10.0-test",
+  )
+  let session = "s-" + mint_run_id()
+  // The record the resend has to find. Its directory must exist too: an
+  // absent one is a session with no history, which cannot hold a duplicate.
+  @fsx.ensure_dir(
+    root.join("ws").join(".openseek").join("sessions").join(session),
+  )
+  let recorded = (
+    {
+      "events": [
+        {
+          "sequence": 1,
+          "item": {
+            "kind": "user",
+            "payload": { "content": "hello", "submission_id": "resent" },
+          },
+        },
+      ],
+    } : Json).stringify()
+  @fs.write_file(
+    engine.to_string(),
+    "#!/bin/sh\nif [ \"$1\" = \"sessions\" ]; then printf '%s' '\{recorded}'; exit 0; fi\nwhile IFS= read -r line; do :; done\n",
+    create_mode=CreateOrTruncate,
+  )
+  assert_eq(@process.run("chmod", ["+x", engine.to_string()]), 0)
+  let actor = new_engine_actor(engine.to_string(), runtime_dir=runtime)
+  let manager = actor.manager()
+  ignore(
+    update_settings(manager, {
+      provider: Some("custom"),
+      custom_api_url: Some("https://example.invalid/chat/completions"),
+      deepseek_api_key: None,
+      custom_api_key: None,
+    }),
+  )
+  let emitted : Array[EngineEvent] = []
+  let sink = EventSink(fn(event) { emitted.push(event) })
+  @async.with_task_group(group => {
+    group.spawn_bg(no_wait=true, allow_failure=true, () => {
+      actor.run(sink, fn(_) { () })
+    })
+    while manager.pump is Stopped {
+      @async.sleep(1)
+    }
+    let resent = start_run(sink, manager, {
+      task: "hello",
+      submission_id: Some("resent"),
+      model: None,
+      max_steps: None,
+      session,
+      workspace: Some(workspace),
+    })
+    assert_eq(resent.status, "duplicate")
+    assert_eq(resent.run_id, None)
+    // Nothing was started: no lifecycle went out, and no engine (hence no
+    // follower) was ever placed for this conversation.
+    for event in emitted {
+      assert_false(event is Started(_))
+    }
+    assert_true(manager.followers.get(session) is None)
+    // A different tag is a different prompt; the check must not swallow it.
+    let fresh = start_run(sink, manager, {
+      task: "hello",
+      submission_id: Some("first-send"),
+      model: None,
+      max_steps: None,
+      session,
+      workspace: Some(workspace),
+    })
+    assert_eq(fresh.status, "accepted")
+    assert_true(fresh.run_id is Some(_))
     group.return_immediately(())
   })
   @fs.rmdir(dir, recursive=true)
@@ -998,17 +1183,19 @@ async test "setup failure retires the writer before an immediate next start" {
     while manager.pump is Stopped {
       @async.sleep(1)
     }
-    let first = start_run(sink, manager, {
-      task: "first",
-      submission_id: None,
-      model: None,
-      max_steps: None,
-      session,
-      workspace: Some(workspace),
-    })
+    let first = opened_run_id(
+      start_run(sink, manager, {
+        task: "first",
+        submission_id: None,
+        model: None,
+        max_steps: None,
+        session,
+        workspace: Some(workspace),
+      }),
+    )
     assert_true(
       @async.with_timeout_opt(3000, () => {
-        while !has_finished_run(emitted, first.run_id) {
+        while !has_finished_run(emitted, first) {
           @async.sleep(1)
         }
       })
@@ -1022,7 +1209,7 @@ async test "setup failure retires the writer before an immediate next start" {
     // condemned, so nothing can be routed to it in the meantime.
     assert_true(old.condemned)
     assert_true(slot.live() is None)
-    let cancelled = cancel_run(manager, { run_id: Some(first.run_id) })
+    let cancelled = cancel_run(manager, { run_id: Some(first) })
     assert_false(cancelled.cancelled)
     let second = start_run(sink, manager, {
       task: "second",
@@ -1046,7 +1233,7 @@ async test "setup failure retires the writer before an immediate next start" {
     assert_eq(@fs.read_file(count.to_string()).text(), "2")
     let mut first_finishes = 0
     for event in emitted {
-      if event is Finished(payload) && payload.run_id == first.run_id {
+      if event is Finished(payload) && payload.run_id == first {
         first_finishes = first_finishes + 1
       }
     }
@@ -1130,8 +1317,8 @@ async test "a prompt bigger than the pipe still settles exactly once" {
       workspace: Some(workspace),
     })
     assert_eq(reply.status, "accepted")
-    assert_eq(started.val, Some(reply.run_id))
-    let run_id = reply.run_id
+    assert_eq(started.val, reply.run_id)
+    let run_id = opened_run_id(reply)
     assert_true(
       @async.with_timeout_opt(10_000, () => {
         while !has_finished_run(emitted, run_id) {
@@ -1226,7 +1413,7 @@ async test "named session retries after its first prompt creates no record" {
       workspace: Some(workspace),
     })
     assert_eq(first.status, "accepted")
-    assert_eq(started.val, Some(first.run_id))
+    assert_eq(started.val, first.run_id)
     assert_true(
       @async.with_timeout_opt(3000, () => {
         while !@fsx.exists(first_ready) {
@@ -1239,7 +1426,7 @@ async test "named session retries after its first prompt creates no record" {
     assert_false(
       @fsx.exists(@session_record.record_path(store.resolve(), session)),
     )
-    let first_run_id = first.run_id
+    let first_run_id = opened_run_id(first)
     assert_true(
       @async.with_timeout_opt(10_000, () => {
         while !has_finished_run(emitted, first_run_id) {
@@ -1266,9 +1453,10 @@ async test "named session retries after its first prompt creates no record" {
       workspace: Some(workspace),
     })
     assert_eq(second.status, "accepted")
+    let second_run_id = opened_run_id(second)
     assert_true(
       @async.with_timeout_opt(3000, () => {
-        while !has_finished_run(emitted, second.run_id) {
+        while !has_finished_run(emitted, second_run_id) {
           @async.sleep(1)
         }
       })
@@ -1535,9 +1723,10 @@ async test "workspace detach drains an idle writer and its follower first" {
       session: "s-detach-idle",
       workspace: Some(workspace.to_string()),
     })
+    let run_id = opened_run_id(reply)
     assert_true(
       @async.with_timeout_opt(3000, () => {
-        while !has_finished_run(events, reply.run_id) {
+        while !has_finished_run(events, run_id) {
           @async.sleep(1)
         }
       })
