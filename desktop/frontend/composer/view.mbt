@@ -357,6 +357,95 @@ pub fn View::render(self : View) -> @html.Html {
 }
 
 ///|
+/// The open turn's heartbeat, docked directly above the textarea: what it is
+/// doing, how long it has been at it, and what it has spent.
+///
+/// A model call is silent for as long as it thinks — no delta, no tool
+/// result, no commit — so without this the window is indistinguishable from a
+/// hung one. Deliberately lighter than a `composer-notice`: this is the only
+/// row here that repaints every second, and a bordered card doing that reads
+/// as an alarm rather than a heartbeat.
+///
+/// Always a slot, empty when idle and collapsed by `.composer-running:empty`,
+/// the same shape as the plan panel's and for the same reason: the context
+/// column is diffed by position, so a row that came and went would shift the
+/// goal row below it on every run start and end.
+fn running_row(run : RunHeartbeat?, clock_ms~ : Double) -> @html.Html {
+  guard run is Some(run) else {
+    return @html.div(class="composer-running", ([] : Array[@html.Html]))
+  }
+  @html.div(class="composer-running", [
+    @html.span(class="composer-running-mark", ""),
+    @html.span(class="composer-running-text", run.label(clock_ms~)),
+  ])
+}
+
+///|
+/// The heartbeat as one line. Each half of the detail is reported only when
+/// genuinely known — an adopted run has no start this page witnessed, and a
+/// turn before its first usage report has no count — so both absent leaves
+/// the bare stage, which is still the one thing worth saying.
+fn RunHeartbeat::label(self : RunHeartbeat, clock_ms~ : Double) -> String {
+  let stage = match self.stage {
+    Starting => "Starting…"
+    Thinking => "Thinking…"
+    AtStep(step) => "Working · step \{step}"
+    Working => "Working…"
+    Stopping => "Stopping…"
+  }
+  let detail : Array[String] = []
+  if self.started_ms is Some(started) && clock_ms > started {
+    detail.push(elapsed_label(clock_ms - started))
+  }
+  if self.tokens > 0 {
+    detail.push("\{compact_count(self.tokens)} tokens")
+  }
+  if detail.is_empty() {
+    stage
+  } else {
+    "\{stage} (\{detail.join(" · ")})"
+  }
+}
+
+///|
+/// A running span, coarsened the way a person reads a wait: seconds under a
+/// minute, minutes and seconds under an hour, hours and minutes beyond. The
+/// units never go finer than the span's own scale — nobody waiting twenty
+/// minutes is reading the seconds column.
+fn elapsed_label(span_ms : Double) -> String {
+  let total_seconds = (span_ms / 1000.0).to_int()
+  if total_seconds < 60 {
+    return "\{total_seconds}s"
+  }
+  let minutes = total_seconds / 60
+  if minutes < 60 {
+    return "\{minutes}m \{total_seconds % 60}s"
+  }
+  "\{minutes / 60}h \{minutes % 60}m"
+}
+
+///|
+/// A count compacted for the running row: exact under a thousand, otherwise
+/// one decimal of k/M with a whole value's ".0" dropped.
+fn compact_count(value : Int) -> String {
+  fn scaled(tenths : Int, unit : String) -> String {
+    if tenths % 10 == 0 {
+      "\{tenths / 10}\{unit}"
+    } else {
+      "\{tenths / 10}.\{tenths % 10}\{unit}"
+    }
+  }
+
+  if value < 1_000 {
+    "\{value}"
+  } else if value < 1_000_000 {
+    scaled(value / 100, "k")
+  } else {
+    scaled(value / 100_000, "M")
+  }
+}
+
+///|
 /// One caller-owned completion row rendered inside the composer popup. The
 /// caller keeps the row's action and payload; this view-only value contains
 /// only its two visible strings.

@@ -2841,7 +2841,6 @@ fn update_msg(
       (cmd, { ..model, codex, })
     }
     ToggleSidebar => (@cmd.none, { ..model, sidebar_open: !model.sidebar_open })
-    RunClockTicked => (@cmd.none, { ..model, clock_ms: now_ms() })
     ViewportResized(width~) => {
       let narrow = width <= NarrowBreakpoint
       // The embedded viewer only learns its host's size through layout(),
@@ -3043,7 +3042,7 @@ fn update_msg(
           // The submit is the moment this run began as far as the user is
           // concerned: the wait they are watching starts here, not at the
           // host's `started`.
-          run_started_ms: Some(now_ms()),
+          run_started_ms: Some(@interop.now_ms()),
         }
         // The worktree launch mode's first submit creates the environment
         // (the host names it, binds this conversation) and starts inside
@@ -7690,97 +7689,82 @@ test "reasoning message waits for its durable commit" {
 }
 
 ///|
-test "the run's activity line follows the phase it is derived from" {
-  // No clock reading is ever taken inside the projection, so a fixed pair of
-  // stamps is the whole environment these cases need.
-  let clock_ms = 1_000_000.0
-  let idle = test_conversation()
-  assert_eq(idle.running_activity(clock_ms~), None)
-  // A silent model call is the whole point of the line: nothing else on
-  // screen moves between the step event and the first answer delta.
-  let opened = running_conversation()
-  assert_eq(opened.running_activity(clock_ms~), Some("Thinking…"))
-  let stepping = {
-    ..running_conversation(),
-    run: Open(run_id="r7", stage=AtStep(Some(3))),
+test "the run heartbeat projects the phase it is derived from" {
+  assert_eq(test_conversation().run_heartbeat(), None)
+  let stage_of = (conv : Conversation) => {
+    conv.run_heartbeat().map(run => run.stage)
   }
-  assert_eq(stepping.running_activity(clock_ms~), Some("Working · step 3"))
-  let unnumbered = {
-    ..running_conversation(),
-    run: Open(run_id="r7", stage=AtStep(None)),
-  }
-  assert_eq(unnumbered.running_activity(clock_ms~), Some("Working…"))
-  let cancelling = {
-    ..running_conversation(),
-    run: Open(run_id="r7", stage=Cancelling),
-  }
-  assert_eq(cancelling.running_activity(clock_ms~), Some("Stopping…"))
-  // The send is accepted but no run id exists yet: still worth a line, or the
+  // A silent model call is the whole point of the row: nothing else on screen
+  // moves between the step event and the first answer delta.
+  assert_eq(stage_of(running_conversation()), Some(Thinking))
+  assert_eq(
+    stage_of({
+      ..running_conversation(),
+      run: Open(run_id="r7", stage=AtStep(Some(3))),
+    }),
+    Some(AtStep(3)),
+  )
+  assert_eq(
+    stage_of({
+      ..running_conversation(),
+      run: Open(run_id="r7", stage=AtStep(None)),
+    }),
+    Some(Working),
+  )
+  assert_eq(
+    stage_of({
+      ..running_conversation(),
+      run: Open(run_id="r7", stage=Cancelling),
+    }),
+    Some(Stopping),
+  )
+  // The send is accepted but no run id exists yet: still worth a row, or the
   // gap between submitting and `started` reads as a dropped prompt.
-  let starting = { ..test_conversation(), run: Starting(submission_id="sub-1") }
-  assert_eq(starting.running_activity(clock_ms~), Some("Starting…"))
+  assert_eq(
+    stage_of({ ..test_conversation(), run: Starting(submission_id="sub-1") }),
+    Some(Starting),
+  )
   // A finished run leaves nothing behind — the answer is the status.
-  let finished = {
-    ..running_conversation(),
-    run: NoRun(ended=Some(RunFinished(Completed))),
-  }
-  assert_eq(finished.running_activity(clock_ms~), None)
+  assert_eq(
+    stage_of({
+      ..running_conversation(),
+      run: NoRun(ended=Some(RunFinished(Completed))),
+    }),
+    None,
+  )
 }
 
 ///|
-test "the run's activity line reports only the detail it actually knows" {
-  let clock_ms = 1_000_000.0
-  // Both halves known: the shape the user asked for.
+test "the run heartbeat carries only the facts the page actually has" {
   let full = {
     ..running_conversation(),
-    run_started_ms: Some(clock_ms - 134_000.0),
+    run_started_ms: Some(1_000.0),
     usage_tokens: 12_345,
   }
   assert_eq(
-    full.running_activity(clock_ms~),
-    Some("Thinking… (2m 14s · 12.3k tokens)"),
+    full.run_heartbeat(),
+    Some({ stage: Thinking, started_ms: Some(1_000.0), tokens: 12_345 }),
   )
-  // A run adopted from a reconnect has no start this page witnessed. Its age
-  // must be omitted, never guessed from the moment we noticed it.
-  let adopted = { ..full, run_started_ms: None }
+  // A run adopted from a reconnect has no start this page witnessed. The
+  // composer omits the span rather than dating it from when we noticed.
   assert_eq(
-    adopted.running_activity(clock_ms~),
-    Some("Thinking… (12.3k tokens)"),
-  )
-  // Before the first `usage` event there is no count to report.
-  let untallied = { ..full, usage_tokens: 0 }
-  assert_eq(untallied.running_activity(clock_ms~), Some("Thinking… (2m 14s)"))
-  // Neither known: the bare stage is still the one thing worth saying.
-  let bare = { ..full, run_started_ms: None, usage_tokens: 0 }
-  assert_eq(bare.running_activity(clock_ms~), Some("Thinking…"))
-  // A clock that has not advanced past the start (the first render of a fresh
-  // submit, or a backwards system clock) reports no span rather than "0s".
-  let instant = { ..full, run_started_ms: Some(clock_ms) }
-  assert_eq(
-    instant.running_activity(clock_ms~),
-    Some("Thinking… (12.3k tokens)"),
+    { ..full, run_started_ms: None }.run_heartbeat().map(run => run.started_ms),
+    Some(None),
   )
 }
 
 ///|
-test "the per-second tick is subscribed only while a run is on screen" {
-  // Nothing is being timed on an idle conversation, and a window left open
-  // overnight must not wake once a second to say so.
-  assert_false(test_model().run_clock_wanted())
-  assert_true(running_model().run_clock_wanted())
-}
-
-///|
-test "an elapsed span never shows finer units than its own scale" {
-  assert_eq(elapsed_label(0.0), "0s")
-  assert_eq(elapsed_label(950.0), "0s")
-  assert_eq(elapsed_label(59_999.0), "59s")
-  assert_eq(elapsed_label(60_000.0), "1m 0s")
-  assert_eq(elapsed_label(134_000.0), "2m 14s")
-  assert_eq(elapsed_label(3_599_000.0), "59m 59s")
-  // Past an hour the seconds column is noise to anyone reading it.
-  assert_eq(elapsed_label(3_600_000.0), "1h 0m")
-  assert_eq(elapsed_label(87_240_000.0), "24h 14m")
+test "the per-second tick is the composer's, not the application's" {
+  // The row's clock lives in the composer component, so nothing in the root
+  // model changes once a second — every other component's input would
+  // otherwise be reprojected at 1Hz to redraw a single line.
+  let running = running_model()
+  let (_, again) = update_dev(
+    test_dispatch(),
+    Engine(Some("r7"), AgentStep(Some(2)), session=None),
+    running,
+  )
+  assert_true(again.active().run_heartbeat() is Some(_))
 }
 
 ///|

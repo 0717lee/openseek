@@ -361,12 +361,6 @@ pub fn boot() -> Unit {
         if model.project_picker is Some(_) {
           subs.push(project_picker_capture_subscription(emit))
         }
-        // One second is the resolution the elapsed spans are displayed at.
-        // Subscribed only while a run is in flight, so an idle window does no
-        // per-second work at all — the same lifetime rule as the menus above.
-        if model.run_clock_wanted() {
-          subs.push(@sub.every(1000, emit(RunClockTicked)))
-        }
         // Click-away dismissal, one listener per menu and only while that menu
         // is open: a document-wide listener should not outlive what it serves.
         if model.git_details_open ||

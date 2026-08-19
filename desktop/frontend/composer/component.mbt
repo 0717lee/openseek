@@ -264,6 +264,12 @@ priv struct Model {
   entries : Array[Entry]
   applied_retirements : Int
   applied_replacements : Int
+  // The clock the running row's elapsed span is measured against, advanced by
+  // `ClockTicked` and only while a turn is open. Component state rather than
+  // the application's: a value that changes every second belongs to the one
+  // subtree that displays it, or every other component's input is reprojected
+  // once a second to redraw a single line.
+  clock_ms : Double
 } derive(Eq)
 
 ///|
@@ -272,6 +278,7 @@ fn Model::Model(input : Input) -> Model {
     entries: [Entry(input)],
     applied_retirements: input.retirements.length(),
     applied_replacements: input.replacements.length(),
+    clock_ms: @interop.now_ms(),
   }
 }
 
@@ -360,6 +367,9 @@ priv enum Msg {
   EntriesTransferred
   EntriesRetired
   CompletionPump
+  // A second passed while a turn was open. Carries nothing: the handler reads
+  // the clock, and the message exists only to advance the span on screen.
+  ClockTicked
   MentionRemoved(Int)
   MentionJumped(Int)
   GoalCancelled
@@ -763,6 +773,8 @@ fn Model::update(
         emit,
         action_emit,
       )
+    ClockTicked =>
+      ({ ..self.with_entry(entry), clock_ms: @interop.now_ms() }, @cmd.none)
     CompletionPump => {
       // Committing the reconciled entry above is this tick's real work: the
       // subscription diff after every update re-derives the declared lookups
@@ -822,6 +834,25 @@ fn Model::update(
 /// package. Every staleness axis lives in the subscription key, in one place,
 /// instead of being re-checked at issue, delay-fire, and ingest time.
 fn Model::subscriptions(
+  self : Model,
+  input : Input,
+  emit : @cmd.Emit[Msg],
+) -> @sub.Sub {
+  // One second is the resolution the running row is displayed at, and it is
+  // wanted only while a turn is open — an idle composer does no per-second
+  // work at all. Kept outside the editing subscriptions below because those
+  // return early: the heartbeat is independent of what the draft is doing.
+  guard input.run is Some(_) else {
+    return self.editing_subscriptions(input, emit)
+  }
+  @sub.batch([
+    @sub.every(1000, emit(ClockTicked)),
+    self.editing_subscriptions(input, emit),
+  ])
+}
+
+///|
+fn Model::editing_subscriptions(
   self : Model,
   input : Input,
   emit : @cmd.Emit[Msg],
@@ -898,6 +929,6 @@ pub fn component(
     subscriptions=(state, input, emit) => state.subscriptions(input, emit),
   )
   state.view2(input, (state, input) => {
-    state.active(input).view(emit, action_emit, input)
+    state.active(input).view(emit, action_emit, input, clock_ms=state.clock_ms)
   })
 }

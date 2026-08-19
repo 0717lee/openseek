@@ -276,6 +276,10 @@ pub fn State::composer_input(
   {
     identity: self.composer_identity(context.channel),
     draft: { task: self.draft, mentions: self.mentions },
+    // Not wired for Codex: a thread runs several turns at once and numbers no
+    // steps, so what a single heartbeat line should say here is a product
+    // question rather than a projection of this state.
+    run: None,
     goal: { draft: None, standing: None, pending: None },
     slash_commands: [
       {

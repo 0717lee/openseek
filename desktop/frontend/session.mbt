@@ -82,15 +82,6 @@ fn generated_session_id() -> String {
 }
 
 ///|
-/// Wall-clock milliseconds. Only ever used for elapsed spans between two
-/// readings taken by this page, so the clock's absolute correctness — and its
-/// agreement with the host's — does not matter.
-fn now_ms() -> Double {
-  let date_constructor : @js.Value = @js.globalThis.get_with_string("Date")
-  date_constructor.apply_with_string("now", ([] : Array[@js.Value]))
-}
-
-///|
 fn random_salt() -> String {
   let math : @js.Value = @js.globalThis.get_with_string("Math")
   let value : Double = math.apply_with_string("random", ([] : Array[@js.Value]))
