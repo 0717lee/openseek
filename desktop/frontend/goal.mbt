@@ -420,7 +420,7 @@ test "a rejected goal request reports it and hands the text back" {
     ),
     model,
   )
-  inspect(next.active().overlay.length(), content="1")
+  inspect(next.notifications.length(), content="1")
   // Nothing durable will ever carry this text, so dropping it loses the
   // user's writing for good — a rejected prompt restores its draft too.
   guard next.active().goal_edit is Some(edit) else {
@@ -445,7 +445,7 @@ test "a rejected clear has nothing to restore, and never steals goal mode" {
     ),
     test_model(),
   )
-  inspect(cleared.active().overlay.length(), content="1")
+  inspect(cleared.notifications.length(), content="1")
   assert_true(cleared.active().goal_edit is None)
   // A newer edit belongs to the user, not to this dead request.
   let editing = test_model().replace_conversation({
@@ -1033,7 +1033,7 @@ test "a dead request cannot retire the one that replaced it" {
   }
 
   let stale = reject(model, "goal-1")
-  inspect(stale.active().overlay.length(), content="1")
+  inspect(stale.notifications.length(), content="1")
   assert_true(
     stale.active().goal_pending
     is Some({ id: "goal-2", request: Setting("ship the feature"), since: 0 }),
@@ -1122,7 +1122,7 @@ test "an undelivered reply goes quiet once its send has been settled" {
     next
   }
 
-  inspect(undelivered(settled, "goal-1").active().overlay.length(), content="0")
+  inspect(undelivered(settled, "goal-1").notifications.length(), content="0")
   // Nor for a send a newer one has replaced.
   let superseded = model.replace_conversation({
     ..model.active(),
@@ -1132,12 +1132,9 @@ test "an undelivered reply goes quiet once its send has been settled" {
       since: 0,
     }),
   })
-  inspect(
-    undelivered(superseded, "goal-1").active().overlay.length(),
-    content="0",
-  )
+  inspect(undelivered(superseded, "goal-1").notifications.length(), content="0")
   // Still in flight: still true, and still reported.
-  inspect(undelivered(model, "goal-1").active().overlay.length(), content="1")
+  inspect(undelivered(model, "goal-1").notifications.length(), content="1")
 }
 
 ///|
@@ -1178,7 +1175,7 @@ test "a rejection that arrives after the record has spoken only reports" {
     ),
     settled,
   )
-  inspect(late.active().overlay.length(), content="1")
+  inspect(late.notifications.length(), content="1")
   assert_true(late.active().goal_edit is None)
   assert_true(
     late.active().goal is Some({ text: "the goal that won", blocked: None }),
@@ -1238,18 +1235,15 @@ test "an unconfirmed delivery keeps waiting instead of handing the text back" {
     ),
     model,
   )
-  inspect(next.active().overlay.length(), content="1")
+  inspect(next.notifications.length(), content="1")
   assert_true(next.active().goal_edit is None)
+  // The writing is not lost: the request still in flight carries it, which is
+  // what the goal row shows and what reopening the editor seeds from.
   assert_true(
     next.active().goal_pending
     is Some({ request: Setting("ship the feature"), .. }),
   )
-  // The writing is not lost either way — it rides the notice, the way an
-  // unconfirmed prompt's does.
-  guard next.active().overlay.last() is Some(notice) else {
-    fail("the failure should be reported")
-  }
-  assert_true(notice.content.has_suffix("ship the feature"))
+  inspect(next.active().goal_draft_seed(), content="ship the feature")
 }
 
 ///|

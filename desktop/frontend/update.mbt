@@ -544,8 +544,8 @@ fn adopt_projects(
 ///|
 /// Retry one failed generation without losing commits that arrived while its
 /// snapshot was in flight. Three attempts form one bounded round. Exhaustion
-/// keeps the buffer and a visible local notice; a later commit/reconnect/open
-/// starts a fresh generation.
+/// keeps the buffer; a later commit/reconnect/open starts a fresh generation,
+/// which is what an exhausted background round waits for.
 fn retry_session_snapshot(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
@@ -589,15 +589,15 @@ fn retry_session_snapshot(
     let failed = {
       ..conv,
       sync: ReloadFailed(generation~, buffered=buffered.copy()),
-    }.append_local_notice_once(
-      Assistant(is_danger=true),
-      TranscriptRefreshFailedNotice,
-    )
+    }
     let next = model.replace_conversation(failed)
     let scroll = @cmd.none
     let owner : @interop.ConversationKey = { channel, session }
     if activate_on_success && model.loading_conversation == Some(owner) {
-      let (toast, next) = next.notify_error(dispatch, message)
+      let (toast, next) = next.notify_error(
+        dispatch,
+        TranscriptRefreshFailedNotice + " (" + message + ")",
+      )
       let (sessions, next) = if conv.is_archived_read_only() {
         request_archived_refresh(dispatch, channel, next)
       } else {
@@ -1167,14 +1167,10 @@ fn apply_engine_event(
     }
     // The steer raced the turn's end through the pipes and was rejected; the
     // text must not vanish silently.
-    SteerDropped(content~, submission_id~) =>
+    SteerDropped(content=_, submission_id~) =>
       if submission_id is Some(submission_id) {
-        let (next, _) = conv.reject_steer(
-          submission_id,
-          event_run_id,
-          steer_dropped_notice(content),
-        )
-        (None, next)
+        let (next, removed) = conv.reject_steer(submission_id, event_run_id)
+        (if removed { Some(steer_dropped_notice()) } else { None }, next)
       } else {
         (None, conv)
       }
@@ -1503,14 +1499,7 @@ fn replace_archived_active(
     worktree_mode: model.default_worktree_mode(channel, workspace),
     goal_edit,
   }
-  let fresh = if pending_initial {
-    fresh.append_local_notice(
-      Assistant(is_danger=true),
-      ArchivedPendingInputNotice,
-    )
-  } else {
-    fresh
-  }
+  let fresh = { ..fresh, archived_pending_input: pending_initial }
   let composer_entry_replacements = model.composer_entry_replacements.copy()
   let archived_owner : @interop.ConversationKey = { channel, session }
   let mut archive_generation = 0
@@ -2553,6 +2542,15 @@ fn update_msg(
         @cmd.none,
         { ..model, notifications: model.notifications.filter(t => t.id != id) },
       )
+    DismissArchivedPendingInput =>
+      if model.active_conversation() is Some(conv) {
+        (
+          @cmd.none,
+          model.replace_conversation({ ..conv, archived_pending_input: false }),
+        )
+      } else {
+        (@cmd.none, model)
+      }
     RemoteStatusLoaded(status) =>
       (@cmd.none, { ..model, remote_access: Some(status) })
     RemoteConnectClicked =>
@@ -4393,10 +4391,10 @@ fn update_msg(
 }
 
 ///|
-/// Settle one definitively refused initial prompt. Worktree setup failures
-/// happen before an agent exists, so they restore the same draft and placement
-/// state but report through the transient notification stack instead of an
-/// agent-style transcript notice.
+/// Settle one definitively refused initial prompt: restore its draft and
+/// placement state, and report the refusal. Nothing durable will ever carry
+/// it — the prompt was refused before anything was written — so it is a toast
+/// rather than a transcript row.
 fn Model::reject_start(
   self : Model,
   dispatch : @cmd.Emit[Msg],
@@ -4404,16 +4402,11 @@ fn Model::reject_start(
   session : String,
   submission_id : String,
   message : String,
-  report_in_transcript : Bool,
 ) -> (@cmd.Cmd, Model) {
   guard self.find_conversation(channel, session) is Some(conv) else {
     return (@cmd.none, self)
   }
-  let (rejected, removed) = conv.reject_pending_prompt(
-    submission_id,
-    message,
-    report_in_transcript~,
-  )
+  let (rejected, removed) = conv.reject_pending_prompt(submission_id)
   guard removed else { return (@cmd.none, self) }
   let next = if conv.run is Starting(submission_id=current) &&
     current == submission_id {
@@ -4421,12 +4414,9 @@ fn Model::reject_start(
   } else {
     rejected
   }
-  let updated = self.replace_conversation(next)
-  let (notice, updated) = if report_in_transcript {
-    (@cmd.none, updated)
-  } else {
-    updated.notify_error(dispatch, message)
-  }
+  let (notice, updated) = self
+    .replace_conversation(next)
+    .notify_error(dispatch, message)
   if updated.device_state(channel) is Some(dev) {
     // A checkout deleted outside the app cannot publish a registry
     // notification. Refresh placement after every rejected workspace start;
@@ -4836,17 +4826,15 @@ fn update_device_msg(
         (@cmd.none, model)
       }
     }
-    SteerRejected(session~, submission_id~, text~, run_id~) =>
+    SteerRejected(session~, submission_id~, run_id~) =>
       // A concrete `steered:false` cannot later commit. Retire the queue entry
       // and restore its exact draft; a later same-text submission is unrelated.
       if model.find_conversation(channel, session) is Some(conv) {
-        let (next, removed) = conv.reject_steer(
-          submission_id,
-          Some(run_id),
-          steer_dropped_notice(text),
-        )
+        let (next, removed) = conv.reject_steer(submission_id, Some(run_id))
         if removed {
-          (@cmd.none, model.replace_conversation(next))
+          model
+          .replace_conversation(next)
+          .notify_error(dispatch, steer_dropped_notice())
         } else {
           (@cmd.none, model)
         }
@@ -6574,13 +6562,9 @@ fn update_device_msg(
         (@cmd.none, model)
       }
     StartRejected(session~, submission_id~, message~) =>
-      model.reject_start(
-        dispatch, channel, session, submission_id, message, true,
-      )
+      model.reject_start(dispatch, channel, session, submission_id, message)
     WorktreeSetupFailed(session~, submission_id~, message~) =>
-      model.reject_start(
-        dispatch, channel, session, submission_id, message, false,
-      )
+      model.reject_start(dispatch, channel, session, submission_id, message)
     Error(run_id~, message~, diagnostics~, exit_code~) => {
       // Agent-side semantic errors are lifecycle-only here; their durable
       // status is classified by the subsequent Finished event. Process
@@ -6606,49 +6590,32 @@ fn update_device_msg(
         } else {
           message
         }
-        // A process diagnostic belongs to no durable event: the record will
-        // never carry it, and the transcript is where durable events go. It is
-        // reported as a toast, and the top bar's `Errored` status is what
+        // Neither kind belongs to a durable event: the record will never
+        // carry either, and the transcript is where durable events go. Both
+        // are reported as toasts, and the top bar's `Errored` status is what
         // stands once the toast dismisses itself.
-        let next = if run_id is Some(_) && exit_code is Some(_) {
-          conv
-        } else {
-          conv.append_local_notice(Assistant(is_danger=true), content)
-        }
         let settled = model.replace_conversation(
-          if next.run is NoRun(..) {
-            { ..next, run: NoRun(ended=Some(RunErrored)) }
+          if conv.run is NoRun(..) {
+            { ..conv, run: NoRun(ended=Some(RunErrored)) }
           } else {
-            next
+            conv
           },
         )
-        if run_id is Some(_) && exit_code is Some(_) {
-          settled.notify_error(dispatch, content)
-        } else {
-          (@cmd.none, settled)
-        }
+        settled.notify_error(dispatch, content)
       } else {
         (@cmd.none, model)
       }
     }
     CompactRejected(session~, message~) =>
       if model.find_conversation(channel, session) is Some(conv) {
-        (
-          @cmd.none,
-          model.replace_conversation({
-            ..conv.append_local_notice(Assistant(is_danger=true), message),
-            compaction: NotCompacting,
-          }),
-        )
+        model
+        .replace_conversation({ ..conv, compaction: NotCompacting })
+        .notify_error(dispatch, message)
       } else {
         (@cmd.none, model)
       }
     GoalRejected(session~, command~, draft~, message~) =>
       if model.find_conversation(channel, session) is Some(conv) {
-        let reported = conv.append_local_notice(
-          Assistant(is_danger=true),
-          message,
-        )
         // A rejection acts only on the send it answers, and only while that
         // send is still the one in flight. The row keeps its actions while a
         // command is out, so the user can send a second over the first — and
@@ -6661,22 +6628,22 @@ fn update_device_msg(
         // text, set from somewhere else. In every such case the durable goal
         // has already been decided, so retiring the slot would drop a live
         // successor and reopening the editor would claim a failure that is
-        // not what this conversation now stands at. The notice still reports
+        // not what this conversation now stands at. The toast still reports
         // it; nothing here is silent.
-        let restored = if !(reported.goal_pending is Some(pending) &&
+        let restored = if !(conv.goal_pending is Some(pending) &&
           pending.id == command) {
-          reported
-        } else if draft is Some(draft) && reported.goal_edit is None {
+          conv
+        } else if draft is Some(draft) && conv.goal_edit is None {
           // Hand the goal text back, the way a rejected prompt restores its
           // draft: nothing durable will ever carry it, so losing it here
           // loses it for good. Only when this conversation has not claimed
           // goal mode since — a newer edit is the user's, not this dead
           // request's.
-          { ..reported, goal_edit: Some({ draft, }), goal_pending: None }
+          { ..conv, goal_edit: Some({ draft, }), goal_pending: None }
         } else {
-          { ..reported, goal_pending: None }
+          { ..conv, goal_pending: None }
         }
-        (@cmd.none, model.replace_conversation(restored))
+        model.replace_conversation(restored).notify_error(dispatch, message)
       } else {
         (@cmd.none, model)
       }
@@ -6694,18 +6661,21 @@ fn update_device_msg(
         // reload that follows the reconnect, is what settles it. So the text
         // cannot come back to the editor — it would claim the goal is unset,
         // and a resend over a command the host may already hold only earns a
-        // refusal. It rides the notice instead, which is where the start path
-        // leaves a prompt it could not confirm either.
-        let detail = if draft is Some(draft) {
-          " — check the transcript before setting it again: " + draft
+        // refusal. Nothing is lost by leaving it there: the request in flight
+        // still carries it, and that is what the goal row shows and what
+        // reopening the editor seeds from.
+        ignore(draft)
+        let detail = if conv.goal_pending is Some({ request: Clearing, .. }) {
+          " — check the goal row before clearing it again"
         } else {
-          " — check the transcript before clearing it again"
+          " — check the goal row before setting it again"
         }
-        let reported = conv.append_local_notice(
-          Assistant(is_danger=true),
+        model
+        .replace_conversation(conv)
+        .notify_error(
+          dispatch,
           "Goal delivery could not be confirmed (" + message + ")" + detail,
         )
-        (@cmd.none, model.replace_conversation(reported))
       } else {
         (@cmd.none, model)
       }
@@ -6831,9 +6801,6 @@ fn update_device_msg(
               }
             }
           }
-        }
-        if base.overlay.length() > conv.overlay.length() {
-          commands.push(@cmd.none)
         }
         (@cmd.batch(commands), next)
       } else {
@@ -7085,7 +7052,6 @@ test "sub-run completion reports only abnormal terminal status" {
   inspect(closed.visible_subruns().length(), content="0")
   // The successful tool brief is the only completion row.
   inspect(closed.messages.length(), content="0")
-  inspect(closed.overlay.length(), content="0")
   let (_, reopened) = apply_engine_event(
     closed,
     SubrunOpened(id="sr-2", kind="review", label="check the change"),
@@ -7099,7 +7065,6 @@ test "sub-run completion reports only abnormal terminal status" {
   inspect(failed.visible_subruns().length(), content="0")
   // The failed tool has no successful brief and no durable event of its own,
   // so the failure is reported as a toast rather than as a transcript row.
-  inspect(failed.overlay.length(), content="0")
   assert_true(
     failure_report is Some("review sr-2: failed · 4 step(s) · 901 tok"),
   )
@@ -7450,7 +7415,6 @@ test "reasoning message waits for its durable commit" {
     model,
   )
   inspect(next.active().messages.length(), content="0")
-  inspect(next.active().overlay.length(), content="0")
 }
 
 ///|
@@ -7550,7 +7514,6 @@ test "assistant message only settles the transient response" {
   )
   inspect(next.active().turn.streaming_response, content="")
   inspect(next.active().messages.length(), content="0")
-  inspect(next.active().overlay.length(), content="0")
 }
 
 ///|
@@ -7570,7 +7533,6 @@ test "agent setup failure is lifecycle-only until its durable terminal" {
   )
   inspect(next.active().turn.streaming_response, content="")
   inspect(next.active().messages.length(), content="0")
-  inspect(next.active().overlay.length(), content="0")
 }
 
 ///|
@@ -7766,7 +7728,6 @@ test "an idle background notice routes by the last run id" {
     model,
   )
   inspect(next.active().watcher_status, content="failed")
-  inspect(next.active().overlay.length(), content="0")
 }
 
 ///|
@@ -9232,15 +9193,16 @@ test "a foreground load preserves state through retries and reports exhaustion" 
   inspect(next.notifications.length(), content="1")
   inspect(
     next.notifications[0].message,
-    content="failed to load session desktop-a: no such file",
+    content="Transcript refresh failed repeatedly. New commits are buffered; reopen the conversation or wait for the next update to retry. (failed to load session desktop-a: no such file)",
   )
   guard next.find_conversation(@interop.ChannelId::Local, "desktop-a")
     is Some(failed) else {
     fail("expected the failed conversation")
   }
   assert_true(failed.sync is ReloadFailed(..))
-  inspect(failed.overlay.length(), content="1")
-  assert_eq(failed.overlay[0].content, TranscriptRefreshFailedNotice)
+  assert_true(
+    next.notifications[0].message.has_prefix(TranscriptRefreshFailedNotice),
+  )
   // The conversation on screen keeps its transcript and status untouched.
   inspect(next.active().messages.length(), content="0")
   assert_true(next.display_status() is Ready)
@@ -9362,14 +9324,11 @@ test "run semantic errors never duplicate their terminal commit" {
     session_root=@interop.ChannelId::Local.test_store_root(),
   )
   let (_, semantic_first) = update_dev(dispatch, semantic, running_model())
-  inspect(semantic_first.active().overlay.length(), content="0")
   let (_, committed_after) = update_dev(dispatch, terminal, semantic_first)
   inspect(committed_after.active().messages.length(), content="1")
-  inspect(committed_after.active().overlay.length(), content="0")
   let (_, committed_first) = update_dev(dispatch, terminal, running_model())
   let (_, semantic_after) = update_dev(dispatch, semantic, committed_first)
   inspect(semantic_after.active().messages.length(), content="1")
-  inspect(semantic_after.active().overlay.length(), content="0")
 }
 
 ///|
@@ -9387,7 +9346,6 @@ test "a process-exit error reports its host diagnostics as a toast" {
   )
   // The record will never carry this text, so the transcript is the wrong
   // place for it: no durable event can ever say where it belongs.
-  inspect(next.active().overlay.length(), content="0")
   inspect(next.notifications.length(), content="1")
   assert_true(next.notifications[0].message.contains("fatal stderr"))
 }
@@ -9689,7 +9647,6 @@ test "started for an unknown session materializes its conversation" {
   // only sources are snapshots and commits, and the prompt's own commit (or
   // the read when this conversation is opened) brings it.
   inspect(ghost.messages.length(), content="0")
-  inspect(ghost.overlay.length(), content="0")
   // Focus stays where the user is.
   inspect(next.active_session, content="desktop-test")
   inspect(next.active().is_running(), content="false")
@@ -9844,7 +9801,6 @@ test "a distinct started id replaces a stale open run as foreign" {
   inspect(next.active().pending_steers.length(), content="0")
   // The replaced run took its pending input with it and left no placeholder:
   // what the turn actually recorded is in the transcript.
-  inspect(next.active().overlay.length(), content="0")
   guard next.active().sync is Reloading(generation=1, attempt=1, ..) else {
     fail("a foreign replacement did not refresh the transcript")
   }
@@ -9940,8 +9896,8 @@ test "a start failure cannot close a run opened by a winning push" {
     content="steer for foreign run",
   )
   inspect(failed.active().task, content="my competing prompt")
-  inspect(failed.active().overlay.length(), content="1")
-  inspect(failed.active().overlay[0].content, content="start was rejected")
+  inspect(failed.notifications.length(), content="1")
+  inspect(failed.notifications[0].message, content="start was rejected")
   guard failed.active().sync is Reloading(generation=1, ..) else {
     fail("the raced start failure did not catch up the transcript")
   }
@@ -9971,7 +9927,7 @@ test "a start failure closes only a still-starting run" {
   )
   assert_true(failed.active().run is NoRun(ended=Some(RunFailed)))
   inspect(failed.active().turn.streaming_response, content="")
-  inspect(failed.active().overlay.length(), content="1")
+  inspect(failed.notifications.length(), content="1")
   inspect(failed.active().task, content="prompt")
   inspect(failed.transcript_request_generation, content="0")
 }
@@ -10008,7 +9964,6 @@ test "a matching Started establishes the run after an undelivered response" {
   // The lost response ended the entry and left no notice behind; a Started
   // that arrives anyway is still the run's exact identity.
   assert_true(started.active().run is Open(run_id="r-recovered", ..))
-  inspect(started.active().overlay.length(), content="0")
   inspect(started.active().pending_steers.length(), content="0")
 }
 
@@ -10033,7 +9988,6 @@ test "a duplicate start response retires the draft and opens no run" {
   )
   // The prompt is in the record, so the recoverable copy has done its job.
   inspect(responded.active().pending_steers.length(), content="0")
-  inspect(responded.active().overlay.length(), content="0")
   // No run was opened, so nothing may claim the lifecycle either way: the
   // conversation is left exactly as the reply found it.
   assert_true(responded.active().run is Starting(submission_id="prompt-id"))
@@ -10132,7 +10086,6 @@ test "an old-host Started without an id is settled by the exact start response" 
   )
   assert_true(started.active().run is Open(run_id="r-old-host", ..))
   assert_true(started.active().pending_prompt is Some(_))
-  inspect(started.active().overlay.length(), content="0")
   let (_, responded) = update_dev(
     dispatch,
     StartResponded(
@@ -10147,7 +10100,6 @@ test "an old-host Started without an id is settled by the exact start response" 
   // The id-less Started could not settle the entry; the exact response can.
   assert_true(responded.active().run is Open(run_id="r-old-host", ..))
   inspect(responded.active().pending_steers.length(), content="0")
-  inspect(responded.active().overlay.length(), content="0")
 }
 
 ///|
@@ -10200,7 +10152,6 @@ test "a late failed response for durable run A cannot disturb open run B" {
     fail("the late reply consumed the newer submission")
   }
   inspect(still_pending.submission_id, content=second_submission)
-  inspect(responded.active().overlay.length(), content="0")
 }
 
 ///|
@@ -10583,7 +10534,6 @@ test "Finished after RunsSettled fills the last run outcome idempotently" {
   let (_, twice) = update_dev(dispatch, finish, once)
   assert_true(once.active().run is NoRun(ended=Some(RunFinished(Completed))))
   assert_true(twice.active().run is NoRun(ended=Some(RunFinished(Completed))))
-  inspect(twice.active().overlay.length(), content="0")
 }
 
 ///|
@@ -10633,7 +10583,6 @@ test "a failed response after durable Finished cannot resurrect its prompt" {
   )
   assert_true(failed.active().run is NoRun(ended=Some(RunFinished(Completed))))
   inspect(failed.active().pending_steers.length(), content="0")
-  inspect(failed.active().overlay.length(), content="0")
   let (_, empty) = update_dev(
     dispatch,
     SessionRefreshed(
@@ -10649,7 +10598,6 @@ test "a failed response after durable Finished cannot resurrect its prompt" {
   )
   assert_true(empty.active().run is NoRun(ended=Some(RunFinished(Completed))))
   inspect(empty.active().pending_steers.length(), content="0")
-  inspect(empty.active().overlay.length(), content="0")
 }
 
 ///|
@@ -10679,7 +10627,6 @@ test "an accepted response consumes a fast-finished prompt without reopening" {
     accepted.active().run is NoRun(ended=Some(RunFinished(Completed))),
   )
   inspect(accepted.active().pending_steers.length(), content="0")
-  inspect(accepted.active().overlay.length(), content="0")
 }
 
 ///|
@@ -10739,7 +10686,6 @@ test "a background run finishes without disturbing the conversation on screen" {
   }
   inspect(bg.is_running(), content="false")
   assert_true(bg.run is NoRun(ended=Some(RunFinished(_))))
-  inspect(bg.overlay.length(), content="0")
   // The conversation on screen is still running its own turn.
   inspect(next.active().is_running(), content="true")
   assert_true(next.display_status() is Running)
@@ -10797,7 +10743,6 @@ test "steer_applied only settles pending UI until its commit" {
   )
   inspect(next.active().pending_steers.length(), content="0")
   inspect(next.active().messages.length(), content="0")
-  inspect(next.active().overlay.length(), content="0")
 }
 
 ///|
@@ -10930,12 +10875,9 @@ test "steer_dropped settles the pending steer with a visible notice" {
     model,
   )
   inspect(next.active().pending_steers.length(), content="0")
-  inspect(next.active().overlay.length(), content="1")
   inspect(next.active().task, content="go left")
-  guard next.active().overlay[0].kind is Assistant(is_danger=true) else {
-    fail("expected an error bubble")
-  }
-  assert_true(next.active().overlay[0].content.contains("go left"))
+  inspect(next.notifications.length(), content="1")
+  assert_true(next.notifications[0].message.contains("back in the composer"))
 }
 
 ///|
@@ -10956,7 +10898,6 @@ test "an identical-text settle removes exactly one pending entry" {
   inspect(next.active().pending_steers.length(), content="1")
   inspect(next.active().pending_steers[0].content, content="again")
   inspect(next.active().pending_steers[0].submission_id, content="test-steer-1")
-  inspect(next.active().overlay.length(), content="0")
 }
 
 ///|
@@ -10986,7 +10927,6 @@ test "a late exact applied receipt retracts a run-end unconfirmed notice" {
   )
   inspect(next.active().pending_steers.length(), content="0")
   inspect(next.active().pending_steers.length(), content="0")
-  inspect(next.active().overlay.length(), content="0")
 }
 
 ///|
@@ -11008,7 +10948,6 @@ test "a trailing applied receipt for run A settles after run B Started" {
   assert_true(next.active().last_run_id is Some("r8"))
   inspect(next.active().pending_steers.length(), content="0")
   assert_true(next.active().pending_prompt is Some(_))
-  inspect(next.active().overlay.length(), content="0")
 }
 
 ///|
@@ -11034,7 +10973,6 @@ test "a trailing dropped receipt for run A cannot close run B" {
   inspect(next.active().pending_steers.length(), content="0")
   assert_true(next.active().pending_prompt is Some(_))
   inspect(next.active().task, content="")
-  inspect(next.active().overlay.length(), content="0")
 }
 
 ///|
@@ -11272,7 +11210,6 @@ test "a trailing applied receipt settles after an empty runs snapshot" {
     settled,
   )
   inspect(applied.active().pending_steers.length(), content="0")
-  inspect(applied.active().overlay.length(), content="0")
 }
 
 ///|
@@ -11300,7 +11237,6 @@ test "a trailing dropped receipt after an empty runs snapshot changes nothing" {
   // trails it owns nothing.
   inspect(dropped.active().pending_steers.length(), content="0")
   inspect(dropped.active().task, content="")
-  inspect(dropped.active().overlay.length(), content="0")
 }
 
 ///|
@@ -13892,7 +13828,6 @@ test "an archive response arriving before its notification preserves the draft o
   // already-safe composer a second time or lose its recovered text.
   inspect(notified.active_session, content="desktop-archive-replacement")
   inspect(notified.active().task, content="keep this draft")
-  inspect(notified.active().overlay.length(), content="0")
 }
 
 ///|
@@ -13933,8 +13868,11 @@ test "archiving a pending start restores its original composer without ownership
   inspect(next.active().mentions.length(), content="2")
   assert_true(next.active().run is NoRun(ended=None))
   inspect(next.active().pending_steers.length(), content="0")
-  inspect(next.active().overlay.length(), content="1")
-  inspect(next.active().overlay[0].content, content=ArchivedPendingInputNotice)
+  // The advice is about the draft the composer is now holding, so it stands
+  // there until acknowledged rather than expiring as a toast.
+  assert_true(next.active().archived_pending_input)
+  let (_, acknowledged) = update(dispatch, DismissArchivedPendingInput, next)
+  assert_false(acknowledged.active().archived_pending_input)
 }
 
 ///|
@@ -15551,9 +15489,6 @@ test "update is pure: automatic checkpoint waits for its commit" {
     Engine(Some("r7"), AutoCompactionFinished("checkpoint recap"), session=None),
     model,
   )
-  inspect(model.active().overlay.length(), content="0")
-  inspect(once.active().overlay.length(), content="0")
-  inspect(twice.active().overlay.length(), content="0")
   inspect(once.active().turn.streaming_response, content="partial")
   inspect(twice.active().turn.streaming_response, content="partial")
   assert_true(
@@ -15583,9 +15518,6 @@ test "update is pure: context yield waits for its commit" {
     Engine(Some("r7"), ContextYield(answer), session=None),
     model,
   )
-  inspect(model.active().overlay.length(), content="0")
-  inspect(once.active().overlay.length(), content="0")
-  inspect(twice.active().overlay.length(), content="0")
   inspect(once.active().turn.streaming_response, content="")
   inspect(twice.active().turn.streaming_response, content="")
   assert_true(once.active().is_running() && twice.active().is_running())
@@ -15618,7 +15550,6 @@ test "context yield settles after its automatic checkpoint" {
     ),
     yielded,
   )
-  inspect(settled.active().overlay.length(), content="0")
   assert_true(settled.active().compaction is NotCompacting)
   assert_false(settled.active().is_running())
   guard settled.display_status() is Finished(outcome) else {
@@ -15647,7 +15578,6 @@ test "compaction_finished waits for its durable summary" {
     ),
     model,
   )
-  inspect(next.active().overlay.length(), content="0")
   assert_true(next.active().compaction is NotCompacting)
 }
 
@@ -15677,7 +15607,6 @@ test "compaction events route by session when no run id matches" {
     ),
     started,
   )
-  inspect(next.active().overlay.length(), content="0")
   assert_true(next.active().compaction is NotCompacting)
 }
 
@@ -15698,14 +15627,13 @@ test "compaction_failed settles a still-queued compaction" {
     model,
   )
   assert_true(next.active().compaction is NotCompacting)
-  inspect(next.active().overlay.length(), content="0")
   inspect(next.notifications.length(), content="1")
 }
 
 ///|
 /// A rejected compact request (no engine, host error) never produces
 /// compaction events, so the rejection itself clears the queued notice and
-/// lands the error in the transcript.
+/// reports the error.
 test "CompactRejected clears the queued notice and reports the error" {
   let dispatch = test_dispatch()
   let model = test_model().replace_conversation({
@@ -15718,7 +15646,8 @@ test "CompactRejected clears the queued notice and reports the error" {
     model,
   )
   assert_true(next.active().compaction is NotCompacting)
-  inspect(next.active().overlay.length(), content="1")
+  inspect(next.notifications.length(), content="1")
+  inspect(next.notifications[0].message, content="no engine")
 }
 
 ///|
@@ -16049,7 +15978,6 @@ test "send does not show a prompt until its commit lands" {
   let (_, sent) = update(dispatch, Send, model)
   // Starting the request changes lifecycle/composer state only.
   inspect(sent.active().messages.length(), content="0")
-  inspect(sent.active().overlay.length(), content="0")
   inspect(sent.active().watermark, content="0")
   // The durable commit is the first point the prompt becomes transcript.
   let (_, committed) = update_dev(
@@ -16067,7 +15995,6 @@ test "send does not show a prompt until its commit lands" {
   guard committed.active().messages[0].kind is User else {
     fail("expected a user item")
   }
-  inspect(committed.active().overlay.length(), content="0")
   inspect(committed.active().watermark, content="1")
 }
 
@@ -16297,7 +16224,7 @@ test "background retries preserve buffered commits until a later success" {
   }
   inspect(failed_buffer.length(), content="1")
   inspect(failed.active().messages.length(), content="1")
-  inspect(failed.active().overlay.length(), content="1")
+  inspect(failed.notifications.length(), content="0")
   // The next commit starts a fresh generation without applying out of order.
   let (_, retrying) = update_dev(
     dispatch,
@@ -16332,12 +16259,11 @@ test "background retries preserve buffered commits until a later success" {
   inspect(healed.active().messages[1].content, content="next")
   inspect(healed.active().messages[2].content, content="x")
   inspect(healed.active().watermark, content="3")
-  inspect(healed.active().overlay.length(), content="0")
   assert_true(healed.active().sync is Synced)
 }
 
 ///|
-test "reopening an active failed reload retries and preserves other local notices" {
+test "reopening an active failed reload restarts it and keeps the buffer" {
   let dispatch = test_dispatch()
   let model = test_model().replace_conversation({
     ..test_conversation(),
@@ -16350,21 +16276,6 @@ test "reopening an active failed reload retries and preserves other local notice
         item: @protocol.User({ content: "two", submission_id: None }),
       },
     ]),
-    overlay: [
-      {
-        id: 1,
-        kind: Assistant(is_danger=true),
-        content: TranscriptRefreshFailedNotice,
-        after_messages: 1,
-      },
-      {
-        id: 2,
-        kind: Assistant(is_danger=true),
-        content: "local steer loss",
-        after_messages: 1,
-      },
-    ],
-    next_notice_id: 2,
   })
   let model = { ..model, transcript_request_generation: 1 }
   let (_, reopened) = update(
@@ -16397,9 +16308,7 @@ test "reopening an active failed reload retries and preserves other local notice
   assert_true(loaded.loading_conversation is None)
   inspect(loaded.active().messages.length(), content="2")
   inspect(loaded.active().watermark, content="2")
-  // Success clears only the exact refresh-state warning.
-  inspect(loaded.active().overlay.length(), content="1")
-  inspect(loaded.active().overlay[0].content, content="local steer loss")
+  assert_true(loaded.active().sync is Synced)
 }
 
 ///|
@@ -16492,10 +16401,8 @@ test "tool decode semantics wait for their durable error tool result" {
   )
   let (_, semantic_first) = update_dev(dispatch, semantic, running_model())
   inspect(semantic_first.active().messages.length(), content="0")
-  inspect(semantic_first.active().overlay.length(), content="0")
   let (_, committed_after) = update_dev(dispatch, commit, semantic_first)
   inspect(committed_after.active().messages.length(), content="1")
-  inspect(committed_after.active().overlay.length(), content="0")
   guard committed_after.active().messages[0].kind
     is Tool(name="edit", is_error=true, ..) else {
     fail("expected the canonical error tool result")
@@ -16507,7 +16414,6 @@ test "tool decode semantics wait for their durable error tool result" {
   let (_, committed_first) = update_dev(dispatch, commit, running_model())
   let (_, semantic_after) = update_dev(dispatch, semantic, committed_first)
   inspect(semantic_after.active().messages.length(), content="1")
-  inspect(semantic_after.active().overlay.length(), content="0")
 }
 
 ///|
@@ -16524,7 +16430,6 @@ test "assistant semantic events wait for their durable commit" {
     thought,
   )
   inspect(answered.active().messages.length(), content="0")
-  inspect(answered.active().overlay.length(), content="0")
   let (_, committed) = update_dev(
     dispatch,
     SessionCommitted(
@@ -16542,7 +16447,6 @@ test "assistant semantic events wait for their durable commit" {
   )
   // One durable item projects as reasoning + answer exactly once.
   inspect(committed.active().messages.length(), content="2")
-  inspect(committed.active().overlay.length(), content="0")
   inspect(committed.active().watermark, content="1")
 }
 
@@ -16637,71 +16541,6 @@ test "a delayed terminal commit never clears a newer live delta" {
 }
 
 ///|
-test "a fixed local notice stays before later durable turns" {
-  let dispatch = test_dispatch()
-  let conv = {
-    ..test_conversation(),
-    messages: [{ kind: User, content: "question", ts: None, sequence: None }],
-    watermark: 1,
-  }.append_local_notice(Assistant(is_danger=true), "local failure")
-  let (_, committed) = update_dev(
-    dispatch,
-    SessionCommitted(
-      session="desktop-test",
-      sequence=2,
-      ts=None,
-      item=@protocol.Assistant({
-        content: "later answer",
-        tool_calls: None,
-        reasoning_content: None,
-      }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
-    ),
-    test_model().replace_conversation(conv),
-  )
-  let visible = committed.active().visible_items()
-  inspect(visible.length(), content="3")
-  inspect(visible[0].content, content="question")
-  inspect(visible[1].content, content="local failure")
-  inspect(visible[2].content, content="later answer")
-}
-
-///|
-test "a durable commit never retires a same-class local notice" {
-  let dispatch = test_dispatch()
-  let model = test_model().replace_conversation({
-    ..test_conversation(),
-    overlay: [
-      {
-        id: 1,
-        kind: Assistant(is_danger=true),
-        content: "local-only failure",
-        after_messages: 0,
-      },
-    ],
-    next_notice_id: 1,
-  })
-  let (_, committed) = update_dev(
-    dispatch,
-    SessionCommitted(
-      session="desktop-test",
-      sequence=1,
-      ts=None,
-      item=@protocol.Assistant({
-        content: "durable answer",
-        tool_calls: None,
-        reasoning_content: None,
-      }),
-      session_root=@interop.ChannelId::Local.test_store_root(),
-    ),
-    model,
-  )
-  inspect(committed.active().messages.length(), content="1")
-  inspect(committed.active().overlay.length(), content="1")
-  inspect(committed.active().overlay[0].content, content="local-only failure")
-}
-
-///|
 test "commit-first assistant semantics do not append again" {
   let dispatch = test_dispatch()
   let streaming = running_model().replace_conversation({
@@ -16734,7 +16573,6 @@ test "commit-first assistant semantics do not append again" {
     thought,
   )
   inspect(answered.active().messages.length(), content="2")
-  inspect(answered.active().overlay.length(), content="0")
   inspect(answered.active().watermark, content="1")
   inspect(answered.active().turn.streaming_response, content="")
 }

@@ -647,18 +647,11 @@ priv struct Conversation {
   // Where the durable transcript stands relative to the store; see
   // `TranscriptSync`.
   sync : TranscriptSync
-  // Client-local transcript notices with no durable counterpart (a rejected
-  // start, a dropped steer, a repeatedly failed transcript refresh). Each is
-  // anchored to a durable chronology boundary, so later turns render after it
-  // rather than pushing an old notice to the transcript tail. A run-end steer
-  // failure follows the current tail only until the durable terminal boundary
-  // arrives; some delivery failures are provisional and a later exact-id
-  // receipt can retract them. Copy-on-write.
-  overlay : Array[LocalNotice]
-  // Monotonic identity source for local notices. Notice positions may move as
-  // durable boundaries reconcile, but a rendered notice must keep the same DOM
-  // node throughout that move.
-  next_notice_id : Int
+  // This conversation replaced one archived while a prompt was in flight. The
+  // composer says so, because what it is advice about is the draft the
+  // composer is now holding — the prompt may or may not have reached the
+  // archived record, and only that record can say.
+  archived_pending_input : Bool
   // The standing goal mirrored from the durable record's `[goal]` markers:
   // seeded by each snapshot's reduction and folded forward by marker
   // commits in `apply_commit`. Nothing local writes it — goal mode only
@@ -790,20 +783,6 @@ priv struct PendingPrompt {
   submission_id : String
   draft : String
   mentions : Array[Mention]
-} derive(Eq)
-
-///|
-/// One client-local transcript notice: text no durable event will ever carry,
-/// reporting a request the host or engine definitively refused. It renders at
-/// the display boundary it was created at, and is never retracted — nothing in
-/// the record can contradict a refusal that kept the record from changing.
-priv struct LocalNotice {
-  // Renderer identity only; never serialized or compared with durable events.
-  id : Int
-  kind : @transcript.ItemKind
-  content : String
-  // How many durable messages preceded this notice when it was appended.
-  after_messages : Int
 } derive(Eq)
 
 ///|
@@ -1479,6 +1458,9 @@ priv enum Msg {
   NotificationExpired(Int)
   // A toast was clicked: dismiss it now.
   DismissNotification(Int)
+  // The active conversation's "archived while a prompt was in flight" advice
+  // was acknowledged.
+  DismissArchivedPendingInput
   // The Settings "Check for updates" button.
   CheckForUpdates
   // An `auth.status` reply or `auth.changed` broadcast: the host's relay
@@ -1819,13 +1801,11 @@ priv enum DeviceMsg {
     run_id~ : String
   )
   // The host definitively returned `steered:false`; no canonical User can
-  // follow, so the queue entry retires and its draft comes back.
-  SteerRejected(
-    session~ : String,
-    submission_id~ : String,
-    text~ : String,
-    run_id~ : String
-  )
+  // follow, so the queue entry retires and its draft comes back. The text is
+  // not carried: the entry holds the draft to restore, and without an entry
+  // this client did not send it and must not put another client's text in
+  // this composer.
+  SteerRejected(session~ : String, submission_id~ : String, run_id~ : String)
   SessionsLoaded(
     Array[@transcript.SessionListItem],
     connection_generation~ : Int,
@@ -2176,8 +2156,7 @@ fn empty_conversation(
     messages: [],
     watermark: 0,
     sync: Synced,
-    overlay: [],
-    next_notice_id: 0,
+    archived_pending_input: false,
     goal: None,
     goal_edit: None,
     goal_pending: None,
@@ -2832,8 +2811,8 @@ fn Model::with_archive_override(
 
 ///|
 /// Whether re-reading this conversation can address a durable record. Local
-/// overlays and a failed pre-persistence start do not prove one exists; using
-/// them as a reload gate would turn every reconnect/reselect into three noisy
+/// a failed pre-persistence start does not prove one exists; using it as a
+/// reload gate would turn every reconnect/reselect into three noisy
 /// `session.load` failures for an unsaved chat.
 fn Model::can_reload_transcript(self : Model, conv : Conversation) -> Bool {
   if conv.is_archived_read_only() ||
@@ -3178,7 +3157,6 @@ fn Conversation::durable_frontier(self : Conversation) -> Int {
 fn Conversation::has_begun(self : Conversation) -> Bool {
   self.is_running() ||
   self.messages.length() > 0 ||
-  self.overlay.length() > 0 ||
   !self.pending_steers.is_empty()
 }
 
@@ -3232,22 +3210,6 @@ fn Conversation::run_heartbeat(self : Conversation) -> @composer.RunHeartbeat? {
 ///|
 fn Conversation::clear_streams(self : Conversation) -> Conversation {
   { ..self, turn: { ..self.turn, streaming_response: "" } }
-}
-
-///|
-/// Append one client-local notice at the current display boundary. Live
-/// semantic events with durable twins never pass through here on their way to
-/// a commit; only definitive refusals do, and a refusal is final the moment it
-/// is made.
-fn Conversation::append_local_notice(
-  self : Conversation,
-  kind : @transcript.ItemKind,
-  content : String,
-) -> Conversation {
-  let id = self.next_notice_id + 1
-  let overlay = self.overlay.copy()
-  overlay.push({ id, kind, content, after_messages: self.messages.length() })
-  { ..self, overlay, next_notice_id: id }
 }
 
 ///|
@@ -3441,31 +3403,21 @@ priv struct ArchiveSalvage {
 }
 
 ///|
-/// Retire one definitively refused local submission, restore its composer
-/// draft, and replace any provisional notice with one retained explanation.
-/// A setup failure can suppress the transcript notice because update reports
-/// the same explanation as a transient toast instead.
+/// Retire one definitively refused local submission and restore its composer
+/// draft. The refusal itself is the caller's to report: no durable event will
+/// ever carry it, so it is a toast, and the text is back in the composer where
+/// the user can act on it.
 fn Conversation::reject_steer(
   self : Conversation,
   submission_id : String,
   run_id : String?,
-  notice : String,
-  report_in_transcript? : Bool = true,
 ) -> (Conversation, Bool) {
   for index, input in self.pending_steers {
     if input.matches_receipt(submission_id, run_id) {
       let pending_steers = self.pending_steers.copy()
       let _ = pending_steers.remove(index)
       let next = { ..self, pending_steers, }
-      let restored = next.restore_submission(input.draft, input.mentions)
-      return (
-        if report_in_transcript {
-          restored.append_local_notice(Assistant(is_danger=true), notice)
-        } else {
-          restored
-        },
-        true,
-      )
+      return (next.restore_submission(input.draft, input.mentions), true)
     }
   }
   (self, false)
@@ -3478,23 +3430,16 @@ fn Conversation::reject_steer(
 fn Conversation::reject_pending_prompt(
   self : Conversation,
   submission_id : String,
-  notice : String,
-  report_in_transcript? : Bool = true,
 ) -> (Conversation, Bool) {
   guard self.pending_prompt is Some(pending) &&
     pending.submission_id == submission_id else {
     return (self, false)
   }
-  let restored = { ..self, pending_prompt: None }.restore_submission(
-    pending.draft,
-    pending.mentions,
-  )
   (
-    if report_in_transcript {
-      restored.append_local_notice(Assistant(is_danger=true), notice)
-    } else {
-      restored
-    },
+    { ..self, pending_prompt: None }.restore_submission(
+      pending.draft,
+      pending.mentions,
+    ),
     true,
   )
 }
@@ -3550,64 +3495,18 @@ fn Conversation::forget_steers_for_run(
 }
 
 ///|
-/// Append one local notice unless the same text is already present. Reload
-/// exhaustion can happen in several rounds; one durable conversation should
-/// not accumulate an identical warning for every round.
-fn Conversation::append_local_notice_once(
-  self : Conversation,
-  kind : @transcript.ItemKind,
-  content : String,
-) -> Conversation {
-  for item in self.overlay {
-    if item.content == content {
-      return self
-    }
-  }
-  self.append_local_notice(kind, content)
-}
-
-///|
-/// Interleave local notices at their creation boundary. Future durable turns
-/// therefore render after an older failure instead of pushing it to the tail.
+/// What the transcript shows: the durable record, and nothing else. Every
+/// failure the record will never carry is reported to the user directly
+/// instead, so no client-local row has to be placed in a chronology it does
+/// not belong to.
 fn Conversation::visible_items(
   self : Conversation,
 ) -> Array[@transcript.TranscriptItem] {
-  if self.overlay.is_empty() {
-    self.messages
-  } else {
-    let visible : Array[@transcript.TranscriptItem] = []
-    for index in 0..<self.messages.length() {
-      for notice in self.overlay {
-        if notice.after_messages == index {
-          visible.push({
-            kind: notice.kind,
-            content: notice.content,
-            ts: None,
-            sequence: None,
-          })
-        }
-      }
-      visible.push(self.messages[index])
-    }
-    // A notice created past the current end of the transcript still belongs at
-    // the tail: a snapshot may have replaced the messages it was created over.
-    for notice in self.overlay {
-      if notice.after_messages >= self.messages.length() {
-        visible.push({
-          kind: notice.kind,
-          content: notice.content,
-          ts: None,
-          sequence: None,
-        })
-      }
-    }
-    visible
-  }
+  self.messages
 }
 
 ///|
-/// Apply one durable commit's item to the transcript. Local notices have no
-/// durable twin and are therefore never retired by item class. Returns
+/// Apply one durable commit's item to the transcript. Returns
 /// whether the durable transcript visibly changed: a tool result can now fill
 /// an existing call row without increasing the array length.
 fn Conversation::apply_commit(
@@ -3831,17 +3730,10 @@ fn Conversation::adopt_snapshot(
       self.goal_pending
     },
   }
-  // This one local notice represents the reload state itself, so a current
-  // successful snapshot clears it by exact identity. Every unrelated local
-  // notice survives unchanged.
-  let overlay = reconciled.overlay.filter(item => {
-    item.content != TranscriptRefreshFailedNotice
-  })
   let mut conv : Conversation = {
     ..reconciled,
     messages: items,
     watermark,
-    overlay,
     sync: Synced,
   }
   let leftover : Array[BufferedCommit] = []
@@ -3868,12 +3760,12 @@ fn Conversation::adopt_snapshot(
 }
 
 ///|
-/// The transcript notice for steering input that never reached the turn —
-/// whether the engine rejected it (it raced the turn's end through the
-/// pipes) or the run died with it unsettled. Either way the text must not
-/// vanish silently.
-fn steer_dropped_notice(text : String) -> String {
-  "Input was not delivered (the task ended as you sent it) — submit it again: \{text}"
+/// The report for steering input that never reached the turn — whether the
+/// engine rejected it (it raced the turn's end through the pipes) or the run
+/// died with it unsettled. Either way the text must not vanish silently, and
+/// it does not: the refusal puts it back in the composer.
+fn steer_dropped_notice() -> String {
+  "Input was not delivered (the task ended as you sent it) — it is back in the composer."
 }
 
 ///|

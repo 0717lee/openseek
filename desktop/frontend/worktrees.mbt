@@ -556,11 +556,10 @@ fn DeviceState::worktree_generation(
 
 ///|
 /// Whether the next submit should run the create-then-start chain: the
-/// composer chose worktree mode, nothing is bound yet, and the
-/// conversation has no durable history. Local overlay notices — exactly
-/// what a rejected setup attempt leaves behind — deliberately do not
-/// count: the retry after a failed create must re-enter the chain, never
-/// silently fall back to the workspace root.
+/// composer chose worktree mode, nothing is bound yet, and the conversation
+/// has no durable history. Durable emptiness is the whole test, so a rejected
+/// setup attempt leaves it intact: the retry after a failed create must
+/// re-enter the chain, never silently fall back to the workspace root.
 fn Conversation::wants_fresh_worktree(self : Conversation) -> Bool {
   self.worktree_mode &&
   self.workspace is Project(..) &&
@@ -571,7 +570,7 @@ fn Conversation::wants_fresh_worktree(self : Conversation) -> Bool {
 /// Whether the composer may still choose where this conversation runs.
 ///
 /// Durable emptiness, not `has_begun`: a rejected setup attempt leaves a
-/// local overlay notice, and hiding the toggle then would lock the user into
+/// restored draft behind, and hiding the toggle then would lock the user into
 /// retrying the failing create with no way back to Local.
 ///
 /// A command already sent settles it, though — that command *is* the choice
@@ -1433,7 +1432,6 @@ test "a failed worktree setup is an actionable toast and keeps retry eligible" {
   let (_, rejected) = update_dev(dispatch, failed, sent)
   assert_eq(repeated.active().task, rejected.active().task)
   assert_eq(repeated.active().pending_steers.length(), 0)
-  assert_eq(repeated.active().overlay.length(), 0)
   assert_eq(repeated.notifications.length(), 1)
   assert_eq(repeated.notifications[0].message, message)
   assert_eq(
@@ -1443,7 +1441,6 @@ test "a failed worktree setup is an actionable toast and keeps retry eligible" {
   // Setup never reached an agent, so the explanation is a toast rather than
   // an agent-style transcript error. The exact prompt returns to the composer.
   assert_eq(rejected.active().task, "go")
-  assert_eq(rejected.active().overlay.length(), 0)
   assert_eq(rejected.notifications.length(), 1)
   assert_eq(rejected.notifications[0].message, message)
   // The next submit re-enters the create-then-start chain instead of silently

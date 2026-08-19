@@ -80,6 +80,24 @@ fn Model::composer_input(
       ]),
     )
   }
+  // Advice about the draft this composer is now holding, so it belongs to the
+  // composer. It stands until the user acts on it: whether the archived record
+  // got the prompt is a question only that record answers, and a toast would
+  // be gone before they could go and look.
+  if conv.archived_pending_input {
+    context.push(
+      @html.div(class="composer-notice", [
+        @html.span(class="composer-notice-text", ArchivedPendingInputNotice),
+        @html.button(
+          class="composer-notice-btn",
+          type_="button",
+          title="Dismiss this notice",
+          on_click=dispatch(DismissArchivedPendingInput),
+          "Got it",
+        ),
+      ]),
+    )
+  }
   if !conv.pending_steers.is_empty() {
     context.push(pending_steers_panel(conv))
   }
