@@ -2906,77 +2906,32 @@ fn update_msg(
       }
     }
     OpenSkills => {
-      // The catalog is fetched once per app run (and again after a
-      // failure); the installed list is cheap and refreshes on every open.
-      let (catalog_cmd, skills_catalog) = match model.skills_catalog {
-        CatalogIdle | CatalogFailed(_) =>
-          (fetch_skills_catalog(dispatch, model.focused), CatalogLoading)
-        current => (@cmd.none, current)
-      }
+      // The page decides whether its catalog still needs fetching; the
+      // installed list is the root's mirror, cheap, and refreshed on every
+      // open.
+      let (page_cmd, skills) = model.skills.opening(
+        dispatch.map(msg => Skills(msg)),
+        model.skills_input(),
+      )
       (
-        @cmd.batch([
-          catalog_cmd,
-          fetch_installed_skills(dispatch, model.focused),
-        ]),
-        { ..model, screen: Skills, skills_catalog, skills_notice: "" },
+        @cmd.batch([page_cmd, fetch_installed_skills(dispatch, model.focused)]),
+        { ..model, screen: Skills, skills },
       )
     }
-    SkillsQueryChanged(value) => (@cmd.none, { ..model, skills_query: value })
-    SkillsCatalogLoaded(items) =>
-      (@cmd.none, { ..model, skills_catalog: CatalogReady(items) })
-    SkillsCatalogFailed(message) =>
-      (@cmd.none, { ..model, skills_catalog: CatalogFailed(message) })
-    SkillsNotice(message) => (@cmd.none, { ..model, skills_notice: message })
-    InstallSkill(item) => {
-      let key = @transcript.market_source_label(item)
-      if model.skills_busy.contains(key) {
-        (@cmd.none, model)
-      } else {
-        let skills_busy = model.skills_busy.copy()
-        skills_busy.push(key)
-        (
-          install_skill(dispatch, model.focused, item),
-          { ..model, skills_busy, skills_notice: "" },
-        )
+    Skills(msg) => {
+      let (page_cmd, skills, outcome) = model.skills.handle(
+        dispatch.map(next => Skills(next)),
+        msg,
+        model.skills_input(),
+      )
+      let model = { ..model, skills, }
+      // A settled install or uninstall changed the library the root owns;
+      // what the page shows must come from disk, not from a client-side
+      // guess.
+      guard outcome is Some(@skills.LibraryChanged(channel~)) else {
+        return (page_cmd, model)
       }
-    }
-    UninstallSkill(id) =>
-      if model.skills_busy.contains(id) {
-        (@cmd.none, model)
-      } else {
-        let skills_busy = model.skills_busy.copy()
-        skills_busy.push(id)
-        (
-          uninstall_skill(dispatch, model.focused, id),
-          { ..model, skills_busy, skills_notice: "" },
-        )
-      }
-    SkillActionDone(channel~, key~, error~) => {
-      let skills_busy = model.skills_busy.filter(entry => entry != key)
-      if error.is_empty() {
-        // The library changed; what the panel shows must come from disk,
-        // not from a client-side guess. A result that outlived a focus
-        // switch belongs to its old host; that host will refetch when it is
-        // focused again.
-        if channel == model.focused {
-          (fetch_installed_skills(dispatch, channel), { ..model, skills_busy, })
-        } else {
-          (@cmd.none, { ..model, skills_busy, })
-        }
-      } else {
-        (
-          @cmd.none,
-          {
-            ..model,
-            skills_busy,
-            skills_notice: if channel == model.focused {
-              error
-            } else {
-              model.skills_notice
-            },
-          },
-        )
-      }
+      (@cmd.batch([page_cmd, fetch_installed_skills(dispatch, channel)]), model)
     }
     Send => {
       guard model.active_conversation() is Some(conv) else {
@@ -4451,7 +4406,7 @@ fn update_device_msg(
       }
     InstalledSkillsFailed(message) =>
       if channel == model.focused {
-        (@cmd.none, { ..model, skills_notice: message })
+        (@cmd.none, { ..model, skills: model.skills.with_notice(message) })
       } else {
         (@cmd.none, model)
       }
@@ -16863,40 +16818,6 @@ test "a transcript stream grows without application-owned scroll state" {
 }
 
 ///|
-fn test_market_item() -> @transcript.MarketSkillItem {
-  {
-    name: "acme/widget",
-    module_name: "acme/widget",
-    package_path: "",
-    version: "1.0.0",
-    description: "Build widgets fast.",
-    author: "acme",
-    repository: "",
-  }
-}
-
-///|
-test "opening the skills page fetches the catalog once" {
-  let dispatch = test_dispatch()
-  let (_, opened) = update(dispatch, OpenSkills, test_model())
-  assert_true(opened.screen is Skills)
-  assert_true(opened.skills_catalog is CatalogLoading)
-
-  // Reopening with a loaded catalog keeps it; only a failure refetches.
-  let loaded = { ..test_model(), skills_catalog: CatalogReady([]) }
-  let (_, reopened) = update(dispatch, OpenSkills, loaded)
-  assert_true(reopened.skills_catalog is CatalogReady(_))
-  let failed = {
-    ..test_model(),
-    skills_catalog: CatalogFailed("offline"),
-    skills_notice: "stale",
-  }
-  let (_, retried) = update(dispatch, OpenSkills, failed)
-  assert_true(retried.skills_catalog is CatalogLoading)
-  inspect(retried.skills_notice, content="")
-}
-
-///|
 test "selecting a conversation returns from the skills page to the chat" {
   let dispatch = test_dispatch()
   let (_, opened) = update(dispatch, OpenSkills, test_model())
@@ -16927,8 +16848,7 @@ test "update is pure: opening the skills page twice is idempotent" {
   let (_, twice) = update(dispatch, OpenSkills, model)
   assert_true(once.screen is Skills)
   assert_true(twice.screen is Skills)
-  assert_true(once.skills_catalog is CatalogLoading)
-  assert_true(twice.skills_catalog is CatalogLoading)
+  assert_true(once.skills == twice.skills)
 }
 
 ///|
@@ -17066,104 +16986,32 @@ test "Codex sidebar actions close only the narrow drawer" {
 }
 
 ///|
-test "the skills search query lands on the model" {
+test "an unreadable library becomes the focused page's notice" {
   let dispatch = test_dispatch()
-  let (_, typed) = update(dispatch, SkillsQueryChanged("widget"), test_model())
-  inspect(typed.skills_query, content="widget")
-}
-
-///|
-test "an install marks its entry busy exactly once" {
-  let dispatch = test_dispatch()
-  let (_, busy) = update(
-    dispatch,
-    InstallSkill(test_market_item()),
-    test_model(),
-  )
-  inspect(busy.skills_busy.length(), content="1")
-  inspect(busy.skills_busy[0], content="acme/widget@1.0.0")
-
-  // A second click while in flight is a no-op.
-  let (_, again) = update(dispatch, InstallSkill(test_market_item()), busy)
-  inspect(again.skills_busy.length(), content="1")
-}
-
-///|
-test "a settled action releases its busy entry" {
-  let dispatch = test_dispatch()
-  let busy = { ..test_model(), skills_busy: ["acme/widget@1.0.0", "other"] }
-  let (_, done) = update(
-    dispatch,
-    SkillActionDone(
-      channel=@interop.ChannelId::Local,
-      key="acme/widget@1.0.0",
-      error="",
-    ),
-    busy,
-  )
-  inspect(done.skills_busy.length(), content="1")
-  inspect(done.skills_busy[0], content="other")
-  inspect(done.skills_notice, content="")
-
-  // A failure surfaces as the panel notice instead.
-  let (_, failed) = update(
-    dispatch,
-    SkillActionDone(
-      channel=@interop.ChannelId::Local,
-      key="other",
-      error="digest mismatch",
-    ),
-    done,
-  )
-  inspect(failed.skills_busy.length(), content="0")
-  inspect(failed.skills_notice, content="digest mismatch")
-}
-
-///|
-test "uninstall is keyed by the library id and deduplicated" {
-  let dispatch = test_dispatch()
-  let (_, busy) = update(dispatch, UninstallSkill("acme-widget"), test_model())
-  inspect(busy.skills_busy.length(), content="1")
-  inspect(busy.skills_busy[0], content="acme-widget")
-  let (_, again) = update(dispatch, UninstallSkill("acme-widget"), busy)
-  inspect(again.skills_busy.length(), content="1")
-}
-
-///|
-test "catalog and library replies land on the model" {
-  let dispatch = test_dispatch()
-  let (_, ready) = update(
-    dispatch,
-    SkillsCatalogLoaded([test_market_item()]),
-    test_model(),
-  )
-  guard ready.skills_catalog is CatalogReady(items) else {
-    fail("catalog should be ready")
+  let home = test_model()
+  // Both devices are known, so a background reply reaches the handler proper
+  // instead of being dropped for want of a device state.
+  let paired = {
+    ..home,
+    devices: [
+      home.devices[0],
+      { ..empty_device_state(Remote("d_b")), bridge: Connected },
+    ],
   }
-  inspect(items.length(), content="1")
-  assert_false(ready.skill_installed("acme/widget@1.0.0"))
-  let (_, failed) = update(dispatch, SkillsCatalogFailed("offline"), ready)
-  assert_true(failed.skills_catalog is CatalogFailed(_))
-  let installed : Array[@transcript.InstalledSkillItem] = [
-    {
-      id: "acme-widget",
-      name: "widget",
-      description: "",
-      source: "acme/widget@1.0.0",
-    },
-  ]
-  let (_, listed) = update_dev(
-    dispatch,
-    InstalledSkillsLoaded(installed),
-    ready,
-  )
-  assert_true(listed.skill_installed("acme/widget@1.0.0"))
   let (_, noticed) = update(
     dispatch,
-    SkillsNotice("library unreadable"),
-    listed,
+    FromDevice(Local, InstalledSkillsFailed("library unreadable")),
+    paired,
   )
-  inspect(noticed.skills_notice, content="library unreadable")
+  assert_true(noticed.skills == paired.skills.with_notice("library unreadable"))
+
+  // The page is the focused host's; a background device says nothing on it.
+  let (_, quiet) = update(
+    dispatch,
+    FromDevice(Remote("d_b"), InstalledSkillsFailed("other host")),
+    noticed,
+  )
+  assert_true(quiet.skills == noticed.skills)
 }
 
 ///|
@@ -17179,7 +17027,7 @@ test "installed skills replies are scoped to their source device" {
     focused: Remote("d_b"),
     installed_skills: [],
   }
-  let old_host : Array[@transcript.InstalledSkillItem] = [
+  let old_host : Array[@skills.InstalledItem] = [
     { id: "old", name: "old", description: "", source: "old/source@1.0.0" },
   ]
   let (_, ignored) = update(
@@ -17188,7 +17036,7 @@ test "installed skills replies are scoped to their source device" {
     focused,
   )
   assert_eq(ignored.installed_skills.length(), 0)
-  let new_host : Array[@transcript.InstalledSkillItem] = [
+  let new_host : Array[@skills.InstalledItem] = [
     { id: "new", name: "new", description: "", source: "new/source@1.0.0" },
   ]
   let (_, applied) = update(

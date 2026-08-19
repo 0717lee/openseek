@@ -1531,209 +1531,8 @@ fn workspace_settings_page(
 }
 
 ///|
-/// One local-library row: name, description, and — for registry installs
-/// only — the source tag and the uninstall button. Hand-written skills are
-/// listed so the user sees everything the engine advertises, but the app
-/// never offers to delete them.
-fn installed_skill_row(
-  dispatch : @cmd.Emit[Msg],
-  model : Model,
-  skill : @transcript.InstalledSkillItem,
-) -> @html.Html {
-  let info : Array[@html.Html] = [@html.div(class="skill-name", skill.name)]
-  if !skill.description.is_blank() {
-    info.push(@html.div(class="skill-desc", skill.description))
-  }
-  info.push(
-    @html.div(
-      class="skill-meta",
-      if skill.source.is_empty() {
-        "hand-written"
-      } else {
-        skill.source
-      },
-    ),
-  )
-  let children : Array[@html.Html] = [
-    @html.div(class="skill-avatar", icon(icon_extensions)),
-    @html.div(class="skill-info", info),
-  ]
-  if skill.source.is_empty() {
-    children.push(@html.span(class="skill-check ok", "✓"))
-  } else {
-    let busy = model.skills_busy.contains(skill.id)
-    children.push(
-      @html.button(
-        class="secondary skill-action",
-        disabled=busy,
-        on_click=dispatch(UninstallSkill(skill.id)),
-        if busy {
-          "Removing…"
-        } else {
-          "Uninstall"
-        },
-      ),
-    )
-  }
-  @html.div(class="skill-row", children)
-}
-
-///|
-/// One catalog row. The action button morphs: already installed at this
-/// exact version reads as a disabled "Installed" (an older install keeps
-/// the button alive as the upgrade path), an install in flight reads as
-/// "Installing…".
-fn market_skill_row(
-  dispatch : @cmd.Emit[Msg],
-  model : Model,
-  item : @transcript.MarketSkillItem,
-) -> @html.Html {
-  let source = @transcript.market_source_label(item)
-  let busy = model.skills_busy.contains(source)
-  let installed = model.skill_installed(source)
-  let info : Array[@html.Html] = [@html.div(class="skill-name", item.name)]
-  if !item.description.is_blank() {
-    info.push(@html.div(class="skill-desc", item.description))
-  }
-  let meta = if item.author.is_empty() {
-    "v\{item.version}"
-  } else {
-    "v\{item.version} · \{item.author}"
-  }
-  info.push(@html.div(class="skill-meta", meta))
-  let action = if installed {
-    @html.span(class="skill-check ok", "✓ Installed")
-  } else {
-    @html.button(
-      class="secondary skill-action",
-      disabled=busy,
-      on_click=dispatch(InstallSkill(item)),
-      if busy {
-        "Installing…"
-      } else {
-        "Install"
-      },
-    )
-  }
-  @html.div(class="skill-row", title=item.repository, [
-    @html.div(class="skill-avatar", icon(icon_extensions)),
-    @html.div(class="skill-info", info),
-    action,
-  ])
-}
-
-///|
-/// Whether a skill row survives the page's search filter: a blank query
-/// keeps everything, otherwise any listed field must contain it
-/// (case-insensitive).
-fn skill_matches(query : String, fields : Array[String]) -> Bool {
-  let query = query.trim().to_owned().to_lower()
-  if query.is_empty() {
-    return true
-  }
-  for field in fields {
-    if field.to_lower().contains(query) {
-      return true
-    }
-  }
-  false
-}
-
-///|
-/// The Skills page, shown in the main area in place of the conversation:
-/// header, search, the local library, then the mooncakes.io catalog.
-fn skills_page(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
-  let sections : Array[@html.Html] = [
-    @html.div(class="skills-header", [
-      @html.div(class="page-eyebrow", "Library"),
-      @html.h1("Skills"),
-      @html.div(
-        class="skills-subtitle",
-        "Playbooks the agent reads when a task matches. Skills apply to new chats.",
-      ),
-    ]),
-    @html.div(
-      class="skills-search",
-      attrs=@html.Attrs::build().data_set("focus-owner", ""),
-      [
-        icon(icon_search),
-        @html.input(
-          input_type=@html.InputType::Search,
-          value=model.skills_query,
-          placeholder="Search skills…",
-          on_input=dispatch.map(value => SkillsQueryChanged(value)),
-          attrs=@html.Attrs::build().data_set("focus-target", ""),
-        ),
-      ],
-    ),
-  ]
-  if !model.skills_notice.is_empty() {
-    sections.push(@html.div(class="skills-notice danger", model.skills_notice))
-  }
-  let installed_rows : Array[@html.Html] = []
-  for skill in model.installed_skills {
-    if skill_matches(model.skills_query, [
-        skill.name,
-        skill.description,
-        skill.source,
-      ]) {
-      installed_rows.push(installed_skill_row(dispatch, model, skill))
-    }
-  }
-  if installed_rows.is_empty() {
-    installed_rows.push(
-      @html.div(
-        class="skills-empty",
-        if model.installed_skills.is_empty() {
-          "No skills installed yet."
-        } else {
-          "No installed skill matches the search."
-        },
-      ),
-    )
-  }
-  sections.push(settings_group(icon_extensions, "Installed", installed_rows))
-  let market_rows : Array[@html.Html] = []
-  match model.skills_catalog {
-    CatalogIdle | CatalogLoading =>
-      market_rows.push(
-        @html.div(class="skills-empty", "Loading the skill catalog…"),
-      )
-    CatalogFailed(message) =>
-      market_rows.push(@html.div(class="skills-empty danger", message))
-    CatalogReady(items) => {
-      for item in items {
-        if skill_matches(model.skills_query, [
-            item.name,
-            item.description,
-            item.author,
-          ]) {
-          market_rows.push(market_skill_row(dispatch, model, item))
-        }
-      }
-      if market_rows.is_empty() {
-        market_rows.push(
-          @html.div(
-            class="skills-empty",
-            if items.is_empty() {
-              "The registry lists no installable skills yet."
-            } else {
-              "No registry skill matches the search."
-            },
-          ),
-        )
-      }
-    }
-  }
-  sections.push(settings_group(icon_package, "Mooncakes registry", market_rows))
-  @html.section(class="skills-page", [
-    @html.div(class="skills-page-inner", sections),
-  ])
-}
-
-///|
 #warnings("-alert_unstable")
-test "settings and skills declare form focus ownership" {
+test "settings and the browser address bar declare form focus ownership" {
   let dispatch = test_dispatch()
   let settings_markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(settings_page(dispatch, test_model()))
@@ -1742,12 +1541,6 @@ test "settings and skills declare form focus ownership" {
   // target that could draw a second frame.
   assert_true(settings_markup.contains("data-focus-owner=\"\""))
   assert_false(settings_markup.contains("data-focus-target=\"\""))
-  let skills_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(skills_page(dispatch, test_model()))
-  })
-  assert_true(skills_markup.contains("class=\"skills-search\""))
-  assert_true(skills_markup.contains("data-focus-owner=\"\""))
-  assert_true(skills_markup.contains("data-focus-target=\"\""))
   let address_markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(
       @preview.toolbar_view(
@@ -1769,7 +1562,7 @@ test "settings and skills declare form focus ownership" {
   // Every rendered form element must choose one side of the contract. A
   // composite also has a separate owner on its wrapper, which is why counting
   // markers alone would not prove that the nested control was marked.
-  for markup in [settings_markup, skills_markup, address_markup] {
+  for markup in [settings_markup, address_markup] {
     for tag in ["<input", "<textarea", "<select"] {
       let parts = markup.split(tag).collect()
       for index, part in parts {
@@ -2240,6 +2033,7 @@ fn view(
   codex_composer_html : @html.Html,
   sidebar_html : @html.Html,
   quick_open_html : @html.Html,
+  skills_html : @html.Html,
 ) -> @html.Html {
   // A browser page is gated on both its relay session and its required
   // query-selected device. Until both exist, the console frame — sidebar,
@@ -2308,7 +2102,7 @@ fn view(
           composer: codex_composer_html,
         },
       )
-    Skills => page_with_toggle(dispatch, model, skills_page(dispatch, model))
+    Skills => page_with_toggle(dispatch, model, skills_html)
     Settings =>
       page_with_toggle(dispatch, model, settings_page(dispatch, model))
     WorkspaceSettings(channel~, workspace~) =>

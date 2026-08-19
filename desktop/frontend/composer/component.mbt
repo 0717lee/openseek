@@ -77,7 +77,7 @@ priv struct Entry {
   symbol_cache : SymbolCache
   file_completion : FileCompletion
   root : @common.Uri?
-  installed_skills : Array[@transcript.InstalledSkillItem]
+  installed_skills : Array[@skills.InstalledItem]
   context_generation : Int
   pending_submission : PendingSubmission?
 } derive(Eq)

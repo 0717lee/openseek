@@ -13,6 +13,7 @@ import {
   "openseek_desktop/frontend/mention_context",
   "openseek_desktop/frontend/pathx",
   "openseek_desktop/frontend/transcript",
+  "openseek_desktop/frontend/skills",
   "openseek_desktop/internal/protocol",
 }
 
