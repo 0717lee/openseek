@@ -621,6 +621,32 @@ fn Model::sidebar_component_input(self : Model) -> @sidebar.Input {
 }
 
 ///|
+/// The open turn's own liveness, docked directly above the composer: what it
+/// is doing, how long it has been at it, and what it has spent.
+///
+/// A model call is silent for as long as it thinks — no delta, no tool, no
+/// commit — and without this the whole window is frozen from the reader's
+/// side. Deliberately lighter than a `composer-notice`: this is the one row
+/// here that changes every second, and a bordered card that repaints at 1Hz
+/// reads as an alarm rather than a heartbeat.
+///
+/// Always a slot, empty when idle, collapsed by `.composer-running:empty` —
+/// the same shape as the plan panel's, and for the same reason. `context` is
+/// diffed by position, so a row that came and went would shift the goal row
+/// below it on every run start and end: the most frequent slot change in the
+/// composer would rebuild the standing-goal element twice a turn.
+fn running_notice(activity : String?) -> @html.Html {
+  match activity {
+    None => @html.div(class="composer-running", ([] : Array[@html.Html]))
+    Some(activity) =>
+      @html.div(class="composer-running", [
+        @html.span(class="composer-running-mark", ""),
+        @html.span(class="composer-running-text", activity),
+      ])
+  }
+}
+
+///|
 /// Steering input the engine has not settled yet, shown as a panel docked
 /// above the composer: the submission is acknowledged immediately, but it
 /// only joins the transcript when the engine folds it into the turn

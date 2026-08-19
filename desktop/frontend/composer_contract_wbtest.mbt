@@ -14,6 +14,41 @@ test "composer input is a projection instead of the root model" {
 }
 
 ///|
+#warnings("-alert_unstable")
+test "the composer docks the turn's heartbeat only while one is open" {
+  let running = running_model()
+  guard running.active_conversation() is Some(conv) else {
+    fail("expected a running conversation")
+  }
+  let idle = running.replace_conversation({
+    ..conv,
+    run: NoRun(ended=None),
+    run_started_ms: None,
+  })
+  let context_of = (model : Model) => {
+    model.composer_input(test_dispatch()).presentation.context
+  }
+  // The slot is permanent, its contents are not. `context` is diffed by
+  // position, so a row that came and went on every run start and end would
+  // shift the goal row below it and rebuild that element twice a turn.
+  assert_eq(context_of(running).length(), context_of(idle).length())
+  let markup_of = (model : Model) => {
+    @rabbita.render_to_string(() => {
+      @rabbita.Val::constant(@html.div(class="probe", context_of(model)))
+    })
+  }
+  let running_markup = markup_of(running)
+  assert_true(running_markup.contains("composer-running-mark"))
+  assert_true(running_markup.contains("Thinking…"))
+  // Idle keeps the element and empties it — `.composer-running:empty` is what
+  // takes it off screen, so the contents must be gone, not merely hidden.
+  let idle_markup = markup_of(idle)
+  assert_true(idle_markup.contains("composer-running"))
+  assert_false(idle_markup.contains("composer-running-mark"))
+  assert_false(idle_markup.contains("Thinking…"))
+}
+
+///|
 test "composer submission stays bound to its originating conversation" {
   let origin = test_conversation()
   let visible = empty_conversation(

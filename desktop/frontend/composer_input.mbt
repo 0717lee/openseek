@@ -128,6 +128,15 @@ fn Model::composer_input(
       )
     Some(_) => ()
   }
+  // Last, so it sits closest to the textarea: the turn's own liveness is what
+  // the person waiting is watching for, and the wait is spent looking here
+  // rather than at the top bar. Sub-run lanes stay in the transcript tail —
+  // they are activity *inside* this turn, and drawing both in one place put
+  // the outer run on the same footing as the children it spawned.
+  //
+  // Pushed unconditionally: the slot itself is permanent, its contents are
+  // not. See `running_notice`.
+  context.push(running_notice(conv.running_activity(clock_ms=self.clock_ms)))
   let pending : @composer.GoalPending? = conv.goal_pending.map(command => {
     match command.request {
       Setting(text) => @composer.GoalSetting(text)

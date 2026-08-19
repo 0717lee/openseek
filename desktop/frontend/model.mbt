@@ -569,6 +569,11 @@ priv struct Conversation {
   // (accent for success, warn otherwise) until the conversation is opened.
   unseen_finish : Bool
   usage_tokens : Int
+  // When this page saw the current run begin, for the composer row's elapsed
+  // span. `None` whenever that moment is not this page's to know — a run
+  // adopted from a reconnect started before we were watching, and guessing
+  // from the moment we noticed would report a wrong, always-too-short age.
+  run_started_ms : Double?
   // Sub-runs this conversation's open turn has in flight, in the order they
   // started. Live-only: nothing persists a sub-run's progress, so a reload
   // mid-turn shows the tool call pending with no lane under it.
@@ -1145,6 +1150,11 @@ priv struct Model {
   // query, so layout-dependent behavior (the sidebar drawer, the file
   // panel's drill-down) flips exactly where the CSS does.
   narrow : Bool
+  // The clock the running conversations' elapsed spans are measured against,
+  // advanced once a second by `RunClockTicked` and only while some run is in
+  // flight. Held here rather than read inside `view` so rendering stays pure
+  // and a still model renders identically twice.
+  clock_ms : Double
   // Whether the left sidebar (chat list + navigation) is shown. Collapsing it
   // hands the full width to the conversation; the topbar toggle brings it back.
   // On the narrow layout the sidebar is a full-screen drawer instead of a
@@ -1561,6 +1571,10 @@ priv enum Msg {
   FontSizeChanged(String)
   // The window was resized; `width` decides the narrow (phone) layout.
   ViewportResized(width~ : Int)
+  // One second passed while some conversation had a run in flight. Carries
+  // nothing: the handler reads the clock, and the only reason the message
+  // exists is to re-render the elapsed spans it advances.
+  RunClockTicked
   SaveApiKey
   OpenSkills
   // Everything the Skills page does with itself once it is open.
@@ -2172,6 +2186,7 @@ fn empty_conversation(
     compaction: NotCompacting,
     unseen_finish: false,
     usage_tokens: 0,
+    run_started_ms: None,
     subruns: [],
     branch: None,
     diffstat: None,
@@ -2277,6 +2292,7 @@ fn initial_model() -> Model {
     app_font: GeistMono,
     app_font_size: Medium,
     narrow,
+    clock_ms: now_ms(),
     sidebar_open: !narrow,
     right_panel_open: false,
     right_panel_menu_open: false,
@@ -2595,6 +2611,15 @@ fn Model::display_status(self : Model) -> Status {
         Some(Open(stage=Cancelling, ..)) => Cancelling
       }
   }
+}
+
+///|
+/// Whether anything on screen is currently measuring an elapsed span, and so
+/// whether the per-second tick is worth subscribing to. Only the conversation
+/// being looked at draws one: a background run pulses in the sidebar off pure
+/// CSS, which needs no clock.
+fn Model::run_clock_wanted(self : Model) -> Bool {
+  self.active_conversation() is Some(conv) && conv.is_running()
 }
 
 ///|
@@ -3220,6 +3245,65 @@ fn Conversation::visible_subruns(
 ) -> Array[@transcript.SubrunLane] {
   guard self.run is Open(run_id~, ..) else { return [] }
   self.subruns.filter(lane => lane.run is Some(owner) && owner == run_id)
+}
+
+///|
+/// What the run is doing right now, as one line docked above the composer.
+/// `None` between runs — an idle conversation reports nothing.
+///
+/// Purely derived from the run phase, like `display_status`, so no handler
+/// has to keep a stored line in sync. The wire protocol carries no live
+/// reasoning stream, so the deepest this can see during a model call is the
+/// step it is on: between `agent_step` and the first answer delta every
+/// engine is silent, and this line plus its pulsing mark is the whole of
+/// what distinguishes thinking from a hang.
+/// `clock_ms` is passed in rather than read here so this stays a pure
+/// projection: the tick that advances the clock is what re-renders the line.
+fn Conversation::running_activity(
+  self : Conversation,
+  clock_ms~ : Double,
+) -> String? {
+  let stage = match self.run {
+    NoRun(..) => return None
+    Starting(..) => "Starting…"
+    Open(stage=Opened, ..) => "Thinking…"
+    Open(stage=AtStep(Some(step)), ..) => "Working · step \{step}"
+    Open(stage=AtStep(None), ..) => "Working…"
+    Open(stage=Cancelling, ..) => "Stopping…"
+  }
+  // Each half is reported only when it is genuinely known: a run adopted from
+  // a reconnect has no start this page witnessed, and a turn that has not yet
+  // reported usage has no token count. Both absent leaves the bare stage,
+  // which is still the one thing worth saying.
+  let detail : Array[String] = []
+  if self.run_started_ms is Some(started) && clock_ms > started {
+    detail.push(elapsed_label(clock_ms - started))
+  }
+  if self.usage_tokens > 0 {
+    detail.push(token_label(self.usage_tokens))
+  }
+  if detail.is_empty() {
+    Some(stage)
+  } else {
+    Some("\{stage} (\{detail.join(" · ")})")
+  }
+}
+
+///|
+/// A running span, coarsened the way a person reads a wait: seconds under a
+/// minute, minutes and seconds under an hour, hours and minutes beyond. The
+/// point is to be glanceable, so the units never go finer than the span's
+/// own scale — nobody waiting twenty minutes is reading the seconds column.
+fn elapsed_label(span_ms : Double) -> String {
+  let total_seconds = (span_ms / 1000.0).to_int()
+  if total_seconds < 60 {
+    return "\{total_seconds}s"
+  }
+  let minutes = total_seconds / 60
+  if minutes < 60 {
+    return "\{minutes}m \{total_seconds % 60}s"
+  }
+  "\{minutes / 60}h \{minutes % 60}m"
 }
 
 ///|

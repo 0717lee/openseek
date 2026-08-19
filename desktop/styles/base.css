@@ -101,6 +101,15 @@ select {
   height: 100%;
 }
 
+/* The heartbeat shared by every "still working" mark: the sub-run lanes in
+   the transcript tail and the composer's running row. One definition so two
+   components that can be on screen at once never pulse out of step, and so
+   neither sheet silently owns the other's animation. */
+@keyframes lane-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
 @keyframes pulseDot {
   0% {
     box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 45%, transparent);
