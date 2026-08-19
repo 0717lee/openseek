@@ -58,22 +58,15 @@ fn Conversation::visible_transcript_rows(
   let visible : Array[@transcript_component.VisibleRow] = []
   for index in 0..<durable.length() {
     for notice in self.overlay {
-      if notice.anchor is AfterMessages(boundary) && boundary == index {
+      if notice.after_messages == index {
         visible.push(notice.visible_transcript_row())
       }
     }
     visible.push(durable[index])
   }
   for notice in self.overlay {
-    match notice.anchor {
-      TerminalTail(_)
-      | PriorTerminalTail(..)
-      | SnapshotCut(..)
-      | UncertainTail
-      | DurableTail(_) => visible.push(notice.visible_transcript_row())
-      AfterMessages(boundary) if boundary >= durable.length() =>
-        visible.push(notice.visible_transcript_row())
-      _ => ()
+    if notice.after_messages >= durable.length() {
+      visible.push(notice.visible_transcript_row())
     }
   }
   visible
@@ -112,11 +105,11 @@ test "transcript row identities include event ordinals and stable notice ids" {
   assert_eq(with_notice.visible_transcript_rows().map(row => row.identity), [
     "s41\u{0}o0", "s41\u{0}o1", "n1",
   ])
-  // Reconciliation may move a notice to a later durable boundary. Its key is
-  // allocated once, rather than derived from whichever array slot it occupies.
+  // A notice keeps the key it was allocated wherever its boundary places it,
+  // rather than deriving one from whichever array slot it occupies.
   let moved = {
     ..with_notice,
-    overlay: [{ ..with_notice.overlay[0], anchor: AfterMessages(1) }],
+    overlay: [{ ..with_notice.overlay[0], after_messages: 1 }],
   }
   assert_eq(moved.visible_transcript_rows().map(row => row.identity), [
     "s41\u{0}o0", "n1", "s41\u{0}o1",

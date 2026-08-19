@@ -2996,15 +2996,6 @@ fn update_msg(
         checkout is None ||
         checkout is Some(@interop.MissingWorktree(..)) {
         (@cmd.none, model)
-      } else if !(conv.sync is Synced) {
-        // A prompt or steer submitted while the durable frontier is unknown
-        // could make a delayed prior terminal look like this run's boundary.
-        // Keep the draft until the single-flight snapshot settles.
-        (@cmd.none, model)
-      } else if conv.has_unresolved_run_tail_notice() {
-        // The previous run's durable terminal is not proved yet. Starting or
-        // steering another run would make its later terminal ambiguous.
-        (@cmd.none, model)
       } else if conv.is_running() {
         // Submitting while this conversation's turn runs steers it: the text
         // is folded into the running turn at its next step boundary and
@@ -3012,9 +3003,7 @@ fn update_msg(
         // cannot be steered — the steer could outlive the dying turn in the
         // engine's queue and contaminate a later prompt — so the text stays
         // in the composer.
-        if conv.run is Open(run_id~, stage~) &&
-          !(stage is Cancelling) &&
-          conv.turn.durable_floor is Some(_) {
+        if conv.run is Open(run_id~, stage~) && !(stage is Cancelling) {
           let (model, submission_id) = model.allocate_submission_id()
           let conv = conv.enqueue_steer(
             submission_id,
@@ -6039,8 +6028,6 @@ fn update_device_msg(
       let same_open = existing.run is Open(run_id=current, ..) &&
         current == run_id
       let conv = existing
-      let successor_snapshot_generation = model.transcript_request_generation +
-        1
       let (conv, foreign, stale_terminal) = match conv.run {
         Starting(..) if owned && current_start => (conv, false, false)
         // A foreign run starting says nothing about this client's own start,
@@ -6057,11 +6044,6 @@ fn update_device_msg(
         NoRun(..) if existing.last_run_id is Some(last) && last == run_id =>
           (conv, false, true)
         NoRun(..) => (conv, true, false)
-      }
-      let conv = if foreign {
-        conv.prepare_tail_notices_for_successor(successor_snapshot_generation)
-      } else {
-        conv
       }
       // The prompt bubble is not appended at this lifecycle boundary. Durable
       // transcript snapshots and `session.event` commits are its only sources.
@@ -6089,19 +6071,6 @@ fn update_device_msg(
           _ => Open(run_id~, stage=Opened)
         }
       }
-      let durable_floor = if stale_terminal || same_open {
-        conv.turn.durable_floor
-      } else {
-        // Lifecycle and durable commits are independent producers. A new run
-        // cannot trust this client's apparently-synced terminal frontier: its
-        // Started may have overtaken the previous run's terminal commit.
-        None
-      }
-      let floor_generation = if refresh {
-        Some(successor_snapshot_generation)
-      } else {
-        conv.turn.floor_generation
-      }
       let sync = if refresh &&
         conv.sync
         is Reloading(generation~, attempt~, buffered~, reload_after_current=_) {
@@ -6111,13 +6080,13 @@ fn update_device_msg(
       }
       // A Started that opens a different run starts its turn from nothing:
       // the fragment, sub-run lanes and token count the previous turn
-      // accumulated belong to that turn, not this one. The two floors are the
-      // only facts computed here for the new one. A repeat of the open run's
-      // Started, or a late one for a run already settled, keeps what it has.
+      // accumulated belong to that turn, not this one. A repeat of the open
+      // run's Started, or a late one for a run already settled, keeps what it
+      // has.
       let turn : RunState = if stale_terminal || same_open {
-        { ..conv.turn, durable_floor, floor_generation }
+        conv.turn
       } else {
-        { ..RunState::empty(), durable_floor, floor_generation }
+        RunState::empty()
       }
       // `foreign` is exactly the question the elapsed span needs answered: a
       // run this page did not submit and wait for has an age that started
@@ -6468,7 +6437,6 @@ fn update_device_msg(
           owner == run_id &&
           !(conv.run is NoRun(ended=Some(RunFinished(outcome))) &&
           outcome is (Completed | ContextYield | MaxStepsExhausted))
-        let snapshot_generation = model.transcript_request_generation + 1
         let settled = conv
         // The reply still opens the lifecycle when its Started notification
         // was delayed. A very short run may already be finished; never
@@ -6504,18 +6472,6 @@ fn update_device_msg(
           }
         } else {
           settled
-        }
-        let next = if missed_started {
-          {
-            ..next,
-            turn: {
-              ..next.turn,
-              durable_floor: None,
-              floor_generation: Some(snapshot_generation),
-            },
-          }
-        } else {
-          next
         }
         let (updated, generation) = if missed_started || late_abnormal {
           model.ensure_transcript_reload_after_current(next)
@@ -6638,8 +6594,7 @@ fn update_device_msg(
     Error(run_id~, message~, diagnostics~, exit_code~) => {
       // Agent-side semantic errors are lifecycle-only here; their durable
       // status is classified by the subsequent Finished event. Process
-      // diagnostics carry `exit_code` and have no durable twin, so they remain
-      // a local notice.
+      // diagnostics carry `exit_code` and have no durable twin.
       let conv = if run_id is Some(run_id) {
         if model.conversation_by_run(channel, run_id) is Some(conv) {
           Some(conv)
@@ -6661,21 +6616,27 @@ fn update_device_msg(
         } else {
           message
         }
-        let next = if run_id is Some(owner) && exit_code is Some(_) {
-          conv.append_run_diagnostic(owner, content)
+        // A process diagnostic belongs to no durable event: the record will
+        // never carry it, and the transcript is where durable events go. It is
+        // reported as a toast, and the top bar's `Errored` status is what
+        // stands once the toast dismisses itself.
+        let next = if run_id is Some(_) && exit_code is Some(_) {
+          conv
         } else {
           conv.append_local_notice(Assistant(is_danger=true), content)
         }
-        (
-          @cmd.none,
-          model.replace_conversation(
-            if next.run is NoRun(..) {
-              { ..next, run: NoRun(ended=Some(RunErrored)) }
-            } else {
-              next
-            },
-          ),
+        let settled = model.replace_conversation(
+          if next.run is NoRun(..) {
+            { ..next, run: NoRun(ended=Some(RunErrored)) }
+          } else {
+            next
+          },
         )
+        if run_id is Some(_) && exit_code is Some(_) {
+          settled.notify_error(dispatch, content)
+        } else {
+          (@cmd.none, settled)
+        }
       } else {
         (@cmd.none, model)
       }
@@ -6785,24 +6746,9 @@ fn update_device_msg(
           "finished" | "context_yield" | "max_steps_exhausted" => true
           _ => false
         }
-        // Normal finishes use this generation to locate their promised
-        // Terminal. Abnormal finishes use the same post-transition read only
-        // as an observation cut; they never claim an anonymous Terminal.
-        let terminal_snapshot_generation = Some(
-          model.transcript_request_generation + 1,
-        )
         // The run is over, so nothing it carried can still acquire a receipt.
         // Whether each submission reached the store is the record's question;
         // the transcript answers it without a local placeholder.
-        let conv = if durable_frontier is Some(frontier) {
-          conv.anchor_run_diagnostics_at_durable_frontier(run_id, frontier)
-        } else {
-          conv.anchor_run_diagnostics_at_finish(
-            run_id,
-            terminal_expected,
-            terminal_snapshot_generation?,
-          )
-        }
         let settled_inputs = conv.clear_streams().forget_steers_for_run(run_id)
         let base = {
           ..settled_inputs,
@@ -6909,41 +6855,14 @@ fn update_device_msg(
       if model.find_conversation(channel, session) is Some(conv) &&
         conv.last_run_id is Some(owner) &&
         owner == run_id {
-        let anchored = conv.anchor_run_diagnostics_at_durable_frontier(
-          run_id, sequence,
-        )
         // An exact zero frontier proves the run created no record at all, so
         // the speculative reload it would otherwise wait on has nothing to
         // read. Nothing else is inferred from it: the run's submissions ended
         // with the run.
-        let anchored = if anchored.is_empty_at_durable_frontier(sequence) {
-          { ..anchored, sync: Synced }
+        if conv.is_empty_at_durable_frontier(sequence) {
+          (@cmd.none, model.replace_conversation({ ..conv, sync: Synced }))
         } else {
-          anchored
-        }
-        let unresolved = anchored.overlay
-          .iter()
-          .any(notice => {
-            notice.anchor is DurableTail(frontier) && frontier == sequence
-          })
-        if unresolved {
-          // The earlier synthetic Finished may already have completed its
-          // compatibility reload before this process finally exited. Re-read
-          // once so the snapshot's per-event boundaries can place an exact
-          // frontier that is older than the current display watermark.
-          let (next, generation) = model.begin_transcript_reload(anchored)
-          if generation is Some(generation) {
-            (
-              session_snapshot_command(
-                dispatch, channel, next, session, generation, false,
-              ),
-              next,
-            )
-          } else {
-            (@cmd.none, next)
-          }
-        } else {
-          (@cmd.none, model.replace_conversation(anchored))
+          (@cmd.none, model)
         }
       } else {
         (@cmd.none, model)
@@ -7041,11 +6960,7 @@ fn test_reloading(buffered : Array[BufferedCommit]) -> TranscriptSync {
 
 ///|
 fn running_conversation() -> Conversation {
-  {
-    ..test_conversation(),
-    run: Open(run_id="r7", stage=Opened),
-    turn: { ..test_conversation().turn, durable_floor: Some(0) },
-  }
+  { ..test_conversation(), run: Open(run_id="r7", stage=Opened) }
 }
 
 ///|
@@ -9470,7 +9385,7 @@ test "run semantic errors never duplicate their terminal commit" {
 }
 
 ///|
-test "a process-exit error keeps its host diagnostics as a local notice" {
+test "a process-exit error reports its host diagnostics as a toast" {
   let dispatch = test_dispatch()
   let (_, next) = update_dev(
     dispatch,
@@ -9482,8 +9397,11 @@ test "a process-exit error keeps its host diagnostics as a local notice" {
     ),
     running_model(),
   )
-  inspect(next.active().overlay.length(), content="1")
-  assert_true(next.active().overlay[0].content.contains("fatal stderr"))
+  // The record will never carry this text, so the transcript is the wrong
+  // place for it: no durable event can ever say where it belongs.
+  inspect(next.active().overlay.length(), content="0")
+  inspect(next.notifications.length(), content="1")
+  assert_true(next.notifications[0].message.contains("fatal stderr"))
 }
 
 ///|
@@ -9878,8 +9796,6 @@ test "a run boundary discards the previous turn's live state whole" {
       streaming_response: "old answer fragment",
       subruns: [lane],
       usage_tokens: 4200,
-      durable_floor: Some(7),
-      floor_generation: None,
     },
   }
   let (_, next) = update_dev(
@@ -9902,7 +9818,6 @@ test "a run boundary discards the previous turn's live state whole" {
   inspect(next.active().turn.streaming_response, content="")
   inspect(next.active().turn.subruns.length(), content="0")
   inspect(next.active().turn.usage_tokens, content="0")
-  assert_true(next.active().turn.durable_floor is None)
 }
 
 ///|
@@ -10161,16 +10076,6 @@ test "an accepted start response opens the run without Started" {
   // The reply is the entry's last consumer: a prompt is sent once.
   inspect(responded.active().pending_steers.length(), content="0")
   assert_true(responded.active().sync is Reloading(generation=1, ..))
-  assert_true(responded.active().turn.durable_floor is None)
-  assert_true(responded.active().turn.floor_generation is Some(1))
-  let drafted = responded.replace_conversation({
-    ..responded.active(),
-    task: "too early",
-  })
-  let (_, gated) = update(dispatch, Send, drafted)
-  // Send is refused while the run is open, so it neither sends nor records.
-  inspect(gated.active().pending_steers.length(), content="0")
-  inspect(gated.active().task, content="too early")
   let (_, started) = update_dev(
     dispatch,
     Started(
@@ -10181,12 +10086,11 @@ test "an accepted start response opens the run without Started" {
       session_root=None,
       submission_id=Some("prompt-id"),
     ),
-    gated,
+    responded,
   )
   // The delayed Started is idempotent with the response-first recovery: it
   // neither drops nor queues a second generation.
   assert_true(started.active().sync is Reloading(generation=1, ..))
-  assert_true(started.active().turn.floor_generation is Some(1))
   let (_, loaded) = update_dev(
     dispatch,
     SessionRefreshed(
@@ -10215,8 +10119,6 @@ test "an accepted start response opens the run without Started" {
     started,
   )
   assert_true(loaded.active().sync is Synced)
-  assert_true(loaded.active().turn.durable_floor is Some(3))
-  assert_true(loaded.active().turn.floor_generation is None)
   inspect(loaded.active().pending_steers.length(), content="0")
 }
 
@@ -11148,61 +11050,7 @@ test "a trailing dropped receipt for run A cannot close run B" {
 }
 
 ///|
-test "a foreign run gains a floor only after snapshot data follows the prior terminal" {
-  let dispatch = test_dispatch()
-  let conv = {
-    ..test_conversation(),
-    messages: [
-      {
-        kind: Assistant(is_danger=false),
-        content: "previous",
-        ts: None,
-        sequence: None,
-      },
-    ],
-    watermark: 2,
-    last_terminal_sequence: 2,
-    sync: test_reloading([]),
-  }
-  let (_, started) = update_dev(
-    dispatch,
-    Started(
-      run_id="foreign",
-      session="desktop-test",
-      model=High,
-      max_steps=1000,
-      session_root=None,
-      submission_id=None,
-    ),
-    test_model().replace_conversation(conv),
-  )
-  assert_true(started.active().turn.durable_floor is None)
-  let (_, loaded) = update_dev(
-    dispatch,
-    SessionRefreshed(
-      goal=None,
-      goal_markers=[],
-      session="desktop-test",
-      items=[
-        {
-          kind: Assistant(is_danger=false),
-          content: "previous",
-          ts: None,
-          sequence: None,
-        },
-        { kind: User, content: "current", ts: None, sequence: None },
-      ],
-      watermark=3,
-      event_boundaries=[(2, true, 1)],
-      generation=1,
-    ),
-    started,
-  )
-  assert_true(loaded.active().turn.durable_floor is Some(2))
-}
-
-///|
-test "a foreign background run waits for a snapshot cut after Started" {
+test "a foreign background run schedules one causal read after Started" {
   let dispatch = test_dispatch()
   let session = "desktop-background"
   let conv = {
@@ -11252,8 +11100,6 @@ test "a foreign background run waits for a snapshot cut after Started" {
     is Some(started_conv) else {
     fail("missing background conversation")
   }
-  assert_true(started_conv.turn.durable_floor is None)
-  assert_true(started_conv.turn.floor_generation is Some(2))
   assert_true(
     started_conv.sync is Reloading(generation=1, reload_after_current=true, ..),
   )
@@ -11279,8 +11125,8 @@ test "a foreign background run waits for a snapshot cut after Started" {
     ),
     buffered_terminal,
   )
-  // Generation 1 predates Started. It may drain the ordered buffer, but it
-  // cannot let the old answer claim the new run's floor.
+  // Generation 1 predates Started. It may drain the ordered buffer, and the
+  // causal read it scheduled still runs after it.
   let (_, after_old_cut) = update_dev(
     dispatch,
     SessionRefreshed(
@@ -11298,8 +11144,6 @@ test "a foreign background run waits for a snapshot cut after Started" {
     is Some(after_old) else {
     fail("missing conversation after old snapshot")
   }
-  assert_true(after_old.turn.durable_floor is None)
-  assert_true(after_old.turn.floor_generation is Some(2))
   assert_true(after_old.sync is Reloading(generation=2, ..))
   inspect(after_old.last_terminal_sequence, content="3")
   let (_, causal) = update_dev(
@@ -11332,19 +11176,18 @@ test "a foreign background run waits for a snapshot cut after Started" {
     is Some(current) else {
     fail("missing conversation after causal snapshot")
   }
-  assert_true(current.turn.durable_floor is Some(3))
-  assert_true(current.turn.floor_generation is None)
+  assert_true(current.sync is Synced)
+  inspect(current.messages.length(), content="2")
 }
 
 ///|
-test "buffered future terminal cannot become its own run floor" {
+test "buffered commits are delivery, not applied chronology" {
   let dispatch = test_dispatch()
   let conv = {
     ..running_conversation(),
     watermark: 1,
     last_terminal_sequence: 1,
     sync: test_reloading([]),
-    turn: { ..running_conversation().turn, durable_floor: None },
   }
   let model = test_model().replace_conversation(conv)
   let (_, user) = update_dev(
@@ -11399,59 +11242,24 @@ test "buffered future terminal cannot become its own run floor" {
     ),
     terminal,
   )
-  assert_true(loaded.active().turn.durable_floor is Some(1))
   inspect(loaded.active().last_terminal_sequence, content="4")
 }
 
 ///|
-test "two run-tail notice groups freeze only at their own terminals" {
-  let first = {
-    ..test_conversation(),
-    turn: { ..test_conversation().turn, durable_floor: Some(1) },
-  }.append_run_tail_notice(Assistant(is_danger=true), "first", Retained)
-  let second = { ..first, turn: { ..first.turn, durable_floor: Some(5) } }.append_run_tail_notice(
-    Assistant(is_danger=true),
-    "second",
-    Retained,
-  )
-  let frozen = second.freeze_run_tail_notices_from_snapshot(
-    [(4, true, 2), (8, true, 4)],
-    1,
-  )
-  assert_true(frozen.overlay[0].anchor is AfterMessages(2))
-  assert_true(frozen.overlay[1].anchor is AfterMessages(4))
-}
-
-///|
-test "only a causal gap-free snapshot may abandon a missing prior terminal" {
-  let prior = {
-      ..test_conversation(),
-      turn: { ..test_conversation().turn, durable_floor: Some(1) },
-    }
-    .append_run_tail_notice(Assistant(is_danger=true), "old notice", Retained)
-    .prepare_tail_notices_for_successor(2)
-  let old_cut = prior
-    .freeze_run_tail_notices_from_snapshot([], 1)
-    .abandon_missing_prior_terminals(1, 0)
-  assert_true(old_cut.overlay[0].anchor is PriorTerminalTail(..))
-  let causal = old_cut
-    .freeze_run_tail_notices_from_snapshot([], 2)
-    .abandon_missing_prior_terminals(2, 0)
-  assert_true(causal.overlay[0].anchor is AfterMessages(0))
-}
-
-///|
-test "send waits while the durable transcript frontier is reloading" {
+test "a reloading transcript does not hold up a steer" {
   let dispatch = test_dispatch()
+  // The record is what a turn writes, not a precondition for submitting to
+  // one. Reading it is the transcript's problem; the engine takes the text
+  // either way, and the record is where it shows up.
   let conv = {
     ..running_conversation(),
-    task: "do not send yet",
+    task: "steer while reloading",
     sync: test_reloading([]),
   }
   let model = running_model().replace_conversation(conv)
   let (_, next) = update(dispatch, Send, model)
-  inspect(next.active().task, content="do not send yet")
-  inspect(next.active().pending_steers.length(), content="0")
+  inspect(next.active().task, content="")
+  inspect(next.active().pending_steers.length(), content="1")
 }
 
 ///|
@@ -14139,7 +13947,6 @@ test "archiving a pending start restores its original composer without ownership
   inspect(next.active().pending_steers.length(), content="0")
   inspect(next.active().overlay.length(), content="1")
   inspect(next.active().overlay[0].content, content=ArchivedPendingInputNotice)
-  assert_true(next.active().overlay[0].reconciliation is Retained)
 }
 
 ///|
@@ -16559,15 +16366,13 @@ test "reopening an active failed reload retries and preserves other local notice
         id: 1,
         kind: Assistant(is_danger=true),
         content: TranscriptRefreshFailedNotice,
-        anchor: AfterMessages(1),
-        reconciliation: Retained,
+        after_messages: 1,
       },
       {
         id: 2,
         kind: Assistant(is_danger=true),
         content: "local steer loss",
-        anchor: AfterMessages(1),
-        reconciliation: Retained,
+        after_messages: 1,
       },
     ],
     next_notice_id: 2,
@@ -16882,8 +16687,7 @@ test "a durable commit never retires a same-class local notice" {
         id: 1,
         kind: Assistant(is_danger=true),
         content: "local-only failure",
-        anchor: AfterMessages(0),
-        reconciliation: Retained,
+        after_messages: 0,
       },
     ],
     next_notice_id: 1,

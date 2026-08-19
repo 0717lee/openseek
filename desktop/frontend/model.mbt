@@ -497,10 +497,10 @@ fn Workspace::worktree_name(self : Workspace) -> String? {
 ///|
 /// Everything that belongs to one turn and to nothing outside it.
 ///
-/// It is replaced wholesale when a run opens, so a fragment, token count, or
-/// terminal floor left by the previous turn cannot survive into this one by
-/// being forgotten - the reset is one assignment rather than five. Only the
-/// `agent.*` lifecycle and stream events write it; durable commits never do.
+/// It is replaced wholesale when a run opens, so a fragment or token count
+/// left by the previous turn cannot survive into this one by being forgotten -
+/// the reset is one assignment rather than three. Only the `agent.*` lifecycle
+/// and stream events write it; durable commits never do.
 priv struct RunState {
   // Live text of the in-flight assistant turn, accumulated from
   // `assistant_delta` events and cleared by ordered full semantic, step,
@@ -513,28 +513,13 @@ priv struct RunState {
   // tool call pending with no lane under it.
   subruns : Array[@transcript.SubrunLane]
   usage_tokens : Int
-  // Exclusive lower bound for this run's terminal. `None` means the run began
-  // while transcript history was unresolved; steering stays gated rather than
-  // attaching a local notice to an unprovable boundary.
-  durable_floor : Int?
-  // The first snapshot generation issued after a foreign Started. An older
-  // in-flight snapshot may drain commits but cannot establish the new run's
-  // floor; only this causal read (or a later one) may release commit-based
-  // floor discovery.
-  floor_generation : Int?
 } derive(Eq)
 
 ///|
 /// The state a turn starts from. A conversation with no run open holds one
 /// too: every field means "nothing observed".
 fn RunState::empty() -> RunState {
-  {
-    streaming_response: "",
-    subruns: [],
-    usage_tokens: 0,
-    durable_floor: None,
-    floor_generation: None,
-  }
+  { streaming_response: "", subruns: [], usage_tokens: 0 }
 }
 
 ///|
@@ -783,36 +768,6 @@ fn GoalRequest::settled_by(
 }
 
 ///|
-/// What a local notice belongs to. `Retained` notices are final text with no
-/// owner; a `RunDiagnostic` follows its run so an exact durable frontier can
-/// place it. No notice is tied to a submission any more — a submitted input
-/// is sent once and the transcript, not a placeholder, reports its fate.
-priv enum NoticeReconciliation {
-  Retained
-  RunDiagnostic(String)
-} derive(Eq)
-
-///|
-/// Where a client-local notice sits in the durable chronology. `TerminalTail`
-/// waits for a run whose semantic finish guarantees a durable Terminal.
-/// Once another run starts, only a causal full snapshot may locate that old
-/// terminal: its commit may already have passed before the notice existed, so
-/// a later live terminal could belong to the successor. `SnapshotCut` waits
-/// for a full read started after the uncertain lifecycle transition, then
-/// fixes the notice at that read's display boundary without claiming any item
-/// inside it. Bare `UncertainTail` has neither a terminal nor a scheduled cut
-/// and therefore never claims an anonymous durable event. `DurableTail` names
-/// an exact final sequence learned from the host's EOF scan.
-priv enum NoticeAnchor {
-  AfterMessages(Int)
-  TerminalTail(Int?)
-  PriorTerminalTail(floor~ : Int, snapshot_generation~ : Int)
-  SnapshotCut(snapshot_generation~ : Int)
-  UncertainTail
-  DurableTail(Int)
-} derive(Eq)
-
-///|
 /// One steer submitted into an open run and awaiting its id-bearing receipt.
 /// The globally unique `submission_id` is the only ownership proof: canonical
 /// transcript text and legacy receipts without an id never settle this entry.
@@ -838,14 +793,17 @@ priv struct PendingPrompt {
 } derive(Eq)
 
 ///|
-/// One non-durable transcript notice at a durable chronology boundary.
+/// One client-local transcript notice: text no durable event will ever carry,
+/// reporting a request the host or engine definitively refused. It renders at
+/// the display boundary it was created at, and is never retracted — nothing in
+/// the record can contradict a refusal that kept the record from changing.
 priv struct LocalNotice {
   // Renderer identity only; never serialized or compared with durable events.
   id : Int
   kind : @transcript.ItemKind
   content : String
-  anchor : NoticeAnchor
-  reconciliation : NoticeReconciliation
+  // How many durable messages preceded this notice when it was appended.
+  after_messages : Int
 } derive(Eq)
 
 ///|
@@ -2886,8 +2844,7 @@ fn Model::can_reload_transcript(self : Model, conv : Conversation) -> Bool {
     // is the only way to find out. Without this a `/goal` on an otherwise
     // empty conversation has nothing else to reload for, so the request
     // would wait for a snapshot that is never asked for.
-    conv.awaits_durable_proof() ||
-    conv.overlay.iter().any(notice => notice.anchor is SnapshotCut(..)) {
+    conv.awaits_durable_proof() {
     return true
   }
   match self.device_state(conv.device) {
@@ -3280,98 +3237,19 @@ fn Conversation::clear_streams(self : Conversation) -> Conversation {
 }
 
 ///|
-/// Append one client-local notice at the current durable chronology boundary.
-fn Conversation::append_notice(
-  self : Conversation,
-  kind : @transcript.ItemKind,
-  content : String,
-  reconciliation : NoticeReconciliation,
-) -> Conversation {
-  let id = self.next_notice_id + 1
-  let overlay = self.overlay.copy()
-  overlay.push({
-    id,
-    kind,
-    content,
-    anchor: AfterMessages(self.messages.length()),
-    reconciliation,
-  })
-  { ..self, overlay, next_notice_id: id }
-}
-
-///|
-/// Choose the only safe chronology proof for a run-finish notice. A
-/// terminal-backed finish waits for the post-Finished snapshot generation;
-/// every other status remains anonymous until the host supplies an exact
-/// durable boundary.
-fn Conversation::run_tail_notice_anchor(
-  self : Conversation,
-  terminal_expected? : Bool = true,
-  terminal_snapshot_generation? : Int,
-) -> NoticeAnchor {
-  if terminal_expected {
-    match (self.turn.durable_floor, terminal_snapshot_generation) {
-      (Some(floor), Some(snapshot_generation)) =>
-        PriorTerminalTail(floor~, snapshot_generation~)
-      (None, Some(snapshot_generation)) => SnapshotCut(snapshot_generation~)
-      _ => TerminalTail(self.turn.durable_floor)
-    }
-  } else {
-    match terminal_snapshot_generation {
-      Some(snapshot_generation) => SnapshotCut(snapshot_generation~)
-      None => UncertainTail
-    }
-  }
-}
-
-///|
-/// Append a provisional submission notice that follows this run's durable
-/// tail until its terminal boundary commits.
-fn Conversation::append_run_tail_notice(
-  self : Conversation,
-  kind : @transcript.ItemKind,
-  content : String,
-  reconciliation : NoticeReconciliation,
-  terminal_expected? : Bool = true,
-  terminal_snapshot_generation? : Int,
-) -> Conversation {
-  let id = self.next_notice_id + 1
-  let overlay = self.overlay.copy()
-  let anchor = self.run_tail_notice_anchor(
-    terminal_expected~,
-    terminal_snapshot_generation?,
-  )
-  overlay.push({ id, kind, content, anchor, reconciliation })
-  { ..self, overlay, next_notice_id: id }
-}
-
-///|
-/// Append a retained local notice. Live semantic events with durable twins
-/// never pass through here on their way to a commit.
+/// Append one client-local notice at the current display boundary. Live
+/// semantic events with durable twins never pass through here on their way to
+/// a commit; only definitive refusals do, and a refusal is final the moment it
+/// is made.
 fn Conversation::append_local_notice(
   self : Conversation,
   kind : @transcript.ItemKind,
   content : String,
 ) -> Conversation {
-  self.append_notice(kind, content, Retained)
-}
-
-///|
-/// A host process diagnostic is local-only, but its display position belongs
-/// after that process's durable EOF frontier. Keep the run id as reconciliation
-/// identity so Finished/agent.durable can place it even while transcript
-/// commits are buffered behind a snapshot.
-fn Conversation::append_run_diagnostic(
-  self : Conversation,
-  run_id : String,
-  content : String,
-) -> Conversation {
-  self.append_run_tail_notice(
-    Assistant(is_danger=true),
-    content,
-    RunDiagnostic(run_id),
-    terminal_expected=false,
-  )
+  let id = self.next_notice_id + 1
+  let overlay = self.overlay.copy()
+  overlay.push({ id, kind, content, after_messages: self.messages.length() })
+  { ..self, overlay, next_notice_id: id }
 }
 
 ///|
@@ -3435,57 +3313,6 @@ fn Conversation::has_initial_submission(
   submission_id : String,
 ) -> Bool {
   self.pending_prompt is Some(pending) && pending.submission_id == submission_id
-}
-
-///|
-/// Place a retained process diagnostic at the exact EOF frontier supplied by
-/// Finished/agent.durable. It belongs to its run rather than to a submission,
-/// and is never retracted.
-fn Conversation::anchor_run_diagnostics_at_durable_frontier(
-  self : Conversation,
-  run_id : String,
-  frontier : Int,
-) -> Conversation {
-  let anchor = if frontier == self.watermark {
-    AfterMessages(self.messages.length())
-  } else {
-    DurableTail(frontier)
-  }
-  let overlay = self.overlay.map(notice => {
-    match notice.reconciliation {
-      RunDiagnostic(owner) if owner == run_id => { ..notice, anchor, }
-      _ => notice
-    }
-  })
-  { ..self, overlay, }
-}
-
-///|
-/// When the exact EOF sequence trails Finished, arm a process diagnostic for
-/// the same causal snapshot rule as other run-tail notices. Duplicate
-/// lifecycle messages cannot rewrite an already exact/frozen placement.
-fn Conversation::anchor_run_diagnostics_at_finish(
-  self : Conversation,
-  run_id : String,
-  terminal_expected : Bool,
-  terminal_snapshot_generation? : Int,
-) -> Conversation {
-  let anchor = self.run_tail_notice_anchor(
-    terminal_expected~,
-    terminal_snapshot_generation?,
-  )
-  let overlay = self.overlay.map(notice => {
-    let replace = notice.anchor is UncertainTail ||
-      (terminal_expected && notice.anchor is SnapshotCut(..))
-    if replace &&
-      notice.reconciliation is RunDiagnostic(owner) &&
-      owner == run_id {
-      { ..notice, anchor, }
-    } else {
-      notice
-    }
-  })
-  { ..self, overlay, }
 }
 
 ///|
@@ -3742,8 +3569,6 @@ fn Conversation::append_local_notice_once(
 }
 
 ///|
-
-///|
 /// Interleave local notices at their creation boundary. Future durable turns
 /// therefore render after an older failure instead of pushing it to the tail.
 fn Conversation::visible_items(
@@ -3755,7 +3580,7 @@ fn Conversation::visible_items(
     let visible : Array[@transcript.TranscriptItem] = []
     for index in 0..<self.messages.length() {
       for notice in self.overlay {
-        if notice.anchor is AfterMessages(boundary) && boundary == index {
+        if notice.after_messages == index {
           visible.push({
             kind: notice.kind,
             content: notice.content,
@@ -3766,214 +3591,20 @@ fn Conversation::visible_items(
       }
       visible.push(self.messages[index])
     }
+    // A notice created past the current end of the transcript still belongs at
+    // the tail: a snapshot may have replaced the messages it was created over.
     for notice in self.overlay {
-      match notice.anchor {
-        TerminalTail(_)
-        | PriorTerminalTail(..)
-        | SnapshotCut(..)
-        | UncertainTail
-        | DurableTail(_) =>
-          visible.push({
-            kind: notice.kind,
-            content: notice.content,
-            ts: None,
-            sequence: None,
-          })
-        AfterMessages(boundary) if boundary >= self.messages.length() =>
-          visible.push({
-            kind: notice.kind,
-            content: notice.content,
-            ts: None,
-            sequence: None,
-          })
-        _ => ()
+      if notice.after_messages >= self.messages.length() {
+        visible.push({
+          kind: notice.kind,
+          content: notice.content,
+          ts: None,
+          sequence: None,
+        })
       }
     }
     visible
   }
-}
-
-///|
-/// A run-tail or abnormal-EOF notice still lacks a proven chronology boundary.
-/// Local submission waits rather than letting a later run make an older
-/// missing boundary look like the notice's owner. A bare `UncertainTail`
-/// never claims a durable event and has no proof left to wait for; the synced
-/// transcript gate is sufficient once its causal recovery read has completed.
-fn Conversation::has_unresolved_run_tail_notice(self : Conversation) -> Bool {
-  self.overlay
-  .iter()
-  .any(notice => {
-    match notice.anchor {
-      TerminalTail(_)
-      | PriorTerminalTail(..)
-      | SnapshotCut(..)
-      | DurableTail(_) => true
-      _ => false
-    }
-  })
-}
-
-///|
-/// A different run began before older run-tail notices were placed. A normal
-/// semantic finish guarantees that its Terminal was durable before Started,
-/// so a post-Started full snapshot can still locate the earliest terminal
-/// above its floor. An uncertain finish has no such proof and loses its floor
-/// immediately; otherwise the successor's terminal could claim it.
-fn Conversation::prepare_tail_notices_for_successor(
-  self : Conversation,
-  snapshot_generation : Int,
-) -> Conversation {
-  let overlay = self.overlay.map(notice => {
-    match notice.anchor {
-      TerminalTail(Some(floor)) =>
-        { ..notice, anchor: PriorTerminalTail(floor~, snapshot_generation~) }
-      TerminalTail(None) | UncertainTail =>
-        { ..notice, anchor: SnapshotCut(snapshot_generation~) }
-      SnapshotCut(_) => { ..notice, anchor: SnapshotCut(snapshot_generation~) }
-      _ => notice
-    }
-  })
-  { ..self, overlay, }
-}
-
-///|
-/// Freeze a current terminal-backed notice whose exclusive sequence floor is
-/// crossed by this durable terminal. `PriorTerminalTail` deliberately does
-/// not match live commits, while `UncertainTail` never matches any anonymous
-/// terminal: either could otherwise claim a successor's terminal.
-fn Conversation::freeze_run_tail_notices_at_terminal(
-  self : Conversation,
-  terminal_sequence : Int,
-  boundary : Int,
-) -> Conversation {
-  let overlay = self.overlay.map(notice => {
-    match notice.anchor {
-      TerminalTail(Some(floor)) if terminal_sequence > floor =>
-        { ..notice, anchor: AfterMessages(boundary) }
-      _ => notice
-    }
-  })
-  { ..self, overlay, }
-}
-
-///|
-/// Reconcile terminal-backed notices when a snapshot has already absorbed
-/// their terminal commits. An uncertain run is intentionally excluded: if it
-/// had no Terminal, the first one above its floor could belong to an entirely
-/// missed successor run. `event_boundaries` identifies terminals and carries
-/// each projected end because a deduplicated finished terminal may add no
-/// display item.
-fn Conversation::freeze_run_tail_notices_from_snapshot(
-  self : Conversation,
-  event_boundaries : Array[(Int, Bool, Int)],
-  generation : Int,
-) -> Conversation {
-  let overlay = self.overlay.map(notice => {
-    let floor = match notice.anchor {
-      TerminalTail(Some(floor)) => Some(floor)
-      PriorTerminalTail(floor~, snapshot_generation~) if generation >=
-        snapshot_generation => Some(floor)
-      _ => None
-    }
-    match floor {
-      Some(floor) => {
-        for event in event_boundaries {
-          let (sequence, is_terminal, boundary) = event
-          if is_terminal && sequence > floor {
-            return { ..notice, anchor: AfterMessages(boundary) }
-          }
-        }
-        notice
-      }
-      _ => notice
-    }
-  })
-  { ..self, overlay, }
-}
-
-///|
-/// A gap-free snapshot whose read began after an uncertain lifecycle event is
-/// a safe display fence even though it cannot identify which stored items
-/// belong to that run. Anchor at the snapshot cut itself, before commits that
-/// arrived later and were drained from the live buffer.
-fn Conversation::freeze_snapshot_cut_notices_from_snapshot(
-  self : Conversation,
-  generation : Int,
-  boundary : Int,
-) -> Conversation {
-  let overlay = self.overlay.map(notice => {
-    match notice.anchor {
-      SnapshotCut(snapshot_generation~) if generation >= snapshot_generation =>
-        { ..notice, anchor: AfterMessages(boundary) }
-      _ => notice
-    }
-  })
-  { ..self, overlay, }
-}
-
-///|
-/// A causal, gap-free snapshot should contain every terminal guaranteed before
-/// its Started boundary. If it does not, stop matching that notice rather than
-/// letting a future run's terminal claim it. The snapshot itself is still a
-/// safe observation fence; exact-id ownership remains, so a later receipt can
-/// retract the notice and `agent.durable` can still move it to an exact cut.
-fn Conversation::abandon_missing_prior_terminals(
-  self : Conversation,
-  generation : Int,
-  boundary : Int,
-) -> Conversation {
-  let overlay = self.overlay.map(notice => {
-    match notice.anchor {
-      PriorTerminalTail(snapshot_generation~, ..) if generation >=
-        snapshot_generation => { ..notice, anchor: AfterMessages(boundary) }
-      _ => notice
-    }
-  })
-  { ..self, overlay, }
-}
-
-///|
-/// Resolve abnormal-EOF notices when their exact final sequence is applied
-/// incrementally. Unlike a normal finish, the boundary event may be a User,
-/// assistant, tool result, or no-op projection rather than a Terminal.
-fn Conversation::freeze_durable_tail_notices_at_commit(
-  self : Conversation,
-  sequence : Int,
-  boundary : Int,
-) -> Conversation {
-  let overlay = self.overlay.map(notice => {
-    match notice.anchor {
-      DurableTail(frontier) if sequence == frontier =>
-        { ..notice, anchor: AfterMessages(boundary) }
-      _ => notice
-    }
-  })
-  { ..self, overlay, }
-}
-
-///|
-/// Resolve the same exact sequence when a snapshot has already absorbed the
-/// buffered commit. Every stored event carries its projected end, including
-/// events that add no visible item.
-fn Conversation::freeze_durable_tail_notices_from_snapshot(
-  self : Conversation,
-  event_boundaries : Array[(Int, Bool, Int)],
-) -> Conversation {
-  let overlay = self.overlay.map(notice => {
-    match notice.anchor {
-      DurableTail(frontier) => {
-        for event in event_boundaries {
-          let (sequence, _, boundary) = event
-          if sequence == frontier {
-            return { ..notice, anchor: AfterMessages(boundary) }
-          }
-        }
-        notice
-      }
-      _ => notice
-    }
-  })
-  { ..self, overlay, }
 }
 
 ///|
@@ -4018,17 +3649,6 @@ fn Conversation::apply_commit(
     } else {
       self.goal_pending
     },
-    turn: {
-      ..self.turn,
-      durable_floor: if !(self.run is NoRun(..)) &&
-        self.turn.durable_floor is None &&
-        self.turn.floor_generation is None &&
-        !terminal {
-        Some(self.last_terminal_sequence)
-      } else {
-        self.turn.durable_floor
-      },
-    },
     last_terminal_sequence: if terminal &&
       sequence > self.last_terminal_sequence {
       sequence
@@ -4036,15 +3656,6 @@ fn Conversation::apply_commit(
       self.last_terminal_sequence
     },
   }
-  let conv = if terminal {
-    conv.freeze_run_tail_notices_at_terminal(sequence, messages.length())
-  } else {
-    conv
-  }
-  let conv = conv.freeze_durable_tail_notices_at_commit(
-    sequence,
-    messages.length(),
-  )
   (changed, conv)
 }
 
@@ -4194,70 +3805,37 @@ fn Conversation::adopt_snapshot(
   }
   // Sequence order, whatever the arrival order was.
   pending.sort_by((a, b) => a.sequence - b.sequence)
-  let snapshot_boundary = items.length()
+  let mut last_terminal_sequence = self.last_terminal_sequence
+  for boundary in event_boundaries {
+    let (sequence, is_terminal, _) = boundary
+    if is_terminal && sequence > last_terminal_sequence {
+      last_terminal_sequence = sequence
+    }
+  }
+  let reconciled = {
+    ..self,
+    last_terminal_sequence,
+    // The snapshot's reduced standing goal replaces the mirror wholesale;
+    // buffered commits newer than the snapshot fold on top below through
+    // `apply_commit`.
+    goal,
+    // A complete durable read is as good a settling point as a marker: if
+    // the goal it reduces to is already what a request in flight asked
+    // for, that request has nothing left to wait for. This is what ends
+    // the wait after a delivery whose reply never came back — the reload
+    // that follows a reconnect answers the question the transport could
+    // not. A snapshot that does *not* show it settles nothing: the append
+    // may still be queued behind this read.
+    goal_pending: if self.goal_pending is Some(pending) &&
+      pending.request.settled_by(pending.since, goal_markers) {
+      None
+    } else {
+      self.goal_pending
+    },
+  }
   // This one local notice represents the reload state itself, so a current
   // successful snapshot clears it by exact identity. Every unrelated local
   // notice survives unchanged.
-  let mut last_terminal_sequence = self.last_terminal_sequence
-  let mut snapshot_terminal_sequence = 0
-  let mut snapshot_terminal_boundary = 0
-  for boundary in event_boundaries {
-    let (sequence, is_terminal, item_count) = boundary
-    if is_terminal && sequence > snapshot_terminal_sequence {
-      snapshot_terminal_sequence = sequence
-      snapshot_terminal_boundary = item_count
-      if sequence > last_terminal_sequence {
-        last_terminal_sequence = sequence
-      }
-    }
-  }
-  let floor_snapshot_is_causal = match self.turn.floor_generation {
-    Some(required) => generation >= required
-    None => true
-  }
-  let reconciled = {
-      ..self,
-      last_terminal_sequence,
-      // The snapshot's reduced standing goal replaces the mirror wholesale;
-      // buffered commits newer than the snapshot fold on top below through
-      // `apply_commit`.
-      goal,
-      // A complete durable read is as good a settling point as a marker: if
-      // the goal it reduces to is already what a request in flight asked
-      // for, that request has nothing left to wait for. This is what ends
-      // the wait after a delivery whose reply never came back — the reload
-      // that follows a reconnect answers the question the transport could
-      // not. A snapshot that does *not* show it settles nothing: the append
-      // may still be queued behind this read.
-      goal_pending: if self.goal_pending is Some(pending) &&
-        pending.request.settled_by(pending.since, goal_markers) {
-        None
-      } else {
-        self.goal_pending
-      },
-      // A foreign/mid-run Started intentionally leaves the floor unknown. It
-      // becomes steerable only when the snapshot visibly has current-run data
-      // after its last terminal; a snapshot ending at a terminal may instead
-      // have beaten the lifecycle Finished event and proves no open floor.
-      turn: {
-        ..self.turn,
-        durable_floor: if !(self.run is NoRun(..)) &&
-          self.turn.durable_floor is None &&
-          floor_snapshot_is_causal &&
-          items.length() > snapshot_terminal_boundary {
-          Some(snapshot_terminal_sequence)
-        } else {
-          self.turn.durable_floor
-        },
-        floor_generation: if floor_snapshot_is_causal {
-          None
-        } else {
-          self.turn.floor_generation
-        },
-      },
-    }
-    .freeze_run_tail_notices_from_snapshot(event_boundaries, generation)
-    .freeze_durable_tail_notices_from_snapshot(event_boundaries)
   let overlay = reconciled.overlay.filter(item => {
     item.content != TranscriptRefreshFailedNotice
   })
@@ -4285,30 +3863,8 @@ fn Conversation::adopt_snapshot(
     }
   }
   if leftover.is_empty() {
-    // Only a complete causal cut may give up on a supposedly guaranteed old
-    // terminal. Do this after the ordered buffer has drained; a gap schedules
-    // another snapshot and must keep every proof obligation intact.
-    (
-      conv
-      .freeze_snapshot_cut_notices_from_snapshot(generation, snapshot_boundary)
-      .abandon_missing_prior_terminals(generation, snapshot_boundary),
-      false,
-    )
+    (conv, false)
   } else {
-    let conv = if !(conv.run is NoRun(..)) {
-      {
-        ..conv,
-        turn: {
-          ..conv.turn,
-          durable_floor: None,
-          // The incomplete cut cannot establish this open run's predecessor.
-          // The retry generation is necessarily newer than this one.
-          floor_generation: Some(generation + 1),
-        },
-      }
-    } else {
-      conv
-    }
     ({ ..conv, sync: ReloadFailed(generation~, buffered=leftover) }, true)
   }
 }

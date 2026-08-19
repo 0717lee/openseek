@@ -1908,23 +1908,20 @@ async fn ServeEngine::run(
             // that run with its only available diagnostics.
             Running(run_id~, compact_queued~, ..) => {
               engine.phase = engine.phase.to_idle()
+              // The stderr tail travels in `diagnostics` only. Repeating it in
+              // `message` made every client that renders both print it twice.
               let diagnostics = stderr_task.wait().trim().to_owned()
-              if diagnostics.is_empty() {
-                emit_error(
-                  sink,
-                  "engine exited without a result",
-                  run_id~,
-                  exit_code=code,
-                )
-              } else {
-                emit_error(
-                  sink,
-                  "engine exited without a result:\n\{diagnostics}",
-                  run_id~,
-                  exit_code=code,
-                  diagnostics~,
-                )
-              }
+              emit_error(
+                sink,
+                "engine exited without a result",
+                run_id~,
+                exit_code=code,
+                diagnostics?=if diagnostics.is_empty() {
+                  None
+                } else {
+                  Some(diagnostics)
+                },
+              )
               emit_finished(
                 sink,
                 run_id,
