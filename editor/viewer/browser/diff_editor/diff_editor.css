@@ -21,6 +21,14 @@
     var(--vscode-diffEditor-border, var(--vscode-editorWidget-border));
 }
 
+.moonbit-diff-editor-unified .moonbit-diff-editor-original {
+  display: none;
+}
+
+.moonbit-diff-editor-unified .moonbit-diff-editor-modified {
+  flex-basis: 100%;
+}
+
 .moonbit-diff-editor .diff-editor-line-delete {
   background: var(--vscode-diffEditor-removedLineBackground, #ff000033);
 }
@@ -47,4 +55,48 @@
 
 .moonbit-diff-editor .diff-editor-alignment-zone {
   background: var(--vscode-diffEditor-diagonalFill, transparent);
+}
+
+.moonbit-diff-editor .diff-editor-unified-deleted-block,
+.moonbit-diff-editor .diff-editor-unified-deleted-margin {
+  box-sizing: border-box;
+  overflow: hidden;
+  color: var(--vscode-editor-foreground);
+  background: var(--vscode-diffEditor-removedLineBackground, #ff000033);
+  font-family: var(--editor-font-family);
+  font-size: var(--editor-font-size);
+  font-variant-ligatures: none;
+}
+
+.moonbit-diff-editor .diff-editor-unified-deleted-line,
+.moonbit-diff-editor .diff-editor-unified-deleted-line-number {
+  box-sizing: border-box;
+  height: var(--editor-line-height);
+  line-height: var(--editor-line-height);
+}
+
+.moonbit-diff-editor .diff-editor-unified-deleted-line {
+  min-width: max-content;
+  white-space: pre;
+}
+
+.moonbit-diff-editor .diff-editor-unified-deleted-line[data-empty-line="true"]::after {
+  content: "\00a0";
+}
+
+.moonbit-diff-editor .diff-editor-unified-deleted-line-number {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding-right: 12px;
+  color: var(--vscode-editorLineNumber-foreground);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.moonbit-diff-editor .diff-editor-unified-deleted-line-number::before {
+  content: "−";
+  color: var(--vscode-editorGutter-deletedBackground, #c84a4a);
+  font-weight: 700;
 }

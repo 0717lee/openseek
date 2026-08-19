@@ -204,14 +204,18 @@ js-only. Concrete browser runtime packages live below the module-private
   DiffViewer installs two ordinary child Viewers into one stable caller-owned
   host, borrows the two caller-owned models, and shares one explicit
   `ViewerServices` bundle. The root coordinator is the only owner of diff
-  mappings, whole-line decoration ids, alignment ViewZone ids, model-change
-  subscriptions, and coupled scroll subscriptions. Phase one fixes both child
-  panes to unwrapped, unfolded code presentations (including raw `.md` source);
-  the corresponding height deficit from each `viewer/common/diff` mapping
-  becomes a ViewZone after the shorter range. Language and feedback behavior
-  stays model-scoped in the ordinary Viewer path. Hosts own revision routing:
-  a historical model must not match a provider that can answer only for the
-  live checkout. The stylesheet source is
+  mappings, line/character decoration ids, ViewZone ids, model-change
+  subscriptions, render mode, and coupled scroll subscriptions. Both children
+  stay unwrapped, unfolded code presentations (including raw `.md` source).
+  `SideBySide` turns each mapping's height deficit into an alignment ViewZone
+  after the shorter range. `Unified` hides only the original presentation and
+  projects tokenized original deletion lines into the full-width modified
+  Viewer as content/margin ViewZones; modified lines retain their ordinary
+  Viewer decorations and interactions. `set_render_mode` rebuilds only those
+  coordinator-owned artifacts, so models and modified view state remain
+  installed. Language and feedback behavior stays model-scoped in the ordinary
+  Viewer path. Hosts own revision routing: a historical model must not match a
+  provider that can answer only for the live checkout. The stylesheet source is
   `viewer/browser/diff_editor/diff_editor.css`.
 - `viewer` retains the independent opaque `UnifiedDiffView` compatibility
   facade. It accepts bounded caller-owned strings and eagerly renders the

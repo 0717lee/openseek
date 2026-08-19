@@ -173,8 +173,16 @@ fn compile_external_viewer_api_contract(
   // The diff facade is the same external composition over two borrowed
   // models and one optionally shared service bundle.
   let diff_host = @rdom.document().create_element("div")
-  let diff_viewer = @viewer.DiffViewer::create(diff_host, services~, options~)
+  let diff_viewer = @viewer.DiffViewer::create(
+    diff_host,
+    services~,
+    options~,
+    render_mode=SideBySide,
+  )
+  diff_viewer.get_render_mode() |> ignore
+  diff_viewer.set_render_mode(Unified)
   diff_viewer.set_model(Some(DiffEditorModel(model, model)))
+  diff_viewer.set_render_mode(SideBySide)
   diff_viewer.get_model() |> ignore
   diff_viewer.layout()
   diff_viewer.clear()

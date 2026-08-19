@@ -46,7 +46,7 @@ fn Doc::quick_diff_original(self : Doc) -> String? {
 }
 
 ///|
-/// The two textual sides available to the side-by-side DiffViewer.
+/// The two textual sides available to the switchable DiffViewer.
 /// Added files use an empty HEAD side and deleted files use an empty working
 /// side. Loading, binary, oversized, and failed reads do not invent text.
 fn Doc::unified_diff_content(self : Doc) -> (String, String)? {
@@ -1794,6 +1794,7 @@ pub fn sync(
         tree_open: state.tree_open,
         explorer_mode: state.explorer_mode,
         review_view_mode: state.review_view_mode,
+        review_diff_layout: state.review_diff_layout,
         // Request tokens must outlive the per-conversation cache. Resetting
         // here would let a late A reply collide after switching A→B→A.
         changes_generation: if placement_identity_changed {
@@ -2080,6 +2081,22 @@ pub fn update(
         ReviewUnifiedDiff => show
       }
       (command, { ..state, docs, review_view_mode: view_mode })
+    }
+    ToggleReviewDiffLayout => {
+      guard ctx.active_file is Some(path) &&
+        state.docs.get(path) is Some(doc) &&
+        doc.review is Some({ view_mode: ReviewUnifiedDiff, .. }) &&
+        doc.unified_diff_content() is Some(_) else {
+        return (@cmd.none, state)
+      }
+      let review_diff_layout = match state.review_diff_layout {
+        ReviewSideBySide => ReviewUnified
+        ReviewUnified => ReviewSideBySide
+      }
+      (
+        apply_review_diff_layout(review_diff_layout),
+        { ..state, review_diff_layout, },
+      )
     }
     ToggleReviewProgress => {
       guard ctx.active_file is Some(path) &&

@@ -11,9 +11,9 @@
 const ViewerHostId = "viewer-host"
 
 ///|
-/// The stable sibling host reserved for the side-by-side DiffViewer. The DOM
-/// id stays compatible with the former unified renderer while the imperative
-/// owner and contents migrate in place.
+/// The stable sibling host reserved for the switchable DiffViewer. The DOM id
+/// stays compatible with the former eager unified renderer while the
+/// imperative owner and contents migrate in place.
 const DiffViewerHostId = "unified-diff-host"
 
 ///|
@@ -44,6 +44,9 @@ priv struct ViewerHost {
   // the source model, selection, folding, and scroll state. The comparison
   // itself is composed from two ordinary Viewers.
   mut diff_viewer : @viewer.DiffViewer?
+  // Desired full-comparison layout survives a pre-mount command in the same
+  // way font settings do for the source Viewer.
+  mut diff_render_mode : @viewer.DiffEditorRenderMode
   // A positioned transcript link keeps its caret collapsed at the requested
   // column. This persistent whole-line decoration makes the destination visible
   // without turning the line into a selection and opening Comment UI. Symbol
@@ -88,6 +91,7 @@ priv struct ViewerHost {
 let viewer_state : ViewerHost = {
   viewer: None,
   diff_viewer: None,
+  diff_render_mode: @viewer.SideBySide,
   point_range_highlight: None,
   services: None,
   absolute: None,
@@ -241,12 +245,29 @@ fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
             diff_host,
             services=services.viewer_services,
             options=@viewer.ViewerOptions(theme="light"),
+            render_mode=viewer_state.diff_render_mode,
           ),
         )
       }
     },
     kind=@cmd.after_render,
   )
+}
+
+///|
+/// Retain and apply the panel's split/unified preference without replacing the
+/// comparison models or either ordinary child Viewer.
+fn apply_review_diff_layout(layout : ReviewDiffLayout) -> @cmd.Cmd {
+  @cmd.custom_cmd(_scheduler => {
+    let render_mode = match layout {
+      ReviewSideBySide => @viewer.SideBySide
+      ReviewUnified => @viewer.Unified
+    }
+    viewer_state.diff_render_mode = render_mode
+    if viewer_state.diff_viewer is Some(diff_viewer) {
+      diff_viewer.set_render_mode(render_mode)
+    }
+  })
 }
 
 ///|
@@ -536,7 +557,7 @@ fn show_transient_navigation_target_highlight(
 /// `review_original`, when present, is the Git HEAD baseline used by the
 /// Viewer's quick-diff contribution. An empty string is meaningful for a new
 /// file; omission clears any earlier baseline for this resource. A unified
-/// pair, when present, is rendered by the sibling side-by-side DiffViewer while
+/// pair, when present, is rendered by the sibling switchable DiffViewer while
 /// the source Viewer remains mounted. Every show is followed by an after-render
 /// layout pass: either sibling host may have just left `display: none`, where
 /// its child Viewer could only measure Monaco's 5px minimum.

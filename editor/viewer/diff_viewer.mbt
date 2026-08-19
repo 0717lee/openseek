@@ -1,15 +1,33 @@
-// The first production slice of Monaco's standalone diff editor: two normal
-// Viewer instances coordinated by line-level diff state. The child Viewers
+// Monaco's standalone diff-editor composition: two normal Viewer instances
+// coordinated by line-level diff state. Side-by-side mode shows both children;
+// unified mode keeps the modified child as the interactive editor and projects
+// deleted original lines into it as tokenized ViewZones. The child Viewers
 // deliberately remain ordinary editors so every model-scoped contribution
 // (tokenization, hover, Definition/Peek, selection, feedback) follows the
-// existing Viewer path. This owner adds only comparison state: whole-line
-// decorations, alignment ViewZones, and vertical/horizontal scroll
-// synchronization.
+// existing Viewer path.
 //
-// Remaining exclusions are explicit: no moved blocks, inline mode, revert
-// actions, unchanged-region collapsing, or overview ruler. Soft wrapping and
-// folding are disabled in the child panes because fixed-height logical lines
-// are the invariant behind the current ViewZone alignment algorithm.
+// Remaining exclusions are explicit: no moved blocks, true-inline single-line
+// rendering, revert actions, unchanged-region collapsing, or overview ruler.
+// Soft wrapping and folding are disabled in the child panes because
+// fixed-height logical lines are the invariant behind both ViewZone layouts.
+
+///|
+/// The presentation selected for one DiffViewer. Both modes retain the same
+/// two models and ordinary child Viewers; changing this value is a rendering
+/// operation, not a model swap.
+pub(all) enum DiffEditorRenderMode {
+  SideBySide
+  Unified
+} derive(Eq, Debug)
+
+///|
+/// A model-line viewport anchor retained while coordinator-owned ViewZones are
+/// rebuilt. Content-space line tops change between render modes, while this
+/// line's pixel position relative to the viewport must not.
+priv struct DiffViewportAnchor {
+  line_number : Int
+  viewport_offset : Double
+}
 
 ///|
 /// The two caller-owned text models displayed by a DiffViewer. Like Monaco's
@@ -29,15 +47,19 @@ pub fn DiffEditorModel::DiffEditorModel(
 }
 
 ///|
-/// A side-by-side diff surface composed from two ordinary Viewer instances.
+/// A switchable diff surface composed from two ordinary Viewer instances.
 /// The caller owns `host` and must keep it stable and otherwise child-free.
 struct DiffViewer {
   host : @rdom.Element
   root : @rdom.Element
+  original_host : @rdom.Element
+  modified_host : @rdom.Element
   original_viewer : Viewer
   modified_viewer : Viewer
   owned_services : ViewerServices?
+  mut render_mode : DiffEditorRenderMode
   mut resize_observer : @base_common.Disposable?
+  mut viewport_restore_frame : @base_common.Disposable?
   scroll_disposables : Array[@base_common.Disposable]
   model_disposables : Array[@base_common.Disposable]
   mut original_decoration_ids : Array[String]
@@ -59,6 +81,7 @@ pub fn DiffViewer::create(
   host : @rdom.Element,
   services? : ViewerServices,
   options? : ViewerOptions = ViewerOptions::default(),
+  render_mode? : DiffEditorRenderMode = SideBySide,
 ) -> DiffViewer {
   let document = @rdom.document()
   let root = document.create_element("section")
@@ -100,10 +123,14 @@ pub fn DiffViewer::create(
   let diff_viewer : DiffViewer = {
     host,
     root,
+    original_host,
+    modified_host,
     original_viewer,
     modified_viewer,
     owned_services,
+    render_mode,
     resize_observer: None,
+    viewport_restore_frame: None,
     scroll_disposables: [],
     model_disposables: [],
     original_decoration_ids: [],
@@ -112,12 +139,13 @@ pub fn DiffViewer::create(
     modified_zone_ids: [],
     disposed: false,
   }
+  diff_viewer.apply_render_mode_dom()
   diff_viewer.scroll_disposables.push(
     original_viewer.on_did_scroll_change(event => {
-      if event.scroll_top_changed {
+      if diff_viewer.render_mode == SideBySide && event.scroll_top_changed {
         diff_viewer.sync_scroll_top_to(modified_viewer, event.scroll_top)
       }
-      if event.scroll_left_changed {
+      if diff_viewer.render_mode == SideBySide && event.scroll_left_changed {
         diff_viewer.sync_scroll_left_to(modified_viewer, event.scroll_left)
       }
     }),
@@ -164,6 +192,7 @@ pub fn DiffViewer::set_model(
   if self.disposed {
     return
   }
+  self.cancel_modified_viewport_restore()
   self.dispose_model_disposables()
   self.clear_diff_artifacts()
   match diff_model {
@@ -176,6 +205,13 @@ pub fn DiffViewer::set_model(
       self.modified_viewer.set_model(Some(diff_model.modified))
       self.model_disposables.push(
         diff_model.original.on_did_change_content(_ => self.refresh_diff()),
+      )
+      self.model_disposables.push(
+        diff_model.original.on_did_change_tokens(_ => {
+          if self.render_mode == Unified {
+            self.refresh_diff()
+          }
+        }),
       )
       self.model_disposables.push(
         diff_model.modified.on_did_change_content(_ => self.refresh_diff()),
@@ -193,6 +229,107 @@ pub fn DiffViewer::get_model(self : DiffViewer) -> DiffEditorModel? {
   match (self.original_viewer.get_model(), self.modified_viewer.get_model()) {
     (Some(original), Some(modified)) => Some({ original, modified })
     _ => None
+  }
+}
+
+///|
+/// The current comparison presentation.
+pub fn DiffViewer::get_render_mode(self : DiffViewer) -> DiffEditorRenderMode {
+  self.render_mode
+}
+
+///|
+fn DiffViewer::capture_modified_viewport_anchor(
+  self : DiffViewer,
+) -> DiffViewportAnchor? {
+  let visible_ranges = self.modified_viewer.get_visible_ranges()
+  guard !visible_ranges.is_empty() else { return None }
+  let line_number = visible_ranges[0].start_line_number
+  let line_top = self.modified_viewer.get_top_for_line_number(line_number)
+  let scroll_top = self.modified_viewer.get_scroll_top()
+  guard line_top >= 0.0 && scroll_top >= 0.0 else { return None }
+  Some({ line_number, viewport_offset: line_top - scroll_top })
+}
+
+///|
+fn DiffViewer::restore_modified_viewport_anchor(
+  self : DiffViewer,
+  anchor : DiffViewportAnchor?,
+) -> Unit {
+  guard anchor is Some(anchor) else { return }
+  let line_top = self.modified_viewer.get_top_for_line_number(
+    anchor.line_number,
+  )
+  guard line_top >= 0.0 else { return }
+  self.modified_viewer.set_scroll_top(
+    (line_top - anchor.viewport_offset).max(0.0),
+  )
+}
+
+///|
+fn DiffViewer::cancel_modified_viewport_restore(self : DiffViewer) -> Unit {
+  match self.viewport_restore_frame {
+    Some(frame) => frame.dispose()
+    None => ()
+  }
+  self.viewport_restore_frame = None
+}
+
+///|
+/// ViewZone mutations enter the ViewModel queue synchronously but reach
+/// ViewLayout during the Viewer's priority-100 render. Restore later in the
+/// same native frame so the browser never paints the displaced numeric
+/// scrollTop. A later model or mode change cancels this anchor.
+fn DiffViewer::schedule_modified_viewport_restore(
+  self : DiffViewer,
+  anchor : DiffViewportAnchor?,
+) -> Unit {
+  guard anchor is Some(anchor) else { return }
+  let expected_render_mode = self.render_mode
+  self.viewport_restore_frame = Some(
+    @base_browser.run_at_this_or_schedule_at_next_animation_frame(
+      () => {
+        self.viewport_restore_frame = None
+        if self.disposed || self.render_mode != expected_render_mode {
+          return
+        }
+        self.restore_modified_viewport_anchor(Some(anchor))
+      },
+      // Viewer render runs at 100; restoring at 0 observes the committed zone
+      // geometry and still runs before the browser paints this native frame.
+      priority=0,
+    ),
+  )
+}
+
+///|
+/// Switch the existing comparison between two panes and one interleaved pane.
+/// Models, services, selections, and the modified Viewer's scroll state stay
+/// installed. Rebuilding only coordinator-owned decorations and ViewZones also
+/// makes repeated calls idempotent.
+pub fn DiffViewer::set_render_mode(
+  self : DiffViewer,
+  render_mode : DiffEditorRenderMode,
+) -> Unit {
+  if self.disposed || self.render_mode == render_mode {
+    return
+  }
+  self.cancel_modified_viewport_restore()
+  let viewport_anchor = self.capture_modified_viewport_anchor()
+  self.render_mode = render_mode
+  self.apply_render_mode_dom()
+  self.layout()
+  self.refresh_diff()
+  self.schedule_modified_viewport_restore(viewport_anchor)
+  if render_mode == SideBySide {
+    self.sync_scroll_top_to(
+      self.original_viewer,
+      self.modified_viewer.get_scroll_top(),
+    )
+    self.sync_scroll_left_to(
+      self.original_viewer,
+      self.modified_viewer.get_scroll_left(),
+    )
   }
 }
 
@@ -218,6 +355,7 @@ pub fn DiffViewer::dispose(self : DiffViewer) -> Unit {
   if self.disposed {
     return
   }
+  self.cancel_modified_viewport_restore()
   match self.resize_observer {
     Some(observer) => observer.dispose()
     None => ()
@@ -245,6 +383,28 @@ fn DiffViewer::dispose_model_disposables(self : DiffViewer) -> Unit {
     disposable.dispose()
   }
   self.model_disposables.clear()
+}
+
+///|
+fn DiffViewer::apply_render_mode_dom(self : DiffViewer) -> Unit {
+  match self.render_mode {
+    SideBySide => {
+      self.root.set_attribute(
+        "class", "moonbit-diff-editor moonbit-diff-editor-side-by-side",
+      )
+      self.root.set_attribute("data-render-mode", "side-by-side")
+      self.original_host.remove_attribute("aria-hidden")
+      self.modified_host.set_attribute("aria-label", "Modified file")
+    }
+    Unified => {
+      self.root.set_attribute(
+        "class", "moonbit-diff-editor moonbit-diff-editor-unified",
+      )
+      self.root.set_attribute("data-render-mode", "unified")
+      self.original_host.set_attribute("aria-hidden", "true")
+      self.modified_host.set_attribute("aria-label", "Unified diff")
+    }
+  }
 }
 
 ///|
@@ -291,24 +451,6 @@ fn DiffViewer::refresh_diff(self : DiffViewer) -> Unit {
     inner_changes: change.get_inner_changes(),
   })
   let presentation = diff_presentation(changes)
-  let original_decorations = line_decorations(
-    diff_model.original,
-    presentation.original_changed,
-    "diff-editor-line-delete",
-    "diff-editor-gutter-delete",
-    "diff-editor-original-line",
-  )
-  original_decorations.append(
-    inline_decorations(
-      presentation.original_inner_changed,
-      "diff-editor-char-delete",
-      "diff-editor-original-character",
-    ),
-  )
-  self.original_decoration_ids = self.original_viewer.delta_decorations(
-    [],
-    original_decorations,
-  )
   let modified_decorations = line_decorations(
     diff_model.modified,
     presentation.modified_changed,
@@ -327,14 +469,42 @@ fn DiffViewer::refresh_diff(self : DiffViewer) -> Unit {
     [],
     modified_decorations,
   )
-  self.original_zone_ids = install_alignment_zones(
-    self.original_viewer,
-    presentation.original_spacers,
-  )
-  self.modified_zone_ids = install_alignment_zones(
-    self.modified_viewer,
-    presentation.modified_spacers,
-  )
+  match self.render_mode {
+    SideBySide => {
+      let original_decorations = line_decorations(
+        diff_model.original,
+        presentation.original_changed,
+        "diff-editor-line-delete",
+        "diff-editor-gutter-delete",
+        "diff-editor-original-line",
+      )
+      original_decorations.append(
+        inline_decorations(
+          presentation.original_inner_changed,
+          "diff-editor-char-delete",
+          "diff-editor-original-character",
+        ),
+      )
+      self.original_decoration_ids = self.original_viewer.delta_decorations(
+        [],
+        original_decorations,
+      )
+      self.original_zone_ids = install_alignment_zones(
+        self.original_viewer,
+        presentation.original_spacers,
+      )
+      self.modified_zone_ids = install_alignment_zones(
+        self.modified_viewer,
+        presentation.modified_spacers,
+      )
+    }
+    Unified =>
+      self.modified_zone_ids = install_unified_deleted_zones(
+        self.modified_viewer,
+        diff_model.original,
+        changes,
+      )
+  }
 }
 
 ///|
@@ -347,8 +517,8 @@ fn DiffViewer::clear_diff_artifacts(self : DiffViewer) -> Unit {
     self.modified_decoration_ids,
     [],
   )
-  remove_alignment_zones(self.original_viewer, self.original_zone_ids)
-  remove_alignment_zones(self.modified_viewer, self.modified_zone_ids)
+  remove_diff_zones(self.original_viewer, self.original_zone_ids)
+  remove_diff_zones(self.modified_viewer, self.modified_zone_ids)
   self.original_zone_ids = []
   self.modified_zone_ids = []
 }
@@ -513,7 +683,240 @@ fn install_alignment_zones(
 }
 
 ///|
-fn remove_alignment_zones(viewer : Viewer, ids : Array[String]) -> Unit {
+priv struct DiffInlineInterval {
+  start_offset : Int
+  end_offset : Int
+}
+
+///|
+fn deleted_inline_intervals_for_line(
+  ranges : Array[@base_common.Range],
+  line_number : Int,
+  line_length : Int,
+) -> Array[DiffInlineInterval] {
+  let intervals = []
+  for range in ranges {
+    if line_number < range.start_line_number ||
+      line_number > range.end_line_number {
+      continue
+    }
+    let start_offset = (if line_number == range.start_line_number {
+        range.start_column - 1
+      } else {
+        0
+      })
+      .max(0)
+      .min(line_length)
+    let end_offset = (if line_number == range.end_line_number {
+        range.end_column - 1
+      } else {
+        line_length
+      })
+      .max(0)
+      .min(line_length)
+    if start_offset < end_offset {
+      intervals.push({ start_offset, end_offset })
+    }
+  }
+  intervals
+}
+
+///|
+fn append_deleted_line_tokens(
+  row : @rdom.Element,
+  model : @model.TextModel,
+  line_number : Int,
+  inner_ranges : Array[@base_common.Range],
+) -> Unit {
+  let document = @rdom.document()
+  let text = model.get_line_content(line_number)
+  if text.is_empty() {
+    row.set_attribute("data-empty-line", "true")
+    return
+  }
+  let intervals = deleted_inline_intervals_for_line(
+    inner_ranges,
+    line_number,
+    text.length(),
+  )
+  let tokens = model.tokenization.get_line_tokens(line_number).inflate()
+  let token_count = tokens.get_count()
+  let mut token_index = 0
+  let mut offset = 0
+  while offset < text.length() {
+    while token_index + 1 < token_count &&
+          tokens.get_end_offset(token_index) <= offset {
+      token_index += 1
+    }
+    let mut next_offset = if token_count > 0 &&
+      tokens.get_end_offset(token_index) > offset {
+      tokens.get_end_offset(token_index).min(text.length())
+    } else {
+      text.length()
+    }
+    let mut changed = false
+    for interval in intervals {
+      if interval.start_offset <= offset && offset < interval.end_offset {
+        changed = true
+      }
+      if interval.start_offset > offset {
+        next_offset = next_offset.min(interval.start_offset)
+      }
+      if interval.end_offset > offset {
+        next_offset = next_offset.min(interval.end_offset)
+      }
+    }
+    let span = document.create_element("span")
+    let token_class = if token_count > 0 {
+      tokens.get_class_name(token_index)
+    } else {
+      "mtk1"
+    }
+    span.set_attribute(
+      "class",
+      if changed {
+        token_class + " diff-editor-char-delete"
+      } else {
+        token_class
+      },
+    )
+    span.append_child(
+      document
+      .create_text_node(text.unsafe_substring(start=offset, end=next_offset))
+      .as_node(),
+    )
+    row.append_child(span.as_node())
+    offset = next_offset
+  }
+}
+
+///|
+fn original_inner_ranges(change : DiffLineChange) -> Array[@base_common.Range] {
+  let ranges = []
+  match change.inner_changes {
+    Some(inner_changes) =>
+      for inner_change in inner_changes {
+        let (original, _modified) = inner_change
+        if !original.is_empty() {
+          ranges.push(original)
+        }
+      }
+    None => ()
+  }
+  ranges
+}
+
+///|
+fn unified_deleted_zone_anchor(change : DiffLineChange) -> Int {
+  change.modified.start_line_number - 1
+}
+
+///|
+fn deleted_line_visual_columns(text : String, tab_size : Int) -> Int {
+  @core.visible_column_from_column(text, text.length() + 1, tab_size.max(1))
+}
+
+///|
+fn deleted_block_min_width(
+  model : @model.TextModel,
+  range : @base_common.LineRange,
+  tab_size : Int,
+  typical_halfwidth_character_width : Double,
+) -> Double {
+  let mut longest_visual_columns = 0
+  for line_number in range.start_line_number..<range.end_line_number_exclusive {
+    longest_visual_columns = longest_visual_columns.max(
+      deleted_line_visual_columns(model.get_line_content(line_number), tab_size),
+    )
+  }
+  (longest_visual_columns.to_double() *
+  typical_halfwidth_character_width.max(1.0) +
+  24.0).min(1000000.0)
+}
+
+///|
+fn install_unified_deleted_zones(
+  viewer : Viewer,
+  original_model : @model.TextModel,
+  changes : Array[DiffLineChange],
+) -> Array[String] {
+  let ids : Array[String] = []
+  let configuration = viewer.configuration.snapshot()
+  let options = configuration.options
+  viewer.change_view_zones(accessor => {
+    for ordinal, change in changes {
+      guard !change.original.is_empty() else { continue }
+      let document = @rdom.document()
+      let content = document.create_element("div")
+      content.set_attribute("class", "diff-editor-unified-deleted-block")
+      content.set_attribute("role", "group")
+      content.set_attribute(
+        "aria-label",
+        "Deleted lines \{change.original.start_line_number} through \{change.original.end_line_number_exclusive - 1}",
+      )
+      content.set_attribute(
+        "data-original-start-line",
+        change.original.start_line_number.to_string(),
+      )
+      content.set_attribute(
+        "data-original-end-line",
+        (change.original.end_line_number_exclusive - 1).to_string(),
+      )
+      @base_browser.set_style_property(
+        content,
+        "tab-size",
+        options.tab_size.to_string(),
+      )
+      let margin = document.create_element("div")
+      margin.set_attribute("class", "diff-editor-unified-deleted-margin")
+      let inner_ranges = original_inner_ranges(change)
+      for
+        line_number in change.original.start_line_number..<change.original.end_line_number_exclusive {
+        let row = document.create_element("div")
+        row.set_attribute("class", "diff-editor-unified-deleted-line")
+        row.set_attribute("data-original-line", line_number.to_string())
+        append_deleted_line_tokens(
+          row, original_model, line_number, inner_ranges,
+        )
+        content.append_child(row.as_node())
+
+        let line_number_node = document.create_element("div")
+        line_number_node.set_attribute(
+          "class", "diff-editor-unified-deleted-line-number",
+        )
+        line_number_node.append_child(
+          document.create_text_node(line_number.to_string()).as_node(),
+        )
+        margin.append_child(line_number_node.as_node())
+      }
+      ids.push(
+        accessor.add_zone(
+          view_zone(
+            unified_deleted_zone_anchor(change),
+            content,
+            ordinal~,
+            suppress_mouse_down=false,
+            height_in_lines=change.original.length().to_double(),
+            min_width_in_px=deleted_block_min_width(
+              original_model,
+              change.original,
+              options.tab_size,
+              configuration.font_info.typical_halfwidth_character_width,
+            ),
+            margin_dom_node=margin,
+          ),
+        ),
+      )
+      // ViewZones defaults caller content to presentation-only. Deleted source
+      // is meaningful comparison text, so expose this non-interactive block.
+      content.remove_attribute("aria-hidden")
+    }
+  })
+  ids
+}
+
+///|
+fn remove_diff_zones(viewer : Viewer, ids : Array[String]) -> Unit {
   if ids.is_empty() {
     return
   }

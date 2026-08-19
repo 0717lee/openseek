@@ -172,7 +172,7 @@ pub fn body_view(
   state : State,
   ctx : Ctx,
 ) -> @html.Html {
-  // The stable elements the source Viewer and side-by-side DiffViewer attach
+  // The stable elements the source Viewer and switchable DiffViewer attach
   // their imperative DOM into; they must stay empty and never be re-keyed
   // (see editor_panel.mbt).
   // `editor-shell` brings in the viewer's `--vscode-*` / `--editor-*` theme
@@ -810,6 +810,7 @@ pub fn breadcrumb_view(
     @html.div(class="crumb-path", crumbs),
     review_navigation(dispatch, state, ctx),
     review_badge(dispatch, state, ctx),
+    review_diff_layout_toggle(dispatch, state, ctx),
     review_progress(dispatch, state, ctx),
     @html.button(
       class="panel-toggle",
@@ -828,6 +829,46 @@ pub fn breadcrumb_view(
       "viewer-breadcrumb"
     },
     children,
+  )
+}
+
+///|
+/// The full comparison keeps its two models mounted while this compact control
+/// changes only their layout. Source mode hides the control but preserves the
+/// panel preference for the next full-diff reveal.
+fn review_diff_layout_toggle(
+  dispatch : @cmd.Emit[Msg],
+  state : State,
+  ctx : Ctx,
+) -> @html.Html {
+  guard ctx.active_file is Some(path) &&
+    state.docs.get(path) is Some(doc) &&
+    doc.review is Some({ view_mode: ReviewUnifiedDiff, .. }) &&
+    doc.unified_diff_content() is Some(_) else {
+    return @html.span(class="review-badge hidden", "")
+  }
+  let unified = state.review_diff_layout == ReviewUnified
+  @html.button(
+    type_="button",
+    class="review-badge review-badge-action review-layout-toggle",
+    title=if unified {
+      "Use side-by-side diff layout"
+    } else {
+      "Use unified diff layout"
+    },
+    on_click=dispatch(ToggleReviewDiffLayout),
+    attrs=@html.Attrs::build()
+      .data_set("layout", if unified { "unified" } else { "split" })
+      .aria_label("Unified diff layout")
+      .aria_pressed(unified.to_string()),
+    @html.span(
+      class=if unified {
+        "review-layout-icon unified"
+      } else {
+        "review-layout-icon split"
+      },
+      "",
+    ),
   )
 }
 
@@ -1105,7 +1146,7 @@ fn review_badge(
               )
             Some({ view_mode: ReviewSource, .. }) =>
               (
-                "View full diff", "Open the side-by-side diff against the review baseline",
+                "View full diff", "Open the full diff against the review baseline",
                 true, false,
               )
             None => ("", "", false, false)

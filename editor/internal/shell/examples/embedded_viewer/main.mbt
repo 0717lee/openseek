@@ -65,6 +65,7 @@ fn memory_workspace() -> MemoryWorkspace {
   directories[memory_root] = [
     memory_dir("src", "src"),
     memory_file("large.mbt", "large.mbt"),
+    memory_file("tabbed-deletion.mbt", "tabbed-deletion.mbt"),
     memory_file("oversized-line.mbt", "oversized-line.mbt"),
     memory_file("README.md", "README.md"),
     memory_file("moon.mod", "moon.mod"),
@@ -78,6 +79,7 @@ fn memory_workspace() -> MemoryWorkspace {
   ]
   let documents : Map[String, String] = Map([])
   documents["\{memory_root}/large.mbt"] = large_diff_document("modified")
+  documents["\{memory_root}/tabbed-deletion.mbt"] = "let retained = 1\n"
   documents["\{memory_root}/oversized-line.mbt"] = oversized_diff_line("m")
   documents["\{memory_root}/README.md"] = (
     #|# Embedded Markdown document
@@ -107,6 +109,8 @@ fn memory_workspace() -> MemoryWorkspace {
   original_documents["\{memory_root}/large.mbt"] = large_diff_document(
     "original",
   )
+  original_documents["\{memory_root}/tabbed-deletion.mbt"] = "\t".repeat(160) +
+    "deleted_tail\n"
   original_documents["\{memory_root}/oversized-line.mbt"] = oversized_diff_line(
     "o",
   )
@@ -221,6 +225,7 @@ fn MemoryWorkspace::model(
 priv struct EmbedModel {
   status : String
   diff_visible : Bool
+  unified_render : Bool
 } derive(Eq)
 
 ///|
@@ -230,6 +235,7 @@ priv enum EmbedMsg {
   ViewerReady(@base_common.Uri)
   ViewerFailed
   ToggleDiff
+  ToggleDiffLayout
 }
 
 ///|
@@ -289,9 +295,10 @@ fn embed_viewer() -> @viewer.Viewer {
 }
 
 ///|
-/// Resolves the side-by-side public diff surface in its own stable host. Source
+/// Resolves the switchable public diff surface in its own stable host. Source
 /// and diff views are siblings so toggling never replaces the source Viewer's
-/// model, selection, or scroll state.
+/// model, selection, or scroll state; render-mode changes stay inside the
+/// DiffViewer.
 fn embed_diff_view() -> @viewer.DiffViewer {
   match embed_diff_view_cell.val {
     Some(view) => view
@@ -368,6 +375,19 @@ fn set_embed_diff_visible(visible : Bool) -> @rabbita.Cmd {
 }
 
 ///|
+fn set_embed_diff_render_mode(unified : Bool) -> @rabbita.Cmd {
+  @cmd.custom_cmd(_ => {
+    embed_diff_view().set_render_mode(
+      if unified {
+        Unified
+      } else {
+        SideBySide
+      },
+    )
+  })
+}
+
+///|
 /// Production delegates directly to the native browser rAF queue. The
 /// optional global hook lets the embed smoke test hold only this host-ready
 /// callback while the Viewer's own render rAF continues normally.
@@ -421,18 +441,31 @@ fn update_embed(
           set_embed_diff_visible(false),
           open_embed_document_cmd(uri),
         ]),
-        { status: "loading", diff_visible: false },
+        { ..model, status: "loading", diff_visible: false },
       )
     ViewerReady(uri) =>
       (embed_tree().set_active(uri), { ..model, status: "ready" })
     ViewerFailed =>
-      (set_embed_diff_visible(false), { status: "error", diff_visible: false })
+      (
+        set_embed_diff_visible(false),
+        { ..model, status: "error", diff_visible: false },
+      )
     ToggleDiff =>
       if model.status != "ready" {
         (@rabbita.none, model)
       } else {
         let visible = !model.diff_visible
         (set_embed_diff_visible(visible), { ..model, diff_visible: visible })
+      }
+    ToggleDiffLayout =>
+      if model.status != "ready" || !model.diff_visible {
+        (@rabbita.none, model)
+      } else {
+        let unified_render = !model.unified_render
+        (
+          set_embed_diff_render_mode(unified_render),
+          { ..model, unified_render, },
+        )
       }
   }
 }
@@ -470,25 +503,43 @@ fn view_embed(
           [
             @html.div(class="workspace-title", [
               @html.span(class="workspace-title-label", "Explorer"),
-              @html.button(
-                type_="button",
-                class="sidebar-action embed-diff-toggle",
-                title=if model.diff_visible {
-                  "Show source"
-                } else {
-                  "Show full diff"
-                },
-                on_click=emit(ToggleDiff),
-                attrs=@html.Attrs::build()
-                  .data_set("action", "toggle-diff")
-                  .aria_label("Full diff")
-                  .aria_pressed(model.diff_visible.to_string()),
-                if model.diff_visible {
-                  "Source"
-                } else {
-                  "Diff"
-                },
-              ),
+              @html.div(class="workspace-title-actions", [
+                @html.button(
+                  type_="button",
+                  class="sidebar-action embed-diff-toggle",
+                  title=if model.diff_visible {
+                    "Show source"
+                  } else {
+                    "Show full diff"
+                  },
+                  on_click=emit(ToggleDiff),
+                  attrs=@html.Attrs::build()
+                    .data_set("action", "toggle-diff")
+                    .aria_label("Full diff")
+                    .aria_pressed(model.diff_visible.to_string()),
+                  if model.diff_visible {
+                    "Source"
+                  } else {
+                    "Diff"
+                  },
+                ),
+                @html.button(
+                  type_="button",
+                  class="sidebar-action embed-diff-toggle",
+                  title=if model.unified_render {
+                    "Use side-by-side diff layout"
+                  } else {
+                    "Use unified diff layout"
+                  },
+                  disabled=!model.diff_visible,
+                  on_click=emit(ToggleDiffLayout),
+                  attrs=@html.Attrs::build()
+                    .data_set("action", "toggle-diff-layout")
+                    .aria_label("Unified diff layout")
+                    .aria_pressed(model.unified_render.to_string()),
+                  "Unified",
+                ),
+              ]),
             ]),
             tree_html,
           ],
@@ -539,7 +590,7 @@ fn main {
   let app = @rabbita.new(() => {
     let tree_view = embed_tree().view()
     let (model, emit) = @rabbita.create_state(
-      { status: "loading", diff_visible: false },
+      { status: "loading", diff_visible: false, unified_render: false },
       update=(model, msg, emit) => {
         let (cmd, model) = update_embed(emit, msg, model)
         (model, cmd)

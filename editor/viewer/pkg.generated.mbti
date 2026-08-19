@@ -36,13 +36,20 @@ pub(all) struct DiffEditorModel {
 }
 pub fn DiffEditorModel::DiffEditorModel(@model.TextModel, @model.TextModel) -> Self
 
+pub(all) enum DiffEditorRenderMode {
+  SideBySide
+  Unified
+} derive(Eq, @debug.Debug)
+
 type DiffViewer
 pub fn DiffViewer::clear(Self) -> Unit
-pub fn DiffViewer::create(@dom.Element, services? : ViewerServices, options? : ViewerOptions) -> Self
+pub fn DiffViewer::create(@dom.Element, services? : ViewerServices, options? : ViewerOptions, render_mode? : DiffEditorRenderMode) -> Self
 pub fn DiffViewer::dispose(Self) -> Unit
 pub fn DiffViewer::get_model(Self) -> DiffEditorModel?
+pub fn DiffViewer::get_render_mode(Self) -> DiffEditorRenderMode
 pub fn DiffViewer::layout(Self) -> Unit
 pub fn DiffViewer::set_model(Self, DiffEditorModel?) -> Unit
+pub fn DiffViewer::set_render_mode(Self, DiffEditorRenderMode) -> Unit
 
 type EditorDecorationsCollection
 pub fn EditorDecorationsCollection::append(Self, Array[@model.ModelDeltaDecoration]) -> Array[String]

@@ -96,37 +96,44 @@ viewer.slot.data -> model: borrows readonly
   still be installed with `ModelData.browser=None`; a model installed through
   the public mounted path always has `Some(BrowserPresentation)`.
 - Browser embedders that need an editor-capable comparison call
-  `DiffViewer::create(host, services?, options?)`, then install a caller-owned
-  `DiffEditorModel { original, modified }`. The opaque coordinator owns two
-  ordinary `Viewer` instances in a side-by-side DOM subtree. It shares one
-  `ViewerServices` bundle, computes line mappings through `viewer/common/diff`,
-  applies whole-line decorations, inserts alignment `ViewZone`s on the shorter
-  side, and synchronizes vertical and horizontal scroll. Because both panes are
-  normal Viewers, tokenization, selection, feedback, hover, Definition, and
-  Peek keep their existing model/provider paths. Revision-aware hosts must make
-  provider selectors equally revision-aware; OpenSeek gives the Git HEAD model
-  an inert URI scheme and restricts live host providers to `openseek`.
+  `DiffViewer::create(host, services?, options?, render_mode?)`, then install a
+  caller-owned `DiffEditorModel { original, modified }`. The opaque coordinator
+  owns two ordinary `Viewer` instances and exposes `get_render_mode` /
+  `set_render_mode` over `DiffEditorRenderMode::{SideBySide, Unified}`. It
+  shares one `ViewerServices` bundle, computes line and character mappings
+  through `viewer/common/diff`, and applies whole-line plus inner-change
+  decorations. Side-by-side rendering inserts alignment `ViewZone`s on the
+  shorter side and synchronizes vertical and horizontal scroll. Unified
+  rendering keeps the modified Viewer interactive at full width and inserts
+  token-classed original deletion blocks, original line numbers, and deletion
+  character ranges as modified-side ViewZones. Switching presentation never
+  swaps either model. Because both children remain normal Viewers,
+  tokenization, selection, feedback, hover, Definition, and Peek keep their
+  existing model/provider paths. Revision-aware hosts must make provider
+  selectors equally revision-aware; OpenSeek gives the Git HEAD model an inert
+  URI scheme and restricts live host providers to `openseek`.
   `set_model(None)`/`clear` detach but never dispose caller models; idempotent
   `dispose` removes both child Viewers and the coordinator subtree without
   removing the host or disposing a caller-supplied service bundle.
-- The phase-one `DiffViewer` alignment invariant is one fixed-height logical
-  line on each side, so it forces soft wrap and folding off in both panes.
+- The `DiffViewer` alignment invariant is one fixed-height logical line in both
+  presentations, so it forces soft wrap and folding off in both children.
   Diff panes force the ordinary code presentation even for `.md` resources,
   matching Monaco's two CodeEditorWidgets rather than the standalone Viewer's
-  Markdown-document policy. Character-level inner changes, moved blocks,
-  inline mode, revert actions, unchanged-region collapsing, and overview-ruler
-  output are deferred. The behavior port is anchored to VS Code
+  Markdown-document policy. Moved blocks, Monaco's experimental true-inline
+  single-line output, revert actions, unchanged-region collapsing, and
+  overview-ruler output are deferred. The behavior port is anchored to VS Code
   revision `b18492a288de038fbc7643aae6de8247029d11bd`:
   `diffEditorWidget.ts:491-521` supplies the dual-model/two-CodeEditorWidget
   composition, while
-  `components/diffEditorViewZones/diffEditorViewZones.ts:137-420` supplies the
-  alignment-zone and scroll-coupling behavior. Local representation is
-  deliberately smaller: synchronous `DefaultLinesDiffComputer` output feeds
-  existing `Viewer` APIs rather than porting the observable view-model graph.
-  `diff_viewer_wbtest.mbt` covers mapping-to-spacer policy, and
-  `tests/browser/component/diff_viewer.spec.js` covers two real editors,
-  decorations, pixel alignment, coupled scrolling, modified hover/F12, and an
-  inert original provider selector.
+  `components/diffEditorViewZones/diffEditorViewZones.ts:137-420` supplies both
+  alignment zones and the `renderSideBySide=false` deleted-line projection.
+  Local representation is deliberately smaller: synchronous
+  `DefaultLinesDiffComputer` output feeds existing `Viewer` APIs rather than
+  porting the observable view-model graph. `diff_viewer_wbtest.mbt` covers
+  mapping-to-spacer, unified-anchor, and UTF-16 interval policy;
+  `tests/browser/smoke/embed.spec.js` covers real split/unified switching,
+  tokenized deletion ViewZones, inner changes, narrow-host fit, and the
+  ordinary-Viewer virtualization path.
 - `UnifiedDiffView::create(host, on_comment?)` remains the compatibility
   fallback for embedders that want an eager unified row renderer over strings.
   It is independent of `Viewer`, bounds input at 1,048,576 combined UTF-16 code

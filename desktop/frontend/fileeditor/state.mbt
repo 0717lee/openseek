@@ -76,10 +76,20 @@ pub(all) enum ReviewBaseline {
 
 ///|
 /// The per-tab review presentation. Source mode keeps the existing Viewer and
-/// quick-diff gutter; unified mode shows the context-bounded full comparison.
+/// quick-diff gutter; full-diff mode shows the context-bounded comparison in
+/// the separately selected split or unified layout.
 pub(all) enum ReviewViewMode {
   ReviewSource
   ReviewUnifiedDiff
+} derive(Eq)
+
+///|
+/// The layout of the full textual comparison. This panel-level preference is
+/// independent from `ReviewViewMode`: returning to source keeps the chosen
+/// layout for the next full-diff open and for the next changed file.
+pub(all) enum ReviewDiffLayout {
+  ReviewSideBySide
+  ReviewUnified
 } derive(Eq)
 
 ///|
@@ -317,6 +327,9 @@ pub(all) struct State {
   // changed-file reviews inherit it so next/previous and tree navigation do
   // not force the reviewer to request the full diff again.
   review_view_mode : ReviewViewMode
+  // Split/unified is likewise a reviewer preference rather than document
+  // state. The imperative DiffViewer retains both models while applying it.
+  review_diff_layout : ReviewDiffLayout
   changes : ChangeList
   // Exact changed rows the user has marked reviewed in the current checkout.
   // Watcher events and run boundaries invalidate affected progress; a final
@@ -406,6 +419,7 @@ pub fn State::empty() -> State {
     tree_open: true,
     explorer_mode: ExplorerFiles,
     review_view_mode: ReviewUnifiedDiff,
+    review_diff_layout: ReviewSideBySide,
     changes: ChangeListIdle,
     reviewed_changes: [],
     changes_generation: 0,
@@ -593,8 +607,11 @@ pub(all) enum Msg {
     generation~ : Int
   )
   // Switch the active changed-file review between the ordinary source Viewer
-  // and its full unified diff. Unavailable/loading reviews ignore the action.
+  // and its full comparison. Unavailable/loading reviews ignore the action.
   ToggleReviewDiff
+  // Switch a visible full comparison between split panes and unified rows.
+  // Source mode and unavailable/loading comparisons ignore the action.
+  ToggleReviewDiffLayout
   // Mark the active changed-file review as reviewed, or return it to the
   // unreviewed queue. Ordinary file tabs ignore the action.
   ToggleReviewProgress
