@@ -2987,8 +2987,8 @@ fn update_msg(
       }
       let checkout = model.conversation_placement(conv)
       // The outgoing prompt is the typed text with the chips folded in as the
-      // `<user_mentions>` envelope. Typed text is required — chips alone are
-      // context without an instruction and stay in the composer.
+      // `<user_mentions>` envelope. The envelope is itself valid prompt
+      // content, so an explicitly attached chip can be sent without text.
       let task = @composer.Draft::{ task: conv.task, mentions: conv.mentions }
         .prompt()
         .trim()

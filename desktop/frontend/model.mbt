@@ -3193,11 +3193,10 @@ fn Conversation::draft_empty(self : Conversation) -> Bool {
 }
 
 ///|
-/// Whether the draft can be submitted: only typed text makes a prompt.
-/// Chips alone don't send — a mention is context *for* an instruction, so
-/// the instruction is required; the chips ride along in the envelope.
+/// Whether the draft can be submitted. Typed text and explicit mention chips
+/// are both prompt content; a mention-only draft sends its context envelope.
 fn Conversation::draft_sendable(self : Conversation) -> Bool {
-  !self.task.is_blank()
+  !self.task.is_blank() || !self.mentions.is_empty()
 }
 
 ///|
