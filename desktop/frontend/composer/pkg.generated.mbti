@@ -10,6 +10,7 @@ import {
   "openseek_desktop/frontend/interop",
   "openseek_desktop/frontend/mention_context",
   "openseek_desktop/frontend/pathx",
+  "openseek_desktop/frontend/skills",
   "openseek_desktop/frontend/transcript",
   "openseek_desktop/internal/protocol",
 }
@@ -112,7 +113,7 @@ pub(all) struct Input {
   goal : GoalInput
   slash_commands : Array[SlashCommand]
   root : @common.Uri?
-  installed_skills : Array[@transcript.InstalledSkillItem]
+  installed_skills : Array[@skills.InstalledItem]
   context_generation : Int
   submission_sequence : Int
   replacements : Array[Replacement]

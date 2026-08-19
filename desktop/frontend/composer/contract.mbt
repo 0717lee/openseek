@@ -101,7 +101,7 @@ pub(all) struct Input {
   goal : GoalInput
   slash_commands : Array[SlashCommand]
   root : @common.Uri?
-  installed_skills : Array[@transcript.InstalledSkillItem]
+  installed_skills : Array[@skills.InstalledItem]
   context_generation : Int
   submission_sequence : Int
   replacements : Array[Replacement]

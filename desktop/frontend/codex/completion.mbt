@@ -82,9 +82,7 @@ fn State::active_context(self : State) -> CodexContext? {
 }
 
 ///|
-fn State::installed_codex_skills(
-  self : State,
-) -> Array[@transcript.InstalledSkillItem] {
+fn State::installed_codex_skills(self : State) -> Array[@skills.InstalledItem] {
   guard self.active_context() is Some(context) &&
     self.skills is CodexSkillsReady(cwd, skills) &&
     cwd == context.cwd else {

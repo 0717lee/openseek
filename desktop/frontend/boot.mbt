@@ -503,7 +503,12 @@ pub fn boot() -> Unit {
       state.map(model => model.quick_open),
       emit.map(msg => QuickOpen(msg)),
     )
-    state.view8(
+    let skills_html = @skills.component(
+      state.map(model => model.skills_input()),
+      state.map(model => model.skills),
+      emit.map(msg => Skills(msg)),
+    )
+    state.view9(
       terminal_html,
       transcript_html,
       right_panel_html,
@@ -511,6 +516,7 @@ pub fn boot() -> Unit {
       codex_composer_html,
       sidebar_html,
       quick_open_html,
+      skills_html,
       (
         model,
         terminal_html,
@@ -520,6 +526,7 @@ pub fn boot() -> Unit {
         codex_composer_html,
         sidebar_html,
         quick_open_html,
+        skills_html,
       ) => {
         view(
           emit,
@@ -533,6 +540,7 @@ pub fn boot() -> Unit {
           codex_composer_html,
           sidebar_html,
           quick_open_html,
+          skills_html,
         )
       },
     )
