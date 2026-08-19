@@ -51,6 +51,7 @@ priv struct PackageOptions {
   artifacts : ArtifactPlan
   sign : SignConfig
   release : Bool
+  open_after_packaging : Bool
 }
 
 ///|
@@ -63,6 +64,7 @@ fn PackageOptions::command() -> @argparse.Command {
         "release",
         about="Build optimized release artifacts instead of debug artifacts.",
       ),
+      FlagArg("no-open", about="Do not open SeekMoon.app after packaging."),
     ],
     options=[
       OptionArg(
@@ -111,6 +113,7 @@ fn PackageOptions::parse(argv? : ArrayView[String]) -> PackageOptions raise {
     artifacts,
     sign: { identity, notary_profile },
     release: matches.flags.get("release").unwrap_or(false),
+    open_after_packaging: !matches.flags.get("no-open").unwrap_or(false),
   }
 }
 
@@ -287,7 +290,9 @@ async fn main {
   let terminal_assets = ws.build_package_inputs(release=options.release)
   ws.stage_package_inputs(terminal_assets, release=options.release)
   ws.package_with_proton(options)
-  let _ = @process.run("open", [ws.at("dist/SeekMoon.app")])
+  if options.open_after_packaging {
+    let _ = @process.run("open", [ws.at("dist/SeekMoon.app")])
+  }
 }
 
 ///|
