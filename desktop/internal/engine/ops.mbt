@@ -723,6 +723,32 @@ fn has_finished_run(events : Array[EngineEvent], run_id : String) -> Bool {
 }
 
 ///|
+/// The shell a fake engine runs to commit one durable Terminal before it
+/// echoes the matching `agent_finished` — the real engine's append-then-emit
+/// order, and what the follower's durable close needs to settle the run. A
+/// fixture that only echoes the stream event leaves its run open forever.
+///
+/// The child reads its own store location and identity from the environment
+/// the host gave it, so this needs no paths baked in. The next sequence is
+/// the record's line count: the header occupies line one, so the first turn
+/// commits sequence 1 and each later one advances.
+#cfg(not(platform="windows"))
+fn commit_terminal_sh() -> String {
+  // `\{newline}` is the two characters a shell `printf` format needs, not an
+  // actual line break.
+  let newline = "\\n"
+  let script =
+    $|record="$OPENSEEK_SESSION_ROOT/sessions/$OPENSEEK_SESSION/openseek_session-$OPENSEEK_SESSION.jsonl"
+    $|mkdir -p "$OPENSEEK_SESSION_ROOT/sessions/$OPENSEEK_SESSION"
+    $|if [ ! -f "$record" ]; then
+    $|  printf '{"version":1,"id":"%s","system_prompt":""}\{newline}' "$OPENSEEK_SESSION" > "$record"
+    $|fi
+    $|printf '{"sequence":%s,"item":{"kind":"terminal","payload":{"kind":"finished","message":"ok"}}}\{newline}' "$(grep -c '' "$record")" >> "$record"
+    $|
+  script
+}
+
+///|
 /// A workspace fixture for the run tests: `<root>/ws` attached as the only
 /// registered workspace, with the registry itself under `<root>/global`.
 /// Every run belongs to a workspace now, so a test that starts one registers
@@ -928,6 +954,7 @@ async test "a discarded command answers its sender" {
       follower: None,
       consumer: None,
       phase: Idle(last_run=None),
+      pending_failure: None,
       condemned: false,
       steer_runs: SteerRunTracker::new(),
     }
@@ -976,7 +1003,7 @@ async test "setup failure retires the writer before an immediate next start" {
   )
   @fs.write_file(
     engine.to_string(),
-    "#!/bin/sh\nif [ \"$1\" = \"sessions\" ]; then printf '%s' '{\"events\":[]}'; exit 0; fi\nn=0\nif [ -f '\{count}' ]; then n=$(cat '\{count}'); fi\nn=$((n + 1))\nprintf '%s' \"$n\" > '\{count}'\nif [ \"$n\" -eq 1 ]; then\n  IFS= read -r line || exit 0\n  printf '%s\\n' '{\"event\":\"agent_setup_failed\",\"error\":\"boom\"}'\n  sleep 1\n  printf '%s\\n' '{\"event\":\"turn_failed\",\"error\":\"append failed\"}'\n  printf '' > '\{old_done}'\n  exit 0\nfi\nif [ ! -f '\{old_done}' ]; then printf '' > '\{overlapped}'; fi\nwhile IFS= read -r line; do\n  printf '%s\\n' '{\"event\":\"agent_finished\",\"answer\":\"ok\"}'\ndone\n",
+    "#!/bin/sh\nif [ \"$1\" = \"sessions\" ]; then printf '%s' '{\"events\":[]}'; exit 0; fi\nn=0\nif [ -f '\{count}' ]; then n=$(cat '\{count}'); fi\nn=$((n + 1))\nprintf '%s' \"$n\" > '\{count}'\nif [ \"$n\" -eq 1 ]; then\n  IFS= read -r line || exit 0\n  printf '%s\\n' '{\"event\":\"agent_setup_failed\",\"error\":\"boom\"}'\n  sleep 1\n  printf '%s\\n' '{\"event\":\"turn_failed\",\"error\":\"append failed\"}'\n  printf '' > '\{old_done}'\n  exit 0\nfi\nif [ ! -f '\{old_done}' ]; then printf '' > '\{overlapped}'; fi\nwhile IFS= read -r line; do\n\{commit_terminal_sh()}  printf '%s\\n' '{\"event\":\"agent_finished\",\"answer\":\"ok\"}'\ndone\n",
     create_mode=CreateOrTruncate,
   )
   assert_eq(@process.run("chmod", ["+x", engine.to_string()]), 0)
@@ -1016,14 +1043,13 @@ async test "setup failure retires the writer before an immediate next start" {
       })
       is Some(_),
     )
-    guard manager.serving().get(session) is Some(slot) &&
-      slot.engine is Some(old) else {
-      fail("missing first engine after setup failure")
+    // No durable Terminal was ever committed, so the run settles at EOF
+    // retirement — which publishes Finished and clears the slot in one
+    // synchronous block. Once Finished is observable, the dead writer has
+    // already left its slot.
+    if manager.serving().get(session) is Some(slot) {
+      assert_true(slot.engine is None)
     }
-    // Still in its slot, so the next start must join its close barrier — but
-    // condemned, so nothing can be routed to it in the meantime.
-    assert_true(old.condemned)
-    assert_true(slot.live() is None)
     let cancelled = cancel_run(manager, { run_id: Some(first) })
     assert_false(cancelled.cancelled)
     let second = start_run(sink, manager, {
@@ -1190,7 +1216,7 @@ async test "named session retries after its first prompt creates no record" {
   // finishes it.
   @fs.write_file(
     engine.to_string(),
-    "#!/bin/sh\nif [ \"$1\" = \"sessions\" ]; then\n  printf '%s\\n' 'session record does not exist' >&2\n  exit 7\nfi\nn=0\nif [ -f '\{count}' ]; then n=$(cat '\{count}'); fi\nn=$((n + 1))\nprintf '%s' \"$n\" > '\{count}'\nif [ \"$n\" -eq 1 ]; then\n  mkdir -p '\{store}/sessions/\{session}'\n  printf '' > '\{first_ready}'\n  exec sleep 1\nfi\nwhile IFS= read -r line; do\n  printf '%s\\n' '{\"event\":\"agent_finished\",\"answer\":\"ok\"}'\ndone\n",
+    "#!/bin/sh\nif [ \"$1\" = \"sessions\" ]; then\n  printf '%s\\n' 'session record does not exist' >&2\n  exit 7\nfi\nn=0\nif [ -f '\{count}' ]; then n=$(cat '\{count}'); fi\nn=$((n + 1))\nprintf '%s' \"$n\" > '\{count}'\nif [ \"$n\" -eq 1 ]; then\n  mkdir -p '\{store}/sessions/\{session}'\n  printf '' > '\{first_ready}'\n  exec sleep 1\nfi\nwhile IFS= read -r line; do\n\{commit_terminal_sh()}  printf '%s\\n' '{\"event\":\"agent_finished\",\"answer\":\"ok\"}'\ndone\n",
     create_mode=CreateOrTruncate,
   )
   assert_eq(@process.run("chmod", ["+x", engine.to_string()]), 0)
@@ -1506,7 +1532,7 @@ async test "workspace detach drains an idle writer and its follower first" {
   )
   @fs.write_file(
     engine.to_string(),
-    "#!/bin/sh\nif [ \"$1\" = \"sessions\" ]; then printf '%s' '{\"events\":[]}' ; exit 0; fi\nwhile IFS= read -r line; do printf '%s\\n' '{\"event\":\"agent_finished\",\"answer\":\"ok\"}'; done\nprintf '' > '\{exited}'\n",
+    "#!/bin/sh\nif [ \"$1\" = \"sessions\" ]; then printf '%s' '{\"events\":[]}' ; exit 0; fi\nwhile IFS= read -r line; do\n\{commit_terminal_sh()}  printf '%s\\n' '{\"event\":\"agent_finished\",\"answer\":\"ok\"}'\ndone\nprintf '' > '\{exited}'\n",
     create_mode=CreateOrTruncate,
   )
   assert_eq(@process.run("chmod", ["+x", engine.to_string()]), 0)
