@@ -188,6 +188,71 @@
   flex-basis: 100%;
 }
 
+.moonbit-diff-overview {
+  position: relative;
+  z-index: 9;
+  flex: 0 0 30px;
+  align-self: stretch;
+  width: 30px;
+  min-width: 30px;
+  height: 100%;
+  overflow: hidden;
+  background: color-mix(
+    in srgb,
+    var(--vscode-editor-foreground, #000000) 3%,
+    transparent
+  );
+  touch-action: none;
+}
+
+.moonbit-diff-overview > .diffOverviewRuler {
+  position: absolute;
+  top: 0;
+  width: 15px;
+  height: 100%;
+  pointer-events: none;
+}
+
+.moonbit-diff-overview-original {
+  left: 0;
+}
+
+.moonbit-diff-overview-modified {
+  left: 15px;
+}
+
+.moonbit-diff-overview-viewport {
+  position: absolute;
+  left: 0;
+  z-index: 10;
+  background: var(--vscode-scrollbarSlider-background, rgba(121, 121, 121, 0.4));
+  pointer-events: none;
+}
+
+.moonbit-diff-overview:hover .moonbit-diff-overview-viewport {
+  background: var(
+    --vscode-scrollbarSlider-hoverBackground,
+    rgba(100, 100, 100, 0.7)
+  );
+}
+
+.moonbit-diff-overview:active .moonbit-diff-overview-viewport {
+  background: var(
+    --vscode-scrollbarSlider-activeBackground,
+    rgba(191, 191, 191, 0.4)
+  );
+}
+
+/* The child scroll models and horizontal scrollbars stay live. Only their
+   vertical UI is replaced by the single diff rail. Keeping geometry in the
+   DOM is required by delegated pointer input. */
+.moonbit-diff-editor
+  .monaco-scrollable-element.editor-scrollable
+  > .scrollbar.vertical {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
 .moonbit-diff-editor .diff-editor-line-delete {
   background: var(--vscode-diffEditor-removedLineBackground, #ff000033);
 }

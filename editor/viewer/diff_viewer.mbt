@@ -7,7 +7,9 @@
 // existing Viewer path.
 //
 // Remaining exclusions are explicit: no moved blocks, true-inline single-line
-// rendering, revert actions, unchanged-region collapsing, or overview ruler.
+// rendering, revert actions, or unchanged-region collapsing. A diff-only
+// overview ruler is retained by the coordinator rather than added to ordinary
+// Viewer instances.
 // Soft wrapping and folding are disabled in the child panes because
 // fixed-height logical lines are the invariant behind both ViewZone layouts.
 
@@ -70,18 +72,24 @@ struct DiffViewer {
   ignore_comments_button : @rdom.Element
   original_viewer : Viewer
   modified_viewer : Viewer
+  overview : DiffOverviewRuler
   owned_services : ViewerServices?
   mut render_mode : DiffEditorRenderMode
   mut resize_observer : @base_common.Disposable?
   mut viewport_restore_frame : @base_common.Disposable?
+  mut overview_render_frame : @base_common.Disposable?
+  mut alignment_rebuild_timeout : @base_common.Disposable?
   scroll_disposables : Array[@base_common.Disposable]
   model_disposables : Array[@base_common.Disposable]
   mut original_decoration_ids : Array[String]
   mut modified_decoration_ids : Array[String]
   mut original_zone_ids : Array[String]
   mut modified_zone_ids : Array[String]
+  mut current_changes : Array[DiffLineChange]
   mut diff_mode : DiffViewerMode
   mut ignore_comments : Bool
+  mut is_updating_diff_zones : Bool
+  mut is_syncing_scroll : Bool
   mut disposed : Bool
 }
 
@@ -194,6 +202,7 @@ pub fn DiffViewer::create(
   let modified_viewer = create_diff_pane(
     modified_host, shared_services, pane_options,
   )
+  let overview = DiffOverviewRuler::create(panes, modified_viewer)
   let diff_viewer : DiffViewer = {
     host,
     root,
@@ -205,21 +214,28 @@ pub fn DiffViewer::create(
     ignore_comments_button,
     original_viewer,
     modified_viewer,
+    overview,
     owned_services,
     render_mode,
     resize_observer: None,
     viewport_restore_frame: None,
+    overview_render_frame: None,
+    alignment_rebuild_timeout: None,
     scroll_disposables: [],
     model_disposables: [],
     original_decoration_ids: [],
     modified_decoration_ids: [],
     original_zone_ids: [],
     modified_zone_ids: [],
+    current_changes: [],
     diff_mode: StandardDiff,
     ignore_comments: true,
+    is_updating_diff_zones: false,
+    is_syncing_scroll: false,
     disposed: false,
   }
   diff_viewer.apply_render_mode_dom()
+  overview.observe_theme(() => diff_viewer.schedule_overview_render())
   for entry in diff_viewer.mode_buttons {
     let (mode, button) = entry
     button.add_event_listener("click", event => {
@@ -250,6 +266,7 @@ pub fn DiffViewer::create(
       if diff_viewer.render_mode == SideBySide && event.scroll_left_changed {
         diff_viewer.sync_scroll_left_to(modified_viewer, event.scroll_left)
       }
+      diff_viewer.schedule_overview_render()
     }),
   )
   diff_viewer.scroll_disposables.push(
@@ -260,11 +277,29 @@ pub fn DiffViewer::create(
       if event.scroll_left_changed {
         diff_viewer.sync_scroll_left_to(original_viewer, event.scroll_left)
       }
+      diff_viewer.schedule_overview_render()
+    }),
+  )
+  diff_viewer.scroll_disposables.push(
+    original_viewer.on_did_change_view_zones(() => {
+      if !diff_viewer.is_updating_diff_zones {
+        diff_viewer.schedule_alignment_rebuild()
+      }
+      diff_viewer.schedule_overview_render()
+    }),
+  )
+  diff_viewer.scroll_disposables.push(
+    modified_viewer.on_did_change_view_zones(() => {
+      if !diff_viewer.is_updating_diff_zones {
+        diff_viewer.schedule_alignment_rebuild()
+      }
+      diff_viewer.schedule_overview_render()
     }),
   )
   diff_viewer.resize_observer = @base_browser.observe_element_resize(host, () => {
     diff_viewer.layout()
   })
+  diff_viewer.schedule_overview_render()
   diff_viewer
 }
 
@@ -295,8 +330,11 @@ pub fn DiffViewer::set_model(
     return
   }
   self.cancel_modified_viewport_restore()
+  self.cancel_overview_render()
+  self.cancel_alignment_rebuild()
   self.dispose_model_disposables()
   self.clear_diff_artifacts()
+  self.current_changes = []
   match diff_model {
     None => {
       self.original_viewer.set_model(None)
@@ -306,6 +344,7 @@ pub fn DiffViewer::set_model(
         effective_mode=StandardDiff,
         fell_back=false,
       )
+      self.schedule_overview_render()
     }
     Some(diff_model) => {
       self.original_viewer.set_model(Some(diff_model.original))
@@ -383,6 +422,113 @@ fn DiffViewer::cancel_modified_viewport_restore(self : DiffViewer) -> Unit {
 }
 
 ///|
+fn DiffViewer::cancel_alignment_rebuild(self : DiffViewer) -> Unit {
+  match self.alignment_rebuild_timeout {
+    Some(timeout) => timeout.dispose()
+    None => ()
+  }
+  self.alignment_rebuild_timeout = None
+}
+
+///|
+fn DiffViewer::cancel_overview_render(self : DiffViewer) -> Unit {
+  match self.overview_render_frame {
+    Some(frame) => frame.dispose()
+    None => ()
+  }
+  self.overview_render_frame = None
+}
+
+///|
+/// Canvas geometry must observe the Viewers' committed priority-100 layout,
+/// including alignment-zone scroll heights. Render later in the same frame.
+fn DiffViewer::schedule_overview_render(self : DiffViewer) -> Unit {
+  if self.disposed || self.overview_render_frame is Some(_) {
+    return
+  }
+  self.overview_render_frame = Some(
+    @base_browser.run_at_this_or_schedule_at_next_animation_frame(
+      () => {
+        self.overview_render_frame = None
+        if !self.disposed {
+          self.overview.render(
+            self.original_viewer,
+            self.modified_viewer,
+            self.current_changes,
+          )
+        }
+      },
+      priority=0,
+    ),
+  )
+}
+
+///|
+/// Foreign ViewZones can resize while either Viewer is rendering. Coalesce
+/// both outgoing events onto one macrotask, matching VS Code's zero-delay
+/// RunOnceScheduler and avoiding an update from the first child observing the
+/// second child midway through its own transaction.
+fn DiffViewer::schedule_alignment_rebuild(self : DiffViewer) -> Unit {
+  if self.disposed ||
+    self.render_mode != SideBySide ||
+    self.alignment_rebuild_timeout is Some(_) ||
+    self.get_model() is None {
+    return
+  }
+  self.alignment_rebuild_timeout = Some(
+    @base_browser.schedule_timeout(
+      () => {
+        self.alignment_rebuild_timeout = None
+        if !self.disposed && self.render_mode == SideBySide {
+          self.rebuild_alignment_zones_with_anchor(
+            self.capture_modified_viewport_anchor(),
+          )
+        }
+      },
+      0,
+    ),
+  )
+}
+
+///|
+fn DiffViewer::rebuild_alignment_zones_with_anchor(
+  self : DiffViewer,
+  anchor : DiffViewportAnchor?,
+  original_content_height_without_owned? : Double,
+  modified_content_height_without_owned? : Double,
+) -> Unit {
+  if self.disposed || self.render_mode != SideBySide || self.get_model() is None {
+    return
+  }
+  // Compute while the previous owned IDs still exist so they can be excluded
+  // without temporarily changing either child's coordinate system.
+  let spacers = compute_diff_pixel_spacers(
+    self.original_viewer,
+    self.modified_viewer,
+    self.current_changes,
+    self.original_zone_ids,
+    self.modified_zone_ids,
+    original_content_height_without_owned?,
+    modified_content_height_without_owned?,
+  )
+  self.is_updating_diff_zones = true
+  self.original_zone_ids = replace_alignment_zones(
+    self.original_viewer,
+    self.original_zone_ids,
+    spacers.original,
+  )
+  self.modified_zone_ids = replace_alignment_zones(
+    self.modified_viewer,
+    self.modified_zone_ids,
+    spacers.modified,
+  )
+  self.is_updating_diff_zones = false
+  self.cancel_modified_viewport_restore()
+  self.schedule_modified_viewport_restore(anchor)
+  self.schedule_overview_render()
+}
+
+///|
 /// ViewZone mutations enter the ViewModel queue synchronously but reach
 /// ViewLayout during the Viewer's priority-100 render. Restore later in the
 /// same native frame so the browser never paints the displaced numeric
@@ -422,12 +568,11 @@ pub fn DiffViewer::set_render_mode(
     return
   }
   self.cancel_modified_viewport_restore()
-  let viewport_anchor = self.capture_modified_viewport_anchor()
+  self.cancel_alignment_rebuild()
   self.render_mode = render_mode
   self.apply_render_mode_dom()
   self.layout()
   self.refresh_diff()
-  self.schedule_modified_viewport_restore(viewport_anchor)
   if render_mode == SideBySide {
     self.sync_scroll_top_to(
       self.original_viewer,
@@ -475,6 +620,8 @@ pub fn DiffViewer::layout(self : DiffViewer) -> Unit {
   if !self.disposed {
     self.original_viewer.layout()
     self.modified_viewer.layout()
+    self.schedule_alignment_rebuild()
+    self.schedule_overview_render()
   }
 }
 
@@ -485,7 +632,10 @@ pub fn DiffViewer::dispose(self : DiffViewer) -> Unit {
   if self.disposed {
     return
   }
+  self.disposed = true
   self.cancel_modified_viewport_restore()
+  self.cancel_overview_render()
+  self.cancel_alignment_rebuild()
   match self.resize_observer {
     Some(observer) => observer.dispose()
     None => ()
@@ -497,6 +647,7 @@ pub fn DiffViewer::dispose(self : DiffViewer) -> Unit {
   }
   self.scroll_disposables.clear()
   self.clear_diff_artifacts()
+  self.overview.dispose()
   self.original_viewer.dispose()
   self.modified_viewer.dispose()
   self.host.remove_child(self.root.as_node())
@@ -504,7 +655,6 @@ pub fn DiffViewer::dispose(self : DiffViewer) -> Unit {
     Some(services) => services.dispose()
     None => ()
   }
-  self.disposed = true
 }
 
 ///|
@@ -543,9 +693,14 @@ fn DiffViewer::sync_scroll_top_to(
   target : Viewer,
   scroll_top : Double,
 ) -> Unit {
-  if !self.disposed && (target.get_scroll_top() - scroll_top).abs() > 0.5 {
-    target.set_scroll_top(scroll_top)
+  if self.disposed ||
+    self.is_syncing_scroll ||
+    (target.get_scroll_top() - scroll_top).abs() <= 0.5 {
+    return
   }
+  self.is_syncing_scroll = true
+  target.set_scroll_top(scroll_top)
+  self.is_syncing_scroll = false
 }
 
 ///|
@@ -554,9 +709,14 @@ fn DiffViewer::sync_scroll_left_to(
   target : Viewer,
   scroll_left : Double,
 ) -> Unit {
-  if !self.disposed && (target.get_scroll_left() - scroll_left).abs() > 0.5 {
-    target.set_scroll_left(scroll_left)
+  if self.disposed ||
+    self.is_syncing_scroll ||
+    (target.get_scroll_left() - scroll_left).abs() <= 0.5 {
+    return
   }
+  self.is_syncing_scroll = true
+  target.set_scroll_left(scroll_left)
+  self.is_syncing_scroll = false
 }
 
 ///|
@@ -688,6 +848,19 @@ fn DiffViewer::refresh_diff(self : DiffViewer) -> Unit {
     return
   }
   guard self.get_model() is Some(diff_model) else { return }
+  self.cancel_modified_viewport_restore()
+  self.cancel_alignment_rebuild()
+  let viewport_anchor = self.capture_modified_viewport_anchor()
+  // `remove_zone` updates the retained registry immediately, while the
+  // ViewLayout whitespace transaction commits in the next Viewer render.
+  // Capture the content axes without the outgoing owned zones before removal
+  // so a mode/layout switch cannot balance against stale whitespace pixels.
+  let original_content_height_without_owned = self.original_viewer.diff_content_height_without_owned_zones(
+    self.original_zone_ids,
+  )
+  let modified_content_height_without_owned = self.modified_viewer.diff_content_height_without_owned_zones(
+    self.modified_zone_ids,
+  )
   self.clear_diff_artifacts()
   let original_lines = diff_model.original.get_lines_content()
   let modified_lines = diff_model.modified.get_lines_content()
@@ -707,6 +880,7 @@ fn DiffViewer::refresh_diff(self : DiffViewer) -> Unit {
     fell_back=calculation.fell_back,
   )
   let changes = calculation.changes
+  self.current_changes = changes
   let presentation = diff_presentation(changes)
   let modified_decorations = line_decorations(
     diff_model.modified,
@@ -746,22 +920,22 @@ fn DiffViewer::refresh_diff(self : DiffViewer) -> Unit {
         [],
         original_decorations,
       )
-      self.original_zone_ids = install_alignment_zones(
-        self.original_viewer,
-        presentation.original_spacers,
-      )
-      self.modified_zone_ids = install_alignment_zones(
-        self.modified_viewer,
-        presentation.modified_spacers,
+      self.rebuild_alignment_zones_with_anchor(
+        viewport_anchor,
+        original_content_height_without_owned~,
+        modified_content_height_without_owned~,
       )
     }
-    Unified =>
+    Unified => {
       self.modified_zone_ids = install_unified_deleted_zones(
         self.modified_viewer,
         diff_model.original,
         changes,
       )
+      self.schedule_modified_viewport_restore(viewport_anchor)
+    }
   }
+  self.schedule_overview_render()
 }
 
 ///|
@@ -774,25 +948,31 @@ fn DiffViewer::clear_diff_artifacts(self : DiffViewer) -> Unit {
     self.modified_decoration_ids,
     [],
   )
+  self.is_updating_diff_zones = true
   remove_diff_zones(self.original_viewer, self.original_zone_ids)
   remove_diff_zones(self.modified_viewer, self.modified_zone_ids)
+  self.is_updating_diff_zones = false
   self.original_zone_ids = []
   self.modified_zone_ids = []
-}
-
-///|
-priv struct DiffSpacer {
-  after_line_number : Int
-  height_in_lines : Int
 }
 
 ///|
 priv struct DiffLineChange {
   original : @base_common.LineRange
   modified : @base_common.LineRange
+  paired_inner_changes : Array[DiffInnerChange]
   original_inner_changed : Array[@base_common.Range]
   modified_inner_changed : Array[@base_common.Range]
   render_change : Bool
+}
+
+///|
+/// A Standard diff keeps the two halves of every detailed range mapping
+/// paired. Decorations consume the side-specific arrays above; alignment must
+/// retain this relation so it can add synchronization points inside a hunk.
+priv struct DiffInnerChange {
+  original : @base_common.Range
+  modified : @base_common.Range
 }
 
 ///|
@@ -801,22 +981,17 @@ priv struct DiffPresentation {
   modified_changed : Array[@base_common.LineRange]
   original_inner_changed : Array[@base_common.Range]
   modified_inner_changed : Array[@base_common.Range]
-  original_spacers : Array[DiffSpacer]
-  modified_spacers : Array[DiffSpacer]
 }
 
 ///|
-/// Convert line mappings once into the four independent rendering inputs.
-/// Unequal replacement ranges align from their starts and put the remaining
-/// height after the shorter block; insertions/deletions therefore use the
-/// preceding logical line (including Monaco's valid line-zero anchor).
+/// Convert line mappings once into the four independent decoration inputs.
+/// Pixel alignment is computed separately because it also consumes paired
+/// inner changes and foreign ViewZone heights.
 fn diff_presentation(changes : Array[DiffLineChange]) -> DiffPresentation {
   let original_changed = []
   let modified_changed = []
   let original_inner_changed = []
   let modified_inner_changed = []
-  let original_spacers = []
-  let modified_spacers = []
   for change in changes {
     if change.render_change {
       if !change.original.is_empty() {
@@ -836,27 +1011,12 @@ fn diff_presentation(changes : Array[DiffLineChange]) -> DiffPresentation {
         }
       }
     }
-    let original_length = change.original.length()
-    let modified_length = change.modified.length()
-    if original_length < modified_length {
-      original_spacers.push({
-        after_line_number: change.original.end_line_number_exclusive - 1,
-        height_in_lines: modified_length - original_length,
-      })
-    } else if modified_length < original_length {
-      modified_spacers.push({
-        after_line_number: change.modified.end_line_number_exclusive - 1,
-        height_in_lines: original_length - modified_length,
-      })
-    }
   }
   {
     original_changed,
     modified_changed,
     original_inner_changed,
     modified_inner_changed,
-    original_spacers,
-    modified_spacers,
   }
 }
 
@@ -910,34 +1070,6 @@ fn inline_decorations(
       description~,
     ),
   })
-}
-
-///|
-fn install_alignment_zones(
-  viewer : Viewer,
-  spacers : Array[DiffSpacer],
-) -> Array[String] {
-  let ids : Array[String] = []
-  if spacers.is_empty() {
-    return ids
-  }
-  viewer.change_view_zones(accessor => {
-    for spacer in spacers {
-      let dom_node = @rdom.document().create_element("div")
-      dom_node.set_attribute("class", "diff-editor-alignment-zone")
-      ids.push(
-        accessor.add_zone(
-          view_zone(
-            spacer.after_line_number,
-            dom_node,
-            suppress_mouse_down=true,
-            height_in_lines=spacer.height_in_lines.to_double(),
-          ),
-        ),
-      )
-    }
-  })
-  ids
 }
 
 ///|

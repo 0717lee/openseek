@@ -25,12 +25,14 @@ fn standard_diff_changes(
     compute_moves: false,
   })
   diff.changes.map(change => {
+    let paired_inner_changes : Array[DiffInnerChange] = []
     let original_inner_changed : Array[@base_common.Range] = []
     let modified_inner_changed : Array[@base_common.Range] = []
     match change.get_inner_changes() {
       Some(inner_changes) =>
         for inner_change in inner_changes {
           let (original, modified) = inner_change
+          paired_inner_changes.push({ original, modified })
           original_inner_changed.push(original)
           modified_inner_changed.push(modified)
         }
@@ -39,6 +41,7 @@ fn standard_diff_changes(
     {
       original: change.original,
       modified: change.modified,
+      paired_inner_changes,
       original_inner_changed,
       modified_inner_changed,
       render_change: true,
@@ -164,6 +167,7 @@ fn ignored_only_alignment_changes(
           alignment.push({
             original: change.original,
             modified: change.modified,
+            paired_inner_changes: [],
             original_inner_changed: [],
             modified_inner_changed: [],
             render_change: false,
@@ -215,6 +219,7 @@ fn moondiff_paired_change(
   {
     original: LineRange(original.index + 1, original.index + 2),
     modified: LineRange(modified.index + 1, modified.index + 2),
+    paired_inner_changes: [],
     original_inner_changed: moondiff_inner_ranges(original),
     modified_inner_changed: moondiff_inner_ranges(modified),
     render_change: true,
@@ -230,6 +235,7 @@ fn moondiff_old_only_change(
   {
     original: LineRange(original.index + 1, original.index + 2),
     modified: LineRange(modified_cursor + 1, modified_cursor + 1),
+    paired_inner_changes: [],
     original_inner_changed: moondiff_inner_ranges(original),
     modified_inner_changed: [],
     render_change,
@@ -245,6 +251,7 @@ fn moondiff_new_only_change(
   {
     original: LineRange(original_cursor + 1, original_cursor + 1),
     modified: LineRange(modified.index + 1, modified.index + 2),
+    paired_inner_changes: [],
     original_inner_changed: [],
     modified_inner_changed: moondiff_inner_ranges(modified),
     render_change,

@@ -206,6 +206,279 @@ test('virtualizes a legal-size large diff through ordinary Viewer panes', async 
     .toEqual(splitAnchor);
 });
 
+test('aligns foreign ViewZones and drives one shared diff overview rail', async ({ page }) => {
+  await page.goto('/embed.html');
+  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
+  await page.locator(workspaceItem('alignment-zones.mbt')).click();
+  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
+  await page.locator('[data-action="toggle-diff"]').click();
+
+  const diff = page.locator('.diff-viewer-host > .moonbit-diff-editor');
+  const originalPane = diff.locator('.moonbit-diff-editor-original');
+  const modifiedPane = diff.locator('.moonbit-diff-editor-modified');
+  const originalScrollable = originalPane.locator(
+    '.monaco-scrollable-element.editor-scrollable',
+  );
+  const modifiedScrollable = modifiedPane.locator(
+    '.monaco-scrollable-element.editor-scrollable',
+  );
+  const rail = diff.locator('.moonbit-diff-overview');
+
+  await expect(rail).toBeVisible();
+  await expect(diff.getByRole('scrollbar', { name: 'Diff overview' })).toHaveCount(1);
+  await expect(
+    diff.locator('.monaco-scrollable-element.editor-scrollable > .scrollbar.vertical'),
+  ).toHaveCount(2);
+  expect(
+    await diff
+      .locator('.monaco-scrollable-element.editor-scrollable > .scrollbar.vertical')
+      .evaluateAll((bars) => bars.map((bar) => getComputedStyle(bar).opacity)),
+  ).toEqual(['0', '0']);
+
+  // Both ordinary Viewers own independently measured Markdown comment zones.
+  // Their opposite tall/short pairs force alignment in both directions. The
+  // middle pair also ends exactly where a modified-only insertion begins, so
+  // the original spacer is anchored inside hidden Markdown source lines.
+  await expect
+    .poll(() => originalPane.locator('.moonbit-viewer-markdown-comment').count())
+    .toBe(3);
+  await expect
+    .poll(() => modifiedPane.locator('.moonbit-viewer-markdown-comment').count())
+    .toBe(3);
+  await expect
+    .poll(() =>
+      originalPane.evaluate((pane) => {
+        const hiddenEnds = new Set(
+          Array.from(
+            pane.querySelectorAll('.moonbit-viewer-markdown-comment'),
+          ).map((node) => Number(node.getAttribute('data-end-line')) - 1),
+        );
+        return Array.from(
+          pane.querySelectorAll('.diff-editor-alignment-zone'),
+        ).some((zone) =>
+          hiddenEnds.has(Number(zone.getAttribute('data-after-line'))),
+        );
+      }),
+    )
+    .toBe(true);
+  await originalScrollable.hover();
+  await page.mouse.wheel(0, 250);
+  await expect(originalPane.locator('.moonbit-viewer-markdown-comment').nth(0)).toBeVisible();
+  await expect(modifiedPane.locator('.moonbit-viewer-markdown-comment').nth(0)).toBeVisible();
+  const firstMarkdownHeights = await Promise.all([
+    originalPane
+      .locator('.moonbit-viewer-markdown-comment')
+      .nth(0)
+      .evaluate((node) => node.getBoundingClientRect().height),
+    modifiedPane
+      .locator('.moonbit-viewer-markdown-comment')
+      .nth(0)
+      .evaluate((node) => node.getBoundingClientRect().height),
+  ]);
+  expect(firstMarkdownHeights[0]).toBeGreaterThan(firstMarkdownHeights[1]);
+
+  await page.mouse.wheel(0, 2_400);
+  await expect(originalPane.locator('.moonbit-viewer-markdown-comment').nth(2)).toBeVisible();
+  await expect(modifiedPane.locator('.moonbit-viewer-markdown-comment').nth(2)).toBeVisible();
+  const secondMarkdownHeights = await Promise.all([
+    originalPane
+      .locator('.moonbit-viewer-markdown-comment')
+      .nth(2)
+      .evaluate((node) => node.getBoundingClientRect().height),
+    modifiedPane
+      .locator('.moonbit-viewer-markdown-comment')
+      .nth(2)
+      .evaluate((node) => node.getBoundingClientRect().height),
+  ]);
+  expect(secondMarkdownHeights[1]).toBeGreaterThan(secondMarkdownHeights[0]);
+
+  await expect
+    .poll(async () => diffScrollState(rail))
+    .toMatchObject({ heightsAligned: true, topsAligned: true });
+  await expectAlignedVisibleRows(diff);
+
+  // Scrolling either child uses the same content coordinate system.
+  await originalScrollable.hover();
+  await page.mouse.wheel(0, 4_000);
+  await expect
+    .poll(async () => (await diffScrollState(rail)).originalTop)
+    .toBeGreaterThan(0);
+  await expect
+    .poll(async () => diffScrollState(rail))
+    .toMatchObject({ heightsAligned: true, topsAligned: true });
+  await expectAlignedVisibleRows(diff);
+
+  await modifiedScrollable.hover();
+  await page.mouse.wheel(0, 4_000);
+  await expect
+    .poll(async () => diffScrollState(rail))
+    .toMatchObject({ heightsAligned: true, topsAligned: true });
+  await expectAlignedVisibleRows(diff);
+
+  // The two 15px canvases summarize offscreen changes across the document.
+  await expect
+    .poll(async () => Number(await rail.getAttribute('data-original-change-count')))
+    .toBeGreaterThan(3);
+  await expect
+    .poll(async () => Number(await rail.getAttribute('data-modified-change-count')))
+    .toBeGreaterThan(3);
+  const paintedLanes = await rail.evaluate((root) =>
+    Array.from(root.querySelectorAll('canvas')).map((canvas) => {
+      const context = canvas.getContext('2d');
+      const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      let rows = 0;
+      let color = null;
+      for (let y = 0; y < canvas.height; y += 1) {
+        let painted = false;
+        for (let x = 0; x < canvas.width; x += 1) {
+          const offset = (y * canvas.width + x) * 4;
+          if (data[offset + 3] !== 0) {
+            painted = true;
+            color ??= Array.from(data.slice(offset, offset + 4));
+            break;
+          }
+        }
+        if (painted) rows += 1;
+      }
+      return { rows, color };
+    }),
+  );
+  expect(paintedLanes[0].rows).toBeGreaterThan(10);
+  expect(paintedLanes[1].rows).toBeGreaterThan(10);
+  expect(paintedLanes[0].color[0]).toBeGreaterThan(paintedLanes[0].color[1]);
+  expect(paintedLanes[1].color[1]).toBeGreaterThan(paintedLanes[1].color[0]);
+
+  // A theme mutation invalidates both canvases without recreating the rail.
+  await diff.evaluate((node) => {
+    node.style.setProperty(
+      '--vscode-diffEditorOverview-insertedForeground',
+      'rgb(1, 2, 3)',
+    );
+  });
+  await expect(rail).toHaveAttribute('data-modified-marker-color', 'rgb(1, 2, 3)');
+  await diff.evaluate((node) => {
+    node.style.removeProperty('--vscode-diffEditorOverview-insertedForeground');
+  });
+
+  // Rail click, wheel, and thumb drag all delegate to the modified Viewer.
+  const railBox = await rail.boundingBox();
+  expect(railBox).not.toBeNull();
+  await page.mouse.click(railBox.x + 22, railBox.y + railBox.height * 0.5);
+  await expect
+    .poll(async () => (await diffScrollState(rail)).progress)
+    .toBeGreaterThan(0.35);
+  await expect
+    .poll(async () => (await diffScrollState(rail)).progress)
+    .toBeLessThan(0.65);
+  await expectAlignedVisibleRows(diff);
+
+  await rail.hover({ position: { x: 22, y: railBox.height * 0.5 } });
+  const beforeWheel = (await diffScrollState(rail)).modifiedTop;
+  await page.mouse.wheel(0, 1_000);
+  await expect
+    .poll(async () => (await diffScrollState(rail)).modifiedTop)
+    .toBeGreaterThan(beforeWheel);
+
+  const thumb = await rail.evaluate((node) => ({
+    top: Number(node.getAttribute('data-slider-top')),
+    height: Number(node.getAttribute('data-slider-height')),
+  }));
+  await page.mouse.move(
+    railBox.x + 22,
+    railBox.y + thumb.top + thumb.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(railBox.x + 22, railBox.y + railBox.height - 4, {
+    steps: 8,
+  });
+  await page.mouse.up();
+  await expect
+    .poll(async () => (await diffScrollState(rail)).progress)
+    .toBeGreaterThan(0.9);
+  await expectAlignedVisibleRows(diff);
+
+  // Horizontal scrolling remains per-pane input with synchronized positions.
+  await page.mouse.click(railBox.x + 22, railBox.y + railBox.height * 0.2);
+  await expect
+    .poll(async () => (await diffScrollState(rail)).progress)
+    .toBeLessThan(0.3);
+  await originalScrollable.hover();
+  await page.mouse.wheel(2_000, 0);
+  await expect
+    .poll(async () => (await diffScrollState(rail)).originalLeft)
+    .toBeGreaterThan(0);
+  await expect
+    .poll(async () => {
+      const state = await diffScrollState(rail);
+      return Math.abs(state.originalLeft - state.modifiedLeft);
+    })
+    .toBeLessThanOrEqual(1);
+
+  // Width-driven Markdown remeasurement rebuilds owned zones without drift.
+  const viewerStack = page.locator('.embedded-viewer-stack');
+  await viewerStack.evaluate((element) => {
+    element.style.width = '420px';
+    element.style.flex = '0 0 420px';
+  });
+  await expect
+    .poll(async () => diffScrollState(rail))
+    .toMatchObject({ heightsAligned: true, topsAligned: true });
+  await viewerStack.evaluate((element) => {
+    element.style.width = '';
+    element.style.flex = '';
+  });
+
+  // The same rail survives algorithm, ignore-comments, and layout changes.
+  const toolbar = diff.locator('.moonbit-diff-editor-toolbar');
+  const token = toolbar.getByRole('button', { name: 'Token diff' });
+  const tree = toolbar.getByRole('button', { name: 'Tree diff' });
+  const ignoreComments = toolbar.getByRole('button', { name: 'Ignore comments' });
+  await token.click();
+  await expect(diff).toHaveAttribute('data-diff-renderer', 'token');
+  await expect(rail).toBeVisible();
+  const ignoredMarkerCount = Number(
+    await rail.getAttribute('data-modified-change-count'),
+  );
+  await ignoreComments.click();
+  await expect(diff).toHaveAttribute('data-ignore-comments', 'false');
+  await expect
+    .poll(async () => Number(await rail.getAttribute('data-modified-change-count')))
+    .toBeGreaterThan(ignoredMarkerCount);
+  await tree.click();
+  await expect(diff).toHaveAttribute('data-diff-renderer', 'tree');
+  await page.locator('[data-action="toggle-diff-layout"]').click();
+  await expect(diff).toHaveAttribute('data-render-mode', 'unified');
+  await expect(rail).toBeVisible();
+  await expect(diff.getByRole('scrollbar', { name: 'Diff overview' })).toHaveCount(1);
+  await page.locator('[data-action="toggle-diff-layout"]').click();
+  await expect(diff).toHaveAttribute('data-render-mode', 'side-by-side');
+  await expect
+    .poll(async () => diffScrollState(rail))
+    .toMatchObject({ heightsAligned: true, topsAligned: true });
+
+  // Replacing both child models keeps one rail and retires old zone geometry.
+  await page.locator(workspaceItem('comments.mbt')).click();
+  await page.locator('[data-action="toggle-diff"]').click();
+  await expect(diff).toBeVisible();
+  await expect(modifiedPane).toContainText('new_value');
+  await expect(diff.getByRole('scrollbar', { name: 'Diff overview' })).toHaveCount(1);
+  await expect
+    .poll(async () => Number(await rail.getAttribute('data-modified-change-count')))
+    .toBeGreaterThan(0);
+  await expect
+    .poll(async () => diffScrollState(rail))
+    .toMatchObject({ heightsAligned: true, topsAligned: true });
+  await page.locator(workspaceItem('alignment-zones.mbt')).click();
+  await page.locator('[data-action="toggle-diff"]').click();
+  await expect(diff).toBeVisible();
+  await expect
+    .poll(() => modifiedPane.locator('.moonbit-viewer-markdown-comment').count())
+    .toBe(3);
+  await expect
+    .poll(async () => diffScrollState(rail))
+    .toMatchObject({ heightsAligned: true, topsAligned: true });
+});
+
 test('keeps tab-expanded unified deletions inside the horizontal scroll extent', async ({
   page,
 }) => {
@@ -551,4 +824,68 @@ async function firstFullyVisibleModelLine(pane) {
       offset: Math.round((rect.top - viewportRect.top) * 10) / 10,
     };
   });
+}
+
+async function diffScrollState(rail) {
+  return rail.evaluate((node) => {
+    const originalTop = Number(node.getAttribute('data-original-scroll-top'));
+    const modifiedTop = Number(node.getAttribute('data-modified-scroll-top'));
+    const originalHeight = Number(
+      node.getAttribute('data-original-scroll-height'),
+    );
+    const modifiedHeight = Number(
+      node.getAttribute('data-modified-scroll-height'),
+    );
+    const viewportHeight = node.getBoundingClientRect().height;
+    const maxTop = Math.max(0, modifiedHeight - viewportHeight);
+    return {
+      originalTop,
+      modifiedTop,
+      originalHeight,
+      modifiedHeight,
+      originalLeft: Number(node.getAttribute('data-original-scroll-left')),
+      modifiedLeft: Number(node.getAttribute('data-modified-scroll-left')),
+      heightsAligned: Math.abs(originalHeight - modifiedHeight) <= 1,
+      topsAligned: Math.abs(originalTop - modifiedTop) <= 1,
+      progress: maxTop > 0 ? modifiedTop / maxTop : 0,
+    };
+  });
+}
+
+async function expectAlignedVisibleRows(diff) {
+  const alignment = await diff.evaluate((root) => {
+    const visibleRows = (selector) => {
+      const pane = root.querySelector(selector);
+      const viewport = pane.querySelector(
+        '.monaco-scrollable-element.editor-scrollable',
+      );
+      const viewportRect = viewport.getBoundingClientRect();
+      const rows = new Map();
+      for (const row of pane.querySelectorAll('.view-line')) {
+        const rect = row.getBoundingClientRect();
+        const text = row.textContent.trim();
+        const stableKey = text.match(/(?:stable_|wide_)\d+/)?.[0];
+        if (
+          stableKey &&
+          rect.bottom >= viewportRect.top &&
+          rect.top <= viewportRect.bottom
+        ) {
+          rows.set(stableKey, rect.top);
+        }
+      }
+      return rows;
+    };
+    const original = visibleRows('.moonbit-diff-editor-original');
+    const modified = visibleRows('.moonbit-diff-editor-modified');
+    const deltas = [];
+    for (const [text, top] of original) {
+      if (modified.has(text)) deltas.push(Math.abs(top - modified.get(text)));
+    }
+    return {
+      count: deltas.length,
+      maxDelta: deltas.length ? Math.max(...deltas) : Number.POSITIVE_INFINITY,
+    };
+  });
+  expect(alignment.count).toBeGreaterThan(0);
+  expect(alignment.maxDelta).toBeLessThanOrEqual(1);
 }

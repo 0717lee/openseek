@@ -626,6 +626,45 @@ test "ViewZones refresh source-aware visibility when merged projection is unchan
 }
 
 ///|
+test "ViewZones layout snapshot preserves model anchors after hidden source" {
+  install_view_lifecycle_test_browser()
+  defer restore_view_lifecycle_test_browser()
+  let fixture = view_zones_branch_fixture(
+    "/view-zones-layout-info-hidden-source.txt",
+    (
+      #|first
+      #|markdown-a
+      #|markdown-b
+      #|markdown-c
+      #|last
+    ),
+    @view_model.ViewModelOptions::no_wrap(),
+    20,
+  )
+  defer fixture.dispose()
+  assert_true(
+    fixture.view_model.set_hidden_areas([Range(2, 1, 4, 1)], source="markdown"),
+  )
+  let zone_id = fixture.add_zone(
+    ViewZone(
+      4,
+      @rdom.document().create_element("div"),
+      ignore_hidden_area_source="markdown",
+      height_in_px=19.75,
+    ),
+  )
+  // The projected whitespace can only retain the nearest visible view line.
+  assert_eq(fixture.whitespace(zone_id).after_line_number, 1)
+  guard fixture.view.view_zone_layout_infos() is [info] else {
+    fail("expected one ViewZone layout snapshot")
+  }
+  let (id, after_model_line_number, height_in_px) = info
+  assert_eq(id, zone_id)
+  assert_eq(after_model_line_number, 4)
+  assert_eq(height_in_px, 19.0)
+}
+
+///|
 test "ViewZones preserves raw height callbacks through retained ToInt32" {
   install_view_lifecycle_test_browser()
   defer restore_view_lifecycle_test_browser()

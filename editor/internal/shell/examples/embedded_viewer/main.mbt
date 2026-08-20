@@ -67,6 +67,7 @@ fn memory_workspace() -> MemoryWorkspace {
     memory_file("broken.mbt", "broken.mbt"),
     memory_file("comments-only.mbt", "comments-only.mbt"),
     memory_file("comments.mbt", "comments.mbt"),
+    memory_file("alignment-zones.mbt", "alignment-zones.mbt"),
     memory_file("large.mbt", "large.mbt"),
     memory_file("tabbed-deletion.mbt", "tabbed-deletion.mbt"),
     memory_file("oversized-line.mbt", "oversized-line.mbt"),
@@ -89,6 +90,9 @@ fn memory_workspace() -> MemoryWorkspace {
     "fn review_value() -> Int {", "", "  // updated explanation", "  new_value()",
     "}",
   ].join("\n")
+  documents["\{memory_root}/alignment-zones.mbt"] = alignment_diff_document(
+    false,
+  )
   documents["\{memory_root}/large.mbt"] = large_diff_document("modified")
   documents["\{memory_root}/tabbed-deletion.mbt"] = "let retained = 1\n"
   documents["\{memory_root}/oversized-line.mbt"] = oversized_diff_line("m")
@@ -124,6 +128,9 @@ fn memory_workspace() -> MemoryWorkspace {
   original_documents["\{memory_root}/comments.mbt"] = [
     "fn review_value() -> Int {", "  // obsolete explanation", "  old_value()", "}",
   ].join("\n")
+  original_documents["\{memory_root}/alignment-zones.mbt"] = alignment_diff_document(
+    true,
+  )
   original_documents["\{memory_root}/large.mbt"] = large_diff_document(
     "original",
   )
@@ -170,6 +177,123 @@ fn large_diff_document(prefix : String) -> String {
     content.write_string("let \{prefix}_\{index} = \{index}\n")
   }
   content.to_string()
+}
+
+///|
+/// A valid MoonBit-shaped source pair with two independently measured
+/// Markdown comment ViewZones and visible edits near the top, middle, and
+/// bottom. Comment source line counts stay paired while their rendered pixel
+/// heights differ; later code hunks also change logical line counts.
+fn alignment_diff_document(original : Bool) -> String {
+  let content = StringBuilder()
+  content.write_string("fn alignment_fixture() -> Int {\n")
+  for index in 0..<700 {
+    if index == 20 {
+      content.write_string("  //~ ## First rendered note\n")
+      content.write_string(
+        if original {
+          "  //~ This original-side paragraph is deliberately long enough to wrap across several rendered rows in a narrow diff pane, so its external ViewZone has a larger measured pixel height than the modified-side note.\n"
+        } else {
+          "  //~ Short modified note.\n"
+        },
+      )
+      content.write_string("  //~ Shared final sentence.\n")
+    } else if index == 180 {
+      content.write_string("  //~ ## Second rendered note\n")
+      content.write_string(
+        if original {
+          "  //~ Short original note.\n"
+        } else {
+          "  //~ This modified-side paragraph is deliberately long enough to wrap across several rendered rows in a narrow diff pane, reversing which child owns the taller external ViewZone.\n"
+        },
+      )
+      content.write_string("  //~ Shared final sentence.\n")
+    } else if index == 60 {
+      content.write_string("  //~ ## Shared note before an insertion\n")
+      content.write_string("  //~ Shared note body.\n")
+      if !original {
+        content.write_string("  //~ Inserted documentation line.\n")
+        content.write_string("  //~ Another inserted documentation line.\n")
+        content.write_string("  let inserted_after_comment_60 = 60\n")
+      }
+    } else if index == 300 {
+      content.write_string("  let replacement_300 = 300\n")
+      if !original {
+        content.write_string("  let inserted_301 = 301\n")
+        content.write_string("  let inserted_302 = 302\n")
+      }
+    } else if index == 480 {
+      content.write_string("  let replacement_480 = 480\n")
+      if original {
+        content.write_string("  let deleted_481 = 481\n")
+        content.write_string("  let deleted_482 = 482\n")
+        content.write_string("  let deleted_483 = 483\n")
+      }
+    } else if index == 80 {
+      content.write_string(
+        if original {
+          "  let changed_80 = 80\n"
+        } else {
+          "  let changed_80 = 800\n"
+        },
+      )
+    } else if index == 120 {
+      content.write_string("  let wide_120 = \"" + "x".repeat(400) + "\"\n")
+    } else if index == 640 {
+      content.write_string(
+        if original {
+          "  let changed_640 = 640\n"
+        } else {
+          "  let changed_640 = 6400\n"
+        },
+      )
+    } else {
+      content.write_string("  let stable_\{index} = \{index}\n")
+    }
+  }
+  content.write_string("  0\n}\n")
+  content.to_string()
+}
+
+///|
+priv struct EmbeddedAlignmentMarkdownProvider {}
+
+///|
+impl @language.MarkdownCommentProvider for EmbeddedAlignmentMarkdownProvider with fn provide_markdown_comments(
+  _self,
+  model,
+) {
+  if !model.uri.path.has_suffix("/alignment-zones.mbt") {
+    return []
+  }
+  let snapshot = model.snapshot()
+  let blocks : Array[@language.MarkdownCommentBlock] = []
+  let mut line_number = 1
+  while line_number <= snapshot.line_count() {
+    if !snapshot.get_line_content(line_number).trim().has_prefix("//~") {
+      line_number += 1
+      continue
+    }
+    let start_line_number = line_number
+    let markdown : Array[String] = []
+    while line_number <= snapshot.line_count() {
+      let line = snapshot.get_line_content(line_number).trim().to_owned()
+      if !line.has_prefix("//~") {
+        break
+      }
+      let mut start = 3
+      if start < line.length() && line[start].to_int() == 32 {
+        start += 1
+      }
+      markdown.push(line.unsafe_substring(start~, end=line.length()))
+      line_number += 1
+    }
+    blocks.push({
+      line_range: LineRange(start_line_number, line_number),
+      markdown: markdown.join("\n"),
+    })
+  }
+  blocks
 }
 
 ///|
@@ -593,6 +717,11 @@ fn main {
   // executing it in the example. The discarded function value keeps every
   // supported root/common signature checked by the real embedding package.
   let _ = compile_external_viewer_api_contract
+  @languages.languages.register_markdown_comment_provider(
+    LanguageId("moonbit"),
+    EmbeddedAlignmentMarkdownProvider::{  },
+  )
+  |> ignore
   // Highlighting needs no server: the language package is composed in
   // by import and registered through the viewer languages facade.
   @languages.languages.set_tokens_provider(

@@ -1,9 +1,10 @@
 ///|
-test "diff presentation aligns insertions, deletions, and replacements" {
+test "pixel alignment handles insertions, deletions, and replacements" {
   let changes : Array[DiffLineChange] = [
     {
       original: LineRange(3, 3),
       modified: LineRange(3, 5),
+      paired_inner_changes: [],
       original_inner_changed: [],
       modified_inner_changed: [],
       render_change: true,
@@ -11,6 +12,7 @@ test "diff presentation aligns insertions, deletions, and replacements" {
     {
       original: LineRange(8, 11),
       modified: LineRange(10, 10),
+      paired_inner_changes: [],
       original_inner_changed: [],
       modified_inner_changed: [],
       render_change: true,
@@ -18,6 +20,7 @@ test "diff presentation aligns insertions, deletions, and replacements" {
     {
       original: LineRange(14, 16),
       modified: LineRange(13, 17),
+      paired_inner_changes: [],
       original_inner_changed: [],
       modified_inner_changed: [],
       render_change: true,
@@ -26,31 +29,221 @@ test "diff presentation aligns insertions, deletions, and replacements" {
   let presentation = diff_presentation(changes)
   assert_eq(presentation.original_changed, [LineRange(8, 11), LineRange(14, 16)])
   assert_eq(presentation.modified_changed, [LineRange(3, 5), LineRange(13, 17)])
-  assert_eq(presentation.original_spacers.length(), 2)
-  assert_eq(presentation.original_spacers[0].after_line_number, 2)
-  assert_eq(presentation.original_spacers[0].height_in_lines, 2)
-  assert_eq(presentation.original_spacers[1].after_line_number, 15)
-  assert_eq(presentation.original_spacers[1].height_in_lines, 2)
-  assert_eq(presentation.modified_spacers.length(), 1)
-  assert_eq(presentation.modified_spacers[0].after_line_number, 9)
-  assert_eq(presentation.modified_spacers[0].height_in_lines, 3)
+  let spacers = diff_pixel_spacers(
+    compute_diff_range_alignments(changes, [], [], 20.0, 20.0, _ => 100),
+  )
+  assert_eq(spacers.original.length(), 2)
+  assert_eq(spacers.original[0].after_line_number, 2)
+  assert_eq(spacers.original[0].height_in_px, 40.0)
+  assert_eq(spacers.original[1].after_line_number, 15)
+  assert_eq(spacers.original[1].height_in_px, 40.0)
+  assert_eq(spacers.modified.length(), 1)
+  assert_eq(spacers.modified[0].after_line_number, 9)
+  assert_eq(spacers.modified[0].height_in_px, 60.0)
 }
 
 ///|
-test "diff presentation supports a spacer before the first line" {
+test "pixel alignment supports a spacer before the first line" {
   let changes : Array[DiffLineChange] = [
     {
       original: LineRange(1, 1),
       modified: LineRange(1, 3),
+      paired_inner_changes: [],
       original_inner_changed: [],
       modified_inner_changed: [],
       render_change: true,
     },
   ]
-  let presentation = diff_presentation(changes)
-  assert_eq(presentation.original_spacers.length(), 1)
-  assert_eq(presentation.original_spacers[0].after_line_number, 0)
-  assert_eq(presentation.original_spacers[0].height_in_lines, 2)
+  let spacers = diff_pixel_spacers(
+    compute_diff_range_alignments(changes, [], [], 20.0, 20.0, _ => 100),
+  )
+  assert_eq(spacers.original.length(), 1)
+  assert_eq(spacers.original[0].after_line_number, 0)
+  assert_eq(spacers.original[0].height_in_px, 40.0)
+}
+
+///|
+test "pixel alignment creates synchronization points inside a hunk" {
+  let original = @base_common.Range(2, 5, 3, 4)
+  let modified = @base_common.Range(2, 5, 4, 4)
+  let change : DiffLineChange = {
+    original: LineRange(2, 6),
+    modified: LineRange(2, 8),
+    paired_inner_changes: [{ original, modified }],
+    original_inner_changed: [original],
+    modified_inner_changed: [modified],
+    render_change: true,
+  }
+  let spacers = diff_pixel_spacers(
+    compute_diff_range_alignments([change], [], [], 20.0, 20.0, _ => 100),
+  )
+  assert_eq(spacers.original.length(), 2)
+  assert_eq(spacers.original[0].after_line_number, 2)
+  assert_eq(spacers.original[0].height_in_px, 20.0)
+  assert_eq(spacers.original[1].after_line_number, 5)
+  assert_eq(spacers.original[1].height_in_px, 20.0)
+  assert_true(spacers.modified.is_empty())
+}
+
+///|
+test "foreign ViewZones align unchanged regions by pixel height" {
+  let spacers = diff_pixel_spacers(
+    compute_diff_range_alignments(
+      [],
+      [
+        { line_number: 3, height_in_px: 30.0 },
+        { line_number: 8, height_in_px: 5.0 },
+      ],
+      [
+        { line_number: 3, height_in_px: 10.0 },
+        { line_number: 6, height_in_px: 25.0 },
+      ],
+      20.0,
+      20.0,
+      _ => 100,
+    ),
+  )
+  assert_eq(spacers.modified.length(), 2)
+  assert_eq(spacers.modified[0].after_line_number, 3)
+  assert_eq(spacers.modified[0].height_in_px, 20.0)
+  assert_eq(spacers.modified[1].after_line_number, 8)
+  assert_eq(spacers.modified[1].height_in_px, 5.0)
+  assert_eq(spacers.original.length(), 1)
+  assert_eq(spacers.original[0].after_line_number, 6)
+  assert_eq(spacers.original[0].height_in_px, 25.0)
+}
+
+///|
+test "owned alignment zones are excluded and foreign zones are combined" {
+  let heights = additional_line_heights_from_view_zones(
+    [
+      { id: "owned", after_line_number: 4, height_in_px: 60.0 },
+      { id: "foreign-a", after_line_number: 4, height_in_px: 12.0 },
+      { id: "foreign-b", after_line_number: 4, height_in_px: 8.0 },
+      { id: "foreign-c", after_line_number: 9, height_in_px: 7.0 },
+    ],
+    ["owned"],
+  )
+  assert_eq(heights.length(), 2)
+  assert_eq(heights[0].line_number, 4)
+  assert_eq(heights[0].height_in_px, 20.0)
+  assert_eq(heights[1].line_number, 9)
+  assert_eq(heights[1].height_in_px, 7.0)
+}
+
+///|
+test "hidden Markdown source lines contribute zero height beside their zone" {
+  let heights = additional_line_heights_from_layout(
+    [{ id: "markdown", after_line_number: 4, height_in_px: 113.0 }],
+    [],
+    [Range(2, 1, 4, 1)],
+    18.0,
+  )
+  assert_eq(heights.length(), 3)
+  assert_eq(heights[0].line_number, 2)
+  assert_eq(heights[0].height_in_px, -18.0)
+  assert_eq(heights[1].line_number, 3)
+  assert_eq(heights[1].height_in_px, -18.0)
+  assert_eq(heights[2].line_number, 4)
+  assert_eq(heights[2].height_in_px, 95.0)
+}
+
+///|
+test "tail balance closes residual physical content height differences" {
+  let balanced = balance_diff_pixel_spacers(
+    {
+      original: [{ after_line_number: 4, height_in_px: 20.0 }],
+      modified: [{ after_line_number: 6, height_in_px: 5.0 }],
+    },
+    100.0,
+    150.0,
+    10,
+    12,
+  )
+  assert_eq(balanced.original.length(), 2)
+  assert_eq(balanced.original[1].after_line_number, 10)
+  assert_eq(balanced.original[1].height_in_px, 35.0)
+  assert_eq(balanced.modified.length(), 1)
+  let already_equal = balance_diff_pixel_spacers(
+    { original: [], modified: [] },
+    200.0,
+    200.4,
+    10,
+    10,
+  )
+  assert_true(already_equal.original.is_empty())
+  assert_true(already_equal.modified.is_empty())
+}
+
+///|
+test "overview markers enforce four CSS pixels across device scale" {
+  let bands = resolve_diff_overview_bands(
+    [{ start_line_number: 100, height_in_lines: 1 }],
+    20.0,
+    100.0,
+    10000.0,
+    2.0,
+    line_number => (line_number - 1).to_double() * 20.0,
+  )
+  assert_eq(bands.length(), 1)
+  assert_eq(bands[0].from, 35)
+  assert_eq(bands[0].to, 43)
+  assert_eq(bands[0].to - bands[0].from, 8)
+}
+
+///|
+test "overview bands scale and merge overlapping same-color intervals" {
+  let bands = resolve_diff_overview_bands(
+    [
+      { start_line_number: 1, height_in_lines: 1 },
+      { start_line_number: 2, height_in_lines: 1 },
+    ],
+    20.0,
+    100.0,
+    1000.0,
+    1.0,
+    line_number => (line_number - 1).to_double() * 20.0,
+  )
+  assert_eq(bands.length(), 1)
+  assert_eq(bands[0].from, 0)
+  assert_eq(bands[0].to, 5)
+}
+
+///|
+test "overview omits ignored-only changes" {
+  let ignored : DiffLineChange = {
+    original: LineRange(1, 3),
+    modified: LineRange(1, 4),
+    paired_inner_changes: [],
+    original_inner_changed: [],
+    modified_inner_changed: [],
+    render_change: false,
+  }
+  let visible : DiffLineChange = {
+    original: LineRange(5, 7),
+    modified: LineRange(6, 6),
+    paired_inner_changes: [],
+    original_inner_changed: [],
+    modified_inner_changed: [],
+    render_change: true,
+  }
+  let original_markers = diff_overview_markers([ignored, visible], true)
+  assert_eq(original_markers.length(), 1)
+  assert_eq(original_markers[0].start_line_number, 5)
+  assert_eq(original_markers[0].height_in_lines, 2)
+  assert_true(diff_overview_markers([ignored, visible], false).is_empty())
+}
+
+///|
+test "shared diff thumb follows modified scrollbar geometry" {
+  let middle = diff_overview_thumb(100.0, 1000.0, 450.0)
+  assert_eq(middle.top, 40.0)
+  assert_eq(middle.height, 20.0)
+  assert_eq(middle.max_scroll_top, 900.0)
+  let fitted = diff_overview_thumb(100.0, 50.0, 0.0)
+  assert_eq(fitted.top, 0.0)
+  assert_eq(fitted.height, 100.0)
+  assert_eq(fitted.max_scroll_top, 0.0)
 }
 
 ///|
@@ -62,6 +255,7 @@ test "diff presentation separates non-empty character ranges by side" {
     {
       original: LineRange(3, 5),
       modified: LineRange(3, 5),
+      paired_inner_changes: [{ original, modified }],
       original_inner_changed: [original, Range(4, 1, 4, 1)],
       modified_inner_changed: [modified, inserted],
       render_change: true,
@@ -94,6 +288,7 @@ test "unified deleted zones precede replacement and deletion anchors" {
     unified_deleted_zone_anchor({
       original: LineRange(4, 6),
       modified: LineRange(4, 5),
+      paired_inner_changes: [],
       original_inner_changed: [],
       modified_inner_changed: [],
       render_change: true,
@@ -104,6 +299,7 @@ test "unified deleted zones precede replacement and deletion anchors" {
     unified_deleted_zone_anchor({
       original: LineRange(1, 3),
       modified: LineRange(1, 1),
+      paired_inner_changes: [],
       original_inner_changed: [],
       modified_inner_changed: [],
       render_change: true,
@@ -223,9 +419,14 @@ test "token and tree diff accept ignored-only source pairs" {
     let presentation = diff_presentation(calculation.changes)
     assert_true(presentation.original_changed.is_empty())
     assert_true(presentation.modified_changed.is_empty())
-    assert_eq(presentation.original_spacers.length(), 1)
-    assert_eq(presentation.original_spacers[0].after_line_number, 1)
-    assert_eq(presentation.original_spacers[0].height_in_lines, 1)
+    let spacers = diff_pixel_spacers(
+      compute_diff_range_alignments(calculation.changes, [], [], 20.0, 20.0, _ => {
+        100
+      }),
+    )
+    assert_eq(spacers.original.length(), 1)
+    assert_eq(spacers.original[0].after_line_number, 1)
+    assert_eq(spacers.original[0].height_in_px, 20.0)
   }
   let visible = calculate_diff_changes(
     TokenDiff,
@@ -339,10 +540,13 @@ test "ignored one-sided rows align panes without change decoration" {
   let presentation = diff_presentation(changes)
   assert_eq(presentation.original_changed, [LineRange(1, 2), LineRange(2, 3)])
   assert_eq(presentation.modified_changed, [LineRange(1, 2), LineRange(3, 4)])
-  assert_eq(presentation.original_spacers.length(), 1)
-  assert_eq(presentation.original_spacers[0].after_line_number, 1)
-  assert_eq(presentation.original_spacers[0].height_in_lines, 1)
-  assert_true(presentation.modified_spacers.is_empty())
+  let spacers = diff_pixel_spacers(
+    compute_diff_range_alignments(changes, [], [], 20.0, 20.0, _ => 100),
+  )
+  assert_eq(spacers.original.length(), 1)
+  assert_eq(spacers.original[0].after_line_number, 1)
+  assert_eq(spacers.original[0].height_in_px, 20.0)
+  assert_true(spacers.modified.is_empty())
 }
 
 ///|

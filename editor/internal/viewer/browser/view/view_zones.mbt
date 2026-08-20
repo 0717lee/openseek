@@ -389,6 +389,32 @@ fn ViewZones::zone_keys_snapshot(self : ViewZones) -> Array[String] {
 }
 
 ///|
+/// Returns the live layout height together with the caller's original model
+/// anchor for every registered zone. `LinesLayout` stores only the projected
+/// view-line anchor, which cannot be converted back losslessly when the zone
+/// follows hidden source lines. Keeping the model anchor from the delegate and
+/// the actual rounded whitespace height from ViewLayout gives coordinators a
+/// read-only, pixel-accurate snapshot without exposing the mutable registry.
+fn ViewZones::layout_infos(self : ViewZones) -> Array[(String, Int, Double)] {
+  guard self.context is Some(context) else { return [] }
+  let layout_heights : Map[String, Double] = Map([])
+  for whitespace in context.view_model.get_whitespaces() {
+    layout_heights.set(whitespace.id, whitespace.height.to_double())
+  }
+  let result : Array[(String, Int, Double)] = []
+  for _, zone in self.zones {
+    result.push(
+      (
+        zone.whitespace_id,
+        zone.delegate.after_line_number,
+        layout_heights.get(zone.whitespace_id).unwrap_or(0.0),
+      ),
+    )
+  }
+  result
+}
+
+///|
 fn ViewZones::zone_ordinal(
   _self : ViewZones,
   zone : @editor_browser.ViewZone,
