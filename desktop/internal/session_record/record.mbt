@@ -312,7 +312,21 @@ fn Tail::consume(
   self : Tail,
   line : BytesView,
 ) -> @protocol.SessionEvent? raise RecordError {
-  let text = @utf8.decode_lossy(line).trim(chars="\r\n \t").to_owned()
+  // Strict, like the store's own reader: bytes that are not UTF-8 are a defect
+  // to report, not one to paper over. Decoding them lossily would hand clients
+  // a durable commit whose text silently differs from the record's — and, on
+  // the unterminated-tail path below, could turn a line cut mid-character into
+  // a plausible-looking event.
+  let text = @utf8.decode(line) catch {
+    // `Malformed` carries the whole suffix from the offending byte onward, and
+    // one line can be hundreds of kilobytes — say where it went wrong, and show
+    // only the bytes that did.
+    Malformed(rest) =>
+      raise Unreadable(
+        "the session record holds a line that is not UTF-8 at byte \{line.length() - rest.length()}: \{@debug.Repr(if rest.length() > 4 { rest[:4] } else { rest })}",
+      )
+  }
+  let text = text.trim(chars="\r\n \t").to_owned()
   if text.is_empty() {
     return None
   }

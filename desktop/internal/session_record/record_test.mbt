@@ -199,6 +199,30 @@ async test "an event line longer than one read is folded in whole" {
 }
 
 ///|
+async test "a line that is not UTF-8 is refused, not silently mangled" {
+  let (root, path) = record_fixture("s-13")
+  // A lone 0xFF cannot begin any UTF-8 sequence. Decoding it lossily would
+  // turn it into U+FFFD, and the line would then parse — publishing a durable
+  // commit whose text is not what the writer wrote.
+  @fsx.write_bytes(
+    path, b"{\"version\":1,\"id\":\"s-13\",\"system_prompt\":\"\"}\n{\"sequence\":1,\"ts\":0,\"item\":{\"kind\":\"user\",\"payload\":{\"content\":\"\xff\"}}}\n",
+  )
+  let refusal = try {
+    ignore(@session_record.Tail(root, "s-13").poll())
+    "read"
+  } catch {
+    @session_record.Unreadable(detail) => detail
+    error => "\{error}"
+  }
+  inspect(
+    refusal,
+    content=(
+      #|the session record holds a line that is not UTF-8 at byte 65: <BytesView: [0xff, 0x22, 0x7d, 0x7d]>
+    ),
+  )
+}
+
+///|
 async test "a poll waits for the writer to finish committing" {
   let (root, path) = record_fixture("s-12")
   write_record(path, header_line("s-12") + event_line(1, "one"))
