@@ -27,7 +27,7 @@ fn is_model_directed_notice(content : String) -> Bool {
 /// stream) into the watcher status and the diagnostic lines, dropping the
 /// metadata assignments the engine prepends.
 pub fn parse_runtime_update(content : String) -> RuntimeUpdateView {
-  let mut status = ""
+  let mut status : String? = None
   let diagnostics : Array[String] = []
   for raw in content.split("\n") {
     let line = raw.to_owned()
@@ -38,7 +38,7 @@ pub fn parse_runtime_update(content : String) -> RuntimeUpdateView {
       let key = key.to_owned()
       if runtime_metadata_keys.contains(key) {
         if key == "status" {
-          status = value.to_owned()
+          status = Some(value.to_owned())
         }
         true
       } else {
@@ -56,10 +56,9 @@ pub fn parse_runtime_update(content : String) -> RuntimeUpdateView {
 
 ///|
 fn runtime_update_title(update : RuntimeUpdateView) -> String {
-  if update.status.is_empty() {
-    "moon_check"
-  } else {
-    "moon_check \{update.status}"
+  match update.status {
+    Some(status) => "moon_check \{status}"
+    None => "moon_check"
   }
 }
 
@@ -68,7 +67,7 @@ test "parse runtime update strips moon_check metadata" {
   let update = parse_runtime_update(
     "[moon_check update]\nevents=3\nid=moon-check-1\ncwd=.\ncommand=moon check --watch --diagnostic-limit 10\nstatus=running\nseq=3\nWarning: unused variable x\nFinished.",
   )
-  inspect(update.status, content="running")
+  assert_eq(update.status, Some("running"))
   inspect(
     update.diagnostics.join("|"),
     content="Warning: unused variable x|Finished.",
@@ -80,6 +79,6 @@ test "parse runtime update keeps diagnostic assignment lines" {
   let update = parse_runtime_update(
     "[moon_check update]\nstatus=running\nlet buf = Buffer()\nFinished.",
   )
-  inspect(update.status, content="running")
+  assert_eq(update.status, Some("running"))
   inspect(update.diagnostics.join("|"), content="let buf = Buffer()|Finished.")
 }

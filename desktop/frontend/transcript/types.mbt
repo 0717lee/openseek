@@ -52,9 +52,10 @@ pub(all) struct TranscriptItem {
 
 ///|
 /// A `runtime_update` notice split into the watcher's status and the
-/// diagnostic lines worth showing.
+/// diagnostic lines worth showing. `status` is absent when the notice
+/// carried no `status=` assignment at all.
 pub struct RuntimeUpdateView {
-  status : String
+  status : String?
   diagnostics : Array[String]
 }
 

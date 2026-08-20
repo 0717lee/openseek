@@ -45,7 +45,7 @@ test "transcript markup exposes conversation identity" {
     root=Some(root),
     submission_generation=7,
     items=[],
-    streaming_response="",
+    streaming_response=None,
     streaming_identity="idle",
   )
   let rendered = transcript_view(
@@ -96,7 +96,7 @@ test "transcript stream children use stable typed keys in display order" {
       },
       { item: first_tool, identity: "s43\u{0}o0" },
     ],
-    streaming_response="partial answer",
+    streaming_response=Some("partial answer"),
     streaming_identity="r7",
   )
   let renderer : TranscriptRenderer = {
@@ -144,7 +144,7 @@ test "transcript stream section key scopes equal session ids by channel" {
     root=None,
     submission_generation=0,
     items=[],
-    streaming_response="",
+    streaming_response=None,
     streaming_identity="idle",
   )
   let remote = {

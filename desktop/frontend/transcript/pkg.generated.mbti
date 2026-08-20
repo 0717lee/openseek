@@ -85,7 +85,7 @@ pub(all) struct LauncherAppItem {
 } derive(Eq)
 
 pub struct RuntimeUpdateView {
-  status : String
+  status : String?
   diagnostics : Array[String]
 }
 

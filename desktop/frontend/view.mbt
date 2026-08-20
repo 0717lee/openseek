@@ -57,9 +57,8 @@ fn setting_select(control : @html.Html) -> @html.Html {
 
 ///|
 fn conversation_title(conv : Conversation) -> String {
-  // Titles follow the committed user transcript. Client-local failure notices
-  // are visible too but never qualify as a title.
-  for item in conv.visible_items() {
+  // Titles follow the committed user transcript.
+  for item in conv.messages {
     if item.kind is User {
       // A prompt sent with chips titles by what was typed (or, chips alone,
       // by their labels) — never by the raw `<user_mentions>` envelope.
@@ -1691,7 +1690,7 @@ fn launcher_view(
 ) -> @html.Html {
   // A conversation's workspace exists only once it has run; a fresh chat with
   // no turn yet has nothing to open, so the launcher is disabled until then.
-  let ready = !conv.visible_items().is_empty() || conv.is_running()
+  let ready = !conv.messages.is_empty() || conv.is_running()
   let children : Array[@html.Html] = [
     @html.button(
       class=if model.launcher.open {
@@ -1768,8 +1767,8 @@ fn topbar_view(
   if conv.turn.usage_tokens > 0 {
     items.push(@html.span(class="pill", token_label(conv.turn.usage_tokens)))
   }
-  if !conv.watcher_status.is_empty() {
-    items.push(@html.span(class="pill", "moon_check \{conv.watcher_status}"))
+  if conv.watcher_status is Some(status) {
+    items.push(@html.span(class="pill", "moon_check \{status}"))
   }
   // The launcher opens GUI apps on the host machine, which only means
   // something when the page IS that machine's desktop window; from a remote

@@ -512,9 +512,11 @@ priv struct RunState {
   // Live text of the in-flight assistant turn, accumulated from
   // `assistant_delta` events and cleared by ordered full semantic, step,
   // run-lifecycle, or reconnect boundaries. Follower commits are not run/step
-  // tagged and therefore never clear a potentially newer stream. Empty means
-  // not streaming.
-  streaming_response : String
+  // tagged and therefore never clear a potentially newer stream. `None` is
+  // not streaming — the one place this client shows text the durable record
+  // has not committed yet, and the only reason it is a separate field from
+  // `messages` rather than a row inside it.
+  streaming_response : String?
   // Sub-runs this turn has in flight, in the order they started. Live-only:
   // nothing persists a sub-run's progress, so a reload mid-turn shows the
   // tool call pending with no lane under it.
@@ -526,7 +528,7 @@ priv struct RunState {
 /// The state a turn starts from. A conversation with no run open holds one
 /// too: every field means "nothing observed".
 fn RunState::empty() -> RunState {
-  { streaming_response: "", subruns: [], usage_tokens: 0 }
+  { streaming_response: None, subruns: [], usage_tokens: 0 }
 }
 
 ///|
@@ -622,7 +624,10 @@ priv struct Conversation {
   // reason. It sits out here rather than in the probe because clearing the
   // probe must not rewind it — see `Conversation::forget_pull_request`.
   pull_request_generation : Int
-  watcher_status : String
+  // The engine's `moon_check --watch` state, as its last `runtime_update`
+  // notice reported it. `None` until one arrives — a conversation whose
+  // engine runs no watcher never shows the chip at all.
+  watcher_status : String?
   // Everything belonging to the turn in flight; see `RunState`.
   turn : RunState
   // Steers submitted into an open run and not yet acknowledged — the queue
@@ -641,7 +646,10 @@ priv struct Conversation {
   // arrives after it.
   pending_prompt : PendingPrompt?
   // The durable transcript: exactly what `session.load` snapshots and
-  // `session.event` commits said, nothing else. Copy-on-write.
+  // `session.event` commits said, nothing else — this is also everything the
+  // transcript shows. Every failure the record will never carry is reported
+  // to the user directly instead, so no client-local row has to be placed in
+  // a chronology it does not belong to. Copy-on-write.
   messages : Array[@transcript.TranscriptItem]
   // The highest durable sequence `messages` reflects: commits at or below it
   // are already applied, `watermark + 1` applies next, and anything later is
@@ -2149,7 +2157,7 @@ fn empty_conversation(
     branch_generation: 0,
     pull_request: None,
     pull_request_generation: 0,
-    watcher_status: "",
+    watcher_status: None,
     turn: RunState::empty(),
     pending_steers: [],
     pending_prompt: None,
@@ -3209,7 +3217,7 @@ fn Conversation::run_heartbeat(self : Conversation) -> @composer.RunHeartbeat? {
 
 ///|
 fn Conversation::clear_streams(self : Conversation) -> Conversation {
-  { ..self, turn: { ..self.turn, streaming_response: "" } }
+  { ..self, turn: { ..self.turn, streaming_response: None } }
 }
 
 ///|
@@ -3492,17 +3500,6 @@ fn Conversation::forget_steers_for_run(
     return self
   }
   { ..self, pending_steers, }
-}
-
-///|
-/// What the transcript shows: the durable record, and nothing else. Every
-/// failure the record will never carry is reported to the user directly
-/// instead, so no client-local row has to be placed in a chronology it does
-/// not belong to.
-fn Conversation::visible_items(
-  self : Conversation,
-) -> Array[@transcript.TranscriptItem] {
-  self.messages
 }
 
 ///|

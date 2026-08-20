@@ -456,7 +456,7 @@ pub fn apply_session_item(
           None =>
             if !is_model_directed_notice(payload.content) {
               let update = parse_runtime_update(payload.content)
-              if !update.status.is_empty() || update.diagnostics.length() > 0 {
+              if update.status is Some(_) || update.diagnostics.length() > 0 {
                 items.push({
                   kind: Tool(
                     call_id="",

@@ -21,8 +21,8 @@ fn TranscriptRowIdentity::wire(self : TranscriptRowIdentity) -> String {
 
 ///|
 /// Key every durable row by the event it came from. This is deliberately
-/// separate from `visible_items`, whose callers only need transcript content
-/// and should not know renderer keys.
+/// separate from `messages` itself, which callers that only need transcript
+/// content read directly and should not know renderer keys.
 fn Conversation::visible_transcript_rows(
   self : Conversation,
 ) -> Array[@transcript_component.VisibleRow] {

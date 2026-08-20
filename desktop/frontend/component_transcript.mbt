@@ -18,7 +18,7 @@ fn Model::transcript_input(self : Model) -> @transcript_component.Input {
         items=@transcript_component.VisibleRow::history(
           self.codex.transcript_items(),
         ),
-        streaming_response="",
+        streaming_response=None,
         streaming_identity="idle",
       )
     }
@@ -32,7 +32,7 @@ fn Model::transcript_input(self : Model) -> @transcript_component.Input {
             root=None,
             submission_generation=self.submission_sequence,
             items=[],
-            streaming_response="",
+            streaming_response=None,
             streaming_identity="",
           )
         Some(conversation) =>

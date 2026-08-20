@@ -1064,14 +1064,12 @@ fn apply_engine_event(
       if content.is_empty() {
         (None, conv)
       } else {
+        let carried = conv.turn.streaming_response.unwrap_or("")
         (
           None,
           {
             ..conv,
-            turn: {
-              ..conv.turn,
-              streaming_response: conv.turn.streaming_response + content,
-            },
+            turn: { ..conv.turn, streaming_response: Some(carried + content) },
           },
         )
       }
@@ -7354,7 +7352,7 @@ test "assistant deltas accumulate into the streaming response" {
     Engine(Some("r7"), AssistantDelta(", world"), session=None),
     first,
   )
-  inspect(second.active().turn.streaming_response, content="Hello, world")
+  assert_eq(second.active().turn.streaming_response, Some("Hello, world"))
   inspect(second.active().messages.length(), content="0")
 }
 
@@ -7363,7 +7361,7 @@ test "update is pure: replaying a delta on the same model is idempotent" {
   let dispatch = test_dispatch()
   let model = running_model().replace_conversation({
     ..running_conversation(),
-    turn: { ..running_conversation().turn, streaming_response: "partial" },
+    turn: { ..running_conversation().turn, streaming_response: Some("partial") },
   })
   let (_, once) = update_dev(
     dispatch,
@@ -7375,8 +7373,8 @@ test "update is pure: replaying a delta on the same model is idempotent" {
     Engine(Some("r7"), AssistantDelta("!"), session=None),
     model,
   )
-  inspect(once.active().turn.streaming_response, content="partial!")
-  inspect(twice.active().turn.streaming_response, content="partial!")
+  assert_eq(once.active().turn.streaming_response, Some("partial!"))
+  assert_eq(twice.active().turn.streaming_response, Some("partial!"))
 }
 
 ///|
@@ -7387,7 +7385,7 @@ test "deltas from an unknown run are dropped" {
     Engine(Some("r99"), AssistantDelta("stale"), session=None),
     running_model(),
   )
-  inspect(next.active().turn.streaming_response, content="")
+  assert_eq(next.active().turn.streaming_response, None)
 }
 
 ///|
@@ -7490,14 +7488,14 @@ test "assistant message only settles the transient response" {
   let dispatch = test_dispatch()
   let model = running_model().replace_conversation({
     ..running_conversation(),
-    turn: { ..running_conversation().turn, streaming_response: "answ" },
+    turn: { ..running_conversation().turn, streaming_response: Some("answ") },
   })
   let (_, next) = update_dev(
     dispatch,
     Engine(Some("r7"), AssistantMessage("answer"), session=None),
     model,
   )
-  inspect(next.active().turn.streaming_response, content="")
+  assert_eq(next.active().turn.streaming_response, None)
   inspect(next.active().messages.length(), content="0")
 }
 
@@ -7508,7 +7506,7 @@ test "agent setup failure is lifecycle-only until its durable terminal" {
     ..running_conversation(),
     turn: {
       ..running_conversation().turn,
-      streaming_response: "partial answer",
+      streaming_response: Some("partial answer"),
     },
   })
   let (_, next) = update_dev(
@@ -7516,7 +7514,7 @@ test "agent setup failure is lifecycle-only until its durable terminal" {
     Engine(Some("r7"), AgentSetupFailed("could not initialize"), session=None),
     model,
   )
-  inspect(next.active().turn.streaming_response, content="")
+  assert_eq(next.active().turn.streaming_response, None)
   inspect(next.active().messages.length(), content="0")
 }
 
@@ -7525,14 +7523,14 @@ test "a new agent step clears the live stream" {
   let dispatch = test_dispatch()
   let model = running_model().replace_conversation({
     ..running_conversation(),
-    turn: { ..running_conversation().turn, streaming_response: "left" },
+    turn: { ..running_conversation().turn, streaming_response: Some("left") },
   })
   let (_, next) = update_dev(
     dispatch,
     Engine(Some("r7"), AgentStep(Some(2)), session=None),
     model,
   )
-  inspect(next.active().turn.streaming_response, content="")
+  assert_eq(next.active().turn.streaming_response, None)
 }
 
 ///|
@@ -7540,7 +7538,10 @@ test "finished run clears any leftover stream" {
   let dispatch = test_dispatch()
   let model = running_model().replace_conversation({
     ..running_conversation(),
-    turn: { ..running_conversation().turn, streaming_response: "leftover" },
+    turn: {
+      ..running_conversation().turn,
+      streaming_response: Some("leftover"),
+    },
   })
   let (_, next) = update_dev(
     dispatch,
@@ -7552,7 +7553,7 @@ test "finished run clears any leftover stream" {
     ),
     model,
   )
-  inspect(next.active().turn.streaming_response, content="")
+  assert_eq(next.active().turn.streaming_response, None)
   inspect(next.active().is_running(), content="false")
 }
 
@@ -7710,7 +7711,7 @@ test "an idle background notice routes by the last run id" {
     Engine(Some("r7"), RuntimeUpdate(notice), session=None),
     model,
   )
-  inspect(next.active().watcher_status, content="failed")
+  assert_eq(next.active().watcher_status, Some("failed"))
 }
 
 ///|
@@ -8276,7 +8277,7 @@ test "open session keeps live state on screen while re-reading the store" {
         "desktop-bg",
         @interop.ChannelId::Local.test_project(),
       ).turn,
-      streaming_response: "mid-stream",
+      streaming_response: Some("mid-stream"),
     },
   }
   let model = running_model().replace_conversation(background)
@@ -8293,7 +8294,7 @@ test "open session keeps live state on screen while re-reading the store" {
   inspect(once.active_session, content="desktop-bg")
   // The live state stays on screen; the store re-read happens behind it
   // (this client may have been absent for part of this conversation).
-  inspect(once.active().turn.streaming_response, content="mid-stream")
+  assert_eq(once.active().turn.streaming_response, Some("mid-stream"))
   inspect(once.active().is_running(), content="true")
   assert_true(
     once.loading_conversation is Some({ channel: Local, session: "desktop-bg" }),
@@ -8345,7 +8346,7 @@ test "BridgeReady clears every non-replayable stream and compaction phase" {
   let active = {
     ..test_conversation(),
     compaction: Queued,
-    turn: { ..test_conversation().turn, streaming_response: "old answer" },
+    turn: { ..test_conversation().turn, streaming_response: Some("old answer") },
   }
   let background = {
     ..empty_conversation(
@@ -8360,7 +8361,7 @@ test "BridgeReady clears every non-replayable stream and compaction phase" {
         "desktop-bg",
         @interop.ChannelId::Local.test_project(),
       ).turn,
-      streaming_response: "background answer",
+      streaming_response: Some("background answer"),
     },
   }
   let model = test_model()
@@ -8368,7 +8369,7 @@ test "BridgeReady clears every non-replayable stream and compaction phase" {
     .replace_conversation(background)
   let (_, next) = update_dev(dispatch, BridgeReady, model)
   for conv in next.conversations {
-    inspect(conv.turn.streaming_response, content="")
+    assert_eq(conv.turn.streaming_response, None)
     assert_true(conv.compaction is NotCompacting)
   }
 }
@@ -8526,7 +8527,7 @@ test "BridgeReady resets only conversations owned by its channel" {
         "shared",
         @interop.ChannelId::Local.test_project(),
       ).turn,
-      streaming_response: "local answer",
+      streaming_response: Some("local answer"),
     },
   }
   let remote = {
@@ -8534,7 +8535,7 @@ test "BridgeReady resets only conversations owned by its channel" {
     compaction: Compacting,
     turn: {
       ..empty_conversation(background, "shared", background.test_project()).turn,
-      streaming_response: "remote answer",
+      streaming_response: Some("remote answer"),
     },
   }
   let model = {
@@ -8552,9 +8553,9 @@ test "BridgeReady resets only conversations owned by its channel" {
     next.find_conversation(background, "shared") is Some(reset) else {
     fail("same-id conversations were not preserved")
   }
-  inspect(kept.turn.streaming_response, content="local answer")
+  assert_eq(kept.turn.streaming_response, Some("local answer"))
   assert_true(kept.compaction is Queued)
-  inspect(reset.turn.streaming_response, content="")
+  assert_eq(reset.turn.streaming_response, None)
   assert_true(reset.compaction is NotCompacting)
 }
 
@@ -9375,12 +9376,12 @@ test "session loaded swaps the active conversation onto the stored session" {
   let model = test_model()
     .replace_conversation({
       ..test_conversation(),
-      watcher_status: "running",
+      watcher_status: Some("running"),
       messages: [{ kind: User, content: "old chat", ts: None, sequence: None }],
       turn: {
         ..test_conversation().turn,
         usage_tokens: 42,
-        streaming_response: "leftover",
+        streaming_response: Some("leftover"),
       },
     })
     // The stored session is opened from its sidebar row, which is what
@@ -9438,9 +9439,9 @@ test "session loaded swaps the active conversation onto the stored session" {
   inspect(once.active_session, content="desktop-stored")
   inspect(once.active().messages.length(), content="2")
   inspect(once.active().messages[0].content, content="stored question")
-  inspect(once.active().turn.streaming_response, content="")
+  assert_eq(once.active().turn.streaming_response, None)
   inspect(once.active().turn.usage_tokens, content="0")
-  inspect(once.active().watcher_status, content="")
+  assert_eq(once.active().watcher_status, None)
   assert_eq(
     once.active().workspace,
     Project(root=@interop.ChannelId::Local.test_project()),
@@ -9485,7 +9486,10 @@ test "session loaded adopts the store transcript and keeps live run state" {
   // run state (phase, streaming buffers) rides across untouched.
   let streaming = running_model().replace_conversation({
     ..running_conversation(),
-    turn: { ..running_conversation().turn, streaming_response: "mid-step" },
+    turn: {
+      ..running_conversation().turn,
+      streaming_response: Some("mid-step"),
+    },
   })
   let loading_same = {
     ..streaming.replace_conversation({
@@ -9509,7 +9513,7 @@ test "session loaded adopts the store transcript and keeps live run state" {
   inspect(same.active().messages.length(), content="1")
   inspect(same.active().messages[0].content, content="stored")
   inspect(same.active().is_running(), content="true")
-  inspect(same.active().turn.streaming_response, content="mid-step")
+  assert_eq(same.active().turn.streaming_response, Some("mid-step"))
 }
 
 ///|
@@ -9709,7 +9713,7 @@ test "a run boundary discards the previous turn's live state whole" {
     ..running_conversation(),
     run: Open(run_id="r-old", stage=AtStep(Some(3))),
     turn: {
-      streaming_response: "old answer fragment",
+      streaming_response: Some("old answer fragment"),
       subruns: [lane],
       usage_tokens: 4200,
     },
@@ -9731,7 +9735,7 @@ test "a run boundary discards the previous turn's live state whole" {
   guard next.active().run is Open(run_id="r-new", ..) else {
     fail("expected the new run to replace the old id")
   }
-  inspect(next.active().turn.streaming_response, content="")
+  assert_eq(next.active().turn.streaming_response, None)
   inspect(next.active().turn.subruns.length(), content="0")
   inspect(next.active().turn.usage_tokens, content="0")
 }
@@ -9745,7 +9749,7 @@ test "a distinct started id replaces a stale open run as foreign" {
       run: Open(run_id="r-old", stage=AtStep(Some(3))),
       turn: {
         ..running_conversation().turn,
-        streaming_response: "old answer fragment",
+        streaming_response: Some("old answer fragment"),
       },
       run_started_ms: Some(1_000.0),
     },
@@ -9768,7 +9772,7 @@ test "a distinct started id replaces a stale open run as foreign" {
   guard next.active().run is Open(run_id="r-new", stage=Opened) else {
     fail("expected the new run to replace the stale id")
   }
-  inspect(next.active().turn.streaming_response, content="")
+  assert_eq(next.active().turn.streaming_response, None)
   inspect(next.active().pending_steers.length(), content="0")
   // The replaced run took its pending input with it and left no placeholder:
   // what the turn actually recorded is in the transcript.
@@ -9789,7 +9793,7 @@ test "a repeated started id is idempotent" {
       run: Open(run_id="r7", stage=AtStep(Some(4))),
       turn: {
         ..running_conversation().turn,
-        streaming_response: "current fragment",
+        streaming_response: Some("current fragment"),
       },
     },
     ["current steer"],
@@ -9810,7 +9814,7 @@ test "a repeated started id is idempotent" {
   guard next.active().run is Open(run_id="r7", stage=AtStep(Some(4))) else {
     fail("a repeated start reset the live run stage")
   }
-  inspect(next.active().turn.streaming_response, content="current fragment")
+  assert_eq(next.active().turn.streaming_response, Some("current fragment"))
   inspect(next.active().pending_steers.length(), content="1")
   inspect(next.active().pending_steers[0].content, content="current steer")
   inspect(next.transcript_request_generation, content="0")
@@ -9842,7 +9846,10 @@ test "a start failure cannot close a run opened by a winning push" {
     with_pending_steers(
       {
         ..opened.active(),
-        turn: { ..opened.active().turn, streaming_response: "foreign fragment" },
+        turn: {
+          ..opened.active().turn,
+          streaming_response: Some("foreign fragment"),
+        },
       },
       ["steer for foreign run"],
       run_id="r-foreign",
@@ -9860,7 +9867,7 @@ test "a start failure cannot close a run opened by a winning push" {
   guard failed.active().run is Open(run_id="r-foreign", stage=Opened) else {
     fail("the local failure closed the already-open run")
   }
-  inspect(failed.active().turn.streaming_response, content="foreign fragment")
+  assert_eq(failed.active().turn.streaming_response, Some("foreign fragment"))
   inspect(failed.active().pending_steers.length(), content="1")
   inspect(
     failed.active().pending_steers[0].content,
@@ -9881,7 +9888,7 @@ test "a start failure closes only a still-starting run" {
     {
       ..test_conversation(),
       run: Starting(submission_id="prompt-id"),
-      turn: { ..test_conversation().turn, streaming_response: "partial" },
+      turn: { ..test_conversation().turn, streaming_response: Some("partial") },
     },
     "prompt-id",
     "prompt",
@@ -9897,7 +9904,7 @@ test "a start failure closes only a still-starting run" {
     model,
   )
   assert_true(failed.active().run is NoRun(ended=Some(RunFailed)))
-  inspect(failed.active().turn.streaming_response, content="")
+  assert_eq(failed.active().turn.streaming_response, None)
   inspect(failed.notifications.length(), content="1")
   inspect(failed.active().task, content="prompt")
   inspect(failed.transcript_request_generation, content="0")
@@ -10110,7 +10117,7 @@ test "runs settled closes runs the host no longer has, sparing live and starting
         "desktop-stale",
         @interop.ChannelId::Local.test_project(),
       ).turn,
-      streaming_response: "mid-step",
+      streaming_response: Some("mid-step"),
     },
   }
   // A send still in flight has no run id yet; its own `started` (or
@@ -10151,7 +10158,7 @@ test "runs settled closes runs the host no longer has, sparing live and starting
     fail("expected the stale conversation")
   }
   inspect(settled.is_running(), content="false")
-  inspect(settled.turn.streaming_response, content="")
+  assert_eq(settled.turn.streaming_response, None)
   guard settled.run is NoRun(ended=None) else {
     fail("expected the stale run to settle without a verdict")
   }
@@ -10584,12 +10591,12 @@ test "concurrent conversations keep their streams apart" {
     model,
   )
   // Run 8 belongs to the background conversation; the active one is untouched.
-  inspect(next.active().turn.streaming_response, content="")
+  assert_eq(next.active().turn.streaming_response, None)
   guard next.find_conversation(@interop.ChannelId::Local, "desktop-second")
     is Some(bg) else {
     fail("expected the background conversation")
   }
-  inspect(bg.turn.streaming_response, content="for B")
+  assert_eq(bg.turn.streaming_response, Some("for B"))
 }
 
 ///|
@@ -14244,7 +14251,7 @@ test "a transcript stream grows without application-owned scroll state" {
     Engine(Some("r7"), AssistantDelta("more"), session=None),
     running_model(),
   )
-  inspect(next.active().turn.streaming_response, content="more")
+  assert_eq(next.active().turn.streaming_response, Some("more"))
 }
 
 ///|
@@ -15400,7 +15407,7 @@ test "update is pure: automatic checkpoint waits for its commit" {
   let dispatch = test_dispatch()
   let model = running_model().replace_conversation({
     ..running_conversation(),
-    turn: { ..running_conversation().turn, streaming_response: "partial" },
+    turn: { ..running_conversation().turn, streaming_response: Some("partial") },
   })
   let (_, once) = update_dev(
     dispatch,
@@ -15412,8 +15419,8 @@ test "update is pure: automatic checkpoint waits for its commit" {
     Engine(Some("r7"), AutoCompactionFinished("checkpoint recap"), session=None),
     model,
   )
-  inspect(once.active().turn.streaming_response, content="partial")
-  inspect(twice.active().turn.streaming_response, content="partial")
+  assert_eq(once.active().turn.streaming_response, Some("partial"))
+  assert_eq(twice.active().turn.streaming_response, Some("partial"))
   assert_true(
     once.active().compaction is NotCompacting &&
     twice.active().compaction is NotCompacting,
@@ -15429,7 +15436,7 @@ test "update is pure: context yield waits for its commit" {
   let answer = "[context ceiling] continue in a new turn"
   let model = running_model().replace_conversation({
     ..running_conversation(),
-    turn: { ..running_conversation().turn, streaming_response: "partial" },
+    turn: { ..running_conversation().turn, streaming_response: Some("partial") },
   })
   let (_, once) = update_dev(
     dispatch,
@@ -15441,8 +15448,8 @@ test "update is pure: context yield waits for its commit" {
     Engine(Some("r7"), ContextYield(answer), session=None),
     model,
   )
-  inspect(once.active().turn.streaming_response, content="")
-  inspect(twice.active().turn.streaming_response, content="")
+  assert_eq(once.active().turn.streaming_response, None)
+  assert_eq(twice.active().turn.streaming_response, None)
   assert_true(once.active().is_running() && twice.active().is_running())
 }
 
@@ -16401,7 +16408,7 @@ test "a delayed assistant commit never clears a newer live delta" {
     ..running_conversation(),
     turn: {
       ..running_conversation().turn,
-      streaming_response: "newer turn fragment",
+      streaming_response: Some("newer turn fragment"),
     },
   })
   let (_, committed) = update_dev(
@@ -16419,9 +16426,9 @@ test "a delayed assistant commit never clears a newer live delta" {
     ),
     model,
   )
-  inspect(
+  assert_eq(
     committed.active().turn.streaming_response,
-    content="newer turn fragment",
+    Some("newer turn fragment"),
   )
 }
 
@@ -16436,7 +16443,7 @@ test "a delayed terminal commit never clears a newer live delta" {
     watermark: 1,
     turn: {
       ..running_conversation().turn,
-      streaming_response: "next turn fragment",
+      streaming_response: Some("next turn fragment"),
     },
   })
   let (_, committed) = update_dev(
@@ -16450,9 +16457,9 @@ test "a delayed terminal commit never clears a newer live delta" {
     ),
     model,
   )
-  inspect(
+  assert_eq(
     committed.active().turn.streaming_response,
-    content="next turn fragment",
+    Some("next turn fragment"),
   )
 }
 
@@ -16461,7 +16468,7 @@ test "commit-first assistant semantics do not append again" {
   let dispatch = test_dispatch()
   let streaming = running_model().replace_conversation({
     ..running_conversation(),
-    turn: { ..running_conversation().turn, streaming_response: "answer" },
+    turn: { ..running_conversation().turn, streaming_response: Some("answer") },
   })
   let (_, committed) = update_dev(
     dispatch,
@@ -16490,7 +16497,7 @@ test "commit-first assistant semantics do not append again" {
   )
   inspect(answered.active().messages.length(), content="2")
   inspect(answered.active().watermark, content="1")
-  inspect(answered.active().turn.streaming_response, content="")
+  assert_eq(answered.active().turn.streaming_response, None)
 }
 
 ///|

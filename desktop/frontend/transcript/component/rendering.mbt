@@ -171,11 +171,11 @@ fn TranscriptRenderer::stream_children(
       )
     }
   }
-  if !self.input.streaming_response.is_empty() {
+  if self.input.streaming_response is Some(streaming) {
     items.set(
       TranscriptRenderKey::streaming(self.input.streaming_identity).wire(),
       streaming_response_view(
-        self.input.streaming_response,
+        streaming,
         self.on_open,
         assistant_name=match self.input.source {
           OpenSeek => "OpenSeek"
