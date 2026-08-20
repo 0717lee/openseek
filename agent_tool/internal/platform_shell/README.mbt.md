@@ -12,7 +12,7 @@ checking shape rather than spelling:
 ```mbt check
 ///|
 test "args carries the command text through as the final argument" {
-  // ["-c", cmd] on POSIX, ["-NoProfile", "-Command", cmd] on Windows —
+  // ["-c", cmd] on POSIX, ["-NoProfile", "-NonInteractive", "-Command", cmd] on Windows —
   // either way the command text is the last argument, verbatim.
   let args = @platform_shell.args("printf 'hi there'")
   inspect(args[args.length() - 1], content="printf 'hi there'")

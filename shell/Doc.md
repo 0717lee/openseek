@@ -50,7 +50,7 @@ Codex adds extra Windows handling around execution:
 
 OpenSeek's shell tool is simpler but follows the same basic direction:
 
-- On Windows, `agent_tool/shell` runs `pwsh -NoProfile -Command <cmd>`.
+- On Windows, `agent_tool/shell` runs `powershell.exe -NoProfile -NonInteractive -Command <cmd>`.
 - On non-Windows platforms, it runs `sh -c <cmd>`.
 - The Windows tool description tells callers to use PowerShell syntax.
 - The non-Windows tool description tells callers to use POSIX shell syntax.
@@ -60,8 +60,8 @@ OpenSeek's shell tool is simpler but follows the same basic direction:
 
 The relevant implementation points are:
 
-- `@platform_shell.program = "pwsh"` on Windows.
-- `@platform_shell.args(cmd) = ["-NoProfile", "-Command", cmd]` on Windows.
+- `@platform_shell.program = "powershell.exe"` on Windows.
+- `@platform_shell.args(cmd) = ["-NoProfile", "-NonInteractive", "-Command", cmd]` on Windows.
 - `@platform_shell.program = "sh"` elsewhere.
 - `@platform_shell.args(cmd) = ["-c", cmd]` elsewhere.
 
