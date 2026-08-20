@@ -1161,7 +1161,10 @@ async test "record stat failure is not mistaken for an empty final drain" {
       error if @async.is_being_cancelled() => raise error
       error => "\{error}"
     }
-    assert_true(detail.contains("cannot open the session record"))
+    // The reader takes the record's lock first, so ENOTDIR surfaces there —
+    // still the failure this test is about, and still not the ENOENT that
+    // would prove no record was ever created.
+    assert_true(detail.contains("Not a directory"))
     assert_true(
       manager.followers.get("s-stat") is Some(current) &&
       physical_equal(current, follower),

@@ -90,19 +90,25 @@ fn lock_path(root : @pathx.Absolute, session : String) -> @pathx.Path {
 /// complete line a commit: the writer releases only after the fdatasync behind
 /// its append has returned.
 ///
-/// A lock file that cannot be opened means there is no session directory yet,
-/// and so no writer to serialize against — a reader must not create one.
+/// An absent lock file is the one failure that reads on: the store creates it
+/// (`ensure_session_dir`, then `with_session_lock`) before any record byte
+/// reaches the disk, so nothing has ever been committed here — and the first
+/// write is an atomic rename rather than an append, so a writer arriving in the
+/// meantime leaves no torn state to observe either. Every other failure raises:
+/// a reader that could not take the lock has not established the ordering this
+/// whole file rests on, and must say so rather than read on without it.
+///
+/// The lock is opened read-only and never created. A shared lock needs no write
+/// access, which keeps a reader from adding files to the store and lets it read
+/// a record that lives on read-only media.
 async fn[T] with_shared_record_lock(
   path : @pathx.Path,
   body : async () -> T,
 ) -> T {
-  let lock = @fs.open(
-    path.to_string(),
-    mode=ReadWrite,
-    create_mode=OpenOrCreate,
-  ) catch {
+  let lock = @fs.open(path.to_string(), mode=ReadOnly, create_mode=OpenExisting) catch {
     error if @async.is_being_cancelled() => raise error
-    _ => return body()
+    @os_error.OSError(_) as error if error.is_ENOENT() => return body()
+    error => raise Unreadable("cannot take the session record's lock: \{error}")
   }
   defer lock.close()
   lock.lock(Shared)

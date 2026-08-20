@@ -199,6 +199,30 @@ async test "an event line longer than one read is folded in whole" {
 }
 
 ///|
+async test "a lock that cannot be taken is a failure, not an unlocked read" {
+  let dir = @fs.tmpdir(prefix="openseek-record-lock-")
+  let root : @pathx.Absolute = @pathx.Path(dir + "/root").resolve()
+  // The session's own directory is a regular file, so opening anything beneath
+  // it raises ENOTDIR — a failure that is not "no lock file yet", and so must
+  // not read on: a reader that could not take the lock has not established the
+  // ordering that makes a complete line a durable commit.
+  let session_dir = @session_record.record_path(root, "s-14").dirname()
+  @fsx.ensure_dir(session_dir.dirname())
+  @fs.write_file(session_dir.to_string(), "file", create_mode=CreateOrTruncate)
+  let refusal = try {
+    ignore(@session_record.Tail(root, "s-14").poll())
+    "read"
+  } catch {
+    @session_record.Unreadable(detail) => detail
+    error => "\{error}"
+  }
+  // The message carries the temp path, so assert its stable halves: that the
+  // lock is what failed — not the record read behind it — and why.
+  assert_true(refusal.has_prefix("cannot take the session record's lock"))
+  assert_true(refusal.contains("Not a directory"))
+}
+
+///|
 async test "a line that is not UTF-8 is refused, not silently mangled" {
   let (root, path) = record_fixture("s-13")
   // A lone 0xFF cannot begin any UTF-8 sequence. Decoding it lossily would
