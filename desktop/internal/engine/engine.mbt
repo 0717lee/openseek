@@ -493,12 +493,6 @@ priv enum EngineActorCommand {
 const EngineActorQueueSize = 64
 
 ///|
-/// A serve process may briefly produce events faster than its sink can publish
-/// them. Backpressure the process stdout at this bound; engine events are
-/// lossless and therefore must never use a discard queue.
-const EngineStreamQueueSize = 256
-
-///|
 /// Delay before starting a fresh process-owning generation after an
 /// unexpected actor failure.
 const EngineActorRestartDelayMs = 1000
@@ -990,13 +984,6 @@ async fn EngineManager::close_engines_for_sessions(
 }
 
 ///|
-priv enum StreamMessage {
-  StreamEvent(DecodedStreamEvent)
-  StreamReaderFailed(String)
-  StreamExited(Int)
-}
-
-///|
 /// One engine JSONL event after the process adapter has extracted every fact
 /// the actor needs. Keeping the raw JSON out of `StreamMessage` makes the
 /// reader/actor channel typed without losing legacy lifecycle normalization.
@@ -1112,44 +1099,6 @@ async fn prepare_engine_stdin(
   }
   @fs.write_file(path.to_string(), "", create_mode=CreateOrTruncate)
   @process.redirect_from_file(path.to_string())
-}
-
-///|
-async fn read_engine_stdout(
-  reader : @process.ReadFromProcess,
-  process : @process.Process,
-  messages : @async.Queue[StreamMessage],
-) -> Unit {
-  try {
-    for ;; {
-      guard reader.read_until("\n") is Some(line) else { break }
-      for json in @jsonl.parse(line) {
-        messages.put(StreamEvent(DecodedStreamEvent::from_wire(json)))
-      }
-    }
-  } catch {
-    error if @async.is_being_cancelled() => raise error
-    _ => {
-      messages.put(StreamReaderFailed("engine wrote malformed JSONL"))
-      @xlog.warn() <?
-        {
-          "event": "desktop_engine_cancel",
-          "reason": "malformed stdout JSONL",
-          "pid": process.pid,
-        }
-      process.cancel()
-    }
-  }
-  reader.close()
-  // A lifecycle timeout cancels the Process task. Its cancellation handler
-  // does not finish until the child has actually terminated, but the task's
-  // result is `Cancelled` rather than an exit code; normalize that reaped
-  // outcome to -1 so the consumer can still publish the EOF latch.
-  let code = process.wait() catch {
-    error if @async.is_being_cancelled() => raise error
-    _ => -1
-  }
-  messages.put(StreamExited(code))
 }
 
 ///|
@@ -1556,23 +1505,19 @@ async fn[G] start_serve_engine(
   // the close by clearing the queue rather than touching the writer.
   group.spawn_bg(no_wait=true, allow_failure=true, () => engine.write_commands())
   slot.engine = Some(engine)
-  let messages : @async.Queue[StreamMessage] = Queue(
-    kind=Blocking(EngineStreamQueueSize),
-  )
   let stderr_task = group.spawn(no_wait=true) <| () => {
     stderr_reader.read_all().text() catch {
       error if @async.is_being_cancelled() => raise error
       _ => ""
     }
   }
-  group.spawn_bg(no_wait=true, allow_failure=true, () => {
-    read_engine_stdout(reader, process, messages)
-  })
   // Kept as a handle, not a background task: everything that waits for this
-  // engine to be retired waits for exactly this task to end.
+  // engine to be retired waits for exactly this task to end. It owns stdout
+  // outright — reading it and acting on it are the same loop, so there is no
+  // buffer between them for a half-dead pair of tasks to strand.
   engine.consumer = Some(
     group.spawn(no_wait=true, allow_failure=true, () => {
-      engine.run(manager, messages, stderr_task)
+      engine.run(manager, reader, stderr_task)
     }),
   )
   startup_committed = true
@@ -1586,20 +1531,22 @@ async fn[G] start_serve_engine(
 /// record is the close authority, read by the session follower
 /// (`close_run_from_terminal` in follower.mbt).
 ///
-/// The consumer is spawned with `allow_failure`, so an error escaping it
-/// would otherwise vanish without a trace. Any non-cancellation failure
-/// therefore becomes a forced retirement here: the child is killed and the
+/// This task is spawned with `allow_failure`, so an error escaping it would
+/// otherwise vanish without a trace. Any non-cancellation failure therefore
+/// becomes a forced retirement here: the child is killed and the
 /// retirement's final durable scan settles the open run — with the record's
 /// real outcome when the turn actually ended, as a synthetic failure only
 /// when no Terminal was ever committed — plus a log line naming the error
-/// the spawn would have swallowed.
+/// the spawn would have swallowed. Malformed JSONL arrives here too: it is
+/// simply an engine this host cannot go on reading, and retirement already
+/// knows how to report a cause for whichever phase the engine is in.
 async fn ServeEngine::run(
   self : ServeEngine,
   manager : EngineManager,
-  messages : @async.Queue[StreamMessage],
+  reader : @process.ReadFromProcess,
   stderr_task : @async.Task[String],
 ) -> Unit {
-  let code = self.consume(manager, messages) catch {
+  let code = self.consume(manager, reader) catch {
     error if @async.is_being_cancelled() => raise error
     error => {
       @xlog.error() <?
@@ -1610,12 +1557,12 @@ async fn ServeEngine::run(
           "run_id": self.phase.latest_run().unwrap_or(""),
           "error": "\{error}",
         }
-      // The consumer is the pipe's drain, not only its interpreter: with it
-      // gone the reader fills the bounded queue, the OS pipe fills behind
-      // that, and the child freezes mid-turn on a blocked stdout write —
-      // the durable record stops advancing too, so nothing would ever
-      // settle. Kill it instead, so the retirement below reaps a real exit
-      // and the final scan settles the turn with whatever the record says.
+      // This task is the pipe's drain, not only its interpreter: with it
+      // gone nothing reads stdout, the OS pipe fills, and the child freezes
+      // mid-turn on a blocked write — the durable record stops advancing
+      // too, so nothing would ever settle. Kill it instead, so the
+      // retirement below reaps a real exit and the final scan settles the
+      // turn with whatever the record says.
       @xlog.warn() <?
         {
           "event": "desktop_engine_cancel",
@@ -1645,127 +1592,100 @@ async fn ServeEngine::run(
 }
 
 ///|
-/// The event pump half of `run`: drain the reader's messages until EOF and
-/// hand back the child's exit code. The transitions that remain here
-/// (compaction phase flips, admission cutoff on unproven-append events) stay
-/// synchronous with the events that cause them, while retirement belongs to
-/// `run`, so a pump that dies mid-stream still retires exactly once.
+/// The event pump half of `run`: read the child's stdout to EOF, acting on
+/// each event as it is decoded, and hand back the child's exit code. Reading
+/// and interpreting are one task on purpose — a split lets the interpreter
+/// die while the reader keeps filling a buffer, which is a state with no
+/// owner. The transitions that live here (compaction phase flips, admission
+/// cutoff on unproven-append events) stay synchronous with the events that
+/// cause them, while retirement belongs to `run`, so a pump that dies
+/// mid-stream still retires exactly once.
 async fn ServeEngine::consume(
   self : ServeEngine,
   manager : EngineManager,
-  messages : @async.Queue[StreamMessage],
+  reader : @process.ReadFromProcess,
 ) -> Int {
   let engine = self
   let sink = self.sink
-  // Sub-run probes are children of this consumer: one per running child,
-  // spawned at its `subrun_started` bracket and cancelled at the finish.
-  // `no_wait` makes the engine's own EOF their backstop — a child whose
-  // finish bracket never arrives cannot outlive the engine that launched it.
+  // The read end belongs to this task for its whole life, so every way out —
+  // EOF, a stream this host cannot read, cancellation — closes it here.
+  defer reader.close()
+  // Sub-run probes are children of this task: one per running child, spawned
+  // at its `subrun_started` bracket and cancelled at the finish. `no_wait`
+  // makes the engine's own EOF their backstop — a child whose finish bracket
+  // never arrives cannot outlive the engine that launched it.
   @async.with_task_group() <| group => {
     let probes : Map[String, @async.Task[Unit]] = Map([])
-    let mut exit_code = 0
     for ;; {
-      match messages.get() {
-        StreamEvent(stream) => {
-          // Every stdout event is a hint that the engine may just have
-          // appended to the durable record — the follower's low-latency
-          // wakeup (its poll only backstops this).
-          manager.kick_follower(engine.session_key)
-          let decoded = stream.legacy
-          let wire_event = stream.wire
-          // The brackets are the only thing that knows a sub-run's lifetime;
-          // the probe in between reads the child's own record, which is the
-          // only place its progress is visible to this process.
-          match wire_event {
-            Some(SubrunStarted(id~, ..)) =>
-              if engine.session_root is Some(root) && probes.get(id) is None {
-                probes[id] = group.spawn(no_wait=true, allow_failure=true, () => {
-                  @subrun.follow_progress(
-                    root~,
-                    parent_session=engine.session_key,
-                    id~,
-                    publish=payload => emit(sink, SubrunProgress(payload)),
-                  )
-                })
-              }
-            Some(SubrunFinished(id~, ..)) =>
-              if probes.get(id) is Some(probe) {
-                probes.remove(id)
-                probe.cancel()
-              }
-            _ => ()
-          }
-          let needs_durable_scan = stream.needs_durable_scan
-          // These events do not prove their matching Terminal append succeeded.
-          // Synchronously close admission and stdin before the first sink
-          // suspension; the current turn can finish its append/TurnDone, while
-          // the next start is forced through the old child's close/reap barrier
-          // and cancel cannot hit stale active_work.
-          // Discarded, not drained: a queued cancel/steer is exactly what
-          // must be cut off. This is synchronous, so no request can be between
-          // its admission check and its enqueue, and every dropped sender is
-          // told rather than left waiting.
-          if needs_durable_scan {
-            engine.discard_commands(
-              "the engine finished its turn before this command was written",
-            )
-          }
-          let (run_id, submission_id) = engine.steer_runs.route_event(
-            decoded,
-            stream.prompt_steer_applied,
-            engine.phase.latest_run(),
-          )
-          // When the Terminal append did succeed, the follower's close will
-          // carry its exact sequence. This registration covers the append
-          // that failed: the EOF final scan then publishes the
-          // `agent.durable` boundary before a successor is admitted.
-          if needs_durable_scan &&
-            run_id is Some(id) &&
-            engine.follower is Some(follower) {
-            follower.expect_durable_finish(id)
-          }
-          match decoded {
-            Some(decoded) => {
-              // Terminal failures are normalized by the follower's durable
-              // close; forwarding their raw event as well would make the
-              // frontend render the same failure twice. With no run to close
-              // (no id recorded yet) that close cannot happen, so the raw
-              // event is the report.
-              if (!host_reports_terminal_error(decoded) || run_id is None) &&
-                wire_event is Some(event) {
-                emit(
-                  sink,
-                  StreamEvent({
-                    run_id,
-                    session: engine.session_key,
-                    event: { event, submission_id },
-                  }),
+      guard reader.read_until("\n") is Some(line) else { break }
+      for json in @jsonl.parse(line) {
+        let stream = DecodedStreamEvent::from_wire(json)
+        // Every stdout event is a hint that the engine may just have
+        // appended to the durable record — the follower's low-latency
+        // wakeup (its poll only backstops this).
+        manager.kick_follower(engine.session_key)
+        let decoded = stream.legacy
+        let wire_event = stream.wire
+        // The brackets are the only thing that knows a sub-run's lifetime;
+        // the probe in between reads the child's own record, which is the
+        // only place its progress is visible to this process.
+        match wire_event {
+          Some(SubrunStarted(id~, ..)) =>
+            if engine.session_root is Some(root) && probes.get(id) is None {
+              probes[id] = group.spawn(no_wait=true, allow_failure=true, () => {
+                @subrun.follow_progress(
+                  root~,
+                  parent_session=engine.session_key,
+                  id~,
+                  publish=payload => emit(sink, SubrunProgress(payload)),
                 )
-              }
-              match decoded {
-                // A compaction queued behind an open turn begins only now, so
-                // the engine's own event is what flips the phase; entering
-                // from anything but Idle would clobber a run's state.
-                CompactionStarted =>
-                  if engine.phase is Idle(last_run~) {
-                    engine.phase = Compacting(last_run~)
-                  }
-                // Either way the engine is done writing the record's summary,
-                // so operations gated on compaction (starts, archiving) may
-                // proceed.
-                CompactionFinished | CompactionFailed =>
-                  engine.phase = engine.phase.to_idle()
-                _ => ()
-              }
-              // Terminal stream events deliberately close nothing here. The
-              // engine appends the turn's durable Terminal before emitting
-              // them, so the follower — kicked above — is the single closer:
-              // it reads the record, publishes the run's Error/Finished and
-              // flips the phase (`close_run_from_terminal`). This consumer
-              // only forwards, which is why its silent death can no longer
-              // strand a run.
+              })
             }
-            None if wire_event is Some(event) =>
+          Some(SubrunFinished(id~, ..)) =>
+            if probes.get(id) is Some(probe) {
+              probes.remove(id)
+              probe.cancel()
+            }
+          _ => ()
+        }
+        let needs_durable_scan = stream.needs_durable_scan
+        // These events do not prove their matching Terminal append succeeded.
+        // Synchronously close admission and stdin before the first sink
+        // suspension; the current turn can finish its append/TurnDone, while
+        // the next start is forced through the old child's close/reap barrier
+        // and cancel cannot hit stale active_work.
+        // Discarded, not drained: a queued cancel/steer is exactly what
+        // must be cut off. This is synchronous, so no request can be between
+        // its admission check and its enqueue, and every dropped sender is
+        // told rather than left waiting.
+        if needs_durable_scan {
+          engine.discard_commands(
+            "the engine finished its turn before this command was written",
+          )
+        }
+        let (run_id, submission_id) = engine.steer_runs.route_event(
+          decoded,
+          stream.prompt_steer_applied,
+          engine.phase.latest_run(),
+        )
+        // When the Terminal append did succeed, the follower's close will
+        // carry its exact sequence. This registration covers the append
+        // that failed: the EOF final scan then publishes the
+        // `agent.durable` boundary before a successor is admitted.
+        if needs_durable_scan &&
+          run_id is Some(id) &&
+          engine.follower is Some(follower) {
+          follower.expect_durable_finish(id)
+        }
+        match decoded {
+          Some(decoded) => {
+            // Terminal failures are normalized by the follower's durable
+            // close; forwarding their raw event as well would make the
+            // frontend render the same failure twice. With no run to close
+            // (no id recorded yet) that close cannot happen, so the raw
+            // event is the report.
+            if (!host_reports_terminal_error(decoded) || run_id is None) &&
+              wire_event is Some(event) {
               emit(
                 sink,
                 StreamEvent({
@@ -1774,37 +1694,57 @@ async fn ServeEngine::consume(
                   event: { event, submission_id },
                 }),
               )
-            None => ()
+            }
+            match decoded {
+              // A compaction queued behind an open turn begins only now, so
+              // the engine's own event is what flips the phase; entering
+              // from anything but Idle would clobber a run's state.
+              CompactionStarted =>
+                if engine.phase is Idle(last_run~) {
+                  engine.phase = Compacting(last_run~)
+                }
+              // Either way the engine is done writing the record's summary,
+              // so operations gated on compaction (starts, archiving) may
+              // proceed.
+              CompactionFinished | CompactionFailed =>
+                engine.phase = engine.phase.to_idle()
+              _ => ()
+            }
+            // Terminal stream events deliberately close nothing here. The
+            // engine appends the turn's durable Terminal before emitting
+            // them, so the follower — kicked above — is the single closer:
+            // it reads the record, publishes the run's Error/Finished and
+            // flips the phase (`close_run_from_terminal`). This consumer
+            // only forwards, which is why its silent death can no longer
+            // strand a run.
           }
-        }
-        StreamReaderFailed(message) => {
-          // Nothing queued can reach a child whose stream is broken. Drop it
-          // so the writer closes stdin instead of failing into a second,
-          // redundant retirement of the lifecycle settled right here.
-          engine.discard_commands("the engine's event stream failed")
-          emit_error(sink, message, run_id?=engine.phase.latest_run())
-          // A broken stream can no longer deliver compaction_finished/failed;
-          // report the compaction as failed now so the frontend does not stay
-          // stuck with Send disabled (the exit branch below then has nothing
-          // left to report for it).
-          if engine.phase is Compacting(..) {
-            engine.phase = engine.phase.to_idle()
-            emit_compaction_failed(sink, engine, message)
-          }
-        }
-        // Retirement is `run`'s, but condemnation must stay synchronous
-        // with consuming the exit: the task-group teardown between this
-        // break and `retire` is a real suspension, and a cancel or steer
-        // admitted in that gap would be accepted for a child that already
-        // exited. Idempotent, so `retire` repeating it is harmless.
-        StreamExited(code) => {
-          engine.discard_commands("the engine exited")
-          exit_code = code
-          break
+          None if wire_event is Some(event) =>
+            emit(
+              sink,
+              StreamEvent({
+                run_id,
+                session: engine.session_key,
+                event: { event, submission_id },
+              }),
+            )
+          None => ()
         }
       }
     }
-    exit_code
+    // EOF. Retirement is `run`'s, but condemnation must stay synchronous
+    // with observing it: leaving this task group is a real suspension, and
+    // a cancel or steer admitted in that gap would be accepted for a child
+    // that has already stopped reading. Idempotent, so `retire` repeating
+    // it is harmless.
+    engine.discard_commands("the engine exited")
+    // A lifecycle timeout cancels the Process task. Its cancellation handler
+    // does not finish until the child has actually terminated, but the task's
+    // result is `Cancelled` rather than an exit code; normalize that reaped
+    // outcome to -1 so retirement can still publish the EOF latch.
+    engine.process.wait() catch {
+      error if @async.is_being_cancelled() => raise error
+      _ => -1
+    }
   }
 }
 
@@ -2017,22 +1957,28 @@ fn test_serve_engine(
 }
 
 ///|
-/// A consumer that dies mid-stream must not leave its open run's phase
+/// A pump that dies mid-stream must not leave its open run's phase
 /// `Running` forever — that state is unreachable by every close path and
 /// reads as a turn that never ends. The failure is forced through the same
-/// retirement an observed engine death gets.
+/// retirement an observed engine death gets, and because this one task both
+/// reads and interprets, a stream it cannot read is exactly such a failure:
+/// the child is killed rather than left writing into a pipe nobody drains.
 #cfg(not(platform="windows"))
-async test "a failed consumer closes its open run and retires the slot" {
+async test "a failed pump closes its open run and retires the slot" {
   let manager = new_engine_manager("/bin/sh")
   let emitted : Array[EngineEvent] = []
   let sink = EventSink(fn(event) { emitted.push(event) })
   @async.with_task_group(group => {
     let (child_stdin, writer) = @process.write_to_process()
+    let (reader, child_stdout) = @process.read_from_process()
+    // Unreadable output, then a child that would otherwise outlive the pump:
+    // the kill is what ends it, not a cooperative exit.
     let process = @process.spawn(
       group,
       "/bin/sh",
-      ["-c", "sleep 30"],
+      ["-c", "printf 'not json\\n'; sleep 30"],
       stdin=child_stdin,
+      stdout=child_stdout,
       no_wait=true,
     )
     let engine = test_serve_engine(
@@ -2050,17 +1996,11 @@ async test "a failed consumer closes its open run and retires the slot" {
     let slot = slot_for(sessions, "s-consumer-died")
     slot.engine = Some(engine)
     manager.pump = Serving(sessions~)
-    let messages : @async.Queue[StreamMessage] = Queue(
-      kind=Blocking(EngineStreamQueueSize),
-    )
-    // The pump's only suspension is this queue's read; failing it stands in
-    // for any error escaping the consumer.
-    messages.close(error=EngineError("boom"))
     let stderr_task = group.spawn(no_wait=true, () => "")
-    engine.run(manager, messages, stderr_task)
+    engine.run(manager, reader, stderr_task)
 
     // `run` returning is retirement: the run was closed as a failure naming
-    // the consumer, the child was killed, and the slot is clear.
+    // the pump, the child was killed, and the slot is clear.
     assert_true(slot.engine is None)
     assert_true(engine.condemned)
     assert_true(engine.phase is Idle(..))
@@ -2091,12 +2031,15 @@ async test "a failed command leaves settlement to the EOF retirement" {
   let sink = EventSink(fn(event) { emitted.push(event) })
   @async.with_task_group(group => {
     let (child_stdin, writer) = @process.write_to_process()
-    // A child that is already gone, so the first write hits a closed pipe.
+    let (reader, child_stdout) = @process.read_from_process()
+    // A child that is already gone, so the first write hits a closed pipe
+    // and the pump reaches EOF on its first read.
     let process = @process.spawn(
       group,
       "/bin/sh",
       ["-c", "exit 0"],
       stdin=child_stdin,
+      stdout=child_stdout,
       no_wait=true,
     )
     let engine = test_serve_engine(
@@ -2134,12 +2077,8 @@ async test "a failed command leaves settlement to the EOF retirement" {
     assert_true(emitted.is_empty())
 
     // EOF retirement settles exactly once, naming the stashed cause.
-    let messages : @async.Queue[StreamMessage] = Queue(
-      kind=Blocking(EngineStreamQueueSize),
-    )
-    messages.put(StreamExited(0))
     let stderr_task = group.spawn(no_wait=true, () => "")
-    engine.run(manager, messages, stderr_task)
+    engine.run(manager, reader, stderr_task)
     assert_true(slot.engine is None)
     assert_true(engine.phase is Idle(..))
     let mut finishes = 0

@@ -1268,11 +1268,13 @@ async test "EOF retirement closes a committed turn with its real outcome" {
       fail("expected follower")
     }
     let (child_stdin, writer) = @process.write_to_process()
+    let (reader, child_stdout) = @process.read_from_process()
     let process = @process.spawn(
       group,
       "/bin/sh",
-      ["-c", "sleep 30"],
+      ["-c", "exit 0"],
       stdin=child_stdin,
+      stdout=child_stdout,
       no_wait=true,
     )
     let engine = test_serve_engine(
@@ -1297,12 +1299,8 @@ async test "EOF retirement closes a committed turn with its real outcome" {
     write_session_record(root, session, [
       "{\"sequence\":7,\"item\":{\"kind\":\"terminal\",\"payload\":{\"kind\":\"interrupted\",\"message\":\"cancelled\"}}}",
     ])
-    let messages : @async.Queue[StreamMessage] = Queue(
-      kind=Blocking(EngineStreamQueueSize),
-    )
-    messages.put(StreamExited(0))
     let stderr_task = group.spawn(no_wait=true, () => "")
-    engine.run(manager, messages, stderr_task)
+    engine.run(manager, reader, stderr_task)
 
     // The final drain found the Terminal: the run settled with the record's
     // own outcome and sequence, and no synthetic failure was fabricated.
@@ -1347,11 +1345,13 @@ async test "abrupt EOF retains a failed final drain for later boundary retry" {
       fail("expected follower")
     }
     let (child_stdin, writer) = @process.write_to_process()
+    let (reader, child_stdout) = @process.read_from_process()
     let process = @process.spawn(
       group,
       "/bin/sh",
       ["-c", "exit 7"],
       stdin=child_stdin,
+      stdout=child_stdout,
       no_wait=true,
     )
     let engine = test_serve_engine(
@@ -1371,15 +1371,11 @@ async test "abrupt EOF retains a failed final drain for later boundary retry" {
     let slot = slot_for(sessions, session)
     slot.engine = Some(engine)
     manager.pump = Serving(sessions~)
-    let messages : @async.Queue[StreamMessage] = Queue(
-      kind=Blocking(EngineStreamQueueSize),
-    )
-    messages.put(StreamExited(7))
     let stderr_task = group.spawn(no_wait=true, () => "")
     // The record is unreadable at EOF, so the drain this engine's exit runs
     // cannot prove a frontier and the boundary stays pending.
     write_damaged_record(root, session)
-    engine.run(manager, messages, stderr_task)
+    engine.run(manager, reader, stderr_task)
 
     // `run` returning is retirement: the slot is clear and every lifecycle
     // event this engine owed has been published.
