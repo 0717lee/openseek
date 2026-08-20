@@ -219,6 +219,18 @@ pub extend Replacement with Debug::{to_repr}
 pub extend Replacement with Eq::{equal, not_equal}
 
 ///|
+pub extend RunHeartbeat with Debug::{to_repr}
+
+///|
+pub extend RunHeartbeat with Eq::{equal, not_equal}
+
+///|
+pub extend RunStage with Debug::{to_repr}
+
+///|
+pub extend RunStage with Eq::{equal, not_equal}
+
+///|
 pub extend SlashCommand with Debug::{to_repr}
 
 ///|
