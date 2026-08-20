@@ -162,9 +162,14 @@ fn session_max_sequence(session : @protocol.SessionDocument) -> Int {
 
 ///|
 /// One scan: read whatever the writer appended since the last one, broadcast
-/// everything committed past the watermark, advance it, and return the
-/// transcript the reader now holds. Raises when the record cannot be read —
-/// the watermark then stays put, so the next scan retries the same span.
+/// everything committed past the watermark, and advance it. Raises when the
+/// record cannot be read — the watermark then stays put, so the next scan
+/// retries the same span.
+///
+/// A scan broadcasts; it does not build a snapshot. Kicks and the poll ticker
+/// run one per committed event, and a document costs a copy of the whole
+/// transcript — the load path asks the reader for that separately, so this
+/// path stays proportional to what was appended.
 ///
 /// The reader may report a whole record again (it re-reads from the head when
 /// the file was replaced under it); the watermark check here is what keeps
@@ -172,7 +177,7 @@ fn session_max_sequence(session : @protocol.SessionDocument) -> Int {
 async fn SessionFollower::scan(
   self : SessionFollower,
   sink : EventSink,
-) -> @protocol.SessionDocument {
+) -> Unit {
   for event in self.tail.poll() {
     if event.sequence <= self.watermark {
       continue
@@ -191,7 +196,6 @@ async fn SessionFollower::scan(
     )
     self.watermark = event.sequence
   }
-  self.tail.document()
 }
 
 ///|
@@ -233,7 +237,7 @@ async fn SessionFollower::run(
       match follower.inbox.get() {
         Kick => {
           follower.kick_pending = false
-          ignore(follower.scan(sink)) catch {
+          follower.scan(sink) catch {
             error if @async.is_being_cancelled() => raise error
             error =>
               @xlog.debug() <?
@@ -245,7 +249,12 @@ async fn SessionFollower::run(
           }
         }
         Load => {
-          let response = LoadOk(follower.scan(sink)) catch {
+          // The one path that pays for a snapshot: scan first, so the reply
+          // carries every commit this generation just broadcast.
+          let response = try {
+            follower.scan(sink)
+            LoadOk(follower.tail.document())
+          } catch {
             error if @async.is_being_cancelled() => raise error
             error => LoadFailed("\{error}")
           }
@@ -273,7 +282,7 @@ async fn SessionFollower::run(
             try {
               // Everything the departed writer persisted is broadcast
               // before this generation can retire successfully.
-              ignore(follower.scan(sink))
+              follower.scan(sink)
               None
             } catch {
               error if @async.is_being_cancelled() => raise error
