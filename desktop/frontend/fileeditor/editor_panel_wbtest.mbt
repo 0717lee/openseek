@@ -41,3 +41,33 @@ test "point navigation keeps its column and highlights the whole line" {
   assert_true(target.decoration.options.is_whole_line)
   assert_false(target.is_transient)
 }
+
+///|
+/// Behavior port of VS Code
+/// `searchTreeModel/fileMatch.ts::FileMatchImpl.updateHighlights` at pinned
+/// revision b18492a2: every file match is decorated, and only the selected
+/// range receives the stronger current-match option.
+test "workspace Search decorates every match and promotes the selected range" {
+  let selected = @common.Range(4, 7, 4, 11)
+  let decorations = search_match_decorations(
+    [@common.Range(2, 1, 2, 5), selected, @common.Range(9, 3, 9, 7)],
+    Some(selected),
+  )
+  assert_eq(decorations.length(), 3)
+  assert_eq(decorations[0].range, @common.Range(2, 1, 2, 5))
+  assert_eq(decorations[0].options.class_name, "findMatch")
+  assert_eq(decorations[0].options.inline_class_name, Some("findMatchInline"))
+  assert_eq(decorations[0].options.z_index, 10)
+  assert_eq(
+    decorations[0].options.stickiness,
+    @model.NeverGrowsWhenTypingAtEdges,
+  )
+  assert_eq(decorations[1].range, selected)
+  assert_eq(decorations[1].options.class_name, "currentFindMatch")
+  assert_eq(
+    decorations[1].options.inline_class_name,
+    Some("currentFindMatchInline"),
+  )
+  assert_eq(decorations[1].options.z_index, 13)
+  assert_eq(decorations[2].options.class_name, "findMatch")
+}

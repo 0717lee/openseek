@@ -58,6 +58,11 @@ priv struct ViewerHost {
   // without turning the line into a selection and opening Comment UI. Symbol
   // navigation uses a fresh, short-lived collection instead (see below).
   mut point_range_highlight : @viewer.EditorDecorationsCollection?
+  // Workspace Search owns one persistent collection over the displayed source
+  // model. Every result range uses `findMatch`; the clicked row uses
+  // `currentFindMatch`. The collection is replaced when Search state changes
+  // and cleared before a model swap, matching VS Code's FileMatch lifetime.
+  mut search_match_highlights : @viewer.EditorDecorationsCollection?
   // Desktop owns the concrete marker and feedback stores passed through the
   // Viewer's public handle API. They receive language-server diagnostics and
   // turn inline reviews into composer chips without requiring editor internals.
@@ -99,6 +104,7 @@ let viewer_state : ViewerHost = {
   diff_viewer: None,
   diff_render_mode: @viewer.SideBySide,
   point_range_highlight: None,
+  search_match_highlights: None,
   services: None,
   absolute: None,
   relative: None,
@@ -180,6 +186,9 @@ fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
         )
         viewer_state.viewer = Some(viewer)
         viewer_state.point_range_highlight = Some(
+          viewer.create_decorations_collection(),
+        )
+        viewer_state.search_match_highlights = Some(
           viewer.create_decorations_collection(),
         )
         services.feedback.on_did_add_feedback(event => {
@@ -616,6 +625,67 @@ fn navigation_target_presentation(
 }
 
 ///|
+/// VS Code `FileMatchImpl.updateHighlights` projects every match into one
+/// model decoration collection and raises the selected row above its peers.
+/// OpenSeek receives the same one-based UTF-16 ranges from its Host search and
+/// keeps the representation native to the public Viewer decoration API.
+fn search_match_decorations(
+  ranges : Array[@common.Range],
+  selected : @common.Range?,
+) -> Array[@model.ModelDeltaDecoration] {
+  ranges.map(range => {
+    let current = selected == Some(range)
+    {
+      range,
+      options: @model.ModelDecorationOptions(
+        if current {
+          "currentFindMatch"
+        } else {
+          "findMatch"
+        },
+        inline_class_name=if current {
+          "currentFindMatchInline"
+        } else {
+          "findMatchInline"
+        },
+        z_index=if current { 13 } else { 10 },
+        show_if_collapsed=true,
+        stickiness=@model.NeverGrowsWhenTypingAtEdges,
+        description=if current {
+          "search-current-find-match"
+        } else {
+          "search-find-match"
+        },
+      ),
+    }
+  })
+}
+
+///|
+fn set_search_match_highlights(
+  highlights : @grep_search.EditorHighlights?,
+) -> Unit {
+  if viewer_state.search_match_highlights is Some(collection) {
+    let decorations = match highlights {
+      Some(highlights) =>
+        search_match_decorations(highlights.ranges(), highlights.selected())
+      None => []
+    }
+    collection.set(decorations) |> ignore
+  }
+}
+
+///|
+/// Refresh Search decorations without replacing the current Viewer model.
+/// Query/options changes clear them immediately; the accepted Host reply then
+/// installs the new complete file projection.
+fn update_search_match_highlights(
+  highlights : @grep_search.EditorHighlights?,
+) -> @cmd.Cmd {
+  @cmd.custom_cmd(_scheduler => set_search_match_highlights(highlights))
+}
+
+///|
 /// Match the reusable Viewer's Definition/References target feedback: keep an
 /// exact symbol highlight for 350ms, then clear it only while the Viewer still
 /// owns the model that received it. A fresh collection prevents an older timer
@@ -672,6 +742,7 @@ fn show_file_in_viewer(
   restore_scroll? : Bool = false,
   review_original? : String,
   unified_diff? : (String, String),
+  search_highlights? : @grep_search.EditorHighlights,
 ) -> @cmd.Cmd {
   let show = @cmd.custom_cmd(_scheduler => {
     // Reads are always batched behind a mount request whose after-render tick
@@ -714,6 +785,9 @@ fn show_file_in_viewer(
     // use fresh transient collections that retire themselves after 350ms.
     if viewer_state.point_range_highlight is Some(highlight) {
       highlight.clear()
+    }
+    if viewer_state.search_match_highlights is Some(highlights) {
+      highlights.clear()
     }
     if !same_document {
       // Park the outgoing document's scroll position for its tab's return.
@@ -810,10 +884,17 @@ fn show_file_in_viewer(
       // avoids a blank repaint and makes View file a non-destructive toggle.
       None => ()
     }
+    set_search_match_highlights(search_highlights)
     if range is Some(range) {
       let target = navigation_target_presentation(range)
       viewer.set_position(target.position)
-      if target.is_transient {
+      let selected_search_match = match search_highlights {
+        Some(highlights) => highlights.selected() == Some(range)
+        None => false
+      }
+      if selected_search_match {
+        ()
+      } else if target.is_transient {
         if viewer.get_model() is Some(target_model) {
           show_transient_navigation_target_highlight(
             viewer,
@@ -882,6 +963,9 @@ fn clear_viewer() -> @cmd.Cmd {
       if viewer_state.point_range_highlight is Some(highlight) {
         highlight.clear()
       }
+      if viewer_state.search_match_highlights is Some(highlights) {
+        highlights.clear()
+      }
       if viewer_state.services is Some(services) &&
         viewer.get_model() is Some(model) {
         services.quick_diff.set_original_content(model.uri, None)
@@ -906,6 +990,9 @@ fn clear_document() -> @cmd.Cmd {
     if viewer_state.viewer is Some(viewer) {
       if viewer_state.point_range_highlight is Some(highlight) {
         highlight.clear()
+      }
+      if viewer_state.search_match_highlights is Some(highlights) {
+        highlights.clear()
       }
       if viewer_state.services is Some(services) &&
         viewer.get_model() is Some(model) {

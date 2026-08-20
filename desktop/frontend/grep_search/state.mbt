@@ -21,6 +21,8 @@ fn fresh_page() -> Page {
     collapsed: Map([]),
     visible_lines: InitialVisibleSearchLines,
     phase: Idle,
+    selected_path: None,
+    selected_range: None,
     generation: 0,
     delay_ms: SearchDebounceMs,
   }
@@ -57,6 +59,8 @@ fn State::schedule(
       limit_hit: false,
       visible_lines: InitialVisibleSearchLines,
       phase: Idle,
+      selected_path: None,
+      selected_range: None,
       generation,
     }
   } else {
@@ -68,6 +72,8 @@ fn State::schedule(
       } else {
         Debouncing
       },
+      selected_path: None,
+      selected_range: None,
       generation,
       delay_ms: if immediate {
         0
@@ -129,6 +135,8 @@ pub fn State::handle(self : State, msg : Msg, input : Input) -> State {
           limit_hit: false,
           visible_lines: InitialVisibleSearchLines,
           phase: Idle,
+          selected_path: None,
+          selected_range: None,
           generation,
         },
       }
@@ -193,6 +201,8 @@ pub fn State::handle(self : State, msg : Msg, input : Input) -> State {
           limit_hit: reply.limit_hit,
           visible_lines: InitialVisibleSearchLines.min(reply.matches.length()),
           phase,
+          selected_path: None,
+          selected_range: None,
         },
       }
     }
@@ -210,12 +220,89 @@ pub fn State::handle(self : State, msg : Msg, input : Input) -> State {
             limit_hit: false,
             visible_lines: InitialVisibleSearchLines,
             phase: Failed(code~, message~),
+            selected_path: None,
+            selected_range: None,
           },
         }
       } else {
         self
       }
   }
+}
+
+///|
+/// Record the Search result whose editor decoration should use VS Code's
+/// stronger current-match presentation. Ignore stale or fabricated rows so a
+/// delayed click cannot attach a highlight to a newer result set.
+pub fn State::select_editor_match(
+  self : State,
+  path : String,
+  selected : @common.Range,
+) -> State {
+  guard self.page.phase is Ready else { return self }
+  let mut found = false
+  for result in self.page.matches {
+    if result.path == path && result.line_number == selected.start_line_number {
+      for range in result.ranges {
+        if selected ==
+          @common.Range(
+            result.line_number,
+            range.start_column,
+            result.line_number,
+            range.end_column,
+          ) {
+          found = true
+          break
+        }
+      }
+    }
+    if found {
+      break
+    }
+  }
+  guard found else { return self }
+  {
+    ..self,
+    page: {
+      ..self.page,
+      selected_path: Some(path),
+      selected_range: Some(selected),
+    },
+  }
+}
+
+///|
+/// Project the retained Host results for `path` into the editor's one-based
+/// UTF-16 coordinate space. OpenSeek's source viewer is read-only, so these
+/// ranges stay authoritative for the search snapshot without duplicating
+/// ripgrep's regex, case, and whole-word semantics in the frontend.
+pub fn State::editor_highlights(
+  self : State,
+  path : String,
+) -> EditorHighlights? {
+  guard self.page.phase is Ready else { return None }
+  let ranges : Array[@common.Range] = []
+  for result in self.page.matches {
+    if result.path == path {
+      for range in result.ranges {
+        ranges.push(
+          @common.Range(
+            result.line_number,
+            range.start_column,
+            result.line_number,
+            range.end_column,
+          ),
+        )
+      }
+    }
+  }
+  guard !ranges.is_empty() else { return None }
+  let selected = if self.page.selected_path == Some(path) {
+    self.page.selected_range
+  } else {
+    None
+  }
+  Some({ ranges, selected })
 }
 
 ///|
@@ -370,6 +457,86 @@ test "refresh is immediate and loaded file groups can collapse and clear" {
   assert_eq(page.query, "moon")
   assert_true(page.matches.is_empty())
   assert_true(page.phase is Idle)
+}
+
+///|
+test "editor highlights include every retained match and promote the selected row" {
+  let owner : @interop.ConversationKey = {
+    channel: @interop.ChannelId::Local,
+    session: "editor-highlights",
+  }
+  let root = @common.Uri::parse("file:///work")
+  let input : Input = { owner, root: Some(root) }
+  let state = State::empty()
+    .handle(QueryChanged("moon"), input)
+    .handle(Submit, input)
+  let page = state.page
+  let reply : @protocol.SearchTextReply = {
+    root: root.path,
+    generation: page.generation,
+    matches: [
+      {
+        path: "src/main.mbt",
+        line_number: 2,
+        preview: "moon moon",
+        preview_start_column: 1,
+        ranges: [
+          { start_column: 1, end_column: 5 },
+          { start_column: 6, end_column: 10 },
+        ],
+      },
+      {
+        path: "src/main.mbt",
+        line_number: 7,
+        preview: "moon",
+        preview_start_column: 1,
+        ranges: [{ start_column: 1, end_column: 5 }],
+      },
+      {
+        path: "src/other.mbt",
+        line_number: 1,
+        preview: "moon",
+        preview_start_column: 1,
+        ranges: [{ start_column: 1, end_column: 5 }],
+      },
+    ],
+    match_count: 4,
+    file_count: 2,
+    limit_hit: false,
+    cancelled: false,
+    error: None,
+  }
+  let ready = state.handle(
+    Loaded(owner~, root=root.path, generation=page.generation, reply~),
+    input,
+  )
+  guard ready.editor_highlights("src/main.mbt") is Some(highlights) else {
+    fail("main file should have editor highlights")
+  }
+  assert_eq(highlights.ranges(), [
+    @common.Range(2, 1, 2, 5),
+    @common.Range(2, 6, 2, 10),
+    @common.Range(7, 1, 7, 5),
+  ])
+  assert_true(highlights.selected() is None)
+  let selected = @common.Range(2, 6, 2, 10)
+  let ready = ready.select_editor_match("src/main.mbt", selected)
+  guard ready.editor_highlights("src/main.mbt") is Some(highlights) else {
+    fail("selected file should retain editor highlights")
+  }
+  assert_eq(highlights.selected(), Some(selected))
+  assert_true(ready.editor_highlights("missing.mbt") is None)
+  let stale = ready.select_editor_match(
+    "src/main.mbt",
+    @common.Range(99, 1, 99, 5),
+  )
+  assert_true(stale == ready)
+  assert_true(
+    ready
+    .handle(QueryChanged("new query"), input)
+    .editor_highlights("src/main.mbt")
+    is None,
+  )
 }
 
 ///|
