@@ -22,9 +22,8 @@ priv struct Hub {
   // run-start order.
   active_starts : Map[String, @protocol.StartedPayload]
   // Completed lifecycle records survive client reconnects for this host
-  // process. An abnormal finish without an exact durable frontier stays here
-  // but is not replayable until its matching `agent.durable` boundary arrives.
-  // Run ids carry host-wide random identity, so they are the deduplication key.
+  // process, so a reconnecting owner learns how its run ended. Run ids carry
+  // host-wide random identity, so they are the deduplication key.
   settlements : Map[String, RunSettlement]
 }
 
@@ -34,8 +33,7 @@ fn Hub::new() -> Hub {
 }
 
 ///|
-/// The reconnect-safe subset of Finished. `replayable` is host-private: the
-/// wire exposes only fully settled entries.
+/// The reconnect-safe subset of Finished.
 priv struct RunSettlement {
   run_id : String
   mut session : String
@@ -43,12 +41,9 @@ priv struct RunSettlement {
   status : String
   mut exit_code : Int?
   mut durable_sequence : Int?
-  mut replayable : Bool
 }
 
 ///|
-/// Expose only the public lifecycle settlement. `replayable` is a host-side
-/// publication gate, not part of the response.
 fn RunSettlement::wire_payload(
   self : RunSettlement,
 ) -> @protocol.RunSettlementPayload {
@@ -60,16 +55,6 @@ fn RunSettlement::wire_payload(
     exit_code: self.exit_code,
     durable_sequence: self.durable_sequence,
   }
-}
-
-///|
-/// These statuses are logged only after their Terminal append succeeds. The
-/// failure/cancellation statuses can be emitted even when that append failed,
-/// so they require an exact sequence from Finished or a later durable boundary.
-fn terminal_backed_status(status : String) -> Bool {
-  status == "finished" ||
-  status == "context_yield" ||
-  status == "max_steps_exhausted"
 }
 
 ///|
@@ -106,7 +91,6 @@ fn Hub::record_finished(
       } else {
         existing.durable_sequence = Some(sequence)
       }
-      existing.replayable = true
     }
     return
   }
@@ -117,30 +101,7 @@ fn Hub::record_finished(
     status: payload.status,
     exit_code: payload.exit_code,
     durable_sequence: payload.durable_sequence,
-    replayable: payload.durable_sequence is Some(_) ||
-    terminal_backed_status(payload.status),
   }
-}
-
-///|
-/// Strengthen an abnormal finish with the exact frontier from the same run
-/// and session. Sequence zero is evidence, not absence, and remains `Some(0)`.
-fn Hub::record_durable_boundary(
-  self : Hub,
-  payload : @protocol.DurableBoundaryPayload,
-) -> Unit {
-  guard self.settlements.get(payload.run_id) is Some(settlement) &&
-    settlement.session == payload.session else {
-    return
-  }
-  if settlement.durable_sequence is Some(current) {
-    if payload.sequence > current {
-      settlement.durable_sequence = Some(payload.sequence)
-    }
-  } else {
-    settlement.durable_sequence = Some(payload.sequence)
-  }
-  settlement.replayable = true
 }
 
 ///|
@@ -161,7 +122,6 @@ fn Hub::publish(self : Hub, notification : @protocol.Notification) -> Unit {
       self.record_finished(payload)
       self.active_starts.remove(payload.run_id)
     }
-    AgentDurable(payload) => self.record_durable_boundary(payload)
     _ => ()
   }
   let wedged : Array[Int] = []
@@ -205,9 +165,9 @@ fn Hub::unsubscribe(
 
 ///|
 /// The `agent.runs` reply: every in-flight run's `agent.started` params, in
-/// run-start order (the map preserves insertion order), plus only replayable
-/// settlements named by the caller's reconnect selectors. This function has
-/// no suspension point, so active runs and settlements form one atomic view.
+/// run-start order (the map preserves insertion order), plus the settlements
+/// named by the caller's own reconnect selectors. This function has no
+/// suspension point, so active runs and settlements form one atomic view.
 fn Hub::runs(
   self : Hub,
   known? : Array[KnownRunPayload],
@@ -219,8 +179,7 @@ fn Hub::runs(
   let settled : Array[@protocol.RunSettlementPayload] = []
   if known is Some(selectors) {
     for _, settlement in self.settlements {
-      if settlement.replayable &&
-        selectors.any(selector => settlement_matches(settlement, selector)) {
+      if selectors.any(selector => settlement_matches(settlement, selector)) {
         settled.push(settlement.wire_payload())
       }
     }
@@ -289,7 +248,6 @@ fn Hub::sink(
       // A failed command may have settled lifecycle before its process was
       // reapable. This later durable boundary is not a second finish: it must
       // not post another system notification or mutate the live-runs table.
-      DurableBoundary(payload) => self.publish(AgentDurable(payload))
     }
   })
 }
@@ -399,7 +357,11 @@ test "a normal terminal-backed finish is replayable only to a matching caller" {
 }
 
 ///|
-test "an abnormal finish waits for an exact durable boundary including zero" {
+/// A run that ended abnormally is as replayable as one that ended cleanly.
+/// The host published that outcome; a reconnecting owner is entitled to it,
+/// and how much the run wrote is a question the record answers when it is
+/// read — not something the settlement has to prove first.
+test "an abnormal finish is replayable to its own caller" {
   let hub = Hub::new()
   hub.publish(
     AgentStarted(
@@ -415,41 +377,32 @@ test "an abnormal finish waits for an exact durable boundary including zero" {
       @json.from_json({ "run_id": "r-zero", "status": "failed", "exit_code": 1 }),
     ),
   )
-  let known : Array[KnownRunPayload] = [
-    {
-      session: "s-zero",
-      run_id: Some("r-zero"),
-      submission_id: Some("sub-zero"),
-    },
-  ]
-  guard hub.runs(known~).settled is [] else {
-    fail("an unbounded abnormal finish was replayed")
+  guard hub.runs(known=[
+      {
+        session: "s-zero",
+        run_id: Some("r-zero"),
+        submission_id: Some("sub-zero"),
+      },
+    ]).settled
+    is [settlement] else {
+    fail("an abnormal finish was withheld from its own caller")
   }
-  hub.publish(
-    AgentDurable(
-      @json.from_json({
-        "run_id": "r-zero",
-        "session": "other-session",
-        "sequence": 99,
-      }),
-    ),
-  )
-  guard hub.runs(known~).settled is [] else {
-    fail("a boundary from another session settled the run")
+  assert_eq(settlement.status, "failed")
+  assert_eq(settlement.exit_code, Some(1))
+  guard hub.runs(known=[
+      {
+        session: "other-session",
+        run_id: Some("r-zero"),
+        submission_id: Some("sub-zero"),
+      },
+    ]).settled
+    is [] else {
+    fail("a non-matching reconnect identity received a settlement")
   }
-  hub.publish(
-    AgentDurable(
-      @json.from_json({ "run_id": "r-zero", "session": "s-zero", "sequence": 0 }),
-    ),
-  )
-  guard hub.runs(known~).settled is [settlement] else {
-    fail("exact-zero boundary did not settle the abnormal finish")
-  }
-  assert_eq(settlement.durable_sequence, Some(0))
 }
 
 ///|
-test "duplicate finish and durable boundaries never downgrade a settlement" {
+test "a duplicate finish never downgrades a settlement" {
   let hub = Hub::new()
   hub.publish(
     AgentStarted(
@@ -466,29 +419,12 @@ test "duplicate finish and durable boundaries never downgrade a settlement" {
         "run_id": "r-dedup",
         "status": "failed",
         "exit_code": 9,
+        "durable_sequence": 12,
       }),
     ),
   )
-  hub.publish(
-    AgentDurable(
-      @json.from_json({
-        "run_id": "r-dedup",
-        "session": "s-dedup",
-        "sequence": 12,
-      }),
-    ),
-  )
-  // Both messages are idempotent. A stale lower boundary and a duplicate
-  // Finished without a sequence cannot erase the stronger frontier.
-  hub.publish(
-    AgentDurable(
-      @json.from_json({
-        "run_id": "r-dedup",
-        "session": "s-dedup",
-        "sequence": 3,
-      }),
-    ),
-  )
+  // Finish is idempotent: a replay that carries less than the first one —
+  // no exit code, no sequence — cannot erase what was already recorded.
   hub.publish(
     AgentFinished(@json.from_json({ "run_id": "r-dedup", "status": "failed" })),
   )

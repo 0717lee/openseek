@@ -709,17 +709,6 @@ pub fn DownloadUpdateAcceptedReply::not_equal(Self, Self) -> Bool
 pub fn DownloadUpdateAcceptedReply::to_json(Self) -> Json
 pub fn DownloadUpdateAcceptedReply::to_repr(Self) -> @debug.Repr
 
-pub(all) struct DurableBoundaryPayload {
-  run_id : String
-  session : String
-  sequence : Int
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
-pub fn DurableBoundaryPayload::equal(Self, Self) -> Bool
-pub fn DurableBoundaryPayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
-pub fn DurableBoundaryPayload::not_equal(Self, Self) -> Bool
-pub fn DurableBoundaryPayload::to_json(Self) -> Json
-pub fn DurableBoundaryPayload::to_repr(Self) -> @debug.Repr
-
 pub(all) enum EmptyPayload {
   NoPayload
 } derive(Eq, @debug.Debug)
@@ -1294,7 +1283,6 @@ pub(all) enum Notification {
   AgentEvent(AgentEventPayload)
   AgentError(AgentErrorPayload)
   AgentFinished(FinishedPayload)
-  AgentDurable(DurableBoundaryPayload)
   SessionEvent(SessionCommitPayload)
   SubrunProgress(SubrunProgressPayload)
   SessionChanged(SessionChangedPayload)
@@ -1330,7 +1318,6 @@ pub(all) enum NotificationKind {
   AgentEvent
   AgentError
   AgentFinished
-  AgentDurable
   SessionEvent
   SubrunProgress
   SessionChanged

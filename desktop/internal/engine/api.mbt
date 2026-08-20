@@ -108,13 +108,6 @@ type ErrorPayload = @protocol.AgentErrorPayload
 type SessionCommitPayload = @protocol.SessionCommitPayload
 
 ///|
-/// A lifecycle finish emitted before a stubborn child could be reaped is
-/// later strengthened by this non-lifecycle boundary notification. Keeping it
-/// distinct avoids a second Finished (and duplicate system/client terminal
-/// side effects) for the same run.
-type DurableBoundaryPayload = @protocol.DurableBoundaryPayload
-
-///|
 pub(all) enum EngineEvent {
   Connected(ConnectedPayload)
   Started(StartedPayload)
@@ -126,7 +119,6 @@ pub(all) enum EngineEvent {
   /// brackets on the raw stream own the sub-run's start and end, and this
   /// only refreshes what it is doing in between.
   SubrunProgress(@protocol.SubrunProgressPayload)
-  DurableBoundary(DurableBoundaryPayload)
 }
 
 ///|
@@ -198,16 +190,6 @@ fn emit_finished(
       durable_sequence,
     }),
   )
-}
-
-///|
-fn emit_durable_boundary(
-  sink : EventSink,
-  run_id : String,
-  session : String,
-  sequence : Int,
-) -> Unit {
-  emit(sink, DurableBoundary({ run_id, session, sequence }))
 }
 
 ///|

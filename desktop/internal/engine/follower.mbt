@@ -68,17 +68,6 @@ priv struct FollowerLoadRequest {
 }
 
 ///|
-/// A lifecycle Finished that was published before the follower could prove
-/// the matching durable frontier. The actor retains published entries until
-/// retirement as an idempotence ledger: a producer that registers the same run
-/// again across the semantic-terminal and failed-command paths cannot make it
-/// be announced twice.
-priv struct PendingDurableFinish {
-  run_id : String
-  mut published : Bool
-}
-
-///|
 priv struct SessionFollower {
   session : String
   root : @pathx.Absolute
@@ -99,10 +88,6 @@ priv struct SessionFollower {
   mut completed_stop_generation : Int
   mut completed_stop_error : String?
   mut stop_observers : Int
-  // Pending run identities belong to this retryable drain, not to the serve
-  // handle: EOF may retire a dead handle while a failed final scan deliberately
-  // leaves this actor alive for archive/detach to retry later.
-  durable_finishes : Array[PendingDurableFinish]
   // The highest sequence already broadcast. Commits at or below it are old
   // news; the frontier only advances, so a scan can never re-broadcast — not
   // even when the reader replays a record that was repaired under it.
@@ -110,41 +95,6 @@ priv struct SessionFollower {
   // Where this follower has read to, and the transcript it read. A scan is
   // this reader moving forward; a `session.load` is what it already holds.
   tail : @session_record.Tail
-}
-
-///|
-/// Remember that `run_id` needs an exact post-Finished durable boundary.
-/// Registration is idempotent across the semantic-terminal and failed-command
-/// paths, which may race while the child is shutting down.
-fn SessionFollower::expect_durable_finish(
-  self : SessionFollower,
-  run_id : String,
-) -> Unit {
-  for pending in self.durable_finishes {
-    if pending.run_id == run_id {
-      return
-    }
-  }
-  self.durable_finishes.push({ run_id, published: false })
-}
-
-///|
-/// Publish every retained boundary at the frontier proved by this successful
-/// final scan, and keep the entries as the actor's dedupe ledger. Publishing
-/// is total, so this is the seam's only outcome.
-fn SessionFollower::publish_durable_finishes(
-  self : SessionFollower,
-  sink : EventSink,
-) -> Unit {
-  let mut index = 0
-  while index < self.durable_finishes.length() {
-    let pending = self.durable_finishes[index]
-    if !pending.published {
-      emit_durable_boundary(sink, pending.run_id, self.session, self.watermark)
-      pending.published = true
-    }
-    index = index + 1
-  }
 }
 
 ///|
@@ -441,12 +391,6 @@ async fn SessionFollower::run(
           } else {
             None
           }
-          // Both a readable snapshot and the exact-zero proof above are
-          // successful drains. Publish pending lifecycle boundaries at this
-          // single seam before retirement.
-          if final_scan && failure is None {
-            follower.publish_durable_finishes(sink)
-          }
           if failure is Some(detail) {
             // A failed final scan is not a drain. Keep the actor installed
             // and polling, and publish the exact failure to every caller
@@ -578,7 +522,6 @@ async fn[G] ensure_follower(
     completed_stop_generation: 0,
     completed_stop_error: None,
     stop_observers: 0,
-    durable_finishes: [],
     watermark: 0,
     tail: Tail(root, session),
   }
@@ -1074,85 +1017,19 @@ async test "failed final scan keeps the follower active and propagates" {
 }
 
 ///|
+/// A first prompt cancelled before the engine created its record leaves a
+/// session with nothing to drain. Once the caller has proved the writer is
+/// gone, that absence is a successful drain rather than a failure to retry
+/// forever.
 #cfg(not(platform="windows"))
-async test "zero-watermark durable boundary survives a failed final scan" {
-  let dir = @fs.tmpdir(prefix="openseek-follower-durable-zero-")
-  let engine = dir + "/engine.sh"
-  let session = "s-durable-zero"
-  let root : @pathx.Absolute = @pathx.Path(dir + "/root").resolve()
-  // A record the writer created but has not committed anything to: the
-  // baseline reads it, and the boundary below lands at sequence 0.
-  write_session_record(root, session, [])
-  let manager = new_engine_manager(engine)
-  let emitted : Array[EngineEvent] = []
-  let sink = EventSink(fn(event) { emitted.push(event) })
-  @async.with_task_group(group => {
-    ignore(
-      ensure_follower(
-        sink~,
-        group~,
-        manager~,
-        config=follower_test_config(engine, session, root),
-      ),
-    )
-    guard manager.followers.get(session) is Some(follower) else {
-      fail("expected follower")
-    }
-    follower.expect_durable_finish("r-durable-zero")
-    follower.expect_durable_finish("r-durable-zero")
-    // Damaged under the follower, so its final scan cannot prove a frontier.
-    write_damaged_record(root, session)
-    let detail = try {
-      stop_follower(manager, session, writer_exited=true)
-      "no error"
-    } catch {
-      EngineError(detail) => detail
-      error if @async.is_being_cancelled() => raise error
-      error => "\{error}"
-    }
-    assert_true(detail.contains("session record"))
-    assert_true(
-      follower.durable_finishes
-      is [{ run_id: "r-durable-zero", published: false }],
-    )
-    assert_false(emitted.iter().any(event => event is DurableBoundary(_)))
-
-    // Readable again: every retry drains, and the retained boundary is
-    // published exactly once across all of them.
-    write_session_record(root, session, [])
-    let retry_a = group.spawn(() => {
-      stop_follower(manager, session, writer_exited=true)
-    })
-    let retry_b = group.spawn(() => {
-      stop_follower(manager, session, writer_exited=true)
-    })
-    retry_a.wait()
-    retry_b.wait()
-    stop_follower(manager, session, writer_exited=true)
-    let boundaries : Array[Int] = []
-    for event in emitted {
-      if event is DurableBoundary(payload) && payload.run_id == "r-durable-zero" {
-        boundaries.push(payload.sequence)
-      }
-    }
-    assert_eq(boundaries, [0])
-    assert_true(follower.durable_finishes[0].published)
-    group.return_immediately(())
-  })
-  @fs.rmdir(dir, recursive=true)
-}
-
-///|
-#cfg(not(platform="windows"))
-async test "absent first record publishes one exact-zero durable boundary" {
+async test "an absent record retires as an empty drain" {
   let dir = @fs.tmpdir(prefix="openseek-follower-durable-absent-")
   let engine = dir + "/engine.sh"
   let session = "s-durable-absent"
   let root : @pathx.Absolute = @pathx.Path(dir + "/root").resolve()
   // No record at all: the writer was cancelled before creating one.
   let manager = new_engine_manager(engine)
-  let emitted : Array[EngineEvent] = []
-  let sink = EventSink(fn(event) { emitted.push(event) })
+  let sink = EventSink(fn(_) { () })
   @async.with_task_group(group => {
     ignore(
       ensure_follower(
@@ -1165,18 +1042,7 @@ async test "absent first record publishes one exact-zero durable boundary" {
     guard manager.followers.get(session) is Some(follower) else {
       fail("expected follower")
     }
-    follower.expect_durable_finish("r-durable-absent")
     stop_follower(manager, session, writer_exited=true)
-    stop_follower(manager, session, writer_exited=true)
-
-    let boundaries : Array[Int] = []
-    for event in emitted {
-      if event is DurableBoundary(payload) &&
-        payload.run_id == "r-durable-absent" {
-        boundaries.push(payload.sequence)
-      }
-    }
-    assert_eq(boundaries, [0])
     assert_true(follower.retired)
     assert_true(manager.followers.get(session) is None)
     group.return_immediately(())
@@ -1186,7 +1052,7 @@ async test "absent first record publishes one exact-zero durable boundary" {
 
 ///|
 #cfg(not(platform="windows"))
-async test "nonzero durable boundary survives a failed final scan" {
+async test "the drain that finally succeeds broadcasts what it could not read" {
   let dir = @fs.tmpdir(prefix="openseek-follower-durable-tail-")
   let engine = dir + "/engine.sh"
   let session = "s-durable-tail"
@@ -1204,10 +1070,9 @@ async test "nonzero durable boundary survives a failed final scan" {
         config=follower_test_config(engine, session, root),
       ),
     )
-    guard manager.followers.get(session) is Some(follower) else {
+    guard manager.followers.get(session) is Some(_) else {
       fail("expected follower")
     }
-    follower.expect_durable_finish("r-durable-tail")
     write_damaged_record(root, session)
     stop_follower(manager, session, writer_exited=true) catch {
       EngineError(detail) => assert_true(detail.contains("session record"))
@@ -1221,20 +1086,12 @@ async test "nonzero durable boundary survives a failed final scan" {
     stop_follower(manager, session, writer_exited=true)
     let relevant : Array[EngineEvent] = []
     for event in emitted {
-      match event {
-        SessionCommit(payload) if payload.session == session =>
-          relevant.push(event)
-        DurableBoundary(payload) if payload.run_id == "r-durable-tail" =>
-          relevant.push(event)
-        _ => ()
+      if event is SessionCommit(payload) && payload.session == session {
+        relevant.push(event)
       }
     }
-    guard relevant
-      is [
-        SessionCommit({ sequence: 1, session_root, .. }),
-        DurableBoundary({ sequence: 1, .. }),
-      ] else {
-      fail("expected one rooted commit and one durable boundary")
+    guard relevant is [SessionCommit({ sequence: 1, session_root, .. })] else {
+      fail("expected exactly one rooted commit")
     }
     assert_eq(session_root, root.resource_path())
     group.return_immediately(())
@@ -1323,7 +1180,7 @@ async test "EOF retirement closes a committed turn with its real outcome" {
 
 ///|
 #cfg(not(platform="windows"))
-async test "abrupt EOF retains a failed final drain for later boundary retry" {
+async test "abrupt EOF leaves a failed drain for a later caller to retry" {
   let dir = @fs.tmpdir(prefix="openseek-follower-abrupt-eof-")
   let engine_path = dir + "/engine.sh"
   let session = "s-abrupt-eof"
@@ -1373,46 +1230,30 @@ async test "abrupt EOF retains a failed final drain for later boundary retry" {
     manager.pump = Serving(sessions~)
     let stderr_task = group.spawn(no_wait=true, () => "")
     // The record is unreadable at EOF, so the drain this engine's exit runs
-    // cannot prove a frontier and the boundary stays pending.
+    // cannot complete and the actor has to stay behind.
     write_damaged_record(root, session)
     engine.run(manager, reader, stderr_task)
 
-    // `run` returning is retirement: the slot is clear and every lifecycle
-    // event this engine owed has been published.
+    // `run` returning is retirement: the dead handle left its slot, and its
+    // run was closed without a record position it could not read.
     assert_true(slot.engine is None)
-    assert_true(
-      follower.durable_finishes
-      is [{ run_id: "r-abrupt-eof", published: false }],
-    )
-    let mut finished_index = -1
-    let mut early_boundaries = 0
-    for index, event in emitted {
-      match event {
-        Finished(payload) if payload.run_id == "r-abrupt-eof" => {
-          assert_true(payload.durable_sequence is None)
-          finished_index = index
-        }
-        DurableBoundary(payload) if payload.run_id == "r-abrupt-eof" =>
-          early_boundaries = early_boundaries + 1
-        _ => ()
+    let mut finishes = 0
+    for event in emitted {
+      if event is Finished(payload) && payload.run_id == "r-abrupt-eof" {
+        assert_true(payload.durable_sequence is None)
+        finishes = finishes + 1
       }
     }
-    assert_true(finished_index >= 0)
-    assert_eq(early_boundaries, 0)
-
+    assert_eq(finishes, 1)
+    // The follower outlived the engine precisely so a later caller can drain
+    // it; once the record is readable again, that retry retires it.
+    assert_true(
+      manager.followers.get(session) is Some(current) &&
+      physical_equal(current, follower),
+    )
     write_session_record(root, session, [])
     stop_follower(manager, session, writer_exited=true)
-    let mut boundary_index = -1
-    let mut boundary_count = 0
-    for index, event in emitted {
-      if event is DurableBoundary(payload) && payload.run_id == "r-abrupt-eof" {
-        assert_eq(payload.sequence, 0)
-        boundary_index = index
-        boundary_count = boundary_count + 1
-      }
-    }
-    assert_eq(boundary_count, 1)
-    assert_true(boundary_index > finished_index)
+    assert_true(follower.retired)
     group.return_immediately(())
   })
   @fs.rmdir(dir, recursive=true)
@@ -1452,7 +1293,6 @@ async test "workspace detach drains an orphaned pending follower before commit" 
     guard manager.followers.get(session) is Some(follower) else {
       fail("expected follower")
     }
-    follower.expect_durable_finish("r-detach-orphan")
     write_damaged_record(root, session)
     stop_follower(manager, session, writer_exited=true) catch {
       EngineError(detail) => assert_true(detail.contains("session record"))
@@ -1463,28 +1303,17 @@ async test "workspace detach drains an orphaned pending follower before commit" 
 
     // The detach below drains the orphan, so the record has to be readable
     // again by then.
-    write_session_record(root, session, [])
-    let committed_after_boundary : Ref[Bool] = Ref(false)
+    write_session_record(root, session, [session_user_event(1, "tail")])
+    // The drain has to finish before the workspace's removal is committed:
+    // once the store is gone, nothing could read what the writer left.
+    let drained_before_commit : Ref[Bool] = Ref(false)
     let detached = detach_workspace(manager, workspace.to_string(), fn(_) {
-      committed_after_boundary.val = emitted
-        .iter()
-        .any(event => {
-          event
-          is DurableBoundary({ run_id: "r-detach-orphan", sequence: 0, .. })
-        })
+      drained_before_commit.val = follower.retired &&
+        emitted.iter().any(event => event is SessionCommit({ sequence: 1, .. }))
     })
-    assert_true(committed_after_boundary.val)
+    assert_true(drained_before_commit.val)
     assert_true(detached is Workspaces([]))
-    assert_true(follower.retired)
     assert_true(manager.followers.get(session) is None)
-    let boundaries : Array[Int] = []
-    for event in emitted {
-      if event is DurableBoundary(payload) &&
-        payload.run_id == "r-detach-orphan" {
-        boundaries.push(payload.sequence)
-      }
-    }
-    assert_eq(boundaries, [0])
     group.return_immediately(())
   })
   @fs.rmdir(dir, recursive=true)
@@ -1725,7 +1554,6 @@ fn follower_state_fixture(session : String) -> SessionFollower {
     completed_stop_generation: 0,
     completed_stop_error: None,
     stop_observers: 0,
-    durable_finishes: [],
     watermark: 0,
     tail: Tail(root, session),
   }

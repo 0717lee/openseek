@@ -530,23 +530,38 @@ pub async fn load_session(
       watermark: Some(session_max_sequence(document)),
     }
   }
-  // Name the missing-record states before spending an engine read that can
-  // only fail with a raw file error: a stale client asks for conversations
-  // whose store just detached (or whose record moved to an archived twin),
-  // and the answer should say that, not ENOENT.
-  if !@fsx.is_dir(root.join("sessions").join(session).to_path()) {
-    if @session_store.archived_root_of(session) is Some(_) {
-      raise EngineError("this conversation is archived; unarchive it first")
-    }
-    raise EngineError(
-      "no durable record for this conversation in any attached workspace",
-    )
+  // A record that moved to an archived twin is a different answer than one
+  // that was never written: say so, rather than reporting this store's
+  // emptiness for a conversation that does have durable content elsewhere.
+  if !@fsx.is_dir(root.join("sessions").join(session).to_path()) &&
+    @session_store.archived_root_of(session) is Some(_) {
+    raise EngineError("this conversation is archived; unarchive it first")
   }
   let document = @session_record.read_document(root, session) catch {
     error if @async.is_being_cancelled() => raise error
+    // No record here yet. That is this conversation's answer, not a failed
+    // read: a turn that died before the engine created the record leaves
+    // exactly this state, and a client told "load failed" can only retry a
+    // read that will keep failing.
+    @session_record.Absent(_) => return empty_session_reply(session)
     error => raise EngineError("session load failed: \{error}")
   }
   { session: document, watermark: Some(session_max_sequence(document)) }
+}
+
+///|
+/// The transcript of a conversation with no durable content: what a store
+/// holds for a session whose first turn has not committed anything.
+fn empty_session_reply(session : String) -> LoadSessionReply {
+  {
+    session: {
+      version: None,
+      id: Some(session),
+      system_prompt: None,
+      events: Some([]),
+    },
+    watermark: Some(0),
+  }
 }
 
 ///|

@@ -70,7 +70,6 @@ pub(all) enum EngineEvent {
   Finished(@protocol.FinishedPayload)
   SessionCommit(@protocol.SessionCommitPayload)
   SubrunProgress(@protocol.SubrunProgressPayload)
-  DurableBoundary(@protocol.DurableBoundaryPayload)
 }
 
 type EngineManager

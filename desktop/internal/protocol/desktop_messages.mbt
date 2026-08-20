@@ -819,13 +819,6 @@ pub(all) struct FinishedPayload {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
-pub(all) struct DurableBoundaryPayload {
-  run_id : String
-  session : String
-  sequence : Int
-} derive(Debug, Eq, FromJson, ToJson)
-
-///|
 pub(all) struct SessionCommitPayload {
   session : String
   sequence : Int
@@ -1235,18 +1228,6 @@ pub extend DiagnosticsPayload with Eq::{equal, not_equal}
 
 ///|
 pub extend DiagnosticsPayload with ToJson::{to_json}
-
-///|
-pub extend DurableBoundaryPayload with Debug::{to_repr}
-
-///|
-pub extend DurableBoundaryPayload with FromJson::{from_json}
-
-///|
-pub extend DurableBoundaryPayload with Eq::{equal, not_equal}
-
-///|
-pub extend DurableBoundaryPayload with ToJson::{to_json}
 
 ///|
 pub extend ExternalLinkPayload with Debug::{to_repr}

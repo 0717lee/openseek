@@ -984,32 +984,34 @@ async fn EngineManager::close_engines_for_sessions(
 }
 
 ///|
-/// One engine JSONL event after the process adapter has extracted every fact
-/// the actor needs. Keeping the raw JSON out of `StreamMessage` makes the
-/// reader/actor channel typed without losing legacy lifecycle normalization.
+/// One engine JSONL event with every fact the pump needs extracted from it,
+/// so the loop reads typed facts instead of re-inspecting raw JSON.
 priv struct DecodedStreamEvent {
   legacy : @event.AgentEvent?
   wire : @wire.Event?
   prompt_steer_applied : Bool
-  needs_durable_scan : Bool
+  // The turn is over, but this event does not prove the record got its
+  // Terminal: the engine writes these from a catch block whose append may
+  // itself have failed. Nothing may be submitted to this child afterwards.
+  turn_ended_unproven : Bool
 }
 
 ///|
 fn DecodedStreamEvent::from_wire(raw : Json) -> DecodedStreamEvent {
-  let (prompt_steer_applied, needs_durable_scan) = match raw {
+  let (prompt_steer_applied, turn_ended_unproven) = match raw {
     Object(fields) => {
       let prompt_steer_applied = match fields.get("kind") {
         None | Some(String("prompt")) => true
         _ => false
       }
-      let needs_durable_scan = match fields.get("event") {
+      let turn_ended_unproven = match fields.get("event") {
         Some(String(name)) =>
           name == "agent_setup_failed" ||
           name == "turn_failed" ||
           name == "agent_aborted"
         _ => false
       }
-      (prompt_steer_applied, needs_durable_scan)
+      (prompt_steer_applied, turn_ended_unproven)
     }
     _ => (false, false)
   }
@@ -1017,7 +1019,7 @@ fn DecodedStreamEvent::from_wire(raw : Json) -> DecodedStreamEvent {
     legacy: @event.decode_event(raw),
     wire: @wire.parse(raw),
     prompt_steer_applied,
-    needs_durable_scan,
+    turn_ended_unproven,
   }
 }
 
@@ -1648,17 +1650,16 @@ async fn ServeEngine::consume(
             }
           _ => ()
         }
-        let needs_durable_scan = stream.needs_durable_scan
-        // These events do not prove their matching Terminal append succeeded.
-        // Synchronously close admission and stdin before the first sink
-        // suspension; the current turn can finish its append/TurnDone, while
-        // the next start is forced through the old child's close/reap barrier
-        // and cancel cannot hit stale active_work.
+        // These events end the turn without proving their matching Terminal
+        // append succeeded. Synchronously close admission and stdin before
+        // the first sink suspension; the current turn can finish its
+        // append/TurnDone, while the next start is forced through the old
+        // child's close/reap barrier and cancel cannot hit stale active_work.
         // Discarded, not drained: a queued cancel/steer is exactly what
         // must be cut off. This is synchronous, so no request can be between
         // its admission check and its enqueue, and every dropped sender is
         // told rather than left waiting.
-        if needs_durable_scan {
+        if stream.turn_ended_unproven {
           engine.discard_commands(
             "the engine finished its turn before this command was written",
           )
@@ -1668,15 +1669,6 @@ async fn ServeEngine::consume(
           stream.prompt_steer_applied,
           engine.phase.latest_run(),
         )
-        // When the Terminal append did succeed, the follower's close will
-        // carry its exact sequence. This registration covers the append
-        // that failed: the EOF final scan then publishes the
-        // `agent.durable` boundary before a successor is admitted.
-        if needs_durable_scan &&
-          run_id is Some(id) &&
-          engine.follower is Some(follower) {
-          follower.expect_durable_finish(id)
-        }
         match decoded {
           Some(decoded) => {
             // Terminal failures are normalized by the follower's durable
@@ -1802,21 +1794,17 @@ async fn ServeEngine::retire(
       durable_sequence = Some(follower.watermark)
     } catch {
       error if @async.is_being_cancelled() => raise error
-      error => {
-        // This abrupt EOF will emit a Failed without an exact sequence.
-        // Move its durable obligation onto the follower before the
-        // lifecycle event; a later archive/detach Stop can then finish
-        // the failed drain after this dead serve handle leaves its slot.
-        if engine.phase is Running(run_id~, ..) {
-          follower.expect_durable_finish(run_id)
-        }
+      // The drain failed, so this abrupt EOF reports a Failed without an
+      // exact sequence. The follower stays installed for archive/detach to
+      // retry; nothing else is owed, because a client learns a conversation's
+      // durable content by reading it, not by being told its frontier.
+      error =>
         @xlog.debug() <?
           {
             "event": "desktop_follower_final_scan_failed",
             "session": engine.session_key,
             "error": "\{error}",
           }
-      }
     }
   }
   match engine.phase {
@@ -2113,21 +2101,21 @@ test "terminal failures are normalized by the host" {
 }
 
 ///|
-test "unproven terminal logs require an EOF durable scan" {
+test "an unproven turn end stops accepting commands for that child" {
   assert_true(
-    DecodedStreamEvent::from_wire({ "event": "agent_setup_failed" }).needs_durable_scan,
+    DecodedStreamEvent::from_wire({ "event": "agent_setup_failed" }).turn_ended_unproven,
   )
   assert_true(
-    DecodedStreamEvent::from_wire({ "event": "turn_failed" }).needs_durable_scan,
+    DecodedStreamEvent::from_wire({ "event": "turn_failed" }).turn_ended_unproven,
   )
   assert_true(
-    DecodedStreamEvent::from_wire({ "event": "agent_aborted" }).needs_durable_scan,
+    DecodedStreamEvent::from_wire({ "event": "agent_aborted" }).turn_ended_unproven,
   )
   assert_false(
-    DecodedStreamEvent::from_wire({ "event": "agent_finished" }).needs_durable_scan,
+    DecodedStreamEvent::from_wire({ "event": "agent_finished" }).turn_ended_unproven,
   )
   assert_false(
-    DecodedStreamEvent::from_wire({ "event": "max_steps_exhausted" }).needs_durable_scan,
+    DecodedStreamEvent::from_wire({ "event": "max_steps_exhausted" }).turn_ended_unproven,
   )
 }
 
