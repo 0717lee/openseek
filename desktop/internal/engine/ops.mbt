@@ -943,21 +943,13 @@ async test "a discarded command answers its sender" {
       cancel_handler=@process.graceful_cancel(timeout=10),
       no_wait=true,
     )
-    let engine : ServeEngine = {
-      session_key: "s-discard",
-      session_root: None,
-      spec_key: "test",
+    let engine = test_serve_engine(
+      "s-discard",
       writer,
-      commands: Queue(kind=Unbounded),
       process,
-      sink: EventSink(fn(_) { () }),
-      follower: None,
-      consumer: None,
-      phase: Idle(last_run=None),
-      pending_failure: None,
-      condemned: false,
-      steer_runs: SteerRunTracker::new(),
-    }
+      EventSink(fn(_) { () }),
+      phase=Idle(last_run=None),
+    )
     let ack : @async.Queue[EngineError?] = Queue(kind=Blocking(1))
     assert_true(
       engine.submit("{}\n", failure_reason="failed to write the goal", ack~),

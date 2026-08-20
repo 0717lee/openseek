@@ -1310,12 +1310,9 @@ async fn[G] handle_spawn_command(
   // The EOF consumer starts follower retirement independently, but
   // replacement must join that exact drain before initializing the successor,
   // even when both roots match. This makes one writer plus one follower
-  // generation the indivisible lifecycle unit — and it is what lets the
-  // durable close attribute terminals without timestamps: a new engine only
-  // spawns after the predecessor's record is drained (or proven absent), so
-  // the successor's baseline watermark already covers every terminal an
-  // earlier generation committed. Returning the failure here, without
-  // spawning, is the load-bearing half of that guarantee.
+  // generation the indivisible lifecycle unit. Refusing to spawn when the
+  // drain fails is also load-bearing for `close_run_from_terminal`: it is
+  // what keeps a predecessor's terminal out of a successor's watermark.
   stop_follower(manager, config.session, writer_exited=true) catch {
     error if @async.is_being_cancelled() => raise error
     error => {
@@ -1989,6 +1986,37 @@ fn emit_compaction_failed(
 }
 
 ///|
+/// A ServeEngine handle for tests, with every bookkeeping field at its spawn
+/// default. Adding a field to ServeEngine updates this one site instead of
+/// every test that needs a handle.
+fn test_serve_engine(
+  session : String,
+  writer : @process.WriteToProcess,
+  process : @process.Process,
+  sink : EventSink,
+  phase~ : EnginePhase,
+  session_root? : @pathx.Absolute,
+  follower? : SessionFollower,
+  condemned? : Bool = false,
+) -> ServeEngine {
+  {
+    session_key: session,
+    session_root,
+    spec_key: "test",
+    writer,
+    commands: Queue(kind=Unbounded),
+    process,
+    sink,
+    follower,
+    consumer: None,
+    phase,
+    pending_failure: None,
+    condemned,
+    steer_runs: SteerRunTracker::new(),
+  }
+}
+
+///|
 /// A consumer that dies mid-stream must not leave its open run's phase
 /// `Running` forever — that state is unreachable by every close path and
 /// reads as a turn that never ends. The failure is forced through the same
@@ -2007,25 +2035,17 @@ async test "a failed consumer closes its open run and retires the slot" {
       stdin=child_stdin,
       no_wait=true,
     )
-    let engine : ServeEngine = {
-      session_key: "s-consumer-died",
-      session_root: None,
-      spec_key: "test",
+    let engine = test_serve_engine(
+      "s-consumer-died",
       writer,
-      commands: Queue(kind=Unbounded),
       process,
       sink,
-      follower: None,
-      consumer: None,
-      phase: Running(
+      phase=Running(
         run_id="r-consumer-died",
         cancel_requested=false,
         compact_queued=false,
       ),
-      pending_failure: None,
-      condemned: false,
-      steer_runs: SteerRunTracker::new(),
-    }
+    )
     let sessions : Map[String, SessionSlot] = Map([])
     let slot = slot_for(sessions, "s-consumer-died")
     slot.engine = Some(engine)
@@ -2079,25 +2099,17 @@ async test "a failed command leaves settlement to the EOF retirement" {
       stdin=child_stdin,
       no_wait=true,
     )
-    let engine : ServeEngine = {
-      session_key: "s-write-failed",
-      session_root: None,
-      spec_key: "test",
+    let engine = test_serve_engine(
+      "s-write-failed",
       writer,
-      commands: Queue(kind=Unbounded),
       process,
       sink,
-      follower: None,
-      consumer: None,
-      phase: Running(
+      phase=Running(
         run_id="r-write-failed",
         cancel_requested=false,
         compact_queued=false,
       ),
-      pending_failure: None,
-      condemned: false,
-      steer_runs: SteerRunTracker::new(),
-    }
+    )
     let sessions : Map[String, SessionSlot] = Map([])
     let slot = slot_for(sessions, "s-write-failed")
     slot.engine = Some(engine)

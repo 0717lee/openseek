@@ -234,18 +234,15 @@ fn recorded_terminal_outcome(item : @protocol.SessionItem) -> TerminalOutcome? {
 /// death can delay this close until the poll ticker's next scan, never
 /// lose it.
 ///
-/// Attribution needs no clock. The record cannot name host run ids, but
-/// within one engine generation, closing a run and advancing the watermark
-/// past its terminal are the same synchronous act (`scan` broadcasts,
-/// advances, then closes, with no suspension between) — so a terminal this
-/// hook reads past the watermark never belongs to a run that already
-/// closed, and turns are strictly sequential, so exactly one run can be
-/// open. Across generations, `handle_spawn_command` drains the
-/// predecessor's follower (or proves its record absent) before a successor
-/// may spawn, and the successor's baseline adopts the record frontier — or
-/// refuses the spawn when it cannot (see `SessionFollower::run`) — before a
-/// run can be admitted. Together: a terminal read while this engine's run
-/// is open is that run's own.
+/// Attribution needs no clock, and no run id in the record. Within one
+/// engine generation, closing a run and advancing the watermark past its
+/// terminal are the same synchronous act, so a terminal read past the
+/// watermark cannot belong to a run that already closed; turns are strictly
+/// sequential, so at most one is open. Across generations, no engine spawns
+/// until the predecessor's record is drained and the successor's baseline
+/// has adopted its frontier (`handle_spawn_command`, `SessionFollower::run`
+/// — both refuse rather than guess). A terminal read while this engine's
+/// run is open is therefore that run's own.
 ///
 /// Deliberately reads `slot.engine`, not `live()`: a condemned engine
 /// draining toward EOF still owns its open run, and this close firing from
@@ -332,19 +329,11 @@ async fn SessionFollower::scan(
 /// broadcasting — anything committed before this follower existed reaches
 /// clients through `session.load`, not through a replay storm — then serve
 /// the inbox serially until a Stop, with a poll ticker as the kick fallback.
-/// The ready ack carries the baseline's outcome and releases the spawn path
-/// only once it is settled: the engine can neither append before the
-/// follower is watching nor start over a watermark the baseline could not
-/// prove.
-///
-/// The baseline refuses to guess. An absent record proves there is no
-/// history to adopt — a session's first turn legitimately baselines at 0 —
-/// but a record that exists and cannot be read is a different fact
-/// entirely: treating it as empty would replay the whole history on the
-/// first successful scan, and `close_run_from_terminal` would settle the
-/// new run with a predecessor's terminal. That failure aborts the spawn
-/// with its cause instead, and the next start retries with a fresh
-/// baseline.
+/// The ready ack carries the baseline's outcome, so the spawn path waits for
+/// it and refuses a frontier the baseline could not prove: an absent record
+/// proves an empty history (a first turn baselines at 0), but one that
+/// exists and cannot be read would replay as history the moment it becomes
+/// readable — straight into `close_run_from_terminal`.
 async fn SessionFollower::run(
   self : SessionFollower,
   sink : EventSink,
@@ -606,11 +595,8 @@ async fn[G] ensure_follower(
     ready.get()
   }
   if baseline_failure is Some(detail) {
-    // A record that exists and cannot be read leaves this follower with no
-    // provable frontier, so there is nothing to follow and no engine may
-    // start over it. The actor already retired itself on its way out; this
-    // only clears an entry that retirement could have lost to an identity
-    // race.
+    // The actor already retired itself on its way out; this only clears an
+    // entry that retirement could have lost to an identity race.
     discard_follower_startup(manager, follower)
     raise EngineError("failed to baseline the session record: \{detail}")
   }
@@ -897,25 +883,18 @@ async test "a durable terminal closes its open run" {
       stdin=child_stdin,
       no_wait=true,
     )
-    let engine : ServeEngine = {
-      session_key: "s-close",
-      session_root: Some(root),
-      spec_key: "test",
+    let engine = test_serve_engine(
+      "s-close",
       writer,
-      commands: Queue(kind=Unbounded),
       process,
       sink,
-      follower: None,
-      consumer: None,
-      phase: Running(
+      phase=Running(
         run_id="r-close",
         cancel_requested=false,
         compact_queued=false,
       ),
-      pending_failure: None,
-      condemned: false,
-      steer_runs: SteerRunTracker::new(),
-    }
+      session_root=root,
+    )
     let sessions : Map[String, SessionSlot] = Map([])
     let slot = slot_for(sessions, "s-close")
     slot.engine = Some(engine)
@@ -1296,25 +1275,19 @@ async test "EOF retirement closes a committed turn with its real outcome" {
       stdin=child_stdin,
       no_wait=true,
     )
-    let engine : ServeEngine = {
-      session_key: session,
-      session_root: Some(root),
-      spec_key: "test",
+    let engine = test_serve_engine(
+      session,
       writer,
-      commands: Queue(kind=Unbounded),
       process,
       sink,
-      follower: Some(follower),
-      consumer: None,
-      phase: Running(
+      phase=Running(
         run_id="r-eof",
         cancel_requested=false,
         compact_queued=false,
       ),
-      pending_failure: None,
-      condemned: false,
-      steer_runs: SteerRunTracker::new(),
-    }
+      session_root=root,
+      follower~,
+    )
     let sessions : Map[String, SessionSlot] = Map([])
     let slot = slot_for(sessions, session)
     slot.engine = Some(engine)
@@ -1381,25 +1354,19 @@ async test "abrupt EOF retains a failed final drain for later boundary retry" {
       stdin=child_stdin,
       no_wait=true,
     )
-    let engine : ServeEngine = {
-      session_key: session,
-      session_root: Some(root),
-      spec_key: "test",
+    let engine = test_serve_engine(
+      session,
       writer,
-      commands: Queue(kind=Unbounded),
       process,
       sink,
-      follower: Some(follower),
-      consumer: None,
-      phase: Running(
+      phase=Running(
         run_id="r-abrupt-eof",
         cancel_requested=false,
         compact_queued=false,
       ),
-      pending_failure: None,
-      condemned: false,
-      steer_runs: SteerRunTracker::new(),
-    }
+      session_root=root,
+      follower~,
+    )
     let sessions : Map[String, SessionSlot] = Map([])
     let slot = slot_for(sessions, session)
     slot.engine = Some(engine)
@@ -1566,21 +1533,16 @@ async test "workspace detach refuses an idle engine whose follower cannot drain"
       stdin=child_stdin,
       no_wait=true,
     )
-    let engine : ServeEngine = {
-      session_key: session,
-      session_root: Some(root),
-      spec_key: "test",
+    let engine = test_serve_engine(
+      session,
       writer,
-      commands: Queue(kind=Unbounded),
       process,
       sink,
-      follower: Some(follower),
-      consumer: None,
-      phase: Idle(last_run=Some("r-detach-fail")),
-      pending_failure: None,
-      condemned: true,
-      steer_runs: SteerRunTracker::new(),
-    }
+      phase=Idle(last_run=Some("r-detach-fail")),
+      session_root=root,
+      follower~,
+      condemned=true,
+    )
     let sessions : Map[String, SessionSlot] = Map([])
     let slot = slot_for(sessions, session)
     slot.engine = Some(engine)
