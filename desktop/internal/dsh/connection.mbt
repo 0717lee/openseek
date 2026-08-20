@@ -179,6 +179,7 @@ async fn Connection::pump(
   self : Connection,
   stream : String,
   receive : (String, Json) -> Bool,
+  on_open~ : () -> Unit,
 ) -> Unit {
   let origin = match self.base_url.strip_prefix("http://") {
     Some(rest) => "ws://" + rest.to_owned()
@@ -187,6 +188,10 @@ async fn Connection::pump(
   }
   let conn = @websocket.Conn::connect(origin + "/api/events." + stream)
   defer conn.close()
+  // `connect` returns only after the WebSocket upgrade succeeds. Report that
+  // boundary before reading frames so the actor can subscribe both streams
+  // before it releases any HTTP reconnect baseline.
+  on_open()
   for ;; {
     let message = conn.recv()
     guard message.kind is Text else {
@@ -253,11 +258,12 @@ async fn[X] Connection::connect(group : @async.TaskGroup[X]) -> Connection {
     }
   }
   // dsh owns its installation and Node runtime. Desktop only invokes the
-  // executable made available through the login-shell PATH.
+  // executable made available through the login-shell PATH; `--no-open`
+  // suppresses dsh's browser because this process is serving the Desktop UI.
   let process = @process.spawn(
     group,
     "dsh",
-    ["web", "--host", "127.0.0.1", "--port", "0"],
+    ["web", "--host", "127.0.0.1", "--port", "0", "--no-open"],
     inherit_env=true,
     stdin=child_stdin,
     stdout=child_stdout,

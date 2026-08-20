@@ -1213,17 +1213,42 @@ fn State::with_reply(
       // dsh answers with its complete new archive set. Take it whole; the page
       // then lets go of the conversation on screen when that is the one which
       // just went away.
+      guard value is Object(fields) &&
+        fields.get("archivedSessionIds") is Some(Array(ids)) else {
+        return (
+          @cmd.none,
+          {
+            ..self,
+            loading: false,
+            notice: "DeepSeek Harness returned a malformed workspace.archiveSession reply",
+          },
+        )
+      }
       let archived_session_ids : Set[String] = Set([])
-      if value is Object(fields) &&
-        fields.get("archivedSessionIds") is Some(Array(ids)) {
-        for id in ids {
-          if id is String(archived) {
-            archived_session_ids.add(archived)
-          }
+      for id in ids {
+        guard id is String(archived) && !archived.trim().is_empty() else {
+          return (
+            @cmd.none,
+            {
+              ..self,
+              loading: false,
+              notice: "DeepSeek Harness returned a malformed workspace.archiveSession reply",
+            },
+          )
         }
+        archived_session_ids.add(archived)
       }
       let next = { ..self, archived_session_ids, }.release_archived_active()
-      (self.list_sessions(dispatch), { ..next, loading: false, notice: "" })
+      (
+        @cmd.batch([
+          // The host archive event revokes the previous native grant table.
+          // Rebuild it from the complete list, which now subtracts the archive
+          // set before Files or Terminal can become available again.
+          DshWorkspacesReply.request(dispatch, "workspace.list", {}),
+          self.list_sessions(dispatch),
+        ]),
+        { ..next, workspaces: [], loading: true, notice: "" },
+      )
     }
     DshWorkspaceDeleteReply =>
       // The registration is gone; its sessions are ungrouped rather than
@@ -1674,6 +1699,39 @@ fn State::with_event(
         // native actor has already revoked every grant for this revision.
         { ..self, workspaces: [], loading: true },
       )
+    "host/archived-sessions-changed" => {
+      let archived_session_ids : Set[String] = Set([])
+      let mut valid = true
+      if payload.get("archivedSessionIds") is Some(Array(ids)) {
+        for id in ids {
+          if id is String(session_id) && !session_id.trim().is_empty() {
+            archived_session_ids.add(session_id)
+          } else {
+            valid = false
+          }
+        }
+      } else {
+        valid = false
+      }
+      // A malformed incremental frame still invalidated native grants. Leave
+      // the last known archive projection alone and let the strict list repair
+      // it rather than interpreting damaged input as "nothing is archived".
+      let next = if valid {
+        { ..self, archived_session_ids, }.release_archived_active()
+      } else {
+        self
+      }
+      (
+        @cmd.batch([
+          DshWorkspacesReply.request(dispatch, "workspace.list", {}),
+          self.list_sessions(dispatch),
+        ]),
+        // The actor invalidates native grants before publishing this event.
+        // Hide the matching frontend roots until the fenced list restores only
+        // conversations which remain visible.
+        { ..next, workspaces: [], loading: true },
+      )
+    }
     "approval/requested" => {
       let generation = @jsonx.json_int(wrapper, "generation").unwrap_or(
         self.pending_generation,
@@ -3794,6 +3852,82 @@ test "changed or removed dsh Workspace hides cached host roots before refresh" {
 }
 
 ///|
+test "dsh archive events hide roots and replace the complete archive set purely" {
+  let state = {
+    ..State(),
+    connection: DshReady,
+    workspaces: [
+      {
+        id: "workspace-1",
+        title: "Project",
+        path: "/work/project",
+        session_ids: ["session-1", "session-2"],
+      },
+    ],
+    archived_session_ids: Set::from_iter(["session-2"].iter()),
+    sessions: [
+      {
+        id: "session-1",
+        title: "First",
+        cwd: Some("/work/project"),
+        running: false,
+        blank: false,
+      },
+      {
+        id: "session-2",
+        title: "Second",
+        cwd: Some("/work/project"),
+        running: false,
+        blank: false,
+      },
+    ],
+    active_id: Some("session-1"),
+  }
+  let event = Event({
+    "stream": "host",
+    "message": {
+      "rpcId": "host-archive-1",
+      "payload": {
+        "type": "host/archived-sessions-changed",
+        "archivedSessionIds": ["session-1"],
+      },
+    },
+  })
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let (_, next) = update(dispatch, event, state)
+  let (_, repeated) = update(dispatch, event, state)
+  // The handler is pure: replaying the same message against the same model
+  // yields the same values for every field this transition owns.
+  assert_eq(next.active_id, repeated.active_id)
+  assert_eq(next.workspaces.length(), repeated.workspaces.length())
+  assert_eq(next.archived_session_ids, repeated.archived_session_ids)
+  assert_eq(next.loading, repeated.loading)
+  assert_eq(next.active_id, None)
+  assert_true(next.workspaces.is_empty())
+  assert_true(next.archived_session_ids.contains("session-1"))
+  assert_false(next.archived_session_ids.contains("session-2"))
+  assert_true(next.loading)
+  let (_, malformed) = update(
+    dispatch,
+    Event({
+      "stream": "host",
+      "message": {
+        "rpcId": "host-archive-2",
+        "payload": {
+          "type": "host/archived-sessions-changed",
+          "archivedSessionIds": [7],
+        },
+      },
+    }),
+    state,
+  )
+  assert_true(malformed.archived_session_ids.contains("session-2"))
+  assert_false(malformed.archived_session_ids.contains("session-1"))
+  assert_eq(malformed.active_id, Some("session-1"))
+  assert_true(malformed.workspaces.is_empty())
+}
+
+///|
 test "removing the active dsh session initializes its fallback composer" {
   let selected : DshModelSelection = {
     provider: "deepseek",
@@ -4231,10 +4365,31 @@ test "archiving a dsh conversation hides it and releases the page" {
   assert_eq(archived.active_id, None)
   assert_true(archived.events.is_empty())
   assert_eq(archived.streaming, "")
-  assert_false(archived.loading)
+  assert_true(archived.loading)
+  assert_true(archived.workspaces.is_empty())
+  // The native grant table was revoked by the archive event. Only the fresh,
+  // complete list may put the unarchived conversation back under this path.
+  let (_, regrouped) = archived.with_reply(dispatch, DshWorkspacesReply, {
+    "type": "server-response",
+    "rpcId": "workspaces-after-archive",
+    "result": {
+      "ok": true,
+      "value": {
+        "items": [
+          {
+            "workspaceId": "workspace-main",
+            "title": "project",
+            "path": "/work/project",
+            "sessionIds": ["session-1", "session-2"],
+          },
+        ],
+        "archivedSessionIds": ["session-2"],
+      },
+    },
+  })
   // dsh keeps the session in its Workspace account; the sidebar is what
-  // stops showing it.
-  guard archived.sidebar_section(true).entries[0] is @section.Project(project) else {
+  // stops showing it after the strict list restores the project row.
+  guard regrouped.sidebar_section(true).entries[0] is @section.Project(project) else {
     fail("expected the project row")
   }
   guard project.conversations is [kept] else {
@@ -4244,7 +4399,7 @@ test "archiving a dsh conversation hides it and releases the page" {
   // dsh keeps serving an archived session from `session.list` — only its
   // Workspace grouping hides it — so the refresh that follows must not hand
   // the page back the conversation it just let go of.
-  let (_, refreshed) = archived.with_reply(
+  let (_, refreshed) = regrouped.with_reply(
     dispatch,
     DshSessionsReply(session_revision=0),
     {
@@ -4275,7 +4430,7 @@ test "archiving a dsh conversation hides it and releases the page" {
   )
   assert_eq(refreshed.active_id, Some("session-1"))
   // Archiving a conversation the user is not reading leaves the page alone.
-  let (_, other) = { ..archived, active_id: Some("session-1") }.with_reply(
+  let (_, other) = { ..regrouped, active_id: Some("session-1") }.with_reply(
     dispatch,
     DshArchiveReply,
     {
@@ -4285,6 +4440,22 @@ test "archiving a dsh conversation hides it and releases the page" {
     },
   )
   assert_eq(other.active_id, Some("session-1"))
+  assert_true(other.workspaces.is_empty())
+  assert_true(other.loading)
+  // A damaged archive reply cannot be treated as an empty archive set.
+  let (_, malformed) = { ..regrouped, active_id: Some("session-1") }.with_reply(
+    dispatch,
+    DshArchiveReply,
+    {
+      "type": "server-response",
+      "rpcId": "archive-damaged",
+      "result": { "ok": true, "value": { "archivedSessionIds": [7] } },
+    },
+  )
+  assert_eq(malformed.active_id, Some("session-1"))
+  assert_true(malformed.archived_session_ids.contains("session-2"))
+  assert_false(malformed.loading)
+  assert_true(malformed.notice.contains("malformed"))
   // Removing a Workspace registration re-reads both baselines: its sessions
   // become ungrouped rather than disappearing.
   let (_, removing) = update(dispatch, RemoveWorkspace("workspace-main"), state)

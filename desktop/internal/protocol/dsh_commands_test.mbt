@@ -143,7 +143,7 @@ test "dsh notification envelopes reject malformed wrappers" {
 }
 
 ///|
-test "dsh workspace list decodes strictly except for its archive set" {
+test "dsh workspace list decodes every authority field strictly" {
   let list : @protocol.DshWorkspaceList = @json.from_json({
     "items": [
       {
@@ -173,58 +173,45 @@ test "dsh workspace list decodes strictly except for its archive set" {
     (@json.from_json(list.to_json()) : @protocol.DshWorkspaceList),
     list,
   )
-  // dsh added `archivedSessionIds` after the first release of this document.
-  // Reading its absence as "nothing is archived" can only count MORE sessions
-  // as live, which is the refusing direction for every caller.
-  let older : @protocol.DshWorkspaceList = @json.from_json({
-    "items": [
-      {
-        "workspaceId": "workspace-1",
-        "title": "project",
-        "path": "/work/project",
-        "sessionIds": ["session-1"],
-      },
-    ],
-  })
-  assert_true(older.archived_session_ids.is_empty())
-  // The archive set is the one field read leniently. Only the occupancy count
-  // consults it, while this document also carries the Files/Terminal grants,
-  // so a shape this build does not recognize must not cost the page its path
-  // authority — and reading it as empty only ever counts more sessions live.
-  let reshaped : @protocol.DshWorkspaceList = @json.from_json({
-    "items": [],
-    "archivedSessionIds": [{ "id": "session-1", "at": "2026-08-17" }],
-  })
-  assert_true(reshaped.archived_session_ids.is_empty())
-  let renamed : @protocol.DshWorkspaceList = @json.from_json({
-    "items": [],
-    "archived": ["session-1"],
-  })
-  assert_true(renamed.archived_session_ids.is_empty())
-  // Everything else is a decode failure rather than a skipped row: a reader
-  // that cannot parse a Workspace must not conclude that it holds nobody.
+  // Every field used to decide native authority is a decode failure rather
+  // than a skipped row. In particular, an absent or reshaped archive set must
+  // not be read as empty and restore a hidden conversation's grants.
   for
     malformed in [
       (
-        { "items": [{ "title": "project", "path": "/p", "sessionIds": [] }] } :
-        Json),
-      { "items": [{ "workspaceId": "w", "path": "/p", "sessionIds": [] }] },
-      { "items": [{ "workspaceId": "w", "title": "p", "sessionIds": [] }] },
+        {
+          "items": [{ "title": "project", "path": "/p", "sessionIds": [] }],
+          "archivedSessionIds": [],
+        } : Json),
+      {
+        "items": [{ "workspaceId": "w", "path": "/p", "sessionIds": [] }],
+        "archivedSessionIds": [],
+      },
+      {
+        "items": [{ "workspaceId": "w", "title": "p", "sessionIds": [] }],
+        "archivedSessionIds": [],
+      },
       {
         "items": [
           { "workspaceId": "w", "title": "p", "path": 7, "sessionIds": [] },
         ],
+        "archivedSessionIds": [],
       },
-      { "items": [{ "workspaceId": "w", "title": "p", "path": "/p" }] },
+      {
+        "items": [{ "workspaceId": "w", "title": "p", "path": "/p" }],
+        "archivedSessionIds": [],
+      },
       {
         "items": [
           { "workspaceId": "w", "title": "p", "path": "/p", "sessionIds": {} },
         ],
+        "archivedSessionIds": [],
       },
       {
         "items": [
           { "workspaceId": "w", "title": "p", "path": "/p", "sessionIds": [7] },
         ],
+        "archivedSessionIds": [],
       },
       {
         "items": [
@@ -235,9 +222,16 @@ test "dsh workspace list decodes strictly except for its archive set" {
             "sessionIds": [" "],
           },
         ],
+        "archivedSessionIds": [],
       },
-      { "items": {} },
+      { "items": {}, "archivedSessionIds": [] },
       { "archivedSessionIds": [] },
+      { "items": [] },
+      {
+        "items": [],
+        "archivedSessionIds": [{ "id": "session-1", "at": "2026-08-17" }],
+      },
+      { "items": [], "archived": ["session-1"] },
     ] {
     let rejected = try {
       let _ : @protocol.DshWorkspaceList = @json.from_json(malformed)

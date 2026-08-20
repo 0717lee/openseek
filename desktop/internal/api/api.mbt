@@ -315,14 +315,18 @@ fn DshDesktopCall::workspace_bindings(
   guard dsh_workspace_list_value(reply) is Some(value) else { return None }
   let bindings : Array[DshWorkspaceBinding] = []
   let owners : Map[String, Bool] = Map([])
-  for workspace in decode_dsh_workspace_list(value).items {
+  let list = decode_dsh_workspace_list(value)
+  let archived = Set::from_iter(list.archived_session_ids.iter())
+  for workspace in list.items {
     for session_id in workspace.session_ids {
-      let owner = @protocol.DshWorkspaceOwner(session_id).id()
-      guard owners.get(owner) is None else {
-        raise PayloadError("dsh returned duplicate Workspace membership")
+      if !archived.contains(session_id) {
+        let owner = @protocol.DshWorkspaceOwner(session_id).id()
+        guard owners.get(owner) is None else {
+          raise PayloadError("dsh returned duplicate Workspace membership")
+        }
+        owners[owner] = true
+        bindings.push({ owner, workspace: workspace.path })
       }
-      owners[owner] = true
-      bindings.push({ owner, workspace: workspace.path })
     }
   }
   Some(bindings)
@@ -1282,13 +1286,19 @@ test "a damaged dsh workspace list fails every native reader alike" {
   for
     damaged in [
       (
-        { "items": [{ "workspaceId": "w", "title": "t", "sessionIds": [] }] } :
-        Json),
-      { "items": [{ "workspaceId": "w", "title": "t", "path": "/p" }] },
+        {
+          "items": [{ "workspaceId": "w", "title": "t", "sessionIds": [] }],
+          "archivedSessionIds": [],
+        } : Json),
+      {
+        "items": [{ "workspaceId": "w", "title": "t", "path": "/p" }],
+        "archivedSessionIds": [],
+      },
       {
         "items": [
           { "workspaceId": "w", "title": "t", "path": "/p", "sessionIds": [7] },
         ],
+        "archivedSessionIds": [],
       },
       // Absoluteness is this layer's rule rather than dsh's schema, so it is
       // enforced beside the codec and refuses on the same terms.
@@ -1301,7 +1311,12 @@ test "a damaged dsh workspace list fails every native reader alike" {
             "sessionIds": [],
           },
         ],
+        "archivedSessionIds": [],
       },
+      // The archive set controls native grants, so an older or reshaped list
+      // cannot be accepted as if every accounted conversation were visible.
+      { "items": [] },
+      { "items": [], "archivedSessionIds": [{ "id": "session-1" }] },
     ] {
     let rejected = try {
       ignore(call.workspace_bindings(envelope(damaged)))
@@ -1351,6 +1366,23 @@ test "a damaged dsh workspace list fails every native reader alike" {
     PayloadError(_) => true
   }
   assert_true(duplicated)
+  guard call.workspace_bindings(
+      envelope({
+        "items": [
+          {
+            "workspaceId": "w1",
+            "title": "one",
+            "path": "/work/one",
+            "sessionIds": ["session-1"],
+          },
+        ],
+        "archivedSessionIds": ["session-1"],
+      }),
+    )
+    is Some(archived_bindings) else {
+    fail("expected a complete archived Workspace snapshot")
+  }
+  assert_true(archived_bindings.is_empty())
 }
 
 ///|
@@ -1682,7 +1714,11 @@ async fn ApiState::dsh_worktree_project(
       "DeepSeek Harness worktree could not verify its Workspace",
     )
   }
-  let owns_requested_workspace = decode_dsh_workspace_list(workspace_value).items
+  let workspace_list = decode_dsh_workspace_list(workspace_value)
+  let owns_requested_workspace = !workspace_list.archived_session_ids.contains(
+      session_id,
+    ) &&
+    workspace_list.items
     .iter()
     .any(workspace => {
       workspace.path == requested_path.to_string() &&

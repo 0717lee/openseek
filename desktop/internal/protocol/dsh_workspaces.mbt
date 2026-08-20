@@ -118,20 +118,16 @@ pub impl FromJson for DshWorkspaceList with fn from_json(json, path) {
     None =>
       raise JsonDecodeError((path.add_key("items"), "missing required field"))
   }
-  // The archive set is read leniently, unlike everything above it: absent, or
-  // any shape this build does not recognize, decodes as "nothing is archived".
-  // Two reasons pointing the same way. It can only ever count MORE sessions as
-  // live, which is the refusing direction for every caller. And exactly one
-  // reader consults it, while this same document carries the Files/Terminal
-  // grants and the first-send authorization — failing the whole list over a
-  // field nobody else reads would drop the page's path authority for a detail
-  // it does not use.
+  // The archive set participates in every native authority decision: it
+  // removes hidden sessions from Files/Terminal grants, first-send worktree
+  // eligibility, and checkout occupancy. Treating an absent or reshaped field
+  // as empty would therefore restore capabilities that dsh has withdrawn.
   let archived_session_ids = match fields.get("archivedSessionIds") {
-    Some(Array(_) as value) =>
-      decode_session_ids(value, path.add_key("archivedSessionIds")) catch {
-        _ => []
-      }
-    _ => []
+    Some(value) => decode_session_ids(value, path.add_key("archivedSessionIds"))
+    None =>
+      raise JsonDecodeError(
+        (path.add_key("archivedSessionIds"), "missing required field"),
+      )
   }
   { items, archived_session_ids }
 }

@@ -76,9 +76,44 @@ fn DshEvent::must_deliver(self : DshEvent) -> Bool {
   match @jsonx.json_text(payload, "type") {
     Some("host/session-removed")
     | Some("host/workspace-changed")
-    | Some("host/workspace-removed") => true
+    | Some("host/workspace-removed")
+    | Some("host/archived-sessions-changed") => true
     _ => false
   }
+}
+
+///|
+/// The two dsh downlinks must both be subscribed before reconnect baselines
+/// may leave the actor. A stream that fails after opening but before its peer
+/// opens reports both facts; consuming that failure keeps the generation from
+/// briefly becoming ready with only one live event source.
+priv struct DshStreamHandshake {
+  outcomes : @async.Queue[Bool]
+}
+
+///|
+fn DshStreamHandshake::DshStreamHandshake() -> DshStreamHandshake {
+  // Each of two streams reports one open and may then report one early failure.
+  // Keep all four signals bounded without letting a failure notification block
+  // the pump that must tear this connection down.
+  { outcomes: Queue(kind=Blocking(4)) }
+}
+
+///|
+fn DshStreamHandshake::opened(self : DshStreamHandshake) -> Unit {
+  (self.outcomes.try_put(true) catch { _ => false }) |> ignore
+}
+
+///|
+fn DshStreamHandshake::failed(self : DshStreamHandshake) -> Unit {
+  (self.outcomes.try_put(false) catch { _ => false }) |> ignore
+}
+
+///|
+async fn DshStreamHandshake::wait(self : DshStreamHandshake) -> Bool {
+  @async.with_timeout_opt(HandshakeTimeoutMs, () => {
+    self.outcomes.get() && self.outcomes.get()
+  }).unwrap_or(false)
 }
 
 ///|
@@ -385,6 +420,7 @@ async fn[G] Actor::run_connection(
   emit("dsh.status_changed", self.status())
   let events : @async.Queue[DshEvent] = Queue(kind=Blocking(DshEventCapacity))
   let lifecycle_events : @async.Queue[DshEvent] = Queue(kind=Unbounded)
+  let stream_handshake = DshStreamHandshake()
   // Disconnects cannot share `events`: queue saturation is itself one reason
   // a pump exits, and a sentinel written back into that full queue could vanish.
   let disconnects : @async.Queue[Unit] = Queue(
@@ -421,7 +457,7 @@ async fn[G] Actor::run_connection(
   }
   for stream in ["mux", "host"] {
     group.spawn_bg(allow_failure=true, () => {
-      connection.pump(stream, receive) catch {
+      connection.pump(stream, receive, on_open=() => stream_handshake.opened()) catch {
         error if @async.is_being_cancelled() => raise error
         error =>
           @xlog.warn(category="dsh") <?
@@ -431,11 +467,26 @@ async fn[G] Actor::run_connection(
               "error": "\{error}",
             }
       }
+      // A pump may also stop normally when its bounded event queue refuses a
+      // frame. That is still an early handshake failure if the other stream
+      // has not opened yet, and must wake the readiness wait immediately.
+      stream_handshake.failed()
       // One signal is enough to tear down both pumps. A second pump may find
       // this one-slot queue full, which means the disconnect is already owned.
       (disconnects.try_put(()) catch { _ => false }) |> ignore
       self.signal()
     })
+  }
+  if !stream_handshake.wait() {
+    let message = "DeepSeek Harness event streams did not become ready"
+    connection.shutdown()
+    self.finish_disconnect(emit, revoke_workspaces~, message~)
+    // `pending` was removed from the actor queue to trigger this reconnect.
+    // Answer it explicitly now that this generation cannot dispatch it.
+    if pending is Some(input) {
+      input.reject(Unavailable(message))
+    }
+    return
   }
   self.set_connection_state(Ready)
   emit("dsh.status_changed", self.status())
@@ -462,10 +513,12 @@ async fn[G] Actor::run_connection(
 /// Apply host-owned lifecycle effects before the renderer observes a frame.
 /// A changed or removed Workspace immediately invalidates the current
 /// generation's dsh grants; the following workspace.list may restore only the
-/// memberships that remain. `host/session-removed` reports that dsh dropped a
-/// session from memory, not that the conversation ended — dsh has no deletion
-/// API and still lists it from persistence — so it invalidates grants and
-/// nothing else. No durable Desktop state may be keyed on it.
+/// memberships that remain. Archive-set changes take the same path because an
+/// archived session stays in Workspace accounting but must lose Files/Terminal
+/// access. `host/session-removed` reports that dsh dropped a session from
+/// memory, not that the conversation ended — dsh has no deletion API and still
+/// lists it from persistence — so it invalidates grants and nothing else. No
+/// durable Desktop state may be keyed on it.
 async fn Actor::publish_frame(
   self : Actor,
   stream : String,
@@ -488,7 +541,8 @@ async fn Actor::publish_frame(
       Some("host/session-status") => self.session_revision += 1
       Some("host/session-removed")
       | Some("host/workspace-changed")
-      | Some("host/workspace-removed") => {
+      | Some("host/workspace-removed")
+      | Some("host/archived-sessions-changed") => {
         self.workspace_revision += 1
         invalidate_workspaces(self.generation, self.workspace_revision)
       }
@@ -511,8 +565,9 @@ async fn Actor::finish_disconnect(
   self : Actor,
   emit : (String, Json) -> Unit,
   revoke_workspaces~ : async (Int) -> Unit,
+  message? : String = "DeepSeek Harness disconnected",
 ) -> Unit {
-  self.set_connection_state(Unavailable("DeepSeek Harness disconnected"))
+  self.set_connection_state(Unavailable(message))
   revoke_workspaces(self.generation)
   emit("dsh.status_changed", self.status())
 }
@@ -693,6 +748,13 @@ async test "dsh actor tracks pending interactions and consumes buffered commands
     "payload": { "type": "host/session-removed", "sessionId": "session-1" },
   })
   assert_true(removal.must_deliver())
+  let archived = Frame("host", {
+    "payload": {
+      "type": "host/archived-sessions-changed",
+      "archivedSessionIds": ["session-1"],
+    },
+  })
+  assert_true(archived.must_deliver())
   assert_false(Frame("mux", {}).must_deliver())
   lifecycle_events.put(removal)
   disconnects.put(())
@@ -705,6 +767,18 @@ async test "dsh actor tracks pending interactions and consumes buffered commands
   assert_true(
     actor.next_step(events, lifecycle_events, disconnects) is Disconnected,
   )
+}
+
+///|
+async test "dsh stream handshake requires two opens and rejects an early failure" {
+  let ready = DshStreamHandshake()
+  ready.opened()
+  ready.opened()
+  assert_true(ready.wait())
+  let failed = DshStreamHandshake()
+  failed.opened()
+  failed.failed()
+  assert_false(failed.wait())
 }
 
 ///|
@@ -801,7 +875,7 @@ async test "dsh actor revisions session projections before publishing them" {
 }
 
 ///|
-async test "dsh actor invalidates grants before publishing workspace changes" {
+async test "dsh actor invalidates grants before publishing authority changes" {
   let actor = Actor()
   actor.generation = 9
   let order : Array[String] = []
@@ -841,6 +915,26 @@ async test "dsh actor invalidates grants before publishing workspace changes" {
   assert_eq(invalidated.get(), (9, 2))
   assert_eq(order, [
     "invalidated:9:1", "dsh.event", "invalidated:9:2", "dsh.event",
+  ])
+  actor.publish_frame(
+    "host",
+    {
+      "rpcId": "host-archive-1",
+      "payload": {
+        "type": "host/archived-sessions-changed",
+        "archivedSessionIds": ["session-1"],
+      },
+    },
+    (method_, _) => order.push(method_),
+    invalidate_workspaces=async fn(generation, revision) {
+      invalidated.put((generation, revision))
+      order.push("invalidated:\{generation}:\{revision}")
+    },
+  )
+  assert_eq(invalidated.get(), (9, 3))
+  assert_eq(order, [
+    "invalidated:9:1", "dsh.event", "invalidated:9:2", "dsh.event", "invalidated:9:3",
+    "dsh.event",
   ])
 }
 
