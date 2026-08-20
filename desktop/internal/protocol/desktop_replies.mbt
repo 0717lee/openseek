@@ -244,7 +244,45 @@ pub(all) struct SessionToolCall {
 pub(all) struct SessionUserMessage {
   content : String
   submission_id : String?
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
+
+///|
+/// Omit an absent tag rather than writing `null`, matching what the store
+/// itself writes: an untagged prompt is byte for byte the line every record
+/// held before the field existed.
+pub impl ToJson for SessionUserMessage with fn to_json(self) {
+  let fields = { "content": Json::string(self.content) }
+  if self.submission_id is Some(submission_id) {
+    fields["submission_id"] = Json::string(submission_id)
+  }
+  Json::object(fields)
+}
+
+///|
+/// `content` is the message; a record without it is not one, and refusing is
+/// how `SessionItem` learns to keep the raw line as `Unknown`.
+///
+/// The tag is a correlation hint, never the message. Missing, `null`, or a
+/// value that is not a string all mean "untagged" — the same answer a record
+/// written before the field existed gives. Refusing there would drop a user's
+/// prompt out of the transcript over an annotation nothing renders, and the
+/// enclosing `SessionItem` decoder would swallow the refusal as `Unknown`
+/// rather than surface it. Unknown fields are ignored: a newer store may
+/// annotate a prompt in ways this client has no reason to understand.
+pub impl FromJson for SessionUserMessage with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected a user message"))
+  }
+  guard fields.get("content") is Some(String(content)) else {
+    raise JsonDecodeError((path.add_key("content"), "expected message content"))
+  }
+  let submission_id = if fields.get("submission_id") is Some(String(value)) {
+    Some(value)
+  } else {
+    None
+  }
+  { content, submission_id }
+}
 
 ///|
 pub(all) struct SessionAssistantMessage {
