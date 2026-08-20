@@ -249,6 +249,13 @@ pub fn CancelSearchFilesPayload::not_equal(Self, Self) -> Bool
 pub fn CancelSearchFilesPayload::to_json(Self) -> Json
 pub fn CancelSearchFilesPayload::to_repr(Self) -> @debug.Repr
 
+pub(all) struct CancelSearchTextPayload {
+  session_key : String
+  generation : Int
+} derive(Eq, @debug.Debug)
+pub impl ToJson for CancelSearchTextPayload
+pub impl @json.FromJson for CancelSearchTextPayload
+
 pub(all) enum CheckUpdateReply {
   UpToDate
   Available(version~ : String, installable~ : Bool, unavailable_reason~ : String?)
@@ -1436,6 +1443,34 @@ pub fn SearchFilesReply::not_equal(Self, Self) -> Bool
 pub fn SearchFilesReply::to_json(Self) -> Json
 pub fn SearchFilesReply::to_repr(Self) -> @debug.Repr
 
+pub(all) struct SearchTextPayload {
+  root : String
+  query : String
+  regex : Bool
+  case_sensitive : Bool
+  whole_word : Bool
+  include_glob : String
+  exclude_glob : String
+  session_key : String
+  generation : Int
+  max_results : Int
+} derive(Eq, @debug.Debug)
+pub impl ToJson for SearchTextPayload
+pub impl @json.FromJson for SearchTextPayload
+
+pub(all) struct SearchTextReply {
+  root : String
+  generation : Int
+  matches : Array[TextSearchMatch]
+  match_count : Int
+  file_count : Int
+  limit_hit : Bool
+  cancelled : Bool
+  error : TextSearchError?
+} derive(Eq, @debug.Debug)
+pub impl ToJson for SearchTextReply
+pub impl @json.FromJson for SearchTextReply
+
 pub(all) struct SessionAssistantMessage {
   content : String
   tool_calls : Array[SessionToolCall]?
@@ -1865,6 +1900,28 @@ pub fn TerminalResizePayload::from_json(Json, @json.JsonPath) -> Self raise @jso
 pub fn TerminalResizePayload::not_equal(Self, Self) -> Bool
 pub fn TerminalResizePayload::to_json(Self) -> Json
 pub fn TerminalResizePayload::to_repr(Self) -> @debug.Repr
+
+pub(all) struct TextSearchError {
+  code : String
+  message : String
+} derive(Eq, @debug.Debug)
+
+pub(all) struct TextSearchMatch {
+  path : String
+  line_number : Int
+  preview : String
+  preview_start_column : Int
+  ranges : Array[TextSearchRange]
+} derive(Eq, @debug.Debug)
+pub impl ToJson for TextSearchMatch
+pub impl @json.FromJson for TextSearchMatch
+
+pub(all) struct TextSearchRange {
+  start_column : Int
+  end_column : Int
+} derive(Eq, @debug.Debug)
+pub impl ToJson for TextSearchRange
+pub impl @json.FromJson for TextSearchRange
 
 pub(all) struct UninstallSkillPayload {
   id : String

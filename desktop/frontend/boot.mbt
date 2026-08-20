@@ -54,7 +54,7 @@ fn app_shortcut_sub_loader(
 /// Subscribe to application command chords in both the native webview and
 /// browser console. Apple platforms use Cmd; other platforms use Ctrl. P/T
 /// open Quick Open, N starts a chat, O adds a project, B toggles the left
-/// sidebar, and Shift+B toggles the right panel.
+/// sidebar, Shift+B toggles the right panel, and Shift+F opens Search.
 fn app_shortcut_subscription(emit : @cmd.Emit[Msg]) -> @sub.Sub {
   @sub.custom_sub(
     "app-shortcut-capture",
@@ -123,6 +123,7 @@ fn app_shortcut_message(keyboard : @dom.KeyboardEvent, is_apple : Bool) -> Msg? 
     ("KeyO", false) => Some(AddProjectRequested)
     ("KeyB", false) => Some(ToggleSidebar)
     ("KeyB", true) => Some(ToggleRightPanel)
+    ("KeyF", true) => Some(ExplorerRequested(ExplorerSearch))
     _ => None
   }
 }
@@ -438,7 +439,7 @@ pub fn boot() -> Unit {
         // each reply, which is what stops a hidden explorer or a switched
         // conversation from leaving an orphaned timer behind.
         subs.push(
-          @fileeditor.changes_poll_subscription(
+          @fileeditor.subscriptions(
             model.file_panel,
             file_ctx(model),
             emit.map(msg => FileEditor(msg)),
@@ -452,8 +453,9 @@ pub fn boot() -> Unit {
       dock: emit.map(msg => Dock(msg)),
       file_editor: emit.map(msg => FileEditor(msg)),
       browser_tab: emit(BrowserTabRequested),
-      files: emit(FilePickerRequested),
-      review: emit(ReviewRequested),
+      search: emit(ExplorerRequested(ExplorerSearch)),
+      files: emit(ExplorerRequested(ExplorerFiles)),
+      review: emit(ExplorerRequested(ExplorerChanges)),
       browser_input: emit.map(value => BrowserAddressEdited(value)),
       browser_submit: emit(BrowserNavigateSubmitted),
       browser_back: emit(BrowserBack),

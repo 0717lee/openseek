@@ -1744,12 +1744,11 @@ priv enum Msg {
   // The browser subsystem's pure messages: address drafts and the host's
   // `browser.event` view events, routed to the `preview` package.
   Preview(@preview.Msg)
-  // The dock launcher's rows: open a blank Browser tab (with the address
-  // bar focused), or open the transient FilePicker tab on Files or Review.
-  // Every row closes the `+` menu.
+  // The dock launcher's rows: open a blank Browser tab, or open the shared
+  // Explorer picker on Files, Changes, or Search. Every row closes the `+`
+  // menu; all inventories share this one shell transition.
   BrowserTabRequested
-  FilePickerRequested
-  ReviewRequested
+  ExplorerRequested(@fileeditor.ExplorerMode)
   // The browser toolbar, acting on whatever Browser tab is active — the
   // messages carry no id so a stale click cannot outlive a tab switch.
   BrowserAddressEdited(String)
