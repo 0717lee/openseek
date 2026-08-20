@@ -92,7 +92,6 @@ pub(all) struct RunSettlementPayload {
   submission_id : String?
   status : String
   exit_code : Int?
-  durable_sequence : Int?
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|

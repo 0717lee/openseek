@@ -815,7 +815,6 @@ pub(all) struct FinishedPayload {
   status : String
   answer : String?
   exit_code : Int?
-  durable_sequence : Int?
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|

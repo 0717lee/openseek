@@ -267,7 +267,7 @@ This is lifecycle correlation only; durable transcript items still come from
 | `agent.steer` | `{text, run_id?, submission_id?}` | steer outcome |
 | `agent.compact` | `{session, model?, max_steps?, workspace?}` — `agent.start` minus `task`: a conversation resumed after a restart has no live process, and compacting spawns one with these settings | compaction outcome |
 | `agent.goal` | `{session, text?, auto?, model?, max_steps?, workspace?}` — sets the session's standing goal to `text`, or clears it when `text` is absent; the engine settings match `agent.compact`'s, and a blank `session` is refused before engine lookup. `auto` arms the engine's autonomous continuation and is **currently rejected**: serve announces the turns it starts with `goal_continue`, which this host does not yet fold into a run's lifecycle, so an autonomous turn would leave the engine looking idle to `agent.start` | `{delivered}` — delivery, not durability: the command reached a live engine's stdin. The goal itself is confirmed by the `[goal]` / `[goal cleared]` runtime-notice arriving as a `session.event` commit, which is also what clients should render from; the engine's `goal_updated` stream event duplicates it |
-| `agent.runs` | `{known?: [{session, run_id?, submission_id?}]}` — each selector must carry a run or submission id; `{}` remains valid | `{runs: […], settled: […]}` — every in-flight run's `agent.started` params plus selector-matched `{run_id, session, submission_id?, status, exit_code?, durable_sequence?}` lifecycle settlements. Every settlement a selector names is replayed, whatever its status: how much the run committed is a question the transcript read answers. Active and settled state are captured atomically |
+| `agent.runs` | `{known?: [{session, run_id?, submission_id?}]}` — each selector must carry a run or submission id; `{}` remains valid | `{runs: […], settled: […]}` — every in-flight run's `agent.started` params plus selector-matched `{run_id, session, submission_id?, status, exit_code?}` lifecycle settlements. Every settlement a selector names is replayed, whatever its status: how much the run committed is a question the transcript read answers. Active and settled state are captured atomically |
 
 Notifications:
 
@@ -276,7 +276,7 @@ Notifications:
 | `agent.started` | `{run_id, submission_id?, session, engine, model, max_steps, session_root?}` — `session_root` is a host-derived durable-store fact, never a client-selected path; the prompt bubble comes from its own `session.event` commit |
 | `agent.event` | `{run_id?, session, event: {…}}` — the engine's event object (`assistant_delta`, `tool_result`, `agent_finished`, …); for a correlated steer receipt the host adds its optional `submission_id`. `run_id` is absent for events emitted before any run of the engine process's lifetime (a compaction on a freshly spawned engine), which route by `session` |
 | `agent.error` | `{message, run_id?, exit_code?, diagnostics?}` |
-| `agent.finished` | `{run_id, status, answer?, exit_code?, durable_sequence?}` — `durable_sequence` is the record position that settled the run: the sequence of the Terminal the follower read, or the frontier its final scan proved when the engine died without committing one. Absent when neither could be established |
+| `agent.finished` | `{run_id, status, answer?, exit_code?}` — the run's outcome, published after the durable Terminal that ended it has been broadcast as a `session.event` commit. Where that commit sits in the record is the record's own answer, not a field here |
 
 ### session.*
 
@@ -332,8 +332,8 @@ commit still applies contiguously.
 
 If the final sweep itself fails, the follower stays installed and a later
 lifecycle drain — a replacement spawn, an archive, a detach — retries it. The
-run's `agent.finished` then carries no `durable_sequence`, which costs the
-client nothing: what a conversation holds is learned by reading it.
+run is still reported as finished; what the conversation holds is learned by
+reading it, and a record that was never created reads as an empty one.
 
 Old clients ignore `session.event` and keep building the transcript from
 `agent.event` as before. Old hosts never send `session.event`, ignore the

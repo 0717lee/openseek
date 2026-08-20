@@ -178,18 +178,8 @@ fn emit_finished(
   status : RunStatus,
   answer? : String,
   exit_code? : Int,
-  durable_sequence? : Int,
 ) -> Unit {
-  emit(
-    sink,
-    Finished({
-      run_id,
-      status: status.wire(),
-      answer,
-      exit_code,
-      durable_sequence,
-    }),
-  )
+  emit(sink, Finished({ run_id, status: status.wire(), answer, exit_code }))
 }
 
 ///|

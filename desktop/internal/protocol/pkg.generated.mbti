@@ -755,7 +755,6 @@ pub(all) struct FinishedPayload {
   status : String
   answer : String?
   exit_code : Int?
-  durable_sequence : Int?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 pub fn FinishedPayload::equal(Self, Self) -> Bool
 pub fn FinishedPayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
@@ -1449,7 +1448,6 @@ pub(all) struct RunSettlementPayload {
   submission_id : String?
   status : String
   exit_code : Int?
-  durable_sequence : Int?
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 pub fn RunSettlementPayload::equal(Self, Self) -> Bool
 pub fn RunSettlementPayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError

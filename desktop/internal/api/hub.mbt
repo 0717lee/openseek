@@ -40,7 +40,6 @@ priv struct RunSettlement {
   mut submission_id : String?
   status : String
   mut exit_code : Int?
-  mut durable_sequence : Int?
 }
 
 ///|
@@ -53,14 +52,12 @@ fn RunSettlement::wire_payload(
     submission_id: self.submission_id,
     status: self.status,
     exit_code: self.exit_code,
-    durable_sequence: self.durable_sequence,
   }
 }
 
 ///|
-/// Capture Finished while its Started row is still present. Duplicate
-/// lifecycle events merge only missing evidence; a later notification can
-/// strengthen the durable frontier but never lower it.
+/// Capture Finished while its Started row is still present. A duplicate
+/// lifecycle event fills in evidence the first one lacked and nothing else.
 fn Hub::record_finished(
   self : Hub,
   payload : @protocol.FinishedPayload,
@@ -83,15 +80,6 @@ fn Hub::record_finished(
     if existing.exit_code is None && payload.exit_code is Some(value) {
       existing.exit_code = Some(value)
     }
-    if payload.durable_sequence is Some(sequence) {
-      if existing.durable_sequence is Some(current) {
-        if sequence > current {
-          existing.durable_sequence = Some(sequence)
-        }
-      } else {
-        existing.durable_sequence = Some(sequence)
-      }
-    }
     return
   }
   self.settlements[payload.run_id] = {
@@ -100,7 +88,6 @@ fn Hub::record_finished(
     submission_id,
     status: payload.status,
     exit_code: payload.exit_code,
-    durable_sequence: payload.durable_sequence,
   }
 }
 
@@ -419,7 +406,6 @@ test "a duplicate finish never downgrades a settlement" {
         "run_id": "r-dedup",
         "status": "failed",
         "exit_code": 9,
-        "durable_sequence": 12,
       }),
     ),
   )
@@ -439,7 +425,6 @@ test "a duplicate finish never downgrades a settlement" {
     fail("deduplicated settlement missing")
   }
   assert_eq(settlement.exit_code, Some(9))
-  assert_eq(settlement.durable_sequence, Some(12))
 }
 
 ///|

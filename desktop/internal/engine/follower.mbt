@@ -215,13 +215,7 @@ fn SessionFollower::close_run_from_terminal(
   if outcome.error is Some(message) {
     emit_error(sink, message, run_id~)
   }
-  emit_finished(
-    sink,
-    run_id,
-    outcome.status,
-    answer?=outcome.answer,
-    durable_sequence=event.sequence,
-  )
+  emit_finished(sink, run_id, outcome.status, answer?=outcome.answer)
   // One synchronous block with the announcement: the phase flip (into a
   // queued compaction when one is pending, back between turns otherwise)
   // and the steer ledger's terminal cut cannot be separated from it by a
@@ -868,7 +862,6 @@ async test "a durable terminal closes its open run" {
     assert_eq(finish.run_id, "r-close")
     assert_eq(finish.status, "finished")
     assert_eq(finish.answer, Some("all done"))
-    assert_eq(finish.durable_sequence, Some(42))
     emitted.clear()
 
     // With the phase already closed, replaying the same commit is inert.
@@ -896,7 +889,6 @@ async test "a durable terminal closes its open run" {
     }
     assert_eq(error.message, Some("cancelled"))
     assert_eq(cancel_finish.status, "cancelled")
-    assert_eq(cancel_finish.durable_sequence, Some(44))
     emitted.clear()
 
     // A close with a compaction queued behind the turn lands in Compacting,
@@ -1168,7 +1160,6 @@ async test "EOF retirement closes a committed turn with its real outcome" {
       if event is Finished(payload) {
         assert_eq(payload.run_id, "r-eof")
         assert_eq(payload.status, "cancelled")
-        assert_eq(payload.durable_sequence, Some(7))
         cancelled += 1
       }
     }
@@ -1240,7 +1231,6 @@ async test "abrupt EOF leaves a failed drain for a later caller to retry" {
     let mut finishes = 0
     for event in emitted {
       if event is Finished(payload) && payload.run_id == "r-abrupt-eof" {
-        assert_true(payload.durable_sequence is None)
         finishes = finishes + 1
       }
     }

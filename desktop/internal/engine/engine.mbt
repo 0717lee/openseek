@@ -1787,17 +1787,12 @@ async fn ServeEngine::retire(
   // this consumer still closes the writer/follower lifecycle. Use the
   // identity captured before clearing the slot, so a delayed cleanup
   // cannot stop a successor.
-  let mut durable_sequence : Int? = None
   if owns_slot && owned_follower is Some(follower) {
-    try {
-      stop_follower_instance(manager, follower, writer_exited=true)
-      durable_sequence = Some(follower.watermark)
-    } catch {
+    stop_follower_instance(manager, follower, writer_exited=true) catch {
       error if @async.is_being_cancelled() => raise error
-      // The drain failed, so this abrupt EOF reports a Failed without an
-      // exact sequence. The follower stays installed for archive/detach to
-      // retry; nothing else is owed, because a client learns a conversation's
-      // durable content by reading it, not by being told its frontier.
+      // A failed drain leaves the follower installed for archive/detach to
+      // retry. Nothing else is owed: what this conversation committed is a
+      // question the transcript read answers.
       error =>
         @xlog.debug() <?
           {
@@ -1829,7 +1824,7 @@ async fn ServeEngine::retire(
           Some(diagnostics)
         },
       )
-      emit_finished(sink, run_id, Failed, exit_code?=code, durable_sequence?)
+      emit_finished(sink, run_id, Failed, exit_code?=code)
       // A compaction queued behind the dead turn died with the engine;
       // only a terminal compaction event clears the frontend's queued
       // notice, so synthesize the failure it can no longer send.
