@@ -12,6 +12,7 @@ import {
 import {
   "openseek_desktop/internal/fsx",
   "openseek_desktop/internal/pathx",
+  "moonbitlang/async",
   "moonbitlang/async/fs",
 } for "test"
 

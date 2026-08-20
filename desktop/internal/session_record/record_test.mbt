@@ -199,6 +199,35 @@ async test "an event line longer than one read is folded in whole" {
 }
 
 ///|
+async test "a poll waits for the writer to finish committing" {
+  let (root, path) = record_fixture("s-12")
+  write_record(path, header_line("s-12") + event_line(1, "one"))
+  let tail = @session_record.Tail(root, "s-12")
+  inspect(tail.poll().length(), content="1")
+  // The store's writer holds this lock across its append and the fdatasync
+  // that makes the append survive an OS crash. The bytes are already visible
+  // in between; a reader that published them would be calling an event
+  // durable before it is.
+  let lock = @fs.open(
+    path.dirname().join("session.lock").to_string(),
+    mode=ReadWrite,
+    create_mode=OpenOrCreate,
+  )
+  lock.lock(Exclusive)
+  append_record(path, event_line(2, "two"))
+  inspect(
+    @async.with_timeout_opt(200, () => tail.poll().length()) is None,
+    content="true",
+  )
+  lock.unlock()
+  lock.close()
+  // That timed-out poll was cancelled while waiting for the lock, which resets
+  // the reader to the head — so this one replays the whole log. The follower's
+  // own watermark is what keeps a replay off the wire.
+  debug_inspect(tail.poll().map(event => event.sequence), content="[1, 2]")
+}
+
+///|
 async test "read_document answers with the whole record at once" {
   let (root, path) = record_fixture("s-10")
   write_record(

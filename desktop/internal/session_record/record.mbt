@@ -8,12 +8,19 @@
 // rewriting a whole snapshot) go through a temp file and a rename, so a reader
 // sees either the old file or the new one — never a half-written mix of both.
 //
-// That is what lets this reader tail the file with no lock and no subprocess:
-// it consumes complete lines only, remembers the byte offset it stopped at,
-// and folds each event in exactly once by its sequence number. A record that
-// was replaced under it — one that shrank, or whose bytes at the offset are no
+// That is what lets this reader tail the file without a subprocess: it
+// consumes complete lines only, remembers the byte offset it stopped at, and
+// folds each event in exactly once by its sequence number. A record that was
+// replaced under it — one that shrank, or whose bytes at the offset are no
 // longer the ones read there — is simply read again from its head, and the
 // sequence check makes that re-read cost nothing but the reading.
+//
+// Reads take the store's own `session.lock` in shared mode, because a complete
+// line is not yet a commit. The writer holds that lock exclusively across its
+// append AND the fdatasync that makes it survive an OS crash; without the
+// shared side a reader can see a newline-terminated line that is still only in
+// the page cache, and publish as durable an event a power failure would take
+// back.
 //
 // Lines decode into the desktop's own transcript types, whose unknown item
 // kinds survive as `Unknown`: a record written by an engine newer than this
@@ -72,10 +79,44 @@ pub fn record_path(root : @pathx.Absolute, session : String) -> @pathx.Path {
 }
 
 ///|
+/// The lock the store serializes a session's writers on. It carries no id
+/// suffix — it already lives inside the per-id directory.
+fn lock_path(root : @pathx.Absolute, session : String) -> @pathx.Path {
+  root.join("sessions").join(session).join("session.lock").to_path()
+}
+
+///|
+/// Run `body` holding the record's lock in shared mode, which is what makes a
+/// complete line a commit: the writer releases only after the fdatasync behind
+/// its append has returned.
+///
+/// A lock file that cannot be opened means there is no session directory yet,
+/// and so no writer to serialize against — a reader must not create one.
+async fn[T] with_shared_record_lock(
+  path : @pathx.Path,
+  body : async () -> T,
+) -> T {
+  let lock = @fs.open(
+    path.to_string(),
+    mode=ReadWrite,
+    create_mode=OpenOrCreate,
+  ) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => return body()
+  }
+  defer lock.close()
+  lock.lock(Shared)
+  defer lock.unlock()
+  body()
+}
+
+///|
 /// One reader's place in one session's record.
 struct Tail {
   session : String
   path : @pathx.Path
+  // The store's per-session lock, taken shared for the length of a read.
+  lock : @pathx.Path
   // Bytes read so far: where the next read starts.
   mut offset : Int64
   // The bytes that end at `offset`, re-checked at their own position before
@@ -110,6 +151,7 @@ pub fn Tail::Tail(root : @pathx.Absolute, session : String) -> Tail {
   {
     session,
     path: record_path(root, session),
+    lock: lock_path(root, session),
     offset: 0,
     anchor: b"",
     carry: [],
@@ -123,14 +165,18 @@ pub fn Tail::Tail(root : @pathx.Absolute, session : String) -> Tail {
 ///|
 /// Everything committed since the last successful poll, oldest first.
 ///
+/// The read runs under the record's shared lock, so every event returned here
+/// is one the writer has already made durable.
+///
 /// Any failure — a vanished record, a read that died mid-chunk, a line this
-/// build cannot read — resets the reader to the record's head, so a poll never
-/// leaves it half-consumed. The next poll then reports the whole log as fresh,
-/// which is why the caller keeps its own frontier: a reader that may replay is
-/// cheaper to reason about than one that has to unwind a partial read.
+/// build cannot read, a cancelled wait for the lock — resets the reader to the
+/// record's head, so a poll never leaves it half-consumed. The next poll then
+/// reports the whole log as fresh, which is why the caller keeps its own
+/// frontier: a reader that may replay is cheaper to reason about than one that
+/// has to unwind a partial read.
 pub async fn Tail::poll(self : Tail) -> Array[@protocol.SessionEvent] {
   errdefer self.rewind()
-  self.read_forward()
+  with_shared_record_lock(self.lock, () => self.read_forward())
 }
 
 ///|
@@ -364,3 +410,6 @@ async fn anchored_at(file : @fs.File, offset : Int64, anchor : Bytes) -> Bool {
   }
   seen == anchor
 }
+
+///|
+pub extend RecordError with Debug::{to_repr}

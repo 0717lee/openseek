@@ -17,6 +17,7 @@ pub(all) suberror RecordError {
   Absent(String)
   Unreadable(String)
 } derive(@debug.Debug)
+pub fn RecordError::to_repr(Self) -> @debug.Repr
 
 // Types and methods
 type Tail
