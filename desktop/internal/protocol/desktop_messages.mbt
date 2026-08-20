@@ -302,7 +302,7 @@ pub(all) struct GitHistoryPayload {
   snapshot : GitHistorySnapshot?
   skip : Int
   limit : Int
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
 
 ///|
 /// List the paths changed by one immutable commit, scoped to the conversation
@@ -312,7 +312,7 @@ pub(all) struct GitCommitChangesPayload {
   session : String
   workspace : String?
   commit : String
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
 
 ///|
 /// Read one workspace-relative path from the supplied commit, falling back to

@@ -843,7 +843,7 @@ pub(all) struct GitHistoryRef {
   name : String
   revision : String
   kind : String
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
 
 ///|
 /// The immutable ref selection shared by every page of one graph read.
@@ -852,7 +852,7 @@ pub(all) struct GitHistorySnapshot {
   branch : String?
   refs : Array[GitHistoryRef]
   tips : Array[String]
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
 
 ///|
 /// One commit row. Parent identities are sufficient for the frontend to draw
@@ -863,7 +863,7 @@ pub(all) struct GitHistoryCommit {
   subject : String
   author : String
   authored_at : String
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
 
 ///|
 pub(all) struct GitHistoryReply {
@@ -871,7 +871,7 @@ pub(all) struct GitHistoryReply {
   snapshot : GitHistorySnapshot
   commits : Array[GitHistoryCommit]
   has_more : Bool
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
 
 ///|
 /// One historical path change. Status and tree-object kind stay independent:
@@ -881,14 +881,14 @@ pub(all) struct GitHistoricalChange {
   original_path : String?
   status : String
   kind : String
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
 
 ///|
 pub(all) struct GitCommitChangesReply {
   commit : String
   parent : String?
   changes : Array[GitHistoricalChange]
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
 
 ///|
 /// One path's comparison blob for quick diff. `Missing` is the legitimate
