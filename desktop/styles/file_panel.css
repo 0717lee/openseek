@@ -388,13 +388,6 @@ html.is-resizing * {
   background: var(--color-accent-soft);
   color: var(--color-accent-strong);
 }
-.dock-launcher-row .icon {
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-}
 .dock-launcher-name {
   font-weight: 600;
 }

@@ -190,6 +190,7 @@
   font-family: var(--font-family-ui);
 }
 .mention-remove {
+  --icon-size: var(--icon-sm);
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -311,6 +312,7 @@
   font-size: var(--font-size-md);
 }
 .composer-notice-icon {
+  --icon-size: var(--icon-md);
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -543,13 +545,10 @@
    whose SVG fills it, so shrinking only the SVG leaves it parked at the box's
    top edge instead of on the text's centre line. */
 .composer-git-glyph {
+  --icon-size: var(--icon-sm);
   display: inline-flex;
   align-items: center;
   flex: none;
-}
-.composer-git-glyph .icon {
-  width: 12px;
-  height: 12px;
 }
 /* The chip is tinted by CI, which is the part that changes while nobody is
    looking. Which pull request it is, and whether it is a draft, are in the
@@ -632,14 +631,11 @@
   color: var(--color-text-muted);
 }
 .composer-git-out {
+  --icon-size: var(--icon-sm);
   display: inline-flex;
   align-items: center;
   flex: none;
   color: var(--color-text-muted);
-}
-.composer-git-out .icon {
-  width: 11px;
-  height: 11px;
 }
 .composer-git-rule {
   height: 1px;
