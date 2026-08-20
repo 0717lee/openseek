@@ -1117,7 +1117,7 @@ fn apply_engine_event(
           true,
           conv.append_local_notice(
             Assistant(is_danger=true),
-            "\{kind} \{id}: \{status} · \{steps} step(s) · \{compact_count(tokens)} tok",
+            "\{kind} \{id}: \{status} · \{steps} step(s) · \{@labels.compact_count(tokens)} tok",
           ),
         )
       }
@@ -3039,6 +3039,10 @@ fn update_msg(
           run_durable_floor: None,
           run_floor_generation: None,
           usage_tokens: 0,
+          // The submit is the moment this run began as far as the user is
+          // concerned: the wait they are watching starts here, not at the
+          // host's `started`.
+          run_started_ms: Some(@interop.now_ms()),
         }
         // The worktree launch mode's first submit creates the environment
         // (the host names it, binds this conversation) and starts inside
@@ -6072,11 +6076,18 @@ fn update_device_msg(
       } else {
         conv.sync
       }
+      // `foreign` is exactly the question the elapsed span needs answered: a
+      // run this page did not submit and wait for has an age that started
+      // before we were watching. Keeping the previous run's start would date
+      // the new one from a moment it never had; the span is simply omitted
+      // until a submit of ours establishes one.
+      let run_started_ms = if foreign { None } else { conv.run_started_ms }
       let conv = {
         ..conv,
         run,
         run_durable_floor,
         run_floor_generation,
+        run_started_ms,
         sync,
         // The tier is deliberately NOT re-established from the run. A start
         // is always older than the composer: the user may have flipped the
@@ -6506,11 +6517,24 @@ fn update_device_msg(
                 run: Open(run_id=current, stage~),
                 last_run_id: Some(run_id),
               }
+            // This page submitted and is now being told the run it was
+            // waiting for opened: the submit is still where the user's wait
+            // began, so the span carries over.
+            Starting(..) =>
+              {
+                ..settled,
+                run: Open(run_id~, stage=Opened),
+                last_run_id: Some(run_id),
+              }
+            // Some other run opened — reconnect adopting one already in
+            // flight, or a turn started elsewhere. Its age is not this page's
+            // to know, and the previous run's start would be a lie.
             _ =>
               {
                 ..settled,
                 run: Open(run_id~, stage=Opened),
                 last_run_id: Some(run_id),
+                run_started_ms: None,
               }
           }
         } else {
@@ -7662,6 +7686,89 @@ test "reasoning message waits for its durable commit" {
   )
   inspect(next.active().messages.length(), content="0")
   inspect(next.active().overlay.length(), content="0")
+}
+
+///|
+test "the run heartbeat projects the phase it is derived from" {
+  assert_eq(test_conversation().run_heartbeat(), None)
+  let stage_of = (conv : Conversation) => {
+    conv.run_heartbeat().map(run => run.stage)
+  }
+  // A silent model call is the whole point of the row: nothing else on screen
+  // moves between the step event and the first answer delta.
+  assert_eq(stage_of(running_conversation()), Some(Thinking))
+  assert_eq(
+    stage_of({
+      ..running_conversation(),
+      run: Open(run_id="r7", stage=AtStep(Some(3))),
+    }),
+    Some(AtStep(3)),
+  )
+  assert_eq(
+    stage_of({
+      ..running_conversation(),
+      run: Open(run_id="r7", stage=AtStep(None)),
+    }),
+    Some(Working),
+  )
+  assert_eq(
+    stage_of({
+      ..running_conversation(),
+      run: Open(run_id="r7", stage=Cancelling),
+    }),
+    Some(Stopping),
+  )
+  // The send is accepted but no run id exists yet: still worth a row, or the
+  // gap between submitting and `started` reads as a dropped prompt.
+  assert_eq(
+    stage_of({ ..test_conversation(), run: Starting(submission_id="sub-1") }),
+    Some(Starting),
+  )
+  // A finished run leaves nothing behind — the answer is the status.
+  assert_eq(
+    stage_of({
+      ..running_conversation(),
+      run: NoRun(ended=Some(RunFinished(Completed))),
+    }),
+    None,
+  )
+}
+
+///|
+test "the run heartbeat carries only the facts the page actually has" {
+  let full = {
+    ..running_conversation(),
+    run_started_ms: Some(1_000.0),
+    usage_tokens: 12_345,
+  }
+  assert_eq(
+    full.run_heartbeat(),
+    Some({ stage: Thinking, started_ms: Some(1_000.0), tokens: 12_345 }),
+  )
+  // A run adopted from a reconnect has no start this page witnessed. The
+  // composer omits the span rather than dating it from when we noticed.
+  assert_eq(
+    { ..full, run_started_ms: None }.run_heartbeat().map(run => run.started_ms),
+    Some(None),
+  )
+}
+
+///|
+test "a step event is what moves the heartbeat's stage" {
+  let running = running_model()
+  assert_eq(
+    running.active().run_heartbeat().map(run => run.stage),
+    Some(Thinking),
+  )
+  let (_, stepped) = update_dev(
+    test_dispatch(),
+    Engine(Some("r7"), AgentStep(Some(2)), session=None),
+    running,
+  )
+  assert_eq(
+    stepped.active().run_heartbeat().map(run => run.stage),
+    Some(AtStep(2)),
+  )
 }
 
 ///|
@@ -10050,6 +10157,7 @@ test "a distinct started id replaces a stale open run as foreign" {
       ..running_conversation(),
       run: Open(run_id="r-old", stage=AtStep(Some(3))),
       streaming_response: "old answer fragment",
+      run_started_ms: Some(1_000.0),
     },
     ["old steer"],
     run_id="r-old",
@@ -10077,6 +10185,9 @@ test "a distinct started id replaces a stale open run as foreign" {
   guard next.active().sync is Reloading(generation=1, attempt=1, ..) else {
     fail("a foreign replacement did not refresh the transcript")
   }
+  // The replaced run's start belonged to the run that just lost the seat.
+  // Carrying it over would age the new run from a moment it never had.
+  assert_eq(next.active().run_started_ms, None)
 }
 
 ///|
@@ -10623,6 +10734,9 @@ test "an old empty runs snapshot cannot close a start sent after reconnect" {
   })
   let (_, sent) = update(dispatch, Send, drafted)
   assert_true(sent.active().run is Starting(..))
+  // The submit is where the user's wait begins, so the elapsed span the tail
+  // lane reports has to be established here — before any host round trip.
+  assert_true(sent.active().run_started_ms is Some(_))
   let (_, stale_snapshot) = update_dev(
     dispatch,
     RunsSettled(live=[], frontier=[]),

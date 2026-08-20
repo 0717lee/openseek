@@ -569,6 +569,11 @@ priv struct Conversation {
   // (accent for success, warn otherwise) until the conversation is opened.
   unseen_finish : Bool
   usage_tokens : Int
+  // When this page saw the current run begin, for the composer row's elapsed
+  // span. `None` whenever that moment is not this page's to know — a run
+  // adopted from a reconnect started before we were watching, and guessing
+  // from the moment we noticed would report a wrong, always-too-short age.
+  run_started_ms : Double?
   // Sub-runs this conversation's open turn has in flight, in the order they
   // started. Live-only: nothing persists a sub-run's progress, so a reload
   // mid-turn shows the tool call pending with no lane under it.
@@ -2172,6 +2177,7 @@ fn empty_conversation(
     compaction: NotCompacting,
     unseen_finish: false,
     usage_tokens: 0,
+    run_started_ms: None,
     subruns: [],
     branch: None,
     diffstat: None,
@@ -3220,6 +3226,32 @@ fn Conversation::visible_subruns(
 ) -> Array[@transcript.SubrunLane] {
   guard self.run is Open(run_id~, ..) else { return [] }
   self.subruns.filter(lane => lane.run is Some(owner) && owner == run_id)
+}
+
+///|
+/// What the run is doing right now, as one line docked above the composer.
+/// `None` between runs — an idle conversation reports nothing.
+///
+/// Purely derived from the run phase, like `display_status`, so no handler
+/// has to keep a stored line in sync. The wire protocol carries no live
+/// reasoning stream, so the deepest this can see during a model call is the
+/// step it is on: between `agent_step` and the first answer delta every
+/// engine is silent, and this line plus its pulsing mark is the whole of
+/// what distinguishes thinking from a hang.
+/// The open turn as the composer's heartbeat row needs it: facts only. The
+/// wording, the clock, and the tick that advances it belong to the composer,
+/// so a span that changes every second costs one component's render instead
+/// of reprojecting every component's input once a second.
+fn Conversation::run_heartbeat(self : Conversation) -> @composer.RunHeartbeat? {
+  let stage : @composer.RunStage = match self.run {
+    NoRun(..) => return None
+    Starting(..) => Starting
+    Open(stage=Opened, ..) => Thinking
+    Open(stage=AtStep(Some(step)), ..) => AtStep(step)
+    Open(stage=AtStep(None), ..) => Working
+    Open(stage=Cancelling, ..) => Stopping
+  }
+  Some({ stage, started_ms: self.run_started_ms, tokens: self.usage_tokens })
 }
 
 ///|

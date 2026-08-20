@@ -449,12 +449,10 @@ button.composer-worktree:hover {
   height: 6px;
   border-radius: 50%;
   background: var(--color-accent);
-  animation: subrun-pulse 1.6s ease-in-out infinite;
+  animation: lane-pulse 1.6s ease-in-out infinite;
 }
-@keyframes subrun-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
-}
+/* `lane-pulse` is defined in base.css — shared with the composer's running
+   row. */
 .subrun-name {
   flex: 0 0 auto;
   color: var(--color-text-secondary);
