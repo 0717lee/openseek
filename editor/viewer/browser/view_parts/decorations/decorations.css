@@ -19,3 +19,13 @@
   background-color: var(--vscode-editor-symbolHighlightBackground, #ea5c0055);
   border: 1px solid var(--vscode-editor-symbolHighlightBorder, transparent);
 }
+
+/* Search result decorations. Every Search FileMatch uses the same readable
+ * highlight; the fallback also supports embedders without a complete
+ * workbench theme. */
+.moonbit-viewer .findMatch {
+  background-color: var(
+    --vscode-editor-findMatchHighlightBackground,
+    #ea5c0055
+  );
+}

@@ -219,6 +219,35 @@ pub fn State::handle(self : State, msg : Msg, input : Input) -> State {
 }
 
 ///|
+/// Project the retained Host results for `path` into the editor's one-based
+/// UTF-16 coordinate space. OpenSeek's source viewer is read-only, so these
+/// ranges stay authoritative for the search snapshot without duplicating
+/// ripgrep's regex, case, and whole-word semantics in the frontend.
+pub fn State::editor_highlights(
+  self : State,
+  path : String,
+) -> EditorHighlights? {
+  guard self.page.phase is Ready else { return None }
+  let ranges : Array[@common.Range] = []
+  for result in self.page.matches {
+    if result.path == path {
+      for range in result.ranges {
+        ranges.push(
+          @common.Range(
+            result.line_number,
+            range.start_column,
+            result.line_number,
+            range.end_column,
+          ),
+        )
+      }
+    }
+  }
+  guard !ranges.is_empty() else { return None }
+  Some({ ranges, })
+}
+
+///|
 fn Page::request_payload(
   self : Page,
   input : Input,
@@ -370,6 +399,74 @@ test "refresh is immediate and loaded file groups can collapse and clear" {
   assert_eq(page.query, "moon")
   assert_true(page.matches.is_empty())
   assert_true(page.phase is Idle)
+}
+
+///|
+test "editor highlights include every retained match for the file" {
+  let owner : @interop.ConversationKey = {
+    channel: @interop.ChannelId::Local,
+    session: "editor-highlights",
+  }
+  let root = @common.Uri::parse("file:///work")
+  let input : Input = { owner, root: Some(root) }
+  let state = State::empty()
+    .handle(QueryChanged("moon"), input)
+    .handle(Submit, input)
+  let page = state.page
+  let reply : @protocol.SearchTextReply = {
+    root: root.path,
+    generation: page.generation,
+    matches: [
+      {
+        path: "src/main.mbt",
+        line_number: 2,
+        preview: "moon moon",
+        preview_start_column: 1,
+        ranges: [
+          { start_column: 1, end_column: 5 },
+          { start_column: 6, end_column: 10 },
+        ],
+      },
+      {
+        path: "src/main.mbt",
+        line_number: 7,
+        preview: "moon",
+        preview_start_column: 1,
+        ranges: [{ start_column: 1, end_column: 5 }],
+      },
+      {
+        path: "src/other.mbt",
+        line_number: 1,
+        preview: "moon",
+        preview_start_column: 1,
+        ranges: [{ start_column: 1, end_column: 5 }],
+      },
+    ],
+    match_count: 4,
+    file_count: 2,
+    limit_hit: false,
+    cancelled: false,
+    error: None,
+  }
+  let ready = state.handle(
+    Loaded(owner~, root=root.path, generation=page.generation, reply~),
+    input,
+  )
+  guard ready.editor_highlights("src/main.mbt") is Some(highlights) else {
+    fail("main file should have editor highlights")
+  }
+  assert_eq(highlights.ranges(), [
+    @common.Range(2, 1, 2, 5),
+    @common.Range(2, 6, 2, 10),
+    @common.Range(7, 1, 7, 5),
+  ])
+  assert_true(ready.editor_highlights("missing.mbt") is None)
+  assert_true(
+    ready
+    .handle(QueryChanged("new query"), input)
+    .editor_highlights("src/main.mbt")
+    is None,
+  )
 }
 
 ///|

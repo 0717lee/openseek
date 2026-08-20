@@ -42,6 +42,20 @@ struct Page {
 } derive(Eq)
 
 ///|
+/// The workspace-search matches that belong on one open editor model. The
+/// ranges are the complete retained result set for the file.
+struct EditorHighlights {
+  ranges : Array[@common.Range]
+} derive(Eq, Debug)
+
+///|
+pub fn EditorHighlights::ranges(
+  self : EditorHighlights,
+) -> Array[@common.Range] {
+  self.ranges
+}
+
+///|
 pub struct State {
   priv page : Page
   priv generation : Int

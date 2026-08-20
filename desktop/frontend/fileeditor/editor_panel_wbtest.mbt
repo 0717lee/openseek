@@ -41,3 +41,30 @@ test "point navigation keeps its column and highlights the whole line" {
   assert_true(target.decoration.options.is_whole_line)
   assert_false(target.is_transient)
 }
+
+///|
+/// Behavior port of VS Code
+/// `searchTreeModel/fileMatch.ts::FileMatchImpl.updateHighlights` at pinned
+/// revision b18492a2: every file match is decorated. OpenSeek intentionally
+/// keeps one presentation for readability instead of promoting a current row.
+test "workspace Search decorates every match with one readable style" {
+  let decorations = search_match_decorations([
+    @common.Range(2, 1, 2, 5),
+    @common.Range(4, 7, 4, 11),
+    @common.Range(9, 3, 9, 7),
+  ])
+  assert_eq(decorations.length(), 3)
+  assert_eq(decorations[0].range, @common.Range(2, 1, 2, 5))
+  assert_eq(decorations[0].options.class_name, "findMatch")
+  assert_eq(decorations[0].options.inline_class_name, Some("findMatchInline"))
+  assert_eq(decorations[0].options.z_index, 10)
+  assert_eq(
+    decorations[0].options.stickiness,
+    @model.NeverGrowsWhenTypingAtEdges,
+  )
+  assert_eq(decorations[1].range, @common.Range(4, 7, 4, 11))
+  assert_eq(decorations[1].options.class_name, "findMatch")
+  assert_eq(decorations[1].options.inline_class_name, Some("findMatchInline"))
+  assert_eq(decorations[1].options.z_index, 10)
+  assert_eq(decorations[2].options.class_name, "findMatch")
+}

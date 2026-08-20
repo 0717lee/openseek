@@ -87,6 +87,19 @@ fn Doc::shows_unified_diff(self : Doc) -> Bool {
 }
 
 ///|
+/// VS Code enables workspace-search model decorations only while its Search
+/// view is active. OpenSeek uses the Explorer inventory selection as the same
+/// logical boundary; narrow drill-down deliberately retains Search mode so the
+/// editor preview keeps its matches while the inventory is temporarily hidden.
+fn State::editor_search_highlights(
+  self : State,
+  path : @pathx.Relative,
+) -> @grep_search.EditorHighlights? {
+  guard self.explorer_mode is ExplorerSearch else { return None }
+  self.search.editor_highlights(path.0)
+}
+
+///|
 /// Whether a requested full diff is still waiting for one textual side. Keep
 /// this distinct from `shows_unified_diff`: the comparison has no model yet,
 /// but revealing the source Viewer while either read settles produces a
@@ -175,6 +188,7 @@ fn Doc::review_generation(self : Doc) -> Int? {
 fn show_tab_impl(
   dispatch : @cmd.Emit[Msg],
   ctx : Ctx,
+  search_highlights : @grep_search.EditorHighlights?,
   path : @pathx.Relative,
   doc : Doc,
   reload_stale : Bool,
@@ -215,6 +229,7 @@ fn show_tab_impl(
         restore_scroll=true,
         review_original?=doc.quick_diff_original(),
         unified_diff?=doc.visible_unified_diff(),
+        search_highlights?,
       )
       if sync_diagnostics &&
         language_id(doc.name) == "moonbit" &&
@@ -248,6 +263,7 @@ fn show_tab_impl(
             relative=path,
             restore_scroll=true,
             unified_diff?=doc.visible_unified_diff(),
+            search_highlights?,
           )
         _ => clear_document()
       }
@@ -282,10 +298,11 @@ fn show_tab_impl(
 fn show_tab(
   dispatch : @cmd.Emit[Msg],
   ctx : Ctx,
+  search_highlights : @grep_search.EditorHighlights?,
   path : @pathx.Relative,
   doc : Doc,
 ) -> @cmd.Cmd {
-  show_tab_impl(dispatch, ctx, path, doc, true, true)
+  show_tab_impl(dispatch, ctx, search_highlights, path, doc, true, true)
 }
 
 ///|
@@ -296,10 +313,11 @@ fn show_tab(
 fn show_settled_review(
   dispatch : @cmd.Emit[Msg],
   ctx : Ctx,
+  search_highlights : @grep_search.EditorHighlights?,
   path : @pathx.Relative,
   doc : Doc,
 ) -> @cmd.Cmd {
-  show_tab_impl(dispatch, ctx, path, doc, true, false)
+  show_tab_impl(dispatch, ctx, search_highlights, path, doc, true, false)
 }
 
 ///|
@@ -309,10 +327,11 @@ fn show_settled_review(
 fn show_pending_review(
   dispatch : @cmd.Emit[Msg],
   ctx : Ctx,
+  search_highlights : @grep_search.EditorHighlights?,
   path : @pathx.Relative,
   doc : Doc,
 ) -> @cmd.Cmd {
-  show_tab_impl(dispatch, ctx, path, doc, false, false)
+  show_tab_impl(dispatch, ctx, search_highlights, path, doc, false, false)
 }
 
 ///|
@@ -323,6 +342,7 @@ fn show_pending_review(
 fn show_activated_tab(
   dispatch : @cmd.Emit[Msg],
   ctx : Ctx,
+  search_highlights : @grep_search.EditorHighlights?,
   path : @pathx.Relative,
   doc : Doc,
   generation : Int,
@@ -331,13 +351,17 @@ fn show_activated_tab(
     !(doc.state is TabLoading) &&
     doc.review is Some(review) &&
     review.selected.has_working_tree_file() else {
-    return (show_tab(dispatch, ctx, path, doc), doc, generation)
+    return (
+      show_tab(dispatch, ctx, search_highlights, path, doc),
+      doc,
+      generation,
+    )
   }
   let working_generation = generation + 1
   let next_doc = { ..doc, review: Some({ ..review, working_generation, }) }
   (
     @cmd.batch([
-      show_pending_review(dispatch, ctx, path, next_doc),
+      show_pending_review(dispatch, ctx, search_highlights, path, next_doc),
       read_file(
         dispatch,
         ctx.owner,
@@ -419,7 +443,13 @@ pub fn open_document(
     | TabReadFailed(_)
     | TabUnavailable(_)
     | TabDeleted)) {
-    let show = show_tab(dispatch, ctx, path, doc)
+    let show = show_tab(
+      dispatch,
+      ctx,
+      state.editor_search_highlights(path),
+      path,
+      doc,
+    )
     // Gaining the first active tab reveals the breadcrumb row, and the
     // narrow drill-down closing the tree reveals a viewer that was last
     // measured while hidden — both need a remeasure alongside the show.
@@ -504,6 +534,7 @@ pub fn open_changed_document(
     let (show, next_doc, review_generation) = show_activated_tab(
       dispatch,
       ctx,
+      state.editor_search_highlights(path),
       path,
       doc,
       state.review_generation,
@@ -590,14 +621,30 @@ pub fn open_changed_document(
       // working document and view state; the new HEAD side fills in later.
       // The tagged read below is the sole refresh owner, so this command only
       // displays the cached document instead of scheduling a duplicate reload.
-      cmds.push(show_pending_review(dispatch, ctx, path, review_doc))
+      cmds.push(
+        show_pending_review(
+          dispatch,
+          ctx,
+          state.editor_search_highlights(path),
+          path,
+          review_doc,
+        ),
+      )
     } else {
       // The Viewer can still contain the previously active reviewed document.
       // The dock has already switched to this uncached path, so clear the
       // outgoing document while its tagged working-tree read is pending. Use
       // the same review-loading presentation path as later activations so the
       // old source, navigation context, and gutter all disappear together.
-      cmds.push(show_pending_review(dispatch, ctx, path, review_doc))
+      cmds.push(
+        show_pending_review(
+          dispatch,
+          ctx,
+          state.editor_search_highlights(path),
+          path,
+          review_doc,
+        ),
+      )
     }
     cmds.push(
       read_file(
@@ -771,7 +818,15 @@ fn reconcile_reviews_after_changes(
           )
         }
         if ctx.active_file == Some(path) {
-          cmds.push(show_tab(dispatch, ctx, path, ordinary))
+          cmds.push(
+            show_tab(
+              dispatch,
+              ctx,
+              state.editor_search_highlights(path),
+              path,
+              ordinary,
+            ),
+          )
         }
       }
       Some(change) if !change.selectable() => {
@@ -787,7 +842,15 @@ fn reconcile_reviews_after_changes(
         }
         docs[path] = ordinary
         if ctx.active_file == Some(path) {
-          cmds.push(show_tab(dispatch, ctx, path, ordinary))
+          cmds.push(
+            show_tab(
+              dispatch,
+              ctx,
+              state.editor_search_highlights(path),
+              path,
+              ordinary,
+            ),
+          )
         }
       }
       Some(change) => {
@@ -879,10 +942,13 @@ fn reconcile_reviews_after_changes(
             // Keep the previous working text visible while its replacement is
             // in flight, but clear the old gutter until both new sides settle.
             cmds.push(
-              show_pending_review(dispatch, ctx, path, {
-                ..refreshed,
-                state: doc.state,
-              }),
+              show_pending_review(
+                dispatch,
+                ctx,
+                state.editor_search_highlights(path),
+                path,
+                { ..refreshed, state: doc.state },
+              ),
             )
           }
           cmds.push(
@@ -900,7 +966,15 @@ fn reconcile_reviews_after_changes(
         } else if ctx.active_file == Some(path) {
           // Clear the old gutter immediately while the new HEAD side loads;
           // deleted previews switch back to their precise loading notice.
-          cmds.push(show_tab(dispatch, ctx, path, refreshed))
+          cmds.push(
+            show_tab(
+              dispatch,
+              ctx,
+              state.editor_search_highlights(path),
+              path,
+              refreshed,
+            ),
+          )
         }
       }
     }
@@ -965,6 +1039,7 @@ pub fn activate(
   let (show, doc, review_generation) = show_activated_tab(
     dispatch,
     ctx,
+    state.editor_search_highlights(path),
     path,
     doc,
     state.review_generation,
@@ -1038,6 +1113,7 @@ pub fn close_document(
         let (show, doc, review_generation) = show_activated_tab(
           dispatch,
           ctx,
+          state.editor_search_highlights(next_path),
           next_path,
           doc,
           state.review_generation,
@@ -1951,7 +2027,12 @@ pub fn sync(
       ctx.active_file is Some(path) &&
       docs.get(path) is Some(doc) {
       let (cmd, doc, generation) = show_activated_tab(
-        dispatch, ctx, path, doc, review_generation,
+        dispatch,
+        ctx,
+        state.editor_search_highlights(path),
+        path,
+        doc,
+        review_generation,
       )
       docs[path] = doc
       review_generation = generation
@@ -2143,7 +2224,13 @@ pub fn update(
         }
       }
       let next_doc = docs.get(path).unwrap()
-      let show = show_pending_review(dispatch, ctx, path, next_doc)
+      let show = show_pending_review(
+        dispatch,
+        ctx,
+        state.editor_search_highlights(path),
+        path,
+        next_doc,
+      )
       let command = match view_mode {
         // A window/tree resize can measure the display:none source host at the
         // Viewer's 5px minimum while the diff is visible. Measure again only
@@ -2188,17 +2275,35 @@ pub fn update(
       }
       (@cmd.none, { ..state, reviewed_changes, })
     }
-    Search(msg) =>
-      (
-        @cmd.none,
-        { ..state, search: state.search.handle(msg, ctx.search_input()) },
-      )
+    Search(msg) => {
+      let search = state.search.handle(msg, ctx.search_input())
+      let next = { ..state, search, }
+      let highlights = ctx.active_file.bind(path => {
+        next.editor_search_highlights(path)
+      })
+      (update_search_match_highlights(highlights), next)
+    }
     ExplorerModeSelected(mode) => {
       let already_selected = state.explorer_mode == mode
       let selected = { ..state, explorer_mode: mode }
+      let search_highlights = if mode is ExplorerSearch {
+        ctx.active_file.bind(path => selected.search.editor_highlights(path.0))
+      } else {
+        None
+      }
+      let search_highlight_cmd = update_search_match_highlights(
+        search_highlights,
+      )
       match mode {
-        ExplorerFiles => (@cmd.none, selected)
-        ExplorerSearch => (@grep_search.focus_query_after_render(), selected)
+        ExplorerFiles => (search_highlight_cmd, selected)
+        ExplorerSearch =>
+          (
+            @cmd.batch([
+              search_highlight_cmd,
+              @grep_search.focus_query_after_render(),
+            ]),
+            selected,
+          )
         ExplorerChanges => {
           let (changes_cmd, selected) = if already_selected ||
             selected.changes is ChangeListIdle ||
@@ -2220,7 +2325,10 @@ pub fn update(
           } else {
             (@cmd.none, selected)
           }
-          (@cmd.batch([changes_cmd, history_cmd]), selected)
+          (
+            @cmd.batch([search_highlight_cmd, changes_cmd, history_cmd]),
+            selected,
+          )
         }
       }
     }
@@ -2761,7 +2869,13 @@ pub fn update(
       // update immediately (including a deleted-file HEAD preview).
       let cmd = if ctx.active_file == Some(path) &&
         working_side_ready_for_review(next_doc) {
-        show_settled_review(dispatch, ctx, path, next_doc)
+        show_settled_review(
+          dispatch,
+          ctx,
+          state.editor_search_highlights(path),
+          path,
+          next_doc,
+        )
       } else {
         @cmd.none
       }
@@ -2798,7 +2912,13 @@ pub fn update(
       docs[path] = next_doc
       let cmd = if ctx.active_file == Some(path) &&
         !(next_doc.state is TabLoading) {
-        show_settled_review(dispatch, ctx, path, next_doc)
+        show_settled_review(
+          dispatch,
+          ctx,
+          state.editor_search_highlights(path),
+          path,
+          next_doc,
+        )
       } else {
         @cmd.none
       }
@@ -2937,6 +3057,7 @@ pub fn update(
                 restore_scroll=previous is TabLoaded(..),
                 review_original?=doc.quick_diff_original(),
                 unified_diff?=next_doc.visible_unified_diff(),
+                search_highlights?=state.editor_search_highlights(path),
               )
               if language_id(name) == "moonbit" && ctx.root() is Some(root) {
                 @cmd.batch([
@@ -3205,7 +3326,15 @@ pub fn update(
               let deleted = { ..doc, state: TabDeleted, review, stale: false }
               docs[stat.path] = deleted
               if ctx.active_file == Some(stat.path) {
-                cmds.push(show_tab(dispatch, ctx, stat.path, deleted))
+                cmds.push(
+                  show_tab(
+                    dispatch,
+                    ctx,
+                    state.editor_search_highlights(stat.path),
+                    stat.path,
+                    deleted,
+                  ),
+                )
               }
             }
             continue
@@ -3342,7 +3471,13 @@ pub fn update(
             let failed = { ..doc, state: TabReadFailed(message), stale: false }
             docs[path] = failed
             let cmd = if !stale_file_link && ctx.active_file == Some(path) {
-              show_tab(dispatch, ctx, path, failed)
+              show_tab(
+                dispatch,
+                ctx,
+                state.editor_search_highlights(path),
+                path,
+                failed,
+              )
             } else {
               @cmd.none
             }
@@ -3365,7 +3500,13 @@ pub fn update(
         let failed = { ..doc, state: TabReadFailed(message), stale: false }
         docs[path] = failed
         let cmd = if ctx.active_file == Some(path) {
-          show_tab(dispatch, ctx, path, failed)
+          show_tab(
+            dispatch,
+            ctx,
+            state.editor_search_highlights(path),
+            path,
+            failed,
+          )
         } else {
           @cmd.none
         }
