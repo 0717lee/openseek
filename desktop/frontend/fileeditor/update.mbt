@@ -1023,26 +1023,6 @@ pub fn open_file(
 }
 
 ///|
-/// Promote one workspace Search row to the editor's current match before the
-/// root opens its dock tab. The selected identity stays in the Search model so
-/// later file loads and tab activations rebuild the same persistent set.
-pub fn select_search_match(
-  state : State,
-  ctx : Ctx,
-  path : String,
-  range : @common.Range,
-) -> (@cmd.Cmd, State) {
-  let search = state.search.select_editor_match(path, range)
-  let selected = { ..state, search, }
-  let highlights = match ctx.active_file {
-    Some(active) if active.0 == path =>
-      selected.editor_search_highlights(active)
-    _ => None
-  }
-  (update_search_match_highlights(highlights), selected)
-}
-
-///|
 /// Show `path`'s document after the dock switched its active tab to it — a
 /// tab-strip click. The document is expected in the table; a missing entry
 /// (a stale click racing a close) is a no-op.

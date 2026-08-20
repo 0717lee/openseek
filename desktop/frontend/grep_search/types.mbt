@@ -37,20 +37,15 @@ struct Page {
   collapsed : Map[String, Bool]
   visible_lines : Int
   phase : Phase
-  selected_path : String?
-  selected_range : @common.Range?
   generation : Int
   delay_ms : Int
 } derive(Eq)
 
 ///|
 /// The workspace-search matches that belong on one open editor model. The
-/// ranges are the complete retained result set for the file; `selected` is
-/// the row whose stronger current-match decoration follows the user's last
-/// Search result click.
+/// ranges are the complete retained result set for the file.
 struct EditorHighlights {
   ranges : Array[@common.Range]
-  selected : @common.Range?
 } derive(Eq, Debug)
 
 ///|
@@ -58,11 +53,6 @@ pub fn EditorHighlights::ranges(
   self : EditorHighlights,
 ) -> Array[@common.Range] {
   self.ranges
-}
-
-///|
-pub fn EditorHighlights::selected(self : EditorHighlights) -> @common.Range? {
-  self.selected
 }
 
 ///|

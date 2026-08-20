@@ -21,8 +21,6 @@ fn fresh_page() -> Page {
     collapsed: Map([]),
     visible_lines: InitialVisibleSearchLines,
     phase: Idle,
-    selected_path: None,
-    selected_range: None,
     generation: 0,
     delay_ms: SearchDebounceMs,
   }
@@ -59,8 +57,6 @@ fn State::schedule(
       limit_hit: false,
       visible_lines: InitialVisibleSearchLines,
       phase: Idle,
-      selected_path: None,
-      selected_range: None,
       generation,
     }
   } else {
@@ -72,8 +68,6 @@ fn State::schedule(
       } else {
         Debouncing
       },
-      selected_path: None,
-      selected_range: None,
       generation,
       delay_ms: if immediate {
         0
@@ -135,8 +129,6 @@ pub fn State::handle(self : State, msg : Msg, input : Input) -> State {
           limit_hit: false,
           visible_lines: InitialVisibleSearchLines,
           phase: Idle,
-          selected_path: None,
-          selected_range: None,
           generation,
         },
       }
@@ -201,8 +193,6 @@ pub fn State::handle(self : State, msg : Msg, input : Input) -> State {
           limit_hit: reply.limit_hit,
           visible_lines: InitialVisibleSearchLines.min(reply.matches.length()),
           phase,
-          selected_path: None,
-          selected_range: None,
         },
       }
     }
@@ -220,54 +210,11 @@ pub fn State::handle(self : State, msg : Msg, input : Input) -> State {
             limit_hit: false,
             visible_lines: InitialVisibleSearchLines,
             phase: Failed(code~, message~),
-            selected_path: None,
-            selected_range: None,
           },
         }
       } else {
         self
       }
-  }
-}
-
-///|
-/// Record the Search result whose editor decoration should use VS Code's
-/// stronger current-match presentation. Ignore stale or fabricated rows so a
-/// delayed click cannot attach a highlight to a newer result set.
-pub fn State::select_editor_match(
-  self : State,
-  path : String,
-  selected : @common.Range,
-) -> State {
-  guard self.page.phase is Ready else { return self }
-  let mut found = false
-  for result in self.page.matches {
-    if result.path == path && result.line_number == selected.start_line_number {
-      for range in result.ranges {
-        if selected ==
-          @common.Range(
-            result.line_number,
-            range.start_column,
-            result.line_number,
-            range.end_column,
-          ) {
-          found = true
-          break
-        }
-      }
-    }
-    if found {
-      break
-    }
-  }
-  guard found else { return self }
-  {
-    ..self,
-    page: {
-      ..self.page,
-      selected_path: Some(path),
-      selected_range: Some(selected),
-    },
   }
 }
 
@@ -297,12 +244,7 @@ pub fn State::editor_highlights(
     }
   }
   guard !ranges.is_empty() else { return None }
-  let selected = if self.page.selected_path == Some(path) {
-    self.page.selected_range
-  } else {
-    None
-  }
-  Some({ ranges, selected })
+  Some({ ranges, })
 }
 
 ///|
@@ -460,7 +402,7 @@ test "refresh is immediate and loaded file groups can collapse and clear" {
 }
 
 ///|
-test "editor highlights include every retained match and promote the selected row" {
+test "editor highlights include every retained match for the file" {
   let owner : @interop.ConversationKey = {
     channel: @interop.ChannelId::Local,
     session: "editor-highlights",
@@ -518,19 +460,7 @@ test "editor highlights include every retained match and promote the selected ro
     @common.Range(2, 6, 2, 10),
     @common.Range(7, 1, 7, 5),
   ])
-  assert_true(highlights.selected() is None)
-  let selected = @common.Range(2, 6, 2, 10)
-  let ready = ready.select_editor_match("src/main.mbt", selected)
-  guard ready.editor_highlights("src/main.mbt") is Some(highlights) else {
-    fail("selected file should retain editor highlights")
-  }
-  assert_eq(highlights.selected(), Some(selected))
   assert_true(ready.editor_highlights("missing.mbt") is None)
-  let stale = ready.select_editor_match(
-    "src/main.mbt",
-    @common.Range(99, 1, 99, 5),
-  )
-  assert_true(stale == ready)
   assert_true(
     ready
     .handle(QueryChanged("new query"), input)

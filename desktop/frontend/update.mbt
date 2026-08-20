@@ -2214,21 +2214,8 @@ fn update_msg(
     // Search rows use the same ordinary positioned-open path as definition,
     // mention, and Quick Open navigation. An active picker is fulfilled in
     // place; an already-open file is activated.
-    FileEditor(@fileeditor.SearchMatchSelected(path~, range~)) => {
-      let (highlight_cmd, file_panel) = @fileeditor.select_search_match(
-        model.file_panel,
-        file_ctx(model),
-        path,
-        range,
-      )
-      let (open_cmd, model) = open_editor_at(
-        dispatch,
-        { ..model, file_panel, },
-        path,
-        Some(range),
-      )
-      (@cmd.batch([highlight_cmd, open_cmd]), model)
-    }
+    FileEditor(@fileeditor.SearchMatchSelected(path~, range~)) =>
+      open_editor_at(dispatch, model, path, Some(range))
     // Intercepted like the comment above: which dock tab a tree click opens
     // is the strip's business. The dock opens (or re-activates) the tab,
     // then the file subsystem loads and shows the document against the

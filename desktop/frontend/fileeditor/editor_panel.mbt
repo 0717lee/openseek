@@ -59,9 +59,9 @@ priv struct ViewerHost {
   // navigation uses a fresh, short-lived collection instead (see below).
   mut point_range_highlight : @viewer.EditorDecorationsCollection?
   // Workspace Search owns one persistent collection over the displayed source
-  // model. Every result range uses `findMatch`; the clicked row uses
-  // `currentFindMatch`. The collection is replaced when Search state changes
-  // and cleared before a model swap, matching VS Code's FileMatch lifetime.
+  // model. Every result range uses the same readable `findMatch` presentation.
+  // The collection is replaced when Search state changes and cleared before a
+  // model swap, matching VS Code's FileMatch lifetime.
   mut search_match_highlights : @viewer.EditorDecorationsCollection?
   // Desktop owns the concrete marker and feedback stores passed through the
   // Viewer's public handle API. They receive language-server diagnostics and
@@ -625,39 +625,23 @@ fn navigation_target_presentation(
 }
 
 ///|
-/// VS Code `FileMatchImpl.updateHighlights` projects every match into one
-/// model decoration collection and raises the selected row above its peers.
-/// OpenSeek receives the same one-based UTF-16 ranges from its Host search and
-/// keeps the representation native to the public Viewer decoration API.
+/// VS Code `FileMatchImpl.updateHighlights` projects every match into one model
+/// decoration collection. OpenSeek receives the same one-based UTF-16 ranges
+/// from its Host search, but deliberately uses one readable presentation for
+/// every result instead of a stronger current-match color.
 fn search_match_decorations(
   ranges : Array[@common.Range],
-  selected : @common.Range?,
 ) -> Array[@model.ModelDeltaDecoration] {
   ranges.map(range => {
-    let current = selected == Some(range)
-    {
-      range,
-      options: @model.ModelDecorationOptions(
-        if current {
-          "currentFindMatch"
-        } else {
-          "findMatch"
-        },
-        inline_class_name=if current {
-          "currentFindMatchInline"
-        } else {
-          "findMatchInline"
-        },
-        z_index=if current { 13 } else { 10 },
-        show_if_collapsed=true,
-        stickiness=@model.NeverGrowsWhenTypingAtEdges,
-        description=if current {
-          "search-current-find-match"
-        } else {
-          "search-find-match"
-        },
-      ),
-    }
+    range,
+    options: @model.ModelDecorationOptions(
+      "findMatch",
+      inline_class_name="findMatchInline",
+      z_index=10,
+      show_if_collapsed=true,
+      stickiness=@model.NeverGrowsWhenTypingAtEdges,
+      description="search-find-match",
+    ),
   })
 }
 
@@ -667,8 +651,7 @@ fn set_search_match_highlights(
 ) -> Unit {
   if viewer_state.search_match_highlights is Some(collection) {
     let decorations = match highlights {
-      Some(highlights) =>
-        search_match_decorations(highlights.ranges(), highlights.selected())
+      Some(highlights) => search_match_decorations(highlights.ranges())
       None => []
     }
     collection.set(decorations) |> ignore
@@ -888,11 +871,11 @@ fn show_file_in_viewer(
     if range is Some(range) {
       let target = navigation_target_presentation(range)
       viewer.set_position(target.position)
-      let selected_search_match = match search_highlights {
-        Some(highlights) => highlights.selected() == Some(range)
+      let search_match = match search_highlights {
+        Some(highlights) => highlights.ranges().contains(range)
         None => false
       }
-      if selected_search_match {
+      if search_match {
         ()
       } else if target.is_transient {
         if viewer.get_model() is Some(target_model) {
