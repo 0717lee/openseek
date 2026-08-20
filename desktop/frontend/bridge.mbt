@@ -1224,7 +1224,6 @@ fn open_session(
           session=session_id,
           items=view.items,
           watermark=view.watermark,
-          event_boundaries=view.event_boundaries,
           goal=view.goal,
           goal_markers=view.goal_markers,
           generation~,
@@ -1271,7 +1270,6 @@ fn refresh_session(
           session=session_id,
           items=view.items,
           watermark=view.watermark,
-          event_boundaries=view.event_boundaries,
           goal=view.goal,
           goal_markers=view.goal_markers,
           generation~,
@@ -1344,7 +1342,7 @@ fn steer_openseek(
           scheduler.add(
             dispatch(
               if @interop.bridge_error_is_definite(error) {
-                SteerRejected(session~, submission_id~, text~, run_id~)
+                SteerRejected(session~, submission_id~, run_id~)
               } else {
                 SteerUndelivered(session~, submission_id~, text~, run_id~)
               },
@@ -1355,7 +1353,7 @@ fn steer_openseek(
       }
       if !delivered {
         scheduler.add(
-          dispatch(SteerRejected(session~, submission_id~, text~, run_id~)),
+          dispatch(SteerRejected(session~, submission_id~, run_id~)),
         )
       }
     })

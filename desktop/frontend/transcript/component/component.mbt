@@ -58,9 +58,11 @@ struct Input {
   root : @common.Uri?
   submission_generation : Int
   items : Array[VisibleRow]
-  streaming_response : String
+  // The in-flight assistant text to show below the committed rows, or `None`
+  // when nothing is streaming. It is deliberately not a `VisibleRow`: the
+  // rows are the durable record and this is not durable yet.
+  streaming_response : String?
   streaming_identity : String
-  subruns : Array[@transcript.SubrunLane]
 } derive(Eq)
 
 ///|
@@ -71,9 +73,8 @@ pub fn Input::Input(
   root~ : @common.Uri?,
   submission_generation~ : Int,
   items~ : Array[VisibleRow],
-  streaming_response~ : String,
+  streaming_response~ : String?,
   streaming_identity~ : String,
-  subruns~ : Array[@transcript.SubrunLane],
 ) -> Input {
   {
     source,
@@ -84,7 +85,6 @@ pub fn Input::Input(
     items,
     streaming_response,
     streaming_identity,
-    subruns,
   }
 }
 
@@ -636,9 +636,8 @@ test "local pinned transitions are pure" {
     root=None,
     submission_generation=0,
     items=[],
-    streaming_response="",
+    streaming_response=None,
     streaming_identity="idle",
-    subruns=[],
   )
   let state : Model = {
     pinned: true,
@@ -698,9 +697,8 @@ test "an overview click unpins and highlights inside the component" {
     root=None,
     submission_generation=0,
     items=[],
-    streaming_response="",
+    streaming_response=None,
     streaming_identity="idle",
-    subruns=[],
   )
   let state : Model = {
     pinned: true,
@@ -728,9 +726,8 @@ test "a conversation switch clears component-owned overview state" {
     root=None,
     submission_generation=0,
     items=[],
-    streaming_response="",
+    streaming_response=None,
     streaming_identity="idle",
-    subruns=[],
   )
   let state : Model = {
     pinned: false,

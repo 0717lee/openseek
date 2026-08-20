@@ -1714,12 +1714,15 @@ pub fn SessionToolResult::to_repr(Self) -> @debug.Repr
 
 pub(all) struct SessionUserMessage {
   content : String
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+  submission_id : String?
+} derive(Eq, @debug.Debug)
 pub fn SessionUserMessage::equal(Self, Self) -> Bool
 pub fn SessionUserMessage::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
 pub fn SessionUserMessage::not_equal(Self, Self) -> Bool
 pub fn SessionUserMessage::to_json(Self) -> Json
 pub fn SessionUserMessage::to_repr(Self) -> @debug.Repr
+pub impl ToJson for SessionUserMessage
+pub impl @json.FromJson for SessionUserMessage
 
 pub(all) struct SessionsReply {
   groups : Array[SessionGroup]

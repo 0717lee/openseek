@@ -163,10 +163,9 @@ pub fn classify(item : @transcript.TranscriptItem) -> Call? {
 /// which is worse than showing nothing. A pending one is no such evidence and
 /// is skipped, exactly as a pending readable call is; a malformed call is
 /// unresolved for the moment before its rejection lands, and blanking the
-/// panel there would flicker on every one of them.
+/// meter there would flicker on every one of them.
 ///
-/// Over a whole conversation this is the standing plan; over one folded run
-/// of activity it is the plan as that run left it.
+/// Over one folded run of activity this is the plan as that run left it.
 pub fn latest(items : Array[@transcript.TranscriptItem]) -> Array[Step]? {
   for item in items.rev_iter() {
     match classify(item) {

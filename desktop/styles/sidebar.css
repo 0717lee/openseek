@@ -430,10 +430,19 @@ button.composer-worktree:hover {
   background: transparent;
 }
 
-/* A sub-run in flight, at the transcript's tail: what is running, how far it
-   has gotten, and what it is doing right now. Quiet by default — it is
-   status, not content — with a pulsing dot so a stalled child still reads as
-   attached rather than as a frozen line. */
+/* A sub-run in flight, docked above the composer: what is running, how far it
+   has gotten, and what it is doing right now. It is status, not content — no
+   durable event describes a child's progress — so it sits with the composer's
+   other live run state rather than in the scroller. Quiet by default, with a
+   pulsing dot so a stalled child still reads as attached rather than as a
+   frozen line. The dock collapses to nothing when no child is running. */
+.subrun-dock {
+  display: flex;
+  flex-direction: column;
+}
+.subrun-dock:empty {
+  display: none;
+}
 .subrun-lane {
   display: flex;
   align-items: baseline;

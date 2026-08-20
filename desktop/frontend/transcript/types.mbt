@@ -51,23 +51,11 @@ pub(all) struct TranscriptItem {
 } derive(Eq)
 
 ///|
-/// One live sub-run shown at the tail of its owning transcript. Progress is
-/// absent until the child has written a durable record; `run` prevents a lane
-/// stranded by a lost finish notification from leaking into a later turn.
-pub(all) struct SubrunLane {
-  id : String
-  kind : String
-  label : String
-  steps : Int
-  activity : String
-  run : String?
-} derive(Eq)
-
-///|
 /// A `runtime_update` notice split into the watcher's status and the
-/// diagnostic lines worth showing.
+/// diagnostic lines worth showing. `status` is absent when the notice
+/// carried no `status=` assignment at all.
 pub struct RuntimeUpdateView {
-  status : String
+  status : String?
   diagnostics : Array[String]
 }
 
@@ -95,9 +83,6 @@ pub extend ItemKind with Eq::{equal, not_equal}
 
 ///|
 pub extend SessionListItem with Eq::{equal, not_equal}
-
-///|
-pub extend SubrunLane with Eq::{equal, not_equal}
 
 ///|
 pub extend TranscriptItem with Eq::{equal, not_equal}

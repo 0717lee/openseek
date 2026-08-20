@@ -427,7 +427,11 @@ async test "readiness precedes the first forwarded hub notification" {
     SessionEvent({
       session: "session-1",
       sequence: 1,
-      event: { sequence: 1, ts: None, item: User({ content: "test" }) },
+      event: {
+        sequence: 1,
+        ts: None,
+        item: User({ content: "test", submission_id: None }),
+      },
       session_root: "/sessions/global",
     }),
   )
@@ -603,7 +607,11 @@ test "remote delivery retains streaming runtime and error events" {
       SessionEvent({
         session: "session-1",
         sequence: 1,
-        event: { sequence: 1, ts: None, item: User({ content: "test" }) },
+        event: {
+          sequence: 1,
+          ts: None,
+          item: User({ content: "test", submission_id: None }),
+        },
         session_root: "/sessions/global",
       }),
     )

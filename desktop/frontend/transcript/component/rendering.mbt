@@ -38,16 +38,6 @@ fn TranscriptRenderKey::streaming(identity : String) -> TranscriptRenderKey {
 }
 
 ///|
-fn TranscriptRenderKey::subrun(
-  lane : @transcript.SubrunLane,
-) -> TranscriptRenderKey {
-  match lane.run {
-    Some(run_id) => { value: "subrun\u{0}\{run_id}\u{0}\{lane.id}" }
-    None => { value: "subrun\u{0}unowned\u{0}\{lane.id}" }
-  }
-}
-
-///|
 fn TranscriptRenderKey::empty() -> TranscriptRenderKey {
   { value: "empty" }
 }
@@ -181,11 +171,11 @@ fn TranscriptRenderer::stream_children(
       )
     }
   }
-  if !self.input.streaming_response.is_empty() {
+  if self.input.streaming_response is Some(streaming) {
     items.set(
       TranscriptRenderKey::streaming(self.input.streaming_identity).wire(),
       streaming_response_view(
-        self.input.streaming_response,
+        streaming,
         self.on_open,
         assistant_name=match self.input.source {
           OpenSeek => "OpenSeek"
@@ -193,12 +183,6 @@ fn TranscriptRenderer::stream_children(
         },
       ),
     )
-  }
-  // Sub-runs in flight sit at the tail, where the turn currently is: their
-  // tool call is what the conversation is blocked on, and it can block for
-  // forty-five minutes.
-  for lane in self.input.subruns {
-    items.set(TranscriptRenderKey::subrun(lane).wire(), subrun_lane_view(lane))
   }
   items
 }

@@ -173,7 +173,7 @@ test "classify names every state a plan call can be observed in" {
 }
 
 ///|
-test "an unreadable plan call hides the panel instead of showing an older plan" {
+test "an unreadable plan call reports no plan instead of an older one" {
   let readable = plan_json([("one", "in_progress")])
   let oversized = plan_json(
     [
@@ -209,7 +209,7 @@ test "an unreadable plan call hides the panel instead of showing an older plan" 
 test "an unreadable call still awaiting its result keeps the prior plan" {
   let readable = plan_json([("one", "in_progress")])
   // A malformed call is unresolved for the moment before its rejection lands.
-  // Treating that as a wall would blank the panel on every malformed call,
+  // Treating that as a wall would blank the meter on every malformed call,
   // and permanently for a run interrupted in the window — while an equally
   // unresolved *decodable* call correctly leaves the prior plan alone.
   guard @plan.latest([
@@ -373,34 +373,4 @@ test "the fold meter reports the run's last plan, or nothing" {
   // The tooltip names the step the run left in progress.
   assert_true(rendered.contains("plan 1/2 · two"))
   assert_eq(markup(@plan.fold_progress([])), "")
-}
-
-///|
-test "the panel names the active step and keeps its slot when empty" {
-  let items = [
-    plan_call(
-      "c1",
-      plan_json([
-        ("read the failing test", "completed"),
-        ("fix the parser", "in_progress"),
-        ("run moon test", "pending"),
-      ]),
-    ),
-  ]
-  let rendered = markup(@plan.panel(items))
-  assert_true(rendered.contains("plan-panel-summary"))
-  assert_true(rendered.contains("fix the parser"))
-  assert_true(rendered.contains("plan-progress-count\">1/3"))
-  // With no plan the slot still renders, so the composer's children keep a
-  // fixed shape as a plan appears and clears mid-turn.
-  let empty = markup(@plan.panel([]))
-  assert_true(empty.contains("plan-panel-slot"))
-  assert_false(empty.contains("plan-panel-summary"))
-}
-
-///|
-test "the panel reads a finished plan as done" {
-  let items = [plan_call("c1", plan_json([("one", "completed")]))]
-  let rendered = markup(@plan.panel(items))
-  assert_true(rendered.contains("all steps done"))
 }

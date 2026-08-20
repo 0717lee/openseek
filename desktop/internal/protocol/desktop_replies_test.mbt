@@ -28,6 +28,55 @@ test "unknown session items preserve their complete wire object" {
 }
 
 ///|
+test "a durable prompt keeps its text whatever the submission tag looks like" {
+  // Untagged encodes exactly as every record written before the field
+  // existed: the key is absent, not null.
+  let untagged : @protocol.SessionUserMessage = {
+    content: "hello",
+    submission_id: None,
+  }
+  @debug.assert_eq(untagged.to_json(), { "content": "hello" })
+  let tagged : @protocol.SessionUserMessage = {
+    content: "hello",
+    submission_id: Some("sub-1"),
+  }
+  @debug.assert_eq(tagged.to_json(), {
+    "content": "hello",
+    "submission_id": "sub-1",
+  })
+
+  // The tag is a correlation hint. Every way of not having one decodes to the
+  // same untagged prompt, and the text survives all of them — a refusal here
+  // would reach `SessionItem` as `Unknown` and drop the prompt off screen.
+  for
+    absent in (
+      [
+        { "content": "hello" },
+        { "content": "hello", "submission_id": Json::null() },
+        { "content": "hello", "submission_id": 7 },
+        { "content": "hello", "annotated_by_a_newer_store": true },
+      ] : Array[Json]) {
+    let decoded : @protocol.SessionUserMessage = @json.from_json(absent)
+    assert_eq(decoded.content, "hello")
+    assert_eq(decoded.submission_id, None)
+  }
+  let carried : @protocol.SessionUserMessage = @json.from_json({
+    "content": "hello",
+    "submission_id": "sub-1",
+  })
+  assert_eq(carried.submission_id, Some("sub-1"))
+
+  // The message itself is required, and refusing is what makes the enclosing
+  // item keep the raw line instead of inventing an empty prompt.
+  let contentless : Json = {
+    "kind": "user",
+    "payload": { "submission_id": "s" },
+  }
+  let item : @protocol.SessionItem = @json.from_json(contentless)
+  assert_true(item is Unknown(_))
+}
+
+///|
 test "agent connected names how much of the host is up" {
   guard @protocol.Notification::from_wire("agent.connected", {
       "stage": "serving",

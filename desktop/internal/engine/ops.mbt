@@ -82,9 +82,11 @@ pub async fn start_run(
     raise EngineError("this conversation is compacting; wait for it to finish")
   }
   let run_id = mint_run_id()
+  // The normalized tag rides the wire command so the engine records it on the
+  // durable User item this prompt appends. That is what lets a client
+  // recognize its own prompt in the record — the host itself never reads it
+  // back.
   let submission_id = normalize_submission_id(payload.submission_id)
-  // The normalized tag rides the wire command so the engine records it on
-  // the durable User item this prompt appends.
   let command = @protocol.prompt(config.task, submission_id?)
   // Submitting, opening the run and announcing it are one synchronous step,
   // with no suspension since the claim check above. That is what makes the
@@ -999,16 +1001,16 @@ async test "setup failure retires the writer before an immediate next start" {
       @async.sleep(1)
     }
     let first = start_run(sink, manager, {
-      task: "first",
-      submission_id: None,
-      model: None,
-      max_steps: None,
-      session,
-      workspace: Some(workspace),
-    })
+        task: "first",
+        submission_id: None,
+        model: None,
+        max_steps: None,
+        session,
+        workspace: Some(workspace),
+      }).run_id
     assert_true(
       @async.with_timeout_opt(3000, () => {
-        while !has_finished_run(emitted, first.run_id) {
+        while !has_finished_run(emitted, first) {
           @async.sleep(1)
         }
       })
@@ -1022,7 +1024,7 @@ async test "setup failure retires the writer before an immediate next start" {
     // condemned, so nothing can be routed to it in the meantime.
     assert_true(old.condemned)
     assert_true(slot.live() is None)
-    let cancelled = cancel_run(manager, { run_id: Some(first.run_id) })
+    let cancelled = cancel_run(manager, { run_id: Some(first) })
     assert_false(cancelled.cancelled)
     let second = start_run(sink, manager, {
       task: "second",
@@ -1046,7 +1048,7 @@ async test "setup failure retires the writer before an immediate next start" {
     assert_eq(@fs.read_file(count.to_string()).text(), "2")
     let mut first_finishes = 0
     for event in emitted {
-      if event is Finished(payload) && payload.run_id == first.run_id {
+      if event is Finished(payload) && payload.run_id == first {
         first_finishes = first_finishes + 1
       }
     }
@@ -1266,9 +1268,10 @@ async test "named session retries after its first prompt creates no record" {
       workspace: Some(workspace),
     })
     assert_eq(second.status, "accepted")
+    let second_run_id = second.run_id
     assert_true(
       @async.with_timeout_opt(3000, () => {
-        while !has_finished_run(emitted, second.run_id) {
+        while !has_finished_run(emitted, second_run_id) {
           @async.sleep(1)
         }
       })
@@ -1535,9 +1538,10 @@ async test "workspace detach drains an idle writer and its follower first" {
       session: "s-detach-idle",
       workspace: Some(workspace.to_string()),
     })
+    let run_id = reply.run_id
     assert_true(
       @async.with_timeout_opt(3000, () => {
-        while !has_finished_run(events, reply.run_id) {
+        while !has_finished_run(events, run_id) {
           @async.sleep(1)
         }
       })

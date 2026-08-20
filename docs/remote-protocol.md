@@ -213,9 +213,11 @@ none of them carry state a resync cannot rebuild or safely ignore. A run
 that *finished* while the client was away is visible through `session.load`;
 its targeted `agent.runs` settlement supplies lifecycle outcome and the exact
 zero-durable case where no record exists to load. Settlements live only for the
-host process lifetime. After a host process restart there is no durable
-submission-id index, so a pre-restart unconfirmed input remains conservatively
-unresolved rather than being guessed.
+host process lifetime, so after a restart a pre-restart submission has no
+lifecycle settlement to look up. It is not therefore unresolvable: the record
+outlives the host, so `session.load` shows whether the prompt landed. The
+host does not deduplicate a resent prompt, so a client that resends one it
+could not confirm risks a second copy of the text; read the record first.
 
 Slow clients are disconnected, not throttled and not silently dropped
 frame-by-frame: when a connection's outbound queue overflows, the host
@@ -251,16 +253,16 @@ submission that owns the returned run or receipt, even when two steers have
 identical text. The `agent.started` echo establishes run ownership but not
 durability—it is emitted before the host writes the prompt. An `agent.start`
 result of `accepted` proves the complete stdin command was written, not that
-the User item reached the store. Clients therefore retain a recovery copy
-until a normal Terminal-backed finish proves the User append, or an abnormal
-exact durable frontier reconciles it (sequence zero restores it for
-resubmission). This is lifecycle correlation only; durable transcript items
-still come from `session.event`. Old clients omit it, and old hosts omit the
-echoes.
+the User item reached the store; the durable proof is the `session.event`
+commit carrying that `submission_id` on its `User` item, which is what a
+client should settle its draft on.
+
+This is lifecycle correlation only; durable transcript items still come from
+`session.event`. Old clients omit it, and old hosts omit the echoes.
 
 | method | params | result |
 |---|---|---|
-| `agent.start` | `{task, session, submission_id?, model?, max_steps?, workspace?}` — `session` is a required non-blank durable conversation id. No credentials or store path are accepted: the host resolves settings and durable placement; `workspace` is honored only when registered. A session bound to one of the workspace's worktrees (`worktree.create` binds at creation) runs in that checkout — the start never names or mutates worktrees | `{run_id, status, …}` — `accepted` after the complete prompt command is written; a post-`started` write failure returns `failed`, while pre-`started` failures use the error response |
+| `agent.start` | `{task, session, submission_id?, model?, max_steps?, workspace?}` — `session` is a required non-blank durable conversation id. No credentials or store path are accepted: the host resolves settings and durable placement; `workspace` is honored only when registered. A session bound to one of the workspace's worktrees (`worktree.create` binds at creation) runs in that checkout — the start never names or mutates worktrees | `{run_id, status, …}` — `accepted` after the complete prompt command is written; a post-`started` write failure returns `failed`, while pre-`started` failures use the error response. Every reply that returns names the run it opened; the host does not deduplicate a resent `submission_id` |
 | `agent.cancel` | `{run_id?}` (absent = the latest run) | cancel outcome |
 | `agent.steer` | `{text, run_id?, submission_id?}` | steer outcome |
 | `agent.compact` | `{session, model?, max_steps?, workspace?}` — `agent.start` minus `task`: a conversation resumed after a restart has no live process, and compacting spawns one with these settings | compaction outcome |

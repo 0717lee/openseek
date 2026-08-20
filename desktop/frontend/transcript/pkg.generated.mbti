@@ -85,7 +85,7 @@ pub(all) struct LauncherAppItem {
 } derive(Eq)
 
 pub struct RuntimeUpdateView {
-  status : String
+  status : String?
   diagnostics : Array[String]
 }
 
@@ -100,7 +100,6 @@ pub(all) struct SessionListItem {
 pub struct SessionLoadView {
   items : Array[TranscriptItem]
   watermark : Int
-  event_boundaries : Array[(Int, Bool, Int)]
   goal : GoalStanding?
   goal_markers : Array[(Int, GoalMarker)]
 }
@@ -108,15 +107,6 @@ pub struct SessionLoadView {
 pub struct SessionTreeRow {
   item : SessionListItem
   children : Array[SessionListItem]
-} derive(Eq)
-
-pub(all) struct SubrunLane {
-  id : String
-  kind : String
-  label : String
-  steps : Int
-  activity : String
-  run : String?
 } derive(Eq)
 
 pub(all) struct TranscriptItem {

@@ -45,9 +45,8 @@ test "transcript markup exposes conversation identity" {
     root=Some(root),
     submission_generation=7,
     items=[],
-    streaming_response="",
+    streaming_response=None,
     streaming_identity="idle",
-    subruns=[],
   )
   let rendered = transcript_view(
     input,
@@ -97,18 +96,8 @@ test "transcript stream children use stable typed keys in display order" {
       },
       { item: first_tool, identity: "s43\u{0}o0" },
     ],
-    streaming_response="partial answer",
+    streaming_response=Some("partial answer"),
     streaming_identity="r7",
-    subruns=[
-      {
-        id: "desktop-abc-sr-1",
-        kind: "agent",
-        label: "inspect tests",
-        steps: 1,
-        activity: "reading",
-        run: Some("r7"),
-      },
-    ],
   )
   let renderer : TranscriptRenderer = {
     input,
@@ -118,7 +107,7 @@ test "transcript stream children use stable typed keys in display order" {
   let keys = renderer.stream_children().to_array().map(pair => pair.0)
   assert_eq(keys, [
     "row\u{0}s41\u{0}o0", "rule\u{0}s41\u{0}o0", "activity\u{0}after\u{0}s41\u{0}o0",
-    "streaming\u{0}r7", "subrun\u{0}r7\u{0}desktop-abc-sr-1",
+    "streaming\u{0}r7",
   ])
   // A newly discovered activity row extends the same card; it does not change
   // the card key and therefore does not replace its browser-owned disclosure.
@@ -155,9 +144,8 @@ test "transcript stream section key scopes equal session ids by channel" {
     root=None,
     submission_generation=0,
     items=[],
-    streaming_response="",
+    streaming_response=None,
     streaming_identity="idle",
-    subruns=[],
   )
   let remote = {
     ..local_input,

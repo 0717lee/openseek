@@ -18,9 +18,8 @@ fn Model::transcript_input(self : Model) -> @transcript_component.Input {
         items=@transcript_component.VisibleRow::history(
           self.codex.transcript_items(),
         ),
-        streaming_response="",
+        streaming_response=None,
         streaming_identity="idle",
-        subruns=[],
       )
     }
     _ =>
@@ -33,9 +32,8 @@ fn Model::transcript_input(self : Model) -> @transcript_component.Input {
             root=None,
             submission_generation=self.submission_sequence,
             items=[],
-            streaming_response="",
+            streaming_response=None,
             streaming_identity="",
-            subruns=[],
           )
         Some(conversation) =>
           @transcript_component.Input(
@@ -47,9 +45,8 @@ fn Model::transcript_input(self : Model) -> @transcript_component.Input {
               .bind(value => value.checkout_root()),
             submission_generation=self.submission_sequence,
             items=conversation.visible_transcript_rows(),
-            streaming_response=conversation.streaming_response,
+            streaming_response=conversation.turn.streaming_response,
             streaming_identity=conversation.streaming_render_identity(),
-            subruns=conversation.visible_subruns(),
           )
       }
   }

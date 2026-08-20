@@ -22,17 +22,16 @@ fn Model::composer_input(
     owner,
     archive_generation: self.composer_entry_retirements.length(),
   }
-  let transcript_ready = conv.sync is Synced &&
-    !conv.has_unresolved_run_tail_notice()
   let checkout_ready = checkout is Some(value) && value.is_ready()
+  // Sending needs a live engine and a workspace to run in — nothing about the
+  // transcript. The record is what the turn writes, not a precondition for
+  // starting one, so a reload in flight or a failed one never gates Send.
   let root_ready = self.bridge_state() is Connected &&
     self.api_ready() &&
-    transcript_ready &&
     checkout_ready
   let primary_action : @composer.PrimaryAction = if conv.is_running() {
     @composer.Running(
       steer_available=root_ready &&
-        conv.run_durable_floor is Some(_) &&
         conv.run is Open(stage~, ..) &&
         !(stage is Cancelling),
       can_stop=can_stop(conv),
@@ -52,7 +51,11 @@ fn Model::composer_input(
   // stay in the application package.
   let context : Array[@html.Html] = [
     connection_banner(self),
-    @plan.panel(conv.visible_items()),
+    // Sub-runs dock here rather than at the transcript's tail: a child turn's
+    // progress is live run status that no durable event describes, and the
+    // scroller shows only what the record can place. The plan is the mirror
+    // image: it is durable, so it stays in the transcript.
+    @subrun.dock(conv.visible_subruns()),
   ]
   // The BYOK reminder: readiness is otherwise folded silently into Send's
   // availability, and the top-bar status is owned by the run state — without
@@ -77,7 +80,25 @@ fn Model::composer_input(
       ]),
     )
   }
-  if !conv.pending_steers().is_empty() {
+  // Advice about the draft this composer is now holding, so it belongs to the
+  // composer. It stands until the user acts on it: whether the archived record
+  // got the prompt is a question only that record answers, and a toast would
+  // be gone before they could go and look.
+  if conv.archived_pending_input {
+    context.push(
+      @html.div(class="composer-notice", [
+        @html.span(class="composer-notice-text", ArchivedPendingInputNotice),
+        @html.button(
+          class="composer-notice-btn",
+          type_="button",
+          title="Dismiss this notice",
+          on_click=dispatch(DismissArchivedPendingInput),
+          "Got it",
+        ),
+      ]),
+    )
+  }
+  if !conv.pending_steers.is_empty() {
     context.push(pending_steers_panel(conv))
   }
   match conv.compaction {
