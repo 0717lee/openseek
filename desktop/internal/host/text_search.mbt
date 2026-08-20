@@ -182,10 +182,10 @@ async fn TextSearchService::run(self : TextSearchService) -> Unit {
       match self.requests.get() {
         Search(command~, root~, payload~, reply~) => {
           let session_key = payload.session_key
-          let root_text = root.to_string()
+          let reply_root = root.resource_path()
           if session_key.is_blank() {
             reply.put(
-              empty_text_search_reply(root_text, payload.generation, error={
+              empty_text_search_reply(reply_root, payload.generation, error={
                 code: "invalid_request",
                 message: "Search session key is empty.",
               }),
@@ -195,7 +195,7 @@ async fn TextSearchService::run(self : TextSearchService) -> Unit {
           if cancelled_through.get(session_key) >= payload.generation {
             reply.put(
               empty_text_search_reply(
-                root_text,
+                reply_root,
                 payload.generation,
                 cancelled=true,
               ),
@@ -206,7 +206,7 @@ async fn TextSearchService::run(self : TextSearchService) -> Unit {
             if payload.generation <= previous.generation {
               reply.put(
                 empty_text_search_reply(
-                  root_text,
+                  reply_root,
                   payload.generation,
                   cancelled=true,
                 ),
@@ -226,7 +226,7 @@ async fn TextSearchService::run(self : TextSearchService) -> Unit {
             }
             self.requests.put(Finished(session_key~, generation~, outcome~))
           })
-          running[session_key] = { generation, root: root_text, reply, task }
+          running[session_key] = { generation, root: reply_root, reply, task }
         }
         Cancel(session_key~, generation~, reply~) => {
           cancelled_through.record(session_key, generation)
@@ -991,27 +991,28 @@ async fn run_text_search(
   root : @pathx.Absolute,
   payload : SearchTextPayload,
 ) -> SearchTextReply {
-  let root_text = root.to_string()
+  let reply_root = root.resource_path()
+  let native_root = root.to_string()
   if payload.query.is_empty() {
-    return empty_text_search_reply(root_text, payload.generation)
+    return empty_text_search_reply(reply_root, payload.generation)
   }
   if external_text_search_path(payload.include_glob) is Some(_) ||
     external_text_search_path(payload.exclude_glob) is Some(_) {
-    return empty_text_search_reply(root_text, payload.generation, error={
+    return empty_text_search_reply(reply_root, payload.generation, error={
       code: "invalid_request",
       message: "Search paths outside the selected workspace are not supported; use ./ for a root-relative pattern.",
     })
   }
   guard command is Some(command) else {
-    return empty_text_search_reply(root_text, payload.generation, error={
+    return empty_text_search_reply(reply_root, payload.generation, error={
       code: "rg_unavailable",
       message: "This SeekMoon installation does not include ripgrep.",
     })
   }
-  let directory = @fs.opendir(root_text) catch {
+  let directory = @fs.opendir(native_root) catch {
     error if @async.is_being_cancelled() => raise error
     error =>
-      return empty_text_search_reply(root_text, payload.generation, error={
+      return empty_text_search_reply(reply_root, payload.generation, error={
         code: if "\{error}".to_lower().contains("permission") {
           "permission_denied"
         } else {
@@ -1032,7 +1033,7 @@ async fn run_text_search(
       inherit_env=true,
       stdout=child_stdout,
       stderr=child_stderr,
-      cwd=root_text,
+      cwd=native_root,
       no_console_window=true,
       cancel_handler=@process.hard_cancel(),
       no_wait=true,
@@ -1041,7 +1042,7 @@ async fn run_text_search(
       error => {
         stdout_reader.close()
         stderr_reader.close()
-        return empty_text_search_reply(root_text, payload.generation, error={
+        return empty_text_search_reply(reply_root, payload.generation, error={
           code: "rg_unavailable",
           message: "Cannot start ripgrep: \{error}",
         })
@@ -1104,13 +1105,13 @@ async fn run_text_search(
     // but reports a recoverable error for another one.
     if text_search_exit_is_fatal(exit_code, limit_hit, got_output) {
       let (code, message) = text_search_error(stderr)
-      return empty_text_search_reply(root_text, payload.generation, error={
+      return empty_text_search_reply(reply_root, payload.generation, error={
         code,
         message,
       })
     }
     {
-      root: root_text,
+      root: reply_root,
       generation: payload.generation,
       matches,
       match_count,
@@ -1476,13 +1477,35 @@ test "ripgrep failures classify regex and permission diagnostics" {
 }
 
 ///|
+async test "text search replies echo resource-form workspace roots" {
+  let root = @pathx.Path(".").resolve()
+  let resource_root = root.resource_path()
+  let payload : SearchTextPayload = {
+    root: resource_root,
+    query: "",
+    regex: false,
+    case_sensitive: false,
+    whole_word: false,
+    include_glob: "",
+    exclude_glob: "",
+    session_key: "search:resource-root",
+    generation: 3,
+    max_results: 20000,
+  }
+  let reply = run_text_search(None, root, payload)
+  assert_eq(reply.root, resource_root)
+}
+
+///|
 async test "cancel-before-search frontier rejects the stale generation" {
   let service = TextSearchService::new()
   @async.with_task_group(group => {
     group.spawn_bg(() => service.run())
     service.cancel("search:stale", 7)
+    let root = @pathx.Path(".").resolve()
+    let resource_root = root.resource_path()
     let payload : SearchTextPayload = {
-      root: "/virtual",
+      root: resource_root,
       query: "moon",
       regex: false,
       case_sensitive: false,
@@ -1493,9 +1516,10 @@ async test "cancel-before-search frontier rejects the stale generation" {
       generation: 7,
       max_results: 20000,
     }
-    let reply = service.search(None, @pathx.Path("/virtual").resolve(), payload)
+    let reply = service.search(None, root, payload)
     assert_true(reply.cancelled)
     assert_eq(reply.generation, 7)
+    assert_eq(reply.root, resource_root)
     group.return_immediately(())
   })
 }
