@@ -522,6 +522,13 @@ pub fn boot() -> Unit {
       dsh_composer_input,
       emit.map(action => Dsh(@dsh.Msg::composer_action(action))),
     )
+    // Rabbita combines at most nine incremental values in one root view.
+    // Codex and dsh are mutually exclusive conversation pages, so carry their
+    // independently stateful composer components as one external-page pair.
+    let external_composers = codex_composer_html.map2(dsh_composer_html, (
+      codex,
+      dsh,
+    ) => (codex, dsh))
     let sidebar_input = state.map(model => model.sidebar_component_input())
     let sidebar_html = @sidebar.component(
       sidebar_input,
@@ -541,8 +548,7 @@ pub fn boot() -> Unit {
       transcript_html,
       right_panel_html,
       composer_html,
-      codex_composer_html,
-      dsh_composer_html,
+      external_composers,
       sidebar_html,
       quick_open_html,
       skills_html,
@@ -552,12 +558,12 @@ pub fn boot() -> Unit {
         transcript_html,
         right_panel_html,
         composer_html,
-        codex_composer_html,
-        dsh_composer_html,
+        external_composers,
         sidebar_html,
         quick_open_html,
         skills_html,
       ) => {
+        let (codex_composer_html, dsh_composer_html) = external_composers
         view(
           emit,
           terminal_emit(@terminal.ToggleTerminal),

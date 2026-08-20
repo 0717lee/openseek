@@ -137,9 +137,3 @@ fn[T] Menu::shifted(self : Menu[T], delta : Int) -> Menu[T] {
 fn[T] Menu::current(self : Menu[T]) -> T? {
   self.items.get(self.selected)
 }
-
-///|
-pub extend Menu with Eq::{equal, not_equal}
-
-///|
-pub extend Trigger with Eq::{equal, not_equal}

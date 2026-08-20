@@ -12,6 +12,7 @@ fn Model::transcript_input(self : Model) -> @transcript_component.Input {
         .active_workspace_path()
         .bind(path => @resource.of_path(@interop.ChannelId::Local, path))
       let session = self.dsh.active_id().unwrap_or("none")
+      let streaming = self.dsh.streaming_text()
       @transcript_component.Input(
         source=@transcript_component.Dsh,
         focused=@interop.ChannelId::Local,
@@ -21,10 +22,14 @@ fn Model::transcript_input(self : Model) -> @transcript_component.Input {
         items=@transcript_component.VisibleRow::history(
           self.dsh.transcript_items(),
         ),
-        streaming_reasoning="",
-        streaming_response=self.dsh.streaming_text(),
+        // Durable dsh events remain record rows; only the unfinished assistant
+        // suffix uses the transcript component's separate streaming lane.
+        streaming_response=if streaming.is_empty() {
+          None
+        } else {
+          Some(streaming)
+        },
         streaming_identity=session,
-        subruns=[],
       )
     }
     Codex => {

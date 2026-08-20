@@ -86,7 +86,7 @@ pub fn State::composer_input(
         })
         status.push(
           @composer.ModelSelect::{
-            options: model_options,
+            groups: [{ label: "DeepSeek Harness", options: model_options }],
             selected: selected.key(),
             disabled: self.models.busy() || self.busy(),
             change: dispatch.map(value => ModelChanged(value)),
@@ -121,6 +121,14 @@ pub fn State::composer_input(
   {
     identity: self.composer_identity(),
     draft: { task: self.draft, mentions: self.mentions },
+    // dsh exposes only whether the selected conversation is running, not its
+    // start time, token usage, or numbered step. Project that exact knowledge
+    // into the shared heartbeat instead of inventing finer progress.
+    run: if self.is_running() {
+      Some({ stage: Working, started_ms: None, tokens: 0 })
+    } else {
+      None
+    },
     goal: { draft: None, standing: None, pending: None },
     slash_commands: [],
     root: None,
