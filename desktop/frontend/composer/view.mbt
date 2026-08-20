@@ -398,7 +398,7 @@ fn RunHeartbeat::label(self : RunHeartbeat, clock_ms~ : Double) -> String {
     detail.push(elapsed_label(clock_ms - started))
   }
   if self.tokens > 0 {
-    detail.push("\{compact_count(self.tokens)} tokens")
+    detail.push("\{@labels.compact_count(self.tokens)} tokens")
   }
   if detail.is_empty() {
     stage
@@ -422,27 +422,6 @@ fn elapsed_label(span_ms : Double) -> String {
     return "\{minutes}m \{total_seconds % 60}s"
   }
   "\{minutes / 60}h \{minutes % 60}m"
-}
-
-///|
-/// A count compacted for the running row: exact under a thousand, otherwise
-/// one decimal of k/M with a whole value's ".0" dropped.
-fn compact_count(value : Int) -> String {
-  fn scaled(tenths : Int, unit : String) -> String {
-    if tenths % 10 == 0 {
-      "\{tenths / 10}\{unit}"
-    } else {
-      "\{tenths / 10}.\{tenths % 10}\{unit}"
-    }
-  }
-
-  if value < 1_000 {
-    "\{value}"
-  } else if value < 1_000_000 {
-    scaled(value / 100, "k")
-  } else {
-    scaled(value / 100_000, "M")
-  }
 }
 
 ///|

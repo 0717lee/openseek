@@ -442,6 +442,37 @@ test "the heartbeat reports only the detail it actually has" {
 }
 
 ///|
+test "an idle tick changes nothing, a running one advances the clock" {
+  // The tick is permanent because a component's subscriptions are re-derived
+  // only when it processes a message — never on an input change alone — so
+  // one declared just for open runs would never be installed for a prompt
+  // the user submits and then waits on. That makes this handler the place
+  // where idleness is decided, and an idle tick must leave the model equal to
+  // itself or the composer re-renders once a second forever.
+  let idle = Input::fixture("")
+  let mounted = Model(idle)
+  let (after_idle, _) = mounted.update(
+    idle,
+    ClockTicked,
+    Msg::test_emit(),
+    Action::test_emit(),
+  )
+  assert_true(after_idle == mounted)
+  let running = {
+    ..idle,
+    run: Some({ stage: Thinking, started_ms: None, tokens: 0 }),
+  }
+  let stale = { ..mounted, clock_ms: 0.0 }
+  let (after_running, _) = stale.update(
+    running,
+    ClockTicked,
+    Msg::test_emit(),
+    Action::test_emit(),
+  )
+  assert_true(after_running.clock_ms > 0.0)
+}
+
+///|
 test "an elapsed span never shows finer units than its own scale" {
   assert_eq(elapsed_label(0.0), "0s")
   assert_eq(elapsed_label(950.0), "0s")

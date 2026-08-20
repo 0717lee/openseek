@@ -1117,7 +1117,7 @@ fn apply_engine_event(
           true,
           conv.append_local_notice(
             Assistant(is_danger=true),
-            "\{kind} \{id}: \{status} · \{steps} step(s) · \{compact_count(tokens)} tok",
+            "\{kind} \{id}: \{status} · \{steps} step(s) · \{@labels.compact_count(tokens)} tok",
           ),
         )
       }
@@ -7754,17 +7754,21 @@ test "the run heartbeat carries only the facts the page actually has" {
 }
 
 ///|
-test "the per-second tick is the composer's, not the application's" {
-  // The row's clock lives in the composer component, so nothing in the root
-  // model changes once a second — every other component's input would
-  // otherwise be reprojected at 1Hz to redraw a single line.
+test "a step event is what moves the heartbeat's stage" {
   let running = running_model()
-  let (_, again) = update_dev(
+  assert_eq(
+    running.active().run_heartbeat().map(run => run.stage),
+    Some(Thinking),
+  )
+  let (_, stepped) = update_dev(
     test_dispatch(),
     Engine(Some("r7"), AgentStep(Some(2)), session=None),
     running,
   )
-  assert_true(again.active().run_heartbeat() is Some(_))
+  assert_eq(
+    stepped.active().run_heartbeat().map(run => run.stage),
+    Some(AtStep(2)),
+  )
 }
 
 ///|

@@ -773,8 +773,18 @@ fn Model::update(
         emit,
         action_emit,
       )
-    ClockTicked =>
-      ({ ..self.with_entry(entry), clock_ms: @interop.now_ms() }, @cmd.none)
+    // The tick runs whether or not a turn is open (see `subscriptions`), so
+    // this is where an idle one is discarded: the clock only moves while
+    // there is a span to measure, leaving the model equal to itself and
+    // nothing to re-render.
+    ClockTicked => {
+      let clock_ms = if input.run is Some(_) {
+        @interop.now_ms()
+      } else {
+        self.clock_ms
+      }
+      ({ ..self.with_entry(entry), clock_ms, }, @cmd.none)
+    }
     CompletionPump => {
       // Committing the reconciled entry above is this tick's real work: the
       // subscription diff after every update re-derives the declared lookups
@@ -838,13 +848,18 @@ fn Model::subscriptions(
   input : Input,
   emit : @cmd.Emit[Msg],
 ) -> @sub.Sub {
-  // One second is the resolution the running row is displayed at, and it is
-  // wanted only while a turn is open — an idle composer does no per-second
-  // work at all. Kept outside the editing subscriptions below because those
-  // return early: the heartbeat is independent of what the draft is doing.
-  guard input.run is Some(_) else {
-    return self.editing_subscriptions(input, emit)
-  }
+  // The heartbeat tick is permanent, deliberately: a component's
+  // subscriptions are re-derived only when that component processes a
+  // message, never when its input alone changes (`handle_subs` runs at
+  // construction and inside `on_update`). A tick declared only while
+  // `input.run` is set would therefore never be installed for the case this
+  // row exists for — submit, then wait without touching the composer, where
+  // no further message ever arrives. Worse, the submit cannot install it
+  // either: `on_update` refreshes subscriptions *before* running the command
+  // that tells the root to open the run, so it still reads `run: None`.
+  //
+  // `ClockTicked` is what stays conditional instead: an idle tick leaves the
+  // model equal to itself, so it costs a comparison and no render.
   @sub.batch([
     @sub.every(1000, emit(ClockTicked)),
     self.editing_subscriptions(input, emit),

@@ -22,6 +22,7 @@ import {
   "openseek_desktop/frontend/fileeditor",
   "openseek_desktop/frontend/files",
   "openseek_desktop/frontend/icons",
+  "openseek_desktop/frontend/labels",
   "openseek_desktop/frontend/sidebar",
   "openseek_desktop/frontend/sidebar/conversation",
   "openseek_desktop/frontend/sidebar/project",
