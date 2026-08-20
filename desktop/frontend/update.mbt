@@ -757,6 +757,41 @@ fn Model::begin_editor_navigation(self : Model) -> Model {
 }
 
 ///|
+/// Open the shared Explorer picker on one of its three inventories. Dock and
+/// panel visibility belong to the shell; inventory selection, focus, and any
+/// host-backed refresh belong to fileeditor.
+fn open_explorer(
+  dispatch : @cmd.Emit[Msg],
+  model : Model,
+  mode : @fileeditor.ExplorerMode,
+) -> (@cmd.Cmd, Model) {
+  let model = model.begin_editor_navigation()
+  let screen = if model.screen is Screen::Codex {
+    Screen::Codex
+  } else {
+    Screen::Chat
+  }
+  let next = {
+    ..model,
+    screen,
+    dock: @dock.open_picker(model.dock),
+    right_panel_open: true,
+    right_panel_menu_open: false,
+    // Invoking any Explorer inventory is an explicit request to keep it next
+    // to the selected file on wide layouts. Narrow file opens still perform
+    // the normal drill-down and close this tree.
+    file_panel: { ..model.file_panel, tree_open: true },
+  }
+  let (cmd, file_panel) = @fileeditor.update(
+    dispatch.map(msg => FileEditor(msg)),
+    @fileeditor.ExplorerModeSelected(mode),
+    next.file_panel,
+    file_ctx(next),
+  )
+  (cmd, { ..next, file_panel, })
+}
+
+///|
 /// Reveal a transcript-linked directory in the editor's Files tree. Keep an
 /// active file visible beside the tree; otherwise activate the picker body so
 /// the reveal has a visible home. `RevealDirectory` expands the ancestors;
@@ -858,39 +893,7 @@ fn open_editor_at(
   // table is seeded from the restored strip (identities only), exactly like
   // `@fileeditor.sync`'s own re-root.
   let dock = @dock.sync(model.dock, owner)
-  let previous_panel = model.file_panel
-  let panel = if previous_panel.owner == Some(owner) {
-    previous_panel
-  } else {
-    let docs : Map[@pathx.Relative, @fileeditor.Doc] = Map([])
-    for open_path in @dock.file_paths(dock) {
-      docs[open_path] = {
-        name: @fileeditor.basename(open_path),
-        state: TabLoading,
-        review: None,
-        stale: false,
-      }
-    }
-    {
-      ..@fileeditor.State::empty(),
-      owner: Some(owner),
-      // Mirror fileeditor.sync's re-root invariants. In particular, request
-      // and watcher generations must outlive an A→B→A jump so older A work
-      // cannot collide with the next request or watch after this eager re-root.
-      tree_open: previous_panel.tree_open,
-      explorer_mode: previous_panel.explorer_mode,
-      review_view_mode: previous_panel.review_view_mode,
-      changes_generation: previous_panel.changes_generation,
-      request_epoch: previous_panel.request_epoch + 1,
-      file_link_generation: previous_panel.file_link_generation,
-      review_generation: previous_panel.review_generation,
-      watch_generation: previous_panel.watch_generation,
-      // Preserve the old host configuration until the post-dispatch sync can
-      // explicitly retire or replace it.
-      watching: previous_panel.watching,
-      docs,
-    }
-  }
+  let panel = model.file_panel.prepare_owner(owner, @dock.file_paths(dock))
   guard model.active_relative_path(path) is Some(relative) else {
     return (
       @fileeditor.mount_cmds(femit),
@@ -1673,7 +1676,8 @@ fn Msg::opens_file_before_panel_reconciliation(self : Msg) -> Bool {
   | JumpToMention(_)
   | JumpToLocation(..)
   | QuickOpen(@quick_open.Pick(_))
-  | OpenFileAt(..))
+  | OpenFileAt(..)
+  | FileEditor(@fileeditor.SearchMatchSelected(..)))
 }
 
 ///|
@@ -2215,6 +2219,11 @@ fn update_msg(
         }).mentions
       (clear_feedback, model.replace_conversation({ ..conv, mentions, }))
     }
+    // Search rows use the same ordinary positioned-open path as definition,
+    // mention, and Quick Open navigation. An active picker is fulfilled in
+    // place; an already-open file is activated.
+    FileEditor(@fileeditor.SearchMatchSelected(path~, range~)) =>
+      open_editor_at(dispatch, model, path, Some(range))
     // Intercepted like the comment above: which dock tab a tree click opens
     // is the strip's business. The dock opens (or re-activates) the tab,
     // then the file subsystem loads and shows the document against the
@@ -4098,30 +4107,7 @@ fn update_msg(
         { ..model, preview, dock, right_panel_menu_open: false },
       )
     }
-    FilePickerRequested => {
-      let model = model.begin_editor_navigation()
-      let dock = @dock.open_picker(model.dock)
-      let next = { ..model, dock, right_panel_menu_open: false }
-      let (cmd, file_panel) = @fileeditor.update(
-        dispatch.map(msg => FileEditor(msg)),
-        @fileeditor.ExplorerModeSelected(ExplorerFiles),
-        next.file_panel,
-        file_ctx(next),
-      )
-      (cmd, { ..next, file_panel, })
-    }
-    ReviewRequested => {
-      let model = model.begin_editor_navigation()
-      let dock = @dock.open_picker(model.dock)
-      let next = { ..model, dock, right_panel_menu_open: false }
-      let (cmd, file_panel) = @fileeditor.update(
-        dispatch.map(msg => FileEditor(msg)),
-        @fileeditor.ExplorerModeSelected(ExplorerChanges),
-        next.file_panel,
-        file_ctx(next),
-      )
-      (cmd, { ..next, file_panel, })
-    }
+    ExplorerRequested(mode) => open_explorer(dispatch, model, mode)
     BrowserAddressEdited(value) =>
       match @dock.active_browser(model.dock) {
         Some(id) =>
@@ -19472,7 +19458,7 @@ test "terminal visibility changes in the root-owned terminal state" {
 }
 
 ///|
-test "launcher rows open Browse, Files, and Review destinations" {
+test "launcher rows open Browser and all Explorer destinations" {
   let dispatch = test_dispatch()
   let model = desktop_model()
   let (_, model) = update(dispatch, ToggleRightPanel, model)
@@ -19484,19 +19470,22 @@ test "launcher rows open Browse, Files, and Review destinations" {
   let page = @preview.page(model.preview, 1).unwrap()
   assert_true(page.url is None)
   assert_false(page.loading)
-  let (_, model) = update(dispatch, FilePickerRequested, model)
+  let (_, model) = update(dispatch, ExplorerRequested(ExplorerFiles), model)
   assert_true(model.dock.active == Some(@dock.DockTab::FilePicker))
   assert_true(model.file_panel.explorer_mode is ExplorerFiles)
   assert_true(
     model.dock.tabs == [@dock.DockTab::Browser(id=1), @dock.DockTab::FilePicker],
   )
-  let (_, model) = update(dispatch, ReviewRequested, model)
+  let (_, model) = update(dispatch, ExplorerRequested(ExplorerChanges), model)
   assert_true(model.dock.active == Some(@dock.DockTab::FilePicker))
   assert_true(model.file_panel.explorer_mode is ExplorerChanges)
   assert_true(model.file_panel.changes is ChangeListLoading(_))
   // Files is an explicit destination even after Review selected Changes.
-  let (_, model) = update(dispatch, FilePickerRequested, model)
+  let (_, model) = update(dispatch, ExplorerRequested(ExplorerFiles), model)
   assert_true(model.file_panel.explorer_mode is ExplorerFiles)
+  let (_, model) = update(dispatch, ExplorerRequested(ExplorerSearch), model)
+  assert_true(model.file_panel.explorer_mode is ExplorerSearch)
+  assert_true(model.file_panel.tree_open)
 }
 
 ///|
@@ -19504,7 +19493,7 @@ test "a tree pick fulfills the active picker in place" {
   let dispatch = test_dispatch()
   let model = desktop_model()
   let (_, model) = update(dispatch, ToggleRightPanel, model)
-  let (_, model) = update(dispatch, FilePickerRequested, model)
+  let (_, model) = update(dispatch, ExplorerRequested(ExplorerFiles), model)
   let (_, model) = update(
     dispatch,
     FileEditor(FileSelected(path=Relative("src/main.mbt"), name="main.mbt")),
@@ -19521,7 +19510,7 @@ test "a changed row opens the file tab in review mode" {
   let dispatch = test_dispatch()
   let model = desktop_model()
   let (_, model) = update(dispatch, ToggleRightPanel, model)
-  let (_, model) = update(dispatch, FilePickerRequested, model)
+  let (_, model) = update(dispatch, ExplorerRequested(ExplorerChanges), model)
   let path = @pathx.Relative("src/main.mbt")
   let (_, model) = update(
     dispatch,
@@ -19867,6 +19856,194 @@ test "navigating an already-placed tab re-places its view" {
   let (_, replaced) = update(dispatch, BrowserPaneMeasured(rect~), navigated)
   assert_true(replaced.browser_pane.shown == Some(1))
   assert_true(replaced.browser_pane.rect == Some(rect))
+}
+
+///|
+#warnings("-alert_unstable")
+fn render_grep_state_for_test(model : Model) -> String {
+  let emit : @cmd.Emit[@grep_search.Msg] = @cmd.Emit(_ => @cmd.none)
+  let active = model
+    .active_checkout()
+    .unwrap_or({
+      owner: { channel: model.focused, session: "" },
+      placement: None,
+    })
+  let input = @grep_search.Input(
+    owner=active.owner,
+    root=active.placement.bind(placement => placement.checkout_root()),
+  )
+  @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(
+      model.file_panel.search.explorer_view(input, emit, (_, _) => @cmd.none),
+    )
+  })
+}
+
+///|
+test "Search reuses the picker and keeps a request when its Explorer tab leaves" {
+  let dispatch = test_dispatch()
+  let (_, opened) = update(
+    dispatch,
+    ExplorerRequested(ExplorerSearch),
+    desktop_model(),
+  )
+  assert_true(opened.right_panel_open)
+  assert_true(opened.dock.active is Some(@dock.DockTab::FilePicker))
+  assert_true(opened.dock.tabs == [@dock.DockTab::FilePicker])
+  assert_true(opened.file_panel.explorer_mode is ExplorerSearch)
+  assert_true(opened.file_panel.tree_open)
+  let (_, reopened_picker) = update(
+    dispatch,
+    ExplorerRequested(ExplorerSearch),
+    opened,
+  )
+  assert_true(reopened_picker.dock.tabs == [@dock.DockTab::FilePicker])
+  let (_, edited) = update(
+    dispatch,
+    FileEditor(Search(@grep_search.QueryChanged("moon"))),
+    reopened_picker,
+  )
+  let (_, running) = update(
+    dispatch,
+    FileEditor(Search(@grep_search.Submit)),
+    edited,
+  )
+  assert_true(render_grep_state_for_test(running).contains("Searching…"))
+  let (_, files) = update(
+    dispatch,
+    FileEditor(@fileeditor.ExplorerModeSelected(ExplorerFiles)),
+    running,
+  )
+  assert_true(render_grep_state_for_test(files).contains("Searching…"))
+  let (_, reopened) = update(dispatch, ExplorerRequested(ExplorerSearch), files)
+  assert_true(reopened.dock.tabs == [@dock.DockTab::FilePicker])
+  assert_true(reopened.file_panel.explorer_mode is ExplorerSearch)
+  let markup = render_grep_state_for_test(reopened)
+  assert_true(markup.contains("Searching…"))
+  assert_true(markup.contains("value=\"moon\""))
+}
+
+///|
+test "a Search result fulfills the picker while preserving Search beside the file" {
+  let dispatch = test_dispatch()
+  let (_, opened) = update(
+    dispatch,
+    ExplorerRequested(ExplorerSearch),
+    desktop_model(),
+  )
+  let (_, edited) = update(
+    dispatch,
+    FileEditor(Search(@grep_search.QueryChanged("moon"))),
+    opened,
+  )
+  let path = @pathx.Relative("src/main.mbt")
+  let range = @common.Range(4, 2, 4, 6)
+  let (_, selected) = update(
+    dispatch,
+    FileEditor(SearchMatchSelected(path=path.0, range~)),
+    edited,
+  )
+  assert_true(selected.dock.tabs == [@dock.DockTab::File(path~)])
+  assert_true(@dock.active_file(selected.dock) == Some(path))
+  assert_true(selected.file_panel.explorer_mode is ExplorerSearch)
+  assert_true(selected.file_panel.tree_open)
+  assert_true(
+    selected.file_panel.docs.get(path)
+    is Some({ review: None, state: TabLoading, .. }),
+  )
+  assert_true(render_grep_state_for_test(selected).contains("value=\"moon\""))
+
+  // Opening Search again appends the one shared picker. Picking the already
+  // open file removes that picker and activates the existing file tab.
+  let (_, picker) = update(
+    dispatch,
+    ExplorerRequested(ExplorerSearch),
+    selected,
+  )
+  assert_true(
+    picker.dock.tabs == [@dock.DockTab::File(path~), @dock.DockTab::FilePicker],
+  )
+  let (_, reused) = update(
+    dispatch,
+    FileEditor(SearchMatchSelected(path=path.0, range~)),
+    picker,
+  )
+  assert_true(reused.dock.tabs == [@dock.DockTab::File(path~)])
+  assert_true(@dock.active_file(reused.dock) == Some(path))
+  assert_true(reused.file_panel.explorer_mode is ExplorerSearch)
+}
+
+///|
+test "narrow Search drill-down hides and restores the retained Explorer" {
+  let dispatch = test_dispatch()
+  let (_, narrow) = update(
+    dispatch,
+    ViewportResized(width=390),
+    desktop_model(),
+  )
+  let (_, opened) = update(dispatch, ExplorerRequested(ExplorerSearch), narrow)
+  let (_, edited) = update(
+    dispatch,
+    FileEditor(Search(@grep_search.QueryChanged("needle"))),
+    opened,
+  )
+  let path = @pathx.Relative("src/narrow.mbt")
+  let range = @common.Range(1, 1, 1, 7)
+  let (_, drilled) = update(
+    dispatch,
+    FileEditor(SearchMatchSelected(path=path.0, range~)),
+    edited,
+  )
+  assert_true(drilled.file_panel.explorer_mode is ExplorerSearch)
+  assert_false(drilled.file_panel.tree_open)
+  assert_true(render_grep_state_for_test(drilled).contains("value=\"needle\""))
+  let (_, restored) = update(
+    dispatch,
+    FileEditor(@fileeditor.ToggleTree),
+    drilled,
+  )
+  assert_true(restored.file_panel.tree_open)
+  assert_true(restored.file_panel.explorer_mode is ExplorerSearch)
+}
+
+///|
+test "Search requests survive hidden Explorer Browser and panel states" {
+  let dispatch = test_dispatch()
+  let (_, opened) = update(
+    dispatch,
+    ExplorerRequested(ExplorerSearch),
+    desktop_model(),
+  )
+  let path = @pathx.Relative("src/main.mbt")
+  let range = @common.Range(2, 1, 2, 5)
+  let (_, file) = update(
+    dispatch,
+    FileEditor(SearchMatchSelected(path=path.0, range~)),
+    opened,
+  )
+  let (_, edited) = update(
+    dispatch,
+    FileEditor(Search(@grep_search.QueryChanged("moon"))),
+    file,
+  )
+  let (_, running) = update(
+    dispatch,
+    FileEditor(Search(@grep_search.Submit)),
+    edited,
+  )
+  assert_true(render_grep_state_for_test(running).contains("Searching…"))
+
+  let (_, tree_hidden) = update(
+    dispatch,
+    FileEditor(@fileeditor.ToggleTree),
+    running,
+  )
+  assert_true(render_grep_state_for_test(tree_hidden).contains("Searching…"))
+  let (_, browser) = update(dispatch, BrowserTabRequested, tree_hidden)
+  assert_true(render_grep_state_for_test(browser).contains("Searching…"))
+  let (_, panel_closed) = update(dispatch, ToggleRightPanel, browser)
+  assert_false(panel_closed.right_panel_open)
+  assert_true(render_grep_state_for_test(panel_closed).contains("Searching…"))
 }
 
 ///|

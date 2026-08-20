@@ -338,6 +338,31 @@ pub(all) struct CancelSearchFilesPayload {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+/// Search workspace text through the Host's bundled ripgrep. `session_key`
+/// names one panel/search lifetime; generations are monotonic inside it, so a
+/// newer request can cancel an older process without affecting another panel.
+pub(all) struct SearchTextPayload {
+  root : String
+  query : String
+  regex : Bool
+  case_sensitive : Bool
+  whole_word : Bool
+  include_glob : String
+  exclude_glob : String
+  session_key : String
+  generation : Int
+  max_results : Int
+} derive(Debug, Eq)
+
+///|
+/// Cancel one text-search generation. The Host also remembers the cancelled
+/// frontier so cancel-before-search message ordering remains safe.
+pub(all) struct CancelSearchTextPayload {
+  session_key : String
+  generation : Int
+} derive(Debug, Eq)
+
+///|
 pub(all) struct ClearFileSearchCachePayload {
   cache_key : String
 } derive(Debug, Eq, FromJson, ToJson)

@@ -899,6 +899,51 @@ pub(all) struct SearchFilesReply {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+/// One match range within the source line. Columns are one-based UTF-16
+/// code-unit offsets and the end is exclusive, matching the editor Viewer
+/// contract.
+pub(all) struct TextSearchRange {
+  start_column : Int
+  end_column : Int
+} derive(Debug, Eq)
+
+///|
+/// A matching source line. `path` is relative to the searched root;
+/// `preview_start_column` maps a clipped preview back onto the source line.
+pub(all) struct TextSearchMatch {
+  path : String
+  line_number : Int
+  preview : String
+  preview_start_column : Int
+  ranges : Array[TextSearchRange]
+} derive(Debug, Eq)
+
+///|
+/// A text-search failure carried inside the successful bridge response. Keeping
+/// code and message together makes a half-populated wire error impossible to
+/// construct inside the Host or frontend.
+pub(all) struct TextSearchError {
+  code : String
+  message : String
+} derive(Debug, Eq)
+
+///|
+/// A complete bounded text-search response. Operational failures stay in the
+/// typed reply so the Search panel can distinguish invalid regexes, missing
+/// bundled assets, permissions, and ordinary errors without failing unrelated
+/// bridge methods. Success omits both optional error fields on the wire.
+pub(all) struct SearchTextReply {
+  root : String
+  generation : Int
+  matches : Array[TextSearchMatch]
+  match_count : Int
+  file_count : Int
+  limit_hit : Bool
+  cancelled : Bool
+  error : TextSearchError?
+} derive(Debug, Eq)
+
+///|
 pub(all) enum ReadFileReply {
   Binary
   Oversized
