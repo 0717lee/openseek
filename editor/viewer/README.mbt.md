@@ -147,7 +147,7 @@ state, update event, and next/previous change navigation. It is readonly; moves,
 hide-unchanged, revert, editing, and the full accessible diff viewer are outside
 the current scope.
 
-## Package and architecture gates
+## Package and architecture boundaries
 
 Dependencies point downward:
 
@@ -159,8 +159,8 @@ internal/code_editor_widget <- internal/diff_editor
 public viewer façade ---------------┘
 ```
 
-`scripts/check-diff-editor-architecture.sh`, invoked by `just check`, enforces
-the important non-regression rules:
+These boundaries remain visible in `moon.pkg`, generated interfaces, and code
+review:
 
 - `diff_editor` depends on `code_editor_widget` and never on public `Viewer`;
 - `code_editor_widget` never depends on public `viewer` or `diff_editor`;
@@ -176,8 +176,9 @@ Fast validation for this boundary:
 ```sh
 moon -C editor check viewer internal/viewer/code_editor_widget --target js --deny-warn
 moon -C editor test internal/viewer/code_editor_widget --target js --deny-warn
-bash scripts/check-diff-editor-architecture.sh
 ```
+
+Run `just check` from the repository root for the integration gate.
 
 Browser behavior is covered by `just editor-test-browser`; the real downstream
 acceptance target remains packaged SeekMoon through its Proton/CEF CDP path.

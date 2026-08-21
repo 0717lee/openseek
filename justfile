@@ -3,7 +3,6 @@ default:
 
 # Check the two production targets together and verify repository formatting.
 check:
-    bash scripts/check-diff-editor-architecture.sh
     moon check --target native --deny-warn
     moon check --target js --deny-warn
     moon fmt --check

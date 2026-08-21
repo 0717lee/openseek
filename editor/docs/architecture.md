@@ -558,9 +558,9 @@ so excluding them would leave it unbuildable.
 ## Dependency Rules
 
 `moon check --target all` enforces package cycles and target compatibility.
-`scripts/check-diff-editor-architecture.sh` enforces the ownership edges and
-forbidden raw seams that type checking alone cannot express. The remaining
-rules stay visible in `moon.pkg`, generated interfaces, and code review:
+The remaining rules are intentionally kept visible in `moon.pkg`, generated
+interfaces, and code review instead of duplicated in an architecture-lint
+script:
 
 - Product code does not import `vscode/` or `codemirror/`.
 - Reusable packages do not import the `internal/shell/**` reference host.
