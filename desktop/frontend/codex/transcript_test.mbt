@@ -69,3 +69,45 @@ test "Codex adapts app-server items to the shared transcript model" {
   assert_true(items[3].kind is @transcript.Assistant(is_danger=true))
   assert_eq(items[3].content, "turn failed")
 }
+
+///|
+test "Codex omits reasoning without visible summary text" {
+  let state = @codex.State::from_thread_snapshot({
+    "thread": {
+      "id": "thread-1",
+      "turns": [
+        {
+          "id": "turn-1",
+          "status": "completed",
+          "items": [
+            {
+              "id": "reasoning-empty",
+              "type": "reasoning",
+              "summary": [],
+              "encryptedContent": "opaque",
+            },
+            {
+              "id": "reasoning-blank",
+              "type": "reasoning",
+              "summary": [{ "type": "summary_text", "text": "  " }],
+            },
+            {
+              "id": "reasoning-visible",
+              "type": "reasoning",
+              "summary": [
+                { "type": "summary_text", "text": "Inspecting the fix" },
+              ],
+            },
+            { "id": "agent-1", "type": "agentMessage", "text": "Done." },
+          ],
+        },
+      ],
+    },
+  })
+  let items = state.transcript_items()
+  assert_eq(items.length(), 2)
+  assert_true(items[0].kind is @transcript.Reasoning)
+  assert_eq(items[0].content, "Inspecting the fix")
+  assert_true(items[1].kind is @transcript.Assistant(is_danger=false))
+  assert_eq(items[1].content, "Done.")
+}
