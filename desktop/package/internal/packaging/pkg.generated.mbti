@@ -18,9 +18,13 @@ pub async fn build_frontend_bundle(Workspace, release~ : Bool) -> Unit
 
 pub async fn build_mermaid_assets(Workspace) -> Unit
 
-pub async fn build_native_host(Workspace, release~ : Bool, extra_args? : Array[String], extra_env? : Map[String, String], runtime_dist? : String) -> Unit
+pub async fn build_native_host(Workspace, release~ : Bool, extra_args? : Array[String], extra_env? : Map[String, String]) -> Unit
+
+pub async fn build_proton_application(Workspace, release~ : Bool, moon_args? : Array[String]) -> Unit
 
 pub async fn build_viewer_stylesheet(Workspace) -> Unit
+
+pub fn cef_helper_name() -> String
 
 pub async fn copy_file(String, String) -> Unit
 
@@ -28,7 +32,7 @@ pub async fn copy_tree(String, String) -> Unit
 
 pub fn engine_package() -> String
 
-pub async fn ensure_cef_runtime(Workspace, extra_env? : Map[String, String]) -> Unit
+pub async fn ensure_cef_runtime(Workspace) -> Unit
 
 pub async fn ensure_dir(String) -> Unit
 
@@ -62,7 +66,7 @@ pub fn Workspace::frontend_binary(Self, release~ : Bool) -> String
 pub fn Workspace::mermaid_assets(Self) -> String
 pub async fn Workspace::module_version(Self) -> String
 pub fn Workspace::native_binary(Self, release~ : Bool) -> String
-pub async fn Workspace::proton_version(Self) -> String
+pub fn Workspace::proton_helper_binary(Self) -> String
 pub fn Workspace::repo(Self) -> String
 pub fn Workspace::repo_at(Self, String) -> String
 

@@ -156,12 +156,12 @@ MoonBit toolchain through the normal fallback chain.
 ## Setup
 
 ```sh
-git clone <this-repo>
+git clone --recurse-submodules <this-repo>
 ```
 
-Proton is an ordinary registry dependency (`moonbit-community/proton` in
-`moon.mod`), so a plain clone is complete — `moon` resolves it like any other
-package.
+This migration branch pins Proton PR #129 as the `desktop/lepus` submodule.
+The root `moon.work` resolves Proton, its extensions, contracts, and CEF store
+directly from that checkout; the matching CLI is also run from its source.
 
 The desktop frontend imports the `moonbitlang/editor` workspace member from
 `../editor`. Packaging reads its reusable CSS and codicon font from that same
@@ -174,9 +174,9 @@ variables; the editor's reference-shell theme remains development-only.
 
 What still needs preparing, beyond the MoonBit packages:
 
-- The native host links `libproton`, which in turn needs CEF. The Proton
-  package ships `libproton` for each platform but not CEF, so the first native
-  build assembles a runtime from the two — see "Run during development" below.
+- Proton's native implementation is compiled privately into the host. The
+  first native build installs the CEF-only runtime declared by the pinned
+  Proton source into the immutable per-user Proton store.
 - The desktop host expects `assets/index.html`, `assets/app.css`,
   `assets/frontend.js`, the generated `assets/mermaid/` tree, and an
   `openseek` engine executable beside it when packaged.
@@ -204,19 +204,11 @@ From the monorepo root, run:
 moon run ./desktop/package/dev
 ```
 
-The launcher detects the desktop workspace, builds the frontend, engine, and
-native host with Moon's normal incremental build, prepares the Proton/CEF
-runtime, and launches the bare host. Setup runs `proton_cli` through `moonx`,
-which fetches the published CLI into the registry cache rather than installing
-anything, and assembles the runtime from the resolved Proton package's platform
-prebuilt plus a CEF distribution. That first setup may download a large
-archive; later development and platform-package runs reuse the validated
-assembled runtime and skip the CLI entirely.
-
-`cef setup` runs at the *monorepo root*, not in `desktop/`: the root is where
-Moon resolves `.mooncakes`, so it is both where the CLI finds the Proton
-prebuilt and where Proton's link config looks for the `.proton/runtime.json`
-it writes.
+The launcher detects the desktop workspace, builds the frontend and engine,
+then asks the checkout-local Proton CLI to build the host and its matching CEF
+helper. The CEF store installs the source-declared runtime on first use and
+reuses the content-addressed installation on later development and packaging
+runs. No separately versioned `libproton` or `.proton/runtime.json` is used.
 
 The executable implementation lives in `package/dev`; it accepts no path or
 build-mode arguments.
@@ -307,17 +299,15 @@ app bundle. At runtime the host copies that seed into the app's per-user
 runtime directory, runs `moon bundle --all` and `moon bundle --target wasm-gc`
 there, and passes the writable copy as `MOON_HOME` to the engine.
 
-The manual steps below are useful when debugging the package script.
-
-From the repository root, assemble the Proton/CEF runtime the native host
-links against:
+The manual command below is useful when debugging the source-built Proton host
+and helper without staging the OpenSeek bundle:
 
 ```powershell
-moonx moonbit-community/proton_cli@<version> -C . cef setup
+moon -C desktop\lepus\cli run . -- -C desktop build --config proton.project.json --no-frontend --release
 ```
 
-`<version>` is whatever `moon.mod` pins `moonbit-community/proton` to; the
-packagers read it from there rather than repeating it.
+This command uses the exact Proton revision pinned by the submodule and the
+same CEF declaration consumed by every platform packager.
 
 Build the frontend bundle, copy it to `frontend.js`, and build the native host:
 
@@ -375,7 +365,7 @@ assets/frontend.js   <- desktop/frontend.js
 builds the `openseek` engine from the monorepo's `cmd/openseek` source, and
 prepares the frontend and MoonBit toolchain inputs. It then delegates the App
 layout, CEF runtime, helper bundles, package metadata, signing, ZIP, and DMG to
-`proton_cli package`. The application-specific MoonBit artifacts are debug by
+the checkout-local `proton_cli package`. The application-specific MoonBit artifacts are debug by
 default, and the command produces `dist/SeekMoon.app`:
 
 ```sh
@@ -455,16 +445,12 @@ For an optimized AppImage, pass the package flag after Moon's `--` separator:
 moon run --target native package/linux -- --release
 ```
 
-Build requirements: `pkg-config` plus the GTK3 and WebKitGTK dev packages
-(`libgtk-3-dev` and `libwebkit2gtk-4.1-dev` on Debian/Ubuntu; `gtk3` and
-`webkit2gtk-4.1` on Arch), and `curl` (used to fetch `appimagetool` on first
-run if it is not already on `PATH`).
+Build requirements include `pkg-config`, GTK3 development files, `patchelf`,
+and `curl` (used to fetch `appimagetool` on first run if it is not already on
+`PATH`). CEF itself is installed from Proton's pinned runtime declaration.
 
 The AppImage bundles the desktop host, the engine, and the frontend assets,
-plus a read-only MoonBit toolchain seed. The first engine run initializes a
-writable toolchain copy under the per-user runtime directory and uses that as
-`MOON_HOME`. The AppImage still links against the system WebKitGTK: running it
-requires GTK3 and
-`libwebkit2gtk-4.1` installed on the host system, which is the standard
-arrangement for webview-based AppImages. If your system lacks FUSE2, run it
-with `APPIMAGE_EXTRACT_AND_RUN=1`.
+plus the source-matched CEF helper, CEF runtime, and a read-only MoonBit
+toolchain seed. The first engine run initializes a writable toolchain copy
+under the per-user runtime directory and uses that as `MOON_HOME`. If your
+system lacks FUSE2, run it with `APPIMAGE_EXTRACT_AND_RUN=1`.

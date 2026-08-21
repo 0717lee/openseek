@@ -4,3 +4,6 @@
 [submodule "editor/vscode"]
 	path = editor/vscode
 	url = https://github.com/microsoft/vscode.git
+[submodule "desktop/lepus"]
+	path = desktop/lepus
+	url = https://github.com/moonbit-community/proton.git

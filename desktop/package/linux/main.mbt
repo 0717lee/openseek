@@ -36,7 +36,7 @@ async fn build_outputs(
     ws,
     @ripgrep_assets.linux_x64_target(),
   )
-  @packaging.build_native_host(ws, release~)
+  @packaging.build_proton_application(ws, release~)
   @packaging.build_engine(ws, release~)
   (terminal_assets, ripgrep_assets)
 }
@@ -113,12 +113,15 @@ async fn copy_bundle_files(
     target,
     UsrBinPath + "/" + target.seed_relative_dir(),
   )
-  // Best-effort: ship the assembled CEF runtime (lib/libproton.so, the CEF
-  // shared library, bin/cef_process, resources). AppRun adds its lib dir to
-  // LD_LIBRARY_PATH. The exact layout/rpath needs validation on Linux.
+  // PR #129 keeps Proton's native implementation private in the host. Only
+  // the immutable third-party CEF runtime and source-built helper are shipped.
   @packaging.copy_tree(
     @packaging.proton_runtime_dist(ws).0,
-    ws.at(UsrBinPath + "/proton"),
+    ws.at(AppDirPath + "/usr/Resources/proton"),
+  )
+  @packaging.copy_file(
+    ws.proton_helper_binary(),
+    ws.at(UsrBinPath + "/cef_process"),
   )
 }
 
@@ -135,7 +138,11 @@ fn apprun_source() -> String {
     #|
     #|APP_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
     #|export PATH="$APP_DIR/usr/bin:$PATH"
-    #|export LD_LIBRARY_PATH="$APP_DIR/usr/bin/proton/lib:$APP_DIR/usr/bin/proton:${LD_LIBRARY_PATH:-}"
+    #|PROTON_ROOT="$APP_DIR/usr/Resources/proton"
+    #|export PROTON_RUNTIME_ROOT="$PROTON_ROOT"
+    #|export PROTON_HELPER_PATH="$APP_DIR/usr/bin/cef_process"
+    #|export LD_LIBRARY_PATH="$PROTON_ROOT/bin${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    #|export LD_PRELOAD="$PROTON_ROOT/bin/libcef.so${LD_PRELOAD:+:$LD_PRELOAD}"
     #|exec "$APP_DIR/usr/bin/openseek-desktop-bin" "$@"
     #|
   source
@@ -182,6 +189,7 @@ async fn write_bundle_metadata(ws : @packaging.Workspace) -> Unit {
       UsrBinPath + "/openseek-desktop-bin",
       UsrBinPath + "/openseek",
       UsrBinPath + "/rg",
+      UsrBinPath + "/cef_process",
     ],
     dir=ws.dir(),
   )

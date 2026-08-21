@@ -8,6 +8,7 @@ import {
   "moonbitlang/core/string",
   "moonbitlang/x/path",
   "openseek_desktop/internal/pathx",
+  "moonbit-community/proton_cefsetup/store" @cef_store,
   "tonyfettes/platform",
 }
 

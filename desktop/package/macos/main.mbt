@@ -17,6 +17,10 @@ const RipgrepLicenseDir : String = PackageInputRoot + "/licenses/ripgrep"
 const SigningEntitlementsPath : String = "package/macos/SeekMoon.entitlements"
 
 ///|
+const ProtonCompilerRoot : String = "target/proton-package-build/macos-" +
+  MinMacOSVersion
+
+///|
 /// Proton always produces the macOS app bundle. Keep only the optional archive
 /// choices here instead of carrying Proton's string-valued CLI arguments into
 /// the packaging model.
@@ -122,8 +126,7 @@ fn PackageOptions::parse(argv? : ArrayView[String]) -> PackageOptions raise {
 
 ///|
 /// Build the exact Proton command arguments for this package selection. The
-/// release flag must reach Proton even with `--no-build`, because Proton uses
-/// it to select the native host from its debug or release target directory.
+/// release flag selects the host and source-matched helper build mode.
 fn PackageOptions::proton_args(
   self : PackageOptions,
   workspace : @packaging.Workspace,
@@ -134,7 +137,6 @@ fn PackageOptions::proton_args(
     "package",
     "--config",
     "proton.project.json",
-    "--no-build",
     "--target",
     "app",
   ]
@@ -158,21 +160,15 @@ fn PackageOptions::proton_args(
 
 ///|
 /// Build the application-specific inputs Proton cannot infer from
-/// `proton.project.json`. The native host builds into the workspace's
-/// default `_build` tree in the selected mode, which is where
-/// `package --no-build` looks the executable up since lepus #116 removed
-/// the identifier-scoped package target directories.
+/// `proton.project.json`. Proton rebuilds the native host and matching helper
+/// during packaging; the early host build keeps failures ahead of the slower
+/// resource and toolchain staging work.
 async fn @packaging.Workspace::build_package_inputs(
   self : @packaging.Workspace,
   release~ : Bool,
 ) -> (@xterm_assets.Assets, @ripgrep_assets.Assets) {
-  let build_env = {
-    "MACOSX_DEPLOYMENT_TARGET": MinMacOSVersion,
-    "PROTON_PACKAGE_RPATH": "@executable_path/../Resources/proton/lib",
-  }
-  @packaging.ensure_cef_runtime(self, extra_env={
-    "MACOSX_DEPLOYMENT_TARGET": MinMacOSVersion,
-  })
+  let build_env = { "MACOSX_DEPLOYMENT_TARGET": MinMacOSVersion }
+  @packaging.ensure_cef_runtime(self)
   @packaging.build_frontend_bundle(self, release~)
   let terminal_assets = @xterm_assets.build(
     self,
@@ -259,6 +255,25 @@ async fn @packaging.Workspace::stage_package_inputs(
 }
 
 ///|
+/// Give Moon a compiler identity that changes with the deployment target.
+/// Moon's shared native cache does not otherwise distinguish two builds that
+/// use the same Clang with different `MACOSX_DEPLOYMENT_TARGET` values.
+async fn @packaging.Workspace::proton_package_compiler(
+  self : @packaging.Workspace,
+) -> String {
+  let compiler = ProtonCompilerRoot + "/clang"
+  @packaging.ensure_dir(self.at(ProtonCompilerRoot))
+  @packaging.write_text(
+    self.at(compiler),
+    "#!/bin/sh\nexec clang -mmacosx-version-min=" +
+    MinMacOSVersion +
+    " \"$@\"\n",
+  )
+  @packaging.run_checked("chmod", ["+x", compiler], dir=self.dir())
+  self.at(compiler)
+}
+
+///|
 /// Hand the prepared host and resource tree to Proton. From here Proton owns
 /// the App layout, CEF helper bundles, package metadata, signatures,
 /// notarization, ZIP, and DMG.
@@ -267,11 +282,11 @@ async fn @packaging.Workspace::package_with_proton(
   options : PackageOptions,
 ) -> Unit {
   let args = options.proton_args(self)
+  let compiler = self.proton_package_compiler()
   let package_env : Map[String, String] = {
+    "MACOSX_DEPLOYMENT_TARGET": MinMacOSVersion,
+    "MOON_CC": compiler,
     "PROTON_MACOS_ENTITLEMENTS": self.at(SigningEntitlementsPath),
-    // The OpenSeek moon.work root is above this embedded Proton checkout, so
-    // package cannot discover the runtime manifest by walking the workspace.
-    "PROTON_NATIVE_DIST": @packaging.proton_runtime_dist(self).0,
   }
   match options.sign.identity {
     Some(identity) => package_env["PROTON_MACOS_SIGNING_IDENTITY"] = identity

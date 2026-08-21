@@ -115,7 +115,9 @@ async fn build_outputs(
     ws,
     @ripgrep_assets.windows_x64_target(),
   )
-  @packaging.build_native_host(ws, release~, extra_args=["--warn-list", "-20"])
+  @packaging.build_proton_application(ws, release~, moon_args=[
+    "--warn-list", "-20",
+  ])
   @packaging.build_engine(ws, release~)
   (terminal_assets, ripgrep_assets)
 }
@@ -202,14 +204,9 @@ async fn copy_bundle_files(
 }
 
 ///|
-/// Stage the CEF runtime the way the Windows loader needs it. proton.dll
-/// (and libcef.dll, which it imports) must sit in the executable's own
-/// directory: both are in the import table, and the DLL search never
-/// descends into a subdirectory, so a nested layout fails before any
-/// MoonBit code runs. proton.dll then derives every other path from its
-/// own module directory — cef_process.exe beside itself, `Resources\`
-/// (with `locales\`) under the same root — so flattening `bin\` into the
-/// bundle root keeps those defaults working too.
+/// Stage the CEF-only runtime the way the private Windows loader expects it.
+/// CEF DLLs and data remain executable-adjacent, resources live below
+/// `Resources`, and the helper is built from the same Proton source as host.
 async fn stage_proton_runtime(ws : @packaging.Workspace) -> Unit {
   let dist = @packaging.proton_runtime_dist(ws).0
   let bin = dist + "/bin"
@@ -222,6 +219,10 @@ async fn stage_proton_runtime(ws : @packaging.Workspace) -> Unit {
     }
   }
   @packaging.copy_tree(dist + "/Resources", ws.at(BundleDir + "/Resources"))
+  @packaging.copy_file(
+    ws.proton_helper_binary(),
+    ws.at(BundleDir + "/cef_process.exe"),
+  )
 }
 
 ///|
