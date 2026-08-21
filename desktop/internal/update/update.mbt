@@ -5,14 +5,14 @@
 // caller reports it rather than reading a broken release as "no update".
 
 ///|
-/// The one manifest the app ever checks, served by the SeekMoon relay
-/// origin from its releases directory. There is no other stream and no
+/// The one manifest the app ever checks, served from the OSS-backed release
+/// CDN. There is no other stream and no
 /// override: the staging channel went with the Settings server selector
 /// (nothing could reach it anymore), and the old
 /// OPENSEEK_UPDATE_MANIFEST_URL environment variable is gone because an
 /// exported variable silently redirecting the check is exactly how a
 /// production install ends up answering from somewhere else.
-const ManifestUrl : String = "https://openseek-api.moonbitlang.cn/desktop/releases/latest.json"
+const ManifestUrl : String = "https://cli.moonbitlang.cn/openseek/desktop/releases/latest.json"
 
 ///|
 /// A newer hosted release: the version to announce, and — when the manifest
