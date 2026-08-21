@@ -1183,9 +1183,11 @@ async fn worktree_test_root(prefix : String) -> @pathx.Absolute {
 ///|
 /// Tests that redirect OPENSEEK_SESSION_ROOT share the process environment,
 /// so they run one at a time.
+#cfg(not(platform="windows"))
 let worktree_env_test_lock : @async.Mutex = Mutex()
 
 ///|
+#cfg(not(platform="windows"))
 fn restore_session_root_env(previous : String?) -> Unit {
   if previous is Some(value) {
     @sys.set_env_var("OPENSEEK_SESSION_ROOT", value)
@@ -1198,6 +1200,7 @@ fn restore_session_root_env(previous : String?) -> Unit {
 /// A host with no engine behind it: `live` names the conversations the pump
 /// would report a slot for, and every drained session is appended to
 /// `drained` instead of closing a process.
+#cfg(not(platform="windows"))
 fn test_host(
   live? : Array[String] = [],
   drained? : Array[String] = [],
@@ -1813,3 +1816,8 @@ pub extend WorktreeOwner with Debug::{to_repr}
 
 ///|
 pub extend WorktreeOwner with Eq::{equal, not_equal}
+
+///|
+/// Mark the platform-gated import alias as used: this binding is `_`-prefixed
+/// (never warned about) and its body is never evaluated.
+let _unused_imports : Unit = ignore(@sys.get_env_var)

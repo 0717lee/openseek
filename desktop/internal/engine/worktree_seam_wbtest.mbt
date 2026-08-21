@@ -8,6 +8,7 @@
 /// canonicalizes what it stores, so a fixture built from the symlinked
 /// spelling (`/tmp` on macOS) would compare unequal to every path the
 /// registry hands back.
+#cfg(not(platform="windows"))
 async fn worktree_test_root(prefix : String) -> @pathx.Absolute {
   @pathx.Path(@fs.realpath(@fs.tmpdir(prefix~))).resolve()
 }
@@ -32,6 +33,7 @@ async fn prepare_git_repo(dir : @pathx.Absolute) -> Unit {
 /// (`<workspace>/.openseek/worktrees.json`), so writing it directly keeps
 /// these engine-side tests free of a real git checkout — what they exercise
 /// is how the engine READS a placement.
+#cfg(not(platform="windows"))
 async fn stage_worktree_placements(
   workspace : @pathx.Absolute,
   rows : Array[(String, String, String?, String?)],

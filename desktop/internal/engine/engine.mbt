@@ -2041,6 +2041,7 @@ fn emit_compaction_failed(
 /// A ServeEngine handle for tests, with every bookkeeping field at its spawn
 /// default. Adding a field to ServeEngine updates this one site instead of
 /// every test that needs a handle.
+#cfg(not(platform="windows"))
 fn test_serve_engine(
   session : String,
   writer : @process.WriteToProcess,

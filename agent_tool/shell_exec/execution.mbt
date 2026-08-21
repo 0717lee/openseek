@@ -318,6 +318,7 @@ pub fn ShellExecution::over_inline_cap(self : ShellExecution) -> Bool {
 
 ///|
 /// The spill file's path, if output spilled to disk.
+#cfg(not(platform="windows"))
 fn ShellExecution::spill_path(self : ShellExecution) -> String? {
   self.sink.spill_path()
 }

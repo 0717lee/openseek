@@ -9,6 +9,7 @@ fn new_push_queue() -> @async.Queue[@terminal.TerminalPush] {
 }
 
 ///|
+#cfg(not(platform="windows"))
 async fn wait_for_output(
   pushes : @async.Queue[@terminal.TerminalPush],
   needle : String,
@@ -25,6 +26,7 @@ async fn wait_for_output(
 }
 
 ///|
+#cfg(not(platform="windows"))
 async fn wait_for_exit(pushes : @async.Queue[@terminal.TerminalPush]) -> Unit {
   for ;; {
     if pushes.get() is Exited(..) {

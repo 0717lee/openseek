@@ -4,9 +4,11 @@
 // rather than racing each other's environment.
 
 ///|
+#cfg(not(platform="windows"))
 let registry_env_test_lock : @async.Mutex = Mutex()
 
 ///|
+#cfg(not(platform="windows"))
 fn restore_env(name : String, previous : String?) -> Unit {
   if previous is Some(value) {
     @sys.set_env_var(name, value)
@@ -89,3 +91,8 @@ async test "a registry without the marker still receives the default workspace" 
   assert_true(initialize() is None)
   @fs.rmdir(dir, recursive=true)
 }
+
+///|
+/// Mark the platform-gated wbtest alias as used: this binding is `_`-prefixed
+/// (never warned about) and its body is never evaluated.
+let _unused_wbtest_imports : Unit = ignore(@sys.get_env_var)

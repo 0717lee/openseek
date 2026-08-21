@@ -31,3 +31,11 @@ async test "shell_stop errors on an unknown job id" {
     assert_true(output.content.contains("no background job"))
   })
 }
+
+///|
+/// Mark the platform-gated test imports as used: this binding is `_`-prefixed
+/// (never warned about) and its body is never evaluated.
+let _unused_test_imports : Unit = {
+  ignore(@agent_runtime.default_agent_event_capacity)
+  ignore(@async.sleep)
+}
