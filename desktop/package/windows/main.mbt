@@ -223,6 +223,7 @@ async fn stage_proton_runtime(ws : @packaging.Workspace) -> Unit {
     ws.proton_helper_binary(),
     ws.at(BundleDir + "/cef_process.exe"),
   )
+  @pe.set_windows_gui_subsystem(ws.at(BundleDir + "/cef_process.exe"))
 }
 
 ///|
