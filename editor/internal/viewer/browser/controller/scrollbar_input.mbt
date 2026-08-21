@@ -98,6 +98,44 @@ pub fn MouseHandler::hook_scrollable_scrollbar_input(
 }
 
 ///|
+/// Delegates a pointer gesture from an external vertical rail to the editor's
+/// retained scrollbar, matching Monaco's
+/// `AbstractScrollbar.delegatePointerDown`. The event target remains the
+/// external rail so pointer capture and dragging continue outside its bounds.
+pub fn MouseHandler::delegate_vertical_scrollbar_pointer_down(
+  self : MouseHandler,
+  event : @rdom.Event,
+) -> Unit {
+  if self.disposed {
+    return
+  }
+  guard event.to_mouse_event() is Some(mouse) else { return }
+  guard mouse.get_button() == 0 else { return }
+  let scrollable = self.view_helper.editor_scrollable
+  let track_rect = scrollable.track(true).get_bounding_client_rect()
+  let state = scrollable.state(true)
+  let pointer_position = mouse.get_client_y().to_double()
+  let slider_start = track_rect.get_top() + state.slider_position()
+  let slider_end = slider_start + state.slider_size()
+  event.prevent_default()
+  event.stop_propagation()
+  if pointer_position < slider_start || pointer_position > slider_end {
+    self.scrollable_track_jump(
+      scrollable,
+      EditorScrollableElement,
+      vertical=true,
+      mouse,
+    )
+  }
+  self.start_scrollable_drag(
+    scrollable,
+    EditorScrollableElement,
+    vertical=true,
+    mouse,
+  )
+}
+
+///|
 /// The editor's `ScrollableElement._onMouseWheel`: normalize into wheel
 /// units, classify the device, run the shared delta pipeline, target the
 /// future position, and choose Monaco's physical-wheel smooth path or its

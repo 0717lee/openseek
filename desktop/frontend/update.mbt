@@ -2182,7 +2182,7 @@ fn update_msg(
     // modified-side comment receives a concrete editor range, so reopening a
     // deleted-line chip cannot claim stale source columns.
     FileEditor(
-      UnifiedDiffCommentAdded(
+      DiffCommentAdded(
         file~,
         original_line_number~,
         modified_line_number~,
@@ -14917,11 +14917,11 @@ test "EditorCommentAdded attaches a deduplicated annotation chip" {
 }
 
 ///|
-test "UnifiedDiffCommentAdded preserves modified and original-only line identity" {
+test "DiffCommentAdded preserves modified and original-only line identity" {
   let dispatch = test_dispatch()
   let file = @pathx.Relative("src/main.mbt")
   let added : Msg = FileEditor(
-    UnifiedDiffCommentAdded(
+    DiffCommentAdded(
       file~,
       original_line_number=None,
       modified_line_number=Some(7),
@@ -14947,7 +14947,7 @@ test "UnifiedDiffCommentAdded preserves modified and original-only line identity
   )
   assert_eq(added_mentions[0].range, Some(@common.Range::Range(7, 1, 7, 16)))
   let deleted : Msg = FileEditor(
-    UnifiedDiffCommentAdded(
+    DiffCommentAdded(
       file~,
       original_line_number=Some(3),
       modified_line_number=None,
@@ -15055,7 +15055,7 @@ test "chip jumps relativize legacy absolute paths against the roots" {
       }),
       tree_open: false,
       explorer_mode: @fileeditor.ExplorerChanges,
-      review_view_mode: @fileeditor.ReviewUnifiedDiff,
+      review_view_mode: @fileeditor.ReviewDiff,
       changes_generation: 7,
       watch_generation: 11,
     },
@@ -15072,7 +15072,7 @@ test "chip jumps relativize legacy absolute paths against the roots" {
   assert_true(@dock.active_file(next.dock) is Some(Relative("src/main.mbt")))
   assert_false(next.file_panel.tree_open)
   assert_true(next.file_panel.explorer_mode is @fileeditor.ExplorerChanges)
-  assert_true(next.file_panel.review_view_mode is @fileeditor.ReviewUnifiedDiff)
+  assert_true(next.file_panel.review_view_mode is @fileeditor.ReviewDiff)
   // The eager re-root retains 7. The jump keeps the explorer hidden while the
   // file is active, so Changes waits until the pane is shown before refreshing.
   assert_true(next.file_panel.changes_generation == 7)

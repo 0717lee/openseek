@@ -9,7 +9,7 @@ import {
 // Values
 pub fn changes_to_decorations(Array[@diff.DetailedLineRangeMapping]) -> Array[@model.ModelDeltaDecoration]
 
-pub fn compute_changes(Array[String], Array[String], ignore_trim_whitespace? : Bool, max_computation_time_ms? : Int) -> Array[@diff.DetailedLineRangeMapping]
+pub fn compute_changes(Array[String], Array[String], ignore_trim_whitespace? : Bool) -> Array[@diff.DetailedLineRangeMapping]
 
 // Errors
 

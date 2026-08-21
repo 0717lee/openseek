@@ -3,7 +3,7 @@ test "new reviews default to the full diff" {
   let path = @pathx.Relative("src/main.mbt")
   let change = test_modified_change(path)
   let state = owned_state()
-  assert_true(state.review_view_mode is ReviewUnifiedDiff)
+  assert_true(state.review_view_mode is ReviewDiff)
   assert_true(state.review_diff_layout is ReviewSideBySide)
   let (_, opened) = open_changed_document(
     test_emit(),
@@ -14,7 +14,7 @@ test "new reviews default to the full diff" {
   )
   assert_true(
     opened.docs.get(path)
-    is Some({ review: Some({ view_mode: ReviewUnifiedDiff, .. }), .. }),
+    is Some({ review: Some({ view_mode: ReviewDiff, .. }), .. }),
   )
 }
 
@@ -29,19 +29,19 @@ test "full diff layout toggles independently and source mode preserves it" {
       generation: 1,
       working_generation: 1,
       baseline: ReviewContent("old source"),
-      view_mode: ReviewUnifiedDiff,
+      view_mode: ReviewDiff,
       selected,
     }),
   }
   let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
-  let (_, unified) = update(
+  let (_, inline) = update(
     test_emit(),
     ToggleReviewDiffLayout,
     { ..owned_state(), docs, },
     ctx,
   )
-  assert_true(unified.review_diff_layout is ReviewUnified)
-  let source_docs = unified.docs.copy()
+  assert_true(inline.review_diff_layout is ReviewInline)
+  let source_docs = inline.docs.copy()
   source_docs[path] = {
     ..source_docs.get(path).unwrap(),
     review: source_docs.get(path).unwrap().review.map(review => {
@@ -52,10 +52,10 @@ test "full diff layout toggles independently and source mode preserves it" {
   let (_, unchanged) = update(
     test_emit(),
     ToggleReviewDiffLayout,
-    { ..unified, docs: source_docs },
+    { ..inline, docs: source_docs },
     ctx,
   )
-  assert_true(unchanged.review_diff_layout is ReviewUnified)
+  assert_true(unchanged.review_diff_layout is ReviewInline)
 }
 
 ///|
@@ -86,10 +86,10 @@ test "full diff remains selected when opening another changed file" {
     { ..owned_state(), docs, review_view_mode: ReviewSource },
     first_ctx,
   )
-  assert_true(full_diff.review_view_mode is ReviewUnifiedDiff)
+  assert_true(full_diff.review_view_mode is ReviewDiff)
   assert_true(
     full_diff.docs.get(first_path)
-    is Some({ review: Some({ view_mode: ReviewUnifiedDiff, .. }), .. }),
+    is Some({ review: Some({ view_mode: ReviewDiff, .. }), .. }),
   )
 
   let second_ctx = {
@@ -106,7 +106,7 @@ test "full diff remains selected when opening another changed file" {
   )
   assert_true(
     switched.docs.get(second_path)
-    is Some({ review: Some({ view_mode: ReviewUnifiedDiff, .. }), .. }),
+    is Some({ review: Some({ view_mode: ReviewDiff, .. }), .. }),
   )
 
   let loaded_docs = switched.docs.copy()
@@ -116,7 +116,7 @@ test "full diff remains selected when opening another changed file" {
       generation: switched.review_generation,
       working_generation: switched.review_generation,
       baseline: ReviewContent("second old source"),
-      view_mode: ReviewUnifiedDiff,
+      view_mode: ReviewDiff,
       selected: second_change,
     }),
   }

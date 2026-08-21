@@ -1,6 +1,6 @@
-// Compile-only contract for the supported Viewer facade. The imports and
-// inferred browser-owned values below keep the public embedding boundary
-// checked by the real MoonBit package.
+// Compile-only contract for the independent Viewer, MarkdownViewer, and
+// DiffEditor facades. The imports and inferred browser-owned values below keep
+// the public embedding boundary checked by the real MoonBit package.
 
 ///|
 fn contract_disposable() -> @base_common.Disposable {
@@ -170,23 +170,90 @@ fn compile_external_viewer_api_contract(
   require_contract_element(viewer.get_container_dom_node())
   require_contract_optional_element(viewer.get_dom_node())
 
-  // The diff facade is the same external composition over two borrowed
-  // models and one optionally shared service bundle.
+  // Rich Markdown is a separate explicit surface, never a Viewer presentation
+  // union. The model carries its resource semantics at the host boundary.
+  let markdown_host = @rdom.document().create_element("div")
+  let markdown_options = @viewer.MarkdownViewerOptions::default()
+    .with_placeholder("Loading external Markdown model...")
+    .with_theme("light")
+    .with_show_unused(false)
+  let markdown_viewer = @viewer.MarkdownViewer::create(
+    markdown_host,
+    services~,
+    options=markdown_options,
+  )
+  let markdown_model = @viewer.MarkdownViewerModel(model, MoonBitMarkdown)
+  let markdown_model_subscription = markdown_viewer.on_did_change_model(
+    require_contract_model_event,
+  )
+  let markdown_content_subscription = markdown_viewer.on_did_change_model_content(_ => {
+      ()
+    },
+  )
+  let markdown_scroll_subscription = markdown_viewer.on_did_scroll_change(() => {
+    ()
+  })
+  let markdown_dispose_subscription = markdown_viewer.on_did_dispose(() => ())
+  markdown_viewer.set_model(Some(markdown_model)) |> ignore
+  // Exact same model + resource kind is a no-op and must not retire the active
+  // caller-owned model.
+  markdown_viewer.set_model(Some(markdown_model)) |> ignore
+  markdown_viewer.get_model() |> ignore
+  markdown_viewer.get_options() |> ignore
+  markdown_viewer.update_options(markdown_options)
+  let markdown_view_state = markdown_viewer.save_view_state()
+  markdown_viewer.restore_view_state(markdown_view_state)
+  markdown_viewer.reveal_range_in_center(Range(1, 1, 1, 1))
+  markdown_viewer.toggle_section_at(0) |> ignore
+  markdown_viewer.collapsed_sections() |> ignore
+  markdown_viewer.get_id() |> ignore
+  markdown_viewer.get_content_height() |> ignore
+  markdown_viewer.get_content_width() |> ignore
+  require_contract_element(markdown_viewer.get_container_dom_node())
+  require_contract_optional_element(markdown_viewer.get_dom_node())
+  markdown_viewer.handle_initialized()
+  markdown_viewer.layout()
+  markdown_viewer.focus()
+  markdown_viewer.has_text_focus() |> ignore
+  markdown_viewer.set_model(None) |> ignore
+  markdown_model_subscription.dispose()
+  markdown_content_subscription.dispose()
+  markdown_scroll_subscription.dispose()
+  markdown_dispose_subscription.dispose()
+  markdown_viewer.dispose()
+
+  // DiffEditor owns two internal code-editor kernels and one shared diff
+  // ViewModel. Algorithm selection remains a host/provider concern.
   let diff_host = @rdom.document().create_element("div")
-  let diff_viewer = @viewer.DiffViewer::create(
+  let diff_options = @viewer.DiffEditorOptions(
+    editor_options=options,
+    layout=SideBySide,
+  )
+  let diff_editor = @viewer.DiffEditor::create(
     diff_host,
     services~,
-    options~,
-    render_mode=SideBySide,
+    options=diff_options,
   )
-  diff_viewer.get_render_mode() |> ignore
-  diff_viewer.set_render_mode(Unified)
-  diff_viewer.set_model(Some(DiffEditorModel(model, model)))
-  diff_viewer.set_render_mode(SideBySide)
-  diff_viewer.get_model() |> ignore
-  diff_viewer.layout()
-  diff_viewer.clear()
-  diff_viewer.dispose()
+  let diff_subscription = diff_editor.on_did_update_diff(() => ())
+  let diff_model = @viewer.DiffEditorModel(model, model)
+  diff_editor.set_model(Some(diff_model)) |> ignore
+  // Exact same pair returns None; callers therefore never dispose active
+  // models while handling a no-op replacement.
+  diff_editor.set_model(Some(diff_model)) |> ignore
+  diff_editor.get_model() |> ignore
+  diff_editor.get_diff() |> ignore
+  diff_editor.is_diff_up_to_date() |> ignore
+  diff_editor.get_layout() |> ignore
+  diff_editor.reveal_next_change() |> ignore
+  diff_editor.reveal_previous_change() |> ignore
+  diff_editor.update_options(diff_options.with_layout(Inline))
+  diff_editor.focus()
+  diff_editor.layout()
+  // A real clear returns the already-detached pair to its caller. This
+  // compile-only contract intentionally leaves the borrowed model alive.
+  diff_editor.set_model(None) |> ignore
+  diff_subscription.dispose()
+  diff_editor.dispose()
 
   // Explicit bundles and concrete backings remain caller-owned.
   services.dispose()

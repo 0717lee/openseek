@@ -19,6 +19,7 @@ pub(all) struct ViewZone {
   mut dom_node : @rdom.Element
   mut margin_dom_node : @rdom.Element?
   mut on_dom_node_top : ((Double) -> Unit raise)?
+  mut on_dom_node_layout : ((Bool, Double) -> Unit raise)?
   mut on_computed_height : ((Double) -> Unit raise)?
 }
 
@@ -39,6 +40,7 @@ pub fn ViewZone::ViewZone(
   min_width_in_px? : Double,
   margin_dom_node? : @rdom.Element,
   on_dom_node_top? : (Double) -> Unit raise,
+  on_dom_node_layout? : (Bool, Double) -> Unit raise,
   on_computed_height? : (Double) -> Unit raise,
 ) -> ViewZone {
   {
@@ -55,6 +57,7 @@ pub fn ViewZone::ViewZone(
     dom_node,
     margin_dom_node,
     on_dom_node_top,
+    on_dom_node_layout,
     on_computed_height,
   }
 }

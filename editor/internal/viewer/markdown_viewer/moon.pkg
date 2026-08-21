@@ -1,0 +1,23 @@
+import {
+  "moonbitlang/editor/base/browser" @base_browser,
+  "moonbitlang/editor/base/common" @base_common,
+  "moonbitlang/editor/language",
+  "moonbitlang/editor/platform/log",
+  "moonbitlang/editor/internal/viewer/browser/markdown_document",
+  "moonbitlang/editor/internal/viewer/contrib/contextmenu/browser" @contextmenu_browser,
+  "moonbitlang/editor/internal/viewer/contrib/goto_symbol",
+  "moonbitlang/editor/internal/viewer/contrib/hover",
+  "moonbitlang/editor/internal/viewer/contrib/hover/browser" @hover_browser,
+  "moonbitlang/editor/internal/viewer/contrib/references",
+  "moonbitlang/editor/internal/viewer/contrib/references/browser" @references_browser,
+  "moonbitlang/editor/internal/viewer/markdown" @markdown_core,
+  "moonbitlang/editor/viewer/common/editor_api",
+  "moonbitlang/editor/viewer/common/languages",
+  "moonbitlang/editor/viewer/common/markers",
+  "moonbitlang/editor/viewer/common/model",
+  "moonbitlang/editor/viewer/common/navigation_api",
+  "moonbit-community/rabbita/dom" @rdom,
+  "moonbit-community/rabbita/js",
+}
+
+supported_targets = "js"

@@ -3,7 +3,12 @@ package "moonbitlang/editor/internal/viewer/contrib/references/browser"
 
 import {
   "moonbit-community/rabbita/dom",
+  "moonbitlang/editor/base/common",
+  "moonbitlang/editor/internal/viewer/contrib/goto_symbol",
   "moonbitlang/editor/internal/viewer/contrib/references",
+  "moonbitlang/editor/language",
+  "moonbitlang/editor/viewer/common/model",
+  "moonbitlang/editor/viewer/common/navigation_api",
 }
 
 // Values
@@ -12,6 +17,45 @@ pub let references_peek_height_in_lines : Int
 // Errors
 
 // Types and methods
+pub struct ReferencesController {
+  // private fields
+}
+pub fn ReferencesController::ReferencesController(ReferencesPeekHost, ReferencesPeekPreviewFactory, resolver? : @navigation_api.TextModelResolverHandle, (async () -> Unit noraise) -> Unit) -> Self
+pub fn ReferencesController::close(Self, restore_focus~ : Bool) -> Unit
+pub fn ReferencesController::contains_focus(Self) -> Bool
+pub fn ReferencesController::dispose(Self) -> Unit
+pub fn ReferencesController::phase(Self) -> @references.ReferencesPeekPhase
+pub fn ReferencesController::set_task_launcher(Self, (async () -> Unit noraise) -> Unit) -> Unit
+pub fn ReferencesController::toggle_locations(Self, @goto_symbol.SymbolNavigationAnchor, @references.ReferencesPeekMode, Array[@language.Location]) -> Bool
+
+pub(all) struct ReferencesPeekHost {
+  is_anchor_current : (@goto_symbol.SymbolNavigationAnchor) -> Bool
+  mount : (@dom.Element, @goto_symbol.SymbolNavigationAnchor) -> ReferencesPeekMount?
+  reveal_anchor : (@goto_symbol.SymbolNavigationAnchor) -> Unit
+  restore_source_focus : () -> Unit
+  open_location : async (@language.Location, @navigation_api.OpenLocationMode, String) -> Bool noraise
+  show_message : (@goto_symbol.SymbolNavigationAnchor, String) -> Unit
+}
+
+pub struct ReferencesPeekMount {
+  // private fields
+}
+pub fn ReferencesPeekMount::ReferencesPeekMount(is_current~ : () -> Bool, dispose~ : () -> Unit) -> Self
+pub fn ReferencesPeekMount::dispose(Self) -> Unit
+pub fn ReferencesPeekMount::is_current(Self) -> Bool
+
+pub struct ReferencesPeekPreview {
+  // private fields
+}
+pub fn ReferencesPeekPreview::ReferencesPeekPreview(contains_focus~ : () -> Bool, focus~ : () -> Unit, dispose~ : () -> Unit) -> Self
+pub fn ReferencesPeekPreview::contains_focus(Self) -> Bool
+pub fn ReferencesPeekPreview::dispose(Self) -> Unit
+pub fn ReferencesPeekPreview::focus(Self) -> Unit
+
+pub(all) struct ReferencesPeekPreviewFactory {
+  create : (@dom.Element, @model.TextModel, @common.Range, Array[@common.Range], @references.ReferencesPeekMode) -> ReferencesPeekPreview?
+}
+
 pub struct ReferencesPeekWidget {
   // private fields
 }

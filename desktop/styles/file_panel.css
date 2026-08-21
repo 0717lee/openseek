@@ -1903,6 +1903,41 @@ button.git-history-file:focus-visible {
   background: color-mix(in srgb, var(--color-accent) 18%, transparent);
 }
 
+.review-diff-mode-toolbar {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.review-diff-mode-toolbar.hidden,
+.review-diff-mode-status.hidden {
+  display: none;
+}
+
+.review-diff-mode-toolbar .review-badge {
+  max-width: none;
+  padding-inline: 5px;
+}
+
+.review-diff-mode-toolbar .review-badge.active {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+
+.review-diff-mode-toolbar .review-badge:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.review-diff-mode-status {
+  max-width: 220px;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+}
+
 .review-layout-toggle {
   display: grid;
   place-items: center;
@@ -1930,7 +1965,7 @@ button.git-history-file:focus-visible {
   border-left: 1px solid currentColor;
 }
 
-.review-layout-icon.unified::after {
+.review-layout-icon.inline::after {
   content: "";
   position: absolute;
   top: 2px;

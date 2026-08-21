@@ -70,6 +70,18 @@ pub fn GlobalPointerMoveMonitor::dispose(Self) -> Unit
 pub fn GlobalPointerMoveMonitor::start_monitoring(Self, @dom.Element, Int, Int, (@dom.MouseEvent) -> Unit, (@dom.Event?) -> Unit) -> Unit
 pub fn GlobalPointerMoveMonitor::stop_monitoring(Self, Bool, browser_event? : @dom.Event) -> Unit
 
+pub struct RunOnceScheduler {
+  delay_ms : Int
+  mut handle : @common.Disposable?
+  schedule_timeout : (() -> Unit, Int) -> @common.Disposable
+}
+pub fn RunOnceScheduler::RunOnceScheduler(Int) -> Self
+pub fn RunOnceScheduler::cancel(Self) -> Unit
+pub fn RunOnceScheduler::dispose(Self) -> Unit
+pub fn RunOnceScheduler::is_scheduled(Self) -> Bool
+pub fn RunOnceScheduler::new_with_timer(Int, (() -> Unit, Int) -> @common.Disposable) -> Self
+pub fn RunOnceScheduler::schedule(Self, () -> Unit) -> Unit
+
 pub struct StandardMouseEvent {
   browser_event : @dom.MouseEvent
   left_button : Bool

@@ -157,6 +157,30 @@ test "ViewLayout incremental whitespace facade updates height and preserves IDs"
 }
 
 ///|
+test "retained whitespace min width updates the horizontal extent transactionally" {
+  let layout = ViewLayout(line_height=10, line_count=3)
+  layout.set_viewport_size(width=100.0, height=100.0) |> ignore
+  layout.set_max_line_width(20.0) |> ignore
+  let id = Ref("")
+  layout.change_whitespace(accessor => {
+    id.val = accessor.insert_whitespace(1, 0, 10.0, 0.0)
+  })
+  |> ignore
+  assert_eq(layout.get_content_width(), 34.0)
+  layout.change_whitespace(accessor => {
+    accessor.change_one_whitespace(id.val, 1, 10.0, new_min_width=250.0)
+  })
+  |> ignore
+  assert_eq(layout.get_whitespaces()[0].min_width, 250)
+  assert_eq(layout.get_content_width(), 250.0)
+  layout.change_whitespace(accessor => {
+    accessor.change_one_whitespace(id.val, 1, 10.0, new_min_width=0.0)
+  })
+  |> ignore
+  assert_eq(layout.get_content_width(), 34.0)
+}
+
+///|
 test "ViewLayout exposes ID whitespace viewport and explicit scrollTop data" {
   let layout = ViewLayout(line_height=10, line_count=20)
   layout.set_viewport_size(width=100.0, height=25.0) |> ignore

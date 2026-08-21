@@ -174,6 +174,16 @@ pub fn View::change_view_zones(
 }
 
 ///|
+/// Read-only geometry seam for owners that coordinate multiple ordinary
+/// viewers. Each tuple is `(zone id, model after-line, actual pixel height)`;
+/// mutable ViewZone registration and ViewLayout remain encapsulated here.
+pub fn View::view_zone_layout_infos(
+  self : View,
+) -> Array[(String, Int, Double)] {
+  self.view_zones.layout_infos()
+}
+
+///|
 /// Live mouse-suppression delegation used by `PointerHandlerHelper`.
 pub fn View::should_suppress_mouse_down_on_view_zone(
   self : View,

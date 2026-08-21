@@ -17,18 +17,18 @@
 ///|
 /// `QuickDiffModel._diff` (`quickDiffModel.ts:348`) reduced: computes the
 /// line-level changes between the original document and the modified one.
-/// Defaults mirror the source's effective configuration: a 1000ms budget
-/// (`quickDiffModel.ts:43`) and `scm.diffDecorationsIgnoreTrimWhitespace`'s
-/// `'false'` default (`scm.contribution.ts:239`).
+/// The trim-whitespace default mirrors
+/// `scm.diffDecorationsIgnoreTrimWhitespace`'s `'false'` default
+/// (`scm.contribution.ts:239`). The local Core provider is synchronous and
+/// has no wall-clock budget option.
 pub fn compute_changes(
   original_lines : Array[String],
   modified_lines : Array[String],
   ignore_trim_whitespace? : Bool = false,
-  max_computation_time_ms? : Int = 1000,
 ) -> Array[@diff.DetailedLineRangeMapping] {
-  @diff.get_default().compute_diff(original_lines, modified_lines, {
-    ignore_trim_whitespace,
-    max_computation_time_ms,
-    compute_moves: false,
-  }).changes
+  @diff.CoreDocumentDiffProvider().compute_diff(
+    TextSnapshot(original_lines.join("\n")),
+    TextSnapshot(modified_lines.join("\n")),
+    { ignore_trim_whitespace, },
+  ).changes
 }

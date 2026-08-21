@@ -1,4 +1,4 @@
-// White-box behavior tests for the Core-diff-backed `DefaultLinesDiffComputer`.
+// White-box behavior tests for `CoreDocumentDiffProvider`.
 //
 // The engine deviates from Monaco's by design (see the impl file header), so
 // unlike the `*_reference_test.mbt` suites these do NOT byte-compare against
@@ -11,19 +11,47 @@
 // plus exact hunks on fixtures where the minimal diff is unambiguous.
 
 ///|
-let default_options : LinesDiffComputerOptions = {
-  ignore_trim_whitespace: false,
-  max_computation_time_ms: 0,
-  compute_moves: false,
-}
+let default_options : DocumentDiffOptions = { ignore_trim_whitespace: false }
 
 ///|
 fn compute(
   original : Array[String],
   modified : Array[String],
-  options? : LinesDiffComputerOptions = default_options,
-) -> LinesDiff {
-  get_default().compute_diff(original, modified, options)
+  options? : DocumentDiffOptions = default_options,
+) -> DocumentDiff {
+  get_core_document_diff_provider().compute_diff(
+    TextSnapshot(original.join("\n")),
+    TextSnapshot(modified.join("\n")),
+    options,
+  )
+}
+
+///|
+fn compute_with_provider(
+  provider : &DocumentDiffProvider,
+  original : @model.TextSnapshot,
+  modified : @model.TextSnapshot,
+  options : DocumentDiffOptions,
+) -> DocumentDiff raise {
+  provider.compute_diff(original, modified, options)
+}
+
+///|
+test "Core provider satisfies the public provider contract" {
+  let core = CoreDocumentDiffProvider()
+  let provider : &DocumentDiffProvider = core
+  let result = try! compute_with_provider(
+    provider,
+    TextSnapshot("same\nbefore"),
+    TextSnapshot("same\nafter"),
+    default_options,
+  )
+  assert_eq(result.changes.length(), 1)
+  assert_true(result.additional_alignments.is_empty())
+  let notifications = Ref(0)
+  let subscription = provider.on_did_change(() => notifications.val += 1)
+  subscription.dispose()
+  assert_eq(notifications.val, 0)
 }
 
 ///|
@@ -116,7 +144,7 @@ fn apply_changes(
 fn assert_valid(
   original : Array[String],
   modified : Array[String],
-  result : LinesDiff,
+  result : DocumentDiff,
 ) -> Unit raise {
   for i in 1..<result.changes.length() {
     let m1 = result.changes[i - 1]
@@ -165,20 +193,103 @@ test "repeated equal lines still yield a valid separated script" {
 }
 
 ///|
-test "default computation budget still yields a correct script" {
-  // A non-zero budget takes Core diff's default cutoff path
-  // (suboptimal-but-correct); correctness must hold regardless.
+test "large Core Myers calculation still yields a correct script" {
   let original : Array[String] = []
   let modified : Array[String] = []
   for i in 0..<200 {
     original.push("line \{i}")
     modified.push(if i % 7 == 0 { "line \{i} changed" } else { "line \{i}" })
   }
-  let result = compute(original, modified, options={
-    ignore_trim_whitespace: false,
-    max_computation_time_ms: 1000,
-    compute_moves: false,
-  })
-  assert_false(result.hit_timeout)
+  let result = compute(original, modified)
   assert_valid(original, modified, result)
+}
+
+///|
+test "trim whitespace policy ignores only line edges" {
+  let original = ["fn main {", "value + other", "}"]
+  let indentation_only = [" fn main { ", "  value + other\t", "}"]
+  let interior_change = ["fn main {", "value  + other", "}"]
+  let options : DocumentDiffOptions = { ignore_trim_whitespace: true }
+  assert_true(compute(original, indentation_only, options~).changes.is_empty())
+  assert_eq(compute(original, interior_change, options~).changes.length(), 1)
+}
+
+///|
+test "trim whitespace is excluded from mixed character refinements" {
+  let result = compute(["  x=1"], ["x=2  "], options={
+    ignore_trim_whitespace: true,
+  })
+  guard result.changes is [change] && change.inner_changes is Some([inner]) else {
+    fail("expected one content-only inner change")
+  }
+  assert_eq(inner.original, Range(1, 5, 1, 6))
+  assert_eq(inner.modified, Range(1, 3, 1, 4))
+}
+
+///|
+test "trim whitespace treats whitespace-only and empty documents as equal" {
+  let ignore : DocumentDiffOptions = { ignore_trim_whitespace: true }
+  let preserve : DocumentDiffOptions = { ignore_trim_whitespace: false }
+  assert_true(compute(["   "], [""], options=ignore).changes.is_empty())
+  assert_true(compute([""], ["\t"], options=ignore).changes.is_empty())
+  assert_eq(compute(["   "], [""], options=preserve).changes.length(), 1)
+  assert_eq(compute([""], ["\t"], options=preserve).changes.length(), 1)
+}
+
+///|
+test "snapshot normalization makes CRLF and LF equal" {
+  let provider = CoreDocumentDiffProvider()
+  let result = provider.compute_diff(
+    TextSnapshot("one\r\ntwo\r\n"),
+    TextSnapshot("one\ntwo\n"),
+    default_options,
+  )
+  assert_true(result.changes.is_empty())
+}
+
+///|
+test "combining marks and ZWJ sequences keep UTF-16 range coordinates" {
+  let combining = compute(["cafe\u{301}"], ["cafe"])
+  guard combining.changes[0].inner_changes is Some(combining_changes) else {
+    fail("expected combining-mark refinement")
+  }
+  assert_eq(combining_changes[0].original, Range(1, 5, 1, 6))
+  assert_eq(combining_changes[0].modified, Range(1, 5, 1, 5))
+
+  let zwj = compute(["x👩‍💻y"], ["x👨‍💻y"])
+  guard zwj.changes[0].inner_changes is Some(zwj_changes) else {
+    fail("expected ZWJ refinement")
+  }
+  assert_eq(zwj_changes[0].original, Range(1, 2, 1, 4))
+  assert_eq(zwj_changes[0].modified, Range(1, 2, 1, 4))
+}
+
+///|
+test "tabs CJK and RTL text keep logical UTF-16 columns" {
+  let cjk = compute(["\t中文x"], ["\t中語x"])
+  guard cjk.changes[0].inner_changes is Some(cjk_changes) else {
+    fail("expected CJK refinement")
+  }
+  assert_eq(cjk_changes[0].original, Range(1, 3, 1, 4))
+  assert_eq(cjk_changes[0].modified, Range(1, 3, 1, 4))
+
+  let rtl = compute(["אבג"], ["אדג"])
+  guard rtl.changes[0].inner_changes is Some(rtl_changes) else {
+    fail("expected RTL refinement")
+  }
+  assert_eq(rtl_changes[0].original, Range(1, 2, 1, 3))
+  assert_eq(rtl_changes[0].modified, Range(1, 2, 1, 3))
+}
+
+///|
+test "external-provider mapping shapes are directly constructible" {
+  let line_mapping = LineRangeMapping(LineRange(2, 3), LineRange(4, 5))
+  let inner = RangeMapping(Range(2, 1, 2, 2), Range(4, 1, 4, 3))
+  let detailed = DetailedLineRangeMapping(
+    line_mapping.original,
+    line_mapping.modified,
+    Some([inner]),
+  )
+  assert_eq(detailed.line_mapping(), line_mapping)
+  assert_eq(detailed.inner_changes, Some([inner]))
 }

@@ -67,10 +67,15 @@ fn memory_workspace() -> MemoryWorkspace {
     memory_file("broken.mbt", "broken.mbt"),
     memory_file("comments-only.mbt", "comments-only.mbt"),
     memory_file("comments.mbt", "comments.mbt"),
+    memory_file("alignment-zones.mbt", "alignment-zones.mbt"),
+    memory_file("fragmented-large.mbt", "fragmented-large.mbt"),
     memory_file("large.mbt", "large.mbt"),
+    memory_file("navigation-anchors.mbt", "navigation-anchors.mbt"),
     memory_file("tabbed-deletion.mbt", "tabbed-deletion.mbt"),
     memory_file("oversized-line.mbt", "oversized-line.mbt"),
     memory_file("README.md", "README.md"),
+    memory_file("Guide.MD", "Guide.MD"),
+    memory_file("tour.MBT.MD", "tour.MBT.MD"),
     memory_file("moon.mod", "moon.mod"),
   ]
   directories["\{memory_root}/src"] = [
@@ -89,16 +94,36 @@ fn memory_workspace() -> MemoryWorkspace {
     "fn review_value() -> Int {", "", "  // updated explanation", "  new_value()",
     "}",
   ].join("\n")
+  documents["\{memory_root}/alignment-zones.mbt"] = alignment_diff_document(
+    false,
+  )
   documents["\{memory_root}/large.mbt"] = large_diff_document("modified")
+  documents["\{memory_root}/fragmented-large.mbt"] = fragmented_deletion_document(
+    false,
+  )
+  documents["\{memory_root}/navigation-anchors.mbt"] = [
+    "fn navigation_anchors() {", "  let stable_head = 0", "  let stable_middle_one = 2",
+    "  let stable_middle_two = 3", "  let inserted_only = 4", "  let stable_tail = 5",
+    "}",
+  ].join("\n")
   documents["\{memory_root}/tabbed-deletion.mbt"] = "let retained = 1\n"
   documents["\{memory_root}/oversized-line.mbt"] = oversized_diff_line("m")
   documents["\{memory_root}/README.md"] = (
     #|# Embedded Markdown document
     #|
-    #|This URI-backed in-memory model is rendered directly by the public **Viewer**.
+    #|This URI-backed in-memory model is rendered directly by the public **MarkdownViewer**.
     #|
-    #|- No workbench presentation branch participates.
+    #|- The embedding host selects the Markdown presentation explicitly.
     #|- No remote protocol or WebSocket participates.
+    #|
+  )
+  documents["\{memory_root}/Guide.MD"] = "# Uppercase Markdown\n"
+  documents["\{memory_root}/tour.MBT.MD"] = (
+    #|# MoonBit Markdown
+    #|
+    #|```mbt check
+    #|let answer = 42
+    #|```
     #|
   )
   documents["\{memory_root}/moon.mod"] = "name = \"embedded-example\"\n"
@@ -124,9 +149,20 @@ fn memory_workspace() -> MemoryWorkspace {
   original_documents["\{memory_root}/comments.mbt"] = [
     "fn review_value() -> Int {", "  // obsolete explanation", "  old_value()", "}",
   ].join("\n")
+  original_documents["\{memory_root}/alignment-zones.mbt"] = alignment_diff_document(
+    true,
+  )
   original_documents["\{memory_root}/large.mbt"] = large_diff_document(
     "original",
   )
+  original_documents["\{memory_root}/fragmented-large.mbt"] = fragmented_deletion_document(
+    true,
+  )
+  original_documents["\{memory_root}/navigation-anchors.mbt"] = [
+    "fn navigation_anchors() {", "  let stable_head = 0", "  let deleted_only = 1",
+    "  let stable_middle_one = 2", "  let stable_middle_two = 3", "  let stable_tail = 5",
+    "}",
+  ].join("\n")
   original_documents["\{memory_root}/tabbed-deletion.mbt"] = "\t".repeat(160) +
     "deleted_tail\n"
   original_documents["\{memory_root}/oversized-line.mbt"] = oversized_diff_line(
@@ -135,7 +171,16 @@ fn memory_workspace() -> MemoryWorkspace {
   original_documents["\{memory_root}/README.md"] = (
     #|# Embedded document
     #|
-    #|This in-memory model is rendered by the public Viewer.
+    #|This in-memory model is rendered by the public MarkdownViewer.
+    #|
+  )
+  original_documents["\{memory_root}/Guide.MD"] = "# Old uppercase Markdown\n"
+  original_documents["\{memory_root}/tour.MBT.MD"] = (
+    #|# Old MoonBit Markdown
+    #|
+    #|```mbt check
+    #|let answer = 41
+    #|```
     #|
   )
   original_documents["\{memory_root}/moon.mod"] = ""
@@ -163,13 +208,149 @@ fn memory_workspace() -> MemoryWorkspace {
 
 ///|
 /// A valid sub-1-MiB source pair with enough short changed lines to exercise
-/// the DiffViewer's ordinary Viewer virtualization.
+/// the DiffEditor's two code-editor kernels and viewport virtualization.
 fn large_diff_document(prefix : String) -> String {
   let content = StringBuilder()
   for index in 0..<2600 {
     content.write_string("let \{prefix}_\{index} = \{index}\n")
   }
   content.to_string()
+}
+
+///|
+/// Twenty independent 130-line deletions separated by stable anchors. This
+/// prevents a renderer from satisfying the DOM budget only for one giant hunk
+/// while eagerly retaining every individually short deleted block.
+fn fragmented_deletion_document(original : Bool) -> String {
+  let content = StringBuilder()
+  for fragment in 0..<20 {
+    if original {
+      for line in 0..<130 {
+        content.write_string(
+          "let fragment_\{fragment}_deleted_\{line} = \{line}\n",
+        )
+      }
+    }
+    content.write_string("let fragment_\{fragment}_retained = \{fragment}\n")
+  }
+  content.to_string()
+}
+
+///|
+/// A valid MoonBit-shaped source pair with two independently measured
+/// Markdown comment ViewZones and visible edits near the top, middle, and
+/// bottom. Comment source line counts stay paired while their rendered pixel
+/// heights differ; later code hunks also change logical line counts.
+fn alignment_diff_document(original : Bool) -> String {
+  let content = StringBuilder()
+  content.write_string("fn alignment_fixture() -> Int {\n")
+  for index in 0..<700 {
+    if index == 20 {
+      content.write_string("  //~ ## First rendered note\n")
+      content.write_string(
+        if original {
+          "  //~ This original-side paragraph is deliberately long enough to wrap across several rendered rows in a narrow diff pane, so its external ViewZone has a larger measured pixel height than the modified-side note.\n"
+        } else {
+          "  //~ Short modified note.\n"
+        },
+      )
+      content.write_string("  //~ Shared final sentence.\n")
+    } else if index == 180 {
+      content.write_string("  //~ ## Second rendered note\n")
+      content.write_string(
+        if original {
+          "  //~ Short original note.\n"
+        } else {
+          "  //~ This modified-side paragraph is deliberately long enough to wrap across several rendered rows in a narrow diff pane, reversing which child owns the taller external ViewZone.\n"
+        },
+      )
+      content.write_string("  //~ Shared final sentence.\n")
+    } else if index == 60 {
+      content.write_string("  //~ ## Shared note before an insertion\n")
+      content.write_string("  //~ Shared note body.\n")
+      if !original {
+        content.write_string("  //~ Inserted documentation line.\n")
+        content.write_string("  //~ Another inserted documentation line.\n")
+        content.write_string("  let inserted_after_comment_60 = 60\n")
+      }
+    } else if index == 300 {
+      content.write_string("  let replacement_300 = 300\n")
+      if !original {
+        content.write_string("  let inserted_301 = 301\n")
+        content.write_string("  let inserted_302 = 302\n")
+      }
+    } else if index == 480 {
+      content.write_string("  let replacement_480 = 480\n")
+      if original {
+        content.write_string("  let deleted_481 = 481\n")
+        content.write_string("  let deleted_482 = 482\n")
+        content.write_string("  let deleted_483 = 483\n")
+      }
+    } else if index == 80 {
+      content.write_string(
+        if original {
+          "  let changed_80 = 80\n"
+        } else {
+          "  let changed_80 = 800\n"
+        },
+      )
+    } else if index == 120 {
+      content.write_string("  let wide_120 = \"" + "x".repeat(400) + "\"\n")
+    } else if index == 640 {
+      content.write_string(
+        if original {
+          "  let changed_640 = 640\n"
+        } else {
+          "  let changed_640 = 6400\n"
+        },
+      )
+    } else {
+      content.write_string("  let stable_\{index} = \{index}\n")
+    }
+  }
+  content.write_string("  0\n}\n")
+  content.to_string()
+}
+
+///|
+priv struct EmbeddedAlignmentMarkdownProvider {}
+
+///|
+impl @language.MarkdownCommentProvider for EmbeddedAlignmentMarkdownProvider with fn provide_markdown_comments(
+  _self,
+  model,
+) {
+  if !model.uri.path.has_suffix("/alignment-zones.mbt") {
+    return []
+  }
+  let snapshot = model.snapshot()
+  let blocks : Array[@language.MarkdownCommentBlock] = []
+  let mut line_number = 1
+  while line_number <= snapshot.line_count() {
+    if !snapshot.get_line_content(line_number).trim().has_prefix("//~") {
+      line_number += 1
+      continue
+    }
+    let start_line_number = line_number
+    let markdown : Array[String] = []
+    while line_number <= snapshot.line_count() {
+      let line = snapshot.get_line_content(line_number).trim().to_owned()
+      if !line.has_prefix("//~") {
+        break
+      }
+      let mut start = 3
+      if start < line.length() && line[start].to_int() == 32 {
+        start += 1
+      }
+      markdown.push(line.unsafe_substring(start~, end=line.length()))
+      line_number += 1
+    }
+    blocks.push({
+      line_range: LineRange(start_line_number, line_number),
+      markdown: markdown.join("\n"),
+    })
+  }
+  blocks
 }
 
 ///|
@@ -240,10 +421,35 @@ fn MemoryWorkspace::model(
 }
 
 ///|
+priv enum EmbedSourcePresentation {
+  Code
+  Markdown
+} derive(Eq)
+
+///|
+fn EmbedSourcePresentation::label(self : EmbedSourcePresentation) -> String {
+  match self {
+    Code => "code"
+    Markdown => "markdown"
+  }
+}
+
+///|
+fn embed_source_presentation(uri : @base_common.Uri) -> EmbedSourcePresentation {
+  if uri.path.to_lower().has_suffix(".md") {
+    Markdown
+  } else {
+    Code
+  }
+}
+
+///|
 priv struct EmbedModel {
   status : String
   diff_visible : Bool
-  unified_render : Bool
+  inline_layout : Bool
+  sash_enabled : Bool
+  source_presentation : EmbedSourcePresentation
 } derive(Eq)
 
 ///|
@@ -254,6 +460,7 @@ priv enum EmbedMsg {
   ViewerFailed
   ToggleDiff
   ToggleDiffLayout
+  ToggleDiffSash
 }
 
 ///|
@@ -271,18 +478,21 @@ fn dispatch_embed_msg(msg : EmbedMsg) -> Unit {
 let embed_viewer_cell : Ref[@viewer.Viewer?] = Ref(None)
 
 ///|
-let embed_diff_view_cell : Ref[@viewer.DiffViewer?] = Ref(None)
+let embed_markdown_viewer_cell : Ref[@viewer.MarkdownViewer?] = Ref(None)
 
 ///|
-/// Resolves the embedded viewer, creating it into the shell-rendered
-/// `.viewer-host` element on first use. First use happens in the boot
+let embed_diff_editor_cell : Ref[@viewer.DiffEditor?] = Ref(None)
+
+///|
+/// Resolves the embedded code viewer, creating it into the shell-rendered
+/// `.code-viewer-host` element on first use. First use happens in the boot
 /// after-render command, so the host element is always in the DOM by then.
 fn embed_viewer() -> @viewer.Viewer {
   match embed_viewer_cell.val {
     Some(viewer) => viewer
     None => {
       let host = @rdom.document()
-        .query_selector(".viewer-host")
+        .query_selector(".code-viewer-host")
         .to_option()
         .unwrap()
       let viewer = @viewer.Viewer::create(
@@ -313,34 +523,121 @@ fn embed_viewer() -> @viewer.Viewer {
 }
 
 ///|
+/// The rich Markdown surface is a separate public widget. The embedding host,
+/// rather than Viewer, owns presentation selection.
+fn embed_markdown_viewer() -> @viewer.MarkdownViewer {
+  match embed_markdown_viewer_cell.val {
+    Some(viewer) => viewer
+    None => {
+      let host = @rdom.document()
+        .query_selector(".markdown-viewer-host")
+        .to_option()
+        .unwrap()
+      let viewer = @viewer.MarkdownViewer::create(
+        host,
+        options=MarkdownViewerOptions(placeholder="Loading Markdown..."),
+      )
+      viewer.on_did_change_model(event => {
+        guard event.new_model_url is Some(attached_uri) else { return }
+        embed_ready_animation_frame(() => {
+          match viewer.get_model() {
+            Some(current) =>
+              if current.model.uri.to_string() == attached_uri.to_string() {
+                dispatch_embed_msg(ViewerReady(attached_uri))
+              }
+            None => ()
+          }
+        })
+      })
+      |> ignore
+      embed_markdown_viewer_cell.val = Some(viewer)
+      viewer
+    }
+  }
+}
+
+///|
+fn replace_embed_code_model(
+  viewer : @viewer.Viewer,
+  model : @model.TextModel?,
+) -> Unit {
+  let previous = viewer.get_model()
+  viewer.set_model(model)
+  match previous {
+    Some(previous) =>
+      match model {
+        Some(current) if previous.same(current) => ()
+        _ => previous.dispose()
+      }
+    None => ()
+  }
+}
+
+///|
+fn replace_embed_markdown_model(
+  viewer : @viewer.MarkdownViewer,
+  model : @viewer.MarkdownViewerModel?,
+) -> Unit {
+  match viewer.set_model(model) {
+    Some(previous) =>
+      match model {
+        // A resource-kind-only replacement keeps the same active TextModel.
+        Some(current) if previous.model.same(current.model) => ()
+        _ => previous.model.dispose()
+      }
+    None => ()
+  }
+}
+
+///|
+fn embed_current_source_model() -> @model.TextModel? {
+  match embed_viewer_cell.val {
+    Some(viewer) if viewer.get_model() is Some(model) => return Some(model)
+    _ => ()
+  }
+  match embed_markdown_viewer_cell.val {
+    Some(viewer) => viewer.get_model().map(model => model.model)
+    None => None
+  }
+}
+
+///|
 /// Resolves the switchable public diff surface in its own stable host. Source
-/// and diff views are siblings so toggling never replaces the source Viewer's
-/// model, selection, or scroll state; render-mode changes stay inside the
-/// DiffViewer.
-fn embed_diff_view() -> @viewer.DiffViewer {
-  match embed_diff_view_cell.val {
+/// and diff views are siblings. DiffEditor owns two internal code-editor
+/// kernels and one shared diff ViewModel; it never creates a public Viewer.
+fn embed_diff_editor() -> @viewer.DiffEditor {
+  match embed_diff_editor_cell.val {
     Some(view) => view
     None => {
       let host = @rdom.document()
-        .query_selector(".diff-viewer-host")
+        .query_selector(".diff-editor-host")
         .to_option()
         .unwrap()
-      let view = @viewer.DiffViewer::create(host)
-      embed_diff_view_cell.val = Some(view)
+      let view = @viewer.DiffEditor::create(host)
+      embed_diff_editor_cell.val = Some(view)
       view
     }
   }
 }
 
 ///|
-fn dispose_embed_diff_models(view : @viewer.DiffViewer) -> Unit {
-  let models = view.get_model()
-  view.clear()
-  if models is Some(models) {
-    models.original.dispose()
-    if !models.modified.same(models.original) {
-      models.modified.dispose()
-    }
+fn dispose_embed_diff_model_pair(models : @viewer.DiffEditorModel) -> Unit {
+  models.original.dispose()
+  if !models.modified.same(models.original) {
+    models.modified.dispose()
+  }
+}
+
+///|
+fn replace_embed_diff_model(
+  view : @viewer.DiffEditor,
+  model : @viewer.DiffEditorModel?,
+) -> Unit {
+  // A same-pair no-op returns None, so the active models are never disposed.
+  // A real replacement returns a pair that is already fully detached.
+  match view.set_model(model) {
+    Some(previous) => dispose_embed_diff_model_pair(previous)
+    None => ()
   }
 }
 
@@ -349,19 +646,18 @@ fn set_embed_diff_visible(visible : Bool) -> @rabbita.Cmd {
   @cmd.custom_cmd(
     _ => {
       if !visible {
-        match embed_diff_view_cell.val {
-          Some(view) => dispose_embed_diff_models(view)
+        match embed_diff_editor_cell.val {
+          Some(view) => replace_embed_diff_model(view, None)
           None => ()
         }
         return
       }
-      guard embed_viewer().get_model() is Some(model) &&
+      guard embed_current_source_model() is Some(model) &&
         workspace_backend.original_documents.get(model.uri.to_string())
         is Some(original) else {
         return
       }
-      let diff_view = embed_diff_view()
-      dispose_embed_diff_models(diff_view)
+      let diff_editor = embed_diff_editor()
       let version = next_embed_model_version()
       let original_uri = @base_common.Uri::from(
         scheme="memory-original",
@@ -386,21 +682,23 @@ fn set_embed_diff_visible(visible : Bool) -> @rabbita.Cmd {
         "modified-memory-\{version.to_string()}",
         model.get_value(),
       )
-      diff_view.set_model(Some(DiffEditorModel(original_model, modified_model)))
+      replace_embed_diff_model(
+        diff_editor,
+        Some(DiffEditorModel(original_model, modified_model)),
+      )
     },
     kind=@cmd.after_render,
   )
 }
 
 ///|
-fn set_embed_diff_render_mode(unified : Bool) -> @rabbita.Cmd {
+fn set_embed_diff_options(inline : Bool, sash_enabled : Bool) -> @rabbita.Cmd {
   @cmd.custom_cmd(_ => {
-    embed_diff_view().set_render_mode(
-      if unified {
-        Unified
-      } else {
-        SideBySide
-      },
+    embed_diff_editor().update_options(
+      DiffEditorOptions(
+        layout=if inline { Inline } else { SideBySide },
+        sash_enabled~,
+      ),
     )
   })
 }
@@ -459,7 +757,12 @@ fn update_embed(
           set_embed_diff_visible(false),
           open_embed_document_cmd(uri),
         ]),
-        { ..model, status: "loading", diff_visible: false },
+        {
+          ..model,
+          status: "loading",
+          diff_visible: false,
+          source_presentation: embed_source_presentation(uri),
+        },
       )
     ViewerReady(uri) =>
       (embed_tree().set_active(uri), { ..model, status: "ready" })
@@ -479,10 +782,20 @@ fn update_embed(
       if model.status != "ready" || !model.diff_visible {
         (@rabbita.none, model)
       } else {
-        let unified_render = !model.unified_render
+        let inline_layout = !model.inline_layout
         (
-          set_embed_diff_render_mode(unified_render),
-          { ..model, unified_render, },
+          set_embed_diff_options(inline_layout, model.sash_enabled),
+          { ..model, inline_layout, },
+        )
+      }
+    ToggleDiffSash =>
+      if model.status != "ready" || !model.diff_visible {
+        (@rabbita.none, model)
+      } else {
+        let sash_enabled = !model.sash_enabled
+        (
+          set_embed_diff_options(model.inline_layout, sash_enabled),
+          { ..model, sash_enabled, },
         )
       }
   }
@@ -492,11 +805,33 @@ fn update_embed(
 fn open_embed_document_cmd(uri : @base_common.Uri) -> @rabbita.Cmd {
   @cmd.custom_cmd(_ => {
     match workspace_backend.model(uri) {
-      Some(model) => {
-        let viewer = embed_viewer()
-        viewer.set_model(Some(model))
-        viewer.handle_initialized()
-      }
+      Some(model) =>
+        if model.uri.path.to_lower().has_suffix(".md") ||
+          model.get_language_id() == "markdown" {
+          match embed_viewer_cell.val {
+            Some(viewer) => replace_embed_code_model(viewer, None)
+            None => ()
+          }
+          let viewer = embed_markdown_viewer()
+          let resource_kind = if model.uri.path.to_lower().has_suffix(".mbt.md") {
+            @viewer.MarkdownResourceKind::MoonBitMarkdown
+          } else {
+            OrdinaryMarkdown
+          }
+          replace_embed_markdown_model(
+            viewer,
+            Some(MarkdownViewerModel(model, resource_kind)),
+          )
+          viewer.handle_initialized()
+        } else {
+          match embed_markdown_viewer_cell.val {
+            Some(viewer) => replace_embed_markdown_model(viewer, None)
+            None => ()
+          }
+          let viewer = embed_viewer()
+          replace_embed_code_model(viewer, Some(model))
+          viewer.handle_initialized()
+        }
       None => dispatch_embed_msg(ViewerFailed)
     }
   })
@@ -512,6 +847,7 @@ fn view_embed(
     class="editor-shell",
     attrs=@html.Attrs::build()
       .data_set("status", model.status)
+      .data_set("source-presentation", model.source_presentation.label())
       .data_set("theme", "dark"),
     [
       @html.div(class="editor-main", [
@@ -544,18 +880,34 @@ fn view_embed(
                 @html.button(
                   type_="button",
                   class="sidebar-action embed-diff-toggle",
-                  title=if model.unified_render {
+                  title=if model.inline_layout {
                     "Use side-by-side diff layout"
                   } else {
-                    "Use unified diff layout"
+                    "Use inline diff layout"
                   },
                   disabled=!model.diff_visible,
                   on_click=emit(ToggleDiffLayout),
                   attrs=@html.Attrs::build()
                     .data_set("action", "toggle-diff-layout")
-                    .aria_label("Unified diff layout")
-                    .aria_pressed(model.unified_render.to_string()),
-                  "Unified",
+                    .aria_label("Inline diff layout")
+                    .aria_pressed(model.inline_layout.to_string()),
+                  "Inline",
+                ),
+                @html.button(
+                  type_="button",
+                  class="sidebar-action embed-diff-toggle",
+                  title=if model.sash_enabled {
+                    "Disable diff pane sash"
+                  } else {
+                    "Enable diff pane sash"
+                  },
+                  disabled=!model.diff_visible,
+                  on_click=emit(ToggleDiffSash),
+                  attrs=@html.Attrs::build()
+                    .data_set("action", "toggle-diff-sash")
+                    .aria_label("Diff pane sash")
+                    .aria_pressed(model.sash_enabled.to_string()),
+                  "Sash",
                 ),
               ]),
             ]),
@@ -566,18 +918,26 @@ fn view_embed(
           // Stable imperative-DOM hosts share the grid's content cell; the
           // shell never renders vdom children into either host.
           @html.div(
-            class=if model.diff_visible {
-              "viewer-host moonbit-viewer-surface-hidden"
+            class=if model.diff_visible || model.source_presentation == Markdown {
+              "viewer-host code-viewer-host moonbit-viewer-surface-hidden"
             } else {
-              "viewer-host"
+              "viewer-host code-viewer-host"
+            },
+            ([] : Array[@html.Html]),
+          ),
+          @html.div(
+            class=if model.diff_visible || model.source_presentation == Code {
+              "viewer-host markdown-viewer-host moonbit-viewer-surface-hidden"
+            } else {
+              "viewer-host markdown-viewer-host"
             },
             ([] : Array[@html.Html]),
           ),
           @html.div(
             class=if model.diff_visible {
-              "viewer-host diff-viewer-host"
+              "viewer-host diff-editor-host"
             } else {
-              "viewer-host diff-viewer-host moonbit-viewer-surface-hidden"
+              "viewer-host diff-editor-host moonbit-viewer-surface-hidden"
             },
             ([] : Array[@html.Html]),
           ),
@@ -593,6 +953,11 @@ fn main {
   // executing it in the example. The discarded function value keeps every
   // supported root/common signature checked by the real embedding package.
   let _ = compile_external_viewer_api_contract
+  @languages.languages.register_markdown_comment_provider(
+    LanguageId("moonbit"),
+    EmbeddedAlignmentMarkdownProvider::{  },
+  )
+  |> ignore
   // Highlighting needs no server: the language package is composed in
   // by import and registered through the viewer languages facade.
   @languages.languages.set_tokens_provider(
@@ -608,7 +973,13 @@ fn main {
   let app = @rabbita.new(() => {
     let tree_view = embed_tree().view()
     let (model, emit) = @rabbita.create_state(
-      { status: "loading", diff_visible: false, unified_render: false },
+      {
+        status: "loading",
+        diff_visible: false,
+        inline_layout: false,
+        sash_enabled: true,
+        source_presentation: Code,
+      },
       update=(model, msg, emit) => {
         let (cmd, model) = update_embed(emit, msg, model)
         (model, cmd)

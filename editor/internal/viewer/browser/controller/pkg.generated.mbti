@@ -38,6 +38,7 @@ pub(all) struct MouseDispatchData {
 type MouseHandler
 pub fn MouseHandler::MouseHandler(PointerHandlerHelper) -> Self
 pub fn MouseHandler::cancel_selection(Self) -> Unit
+pub fn MouseHandler::delegate_vertical_scrollbar_pointer_down(Self, @dom.Event) -> Unit
 pub fn MouseHandler::dispose(Self) -> Unit
 pub fn MouseHandler::handle_editor_wheel(Self, @dom.Event, @dom.WheelEvent) -> Bool
 pub fn MouseHandler::hook_browser_desperate_reveal(Self) -> Unit

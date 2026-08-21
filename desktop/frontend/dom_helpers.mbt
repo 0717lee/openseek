@@ -45,11 +45,14 @@ fn host_prefers_dark() -> Bool {
 /// owns the palette; the command keeps the DOM write out of the pure handler.
 fn Theme::apply(self : Theme, system_dark : Bool) -> @cmd.Cmd {
   let value = if self.is_dark(system_dark) { "dark" } else { "light" }
-  @cmd.custom_cmd(_ => {
-    if @dom.document().get_document_element() is Some(root) {
-      root.set_attribute("data-theme", value)
-    }
-  })
+  @cmd.batch([
+    @cmd.custom_cmd(_ => {
+      if @dom.document().get_document_element() is Some(root) {
+        root.set_attribute("data-theme", value)
+      }
+    }),
+    @fileeditor.apply_theme(value),
+  ])
 }
 
 ///|

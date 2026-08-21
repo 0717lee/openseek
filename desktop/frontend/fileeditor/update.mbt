@@ -47,10 +47,10 @@ fn Doc::quick_diff_original(self : Doc) -> String? {
 }
 
 ///|
-/// The two textual sides available to the switchable DiffViewer.
+/// The two textual sides available to the switchable DiffEditor.
 /// Added files use an empty HEAD side and deleted files use an empty working
 /// side. Loading, binary, oversized, and failed reads do not invent text.
-fn Doc::unified_diff_content(self : Doc) -> (String, String)? {
+fn Doc::diff_content(self : Doc) -> (String, String)? {
   guard self.review is Some(review) else { return None }
   let original = match review.baseline {
     ReviewContent(content) => content
@@ -72,18 +72,16 @@ fn Doc::unified_diff_content(self : Doc) -> (String, String)? {
 
 ///|
 /// Diff inputs only enter the comparison while this tab's cached copy of the
-/// panel preference is unified mode. Keeping the copy on its review state also
+/// panel preference is full-diff mode. Keeping the copy on its review state also
 /// preserves it through generation-fenced source/baseline refreshes.
-fn Doc::visible_unified_diff(self : Doc) -> (String, String)? {
-  guard self.review is Some({ view_mode: ReviewUnifiedDiff, .. }) else {
-    return None
-  }
-  self.unified_diff_content()
+fn Doc::visible_diff(self : Doc) -> (String, String)? {
+  guard self.review is Some({ view_mode: ReviewDiff, .. }) else { return None }
+  self.diff_content()
 }
 
 ///|
-fn Doc::shows_unified_diff(self : Doc) -> Bool {
-  self.visible_unified_diff() is Some(_)
+fn Doc::shows_diff(self : Doc) -> Bool {
+  self.visible_diff() is Some(_)
 }
 
 ///|
@@ -101,11 +99,11 @@ fn State::editor_search_highlights(
 
 ///|
 /// Whether a requested full diff is still waiting for one textual side. Keep
-/// this distinct from `shows_unified_diff`: the comparison has no model yet,
+/// this distinct from `shows_diff`: the comparison has no model yet,
 /// but revealing the source Viewer while either read settles produces a
 /// source-to-diff flash.
-fn Doc::unified_diff_is_pending(self : Doc) -> Bool {
-  guard self.review is Some(review) && review.view_mode is ReviewUnifiedDiff else {
+fn Doc::diff_is_pending(self : Doc) -> Bool {
+  guard self.review is Some(review) && review.view_mode is ReviewDiff else {
     return false
   }
   match (review.baseline, self.state) {
@@ -119,8 +117,8 @@ fn Doc::unified_diff_is_pending(self : Doc) -> Bool {
 /// The surface selected for the current render. A full comparison owns the
 /// diff host from the moment it is requested, including its loading interval;
 /// a settled unavailable comparison falls back to the ordinary file surface.
-fn Doc::uses_unified_diff_surface(self : Doc) -> Bool {
-  self.shows_unified_diff() || self.unified_diff_is_pending()
+fn Doc::uses_diff_surface(self : Doc) -> Bool {
+  self.shows_diff() || self.diff_is_pending()
 }
 
 ///|
@@ -133,8 +131,8 @@ fn ReviewState::diff_loading_generation(self : ReviewState) -> Int {
 }
 
 ///|
-fn Doc::unified_diff_pending_generation(self : Doc) -> Int? {
-  guard self.unified_diff_is_pending() && self.review is Some(review) else {
+fn Doc::diff_pending_generation(self : Doc) -> Int? {
+  guard self.diff_is_pending() && self.review is Some(review) else {
     return None
   }
   Some(review.diff_loading_generation())
@@ -142,9 +140,7 @@ fn Doc::unified_diff_pending_generation(self : Doc) -> Int? {
 
 ///|
 fn State::shows_delayed_diff_loading(self : State, doc : Doc) -> Bool {
-  guard doc.unified_diff_pending_generation() is Some(generation) else {
-    return false
-  }
+  guard doc.diff_pending_generation() is Some(generation) else { return false }
   self.diff_loading_generation == Some(generation)
 }
 
@@ -158,7 +154,7 @@ fn delayed_diff_loading(
   path : @pathx.Relative,
   doc : Doc,
 ) -> @cmd.Cmd {
-  guard doc.unified_diff_pending_generation() is Some(generation) else {
+  guard doc.diff_pending_generation() is Some(generation) else {
     return @cmd.none
   }
   @cmd.delay(
@@ -228,7 +224,7 @@ fn show_tab_impl(
         relative=path,
         restore_scroll=true,
         review_original?=doc.quick_diff_original(),
-        unified_diff?=doc.visible_unified_diff(),
+        diff?=doc.visible_diff(),
         search_highlights?,
       )
       if sync_diagnostics &&
@@ -262,7 +258,7 @@ fn show_tab_impl(
             content,
             relative=path,
             restore_scroll=true,
-            unified_diff?=doc.visible_unified_diff(),
+            diff?=doc.visible_diff(),
             search_highlights?,
           )
         _ => clear_document()
@@ -525,7 +521,7 @@ pub fn open_changed_document(
   let path = change.path
   // Selecting a Changes row is activation, not a manual reload. Reuse the
   // exact cached review (including one whose paired reads are still pending)
-  // so repeated clicks cannot replace its generation, clear its DiffViewer
+  // so repeated clicks cannot replace its generation, clear its DiffEditor
   // models, and briefly paint an empty comparison. Exact row identity matters:
   // Git can legitimately expose two different reviews for the same path.
   if state.docs.get(path) is Some(doc) &&
@@ -1895,6 +1891,8 @@ pub fn sync(
         search: state.search.reset_checkout(),
         review_view_mode: state.review_view_mode,
         review_diff_layout: state.review_diff_layout,
+        review_diff_mode: state.review_diff_mode,
+        review_diff_ignore_comments: state.review_diff_ignore_comments,
         changes_collapsed: state.changes_collapsed,
         git_graph_collapsed: state.git_graph_collapsed,
         // Request tokens must outlive the per-conversation cache. Resetting
@@ -2193,7 +2191,7 @@ pub fn update(
       if state.owner == Some(owner) &&
         ctx.active_file == Some(path) &&
         state.docs.get(path) is Some(doc) &&
-        doc.unified_diff_pending_generation() == Some(generation) {
+        doc.diff_pending_generation() == Some(generation) {
         (@cmd.none, { ..state, diff_loading_generation: Some(generation) })
       } else {
         (@cmd.none, state)
@@ -2202,12 +2200,12 @@ pub fn update(
       guard ctx.active_file is Some(path) &&
         state.docs.get(path) is Some(doc) &&
         doc.review is Some(_) &&
-        doc.unified_diff_content() is Some(_) else {
+        doc.diff_content() is Some(_) else {
         return (@cmd.none, state)
       }
       let view_mode = match state.review_view_mode {
-        ReviewSource => ReviewUnifiedDiff
-        ReviewUnifiedDiff => ReviewSource
+        ReviewSource => ReviewDiff
+        ReviewDiff => ReviewSource
       }
       let docs = state.docs.copy()
       // Keep every parked review aligned with the panel preference. Otherwise
@@ -2236,29 +2234,58 @@ pub fn update(
         // Viewer's 5px minimum while the diff is visible. Measure again only
         // after source mode has restored the host's real box.
         ReviewSource => @cmd.batch([show, request_viewer_remeasure()])
-        ReviewUnifiedDiff => show
+        ReviewDiff => show
       }
       (command, { ..state, docs, review_view_mode: view_mode })
     }
     ToggleReviewDiffLayout => {
       let review_ready = ctx.active_file is Some(path) &&
         state.docs.get(path) is Some(doc) &&
-        doc.review is Some({ view_mode: ReviewUnifiedDiff, .. }) &&
-        doc.unified_diff_content() is Some(_)
+        doc.review is Some({ view_mode: ReviewDiff, .. }) &&
+        doc.diff_content() is Some(_)
       let history_ready = ctx.active_history_diff is Some(diff) &&
         state.history_docs.get(history_diff_key(diff)) is Some(history) &&
         history.original.text() is Some(_) &&
         history.modified.text() is Some(_)
       guard review_ready || history_ready else { return (@cmd.none, state) }
       let review_diff_layout = match state.review_diff_layout {
-        ReviewSideBySide => ReviewUnified
-        ReviewUnified => ReviewSideBySide
+        ReviewSideBySide => ReviewInline
+        ReviewInline => ReviewSideBySide
       }
       (
         apply_review_diff_layout(review_diff_layout),
         { ..state, review_diff_layout, },
       )
     }
+    ReviewDiffModeSelected(mode) => {
+      guard moon_diff_ready(state, ctx) else { return (@cmd.none, state) }
+      (
+        apply_review_diff_provider(mode, state.review_diff_ignore_comments),
+        { ..state, review_diff_mode: mode, review_diff_status: None },
+      )
+    }
+    ToggleReviewDiffIgnoreComments => {
+      guard moon_diff_ready(state, ctx) &&
+        state.review_diff_mode != ReviewDiffCore else {
+        return (@cmd.none, state)
+      }
+      let ignore_comments = !state.review_diff_ignore_comments
+      (
+        apply_review_diff_provider(state.review_diff_mode, ignore_comments),
+        {
+          ..state,
+          review_diff_ignore_comments: ignore_comments,
+          review_diff_status: None,
+        },
+      )
+    }
+    ReviewDiffStatusChanged(status) =>
+      if moon_diff_ready(state, ctx) &&
+        status.requested == state.review_diff_mode {
+        (@cmd.none, { ..state, review_diff_status: Some(status) })
+      } else {
+        (@cmd.none, state)
+      }
     ToggleReviewProgress => {
       guard ctx.active_file is Some(path) &&
         state.docs.get(path) is Some({ review: Some(review), .. }) &&
@@ -3056,7 +3083,7 @@ pub fn update(
                 // position; only a genuinely fresh document opens at the top.
                 restore_scroll=previous is TabLoaded(..),
                 review_original?=doc.quick_diff_original(),
-                unified_diff?=next_doc.visible_unified_diff(),
+                diff?=next_doc.visible_diff(),
                 search_highlights?=state.editor_search_highlights(path),
               )
               if language_id(name) == "moonbit" && ctx.root() is Some(root) {
@@ -3550,7 +3577,7 @@ pub fn update(
     // chip there, which then clears the editor bubble through
     // `remove_editor_feedback`. Reaching this arm means the main update
     // didn't intercept it; changing nothing is the safe answer.
-    EditorCommentAdded(..) | UnifiedDiffCommentAdded(..) => (@cmd.none, state)
+    EditorCommentAdded(..) | DiffCommentAdded(..) => (@cmd.none, state)
   }
 }
 
@@ -4163,7 +4190,7 @@ test "reselecting a settled review keeps its cached comparison generation" {
       generation: 7,
       working_generation: 7,
       baseline: ReviewContent("HEAD source"),
-      view_mode: ReviewUnifiedDiff,
+      view_mode: ReviewDiff,
       selected: change,
     }),
   }
@@ -4419,13 +4446,8 @@ test "deleted changes preview HEAD and working-file loads retain early baselines
   guard preview.docs.get(deleted_path) is Some(deleted_preview) else {
     fail("deleted review was missing")
   }
-  assert_eq(
-    deleted_preview.unified_diff_content(),
-    Some(("removed source", "")),
-  )
-  assert_true(
-    deleted_preview.review is Some({ view_mode: ReviewUnifiedDiff, .. }),
-  )
+  assert_eq(deleted_preview.diff_content(), Some(("removed source", "")))
+  assert_true(deleted_preview.review is Some({ view_mode: ReviewDiff, .. }))
   let (_, source) = update(emit, ToggleReviewDiff, preview, ctx)
   assert_true(
     source.docs.get(deleted_path)
@@ -4434,7 +4456,7 @@ test "deleted changes preview HEAD and working-file loads retain early baselines
   let (_, full_diff_again) = update(emit, ToggleReviewDiff, source, ctx)
   assert_true(
     full_diff_again.docs.get(deleted_path)
-    is Some({ review: Some({ view_mode: ReviewUnifiedDiff, .. }), .. }),
+    is Some({ review: Some({ view_mode: ReviewDiff, .. }), .. }),
   )
 
   // The HEAD request may beat the ordinary filesystem read. Its result stays
@@ -4503,7 +4525,7 @@ test "deleted changes preview HEAD and working-file loads retain early baselines
   guard loaded.docs.get(live_path) is Some(added_preview) else {
     fail("added review was missing")
   }
-  assert_eq(added_preview.unified_diff_content(), Some(("", "new")))
+  assert_eq(added_preview.diff_content(), Some(("", "new")))
 }
 
 ///|

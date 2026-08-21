@@ -11,13 +11,13 @@ import {
   "moonbitlang/editor/viewer/common/agent_feedback_api",
   "moonbitlang/editor/viewer/common/config",
   "moonbitlang/editor/viewer/common/core",
+  "moonbitlang/editor/viewer/common/diff",
   "moonbitlang/editor/viewer/common/editor_api",
   "moonbitlang/editor/viewer/common/languages",
   "moonbitlang/editor/viewer/common/markers",
   "moonbitlang/editor/viewer/common/model",
   "moonbitlang/editor/viewer/common/navigation_api",
   "moonbitlang/editor/viewer/common/quick_diff_api",
-  "moonbitlang/editor/viewer/common/unified_diff",
 }
 
 // Values
@@ -25,44 +25,55 @@ pub fn overlay_widget(String, @dom.Element) -> @browser.OverlayWidget
 
 pub fn render_uml_diagram_svg(String) -> String?
 
-pub fn view_zone(Int, @dom.Element, after_column? : Int, after_column_affinity? : @model.PositionAffinity, show_in_hidden_areas? : Bool, ignore_hidden_area_source? : String, ordinal? : Int, suppress_mouse_down? : Bool, height_in_lines? : Double, height_in_px? : Double, min_width_in_px? : Double, margin_dom_node? : @dom.Element, on_dom_node_top? : (Double) -> Unit raise, on_computed_height? : (Double) -> Unit raise) -> @browser.ViewZone
+pub fn view_zone(Int, @dom.Element, after_column? : Int, after_column_affinity? : @model.PositionAffinity, show_in_hidden_areas? : Bool, ignore_hidden_area_source? : String, ordinal? : Int, suppress_mouse_down? : Bool, height_in_lines? : Double, height_in_px? : Double, min_width_in_px? : Double, margin_dom_node? : @dom.Element, on_dom_node_top? : (Double) -> Unit raise, on_dom_node_layout? : (Bool, Double) -> Unit raise, on_computed_height? : (Double) -> Unit raise) -> @browser.ViewZone
 
 // Errors
 
 // Types and methods
+type DiffEditor
+pub fn DiffEditor::create(@dom.Element, services? : ViewerServices, options? : DiffEditorOptions, provider? : &@diff.DocumentDiffProvider) -> Self
+pub fn DiffEditor::dispose(Self) -> Unit
+pub fn DiffEditor::focus(Self) -> Unit
+pub fn DiffEditor::get_diff(Self) -> @diff.DocumentDiff?
+pub fn DiffEditor::get_layout(Self) -> DiffEditorLayout
+pub fn DiffEditor::get_model(Self) -> DiffEditorModel?
+pub fn DiffEditor::is_diff_up_to_date(Self) -> Bool
+pub fn DiffEditor::layout(Self) -> Unit
+pub fn DiffEditor::on_did_update_diff(Self, () -> Unit) -> @common.Disposable
+pub fn DiffEditor::reveal_next_change(Self) -> Bool
+pub fn DiffEditor::reveal_previous_change(Self) -> Bool
+pub fn DiffEditor::set_diff_provider(Self, &@diff.DocumentDiffProvider) -> Unit
+pub fn DiffEditor::set_model(Self, DiffEditorModel?) -> DiffEditorModel?
+pub fn DiffEditor::update_options(Self, DiffEditorOptions) -> Unit
+
+pub(all) enum DiffEditorLayout {
+  SideBySide
+  Inline
+} derive(Eq, @debug.Debug)
+pub fn DiffEditorLayout::equal(Self, Self) -> Bool
+pub fn DiffEditorLayout::not_equal(Self, Self) -> Bool
+pub fn DiffEditorLayout::to_repr(Self) -> @debug.Repr
+
 pub(all) struct DiffEditorModel {
   original : @model.TextModel
   modified : @model.TextModel
 }
 pub fn DiffEditorModel::DiffEditorModel(@model.TextModel, @model.TextModel) -> Self
 
-pub(all) enum DiffEditorRenderMode {
-  SideBySide
-  Unified
+type DiffEditorOptions
+pub fn DiffEditorOptions::DiffEditorOptions(editor_options? : ViewerOptions, layout? : DiffEditorLayout, automatic_inline? : Bool, automatic_inline_width? : Double, sash_enabled? : Bool, split_ratio? : Double, diff_word_wrap? : DiffWordWrap, overview_ruler? : Bool, ignore_trim_whitespace? : Bool) -> Self
+pub fn DiffEditorOptions::default() -> Self
+pub fn DiffEditorOptions::layout(Self) -> DiffEditorLayout
+pub fn DiffEditorOptions::with_editor_options(Self, ViewerOptions) -> Self
+pub fn DiffEditorOptions::with_layout(Self, DiffEditorLayout) -> Self
+
+pub(all) enum DiffWordWrap {
+  Inherit
+  Off
 } derive(Eq, @debug.Debug)
-pub fn DiffEditorRenderMode::equal(Self, Self) -> Bool
-pub fn DiffEditorRenderMode::not_equal(Self, Self) -> Bool
-pub fn DiffEditorRenderMode::to_repr(Self) -> @debug.Repr
-
-type DiffViewer
-pub fn DiffViewer::clear(Self) -> Unit
-pub fn DiffViewer::create(@dom.Element, services? : ViewerServices, options? : ViewerOptions, render_mode? : DiffEditorRenderMode) -> Self
-pub fn DiffViewer::dispose(Self) -> Unit
-pub fn DiffViewer::get_diff_mode(Self) -> DiffViewerMode
-pub fn DiffViewer::get_model(Self) -> DiffEditorModel?
-pub fn DiffViewer::get_render_mode(Self) -> DiffEditorRenderMode
-pub fn DiffViewer::layout(Self) -> Unit
-pub fn DiffViewer::set_diff_mode(Self, DiffViewerMode) -> Unit
-pub fn DiffViewer::set_model(Self, DiffEditorModel?) -> Unit
-pub fn DiffViewer::set_render_mode(Self, DiffEditorRenderMode) -> Unit
-
-pub(all) enum DiffViewerMode {
-  StandardDiff
-  TokenDiff
-  TreeDiff
-} derive(Eq)
-pub fn DiffViewerMode::equal(Self, Self) -> Bool
-pub fn DiffViewerMode::not_equal(Self, Self) -> Bool
+pub fn DiffWordWrap::equal(Self, Self) -> Bool
+pub fn DiffWordWrap::not_equal(Self, Self) -> Bool
+pub fn DiffWordWrap::to_repr(Self) -> @debug.Repr
 
 type EditorDecorationsCollection
 pub fn EditorDecorationsCollection::append(Self, Array[@model.ModelDeltaDecoration]) -> Array[String]
@@ -72,16 +83,58 @@ pub fn EditorDecorationsCollection::get_ranges(Self) -> Array[@common.Range]
 pub fn EditorDecorationsCollection::length(Self) -> Int
 pub fn EditorDecorationsCollection::set(Self, Array[@model.ModelDeltaDecoration]) -> Array[String]
 
-type UnifiedDiffView
-pub fn UnifiedDiffView::clear(Self) -> Unit
-pub fn UnifiedDiffView::create(@dom.Element, on_comment? : (@unified_diff.UnifiedDiffLineComment) -> Unit) -> Self
-pub fn UnifiedDiffView::dispose(Self) -> Unit
-pub fn UnifiedDiffView::set_diff(Self, String, String, context_lines? : Int) -> Unit
+pub(all) enum MarkdownResourceKind {
+  OrdinaryMarkdown
+  MoonBitMarkdown
+} derive(Eq, @debug.Debug)
+pub fn MarkdownResourceKind::equal(Self, Self) -> Bool
+pub fn MarkdownResourceKind::not_equal(Self, Self) -> Bool
+pub fn MarkdownResourceKind::to_repr(Self) -> @debug.Repr
+
+type MarkdownViewer
+pub fn MarkdownViewer::collapsed_sections(Self) -> Array[Int]
+pub fn MarkdownViewer::create(@dom.Element, services? : ViewerServices, options? : MarkdownViewerOptions) -> Self
+pub fn MarkdownViewer::dispose(Self) -> Unit
+pub fn MarkdownViewer::focus(Self) -> Unit
+pub fn MarkdownViewer::get_container_dom_node(Self) -> @dom.Element
+pub fn MarkdownViewer::get_content_height(Self) -> Double
+pub fn MarkdownViewer::get_content_width(Self) -> Double
+pub fn MarkdownViewer::get_dom_node(Self) -> @dom.Element?
+pub fn MarkdownViewer::get_id(Self) -> String
+pub fn MarkdownViewer::get_model(Self) -> MarkdownViewerModel?
+pub fn MarkdownViewer::get_options(Self) -> MarkdownViewerOptions
+pub fn MarkdownViewer::handle_initialized(Self) -> Unit
+pub fn MarkdownViewer::has_text_focus(Self) -> Bool
+pub fn MarkdownViewer::layout(Self) -> Unit
+pub fn MarkdownViewer::on_did_change_model(Self, (@editor_api.ModelChangedEvent) -> Unit) -> @common.Disposable
+pub fn MarkdownViewer::on_did_change_model_content(Self, (@model.ModelContentChangedEvent) -> Unit) -> @common.Disposable
+pub fn MarkdownViewer::on_did_dispose(Self, () -> Unit) -> @common.Disposable
+pub fn MarkdownViewer::on_did_scroll_change(Self, () -> Unit) -> @common.Disposable
+pub fn MarkdownViewer::restore_view_state(Self, MarkdownViewerViewState?) -> Unit
+pub fn MarkdownViewer::reveal_range_in_center(Self, @common.Range) -> Unit
+pub fn MarkdownViewer::save_view_state(Self) -> MarkdownViewerViewState?
+pub fn MarkdownViewer::set_model(Self, MarkdownViewerModel?) -> MarkdownViewerModel?
+pub fn MarkdownViewer::toggle_section_at(Self, Int) -> Bool
+pub fn MarkdownViewer::update_options(Self, MarkdownViewerOptions) -> Unit
+
+pub(all) struct MarkdownViewerModel {
+  model : @model.TextModel
+  resource_kind : MarkdownResourceKind
+}
+pub fn MarkdownViewerModel::MarkdownViewerModel(@model.TextModel, MarkdownResourceKind) -> Self
+
+type MarkdownViewerOptions derive(Eq, @debug.Debug)
+pub fn MarkdownViewerOptions::MarkdownViewerOptions(theme? : String, placeholder? : String, show_unused? : Bool) -> Self
+pub fn MarkdownViewerOptions::default() -> Self
+pub fn MarkdownViewerOptions::with_placeholder(Self, String) -> Self
+pub fn MarkdownViewerOptions::with_show_unused(Self, Bool) -> Self
+pub fn MarkdownViewerOptions::with_theme(Self, String) -> Self
+
+type MarkdownViewerViewState derive(@debug.Debug)
 
 type Viewer
 pub fn Viewer::add_overlay_widget(Self, @browser.OverlayWidget) -> Unit
 pub fn Viewer::change_view_zones(Self, (@browser.ViewZoneChangeAccessor) -> Unit raise) -> Unit
-pub fn Viewer::collapsed_markdown_sections(Self) -> Array[Int]
 pub fn Viewer::create(@dom.Element, services? : ViewerServices, options? : ViewerOptions) -> Self
 pub fn Viewer::create_decorations_collection(Self, decorations? : Array[@model.ModelDeltaDecoration]) -> EditorDecorationsCollection
 pub fn Viewer::delta_decorations(Self, Array[String], Array[@model.ModelDeltaDecoration]) -> Array[String]
@@ -164,15 +217,12 @@ pub fn Viewer::set_selection(Self, @core.Selection, source? : String) -> Unit
 pub fn Viewer::set_selections(Self, Array[@core.Selection], source? : String, reason? : @editor_api.CursorChangeReason) -> Unit
 pub fn Viewer::set_value(Self, String) -> Unit
 pub fn Viewer::show_references(Self, @common.Position, Array[@language.Location]) -> Unit
-pub fn Viewer::toggle_markdown_section_at(Self, Int) -> Bool
 pub fn Viewer::update_options(Self, ViewerOptions) -> Unit
 
 type ViewerOptions derive(Eq, @debug.Debug)
 pub fn ViewerOptions::ViewerOptions(soft_wrap? : Bool, tab_size? : Int, wrapping_indent? : @editor_api.WrappingIndent, render_whitespace? : @editor_api.RenderWhitespace, render_control_characters? : Bool, render_line_highlight? : @editor_api.RenderLineHighlight, render_line_highlight_only_when_focus? : Bool, render_validation_decorations? : @editor_api.RenderValidationDecorations, theme? : String, placeholder? : String, line_decorations_width? : Int, line_numbers_min_chars? : Int, folding? : Bool, show_folding_controls? : @editor_api.ShowFoldingControls, folding_highlight? : Bool, folding_maximum_regions? : Int, unfold_on_click_after_end_of_line? : Bool, smooth_scrolling? : Bool, show_unused? : Bool, show_deprecated? : Bool, font_family? : String, font_weight? : String, font_size? : Double, line_height? : Double, letter_spacing? : Double) -> Self
 pub fn ViewerOptions::default() -> Self
-pub fn ViewerOptions::equal(Self, Self) -> Bool
 pub fn ViewerOptions::line_height(Self) -> Double
-pub fn ViewerOptions::not_equal(Self, Self) -> Bool
 pub fn ViewerOptions::soft_wrap(Self) -> Bool
 pub fn ViewerOptions::with_font_family(Self, String) -> Self
 pub fn ViewerOptions::with_font_size(Self, Double) -> Self

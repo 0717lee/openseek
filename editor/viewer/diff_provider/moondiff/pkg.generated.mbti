@@ -1,0 +1,53 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitlang/editor/viewer/diff_provider/moondiff"
+
+import {
+  "moonbitlang/core/debug",
+  "moonbitlang/editor/base/common",
+  "moonbitlang/editor/viewer/common/diff",
+  "moonbitlang/editor/viewer/common/model",
+}
+
+// Values
+
+// Errors
+
+// Types and methods
+pub(all) enum MoonDiffMode {
+  Core
+  Token
+  Tree
+} derive(Eq, @debug.Debug)
+pub fn MoonDiffMode::equal(Self, Self) -> Bool
+pub fn MoonDiffMode::not_equal(Self, Self) -> Bool
+pub fn MoonDiffMode::to_repr(Self) -> @debug.Repr
+
+pub(all) struct MoonDiffStatus {
+  requested : MoonDiffMode
+  effective : MoonDiffMode
+  fell_back : Bool
+} derive(Eq, @debug.Debug)
+pub fn MoonDiffStatus::equal(Self, Self) -> Bool
+pub fn MoonDiffStatus::not_equal(Self, Self) -> Bool
+pub fn MoonDiffStatus::to_repr(Self) -> @debug.Repr
+
+pub struct MoonDocumentDiffProvider {
+  mut mode : MoonDiffMode
+  mut ignore_comments : Bool
+  mut status : MoonDiffStatus
+  did_change : @common.Emitter[Unit]
+  mut disposed : Bool
+}
+pub fn MoonDocumentDiffProvider::MoonDocumentDiffProvider(mode? : MoonDiffMode, ignore_comments? : Bool) -> Self
+pub fn MoonDocumentDiffProvider::as_document_diff_provider(Self) -> &@diff.DocumentDiffProvider
+pub fn MoonDocumentDiffProvider::dispose(Self) -> Unit
+pub fn MoonDocumentDiffProvider::get_ignore_comments(Self) -> Bool
+pub fn MoonDocumentDiffProvider::get_mode(Self) -> MoonDiffMode
+pub fn MoonDocumentDiffProvider::get_status(Self) -> MoonDiffStatus
+pub fn MoonDocumentDiffProvider::set_ignore_comments(Self, Bool) -> Unit
+pub fn MoonDocumentDiffProvider::set_mode(Self, MoonDiffMode) -> Unit
+pub impl @diff.DocumentDiffProvider for MoonDocumentDiffProvider
+
+// Type aliases
+
+// Traits

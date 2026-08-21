@@ -5,11 +5,44 @@
 // public editor state.
 
 ///|
+#external
+type BrowserDefinitionGate
+
+///|
+extern "js" fn BrowserDefinitionGate::new() -> BrowserDefinitionGate =
+  #| () => {
+  #|   let release;
+  #|   const promise = new Promise(resolve => { release = resolve; });
+  #|   return { promise, release };
+  #| }
+
+///|
+extern "js" fn BrowserDefinitionGate::promise(
+  self : BrowserDefinitionGate,
+) -> @js.Promise = "gate => gate.promise"
+
+///|
+extern "js" fn BrowserDefinitionGate::release(
+  self : BrowserDefinitionGate,
+) -> Unit = "gate => gate.release()"
+
+///|
+async fn BrowserDefinitionGate::wait(self : BrowserDefinitionGate) -> Unit {
+  self.promise().wait() |> ignore
+}
+
+///|
 priv struct BrowserDefinitionProvider {
   calls : Ref[Int]
+  source_uri : @base_common.Uri
   location : @language.Location
   alternate_location : @language.Location?
+  redirect_location : @language.Location?
   multiple : Ref[Bool]
+  redirect : Ref[Bool]
+  delay : Ref[Bool]
+  pending : Ref[Bool]
+  release : BrowserDefinitionGate?
   reference_line : Int
 }
 
@@ -20,14 +53,26 @@ impl @language.DefinitionProvider for BrowserDefinitionProvider with fn provide_
   position,
   _token,
 ) {
-  self.calls.val += 1
-  if model.uri.to_string() == self.location.uri.to_string() &&
+  if model.uri.to_string() == self.source_uri.to_string() &&
     position.line_number == self.reference_line &&
     position.column >= definition_reference_start_column() &&
     position.column <= definition_reference_end_column() {
+    self.calls.val += 1
+    if self.delay.val {
+      self.pending.val = true
+      match self.release {
+        Some(release) => release.wait() catch { _ => () }
+        None => ()
+      }
+      self.pending.val = false
+    }
+    let primary = match (self.redirect.val, self.redirect_location) {
+      (true, Some(location)) => location
+      _ => self.location
+    }
     match (self.multiple.val, self.alternate_location) {
-      (true, Some(alternate)) => [self.location, alternate]
-      _ => [self.location]
+      (true, Some(alternate)) => [primary, alternate]
+      _ => [primary]
     }
   } else {
     []
@@ -48,11 +93,11 @@ impl @language.ReferencesProvider for BrowserReferencesProvider with fn provide_
   position,
   _token,
 ) {
-  self.calls.val += 1
   if model.uri.to_string() == self.code_uri.to_string() &&
     position.line_number == 2 &&
     position.column >= definition_reference_start_column() &&
     position.column <= definition_reference_end_column() {
+    self.calls.val += 1
     [
       { uri: self.code_uri, range: Range(1, 5, 1, 21) },
       { uri: self.code_uri, range: Range(2, 11, 2, 27) },
@@ -61,6 +106,7 @@ impl @language.ReferencesProvider for BrowserReferencesProvider with fn provide_
     position.line_number == 2 &&
     position.column >= definition_reference_start_column() &&
     position.column <= definition_reference_end_column() {
+    self.calls.val += 1
     [
       { uri: self.markdown_uri, range: Range(2, 11, 2, 27) },
       {
@@ -75,6 +121,26 @@ impl @language.ReferencesProvider for BrowserReferencesProvider with fn provide_
     ]
   } else {
     []
+  }
+}
+
+///|
+priv struct BrowserDefinitionFixtureState {
+  mut resolver_calls : Int
+  mut resolver_acquires : Int
+  mut resolver_releases : Int
+  mut resolver_behavior : Int
+  opened_uris : Array[String]
+  opened_modes : Array[String]
+}
+
+///|
+fn browser_definition_open_mode(
+  mode : @navigation_api.OpenLocationMode,
+) -> String {
+  match mode {
+    Current => "Current"
+    Side => "Side"
   }
 }
 
@@ -121,7 +187,10 @@ fn markdown_definition_line() -> Int {
 fn definition_state_json(
   viewer : @viewer.Viewer,
   provider_calls : Ref[Int],
+  markdown_provider_calls : Ref[Int],
   references_provider_calls : Ref[Int],
+  markdown_provider_pending : Ref[Bool],
+  fixture : BrowserDefinitionFixtureState,
 ) -> String {
   let (line, column) = match viewer.get_position() {
     Some(position) => (position.line_number, position.column)
@@ -148,7 +217,14 @@ fn definition_state_json(
       "activeColumn": active_column.to_json(),
     }),
     "providerCalls": provider_calls.val.to_json(),
+    "markdownProviderCalls": markdown_provider_calls.val.to_json(),
     "referencesProviderCalls": references_provider_calls.val.to_json(),
+    "markdownProviderPending": markdown_provider_pending.val.to_json(),
+    "resolverCalls": fixture.resolver_calls.to_json(),
+    "resolverAcquires": fixture.resolver_acquires.to_json(),
+    "resolverReleases": fixture.resolver_releases.to_json(),
+    "openedUris": fixture.opened_uris.to_json(),
+    "openedModes": fixture.opened_modes.to_json(),
     "scrollTop": viewer.get_scroll_top().to_json(),
     "scrollHeight": viewer.get_scroll_height().to_json(),
     "hasTextFocus": viewer.has_text_focus().to_json(),
@@ -197,9 +273,15 @@ fn run_definition_browser_test() -> Unit {
   let provider_multiple = Ref(false)
   let provider = BrowserDefinitionProvider::{
     calls: provider_calls,
+    source_uri: uri,
     location: { uri, range: Range(1, 5, 1, 21) },
     alternate_location: Some({ uri, range: Range(3, 1, 3, 14) }),
+    redirect_location: None,
     multiple: provider_multiple,
+    redirect: Ref(false),
+    delay: Ref(false),
+    pending: Ref(false),
+    release: None,
     reference_line: 2,
   }
   let markdown_uri = try! @base_common.Uri::from(
@@ -215,10 +297,40 @@ fn run_definition_browser_test() -> Unit {
     "definition-markdown-rev-1",
     markdown_definition_source(),
   )
+  let markdown_replacement_model = @model.TextModel(
+    markdown_uri,
+    "definition-fixture.mbt.md",
+    "moonbit",
+    1,
+    "definition-markdown-replacement-rev-1",
+    markdown_definition_source(),
+  )
   let markdown_provider_calls = Ref(0)
   let markdown_provider_multiple = Ref(false)
+  let markdown_provider_redirect = Ref(false)
+  let markdown_provider_delay = Ref(false)
+  let markdown_provider_pending = Ref(false)
+  let markdown_provider_release = BrowserDefinitionGate::new()
+  let remote_uri = try! @base_common.Uri::from(
+    scheme="inmemory",
+    authority="model",
+    path="/definition-remote.mbt",
+  )
+  let remote_model = @model.TextModel(
+    remote_uri, "definition-remote.mbt", "moonbit", 1, "definition-remote-rev-1",
+    "let remote_definition_alpha = 1\nlet remote_use = remote_definition_alpha",
+  )
+  let wrong_uri = try! @base_common.Uri::from(
+    scheme="inmemory",
+    authority="model",
+    path="/definition-wrong.mbt",
+  )
+  let wrong_model = @model.TextModel(
+    wrong_uri, "definition-wrong.mbt", "moonbit", 1, "definition-wrong-rev-1", "let wrong_definition_alpha = 1",
+  )
   let markdown_provider = BrowserDefinitionProvider::{
     calls: markdown_provider_calls,
+    source_uri: markdown_uri,
     location: {
       uri: markdown_uri,
       range: Range(
@@ -228,8 +340,13 @@ fn run_definition_browser_test() -> Unit {
         21,
       ),
     },
-    alternate_location: None,
+    alternate_location: Some({ uri: markdown_uri, range: Range(6, 5, 6, 21) }),
+    redirect_location: Some({ uri: remote_uri, range: Range(1, 5, 1, 28) }),
     multiple: markdown_provider_multiple,
+    redirect: markdown_provider_redirect,
+    delay: markdown_provider_delay,
+    pending: markdown_provider_pending,
+    release: Some(markdown_provider_release),
     reference_line: 2,
   }
   let references_provider_calls = Ref(0)
@@ -253,8 +370,45 @@ fn run_definition_browser_test() -> Unit {
   |> ignore
   let log_service = @log.LogService()
   let log_handle = log_service.log_handle()
+  let fixture : BrowserDefinitionFixtureState = {
+    resolver_calls: 0,
+    resolver_acquires: 0,
+    resolver_releases: 0,
+    resolver_behavior: 0,
+    opened_uris: [],
+    opened_modes: [],
+  }
+  let resolver = @navigation_api.TextModelResolverHandle(resolve=(
+    resource,
+    _token,
+  ) => {
+    fixture.resolver_calls += 1
+    if resource.to_string() != remote_uri.to_string() ||
+      fixture.resolver_behavior == 1 {
+      None
+    } else {
+      let resolved = if fixture.resolver_behavior == 2 {
+        wrong_model
+      } else {
+        remote_model
+      }
+      fixture.resolver_acquires += 1
+      Some(
+        TextModelReference(resolved, release=() => {
+          fixture.resolver_releases += 1
+        }),
+      )
+    }
+  })
+  let opener = @navigation_api.LocationOpenerHandle(open=request => {
+    fixture.opened_uris.push(request.location.uri.to_string())
+    fixture.opened_modes.push(browser_definition_open_mode(request.mode))
+    true
+  })
   let services = @viewer.ViewerServices(
     languages=languages.language_handle(log_handle),
+    location_opener=opener,
+    text_model_resolver=resolver,
     log_service=log_handle,
   )
   let viewer = @viewer.Viewer::create(
@@ -269,16 +423,15 @@ fn run_definition_browser_test() -> Unit {
   viewer.set_model(Some(model))
   viewer.set_position(Position(1, 1))
   viewer.handle_initialized()
-  let markdown_viewer = @viewer.Viewer::create(
+  let markdown_viewer = @viewer.MarkdownViewer::create(
     markdown_host,
     services~,
-    options=ViewerOptions(
-      soft_wrap=false,
-      smooth_scrolling=false,
-      folding=false,
-    ),
+    options=MarkdownViewerOptions(theme="dark"),
   )
-  markdown_viewer.set_model(Some(markdown_model))
+  markdown_viewer.set_model(
+    Some(MarkdownViewerModel(markdown_model, MoonBitMarkdown)),
+  )
+  |> ignore
   markdown_viewer.handle_initialized()
   guard viewer.get_dom_node() is Some(root) else {
     ctx.fail("mounted Viewer did not expose its root")
@@ -294,11 +447,28 @@ fn run_definition_browser_test() -> Unit {
     root,
     markdown_root,
     () => {
-      definition_state_json(viewer, provider_calls, references_provider_calls)
+      definition_state_json(
+        viewer, provider_calls, markdown_provider_calls, references_provider_calls,
+        markdown_provider_pending, fixture,
+      )
     },
     () => viewer.set_scroll_top(0.0),
     () => viewer.set_selection(Selection(Position(2, 11), Position(2, 27))),
     () => provider_multiple.val = true,
+    () => markdown_provider_multiple.val = true,
+    () => markdown_provider_redirect.val = true,
+    () => fixture.resolver_behavior = 1,
+    () => fixture.resolver_behavior = 2,
+    () => remote_model.dispose(),
+    () => {
+      fixture.opened_uris.clear()
+      fixture.opened_modes.clear()
+    },
+    () => markdown_provider_delay.val = true,
+    () => {
+      markdown_provider_delay.val = false
+      markdown_provider_release.release()
+    },
     () => {
       markdown_model.set_value(
         (
@@ -307,6 +477,12 @@ fn run_definition_browser_test() -> Unit {
           $|Projection generation changed.
         ),
       )
+    },
+    () => {
+      markdown_viewer.set_model(
+        Some(MarkdownViewerModel(markdown_replacement_model, MoonBitMarkdown)),
+      )
+      |> ignore
     },
   )
   wait_for_definition_fixture(ctx, 100)
@@ -348,7 +524,16 @@ extern "js" fn install_definition_controls(
   reset_scroll : () -> Unit,
   select_reference : () -> Unit,
   enable_multiple_definitions : () -> Unit,
+  enable_multiple_markdown_definitions : () -> Unit,
+  enable_markdown_cross_definition : () -> Unit,
+  use_missing_resolver : () -> Unit,
+  use_wrong_resolver_model : () -> Unit,
+  dispose_remote_model : () -> Unit,
+  clear_opened_locations : () -> Unit,
+  delay_markdown_provider : () -> Unit,
+  release_markdown_provider : () -> Unit,
   replace_markdown_source : () -> Unit,
+  replace_markdown_model : () -> Unit,
 ) -> Unit =
   #| (
   #|   outerRoot,
@@ -357,7 +542,16 @@ extern "js" fn install_definition_controls(
   #|   resetScroll,
   #|   selectReference,
   #|   enableMultipleDefinitions,
+  #|   enableMultipleMarkdownDefinitions,
+  #|   enableMarkdownCrossDefinition,
+  #|   useMissingResolver,
+  #|   useWrongResolverModel,
+  #|   disposeRemoteModel,
+  #|   clearOpenedLocations,
+  #|   delayMarkdownProvider,
+  #|   releaseMarkdownProvider,
   #|   replaceMarkdownSource,
+  #|   replaceMarkdownModel,
   #| ) => {
   #|   globalThis.__definitionControls = {
   #|     outerRoot,
@@ -366,6 +560,16 @@ extern "js" fn install_definition_controls(
   #|     reset_scroll: resetScroll,
   #|     select_reference: selectReference,
   #|     enable_multiple_definitions: enableMultipleDefinitions,
+  #|     enable_multiple_markdown_definitions:
+  #|       enableMultipleMarkdownDefinitions,
+  #|     enable_markdown_cross_definition: enableMarkdownCrossDefinition,
+  #|     use_missing_resolver: useMissingResolver,
+  #|     use_wrong_resolver_model: useWrongResolverModel,
+  #|     dispose_remote_model: disposeRemoteModel,
+  #|     clear_opened_locations: clearOpenedLocations,
+  #|     delay_markdown_provider: delayMarkdownProvider,
+  #|     release_markdown_provider: releaseMarkdownProvider,
   #|     replace_markdown_source: replaceMarkdownSource,
+  #|     replace_markdown_model: replaceMarkdownModel,
   #|   };
   #| }

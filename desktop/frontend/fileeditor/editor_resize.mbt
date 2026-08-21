@@ -129,9 +129,7 @@ fn end_drag(active : Ref[Bool]) -> Unit {
   guard active.val else { return }
   active.val = false
   set_root_class("")
-  if mounted_viewer() is Some(viewer) {
-    viewer.layout()
-  }
+  layout_active_editor_surface()
 }
 
 ///|
@@ -210,15 +208,18 @@ fn document_element() -> @dom.Element? {
 /// flood of `mousemove`s does not thrash its layout (the viewer fills its host
 /// with absolutely-positioned layers and cannot see a CSS width change itself).
 fn schedule_remeasure() -> Unit {
-  if remeasure_pending.val || mounted_viewer() is None {
+  if remeasure_pending.val ||
+    (
+      mounted_viewer() is None &&
+      mounted_markdown_viewer() is None &&
+      mounted_diff_editor() is None
+    ) {
     return
   }
   remeasure_pending.val = true
   @dom.window().request_animation_frame(_ => {
     remeasure_pending.val = false
-    if mounted_viewer() is Some(viewer) {
-      viewer.layout()
-    }
+    layout_active_editor_surface()
   })
   |> ignore
 }

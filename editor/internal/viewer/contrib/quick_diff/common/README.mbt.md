@@ -92,26 +92,21 @@ addition, an empty modified is a deletion, and anything else is a modification.
 ```mbt check
 ///|
 test "an empty side decides between Add, Delete, and Modify" {
-  let options : @diff.LinesDiffComputerOptions = {
-    ignore_trim_whitespace: false,
-    max_computation_time_ms: 0,
-    compute_moves: false,
-  }
-  let added = @diff.get_default().compute_diff(
-      ["a", "c"],
-      ["a", "b", "c"],
-      options,
-    ).changes[0]
-  let deleted = @diff.get_default().compute_diff(
-      ["a", "b", "c"],
-      ["a", "c"],
-      options,
-    ).changes[0]
-  let modified = @diff.get_default().compute_diff(
-      ["a", "old", "c"],
-      ["a", "new", "c"],
-      options,
-    ).changes[0]
+  let added = @diff.DetailedLineRangeMapping(
+    LineRange(2, 2),
+    LineRange(2, 3),
+    None,
+  )
+  let deleted = @diff.DetailedLineRangeMapping(
+    LineRange(2, 3),
+    LineRange(2, 2),
+    None,
+  )
+  let modified = @diff.DetailedLineRangeMapping(
+    LineRange(2, 3),
+    LineRange(2, 3),
+    None,
+  )
   debug_inspect(
     (
       @common.get_change_type(added),

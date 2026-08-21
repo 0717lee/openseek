@@ -389,6 +389,32 @@ fn ViewZones::zone_keys_snapshot(self : ViewZones) -> Array[String] {
 }
 
 ///|
+/// Returns the live layout height together with the caller's original model
+/// anchor for every registered zone. `LinesLayout` stores only the projected
+/// view-line anchor, which cannot be converted back losslessly when the zone
+/// follows hidden source lines. Keeping the model anchor from the delegate and
+/// the actual rounded whitespace height from ViewLayout gives coordinators a
+/// read-only, pixel-accurate snapshot without exposing the mutable registry.
+fn ViewZones::layout_infos(self : ViewZones) -> Array[(String, Int, Double)] {
+  guard self.context is Some(context) else { return [] }
+  let layout_heights : Map[String, Double] = Map([])
+  for whitespace in context.view_model.get_whitespaces() {
+    layout_heights.set(whitespace.id, whitespace.height.to_double())
+  }
+  let result : Array[(String, Int, Double)] = []
+  for _, zone in self.zones {
+    result.push(
+      (
+        zone.whitespace_id,
+        zone.delegate.after_line_number,
+        layout_heights.get(zone.whitespace_id).unwrap_or(0.0),
+      ),
+    )
+  }
+  result
+}
+
+///|
 fn ViewZones::zone_ordinal(
   _self : ViewZones,
   zone : @editor_browser.ViewZone,
@@ -589,11 +615,13 @@ fn ViewZones::layout_zone(
   guard self.zones.get(id) is Some(zone) else { return false }
   let props = self.compute_whitespace_props(zone.delegate)
   zone.is_in_hidden_area = props.is_in_hidden_area
-  // Ordinal and minimum width intentionally remain insertion-time facts.
+  // Ordinal remains an insertion-time ordering fact. Minimum width is live so
+  // viewport-rendered zone content can grow its horizontal extent lazily.
   whitespace_accessor.change_one_whitespace(
     zone.whitespace_id,
     props.after_view_line_number,
     props.height_in_px,
+    new_min_width=props.min_width_in_px,
   )
   self.safe_call_on_computed_height(zone.delegate, props.height_in_px)
   self.should_render = true
@@ -665,6 +693,22 @@ fn ViewZones::safe_call_on_dom_node_top(
 }
 
 ///|
+fn ViewZones::safe_call_on_dom_node_layout(
+  self : ViewZones,
+  zone : @editor_browser.ViewZone,
+  visible : Bool,
+  top : Double,
+) -> Unit {
+  match zone.on_dom_node_layout {
+    Some(callback) =>
+      callback(visible, top) catch {
+        _ => self.report_callback_error("onDomNodeLayout")
+      }
+    None => ()
+  }
+}
+
+///|
 fn ViewZones::report_callback_error(
   self : ViewZones,
   callback_name : String,
@@ -728,6 +772,11 @@ fn ViewZones::render(
           zone.delegate,
           visible_zone.vertical_offset - scroll_top,
         )
+        self.safe_call_on_dom_node_layout(
+          zone.delegate,
+          true,
+          visible_zone.vertical_offset - scroll_top,
+        )
       }
       None => {
         if zone.is_visible {
@@ -736,6 +785,11 @@ fn ViewZones::render(
         }
         self.safe_call_on_dom_node_top(
           zone.delegate,
+          offscreen_absolute_top - scroll_top,
+        )
+        self.safe_call_on_dom_node_layout(
+          zone.delegate,
+          false,
           offscreen_absolute_top - scroll_top,
         )
       }

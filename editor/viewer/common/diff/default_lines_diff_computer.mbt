@@ -1,62 +1,71 @@
-// The viewer's `DefaultLinesDiffComputer` — the API of
-// `vscode/src/vs/editor/common/diff/defaultLinesDiffComputer/
-// defaultLinesDiffComputer.ts` (checked-in vscode submodule) over a different engine.
-//
-// DEVIATION (by decision, 2026-07-09): the computation is delegated to Core's
-// `diff` package (a GNU-diffutils-style bidirectional Myers) instead of porting
-// Monaco's Myers + refinement pipeline. The source method contract, the result
-// types, and the two trivial-input branches are 1:1. Character-level inner
-// changes are computed with a bounded Core-diff scalar pass, but Monaco's
-// refinement heuristics (`optimizeSequenceDiffs`,
-// `extendDiffsToEntireWordIfAppropriate`, `removeShortMatches`,
-// `removeVeryShortMatching*`) are not ported;
-// - move detection (`computeMovedLines`) — the result field is not exposed and
-//   `options.compute_moves` is ignored;
-// - the timeout protocol — Core diff's `cutoff` bounds the search *depth*, not
-//   wall-clock time, and degrades silently to a correct-but-suboptimal
-//   script, so `hit_timeout` is always `false`.
-//   `options.max_computation_time_ms == 0` (Monaco's `InfiniteTimeout`) maps
-//   to an effectively-unbounded cutoff; any other value keeps Core diff's
-//   default `~sqrt(n+m)` heuristic.
-// Line-range boundaries may therefore differ from Monaco's output by
-// tie-breaking among equal adjacent lines; tests assert diff *validity*
-// (round-trip, ordering) and hand-checked fixtures, not byte parity.
-//
-// Parity ledger (source members): `computeDiff` trivial-equal branch (:28)
-// and one-side-empty-document branch (:33) — PORTED; the remainder of
-// `computeDiff` plus `refineDiff` and the assertion harness — N-A (replaced
-// by the Core diff engine per the deviation above).
+// Built-in synchronous document diff provider. It delegates line and scalar
+// matching to moonbitlang/core/diff's Myers implementation. This is an
+// intentional local algorithm choice, not an emulation of Monaco's advanced
+// refinement or timeout/move protocol.
 
 ///|
-/// `DefaultLinesDiffComputer` (`defaultLinesDiffComputer.ts:26`), engine
-/// swapped for Core diff (see the file header).
-struct DefaultLinesDiffComputer {
+/// Stateless Core-Myers document diff provider.
+pub struct CoreDocumentDiffProvider {
   _unit : Unit
 } derive(Eq, Debug)
 
 ///|
-fn DefaultLinesDiffComputer::DefaultLinesDiffComputer() -> DefaultLinesDiffComputer {
+pub fn CoreDocumentDiffProvider::CoreDocumentDiffProvider() -> CoreDocumentDiffProvider {
   { _unit: () }
 }
 
 ///|
-pub fn DefaultLinesDiffComputer::compute_diff(
-  self : DefaultLinesDiffComputer,
+fn snapshot_lines(snapshot : @model.TextSnapshot) -> Array[String] {
+  let lines : Array[String] = []
+  for line_number in 1..<=snapshot.line_count() {
+    lines.push(snapshot.get_line_content(line_number))
+  }
+  lines
+}
+
+///|
+pub fn CoreDocumentDiffProvider::compute_diff(
+  self : CoreDocumentDiffProvider,
+  original : @model.TextSnapshot,
+  modified : @model.TextSnapshot,
+  options : DocumentDiffOptions,
+) -> DocumentDiff {
+  self.compute_lines_diff(
+    snapshot_lines(original),
+    snapshot_lines(modified),
+    options,
+  )
+}
+
+///|
+fn CoreDocumentDiffProvider::compute_lines_diff(
+  self : CoreDocumentDiffProvider,
   original_lines : Array[String],
   modified_lines : Array[String],
-  options : LinesDiffComputerOptions,
-) -> LinesDiff {
+  options : DocumentDiffOptions,
+) -> DocumentDiff {
   ignore(self)
-  // `defaultLinesDiffComputer.ts:28`: a trivially-equal (empty or one-line)
-  // input diffs to nothing.
-  if original_lines.length() <= 1 && original_lines == modified_lines {
-    return { changes: [], hit_timeout: false }
+  // Normalize before both equality and empty-document handling. Otherwise a
+  // whitespace-only logical line and an empty line incorrectly remain a
+  // visible change when trim whitespace is ignored.
+  let old_input = if options.ignore_trim_whitespace {
+    original_lines.map(line => line.trim().to_owned())
+  } else {
+    original_lines
+  }
+  let new_input = if options.ignore_trim_whitespace {
+    modified_lines.map(line => line.trim().to_owned())
+  } else {
+    modified_lines
+  }
+  if old_input == new_input {
+    return { changes: [], additional_alignments: [] }
   }
 
-  // `defaultLinesDiffComputer.ts:33`: one side being the empty document maps
-  // to a single whole-document change.
-  if (original_lines.length() == 1 && original_lines[0].length() == 0) ||
-    (modified_lines.length() == 1 && modified_lines[0].length() == 0) {
+  // Preserve Monaco's useful empty-document shape: its one logical empty line
+  // participates in a single whole-document change.
+  if (old_input.length() == 1 && old_input[0].length() == 0) ||
+    (new_input.length() == 1 && new_input[0].length() == 0) {
     return {
       changes: [
         DetailedLineRangeMapping(
@@ -67,32 +76,19 @@ pub fn DefaultLinesDiffComputer::compute_diff(
             modified_lines,
             LineRange(1, original_lines.length() + 1),
             LineRange(1, modified_lines.length() + 1),
+            options.ignore_trim_whitespace,
           ),
         ),
       ],
-      hit_timeout: false,
+      additional_alignments: [],
     }
   }
 
-  // Engine: Core diff over the (optionally trimmed) line arrays. Trimming
-  // before hashing is how the source's `ignoreTrimWhitespace` line equality
-  // behaves at line granularity (`defaultLinesDiffComputer.ts:60`).
-  let old_input = if options.ignore_trim_whitespace {
-    original_lines.map(l => l.trim().to_owned())
-  } else {
-    original_lines
-  }
-  let new_input = if options.ignore_trim_whitespace {
-    modified_lines.map(l => l.trim().to_owned())
-  } else {
-    modified_lines
-  }
-  let cutoff : Int? = if options.max_computation_time_ms == 0 {
-    Some(0x7FFFFFFF)
-  } else {
-    None
-  }
-  let d = @core_diff.Diff::Diff(old=old_input[:], new=new_input[:], cutoff?)
+  let d = @core_diff.Diff::Diff(
+    old=old_input[:],
+    new=new_input[:],
+    algorithm=Myers,
+  )
 
   // Convert the flat edit script into hunks: each maximal run of
   // consecutive `Delete`/`Insert` edits (separated by `Equal` runs) is one
@@ -146,18 +142,40 @@ pub fn DefaultLinesDiffComputer::compute_diff(
             original,
             modified,
             compute_inner_changes(
-              original_lines, modified_lines, original, modified,
+              original_lines,
+              modified_lines,
+              original,
+              modified,
+              options.ignore_trim_whitespace,
             ),
           ),
         )
       }
     }
   }
-  { changes, hit_timeout: false }
+  { changes, additional_alignments: [] }
 }
 
 ///|
-pub extend DefaultLinesDiffComputer with Debug::{to_repr}
+pub impl DocumentDiffProvider for CoreDocumentDiffProvider with fn compute_diff(
+  self,
+  original,
+  modified,
+  options,
+) {
+  self.compute_diff(original, modified, options)
+}
 
 ///|
-pub extend DefaultLinesDiffComputer with Eq::{equal, not_equal}
+pub impl DocumentDiffProvider for CoreDocumentDiffProvider with fn on_did_change(
+  _self,
+  _listener,
+) {
+  @base_common.Disposable::from(() => ())
+}
+
+///|
+pub extend CoreDocumentDiffProvider with Debug::{to_repr}
+
+///|
+pub extend CoreDocumentDiffProvider with Eq::{equal, not_equal}

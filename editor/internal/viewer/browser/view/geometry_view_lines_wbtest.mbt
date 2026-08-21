@@ -8,7 +8,7 @@ fn geometry_view_lines(
   visible_range : @base_common.Range,
   layout : @view_layout.ViewLayout,
   fixture : ViewLineFixture,
-  scheduler? : RunOnceScheduler = RunOnceScheduler(200),
+  scheduler? : @base_browser.RunOnceScheduler = RunOnceScheduler(200),
   lines_content? : @rdom.Element = view_line_fixture_context(fixture),
 ) -> ViewLines {
   let configuration = ViewLinesConfiguration::ViewLinesConfiguration()
@@ -498,9 +498,10 @@ test "ViewLines width sweep preserves one ceil monotonic and full-document reset
 ///|
 test "ViewLines scheduler debounces fires the latest callback and disposes pending work" {
   let spy = GeometryTimerSpy::new()
-  let scheduler = RunOnceScheduler::new_with_timer(200, (callback, delay_ms) => {
-    spy.schedule_timeout(callback, delay_ms)
-  })
+  let scheduler = @base_browser.RunOnceScheduler::new_with_timer(200, (
+    callback,
+    delay_ms,
+  ) => spy.schedule_timeout(callback, delay_ms))
   let fired : Array[Int] = []
   scheduler.schedule(() => fired.push(1))
   guard scheduler.handle is Some(_) else {
@@ -533,9 +534,10 @@ test "ViewLines scheduler debounces fires the latest callback and disposes pendi
 ///|
 test "ViewLines 200ms scheduler guards and cancel-before-slow ordering" {
   let spy = GeometryTimerSpy::new()
-  let scheduler = RunOnceScheduler::new_with_timer(200, (callback, delay_ms) => {
-    spy.schedule_timeout(callback, delay_ms)
-  })
+  let scheduler = @base_browser.RunOnceScheduler::new_with_timer(200, (
+    callback,
+    delay_ms,
+  ) => spy.schedule_timeout(callback, delay_ms))
   let fixture = new_view_line_fixture(12.0, 10.0)
   let input = geometry_line_input("a")
   let line = mapped_fixture_line(input, fixture, 2)

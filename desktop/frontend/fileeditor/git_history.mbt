@@ -1,6 +1,6 @@
 // Git Graph and immutable historical comparisons. Repository plumbing stays
 // in the native host; this package owns request fencing, graph presentation
-// state, and the inert DiffViewer models selected from the Review sidebar.
+// state, and the inert DiffEditor models selected from the Review sidebar.
 
 ///|
 const GitHistoryPageSize = 50

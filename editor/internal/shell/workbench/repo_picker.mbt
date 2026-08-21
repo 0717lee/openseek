@@ -182,7 +182,7 @@ fn workspace_root_switched_update(
       viewer_cmd(() => {
         workbench_services().remote_language.invalidate()
         workbench_services().markers.change_all("moon", [])
-        workbench_viewer().set_model(None)
+        clear_workbench_model()
       }),
       workspace_file_tree().refresh(),
       auto_open_first_file_cmd(emit),

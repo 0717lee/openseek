@@ -13,12 +13,16 @@ const preview =
   '.monaco-editor.readonly-editor';
 const markdownEditor =
   '.definition-markdown-host > .moonbit-viewer-markdown-document';
+const markdownArticle =
+  `${markdownEditor} .moonbit-viewer-markdown-document-article`;
 const markdownPeek =
   `${markdownEditor} > .moonbit-viewer-markdown-document-overlays > ` +
   '.moonbit-viewer-references-peek-overlay';
 const markdownPreview =
   `${markdownPeek} .moonbit-viewer-references-peek-preview > ` +
-  '.moonbit-viewer-markdown-document';
+  '.monaco-editor.readonly-editor';
+const markdownDefinitionLink =
+  `${markdownEditor} .moonbit-viewer-markdown-definition-link`;
 const contextMenu =
   'body > .moonbit-context-menu:not(.moonbit-context-submenu)';
 const goToDefinitionAction =
@@ -27,6 +31,9 @@ const goToDefinitionAction =
 const peekDefinitionAction =
   `${contextMenu} ` +
   '[data-context-menu-command="editor.action.peekDefinition"]';
+const goToReferencesAction =
+  `${contextMenu} ` +
+  '[data-context-menu-command="editor.action.goToReferences"]';
 const peekReferencesAction =
   `${contextMenu} ` +
   '[data-context-menu-command="editor.action.referenceSearch.trigger"]';
@@ -57,6 +64,13 @@ async function mountDefinitionFixture(page, testInfo) {
 
 async function state(page) {
   return page.evaluate(() => globalThis.__definitionControls.state());
+}
+
+async function control(page, method) {
+  await page.evaluate(
+    (name) => globalThis.__definitionControls[name](),
+    method,
+  );
 }
 
 async function resetScroll(page) {
@@ -207,13 +221,16 @@ test('HTML context menu preserves an enclosing selection and runs Go to Definiti
     await expect(page.locator(contextMenu)).toHaveCount(1);
     await expect(page.locator(`${contextMenu} [role="menu"]`)).toHaveCount(1);
     await expect(page.locator(`${contextMenu} [role="menuitem"]`)).toHaveCount(
-      3,
+      4,
     );
     await expect(page.locator(goToDefinitionAction)).toContainText(
       'Go to Definition',
     );
     await expect(page.locator(peekDefinitionAction)).toContainText(
       'Peek Definition',
+    );
+    await expect(page.locator(goToReferencesAction)).toContainText(
+      'Go to References',
     );
     await expect(page.locator(peekReferencesAction)).toContainText(
       'Peek References',
@@ -455,7 +472,69 @@ test('F4 replaces a multi-definition preview without losing preview focus', asyn
   }
 });
 
-test('Alt+F12 from semantic Markdown mounts a projection-scoped Peek overlay and restores focus', async ({
+test('F12 from semantic Markdown navigates the original source model', async ({
+  page,
+}, testInfo) => {
+  const reporter = await mountDefinitionFixture(page, testInfo);
+  try {
+    const beforeCalls = (await state(page)).markdownProviderCalls;
+    const point = await markdownTextRange(
+      page,
+      'definition_alpha',
+      true,
+      0,
+    );
+    await page.mouse.click(point.x, point.y);
+    await page.keyboard.press('F12');
+    await expect
+      .poll(async () => (await state(page)).markdownProviderCalls)
+      .toBe(beforeCalls + 1);
+    await expect(page.locator(markdownPeek)).toHaveCount(0);
+    await expect(page.locator(markdownPreview)).toHaveCount(0);
+    await expect
+      .poll(() =>
+        page.locator(markdownEditor).evaluate((root) =>
+          root.querySelector(
+            '.moonbit-viewer-markdown-document-viewport',
+          ).scrollTop,
+        ),
+      )
+      .toBeGreaterThan(0);
+
+  } finally {
+    reporter.dispose();
+  }
+});
+
+test('F12 from semantic Markdown delegates a cross-model location to the opener', async ({
+  page,
+}, testInfo) => {
+  const reporter = await mountDefinitionFixture(page, testInfo);
+  try {
+    await control(page, 'enable_markdown_cross_definition');
+    await control(page, 'clear_opened_locations');
+    const point = await markdownTextRange(
+      page,
+      'definition_alpha',
+      true,
+      0,
+    );
+    await page.mouse.click(point.x, point.y);
+    await page.keyboard.press('F12');
+    await expect
+      .poll(async () => (await state(page)).openedUris)
+      .toHaveLength(1);
+    const snapshot = await state(page);
+    expect(snapshot.openedUris[0]).toContain('/definition-remote.mbt');
+    expect(snapshot.openedModes).toEqual(['Current']);
+    expect(snapshot.resolverCalls).toBe(0);
+    await expect(page.locator(markdownPeek)).toHaveCount(0);
+  } finally {
+    reporter.dispose();
+  }
+});
+
+test('Alt+F12 mounts a Markdown overlay with an injected CodeEditor preview and restores focus', async ({
   page,
 }, testInfo) => {
   const reporter = await mountDefinitionFixture(page, testInfo);
@@ -469,16 +548,21 @@ test('Alt+F12 from semantic Markdown mounts a projection-scoped Peek overlay and
     await page.mouse.click(point.x, point.y);
     await page.keyboard.press('Alt+F12');
     await expect(page.locator(markdownPeek)).toHaveCount(1);
+    await expect(page.locator(markdownPeek)).toHaveAttribute(
+      'aria-label',
+      'Peek Definition',
+    );
     await expect(page.locator(markdownPreview)).toHaveCount(1);
+    await expect(page.locator(markdownPreview)).toContainText(
+      'definition_alpha',
+    );
 
     await page.locator('.definition-markdown-host').evaluate((host) => {
       host.style.width = '640px';
     });
     await settle(page);
     const geometry = await page.locator(markdownPeek).evaluate((root) => {
-      const editor = root.closest(
-        '.moonbit-viewer-markdown-document',
-      );
+      const editor = root.closest('.moonbit-viewer-markdown-document');
       const rootRect = root.getBoundingClientRect();
       const editorRect = editor.getBoundingClientRect();
       return {
@@ -522,10 +606,363 @@ test('Alt+F12 from semantic Markdown mounts a projection-scoped Peek overlay and
     await page.mouse.click(freshPoint.x, freshPoint.y);
     await page.keyboard.press('Alt+F12');
     await expect(page.locator(markdownPeek)).toHaveCount(1);
-    await page.evaluate(
-      () => globalThis.__definitionControls.replace_markdown_source(),
-    );
+    await page.locator(markdownEditor).evaluate((root) => {
+      globalThis.__definitionRetainedMarkdownRoot = root;
+    });
+    await control(page, 'replace_markdown_source');
+    await expect(page.locator(markdownEditor)).toHaveCount(1);
+    expect(
+      await page.evaluate(
+        (selector) =>
+          document.querySelector(selector) ===
+          globalThis.__definitionRetainedMarkdownRoot,
+        markdownEditor,
+      ),
+    ).toBe(true);
     await expect(page.locator(markdownPeek)).toHaveCount(0);
+
+    const replacementPoint = await markdownTextRange(
+      page,
+      'definition_alpha',
+      true,
+      0,
+    );
+    await page.mouse.click(replacementPoint.x, replacementPoint.y);
+    await page.keyboard.press('Alt+F12');
+    await expect(page.locator(markdownPeek)).toHaveCount(1);
+    await control(page, 'replace_markdown_model');
+    await expect(page.locator(markdownPeek)).toHaveCount(0);
+    await expect(page.locator(markdownEditor)).toHaveCount(1);
+  } finally {
+    reporter.dispose();
+  }
+});
+
+test('Shift+F12 uses Go to References and keeps the Markdown controller local', async ({
+  page,
+}, testInfo) => {
+  const reporter = await mountDefinitionFixture(page, testInfo);
+  try {
+    const before = await state(page);
+    const point = await markdownTextRange(
+      page,
+      'definition_alpha',
+      true,
+      0,
+    );
+    await page.mouse.click(point.x, point.y);
+    await page.keyboard.press('Shift+F12');
+    await expect(page.locator(markdownPeek)).toHaveCount(1);
+    await expect(page.locator(markdownPeek)).toHaveAttribute(
+      'aria-label',
+      'Peek References',
+    );
+    await expect(page.locator(markdownPreview)).toHaveCount(1);
+    await expect
+      .poll(async () => (await state(page)).referencesProviderCalls)
+      .toBe(before.referencesProviderCalls + 1);
+    expect((await state(page)).markdownProviderCalls).toBe(
+      before.markdownProviderCalls,
+    );
+    await expect(page.locator(peek)).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(page.locator(markdownPeek)).toHaveCount(0);
+  } finally {
+    reporter.dispose();
+  }
+});
+
+test('multiple Markdown definitions query once and default to Peek', async ({
+  page,
+}, testInfo) => {
+  const reporter = await mountDefinitionFixture(page, testInfo);
+  try {
+    await control(page, 'enable_multiple_markdown_definitions');
+    const beforeCalls = (await state(page)).markdownProviderCalls;
+    const point = await markdownTextRange(
+      page,
+      'definition_alpha',
+      true,
+      0,
+    );
+    await page.mouse.click(point.x, point.y);
+    await page.keyboard.press('F12');
+    await expect(page.locator(markdownPeek)).toHaveCount(1);
+    await expect(page.locator(`${markdownPeek} [role="treeitem"]`)).toHaveCount(
+      2,
+    );
+    await expect(page.locator(markdownPreview)).toHaveCount(1);
+    expect((await state(page)).markdownProviderCalls).toBe(beforeCalls + 1);
+    await page.keyboard.press('Escape');
+  } finally {
+    reporter.dispose();
+  }
+});
+
+test('Markdown right-click commands and modifier-click use the shared actions', async ({
+  page,
+}, testInfo) => {
+  const reporter = await mountDefinitionFixture(page, testInfo);
+  try {
+    let point = await markdownTextRange(
+      page,
+      'definition_alpha',
+      true,
+      0,
+    );
+    expect(
+      await contextMenuDefaultPrevented(page, markdownArticle, () =>
+        page.mouse.click(point.x, point.y, { button: 'right' }),
+      ),
+    ).toBe(true);
+    await expect(page.locator(`${contextMenu} [role="menuitem"]`)).toHaveCount(
+      4,
+    );
+    await expect(page.locator(goToDefinitionAction)).toContainText(
+      'Go to Definition',
+    );
+    await expect(page.locator(peekDefinitionAction)).toContainText(
+      'Peek Definition',
+    );
+    await expect(page.locator(goToReferencesAction)).toContainText(
+      'Go to References',
+    );
+    await expect(page.locator(peekReferencesAction)).toContainText(
+      'Peek References',
+    );
+    const referenceCalls = (await state(page)).referencesProviderCalls;
+    await page.locator(goToReferencesAction).click();
+    await expect(page.locator(markdownPeek)).toHaveAttribute(
+      'aria-label',
+      'Peek References',
+    );
+    expect((await state(page)).referencesProviderCalls).toBe(
+      referenceCalls + 1,
+    );
+    await page.keyboard.press('Escape');
+
+    point = await markdownTextRange(page, 'definition_alpha', true, 0);
+    await page.mouse.move(2, 2);
+    await page.keyboard.down(platformModifier);
+    await page.mouse.move(point.x, point.y);
+    await expect(page.locator(markdownDefinitionLink)).not.toHaveCount(0);
+    const definitionCalls = (await state(page)).markdownProviderCalls;
+    await page.mouse.down();
+    await page.mouse.up();
+    await expect
+      .poll(async () => (await state(page)).markdownProviderCalls)
+      .toBe(definitionCalls + 1);
+    await expect(page.locator(markdownDefinitionLink)).toHaveCount(0);
+    await page.keyboard.up(platformModifier);
+  } finally {
+    await page.keyboard.up(platformModifier).catch(() => {});
+    reporter.dispose();
+  }
+});
+
+test('invalid cross-model resolver output is released and leaves Peek unavailable', async ({
+  page,
+}, testInfo) => {
+  const reporter = await mountDefinitionFixture(page, testInfo);
+  try {
+    await control(page, 'enable_markdown_cross_definition');
+    await control(page, 'use_wrong_resolver_model');
+    const point = await markdownTextRange(
+      page,
+      'definition_alpha',
+      true,
+      0,
+    );
+    await page.mouse.click(point.x, point.y);
+    await page.keyboard.press('Alt+F12');
+    await expect(page.locator(markdownPeek)).toHaveCount(1);
+    await expect(
+      page.locator(`${markdownPeek} .moonbit-viewer-references-peek-status`),
+    ).toContainText('No preview available');
+    await expect
+      .poll(async () => {
+        const snapshot = await state(page);
+        return [snapshot.resolverAcquires, snapshot.resolverReleases];
+      })
+      .toEqual([2, 2]);
+    await expect(page.locator(markdownPreview)).toHaveCount(0);
+    await page.keyboard.press('Escape');
+  } finally {
+    reporter.dispose();
+  }
+});
+
+test('missing cross-model previews stay unavailable without acquiring leases', async ({
+  page,
+}, testInfo) => {
+  const reporter = await mountDefinitionFixture(page, testInfo);
+  try {
+    await control(page, 'enable_markdown_cross_definition');
+    await control(page, 'use_missing_resolver');
+    let point = await markdownTextRange(
+      page,
+      'definition_alpha',
+      true,
+      0,
+    );
+    await page.mouse.click(point.x, point.y);
+    await page.keyboard.press('Alt+F12');
+    await expect(
+      page.locator(`${markdownPeek} .moonbit-viewer-references-peek-status`),
+    ).toContainText('No preview available');
+    await expect
+      .poll(async () => (await state(page)).resolverCalls)
+      .toBe(2);
+    let snapshot = await state(page);
+    expect(snapshot.resolverAcquires).toBe(0);
+    expect(snapshot.resolverReleases).toBe(0);
+    await page.keyboard.press('Escape');
+  } finally {
+    reporter.dispose();
+  }
+});
+
+test('disposed cross-model previews release every rejected resolver lease', async ({
+  page,
+}, testInfo) => {
+  const reporter = await mountDefinitionFixture(page, testInfo);
+  try {
+    await control(page, 'enable_markdown_cross_definition');
+    await control(page, 'dispose_remote_model');
+    const point = await markdownTextRange(
+      page,
+      'definition_alpha',
+      true,
+      0,
+    );
+    await page.mouse.click(point.x, point.y);
+    await page.keyboard.press('Alt+F12');
+    await expect(
+      page.locator(`${markdownPeek} .moonbit-viewer-references-peek-status`),
+    ).toContainText('No preview available');
+    await expect
+      .poll(async () => {
+        const snapshot = await state(page);
+        return [snapshot.resolverAcquires, snapshot.resolverReleases];
+      })
+      .toEqual([2, 2]);
+    await page.keyboard.press('Escape');
+  } finally {
+    reporter.dispose();
+  }
+});
+
+test('Code and Markdown Peek controllers keep simultaneous sessions isolated', async ({
+  page,
+}, testInfo) => {
+  const reporter = await mountDefinitionFixture(page, testInfo);
+  try {
+    await control(page, 'enable_multiple_definitions');
+    const codePoint = await referencePoint(page);
+    await page.mouse.click(codePoint.x, codePoint.y);
+    await page.keyboard.press('Alt+F12');
+    await expect(page.locator(peek)).toHaveCount(1);
+
+    const markdownPoint = await markdownTextRange(
+      page,
+      'definition_alpha',
+      true,
+      0,
+    );
+    await page.mouse.click(markdownPoint.x, markdownPoint.y);
+    await page.keyboard.press('Alt+F12');
+    await expect(page.locator(markdownPeek)).toHaveCount(1);
+    await expect(page.locator(peek)).toHaveCount(1);
+
+    await page.keyboard.press('Escape');
+    await expect(page.locator(markdownPeek)).toHaveCount(0);
+    await expect(page.locator(peek)).toHaveCount(1);
+    await page.locator(preview).focus();
+    await page.keyboard.press('Escape');
+    await expect(page.locator(peek)).toHaveCount(0);
+  } finally {
+    reporter.dispose();
+  }
+});
+
+test('a newer Markdown request cancels a pending predecessor before one cross-model open', async ({
+  page,
+}, testInfo) => {
+  const reporter = await mountDefinitionFixture(page, testInfo);
+  try {
+    await control(page, 'enable_markdown_cross_definition');
+    await control(page, 'delay_markdown_provider');
+    const point = await markdownTextRange(
+      page,
+      'definition_alpha',
+      true,
+      0,
+    );
+    const beforeCalls = (await state(page)).markdownProviderCalls;
+    await page.mouse.click(point.x, point.y);
+    await page.keyboard.press('F12');
+    await expect
+      .poll(async () => (await state(page)).markdownProviderCalls)
+      .toBe(beforeCalls + 1);
+    await page.keyboard.press('F12');
+    await expect
+      .poll(async () => (await state(page)).markdownProviderCalls)
+      .toBe(beforeCalls + 2);
+    await control(page, 'release_markdown_provider');
+    await expect
+      .poll(async () => (await state(page)).openedUris)
+      .toHaveLength(1);
+    const snapshot = await state(page);
+    expect(snapshot.openedUris[0]).toContain('/definition-remote.mbt');
+    expect(snapshot.openedModes).toEqual(['Current']);
+  } finally {
+    reporter.dispose();
+  }
+});
+
+test('projection replacement cancels a pending Markdown provider and rebinds navigation', async ({
+  page,
+}, testInfo) => {
+  const reporter = await mountDefinitionFixture(page, testInfo);
+  try {
+    await control(page, 'delay_markdown_provider');
+    let point = await markdownTextRange(
+      page,
+      'definition_alpha',
+      true,
+      0,
+    );
+    await page.mouse.click(point.x, point.y);
+    await page.keyboard.press('F12');
+    await expect
+      .poll(async () => (await state(page)).markdownProviderPending)
+      .toBe(true);
+    await control(page, 'replace_markdown_source');
+    await expect(page.locator(markdownPeek)).toHaveCount(0);
+    await control(page, 'release_markdown_provider');
+    await expect
+      .poll(async () => (await state(page)).markdownProviderPending)
+      .toBe(false);
+    await settle(page);
+    expect((await state(page)).openedUris).toEqual([]);
+    await expect(page.locator(markdownPeek)).toHaveCount(0);
+
+    point = await markdownTextRange(page, 'definition_alpha', true, 0);
+    const beforeCalls = (await state(page)).markdownProviderCalls;
+    await page.mouse.click(point.x, point.y);
+    await page.keyboard.press('F12');
+    await expect
+      .poll(async () => (await state(page)).markdownProviderCalls)
+      .toBe(beforeCalls + 1);
+    await expect
+      .poll(() =>
+        page.locator(markdownEditor).evaluate((root) =>
+          root.querySelector(
+            '.moonbit-viewer-markdown-document-viewport',
+          ).scrollTop,
+        ),
+      )
+      .toBeGreaterThan(0);
   } finally {
     reporter.dispose();
   }

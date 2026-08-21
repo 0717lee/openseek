@@ -110,6 +110,7 @@ pub fn View::measure_line_selection(Self, Int, Int, Int, keep_empty? : Bool) -> 
 pub fn View::offset_for_column(Self, Int, Int) -> Double
 pub fn View::render(Self, ViewContext, ViewRenderInput) -> Unit
 pub fn View::should_suppress_mouse_down_on_view_zone(Self, String) -> Bool
+pub fn View::view_zone_layout_infos(Self) -> Array[(String, Int, Double)]
 pub fn View::visible_range_for_position(Self, Int, Int) -> HorizontalPosition?
 
 type ViewConfigurationChangedEvent

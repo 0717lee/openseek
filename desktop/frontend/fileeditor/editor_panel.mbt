@@ -11,10 +11,14 @@
 const ViewerHostId = "viewer-host"
 
 ///|
-/// The stable sibling host reserved for the switchable DiffViewer. The DOM id
-/// stays compatible with the former eager unified renderer while the
-/// imperative owner and contents migrate in place.
-const DiffViewerHostId = "unified-diff-host"
+/// The stable sibling host for rich Markdown source presentation. Selection
+/// is an explicit desktop policy; the code-only Viewer never changes its own
+/// presentation from model metadata.
+const MarkdownViewerHostId = "markdown-viewer-host"
+
+///|
+/// The stable sibling host reserved for the switchable DiffEditor.
+const DiffEditorHostId = "diff-editor-host"
 
 ///|
 /// A model in this URI scheme is a Git HEAD snapshot, not a document the
@@ -34,25 +38,41 @@ const HistoryRevisionScheme = "openseek-git-history"
 const DiagnosticsOwner = "moon-lsp"
 
 ///|
+const DefaultEditorFontFamily = "\"Geist Mono\", \"SF Mono\", ui-monospace, \"Cascadia Mono\", Menlo, Consolas, monospace"
+
+///|
+const DefaultEditorFontSize : Double = 13.0
+
+///|
 /// The viewer's imperative state — the attached widget, its services, and the
 /// document it currently shows. None of this may live in the Rabbita model
 /// (the virtual DOM must not own imperative DOM state), so it is collected
 /// into this one module-level instance instead of loose globals.
 priv struct ViewerHost {
-  // The single viewer instance. `None` until the first `request_viewer_mount`
-  // finds the host element in the DOM — the viewer API constructs attached
+  // The code-only source Viewer. `None` until the first
+  // `request_viewer_mount` finds the host element in the DOM — the Viewer API constructs attached
   // (`Viewer::create`), so creation and mounting are one step. The host is
   // rendered on every screen from the first paint, and every file read is
   // batched behind a mount request whose after-render tick precedes the async
   // reply, so by the time a document arrives the viewer exists.
   mut viewer : @viewer.Viewer?
   // Kept separate from the source Viewer so a Diff/Source toggle preserves
-  // the source model, selection, folding, and scroll state. The comparison
-  // itself is composed from two ordinary Viewers.
-  mut diff_viewer : @viewer.DiffViewer?
+  // the source model, selection, folding, and scroll state. DiffEditor owns
+  // two code kernels directly rather than wrapping public Viewers.
+  mut diff_editor : @viewer.DiffEditor?
+  // Rich Markdown is a separate public surface, never a presentation branch
+  // inside the code Viewer. It shares product services but owns its own model
+  // and view-state lifetime.
+  mut markdown_viewer : @viewer.MarkdownViewer?
   // Desired full-comparison layout survives a pre-mount command in the same
   // way font settings do for the source Viewer.
-  mut diff_render_mode : @viewer.DiffEditorRenderMode
+  mut diff_options : @viewer.DiffEditorOptions
+  // Desktop owns MoonBit-specific comparison policy. The provider stays
+  // outside the reusable editor so non-`.mbt` documents can force Core while
+  // retaining the user's last Token/Tree preference.
+  diff_provider : @moon_diff_provider.MoonDocumentDiffProvider
+  mut diff_mode : ReviewDiffMode
+  mut diff_ignore_comments : Bool
   // A positioned transcript link keeps its caret collapsed at the requested
   // column. This persistent whole-line decoration makes the destination visible
   // without turning the line into a selection and opening Comment UI. Symbol
@@ -85,6 +105,9 @@ priv struct ViewerHost {
   // Monotonic model version; the viewer treats a new version as a new
   // document.
   mut version : Int
+  // Imperative canvas/Markdown renderers must receive theme changes through
+  // their options API; CSS data attributes alone cannot repaint their pixels.
+  mut theme : String
   // Desired family survives before the Viewer mounts, so startup settings and
   // a later first file open cannot race back to the editor package default.
   mut font_family : String
@@ -96,13 +119,27 @@ priv struct ViewerHost {
   // Scroll is DOM state, so it lives here beside the viewer rather than in
   // the Rabbita model.
   view_states : Map[String, @viewer.ViewerViewState]
+  markdown_view_states : Map[String, @viewer.MarkdownViewerViewState]
 }
 
 ///|
 let viewer_state : ViewerHost = {
   viewer: None,
-  diff_viewer: None,
-  diff_render_mode: @viewer.SideBySide,
+  diff_editor: None,
+  markdown_viewer: None,
+  diff_options: @viewer.DiffEditorOptions(
+    editor_options=@viewer.ViewerOptions(
+      theme="light",
+      soft_wrap=true,
+      font_family=DefaultEditorFontFamily,
+      font_size=DefaultEditorFontSize,
+    ),
+    layout=@viewer.SideBySide,
+    automatic_inline=false,
+  ),
+  diff_provider: @moon_diff_provider.MoonDocumentDiffProvider(),
+  diff_mode: ReviewDiffCore,
+  diff_ignore_comments: true,
   point_range_highlight: None,
   search_match_highlights: None,
   services: None,
@@ -110,15 +147,111 @@ let viewer_state : ViewerHost = {
   relative: None,
   navigation: None,
   version: 0,
-  font_family: "\"Geist Mono\", \"SF Mono\", ui-monospace, \"Cascadia Mono\", Menlo, Consolas, monospace",
-  font_size: 13.0,
+  theme: "light",
+  font_family: DefaultEditorFontFamily,
+  font_size: DefaultEditorFontSize,
   view_states: Map([]),
+  markdown_view_states: Map([]),
 }
 
 ///|
 /// The mounted viewer, or `None` before the first mount.
 fn mounted_viewer() -> @viewer.Viewer? {
   viewer_state.viewer
+}
+
+///|
+fn mounted_markdown_viewer() -> @viewer.MarkdownViewer? {
+  viewer_state.markdown_viewer
+}
+
+///|
+fn mounted_diff_editor() -> @viewer.DiffEditor? {
+  viewer_state.diff_editor
+}
+
+///|
+priv enum ActiveEditorSurface {
+  CodeEditorSurface
+  MarkdownEditorSurface
+  DiffEditorSurface
+}
+
+///|
+fn active_editor_surface_from_visibility(
+  code_visible : Bool,
+  markdown_visible : Bool,
+  diff_visible : Bool,
+) -> ActiveEditorSurface? {
+  if diff_visible {
+    Some(DiffEditorSurface)
+  } else if markdown_visible {
+    Some(MarkdownEditorSurface)
+  } else if code_visible {
+    Some(CodeEditorSurface)
+  } else {
+    None
+  }
+}
+
+///|
+fn editor_surface_host_visible(host_id : String) -> Bool {
+  guard @dom.document().get_element_by_id(host_id).to_option() is Some(host) else {
+    return false
+  }
+  let rect = host.get_bounding_client_rect()
+  rect.get_width() > 0.0 && rect.get_height() > 0.0
+}
+
+///|
+fn active_editor_surface() -> ActiveEditorSurface? {
+  active_editor_surface_from_visibility(
+    editor_surface_host_visible(ViewerHostId),
+    editor_surface_host_visible(MarkdownViewerHostId),
+    editor_surface_host_visible(DiffEditorHostId),
+  )
+}
+
+///|
+fn layout_active_editor_surface() -> Unit {
+  match active_editor_surface() {
+    Some(CodeEditorSurface) =>
+      match mounted_viewer() {
+        Some(viewer) => viewer.layout()
+        None => ()
+      }
+    Some(MarkdownEditorSurface) =>
+      match mounted_markdown_viewer() {
+        Some(viewer) => viewer.layout()
+        None => ()
+      }
+    Some(DiffEditorSurface) =>
+      match mounted_diff_editor() {
+        Some(viewer) => viewer.layout()
+        None => ()
+      }
+    None => ()
+  }
+}
+
+///|
+/// Resolves feedback for the live working document. The code source Viewer is
+/// normally authoritative; when rich Markdown is selected it is detached, so
+/// the modified DiffEditor kernel becomes the working-document surface.
+fn working_feedback_model(
+  source_model : @model.TextModel?,
+  diff_model : @viewer.DiffEditorModel?,
+  resource : @common.Uri,
+) -> @model.TextModel? {
+  match source_model {
+    Some(model) if model.uri.to_string() == resource.to_string() => Some(model)
+    _ =>
+      match diff_model {
+        Some(model) if model.modified.uri.to_string() == resource.to_string() =>
+          Some(model.modified)
+        _ => None
+      }
+  }
 }
 
 ///|
@@ -146,13 +279,94 @@ fn register_tokenizers() -> Unit {
 }
 
 ///|
+fn ReviewDiffMode::provider_mode(
+  self : ReviewDiffMode,
+) -> @moon_diff_provider.MoonDiffMode {
+  match self {
+    ReviewDiffCore => @moon_diff_provider.Core
+    ReviewDiffToken => @moon_diff_provider.Token
+    ReviewDiffTree => @moon_diff_provider.Tree
+  }
+}
+
+///|
+fn review_diff_mode(mode : @moon_diff_provider.MoonDiffMode) -> ReviewDiffMode {
+  match mode {
+    @moon_diff_provider.Core => ReviewDiffCore
+    @moon_diff_provider.Token => ReviewDiffToken
+    @moon_diff_provider.Tree => ReviewDiffTree
+  }
+}
+
+///|
+fn supports_moon_diff(path : String) -> Bool {
+  path.to_lower().has_suffix(".mbt")
+}
+
+///|
+fn uses_markdown_presentation(name : String) -> Bool {
+  name.to_lower().has_suffix(".md") || language_id(name) == "markdown"
+}
+
+///|
+fn markdown_resource_kind(name : String) -> @viewer.MarkdownResourceKind {
+  if name.to_lower().has_suffix(".mbt.md") {
+    @viewer.MoonBitMarkdown
+  } else {
+    @viewer.OrdinaryMarkdown
+  }
+}
+
+///|
+fn effective_diff_provider_mode(
+  mode : ReviewDiffMode,
+  supports_moonbit : Bool,
+) -> @moon_diff_provider.MoonDiffMode {
+  if supports_moonbit {
+    mode.provider_mode()
+  } else {
+    @moon_diff_provider.Core
+  }
+}
+
+///|
+fn configure_diff_provider(supports_moonbit : Bool) -> Unit {
+  let provider_mode = effective_diff_provider_mode(
+    viewer_state.diff_mode,
+    supports_moonbit,
+  )
+  viewer_state.diff_provider.set_ignore_comments(
+    viewer_state.diff_ignore_comments,
+  )
+  viewer_state.diff_provider.set_mode(provider_mode)
+}
+
+///|
+/// Apply desktop-owned provider preferences to the current comparison. The
+/// requested Moon mode is retained even when a non-`.mbt` model forces Core.
+fn apply_review_diff_provider(
+  mode : ReviewDiffMode,
+  ignore_comments : Bool,
+) -> @cmd.Cmd {
+  @cmd.custom_cmd(_scheduler => {
+    viewer_state.diff_mode = mode
+    viewer_state.diff_ignore_comments = ignore_comments
+    let supports_moonbit = viewer_state.diff_editor
+      .bind(editor => editor.get_model())
+      .map(model => supports_moon_diff(model.modified.uri.path))
+      .unwrap_or(false)
+    configure_diff_provider(supports_moonbit)
+  })
+}
+
+///|
 /// Create the viewer in its host element after the next paint, once (the
 /// tokenizers and hover provider register with it). A no-op if already
 /// mounted or the host element is not in the DOM yet.
 ///
-/// Mounting also wires both ordinary-Viewer comment flows into the update
+/// Mounting also wires both code-pane comment flows into the update
 /// loop. Working-side feedback becomes `EditorCommentAdded`; feedback filed on
-/// the original pane becomes `UnifiedDiffCommentAdded` with original-revision
+/// the original pane becomes `DiffCommentAdded` with original-revision
 /// identity. The main package turns either event into a composer chip.
 fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
   @cmd.custom_cmd(
@@ -178,7 +392,7 @@ fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
           host,
           services=services.viewer_services,
           options=@viewer.ViewerOptions(
-            theme="light",
+            theme=viewer_state.theme,
             placeholder="Select a file to view",
             font_family=viewer_state.font_family,
             font_size=viewer_state.font_size,
@@ -196,11 +410,18 @@ fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
             return
           }
           guard viewer_state.relative is Some(file) else { return }
-          // The modified pane uses the source Viewer's live URI and exact
-          // content, so both submit the same working-document event and retain
-          // exact columns.
-          if viewer.get_model() is Some(model) &&
-            model.uri.to_string() == event.feedback.resource.to_string() {
+          // The modified pane and code source use the same live URI. Rich
+          // Markdown detaches that source Viewer, so resolve the modified diff
+          // model as the fallback working-document owner.
+          let diff_model = viewer_state.diff_editor.bind(editor => {
+            editor.get_model()
+          })
+          if working_feedback_model(
+              viewer.get_model(),
+              diff_model,
+              event.feedback.resource,
+            )
+            is Some(model) {
             scheduler.add(
               dispatch(
                 EditorCommentAdded(
@@ -219,8 +440,7 @@ fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
           // host language providers. Their feedback still uses the ordinary
           // Viewer UI and is projected onto the existing original-side chip
           // contract, including a key for clearing that Viewer's bubble.
-          guard viewer_state.diff_viewer is Some(diff_viewer) &&
-            diff_viewer.get_model() is Some(diff_model) &&
+          guard diff_model is Some(diff_model) &&
             diff_model.original.uri.to_string() ==
             event.feedback.resource.to_string() else {
             return
@@ -230,19 +450,14 @@ fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
           )
           scheduler.add(
             dispatch(
-              unified_diff_comment_message(
+              diff_comment_message(
                 file,
-                {
-                  line: {
-                    kind: @unified_diff.Deletion,
-                    original_line_number: Some(
-                      event.feedback.range.start_line_number,
-                    ),
-                    modified_line_number: None,
-                    text: quote,
-                  },
-                  comment: event.feedback.text,
-                },
+                original_line_number=Some(
+                  event.feedback.range.start_line_number,
+                ),
+                modified_line_number=None,
+                quote~,
+                comment=event.feedback.text,
                 resource=ModelUri(event.feedback.resource.to_string()),
                 feedback_id=event.feedback.id,
               ),
@@ -251,18 +466,45 @@ fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
         })
         |> ignore
       }
-      if viewer_state.diff_viewer is None &&
+      if viewer_state.markdown_viewer is None &&
         viewer_state.services is Some(services) &&
-        @dom.document().get_element_by_id(DiffViewerHostId).to_option()
-        is Some(diff_host) {
-        viewer_state.diff_viewer = Some(
-          @viewer.DiffViewer::create(
-            diff_host,
+        @dom.document().get_element_by_id(MarkdownViewerHostId).to_option()
+        is Some(markdown_host) {
+        viewer_state.markdown_viewer = Some(
+          @viewer.MarkdownViewer::create(
+            markdown_host,
             services=services.viewer_services,
-            options=@viewer.ViewerOptions(theme="light"),
-            render_mode=viewer_state.diff_render_mode,
+            options=@viewer.MarkdownViewerOptions(
+              theme=viewer_state.theme,
+              placeholder="Select a Markdown file to view",
+            ),
           ),
         )
+      }
+      if viewer_state.diff_editor is None &&
+        viewer_state.services is Some(services) &&
+        @dom.document().get_element_by_id(DiffEditorHostId).to_option()
+        is Some(diff_host) {
+        let diff_editor = @viewer.DiffEditor::create(
+          diff_host,
+          services=services.viewer_services,
+          options=viewer_state.diff_options,
+          provider=viewer_state.diff_provider,
+        )
+        diff_editor.on_did_update_diff(() => {
+          let status = viewer_state.diff_provider.get_status()
+          scheduler.add(
+            dispatch(
+              ReviewDiffStatusChanged({
+                requested: review_diff_mode(status.requested),
+                effective: review_diff_mode(status.effective),
+                fell_back: status.fell_back,
+              }),
+            ),
+          )
+        })
+        |> ignore
+        viewer_state.diff_editor = Some(diff_editor)
       }
     },
     kind=@cmd.after_render,
@@ -270,18 +512,58 @@ fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
 }
 
 ///|
-/// Retain and apply the panel's split/unified preference without replacing the
-/// comparison models or either ordinary child Viewer.
+/// Retain and apply the panel's side-by-side/inline preference without
+/// replacing the comparison models or either code kernel.
 fn apply_review_diff_layout(layout : ReviewDiffLayout) -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
-    let render_mode = match layout {
+    let editor_layout = match layout {
       ReviewSideBySide => @viewer.SideBySide
-      ReviewUnified => @viewer.Unified
+      ReviewInline => @viewer.Inline
     }
-    viewer_state.diff_render_mode = render_mode
-    if viewer_state.diff_viewer is Some(diff_viewer) {
-      diff_viewer.set_render_mode(render_mode)
+    let options = viewer_state.diff_options.with_layout(editor_layout)
+    viewer_state.diff_options = options
+    if viewer_state.diff_editor is Some(diff_editor) {
+      diff_editor.update_options(options)
     }
+  })
+}
+
+///|
+fn current_diff_pane_options() -> @viewer.ViewerOptions {
+  @viewer.ViewerOptions(
+    theme=viewer_state.theme,
+    soft_wrap=true,
+    font_family=viewer_state.font_family,
+    font_size=viewer_state.font_size,
+  )
+}
+
+///|
+fn refresh_diff_pane_options() -> Unit {
+  let options = viewer_state.diff_options.with_editor_options(
+    current_diff_pane_options(),
+  )
+  viewer_state.diff_options = options
+  if viewer_state.diff_editor is Some(diff_editor) {
+    diff_editor.update_options(options)
+  }
+}
+
+///|
+/// Update every imperative presentation, including canvas overview markers
+/// and Markdown diagrams that cannot repaint from inherited CSS alone.
+pub fn apply_theme(theme : String) -> @cmd.Cmd {
+  @cmd.custom_cmd(_scheduler => {
+    viewer_state.theme = theme
+    if viewer_state.viewer is Some(viewer) {
+      viewer.update_options(viewer.get_options().with_theme(theme))
+    }
+    if viewer_state.markdown_viewer is Some(markdown_viewer) {
+      markdown_viewer.update_options(
+        markdown_viewer.get_options().with_theme(theme),
+      )
+    }
+    refresh_diff_pane_options()
   })
 }
 
@@ -295,6 +577,7 @@ pub fn apply_font_family(font_family : String) -> @cmd.Cmd {
     if viewer_state.viewer is Some(viewer) {
       viewer.update_options(viewer.get_options().with_font_family(font_family))
     }
+    refresh_diff_pane_options()
   })
 }
 
@@ -308,6 +591,7 @@ pub fn apply_font_size(font_size : Double) -> @cmd.Cmd {
     if viewer_state.viewer is Some(viewer) {
       viewer.update_options(viewer.get_options().with_font_size(font_size))
     }
+    refresh_diff_pane_options()
   })
 }
 
@@ -315,18 +599,21 @@ pub fn apply_font_size(font_size : Double) -> @cmd.Cmd {
 /// Keep the renderer-to-application mapping explicit and independently
 /// testable. No DOM details cross this boundary; both line-number domains are
 /// retained for the main update loop to interpret.
-fn unified_diff_comment_message(
+fn diff_comment_message(
   file : @pathx.Relative,
-  submission : @unified_diff.UnifiedDiffLineComment,
+  original_line_number~ : Int?,
+  modified_line_number~ : Int?,
+  quote~ : String,
+  comment~ : String,
   resource? : ModelUri,
   feedback_id? : String,
 ) -> Msg {
-  UnifiedDiffCommentAdded(
+  DiffCommentAdded(
     file~,
-    original_line_number=submission.line.original_line_number,
-    modified_line_number=submission.line.modified_line_number,
-    quote=submission.line.text,
-    comment=submission.comment,
+    original_line_number~,
+    modified_line_number~,
+    quote~,
+    comment~,
     resource~,
     feedback_id~,
   )
@@ -357,14 +644,7 @@ pub fn remove_editor_feedback(
 /// changes the panel's host size without any panel message.
 pub fn request_viewer_remeasure() -> @cmd.Cmd {
   @cmd.custom_cmd(
-    _after => {
-      if viewer_state.viewer is Some(viewer) {
-        viewer.layout()
-      }
-      if viewer_state.diff_viewer is Some(diff_viewer) {
-        diff_viewer.layout()
-      }
-    },
+    _after => layout_active_editor_surface(),
     kind=@cmd.after_render,
   )
 }
@@ -395,19 +675,14 @@ fn original_revision_model_uri(
 }
 
 ///|
-/// Dispose a pair only after every Viewer render already queued by the swap has
-/// had first chance to finish. `Viewer::set_model` synchronously detaches the
-/// outgoing presentation but its replacement paints on the animation-frame
-/// coordinator; retiring the TextModels in that same command can otherwise
-/// race token, hover, feedback, or render work that still holds the old pair.
-fn retire_diff_comparison_models(previous : @viewer.DiffEditorModel) -> Unit {
-  @base_browser.schedule_at_next_animation_frame(() => {
-    previous.original.dispose()
-    if !previous.modified.same(previous.original) {
-      previous.modified.dispose()
-    }
-  })
-  |> ignore
+/// Dispose a pair returned by `DiffEditor::set_model`. The return contract
+/// guarantees both kernels and the shared view model have already detached
+/// it, so no frame-delayed retirement or compatibility grace period exists.
+fn dispose_diff_comparison_models(previous : @viewer.DiffEditorModel) -> Unit {
+  previous.original.dispose()
+  if !previous.modified.same(previous.original) {
+    previous.modified.dispose()
+  }
 }
 
 ///|
@@ -416,15 +691,14 @@ fn retire_diff_comparison_models(previous : @viewer.DiffEditorModel) -> Unit {
 /// this: the last complete pair stays parked behind the inactive surface until
 /// its successor is ready. Hard owner/workspace boundaries clear it here.
 fn clear_diff_comparison() -> Unit {
-  guard viewer_state.diff_viewer is Some(diff_viewer) else { return }
-  let previous = diff_viewer.get_model()
-  diff_viewer.clear()
+  guard viewer_state.diff_editor is Some(diff_editor) else { return }
+  let previous = diff_editor.set_model(None)
   if previous is Some(previous) {
     if viewer_state.services is Some(services) {
       services.feedback.set_feedback_enabled(previous.original.uri, false)
       services.feedback.clear_feedback(previous.original.uri)
     }
-    retire_diff_comparison_models(previous)
+    dispose_diff_comparison_models(previous)
   }
 }
 
@@ -441,13 +715,13 @@ fn show_diff_comparison(
   original_content : String,
   modified_content : String,
 ) -> Unit {
-  guard viewer_state.diff_viewer is Some(diff_viewer) &&
+  guard viewer_state.diff_editor is Some(diff_editor) &&
     viewer_state.services is Some(services) &&
     original_revision_model_uri(owner, absolute, relative, name)
     is Some(original_uri) else {
     return
   }
-  if diff_viewer.get_model() is Some(current) &&
+  if diff_editor.get_model() is Some(current) &&
     current.original.uri.to_string() == original_uri.to_string() &&
     current.modified.uri.to_string() == modified_uri.to_string() &&
     current.original.get_value() == original_content &&
@@ -455,8 +729,8 @@ fn show_diff_comparison(
     services.feedback.set_feedback_enabled(original_uri, relative is Some(_))
     return
   }
-  let previous = diff_viewer.get_model()
-  if previous is Some(previous) {
+  let current = diff_editor.get_model()
+  if current is Some(previous) {
     services.feedback.set_feedback_enabled(previous.original.uri, false)
     services.feedback.clear_feedback(previous.original.uri)
   }
@@ -478,12 +752,13 @@ fn show_diff_comparison(
     "diff-v" + model_version.to_string(),
     modified_content,
   )
-  diff_viewer.set_model(
+  configure_diff_provider(supports_moon_diff(name))
+  let previous = diff_editor.set_model(
     Some(@viewer.DiffEditorModel(original_model, modified_model)),
   )
   services.feedback.set_feedback_enabled(original_uri, relative is Some(_))
   if previous is Some(previous) {
-    retire_diff_comparison_models(previous)
+    dispose_diff_comparison_models(previous)
   }
 }
 
@@ -505,7 +780,7 @@ fn history_revision_model_uri(
 }
 
 ///|
-/// Install a historical pair directly into the permanent DiffViewer. Neither
+/// Install a historical pair directly into the permanent DiffEditor. Neither
 /// model represents the working tree, so feedback, quick diff, diagnostics,
 /// and language navigation stay disabled on both sides.
 fn show_history_diff_in_viewer(
@@ -515,7 +790,7 @@ fn show_history_diff_in_viewer(
   modified_content : String,
 ) -> @cmd.Cmd {
   let show = @cmd.custom_cmd(_scheduler => {
-    guard viewer_state.diff_viewer is Some(diff_viewer) &&
+    guard viewer_state.diff_editor is Some(diff_editor) &&
       viewer_state.services is Some(services) else {
       return
     }
@@ -529,7 +804,7 @@ fn show_history_diff_in_viewer(
       is Some(modified_uri) else {
       return
     }
-    if diff_viewer.get_model() is Some(current) &&
+    if diff_editor.get_model() is Some(current) &&
       current.original.uri.to_string() == original_uri.to_string() &&
       current.modified.uri.to_string() == modified_uri.to_string() &&
       current.original.get_value() == original_content &&
@@ -538,8 +813,8 @@ fn show_history_diff_in_viewer(
       services.feedback.set_feedback_enabled(modified_uri, false)
       return
     }
-    let previous = diff_viewer.get_model()
-    if previous is Some(previous) {
+    let current = diff_editor.get_model()
+    if current is Some(previous) {
       services.feedback.set_feedback_enabled(previous.original.uri, false)
       services.feedback.set_feedback_enabled(previous.modified.uri, false)
       services.feedback.clear_feedback(previous.original.uri)
@@ -565,7 +840,8 @@ fn show_history_diff_in_viewer(
       "history-modified-v" + version.to_string(),
       modified_content,
     )
-    diff_viewer.set_model(
+    configure_diff_provider(supports_moon_diff(diff.path.0))
+    let previous = diff_editor.set_model(
       Some(@viewer.DiffEditorModel(original_model, modified_model)),
     )
     services.feedback.set_feedback_enabled(original_uri, false)
@@ -574,7 +850,7 @@ fn show_history_diff_in_viewer(
     viewer_state.relative = None
     viewer_state.navigation = None
     if previous is Some(previous) {
-      retire_diff_comparison_models(previous)
+      dispose_diff_comparison_models(previous)
     }
   })
   @cmd.batch([show, request_viewer_remeasure()])
@@ -694,6 +970,19 @@ fn show_transient_navigation_target_highlight(
 }
 
 ///|
+fn dispose_markdown_model(model : @viewer.MarkdownViewerModel) -> Unit {
+  model.model.dispose()
+}
+
+///|
+fn dispose_source_model(model : @model.TextModel?) -> Unit {
+  match model {
+    Some(model) => model.dispose()
+    None => ()
+  }
+}
+
+///|
 /// Show a file's contents in the viewer as a fresh read-only document. A
 /// symbol jump's `range`, when present, is revealed centered once the
 /// document is set. The caret stays collapsed at the range start while an
@@ -707,12 +996,12 @@ fn show_transient_navigation_target_highlight(
 /// brings the incoming document back to its saved position instead of the
 /// top — the Monaco save/restore-view-state contract around `set_model`.
 /// `review_original`, when present, is the Git HEAD baseline used by the
-/// Viewer's quick-diff contribution. An empty string is meaningful for a new
-/// file; omission clears any earlier baseline for this resource. A unified
-/// pair, when present, is rendered by the sibling switchable DiffViewer while
-/// the source Viewer remains mounted. Every show is followed by an after-render
-/// layout pass: either sibling host may have just left `display: none`, where
-/// its child Viewer could only measure Monaco's 5px minimum.
+/// code Viewer's quick-diff contribution. An empty string is meaningful for a
+/// new file; omission clears any earlier baseline for this resource. A
+/// comparison pair, when present, is rendered by the sibling DiffEditor while
+/// both source widgets remain mounted. Every show is followed by an
+/// after-render layout pass: a sibling host may have just left `display: none`,
+/// where its child widget could only measure Monaco's 5px minimum.
 fn show_file_in_viewer(
   owner : @interop.ConversationKey,
   root~ : @common.Uri?,
@@ -724,14 +1013,18 @@ fn show_file_in_viewer(
   annotation? : String,
   restore_scroll? : Bool = false,
   review_original? : String,
-  unified_diff? : (String, String),
+  diff? : (String, String),
   search_highlights? : @grep_search.EditorHighlights,
 ) -> @cmd.Cmd {
   let show = @cmd.custom_cmd(_scheduler => {
     // Reads are always batched behind a mount request whose after-render tick
     // runs before this async reply, so the viewer exists here (see
     // `ViewerHost::viewer`); the guard only drops a pathological stray.
-    guard viewer_state.viewer is Some(viewer) else { return }
+    guard viewer_state.viewer is Some(viewer) &&
+      viewer_state.markdown_viewer is Some(markdown_viewer) else {
+      return
+    }
+    let show_markdown = uses_markdown_presentation(name)
     // The URI is the file's absolute path and host identity. The hover
     // provider pairs it with the active navigation root. A notice document
     // (withheld binary/oversized file) has no file behind it, so its inert
@@ -756,10 +1049,22 @@ fn show_file_in_viewer(
     // unchanged, or a jump into the file on screen), the model is left
     // untouched so the selection, scroll, and feedback bubbles survive; a
     // jump's reveal and annotation still apply below, over the kept document.
-    let same_document = viewer.get_model() is Some(model) &&
-      model.uri.to_string() == uri.to_string() &&
-      model.get_value() == content
-    let previous_uri = viewer.get_model().map(model => model.uri)
+    let code_model = viewer.get_model()
+    let markdown_model = markdown_viewer.get_model()
+    let same_document = if show_markdown {
+      markdown_model is Some(current) &&
+      current.model.uri.to_string() == uri.to_string() &&
+      current.model.get_value() == content &&
+      current.resource_kind == markdown_resource_kind(name)
+    } else {
+      code_model is Some(current) &&
+      current.uri.to_string() == uri.to_string() &&
+      current.get_value() == content
+    }
+    let previous_uri = match code_model {
+      Some(model) => Some(model.uri)
+      None => markdown_model.map(model => model.model.uri)
+    }
     let restore_view_state = should_restore_view_state(
       restore_scroll, previous_uri, uri,
     )
@@ -774,10 +1079,14 @@ fn show_file_in_viewer(
     }
     if !same_document {
       // Park the outgoing document's scroll position for its tab's return.
-      if viewer_state.relative is Some(prev) &&
-        viewer.get_model() is Some(_) &&
-        viewer.save_view_state() is Some(view_state) {
-        viewer_state.view_states[prev.0] = view_state
+      if viewer_state.relative is Some(prev) {
+        if code_model is Some(_) && viewer.save_view_state() is Some(view_state) {
+          viewer_state.view_states[prev.0] = view_state
+        }
+        if markdown_model is Some(_) &&
+          markdown_viewer.save_view_state() is Some(view_state) {
+          viewer_state.markdown_view_states[prev.0] = view_state
+        }
       }
       viewer_state.version = viewer_state.version + 1
       let version = viewer_state.version
@@ -789,22 +1098,59 @@ fn show_file_in_viewer(
         "v" + version.to_string(),
         content,
       )
-      // `set_model` resets the view state itself (the Monaco contract), so a
-      // fresh document always opens at the top; a tab switch or reload then
-      // restores the saved position over that reset.
-      viewer.set_model(Some(text_model))
-      if restore_view_state &&
-        relative is Some(rel) &&
-        viewer_state.view_states.get(rel.0) is Some(saved) {
-        viewer.restore_view_state(Some(saved))
+      if show_markdown {
+        // The public surfaces are mutually exclusive model owners. Detach and
+        // retire Code before installing the rich Markdown model.
+        viewer.set_model(None)
+        dispose_source_model(code_model)
+        let previous = markdown_viewer.set_model(
+          Some(
+            @viewer.MarkdownViewerModel(
+              text_model,
+              markdown_resource_kind(name),
+            ),
+          ),
+        )
+        match previous {
+          Some(previous) => dispose_markdown_model(previous)
+          None => ()
+        }
+        if restore_view_state &&
+          relative is Some(rel) &&
+          viewer_state.markdown_view_states.get(rel.0) is Some(saved) {
+          markdown_viewer.restore_view_state(Some(saved))
+        }
+      } else {
+        // `MarkdownViewer::set_model` returns only after its attachment and
+        // bridges are detached, so the caller-owned TextModel can be retired
+        // immediately before Code takes over.
+        match markdown_viewer.set_model(None) {
+          Some(previous) => dispose_markdown_model(previous)
+          None => ()
+        }
+        viewer.set_model(Some(text_model))
+        dispose_source_model(code_model)
+        if restore_view_state &&
+          relative is Some(rel) &&
+          viewer_state.view_states.get(rel.0) is Some(saved) {
+          viewer.restore_view_state(Some(saved))
+        }
+        // Match the reference workbench's host policy: ordinary `.mbt` files
+        // open as a top-level outline. `set_model` computes folding ranges
+        // synchronously, so this is stable initialization state rather than a
+        // delayed render effect. Keeping it in the fresh-model branch leaves
+        // folding interactions on the current model user-controlled.
+        if should_auto_fold_top_level(text_model) {
+          viewer.fold_top_level()
+        }
       }
-      // Match the reference workbench's host policy: ordinary `.mbt` files
-      // open as a top-level outline. `set_model` computes folding ranges
-      // synchronously, so this is stable initialization state rather than a
-      // delayed render effect. Keeping it in the fresh-model branch leaves
-      // folding interactions on the current model entirely user-controlled.
-      if should_auto_fold_top_level(text_model) {
-        viewer.fold_top_level()
+    } else if show_markdown {
+      viewer.set_model(None)
+      dispose_source_model(code_model)
+    } else {
+      match markdown_viewer.set_model(None) {
+        Some(previous) => dispose_markdown_model(previous)
+        None => ()
       }
     }
     // Gate incoming diagnostics to the file now on screen (a notice document,
@@ -830,9 +1176,19 @@ fn show_file_in_viewer(
       // The service is resource-keyed, so setting this after `set_model` also
       // handles a late HEAD reply for the document already on screen. The
       // service event makes the gutter recompute without replacing the model.
-      services.quick_diff.set_original_content(uri, review_original)
+      services.quick_diff.set_original_content(
+        uri,
+        if show_markdown {
+          None
+        } else {
+          review_original
+        },
+      )
+      // MarkdownViewer has no code-feedback contribution, but the same live
+      // resource may be mounted in DiffEditor's modified code kernel. Keep the
+      // resource enabled so review comments remain available there.
       services.feedback.set_feedback_enabled(uri, absolute is Some(_))
-      if absolute is Some(_) {
+      if absolute is Some(_) && !show_markdown {
         // A fresh document view starts with no bubbles (comments become
         // chips the moment they are filed, so anything lingering here is a
         // previous jump's re-display); an annotation chip's jump then
@@ -856,7 +1212,7 @@ fn show_file_in_viewer(
         }
       }
     }
-    match unified_diff {
+    match diff {
       Some((original, modified)) =>
         show_diff_comparison(
           owner, name, uri, absolute, relative, original, modified,
@@ -867,28 +1223,38 @@ fn show_file_in_viewer(
       // avoids a blank repaint and makes View file a non-destructive toggle.
       None => ()
     }
-    set_search_match_highlights(search_highlights)
+    set_search_match_highlights(
+      if show_markdown {
+        None
+      } else {
+        search_highlights
+      },
+    )
     if range is Some(range) {
-      let target = navigation_target_presentation(range)
-      viewer.set_position(target.position)
-      let search_match = match search_highlights {
-        Some(highlights) => highlights.ranges().contains(range)
-        None => false
-      }
-      if search_match {
-        ()
-      } else if target.is_transient {
-        if viewer.get_model() is Some(target_model) {
-          show_transient_navigation_target_highlight(
-            viewer,
-            target_model,
-            target.decoration,
-          )
+      if show_markdown {
+        markdown_viewer.reveal_range_in_center(range)
+      } else {
+        let target = navigation_target_presentation(range)
+        viewer.set_position(target.position)
+        let search_match = match search_highlights {
+          Some(highlights) => highlights.ranges().contains(range)
+          None => false
         }
-      } else if viewer_state.point_range_highlight is Some(highlight) {
-        highlight.set([target.decoration]) |> ignore
+        if search_match {
+          ()
+        } else if target.is_transient {
+          if viewer.get_model() is Some(target_model) {
+            show_transient_navigation_target_highlight(
+              viewer,
+              target_model,
+              target.decoration,
+            )
+          }
+        } else if viewer_state.point_range_highlight is Some(highlight) {
+          highlight.set([target.decoration]) |> ignore
+        }
+        viewer.reveal_range_in_center(range)
       }
-      viewer.reveal_range_in_center(range)
     }
   })
   @cmd.batch([show, request_viewer_remeasure()])
@@ -942,6 +1308,7 @@ fn should_auto_fold_top_level(text_model : @model.TextModel) -> Bool {
 fn clear_viewer() -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
     viewer_state.view_states.clear()
+    viewer_state.markdown_view_states.clear()
     if viewer_state.viewer is Some(viewer) {
       if viewer_state.point_range_highlight is Some(highlight) {
         highlight.clear()
@@ -953,17 +1320,25 @@ fn clear_viewer() -> @cmd.Cmd {
         viewer.get_model() is Some(model) {
         services.quick_diff.set_original_content(model.uri, None)
       }
-      viewer_state.absolute = None
-      viewer_state.relative = None
-      viewer_state.navigation = None
+      let previous = viewer.get_model()
       viewer.set_model(None)
+      dispose_source_model(previous)
     }
+    if viewer_state.markdown_viewer is Some(markdown_viewer) {
+      match markdown_viewer.set_model(None) {
+        Some(previous) => dispose_markdown_model(previous)
+        None => ()
+      }
+    }
+    viewer_state.absolute = None
+    viewer_state.relative = None
+    viewer_state.navigation = None
     clear_diff_comparison()
   })
 }
 
 ///|
-/// Show the source Viewer's placeholder without touching the other tabs'
+/// Clear the active source presentation without touching the other tabs'
 /// parked scroll positions. The comparison remains parked: transient review
 /// reads, unavailable files, ordinary navigation, and View file all hide it by
 /// CSS, while the next complete comparison replaces it atomically. Its memory
@@ -981,11 +1356,19 @@ fn clear_document() -> @cmd.Cmd {
         viewer.get_model() is Some(model) {
         services.quick_diff.set_original_content(model.uri, None)
       }
-      viewer_state.absolute = None
-      viewer_state.relative = None
-      viewer_state.navigation = None
+      let previous = viewer.get_model()
       viewer.set_model(None)
+      dispose_source_model(previous)
     }
+    if viewer_state.markdown_viewer is Some(markdown_viewer) {
+      match markdown_viewer.set_model(None) {
+        Some(previous) => dispose_markdown_model(previous)
+        None => ()
+      }
+    }
+    viewer_state.absolute = None
+    viewer_state.relative = None
+    viewer_state.navigation = None
   })
 }
 
@@ -994,7 +1377,10 @@ fn clear_document() -> @cmd.Cmd {
 /// neighbor's `show_file_in_viewer` (which re-parks the outgoing document,
 /// closed tab included), so the closed tab's entry does not linger.
 fn forget_view_state(path : @pathx.Relative) -> @cmd.Cmd {
-  @cmd.custom_cmd(_scheduler => viewer_state.view_states.remove(path.0))
+  @cmd.custom_cmd(_scheduler => {
+    viewer_state.view_states.remove(path.0)
+    viewer_state.markdown_view_states.remove(path.0)
+  })
 }
 
 ///|
@@ -1041,6 +1427,8 @@ fn language_id(name : String) -> String {
     "javascript"
   } else if lower.has_suffix(".json") {
     "json"
+  } else if lower.has_suffix(".md") {
+    "markdown"
   } else {
     "plaintext"
   }

@@ -1,0 +1,287 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitlang/editor/internal/viewer/diff_editor"
+
+import {
+  "moonbit-community/rabbita/dom",
+  "moonbitlang/core/debug",
+  "moonbitlang/editor/base/browser",
+  "moonbitlang/editor/base/common",
+  "moonbitlang/editor/internal/viewer/code_editor_widget",
+  "moonbitlang/editor/viewer/common/diff",
+  "moonbitlang/editor/viewer/common/model",
+}
+
+// Values
+pub fn compute_managed_alignment_spacers(DiffFeatureProjection, PaneGeometrySnapshot, PaneGeometrySnapshot, inner_hunk_alignment? : Bool) -> ManagedAlignmentSpacers
+
+// Errors
+
+// Types and methods
+pub struct DiffEditorEditors {
+  original : @code_editor_widget.CodeEditorWidget
+  modified : @code_editor_widget.CodeEditorWidget
+  owned_services : @code_editor_widget.CodeEditorServices?
+  model_pair_commit : DiffEditorModelPairCommitBarrier
+  mut disposed : Bool
+}
+
+pub(all) enum DiffEditorLayout {
+  SideBySide
+  Inline
+} derive(Eq, @debug.Debug)
+pub fn DiffEditorLayout::equal(Self, Self) -> Bool
+pub fn DiffEditorLayout::not_equal(Self, Self) -> Bool
+pub fn DiffEditorLayout::to_repr(Self) -> @debug.Repr
+
+pub struct DiffEditorLayoutState {
+  mut options : DiffEditorOptions
+  mut width : Double
+  mut actual_layout : DiffEditorLayout
+  mut split_ratio : Double
+}
+pub fn DiffEditorLayoutState::pane_widths(Self) -> (Double, Double)
+
+pub(all) struct DiffEditorModelData {
+  original : @model.TextModel
+  modified : @model.TextModel
+}
+
+type DiffEditorModelPairCommitBarrier
+
+pub(all) struct DiffEditorOptions {
+  layout : DiffEditorLayout
+  automatic_inline : Bool
+  automatic_inline_width : Double
+  sash_enabled : Bool
+  split_ratio : Double
+  diff_word_wrap : DiffWordWrap
+  overview_ruler : Bool
+  ignore_trim_whitespace : Bool
+}
+pub fn DiffEditorOptions::DiffEditorOptions(layout? : DiffEditorLayout, automatic_inline? : Bool, automatic_inline_width? : Double, sash_enabled? : Bool, split_ratio? : Double, diff_word_wrap? : DiffWordWrap, overview_ruler? : Bool, ignore_trim_whitespace? : Bool) -> Self
+pub fn DiffEditorOptions::default() -> Self
+
+pub struct DiffEditorViewModel {
+  mut provider : &@diff.DocumentDiffProvider
+  mut provider_subscription : @common.Disposable?
+  mut model : DiffEditorModelData?
+  model_subscriptions : Array[@common.Disposable]
+  mut options : @diff.DocumentDiffOptions
+  mut state : DiffEditorViewModelState
+  mut current_diff : @diff.DocumentDiff?
+  mut generation : Int
+  immediate : @browser.RunOnceScheduler
+  content_debounce : @browser.RunOnceScheduler
+  did_change_model : @common.Emitter[Unit]
+  did_update : @common.Emitter[Unit]
+  mut disposed : Bool
+}
+pub fn DiffEditorViewModel::DiffEditorViewModel(&@diff.DocumentDiffProvider, options? : @diff.DocumentDiffOptions, schedule_timeout? : (() -> Unit, Int) -> @common.Disposable) -> Self
+pub fn DiffEditorViewModel::dispose(Self) -> Unit
+pub fn DiffEditorViewModel::get_diff(Self) -> @diff.DocumentDiff?
+pub fn DiffEditorViewModel::get_model(Self) -> DiffEditorModelData?
+pub fn DiffEditorViewModel::get_state(Self) -> DiffEditorViewModelState
+pub fn DiffEditorViewModel::is_diff_up_to_date(Self) -> Bool
+pub fn DiffEditorViewModel::on_did_update_diff(Self, () -> Unit) -> @common.Disposable
+pub fn DiffEditorViewModel::set_model(Self, DiffEditorModelData?) -> DiffEditorModelData?
+pub fn DiffEditorViewModel::set_provider(Self, &@diff.DocumentDiffProvider) -> Unit
+pub fn DiffEditorViewModel::update_options(Self, @diff.DocumentDiffOptions) -> Unit
+
+pub(all) enum DiffEditorViewModelState {
+  NoModel
+  Pending
+  Ready
+  Failed
+} derive(Eq, @debug.Debug)
+pub fn DiffEditorViewModelState::equal(Self, Self) -> Bool
+pub fn DiffEditorViewModelState::not_equal(Self, Self) -> Bool
+pub fn DiffEditorViewModelState::to_repr(Self) -> @debug.Repr
+
+pub struct DiffEditorWidget {
+  host : @dom.Element
+  root : @dom.Element
+  panes : @dom.Element
+  original_host : @dom.Element
+  modified_host : @dom.Element
+  sash : @dom.Element
+  live_region : @dom.Element
+  editors : DiffEditorEditors
+  view_model : DiffEditorViewModel
+  mut editor_options : @code_editor_widget.CodeEditorOptions
+  mut options : DiffEditorOptions
+  layout_state : DiffEditorLayoutState
+  pointer_monitor : @browser.GlobalPointerMoveMonitor
+  lifetime : Array[@common.Disposable]
+  mut resize_observer : @common.Disposable?
+  mut overview_ruler : @code_editor_widget.CodeEditorOverviewRuler?
+  mut original_decoration_ids : Array[String]
+  mut modified_decoration_ids : Array[String]
+  mut original_alignment_zone_ids : Array[String]
+  mut modified_alignment_zone_ids : Array[String]
+  mut inline_deleted_render_context : @code_editor_widget.VirtualizedCodeEditorRenderLinesContext?
+  mut inline_deleted_renderers : Array[InlineDeletedRenderer]
+  mut original_alignment_geometry : PaneGeometrySnapshot?
+  mut modified_alignment_geometry : PaneGeometrySnapshot?
+  mut projection : DiffFeatureProjection?
+  mut navigation_index : Int?
+  mut reconciling_generation : Int
+  mut is_reconciling : Bool
+  layout_render_waiters : Array[@common.Disposable]
+  mut layout_render_generation : Int
+  mut layout_render_remaining : Int
+  mut has_valid_layout_box : Bool
+  mut is_syncing_scroll : Bool
+  mut dispose_pass_count : Int
+  mut resize_observer_disposed : Bool
+  mut overview_ruler_disposed : Bool
+  mut inline_render_context_disposed : Bool
+  mut disposed : Bool
+}
+pub fn DiffEditorWidget::create(@dom.Element, services? : @code_editor_widget.CodeEditorServices, editor_options? : @code_editor_widget.CodeEditorOptions, options? : DiffEditorOptions, &@diff.DocumentDiffProvider) -> Self
+pub fn DiffEditorWidget::dispose(Self) -> Unit
+pub fn DiffEditorWidget::focus(Self) -> Unit
+pub fn DiffEditorWidget::get_diff(Self) -> @diff.DocumentDiff?
+pub fn DiffEditorWidget::get_layout(Self) -> DiffEditorLayout
+pub fn DiffEditorWidget::get_model(Self) -> DiffEditorModelData?
+pub fn DiffEditorWidget::is_diff_up_to_date(Self) -> Bool
+pub fn DiffEditorWidget::layout(Self) -> Unit
+pub fn DiffEditorWidget::lifecycle_snapshot(Self) -> DiffEditorWidgetLifecycleSnapshot
+pub fn DiffEditorWidget::on_did_update_diff(Self, () -> Unit) -> @common.Disposable
+pub fn DiffEditorWidget::reveal_next_change(Self) -> Bool
+pub fn DiffEditorWidget::reveal_previous_change(Self) -> Bool
+pub fn DiffEditorWidget::set_diff_provider(Self, &@diff.DocumentDiffProvider) -> Unit
+pub fn DiffEditorWidget::set_model(Self, DiffEditorModelData?) -> DiffEditorModelData?
+pub fn DiffEditorWidget::update_options(Self, @code_editor_widget.CodeEditorOptions, DiffEditorOptions) -> Unit
+
+pub(all) struct DiffEditorWidgetLifecycleSnapshot {
+  kernel_count : Int
+  original_kernel_id : String
+  modified_kernel_id : String
+  kernels_are_distinct : Bool
+  view_model_count : Int
+  widget_disposed : Bool
+  dispose_pass_count : Int
+  original_kernel_disposed : Bool
+  modified_kernel_disposed : Bool
+  view_model_disposed : Bool
+  model_pair_is_committing : Bool
+  committed_model_generation : Int
+  overview_ruler_present : Bool
+  overview_ruler_disposed : Bool
+  inline_render_context_present : Bool
+  inline_render_context_disposed : Bool
+  inline_render_live_handle_count : Int
+  inline_render_registered_zone_count : Int
+  resize_observer_present : Bool
+  resize_observer_disposed : Bool
+  after_render_waiter_count : Int
+  after_render_remaining : Int
+  view_model_pending_scheduler_count : Int
+  lifetime_subscription_count : Int
+}
+
+pub struct DiffFeatureProjection {
+  sorted_changes : Array[@diff.DetailedLineRangeMapping]
+  original_decorations : DiffPaneDecorations
+  modified_decorations : DiffPaneDecorations
+  original_overview : Array[DiffOverviewEntry]
+  modified_overview : Array[DiffOverviewEntry]
+  alignment_anchors : Array[@diff.LineRangeMapping]
+}
+pub fn DiffFeatureProjection::DiffFeatureProjection(@diff.DocumentDiff, @model.TextSnapshot, @model.TextSnapshot) -> Self
+pub fn DiffFeatureProjection::alignment_anchors(Self) -> Array[@diff.LineRangeMapping]
+pub fn DiffFeatureProjection::change_at(Self, Int) -> @diff.DetailedLineRangeMapping?
+pub fn DiffFeatureProjection::change_count(Self) -> Int
+pub fn DiffFeatureProjection::modified_decorations(Self) -> DiffPaneDecorations
+pub fn DiffFeatureProjection::modified_overview_entries(Self) -> Array[DiffOverviewEntry]
+pub fn DiffFeatureProjection::next_change(Self, Int?) -> DiffNavigationTarget?
+pub fn DiffFeatureProjection::original_decorations(Self) -> DiffPaneDecorations
+pub fn DiffFeatureProjection::original_overview_entries(Self) -> Array[DiffOverviewEntry]
+pub fn DiffFeatureProjection::previous_change(Self, Int?) -> DiffNavigationTarget?
+
+pub(all) struct DiffNavigationTarget {
+  change_index : Int
+  change_count : Int
+  change : @diff.DetailedLineRangeMapping
+} derive(Eq, @debug.Debug)
+pub fn DiffNavigationTarget::equal(Self, Self) -> Bool
+pub fn DiffNavigationTarget::not_equal(Self, Self) -> Bool
+pub fn DiffNavigationTarget::to_repr(Self) -> @debug.Repr
+
+pub(all) struct DiffOverviewEntry {
+  change_index : Int
+  range : @common.LineRange
+} derive(Eq, @debug.Debug)
+pub fn DiffOverviewEntry::equal(Self, Self) -> Bool
+pub fn DiffOverviewEntry::not_equal(Self, Self) -> Bool
+pub fn DiffOverviewEntry::to_repr(Self) -> @debug.Repr
+
+pub struct DiffPaneDecorations {
+  whole_line : Array[@common.Range]
+  inner : Array[@common.Range]
+}
+pub fn DiffPaneDecorations::inner_ranges(Self) -> Array[@common.Range]
+pub fn DiffPaneDecorations::whole_line_ranges(Self) -> Array[@common.Range]
+
+pub(all) enum DiffWordWrap {
+  Inherit
+  Off
+} derive(Eq, @debug.Debug)
+pub fn DiffWordWrap::equal(Self, Self) -> Bool
+pub fn DiffWordWrap::not_equal(Self, Self) -> Bool
+pub fn DiffWordWrap::to_repr(Self) -> @debug.Repr
+
+pub struct InlineDeletedRenderer {
+  change_index : Int
+  renderer : @code_editor_widget.VirtualizedCodeEditorRenderedLines
+}
+
+pub(all) struct ManagedAlignmentSpacer {
+  after_line_number : Int
+  height_in_px : Double
+} derive(Eq, @debug.Debug)
+pub fn ManagedAlignmentSpacer::equal(Self, Self) -> Bool
+pub fn ManagedAlignmentSpacer::not_equal(Self, Self) -> Bool
+pub fn ManagedAlignmentSpacer::to_repr(Self) -> @debug.Repr
+
+pub struct ManagedAlignmentSpacers {
+  original : Array[ManagedAlignmentSpacer]
+  modified : Array[ManagedAlignmentSpacer]
+}
+pub fn ManagedAlignmentSpacers::modified(Self) -> Array[ManagedAlignmentSpacer]
+pub fn ManagedAlignmentSpacers::original(Self) -> Array[ManagedAlignmentSpacer]
+
+pub(all) struct PaneForeignZoneHeight {
+  after_line_number : Int
+  height_in_px : Double
+} derive(Eq, @debug.Debug)
+pub fn PaneForeignZoneHeight::equal(Self, Self) -> Bool
+pub fn PaneForeignZoneHeight::not_equal(Self, Self) -> Bool
+pub fn PaneForeignZoneHeight::to_repr(Self) -> @debug.Repr
+
+pub struct PaneGeometrySnapshot {
+  line_height : Double
+  viewport_width : Double
+  line_heights : Array[Double]
+  line_max_columns : Array[Int]?
+  foreign_zone_heights : Array[PaneForeignZoneHeight]
+  cumulative_pixels : Array[Double]
+}
+pub fn PaneGeometrySnapshot::PaneGeometrySnapshot(Int, Double, model_line_heights? : Array[PaneModelLineHeight], hidden_lines? : Array[@common.LineRange], foreign_zone_heights? : Array[PaneForeignZoneHeight], line_max_columns? : Array[Int], viewport_width? : Double) -> Self
+pub fn PaneGeometrySnapshot::content_height(Self) -> Double
+pub fn PaneGeometrySnapshot::foreign_zone_heights(Self) -> Array[PaneForeignZoneHeight]
+pub fn PaneGeometrySnapshot::line_count(Self) -> Int
+pub fn PaneGeometrySnapshot::line_height(Self) -> Double
+pub fn PaneGeometrySnapshot::viewport_width(Self) -> Double
+
+pub(all) struct PaneModelLineHeight {
+  line_number : Int
+  height_in_px : Double
+} derive(Eq, @debug.Debug)
+pub fn PaneModelLineHeight::equal(Self, Self) -> Bool
+pub fn PaneModelLineHeight::not_equal(Self, Self) -> Bool
+pub fn PaneModelLineHeight::to_repr(Self) -> @debug.Repr
+
+// Type aliases
+
+// Traits

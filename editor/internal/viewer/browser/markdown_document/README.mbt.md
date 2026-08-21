@@ -23,7 +23,7 @@ The package owns no model, provider, marker store, or request policy. Root and
 the hover browser package own those higher-level contracts.
 
 ```mbt nocheck
-// The root installs this as the Markdown BrowserPresentation.
+// MarkdownViewer installs this as its rich-document presentation.
 let document_view = MarkdownDocumentView::new(host, model_source)
 document_view.set_source(projection)  // replaces the article, keeps the root
 document_view.dispose()

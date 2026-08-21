@@ -11,7 +11,9 @@ or WebSocket participates.
 
 ```mermaid
 flowchart LR
-  E["embedded_viewer example"] --> V["viewer"]
+  E["embedded_viewer example"] --> V["Viewer (code)"]
+  E --> M["MarkdownViewer"]
+  E --> D["DiffEditor"]
   E --> CM["viewer/common/{model,languages,editor_api,capability APIs}"]
   E -.->|"deliberately never"| S["internal/shell/**"]
 ```
@@ -24,33 +26,43 @@ forces embedders through a private package breaks the build here first.
 // The whole embedding surface an external host needs.
 let viewer = @viewer.Viewer::create(host)
 viewer.set_model(Some(@model.TextModel(uri, name, "moonbit", 1, "rev-1", text)))
+
+let markdown = @viewer.MarkdownViewer::create(markdown_host)
+markdown.set_model(Some(@viewer.MarkdownViewerModel(model, OrdinaryMarkdown)))
+
+let diff = @viewer.DiffEditor::create(diff_host)
+diff.set_model(Some(@viewer.DiffEditorModel(original, modified)))
 ```
 
 ## Flow
 
 - Startup registers the MoonBit tokenizer in the default `Languages` registry.
 - `FileTree.on_open` asks the in-memory host for a new
-  `viewer/common/model.TextModel`, calls `Viewer::set_model`, then invokes the
-  separate `Viewer::handle_initialized` boundary after synchronous model
-  setup. That same path accepts Code, `.md`, and `.mbt.md` models; the Viewer
-  owns automatic presentation selection, so the embed has no Markdown parser
-  or presentation adapter.
-- `Viewer::on_did_change_model` captures the attached URI and schedules one
-  native animation frame after the Viewer has queued its own DOM flush. The
-  callback rechecks the current model URI, drops stale swaps, then drives
-  `FileTree::set_active` (`autoReveal`) and the `ready` status.
-- Rabbita renders a stable, childless `.viewer-host`; after the first paint the
-  host mounts the imperative editor with `Viewer::create`.
+  `viewer/common/model.TextModel`. Lowercase `.md` paths or the `markdown`
+  language id go to a dedicated `MarkdownViewer`; `.mbt.md` selects
+  `MoonBitMarkdown`. Every other model goes to the code-only `Viewer`.
+- Each surface captures the attached URI and schedules one native animation
+  frame after its own DOM work. The callback rechecks the current model URI,
+  drops stale swaps, then drives `FileTree::set_active` (`autoReveal`) and the
+  `ready` status.
+- `DiffEditor` receives an atomic original/modified pair. A real replacement
+  returns the fully detached old pair for immediate disposal; an exact same-pair
+  no-op returns `None`, so active models are never retired accidentally.
+- Rabbita renders stable, childless code, Markdown, and diff hosts; after the
+  first paint the host mounts the imperative surfaces through their independent
+  public facades.
 
 This is the standalone-host boundary: the host owns storage, model creation,
 selection, and feature registration; the viewer owns its DOM subtree.
 `public_api_contract.mbt` is referenced but not executed; it keeps the opaque
-options/services facade, common capability handles, root widget/zone factories,
-and container/view DOM contracts compiling without importing browser internals.
+options/services facades, common capability handles, root widget/zone factories,
+and independent Code/Markdown/Diff contracts compiling without importing
+browser internals.
 
 ## Validation
 
 `just dist-front-end` emits `web/dist/embed.{html,mjs}`. The host server serves
-`/embed.html`; `tests/browser/smoke/embed.spec.js` covers Code and in-memory
-Markdown rendering, lazy expansion, navigation, stale ready callbacks, and the
-absence of a WebSocket.
+`/embed.html`; `tests/browser/smoke/embed.spec.js` covers explicit Code and
+Markdown routing, DiffEditor responsive/Inline/navigation/accessibility
+contracts, lazy expansion, stale ready callbacks, and the absence of a
+WebSocket.

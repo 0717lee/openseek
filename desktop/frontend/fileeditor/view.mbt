@@ -297,7 +297,8 @@ pub fn resize_handle_view() -> @html.Html {
 /// viewer with its notice overlay, and the workspace tree (expandable and
 /// always rooted at the workspace root) as a toggleable pane on
 /// the viewer's right. Always rendered so the viewer's host element
-/// (`viewer-host` and `unified-diff-host`) stay put across renders and screen
+/// (`viewer-host`, `markdown-viewer-host`, and `diff-editor-host`) stay put
+/// across renders and screen
 /// switches; CSS hides the inactive surface and the tree pane when toggled off,
 /// and collapses the whole panel to zero width when it is closed. The children's
 /// order is structural — rabbita diffs by index, so every part renders
@@ -307,31 +308,40 @@ pub fn body_view(
   state : State,
   ctx : Ctx,
 ) -> @html.Html {
-  // The stable elements the source Viewer and switchable DiffViewer attach
-  // their imperative DOM into; they must stay empty and never be re-keyed
+  // The stable elements the code Viewer, MarkdownViewer, and switchable
+  // DiffEditor attach their imperative DOM into; they stay empty and are
+  // never re-keyed
   // (see editor_panel.mbt).
   // `editor-shell` brings in the viewer's `--vscode-*` / `--editor-*` theme
   // variables (defined on that class in the bundled viewer.css); `data-theme`
   // picks the palette matching the app's own light/dark scheme (the shell's
   // default is dark, `light` overrides). The viewer's colors cascade from
   // this host.
-  let use_unified_diff_surface = if ctx.active_history_diff is Some(_) {
+  let use_diff_surface = if ctx.active_history_diff is Some(_) {
     true
   } else {
     match ctx.active_file {
       Some(path) =>
         state.docs
         .get(path)
-        .map(doc => doc.uses_unified_diff_surface())
+        .map(doc => doc.uses_diff_surface())
         .unwrap_or(false)
       None => false
     }
   }
+  let use_markdown_surface = !use_diff_surface &&
+    (match ctx.active_file {
+      Some(path) =>
+        uses_markdown_presentation(
+          state.docs.get(path).map(doc => doc.name).unwrap_or(path.0),
+        )
+      None => false
+    })
   let viewer_host = @html.div(
     attrs=@html.Attrs::build()
       .id(ViewerHostId)
       .class(
-        if use_unified_diff_surface {
+        if use_diff_surface || use_markdown_surface {
           "viewer-host editor-shell moonbit-viewer-surface-hidden"
         } else {
           "viewer-host editor-shell"
@@ -340,11 +350,24 @@ pub fn body_view(
       .data_set("theme", if ctx.dark_mode { "dark" } else { "light" }),
     ([] : Array[@html.Html]),
   )
-  let unified_diff_host = @html.div(
+  let markdown_viewer_host = @html.div(
     attrs=@html.Attrs::build()
-      .id(DiffViewerHostId)
+      .id(MarkdownViewerHostId)
       .class(
-        if use_unified_diff_surface {
+        if use_markdown_surface {
+          "viewer-host editor-shell"
+        } else {
+          "viewer-host editor-shell moonbit-viewer-surface-hidden"
+        },
+      )
+      .data_set("theme", if ctx.dark_mode { "dark" } else { "light" }),
+    ([] : Array[@html.Html]),
+  )
+  let diff_editor_host = @html.div(
+    attrs=@html.Attrs::build()
+      .id(DiffEditorHostId)
+      .class(
+        if use_diff_surface {
           "viewer-host editor-shell"
         } else {
           "viewer-host editor-shell moonbit-viewer-surface-hidden"
@@ -356,7 +379,8 @@ pub fn body_view(
   @html.div(class="editor-body", [
     @html.div(class="viewer-stack", [
       viewer_host,
-      unified_diff_host,
+      markdown_viewer_host,
+      diff_editor_host,
       viewer_notice(state, ctx),
     ]),
     tree_pane(dispatch, state, ctx),
@@ -382,10 +406,7 @@ fn viewer_notice(state : State, ctx : Ctx) -> @html.Html {
   }
   let diff_pending = match ctx.active_file {
     Some(path) =>
-      state.docs
-      .get(path)
-      .map(doc => doc.unified_diff_is_pending())
-      .unwrap_or(false)
+      state.docs.get(path).map(doc => doc.diff_is_pending()).unwrap_or(false)
     None => false
   }
   let text = match ctx.active_file {
@@ -1678,6 +1699,7 @@ pub fn breadcrumb_view(
         @html.span(class="crumb-sep", "›"),
         @html.span(class="crumb crumb-file", diff.path.0),
       ]),
+      review_diff_mode_toolbar(dispatch, state, ctx),
       review_diff_layout_toggle(dispatch, state, ctx),
       @html.button(
         class="panel-toggle",
@@ -1721,6 +1743,7 @@ pub fn breadcrumb_view(
     @html.div(class="crumb-path", crumbs),
     review_navigation(dispatch, state, ctx),
     review_badge(dispatch, state, ctx),
+    review_diff_mode_toolbar(dispatch, state, ctx),
     review_diff_layout_toggle(dispatch, state, ctx),
     review_progress(dispatch, state, ctx),
     @html.button(
@@ -1744,6 +1767,132 @@ pub fn breadcrumb_view(
 }
 
 ///|
+fn moon_diff_ready(state : State, ctx : Ctx) -> Bool {
+  let review_ready = ctx.active_file is Some(path) &&
+    path.0.to_lower().has_suffix(".mbt") &&
+    state.docs.get(path) is Some(doc) &&
+    doc.review is Some({ view_mode: ReviewDiff, .. }) &&
+    doc.diff_content() is Some(_)
+  let history_ready = ctx.active_history_diff is Some(diff) &&
+    diff.path.0.to_lower().has_suffix(".mbt") &&
+    state.history_docs.get(history_diff_key(diff)) is Some(history) &&
+    history.original.text() is Some(_) &&
+    history.modified.text() is Some(_)
+  review_ready || history_ready
+}
+
+///|
+fn ReviewDiffMode::label(self : ReviewDiffMode) -> String {
+  match self {
+    ReviewDiffCore => "Core"
+    ReviewDiffToken => "Token"
+    ReviewDiffTree => "Tree"
+  }
+}
+
+///|
+fn ReviewDiffMode::attribute(self : ReviewDiffMode) -> String {
+  match self {
+    ReviewDiffCore => "core"
+    ReviewDiffToken => "token"
+    ReviewDiffTree => "tree"
+  }
+}
+
+///|
+fn review_diff_mode_button(
+  dispatch : @cmd.Emit[Msg],
+  selected : ReviewDiffMode,
+  mode : ReviewDiffMode,
+) -> @html.Html {
+  let active = selected == mode
+  @html.button(
+    type_="button",
+    class=if active {
+      "review-badge review-badge-action active"
+    } else {
+      "review-badge review-badge-action"
+    },
+    title="Use " + mode.label() + " diff",
+    on_click=dispatch(ReviewDiffModeSelected(mode)),
+    attrs=@html.Attrs::build()
+      .data_set("diff-mode", mode.attribute())
+      .aria_label(mode.label() + " diff")
+      .aria_pressed(active.to_string()),
+    mode.label(),
+  )
+}
+
+///|
+fn review_diff_fallback_text(state : State) -> String {
+  guard state.review_diff_status is Some(status) &&
+    status.requested == state.review_diff_mode &&
+    status.fell_back else {
+    return ""
+  }
+  status.requested.label() +
+  " unavailable — showing " +
+  status.effective.label() +
+  " diff"
+}
+
+///|
+/// MoonBit-aware comparison policy belongs to the desktop review chrome.
+/// Other file types omit these controls and the imperative provider forces
+/// Core without overwriting the retained Token/Tree preference.
+fn review_diff_mode_toolbar(
+  dispatch : @cmd.Emit[Msg],
+  state : State,
+  ctx : Ctx,
+) -> @html.Html {
+  guard moon_diff_ready(state, ctx) else {
+    return @html.span(class="review-diff-mode-toolbar hidden", "")
+  }
+  let fallback = review_diff_fallback_text(state)
+  @html.div(
+    class="review-diff-mode-toolbar",
+    attrs=@html.Attrs::build()
+      .role("toolbar")
+      .aria_label("Comparison algorithm"),
+    [
+      review_diff_mode_button(dispatch, state.review_diff_mode, ReviewDiffCore),
+      review_diff_mode_button(dispatch, state.review_diff_mode, ReviewDiffToken),
+      review_diff_mode_button(dispatch, state.review_diff_mode, ReviewDiffTree),
+      @html.button(
+        type_="button",
+        class=if state.review_diff_ignore_comments {
+          "review-badge review-badge-action active"
+        } else {
+          "review-badge review-badge-action"
+        },
+        title=if state.review_diff_mode == ReviewDiffCore {
+          "Available in Token and Tree diff"
+        } else if state.review_diff_ignore_comments {
+          "Include comments in the comparison"
+        } else {
+          "Ignore comment-only changes"
+        },
+        disabled=state.review_diff_mode == ReviewDiffCore,
+        on_click=dispatch(ToggleReviewDiffIgnoreComments),
+        attrs=@html.Attrs::build()
+          .aria_label("Ignore comments")
+          .aria_pressed(state.review_diff_ignore_comments.to_string()),
+        "Ignore comments",
+      ),
+      @html.span(
+        class=if fallback.is_empty() {
+          "review-diff-mode-status hidden"
+        } else {
+          "review-diff-mode-status"
+        },
+        attrs=@html.Attrs::build().role("status").aria_live("polite"),
+        fallback,
+      ),
+    ],
+  )
+}
+
+///|
 /// The full comparison keeps its two models mounted while this compact control
 /// changes only their layout. Source mode hides the control but preserves the
 /// panel preference for the next full-diff reveal.
@@ -1754,8 +1903,8 @@ fn review_diff_layout_toggle(
 ) -> @html.Html {
   let review_ready = ctx.active_file is Some(path) &&
     state.docs.get(path) is Some(doc) &&
-    doc.review is Some({ view_mode: ReviewUnifiedDiff, .. }) &&
-    doc.unified_diff_content() is Some(_)
+    doc.review is Some({ view_mode: ReviewDiff, .. }) &&
+    doc.diff_content() is Some(_)
   let history_ready = ctx.active_history_diff is Some(diff) &&
     state.history_docs.get(history_diff_key(diff)) is Some(history) &&
     history.original.text() is Some(_) &&
@@ -1763,23 +1912,23 @@ fn review_diff_layout_toggle(
   guard review_ready || history_ready else {
     return @html.span(class="review-badge hidden", "")
   }
-  let unified = state.review_diff_layout == ReviewUnified
+  let inline = state.review_diff_layout == ReviewInline
   @html.button(
     type_="button",
     class="review-badge review-badge-action review-layout-toggle",
-    title=if unified {
+    title=if inline {
       "Use side-by-side diff layout"
     } else {
-      "Use unified diff layout"
+      "Use inline diff layout"
     },
     on_click=dispatch(ToggleReviewDiffLayout),
     attrs=@html.Attrs::build()
-      .data_set("layout", if unified { "unified" } else { "split" })
-      .aria_label("Unified diff layout")
-      .aria_pressed(unified.to_string()),
+      .data_set("layout", if inline { "inline" } else { "side-by-side" })
+      .aria_label("Inline diff layout")
+      .aria_pressed(inline.to_string()),
     @html.span(
-      class=if unified {
-        "review-layout-icon unified"
+      class=if inline {
+        "review-layout-icon inline"
       } else {
         "review-layout-icon split"
       },
@@ -2053,9 +2202,9 @@ fn review_badge(
   let (text, title, action, pressed) = match ctx.active_file {
     Some(path) =>
       match state.docs.get(path) {
-        Some(doc) if doc.unified_diff_content() is Some(_) =>
+        Some(doc) if doc.diff_content() is Some(_) =>
           match doc.review {
-            Some({ view_mode: ReviewUnifiedDiff, .. }) =>
+            Some({ view_mode: ReviewDiff, .. }) =>
               (
                 "View file", "Return to the source preview and quick-diff gutter",
                 true, true,
