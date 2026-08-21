@@ -1216,6 +1216,18 @@ pub extend CancelSearchFilesPayload with Eq::{equal, not_equal}
 pub extend CancelSearchFilesPayload with ToJson::{to_json}
 
 ///|
+pub extend CancelSearchTextPayload with Debug::{to_repr}
+
+///|
+pub extend CancelSearchTextPayload with FromJson::{from_json}
+
+///|
+pub extend CancelSearchTextPayload with Eq::{equal, not_equal}
+
+///|
+pub extend CancelSearchTextPayload with ToJson::{to_json}
+
+///|
 pub extend ClearFileSearchCachePayload with Debug::{to_repr}
 
 ///|
@@ -1358,6 +1370,30 @@ pub extend GitChangesPayload with Eq::{equal, not_equal}
 
 ///|
 pub extend GitChangesPayload with ToJson::{to_json}
+
+///|
+pub extend GitCommitChangesPayload with Debug::{to_repr}
+
+///|
+pub extend GitCommitChangesPayload with FromJson::{from_json}
+
+///|
+pub extend GitCommitChangesPayload with Eq::{equal, not_equal}
+
+///|
+pub extend GitCommitChangesPayload with ToJson::{to_json}
+
+///|
+pub extend GitHistoryPayload with Debug::{to_repr}
+
+///|
+pub extend GitHistoryPayload with FromJson::{from_json}
+
+///|
+pub extend GitHistoryPayload with Eq::{equal, not_equal}
+
+///|
+pub extend GitHistoryPayload with ToJson::{to_json}
 
 ///|
 pub extend GitOriginalFilePayload with Debug::{to_repr}
@@ -1538,6 +1574,18 @@ pub extend SearchFilesPayload with Eq::{equal, not_equal}
 
 ///|
 pub extend SearchFilesPayload with ToJson::{to_json}
+
+///|
+pub extend SearchTextPayload with Debug::{to_repr}
+
+///|
+pub extend SearchTextPayload with FromJson::{from_json}
+
+///|
+pub extend SearchTextPayload with Eq::{equal, not_equal}
+
+///|
+pub extend SearchTextPayload with ToJson::{to_json}
 
 ///|
 pub extend SessionChangedPayload with Debug::{to_repr}

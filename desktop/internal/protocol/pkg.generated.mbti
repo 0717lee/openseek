@@ -254,6 +254,11 @@ pub(all) struct CancelSearchTextPayload {
   session_key : String
   generation : Int
 } derive(Eq, @debug.Debug)
+pub fn CancelSearchTextPayload::equal(Self, Self) -> Bool
+pub fn CancelSearchTextPayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn CancelSearchTextPayload::not_equal(Self, Self) -> Bool
+pub fn CancelSearchTextPayload::to_json(Self) -> Json
+pub fn CancelSearchTextPayload::to_repr(Self) -> @debug.Repr
 pub impl ToJson for CancelSearchTextPayload
 pub impl @json.FromJson for CancelSearchTextPayload
 
@@ -880,6 +885,11 @@ pub(all) struct GitCommitChangesPayload {
   workspace : String?
   commit : String
 } derive(Eq, @debug.Debug)
+pub fn GitCommitChangesPayload::equal(Self, Self) -> Bool
+pub fn GitCommitChangesPayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn GitCommitChangesPayload::not_equal(Self, Self) -> Bool
+pub fn GitCommitChangesPayload::to_json(Self) -> Json
+pub fn GitCommitChangesPayload::to_repr(Self) -> @debug.Repr
 pub impl ToJson for GitCommitChangesPayload
 pub impl @json.FromJson for GitCommitChangesPayload
 
@@ -888,6 +898,11 @@ pub(all) struct GitCommitChangesReply {
   parent : String?
   changes : Array[GitHistoricalChange]
 } derive(Eq, @debug.Debug)
+pub fn GitCommitChangesReply::equal(Self, Self) -> Bool
+pub fn GitCommitChangesReply::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn GitCommitChangesReply::not_equal(Self, Self) -> Bool
+pub fn GitCommitChangesReply::to_json(Self) -> Json
+pub fn GitCommitChangesReply::to_repr(Self) -> @debug.Repr
 pub impl ToJson for GitCommitChangesReply
 pub impl @json.FromJson for GitCommitChangesReply
 
@@ -910,6 +925,11 @@ pub(all) struct GitHistoricalChange {
   status : String
   kind : String
 } derive(Eq, @debug.Debug)
+pub fn GitHistoricalChange::equal(Self, Self) -> Bool
+pub fn GitHistoricalChange::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn GitHistoricalChange::not_equal(Self, Self) -> Bool
+pub fn GitHistoricalChange::to_json(Self) -> Json
+pub fn GitHistoricalChange::to_repr(Self) -> @debug.Repr
 pub impl ToJson for GitHistoricalChange
 pub impl @json.FromJson for GitHistoricalChange
 
@@ -920,6 +940,11 @@ pub(all) struct GitHistoryCommit {
   author : String
   authored_at : String
 } derive(Eq, @debug.Debug)
+pub fn GitHistoryCommit::equal(Self, Self) -> Bool
+pub fn GitHistoryCommit::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn GitHistoryCommit::not_equal(Self, Self) -> Bool
+pub fn GitHistoryCommit::to_json(Self) -> Json
+pub fn GitHistoryCommit::to_repr(Self) -> @debug.Repr
 pub impl ToJson for GitHistoryCommit
 pub impl @json.FromJson for GitHistoryCommit
 
@@ -930,6 +955,11 @@ pub(all) struct GitHistoryPayload {
   skip : Int
   limit : Int
 } derive(Eq, @debug.Debug)
+pub fn GitHistoryPayload::equal(Self, Self) -> Bool
+pub fn GitHistoryPayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn GitHistoryPayload::not_equal(Self, Self) -> Bool
+pub fn GitHistoryPayload::to_json(Self) -> Json
+pub fn GitHistoryPayload::to_repr(Self) -> @debug.Repr
 pub impl ToJson for GitHistoryPayload
 pub impl @json.FromJson for GitHistoryPayload
 
@@ -938,6 +968,11 @@ pub(all) struct GitHistoryRef {
   revision : String
   kind : String
 } derive(Eq, @debug.Debug)
+pub fn GitHistoryRef::equal(Self, Self) -> Bool
+pub fn GitHistoryRef::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn GitHistoryRef::not_equal(Self, Self) -> Bool
+pub fn GitHistoryRef::to_json(Self) -> Json
+pub fn GitHistoryRef::to_repr(Self) -> @debug.Repr
 pub impl ToJson for GitHistoryRef
 pub impl @json.FromJson for GitHistoryRef
 
@@ -947,6 +982,11 @@ pub(all) struct GitHistoryReply {
   commits : Array[GitHistoryCommit]
   has_more : Bool
 } derive(Eq, @debug.Debug)
+pub fn GitHistoryReply::equal(Self, Self) -> Bool
+pub fn GitHistoryReply::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn GitHistoryReply::not_equal(Self, Self) -> Bool
+pub fn GitHistoryReply::to_json(Self) -> Json
+pub fn GitHistoryReply::to_repr(Self) -> @debug.Repr
 pub impl ToJson for GitHistoryReply
 pub impl @json.FromJson for GitHistoryReply
 
@@ -956,6 +996,11 @@ pub(all) struct GitHistorySnapshot {
   refs : Array[GitHistoryRef]
   tips : Array[String]
 } derive(Eq, @debug.Debug)
+pub fn GitHistorySnapshot::equal(Self, Self) -> Bool
+pub fn GitHistorySnapshot::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn GitHistorySnapshot::not_equal(Self, Self) -> Bool
+pub fn GitHistorySnapshot::to_json(Self) -> Json
+pub fn GitHistorySnapshot::to_repr(Self) -> @debug.Repr
 pub impl ToJson for GitHistorySnapshot
 pub impl @json.FromJson for GitHistorySnapshot
 
@@ -1525,6 +1570,11 @@ pub(all) struct SearchTextPayload {
   generation : Int
   max_results : Int
 } derive(Eq, @debug.Debug)
+pub fn SearchTextPayload::equal(Self, Self) -> Bool
+pub fn SearchTextPayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn SearchTextPayload::not_equal(Self, Self) -> Bool
+pub fn SearchTextPayload::to_json(Self) -> Json
+pub fn SearchTextPayload::to_repr(Self) -> @debug.Repr
 pub impl ToJson for SearchTextPayload
 pub impl @json.FromJson for SearchTextPayload
 
@@ -1538,6 +1588,11 @@ pub(all) struct SearchTextReply {
   cancelled : Bool
   error : TextSearchError?
 } derive(Eq, @debug.Debug)
+pub fn SearchTextReply::equal(Self, Self) -> Bool
+pub fn SearchTextReply::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn SearchTextReply::not_equal(Self, Self) -> Bool
+pub fn SearchTextReply::to_json(Self) -> Json
+pub fn SearchTextReply::to_repr(Self) -> @debug.Repr
 pub impl ToJson for SearchTextReply
 pub impl @json.FromJson for SearchTextReply
 
@@ -1978,6 +2033,9 @@ pub(all) struct TextSearchError {
   code : String
   message : String
 } derive(Eq, @debug.Debug)
+pub fn TextSearchError::equal(Self, Self) -> Bool
+pub fn TextSearchError::not_equal(Self, Self) -> Bool
+pub fn TextSearchError::to_repr(Self) -> @debug.Repr
 
 pub(all) struct TextSearchMatch {
   path : String
@@ -1986,6 +2044,11 @@ pub(all) struct TextSearchMatch {
   preview_start_column : Int
   ranges : Array[TextSearchRange]
 } derive(Eq, @debug.Debug)
+pub fn TextSearchMatch::equal(Self, Self) -> Bool
+pub fn TextSearchMatch::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn TextSearchMatch::not_equal(Self, Self) -> Bool
+pub fn TextSearchMatch::to_json(Self) -> Json
+pub fn TextSearchMatch::to_repr(Self) -> @debug.Repr
 pub impl ToJson for TextSearchMatch
 pub impl @json.FromJson for TextSearchMatch
 
@@ -1993,6 +2056,11 @@ pub(all) struct TextSearchRange {
   start_column : Int
   end_column : Int
 } derive(Eq, @debug.Debug)
+pub fn TextSearchRange::equal(Self, Self) -> Bool
+pub fn TextSearchRange::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn TextSearchRange::not_equal(Self, Self) -> Bool
+pub fn TextSearchRange::to_json(Self) -> Json
+pub fn TextSearchRange::to_repr(Self) -> @debug.Repr
 pub impl ToJson for TextSearchRange
 pub impl @json.FromJson for TextSearchRange
 
