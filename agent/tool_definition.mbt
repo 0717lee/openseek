@@ -94,6 +94,10 @@ async fn[X] shell_tools(
 ) -> Array[@agent_tool.AgentToolDefinition] {
   ignore(scope)
   ignore(on_background_wake)
+  // A real await keeps this variant genuinely async, matching the POSIX
+  // variant's signature so `build_tools` stays async on every platform and
+  // `unused_async` can stay on for the package.
+  @async.pause()
   [@shell.definition(workspace_root=runtime.workspace_root())]
 }
 
@@ -232,4 +236,15 @@ async test "a finished background job queues a notice and wakes the controller" 
     let steers = runtime.drain_steers()
     assert_true(steers.any(s => s is Notice(_)))
   })
+}
+
+///|
+/// Mark the imports the non-Windows `shell_tools` uses as used on Windows:
+/// this binding is `_`-prefixed (never warned about) and its body is never
+/// evaluated.
+let _unused_windows_imports : Unit = {
+  ignore(@bgjobs.BgJobRuntime::list)
+  ignore(@shell_output.definition)
+  ignore(@shell_stop.definition)
+  ignore(@fs.exists)
 }

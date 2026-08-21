@@ -188,3 +188,12 @@ async test "a non-numeric wait_ms is a tool error, not silently ignored" {
     assert_true(output.content.contains("wait_ms must be a number"))
   })
 }
+
+///|
+/// Mark the platform-gated test imports as used: this binding is `_`-prefixed
+/// (never warned about) and its body is never evaluated.
+let _unused_test_imports : Unit = {
+  ignore(@agent_runtime.default_agent_event_capacity)
+  ignore(@async.sleep)
+  ignore(@fs.exists)
+}

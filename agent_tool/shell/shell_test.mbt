@@ -175,10 +175,12 @@ async fn run_shell_in_workspace(
 
 ///|
 /// The canonical protected source fixture for the masked-write catalog below.
+#cfg(not(platform="windows"))
 let answer_source : String = "pub fn answer() -> Int { 42 }\n"
 
 ///|
 /// Write the protected `main.mbt` fixture into `dir`.
+#cfg(not(platform="windows"))
 async fn write_answer_main(
   dir : String,
   content? : String = answer_source,
@@ -188,6 +190,7 @@ async fn write_answer_main(
 
 ///|
 /// Assert the protected `main.mbt` fixture survived untouched.
+#cfg(not(platform="windows"))
 async fn assert_answer_main_unchanged(
   dir : String,
   content? : String = answer_source,
@@ -199,6 +202,7 @@ async fn assert_answer_main_unchanged(
 /// Assert `result` is the pre-execution source-write refusal: an error
 /// Respond carrying the `marker` phrase plus the shared feedback line (and,
 /// when `line_anchored`, the edit-tool redirection hint).
+#cfg(not(platform="windows"))
 fn expect_source_write_blocked(
   output : @agent_tool.ToolOutput,
   marker? : String = "source tree operation is blocked",
@@ -2101,6 +2105,7 @@ async test "shell rejects cwd that is a file not a directory" {
 ///|
 /// Run the shell tool unwired with an injected default timeout (the test
 /// seam for the no-explicit-timeout paths).
+#cfg(not(platform="windows"))
 async fn run_shell_default(
   arguments : Json,
   default_timeout_ms~ : Int,

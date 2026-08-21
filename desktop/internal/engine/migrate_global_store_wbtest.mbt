@@ -5,6 +5,7 @@
 // test in this package.
 
 ///|
+#cfg(not(platform="windows"))
 async fn seed_record(record : @pathx.Absolute, content : String) -> Unit {
   @fsx.ensure_dir(record.join("events").to_path())
   @fsx.write_text(record.join("events/1.jsonl").to_path(), content)
@@ -118,4 +119,12 @@ async test "copying a record across filesystems leaves the destination whole" {
   assert_false(@fsx.exists(record.to_path()))
   assert_false(@fsx.exists(staging.to_path()))
   @fs.rmdir(dir, recursive=true)
+}
+
+///|
+/// Mark the platform-gated wbtest imports as used: this binding is `_`-prefixed
+/// (never warned about) and its body is never evaluated.
+let _unused_wbtest_imports : Unit = {
+  ignore(@gitx.run)
+  ignore(@work_dir.open_target)
 }
