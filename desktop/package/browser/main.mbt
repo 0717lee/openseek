@@ -1,5 +1,6 @@
 ///|
-/// The complete browser application directory consumed by openseek-api.
+/// The complete Browser application directory. Release CI archives this for
+/// openseek-api's same-origin `/console/` deployment.
 const BrowserDistDir : String = "dist/browser"
 
 ///|
