@@ -633,6 +633,7 @@ fn follower_test_config(
     api_key: "test",
     api_url: None,
     model: "test",
+    thinking: ReasoningMax,
     max_steps: 1,
     engine,
     cwd: None,

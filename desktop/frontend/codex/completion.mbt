@@ -190,6 +190,7 @@ fn State::loading_context(self : State, force_skills : Bool) -> State {
 pub(all) struct ComposerContext {
   channel : @interop.ChannelId
   model_chip : @html.Html
+  reasoning_chip : @html.Html?
   file_candidates : Array[@pathx.Relative]
   open_files : Array[@pathx.Relative]
   active_file : @pathx.Relative?
@@ -251,6 +252,9 @@ pub fn State::composer_input(
     )
   }
   let status : Array[@html.Html] = [context.model_chip]
+  if context.reasoning_chip is Some(chip) {
+    status.push(chip)
+  }
   if self.worktree_launch_workspace(context.channel) is Some(_) &&
     self.active_draft() is Some(_) {
     status.push(
@@ -476,6 +480,7 @@ test "Codex projects app-server facts into the shared composer contract" {
   let input = state.composer_input(dispatch, {
     channel: @interop.ChannelId::Local,
     model_chip: @html.nothing,
+    reasoning_chip: None,
     file_candidates: [@pathx.Relative("src/main.mbt")],
     open_files: [],
     active_file: None,

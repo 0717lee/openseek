@@ -615,8 +615,8 @@
   color: var(--color-danger);
 }
 
-/* A native select fills this compact model pill transparently, so its visible
-   width follows the selected label rather than the longest menu option. */
+/* A native select fills each compact setting pill transparently, so its
+   visible width follows the selected label rather than the longest option. */
 .composer-model {
   position: relative;
   display: inline-flex;

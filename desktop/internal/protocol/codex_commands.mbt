@@ -217,6 +217,7 @@ pub(all) struct CodexTurnStartPayload {
   thread_id : String
   input : Array[Json]
   model : String?
+  effort : String?
   cwd : String?
 } derive(Debug, Eq)
 
@@ -593,6 +594,7 @@ pub impl FromJson for CodexTurnStartPayload with fn from_json(json, path) {
     thread_id: object.required_string("threadId"),
     input: object.required_array("input"),
     model: object.optional_string("model"),
+    effort: object.optional_string("effort"),
     cwd: object.optional_string("cwd"),
   }
 }
@@ -605,6 +607,9 @@ pub impl ToJson for CodexTurnStartPayload with fn to_json(self) {
   }
   if self.model is Some(model) {
     fields["model"] = Json::string(model)
+  }
+  if self.effort is Some(effort) {
+    fields["effort"] = Json::string(effort)
   }
   if self.cwd is Some(cwd) {
     fields["cwd"] = Json::string(cwd)

@@ -458,6 +458,7 @@ fn State::send(
       )
     }
     let model = self.selected_model.trim().to_owned()
+    let effort = self.selected_effort.trim().to_owned()
     CodexTurnReply(active.id).request(
       dispatch,
       channel,
@@ -469,6 +470,11 @@ fn State::send(
           None
         } else {
           Some(model)
+        },
+        effort: if effort.is_empty() {
+          None
+        } else {
+          Some(effort)
         },
         cwd: None,
       },
@@ -508,6 +514,7 @@ fn State::start_turn_in_new_worktree(
 ) -> @cmd.Cmd {
   let thread_id = active.id
   let model = self.selected_model.trim().to_owned()
+  let effort = self.selected_effort.trim().to_owned()
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
       @interop.in_ordered_lane(
@@ -562,6 +569,11 @@ fn State::start_turn_in_new_worktree(
                 None
               } else {
                 Some(model)
+              },
+              effort: if effort.is_empty() {
+                None
+              } else {
+                Some(effort)
               },
               cwd: Some(worktree.path),
             },

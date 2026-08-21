@@ -962,6 +962,7 @@ fn run_slash_command(
             model.focused,
             session=conv.session_id,
             model=conv.engine_model,
+            reasoning=model.openseek_reasoning,
             max_steps=model.max_steps,
             workspace=conv.project(),
           ),
@@ -1018,6 +1019,7 @@ fn send_goal(
       conv.session_id,
       workspace,
       conv.engine_model,
+      model.openseek_reasoning,
       model.max_steps,
       command,
       text,
@@ -1028,6 +1030,7 @@ fn send_goal(
     conv.device,
     session=conv.session_id,
     model=conv.engine_model,
+    reasoning=model.openseek_reasoning,
     max_steps=model.max_steps,
     workspace=conv.project(),
     command,
@@ -1719,7 +1722,9 @@ fn update_msg(
       model=stored,
       conversation_models=remembered,
       agent~,
-      codex_model~
+      codex_model~,
+      codex_effort~,
+      openseek_effort~
     ) => {
       let theme = Theme::parse(theme, model.theme)
       let app_font = AppFont::parse(font, model.app_font)
@@ -1732,6 +1737,9 @@ fn update_msg(
       )
       let default_agent = AgentChoice::parse(agent).unwrap_or(
         model.default_agent,
+      )
+      let openseek_reasoning = OpenSeekReasoning::parse(openseek_effort).unwrap_or(
+        model.openseek_reasoning,
       )
       // The stored Codex pick seeds Codex's own selection state. When the
       // catalog arrives, `with_models` keeps this id if it is still listed
@@ -1748,12 +1756,24 @@ fn update_msg(
           url => open_external_link(dispatch, url),
         )
       }
+      let (codex_effort_cmd, codex) = if codex_effort.is_blank() {
+        (@cmd.none, codex)
+      } else {
+        @codex.update(
+          dispatch.map(msg => Codex(channel=model.focused, msg)),
+          @codex.Msg::effort_changed(codex_effort.trim().to_owned()),
+          codex,
+          model.focused,
+          url => open_external_link(dispatch, url),
+        )
+      }
       (
         @cmd.batch([
           theme.apply(model.system_dark),
           app_font.apply(),
           app_font_size.apply(),
           codex_cmd,
+          codex_effort_cmd,
         ]),
         {
           ..model,
@@ -1765,6 +1785,7 @@ fn update_msg(
           default_model,
           default_agent,
           conversation_models: parse_conversation_models(remembered),
+          openseek_reasoning,
           codex,
         },
       )
@@ -2467,6 +2488,25 @@ fn update_msg(
           update_msg(dispatch, OpenSetup, model)
       }
     }
+    CodexEffortPicked(value) => {
+      let (effort_cmd, codex) = @codex.update(
+        dispatch.map(msg => Codex(channel=model.focused, msg)),
+        @codex.Msg::effort_changed(value),
+        model.codex,
+        model.focused,
+        url => open_external_link(dispatch, url),
+      )
+      (
+        @cmd.batch([effort_cmd, save_codex_reasoning_effort(value)]),
+        { ..model, codex, },
+      )
+    }
+    OpenSeekEffortPicked(value) => {
+      guard OpenSeekReasoning::parse(value) is Some(reasoning) else {
+        return (@cmd.none, model)
+      }
+      (reasoning.save(), { ..model, openseek_reasoning: reasoning })
+    }
     MaxStepsChanged(value) => (@cmd.none, { ..model, max_steps: value })
     SetupApiKeyChanged(value) => {
       guard model.host_settings_loaded() else { return (@cmd.none, model) }
@@ -3071,6 +3111,7 @@ fn update_msg(
             task,
             submission_id,
             conv.engine_model,
+            model.openseek_reasoning,
             model.max_steps,
             conv.session_id,
             workspace,
@@ -3082,6 +3123,7 @@ fn update_msg(
             task,
             submission_id,
             conv.engine_model,
+            model.openseek_reasoning,
             model.max_steps,
             conv.session_id,
             workspace=conv.project(),
@@ -7056,6 +7098,7 @@ fn encoded_start_workspace(conv : Conversation) -> String? {
   let payload = start_payload(
     "continue",
     High,
+    ReasoningMax,
     "1000",
     conv.session_id,
     "test-submission",
@@ -11086,6 +11129,8 @@ test "loaded UI preferences parse their wire names" {
       conversation_models="[{\"key\":\"local/desktop-test\",\"model\":\"deepseek-v4-pro\"}]",
       agent="codex",
       codex_model="gpt-5.4-codex",
+      codex_effort="xhigh",
+      openseek_effort="high",
     ),
     test_model(),
   )
@@ -11095,6 +11140,7 @@ test "loaded UI preferences parse their wire names" {
   assert_true(restored.app_font_size is Large)
   assert_true(restored.default_model is Low)
   assert_true(restored.default_agent is CodexAgent)
+  assert_true(restored.openseek_reasoning is ReasoningHigh)
   // The stored conversation outranks the stored default for its own chat.
   assert_true(restored.active().engine_model is High)
   // Unknown stored values fall back to the defaults.
@@ -11110,6 +11156,8 @@ test "loaded UI preferences parse their wire names" {
       conversation_models="not json",
       agent="broken",
       codex_model="",
+      codex_effort="",
+      openseek_effort="broken",
     ),
     test_model(),
   )
@@ -11118,6 +11166,7 @@ test "loaded UI preferences parse their wire names" {
   assert_true(unknown.app_font is GeistMono)
   assert_true(unknown.app_font_size is Medium)
   assert_true(unknown.default_model is High)
+  assert_true(unknown.openseek_reasoning is ReasoningMax)
   assert_true(unknown.default_agent is OpenSeekAgent)
   // A store that will not parse remembers nothing rather than wedging.
   assert_eq(unknown.conversation_models.length(), 0)

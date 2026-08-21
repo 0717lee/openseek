@@ -100,12 +100,14 @@ test "Codex turn start preserves its typed app-server fields" {
     "cwd": "/work/project",
     "input": [{ "type": "text", "text": "hello" }],
     "model": "gpt-test",
+    "effort": "high",
   })
   assert_eq(ToJson::to_json(request), {
     "threadId": "thread-1",
     "cwd": "/work/project",
     "input": [{ "type": "text", "text": "hello" }],
     "model": "gpt-test",
+    "effort": "high",
   })
 }
 
@@ -115,8 +117,10 @@ test "start and steer payloads preserve submission ids" {
     "task": "hello",
     "session": "s-start",
     "submission_id": "submission-start",
+    "thinking": "high",
   })
   assert_eq(start.submission_id, Some("submission-start"))
+  assert_eq(start.thinking, Some("high"))
   let steer : @protocol.SteerPayload = @json.from_json({
     "text": "more detail",
     "run_id": "r1",
@@ -169,9 +173,11 @@ test "goal payload distinguishes set from clear by the text field" {
     "session": "s-goal",
     "text": "ship the feature",
     "model": "deepseek-v4-pro",
+    "thinking": "max",
   })
   assert_eq(set.text, Some("ship the feature"))
   assert_eq(set.model, Some("deepseek-v4-pro"))
+  assert_eq(set.thinking, Some("max"))
   let clear : @protocol.GoalPayload = @json.from_json({ "session": "s-goal" })
   assert_true(clear.text is None)
 }

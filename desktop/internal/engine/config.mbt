@@ -8,6 +8,55 @@ const DefaultModel = "deepseek-v4-pro"
 const DefaultMaxSteps = 1000
 
 ///|
+/// The reasoning mode exported to the OpenSeek engine process. Keeping this
+/// typed at the Desktop boundary prevents an unvalidated client string from
+/// becoming process configuration.
+priv enum EngineReasoning {
+  ReasoningOff
+  ReasoningHigh
+  ReasoningMax
+}
+
+///|
+fn EngineReasoning::wire(self : EngineReasoning) -> String {
+  match self {
+    ReasoningOff => "no"
+    ReasoningHigh => "high"
+    ReasoningMax => "max"
+  }
+}
+
+///|
+fn EngineReasoning::parse(value : String) -> EngineReasoning? {
+  match value.trim().to_owned() {
+    "no" => Some(ReasoningOff)
+    "high" => Some(ReasoningHigh)
+    "max" => Some(ReasoningMax)
+    _ => None
+  }
+}
+
+///|
+/// A request value outranks the inherited process setting. Older clients omit
+/// the field and retain the CLI-compatible environment/default behavior.
+fn EngineReasoning::configured(
+  value : String?,
+) -> EngineReasoning raise EngineError {
+  let configured = match value {
+    Some(value) => Some(value)
+    None => @env.get("OPENSEEK_THINKING")
+  }
+  match configured {
+    None => ReasoningMax
+    Some(value) =>
+      match EngineReasoning::parse(value) {
+        Some(reasoning) => reasoning
+        None => raise EngineError("thinking must be one of no, high, or max")
+      }
+  }
+}
+
+///|
 /// Sent as the API key when a custom endpoint has no stored key: the
 /// engine refuses to start with an empty key, so this preserves the request
 /// shape for endpoints that need no credential (e.g. a local Ollama or
@@ -22,6 +71,7 @@ priv struct RunConfig {
   // default (the official DeepSeek endpoint).
   api_url : String?
   model : String
+  thinking : EngineReasoning
   max_steps : Int
   engine : String
   cwd : @pathx.Path?
@@ -81,6 +131,7 @@ async fn run_config(
     task,
     manager,
     model?=payload.model,
+    thinking?=payload.thinking,
     max_steps?=payload.max_steps,
     session~,
     workspace?=payload.workspace,
@@ -101,6 +152,7 @@ async fn compact_config(
     manager,
     payload.session,
     model?=payload.model,
+    thinking?=payload.thinking,
     max_steps?=payload.max_steps,
     workspace?=payload.workspace,
   )
@@ -118,6 +170,7 @@ async fn goal_config(
     manager,
     payload.session,
     model?=payload.model,
+    thinking?=payload.thinking,
     max_steps?=payload.max_steps,
     workspace?=payload.workspace,
   )
@@ -128,6 +181,7 @@ async fn session_command_config(
   manager : EngineManager,
   session : String,
   model? : String,
+  thinking? : String,
   max_steps? : Int,
   workspace? : String,
 ) -> RunConfig {
@@ -135,7 +189,7 @@ async fn session_command_config(
   guard !session.is_empty() else {
     raise EngineError("session id must not be empty")
   }
-  serve_config("", manager, model?, max_steps?, session~, workspace?)
+  serve_config("", manager, model?, thinking?, max_steps?, session~, workspace?)
 }
 
 ///|
@@ -147,6 +201,7 @@ async fn serve_config(
   task : String,
   manager : EngineManager,
   model? : String,
+  thinking? : String,
   max_steps? : Int,
   session~ : String,
   workspace? : String,
@@ -194,6 +249,7 @@ async fn serve_config(
       // fallback must read the same variable.
       None => @env.get("OPENSEEK_MODEL").unwrap_or(DefaultModel)
     },
+    thinking: EngineReasoning::configured(thinking),
     max_steps: configured_max_steps(max_steps),
     engine,
     // A run happens in the workspace directory itself, unless the session is
@@ -217,6 +273,7 @@ fn engine_fingerprint(config : RunConfig) -> String {
     config.api_key,
     config.api_url.unwrap_or(""),
     config.model,
+    config.thinking.wire(),
     config.max_steps.to_string(),
     config.cwd.map(cwd => cwd.to_string()).unwrap_or(""),
     config.session,
@@ -231,6 +288,7 @@ test "a different endpoint cannot reuse a live engine process" {
     api_key: "k",
     api_url: None,
     model: "deepseek-v4-pro",
+    thinking: ReasoningMax,
     max_steps: 1000,
     engine: "openseek",
     cwd: None,
@@ -242,6 +300,10 @@ test "a different endpoint cannot reuse a live engine process" {
     api_url: Some("https://proxy.example/chat/completions"),
   }
   assert_true(engine_fingerprint(base) != engine_fingerprint(custom))
+  assert_true(
+    engine_fingerprint(base) !=
+    engine_fingerprint({ ..base, thinking: ReasoningHigh }),
+  )
   assert_eq(engine_fingerprint(base), engine_fingerprint({ ..base, task: "u" }))
   // cwd is part of the fingerprint: a session bound to a worktree can never
   // reuse a serve process rooted elsewhere (and vice versa).
@@ -315,6 +377,7 @@ async test "run config ignores OPENSEEK_API_URL in favor of the settings" {
     task: "hello",
     submission_id: None,
     model: None,
+    thinking: None,
     max_steps: None,
     session: "s-default",
     workspace: Some(workspace),
@@ -334,6 +397,7 @@ async test "run config rejects a blank session" {
           task: "hello",
           submission_id: None,
           model: None,
+          thinking: None,
           max_steps: None,
           session,
           workspace: None,
@@ -388,6 +452,7 @@ async test "host chooses durable placement from workspace state" {
     task: "resume",
     submission_id: None,
     model: None,
+    thinking: None,
     max_steps: None,
     session: "s-workspace",
     workspace: None,
@@ -406,6 +471,7 @@ async test "host chooses durable placement from workspace state" {
         task: "fresh",
         submission_id: None,
         model: None,
+        thinking: None,
         max_steps: None,
         session: "s-unclaimed",
         workspace: None,
@@ -422,6 +488,7 @@ async test "host chooses durable placement from workspace state" {
     task: "attached",
     submission_id: None,
     model: None,
+    thinking: None,
     max_steps: None,
     session: "s-attached",
     workspace: Some(workspace_resource),

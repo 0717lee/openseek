@@ -15,6 +15,9 @@ pub(all) struct StartPayload {
   // Blank ids and ids longer than 128 UTF-8 bytes are ignored.
   submission_id : String?
   model : String?
+  // OpenSeek's `no`/`high`/`max` reasoning setting. Optional keeps older
+  // clients compatible; the host validates a present value before launch.
+  thinking : String?
   max_steps : Int?
   // Every desktop run belongs to a durable conversation. The engine rejects
   // a blank id before it acquires that conversation's record lease.
@@ -24,7 +27,7 @@ pub(all) struct StartPayload {
   // binds at creation) runs in that checkout — the start itself never names
   // or mutates worktrees.
   workspace : String?
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
 
 ///|
 pub(all) struct CancelPayload {
@@ -57,9 +60,10 @@ pub(all) struct CompactPayload {
   session : String
   // A resumed conversation may need a new engine process with these settings.
   model : String?
+  thinking : String?
   max_steps : Int?
   workspace : String?
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
 
 ///|
 pub(all) struct GoalPayload {
@@ -75,9 +79,10 @@ pub(all) struct GoalPayload {
   auto : Bool?
   // A resumed conversation may need a new engine process with these settings.
   model : String?
+  thinking : String?
   max_steps : Int?
   workspace : String?
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
 
 ///|
 pub(all) struct LoadSessionPayload {

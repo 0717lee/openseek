@@ -230,17 +230,34 @@ pub async fn compact_run(
   defer claim.release(manager)
   placement_locked = false
   manager.workspace_lifecycle_lock.release()
-  let live = if slot.live() is Some(live) {
-    live
-  } else {
-    let config = compact_config(manager, payload)
+  // A changed model, reasoning choice, or endpoint replaces an idle engine
+  // before the compaction. During a turn the compact command must stay behind
+  // that turn on its current process; do not resolve new endpoint settings in
+  // that active path, because they do not configure the process accepting the
+  // queued command. The next start applies the new fingerprint after both
+  // settle.
+  let replacement = match slot.live() {
+    None => Some(compact_config(manager, payload))
+    Some(live) =>
+      match live.phase {
+        Idle(..) => {
+          let config = compact_config(manager, payload)
+          if live.spec_key != engine_fingerprint(config) {
+            Some(config)
+          } else {
+            None
+          }
+        }
+        Running(..) | Compacting(..) => None
+      }
+  }
+  if replacement is Some(config) {
     ensure_run_cwd(config)
     request_spawn(manager, claim, config)
     claim.require_current(manager)
-    guard slot.live() is Some(live) else {
-      raise EngineError("engine failed to start")
-    }
-    live
+  }
+  guard slot.live() is Some(live) else {
+    raise EngineError("engine failed to start")
   }
   // Deciding the phase this command implies is also how it is admitted, so
   // there is exactly one place that classifies the current phase instead of
@@ -327,17 +344,33 @@ pub async fn goal_run(
   defer claim.release(manager)
   placement_locked = false
   manager.workspace_lifecycle_lock.release()
-  let live = if slot.live() is Some(live) {
-    live
-  } else {
-    let config = goal_config(manager, payload)
+  // A goal sent while idle observes the selected engine settings immediately.
+  // Mid-turn and queued-compaction goals stay on the current process because
+  // replacing it would destroy the operation they are ordered behind. New
+  // endpoint settings are therefore not resolved in that active path; the
+  // next idle start applies their fingerprint.
+  let replacement = match slot.live() {
+    None => Some(goal_config(manager, payload))
+    Some(live) =>
+      match live.phase {
+        Idle(..) => {
+          let config = goal_config(manager, payload)
+          if live.spec_key != engine_fingerprint(config) {
+            Some(config)
+          } else {
+            None
+          }
+        }
+        Running(..) | Compacting(..) => None
+      }
+  }
+  if replacement is Some(config) {
     ensure_run_cwd(config)
     request_spawn(manager, claim, config)
     claim.require_current(manager)
-    guard slot.live() is Some(live) else {
-      raise EngineError("engine failed to start")
-    }
-    live
+  }
+  guard slot.live() is Some(live) else {
+    raise EngineError("engine failed to start")
   }
   let command = if goal is Some(text) {
     @protocol.goal_set(text, auto=payload.auto is Some(true))
@@ -837,6 +870,7 @@ async test "start echoes the client submission id in Started" {
         task: "hello",
         submission_id: Some("submission-start"),
         model: None,
+        thinking: None,
         max_steps: None,
         session,
         workspace: Some(workspace),
@@ -915,6 +949,7 @@ async test "a goal is delivered only once its command is on the wire" {
       text: Some("keep the build green"),
       auto: None,
       model: None,
+      thinking: None,
       max_steps: None,
       workspace: Some(workspace),
     })
@@ -1042,6 +1077,7 @@ async test "setup failure retires the writer before an immediate next start" {
         task: "first",
         submission_id: None,
         model: None,
+        thinking: None,
         max_steps: None,
         session,
         workspace: Some(workspace),
@@ -1065,6 +1101,7 @@ async test "setup failure retires the writer before an immediate next start" {
       task: "second",
       submission_id: None,
       model: None,
+      thinking: None,
       max_steps: None,
       session,
       workspace: Some(workspace),
@@ -1162,6 +1199,7 @@ async test "a prompt bigger than the pipe still settles exactly once" {
       task: "x".repeat(4_000_000),
       submission_id: None,
       model: None,
+      thinking: None,
       max_steps: None,
       session,
       workspace: Some(workspace),
@@ -1258,6 +1296,7 @@ async test "named session retries after its first prompt creates no record" {
       task: "x".repeat(4_000_000),
       submission_id: None,
       model: None,
+      thinking: None,
       max_steps: None,
       session,
       workspace: Some(workspace),
@@ -1298,6 +1337,7 @@ async test "named session retries after its first prompt creates no record" {
       task: "retry",
       submission_id: None,
       model: None,
+      thinking: None,
       max_steps: None,
       session,
       workspace: Some(workspace),
@@ -1483,6 +1523,7 @@ async test "workspace detach refuses a running conversation without hiding it" {
       task: "keep running",
       submission_id: None,
       model: None,
+      thinking: None,
       max_steps: None,
       session: "s-detach-running",
       workspace: Some(workspace.to_string()),
@@ -1569,6 +1610,7 @@ async test "workspace detach drains an idle writer and its follower first" {
       task: "finish",
       submission_id: None,
       model: None,
+      thinking: None,
       max_steps: None,
       session: "s-detach-idle",
       workspace: Some(workspace.to_string()),
@@ -1624,6 +1666,7 @@ async test "a goal request is refused before it can reach the wrong engine" {
       text: Some("ship it"),
       auto: Some(true),
       model: None,
+      thinking: None,
       max_steps: None,
       workspace: None,
     }).contains("autonomous goal continuation is not supported yet"),
@@ -1636,6 +1679,7 @@ async test "a goal request is refused before it can reach the wrong engine" {
       text: Some("ship it"),
       auto: None,
       model: None,
+      thinking: None,
       max_steps: None,
       workspace: None,
     }).contains("not supported yet"),
