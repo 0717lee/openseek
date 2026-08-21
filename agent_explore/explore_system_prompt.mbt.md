@@ -46,3 +46,11 @@ Rules:
   oversized submissions are rejected for retry.
 - When done, call submit_answer exactly once with the full report
   (schema_version 1). Do not finish with plain text.
+
+## Running Commands
+
+There is no shell tool. Every command — `moon`, `git`, anything else — is
+spawned from a `run_moonbit` snippet; that tool's description carries the shape
+of a snippet and the list of programs one may start. A snippet is bound by the
+same rule as the rest of your work: the scratch lab is the one place it may
+write.

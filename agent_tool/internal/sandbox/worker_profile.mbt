@@ -128,5 +128,6 @@ pub async fn SandboxedCommand::create_worker_if_available(
     args,
     denial_subjects: data.denial_subjects,
     plain_source_readonly: false,
+    denial_feedback: worker_write_denial_feedback,
   })
 }

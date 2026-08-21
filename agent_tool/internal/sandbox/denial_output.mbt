@@ -1,4 +1,38 @@
 ///|
+/// Guidance for a sandboxed run whose output shows a source-write denial
+/// ("Operation not permitted" on a protected source path). Without it the model
+/// reads a bare OS error and debugs the filesystem — or worse, tries to escape
+/// the sandbox — instead of using `edit`. It lives beside the denial detector
+/// because both the foreground runner and the background-job reader need the
+/// same explanation for the same recognized condition.
+///
+/// Names the way forward without naming ways around it, for the same reason as
+/// `policy_refusal_feedback`.
+let source_write_denial_feedback : String =
+  #|run_moonbit sandbox: the "Operation not permitted" failure above is this tool's
+  #|sandbox denying a write to a protected MoonBit source file (`*.mbt`, `*.mbti`,
+  #|`*.mbt.md`, `moon.mod`/`moon.pkg`/`moon.work`) — not a filesystem or permissions
+  #|problem to debug. Snippets run source-write-readonly by design; writing non-source
+  #|files (data, logs, reports) stays allowed, and source-writing moon commands
+  #|(`moon fmt`, `moon info`, `moon add`, `moon test --update`) are denied here by the
+  #|same rule. Make source changes with the line-anchored `edit` tool, and keep
+  #|run_moonbit for commands, compute, probing, and non-source IO.
+
+///|
+/// The same guidance for the WORKER profile, which denies a different thing: a
+/// worker is supposed to write source, just only its own, so what it can hit is
+/// the boundary around its worktree. Told the source-write text instead, it
+/// would go looking for an `edit` tool to do what it may already do directly.
+let worker_write_denial_feedback : String =
+  #|run_moonbit sandbox: the "Operation not permitted" failure above is this tool's
+  #|sandbox denying a write OUTSIDE your worktree — a sibling worktree, the parent
+  #|checkout, or the repository's shared git state — not a filesystem or permissions
+  #|problem to debug. Your own worktree stays fully writable, source included. This
+  #|is the boundary your task defines, so do not work around it: if the slice
+  #|genuinely requires touching something outside it, stop and report that in your
+  #|result (status partial or failed) instead.
+
+///|
 /// Protected MoonBit source and manifest names, as they appear at the end of a
 /// path in a denial line. Matched with `line_names_subject`, so `.mbt` does not
 /// also cover `.mbt.md` — both are listed.

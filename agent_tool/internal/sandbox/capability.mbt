@@ -23,13 +23,20 @@ struct SandboxedCommand {
   /// `program = "/usr/bin/sandbox-exec"` with
   /// `args = ["-p", "<profile>", "sh", "-c", "moon check"]` on macOS.
   args : Array[String]
-  /// Protected paths and basenames derived from the same profile encoded in
-  /// `args`, retained so denial reporting cannot use metadata from another run.
+  /// The paths a denial from this profile may name — protected directories and
+  /// basenames — which is how one is told apart from a permission error this
+  /// sandbox did not cause. Derived from the same profile encoded in `args`, so
+  /// denial reporting cannot use metadata from another run.
   denial_subjects : Array[String]
   /// True only for the ordinary source-readonly profile with no writable
   /// subtree. A trusted source writer can escape this profile by running as a
   /// standalone shell command; worker and scratch-lab profiles cannot.
   plain_source_readonly : Bool
+  /// What to tell the model when this command's output reports a denial. Held
+  /// per command rather than picked by the caller, because the profiles deny
+  /// different things: the source-readonly one denies source writes, the worker
+  /// one denies writes outside its worktree, and each needs its own way forward.
+  denial_feedback : String
 }
 
 ///|
@@ -95,6 +102,7 @@ pub async fn SandboxedCommand::create_if_available(
     // keep classifying with the subjects of the profile it actually runs under.
     denial_subjects: data.denial_subjects.copy(),
     plain_source_readonly: subtree is None,
+    denial_feedback: source_write_denial_feedback,
   })
 }
 
@@ -119,6 +127,15 @@ pub fn SandboxedCommand::output_reports_denial(
   output : String,
 ) -> Bool {
   source_write_denied_in_text(output, self.denial_subjects)
+}
+
+///|
+/// The guidance to append when this command's output reports a denial. It comes
+/// from the prepared command that classified the output, not from a global a
+/// caller picks by hand, so the text can never describe a profile other than the
+/// one that actually refused.
+pub fn SandboxedCommand::denial_feedback(self : SandboxedCommand) -> String {
+  self.denial_feedback
 }
 
 ///|

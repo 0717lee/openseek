@@ -1,15 +1,15 @@
 ///|
-/// Tool `shell_output`: read a background shell job's output and status by id.
-/// The id comes from `shell run_in_background`, or from a foreground command that
+/// Tool `job_output`: read a background job's output and status by id.
+/// The id comes from `run_moonbit run_in_background`, or from a foreground command that
 /// was moved to the background when it exceeded its `timeout_ms`.
 pub fn definition(
   bg_runtime : @bgjobs.BgJobRuntime,
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(
-    name="shell_output",
+    name="job_output",
     description=(
-      #|Read a background shell job's recent output and status by its job_id (returned by
-      #|shell run_in_background, or by a command moved to the background on timeout).
+      #|Read a background job's recent output and status by its job_id (returned by
+      #|run_moonbit run_in_background, or by a command moved to the background on timeout).
       #|Returns the most recent window of captured output (with truncation metadata naming
       #|the total size when output exceeds the window) and whether the job is still
       #|running. If you need the job's result before you can continue and have no other
@@ -42,7 +42,7 @@ async fn execute(
 ) -> @agent_tool.ToolAction {
   guard arguments is { "job_id": String(job_id), .. } else {
     return @agent_tool.ToolAction::respond(
-      "error: shell_output requires a string job_id",
+      "error: job_output requires a string job_id",
       is_error=true,
     )
   }
@@ -92,29 +92,32 @@ async fn execute(
     Stopped => ("stopped", true)
   }
   // Preserve the foreground path's error semantics for a job read later: binary
-  // (non-UTF-8) output and a sandboxed source-write denial are tool errors even
-  // when the command exited 0. Scan the *full* retained output for a denial (the
-  // denial line can be earlier than the displayed tail), but only for a sandboxed
-  // job — so a full read is done only in that rare case.
-  let sandbox_feedback = match snapshot.sandboxed_command {
-    Some(command) => {
-      let full = bg_runtime.read_output(job_id).unwrap_or(output)
-      if command.output_reports_denial(full) {
-        Some(
-          @shell.contextual_source_write_denial_feedback(
-            command,
-            full,
-            read_only_review=snapshot.read_only_review,
-          ),
-        )
-      } else {
-        None
-      }
-    }
-    None => None
+  // (non-UTF-8) output and a refused access are tool errors even when the
+  // command exited 0.
+  //
+  // The moonrun policy refuses on every platform and for every job, so its
+  // wording is looked for first — in the displayed tail, which is where an
+  // uncaught refusal lands because it is what killed the job. A refusal the job
+  // caught and then outran can scroll out of that window; the foreground path's
+  // full-log scan is what covers that case, and it is not worth a full read of
+  // every job's output here.
+  //
+  // A profile denial is then scanned for across the *full* retained output (the
+  // denial line can be earlier than the tail), but only for a sandboxed job — so
+  // a full read happens only in that rarer case.
+  let sandbox_denied = if @sandbox.output_reports_policy_refusal(output) {
+    Some(@sandbox.policy_refusal_feedback)
+  } else if snapshot.sandboxed_command is Some(command) &&
+    command.output_reports_denial(
+      bg_runtime.read_output(job_id).unwrap_or(output),
+    ) {
+    Some(command.denial_feedback())
+  } else {
+    None
   }
-  let sandbox_denied = sandbox_feedback is Some(_)
-  let is_error = exit_error || snapshot.had_invalid_utf8 || sandbox_denied
+  let is_error = exit_error ||
+    snapshot.had_invalid_utf8 ||
+    sandbox_denied is Some(_)
   // Truncated whenever what we show is less than what the job produced — this
   // covers the window (large output), a memory-only runtime that dropped output
   // past the budget, and a hard-cap drop — so a prefix is never presented as the
@@ -145,8 +148,8 @@ async fn execute(
       content.write_string("\n")
     }
   }
-  if sandbox_feedback is Some(feedback) {
-    content.write_string(feedback)
+  if sandbox_denied is Some(guidance) {
+    content.write_string(guidance)
     content.write_string("\n")
   }
   content.write_string(footer)
@@ -155,7 +158,7 @@ async fn execute(
 }
 
 ///|
-/// Longest a single shell_output call may block awaiting a job, so one tool
+/// Longest a single job_output call may block awaiting a job, so one tool
 /// call cannot hold the turn indefinitely; the model can always call again.
 let max_wait_ms : Int = 120_000
 
@@ -167,7 +170,7 @@ fn wait_ms(arguments : Json) -> Result[Int?, String] {
     { "wait_ms": Number(value, ..), .. } => {
       let wait = value.to_int()
       if wait <= 0 {
-        Err("error: shell_output wait_ms must be a positive number")
+        Err("error: job_output wait_ms must be a positive number")
       } else if wait > max_wait_ms {
         Ok(Some(max_wait_ms))
       } else {
@@ -178,7 +181,7 @@ fn wait_ms(arguments : Json) -> Result[Int?, String] {
     // Present but not a number (e.g. a stringified "30000"): reject rather than
     // silently skip the wait — the local dispatcher does not enforce the JSON
     // schema, so the decoder must.
-    { "wait_ms": _, .. } => Err("error: shell_output wait_ms must be a number")
+    { "wait_ms": _, .. } => Err("error: job_output wait_ms must be a number")
     _ => Ok(None)
   }
 }

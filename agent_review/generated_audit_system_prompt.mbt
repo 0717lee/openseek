@@ -38,5 +38,11 @@ fn audit_system_prompt() -> String {
     #|  report (schema_version 1); set scope.head to "WORKTREE". Do not
     #|  finish with plain text.
     #|
+    #|## Running Commands
+    #|
+    #|There is no shell tool. Every command — `moon`, `git`, anything else — is
+    #|spawned from a `run_moonbit` snippet; that tool's description carries the shape
+    #|of a snippet and the list of programs one may start.
+    #|
   )
 }

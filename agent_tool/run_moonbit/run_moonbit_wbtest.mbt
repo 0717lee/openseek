@@ -19,7 +19,7 @@ async test "denial scan is bounded to the log's head and tail" {
     async fn scan(name : String, content : String) -> Bool {
       let path = "\{dir}/\{name}.log"
       @fs.write_file(path, content, create_mode=CreateOrTruncate)
-      log_shows_source_write_denial(
+      log_shows_denial(
         path,
         text => text.contains("main.mbt: Operation not permitted"),
         budget_bytes=1024,
@@ -38,3 +38,8 @@ async test "denial scan is bounded to the log's head and tail" {
     assert_false(scan("clean", filler(64)))
   })
 }
+
+// The spawn allowlist is taught by each role's system prompt now, and that
+// prose is NOT pinned by a test: asserting a prompt contains particular words
+// only breaks on rewrites. Keeping the list and the prompts in step is a
+// review-time job, not a test-time one.

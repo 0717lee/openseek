@@ -1,30 +1,20 @@
 ///|
 /// A snippet is bounded to this wall-clock so a runaway loop or a build that
 /// never finishes cannot block the whole turn. On expiry the run is cancelled
-/// (which tears down the moon subprocess) and reported as a timeout.
-const RunTimeoutMs : Int = 60_000
+/// (which tears down the moon subprocess) and reported as a timeout. Sized for
+/// commands, not just compute: a snippet runs whole `moon test` cycles, and a
+/// fresh workspace's first build downloads and compiles its dependencies.
+const RunTimeoutMs : Int = 300_000
 
 ///|
 /// Output is streamed to a file on disk, not buffered in memory, so a snippet
 /// that floods stdout (e.g. `while true { println(…) }`) cannot exhaust the
-/// agent's memory before the timeout fires. Only this many bytes are read back
-/// — the rest is dropped with a truncation marker.
+/// agent's memory before the timeout fires. A FOREGROUND run is STOPPED once it
+/// passes this, rather than truncated — the runtime spawns it with
+/// `kill_when_full`, so a clipped head means a killed program and the exit code
+/// is not the program's own. Detaching clears that, so a background job is
+/// bounded by the hard cap instead and runs to its own end.
 const OutputCapBytes : Int = 48_000
-
-///|
-/// Guidance appended when a sandboxed run's output shows a source-write denial
-/// ("Operation not permitted" on a protected source path). Without it the model
-/// reads a bare OS error and debugs the filesystem — or worse, tries to escape
-/// the sandbox — instead of using `edit`.
-const SandboxSourceWriteFeedback : String =
-  #|run_moonbit sandbox: the "Operation not permitted" failure above is this tool's
-  #|sandbox denying a write to a protected MoonBit source file (`*.mbt`, `*.mbti`,
-  #|`*.mbt.md`, `moon.mod`/`moon.pkg`/`moon.work`) — not a filesystem or permissions
-  #|problem to debug. Snippets run source-write-readonly by design; writing non-source
-  #|files (data, logs, reports) stays allowed. Do NOT try to work around the block from
-  #|inside a snippet (renames, copies, temp-then-move, or other sandbox escapes) — make
-  #|source changes with the line-anchored `edit` tool instead, and keep run_moonbit for
-  #|compute, probing, and non-source IO.
 
 ///|
 /// The `--warn-list` spec for `warning: "off"`. `-a` disables all warnings;
@@ -34,19 +24,17 @@ const SandboxSourceWriteFeedback : String =
 const WarnOffList : String = "-a+partial_match@partial_match+multiline_string_escape@multiline_string_escape+invalid_inline_wasm@invalid_inline_wasm+unannotated_ffi@unannotated_ffi"
 
 ///|
-/// Best-effort refusal of the two obvious native escapes: process spawning
-/// (`moonbitlang/async/process` — the `shell` tool owns commands) and native
-/// FFI (`extern`, which can bind libc `system`). A substring scan is NOT a
-/// real boundary — a determined native snippet can still escape — so HARD
-/// containment is deferred to the planned wasm backend (safe by construction).
-/// Until then this closes the trivial escapes and keeps descendant processes
-/// from outliving the timeout. Returns the reason to report, or None.
+/// Best-effort refusal of native FFI (`extern`, which can bind libc `system`
+/// and sidesteps every guard above it). Spawning processes is no longer an
+/// escape — it is what this tool is for — but FFI still is. A substring scan is
+/// NOT a real boundary; HARD containment is deferred to the planned wasm
+/// backend (safe by construction). Returns the reason to report, or None.
 fn native_escape(source : String) -> String? {
-  if source.contains("moonbitlang/async/process") {
-    Some(
-      "spawns processes (moonbitlang/async/process) — use the shell tool for commands",
-    )
-  } else if source.contains("extern") {
+  // Match the FFI syntax (`extern "c" fn …`), not the bare word. Scanning for
+  // `extern` alone refused a snippet whose only offence was a commit message
+  // mentioning it — the word appears in prose and string literals, the quote
+  // that follows it does not.
+  if source.contains("extern \"") {
     Some("uses native FFI (extern), which the wasm sandbox will contain later")
   } else {
     None
@@ -81,66 +69,55 @@ fn native_escape(source : String) -> String? {
 /// `partial_match` keep failing compilation with warnings off (see
 /// `WarnOffList`).
 ///
-/// Note: on macOS the run is wrapped in `sandbox-exec` with the shell tool's
-/// source-write-readonly profile, so a snippet is blocked from directly writing
-/// protected source files (`*.mbt`, `*.mbti`, `*.mbt.md`, `moon.mod/pkg/work`)
-/// while non-source output stays permitted. This is best-effort, not a hard
-/// boundary — an arbitrary snippet can still smuggle sources via directory
-/// renames (which `shell` catches by preflighting its command text, impossible
-/// for arbitrary code). Full capability containment is deferred to the planned
-/// wasm backend, where the runtime is safe by construction.
-pub fn definition(workspace_root~ : String) -> @agent_tool.AgentToolDefinition {
+/// Confinement is moonrun's wasm policy, which applies on every platform. It
+/// decides WHICH programs may start — an allowlist holding the moon/git/gh
+/// toolchain and inert utilities, with no shell, interpreter, or ad-hoc
+/// rewriter in it — and bounds the file access of the snippet itself.
+///
+/// Its `fs` rules stop at the process boundary, so an admitted command writes
+/// with the agent's own access. What is bounded is which commands exist at all,
+/// and one of those bounds is per subcommand: the options that would point git
+/// at another repository (`git -C`, `--git-dir`) precede the subcommand and so
+/// match no allowlist prefix.
+///
+/// Note what is deliberately NOT denied: source writes as such. The commands
+/// whose job is to rewrite source (`moon fmt`, `moon info`, `git checkout`) run
+/// normally, and the reason the old rule existed — an arbitrary program editing
+/// files behind the model's back — is covered by the allowlist admitting no
+/// such program. A read-only subrun is the exception, and the one role that
+/// still takes a `sandbox-exec` profile: holding no editing tool is what defines
+/// it, so `read_only=true` puts "may not write source" in the kernel.
+pub fn definition(
+  workspace_root~ : String,
+  read_only? : Bool = false,
+  bg_runtime? : @bgjobs.BgJobRuntime,
+  job_dir? : String,
+  scratch_dir? : String,
+  worker_sandbox? : WorkerSandbox,
+  run_timeout_ms? : Int = RunTimeoutMs,
+) -> @agent_tool.AgentToolDefinition {
+  // Background snippet directories are numbered inside the caller's scratch
+  // dir rather than created as fresh system temp dirs: a detached job outlives
+  // this call, so its snippet, build artifacts, and output log cannot be
+  // removed here — the caller's scratch dir is what eventually reclaims them.
+  let next_background = Ref(0)
   AgentToolDefinition(
     name="run_moonbit",
-    description=(
-      #|Compile and run a self-contained MoonBit program (a `.mbtx` single-file script)
-      #|and return its merged stdout/stderr and exit status. Use this for scripting
-      #|automation (read/transform files, parse JSON, compute) and for probing MoonBit
-      #|language behavior — PREFER it over shell python/node so the automation is MoonBit.
-      #|`source` may begin with an inline `import { "pkg", ... }` block (comma-separated
-      #|module paths such as `"moonbitlang/async", "moonbitlang/async/fs",
-      #|"moonbitlang/core/json"`) followed by the program including its own `main`; use
-      #|`async fn main` for IO (add `"moonbitlang/async"` to the import block for it). It
-      #|runs with your workspace as the working directory by default, so RELATIVE paths
-      #|like `@fs.read_file("data.json")` reach workspace files and files the program
-      #|writes land in the workspace; pass `cwd` to run elsewhere. Build artifacts stay in
-      #|a temp dir (your `_build` is untouched), and imports resolve against the registry
-      #|(NOT your uncommitted edits) — to exercise working-tree code, add a `*_test.mbt`
-      #|to that package and run `moon test` via shell instead. Compiler warnings are
-      #|suppressed by default (throwaway scripts trip unused-value noise constantly); pass
-      #|`warning: "on"` when the warnings are what you want to see. Bounded to 60s. When
-      #|probing language or API behavior, don't probe serially one turn at a time: emit
-      #|SEVERAL independent run_moonbit calls in the SAME assistant turn — one small
-      #|program per hypothesis — and read all the results together; batching saves a full
-      #|model round-trip per hypothesis and keeps each probe minimal instead of one
-      #|growing mega-program.
-    ),
-    schema=JsonSchema({
-      "type": "object",
-      "properties": {
-        "source": { "type": "string" },
-        "target": {
-          "type": "string",
-          "enum": ["native", "wasm", "wasm-gc", "js", "llvm"],
-          "description": "Backend to run on; defaults to native (required for the async @fs/@stdio/@process IO batteries).",
-        },
-        "cwd": {
-          "type": "string",
-          "description": "Working directory the program runs in (relative paths resolve against the workspace root); defaults to the workspace root.",
-        },
-        "warning": {
-          "type": "string",
-          "enum": ["off", "on"],
-          "description": (
-            #|Whether compiler warnings appear in the output; defaults to off (a snippet
-            #|is a throwaway script, so unused-variable style noise is suppressed). Set
-            #|"on" only when the warnings themselves are what you are probing.
-          ),
-        },
-      },
-      "required": ["source"],
+    description=description(background=bg_runtime is Some(_)),
+    schema=JsonSchema(schema(background=bg_runtime is Some(_))),
+    execute=Async(arguments => {
+      execute(
+        workspace_root,
+        arguments,
+        read_only~,
+        bg_runtime?,
+        job_dir?,
+        scratch_dir?,
+        worker_sandbox?,
+        run_timeout_ms~,
+        next_background~,
+      )
     }),
-    execute=Async(arguments => execute(workspace_root, arguments)),
   )
 }
 
@@ -148,6 +125,15 @@ pub fn definition(workspace_root~ : String) -> @agent_tool.AgentToolDefinition {
 async fn execute(
   workspace_root : String,
   arguments : Json,
+  read_only~ : Bool,
+  bg_runtime? : @bgjobs.BgJobRuntime,
+  job_dir? : String,
+  scratch_dir? : String,
+  worker_sandbox? : WorkerSandbox,
+  // The wall-clock bound, injectable so a test can exercise the deadline
+  // without waiting out the real one.
+  run_timeout_ms~ : Int,
+  next_background~ : Ref[Int],
 ) -> @agent_tool.ToolAction {
   let input = @decode.decode(arguments) catch {
     error =>
@@ -164,7 +150,7 @@ async fn execute(
   }
   // The program's working directory (default: the workspace root, so relative
   // `@fs` paths reach workspace files). An explicit relative `cwd` resolves
-  // against the workspace, like the shell tool.
+  // against the workspace, as every workspace-relative tool path does.
   let run_cwd = @workspace_path.resolve_cwd(workspace_root, input.cwd)
   if run_cwd is Some(c) {
     guard @fs.exists(c) else {
@@ -189,20 +175,73 @@ async fn execute(
   // a possibly-large output log when a turn is cancelled mid-run. The timeout
   // wraps only the process body; output is redirected to a file (not buffered in
   // memory) and read back capped, so a flood cannot exhaust memory.
-  let dir = @fs.tmpdir(prefix="openseek-run-moonbit-") catch {
-    // Let a cancellation propagate to the loop's Interrupted terminal instead of
-    // swallowing it into an ordinary tool error.
-    error if @async.is_being_cancelled() => raise error
-    _ =>
-      return @agent_tool.ToolAction::respond(
-        "run_moonbit: could not create a temporary working directory.",
-        is_error=true,
-      )
+  if input.run_in_background && bg_runtime is None {
+    return @agent_tool.ToolAction::respond(
+      "error: run_in_background is not available in this context",
+      is_error=true,
+    )
   }
+  // A directory a job may take over must outlive this call, so it is numbered
+  // inside the caller's job dir — reclaimed when the session's scope ends —
+  // rather than a system temp dir that only this function ever revisits. That
+  // covers BOTH ways a job takes over: an explicit `run_in_background`, and a
+  // foreground run detached at its deadline, which is why this does not test
+  // `run_in_background`.
+  let background = input.run_in_background
+  let dir = if job_dir is Some(scratch) {
+    let dir = "\{scratch}/snippet-\{next_background.val}"
+    next_background.val += 1
+    @fs.mkdir(dir, recursive=true) catch {
+      error if @async.is_being_cancelled() => raise error
+      _ =>
+        return @agent_tool.ToolAction::respond(
+          "run_moonbit: could not create a working directory for the background job.",
+          is_error=true,
+        )
+    }
+    dir
+  } else if scratch_dir is Some(lab) {
+    // With a lab wired, the snippet builds INSIDE it: the profile re-allows
+    // exactly one subtree, and pointing it at the lab then covers both the
+    // lab writes the caller sanctioned and moon's own build output.
+    let dir = "\{lab}/run-moonbit-\{next_background.val}"
+    next_background.val += 1
+    @fs.mkdir(dir, recursive=true) catch {
+      error if @async.is_being_cancelled() => raise error
+      _ =>
+        return @agent_tool.ToolAction::respond(
+          "run_moonbit: could not create a working directory in the scratch lab.",
+          is_error=true,
+        )
+    }
+    dir
+  } else {
+    @fs.tmpdir(prefix="openseek-run-moonbit-") catch {
+      // Let a cancellation propagate to the loop's Interrupted terminal instead of
+      // swallowing it into an ordinary tool error.
+      error if @async.is_being_cancelled() => raise error
+      _ =>
+        return @agent_tool.ToolAction::respond(
+          "run_moonbit: could not create a temporary working directory.",
+          is_error=true,
+        )
+    }
+  }
+  // Set once a background job takes over the directory (snippet, artifacts,
+  // output log): either an explicit `run_in_background`, or a foreground run
+  // detached at its deadline. `cleanup` runs on every exit path, so the flag —
+  // not the request — decides whether reclaiming the directory is still ours.
+  //
+  // Handing it over is sound because a job only ever runs with a `job_dir`
+  // wired, and that directory is reclaimed with the session's scope. The
+  // `@fs.tmpdir` branch above has no such owner, but it is only taken when the
+  // caller wired no job dir — which happens only if the session's own tmpdir
+  // call failed, in which case the one above fails too and returns first.
+  let job_owns_dir = Ref(false)
   async fn cleanup() -> Unit {
-    // Shielded from cancellation so an interrupted run still removes its temp
-    // dir — the `defer` below runs on the cancellation path too, where every
-    // async call inside it would otherwise be cancelled on the spot.
+    if job_owns_dir.val {
+      return
+    }
     @async.protect_from_cancel(() => {
       @fs.rmdir(dir, recursive=true) catch {
         _ => ()
@@ -230,6 +269,27 @@ async fn execute(
   // moon's diagnostics point at the copied source under the build dir; the
   // canonical path anchors the diagnostic path rewrite below.
   let real = @fs.realpath(dir) catch { _ => dir }
+  // The wasm backend is where moonrun's policy applies, so the policy file is
+  // written for every run and passed alongside. `--wasm-policy` is silently
+  // IGNORED on other backends, which is why `target` is not the model's choice
+  // to make freely — see `decode`.
+  let policy_path = "\{dir}/policy.json"
+  // Scratch space for the snippet's own `@fs.tmpdir()`, kept beside the build
+  // output rather than inside it so temp directories do not appear among moon's
+  // artifacts. It goes away with `dir` when the run is cleaned up.
+  let snippet_tmp = "\{dir}/tmp"
+  @fs.mkdir(snippet_tmp) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => ()
+  }
+  // `cwd` is deliberately NOT a write root: naming where a program runs should
+  // not also grant writing there, and reads are open, so a snippet can still
+  // work in a directory it may not modify.
+  let policy = wasm_policy_document(
+    tmp_dir=snippet_tmp,
+    extra_roots=[..scratch_dir.map(l => [l]).unwrap_or([])],
+  )
+  @fs.write_file(policy_path, policy.stringify(), create_mode=CreateOrTruncate)
   let moon_argv = [
     "run",
     "\{dir}/snippet.mbtx",
@@ -237,33 +297,230 @@ async fn execute(
     input.target,
     "--target-dir",
     dir,
+    ..if input.target == "wasm" {
+      ["--wasm-policy", policy_path]
+    },
     ..if !input.warning {
       ["--warn-list", WarnOffList]
     },
   ]
-  // Wrap `moon run` in sandbox-exec where it can actually enforce (macOS) so a
-  // snippet cannot directly overwrite protected source files — reusing the
-  // shell tool's source-write-readonly profile keyed on the workspace root.
-  // This is best-effort, not a hard boundary: unlike `shell` (which statically
-  // preflights the command) an arbitrary snippet can still smuggle sources via
-  // directory renames; full containment is the wasm backend's job. Elsewhere
-  // (or in a nested sandbox where it cannot enforce) run moon directly.
-  // The prepared command carries its denial subjects, so a denial showing up
-  // in the program's output can be recognized and explained below. The
-  // throwaway build dir is the writable subtree: if it falls INSIDE the
+  // Wrap `moon run` in sandbox-exec for the roles that need a rule the wasm
+  // policy cannot state: "may not write source". The policy's `fs` rules bind
+  // the snippet and stop at the process boundary, so a spawned `moon fmt` is
+  // beyond them, and a role defined by holding no editing tool needs that
+  // covered in the kernel. The main agent is not such a role and takes no
+  // profile — see below. Off macOS, or in a nested sandbox where a profile
+  // cannot be applied, every role runs with the policy as its only bound.
+  // The prepared command carries what it needs to classify its own denials, so
+  // one showing up in the program's output can be recognized and explained.
+  // The throwaway build dir is the writable subtree: if it falls INSIDE the
   // workspace root (e.g. `workspace_root=/tmp`, where `@fs.tmpdir` lands
   // under it) the shared deny would otherwise block moon's own generated
   // `snippet.mbt`.
-  let sandboxed_command = @sandbox.SandboxedCommand::create_if_available(
-    workspace_root,
-    Exec("moon", moon_argv),
-    writable_subtree=dir,
-  )
+  // The writable subtree has to contain the snippet's own build output. With a
+  // lab wired the snippet builds inside it, so the lab covers both; otherwise
+  // the build dir is the subtree. Choosing by where `dir` actually sits keeps
+  // the two from disagreeing when a caller passes both a job dir and a lab.
+  let writable_subtree = match scratch_dir {
+    Some(lab) if dir.has_prefix(lab) => lab
+    _ => dir
+  }
+  let sandboxed_command = match worker_sandbox {
+    // Worker mode replaces the workspace source-write profile rather than
+    // adding to it: a worker is supposed to write source, just only its own,
+    // so the kernel denies its siblings' trees and the shared git dir instead
+    // of denying source writes as such.
+    Some(scope) =>
+      @sandbox.SandboxedCommand::create_worker_if_available(
+        Exec("moon", moon_argv),
+        deny_roots=scope.deny_roots,
+        worker_root=scope.worker_root,
+        worker_admin_dir=scope.worker_admin_dir,
+      )
+    // The read-only roles (explore/review/audit) hold no editing tool, so "may
+    // not write source" is the guarantee that defines them and it stays
+    // kernel-enforced. The profile suits them for a second reason — it is
+    // `(allow default)` minus source, so `moon check` can still write its
+    // target dir inside the workspace, which a boundary profile denying the
+    // workspace would take away.
+    //
+    // Read-only is its own parameter rather than being read off `scratch_dir`:
+    // a caller that forgets the lab should lose the lab, not the sandbox.
+    None if read_only =>
+      @sandbox.SandboxedCommand::create_if_available(
+        workspace_root,
+        Exec("moon", moon_argv),
+        writable_subtree~,
+      )
+    // The main agent runs with no kernel profile at all. Forbidding source
+    // writes here would break the very commands it needs — `moon fmt`,
+    // `moon info`, `git checkout` all rewrite source by definition — and the
+    // other shape, denying writes globally and re-allowing an enumerated set,
+    // was tried and withdrawn: every root it missed (`/dev` for git's
+    // `/dev/null`, `/tmp` for `@fs.tmpdir`, the toolchain root, gh's cache)
+    // surfaced as a bare EPERM in a live turn rather than in a test, and the
+    // list only ever protected macOS.
+    //
+    // What is left bounding a child is the allowlist, which works everywhere:
+    // it admits no shell, no interpreter and no ad-hoc rewriter, and it refuses
+    // the git options that would point a command at another repository. That is
+    // a bound on which commands exist, not on where they may write — the file
+    // tools are not path-confined for this role either, so a profile here would
+    // have been the only such rule in the tool set.
+    None => None
+  }
   let (prog, argv) = match sandboxed_command {
     Some(command) => (command.program(), command.args())
     None => ("moon", moon_argv)
   }
-  let result = @async.with_timeout_opt(RunTimeoutMs, () => {
+  if background && bg_runtime is Some(runtime) {
+    // Compile in the FOREGROUND first. A detached run would otherwise report
+    // a syntax or type error only through job_output, and with the throwaway
+    // temp path instead of `source:LINE:COL` — the two things that make a
+    // compile error readable. `--build-only` is the single-file equivalent of
+    // a check: `moon check`/`moon build` do not accept a `.mbtx` script (the
+    // first reports "no work to do", the second demands a Moon project).
+    // TODO(upstream): teach `moon check` to accept a `.mbtx` script, and use
+    // it here — building is more work than this preflight needs.
+    let build_argv = [..argv]
+    build_argv.push("--build-only")
+    let build_log = "\{dir}/build.log"
+    @fs.write_file(build_log, "", create_mode=CreateOrTruncate)
+    // Bounded like every other run here: a first build downloads and compiles
+    // dependencies, and a wedged fetch would otherwise hold the turn open —
+    // exactly what asking for a background job was meant to avoid.
+    let build_exit = @async.with_timeout_opt(run_timeout_ms, () => {
+      @process.run(
+        prog,
+        build_argv,
+        cwd=run_cwd.unwrap_or("."),
+        inherit_env=true,
+        stdin=@process.redirect_from_file(empty_stdin),
+        stdout=@process.redirect_to_file(build_log, append=true),
+        stderr=@process.redirect_to_file(build_log, append=true),
+        no_console_window=true,
+      )
+    })
+    guard build_exit is Some(build_exit) else {
+      let text = rewrite_temp_paths(read_capped(build_log), [real, dir])
+      return @agent_tool.ToolAction::respond(
+        "run_moonbit: the build did not finish within \{run_timeout_ms / 1000}s, so no background job was started.\n\{text}",
+        is_error=true,
+        brief="run_moonbit (build timeout)",
+      )
+    }
+    if build_exit != 0 {
+      let text = rewrite_temp_paths(read_capped(build_log), [real, dir])
+      return @agent_tool.ToolAction::respond(
+        "[run_moonbit: the program did not compile, so no background job was started]\n\{text}",
+        is_error=true,
+        brief="run_moonbit (build failed)",
+      )
+    }
+    let id = runtime.start(
+      program=prog,
+      args=argv,
+      command="run_moonbit: \{@agent_tool.brief_line(input.source, limit=64)}",
+      cwd?=run_cwd,
+      sandboxed_command?,
+      // Same EOF-on-stdin contract as a foreground run: a detached snippet
+      // must not inherit the engine's fd 0, which under `serve` carries the
+      // JSONL commands.
+      stdin=@process.redirect_from_file(empty_stdin),
+    )
+    job_owns_dir.val = true
+    return @agent_tool.ToolAction::respond(
+      "started background job \{id} (the program compiled). Read its output with job_output (job_id=\"\{id}\") and stop it with job_stop (job_id=\"\{id}\").",
+      brief="run_moonbit → bg \{id}",
+    )
+  }
+  // With a job runtime wired the foreground run happens ON it, so the
+  // deadline can DETACH the still-running program as a background job rather
+  // than killing it: a long `moon test` that outlives the bound is then still
+  // there to read, which is what the shell tool did with its own deadline.
+  // Without a runtime (a standalone definition) there is nothing to hand the
+  // process to, so the deadline cancels as before.
+  if bg_runtime is Some(runtime) {
+    let exec = runtime.spawn_foreground_retained(
+      prog,
+      argv,
+      run_cwd,
+      OutputCapBytes,
+      // Same EOF-on-stdin contract as every other path here: never hand the
+      // snippet the engine's fd 0.
+      stdin=@process.redirect_from_file(empty_stdin),
+    )
+    // A cancelled turn must not leak the child: stop it before unwinding.
+    errdefer exec.request_stop()
+    // `wait`, not `wait_or_invalid`. That one returns early on the first non-UTF-8
+    // byte, for a caller that fails fast on binary output — and this is not one:
+    // reporting with the child still running would leave it going while
+    // `defer cleanup()` removes its build directory underneath it, and the exit
+    // code below would be invented. The exit is what this waits for either way,
+    // so asking for the early wake only put the rest of the wait outside the
+    // deadline. Expiry needs nothing special: it detaches like any other long run.
+    let finished = @async.with_timeout_opt(run_timeout_ms, () => exec.wait())
+    let saw_binary = exec.had_invalid_utf8()
+    if finished is None {
+      let _ = exec.background()
+      let id = runtime.adopt(
+        exec,
+        command="run_moonbit: \{@agent_tool.brief_line(input.source, limit=64)}",
+        cwd?=run_cwd,
+        sandboxed_command?,
+      )
+      job_owns_dir.val = true
+      return @agent_tool.ToolAction::respond(
+        "run_moonbit: still running after \{run_timeout_ms / 1000}s, so it moved to the background as job \{id} (nothing was lost). Read its output with job_output (job_id=\"\{id}\") and stop it with job_stop (job_id=\"\{id}\").",
+        brief="run_moonbit → bg \{id}",
+      )
+    }
+    let raw = exec.head()
+    let exit_code = exec.exit_code().unwrap_or(-1)
+    // The retained execution is KILLED once output passes the inline cap, so a
+    // clipped head means a stopped program, not a quiet one — say which.
+    let output_limit_reached = exec.over_inline_cap() || exec.output_truncated()
+    // A denial can land past the rendered head — a snippet floods, THEN hits
+    // it — so scan the retained output on disk with the same bounded,
+    // chunked walk the redirected path uses. A memory-only execution (no
+    // session temp dir) has no such file, and there the head is all there is.
+    let denial_scan_source = exec.spill_path()
+    let sandbox_denied = refusal_guidance(
+      sandboxed_command, denial_scan_source, raw,
+    )
+    exec.discard()
+    let text = rewrite_temp_paths(raw, [real, dir])
+    let body = if text.is_blank() {
+      "run_moonbit: program exited \{exit_code} with no output"
+    } else if exit_code != 0 {
+      "[run_moonbit: exited \{exit_code}]\n\{text}"
+    } else {
+      text
+    }
+    let body = if output_limit_reached {
+      "\{body}\n[run_moonbit: output passed \{OutputCapBytes} bytes, so the program was STOPPED and this is only what it printed first. Redirect bulky output with `stdout=ToFile(path)` and read the file instead.]"
+    } else {
+      body
+    }
+    let body = if saw_binary {
+      "\{body}\n[run_moonbit: the program emitted non-UTF-8 bytes; the text above is a lossy rendering.]"
+    } else {
+      body
+    }
+    let body = if sandbox_denied is Some(guidance) {
+      "\{body}\n\n\{guidance}"
+    } else {
+      body
+    }
+    return @agent_tool.ToolAction::respond(
+      body,
+      is_error=exit_code != 0 ||
+        sandbox_denied is Some(_) ||
+        output_limit_reached,
+      brief="run_moonbit (exit=\{exit_code})",
+    )
+  }
+  let result = @async.with_timeout_opt(run_timeout_ms, () => {
     let exit_code = @process.run(
       prog,
       argv,
@@ -276,20 +533,13 @@ async fn execute(
     )
     (exit_code, read_capped(log))
   })
-  // A "not permitted" line naming a protected source path in a sandboxed run
-  // is the source-write policy firing, not an environment fault: explain it
-  // (the raw OS error is otherwise a dead end) and treat the run as failed
-  // even if the snippet swallowed the error and exited 0 — the same
-  // semantics the shell tool applies to its command output. Detection scans
-  // the on-disk log far past the capped display prefix (bounded to a fixed
-  // head+tail byte budget), and runs for the timeout arm too: a snippet can
-  // flood past the cap before hitting the denial, or print a caught denial
-  // and then hang.
-  let sandbox_denied = sandboxed_command is Some(command) &&
-    log_shows_source_write_denial(log, output => {
-      command.output_reports_denial(output)
-    })
-  match result {
+  // A refusal is this tool's confinement firing, not an environment fault:
+  // explain it (the raw OS error is otherwise a dead end) and treat the run as
+  // failed even if the snippet swallowed the error and exited 0 — a swallowed
+  // denial still means the access it needed did not happen. It runs for the
+  // timeout arm too: a snippet can print a caught denial and then hang.
+  let sandbox_denied = refusal_guidance(sandboxed_command, Some(log), "")
+  let action = match result {
     Some((exit_code, raw)) => {
       // Rewrite the throwaway temp path to `source` so the model reads
       // `source:LINE:COL` about its own input, not a random temp path.
@@ -304,31 +554,31 @@ async fn execute(
       } else {
         text
       }
-      let body = if sandbox_denied {
-        "\{body}\n\n\{SandboxSourceWriteFeedback}"
+      let body = if sandbox_denied is Some(guidance) {
+        "\{body}\n\n\{guidance}"
       } else {
         body
       }
       @agent_tool.ToolAction::respond(
         body,
-        is_error=exit_code != 0 || sandbox_denied,
+        is_error=exit_code != 0 || sandbox_denied is Some(_),
         brief="run_moonbit (exit=\{exit_code})",
       )
     }
     None => {
       // The snippet may have printed useful output before it hung; the log is
-      // still on disk (cleanup runs on scope exit), so surface the captured prefix
+      // still on disk (cleanup runs below), so surface the captured prefix
       // instead of discarding it behind a generic timeout message. The status
       // line stays first so it survives the outer result clamp.
       let partial = rewrite_temp_paths(read_capped(log), [real, dir])
-      let head = "run_moonbit: timed out after \{RunTimeoutMs / 1000}s and was cancelled — the program did not finish (an infinite loop, or a build that never completed)."
+      let head = "run_moonbit: timed out after \{run_timeout_ms / 1000}s and was cancelled — the program did not finish (an infinite loop, or a build that never completed)."
       let body = if partial.is_blank() {
         head
       } else {
         "\{head}\n[partial output before the timeout]\n\{partial}"
       }
-      let body = if sandbox_denied {
-        "\{body}\n\n\{SandboxSourceWriteFeedback}"
+      let body = if sandbox_denied is Some(guidance) {
+        "\{body}\n\n\{guidance}"
       } else {
         body
       }
@@ -339,6 +589,43 @@ async fn execute(
       )
     }
   }
+  action
+}
+
+///|
+/// The guidance for a refusal this run's confinement produced, or `None` when
+/// the output shows none.
+///
+/// Both layers are read, in the order they can fire. The moonrun policy binds
+/// the snippet itself and refuses first — a write outside its roots never
+/// reaches the kernel — and it applies on every platform, so it is checked
+/// whether or not a profile was prepared. A `sandbox-exec` profile refuses only
+/// what got past that, and only for the roles that carry one; its text comes
+/// from the prepared command, so it always describes the profile that actually
+/// ran.
+///
+/// `log_path` is the retained output on disk, scanned past the display cap; a
+/// memory-only execution has none and `head` is then all there is.
+async fn refusal_guidance(
+  sandboxed_command : @sandbox.SandboxedCommand?,
+  log_path : String?,
+  head : String,
+) -> String? {
+  async fn shows(reports : (String) -> Bool) -> Bool {
+    match log_path {
+      Some(path) => log_shows_denial(path, reports)
+      None => reports(head)
+    }
+  }
+
+  if shows(@sandbox.output_reports_policy_refusal) {
+    return Some(@sandbox.policy_refusal_feedback)
+  }
+  guard sandboxed_command is Some(command) else { return None }
+  if shows(output => command.output_reports_denial(output)) {
+    return Some(command.denial_feedback())
+  }
+  None
 }
 
 ///|
@@ -379,16 +666,17 @@ const DenialScanCarryTailChars : Int = 4_096
 const DenialScanBudgetBytes : Int = 16_777_216
 
 ///|
-/// Whether the on-disk output log shows a source-write denial. Detection must
-/// not be bounded by the 48KB display cap (a snippet can flood past it before
-/// the denied write), but it must stay bounded in bytes and time: a log larger
+/// Whether the on-disk output log shows a denial, as `reports_denial` reads
+/// one. Detection must not be bounded by the 48KB display cap (a snippet can
+/// flood past it before the denied access), but it must stay bounded in bytes
+/// and time: a log larger
 /// than twice `DenialScanBudgetBytes` is scanned at its head and tail only. An
 /// uncaught denial crashes the snippet, so its OSError line is the log's tail;
 /// a caught-and-printed denial lands where it happened, inside the head for
 /// realistic probes. Only a denial buried in the MIDDLE of a >32MB flood is
 /// missed — the price of a bounded scan. `budget_bytes` is parameterized for
 /// tests only.
-async fn log_shows_source_write_denial(
+async fn log_shows_denial(
   path : String,
   reports_denial : (String) -> Bool,
   budget_bytes? : Int = DenialScanBudgetBytes,
@@ -488,4 +776,179 @@ async fn read_capped(path : String) -> String {
   } else {
     text
   }
+}
+
+///|
+/// The `run_moonbit` argument schema. `background` adds `run_in_background`,
+/// which a definition without a job runtime must not advertise — the model
+/// would only get an error from a call it cannot execute.
+fn schema(background~ : Bool) -> Json {
+  let properties : Map[String, Json] = {
+    "source": { "type": "string" },
+    "target": {
+      "type": "string",
+      "enum": ["wasm", "wasm-gc", "js", "llvm"],
+      "description": "Backend to run on; defaults to wasm, which is the sandboxed one. The alternatives run pure computation only — they cannot spawn commands or touch files.",
+    },
+    "cwd": {
+      "type": "string",
+      "description": "Working directory the program runs in (relative paths resolve against the workspace root); defaults to the workspace root.",
+    },
+    "warning": {
+      "type": "string",
+      "enum": ["off", "on"],
+      "description": (
+        #|Whether compiler warnings appear in the output; defaults to off (a snippet
+        #|is a throwaway script, so unused-variable style noise is suppressed). Set
+        #|"on" only when the warnings themselves are what you are probing.
+      ),
+    },
+  }
+  if background {
+    properties["run_in_background"] = {
+      "type": "boolean",
+      "description": (
+        #|Run as a background job: returns a job id immediately and a completion
+        #|notice arrives when it exits. Use for long-running work (full test
+        #|suites, long builds, watchers) instead of blocking on the 300s
+        #|foreground bound, which moves the run to a job when it expires.
+      ),
+    }
+  }
+  {
+    "type": "object",
+    "properties": Json::object(properties),
+    "required": ["source"],
+  }
+}
+
+///|
+/// The `run_moonbit` tool description.
+///
+/// Holds the whole command surface: every role that registers this tool gets it
+/// and nothing else does. The five system prompts carried this text for one
+/// revision and had already drifted apart within a single commit, while the
+/// prompt-versus-tool A/B that motivated the move showed no effect either way.
+/// What stays in a prompt is what varies by role — which file tools exist, and
+/// whether the role may commit.
+///
+/// The spawn list is prose about `spawnable_commands`, kept by hand so the
+/// groupings survive; adding an entry there means editing this text too.
+///
+/// `background` is conditional because without a job runtime the tool must not
+/// advertise `run_in_background`: the model would only get an error.
+fn description(background~ : Bool) -> String {
+  let base =
+    #|Compile and run a self-contained MoonBit program and return its merged
+    #|stdout/stderr and exit status. This is BOTH your command runner and your
+    #|scripting surface: there is no shell tool, so commands are spawned from MoonBit
+    #|with the `bobzhang/myshell` EDSL.
+    #|
+    #|`source` is the whole program. Diagnostics are rewritten to `source:LINE:COL`
+    #|about your input; `target` defaults to wasm, the sandboxed backend.
+    #|
+    #|```
+    #|import { "bobzhang/myshell", "moonbitlang/async", "moonbitlang/async/fs" }
+    #|
+    #|async fn main {
+    #|  let out = @myshell.Cmd("moon", ["check", "--diagnostic-limit", "5"]).output()
+    #|  println(out.stdout)
+    #|  println(out.stderr)
+    #|  println("exit=\{out.exit_code}")
+    #|  for name in @fs.readdir(".") {
+    #|    println(name)
+    #|  }
+    #|}
+    #|```
+    #|
+    #|- Every `@pkg` is imported SEPARATELY, as `@fs` is above: `"moonbitlang/async"`
+    #|  alone does not bring in `fs` or `stdio`, and the failure reads
+    #|  `Package "fs" not found`.
+    #|- Keep `async fn main`: a plain `fn main` may not call anything that raises,
+    #|  which nearly every `@fs`/`@myshell` call does.
+    #|- ALWAYS `println` each command's stdout, stderr and exit code — what you do not
+    #|  print is invisible to you. But a run that prints more than ~48KB is STOPPED
+    #|  mid-print, so filter before printing, or park the bulk with
+    #|  `stdout=ToFile("\{@fs.tmpdir()}/out.log")` and read back the part you need.
+    #|  A snippet may write ONLY inside its own `@fs.tmpdir()`, so that redirect
+    #|  cannot target the workspace.
+    #|- `Cmd(program, args)` passes the argument VECTOR literally: no shell parsing, no
+    #|  quoting, and `|`, `>`, `&&`, `$()`, `*` mean nothing. Other labels: `cwd`,
+    #|  `env`, `stdin=Text(...)`. Run several commands as sequential statements in ONE
+    #|  snippet and branch on `out.exit_code`; do NOT reach for `@myshell.Pipeline` —
+    #|  filter captured output in MoonBit instead.
+    #|
+    #|## Which programs a snippet may start
+    #|
+    #|These, and nothing else:
+    #|
+    #|- `moon` — check, test, build, run, fmt, info, add, remove, update, install,
+    #|  tree, clean, new, ide, doc, explain, coverage, cram, version. (Not `publish`,
+    #|  `login` or `register`.)
+    #|- `git` — status, log, diff, show, blame, describe, rev-parse, rev-list,
+    #|  show-ref, for-each-ref, cat-file, check-ignore, merge-base, range-diff,
+    #|  ls-files, ls-tree, ls-remote, shortlog, grep, branch, tag, remote, reflog,
+    #|  add, commit, checkout, switch, restore, reset, revert, rm, init, fetch,
+    #|  push, rebase; plus `submodule update|status`, `worktree list|add|prune`,
+    #|  `stash list|show`. Not `config`. A global option BEFORE the subcommand
+    #|  (`-c`, `-C`, `--git-dir`, `--work-tree`) is refused.
+    #|- `gh` — pr, issue, run, `repo view`, api, `auth status`.
+    #|- `just`, for a repository whose gates live in a `justfile`.
+    #|- `rg` and `diff`.
+    #|
+    #|Anything else is REFUSED, including the obvious ones; if a refused command is
+    #|genuinely what the task needs, say so rather than working around it. Reach for
+    #|the replacement rather than finding this out one command at a time — each is a
+    #|line of MoonBit that also works on Windows, where these binaries do not exist:
+    #|
+    #|    ls          → @fs.readdir(dir)
+    #|    find        → rg --files, or recurse @fs.readdir + @fs.kind
+    #|    cat         → @fs.read_file(p).text()
+    #|    head/tail   → slice the split text; wc -l → count it
+    #|    grep        → rg, or .split("\n").filter(...) on captured output
+    #|    sort/uniq   → .sort(), a Set, or a Map
+    #|    pwd         → @env.current_dir(); printenv → @env.get_env_var(name)
+    #|    mkdir -p    → @fs.mkdir(d, recursive=true)
+    #|    test -f     → @fs.exists(p); test -d → @fs.kind(p) is Directory
+    #|    echo/printf → println
+    #|    rm/mv/cp    → the `remove` and `write` tools; a snippet cannot write the
+    #|                  workspace, and `remove` refuses files it did not create —
+    #|                  a refusal there is an answer, not an obstacle to route past
+    #|    sh -c, xargs, make → write the logic as MoonBit statements
+    #|
+    #|## Isolation and limits
+    #|
+    #|- A snippet runs with the workspace as its working directory, so RELATIVE paths
+    #|  reach workspace files; pass `cwd` to run elsewhere. Its own build artifacts
+    #|  stay in a temp dir — your `_build` is untouched.
+    #|- A snippet's imports resolve against the REGISTRY, not your uncommitted edits.
+    #|  To exercise working-tree code, add a `*_test.mbt` to that package and run
+    #|  `moon test` through a `@myshell.Cmd`.
+    #|- A snippet READS anywhere and WRITES only its own `@fs.tmpdir()`. Changing a
+    #|  workspace file is the file tools' job, or a command's — `moon fmt`, `git
+    #|  checkout` and friends are child processes and run normally. A write refusal
+    #|  is that rule firing, not a filesystem fault to debug or route around.
+    #|- Compiler warnings for the snippet are suppressed; pass `warning: "on"` to
+    #|  see them.
+    #|- Bounded to 300s. For independent commands or probes, emit SEVERAL
+    #|  `run_moonbit` calls in the SAME assistant turn — they run and come back
+    #|  together, saving a model round-trip each.
+  if !background {
+    return base
+  }
+  // The blank `$|` line is the paragraph break: without it the section heading
+  // runs onto the base text's last line and stops reading as a heading.
+  (
+    $|\{base}
+    $|
+    $|## Long-running work
+    $|
+    $|For full test suites, long builds and watchers, set run_in_background=true: the
+    $|call returns a job id immediately and a notice arrives automatically when the job
+    $|finishes — so never block on time (no sleep loops, no polling); keep working and
+    $|act on the completion notice. Read a job's recent output with job_output and
+    $|cancel it with job_stop. A foreground run is bounded to 300s; at that deadline it
+    $|MOVES to a background job rather than dying, so nothing is lost either way —
+    $|asking for a job up front just skips the wait.
+  )
 }

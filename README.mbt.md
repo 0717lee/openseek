@@ -130,9 +130,12 @@ The `cmd/openseek` package is the single-binary entry point — a subcommand tre
 (default: the terminal UI; `run`/`serve`/`review`/`sessions` for the headless
 engine; `mcp` to validate MCP configuration). `openseek run` parses arguments
 and runs the agent package. The agent sends DeepSeek native function tools and
-supports twelve local tools: `shell` (with `shell_output` and `shell_stop` for
-background jobs — on Windows the plain foreground shell only), `read`, `edit`,
-`multi_edit`, `write`, `remove`, `plan`, `goal`, `run_moonbit`, and `finish`.
+supports eleven local tools: `run_moonbit` — both the scripting surface and the
+command runner, spawning processes through the shell-free
+[`bobzhang/myshell`](https://mooncakes.io/docs/bobzhang/myshell) EDSL, with
+`job_output` and `job_stop` watching anything it detaches as a background job —
+plus `read`, `edit`, `multi_edit`, `write`, `remove`, `plan`, `goal`, and
+`finish`. There is no shell tool, so no command ever goes through a shell.
 
 ```bash
 export DEEPSEEK=sk-...
