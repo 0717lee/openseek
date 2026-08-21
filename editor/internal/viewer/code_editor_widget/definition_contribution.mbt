@@ -57,8 +57,8 @@ fn DefinitionContributionState::DefinitionContributionState(
     link_decorations: viewer.create_decorations_collection(),
     launch_async_task,
     navigation_action,
-    definition_action: @goto_symbol.DefinitionAction(navigation_action),
-    references_action: @goto_symbol.ReferencesAction(navigation_action),
+    definition_action: DefinitionAction(navigation_action),
+    references_action: ReferencesAction(navigation_action),
   }
 }
 
@@ -209,7 +209,7 @@ fn CodeEditorWidget::symbol_navigation_anchor_at(
         word.end_column,
       )
     None =>
-      @base_common.Range(
+      Range(
         position.line_number,
         position.column,
         position.line_number,

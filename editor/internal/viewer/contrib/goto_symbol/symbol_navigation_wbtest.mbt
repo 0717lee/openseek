@@ -83,7 +83,7 @@ fn SymbolNavigationTestHost::host(
 
 ///|
 fn symbol_navigation_test_model() -> @model.TextModel {
-  @model.TextModel(
+  TextModel(
     try! @base_common.Uri::parse("file:///symbol-navigation.mbt"),
     "symbol-navigation.mbt",
     "moonbit",

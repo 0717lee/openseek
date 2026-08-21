@@ -162,7 +162,7 @@ fn ReferencesControllerTestPreviewLog::factory(
 
 ///|
 fn references_controller_test_model(resource : String) -> @model.TextModel {
-  @model.TextModel(
+  TextModel(
     try! @base_common.Uri::parse(resource),
     "controller.mbt",
     "moonbit",
@@ -179,8 +179,8 @@ fn references_controller_test_anchor(
 ) -> @goto_symbol.SymbolNavigationAnchor {
   @goto_symbol.SymbolNavigationAnchor::from_model(
     model,
-    @base_common.Position(1, 14),
-    @base_common.Range(1, 14, 1, 20),
+    Position(1, 14),
+    Range(1, 14, 1, 20),
     surface_generation,
   )
 }
@@ -237,8 +237,8 @@ async test "controller toggles one surface session and replaces previews in plac
   )
   let anchor = references_controller_test_anchor(model, surface_generation.val)
   let locations : Array[@language.Location] = [
-    { uri: model.uri, range: @base_common.Range(1, 14, 1, 20) },
-    { uri: model.uri, range: @base_common.Range(2, 14, 2, 20) },
+    { uri: model.uri, range: Range(1, 14, 1, 20) },
+    { uri: model.uri, range: Range(2, 14, 2, 20) },
   ]
 
   assert_true(controller.toggle_locations(anchor, Definitions, locations))
@@ -248,7 +248,7 @@ async test "controller toggles one surface session and replaces previews in plac
   assert_eq(host.mount_count.val, 1)
   assert_eq(host.reveal_count.val, 1)
   assert_eq(previews.resources, [model.uri.to_string()])
-  assert_eq(previews.targets, [@base_common.Range(1, 14, 1, 20)])
+  assert_eq(previews.targets, [Range(1, 14, 1, 20)])
   assert_eq(previews.match_counts, [2])
   assert_true(controller.phase() is PeekShown(_, _))
 
@@ -259,7 +259,7 @@ async test "controller toggles one surface session and replaces previews in plac
   tasks.run_all()
   assert_eq(previews.dispose_count.val, 1)
   assert_eq(previews.resources.length(), 2)
-  assert_eq(previews.targets[1], @base_common.Range(2, 14, 2, 20))
+  assert_eq(previews.targets[1], Range(2, 14, 2, 20))
   assert_eq(previews.focus_count.val, 1)
   assert_true(controller.phase() is PeekShown(_, _))
 
@@ -300,7 +300,7 @@ async test "separate controllers keep Code and Markdown-like sessions isolated" 
   )
   let location : @language.Location = {
     uri: model.uri,
-    range: @base_common.Range(1, 14, 1, 20),
+    range: Range(1, 14, 1, 20),
   }
   assert_true(
     code.toggle_locations(
@@ -349,7 +349,7 @@ async test "dispose marks the controller stale before resource callbacks can reo
   let anchor = references_controller_test_anchor(model, surface_generation.val)
   let location : @language.Location = {
     uri: model.uri,
-    range: @base_common.Range(1, 14, 1, 20),
+    range: Range(1, 14, 1, 20),
   }
   assert_true(controller.toggle_locations(anchor, Definitions, [location]))
   tasks.run_all()
@@ -388,17 +388,9 @@ async test "resolver leases transfer on preview replacement and release on close
   ) => {
     resolver_calls.push(resource.to_string())
     if resource.to_string() == target_a.uri.to_string() {
-      Some(
-        @navigation_api.TextModelReference(target_a, release=() => {
-          release_a.val += 1
-        }),
-      )
+      Some(TextModelReference(target_a, release=() => release_a.val += 1))
     } else if resource.to_string() == target_b.uri.to_string() {
-      Some(
-        @navigation_api.TextModelReference(target_b, release=() => {
-          release_b.val += 1
-        }),
-      )
+      Some(TextModelReference(target_b, release=() => release_b.val += 1))
     } else {
       None
     }
@@ -414,8 +406,8 @@ async test "resolver leases transfer on preview replacement and release on close
     task => tasks.schedule(task),
   )
   let locations : Array[@language.Location] = [
-    { uri: target_a.uri, range: @base_common.Range(1, 5, 1, 11) },
-    { uri: target_b.uri, range: @base_common.Range(2, 5, 2, 11) },
+    { uri: target_a.uri, range: Range(1, 5, 1, 11) },
+    { uri: target_b.uri, range: Range(2, 5, 2, 11) },
   ]
   assert_true(
     controller.toggle_locations(
@@ -474,9 +466,7 @@ async test "stale and invalid resolver results are released without preview inst
     token,
   ) => {
     saw_cancelled.val = token.is_cancellation_requested()
-    Some(
-      @navigation_api.TextModelReference(wrong, release=() => releases.val += 1),
-    )
+    Some(TextModelReference(wrong, release=() => releases.val += 1))
   })
   let surface_generation = Ref(5)
   let host = references_controller_test_host(source, surface_generation)
@@ -490,7 +480,7 @@ async test "stale and invalid resolver results are released without preview inst
   )
   let location : @language.Location = {
     uri: requested.uri,
-    range: @base_common.Range(1, 5, 1, 11),
+    range: Range(1, 5, 1, 11),
   }
   assert_true(
     controller.toggle_locations(

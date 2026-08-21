@@ -116,12 +116,7 @@ pub fn code_editor_references_preview_factory(
         },
       )
       preview.reveal_range_in_center_if_outside_viewport(
-        @base_common.Range(
-          start.line_number,
-          start.column,
-          start.line_number,
-          start.column,
-        ),
+        Range(start.line_number, start.column, start.line_number, start.column),
       )
       preview.handle_initialized()
       let owner_slot : Ref[CodeReferencesPeekPreviewOwner?] = Ref(None)
@@ -146,7 +141,7 @@ pub fn code_editor_references_preview_factory(
       }
       owner_slot.val = Some(owner)
       Some(
-        @references_browser.ReferencesPeekPreview(
+        ReferencesPeekPreview(
           contains_focus=() => owner.contains_focus(),
           focus=() => preview.focus(),
           dispose=() => owner.dispose(),
@@ -232,10 +227,9 @@ fn CodeEditorWidget::mount_code_references_peek(
     return None
   }
   Some(
-    @references_browser.ReferencesPeekMount(
-      is_current=() => owner.is_current(),
-      dispose=() => owner.dispose(),
-    ),
+    ReferencesPeekMount(is_current=() => owner.is_current(), dispose=() => {
+      owner.dispose()
+    }),
   )
 }
 
@@ -258,7 +252,7 @@ fn CodeEditorWidget::reveal_references_peek_anchor(
 fn CodeEditorWidget::create_references_controller(
   self : CodeEditorWidget,
 ) -> @references_browser.ReferencesController {
-  @references_browser.ReferencesController(
+  ReferencesController(
     {
       is_anchor_current: anchor => {
         self.symbol_navigation_anchor_is_current(anchor)
@@ -407,12 +401,7 @@ async fn CodeEditorWidget::open_peek_location(
     let start = range.get_start_position()
     self.set_position(start, source~)
     self.reveal_range_in_center_if_outside_viewport(
-      @base_common.Range(
-        start.line_number,
-        start.column,
-        start.line_number,
-        start.column,
-      ),
+      Range(start.line_number, start.column, start.line_number, start.column),
     )
     self.focus()
     self.show_navigation_target_highlight(source_model, range)

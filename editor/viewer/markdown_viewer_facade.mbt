@@ -107,7 +107,7 @@ fn ViewerServices::markdown_services(
     text_model_resolver?=self.text_model_resolver(),
     preview_factory=@code_widget.code_editor_references_preview_factory(
       self.code_services(),
-      @code_widget.CodeEditorOptions(theme=options.theme),
+      CodeEditorOptions(theme=options.theme),
     ),
     log_service=self.log_service(),
   )

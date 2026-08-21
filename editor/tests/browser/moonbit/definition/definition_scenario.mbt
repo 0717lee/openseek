@@ -394,7 +394,7 @@ fn run_definition_browser_test() -> Unit {
       }
       fixture.resolver_acquires += 1
       Some(
-        @navigation_api.TextModelReference(resolved, release=() => {
+        TextModelReference(resolved, release=() => {
           fixture.resolver_releases += 1
         }),
       )

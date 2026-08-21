@@ -142,8 +142,8 @@ fn MarkdownViewerWidgetDefinitionBridge::MarkdownViewerWidgetDefinitionBridge(
     attach_generation,
     listeners: [],
     navigation_action,
-    definition_action: @goto_symbol.DefinitionAction(navigation_action),
-    references_action: @goto_symbol.ReferencesAction(navigation_action),
+    definition_action: DefinitionAction(navigation_action),
+    references_action: ReferencesAction(navigation_action),
     link_resolver,
     controller,
     context_menu: None,
@@ -712,7 +712,7 @@ fn MarkdownViewerWidgetDefinitionBridge::mount_peek(
   self.view.overlay_mount().append_child(root.as_node())
   let disposed = Ref(false)
   Some(
-    @references_browser.ReferencesPeekMount(
+    ReferencesPeekMount(
       is_current=() => {
         !disposed.val &&
         self.anchor_is_current(anchor) &&
