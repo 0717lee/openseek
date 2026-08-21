@@ -28,10 +28,10 @@ aside {
   border-bottom: 1px solid var(--color-border);
 }
 
-/* New chat holds the header's right edge. The -4px mirrors the
+/* Add project holds the header's right edge. The -4px mirrors the
    toggle's left pull so both icons sit the same optical distance from
    their window edge. */
-.sidebar-header .header-new-chat {
+.sidebar-header .header-add-project {
   margin-left: auto;
   margin-right: -4px;
 }
