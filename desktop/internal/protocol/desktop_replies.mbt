@@ -1722,6 +1722,18 @@ pub extend GitChangesReply with Eq::{equal, not_equal}
 pub extend GitChangesReply with ToJson::{to_json}
 
 ///|
+pub extend GitCommitChangesReply with Debug::{to_repr}
+
+///|
+pub extend GitCommitChangesReply with FromJson::{from_json}
+
+///|
+pub extend GitCommitChangesReply with Eq::{equal, not_equal}
+
+///|
+pub extend GitCommitChangesReply with ToJson::{to_json}
+
+///|
 pub extend GitChecks with Debug::{to_repr}
 
 ///|
@@ -1744,6 +1756,66 @@ pub extend GitDiffStat with Eq::{equal, not_equal}
 
 ///|
 pub extend GitDiffStat with ToJson::{to_json}
+
+///|
+pub extend GitHistoricalChange with Debug::{to_repr}
+
+///|
+pub extend GitHistoricalChange with FromJson::{from_json}
+
+///|
+pub extend GitHistoricalChange with Eq::{equal, not_equal}
+
+///|
+pub extend GitHistoricalChange with ToJson::{to_json}
+
+///|
+pub extend GitHistoryCommit with Debug::{to_repr}
+
+///|
+pub extend GitHistoryCommit with FromJson::{from_json}
+
+///|
+pub extend GitHistoryCommit with Eq::{equal, not_equal}
+
+///|
+pub extend GitHistoryCommit with ToJson::{to_json}
+
+///|
+pub extend GitHistoryRef with Debug::{to_repr}
+
+///|
+pub extend GitHistoryRef with FromJson::{from_json}
+
+///|
+pub extend GitHistoryRef with Eq::{equal, not_equal}
+
+///|
+pub extend GitHistoryRef with ToJson::{to_json}
+
+///|
+pub extend GitHistoryReply with Debug::{to_repr}
+
+///|
+pub extend GitHistoryReply with FromJson::{from_json}
+
+///|
+pub extend GitHistoryReply with Eq::{equal, not_equal}
+
+///|
+pub extend GitHistoryReply with ToJson::{to_json}
+
+///|
+pub extend GitHistorySnapshot with Debug::{to_repr}
+
+///|
+pub extend GitHistorySnapshot with FromJson::{from_json}
+
+///|
+pub extend GitHistorySnapshot with Eq::{equal, not_equal}
+
+///|
+pub extend GitHistorySnapshot with ToJson::{to_json}
 
 ///|
 pub extend GitOriginalFileReply with Debug::{to_repr}
@@ -2070,6 +2142,18 @@ pub extend SearchFilesReply with Eq::{equal, not_equal}
 pub extend SearchFilesReply with ToJson::{to_json}
 
 ///|
+pub extend SearchTextReply with Debug::{to_repr}
+
+///|
+pub extend SearchTextReply with FromJson::{from_json}
+
+///|
+pub extend SearchTextReply with Eq::{equal, not_equal}
+
+///|
+pub extend SearchTextReply with ToJson::{to_json}
+
+///|
 pub extend SessionAssistantMessage with Debug::{to_repr}
 
 ///|
@@ -2320,6 +2404,36 @@ pub extend TerminalOpenReply with Eq::{equal, not_equal}
 
 ///|
 pub extend TerminalOpenReply with ToJson::{to_json}
+
+///|
+pub extend TextSearchError with Debug::{to_repr}
+
+///|
+pub extend TextSearchError with Eq::{equal, not_equal}
+
+///|
+pub extend TextSearchMatch with Debug::{to_repr}
+
+///|
+pub extend TextSearchMatch with FromJson::{from_json}
+
+///|
+pub extend TextSearchMatch with Eq::{equal, not_equal}
+
+///|
+pub extend TextSearchMatch with ToJson::{to_json}
+
+///|
+pub extend TextSearchRange with Debug::{to_repr}
+
+///|
+pub extend TextSearchRange with FromJson::{from_json}
+
+///|
+pub extend TextSearchRange with Eq::{equal, not_equal}
+
+///|
+pub extend TextSearchRange with ToJson::{to_json}
 
 ///|
 pub extend UninstallSkillReply with Debug::{to_repr}
