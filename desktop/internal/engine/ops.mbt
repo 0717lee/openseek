@@ -196,6 +196,13 @@ async fn request_spawn(
       raise error
     }
   })
+  // async 0.21: `protect_from_cancel` no longer raises after resuming a
+  // cancelled shield (the old `resume_on_cancel=false` default), so a
+  // requester cancelled while awaiting this ack would otherwise return
+  // normally and its caller would proceed as if it had not been cancelled.
+  // `pause` re-raises the pending cancellation the moment the shield lifts,
+  // preserving the old observable contract for the caller.
+  @async.pause()
 }
 
 ///|

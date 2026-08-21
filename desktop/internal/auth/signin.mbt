@@ -109,10 +109,9 @@ pub async fn AuthStore::sign_in(self : AuthStore, server_url~ : String) -> Unit 
       // The result is now available, so remove the minted device before the
       // original cancellation escapes.
       if exchanged.val is Some(session) {
-        @async.protect_from_cancel(
-          () => session.revoke_after_cancelled_exchange(),
-          resume_on_cancel=true,
-        )
+        @async.protect_from_cancel(() => {
+          session.revoke_after_cancelled_exchange()
+        })
       }
       raise error
     }
@@ -153,17 +152,14 @@ async fn AuthStore::commit_session(
   self : AuthStore,
   session : AuthSession,
 ) -> Unit {
-  @async.protect_from_cancel(
-    () => {
-      if self.runtime_dir is Some(dir) {
-        save_session_file(dir, session)
-      }
-      self.session = Some(session)
-      self.connected = false
-      self.poke()
-    },
-    resume_on_cancel=true,
-  )
+  @async.protect_from_cancel(() => {
+    if self.runtime_dir is Some(dir) {
+      save_session_file(dir, session)
+    }
+    self.session = Some(session)
+    self.connected = false
+    self.poke()
+  })
 }
 
 ///|

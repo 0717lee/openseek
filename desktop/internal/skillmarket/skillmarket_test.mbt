@@ -93,7 +93,7 @@ async fn fake_registry(
     "acme/nomd@1.0.0": false,
   }
   group.spawn_bg(no_wait=true) <| () => {
-    let json_headers = { "Content-Type": "application/json" }
+    let json_headers : @http.Headers = { "Content-Type": "application/json" }
     server.run_forever(
       (request, body, conn) => {
         let _ = body.read_all()
