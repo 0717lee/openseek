@@ -126,8 +126,8 @@ conversation's engine process on the next prompt.
 
 ## Updates
 
-After the webview connects, the host fetches the OSS-backed release manifest
-(`/openseek/desktop/releases/latest.json` on the release CDN, see
+After the webview connects, the host fetches the hosted release manifest
+(`/desktop/releases/latest.json` on the SeekMoon relay origin, see
 `internal/version` for the version it compares against) in the background.
 On macOS, when the manifest lists a `macos-arm64` package and the running
 bundle is Developer ID signed, the host downloads the zip, checks its

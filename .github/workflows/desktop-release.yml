@@ -81,8 +81,6 @@ jobs:
       MACOS_SIGNING_IDENTITY: "Developer ID Application: Haoxiang Fei (NYZ3LQ5QWC)"
       NOTARY_PROFILE: openseek-${{ github.event_name == 'schedule' && 'stable' || inputs.channel }}
       OPENSEEK_API_ORIGIN: ${{ (github.event_name != 'schedule' && inputs.channel == 'staging') && 'https://openseek-api-staging.moonbitlang.cn' || 'https://openseek-api.moonbitlang.cn' }}
-      OPENSEEK_RELEASES_ORIGIN: ${{ (github.event_name != 'schedule' && inputs.channel == 'staging') && 'https://cli.moonbitlang.cn/openseek/staging/desktop/releases' || 'https://cli.moonbitlang.cn/openseek/desktop/releases' }}
-      OPENSEEK_OSS_PREFIX: ${{ (github.event_name != 'schedule' && inputs.channel == 'staging') && 'openseek/staging/desktop/releases' || 'openseek/desktop/releases' }}
       RELEASE_CHANNEL: ${{ github.event_name == 'schedule' && 'stable' || inputs.channel }}
 
     steps:
@@ -115,13 +113,10 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$GITHUB_EVENT_NAME" == "schedule" ]]; then
-            # The first run after migration can fall back to the API-owned
-            # pointer. Every later run reads the canonical OSS object.
-            current_manifest="$(
-              curl -fsSL "$OPENSEEK_RELEASES_ORIGIN/latest.json" 2>/dev/null ||
-                curl -fsSL "$OPENSEEK_API_ORIGIN/desktop/releases/latest.json"
+            current_version="$(
+              curl -fsSL "$OPENSEEK_API_ORIGIN/desktop/releases/latest.json" |
+                jq -er '.version | strings'
             )"
-            current_version="$(jq -er '.version | strings' <<< "$current_manifest")"
             if [[ ! "$current_version" =~ ^([0-9]{1,4})\.([0-9]{1,2})\.([0-9]{1,2})$ ]]; then
               echo "::error::Published $RELEASE_CHANNEL version '$current_version' is not an Apple-compatible three-part version"
               exit 1
@@ -266,8 +261,9 @@ jobs:
             -czf desktop/dist/SeekMoon.browser.tar.gz \
             browser
 
-      # Upload first. A missing version manifest leaves these objects
-      # replaceable; a retry of a sealed version restores the exact OSS bytes.
+      # Upload artifacts before publication. Until API publish succeeds, a
+      # retry may replace nondeterministic rebuilds; a published Browser
+      # version restores the exact OSS bytes instead.
       - name: Upload release to OSS
         shell: bash
         env:
@@ -279,9 +275,9 @@ jobs:
         run: |
           desktop/scripts/publish-release.sh upload "v$RELEASE_VERSION"
 
-      # A sealed retry replaces this run's nondeterministic rebuilds with the
-      # exact OSS objects before reaching here. Keep those canonical bytes as
-      # the downloadable Actions artifact too.
+      # A retry of an API-published version replaces this run's nondeterministic
+      # rebuilds with the exact OSS objects before reaching here. Keep those
+      # canonical bytes as the downloadable Actions artifact too.
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -293,8 +289,9 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      # Publish seals the uploaded bytes, selects the staged Browser version,
-      # and replaces latest.json last. It does not upload release binaries.
+      # Publish sends filenames and digests to the API. The API selects the
+      # staged Browser version and atomically replaces its own latest.json; it
+      # does not receive the ZIP or DMG.
       - name: Publish release
         shell: bash
         env:
@@ -310,7 +307,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          manifest="$(curl -fsSL "$OPENSEEK_RELEASES_ORIGIN/latest.json")"
+          manifest="$(curl -fsSL "$OPENSEEK_API_ORIGIN/desktop/releases/latest.json")"
           jq -e --arg version "$RELEASE_VERSION" '.version == $version' \
             <<< "$manifest"
 
