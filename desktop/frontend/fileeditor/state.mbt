@@ -75,12 +75,12 @@ pub(all) enum ReviewBaseline {
 } derive(Eq)
 
 ///|
-/// The per-tab review presentation. Source mode keeps the existing Viewer and
-/// quick-diff gutter; full-diff mode shows the context-bounded comparison in
-/// the separately selected split or unified layout.
+/// The per-tab review presentation. Source mode keeps the selected code or
+/// Markdown surface; full-diff mode shows the context-bounded source comparison
+/// in the separately selected side-by-side or inline layout.
 pub(all) enum ReviewViewMode {
   ReviewSource
-  ReviewUnifiedDiff
+  ReviewDiff
 } derive(Eq)
 
 ///|
@@ -89,8 +89,29 @@ pub(all) enum ReviewViewMode {
 /// layout for the next full-diff open and for the next changed file.
 pub(all) enum ReviewDiffLayout {
   ReviewSideBySide
-  ReviewUnified
+  ReviewInline
 } derive(Eq)
+
+///|
+/// Desktop-owned comparison algorithm preference. Non-MoonBit comparisons
+/// force Core at the provider boundary without overwriting this preference,
+/// so returning to a `.mbt` review restores Token or Tree.
+pub(all) enum ReviewDiffMode {
+  ReviewDiffCore
+  ReviewDiffToken
+  ReviewDiffTree
+} derive(Eq, Debug)
+
+///|
+/// The last provider result for the visible MoonBit comparison. A requested
+/// Tree calculation can legitimately settle as Token; malformed specialized
+/// output settles as Core. The host renders this fallback instead of placing
+/// product controls inside the reusable diff editor.
+pub(all) struct ReviewDiffStatus {
+  requested : ReviewDiffMode
+  effective : ReviewDiffMode
+  fell_back : Bool
+} derive(Eq, Debug)
 
 ///|
 /// One changed-file review request parked on its document. Separate request
@@ -387,9 +408,18 @@ pub(all) struct State {
   // changed-file reviews inherit it so next/previous and tree navigation do
   // not force the reviewer to request the full diff again.
   review_view_mode : ReviewViewMode
-  // Split/unified is likewise a reviewer preference rather than document
-  // state. The imperative DiffViewer retains both models while applying it.
+  // Side-by-side/inline is likewise a reviewer preference rather than
+  // document state. The imperative DiffEditor retains both models while
+  // applying it.
   review_diff_layout : ReviewDiffLayout
+  // The requested MoonBit-aware algorithm and comment policy are desktop
+  // preferences. The provider is forced to Core for other file types while
+  // these values remain parked for the next `.mbt` comparison.
+  review_diff_mode : ReviewDiffMode
+  review_diff_ignore_comments : Bool
+  // Updated from DiffEditor's completed provider transaction. `None` means a
+  // new model/options calculation has not yet produced host-visible status.
+  review_diff_status : ReviewDiffStatus?
   changes : ChangeList
   // Git graph state is conversation/workspace scoped like Changes, but is
   // refreshed only at meaningful repository boundaries rather than on the
@@ -498,8 +528,11 @@ pub fn State::empty() -> State {
     tree_open: true,
     explorer_mode: ExplorerFiles,
     search: @grep_search.State::empty(),
-    review_view_mode: ReviewUnifiedDiff,
+    review_view_mode: ReviewDiff,
     review_diff_layout: ReviewSideBySide,
+    review_diff_mode: ReviewDiffCore,
+    review_diff_ignore_comments: true,
+    review_diff_status: None,
     changes: ChangeListIdle,
     git_graph: GitGraphIdle,
     git_graph_generation: 0,
@@ -563,6 +596,9 @@ pub fn State::prepare_owner(
     explorer_mode: self.explorer_mode,
     search: self.search.reset_checkout(),
     review_view_mode: self.review_view_mode,
+    review_diff_layout: self.review_diff_layout,
+    review_diff_mode: self.review_diff_mode,
+    review_diff_ignore_comments: self.review_diff_ignore_comments,
     changes_generation: self.changes_generation,
     request_epoch: self.request_epoch + 1,
     file_link_generation: self.file_link_generation,
@@ -781,12 +817,23 @@ pub(all) enum Msg {
     path~ : @pathx.Relative,
     generation~ : Int
   )
-  // Switch the active changed-file review between the ordinary source Viewer
-  // and its full comparison. Unavailable/loading reviews ignore the action.
+  // Switch the active changed-file review between its selected source
+  // presentation and the full comparison. Unavailable/loading reviews ignore
+  // the action.
   ToggleReviewDiff
-  // Switch a visible full comparison between split panes and unified rows.
+  // Switch a visible full comparison between side-by-side panes and inline
+  // rows.
   // Source mode and unavailable/loading comparisons ignore the action.
   ToggleReviewDiffLayout
+  // Select the desktop-owned comparison provider mode. Token and Tree are
+  // accepted only for a visible `.mbt` comparison; other files keep the
+  // preference parked while their provider is forced to Core.
+  ReviewDiffModeSelected(ReviewDiffMode)
+  ToggleReviewDiffIgnoreComments
+  // Provider completion is asynchronous with respect to the Rabbita update
+  // loop. This message republishes the requested/effective mode so the host
+  // toolbar can announce Tree→Token and specialized→Core fallbacks.
+  ReviewDiffStatusChanged(ReviewDiffStatus)
   // Mark the active changed-file review as reviewed, or return it to the
   // unreviewed queue. Ordinary file tabs ignore the action.
   ToggleReviewProgress
@@ -940,15 +987,13 @@ pub(all) enum Msg {
   // without pretending it exists in the working document.
   // Like `EditorCommentAdded`, the main update intercepts this message and
   // turns it into a deduplicated annotation chip.
-  UnifiedDiffCommentAdded(
+  DiffCommentAdded(
     file~ : @pathx.Relative,
     original_line_number~ : Int?,
     modified_line_number~ : Int?,
     quote~ : String,
     comment~ : String,
-    // Present when the comment came from the new original-side Viewer. The
-    // legacy standalone renderer has no feedback bubble and leaves both keys
-    // absent.
+    // Present when the comment came from the original-side code kernel.
     resource~ : ModelUri?,
     feedback_id~ : String?
   )

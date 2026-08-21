@@ -75,6 +75,7 @@ priv enum WorkbenchViewerEvent {
   DidChangeMarkers(Array[@base_common.Uri])
   DidBuildViewModel(@viewer_testing.ViewModelBuiltObservation)
   DidRenderModel(@viewer_testing.ModelRenderedObservation)
+  DidRenderMarkdown(@model.TextModel)
   DidResolveHover(@viewer_testing.HoverResolvedObservation)
   DidScroll(@editor_api.ScrollEvent)
   DidDispose
@@ -111,6 +112,11 @@ fn dispatch_workbench_msg(msg : WorkbenchMsg) -> Unit {
 /// The embedded viewer instance, created on first use with the remote
 /// document provider and event subscriptions into the shell update loop.
 let viewer_cell : Ref[@viewer.Viewer?] = Ref(None)
+
+///|
+/// Rich Markdown is a sibling surface selected by this host. It is never a
+/// presentation branch inside the code editor.
+let markdown_viewer_cell : Ref[@viewer.MarkdownViewer?] = Ref(None)
 
 ///|
 /// Workbench-only layout hooks live for the mounted page. Keeping the
@@ -203,6 +209,72 @@ fn workbench_viewer() -> @viewer.Viewer {
     }
   }
 }
+
+///|
+fn workbench_markdown_viewer() -> @viewer.MarkdownViewer {
+  match markdown_viewer_cell.val {
+    Some(viewer) => viewer
+    None => {
+      let host = @rdom.document()
+        .query_selector(".viewer-host")
+        .to_option()
+        .unwrap()
+      let viewer = @viewer.MarkdownViewer::create(
+        host,
+        services=workbench_services().viewer,
+        options=@viewer.MarkdownViewerOptions(theme=stored_theme()),
+      )
+      markdown_viewer_cell.val = Some(viewer)
+      viewer
+    }
+  }
+}
+
+///|
+fn workbench_active_model() -> @model.TextModel? {
+  match markdown_viewer_cell.val {
+    Some(viewer) =>
+      match viewer.get_model() {
+        Some(model) => Some(model.model)
+        None => workbench_viewer().get_model()
+      }
+    None => workbench_viewer().get_model()
+  }
+}
+
+///|
+fn layout_workbench_presentation() -> Unit {
+  workbench_viewer().layout()
+  match markdown_viewer_cell.val {
+    Some(viewer) => viewer.layout()
+    None => ()
+  }
+}
+
+///|
+fn clear_workbench_model() -> Unit {
+  workbench_viewer().set_model(None)
+  match markdown_viewer_cell.val {
+    Some(viewer) => viewer.set_model(None) |> ignore
+    None => ()
+  }
+  show_workbench_presentation("code")
+}
+
+///|
+extern "js" fn show_workbench_presentation(kind : String) -> Unit =
+  #| (kind) => {
+  #|   const host = globalThis.document?.querySelector?.('.viewer-host');
+  #|   if (!host) return;
+  #|   for (const node of host.children) {
+  #|     const code = node.classList?.contains('monaco-editor') ?? false;
+  #|     const markdown =
+  #|       node.classList?.contains('moonbit-viewer-markdown-document') ||
+  #|       node.classList?.contains('moonbit-viewer-markdown-empty');
+  #|     if (code) node.hidden = kind !== 'code';
+  #|     if (markdown) node.hidden = kind !== 'markdown';
+  #|   }
+  #| }
 
 ///|
 fn install_viewer_event_subscriptions(viewer : @viewer.Viewer) -> Unit {
@@ -321,14 +393,15 @@ fn mount_app() -> Unit {
 /// gives it keyboard focus (the viewer owns its own key handling).
 fn attach_workbench_viewer() -> Unit {
   let viewer = workbench_viewer()
-  install_workbench_resize_hooks(viewer)
+  install_workbench_resize_hooks()
+  show_workbench_presentation("code")
   viewer.focus()
 }
 
 ///|
 /// Keeps the Viewer layout synchronized with every host-box change, including
 /// Explorer splitter gestures that do not emit a window resize event.
-fn install_workbench_resize_hooks(viewer : @viewer.Viewer) -> Unit {
+fn install_workbench_resize_hooks() -> Unit {
   match viewer_host_resize_observer.val {
     Some(observer) => observer.dispose()
     None => ()
@@ -342,7 +415,7 @@ fn install_workbench_resize_hooks(viewer : @viewer.Viewer) -> Unit {
     return
   }
   viewer_host_resize_observer.val = @base_browser.observe_element_resize(host, () => {
-    viewer.layout()
+    layout_workbench_presentation()
   })
   explorer_resize_dispose.val = Some(install_explorer_resize_handle())
 }
@@ -537,7 +610,7 @@ fn workbench_update(
     ToggleExplorer =>
       (
         @cmd.custom_cmd(
-          _ => workbench_viewer().layout(),
+          _ => layout_workbench_presentation(),
           kind=@cmd.after_render,
         ),
         { ..model, explorer_visible: !model.explorer_visible },
@@ -550,12 +623,19 @@ fn workbench_update(
           viewer_cmd(() => {
             let viewer = workbench_viewer()
             viewer.update_options(viewer.get_options().with_theme(theme))
+            match markdown_viewer_cell.val {
+              Some(markdown) =>
+                markdown.update_options(
+                  markdown.get_options().with_theme(theme),
+                )
+              None => ()
+            }
           }),
         ]),
         { ..model, theme, },
       )
     }
-    WindowResized => (viewer_cmd(() => workbench_viewer().layout()), model)
+    WindowResized => (viewer_cmd(layout_workbench_presentation), model)
     OpenRepoPicker => open_repo_picker_update(emit, model)
     CloseRepoPicker => (@rabbita.none, { ..model, repo_picker: None })
     BrowseRepoDirectory(path) => browse_repo_directory_update(emit, model, path)
@@ -592,16 +672,73 @@ fn open_definition_location_update(
 }
 
 ///|
-/// Installs a model, wrapping `set_model` with the Monaco host pattern for
-/// scroll continuity: `set_model` always resets the viewport, so a reload
-/// saves and restores the view state around it.
+fn workbench_markdown_resource_kind(
+  text_model : @model.TextModel,
+) -> @viewer.MarkdownResourceKind? {
+  let path = text_model.uri.path.to_lower()
+  if path.has_suffix(".mbt.md") {
+    Some(@viewer.MoonBitMarkdown)
+  } else if path.has_suffix(".md") || text_model.get_language_id() == "markdown" {
+    Some(@viewer.OrdinaryMarkdown)
+  } else {
+    None
+  }
+}
+
+///|
+/// Installs a model into the host-selected code or Markdown surface. Neither
+/// reusable widget infers presentation from a URI.
 fn set_workbench_model(
   text_model : @model.TextModel,
   view_state : DocumentViewState,
 ) -> Unit {
-  let viewer = workbench_viewer()
   workbench_services().remote_language.note_document(text_model)
   sync_document_feedback(text_model)
+  match workbench_markdown_resource_kind(text_model) {
+    Some(resource_kind) =>
+      set_workbench_markdown_model(text_model, resource_kind, view_state)
+    None => set_workbench_code_model(text_model, view_state)
+  }
+}
+
+///|
+fn set_workbench_markdown_model(
+  text_model : @model.TextModel,
+  resource_kind : @viewer.MarkdownResourceKind,
+  view_state : DocumentViewState,
+) -> Unit {
+  let viewer = workbench_markdown_viewer()
+  let state = match view_state {
+    PreserveScroll => viewer.save_view_state()
+    ResetScroll | RevealDefinition(_) => None
+  }
+  workbench_viewer().set_model(None)
+  viewer.set_model(Some(@viewer.MarkdownViewerModel(text_model, resource_kind)))
+  |> ignore
+  show_workbench_presentation("markdown")
+  viewer.restore_view_state(state)
+  viewer.handle_initialized()
+  match view_state {
+    RevealDefinition(location) =>
+      if location.uri.to_string() == text_model.uri.to_string() {
+        viewer.reveal_range_in_center(text_model.validate_range(location.range))
+        viewer.focus()
+      }
+    PreserveScroll | ResetScroll => ()
+  }
+  dispatch_workbench_msg(ViewerEvent(DidRenderMarkdown(text_model)))
+}
+
+///|
+fn set_workbench_code_model(
+  text_model : @model.TextModel,
+  view_state : DocumentViewState,
+) -> Unit {
+  let viewer = workbench_viewer()
+  match markdown_viewer_cell.val {
+    Some(markdown) => markdown.set_model(None) |> ignore
+    None => ()
+  }
   match view_state {
     PreserveScroll => {
       let state = viewer.save_view_state()
@@ -611,6 +748,7 @@ fn set_workbench_model(
     ResetScroll => viewer.set_model(Some(text_model))
     RevealDefinition(_) => viewer.set_model(Some(text_model))
   }
+  show_workbench_presentation("code")
   // The reference workbench presents `.mbt` sources as a top-level outline.
   // Keep this a host policy instead of changing the reusable Viewer's default:
   // other registered languages and external embedders retain expanded models.
@@ -720,7 +858,7 @@ fn active_document_error_update(
   emit_event("language:error", error.to_json().stringify())
   let clear = viewer_cmd(() => {
     workbench_services().remote_language.invalidate()
-    workbench_viewer().set_model(None)
+    clear_workbench_model()
   })
   if error.code == FileNotFound {
     (
@@ -757,7 +895,7 @@ fn viewer_event_update(
     DidChangeMarkers(uris) => {
       // The marker service reports per-resource changes; the status line only
       // tracks the open document.
-      match workbench_viewer().get_model() {
+      match workbench_active_model() {
         Some(text_model) =>
           if uris.search_by(uri => uri.to_string() == text_model.uri.to_string())
             is Some(_) {
@@ -813,6 +951,32 @@ fn viewer_event_update(
       } else {
         (@rabbita.none, next)
       }
+    }
+    DidRenderMarkdown(text_model) => {
+      let diagnostics = workbench_services().markers.diagnostics_for_resource(
+        text_model.uri,
+      )
+      let line_count = text_model.get_line_count()
+      set_current_model(text_model_harness_json(text_model))
+      emit_render_event(
+        line_count,
+        0,
+        diagnostics.length(),
+        text_model.revision,
+        0.0,
+        0.0,
+      )
+      emit_dom_mounted(line_count, diagnostics.length(), "ready", patch_ms=None)
+      let next = {
+        ..model,
+        status: "ready",
+        status_message: "",
+        document: Some(model_to_view(text_model)),
+        line_count,
+        diagnostics,
+        viewer_has_frame: true,
+      }
+      (workspace_file_tree().set_active(text_model.uri), next)
     }
     DidResolveHover(event) => {
       emit_hover_status(event.ok, event.revision)

@@ -24,61 +24,66 @@ imports them and public names remain MoonBit-owned.
 
 ```mermaid
 flowchart TB
-  A[host document] --> B[TextModel<br>common/model]
-  B --> C[ViewModel<br>common/view_model]
-  C --> D[ViewLayout<br>common/view_layout]
-  D --> E[BrowserPresentation<br>closed family]
-  E --> F[Code: View<br>browser/view]
-  E --> G[Markdown: document view<br>+ hover and definition bridges]
-  F --> H[DOM]
-  G --> H
+  H[desktop or embedded host] --> P{explicit presentation policy}
+  P --> V[public Viewer]
+  P --> M[public MarkdownViewer]
+  P --> D[public DiffEditor]
+  V --> C[internal CodeEditorWidget]
+  M --> MW[internal MarkdownViewerWidget]
+  D --> DW[internal DiffEditorWidget]
+  DW --> VM[one DiffEditorViewModel]
+  DW --> E[DiffEditorEditors]
+  E --> O[original CodeEditorWidget]
+  E --> N[modified CodeEditorWidget]
+  C --> DOM[DOM]
+  MW --> DOM
+  O --> DOM
+  N --> DOM
 ```
 
-The stages after the host document live in `viewer/common/model`,
-`viewer/common/view_model`, and `viewer/common/view_layout`. The Viewer-owned
-closed `BrowserPresentation` family then selects
-`internal/viewer/browser/view.View` for Code or
-`internal/viewer/browser/markdown_document.MarkdownDocumentView` plus the
-presentation-local hover and definition bridges for Markdown.
+The public root is a façade, not the editor implementation. `Viewer` is an
+opaque wrapper around exactly one code-only `CodeEditorWidget` in
+`internal/viewer/code_editor_widget`. That kernel owns configuration, one model
+slot, `ViewModel`, `View`, input, render scheduling, decorations, ViewZones,
+scroll/focus state, and code contributions. It neither imports the public root
+package nor knows about Markdown or diff presentation policy.
 
-`Viewer` keeps cross-domain ordering at the root and delegates private state to
-five concrete owners: `EditorConfigurationState`, `ViewerModelSlot`,
-`ViewerMount`, `EditorContributions`, and `CursorEventDelivery`.
-`ViewerModelSlot.current` is the one nullable `ModelData`; its optional closed
-`BrowserPresentation` makes active-root dispatch explicit. It contains exactly
-`Code(CodeBrowserData)` and `Markdown(MarkdownBrowserData)`; root lookup, focus,
-theme, layout, scroll, reveal, and lifecycle dispatch exhaustively over that
-family instead of assuming a hidden Code `View`. The Code payload pairs a real
-`View` with its retained mouse handler and view-scoped render/reveal facts. The
-Markdown payload pairs a contribution-free document view with
-presentation-local hover and definition bridges over the original model.
-Public construction seeds
-`EditorConfigurationState` synchronously from the host client box before model
-attachment. Each `ModelData` then carries one generation-scoped initialization
-boundary: the host invokes `Viewer::handle_initialized` after model, view-state,
-and option setup, publishing stable visible-token demand outside `attach_model`
-and independently of the animation-frame render loop. Repeated calls
-re-stabilize the current model's demand instead of consuming one-shot state.
+`MarkdownViewer` wraps `internal/viewer/markdown_viewer.MarkdownViewerWidget`.
+It directly owns `MarkdownDocumentView` and its Markdown-specific hover,
+definition, folding, projection, and native scroll lifetimes. The host supplies
+`OrdinaryMarkdown` or `MoonBitMarkdown` explicitly; the widget never infers a
+presentation from URI or language id.
 
-Presentation selection belongs to the root Viewer. An exact lowercase URI-path
-`.md` suffix, including `.mbt.md`, or the exact `markdown` language id selects
-Markdown; every other model selects Code. URI matching excludes query and
-fragment text and remains case-sensitive. Shells and embedders always supply an
-ordinary caller-owned `TextModel`; they do not parse Markdown or select a
-presentation. Both variants retain that original model and `ViewModel` as
-source truth.
+`DiffEditor` wraps `internal/viewer/diff_editor.DiffEditorWidget`. The internal
+widget owns exactly two `CodeEditorWidget` kernels through `DiffEditorEditors`
+and exactly one shared `DiffEditorViewModel`. It never constructs, contains, or
+calls the public `Viewer`. Diff panes therefore show source code for every
+resource, including Markdown, without a force-code escape hatch.
 
-Headless means `ViewerMount::Headless`: there is no caller host, placeholder,
-browser presentation, DOM focus state, or root animation frame. A headless
-Viewer may still have a model and `ViewModel`; `ModelData.presentation_kind`
-retains the same automatic selection while `ModelData.browser=None`. On
-supported construction paths, a mounted model always has
-`Some(BrowserPresentation)`. `ViewerMount` installs and removes the active
-presentation root without knowing its concrete payload. This is distinct from
-a mounted Viewer with no model, which owns and paints one complete placeholder
-pair. Mounting is one-way; disposal removes Viewer-owned DOM and clears mounted
-placeholder/frame/focus state, but retains the caller's host for container
-lookup.
+Every kernel construction supplies an explicit
+`CodeEditorContributionDescriptors` set; there is no editor-role field or
+role-based feature branch. Public `Viewer` selects `standalone`, both diff
+panes select `diff_pane`, and an embedded Peek source preview selects
+`peek_preview`. Standalone enables the complete code contribution set. Diff
+panes retain agent feedback, folding, hover, context menu, Definition, and
+References, but omit Markdown-comment rich replacement to preserve source-line
+geometry and omit quick diff to prevent a nested diff. Peek previews retain
+hover, context menu, and direct Definition only, so they cannot recursively
+open References Peek, render Markdown comments, or attach quick diff. Runtime
+availability is always determined by whether the corresponding typed
+contribution was instantiated.
+
+Presentation selection belongs to desktop and embedded hosts. The usual policy
+is a decoded lowercase `.md` path or exact `markdown` language id for
+`MarkdownViewer`, with `.mbt.md` selecting `MoonBitMarkdown`; all other files
+use `Viewer`. A comparison always uses `DiffEditor`.
+
+Each surface borrows caller-owned models and an explicitly supplied service
+bundle. Its mounted constructor owns the renderer subtree and scheduled work,
+not the host element. Clearing or replacing a model detaches it synchronously;
+Markdown and diff setters return their fully detached old model value so the
+host can release it immediately. Disposal is idempotent and never disposes
+caller-owned models, hosts, or services.
 
 The host owns files, transport, persistence, reload policy, shell chrome, and
 error presentation. The viewer owns readonly rendering, selection, scrolling,
@@ -101,6 +106,9 @@ reference_host: editor reference composition {
 facade: viewer facade
 inner: internal/viewer {
   grid-columns: 1
+  code_editor: code_editor_widget
+  diff_editor: diff_editor
+  markdown_viewer: markdown_viewer
   view: browser/view
   contrib: contrib/*
   markdown: markdown
@@ -191,8 +199,8 @@ The root `viewer` facade and public `viewer/browser` contract package are
 js-only. Concrete browser runtime packages live below the module-private
 `internal/viewer/**` boundary:
 
-- `viewer` is the opaque public facade, the Monaco `CodeEditorWidget` and
-  `editor.api.ts` role. Public `Viewer` construction is only `Viewer::create`;
+- `viewer` is the opaque public façade for `Viewer`, `MarkdownViewer`, and
+  `DiffEditor`. Public `Viewer` construction is only `Viewer::create`;
   precomputed reference locations enter only through
   `Viewer::show_references`, while the provider-backed References contribution
   consumes only the opaque `LanguageHandle`; `ViewerOptions`,
@@ -200,30 +208,23 @@ js-only. Concrete browser runtime packages live below the module-private
   generated interfaces may reference language/common values, browser
   contracts, and common capability handles, never private view or contribution
   implementations.
-- `viewer` also exposes opaque `DiffViewer` and `DiffEditorModel` facades. A
-  DiffViewer installs two ordinary child Viewers into one stable caller-owned
-  host, borrows the two caller-owned models, and shares one explicit
-  `ViewerServices` bundle. The root coordinator is the only owner of diff
-  mappings, line/character decoration ids, ViewZone ids, model-change
-  subscriptions, render mode, and coupled scroll subscriptions. Both children
-  stay unwrapped, unfolded code presentations (including raw `.md` source).
-  `SideBySide` turns each mapping's height deficit into an alignment ViewZone
-  after the shorter range. `Unified` hides only the original presentation and
-  projects tokenized original deletion lines into the full-width modified
-  Viewer as content/margin ViewZones; modified lines retain their ordinary
-  Viewer decorations and interactions. `set_render_mode` rebuilds only those
-  coordinator-owned artifacts, so models and modified view state remain
-  installed. Language and feedback behavior stays model-scoped in the ordinary
-  Viewer path. Hosts own revision routing: a historical model must not match a
-  provider that can answer only for the live checkout. The stylesheet source is
-  `viewer/browser/diff_editor/diff_editor.css`.
-- `viewer` retains the independent opaque `UnifiedDiffView` compatibility
-  facade. It accepts bounded caller-owned strings and eagerly renders the
-  `viewer/common/unified_diff` result through
-  `internal/viewer/browser/unified_diff`; its stylesheet remains
-  `viewer/browser/unified_diff/unified_diff.css`. It does not participate in
-  the two-Viewer composition and is no longer OpenSeek's primary review
-  surface.
+- `internal/viewer/code_editor_widget` is the canonical Monaco
+  `CodeEditorWidget`-shaped implementation. Public `Viewer` owns one kernel and
+  forwards the standalone code API. The internal package cannot import public
+  `viewer`, `diff_editor`, or Markdown document packages, and it exports only
+  stable coordinator primitives rather than raw configuration, `ViewModel`,
+  `View`, or `MouseHandler` handles.
+- `internal/viewer/diff_editor` owns `DiffEditorWidget`,
+  `DiffEditorEditors`, one shared `DiffEditorViewModel`, diff decorations,
+  managed alignment zones, stable scroll restoration, overview, layout, and
+  navigation. `DiffEditorEditors` creates two code kernels directly; there is
+  no public `Viewer` in this ownership graph. The public layouts are
+  `SideBySide` and `Inline`; no compatibility renderer or adapter layer is
+  retained.
+- `internal/viewer/markdown_viewer` owns the standalone rich Markdown widget
+  and its model-scoped feature bridges. Public `MarkdownViewer` projects a
+  shared `ViewerServices` bundle into its narrower service contract and keeps
+  Markdown model/options/view-state types out of the code kernel.
 - `viewer/browser` owns canonical editor mouse events, target kinds, DOM
   coordinates, the mutable live ViewZone descriptor/opaque accessor contract, and
   the opaque unmanaged overlay-widget handle.
@@ -289,10 +290,12 @@ js-only. Concrete browser runtime packages live below the module-private
 
 `internal/viewer/browser/view` owns closed event/render handle enums, rendering
 contexts, concrete view parts, and their lifecycle wiring. Files in that
-directory share private declarations as one compilation unit. Root
-`viewer/*.mbt` contains the `Viewer::` composition glue: the internal browser
-packages are lower-level dependencies and cannot import the root facade
-without reversing the dependency and creating a package cycle.
+directory share private declarations as one compilation unit.
+`internal/viewer/code_editor_widget/*.mbt` contains the
+`CodeEditorWidget::` composition glue. Root `viewer/*.mbt` is only the opaque
+public facade and forwards standalone code-editor operations to one kernel;
+internal browser packages cannot import that facade without reversing the
+dependency and creating a package cycle.
 
 ### Contributions
 
@@ -317,37 +320,37 @@ editor common/browser layers; editor common never depends on them.
 - `internal/viewer/contrib/definition` owns DOM-free definition-result
   normalization, token fingerprints, and Ctrl/Cmd-link/request state.
   `internal/viewer/contrib/definition/browser` owns only Definition's
-  non-destructive-message DOM shell. Root Definition composition owns provider
-  requests, cancellation, Definition-specific no-result/open-rejection
-  feedback, and Code decorations or projected Markdown link spans. It
-  populates the shared References controller after an Alt+F12 result set or
-  multiple ordinary results are already known. The Markdown adapter resolves
-  native pointer geometry through the document-owned source map and never
-  creates a virtual model. The emitted
+  non-destructive-message DOM shell. `CodeEditorWidget` composition owns Code
+  provider requests, cancellation, Definition-specific no-result/open-
+  rejection feedback, and editor decorations. It populates the shared
+  References controller after an Alt+F12 result set or multiple ordinary
+  results are already known. Markdown definition projection is owned by
+  `MarkdownViewerWidget`; its adapter resolves native pointer geometry through
+  the document-owned source map and never creates a virtual model. The emitted
   stylesheet remains at `viewer/contrib/definition/browser/definition.css`.
 - `internal/viewer/contrib/references` owns the DOM-free grouped result,
   snippet, navigation, mode, phase, and exact source-session values shared by
   Definition and References Peek. Its browser sibling owns only the detached
   mode-labelled shell and feature-local ARIA tree. The tree is native content
   inside the shared `internal/viewer/ui/scrollbar` DOM/input lifetime, while
-  retaining tree focus and keyboard ownership. Root `viewer` owns the one
-  shared per-Viewer controller, the Shift+F12/context-menu provider action,
-  provider-query cancellation and freshness, `Viewer::show_references`,
-  per-group lazy cancellation/reference slots, the selected nested
-  Viewer/reference and decorations, presentation mounts, Current/Side opener
-  dispatch, and atomic teardown. Browser callbacks carry typed result
-  identities upward; neither internal package imports the root facade or
-  resolves a model.
+  retaining tree focus and keyboard ownership. Each `CodeEditorWidget` owns
+  one shared controller, the Shift+F12/context-menu provider action,
+  provider-query cancellation and freshness, the internal implementation of
+  `Viewer::show_references`, per-group lazy cancellation/reference slots, the
+  selected nested code kernel/reference and decorations, Peek mounts,
+  Current/Side opener dispatch, and atomic teardown. Browser callbacks carry
+  typed result identities upward; no internal browser/contribution package
+  imports the public facade or resolves a model.
   The shared Peek/tree stylesheet remains at
   `viewer/contrib/references/browser/references.css`.
 - `internal/viewer/contrib/contextmenu/browser` owns the reusable detached HTML
   menu shell, focus return, temporary document/window listeners, submenu
-  timers, ARIA state, and viewport fitting. Root `viewer` owns the per-Viewer
-  contribution, live command/menu resolution, target filtering,
-  cursor/selection policy, and semantic Markdown source anchor. Code text or
-  empty-content hits and valid semantic Markdown rows use the custom menu;
-  injected text, editor widgets, margins, scrollbars, ordinary Markdown, and
-  unavailable command sets retain the browser-native menu. The emitted
+  timers, ARIA state, and viewport fitting. `CodeEditorWidget` owns the
+  per-editor contribution, live command/menu resolution, target filtering, and
+  cursor/selection policy. Code text or empty-content hits use the custom menu;
+  injected text, editor widgets, margins, scrollbars, and unavailable command
+  sets retain the browser-native menu. Markdown interactions belong to
+  `MarkdownViewerWidget` and do not enter this code contribution. The emitted
   stylesheet remains at
   `viewer/contrib/contextmenu/browser/contextmenu.css`.
 - `internal/viewer/contrib/agent_feedback` owns concrete feedback
@@ -365,7 +368,7 @@ editor common/browser layers; editor common never depends on them.
 - `internal/viewer/contrib/folding/browser` currently owns the complete
   js-only folding implementation, including ranges, hidden areas, decorations,
   controller, and the language-neutral outline-body range presentation used by
-  explicit host outlines. The root Viewer computes MoonBit function-body
+  explicit host outlines. `CodeEditorWidget` computes MoonBit function-body
   ranges without importing a concrete syntax package; ordinary provider/user
   folding remains the Monaco behavior port. Its emitted stylesheet remains at
   `viewer/contrib/folding/browser/folding.css`.
@@ -375,8 +378,8 @@ editor common/browser layers; editor common never depends on them.
   visible/offscreen size observer. The root contribution owns one instance of
   the shared Markdown diagram-viewport group per rendered target and disposes
   it before renderer replacement. Inline viewport-height changes report only
-  through a narrow callback into the existing size observer. The root
-  `viewer` contribution owns reconciliation, renderer and viewport lifetimes,
+  through a narrow callback into the existing size observer. The code-widget
+  contribution owns reconciliation, renderer and viewport lifetimes,
   exact model-source extraction, zone ids, and the one hidden-area source. Its
   emitted stylesheet remains at
   `viewer/contrib/markdown_comments/browser/markdown_comments.css`.
@@ -391,11 +394,12 @@ Removal restores the caller node's original `aria-hidden` presence and value.
 The root editor registry has two distinct ownership layers. Its process-wide
 contribution-description table contains constructors only; the adjacent
 command, keybinding, and closed menu-placement tables likewise contain no
-per-Viewer state.
-`Viewer.contributions` is an `EditorContributions` owner whose `instances` map
-is the sole lookup table for that Viewer's eight concrete contribution entries;
-feature packages do not keep second maps keyed by editor id. Root `Viewer::`
-helpers recover typed controllers by matching both the fixed id and central
+per-kernel state.
+`CodeEditorWidget.contributions` is an `EditorContributions` owner whose
+`instances` map is the sole lookup table for that kernel's concrete
+contribution entries;
+feature packages do not keep second maps keyed by editor id. Kernel helpers
+recover typed controllers by matching both the fixed id and central
 entry variant, mirroring Monaco's typed view over
 `CodeEditorContributions._instances`.
 
@@ -410,12 +414,12 @@ are released at their later root cleanup slot before the map is cleared.
 Declared instantiation modes are retained for source parity, but all modes
 currently instantiate eagerly.
 
-The Markdown hover bridge is not a central Code contribution. It is
-owned by `MarkdownBrowserData`, is activated only after the corresponding
-`ModelData` becomes current, and is cancelled before any source/theme
-projection replacement. Detach retires the bridge and renderer while the root
-is still mounted, removes the now-inert presentation root, and only then
-releases model listeners, the attached-view handle, and the `ViewModel`.
+The Markdown hover bridge is not a Code contribution. It is owned by the
+current `MarkdownViewerWidgetAttachment`, is activated only after that
+attachment becomes current, and is cancelled before any source/theme
+projection replacement. Detach retires the bridge and renderer while the
+Markdown root is still mounted, removes the inert root, and then releases its
+model listeners.
 
 The Markdown-comment entry owns Viewer-lifetime model/content subscriptions and
 a model-scoped stable-key map. A mounted Viewer replaces normalized comment
@@ -452,7 +456,7 @@ teardown orders toggle, viewport, renderers, and observer disposal before zone
 removal. The only diagram-to-ViewZone invalidation chain runs from the
 viewport-height callback through
 `MarkdownCommentSizeObserver::request_measure` to
-`Viewer::apply_markdown_comment_height`; the final step keeps the existing
+`CodeEditorWidget::apply_markdown_comment_height`; the final step keeps the existing
 generation and zone-id checks and remains the sole writer of the live ViewZone
 height.
 
@@ -544,8 +548,9 @@ so excluding them would leave it unbuildable.
   events. Its private MoonBit
   Markdown-comment provider adapts exact `///|` item anchors and their following
   `///` documentation into the Viewer's language-neutral provider contract.
-  It installs every document through the same `Viewer::set_model` path; `.md`
-  and `.mbt.md` require no shell-side presentation branch. Remote hover and
+  It explicitly selects public `Viewer` or `MarkdownViewer` before installing
+  a document; `.mbt.md` also selects `MoonBitMarkdown` resource semantics.
+  Remote hover and
   diagnostics are accepted only for the exact current model identity, version,
   URI, revision, and content generation, so the Markdown bridge receives the
   same original-model freshness guarantees as Code.
@@ -553,9 +558,9 @@ so excluding them would leave it unbuildable.
 ## Dependency Rules
 
 `moon check --target all` enforces package cycles and target compatibility.
-The remaining rules are intentionally kept visible in `moon.pkg`, generated
-interfaces, and code review instead of duplicated in an architecture-lint
-script:
+`scripts/check-diff-editor-architecture.sh` enforces the ownership edges and
+forbidden raw seams that type checking alone cannot express. The remaining
+rules stay visible in `moon.pkg`, generated interfaces, and code review:
 
 - Product code does not import `vscode/` or `codemirror/`.
 - Reusable packages do not import the `internal/shell/**` reference host.
@@ -568,6 +573,11 @@ script:
   framework packages. The reference shell owns the app framework.
 - Browser helper packages do not import the parent `viewer` facade.
 - `viewer/common/**` does not import `internal/viewer/**`.
+- `internal/viewer/diff_editor` depends on
+  `internal/viewer/code_editor_widget`, never on public `Viewer`.
+- `internal/viewer/code_editor_widget` does not import public `viewer`,
+  `diff_editor`, or Markdown presentation packages, and does not export raw
+  configuration, `ViewModel`, `View`, or `MouseHandler` accessors.
 - The root `viewer` package is the external browser facade; embedders use it and
   public `viewer/common/**` contracts rather than private browser/contribution
   implementation packages. The embedded example keeps this surface compiling.
@@ -595,10 +605,10 @@ maps the model URI to a server-side workspace path.
 
 ```mermaid
 flowchart LR
-  subgraph PM["Presentation-specific pointer mapping"]
-    PTR["Pointer coordinates"] --> PRES{"Active presentation"}
-    PRES -->|Code| CODE["Browser caret hit<br>+ retained CharacterMapping"]
-    PRES -->|Markdown| MD["Browser caret hit<br>+ retained semantic source boundaries"]
+  subgraph PM["Surface-specific pointer mapping"]
+    PTR["Pointer coordinates"] --> PRES{"Selected public surface"}
+    PRES -->|Viewer| CODE["Browser caret hit<br>+ retained CharacterMapping"]
+    PRES -->|MarkdownViewer| MD["Browser caret hit<br>+ retained semantic source boundaries"]
     CODE --> VP["1-based view Position"]
     VP --> CONV["CoordinatesConverter"]
     CONV --> MP["1-based model Position"]
@@ -617,7 +627,7 @@ flowchart LR
   FRESH --> UI["Hover widget + range decoration"]
 ```
 
-There are two presentation-specific entrances and one shared semantic path:
+There are two surface-specific entrances and one shared semantic path:
 
 - **Code** uses the browser caret API and the `CharacterMapping` retained by
   each rendered `ViewLine`. It first produces a view position, then converts
@@ -638,7 +648,7 @@ represented by an ordinary integer or `Position`.
 | Space | Shape and unit | Owner | Conversion boundary |
 | --- | --- | --- | --- |
 | Pointer geometry | client/page/editor-relative CSS pixels | browser controller | Browser event coordinates are normalized before hit testing. |
-| DOM caret | token span plus a normalized 0-based UTF-16 text offset | active browser presentation | The browser caret API answers a DOM boundary, not a source location. |
+| DOM caret | token span plus a normalized 0-based UTF-16 text offset | selected code or Markdown surface | The browser caret API answers a DOM boundary, not a source location. |
 | View position | 1-based UTF-16 `Position` in rendered view lines | Code `View`/`ViewModel` | `CharacterMapping` maps the token span and DOM offset to a view column. Markdown does not use this space. |
 | Model position | 1-based UTF-16 `Position` in the original source model | `TextModel` | `CoordinatesConverter` removes wrapping, folding, and injected-text projection. |
 | Model offset | 0-based UTF-16 offset from the start of the original document | `TextSnapshot` | `TextModel::get_offset_at` and `get_position_at` are the only position/offset authorities. |
@@ -653,7 +663,7 @@ Unicode character can therefore occupy two columns/offset units. No stage may
 silently reinterpret these values as UTF-8 byte offsets or Unicode scalar
 indices.
 
-### Code presentation: DOM caret to model position
+### Code surface: DOM caret to model position
 
 For Code, the pointer controller performs the following steps:
 
@@ -669,8 +679,9 @@ For Code, the pointer controller performs the following steps:
    `CharacterMapping` for the view column. The mapping was produced together
    with the token-span HTML and retained with the `ViewLine`; it is not
    reconstructed from CSS geometry or token text after the event.
-4. The resulting `MouseTarget` is still in view coordinates. At the root
-   Viewer event boundary, `convert_view_to_model_mouse_target` rebuilds every
+4. The resulting `MouseTarget` is still in view coordinates. At the
+   `CodeEditorWidget` event boundary, `convert_view_to_model_mouse_target`
+   rebuilds every
    position-bearing target arm through the active `CoordinatesConverter`.
    This is where wrapped view rows, folded source lines, and injected text
    collapse back to a position in the original model.
@@ -680,10 +691,10 @@ For Code, the pointer controller performs the following steps:
    yet the semantic token range eventually returned by the provider.
 
 The critical invariant is that a public editor mouse target and a hover anchor
-are already in **model space**. Code above the Viewer boundary must never treat
+are already in **model space**. Code above the kernel boundary must never treat
 them as view coordinates or apply the conversion a second time.
 
-### Markdown presentation: DOM caret to model position
+### Markdown surface: DOM caret to model position
 
 Markdown is rendered as a semantic document rather than as Code `ViewLine`
 rows, so reusing Code hit testing would invent the wrong coordinate space. A
@@ -698,15 +709,15 @@ source-bearing semantic rows. The Markdown hover bridge:
 
 Ordinary prose, synthetic indentation, mismatched projections, and unsafe DOM
 zones fail closed rather than guessing a source location. The bridge is owned
-by the active Markdown presentation and is cancelled before source, theme, or
-projection replacement.
+by the current `MarkdownViewerWidget` attachment and is cancelled before
+source, theme, or projection replacement.
 
 ### Model position to language provider
 
 `MarkdownHoverParticipant` queries providers at the start of the model-space
 anchor range. Here, "Markdown" describes the hover content format, not the
-Markdown document presentation: the same participant is used after either
-presentation has found a model anchor. The `Languages` query surface is
+public Markdown surface: the same participant is used after either surface has
+found a model anchor. The `Languages` query surface is
 offset-addressed, so it first calls `TextModel::get_offset_at`. The registry
 then calls `TextModel::get_position_at` before invoking the provider because
 the two contracts intentionally differ:

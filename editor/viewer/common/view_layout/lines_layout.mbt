@@ -21,7 +21,7 @@ pub struct EditorWhitespace {
   mut after_line_number : Int
   ordinal : Int
   mut height : Int
-  min_width : Int
+  mut min_width : Int
   mut prefix_sum : Double
 } derive(Eq, Debug)
 
@@ -66,6 +66,7 @@ priv struct PendingChange {
   id : String
   new_after_line_number : Int
   new_height : Int
+  new_min_width : Int?
 }
 
 ///|
@@ -154,6 +155,7 @@ fn javascript_to_int32(value : Double) -> Int {
 struct WhitespaceChangeAccessor {
   layout : LinesLayout
   mut had_a_change : Bool
+  mut min_width_update_requested : Bool
 }
 
 ///|
@@ -185,10 +187,19 @@ pub fn WhitespaceChangeAccessor::change_one_whitespace(
   id : String,
   new_after_line_number : Int,
   new_height : Double,
+  new_min_width? : Double,
 ) -> Unit {
   self.had_a_change = true
+  if new_min_width is Some(_) {
+    self.min_width_update_requested = true
+  }
   let new_height = javascript_to_int32(new_height)
-  self.layout.pending_changes.change({ id, new_after_line_number, new_height })
+  self.layout.pending_changes.change({
+    id,
+    new_after_line_number,
+    new_height,
+    new_min_width: new_min_width.map(javascript_to_int32),
+  })
 }
 
 ///|
@@ -302,12 +313,25 @@ pub fn LinesLayout::change_whitespace(
   self : LinesLayout,
   callback : (WhitespaceChangeAccessor) -> Unit raise?,
 ) -> Bool raise? {
-  let accessor = { layout: self, had_a_change: false }
+  let (had_a_change, _) = self.change_whitespace_with_width(callback)
+  had_a_change
+}
+
+///|
+fn LinesLayout::change_whitespace_with_width(
+  self : LinesLayout,
+  callback : (WhitespaceChangeAccessor) -> Unit raise?,
+) -> (Bool, Bool) raise? {
+  let accessor = {
+    layout: self,
+    had_a_change: false,
+    min_width_update_requested: false,
+  }
   // Monaco commits in `finally`: queued work survives a callback failure, and
   // the queues are cleared before that failure continues to the caller.
   defer self.pending_changes.commit(self)
   callback(accessor)
-  accessor.had_a_change
+  (accessor.had_a_change, accessor.min_width_update_requested)
 }
 
 ///|
@@ -317,7 +341,9 @@ fn LinesLayout::commit_pending_changes(
   changes : Array[PendingChange],
   removes : Array[PendingRemove],
 ) -> Unit {
-  if inserts.length() > 0 || removes.length() > 0 {
+  if inserts.length() > 0 ||
+    removes.length() > 0 ||
+    changes.any(change => change.new_min_width is Some(_)) {
     self.min_width = -1
   }
   if inserts.length() + changes.length() + removes.length() <= 1 {
@@ -330,6 +356,7 @@ fn LinesLayout::commit_pending_changes(
         change.id,
         change.new_after_line_number,
         change.new_height,
+        change.new_min_width,
       )
     }
     for remove in removes {
@@ -363,6 +390,10 @@ fn LinesLayout::commit_pending_changes(
         Some(change) => {
           whitespace.after_line_number = change.new_after_line_number
           whitespace.height = change.new_height
+          match change.new_min_width {
+            Some(min_width) => whitespace.min_width = min_width
+            None => ()
+          }
         }
         None => ()
       }
@@ -439,6 +470,7 @@ fn LinesLayout::change_one_whitespace(
   id : String,
   new_after_line_number : Int,
   new_height : Int,
+  new_min_width : Int?,
 ) -> Unit {
   let index = self.find_whitespace_index(id)
   if index == -1 {
@@ -447,6 +479,14 @@ fn LinesLayout::change_one_whitespace(
   if self.arr[index].height != new_height {
     self.arr[index].height = new_height
     self.prefix_sum_valid_index = self.prefix_sum_valid_index.min(index - 1)
+  }
+  match new_min_width {
+    Some(min_width) =>
+      if self.arr[index].min_width != min_width {
+        self.arr[index].min_width = min_width
+        self.min_width = -1
+      }
+    None => ()
   }
   if self.arr[index].after_line_number != new_after_line_number {
     // `afterLineNumber` changed: removing then re-inserting may reorder it.

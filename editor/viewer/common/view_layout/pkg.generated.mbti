@@ -128,7 +128,7 @@ pub struct EditorWhitespace {
   mut after_line_number : Int
   ordinal : Int
   mut height : Int
-  min_width : Int
+  mut min_width : Int
   mut prefix_sum : Double
 } derive(Eq, @debug.Debug)
 pub fn EditorWhitespace::EditorWhitespace(String, Int, Int, Int, Int) -> Self
@@ -624,7 +624,7 @@ pub fn ViewportData::not_equal(Self, Self) -> Bool
 pub fn ViewportData::to_repr(Self) -> @debug.Repr
 
 type WhitespaceChangeAccessor
-pub fn WhitespaceChangeAccessor::change_one_whitespace(Self, String, Int, Double) -> Unit
+pub fn WhitespaceChangeAccessor::change_one_whitespace(Self, String, Int, Double, new_min_width? : Double) -> Unit
 pub fn WhitespaceChangeAccessor::insert_whitespace(Self, Int, Int, Double, Double) -> String
 pub fn WhitespaceChangeAccessor::remove_whitespace(Self, String) -> Unit
 

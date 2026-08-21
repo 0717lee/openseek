@@ -101,6 +101,15 @@ fn view_zones_geometry_fixture(
     height_in_px=17.0,
     margin_dom_node=margin_zone,
     on_dom_node_top=_ => record_view_zones_geometry_event("callback:top"),
+    on_dom_node_layout=(visible, _) => {
+      record_view_zones_geometry_event(
+        if visible {
+          "callback:layout-visible"
+        } else {
+          "callback:layout-hidden"
+        },
+      )
+    },
   )
   let layout = @view_layout.LinesLayout(1, 20, 22, 0)
   let whitespace_id = Ref("")
@@ -166,6 +175,7 @@ test "ViewZones writes callbacks and zone geometry before container widths" {
   render_geometry_zone(part, visible, 100.0)
   let events = view_zones_geometry_events()
   let callback = geometry_event_index(events, "callback:top")
+  let layout_callback = geometry_event_index(events, "callback:layout-visible")
   let content_top = geometry_event_index(events, "style:content-zone:top:42px")
   let content_height = geometry_event_index(
     events, "style:content-zone:height:17px",
@@ -188,12 +198,13 @@ test "ViewZones writes callbacks and zone geometry before container widths" {
   )
   for
     index in [
-      callback, content_top, content_height, content_display, margin_top, margin_height,
-      margin_display, content_width, margin_width,
+      callback, layout_callback, content_top, content_height, content_display, margin_top,
+      margin_height, margin_display, content_width, margin_width,
     ] {
     assert_true(index >= 0)
   }
   assert_true(callback < content_top)
+  assert_true(callback < layout_callback && layout_callback < content_top)
   assert_true(content_top < content_height && content_height < content_display)
   assert_true(content_display < margin_top)
   assert_true(margin_top < margin_height && margin_height < margin_display)
@@ -216,4 +227,5 @@ test "ViewZones some to none retains both container widths" {
   for event in view_zones_geometry_events() {
     assert_false(event.contains(":width:"))
   }
+  assert_true(view_zones_geometry_events().contains("callback:layout-hidden"))
 }

@@ -85,69 +85,6 @@ fn LastRenderedData::set_current_visible_range(
 }
 
 ///|
-priv struct RunOnceScheduler {
-  delay_ms : Int
-  mut handle : @base_common.Disposable?
-  schedule_timeout : (() -> Unit, Int) -> @base_common.Disposable
-}
-
-///|
-fn RunOnceScheduler::RunOnceScheduler(delay_ms : Int) -> RunOnceScheduler {
-  RunOnceScheduler::new_with_timer(delay_ms, @base_browser.schedule_timeout)
-}
-
-///|
-/// A timer-capability constructor keeps the production scheduler identical to
-/// `RunOnceScheduler` while making its cancel/reschedule contract observable
-/// without sleeping in white-box tests.
-fn RunOnceScheduler::new_with_timer(
-  delay_ms : Int,
-  schedule_timeout : (() -> Unit, Int) -> @base_common.Disposable,
-) -> RunOnceScheduler {
-  { delay_ms, handle: None, schedule_timeout }
-}
-
-///|
-fn RunOnceScheduler::is_scheduled(self : RunOnceScheduler) -> Bool {
-  self.handle is Some(_)
-}
-
-///|
-fn RunOnceScheduler::schedule(
-  self : RunOnceScheduler,
-  callback : () -> Unit,
-) -> Unit {
-  // Source `RunOnceScheduler.schedule` always cancels the previous token and
-  // starts a fresh delay window.
-  self.cancel()
-  self.handle = Some(
-    (self.schedule_timeout)(
-      () => {
-        self.handle = None
-        callback()
-      },
-      self.delay_ms,
-    ),
-  )
-}
-
-///|
-fn RunOnceScheduler::cancel(self : RunOnceScheduler) -> Unit {
-  match self.handle {
-    Some(handle) => {
-      handle.dispose()
-      self.handle = None
-    }
-    None => ()
-  }
-}
-
-///|
-fn RunOnceScheduler::dispose(self : RunOnceScheduler) -> Unit {
-  self.cancel()
-}
-
-///|
 /// The public owner type retains only its caller-proven methods; its lifecycle
 /// and retained-render state stay private to `browser/view`.
 struct ViewLines {
@@ -167,7 +104,7 @@ struct ViewLines {
   mut view_line_to_model_line : (Int) -> Int
   mut model_line_text_direction : (Int) -> @view_layout.TextDirection
   line_factory : () -> ViewLine
-  async_update_line_widths : RunOnceScheduler
+  async_update_line_widths : @base_browser.RunOnceScheduler
   last_rendered_data : LastRenderedData
   mut max_line_width : Double
   mut last_layout : @view_layout.ViewLayout?
@@ -209,7 +146,7 @@ fn ViewLines::ViewLines(
     view_line_to_model_line: line_number => line_number,
     model_line_text_direction: _line_number => LTR,
     line_factory,
-    async_update_line_widths: RunOnceScheduler(200),
+    async_update_line_widths: @base_browser.RunOnceScheduler(200),
     last_rendered_data: LastRenderedData(),
     max_line_width: 0.0,
     last_layout: None,

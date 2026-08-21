@@ -37,3 +37,17 @@
   color: var(--vscode-foreground);
   font-size: 14px;
 }
+
+/* Generic CodeEditorWidget-owned overview ruler. It sits beside, rather than
+   replacing or delegating to, the ordinary vertical scrollbar. */
+.moonbit-viewer .moonbit-code-overview-ruler {
+  position: absolute;
+  z-index: 10;
+  top: 0;
+  right: 14px;
+  width: 12px;
+  height: calc(100% - 12px);
+  contain: strict;
+  cursor: pointer;
+  touch-action: none;
+}

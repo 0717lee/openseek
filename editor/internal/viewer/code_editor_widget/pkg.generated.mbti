@@ -1,0 +1,364 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitlang/editor/internal/viewer/code_editor_widget"
+
+import {
+  "moonbit-community/rabbita/dom",
+  "moonbitlang/core/debug",
+  "moonbitlang/editor/base/common",
+  "moonbitlang/editor/language",
+  "moonbitlang/editor/platform/log",
+  "moonbitlang/editor/viewer/browser",
+  "moonbitlang/editor/viewer/common/agent_feedback_api",
+  "moonbitlang/editor/viewer/common/config",
+  "moonbitlang/editor/viewer/common/core",
+  "moonbitlang/editor/viewer/common/editor_api",
+  "moonbitlang/editor/viewer/common/languages",
+  "moonbitlang/editor/viewer/common/markers",
+  "moonbitlang/editor/viewer/common/model",
+  "moonbitlang/editor/viewer/common/navigation_api",
+  "moonbitlang/editor/viewer/common/quick_diff_api",
+  "moonbitlang/editor/viewer/common/view_model",
+}
+
+// Values
+pub fn overlay_widget(String, @dom.Element) -> @browser.OverlayWidget
+
+pub fn view_zone(Int, @dom.Element, after_column? : Int, after_column_affinity? : @model.PositionAffinity, show_in_hidden_areas? : Bool, ignore_hidden_area_source? : String, ordinal? : Int, suppress_mouse_down? : Bool, height_in_lines? : Double, height_in_px? : Double, min_width_in_px? : Double, margin_dom_node? : @dom.Element, on_dom_node_top? : (Double) -> Unit raise, on_dom_node_layout? : (Bool, Double) -> Unit raise, on_computed_height? : (Double) -> Unit raise) -> @browser.ViewZone
+
+// Errors
+
+// Types and methods
+pub struct CodeEditorContributionDescriptors {
+  // private fields
+}
+pub fn CodeEditorContributionDescriptors::diff_pane() -> Self
+pub fn CodeEditorContributionDescriptors::peek_preview() -> Self
+pub fn CodeEditorContributionDescriptors::standalone() -> Self
+
+pub(all) struct CodeEditorForeignZoneHeight {
+  after_line_number : Int
+  height_in_px : Double
+} derive(Eq, @debug.Debug)
+pub fn CodeEditorForeignZoneHeight::equal(Self, Self) -> Bool
+pub fn CodeEditorForeignZoneHeight::not_equal(Self, Self) -> Bool
+pub fn CodeEditorForeignZoneHeight::to_repr(Self) -> @debug.Repr
+
+pub struct CodeEditorGeometrySnapshot {
+  model_version : Int
+  line_height : Double
+  model_line_heights : Array[CodeEditorModelLineHeight]
+  foreign_zone_heights : Array[CodeEditorForeignZoneHeight]
+  line_max_columns : Array[Int]
+  scroll_content : CodeEditorScrollContentFacts
+}
+pub fn CodeEditorGeometrySnapshot::foreign_zone_heights(Self) -> Array[CodeEditorForeignZoneHeight]
+pub fn CodeEditorGeometrySnapshot::line_height(Self) -> Double
+pub fn CodeEditorGeometrySnapshot::line_max_columns(Self) -> Array[Int]
+pub fn CodeEditorGeometrySnapshot::model_line_heights(Self) -> Array[CodeEditorModelLineHeight]
+pub fn CodeEditorGeometrySnapshot::model_version(Self) -> Int
+pub fn CodeEditorGeometrySnapshot::scroll_content(Self) -> CodeEditorScrollContentFacts
+
+pub(all) struct CodeEditorModelLineHeight {
+  line_number : Int
+  height_in_px : Double
+} derive(Eq, @debug.Debug)
+pub fn CodeEditorModelLineHeight::equal(Self, Self) -> Bool
+pub fn CodeEditorModelLineHeight::not_equal(Self, Self) -> Bool
+pub fn CodeEditorModelLineHeight::to_repr(Self) -> @debug.Repr
+
+type CodeEditorOptions derive(Eq, @debug.Debug)
+pub fn CodeEditorOptions::CodeEditorOptions(soft_wrap? : Bool, tab_size? : Int, wrapping_indent? : @editor_api.WrappingIndent, render_whitespace? : @editor_api.RenderWhitespace, render_control_characters? : Bool, render_line_highlight? : @editor_api.RenderLineHighlight, render_line_highlight_only_when_focus? : Bool, render_validation_decorations? : @editor_api.RenderValidationDecorations, theme? : String, placeholder? : String, line_decorations_width? : Int, line_numbers_min_chars? : Int, folding? : Bool, show_folding_controls? : @editor_api.ShowFoldingControls, folding_highlight? : Bool, folding_maximum_regions? : Int, unfold_on_click_after_end_of_line? : Bool, smooth_scrolling? : Bool, show_unused? : Bool, show_deprecated? : Bool, font_family? : String, font_weight? : String, font_size? : Double, line_height? : Double, letter_spacing? : Double) -> Self
+pub fn CodeEditorOptions::default() -> Self
+pub fn CodeEditorOptions::equal(Self, Self) -> Bool
+pub fn CodeEditorOptions::line_height(Self) -> Double
+pub fn CodeEditorOptions::not_equal(Self, Self) -> Bool
+pub fn CodeEditorOptions::soft_wrap(Self) -> Bool
+pub fn CodeEditorOptions::with_font_family(Self, String) -> Self
+pub fn CodeEditorOptions::with_font_size(Self, Double) -> Self
+pub fn CodeEditorOptions::with_line_decorations_width(Self, Int) -> Self
+pub fn CodeEditorOptions::with_line_height(Self, Double) -> Self
+pub fn CodeEditorOptions::with_line_numbers_min_chars(Self, Int) -> Self
+pub fn CodeEditorOptions::with_placeholder(Self, String) -> Self
+pub fn CodeEditorOptions::with_render_control_characters(Self, Bool) -> Self
+pub fn CodeEditorOptions::with_render_line_highlight(Self, @editor_api.RenderLineHighlight) -> Self
+pub fn CodeEditorOptions::with_render_line_highlight_only_when_focus(Self, Bool) -> Self
+pub fn CodeEditorOptions::with_render_validation_decorations(Self, @editor_api.RenderValidationDecorations) -> Self
+pub fn CodeEditorOptions::with_render_whitespace(Self, @editor_api.RenderWhitespace) -> Self
+pub fn CodeEditorOptions::with_soft_wrap(Self, Bool) -> Self
+pub fn CodeEditorOptions::with_tab_size(Self, Int) -> Self
+pub fn CodeEditorOptions::with_theme(Self, String) -> Self
+
+pub struct CodeEditorOverviewRuler {
+  editor : CodeEditorWidget
+  root : @dom.Element
+  minimum_marker_height : Double
+  on_select : ((Int) -> Unit)?
+  listeners : Array[@common.Disposable]
+  mut resize_observer : @common.Disposable?
+  mut entries : Array[CodeEditorOverviewRulerEntry]
+  mut bands : Array[CodeEditorOverviewRulerBand]
+  mut generation : Int
+  mut disposed : Bool
+}
+pub fn CodeEditorOverviewRuler::clear(Self, Int) -> Unit
+pub fn CodeEditorOverviewRuler::dispose(Self) -> Unit
+pub fn CodeEditorOverviewRuler::entry_count(Self) -> Int
+pub fn CodeEditorOverviewRuler::generation(Self) -> Int
+pub fn CodeEditorOverviewRuler::get_dom_node(Self) -> @dom.Element
+pub fn CodeEditorOverviewRuler::is_disposed(Self) -> Bool
+pub fn CodeEditorOverviewRuler::set_entries(Self, Int, Array[CodeEditorOverviewRulerEntry]) -> Unit
+
+type CodeEditorOverviewRulerBand derive(Eq, @debug.Debug)
+
+pub(all) struct CodeEditorOverviewRulerEntry {
+  id : Int
+  range : @common.LineRange
+  color : String
+  lane : CodeEditorOverviewRulerLane
+} derive(Eq, @debug.Debug)
+
+pub(all) enum CodeEditorOverviewRulerLane {
+  Left
+  Center
+  Right
+  Full
+} derive(Eq, @debug.Debug)
+
+pub(all) struct CodeEditorRenderLinesDecoration {
+  range : @common.Range
+  class_name : String
+} derive(Eq, @debug.Debug)
+pub fn CodeEditorRenderLinesDecoration::equal(Self, Self) -> Bool
+pub fn CodeEditorRenderLinesDecoration::not_equal(Self, Self) -> Bool
+pub fn CodeEditorRenderLinesDecoration::to_repr(Self) -> @debug.Repr
+
+pub struct CodeEditorRenderedLines {
+  dom_node : @dom.Element
+  margin_dom_node : @dom.Element
+  height_in_px : Double
+  min_width_in_px : Double
+  view_line_count : Int
+  model_line_view_counts : Array[Int]
+}
+pub fn CodeEditorRenderedLines::dom_node(Self) -> @dom.Element
+pub fn CodeEditorRenderedLines::height_in_px(Self) -> Double
+pub fn CodeEditorRenderedLines::margin_dom_node(Self) -> @dom.Element
+pub fn CodeEditorRenderedLines::min_width_in_px(Self) -> Double
+pub fn CodeEditorRenderedLines::model_line_view_counts(Self) -> Array[Int]
+pub fn CodeEditorRenderedLines::view_line_count(Self) -> Int
+
+pub(all) struct CodeEditorScrollContentFacts {
+  scroll_top : Double
+  scroll_left : Double
+  viewport_width : Double
+  viewport_height : Double
+  content_width : Double
+  content_height : Double
+  scroll_width : Double
+  scroll_height : Double
+} derive(Eq, @debug.Debug)
+pub fn CodeEditorScrollContentFacts::equal(Self, Self) -> Bool
+pub fn CodeEditorScrollContentFacts::not_equal(Self, Self) -> Bool
+pub fn CodeEditorScrollContentFacts::to_repr(Self) -> @debug.Repr
+
+type CodeEditorServices
+pub fn CodeEditorServices::CodeEditorServices(languages? : @languages.LanguageHandle, markers? : @markers.MarkerDecorationsSource, agent_feedback? : @agent_feedback_api.AgentFeedbackHandle, location_opener? : @navigation_api.LocationOpenerHandle, text_model_resolver? : @navigation_api.TextModelResolverHandle, quick_diff? : @quick_diff_api.QuickDiffHandle, log_service? : @log.LogHandle) -> Self
+pub fn CodeEditorServices::agent_feedback(Self) -> @agent_feedback_api.AgentFeedbackHandle
+pub fn CodeEditorServices::dispose(Self) -> Unit
+pub fn CodeEditorServices::languages(Self) -> @languages.LanguageHandle
+pub fn CodeEditorServices::location_opener(Self) -> @navigation_api.LocationOpenerHandle?
+pub fn CodeEditorServices::log_service(Self) -> @log.LogHandle
+pub fn CodeEditorServices::marker_decorations(Self) -> @markers.MarkerDecorationsHandle
+pub fn CodeEditorServices::quick_diff(Self) -> @quick_diff_api.QuickDiffHandle
+pub fn CodeEditorServices::text_model_resolver(Self) -> @navigation_api.TextModelResolverHandle?
+
+type CodeEditorViewState derive(@debug.Debug)
+
+type CodeEditorWidget
+pub fn CodeEditorWidget::add_overlay_widget(Self, @browser.OverlayWidget) -> Unit
+pub fn CodeEditorWidget::after_next_render(Self, () -> Unit) -> @common.Disposable
+pub fn CodeEditorWidget::apply_managed_view_zones(Self, Array[String], Array[ManagedCodeEditorViewZoneSpec], Int) -> Array[String]
+pub fn CodeEditorWidget::capture_stable_viewport_state(Self) -> StableCodeEditorViewportState?
+pub fn CodeEditorWidget::change_view_zones(Self, (@browser.ViewZoneChangeAccessor) -> Unit raise) -> Unit
+pub fn CodeEditorWidget::create(@dom.Element, services? : CodeEditorServices, options? : CodeEditorOptions, contributions~ : CodeEditorContributionDescriptors) -> Self
+pub fn CodeEditorWidget::create_decorations_collection(Self, decorations? : Array[@model.ModelDeltaDecoration]) -> EditorDecorationsCollection
+pub fn CodeEditorWidget::create_overview_ruler(Self, minimum_marker_height? : Double, on_select? : (Int) -> Unit) -> CodeEditorOverviewRuler
+pub fn CodeEditorWidget::create_render_lines_context(Self, @model.TextModel, owner_generation? : Int) -> VirtualizedCodeEditorRenderLinesContext?
+pub fn CodeEditorWidget::delta_decorations(Self, Array[String], Array[@model.ModelDeltaDecoration]) -> Array[String]
+pub fn CodeEditorWidget::dispose(Self) -> Unit
+pub fn CodeEditorWidget::focus(Self) -> Unit
+pub fn CodeEditorWidget::fold_top_level(Self) -> Unit
+pub fn CodeEditorWidget::geometry_snapshot(Self, Array[String]) -> CodeEditorGeometrySnapshot?
+pub fn CodeEditorWidget::get_bottom_for_line_number(Self, Int) -> Double
+pub fn CodeEditorWidget::get_container_dom_node(Self) -> @dom.Element
+pub fn CodeEditorWidget::get_content_height(Self) -> Double
+pub fn CodeEditorWidget::get_content_width(Self) -> Double
+pub fn CodeEditorWidget::get_decorations_in_range(Self, @common.Range) -> Array[@model.ModelDecoration]
+pub fn CodeEditorWidget::get_dom_node(Self) -> @dom.Element?
+pub fn CodeEditorWidget::get_editor_type(Self) -> String
+pub fn CodeEditorWidget::get_id(Self) -> String
+pub fn CodeEditorWidget::get_layout_info(Self) -> @config.EditorLayoutInfo
+pub fn CodeEditorWidget::get_line_decorations(Self, Int) -> Array[@model.ModelDecoration]
+pub fn CodeEditorWidget::get_line_height_for_position(Self, @common.Position) -> Double
+pub fn CodeEditorWidget::get_model(Self) -> @model.TextModel?
+pub fn CodeEditorWidget::get_offset_for_column(Self, Int, Int) -> Double
+pub fn CodeEditorWidget::get_options(Self) -> CodeEditorOptions
+pub fn CodeEditorWidget::get_position(Self) -> @common.Position?
+pub fn CodeEditorWidget::get_scroll_height(Self) -> Double
+pub fn CodeEditorWidget::get_scroll_left(Self) -> Double
+pub fn CodeEditorWidget::get_scroll_top(Self) -> Double
+pub fn CodeEditorWidget::get_scroll_width(Self) -> Double
+pub fn CodeEditorWidget::get_scrolled_visible_position(Self, @common.Position) -> @editor_api.ScrolledVisiblePosition?
+pub fn CodeEditorWidget::get_selection(Self) -> @core.Selection?
+pub fn CodeEditorWidget::get_selections(Self) -> Array[@core.Selection]?
+pub fn CodeEditorWidget::get_top_for_line_number(Self, Int, include_view_zones? : Bool) -> Double
+pub fn CodeEditorWidget::get_top_for_position(Self, Int, Int) -> Double
+pub fn CodeEditorWidget::get_value(Self) -> String
+pub fn CodeEditorWidget::get_visible_column_from_position(Self, @common.Position) -> Int
+pub fn CodeEditorWidget::get_visible_ranges(Self) -> Array[@common.Range]
+pub fn CodeEditorWidget::get_width_of_line(Self, Int) -> Double
+pub fn CodeEditorWidget::handle_initialized(Self) -> Unit
+pub fn CodeEditorWidget::has_text_focus(Self) -> Bool
+pub fn CodeEditorWidget::has_widget_focus(Self) -> Bool
+pub fn CodeEditorWidget::is_disposed(Self) -> Bool
+pub fn CodeEditorWidget::layout(Self) -> Unit
+pub fn CodeEditorWidget::on_context_menu(Self, (@browser.EditorMouseEvent) -> Unit) -> @common.Disposable
+pub fn CodeEditorWidget::on_did_change_cursor_position(Self, (@editor_api.CursorPositionChangedEvent) -> Unit) -> @common.Disposable
+pub fn CodeEditorWidget::on_did_change_cursor_selection(Self, (@editor_api.CursorSelectionChangedEvent) -> Unit) -> @common.Disposable
+pub fn CodeEditorWidget::on_did_change_hidden_areas(Self, () -> Unit) -> @common.Disposable
+pub fn CodeEditorWidget::on_did_change_model(Self, (@editor_api.ModelChangedEvent) -> Unit) -> @common.Disposable
+pub fn CodeEditorWidget::on_did_change_model_content(Self, (@model.ModelContentChangedEvent) -> Unit) -> @common.Disposable
+pub fn CodeEditorWidget::on_did_change_view_zones(Self, () -> Unit) -> @common.Disposable
+pub fn CodeEditorWidget::on_did_dispose(Self, () -> Unit) -> @common.Disposable
+pub fn CodeEditorWidget::on_did_scroll_change(Self, (@editor_api.ScrollEvent) -> Unit) -> @common.Disposable
+pub fn CodeEditorWidget::on_mouse_down(Self, (@browser.EditorMouseEvent) -> Unit) -> @common.Disposable
+pub fn CodeEditorWidget::on_mouse_leave(Self, (@browser.PartialEditorMouseEvent) -> Unit) -> @common.Disposable
+pub fn CodeEditorWidget::on_mouse_move(Self, (@browser.EditorMouseEvent) -> Unit) -> @common.Disposable
+pub fn CodeEditorWidget::on_mouse_up(Self, (@browser.EditorMouseEvent) -> Unit) -> @common.Disposable
+pub fn CodeEditorWidget::remove_decorations(Self, Array[String]) -> Unit
+pub fn CodeEditorWidget::remove_overlay_widget(Self, @browser.OverlayWidget) -> Unit
+pub fn CodeEditorWidget::render_lines(Self, @model.TextModel, @common.LineRange, decorations? : Array[CodeEditorRenderLinesDecoration], line_class_name? : String, margin_line_class_name? : String) -> CodeEditorRenderedLines?
+pub fn CodeEditorWidget::restore_stable_viewport_state(Self, StableCodeEditorViewportState) -> Bool
+pub fn CodeEditorWidget::restore_view_state(Self, CodeEditorViewState?) -> Unit
+pub fn CodeEditorWidget::reveal_line(Self, Int) -> Unit
+pub fn CodeEditorWidget::reveal_line_in_center(Self, Int) -> Unit
+pub fn CodeEditorWidget::reveal_line_in_center_if_outside_viewport(Self, Int) -> Unit
+pub fn CodeEditorWidget::reveal_line_near_top(Self, Int) -> Unit
+pub fn CodeEditorWidget::reveal_lines(Self, Int, Int) -> Unit
+pub fn CodeEditorWidget::reveal_lines_in_center(Self, Int, Int) -> Unit
+pub fn CodeEditorWidget::reveal_lines_in_center_if_outside_viewport(Self, Int, Int) -> Unit
+pub fn CodeEditorWidget::reveal_lines_near_top(Self, Int, Int) -> Unit
+pub fn CodeEditorWidget::reveal_managed_view_zone_top(Self, String) -> Bool
+pub fn CodeEditorWidget::reveal_position(Self, @common.Position) -> Unit
+pub fn CodeEditorWidget::reveal_position_in_center(Self, @common.Position) -> Unit
+pub fn CodeEditorWidget::reveal_position_in_center_if_outside_viewport(Self, @common.Position) -> Unit
+pub fn CodeEditorWidget::reveal_position_near_top(Self, @common.Position) -> Unit
+pub fn CodeEditorWidget::reveal_range(Self, @common.Range) -> Unit
+pub fn CodeEditorWidget::reveal_range_at_top(Self, @common.Range) -> Unit
+pub fn CodeEditorWidget::reveal_range_in_center(Self, @common.Range) -> Unit
+pub fn CodeEditorWidget::reveal_range_in_center_if_outside_viewport(Self, @common.Range) -> Unit
+pub fn CodeEditorWidget::reveal_range_near_top(Self, @common.Range) -> Unit
+pub fn CodeEditorWidget::reveal_range_near_top_if_outside_viewport(Self, @common.Range) -> Unit
+pub fn CodeEditorWidget::save_view_state(Self) -> CodeEditorViewState?
+pub fn CodeEditorWidget::set_model(Self, @model.TextModel?) -> Unit
+pub fn CodeEditorWidget::set_position(Self, @common.Position, source? : String) -> Unit
+pub fn CodeEditorWidget::set_scroll_left(Self, Double) -> Unit
+pub fn CodeEditorWidget::set_scroll_position(Self, scroll_top? : Double, scroll_left? : Double) -> Unit
+pub fn CodeEditorWidget::set_scroll_top(Self, Double) -> Unit
+pub fn CodeEditorWidget::set_selection(Self, @core.Selection, source? : String) -> Unit
+pub fn CodeEditorWidget::set_selections(Self, Array[@core.Selection], source? : String, reason? : @editor_api.CursorChangeReason) -> Unit
+pub fn CodeEditorWidget::set_value(Self, String) -> Unit
+pub fn CodeEditorWidget::show_references(Self, @common.Position, Array[@language.Location]) -> Unit
+pub fn CodeEditorWidget::update_options(Self, CodeEditorOptions) -> Unit
+
+type EditorDecorationsCollection
+pub fn EditorDecorationsCollection::append(Self, Array[@model.ModelDeltaDecoration]) -> Array[String]
+pub fn EditorDecorationsCollection::clear(Self) -> Unit
+pub fn EditorDecorationsCollection::get_range(Self, Int) -> @common.Range?
+pub fn EditorDecorationsCollection::get_ranges(Self) -> Array[@common.Range]
+pub fn EditorDecorationsCollection::length(Self) -> Int
+pub fn EditorDecorationsCollection::set(Self, Array[@model.ModelDeltaDecoration]) -> Array[String]
+
+pub(all) struct ManagedCodeEditorViewZoneSpec {
+  after_line_number : Int
+  height_in_px : Double
+  dom_node : @dom.Element
+  show_in_hidden_areas : Bool
+  margin_dom_node : @dom.Element?
+  min_width_in_px : Double?
+  ordinal : Int?
+  suppress_mouse_down : Bool
+  on_dom_node_top : ((Double) -> Unit raise)?
+  on_dom_node_layout : ((Bool, Double) -> Unit raise)?
+  on_zone_registered : ((String, @browser.ViewZone) -> Unit)?
+}
+pub fn ManagedCodeEditorViewZoneSpec::ManagedCodeEditorViewZoneSpec(Int, Double, @dom.Element, show_in_hidden_areas? : Bool, margin_dom_node? : @dom.Element, min_width_in_px? : Double, ordinal? : Int, suppress_mouse_down? : Bool, on_dom_node_top? : (Double) -> Unit raise, on_dom_node_layout? : (Bool, Double) -> Unit raise, on_zone_registered? : (String, @browser.ViewZone) -> Unit) -> Self
+
+pub struct StableCodeEditorViewportState {
+  model : @model.TextModel
+  anchor_line_number : Int
+  anchor_viewport_offset : Double
+  scroll_left : Double
+}
+pub fn StableCodeEditorViewportState::anchor_line_number(Self) -> Int
+pub fn StableCodeEditorViewportState::anchor_viewport_offset(Self) -> Double
+pub fn StableCodeEditorViewportState::scroll_left(Self) -> Double
+
+pub struct VirtualizedCodeEditorRenderLinesContext {
+  editor : CodeEditorWidget
+  source_model : @model.TextModel
+  source_version : Int
+  detached_view_model : @view_model.ViewModel
+  configuration_options : CodeEditorOptions
+  configuration_font_info : @config.FontInfo
+  configuration_width : Double
+  configuration_content_width : Double
+  configuration_height : Double
+  configuration_soft_wrap_column : Int
+  owner_generation : Int
+  handles : Array[VirtualizedCodeEditorRenderedLines]
+  mut created_handle_count : Int
+  mut live_handle_count : Int
+  mut registered_zone_count : Int
+  mut disposed : Bool
+}
+pub fn VirtualizedCodeEditorRenderLinesContext::created_handle_count(Self) -> Int
+pub fn VirtualizedCodeEditorRenderLinesContext::dispose(Self) -> Unit
+pub fn VirtualizedCodeEditorRenderLinesContext::is_disposed(Self) -> Bool
+pub fn VirtualizedCodeEditorRenderLinesContext::live_handle_count(Self) -> Int
+pub fn VirtualizedCodeEditorRenderLinesContext::owner_generation(Self) -> Int
+pub fn VirtualizedCodeEditorRenderLinesContext::registered_zone_count(Self) -> Int
+pub fn VirtualizedCodeEditorRenderLinesContext::render_lines(Self, @common.LineRange, decorations? : Array[CodeEditorRenderLinesDecoration], line_class_name? : String, margin_line_class_name? : String) -> VirtualizedCodeEditorRenderedLines?
+
+pub struct VirtualizedCodeEditorRenderedLines {
+  context : VirtualizedCodeEditorRenderLinesContext
+  decorations : Array[CodeEditorRenderLinesDecoration]
+  line_class_name : String
+  margin_line_class_name : String
+  dom_node : @dom.Element
+  margin_dom_node : @dom.Element
+  range_view_start : Int
+  range_view_end_exclusive : Int
+  line_height : Double
+  height_in_px : Double
+  mut discovered_min_width_in_px : Double
+  mut zone_id : String?
+  mut zone_delegate : @browser.ViewZone?
+  mut rendered_start_offset : Int
+  mut rendered_end_offset_exclusive : Int
+  mut rendered_visible : Bool
+  mut disposed : Bool
+}
+pub fn VirtualizedCodeEditorRenderedLines::dispose(Self) -> Unit
+pub fn VirtualizedCodeEditorRenderedLines::dom_node(Self) -> @dom.Element
+pub fn VirtualizedCodeEditorRenderedLines::height_in_px(Self) -> Double
+pub fn VirtualizedCodeEditorRenderedLines::is_disposed(Self) -> Bool
+pub fn VirtualizedCodeEditorRenderedLines::managed_view_zone_spec(Self, Int, ordinal? : Int, suppress_mouse_down? : Bool) -> ManagedCodeEditorViewZoneSpec
+pub fn VirtualizedCodeEditorRenderedLines::margin_dom_node(Self) -> @dom.Element
+pub fn VirtualizedCodeEditorRenderedLines::min_width_in_px(Self) -> Double
+pub fn VirtualizedCodeEditorRenderedLines::reveal_zone_top(Self) -> Bool
+pub fn VirtualizedCodeEditorRenderedLines::view_line_count(Self) -> Int
+
+// Type aliases
+
+// Traits

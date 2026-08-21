@@ -16,6 +16,12 @@ priv struct InnerDiffSequence {
 }
 
 ///|
+priv struct InnerDiffLine {
+  values : Array[Int]
+  boundaries : Array[@base_common.Position]
+}
+
+///|
 fn line_range_code_units(
   lines : Array[String],
   range : @base_common.LineRange,
@@ -46,25 +52,80 @@ fn empty_line_range_anchor(
 }
 
 ///|
+fn flatten_inner_diff_line(
+  line : String,
+  line_number : Int,
+  ignore_trim_whitespace : Bool,
+) -> InnerDiffLine {
+  let values : Array[Int] = []
+  let whitespace : Array[Bool] = []
+  let starts : Array[Int] = []
+  let ends : Array[Int] = []
+  let mut column = 1
+  for character in line {
+    values.push(character.to_int())
+    whitespace.push(character.is_whitespace())
+    starts.push(column)
+    column += character.utf16_len()
+    ends.push(column)
+  }
+  let mut start = 0
+  let mut end = values.length()
+  if ignore_trim_whitespace {
+    while start < end && whitespace[start] {
+      start += 1
+    }
+    while end > start && whitespace[end - 1] {
+      end -= 1
+    }
+  }
+  let normalized : Array[Int] = []
+  let anchor_column = if start < end { starts[start] } else { 1 }
+  let boundaries : Array[@base_common.Position] = [
+    Position(line_number, anchor_column),
+  ]
+  for index in start..<end {
+    normalized.push(values[index])
+    boundaries.push(Position(line_number, ends[index]))
+  }
+  { values: normalized, boundaries }
+}
+
+///|
 fn flatten_inner_diff_sequence(
   lines : Array[String],
   range : @base_common.LineRange,
+  ignore_trim_whitespace : Bool,
 ) -> InnerDiffSequence {
+  if range.is_empty() {
+    return {
+      values: [],
+      boundaries: [empty_line_range_anchor(lines, range.start_line_number)],
+    }
+  }
+  let line_sequences : Array[InnerDiffLine] = []
+  for line_number in range.start_line_number..<range.end_line_number_exclusive {
+    line_sequences.push(
+      flatten_inner_diff_line(
+        lines[line_number - 1],
+        line_number,
+        ignore_trim_whitespace,
+      ),
+    )
+  }
   let values : Array[Int] = []
   let boundaries : Array[@base_common.Position] = [
-    empty_line_range_anchor(lines, range.start_line_number),
+    line_sequences[0].boundaries[0],
   ]
-  for line_number in range.start_line_number..<range.end_line_number_exclusive {
-    let line = lines[line_number - 1]
-    let mut column = 1
-    for character in line {
-      values.push(character.to_int())
-      column += character.utf16_len()
-      boundaries.push(Position(line_number, column))
+  for line_index in 0..<line_sequences.length() {
+    let line = line_sequences[line_index]
+    for value_index in 0..<line.values.length() {
+      values.push(line.values[value_index])
+      boundaries.push(line.boundaries[value_index + 1])
     }
-    if line_number + 1 < range.end_line_number_exclusive {
+    if line_index + 1 < line_sequences.length() {
       values.push('\n'.to_int())
-      boundaries.push(Position(line_number + 1, 1))
+      boundaries.push(line_sequences[line_index + 1].boundaries[0])
     }
   }
   { values, boundaries }
@@ -90,6 +151,7 @@ fn compute_inner_changes(
   modified_lines : Array[String],
   original_range : @base_common.LineRange,
   modified_range : @base_common.LineRange,
+  ignore_trim_whitespace : Bool,
 ) -> Array[RangeMapping]? {
   let original_length = line_range_code_units(original_lines, original_range)
   let modified_length = line_range_code_units(modified_lines, modified_range)
@@ -98,8 +160,12 @@ fn compute_inner_changes(
     original_length > MaxInnerDiffCodeUnits - modified_length {
     return None
   }
-  let original = flatten_inner_diff_sequence(original_lines, original_range)
-  let modified = flatten_inner_diff_sequence(modified_lines, modified_range)
+  let original = flatten_inner_diff_sequence(
+    original_lines, original_range, ignore_trim_whitespace,
+  )
+  let modified = flatten_inner_diff_sequence(
+    modified_lines, modified_range, ignore_trim_whitespace,
+  )
   let edits = @core_diff.Diff::Diff(
     old=original.values[:],
     new=modified.values[:],

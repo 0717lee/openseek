@@ -729,7 +729,7 @@ test "ViewZones preserves raw height callbacks through retained ToInt32" {
 }
 
 ///|
-test "ViewZones layoutZone rereads geometry but retains ordinal width and nodes" {
+test "ViewZones layoutZone rereads geometry and width but retains ordinal and nodes" {
   install_view_lifecycle_test_browser()
   defer restore_view_lifecycle_test_browser()
   let fixture = view_zones_branch_fixture(
@@ -798,7 +798,7 @@ test "ViewZones layoutZone rereads geometry but retains ordinal width and nodes"
   assert_eq(updated.after_line_number, 3)
   assert_eq(updated.height, 40)
   assert_eq(updated.ordinal, 17)
-  assert_eq(updated.min_width, 42)
+  assert_eq(updated.min_width, 999)
   assert_eq(original_callback_count.val, 1)
   assert_eq(replacement_callback_count.val, 1)
   assert_eq(replacement_callback_height.val, 40.0)

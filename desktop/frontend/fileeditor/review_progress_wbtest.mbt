@@ -9,7 +9,7 @@ fn review_progress_state() -> (State, Ctx, ChangedFile) raise {
       generation: 1,
       working_generation: 1,
       baseline: ReviewContent("old source"),
-      view_mode: ReviewUnifiedDiff,
+      view_mode: ReviewDiff,
       selected,
     }),
   }

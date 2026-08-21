@@ -272,7 +272,7 @@ fn markdown_document_replacement_source() -> String {
     #|```
     #|
     #|The replacement stays long enough to retain an observable scroll state
-    #|while the Viewer swaps between Markdown and code presentations.
+    #|while the host swaps between MarkdownViewer and Viewer surfaces.
   )
 }
 
@@ -354,42 +354,73 @@ fn run_markdown_document_test() -> Unit {
   set_markdown_document_diagnostic(
     markers, markdown_model, "markdown_answer", "initial markdown diagnostic",
   )
-  let viewer = @viewer.Viewer::create(
+  let viewer = @viewer.MarkdownViewer::create(
     host,
     services~,
-    options=ViewerOptions(theme="dark"),
+    options=MarkdownViewerOptions(theme="dark"),
   )
-  let secondary_viewer = @viewer.Viewer::create(
+  let secondary_viewer = @viewer.MarkdownViewer::create(
     secondary_host,
     services~,
-    options=ViewerOptions(theme="dark"),
+    options=MarkdownViewerOptions(theme="dark"),
   )
-  viewer.set_model(Some(markdown_model))
-  secondary_viewer.set_model(Some(markdown_model))
+  viewer.set_model(Some(MarkdownViewerModel(markdown_model, MoonBitMarkdown)))
+  |> ignore
+  secondary_viewer.set_model(
+    Some(MarkdownViewerModel(markdown_model, MoonBitMarkdown)),
+  )
+  |> ignore
   viewer.handle_initialized()
   secondary_viewer.handle_initialized()
+  let code_viewer : Ref[@viewer.Viewer?] = Ref(None)
   install_markdown_document_controls(
     () => markdown_model.get_value(),
-    () => viewer.set_value(markdown_document_diagram_source()),
+    () => markdown_model.set_value(markdown_document_diagram_source()),
     () => {
-      viewer.set_value(markdown_document_replacement_source())
+      markdown_model.set_value(markdown_document_replacement_source())
       set_markdown_document_diagnostic(
         markers, markdown_model, "replacement_answer", "replacement markdown diagnostic",
       )
     },
     theme => viewer.update_options(viewer.get_options().with_theme(theme)),
-    () => viewer.set_model(Some(code_model)),
-    () => viewer.set_model(Some(markdown_model)),
+    () => {
+      viewer.set_model(None) |> ignore
+      let code = @viewer.Viewer::create(
+        host,
+        services~,
+        options=ViewerOptions(theme="dark"),
+      )
+      code.set_model(Some(code_model))
+      code.handle_initialized()
+      code_viewer.val = Some(code)
+    },
+    () => {
+      match code_viewer.val {
+        Some(code) => {
+          code.dispose()
+          code_viewer.val = None
+        }
+        None => ()
+      }
+      viewer.set_model(
+        Some(MarkdownViewerModel(markdown_model, MoonBitMarkdown)),
+      )
+      |> ignore
+    },
     () => {
       set_markdown_document_diagnostic(
         markers, same_uri_model, "same_uri_answer", "same URI markdown diagnostic",
       )
-      viewer.set_model(Some(same_uri_model))
+      viewer.set_model(
+        Some(MarkdownViewerModel(same_uri_model, MoonBitMarkdown)),
+      )
+      |> ignore
     },
     () => hover_harness.calls_json(),
     (call_id, outcome) => hover_harness.release(call_id, outcome),
     message => {
-      if viewer.get_model() is Some(model) {
+      if viewer.get_model() is Some(viewer_model) {
+        let model = viewer_model.model
         let symbol = if model.get_value().contains("replacement_answer") {
           "replacement_answer"
         } else if model.get_value().contains("same_uri_answer") {
@@ -402,14 +433,22 @@ fn run_markdown_document_test() -> Unit {
     },
     () => set_markdown_document_marker_policy_fixture(markers, markdown_model),
     show_unused => {
-      viewer.update_options(ViewerOptions(theme="dark", show_unused~))
+      viewer.update_options(MarkdownViewerOptions(theme="dark", show_unused~))
     },
-    top => viewer.set_scroll_top(top),
+    top => set_markdown_document_scroll_top(top),
     width => {
       host.set_attribute("style", "height:220px;width:\{width}px;")
       viewer.layout()
+      match code_viewer.val {
+        Some(code) => code.layout()
+        None => ()
+      }
     },
     () => {
+      match code_viewer.val {
+        Some(code) => code.dispose()
+        None => ()
+      }
       viewer.dispose()
       secondary_viewer.dispose()
       services.dispose()
@@ -423,6 +462,15 @@ fn run_markdown_document_test() -> Unit {
   )
   poll_markdown_document_ready(ctx, markdown_model, 100)
 }
+
+///|
+extern "js" fn set_markdown_document_scroll_top(top : Double) -> Unit =
+  #| (top) => {
+  #|   const viewport = document.querySelector(
+  #|     '.markdown-document-host > .moonbit-viewer-markdown-document > .moonbit-viewer-markdown-document-viewport',
+  #|   );
+  #|   if (viewport) viewport.scrollTop = top;
+  #| }
 
 ///|
 fn poll_markdown_document_ready(

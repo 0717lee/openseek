@@ -1,47 +1,38 @@
 # viewer/common/diff
 
-Line-diff contracts and the default computer used by quick diff.
-
-This DOM-free package turns two arrays of lines into detailed half-open line
-range mappings. Quick diff consumes those mappings to place gutter
-decorations; the algorithm does not know about models, decorations, or the DOM.
+Renderer-neutral document-diff contracts and the built-in synchronous Core
+Myers provider. The package has no DOM or editor-widget dependency.
 
 ```mermaid
 flowchart LR
-  O["original lines"] --> C["DefaultLinesDiffComputer"]
-  M["modified lines"] --> C
-  C --> R["LinesDiff.changes"]
-  R --> D["DetailedLineRangeMapping<br>original ↔ modified"]
+  O["original TextSnapshot"] --> P["DocumentDiffProvider"]
+  M["modified TextSnapshot"] --> P
+  P --> C["DocumentDiff.changes<br/>render and navigate"]
+  P --> A["additional_alignments<br/>geometry only"]
 ```
 
 ## Computing a diff
 
+The built-in provider accepts immutable, LF-normalized snapshots. A line
+change may also contain one-based UTF-16 character mappings.
+
 ```mbt check
 ///|
-let line_options : @diff.LinesDiffComputerOptions = {
+let strict_options : @diff.DocumentDiffOptions = {
   ignore_trim_whitespace: false,
-  max_computation_time_ms: 1000,
-  compute_moves: false,
 }
 
 ///|
-test "an edited line maps one original range onto one modified range" {
-  let result = @diff.get_default().compute_diff(
-    ["fn main {", "  println(1)", "}"],
-    ["fn main {", "  println(2)", "}"],
-    line_options,
+test "an edited line maps original and modified ranges" {
+  let result = @diff.get_core_document_diff_provider().compute_diff(
+    @model.TextSnapshot("fn main {\n  println(1)\n}"),
+    @model.TextSnapshot("fn main {\n  println(2)\n}"),
+    strict_options,
   )
-  debug_inspect(
-    result.changes.map(change => (change.original, change.modified)),
-    content=(
-      #|[
-      #|  (
-      #|    { start_line_number: 2, end_line_number_exclusive: 3 },
-      #|    { start_line_number: 2, end_line_number_exclusive: 3 },
-      #|  ),
-      #|]
-    ),
-  )
+  assert_eq(result.changes.length(), 1)
+  assert_eq(result.changes[0].original, @base_common.LineRange(2, 3))
+  assert_eq(result.changes[0].modified, @base_common.LineRange(2, 3))
+  assert_true(result.additional_alignments.is_empty())
 }
 ```
 
@@ -50,72 +41,43 @@ range. Identical inputs produce no changes.
 
 ```mbt check
 ///|
-test "insertions and identical inputs keep half-open range semantics" {
-  let inserted = @diff.get_default().compute_diff(
-    ["a", "c"],
-    ["a", "b", "c"],
-    line_options,
+test "insertions keep half-open line-range semantics" {
+  let inserted = @diff.get_core_document_diff_provider().compute_diff(
+    @model.TextSnapshot("a\nc"),
+    @model.TextSnapshot("a\nb\nc"),
+    strict_options,
   )
-  let identical = @diff.get_default().compute_diff(
-    ["a", "b"],
-    ["a", "b"],
-    line_options,
-  )
-  debug_inspect(
-    (
-      inserted.changes.map(change => {
-        (change.original.is_empty(), change.original, change.modified)
-      }),
-      identical.changes.length(),
-    ),
-    content=(
-      #|(
-      #|  [
-      #|    (
-      #|      true,
-      #|      { start_line_number: 2, end_line_number_exclusive: 2 },
-      #|      { start_line_number: 2, end_line_number_exclusive: 3 },
-      #|    ),
-      #|  ],
-      #|  0,
-      #|)
-    ),
-  )
+  assert_eq(inserted.changes.length(), 1)
+  assert_true(inserted.changes[0].original.is_empty())
+  assert_eq(inserted.changes[0].modified, @base_common.LineRange(2, 3))
 }
 ```
 
-## Whitespace policy
+## Whitespace and provider policy
 
-`ignore_trim_whitespace` decides whether re-indentation is a change.
+`ignore_trim_whitespace` ignores only whitespace at each line's edges. The
+contract deliberately has no fake millisecond timeout, timeout result, or move
+option: providers expose only semantics they implement.
 
 ```mbt check
 ///|
-test "ignore_trim_whitespace can ignore re-indentation" {
-  let original = ["fn main {", "println(1)", "}"]
-  let modified = ["fn main {", "  println(1)", "}"]
-  let strict = @diff.get_default().compute_diff(
-    original, modified, line_options,
-  )
-  let lenient = @diff.get_default().compute_diff(original, modified, {
+test "trim whitespace can ignore re-indentation" {
+  let provider = @diff.CoreDocumentDiffProvider()
+  let original = @model.TextSnapshot("fn main {\nprintln(1)\n}")
+  let modified = @model.TextSnapshot("fn main {\n  println(1)\n}")
+  let strict = provider.compute_diff(original, modified, strict_options)
+  let lenient = provider.compute_diff(original, modified, {
     ignore_trim_whitespace: true,
-    max_computation_time_ms: 1000,
-    compute_moves: false,
   })
-  debug_inspect(
-    (strict.changes.length(), lenient.changes.length()),
-    content=(
-      #|(1, 0)
-    ),
-  )
+  assert_eq(strict.changes.length(), 1)
+  assert_true(lenient.changes.is_empty())
 }
 ```
 
-## Boundaries and checks
-
-The mapping shapes follow `vs/editor/common/diff/`. Computation delegates to
-`moonbitlang/core/diff`; `max_computation_time_ms` preserves the bounded work
-contract callers depend on. Internal mapping helpers and constructors are not
-part of the package interface.
+External providers implement `DocumentDiffProvider` and may fill
+`additional_alignments` for ignored source rows. `LineRangeMapping`,
+`DetailedLineRangeMapping`, and `RangeMapping` are public constructible values,
+so no viewer-layer adapter is required.
 
 ```sh
 moon test --target js viewer/common/diff

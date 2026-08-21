@@ -121,6 +121,7 @@ fn markdown_definition_line() -> Int {
 fn definition_state_json(
   viewer : @viewer.Viewer,
   provider_calls : Ref[Int],
+  markdown_provider_calls : Ref[Int],
   references_provider_calls : Ref[Int],
 ) -> String {
   let (line, column) = match viewer.get_position() {
@@ -148,6 +149,7 @@ fn definition_state_json(
       "activeColumn": active_column.to_json(),
     }),
     "providerCalls": provider_calls.val.to_json(),
+    "markdownProviderCalls": markdown_provider_calls.val.to_json(),
     "referencesProviderCalls": references_provider_calls.val.to_json(),
     "scrollTop": viewer.get_scroll_top().to_json(),
     "scrollHeight": viewer.get_scroll_height().to_json(),
@@ -269,16 +271,15 @@ fn run_definition_browser_test() -> Unit {
   viewer.set_model(Some(model))
   viewer.set_position(Position(1, 1))
   viewer.handle_initialized()
-  let markdown_viewer = @viewer.Viewer::create(
+  let markdown_viewer = @viewer.MarkdownViewer::create(
     markdown_host,
     services~,
-    options=ViewerOptions(
-      soft_wrap=false,
-      smooth_scrolling=false,
-      folding=false,
-    ),
+    options=MarkdownViewerOptions(theme="dark"),
   )
-  markdown_viewer.set_model(Some(markdown_model))
+  markdown_viewer.set_model(
+    Some(MarkdownViewerModel(markdown_model, MoonBitMarkdown)),
+  )
+  |> ignore
   markdown_viewer.handle_initialized()
   guard viewer.get_dom_node() is Some(root) else {
     ctx.fail("mounted Viewer did not expose its root")
@@ -294,7 +295,9 @@ fn run_definition_browser_test() -> Unit {
     root,
     markdown_root,
     () => {
-      definition_state_json(viewer, provider_calls, references_provider_calls)
+      definition_state_json(
+        viewer, provider_calls, markdown_provider_calls, references_provider_calls,
+      )
     },
     () => viewer.set_scroll_top(0.0),
     () => viewer.set_selection(Selection(Position(2, 11), Position(2, 27))),

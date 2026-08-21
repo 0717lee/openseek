@@ -349,8 +349,9 @@ test('opens Markdown documents through the native protocol and hovers literate M
   await page.goto('/');
   await openMainFixture(page);
 
-  // The workbench supplies the untouched URI-backed model. Public Viewer
-  // routing alone replaces the code surface with the Markdown presentation.
+  // The workbench supplies the untouched URI-backed model and explicitly
+  // selects its MarkdownViewer sibling. The code-only Viewer remains mounted
+  // so switching back preserves its DOM lifetime, but it must be hidden.
   await openWorkspaceFile(page, 'README.md');
   await expect(page.locator('.editor-shell')).toHaveAttribute(
     'data-source-uri',
@@ -376,7 +377,9 @@ test('opens Markdown documents through the native protocol and hovers literate M
   );
   await expect(markdown.locator('h1')).toHaveText('Fixture workspace');
   await expect(markdown).toContainText('reusable public Viewer');
-  await expect(page.locator('.viewer-host > .monaco-editor')).toHaveCount(0);
+  const parkedCodeViewer = page.locator('.viewer-host > .monaco-editor');
+  await expect(parkedCodeViewer).toHaveCount(1);
+  await expect(parkedCodeViewer).toBeHidden();
 
   // `.mbt.md` keeps the original MoonBit model identity. A real pointer over
   // the compiler-recognized fence symbol reaches the native `moon ide hover`

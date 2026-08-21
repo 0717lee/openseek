@@ -2,25 +2,32 @@ import { expect, test } from '../support/test.js';
 import { workspaceItem as workspaceSelector } from '../support/app.js';
 
 const sourceEditor =
-  '.viewer-host:not(.diff-viewer-host) > .monaco-editor.readonly-editor';
+  '.code-viewer-host > .monaco-editor.readonly-editor';
+const markdownDocument =
+  '.markdown-viewer-host > .moonbit-viewer-markdown-document';
+const diffEditor = '.diff-editor-host > .moonbit-diff-editor';
 
-// Proves the library boundary: the embedded page runs the viewer and the
-// file-tree widget against in-memory providers, with no websocket opened.
-test('runs the viewer and tree from in-memory providers without a server', async ({ page }) => {
+// Proves the public embedding boundary: a code-only Viewer, an explicit
+// MarkdownViewer, a first-class DiffEditor, and the file tree all run against
+// in-memory providers without opening a websocket.
+test('runs the independent viewer surfaces and tree without a server', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
   const websockets = [];
   page.on('websocket', (ws) => websockets.push(ws.url()));
 
   await page.goto('/embed.html');
-
-  // The embedding host auto-opens src/main.mbt; auto-reveal expands src.
   await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
+  await expect(page.locator('.editor-shell')).toHaveAttribute(
+    'data-source-presentation',
+    'code',
+  );
   await expect(page.locator(sourceEditor)).toContainText('fn main');
   await expect
     .poll(async () => (await page.locator('.embedded-viewer-stack').boundingBox())?.width ?? 0)
-    .toBeGreaterThan(400);
+    .toBeGreaterThan(900);
 
-  // Real language highlighting with no server: the MoonBit lexer is
-  // registered by the embedding host, not fetched from anywhere.
+  // Language highlighting is registered by the embedding host, not fetched
+  // from a workbench or server.
   await expect(page.locator('.mtk3', { hasText: 'fn' }).first()).toBeVisible();
   await expect(page.locator(workspaceItem('src'))).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator(workspaceItem('src/main.mbt'))).toHaveAttribute(
@@ -28,26 +35,26 @@ test('runs the viewer and tree from in-memory providers without a server', async
     'true',
   );
 
-  // The same public facade exposes the side-by-side DiffViewer. The host
-  // toggles sibling surfaces, preserving the ordinary source Viewer's model
-  // and scroll while the comparison owns two ordinary Viewer panes.
-  const diffToggle = page.locator('[data-action=\"toggle-diff\"]');
+  const diffToggle = page.locator('[data-action="toggle-diff"]');
   const layoutToggle = page.locator('[data-action="toggle-diff-layout"]');
   await expect(layoutToggle).toBeDisabled();
-  await expect(layoutToggle).toHaveAccessibleName('Unified diff layout');
+  await expect(layoutToggle).toHaveAccessibleName('Inline diff layout');
   await expect(diffToggle).toHaveAccessibleName('Full diff');
   await diffToggle.click();
-  await expect(diffToggle).toHaveAttribute('aria-pressed', 'true');
-  await expect(diffToggle).toHaveAccessibleName('Full diff');
-  const diff = page.locator('.diff-viewer-host > .moonbit-diff-editor');
-  await expect(diff).toBeVisible();
-  await expect
-    .poll(async () => (await diff.boundingBox())?.width ?? 0)
-    .toBeGreaterThan(400);
+
+  const diff = page.locator(diffEditor);
   const originalPane = diff.locator('.moonbit-diff-editor-original');
   const modifiedPane = diff.locator('.moonbit-diff-editor-modified');
+  await expect(diff).toBeVisible();
+  await expect(diff).toHaveAttribute('role', 'region');
+  await expect(diff).toHaveAccessibleName('File comparison');
+  await expect(diff).toHaveAttribute('data-render-mode', 'side-by-side');
+  await expect(originalPane).toHaveAttribute('role', 'group');
+  await expect(originalPane).toHaveAccessibleName('Original file');
+  await expect(modifiedPane).toHaveAttribute('role', 'group');
+  await expect(modifiedPane).toHaveAccessibleName('Modified file');
   await expect(originalPane.locator('.monaco-editor')).toContainText(
-    'println(\"hello\")',
+    'println("hello")',
   );
   await expect(modifiedPane.locator('.monaco-editor')).toContainText(
     'println(greeting())',
@@ -55,80 +62,35 @@ test('runs the viewer and tree from in-memory providers without a server', async
   await expect(originalPane.locator('.diff-editor-line-delete')).toHaveCount(1);
   await expect(modifiedPane.locator('.diff-editor-line-insert')).toHaveCount(1);
 
-  // Render-mode switching keeps the same model pair. Unified mode hides only
-  // the original child presentation and interleaves its deleted line as a
-  // tokenized ViewZone in the still-interactive modified Viewer.
+  // Algorithm controls are a host/provider concern. DiffEditor itself contains
+  // neither the removed toolbar nor the host-owned layout action.
+  await expect(diff.locator('.moonbit-diff-editor-toolbar')).toHaveCount(0);
+  await expect(diff.locator('[data-action="toggle-diff-layout"]')).toHaveCount(0);
+
   await expect(layoutToggle).toBeEnabled();
   await expect(layoutToggle).toHaveAttribute('aria-pressed', 'false');
   await layoutToggle.click();
   await expect(layoutToggle).toHaveAttribute('aria-pressed', 'true');
-  await expect(diff).toHaveAttribute('data-render-mode', 'unified');
+  await expect(diff).toHaveAttribute('data-render-mode', 'inline');
   await expect(originalPane).toBeHidden();
-  await expect(modifiedPane).toBeVisible();
-  const deletedBlock = modifiedPane.locator(
-    '.diff-editor-unified-deleted-block',
-  );
-  await expect(deletedBlock).toContainText('println("hello")');
-  await expect(
-    modifiedPane.locator('.diff-editor-unified-deleted-line-number'),
-  ).toContainText('3');
-  await expect(modifiedPane.locator('.diff-editor-line-insert')).toHaveCount(1);
+  await expect(originalPane).toHaveAttribute('aria-hidden', 'true');
+  await expect(modifiedPane).toHaveAccessibleName('Inline diff');
   await layoutToggle.click();
-  await expect(layoutToggle).toHaveAttribute('aria-pressed', 'false');
   await expect(diff).toHaveAttribute('data-render-mode', 'side-by-side');
   await expect(originalPane).toBeVisible();
-
-  // Desktop can place the changed-file tree beside this surface. Both panes
-  // must remain within a substantially narrower caller-owned host.
-  const viewerStack = page.locator('.embedded-viewer-stack');
-  await viewerStack.evaluate((element) => {
-    element.style.width = '300px';
-    element.style.flex = '0 0 300px';
-  });
-  const [narrowDiffBox, originalPaneBox, modifiedPaneBox] = await Promise.all([
-    diff.boundingBox(),
-    originalPane.boundingBox(),
-    modifiedPane.boundingBox(),
-  ]);
-  expect(narrowDiffBox).not.toBeNull();
-  expect(originalPaneBox).not.toBeNull();
-  expect(modifiedPaneBox).not.toBeNull();
-  expect(originalPaneBox.x).toBeGreaterThanOrEqual(narrowDiffBox.x);
-  expect(modifiedPaneBox.x + modifiedPaneBox.width).toBeLessThanOrEqual(
-    narrowDiffBox.x + narrowDiffBox.width + 1,
-  );
-  await expect(
-    originalPane.locator('.view-line').filter({ hasText: 'println("hello")' }),
-  ).toBeVisible();
-  await expect(
-    modifiedPane.locator('.view-line').filter({ hasText: 'println(greeting())' }),
-  ).toBeVisible();
-  await viewerStack.evaluate((element) => {
-    element.style.width = '';
-    element.style.flex = '';
-  });
-  const viewportFit = await page.evaluate(() => ({
-    innerWidth: window.innerWidth,
-    innerHeight: window.innerHeight,
-    scrollWidth: document.documentElement.scrollWidth,
-    scrollHeight: document.documentElement.scrollHeight,
-  }));
-  expect(viewportFit.scrollWidth).toBeLessThanOrEqual(viewportFit.innerWidth);
-  expect(viewportFit.scrollHeight).toBeLessThanOrEqual(viewportFit.innerHeight);
-  await expect(page.locator(sourceEditor)).not.toBeVisible();
+  await expect(modifiedPane).toHaveAccessibleName('Modified file');
 
   await diffToggle.click();
-  await expect(diffToggle).toHaveAttribute('aria-pressed', 'false');
-  await expect(diffToggle).toHaveAccessibleName('Full diff');
-  await expect(diff).not.toBeVisible();
+  await expect(diff).toBeHidden();
   await expect(page.locator(sourceEditor)).toContainText('fn main');
 
   // Nested folders resolve lazily on expand.
   await expect(page.locator(workspaceItem('src/lib/util.mbt'))).toHaveCount(0);
   await page.locator(workspaceItem('src/lib')).click();
-  await expect(page.locator(workspaceItem('src/lib'))).toHaveAttribute('aria-expanded', 'true');
-
-  // Navigating between files goes through the in-memory document source.
+  await expect(page.locator(workspaceItem('src/lib'))).toHaveAttribute(
+    'aria-expanded',
+    'true',
+  );
   await page.locator(workspaceItem('src/lib/util.mbt')).click();
   await expect(page.locator(sourceEditor)).toContainText('util_answer');
   await expect(page.locator(workspaceItem('src/lib/util.mbt'))).toHaveAttribute(
@@ -136,616 +98,437 @@ test('runs the viewer and tree from in-memory providers without a server', async
     'true',
   );
 
-  // The same public Viewer instance selects its Markdown presentation from an
-  // ordinary URI-backed in-memory model. No workbench or host-side Markdown
-  // parsing/presentation branch participates.
+  // Markdown routing is explicit at the host. The code Viewer is detached and
+  // hidden while the independent MarkdownViewer owns this source model.
   await page.locator(workspaceItem('README.md')).click();
   await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
-  await expect(page.locator(workspaceItem('README.md'))).toHaveAttribute(
-    'aria-selected',
-    'true',
+  await expect(page.locator('.editor-shell')).toHaveAttribute(
+    'data-source-presentation',
+    'markdown',
   );
-  const markdown = page.locator(
-    '.viewer-host > .moonbit-viewer-markdown-document',
-  );
+  await expect(page.locator('.code-viewer-host')).toBeHidden();
+  await expect(page.locator('.markdown-viewer-host')).toBeVisible();
+  const markdown = page.locator(markdownDocument);
   await expect(markdown).toBeVisible();
   await expect(markdown).toHaveAttribute(
     'data-source-uri',
     'memory://workspace/README.md',
   );
   await expect(markdown.locator('h1')).toHaveText('Embedded Markdown document');
-  await expect(markdown.locator('strong')).toHaveText('Viewer');
-  await expect(page.locator('.viewer-host > .monaco-editor')).toHaveCount(0);
+  await expect(markdown.locator('strong')).toHaveText('MarkdownViewer');
+
+  // Presentation and MoonBit Markdown resource-kind routing use a decoded,
+  // lowercase path rather than case-sensitive suffix checks.
+  await page.locator(workspaceItem('Guide.MD')).click();
+  await expect(markdown).toHaveAttribute(
+    'data-source-uri',
+    'memory://workspace/Guide.MD',
+  );
+  await expect(markdown.locator('h1')).toHaveText('Uppercase Markdown');
+  await page.locator(workspaceItem('tour.MBT.MD')).click();
+  await expect(markdown).toHaveAttribute(
+    'data-source-uri',
+    'memory://workspace/tour.MBT.MD',
+  );
+  await expect(markdown.locator('[data-markdown-semantic="moonbit-check"]')).toHaveCount(1);
 
   expect(websockets).toEqual([]);
 });
 
-test('virtualizes a legal-size large diff through ordinary Viewer panes', async ({ page }) => {
+test('switches at the 900/901 boundary and keeps explicit Inline above it', async ({ page }) => {
+  await page.setViewportSize({ width: 1500, height: 900 });
   await page.goto('/embed.html');
   await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
+  await page.locator('[data-action="toggle-diff"]').click();
 
-  // Both sides contain thousands of changed lines. The two Viewer panes keep
-  // only a viewport-sized set of line DOM instead of eager diff rows.
+  const stack = page.locator('.embedded-viewer-stack');
+  const diff = page.locator(diffEditor);
+  const originalPane = diff.locator('.moonbit-diff-editor-original');
+  const sash = diff.getByRole('separator', { name: 'Resize diff panes' });
+  const layoutToggle = page.locator('[data-action="toggle-diff-layout"]');
+
+  await setViewerStackWidth(stack, diff, 901);
+  await expect(diff).toHaveAttribute('data-render-mode', 'side-by-side');
+  await expect(originalPane).toBeVisible();
+  await expect(sash).toBeVisible();
+  await expect(sash).toHaveAttribute('aria-valuemin', '10');
+  await expect(sash).toHaveAttribute('aria-valuemax', '90');
+  await expect(sash).toHaveAttribute('aria-valuenow', '50');
+
+  await setViewerStackWidth(stack, diff, 900);
+  await expect(diff).toHaveAttribute('data-render-mode', 'inline');
+  await expect(originalPane).toBeHidden();
+  await expect(sash).toBeHidden();
+
+  // Responsive fallback never mutates the requested SideBySide preference.
+  await expect(layoutToggle).toHaveAttribute('aria-pressed', 'false');
+  await setViewerStackWidth(stack, diff, 901);
+  await expect(diff).toHaveAttribute('data-render-mode', 'side-by-side');
+
+  // Explicit Inline remains Inline even when the host grows above the boundary.
+  await layoutToggle.click();
+  await expect(layoutToggle).toHaveAttribute('aria-pressed', 'true');
+  await setViewerStackWidth(stack, diff, 1000);
+  await expect(diff).toHaveAttribute('data-render-mode', 'inline');
+  await expect(originalPane).toBeHidden();
+});
+
+test('removes a disabled sash from visibility, tab order, and key handling', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto('/embed.html');
+  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
+  await page.locator('[data-action="toggle-diff"]').click();
+
+  const diff = page.locator(diffEditor);
+  const sash = diff.locator('.moonbit-diff-editor-sash');
+  const toggle = page.locator('[data-action="toggle-diff-sash"]');
+  await expect(sash).toBeVisible();
+  await expect(sash).toHaveAttribute('tabindex', '0');
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(sash).toBeHidden();
+  await expect(sash).toHaveAttribute('aria-hidden', 'true');
+  expect(await sash.getAttribute('tabindex')).toBeNull();
+  expect(
+    await sash.evaluate((node) => {
+      const event = new KeyboardEvent('keydown', {
+        key: 'ArrowRight',
+        bubbles: true,
+        cancelable: true,
+      });
+      node.dispatchEvent(event);
+      return event.defaultPrevented;
+    }),
+  ).toBe(false);
+
+  await toggle.click();
+  await expect(sash).toBeVisible();
+  await expect(sash).not.toHaveAttribute('aria-hidden', 'true');
+  await expect(sash).toHaveAttribute('tabindex', '0');
+});
+
+test('moves original focus into Inline and keeps F7 navigation live', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto('/embed.html');
+  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
+  await page.locator(workspaceItem('navigation-anchors.mbt')).click();
+  await page.locator('[data-action="toggle-diff"]').click();
+
+  const stack = page.locator('.embedded-viewer-stack');
+  const diff = page.locator(diffEditor);
+  const originalPane = diff.locator('.moonbit-diff-editor-original');
+  const modifiedPane = diff.locator('.moonbit-diff-editor-modified');
+  const liveRegion = diff.locator('.moonbit-diff-editor-live-region');
+  await originalPane.locator('.monaco-editor').click({ position: { x: 120, y: 80 } });
+  await expect
+    .poll(() =>
+      originalPane.evaluate((node) => node.contains(document.activeElement)),
+    )
+    .toBe(true);
+
+  // Responsive layout changes do not move focus through a toolbar button.
+  await setViewerStackWidth(stack, diff, 900);
+  await expect(diff).toHaveAttribute('data-render-mode', 'inline');
+  await expect
+    .poll(() =>
+      modifiedPane.evaluate((node) => node.contains(document.activeElement)),
+    )
+    .toBe(true);
+  await page.keyboard.press('F7');
+  await expect(liveRegion).toHaveText(
+    'Change 1 of 2; original lines 3 through 3; modified deletion anchor at line 3',
+  );
+});
+
+test('reconciles height-only and Inline-to-side layouts after fresh pane renders', async ({ page }) => {
+  await page.setViewportSize({ width: 1500, height: 1000 });
+  await page.goto('/embed.html');
+  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
+  await page.locator(workspaceItem('alignment-zones.mbt')).click();
+  await page.locator('[data-action="toggle-diff"]').click();
+
+  const stack = page.locator('.embedded-viewer-stack');
+  const diff = page.locator(diffEditor);
+  const spacers = diff.locator('.moonbit-diff-editor-alignment-spacer[monaco-view-zone]');
+  await expect.poll(() => spacers.count()).toBeGreaterThan(0);
+  const beforeIds = await spacers.evaluateAll((nodes) =>
+    nodes.map((node) => node.getAttribute('monaco-view-zone')),
+  );
+
+  // Width is unchanged: the new ids prove a fresh geometry transaction still
+  // replaced the managed alignment zones after the height-only outer layout.
+  await stack.evaluate((node) => {
+    node.style.height = '620px';
+    node.style.flex = '0 0 auto';
+  });
+  await expect
+    .poll(async () =>
+      spacers.evaluateAll((nodes) =>
+        nodes.map((node) => node.getAttribute('monaco-view-zone')),
+      ),
+    )
+    .not.toEqual(beforeIds);
+  expect(await firstChangedLineTopDelta(diff)).toBeLessThanOrEqual(1);
+
+  await page.locator('[data-action="toggle-diff-layout"]').click();
+  await expect(diff).toHaveAttribute('data-render-mode', 'inline');
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+  await page.locator('[data-action="toggle-diff-layout"]').click();
+  await expect(diff).toHaveAttribute('data-render-mode', 'side-by-side');
+  await expect.poll(() => spacers.count()).toBeGreaterThan(0);
+  expect(await firstChangedLineTopDelta(diff)).toBeLessThanOrEqual(1);
+});
+
+test('navigates deletion and insertion anchors across side-by-side and Inline layouts', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto('/embed.html');
+  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
+  await page.locator(workspaceItem('navigation-anchors.mbt')).click();
+  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
+  await page.locator('[data-action="toggle-diff"]').click();
+
+  const diff = page.locator(diffEditor);
+  const originalPane = diff.locator('.moonbit-diff-editor-original');
+  const modifiedPane = diff.locator('.moonbit-diff-editor-modified');
+  const liveRegion = diff.locator('.moonbit-diff-editor-live-region');
+  const layoutToggle = page.locator('[data-action="toggle-diff-layout"]');
+  const deletionAnnouncement =
+    'Change 1 of 2; original lines 3 through 3; modified deletion anchor at line 3';
+  const insertionAnnouncement =
+    'Change 2 of 2; original insertion anchor at line 6; modified lines 5 through 5';
+  await expect(liveRegion).toHaveAttribute('aria-live', 'polite');
+  await expect(liveRegion).toHaveAttribute('aria-atomic', 'true');
+  await expect(originalPane.locator('.diff-editor-line-delete')).toHaveCount(1);
+  await expect(modifiedPane.locator('.diff-editor-line-insert')).toHaveCount(1);
+
+  await modifiedPane.locator('.monaco-editor').click({ position: { x: 120, y: 80 } });
+
+  // Side-by-side navigates to the pane that owns physical changed lines.
+  await page.keyboard.press('F7');
+  await expect(liveRegion).toHaveText(deletionAnnouncement);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        document
+          .querySelector('.moonbit-diff-editor-original')
+          ?.contains(document.activeElement),
+      ),
+    )
+    .toBe(true);
+
+  await page.keyboard.press('F7');
+  await expect(liveRegion).toHaveText(insertionAnnouncement);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        document
+          .querySelector('.moonbit-diff-editor-modified')
+          ?.contains(document.activeElement),
+      ),
+    )
+    .toBe(true);
+
+  // Inline has one interactive surface. Consecutive F7 presses reveal both
+  // kinds of hunk in the modified editor, including the deletion-only anchor.
+  await layoutToggle.click();
+  await expect(diff).toHaveAttribute('data-render-mode', 'inline');
+  await modifiedPane.locator('.monaco-editor').click({ position: { x: 120, y: 80 } });
+  await page.keyboard.press('F7');
+  await expect(liveRegion).toHaveText(deletionAnnouncement);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        document
+          .querySelector('.moonbit-diff-editor-modified')
+          ?.contains(document.activeElement),
+      ),
+    )
+    .toBe(true);
+
+  await page.keyboard.press('F7');
+  await expect(liveRegion).toHaveText(insertionAnnouncement);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        document
+          .querySelector('.moonbit-diff-editor-modified')
+          ?.contains(document.activeElement),
+      ),
+    )
+    .toBe(true);
+
+  await page.keyboard.press('Shift+F7');
+  await expect(liveRegion).toHaveText(deletionAnnouncement);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        document
+          .querySelector('.moonbit-diff-editor-modified')
+          ?.contains(document.activeElement),
+      ),
+    )
+    .toBe(true);
+});
+
+test('virtualizes a 2600-line Inline deletion through the viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto('/embed.html');
+  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
   await page.locator(workspaceItem('large.mbt')).click();
   await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
   await page.locator('[data-action="toggle-diff"]').click();
-  const diff = page.locator('.diff-viewer-host > .moonbit-diff-editor');
+
+  const diff = page.locator(diffEditor);
+  const modifiedPane = diff.locator('.moonbit-diff-editor-modified');
   await expect(diff).toBeVisible();
-  await expect(
-    diff.locator('.moonbit-diff-editor-pane > .monaco-editor'),
-  ).toHaveCount(2);
+  await expect(diff.locator('.moonbit-diff-editor-pane > .monaco-editor')).toHaveCount(2);
   await expect(diff.locator('.view-line').first()).toBeVisible();
   expect(await diff.locator('.view-line').count()).toBeLessThan(200);
 
-  // ViewZone insertion/removal changes content-space scroll offsets. Switching
-  // layouts must retain the same modified model line at the same viewport
-  // pixel instead of keeping a now-displaced numeric scrollTop.
+  await page.locator('[data-action="toggle-diff-layout"]').click();
+  await expect(diff).toHaveAttribute('data-render-mode', 'inline');
+  const block = modifiedPane.locator(
+    '.diff-editor-inline-deleted-block[data-virtualized-render-lines="true"]',
+  );
+  await expect(block).toHaveCount(1);
+  await expect(block).toHaveAttribute('data-original-line-start', '1');
+  await expect(block).toHaveAttribute('data-original-line-end-exclusive', '2601');
+
+  // Installing a leading Inline zone preserves the raw viewport origin. It
+  // must not restore modified line 1 below the new 46,800px deletion.
+  await expect
+    .poll(() => block.getAttribute('data-render-window-start-model-line'))
+    .toBe('1');
+
+  const top = await inlineDeletedWindowEvidence(modifiedPane);
+  expect(top.rowCount).toBeLessThan(200);
+  expect(top.firstLine).toBe(1);
+  expect(top.validText).toBeTruthy();
+  expect(top.validLineNumbers).toBeTruthy();
+  expect(top.hasTokens).toBeTruthy();
+
+  // The editor's Monaco-shaped wheel path multiplies pixel deltas by 1.25.
+  // 18,720px therefore lands at 23,400px, the middle of the 46,800px zone.
+  await wheelInlinePane(modifiedPane, 18_720);
+  await expect
+    .poll(() => block.getAttribute('data-render-window-start-model-line'))
+    .not.toBe('1');
+  const middle = await inlineDeletedWindowEvidence(modifiedPane);
+  expect(middle.rowCount).toBeLessThan(200);
+  expect(middle.firstLine).toBeGreaterThan(1_000);
+  expect(middle.lastLine).toBeLessThan(1_800);
+  expect(middle.validText).toBeTruthy();
+  expect(middle.validLineNumbers).toBeTruthy();
+  expect(middle.hasTokens).toBeTruthy();
+
+  // A geometry-only Inline reconcile replaces the rendering context but
+  // preserves the current model-line anchor once the projection already
+  // exists. Resizing in the middle must not fall back to the raw/topology
+  // installation behavior.
+  await page.setViewportSize({ width: 1360, height: 900 });
+  await expect
+    .poll(async () => (await inlineDeletedWindowEvidence(modifiedPane)).firstLine)
+    .toBe(middle.firstLine);
+  expect(await diff.locator('.view-line').count()).toBeLessThan(200);
+
+  // Another movement keeps the zone intersecting the viewport while
+  // exposing its final original row rather than overshooting into insertions.
+  await wheelInlinePane(modifiedPane, 18_500);
+  await expect
+    .poll(() => block.getAttribute('data-render-window-end-model-line'))
+    .toBe('2600');
+  const tail = await inlineDeletedWindowEvidence(modifiedPane);
+  expect(tail.rowCount).toBeLessThan(200);
+  expect(tail.lastLine).toBe(2600);
+  expect(tail.validText).toBeTruthy();
+  expect(tail.validLineNumbers).toBeTruthy();
+  expect(tail.hasTokens).toBeTruthy();
+  expect(await diff.locator('.view-line').count()).toBeLessThan(200);
+});
+
+test('shares the Inline DOM budget across twenty 130-line deletions', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto('/embed.html');
+  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
+  await page.locator(workspaceItem('fragmented-large.mbt')).click();
+  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
+  await page.locator('[data-action="toggle-diff"]').click();
+  await page.locator('[data-action="toggle-diff-layout"]').click();
+
+  const diff = page.locator(diffEditor);
   const modifiedPane = diff.locator('.moonbit-diff-editor-modified');
-  const modifiedScrollable = modifiedPane.locator(
-    '.monaco-scrollable-element.editor-scrollable',
+  const blocks = modifiedPane.locator(
+    '.diff-editor-inline-deleted-block[data-virtualized-render-lines="true"]',
   );
-  await modifiedScrollable.hover();
-  await page.mouse.wheel(0, 18_000);
-  await expect
-    .poll(async () => (await firstFullyVisibleModelLine(modifiedPane))?.text ?? '')
-    .toContain('modified_');
-  const splitAnchor = await firstFullyVisibleModelLine(modifiedPane);
-  expect(splitAnchor).not.toBeNull();
+  await expect(diff).toHaveAttribute('data-render-mode', 'inline');
+  await expect(blocks).toHaveCount(20);
 
-  const layoutToggle = page.locator('[data-action="toggle-diff-layout"]');
-  await layoutToggle.click();
-  await expect(diff).toHaveAttribute('data-render-mode', 'unified');
+  // F7 on a deletion-only Inline hunk reveals the ViewZone top itself, not
+  // the retained modified line after its 130 deleted rows. This also gives
+  // the fragmented budget test a deterministic content-space origin even if
+  // SideBySide alignment had retained a non-zero raw scroll offset.
+  await modifiedPane.locator('.monaco-editor').click({ position: { x: 120, y: 80 } });
+  await page.keyboard.press('F7');
   await expect
-    .poll(async () => firstFullyVisibleModelLine(modifiedPane))
-    .toEqual(splitAnchor);
+    .poll(async () => (await fragmentedInlineEvidence(modifiedPane)).activeFragments)
+    .toContain(0);
+  const top = await fragmentedInlineEvidence(modifiedPane);
+  expect(top.rowCount).toBeLessThan(100);
+  expect(top.activeBlockCount).toBeLessThanOrEqual(2);
+  expect(top.validText).toBeTruthy();
+  expect(top.validLineNumbers).toBeTruthy();
+  expect(top.hasTokens).toBeTruthy();
+  expect(top.activeOriginalLines).toContain(1);
+  expect(await diff.locator('.view-line').count()).toBeLessThan(200);
 
-  await layoutToggle.click();
-  await expect(diff).toHaveAttribute('data-render-mode', 'side-by-side');
+  await wheelInlinePane(modifiedPane, 18_720);
   await expect
-    .poll(async () => firstFullyVisibleModelLine(modifiedPane))
-    .toEqual(splitAnchor);
+    .poll(async () => (await fragmentedInlineEvidence(modifiedPane)).activeFragments)
+    .toContain(10);
+  const middle = await fragmentedInlineEvidence(modifiedPane);
+  expect(middle.rowCount).toBeLessThan(100);
+  expect(middle.activeBlockCount).toBeLessThanOrEqual(2);
+  expect(middle.validText).toBeTruthy();
+  expect(middle.validLineNumbers).toBeTruthy();
+  expect(await diff.locator('.view-line').count()).toBeLessThan(200);
+
+  await wheelInlinePane(modifiedPane, 18_700);
+  await expect
+    .poll(async () => (await fragmentedInlineEvidence(modifiedPane)).activeFragments)
+    .toContain(19);
+  const tail = await fragmentedInlineEvidence(modifiedPane);
+  expect(tail.rowCount).toBeLessThan(100);
+  expect(tail.activeBlockCount).toBeLessThanOrEqual(2);
+  // The twentieth 130-line deletion spans original lines 2490..2619;
+  // original line 2620 is its retained anchor and belongs to the code model.
+  expect(tail.activeOriginalLines).toContain(2619);
+  expect(tail.validText).toBeTruthy();
+  expect(tail.validLineNumbers).toBeTruthy();
+  expect(await diff.locator('.view-line').count()).toBeLessThan(200);
 });
 
-test('aligns foreign ViewZones and drives one shared diff overview rail', async ({ page }) => {
+test('renders character changes in the side-by-side code kernels', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
   await page.goto('/embed.html');
   await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
-  await page.locator(workspaceItem('alignment-zones.mbt')).click();
-  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
-  await page.locator('[data-action="toggle-diff"]').click();
-
-  const diff = page.locator('.diff-viewer-host > .moonbit-diff-editor');
-  const originalPane = diff.locator('.moonbit-diff-editor-original');
-  const modifiedPane = diff.locator('.moonbit-diff-editor-modified');
-  const originalScrollable = originalPane.locator(
-    '.monaco-scrollable-element.editor-scrollable',
-  );
-  const modifiedScrollable = modifiedPane.locator(
-    '.monaco-scrollable-element.editor-scrollable',
-  );
-  const rail = diff.locator('.moonbit-diff-overview');
-
-  await expect(rail).toBeVisible();
-  await expect(diff.getByRole('scrollbar', { name: 'Diff overview' })).toHaveCount(1);
-  await expect(
-    diff.locator('.monaco-scrollable-element.editor-scrollable > .scrollbar.vertical'),
-  ).toHaveCount(2);
-  expect(
-    await diff
-      .locator('.monaco-scrollable-element.editor-scrollable > .scrollbar.vertical')
-      .evaluateAll((bars) => bars.map((bar) => getComputedStyle(bar).opacity)),
-  ).toEqual(['0', '0']);
-
-  // Both ordinary Viewers own independently measured Markdown comment zones.
-  // Their opposite tall/short pairs force alignment in both directions. The
-  // middle pair also ends exactly where a modified-only insertion begins, so
-  // the original spacer is anchored inside hidden Markdown source lines.
-  await expect
-    .poll(() => originalPane.locator('.moonbit-viewer-markdown-comment').count())
-    .toBe(3);
-  await expect
-    .poll(() => modifiedPane.locator('.moonbit-viewer-markdown-comment').count())
-    .toBe(3);
-  await expect
-    .poll(() =>
-      originalPane.evaluate((pane) => {
-        const hiddenEnds = new Set(
-          Array.from(
-            pane.querySelectorAll('.moonbit-viewer-markdown-comment'),
-          ).map((node) => Number(node.getAttribute('data-end-line')) - 1),
-        );
-        return Array.from(
-          pane.querySelectorAll('.diff-editor-alignment-zone'),
-        ).some((zone) =>
-          hiddenEnds.has(Number(zone.getAttribute('data-after-line'))),
-        );
-      }),
-    )
-    .toBe(true);
-  await originalScrollable.hover();
-  await page.mouse.wheel(0, 250);
-  await expect(originalPane.locator('.moonbit-viewer-markdown-comment').nth(0)).toBeVisible();
-  await expect(modifiedPane.locator('.moonbit-viewer-markdown-comment').nth(0)).toBeVisible();
-  const firstMarkdownHeights = await Promise.all([
-    originalPane
-      .locator('.moonbit-viewer-markdown-comment')
-      .nth(0)
-      .evaluate((node) => node.getBoundingClientRect().height),
-    modifiedPane
-      .locator('.moonbit-viewer-markdown-comment')
-      .nth(0)
-      .evaluate((node) => node.getBoundingClientRect().height),
-  ]);
-  expect(firstMarkdownHeights[0]).toBeGreaterThan(firstMarkdownHeights[1]);
-
-  await page.mouse.wheel(0, 2_400);
-  await expect(originalPane.locator('.moonbit-viewer-markdown-comment').nth(2)).toBeVisible();
-  await expect(modifiedPane.locator('.moonbit-viewer-markdown-comment').nth(2)).toBeVisible();
-  const secondMarkdownHeights = await Promise.all([
-    originalPane
-      .locator('.moonbit-viewer-markdown-comment')
-      .nth(2)
-      .evaluate((node) => node.getBoundingClientRect().height),
-    modifiedPane
-      .locator('.moonbit-viewer-markdown-comment')
-      .nth(2)
-      .evaluate((node) => node.getBoundingClientRect().height),
-  ]);
-  expect(secondMarkdownHeights[1]).toBeGreaterThan(secondMarkdownHeights[0]);
-
-  await expect
-    .poll(async () => diffScrollState(rail))
-    .toMatchObject({ heightsAligned: true, topsAligned: true });
-  await expectAlignedVisibleRows(diff);
-
-  // Scrolling either child uses the same content coordinate system.
-  await originalScrollable.hover();
-  await page.mouse.wheel(0, 4_000);
-  await expect
-    .poll(async () => (await diffScrollState(rail)).originalTop)
-    .toBeGreaterThan(0);
-  await expect
-    .poll(async () => diffScrollState(rail))
-    .toMatchObject({ heightsAligned: true, topsAligned: true });
-  await expectAlignedVisibleRows(diff);
-
-  await modifiedScrollable.hover();
-  await page.mouse.wheel(0, 4_000);
-  await expect
-    .poll(async () => diffScrollState(rail))
-    .toMatchObject({ heightsAligned: true, topsAligned: true });
-  await expectAlignedVisibleRows(diff);
-
-  // The two 15px canvases summarize offscreen changes across the document.
-  await expect
-    .poll(async () => Number(await rail.getAttribute('data-original-change-count')))
-    .toBeGreaterThan(3);
-  await expect
-    .poll(async () => Number(await rail.getAttribute('data-modified-change-count')))
-    .toBeGreaterThan(3);
-  const paintedLanes = await rail.evaluate((root) =>
-    Array.from(root.querySelectorAll('canvas')).map((canvas) => {
-      const context = canvas.getContext('2d');
-      const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
-      let rows = 0;
-      let color = null;
-      for (let y = 0; y < canvas.height; y += 1) {
-        let painted = false;
-        for (let x = 0; x < canvas.width; x += 1) {
-          const offset = (y * canvas.width + x) * 4;
-          if (data[offset + 3] !== 0) {
-            painted = true;
-            color ??= Array.from(data.slice(offset, offset + 4));
-            break;
-          }
-        }
-        if (painted) rows += 1;
-      }
-      return { rows, color };
-    }),
-  );
-  expect(paintedLanes[0].rows).toBeGreaterThan(10);
-  expect(paintedLanes[1].rows).toBeGreaterThan(10);
-  expect(paintedLanes[0].color[0]).toBeGreaterThan(paintedLanes[0].color[1]);
-  expect(paintedLanes[1].color[1]).toBeGreaterThan(paintedLanes[1].color[0]);
-
-  // A theme mutation invalidates both canvases without recreating the rail.
-  await diff.evaluate((node) => {
-    node.style.setProperty(
-      '--vscode-diffEditorOverview-insertedForeground',
-      'rgb(1, 2, 3)',
-    );
-  });
-  await expect(rail).toHaveAttribute('data-modified-marker-color', 'rgb(1, 2, 3)');
-  await diff.evaluate((node) => {
-    node.style.removeProperty('--vscode-diffEditorOverview-insertedForeground');
-  });
-
-  // Rail click, wheel, and thumb drag all delegate to the modified Viewer.
-  const railBox = await rail.boundingBox();
-  expect(railBox).not.toBeNull();
-  await page.mouse.click(railBox.x + 22, railBox.y + railBox.height * 0.5);
-  await expect
-    .poll(async () => (await diffScrollState(rail)).progress)
-    .toBeGreaterThan(0.35);
-  await expect
-    .poll(async () => (await diffScrollState(rail)).progress)
-    .toBeLessThan(0.65);
-  await expectAlignedVisibleRows(diff);
-
-  await rail.hover({ position: { x: 22, y: railBox.height * 0.5 } });
-  const beforeWheel = (await diffScrollState(rail)).modifiedTop;
-  await page.mouse.wheel(0, 1_000);
-  await expect
-    .poll(async () => (await diffScrollState(rail)).modifiedTop)
-    .toBeGreaterThan(beforeWheel);
-
-  const thumb = await rail.evaluate((node) => ({
-    top: Number(node.getAttribute('data-slider-top')),
-    height: Number(node.getAttribute('data-slider-height')),
-  }));
-  await page.mouse.move(
-    railBox.x + 22,
-    railBox.y + thumb.top + thumb.height / 2,
-  );
-  await page.mouse.down();
-  await page.mouse.move(railBox.x + 22, railBox.y + railBox.height - 4, {
-    steps: 8,
-  });
-  await page.mouse.up();
-  await expect
-    .poll(async () => (await diffScrollState(rail)).progress)
-    .toBeGreaterThan(0.9);
-  await expectAlignedVisibleRows(diff);
-
-  // Horizontal scrolling remains per-pane input with synchronized positions.
-  await page.mouse.click(railBox.x + 22, railBox.y + railBox.height * 0.2);
-  await expect
-    .poll(async () => (await diffScrollState(rail)).progress)
-    .toBeLessThan(0.3);
-  await originalScrollable.hover();
-  await page.mouse.wheel(2_000, 0);
-  await expect
-    .poll(async () => (await diffScrollState(rail)).originalLeft)
-    .toBeGreaterThan(0);
-  await expect
-    .poll(async () => {
-      const state = await diffScrollState(rail);
-      return Math.abs(state.originalLeft - state.modifiedLeft);
-    })
-    .toBeLessThanOrEqual(1);
-
-  // Width-driven Markdown remeasurement rebuilds owned zones without drift.
-  const viewerStack = page.locator('.embedded-viewer-stack');
-  await viewerStack.evaluate((element) => {
-    element.style.width = '420px';
-    element.style.flex = '0 0 420px';
-  });
-  await expect
-    .poll(async () => diffScrollState(rail))
-    .toMatchObject({ heightsAligned: true, topsAligned: true });
-  await viewerStack.evaluate((element) => {
-    element.style.width = '';
-    element.style.flex = '';
-  });
-
-  // The same rail survives algorithm, ignore-comments, and layout changes.
-  const toolbar = diff.locator('.moonbit-diff-editor-toolbar');
-  const token = toolbar.getByRole('button', { name: 'Token diff' });
-  const tree = toolbar.getByRole('button', { name: 'Tree diff' });
-  const ignoreComments = toolbar.getByRole('button', { name: 'Ignore comments' });
-  await token.click();
-  await expect(diff).toHaveAttribute('data-diff-renderer', 'token');
-  await expect(rail).toBeVisible();
-  const ignoredMarkerCount = Number(
-    await rail.getAttribute('data-modified-change-count'),
-  );
-  await ignoreComments.click();
-  await expect(diff).toHaveAttribute('data-ignore-comments', 'false');
-  await expect
-    .poll(async () => Number(await rail.getAttribute('data-modified-change-count')))
-    .toBeGreaterThan(ignoredMarkerCount);
-  await tree.click();
-  await expect(diff).toHaveAttribute('data-diff-renderer', 'tree');
-  await page.locator('[data-action="toggle-diff-layout"]').click();
-  await expect(diff).toHaveAttribute('data-render-mode', 'unified');
-  await expect(rail).toBeVisible();
-  await expect(diff.getByRole('scrollbar', { name: 'Diff overview' })).toHaveCount(1);
-  await page.locator('[data-action="toggle-diff-layout"]').click();
-  await expect(diff).toHaveAttribute('data-render-mode', 'side-by-side');
-  await expect
-    .poll(async () => diffScrollState(rail))
-    .toMatchObject({ heightsAligned: true, topsAligned: true });
-
-  // Replacing both child models keeps one rail and retires old zone geometry.
-  await page.locator(workspaceItem('comments.mbt')).click();
-  await page.locator('[data-action="toggle-diff"]').click();
-  await expect(diff).toBeVisible();
-  await expect(modifiedPane).toContainText('new_value');
-  await expect(diff.getByRole('scrollbar', { name: 'Diff overview' })).toHaveCount(1);
-  await expect
-    .poll(async () => Number(await rail.getAttribute('data-modified-change-count')))
-    .toBeGreaterThan(0);
-  await expect
-    .poll(async () => diffScrollState(rail))
-    .toMatchObject({ heightsAligned: true, topsAligned: true });
-  await page.locator(workspaceItem('alignment-zones.mbt')).click();
-  await page.locator('[data-action="toggle-diff"]').click();
-  await expect(diff).toBeVisible();
-  await expect
-    .poll(() => modifiedPane.locator('.moonbit-viewer-markdown-comment').count())
-    .toBe(3);
-  await expect
-    .poll(async () => diffScrollState(rail))
-    .toMatchObject({ heightsAligned: true, topsAligned: true });
-});
-
-test('keeps tab-expanded unified deletions inside the horizontal scroll extent', async ({
-  page,
-}) => {
-  await page.goto('/embed.html');
-  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
-
-  await page.locator(workspaceItem('tabbed-deletion.mbt')).click();
-  await page.locator('[data-action="toggle-diff"]').click();
-  await page.locator('[data-action="toggle-diff-layout"]').click();
-
-  const modifiedPane = page.locator(
-    '.diff-viewer-host .moonbit-diff-editor-modified',
-  );
-  const deletedLine = modifiedPane.locator(
-    '.diff-editor-unified-deleted-line',
-  );
-  await expect(deletedLine).toContainText('deleted_tail');
-  const widths = await modifiedPane.evaluate((pane) => {
-    const rail = pane.querySelector('.view-zones');
-    const line = pane.querySelector('.diff-editor-unified-deleted-line');
-    const viewport = pane.querySelector(
-      '.monaco-scrollable-element.editor-scrollable',
-    );
-    return {
-      rail: Number.parseFloat(rail.style.width),
-      deleted: line.scrollWidth,
-      viewport: viewport.clientWidth,
-    };
-  });
-  expect(widths.deleted).toBeGreaterThan(widths.viewport + 500);
-  expect(widths.rail + 1).toBeGreaterThanOrEqual(widths.deleted);
-});
-
-test('renders character changes inside the line-level diff', async ({ page }) => {
-  await page.goto('/embed.html');
-  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
-
   await page.locator(workspaceItem('src/lib')).click();
   await page.locator(workspaceItem('src/lib/util.mbt')).click();
   await expect(page.locator(sourceEditor)).toContainText('42');
   await page.locator('[data-action="toggle-diff"]').click();
-  await page.locator('[data-action="toggle-diff-layout"]').click();
 
-  const diff = page.locator('.diff-viewer-host > .moonbit-diff-editor');
+  const diff = page.locator(diffEditor);
   const originalPane = diff.locator('.moonbit-diff-editor-original');
   const modifiedPane = diff.locator('.moonbit-diff-editor-modified');
-  await expect(diff).toHaveAttribute('data-render-mode', 'unified');
-  await expect(originalPane).toBeHidden();
-  await expect(
-    modifiedPane.locator(
-      '.diff-editor-unified-deleted-line .diff-editor-char-delete',
-    ),
-  ).toHaveText('1');
+  await expect(diff).toHaveAttribute('data-render-mode', 'side-by-side');
+  await expect(originalPane.locator('.diff-editor-char-delete')).toHaveText('1');
   await expect(modifiedPane.locator('.diff-editor-char-insert')).toHaveText('2');
-  await expect(
-    modifiedPane.locator('.diff-editor-unified-deleted-line'),
-  ).toHaveCount(1);
+  await expect(originalPane.locator('.diff-editor-line-delete')).toHaveCount(1);
   await expect(modifiedPane.locator('.diff-editor-line-insert')).toHaveCount(1);
 });
 
-test('switches standard token and tree diff only for mbt comparisons', async ({ page }) => {
-  await page.goto('/embed.html');
-  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
-  await page.locator('[data-action="toggle-diff"]').click();
-
-  const diff = page.locator('.diff-viewer-host > .moonbit-diff-editor');
-  const toolbar = diff.locator('.moonbit-diff-editor-toolbar');
-  const standard = toolbar.getByRole('button', { name: 'Standard diff' });
-  const token = toolbar.getByRole('button', { name: 'Token diff' });
-  const tree = toolbar.getByRole('button', { name: 'Tree diff' });
-  const ignoreComments = toolbar.getByRole('button', {
-    name: 'Ignore comments',
-  });
-  await expect(toolbar).toBeVisible();
-  await expect(standard).toHaveAttribute('aria-pressed', 'true');
-  await expect(ignoreComments).toHaveAttribute('aria-pressed', 'true');
-  await expect(ignoreComments).toBeDisabled();
-  await expect(diff).toHaveAttribute('data-ignore-comments', 'true');
-  await expect(diff).toHaveAttribute('data-diff-renderer', 'standard');
-
-  await token.click();
-  await expect(token).toHaveAttribute('aria-pressed', 'true');
-  await expect(ignoreComments).toBeEnabled();
-  await expect(diff).toHaveAttribute('data-diff-mode', 'token');
-  await expect(diff).toHaveAttribute('data-diff-renderer', 'token');
-  await expect(diff).not.toHaveAttribute('data-diff-fallback', 'true');
-
-  await tree.click();
-  await expect(tree).toHaveAttribute('aria-pressed', 'true');
-  await expect(diff).toHaveAttribute('data-diff-mode', 'tree');
-  await expect(diff).toHaveAttribute('data-diff-renderer', 'tree');
-  await expect(diff).not.toHaveAttribute('data-diff-fallback', 'true');
-
-  await standard.click();
-  await expect(standard).toHaveAttribute('aria-pressed', 'true');
-  await expect(ignoreComments).toBeDisabled();
-  await expect(diff).toHaveAttribute('data-diff-renderer', 'standard');
-
-  // Manifests and other non-.mbt files continue to use the existing diff and
-  // do not expose language-specific choices.
-  await page.locator('[data-action="toggle-diff"]').click();
-  await page.locator(workspaceItem('moon.mod')).click();
-  await page.locator('[data-action="toggle-diff"]').click();
-  await expect(diff).toBeVisible();
-  await expect(toolbar).toBeHidden();
-  await expect(diff).not.toHaveAttribute('data-moondiff-available', 'true');
-  await expect(diff).toHaveAttribute('data-diff-renderer', 'standard');
-});
-
-test('toggles comment filtering for token and tree review diffs', async ({ page }) => {
-  await page.goto('/embed.html');
-  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
-  await page.locator(workspaceItem('comments.mbt')).click();
-  await expect(page.locator(sourceEditor)).toContainText('new_value');
-  await page.locator('[data-action="toggle-diff"]').click();
-
-  const diff = page.locator('.diff-viewer-host > .moonbit-diff-editor');
-  const toolbar = diff.locator('.moonbit-diff-editor-toolbar');
-  const token = toolbar.getByRole('button', { name: 'Token diff' });
-  const tree = toolbar.getByRole('button', { name: 'Tree diff' });
-  const ignoreComments = toolbar.getByRole('button', {
-    name: 'Ignore comments',
-  });
-  const ignoreLabel = ignoreComments.locator(
-    '.moonbit-diff-editor-ignore-comments-label',
-  );
-  const originalPane = diff.locator('.moonbit-diff-editor-original');
-
-  // The standalone label collapses inside the actual diff container rather
-  // than relying on the whole browser viewport width.
-  const viewerStack = page.locator('.embedded-viewer-stack');
-  await viewerStack.evaluate((element) => {
-    element.style.width = '300px';
-    element.style.flex = '0 0 300px';
-  });
-  await expect(ignoreComments).toBeVisible();
-  await expect(ignoreLabel).toBeHidden();
-  const toolbarWidth = await toolbar.evaluate((element) => ({
-    client: element.clientWidth,
-    scroll: element.scrollWidth,
-  }));
-  expect(toolbarWidth.scroll).toBeLessThanOrEqual(toolbarWidth.client);
-  await viewerStack.evaluate((element) => {
-    element.style.width = '';
-    element.style.flex = '';
-  });
-
-  await token.click();
-  await expect(ignoreComments).toBeEnabled();
-  await expect(ignoreComments).toHaveAttribute('aria-pressed', 'true');
-  await expect(diff).toHaveAttribute('data-diff-renderer', 'token');
-  const ignoredTokenText = (
-    await originalPane.locator('.diff-editor-char-delete').allTextContents()
-  ).join(' ');
-  expect(ignoredTokenText).toContain('old');
-  expect(ignoredTokenText).not.toContain('obsolete');
-
-  await ignoreComments.click();
-  await expect(ignoreComments).toHaveAttribute('aria-pressed', 'false');
-  await expect(diff).toHaveAttribute('data-ignore-comments', 'false');
-  const visibleTokenText = (
-    await originalPane.locator('.diff-editor-char-delete').allTextContents()
-  ).join(' ');
-  expect(visibleTokenText).toContain('obsolete');
-
-  await tree.click();
-  await expect(tree).toHaveAttribute('aria-pressed', 'true');
-  await expect(ignoreComments).toHaveAttribute('aria-pressed', 'false');
-  await expect(diff).toHaveAttribute('data-diff-renderer', 'tree');
-  await ignoreComments.click();
-  await expect(ignoreComments).toHaveAttribute('aria-pressed', 'true');
-  await expect(diff).toHaveAttribute('data-ignore-comments', 'true');
-  const ignoredTreeText = (
-    await originalPane.locator('.diff-editor-char-delete').allTextContents()
-  ).join(' ');
-  expect(ignoredTreeText).not.toContain('obsolete');
-
-  // A fully filtered comparison is still a specialized result. Its inserted
-  // blank line aligns later source without painting either ignored line.
-  await page.locator('[data-action="toggle-diff"]').click();
-  await page.locator(workspaceItem('comments-only.mbt')).click();
-  await page.locator('[data-action="toggle-diff"]').click();
-  await expect(tree).toHaveAttribute('aria-pressed', 'true');
-  await expect(ignoreComments).toHaveAttribute('aria-pressed', 'true');
-  await expect(diff).toHaveAttribute('data-diff-renderer', 'tree');
-  await expect(
-    originalPane.locator('.diff-editor-line-delete, .diff-editor-char-delete'),
-  ).toHaveCount(0);
-  await expect(
-    diff.locator('.moonbit-diff-editor-modified').locator(
-      '.diff-editor-line-insert, .diff-editor-char-insert',
-    ),
-  ).toHaveCount(0);
-  await expect(originalPane.locator('.diff-editor-alignment-zone')).toHaveCount(1);
-
-  await page.locator('[data-action="toggle-diff"]').click();
-  await page.locator(workspaceItem('comments.mbt')).click();
-  await page.locator('[data-action="toggle-diff"]').click();
-  await expect(tree).toHaveAttribute('aria-pressed', 'true');
-  await expect(ignoreComments).toHaveAttribute('aria-pressed', 'true');
-
-  await page.locator('[data-action="toggle-diff-layout"]').click();
-  await expect(diff).toHaveAttribute('data-render-mode', 'unified');
-  await expect(
-    diff.locator('.diff-editor-unified-deleted-line'),
-  ).not.toContainText('obsolete explanation');
-
-  // The component keeps the preference and selected algorithm when its model
-  // pair changes within the mounted review surface.
-  await page.locator('[data-action="toggle-diff"]').click();
-  await page.locator(workspaceItem('src/lib')).click();
-  await page.locator(workspaceItem('src/lib/util.mbt')).click();
-  await page.locator('[data-action="toggle-diff"]').click();
-  await expect(tree).toHaveAttribute('aria-pressed', 'true');
-  await expect(ignoreComments).toHaveAttribute('aria-pressed', 'true');
-  await expect(ignoreComments).toBeEnabled();
-});
-
-test('uses moondiff token fallback when tree diff cannot parse a model', async ({ page }) => {
-  await page.goto('/embed.html');
-  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
-  await page.locator(workspaceItem('broken.mbt')).click();
-  await expect(page.locator(sourceEditor)).toContainText('fn okay');
-  await page.locator('[data-action="toggle-diff"]').click();
-
-  const diff = page.locator('.diff-viewer-host > .moonbit-diff-editor');
-  const toolbar = diff.locator('.moonbit-diff-editor-toolbar');
-  const standard = toolbar.getByRole('button', { name: 'Standard diff' });
-  const token = toolbar.getByRole('button', { name: 'Token diff' });
-  const tree = toolbar.getByRole('button', { name: 'Tree diff' });
-  await tree.click();
-  await expect(tree).toHaveAttribute('aria-pressed', 'true');
-  await expect(diff).toHaveAttribute('data-diff-mode', 'tree');
-  await expect(diff).toHaveAttribute('data-diff-renderer', 'token');
-  await expect(diff).toHaveAttribute('data-diff-fallback', 'true');
-  await expect(toolbar.locator('.moonbit-diff-editor-mode-status')).toHaveText(
-    'Tree diff unavailable — showing token diff',
-  );
-
-  // Token mode does not require a parseable tree, and leaving the failed
-  // mode clears the fallback notice.
-  await token.click();
-  await expect(diff).toHaveAttribute('data-diff-renderer', 'token');
-  await expect(diff).not.toHaveAttribute('data-diff-fallback', 'true');
-  await expect(toolbar.locator('.moonbit-diff-editor-mode-status')).toBeHidden();
-  await standard.click();
-  await expect(diff).toHaveAttribute('data-diff-renderer', 'standard');
-});
-
-test('renders a wide single-line comparison without eager row expansion', async ({ page }) => {
-  await page.goto('/embed.html');
-  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
-
-  await page.locator(workspaceItem('oversized-line.mbt')).click();
-  await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
-  await page.locator('[data-action="toggle-diff"]').click();
-  const diff = page.locator('.diff-viewer-host > .moonbit-diff-editor');
-  await expect(diff).toBeVisible();
-  await expect(
-    diff.locator('.moonbit-diff-editor-pane > .monaco-editor'),
-  ).toHaveCount(2);
-  await expect(diff.locator('.view-line')).toHaveCount(2);
-  await expect(diff.locator('.diff-editor-char-delete')).toHaveCount(0);
-  await expect(diff.locator('.diff-editor-char-insert')).toHaveCount(0);
-});
-
-test('drops a stale host-ready rAF after a rapid model swap', async ({ page }) => {
+test('drops a stale host-ready rAF after a rapid code-model swap', async ({ page }) => {
   await page.addInitScript(() => {
     const queue = [];
     globalThis.__embeddedReadyAnimationFrame = (callback) => {
@@ -771,10 +554,6 @@ test('drops a stale host-ready rAF after a rapid model swap', async ({ page }) =
 
   await page.locator(workspaceItem('src/lib')).click();
   await expect(page.locator(workspaceItem('src/lib/util.mbt'))).toBeVisible();
-
-  // Hold the host-ready callbacks while the Viewer itself continues to render
-  // on the browser's native rAF queue. The first callback captures moon.mod;
-  // the second captures util.mbt, which is the current model by flush time.
   await page.locator(workspaceItem('moon.mod')).click();
   await expect
     .poll(() => page.evaluate(() => globalThis.__embeddedReadyQueueLength()))
@@ -787,105 +566,137 @@ test('drops a stale host-ready rAF after a rapid model swap', async ({ page }) =
 
   await page.evaluate(() => globalThis.__flushEmbeddedReadyFrame());
   await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'loading');
-
   await page.evaluate(() => globalThis.__flushEmbeddedReadyFrame());
   await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
   await expect(page.locator(workspaceItem('src/lib/util.mbt'))).toHaveAttribute(
     'aria-selected',
     'true',
   );
-  await expect(page.locator('.monaco-editor.readonly-editor')).toContainText(
-    'util_answer',
-  );
+  await expect(page.locator(sourceEditor)).toContainText('util_answer');
 });
 
 function workspaceItem(path) {
   return workspaceSelector(path, { root: 'memory://workspace' });
 }
 
-async function firstFullyVisibleModelLine(pane) {
+async function wheelInlinePane(pane, deltaY) {
+  await pane.locator('.overflow-guard').evaluate((node, wheelDelta) => {
+    node.dispatchEvent(
+      new WheelEvent('wheel', {
+        deltaY: wheelDelta,
+        deltaMode: 0,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  }, deltaY);
+}
+
+async function inlineDeletedWindowEvidence(pane) {
   return pane.evaluate((root) => {
-    const viewport = root.querySelector(
-      '.monaco-scrollable-element.editor-scrollable',
+    const block = root.querySelector('.diff-editor-inline-deleted-block');
+    const margin = root.querySelector('.diff-editor-inline-deleted-margin');
+    const rows = Array.from(block?.querySelectorAll('.view-line') ?? []);
+    const margins = new Map(
+      Array.from(margin?.querySelectorAll('.line-numbers') ?? []).map((row) => [
+        Number(row.getAttribute('data-model-line')),
+        row.textContent.trim(),
+      ]),
     );
-    if (!viewport) return null;
-    const viewportRect = viewport.getBoundingClientRect();
-    const line = Array.from(root.querySelectorAll('.view-line')).find((row) => {
-      const rect = row.getBoundingClientRect();
-      return (
-        rect.top >= viewportRect.top - 0.5 &&
-        rect.bottom <= viewportRect.bottom + 0.5
-      );
-    });
-    if (!line) return null;
-    const rect = line.getBoundingClientRect();
+    const lineNumbers = rows.map((row) =>
+      Number(row.getAttribute('data-model-line')),
+    );
     return {
-      text: line.textContent,
-      offset: Math.round((rect.top - viewportRect.top) * 10) / 10,
+      rowCount: rows.length,
+      firstLine: lineNumbers.at(0) ?? 0,
+      lastLine: lineNumbers.at(-1) ?? 0,
+      validText: rows.every((row, index) =>
+        row.textContent.includes(`original_${lineNumbers[index] - 1}`),
+      ),
+      validLineNumbers: lineNumbers.every(
+        (lineNumber) => margins.get(lineNumber) === String(lineNumber),
+      ),
+      hasTokens: rows.some((row) => row.querySelector('[class*="mtk"]')),
     };
   });
 }
 
-async function diffScrollState(rail) {
-  return rail.evaluate((node) => {
-    const originalTop = Number(node.getAttribute('data-original-scroll-top'));
-    const modifiedTop = Number(node.getAttribute('data-modified-scroll-top'));
-    const originalHeight = Number(
-      node.getAttribute('data-original-scroll-height'),
+async function fragmentedInlineEvidence(pane) {
+  return pane.evaluate((root) => {
+    const blocks = Array.from(
+      root.querySelectorAll('.diff-editor-inline-deleted-block'),
     );
-    const modifiedHeight = Number(
-      node.getAttribute('data-modified-scroll-height'),
-    );
-    const viewportHeight = node.getBoundingClientRect().height;
-    const maxTop = Math.max(0, modifiedHeight - viewportHeight);
-    return {
-      originalTop,
-      modifiedTop,
-      originalHeight,
-      modifiedHeight,
-      originalLeft: Number(node.getAttribute('data-original-scroll-left')),
-      modifiedLeft: Number(node.getAttribute('data-modified-scroll-left')),
-      heightsAligned: Math.abs(originalHeight - modifiedHeight) <= 1,
-      topsAligned: Math.abs(originalTop - modifiedTop) <= 1,
-      progress: maxTop > 0 ? modifiedTop / maxTop : 0,
-    };
-  });
-}
-
-async function expectAlignedVisibleRows(diff) {
-  const alignment = await diff.evaluate((root) => {
-    const visibleRows = (selector) => {
-      const pane = root.querySelector(selector);
-      const viewport = pane.querySelector(
-        '.monaco-scrollable-element.editor-scrollable',
+    let rowCount = 0;
+    const activeFragments = new Set();
+    const activeOriginalLines = [];
+    let validText = true;
+    let validLineNumbers = true;
+    let hasTokens = false;
+    let activeBlockCount = 0;
+    for (const block of blocks) {
+      const rows = Array.from(block.querySelectorAll('.view-line'));
+      if (!rows.length) continue;
+      activeBlockCount += 1;
+      rowCount += rows.length;
+      const zoneId = block.getAttribute('monaco-view-zone');
+      const margin = root.querySelector(
+        `.diff-editor-inline-deleted-margin[monaco-view-zone="${zoneId}"]`,
       );
-      const viewportRect = viewport.getBoundingClientRect();
-      const rows = new Map();
-      for (const row of pane.querySelectorAll('.view-line')) {
-        const rect = row.getBoundingClientRect();
-        const text = row.textContent.trim();
-        const stableKey = text.match(/(?:stable_|wide_)\d+/)?.[0];
-        if (
-          stableKey &&
-          rect.bottom >= viewportRect.top &&
-          rect.top <= viewportRect.bottom
-        ) {
-          rows.set(stableKey, rect.top);
+      const margins = new Map(
+        Array.from(margin?.querySelectorAll('.line-numbers') ?? []).map((row) => [
+          Number(row.getAttribute('data-model-line')),
+          row.textContent.trim(),
+        ]),
+      );
+      for (const row of rows) {
+        const originalLine = Number(row.getAttribute('data-model-line'));
+        const match = row.textContent.match(/fragment_(\d+)_deleted_(\d+)/);
+        if (!match) {
+          validText = false;
+          continue;
         }
+        const fragment = Number(match[1]);
+        const deletedLine = Number(match[2]);
+        activeFragments.add(fragment);
+        activeOriginalLines.push(originalLine);
+        validText &&= originalLine === fragment * 131 + deletedLine + 1;
+        validLineNumbers &&= margins.get(originalLine) === String(originalLine);
+        hasTokens ||= Boolean(row.querySelector('[class*="mtk"]'));
       }
-      return rows;
-    };
-    const original = visibleRows('.moonbit-diff-editor-original');
-    const modified = visibleRows('.moonbit-diff-editor-modified');
-    const deltas = [];
-    for (const [text, top] of original) {
-      if (modified.has(text)) deltas.push(Math.abs(top - modified.get(text)));
     }
     return {
-      count: deltas.length,
-      maxDelta: deltas.length ? Math.max(...deltas) : Number.POSITIVE_INFINITY,
+      rowCount,
+      activeBlockCount,
+      activeFragments: Array.from(activeFragments),
+      activeOriginalLines,
+      validText,
+      validLineNumbers,
+      hasTokens,
     };
   });
-  expect(alignment.count).toBeGreaterThan(0);
-  expect(alignment.maxDelta).toBeLessThanOrEqual(1);
+}
+
+async function setViewerStackWidth(stack, diff, width) {
+  await stack.evaluate((element, nextWidth) => {
+    element.style.width = `${nextWidth}px`;
+    element.style.flex = `0 0 ${nextWidth}px`;
+  }, width);
+  await expect
+    .poll(async () => Math.round((await diff.boundingBox())?.width ?? 0))
+    .toBe(width);
+}
+
+async function firstChangedLineTopDelta(diff) {
+  return diff.evaluate((root) => {
+    const original = root.querySelector(
+      '.moonbit-diff-editor-original .diff-editor-line-delete',
+    );
+    const modified = root.querySelector(
+      '.moonbit-diff-editor-modified .diff-editor-line-insert',
+    );
+    if (!original || !modified) return Number.POSITIVE_INFINITY;
+    return Math.abs(
+      original.getBoundingClientRect().top - modified.getBoundingClientRect().top,
+    );
+  });
 }

@@ -118,9 +118,17 @@ pub fn ViewLayout::change_whitespace(
   self : ViewLayout,
   callback : (WhitespaceChangeAccessor) -> Unit raise?,
 ) -> Bool raise? {
-  let had_a_change = self.lines.change_whitespace(callback)
+  let (had_a_change, min_width_update_requested) = self.lines.change_whitespace_with_width(
+    callback,
+  )
   if had_a_change {
-    self.on_height_maybe_changed() |> ignore
+    if min_width_update_requested {
+      // A retained ViewZone can raise its discovered minimum width without
+      // changing vertical geometry. Recompute both axes in the same transaction.
+      self.update_content_width() |> ignore
+    } else {
+      self.on_height_maybe_changed() |> ignore
+    }
   }
   had_a_change
 }

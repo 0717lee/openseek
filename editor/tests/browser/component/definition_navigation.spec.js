@@ -455,11 +455,12 @@ test('F4 replaces a multi-definition preview without losing preview focus', asyn
   }
 });
 
-test('Alt+F12 from semantic Markdown mounts a projection-scoped Peek overlay and restores focus', async ({
+test('F12 from semantic Markdown navigates the source model without embedding a code-editor Peek', async ({
   page,
 }, testInfo) => {
   const reporter = await mountDefinitionFixture(page, testInfo);
   try {
+    const beforeCalls = (await state(page)).markdownProviderCalls;
     const point = await markdownTextRange(
       page,
       'definition_alpha',
@@ -467,64 +468,39 @@ test('Alt+F12 from semantic Markdown mounts a projection-scoped Peek overlay and
       0,
     );
     await page.mouse.click(point.x, point.y);
-    await page.keyboard.press('Alt+F12');
-    await expect(page.locator(markdownPeek)).toHaveCount(1);
-    await expect(page.locator(markdownPreview)).toHaveCount(1);
-
-    await page.locator('.definition-markdown-host').evaluate((host) => {
-      host.style.width = '640px';
-    });
-    await settle(page);
-    const geometry = await page.locator(markdownPeek).evaluate((root) => {
-      const editor = root.closest(
-        '.moonbit-viewer-markdown-document',
-      );
-      const rootRect = root.getBoundingClientRect();
-      const editorRect = editor.getBoundingClientRect();
-      return {
-        width: rootRect.width,
-        height: rootRect.height,
-        left: rootRect.left,
-        right: rootRect.right,
-        top: rootRect.top,
-        bottom: rootRect.bottom,
-        editorLeft: editorRect.left,
-        editorRight: editorRect.right,
-        editorTop: editorRect.top,
-        editorBottom: editorRect.bottom,
-      };
-    });
-    expect(geometry.width).toBeGreaterThan(300);
-    expect(geometry.height).toBeGreaterThan(200);
-    expect(geometry.left).toBeGreaterThanOrEqual(geometry.editorLeft);
-    expect(geometry.right).toBeLessThanOrEqual(geometry.editorRight);
-    expect(geometry.top).toBeGreaterThanOrEqual(geometry.editorTop);
-    expect(geometry.bottom).toBeLessThanOrEqual(geometry.editorBottom);
-
-    await page.keyboard.press('Escape');
+    await page.keyboard.press('F12');
+    await expect
+      .poll(async () => (await state(page)).markdownProviderCalls)
+      .toBeGreaterThan(beforeCalls);
     await expect(page.locator(markdownPeek)).toHaveCount(0);
+    await expect(page.locator(markdownPreview)).toHaveCount(0);
     await expect
       .poll(() =>
-        page.evaluate(
-          () =>
-            document.activeElement ===
-            globalThis.__definitionControls.markdownRoot,
+        page.locator(markdownEditor).evaluate((root) =>
+          root.querySelector(
+            '.moonbit-viewer-markdown-document-viewport',
+          ).scrollTop,
         ),
       )
-      .toBe(true);
+      .toBeGreaterThan(0);
 
-    const freshPoint = await markdownTextRange(
-      page,
-      'definition_alpha',
-      true,
-      0,
-    );
-    await page.mouse.click(freshPoint.x, freshPoint.y);
-    await page.keyboard.press('Alt+F12');
-    await expect(page.locator(markdownPeek)).toHaveCount(1);
+    // Replacing the projection keeps the same first-class Markdown surface;
+    // there is no nested Viewer lifecycle to retire.
+    await page.locator(markdownEditor).evaluate((root) => {
+      globalThis.__definitionRetainedMarkdownRoot = root;
+    });
     await page.evaluate(
       () => globalThis.__definitionControls.replace_markdown_source(),
     );
+    await expect(page.locator(markdownEditor)).toHaveCount(1);
+    expect(
+      await page.evaluate(
+        (selector) =>
+          document.querySelector(selector) ===
+          globalThis.__definitionRetainedMarkdownRoot,
+        markdownEditor,
+      ),
+    ).toBe(true);
     await expect(page.locator(markdownPeek)).toHaveCount(0);
   } finally {
     reporter.dispose();

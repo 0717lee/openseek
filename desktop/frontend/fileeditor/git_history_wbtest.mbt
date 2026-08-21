@@ -191,12 +191,12 @@ test "historical tabs use only the inert diff surface and history breadcrumb" {
     ),
   )
   assert_true(
-    body.contains("id=\"unified-diff-host\" class=\"viewer-host editor-shell\""),
+    body.contains("id=\"diff-editor-host\" class=\"viewer-host editor-shell\""),
   )
   let breadcrumb = render_review_html(breadcrumb_view(test_emit(), state, ctx))
   assert_true(breadcrumb.contains("11111111"))
   assert_true(breadcrumb.contains("src/main.mbt"))
-  assert_true(breadcrumb.contains("aria-label=\"Unified diff layout\""))
+  assert_true(breadcrumb.contains("aria-label=\"Inline diff layout\""))
   assert_false(breadcrumb.contains("Mark reviewed"))
   assert_false(breadcrumb.contains("View file"))
 }

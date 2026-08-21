@@ -1,4 +1,4 @@
-// Direct public-Viewer proof for Markdown section folding. The mounted
+// Direct public-MarkdownViewer proof for Markdown section folding. The mounted
 // white-box suite pins the synchronous fold state machine; this scenario owns
 // what only a real browser can observe: computed `display:none`, real toggle
 // clicks, caret-based semantic hover against visible and revealed fences, and
@@ -46,7 +46,7 @@ fn markdown_folding_source() -> String {
 
 ///|
 fn markdown_folding_facts_json(
-  viewer : @viewer.Viewer,
+  viewer : @viewer.MarkdownViewer,
   source : () -> String,
 ) -> String {
   let current = source()
@@ -61,7 +61,7 @@ fn markdown_folding_facts_json(
     "beta": offset_of("## Beta"),
     "deep": offset_of("### Deep"),
     "collapsed": viewer
-    .collapsed_markdown_sections()
+    .collapsed_sections()
     .map(offset => offset.to_json())
     .to_json(),
   }).stringify()
@@ -112,12 +112,12 @@ fn run_markdown_folding_test() -> Unit {
     "markdown-folding-rev-1",
     markdown_folding_source(),
   )
-  let viewer = @viewer.Viewer::create(
+  let viewer = @viewer.MarkdownViewer::create(
     host,
     services~,
-    options=ViewerOptions(theme="dark"),
+    options=MarkdownViewerOptions(theme="dark"),
   )
-  viewer.set_model(Some(model))
+  viewer.set_model(Some(MarkdownViewerModel(model, MoonBitMarkdown))) |> ignore
   viewer.handle_initialized()
   install_markdown_folding_controls(
     () => markdown_folding_facts_json(viewer, () => model.get_value()),
@@ -126,12 +126,9 @@ fn run_markdown_folding_test() -> Unit {
   )
   // The initial seeded state is part of the report so the spec separates
   // "policy seeded wrongly" from "a later interaction broke it".
-  ctx.metric_int(
-    "initialCollapsedCount",
-    viewer.collapsed_markdown_sections().length(),
-  )
+  ctx.metric_int("initialCollapsedCount", viewer.collapsed_sections().length())
   ctx.assert_true(
-    viewer.collapsed_markdown_sections().length() == 1,
+    viewer.collapsed_sections().length() == 1,
     "auto-fold seeds exactly the bulky depth-3 section",
   )
   ctx.finish()
