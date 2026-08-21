@@ -1012,6 +1012,7 @@ fn start_openseek(
   task : String,
   submission_id : String,
   selected_model : EngineModel,
+  reasoning : OpenSeekReasoning,
   max_steps : String,
   session : String,
   workspace~ : @common.Uri,
@@ -1020,6 +1021,7 @@ fn start_openseek(
   let payload = start_payload(
     task,
     selected_model,
+    reasoning,
     max_steps,
     session,
     submission_id,
@@ -1098,6 +1100,7 @@ async fn request_agent_start(
 fn start_payload(
   task : String,
   selected_model : EngineModel,
+  reasoning : OpenSeekReasoning,
   max_steps : String,
   session : String,
   submission_id : String,
@@ -1108,6 +1111,7 @@ fn start_payload(
     task,
     submission_id: Some(submission_id),
     model: Some(selected_model.wire()),
+    thinking: selected_model.thinking(reasoning),
     max_steps: parsed_max_steps(max_steps),
     session,
     workspace: Some(workspace.path),
@@ -1365,6 +1369,7 @@ fn compact_openseek(
   channel : @interop.ChannelId,
   session~ : String,
   model~ : EngineModel,
+  reasoning~ : OpenSeekReasoning,
   max_steps~ : String,
   workspace~ : @common.Uri,
 ) -> @cmd.Cmd {
@@ -1381,6 +1386,7 @@ fn compact_openseek(
           {
             session,
             model: Some(model.wire()),
+            thinking: model.thinking(reasoning),
             max_steps: parsed_max_steps(max_steps),
             workspace: Some(workspace.path),
           },
@@ -1418,13 +1424,16 @@ fn goal_openseek(
   channel : @interop.ChannelId,
   session~ : String,
   model~ : EngineModel,
+  reasoning~ : OpenSeekReasoning,
   max_steps~ : String,
   workspace~ : @common.Uri,
   command : String,
   text : String?,
 ) -> @cmd.Cmd {
   guard @resource.belongs_to(workspace, channel) else { return @cmd.none }
-  let payload = goal_payload(session, model, max_steps, workspace, text)
+  let payload = goal_payload(
+    session, model, reasoning, max_steps, workspace, text,
+  )
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
       @interop.in_ordered_lane(
@@ -1450,6 +1459,7 @@ fn goal_openseek(
 fn goal_payload(
   session : String,
   model : EngineModel,
+  reasoning : OpenSeekReasoning,
   max_steps : String,
   workspace : @common.Uri,
   text : String?,
@@ -1465,6 +1475,7 @@ fn goal_payload(
     // the lifecycle work.
     auto: None,
     model: Some(model.wire()),
+    thinking: model.thinking(reasoning),
     max_steps: parsed_max_steps(max_steps),
     workspace: Some(workspace.path),
   }

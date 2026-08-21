@@ -103,6 +103,7 @@ fn start_in_new_worktree(
   task : String,
   submission_id : String,
   selected_model : EngineModel,
+  reasoning : OpenSeekReasoning,
   max_steps : String,
   session : String,
   workspace : @common.Uri,
@@ -186,6 +187,7 @@ fn start_in_new_worktree(
           let start = start_payload(
             task,
             selected_model,
+            reasoning,
             max_steps,
             session,
             submission_id,
@@ -239,6 +241,7 @@ fn set_goal_in_new_worktree(
   session : String,
   workspace : @common.Uri,
   engine_model : EngineModel,
+  reasoning : OpenSeekReasoning,
   max_steps : String,
   command : String,
   text : String?,
@@ -328,7 +331,7 @@ fn set_goal_in_new_worktree(
             ),
           )
           let payload = goal_payload(
-            session, engine_model, max_steps, workspace, text,
+            session, engine_model, reasoning, max_steps, workspace, text,
           )
           request_agent_goal(
             scheduler, dispatch, channel, payload, session, command, text,
@@ -1653,6 +1656,7 @@ test "a start payload never names a worktree" {
   let payload = start_payload(
     "go",
     High,
+    ReasoningMax,
     "1000",
     "desktop-wt",
     "sub-1",
@@ -1664,4 +1668,15 @@ test "a start payload never names a worktree" {
     payload.to_json() is Object(fields) && fields.get("worktree") is None,
   )
   assert_eq(payload.workspace, Some("/proj"))
+  assert_eq(payload.thinking, Some(ThinkingMax))
+  let unknown_model = start_payload(
+    "go",
+    Other("kimi-k2.5"),
+    ReasoningMax,
+    "1000",
+    "desktop-kimi",
+    "sub-2",
+    workspace~,
+  )
+  assert_true(unknown_model.thinking is None)
 }

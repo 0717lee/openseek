@@ -17,12 +17,14 @@ test "Codex turn payloads keep app-server field names" {
     thread_id: "thread-1",
     input: [{ "type": "text", "text": "hello" }],
     model: Some("gpt-test"),
+    effort: Some("high"),
     cwd: None,
   }
   @debug.assert_eq(start.to_json(), {
     "threadId": "thread-1",
     "input": [{ "type": "text", "text": "hello" }],
     "model": "gpt-test",
+    "effort": "high",
   })
   let steer : @protocol.CodexTurnSteerPayload = {
     thread_id: "thread-1",

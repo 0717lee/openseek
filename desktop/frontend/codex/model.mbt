@@ -32,6 +32,17 @@ priv struct CodexModelOption {
   id : String
   label : String
   is_default : Bool
+  reasoning_efforts : Array[CodexReasoningEffort]
+  default_reasoning_effort : String?
+} derive(Eq)
+
+///|
+/// One effort advertised by app-server for one exact model. Values remain
+/// catalog-owned strings so newer Codex releases can add a level without a
+/// SeekMoon protocol release.
+priv struct CodexReasoningEffort {
+  value : String
+  description : String
 } derive(Eq)
 
 ///|
@@ -236,6 +247,7 @@ enum Msg {
   SkillsLoaded(cwd~ : String, skills~ : Array[CodexSkill])
   SkillsFailed(cwd~ : String)
   ModelChanged(String)
+  EffortChanged(String)
   GitLoaded(thread_id~ : String, reply~ : @protocol.GitPullRequestReply)
   ToggleGitDetails
   CloseGitDetails
@@ -294,6 +306,13 @@ pub fn Msg::start_draft(id : String, cwd : String) -> Msg {
 /// package only carries the current pick.
 pub fn Msg::model_changed(id : String) -> Msg {
   ModelChanged(id)
+}
+
+///|
+/// Shell entrypoint for the Codex reasoning selector. The catalog validates
+/// the value before it can become the next `turn/start` override.
+pub fn Msg::effort_changed(effort : String) -> Msg {
+  EffortChanged(effort)
 }
 
 ///|
@@ -398,6 +417,9 @@ struct State {
   auth_url : String?
   models : Array[CodexModelOption]
   selected_model : String
+  // The next ordinary turn's app-server `effort`. It is always empty when the
+  // selected model has no advertised effort metadata.
+  selected_effort : String
   threads : Array[CodexThreadRow]
   archived_threads : Array[CodexThreadRow]
   // Live and archived pagination are independent requests. Each refresh
@@ -446,6 +468,7 @@ pub fn State::State(loading? : Bool = false) -> State {
     auth_url: None,
     models: [],
     selected_model: "",
+    selected_effort: "",
     threads: [],
     archived_threads: [],
     live_catalog_generation: 0,
@@ -492,6 +515,69 @@ pub fn State::can_start_thread(self : State) -> Bool {
 /// chip may still switch the conversation to another agent.
 pub fn State::composing_draft(self : State) -> Bool {
   self.selection is CodexDraftTask(_)
+}
+
+///|
+/// Select a catalog model and retain the current effort only when that exact
+/// model supports it. Otherwise the model's advertised default (then its first
+/// supported value) becomes the next turn's setting.
+fn State::with_selected_model(self : State, id : String) -> State {
+  let id = id.trim().to_owned()
+  if self.models.is_empty() {
+    // Startup restores preferences before model/list settles.
+    return { ..self, selected_model: id }
+  }
+  for model in self.models {
+    if model.id == id {
+      return {
+        ..self,
+        selected_model: id,
+        selected_effort: model.reasoning_effort(self.selected_effort),
+      }
+    }
+  }
+  self
+}
+
+///|
+/// Adopt only a value the selected model advertised. Before model/list
+/// arrives, retain the preference so catalog reconciliation can validate it.
+fn State::with_selected_effort(self : State, effort : String) -> State {
+  let effort = effort.trim().to_owned()
+  if self.models.is_empty() {
+    return { ..self, selected_effort: effort }
+  }
+  guard self.selected_model_option() is Some(model) &&
+    model.reasoning_efforts.iter().any(option => option.value == effort) else {
+    return self
+  }
+  { ..self, selected_effort: effort }
+}
+
+///|
+fn State::selected_model_option(self : State) -> CodexModelOption? {
+  for model in self.models {
+    if model.id == self.selected_model {
+      return Some(model)
+    }
+  }
+  None
+}
+
+///|
+fn CodexModelOption::reasoning_effort(
+  self : CodexModelOption,
+  preferred : String,
+) -> String {
+  let preferred = preferred.trim().to_owned()
+  if self.reasoning_efforts.iter().any(option => option.value == preferred) {
+    return preferred
+  }
+  if self.default_reasoning_effort is Some(default_) &&
+    self.reasoning_efforts.iter().any(option => option.value == default_) {
+    return default_
+  }
+  self.reasoning_efforts.get(0).map(option => option.value).unwrap_or("")
 }
 
 ///|
@@ -559,6 +645,43 @@ test "the model listing follows catalog and account state" {
   }
   assert_eq(options.length(), 2)
   inspect(selected, content="gpt-5.4-codex")
+}
+
+///|
+test "the model catalog validates reasoning effort per model" {
+  let listed = {
+    ..State(),
+    selected_model: "gpt-main",
+    selected_effort: "xhigh",
+  }.with_models({
+    "data": [
+      {
+        "id": "gpt-main",
+        "isDefault": true,
+        "defaultReasoningEffort": "medium",
+        "supportedReasoningEfforts": [
+          { "reasoningEffort": "low", "description": "Faster" },
+          { "reasoningEffort": "medium", "description": "Balanced" },
+        ],
+      },
+      {
+        "id": "gpt-fast",
+        "defaultReasoningEffort": "minimal",
+        "supportedReasoningEfforts": [
+          { "reasoningEffort": "minimal", "description": "Fastest" },
+        ],
+      },
+    ],
+  })
+  // A stale stored value falls back to this model's catalog default.
+  assert_eq(listed.selected_effort, "medium")
+  let low = listed.with_selected_effort("low")
+  assert_eq(low.selected_effort, "low")
+  // Changing model revalidates the effort instead of sending an unsupported
+  // model/effort pair to app-server.
+  let fast = low.with_selected_model("gpt-fast")
+  assert_eq(fast.selected_effort, "minimal")
+  assert_eq(fast.with_selected_effort("high").selected_effort, "minimal")
 }
 
 ///|
@@ -1131,10 +1254,27 @@ fn State::with_models(self : State, value : Json) -> State {
     if is_default {
       default_model = id
     }
+    let reasoning_efforts : Array[CodexReasoningEffort] = []
+    if model.get("supportedReasoningEfforts") is Some(Array(efforts)) {
+      for effort in efforts {
+        guard effort is Object(effort) &&
+          @jsonx.json_text(effort, "reasoningEffort") is Some(value) else {
+          continue
+        }
+        reasoning_efforts.push({
+          value,
+          description: @jsonx.json_text(effort, "description").unwrap_or(""),
+        })
+      }
+    }
     models.push({
       id,
       label: @jsonx.json_text(model, "displayName").unwrap_or(id),
       is_default,
+      reasoning_efforts,
+      default_reasoning_effort: @jsonx.json_text(
+        model, "defaultReasoningEffort",
+      ),
     })
   }
   let selected_model = if self.selected_model.is_empty() ||
@@ -1147,7 +1287,12 @@ fn State::with_models(self : State, value : Json) -> State {
   } else {
     self.selected_model
   }
-  { ..self, models, selected_model, notice: "" }
+  let selected_effort = models
+    .iter()
+    .find_first(model => model.id == selected_model)
+    .map(model => model.reasoning_effort(self.selected_effort))
+    .unwrap_or("")
+  { ..self, models, selected_model, selected_effort, notice: "" }
 }
 
 ///|

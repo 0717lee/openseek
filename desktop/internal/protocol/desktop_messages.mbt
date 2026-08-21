@@ -9,12 +9,46 @@
 // slash-separated relative strings.
 
 ///|
+/// OpenSeek's closed reasoning setting. Keeping the wire values typed in the
+/// protocol package makes every Desktop command reject schema drift before an
+/// engine's current phase can affect how the request is handled.
+pub(all) enum OpenSeekThinking {
+  ThinkingOff
+  ThinkingHigh
+  ThinkingMax
+} derive(Debug, Eq)
+
+///|
+pub fn OpenSeekThinking::wire(self : OpenSeekThinking) -> String {
+  match self {
+    ThinkingOff => "no"
+    ThinkingHigh => "high"
+    ThinkingMax => "max"
+  }
+}
+
+///|
+/// Parse the same wire spelling from non-JSON configuration such as the
+/// inherited OPENSEEK_THINKING environment variable.
+pub fn OpenSeekThinking::parse(value : String) -> OpenSeekThinking? {
+  match value {
+    "no" => Some(ThinkingOff)
+    "high" => Some(ThinkingHigh)
+    "max" => Some(ThinkingMax)
+    _ => None
+  }
+}
+
+///|
 pub(all) struct StartPayload {
   task : String
   // Optional client-minted lifecycle identity echoed with `agent.started`.
   // Blank ids and ids longer than 128 UTF-8 bytes are ignored.
   submission_id : String?
   model : String?
+  // Optional keeps older clients compatible; a present value is decoded into
+  // the closed protocol type before the command reaches the host operation.
+  thinking : OpenSeekThinking?
   max_steps : Int?
   // Every desktop run belongs to a durable conversation. The engine rejects
   // a blank id before it acquires that conversation's record lease.
@@ -24,7 +58,7 @@ pub(all) struct StartPayload {
   // binds at creation) runs in that checkout — the start itself never names
   // or mutates worktrees.
   workspace : String?
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
 
 ///|
 pub(all) struct CancelPayload {
@@ -57,9 +91,10 @@ pub(all) struct CompactPayload {
   session : String
   // A resumed conversation may need a new engine process with these settings.
   model : String?
+  thinking : OpenSeekThinking?
   max_steps : Int?
   workspace : String?
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
 
 ///|
 pub(all) struct GoalPayload {
@@ -75,9 +110,10 @@ pub(all) struct GoalPayload {
   auto : Bool?
   // A resumed conversation may need a new engine process with these settings.
   model : String?
+  thinking : OpenSeekThinking?
   max_steps : Int?
   workspace : String?
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
 
 ///|
 pub(all) struct LoadSessionPayload {
@@ -1514,6 +1550,18 @@ pub extend MoonIdeNavigationPayload with Eq::{equal, not_equal}
 
 ///|
 pub extend MoonIdeNavigationPayload with ToJson::{to_json}
+
+///|
+pub extend OpenSeekThinking with Debug::{to_repr}
+
+///|
+pub extend OpenSeekThinking with FromJson::{from_json}
+
+///|
+pub extend OpenSeekThinking with Eq::{equal, not_equal}
+
+///|
+pub extend OpenSeekThinking with ToJson::{to_json}
 
 ///|
 pub extend OpenPathPayload with Debug::{to_repr}

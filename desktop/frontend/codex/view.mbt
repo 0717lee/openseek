@@ -31,6 +31,44 @@ pub fn State::account_label(self : State) -> String {
 }
 
 ///|
+/// The selected model's catalog-backed reasoning control. Older app-server
+/// catalogs omit effort metadata; in that case there is no honest selector to
+/// render and ordinary turns keep inheriting Codex's own configuration.
+pub fn State::reasoning_effort_chip(
+  self : State,
+  change : @cmd.Emit[String],
+) -> @html.Html? {
+  guard self.selected_model_option() is Some(model) &&
+    !model.reasoning_efforts.is_empty() else {
+    return None
+  }
+  let selected = model.reasoning_effort(self.selected_effort)
+  guard !selected.is_empty() else { return None }
+  let options : Array[@composer.ModelOption] = []
+  for option in model.reasoning_efforts {
+    options.push({ value: option.value, label: "Reasoning · " + option.value })
+  }
+  let description = model.reasoning_efforts
+    .iter()
+    .find_first(option => option.value == selected)
+    .map(option => option.description)
+    .unwrap_or("")
+  Some(
+    @composer.ReasoningSelect::{
+      options,
+      selected,
+      disabled: options.length() <= 1,
+      change,
+      title: if description.is_empty() {
+        "Reasoning effort: " + selected
+      } else {
+        "Reasoning effort: \{selected} — \{description}"
+      },
+    }.render(),
+  )
+}
+
+///|
 fn CodexPendingRequest::view(
   self : CodexPendingRequest,
   dispatch : @cmd.Emit[Msg],

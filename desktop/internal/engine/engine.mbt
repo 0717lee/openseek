@@ -1451,6 +1451,7 @@ async fn engine_process_env(
   // ignores that and falls back to its default model.
   env["DEEPSEEK"] = config.api_key
   env["OPENSEEK_MODEL"] = config.model
+  env["OPENSEEK_THINKING"] = config.thinking.wire()
   env["OPENSEEK_MAX_STEPS"] = config.max_steps.to_string()
   env["OPENSEEK_DIR"] = "."
   if resolved_global_skills_dir() is Some(dir) {
@@ -2696,6 +2697,7 @@ async test "native engine env has one authoritative bundled moon path" {
     api_key: "k",
     api_url: None,
     model: "m",
+    thinking: ThinkingHigh,
     max_steps: 1,
     engine: engine.to_string(),
     cwd: None,
@@ -2704,6 +2706,7 @@ async test "native engine env has one authoritative bundled moon path" {
   }
   let env = engine_process_env(config, Some(runtime))
   assert_eq(env["OPENSEEK_SESSION"], "s-env")
+  assert_eq(env["OPENSEEK_THINKING"], "high")
   assert_true(env.get("OPENSEEK_SESSION_ROOT") is None)
   let moon_bin = moon_home.join("bin").to_string()
   let expected_path = if ambient_path is Some(path) && !path.is_empty() {
@@ -2786,6 +2789,7 @@ async test "engine startup rolls back follower on pre-spawn failure" {
     api_key: "test",
     api_url: None,
     model: "test",
+    thinking: ThinkingMax,
     max_steps: 1,
     engine: dir + "/missing/openseek",
     cwd: None,
@@ -2901,6 +2905,7 @@ fn pump_test_config(session : String) -> RunConfig {
     api_key: "test",
     api_url: None,
     model: "test",
+    thinking: ThinkingMax,
     max_steps: 1,
     engine: "unused",
     cwd: None,

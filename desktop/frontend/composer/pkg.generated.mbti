@@ -62,7 +62,10 @@ pub(all) struct Draft {
   task : String
   mentions : Array[Mention]
 } derive(Eq, @debug.Debug)
+pub fn Draft::equal(Self, Self) -> Bool
+pub fn Draft::not_equal(Self, Self) -> Bool
 pub fn Draft::prompt(Self) -> String
+pub fn Draft::to_repr(Self) -> @debug.Repr
 pub fn Draft::with_mention(Self, Mention) -> Self
 
 pub(all) enum FileIndex {
@@ -71,47 +74,66 @@ pub(all) enum FileIndex {
   FileIndexReady(epoch~ : Int, truncated~ : Bool)
   FileIndexFailed(epoch~ : Int)
 } derive(Eq, @debug.Debug)
+pub fn FileIndex::equal(Self, Self) -> Bool
+pub fn FileIndex::not_equal(Self, Self) -> Bool
+pub fn FileIndex::to_repr(Self) -> @debug.Repr
 
 type GitChanges derive(Eq)
 pub fn GitChanges::GitChanges(added~ : Int, removed~ : Int, files~ : Int, partial~ : Bool, base? : String) -> Self
+pub fn GitChanges::equal(Self, Self) -> Bool
+pub fn GitChanges::not_equal(Self, Self) -> Bool
 
 type GitChecks derive(Eq)
 pub fn GitChecks::GitChecks(passed~ : Int, failed~ : Int, pending~ : Int) -> Self
+pub fn GitChecks::equal(Self, Self) -> Bool
+pub fn GitChecks::not_equal(Self, Self) -> Bool
 pub fn GitChecks::summary(Self) -> String
 pub fn GitChecks::tone(Self) -> String
 
 type GitPresentation derive(Eq)
 pub fn GitPresentation::GitPresentation(branch~ : String, changes? : GitChanges, pull_request? : GitPullRequest, compare_url? : String, missing_pull_request? : String) -> Self
+pub fn GitPresentation::equal(Self, Self) -> Bool
 pub fn GitPresentation::label(Self) -> String
+pub fn GitPresentation::not_equal(Self, Self) -> Bool
 pub fn GitPresentation::render(Self, open~ : Bool, toggle~ : @cmd.Cmd) -> @html.Html
 pub fn GitPresentation::summary(Self) -> String
 pub fn GitPresentation::tone(Self) -> String
 
 type GitPullRequest derive(Eq)
 pub fn GitPullRequest::GitPullRequest(number~ : Int, title~ : String, state~ : String, draft~ : Bool, url~ : String, checks? : GitChecks) -> Self
+pub fn GitPullRequest::equal(Self, Self) -> Bool
 pub fn GitPullRequest::label(Self) -> String
+pub fn GitPullRequest::not_equal(Self, Self) -> Bool
 
 pub(all) struct GoalInput {
   draft : String?
   standing : @transcript.GoalStanding?
   pending : GoalPending?
 } derive(Eq)
+pub fn GoalInput::equal(Self, Self) -> Bool
+pub fn GoalInput::not_equal(Self, Self) -> Bool
 
 pub(all) enum GoalPending {
   GoalSetting(String)
   GoalClearing
 } derive(Eq, @debug.Debug)
+pub fn GoalPending::equal(Self, Self) -> Bool
+pub fn GoalPending::not_equal(Self, Self) -> Bool
+pub fn GoalPending::to_repr(Self) -> @debug.Repr
 
 pub(all) struct Identity {
   owner : @interop.ConversationKey
   archive_generation : Int
 } derive(Eq, @debug.Debug)
+pub fn Identity::equal(Self, Self) -> Bool
+pub fn Identity::not_equal(Self, Self) -> Bool
+pub fn Identity::to_repr(Self) -> @debug.Repr
 
 pub(all) struct Input {
   identity : Identity
   draft : Draft
-  run : RunHeartbeat?
   goal : GoalInput
+  run : RunHeartbeat?
   slash_commands : Array[SlashCommand]
   root : @common.Uri?
   installed_skills : Array[@skills.InstalledItem]
@@ -125,6 +147,8 @@ pub(all) struct Input {
   file_index : FileIndex
   presentation : Presentation
 } derive(Eq)
+pub fn Input::equal(Self, Self) -> Bool
+pub fn Input::not_equal(Self, Self) -> Bool
 
 pub(all) struct KeyboardActions {
   menu_open : Bool
@@ -139,6 +163,9 @@ pub(all) struct Mention {
   ref_ : @mention_context.MentionRef
   range : @common.Range?
 } derive(Eq, @debug.Debug)
+pub fn Mention::equal(Self, Self) -> Bool
+pub fn Mention::not_equal(Self, Self) -> Bool
+pub fn Mention::to_repr(Self) -> @debug.Repr
 
 pub(all) struct MentionChip {
   glyph : String
@@ -152,6 +179,8 @@ pub fn MentionChip::render(Self) -> @html.Html
 type Menu[T] derive(Eq)
 pub fn[T] Menu::Menu(Array[T], loading~ : Bool, draft_without_token~ : String) -> Self[T]
 pub fn[T] Menu::current(Self[T]) -> T?
+pub fn[T : Eq] Menu::equal(Self[T], Self[T]) -> Bool
+pub fn[T : Eq] Menu::not_equal(Self[T], Self[T]) -> Bool
 pub fn[T] Menu::selected(Self[T]) -> Int
 pub fn[T] Menu::shifted(Self[T], Int) -> Self[T]
 
@@ -189,23 +218,43 @@ pub(all) struct Presentation {
   disabled : Bool
   primary_action : PrimaryAction
 } derive(Eq)
+pub fn Presentation::equal(Self, Self) -> Bool
+pub fn Presentation::not_equal(Self, Self) -> Bool
 
 pub(all) enum PrimaryAction {
   Send(available~ : Bool)
   Running(steer_available~ : Bool, can_stop~ : Bool)
 } derive(Eq, @debug.Debug)
+pub fn PrimaryAction::equal(Self, Self) -> Bool
+pub fn PrimaryAction::not_equal(Self, Self) -> Bool
+pub fn PrimaryAction::to_repr(Self) -> @debug.Repr
+
+pub(all) struct ReasoningSelect {
+  options : Array[ModelOption]
+  selected : String
+  disabled : Bool
+  change : @cmd.Emit[String]
+  title : String
+}
+pub fn ReasoningSelect::render(Self) -> @html.Html
 
 pub(all) struct Replacement {
   archived : @interop.ConversationKey
   fresh : @interop.ConversationKey
   archive_generation : Int
 } derive(Eq, @debug.Debug)
+pub fn Replacement::equal(Self, Self) -> Bool
+pub fn Replacement::not_equal(Self, Self) -> Bool
+pub fn Replacement::to_repr(Self) -> @debug.Repr
 
 pub(all) struct RunHeartbeat {
   stage : RunStage
   started_ms : Double?
   tokens : Int
 } derive(Eq, @debug.Debug)
+pub fn RunHeartbeat::equal(Self, Self) -> Bool
+pub fn RunHeartbeat::not_equal(Self, Self) -> Bool
+pub fn RunHeartbeat::to_repr(Self) -> @debug.Repr
 
 pub(all) enum RunStage {
   Starting
@@ -214,17 +263,25 @@ pub(all) enum RunStage {
   Working
   Stopping
 } derive(Eq, @debug.Debug)
+pub fn RunStage::equal(Self, Self) -> Bool
+pub fn RunStage::not_equal(Self, Self) -> Bool
+pub fn RunStage::to_repr(Self) -> @debug.Repr
 
 pub(all) struct SlashCommand {
   label : String
   detail : String
   command : String
 } derive(Eq, @debug.Debug)
+pub fn SlashCommand::equal(Self, Self) -> Bool
+pub fn SlashCommand::not_equal(Self, Self) -> Bool
+pub fn SlashCommand::to_repr(Self) -> @debug.Repr
 
 type Trigger derive(Eq)
 pub fn Trigger::draft_without_token(Self) -> String
+pub fn Trigger::equal(Self, Self) -> Bool
 pub fn Trigger::marker(Self) -> String
 pub fn Trigger::matches(Self, Array[String]) -> Bool
+pub fn Trigger::not_equal(Self, Self) -> Bool
 pub fn Trigger::parse(String, inline_markers~ : String) -> Self?
 pub fn Trigger::query(Self) -> String
 
@@ -256,6 +313,9 @@ pub(all) enum WorktreeChoice {
   FreshWorktree
   BoundWorktree(String)
 } derive(Eq, @debug.Debug)
+pub fn WorktreeChoice::equal(Self, Self) -> Bool
+pub fn WorktreeChoice::not_equal(Self, Self) -> Bool
+pub fn WorktreeChoice::to_repr(Self) -> @debug.Repr
 pub fn WorktreeChoice::toggled(Self) -> Self
 pub fn WorktreeChoice::wants_fresh(Self) -> Bool
 

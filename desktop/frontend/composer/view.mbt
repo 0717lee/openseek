@@ -42,19 +42,21 @@ pub(all) struct ModelGroup {
 }
 
 ///|
-/// A compact model pill. A transparent native
-/// select covers the visible label, preserving platform menu behavior without
-/// letting the longest option determine the pill's width.
-pub(all) struct ModelSelect {
+/// A compact native-select pill for one caller-owned setting. The transparent
+/// select preserves platform menu behavior while the visible label stays
+/// sized to the current choice instead of the longest available option.
+priv struct CompactSelect {
   groups : Array[ModelGroup]
   selected : String
   disabled : Bool
   change : @cmd.Emit[String]
   title : String
+  glyph : String
+  aria_label : String
 }
 
 ///|
-pub fn ModelSelect::render(self : ModelSelect) -> @html.Html {
+fn CompactSelect::render(self : CompactSelect) -> @html.Html {
   let choices : Array[@html.Html] = []
   let mut selected_label = self.selected
   let flat = self.groups.length() <= 1
@@ -81,6 +83,8 @@ pub fn ModelSelect::render(self : ModelSelect) -> @html.Html {
     }
   }
   @html.div(
+    // These class names predate the generic pill. Keeping them preserves the
+    // shared model/reasoning geometry without duplicating its CSS contract.
     class=if self.disabled {
       "composer-model disabled"
     } else {
@@ -89,22 +93,70 @@ pub fn ModelSelect::render(self : ModelSelect) -> @html.Html {
     title=self.title,
     attrs=@html.Attrs::build().data_set("focus-owner", ""),
     [
-      @html.span(class="composer-model-glyph", "✦"),
+      @html.span(class="composer-model-glyph", self.glyph),
       @html.span(class="composer-model-label", selected_label),
-      // CSS draws this chevron from two borders. A font glyph has a descender
-      // and sat visibly below the star/label even inside a centered flex row.
       @html.span(class="composer-model-chevron", ""),
       @html.select(
         class="composer-model-native",
         disabled=self.disabled,
         on_change=self.change,
         attrs=@html.Attrs::build()
-          .aria_label("Model")
+          .aria_label(self.aria_label)
           .data_set("focus-target", ""),
         choices,
       ),
     ],
   )
+}
+
+///|
+/// A compact model pill. A transparent native select covers the visible label,
+/// preserving platform menu behavior without letting the longest option
+/// determine the pill's width.
+pub(all) struct ModelSelect {
+  groups : Array[ModelGroup]
+  selected : String
+  disabled : Bool
+  change : @cmd.Emit[String]
+  title : String
+}
+
+///|
+pub fn ModelSelect::render(self : ModelSelect) -> @html.Html {
+  CompactSelect::{
+    groups: self.groups,
+    selected: self.selected,
+    disabled: self.disabled,
+    change: self.change,
+    title: self.title,
+    glyph: "✦",
+    aria_label: "Model",
+  }.render()
+}
+
+///|
+/// The shared reasoning selector used by both OpenSeek and Codex composers.
+/// Each caller owns its supported values; this type owns their identical
+/// placement, accessibility label, and compact native-menu presentation.
+pub(all) struct ReasoningSelect {
+  options : Array[ModelOption]
+  selected : String
+  disabled : Bool
+  change : @cmd.Emit[String]
+  title : String
+}
+
+///|
+pub fn ReasoningSelect::render(self : ReasoningSelect) -> @html.Html {
+  CompactSelect::{
+    groups: [{ label: "Reasoning effort", options: self.options }],
+    selected: self.selected,
+    disabled: self.disabled,
+    change: self.change,
+    title: self.title,
+    glyph: "◐",
+    aria_label: "Reasoning effort",
+  }.render()
 }
 
 ///|

@@ -19,7 +19,8 @@ pub fn update(
       state.apply_composer_action(dispatch, channel, action)
     SkillsLoaded(cwd~, skills~) => (@cmd.none, state.with_skills(cwd, skills))
     SkillsFailed(cwd~) => (@cmd.none, state.with_skill_failure(cwd))
-    ModelChanged(value) => (@cmd.none, { ..state, selected_model: value })
+    ModelChanged(value) => (@cmd.none, state.with_selected_model(value))
+    EffortChanged(value) => (@cmd.none, state.with_selected_effort(value))
     GitLoaded(thread_id~, reply~) =>
       (@cmd.none, state.with_git_reply(thread_id, reply))
     ToggleGitDetails =>
@@ -840,6 +841,7 @@ test "Codex update handlers are pure and idempotent" {
       @composer.SlashCommand(identity=composer_identity, command="unknown"),
     ),
     ModelChanged("gpt-test"),
+    EffortChanged("high"),
     ToggleGitDetails,
     CloseGitDetails,
     ToggleWorktreeMode,

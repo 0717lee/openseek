@@ -191,6 +191,33 @@ fn Model::openseek_model_chip(
 }
 
 ///|
+/// OpenSeek's reasoning chip shares the same control as Codex but offers only
+/// the values its DeepSeek request format defines. An unknown model may be a
+/// provider such as Kimi, so hiding the chip there is safer than sending a
+/// setting that provider deliberately ignores.
+fn Model::openseek_reasoning_chip(
+  self : Model,
+  dispatch : @cmd.Emit[Msg],
+  conv : Conversation,
+) -> @html.Html? {
+  guard conv.engine_model.supports_reasoning() else { return None }
+  let options : Array[@composer.ModelOption] = [
+    { value: ReasoningOff.wire(), label: "Reasoning · Off" },
+    { value: ReasoningHigh.wire(), label: "Reasoning · High" },
+    { value: ReasoningMax.wire(), label: "Reasoning · Max" },
+  ]
+  Some(
+    @composer.ReasoningSelect::{
+      options,
+      selected: self.openseek_reasoning.wire(),
+      disabled: false,
+      change: dispatch.map(value => OpenSeekEffortPicked(value)),
+      title: "Reasoning effort: \{self.openseek_reasoning.label()}",
+    }.render(),
+  )
+}
+
+///|
 /// The unified model chip on the Codex page. A composing draft may still be
 /// handed back to OpenSeek; a stored thread's transcript is Codex's alone,
 /// so its menu narrows to Codex models.

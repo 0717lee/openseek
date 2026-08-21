@@ -29,6 +29,8 @@ fn load_saved_settings(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
           conversation_models=load_setting(ConversationModelsStorageKey),
           agent=load_setting(AgentStorageKey),
           codex_model=load_setting(CodexModelStorageKey),
+          codex_effort=load_setting(CodexReasoningEffortStorageKey),
+          openseek_effort=load_setting(OpenSeekReasoningStorageKey),
         ),
       ),
     )
@@ -61,6 +63,18 @@ fn save_default_agent(agent : AgentChoice) -> @cmd.Cmd {
 /// Persist the Codex model the next thread or turn starts with.
 fn save_codex_model(id : String) -> @cmd.Cmd {
   @cmd.custom_cmd(_ => save_setting(CodexModelStorageKey, id))
+}
+
+///|
+/// Persist the catalog-validated Codex effort used for the next ordinary turn.
+fn save_codex_reasoning_effort(effort : String) -> @cmd.Cmd {
+  @cmd.custom_cmd(_ => save_setting(CodexReasoningEffortStorageKey, effort))
+}
+
+///|
+/// Persist OpenSeek's typed reasoning choice for its next engine operation.
+fn OpenSeekReasoning::save(self : OpenSeekReasoning) -> @cmd.Cmd {
+  @cmd.custom_cmd(_ => save_setting(OpenSeekReasoningStorageKey, self.wire()))
 }
 
 ///|

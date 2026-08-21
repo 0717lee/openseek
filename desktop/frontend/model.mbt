@@ -44,6 +44,84 @@ fn EngineModel::label(self : EngineModel) -> String {
 }
 
 ///|
+/// Whether this Desktop model is one of OpenSeek's DeepSeek models, whose
+/// request format accepts the `no`/`high`/`max` reasoning setting. Unknown
+/// models include providers such as Kimi, where sending this setting would
+/// claim a capability the model does not expose.
+fn EngineModel::supports_reasoning(self : EngineModel) -> Bool {
+  match self {
+    High | Low => true
+    Other(_) => false
+  }
+}
+
+///|
+/// OpenSeek's reasoning choices. These stay distinct from Codex catalog
+/// values: the two agents share the control and request lifecycle, while
+/// each agent sends only values its own service defines.
+priv enum OpenSeekReasoning {
+  ReasoningOff
+  ReasoningHigh
+  ReasoningMax
+} derive(Eq)
+
+///|
+fn OpenSeekReasoning::wire(self : OpenSeekReasoning) -> String {
+  match self {
+    ReasoningOff => "no"
+    ReasoningHigh => "high"
+    ReasoningMax => "max"
+  }
+}
+
+///|
+/// Convert the UI choice into the closed OpenSeek command value. Storage keeps
+/// the UI enum's string representation, while requests cross the Desktop JSON
+/// boundary with the protocol-owned type.
+fn OpenSeekReasoning::protocol(
+  self : OpenSeekReasoning,
+) -> @protocol.OpenSeekThinking {
+  match self {
+    ReasoningOff => ThinkingOff
+    ReasoningHigh => ThinkingHigh
+    ReasoningMax => ThinkingMax
+  }
+}
+
+///|
+fn OpenSeekReasoning::parse(value : String) -> OpenSeekReasoning? {
+  match value.trim().to_owned() {
+    "no" => Some(ReasoningOff)
+    "high" => Some(ReasoningHigh)
+    "max" => Some(ReasoningMax)
+    _ => None
+  }
+}
+
+///|
+fn OpenSeekReasoning::label(self : OpenSeekReasoning) -> String {
+  match self {
+    ReasoningOff => "Off"
+    ReasoningHigh => "High"
+    ReasoningMax => "Max"
+  }
+}
+
+///|
+/// Encode a reasoning setting only for models that advertise it in this UI.
+/// Unknown providers keep the field absent, matching the hidden selector.
+fn EngineModel::thinking(
+  self : EngineModel,
+  reasoning : OpenSeekReasoning,
+) -> @protocol.OpenSeekThinking? {
+  if self.supports_reasoning() {
+    Some(reasoning.protocol())
+  } else {
+    None
+  }
+}
+
+///|
 /// One conversation's remembered tier. `ConversationKey` is a frontend value
 /// that deliberately never crosses a boundary, so persistence spells the same
 /// identity out itself: the channel's stable URI authority joined to the
@@ -148,6 +226,17 @@ const AgentStorageKey : String = "openseek.agent"
 /// The Codex model id the next Codex thread or turn starts with. Codex's own
 /// catalog default applies when this is absent or no longer listed.
 const CodexModelStorageKey : String = "openseek.codex_model"
+
+///|
+/// The Codex reasoning effort the next ordinary turn starts with. The fetched
+/// model catalog validates it before the frontend sends it to app-server.
+const CodexReasoningEffortStorageKey : String = "openseek.codex_reasoning_effort"
+
+///|
+/// The OpenSeek reasoning choice used by the next start, compaction, or goal
+/// request. It is page-local like the model choice and separate from Codex's
+/// catalog-backed setting because their supported wire values differ.
+const OpenSeekReasoningStorageKey : String = "openseek.reasoning_effort"
 
 ///|
 /// Every conversation whose tier the user has chosen, so reopening one
@@ -1056,6 +1145,10 @@ priv struct Model {
   // default an unrelated chat has moved to since. Reopening recovers from
   // here; `default_model` is only for conversations this list has never held.
   conversation_models : Array[StoredConversationModel]
+  // The reasoning choice sent on the next OpenSeek operation. The host puts
+  // it in the engine-process environment and fingerprints it, so changing the
+  // chip cannot silently reuse an idle process configured for an older value.
+  openseek_reasoning : OpenSeekReasoning
   max_steps : String
   // Whether the host has a key stored for each keyed provider. The key text
   // itself never reaches a client — the Settings page only needs presence
@@ -1407,7 +1500,9 @@ priv enum Msg {
     model~ : String,
     conversation_models~ : String,
     agent~ : String,
-    codex_model~ : String
+    codex_model~ : String,
+    codex_effort~ : String,
+    openseek_effort~ : String
   )
   // The legacy localStorage engine settings, read at bridge time. The
   // desktop window migrates them up to the host once; a browser page only
@@ -1453,6 +1548,13 @@ priv enum Msg {
   // chat to the other agent instead. Either way the pick becomes the default
   // agent and model for new conversations.
   ModelPicked(String)
+  // The Codex-only reasoning chip applies to the next ordinary turn. It is a
+  // separate setting because the catalog exposes model and effort as two
+  // independent fields.
+  CodexEffortPicked(String)
+  // OpenSeek's fixed `no`/`high`/`max` choice. It shares the composer control
+  // with Codex but remains a separate typed value at the request boundary.
+  OpenSeekEffortPicked(String)
   MaxStepsChanged(String)
   SetupApiKeyChanged(String)
   ProviderChanged(String)
@@ -2218,6 +2320,7 @@ fn initial_model() -> Model {
     default_model: High,
     default_agent: OpenSeekAgent,
     conversation_models: [],
+    openseek_reasoning: ReasoningMax,
     max_steps: DefaultMaxSteps,
     deepseek_key_saved: false,
     custom_key_saved: false,

@@ -31,8 +31,9 @@ The frontend keeps per-conversation state — transcript, streaming buffers,
 pending steers, composer draft — and routes every engine event by run id, so
 you can switch away mid-turn, work elsewhere, and switch back to find the
 stream where you left it. A running conversation shows a pulsing dot in the
-sidebar. Changing the model, API key, or endpoint retires that conversation's
-process on its next prompt; an engine that dies mid-turn fails that run with
+sidebar. Changing the model, reasoning effort, API key, or endpoint replaces
+an idle process before its next start, compaction, or goal; an engine that
+dies mid-turn fails that run with
 its stderr as diagnostics, and the next prompt respawns on the same durable
 session. Idle engines stay alive until the app exits.
 

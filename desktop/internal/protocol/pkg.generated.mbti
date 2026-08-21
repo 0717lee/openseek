@@ -627,6 +627,7 @@ pub(all) struct CodexTurnStartPayload {
   thread_id : String
   input : Array[Json]
   model : String?
+  effort : String?
   cwd : String?
 } derive(Eq, @debug.Debug)
 pub fn CodexTurnStartPayload::equal(Self, Self) -> Bool
@@ -653,14 +654,17 @@ pub impl @json.FromJson for CodexTurnSteerPayload
 pub(all) struct CompactPayload {
   session : String
   model : String?
+  thinking : OpenSeekThinking?
   max_steps : Int?
   workspace : String?
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+} derive(Eq, @debug.Debug)
 pub fn CompactPayload::equal(Self, Self) -> Bool
 pub fn CompactPayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
 pub fn CompactPayload::not_equal(Self, Self) -> Bool
 pub fn CompactPayload::to_json(Self) -> Json
 pub fn CompactPayload::to_repr(Self) -> @debug.Repr
+pub impl ToJson for CompactPayload
+pub impl @json.FromJson for CompactPayload
 
 pub(all) struct CompactReply {
   compacting : Bool
@@ -1077,14 +1081,17 @@ pub(all) struct GoalPayload {
   text : String?
   auto : Bool?
   model : String?
+  thinking : OpenSeekThinking?
   max_steps : Int?
   workspace : String?
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+} derive(Eq, @debug.Debug)
 pub fn GoalPayload::equal(Self, Self) -> Bool
 pub fn GoalPayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
 pub fn GoalPayload::not_equal(Self, Self) -> Bool
 pub fn GoalPayload::to_json(Self) -> Json
 pub fn GoalPayload::to_repr(Self) -> @debug.Repr
+pub impl ToJson for GoalPayload
+pub impl @json.FromJson for GoalPayload
 
 pub(all) struct GoalReply {
   delivered : Bool
@@ -1457,6 +1464,21 @@ pub fn OpenPathReply::to_repr(Self) -> @debug.Repr
 pub impl ToJson for OpenPathReply
 pub impl @json.FromJson for OpenPathReply
 
+pub(all) enum OpenSeekThinking {
+  ThinkingOff
+  ThinkingHigh
+  ThinkingMax
+} derive(Eq, @debug.Debug)
+pub fn OpenSeekThinking::equal(Self, Self) -> Bool
+pub fn OpenSeekThinking::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn OpenSeekThinking::not_equal(Self, Self) -> Bool
+pub fn OpenSeekThinking::parse(String) -> Self?
+pub fn OpenSeekThinking::to_json(Self) -> Json
+pub fn OpenSeekThinking::to_repr(Self) -> @debug.Repr
+pub fn OpenSeekThinking::wire(Self) -> String
+pub impl ToJson for OpenSeekThinking
+pub impl @json.FromJson for OpenSeekThinking
+
 pub(all) struct ReadDirPayload {
   path : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
@@ -1826,15 +1848,18 @@ pub(all) struct StartPayload {
   task : String
   submission_id : String?
   model : String?
+  thinking : OpenSeekThinking?
   max_steps : Int?
   session : String
   workspace : String?
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+} derive(Eq, @debug.Debug)
 pub fn StartPayload::equal(Self, Self) -> Bool
 pub fn StartPayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
 pub fn StartPayload::not_equal(Self, Self) -> Bool
 pub fn StartPayload::to_json(Self) -> Json
 pub fn StartPayload::to_repr(Self) -> @debug.Repr
+pub impl ToJson for StartPayload
+pub impl @json.FromJson for StartPayload
 
 pub(all) struct StartReply {
   run_id : String

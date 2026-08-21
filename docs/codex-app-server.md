@@ -23,7 +23,7 @@ in `desktop/frontend/composer` and `desktop/frontend/icons`; Codex owns no
 second transcript renderer or conversation chrome.
 
 The implementation follows the [official app-server
-protocol](https://learn.chatgpt.com/docs/app-server.md). The native process
+protocol](https://developers.openai.com/codex/app-server). The native process
 uses app-server's newline-delimited JSON over stdin/stdout; stdout is reserved
 for protocol messages and stderr is drained separately. The connection sends
 `initialize`, waits for its reply, and then sends `initialized` before it serves
@@ -75,6 +75,19 @@ a project instead of being presented as a project root.
 
 `codex.thread.start` sets `serviceName: "openseek_desktop"` and otherwise
 preserves Codex's configured sandbox and approval defaults.
+
+The model picker also uses `model/list` as the authority for reasoning effort.
+When a model reports `supportedReasoningEfforts`, the composer shows a separate
+Reasoning picker beside the model picker. The current choice is checked again
+when the model changes, falling back to that model's `defaultReasoningEffort`
+and then its first supported effort. The page stores the choice locally with
+the selected model.
+
+New turns pass the checked choice as `turn/start.effort`, including the first
+turn in a newly created worktree. `turn/steer` has no effort override, so a
+steered prompt keeps the active turn's settings. Compatibility is catalog
+driven: if an older app-server omits reasoning metadata, OpenSeek hides the
+picker and omits `effort` instead of guessing supported values.
 
 ## Isolated Codex home
 
