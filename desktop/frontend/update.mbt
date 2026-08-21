@@ -3990,7 +3990,21 @@ fn update_msg(
       // commanded here off the before/after difference.
       let before = model.dock
       let dock = @dock.update(msg, before)
-      let model = { ..model, dock, }
+      // Only a real non-empty -> empty strip transition closes the panel.
+      // An already-empty panel is the launcher surface, so a stale close must
+      // leave it open. Reset the other visibility bits just like the explicit
+      // panel toggle does, keeping the root-owned panel state consistent.
+      let model = if !before.tabs.is_empty() && dock.tabs.is_empty() {
+        {
+          ..model,
+          dock,
+          right_panel_open: false,
+          right_panel_menu_open: false,
+          right_panel_expanded: false,
+        }
+      } else {
+        { ..model, dock, }
+      }
       let femit = dispatch.map(msg => FileEditor(msg))
       match msg {
         TabActivated(_) =>
@@ -12716,7 +12730,15 @@ test "every click-away menu closes without reopening on a second dismissal" {
   assert_true(dropped.launcher.apps is AppsLoading)
   // Right-panel actions update the root's single visibility state directly.
   let (_, docked) = update(dispatch, ToggleRightPanel, desktop_model())
-  let (_, menued) = update(dispatch, ToggleRightPanelMenu, docked)
+  // The empty strip is the launcher's deliberate open state. A delayed close
+  // for a tab that is already gone must not collapse that surface.
+  let (_, empty) = update(
+    dispatch,
+    Dock(TabClosed(@dock.DockTab::FilePicker)),
+    docked,
+  )
+  assert_true(empty.right_panel_open)
+  let (_, menued) = update(dispatch, ToggleRightPanelMenu, empty)
   assert_true(menued.right_panel_menu_open)
   let (_, unmenued) = update(dispatch, CloseRightPanelMenu, menued)
   assert_false(unmenued.right_panel_menu_open)
@@ -17203,7 +17225,7 @@ test "pane measurements place the active view and idempotently settle" {
 }
 
 ///|
-test "the launcher popup and tab close both retire the shown view" {
+test "the launcher popup and final tab close both retire the shown view" {
   let dispatch = test_dispatch()
   let model = desktop_model()
   let (_, model) = update(
@@ -17218,14 +17240,24 @@ test "the launcher popup and tab close both retire the shown view" {
   let (_, covered) = update(dispatch, ToggleRightPanelMenu, model)
   assert_true(covered.browser_pane.shown is None)
   // Closing the tab drops the page and the placement.
+  let closing = { ..model, right_panel_expanded: true }
   let (_, closed) = update(
     dispatch,
     Dock(TabClosed(@dock.DockTab::Browser(id=1))),
-    model,
+    closing,
   )
+  let (_, closed_again) = update(
+    dispatch,
+    Dock(TabClosed(@dock.DockTab::Browser(id=1))),
+    closing,
+  )
+  assert_true(closed_again == closed)
   assert_true(closed.browser_pane.shown is None)
   assert_true(@preview.page(closed.preview, 1) is None)
   assert_true(closed.dock.tabs.is_empty())
+  assert_false(closed.right_panel_open)
+  assert_false(closed.right_panel_menu_open)
+  assert_false(closed.right_panel_expanded)
 }
 
 ///|
@@ -17253,6 +17285,7 @@ test "closing a background Browser tab keeps the shown view placement" {
   assert_true(closed.browser_pane.rect == Some(rect))
   assert_true(@preview.page(closed.preview, 1) is None)
   assert_true(@preview.page(closed.preview, 2) is Some(_))
+  assert_true(closed.right_panel_open)
 }
 
 ///|
