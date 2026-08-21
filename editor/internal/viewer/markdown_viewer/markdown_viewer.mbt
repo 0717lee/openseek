@@ -37,10 +37,8 @@ fn MarkdownResourceKind::to_internal(
   self : MarkdownResourceKind,
 ) -> @markdown_core.MarkdownResourceKind {
   match self {
-    MarkdownResourceKind::OrdinaryMarkdown =>
-      @markdown_core.MarkdownResourceKind::OrdinaryMarkdown
-    MarkdownResourceKind::MoonBitMarkdown =>
-      @markdown_core.MarkdownResourceKind::MoonBitMarkdown
+    OrdinaryMarkdown => OrdinaryMarkdown
+    MoonBitMarkdown => MoonBitMarkdown
   }
 }
 
@@ -225,12 +223,12 @@ fn MarkdownViewerWidget::MarkdownViewerWidget(
     current: None,
     focused: false,
     disposed: false,
-    did_change_model: @base_common.Emitter(),
-    did_change_model_content: @base_common.Emitter(),
-    did_scroll: @base_common.Emitter(),
-    did_change_content_size: @base_common.Emitter(),
-    did_dispose: @base_common.Emitter(),
-    did_detach_for_diagnostics: @base_common.Emitter(),
+    did_change_model: Emitter(),
+    did_change_model_content: Emitter(),
+    did_scroll: Emitter(),
+    did_change_content_size: Emitter(),
+    did_dispose: Emitter(),
+    did_detach_for_diagnostics: Emitter(),
   }
 }
 

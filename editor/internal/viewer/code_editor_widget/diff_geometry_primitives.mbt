@@ -129,13 +129,13 @@ pub fn CodeEditorWidget::geometry_snapshot(
     let max_column = model.get_line_max_column(line_number)
     line_max_columns.push(max_column)
     let height_in_px = if converter.model_position_is_visible(
-        @base_common.Position(line_number, 1),
+        Position(line_number, 1),
       ) {
       let start = converter.model_position_to_view_position(
-        @base_common.Position(line_number, 1),
+        Position(line_number, 1),
       )
       let end = converter.model_position_to_view_position(
-        @base_common.Position(line_number, max_column),
+        Position(line_number, max_column),
       )
       (end.line_number - start.line_number + 1).max(1).to_double() * line_height
     } else {
@@ -346,7 +346,7 @@ pub fn CodeEditorWidget::capture_stable_viewport_state(
   let anchor_view_line = layout.line_at_vertical_offset(position.scroll_top)
   let anchor_model_position = view_model
     .coordinates_converter()
-    .view_position_to_model_position(@base_common.Position(anchor_view_line, 1))
+    .view_position_to_model_position(Position(anchor_view_line, 1))
   let anchor_line_number = anchor_model_position.line_number
   let anchor_top = self.get_top_for_line_number(anchor_line_number)
   if anchor_top < 0.0 {

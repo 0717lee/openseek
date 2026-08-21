@@ -25,13 +25,13 @@ let strict_options : @diff.DocumentDiffOptions = {
 ///|
 test "an edited line maps original and modified ranges" {
   let result = @diff.get_core_document_diff_provider().compute_diff(
-    @model.TextSnapshot("fn main {\n  println(1)\n}"),
-    @model.TextSnapshot("fn main {\n  println(2)\n}"),
+    TextSnapshot("fn main {\n  println(1)\n}"),
+    TextSnapshot("fn main {\n  println(2)\n}"),
     strict_options,
   )
   assert_eq(result.changes.length(), 1)
-  assert_eq(result.changes[0].original, @base_common.LineRange(2, 3))
-  assert_eq(result.changes[0].modified, @base_common.LineRange(2, 3))
+  assert_eq(result.changes[0].original, LineRange(2, 3))
+  assert_eq(result.changes[0].modified, LineRange(2, 3))
   assert_true(result.additional_alignments.is_empty())
 }
 ```
@@ -43,13 +43,13 @@ range. Identical inputs produce no changes.
 ///|
 test "insertions keep half-open line-range semantics" {
   let inserted = @diff.get_core_document_diff_provider().compute_diff(
-    @model.TextSnapshot("a\nc"),
-    @model.TextSnapshot("a\nb\nc"),
+    TextSnapshot("a\nc"),
+    TextSnapshot("a\nb\nc"),
     strict_options,
   )
   assert_eq(inserted.changes.length(), 1)
   assert_true(inserted.changes[0].original.is_empty())
-  assert_eq(inserted.changes[0].modified, @base_common.LineRange(2, 3))
+  assert_eq(inserted.changes[0].modified, LineRange(2, 3))
 }
 ```
 

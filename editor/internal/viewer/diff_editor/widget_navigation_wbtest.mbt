@@ -5,9 +5,9 @@ fn widget_navigation_test_change(
   modified_start : Int,
   modified_end : Int,
 ) -> @diff.DetailedLineRangeMapping {
-  @diff.DetailedLineRangeMapping(
-    @base_common.LineRange(original_start, original_end),
-    @base_common.LineRange(modified_start, modified_end),
+  DetailedLineRangeMapping(
+    LineRange(original_start, original_end),
+    LineRange(modified_start, modified_end),
     None,
   )
 }
@@ -17,7 +17,7 @@ test "Inline navigation always uses the modified pane and clamps deletion anchor
   let deletion = widget_navigation_test_change(6, 7, 6, 6)
   let plan = diff_navigation_reveal_plan(Inline, deletion, 7, 5).unwrap()
   assert_true(plan.pane is ModifiedNavigationPane)
-  assert_eq(plan.range, @base_common.Range(5, 1, 5, 1))
+  assert_eq(plan.range, Range(5, 1, 5, 1))
   assert_true(plan.range.is_empty())
 
   let empty_document_plan = diff_navigation_reveal_plan(
@@ -27,7 +27,7 @@ test "Inline navigation always uses the modified pane and clamps deletion anchor
     0,
   ).unwrap()
   assert_true(empty_document_plan.pane is ModifiedNavigationPane)
-  assert_eq(empty_document_plan.range, @base_common.Range(1, 1, 1, 1))
+  assert_eq(empty_document_plan.range, Range(1, 1, 1, 1))
 }
 
 ///|
@@ -39,7 +39,7 @@ test "side-by-side navigation chooses the non-empty pane" {
     3,
   ).unwrap()
   assert_true(deletion.pane is OriginalNavigationPane)
-  assert_eq(deletion.range, @base_common.Range(2, 1, 2, 1))
+  assert_eq(deletion.range, Range(2, 1, 2, 1))
 
   let insertion = diff_navigation_reveal_plan(
     SideBySide,
@@ -48,7 +48,7 @@ test "side-by-side navigation chooses the non-empty pane" {
     4,
   ).unwrap()
   assert_true(insertion.pane is ModifiedNavigationPane)
-  assert_eq(insertion.range, @base_common.Range(3, 1, 3, 1))
+  assert_eq(insertion.range, Range(3, 1, 3, 1))
 
   let modification = diff_navigation_reveal_plan(
     SideBySide,

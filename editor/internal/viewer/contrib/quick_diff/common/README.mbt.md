@@ -93,18 +93,18 @@ addition, an empty modified is a deletion, and anything else is a modification.
 ///|
 test "an empty side decides between Add, Delete, and Modify" {
   let added = @diff.DetailedLineRangeMapping(
-    @base_common.LineRange(2, 2),
-    @base_common.LineRange(2, 3),
+    LineRange(2, 2),
+    LineRange(2, 3),
     None,
   )
   let deleted = @diff.DetailedLineRangeMapping(
-    @base_common.LineRange(2, 3),
-    @base_common.LineRange(2, 2),
+    LineRange(2, 3),
+    LineRange(2, 2),
     None,
   )
   let modified = @diff.DetailedLineRangeMapping(
-    @base_common.LineRange(2, 3),
-    @base_common.LineRange(2, 3),
+    LineRange(2, 3),
+    LineRange(2, 3),
     None,
   )
   debug_inspect(

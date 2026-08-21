@@ -92,7 +92,7 @@ fn FakeDocumentDiffProvider::new(
     observed_original_values: [],
     observed_modified_values: [],
     before_compute: Ref(None),
-    did_change: @base_common.Emitter(),
+    did_change: Emitter(),
   }
 }
 
@@ -128,7 +128,7 @@ impl @diff.DocumentDiffProvider for FakeDocumentDiffProvider with fn compute_dif
       let modified_range = @base_common.LineRange(1, 2)
       {
         changes: [
-          @diff.DetailedLineRangeMapping(original_range, modified_range, None),
+          DetailedLineRangeMapping(original_range, modified_range, None),
         ],
         additional_alignments: [],
       }
@@ -136,26 +136,17 @@ impl @diff.DocumentDiffProvider for FakeDocumentDiffProvider with fn compute_dif
     InvalidLineMapping =>
       {
         changes: [
-          @diff.DetailedLineRangeMapping(
-            @base_common.LineRange(0, 2),
-            @base_common.LineRange(1, 2),
-            None,
-          ),
+          DetailedLineRangeMapping(LineRange(0, 2), LineRange(1, 2), None),
         ],
         additional_alignments: [],
       }
     InvalidInnerMapping =>
       {
         changes: [
-          @diff.DetailedLineRangeMapping(
-            @base_common.LineRange(1, 2),
-            @base_common.LineRange(1, 2),
-            Some([
-              @diff.RangeMapping(
-                @base_common.Range(1, 1, 1, 99),
-                @base_common.Range(1, 1, 1, 2),
-              ),
-            ]),
+          DetailedLineRangeMapping(
+            LineRange(1, 2),
+            LineRange(1, 2),
+            Some([RangeMapping(Range(1, 1, 1, 99), Range(1, 1, 1, 2))]),
           ),
         ],
         additional_alignments: [],
@@ -163,15 +154,10 @@ impl @diff.DocumentDiffProvider for FakeDocumentDiffProvider with fn compute_dif
     InnerOutsideParent =>
       {
         changes: [
-          @diff.DetailedLineRangeMapping(
-            @base_common.LineRange(1, 2),
-            @base_common.LineRange(1, 2),
-            Some([
-              @diff.RangeMapping(
-                @base_common.Range(2, 1, 2, 2),
-                @base_common.Range(1, 1, 1, 2),
-              ),
-            ]),
+          DetailedLineRangeMapping(
+            LineRange(1, 2),
+            LineRange(1, 2),
+            Some([RangeMapping(Range(2, 1, 2, 2), Range(1, 1, 1, 2))]),
           ),
         ],
         additional_alignments: [],
@@ -179,18 +165,12 @@ impl @diff.DocumentDiffProvider for FakeDocumentDiffProvider with fn compute_dif
     OverlappingInnerMappings =>
       {
         changes: [
-          @diff.DetailedLineRangeMapping(
-            @base_common.LineRange(1, 2),
-            @base_common.LineRange(1, 2),
+          DetailedLineRangeMapping(
+            LineRange(1, 2),
+            LineRange(1, 2),
             Some([
-              @diff.RangeMapping(
-                @base_common.Range(1, 1, 1, 3),
-                @base_common.Range(1, 1, 1, 3),
-              ),
-              @diff.RangeMapping(
-                @base_common.Range(1, 2, 1, 3),
-                @base_common.Range(1, 2, 1, 3),
-              ),
+              RangeMapping(Range(1, 1, 1, 3), Range(1, 1, 1, 3)),
+              RangeMapping(Range(1, 2, 1, 3), Range(1, 2, 1, 3)),
             ]),
           ),
         ],
@@ -210,7 +190,7 @@ impl @diff.DocumentDiffProvider for FakeDocumentDiffProvider with fn on_did_chan
 
 ///|
 fn diff_view_model_test_model(name : String, text : String) -> @model.TextModel {
-  @model.TextModel(
+  TextModel(
     @base_common.Uri::file("/diff-view-model-\{name}.mbt"),
     name,
     "moonbit",

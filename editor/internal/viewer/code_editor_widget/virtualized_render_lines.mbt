@@ -286,10 +286,10 @@ fn VirtualizedCodeEditorRenderedLines::render_for_zone_layout(
     .lines()
     .view_line_rendering_data(final_view_line)
   let first_model_line = converter.view_position_to_model_position(
-      @base_common.Position(window_view_start, first_data.min_column),
+      Position(window_view_start, first_data.min_column),
     ).line_number
   let final_model_line = converter.view_position_to_model_position(
-      @base_common.Position(final_view_line, final_data.max_column),
+      Position(final_view_line, final_data.max_column),
     ).line_number
   stabilize_render_lines_tokens(
     self.context.source_model,
@@ -491,11 +491,11 @@ fn VirtualizedCodeEditorRenderLinesContext::render_lines_impl(
   }
   let converter = self.detached_view_model.coordinates_converter()
   let range_view_start = converter.model_position_to_view_position(
-      @base_common.Position(start_line_number, 1),
+      Position(start_line_number, 1),
     ).line_number
   let final_model_line = end_line_number_exclusive - 1
   let range_view_end_exclusive = converter.model_position_to_view_position(
-      @base_common.Position(
+      Position(
         final_model_line,
         self.source_model.get_line_max_column(final_model_line),
       ),

@@ -99,16 +99,16 @@ fn DiffEditorLayout::internal(
   self : DiffEditorLayout,
 ) -> @diff_editor.DiffEditorLayout {
   match self {
-    SideBySide => @diff_editor.SideBySide
-    Inline => @diff_editor.Inline
+    SideBySide => SideBySide
+    Inline => Inline
   }
 }
 
 ///|
 fn DiffWordWrap::internal(self : DiffWordWrap) -> @diff_editor.DiffWordWrap {
   match self {
-    Inherit => @diff_editor.Inherit
-    Off => @diff_editor.Off
+    Inherit => Inherit
+    Off => Off
   }
 }
 
@@ -116,7 +116,7 @@ fn DiffWordWrap::internal(self : DiffWordWrap) -> @diff_editor.DiffWordWrap {
 fn DiffEditorOptions::internal(
   self : DiffEditorOptions,
 ) -> @diff_editor.DiffEditorOptions {
-  @diff_editor.DiffEditorOptions(
+  DiffEditorOptions(
     layout=self.layout.internal(),
     automatic_inline=self.automatic_inline,
     automatic_inline_width=self.automatic_inline_width,
@@ -212,8 +212,8 @@ pub fn DiffEditor::update_options(
 ///|
 pub fn DiffEditor::get_layout(self : DiffEditor) -> DiffEditorLayout {
   match self.widget.get_layout() {
-    @diff_editor.SideBySide => SideBySide
-    @diff_editor.Inline => Inline
+    SideBySide => SideBySide
+    Inline => Inline
   }
 }
 

@@ -35,7 +35,7 @@ pub fn ViewerOptions::ViewerOptions(
   letter_spacing? : Double = @config.editor_font_defaults.letter_spacing,
 ) -> ViewerOptions {
   {
-    inner: @code_widget.CodeEditorOptions(
+    inner: CodeEditorOptions(
       soft_wrap~,
       tab_size~,
       wrapping_indent~,

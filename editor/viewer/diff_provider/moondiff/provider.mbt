@@ -38,7 +38,7 @@ pub fn MoonDocumentDiffProvider::MoonDocumentDiffProvider(
     mode,
     ignore_comments,
     status: { requested: mode, effective: mode, fell_back: false },
-    did_change: @base_common.Emitter(),
+    did_change: Emitter(),
     disposed: false,
   }
 }
@@ -239,9 +239,9 @@ fn paired_change(
   original : @tokdiff.DiffLine,
   modified : @tokdiff.DiffLine,
 ) -> @diff.DetailedLineRangeMapping {
-  @diff.DetailedLineRangeMapping(
-    @base_common.LineRange(original.index + 1, original.index + 2),
-    @base_common.LineRange(modified.index + 1, modified.index + 2),
+  DetailedLineRangeMapping(
+    LineRange(original.index + 1, original.index + 2),
+    LineRange(modified.index + 1, modified.index + 2),
     paired_inner_changes(original, modified),
   )
 }
@@ -251,9 +251,9 @@ fn old_only_change(
   original : @tokdiff.DiffLine,
   modified_cursor : Int,
 ) -> @diff.DetailedLineRangeMapping {
-  @diff.DetailedLineRangeMapping(
-    @base_common.LineRange(original.index + 1, original.index + 2),
-    @base_common.LineRange(modified_cursor + 1, modified_cursor + 1),
+  DetailedLineRangeMapping(
+    LineRange(original.index + 1, original.index + 2),
+    LineRange(modified_cursor + 1, modified_cursor + 1),
     None,
   )
 }
@@ -263,9 +263,9 @@ fn new_only_change(
   modified : @tokdiff.DiffLine,
   original_cursor : Int,
 ) -> @diff.DetailedLineRangeMapping {
-  @diff.DetailedLineRangeMapping(
-    @base_common.LineRange(original_cursor + 1, original_cursor + 1),
-    @base_common.LineRange(modified.index + 1, modified.index + 2),
+  DetailedLineRangeMapping(
+    LineRange(original_cursor + 1, original_cursor + 1),
+    LineRange(modified.index + 1, modified.index + 2),
     None,
   )
 }

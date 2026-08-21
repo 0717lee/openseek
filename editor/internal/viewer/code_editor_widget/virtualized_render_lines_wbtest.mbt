@@ -64,7 +64,7 @@ test "virtualized render-lines handle keeps a 2600-line zone below 200 DOM rows"
           .unwrap()
         let rendered = context
           .render_lines(
-            @base_common.LineRange(1, 2601),
+            LineRange(1, 2601),
             line_class_name="diff-editor-inline-deleted-line",
             margin_line_class_name="diff-editor-inline-deleted-line-number",
           )
@@ -149,7 +149,7 @@ test "one generation shares one detached ViewModel across 1000 small zones" {
       let handles : Array[VirtualizedCodeEditorRenderedLines] = []
       for index in 0..<1000 {
         let handle = context
-          .render_lines(@base_common.LineRange(index + 1, index + 2))
+          .render_lines(LineRange(index + 1, index + 2))
           .unwrap()
         handle.bind_zone(
           "fragmented-zone-\{index}",

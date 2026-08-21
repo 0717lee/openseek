@@ -147,7 +147,7 @@ fn append_whole_line_range(
   }
   let end_line = line_range.end_line_number_exclusive - 1
   target.push(
-    @base_common.Range(
+    Range(
       line_range.start_line_number,
       1,
       end_line,

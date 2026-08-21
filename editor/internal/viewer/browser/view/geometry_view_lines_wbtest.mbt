@@ -8,9 +8,7 @@ fn geometry_view_lines(
   visible_range : @base_common.Range,
   layout : @view_layout.ViewLayout,
   fixture : ViewLineFixture,
-  scheduler? : @base_browser.RunOnceScheduler = @base_browser.RunOnceScheduler(
-    200,
-  ),
+  scheduler? : @base_browser.RunOnceScheduler = RunOnceScheduler(200),
   lines_content? : @rdom.Element = view_line_fixture_context(fixture),
 ) -> ViewLines {
   let configuration = ViewLinesConfiguration::ViewLinesConfiguration()

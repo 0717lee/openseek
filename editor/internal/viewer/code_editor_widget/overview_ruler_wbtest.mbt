@@ -148,9 +148,7 @@ fn overview_ruler_disposal_test_handle(
     on_select: None,
     listeners,
     resize_observer,
-    entries: [
-      { id: 1, range: @base_common.LineRange(1, 2), color: "red", lane: Full },
-    ],
+    entries: [{ id: 1, range: LineRange(1, 2), color: "red", lane: Full }],
     bands: [{ id: 1, from: 0, to: 4, color: "red", lane: Full }],
     generation: 3,
     disposed: false,

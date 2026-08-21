@@ -6,11 +6,9 @@ fn compute_with_provider(
   ignore_trim_whitespace? : Bool = true,
 ) -> @diff.DocumentDiff raise {
   let object : &@diff.DocumentDiffProvider = provider
-  object.compute_diff(
-    @model.TextSnapshot(original),
-    @model.TextSnapshot(modified),
-    { ignore_trim_whitespace, },
-  )
+  object.compute_diff(TextSnapshot(original), TextSnapshot(modified), {
+    ignore_trim_whitespace,
+  })
 }
 
 ///|
@@ -73,8 +71,8 @@ test "Token provider exposes UTF-16 inner mappings" {
   guard change.inner_changes is Some([inner]) else {
     fail("expected one paired inner mapping")
   }
-  assert_eq(inner.original, @base_common.Range(1, 21, 1, 22))
-  assert_eq(inner.modified, @base_common.Range(1, 21, 1, 22))
+  assert_eq(inner.original, Range(1, 21, 1, 22))
+  assert_eq(inner.modified, Range(1, 21, 1, 22))
   assert_eq(provider.get_status(), {
     requested: Token,
     effective: Token,

@@ -58,7 +58,7 @@ fn diff_whole_line_decorations(
 ) -> Array[@model.ModelDeltaDecoration] {
   ranges.map(range => {
     range,
-    options: @model.ModelDecorationOptions(
+    options: ModelDecorationOptions(
       line_class,
       is_whole_line=true,
       lines_decorations_class_name=gutter_class,
@@ -75,7 +75,7 @@ fn diff_inner_decorations(
 ) -> Array[@model.ModelDeltaDecoration] {
   ranges.map(range => {
     range,
-    options: @model.ModelDecorationOptions(
+    options: ModelDecorationOptions(
       "",
       inline_class_name=inline_class,
       description~,
@@ -152,7 +152,7 @@ pub fn DiffEditorWidget::create(
     editor_options,
     options,
     layout_state: DiffEditorLayoutState::new(options),
-    pointer_monitor: @base_browser.GlobalPointerMoveMonitor(),
+    pointer_monitor: GlobalPointerMoveMonitor(),
     lifetime: [],
     resize_observer: None,
     overview_ruler: None,
@@ -513,7 +513,7 @@ fn alignment_view_zone_specs(
       "moonbit-diff-editor-alignment-spacer \{pane_class}",
     )
     node.set_attribute("aria-hidden", "true")
-    @code_widget.ManagedCodeEditorViewZoneSpec(
+    ManagedCodeEditorViewZoneSpec(
       spacer.after_line_number,
       spacer.height_in_px,
       node,
@@ -1039,14 +1039,9 @@ fn navigation_reveal_range(
     // needs a valid model coordinate, so represent the position as a
     // collapsed range on the nearest modified/original line.
     let anchor = range.start_line_number.clamp(min=1, max=line_count.max(1))
-    return @base_common.Range(anchor, 1, anchor, 1)
+    return Range(anchor, 1, anchor, 1)
   }
-  @base_common.Range(
-    range.start_line_number,
-    1,
-    range.end_line_number_exclusive - 1,
-    1,
-  )
+  Range(range.start_line_number, 1, range.end_line_number_exclusive - 1, 1)
 }
 
 ///|
@@ -1191,7 +1186,7 @@ fn DiffEditorWidget::reveal_overview_change(
   }
   if !change.modified.is_empty() {
     self.editors.modified.reveal_range_in_center(
-      @base_common.Range(
+      Range(
         change.modified.start_line_number,
         1,
         change.modified.end_line_number_exclusive - 1,

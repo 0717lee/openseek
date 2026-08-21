@@ -27,8 +27,8 @@ pub fn compute_changes(
   ignore_trim_whitespace? : Bool = false,
 ) -> Array[@diff.DetailedLineRangeMapping] {
   @diff.CoreDocumentDiffProvider().compute_diff(
-    @model.TextSnapshot(original_lines.join("\n")),
-    @model.TextSnapshot(modified_lines.join("\n")),
+    TextSnapshot(original_lines.join("\n")),
+    TextSnapshot(modified_lines.join("\n")),
     { ignore_trim_whitespace, },
   ).changes
 }

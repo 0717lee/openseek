@@ -20,8 +20,8 @@ fn compute(
   options? : DocumentDiffOptions = default_options,
 ) -> DocumentDiff {
   get_core_document_diff_provider().compute_diff(
-    @model.TextSnapshot(original.join("\n")),
-    @model.TextSnapshot(modified.join("\n")),
+    TextSnapshot(original.join("\n")),
+    TextSnapshot(modified.join("\n")),
     options,
   )
 }
@@ -42,8 +42,8 @@ test "Core provider satisfies the public provider contract" {
   let provider : &DocumentDiffProvider = core
   let result = try! compute_with_provider(
     provider,
-    @model.TextSnapshot("same\nbefore"),
-    @model.TextSnapshot("same\nafter"),
+    TextSnapshot("same\nbefore"),
+    TextSnapshot("same\nafter"),
     default_options,
   )
   assert_eq(result.changes.length(), 1)
@@ -240,8 +240,8 @@ test "trim whitespace treats whitespace-only and empty documents as equal" {
 test "snapshot normalization makes CRLF and LF equal" {
   let provider = CoreDocumentDiffProvider()
   let result = provider.compute_diff(
-    @model.TextSnapshot("one\r\ntwo\r\n"),
-    @model.TextSnapshot("one\ntwo\n"),
+    TextSnapshot("one\r\ntwo\r\n"),
+    TextSnapshot("one\ntwo\n"),
     default_options,
   )
   assert_true(result.changes.is_empty())

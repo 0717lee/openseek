@@ -96,11 +96,7 @@ fn detached_line_decorations(
       .min(max_column)
     if start_column < end_column {
       result.push(
-        @view_layout.LineDecoration(
-          start_column,
-          end_column,
-          decoration.class_name,
-        ),
+        LineDecoration(start_column, end_column, decoration.class_name),
       )
     }
   }
@@ -199,7 +195,7 @@ fn render_detached_view_line_window(
       .lines()
       .view_line_rendering_data(view_line_number)
     let model_position = converter.view_position_to_model_position(
-      @base_common.Position(view_line_number, data.min_column),
+      Position(view_line_number, data.min_column),
     )
     let model_line_number = model_position.line_number
     model_line_numbers.push(model_line_number)
@@ -225,7 +221,7 @@ fn render_detached_view_line_window(
     content_html <+
       " class=\"\{line_class}\" data-model-line=\"\{model_line_number}\" data-rendered-view-line=\"\{view_line_number}\" style=\"top:\{top}px;height:\{line_height}px;line-height:\{line_height}px;width:1000000px;\">\{output.html}</div>"
     let model_view_start = converter.model_position_to_view_position(
-        @base_common.Position(model_line_number, 1),
+        Position(model_line_number, 1),
       ).line_number
     margin_html <+
       "<div class=\"\{margin_line_class}\" data-model-line=\"\{model_line_number}\" data-rendered-view-line=\"\{view_line_number}\" style=\"top:\{top}px;height:\{line_height}px;line-height:\{line_height}px;right:0;width:100%;\">"
@@ -283,11 +279,11 @@ pub fn CodeEditorWidget::render_lines(
   defer detached_view_model.dispose()
   let converter = detached_view_model.coordinates_converter()
   let view_start = converter.model_position_to_view_position(
-      @base_common.Position(start_line_number, 1),
+      Position(start_line_number, 1),
     ).line_number
   let final_model_line = end_line_number_exclusive - 1
   let view_end = converter.model_position_to_view_position(
-      @base_common.Position(
+      Position(
         final_model_line,
         source_model.get_line_max_column(final_model_line),
       ),

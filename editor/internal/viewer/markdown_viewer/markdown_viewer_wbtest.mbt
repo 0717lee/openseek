@@ -3,7 +3,7 @@ fn markdown_viewer_lifecycle_test_model(
   path : String,
   source : String,
 ) -> @model.TextModel {
-  @model.TextModel(
+  TextModel(
     try! @base_common.Uri::from(
       scheme="inmemory",
       authority="markdown-viewer-lifecycle-test",
@@ -79,10 +79,7 @@ test "explicit resource kind renders a code model as Markdown without classifica
   guard viewer.current is Some(current) else { fail("expected attachment") }
   assert_true(current.model.model.same(model))
   assert_true(current.model.resource_kind == MoonBitMarkdown)
-  assert_true(
-    current.model.resource_kind.to_internal() ==
-    @markdown_core.MarkdownResourceKind::MoonBitMarkdown,
-  )
+  assert_true(current.model.resource_kind.to_internal() == MoonBitMarkdown)
   // A headless package test has no DOM, but it follows the same attachment
   // constructor and explicit kind path as the mounted MarkdownDocumentView.
   assert_true(current.view is None)

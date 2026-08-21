@@ -79,8 +79,8 @@ fn MarkdownResourceKind::internal(
   self : MarkdownResourceKind,
 ) -> @markdown_viewer.MarkdownResourceKind {
   match self {
-    OrdinaryMarkdown => @markdown_viewer.OrdinaryMarkdown
-    MoonBitMarkdown => @markdown_viewer.MoonBitMarkdown
+    OrdinaryMarkdown => OrdinaryMarkdown
+    MoonBitMarkdown => MoonBitMarkdown
   }
 }
 
@@ -88,7 +88,7 @@ fn MarkdownResourceKind::internal(
 fn MarkdownViewerOptions::internal(
   self : MarkdownViewerOptions,
 ) -> @markdown_viewer.MarkdownViewerWidgetOptions {
-  @markdown_viewer.MarkdownViewerWidgetOptions(
+  MarkdownViewerWidgetOptions(
     theme=self.theme,
     placeholder=self.placeholder,
     show_unused=self.show_unused,
@@ -101,16 +101,16 @@ fn ViewerServices::markdown_services(
 ) -> @markdown_viewer.MarkdownViewerServices {
   match self.location_opener() {
     Some(location_opener) =>
-      @markdown_viewer.MarkdownViewerServices(
+      MarkdownViewerServices(
         languages=self.languages(),
-        markers=@markers.Decorations(self.marker_decorations()),
+        markers=Decorations(self.marker_decorations()),
         location_opener~,
         log_service=self.log_service(),
       )
     None =>
-      @markdown_viewer.MarkdownViewerServices(
+      MarkdownViewerServices(
         languages=self.languages(),
-        markers=@markers.Decorations(self.marker_decorations()),
+        markers=Decorations(self.marker_decorations()),
         log_service=self.log_service(),
       )
   }
@@ -160,8 +160,8 @@ pub fn MarkdownViewer::set_model(
   .map(previous => {
     model: previous.model,
     resource_kind: match previous.resource_kind {
-      @markdown_viewer.OrdinaryMarkdown => OrdinaryMarkdown
-      @markdown_viewer.MoonBitMarkdown => MoonBitMarkdown
+      OrdinaryMarkdown => OrdinaryMarkdown
+      MoonBitMarkdown => MoonBitMarkdown
     },
   })
 }
@@ -173,8 +173,8 @@ pub fn MarkdownViewer::get_model(self : MarkdownViewer) -> MarkdownViewerModel? 
   .map(model => {
     model: model.model,
     resource_kind: match model.resource_kind {
-      @markdown_viewer.OrdinaryMarkdown => OrdinaryMarkdown
-      @markdown_viewer.MoonBitMarkdown => MoonBitMarkdown
+      OrdinaryMarkdown => OrdinaryMarkdown
+      MoonBitMarkdown => MoonBitMarkdown
     },
   })
 }

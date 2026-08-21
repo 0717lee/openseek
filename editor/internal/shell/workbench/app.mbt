@@ -222,7 +222,7 @@ fn workbench_markdown_viewer() -> @viewer.MarkdownViewer {
       let viewer = @viewer.MarkdownViewer::create(
         host,
         services=workbench_services().viewer,
-        options=@viewer.MarkdownViewerOptions(theme=stored_theme()),
+        options=MarkdownViewerOptions(theme=stored_theme()),
       )
       markdown_viewer_cell.val = Some(viewer)
       viewer
@@ -677,9 +677,9 @@ fn workbench_markdown_resource_kind(
 ) -> @viewer.MarkdownResourceKind? {
   let path = text_model.uri.path.to_lower()
   if path.has_suffix(".mbt.md") {
-    Some(@viewer.MoonBitMarkdown)
+    Some(MoonBitMarkdown)
   } else if path.has_suffix(".md") || text_model.get_language_id() == "markdown" {
-    Some(@viewer.OrdinaryMarkdown)
+    Some(OrdinaryMarkdown)
   } else {
     None
   }
@@ -713,7 +713,7 @@ fn set_workbench_markdown_model(
     ResetScroll | RevealDefinition(_) => None
   }
   workbench_viewer().set_model(None)
-  viewer.set_model(Some(@viewer.MarkdownViewerModel(text_model, resource_kind)))
+  viewer.set_model(Some(MarkdownViewerModel(text_model, resource_kind)))
   |> ignore
   show_workbench_presentation("markdown")
   viewer.restore_view_state(state)

@@ -146,7 +146,7 @@ fn ViewLines::ViewLines(
     view_line_to_model_line: line_number => line_number,
     model_line_text_direction: _line_number => LTR,
     line_factory,
-    async_update_line_widths: @base_browser.RunOnceScheduler(200),
+    async_update_line_widths: RunOnceScheduler(200),
     last_rendered_data: LastRenderedData(),
     max_line_width: 0.0,
     last_layout: None,

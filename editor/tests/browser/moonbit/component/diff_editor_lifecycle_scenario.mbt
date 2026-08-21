@@ -10,14 +10,7 @@ fn diff_editor_lifecycle_model(
   ) catch {
     _ => abort("invalid lifecycle fixture URI")
   }
-  @model.TextModel(
-    uri,
-    "\{name}.mbt",
-    "moonbit",
-    1,
-    "diff-lifecycle-\{name}",
-    content,
-  )
+  TextModel(uri, "\{name}.mbt", "moonbit", 1, "diff-lifecycle-\{name}", content)
 }
 
 ///|
@@ -69,10 +62,7 @@ fn run_diff_editor_lifecycle_test() -> Unit {
     host,
     provider_object,
     editor_options=@code_widget.CodeEditorOptions::default(),
-    options=@diff_editor.DiffEditorOptions(
-      layout=@diff_editor.Inline,
-      automatic_inline=false,
-    ),
+    options=DiffEditorOptions(layout=Inline, automatic_inline=false),
   )
   let original = diff_editor_lifecycle_model(
     "original",

@@ -100,7 +100,7 @@ fn MarkdownViewerWidgetDefinitionBridge::target_at(
   }
   Some({
     source_offset: hit.source_offset,
-    range: @base_common.Range(
+    range: Range(
       position.line_number,
       word.start_column,
       position.line_number,
@@ -415,11 +415,7 @@ async fn MarkdownViewerWidget::open_definition_location(
   }
   match self.services.location_opener() {
     Some(opener) =>
-      opener.open({
-        source_viewer_id: self.get_id(),
-        location,
-        mode: @navigation_api.OpenLocationMode::Current,
-      })
+      opener.open({ source_viewer_id: self.get_id(), location, mode: Current })
     None => false
   }
 }

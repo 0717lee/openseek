@@ -182,10 +182,7 @@ fn compile_external_viewer_api_contract(
     services~,
     options=markdown_options,
   )
-  let markdown_model = @viewer.MarkdownViewerModel(
-    model,
-    @viewer.MarkdownResourceKind::MoonBitMarkdown,
-  )
+  let markdown_model = @viewer.MarkdownViewerModel(model, MoonBitMarkdown)
   let markdown_model_subscription = markdown_viewer.on_did_change_model(
     require_contract_model_event,
   )
@@ -206,7 +203,7 @@ fn compile_external_viewer_api_contract(
   markdown_viewer.update_options(markdown_options)
   let markdown_view_state = markdown_viewer.save_view_state()
   markdown_viewer.restore_view_state(markdown_view_state)
-  markdown_viewer.reveal_range_in_center(@base_common.Range(1, 1, 1, 1))
+  markdown_viewer.reveal_range_in_center(Range(1, 1, 1, 1))
   markdown_viewer.toggle_section_at(0) |> ignore
   markdown_viewer.collapsed_sections() |> ignore
   markdown_viewer.get_id() |> ignore
@@ -230,7 +227,7 @@ fn compile_external_viewer_api_contract(
   let diff_host = @rdom.document().create_element("div")
   let diff_options = @viewer.DiffEditorOptions(
     editor_options=options,
-    layout=@viewer.DiffEditorLayout::SideBySide,
+    layout=SideBySide,
   )
   let diff_editor = @viewer.DiffEditor::create(
     diff_host,
@@ -249,9 +246,7 @@ fn compile_external_viewer_api_contract(
   diff_editor.get_layout() |> ignore
   diff_editor.reveal_next_change() |> ignore
   diff_editor.reveal_previous_change() |> ignore
-  diff_editor.update_options(
-    diff_options.with_layout(@viewer.DiffEditorLayout::Inline),
-  )
+  diff_editor.update_options(diff_options.with_layout(Inline))
   diff_editor.focus()
   diff_editor.layout()
   // A real clear returns the already-detached pair to its caller. This

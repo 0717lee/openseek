@@ -1,6 +1,6 @@
 ///|
 fn public_markdown_viewer_test_model() -> @model.TextModel {
-  @model.TextModel(
+  TextModel(
     try! @base_common.Uri::from(
       scheme="inmemory",
       authority="markdown-viewer-public-test",
@@ -20,22 +20,16 @@ test "public MarkdownViewerWidget model makes resource semantics explicit" {
   defer model.dispose()
   let ordinary = @markdown_viewer.MarkdownViewerWidgetModel(
     model,
-    @markdown_viewer.MarkdownResourceKind::OrdinaryMarkdown,
+    OrdinaryMarkdown,
   )
   let moonbit = @markdown_viewer.MarkdownViewerWidgetModel(
     model,
-    @markdown_viewer.MarkdownResourceKind::MoonBitMarkdown,
+    MoonBitMarkdown,
   )
   assert_true(ordinary.model.same(model))
-  assert_true(
-    ordinary.resource_kind ==
-    @markdown_viewer.MarkdownResourceKind::OrdinaryMarkdown,
-  )
+  assert_true(ordinary.resource_kind == OrdinaryMarkdown)
   assert_true(moonbit.model.same(model))
-  assert_true(
-    moonbit.resource_kind ==
-    @markdown_viewer.MarkdownResourceKind::MoonBitMarkdown,
-  )
+  assert_true(moonbit.resource_kind == MoonBitMarkdown)
 }
 
 ///|

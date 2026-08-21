@@ -4,8 +4,8 @@ fn test_change(
   modified : Array[String],
 ) -> @diff.DetailedLineRangeMapping raise {
   let changes = @diff.CoreDocumentDiffProvider().compute_diff(
-      @model.TextSnapshot(original.join("\n")),
-      @model.TextSnapshot(modified.join("\n")),
+      TextSnapshot(original.join("\n")),
+      TextSnapshot(modified.join("\n")),
       { ignore_trim_whitespace: false },
     ).changes
   assert_eq(changes.length(), 1)

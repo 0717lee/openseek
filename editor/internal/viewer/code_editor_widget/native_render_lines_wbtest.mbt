@@ -60,10 +60,10 @@ test "native render_lines keeps tokenizer spans and UTF-16 decorations" {
     let rendered = viewer
       .render_lines(
         source,
-        @base_common.LineRange(1, 2),
+        LineRange(1, 2),
         decorations=[
           {
-            range: @base_common.Range(1, 5, 1, 8),
+            range: Range(1, 5, 1, 8),
             class_name: "diff-editor-inline-char-delete",
           },
         ],
@@ -97,9 +97,7 @@ test "native render_lines uses editor wrapping and exact model-line heights" {
       "host",
       viewer => {
         viewer.test_set_soft_wrap_column(6)
-        let rendered = viewer
-          .render_lines(source, @base_common.LineRange(1, 2))
-          .unwrap()
+        let rendered = viewer.render_lines(source, LineRange(1, 2)).unwrap()
         assert_eq(rendered.view_line_count(), 2)
         assert_eq(rendered.height_in_px(), 36.0)
         assert_true(rendered.model_line_view_counts() == [2])
@@ -121,9 +119,7 @@ test "native render_lines preserves tab CJK emoji and RTL source" {
     with_test_viewer(
       "host",
       viewer => {
-        let rendered = viewer
-          .render_lines(source, @base_common.LineRange(1, 2))
-          .unwrap()
+        let rendered = viewer.render_lines(source, LineRange(1, 2)).unwrap()
         let html = native_render_lines_test_html(rendered.dom_node())
         assert_false(html.contains("\t"))
         assert_true(html.contains("中"))
@@ -144,9 +140,7 @@ test "native render_lines does not truncate a very long source line" {
     let source = test_model(source_text)
     defer source.dispose()
     with_test_viewer("host", viewer => {
-      let rendered = viewer
-        .render_lines(source, @base_common.LineRange(1, 2))
-        .unwrap()
+      let rendered = viewer.render_lines(source, LineRange(1, 2)).unwrap()
       let html = native_render_lines_test_html(rendered.dom_node())
       assert_true(html.contains("END"))
       assert_true(html.length() > 2600)

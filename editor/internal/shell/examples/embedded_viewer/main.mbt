@@ -535,7 +535,7 @@ fn embed_markdown_viewer() -> @viewer.MarkdownViewer {
         .unwrap()
       let viewer = @viewer.MarkdownViewer::create(
         host,
-        options=@viewer.MarkdownViewerOptions(placeholder="Loading Markdown..."),
+        options=MarkdownViewerOptions(placeholder="Loading Markdown..."),
       )
       viewer.on_did_change_model(event => {
         guard event.new_model_url is Some(attached_uri) else { return }
@@ -684,7 +684,7 @@ fn set_embed_diff_visible(visible : Bool) -> @rabbita.Cmd {
       )
       replace_embed_diff_model(
         diff_editor,
-        Some(@viewer.DiffEditorModel(original_model, modified_model)),
+        Some(DiffEditorModel(original_model, modified_model)),
       )
     },
     kind=@cmd.after_render,
@@ -695,12 +695,8 @@ fn set_embed_diff_visible(visible : Bool) -> @rabbita.Cmd {
 fn set_embed_diff_options(inline : Bool, sash_enabled : Bool) -> @rabbita.Cmd {
   @cmd.custom_cmd(_ => {
     embed_diff_editor().update_options(
-      @viewer.DiffEditorOptions(
-        layout=if inline {
-          @viewer.DiffEditorLayout::Inline
-        } else {
-          @viewer.DiffEditorLayout::SideBySide
-        },
+      DiffEditorOptions(
+        layout=if inline { Inline } else { SideBySide },
         sash_enabled~,
       ),
     )
@@ -820,11 +816,11 @@ fn open_embed_document_cmd(uri : @base_common.Uri) -> @rabbita.Cmd {
           let resource_kind = if model.uri.path.to_lower().has_suffix(".mbt.md") {
             @viewer.MarkdownResourceKind::MoonBitMarkdown
           } else {
-            @viewer.MarkdownResourceKind::OrdinaryMarkdown
+            OrdinaryMarkdown
           }
           replace_embed_markdown_model(
             viewer,
-            Some(@viewer.MarkdownViewerModel(model, resource_kind)),
+            Some(MarkdownViewerModel(model, resource_kind)),
           )
           viewer.handle_initialized()
         } else {

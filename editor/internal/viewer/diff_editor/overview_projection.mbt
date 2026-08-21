@@ -21,7 +21,7 @@ fn modified_overview_range(
   // use the same geometry and reveal API as every other entry.
   let line_count = modified_line_count.max(1)
   let anchor = change.modified.start_line_number.clamp(min=1, max=line_count)
-  @base_common.LineRange(anchor, anchor + 1)
+  LineRange(anchor, anchor + 1)
 }
 
 ///|

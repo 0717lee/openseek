@@ -16,8 +16,8 @@ fn alignment_test_projection(
 ) -> DiffFeatureProjection {
   DiffFeatureProjection(
     { changes, additional_alignments },
-    @model.TextSnapshot(alignment_test_text(original_line_count)),
-    @model.TextSnapshot(alignment_test_text(modified_line_count)),
+    TextSnapshot(alignment_test_text(original_line_count)),
+    TextSnapshot(alignment_test_text(modified_line_count)),
   )
 }
 
@@ -29,9 +29,9 @@ fn alignment_test_change(
   modified_end : Int,
   inner_changes? : Array[@diff.RangeMapping],
 ) -> @diff.DetailedLineRangeMapping {
-  @diff.DetailedLineRangeMapping(
-    @base_common.LineRange(original_start, original_end),
-    @base_common.LineRange(modified_start, modified_end),
+  DetailedLineRangeMapping(
+    LineRange(original_start, original_end),
+    LineRange(modified_start, modified_end),
     inner_changes,
   )
 }
@@ -100,7 +100,7 @@ test "hidden lines and replacement foreign zones both affect geometry" {
   let projection = alignment_test_projection([], [], 4, 4)
   let hidden_only = compute_managed_alignment_spacers(
     projection,
-    PaneGeometrySnapshot(4, 20.0, hidden_lines=[@base_common.LineRange(2, 3)]),
+    PaneGeometrySnapshot(4, 20.0, hidden_lines=[LineRange(2, 3)]),
     PaneGeometrySnapshot(4, 20.0),
   )
   assert_eq(hidden_only.original(), [
@@ -110,7 +110,7 @@ test "hidden lines and replacement foreign zones both affect geometry" {
 
   let hidden_with_zone = compute_managed_alignment_spacers(
     projection,
-    PaneGeometrySnapshot(4, 20.0, hidden_lines=[@base_common.LineRange(2, 3)], foreign_zone_heights=[
+    PaneGeometrySnapshot(4, 20.0, hidden_lines=[LineRange(2, 3)], foreign_zone_heights=[
       { after_line_number: 2, height_in_px: 50.0 },
     ]),
     PaneGeometrySnapshot(4, 20.0),
@@ -123,10 +123,7 @@ test "hidden lines and replacement foreign zones both affect geometry" {
 
 ///|
 test "additional alignment can align omitted geometry without a real change" {
-  let additional = @diff.LineRangeMapping(
-    @base_common.LineRange(2, 2),
-    @base_common.LineRange(2, 3),
-  )
+  let additional = @diff.LineRangeMapping(LineRange(2, 2), LineRange(2, 3))
   let projection = alignment_test_projection([], [additional], 3, 4)
   assert_eq(projection.change_count(), 0)
   let spacers = compute_managed_alignment_spacers(
@@ -143,7 +140,7 @@ test "character mappings add synchronization points inside a real hunk" {
   let original_inner = @base_common.Range(2, 5, 3, 4)
   let modified_inner = @base_common.Range(2, 5, 4, 4)
   let change = alignment_test_change(2, 6, 2, 8, inner_changes=[
-    @diff.RangeMapping(original_inner, modified_inner),
+    RangeMapping(original_inner, modified_inner),
   ])
   let projection = alignment_test_projection([change], [], 7, 9)
   let spacers = compute_managed_alignment_spacers(

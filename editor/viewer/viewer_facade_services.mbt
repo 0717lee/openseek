@@ -17,7 +17,7 @@ pub fn ViewerServices::ViewerServices(
   log_service? : @log.LogHandle,
 ) -> ViewerServices {
   {
-    inner: @code_widget.CodeEditorServices(
+    inner: CodeEditorServices(
       languages?,
       markers?,
       agent_feedback?,

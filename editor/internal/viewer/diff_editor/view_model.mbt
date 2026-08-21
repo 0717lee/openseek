@@ -55,8 +55,8 @@ pub fn DiffEditorViewModel::DiffEditorViewModel(
     content_debounce: @base_browser.RunOnceScheduler::new_with_timer(
       200, schedule_timeout,
     ),
-    did_change_model: @base_common.Emitter(),
-    did_update: @base_common.Emitter(),
+    did_change_model: Emitter(),
+    did_update: Emitter(),
     disposed: false,
   }
   self.install_provider_subscription()
@@ -337,10 +337,7 @@ fn line_range_contains_range(
     @base_common.Position(parent.start_line_number.max(1), 1)
   } else {
     let last_line_number = snapshot.line_count().max(1)
-    @base_common.Position(
-      last_line_number,
-      snapshot.get_line_max_column(last_line_number),
-    )
+    Position(last_line_number, snapshot.get_line_max_column(last_line_number))
   }
   child.get_start_position() == anchor && child.get_end_position() == anchor
 }

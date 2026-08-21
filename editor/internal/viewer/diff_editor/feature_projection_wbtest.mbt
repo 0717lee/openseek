@@ -6,9 +6,9 @@ fn projection_change(
   modified_end : Int,
   inner_changes? : Array[@diff.RangeMapping],
 ) -> @diff.DetailedLineRangeMapping {
-  @diff.DetailedLineRangeMapping(
-    @base_common.LineRange(original_start, original_end),
-    @base_common.LineRange(modified_start, modified_end),
+  DetailedLineRangeMapping(
+    LineRange(original_start, original_end),
+    LineRange(modified_start, modified_end),
     inner_changes,
   )
 }
@@ -16,10 +16,7 @@ fn projection_change(
 ///|
 test "additional alignments are isolated to geometry anchors" {
   let change = projection_change(1, 2, 1, 2)
-  let extra = @diff.LineRangeMapping(
-    @base_common.LineRange(2, 2),
-    @base_common.LineRange(2, 2),
-  )
+  let extra = @diff.LineRangeMapping(LineRange(2, 2), LineRange(2, 2))
   let original = @model.TextSnapshot("before\ntail")
   let modified = @model.TextSnapshot("after\ntail")
   let without_extra = DiffFeatureProjection(
@@ -69,25 +66,25 @@ test "insert delete and modify project pane-specific decorations" {
   let original_inner = @base_common.Range(2, 2, 2, 4)
   let modified_inner = @base_common.Range(2, 2, 2, 4)
   let modify = projection_change(2, 3, 2, 3, inner_changes=[
-    @diff.RangeMapping(original_inner, modified_inner),
+    RangeMapping(original_inner, modified_inner),
   ])
   let delete = projection_change(3, 4, 4, 4)
   // Deliberately unsorted: projection order is independent of provider array
   // order, and navigation/overview indices use the sorted canonical changes.
   let projection = DiffFeatureProjection(
     { changes: [delete, insert, modify], additional_alignments: [] },
-    @model.TextSnapshot("keep\na😀b\ngone\ntail"),
-    @model.TextSnapshot("new\naXYb\nkeep\ntail"),
+    TextSnapshot("keep\na😀b\ngone\ntail"),
+    TextSnapshot("new\naXYb\nkeep\ntail"),
   )
 
   // The emoji occupies two UTF-16 code units, so line 2's max column is 5.
   assert_eq(projection.original_decorations().whole_line_ranges(), [
-    @base_common.Range(2, 1, 2, 5),
-    @base_common.Range(3, 1, 3, 5),
+    Range(2, 1, 2, 5),
+    Range(3, 1, 3, 5),
   ])
   assert_eq(projection.modified_decorations().whole_line_ranges(), [
-    @base_common.Range(1, 1, 1, 4),
-    @base_common.Range(2, 1, 2, 5),
+    Range(1, 1, 1, 4),
+    Range(2, 1, 2, 5),
   ])
   assert_eq(projection.original_decorations().inner_ranges(), [original_inner])
   assert_eq(projection.modified_decorations().inner_ranges(), [modified_inner])
@@ -95,12 +92,12 @@ test "insert delete and modify project pane-specific decorations" {
   // Empty original/modified ranges remain alignment anchors but never create
   // phantom whole-line or overview decorations on that pane.
   assert_eq(projection.original_overview_entries(), [
-    { change_index: 1, range: @base_common.LineRange(2, 3) },
-    { change_index: 2, range: @base_common.LineRange(3, 4) },
+    { change_index: 1, range: LineRange(2, 3) },
+    { change_index: 2, range: LineRange(3, 4) },
   ])
   assert_eq(projection.modified_overview_entries(), [
-    { change_index: 0, range: @base_common.LineRange(1, 2) },
-    { change_index: 1, range: @base_common.LineRange(2, 3) },
+    { change_index: 0, range: LineRange(1, 2) },
+    { change_index: 1, range: LineRange(2, 3) },
   ])
   assert_eq(projection.alignment_anchors(), [
     insert.line_mapping(),
@@ -112,7 +109,7 @@ test "insert delete and modify project pane-specific decorations" {
   assert_eq(projection.change_at(1), Some(modify))
   assert_eq(
     projection.change_at(1).unwrap().inner_changes.unwrap()[0].original,
-    @base_common.Range(2, 2, 2, 4),
+    Range(2, 2, 2, 4),
   )
 }
 
@@ -123,8 +120,8 @@ test "navigation follows sorted changes and cycles in both directions" {
   let third = projection_change(4, 5, 4, 4)
   let projection = DiffFeatureProjection(
     { changes: [third, second, first], additional_alignments: [] },
-    @model.TextSnapshot("one\ntwo\nthree\nfour"),
-    @model.TextSnapshot("added\ntwo\nthree\nfour"),
+    TextSnapshot("one\ntwo\nthree\nfour"),
+    TextSnapshot("added\ntwo\nthree\nfour"),
   )
 
   assert_eq(projection.change_at(0), Some(first))
@@ -153,8 +150,8 @@ test "navigation follows sorted changes and cycles in both directions" {
 test "empty projection has no feature output or navigation target" {
   let projection = DiffFeatureProjection(
     { changes: [], additional_alignments: [] },
-    @model.TextSnapshot(""),
-    @model.TextSnapshot(""),
+    TextSnapshot(""),
+    TextSnapshot(""),
   )
   assert_eq(projection.change_count(), 0)
   assert_true(projection.original_decorations().whole_line_ranges().is_empty())
