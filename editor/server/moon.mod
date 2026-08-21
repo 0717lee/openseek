@@ -14,5 +14,5 @@ warnings = "+prefer_readonly_array"
 
 import {
   "moonbitlang/editor@0.4.4",
-  "moonbitlang/async@0.20.5",
+  "moonbitlang/async@0.21.0",
 }

@@ -100,8 +100,8 @@ fn HttpTransport::new(
 /// The headers for one POST: the MCP-required set, the session/version state,
 /// and the user's extras. `Accept-Encoding: identity` keeps an intermediary from
 /// re-buffering the event stream (same pitfall the DeepSeek client pins).
-fn HttpTransport::request_headers(self : HttpTransport) -> Map[String, String] {
-  let headers = {
+fn HttpTransport::request_headers(self : HttpTransport) -> @http.Headers {
+  let headers : @http.Headers = {
     "Content-Type": "application/json",
     "Accept": "application/json, text/event-stream",
     "Accept-Encoding": "identity",
@@ -149,14 +149,10 @@ fn feed_gate(completion : @async.Queue[Unit]?) -> Unit {
 ///|
 /// Case-insensitive response-header lookup (header names are case-insensitive
 /// on the wire and servers vary).
-fn header_value(headers : Map[String, String], name : String) -> String? {
-  let wanted = name.to_lower()
-  for key, value in headers {
-    if key.to_lower() == wanted {
-      return Some(value)
-    }
-  }
-  None
+fn header_value(headers : @http.Headers, name : String) -> String? {
+  // `Headers` keys are case-insensitive, so a direct lookup covers the
+  // differently-cased wire spellings this scan used to handle manually.
+  headers.get(name)
 }
 
 ///|
@@ -259,7 +255,7 @@ pub impl @jsonrpc.Transport for HttpTransport with fn close(self) {
   // servers to handle anyway (clients can vanish at any time).
   if !already_closed && self.session_id is Some(session_id) {
     let url = self.url
-    let headers = { "Mcp-Session-Id": session_id }
+    let headers : @http.Headers = { "Mcp-Session-Id": session_id }
     // A strict server enforces the negotiated version on every
     // post-initialization request, the DELETE included.
     if self.protocol_version is Some(version) {
@@ -284,7 +280,7 @@ pub impl @jsonrpc.Transport for HttpTransport with fn close(self) {
 /// Best-effort `DELETE <endpoint>` with the session (and negotiated-version)
 /// headers; every failure — including 405 from a server that declines
 /// client-initiated termination — is swallowed.
-async fn delete_session(url : String, headers : Map[String, String]) -> Unit {
+async fn delete_session(url : String, headers : @http.Headers) -> Unit {
   // Split the MCP URL into origin (scheme + host[:port]) and path.
   guard url.find("://") is Some(scheme_end) else { return }
   let host_start = scheme_end + 3

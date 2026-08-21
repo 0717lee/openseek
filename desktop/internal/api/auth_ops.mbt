@@ -38,30 +38,27 @@ async fn auth_connect(state : ApiState) -> @protocol.AuthStatusPayload {
   // The persisted session is not final until its issuer still matches the
   // selected server. This protected completion also runs when cancellation
   // landed during the commit shield in `sign_in`.
-  @async.protect_from_cancel(
-    () => {
-      if @engine.remote_server_base(state.manager) != Some(server_url) {
-        // Publish the final local state even if cleanup itself raises after
-        // clearing it.
-        defer state.hub.publish(AuthChanged(store.status()))
-        store.sign_out() catch {
-          @auth.AuthError(message) =>
-            raise @host.HostError(
-              "could not discard the superseded sign-in: \{message}",
-            )
-          error =>
-            raise @host.HostError(
-              "could not discard the superseded sign-in: \{error}",
-            )
-        }
-        raise @host.HostError(
-          "the server changed during sign-in; connect again for the selected server",
-        )
+  @async.protect_from_cancel(() => {
+    if @engine.remote_server_base(state.manager) != Some(server_url) {
+      // Publish the final local state even if cleanup itself raises after
+      // clearing it.
+      defer state.hub.publish(AuthChanged(store.status()))
+      store.sign_out() catch {
+        @auth.AuthError(message) =>
+          raise @host.HostError(
+            "could not discard the superseded sign-in: \{message}",
+          )
+        error =>
+          raise @host.HostError(
+            "could not discard the superseded sign-in: \{error}",
+          )
       }
-      state.hub.publish(AuthChanged(store.status()))
-    },
-    resume_on_cancel=true,
-  )
+      raise @host.HostError(
+        "the server changed during sign-in; connect again for the selected server",
+      )
+    }
+    state.hub.publish(AuthChanged(store.status()))
+  })
   auth_status(state)
 }
 
@@ -77,20 +74,18 @@ async fn auth_disconnect(state : ApiState) -> @protocol.AuthStatusPayload {
     error if @async.is_being_cancelled() => {
       // `sign_out` has already cleared local authority and poked the
       // supervisor before cancellation can escape its local transition.
-      @async.protect_from_cancel(
-        () => state.hub.publish(AuthChanged(store.status())),
-        resume_on_cancel=true,
-      )
+      @async.protect_from_cancel(() => {
+        state.hub.publish(AuthChanged(store.status()))
+      })
       raise error
     }
     @auth.AuthError(message) => {
       // `clear_local_session` clears memory and parks the connector before
       // it writes the marker. Publish that truthful in-process state even
       // though the persistence failure must still reach the requester.
-      @async.protect_from_cancel(
-        () => state.hub.publish(AuthChanged(store.status())),
-        resume_on_cancel=true,
-      )
+      @async.protect_from_cancel(() => {
+        state.hub.publish(AuthChanged(store.status()))
+      })
       raise @host.HostError(message)
     }
     error => raise @host.HostError("sign-out failed: \{error}")

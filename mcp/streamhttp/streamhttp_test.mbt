@@ -51,7 +51,7 @@ async fn mock_mcp_endpoint(
         let text = body.read_all().text()
         if request.meth is Delete {
           for key, value in request.headers {
-            if key.to_lower() == "mcp-session-id" {
+            if key == "mcp-session-id" {
               seen.deleted_session = value
             }
           }
@@ -77,7 +77,7 @@ async fn mock_mcp_endpoint(
           }
           { "method": "tools/list", "id": id, .. } => {
             for key, value in request.headers {
-              match key.to_lower() {
+              match key.0.to_lower() {
                 "mcp-session-id" => seen.session_id = value
                 "mcp-protocol-version" => seen.protocol_version = value
                 "accept" => seen.accept = value

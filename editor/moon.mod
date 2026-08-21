@@ -21,7 +21,7 @@ warnings = "+prefer_readonly_array"
 import {
   "moonbit-community/cmark@0.4.5",
   "moonbit-community/moondiff@0.0.1",
-  "moonbitlang/async@0.20.5",
+  "moonbitlang/async@0.21.0",
   "moonbit-community/rabbita@0.14.3",
   "Milky2018/diago@0.3.0",
   "moonbitlang/x@0.4.50",
