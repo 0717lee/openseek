@@ -18,16 +18,15 @@ jobs:
     permissions:
       contents: read
     strategy:
-      # Run both channels and targets independently (fail-fast: false): the
-      # stable/nightly split identifies toolchain regressions, while the
+      # Run pre-release targets independently (fail-fast: false), while the
       # native/JS split lets the two test suites run in parallel.
       fail-fast: false
       matrix:
-        moonbit-channel: [stable]
+        moonbit-channel: [pre-release]
         target: [native, js]
         include:
-          - moonbit-channel: stable
-            moonbit-version: latest
+          - moonbit-channel: pre-release
+            moonbit-version: pre-release
             deny-warn: "--deny-warn"
     steps:
       - name: Checkout code
@@ -68,29 +67,29 @@ jobs:
           key: cef-${{ runner.os }}-${{ runner.arch }}-proton-${{ steps.proton.outputs.version }}
 
       - name: Check formatting
-        # Stable only, for the same reason as `--deny-warn` below. `moon fmt` is
+        # Pre-release only, for the same reason as `--deny-warn` below. `moon fmt` is
         # a moving target on nightly: its output for markdown `mbt` blocks
         # changed between 2026-07-15 and 2026-07-25, which red-lined this step
         # for a file no one had touched. And because the step ran on both
         # channels, the repo could only ever satisfy it while the two
         # formatters agreed — once they disagree there is no committed form
         # that passes, which is not a state CI should be able to reach.
-        if: matrix.moonbit-channel == 'stable' && matrix.target == 'native'
+        if: matrix.moonbit-channel == 'pre-release' && matrix.target == 'native'
         run: moon fmt --check
 
       - name: Check ${{ matrix.target }} target
         # This is the local-dependency integration check: desktop must compile
         # against the editor member from this checkout. Keeping the target
         # explicit also makes each matrix row own one complete check/test pair;
-        # stable denies warnings across the complete integrated workspace.
+        # pre-release denies warnings across the complete integrated workspace.
         run: moon check --target ${{ matrix.target }} ${{ matrix.deny-warn }}
 
       - name: Check generated interfaces
         # `moon info` formats abstract types differently across toolchain
-        # versions (`type X` on nightly vs `pub struct X { // private fields }`
-        # on stable), and the committed `.mbti` are nightly-generated — so this
-        # consistency check is only meaningful on nightly. This covers the
-        # editor's public interfaces from the same checkout too. Ignore
+        # versions (`type X` on pre-release vs `pub struct X { // private fields }`
+        # on stable), and the committed `.mbti` are pre-release-generated — so
+        # this consistency check is only meaningful on pre-release. This covers
+        # the editor's public interfaces from the same checkout too. Ignore
         # blank-only formatter drift, but still reject content changes and new
         # `.mbti`.
         if: matrix.target == 'native'
@@ -126,12 +125,12 @@ jobs:
             -C "$PWD" cef setup
           test -f .proton/runtime.json
 
-      # The stable/native main job is the sole Linux writer. PR jobs remain
-      # restore-only, and nightly does not race stable to reserve the same key.
+      # The pre-release/native main job is the sole Linux writer. PR jobs remain
+      # restore-only, and no second channel races to reserve the same key.
       - name: Save CEF distribution
         if: >-
           github.event_name == 'push' &&
-          matrix.moonbit-channel == 'stable' &&
+          matrix.moonbit-channel == 'pre-release' &&
           matrix.target == 'native' &&
           steps.cef-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4

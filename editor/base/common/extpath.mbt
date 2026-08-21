@@ -7,7 +7,7 @@
 /// `[\\/]` → `sep` global replace (the regex bodies of extpath.ts:22 and
 /// extpath.ts:71).
 fn replace_path_separators(os_path : String, sep : String) -> String {
-  let sb = StringBuilder::new()
+  let sb = StringBuilder()
   for unit in os_path.code_units() {
     let code = unit.to_int()
     if is_path_separator(code) {

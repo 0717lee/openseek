@@ -5,7 +5,7 @@
 
 ///|
 fn tab_view(dispatch : @cmd.Emit[Msg], tab : Tab, active : Bool) -> @html.Html {
-  let classes = StringBuilder::new()
+  let classes = StringBuilder()
   classes.write_string("terminal-tab")
   if active {
     classes.write_string(" active")

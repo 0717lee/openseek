@@ -207,7 +207,7 @@ fn to_lower_js(s : String) -> String {
   // Copy unchanged runs as substring chunks: every mapped unit is a BMP
   // non-surrogate, so chunk boundaries never split a surrogate pair, and
   // `UInt16::to_char` therefore always yields `Some`.
-  let sb = StringBuilder::new()
+  let sb = StringBuilder()
   let chunk_start = for i in 0..<len; chunk_start = 0 {
     let code = s[i]
     let lowered = to_lower_code_unit(code)
@@ -351,7 +351,7 @@ fn starts_with_ignore_case_impl(str : String, candidate : String) -> Bool {
 /// `"` alone, matching Monaco's `_tokenizeToString`; use `escape_html` for text
 /// that can also land in an attribute value.
 pub fn escape(text : String) -> String {
-  let sb = StringBuilder::new()
+  let sb = StringBuilder()
   for ch in text {
     match ch {
       '&' => sb.write_string("&amp;")
@@ -368,7 +368,7 @@ pub fn escape(text : String) -> String {
 /// three characters plus `"`. Callers that build markup by concatenation and
 /// may quote the result need this variant.
 pub fn escape_html(text : String) -> String {
-  let sb = StringBuilder::new()
+  let sb = StringBuilder()
   for ch in text {
     match ch {
       '&' => sb.write_string("&amp;")

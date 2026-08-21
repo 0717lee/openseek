@@ -77,7 +77,7 @@ pub fn analyze_session(session : @agent_session.Session) -> EvalResult {
 /// behavior. User prompts and summaries are intentionally excluded so a task
 /// statement cannot inflate model-behavior counters.
 pub fn transcript_text(session : @agent_session.Session) -> String {
-  let out = StringBuilder::new()
+  let out = StringBuilder()
   for event in session.events() {
     append_item_text(out, event.item())
   }

@@ -214,7 +214,7 @@ fn markdown_block_heading_level(block : @cmark.Block) -> Int? {
 /// setext heading yields one space-joined string.
 fn markdown_block_heading_text(block : @cmark.Block) -> String? {
   guard block is Heading(node) else { return None }
-  let collapsed = StringBuilder::new()
+  let collapsed = StringBuilder()
   let mut wrote_any = false
   let mut pending_space = false
   for line in node.v.inline.to_plain_text(break_on_soft=false) {

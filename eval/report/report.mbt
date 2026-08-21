@@ -117,7 +117,7 @@ fn Report::to_json(self : Report) -> Json {
 ///|
 /// Render the report as a standalone HTML document for browser inspection.
 pub fn Report::html(self : Report) -> String {
-  let out = StringBuilder::new()
+  let out = StringBuilder()
   out.write_string("<!doctype html>\n<html><head><meta charset=\"utf-8\">")
   out.write_string(
     "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
@@ -392,7 +392,7 @@ fn short_cell(text : String) -> String {
     .replace_all(old="\r\n", new="\n")
     .replace_all(old="\n", new=" ")
     .trim()
-  let out = StringBuilder::new()
+  let out = StringBuilder()
   for char in squashed; count = 0 {
     if count >= 96 {
       out.write_string("...")

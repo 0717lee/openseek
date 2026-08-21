@@ -688,7 +688,7 @@ pub async fn build_app_stylesheet(ws : Workspace) -> Unit {
 /// resource URLs. `app_font.css` stays at the desktop root so its `fonts/` URL
 /// resolves identically before and after concatenation.
 async fn assembled_app_stylesheet(ws : Workspace) -> String {
-  let css = StringBuilder::new()
+  let css = StringBuilder()
   for source in app_css_sources() {
     let absolute = ws.at(source)
     if !@asyncfs.exists(absolute) {
@@ -739,7 +739,7 @@ pub async fn build_viewer_stylesheet(ws : Workspace) -> Unit {
 /// workspace stylesheet. Keeping assembly separate from the output write lets
 /// tests exercise the real member files without mutating the checkout.
 async fn assembled_viewer_stylesheet(ws : Workspace) -> String {
-  let css = StringBuilder::new()
+  let css = StringBuilder()
   let theme_path = ws.at(ViewerThemeSource)
   if !@asyncfs.exists(theme_path) {
     raise PackageError("viewer theme not found: \{theme_path}")

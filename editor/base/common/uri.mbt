@@ -618,7 +618,7 @@ fn encode_uri_component_fast(
     } else {
       // encoding needed, we need to allocate a new string
       if res is None {
-        let sb = StringBuilder::new()
+        let sb = StringBuilder()
         sb.write_string(js_slice(uri_component, 0, end=pos))
         res = Some(sb)
       }
@@ -674,7 +674,7 @@ fn encode_uri_component_minimal(path : String) -> String {
     if code == '#'.to_int() || code == '?'.to_int() {
       let sb = match res {
         None => {
-          let sb = StringBuilder::new()
+          let sb = StringBuilder()
           res = Some(sb)
           sb
         }
@@ -861,7 +861,7 @@ fn read_percent_byte(s : String, at : Int) -> Int raise UriDecodeError {
 /// surrogate/out-of-range code points all fail, exactly the inputs that make
 /// the JS builtin throw `URIError`.
 fn decode_uri_component(str : String) -> String raise UriDecodeError {
-  let sb = StringBuilder::new()
+  let sb = StringBuilder()
   let len = str.length()
   let mut i = 0
   let mut chunk_start = 0
@@ -970,7 +970,7 @@ fn percent_decode(str : String) -> String {
   if !found {
     return str
   }
-  let sb = StringBuilder::new()
+  let sb = StringBuilder()
   let mut chunk_start = 0
   let mut i = 0
   while i < len {

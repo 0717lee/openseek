@@ -11,7 +11,7 @@
 fn pkce_challenge(verifier : String) -> String {
   let digest = Bytes::from_array(@crypto.sha256(@utf8.encode(verifier)))
   let standard = @base64.encode(digest, padding=false)
-  let builder = StringBuilder::new()
+  let builder = StringBuilder()
   for c in standard {
     builder.write_char(
       match c {

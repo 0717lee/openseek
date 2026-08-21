@@ -5,7 +5,7 @@
 
 ///|
 fn ascii_lower(text : String) -> String {
-  let buf = StringBuilder::new()
+  let buf = StringBuilder()
   for ch in text {
     buf.write_char(ch.to_ascii_lowercase())
   }
@@ -38,7 +38,7 @@ pub fn host_of(url : String) -> String? {
   }
   if host_port.has_prefix("[") {
     // An IPv6 literal's colons are not a port separator.
-    let buf = StringBuilder::new()
+    let buf = StringBuilder()
     for ch in host_port {
       buf.write_char(ch)
       if ch == ']' {
@@ -68,7 +68,7 @@ pub fn is_web_url(url : String) -> Bool {
 /// sharing a document differ only in the anchor a same-document jump
 /// scrolls to, which never reloads the page.
 fn document_of(url : String) -> String {
-  let buf = StringBuilder::new()
+  let buf = StringBuilder()
   for ch in url {
     if ch == '#' {
       break
@@ -139,7 +139,7 @@ fn all_digits(text : StringView) -> Bool {
 /// The draft's first segment — everything before the path, query, or
 /// fragment — where a scheme or port would live.
 fn head_of(text : StringView) -> String {
-  let buf = StringBuilder::new()
+  let buf = StringBuilder()
   for ch in text {
     if ch == '/' || ch == '?' || ch == '#' {
       break

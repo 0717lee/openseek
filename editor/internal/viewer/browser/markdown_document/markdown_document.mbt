@@ -347,7 +347,7 @@ fn render_semantic_tokenized_code_lines(
     tokenized_line_segment_is_empty(rendered_lines[rendered_lines.length() - 1]) else {
     return tokenized
   }
-  let result = StringBuilder::new()
+  let result = StringBuilder()
   result.write_string(prefix)
   for line_index, code_line in code_block.code_lines {
     if line_index > 0 {

@@ -40,7 +40,7 @@ pub fn decode(text : StringView) -> String {
 
 ///|
 fn encode_bytes(text : StringView, keep : (Int) -> Bool) -> String {
-  let out = StringBuilder::new()
+  let out = StringBuilder()
   for byte in @utf8.encode(text) {
     let code = byte.to_int()
     if keep(code) {
