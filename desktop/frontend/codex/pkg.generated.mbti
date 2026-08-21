@@ -32,6 +32,7 @@ pub(all) struct CodexProjectRow {
 pub(all) struct ComposerContext {
   channel : @interop.ChannelId
   model_chip : @html.Html
+  reasoning_chip : @html.Html?
   file_candidates : Array[@pathx.Relative]
   open_files : Array[@pathx.Relative]
   active_file : @pathx.Relative?
@@ -44,6 +45,7 @@ pub fn Msg::archive_thread(String) -> Self
 pub fn Msg::cancel_login() -> Self
 pub fn Msg::close_git_details() -> Self
 pub fn Msg::composer_action(@composer.Action) -> Self
+pub fn Msg::effort_changed(String) -> Self
 pub fn Msg::login() -> Self
 pub fn Msg::logout() -> Self
 pub fn Msg::model_changed(String) -> Self
@@ -82,6 +84,7 @@ pub fn State::composer_input(Self, @cmd.Emit[Msg], ComposerContext) -> @composer
 pub fn State::composing_draft(Self) -> Bool
 pub fn State::connection_label(Self) -> String
 pub fn State::draft_text(Self) -> String
+pub fn State::equal(Self, Self) -> Bool
 pub fn State::from_thread_snapshot(Json) -> Self
 pub fn State::git_details_open(Self) -> Bool
 pub fn State::has_active(Self) -> Bool
@@ -89,11 +92,13 @@ pub fn State::is_busy(Self) -> Bool
 pub fn State::loose_entries(Self, SidebarContext) -> Array[@section.Entry]
 pub fn State::model_listing(Self) -> CodexModelListing
 pub fn State::new_thread_cwd(Self) -> String
+pub fn State::not_equal(Self, Self) -> Bool
 pub fn State::page(Self, @cmd.Emit[Msg], @interop.ChannelId, Bool, Bool, Bool, PageActions) -> Array[@html.Html]
 pub fn State::pending_auth_url(Self) -> String?
 pub fn State::project_activation(Self, SidebarContext, String) -> String?
 pub fn State::project_conversations(Self, SidebarContext, String) -> Array[CodexProjectRow]
 pub fn State::project_draft(Self, SidebarContext, String) -> @conversation.Input?
+pub fn State::reasoning_effort_chip(Self, @cmd.Emit[String]) -> @html.Html?
 pub fn State::refresh(Self, @cmd.Emit[Msg], @interop.ChannelId) -> (@cmd.Cmd, Self)
 pub fn State::sign_in_required(Self) -> Bool
 pub fn State::signed_in(Self) -> Bool
