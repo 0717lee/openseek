@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Publish Desktop releases with OSS as the canonical store. A normal publish
-# uploads each versioned artifact once, verifies its public OSS metadata,
-# deploys the small Browser archive to openseek-api for same-origin `/console/`,
-# writes an immutable version manifest, and replaces latest.json last.
+# replaces provisional version artifacts until an immutable manifest seals
+# them, deploys the exact Browser archive to openseek-api for same-origin
+# `/console/`, and replaces latest.json last.
 #
 #   scripts/publish-release.sh publish [vX.Y.Z]  publish the checkout's artifacts
 #   scripts/publish-release.sh rollback vX.Y.Z   republish an immutable manifest
@@ -46,54 +46,109 @@ case "${1:-}" in
     )
     platforms=("macos-arm64" "macos-arm64-dmg" "browser")
     content_types=("application/zip" "application/x-apple-diskimage" "application/gzip")
+    manifest_path="$desktop_dir/dist/latest.json"
+    version_manifest_key="$oss_prefix/$publish_version/manifest.json"
+    version_manifest_destination="oss://$oss_bucket/$version_manifest_key"
+    version_manifest_url="$releases_origin/$publish_version/manifest.json"
     artifact_urls=()
     artifact_shas=()
+    browser_staged=false
 
-    for index in 0 1 2; do
-      artifact="${artifacts[$index]}"
-      platform="${platforms[$index]}"
-      content_type="${content_types[$index]}"
-      if [[ ! -f "$artifact" ]]; then
-        echo "artifact not found: $artifact" >&2
-        exit 1
-      fi
-      release_name="$(basename "$artifact")"
-      oss_destination="oss://$oss_bucket/$oss_prefix/$publish_version/$release_name"
-      public_url="$releases_origin/$publish_version/$release_name"
-      local_sha="$(shasum -a 256 "$artifact" | cut -d' ' -f1)"
-      local_size="$(wc -c < "$artifact" | tr -d '[:space:]')"
+    # The immutable version manifest is the commit marker. A failed HEAD must
+    # never be mistaken for an open version: only OSS's explicit NoSuchKey
+    # response permits this run to replace provisional artifacts.
+    manifest_head_status=0
+    manifest_head="$(
+      ossutil api head-object \
+        --region "$oss_region" \
+        --bucket "$oss_bucket" \
+        --key "$version_manifest_key" \
+        --output-format json 2>&1
+    )" || manifest_head_status=$?
+    if ((manifest_head_status == 0)); then
+      echo "$publish_version is sealed; reusing its OSS manifest and artifacts"
+      ossutil cp --force --region "$oss_region" \
+        "$version_manifest_destination" "$manifest_path"
+      jq -e --arg version "$version" '
+        .version == $version and
+        (.platforms["macos-arm64"].url | type == "string") and
+        (.platforms["macos-arm64"].sha256 | type == "string") and
+        (.platforms["macos-arm64-dmg"].url | type == "string") and
+        (.platforms["macos-arm64-dmg"].sha256 | type == "string") and
+        (.platforms.browser.url | type == "string") and
+        (.platforms.browser.sha256 | type == "string")
+      ' "$manifest_path" >/dev/null
+      artifact_urls=(
+        "$(jq -er '.platforms["macos-arm64"].url' "$manifest_path")"
+        "$(jq -er '.platforms["macos-arm64-dmg"].url' "$manifest_path")"
+        "$(jq -er '.platforms.browser.url' "$manifest_path")"
+      )
+      artifact_shas=(
+        "$(jq -er '.platforms["macos-arm64"].sha256' "$manifest_path")"
+        "$(jq -er '.platforms["macos-arm64-dmg"].sha256' "$manifest_path")"
+        "$(jq -er '.platforms.browser.sha256' "$manifest_path")"
+      )
 
-      # Existing versioned objects are never overwritten. Retrying a partial
-      # release skips them, then proves they match this checkout below.
-      echo "uploading $artifact"
-      echo "       to $oss_destination"
-      ossutil cp --ignore-existing --region "$oss_region" \
-        --content-type "$content_type" \
-        --cache-control "public, max-age=31536000, immutable" \
-        --metadata "sha256=$local_sha" \
-        "$artifact" "$oss_destination"
+      # The workflow rebuilt before discovering this sealed retry. Replace
+      # those nondeterministic bytes with the exact objects the manifest owns,
+      # so later artifact upload and verification use the published release.
+      for index in 0 1 2; do
+        artifact="${artifacts[$index]}"
+        release_name="$(basename "$artifact")"
+        oss_destination="oss://$oss_bucket/$oss_prefix/$publish_version/$release_name"
+        ossutil cp --force --region "$oss_region" "$oss_destination" "$artifact"
+        local_sha="$(shasum -a 256 "$artifact" | cut -d' ' -f1)"
+        if [[ "$local_sha" != "${artifact_shas[$index]}" ]]; then
+          echo "sealed $release_name does not match $version_manifest_url" >&2
+          exit 1
+        fi
+      done
+      COPYFILE_DISABLE=1 tar -xzf "${artifacts[2]}" -C "$desktop_dir/dist"
+    elif [[ "$manifest_head" == *"Http Status Code: 404."* && \
+      "$manifest_head" == *"Error Code: NoSuchKey."* ]]; then
+      echo "$publish_version is open; uploading replaceable artifacts"
+      for index in 0 1 2; do
+        artifact="${artifacts[$index]}"
+        platform="${platforms[$index]}"
+        content_type="${content_types[$index]}"
+        if [[ ! -f "$artifact" ]]; then
+          echo "artifact not found: $artifact" >&2
+          exit 1
+        fi
+        release_name="$(basename "$artifact")"
+        oss_destination="oss://$oss_bucket/$oss_prefix/$publish_version/$release_name"
+        public_url="$releases_origin/$publish_version/$release_name"
+        local_sha="$(shasum -a 256 "$artifact" | cut -d' ' -f1)"
+        local_size="$(wc -c < "$artifact" | tr -d '[:space:]')"
 
-      headers="$(curl -fsSI --retry 3 "$public_url" | tr -d '\r')"
-      served_size="$(awk 'tolower($1) == "content-length:" { print $2; exit }' <<< "$headers")"
-      served_sha="$(awk 'tolower($1) == "x-oss-meta-sha256:" { print $2; exit }' <<< "$headers")"
-      served_crc64="$(awk 'tolower($1) == "x-oss-hash-crc64ecma:" { print $2; exit }' <<< "$headers")"
-      if [[ "$served_size" != "$local_size" || \
-        "$served_sha" != "$local_sha" || \
-        -z "$served_crc64" ]]; then
-        echo "OSS verification failed for $platform at $public_url" >&2
-        exit 1
-      fi
-      artifact_urls+=("$public_url")
-      artifact_shas+=("$local_sha")
-      echo "$platform verified: $public_url"
-    done
+        # Until manifest.json exists these objects are provisional. Retrying a
+        # partial release must replace nondeterministic rebuilds instead of
+        # preserving bytes that no immutable manifest committed.
+        echo "uploading $artifact"
+        echo "       to $oss_destination"
+        ossutil cp --force --region "$oss_region" \
+          --content-type "$content_type" \
+          --cache-control "public, max-age=31536000, immutable" \
+          --metadata "sha256=$local_sha" \
+          "$artifact" "$oss_destination"
 
-    # Browser remains on the API origin because its session cookies, HTTP API,
-    # and WebSocket routes are same-origin. A retry after Browser selection can
-    # safely skip this upload and continue to the OSS manifest.
-    browser_current="$(curl -fsSL "$api_origin/browser/releases/current.json" 2>/dev/null || true)"
-    if ! jq -e --arg version "$version" '.version == $version' \
-      <<< "$browser_current" >/dev/null 2>&1; then
+        headers="$(curl -fsSI --retry 3 "$public_url" | tr -d '\r')"
+        served_size="$(awk 'tolower($1) == "content-length:" { print $2; exit }' <<< "$headers")"
+        served_sha="$(awk 'tolower($1) == "x-oss-meta-sha256:" { print $2; exit }' <<< "$headers")"
+        served_crc64="$(awk 'tolower($1) == "x-oss-hash-crc64ecma:" { print $2; exit }' <<< "$headers")"
+        if [[ "$served_size" != "$local_size" || \
+          "$served_sha" != "$local_sha" || \
+          -z "$served_crc64" ]]; then
+          echo "OSS verification failed for $platform at $public_url" >&2
+          exit 1
+        fi
+        artifact_urls+=("$public_url")
+        artifact_shas+=("$local_sha")
+        echo "$platform verified: $public_url"
+      done
+
+      # Stage Browser before sealing the manifest. It remains replaceable in
+      # the API until the later publish request selects this version.
       browser_archive="${artifacts[2]}"
       browser_upload_url="$api_origin/desktop/releases/$publish_version/SeekMoon.browser.tar.gz?platform=browser"
       response="$(curl -sS --fail-with-body -T "$browser_archive" \
@@ -103,47 +158,73 @@ case "${1:-}" in
         echo "DIGEST MISMATCH: API recorded $response_sha for Browser" >&2
         exit 1
       fi
-      curl -sS --fail-with-body -X POST \
-        -H "Authorization: Bearer $deploy_token" \
-        "$api_origin/browser/releases/$publish_version/publish"
-      echo
-    fi
+      browser_staged=true
 
-    manifest_path="$desktop_dir/dist/latest.json"
-    jq -n \
-      --arg version "$version" \
-      --arg archive_url "${artifact_urls[0]}" \
-      --arg archive_sha "${artifact_shas[0]}" \
-      --arg dmg_url "${artifact_urls[1]}" \
-      --arg dmg_sha "${artifact_shas[1]}" \
-      --arg browser_url "${artifact_urls[2]}" \
-      --arg browser_sha "${artifact_shas[2]}" \
-      '{
-        version: $version,
-        url: "https://github.com/moonbitlang/openseek/releases/latest",
-        platforms: {
-          "macos-arm64": {url: $archive_url, sha256: $archive_sha},
-          "macos-arm64-dmg": {url: $dmg_url, sha256: $dmg_sha},
-          browser: {url: $browser_url, sha256: $browser_sha}
-        }
-      }' > "$manifest_path"
+      jq -n \
+        --arg version "$version" \
+        --arg archive_url "${artifact_urls[0]}" \
+        --arg archive_sha "${artifact_shas[0]}" \
+        --arg dmg_url "${artifact_urls[1]}" \
+        --arg dmg_sha "${artifact_shas[1]}" \
+        --arg browser_url "${artifact_urls[2]}" \
+        --arg browser_sha "${artifact_shas[2]}" \
+        '{
+          version: $version,
+          url: "https://github.com/moonbitlang/openseek/releases/latest",
+          platforms: {
+            "macos-arm64": {url: $archive_url, sha256: $archive_sha},
+            "macos-arm64-dmg": {url: $dmg_url, sha256: $dmg_sha},
+            browser: {url: $browser_url, sha256: $browser_sha}
+          }
+        }' > "$manifest_path"
+
+      manifest_sha="$(shasum -a 256 "$manifest_path" | cut -d' ' -f1)"
+      ossutil api put-object \
+        --region "$oss_region" \
+        --bucket "$oss_bucket" \
+        --key "$version_manifest_key" \
+        --body "file://$manifest_path" \
+        --content-type "application/json" \
+        --cache-control "public, max-age=31536000, immutable" \
+        --metadata "sha256=$manifest_sha" \
+        --forbid-overwrite true
+      echo "$publish_version sealed at $version_manifest_url"
+    else
+      printf '%s\n' "$manifest_head" >&2
+      exit "$manifest_head_status"
+    fi
 
     manifest_sha="$(shasum -a 256 "$manifest_path" | cut -d' ' -f1)"
     manifest_size="$(wc -c < "$manifest_path" | tr -d '[:space:]')"
-    version_manifest_destination="oss://$oss_bucket/$oss_prefix/$publish_version/manifest.json"
-    ossutil cp --ignore-existing --region "$oss_region" \
-      --content-type "application/json" \
-      --cache-control "public, max-age=31536000, immutable" \
-      --metadata "sha256=$manifest_sha" \
-      "$manifest_path" "$version_manifest_destination"
-
-    version_manifest_url="$releases_origin/$publish_version/manifest.json"
     headers="$(curl -fsSI --retry 3 "$version_manifest_url" | tr -d '\r')"
     served_size="$(awk 'tolower($1) == "content-length:" { print $2; exit }' <<< "$headers")"
     served_sha="$(awk 'tolower($1) == "x-oss-meta-sha256:" { print $2; exit }' <<< "$headers")"
     if [[ "$served_size" != "$manifest_size" || "$served_sha" != "$manifest_sha" ]]; then
       echo "version manifest verification failed at $version_manifest_url" >&2
       exit 1
+    fi
+
+    # Browser remains on the API origin because its session cookies, HTTP API,
+    # and WebSocket routes are same-origin. A sealed retry stages the exact OSS
+    # archive; a retry after selection skips straight to latest.json.
+    browser_current="$(curl -fsSL "$api_origin/browser/releases/current.json" 2>/dev/null || true)"
+    if ! jq -e --arg version "$version" '.version == $version' \
+      <<< "$browser_current" >/dev/null 2>&1; then
+      if [[ "$browser_staged" != true ]]; then
+        browser_archive="${artifacts[2]}"
+        browser_upload_url="$api_origin/desktop/releases/$publish_version/SeekMoon.browser.tar.gz?platform=browser"
+        response="$(curl -sS --fail-with-body -T "$browser_archive" \
+          -H "Authorization: Bearer $deploy_token" "$browser_upload_url")"
+        response_sha="$(jq -er '.sha256' <<< "$response")"
+        if [[ "$response_sha" != "${artifact_shas[2]}" ]]; then
+          echo "DIGEST MISMATCH: API recorded $response_sha for Browser" >&2
+          exit 1
+        fi
+      fi
+      curl -sS --fail-with-body -X POST \
+        -H "Authorization: Bearer $deploy_token" \
+        "$api_origin/browser/releases/$publish_version/publish"
+      echo
     fi
 
     # This small object is the only mutable release object and therefore the

@@ -266,20 +266,9 @@ jobs:
             -czf desktop/dist/SeekMoon.browser.tar.gz \
             browser
 
-      - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: SeekMoon-macos-arm64-v${{ steps.release.outputs.version }}
-          path: |
-            desktop/dist/SeekMoon.app.zip
-            desktop/dist/SeekMoon.dmg
-            desktop/dist/SeekMoon.browser.tar.gz
-          if-no-files-found: error
-          retention-days: 14
-
-      # Versioned artifacts are uploaded exactly once to OSS. Browser also
-      # enters its same-origin deployment path; only after that succeeds does
-      # the runner atomically replace OSS latest.json.
+      # A missing version manifest leaves artifacts replaceable for retries.
+      # Once the manifest seals their exact bytes, Browser enters its
+      # same-origin deployment path and latest.json is replaced last.
       - name: Publish release
         shell: bash
         env:
@@ -290,6 +279,20 @@ jobs:
           OSS_ACCESS_KEY_SECRET: ${{ secrets.OPENSEEK_OSS_ACCESS_KEY_SECRET }}
         run: |
           desktop/scripts/publish-release.sh publish "v$RELEASE_VERSION"
+
+      # A sealed retry replaces this run's nondeterministic rebuilds with the
+      # exact OSS objects before reaching here. Keep those canonical bytes as
+      # the downloadable Actions artifact too.
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: SeekMoon-macos-arm64-v${{ steps.release.outputs.version }}
+          path: |
+            desktop/dist/SeekMoon.app.zip
+            desktop/dist/SeekMoon.dmg
+            desktop/dist/SeekMoon.browser.tar.gz
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Verify release manifest
         shell: bash
