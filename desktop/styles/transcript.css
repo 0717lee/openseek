@@ -24,6 +24,115 @@
   margin: 0 auto;
 }
 
+/* Temporary live typography controls float inside the conversation column,
+   so the transcript remains visible while each value is tuned. */
+.typography-lab {
+  position: absolute;
+  top: calc(var(--topbar-height) + 14px);
+  right: 16px;
+  z-index: var(--z-menu);
+  width: min(320px, calc(100% - 32px));
+  max-height: calc(100% - var(--topbar-height) - 28px);
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-surface);
+  padding: 14px;
+  box-shadow: var(--shadow-overlay);
+}
+
+.typography-lab-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.typography-lab-title {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  line-height: var(--line-height-normal);
+}
+
+.typography-lab-subtitle {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+}
+
+.typography-lab-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: -4px -4px 0 0;
+  padding: 0;
+  color: var(--color-text-muted);
+}
+
+.typography-lab-close:hover {
+  background: var(--color-bg-subtle);
+  color: var(--color-text-primary);
+}
+
+.typography-lab-controls {
+  display: grid;
+  gap: 12px;
+}
+
+.typography-lab-row {
+  display: grid;
+  gap: 5px;
+}
+
+.typography-lab-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.typography-lab-value {
+  color: var(--color-text-muted);
+  font-family: var(--font-family-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.typography-lab-row input[type="range"] {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--color-accent);
+}
+
+.typography-lab-row input[type="range"]:focus-visible,
+.typography-lab-close:focus-visible,
+.typography-lab-reset:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+.typography-lab-reset {
+  width: 100%;
+  margin-top: 14px;
+  border-color: var(--color-border);
+  background: var(--color-bg-subtle);
+  padding: 7px 10px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.typography-lab-reset:hover {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent-border);
+  color: var(--color-accent-strong);
+}
+
 /* Floating "jump to latest" over the transcript's bottom edge, shown
    only while auto-follow is unpinned. Sticky inside the scroller; zero
    height so it never adds scroll length, the transform lifts the button
@@ -310,8 +419,11 @@
      internally rather than widening the message. */
   min-width: 0;
   color: var(--color-text-primary);
-  font-size: var(--font-size-md);
-  line-height: var(--line-height-relaxed);
+  font-size: var(--conversation-font-size);
+  font-weight: var(--conversation-font-weight);
+  line-height: var(--conversation-line-height);
+  letter-spacing: var(--conversation-letter-spacing);
+  word-spacing: var(--conversation-word-spacing);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
@@ -335,7 +447,7 @@
   margin-bottom: 0;
 }
 .msg-content.markdown p {
-  margin: 0.55em 0;
+  margin: var(--conversation-paragraph-spacing) 0;
 }
 .msg-content.markdown h1,
 .msg-content.markdown h2,
@@ -579,6 +691,18 @@
   list-style: none;
   user-select: none;
 }
+
+/* Transcript metadata follows the same tracking as conversation prose.
+   Keeping every summary on the shared token also makes Typography Lab
+   previews apply consistently across prose and its supporting work log. */
+.activity-summary,
+.summary-card-label,
+.tool-line-summary,
+.tool-call-label,
+.tool-call-summary {
+  letter-spacing: var(--conversation-letter-spacing);
+}
+
 .activity-summary::-webkit-details-marker,
 .tool-line-summary::-webkit-details-marker,
 .tool-call-summary::-webkit-details-marker {

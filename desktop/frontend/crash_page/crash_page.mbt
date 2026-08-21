@@ -21,7 +21,8 @@ pub extern "js" fn install() -> Unit =
   #|      background: var(--color-bg-canvas, #fbfbf9);
   #|      color: var(--color-text-primary, #16171a);
   #|      font: var(--font-size-md, 13px)/var(--line-height-relaxed, 1.6)
-  #|        var(--font-family-ui, "SF Mono", ui-monospace, Consolas, monospace);
+  #|        var(--font-family-sans, ui-sans-serif, system-ui, -apple-system,
+  #|          BlinkMacSystemFont, "Segoe UI", sans-serif);
   #|    }
   #|    body.frontend-crashed {
   #|      margin: 0;
@@ -93,7 +94,8 @@ pub extern "js" fn install() -> Unit =
   #|      background: var(--color-bg-subtle, #f6f6f3);
   #|      color: var(--color-code, #2b2f36);
   #|      font: var(--font-size-sm, 12px)/var(--line-height-normal, 1.5)
-  #|        var(--font-family-ui, "SF Mono", ui-monospace, Consolas, monospace);
+  #|        var(--font-family-mono, ui-monospace, SFMono-Regular, Menlo, Monaco,
+  #|          Consolas, "Liberation Mono", "Courier New", monospace);
   #|      white-space: pre-wrap;
   #|      word-break: break-word;
   #|    }

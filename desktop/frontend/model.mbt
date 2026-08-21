@@ -125,7 +125,7 @@ const TreeLayoutStorageKey : String = "openseek.tree_layout"
 const ThemeStorageKey : String = "openseek.theme"
 
 ///|
-/// The page-local monospace family shared by the app chrome, editor, and
+/// The page-local monospace family shared by code content, the editor, and the
 /// terminal. The value is a fixed choice rather than arbitrary CSS so stored
 /// input can never become a style injection surface.
 const AppFontStorageKey : String = "openseek.font"
@@ -215,8 +215,8 @@ fn Theme::wire(self : Theme) -> String {
 }
 
 ///|
-/// The monospace family selected in Settings. Geist remains the bundled,
-/// offline-safe default; the other choices use fonts supplied by the OS.
+/// The monospace family selected in Settings. The system stack is the default;
+/// Geist remains available as an offline bundled alternative.
 priv enum AppFont {
   GeistMono
   SystemMono
@@ -225,7 +225,7 @@ priv enum AppFont {
 
 ///|
 /// Unknown or absent stored values retain the current choice, so a stale
-/// localStorage value cannot silently replace the app's bundled default.
+/// localStorage value cannot silently replace the active system default.
 fn AppFont::parse(value : String, fallback : AppFont) -> AppFont {
   match value {
     "geist-mono" => GeistMono
@@ -250,10 +250,11 @@ fn AppFont::wire(self : AppFont) -> String {
 fn AppFont::css_family(self : AppFont) -> String {
   match self {
     GeistMono =>
-      "\"Geist Mono\", \"SF Mono\", ui-monospace, \"Cascadia Mono\", Menlo, Consolas, monospace"
+      "\"Geist Mono\", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
     SystemMono =>
-      "ui-monospace, \"SF Mono\", \"Cascadia Mono\", Menlo, Consolas, monospace"
-    Menlo => "Menlo, Monaco, \"Courier New\", monospace"
+      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
+    Menlo =>
+      "Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
   }
 }
 
@@ -295,6 +296,136 @@ fn AppFontSize::pixels(self : AppFontSize) -> Double {
     Medium => 13.0
     Large => 14.0
   }
+}
+
+///|
+/// The conversation typography controlled by the live lab. Values stay in the
+/// page model so reopening the app starts from the reviewed product defaults;
+/// the panel itself remains a supported way to compare treatments. An absent
+/// font size follows the app scale, so the sidebar and transcript agree until
+/// the user deliberately gives conversation text its own size.
+priv struct TypographyLab {
+  font_size : Int?
+  font_weight : Int
+  line_height : Int
+  paragraph_spacing : Int
+  letter_spacing : Int
+  word_spacing : Int
+} derive(Debug, Eq)
+
+///|
+/// Each field has its own safe range. The slider normally guarantees it, but
+/// clamping here also protects updates synthesized by tests or browser tools.
+priv enum TypographyField {
+  TypographyFontSize
+  TypographyFontWeight
+  TypographyLineHeight
+  TypographyParagraphSpacing
+  TypographyLetterSpacing
+  TypographyWordSpacing
+}
+
+///|
+/// Slider readouts use the same units as the CSS they control. Paragraph,
+/// letter, and word spacing use hundredths of an em, so small optical changes
+/// remain exact and legible in Settings.
+fn TypographyField::format(self : TypographyField, value : Int) -> String {
+  match self {
+    TypographyFontSize => "\{value} px"
+    TypographyFontWeight => value.to_string()
+    TypographyLineHeight => "\{value}%"
+    TypographyParagraphSpacing
+    | TypographyLetterSpacing
+    | TypographyWordSpacing => self.css_value(value)
+  }
+}
+
+///|
+/// CSS receives concrete values rather than arithmetic expressions. In
+/// particular, a unitless line height continues to scale with the adjusted
+/// font size instead of becoming a fixed inherited pixel height.
+fn TypographyField::css_value(self : TypographyField, value : Int) -> String {
+  match self {
+    TypographyFontSize => "\{value}px"
+    TypographyFontWeight => value.to_string()
+    TypographyLineHeight
+    | TypographyParagraphSpacing
+    | TypographyLetterSpacing
+    | TypographyWordSpacing => {
+      let sign = if value < 0 { "-" } else { "" }
+      let magnitude = if value < 0 { -value } else { value }
+      let hundredths = magnitude % 100
+      let fraction = if hundredths < 10 {
+        "0\{hundredths}"
+      } else {
+        hundredths.to_string()
+      }
+      let unit = match self {
+        TypographyLineHeight => ""
+        TypographyParagraphSpacing
+        | TypographyLetterSpacing
+        | TypographyWordSpacing => "em"
+        _ => ""
+      }
+      "\{sign}\{magnitude / 100}.\{fraction}\{unit}"
+    }
+  }
+}
+
+///|
+fn TypographyLab::default() -> TypographyLab {
+  {
+    font_size: None,
+    font_weight: 400,
+    line_height: 150,
+    paragraph_spacing: 55,
+    letter_spacing: -2,
+    word_spacing: 0,
+  }
+}
+
+///|
+/// Invalid input retains the current treatment. Integer percentages and
+/// hundredths of an em keep every slider exact without floating-point state.
+fn TypographyLab::change(
+  self : TypographyLab,
+  field : TypographyField,
+  raw : String,
+) -> TypographyLab {
+  let value = @string.parse_int(raw) catch { _ => return self }
+  match field {
+    TypographyFontSize =>
+      { ..self, font_size: Some(value.clamp(min=10, max=24)) }
+    TypographyFontWeight =>
+      { ..self, font_weight: value.clamp(min=300, max=700) }
+    TypographyLineHeight =>
+      { ..self, line_height: value.clamp(min=110, max=220) }
+    TypographyParagraphSpacing =>
+      { ..self, paragraph_spacing: value.clamp(min=0, max=150) }
+    TypographyLetterSpacing =>
+      { ..self, letter_spacing: value.clamp(min=-8, max=12) }
+    TypographyWordSpacing =>
+      { ..self, word_spacing: value.clamp(min=-10, max=30) }
+  }
+}
+
+///|
+/// The app root carries experiment values as CSS variables. Only transcript
+/// text consumes them, leaving Settings stable while its sliders are moved.
+fn TypographyLab::style(self : TypographyLab) -> Array[String] {
+  let font_size = if self.font_size is Some(value) {
+    TypographyFontSize.css_value(value)
+  } else {
+    "var(--font-size-md)"
+  }
+  [
+    "--conversation-font-size: \{font_size}",
+    "--conversation-font-weight: \{TypographyFontWeight.css_value(self.font_weight)}",
+    "--conversation-line-height: \{TypographyLineHeight.css_value(self.line_height)}",
+    "--conversation-paragraph-spacing: \{TypographyParagraphSpacing.css_value(self.paragraph_spacing)}",
+    "--conversation-letter-spacing: \{TypographyLetterSpacing.css_value(self.letter_spacing)}",
+    "--conversation-word-spacing: \{TypographyWordSpacing.css_value(self.word_spacing)}",
+  ]
 }
 
 ///|
@@ -1111,10 +1242,14 @@ priv struct Model {
   // The Settings selection. Its effective palette drives the app root,
   // embedded viewer, and terminal together.
   theme : Theme
-  // The Settings selection shared by app chrome, editor text, and terminals.
+  // The Settings selection shared by code content, editor text, and terminals.
   app_font : AppFont
   // The Settings type scale shared by app chrome, editor text, and terminals.
   app_font_size : AppFontSize
+  // Page-lifetime conversation typography; intentionally not persisted.
+  typography_lab : TypographyLab
+  // The lab floats over the conversation so its changes stay visible live.
+  typography_lab_open : Bool
   // Whether the viewport is phone-narrow (at most `NarrowBreakpoint` wide).
   // Seeded from the window at startup and kept fresh by the resize
   // subscription; the value must agree with index.html's one mobile media
@@ -1538,6 +1673,10 @@ priv enum Msg {
   FontChanged(String)
   // A Settings selection changes the shared app/editor/terminal type scale.
   FontSizeChanged(String)
+  // Live conversation typography controls; neither message persists.
+  TypographyChanged(TypographyField, String)
+  TypographyReset
+  ToggleTypographyLab
   // The window was resized; `width` decides the narrow (phone) layout.
   ViewportResized(width~ : Int)
   SaveApiKey
@@ -2241,8 +2380,10 @@ fn initial_model() -> Model {
     },
     system_dark: host_prefers_dark(),
     theme: System,
-    app_font: GeistMono,
+    app_font: SystemMono,
     app_font_size: Medium,
+    typography_lab: TypographyLab::default(),
+    typography_lab_open: true,
     narrow,
     sidebar_open: !narrow,
     right_panel_open: false,

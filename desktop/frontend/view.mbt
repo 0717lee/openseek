@@ -56,6 +56,167 @@ fn setting_select(control : @html.Html) -> @html.Html {
 }
 
 ///|
+fn TypographyField::label(self : TypographyField) -> String {
+  match self {
+    TypographyFontSize => "Font size"
+    TypographyFontWeight => "Font weight"
+    TypographyLineHeight => "Line height"
+    TypographyParagraphSpacing => "Paragraph spacing"
+    TypographyLetterSpacing => "Letter spacing"
+    TypographyWordSpacing => "Word spacing"
+  }
+}
+
+///|
+fn TypographyField::wire(self : TypographyField) -> String {
+  match self {
+    TypographyFontSize => "font-size"
+    TypographyFontWeight => "font-weight"
+    TypographyLineHeight => "line-height"
+    TypographyParagraphSpacing => "paragraph-spacing"
+    TypographyLetterSpacing => "letter-spacing"
+    TypographyWordSpacing => "word-spacing"
+  }
+}
+
+///|
+fn TypographyField::value(
+  self : TypographyField,
+  lab : TypographyLab,
+  app_font_size : AppFontSize,
+) -> Int {
+  match self {
+    TypographyFontSize =>
+      lab.font_size.unwrap_or(
+        match app_font_size {
+          Small => 12
+          Medium => 13
+          Large => 14
+        },
+      )
+    TypographyFontWeight => lab.font_weight
+    TypographyLineHeight => lab.line_height
+    TypographyParagraphSpacing => lab.paragraph_spacing
+    TypographyLetterSpacing => lab.letter_spacing
+    TypographyWordSpacing => lab.word_spacing
+  }
+}
+
+///|
+fn TypographyField::min(self : TypographyField) -> Int {
+  match self {
+    TypographyFontSize => 10
+    TypographyFontWeight => 300
+    TypographyLineHeight => 110
+    TypographyParagraphSpacing => 0
+    TypographyLetterSpacing => -8
+    TypographyWordSpacing => -10
+  }
+}
+
+///|
+fn TypographyField::max(self : TypographyField) -> Int {
+  match self {
+    TypographyFontSize => 24
+    TypographyFontWeight => 700
+    TypographyLineHeight => 220
+    TypographyParagraphSpacing => 150
+    TypographyLetterSpacing => 12
+    TypographyWordSpacing => 30
+  }
+}
+
+///|
+fn TypographyField::step(self : TypographyField) -> Int {
+  match self {
+    TypographyFontSize => 1
+    TypographyFontWeight => 50
+    TypographyLineHeight | TypographyParagraphSpacing => 5
+    TypographyLetterSpacing | TypographyWordSpacing => 1
+  }
+}
+
+///|
+/// One labelled live slider in the floating lab. Keeping the label, value,
+/// bounds, and message on the field makes the six controls use one contract.
+fn TypographyField::control(
+  self : TypographyField,
+  lab : TypographyLab,
+  app_font_size : AppFontSize,
+  dispatch : @cmd.Emit[Msg],
+) -> @html.Html {
+  let value = self.value(lab, app_font_size)
+  let id = "typography-lab-\{self.wire()}"
+  @html.div(class="typography-lab-row", [
+    @html.div(class="typography-lab-label", [
+      @html.label(for_=id, self.label()),
+      @html.span(class="typography-lab-value", self.format(value)),
+    ]),
+    @html.input(
+      id~,
+      input_type=@html.InputType::Range,
+      min=self.min(),
+      max=self.max(),
+      step=self.step(),
+      value=value.to_string(),
+      on_input=dispatch.map(raw => TypographyChanged(self, raw)),
+      attrs=@html.Attrs::build()
+        .aria_label("Conversation \{self.label()}")
+        .data_set("focus-owner", ""),
+    ),
+  ])
+}
+
+///|
+/// A conversation-local floating panel: the transcript remains visible under
+/// it, so every typography adjustment has an immediate, readable preview.
+fn TypographyLab::panel(
+  self : TypographyLab,
+  app_font_size : AppFontSize,
+  dispatch : @cmd.Emit[Msg],
+) -> @html.Html {
+  let controls : Array[@html.Html] = []
+  for
+    field in [
+      TypographyFontSize,
+      TypographyFontWeight,
+      TypographyLineHeight,
+      TypographyParagraphSpacing,
+      TypographyLetterSpacing,
+      TypographyWordSpacing,
+    ] {
+    controls.push(field.control(self, app_font_size, dispatch))
+  }
+  @html.section(
+    class="typography-lab",
+    attrs=@html.Attrs::build().aria_label("Typography Lab"),
+    [
+      @html.header(class="typography-lab-header", [
+        @html.div([
+          @html.div(class="typography-lab-title", "Typography Lab"),
+          @html.div(
+            class="typography-lab-subtitle",
+            "Conversation text · live preview",
+          ),
+        ]),
+        @html.button(
+          class="typography-lab-close",
+          title="Hide Typography Lab",
+          on_click=dispatch(ToggleTypographyLab),
+          icon(icon_close),
+        ),
+      ]),
+      @html.div(class="typography-lab-controls", controls),
+      @html.button(
+        class="typography-lab-reset",
+        on_click=dispatch(TypographyReset),
+        "Reset defaults",
+      ),
+    ],
+  )
+}
+
+///|
 fn conversation_title(conv : Conversation) -> String {
   // Titles follow the committed user transcript.
   for item in conv.messages {
@@ -1253,24 +1414,24 @@ fn settings_page(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
         desc="Used by the app, editor, and terminal. System follows the OS appearance.",
       ),
       setting_row(
-        "Font",
+        "Monospace font",
         [
           setting_select(
             @html.select(
               on_change=dispatch.map(value => FontChanged(value)),
               attrs=@html.Attrs::build()
-                .aria_label("Font")
+                .aria_label("Monospace font")
                 .data_set("focus-owner", ""),
               [
-                @html.option(
-                  value="geist-mono",
-                  selected=model.app_font is GeistMono,
-                  "Geist Mono",
-                ),
                 @html.option(
                   value="system-mono",
                   selected=model.app_font is SystemMono,
                   "System monospace",
+                ),
+                @html.option(
+                  value="geist-mono",
+                  selected=model.app_font is GeistMono,
+                  "Geist Mono",
                 ),
                 @html.option(
                   value="menlo",
@@ -1281,7 +1442,7 @@ fn settings_page(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
             ),
           ),
         ],
-        desc="Used by the app, editor, and terminal.",
+        desc="Used by code, the editor, and the terminal.",
       ),
       setting_row(
         "Font size",
@@ -1602,6 +1763,71 @@ test "onboarding stands in for the chat until a project holds one" {
 }
 
 ///|
+#warnings("-alert_unstable")
+test "the typography lab renders live range controls" {
+  let typography_lab = {
+    ..TypographyLab::default(),
+    font_size: Some(18),
+    letter_spacing: 3,
+  }
+  let markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(typography_lab.panel(Medium, test_dispatch()))
+  })
+  assert_true(markup.contains("Typography Lab"))
+  assert_true(markup.contains("type=\"range\""))
+  assert_true(markup.contains("aria-label=\"Conversation Font size\""))
+  assert_true(markup.contains("18 px"))
+  assert_true(markup.contains("0.03em"))
+  assert_true(markup.contains("Conversation text · live preview"))
+  assert_true(markup.contains("Hide Typography Lab"))
+  let open_model = { ..test_model(), typography_lab, typography_lab_open: true }
+  let open_markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(
+      view(
+        test_dispatch(),
+        @cmd.none,
+        @cmd.none,
+        open_model,
+        @html.div(class="test-terminal", ""),
+        @html.div(class="test-transcript", "sample conversation"),
+        @html.div(class="test-panel", ""),
+        @html.div(class="test-composer", ""),
+        @html.div(class="test-codex-composer", ""),
+        @html.div(class="test-sidebar", ""),
+        @html.div(class="test-quick-open", ""),
+        @html.div(class="test-skills", ""),
+      ),
+    )
+  })
+  assert_true(open_markup.contains("class=\"test-transcript\""))
+  assert_true(open_markup.contains("class=\"typography-lab\""))
+  assert_true(
+    open_markup.contains("class=\"typography-toggle-glyph\">A</span>"),
+  )
+  let closed_model = { ..open_model, typography_lab_open: false }
+  let closed_markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(
+      view(
+        test_dispatch(),
+        @cmd.none,
+        @cmd.none,
+        closed_model,
+        @html.div(class="test-terminal", ""),
+        @html.div(class="test-transcript", "sample conversation"),
+        @html.div(class="test-panel", ""),
+        @html.div(class="test-composer", ""),
+        @html.div(class="test-codex-composer", ""),
+        @html.div(class="test-sidebar", ""),
+        @html.div(class="test-quick-open", ""),
+        @html.div(class="test-skills", ""),
+      ),
+    )
+  })
+  assert_false(closed_markup.contains("class=\"typography-lab\""))
+  assert_true(closed_markup.contains("title=\"Show Typography Lab\""))
+}
+
+///|
 fn run_indicator(model : Model, conv : Conversation) -> @html.Html {
   let status = model.display_status()
   let label = status.label()
@@ -1776,6 +2002,22 @@ fn topbar_view(
   if model.is_desktop {
     items.push(launcher_view(dispatch, model, conv))
   }
+  items.push(
+    @html.button(
+      class=if model.typography_lab_open {
+        "panel-toggle active"
+      } else {
+        "panel-toggle"
+      },
+      title=if model.typography_lab_open {
+        "Hide Typography Lab"
+      } else {
+        "Show Typography Lab"
+      },
+      on_click=dispatch(ToggleTypographyLab),
+      @html.span(class="typography-toggle-glyph", "A"),
+    ),
+  )
   // A browser terminal is rendered locally but its PTY lives on the focused
   // remote device, reached through that device's WebSocket channel.
   items.push(
@@ -2048,8 +2290,8 @@ fn view(
       match model.active_conversation() {
         None =>
           page_with_toggle(dispatch, model, onboarding_view(dispatch, model))
-        Some(conv) =>
-          [
+        Some(conv) => {
+          let children : Array[@html.Html] = [
             topbar_view(
               dispatch, toggle_terminal, toggle_right_panel, model, conv,
             ),
@@ -2060,6 +2302,15 @@ fn view(
               composer_html
             },
           ]
+          // Appended after the stable composer so hiding the lab never shifts
+          // or rebuilds its focus-holding textarea under positional diffing.
+          if model.typography_lab_open {
+            children.push(
+              model.typography_lab.panel(model.app_font_size, dispatch),
+            )
+          }
+          children
+        }
       }
     Codex =>
       model.codex.page(
@@ -2167,6 +2418,7 @@ fn view(
   }
   @html.div(
     class=if model.sidebar_open { "app" } else { "app sidebar-collapsed" },
+    style=model.typography_lab.style(),
     children,
   )
 }

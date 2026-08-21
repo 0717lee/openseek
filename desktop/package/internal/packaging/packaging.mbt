@@ -1110,6 +1110,22 @@ async test "application stylesheet assembles without development imports" {
   assert_true(css.contains("/* ---------- terminal panel ---------- */"))
   assert_true(css.contains("/* ---------- narrow (phone) layout ---------- */"))
   assert_true(!css.contains("@import"))
+  // Prose and code deliberately use separate system stacks. Keeping the exact
+  // token declarations here prevents a later all-mono shortcut from merging
+  // the two responsibilities again.
+  assert_true(
+    css.contains(
+      "--font-family-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,",
+    ),
+  )
+  assert_true(css.contains("\"Liberation Mono\", \"Courier New\", monospace;"))
+  assert_true(
+    css.contains("--font-family-sans: ui-sans-serif, system-ui, -apple-system,"),
+  )
+  assert_true(css.contains("BlinkMacSystemFont, \"Segoe UI\", sans-serif;"))
+  assert_true(css.contains("font-family: var(--font-family-sans);"))
+  assert_true(css.contains("font-family: var(--font-family-mono);"))
+  assert_false(css.contains("--font-family-ui"))
   // Keep the semantic-token migration closed over every packaged source. This
   // catches a new component copied from an older stylesheet before undefined
   // custom properties silently erase its colors, borders, or shadows.

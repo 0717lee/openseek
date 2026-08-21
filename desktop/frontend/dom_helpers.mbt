@@ -53,9 +53,9 @@ fn Theme::apply(self : Theme, system_dark : Bool) -> @cmd.Cmd {
 }
 
 ///|
-/// Apply one font choice to the document and to both imperative text widgets.
-/// The root attribute lets normal CSS inherit the choice; the editor and
-/// terminal commands also update their measured font state and existing DOM.
+/// Apply one monospace choice to CSS code surfaces and both imperative text
+/// widgets. The editor and terminal commands also update their measured font
+/// state and existing DOM.
 fn AppFont::apply(self : AppFont) -> @cmd.Cmd {
   let wire = self.wire()
   let family = self.css_family()

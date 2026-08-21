@@ -4,6 +4,7 @@
 main {
   --topbar-height: 46px;
 
+  position: relative;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   /* Constrain the single column too: without this it defaults to `auto`
@@ -49,6 +50,14 @@ main {
 .topbar-toggle:hover {
   background: var(--color-bg-subtle);
   color: var(--color-text-primary);
+}
+
+/* A literal A makes the typography control distinct from general Settings. */
+.typography-toggle-glyph {
+  font-family: var(--font-family-sans);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
 }
 
 /* The sidebar toggle's fallback on screens without a topbar (Skills,

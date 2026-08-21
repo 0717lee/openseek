@@ -3688,6 +3688,24 @@ fn update_msg(
         )
       }
     }
+    TypographyChanged(field, value) => {
+      let typography_lab = model.typography_lab.change(field, value)
+      if typography_lab == model.typography_lab {
+        (@cmd.none, model)
+      } else {
+        (@cmd.none, { ..model, typography_lab, })
+      }
+    }
+    TypographyReset => {
+      let typography_lab = TypographyLab::default()
+      if typography_lab == model.typography_lab {
+        (@cmd.none, model)
+      } else {
+        (@cmd.none, { ..model, typography_lab, })
+      }
+    }
+    ToggleTypographyLab =>
+      (@cmd.none, { ..model, typography_lab_open: !model.typography_lab_open })
     OpenFile(path) => {
       // A relative path is taken against the active conversation's projected
       // checkout root. The host keeps text editor targets inside that root;
@@ -11115,7 +11133,7 @@ test "loaded UI preferences parse their wire names" {
   )
   assert_true(unknown.notification_corner is BottomRight)
   assert_true(unknown.theme is System)
-  assert_true(unknown.app_font is GeistMono)
+  assert_true(unknown.app_font is SystemMono)
   assert_true(unknown.app_font_size is Medium)
   assert_true(unknown.default_model is High)
   assert_true(unknown.default_agent is OpenSeekAgent)
@@ -14078,19 +14096,24 @@ test "theme settings switch fixed palettes and are idempotent" {
 }
 
 ///|
-test "font settings switch every text surface and are idempotent" {
+test "font settings switch every monospace surface and are idempotent" {
   let dispatch = test_dispatch()
   let model = test_model()
-  let (_, first) = update(dispatch, FontChanged("system-mono"), model)
-  let (_, second) = update(dispatch, FontChanged("system-mono"), model)
-  assert_true(first.app_font is SystemMono)
-  assert_true(second.app_font is SystemMono)
-  let (_, menlo) = update(dispatch, FontChanged("menlo"), first)
-  assert_true(menlo.app_font is Menlo)
-  let (_, bundled) = update(dispatch, FontChanged("geist-mono"), menlo)
+  assert_true(model.app_font is SystemMono)
+  assert_eq(
+    model.app_font.css_family(),
+    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
+  )
+  let (_, bundled) = update(dispatch, FontChanged("geist-mono"), model)
+  let (_, repeated) = update(dispatch, FontChanged("geist-mono"), bundled)
   assert_true(bundled.app_font is GeistMono)
+  assert_true(repeated.app_font is GeistMono)
+  let (_, menlo) = update(dispatch, FontChanged("menlo"), bundled)
+  assert_true(menlo.app_font is Menlo)
+  let (_, system) = update(dispatch, FontChanged("system-mono"), menlo)
+  assert_true(system.app_font is SystemMono)
   let (_, unchanged) = update(dispatch, FontChanged("unknown"), model)
-  assert_true(unchanged.app_font is GeistMono)
+  assert_true(unchanged.app_font is SystemMono)
 }
 
 ///|
@@ -14107,6 +14130,50 @@ test "font-size settings switch every text surface and are idempotent" {
   assert_true(medium.app_font_size is Medium)
   let (_, unchanged) = update(dispatch, FontSizeChanged("unknown"), model)
   assert_true(unchanged.app_font_size is Medium)
+}
+
+///|
+test "the typography lab clamps live values, resets, and is idempotent" {
+  let dispatch = test_dispatch()
+  let model = test_model()
+  assert_eq(model.typography_lab, TypographyLab::default())
+  let (_, first) = update(
+    dispatch,
+    TypographyChanged(TypographyFontSize, "18"),
+    model,
+  )
+  let (_, repeated) = update(
+    dispatch,
+    TypographyChanged(TypographyFontSize, "18"),
+    first,
+  )
+  assert_eq(first.typography_lab.font_size, Some(18))
+  assert_eq(repeated.typography_lab, first.typography_lab)
+  let (_, clamped) = update(
+    dispatch,
+    TypographyChanged(TypographyLineHeight, "999"),
+    first,
+  )
+  assert_eq(clamped.typography_lab.line_height, 220)
+  let (_, invalid) = update(
+    dispatch,
+    TypographyChanged(TypographyFontWeight, "heavy"),
+    clamped,
+  )
+  assert_eq(invalid.typography_lab, clamped.typography_lab)
+  let (_, reset) = update(dispatch, TypographyReset, invalid)
+  let (_, reset_again) = update(dispatch, TypographyReset, reset)
+  assert_eq(reset.typography_lab, TypographyLab::default())
+  assert_eq(reset_again.typography_lab, reset.typography_lab)
+  let styles = reset.typography_lab.style()
+  inspect(styles[0], content="--conversation-font-size: var(--font-size-md)")
+  inspect(styles[2], content="--conversation-line-height: 1.50")
+  inspect(styles[3], content="--conversation-paragraph-spacing: 0.55em")
+  inspect(styles[4], content="--conversation-letter-spacing: -0.02em")
+  let (_, closed) = update(dispatch, ToggleTypographyLab, model)
+  let (_, closed_again) = update(dispatch, ToggleTypographyLab, model)
+  assert_false(closed.typography_lab_open)
+  assert_eq(closed_again.typography_lab_open, closed.typography_lab_open)
 }
 
 ///|

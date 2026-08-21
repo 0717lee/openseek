@@ -71,7 +71,7 @@ fn terminal_style() -> @js.Value {
         None => 13.0
       }
       (
-        style.get_property_value("--font-family-ui").trim().to_owned(),
+        style.get_property_value("--font-family-mono").trim().to_owned(),
         font_size,
         style.get_property_value("--color-bg-surface").trim().to_owned(),
         style.get_property_value("--color-text-primary").trim().to_owned(),

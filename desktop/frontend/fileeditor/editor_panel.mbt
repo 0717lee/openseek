@@ -110,7 +110,7 @@ let viewer_state : ViewerHost = {
   relative: None,
   navigation: None,
   version: 0,
-  font_family: "\"Geist Mono\", \"SF Mono\", ui-monospace, \"Cascadia Mono\", Menlo, Consolas, monospace",
+  font_family: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace",
   font_size: 13.0,
   view_states: Map([]),
 }
