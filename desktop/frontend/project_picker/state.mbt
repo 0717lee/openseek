@@ -14,14 +14,18 @@
 /// `generation` numbers that picker's latest request. Both ride on replies,
 /// so neither a superseded navigation nor a closed picker from another
 /// device can replace the current listing.
-pub(all) struct State {
-  priv channel : @interop.ChannelId
+///
+/// Opaque outside this package: the shell holds the value but cannot read
+/// into it — every transition goes through `open`, `handle`, `view`, or
+/// `subscriptions`.
+struct State {
+  channel : @interop.ChannelId
   // The last location the host successfully listed. `None` only while the
   // initial home listing is in flight.
-  priv location : Location?
-  priv entries : Array[String]
-  priv loading : Bool
-  priv generation : Int
+  location : Location?
+  entries : Array[String]
+  loading : Bool
+  generation : Int
 } derive(Eq)
 
 ///|
