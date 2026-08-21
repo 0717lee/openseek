@@ -323,7 +323,9 @@ fn SidebarDispatcher::actions(self : SidebarDispatcher) -> @sidebar.Actions {
   }
   {
     toggle: self.emit(ToggleSidebar),
-    new_chat: self.emit(NewChat),
+    // The global header action attaches a project. New conversations stay
+    // scoped to the project rows that own them.
+    new_chat: self.emit(AddProjectRequested),
     update: self.emit(UpdateClicked),
     open_skills: self.emit(OpenSkills),
     open_settings: self.emit(OpenSetup),

@@ -159,9 +159,10 @@ pub fn component(
           @icons.icon(@icons.icon_layout_sidebar_left),
         ),
         @html.button(
-          class="topbar-toggle header-new-chat",
-          title="New chat",
+          class="topbar-toggle header-add-project",
+          title="Add a project",
           on_click=actions.new_chat,
+          attrs=@html.Attrs::build().aria_label("Add a project"),
           @icons.icon(@icons.icon_add),
         ),
       ]),
