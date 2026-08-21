@@ -11,6 +11,20 @@
       content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content"
     />
     <title>SeekMoon</title>
+    <script>
+      // The native host overlays macOS window controls on this desktop entry.
+      // Mark it before styles load so the first frame already reserves their
+      // space; the separate browser-console entry keeps its ordinary layout.
+      {
+        const hostPlatform =
+          navigator.userAgentData?.platform ||
+          navigator.platform ||
+          navigator.userAgent;
+        if (hostPlatform.toLowerCase().includes("mac")) {
+          document.documentElement.classList.add("macos-titlebar-overlay");
+        }
+      }
+    </script>
     <!-- The embedded code viewer's styles, assembled from the editor dependency
          by the packager (see build_viewer_stylesheet). -->
     <link rel="stylesheet" href="viewer.css" />

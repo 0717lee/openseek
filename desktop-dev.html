@@ -7,6 +7,20 @@
       content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content"
     />
     <title>SeekMoon Development</title>
+    <script>
+      // The native host overlays macOS window controls on this development
+      // entry. Mark it before styles load so the first frame reserves the
+      // traffic lights just like the packaged desktop entry.
+      {
+        const hostPlatform =
+          navigator.userAgentData?.platform ||
+          navigator.platform ||
+          navigator.userAgent;
+        if (hostPlatform.toLowerCase().includes("mac")) {
+          document.documentElement.classList.add("macos-titlebar-overlay");
+        }
+      }
+    </script>
     <!-- Proton uses this file's directory as its asset root. Keeping the file
          at the repository root lets CEF serve source CSS, cached vendor files,
          and Moon's _build artifact without copying them into a data_dir. -->

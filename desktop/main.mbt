@@ -122,6 +122,14 @@ async fn main {
   let app = @proton.asset("SeekMoon", frontend_entry, width=1120, height=760).debug_level(
     1,
   )
+  // On macOS, let the page paint beneath the system-positioned traffic lights.
+  // Proton does not expose their coordinates, so the desktop entry reserves
+  // their leading space and aligns its header height to their center instead.
+  let app = if @platform.apple_os_mac {
+    app.titlebar_style(Overlay)
+  } else {
+    app
+  }
   // Proton auto-fills only the Application menu; Edit and Window must be
   // declared or macOS loses their key equivalents (Cmd+A/C/V/X/Z, Cmd+W/M),
   // which is what dispatches editing shortcuts to every text field. The

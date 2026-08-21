@@ -215,3 +215,45 @@ select {
 .app.sidebar-collapsed .content.panel-expanded .editor-tabsbar {
   padding-left: 54px;
 }
+
+/* Proton leaves the macOS traffic lights at their system position and does not
+   expose a coordinate override. A 36px desktop header shares their 18px center
+   line, so reuse the app's header as the titlebar instead of keeping a separate
+   blank native row. The 80px leading inset clears the green light by roughly
+   9px at the normal macOS scale; an open sidebar already keeps the main column
+   beyond the lights. */
+:root.macos-titlebar-overlay {
+  --macos-titlebar-height: 36px;
+  --macos-titlebar-leading-content: 80px;
+}
+
+:root.macos-titlebar-overlay main {
+  --topbar-height: var(--macos-titlebar-height);
+}
+
+:root.macos-titlebar-overlay .sidebar-header,
+:root.macos-titlebar-overlay .editor-tabsbar {
+  height: var(--macos-titlebar-height);
+}
+
+:root.macos-titlebar-overlay .sidebar-header,
+:root.macos-titlebar-overlay .app.sidebar-collapsed .topbar {
+  padding-left: calc(var(--macos-titlebar-leading-content) + 4px);
+}
+
+:root.macos-titlebar-overlay .page-sidebar-toggle,
+:root.macos-titlebar-overlay
+  .app.sidebar-collapsed
+  .content.panel-expanded
+  .topbar
+  > .topbar-toggle {
+  top: 4px;
+  left: var(--macos-titlebar-leading-content);
+}
+
+:root.macos-titlebar-overlay
+  .app.sidebar-collapsed
+  .content.panel-expanded
+  .editor-tabsbar {
+  padding-left: calc(54px + var(--macos-titlebar-leading-content) - 14px);
+}

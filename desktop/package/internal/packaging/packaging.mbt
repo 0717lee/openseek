@@ -721,6 +721,21 @@ async test "development app stylesheet imports every production source" {
 }
 
 ///|
+/// Both native launch paths use Proton's macOS titlebar overlay. Keep their
+/// early platform marker together while leaving the remote browser console in
+/// its ordinary page layout, where no native traffic lights exist.
+async test "native HTML entries reserve macOS window controls" {
+  let ws = locate_workspace()
+  for entry in [ws.at("index.html"), ws.repo_at("desktop-dev.html")] {
+    let html = @asyncfs.read_file(entry).text()
+    assert_true(html.contains("navigator.platform"))
+    assert_true(html.contains("macos-titlebar-overlay"))
+  }
+  let browser = @asyncfs.read_file(ws.at("frontend/browser/index.html")).text()
+  assert_false(browser.contains("macos-titlebar-overlay"))
+}
+
+///|
 /// Concatenate the embedded viewer's CSS into a single `viewer.css` next to the
 /// frontend bundle, mirroring the editor's own `scripts/build-web` step. The
 /// viewer ships its styles as many files, none of which are loaded unless
