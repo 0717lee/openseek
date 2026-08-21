@@ -60,6 +60,17 @@ fn AgentPayloadJsonObject::optional_string(
 }
 
 ///|
+fn AgentPayloadJsonObject::optional_thinking(
+  self : AgentPayloadJsonObject,
+  name : String,
+) -> OpenSeekThinking? raise @json.JsonDecodeError {
+  match self.fields.get(name) {
+    Some(Null) | None => None
+    Some(value) => Some(@json.from_json(value, path=self.path.add_key(name)))
+  }
+}
+
+///|
 fn AgentPayloadJsonObject::optional_int(
   self : AgentPayloadJsonObject,
   name : String,
@@ -93,7 +104,7 @@ pub impl FromJson for StartPayload with fn from_json(json, path) {
     task: object.required_string("task"),
     submission_id: object.optional_string("submission_id"),
     model: object.optional_string("model"),
-    thinking: object.optional_string("thinking"),
+    thinking: object.optional_thinking("thinking"),
     max_steps: object.optional_int("max_steps"),
     session: object.required_string("session"),
     workspace: object.optional_string("workspace"),
@@ -132,7 +143,7 @@ pub impl FromJson for CompactPayload with fn from_json(json, path) {
   {
     session: object.required_string("session"),
     model: object.optional_string("model"),
-    thinking: object.optional_string("thinking"),
+    thinking: object.optional_thinking("thinking"),
     max_steps: object.optional_int("max_steps"),
     workspace: object.optional_string("workspace"),
   }
@@ -164,7 +175,7 @@ pub impl FromJson for GoalPayload with fn from_json(json, path) {
     text: object.optional_string("text"),
     auto: object.optional_bool("auto"),
     model: object.optional_string("model"),
-    thinking: object.optional_string("thinking"),
+    thinking: object.optional_thinking("thinking"),
     max_steps: object.optional_int("max_steps"),
     workspace: object.optional_string("workspace"),
   }
@@ -192,4 +203,20 @@ pub impl ToJson for GoalPayload with fn to_json(self) {
     fields["workspace"] = workspace.to_json()
   }
   Json::object(fields)
+}
+
+///|
+pub impl FromJson for OpenSeekThinking with fn from_json(json, path) {
+  guard json is String(value) else {
+    raise JsonDecodeError((path, "expected no, high, or max"))
+  }
+  guard OpenSeekThinking::parse(value) is Some(thinking) else {
+    raise JsonDecodeError((path, "expected no, high, or max"))
+  }
+  thinking
+}
+
+///|
+pub impl ToJson for OpenSeekThinking with fn to_json(self) {
+  Json::string(self.wire())
 }

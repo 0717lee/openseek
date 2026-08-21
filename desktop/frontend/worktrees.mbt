@@ -1668,7 +1668,7 @@ test "a start payload never names a worktree" {
     payload.to_json() is Object(fields) && fields.get("worktree") is None,
   )
   assert_eq(payload.workspace, Some("/proj"))
-  assert_eq(payload.thinking, Some("max"))
+  assert_eq(payload.thinking, Some(ThinkingMax))
   let unknown_model = start_payload(
     "go",
     Other("kimi-k2.5"),

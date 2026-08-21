@@ -120,7 +120,7 @@ test "start and steer payloads preserve submission ids" {
     "thinking": "high",
   })
   assert_eq(start.submission_id, Some("submission-start"))
-  assert_eq(start.thinking, Some("high"))
+  assert_eq(start.thinking, Some(ThinkingHigh))
   let steer : @protocol.SteerPayload = @json.from_json({
     "text": "more detail",
     "run_id": "r1",
@@ -177,7 +177,7 @@ test "goal payload distinguishes set from clear by the text field" {
   })
   assert_eq(set.text, Some("ship the feature"))
   assert_eq(set.model, Some("deepseek-v4-pro"))
-  assert_eq(set.thinking, Some("max"))
+  assert_eq(set.thinking, Some(ThinkingMax))
   let clear : @protocol.GoalPayload = @json.from_json({ "session": "s-goal" })
   assert_true(clear.text is None)
 }

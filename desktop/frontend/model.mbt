@@ -75,6 +75,20 @@ fn OpenSeekReasoning::wire(self : OpenSeekReasoning) -> String {
 }
 
 ///|
+/// Convert the UI choice into the closed OpenSeek command value. Storage keeps
+/// the UI enum's string representation, while requests cross the Desktop JSON
+/// boundary with the protocol-owned type.
+fn OpenSeekReasoning::protocol(
+  self : OpenSeekReasoning,
+) -> @protocol.OpenSeekThinking {
+  match self {
+    ReasoningOff => ThinkingOff
+    ReasoningHigh => ThinkingHigh
+    ReasoningMax => ThinkingMax
+  }
+}
+
+///|
 fn OpenSeekReasoning::parse(value : String) -> OpenSeekReasoning? {
   match value.trim().to_owned() {
     "no" => Some(ReasoningOff)
@@ -99,9 +113,9 @@ fn OpenSeekReasoning::label(self : OpenSeekReasoning) -> String {
 fn EngineModel::thinking(
   self : EngineModel,
   reasoning : OpenSeekReasoning,
-) -> String? {
+) -> @protocol.OpenSeekThinking? {
   if self.supports_reasoning() {
-    Some(reasoning.wire())
+    Some(reasoning.protocol())
   } else {
     None
   }

@@ -649,7 +649,7 @@ pub impl @json.FromJson for CodexTurnSteerPayload
 pub(all) struct CompactPayload {
   session : String
   model : String?
-  thinking : String?
+  thinking : OpenSeekThinking?
   max_steps : Int?
   workspace : String?
 } derive(Eq, @debug.Debug)
@@ -1036,7 +1036,7 @@ pub(all) struct GoalPayload {
   text : String?
   auto : Bool?
   model : String?
-  thinking : String?
+  thinking : OpenSeekThinking?
   max_steps : Int?
   workspace : String?
 } derive(Eq, @debug.Debug)
@@ -1419,6 +1419,21 @@ pub fn OpenPathReply::to_repr(Self) -> @debug.Repr
 pub impl ToJson for OpenPathReply
 pub impl @json.FromJson for OpenPathReply
 
+pub(all) enum OpenSeekThinking {
+  ThinkingOff
+  ThinkingHigh
+  ThinkingMax
+} derive(Eq, @debug.Debug)
+pub fn OpenSeekThinking::equal(Self, Self) -> Bool
+pub fn OpenSeekThinking::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn OpenSeekThinking::not_equal(Self, Self) -> Bool
+pub fn OpenSeekThinking::parse(String) -> Self?
+pub fn OpenSeekThinking::to_json(Self) -> Json
+pub fn OpenSeekThinking::to_repr(Self) -> @debug.Repr
+pub fn OpenSeekThinking::wire(Self) -> String
+pub impl ToJson for OpenSeekThinking
+pub impl @json.FromJson for OpenSeekThinking
+
 pub(all) struct ReadDirPayload {
   path : String
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
@@ -1778,7 +1793,7 @@ pub(all) struct StartPayload {
   task : String
   submission_id : String?
   model : String?
-  thinking : String?
+  thinking : OpenSeekThinking?
   max_steps : Int?
   session : String
   workspace : String?
