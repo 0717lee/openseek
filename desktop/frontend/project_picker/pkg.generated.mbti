@@ -1,0 +1,52 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "openseek_desktop/frontend/project_picker"
+
+import {
+  "moonbit-community/rabbita/cmd",
+  "moonbit-community/rabbita/html",
+  "moonbit-community/rabbita/sub",
+  "moonbitlang/editor/base/common",
+  "openseek_desktop/frontend/interop",
+}
+
+// Values
+pub fn subscriptions(State?, @cmd.Emit[Msg]) -> @sub.Sub
+
+pub fn view(@cmd.Emit[Msg], State) -> @html.Html
+
+// Errors
+
+// Types and methods
+pub(all) enum Location {
+  Directory(@common.Uri)
+  DriveList
+} derive(Eq)
+pub fn Location::equal(Self, Self) -> Bool
+pub fn Location::not_equal(Self, Self) -> Bool
+
+pub(all) enum Msg {
+  Navigate(String)
+  Loaded(channel~ : @interop.ChannelId, location~ : Location, entries~ : Array[String], generation~ : Int)
+  Failed(channel~ : @interop.ChannelId, message~ : String, generation~ : Int)
+  Confirm
+  Close
+} derive(Eq)
+pub fn Msg::equal(Self, Self) -> Bool
+pub fn Msg::not_equal(Self, Self) -> Bool
+
+pub(all) enum Outcome {
+  Picked(@interop.ChannelId, @common.Uri)
+  Failed(String)
+} derive(Eq)
+pub fn Outcome::equal(Self, Self) -> Bool
+pub fn Outcome::not_equal(Self, Self) -> Bool
+
+type State derive(Eq)
+pub fn State::equal(Self, Self) -> Bool
+pub fn State::handle(Self, @cmd.Emit[Msg], Msg) -> (@cmd.Cmd, Self?, Outcome?)
+pub fn State::not_equal(Self, Self) -> Bool
+pub fn State::open(@interop.ChannelId, @cmd.Emit[Msg]) -> (@cmd.Cmd, Self)
+
+// Type aliases
+
+// Traits

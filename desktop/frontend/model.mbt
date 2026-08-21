@@ -1258,7 +1258,7 @@ priv struct Model {
   // instant switch back. Copy-on-write, like the transcript arrays.
   conversations : Array[Conversation]
   // The in-app folder picker behind "Add a project"; None while closed.
-  project_picker : ProjectPicker?
+  project_picker : @project_picker.State?
   // A confirmed add waiting for its registry snapshot; None otherwise.
   pending_project_adoption : ProjectAdoption?
   screen : Screen
@@ -1408,41 +1408,6 @@ priv struct BrowserGeometry {
 priv struct GoalEdit {
   draft : String
 } derive(Eq)
-
-///|
-/// The in-app folder picker's state: the host location currently shown and
-/// the rows inside it — a directory's subdirectories, or the Windows drive
-/// list's drives. `loading` marks a browse in flight; a failed
-/// navigation pops a toast while the previous listing stays usable.
-/// `channel` owns every browse and the eventual project mutation;
-/// `generation` numbers that picker's latest request. Both ride on replies,
-/// so neither a superseded navigation nor a closed picker from another
-/// device can replace the current listing.
-priv struct ProjectPicker {
-  channel : @interop.ChannelId
-  // The last location the host successfully listed. `None` only while the
-  // initial home listing is in flight.
-  location : PickerLocation?
-  entries : Array[String]
-  loading : Bool
-  generation : Int
-} derive(Eq)
-
-///|
-/// Where the picker's current listing was taken: a real host directory —
-/// the only thing Confirm can register — or the Windows-only virtual level
-/// above the drive roots, whose rows are the drives themselves.
-priv enum PickerLocation {
-  Directory(@common.Uri)
-  DriveList
-} derive(Eq)
-
-///|
-/// A picker that just opened: nothing browsed yet, first listing (the home
-/// directory) on its way.
-fn opening_project_picker(channel : @interop.ChannelId) -> ProjectPicker {
-  { channel, location: None, entries: [], loading: true, generation: 1 }
-}
 
 ///|
 /// Set when the picker's confirm sends `workspace.add`, then settled in two
@@ -1689,28 +1654,9 @@ priv enum Msg {
   // no-op while the picker is already open, so a repeat chord cannot yank
   // the listing back to the home directory mid-navigation.
   AddProjectRequested
-  // Browse into a directory: a subdirectory row, a breadcrumb ancestor, or
-  // a path pasted while the picker is open.
-  ProjectPickerNavigate(String)
-  // One location's listing came back from the host — a directory, or the
-  // Windows drive list; `generation` names the browse request it answers,
-  // so a stale reply is dropped.
-  ProjectPickerLoaded(
-    channel~ : @interop.ChannelId,
-    location~ : PickerLocation,
-    entries~ : Array[String],
-    generation~ : Int
-  )
-  // A navigation failed; the message pops as a toast and the previous
-  // listing stays usable.
-  ProjectPickerFailed(
-    channel~ : @interop.ChannelId,
-    message~ : String,
-    generation~ : Int
-  )
-  // Register the picker's current directory and close it.
-  ProjectPickerConfirm
-  ProjectPickerClose
+  // One picker-package message: navigation, a listing reply, a failure, or
+  // a confirm/close. The shell intercepts the confirm's picked directory.
+  ProjectPicker(@project_picker.Msg)
   // Detach a project from one device: only the registry entry goes
   // away — the directory and the sessions inside it stay, so re-adding
   // restores them.

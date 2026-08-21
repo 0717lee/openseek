@@ -361,9 +361,12 @@ pub fn boot() -> Unit {
         ]
         // The project picker's Enter/Escape/paste surface, only while its
         // modal is open — same lifetime rule as the dismissal listeners.
-        if model.project_picker is Some(_) {
-          subs.push(project_picker_capture_subscription(emit))
-        }
+        subs.push(
+          @project_picker.subscriptions(
+            model.project_picker,
+            emit.map(msg => ProjectPicker(msg)),
+          ),
+        )
         // Click-away dismissal, one listener per menu and only while that menu
         // is open: a document-wide listener should not outlive what it serves.
         if model.git_details_open ||

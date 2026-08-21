@@ -3364,13 +3364,12 @@ fn update_msg(
       // it. The palette holds nothing worth preserving — unlike the picker's
       // own browse position, which is why it refuses to reopen over itself.
       let (quick_open_cmd, quick_open) = model.quick_open.close()
-      let picker = opening_project_picker(channel)
+      let (browse_cmd, picker) = @project_picker.State::open(
+        channel,
+        dispatch.map(msg => ProjectPicker(msg)),
+      )
       (
-        @cmd.batch([
-          focus_cmd,
-          quick_open_cmd,
-          browse_directory(dispatch, channel, "", generation=picker.generation),
-        ]),
+        @cmd.batch([focus_cmd, quick_open_cmd, browse_cmd]),
         { ..model, quick_open, project_picker: Some(picker) },
       )
     }
@@ -3383,90 +3382,52 @@ fn update_msg(
       } else {
         update(dispatch, PickProject(model.focused), model)
       }
-    ProjectPickerNavigate(path) =>
+    ProjectPicker(msg) =>
       match model.project_picker {
         Some(picker) => {
-          let generation = picker.generation + 1
-          (
-            browse_directory(dispatch, picker.channel, path, generation~),
-            {
-              ..model,
-              project_picker: Some({ ..picker, loading: true, generation }),
-            },
+          let (cmd, next, outcome) = @project_picker.State::handle(
+            picker,
+            dispatch.map(msg => ProjectPicker(msg)),
+            msg,
           )
+          let model = { ..model, project_picker: next }
+          match outcome {
+            None => (cmd, model)
+            // The failure pops as a toast — mainly a pasted path that names
+            // no directory — while the previous listing stays usable.
+            Some(@project_picker.Outcome::Failed(message)) => {
+              let (toast, model) = model.notify_error(
+                dispatch,
+                "Cannot open folder: \{message}",
+              )
+              (@cmd.batch([cmd, toast]), model)
+            }
+            // Confirm registers the directory the host last listed — always
+            // something it confirmed exists — never raw pasted text; a paste
+            // navigates (and validates) first. The pending adoption later
+            // focuses the project the add committed.
+            Some(@project_picker.Outcome::Picked(channel, path)) => {
+              let known = match model.device_state(channel) {
+                Some(dev) => dev.projects.copy()
+                None => []
+              }
+              (
+                @cmd.batch([cmd, add_project(dispatch, channel, path.path)]),
+                {
+                  ..model,
+                  pending_project_adoption: Some({
+                    channel,
+                    picked: path,
+                    known,
+                    resolved: None,
+                  }),
+                },
+              )
+            }
+          }
         }
         None => (@cmd.none, model)
       }
-    ProjectPickerLoaded(channel~, location~, entries~, generation~) =>
-      // A listing for a picker the user already closed — or one answering
-      // a navigation that has since been superseded — is dropped.
-      match model.project_picker {
-        Some(picker) if picker.channel == channel &&
-          picker.generation == generation =>
-          (
-            @cmd.none,
-            {
-              ..model,
-              project_picker: Some({
-                channel,
-                location: Some(location),
-                entries,
-                loading: false,
-                generation,
-              }),
-            },
-          )
-        _ => (@cmd.none, model)
-      }
-    ProjectPickerFailed(channel~, message~, generation~) =>
-      // The failure pops as a toast — mainly a pasted path that names no
-      // directory — while the previous listing stays usable.
-      match model.project_picker {
-        Some(picker) if picker.channel == channel &&
-          picker.generation == generation => {
-          let (toast, model) = model.notify_error(
-            dispatch,
-            "Cannot open folder: \{message}",
-          )
-          (
-            toast,
-            { ..model, project_picker: Some({ ..picker, loading: false }) },
-          )
-        }
-        _ => (@cmd.none, model)
-      }
-    ProjectPickerConfirm =>
-      match model.project_picker {
-        // Confirm registers the directory the host last listed — always
-        // something it confirmed exists — never raw pasted text; a paste
-        // navigates (and validates) first. While a navigation is in flight
-        // the shown listing is stale, so Enter must wait: confirming then
-        // would attach the previous directory, not the destination. The
-        // Windows drive list is not a directory and cannot be registered.
-        // The pending adoption later focuses the project the add committed.
-        Some(picker) if picker.location is Some(Directory(path)) &&
-          !picker.loading => {
-          let known = match model.device_state(picker.channel) {
-            Some(dev) => dev.projects.copy()
-            None => []
-          }
-          (
-            add_project(dispatch, picker.channel, path.path),
-            {
-              ..model,
-              project_picker: None,
-              pending_project_adoption: Some({
-                channel: picker.channel,
-                picked: path,
-                known,
-                resolved: None,
-              }),
-            },
-          )
-        }
-        _ => (@cmd.none, model)
-      }
-    ProjectPickerClose => (@cmd.none, { ..model, project_picker: None })
     RemoveProject(channel, path) =>
       // The row itself leaves with the registry commit broadcast; its open
       // "…" menu is component state and leaves with the keyed row.
@@ -17312,7 +17273,11 @@ test "full-screen modals hide the native view and closing restores it" {
   assert_true(covered.project_picker is Some(_))
   assert_true(covered.browser_pane.shown is None)
   // Closing the modal re-measures; the next measurement re-places the view.
-  let (_, closed) = update(dispatch, ProjectPickerClose, covered)
+  let (_, closed) = update(
+    dispatch,
+    ProjectPicker(@project_picker.Msg::Close),
+    covered,
+  )
   let (_, restored) = update(dispatch, BrowserPaneMeasured(rect~), closed)
   assert_true(restored.browser_pane.shown == Some(1))
   // The topbar app launcher covers the pane too, and so does the composer's
