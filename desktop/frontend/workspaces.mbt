@@ -64,92 +64,6 @@ fn remove_project(
 }
 
 ///|
-/// Ask the host to list one location — the in-app picker's data source.
-/// `path` "" starts at the host's home directory; "/" is a Windows host's
-/// drive list. `generation` rides along on the reply with `channel`, so the
-/// update can drop answers to superseded navigations and to a picker that
-/// was reopened for another device.
-fn browse_directory(
-  dispatch : @cmd.Emit[Msg],
-  channel : @interop.ChannelId,
-  path : String,
-  generation~ : Int,
-) -> @cmd.Cmd {
-  @cmd.custom_cmd(scheduler => {
-    @js.async_run(() => {
-      let reply = @interop.bridge_request(channel, @commands.fs_browse, {
-        path: match path.trim() {
-          "" => None
-          value => Some(value.to_owned())
-        },
-      }) catch {
-        error => {
-          scheduler.add(
-            dispatch(
-              ProjectPickerFailed(
-                channel~,
-                message=@interop.bridge_error_text(error),
-                generation~,
-              ),
-            ),
-          )
-          return
-        }
-      }
-      let message = match reply {
-        Listing(path~, entries~, ..) => {
-          if @resource.of_path(channel, path) is Some(path) {
-            let entries = entries.filter(name => !name.is_empty())
-            scheduler.add(
-              dispatch(
-                ProjectPickerLoaded(
-                  channel~,
-                  location=Directory(path),
-                  entries~,
-                  generation~,
-                ),
-              ),
-            )
-            return
-          }
-          "malformed directory listing"
-        }
-        Drives(entries~) => {
-          let entries = entries.filter(name => !name.is_empty())
-          scheduler.add(
-            dispatch(
-              ProjectPickerLoaded(
-                channel~,
-                location=DriveList,
-                entries~,
-                generation~,
-              ),
-            ),
-          )
-          return
-        }
-        BrowseError(message) => message
-      }
-      scheduler.add(
-        dispatch(ProjectPickerFailed(channel~, message~, generation~)),
-      )
-    })
-  })
-}
-
-///|
-/// The protocol path for one child of a directory the picker already loaded.
-/// Resource URI paths always use `/`, including Windows drive resources such
-/// as `/C:/code`.
-fn @common.Uri::picker_child_path(self : @common.Uri, name : String) -> String {
-  if self.path.has_suffix("/") {
-    self.path + name
-  } else {
-    self.path + "/" + name
-  }
-}
-
-///|
 fn project_action(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
@@ -630,104 +544,23 @@ test "the two full-screen pickers never share the screen" {
 }
 
 ///|
-test "the picker opens loading and adopts the first listing" {
-  let dispatch = test_dispatch()
-  let (_, opened) = update(
-    dispatch,
-    PickProject(@interop.ChannelId::Local),
-    test_model(),
-  )
-  guard opened.project_picker is Some(opening) else {
-    fail("picker did not open")
-  }
-  assert_true(opening.loading)
-  let (_, loaded) = update(
-    dispatch,
-    ProjectPickerLoaded(
-      channel=Local,
-      location=Directory(@interop.ChannelId::Local.test_resource("/home/u")),
-      entries=["proj"],
-      generation=1,
-    ),
-    opened,
-  )
-  guard loaded.project_picker is Some(picker) else {
-    fail("picker closed by its own listing")
-  }
-  assert_true(
-    picker.location is Some(Directory(path)) && path.path == "/home/u",
-  )
-  inspect(picker.entries.length(), content="1")
-  assert_true(!picker.loading)
-}
-
-///|
-test "a listing for a closed picker is dropped" {
+test "a picker message with no picker open is dropped" {
   let dispatch = test_dispatch()
   let (_, next) = update(
     dispatch,
-    ProjectPickerLoaded(
-      channel=Local,
-      location=Directory(@interop.ChannelId::Local.test_resource("/home/u")),
-      entries=[],
-      generation=1,
+    ProjectPicker(
+      @project_picker.Msg::Loaded(
+        channel=Local,
+        location=@project_picker.Location::Directory(
+          @interop.ChannelId::Local.test_resource("/home/u"),
+        ),
+        entries=[],
+        generation=1,
+      ),
     ),
     test_model(),
   )
   assert_true(next.project_picker is None)
-}
-
-///|
-test "a listing from the previous device cannot replace a reopened picker" {
-  let dispatch = test_dispatch()
-  let first : @interop.ChannelId = Remote("d_a")
-  let second : @interop.ChannelId = Remote("d_b")
-  let model = {
-    ..test_model(),
-    devices: [
-      { ..empty_device_state(first), bridge: Connected },
-      { ..empty_device_state(second), bridge: Connected },
-    ],
-    focused: first,
-  }
-  let (_, first_open) = update(dispatch, PickProject(first), model)
-  let (_, closed) = update(dispatch, ProjectPickerClose, first_open)
-  let (_, second_open) = update(dispatch, PickProject(second), closed)
-  // Both opens use generation 1. The channel is the other half of the reply
-  // identity, so the first device's late home listing is still stale.
-  let (_, stale) = update(
-    dispatch,
-    ProjectPickerLoaded(
-      channel=first,
-      location=Directory(first.test_resource("/from-a")),
-      entries=["wrong"],
-      generation=1,
-    ),
-    second_open,
-  )
-  guard stale.project_picker is Some(picker) else {
-    fail("current picker closed by a stale listing")
-  }
-  assert_true(picker.channel == second)
-  assert_true(picker.loading)
-  assert_true(picker.location is None)
-  let (_, current) = update(
-    dispatch,
-    ProjectPickerLoaded(
-      channel=second,
-      location=Directory(second.test_resource("/from-b")),
-      entries=[],
-      generation=1,
-    ),
-    stale,
-  )
-  guard current.project_picker is Some(picker) else {
-    fail("current picker closed by its own listing")
-  }
-  assert_true(picker.channel == second)
-  assert_true(
-    picker.location is Some(Directory(path)) && path.path == "/from-b",
-  )
 }
 
 ///|
@@ -740,20 +573,26 @@ test "a failed navigation keeps the listing and pops a toast" {
   )
   let (_, loaded) = update(
     dispatch,
-    ProjectPickerLoaded(
-      channel=Local,
-      location=Directory(@interop.ChannelId::Local.test_resource("/home/u")),
-      entries=["proj"],
-      generation=1,
+    ProjectPicker(
+      @project_picker.Msg::Loaded(
+        channel=Local,
+        location=@project_picker.Location::Directory(
+          @interop.ChannelId::Local.test_resource("/home/u"),
+        ),
+        entries=["proj"],
+        generation=1,
+      ),
     ),
     opened,
   )
   let (_, failed) = update(
     dispatch,
-    ProjectPickerFailed(
-      channel=Local,
-      message="no such directory: /gone",
-      generation=1,
+    ProjectPicker(
+      @project_picker.Msg::Failed(
+        channel=Local,
+        message="no such directory: /gone",
+        generation=1,
+      ),
     ),
     loaded,
   )
@@ -761,7 +600,8 @@ test "a failed navigation keeps the listing and pops a toast" {
     fail("picker closed by a failed navigation")
   }
   assert_true(
-    picker.location is Some(Directory(path)) && path.path == "/home/u",
+    picker.location is Some(@project_picker.Location::Directory(path)) &&
+    path.path == "/home/u",
   )
   inspect(picker.entries.length(), content="1")
   assert_true(!picker.loading)
@@ -774,7 +614,9 @@ test "a failed navigation keeps the listing and pops a toast" {
   // would describe a browse the user has already replaced.
   let (_, stale) = update(
     dispatch,
-    ProjectPickerFailed(channel=Local, message="stale", generation=99),
+    ProjectPicker(
+      @project_picker.Msg::Failed(channel=Local, message="stale", generation=99),
+    ),
     failed,
   )
   inspect(stale.notifications.length(), content="1")
@@ -790,68 +632,33 @@ test "confirming registers the browsed directory and closes the picker" {
   )
   let (_, loaded) = update(
     dispatch,
-    ProjectPickerLoaded(
-      channel=Local,
-      location=Directory(
-        @interop.ChannelId::Local.test_resource("/home/u/proj"),
+    ProjectPicker(
+      @project_picker.Msg::Loaded(
+        channel=Local,
+        location=@project_picker.Location::Directory(
+          @interop.ChannelId::Local.test_resource("/home/u/proj"),
+        ),
+        entries=[],
+        generation=1,
       ),
-      entries=[],
-      generation=1,
     ),
     opened,
   )
-  let (_, confirmed) = update(dispatch, ProjectPickerConfirm, loaded)
+  let (_, confirmed) = update(
+    dispatch,
+    ProjectPicker(@project_picker.Msg::Confirm),
+    loaded,
+  )
   assert_true(confirmed.project_picker is None)
   inspect(confirmed.dev().projects_request_generation, content="0")
   // Confirming before anything was browsed has nothing to register and
   // keeps the picker open.
-  let (_, early) = update(dispatch, ProjectPickerConfirm, opened)
-  assert_true(early.project_picker is Some(_))
-}
-
-///|
-test "the Windows drive list shows its drives and refuses a confirm" {
-  let dispatch = test_dispatch()
-  let (_, opened) = update(
+  let (_, early) = update(
     dispatch,
-    PickProject(@interop.ChannelId::Local),
-    test_model(),
-  )
-  let (_, listed) = update(
-    dispatch,
-    ProjectPickerLoaded(
-      channel=Local,
-      location=DriveList,
-      entries=["C:", "D:"],
-      generation=1,
-    ),
+    ProjectPicker(@project_picker.Msg::Confirm),
     opened,
   )
-  guard listed.project_picker is Some(picker) else {
-    fail("picker closed by the drive list")
-  }
-  assert_true(picker.location is Some(DriveList))
-  inspect(picker.entries.length(), content="2")
-  assert_true(!picker.loading)
-  // The drive list is not a directory: Enter and "Add" have nothing to
-  // register, so the picker stays open with nothing pending.
-  let (_, held) = update(dispatch, ProjectPickerConfirm, listed)
-  assert_true(held.project_picker is Some(_))
-  assert_true(held.pending_project_adoption is None)
-}
-
-///|
-test "picker paths join with URI separators" {
-  let channel = @interop.ChannelId::Local
-  inspect(
-    channel.test_resource("/home/u").picker_child_path("proj"),
-    content="/home/u/proj",
-  )
-  inspect(channel.test_resource("/").picker_child_path("etc"), content="/etc")
-  inspect(
-    channel.test_resource("/C:/code").picker_child_path("app"),
-    content="/c:/code/app",
-  )
+  assert_true(early.project_picker is Some(_))
 }
 
 ///|
@@ -880,11 +687,15 @@ test "the add-project chord opens the picker once and never restarts it" {
   assert_true(picker.loading)
   let (_, loaded) = update(
     dispatch,
-    ProjectPickerLoaded(
-      channel=Local,
-      location=Directory(@interop.ChannelId::Local.test_resource("/home/u")),
-      entries=["proj"],
-      generation=1,
+    ProjectPicker(
+      @project_picker.Msg::Loaded(
+        channel=Local,
+        location=@project_picker.Location::Directory(
+          @interop.ChannelId::Local.test_resource("/home/u"),
+        ),
+        entries=["proj"],
+        generation=1,
+      ),
     ),
     opened,
   )
@@ -908,15 +719,21 @@ fn confirmed_add(
   )
   let (_, loaded) = update(
     dispatch,
-    ProjectPickerLoaded(
-      channel=Local,
-      location=Directory(picked),
-      entries=[],
-      generation=1,
+    ProjectPicker(
+      @project_picker.Msg::Loaded(
+        channel=Local,
+        location=@project_picker.Location::Directory(picked),
+        entries=[],
+        generation=1,
+      ),
     ),
     opened,
   )
-  let (_, confirmed) = update(dispatch, ProjectPickerConfirm, loaded)
+  let (_, confirmed) = update(
+    dispatch,
+    ProjectPicker(@project_picker.Msg::Confirm),
+    loaded,
+  )
   assert_true(confirmed.project_picker is None)
   confirmed
 }
@@ -1068,15 +885,21 @@ test "a superseded confirm's reply cannot resolve the newer pending" {
   )
   let (_, listed) = update(
     dispatch,
-    ProjectPickerLoaded(
-      channel=Local,
-      location=Directory(second),
-      entries=[],
-      generation=1,
+    ProjectPicker(
+      @project_picker.Msg::Loaded(
+        channel=Local,
+        location=@project_picker.Location::Directory(second),
+        entries=[],
+        generation=1,
+      ),
     ),
     reopened,
   )
-  let (_, confirmed_second) = update(dispatch, ProjectPickerConfirm, listed)
+  let (_, confirmed_second) = update(
+    dispatch,
+    ProjectPicker(@project_picker.Msg::Confirm),
+    listed,
+  )
   // The first add's reply answers a confirm the user has moved past: it
   // must neither resolve nor clear the second's pending.
   let (_, ignored) = update_dev(
@@ -1130,15 +953,21 @@ test "a resolved add wins over the detach fallback in one snapshot" {
   )
   let (_, listed) = update(
     dispatch,
-    ProjectPickerLoaded(
-      channel=Local,
-      location=Directory(picked),
-      entries=[],
-      generation=1,
+    ProjectPicker(
+      @project_picker.Msg::Loaded(
+        channel=Local,
+        location=@project_picker.Location::Directory(picked),
+        entries=[],
+        generation=1,
+      ),
     ),
     opened,
   )
-  let (_, confirmed) = update(dispatch, ProjectPickerConfirm, listed)
+  let (_, confirmed) = update(
+    dispatch,
+    ProjectPicker(@project_picker.Msg::Confirm),
+    listed,
+  )
   let (_, resolved) = update_dev(
     dispatch,
     ProjectAddCommitted(added=picked.path, paths=[gone, picked]),
@@ -1164,11 +993,13 @@ test "confirm waits for an in-flight navigation" {
   )
   let (_, loaded) = update(
     dispatch,
-    ProjectPickerLoaded(
-      channel=Local,
-      location=Directory(picked),
-      entries=[],
-      generation=1,
+    ProjectPicker(
+      @project_picker.Msg::Loaded(
+        channel=Local,
+        location=@project_picker.Location::Directory(picked),
+        entries=[],
+        generation=1,
+      ),
     ),
     opened,
   )
@@ -1176,61 +1007,14 @@ test "confirm waits for an in-flight navigation" {
   // stale, so Enter right now must not attach the previous directory.
   let (_, navigating) = update(
     dispatch,
-    ProjectPickerNavigate("/home/u/proj"),
+    ProjectPicker(@project_picker.Msg::Navigate("/home/u/proj")),
     loaded,
   )
-  let (_, held) = update(dispatch, ProjectPickerConfirm, navigating)
+  let (_, held) = update(
+    dispatch,
+    ProjectPicker(@project_picker.Msg::Confirm),
+    navigating,
+  )
   assert_true(held.project_picker is Some(_))
   assert_true(held.pending_project_adoption is None)
-}
-
-///|
-test "a listing for a superseded navigation is dropped" {
-  let dispatch = test_dispatch()
-  let (_, opened) = update(
-    dispatch,
-    PickProject(@interop.ChannelId::Local),
-    test_model(),
-  )
-  let (_, navigated) = update(
-    dispatch,
-    ProjectPickerNavigate("/home/u/proj"),
-    opened,
-  )
-  // The reply to the original open (generation 1) lands after a navigation
-  // bumped the picker to generation 2: it must not move the picker back.
-  let (_, stale) = update(
-    dispatch,
-    ProjectPickerLoaded(
-      channel=Local,
-      location=Directory(@interop.ChannelId::Local.test_resource("/home/u")),
-      entries=["proj"],
-      generation=1,
-    ),
-    navigated,
-  )
-  guard stale.project_picker is Some(picker) else {
-    fail("picker closed by a stale listing")
-  }
-  assert_true(picker.loading)
-  assert_true(picker.location is None)
-  let (_, current) = update(
-    dispatch,
-    ProjectPickerLoaded(
-      channel=Local,
-      location=Directory(
-        @interop.ChannelId::Local.test_resource("/home/u/proj"),
-      ),
-      entries=[],
-      generation=2,
-    ),
-    stale,
-  )
-  guard current.project_picker is Some(picker) else {
-    fail("picker closed by the current listing")
-  }
-  assert_true(
-    picker.location is Some(Directory(path)) && path.path == "/home/u/proj",
-  )
-  assert_true(!picker.loading)
 }
