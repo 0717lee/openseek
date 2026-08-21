@@ -266,10 +266,9 @@ jobs:
             -czf desktop/dist/SeekMoon.browser.tar.gz \
             browser
 
-      # A missing version manifest leaves artifacts replaceable for retries.
-      # Once the manifest seals their exact bytes, Browser enters its
-      # same-origin deployment path and latest.json is replaced last.
-      - name: Publish release
+      # Upload first. A missing version manifest leaves these objects
+      # replaceable; a retry of a sealed version restores the exact OSS bytes.
+      - name: Upload release to OSS
         shell: bash
         env:
           OPENSEEK_DEPLOY_TOKEN: ${{ secrets.OPENSEEK_DEPLOY_TOKEN }}
@@ -278,7 +277,7 @@ jobs:
           OSS_ACCESS_KEY_ID: ${{ secrets.OPENSEEK_OSS_ACCESS_KEY_ID }}
           OSS_ACCESS_KEY_SECRET: ${{ secrets.OPENSEEK_OSS_ACCESS_KEY_SECRET }}
         run: |
-          desktop/scripts/publish-release.sh publish "v$RELEASE_VERSION"
+          desktop/scripts/publish-release.sh upload "v$RELEASE_VERSION"
 
       # A sealed retry replaces this run's nondeterministic rebuilds with the
       # exact OSS objects before reaching here. Keep those canonical bytes as
@@ -293,6 +292,19 @@ jobs:
             desktop/dist/SeekMoon.browser.tar.gz
           if-no-files-found: error
           retention-days: 14
+
+      # Publish seals the uploaded bytes, selects the staged Browser version,
+      # and replaces latest.json last. It does not upload release binaries.
+      - name: Publish release
+        shell: bash
+        env:
+          OPENSEEK_DEPLOY_TOKEN: ${{ secrets.OPENSEEK_DEPLOY_TOKEN }}
+          OPENSEEK_OSS_BUCKET: ${{ secrets.OPENSEEK_OSS_BUCKET }}
+          OPENSEEK_OSS_REGION: ${{ secrets.OPENSEEK_OSS_REGION }}
+          OSS_ACCESS_KEY_ID: ${{ secrets.OPENSEEK_OSS_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.OPENSEEK_OSS_ACCESS_KEY_SECRET }}
+        run: |
+          desktop/scripts/publish-release.sh publish "v$RELEASE_VERSION"
 
       - name: Verify release manifest
         shell: bash
