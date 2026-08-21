@@ -15,13 +15,13 @@
 /// so neither a superseded navigation nor a closed picker from another
 /// device can replace the current listing.
 pub(all) struct State {
-  channel : @interop.ChannelId
+  priv channel : @interop.ChannelId
   // The last location the host successfully listed. `None` only while the
   // initial home listing is in flight.
-  location : Location?
-  entries : Array[String]
-  loading : Bool
-  generation : Int
+  priv location : Location?
+  priv entries : Array[String]
+  priv loading : Bool
+  priv generation : Int
 } derive(Eq)
 
 ///|
@@ -66,10 +66,10 @@ pub extend Msg with Eq::{equal, not_equal}
 
 ///|
 /// What the shell must do about a handled message: register a confirmed
-/// directory, or surface a navigation failure as a toast. Everything else
-/// stays inside the package.
+/// directory on its owning device, or surface a navigation failure as a
+/// toast. Everything else stays inside the package.
 pub(all) enum Outcome {
-  Picked(@common.Uri)
+  Picked(@interop.ChannelId, @common.Uri)
   Failed(String)
 } derive(Eq)
 
@@ -141,7 +141,7 @@ pub fn State::handle(
       // previous directory, not the destination. The Windows drive list is
       // not a directory and cannot be registered.
       if self.location is Some(Directory(path)) && !self.loading {
-        (@cmd.none, None, Some(Picked(path)))
+        (@cmd.none, None, Some(Picked(self.channel, path)))
       } else {
         (@cmd.none, Some(self), None)
       }

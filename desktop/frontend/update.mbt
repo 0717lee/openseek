@@ -3364,20 +3364,17 @@ fn update_msg(
             // something it confirmed exists — never raw pasted text; a paste
             // navigates (and validates) first. The pending adoption later
             // focuses the project the add committed.
-            Some(@project_picker.Outcome::Picked(path)) => {
-              let known = match model.device_state(picker.channel) {
+            Some(@project_picker.Outcome::Picked(channel, path)) => {
+              let known = match model.device_state(channel) {
                 Some(dev) => dev.projects.copy()
                 None => []
               }
               (
-                @cmd.batch([
-                  cmd,
-                  add_project(dispatch, picker.channel, path.path),
-                ]),
+                @cmd.batch([cmd, add_project(dispatch, channel, path.path)]),
                 {
                   ..model,
                   pending_project_adoption: Some({
-                    channel: picker.channel,
+                    channel,
                     picked: path,
                     known,
                     resolved: None,

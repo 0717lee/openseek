@@ -599,12 +599,12 @@ test "a failed navigation keeps the listing and pops a toast" {
   guard failed.project_picker is Some(picker) else {
     fail("picker closed by a failed navigation")
   }
-  assert_true(
-    picker.location is Some(@project_picker.Location::Directory(path)) &&
-    path.path == "/home/u",
-  )
-  inspect(picker.entries.length(), content="1")
-  assert_true(!picker.loading)
+  guard loaded.project_picker is Some(before) else {
+    fail("listing never landed")
+  }
+  // A failed navigation keeps the shown listing; the toast carries the
+  // message.
+  assert_true(picker == before)
   inspect(failed.notifications.length(), content="1")
   inspect(
     failed.notifications[0].message,
@@ -680,11 +680,9 @@ test "a workspace failure pops a toast" {
 test "the add-project chord opens the picker once and never restarts it" {
   let dispatch = test_dispatch()
   let (_, opened) = update(dispatch, AddProjectRequested, test_model())
-  guard opened.project_picker is Some(picker) else {
+  guard opened.project_picker is Some(_) else {
     fail("chord did not open the picker")
   }
-  assert_true(picker.channel == Local)
-  assert_true(picker.loading)
   let (_, loaded) = update(
     dispatch,
     ProjectPicker(
