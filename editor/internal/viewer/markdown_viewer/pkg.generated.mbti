@@ -5,6 +5,7 @@ import {
   "moonbit-community/rabbita/dom",
   "moonbitlang/core/debug",
   "moonbitlang/editor/base/common",
+  "moonbitlang/editor/internal/viewer/contrib/references/browser",
   "moonbitlang/editor/platform/log",
   "moonbitlang/editor/viewer/common/editor_api",
   "moonbitlang/editor/viewer/common/languages",
@@ -24,12 +25,15 @@ pub(all) enum MarkdownResourceKind {
 } derive(Eq, @debug.Debug)
 
 type MarkdownViewerServices
-pub fn MarkdownViewerServices::MarkdownViewerServices(languages? : @languages.LanguageHandle, markers? : @markers.MarkerDecorationsSource, location_opener? : @navigation_api.LocationOpenerHandle, log_service? : @log.LogHandle) -> Self
+pub fn MarkdownViewerServices::MarkdownViewerServices(languages? : @languages.LanguageHandle, markers? : @markers.MarkerDecorationsSource, location_opener? : @navigation_api.LocationOpenerHandle, text_model_resolver? : @navigation_api.TextModelResolverHandle, preview_factory? : @browser.ReferencesPeekPreviewFactory, launch_async_task? : (async () -> Unit noraise) -> Unit, log_service? : @log.LogHandle) -> Self
 pub fn MarkdownViewerServices::dispose(Self) -> Unit
 pub fn MarkdownViewerServices::languages(Self) -> @languages.LanguageHandle
+pub fn MarkdownViewerServices::launch_async_task(Self, async () -> Unit noraise) -> Unit
 pub fn MarkdownViewerServices::location_opener(Self) -> @navigation_api.LocationOpenerHandle?
 pub fn MarkdownViewerServices::log_service(Self) -> @log.LogHandle
 pub fn MarkdownViewerServices::marker_decorations(Self) -> @markers.MarkerDecorationsHandle
+pub fn MarkdownViewerServices::preview_factory(Self) -> @browser.ReferencesPeekPreviewFactory?
+pub fn MarkdownViewerServices::text_model_resolver(Self) -> @navigation_api.TextModelResolverHandle?
 
 type MarkdownViewerWidget
 pub fn MarkdownViewerWidget::collapsed_sections(Self) -> Array[Int]

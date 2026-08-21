@@ -392,8 +392,6 @@ test "two viewers isolate mutable contribution state and disposal owners" {
   first_hover.hover_notified_token = 11
   second_hover.hover_ignore_mouse_events = true
   second_hover.hover_notified_token = 22
-  first_references.generation = 303
-  second_references.generation = 404
 
   let first_disposals : Array[String] = []
   let second_disposals : Array[String] = []
@@ -467,8 +465,6 @@ test "two viewers isolate mutable contribution state and disposal owners" {
   assert_false(second_hover.hover_keep_open)
   assert_false(first_hover.hover_ignore_mouse_events)
   assert_true(second_hover.hover_ignore_mouse_events)
-  assert_eq(first_references.generation, 303)
-  assert_eq(second_references.generation, 404)
 
   first.dispose()
 
@@ -727,9 +723,9 @@ test "cursor navigation registers exactly 16 primary rules after contributions" 
 }
 
 ///|
-test "Peek References registers the exact Shift F12 chord" {
+test "Go to References registers the exact Shift F12 chord" {
   let rules = editor_registry().keybindings.filter(rule => {
-    rule.command_id == "editor.action.referenceSearch.trigger"
+    rule.command_id == "editor.action.goToReferences"
   })
   assert_eq(rules.length(), 1)
   assert_eq(rules[0].key, "F12")

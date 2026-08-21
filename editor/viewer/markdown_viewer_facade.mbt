@@ -98,22 +98,19 @@ fn MarkdownViewerOptions::internal(
 ///|
 fn ViewerServices::markdown_services(
   self : ViewerServices,
+  options : MarkdownViewerOptions,
 ) -> @markdown_viewer.MarkdownViewerServices {
-  match self.location_opener() {
-    Some(location_opener) =>
-      MarkdownViewerServices(
-        languages=self.languages(),
-        markers=Decorations(self.marker_decorations()),
-        location_opener~,
-        log_service=self.log_service(),
-      )
-    None =>
-      MarkdownViewerServices(
-        languages=self.languages(),
-        markers=Decorations(self.marker_decorations()),
-        log_service=self.log_service(),
-      )
-  }
+  MarkdownViewerServices(
+    languages=self.languages(),
+    markers=Decorations(self.marker_decorations()),
+    location_opener?=self.location_opener(),
+    text_model_resolver?=self.text_model_resolver(),
+    preview_factory=@code_widget.code_editor_references_preview_factory(
+      self.code_services(),
+      @code_widget.CodeEditorOptions(theme=options.theme),
+    ),
+    log_service=self.log_service(),
+  )
 }
 
 ///|
@@ -124,7 +121,7 @@ pub fn MarkdownViewer::create(
 ) -> MarkdownViewer {
   match services {
     Some(services) => {
-      let markdown_services = services.markdown_services()
+      let markdown_services = services.markdown_services(options)
       {
         widget: @markdown_viewer.MarkdownViewerWidget::create(
           host,

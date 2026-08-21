@@ -345,7 +345,7 @@ fn MarkdownViewerWidget::attach_model(
         self.services.marker_decorations(),
         generation,
         () => self.is_current_attachment(model.model, generation),
-        markdown_viewer_launch_async_task,
+        task => self.services.launch_async_task(task),
       )
       let definition_bridge = MarkdownViewerWidgetDefinitionBridge(
         self,
@@ -377,11 +377,6 @@ fn MarkdownViewerWidget::attach_model(
     None => ()
   }
   self.layout()
-}
-
-///|
-fn markdown_viewer_launch_async_task(task : async () -> Unit noraise) -> Unit {
-  @js.async_run(task)
 }
 
 ///|

@@ -1,10 +1,6 @@
 ///|
 priv struct MarkdownViewerWidgetDefinitionTarget {
-  source_offset : Int
-  range : @base_common.Range
-  model_identity : Int
-  model_version : Int
-  attach_generation : Int
+  anchor : @goto_symbol.SymbolNavigationAnchor
 }
 
 ///|
@@ -12,30 +8,42 @@ fn MarkdownViewerWidgetDefinitionTarget::same(
   self : MarkdownViewerWidgetDefinitionTarget,
   other : MarkdownViewerWidgetDefinitionTarget,
 ) -> Bool {
-  self.model_identity == other.model_identity &&
-  self.model_version == other.model_version &&
-  self.attach_generation == other.attach_generation &&
-  self.range == other.range
+  self.anchor.same_snapshot(other.anchor)
 }
 
 ///|
-/// Attachment-scoped adapter from semantic Markdown DOM hits to the shared
-/// language-definition registry and host location opener. It keeps no virtual
-/// code model: every request is issued against the caller's original model.
+/// OpenSeek Markdown IDE bridge. DOM/projection work remains surface-owned;
+/// provider policy and Peek lifecycle are delegated to the shared navigation
+/// action and one attachment-local ReferencesController.
 priv struct MarkdownViewerWidgetDefinitionBridge {
   viewer : MarkdownViewerWidget
   view : @markdown_document.MarkdownDocumentView
   model : @model.TextModel
   attach_generation : Int
   listeners : Array[@base_common.Disposable]
+  navigation_action : @goto_symbol.SymbolNavigationAction
+  definition_action : @goto_symbol.DefinitionAction
+  references_action : @goto_symbol.ReferencesAction
+  link_resolver : @goto_symbol.DefinitionLinkResolver
+  controller : @references_browser.ReferencesController?
+  mut context_menu : @contextmenu_browser.ContextMenuWidget?
   mut link_elements : Array[@rdom.Element]
   mut last_target : MarkdownViewerWidgetDefinitionTarget?
   mut mouse_down_target : MarkdownViewerWidgetDefinitionTarget?
-  mut preview_source : @language.CancellationTokenSource?
-  mut action_source : @language.CancellationTokenSource?
-  mut request_generation : Int
+  mut last_client_x : Double
+  mut last_client_y : Double
+  mut surface_generation : Int
   mut active : Bool
   mut disposed : Bool
+}
+
+///|
+async fn markdown_navigation_run_provider_tasks(
+  tasks : Array[async () -> Unit],
+) -> Unit {
+  for task in tasks {
+    task()
+  }
 }
 
 ///|
@@ -45,21 +53,111 @@ fn MarkdownViewerWidgetDefinitionBridge::MarkdownViewerWidgetDefinitionBridge(
   model : @model.TextModel,
   attach_generation : Int,
 ) -> MarkdownViewerWidgetDefinitionBridge {
-  {
+  let bridge_slot : Ref[MarkdownViewerWidgetDefinitionBridge?] = Ref(None)
+  let anchor_is_current = anchor => {
+    match bridge_slot.val {
+      Some(bridge) => bridge.anchor_is_current(anchor)
+      None => false
+    }
+  }
+  let navigation_action = @goto_symbol.SymbolNavigationAction(
+    viewer.services.languages(),
+    {
+      prepare_navigation: () => {
+        match bridge_slot.val {
+          Some(bridge) => bridge.prepare_navigation()
+          None => ()
+        }
+      },
+      is_anchor_current: anchor_is_current,
+      open_location: (_anchor, location, mode, _source) => {
+        match bridge_slot.val {
+          Some(bridge) => bridge.open_location(location, mode)
+          None => false
+        }
+      },
+      open_in_peek: (anchor, mode, locations) => {
+        match bridge_slot.val {
+          Some(bridge) => bridge.open_in_peek(anchor, mode, locations)
+          None => false
+        }
+      },
+      show_message: (_anchor, message) => {
+        match bridge_slot.val {
+          Some(bridge) => bridge.show_message(message)
+          None => ()
+        }
+      },
+    },
+    markdown_navigation_run_provider_tasks,
+  )
+  let link_resolver = @goto_symbol.DefinitionLinkResolver(
+    viewer.services.languages(),
+    is_anchor_current=anchor_is_current,
+    markdown_navigation_run_provider_tasks,
+  )
+  let controller = match viewer.services.preview_factory() {
+    None => None
+    Some(preview_factory) =>
+      Some(
+        @references_browser.ReferencesController(
+          {
+            is_anchor_current: anchor_is_current,
+            mount: (root, anchor) => {
+              match bridge_slot.val {
+                Some(bridge) => bridge.mount_peek(root, anchor)
+                None => None
+              }
+            },
+            reveal_anchor: anchor => {
+              match bridge_slot.val {
+                Some(bridge) => bridge.reveal_anchor(anchor)
+                None => ()
+              }
+            },
+            restore_source_focus: () => viewer.focus(),
+            open_location: (location, mode, _source) => {
+              match bridge_slot.val {
+                Some(bridge) => bridge.open_location(location, mode)
+                None => false
+              }
+            },
+            show_message: (_anchor, message) => {
+              match bridge_slot.val {
+                Some(bridge) => bridge.show_message(message)
+                None => ()
+              }
+            },
+          },
+          preview_factory,
+          resolver?=viewer.services.text_model_resolver(),
+          task => viewer.services.launch_async_task(task),
+        ),
+      )
+  }
+  let bridge : MarkdownViewerWidgetDefinitionBridge = {
     viewer,
     view,
     model,
     attach_generation,
     listeners: [],
+    navigation_action,
+    definition_action: @goto_symbol.DefinitionAction(navigation_action),
+    references_action: @goto_symbol.ReferencesAction(navigation_action),
+    link_resolver,
+    controller,
+    context_menu: None,
     link_elements: [],
     last_target: None,
     mouse_down_target: None,
-    preview_source: None,
-    action_source: None,
-    request_generation: 0,
+    last_client_x: 0.0,
+    last_client_y: 0.0,
+    surface_generation: attach_generation,
     active: false,
     disposed: false,
   }
+  bridge_slot.val = Some(bridge)
+  bridge
 }
 
 ///|
@@ -74,14 +172,22 @@ fn MarkdownViewerWidgetDefinitionBridge::is_current(
 }
 
 ///|
+fn MarkdownViewerWidgetDefinitionBridge::anchor_is_current(
+  self : MarkdownViewerWidgetDefinitionBridge,
+  anchor : @goto_symbol.SymbolNavigationAnchor,
+) -> Bool {
+  self.is_current() &&
+  anchor.surface_generation() == self.surface_generation &&
+  anchor.model().same(self.model) &&
+  anchor.model_is_current()
+}
+
+///|
 fn MarkdownViewerWidgetDefinitionBridge::target_is_current(
   self : MarkdownViewerWidgetDefinitionBridge,
   target : MarkdownViewerWidgetDefinitionTarget,
 ) -> Bool {
-  self.is_current() &&
-  target.model_identity == self.model.identity() &&
-  target.model_version == self.model.get_version_id() &&
-  target.attach_generation == self.attach_generation
+  self.anchor_is_current(target.anchor)
 }
 
 ///|
@@ -98,17 +204,19 @@ fn MarkdownViewerWidgetDefinitionBridge::target_at(
   guard self.model.get_word_at_position(position) is Some(word) else {
     return None
   }
+  let range = @base_common.Range(
+    position.line_number,
+    word.start_column,
+    position.line_number,
+    word.end_column,
+  )
   Some({
-    source_offset: hit.source_offset,
-    range: Range(
-      position.line_number,
-      word.start_column,
-      position.line_number,
-      word.end_column,
+    anchor: @goto_symbol.SymbolNavigationAnchor::from_model(
+      self.model,
+      position,
+      range,
+      self.surface_generation,
     ),
-    model_identity: self.model.identity(),
-    model_version: self.model.get_version_id(),
-    attach_generation: self.attach_generation,
   })
 }
 
@@ -152,19 +260,251 @@ fn markdown_viewer_definition_modifier_key(key : String) -> Bool {
 }
 
 ///|
+fn MarkdownViewerWidgetDefinitionBridge::clear_link_elements(
+  self : MarkdownViewerWidgetDefinitionBridge,
+) -> Unit {
+  for element in self.link_elements {
+    @base_browser.remove_element(element)
+  }
+  self.link_elements.clear()
+}
+
+///|
+fn MarkdownViewerWidgetDefinitionBridge::cancel_link_preview(
+  self : MarkdownViewerWidgetDefinitionBridge,
+) -> Unit {
+  self.link_resolver.cancel()
+  self.clear_link_elements()
+}
+
+///|
+fn MarkdownViewerWidgetDefinitionBridge::reset_link(
+  self : MarkdownViewerWidgetDefinitionBridge,
+) -> Unit {
+  self.cancel_link_preview()
+  self.mouse_down_target = None
+  self.last_target = None
+}
+
+///|
+fn MarkdownViewerWidgetDefinitionBridge::start_link_preview(
+  self : MarkdownViewerWidgetDefinitionBridge,
+  target : MarkdownViewerWidgetDefinitionTarget,
+) -> Unit {
+  guard self.target_is_current(target) &&
+    self.viewer.services.languages().has_definition_provider(self.model) else {
+    self.cancel_link_preview()
+    return
+  }
+  if self.last_target is Some(last) &&
+    last.same(target) &&
+    !self.link_elements.is_empty() {
+    return
+  }
+  self.cancel_link_preview()
+  self.last_target = Some(target)
+  guard self.link_resolver.begin(target.anchor) is Some(generation) else {
+    return
+  }
+  self.viewer.services.launch_async_task(async fn() noraise {
+    let locations = self.link_resolver.resolve_reserved(
+      target.anchor,
+      generation,
+    )
+    guard !locations.is_empty() && self.target_is_current(target) else {
+      return
+    }
+    let source_range = self.model.snapshot.offset_range_of(
+      target.anchor.range(),
+    )
+    self.link_elements = self.view.append_projected_range_spans(
+      source_range, "moonbit-viewer-markdown-definition-link",
+    )
+  })
+}
+
+///|
+fn MarkdownViewerWidgetDefinitionBridge::prepare_navigation(
+  self : MarkdownViewerWidgetDefinitionBridge,
+) -> Unit {
+  self.cancel_link_preview()
+  self.hide_context_menu()
+  self.show_message("")
+}
+
+///|
+fn MarkdownViewerWidgetDefinitionBridge::run_definition(
+  self : MarkdownViewerWidgetDefinitionBridge,
+  target : MarkdownViewerWidgetDefinitionTarget,
+  config : @goto_symbol.SymbolNavigationActionConfig,
+) -> Unit {
+  guard self.target_is_current(target) &&
+    self.viewer.services.languages().has_definition_provider(self.model) &&
+    self.definition_action.begin(target.anchor) is Some(generation) else {
+    return
+  }
+  self.viewer.services.launch_async_task(async fn() noraise {
+    self.definition_action.run_reserved(target.anchor, config, generation)
+  })
+}
+
+///|
+fn MarkdownViewerWidgetDefinitionBridge::run_references(
+  self : MarkdownViewerWidgetDefinitionBridge,
+  target : MarkdownViewerWidgetDefinitionTarget,
+  config : @goto_symbol.SymbolNavigationActionConfig,
+) -> Unit {
+  guard self.target_is_current(target) &&
+    self.viewer.services.languages().has_references_provider(self.model) &&
+    self.references_action.begin(target.anchor) is Some(generation) else {
+    return
+  }
+  self.viewer.services.launch_async_task(async fn() noraise {
+    self.references_action.run_reserved(target.anchor, config, generation)
+  })
+}
+
+///|
+fn MarkdownViewerWidgetDefinitionBridge::run_command(
+  self : MarkdownViewerWidgetDefinitionBridge,
+  command_id : String,
+) -> Unit {
+  guard self.last_target is Some(target) && self.target_is_current(target) else {
+    return
+  }
+  match @goto_symbol.SymbolNavigationCommand::from_id(command_id) {
+    Some(RevealDefinition) =>
+      self.run_definition(
+        target,
+        @goto_symbol.SymbolNavigationActionConfig::goto(),
+      )
+    Some(PeekDefinition) =>
+      self.run_definition(
+        target,
+        @goto_symbol.SymbolNavigationActionConfig::peek(),
+      )
+    Some(GoToReferences) =>
+      self.run_references(
+        target,
+        @goto_symbol.SymbolNavigationActionConfig::goto(),
+      )
+    Some(PeekReferences) =>
+      self.run_references(
+        target,
+        @goto_symbol.SymbolNavigationActionConfig::peek(),
+      )
+    _ => ()
+  }
+}
+
+///|
+fn MarkdownViewerWidgetDefinitionBridge::context_menu_entries(
+  self : MarkdownViewerWidgetDefinitionBridge,
+) -> Array[@contextmenu_browser.ContextMenuEntry] {
+  @goto_symbol.symbol_navigation_context_commands(
+    self.viewer.services.languages(),
+    self.model,
+    self.controller is Some(_),
+  ).map(command => {
+    ContextMenuAction(
+      id=command.id(),
+      label=command.title(),
+      keybinding_label=command.keybinding_label(),
+    )
+  })
+}
+
+///|
+fn MarkdownViewerWidgetDefinitionBridge::get_or_create_context_menu(
+  self : MarkdownViewerWidgetDefinitionBridge,
+) -> @contextmenu_browser.ContextMenuWidget? {
+  if self.disposed {
+    return None
+  }
+  match self.context_menu {
+    Some(widget) => Some(widget)
+    None => {
+      let widget = @contextmenu_browser.ContextMenuWidget({
+        on_action: command_id => self.run_command(command_id),
+        on_hide: _cancelled => (),
+      })
+      self.context_menu = Some(widget)
+      Some(widget)
+    }
+  }
+}
+
+///|
+fn MarkdownViewerWidgetDefinitionBridge::hide_context_menu(
+  self : MarkdownViewerWidgetDefinitionBridge,
+) -> Unit {
+  match self.context_menu {
+    Some(widget) => widget.hide(was_cancelled=true)
+    None => ()
+  }
+}
+
+///|
+fn MarkdownViewerWidgetDefinitionBridge::show_context_menu(
+  self : MarkdownViewerWidgetDefinitionBridge,
+  target : MarkdownViewerWidgetDefinitionTarget,
+  client_x : Double,
+  client_y : Double,
+  auto_select_first? : Bool = false,
+) -> Bool {
+  guard self.target_is_current(target) else { return false }
+  let entries = self.context_menu_entries()
+  guard !entries.is_empty() && self.get_or_create_context_menu() is Some(widget) else {
+    return false
+  }
+  self.last_target = Some(target)
+  self.last_client_x = client_x
+  self.last_client_y = client_y
+  self.viewer.focus()
+  widget.show(
+    entries,
+    client_x,
+    client_y,
+    self.viewer.options.theme,
+    theme_source=self.view.root(),
+    auto_select_first~,
+  )
+}
+
+///|
+fn MarkdownViewerWidgetDefinitionBridge::show_keyboard_context_menu(
+  self : MarkdownViewerWidgetDefinitionBridge,
+) -> Bool {
+  guard self.last_target is Some(target) && self.target_is_current(target) else {
+    return false
+  }
+  let rect = self.view.root().get_bounding_client_rect()
+  let x = if self.last_client_x > 0.0 {
+    self.last_client_x
+  } else {
+    rect.get_left() + 24.0
+  }
+  let y = if self.last_client_y > 0.0 {
+    self.last_client_y
+  } else {
+    rect.get_top() + 24.0
+  }
+  self.show_context_menu(target, x, y, auto_select_first=true)
+}
+
+///|
 fn MarkdownViewerWidgetDefinitionBridge::bind_semantic_dom(
   self : MarkdownViewerWidgetDefinitionBridge,
 ) -> Unit {
   guard self.is_current() else { return }
   self.view.listen_semantic_dom("mousemove", event => {
     guard self.is_current() && event.to_mouse_event() is Some(mouse) else {
-      self.reset_link()
+      self.cancel_link_preview()
       return
     }
-    let target = self.target_at(
-      mouse.get_client_x().to_double(),
-      mouse.get_client_y().to_double(),
-    )
+    self.last_client_x = mouse.get_client_x().to_double()
+    self.last_client_y = mouse.get_client_y().to_double()
+    let target = self.target_at(self.last_client_x, self.last_client_y)
     self.last_target = target
     if mouse.get_buttons() == 0 &&
       markdown_viewer_definition_modifier_is_active(
@@ -174,11 +514,30 @@ fn MarkdownViewerWidgetDefinitionBridge::bind_semantic_dom(
         mouse.get_shift_key(),
       ) {
       match target {
-        Some(target) => self.start_preview(target)
-        None => self.cancel_preview()
+        Some(target) => self.start_link_preview(target)
+        None => self.cancel_link_preview()
       }
     } else {
-      self.cancel_preview()
+      self.cancel_link_preview()
+    }
+  })
+  self.view.listen_semantic_dom("contextmenu", event => {
+    guard self.is_current() &&
+      event.to_mouse_event() is Some(mouse) &&
+      self.target_at(
+        mouse.get_client_x().to_double(),
+        mouse.get_client_y().to_double(),
+      )
+      is Some(target) else {
+      return
+    }
+    if self.show_context_menu(
+        target,
+        mouse.get_client_x().to_double(),
+        mouse.get_client_y().to_double(),
+      ) {
+      event.prevent_default()
+      event.stop_propagation()
     }
   })
   self.view.listen_semantic_dom("mousedown", event => {
@@ -192,6 +551,7 @@ fn MarkdownViewerWidgetDefinitionBridge::bind_semantic_dom(
       mouse.get_client_x().to_double(),
       mouse.get_client_y().to_double(),
     )
+    self.last_target = self.mouse_down_target
   })
   self.view.listen_semantic_dom("mouseup", event => {
     guard self.is_current() && event.to_mouse_event() is Some(mouse) else {
@@ -218,7 +578,11 @@ fn MarkdownViewerWidgetDefinitionBridge::bind_semantic_dom(
       self.target_is_current(target) else {
       return
     }
-    self.start_action(target)
+    self.last_target = Some(target)
+    self.run_definition(
+      target,
+      @goto_symbol.SymbolNavigationActionConfig::link(),
+    )
     event.prevent_default()
     event.stop_propagation()
   })
@@ -243,181 +607,137 @@ fn MarkdownViewerWidgetDefinitionBridge::activate(
             keyboard.meta_key(),
             keyboard.alt_key(),
             keyboard.shift_key(),
-          ) => self.start_preview(target)
-        _ => self.cancel_preview()
+          ) => self.start_link_preview(target)
+        _ => self.cancel_link_preview()
       }
       return
     }
-    if keyboard.key() == "F12" &&
-      !keyboard.alt_key() &&
-      !keyboard.shift_key() &&
-      self.viewer.services.languages().has_definition_provider(self.model) {
-      match self.last_target {
-        Some(target) if self.target_is_current(target) => {
-          self.start_action(target)
-          event.prevent_default()
-          event.stop_propagation()
-        }
-        _ => ()
+    let handled = if keyboard.key() == "F12" {
+      if keyboard.alt_key() && !keyboard.shift_key() {
+        self.run_command("editor.action.peekDefinition")
+        true
+      } else if keyboard.shift_key() && !keyboard.alt_key() {
+        self.run_command("editor.action.goToReferences")
+        true
+      } else if !keyboard.alt_key() && !keyboard.shift_key() {
+        self.run_command("editor.action.revealDefinition")
+        true
+      } else {
+        false
       }
+    } else if keyboard.key() == "ContextMenu" ||
+      (keyboard.key() == "F10" && keyboard.shift_key()) {
+      self.show_keyboard_context_menu()
+    } else {
+      false
+    }
+    if handled {
+      event.prevent_default()
+      event.stop_propagation()
     }
   })
   self.listen(self.view.root(), "keyup", event => {
     guard event.to_keyboard_event() is Some(keyboard) else { return }
     if markdown_viewer_definition_modifier_key(keyboard.key()) {
-      self.cancel_preview()
+      self.cancel_link_preview()
     }
   })
-  self.listen(self.view.root(), "mouseleave", _ => self.reset_link())
-  self.listen(self.view.root(), "blur", _ => self.reset_link())
-  self.listen(self.view.viewport(), "scroll", _ => self.reset_link())
+  self.listen(self.view.root(), "mouseleave", _ => self.cancel_link_preview())
+  self.listen(self.view.root(), "blur", _ => self.cancel_link_preview())
+  self.listen(self.view.viewport(), "scroll", _ => {
+    self.cancel_link_preview()
+    self.hide_context_menu()
+  })
   self.bind_semantic_dom()
 }
 
 ///|
-fn MarkdownViewerWidgetDefinitionBridge::clear_link_elements(
+fn MarkdownViewerWidgetDefinitionBridge::show_message(
   self : MarkdownViewerWidgetDefinitionBridge,
+  message : String,
 ) -> Unit {
-  for element in self.link_elements {
-    @base_browser.remove_element(element)
+  if message.is_empty() {
+    self.view.root().remove_attribute("data-navigation-message")
+  } else {
+    self.view.root().set_attribute("data-navigation-message", message)
   }
-  self.link_elements.clear()
 }
 
 ///|
-fn MarkdownViewerWidgetDefinitionBridge::cancel_preview(
+async fn MarkdownViewerWidgetDefinitionBridge::open_location(
   self : MarkdownViewerWidgetDefinitionBridge,
-) -> Unit {
-  self.request_generation += 1
-  match self.preview_source {
-    Some(source) => source.dispose(cancel=true)
-    None => ()
-  }
-  self.preview_source = None
-  self.clear_link_elements()
-}
-
-///|
-fn MarkdownViewerWidgetDefinitionBridge::cancel_action(
-  self : MarkdownViewerWidgetDefinitionBridge,
-) -> Unit {
-  self.request_generation += 1
-  match self.action_source {
-    Some(source) => source.dispose(cancel=true)
-    None => ()
-  }
-  self.action_source = None
-}
-
-///|
-fn MarkdownViewerWidgetDefinitionBridge::reset_link(
-  self : MarkdownViewerWidgetDefinitionBridge,
-) -> Unit {
-  self.cancel_preview()
-  self.mouse_down_target = None
-  self.last_target = None
-}
-
-///|
-fn MarkdownViewerWidgetDefinitionBridge::start_preview(
-  self : MarkdownViewerWidgetDefinitionBridge,
-  target : MarkdownViewerWidgetDefinitionTarget,
-) -> Unit {
-  guard self.target_is_current(target) &&
-    self.viewer.services.languages().has_definition_provider(self.model) else {
-    self.cancel_preview()
-    return
-  }
-  if self.last_target is Some(last) &&
-    last.same(target) &&
-    !self.link_elements.is_empty() {
-    return
-  }
-  self.cancel_preview()
-  self.last_target = Some(target)
-  let generation = self.request_generation
-  let source = @language.CancellationTokenSource()
-  self.preview_source = Some(source)
-  markdown_viewer_launch_async_task(async fn() noraise {
-    let locations = self.viewer.services
-      .languages()
-      .definition_at(self.model, target.source_offset, token=source.token())
-    guard !source.token().is_cancellation_requested() &&
-      self.request_generation == generation &&
-      self.preview_source is Some(current) &&
-      physical_equal(current, source) &&
-      self.target_is_current(target) else {
-      source.dispose(cancel=true)
-      return
-    }
-    source.dispose()
-    self.preview_source = None
-    if !locations.is_empty() {
-      let source_range = self.model.snapshot.offset_range_of(target.range)
-      self.link_elements = self.view.append_projected_range_spans(
-        source_range, "moonbit-viewer-markdown-definition-link",
-      )
-    }
-  })
-}
-
-///|
-fn MarkdownViewerWidgetDefinitionBridge::start_action(
-  self : MarkdownViewerWidgetDefinitionBridge,
-  target : MarkdownViewerWidgetDefinitionTarget,
-) -> Unit {
-  guard self.target_is_current(target) &&
-    self.viewer.services.languages().has_definition_provider(self.model) else {
-    return
-  }
-  self.cancel_action()
-  let generation = self.request_generation
-  let source = @language.CancellationTokenSource()
-  self.action_source = Some(source)
-  markdown_viewer_launch_async_task(async fn() noraise {
-    let locations = self.viewer.services
-      .languages()
-      .definition_at(self.model, target.source_offset, token=source.token())
-    guard !source.token().is_cancellation_requested() &&
-      self.request_generation == generation &&
-      self.action_source is Some(current) &&
-      physical_equal(current, source) &&
-      self.target_is_current(target) else {
-      source.dispose(cancel=true)
-      return
-    }
-    source.dispose()
-    self.action_source = None
-    let locations = @definition.normalize_definition_locations(locations)
-    guard locations is [location, ..] else { return }
-    self.viewer.open_definition_location(location) |> ignore
-  })
-}
-
-///|
-async fn MarkdownViewerWidget::open_definition_location(
-  self : MarkdownViewerWidget,
   location : @language.Location,
+  mode : @navigation_api.OpenLocationMode,
 ) -> Bool noraise {
-  guard !self.disposed &&
-    self.current is Some(current) &&
-    current.view is Some(view) else {
-    return false
-  }
-  if current.model.model.uri.to_string() == location.uri.to_string() {
-    let range = current.model.model.validate_range(location.range)
-    view.reveal_source_offset(
-      current.model.model.get_offset_at(range.get_start_position()),
+  guard self.is_current() else { return false }
+  if mode == Current && self.model.uri.to_string() == location.uri.to_string() {
+    let range = self.model.validate_range(location.range)
+    self.view.reveal_source_offset(
+      self.model.get_offset_at(range.get_start_position()),
       "center",
     )
-    current.layout_changed()
+    self.viewer.focus()
     return true
   }
-  match self.services.location_opener() {
+  match self.viewer.services.location_opener() {
     Some(opener) =>
-      opener.open({ source_viewer_id: self.get_id(), location, mode: Current })
+      opener.open({ source_viewer_id: self.viewer.get_id(), location, mode })
     None => false
   }
+}
+
+///|
+fn MarkdownViewerWidgetDefinitionBridge::open_in_peek(
+  self : MarkdownViewerWidgetDefinitionBridge,
+  anchor : @goto_symbol.SymbolNavigationAnchor,
+  mode : @references.ReferencesPeekMode,
+  locations : Array[@language.Location],
+) -> Bool {
+  guard self.anchor_is_current(anchor) && self.controller is Some(controller) else {
+    return false
+  }
+  controller.toggle_locations(anchor, mode, locations)
+}
+
+///|
+fn MarkdownViewerWidgetDefinitionBridge::mount_peek(
+  self : MarkdownViewerWidgetDefinitionBridge,
+  root : @rdom.Element,
+  anchor : @goto_symbol.SymbolNavigationAnchor,
+) -> @references_browser.ReferencesPeekMount? {
+  guard self.anchor_is_current(anchor) else { return None }
+  root.set_attribute(
+    "class", "moonbit-viewer-references-peek moonbit-viewer-references-peek-overlay",
+  )
+  self.view.overlay_mount().append_child(root.as_node())
+  let disposed = Ref(false)
+  Some(
+    @references_browser.ReferencesPeekMount(
+      is_current=() => {
+        !disposed.val &&
+        self.anchor_is_current(anchor) &&
+        @base_browser.element_contains(self.view.overlay_mount(), root)
+      },
+      dispose=() => {
+        if !disposed.val {
+          disposed.val = true
+          @base_browser.remove_element(root)
+        }
+      },
+    ),
+  )
+}
+
+///|
+fn MarkdownViewerWidgetDefinitionBridge::reveal_anchor(
+  self : MarkdownViewerWidgetDefinitionBridge,
+  anchor : @goto_symbol.SymbolNavigationAnchor,
+) -> Unit {
+  guard self.anchor_is_current(anchor) else { return }
+  self.view.reveal_source_offset(
+    self.model.get_offset_at(anchor.position()),
+    "center",
+  )
 }
 
 ///|
@@ -425,8 +745,15 @@ fn MarkdownViewerWidgetDefinitionBridge::before_projection_replaced(
   self : MarkdownViewerWidgetDefinitionBridge,
 ) -> Unit {
   guard !self.disposed else { return }
-  self.cancel_action()
+  self.surface_generation += 1
+  self.navigation_action.cancel()
+  self.link_resolver.cancel()
+  match self.controller {
+    Some(controller) => controller.close(restore_focus=false)
+    None => ()
+  }
   self.reset_link()
+  self.hide_context_menu()
 }
 
 ///|
@@ -442,7 +769,8 @@ fn MarkdownViewerWidgetDefinitionBridge::layout_changed(
   self : MarkdownViewerWidgetDefinitionBridge,
 ) -> Unit {
   guard !self.disposed else { return }
-  self.reset_link()
+  self.cancel_link_preview()
+  self.hide_context_menu()
 }
 
 ///|
@@ -454,8 +782,18 @@ fn MarkdownViewerWidgetDefinitionBridge::dispose(
   }
   self.disposed = true
   self.active = false
-  self.cancel_action()
+  self.navigation_action.dispose()
+  self.link_resolver.dispose()
+  match self.controller {
+    Some(controller) => controller.dispose()
+    None => ()
+  }
   self.reset_link()
+  match self.context_menu {
+    Some(widget) => widget.dispose()
+    None => ()
+  }
+  self.context_menu = None
   while self.listeners.length() > 0 {
     self.listeners.remove(self.listeners.length() - 1).dispose()
   }

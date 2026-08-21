@@ -7,7 +7,6 @@ import {
   "moonbitlang/editor/base/common",
   "moonbitlang/editor/language",
   "moonbitlang/editor/platform/log",
-  "moonbitlang/editor/viewer/browser",
   "moonbitlang/editor/viewer/common/agent_feedback_api",
   "moonbitlang/editor/viewer/common/config",
   "moonbitlang/editor/viewer/common/core",
@@ -21,9 +20,11 @@ import {
 }
 
 // Values
-pub fn overlay_widget(String, @dom.Element) -> @browser.OverlayWidget
+pub fn code_editor_references_preview_factory(CodeEditorServices, CodeEditorOptions) -> @moonbitlang/editor/internal/viewer/contrib/references/browser.ReferencesPeekPreviewFactory
 
-pub fn view_zone(Int, @dom.Element, after_column? : Int, after_column_affinity? : @model.PositionAffinity, show_in_hidden_areas? : Bool, ignore_hidden_area_source? : String, ordinal? : Int, suppress_mouse_down? : Bool, height_in_lines? : Double, height_in_px? : Double, min_width_in_px? : Double, margin_dom_node? : @dom.Element, on_dom_node_top? : (Double) -> Unit raise, on_dom_node_layout? : (Bool, Double) -> Unit raise, on_computed_height? : (Double) -> Unit raise) -> @browser.ViewZone
+pub fn overlay_widget(String, @dom.Element) -> @moonbitlang/editor/viewer/browser.OverlayWidget
+
+pub fn view_zone(Int, @dom.Element, after_column? : Int, after_column_affinity? : @model.PositionAffinity, show_in_hidden_areas? : Bool, ignore_hidden_area_source? : String, ordinal? : Int, suppress_mouse_down? : Bool, height_in_lines? : Double, height_in_px? : Double, min_width_in_px? : Double, margin_dom_node? : @dom.Element, on_dom_node_top? : (Double) -> Unit raise, on_dom_node_layout? : (Bool, Double) -> Unit raise, on_computed_height? : (Double) -> Unit raise) -> @moonbitlang/editor/viewer/browser.ViewZone
 
 // Errors
 
@@ -175,11 +176,11 @@ pub fn CodeEditorServices::text_model_resolver(Self) -> @navigation_api.TextMode
 type CodeEditorViewState derive(@debug.Debug)
 
 type CodeEditorWidget
-pub fn CodeEditorWidget::add_overlay_widget(Self, @browser.OverlayWidget) -> Unit
+pub fn CodeEditorWidget::add_overlay_widget(Self, @moonbitlang/editor/viewer/browser.OverlayWidget) -> Unit
 pub fn CodeEditorWidget::after_next_render(Self, () -> Unit) -> @common.Disposable
 pub fn CodeEditorWidget::apply_managed_view_zones(Self, Array[String], Array[ManagedCodeEditorViewZoneSpec], Int) -> Array[String]
 pub fn CodeEditorWidget::capture_stable_viewport_state(Self) -> StableCodeEditorViewportState?
-pub fn CodeEditorWidget::change_view_zones(Self, (@browser.ViewZoneChangeAccessor) -> Unit raise) -> Unit
+pub fn CodeEditorWidget::change_view_zones(Self, (@moonbitlang/editor/viewer/browser.ViewZoneChangeAccessor) -> Unit raise) -> Unit
 pub fn CodeEditorWidget::create(@dom.Element, services? : CodeEditorServices, options? : CodeEditorOptions, contributions~ : CodeEditorContributionDescriptors) -> Self
 pub fn CodeEditorWidget::create_decorations_collection(Self, decorations? : Array[@model.ModelDeltaDecoration]) -> EditorDecorationsCollection
 pub fn CodeEditorWidget::create_overview_ruler(Self, minimum_marker_height? : Double, on_select? : (Int) -> Unit) -> CodeEditorOverviewRuler
@@ -222,7 +223,7 @@ pub fn CodeEditorWidget::has_text_focus(Self) -> Bool
 pub fn CodeEditorWidget::has_widget_focus(Self) -> Bool
 pub fn CodeEditorWidget::is_disposed(Self) -> Bool
 pub fn CodeEditorWidget::layout(Self) -> Unit
-pub fn CodeEditorWidget::on_context_menu(Self, (@browser.EditorMouseEvent) -> Unit) -> @common.Disposable
+pub fn CodeEditorWidget::on_context_menu(Self, (@moonbitlang/editor/viewer/browser.EditorMouseEvent) -> Unit) -> @common.Disposable
 pub fn CodeEditorWidget::on_did_change_cursor_position(Self, (@editor_api.CursorPositionChangedEvent) -> Unit) -> @common.Disposable
 pub fn CodeEditorWidget::on_did_change_cursor_selection(Self, (@editor_api.CursorSelectionChangedEvent) -> Unit) -> @common.Disposable
 pub fn CodeEditorWidget::on_did_change_hidden_areas(Self, () -> Unit) -> @common.Disposable
@@ -231,12 +232,12 @@ pub fn CodeEditorWidget::on_did_change_model_content(Self, (@model.ModelContentC
 pub fn CodeEditorWidget::on_did_change_view_zones(Self, () -> Unit) -> @common.Disposable
 pub fn CodeEditorWidget::on_did_dispose(Self, () -> Unit) -> @common.Disposable
 pub fn CodeEditorWidget::on_did_scroll_change(Self, (@editor_api.ScrollEvent) -> Unit) -> @common.Disposable
-pub fn CodeEditorWidget::on_mouse_down(Self, (@browser.EditorMouseEvent) -> Unit) -> @common.Disposable
-pub fn CodeEditorWidget::on_mouse_leave(Self, (@browser.PartialEditorMouseEvent) -> Unit) -> @common.Disposable
-pub fn CodeEditorWidget::on_mouse_move(Self, (@browser.EditorMouseEvent) -> Unit) -> @common.Disposable
-pub fn CodeEditorWidget::on_mouse_up(Self, (@browser.EditorMouseEvent) -> Unit) -> @common.Disposable
+pub fn CodeEditorWidget::on_mouse_down(Self, (@moonbitlang/editor/viewer/browser.EditorMouseEvent) -> Unit) -> @common.Disposable
+pub fn CodeEditorWidget::on_mouse_leave(Self, (@moonbitlang/editor/viewer/browser.PartialEditorMouseEvent) -> Unit) -> @common.Disposable
+pub fn CodeEditorWidget::on_mouse_move(Self, (@moonbitlang/editor/viewer/browser.EditorMouseEvent) -> Unit) -> @common.Disposable
+pub fn CodeEditorWidget::on_mouse_up(Self, (@moonbitlang/editor/viewer/browser.EditorMouseEvent) -> Unit) -> @common.Disposable
 pub fn CodeEditorWidget::remove_decorations(Self, Array[String]) -> Unit
-pub fn CodeEditorWidget::remove_overlay_widget(Self, @browser.OverlayWidget) -> Unit
+pub fn CodeEditorWidget::remove_overlay_widget(Self, @moonbitlang/editor/viewer/browser.OverlayWidget) -> Unit
 pub fn CodeEditorWidget::render_lines(Self, @model.TextModel, @common.LineRange, decorations? : Array[CodeEditorRenderLinesDecoration], line_class_name? : String, margin_line_class_name? : String) -> CodeEditorRenderedLines?
 pub fn CodeEditorWidget::restore_stable_viewport_state(Self, StableCodeEditorViewportState) -> Bool
 pub fn CodeEditorWidget::restore_view_state(Self, CodeEditorViewState?) -> Unit
@@ -290,9 +291,9 @@ pub(all) struct ManagedCodeEditorViewZoneSpec {
   suppress_mouse_down : Bool
   on_dom_node_top : ((Double) -> Unit raise)?
   on_dom_node_layout : ((Bool, Double) -> Unit raise)?
-  on_zone_registered : ((String, @browser.ViewZone) -> Unit)?
+  on_zone_registered : ((String, @moonbitlang/editor/viewer/browser.ViewZone) -> Unit)?
 }
-pub fn ManagedCodeEditorViewZoneSpec::ManagedCodeEditorViewZoneSpec(Int, Double, @dom.Element, show_in_hidden_areas? : Bool, margin_dom_node? : @dom.Element, min_width_in_px? : Double, ordinal? : Int, suppress_mouse_down? : Bool, on_dom_node_top? : (Double) -> Unit raise, on_dom_node_layout? : (Bool, Double) -> Unit raise, on_zone_registered? : (String, @browser.ViewZone) -> Unit) -> Self
+pub fn ManagedCodeEditorViewZoneSpec::ManagedCodeEditorViewZoneSpec(Int, Double, @dom.Element, show_in_hidden_areas? : Bool, margin_dom_node? : @dom.Element, min_width_in_px? : Double, ordinal? : Int, suppress_mouse_down? : Bool, on_dom_node_top? : (Double) -> Unit raise, on_dom_node_layout? : (Bool, Double) -> Unit raise, on_zone_registered? : (String, @moonbitlang/editor/viewer/browser.ViewZone) -> Unit) -> Self
 
 pub struct StableCodeEditorViewportState {
   model : @model.TextModel
@@ -343,7 +344,7 @@ pub struct VirtualizedCodeEditorRenderedLines {
   height_in_px : Double
   mut discovered_min_width_in_px : Double
   mut zone_id : String?
-  mut zone_delegate : @browser.ViewZone?
+  mut zone_delegate : @moonbitlang/editor/viewer/browser.ViewZone?
   mut rendered_start_offset : Int
   mut rendered_end_offset_exclusive : Int
   mut rendered_visible : Bool

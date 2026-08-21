@@ -7,8 +7,10 @@ import {
   "moonbitlang/editor/viewer/common/core",
   "moonbitlang/editor/viewer/common/languages",
   "moonbitlang/editor/viewer/common/model",
+  "moonbitlang/editor/viewer/common/navigation_api",
   "moonbitlang/editor/tests/browser/moonbit/support",
   "moonbit-community/rabbita/dom" @rdom,
+  "moonbit-community/rabbita/js",
 }
 
 supported_targets = "js"

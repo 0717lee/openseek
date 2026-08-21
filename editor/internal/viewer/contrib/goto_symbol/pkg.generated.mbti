@@ -1,0 +1,94 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "moonbitlang/editor/internal/viewer/contrib/goto_symbol"
+
+import {
+  "moonbitlang/core/debug",
+  "moonbitlang/editor/base/common",
+  "moonbitlang/editor/internal/viewer/contrib/references",
+  "moonbitlang/editor/language",
+  "moonbitlang/editor/viewer/common/languages",
+  "moonbitlang/editor/viewer/common/model",
+  "moonbitlang/editor/viewer/common/navigation_api",
+}
+
+// Values
+pub fn symbol_navigation_context_commands(@languages.LanguageHandle, @model.TextModel, Bool) -> Array[SymbolNavigationCommand]
+
+// Errors
+
+// Types and methods
+pub struct DefinitionAction {
+  // private fields
+}
+pub fn DefinitionAction::DefinitionAction(SymbolNavigationAction) -> Self
+pub fn DefinitionAction::begin(Self, SymbolNavigationAnchor) -> Int?
+pub async fn DefinitionAction::run(Self, SymbolNavigationAnchor, SymbolNavigationActionConfig) -> Unit noraise
+pub async fn DefinitionAction::run_reserved(Self, SymbolNavigationAnchor, SymbolNavigationActionConfig, Int) -> Unit noraise
+
+pub struct DefinitionLinkResolver {
+  // private fields
+}
+pub fn DefinitionLinkResolver::DefinitionLinkResolver(@languages.LanguageHandle, is_anchor_current~ : (SymbolNavigationAnchor) -> Bool, async (Array[async () -> Unit]) -> Unit) -> Self
+pub fn DefinitionLinkResolver::begin(Self, SymbolNavigationAnchor) -> Int?
+pub fn DefinitionLinkResolver::cancel(Self) -> Unit
+pub fn DefinitionLinkResolver::dispose(Self) -> Unit
+pub async fn DefinitionLinkResolver::resolve_reserved(Self, SymbolNavigationAnchor, Int) -> Array[@language.Location] noraise
+
+pub struct ReferencesAction {
+  // private fields
+}
+pub fn ReferencesAction::ReferencesAction(SymbolNavigationAction) -> Self
+pub fn ReferencesAction::begin(Self, SymbolNavigationAnchor) -> Int?
+pub async fn ReferencesAction::run(Self, SymbolNavigationAnchor, SymbolNavigationActionConfig) -> Unit noraise
+pub async fn ReferencesAction::run_reserved(Self, SymbolNavigationAnchor, SymbolNavigationActionConfig, Int) -> Unit noraise
+
+pub struct SymbolNavigationAction {
+  // private fields
+}
+pub fn SymbolNavigationAction::SymbolNavigationAction(@languages.LanguageHandle, SymbolNavigationActionHost, async (Array[async () -> Unit]) -> Unit) -> Self
+pub fn SymbolNavigationAction::cancel(Self) -> Unit
+pub fn SymbolNavigationAction::dispose(Self) -> Unit
+
+pub(all) struct SymbolNavigationActionConfig {
+  open_to_side : Bool
+  open_in_peek : Bool
+  mute_message : Bool
+}
+pub fn SymbolNavigationActionConfig::goto() -> Self
+pub fn SymbolNavigationActionConfig::link() -> Self
+pub fn SymbolNavigationActionConfig::peek() -> Self
+
+pub(all) struct SymbolNavigationActionHost {
+  prepare_navigation : () -> Unit
+  is_anchor_current : (SymbolNavigationAnchor) -> Bool
+  open_location : async (SymbolNavigationAnchor, @language.Location, @navigation_api.OpenLocationMode, String) -> Bool noraise
+  open_in_peek : (SymbolNavigationAnchor, @references.ReferencesPeekMode, Array[@language.Location]) -> Bool
+  show_message : (SymbolNavigationAnchor, String) -> Unit
+}
+
+pub struct SymbolNavigationAnchor {
+  // private fields
+}
+pub fn SymbolNavigationAnchor::from_model(@model.TextModel, @common.Position, @common.Range, Int) -> Self
+pub fn SymbolNavigationAnchor::model(Self) -> @model.TextModel
+pub fn SymbolNavigationAnchor::model_is_current(Self) -> Bool
+pub fn SymbolNavigationAnchor::position(Self) -> @common.Position
+pub fn SymbolNavigationAnchor::range(Self) -> @common.Range
+pub fn SymbolNavigationAnchor::same_snapshot(Self, Self) -> Bool
+pub fn SymbolNavigationAnchor::surface_generation(Self) -> Int
+
+pub(all) enum SymbolNavigationCommand {
+  RevealDefinition
+  PeekDefinition
+  GoToReferences
+  PeekReferences
+} derive(Eq, @debug.Debug)
+pub fn SymbolNavigationCommand::from_id(String) -> Self?
+pub fn SymbolNavigationCommand::id(Self) -> String
+pub fn SymbolNavigationCommand::is_available(Self, @languages.LanguageHandle, @model.TextModel, Bool) -> Bool
+pub fn SymbolNavigationCommand::keybinding_label(Self) -> String?
+pub fn SymbolNavigationCommand::title(Self) -> String
+
+// Type aliases
+
+// Traits

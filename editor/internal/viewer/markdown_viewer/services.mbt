@@ -5,6 +5,9 @@ struct MarkdownViewerServices {
   languages : @languages.LanguageHandle
   marker_decorations : @markers.MarkerDecorationsHandle
   location_opener : @navigation_api.LocationOpenerHandle?
+  text_model_resolver : @navigation_api.TextModelResolverHandle?
+  preview_factory : @references_browser.ReferencesPeekPreviewFactory?
+  launch_async_task : (async () -> Unit noraise) -> Unit
   log_service : @log.LogHandle
   owned_marker_decorations : @markers.MarkerDecorationsService?
   owned_markers : @markers.MarkerService?
@@ -18,6 +21,11 @@ pub fn MarkdownViewerServices::MarkdownViewerServices(
   languages? : @languages.LanguageHandle,
   markers? : @markers.MarkerDecorationsSource,
   location_opener? : @navigation_api.LocationOpenerHandle,
+  text_model_resolver? : @navigation_api.TextModelResolverHandle,
+  preview_factory? : @references_browser.ReferencesPeekPreviewFactory,
+  launch_async_task? : (async () -> Unit noraise) -> Unit = task => {
+    @js.async_run(task)
+  },
   log_service? : @log.LogHandle,
 ) -> MarkdownViewerServices {
   let log_service = match log_service {
@@ -47,6 +55,9 @@ pub fn MarkdownViewerServices::MarkdownViewerServices(
     languages,
     marker_decorations,
     location_opener,
+    text_model_resolver,
+    preview_factory,
+    launch_async_task,
     log_service,
     owned_marker_decorations,
     owned_markers,
@@ -73,6 +84,28 @@ pub fn MarkdownViewerServices::location_opener(
   self : MarkdownViewerServices,
 ) -> @navigation_api.LocationOpenerHandle? {
   self.location_opener
+}
+
+///|
+pub fn MarkdownViewerServices::text_model_resolver(
+  self : MarkdownViewerServices,
+) -> @navigation_api.TextModelResolverHandle? {
+  self.text_model_resolver
+}
+
+///|
+pub fn MarkdownViewerServices::preview_factory(
+  self : MarkdownViewerServices,
+) -> @references_browser.ReferencesPeekPreviewFactory? {
+  self.preview_factory
+}
+
+///|
+pub fn MarkdownViewerServices::launch_async_task(
+  self : MarkdownViewerServices,
+  task : async () -> Unit noraise,
+) -> Unit {
+  (self.launch_async_task)(task)
 }
 
 ///|

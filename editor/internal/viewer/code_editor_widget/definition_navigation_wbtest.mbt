@@ -97,27 +97,12 @@ fn definition_navigation_services(
 }
 
 ///|
-test "cancellation callbacks cannot clobber replacement request owners" {
+test "definition-link cancellation callbacks cannot clobber replacement owners" {
   let services = definition_navigation_services([])
   let viewer = CodeEditorWidget(services~)
   guard viewer.definition_contribution() is Some(state) else {
     fail("definition contribution was not installed")
   }
-  let references = viewer.references_contribution().unwrap()
-
-  let old_action = @language.CancellationTokenSource()
-  let new_action = @language.CancellationTokenSource()
-  old_action
-  .token()
-  .on_cancellation_requested(() => state.action_source = Some(new_action))
-  |> ignore
-  state.action_source = Some(old_action)
-  state.cancel_action()
-  guard state.action_source is Some(current_action) else {
-    fail("action cancellation clobbered its replacement owner")
-  }
-  assert_true(physical_equal(current_action, new_action))
-
   let old_link = @language.CancellationTokenSource()
   let new_link = @language.CancellationTokenSource()
   old_link
@@ -131,40 +116,8 @@ test "cancellation callbacks cannot clobber replacement request owners" {
   }
   assert_true(physical_equal(current_link, new_link))
 
-  let old_preview = @language.CancellationTokenSource()
-  let new_preview = @language.CancellationTokenSource()
-  old_preview
-  .token()
-  .on_cancellation_requested(() => references.preview_source = Some(new_preview))
-  |> ignore
-  references.preview_source = Some(old_preview)
-  viewer.cancel_definition_peek_preview_request()
-  guard references.preview_source is Some(current_preview) else {
-    fail("preview cancellation clobbered its replacement owner")
-  }
-  assert_true(physical_equal(current_preview, new_preview))
-
-  let old_definitions = @language.CancellationTokenSource()
-  let new_definitions = @language.CancellationTokenSource()
-  old_definitions
-  .token()
-  .on_cancellation_requested(() => state.peek_source = Some(new_definitions))
-  |> ignore
-  state.peek_source = Some(old_definitions)
-  viewer.close_definition_peek(restore_focus=false)
-  guard state.peek_source is Some(current_definitions) else {
-    fail("Peek cancellation clobbered its replacement owner")
-  }
-  assert_true(physical_equal(current_definitions, new_definitions))
-
-  new_action.dispose(cancel=true)
   new_link.dispose(cancel=true)
-  new_preview.dispose(cancel=true)
-  new_definitions.dispose(cancel=true)
-  state.action_source = None
   state.link_source = None
-  references.preview_source = None
-  state.peek_source = None
   viewer.dispose()
   services.dispose()
 }
@@ -389,15 +342,7 @@ async test "empty and stale definition actions cannot navigate" {
 
   viewer.set_position(Position(1, 5))
   viewer.start_goto_definition()
-  guard viewer.definition_contribution() is Some(action_state) else {
-    fail("missing definition contribution")
-  }
-  guard action_state.action_source is Some(action_source) else {
-    fail("F12 did not retain its cancellation source")
-  }
   viewer.set_position(Position(1, 6))
-  assert_true(action_source.token().is_cancellation_requested())
-  assert_true(action_state.action_source is None)
   tasks.run_next()
   assert_eq(opener_calls.val, 0)
 
@@ -851,12 +796,8 @@ async test "plain definition click cancels the previous pointer-anchored action"
   )
 
   viewer.start_goto_definition_at(first_position, mute_message=false)
-  guard viewer.definition_contribution() is Some(state) &&
-    state.action_source is Some(first_source) else {
-    fail("first definition action was not pending")
-  }
+  let state = viewer.definition_contribution().unwrap()
   viewer.commit_plain_definition_pointer_target(Some(second_target))
-  assert_true(first_source.token().is_cancellation_requested())
   assert_eq(state.last_pointer_target, Some(second_target))
   tasks.run_next()
   assert_eq(opener_calls.val, 0)
@@ -890,10 +831,7 @@ test "non-left definition mouseup does not replace the command anchor" {
     model.get_word_at_position(second_position).unwrap(),
   )
   viewer.start_goto_definition_at(first_position, mute_message=false)
-  guard viewer.definition_contribution() is Some(state) &&
-    state.action_source is Some(source) else {
-    fail("definition action was not pending")
-  }
+  let state = viewer.definition_contribution().unwrap()
   state.last_pointer_target = Some(first_target)
 
   assert_false(
@@ -907,7 +845,6 @@ test "non-left definition mouseup does not replace the command anchor" {
       detail=1,
     ),
   )
-  assert_false(source.token().is_cancellation_requested())
   assert_eq(state.last_pointer_target, Some(first_target))
 
   viewer.dispose()

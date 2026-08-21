@@ -2,27 +2,8 @@
 let definition_contribution_id : String = "editor.contrib.definition"
 
 ///|
-priv struct DefinitionActionStamp {
-  generation : Int
-  model_identity : Int
-  model_generation : Int
-  model_version_id : Int
-}
-
-///|
-priv struct DefinitionOpenStamp {
-  generation : Int
-  model_identity : Int
-  model_generation : Int
-  model_version_id : Int
-}
-
-///|
 priv struct DefinitionContributionState {
   mut disposed : Bool
-  mut action_generation : Int
-  mut action_source : @language.CancellationTokenSource?
-  mut open_generation : Int
   mut link_generation : Int
   mut link_source : @language.CancellationTokenSource?
   mut link_state : @definition.DefinitionLinkState
@@ -32,20 +13,38 @@ priv struct DefinitionContributionState {
   mut last_message : String?
   mut message_widget : @definition_browser.DefinitionMessageWidget?
   mut message_hide : @base_common.Disposable?
-  mut peek_source : @language.CancellationTokenSource?
   link_decorations : EditorDecorationsCollection
   mut launch_async_task : (async () -> Unit noraise) -> Unit
+  navigation_action : @goto_symbol.SymbolNavigationAction
+  definition_action : @goto_symbol.DefinitionAction
+  references_action : @goto_symbol.ReferencesAction
 }
 
 ///|
 fn DefinitionContributionState::DefinitionContributionState(
   viewer : CodeEditorWidget,
 ) -> DefinitionContributionState {
+  let navigation_action = @goto_symbol.SymbolNavigationAction(
+    viewer.services.languages,
+    {
+      prepare_navigation: () => viewer.prepare_symbol_navigation_intent(),
+      is_anchor_current: anchor => {
+        viewer.symbol_navigation_anchor_is_current(anchor)
+      },
+      open_location: (_anchor, location, mode, source) => {
+        viewer.open_peek_location(location, mode, source)
+      },
+      open_in_peek: (anchor, mode, locations) => {
+        viewer.open_symbol_navigation_peek(anchor, mode, locations)
+      },
+      show_message: (anchor, message) => {
+        viewer.show_definition_message(message, position=anchor.position())
+      },
+    },
+    run_async_tasks_concurrently,
+  )
   {
     disposed: false,
-    action_generation: 0,
-    action_source: None,
-    open_generation: 0,
     link_generation: 0,
     link_source: None,
     link_state: LinkIdle,
@@ -55,64 +54,11 @@ fn DefinitionContributionState::DefinitionContributionState(
     last_message: None,
     message_widget: None,
     message_hide: None,
-    peek_source: None,
     link_decorations: viewer.create_decorations_collection(),
     launch_async_task,
-  }
-}
-
-///|
-fn DefinitionContributionState::cancel_action(
-  self : DefinitionContributionState,
-) -> Unit {
-  self.action_generation += 1
-  let source = self.action_source
-  self.action_source = None
-  match source {
-    Some(source) => source.dispose(cancel=true)
-    None => ()
-  }
-}
-
-///|
-fn DefinitionContributionState::invalidate_open_feedback(
-  self : DefinitionContributionState,
-) -> Unit {
-  self.open_generation += 1
-}
-
-///|
-/// Retires a completed or stale Definition Peek provider request only when it
-/// is still the exact source owned by this state.
-fn DefinitionContributionState::retire_peek_source(
-  self : DefinitionContributionState,
-  source : @language.CancellationTokenSource,
-  cancel~ : Bool,
-) -> Unit {
-  match self.peek_source {
-    Some(current) if physical_equal(current, source) => {
-      self.peek_source = None
-      source.dispose(cancel~)
-    }
-    _ => ()
-  }
-}
-
-///|
-/// Retires a completed or stale action only when it is still the exact request
-/// owned by this state. A newer F12 request is therefore never cancelled by an
-/// older continuation.
-fn DefinitionContributionState::retire_action_source(
-  self : DefinitionContributionState,
-  source : @language.CancellationTokenSource,
-  cancel~ : Bool,
-) -> Unit {
-  match self.action_source {
-    Some(current) if physical_equal(current, source) => {
-      self.action_source = None
-      source.dispose(cancel~)
-    }
-    _ => ()
+    navigation_action,
+    definition_action: @goto_symbol.DefinitionAction(navigation_action),
+    references_action: @goto_symbol.ReferencesAction(navigation_action),
   }
 }
 
@@ -174,7 +120,7 @@ fn DefinitionContributionState::dispose(
     return
   }
   self.disposed = true
-  self.cancel_action()
+  self.navigation_action.dispose()
   self.reset_link_gesture()
   viewer.close_references_peek(restore_focus=false)
   viewer.dispose_definition_message()
@@ -191,8 +137,9 @@ fn register_definition_contribution(
     viewer => Definition(DefinitionContributionState(viewer)),
     viewer => viewer.hook_definition_contribution(),
   )
+  let reveal = @goto_symbol.RevealDefinition
   registry.register_editor_command(
-    "editor.action.revealDefinition",
+    reveal.id(),
     viewer => viewer.definition_action_available(),
     viewer => viewer.start_goto_definition(),
     [
@@ -200,38 +147,24 @@ fn register_definition_contribution(
       // VS Code's web fallback is the same Current-mode action.
       ("F12", false, true),
     ],
-    title="Go to Definition",
-    menu_keybinding_label=definition_menu_keybinding_label(
-      alt=false,
-      ctrl_cmd=false,
-    ),
+    title=reveal.title(),
+    menu_keybinding_label=reveal.keybinding_label().unwrap(),
     menu_placements=[
       { menu_id: EditorContext, group: "navigation", order: 1.1 },
     ],
   )
+  let peek = @goto_symbol.PeekDefinition
   registry.register_editor_command(
-    "editor.action.peekDefinition",
+    peek.id(),
     viewer => viewer.definition_peek_available(),
     viewer => viewer.start_peek_definition(),
     [("F12", true, false)],
-    title="Peek Definition",
-    menu_keybinding_label=definition_menu_keybinding_label(
-      alt=true,
-      ctrl_cmd=false,
-    ),
+    title=peek.title(),
+    menu_keybinding_label=peek.keybinding_label().unwrap(),
     menu_placements=[
       { menu_id: EditorContext, group: "navigation", order: 1.2 },
     ],
   )
-}
-
-///|
-fn definition_menu_keybinding_label(alt~ : Bool, ctrl_cmd~ : Bool) -> String {
-  if @base_common.is_macintosh {
-    "\{(if alt { "\u{2325}" } else { "" })}\{(if ctrl_cmd { "\u{2318}" } else { "" })}F12"
-  } else {
-    "\{(if alt { "Alt+" } else { "" })}\{(if ctrl_cmd { "Ctrl+" } else { "" })}F12"
-  }
 }
 
 ///|
@@ -257,6 +190,96 @@ fn CodeEditorWidget::definition_action_available(
   match self.get_model() {
     Some(model) => self.services.languages.has_definition_provider(model)
     None => false
+  }
+}
+
+///|
+fn CodeEditorWidget::symbol_navigation_anchor_at(
+  self : CodeEditorWidget,
+  position : @base_common.Position,
+) -> @goto_symbol.SymbolNavigationAnchor? {
+  guard !self.disposed && self.get_model() is Some(model) else { return None }
+  let position = model.validate_position(position)
+  let range = match model.get_word_at_position(position) {
+    Some(word) =>
+      @base_common.Range(
+        position.line_number,
+        word.start_column,
+        position.line_number,
+        word.end_column,
+      )
+    None =>
+      @base_common.Range(
+        position.line_number,
+        position.column,
+        position.line_number,
+        position.column,
+      )
+  }
+  Some(
+    @goto_symbol.SymbolNavigationAnchor::from_model(
+      model,
+      position,
+      range,
+      self.model_slot.generation,
+    ),
+  )
+}
+
+///|
+fn CodeEditorWidget::symbol_navigation_anchor_is_current(
+  self : CodeEditorWidget,
+  anchor : @goto_symbol.SymbolNavigationAnchor,
+) -> Bool {
+  guard !self.disposed && self.get_model() is Some(model) else { return false }
+  anchor.surface_generation() == self.model_slot.generation &&
+  anchor.model().same(model) &&
+  anchor.model_is_current() &&
+  self.get_position() == Some(anchor.position())
+}
+
+///|
+/// Surface-owned preparation shared by Definition and References actions.
+/// Populated Peek sessions remain independently usable; only unresolved
+/// queries are superseded by the new navigation intent.
+fn CodeEditorWidget::prepare_symbol_navigation_intent(
+  self : CodeEditorWidget,
+) -> Unit {
+  match self.references_contribution() {
+    Some(references) =>
+      match references.controller.phase() {
+        PeekLoadingDefinitions(_) | PeekLoadingReferences(_) =>
+          self.close_references_peek(restore_focus=false)
+        _ => ()
+      }
+    None => ()
+  }
+  match self.definition_contribution() {
+    Some(state) => state.reset_link_gesture()
+    None => ()
+  }
+  self.clear_definition_message()
+}
+
+///|
+fn CodeEditorWidget::open_symbol_navigation_peek(
+  self : CodeEditorWidget,
+  anchor : @goto_symbol.SymbolNavigationAnchor,
+  mode : @references.ReferencesPeekMode,
+  locations : Array[@language.Location],
+) -> Bool {
+  guard self.symbol_navigation_anchor_is_current(anchor) else { return false }
+  match mode {
+    Definitions => {
+      guard self.definition_peek_available() else { return false }
+      self.open_definition_peek_with_locations(anchor.position(), locations)
+      true
+    }
+    References => {
+      guard self.references_peek_available() else { return false }
+      self.show_references(anchor.position(), locations)
+      true
+    }
   }
 }
 
@@ -295,8 +318,7 @@ fn CodeEditorWidget::on_definition_cursor_selection_changed(
   selection_is_empty : Bool,
 ) -> Unit {
   guard self.definition_contribution() is Some(state) else { return }
-  state.invalidate_open_feedback()
-  state.cancel_action()
+  state.navigation_action.cancel()
   if state.definition_mouse_down_line > 0 && selection_is_empty {
     state.cancel_link()
   } else {
@@ -304,7 +326,7 @@ fn CodeEditorWidget::on_definition_cursor_selection_changed(
   }
   match self.references_contribution() {
     Some(references) =>
-      match references.phase {
+      match references.controller.phase() {
         PeekLoadingDefinitions(_) | PeekLoadingReferences(_) =>
           self.close_references_peek(restore_focus=false)
         _ => ()
@@ -326,7 +348,7 @@ fn CodeEditorWidget::cancel_definition_link(self : CodeEditorWidget) -> Unit {
 fn CodeEditorWidget::reset_definition_requests(self : CodeEditorWidget) -> Unit {
   match self.definition_contribution() {
     Some(state) => {
-      state.cancel_action()
+      state.navigation_action.cancel()
       state.reset_link_gesture()
       self.close_references_peek(restore_focus=false)
       self.dispose_definition_message()
@@ -359,85 +381,20 @@ fn CodeEditorWidget::start_goto_definition_at(
   mute_message~ : Bool,
 ) -> Unit {
   guard self.definition_contribution() is Some(state) else { return }
-  guard self.get_model() is Some(model) else { return }
-  let position = model.validate_position(position)
-  // An ordinary Definition action is a newer navigation intent than a Peek
-  // request that is still resolving its definition list. Retire only that
-  // loading shell: an already populated Peek remains independently usable.
-  match self.references_contribution() {
-    Some(references) =>
-      match references.phase {
-        PeekLoadingDefinitions(_) | PeekLoadingReferences(_) =>
-          self.close_references_peek(restore_focus=false)
-        _ => ()
-      }
-    None => ()
+  guard self.symbol_navigation_anchor_at(position) is Some(anchor) else {
+    return
   }
-  // A new navigation intent immediately supersedes feedback from any opener
-  // that is still awaiting its host, even before this provider request
-  // resolves far enough to call the next opener.
-  state.invalidate_open_feedback()
-  state.cancel_action()
-  self.clear_definition_message()
-  state.action_generation += 1
-  let generation = state.action_generation
-  let source = @language.CancellationTokenSource()
-  state.action_source = Some(source)
-  let stamp : DefinitionActionStamp = {
-    generation,
-    model_identity: model.identity(),
-    model_generation: self.model_slot.generation,
-    model_version_id: model.get_version_id(),
+  guard state.definition_action.begin(anchor) is Some(generation) else {
+    return
   }
-  let offset = model.get_offset_at(position)
   let task = state.launch_async_task
   task(async fn() noraise {
-    let locations = self.services.languages.definition_at(
-      model,
-      offset,
-      token=source.token(),
-      run_tasks=run_async_tasks_concurrently,
+    state.definition_action.run_reserved(
+      anchor,
+      { open_to_side: false, open_in_peek: false, mute_message },
+      generation,
     )
-    if !self.definition_action_is_current(stamp, source) {
-      state.retire_action_source(source, cancel=true)
-      return
-    }
-    source.dispose()
-    state.action_source = None
-    let locations = @definition.normalize_definition_locations(locations)
-    self.dispatch_definition_locations(position, locations, mute_message~)
   })
-}
-
-///|
-/// Applies Monaco's default definition result policy without asking providers
-/// a second time: direct-open one result, or populate Peek for multiple
-/// results when this outer mounted CodeEditorWidget can host it.
-async fn CodeEditorWidget::dispatch_definition_locations(
-  self : CodeEditorWidget,
-  source_position : @base_common.Position,
-  locations : Array[@language.Location],
-  mute_message~ : Bool,
-) -> Unit noraise {
-  if locations.is_empty() {
-    if !mute_message {
-      self.show_definition_message(
-        self.definition_no_result_message(source_position),
-        position=source_position,
-      )
-    }
-    return
-  }
-  if locations.length() > 1 && self.definition_peek_available() {
-    self.open_definition_peek_with_locations(source_position, locations)
-    return
-  }
-  self.open_definition_location(
-    locations[0],
-    Current,
-    message_position=source_position,
-  )
-  |> ignore
 }
 
 ///|
@@ -515,11 +472,10 @@ fn CodeEditorWidget::commit_plain_definition_pointer_target(
   target : @definition.DefinitionTargetFingerprint?,
 ) -> Unit {
   guard self.definition_contribution() is Some(state) else { return }
-  state.invalidate_open_feedback()
-  state.cancel_action()
+  state.navigation_action.cancel()
   match self.references_contribution() {
     Some(references) =>
-      match references.phase {
+      match references.controller.phase() {
         PeekLoadingDefinitions(_) | PeekLoadingReferences(_) =>
           self.close_references_peek(restore_focus=false)
         _ => ()
@@ -772,50 +728,6 @@ fn CodeEditorWidget::handle_definition_pointer_up(
 }
 
 ///|
-fn CodeEditorWidget::definition_action_is_current(
-  self : CodeEditorWidget,
-  stamp : DefinitionActionStamp,
-  source : @language.CancellationTokenSource,
-) -> Bool {
-  guard !self.disposed && !source.token().is_cancellation_requested() else {
-    return false
-  }
-  guard self.definition_contribution() is Some(state) else { return false }
-  guard state.action_generation == stamp.generation else { return false }
-  guard self.get_model() is Some(model) else { return false }
-  model.identity() == stamp.model_identity &&
-  self.model_slot.generation == stamp.model_generation &&
-  model.get_version_id() == stamp.model_version_id
-}
-
-///|
-async fn CodeEditorWidget::open_definition_location(
-  self : CodeEditorWidget,
-  location : @language.Location,
-  mode : @navigation_api.OpenLocationMode,
-  message_position? : @base_common.Position,
-) -> Bool noraise {
-  guard !self.disposed else { return false }
-  guard self.definition_contribution() is Some(state) else { return false }
-  guard self.get_model() is Some(source_model) else { return false }
-  state.invalidate_open_feedback()
-  let stamp : DefinitionOpenStamp = {
-    generation: state.open_generation,
-    model_identity: source_model.identity(),
-    model_generation: self.model_slot.generation,
-    model_version_id: source_model.get_version_id(),
-  }
-  let accepted = self.open_peek_location(location, mode, "gotoDefinition")
-  if !accepted && self.definition_open_is_current(stamp) {
-    self.show_definition_message(
-      "Unable to open definition",
-      position?=message_position,
-    )
-  }
-  accepted
-}
-
-///|
 /// VS Code's `_openReference` target feedback shared by Definition and
 /// References navigation: retain the full target range for 350ms, and clear it
 /// only if the CodeEditorWidget still owns the exact model that received the decoration.
@@ -843,39 +755,6 @@ fn CodeEditorWidget::show_navigation_target_highlight(
     350,
   )
   |> ignore
-}
-
-///|
-fn CodeEditorWidget::definition_open_is_current(
-  self : CodeEditorWidget,
-  stamp : DefinitionOpenStamp,
-) -> Bool {
-  guard !self.disposed else { return false }
-  guard self.definition_contribution() is Some(state) &&
-    !state.disposed &&
-    state.open_generation == stamp.generation else {
-    return false
-  }
-  guard self.get_model() is Some(model) else { return false }
-  model.identity() == stamp.model_identity &&
-  self.model_slot.generation == stamp.model_generation &&
-  model.get_version_id() == stamp.model_version_id
-}
-
-///|
-fn CodeEditorWidget::definition_no_result_message(
-  self : CodeEditorWidget,
-  position : @base_common.Position,
-) -> String {
-  match self.get_model() {
-    Some(model) =>
-      match model.get_word_at_position(model.validate_position(position)) {
-        Some(word) if !word.word.is_empty() =>
-          "No definition found for '\{word.word}'"
-        _ => "No definition found"
-      }
-    None => "No definition found"
-  }
 }
 
 ///|
@@ -1030,7 +909,7 @@ fn CodeEditorWidget::set_definition_host_for_test(
     None => ()
   }
   match self.references_contribution() {
-    Some(state) => state.launch_async_task = launch
+    Some(state) => state.controller.set_task_launcher(launch)
     None => ()
   }
 }

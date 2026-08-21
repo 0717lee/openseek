@@ -63,6 +63,13 @@ fn ViewerServices::location_opener(
 }
 
 ///|
+fn ViewerServices::text_model_resolver(
+  self : ViewerServices,
+) -> @navigation_api.TextModelResolverHandle? {
+  self.inner.text_model_resolver()
+}
+
+///|
 fn ViewerServices::log_service(self : ViewerServices) -> @log.LogHandle {
   self.inner.log_service()
 }

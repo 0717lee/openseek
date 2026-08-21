@@ -22,6 +22,7 @@ extern "js" fn install_references_peek_test_browser() -> ReferencesPeekBrowserTe
   #|     HTMLElement: globalThis.HTMLElement,
   #|     Event: globalThis.Event,
   #|     KeyboardEvent: globalThis.KeyboardEvent,
+  #|     requestAnimationFrame: globalThis.requestAnimationFrame,
   #|   };
   #|
   #|   class TestEvent {
@@ -208,7 +209,12 @@ extern "js" fn install_references_peek_test_browser() -> ReferencesPeekBrowserTe
   #|   globalThis.HTMLElement = TestElement;
   #|   globalThis.Event = TestEvent;
   #|   globalThis.KeyboardEvent = TestKeyboardEvent;
-  #|   return { originals, disposed: false };
+  #|   const animationFrames = [];
+  #|   globalThis.requestAnimationFrame = callback => {
+  #|     animationFrames.push(callback);
+  #|     return animationFrames.length;
+  #|   };
+  #|   return { originals, animationFrames, disposed: false };
   #| }
 
 ///|
@@ -227,6 +233,21 @@ extern "js" fn ReferencesPeekBrowserTestHarness::dispose(
   #|   restore("HTMLElement", harness.originals.HTMLElement);
   #|   restore("Event", harness.originals.Event);
   #|   restore("KeyboardEvent", harness.originals.KeyboardEvent);
+  #|   restore(
+  #|     "requestAnimationFrame",
+  #|     harness.originals.requestAnimationFrame,
+  #|   );
+  #| }
+
+///|
+extern "js" fn ReferencesPeekBrowserTestHarness::flush_animation_frames(
+  self : ReferencesPeekBrowserTestHarness,
+) -> Unit =
+  #| harness => {
+  #|   while (harness.animationFrames.length > 0) {
+  #|     const callbacks = harness.animationFrames.splice(0);
+  #|     for (const callback of callbacks) callback(0);
+  #|   }
   #| }
 
 ///|
