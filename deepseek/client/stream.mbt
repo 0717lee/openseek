@@ -7,7 +7,7 @@ priv struct StreamToolCall {
 
 ///|
 fn StreamToolCall::StreamToolCall() -> StreamToolCall {
-  { id: "", name: "", arguments: StringBuilder::new() }
+  { id: "", name: "", arguments: StringBuilder() }
 }
 
 ///|
@@ -30,8 +30,8 @@ priv struct StreamAccumulator {
 ///|
 fn StreamAccumulator::StreamAccumulator() -> StreamAccumulator {
   {
-    content: StringBuilder::new(),
-    reasoning_content: StringBuilder::new(),
+    content: StringBuilder(),
+    reasoning_content: StringBuilder(),
     tool_calls: [],
     usage: None,
   }

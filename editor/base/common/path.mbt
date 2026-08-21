@@ -714,7 +714,7 @@ fn Win32::relative_impl(from : String, to : String) -> String {
 ///|
 /// `toSplit.slice(i).join('\\')` helper for `Win32::relative`.
 fn join_range(parts : ArrayView[String], start : Int, sep : String) -> String {
-  let sb = StringBuilder::new()
+  let sb = StringBuilder()
   for i in start..<parts.length() {
     if i > start {
       sb.write_string(sep)

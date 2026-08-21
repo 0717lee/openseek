@@ -233,7 +233,7 @@ fn markdown_heading_text_from_source(
   } else {
     trimmed
   }
-  let collapsed = StringBuilder::new()
+  let collapsed = StringBuilder()
   let mut wrote_any = false
   let mut in_space = false
   for unit in trimmed.trim(chars=" \t\r") {

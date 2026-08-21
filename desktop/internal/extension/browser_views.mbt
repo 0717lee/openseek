@@ -104,7 +104,7 @@ impl Show for BrowserViewError with fn output(self, logger) {
 /// app's own scheme. Schemes are case-insensitive (RFC 3986), and the
 /// frontend passes URLs as typed, so the check lowercases before matching.
 fn allowed_page_url(url : String) -> Bool {
-  let buf = StringBuilder::new()
+  let buf = StringBuilder()
   for ch in url {
     buf.write_char(ch.to_ascii_lowercase())
   }

@@ -65,7 +65,7 @@ fn valid_slug(name : String) -> Bool {
 /// `-` and no leading or trailing `-`. `Yoorkin/cowsay` -> `yoorkin-cowsay`.
 /// The registry's own (possibly slash-bearing) name can never become a path.
 fn slugify(name : String) -> String {
-  let builder = StringBuilder::new()
+  let builder = StringBuilder()
   let mut wrote_alnum = false
   let mut pending_dash = false
   for ch in name {

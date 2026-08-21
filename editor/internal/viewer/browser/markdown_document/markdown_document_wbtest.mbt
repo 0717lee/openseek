@@ -244,7 +244,7 @@ test "semantic wrapping keeps astral UTF-16 text and fails closed on isolated su
     "let planet = \"🪐\"".length(),
   )
 
-  let source = StringBuilder::new()
+  let source = StringBuilder()
   source.write_string("```mbt check\nlet invalid = \"")
   source.write_char(Int::unsafe_to_char(0xD800))
   source.write_string("\"\n```")

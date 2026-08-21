@@ -319,7 +319,7 @@ const SignInDeniedPage : String = "<!doctype html><meta charset=\"utf-8\"><title
 /// Escape a value for an HTML attribute. The console URL derives from the
 /// user's server selection, so nothing about its charset is guaranteed.
 fn html_attr_escape(text : String) -> String {
-  let builder = StringBuilder::new()
+  let builder = StringBuilder()
   for c in text {
     match c {
       '&' => builder.write_string("&amp;")

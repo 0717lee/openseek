@@ -112,7 +112,7 @@ fn TextSnapshot::get_value_in_range(
     let b = (range.end_column - 1).clamp(min=a, max=line.length())
     return code_unit_slice(line, a, b)
   }
-  let sb = StringBuilder::new()
+  let sb = StringBuilder()
   let first = self.line_text(start_line)
   let a = (range.start_column - 1).clamp(min=0, max=first.length())
   sb.write_string(code_unit_slice(first, a, first.length()))
@@ -296,7 +296,7 @@ fn TextSnapshot::get_line_last_non_whitespace_column(
 /// beside an EOL are retained exactly once on both JS and native targets.
 fn normalize_eol(text : String) -> String {
   let len = text.length()
-  let sb = StringBuilder::new()
+  let sb = StringBuilder()
   let mut segment_start = 0
   let mut i = 0
   let mut changed = false

@@ -17,7 +17,7 @@ async test "a default session launches a live platform shell" {
     // timeout is generous because a real POSIX login shell runs the user's
     // profile (a slow one is not a failure); an early exit fails through the
     // `Exited` branch long before it.
-    let text = StringBuilder::new()
+    let text = StringBuilder()
     @async.with_timeout(15000, () => {
       for ;; {
         match pushes.get() {
