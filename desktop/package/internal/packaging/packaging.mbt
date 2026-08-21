@@ -272,29 +272,17 @@ pub async fn run_proton_cli(
 }
 
 ///|
-/// Build the application host and its source-matched CEF helper through the
-/// checked-out Proton CLI.
+/// Build the application host directly through Moon, then install its
+/// source-matched CEF helper from the checked-out Proton package. Keeping the
+/// release flag on Moon's side matches the macOS input build and avoids
+/// translating Moon build arguments through the Proton CLI.
 pub async fn build_proton_application(
   ws : Workspace,
   release~ : Bool,
   moon_args? : Array[String] = [],
 ) -> Unit {
-  let args = [
-    "-C",
-    ws.dir(),
-    "build",
-    "--config",
-    "proton.project.json",
-    "--no-frontend",
-  ]
-  if release {
-    args.push("--release")
-  }
-  if !moon_args.is_empty() {
-    args.push("--")
-    args.append(moon_args)
-  }
-  run_proton_cli(ws, args)
+  build_native_host(ws, release~, extra_args=moon_args)
+  build_source_cef_process(ws)
 }
 
 ///|
@@ -311,6 +299,29 @@ pub fn cef_helper_name() -> String {
 /// The PR CLI installs the helper below the configured backend workspace.
 pub fn Workspace::proton_helper_binary(self : Workspace) -> String {
   self.repo_at("_build/" + cef_helper_name())
+}
+
+///|
+/// Install CEF's subprocess helper from the same Proton source revision that
+/// Moon resolves for the host. The stable output path is shared by development
+/// and the Linux/Windows packagers.
+async fn build_source_cef_process(ws : Workspace) -> Unit {
+  let helper = ws.proton_helper_binary()
+  run_checked(
+    "moon",
+    [
+      "install",
+      "--path",
+      ws.repo_at(ProtonSourceRoot + "/internal/cef_process"),
+      "--bin",
+      ws.repo_at("_build"),
+    ],
+    dir=ws.repo(),
+    extra_env=native_moon_process_env(Map([])),
+  )
+  if !@asyncfs.exists(helper) {
+    raise PackageError("Proton CEF helper not found after build: \{helper}")
+  }
 }
 
 ///|
@@ -509,13 +520,9 @@ async test "development viewer stylesheet imports every production source" {
 }
 
 ///|
-/// Build the native desktop host in the selected mode.
-pub async fn build_native_host(
-  ws : Workspace,
-  release~ : Bool,
-  extra_args? : Array[String] = [],
-  extra_env? : Map[String, String] = Map([]),
-) -> Unit {
+fn native_moon_process_env(
+  extra_env : Map[String, String],
+) -> Map[String, String] {
   let build_env : Map[String, String] = Map([])
   for name, value in extra_env {
     build_env[name] = value
@@ -525,6 +532,18 @@ pub async fn build_native_host(
     // system compiler keeps Moon's process-wide allocator out of CEF.
     build_env["MOON_CC"] = "clang"
   }
+  build_env
+}
+
+///|
+/// Build the native desktop host in the selected mode.
+pub async fn build_native_host(
+  ws : Workspace,
+  release~ : Bool,
+  extra_args? : Array[String] = [],
+  extra_env? : Map[String, String] = Map([]),
+) -> Unit {
+  let build_env = native_moon_process_env(extra_env)
   let release_args = if release { ["--release"] } else { [] }
   run_checked(
     "moon",
