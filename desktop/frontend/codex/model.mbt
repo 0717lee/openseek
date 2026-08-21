@@ -2433,7 +2433,16 @@ pub fn State::transcript_items(
   if self.active_thread() is Some(active) {
     for turn in active.turns {
       for item in turn.items {
-        items.push(item.transcript_item())
+        let transcript_item = item.transcript_item()
+        // GPT can commit a reasoning item whose only payload is encrypted:
+        // until app-server exposes summary text, there is nothing the
+        // transcript can display and an empty Reasoning row becomes a blank
+        // "Thought" card. Keep the semantic item in Codex state so a later
+        // summary delta can reveal it, but omit it from this display snapshot.
+        if !(transcript_item.kind is @transcript.Reasoning) ||
+          !transcript_item.content.is_blank() {
+          items.push(transcript_item)
+        }
       }
       if turn.error is Some(message) {
         items.push({
