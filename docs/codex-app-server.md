@@ -73,8 +73,25 @@ locations and are not rendered as another navigation level. Existing non-Git
 directories map to themselves, while a missing or deleted cwd is left without
 a project instead of being presented as a project root.
 
-`codex.thread.start` sets `serviceName: "openseek_desktop"` and otherwise
-preserves Codex's configured sandbox and approval defaults.
+The app-server connection opts into `capabilities.experimentalApi`, and the
+Codex composer exposes three permission modes. The native command layer maps
+the selected mode to app-server fields instead of accepting arbitrary sandbox
+JSON from the page:
+
+- **Request approval:** `approvalPolicy: "on-request"`,
+  `approvalsReviewer: "user"`, and `permissions: ":workspace"`;
+- **Approve for me:** `approvalPolicy: "on-request"`,
+  `approvalsReviewer: "auto_review"`, and `permissions: ":workspace"`;
+- **Full access:** `approvalPolicy: "never"` and
+  `permissions: ":danger-full-access"`; no reviewer is sent because this mode
+  does not produce interactive approval requests.
+
+The page defaults to **Approve for me** and requires confirmation before it
+selects **Full access**. `codex.thread.start`, `codex.thread.resume`, and
+`codex.turn.start` all send the current selection. They therefore intentionally
+override the isolated Codex home's sandbox and approval defaults; the named
+`permissions` profile is sent instead of the legacy `sandbox` field.
+`codex.thread.start` also sets `serviceName: "openseek_desktop"`.
 
 The model picker also uses `model/list` as the authority for reasoning effort.
 When a model reports `supportedReasoningEfforts`, the composer shows a separate
