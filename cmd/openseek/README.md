@@ -11,7 +11,7 @@ sessions; fleet mode's independent attempts use `agent.run_turn_with_append`).
 ```
 openseek [--prompt "…"]        interactive UI (default)
 openseek tui [--prompt "…"]    the UI, explicitly
-openseek run [options] TASK    run one task headlessly; JSONL events on stdout
+openseek run [options] TASK    run one task headlessly; compact human output by default
 openseek serve                 JSONL command server (stdin: prompt/steer/cancel/compact)
 openseek review [--base REF]   read-only code review of REF...HEAD → one JSON report
 openseek sessions list|show <id>|compact <id> …   manage durable sessions
@@ -32,7 +32,7 @@ globals; the UI's own options (`--prompt`, `--engine`, `--continue`) live on the
 ## `openseek run`
 
 ```bash
-moon run cmd/openseek -- run [--api-key sk-...] [--model deepseek-v4-pro] [--api-url https://api.deepseek.com/chat/completions] [--dir .] [--max-steps N] [--system-prompt-file prompt.md] [--system-prompt-addendum-file addendum.md] [--session session-id] [--session-root .openseek] "task text"
+moon run cmd/openseek -- run [--format human|jsonl] [--api-key sk-...] [--model deepseek-v4-pro] [--api-url https://api.deepseek.com/chat/completions] [--dir .] [--max-steps N] [--system-prompt-file prompt.md] [--system-prompt-addendum-file addendum.md] [--session session-id] [--session-root .openseek] "task text"
 ```
 
 Runs require `--api-key` or the provider-specific environment variable:
@@ -57,11 +57,25 @@ with `OPENSEEK_SYSTEM_PROMPT_FILE` and
 `--session-root` / `OPENSEEK_SESSION_ROOT` (default `.openseek`). Relative
 session roots are resolved under `--dir`.
 
+`run` writes compact human output to stdout by default: a thinking marker makes
+long model reasoning visible, assistant prose streams as it arrives, tool calls
+become one-line summaries, and the terminal line reports steps and token usage.
+Runtime failures use the same stdout stream and retain a non-zero exit status;
+argument-parser errors still use stderr.
+Use `--format jsonl` (or `OPENSEEK_RUN_FORMAT=jsonl`) for the complete,
+backward-compatible event stream needed by scripts. This option belongs only to
+the one-shot `run` command; `serve` and
+the internal `subrun` protocol remain JSONL unconditionally. When
+`OPENSEEK_LOG_FILE` is set, it always receives raw JSONL events regardless of
+the terminal format.
+
 Every run records a durable session: without `--session`, a generated
-`cli-YYYYMMDD-HHMMSS-mmm` id is used and announced by a `session_started` event
-on stdout, so the conversation is reviewable afterwards with `openseek sessions
-list` / `openseek sessions show <id>` (or the viz server) and resumable with
-`--session <id>`. Pass `--no-session` to run ephemerally; combining it with
+`cli-YYYYMMDD-HHMMSS-mmm` id is used and announced on stdout (as a compact
+`Session:` line in human mode or a `session_started` event in JSONL mode), so
+the conversation is reviewable afterwards with `openseek sessions list` /
+`openseek sessions show <id>` (or the viz server) and resumable with `--session
+<id>`. The durable agent session itself remains an append-only JSONL record in
+both display modes. Pass `--no-session` to run ephemerally; combining it with
 `--session` is rejected.
 
 Without an explicit prompt file, the CLI uses the default built-in prompt
@@ -135,7 +149,9 @@ moon run cmd/openseek -- run --session parser-fix "continue from the last run"
 ```
 
 Best-of-N: run the same task in N sibling copies of `--dir` concurrently, each
-recording its own session, then print a summary. The original `--dir` is never
+recording its own session, then print a summary. Human mode suppresses the
+attempts' interleaved event output and prints only that summary; JSONL mode
+keeps the complete event stream and writes the summary to stderr. The original `--dir` is never
 written to (a present `--dir` is copied — keeping `.git` and `.openseek/skills`,
 skipping `_build`/`node_modules` and the session store; an absent one yields
 empty workspaces to build from scratch).

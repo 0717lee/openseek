@@ -4,10 +4,11 @@
 /// `tui` subcommand, while the headless engine lives under
 /// `run`/`serve`/`review`/`sessions`. argparse owns parsing, `--help`, and
 /// error reporting (including rejecting unknown subcommands); we only dispatch on
-/// the parsed result. Engine stdout-JSONL logging is installed per subcommand in
-/// the run/serve handlers, never on the UI path.
+/// the parsed result. Engine output logging is installed per subcommand in the
+/// run/serve handlers, never on the UI path.
 async fn main {
   dispatch() catch {
+    HumanRunFailure => @sys.exit(1)
     error => {
       @stdio.stderr.write("error: \{failure_message("\{error}")}\n") catch {
         _ => ()
@@ -113,22 +114,23 @@ fn reject_session_contradiction(matches : @argparse.Matches) -> Unit raise {
 
 ///|
 /// `openseek run [TASK…]` — a headless one-shot agent run (best-of-N under
-/// `--concurrency`), streaming JSONL events on stdout.
+/// `--concurrency`), with compact human stdout by default and the complete
+/// event protocol under `--format jsonl`.
 async fn run_task_command(matches : @argparse.Matches) -> Unit {
-  with_jsonl_stdout(() => {
+  let concurrency_input = match matches {
+    { values: { "concurrency": [input, ..], .. }, .. } => input
+    _ => fail("missing parsed argument: concurrency")
+  }
+  let concurrency = @cli.parse_positive_int(concurrency_input, "--concurrency")
+  let fleet = fleet_mode(matches, concurrency)
+  let format = run_output_format(matches)
+  with_run_stdout(format, fleet~, () => {
     // --no-session contradicts an explicit --session; reject up front.
     reject_session_contradiction(matches)
     // Best-of-N fleet mode owns its own workspace materialization and session
     // creation, so it branches before prepare_workspace_root (which would
     // create a single --dir).
-    let concurrency_input = match matches {
-      { values: { "concurrency": [input, ..], .. }, .. } => input
-      _ => fail("missing parsed argument: concurrency")
-    }
-    let concurrency = @cli.parse_positive_int(
-      concurrency_input, "--concurrency",
-    )
-    if fleet_mode(matches, concurrency) {
+    if fleet {
       // Fleet members own separate materialized workspaces; per-member MCP
       // connections are not wired, so say so instead of silently ignoring.
       if mcp_config_path(matches) != "" {
@@ -136,7 +138,7 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
           McpConfigIgnored(reason="fleet mode does not support MCP servers"),
         )
       }
-      run_fleet(matches, concurrency~)
+      run_fleet(matches, concurrency~, human_output=format is Human)
       return
     }
     let workspace_root = prepare_workspace_root(matches, log_created=true)
@@ -210,7 +212,19 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
         )
       }
     }
-  })
+  }) catch {
+    error =>
+      match format {
+        Human => {
+          let detail = human_brief(failure_message("\{error}"), limit=240)
+          @stdio.stdout.write("✗ Failed: \{detail}\n") catch {
+            _ => ()
+          }
+          raise HumanRunFailure
+        }
+        Jsonl => raise error
+      }
+  }
 }
 
 ///|
@@ -672,9 +686,16 @@ fn root_command() -> @argparse.Command {
       ),
       Command(
         "run",
-        about="Run one task headlessly; stream JSONL events on stdout.",
+        about="Run one task headlessly with compact human output (or JSONL with --format jsonl).",
         options=[
           ..agent_options(),
+          OptionArg(
+            "format",
+            long="format",
+            env="OPENSEEK_RUN_FORMAT",
+            default_values=["human"],
+            about="Output format: human or jsonl.",
+          ),
           OptionArg(
             "concurrency",
             long="concurrency",

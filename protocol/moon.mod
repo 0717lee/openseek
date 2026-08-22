@@ -12,4 +12,4 @@ repository = "https://github.com/bobzhang/openseek"
 
 license = "Apache-2.0"
 
-description = "Typed engine event stream: the openseek run/serve stdout wire contract."
+description = "Typed engine event stream: the openseek serve and run --format jsonl wire contract."

@@ -6,7 +6,11 @@
 ///
 /// Naming uses `<base>_run_<i>` (underscores, not a dotted suffix that reads as a
 /// file extension) so the run directories are unambiguous and easy to recognize.
-async fn run_fleet(matches : @argparse.Matches, concurrency~ : Int) -> Unit {
+async fn run_fleet(
+  matches : @argparse.Matches,
+  concurrency~ : Int,
+  human_output~ : Bool,
+) -> Unit {
   // Fleet mode owns session creation and is a one-shot batch, so it conflicts
   // with the single-session and no-session modes of `openseek run`.
   guard !(matches is { flags: { "no-session": true, .. }, .. }) else {
@@ -78,7 +82,7 @@ async fn run_fleet(matches : @argparse.Matches, concurrency~ : Int) -> Unit {
       )
     }
   })
-  print_fleet_summary(task, outcomes, session_root_value)
+  print_fleet_summary(task, outcomes, session_root_value, human_output~)
   guard outcomes.any(outcome => outcome is Some(result) && result.ok) else {
     fail("all \{concurrency} run(s) failed")
   }
@@ -357,12 +361,14 @@ fn inspect_hint(session_root_value : String) -> String {
 }
 
 ///|
-/// Print the fleet summary to stderr (stdout stays the JSONL event stream): a
-/// header line plus one row per attempt, and where to view the results.
+/// Print the fleet summary as the complete human stdout, or to stderr while
+/// stdout stays the JSONL event stream: a header line plus one row per attempt,
+/// and where to view the results.
 async fn print_fleet_summary(
   task : String,
   outcomes : Array[AttemptOutcome?],
   session_root_value : String,
+  human_output~ : Bool,
 ) -> Unit {
   let total = outcomes.length()
   let finished = outcomes
@@ -381,16 +387,20 @@ async fn print_fleet_summary(
     }
   }
 
-  @stdio.stderr.write(
-    (
-      $|
-      $|openseek: \{total} run(s) of "\{one_line_brief(task, 60)}" — \{finished} finished, \{total - finished} not\{out => rows(out)}
-      $|
-      $|inspect a run:  \{inspect_hint(session_root_value)}
-      $|
-    ),
-  ) catch {
-    _ => ()
+  let summary =
+    $|
+    $|openseek: \{total} run(s) of "\{one_line_brief(task, 60)}" — \{finished} finished, \{total - finished} not\{out => rows(out)}
+    $|
+    $|inspect a run:  \{inspect_hint(session_root_value)}
+    $|
+  if human_output {
+    @stdio.stdout.write(human_content(summary)) catch {
+      _ => ()
+    }
+  } else {
+    @stdio.stderr.write(summary) catch {
+      _ => ()
+    }
   }
 }
 

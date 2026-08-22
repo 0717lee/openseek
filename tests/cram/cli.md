@@ -25,7 +25,7 @@ DeepSeek-backed MoonBit coding agent — runs the interactive UI by default.
 
 Commands:
   tui       OpenSeek terminal UI.
-  run       Run one task headlessly; stream JSONL events on stdout.
+  run       Run one task headlessly with compact human output (or JSONL with --format jsonl).
   serve     Session server: read JSONL commands (prompt/steer/cancel/compact/goal) from stdin.
   mcp       List configured MCP servers and the tools they expose.
   review    Read-only code review of base...HEAD; prints a JSON ReviewReport.
@@ -123,7 +123,7 @@ behind a headless run.
 $ openseek.exe run --help
 Usage: openseek run [options] [task...]
 
-Run one task headlessly; stream JSONL events on stdout.
+Run one task headlessly with compact human output (or JSONL with --format jsonl).
 
 Arguments:
   task...  Task description.
@@ -144,16 +144,17 @@ Options:
   --system-prompt-addendum-file <system-prompt-addendum-file>  Append this file to the selected system prompt for prompt experiments. [env: OPENSEEK_SYSTEM_PROMPT_ADDENDUM_FILE] [default: ]
   --global-skills-dir <global-skills-dir>                      User-level skills directory advertised alongside workspace skills; empty means $HOME/.openseek/skills, or %USERPROFILE%/.openseek/skills on Windows. [env: OPENSEEK_GLOBAL_SKILLS_DIR] [default: ]
   --mcp-config <mcp-config>                                    Path to a JSON file of MCP servers ({"mcpServers": {"<name>": {"command", "args", "env"} | {"url", "headers"}}}); each server's tools (stdio subprocess or Streamable HTTP) are exposed to the agent, namespaced mcp__<server>__<tool>. Empty disables MCP. [env: OPENSEEK_MCP_CONFIG] [default: ]
+  --format <format>                                            Output format: human or jsonl. [env: OPENSEEK_RUN_FORMAT] [default: human]
   --concurrency <concurrency>                                  Run the task in N sibling copies of --dir concurrently (best-of-N). Any explicit value, including 1, copies --dir into <dir>_run_<i> and never writes to --dir itself; omit the flag for a single in-place run. [env: OPENSEEK_CONCURRENCY] [default: 1]
 ```
 
 ## API Key Is Required For Agent Runs
 
-With no `--api-key` flag and no `DEEPSEEK` in the environment, a run reports the
-missing key and exits non-zero. The message names the model that wanted a key,
-not the variable that would have supplied one — `DEEPSEEK` here, `KIMI` for a
-Kimi model. Those options are hidden from `--help`, so this is where they are
-written down.
+With no `--api-key` flag and no `DEEPSEEK` in the environment, a human run
+reports the missing key on stdout and exits non-zero. The message names the
+model that wanted a key, not the variable that would have supplied one —
+`DEEPSEEK` here, `KIMI` for a Kimi model. Those options are hidden from
+`--help`, so this is where they are written down.
 
 ```mooncram
 $ sh <<'EOF'
@@ -161,12 +162,11 @@ $ sh <<'EOF'
 > stderr=$(mktemp)
 > if env -u DEEPSEEK -u KIMI -u OPENSEEK_MODEL openseek.exe run "summarize this project" > "$stdout" 2> "$stderr"; then echo exit-zero; else echo exit-non-zero; fi
 > cat "$stderr"
-> if test -s "$stdout"; then echo stdout-not-empty; else echo stdout-empty; fi
+> cat "$stdout"
 > rm -f "$stdout" "$stderr"
 > EOF
 exit-non-zero
-error: an API key is required for deepseek-v4-pro: pass --api-key
-stdout-empty
+✗ Failed: an API key is required for deepseek-v4-pro: pass --api-key
 ```
 
 ## Unknown Options Are Rejected Before Task Text
@@ -198,12 +198,11 @@ $ sh <<'EOF'
 > stderr=$(mktemp)
 > if env -u DEEPSEEK -u KIMI -u OPENSEEK_MODEL openseek.exe run -- '--xxy he' > "$stdout" 2> "$stderr"; then echo exit-zero; else echo exit-non-zero; fi
 > cat "$stderr"
-> if test -s "$stdout"; then echo stdout-not-empty; else echo stdout-empty; fi
+> cat "$stdout"
 > rm -f "$stdout" "$stderr"
 > EOF
 exit-non-zero
-error: an API key is required for deepseek-v4-pro: pass --api-key
-stdout-empty
+✗ Failed: an API key is required for deepseek-v4-pro: pass --api-key
 ```
 
 ## `openseek sessions` Is Offline
@@ -241,10 +240,11 @@ compacted session demo events 1..2; last_sequence=3
 `cli-YYYYMMDD-HHMMSS-mmm` session under `--session-root` (default `.openseek`),
 exactly as if `--session` had been passed — "what did the agent do?" is usually
 asked after the run, when an unrecorded answer is gone for good. The run
-announces the recording with a `session_started` event on stdout, so the id is
-in the log stream (and any `OPENSEEK_LOG_FILE` mirror); afterwards the run is
-visible to `sessions list`, `sessions show`, the viz server, and `--session
-<id>` resumption.
+announces the recording on stdout. Human output shows a compact `Session:` line;
+`--format jsonl` emits the complete `session_started` event. The raw event also
+appears in any `OPENSEEK_LOG_FILE` mirror. Afterwards the run is visible to
+`sessions list`, `sessions show`, the viz server, and `--session <id>`
+resumption.
 
 This example stays offline by pointing `--api-url` at a closed local port: the
 engine names its session, durably records the user prompt, and only then fails
@@ -254,7 +254,7 @@ to reach the API. The generated id's timestamp is normalized for determinism.
 $ sh <<'EOF'
 > tmp=$(mktemp -d)
 > cd "$tmp"
-> if env DEEPSEEK=test-key openseek.exe run --api-url "http://127.0.0.1:9/chat/completions" "say hi" > out.jsonl 2>/dev/null; then echo exit-zero; else echo exit-non-zero; fi
+> if env DEEPSEEK=test-key openseek.exe run --format jsonl --api-url "http://127.0.0.1:9/chat/completions" "say hi" > out.jsonl 2>/dev/null; then echo exit-zero; else echo exit-non-zero; fi
 > grep -c '"event":"session_started"' out.jsonl
 > env -u DEEPSEEK openseek.exe sessions list | cut -f1 | sed -E 's/cli-[0-9]{8}-[0-9]{6}-[0-9]{3}(-[A-Za-z0-9]+)?/cli-<stamp>/'
 > rm -rf "$tmp"
@@ -264,7 +264,7 @@ exit-non-zero
 cli-<stamp>
 ```
 
-The stdout stream is a protocol, not a log, so a logging environment variable
+The JSONL stdout stream is a protocol, not a log, so a logging environment variable
 must not be able to silence it. `@xlog`'s root level comes from `MOON_XLOG`, and
 every event is info/warn/error — so `MOON_XLOG=warn` once dropped the whole
 stream, and a TUI attached to that engine rendered nothing with no error to
@@ -275,13 +275,33 @@ $ sh <<'EOF'
 > tmp=$(mktemp -d)
 > cd "$tmp"
 > for level in warn error; do
->   env DEEPSEEK=test-key MOON_XLOG=$level openseek.exe run --api-url "http://127.0.0.1:9/chat/completions" --dir "$tmp/$level" "say hi" > "out-$level.jsonl" 2>/dev/null
+>   env DEEPSEEK=test-key MOON_XLOG=$level openseek.exe run --format jsonl --api-url "http://127.0.0.1:9/chat/completions" --dir "$tmp/$level" "say hi" > "out-$level.jsonl" 2>/dev/null
 >   echo "$level: $(grep -c '"event":"agent_step"' "out-$level.jsonl")"
 > done
 > rm -rf "$tmp"
 > EOF
 warn: 1
 error: 1
+```
+
+Human mode is the default, while `OPENSEEK_LOG_FILE` remains a raw JSONL event
+mirror. This lets a terminal stay readable without sacrificing the diagnostic
+stream used by automation.
+
+```mooncram
+$ sh <<'EOF'
+> tmp=$(mktemp -d)
+> cd "$tmp"
+> if env DEEPSEEK=test-key OPENSEEK_LOG_FILE="$tmp/events.jsonl" openseek.exe run --no-session --api-url "http://127.0.0.1:9/chat/completions" "say hi" > human.out 2>/dev/null; then echo exit-zero; else echo exit-non-zero; fi
+> sed -n '1p' human.out
+> grep -c '"event":' human.out || true
+> grep -c '"event":"agent_step"' events.jsonl
+> rm -rf "$tmp"
+> EOF
+exit-non-zero
+… Thinking (step 1)
+0
+1
 ```
 
 `--no-session` turns recording off: the same failing run leaves no session root
@@ -309,7 +329,7 @@ it.
 $ sh <<'EOF'
 > tmp=$(mktemp -d)
 > mkdir -p "$tmp/parent"
-> if env DEEPSEEK=test-key openseek.exe run --dir "$tmp/parent/new" --api-url "http://127.0.0.1:9/chat/completions" "say hi" > "$tmp/out.jsonl" 2>/dev/null; then echo exit-zero; else echo exit-non-zero; fi
+> if env DEEPSEEK=test-key openseek.exe run --format jsonl --dir "$tmp/parent/new" --api-url "http://127.0.0.1:9/chat/completions" "say hi" > "$tmp/out.jsonl" 2>/dev/null; then echo exit-zero; else echo exit-non-zero; fi
 > if test -d "$tmp/parent/new"; then echo dir-created; else echo dir-missing; fi
 > grep -c '"event":"workspace_created"' "$tmp/out.jsonl"
 > env -u DEEPSEEK openseek.exe sessions list --dir "$tmp/parent/new" | cut -f1 | sed -E 's/cli-[0-9]{8}-[0-9]{6}-[0-9]{3}(-[A-Za-z0-9]+)?/cli-<stamp>/'
@@ -330,7 +350,7 @@ Asking for both recording behaviors at once is rejected before any work happens.
 
 ```mooncram
 $ env DEEPSEEK=test-key openseek.exe run --session demo --no-session "say hi" 2>&1
-error: --no-session contradicts --session; pick one behavior
+✗ Failed: --no-session contradicts --session; pick one behavior
 [1]
 ```
 

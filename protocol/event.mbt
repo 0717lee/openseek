@@ -1,7 +1,7 @@
 ///|
-/// One event on the engine's stdout JSONL stream — the wire contract between
-/// `openseek run`/`openseek serve` and every client that reads them (the TUI,
-/// the desktop host, and any script consuming `run`'s stdout).
+/// One event on the engine's JSONL stream — the wire contract between
+/// `openseek serve` (always JSONL), `openseek run --format jsonl`, and every
+/// client that reads them (the TUI, the desktop host, and automation).
 ///
 /// The stream doubles as the process log: `emit` routes through `@xlog`, whose
 /// handler serializes an `Entry` per line as

@@ -152,6 +152,11 @@ fn engine_extra_env(config : AppConfig) -> Map[String, String] {
     "OPENSEEK_SESSION": config.session_id.value(),
     "OPENSEEK_SESSION_ROOT": config.session_root,
     "OPENSEEK_DIR": config.cwd,
+    // `serve` ignores this run-only setting. The legacy one-shot path needs a
+    // current OpenSeek engine to retain the JSONL protocol, while replay/custom
+    // engines can ignore the environment variable without accepting a new
+    // command-line option.
+    "OPENSEEK_RUN_FORMAT": "jsonl",
   }
   // Absent means context-bounded turns: the variable must be OMITTED, not
   // set to "" — the engine treats an empty value as a parse error.
@@ -1023,6 +1028,7 @@ test "engine configuration travels through the environment" {
   assert_eq(dir, ".")
   assert_true(env.get("DEEPSEEK") == Some(config.api_key))
   assert_true(env.get("OPENSEEK_THINKING") == Some("max"))
+  assert_true(env.get("OPENSEEK_RUN_FORMAT") == Some("jsonl"))
   assert_true(
     env.get("OPENSEEK_API_URL") ==
     Some("https://proxy.example/v1/chat/completions"),

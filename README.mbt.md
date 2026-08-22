@@ -66,7 +66,7 @@ git submodule update --init editor/vscode     # opt-in performance suite
 | `bobzhang/openseek/jsonrpc` | Duplex JSON-RPC 2.0 client (concurrent requests, notifications, out-of-order replies). | — |
 | `bobzhang/openseek/mcp` (+ `config`, `stdio`, `streamhttp`, `tools`) | MCP client: `mcp.json` decoding, stdio and Streamable HTTP transports, and the bridge that namespaces server tools into the registry. | — |
 | `bobzhang/openseek/prompt` | Built-in system prompt text (generated from Markdown) and prompt-selection policy. | `prompt/README.mbt.md` |
-| `bobzhang/openseek_protocol` | Typed engine event stream (own module): the `openseek run`/`serve` stdout wire contract, decodable on every backend. | `protocol/README.mbt.md` |
+| `bobzhang/openseek_protocol` | Typed engine event stream (own module): the `openseek serve` and `openseek run --format jsonl` stdout wire contract, decodable on every backend. | `protocol/README.mbt.md` |
 | `bobzhang/openseek_protocol/emit` | Native-only writer for that stream: owns each event's log level. | `protocol/emit/README.mbt.md` |
 | `bobzhang/openseek/agent` | Native-only OpenSeek agent loop and local tool dispatch. | `agent/README.mbt.md` |
 | `bobzhang/openseek/agent_review` | Read-only, compiler-grounded code-review engine behind `openseek review`. | `agent_review/README.mbt.md` |
@@ -129,7 +129,8 @@ filesystem, and process APIs.
 The `cmd/openseek` package is the single-binary entry point — a subcommand tree
 (default: the terminal UI; `run`/`serve`/`review`/`sessions` for the headless
 engine; `mcp` to validate MCP configuration). `openseek run` parses arguments
-and runs the agent package. The agent sends DeepSeek native function tools and
+and runs the agent package, rendering compact human progress by default; pass
+`--format jsonl` for the complete protocol stream. The agent sends DeepSeek native function tools and
 supports eleven local tools: `run_moonbit` — both the scripting surface and the
 command runner, spawning processes through the shell-free
 [`bobzhang/myshell`](https://mooncakes.io/docs/bobzhang/myshell) EDSL, with

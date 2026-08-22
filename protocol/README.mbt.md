@@ -1,9 +1,11 @@
 # OpenSeek Protocol
 
 `bobzhang/openseek_protocol` owns **both directions** of the serve protocol: the
-stdout event stream the engine reports (`Event`), and the stdin command stream it
+JSONL event stream the engine reports (`Event`), and the stdin command stream it
 is told (`Command`). Between them they are the whole wire contract with the TUI,
-the desktop host, the desktop frontend, and any script driving `run` or `serve`.
+the desktop host, the desktop frontend, and any script driving `serve` or
+`run --format jsonl`. A plain `run` renders those same typed events as compact
+human output instead.
 
 It is a **leaf module with no openseek dependencies**, split so the decoder is
 portable:

@@ -102,6 +102,10 @@ async fn run_trial(config : Config, index : Int) -> TrialResult {
     // exists, so the old invocation could not have launched at all).
     "\{repo_root}/cmd/openseek",
     "--",
+    // This harness parses the engine's stdout protocol for tool/step metrics;
+    // the interactive `run` default is intentionally human-readable.
+    "--format",
+    "jsonl",
     "--max-steps",
     config.max_steps.to_string(),
     "--model",

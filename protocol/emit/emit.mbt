@@ -34,7 +34,8 @@ fn level(event : @protocol.Event) -> @xlog.Level {
 }
 
 ///|
-/// Write `event` to the process log, which is the engine's stdout JSONL stream.
+/// Write `event` to the process log. The installed command handler routes it to
+/// a JSONL stream, a compact human renderer, and/or a raw JSONL file mirror.
 ///
 /// `loc` is autofilled from the *caller*, then forwarded to `@xlog`, so each
 /// line's `source` still points at the code that reported the event rather than
