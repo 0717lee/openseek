@@ -34,6 +34,56 @@ test "human run output streams the answer once and reports aggregate usage" {
 }
 
 ///|
+test "human run output streams reasoning before a distinct answer" {
+  assert_eq(
+    render_human_events([
+      AgentStep(step=1),
+      ReasoningDelta(content="I need"),
+      ReasoningDelta(content=" to inspect first.\n"),
+      ReasoningMessage(content="I need to inspect first.\n"),
+      AssistantDelta(content="Done"),
+      AssistantMessage(content="Done"),
+      AgentFinished(answer="Done"),
+    ]),
+    "… Thinking (step 1)\nI need to inspect first.\n→ Answer\nDone\n✓ Finished · 1 step\n",
+  )
+}
+
+///|
+test "human run output separates tool-only reasoning from the final answer" {
+  assert_eq(
+    render_human_events([
+      AgentStep(step=1),
+      ReasoningDelta(content="Use the finish tool."),
+      ToolResult(
+        tool_call_id="call_finish",
+        tool_name="finish",
+        is_error=false,
+        content="Done",
+        brief=None,
+      ),
+      AgentFinished(answer="Done"),
+    ]),
+    "… Thinking (step 1)\nUse the finish tool.\n✓ finish — Done\n→ Answer\nDone\n✓ Finished · 1 step\n",
+  )
+}
+
+///|
+test "human run output keeps an interleaved reasoning phase readable" {
+  assert_eq(
+    render_human_events([
+      AgentStep(step=1),
+      AssistantDelta(content="partial"),
+      ReasoningDelta(content="late thought"),
+      AssistantDelta(content=" rest"),
+      AssistantMessage(content="partial rest"),
+      AgentFinished(answer="partial rest"),
+    ]),
+    "… Thinking (step 1)\npartial\n… Thinking (step 1, continued)\nlate thought\n→ Answer\n rest\n✓ Finished · 1 step\n",
+  )
+}
+
+///|
 test "human run output reduces tools and terminal events to compact lines" {
   assert_eq(
     render_human_events([
@@ -135,6 +185,7 @@ test "human fleet output suppresses attempt events but preserves diagnostics" {
       [
         FleetStarted(runs=2, task="task"),
         AgentStep(step=1),
+        ReasoningDelta(content="interleaved thought"),
         AssistantDelta(content="interleaved"),
         AgentFinished(answer="done"),
         McpConfigIgnored(reason="fleet mode does not support MCP servers"),

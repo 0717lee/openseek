@@ -129,7 +129,8 @@ pub fn decode_engine_event(
     // to an open turn, unlike the finish this view previews;
     // `session_started`/`workspace_created`/`fleet_started` describe a headless
     // run's setup; the MCP events are engine-side registry diagnostics.
-    GoalUpdated(..)
+    ReasoningDelta(..)
+    | GoalUpdated(..)
     | GoalBlocked(..)
     | GoalUnblocked
     | GoalCheck(..)
@@ -185,6 +186,12 @@ test "decode recognizes the streaming events" {
     is Some(ReasoningMessage("all")) else {
     fail("reasoning_message not decoded")
   }
+  assert_true(
+    decode_engine_event(
+      event_fields({ "event": "reasoning_delta", "content": "live" }),
+    )
+    is None,
+  )
 }
 
 ///|

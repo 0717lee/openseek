@@ -59,14 +59,26 @@ async test "chat stream handler accumulates SSE content, tool calls, and usage" 
     let client = @client.Client(api_key="test-key", api_url=url)
     let deltas : Array[String] = []
     let reasoning_deltas : Array[String] = []
+    let callbacks : Array[String] = []
     let response = client.chat(
       [ChatMessage(User, content="hello")],
-      stream=StreamHandler(on_content_delta=delta => deltas.push(delta), on_reasoning_delta=delta => {
-        reasoning_deltas.push(delta)
-      }),
+      stream=StreamHandler(
+        on_content_delta=delta => {
+          deltas.push(delta)
+          callbacks.push("content:\{delta}")
+        },
+        on_reasoning_delta=delta => {
+          reasoning_deltas.push(delta)
+          callbacks.push("reasoning:\{delta}")
+        },
+      ),
     )
     assert_eq(deltas.join("|"), "Hello| world")
     assert_eq(reasoning_deltas.join("|"), "hidden")
+    assert_eq(
+      callbacks.join("|"),
+      "content:Hello|reasoning:hidden|content: world",
+    )
     assert_eq(response.content, "Hello world")
     assert_eq(response.reasoning_content, "hidden")
     assert_eq(response.tool_calls.length(), 1)

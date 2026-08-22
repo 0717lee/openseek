@@ -188,6 +188,7 @@ async fn run_one_attempt(
       append_item=(session, item) => store.append(session, item),
       max_steps?,
       thinking~,
+      emit_reasoning_deltas=true,
       api_url?,
       workspace_root=run_dir,
     )

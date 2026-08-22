@@ -70,6 +70,14 @@ fn human_brief(text : String, limit? : Int = 120) -> String {
 }
 
 ///|
+/// Which kind of provider prose was most recently streamed.
+priv enum HumanRunStreamPhase {
+  Waiting
+  Reasoning
+  Answer
+}
+
+///|
 /// Stateful reduction of typed engine events into compact human output.
 /// Returning a chunk rather than writing here keeps the reducer pure with
 /// respect to IO and makes duplicate suppression directly testable.
@@ -77,6 +85,7 @@ priv struct HumanRunRenderer {
   suppress_events : Bool
   mut step : Int
   mut line_open : Bool
+  mut stream_phase : HumanRunStreamPhase
   mut saw_delta : Bool
   mut last_assistant : String?
   mut last_assistant_printed : Bool
@@ -92,6 +101,7 @@ fn HumanRunRenderer::HumanRunRenderer(
     suppress_events,
     step: 0,
     line_open: false,
+    stream_phase: Waiting,
     saw_delta: false,
     last_assistant: None,
     last_assistant_printed: false,
@@ -124,6 +134,24 @@ fn HumanRunRenderer::answer(self : HumanRunRenderer, text : String) -> String {
   let prefix = self.break_line()
   self.line_open = !safe.has_suffix("\n")
   "\{prefix}\{safe}"
+}
+
+///|
+/// Separate streamed reasoning from the next visible answer fragment.
+/// Whitespace-only content cannot consume the transition before prose begins.
+fn HumanRunRenderer::answer_marker(
+  self : HumanRunRenderer,
+  text : String,
+) -> String {
+  if self.stream_phase is Reasoning && !human_content(text).is_blank() {
+    self.stream_phase = Answer
+    self.line("→ Answer")
+  } else {
+    if self.stream_phase is Waiting && !human_content(text).is_blank() {
+      self.stream_phase = Answer
+    }
+    ""
+  }
 }
 
 ///|
@@ -179,20 +207,38 @@ fn HumanRunRenderer::render(
   match event {
     AgentStep(step~) => {
       self.step = step
+      self.stream_phase = Waiting
       self.saw_delta = false
       self.last_assistant = None
       self.last_assistant_printed = false
       self.line("… Thinking (step \{step})")
+    }
+    ReasoningDelta(content~) => {
+      let safe = human_content(content)
+      if safe == "" {
+        ""
+      } else {
+        let prefix = if self.stream_phase is Answer {
+          self.line("… Thinking (step \{self.step}, continued)")
+        } else {
+          ""
+        }
+        self.stream_phase = Reasoning
+        self.line_open = !safe.has_suffix("\n")
+        "\{prefix}\{safe}"
+      }
     }
     AssistantDelta(content~) => {
       let safe = human_content(content)
       if safe == "" {
         ""
       } else {
+        let prefix = self.answer_marker(safe)
         self.saw_delta = true
-        self.last_assistant_printed = true
+        self.last_assistant_printed = self.last_assistant_printed ||
+          !safe.is_blank()
         self.line_open = !safe.has_suffix("\n")
-        safe
+        "\{prefix}\{safe}"
       }
     }
     AssistantMessage(content~) => {
@@ -200,8 +246,9 @@ fn HumanRunRenderer::render(
       if self.saw_delta {
         self.break_line()
       } else {
-        self.last_assistant_printed = !content.is_blank()
-        self.answer(content)
+        let prefix = self.answer_marker(content)
+        self.last_assistant_printed = !human_content(content).is_blank()
+        "\{prefix}\{self.answer(content)}"
       }
     }
     ReasoningMessage(..) => ""
@@ -219,6 +266,7 @@ fn HumanRunRenderer::render(
       if !(self.last_assistant is Some(previous) &&
         previous == answer &&
         self.last_assistant_printed) {
+        out <+ "\{self.answer_marker(answer)}"
         out <+ "\{self.answer(answer)}"
       } else {
         out <+ "\{self.break_line()}"
@@ -259,6 +307,7 @@ fn HumanRunRenderer::render(
       self.line("✗ Context compaction failed: \{human_brief(error)}")
     ContextYield(answer~, ..) => {
       let out = StringBuilder()
+      out <+ "\{self.answer_marker(answer)}"
       out <+ "\{self.answer(answer)}"
       out <+ "\{self.terminal_line("⚠", "Context limit reached")}"
       out.to_string()

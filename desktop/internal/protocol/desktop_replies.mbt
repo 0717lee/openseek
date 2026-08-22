@@ -1500,6 +1500,10 @@ pub fn AgentStreamEvent::remote_lifecycle(
   self : AgentStreamEvent,
 ) -> AgentStreamEvent? {
   match self.event {
+    // One-shot `run` can expose live reasoning, but Desktop's `serve` engine
+    // deliberately does not. Never forward a future accidental delta to a
+    // remote client before the GUI has an explicit bounded rendering policy.
+    ReasoningDelta(..) => None
     ReasoningMessage(..) =>
       Some({ ..self, event: ReasoningMessage(content="") })
     AssistantMessage(..) =>

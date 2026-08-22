@@ -335,7 +335,7 @@ async fn reasoning_log_test_server(group : @async.TaskGroup[Unit]) -> String? {
 }
 
 ///|
-async test "streaming reasoning deltas are skipped in logs" {
+async test "streaming reasoning deltas are opt-in and stay transient" {
   @async.with_task_group() <| group => {
     guard reasoning_log_test_server(group) is Some(url) else { return }
     let entries : Array[Json] = []
@@ -370,6 +370,41 @@ async test "streaming reasoning deltas are skipped in logs" {
     assert_true(event_names.contains("reasoning_message"))
     assert_true(event_names.contains("assistant_delta"))
     assert_true(event_names.contains("assistant_message"))
+
+    entries.clear()
+    guard reasoning_log_test_server(group) is Some(streaming_url) else {
+      return
+    }
+    let streaming_session = @agent_session.Session(
+      SessionId("reasoning-stream-test"),
+      system_prompt="system",
+    )
+    let streaming_result = @agent.run_turn_with_append(
+      api_key="test-key",
+      model=Deepseek(V4Flash),
+      session=streaming_session,
+      task="do the task",
+      append_item=(session, item) => session.append(item),
+      max_steps=1,
+      emit_reasoning_deltas=true,
+      api_url=streaming_url,
+    )
+    // Deltas are a transient wire concern: opting in must not add durable
+    // session items or duplicate the completed reasoning-bearing response.
+    assert_eq(streaming_result.events().length(), 2)
+    let reasoning_deltas : Array[String] = []
+    for entry in entries {
+      if entry
+        is {
+          "event": String("reasoning_delta"),
+          "content": String(content),
+          ..
+        } {
+        reasoning_deltas.push(content)
+      }
+    }
+    assert_eq(reasoning_deltas.join(""), "I think")
+    assert_true(entries.map(log_event).contains("reasoning_message"))
   }
 }
 

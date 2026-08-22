@@ -675,6 +675,19 @@ test "remote lifecycle frames keep state without transcript text" {
       "summary": "",
     },
   })
+  assert_true(
+    notification_for_client(
+      AgentEvent({
+        run_id: None,
+        session: "session-1",
+        event: {
+          event: ReasoningDelta(content="live thought"),
+          submission_id: None,
+        },
+      }),
+    )
+    is None,
+  )
   let settled_events : Array[@wire.Event] = [
     ReasoningMessage(content="large content"),
     AssistantMessage(content="large content"),

@@ -115,7 +115,7 @@ fn reject_session_contradiction(matches : @argparse.Matches) -> Unit raise {
 ///|
 /// `openseek run [TASK…]` — a headless one-shot agent run (best-of-N under
 /// `--concurrency`), with compact human stdout by default and the complete
-/// event protocol under `--format jsonl`.
+/// run event protocol, including reasoning deltas, under `--format jsonl`.
 async fn run_task_command(matches : @argparse.Matches) -> Unit {
   let concurrency_input = match matches {
     { values: { "concurrency": [input, ..], .. }, .. } => input
@@ -352,6 +352,7 @@ async fn run_task_turn(
         },
         max_steps?,
         thinking~,
+        emit_reasoning_deltas=true,
         api_url?,
         tools~,
         on_goal_met?,

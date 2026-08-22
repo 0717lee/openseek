@@ -25,6 +25,12 @@ test "decode assistant events" {
     Some(AssistantMessage(text)) => assert_eq(text, "hello")
     _ => fail("expected assistant message")
   }
+  // `openseek run` can opt into this event, but Desktop drives `serve` and
+  // keeps completed reasoning as its sole thought source.
+  assert_true(
+    @event.decode_event({ "event": "reasoning_delta", "content": "live" })
+    is None,
+  )
 }
 
 ///|

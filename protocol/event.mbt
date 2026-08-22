@@ -20,6 +20,10 @@ pub(all) enum Event {
   MaxStepsExhausted
   TurnFailed(error~ : String)
   AssistantDelta(content~ : String)
+  /// One provider reasoning fragment. Only one-shot `openseek run` opts into
+  /// emitting these; long-lived `serve` turns keep reasoning private until the
+  /// completed `ReasoningMessage` is available.
+  ReasoningDelta(content~ : String)
   AssistantMessage(content~ : String)
   ReasoningMessage(content~ : String)
   Usage(usage~ : Usage)

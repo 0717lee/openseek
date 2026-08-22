@@ -5,7 +5,9 @@ JSONL event stream the engine reports (`Event`), and the stdin command stream it
 is told (`Command`). Between them they are the whole wire contract with the TUI,
 the desktop host, the desktop frontend, and any script driving `serve` or
 `run --format jsonl`. A plain `run` renders those same typed events as compact
-human output instead.
+human output instead. `ReasoningDelta` is an explicitly opt-in event: one-shot
+`run` enables it for live progress, while `serve` continues to emit only the
+completed `ReasoningMessage` so existing GUI behavior is unchanged.
 
 It is a **leaf module with no openseek dependencies**, split so the decoder is
 portable:
@@ -58,7 +60,9 @@ What that caught, once the readers were made exhaustive:
 
 - **`reasoning_delta`** had not been emitted since 2026-06-21 (a85d5682), yet the
   TUI and the desktop both still decoded it and rendered a live "thinking" view
-  from it — under tests that passed on fabricated lines.
+  from it — under tests that passed on fabricated lines. It is now reintroduced
+  as a typed, tested event emitted only when one-shot `run` explicitly opts in;
+  the TUI and Desktop still ignore it.
 - **`runtime_update`** had not been emitted since 2026-07-05 (4b1ec831), yet the
   desktop host still decoded it, likewise under a passing test.
 - The desktop host **synthesized `compaction_failed` with `reason`** while the

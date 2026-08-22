@@ -57,14 +57,18 @@ with `OPENSEEK_SYSTEM_PROMPT_FILE` and
 `--session-root` / `OPENSEEK_SESSION_ROOT` (default `.openseek`). Relative
 session roots are resolved under `--dir`.
 
-`run` writes compact human output to stdout by default: a thinking marker makes
-long model reasoning visible, assistant prose streams as it arrives, tool calls
-become one-line summaries, and the terminal line reports steps and token usage.
+`run` writes compact human output to stdout by default: provider reasoning
+streams as readable prose under a thinking marker, assistant prose follows
+under a distinct answer marker, tool calls become one-line summaries, and the
+terminal line reports steps and token usage. Reasoning deltas are enabled only
+for this one-shot command; `serve`, the TUI, and Desktop retain their existing
+completed-reasoning behavior.
 Runtime failures use the same stdout stream and retain a non-zero exit status;
 argument-parser errors still use stderr.
 Use `--format jsonl` (or `OPENSEEK_RUN_FORMAT=jsonl`) for the complete,
-backward-compatible event stream needed by scripts. This option belongs only to
-the one-shot `run` command; `serve` and
+machine-readable event stream needed by scripts, including the one-shot run's
+`reasoning_delta` fragments. This option belongs only to the one-shot `run`
+command; `serve` and
 the internal `subrun` protocol remain JSONL unconditionally. When
 `OPENSEEK_LOG_FILE` is set, it always receives raw JSONL events regardless of
 the terminal format.

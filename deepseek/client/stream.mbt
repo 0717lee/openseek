@@ -116,13 +116,15 @@ async fn apply_stream_delta(
   on_content_delta~ : async (String) -> Unit,
   on_reasoning_delta~ : async (String) -> Unit,
 ) -> Unit {
-  if delta is { "content": String(content), .. } && content != "" {
-    acc.content <+ "\{content}"
-    on_content_delta(content)
-  }
+  // Some compatible providers put both fields in one SSE object. Reasoning
+  // logically precedes the answer, so preserve that order for live renderers.
   if delta is { "reasoning_content": String(reasoning), .. } && reasoning != "" {
     acc.reasoning_content <+ "\{reasoning}"
     on_reasoning_delta(reasoning)
+  }
+  if delta is { "content": String(content), .. } && content != "" {
+    acc.content <+ "\{content}"
+    on_content_delta(content)
   }
   if delta is { "tool_calls": Array(calls), .. } {
     for index, call in calls {
