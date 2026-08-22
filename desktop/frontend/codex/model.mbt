@@ -267,7 +267,9 @@ enum Msg {
   CancelLogin
   Logout
   RequestAnswer(request_key~ : String, question_id~ : String, answer~ : String)
-  Respond(request_key~ : String, decision~ : String)
+  // Command approvals can carry an execution-policy amendment object, not
+  // only a string. Preserve the exact advertised decision through the UI.
+  Respond(request_key~ : String, decision~ : Json)
   Reply(kind~ : CodexReplyKind, value~ : Json)
   Failed(kind~ : CodexReplyKind, message~ : String)
   StatusChanged(Json)
@@ -2049,6 +2051,29 @@ fn CodexPendingRequest::decode(
 }
 
 ///|
+/// Use the server's advertised choices when present. Older app-server builds
+/// omitted `availableDecisions`, so retain their original three-button set as
+/// the compatibility fallback for command and file approvals.
+fn CodexPendingRequest::approval_decisions(
+  self : CodexPendingRequest,
+) -> Array[Json] {
+  if self.params is Object(fields) &&
+    fields.get("availableDecisions") is Some(Array(decisions)) {
+    return decisions
+  }
+  match self.method_ {
+    "item/commandExecution/requestApproval"
+    | "item/fileChange/requestApproval" =>
+      [
+        Json::string("accept"),
+        Json::string("acceptForSession"),
+        Json::string("decline"),
+      ]
+    _ => []
+  }
+}
+
+///|
 fn State::with_request_answer(
   self : State,
   request_key : String,
@@ -2109,20 +2134,20 @@ fn CodexPendingRequest::questions(
 ///|
 fn CodexPendingRequest::response(
   self : CodexPendingRequest,
-  decision : String,
+  decision : Json,
 ) -> Json? {
   match self.method_ {
     "item/commandExecution/requestApproval"
-    | "item/fileChange/requestApproval" =>
-      Some({ "decision": Json::string(decision) })
-    "item/permissions/requestApproval" =>
-      if decision == "decline" {
+    | "item/fileChange/requestApproval" => Some({ "decision": decision })
+    "item/permissions/requestApproval" => {
+      guard decision is String(decision_name) else { return None }
+      if decision_name == "decline" || decision_name == "cancel" {
         Some({ "permissions": {}, "scope": "turn" })
       } else if self.params is Object(fields) &&
         fields.get("permissions") is Some(permissions) {
         Some({
           "permissions": permissions,
-          "scope": if decision == "acceptForSession" {
+          "scope": if decision_name == "acceptForSession" {
             "session"
           } else {
             "turn"
@@ -2131,6 +2156,7 @@ fn CodexPendingRequest::response(
       } else {
         None
       }
+    }
     "item/tool/requestUserInput" => {
       let answers : Map[String, Json] = Map([])
       for question in self.questions() {
@@ -2142,9 +2168,10 @@ fn CodexPendingRequest::response(
       }
       Some({ "answers": Json::object(answers) })
     }
-    "mcpServer/elicitation/request" =>
-      if decision == "decline" || decision == "cancel" {
-        Some({ "action": Json::string(decision), "content": Json::null() })
+    "mcpServer/elicitation/request" => {
+      guard decision is String(decision_name) else { return None }
+      if decision_name == "decline" || decision_name == "cancel" {
+        Some({ "action": Json::string(decision_name), "content": Json::null() })
       } else {
         let text = self.answers
           .get("__content")
@@ -2154,6 +2181,7 @@ fn CodexPendingRequest::response(
         let content = @json.parse(text) catch { _ => return None }
         Some({ "action": "accept", "content": content })
       }
+    }
     _ => None
   }
 }
@@ -2577,7 +2605,7 @@ test "Codex interrupt authority requires the local writer" {
 }
 
 ///|
-test "Codex user-input replies preserve exact question ids" {
+test "Codex request replies preserve structured values" {
   let request : CodexPendingRequest = {
     request_id: Json::number(7),
     thread_id: "thread-1",
@@ -2595,9 +2623,22 @@ test "Codex user-input replies preserve exact question ids" {
     answers: { "scope": "Small" },
   }
   assert_eq(
-    request.response("accept"),
+    request.response(Json::string("accept")),
     Some({ "answers": { "scope": { "answers": ["Small"] } } }),
   )
+  let command : CodexPendingRequest = {
+    request_id: Json::number(8),
+    thread_id: "thread-1",
+    method_: "item/commandExecution/requestApproval",
+    params: { "threadId": "thread-1" },
+    answers: {},
+  }
+  let decision : Json = {
+    "acceptWithExecpolicyAmendment": {
+      "execpolicy_amendment": ["moon", "info"],
+    },
+  }
+  assert_eq(command.response(decision), Some({ "decision": decision }))
 }
 
 ///|

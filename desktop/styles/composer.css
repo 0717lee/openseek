@@ -6,6 +6,15 @@
   padding: 16px 24px 18px;
 }
 
+/* Caller-owned notices and approval panels remain a stable DOM sibling above
+   the focus-holding composer card. When present, space them from each other
+   and from the input so their borders do not visually merge. */
+.composer-context:not(:empty) {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
 /* Archived transcripts occupy the composer's grid row but expose only their
    immutable state and the explicit action that returns the record to live. */
 .archived-read-only-bar {

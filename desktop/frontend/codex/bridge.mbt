@@ -917,7 +917,7 @@ fn State::respond(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
   request_key : String,
-  decision : String,
+  decision : Json,
 ) -> @cmd.Cmd {
   let mut selected : CodexPendingRequest? = None
   for request in self.pending_requests {
