@@ -4,27 +4,47 @@ test "Codex thread start omits absent optional fields" {
     cwd: Some("/work/project"),
     model: None,
     draft_id: Some("desktop-draft-1"),
+    permission_mode: AutoReview,
   }
   @debug.assert_eq(payload.to_json(), {
     "cwd": "/work/project",
     "openseekDraftId": "desktop-draft-1",
+    "permissionMode": "autoReview",
   })
 }
 
 ///|
-test "Codex turn payloads keep app-server field names" {
+test "Codex permission modes and turn payloads keep Desktop field names" {
+  let modes : Array[@protocol.CodexPermissionMode] = [
+    RequestApproval,
+    AutoReview,
+    FullAccess,
+  ]
+  @debug.assert_eq(modes.map(mode => mode.to_json()), [
+    "requestApproval", "autoReview", "fullAccess",
+  ])
+  let resume_request : @protocol.CodexThreadResumePayload = {
+    thread_id: "thread-1",
+    permission_mode: RequestApproval,
+  }
+  @debug.assert_eq(resume_request.to_json(), {
+    "threadId": "thread-1",
+    "permissionMode": "requestApproval",
+  })
   let start : @protocol.CodexTurnStartPayload = {
     thread_id: "thread-1",
     input: [{ "type": "text", "text": "hello" }],
     model: Some("gpt-test"),
     effort: Some("high"),
     cwd: None,
+    permission_mode: FullAccess,
   }
   @debug.assert_eq(start.to_json(), {
     "threadId": "thread-1",
     "input": [{ "type": "text", "text": "hello" }],
     "model": "gpt-test",
     "effort": "high",
+    "permissionMode": "fullAccess",
   })
   let steer : @protocol.CodexTurnSteerPayload = {
     thread_id: "thread-1",

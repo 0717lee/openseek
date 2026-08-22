@@ -928,6 +928,9 @@ pub fn State::page(
       }.render(),
     )
   }
+  if self.permission_picker.confirmation_dialog(dispatch) is Some(dialog) {
+    page.push(dialog)
+  }
   page
 }
 

@@ -265,7 +265,7 @@ pub let codex_thread_start : Command[
 
 ///|
 pub let codex_thread_resume : Command[
-  @protocol.CodexThreadPayload,
+  @protocol.CodexThreadResumePayload,
   @protocol.CodexCommandReply[@protocol.CodexThreadResumeReply],
 ] = Command("codex.thread.resume")
 

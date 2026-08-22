@@ -21,10 +21,71 @@ pub fn update(
     SkillsFailed(cwd~) => (@cmd.none, state.with_skill_failure(cwd))
     ModelChanged(value) => (@cmd.none, state.with_selected_model(value))
     EffortChanged(value) => (@cmd.none, state.with_selected_effort(value))
+    TogglePermissionMenu =>
+      if state.can_choose_permission() {
+        (
+          @cmd.none,
+          {
+            ..state,
+            permission_picker: state.permission_picker.toggle(),
+            git_details_open: false,
+          },
+        )
+      } else {
+        (@cmd.none, state)
+      }
+    DismissPermissionMenu =>
+      (
+        @cmd.none,
+        { ..state, permission_picker: state.permission_picker.close() },
+      )
+    ChoosePermission(mode) =>
+      if state.can_choose_permission() {
+        (
+          @cmd.none,
+          {
+            ..state,
+            permission_picker: state.permission_picker.choose(mode),
+            git_details_open: false,
+          },
+        )
+      } else {
+        (@cmd.none, state)
+      }
+    ConfirmFullAccess =>
+      if state.can_choose_permission() {
+        (
+          @cmd.none,
+          {
+            ..state,
+            permission_picker: state.permission_picker.confirm_full_access(),
+          },
+        )
+      } else {
+        (
+          @cmd.none,
+          { ..state, permission_picker: state.permission_picker.close() },
+        )
+      }
+    CancelFullAccess =>
+      (
+        @cmd.none,
+        {
+          ..state,
+          permission_picker: state.permission_picker.cancel_full_access(),
+        },
+      )
     GitLoaded(thread_id~, reply~) =>
       (@cmd.none, state.with_git_reply(thread_id, reply))
     ToggleGitDetails =>
-      (@cmd.none, { ..state, git_details_open: !state.git_details_open })
+      (
+        @cmd.none,
+        {
+          ..state,
+          git_details_open: !state.git_details_open,
+          permission_picker: state.permission_picker.close(),
+        },
+      )
     CloseGitDetails => (@cmd.none, state.with_git_details_closed())
     ToggleWorktreeMode =>
       if state.can_choose_worktree() {
@@ -418,6 +479,9 @@ pub fn update(
     }
     Notification(method_~, params~, generation~) => {
       let mut next = state.with_notification(method_, params, generation)
+      if !next.can_choose_permission() {
+        next = { ..next, permission_picker: next.permission_picker.close() }
+      }
       if method_ == "skills/changed" {
         let invalidated = next.loading_context(true)
         return (
@@ -753,6 +817,89 @@ test "Codex cwd-less draft remains a Local first prompt" {
 }
 
 ///|
+test "Codex permission picker confirms full access and freezes while running" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let open_external = (_ : String) => @cmd.none
+  let idle = State::from_thread_snapshot({
+    "thread": { "id": "thread-1", "turns": [] },
+  })
+  assert_eq(idle.permission_mode(), @protocol.AutoReview)
+  let (_, opened) = update(
+    dispatch,
+    TogglePermissionMenu,
+    idle,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  assert_true(opened.permission_picker is CodexPermissionOpen(_))
+  let (_, requested) = update(
+    dispatch,
+    ChoosePermission(@protocol.RequestApproval),
+    opened,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  assert_eq(requested.permission_mode(), @protocol.RequestApproval)
+  let (_, warning) = update(
+    dispatch,
+    ChoosePermission(@protocol.FullAccess),
+    requested,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  assert_true(
+    warning.permission_picker is CodexPermissionConfirmingFullAccess(_),
+  )
+  assert_eq(warning.permission_mode(), @protocol.RequestApproval)
+  let (_, cancelled) = update(
+    dispatch,
+    CancelFullAccess,
+    warning,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  assert_eq(cancelled.permission_mode(), @protocol.RequestApproval)
+  let (_, warning) = update(
+    dispatch,
+    ChoosePermission(@protocol.FullAccess),
+    cancelled,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  let (_, confirmed) = update(
+    dispatch,
+    ConfirmFullAccess,
+    warning,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  assert_eq(confirmed.permission_mode(), @protocol.FullAccess)
+
+  let running = State::from_thread_snapshot({
+    "thread": {
+      "id": "thread-1",
+      "turns": [{ "id": "turn-1", "status": "inProgress", "items": [] }],
+    },
+  })
+  let (_, unchanged1) = update(
+    dispatch,
+    ChoosePermission(@protocol.RequestApproval),
+    running,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  let (_, unchanged2) = update(
+    dispatch,
+    ChoosePermission(@protocol.RequestApproval),
+    running,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  assert_true(unchanged1 == unchanged2)
+  assert_eq(unchanged1.permission_mode(), @protocol.AutoReview)
+}
+
+///|
 test "cwd-less stored Codex tasks expose Terminal scratch without Files" {
   let state = State::from_thread_snapshot({
     "thread": { "id": "thread-scratch", "turns": [] },
@@ -842,6 +989,13 @@ test "Codex update handlers are pure and idempotent" {
     ),
     ModelChanged("gpt-test"),
     EffortChanged("high"),
+    TogglePermissionMenu,
+    DismissPermissionMenu,
+    ChoosePermission(@protocol.RequestApproval),
+    ChoosePermission(@protocol.AutoReview),
+    ChoosePermission(@protocol.FullAccess),
+    ConfirmFullAccess,
+    CancelFullAccess,
     ToggleGitDetails,
     CloseGitDetails,
     ToggleWorktreeMode,

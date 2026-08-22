@@ -410,7 +410,9 @@ pub fn endpoints(
     @endpoint.Endpoint::codex(@commands.codex_thread_start, async fn(payload) {
       state.codex_thread_start(payload)
     }),
-    state.codex_endpoint(@commands.codex_thread_resume),
+    @endpoint.Endpoint::codex(@commands.codex_thread_resume, async fn(payload) {
+      state.codex_thread_resume(payload)
+    }),
     state.codex_endpoint(@commands.codex_thread_read),
     @endpoint.Endpoint::codex(@commands.codex_thread_history_read, async fn(
       payload,
@@ -867,8 +869,9 @@ async fn ApiState::open_codex_draft(
 
 ///|
 /// Start a thread only from the exact draft cwd already authorized by
-/// `codex.draft.open`. The browser-facing command cannot select app-server
-/// sandbox or approval policy; only cwd and model cross this boundary.
+/// `codex.draft.open`. The browser chooses one Desktop permission mode; the
+/// native boundary expands it to the matching app-server reviewer and named
+/// permission profile instead of accepting arbitrary sandbox JSON.
 async fn ApiState::codex_thread_start(
   self : ApiState,
   request : @protocol.CodexThreadStartPayload,
@@ -902,6 +905,18 @@ async fn ApiState::codex_thread_start(
 }
 
 ///|
+/// Claim the stored task writer and install the permission mode atomically.
+/// Opening history remains read-only and never reaches this path.
+async fn ApiState::codex_thread_resume(
+  self : ApiState,
+  request : @protocol.CodexThreadResumePayload,
+) -> @protocol.CodexThreadResumeReply {
+  @json.from_json(
+    self.codex_request("codex.thread.resume", request.app_server_params()),
+  )
+}
+
+///|
 /// A worktree first turn may override cwd, but only with the exact checkout
 /// the native worktree operation just authorized for this thread.
 async fn ApiState::codex_turn_start(
@@ -917,7 +932,7 @@ async fn ApiState::codex_turn_start(
     }
   }
   @json.from_json(
-    self.codex_request("codex.turn.start", ToJson::to_json(request)),
+    self.codex_request("codex.turn.start", request.app_server_params()),
   )
 }
 
@@ -1201,6 +1216,7 @@ test "Codex draft creation reuses a successful native reply until close" {
     cwd: Some("/work/project"),
     model: Some("gpt-test"),
     draft_id: Some("desktop-draft-1"),
+    permission_mode: AutoReview,
   }
   let reply : @protocol.CodexThreadReply = {
     thread: { "id": "thread-1", "cwd": "/work/project" },
@@ -1208,9 +1224,14 @@ test "Codex draft creation reuses a successful native reply until close" {
   assert_true(drafts.cached(request) is None)
   drafts.remember(request, reply)
   assert_eq(drafts.cached(request), Some(reply))
-  // Model selection belongs to the eventual turn. Changing it after an
-  // ambiguous thread/start reply must still adopt the one created task.
+  // Model and permission selection belong to the eventual turn. Changing
+  // either after an ambiguous thread/start reply must still adopt the one
+  // created task; turn/start installs the current selection.
   assert_eq(drafts.cached({ ..request, model: Some("gpt-other") }), Some(reply))
+  assert_eq(
+    drafts.cached({ ..request, permission_mode: FullAccess }),
+    Some(reply),
+  )
   drafts.forget("desktop-draft-1")
   assert_true(drafts.cached(request) is None)
 }

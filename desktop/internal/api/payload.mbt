@@ -45,6 +45,32 @@ fn ArchivedSessionPayload::canonical_session(
 }
 
 ///|
+/// Translate one Desktop permission choice into the current experimental
+/// app-server fields. Auto-review changes the reviewer, not the sandbox; full
+/// access deliberately removes both the approval prompt and sandbox boundary.
+fn @protocol.CodexPermissionMode::write_app_server_settings(
+  self : @protocol.CodexPermissionMode,
+  fields : Map[String, Json],
+) -> Unit {
+  match self {
+    RequestApproval => {
+      fields["approvalPolicy"] = Json::string("on-request")
+      fields["approvalsReviewer"] = Json::string("user")
+      fields["permissions"] = Json::string(":workspace")
+    }
+    AutoReview => {
+      fields["approvalPolicy"] = Json::string("on-request")
+      fields["approvalsReviewer"] = Json::string("auto_review")
+      fields["permissions"] = Json::string(":workspace")
+    }
+    FullAccess => {
+      fields["approvalPolicy"] = Json::string("never")
+      fields["permissions"] = Json::string(":danger-full-access")
+    }
+  }
+}
+
+///|
 /// Reduce Desktop's typed thread/start request to the fields owned by the
 /// app-server. The draft id exists only to prove the selected cwd below.
 fn @protocol.CodexThreadStartPayload::app_server_params(
@@ -59,6 +85,42 @@ fn @protocol.CodexThreadStartPayload::app_server_params(
   if self.model is Some(model) && !model.trim().is_empty() {
     fields["model"] = Json::string(model)
   }
+  self.permission_mode.write_app_server_settings(fields)
+  Json::object(fields)
+}
+
+///|
+/// Resume acquires the task writer and installs the selected permission mode
+/// in the same request, so no turn can slip through under stale settings.
+fn @protocol.CodexThreadResumePayload::app_server_params(
+  self : @protocol.CodexThreadResumePayload,
+) -> Json {
+  let fields : Map[String, Json] = { "threadId": Json::string(self.thread_id) }
+  self.permission_mode.write_app_server_settings(fields)
+  Json::object(fields)
+}
+
+///|
+/// A turn-level override becomes app-server's default for later turns too.
+/// Carrying the mode here covers already-writable tasks without a separate
+/// settings mutation between the user's selection and Send.
+fn @protocol.CodexTurnStartPayload::app_server_params(
+  self : @protocol.CodexTurnStartPayload,
+) -> Json {
+  let fields : Map[String, Json] = {
+    "threadId": Json::string(self.thread_id),
+    "input": Json::array(self.input),
+  }
+  if self.model is Some(model) {
+    fields["model"] = Json::string(model)
+  }
+  if self.effort is Some(effort) {
+    fields["effort"] = Json::string(effort)
+  }
+  if self.cwd is Some(cwd) {
+    fields["cwd"] = Json::string(cwd)
+  }
+  self.permission_mode.write_app_server_settings(fields)
   Json::object(fields)
 }
 
@@ -85,29 +147,46 @@ test "Codex thread start maps the Desktop envelope to app-server" {
     "cwd": "/work/project",
     "model": "gpt-test",
     "openseekDraftId": "desktop-draft-1",
+    "permissionMode": "autoReview",
   })
   assert_eq(request.app_server_params(), {
+    "approvalPolicy": "on-request",
+    "approvalsReviewer": "auto_review",
     "cwd": "/work/project",
     "model": "gpt-test",
+    "permissions": ":workspace",
     "serviceName": "openseek_desktop",
   })
 }
 
 ///|
-test "Codex turn start preserves its typed app-server fields" {
+test "Codex resume and turn map full access without a reviewer" {
+  let resume_request : @protocol.CodexThreadResumePayload = @json.from_json({
+    "threadId": "thread-1",
+    "permissionMode": "fullAccess",
+  })
+  assert_eq(resume_request.app_server_params(), {
+    "threadId": "thread-1",
+    "approvalPolicy": "never",
+    "permissions": ":danger-full-access",
+  })
   let request : @protocol.CodexTurnStartPayload = @json.from_json({
     "threadId": "thread-1",
     "cwd": "/work/project",
     "input": [{ "type": "text", "text": "hello" }],
     "model": "gpt-test",
     "effort": "high",
+    "permissionMode": "requestApproval",
   })
-  assert_eq(ToJson::to_json(request), {
+  assert_eq(request.app_server_params(), {
+    "approvalPolicy": "on-request",
+    "approvalsReviewer": "user",
     "threadId": "thread-1",
     "cwd": "/work/project",
     "input": [{ "type": "text", "text": "hello" }],
     "model": "gpt-test",
     "effort": "high",
+    "permissions": ":workspace",
   })
 }
 

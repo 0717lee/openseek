@@ -223,6 +223,7 @@ priv struct CodexDraftThreadRequest {
   draft_id : String
   cwd : String?
   model : String
+  permission_mode : @protocol.CodexPermissionMode
 }
 
 ///|
@@ -249,6 +250,7 @@ fn CodexDraftThreadRequest::run(
                 Some(self.model)
               },
               draft_id: Some(self.draft_id),
+              permission_mode: self.permission_mode,
             },
           ) catch {
             error => {
@@ -325,6 +327,7 @@ fn State::start_draft_thread(
     draft_id: draft.id,
     cwd: draft.project_root,
     model: self.selected_model.trim().to_owned(),
+    permission_mode: self.permission_mode(),
   }.run(dispatch, channel)
 }
 
@@ -409,7 +412,7 @@ fn State::resume_for_send(
       let reply : @protocol.CodexThreadResumeReply = @interop.codex_request(
         channel,
         @commands.codex_thread_resume,
-        { thread_id, },
+        { thread_id, permission_mode: self.permission_mode() },
       ) catch {
         error => {
           scheduler.add(
@@ -477,6 +480,7 @@ fn State::send(
           Some(effort)
         },
         cwd: None,
+        permission_mode: self.permission_mode(),
       },
     )
   }
@@ -515,6 +519,7 @@ fn State::start_turn_in_new_worktree(
   let thread_id = active.id
   let model = self.selected_model.trim().to_owned()
   let effort = self.selected_effort.trim().to_owned()
+  let permission_mode = self.permission_mode()
   @cmd.custom_cmd(scheduler => {
     @js.async_run(() => {
       @interop.in_ordered_lane(
@@ -576,6 +581,7 @@ fn State::start_turn_in_new_worktree(
                 Some(effort)
               },
               cwd: Some(worktree.path),
+              permission_mode,
             },
           ) catch {
             error => {

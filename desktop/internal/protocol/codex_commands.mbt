@@ -171,15 +171,32 @@ pub(all) struct CodexModelListPayload {
 } derive(Debug, Eq)
 
 ///|
+/// The three user-facing Codex autonomy choices. Desktop keeps this small
+/// vocabulary stable and lets the native host translate it to the current
+/// app-server approval reviewer and permission-profile fields.
+pub(all) enum CodexPermissionMode {
+  RequestApproval
+  AutoReview
+  FullAccess
+} derive(Debug, Eq)
+
+///|
 pub(all) struct CodexThreadStartPayload {
   cwd : String?
   model : String?
   draft_id : String?
+  permission_mode : CodexPermissionMode
 } derive(Debug, Eq)
 
 ///|
 pub(all) struct CodexThreadPayload {
   thread_id : String
+} derive(Debug, Eq)
+
+///|
+pub(all) struct CodexThreadResumePayload {
+  thread_id : String
+  permission_mode : CodexPermissionMode
 } derive(Debug, Eq)
 
 ///|
@@ -219,6 +236,7 @@ pub(all) struct CodexTurnStartPayload {
   model : String?
   effort : String?
   cwd : String?
+  permission_mode : CodexPermissionMode
 } derive(Debug, Eq)
 
 ///|
@@ -462,12 +480,40 @@ pub impl ToJson for CodexModelListPayload with fn to_json(self) {
 }
 
 ///|
+pub impl FromJson for CodexPermissionMode with fn from_json(json, path) {
+  guard json is String(value) else {
+    raise JsonDecodeError((path, "expected Codex permission mode string"))
+  }
+  match value {
+    "requestApproval" => RequestApproval
+    "autoReview" => AutoReview
+    "fullAccess" => FullAccess
+    _ => raise JsonDecodeError((path, "unknown Codex permission mode"))
+  }
+}
+
+///|
+pub impl ToJson for CodexPermissionMode with fn to_json(self) {
+  Json::string(
+    match self {
+      RequestApproval => "requestApproval"
+      AutoReview => "autoReview"
+      FullAccess => "fullAccess"
+    },
+  )
+}
+
+///|
 pub impl FromJson for CodexThreadStartPayload with fn from_json(json, path) {
   let object = CodexJsonObject::decode(json, path, "Codex thread start payload")
   {
     cwd: object.optional_string("cwd"),
     model: object.optional_string("model"),
     draft_id: object.optional_string("openseekDraftId"),
+    permission_mode: @json.from_json(
+      object.required_json("permissionMode"),
+      path=path.add_key("permissionMode"),
+    ),
   }
 }
 
@@ -483,6 +529,7 @@ pub impl ToJson for CodexThreadStartPayload with fn to_json(self) {
   if self.draft_id is Some(draft_id) {
     fields["openseekDraftId"] = Json::string(draft_id)
   }
+  fields["permissionMode"] = ToJson::to_json(self.permission_mode)
   Json::object(fields)
 }
 
@@ -495,6 +542,28 @@ pub impl FromJson for CodexThreadPayload with fn from_json(json, path) {
 ///|
 pub impl ToJson for CodexThreadPayload with fn to_json(self) {
   { "threadId": Json::string(self.thread_id) }
+}
+
+///|
+pub impl FromJson for CodexThreadResumePayload with fn from_json(json, path) {
+  let object = CodexJsonObject::decode(
+    json, path, "Codex thread resume payload",
+  )
+  {
+    thread_id: object.required_string("threadId"),
+    permission_mode: @json.from_json(
+      object.required_json("permissionMode"),
+      path=path.add_key("permissionMode"),
+    ),
+  }
+}
+
+///|
+pub impl ToJson for CodexThreadResumePayload with fn to_json(self) {
+  {
+    "threadId": Json::string(self.thread_id),
+    "permissionMode": ToJson::to_json(self.permission_mode),
+  }
 }
 
 ///|
@@ -596,6 +665,10 @@ pub impl FromJson for CodexTurnStartPayload with fn from_json(json, path) {
     model: object.optional_string("model"),
     effort: object.optional_string("effort"),
     cwd: object.optional_string("cwd"),
+    permission_mode: @json.from_json(
+      object.required_json("permissionMode"),
+      path=path.add_key("permissionMode"),
+    ),
   }
 }
 
@@ -614,6 +687,7 @@ pub impl ToJson for CodexTurnStartPayload with fn to_json(self) {
   if self.cwd is Some(cwd) {
     fields["cwd"] = Json::string(cwd)
   }
+  fields["permissionMode"] = ToJson::to_json(self.permission_mode)
   Json::object(fields)
 }
 
@@ -1121,6 +1195,18 @@ pub extend CodexThreadListPayload with Eq::{equal, not_equal}
 pub extend CodexThreadListPayload with ToJson::{to_json}
 
 ///|
+pub extend CodexPermissionMode with Debug::{to_repr}
+
+///|
+pub extend CodexPermissionMode with FromJson::{from_json}
+
+///|
+pub extend CodexPermissionMode with Eq::{equal, not_equal}
+
+///|
+pub extend CodexPermissionMode with ToJson::{to_json}
+
+///|
 pub extend CodexThreadPayload with Debug::{to_repr}
 
 ///|
@@ -1131,6 +1217,18 @@ pub extend CodexThreadPayload with Eq::{equal, not_equal}
 
 ///|
 pub extend CodexThreadPayload with ToJson::{to_json}
+
+///|
+pub extend CodexThreadResumePayload with Debug::{to_repr}
+
+///|
+pub extend CodexThreadResumePayload with FromJson::{from_json}
+
+///|
+pub extend CodexThreadResumePayload with Eq::{equal, not_equal}
+
+///|
+pub extend CodexThreadResumePayload with ToJson::{to_json}
 
 ///|
 pub extend CodexThreadReadPayload with Debug::{to_repr}
