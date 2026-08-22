@@ -82,10 +82,15 @@ with `content: ""`; `tool_result`, `auto_compaction_finished`, `agent_finished`,
 and `context_yield` are omitted. The separate `agent.finished` lifecycle
 notification remains, including its optional `answer`;
 `compaction_finished` remains with an empty `summary` so it still closes the
-lifecycle state. Deltas, usage, step progress, tool-decode errors, runtime
-status, steer receipts, and all other run/compaction lifecycle and error events
-are unchanged. The desktop's in-process bridge continues to receive the hub's
-complete stream; this trimming is specific to remote WebSocket delivery.
+lifecycle state. Deltas — including the Desktop-only `reasoning_delta` progress
+stream — usage, step progress, tool-decode errors, runtime status, steer
+receipts, and all other run/compaction lifecycle and error events are unchanged.
+Before publishing a new `agent_step` or a successful terminal lifecycle event,
+the Desktop host drains that session's serialized follower. Consequently every
+durable commit preceding the boundary reaches both local and remote clients
+first; live reasoning can hand off without a follower race.
+The desktop's in-process bridge continues to receive the hub's complete stream;
+this trimming is specific to remote WebSocket delivery.
 
 ### Filesystem path encoding
 

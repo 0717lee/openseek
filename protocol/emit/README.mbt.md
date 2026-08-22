@@ -98,6 +98,7 @@ explain it. `cmd/openseek` pins the level for that reason, and a cram case holds
 it.
 
 That is a guard on the caller's side, not a property of this package. The real
-issue is that the stream has no identity apart from the log: it is also why
-`reasoning_delta` could be dropped for log noise and silently take the clients'
-live-thinking view with it. Giving the protocol its own sink is the fix.
+issue is that the stream has no identity apart from the log. Desktop now opts
+its serve process into `reasoning_delta` explicitly, while other controllers
+leave the high-volume event off; enabled deltas still pass through the logger.
+Giving the protocol its own sink would separate those concerns completely.

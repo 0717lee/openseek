@@ -202,8 +202,10 @@ fn failed_badge(failed : Int) -> @html.Html {
 fn activity_view(
   items : Array[@transcript.TranscriptItem],
   on_open : (String) -> @cmd.Cmd,
+  live_reasoning? : String,
+  reasoning_complete? : Bool = false,
 ) -> @html.Html {
-  if flatten_tool_activity(items) {
+  if live_reasoning is None && flatten_tool_activity(items) {
     return @html.div(class="activity-row", [tool_line_view(items)])
   }
   let inline_tool = inline_singleton_tool(items)
@@ -233,13 +235,38 @@ fn activity_view(
       index = index + 1
     }
   }
+  if live_reasoning is Some(content) {
+    if reasoning_complete {
+      // The semantic completion supplies one whole document, so Markdown is
+      // safe and cheap now. The durable item will take over the same card.
+      log.push(
+        @html.div(
+          class="msg-content markdown activity-thinking",
+          @markdown.markdown_nodes(content, open_file=on_open),
+        ),
+      )
+    } else {
+      // Do not parse an unfinished Markdown document on every provider token.
+      // Newlines are preserved by CSS while fragments are still arriving.
+      log.push(
+        @html.div(
+          class="msg-content activity-thinking activity-thinking-live",
+          @html.text(content),
+        ),
+      )
+    }
+  }
   let failed = count_failed(items)
   let summary_label = tool_activity_summary(items)
   let summary : Array[@html.Html] = [
     @html.span(
       class="activity-text",
       if summary_label.is_empty() {
-        "Thought"
+        if live_reasoning is Some(_) && !reasoning_complete {
+          "Thinking…"
+        } else {
+          "Thought"
+        }
       } else {
         summary_label
       },
@@ -253,7 +280,7 @@ fn activity_view(
   // nothing.
   summary.push(@plan.fold_progress(items))
   @html.div(class="activity-row", [
-    @html.details(class="activity", [
+    @html.details(class="activity", open=live_reasoning is Some(_), [
       @html.summary(class="activity-summary", summary),
       @html.div(class="activity-body", log),
     ]),

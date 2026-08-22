@@ -335,7 +335,7 @@ async fn reasoning_log_test_server(group : @async.TaskGroup[Unit]) -> String? {
 }
 
 ///|
-async test "streaming reasoning deltas are skipped in logs" {
+async test "streaming reasoning deltas are opt-in and stay transient" {
   @async.with_task_group() <| group => {
     guard reasoning_log_test_server(group) is Some(url) else { return }
     let entries : Array[Json] = []
@@ -360,9 +360,14 @@ async test "streaming reasoning deltas are skipped in logs" {
       api_url=url,
     )
     let events = result.events()
-    assert_eq(events.length(), 2)
+    assert_eq(events.length(), 3)
     assert_true(events[0].item() is User(_))
-    guard events[1].item() is Terminal(Finished("done")) else {
+    guard events[1].item() is Assistant(message) else {
+      fail("expected a durable reasoning-bearing assistant response")
+    }
+    assert_eq(message.content(), "done")
+    assert_eq(message.reasoning_content(), Some("I think"))
+    guard events[2].item() is Terminal(Finished("done")) else {
       fail("expected a completed one-step turn")
     }
     let event_names = entries.map(log_event)
@@ -370,6 +375,41 @@ async test "streaming reasoning deltas are skipped in logs" {
     assert_true(event_names.contains("reasoning_message"))
     assert_true(event_names.contains("assistant_delta"))
     assert_true(event_names.contains("assistant_message"))
+
+    entries.clear()
+    guard reasoning_log_test_server(group) is Some(streaming_url) else {
+      return
+    }
+    let streaming_session = @agent_session.Session(
+      SessionId("reasoning-stream-test"),
+      system_prompt="system",
+    )
+    let streaming_result = @agent.run_turn_with_append(
+      api_key="test-key",
+      model=Deepseek(V4Flash),
+      session=streaming_session,
+      task="do the task",
+      append_item=(session, item) => session.append(item),
+      max_steps=1,
+      emit_reasoning_deltas=true,
+      api_url=streaming_url,
+    )
+    // Deltas are wire-only progress. The durable shape is identical whether
+    // they are enabled or not: user, complete assistant, terminal.
+    assert_eq(streaming_result.events().length(), 3)
+    let reasoning_deltas : Array[String] = []
+    for entry in entries {
+      if entry
+        is {
+          "event": String("reasoning_delta"),
+          "content": String(content),
+          ..
+        } {
+        reasoning_deltas.push(content)
+      }
+    }
+    assert_eq(reasoning_deltas.join(""), "I think")
+    assert_true(entries.map(log_event).contains("reasoning_message"))
   }
 }
 

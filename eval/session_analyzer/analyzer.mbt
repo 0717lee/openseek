@@ -78,8 +78,20 @@ pub fn analyze_session(session : @agent_session.Session) -> EvalResult {
 /// statement cannot inflate model-behavior counters.
 pub fn transcript_text(session : @agent_session.Session) -> String {
   let out = StringBuilder()
+  let mut reasoning_final_answer : String? = None
   for event in session.events() {
-    append_item_text(out, event.item())
+    let item = event.item()
+    let repeated_terminal = item is Terminal(Finished(answer)) &&
+      reasoning_final_answer is Some(previous) &&
+      previous == answer
+    if !repeated_terminal {
+      append_item_text(out, item)
+    }
+    reasoning_final_answer = match item {
+      Assistant(message) if message.reasoning_content() is Some(reasoning) &&
+        !reasoning.is_blank() => Some(message.content())
+      _ => None
+    }
   }
   out.to_string()
 }
@@ -97,13 +109,19 @@ fn summarize_session(session : @agent_session.Session) -> SessionMetrics {
   let mut terminal_status = ""
   let mut terminal_message = ""
   let mut previous_finish_tool = false
+  let mut reasoning_final_answer : String? = None
   for event in session.events() {
     match event.item() {
-      Assistant(_) => {
+      Assistant(message) => {
         steps += 1
         previous_finish_tool = false
+        reasoning_final_answer = match message.reasoning_content() {
+          Some(reasoning) if !reasoning.is_blank() => Some(message.content())
+          _ => None
+        }
       }
       Tool(result) => {
+        reasoning_final_answer = None
         tool_results += 1
         if result.tool_name() == "shell" {
           shell_uses += 1
@@ -126,6 +144,7 @@ fn summarize_session(session : @agent_session.Session) -> SessionMetrics {
         }
       }
       Runtime(_) => {
+        reasoning_final_answer = None
         runtime_notices += 1
         previous_finish_tool = false
       }
@@ -139,7 +158,9 @@ fn summarize_session(session : @agent_session.Session) -> SessionMetrics {
           terminal_message = message
           previous_finish_tool = false
         } else {
-          if !previous_finish_tool {
+          let repeats_reasoning_final = reasoning_final_answer is Some(answer) &&
+            answer == message
+          if !previous_finish_tool && !repeats_reasoning_final {
             steps += 1
           }
           finished = true
@@ -147,29 +168,36 @@ fn summarize_session(session : @agent_session.Session) -> SessionMetrics {
           terminal_status = "finished"
           terminal_message = message
           previous_finish_tool = false
+          reasoning_final_answer = None
         }
       Terminal(Aborted(message)) => {
         finished = false
         terminal_status = "aborted"
         terminal_message = message
         previous_finish_tool = false
+        reasoning_final_answer = None
       }
       Terminal(Interrupted(message)) => {
         finished = false
         terminal_status = "interrupted"
         terminal_message = message
         previous_finish_tool = false
+        reasoning_final_answer = None
       }
       Terminal(Failed(message)) => {
         finished = false
         terminal_status = "failed"
         terminal_message = message
         previous_finish_tool = false
+        reasoning_final_answer = None
       }
       // A compact-on-finish checkpoint sits between the finish result and
       // its terminal; it must not break the attribution.
-      Summary(_) => ()
-      User(_) => previous_finish_tool = false
+      Summary(_) => reasoning_final_answer = None
+      User(_) => {
+        previous_finish_tool = false
+        reasoning_final_answer = None
+      }
     }
   }
   {

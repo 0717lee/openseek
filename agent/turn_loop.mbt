@@ -15,6 +15,9 @@ priv struct AgentLoop {
   messages : Array[@deepseek.ChatMessage]
   plan_cadence : PlanCadence
   goal_cadence : GoalCadence
+  /// Whether provider reasoning fragments join the transient event stream.
+  /// Completed reasoning still emits once as `ReasoningMessage` either way.
+  emit_reasoning_deltas : Bool
   /// The advisory goal-met gate: given the met goal's text and its
   /// captured baseline, produce the notice to append (or None for
   /// nothing). Review-neutral by type — the CLI layer supplies a callback
@@ -34,6 +37,7 @@ fn AgentLoop::AgentLoop(
   tools~ : @agent_tool.Tools,
   append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
   session~ : @agent_session.Session,
+  emit_reasoning_deltas~ : Bool,
   on_goal_met? : async (String, @agent_session.GoalBaseline?) -> String?,
 ) -> AgentLoop {
   {
@@ -43,6 +47,7 @@ fn AgentLoop::AgentLoop(
     tools,
     append_item,
     on_goal_met,
+    emit_reasoning_deltas,
     messages: session.chat_messages(),
     plan_cadence: PlanCadence(registered=tools.find("plan") is Some(_)),
     goal_cadence: GoalCadence(
@@ -170,10 +175,10 @@ async fn AgentLoop::run(
               ContinueTurn(next) => continue next
             }
           }
-          // A true final answer is stored once as Terminal(Finished). Later turns
-          // rebuild model context through Session::chat_messages, which projects
-          // that terminal back into an assistant message; appending an Assistant
-          // session item here would duplicate the answer on replay.
+          // A plain true final answer is stored once as Terminal(Finished).
+          // Thinking-mode finals first store a full Assistant payload so their
+          // reasoning survives; projection recognizes the matching terminal
+          // and does not replay its visible answer twice.
           match
             self.finish_turn(
               session,
@@ -434,11 +439,18 @@ async fn AgentLoop::chat(self : Self, step : Int) -> @deepseek.ChatResponse {
   let response = self.client.chat(
     self.messages,
     tools=self.tools.function_tools(),
-    stream=StreamHandler(on_content_delta=delta => {
-      if delta != "" {
-        @emit.emit(AssistantDelta(content=delta))
-      }
-    }),
+    stream=StreamHandler(
+      on_content_delta=delta => {
+        if delta != "" {
+          @emit.emit(AssistantDelta(content=delta))
+        }
+      },
+      on_reasoning_delta=delta => {
+        if self.emit_reasoning_deltas && delta != "" {
+          @emit.emit(ReasoningDelta(content=delta))
+        }
+      },
+    ),
   )
   response.log_and_reasoning_content()
 }
@@ -1246,6 +1258,17 @@ async fn AgentLoop::finish_turn(
       return ContinueTurn(session)
     }
     session
+  } else {
+    session
+  }
+  // A finished terminal stores only its visible answer. Preserve thinking-mode
+  // reasoning in the ordinary assistant payload first; projection recognizes
+  // the matching terminal and does not replay the answer twice.
+  let session = if reasoning_content is Some(reasoning) && !reasoning.is_blank() {
+    self.append(
+      session,
+      Assistant(AssistantMessage(answer, reasoning_content=reasoning)),
+    )
   } else {
     session
   }

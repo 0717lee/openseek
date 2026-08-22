@@ -682,6 +682,10 @@
   color: var(--color-text-secondary);
   font-size: var(--font-size-md);
 }
+.activity-thinking-live {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 
 /* A burst of consecutive tool calls: a gray one-line summary that
    expands to the per-call briefs.
