@@ -1579,6 +1579,7 @@ fn model_message_labels(
 ) -> Array[String] {
   let out : Array[String] = [""]
   let pending_tool_calls : Array[String] = []
+  let mut reasoning_final_answer : String? = None
   let events = session.events()
   for event in events {
     // Mirror `Session::chat_messages`: a surviving summary projects at the
@@ -1589,6 +1590,7 @@ fn model_message_labels(
         !model_event_covered_by_later_summary(candidate, events) {
         flush_pending_tool_labels(pending_tool_calls, out)
         out.push(label_of(candidate))
+        reasoning_final_answer = None
       }
     }
     if model_event_covered_by_later_summary(event, events) {
@@ -1600,6 +1602,10 @@ fn model_message_labels(
       Assistant(message) => {
         flush_pending_tool_labels(pending_tool_calls, out)
         out.push(label_of(event))
+        reasoning_final_answer = match message.reasoning_content() {
+          Some(reasoning) if !reasoning.is_blank() => Some(message.content())
+          _ => None
+        }
         for call in message.tool_calls() {
           pending_tool_calls.push(call.id)
         }
@@ -1607,9 +1613,25 @@ fn model_message_labels(
       Tool(result) =>
         if remove_pending_tool_id(pending_tool_calls, result.tool_call_id()) {
           out.push(tool_label_of(event))
+          reasoning_final_answer = None
         }
+      Terminal(terminal) => {
+        if !pending_tool_calls.is_empty() {
+          flush_pending_tool_labels(pending_tool_calls, out)
+          reasoning_final_answer = None
+        }
+        let repeated_reasoning_final = terminal is Finished(answer) &&
+          reasoning_final_answer is Some(previous) &&
+          previous == answer
+        if terminal_projects_model_message(terminal) &&
+          !repeated_reasoning_final {
+          out.push(label_of(event))
+        }
+        reasoning_final_answer = None
+      }
       item => {
         flush_pending_tool_labels(pending_tool_calls, out)
+        reasoning_final_answer = None
         if item_projects_model_message(item) {
           out.push(label_of(event))
         }
@@ -1618,6 +1640,22 @@ fn model_message_labels(
   }
   flush_pending_tool_labels(pending_tool_calls, out)
   out
+}
+
+///|
+test "model metadata omits a reasoning final's duplicate terminal" {
+  let session = @agent_session.Session(SessionId("labels"), system_prompt="")
+    .append(User(UserMessage("first")))
+    .append(Assistant(AssistantMessage("answer", reasoning_content="thought")))
+    .append(Terminal(Finished("answer")))
+    .append(User(UserMessage("second")))
+    .append(Terminal(Finished("done")))
+  let messages = session.chat_messages()
+  let anchors = model_message_anchor_seqs(session)
+  assert_eq(anchors.length(), messages.length())
+  assert_eq(model_message_time_labels(session).length(), messages.length())
+  assert_eq(model_message_step_labels(session).length(), messages.length())
+  debug_inspect(anchors, content="[\"\", \"1\", \"2\", \"4\", \"5\"]")
 }
 
 ///|

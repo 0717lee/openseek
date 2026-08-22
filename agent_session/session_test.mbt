@@ -212,6 +212,24 @@ test "projection skips context-yield terminals" {
 }
 
 ///|
+test "projection does not repeat a reasoning-bearing final answer" {
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
+    .append(User(UserMessage("question")))
+    .append(
+      Assistant(
+        AssistantMessage("answer", reasoning_content="consider the options"),
+      ),
+    )
+    .append(Terminal(Finished("answer")))
+  let messages = session.chat_messages()
+  assert_eq(messages.length(), 3)
+  assert_true(messages[1].role is User)
+  assert_true(messages[2].role is Assistant)
+  assert_eq(messages[2].content, "answer")
+  assert_eq(messages[2].reasoning_content, Some("consider the options"))
+}
+
+///|
 test "projection skips compacted assistant tool results" {
   let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
     .append(User(UserMessage("inspect")))

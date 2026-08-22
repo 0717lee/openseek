@@ -25,6 +25,10 @@ test "decode assistant events" {
     Some(AssistantMessage(text)) => assert_eq(text, "hello")
     _ => fail("expected assistant message")
   }
+  assert_true(
+    @event.decode_event({ "event": "reasoning_delta", "content": "live" })
+    is None,
+  )
 }
 
 ///|

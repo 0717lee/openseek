@@ -62,6 +62,10 @@ struct Input {
   // when nothing is streaming. It is deliberately not a `VisibleRow`: the
   // rows are the durable record and this is not durable yet.
   streaming_response : String?
+  // Live reasoning is likewise provisional. It is plain text until complete;
+  // the durable reasoning row replaces it and renders Markdown once.
+  streaming_reasoning : String?
+  reasoning_complete : Bool
   streaming_identity : String
 } derive(Eq)
 
@@ -74,6 +78,8 @@ pub fn Input::Input(
   submission_generation~ : Int,
   items~ : Array[VisibleRow],
   streaming_response~ : String?,
+  streaming_reasoning? : String,
+  reasoning_complete? : Bool = false,
   streaming_identity~ : String,
 ) -> Input {
   {
@@ -84,6 +90,8 @@ pub fn Input::Input(
     submission_generation,
     items,
     streaming_response,
+    streaming_reasoning,
+    reasoning_complete,
     streaming_identity,
   }
 }

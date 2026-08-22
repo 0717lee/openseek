@@ -587,12 +587,21 @@ fn Workspace::worktree_name(self : Workspace) -> String? {
 }
 
 ///|
+/// Reasoning visible before its durable assistant event lands.
+priv struct LiveReasoning {
+  content : String
+  complete : Bool
+} derive(Eq, Debug)
+
+///|
 /// Everything that belongs to one turn and to nothing outside it.
 ///
 /// It is replaced wholesale when a run opens, so a fragment or token count
 /// left by the previous turn cannot survive into this one by being forgotten -
 /// the reset is one assignment rather than three. Only the `agent.*` lifecycle
-/// and stream events write it; durable commits never do.
+/// and stream events write it. Durable commits are deliberately not allowed to
+/// mutate it: they carry no run or step identity, so a delayed older commit
+/// cannot safely settle a newer stream.
 priv struct RunState {
   // Live text of the in-flight assistant turn, accumulated from
   // `assistant_delta` events and cleared by ordered full semantic, step,
@@ -602,6 +611,15 @@ priv struct RunState {
   // has not committed yet, and the only reason it is a separate field from
   // `messages` rather than a row inside it.
   streaming_response : String?
+  // Provisional reasoning assembled from `reasoning_delta`. The completed
+  // semantic event seals the buffer. The durable Assistant commit remains the
+  // sole history; rendering de-duplicates an equal completed preview without
+  // letting the untagged commit mutate this run-scoped state.
+  live_reasoning : LiveReasoning?
+  // Highest durable event already known when this run opened. Only reasoning
+  // committed after this frontier can visually de-duplicate this run's sealed
+  // preview; identical text from an earlier turn is unrelated.
+  reasoning_frontier : Int
   // Sub-runs this turn has in flight, in the order they started. Live-only:
   // nothing persists a sub-run's progress, so a reload mid-turn shows the
   // tool call pending with no lane under it.
@@ -613,7 +631,18 @@ priv struct RunState {
 /// The state a turn starts from. A conversation with no run open holds one
 /// too: every field means "nothing observed".
 fn RunState::empty() -> RunState {
-  { streaming_response: None, subruns: [], usage_tokens: 0 }
+  {
+    streaming_response: None,
+    live_reasoning: None,
+    reasoning_frontier: 0,
+    subruns: [],
+    usage_tokens: 0,
+  }
+}
+
+///|
+fn RunState::for_run(reasoning_frontier : Int) -> RunState {
+  { ..RunState::empty(), reasoning_frontier, }
 }
 
 ///|
@@ -3215,11 +3244,10 @@ fn Conversation::visible_subruns(self : Conversation) -> Array[@subrun.Lane] {
 /// `None` between runs — an idle conversation reports nothing.
 ///
 /// Purely derived from the run phase, like `display_status`, so no handler
-/// has to keep a stored line in sync. The wire protocol carries no live
-/// reasoning stream, so the deepest this can see during a model call is the
-/// step it is on: between `agent_step` and the first answer delta every
-/// engine is silent, and this line plus its pulsing mark is the whole of
-/// what distinguishes thinking from a hang.
+/// has to keep a stored line in sync. Before the first reasoning delta this
+/// only knows the current step. Once reasoning arrives, the transcript itself
+/// becomes the progress indicator while this heartbeat continues to report
+/// elapsed time.
 /// The open turn as the composer's heartbeat row needs it: facts only. The
 /// wording, the clock, and the tick that advances it belong to the composer,
 /// so a span that changes every second costs one component's render instead
@@ -3242,7 +3270,30 @@ fn Conversation::run_heartbeat(self : Conversation) -> @composer.RunHeartbeat? {
 
 ///|
 fn Conversation::clear_streams(self : Conversation) -> Conversation {
+  {
+    ..self,
+    turn: { ..self.turn, streaming_response: None, live_reasoning: None },
+  }
+}
+
+///|
+fn Conversation::clear_response(self : Conversation) -> Conversation {
   { ..self, turn: { ..self.turn, streaming_response: None } }
+}
+
+///|
+fn Conversation::complete_reasoning(self : Conversation) -> Conversation {
+  match self.turn.live_reasoning {
+    Some(reasoning) if !reasoning.complete =>
+      {
+        ..self,
+        turn: {
+          ..self.turn,
+          live_reasoning: Some({ ..reasoning, complete: true }),
+        },
+      }
+    _ => self
+  }
 }
 
 ///|

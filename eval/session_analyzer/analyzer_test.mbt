@@ -124,6 +124,25 @@ test "session analyzer counts typed events" {
 }
 
 ///|
+test "reasoning-bearing final pair counts and indexes the answer once" {
+  let session = @agent_session.Session(
+      SessionId("reasoning-final"),
+      system_prompt="",
+    )
+    .append(User(UserMessage("question")))
+    .append(
+      Assistant(
+        AssistantMessage("unique-answer", reasoning_content="unique-thought"),
+      ),
+    )
+    .append(Terminal(Finished("unique-answer")))
+  let result = @session_analyzer.analyze_session(session)
+  assert_eq(result.steps, 1)
+  let transcript = @session_analyzer.transcript_text(session)
+  assert_eq(transcript, "unique-thought\nunique-answer\n")
+}
+
+///|
 test "latest non-finished terminal determines success" {
   let session = @agent_session.Session(
       SessionId("multi-turn"),

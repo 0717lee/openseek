@@ -55,8 +55,9 @@ noticed.
 What that caught, once the readers were made exhaustive:
 
 - **`reasoning_delta`** had not been emitted since 2026-06-21 (a85d5682), yet the
-  TUI and the desktop both still decoded it and rendered a live "thinking" view
-  from it — under tests that passed on fabricated lines.
+  TUI and the desktop both still decoded it under tests that passed on
+  fabricated lines. It is now an explicit opt-in used by the Desktop serve
+  process; the TUI does not request or render the high-volume stream.
 - **`runtime_update`** had not been emitted since 2026-07-05 (4b1ec831), yet the
   desktop host still decoded it, likewise under a passing test.
 - The desktop host **synthesized `compaction_failed` with `reason`** while the
@@ -147,9 +148,9 @@ contract too.
 
 ## Known gaps
 
-- **The stream still has no identity apart from the log, and that has already
-  cost a feature.** `reasoning_delta` was dropped for log noise (a85d5682) and
-  silently took the clients' live-thinking view with it, because there is no way
-  to send a reader something without also writing it to the log file. The engine
-  now pins its own level so `MOON_XLOG` cannot silence the protocol, but that is
-  a guard, not a fix: a real one gives the protocol its own sink.
+- **The stream still has no identity apart from the log.** Desktop explicitly
+  opts its serve process into `reasoning_delta`, while other controllers keep it
+  off. Every enabled delta still passes through the process logger because there
+  is no separate transport sink. The engine pins its own level so `MOON_XLOG`
+  cannot silence the protocol, but a full separation would give the protocol its
+  own sink.

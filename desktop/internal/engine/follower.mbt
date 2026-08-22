@@ -29,7 +29,7 @@ const FollowerPollMs = 1000
 ///|
 /// Load callers backpressure here instead of accumulating an unbounded
 /// waiter array in the actor. The control inbox has one reserved logical
-/// slot for each collapsed message kind (Kick, Load, Stop), so Stop can
+/// slot for each collapsed message kind (Kick, Load, Barrier, Stop), so Stop can
 /// always be queued even when loads are saturated.
 const FollowerLoadQueueSize = 32
 
@@ -41,6 +41,11 @@ priv enum FollowerMsg {
   // A `session.load` routed through the actor: scan — broadcasting any fresh
   // commits — and reply with the whole transcript the reader now holds.
   Load
+  // An engine-stream ordering barrier: broadcast every commit currently
+  // readable, then acknowledge. The stdout consumer uses this before a new
+  // model step or successful terminal event so those lifecycle boundaries
+  // cannot overtake the durable events they delimit.
+  Barrier(@async.Queue[String?])
   // Stop after a final scan. `writer_exited` is supplied only by a caller
   // that has crossed the process-exit barrier; it lets a brand-new session
   // with no record file retire as an empty drain. The completed generation
@@ -236,6 +241,16 @@ async fn SessionFollower::run(
             }
           }
         }
+        Barrier(reply) => {
+          let failure = try {
+            follower.scan(sink)
+            None
+          } catch {
+            error if @async.is_being_cancelled() => raise error
+            error => Some("\{error}")
+          }
+          reply.put(failure)
+        }
         Stop(final_scan~, writer_exited~, generation~) => {
           let failure = if final_scan {
             try {
@@ -385,7 +400,7 @@ async fn[G] ensure_follower(
   let follower : SessionFollower = {
     session,
     root,
-    inbox: Queue(kind=Blocking(3)),
+    inbox: Queue(kind=Blocking(4)),
     load_requests: Queue(kind=Blocking(FollowerLoadQueueSize)),
     kick_pending: false,
     load_pending: false,
@@ -513,7 +528,7 @@ fn discard_follower_startup(
 ///|
 /// Queue a bounded, coalesced snapshot request. When the request queue is
 /// full, `put` backpressures this caller; Stop remains independent in the
-/// three-slot control inbox and can always overtake load saturation after
+/// four-slot control inbox and can always overtake load saturation after
 /// the single pending Load generation.
 async fn request_follower_load(follower : SessionFollower) -> FollowerLoadReply {
   if follower.stopping {
@@ -538,6 +553,24 @@ async fn request_follower_load(follower : SessionFollower) -> FollowerLoadReply 
     }
   }
   reply.get()
+}
+
+///|
+/// Drain every durable event visible now through the follower's serialized
+/// scan loop. Returning is an ordering proof: the sink received those commits
+/// before the caller publishes the lifecycle event that follows this barrier.
+async fn await_follower_barrier(follower : SessionFollower) -> Unit {
+  if follower.stopping {
+    raise EngineError("session follower is stopping")
+  }
+  let reply : @async.Queue[String?] = Queue(kind=Blocking(1))
+  follower.inbox.put(Barrier(reply)) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => raise EngineError("session follower control queue is closed")
+  }
+  if reply.get() is Some(detail) {
+    raise EngineError(detail)
+  }
 }
 
 // The follower's pure core: the watermark a snapshot reports. Reading the
@@ -640,6 +673,40 @@ fn follower_test_config(
     session,
     session_root: Some(root),
   }
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "a follower barrier broadcasts the durable tail before returning" {
+  let dir = @fs.tmpdir(prefix="openseek-follower-barrier-")
+  let engine = dir + "/engine.sh"
+  let session = "s-barrier"
+  let root : @pathx.Absolute = @pathx.Path(dir + "/root").resolve()
+  write_session_record(root, session, [])
+  let manager = new_engine_manager(engine)
+  let emitted : Array[EngineEvent] = []
+  let sink = EventSink(fn(event) { emitted.push(event) })
+  @async.with_task_group(group => {
+    ignore(
+      ensure_follower(
+        sink~,
+        group~,
+        manager~,
+        config=follower_test_config(engine, session, root),
+      ),
+    )
+    guard manager.followers.get(session) is Some(follower) else {
+      fail("expected follower")
+    }
+    write_session_record(root, session, [session_user_event(1, "before")])
+    await_follower_barrier(follower)
+    guard emitted is [SessionCommit({ sequence: 1, .. })] else {
+      fail("expected the barrier to broadcast the committed event")
+    }
+    stop_follower(manager, session, writer_exited=true)
+    group.return_immediately(())
+  })
+  @fs.rmdir(dir, recursive=true)
 }
 
 ///|
@@ -1262,7 +1329,7 @@ fn follower_state_fixture(session : String) -> SessionFollower {
   {
     session,
     root,
-    inbox: Queue(kind=Blocking(3)),
+    inbox: Queue(kind=Blocking(4)),
     load_requests: Queue(kind=Blocking(1)),
     kick_pending: false,
     load_pending: false,

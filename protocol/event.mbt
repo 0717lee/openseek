@@ -20,6 +20,10 @@ pub(all) enum Event {
   MaxStepsExhausted
   TurnFailed(error~ : String)
   AssistantDelta(content~ : String)
+  /// One provider reasoning fragment. Emission is opt-in because these are
+  /// transient, high-volume progress events; completed reasoning still emits
+  /// once as `ReasoningMessage` and is stored with its assistant response.
+  ReasoningDelta(content~ : String)
   AssistantMessage(content~ : String)
   ReasoningMessage(content~ : String)
   Usage(usage~ : Usage)

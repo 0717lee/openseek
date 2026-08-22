@@ -136,6 +136,85 @@ test "transcript stream children use stable typed keys in display order" {
 }
 
 ///|
+#warnings("-alert_unstable")
+test "live reasoning is plain text and keeps the durable activity key" {
+  let user : VisibleRow = {
+    item: { kind: User, content: "question", ts: None, sequence: Some(1) },
+    identity: "s1\u{0}o0",
+  }
+  let live_input = Input(
+    source=OpenSeek,
+    focused=@interop.ChannelId::Local,
+    active_session="desktop-test",
+    root=None,
+    submission_generation=1,
+    items=[user],
+    streaming_response=None,
+    streaming_reasoning="*unfinished*\nnext",
+    streaming_identity="r7",
+  )
+  let live_renderer : TranscriptRenderer = {
+    input: live_input,
+    on_open: _ => @cmd.none,
+    on_jump: _ => @cmd.none,
+  }
+  let live_children = live_renderer.stream_children()
+  assert_true(live_children.get("activity\u{0}after\u{0}s1\u{0}o0") is Some(_))
+  let live_markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(live_children["activity\u{0}after\u{0}s1\u{0}o0"])
+  })
+  assert_true(live_markup.contains("*unfinished*\nnext"))
+  assert_false(live_markup.contains("<em>unfinished</em>"))
+  assert_true(live_markup.contains("<details class=\"activity\" open"))
+
+  let complete_renderer = {
+    ..live_renderer,
+    input: { ..live_input, reasoning_complete: true },
+  }
+  let complete_markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(
+      complete_renderer.stream_children()["activity\u{0}after\u{0}s1\u{0}o0"],
+    )
+  })
+  assert_true(complete_markup.contains("<em>unfinished</em>"))
+
+  let settled = {
+    ..live_input,
+    items: [
+      user,
+      {
+        item: {
+          kind: Reasoning,
+          content: "*unfinished*\nnext",
+          ts: None,
+          sequence: Some(2),
+        },
+        identity: "s2\u{0}o0",
+      },
+      {
+        item: {
+          kind: Assistant(is_danger=false),
+          content: "answer",
+          ts: None,
+          sequence: Some(2),
+        },
+        identity: "s2\u{0}o1",
+      },
+    ],
+    streaming_reasoning: None,
+  }
+  let settled_renderer = { ..live_renderer, input: settled }
+  let settled_children = settled_renderer.stream_children()
+  assert_true(
+    settled_children.get("activity\u{0}after\u{0}s1\u{0}o0") is Some(_),
+  )
+  let settled_markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(settled_children["activity\u{0}after\u{0}s1\u{0}o0"])
+  })
+  assert_true(settled_markup.contains("<em>unfinished</em>"))
+}
+
+///|
 test "transcript stream section key scopes equal session ids by channel" {
   let local_input = Input(
     source=OpenSeek,

@@ -70,9 +70,17 @@ refreshes when the bridge connects and after each run. Switching while runs
 are active is fine — a conversation already open in this app run switches
 back instantly with its live state intact, without replaying the store.
 
-While a turn runs, the UI renders the engine's `assistant_delta` events as a
-live answer bubble with a streaming caret; the committed `reasoning_message` /
-`assistant_message` events then land as permanent transcript items.
+While a turn runs, the Desktop opts its serve engine into `reasoning_delta` and
+renders those fragments as plain text in one open activity card; no partial
+Markdown is parsed on every token. `reasoning_message` seals that preview and
+renders its complete text as Markdown. When the matching durable assistant
+session event arrives, the same keyed card visually de-duplicates the sealed
+preview without letting an untagged commit mutate run-scoped streaming state.
+The host drains the session follower before each new model step and successful
+terminal boundary, so an older commit cannot be mistaken for the next step and
+a finish cannot outrun the canonical row. The UI likewise renders
+`assistant_delta` as a live answer bubble, while durable `session.event`
+commits remain the only permanent transcript source.
 
 Submitting while a turn runs steers it instead of starting a new prompt: the
 text rides the serve engine's lossless steering queue and is folded into the

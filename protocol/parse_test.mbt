@@ -24,6 +24,20 @@ test "decodes a streaming delta" {
 }
 
 ///|
+test "decodes a reasoning delta" {
+  debug_inspect(
+    decode(
+      (
+        #|{"timestamp":"t","level":"INFO","source":"s","event":"reasoning_delta","content":"thinking"}
+      ),
+    ),
+    content=(
+      #|Some(ReasoningDelta(content="thinking"))
+    ),
+  )
+}
+
+///|
 /// The envelope is ignored: a reader cares about the event, not about which
 /// line of the engine reported it.
 test "decodes with the envelope absent" {

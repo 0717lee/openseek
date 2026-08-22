@@ -66,7 +66,16 @@ fn append_item_message(
       )
     Terminal(terminal) =>
       if terminal_model_message(terminal) is Some(content) {
-        messages.push(ChatMessage(Assistant, content~))
+        // Thinking-mode final answers are stored as a full Assistant payload
+        // immediately before their terminal so reasoning survives reload.
+        // The terminal still seals the turn, but must not replay the same
+        // visible answer a second time.
+        if !(messages.last() is Some(last) &&
+          last.role is Assistant &&
+          last.reasoning_content is Some(_) &&
+          last.content == content) {
+          messages.push(ChatMessage(Assistant, content~))
+        }
       }
   }
 }
@@ -123,8 +132,9 @@ fn is_covered_by_later_summary(
 /// - pending tool calls are closed with synthetic tool-error messages before a
 ///   non-tool event or at the end of projection;
 /// - `Terminal(Finished(text))` becomes a final assistant message when `text`
-///   is non-blank and is not a context-yield status (see
-///   `ContextYieldAnswerPrefix`);
+///   is non-blank, is not a context-yield status (see
+///   `ContextYieldAnswerPrefix`), and the preceding Assistant did not already
+///   preserve the same thinking-mode final answer;
 /// - `Terminal(Aborted|Interrupted|Failed)` becomes an assistant status
 ///   message, preserving any non-blank reason.
 ///

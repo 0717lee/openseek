@@ -35,7 +35,8 @@ fn Model::transcript_input(self : Model) -> @transcript_component.Input {
             streaming_response=None,
             streaming_identity="",
           )
-        Some(conversation) =>
+        Some(conversation) => {
+          let (streaming_reasoning, reasoning_complete) = conversation.reasoning_for_render()
           @transcript_component.Input(
             source=@transcript_component.OpenSeek,
             focused=self.focused,
@@ -46,8 +47,11 @@ fn Model::transcript_input(self : Model) -> @transcript_component.Input {
             submission_generation=self.submission_sequence,
             items=conversation.visible_transcript_rows(),
             streaming_response=conversation.turn.streaming_response,
+            streaming_reasoning?,
+            reasoning_complete~,
             streaming_identity=conversation.streaming_render_identity(),
           )
+        }
       }
   }
 }

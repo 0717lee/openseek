@@ -1526,7 +1526,7 @@ async fn[G] start_serve_engine(
   let (stderr_reader, child_stderr) = @process.read_from_process()
   let env = engine_process_env(config, manager.runtime_dir)
   let program = config.engine
-  let args = ["serve", "--dir", "."]
+  let args = ["serve", "--reasoning-deltas", "--dir", "."]
   let graceful_cancel = @process.graceful_cancel(timeout=1000)
   @xlog.debug() <?
     {
@@ -1680,6 +1680,27 @@ async fn ServeEngine::run(
 }
 
 ///|
+/// Whether this stream event starts after, or completes after, a durable
+/// transcript span. The host publishes these only after the session follower
+/// has broadcast everything currently committed; other progress events stay
+/// on the low-latency kick path.
+fn event_requires_durable_barrier(event : @event.AgentEvent) -> Bool {
+  match event {
+    AgentStep | AgentFinished(_) | ContextYield(_) => true
+    _ => false
+  }
+}
+
+///|
+test "model-step and successful-terminal events are durable barriers" {
+  assert_true(event_requires_durable_barrier(AgentStep))
+  assert_true(event_requires_durable_barrier(AgentFinished("done")))
+  assert_true(event_requires_durable_barrier(ContextYield("continue")))
+  assert_false(event_requires_durable_barrier(AssistantMessage("live")))
+  assert_false(event_requires_durable_barrier(Usage({ total_tokens: 3 })))
+}
+
+///|
 /// The event pump half of `run`: read the child's stdout to EOF, acting on
 /// each event as it is decoded, and hand back the child's exit code. Reading
 /// and interpreting are one task on purpose — a split lets the interpreter
@@ -1752,6 +1773,16 @@ async fn ServeEngine::consume(
           stream.prompt_steer_applied,
           engine.phase.latest_run(),
         )
+        // Step and successful terminal events are causal transcript
+        // boundaries. Drain the serialized follower before publishing them:
+        // the frontend can then use its current durable frontier to associate
+        // reasoning with this exact model step, and a finish cannot clear a
+        // sealed preview before its canonical Assistant commit is visible.
+        if decoded is Some(event) &&
+          event_requires_durable_barrier(event) &&
+          manager.followers.get(engine.session_key) is Some(follower) {
+          await_follower_barrier(follower)
+        }
         match decoded {
           Some(decoded) => {
             // Terminal failures are published as the run's Error/Finished

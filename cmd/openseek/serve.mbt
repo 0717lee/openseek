@@ -565,6 +565,8 @@ async fn run_serve(
   workspace_root~ : String,
 ) -> Unit {
   let (model, thinking, api_url) = agent_settings(matches)
+  let emit_reasoning_deltas = matches
+    is { flags: { "reasoning-deltas": true, .. }, .. }
   guard model.api_key(matches.values) is Some(api_key) else {
     fail("an API key is required for \{model}: pass --api-key")
   }
@@ -943,6 +945,7 @@ async fn run_serve(
           },
           max_steps?,
           thinking~,
+          emit_reasoning_deltas~,
           api_url?,
           tools~,
         ) catch {

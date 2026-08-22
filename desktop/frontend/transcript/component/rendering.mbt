@@ -90,10 +90,14 @@ fn TranscriptRenderer::stream_children(
 ) -> Map[String, @html.Html] {
   let visible = self.input.items
   let items : Map[String, @html.Html] = Map([])
+  let mut left_boundary : String? = None
+  let mut reasoning_attached = false
   // The durable transcript plus client-local notices, rendered through one
   // folding pass. Live semantic events never synthesize durable-looking
   // items here; their store commits populate the transcript.
-  if visible.is_empty() {
+  if visible.is_empty() &&
+    self.input.streaming_reasoning is None &&
+    self.input.streaming_response is None {
     items.set(
       TranscriptRenderKey::empty().wire(),
       @html.div(class="empty", [
@@ -126,7 +130,6 @@ fn TranscriptRenderer::stream_children(
     // the turn is still streaming or long settled, so nothing shown live
     // vanishes or restyles when the turn lands.
     let mut index = 0
-    let mut left_boundary : String? = None
     while index < visible.length() {
       guard visible[index].item.kind is (Tool(..) | Reasoning) else {
         let row = visible[index]
@@ -165,11 +168,33 @@ fn TranscriptRenderer::stream_children(
         run.push(visible[index].item)
         index = index + 1
       }
+      let live_reasoning = if index == visible.length() {
+        self.input.streaming_reasoning
+      } else {
+        None
+      }
+      reasoning_attached = live_reasoning is Some(_)
       items.set(
         TranscriptRenderKey::activity_after(left_boundary).wire(),
-        activity_view(run, self.on_open),
+        activity_view(
+          run,
+          self.on_open,
+          live_reasoning?,
+          reasoning_complete=self.input.reasoning_complete,
+        ),
       )
     }
+  }
+  if self.input.streaming_reasoning is Some(reasoning) && !reasoning_attached {
+    items.set(
+      TranscriptRenderKey::activity_after(left_boundary).wire(),
+      activity_view(
+        [],
+        self.on_open,
+        live_reasoning=reasoning,
+        reasoning_complete=self.input.reasoning_complete,
+      ),
+    )
   }
   if self.input.streaming_response is Some(streaming) {
     items.set(
