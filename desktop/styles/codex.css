@@ -154,6 +154,161 @@
   display: none;
 }
 
+/* Codex's approval-mode control lives in the shared composer status row, but
+   the menu opens against the full composer card so narrow editor splits do
+   not clip its descriptions. */
+.codex-permission-control {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.codex-permission-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  max-width: 150px;
+  min-width: 0;
+  margin: 0;
+  padding: 0 9px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.codex-permission-button-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.codex-permission-button:hover:not(:disabled) {
+  border-color: var(--color-accent-border);
+  color: var(--color-text-primary);
+}
+
+.codex-permission-button:disabled {
+  color: var(--color-text-muted);
+  cursor: default;
+  opacity: 0.7;
+}
+
+.codex-permission-button-glyph {
+  display: inline-grid;
+  place-items: center;
+  min-width: 14px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.codex-permission-chevron {
+  color: var(--color-text-muted);
+  transform: translateY(-1px);
+}
+
+.codex-permission-control.danger .codex-permission-button {
+  border-color: var(--color-danger-border);
+  color: var(--color-danger);
+}
+
+.codex-permission-dismiss {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-menu) - 1);
+}
+
+.codex-permission-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: var(--z-menu);
+  display: grid;
+  width: min(470px, 100%);
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  box-shadow: var(--shadow-overlay);
+}
+
+.codex-permission-menu-title {
+  padding: 6px 10px 8px;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+.codex-permission-option {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.codex-permission-option:hover,
+.codex-permission-option.selected {
+  background: var(--color-bg-subtle);
+}
+
+.codex-permission-option-glyph {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.codex-permission-copy {
+  display: grid;
+  min-width: 0;
+}
+
+.codex-permission-option-title {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+}
+
+.codex-permission-option-desc {
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codex-permission-check {
+  color: var(--color-text-secondary);
+  font-size: 16px;
+  text-align: center;
+}
+
+.codex-permission-option.danger,
+.codex-permission-option.danger .codex-permission-option-glyph,
+.codex-permission-option.danger .codex-permission-option-desc {
+  color: var(--color-danger);
+}
+
 .codex-request {
   display: grid;
   gap: 9px;

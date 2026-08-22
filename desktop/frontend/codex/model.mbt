@@ -28,6 +28,89 @@ priv enum CodexWriteAccess {
 } derive(Eq)
 
 ///|
+/// The permission picker keeps its current choice inside every transient UI
+/// state. Full access cannot become active until the explicit confirmation
+/// transition completes.
+priv enum CodexPermissionPicker {
+  CodexPermissionClosed(@protocol.CodexPermissionMode)
+  CodexPermissionOpen(@protocol.CodexPermissionMode)
+  CodexPermissionConfirmingFullAccess(@protocol.CodexPermissionMode)
+} derive(Eq)
+
+///|
+fn CodexPermissionPicker::mode(
+  self : CodexPermissionPicker,
+) -> @protocol.CodexPermissionMode {
+  match self {
+    CodexPermissionClosed(mode)
+    | CodexPermissionOpen(mode)
+    | CodexPermissionConfirmingFullAccess(mode) => mode
+  }
+}
+
+///|
+fn CodexPermissionPicker::is_open(self : CodexPermissionPicker) -> Bool {
+  self is CodexPermissionOpen(_)
+}
+
+///|
+fn CodexPermissionPicker::toggle(
+  self : CodexPermissionPicker,
+) -> CodexPermissionPicker {
+  match self {
+    CodexPermissionClosed(mode) => CodexPermissionOpen(mode)
+    CodexPermissionOpen(mode) => CodexPermissionClosed(mode)
+    CodexPermissionConfirmingFullAccess(_) => self
+  }
+}
+
+///|
+fn CodexPermissionPicker::close(
+  self : CodexPermissionPicker,
+) -> CodexPermissionPicker {
+  match self {
+    CodexPermissionOpen(mode) => CodexPermissionClosed(mode)
+    CodexPermissionConfirmingFullAccess(previous) =>
+      CodexPermissionClosed(previous)
+    CodexPermissionClosed(_) => self
+  }
+}
+
+///|
+fn CodexPermissionPicker::choose(
+  self : CodexPermissionPicker,
+  mode : @protocol.CodexPermissionMode,
+) -> CodexPermissionPicker {
+  if mode is @protocol.FullAccess {
+    CodexPermissionConfirmingFullAccess(self.mode())
+  } else {
+    CodexPermissionClosed(mode)
+  }
+}
+
+///|
+fn CodexPermissionPicker::confirm_full_access(
+  self : CodexPermissionPicker,
+) -> CodexPermissionPicker {
+  match self {
+    CodexPermissionConfirmingFullAccess(_) =>
+      CodexPermissionClosed(@protocol.FullAccess)
+    _ => self
+  }
+}
+
+///|
+fn CodexPermissionPicker::cancel_full_access(
+  self : CodexPermissionPicker,
+) -> CodexPermissionPicker {
+  match self {
+    CodexPermissionConfirmingFullAccess(previous) =>
+      CodexPermissionClosed(previous)
+    _ => self
+  }
+}
+
+///|
 priv struct CodexModelOption {
   id : String
   label : String
@@ -248,6 +331,11 @@ enum Msg {
   SkillsFailed(cwd~ : String)
   ModelChanged(String)
   EffortChanged(String)
+  TogglePermissionMenu
+  DismissPermissionMenu
+  ChoosePermission(@protocol.CodexPermissionMode)
+  ConfirmFullAccess
+  CancelFullAccess
   GitLoaded(thread_id~ : String, reply~ : @protocol.GitPullRequestReply)
   ToggleGitDetails
   CloseGitDetails
@@ -422,6 +510,7 @@ struct State {
   // The next ordinary turn's app-server `effort`. It is always empty when the
   // selected model has no advertised effort metadata.
   selected_effort : String
+  permission_picker : CodexPermissionPicker
   threads : Array[CodexThreadRow]
   archived_threads : Array[CodexThreadRow]
   // Live and archived pagination are independent requests. Each refresh
@@ -471,6 +560,9 @@ pub fn State::State(loading? : Bool = false) -> State {
     models: [],
     selected_model: "",
     selected_effort: "",
+    // Match Codex App's assisted workflow: the workspace sandbox remains in
+    // force, while eligible boundary requests go to the reviewer agent.
+    permission_picker: CodexPermissionClosed(@protocol.AutoReview),
     threads: [],
     archived_threads: [],
     live_catalog_generation: 0,
@@ -493,6 +585,20 @@ pub fn State::State(loading? : Bool = false) -> State {
     foreground: None,
     notice: "",
   }
+}
+
+///|
+/// The selected mode is request data, independent of whether its menu or the
+/// full-access warning is currently visible.
+fn State::permission_mode(self : State) -> @protocol.CodexPermissionMode {
+  self.permission_picker.mode()
+}
+
+///|
+/// Permission changes are frozen while an operation is being accepted or a
+/// turn is active, so the visible choice always describes the next request.
+fn State::can_choose_permission(self : State) -> Bool {
+  self.foreground is None && self.active_turn_id() is None
 }
 
 ///|
@@ -808,7 +914,13 @@ fn CodexForeground::belongs_to_thread(
 ///|
 fn State::begin_foreground(self : State, kind : CodexReplyKind) -> State {
   guard kind.foreground() is Some(foreground) else { return self }
-  { ..self, loading: true, foreground: Some(foreground), notice: "" }
+  {
+    ..self,
+    loading: true,
+    foreground: Some(foreground),
+    permission_picker: self.permission_picker.close(),
+    notice: "",
+  }
 }
 
 ///|

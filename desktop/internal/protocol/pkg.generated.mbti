@@ -443,6 +443,19 @@ pub fn CodexModelListPayload::to_repr(Self) -> @debug.Repr
 pub impl ToJson for CodexModelListPayload
 pub impl @json.FromJson for CodexModelListPayload
 
+pub(all) enum CodexPermissionMode {
+  RequestApproval
+  AutoReview
+  FullAccess
+} derive(Eq, @debug.Debug)
+pub fn CodexPermissionMode::equal(Self, Self) -> Bool
+pub fn CodexPermissionMode::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn CodexPermissionMode::not_equal(Self, Self) -> Bool
+pub fn CodexPermissionMode::to_json(Self) -> Json
+pub fn CodexPermissionMode::to_repr(Self) -> @debug.Repr
+pub impl ToJson for CodexPermissionMode
+pub impl @json.FromJson for CodexPermissionMode
+
 pub(all) struct CodexReviewStartPayload {
   thread_id : String
   target : CodexReviewTarget
@@ -574,6 +587,18 @@ pub fn CodexThreadReply::to_repr(Self) -> @debug.Repr
 pub impl ToJson for CodexThreadReply
 pub impl @json.FromJson for CodexThreadReply
 
+pub(all) struct CodexThreadResumePayload {
+  thread_id : String
+  permission_mode : CodexPermissionMode
+} derive(Eq, @debug.Debug)
+pub fn CodexThreadResumePayload::equal(Self, Self) -> Bool
+pub fn CodexThreadResumePayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn CodexThreadResumePayload::not_equal(Self, Self) -> Bool
+pub fn CodexThreadResumePayload::to_json(Self) -> Json
+pub fn CodexThreadResumePayload::to_repr(Self) -> @debug.Repr
+pub impl ToJson for CodexThreadResumePayload
+pub impl @json.FromJson for CodexThreadResumePayload
+
 pub(all) struct CodexThreadResumeReply {
   thread : Json?
   status : String?
@@ -590,6 +615,7 @@ pub(all) struct CodexThreadStartPayload {
   cwd : String?
   model : String?
   draft_id : String?
+  permission_mode : CodexPermissionMode
 } derive(Eq, @debug.Debug)
 pub fn CodexThreadStartPayload::equal(Self, Self) -> Bool
 pub fn CodexThreadStartPayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
@@ -629,6 +655,7 @@ pub(all) struct CodexTurnStartPayload {
   model : String?
   effort : String?
   cwd : String?
+  permission_mode : CodexPermissionMode
 } derive(Eq, @debug.Debug)
 pub fn CodexTurnStartPayload::equal(Self, Self) -> Bool
 pub fn CodexTurnStartPayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError

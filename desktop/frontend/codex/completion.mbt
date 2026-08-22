@@ -122,9 +122,12 @@ fn State::submit_composer(
     !self.can_prompt() {
     return (@cmd.none, self)
   }
-  if self.active_draft() is Some(draft) {
+  // Once Send begins, the visible choice is frozen into its request payload;
+  // close the menu before any asynchronous writer/start transition.
+  let ready = { ..self, permission_picker: self.permission_picker.close() }
+  if ready.active_draft() is Some(draft) {
     let next = {
-      ..self
+      ..ready
       // This copy is a UI receipt for the first Send. It follows the draft
       // into the real thread until app-server emits its User item, but is
       // never consulted when constructing or retrying a request.
@@ -138,15 +141,19 @@ fn State::submit_composer(
       next.start_draft_thread(dispatch, channel),
       next.begin_foreground(CodexDraftThreadReply(draft.id)),
     )
-  } else if self.write_access is CodexWritable {
-    guard self.active_thread() is Some(active) else { return (@cmd.none, self) }
-    let next = self.begin_foreground(CodexTurnReply(active.id))
-    (self.send(dispatch, channel), next)
+  } else if ready.write_access is CodexWritable {
+    guard ready.active_thread() is Some(active) else {
+      return (@cmd.none, ready)
+    }
+    let next = ready.begin_foreground(CodexTurnReply(active.id))
+    (ready.send(dispatch, channel), next)
   } else {
-    guard self.active_thread() is Some(active) else { return (@cmd.none, self) }
+    guard ready.active_thread() is Some(active) else {
+      return (@cmd.none, ready)
+    }
     (
-      self.resume_for_send(dispatch, channel),
-      self.begin_foreground(CodexWriterReply(active.id)),
+      ready.resume_for_send(dispatch, channel),
+      ready.begin_foreground(CodexWriterReply(active.id)),
     )
   }
 }
@@ -222,6 +229,180 @@ pub fn State::accepts_composer_identity(
 }
 
 ///|
+fn @protocol.CodexPermissionMode::short_label(
+  self : @protocol.CodexPermissionMode,
+) -> String {
+  match self {
+    @protocol.RequestApproval => "Ask"
+    @protocol.AutoReview => "Approve for me"
+    @protocol.FullAccess => "Full access"
+  }
+}
+
+///|
+fn @protocol.CodexPermissionMode::title(
+  self : @protocol.CodexPermissionMode,
+) -> String {
+  match self {
+    @protocol.RequestApproval => "Request approval"
+    @protocol.AutoReview => "Approve for me"
+    @protocol.FullAccess => "Full access"
+  }
+}
+
+///|
+fn @protocol.CodexPermissionMode::description(
+  self : @protocol.CodexPermissionMode,
+) -> String {
+  match self {
+    @protocol.RequestApproval =>
+      "Always ask before editing outside the workspace or using the internet"
+    @protocol.AutoReview =>
+      "Ask only when the reviewer detects a risky operation"
+    @protocol.FullAccess =>
+      "Unrestricted internet access and access to any file on this computer"
+  }
+}
+
+///|
+fn @protocol.CodexPermissionMode::glyph(
+  self : @protocol.CodexPermissionMode,
+) -> String {
+  match self {
+    @protocol.RequestApproval => "✋"
+    @protocol.AutoReview => ">_"
+    @protocol.FullAccess => "!"
+  }
+}
+
+///|
+fn @protocol.CodexPermissionMode::option(
+  self : @protocol.CodexPermissionMode,
+  dispatch : @cmd.Emit[Msg],
+  selected : @protocol.CodexPermissionMode,
+) -> @html.Html {
+  let class_name = if self is @protocol.FullAccess {
+    "codex-permission-option danger"
+  } else {
+    "codex-permission-option"
+  }
+  @html.button(
+    class=if self == selected { class_name + " selected" } else { class_name },
+    type_="button",
+    on_click=dispatch(ChoosePermission(self)),
+    [
+      @html.span(class="codex-permission-option-glyph", self.glyph()),
+      @html.span(class="codex-permission-copy", [
+        @html.span(class="codex-permission-option-title", self.title()),
+        @html.span(class="codex-permission-option-desc", self.description()),
+      ]),
+      @html.span(
+        class="codex-permission-check",
+        if self == selected {
+          "✓"
+        } else {
+          ""
+        },
+      ),
+    ],
+  )
+}
+
+///|
+/// Render the Codex-only permission menu inside the shared composer's status
+/// row. Its popover anchors to `.composer-inner`, just like the Git menu.
+fn CodexPermissionPicker::control(
+  self : CodexPermissionPicker,
+  dispatch : @cmd.Emit[Msg],
+  enabled : Bool,
+) -> @html.Html {
+  let mode = self.mode()
+  let class_name = if mode is @protocol.FullAccess {
+    "codex-permission-control danger"
+  } else {
+    "codex-permission-control"
+  }
+  let children : Array[@html.Html] = [
+    @html.button(
+      class="codex-permission-button",
+      type_="button",
+      disabled=!enabled,
+      title=if enabled {
+        "Choose how Codex handles approval requests"
+      } else {
+        "Permission mode cannot change while Codex is running"
+      },
+      on_click=dispatch(TogglePermissionMenu),
+      [
+        @html.span(class="codex-permission-button-glyph", mode.glyph()),
+        @html.span(class="codex-permission-button-label", mode.short_label()),
+        @html.span(class="codex-permission-chevron", "⌄"),
+      ],
+    ),
+  ]
+  if self.is_open() {
+    children.push(
+      @html.div(
+        class="codex-permission-dismiss",
+        on_click=dispatch(DismissPermissionMenu),
+        ([] : Array[@html.Html]),
+      ),
+    )
+    children.push(
+      @html.div(class="codex-permission-menu", [
+        @html.div(
+          class="codex-permission-menu-title",
+          "How should Codex approve operations?",
+        ),
+        @protocol.RequestApproval.option(dispatch, mode),
+        @protocol.AutoReview.option(dispatch, mode),
+        @protocol.FullAccess.option(dispatch, mode),
+      ]),
+    )
+  }
+  @html.div(class=class_name, children)
+}
+
+///|
+fn CodexPermissionPicker::confirmation_dialog(
+  self : CodexPermissionPicker,
+  dispatch : @cmd.Emit[Msg],
+) -> @html.Html? {
+  guard self is CodexPermissionConfirmingFullAccess(_) else { return None }
+  let cancel = dispatch(CancelFullAccess)
+  Some(
+    @html.div(class="modal-backdrop", on_click=cancel, [
+      @html.div(
+        class="modal",
+        attrs=@html.Attrs::build()
+          .role("dialog")
+          .aria_modal("true")
+          .aria_label("Enable full Codex access")
+          .on_click(event => {
+            event.stop_propagation()
+            @cmd.none
+          }),
+        [
+          @html.div(class="modal-title", "Enable full access?"),
+          @html.div(
+            class="modal-body",
+            "Codex will be able to access the internet and read or modify any file on this computer without asking. Approve for me is safer because it keeps the workspace sandbox in place.",
+          ),
+          @html.div(class="modal-actions", [
+            @html.button(on_click=cancel, "Cancel"),
+            @html.button(
+              class="danger",
+              on_click=dispatch(ConfirmFullAccess),
+              "Enable full access",
+            ),
+          ]),
+        ],
+      ),
+    ]),
+  )
+}
+
+///|
 /// Project Codex's canonical task state and app-server-specific controls into
 /// the shared composer component. No editable or completion state is retained
 /// in this view projection.
@@ -255,6 +436,9 @@ pub fn State::composer_input(
   if context.reasoning_chip is Some(chip) {
     status.push(chip)
   }
+  status.push(
+    self.permission_picker.control(dispatch, self.can_choose_permission()),
+  )
   if self.worktree_launch_workspace(context.channel) is Some(_) &&
     self.active_draft() is Some(_) {
     status.push(
