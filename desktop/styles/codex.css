@@ -18,6 +18,55 @@
   gap: 8px;
 }
 
+/* Approval controls own their geometry instead of borrowing the settings-page
+   button modifiers. This keeps every advertised decision visibly clickable. */
+.codex-request-action {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  max-width: 100%;
+  padding: 6px 11px;
+  border-color: var(--color-border);
+  background: var(--color-bg-surface);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.codex-request-action:not(:disabled):hover {
+  background: var(--color-bg-subtle);
+}
+
+.codex-request-action-primary {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.codex-request-action-primary:not(:disabled):hover {
+  border-color: var(--color-accent-strong);
+  background: var(--color-accent-strong);
+  color: var(--color-on-accent);
+}
+
+.codex-request-action-danger {
+  border-color: var(--color-danger-border);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.codex-request-action-danger:not(:disabled):hover {
+  background: color-mix(
+    in srgb,
+    var(--color-danger-soft) 78%,
+    var(--color-danger)
+  );
+}
+
 .codex-topbar > button:not(.topbar-toggle):not(.panel-toggle) {
   flex: 0 0 auto;
   padding: 5px 9px;
@@ -26,7 +75,7 @@
 
 .codex-raw {
   max-height: 260px;
-  margin: 8px 0 0;
+  margin: 0;
   padding: 10px;
   overflow: auto;
   border-radius: var(--radius-sm);
@@ -35,6 +84,62 @@
   font-size: 11px;
   line-height: 1.5;
   white-space: pre-wrap;
+}
+
+.codex-request-details {
+  display: grid;
+  gap: 8px;
+}
+
+.codex-request-detail {
+  display: grid;
+  gap: 4px;
+}
+
+.codex-request-detail-label {
+  color: var(--color-text-muted);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.codex-request-command {
+  margin: 0;
+  padding: 9px 10px;
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-surface);
+  color: var(--color-code);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.codex-request-value {
+  color: var(--color-code);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+.codex-request-raw {
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.codex-request-raw-summary {
+  width: fit-content;
+  cursor: pointer;
+  user-select: none;
+}
+
+.codex-request-raw[open] .codex-request-raw-summary {
+  margin-bottom: 6px;
+}
+
+.codex-request-unsupported {
+  color: var(--color-danger);
+  font-size: 11.5px;
 }
 
 .codex-pending {
@@ -109,6 +214,12 @@
 }
 
 @media (max-width: 720px) {
+  .codex-request-action {
+    min-height: 44px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
   .codex-topbar .codex-account-label {
     display: none;
   }

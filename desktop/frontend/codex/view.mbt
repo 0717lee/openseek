@@ -69,6 +69,225 @@ pub fn State::reasoning_effort_chip(
 }
 
 ///|
+/// Render only the approval facts a person needs to make the decision. The
+/// full request remains available in a disclosure below for diagnostics and
+/// forward-compatible fields this client does not know yet.
+fn CodexPendingRequest::approval_details(
+  self : CodexPendingRequest,
+) -> Array[@html.Html] {
+  guard self.params is Object(fields) else { return [] }
+  let details : Array[@html.Html] = []
+  let network_request = fields.get("networkApprovalContext") is Some(Object(_))
+  if network_request &&
+    fields.get("networkApprovalContext") is Some(Object(network)) &&
+    @jsonx.json_text(network, "host") is Some(host) {
+    let protocol = @jsonx.json_text(network, "protocol")
+    let port = network
+      .get("port")
+      .bind(value => {
+        match value {
+          String(port) => Some(port)
+          Number(_) => Some(value.stringify())
+          _ => None
+        }
+      })
+    let destination = if protocol is Some(protocol) && port is Some(port) {
+      "\{protocol}://\{host}:\{port}"
+    } else if protocol is Some(protocol) {
+      "\{protocol}://\{host}"
+    } else if port is Some(port) {
+      "\{host}:\{port}"
+    } else {
+      host
+    }
+    details.push(
+      @html.div(class="codex-request-detail", [
+        @html.div(class="codex-request-detail-label", "Network destination"),
+        @html.code(class="codex-request-value", destination),
+      ]),
+    )
+  }
+  if !network_request {
+    let commands : Array[String] = []
+    if @jsonx.json_text(fields, "command") is Some(command) {
+      commands.push(command)
+    } else if fields.get("commandActions") is Some(Array(actions)) {
+      for action in actions {
+        if action is Object(action_fields) &&
+          @jsonx.json_text(action_fields, "command") is Some(command) {
+          commands.push(command)
+        }
+      }
+    }
+    if !commands.is_empty() {
+      details.push(
+        @html.div(class="codex-request-detail", [
+          @html.div(class="codex-request-detail-label", "Command"),
+          @html.pre(class="codex-request-command", commands.join("\n")),
+        ]),
+      )
+    }
+  }
+  if @jsonx.json_text(fields, "cwd") is Some(cwd) && !cwd.is_empty() {
+    details.push(
+      @html.div(class="codex-request-detail", [
+        @html.div(class="codex-request-detail-label", "Working directory"),
+        @html.code(class="codex-request-value", cwd),
+      ]),
+    )
+  }
+  if fields.get("proposedExecpolicyAmendment") is Some(Array(values)) {
+    let parts : Array[String] = []
+    for value in values {
+      if value is String(part) {
+        parts.push(part)
+      }
+    }
+    if !parts.is_empty() {
+      details.push(
+        @html.div(class="codex-request-detail", [
+          @html.div(class="codex-request-detail-label", "Requested rule"),
+          @html.code(class="codex-request-value", parts.join(" ")),
+        ]),
+      )
+    }
+  }
+  if @jsonx.json_text(fields, "grantRoot") is Some(grant_root) &&
+    !grant_root.is_empty() {
+    details.push(
+      @html.div(class="codex-request-detail", [
+        @html.div(class="codex-request-detail-label", "Allowed path"),
+        @html.code(class="codex-request-value", grant_root),
+      ]),
+    )
+  }
+  if fields.get("additionalPermissions") is Some(additional_permissions) &&
+    !(additional_permissions is Null) {
+    details.push(
+      @html.div(class="codex-request-detail", [
+        @html.div(class="codex-request-detail-label", "Additional permissions"),
+        @html.pre(
+          class="codex-request-command",
+          additional_permissions.stringify(indent=2),
+        ),
+      ]),
+    )
+  }
+  details
+}
+
+///|
+/// Name the execution-policy choice with its concrete command prefix. The
+/// server-provided decision is authoritative; the top-level proposal is only
+/// a compatibility fallback for older payloads.
+fn CodexPendingRequest::execpolicy_label(
+  self : CodexPendingRequest,
+  decision : Json,
+) -> String {
+  let parts : Array[String] = []
+  if decision is Object(decision_fields) &&
+    decision_fields.get("acceptWithExecpolicyAmendment")
+    is Some(Object(amendment)) &&
+    amendment.get("execpolicy_amendment") is Some(Array(values)) {
+    for value in values {
+      if value is String(part) {
+        parts.push(part)
+      }
+    }
+  }
+  if parts.is_empty() &&
+    self.params is Object(fields) &&
+    fields.get("proposedExecpolicyAmendment") is Some(Array(values)) {
+    for value in values {
+      if value is String(part) {
+        parts.push(part)
+      }
+    }
+  }
+  if parts.is_empty() {
+    "Allow by rule"
+  } else {
+    "Allow by rule: \{parts.join(" ")}"
+  }
+}
+
+///|
+/// Build controls from `availableDecisions` instead of offering choices the
+/// current approval request may reject.
+fn CodexPendingRequest::approval_actions(
+  self : CodexPendingRequest,
+  dispatch : @cmd.Emit[Msg],
+  request_key : String,
+) -> @html.Html {
+  let controls : Array[@html.Html] = []
+  for decision in self.approval_decisions() {
+    match decision {
+      String("accept") =>
+        controls.push(
+          @html.button(
+            class="codex-request-action codex-request-action-primary",
+            on_click=dispatch(Respond(request_key~, decision~)),
+            "Approve once",
+          ),
+        )
+      String("acceptForSession") =>
+        controls.push(
+          @html.button(
+            class="codex-request-action",
+            on_click=dispatch(Respond(request_key~, decision~)),
+            "Approve for session",
+          ),
+        )
+      String("decline") =>
+        controls.push(
+          @html.button(
+            class="codex-request-action codex-request-action-danger",
+            on_click=dispatch(Respond(request_key~, decision~)),
+            "Decline",
+          ),
+        )
+      String("cancel") =>
+        controls.push(
+          @html.button(
+            class="codex-request-action codex-request-action-danger",
+            on_click=dispatch(Respond(request_key~, decision~)),
+            "Cancel",
+          ),
+        )
+      Object(fields) if fields.get("acceptWithExecpolicyAmendment") is Some(_) =>
+        controls.push(
+          @html.button(
+            class="codex-request-action",
+            on_click=dispatch(Respond(request_key~, decision~)),
+            self.execpolicy_label(decision),
+          ),
+        )
+      _ => ()
+    }
+  }
+  if controls.is_empty() {
+    controls.push(
+      @html.span(
+        class="codex-request-unsupported",
+        "This app version cannot answer the advertised approval choices.",
+      ),
+    )
+  }
+  @html.div(class="codex-request-actions", controls)
+}
+
+///|
+fn CodexPendingRequest::raw_details(
+  self : CodexPendingRequest,
+  open~ : Bool,
+) -> @html.Html {
+  @html.details(class="codex-request-raw", open~, [
+    @html.summary(class="codex-request-raw-summary", "Show details"),
+    @html.pre(class="codex-raw", self.params.stringify(indent=2)),
+  ])
+}
+
+///|
 fn CodexPendingRequest::view(
   self : CodexPendingRequest,
   dispatch : @cmd.Emit[Msg],
@@ -78,7 +297,13 @@ fn CodexPendingRequest::view(
     @html.div(
       class="codex-request-title",
       match self.method_ {
-        "item/commandExecution/requestApproval" => "Command approval"
+        "item/commandExecution/requestApproval" =>
+          if self.params is Object(fields) &&
+            fields.get("networkApprovalContext") is Some(Object(_)) {
+            "Network access approval"
+          } else {
+            "Command approval"
+          }
         "item/fileChange/requestApproval" => "File change approval"
         "item/permissions/requestApproval" => "Permission request"
         "item/tool/requestUserInput" => "Codex needs your input"
@@ -95,46 +320,39 @@ fn CodexPendingRequest::view(
   match self.method_ {
     "item/commandExecution/requestApproval"
     | "item/fileChange/requestApproval" => {
-      body.push(@html.pre(class="codex-raw", self.params.stringify()))
-      body.push(
-        @html.div(class="codex-request-actions", [
-          @html.button(
-            class="primary",
-            on_click=dispatch(Respond(request_key=key, decision="accept")),
-            "Approve once",
-          ),
-          @html.button(
-            on_click=dispatch(
-              Respond(request_key=key, decision="acceptForSession"),
-            ),
-            "Approve for session",
-          ),
-          @html.button(
-            class="danger-button",
-            on_click=dispatch(Respond(request_key=key, decision="decline")),
-            "Decline",
-          ),
-        ]),
-      )
+      let details = self.approval_details()
+      if !details.is_empty() {
+        body.push(@html.div(class="codex-request-details", details))
+      }
+      body.push(self.raw_details(open=details.is_empty()))
+      body.push(self.approval_actions(dispatch, key))
     }
     "item/permissions/requestApproval" => {
-      body.push(@html.pre(class="codex-raw", self.params.stringify()))
+      body.push(@html.pre(class="codex-raw", self.params.stringify(indent=2)))
       body.push(
         @html.div(class="codex-request-actions", [
           @html.button(
-            class="primary",
-            on_click=dispatch(Respond(request_key=key, decision="accept")),
+            class="codex-request-action codex-request-action-primary",
+            on_click=dispatch(
+              Respond(request_key=key, decision=Json::string("accept")),
+            ),
             "Grant for turn",
           ),
           @html.button(
+            class="codex-request-action",
             on_click=dispatch(
-              Respond(request_key=key, decision="acceptForSession"),
+              Respond(
+                request_key=key,
+                decision=Json::string("acceptForSession"),
+              ),
             ),
             "Grant for session",
           ),
           @html.button(
-            class="danger-button",
-            on_click=dispatch(Respond(request_key=key, decision="decline")),
+            class="codex-request-action codex-request-action-danger",
+            on_click=dispatch(
+              Respond(request_key=key, decision=Json::string("decline")),
+            ),
             "Deny",
           ),
         ]),
@@ -191,15 +409,17 @@ fn CodexPendingRequest::view(
       body.push(
         @html.div(class="codex-request-actions", [
           @html.button(
-            class="primary",
-            on_click=dispatch(Respond(request_key=key, decision="accept")),
+            class="codex-request-action codex-request-action-primary",
+            on_click=dispatch(
+              Respond(request_key=key, decision=Json::string("accept")),
+            ),
             "Submit answers",
           ),
         ]),
       )
     }
     "mcpServer/elicitation/request" => {
-      body.push(@html.pre(class="codex-raw", self.params.stringify()))
+      body.push(@html.pre(class="codex-raw", self.params.stringify(indent=2)))
       body.push(
         @html.textarea(
           value=self.answers.get("__content").unwrap_or("{}"),
@@ -217,13 +437,17 @@ fn CodexPendingRequest::view(
       body.push(
         @html.div(class="codex-request-actions", [
           @html.button(
-            class="primary",
-            on_click=dispatch(Respond(request_key=key, decision="accept")),
+            class="codex-request-action codex-request-action-primary",
+            on_click=dispatch(
+              Respond(request_key=key, decision=Json::string("accept")),
+            ),
             "Submit JSON",
           ),
           @html.button(
-            class="danger-button",
-            on_click=dispatch(Respond(request_key=key, decision="decline")),
+            class="codex-request-action codex-request-action-danger",
+            on_click=dispatch(
+              Respond(request_key=key, decision=Json::string("decline")),
+            ),
             "Decline",
           ),
         ]),
@@ -233,7 +457,7 @@ fn CodexPendingRequest::view(
       body.push(
         @html.pre(
           class="codex-raw danger",
-          "Unsupported app-server request:\n" + self.params.stringify(),
+          "Unsupported app-server request:\n" + self.params.stringify(indent=2),
         ),
       )
   }
