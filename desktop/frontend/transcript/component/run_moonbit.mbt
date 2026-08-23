@@ -135,11 +135,67 @@ fn run_moonbit_card(arguments : String) -> @html.Html? {
   }
   children.push(
     @html.pre(class="run-moonbit-source", [
-      @html.code(class="language-moonbit", truncate_output(call.source)),
+      moonbit_source_code(truncate_output(call.source)),
     ]),
   )
   children.push(original_json_view(arguments))
   Some(@html.div(class="run-moonbit-args", children))
+}
+
+///|
+/// Render MoonBit source with the editor's lexer and token color classes. Text
+/// stays in Rabbita text nodes, so source containing HTML remains escaped.
+fn moonbit_source_code(source : String) -> @html.Html {
+  let tokenizer : &@syntax.LineTokenizer = @lang_moonbit.MoonBitTokenizer()
+  let children : Array[@html.Html] = []
+  let mut state = tokenizer.initial_state()
+  for line_number, line in source.split("\n") {
+    if line_number > 0 {
+      children.push(@html.text("\n"))
+    }
+    let (tokens, next_state) = tokenizer.tokenize_line(line, state)
+    state = next_state
+    let mut offset = 0
+    for token in tokens {
+      if offset < token.start {
+        children.push(
+          @html.span(class="mtk1", line[offset:token.start].to_owned()),
+        )
+      }
+      if token.start < token.end {
+        children.push(
+          @html.span(
+            class=moonbit_token_class(token.tag),
+            line[token.start:token.end].to_owned(),
+          ),
+        )
+      }
+      offset = token.end
+    }
+    if offset < line.length() {
+      children.push(@html.span(class="mtk1", line[offset:].to_owned()))
+    }
+  }
+  @html.code(class="language-moonbit", children)
+}
+
+///|
+/// Map the lexer tags to the same Monaco color ids used by the editor model.
+fn moonbit_token_class(tag : @syntax.HighlightTag) -> String {
+  match tag {
+    Plain => "mtk1"
+    Keyword | Constant | Tag => "mtk3"
+    Identifier | Variable | Attribute => "mtk4"
+    String => "mtk5"
+    Number => "mtk6"
+    Comment | CommentDoc => "mtk7"
+    Punctuation | Operator | Delimiter => "mtk8"
+    Type => "mtk9"
+    Function => "mtk10"
+    StringEscape => "mtk11"
+    Regexp => "mtk12"
+    Invalid => "mtk13"
+  }
 }
 
 ///|
