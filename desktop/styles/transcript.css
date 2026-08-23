@@ -562,7 +562,7 @@
   color: var(--bg, var(--color-on-accent));
 }
 
-/* One turn's work (thinking + tool calls), folded behind a single
+/* One model step's work (thinking + tool calls), folded behind a single
    summary line. Flush with the agent's prose, not indented: the work is
    the agent's, and an indent under a user bubble would read as the
    user's. The summary stays borderless; once opened, a quiet guide line

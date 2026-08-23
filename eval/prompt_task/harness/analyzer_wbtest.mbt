@@ -32,6 +32,7 @@ fn sample_events() -> String {
         ),
       ),
     )
+    .append(Assistant(AssistantMessage("done")))
     .append(Terminal(Finished("done")))
   session_events(session)
 }

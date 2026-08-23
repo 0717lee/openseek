@@ -338,7 +338,14 @@ test "summary replaces covered events in model projection only" {
       #|      {
       #|        sequence: 2,
       #|        ts: 0,
-      #|        item: Assistant({ content: "old assistant", tool_calls: [], reasoning_content: None }),
+      #|        item: Assistant(
+      #|          {
+      #|            content: "old assistant",
+      #|            tool_calls: [],
+      #|            reasoning_content: None,
+      #|            is_replay: None,
+      #|          },
+      #|        ),
       #|      },
       #|      {
       #|        sequence: 3,

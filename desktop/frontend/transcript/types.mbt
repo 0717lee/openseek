@@ -11,6 +11,13 @@ pub(all) enum ItemKind {
   // raised itself. They wear the assistant's bubble but render as plain red
   // text, never markdown: an error's own `*` and `#` are not formatting.
   Assistant(is_danger~ : Bool)
+  // A durable checkpoint copy of an answer already owned by an earlier model
+  // step. It renders as normal assistant prose but never starts another step.
+  AssistantReplay
+  // A visible answer carried by a durable Finished terminal rather than an
+  // Assistant event. It renders like ordinary assistant prose, while keeping
+  // the source event kind available for exact model-step attribution.
+  TerminalAnswer
   Reasoning
   // One tool call in its original assistant-message order. `call_id` pairs the
   // later durable result into this same item instead of adding a second row;

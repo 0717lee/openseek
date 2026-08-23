@@ -294,10 +294,13 @@ pub fn apply_session_item(
       }
     }
     @desktop_protocol.Assistant(payload) => {
+      let is_replay = payload.is_replay == Some(true)
       // Thinking-mode turns store the reasoning alongside the answer (the
       // store omits the field entirely otherwise); the live transcript
-      // showed it first, so replay does too.
-      if payload.reasoning_content is Some(reasoning) {
+      // showed it first, so replay does too. A checkpoint replay already has
+      // its reasoning on the original durable provider response, so do not
+      // duplicate that activity or let it masquerade as a new step.
+      if !is_replay && payload.reasoning_content is Some(reasoning) {
         let reasoning = reasoning.trim().to_owned()
         if !reasoning.is_empty() {
           items.push({ kind: Reasoning, content: reasoning, ts, sequence })
@@ -305,7 +308,16 @@ pub fn apply_session_item(
       }
       let content = payload.content.trim().to_owned()
       if !content.is_empty() {
-        items.push({ kind: Assistant(is_danger=false), content, ts, sequence })
+        items.push({
+          kind: if is_replay {
+            AssistantReplay
+          } else {
+            Assistant(is_danger=false)
+          },
+          content,
+          ts,
+          sequence,
+        })
       }
       // Tool calls belong after this assistant event's reasoning and visible
       // prose, in the exact order the model emitted them. Their results arrive
@@ -346,14 +358,15 @@ pub fn apply_session_item(
       if pending_matches == 1 &&
         matched is Some(index) &&
         items[index].kind is Tool(call_id~, name=call_name, arguments~, ..) {
+        let tool_name = if payload.tool_name.is_blank() {
+          call_name
+        } else {
+          payload.tool_name
+        }
         items[index] = {
           kind: Tool(
             call_id~,
-            name=if payload.tool_name.is_blank() {
-              call_name
-            } else {
-              payload.tool_name
-            },
+            name=tool_name,
             arguments~,
             has_result=true,
             is_error=payload.is_error,
@@ -369,14 +382,15 @@ pub fn apply_session_item(
       } else {
         // Older or malformed logs can contain an unmatched result. Keep the
         // existing Desktop behavior for those records instead of hiding them.
+        let tool_name = if payload.tool_name.is_blank() {
+          "tool"
+        } else {
+          payload.tool_name
+        }
         items.push({
           kind: Tool(
             call_id=payload.tool_call_id,
-            name=if payload.tool_name.is_blank() {
-              "tool"
-            } else {
-              payload.tool_name
-            },
+            name=tool_name,
             arguments=None,
             has_result=true,
             is_error=payload.is_error,
@@ -507,16 +521,12 @@ fn SessionTerminalProjection::append_to(
   }
   let message = message.trim().to_owned()
   match kind {
-    // The final answer is usually already in the log as the last assistant
-    // message; only a differing terminal message adds a bubble.
+    // A current no-tool final is already the last assistant message; only a
+    // differing terminal message, such as a completion-tool answer, adds a
+    // bubble.
     "finished" =>
       if !message.is_empty() && !ends_with_assistant(items, message) {
-        items.push({
-          kind: Assistant(is_danger=false),
-          content: message,
-          ts,
-          sequence,
-        })
+        items.push({ kind: TerminalAnswer, content: message, ts, sequence })
       }
     "aborted" =>
       items.push({
@@ -881,6 +891,18 @@ test "transcript mapping replays a finished conversation" {
 }
 
 ///|
+test "checkpoint assistant provenance projects without duplicate reasoning" {
+  let events =
+    #|{"sequence":1,"item":{"kind":"assistant","payload":{"content":"kept answer","tool_calls":[],"reasoning_content":"old thought","is_replay":true}}}
+  let items = transcript_from_session(session_reply(events))
+  inspect(items.length(), content="1")
+  guard items[0].kind is AssistantReplay else {
+    fail("expected a checkpoint replay")
+  }
+  inspect(items[0].content, content="kept answer")
+}
+
+///|
 test "tool results fill calls by id without changing call order" {
   let events =
     #|{"sequence":1,"item":{"kind":"assistant","payload":{"content":"","tool_calls":[{"id":"c1","name":"read","arguments":"{\"path\":\"moon.mod\"}"},{"id":"c2","name":"shell","arguments":"{\"cmd\":\"moon test\"}"}]}}},
@@ -1109,7 +1131,7 @@ test "transcript mapping replays a context checkpoint and yield guidance" {
   inspect(items.length(), content="2")
   guard items[0].kind is Summary else { fail("expected checkpoint summary") }
   inspect(items[0].content, content="checkpoint recap")
-  guard items[1].kind is Assistant(is_danger=false) else {
+  guard items[1].kind is TerminalAnswer else {
     fail("expected context-yield guidance")
   }
   inspect(items[1].content, content="[context ceiling] continue in a new turn")

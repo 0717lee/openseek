@@ -157,15 +157,21 @@ fn finished_answer(
 }
 
 ///|
-/// The checkpoint summary appended right before the terminal, failing the
-/// test when it is missing.
+/// The latest checkpoint summary before the terminal, failing the test when it
+/// is missing. A no-tool final response is persisted between the two.
 #callsite(autofill(loc))
 fn summary_before_terminal(
   result : @agent_session.Session,
   loc~ : SourceLoc,
 ) -> @agent_session.SessionSummary raise {
   let events = result.events()
-  guard events[events.length() - 2].item() is Summary(summary) else {
+  let mut found = None
+  for event in events {
+    if event.item() is Summary(summary) {
+      found = Some(summary)
+    }
+  }
+  guard found is Some(summary) else {
     fail("expected the checkpoint summary before the terminal", loc~)
   }
   summary
@@ -308,7 +314,7 @@ async test "a final answer at pressure checkpoints then finishes normally" {
     let summary = summary_before_terminal(result)
     assert_eq(summary.content(), "FINISH-SUMMARY")
     assert_eq(summary.from_sequence(), 1)
-    assert_eq(summary.to_sequence(), count - 2)
+    assert_eq(summary.to_sequence(), count - 3)
   }
 }
 
@@ -643,13 +649,18 @@ async test "a pressured custom control completion is salvaged at the ceiling" {
     assert_eq(checkpoint_requests.length(), 1)
     // A completed task, not a yield: the custom completion's answer verbatim.
     assert_eq(finished_answer(result), "report captured")
+    let mut completion_recorded = false
     for event in result.events() {
       if event.item() is Tool(tool_result) {
         // The probe may not execute: its result could grow the checkpoint
         // request and cannot change the decided answer.
         assert_true(tool_result.content() != "result-1")
+        if tool_result.tool_name() == "submit_report" {
+          completion_recorded = true
+        }
       }
     }
+    assert_true(completion_recorded)
   }
 }
 
@@ -1556,9 +1567,14 @@ async test "a steer during a salvaged finish's checkpoint continues once" {
     let mut summaries = 0
     let mut skip_notes = 0
     let mut steer_present = false
+    let mut replayed_finish_answers = 0
     for event in result.events() {
       match event.item() {
         Summary(_) => summaries += 1
+        Assistant(message) if message.content() == "wrapped: all done" => {
+          assert_true(message.is_replay())
+          replayed_finish_answers += 1
+        }
         Tool(tool_result) =>
           if tool_result.is_error() &&
             tool_result.content().contains("yielding at the context ceiling") {
@@ -1573,6 +1589,7 @@ async test "a steer during a salvaged finish's checkpoint continues once" {
     // once, and the steer survives as the continuation's input.
     assert_eq(summaries, 1)
     assert_eq(skip_notes, 2)
+    assert_eq(replayed_finish_answers, 1)
     assert_true(steer_present)
     assert_eq(finished_answer(result), "done")
   }
