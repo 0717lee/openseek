@@ -3,93 +3,6 @@
 // missing, null, malformed, and encoded behavior.
 
 ///|
-priv struct TextSearchJsonObject {
-  fields : Map[String, Json]
-  path : @json.JsonPath
-}
-
-///|
-fn TextSearchJsonObject::decode(
-  json : Json,
-  path : @json.JsonPath,
-  expected : String,
-) -> TextSearchJsonObject raise @json.JsonDecodeError {
-  guard json is Object(fields) else {
-    raise JsonDecodeError((path, "expected " + expected + " object"))
-  }
-  { fields, path }
-}
-
-///|
-fn TextSearchJsonObject::required_json(
-  self : TextSearchJsonObject,
-  name : String,
-) -> Json raise @json.JsonDecodeError {
-  match self.fields.get(name) {
-    Some(value) => value
-    None =>
-      raise JsonDecodeError((self.path.add_key(name), "missing required field"))
-  }
-}
-
-///|
-fn TextSearchJsonObject::required_string(
-  self : TextSearchJsonObject,
-  name : String,
-) -> String raise @json.JsonDecodeError {
-  guard self.required_json(name) is String(value) else {
-    raise JsonDecodeError((self.path.add_key(name), "expected string"))
-  }
-  value
-}
-
-///|
-fn TextSearchJsonObject::optional_string(
-  self : TextSearchJsonObject,
-  name : String,
-) -> String? raise @json.JsonDecodeError {
-  match self.fields.get(name) {
-    Some(String(value)) => Some(value)
-    Some(Null) | None => None
-    Some(_) =>
-      raise JsonDecodeError(
-        (self.path.add_key(name), "expected string or null"),
-      )
-  }
-}
-
-///|
-fn TextSearchJsonObject::required_bool(
-  self : TextSearchJsonObject,
-  name : String,
-) -> Bool raise @json.JsonDecodeError {
-  match self.required_json(name) {
-    True => true
-    False => false
-    _ => raise JsonDecodeError((self.path.add_key(name), "expected boolean"))
-  }
-}
-
-///|
-fn TextSearchJsonObject::required_int(
-  self : TextSearchJsonObject,
-  name : String,
-) -> Int raise @json.JsonDecodeError {
-  @json.from_json(self.required_json(name), path=self.path.add_key(name))
-}
-
-///|
-fn TextSearchJsonObject::required_array(
-  self : TextSearchJsonObject,
-  name : String,
-) -> Array[Json] raise @json.JsonDecodeError {
-  guard self.required_json(name) is Array(values) else {
-    raise JsonDecodeError((self.path.add_key(name), "expected array"))
-  }
-  values
-}
-
-///|
 fn require_text_search_non_negative(
   value : Int,
   path : @json.JsonPath,
@@ -102,7 +15,7 @@ fn require_text_search_non_negative(
 
 ///|
 pub impl FromJson for SearchTextPayload with fn from_json(json, path) {
-  let object = TextSearchJsonObject::decode(json, path, "text-search payload")
+  let object = JsonObject::decode(json, path, "text-search payload")
   {
     root: object.required_string("root"),
     query: object.required_string("query"),
@@ -141,7 +54,7 @@ pub impl ToJson for SearchTextPayload with fn to_json(self) {
 
 ///|
 pub impl FromJson for CancelSearchTextPayload with fn from_json(json, path) {
-  let object = TextSearchJsonObject::decode(
+  let object = JsonObject::decode(
     json, path, "text-search cancellation payload",
   )
   {
@@ -160,7 +73,7 @@ pub impl ToJson for CancelSearchTextPayload with fn to_json(self) {
 
 ///|
 pub impl FromJson for TextSearchRange with fn from_json(json, path) {
-  let object = TextSearchJsonObject::decode(json, path, "text-search range")
+  let object = JsonObject::decode(json, path, "text-search range")
   let start_column = object.required_int("start_column")
   let end_column = object.required_int("end_column")
   if start_column < 1 {
@@ -183,7 +96,7 @@ pub impl ToJson for TextSearchRange with fn to_json(self) {
 
 ///|
 pub impl FromJson for TextSearchMatch with fn from_json(json, path) {
-  let object = TextSearchJsonObject::decode(json, path, "text-search match")
+  let object = JsonObject::decode(json, path, "text-search match")
   let line_number = object.required_int("line_number")
   let preview_start_column = object.required_int("preview_start_column")
   if line_number < 1 {
@@ -229,7 +142,7 @@ pub impl ToJson for TextSearchMatch with fn to_json(self) {
 
 ///|
 pub impl FromJson for SearchTextReply with fn from_json(json, path) {
-  let object = TextSearchJsonObject::decode(json, path, "text-search reply")
+  let object = JsonObject::decode(json, path, "text-search reply")
   let generation = require_text_search_non_negative(
     object.required_int("generation"),
     path.add_key("generation"),

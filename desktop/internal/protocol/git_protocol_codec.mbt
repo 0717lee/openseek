@@ -3,120 +3,8 @@
 // missing, null, malformed, and encoded behavior.
 
 ///|
-priv struct GitJsonObject {
-  fields : Map[String, Json]
-  path : @json.JsonPath
-}
-
-///|
-fn GitJsonObject::decode(
-  json : Json,
-  path : @json.JsonPath,
-  expected : String,
-) -> GitJsonObject raise @json.JsonDecodeError {
-  guard json is Object(fields) else {
-    raise JsonDecodeError((path, "expected " + expected + " object"))
-  }
-  { fields, path }
-}
-
-///|
-fn GitJsonObject::required_json(
-  self : GitJsonObject,
-  name : String,
-) -> Json raise @json.JsonDecodeError {
-  match self.fields.get(name) {
-    Some(value) => value
-    None =>
-      raise JsonDecodeError((self.path.add_key(name), "missing required field"))
-  }
-}
-
-///|
-fn GitJsonObject::optional_json(self : GitJsonObject, name : String) -> Json? {
-  match self.fields.get(name) {
-    Some(Null) | None => None
-    Some(value) => Some(value)
-  }
-}
-
-///|
-fn GitJsonObject::required_string(
-  self : GitJsonObject,
-  name : String,
-) -> String raise @json.JsonDecodeError {
-  guard self.required_json(name) is String(value) else {
-    raise JsonDecodeError((self.path.add_key(name), "expected string"))
-  }
-  value
-}
-
-///|
-fn GitJsonObject::optional_string(
-  self : GitJsonObject,
-  name : String,
-) -> String? raise @json.JsonDecodeError {
-  match self.fields.get(name) {
-    Some(String(value)) => Some(value)
-    Some(Null) | None => None
-    Some(_) =>
-      raise JsonDecodeError(
-        (self.path.add_key(name), "expected string or null"),
-      )
-  }
-}
-
-///|
-fn GitJsonObject::required_bool(
-  self : GitJsonObject,
-  name : String,
-) -> Bool raise @json.JsonDecodeError {
-  match self.required_json(name) {
-    True => true
-    False => false
-    _ => raise JsonDecodeError((self.path.add_key(name), "expected boolean"))
-  }
-}
-
-///|
-fn GitJsonObject::required_int(
-  self : GitJsonObject,
-  name : String,
-) -> Int raise @json.JsonDecodeError {
-  @json.from_json(self.required_json(name), path=self.path.add_key(name))
-}
-
-///|
-fn GitJsonObject::required_array(
-  self : GitJsonObject,
-  name : String,
-) -> Array[Json] raise @json.JsonDecodeError {
-  guard self.required_json(name) is Array(values) else {
-    raise JsonDecodeError((self.path.add_key(name), "expected array"))
-  }
-  values
-}
-
-///|
-fn GitJsonObject::required_string_array(
-  self : GitJsonObject,
-  name : String,
-) -> Array[String] raise @json.JsonDecodeError {
-  let decoded : Array[String] = []
-  for index, raw in self.required_array(name) {
-    guard raw is String(value) else {
-      raise JsonDecodeError(
-        (self.path.add_key(name).add_index(index), "expected string"),
-      )
-    }
-    decoded.push(value)
-  }
-  decoded
-}
-
-///|
 pub impl FromJson for GitHistoryPayload with fn from_json(json, path) {
-  let object = GitJsonObject::decode(json, path, "Git history payload")
+  let object = JsonObject::decode(json, path, "Git history payload")
   let snapshot = match object.optional_json("snapshot") {
     Some(raw) => Some(@json.from_json(raw, path=path.add_key("snapshot")))
     None => None
@@ -148,7 +36,7 @@ pub impl ToJson for GitHistoryPayload with fn to_json(self) {
 
 ///|
 pub impl FromJson for GitCommitChangesPayload with fn from_json(json, path) {
-  let object = GitJsonObject::decode(json, path, "Git commit-changes payload")
+  let object = JsonObject::decode(json, path, "Git commit-changes payload")
   {
     session: object.required_string("session"),
     workspace: object.optional_string("workspace"),
@@ -170,7 +58,7 @@ pub impl ToJson for GitCommitChangesPayload with fn to_json(self) {
 
 ///|
 pub impl FromJson for GitHistoryRef with fn from_json(json, path) {
-  let object = GitJsonObject::decode(json, path, "Git history ref")
+  let object = JsonObject::decode(json, path, "Git history ref")
   {
     name: object.required_string("name"),
     revision: object.required_string("revision"),
@@ -185,7 +73,7 @@ pub impl ToJson for GitHistoryRef with fn to_json(self) {
 
 ///|
 pub impl FromJson for GitHistorySnapshot with fn from_json(json, path) {
-  let object = GitJsonObject::decode(json, path, "Git history snapshot")
+  let object = JsonObject::decode(json, path, "Git history snapshot")
   let refs : Array[GitHistoryRef] = []
   for index, raw in object.required_array("refs") {
     refs.push(@json.from_json(raw, path=path.add_key("refs").add_index(index)))
@@ -215,7 +103,7 @@ pub impl ToJson for GitHistorySnapshot with fn to_json(self) {
 
 ///|
 pub impl FromJson for GitHistoryCommit with fn from_json(json, path) {
-  let object = GitJsonObject::decode(json, path, "Git history commit")
+  let object = JsonObject::decode(json, path, "Git history commit")
   {
     id: object.required_string("id"),
     parent_ids: object.required_string_array("parent_ids"),
@@ -238,7 +126,7 @@ pub impl ToJson for GitHistoryCommit with fn to_json(self) {
 
 ///|
 pub impl FromJson for GitHistoryReply with fn from_json(json, path) {
-  let object = GitJsonObject::decode(json, path, "Git history reply")
+  let object = JsonObject::decode(json, path, "Git history reply")
   let snapshot : GitHistorySnapshot = @json.from_json(
     object.required_json("snapshot"),
     path=path.add_key("snapshot"),
@@ -269,7 +157,7 @@ pub impl ToJson for GitHistoryReply with fn to_json(self) {
 
 ///|
 pub impl FromJson for GitHistoricalChange with fn from_json(json, path) {
-  let object = GitJsonObject::decode(json, path, "Git historical change")
+  let object = JsonObject::decode(json, path, "Git historical change")
   {
     path: object.required_string("path"),
     original_path: object.optional_string("original_path"),
@@ -293,7 +181,7 @@ pub impl ToJson for GitHistoricalChange with fn to_json(self) {
 
 ///|
 pub impl FromJson for GitCommitChangesReply with fn from_json(json, path) {
-  let object = GitJsonObject::decode(json, path, "Git commit-changes reply")
+  let object = JsonObject::decode(json, path, "Git commit-changes reply")
   let changes : Array[GitHistoricalChange] = []
   for index, raw in object.required_array("changes") {
     changes.push(
