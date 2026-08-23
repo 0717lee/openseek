@@ -459,6 +459,51 @@ pub(all) struct BrowseDirectoryPayload {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+/// Create one direct child of a directory already reached through the project
+/// picker. Keeping the parent and leaf separate lets the host reject path
+/// traversal before touching the filesystem.
+pub(all) struct CreateDirectoryPayload {
+  parent : String
+  name : String
+} derive(Debug, Eq)
+
+///|
+pub impl FromJson for CreateDirectoryPayload with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected directory creation payload"))
+  }
+  let parent = match fields.get("parent") {
+    Some(String(value)) => value
+    Some(Null) =>
+      raise JsonDecodeError(
+        (path.add_key("parent"), "required field cannot be null"),
+      )
+    Some(_) =>
+      raise JsonDecodeError((path.add_key("parent"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("parent"), "missing required field"))
+  }
+  let name = match fields.get("name") {
+    Some(String(value)) => value
+    Some(Null) =>
+      raise JsonDecodeError(
+        (path.add_key("name"), "required field cannot be null"),
+      )
+    Some(_) => raise JsonDecodeError((path.add_key("name"), "expected string"))
+    None =>
+      raise JsonDecodeError((path.add_key("name"), "missing required field"))
+  }
+  // Unknown fields are intentionally ignored for forward compatibility; the
+  // host still validates the two required path components before mutation.
+  { parent, name }
+}
+
+///|
+pub impl ToJson for CreateDirectoryPayload with fn to_json(self) {
+  { "parent": self.parent, "name": self.name }
+}
+
+///|
 pub(all) struct TerminalOpenPayload {
   session : String
   workspace : String?

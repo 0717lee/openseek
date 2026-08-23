@@ -778,6 +778,37 @@ test "browse replies keep success compatible and carry refusals" {
 }
 
 ///|
+test "directory creation payload has explicit required-field semantics" {
+  let payload : @protocol.CreateDirectoryPayload = @json.from_json({
+    "parent": "/home/u",
+    "name": "new project",
+    "future_field": true,
+  })
+  assert_eq(payload.parent, "/home/u")
+  assert_eq(payload.name, "new project")
+  @debug.assert_eq(payload.to_json(), {
+    "parent": "/home/u",
+    "name": "new project",
+  })
+  for
+    malformed in (
+      [
+        {},
+        { "parent": "/home/u" },
+        { "parent": null, "name": "new project" },
+        { "parent": "/home/u", "name": 7 },
+      ] : Array[Json]) {
+    try {
+      let _ : @protocol.CreateDirectoryPayload = @json.from_json(malformed)
+    } catch {
+      _ => ()
+    } noraise {
+      _ => fail("expected malformed directory creation payload to fail")
+    }
+  }
+}
+
+///|
 test "Git pull-request payload controls optional branch hints explicitly" {
   let payload : @protocol.GitPullRequestPayload = @json.from_json({
     "session": "thread-1",
