@@ -99,6 +99,6 @@ it.
 
 That is a guard on the caller's side, not a property of this package. The real
 issue is that the stream has no identity apart from the log. Desktop now opts
-its serve process into `reasoning_delta` explicitly, while other controllers
-leave the high-volume event off; enabled deltas still pass through the logger.
+into presenting `reasoning_delta`, while other consumers may ignore it; every
+delta still passes through the logger.
 Giving the protocol its own sink would separate those concerns completely.

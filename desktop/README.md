@@ -70,8 +70,8 @@ refreshes when the bridge connects and after each run. Switching while runs
 are active is fine — a conversation already open in this app run switches
 back instantly with its live state intact, without replaying the store.
 
-While a turn runs, the Desktop opts its serve engine into `reasoning_delta` and
-renders those fragments as plain text in one open activity card; no partial
+While a turn runs, the Desktop renders `reasoning_delta` fragments as plain text
+in one open activity card; no partial
 Markdown is parsed on every token. `reasoning_message` seals that preview and
 renders its complete text as Markdown. When the matching durable assistant
 session event arrives, the same keyed card visually de-duplicates the sealed

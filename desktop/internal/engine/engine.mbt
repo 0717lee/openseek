@@ -1526,7 +1526,7 @@ async fn[G] start_serve_engine(
   let (stderr_reader, child_stderr) = @process.read_from_process()
   let env = engine_process_env(config, manager.runtime_dir)
   let program = config.engine
-  let args = ["serve", "--reasoning-deltas", "--dir", "."]
+  let args = ["serve", "--dir", "."]
   let graceful_cancel = @process.graceful_cancel(timeout=1000)
   @xlog.debug() <?
     {

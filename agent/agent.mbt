@@ -114,9 +114,8 @@ fn PlanCadence::record_plan_success(
 ///
 /// This owns a fresh runtime, task group, and tool registry for the duration of
 /// one turn. Use `run_turn_in_scope` when the caller needs to preserve runtime
-/// state or tool state across turns. `emit_reasoning_deltas` is transient: it
-/// adds provider reasoning fragments to the event stream without appending
-/// extra durable session items.
+/// state or tool state across turns. Provider reasoning fragments are emitted
+/// as transient events without appending extra durable session items.
 pub async fn run_turn_with_append(
   api_key~ : String,
   model~ : @deepseek.Model,
@@ -125,7 +124,6 @@ pub async fn run_turn_with_append(
   append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
   max_steps? : Int = unbounded_max_steps,
   thinking? : @deepseek.ThinkingMode = Max,
-  emit_reasoning_deltas? : Bool = false,
   api_url? : String,
   workspace_root? : String = ".",
 ) -> @agent_session.Session {
@@ -140,7 +138,6 @@ pub async fn run_turn_with_append(
       append_item~,
       max_steps~,
       thinking~,
-      emit_reasoning_deltas~,
       api_url?,
     )
   }
@@ -232,8 +229,8 @@ async test "run_turn_with_append closes failed persisted turns" {
 /// scope)` for a long-lived engine. If `tools` is omitted, this function builds
 /// a fresh registry for this call only. `api_url` is forwarded to the DeepSeek
 /// client. The caller owns the lifetime of `runtime`, `scope`, and any shared
-/// `tools` registry passed here. `emit_reasoning_deltas` opts the event stream
-/// into provider reasoning fragments; it defaults off for existing callers.
+/// `tools` registry passed here. Provider reasoning fragments always join the
+/// transient event stream; consumers choose whether and how to present them.
 pub async fn[X] run_turn_in_scope(
   runtime~ : @agent_runtime.AgentRuntime,
   scope~ : @agent_runtime.AgentTaskScope[X],
@@ -245,7 +242,6 @@ pub async fn[X] run_turn_in_scope(
   append_item~ : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
   max_steps? : Int = unbounded_max_steps,
   thinking? : @deepseek.ThinkingMode = Max,
-  emit_reasoning_deltas? : Bool = false,
   api_url? : String,
   tools? : @agent_tool.Tools,
   on_goal_met? : async (String, @agent_session.GoalBaseline?) -> String?,
@@ -272,7 +268,6 @@ pub async fn[X] run_turn_in_scope(
     tools~,
     append_item~,
     session~,
-    emit_reasoning_deltas~,
     on_goal_met?,
   ).run(session, max_steps)
 }
