@@ -1,6 +1,7 @@
 ///|
-/// Shared accessors over `@argparse.Matches` for the command mains
-/// (`cmd/openseek`, `cmd/tui`, the `eval` harness mains). Each main used to
+/// Shared helpers for the command mains (`cmd/openseek`, `cmd/tui`, the `eval`
+/// harness mains): accessors over `@argparse.Matches`, and the sanitizer every
+/// command runs untrusted text through before printing it. Each main used to
 /// carry its own byte-identical copies; keeping one copy here removes the risk
 /// of the copies drifting apart. Error messages are part of each command's
 /// contract and must not change when helpers move.
@@ -28,4 +29,51 @@ test "parse_positive_int accepts positives and rejects zero, negatives, junk" {
       _ => fail("expected \{bad} to be rejected")
     }
   }
+}
+
+///|
+/// Collapse untrusted text to one terminal-safe line: leading and trailing
+/// whitespace goes, interior whitespace runs become a single space, C0/C1
+/// controls and DEL are dropped — ESC, CSI, OSC and friends render as terminal
+/// commands, not text, so anything a session log, an MCP server or a config
+/// file hands back must not be able to reach the terminal intact — and
+/// anything past `limit` characters is elided with `…`.
+pub fn terminal_safe_line(text : String, limit? : Int = 72) -> String {
+  let out = StringBuilder()
+  for ch in text.trim(); last_was_space = false, count = 0 {
+    if count >= limit {
+      out.write_char('…')
+      break
+    }
+    if ch is (' ' | '\t' | '\n' | '\r') {
+      if !last_was_space {
+        out.write_char(' ')
+        continue true, count + 1
+      }
+      continue true, count
+    } else if ch.to_int() < 0x20 ||
+      ch.to_int() == 0x7F ||
+      (ch.to_int() >= 0x80 && ch.to_int() <= 0x9F) {
+      continue last_was_space, count
+    } else {
+      out.write_char(ch)
+      continue false, count + 1
+    }
+  }
+  out.to_string()
+}
+
+///|
+test "terminal_safe_line collapses whitespace, drops controls, elides at limit" {
+  assert_eq(
+    terminal_safe_line("  fix the \n\t streaming   bug  "),
+    "fix the streaming bug",
+  )
+  // C0 (ESC), OSC and C1 (CSI) all disappear rather than reaching the terminal.
+  assert_eq(
+    terminal_safe_line("\u{1b}[31mred\u{1b}]0;title\u{7}\u{9b}31m text"),
+    "[31mred]0;title31m text",
+  )
+  assert_eq(terminal_safe_line("abcdef", limit=3), "abc…")
+  assert_eq(terminal_safe_line("   "), "")
 }

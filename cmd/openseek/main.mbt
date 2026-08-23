@@ -924,36 +924,12 @@ fn session_root(
 const PromptLabelMaxChars : Int = 60
 
 ///|
-/// Collapse a prompt to a single-line label: whitespace runs become one
-/// space, remaining control characters are dropped — a stored prompt must
-/// not be able to inject terminal escape sequences into the listing — and
-/// anything beyond `PromptLabelMaxChars` is elided with `…`. A session
-/// without a recorded prompt shows `-` so the column never vanishes.
+/// Collapse a prompt to a single-line label — a stored prompt must not be able
+/// to inject terminal escape sequences into the listing — elided at
+/// `PromptLabelMaxChars`. A session without a recorded prompt shows `-` so the
+/// column never vanishes.
 fn compact_prompt_label(prompt : String) -> String {
-  let out = StringBuilder()
-  for ch in prompt.trim(); last_was_space = false, count = 0 {
-    if count >= PromptLabelMaxChars {
-      out.write_char('…')
-      break
-    }
-    if ch is (' ' | '\t' | '\n' | '\r') {
-      if !last_was_space {
-        out.write_char(' ')
-        continue true, count + 1
-      }
-      continue true, count
-    } else if ch.to_int() < 0x20 ||
-      ch.to_int() == 0x7F ||
-      (ch.to_int() >= 0x80 && ch.to_int() <= 0x9F) {
-      // C0/C1 controls and DEL: ESC, CSI, OSC and friends render as terminal
-      // commands, not text.
-      continue last_was_space, count
-    } else {
-      out.write_char(ch)
-      continue false, count + 1
-    }
-  }
-  let label = out.to_string()
+  let label = @cli.terminal_safe_line(prompt, limit=PromptLabelMaxChars)
   if label.is_empty() {
     "-"
   } else {
