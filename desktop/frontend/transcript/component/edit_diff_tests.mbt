@@ -1,5 +1,5 @@
 ///|
-test "a diff collapses shared context around the change" {
+test "a diff includes shared context around the change" {
   let old =
     #|fn main {
     #|  let x = 1
@@ -11,7 +11,7 @@ test "a diff collapses shared context around the change" {
     #|  println(x)
     #|}
   assert_eq(
-    generate_diff(old, new),
+    @edit_diff.generate(old, new),
     (
       #|  fn main {
       #|-   let x = 1
@@ -26,8 +26,24 @@ test "a diff collapses shared context around the change" {
 /// The empty `old_string` is how the tools spell an insertion, and the empty
 /// `new_string` a deletion; neither has context to collapse.
 test "an insertion is all additions and a deletion all removals" {
-  assert_eq(generate_diff("", "one\ntwo"), "+ one\n+ two")
-  assert_eq(generate_diff("one\ntwo", ""), "- one\n- two")
+  assert_eq(@edit_diff.generate("", "one\ntwo"), "+ one\n+ two")
+  assert_eq(@edit_diff.generate("one\ntwo", ""), "- one\n- two")
+}
+
+///|
+/// The shared code-unit clamp may retain a tail that begins partway through a
+/// very long line. That fragment must repeat its diff marker — including when
+/// the cut lands inside the marker itself — or an addition becomes context.
+#warnings("-alert_unstable")
+test "a long single-line diff keeps both retained sides marked" {
+  let old = "a".repeat(15_000)
+  // This length puts the retained tail's start on the space inside `+ `.
+  let new = "b".repeat(7_999)
+  let rendered = diff_block(@edit_diff.generate(old, new))
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  assert_true(markup.contains("class=\"diff-del\">- a"))
+  assert_true(markup.contains("class=\"diff-add\">+ b"))
+  assert_false(markup.contains("class=\"diff-add\">+  b"))
 }
 
 ///|

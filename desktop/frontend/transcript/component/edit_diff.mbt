@@ -121,66 +121,7 @@ fn decode_edit(fields : Map[String, Json], path_key~ : String) -> EditDiff? {
     ],
     dramatized=["old_string", "new_string"],
   )
-  Some({ chips, diff: generate_diff(old, new) })
-}
-
-///|
-/// A line-oriented diff of `old` → `new`: shared leading/trailing lines are
-/// context (`  `), the differing middle is removed (`- `) then added (`+ `). An
-/// insertion (empty `old`) is all `+` lines; a deletion (empty `new`) all `-`.
-///
-/// One hunk, deliberately. An edit's two strings are a single contiguous span
-/// — that is what the tools take — so the prefix/suffix collapse is exact for
-/// the shape they actually have, and this stays the same synthesis `viz`
-/// shows for the same calls.
-fn generate_diff(old : String, new : String) -> String {
-  if old == "" {
-    return prefix_lines(new, "+ ")
-  }
-  if new == "" {
-    return prefix_lines(old, "- ")
-  }
-  let old_lines = string_lines(old)
-  let new_lines = string_lines(new)
-  let n = old_lines.length()
-  let m = new_lines.length()
-  let mut pre = 0
-  while pre < n && pre < m && old_lines[pre] == new_lines[pre] {
-    pre += 1
-  }
-  let mut suf = 0
-  while suf < n - pre &&
-        suf < m - pre &&
-        old_lines[n - 1 - suf] == new_lines[m - 1 - suf] {
-    suf += 1
-  }
-  [
-    ..[
-      for line in old_lines[:pre] => "  \{line}"
-    ],
-    ..[
-      for line in old_lines[pre:n - suf] => "- \{line}"
-    ],
-    ..[
-      for line in new_lines[pre:m - suf] => "+ \{line}"
-    ],
-    ..[
-      for line in old_lines[n - suf:] => "  \{line}"
-    ],
-  ].join("\n")
-}
-
-///|
-/// Split `text` into lines on `\n`, as views into `text`.
-fn string_lines(text : String) -> Array[StringView] {
-  [..text.split("\n")]
-}
-
-///|
-/// Prefix every line of `text` with `marker` (for all-added / all-removed
-/// diffs).
-fn prefix_lines(text : String, marker : String) -> String {
-  string_lines(text).map(line => "\{marker}\{line}").join("\n")
+  Some({ chips, diff: @edit_diff.generate(old, new) })
 }
 
 ///|
@@ -189,7 +130,7 @@ fn prefix_lines(text : String, marker : String) -> String {
 /// a long change, which is context about the diff itself.
 fn diff_block(text : String) -> @html.Html {
   let lines : Array[@html.Html] = [
-    for raw in truncate_output(text).split("\n") => {
+    for raw in truncate_output(text, line_prefix_width=2).split("\n") => {
       let line = raw.to_owned()
       let cls = if line.has_prefix("+ ") {
         "diff-add"

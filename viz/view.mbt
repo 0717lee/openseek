@@ -431,6 +431,12 @@ fn goal_notice_card(
 }
 
 ///|
+/// Split text into line views for structured transcript notices.
+fn string_lines(text : String) -> Array[StringView] {
+  [..text.split("\n")]
+}
+
+///|
 /// The goal text inside a reminder/check notice: the lines between the
 /// "The standing goal for this session:" header and this notice kind's own
 /// boilerplate delimiter (mirroring `goal_reminder_text` / `goal_check_text`
@@ -999,62 +1005,9 @@ fn add_edit_diff(json : Json) -> Json {
     return json
   }
   if old != new {
-    fields["generated_diff"] = Json::string(generate_diff(old, new))
+    fields["generated_diff"] = Json::string(@edit_diff.generate(old, new))
   }
   json
-}
-
-///|
-/// A line-oriented diff of `old` → `new`: shared leading/trailing lines are
-/// context (`  `), the differing middle is removed (`- `) then added (`+ `). An
-/// insertion (empty `old`) is all `+` lines; a deletion (empty `new`) all `-`.
-fn generate_diff(old : String, new : String) -> String {
-  if old == "" {
-    return prefix_lines(new, "+ ")
-  }
-  if new == "" {
-    return prefix_lines(old, "- ")
-  }
-  let old_lines = string_lines(old)
-  let new_lines = string_lines(new)
-  let n = old_lines.length()
-  let m = new_lines.length()
-  let mut pre = 0
-  while pre < n && pre < m && old_lines[pre] == new_lines[pre] {
-    pre += 1
-  }
-  let mut suf = 0
-  while suf < n - pre &&
-        suf < m - pre &&
-        old_lines[n - 1 - suf] == new_lines[m - 1 - suf] {
-    suf += 1
-  }
-  [
-    ..[
-      for line in old_lines[:pre] => "  \{line}"
-    ],
-    ..[
-      for line in old_lines[pre:n - suf] => "- \{line}"
-    ],
-    ..[
-      for line in new_lines[pre:m - suf] => "+ \{line}"
-    ],
-    ..[
-      for line in old_lines[n - suf:] => "  \{line}"
-    ],
-  ].join("\n")
-}
-
-///|
-/// Split `text` into lines on `\n`, as views into `text`.
-fn string_lines(text : String) -> Array[StringView] {
-  [..text.split("\n")]
-}
-
-///|
-/// Prefix every line of `text` with `marker` (for all-added / all-removed diffs).
-fn prefix_lines(text : String, marker : String) -> String {
-  string_lines(text).map(line => "\{marker}\{line}").join("\n")
 }
 
 ///|
