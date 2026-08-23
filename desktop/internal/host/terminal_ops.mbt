@@ -61,12 +61,12 @@ async fn terminal_open_op(
     is Some(root) else {
     raise HostError("terminal requires a conversation workspace")
   }
-  // Match the engine and language services: a packaged seed wins when present,
-  // while an unbundled development host uses the first external toolchain.
-  // Queue the path update after shell startup so rc/profile files cannot
-  // overwrite the selection. Unknown shells stay usable without receiving a
-  // command in another shell's syntax. MOON_HOME remains the user's registry
-  // and caches.
+  // Match the engine and language services: packaged command-line tools and a
+  // packaged MoonBit seed win when present. Queue one combined path update
+  // after shell startup so rc/profile files cannot overwrite the selection.
+  // Its entries leave the final order as moon-bin, packaged-bin, then the
+  // shell's PATH. Unknown shells stay usable without receiving a command in
+  // another shell's syntax. MOON_HOME remains the user's registry and caches.
   let toolchain = @moonbit.resolve_toolchain(
     state.engine,
     runtime_dir?=state.runtime_dir,
@@ -82,9 +82,14 @@ async fn terminal_open_op(
   } else {
     @sys.get_env_var("SHELL").unwrap_or("/bin/sh")
   }
+  let path_entries = [toolchain.bin_dir.to_string()]
+  if state.executable is Some(executable) &&
+    PackagedTools::resolve(executable) is Some(tools) {
+    path_entries.push(tools.bin_dir)
+  }
   let activation_command = @shellenv.path_prepend_command(
     shell_command,
-    toolchain.bin_dir.to_string(),
+    path_entries,
     windows~,
   )
   let id = @terminal.open_terminal(
@@ -100,7 +105,9 @@ async fn terminal_open_op(
     @terminal.write_terminal(terminals, id~, @utf8.encode(command)) catch {
       @terminal.TerminalError(message) => {
         @terminal.close_terminal(terminals, id~)
-        raise HostError("could not activate the MoonBit toolchain: \{message}")
+        raise HostError(
+          "could not activate terminal command-line tools: \{message}",
+        )
       }
       error => {
         @terminal.close_terminal(terminals, id~)
