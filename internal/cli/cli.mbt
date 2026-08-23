@@ -1,9 +1,9 @@
 ///|
 /// Shared accessors over `@argparse.Matches` for the command mains
-/// (`cmd/openseek`, `cmd/tui`, the `inspect` module). Each main used to carry its
-/// own byte-identical copies; keeping one copy here removes the risk of the
-/// copies drifting apart. Error messages are part of each command's contract
-/// and must not change when helpers move.
+/// (`cmd/openseek`, `cmd/tui`, the `eval` harness mains). Each main used to
+/// carry its own byte-identical copies; keeping one copy here removes the risk
+/// of the copies drifting apart. Error messages are part of each command's
+/// contract and must not change when helpers move.
 
 ///|
 /// Parse `input` as a strictly positive integer; `label` names the offending
