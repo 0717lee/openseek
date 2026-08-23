@@ -4808,6 +4808,60 @@ fn Model::apply_codex_worktree_snapshot(
 }
 
 ///|
+/// Catch up the transcript of a sub-run child the reader is looking at.
+///
+/// A child's record is written by a process the host manages no writer for, so
+/// no follower broadcasts its commits (`internal/engine/follower` runs one per
+/// host-managed writer) and `session.load` answered it with a one-shot read.
+/// Every signal that the child moved therefore has to drive its own catch-up,
+/// and there are exactly two: the probe's progress push while it runs, and the
+/// finish. Both matter — the host cancels the probe at `subrun_finished`
+/// without a final poll (`internal/engine/engine.mbt`), and the probe sleeps
+/// before it reads, so the child's last writes — its report among them — reach
+/// a reader through the finish or not at all.
+///
+/// `active_session` alone does not mean visible: a reader on Skills or
+/// Settings has one, and reloading behind those screens would be work nobody
+/// can see.
+fn refresh_visible_subrun_child(
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  session : String,
+  model : Model,
+) -> (@cmd.Cmd, Model) {
+  guard model.screen is Chat &&
+    channel == model.focused &&
+    session == model.active_session &&
+    model.find_conversation(channel, session) is Some(child) &&
+    model.can_reload_transcript(child) else {
+    return (@cmd.none, model)
+  }
+  // Coalesce rather than drop. `begin_transcript_reload` is single-flight and
+  // answers a signal arriving mid-read with `None`, which is right for a user
+  // re-selecting a row and wrong here: the probe publishes only when the child
+  // ADVANCED, so a dropped signal can be the last one ever sent — a child that
+  // then finishes would strand this transcript one step short with nothing
+  // left to correct it.
+  let (next, generation) = model.ensure_transcript_reload_after_current(child)
+  match generation {
+    // A background refresh, never `activate_on_success`: the foreground path
+    // pulls the UI to Chat, calls `Model::activate` (pruning other
+    // conversations and clearing their unseen-finish marks), and remounts the
+    // transcript component — and the remount is what would discard a reader's
+    // scroll position and open disclosures. None of that belongs here.
+    Some(generation) =>
+      (
+        session_snapshot_command(
+          dispatch, channel, next, session, generation, false,
+        ),
+        next,
+      )
+    // Already reloading; the follow-up generation is now armed.
+    None => (@cmd.none, next)
+  }
+}
+
+///|
 /// One device channel's messages — its connection lifecycle, its
 /// notification stream, and every generation-fenced reply. The arms are
 /// the same handlers `update_msg` held before the channel split; `channel`
@@ -4867,49 +4921,7 @@ fn update_device_msg(
       } else {
         model
       }
-      // The child writes its record in a process the host manages no writer
-      // for, so no follower broadcasts its commits (`internal/engine/follower`
-      // runs one per host-managed writer) and `session.load` answered it with
-      // a one-shot read. Without this, a transcript opened mid-run sits frozen
-      // at the snapshot it arrived with. This probe push is the only signal
-      // the host has that the child moved, so it is also the only thing that
-      // can drive the catch-up.
-      //
-      // `active_session` alone does not mean visible: a reader on Skills or
-      // Settings has one, and reloading behind those screens would be work
-      // nobody can see.
-      guard model.screen is Chat &&
-        channel == model.focused &&
-        session == model.active_session &&
-        model.find_conversation(channel, session) is Some(child) &&
-        model.can_reload_transcript(child) else {
-        return (@cmd.none, model)
-      }
-      // Coalesce rather than drop. `begin_transcript_reload` is single-flight
-      // and answers a signal arriving mid-read with `None`, which is right for
-      // a user re-selecting a row and wrong here: the probe publishes only
-      // when the child ADVANCED, so a dropped signal can be the last one ever
-      // sent — a child that then finishes would strand this transcript one
-      // step short with nothing left to correct it.
-      let (next, generation) = model.ensure_transcript_reload_after_current(
-        child,
-      )
-      match generation {
-        // A background refresh, never `activate_on_success`: the foreground
-        // path pulls the UI to Chat, calls `Model::activate` (pruning other
-        // conversations and clearing their unseen-finish marks), and remounts
-        // the transcript component — which is what preserves a reader's scroll
-        // and open disclosures. None of that belongs on a progress tick.
-        Some(generation) =>
-          (
-            session_snapshot_command(
-              dispatch, channel, next, session, generation, false,
-            ),
-            next,
-          )
-        // Already reloading; the follow-up generation is now armed.
-        None => (@cmd.none, next)
-      }
+      refresh_visible_subrun_child(dispatch, channel, session, model)
     }
     SkillsChanged =>
       if channel == model.focused {
@@ -6856,7 +6868,23 @@ fn update_device_msg(
         )
         let (report, next) = apply_engine_event(conv, event, run_id)
         let updated = model.replace_conversation(next)
-        if report is Some(text) {
+        // The finish is a sub-run child's terminal refresh boundary, and the
+        // only one it has. The host cancels the progress probe here without a
+        // final poll, and the probe sleeps before it reads — so everything the
+        // child wrote since the last tick, which is where its report lands,
+        // reaches a reader watching that transcript through this event or not
+        // at all.
+        let (finished_cmd, updated) = if event is SubrunClosed(id~, ..) {
+          refresh_visible_subrun_child(
+            dispatch,
+            channel,
+            "\{conv.session_id}-\{id}",
+            updated,
+          )
+        } else {
+          (@cmd.none, updated)
+        }
+        let (report_cmd, updated) = if report is Some(text) {
           updated.notify_error(dispatch, text)
         } else {
           let command = match approval_notification {
@@ -6865,6 +6893,7 @@ fn update_device_msg(
           }
           (command, updated)
         }
+        (@cmd.batch([finished_cmd, report_cmd]), updated)
       } else {
         (@cmd.none, model)
       }
@@ -18409,6 +18438,7 @@ fn subrun_child_of(model : Model) -> Conversation raise {
 test "a sub-run's progress refreshes the child transcript on screen" {
   // No follower broadcasts a child's commits, so this probe push is the only
   // thing that can move a transcript the reader opened mid-run.
+  let page = subrun_page(active="desktop-test-sr-1")
   let (_, next) = update_dev(
     test_dispatch(),
     SubrunProgressed(
@@ -18417,11 +18447,43 @@ test "a sub-run's progress refreshes the child transcript on screen" {
       steps=3,
       activity="shell",
     ),
-    subrun_page(active="desktop-test-sr-1"),
+    page,
   )
-  guard subrun_child_of(next).sync is Reloading(reload_after_current=false, ..) else {
+  // A fresh generation was minted for the read. `Cmd` is opaque, so this is
+  // what separates an issued load from a conversation parked in `Reloading`
+  // with nothing on the way to settle it.
+  let generation = page.transcript_request_generation + 1
+  assert_eq(next.transcript_request_generation, generation)
+  guard subrun_child_of(next).sync
+    is Reloading(generation=minted, reload_after_current=false, ..) else {
     fail("expected the viewed child to start a background reload")
   }
+  assert_eq(minted, generation)
+  // The reply that generation fences is accepted and adopted, proving the read
+  // this started is one the model can actually settle.
+  let (_, settled) = update_dev(
+    test_dispatch(),
+    SessionRefreshed(
+      session="desktop-test-sr-1",
+      items=[
+        {
+          kind: Reasoning,
+          content: "child thought",
+          ts: None,
+          sequence: Some(5),
+        },
+      ],
+      watermark=5,
+      goal=None,
+      goal_markers=[],
+      generation~,
+    ),
+    next,
+  )
+  let child = subrun_child_of(settled)
+  assert_true(child.sync is Synced)
+  assert_eq(child.watermark, 5)
+  assert_eq(child.messages.length(), 1)
   // The parent's lane still advances: the two readers are independent.
   guard next.find_conversation(@interop.ChannelId::Local, "desktop-test")
     is Some(parent) else {
@@ -18506,5 +18568,29 @@ test "a lane whose parent is gone still refreshes the child on screen" {
   )
   guard subrun_child_of(next).sync is Reloading(..) else {
     fail("expected the viewed child to reload without its parent")
+  }
+}
+
+///|
+test "a sub-run's finish refreshes the child transcript one last time" {
+  // The host cancels the progress probe at the finish bracket without a final
+  // poll, and the probe sleeps before it reads — so the child's last writes,
+  // its report among them, arrive here or nowhere.
+  let page = subrun_page(active="desktop-test-sr-1")
+  let (_, next) = update_dev(
+    test_dispatch(),
+    Engine(
+      Some("r7"),
+      SubrunClosed(id="sr-1", status="captured", steps=7, tokens=30),
+      session=None,
+    ),
+    page,
+  )
+  assert_eq(
+    next.transcript_request_generation,
+    page.transcript_request_generation + 1,
+  )
+  guard subrun_child_of(next).sync is Reloading(..) else {
+    fail("expected the finish to catch the child transcript up")
   }
 }

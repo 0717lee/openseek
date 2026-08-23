@@ -431,11 +431,17 @@ fn tool_call_view_mode(
   // child's transcript is the only account of what the subagent actually did —
   // this card holds its report, not its work — so the card leads with the way
   // to go and read it.
-  if subrun is Some(link) &&
-    brief is Some(brief) &&
-    @transcript.subrun_child_session(name, brief, parent=link.parent)
-    is Some(child) {
-    body.push(subrun_chip(child, link.open))
+  if subrun is Some(link) && brief is Some(brief) {
+    // One launch can start several workers and name them all in one brief, so
+    // this is a chip each rather than a single link.
+    for
+      child in @transcript.subrun_child_sessions(
+        name,
+        brief,
+        parent=link.parent,
+      ) {
+      body.push(subrun_chip(child, link.open))
+    }
   }
   // A `plan` call shows the checklist it recorded rather than its JSON, in
   // every state where that checklist is what the model asked for. A pending

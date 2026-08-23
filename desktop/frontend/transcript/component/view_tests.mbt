@@ -1393,3 +1393,56 @@ test "an ordinary tool card carries no sub-run link" {
   })
   assert_false(markup.contains("subrun-chip"))
 }
+
+///|
+#warnings("-alert_unstable")
+test "a subtask launch card links every worker it started" {
+  // The launch brief leads with a slice COUNT and nests the per-worker briefs
+  // inside it, so this card names two children and neither at token 1.
+  let rows : Array[VisibleRow] = [
+    {
+      item: { kind: User, content: "split it", ts: None, sequence: Some(1) },
+      identity: "s1\u{0}o0",
+    },
+    {
+      item: {
+        kind: Tool(
+          call_id="c1",
+          name="subtask",
+          arguments=Some("{}"),
+          has_result=true,
+          is_error=false,
+          brief=Some(
+            "subtask 2 slices (subtask sr-3 a (captured), subtask sr-4 b (captured))",
+          ),
+        ),
+        content: "report",
+        ts: None,
+        sequence: Some(2),
+      },
+      identity: "s2\u{0}o0",
+    },
+  ]
+  let input = Input(
+    source=OpenSeek,
+    focused=@interop.ChannelId::Local,
+    active_session="run",
+    root=None,
+    submission_generation=1,
+    items=rows,
+    streaming_response=None,
+    streaming_identity="idle",
+  )
+  let children = (
+    {
+      input,
+      on_open: _ => @cmd.none,
+      on_jump: _ => @cmd.none,
+      on_open_session: _ => @cmd.none,
+    } : TranscriptRenderer).stream_children()
+  let markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(children["activity\u{0}after\u{0}s1\u{0}o0"])
+  })
+  assert_true(markup.contains("run-sr-3"))
+  assert_true(markup.contains("run-sr-4"))
+}
