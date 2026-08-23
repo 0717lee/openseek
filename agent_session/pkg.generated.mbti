@@ -37,10 +37,11 @@ pub fn parse_goal_baseline(String) -> GoalBaseline?
 pub struct AssistantMessage {
   // private fields
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
-pub fn AssistantMessage::AssistantMessage(String, tool_calls? : Array[@deepseek.ToolCall], reasoning_content? : String) -> Self
+pub fn AssistantMessage::AssistantMessage(String, tool_calls? : Array[@deepseek.ToolCall], reasoning_content? : String, is_replay? : Bool) -> Self
 pub fn AssistantMessage::content(Self) -> String
 pub fn AssistantMessage::equal(Self, Self) -> Bool
 pub fn AssistantMessage::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn AssistantMessage::is_replay(Self) -> Bool
 pub fn AssistantMessage::not_equal(Self, Self) -> Bool
 pub fn AssistantMessage::reasoning_content(Self) -> String?
 pub fn AssistantMessage::to_json(Self) -> Json
@@ -102,6 +103,7 @@ pub struct SessionEvent {
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 pub fn SessionEvent::equal(Self, Self) -> Bool
 pub fn SessionEvent::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn SessionEvent::is_agent_step(Self) -> Bool
 pub fn SessionEvent::item(Self) -> SessionItem
 pub fn SessionEvent::not_equal(Self, Self) -> Bool
 pub fn SessionEvent::sequence(Self) -> Int

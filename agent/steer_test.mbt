@@ -59,14 +59,18 @@ async test "queued steering is folded in at the next step boundary" {
       tools~,
     )
     // The steered text is durably part of the conversation: task, steer,
-    // then the finished terminal.
+    // final response, then the terminal seal.
     let events = result.events()
-    assert_eq(events.length(), 3)
+    assert_eq(events.length(), 4)
     guard events[0].item() is User(task) else { fail("expected task event") }
     assert_eq(task.content(), "do the task")
     guard events[1].item() is User(steer) else { fail("expected steer event") }
     assert_eq(steer.content(), "also rename the file")
-    guard events[2].item() is Terminal(Finished(answer)) else {
+    guard events[2].item() is Assistant(response) else {
+      fail("expected durable final response")
+    }
+    assert_eq(response.content(), "ok")
+    guard events[3].item() is Terminal(Finished(answer)) else {
       fail("expected finished terminal")
     }
     assert_eq(answer, "ok")
@@ -141,7 +145,7 @@ async test "a steer racing the final call keeps the turn alive" {
     // assistant message, the steer follows it, and the turn finished on the
     // second answer.
     let events = result.events()
-    assert_eq(events.length(), 4)
+    assert_eq(events.length(), 5)
     assert_true(events[0].item() is User(_))
     guard events[1].item() is Assistant(draft) else {
       fail("expected the draft as an assistant message")
@@ -149,7 +153,11 @@ async test "a steer racing the final call keeps the turn alive" {
     assert_eq(draft.content(), "draft answer")
     guard events[2].item() is User(steer) else { fail("expected steer event") }
     assert_eq(steer.content(), "actually, make it rhyme")
-    guard events[3].item() is Terminal(Finished(answer)) else {
+    guard events[3].item() is Assistant(response) else {
+      fail("expected durable final response")
+    }
+    assert_eq(response.content(), "rhymed answer")
+    guard events[4].item() is Terminal(Finished(answer)) else {
       fail("expected finished terminal")
     }
     assert_eq(answer, "rhymed answer")
@@ -232,7 +240,7 @@ async test "inject racing the final call keeps the turn alive" {
       api_url=url,
     )
     let events = result.events()
-    assert_eq(events.length(), 4)
+    assert_eq(events.length(), 5)
     assert_true(events[0].item() is User(_))
     guard events[1].item() is Assistant(draft) else {
       fail("expected the draft as an assistant message")
@@ -242,7 +250,11 @@ async test "inject racing the final call keeps the turn alive" {
       fail("expected inject")
     }
     assert_eq(inject_message.content(), context)
-    guard events[3].item() is Terminal(Finished(answer)) else {
+    guard events[3].item() is Assistant(response) else {
+      fail("expected durable final response")
+    }
+    assert_eq(response.content(), "contextual answer")
+    guard events[4].item() is Terminal(Finished(answer)) else {
       fail("expected finished terminal")
     }
     assert_eq(answer, "contextual answer")
@@ -273,7 +285,7 @@ async test "blank steering input is dropped at the boundary" {
       api_url=url,
     )
     // The blank steer left no trace; only the real one was applied.
-    assert_eq(result.events().length(), 3)
+    assert_eq(result.events().length(), 4)
   }
 }
 
@@ -394,6 +406,7 @@ async fn notice_test_server(
   group : @async.TaskGroup[Unit],
   runtime : @agent_runtime.AgentRuntime,
   notice : String,
+  finish_first? : Bool = false,
 ) -> String? {
   guard bind_test_server("local TCP bind unavailable; skipping notice test")
     is Some(server) else {
@@ -411,9 +424,15 @@ async fn notice_test_server(
         if requests == 1 {
           // A background job finishes mid-turn and pushes a notice.
           runtime.queue_steer(Notice(notice))
-          conn.write(
-            "data: {\"choices\":[{\"delta\":{\"content\":\"draft\"}}]}\n\n",
-          )
+          if finish_first {
+            conn.write(
+              "data: \{sse_tool_call("call_finish", "finish_test", 100_000)}\n\n",
+            )
+          } else {
+            conn.write(
+              "data: {\"choices\":[{\"delta\":{\"content\":\"draft\"}}]}\n\n",
+            )
+          }
         } else {
           // The notice was delivered to the model as user-role content.
           assert_true(request_body.contains(notice))
@@ -460,5 +479,64 @@ async test "a background notice steer is applied as a runtime notice" {
       n.content() == notice => n.content()
     ]
     assert_eq(notices.length(), 1)
+    let finals = [
+      for event in result.events() if event.item() is Assistant(message) &&
+      message.content() == "done" => message
+    ]
+    // Runtime notices have no durable User boundary, so the response they
+    // trigger is kept explicitly instead of existing only as a terminal.
+    assert_eq(finals.length(), 1)
+    assert_false(finals[0].is_replay())
+  }
+}
+
+///|
+async test "a runtime notice after a completion preserves the follow-up step" {
+  @async.with_task_group() <| group => {
+    let runtime = @agent_runtime.AgentRuntime()
+    let notice = "background job bg-2 finished (exit=0): `moon test`"
+    guard notice_test_server(group, runtime, notice, finish_first=true)
+      is Some(url) else {
+      return
+    }
+    let tools = @agent_tool.Tools([
+      AgentToolDefinition(
+        name="finish_test",
+        description="Finish stand-in.",
+        schema=JsonSchema({ "type": "object" }),
+        execute=Sync(_args => @agent_tool.ToolAction::finish("first answer")),
+      ),
+    ])
+    let result = @agent.run_turn_in_scope(
+      runtime~,
+      scope=AgentTaskScope(group),
+      api_key="test-key",
+      model=Deepseek(V4Flash),
+      session=Session(
+        SessionId("notice-after-completion"),
+        system_prompt="system",
+      ),
+      task="do a task",
+      append_item=(session, item) => session.append(item),
+      max_steps=3,
+      api_url=url,
+      tools~,
+    )
+    let events = result.events()
+    let mut completions = 0
+    for event in events {
+      if event.item() is Tool(tool) && tool.tool_name() == "finish_test" {
+        completions += 1
+      }
+    }
+    assert_eq(completions, 1)
+    guard events[events.length() - 2].item() is Assistant(message) else {
+      fail("expected explicit follow-up step before its terminal")
+    }
+    assert_eq(message.content(), "done")
+    assert_false(message.is_replay())
+    assert_true(
+      events.peek() is Some(last) && last.item() is Terminal(Finished("done")),
+    )
   }
 }

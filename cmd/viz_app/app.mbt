@@ -1448,67 +1448,7 @@ fn session_metadata(
 
 ///|
 fn agent_step_count(parsed : @session_log.ParsedLog) -> Int {
-  let mut count = 0
-  let mut previous : @agent_session.SessionEvent? = None
-  let mut finish_in_batch = false
-  for event in parsed.events {
-    if event_represents_agent_step(event, previous, finish_in_batch) {
-      count += 1
-    }
-    // A checkpoint Summary can sit between a finish-tool result and its
-    // terminal (compact-on-finish); skip it when looking backward so the
-    // terminal is still attributed to the finish call.
-    match event.item() {
-      Tool(result) =>
-        if result.tool_name() == "finish" {
-          finish_in_batch = true
-        }
-      Summary(_) => ()
-      _ => finish_in_batch = false
-    }
-    if !(event.item() is Summary(_)) {
-      previous = Some(event)
-    }
-  }
-  count
-}
-
-///|
-fn event_represents_agent_step(
-  event : @agent_session.SessionEvent,
-  previous : @agent_session.SessionEvent?,
-  finish_in_batch : Bool,
-) -> Bool {
-  match event.item() {
-    Assistant(_) => true
-    Terminal(Finished(message)) =>
-      // A context-ceiling yield's terminal is synthetic, not a model step.
-      !message.has_prefix(@agent_session.ContextYieldAnswerPrefix) &&
-      terminal_finished_represents_agent_step(previous, finish_in_batch)
-    _ => false
-  }
-}
-
-///|
-/// Tool results are recorded in CALL order, so a finish result may be
-/// followed by same-batch skip notes; `finish_in_batch` — a finish result
-/// seen since the last assistant message — is the completion signal, not
-/// "the finish result came last".
-fn terminal_finished_represents_agent_step(
-  previous : @agent_session.SessionEvent?,
-  finish_in_batch : Bool,
-) -> Bool {
-  if finish_in_batch {
-    return false
-  }
-  match previous {
-    Some(event) =>
-      match event.item() {
-        Assistant(_) => false
-        _ => true
-      }
-    None => true
-  }
+  parsed.events.count_if(event => event.is_agent_step())
 }
 
 ///|
@@ -1834,16 +1774,6 @@ test "session metadata counts steps and total runtime" {
 }
 
 ///|
-test "session metadata counts terminal final answers as steps" {
-  let parsed = parsed_log(
-    @agent_session.Session(SessionId("terminal-step"), system_prompt="")
-    .append(User(UserMessage("hi")))
-    .append(Terminal(Finished("done"))),
-  )
-  inspect(agent_step_count(parsed), content="1")
-}
-
-///|
 test "session metadata does not double count finish tool terminals" {
   let parsed = parsed_log(
     @agent_session.Session(SessionId("finish-step"), system_prompt="")
@@ -1861,6 +1791,65 @@ test "session metadata does not double count finish tool terminals" {
     .append(Terminal(Finished("done"))),
   )
   inspect(agent_step_count(parsed), content="1")
+}
+
+///|
+test "session metadata counts durable assistant responses" {
+  let parsed = parsed_log(
+    @agent_session.Session(SessionId("review-on-finish"), system_prompt="")
+    .append(User(UserMessage("hi")))
+    .append(Assistant(AssistantMessage("")))
+    .append(
+      Tool(
+        ToolResult(
+          tool_call_id="finish_1",
+          tool_name="submit_report",
+          content="finished: done",
+        ),
+      ),
+    )
+    .append(Runtime(RuntimeNotice("[review] goal-met audit: clean")))
+    .append(Runtime(RuntimeNotice(@agent_session.GoalClearedNotice)))
+    .append(Terminal(Finished("done"))),
+  )
+  inspect(agent_step_count(parsed), content="1")
+  let continued = parsed_log(
+    @agent_session.Session(SessionId("runtime-continuation"), system_prompt="")
+    .append(User(UserMessage("hi")))
+    .append(Assistant(AssistantMessage("")))
+    .append(
+      Tool(
+        ToolResult(
+          tool_call_id="finish_1",
+          tool_name="submit_report",
+          content="finished: first answer",
+        ),
+      ),
+    )
+    .append(Runtime(RuntimeNotice("background job completed")))
+    .append(Assistant(AssistantMessage("second answer")))
+    .append(Terminal(Finished("second answer"))),
+  )
+  inspect(agent_step_count(continued), content="2")
+}
+
+///|
+test "session metadata ignores checkpoint replay assistants" {
+  let parsed = parsed_log(
+    @agent_session.Session(SessionId("checkpoint-replay"), system_prompt="")
+    .append(User(UserMessage("go")))
+    .append(Assistant(AssistantMessage("first")))
+    .append(
+      Summary(
+        SessionSummary(content="checkpoint", from_sequence=1, to_sequence=2),
+      ),
+    )
+    .append(Assistant(AssistantMessage("first", is_replay=true)))
+    .append(User(UserMessage("continue")))
+    .append(Assistant(AssistantMessage("second")))
+    .append(Terminal(Finished("second"))),
+  )
+  inspect(agent_step_count(parsed), content="2")
 }
 
 ///|

@@ -43,6 +43,30 @@ fn TranscriptRenderKey::empty() -> TranscriptRenderKey {
 }
 
 ///|
+/// Every current-format provider response is persisted as one Assistant event.
+/// Its sequence is copied to the response's reasoning, prose, and tool rows, so
+/// step numbering is a direct grouping operation rather than a reconstruction
+/// from terminal or tool payloads. Checkpoint replays have their own item kind
+/// and deliberately do not contribute evidence.
+fn durable_step_ordinals(rows : Array[VisibleRow]) -> Map[Int, Int] {
+  let ordinals : Map[Int, Int] = Map([])
+  let mut next = 1
+  for row in rows {
+    guard row.item.sequence is Some(sequence) else { continue }
+    let evidence = match row.item.kind {
+      Reasoning | Tool(arguments=Some(_), ..) | Assistant(is_danger=false) =>
+        true
+      _ => false
+    }
+    if evidence && ordinals.get(sequence) is None {
+      ordinals.set(sequence, next)
+      next = next + 1
+    }
+  }
+  ordinals
+}
+
+///|
 /// One renderer-private key for a direct child of `#transcript`.
 priv struct TranscriptSectionKey {
   value : String
@@ -83,6 +107,44 @@ priv struct TranscriptRenderer {
 }
 
 ///|
+/// Insert one non-activity transcript row. Activity rows are handled by the
+/// step-aware folding pass below; keeping this path singular ensures user turn
+/// anchors and assistant/error rendering cannot drift between durable steps
+/// and rows from other transcript sources.
+fn TranscriptRenderer::insert_row(
+  self : TranscriptRenderer,
+  items : Map[String, @html.Html],
+  row : VisibleRow,
+  index : Int,
+) -> Unit {
+  let item = row.item
+  let anchor = if item.kind is User {
+    Some(@transcript_overview.TurnKey::of(item, index~).anchor())
+  } else {
+    None
+  }
+  items.set(
+    TranscriptRenderKey::row(row.identity).wire(),
+    transcript_item_view(
+      item,
+      self.on_open,
+      anchor?,
+      on_jump=self.on_jump,
+      assistant_name=match self.input.source {
+        OpenSeek => "OpenSeek"
+        Codex => "Codex"
+      },
+    ),
+  )
+  if item.kind is User {
+    items.set(
+      TranscriptRenderKey::turn_rule(row.identity).wire(),
+      turn_rule_view(ts?=item.ts),
+    )
+  }
+}
+
+///|
 /// Build the keyed direct children of `#stream` in display order. Map insertion
 /// order determines visual order; the strings only determine node identity.
 fn TranscriptRenderer::stream_children(
@@ -91,7 +153,11 @@ fn TranscriptRenderer::stream_children(
   let visible = self.input.items
   let items : Map[String, @html.Html] = Map([])
   let mut left_boundary : String? = None
-  let mut reasoning_attached = false
+  let step_ordinals = if self.input.source is OpenSeek {
+    durable_step_ordinals(visible)
+  } else {
+    Map([])
+  }
   // The durable transcript plus client-local notices, rendered through one
   // folding pass. Live semantic events never synthesize durable-looking
   // items here; their store commits populate the transcript.
@@ -122,42 +188,57 @@ fn TranscriptRenderer::stream_children(
       ]),
     )
   } else {
-    // Reasoning and tool results fold behind collapsed activity cards;
-    // everything the agent says stays out. Assistant messages break the run
-    // like user messages and error bubbles do, so a turn reads as narration,
-    // work, narration, work, answer rather than hiding the interim narration
-    // inside the fold above the final answer. The same fold renders whether
-    // the turn is still streaming or long settled, so nothing shown live
-    // vanishes or restyles when the turn lands.
+    // OpenSeek's durable Assistant sequence is the model-step identity. Fold
+    // each step's reasoning and tools together, while keeping assistant prose
+    // visible beside the fold. Legacy/Codex rows have no OpenSeek step map and
+    // retain the adjacent-activity behavior below.
     let mut index = 0
     while index < visible.length() {
-      guard visible[index].item.kind is (Tool(..) | Reasoning) else {
-        let row = visible[index]
-        let item = row.item
-        let anchor = if item.kind is User {
-          Some(@transcript_overview.TurnKey::of(item, index~).anchor())
-        } else {
-          None
+      if visible[index].item.sequence is Some(sequence) &&
+        step_ordinals.get(sequence) is Some(step_number) {
+        let start = index
+        let activity : Array[@transcript.TranscriptItem] = []
+        while index < visible.length() &&
+              visible[index].item.sequence == Some(sequence) {
+          if visible[index].item.kind is (Tool(..) | Reasoning) {
+            activity.push(visible[index].item)
+          }
+          index = index + 1
         }
-        items.set(
-          TranscriptRenderKey::row(row.identity).wire(),
-          transcript_item_view(
-            item,
-            self.on_open,
-            anchor?,
-            on_jump=self.on_jump,
-            assistant_name=match self.input.source {
-              OpenSeek => "OpenSeek"
-              Codex => "Codex"
-            },
-          ),
-        )
-        if item.kind is User {
+        if !activity.is_empty() {
           items.set(
-            TranscriptRenderKey::turn_rule(row.identity).wire(),
-            turn_rule_view(ts?=item.ts),
+            TranscriptRenderKey::activity_after(left_boundary).wire(),
+            activity_view(
+              activity,
+              self.on_open,
+              step_label="Step \{step_number}",
+            ),
           )
         }
+        // Assistant narration and final answers remain visible. The activity
+        // is emitted first as the step's work disclosure; prose then becomes
+        // the stable left boundary for the next provisional/durable step.
+        let mut rendered_prose = false
+        for row_index in start..<index {
+          let row = visible[row_index]
+          if !(row.item.kind is (Tool(..) | Reasoning)) {
+            self.insert_row(items, row, row_index)
+            left_boundary = Some(row.identity)
+            rendered_prose = true
+          }
+        }
+        if !rendered_prose {
+          // A tool-only step has no prose row to become a boundary. Its final
+          // durable row is still a stable predecessor: before the next commit
+          // the live card keys after it, and after the commit the settled card
+          // uses that same key.
+          left_boundary = Some(visible[index - 1].identity)
+        }
+        continue
+      }
+      guard visible[index].item.kind is (Tool(..) | Reasoning) else {
+        let row = visible[index]
+        self.insert_row(items, row, index)
         left_boundary = Some(row.identity)
         index = index + 1
         continue
@@ -165,27 +246,28 @@ fn TranscriptRenderer::stream_children(
       let run : Array[@transcript.TranscriptItem] = []
       while index < visible.length() &&
             visible[index].item.kind is (Tool(..) | Reasoning) {
+        // An unnumbered runtime/goal card may sit immediately before a
+        // durable model step. Leave that row for the step-aware branch above
+        // instead of absorbing it into this fallback activity run.
+        if visible[index].item.sequence is Some(sequence) &&
+          step_ordinals.get(sequence) is Some(_) {
+          break
+        }
         run.push(visible[index].item)
         index = index + 1
       }
-      let live_reasoning = if index == visible.length() {
-        self.input.streaming_reasoning
-      } else {
-        None
-      }
-      reasoning_attached = live_reasoning is Some(_)
       items.set(
         TranscriptRenderKey::activity_after(left_boundary).wire(),
-        activity_view(
-          run,
-          self.on_open,
-          live_reasoning?,
-          reasoning_complete=self.input.reasoning_complete,
-        ),
+        activity_view(run, self.on_open),
       )
+      left_boundary = Some(visible[index - 1].identity)
     }
   }
-  if self.input.streaming_reasoning is Some(reasoning) && !reasoning_attached {
+  // Durable commits are untagged and cannot prove ownership of an in-flight
+  // preview. Keep ambiguous live reasoning visible as a provisional next step;
+  // `Conversation::reasoning_for_render` suppresses only an exact, completed
+  // duplicate after it has durably committed.
+  if self.input.streaming_reasoning is Some(reasoning) {
     items.set(
       TranscriptRenderKey::activity_after(left_boundary).wire(),
       activity_view(
@@ -193,6 +275,11 @@ fn TranscriptRenderer::stream_children(
         self.on_open,
         live_reasoning=reasoning,
         reasoning_complete=self.input.reasoning_complete,
+        step_label=if self.input.source is OpenSeek {
+          "Step \{step_ordinals.length() + 1}"
+        } else {
+          ""
+        },
       ),
     )
   }

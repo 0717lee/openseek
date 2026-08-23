@@ -57,6 +57,18 @@ test "an abort bubble is the answer a turn got" {
 }
 
 ///|
+test "a terminal-carried final is the answer a turn got" {
+  let rows = @transcript_overview.entries(
+    [
+      item(User, "question", sequence=1),
+      item(TerminalAnswer, "final answer", sequence=2),
+    ],
+    display=text => text,
+  )
+  @debug.assert_eq(rows[0].reply, Some("final answer"))
+}
+
+///|
 test "a row without a sequence keys by its position" {
   let rows = @transcript_overview.entries(
     [item(Assistant(is_danger=false), "notice"), item(User, "local bubble")],

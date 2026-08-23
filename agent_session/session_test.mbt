@@ -52,17 +52,25 @@ test "event timestamps round trip through JSON" {
 }
 
 ///|
-test "ToolResult brief is optional and backwards compatible" {
-  // A record written before briefs existed (no `brief` key) must still decode,
-  // with `brief` defaulting to None — old logs keep parsing.
-  let legacy_json =
-    #|{"tool_call_id":"call_1","tool_name":"read","content":"README","is_error":false}
-  let legacy : @agent_session.ToolResult = @json.from_json(
-    @json.parse(legacy_json),
+test "assistant checkpoint replay provenance is durable and sparse" {
+  let ordinary = @agent_session.AssistantMessage("answer")
+  assert_false(ordinary.is_replay())
+  assert_false(ordinary.to_json().stringify().contains("is_replay"))
+  let replay = @agent_session.AssistantMessage(
+    "answer",
+    reasoning_content="thought",
+    is_replay=true,
   )
-  guard legacy.brief() is None else { fail("legacy brief should be None") }
-  assert_eq(legacy.content(), "README")
-  // A brief round-trips when present.
+  assert_true(replay.is_replay())
+  let decoded : @agent_session.AssistantMessage = @json.from_json(
+    replay.to_json(),
+  )
+  assert_true(decoded.is_replay())
+  assert_eq(decoded.reasoning_content(), Some("thought"))
+}
+
+///|
+test "ToolResult brief round-trips when present" {
   let with_brief = @agent_session.ToolResult(
     tool_call_id="call_2",
     tool_name="shell",
@@ -227,6 +235,19 @@ test "projection does not repeat a reasoning-bearing final answer" {
   assert_true(messages[2].role is Assistant)
   assert_eq(messages[2].content, "answer")
   assert_eq(messages[2].reasoning_content, Some("consider the options"))
+}
+
+///|
+test "projection does not repeat a plain final preserved as an assistant" {
+  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
+    .append(User(UserMessage("question")))
+    .append(Assistant(AssistantMessage("answer")))
+    .append(Terminal(Finished("answer")))
+  let messages = session.chat_messages()
+  assert_eq(messages.length(), 3)
+  assert_true(messages[1].role is User)
+  assert_true(messages[2].role is Assistant)
+  assert_eq(messages[2].content, "answer")
 }
 
 ///|

@@ -83,7 +83,7 @@ pub fn entries(
     for cursor in (index + 1)..<items.length() {
       match items[cursor].kind {
         User => break
-        Assistant(_) => {
+        Assistant(_) | AssistantReplay | TerminalAnswer => {
           reply = Some(items[cursor].content)
           break
         }

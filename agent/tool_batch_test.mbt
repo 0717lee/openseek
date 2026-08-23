@@ -90,7 +90,7 @@ async test "agent executes each normal tool call in a response batch" {
     assert_true(first_called)
     assert_true(second_called)
     let events = result.events()
-    assert_eq(events.length(), 5)
+    assert_eq(events.length(), 6)
     assert_true(events[0].item() is User(_))
     guard events[1].item() is Assistant(message) else {
       fail("expected assistant tool-call event")
@@ -106,7 +106,11 @@ async test "agent executes each normal tool call in a response batch" {
     }
     assert_eq(second_result.tool_call_id(), "call_second")
     assert_eq(second_result.content(), "second-result")
-    guard events[4].item() is Terminal(Finished(answer)) else {
+    guard events[4].item() is Assistant(final_response) else {
+      fail("expected durable final response")
+    }
+    assert_eq(final_response.content(), "done")
+    guard events[5].item() is Terminal(Finished(answer)) else {
       fail("expected finished terminal")
     }
     assert_eq(answer, "done")

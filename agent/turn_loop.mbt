@@ -170,10 +170,8 @@ async fn AgentLoop::run(
               ContinueTurn(next) => continue next
             }
           }
-          // A plain true final answer is stored once as Terminal(Finished).
-          // Thinking-mode finals first store a full Assistant payload so their
-          // reasoning survives; projection recognizes the matching terminal
-          // and does not replay its visible answer twice.
+          // Every provider response is durable as an Assistant event. The
+          // terminal seals the turn but does not double as model-step evidence.
           match
             self.finish_turn(
               session,
@@ -689,10 +687,8 @@ async fn AgentLoop::execute_tool_call(
       // order, matching the assistant's tool_calls echo sequence — so the
       // durable log and any checkpoint request generated from it stay
       // API-valid without projection repair text leaking into summaries.
-      // Step attribution downstream does not need the finish result last:
-      // analyzers treat "a finish result seen since the last assistant
-      // message" as finish-completion, because everything recorded after
-      // it in the same batch is by construction a skip note.
+      // Step attribution comes from the Assistant event recorded before this
+      // batch, so it does not depend on which result appears last.
       let remaining_tool_calls = response.tool_calls[call_index + 1:]
       let session = self.close_skipped_tool_calls(
         session,
@@ -729,6 +725,7 @@ async fn AgentLoop::execute_tool_call(
             answer,
             usage=response.usage,
             spent_result_chars~,
+            answer_already_durable=true,
           ),
         )
       }
@@ -965,6 +962,9 @@ async fn AgentLoop::salvage_control_calls_at_ceiling(
 let max_tool_result_chars : Int = 60_000
 
 ///|
+let tool_result_truncation_marker : String = "\n[truncated: result exceeded the 60000-char cap]"
+
+///|
 /// Clamp an oversized tool result to `max_tool_result_chars`, never
 /// splitting a surrogate pair.
 fn clamp_tool_result_content(content : String) -> String {
@@ -973,14 +973,14 @@ fn clamp_tool_result_content(content : String) -> String {
   }
   // The marker fits INSIDE the cap: the recorded result must never exceed
   // the per-call figure soft_batch_fits budgets with.
-  let marker = "\n[truncated: result exceeded the \{max_tool_result_chars}-char cap]"
+  let marker = tool_result_truncation_marker
   let body_budget = max_tool_result_chars - marker.length()
   "\{content.clamped_view(end=body_budget)}\{marker}"
 }
 
 ///|
 test "tool result clamp snaps a UTF-16 cut before a surrogate pair" {
-  let marker = "\n[truncated: result exceeded the \{max_tool_result_chars}-char cap]"
+  let marker = tool_result_truncation_marker
   let prefix = String::make(max_tool_result_chars - marker.length() - 1, 'x')
   let tail = String::make(marker.length() + 1, 'y')
   let clamped = clamp_tool_result_content("\{prefix}😀\{tail}")
@@ -1119,7 +1119,13 @@ async fn AgentLoop::continue_into_goal_check(
   let session = if !keep_only_when_compacted || at_ceiling {
     let session = self.append(
       session,
-      Assistant(AssistantMessage(kept_answer, reasoning_content?)),
+      Assistant(
+        AssistantMessage(
+          kept_answer,
+          reasoning_content?,
+          is_replay=keep_only_when_compacted,
+        ),
+      ),
     )
     self.messages.push(
       ChatMessage(Assistant, content=kept_answer, reasoning_content?),
@@ -1201,6 +1207,7 @@ async fn AgentLoop::finish_turn(
   usage~ : @deepseek.Usage,
   spent_result_chars? : Int64 = 0,
   reasoning_content? : String,
+  answer_already_durable? : Bool = false,
 ) -> FinishOutcome {
   // A met claim reaching a seal that skipped the review continuation (the
   // last bounded step) still gets its audit: the model cannot react this
@@ -1231,7 +1238,13 @@ async fn AgentLoop::finish_turn(
       // messages, and this answer is history now.
       let session = self.append(
         session,
-        Assistant(AssistantMessage(answer, reasoning_content?)),
+        Assistant(
+          AssistantMessage(
+            answer,
+            reasoning_content?,
+            is_replay=answer_already_durable,
+          ),
+        ),
       )
       let session = self.apply_steer_inputs(session, steers)
       if !compacted {
@@ -1256,13 +1269,13 @@ async fn AgentLoop::finish_turn(
   } else {
     session
   }
-  // A finished terminal stores only its visible answer. Preserve thinking-mode
-  // reasoning in the ordinary assistant payload first; projection recognizes
-  // the matching terminal and does not replay the answer twice.
-  let session = if reasoning_content is Some(reasoning) && !reasoning.is_blank() {
+  // A no-tool provider response is not otherwise durable. Record it once as
+  // Assistant before the terminal; a completion tool already has the response's
+  // Assistant/tool-call event, so its answer needs only the terminal seal.
+  let session = if !answer_already_durable {
     self.append(
       session,
-      Assistant(AssistantMessage(answer, reasoning_content=reasoning)),
+      Assistant(AssistantMessage(answer, reasoning_content?)),
     )
   } else {
     session
