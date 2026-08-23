@@ -178,31 +178,10 @@ pub impl FromJson for WorktreeCreatePayload with fn from_json(json, path) {
   guard json is Object(fields) else {
     raise JsonDecodeError((path, "expected worktree creation payload"))
   }
-  let workspace = match fields.get("workspace") {
-    Some(String(value)) => value
-    Some(_) =>
-      raise JsonDecodeError((path.add_key("workspace"), "expected string"))
-    None =>
-      raise JsonDecodeError(
-        (path.add_key("workspace"), "missing required field"),
-      )
-  }
-  let session = match fields.get("session") {
-    Some(String(value)) => Some(value)
-    Some(Null) | None => None
-    Some(_) =>
-      raise JsonDecodeError(
-        (path.add_key("session"), "expected string or null"),
-      )
-  }
-  let codex_thread = match fields.get("codex_thread") {
-    Some(String(value)) => Some(value)
-    Some(Null) | None => None
-    Some(_) =>
-      raise JsonDecodeError(
-        (path.add_key("codex_thread"), "expected string or null"),
-      )
-  }
+  let object = JsonObject::of(fields, path)
+  let workspace = object.required_string("workspace")
+  let session = object.optional_string("session")
+  let codex_thread = object.optional_string("codex_thread")
   // Unknown fields remain forward-compatible, but ownership is deliberately
   // closed: a worktree belongs to one OpenSeek session or one Codex thread.
   if (session is Some(_)) == (codex_thread is Some(_)) {
@@ -281,27 +260,10 @@ pub impl FromJson for GitPullRequestPayload with fn from_json(json, path) {
   guard json is Object(fields) else {
     raise JsonDecodeError((path, "expected Git pull-request payload"))
   }
-  let session = match fields.get("session") {
-    Some(String(value)) => value
-    Some(_) =>
-      raise JsonDecodeError((path.add_key("session"), "expected string"))
-    None =>
-      raise JsonDecodeError((path.add_key("session"), "missing required field"))
-  }
-  let cwd = match fields.get("cwd") {
-    Some(String(value)) => Some(value)
-    Some(Null) | None => None
-    Some(_) =>
-      raise JsonDecodeError((path.add_key("cwd"), "expected string or null"))
-  }
-  let branch_hint = match fields.get("branch_hint") {
-    Some(String(value)) => Some(value)
-    Some(Null) | None => None
-    Some(_) =>
-      raise JsonDecodeError(
-        (path.add_key("branch_hint"), "expected string or null"),
-      )
-  }
+  let object = JsonObject::of(fields, path)
+  let session = object.required_string("session")
+  let cwd = object.optional_string("cwd")
+  let branch_hint = object.optional_string("branch_hint")
   { session, cwd, branch_hint }
 }
 
@@ -548,25 +510,10 @@ pub impl FromJson for LspOpenPayload with fn from_json(json, path) {
   guard json is Object(fields) else {
     raise JsonDecodeError((path, "expected LSP open payload"))
   }
-  let session = match fields.get("session") {
-    Some(String(value)) => value
-    Some(_) =>
-      raise JsonDecodeError((path.add_key("session"), "expected string"))
-    None =>
-      raise JsonDecodeError((path.add_key("session"), "missing required field"))
-  }
-  let root = match fields.get("root") {
-    Some(String(value)) => value
-    Some(_) => raise JsonDecodeError((path.add_key("root"), "expected string"))
-    None =>
-      raise JsonDecodeError((path.add_key("root"), "missing required field"))
-  }
-  let file_path = match fields.get("path") {
-    Some(String(value)) => value
-    Some(_) => raise JsonDecodeError((path.add_key("path"), "expected string"))
-    None =>
-      raise JsonDecodeError((path.add_key("path"), "missing required field"))
-  }
+  let object = JsonObject::of(fields, path)
+  let session = object.required_string("session")
+  let root = object.required_string("root")
+  let file_path = object.required_string("path")
   { session, root, path: file_path }
 }
 
@@ -589,40 +536,12 @@ pub impl FromJson for LspHoverPayload with fn from_json(json, path) {
   guard json is Object(fields) else {
     raise JsonDecodeError((path, "expected LSP hover payload"))
   }
-  let session = match fields.get("session") {
-    Some(String(value)) => value
-    Some(_) =>
-      raise JsonDecodeError((path.add_key("session"), "expected string"))
-    None =>
-      raise JsonDecodeError((path.add_key("session"), "missing required field"))
-  }
-  let root = match fields.get("root") {
-    Some(String(value)) => value
-    Some(_) => raise JsonDecodeError((path.add_key("root"), "expected string"))
-    None =>
-      raise JsonDecodeError((path.add_key("root"), "missing required field"))
-  }
-  let file_path = match fields.get("path") {
-    Some(String(value)) => value
-    Some(_) => raise JsonDecodeError((path.add_key("path"), "expected string"))
-    None =>
-      raise JsonDecodeError((path.add_key("path"), "missing required field"))
-  }
-  let line = match fields.get("line") {
-    Some(Number(value, ..)) => value.to_int()
-    Some(_) => raise JsonDecodeError((path.add_key("line"), "expected integer"))
-    None =>
-      raise JsonDecodeError((path.add_key("line"), "missing required field"))
-  }
-  let character = match fields.get("character") {
-    Some(Number(value, ..)) => value.to_int()
-    Some(_) =>
-      raise JsonDecodeError((path.add_key("character"), "expected integer"))
-    None =>
-      raise JsonDecodeError(
-        (path.add_key("character"), "missing required field"),
-      )
-  }
+  let object = JsonObject::of(fields, path)
+  let session = object.required_string("session")
+  let root = object.required_string("root")
+  let file_path = object.required_string("path")
+  let line = object.required_int("line")
+  let character = object.required_int("character")
   { session, root, path: file_path, line, character }
 }
 
@@ -649,25 +568,10 @@ pub impl FromJson for WorkspaceSymbolsPayload with fn from_json(json, path) {
   guard json is Object(fields) else {
     raise JsonDecodeError((path, "expected workspace-symbol payload"))
   }
-  let session = match fields.get("session") {
-    Some(String(value)) => value
-    Some(_) =>
-      raise JsonDecodeError((path.add_key("session"), "expected string"))
-    None =>
-      raise JsonDecodeError((path.add_key("session"), "missing required field"))
-  }
-  let root = match fields.get("root") {
-    Some(String(value)) => value
-    Some(_) => raise JsonDecodeError((path.add_key("root"), "expected string"))
-    None =>
-      raise JsonDecodeError((path.add_key("root"), "missing required field"))
-  }
-  let query = match fields.get("query") {
-    Some(String(value)) => value
-    Some(_) => raise JsonDecodeError((path.add_key("query"), "expected string"))
-    None =>
-      raise JsonDecodeError((path.add_key("query"), "missing required field"))
-  }
+  let object = JsonObject::of(fields, path)
+  let session = object.required_string("session")
+  let root = object.required_string("root")
+  let query = object.required_string("query")
   { session, root, query }
 }
 
@@ -690,38 +594,12 @@ pub impl FromJson for MoonIdeNavigationPayload with fn from_json(json, path) {
   guard json is Object(fields) else {
     raise JsonDecodeError((path, "expected Moon IDE navigation payload"))
   }
-  let session = match fields.get("session") {
-    Some(String(value)) => value
-    Some(_) =>
-      raise JsonDecodeError((path.add_key("session"), "expected string"))
-    None =>
-      raise JsonDecodeError((path.add_key("session"), "missing required field"))
-  }
-  let root = match fields.get("root") {
-    Some(String(value)) => value
-    Some(_) => raise JsonDecodeError((path.add_key("root"), "expected string"))
-    None =>
-      raise JsonDecodeError((path.add_key("root"), "missing required field"))
-  }
-  let file_path = match fields.get("path") {
-    Some(String(value)) => value
-    Some(_) => raise JsonDecodeError((path.add_key("path"), "expected string"))
-    None =>
-      raise JsonDecodeError((path.add_key("path"), "missing required field"))
-  }
-  let line = match fields.get("line") {
-    Some(Number(value, ..)) => value.to_int()
-    Some(_) => raise JsonDecodeError((path.add_key("line"), "expected integer"))
-    None =>
-      raise JsonDecodeError((path.add_key("line"), "missing required field"))
-  }
-  let column = match fields.get("column") {
-    Some(Number(value, ..)) => value.to_int()
-    Some(_) =>
-      raise JsonDecodeError((path.add_key("column"), "expected integer"))
-    None =>
-      raise JsonDecodeError((path.add_key("column"), "missing required field"))
-  }
+  let object = JsonObject::of(fields, path)
+  let session = object.required_string("session")
+  let root = object.required_string("root")
+  let file_path = object.required_string("path")
+  let line = object.required_int("line")
+  let column = object.required_int("column")
   { session, root, path: file_path, line, column }
 }
 

@@ -700,60 +700,20 @@ pub impl FromJson for WorktreeInfo with fn from_json(json, path) {
   guard json is Object(fields) else {
     raise JsonDecodeError((path, "expected worktree info"))
   }
-  let name = match fields.get("name") {
-    Some(String(value)) => value
-    Some(_) => raise JsonDecodeError((path.add_key("name"), "expected string"))
-    None =>
-      raise JsonDecodeError((path.add_key("name"), "missing required field"))
-  }
-  let branch = match fields.get("branch") {
-    Some(String(value)) => value
-    Some(_) =>
-      raise JsonDecodeError((path.add_key("branch"), "expected string"))
-    None =>
-      raise JsonDecodeError((path.add_key("branch"), "missing required field"))
-  }
-  let base = match fields.get("base") {
-    Some(String(value)) => value
-    Some(_) => raise JsonDecodeError((path.add_key("base"), "expected string"))
-    None =>
-      raise JsonDecodeError((path.add_key("base"), "missing required field"))
-  }
-  let session = match fields.get("session") {
-    Some(String(value)) => Some(value)
-    Some(Null) | None => None
-    Some(_) =>
-      raise JsonDecodeError(
-        (path.add_key("session"), "expected string or null"),
-      )
-  }
-  let codex_thread = match fields.get("codex_thread") {
-    Some(String(value)) => Some(value)
-    Some(Null) | None => None
-    Some(_) =>
-      raise JsonDecodeError(
-        (path.add_key("codex_thread"), "expected string or null"),
-      )
-  }
+  let object = JsonObject::of(fields, path)
+  let name = object.required_string("name")
+  let branch = object.required_string("branch")
+  let base = object.required_string("base")
+  let session = object.optional_string("session")
+  let codex_thread = object.optional_string("codex_thread")
   if session is Some(_) && codex_thread is Some(_) {
     raise JsonDecodeError(
       (path, "worktree cannot belong to both session and codex_thread"),
     )
   }
-  let checkout_path = match fields.get("path") {
-    Some(String(value)) => value
-    Some(_) => raise JsonDecodeError((path.add_key("path"), "expected string"))
-    None =>
-      raise JsonDecodeError((path.add_key("path"), "missing required field"))
-  }
-  let present = match fields.get("present") {
-    Some(True) => true
-    Some(False) => false
-    Some(_) =>
-      raise JsonDecodeError((path.add_key("present"), "expected boolean"))
-    None =>
-      raise JsonDecodeError((path.add_key("present"), "missing required field"))
-  }
+  let object = JsonObject::of(fields, path)
+  let checkout_path = object.required_string("path")
+  let present = object.required_bool("present")
   { name, branch, base, session, codex_thread, path: checkout_path, present }
 }
 

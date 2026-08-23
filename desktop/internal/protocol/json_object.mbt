@@ -30,6 +30,18 @@ fn JsonObject::decode(
 }
 
 ///|
+/// A reader over fields the caller has already destructured. The message and
+/// reply payloads phrase their own top-level failure — "expected worktree
+/// creation payload", not "expected worktree creation object" — so they guard
+/// first and read fields through this.
+fn JsonObject::of(
+  fields : Map[String, Json],
+  path : @json.JsonPath,
+) -> JsonObject {
+  { fields, path }
+}
+
+///|
 fn JsonObject::required_json(
   self : JsonObject,
   name : String,
