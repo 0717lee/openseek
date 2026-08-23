@@ -124,6 +124,11 @@ async test "a same-batch met plus finish continues through the gate" {
     assert_eq(review_notice_count(result), 1)
     assert_true(bodies[1].contains("vacuous test"))
     assert_true(finished_answer(result).contains("confirmed done"))
+    guard result.events()[result.events().length() - 2].item()
+      is Assistant(confirmed) else {
+      fail("expected the post-review final before its terminal")
+    }
+    assert_eq(confirmed.content(), "confirmed done")
   }
 }
 
@@ -326,6 +331,13 @@ async test "a last-step met still gets its audit durably" {
     assert_eq(gate_calls, 1)
     assert_eq(review_notice_count(result), 1)
     assert_true(finished_answer(result).contains("all done"))
+    // No continuation request ran on the last bounded step, so its terminal
+    // remains owned by the finish response and no plain final is synthesized.
+    let preserved_finals = [
+      for event in result.events() if event.item() is Assistant(message) &&
+      message.content() == "all done" => message
+    ]
+    assert_eq(preserved_finals.length(), 0)
   }
 }
 

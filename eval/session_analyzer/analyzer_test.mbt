@@ -21,6 +21,7 @@ fn sample_session() -> @agent_session.Session {
   .append(
     Runtime(RuntimeNotice("\{@agent_session.PlanReminderPrefix}\nrun tests")),
   )
+  .append(Assistant(AssistantMessage("done")))
   .append(Terminal(Finished("done")))
 }
 
@@ -70,6 +71,52 @@ test "a checkpoint between finish result and terminal keeps step attribution" {
   // The terminal belongs to the finish call: one model step, not two.
   assert_eq(result.steps, 1)
   assert_true(result.finished)
+}
+
+///|
+test "only durable assistant responses count as steps" {
+  let session = @agent_session.Session(
+      SessionId("review-on-finish"),
+      system_prompt="",
+    )
+    .append(User(UserMessage("wrap it up")))
+    .append(Assistant(AssistantMessage("")))
+    .append(
+      Tool(
+        ToolResult(
+          tool_call_id="call_finish",
+          tool_name="submit_report",
+          content="finished: done",
+        ),
+      ),
+    )
+    .append(Runtime(RuntimeNotice("[review] goal-met audit: clean")))
+    .append(Runtime(RuntimeNotice(@agent_session.GoalClearedNotice)))
+    .append(Terminal(Finished("done")))
+  let result = @session_analyzer.analyze_session(session)
+  assert_eq(result.steps, 1)
+  assert_true(result.finished)
+  let continued = @agent_session.Session(
+      SessionId("runtime-continuation"),
+      system_prompt="",
+    )
+    .append(User(UserMessage("wrap it up")))
+    .append(Assistant(AssistantMessage("")))
+    .append(
+      Tool(
+        ToolResult(
+          tool_call_id="call_finish",
+          tool_name="submit_report",
+          content="finished: first answer",
+        ),
+      ),
+    )
+    .append(Runtime(RuntimeNotice("background job completed")))
+    .append(Assistant(AssistantMessage("second answer")))
+    .append(Terminal(Finished("second answer")))
+  // A true runtime steer is not a completion epilogue: its explicit follow-up
+  // Assistant remains a distinct provider step.
+  assert_eq(@session_analyzer.analyze_session(continued).steps, 2)
 }
 
 ///|
@@ -124,7 +171,22 @@ test "session analyzer counts typed events" {
 }
 
 ///|
-test "reasoning-bearing final pair counts and indexes the answer once" {
+test "assistant final pair counts and indexes the answer once" {
+  let session = @agent_session.Session(
+      SessionId("reasoning-final"),
+      system_prompt="",
+    )
+    .append(User(UserMessage("question")))
+    .append(Assistant(AssistantMessage("unique-answer")))
+    .append(Terminal(Finished("unique-answer")))
+  let result = @session_analyzer.analyze_session(session)
+  assert_eq(result.steps, 1)
+  let transcript = @session_analyzer.transcript_text(session)
+  assert_eq(transcript, "unique-answer\n")
+}
+
+///|
+test "reasoning-bearing final pair still counts and indexes the answer once" {
   let session = @agent_session.Session(
       SessionId("reasoning-final"),
       system_prompt="",
@@ -191,6 +253,51 @@ test "finish tool terminal does not double count a model step" {
   assert_eq(result.steps, 1)
   assert_eq(result.tool_results, 1)
   assert_true(result.finished)
+}
+
+///|
+test "checkpoint replay assistants do not add model steps" {
+  let session = @agent_session.Session(
+      SessionId("checkpoint-replay"),
+      system_prompt="",
+    )
+    .append(User(UserMessage("finish and keep going")))
+    .append(
+      Assistant(
+        AssistantMessage("", tool_calls=[
+          ToolCall(
+            id="call_finish",
+            name="finish",
+            arguments="{\"answer\":\"first answer\"}",
+          ),
+        ]),
+      ),
+    )
+    .append(
+      Tool(
+        ToolResult(
+          tool_call_id="call_finish",
+          tool_name="finish",
+          content="finished: first answer",
+        ),
+      ),
+    )
+    .append(
+      Summary(
+        SessionSummary(content="checkpoint", from_sequence=1, to_sequence=3),
+      ),
+    )
+    .append(Assistant(AssistantMessage("first answer", is_replay=true)))
+    .append(User(UserMessage("late steer")))
+    .append(Assistant(AssistantMessage("second answer")))
+    .append(Terminal(Finished("second answer")))
+  let result = @session_analyzer.analyze_session(session)
+  assert_eq(result.steps, 2)
+  assert_true(result.finished)
+  let transcript = @session_analyzer.transcript_text(session)
+  // The original completion result remains searchable; the checkpoint's
+  // Assistant copy must not index the same provider output a second time.
+  assert_eq(transcript.split("first answer").length(), 3)
 }
 
 ///|

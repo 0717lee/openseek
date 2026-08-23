@@ -102,7 +102,9 @@ async test "a finish attempt with a standing goal gets one goal check" {
     let bodies : Array[String] = []
     guard goal_check_test_server(group, bodies, [
         final_answer_payload("premature answer"),
-        final_answer_payload("really done"),
+        // Repeating the attempted answer is deliberate: durable ownership,
+        // not text inequality, must prove that the check caused another step.
+        final_answer_payload("premature answer"),
       ])
       is Some(url) else {
       return
@@ -130,18 +132,21 @@ async test "a finish attempt with a standing goal gets one goal check" {
       last.item() is Terminal(Finished(answer)) else {
       fail("expected finished terminal")
     }
-    assert_eq(answer, "really done")
+    assert_eq(answer, "premature answer")
     let checks = [
       for event in events if event.item() is Runtime(notice) &&
       notice.content().has_prefix(@agent_session.GoalCheckPrefix) => notice
     ]
     assert_eq(checks.length(), 1)
-    // The premature answer is preserved as an ordinary assistant message.
+    // Both provider responses are preserved as ordinary assistant messages.
+    // The second one is the durable step boundary for the repeated plain final;
+    // the matching Terminal remains only its visible completion record.
     let held = [
       for event in events if event.item() is Assistant(message) &&
       message.content() == "premature answer" => message
     ]
-    assert_eq(held.length(), 1)
+    assert_eq(held.length(), 2)
+    assert_true(held.all(message => !message.is_replay()))
   }
 }
 
@@ -208,12 +213,74 @@ async test "a finish tool call mid-batch closes the batch before the check" {
       fail("expected finished terminal")
     }
     assert_eq(answer, "confirmed done")
+    // The finish call was converted into a goal-check continuation. Preserve
+    // the follow-up plain final as its own durable model step so session-backed
+    // renderers can distinguish it from the original finish response.
+    guard events[events.length() - 2].item() is Assistant(confirmed) else {
+      fail("expected the continued final before its terminal")
+    }
+    assert_eq(confirmed.content(), "confirmed done")
     let skipped = [
       for event in events if event.item() is Tool(tool_result) &&
       tool_result.tool_call_id() == "call_probe" => tool_result
     ]
     assert_eq(skipped.length(), 1)
     assert_true(skipped[0].is_error())
+  }
+}
+
+///|
+async test "checkpoint replay provenance distinguishes a same-text follow-up" {
+  @async.with_task_group() <| group => {
+    let bodies : Array[String] = []
+    let checkpoint_bodies : Array[String] = []
+    let pressured_finish =
+      #|{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_finish","function":{"name":"finish_test","arguments":"{}"}}]}}],"usage":{"prompt_tokens":749000,"completion_tokens":1000,"total_tokens":750000}}
+    guard goal_ceiling_test_server(group, bodies, checkpoint_bodies, [
+        pressured_finish,
+        pressured_final_payload("same answer", 750_000),
+      ])
+      is Some(url) else {
+      return
+    }
+    let tools = @agent_tool.Tools([
+      AgentToolDefinition(
+        name="finish_test",
+        description="Finish stand-in.",
+        schema=JsonSchema({ "type": "object" }),
+        execute=Sync(_args => @agent_tool.ToolAction::finish("same answer")),
+      ),
+    ])
+    let result = @agent.run_turn_in_scope(
+      runtime=AgentRuntime(),
+      scope=AgentTaskScope(group),
+      api_key="test-key",
+      model=Deepseek(V4Flash),
+      session=answered_goal_session("goal-check-replay-provenance"),
+      task="finish carefully",
+      append_item=(session, item) => session.append(item),
+      max_steps=3,
+      api_url=url,
+      tools~,
+    )
+    assert_eq(bodies.length(), 2)
+    assert_eq(checkpoint_bodies.length(), 2)
+    let replays = [
+      for event in result.events() if event.item() is Assistant(message) &&
+      message.content() == "same answer" &&
+      message.is_replay() => message
+    ]
+    let provider_finals = [
+      for event in result.events() if event.item() is Assistant(message) &&
+      message.content() == "same answer" &&
+      !message.is_replay() => message
+    ]
+    assert_eq(replays.length(), 1)
+    assert_eq(provider_finals.length(), 1)
+    guard result.events().peek() is Some(last) &&
+      last.item() is Terminal(Finished("same answer")) else {
+      fail("expected the repeated provider final to seal the turn")
+    }
   }
 }
 

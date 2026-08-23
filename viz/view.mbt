@@ -150,9 +150,8 @@ test "group_turns splits on terminals and keeps an unterminated tail" {
 
 ///|
 /// Durable session logs do not store the transient `agent_step` events the CLI
-/// emits while running. Most model iterations persist as `Assistant` events,
-/// but the common final-answer path stores the no-tool response only as
-/// `Terminal(Finished(_))`, so derive stable human-facing labels from both.
+/// emits while running. Each current-format provider response has one
+/// non-replay `Assistant` event, whose sequence gives the stable step label.
 fn agent_step_labels(session : @agent_session.Session) -> Map[Int, String] {
   let sequences = agent_step_sequences(session)
   let labels : Map[Int, String] = Map([])
@@ -165,67 +164,9 @@ fn agent_step_labels(session : @agent_session.Session) -> Map[Int, String] {
 ///|
 /// Sequence numbers of the events that represent agent steps, in log order.
 fn agent_step_sequences(session : @agent_session.Session) -> Array[Int] {
-  let sequences : Array[Int] = []
-  let mut previous : @agent_session.SessionEvent? = None
-  let mut finish_in_batch = false
-  for event in session.events() {
-    if event_represents_agent_step(event, previous, finish_in_batch) {
-      sequences.push(event.sequence())
-    }
-    // A checkpoint Summary can sit between a finish-tool result and its
-    // terminal (compact-on-finish); skip it when looking backward so the
-    // terminal is still attributed to the finish call.
-    match event.item() {
-      Tool(result) =>
-        if result.tool_name() == "finish" {
-          finish_in_batch = true
-        }
-      Summary(_) => ()
-      _ => finish_in_batch = false
-    }
-    if !(event.item() is Summary(_)) {
-      previous = Some(event)
-    }
-  }
-  sequences
-}
-
-///|
-fn event_represents_agent_step(
-  event : @agent_session.SessionEvent,
-  previous : @agent_session.SessionEvent?,
-  finish_in_batch : Bool,
-) -> Bool {
-  match event.item() {
-    Assistant(_) => true
-    Terminal(Finished(message)) =>
-      // A context-ceiling yield's terminal is synthetic, not a model step.
-      !message.has_prefix(@agent_session.ContextYieldAnswerPrefix) &&
-      terminal_finished_represents_agent_step(previous, finish_in_batch)
-    _ => false
-  }
-}
-
-///|
-/// Tool results are recorded in CALL order, so a finish result may be
-/// followed by same-batch skip notes; `finish_in_batch` — a finish result
-/// seen since the last assistant message — is the completion signal, not
-/// "the finish result came last".
-fn terminal_finished_represents_agent_step(
-  previous : @agent_session.SessionEvent?,
-  finish_in_batch : Bool,
-) -> Bool {
-  if finish_in_batch {
-    return false
-  }
-  match previous {
-    Some(event) =>
-      match event.item() {
-        Assistant(_) => false
-        _ => true
-      }
-    None => true
-  }
+  [
+    for event in session.events() if event.is_agent_step() => event.sequence()
+  ]
 }
 
 ///|
@@ -1579,7 +1520,7 @@ fn model_message_labels(
 ) -> Array[String] {
   let out : Array[String] = [""]
   let pending_tool_calls : Array[String] = []
-  let mut reasoning_final_answer : String? = None
+  let mut previous_assistant_answer : String? = None
   let events = session.events()
   for event in events {
     // Mirror `Session::chat_messages`: a surviving summary projects at the
@@ -1590,7 +1531,7 @@ fn model_message_labels(
         !model_event_covered_by_later_summary(candidate, events) {
         flush_pending_tool_labels(pending_tool_calls, out)
         out.push(label_of(candidate))
-        reasoning_final_answer = None
+        previous_assistant_answer = None
       }
     }
     if model_event_covered_by_later_summary(event, events) {
@@ -1602,10 +1543,7 @@ fn model_message_labels(
       Assistant(message) => {
         flush_pending_tool_labels(pending_tool_calls, out)
         out.push(label_of(event))
-        reasoning_final_answer = match message.reasoning_content() {
-          Some(reasoning) if !reasoning.is_blank() => Some(message.content())
-          _ => None
-        }
+        previous_assistant_answer = Some(message.content())
         for call in message.tool_calls() {
           pending_tool_calls.push(call.id)
         }
@@ -1613,25 +1551,25 @@ fn model_message_labels(
       Tool(result) =>
         if remove_pending_tool_id(pending_tool_calls, result.tool_call_id()) {
           out.push(tool_label_of(event))
-          reasoning_final_answer = None
+          previous_assistant_answer = None
         }
       Terminal(terminal) => {
         if !pending_tool_calls.is_empty() {
           flush_pending_tool_labels(pending_tool_calls, out)
-          reasoning_final_answer = None
+          previous_assistant_answer = None
         }
-        let repeated_reasoning_final = terminal is Finished(answer) &&
-          reasoning_final_answer is Some(previous) &&
+        let repeated_assistant_final = terminal is Finished(answer) &&
+          previous_assistant_answer is Some(previous) &&
           previous == answer
         if terminal_projects_model_message(terminal) &&
-          !repeated_reasoning_final {
+          !repeated_assistant_final {
           out.push(label_of(event))
         }
-        reasoning_final_answer = None
+        previous_assistant_answer = None
       }
       item => {
         flush_pending_tool_labels(pending_tool_calls, out)
-        reasoning_final_answer = None
+        previous_assistant_answer = None
         if item_projects_model_message(item) {
           out.push(label_of(event))
         }
@@ -1643,10 +1581,10 @@ fn model_message_labels(
 }
 
 ///|
-test "model metadata omits a reasoning final's duplicate terminal" {
+test "model metadata omits an assistant final's duplicate terminal" {
   let session = @agent_session.Session(SessionId("labels"), system_prompt="")
     .append(User(UserMessage("first")))
-    .append(Assistant(AssistantMessage("answer", reasoning_content="thought")))
+    .append(Assistant(AssistantMessage("answer")))
     .append(Terminal(Finished("answer")))
     .append(User(UserMessage("second")))
     .append(Terminal(Finished("done")))
@@ -2277,7 +2215,9 @@ fn subrun_transcript(child : @agent_session.Session) -> @html.Html {
   let steps = child
     .events()
     .iter()
-    .count_if(event => event.item() is Assistant(_))
+    .count_if(event => {
+      event.item() is Assistant(message) && !message.is_replay()
+    })
   let tools = child.events().iter().count_if(event => event.item() is Tool(_))
   // Namespace every anchor the child render emits (and the pair links
   // referencing them), so the nested transcript never duplicates the

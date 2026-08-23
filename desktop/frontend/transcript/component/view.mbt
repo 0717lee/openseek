@@ -128,6 +128,7 @@ fn flatten_tool_activity(items : Array[@transcript.TranscriptItem]) -> Bool {
 /// belong to the ordinary tool-card rendering.
 fn inline_singleton_tool(
   items : Array[@transcript.TranscriptItem],
+  allow_tool_only? : Bool = false,
 ) -> @transcript.TranscriptItem? {
   let mut tool : @transcript.TranscriptItem? = None
   let mut has_reasoning = false
@@ -143,7 +144,7 @@ fn inline_singleton_tool(
       _ => return None
     }
   }
-  if has_reasoning {
+  if has_reasoning || allow_tool_only {
     tool
   } else {
     None
@@ -186,9 +187,9 @@ fn failed_badge(failed : Int) -> @html.Html {
 }
 
 ///|
-/// A stretch of a turn's work — reasoning and tool results — folded behind a
-/// single summary line ("Read moon.mod · moon test"), the way Codex folds a
-/// turn behind "Worked for 46s". Expanding shows the work log in order:
+/// One durable model step's work, or adjacent activity from another source,
+/// folded behind a single summary line ("#2 · Read moon.mod · moon test").
+/// Expanding shows the work log in order:
 /// reasoning as muted prose — never a labelled "Thinking" row of its own —
 /// each burst of tool calls as a one-line sublist. A stretch that only
 /// thought folds behind a plain "Thought" line. Failures never force the fold
@@ -204,11 +205,17 @@ fn activity_view(
   on_open : (String) -> @cmd.Cmd,
   live_reasoning? : String,
   reasoning_complete? : Bool = false,
+  step_label? : String = "",
 ) -> @html.Html {
-  if live_reasoning is None && flatten_tool_activity(items) {
+  if step_label.is_empty() &&
+    live_reasoning is None &&
+    flatten_tool_activity(items) {
     return @html.div(class="activity-row", [tool_line_view(items)])
   }
-  let inline_tool = inline_singleton_tool(items)
+  let inline_tool = inline_singleton_tool(
+    items,
+    allow_tool_only=!step_label.is_empty(),
+  )
   let log : Array[@html.Html] = []
   let mut index = 0
   while index < items.length() {
@@ -220,6 +227,10 @@ fn activity_view(
       }
       if inline_tool is Some(tool) && tools.length() == 1 {
         log.push(inline_tool_call_view(tool))
+      } else if !step_label.is_empty() {
+        // The outer disclosure already groups this model step. Show each call
+        // directly rather than adding a redundant second burst disclosure.
+        log.append(tools.map(tool_call_view))
       } else {
         log.push(tool_line_view(tools))
       }
@@ -258,17 +269,22 @@ fn activity_view(
   }
   let failed = count_failed(items)
   let summary_label = tool_activity_summary(items)
+  let activity_label = if summary_label.is_empty() {
+    if live_reasoning is Some(_) && !reasoning_complete {
+      "Thinking…"
+    } else {
+      "Thought"
+    }
+  } else {
+    summary_label
+  }
   let summary : Array[@html.Html] = [
     @html.span(
       class="activity-text",
-      if summary_label.is_empty() {
-        if live_reasoning is Some(_) && !reasoning_complete {
-          "Thinking…"
-        } else {
-          "Thought"
-        }
+      if step_label.is_empty() {
+        activity_label
       } else {
-        summary_label
+        "\{step_label} · \{activity_label}"
       },
     ),
   ]
@@ -621,21 +637,22 @@ fn transcript_item_view(
 ) -> @html.Html {
   match item.kind {
     User => user_message_view(item.content, anchor?, on_jump?)
-    Assistant(is_danger~) => {
-      // Errors and abort notices are plain text; only real assistant replies
-      // are markdown.
-      let content = if is_danger {
-        @html.div(class="msg-content danger", inline_code_nodes(item.content))
-      } else {
-        @html.div(
-          class="msg-content markdown",
-          @markdown.markdown_nodes(item.content, open_file=on_open),
-        )
-      }
-      @html.div(class="msg", [
-        @html.div(class="msg-body", [speaker_label(assistant_name), content]),
-      ])
-    }
+    Assistant(is_danger~) =>
+      assistant_message_view(item.content, on_open, assistant_name, is_danger~)
+    AssistantReplay =>
+      assistant_message_view(
+        item.content,
+        on_open,
+        assistant_name,
+        is_danger=false,
+      )
+    TerminalAnswer =>
+      assistant_message_view(
+        item.content,
+        on_open,
+        assistant_name,
+        is_danger=false,
+      )
     // Unreachable in practice — the transcript loop batches every reasoning
     // and tool item into a run and builds the activity card itself — but the
     // match must cover them, so a stray item gets the same one-item card.
@@ -643,6 +660,28 @@ fn transcript_item_view(
     Tool(..) => activity_view([item], on_open)
     Summary => summary_card_view(item.content, on_open)
   }
+}
+
+///|
+fn assistant_message_view(
+  content : String,
+  on_open : (String) -> @cmd.Cmd,
+  assistant_name : String,
+  is_danger~ : Bool,
+) -> @html.Html {
+  // Errors and abort notices are plain text; only real assistant replies are
+  // markdown. Finished-terminal answers share this exact presentation.
+  let body = if is_danger {
+    @html.div(class="msg-content danger", inline_code_nodes(content))
+  } else {
+    @html.div(
+      class="msg-content markdown",
+      @markdown.markdown_nodes(content, open_file=on_open),
+    )
+  }
+  @html.div(class="msg", [
+    @html.div(class="msg-body", [speaker_label(assistant_name), body]),
+  ])
 }
 
 ///|
