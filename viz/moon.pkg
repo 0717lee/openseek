@@ -6,6 +6,8 @@ import {
   "moonbit-community/rabbita/html",
   "moonbitlang/core/immut/vector",
   "moonbitlang/core/json",
+  "moonbitlang/editor/syntax",
+  "moonbitlang/editor/syntax/lang_moonbit",
 }
 
 import {

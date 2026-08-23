@@ -34,6 +34,12 @@
       --badge-aborted-bg: #fbeed1; --badge-aborted-fg: #8a6d10;
       --badge-interrupted-bg: #e6e9ef; --badge-interrupted-fg: #4a5263;
       --badge-failed-bg: #fbe0e5; --badge-failed-fg: #b02a43;
+      --token-keyword: #0000ff; --token-variable: #001080;
+      --token-string: #a31515; --token-number: #098658;
+      --token-comment: #008000; --token-punctuation: #3b3b3b;
+      --token-function: #795e26; --token-type: #267f99;
+      --token-string-escape: #ee0000; --token-regexp: #811f3f;
+      --token-invalid: #cd3131;
     }
     :root[data-theme="dark"] {
       color-scheme: dark;
@@ -60,6 +66,12 @@
       --badge-aborted-bg: #3a2f12; --badge-aborted-fg: #e0b257;
       --badge-interrupted-bg: #2a2f3a; --badge-interrupted-fg: #9fb0c9;
       --badge-failed-bg: #3a1620; --badge-failed-fg: #ef8098;
+      --token-keyword: #569cd6; --token-variable: #9cdcfe;
+      --token-string: #ce9178; --token-number: #b5cea8;
+      --token-comment: #6a9955; --token-punctuation: #cccccc;
+      --token-function: #dcdcaa; --token-type: #4ec9b0;
+      --token-string-escape: #d7ba7d; --token-regexp: #d16969;
+      --token-invalid: #f44747;
     }
     @media (prefers-color-scheme: dark) {
       :root[data-theme="system"] {
@@ -87,6 +99,12 @@
         --badge-aborted-bg: #3a2f12; --badge-aborted-fg: #e0b257;
         --badge-interrupted-bg: #2a2f3a; --badge-interrupted-fg: #9fb0c9;
         --badge-failed-bg: #3a1620; --badge-failed-fg: #ef8098;
+        --token-keyword: #569cd6; --token-variable: #9cdcfe;
+        --token-string: #ce9178; --token-number: #b5cea8;
+        --token-comment: #6a9955; --token-punctuation: #cccccc;
+        --token-function: #dcdcaa; --token-type: #4ec9b0;
+        --token-string-escape: #d7ba7d; --token-regexp: #d16969;
+        --token-invalid: #f44747;
       }
     }
     * { box-sizing: border-box; }
@@ -497,6 +515,19 @@
       white-space: pre-wrap; word-break: break-word;
       font-family: ui-monospace, monospace; font-size: 12px;
     }
+    /* MoonBit source uses the editor lexer and its Monaco token color ids. */
+    .run-moonbit-source .mtk1 { color: var(--text); }
+    .run-moonbit-source .mtk3 { color: var(--token-keyword); }
+    .run-moonbit-source .mtk4 { color: var(--token-variable); }
+    .run-moonbit-source .mtk5 { color: var(--token-string); }
+    .run-moonbit-source .mtk6 { color: var(--token-number); }
+    .run-moonbit-source .mtk7 { color: var(--token-comment); }
+    .run-moonbit-source .mtk8 { color: var(--token-punctuation); }
+    .run-moonbit-source .mtk9 { color: var(--token-type); }
+    .run-moonbit-source .mtk10 { color: var(--token-function); }
+    .run-moonbit-source .mtk11 { color: var(--token-string-escape); }
+    .run-moonbit-source .mtk12 { color: var(--token-regexp); }
+    .run-moonbit-source .mtk13 { color: var(--token-invalid); }
     /* nested args: objects/arrays recurse into indented rows, not a JSON blob */
     .arg-object { margin: 2px 0 2px 2px; padding-left: 8px; border-left: 1px solid var(--border); }
     .arg-array { margin: 2px 0 2px 2px; }

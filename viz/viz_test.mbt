@@ -293,6 +293,24 @@ test "tool args render verbatim, keeping the raw JSON for debugging" {
 }
 
 ///|
+test "run_moonbit source uses editor token classes and keeps original JSON" {
+  let arguments =
+    #|{"source":"fn main {\n  let greeting = \"<hello>\"\n}","target":"js"}
+  let html = render_tool_call("run_moonbit", arguments)
+  assert_true(html.contains("class=\"arg-value run-moonbit-source\""))
+  assert_true(html.contains("class=\"language-moonbit\""))
+  assert_true(html.contains("<span class=\"mtk3\">fn</span>"))
+  assert_true(html.contains("<span class=\"mtk3\">let</span>"))
+  assert_true(html.contains("class=\"mtk5\""))
+  // Token text is still escaped by Rabbita rather than installed as raw HTML.
+  assert_true(html.contains("&lt;hello&gt;"))
+  assert_false(html.contains("<hello>"))
+  // Viz's global Rendered / Original toggle keeps the raw payload in the DOM.
+  assert_true(html.contains("tool-call-args-original"))
+  assert_true(html.contains("target"))
+}
+
+///|
 test "non-object tool args fall back to JSON in both forms" {
   // Arguments that are not a JSON object (here a bare array) have no key/value
   // fields, so the friendly view falls back to pretty JSON rather than inventing

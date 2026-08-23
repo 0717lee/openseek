@@ -935,7 +935,7 @@ fn render_args_friendly(tool_name : String, raw : String) -> @html.Html {
   match json {
     Object(fields) if !fields.is_empty() => {
       let rows : Array[@html.Html] = [
-        for key, value in fields => arg_field(key, value)
+        for key, value in fields => arg_field(tool_name, key, value)
       ]
       @html.div(class="tool-call-args-rendered") <| rows
     }
@@ -951,17 +951,77 @@ fn render_args_friendly(tool_name : String, raw : String) -> @html.Html {
 /// verbatim — a multi-line value (e.g. a file body) as a preformatted block, a
 /// single-line value inline. Non-string scalars render inline; nested arrays and
 /// objects keep their JSON form, which is rare for tool arguments.
-fn arg_field(key : String, value : Json) -> @html.Html {
+fn arg_field(tool_name : String, key : String, value : Json) -> @html.Html {
   // A synthesized `generated_diff` string renders as a colored diff block; every
   // other field uses the generic recursive rendering.
   let value_html = match value {
     String(text) if key == "generated_diff" => diff_block(text)
+    String(source) if tool_name == "run_moonbit" && key == "source" =>
+      @html.pre(class="arg-value run-moonbit-source", [
+        moonbit_source_code(source),
+      ])
     _ => render_value(value)
   }
   @html.div(class="arg-field") <| [
     @html.span(class="arg-key") <| key,
     value_html,
   ]
+}
+
+///|
+/// Render MoonBit source with the editor's lexer and token color classes. Text
+/// stays in Rabbita text nodes, so source containing HTML remains escaped.
+fn moonbit_source_code(source : String) -> @html.Html {
+  let tokenizer : &@syntax.LineTokenizer = @lang_moonbit.MoonBitTokenizer()
+  let children : Array[@html.Html] = []
+  let mut state = tokenizer.initial_state()
+  for line_number, line in source.split("\n") {
+    if line_number > 0 {
+      children.push(@html.text("\n"))
+    }
+    let (tokens, next_state) = tokenizer.tokenize_line(line, state)
+    state = next_state
+    let mut offset = 0
+    for token in tokens {
+      if offset < token.start {
+        children.push(
+          @html.span(class="mtk1", line[offset:token.start].to_owned()),
+        )
+      }
+      if token.start < token.end {
+        children.push(
+          @html.span(
+            class=moonbit_token_class(token.tag),
+            line[token.start:token.end].to_owned(),
+          ),
+        )
+      }
+      offset = token.end
+    }
+    if offset < line.length() {
+      children.push(@html.span(class="mtk1", line[offset:].to_owned()))
+    }
+  }
+  @html.code(class="language-moonbit", children)
+}
+
+///|
+/// Map the lexer tags to the same Monaco color ids used by the editor model.
+fn moonbit_token_class(tag : @syntax.HighlightTag) -> String {
+  match tag {
+    Plain => "mtk1"
+    Keyword | Constant | Tag => "mtk3"
+    Identifier | Variable | Attribute => "mtk4"
+    String => "mtk5"
+    Number => "mtk6"
+    Comment | CommentDoc => "mtk7"
+    Punctuation | Operator | Delimiter => "mtk8"
+    Type => "mtk9"
+    Function => "mtk10"
+    StringEscape => "mtk11"
+    Regexp => "mtk12"
+    Invalid => "mtk13"
+  }
 }
 
 ///|
@@ -1090,7 +1150,7 @@ fn render_value(value : Json) -> @html.Html {
       }
     Object(fields) if !fields.is_empty() =>
       @html.div(class="arg-object") <| [
-        for key, field in fields => arg_field(key, field)
+        for key, field in fields => arg_field("", key, field)
       ]
     Array(items) if !items.is_empty() =>
       @html.div(class="arg-array") <| [
