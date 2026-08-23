@@ -8,6 +8,8 @@ import {
 // Values
 pub fn parse_positive_int(String, String) -> Int raise
 
+pub fn terminal_safe_line(String, limit? : Int) -> String
+
 pub fn value(@argparse.Matches, String) -> String raise
 
 // Errors
