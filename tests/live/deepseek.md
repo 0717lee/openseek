@@ -22,11 +22,11 @@ Every example gives the cheap Flash model a trivial, self-contained task and a
 tiny step budget.
 
 When the model emits assistant text, the stream may include one or more
-`assistant_delta` events before the final `assistant_message`. The Desktop's
-serve process additionally opts into `reasoning_delta`; ordinary one-shot runs
-leave that high-volume progress stream off and still emit the completed
-`reasoning_message`. Tool-only responses, such as the forced `finish` examples
-below, may skip content events and go straight to tool execution.
+`assistant_delta` events before the final `assistant_message`. Thinking-mode
+runs may also emit `reasoning_delta` progress before the completed
+`reasoning_message`; interactive clients render it live, while JSONL consumers
+may ignore it. Tool-only responses, such as the forced `finish` examples below,
+may skip content events and go straight to tool execution.
 
 ## A Real Round Trip That Finishes
 

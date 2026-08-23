@@ -572,20 +572,6 @@ test "tui is an explicit subcommand" {
 }
 
 ///|
-test "serve reasoning deltas require the Desktop opt-in flag" {
-  let ordinary = root_command().parse(argv=["serve"], env={})
-  guard ordinary.subcommand is Some((_, ordinary)) else {
-    fail("expected serve matches")
-  }
-  assert_false(ordinary is { flags: { "reasoning-deltas": true, .. }, .. })
-  let desktop = root_command().parse(argv=["serve", "--reasoning-deltas"], env={})
-  guard desktop.subcommand is Some((_, desktop)) else {
-    fail("expected serve matches")
-  }
-  assert_true(desktop is { flags: { "reasoning-deltas": true, .. }, .. })
-}
-
-///|
 fn dir_option() -> @argparse.OptionArg {
   OptionArg(
     "dir",
@@ -703,10 +689,6 @@ fn root_command() -> @argparse.Command {
             long="no-session",
             about="Run ephemerally: do not record this server's conversation to a durable session.",
           ),
-          // The Desktop host is currently the only serve controller with a
-          // bounded live-reasoning renderer. Keep the high-volume stream off
-          // for the TUI and third-party serve clients unless they opt in.
-          FlagArg("reasoning-deltas", long="reasoning-deltas", hidden=true),
           review_gate_flag(),
         ],
       ),

@@ -335,7 +335,7 @@ async fn reasoning_log_test_server(group : @async.TaskGroup[Unit]) -> String? {
 }
 
 ///|
-async test "streaming reasoning deltas are opt-in and stay transient" {
+async test "streaming reasoning deltas are always emitted and stay transient" {
   @async.with_task_group() <| group => {
     guard reasoning_log_test_server(group) is Some(url) else { return }
     let entries : Array[Json] = []
@@ -371,32 +371,9 @@ async test "streaming reasoning deltas are opt-in and stay transient" {
       fail("expected a completed one-step turn")
     }
     let event_names = entries.map(log_event)
-    assert_false(event_names.contains("reasoning_delta"))
     assert_true(event_names.contains("reasoning_message"))
     assert_true(event_names.contains("assistant_delta"))
     assert_true(event_names.contains("assistant_message"))
-
-    entries.clear()
-    guard reasoning_log_test_server(group) is Some(streaming_url) else {
-      return
-    }
-    let streaming_session = @agent_session.Session(
-      SessionId("reasoning-stream-test"),
-      system_prompt="system",
-    )
-    let streaming_result = @agent.run_turn_with_append(
-      api_key="test-key",
-      model=Deepseek(V4Flash),
-      session=streaming_session,
-      task="do the task",
-      append_item=(session, item) => session.append(item),
-      max_steps=1,
-      emit_reasoning_deltas=true,
-      api_url=streaming_url,
-    )
-    // Deltas are wire-only progress. The durable shape is identical whether
-    // they are enabled or not: user, complete assistant, terminal.
-    assert_eq(streaming_result.events().length(), 3)
     let reasoning_deltas : Array[String] = []
     for entry in entries {
       if entry
@@ -409,7 +386,6 @@ async test "streaming reasoning deltas are opt-in and stay transient" {
       }
     }
     assert_eq(reasoning_deltas.join(""), "I think")
-    assert_true(entries.map(log_event).contains("reasoning_message"))
   }
 }
 
