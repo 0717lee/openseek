@@ -22,7 +22,8 @@
  * everything token-bound flips with the app theme on its own.
  */
 
-.editor-shell {
+.editor-shell,
+.run-moonbit-source {
   /* Base text and chrome. */
   --vscode-foreground: var(--color-text-primary);
   --vscode-icon-foreground: var(--color-text-secondary);
@@ -232,7 +233,8 @@
   --ui-font-size: 13px;
 }
 
-.editor-shell[data-theme="light"] {
+.editor-shell[data-theme="light"],
+:root[data-theme="light"] .run-moonbit-source {
   /* Light Modern syntax palette plus the highlight and shadow literals whose
      light values differ; the token-bound variables above follow the app
      theme by themselves. */
