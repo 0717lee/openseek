@@ -436,7 +436,12 @@ fn tool_call_view_mode(
 /// the line bound keeps logs readable. `clamped_view` keeps cuts out of UTF-16
 /// surrogate pairs. The transcript remains the only scroll area, so bounded
 /// payloads grow the page instead of adding a nested scrollbar.
-fn truncate_output(content : String) -> String {
+///
+/// `line_prefix_width` preserves a fixed-width line marker on a retained tail
+/// fragment when the code-unit cut lands inside a line. Diff rows use this for
+/// their two-character `+ ` / `- ` / context marker; ordinary output leaves it
+/// at zero.
+fn truncate_output(content : String, line_prefix_width? : Int = 0) -> String {
   let code_unit_head_limit = 12_000
   let code_unit_tail_limit = 8_000
   let bounded = if content.length() <=
@@ -447,10 +452,13 @@ fn truncate_output(content : String) -> String {
     let tail = content.clamped_view(
       start=content.length() - code_unit_tail_limit,
     )
+    let retained_tail = restore_retained_tail_prefix(
+      content, tail, line_prefix_width,
+    )
     [
       head.to_owned(),
       "⋯ \{content.length() - head.length() - tail.length()} UTF-16 code units skipped ⋯",
-      tail.to_owned(),
+      retained_tail,
     ].join("\n")
   }
   let head_limit = 60
@@ -464,6 +472,41 @@ fn truncate_output(content : String) -> String {
     "⋯ \{lines.length() - head_limit - tail_limit} lines skipped ⋯",
     ..lines[lines.length() - tail_limit:],
   ].join("\n")
+}
+
+///|
+/// Repeat a line's fixed-width prefix when `tail` starts partway through that
+/// line. If the cut itself bisects the prefix, discard the retained suffix of
+/// the old prefix before prepending the whole one, so `+ text` cannot become
+/// `+  text`. `tail` is a suffix view of `content`, so its start is recovered
+/// from their lengths after `clamped_view` has made the UTF-16 boundary safe.
+fn restore_retained_tail_prefix(
+  content : String,
+  tail : StringView,
+  line_prefix_width : Int,
+) -> String {
+  if line_prefix_width <= 0 {
+    return tail.to_owned()
+  }
+  let tail_start = content.length() - tail.length()
+  let line_start = match content.clamped_view(end=tail_start).rev_find("\n") {
+    Some(index) => index + 1
+    None => 0
+  }
+  if line_start == tail_start {
+    return tail.to_owned()
+  }
+  let prefix = content.clamped_view(
+    start=line_start,
+    end=line_start + line_prefix_width,
+  )
+  let prefix_end = line_start + prefix.length()
+  let overlap = if tail_start < prefix_end {
+    prefix_end - tail_start
+  } else {
+    0
+  }
+  prefix.to_owned() + tail.clamped_view(start=overlap).to_owned()
 }
 
 ///|
