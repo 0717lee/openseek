@@ -113,6 +113,8 @@ pub let fs_cancel_search_text : Command[@protocol.CancelSearchTextPayload, @prot
 
 pub let fs_clear_file_search_cache : Command[@protocol.ClearFileSearchCachePayload, @protocol.EmptyReply]
 
+pub let fs_create_directory : Command[@protocol.CreateDirectoryPayload, @protocol.BrowseDirectoryReply]
+
 pub let fs_read_directory : Command[@protocol.ReadDirPayload, @protocol.ReadDirReply]
 
 pub let fs_read_file : Command[@protocol.ReadFilePayload, @protocol.ReadFileReply]

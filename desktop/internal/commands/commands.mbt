@@ -421,6 +421,12 @@ pub let fs_browse : Command[
 ] = Command("fs.browse")
 
 ///|
+pub let fs_create_directory : Command[
+  @protocol.CreateDirectoryPayload,
+  @protocol.BrowseDirectoryReply,
+] = Command("fs.create_directory")
+
+///|
 pub let terminal_open : Command[
   @protocol.TerminalOpenPayload,
   @protocol.TerminalOpenReply,

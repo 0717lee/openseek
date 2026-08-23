@@ -693,7 +693,7 @@ test "remote endpoint catalog has one entry per command name" {
   // Draft open/close and the curated file/skills operations are host-owned
   // Codex endpoints. The archived-session delete endpoint added on main is
   // part of the same exact catalog, so keep this count aligned with both.
-  assert_eq(names.length(), 90)
+  assert_eq(names.length(), 91)
   assert_true(names.contains("codex.config.open"))
   assert_true(names.contains("codex.draft.open"))
   assert_true(names.contains("codex.draft.close"))
@@ -718,6 +718,7 @@ test "remote endpoint catalog has one entry per command name" {
   assert_true(names.contains("fs.search_files"))
   assert_true(names.contains("fs.cancel_search_files"))
   assert_true(names.contains("fs.clear_file_search_cache"))
+  assert_true(names.contains("fs.create_directory"))
   assert_true(names.contains("fs.search_text"))
   assert_true(names.contains("fs.cancel_search_text"))
   assert_true(names.contains("moonide.references"))

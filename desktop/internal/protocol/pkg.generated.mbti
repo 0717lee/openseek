@@ -725,6 +725,13 @@ pub fn ConnectedStage::to_repr(Self) -> @debug.Repr
 pub impl ToJson for ConnectedStage
 pub impl @json.FromJson for ConnectedStage
 
+pub(all) struct CreateDirectoryPayload {
+  parent : String
+  name : String
+} derive(Eq, @debug.Debug)
+pub impl ToJson for CreateDirectoryPayload
+pub impl @json.FromJson for CreateDirectoryPayload
+
 pub(all) struct DiagnosticsPayload {
   root : String
   path : String
