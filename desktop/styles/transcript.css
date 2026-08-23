@@ -790,20 +790,19 @@
   background: var(--color-danger-soft);
 }
 
-/* ---------- run_moonbit ----------
-   The call is a whole `.mbtx` program, so the card shows it as program text
-   rather than as an escaped JSON string, with the arguments that shaped the
-   run as chips above it. The program block needs no rule of its own: the
-   shared `.tool-call pre` already gives it the padding and background, and its
-   `pre-wrap` keeps the listing's indentation while wrapping the overflow —
-   so a long line grows the page rather than adding a nested scrollbar. */
-.run-moonbit-meta {
+/* ---------- custom tool cards ----------
+   One tool's arguments rendered in the shape a reader wants — a `run_moonbit`
+   call as its program, an `edit` as the change it describes — instead of the
+   escaped JSON the generic path shows. Every such card carries the same two
+   pieces around that shape: a chip row for the arguments it did not
+   dramatize, and the recorded payload behind a disclosure. */
+.tool-card-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 6px;
 }
-.run-moonbit-chip {
+.tool-card-chip {
   padding: 0 6px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -811,16 +810,56 @@
   font-size: var(--font-size-xs);
   overflow-wrap: anywhere;
 }
-/* The payload as the model sent it, so the card above is a reading of the
-   call and never the only account of it. A fourth disclosure altitude, so it
-   keeps the same muted line the three above it use. */
-.run-moonbit-original-summary {
+/* The payload as the model sent it, so a card is a reading of the call and
+   never the only account of it. A fourth disclosure altitude, so it keeps the
+   same muted line the three above it use. */
+.tool-card-original-summary {
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);
   cursor: pointer;
 }
-.run-moonbit-original-summary:hover {
+.tool-card-original-summary:hover {
   color: var(--color-text-secondary);
+}
+
+/* The `run_moonbit` program block needs no rule of its own: the shared
+   `.tool-call pre` already gives it the padding and background, and its
+   `pre-wrap` keeps the listing's indentation while wrapping the overflow — so
+   a long line grows the page rather than adding a nested scrollbar. */
+
+/* A synthesized `edit` / `multi_edit` diff. Same block treatment as the
+   argument and output dumps beside it, since it stands in for one; the marker
+   column is part of the text, so removed and added lines stay distinguishable
+   without relying on color alone. */
+.tool-diff {
+  margin: 6px 0 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-subtle);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-relaxed);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.tool-diff .diff-add {
+  color: var(--color-success);
+}
+.tool-diff .diff-del {
+  color: var(--color-danger);
+}
+.tool-diff .diff-ctx {
+  color: var(--color-text-muted);
+}
+/* One edit of a batch: the anchoring chips sit with the diff they anchor,
+   with a quiet rule between entries so a long batch reads as a list. */
+.edit-entry + .edit-entry {
+  margin-top: 10px;
+  padding-top: 4px;
+  border-top: 1px solid var(--color-border);
+}
+.edit-omitted {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
 }
 
 /* ---------- plan ----------

@@ -370,16 +370,16 @@ fn tool_call_view_mode(
   // checklist would report a plan that never took effect.
   if @plan.classify(item) is Some(Applied(steps) | Pending(steps)) {
     body.push(@html.div(class="tool-call-section", [@plan.card(steps)]))
-  } else if name == "run_moonbit" &&
-    arguments is Some(arguments) &&
-    run_moonbit_card(arguments) is Some(card) {
-    // A `run_moonbit` call is a whole `.mbtx` program, and JSON escaping turns
-    // it into one unreadable line. The card shows it as program text; a
-    // payload the card cannot read falls through to the generic rendering
-    // below, so nothing is ever shown as a program that is not one.
+  } else if arguments is Some(arguments) &&
+    custom_card(name, arguments) is Some((label, card)) {
+    // Some tools' arguments have a shape JSON hides: a `run_moonbit` program
+    // escaped onto one line, an `edit` split across two blobs whose difference
+    // is the whole point. Those get a card. A payload the card cannot read
+    // falls through to the generic rendering below, so nothing is ever shown
+    // as a program or a change that is not one.
     body.push(
       @html.div(class="tool-call-section", [
-        @html.div(class="tool-call-section-label", "Program"),
+        @html.div(class="tool-call-section-label", label),
         card,
       ]),
     )

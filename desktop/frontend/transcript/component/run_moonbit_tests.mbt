@@ -85,7 +85,7 @@ test "a failed run_moonbit row still reads as a program, not escaped JSON" {
   assert_true(markup.contains("language-moonbit"))
   assert_true(markup.contains("<span class=\"mtk3\">fn</span>"))
   assert_true(markup.contains("<span class=\"mtk6\">1</span>"))
-  assert_true(markup.contains("run-moonbit-chip"))
+  assert_true(markup.contains("tool-card-chip"))
   assert_true(markup.contains("target: js"))
   // The program reads as lines rather than as one JSON-escaped string.
   assert_true(markup.contains("println(1 / 0)"))
