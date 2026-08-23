@@ -32,7 +32,12 @@ fn listed(
   let (_, loaded, outcome) = @project_picker.State::handle(
     opening,
     emit(),
-    @project_picker.Msg::Loaded(channel~, location~, entries~, generation=1),
+    @project_picker.Msg::Loaded(
+      channel~,
+      location~,
+      entries~,
+      generation=opening.request_generation(),
+    ),
   )
   assert_true(outcome is None)
   guard loaded is Some(picker) else { fail("picker closed by its own listing") }
@@ -93,7 +98,7 @@ test "a listing for another channel is dropped" {
         test_resource(@interop.ChannelId::Remote("d_b"), "/from-b"),
       ),
       entries=["wrong"],
-      generation=1,
+      generation=picker.request_generation(),
     ),
   )
   assert_true(outcome is None)
@@ -119,8 +124,8 @@ test "a stale listing leaves the picker untouched" {
   guard browsing is Some(navigating) else {
     fail("picker closed by navigation")
   }
-  // The reply to the original listing (generation 1) lands after the
-  // navigation bumped the generation: it must not move the picker back.
+  // The reply to the original listing lands after navigation moved to a new
+  // generation: it must not move the picker back.
   let (_, stale, outcome) = @project_picker.State::handle(
     navigating,
     emit(),
@@ -130,7 +135,7 @@ test "a stale listing leaves the picker untouched" {
         test_resource(@interop.ChannelId::Local, "/elsewhere"),
       ),
       entries=["wrong"],
-      generation=1,
+      generation=picker.request_generation(),
     ),
   )
   assert_true(outcome is None)
@@ -152,7 +157,7 @@ test "a failed navigation reports the failure and keeps the picker" {
     @project_picker.Msg::Failed(
       channel=@interop.ChannelId::Local,
       message="no such directory: /gone",
-      generation=1,
+      generation=picker.request_generation(),
     ),
   )
   guard kept is Some(state) else {
@@ -161,7 +166,7 @@ test "a failed navigation reports the failure and keeps the picker" {
   assert_true(state == picker)
   assert_true(
     outcome is Some(@project_picker.Outcome::Failed(message)) &&
-    message == "no such directory: /gone",
+    message == "Cannot open folder: no such directory: /gone",
   )
   // A failure answering a superseded navigation stays silent.
   let (_, stale, outcome) = @project_picker.State::handle(

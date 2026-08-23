@@ -32,6 +32,12 @@ fn emit() -> @cmd.Emit[Msg] {
 }
 
 ///|
+#warnings("-alert_unstable")
+fn markup(picker : State) -> String {
+  @rabbita.render_to_string(() => @rabbita.Val::constant(view(emit(), picker)))
+}
+
+///|
 /// Open the picker and land one listing at `location`.
 fn opened(
   channel? : @interop.ChannelId = @interop.ChannelId::Local,
@@ -43,7 +49,7 @@ fn opened(
   let (_, loaded, _) = State::handle(
     opening,
     emit(),
-    Msg::Loaded(channel~, location~, entries~, generation=1),
+    Msg::Loaded(channel~, location~, entries~, generation=opening.generation),
   )
   guard loaded is Some(picker) else { fail("picker closed by its own listing") }
   picker
@@ -62,7 +68,7 @@ test "the picker opens loading and adopts the first listing" {
       channel=@interop.ChannelId::Local,
       location=Location::Directory(home),
       entries=["proj"],
-      generation=1,
+      generation=opening.generation,
     ),
   )
   guard loaded is Some(picker) else { fail("picker closed by its own listing") }
@@ -91,7 +97,7 @@ test "a listing for another channel or generation is dropped" {
         test_resource(@interop.ChannelId::Remote("d_b"), "/from-b"),
       ),
       entries=["wrong"],
-      generation=1,
+      generation=opening.generation,
     ),
   )
   guard foreign is Some(picker) else {
@@ -120,7 +126,7 @@ test "a listing for another channel or generation is dropped" {
         test_resource(@interop.ChannelId::Local, "/elsewhere"),
       ),
       entries=["wrong"],
-      generation=1,
+      generation=opening.generation,
     ),
   )
   guard stale is Some(picker) else { fail("picker closed by a stale listing") }
@@ -141,7 +147,7 @@ test "a failed navigation keeps the listing" {
     Msg::Failed(
       channel=@interop.ChannelId::Local,
       message="no such directory: /gone",
-      generation=1,
+      generation=opening.generation,
     ),
   )
   guard failed is Some(picker) else {
@@ -154,8 +160,15 @@ test "a failed navigation keeps the listing" {
   assert_true(!picker.loading)
   assert_true(
     outcome is Some(Outcome::Failed(message)) &&
-    message == "no such directory: /gone",
+    message == "Cannot open folder: no such directory: /gone",
   )
+}
+
+///|
+test "reopened pickers do not reuse request generations" {
+  let (_, first) = State::open(@interop.ChannelId::Local, emit())
+  let (_, second) = State::open(@interop.ChannelId::Local, emit())
+  assert_true(first.generation != second.generation)
 }
 
 ///|
@@ -186,4 +199,105 @@ test "the Windows drive list shows its drives and refuses a confirm" {
   let (_, held, outcome) = State::handle(opening, emit(), Msg::Confirm)
   assert_true(held is Some(_))
   assert_true(outcome is None)
+}
+
+///|
+test "new folder creation enters the created directory" {
+  let opening = opened(
+    location=Directory(test_resource(@interop.ChannelId::Local, "/home/u")),
+    entries=["existing"],
+  )
+  let (_, composing, _) = State::handle(opening, emit(), BeginCreateFolder)
+  guard composing is Some(composing) else {
+    fail("picker closed while opening the new-folder composer")
+  }
+  assert_eq(composing.new_folder, Some(""))
+  let (_, held, outcome) = State::handle(composing, emit(), Confirm)
+  assert_true(held is Some(_))
+  assert_true(outcome is None)
+  let (_, named, _) = State::handle(
+    composing,
+    emit(),
+    NewFolderNameChanged("new project"),
+  )
+  guard named is Some(named) else {
+    fail("picker closed while naming a folder")
+  }
+  let (_, creating, _) = State::handle(named, emit(), CreateFolder)
+  guard creating is Some(creating) else {
+    fail("picker closed while creating a folder")
+  }
+  assert_true(creating.loading)
+  assert_true(creating.generation != named.generation)
+  assert_eq(creating.new_folder, Some("new project"))
+  let created = test_resource(@interop.ChannelId::Local, "/home/u/new project")
+  let (_, loaded, outcome) = State::handle(
+    creating,
+    emit(),
+    Loaded(
+      channel=@interop.ChannelId::Local,
+      location=Directory(created),
+      entries=[],
+      generation=creating.generation,
+    ),
+  )
+  assert_true(outcome is None)
+  guard loaded is Some(loaded) else { fail("created directory closed picker") }
+  assert_true(loaded.location == Some(Directory(created)))
+  assert_eq(loaded.new_folder, None)
+  assert_false(loaded.loading)
+}
+
+///|
+test "a failed folder create keeps its name editable" {
+  let opening = opened(
+    location=Directory(test_resource(@interop.ChannelId::Local, "/home/u")),
+  )
+  let (_, composing, _) = State::handle(opening, emit(), BeginCreateFolder)
+  guard composing is Some(composing) else { fail("composer did not open") }
+  let (_, named, _) = State::handle(
+    composing,
+    emit(),
+    NewFolderNameChanged("taken"),
+  )
+  guard named is Some(named) else { fail("folder name was not kept") }
+  let (_, creating, _) = State::handle(named, emit(), CreateFolder)
+  guard creating is Some(creating) else { fail("create closed picker") }
+  let (_, failed, outcome) = State::handle(
+    creating,
+    emit(),
+    Failed(
+      channel=@interop.ChannelId::Local,
+      message="already exists",
+      generation=creating.generation,
+    ),
+  )
+  guard failed is Some(failed) else { fail("failed create closed picker") }
+  assert_eq(failed.new_folder, Some("taken"))
+  assert_false(failed.loading)
+  assert_true(
+    outcome is Some(Outcome::Failed(message)) &&
+    message == "Cannot create folder: already exists",
+  )
+}
+
+///|
+#warnings("-alert_unstable")
+test "picker view exposes the folder controls" {
+  let picker = opened(
+    location=Directory(test_resource(@interop.ChannelId::Local, "/home/u")),
+    entries=["alpha", "beta"],
+  )
+  let html = markup(picker)
+  assert_true(html.contains("role=\"dialog\""))
+  assert_true(html.contains("Choose a folder, or create a new one"))
+  assert_true(html.contains("New folder"))
+  assert_true(html.contains("Open folder alpha"))
+  assert_true(html.contains("Add project"))
+  let (_, composing, _) = State::handle(picker, emit(), BeginCreateFolder)
+  guard composing is Some(composing) else { fail("composer did not open") }
+  let composer_html = markup(composing)
+  assert_true(composer_html.contains("picker-create-row"))
+  assert_true(composer_html.contains("placeholder=\"New folder name\""))
+  assert_true(composer_html.contains("autofocus"))
 }
