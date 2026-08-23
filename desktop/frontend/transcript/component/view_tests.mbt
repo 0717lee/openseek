@@ -701,6 +701,61 @@ test "the turn rule dates itself only from a real stamp" {
 
 ///|
 #warnings("-alert_unstable")
+test "a step is stamped to the second, from a real stamp only" {
+  let render = items => {
+    @rabbita.render_to_string(() => {
+      @rabbita.Val::constant(
+        activity_view(items, _ => @cmd.none, step_label="#1"),
+      )
+    })
+  }
+  let stamped : @transcript.TranscriptItem = {
+    ..tool_item("read"),
+    ts: Some(1781144351123),
+    sequence: Some(2),
+  }
+  let markup = render([stamped])
+  assert_true(markup.contains("activity-time"))
+  // Ordinal, then instant, then the separator introducing the label. The order
+  // is the feature: the instants are read as a column against the rows above
+  // and below, which only works with nothing variable-width before them.
+  let after_step = markup.split("activity-step").to_array()[1]
+  assert_true(after_step.contains("activity-time"))
+  assert_true(after_step.split("activity-time").to_array()[1].contains(" · "))
+  // The gap after the ordinal is a real space, so it survives into the
+  // accessible name and anything copied out of the row — a CSS margin would
+  // have left "#1Committed 14:32:10".
+  assert_true(markup.contains("#1</span> <span"))
+  // ...and without a stamp there is no stray space before the separator.
+  assert_true(render([tool_item("read")]).contains("#1</span> · "))
+  // Seconds are there — the property, not its spelling. Counting `:` would
+  // have pinned the viewer's locale: fi-FI and da-DK write the same instant
+  // as `10.19.11`. Two instants a second apart rendering differently is the
+  // same claim in a form every locale satisfies, since minute precision would
+  // collapse them.
+  assert_true(step_time_label(1781144351123) != step_time_label(1781144352123))
+  // ...and the minute is still shared, so the difference really is the
+  // seconds field rather than a rollover.
+  assert_eq(clock_label(1781144351123), clock_label(1781144352123))
+  assert_true(markup.contains("Committed "))
+  // A step with no stamp, and the zero stamp old stores wrote for "no time
+  // recorded", both keep the bare summary.
+  assert_false(render([tool_item("read")]).contains("activity-time"))
+  assert_false(
+    render([{ ..tool_item("read"), ts: Some(0) }]).contains("activity-time"),
+  )
+  // A step still running has no committed instant to report.
+  assert_false(
+    @rabbita.render_to_string(() => {
+      @rabbita.Val::constant(
+        activity_view([], _ => @cmd.none, live_reasoning="thinking"),
+      )
+    }).contains("activity-time"),
+  )
+}
+
+///|
+#warnings("-alert_unstable")
 test "every message names its speaker to assistive technology" {
   let render = item => {
     @rabbita.render_to_string(() => {
