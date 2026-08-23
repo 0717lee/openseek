@@ -372,7 +372,55 @@ pub(all) struct SessionAssistantMessage {
   content : String
   tool_calls : Array[SessionToolCall]?
   reasoning_content : String?
-} derive(Debug, Eq, FromJson, ToJson)
+  is_replay : Bool?
+} derive(Debug, Eq)
+
+///|
+/// Preserve the store's compact assistant payload: optional fields are absent
+/// rather than null, and replay provenance appears only on checkpoint copies.
+pub impl ToJson for SessionAssistantMessage with fn to_json(self) {
+  let fields = { "content": Json::string(self.content) }
+  if self.tool_calls is Some(tool_calls) {
+    fields["tool_calls"] = ToJson::to_json(tool_calls)
+  }
+  if self.reasoning_content is Some(reasoning_content) {
+    fields["reasoning_content"] = Json::string(reasoning_content)
+  }
+  if self.is_replay is Some(is_replay) {
+    fields["is_replay"] = Json::boolean(is_replay)
+  }
+  Json::object(fields)
+}
+
+///|
+/// Content is required. Tool calls are functional protocol data, so a present
+/// malformed list rejects the payload rather than silently dropping calls.
+/// Reasoning and replay provenance are optional annotations; malformed values
+/// do not hide otherwise readable assistant prose.
+pub impl FromJson for SessionAssistantMessage with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected an assistant message"))
+  }
+  guard fields.get("content") is Some(String(content)) else {
+    raise JsonDecodeError((path.add_key("content"), "expected message content"))
+  }
+  let tool_calls = match fields.get("tool_calls") {
+    None | Some(Null) => None
+    Some(value) => Some(@json.from_json(value, path=path.add_key("tool_calls")))
+  }
+  let reasoning_content = if fields.get("reasoning_content")
+    is Some(String(value)) {
+    Some(value)
+  } else {
+    None
+  }
+  let is_replay = match fields.get("is_replay") {
+    Some(True) => Some(true)
+    Some(False) => Some(false)
+    _ => None
+  }
+  { content, tool_calls, reasoning_content, is_replay }
+}
 
 ///|
 pub(all) struct SessionToolResult {
@@ -381,7 +429,66 @@ pub(all) struct SessionToolResult {
   content : String
   is_error : Bool
   brief : String?
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
+
+///|
+/// Optional display annotations are omitted when absent, matching the durable
+/// store's compact wire shape. Unknown fields are not copied back: this encoder
+/// owns only the fields this client understands.
+pub impl ToJson for SessionToolResult with fn to_json(self) {
+  let fields = {
+    "tool_call_id": Json::string(self.tool_call_id),
+    "tool_name": Json::string(self.tool_name),
+    "content": Json::string(self.content),
+    "is_error": Json::boolean(self.is_error),
+  }
+  if self.brief is Some(brief) {
+    fields["brief"] = Json::string(brief)
+  }
+  Json::object(fields)
+}
+
+///|
+/// The four core fields identify and carry a tool result, so missing, `null`,
+/// or malformed values reject the payload and let `SessionItem` preserve the
+/// raw event as `Unknown`.
+///
+/// `brief` is an annotation. Missing, `null`, or malformed values all mean
+/// "not annotated": refusing it would hide an otherwise valid durable tool
+/// result. Unknown fields are ignored for forward compatibility with newer
+/// stores.
+pub impl FromJson for SessionToolResult with fn from_json(json, path) {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected a tool result"))
+  }
+  guard fields.get("tool_call_id") is Some(String(tool_call_id)) else {
+    raise JsonDecodeError(
+      (path.add_key("tool_call_id"), "expected tool call id"),
+    )
+  }
+  guard fields.get("tool_name") is Some(String(tool_name)) else {
+    raise JsonDecodeError((path.add_key("tool_name"), "expected tool name"))
+  }
+  guard fields.get("content") is Some(String(content)) else {
+    raise JsonDecodeError(
+      (path.add_key("content"), "expected tool result content"),
+    )
+  }
+  let is_error = match fields.get("is_error") {
+    Some(True) => true
+    Some(False) => false
+    _ =>
+      raise JsonDecodeError(
+        (path.add_key("is_error"), "expected tool result error flag"),
+      )
+  }
+  let brief = if fields.get("brief") is Some(String(value)) {
+    Some(value)
+  } else {
+    None
+  }
+  { tool_call_id, tool_name, content, is_error, brief }
+}
 
 ///|
 pub(all) struct SessionRuntimeNotice {

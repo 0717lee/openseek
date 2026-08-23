@@ -78,18 +78,18 @@ pub fn analyze_session(session : @agent_session.Session) -> EvalResult {
 /// statement cannot inflate model-behavior counters.
 pub fn transcript_text(session : @agent_session.Session) -> String {
   let out = StringBuilder()
-  let mut reasoning_final_answer : String? = None
+  let mut previous_assistant_answer : String? = None
   for event in session.events() {
     let item = event.item()
     let repeated_terminal = item is Terminal(Finished(answer)) &&
-      reasoning_final_answer is Some(previous) &&
+      previous_assistant_answer is Some(previous) &&
       previous == answer
-    if !repeated_terminal {
+    let checkpoint_replay = item is Assistant(message) && message.is_replay()
+    if !repeated_terminal && !checkpoint_replay {
       append_item_text(out, item)
     }
-    reasoning_final_answer = match item {
-      Assistant(message) if message.reasoning_content() is Some(reasoning) &&
-        !reasoning.is_blank() => Some(message.content())
+    previous_assistant_answer = match item {
+      Assistant(message) => Some(message.content())
       _ => None
     }
   }
@@ -100,7 +100,7 @@ pub fn transcript_text(session : @agent_session.Session) -> String {
 fn summarize_session(session : @agent_session.Session) -> SessionMetrics {
   let mut finished = false
   let mut finish_message = ""
-  let mut steps = 0
+  let steps = session.events().iter().count_if(event => event.is_agent_step())
   let mut tool_results = 0
   let mut tool_errors = 0
   let mut shell_uses = 0
@@ -108,20 +108,10 @@ fn summarize_session(session : @agent_session.Session) -> SessionMetrics {
   let mut runtime_notices = 0
   let mut terminal_status = ""
   let mut terminal_message = ""
-  let mut previous_finish_tool = false
-  let mut reasoning_final_answer : String? = None
   for event in session.events() {
     match event.item() {
-      Assistant(message) => {
-        steps += 1
-        previous_finish_tool = false
-        reasoning_final_answer = match message.reasoning_content() {
-          Some(reasoning) if !reasoning.is_blank() => Some(message.content())
-          _ => None
-        }
-      }
+      Assistant(_) => ()
       Tool(result) => {
-        reasoning_final_answer = None
         tool_results += 1
         if result.tool_name() == "shell" {
           shell_uses += 1
@@ -135,19 +125,8 @@ fn summarize_session(session : @agent_session.Session) -> SessionMetrics {
         if result.is_error() {
           tool_errors += 1
         }
-        // Sticky within the batch: results recorded after a finish call
-        // are by construction skip notes, and results are in CALL order —
-        // so "a finish result seen since the last assistant message" is
-        // the completion signal, not "the finish result came last".
-        if result.tool_name() == "finish" {
-          previous_finish_tool = true
-        }
       }
-      Runtime(_) => {
-        reasoning_final_answer = None
-        runtime_notices += 1
-        previous_finish_tool = false
-      }
+      Runtime(_) => runtime_notices += 1
       Terminal(Finished(message)) =>
         if message.has_prefix(@agent_session.ContextYieldAnswerPrefix) {
           // A context-ceiling yield is durably Finished (replay/chaining)
@@ -156,48 +135,28 @@ fn summarize_session(session : @agent_session.Session) -> SessionMetrics {
           finished = false
           terminal_status = "context_yield"
           terminal_message = message
-          previous_finish_tool = false
         } else {
-          let repeats_reasoning_final = reasoning_final_answer is Some(answer) &&
-            answer == message
-          if !previous_finish_tool && !repeats_reasoning_final {
-            steps += 1
-          }
           finished = true
           finish_message = message
           terminal_status = "finished"
           terminal_message = message
-          previous_finish_tool = false
-          reasoning_final_answer = None
         }
       Terminal(Aborted(message)) => {
         finished = false
         terminal_status = "aborted"
         terminal_message = message
-        previous_finish_tool = false
-        reasoning_final_answer = None
       }
       Terminal(Interrupted(message)) => {
         finished = false
         terminal_status = "interrupted"
         terminal_message = message
-        previous_finish_tool = false
-        reasoning_final_answer = None
       }
       Terminal(Failed(message)) => {
         finished = false
         terminal_status = "failed"
         terminal_message = message
-        previous_finish_tool = false
-        reasoning_final_answer = None
       }
-      // A compact-on-finish checkpoint sits between the finish result and
-      // its terminal; it must not break the attribution.
-      Summary(_) => reasoning_final_answer = None
-      User(_) => {
-        previous_finish_tool = false
-        reasoning_final_answer = None
-      }
+      Summary(_) | User(_) => ()
     }
   }
   {

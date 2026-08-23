@@ -77,6 +77,171 @@ test "a durable prompt keeps its text whatever the submission tag looks like" {
 }
 
 ///|
+test "durable assistant replay provenance has an explicit codec" {
+  let plain : @protocol.SessionAssistantMessage = {
+    content: "answer",
+    tool_calls: None,
+    reasoning_content: None,
+    is_replay: None,
+  }
+  @debug.assert_eq(plain.to_json(), { "content": "answer" })
+  let replay : @protocol.SessionAssistantMessage = {
+    content: "answer",
+    tool_calls: Some([]),
+    reasoning_content: Some("thought"),
+    is_replay: Some(true),
+  }
+  @debug.assert_eq(replay.to_json(), {
+    "content": "answer",
+    "tool_calls": [],
+    "reasoning_content": "thought",
+    "is_replay": true,
+  })
+  let decoded : @protocol.SessionAssistantMessage = @json.from_json(
+    replay.to_json(),
+  )
+  assert_eq(decoded, replay)
+
+  // Optional annotations cannot hide otherwise readable prose.
+  let tolerant : @protocol.SessionAssistantMessage = @json.from_json({
+    "content": "answer",
+    "reasoning_content": 7,
+    "is_replay": "yes",
+    "newer_annotation": true,
+  })
+  assert_eq(tolerant.reasoning_content, None)
+  assert_eq(tolerant.is_replay, None)
+
+  // Content and a present tool-call list are functional data. Invalid values
+  // make the enclosing item preserve the complete raw event as Unknown.
+  for
+    payload in (
+      [
+        { "tool_calls": [] },
+        { "content": null, "tool_calls": [] },
+        { "content": "answer", "tool_calls": "lost" },
+      ] : Array[Json]) {
+    let item : @protocol.SessionItem = @json.from_json({
+      "kind": "assistant",
+      "payload": payload,
+    })
+    assert_true(item is Unknown(_))
+  }
+}
+
+///|
+test "durable tool results explicitly encode their optional brief" {
+  let plain : @protocol.SessionToolResult = {
+    tool_call_id: "call-1",
+    tool_name: "read",
+    content: "contents",
+    is_error: false,
+    brief: None,
+  }
+  @debug.assert_eq(plain.to_json(), {
+    "tool_call_id": "call-1",
+    "tool_name": "read",
+    "content": "contents",
+    "is_error": false,
+  })
+  let annotated : @protocol.SessionToolResult = {
+    ..plain,
+    brief: Some("read moon.mod"),
+  }
+  @debug.assert_eq(annotated.to_json(), {
+    "tool_call_id": "call-1",
+    "tool_name": "read",
+    "content": "contents",
+    "is_error": false,
+    "brief": "read moon.mod",
+  })
+}
+
+///|
+test "durable tool result brief cannot hide a valid result" {
+  for
+    payload in (
+      [
+        {
+          "tool_call_id": "call-1",
+          "tool_name": "read",
+          "content": "contents",
+          "is_error": false,
+        },
+        {
+          "tool_call_id": "call-1",
+          "tool_name": "read",
+          "content": "contents",
+          "is_error": false,
+          "brief": null,
+        },
+        {
+          "tool_call_id": "call-1",
+          "tool_name": "read",
+          "content": "contents",
+          "is_error": false,
+          "brief": 7,
+        },
+        {
+          "tool_call_id": "call-1",
+          "tool_name": "read",
+          "content": "contents",
+          "is_error": false,
+          "future_annotation": true,
+        },
+      ] : Array[Json]) {
+    let decoded : @protocol.SessionToolResult = @json.from_json(payload)
+    assert_eq(decoded.brief, None)
+  }
+  let annotated : @protocol.SessionToolResult = @json.from_json({
+    "tool_call_id": "call-1",
+    "tool_name": "read",
+    "content": "contents",
+    "is_error": false,
+    "brief": "read moon.mod",
+  })
+  assert_eq(annotated.brief, Some("read moon.mod"))
+
+  // Every core field is required and typed; `SessionItem` preserves any
+  // invalid record verbatim instead of inventing a partial tool result.
+  for
+    payload in (
+      [
+        { "tool_name": "read", "content": "contents", "is_error": false },
+        {
+          "tool_call_id": null,
+          "tool_name": "read",
+          "content": "contents",
+          "is_error": false,
+        },
+        {
+          "tool_call_id": "call-1",
+          "tool_name": 7,
+          "content": "contents",
+          "is_error": false,
+        },
+        {
+          "tool_call_id": "call-1",
+          "tool_name": "read",
+          "content": false,
+          "is_error": false,
+        },
+        {
+          "tool_call_id": "call-1",
+          "tool_name": "read",
+          "content": "contents",
+          "is_error": "no",
+        },
+      ] : Array[Json]) {
+    let item : @protocol.SessionItem = @json.from_json({
+      "kind": "tool_result",
+      "payload": payload,
+    })
+    assert_true(item is Unknown(_))
+  }
+}
+
+///|
 test "agent connected names how much of the host is up" {
   guard @protocol.Notification::from_wire("agent.connected", {
       "stage": "serving",

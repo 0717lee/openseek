@@ -143,6 +143,7 @@ fn multi_step_session() -> @agent_session.Session {
   .append(
     Tool(ToolResult(tool_call_id="c1", tool_name="shell", content="/repo")),
   )
+  .append(Assistant(AssistantMessage("final answer")))
   .append(Terminal(Finished("final answer")))
 }
 
@@ -475,6 +476,82 @@ test "finish tool terminal does not add an extra step" {
   assert_true(model.contains("class=\"card-step\">Step 1/1"))
   inspect(occurrences(model, "class=\"card-step\""), content="1")
   assert_false(model.contains("Step 2/2"))
+}
+
+///|
+test "only assistant responses add step badges" {
+  let session = @agent_session.Session(
+      SessionId("review-on-finish"),
+      system_prompt="system",
+    )
+    .append(User(UserMessage("finish")))
+    .append(Assistant(AssistantMessage("")))
+    .append(
+      Tool(
+        ToolResult(
+          tool_call_id="call_finish",
+          tool_name="submit_report",
+          content="finished: done",
+        ),
+      ),
+    )
+    .append(Runtime(RuntimeNotice("[review] goal-met audit: clean")))
+    .append(Runtime(RuntimeNotice(@agent_session.GoalClearedNotice)))
+    .append(Terminal(Finished("done")))
+  let raw = render(@viz.render_session(session, RawLog))
+  assert_true(raw.contains("class=\"card-step\">Step 1/1"))
+  inspect(occurrences(raw, "class=\"card-step\""), content="1")
+  let continued = @agent_session.Session(
+      SessionId("runtime-continuation"),
+      system_prompt="system",
+    )
+    .append(User(UserMessage("finish")))
+    .append(Assistant(AssistantMessage("")))
+    .append(
+      Tool(
+        ToolResult(
+          tool_call_id="call_finish",
+          tool_name="submit_report",
+          content="finished: first answer",
+        ),
+      ),
+    )
+    .append(Runtime(RuntimeNotice("background job completed")))
+    .append(Assistant(AssistantMessage("second answer")))
+    .append(Terminal(Finished("second answer")))
+  let continued_raw = render(@viz.render_session(continued, RawLog))
+  assert_true(continued_raw.contains("class=\"card-step\">Step 1/2"))
+  assert_true(continued_raw.contains("class=\"card-step\">Step 2/2"))
+  inspect(occurrences(continued_raw, "class=\"card-step\""), content="2")
+}
+
+///|
+test "checkpoint replay assistants do not add an extra step" {
+  let session = @agent_session.Session(
+      SessionId("checkpoint-replay"),
+      system_prompt="system",
+    )
+    .append(User(UserMessage("go")))
+    .append(Assistant(AssistantMessage("first")))
+    .append(
+      Summary(
+        SessionSummary(content="checkpoint", from_sequence=1, to_sequence=2),
+      ),
+    )
+    .append(Assistant(AssistantMessage("first", is_replay=true)))
+    .append(User(UserMessage("continue")))
+    .append(Assistant(AssistantMessage("second")))
+    .append(Terminal(Finished("second")))
+  let raw = render(@viz.render_session(session, RawLog))
+  assert_true(raw.contains("class=\"card-step\">Step 1/2"))
+  assert_true(raw.contains("class=\"card-step\">Step 2/2"))
+  inspect(occurrences(raw, "class=\"card-step\""), content="2")
+  let model = render(@viz.render_session(session, ModelView))
+  // The summary projects in place of the covered first assistant. The replay
+  // keeps its prose available to the model but owns no new step badge.
+  assert_false(model.contains("class=\"card-step\">Step 1/2"))
+  assert_true(model.contains("class=\"card-step\">Step 2/2"))
+  inspect(occurrences(model, "class=\"card-step\""), content="1")
 }
 
 ///|
@@ -1220,7 +1297,7 @@ test "raw cards carry stable seq anchors" {
   let html = render(@viz.render_session(multi_step_session(), RawLog))
   assert_true(html.contains("id=\"seq-1\"")) // user
   assert_true(html.contains("id=\"seq-2\"")) // assistant
-  assert_true(html.contains("id=\"seq-4\"")) // terminal
+  assert_true(html.contains("id=\"seq-4\"")) // final assistant
   // The tool result at seq 3 is paired: pair anchor wins, no seq id.
   assert_true(html.contains("id=\"tool-result-1\""))
   assert_false(html.contains("id=\"seq-3\""))
@@ -1237,7 +1314,7 @@ test "model cards anchor event-backed messages only" {
   let html = render(@viz.render_session(multi_step_session(), ModelView))
   assert_true(html.contains("id=\"seq-1\""))
   assert_true(html.contains("id=\"seq-2\""))
-  assert_true(html.contains("id=\"seq-4\""))
+  assert_true(html.contains("id=\"seq-4\"")) // final assistant
   // The healed synthetic result of a dangling call gets no seq anchor (it
   // pairs, so it carries the pair id instead).
   let healed = render(@viz.render_session(dangling_call_session(), ModelView))

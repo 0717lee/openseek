@@ -162,6 +162,9 @@ pub struct AssistantMessage {
   priv content : String
   priv tool_calls : Array[SessionToolCall]
   priv reasoning_content : String?
+  // True only when a checkpoint re-appends an answer that an earlier durable
+  // provider step already owns. Absent on ordinary messages.
+  priv is_replay : Bool?
 } derive(Eq, Debug, ToJson, FromJson)
 
 ///|
@@ -171,11 +174,13 @@ pub struct AssistantMessage {
 /// requested tools. `tool_calls` are copied from DeepSeek protocol values into
 /// the session storage form so ids, names, and raw argument strings survive
 /// JSON round-tripping. `reasoning_content` is stored only when the provider
-/// returned it.
+/// returned it. `is_replay` marks a checkpoint copy of an already durable
+/// answer; ordinary messages omit that field from the stored JSON.
 pub fn AssistantMessage::AssistantMessage(
   content : String,
   tool_calls? : Array[@deepseek.ToolCall] = [],
   reasoning_content? : String,
+  is_replay? : Bool = false,
 ) -> AssistantMessage {
   {
     content,
@@ -183,6 +188,11 @@ pub fn AssistantMessage::AssistantMessage(
       for call in tool_calls => SessionToolCall::from_deepseek(call)
     ],
     reasoning_content,
+    is_replay: if is_replay {
+      Some(true)
+    } else {
+      None
+    },
   }
 }
 
@@ -216,6 +226,13 @@ pub fn AssistantMessage::tool_calls(
 /// means it returned an explicitly empty reasoning field.
 pub fn AssistantMessage::reasoning_content(self : AssistantMessage) -> String? {
   self.reasoning_content
+}
+
+///|
+/// Whether this event only restores an already durable answer after a
+/// checkpoint. It remains model-visible but is not a new provider step.
+pub fn AssistantMessage::is_replay(self : AssistantMessage) -> Bool {
+  self.is_replay == Some(true)
 }
 
 ///|
@@ -435,6 +452,16 @@ pub fn SessionEvent::sequence(self : SessionEvent) -> Int {
 /// Return this event's payload.
 pub fn SessionEvent::item(self : SessionEvent) -> SessionItem {
   self.item
+}
+
+///|
+/// Whether this event records one provider response.
+///
+/// The agent persists every current-format provider response as an Assistant.
+/// Checkpoint replays remain model-visible history, but their explicit replay
+/// bit keeps them from being counted as a second provider step.
+pub fn SessionEvent::is_agent_step(self : SessionEvent) -> Bool {
+  self.item is Assistant(message) && !message.is_replay()
 }
 
 ///|
