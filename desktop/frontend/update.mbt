@@ -2587,11 +2587,60 @@ fn update_msg(
             )
           }
         }
+        DshNewConversation => {
+          guard model.is_desktop && model.focused == @interop.ChannelId::Local else {
+            return (@cmd.none, model)
+          }
+          let mut origin_cmd = @cmd.none
+          let mut next = model
+          let workspace_path = if model.screen is Codex {
+            // Only a composing Codex draft offers the dsh group. Retire that
+            // draft before creating the dsh conversation, just as the
+            // OpenSeek cross-agent pick retires it.
+            guard model.codex.composing_draft() else {
+              return (@cmd.none, model)
+            }
+            let path = model.codex.new_thread_cwd()
+            let (command, codex) = @codex.update(
+              dispatch.map(msg => Codex(channel=model.focused, msg)),
+              @codex.Msg::abandon_draft(),
+              model.codex,
+              model.focused,
+              url => open_external_link(dispatch, url),
+            )
+            origin_cmd = command
+            next = { ..model, codex, }
+            if path.trim().is_empty() {
+              None
+            } else {
+              Some(path)
+            }
+          } else {
+            // A begun OpenSeek conversation never offers this row. Preserve a
+            // typed-but-unsent husk as its own sidebar draft; an empty "New
+            // chat" husk can disappear once the dsh page takes over.
+            guard model.composing_new_chat() &&
+              model.active_conversation() is Some(conv) else {
+              return (@cmd.none, model)
+            }
+            if !conv.worth_keeping() {
+              next = { ..next, active_session: "" }
+            }
+            @resource.path_for(conv.project(), @interop.ChannelId::Local)
+          }
+          let (dsh_cmd, next) = next.new_dsh_chat(dispatch, workspace_path)
+          (@cmd.batch([origin_cmd, dsh_cmd]), next)
+        }
         CodexUnavailablePick =>
           // The Codex group's placeholder row: not a model, a doorway.
           // Sign-in and connection state live in the Settings page's Codex
           // group.
           update_msg(dispatch, OpenSetup, model)
+        DshUnavailablePick =>
+          // dsh has no model catalog without a live session. This placeholder
+          // opens the page and retries the process; it does not persist dsh as
+          // the default until a real dsh conversation is chosen.
+          update_msg(dispatch, OpenDsh, model)
       }
     }
     CodexEffortPicked(value) => {
@@ -2912,11 +2961,27 @@ fn update_msg(
       (cmd, { ..next, update_ux, })
     }
     UpdateApplied => (close_window(), model)
-    OpenSetup =>
+    OpenSetup => {
+      let (command, dsh) = if model.is_desktop {
+        @dsh.update(
+          dispatch.map(next => Dsh(next)),
+          @dsh.Msg::settings_opened(),
+          model.dsh,
+        )
+      } else {
+        (@cmd.none, model.dsh)
+      }
       (
-        @cmd.none,
-        { ..model, screen: Settings, setup_api_key: "", api_setup_open: false },
+        command,
+        {
+          ..model,
+          screen: Settings,
+          setup_api_key: "",
+          api_setup_open: false,
+          dsh,
+        },
       )
+    }
     DismissApiSetup =>
       (@cmd.none, { ..model, api_setup_open: false, api_setup_dismissed: true })
     OpenApiSetup =>
@@ -3030,39 +3095,11 @@ fn update_msg(
         },
       )
     }
-    DshNewSession => {
-      // Prefer dsh's selected Workspace. If dsh has none yet, an explicitly
-      // selected local OpenSeek project may seed one; a remote path never can.
-      let dsh_msg = if model.dsh.preferred_workspace_id() is Some(workspace_id) {
-        @dsh.Msg::new_session(Some(workspace_id))
-      } else {
-        let local_path = model
-          .device_state(@interop.ChannelId::Local)
-          .bind(dev => dev.active_project)
-          .bind(project => {
-            @resource.path_for(project, @interop.ChannelId::Local)
-          })
-        if local_path is Some(path) {
-          @dsh.Msg::new_workspace_session(path)
-        } else {
-          @dsh.Msg::new_session(None)
-        }
-      }
-      let (cmd, dsh) = @dsh.update(
-        dispatch.map(msg => Dsh(msg)),
-        dsh_msg,
-        model.dsh,
-      )
-      (
-        cmd,
-        {
-          ..model,
-          screen: Dsh,
-          sidebar_open: model.sidebar_open && !model.narrow,
-          dsh,
-        },
-      )
-    }
+    DshNewSession =>
+      // The dsh section add action has no OpenSeek project argument, so keep
+      // its selected Workspace and fall back to the active local project only
+      // when dsh has no Workspace yet.
+      model.new_dsh_chat(dispatch, None)
     DshNewSessionIn(workspace_id) => {
       let (cmd, dsh) = @dsh.update(
         dispatch.map(msg => Dsh(msg)),
@@ -3070,11 +3107,12 @@ fn update_msg(
         model.dsh,
       )
       (
-        cmd,
+        @cmd.batch([cmd, save_default_agent(DshAgent)]),
         {
           ..model,
           screen: Dsh,
           sidebar_open: model.sidebar_open && !model.narrow,
+          default_agent: DshAgent,
           dsh,
         },
       )
@@ -3132,16 +3170,25 @@ fn update_msg(
         return open_editor_at(dispatch, model, path, range, annotation?)
       }
       let unavailable_before = model.dsh.unavailable_message()
+      let settings_failure_before = model.dsh.settings_failure_notice()
       let (cmd, dsh) = @dsh.update(
         dispatch.map(next => Dsh(next)),
         msg,
         model.dsh,
       )
       let unavailable_after = dsh.unavailable_message()
+      let settings_failure_after = dsh.settings_failure_notice()
       let next = { ..model, dsh, }
       if unavailable_after is Some(message) &&
         unavailable_before != unavailable_after {
         let (toast, notified) = next.notify_error(dispatch, message)
+        (@cmd.batch([cmd, toast]), notified)
+      } else if settings_failure_after is Some((_, message)) &&
+        settings_failure_before != settings_failure_after {
+        let (toast, notified) = next.notify_error(
+          dispatch,
+          "DeepSeek Harness settings: " + message,
+        )
         (@cmd.batch([cmd, toast]), notified)
       } else {
         (cmd, next)
@@ -3392,17 +3439,19 @@ fn update_msg(
       // running in the background and stays one sidebar click away. It lands
       // in the active workspace — the one the on-screen conversation uses —
       // and starts with whichever agent the model chip was last picked from.
-      if model.default_agent is CodexAgent {
-        new_codex_chat(
-          dispatch,
-          model,
-          model.focused_device().bind(dev => dev.active_project),
-        )
-      } else {
-        (
-          rotate_session(dispatch, model.focused),
-          { ..model, loading_conversation: None },
-        )
+      match model.default_agent {
+        CodexAgent =>
+          new_codex_chat(
+            dispatch,
+            model,
+            model.focused_device().bind(dev => dev.active_project),
+          )
+        DshAgent if model.is_desktop => model.new_dsh_chat(dispatch, None)
+        OpenSeekAgent | DshAgent =>
+          (
+            rotate_session(dispatch, model.focused),
+            { ..model, loading_conversation: None },
+          )
       }
     NewChatIn(channel, workspace) => {
       // A workspace section's own "new chat": the fresh conversation lands in
@@ -3418,10 +3467,15 @@ fn update_msg(
         ..model.with_active_project(workspace),
         loading_conversation: None,
       }
-      let (start_cmd, model) = if model.default_agent is CodexAgent {
-        new_codex_chat(dispatch, model, workspace)
-      } else {
-        (rotate_session(dispatch, channel), model)
+      let (start_cmd, model) = match model.default_agent {
+        CodexAgent => new_codex_chat(dispatch, model, workspace)
+        DshAgent if model.is_desktop && channel == @interop.ChannelId::Local => {
+          let path = workspace.bind(project => {
+            @resource.path_for(project, @interop.ChannelId::Local)
+          })
+          model.new_dsh_chat(dispatch, path)
+        }
+        OpenSeekAgent | DshAgent => (rotate_session(dispatch, channel), model)
       }
       (@cmd.batch([focus_cmd, start_cmd]), model)
     }
@@ -11844,6 +11898,24 @@ test "a Codex pick hands a fresh chat to Codex" {
 }
 
 ///|
+test "a dsh pick hands a fresh local chat to DeepSeek Harness" {
+  let dispatch = test_dispatch()
+  let model = { ..test_model(), is_desktop: true }
+  let (_, switched) = update(dispatch, ModelPicked("dsh:new"), model)
+  assert_true(switched.screen is Dsh)
+  assert_true(switched.default_agent is DshAgent)
+  // The empty OpenSeek husk was only the New chat placeholder; dsh owns the
+  // composing surface now, so no second blank row remains selected.
+  assert_true(switched.active_conversation() is None)
+  // The reducer is pure even while the opaque reconnect/create command is
+  // pending: repeating the same pick against the same snapshot is identical.
+  let (_, repeated) = update(dispatch, ModelPicked("dsh:new"), model)
+  assert_true(repeated.screen is Dsh)
+  assert_true(repeated.default_agent is DshAgent)
+  assert_true(repeated.dsh == switched.dsh)
+}
+
+///|
 test "a begun conversation never changes agents" {
   let dispatch = test_dispatch()
   let (_, ran) = update_dev(
@@ -11861,6 +11933,12 @@ test "a begun conversation never changes agents" {
   let (_, unchanged) = update(dispatch, ModelPicked("codex:gpt-5.4-codex"), ran)
   assert_true(unchanged.screen is Chat)
   assert_true(unchanged.default_agent is OpenSeekAgent)
+  let (_, still_openseek) = update(dispatch, ModelPicked("dsh:new"), {
+    ..ran,
+    is_desktop: true,
+  })
+  assert_true(still_openseek.screen is Chat)
+  assert_true(still_openseek.default_agent is OpenSeekAgent)
 }
 
 ///|
@@ -11894,6 +11972,15 @@ test "the Codex group's placeholder row opens Settings" {
   // Sign-in and connection state live in the Settings page's Codex group.
   assert_true(opened.screen is Settings)
   // A placeholder pick is a doorway, not a model: nothing was selected.
+  assert_true(opened.default_agent is OpenSeekAgent)
+}
+
+///|
+test "the dsh placeholder opens its page without changing the default agent" {
+  let dispatch = test_dispatch()
+  let model = { ..test_model(), is_desktop: true }
+  let (_, opened) = update(dispatch, ModelPicked("dsh.unavailable"), model)
+  assert_true(opened.screen is Dsh)
   assert_true(opened.default_agent is OpenSeekAgent)
 }
 

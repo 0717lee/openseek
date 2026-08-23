@@ -9,6 +9,127 @@ priv enum DshConnection {
 } derive(Eq)
 
 ///|
+const DeepSeekCredentialRef : String = "DEEPSEEK_API_KEY"
+
+///|
+const DeepSeekSettingsNamespace : String = "llm-deepseek"
+
+///|
+const DeepSeekPublicBaseUrl : String = "https://api.deepseek.com"
+
+///|
+/// The value-free credential facts returned by dsh. The secret has no field in
+/// this type: it travels only in the write request and is never echoed back.
+priv struct DshCredentialView {
+  configured : Bool
+  source : String?
+  writable : Bool
+} derive(Eq)
+
+///|
+/// One Settings request lifecycle with the last complete value-free view kept
+/// while a refresh or write is in flight. The cached view prevents a pending
+/// operation from making the form forget whether it is replacing a key.
+priv enum DshCredentialStatus {
+  DshCredentialIdle(view~ : DshCredentialView?)
+  DshCredentialLoading(view~ : DshCredentialView?)
+  DshCredentialSaving(view~ : DshCredentialView?)
+} derive(Eq)
+
+///|
+/// The editable endpoint facts projected from dsh's `llm-deepseek` settings
+/// namespace. `override_url` is only the user layer: clearing it restores the
+/// composition/public fallback instead of persisting that fallback as a new
+/// override.
+priv struct DshEndpointView {
+  override_url : String?
+  fallback_url : String
+  writable : Bool
+  revision : Int
+} derive(Eq)
+
+///|
+/// Keep the last complete endpoint view during a request so the input never
+/// changes identity or styling merely because Save is in flight.
+priv enum DshEndpointStatus {
+  DshEndpointIdle(view~ : DshEndpointView?)
+  DshEndpointLoading(view~ : DshEndpointView?)
+  DshEndpointSaving(view~ : DshEndpointView?)
+} derive(Eq)
+
+///|
+/// The complete Settings-page projection for dsh's DeepSeek credential. The
+/// root view can render it but cannot construct or mutate dsh's internal
+/// request lifecycle.
+struct CredentialSettings {
+  input : String
+  status : String
+  placeholder : String
+  refresh_enabled : Bool
+  input_enabled : Bool
+  save_enabled : Bool
+}
+
+///|
+pub fn CredentialSettings::input(self : CredentialSettings) -> String {
+  self.input
+}
+
+///|
+pub fn CredentialSettings::status(self : CredentialSettings) -> String {
+  self.status
+}
+
+///|
+pub fn CredentialSettings::placeholder(self : CredentialSettings) -> String {
+  self.placeholder
+}
+
+///|
+pub fn CredentialSettings::refresh_enabled(self : CredentialSettings) -> Bool {
+  self.refresh_enabled
+}
+
+///|
+pub fn CredentialSettings::input_enabled(self : CredentialSettings) -> Bool {
+  self.input_enabled
+}
+
+///|
+pub fn CredentialSettings::save_enabled(self : CredentialSettings) -> Bool {
+  self.save_enabled
+}
+
+///|
+/// The non-secret endpoint projection rendered beside the credential row.
+struct EndpointSettings {
+  input : String
+  placeholder : String
+  input_enabled : Bool
+  save_enabled : Bool
+}
+
+///|
+pub fn EndpointSettings::input(self : EndpointSettings) -> String {
+  self.input
+}
+
+///|
+pub fn EndpointSettings::placeholder(self : EndpointSettings) -> String {
+  self.placeholder
+}
+
+///|
+pub fn EndpointSettings::input_enabled(self : EndpointSettings) -> Bool {
+  self.input_enabled
+}
+
+///|
+pub fn EndpointSettings::save_enabled(self : EndpointSettings) -> Bool {
+  self.save_enabled
+}
+
+///|
 priv struct DshSessionRow {
   id : String
   title : String
@@ -235,6 +356,10 @@ priv struct DshPromptReconciliation {
 priv enum DshReplyKind {
   DshStatusReply
   DshPendingReply
+  DshCredentialDescribeReply
+  DshCredentialSetReply
+  DshSettingsDescribeReply
+  DshSettingsMutateReply
   DshReconnectReply
   DshWorkspacesReply
   DshWorkspaceCreateReply(Int)
@@ -268,6 +393,12 @@ priv enum DshReplyKind {
 ///|
 enum Msg {
   Refresh
+  SettingsOpened
+  SettingsRefresh
+  CredentialInputChanged(String)
+  CredentialSave
+  EndpointInputChanged(String)
+  EndpointSave
   NewSession(String?)
   NewWorkspaceSession(String)
   OpenSession(String)
@@ -302,14 +433,44 @@ pub fn Msg::refresh() -> Msg {
 }
 
 ///|
+pub fn Msg::settings_refresh() -> Msg {
+  SettingsRefresh
+}
+
+///|
+pub fn Msg::settings_opened() -> Msg {
+  SettingsOpened
+}
+
+///|
+pub fn Msg::credential_input_changed(value : String) -> Msg {
+  CredentialInputChanged(value)
+}
+
+///|
+pub fn Msg::credential_save() -> Msg {
+  CredentialSave
+}
+
+///|
+pub fn Msg::endpoint_input_changed(value : String) -> Msg {
+  EndpointInputChanged(value)
+}
+
+///|
+pub fn Msg::endpoint_save() -> Msg {
+  EndpointSave
+}
+
+///|
 pub fn Msg::new_session(workspace_id : String?) -> Msg {
   NewSession(workspace_id)
 }
 
 ///|
-/// Register one local directory in dsh, then create the first session through
-/// the returned Workspace id. Used only when dsh has no registered Workspace
-/// and OpenSeek already has an explicit local project selection.
+/// Create a session in one local directory. An existing dsh Workspace with the
+/// same resource path is reused; otherwise dsh registers the
+/// directory first and creates the session through the returned Workspace id.
 pub fn Msg::new_workspace_session(path : String) -> Msg {
   NewWorkspaceSession(path)
 }
@@ -363,6 +524,15 @@ struct State {
   // Status polls and notifications carry the same actor-owned revision. This
   // rejects a poll response that arrives after a newer transition event.
   connection_status_revision : Int
+  // dsh owns the secret. The renderer keeps only a write draft, dsh's
+  // value-free configured/source/writable view, and an ordered failure marker
+  // that lets the root surface each Settings failure once as a toast.
+  credential_input : String
+  credential_status : DshCredentialStatus
+  endpoint_input : String
+  endpoint_dirty : Bool
+  endpoint_status : DshEndpointStatus
+  settings_failure : (Int, String)?
   workspaces : Array[DshWorkspaceRow]
   // dsh's registry-global archive set, carried on every `workspace.list`. An
   // archived conversation keeps its slot in its Workspace's account, so this
@@ -434,6 +604,12 @@ pub fn State::State(loading? : Bool = false) -> State {
   {
     connection: DshStarting,
     connection_status_revision: 0,
+    credential_input: "",
+    credential_status: DshCredentialIdle(view=None),
+    endpoint_input: "",
+    endpoint_dirty: false,
+    endpoint_status: DshEndpointIdle(view=None),
+    settings_failure: None,
     workspaces: [],
     archived_session_ids: Set([]),
     sessions: [],
@@ -462,6 +638,204 @@ pub fn State::State(loading? : Bool = false) -> State {
     response_pending_rpcs: [],
     loading,
     notice: "",
+  }
+}
+
+///|
+fn DshCredentialStatus::view(self : DshCredentialStatus) -> DshCredentialView? {
+  match self {
+    DshCredentialIdle(view~)
+    | DshCredentialLoading(view~)
+    | DshCredentialSaving(view~) => view
+  }
+}
+
+///|
+fn DshCredentialStatus::busy(self : DshCredentialStatus) -> Bool {
+  self is DshCredentialLoading(_) || self is DshCredentialSaving(_)
+}
+
+///|
+fn DshCredentialStatus::settled(
+  self : DshCredentialStatus,
+) -> DshCredentialStatus {
+  DshCredentialIdle(view=self.view())
+}
+
+///|
+fn DshEndpointStatus::view(self : DshEndpointStatus) -> DshEndpointView? {
+  match self {
+    DshEndpointIdle(view~)
+    | DshEndpointLoading(view~)
+    | DshEndpointSaving(view~) => view
+  }
+}
+
+///|
+fn DshEndpointStatus::busy(self : DshEndpointStatus) -> Bool {
+  self is DshEndpointLoading(_) || self is DshEndpointSaving(_)
+}
+
+///|
+fn DshEndpointStatus::settled(self : DshEndpointStatus) -> DshEndpointStatus {
+  DshEndpointIdle(view=self.view())
+}
+
+///|
+fn DshCredentialView::decode(value : Json) -> DshCredentialView? {
+  guard value is Object(fields) &&
+    fields.get("credentials") is Some(Object(credentials)) &&
+    credentials.get(DeepSeekCredentialRef) is Some(Object(info)) &&
+    @jsonx.json_bool(info, "configured") is Some(configured) &&
+    @jsonx.json_bool(info, "writable") is Some(writable) else {
+    return None
+  }
+  let source = if info.get("source") is Some(source) {
+    match source {
+      String(source) => Some(source)
+      Null => None
+      _ => return None
+    }
+  } else {
+    None
+  }
+  Some({ configured, source, writable })
+}
+
+///|
+fn DshCredentialView::label(self : DshCredentialView) -> String {
+  if !self.configured {
+    return "API key not configured"
+  }
+  let source = if self.source is Some(source) {
+    match source {
+      "env" => "launching environment"
+      "file" => "dsh credential store"
+      "project-env" => "project .env"
+      "user-env" => "dsh home .env"
+      source => source
+    }
+  } else {
+    "dsh"
+  }
+  if self.writable {
+    "API key configured by \{source}"
+  } else {
+    "API key configured by \{source} · read-only"
+  }
+}
+
+///|
+/// Decode only the endpoint projection approved by the native Desktop
+/// boundary. The full dsh settings document and schema never enter this
+/// frontend package.
+fn DshEndpointView::decode(value : Json) -> DshEndpointView? {
+  guard value is Object(fields) &&
+    @jsonx.json_text(fields, "fallbackBaseURL") is Some(fallback_url) &&
+    @jsonx.json_bool(fields, "writable") is Some(writable) &&
+    @jsonx.json_int(fields, "revision") is Some(revision) else {
+    return None
+  }
+  let override_url = match fields.get("baseURL") {
+    Some(String(value)) => Some(value)
+    Some(Null) | None => None
+    _ => return None
+  }
+  Some({ override_url, fallback_url, writable, revision })
+}
+
+///|
+/// Project dsh's value-free credential lifecycle into the root Settings page.
+/// The only secret here is the user's current unsaved input draft.
+pub fn State::credential_settings(self : State) -> CredentialSettings {
+  let view = self.credential_status.view()
+  let busy = self.credential_status.busy()
+  let input_enabled = self.connection is DshReady &&
+    view.map(item => item.writable).unwrap_or(false)
+  let configured = view.map(item => item.configured).unwrap_or(false)
+  let status = match self.connection {
+    DshStarting => "Starting DeepSeek Harness…"
+    DshUnavailable(message) => "Unavailable · \{message}"
+    DshReady =>
+      match self.credential_status {
+        DshCredentialLoading(_) => "Ready · Checking API key…"
+        DshCredentialSaving(_) => "Ready · Saving API key…"
+        DshCredentialIdle(view=Some(view)) => "Ready · \{view.label()}"
+        DshCredentialIdle(view=None) => "Ready · API key status not loaded"
+      }
+  }
+  {
+    input: self.credential_input,
+    status,
+    placeholder: if configured {
+      "configured — enter to replace"
+    } else {
+      "sk-..."
+    },
+    // One settings refresh reads the key and endpoint together. A request is
+    // also the deliberate reconnect attempt after dsh becomes unavailable.
+    refresh_enabled: !(self.connection is DshStarting) &&
+    !busy &&
+    !self.endpoint_status.busy(),
+    input_enabled,
+    save_enabled: input_enabled && !busy && !self.credential_input.is_blank(),
+  }
+}
+
+///|
+/// Project dsh's user-owned endpoint override. Save is enabled for a blank
+/// dirty draft when an override exists because blank means restore the
+/// inherited/public endpoint, not store an empty URL.
+pub fn State::endpoint_settings(self : State) -> EndpointSettings {
+  let view = self.endpoint_status.view()
+  let busy = self.endpoint_status.busy()
+  let input_enabled = self.connection is DshReady &&
+    view.map(item => item.writable).unwrap_or(false)
+  let stored = view.bind(item => item.override_url).unwrap_or("")
+  {
+    input: self.endpoint_input,
+    placeholder: view
+    .map(item => item.fallback_url)
+    .unwrap_or(DeepSeekPublicBaseUrl),
+    input_enabled,
+    save_enabled: input_enabled &&
+    !busy &&
+    self.endpoint_dirty &&
+    self.endpoint_input.trim() != stored,
+  }
+}
+
+///|
+/// The monotonically numbered Settings failure, used by the root toast queue
+/// to show repeated identical dsh errors once per failed operation.
+pub fn State::settings_failure_notice(self : State) -> (Int, String)? {
+  self.settings_failure
+}
+
+///|
+fn State::with_settings_failure(
+  self : State,
+  kind : DshReplyKind,
+  message : String,
+) -> State {
+  let revision = self.settings_failure
+    .map(failure => failure.0 + 1)
+    .unwrap_or(1)
+  {
+    ..self,
+    credential_status: if kind is DshCredentialDescribeReply ||
+      kind is DshCredentialSetReply {
+      self.credential_status.settled()
+    } else {
+      self.credential_status
+    },
+    endpoint_status: if kind is DshSettingsDescribeReply ||
+      kind is DshSettingsMutateReply {
+      self.endpoint_status.settled()
+    } else {
+      self.endpoint_status
+    },
+    settings_failure: Some((revision, message)),
   }
 }
 
@@ -543,6 +917,14 @@ fn DshReplyKind::model_session(self : DshReplyKind) -> String? {
       Some(session_id)
     _ => None
   }
+}
+
+///|
+fn DshReplyKind::settings_request(self : DshReplyKind) -> Bool {
+  self is DshCredentialDescribeReply ||
+  self is DshCredentialSetReply ||
+  self is DshSettingsDescribeReply ||
+  self is DshSettingsMutateReply
 }
 
 ///|

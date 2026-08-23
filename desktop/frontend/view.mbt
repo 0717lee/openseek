@@ -30,6 +30,52 @@ fn setting_row(
 }
 
 ///|
+/// The one secret-input row used by every Settings credential. It keeps the
+/// focus-owning password input at a stable first position and groups all
+/// actions in the same right-aligned container, so API and dsh credentials do
+/// not drift into separate layouts.
+priv struct SettingsSecretRow {
+  label : String
+  description : String
+  value : String
+  placeholder : String
+  aria_label : String
+  enabled : Bool
+  save_enabled : Bool
+  on_input : @cmd.Emit[String]
+  on_save : @cmd.Cmd
+}
+
+///|
+fn SettingsSecretRow::render(self : SettingsSecretRow) -> @html.Html {
+  setting_row(
+    self.label,
+    [
+      @html.input(
+        input_type=@html.InputType::Password,
+        value=self.value,
+        placeholder=self.placeholder,
+        on_input=self.on_input,
+        attrs=@html.Attrs::build()
+          .aria_label(self.aria_label)
+          .data_set("focus-owner", "")
+          .disabled(!self.enabled),
+      ),
+      @html.div(class="setting-secret-actions", [
+        @html.button(
+          class="primary",
+          disabled=!self.save_enabled,
+          on_click=self.on_save,
+          "Save API key",
+        ),
+      ]),
+    ],
+    desc=self.description,
+    stack=true,
+  )
+}
+
+///|
 /// A titled card of rows: an accent-tinted icon and heading above a bordered
 /// surface, the design system's settings section. Shared with the Skills
 /// page so the two pages read as siblings.
@@ -847,6 +893,73 @@ fn codex_account_rows(
 }
 
 ///|
+/// DeepSeek Harness owns this credential independently from SeekMoon's API
+/// configuration. The projection contains only configured/source/writable
+/// facts plus the user's unsaved draft; dsh never returns the saved key.
+fn Model::dsh_credential_rows(
+  self : Model,
+  dispatch : @cmd.Emit[Msg],
+) -> Array[@html.Html] {
+  let credential = self.dsh.credential_settings()
+  let endpoint = self.dsh.endpoint_settings()
+  [
+    setting_row(
+      "Status",
+      [
+        @html.button(
+          class="secondary",
+          disabled=!credential.refresh_enabled(),
+          on_click=dispatch(Dsh(@dsh.Msg::settings_refresh())),
+          "Refresh",
+        ),
+      ],
+      desc=credential.status(),
+    ),
+    SettingsSecretRow::{
+      label: "DeepSeek API key",
+      description: "Stored and resolved by dsh, separately from SeekMoon's API key. The saved value is never read back into this page.",
+      value: credential.input(),
+      placeholder: credential.placeholder(),
+      aria_label: "DeepSeek Harness API key",
+      enabled: credential.input_enabled(),
+      save_enabled: credential.save_enabled(),
+      on_input: dispatch.map(value => {
+        Dsh(@dsh.Msg::credential_input_changed(value))
+      }),
+      on_save: dispatch(Dsh(@dsh.Msg::credential_save())),
+    }.render(),
+    setting_row(
+      "Base URL",
+      [
+        @html.input(
+          input_type=@html.InputType::Text,
+          value=endpoint.input(),
+          placeholder=endpoint.placeholder(),
+          on_input=dispatch.map(value => {
+            Dsh(@dsh.Msg::endpoint_input_changed(value))
+          }),
+          attrs=@html.Attrs::build()
+            .aria_label("DeepSeek Harness Base URL")
+            .data_set("focus-owner", "")
+            .disabled(!endpoint.input_enabled()),
+        ),
+        @html.div(
+          class="setting-actions",
+          @html.button(
+            class="primary",
+            disabled=!endpoint.save_enabled(),
+            on_click=dispatch(Dsh(@dsh.Msg::endpoint_save())),
+            "Save endpoint",
+          ),
+        ),
+      ],
+      desc="Optional dsh endpoint override. Leave it empty and save to restore the inherited or public DeepSeek endpoint.",
+      stack=true,
+    ),
+  ]
+}
+
+///|
 /// The Remote access group's rows: sign-in state against the SeekMoon
 /// relay. The relay no longer depends on the chat provider — only the
 /// hosted chat proxy was retired — so it is always available.
@@ -1154,40 +1267,25 @@ fn api_settings_rows(
       model.deepseek_key_saved
     }
     rows.push(
-      setting_row(
-        if model.api_provider is Custom {
+      SettingsSecretRow::{
+        label: if model.api_provider is Custom {
           "Custom API key"
         } else {
           "DeepSeek API key"
         },
-        [
-          @html.input(
-            input_type=@html.InputType::Password,
-            value=model.setup_api_key,
-            placeholder=if key_saved {
-              "saved — enter to replace"
-            } else {
-              "sk-..."
-            },
-            on_input=dispatch.map(value => SetupApiKeyChanged(value)),
-            attrs=@html.Attrs::build()
-              .aria_label("API key")
-              .data_set("focus-owner", "")
-              .disabled(!settings_loaded),
-          ),
-          @html.button(
-            // The id is layout only (grid placement); the fill is the
-            // shared primary style.
-            id="saveApiKey",
-            class="primary",
-            disabled=!settings_loaded || model.setup_api_key.is_blank(),
-            on_click=dispatch(SaveApiKey),
-            "Save API key",
-          ),
-        ],
-        desc="Stored on this machine and sent only with API requests. SeekMoon never reads it.",
-        stack=true,
-      ),
+        description: "Stored on this machine and sent only with API requests. SeekMoon never reads it.",
+        value: model.setup_api_key,
+        placeholder: if key_saved {
+          "saved — enter to replace"
+        } else {
+          "sk-..."
+        },
+        aria_label: "API key",
+        enabled: settings_loaded,
+        save_enabled: settings_loaded && !model.setup_api_key.is_blank(),
+        on_input: dispatch.map(value => SetupApiKeyChanged(value)),
+        on_save: dispatch(SaveApiKey),
+      }.render(),
     )
   }
   rows
@@ -1230,6 +1328,15 @@ fn settings_page(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
       "Codex",
       codex_account_rows(dispatch, model),
     ),
+    ..if model.is_desktop {
+      [
+        settings_group(
+          icon_sparkle,
+          "DeepSeek Harness",
+          model.dsh_credential_rows(dispatch),
+        ),
+      ]
+    },
     settings_group(icon_layout, "Interface", [
       setting_row(
         "Theme",
@@ -1515,13 +1622,31 @@ fn workspace_settings_page(
 #warnings("-alert_unstable")
 test "settings and the browser address bar declare form focus ownership" {
   let dispatch = test_dispatch()
+  let desktop = { ..test_model(), is_desktop: true }
   let settings_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(settings_page(dispatch, test_model()))
+    @rabbita.Val::constant(settings_page(dispatch, desktop))
   })
   // Settings fields own their existing borders directly; there is no nested
   // target that could draw a second frame.
   assert_true(settings_markup.contains("data-focus-owner=\"\""))
   assert_false(settings_markup.contains("data-focus-target=\"\""))
+  assert_true(settings_markup.contains("DeepSeek Harness"))
+  assert_true(
+    settings_markup.contains("aria-label=\"DeepSeek Harness API key\""),
+  )
+  assert_true(
+    settings_markup.contains("aria-label=\"DeepSeek Harness Base URL\""),
+  )
+  assert_true(settings_markup.contains(">Save endpoint</button>"))
+  assert_false(settings_markup.contains("Clear saved key"))
+  assert_true(settings_markup.contains("type=\"password\""))
+  // The ordinary provider key and dsh key use the same secret-row component;
+  // split length is occurrences + 1.
+  assert_eq(
+    settings_markup.split("class=\"setting-secret-actions\"").length(),
+    3,
+  )
+  assert_false(settings_markup.contains("id=\"saveApiKey\""))
   let address_markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(
       @preview.toolbar_view(

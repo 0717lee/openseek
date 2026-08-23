@@ -18,8 +18,9 @@ not introduce another dsh protocol:
   `client-response` and `rpcId`.
 
 The native Desktop process is the only component that knows the loopback port.
-The browser page calls three Proton commands (`dsh.status`, `dsh.request`, and
-`dsh.respond`), and the native process translates those calls to dsh HTTP. This
+The browser page calls four Proton commands (`dsh.status`, `dsh.pending`,
+`dsh.request`, and `dsh.respond`), and the native process translates those calls
+to dsh HTTP. This
 preserves dsh's Host/Origin checks instead of adding CORS or asking the renderer
 to contact localhost directly.
 
@@ -68,13 +69,21 @@ The browser state lives in `desktop/frontend/dsh`. It currently supports:
 - allowing or rejecting a tool approval once;
 - answering single-select, multi-select, and free-text questions.
 
-Only the eleven dsh methods used by that page are allowlisted:
+Only the fifteen dsh methods used by the conversation and Settings pages are
+allowlisted:
 `workspace.list`, `workspace.create`, `workspace.delete`,
 `workspace.archiveSession`, `session.list`, `session.create`,
 `session.history`, `session.models`, `session.selectModel`, `session.prompt`,
-and `session.cancel`. Settings, credentials, arbitrary path operations, plugin
-management, `workspace.rename`, `workspace.insertSessionBefore`, and other dsh
-APIs are not exposed by this integration.
+`session.cancel`, `credentials.describe`, `credentials.set`,
+`settings.describe`, and `settings.mutate`. Credential calls are pinned at the
+native boundary to `DEEPSEEK_API_KEY`; settings calls are pinned to
+`llm-deepseek.baseURL` and its current revision. Native code projects the
+settings reply down to the endpoint override/fallback and strips every other
+namespace and schema before CEF sees it. Credential describe returns only
+configured/source/writable facts and never the saved value. Other credentials,
+dsh Settings fields, arbitrary path operations, plugin management, `workspace.rename`,
+`workspace.insertSessionBefore`, and other dsh APIs are not exposed by this
+integration.
 
 Archiving and removing a Workspace registration are the page's only cleanup
 verbs, and dsh gives no others: it has no session deletion at all.
@@ -147,10 +156,13 @@ grant to that path.
 
 ## Runtime prerequisite
 
-Desktop does not package or configure DeepSeek Harness. It executes the exact
-command shown above, so `dsh` and the Node environment it requires must already
-be available through the login-shell `PATH`. dsh remains responsible for its
-installation, `DSH_HOME`, provider credentials, and profile environment.
+Desktop does not package DeepSeek Harness. It executes the exact command shown
+above, so `dsh` and the Node environment it requires must already be available
+through the login-shell `PATH`. The Desktop Settings page can describe, save,
+and replace only dsh's `DEEPSEEK_API_KEY`, and can set or restore only the
+`llm-deepseek.baseURL` override. dsh remains responsible for its installation,
+`DSH_HOME`, every other provider credential, and all other profile settings. A
+key supplied by the launching environment remains read-only in the page.
 
 If `dsh` cannot start, Desktop reports DeepSeek Harness as unavailable. There
 is no Desktop setting or environment-variable override for another executable.

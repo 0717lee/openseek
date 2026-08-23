@@ -261,7 +261,8 @@ fn DshDesktopCall::is_allowed(self : DshDesktopCall) -> Bool {
   [
     "workspace.list", "workspace.create", "workspace.delete", "workspace.archiveSession",
     "session.list", "session.create", "session.history", "session.models", "session.selectModel",
-    "session.prompt", "session.cancel",
+    "session.prompt", "session.cancel", "credentials.describe", "credentials.set",
+    "settings.describe", "settings.mutate",
   ].contains(self.method_)
 }
 
@@ -425,18 +426,93 @@ async fn DshWorkspaceAuthorizations::revoke(
 fn DshDesktopCall::host_payload(
   self : DshDesktopCall,
 ) -> Json raise @host.PayloadError {
-  guard self.method_ == "workspace.create" else { return self.payload }
-  guard self.payload is Object(fields) &&
-    fields.get("path") is Some(String(path)) &&
-    @pathx.Absolute::from_uri_path(path) is Some(absolute) else {
-    raise PayloadError("malformed dsh workspace.create payload")
+  match self.method_ {
+    "workspace.create" => {
+      guard self.payload is Object(fields) &&
+        fields.get("path") is Some(String(path)) &&
+        @pathx.Absolute::from_uri_path(path) is Some(absolute) else {
+        raise PayloadError("malformed dsh workspace.create payload")
+      }
+      let payload : Map[String, Json] = Map([])
+      for key, value in fields {
+        payload[key] = value
+      }
+      payload["path"] = Json::string(absolute.to_string())
+      Json::object(payload)
+    }
+    "credentials.describe" => {
+      guard self.payload is Object(fields) &&
+        fields.get("refs") is Some(Array([String("DEEPSEEK_API_KEY")])) else {
+        raise PayloadError("malformed dsh credentials.describe payload")
+      }
+      for key, _ in fields {
+        guard key == "refs" else {
+          raise PayloadError("malformed dsh credentials.describe payload")
+        }
+      }
+      self.payload
+    }
+    "credentials.set" => {
+      guard self.payload is Object(fields) &&
+        fields.get("ref") is Some(String("DEEPSEEK_API_KEY")) &&
+        fields.get("value") is Some(String(value)) &&
+        !value.trim().is_empty() else {
+        raise PayloadError("malformed dsh credentials.set payload")
+      }
+      for key, _ in fields {
+        guard key == "ref" || key == "value" else {
+          raise PayloadError("malformed dsh credentials.set payload")
+        }
+      }
+      self.payload
+    }
+    "settings.describe" => {
+      guard self.payload is Object(fields) else {
+        raise PayloadError("malformed dsh settings.describe payload")
+      }
+      for _, _ in fields {
+        raise PayloadError("malformed dsh settings.describe payload")
+      }
+      self.payload
+    }
+    "settings.mutate" => {
+      guard self.payload is Object(fields) &&
+        fields.get("ns") is Some(String("llm-deepseek")) &&
+        fields.get("ops") is Some(Array([Object(operation)])) &&
+        operation.get("path") is Some(Array([String("baseURL")])) &&
+        fields.get("expectedRevision") is Some(Number(revision, ..)) &&
+        revision >= 0.0 else {
+        raise PayloadError("malformed dsh settings.mutate payload")
+      }
+      for key, _ in fields {
+        guard key == "ns" || key == "ops" || key == "expectedRevision" else {
+          raise PayloadError("malformed dsh settings.mutate payload")
+        }
+      }
+      match operation.get("op") {
+        Some(String("set")) => {
+          guard operation.get("value") is Some(String(value)) &&
+            !value.trim().is_empty() else {
+            raise PayloadError("malformed dsh settings.mutate payload")
+          }
+          for key, _ in operation {
+            guard key == "op" || key == "path" || key == "value" else {
+              raise PayloadError("malformed dsh settings.mutate payload")
+            }
+          }
+        }
+        Some(String("unset")) =>
+          for key, _ in operation {
+            guard key == "op" || key == "path" else {
+              raise PayloadError("malformed dsh settings.mutate payload")
+            }
+          }
+        _ => raise PayloadError("malformed dsh settings.mutate payload")
+      }
+      self.payload
+    }
+    _ => self.payload
   }
-  let payload : Map[String, Json] = Map([])
-  for key, value in fields {
-    payload[key] = value
-  }
-  payload["path"] = Json::string(absolute.to_string())
-  Json::object(payload)
 }
 
 ///|
@@ -471,6 +547,107 @@ fn DshDesktopCall::frontend_reply(
   self : DshDesktopCall,
   reply : Json,
 ) -> Json raise @host.PayloadError {
+  if self.method_ == "settings.describe" {
+    guard reply is Object(envelope_fields) &&
+      envelope_fields.get("result") is Some(Object(result_fields)) else {
+      return reply
+    }
+    // Preserve dsh's business-error envelope. Successful settings reads are
+    // reduced to the one namespace and field the Desktop page is authorized
+    // to inspect; schemas and unrelated dsh settings never cross into CEF.
+    guard result_fields.get("ok") is Some(True) else { return reply }
+    guard result_fields.get("value") is Some(Object(value_fields)) &&
+      value_fields.get("writable") is Some(writable_json) &&
+      value_fields.get("namespaces") is Some(Array(namespaces)) else {
+      raise PayloadError("dsh returned malformed settings.describe data")
+    }
+    let writable = match writable_json {
+      True => true
+      False => false
+      _ => raise PayloadError("dsh returned malformed settings writability")
+    }
+    let mut projected : Json? = None
+    for row in namespaces {
+      guard row is Object(fields) else { continue }
+      guard fields.get("ns") == Some(Json::string("llm-deepseek")) else {
+        continue
+      }
+      guard projected is None &&
+        fields.get("revision") is Some(Number(revision, ..)) &&
+        revision >= 0.0 else {
+        raise PayloadError("dsh returned malformed llm-deepseek settings")
+      }
+      let base_url = match fields.get("base") {
+        Some(Object(base)) =>
+          match base.get("baseURL") {
+            Some(String(value)) => value
+            Some(_) =>
+              raise PayloadError("dsh returned malformed llm-deepseek base")
+            None => "https://api.deepseek.com"
+          }
+        Some(Null) | None => "https://api.deepseek.com"
+        Some(_) =>
+          raise PayloadError("dsh returned malformed llm-deepseek base")
+      }
+      let user_base_url : Json = match fields.get("user") {
+        Some(Object(user)) =>
+          match user.get("baseURL") {
+            Some(String(value)) => Json::string(value)
+            Some(_) =>
+              raise PayloadError(
+                "dsh returned malformed llm-deepseek user settings",
+              )
+            None => Json::null()
+          }
+        Some(Null) | None => Json::null()
+        Some(_) =>
+          raise PayloadError(
+            "dsh returned malformed llm-deepseek user settings",
+          )
+      }
+      projected = Some({
+        "baseURL": user_base_url,
+        "fallbackBaseURL": base_url,
+        "writable": writable,
+        "revision": Json::number(revision),
+      })
+    }
+    guard projected is Some(projected) else {
+      raise PayloadError("dsh omitted llm-deepseek settings")
+    }
+    let result : Map[String, Json] = Map([])
+    for key, field in result_fields {
+      result[key] = field
+    }
+    result["value"] = projected
+    let envelope : Map[String, Json] = Map([])
+    for key, field in envelope_fields {
+      envelope[key] = field
+    }
+    envelope["result"] = Json::object(result)
+    return Json::object(envelope)
+  }
+  if self.method_ == "settings.mutate" {
+    guard reply is Object(envelope_fields) &&
+      envelope_fields.get("result") is Some(Object(result_fields)) else {
+      return reply
+    }
+    guard result_fields.get("ok") is Some(True) else { return reply }
+    // The frontend follows a successful write with the same sanitized
+    // describe call. Do not forward the mutate response's complete namespace
+    // descriptor during that interval.
+    let result : Map[String, Json] = Map([])
+    for key, field in result_fields {
+      result[key] = field
+    }
+    result["value"] = {}
+    let envelope : Map[String, Json] = Map([])
+    for key, field in envelope_fields {
+      envelope[key] = field
+    }
+    envelope["result"] = Json::object(result)
+    return Json::object(envelope)
+  }
   guard self.method_ == "workspace.list" || self.method_ == "workspace.create" else {
     return reply
   }
@@ -1033,9 +1210,11 @@ pub fn local_endpoints(state : ApiState) -> Array[@endpoint.Endpoint] {
         payload: params.payload,
       }
       // Keep the native capability small and reviewable. dsh's own Workspace
-      // registry supplies canonical local paths and session membership;
-      // credentials, settings, arbitrary path-opening, and host-control
-      // operations remain absent from the Desktop conversation page.
+      // registry supplies canonical local paths and session membership. The
+      // Settings can describe/set only DEEPSEEK_API_KEY and read/mutate only
+      // llm-deepseek.baseURL. The native reply projection strips every other
+      // dsh setting before it reaches CEF; arbitrary references, namespaces,
+      // path-opening, and host-control operations remain absent.
       guard call.is_allowed() else {
         raise @host.PayloadError("unsupported dsh method '\{call.method_}'")
       }
@@ -1192,13 +1371,215 @@ test "dsh endpoints stay in the local Desktop catalog" {
     method_: "workspace.rename",
     payload: {},
   }
+  let describe_credential : DshDesktopCall = {
+    method_: "credentials.describe",
+    payload: {},
+  }
+  let set_credential : DshDesktopCall = {
+    method_: "credentials.set",
+    payload: {},
+  }
+  let describe_settings : DshDesktopCall = {
+    method_: "settings.describe",
+    payload: {},
+  }
+  let mutate_settings : DshDesktopCall = {
+    method_: "settings.mutate",
+    payload: {},
+  }
   assert_true(models.is_allowed())
   assert_true(select_model.is_allowed())
   assert_true(create_session.is_allowed())
   assert_true(archive_session.is_allowed())
   assert_true(delete_workspace.is_allowed())
+  assert_true(describe_credential.is_allowed())
+  assert_true(set_credential.is_allowed())
+  assert_true(describe_settings.is_allowed())
+  assert_true(mutate_settings.is_allowed())
   assert_false(insert_session.is_allowed())
   assert_false(rename_workspace.is_allowed())
+  assert_false(
+    DshDesktopCall::{ method_: "settings.update", payload: {} }.is_allowed(),
+  )
+}
+
+///|
+test "dsh credential calls are pinned to the DeepSeek API key" {
+  let describe : DshDesktopCall = {
+    method_: "credentials.describe",
+    payload: { "refs": ["DEEPSEEK_API_KEY"] },
+  }
+  let set : DshDesktopCall = {
+    method_: "credentials.set",
+    payload: { "ref": "DEEPSEEK_API_KEY", "value": "test-key" },
+  }
+  assert_eq(describe.host_payload(), describe.payload)
+  assert_eq(set.host_payload(), set.payload)
+  let invalid : Array[DshDesktopCall] = [
+    { method_: "credentials.describe", payload: { "refs": ["OTHER_API_KEY"] } },
+    {
+      method_: "credentials.describe",
+      payload: { "refs": ["DEEPSEEK_API_KEY"], "extra": true },
+    },
+    {
+      method_: "credentials.set",
+      payload: { "ref": "OTHER_API_KEY", "value": "test-key" },
+    },
+    {
+      method_: "credentials.set",
+      payload: { "ref": "DEEPSEEK_API_KEY", "value": "  " },
+    },
+  ]
+  for call in invalid {
+    let rejected = try {
+      ignore(call.host_payload())
+      false
+    } catch {
+      PayloadError(_) => true
+    }
+    assert_true(rejected)
+  }
+}
+
+///|
+test "dsh settings calls are pinned to llm-deepseek baseURL" {
+  let describe : DshDesktopCall = { method_: "settings.describe", payload: {} }
+  let set : DshDesktopCall = {
+    method_: "settings.mutate",
+    payload: {
+      "ns": "llm-deepseek",
+      "ops": [
+        {
+          "op": "set",
+          "path": ["baseURL"],
+          "value": "https://gateway.example/v1",
+        },
+      ],
+      "expectedRevision": 3,
+    },
+  }
+  let unset : DshDesktopCall = {
+    method_: "settings.mutate",
+    payload: {
+      "ns": "llm-deepseek",
+      "ops": [{ "op": "unset", "path": ["baseURL"] }],
+      "expectedRevision": 4,
+    },
+  }
+  assert_eq(describe.host_payload(), describe.payload)
+  assert_eq(set.host_payload(), set.payload)
+  assert_eq(unset.host_payload(), unset.payload)
+  let invalid : Array[DshDesktopCall] = [
+    { method_: "settings.describe", payload: { "ns": "llm-deepseek" } },
+    {
+      method_: "settings.mutate",
+      payload: {
+        "ns": "other",
+        "ops": [{ "op": "unset", "path": ["baseURL"] }],
+        "expectedRevision": 1,
+      },
+    },
+    {
+      method_: "settings.mutate",
+      payload: {
+        "ns": "llm-deepseek",
+        "ops": [{ "op": "set", "path": ["models"], "value": [] }],
+        "expectedRevision": 1,
+      },
+    },
+    {
+      method_: "settings.mutate",
+      payload: {
+        "ns": "llm-deepseek",
+        "ops": [{ "op": "set", "path": ["baseURL"], "value": "  " }],
+        "expectedRevision": 1,
+      },
+    },
+  ]
+  for call in invalid {
+    let rejected = try {
+      ignore(call.host_payload())
+      false
+    } catch {
+      PayloadError(_) => true
+    }
+    assert_true(rejected)
+  }
+}
+
+///|
+test "dsh settings replies expose only the endpoint projection" {
+  let describe : DshDesktopCall = { method_: "settings.describe", payload: {} }
+  let reply : Json = {
+    "type": "server-response",
+    "rpcId": "settings-1",
+    "result": {
+      "ok": true,
+      "value": {
+        "writable": true,
+        "hasDocument": true,
+        "namespaces": [
+          {
+            "ns": "llm-deepseek",
+            "schema": { "secretSchemaDetail": true },
+            "value": {
+              "baseURL": "https://gateway.example/v1",
+              "models": [{ "id": "private-model" }],
+            },
+            "base": { "baseURL": "https://api.deepseek.com" },
+            "user": {
+              "baseURL": "https://gateway.example/v1",
+              "retryPolicy": { "mode": "always" },
+            },
+            "secrets": [],
+            "revision": 9,
+          },
+          {
+            "ns": "shell",
+            "schema": { "private": true },
+            "value": { "cwd": "/private/path" },
+            "revision": 2,
+          },
+        ],
+      },
+    },
+  }
+  guard describe.frontend_reply(reply) is Object(envelope) &&
+    envelope.get("result") is Some(Object(result)) &&
+    result.get("value") is Some(Object(value)) else {
+    fail("expected sanitized dsh settings reply")
+  }
+  assert_eq(
+    value.get("baseURL"),
+    Some(Json::string("https://gateway.example/v1")),
+  )
+  assert_eq(
+    value.get("fallbackBaseURL"),
+    Some(Json::string("https://api.deepseek.com")),
+  )
+  assert_true(value.get("writable") is Some(True))
+  assert_eq(value.get("revision"), Some(Json::number(9)))
+  assert_eq(value.iter().count(), 4)
+  let mutate : DshDesktopCall = { method_: "settings.mutate", payload: {} }
+  guard mutate.frontend_reply({
+      "type": "server-response",
+      "rpcId": "settings-2",
+      "result": {
+        "ok": true,
+        "value": {
+          "ns": "llm-deepseek",
+          "schema": { "secretSchemaDetail": true },
+          "value": { "baseURL": "https://gateway.example/v1" },
+          "revision": 10,
+        },
+      },
+    })
+    is Object(mutate_envelope) &&
+    mutate_envelope.get("result") is Some(Object(mutate_result)) &&
+    mutate_result.get("value") is Some(Object(mutate_value)) else {
+    fail("expected sanitized dsh settings write reply")
+  }
+  assert_eq(mutate_value.iter().count(), 0)
 }
 
 ///|

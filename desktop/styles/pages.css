@@ -300,8 +300,12 @@ h2 {
   justify-self: start;
 }
 
-#saveApiKey {
-  align-self: flex-end;
+.setting-secret-actions,
+.setting-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 /* Settings, Skills, and the API-setup modal own these form defaults. Keep

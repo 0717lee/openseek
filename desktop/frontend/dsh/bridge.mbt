@@ -10,6 +10,9 @@
 /// its probe is a `workspace.list` request too.
 fn DshReplyKind::ordered_lane(self : DshReplyKind) -> String? {
   match self {
+    DshCredentialDescribeReply | DshCredentialSetReply =>
+      Some("dsh-credentials")
+    DshSettingsDescribeReply | DshSettingsMutateReply => Some("dsh-settings")
     DshReconnectReply | DshWorkspacesReply => Some("dsh-workspace-list")
     DshSessionsReply(..) => Some("dsh-session-list")
     DshHistoryReply(session_id) => Some("dsh-history-" + session_id)
@@ -105,6 +108,10 @@ fn DshReplyKind::request(
 ///|
 test "dsh snapshot replies select independent ordered lanes" {
   assert_eq(DshReconnectReply.ordered_lane(), Some("dsh-workspace-list"))
+  assert_eq(DshCredentialDescribeReply.ordered_lane(), Some("dsh-credentials"))
+  assert_eq(DshCredentialSetReply.ordered_lane(), Some("dsh-credentials"))
+  assert_eq(DshSettingsDescribeReply.ordered_lane(), Some("dsh-settings"))
+  assert_eq(DshSettingsMutateReply.ordered_lane(), Some("dsh-settings"))
   assert_eq(DshWorkspacesReply.ordered_lane(), Some("dsh-workspace-list"))
   assert_eq(
     DshSessionsReply(session_revision=-1).ordered_lane(),
@@ -220,6 +227,60 @@ fn State::refresh(self : State, dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
       DshReconnectReply.request(dispatch, "workspace.list", {})
     DshStarting | DshReady => DshStatusReply.status(dispatch)
   }
+}
+
+///|
+/// Read only dsh's value-free facts for the one credential managed by the
+/// Desktop Settings page. The native boundary rejects any other reference.
+fn State::load_credential(_self : State, dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
+  DshCredentialDescribeReply.request(dispatch, "credentials.describe", {
+    "refs": [DeepSeekCredentialRef],
+  })
+}
+
+///|
+/// Send the write draft directly to dsh. The response never echoes the secret;
+/// a successful write is enough to project a configured file-backed key.
+fn State::save_credential(
+  _self : State,
+  dispatch : @cmd.Emit[Msg],
+  value : String,
+) -> @cmd.Cmd {
+  DshCredentialSetReply.request(dispatch, "credentials.set", {
+    "ref": DeepSeekCredentialRef,
+    "value": value,
+  })
+}
+
+///|
+/// Read the one settings namespace projected by the native Desktop boundary.
+/// dsh returns its complete redacted descriptor; native code reduces that to
+/// the endpoint override, fallback, writability, and revision before the
+/// browser sees it.
+fn State::load_endpoint(_self : State, dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
+  DshSettingsDescribeReply.request(dispatch, "settings.describe", {})
+}
+
+///|
+/// Store or remove exactly `llm-deepseek.baseURL` at the descriptor revision
+/// the user edited. A blank draft is an unset operation, restoring dsh's
+/// composition/environment/public fallback.
+fn State::save_endpoint(
+  _self : State,
+  dispatch : @cmd.Emit[Msg],
+  value : String,
+  revision : Int,
+) -> @cmd.Cmd {
+  let operation : Json = if value.is_empty() {
+    { "op": "unset", "path": ["baseURL"] }
+  } else {
+    { "op": "set", "path": ["baseURL"], "value": value }
+  }
+  DshSettingsMutateReply.request(dispatch, "settings.mutate", {
+    "ns": DeepSeekSettingsNamespace,
+    "ops": [operation],
+    "expectedRevision": Json::number(revision.to_double()),
+  })
 }
 
 ///|

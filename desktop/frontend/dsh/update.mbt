@@ -24,6 +24,103 @@ pub fn update(
       }
       (@cmd.batch(commands), { ..state, models, loading: true, notice: "" })
     }
+    SettingsOpened =>
+      // Match the main API-key form: returning to Settings never restores an
+      // unsaved secret or endpoint draft from an earlier visit.
+      update(dispatch, SettingsRefresh, {
+        ..state,
+        credential_input: "",
+        endpoint_input: "",
+        endpoint_dirty: false,
+      })
+    SettingsRefresh =>
+      if !(state.connection is DshStarting) &&
+        !state.credential_status.busy() &&
+        !state.endpoint_status.busy() {
+        if state.connection is DshReady {
+          (
+            @cmd.batch([
+              state.load_credential(dispatch),
+              state.load_endpoint(dispatch),
+            ]),
+            {
+              ..state,
+              credential_status: DshCredentialLoading(
+                view=state.credential_status.view(),
+              ),
+              endpoint_status: DshEndpointLoading(
+                view=state.endpoint_status.view(),
+              ),
+            },
+          )
+        } else {
+          // One request is enough to wake the actor. The new Ready revision
+          // loads both descriptors with the rest of its baselines.
+          (
+            state.load_credential(dispatch),
+            {
+              ..state,
+              credential_status: DshCredentialLoading(
+                view=state.credential_status.view(),
+              ),
+            },
+          )
+        }
+      } else {
+        (@cmd.none, state)
+      }
+    CredentialInputChanged(value) =>
+      if state.credential_settings().input_enabled {
+        (@cmd.none, { ..state, credential_input: value })
+      } else {
+        (@cmd.none, state)
+      }
+    CredentialSave => {
+      let value = state.credential_input.trim().to_owned()
+      guard state.credential_status is DshCredentialIdle(view=Some(view)) &&
+        state.connection is DshReady &&
+        view.writable &&
+        !value.is_empty() else {
+        return (@cmd.none, state)
+      }
+      (
+        state.save_credential(dispatch, value),
+        {
+          ..state
+          // Clear once, immediately, like the main API-key form. The field
+          // remains editable while the request is in flight, avoiding the
+          // disabled/enabled repaint that made Save visibly flash.
+          ,
+          credential_input: "",
+          credential_status: DshCredentialSaving(view=Some(view)),
+        },
+      )
+    }
+    EndpointInputChanged(value) =>
+      if state.endpoint_settings().input_enabled {
+        (@cmd.none, { ..state, endpoint_input: value, endpoint_dirty: true })
+      } else {
+        (@cmd.none, state)
+      }
+    EndpointSave => {
+      let value = state.endpoint_input.trim().to_owned()
+      guard state.endpoint_status is DshEndpointIdle(view=Some(view)) &&
+        state.connection is DshReady &&
+        view.writable &&
+        state.endpoint_dirty &&
+        value != view.override_url.unwrap_or("") else {
+        return (@cmd.none, state)
+      }
+      (
+        state.save_endpoint(dispatch, value, view.revision),
+        {
+          ..state,
+          endpoint_input: value,
+          endpoint_dirty: false,
+          endpoint_status: DshEndpointSaving(view=Some(view)),
+        },
+      )
+    }
     NewSession(workspace_id) =>
       if state.creation_pending {
         (@cmd.none, state)
@@ -59,8 +156,23 @@ pub fn update(
           },
         )
       } else {
+        // `workspace.create` is not an idempotent lookup. Reuse the
+        // authoritative row when this Desktop project is already registered,
+        // and only create a new dsh Workspace for a genuinely new path.
+        let command = if state.workspaces
+          .iter()
+          .find_first(workspace => workspace.path == path)
+          is Some(workspace) {
+          state.create_session(
+            dispatch,
+            workspace.id,
+            state.selection_generation,
+          )
+        } else {
+          state.create_workspace_session(dispatch, path)
+        }
         (
-          state.create_workspace_session(dispatch, path),
+          command,
           { ..state, creation_pending: true, loading: true, notice: "" },
         )
       }
@@ -354,6 +466,9 @@ pub fn update(
       state.with_reply(dispatch, kind, value)
     }
     Failed(kind~, message~) => {
+      if kind.settings_request() {
+        return (@cmd.none, state.with_settings_failure(kind, message))
+      }
       if kind is DshPromptHistoryReply(reconciliation) {
         guard state.prompt_generation == reconciliation.generation &&
           state.prompt_pending_session == Some(reconciliation.session_id) else {
@@ -578,6 +693,86 @@ fn State::with_reply(
     )
   }
   let envelope = DshEnvelope(reply)
+  if kind.settings_request() {
+    guard envelope.value() is Some(value) else {
+      return (@cmd.none, self.with_settings_failure(kind, envelope.error()))
+    }
+    match kind {
+      DshCredentialDescribeReply =>
+        if DshCredentialView::decode(value) is Some(view) {
+          return (
+            @cmd.none,
+            { ..self, credential_status: DshCredentialIdle(view=Some(view)) },
+          )
+        } else {
+          return (
+            @cmd.none,
+            self.with_settings_failure(
+              kind, "DeepSeek Harness returned malformed credential status",
+            ),
+          )
+        }
+      DshCredentialSetReply => {
+        // credentials.set has committed the managed file before replying.
+        // Project that value-free fact directly instead of flashing through a
+        // second "Checking" state; external changes still trigger describe.
+        guard self.credential_status.view() is Some(_) else {
+          return (
+            @cmd.none,
+            self.with_settings_failure(
+              kind, "DeepSeek Harness saved an API key without a credential descriptor",
+            ),
+          )
+        }
+        return (
+          @cmd.none,
+          {
+            ..self,
+            credential_status: DshCredentialIdle(
+              view=Some({
+                configured: true,
+                source: Some("file"),
+                writable: true,
+              }),
+            ),
+          },
+        )
+      }
+      DshSettingsDescribeReply =>
+        if DshEndpointView::decode(value) is Some(view) {
+          return (
+            @cmd.none,
+            {
+              ..self,
+              endpoint_input: if self.endpoint_dirty {
+                self.endpoint_input
+              } else {
+                view.override_url.unwrap_or("")
+              },
+              endpoint_status: DshEndpointIdle(view=Some(view)),
+            },
+          )
+        } else {
+          return (
+            @cmd.none,
+            self.with_settings_failure(
+              kind, "DeepSeek Harness returned malformed endpoint settings",
+            ),
+          )
+        }
+      DshSettingsMutateReply =>
+        return (
+          self.load_endpoint(dispatch),
+          {
+            ..self,
+            endpoint_status: DshEndpointLoading(
+              view=self.endpoint_status.view(),
+            ),
+          },
+        )
+      _ => ()
+    }
+  }
   if kind is DshPromptHistoryReply(reconciliation) {
     guard self.prompt_generation == reconciliation.generation &&
       self.prompt_pending_session == Some(reconciliation.session_id) else {
@@ -1262,6 +1457,10 @@ fn State::with_reply(
       )
     DshStatusReply
     | DshPendingReply
+    | DshCredentialDescribeReply
+    | DshCredentialSetReply
+    | DshSettingsDescribeReply
+    | DshSettingsMutateReply
     | DshResponseReply(..)
     | DshPromptHistoryReply(_) => (@cmd.none, self)
   }
@@ -1298,6 +1497,20 @@ fn State::with_status(
         self.list_sessions(dispatch),
         DshPendingReply.pending(dispatch),
       ]
+      let refresh_credential = new_ready && !self.credential_status.busy()
+      if refresh_credential {
+        // A new dsh process may resolve the key from a different launch
+        // environment. Refresh its value-free Settings projection with the
+        // rest of the new connection baselines.
+        commands.push(self.load_credential(dispatch))
+      }
+      let refresh_endpoint = new_ready && !self.endpoint_status.busy()
+      if refresh_endpoint {
+        // The endpoint may come from a newly edited settings document or a
+        // different dsh home after reconnect. Read the user override and its
+        // revision from the new process before enabling Save.
+        commands.push(self.load_endpoint(dispatch))
+      }
       let models = if new_ready && self.active_id is Some(session_id) {
         commands.push(self.load_models(dispatch, session_id))
         DshModelsLoading(session_id~)
@@ -1323,6 +1536,16 @@ fn State::with_status(
           // sessions. Reload the selected session on every new Ready revision
           // so provider and routing changes made while offline take effect.
           models,
+          credential_status: if refresh_credential {
+            DshCredentialLoading(view=self.credential_status.view())
+          } else {
+            self.credential_status
+          },
+          endpoint_status: if refresh_endpoint {
+            DshEndpointLoading(view=self.endpoint_status.view())
+          } else {
+            self.endpoint_status
+          },
           loading: true,
           notice: "",
         },
@@ -1424,6 +1647,46 @@ fn State::with_event(
     return (@cmd.none, self)
   }
   match type_ {
+    "host/remote-event" =>
+      match @jsonx.json_text(payload, "event") {
+        Some("credentials/updated") => {
+          guard payload.get("args")
+            is Some(Array([String(DeepSeekCredentialRef)])) &&
+            !self.credential_status.busy() else {
+            return (@cmd.none, self)
+          }
+          // Another dsh client may have replaced the key. Re-read the
+          // value-free descriptor instead of guessing from the notification.
+          (
+            self.load_credential(dispatch),
+            {
+              ..self,
+              credential_status: DshCredentialLoading(
+                view=self.credential_status.view(),
+              ),
+            },
+          )
+        }
+        Some("settings/document-updated") => {
+          guard payload.get("args")
+            is Some(Array([String(DeepSeekSettingsNamespace), Number(_, ..)])) &&
+            !self.endpoint_status.busy() else {
+            return (@cmd.none, self)
+          }
+          // The event carries only namespace and revision. Re-read the
+          // native-projected endpoint fields, preserving a dirty local draft.
+          (
+            self.load_endpoint(dispatch),
+            {
+              ..self,
+              endpoint_status: DshEndpointLoading(
+                view=self.endpoint_status.view(),
+              ),
+            },
+          )
+        }
+        _ => (@cmd.none, self)
+      }
     "session/subscribed" => {
       // This is dsh's per-session stream baseline. Re-read the selected tail
       // after every WebSocket generation so a reconnect repairs any events
@@ -2467,6 +2730,27 @@ test "dsh workspace creation stays busy until its session is created" {
   assert_false(created.creation_pending)
   assert_eq(created.active_id, Some("session-b"))
   assert_eq(created.notice, "session B notice")
+}
+
+///|
+test "a local project already registered in dsh reuses its Workspace" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let state = {
+    ..State(),
+    connection: DshReady,
+    workspaces: [
+      { id: "workspace-1", title: "Project", path: "/project", session_ids: [] },
+    ],
+  }
+  let (_, creating) = update(dispatch, NewWorkspaceSession("/project"), state)
+  assert_true(creating.creation_pending)
+  assert_true(creating.loading)
+  // Repeating the same action against the same snapshot cannot mutate the
+  // Workspace registry or invent a local session before dsh replies.
+  let (_, repeated) = update(dispatch, NewWorkspaceSession("/project"), state)
+  assert_true(repeated == creating)
+  assert_true(repeated.workspaces == state.workspaces)
+  assert_true(repeated.sessions == state.sessions)
 }
 
 ///|
@@ -4466,4 +4750,204 @@ test "archiving a dsh conversation hides it and releases the page" {
     "result": { "ok": true, "value": { "deleted": true } },
   })
   assert_true(removed.loading)
+}
+
+///|
+test "dsh credential settings keep saved values out of frontend state" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let ready = { ..State(), connection: DshReady }
+  let (_, loading) = update(dispatch, SettingsRefresh, ready)
+  assert_false(loading.credential_settings().refresh_enabled)
+  let (_, described) = loading.with_reply(
+    dispatch,
+    DshCredentialDescribeReply,
+    {
+      "type": "server-response",
+      "rpcId": "credential-describe-1",
+      "result": {
+        "ok": true,
+        "value": {
+          "credentials": {
+            "DEEPSEEK_API_KEY": {
+              "configured": true,
+              "source": "file",
+              "writable": true,
+            },
+          },
+        },
+      },
+    },
+  )
+  let settings = described.credential_settings()
+  assert_true(settings.input_enabled)
+  assert_eq(settings.input, "")
+  let (_, edited) = update(
+    dispatch,
+    CredentialInputChanged("replacement-key"),
+    described,
+  )
+  assert_true(edited.credential_settings().save_enabled)
+  let (_, reopened) = update(dispatch, SettingsOpened, edited)
+  assert_eq(reopened.credential_settings().input, "")
+  let (_, saving) = update(dispatch, CredentialSave, edited)
+  // Save clears the accepted draft once but leaves the stable input enabled;
+  // toggling disabled was the visible flash in the Settings form.
+  assert_true(saving.credential_settings().input_enabled)
+  assert_eq(saving.credential_settings().input, "")
+  let (_, next_draft) = update(
+    dispatch,
+    CredentialInputChanged("next-key"),
+    saving,
+  )
+  let (_, reloading) = saving.with_reply(dispatch, DshCredentialSetReply, {
+    "type": "server-response",
+    "rpcId": "credential-set-1",
+    "result": { "ok": true, "value": {} },
+  })
+  // A new draft typed while the prior save is in flight survives its reply.
+  let (_, next_reloading) = next_draft.with_reply(
+    dispatch,
+    DshCredentialSetReply,
+    {
+      "type": "server-response",
+      "rpcId": "credential-set-2",
+      "result": { "ok": true, "value": {} },
+    },
+  )
+  assert_eq(next_reloading.credential_settings().input, "next-key")
+  assert_false(reloading.credential_settings().refresh_enabled)
+}
+
+///|
+test "dsh endpoint settings preserve drafts and reset to the public endpoint" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let state = {
+    ..State(),
+    connection: DshReady,
+    endpoint_status: DshEndpointLoading(view=None),
+  }
+  let (_, described) = state.with_reply(dispatch, DshSettingsDescribeReply, {
+    "type": "server-response",
+    "rpcId": "settings-describe-1",
+    "result": {
+      "ok": true,
+      "value": {
+        "baseURL": null,
+        "fallbackBaseURL": "https://api.deepseek.com",
+        "writable": true,
+        "revision": 7,
+      },
+    },
+  })
+  assert_eq(described.endpoint_settings().input, "")
+  assert_eq(
+    described.endpoint_settings().placeholder,
+    "https://api.deepseek.com",
+  )
+  let (_, edited) = update(
+    dispatch,
+    EndpointInputChanged("https://gateway.example/v1"),
+    described,
+  )
+  assert_true(edited.endpoint_settings().save_enabled)
+  let (_, saving) = update(dispatch, EndpointSave, edited)
+  assert_true(saving.endpoint_settings().input_enabled)
+  let (_, newer) = update(
+    dispatch,
+    EndpointInputChanged("https://next.example/v1"),
+    saving,
+  )
+  let (_, reloading) = newer.with_reply(dispatch, DshSettingsMutateReply, {
+    "type": "server-response",
+    "rpcId": "settings-mutate-1",
+    "result": { "ok": true, "value": {} },
+  })
+  let (_, refreshed) = reloading.with_reply(
+    dispatch,
+    DshSettingsDescribeReply,
+    {
+      "type": "server-response",
+      "rpcId": "settings-describe-2",
+      "result": {
+        "ok": true,
+        "value": {
+          "baseURL": "https://gateway.example/v1",
+          "fallbackBaseURL": "https://api.deepseek.com",
+          "writable": true,
+          "revision": 8,
+        },
+      },
+    },
+  )
+  assert_eq(refreshed.endpoint_settings().input, "https://next.example/v1")
+  assert_true(refreshed.endpoint_settings().save_enabled)
+}
+
+///|
+test "environment dsh credentials are read-only" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let state = {
+    ..State(),
+    connection: DshReady,
+    credential_status: DshCredentialLoading(view=None),
+  }
+  let (_, described) = state.with_reply(dispatch, DshCredentialDescribeReply, {
+    "type": "server-response",
+    "rpcId": "credential-env-1",
+    "result": {
+      "ok": true,
+      "value": {
+        "credentials": {
+          "DEEPSEEK_API_KEY": {
+            "configured": true,
+            "source": "env",
+            "writable": false,
+          },
+        },
+      },
+    },
+  })
+  let settings = described.credential_settings()
+  assert_true(settings.status.contains("launching environment"))
+  assert_false(settings.input_enabled)
+  assert_false(settings.save_enabled)
+}
+
+///|
+test "dsh Settings failures and remote updates refresh once" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let unavailable = { ..State(), connection: DshUnavailable("dsh stopped") }
+  assert_true(unavailable.credential_settings().refresh_enabled)
+  let (_, reconnecting) = update(dispatch, SettingsRefresh, unavailable)
+  assert_false(reconnecting.credential_settings().refresh_enabled)
+  let ready = { ..State(), connection: DshReady }
+  let (_, first) = update(
+    dispatch,
+    Failed(kind=DshCredentialDescribeReply, message="credential read failed"),
+    ready,
+  )
+  let (_, second) = update(
+    dispatch,
+    Failed(kind=DshCredentialDescribeReply, message="credential read failed"),
+    first,
+  )
+  assert_eq(
+    first.settings_failure_notice(),
+    Some((1, "credential read failed")),
+  )
+  assert_eq(
+    second.settings_failure_notice(),
+    Some((2, "credential read failed")),
+  )
+  let (_, refreshed) = second.with_event(dispatch, {
+    "message": {
+      "rpcId": "credential-event-1",
+      "payload": {
+        "type": "host/remote-event",
+        "event": "credentials/updated",
+        "args": ["DEEPSEEK_API_KEY"],
+      },
+    },
+  })
+  assert_false(refreshed.credential_settings().refresh_enabled)
 }
