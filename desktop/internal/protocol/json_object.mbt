@@ -1,0 +1,147 @@
+// The shared field reader behind every explicit Desktop codec in this package.
+// Each boundary (agent payloads, Codex commands, Git history, text search) used
+// to carry its own byte-identical copy of this wrapper; one copy keeps the
+// decode error strings — which are part of the wire contract — from drifting
+// apart per boundary.
+
+///|
+/// A decoded JSON object plus the path it was found at, so every field error
+/// can name its exact location. Readers deliberately ignore unknown fields for
+/// forward evolution; each concrete codec still names every field it consumes
+/// and decides how `null` differs from absence.
+priv struct JsonObject {
+  fields : Map[String, Json]
+  path : @json.JsonPath
+}
+
+///|
+/// Require `json` to be an object. `expected` names the payload in the failure
+/// message, e.g. "Git history payload" reads as "expected Git history payload
+/// object".
+fn JsonObject::decode(
+  json : Json,
+  path : @json.JsonPath,
+  expected : String,
+) -> JsonObject raise @json.JsonDecodeError {
+  guard json is Object(fields) else {
+    raise JsonDecodeError((path, "expected " + expected + " object"))
+  }
+  { fields, path }
+}
+
+///|
+fn JsonObject::required_json(
+  self : JsonObject,
+  name : String,
+) -> Json raise @json.JsonDecodeError {
+  match self.fields.get(name) {
+    Some(value) => value
+    None =>
+      raise JsonDecodeError((self.path.add_key(name), "missing required field"))
+  }
+}
+
+///|
+/// The value at `name`, treating an explicit `null` the same as absence.
+fn JsonObject::optional_json(self : JsonObject, name : String) -> Json? {
+  match self.fields.get(name) {
+    Some(Null) | None => None
+    Some(value) => Some(value)
+  }
+}
+
+///|
+fn JsonObject::required_string(
+  self : JsonObject,
+  name : String,
+) -> String raise @json.JsonDecodeError {
+  guard self.required_json(name) is String(value) else {
+    raise JsonDecodeError((self.path.add_key(name), "expected string"))
+  }
+  value
+}
+
+///|
+fn JsonObject::optional_string(
+  self : JsonObject,
+  name : String,
+) -> String? raise @json.JsonDecodeError {
+  guard self.optional_json(name) is Some(value) else { return None }
+  guard value is String(value) else {
+    raise JsonDecodeError((self.path.add_key(name), "expected string or null"))
+  }
+  Some(value)
+}
+
+///|
+fn JsonObject::required_bool(
+  self : JsonObject,
+  name : String,
+) -> Bool raise @json.JsonDecodeError {
+  match self.required_json(name) {
+    True => true
+    False => false
+    _ => raise JsonDecodeError((self.path.add_key(name), "expected boolean"))
+  }
+}
+
+///|
+fn JsonObject::optional_bool(
+  self : JsonObject,
+  name : String,
+) -> Bool? raise @json.JsonDecodeError {
+  guard self.optional_json(name) is Some(value) else { return None }
+  match value {
+    True => Some(true)
+    False => Some(false)
+    _ =>
+      raise JsonDecodeError(
+        (self.path.add_key(name), "expected boolean or null"),
+      )
+  }
+}
+
+///|
+fn JsonObject::required_int(
+  self : JsonObject,
+  name : String,
+) -> Int raise @json.JsonDecodeError {
+  @json.from_json(self.required_json(name), path=self.path.add_key(name))
+}
+
+///|
+fn JsonObject::optional_int(
+  self : JsonObject,
+  name : String,
+) -> Int? raise @json.JsonDecodeError {
+  guard self.optional_json(name) is Some(value) else { return None }
+  Some(@json.from_json(value, path=self.path.add_key(name)))
+}
+
+///|
+fn JsonObject::required_array(
+  self : JsonObject,
+  name : String,
+) -> Array[Json] raise @json.JsonDecodeError {
+  guard self.required_json(name) is Array(values) else {
+    raise JsonDecodeError((self.path.add_key(name), "expected array"))
+  }
+  values
+}
+
+///|
+fn JsonObject::required_string_array(
+  self : JsonObject,
+  name : String,
+) -> Array[String] raise @json.JsonDecodeError {
+  let decoded : Array[String] = []
+  for index, raw in self.required_array(name) {
+    guard raw is String(value) else {
+      raise JsonDecodeError(
+        (self.path.add_key(name).add_index(index), "expected string"),
+      )
+    }
+    decoded.push(value)
+  }
+  decoded
+}

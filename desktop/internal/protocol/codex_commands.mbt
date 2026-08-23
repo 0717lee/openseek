@@ -3,120 +3,6 @@
 // documents remain JSON where their schema is versioned independently.
 
 ///|
-/// The explicit Codex codecs intentionally ignore unknown object fields so a
-/// newer app-server may add metadata. Each concrete codec below still names
-/// every field it consumes and decides how `null` differs from absence.
-priv struct CodexJsonObject {
-  fields : Map[String, Json]
-  path : @json.JsonPath
-}
-
-///|
-fn CodexJsonObject::decode(
-  json : Json,
-  path : @json.JsonPath,
-  expected : String,
-) -> CodexJsonObject raise @json.JsonDecodeError {
-  guard json is Object(fields) else {
-    raise JsonDecodeError((path, "expected " + expected + " object"))
-  }
-  { fields, path }
-}
-
-///|
-fn CodexJsonObject::required_json(
-  self : CodexJsonObject,
-  name : String,
-) -> Json raise @json.JsonDecodeError {
-  match self.fields.get(name) {
-    Some(value) => value
-    None =>
-      raise JsonDecodeError((self.path.add_key(name), "missing required field"))
-  }
-}
-
-///|
-fn CodexJsonObject::optional_json(
-  self : CodexJsonObject,
-  name : String,
-) -> Json? {
-  match self.fields.get(name) {
-    Some(Null) | None => None
-    Some(value) => Some(value)
-  }
-}
-
-///|
-fn CodexJsonObject::required_string(
-  self : CodexJsonObject,
-  name : String,
-) -> String raise @json.JsonDecodeError {
-  guard self.required_json(name) is String(value) else {
-    raise JsonDecodeError((self.path.add_key(name), "expected string"))
-  }
-  value
-}
-
-///|
-fn CodexJsonObject::optional_string(
-  self : CodexJsonObject,
-  name : String,
-) -> String? raise @json.JsonDecodeError {
-  guard self.optional_json(name) is Some(value) else { return None }
-  guard value is String(value) else {
-    raise JsonDecodeError((self.path.add_key(name), "expected string or null"))
-  }
-  Some(value)
-}
-
-///|
-fn CodexJsonObject::required_bool(
-  self : CodexJsonObject,
-  name : String,
-) -> Bool raise @json.JsonDecodeError {
-  match self.required_json(name) {
-    True => true
-    False => false
-    _ => raise JsonDecodeError((self.path.add_key(name), "expected boolean"))
-  }
-}
-
-///|
-fn CodexJsonObject::optional_bool(
-  self : CodexJsonObject,
-  name : String,
-) -> Bool? raise @json.JsonDecodeError {
-  guard self.optional_json(name) is Some(value) else { return None }
-  match value {
-    True => Some(true)
-    False => Some(false)
-    _ =>
-      raise JsonDecodeError(
-        (self.path.add_key(name), "expected boolean or null"),
-      )
-  }
-}
-
-///|
-fn CodexJsonObject::required_int(
-  self : CodexJsonObject,
-  name : String,
-) -> Int raise @json.JsonDecodeError {
-  @json.from_json(self.required_json(name), path=self.path.add_key(name))
-}
-
-///|
-fn CodexJsonObject::required_array(
-  self : CodexJsonObject,
-  name : String,
-) -> Array[Json] raise @json.JsonDecodeError {
-  guard self.required_json(name) is Array(values) else {
-    raise JsonDecodeError((self.path.add_key(name), "expected array"))
-  }
-  values
-}
-
-///|
 pub(all) struct CodexDraftOpenPayload {
   draft_id : String
   cwd : String
@@ -327,7 +213,7 @@ pub(all) struct CodexTurnReply {
 
 ///|
 pub impl FromJson for CodexDraftOpenPayload with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(json, path, "Codex draft open payload")
+  let object = JsonObject::decode(json, path, "Codex draft open payload")
   {
     draft_id: object.required_string("draft_id"),
     cwd: object.required_string("cwd"),
@@ -341,7 +227,7 @@ pub impl ToJson for CodexDraftOpenPayload with fn to_json(self) {
 
 ///|
 pub impl FromJson for CodexDraftClosePayload with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(json, path, "Codex draft close payload")
+  let object = JsonObject::decode(json, path, "Codex draft close payload")
   { draft_id: object.required_string("draft_id") }
 }
 
@@ -355,7 +241,7 @@ pub impl FromJson for CodexServerRequestRespondPayload with fn from_json(
   json,
   path,
 ) {
-  let object = CodexJsonObject::decode(
+  let object = JsonObject::decode(
     json, path, "Codex server request response payload",
   )
   {
@@ -371,7 +257,7 @@ pub impl ToJson for CodexServerRequestRespondPayload with fn to_json(self) {
 
 ///|
 pub impl FromJson for CodexFileSearchPayload with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(json, path, "Codex file search payload")
+  let object = JsonObject::decode(json, path, "Codex file search payload")
   {
     thread_id: object.required_string("thread_id"),
     cwd: object.required_string("cwd"),
@@ -390,7 +276,7 @@ pub impl ToJson for CodexFileSearchPayload with fn to_json(self) {
 
 ///|
 pub impl FromJson for CodexSkillsListPayload with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(json, path, "Codex skills list payload")
+  let object = JsonObject::decode(json, path, "Codex skills list payload")
   {
     thread_id: object.required_string("thread_id"),
     cwd: object.required_string("cwd"),
@@ -409,7 +295,7 @@ pub impl ToJson for CodexSkillsListPayload with fn to_json(self) {
 
 ///|
 pub impl FromJson for CodexAccountReadPayload with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(json, path, "Codex account read payload")
+  let object = JsonObject::decode(json, path, "Codex account read payload")
   { refresh_token: object.required_bool("refreshToken") }
 }
 
@@ -423,7 +309,7 @@ pub impl FromJson for CodexAccountLoginStartPayload with fn from_json(
   json,
   path,
 ) {
-  let object = CodexJsonObject::decode(
+  let object = JsonObject::decode(
     json, path, "Codex account login start payload",
   )
   {
@@ -451,7 +337,7 @@ pub impl FromJson for CodexAccountLoginCancelPayload with fn from_json(
   json,
   path,
 ) {
-  let object = CodexJsonObject::decode(
+  let object = JsonObject::decode(
     json, path, "Codex account login cancel payload",
   )
   { login_id: object.required_string("loginId") }
@@ -464,7 +350,7 @@ pub impl ToJson for CodexAccountLoginCancelPayload with fn to_json(self) {
 
 ///|
 pub impl FromJson for CodexModelListPayload with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(json, path, "Codex model list payload")
+  let object = JsonObject::decode(json, path, "Codex model list payload")
   {
     limit: object.required_int("limit"),
     include_hidden: object.required_bool("includeHidden"),
@@ -505,7 +391,7 @@ pub impl ToJson for CodexPermissionMode with fn to_json(self) {
 
 ///|
 pub impl FromJson for CodexThreadStartPayload with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(json, path, "Codex thread start payload")
+  let object = JsonObject::decode(json, path, "Codex thread start payload")
   {
     cwd: object.optional_string("cwd"),
     model: object.optional_string("model"),
@@ -535,7 +421,7 @@ pub impl ToJson for CodexThreadStartPayload with fn to_json(self) {
 
 ///|
 pub impl FromJson for CodexThreadPayload with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(json, path, "Codex thread payload")
+  let object = JsonObject::decode(json, path, "Codex thread payload")
   { thread_id: object.required_string("threadId") }
 }
 
@@ -546,9 +432,7 @@ pub impl ToJson for CodexThreadPayload with fn to_json(self) {
 
 ///|
 pub impl FromJson for CodexThreadResumePayload with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(
-    json, path, "Codex thread resume payload",
-  )
+  let object = JsonObject::decode(json, path, "Codex thread resume payload")
   {
     thread_id: object.required_string("threadId"),
     permission_mode: @json.from_json(
@@ -568,7 +452,7 @@ pub impl ToJson for CodexThreadResumePayload with fn to_json(self) {
 
 ///|
 pub impl FromJson for CodexThreadReadPayload with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(json, path, "Codex thread read payload")
+  let object = JsonObject::decode(json, path, "Codex thread read payload")
   {
     thread_id: object.required_string("threadId"),
     include_turns: object.optional_bool("includeTurns"),
@@ -586,7 +470,7 @@ pub impl ToJson for CodexThreadReadPayload with fn to_json(self) {
 
 ///|
 pub impl FromJson for CodexThreadListPayload with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(json, path, "Codex thread list payload")
+  let object = JsonObject::decode(json, path, "Codex thread list payload")
   {
     limit: object.required_int("limit"),
     archived: object.required_bool("archived"),
@@ -608,9 +492,7 @@ pub impl ToJson for CodexThreadListPayload with fn to_json(self) {
 
 ///|
 pub impl FromJson for CodexThreadArchivePayload with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(
-    json, path, "Codex thread archive payload",
-  )
+  let object = JsonObject::decode(json, path, "Codex thread archive payload")
   {
     thread_id: object.required_string("threadId"),
     force: object.required_bool("force"),
@@ -627,7 +509,7 @@ pub impl ToJson for CodexThreadArchivePayload with fn to_json(self) {
 
 ///|
 pub impl FromJson for CodexReviewTarget with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(json, path, "Codex review target")
+  let object = JsonObject::decode(json, path, "Codex review target")
   { kind_: object.required_string("type") }
 }
 
@@ -638,7 +520,7 @@ pub impl ToJson for CodexReviewTarget with fn to_json(self) {
 
 ///|
 pub impl FromJson for CodexReviewStartPayload with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(json, path, "Codex review start payload")
+  let object = JsonObject::decode(json, path, "Codex review start payload")
   {
     thread_id: object.required_string("threadId"),
     target: @json.from_json(
@@ -658,7 +540,7 @@ pub impl ToJson for CodexReviewStartPayload with fn to_json(self) {
 
 ///|
 pub impl FromJson for CodexTurnStartPayload with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(json, path, "Codex turn start payload")
+  let object = JsonObject::decode(json, path, "Codex turn start payload")
   {
     thread_id: object.required_string("threadId"),
     input: object.required_array("input"),
@@ -693,7 +575,7 @@ pub impl ToJson for CodexTurnStartPayload with fn to_json(self) {
 
 ///|
 pub impl FromJson for CodexTurnSteerPayload with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(json, path, "Codex turn steer payload")
+  let object = JsonObject::decode(json, path, "Codex turn steer payload")
   {
     thread_id: object.required_string("threadId"),
     input: object.required_array("input"),
@@ -712,9 +594,7 @@ pub impl ToJson for CodexTurnSteerPayload with fn to_json(self) {
 
 ///|
 pub impl FromJson for CodexTurnInterruptPayload with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(
-    json, path, "Codex turn interrupt payload",
-  )
+  let object = JsonObject::decode(json, path, "Codex turn interrupt payload")
   {
     thread_id: object.required_string("threadId"),
     turn_id: object.required_string("turnId"),
@@ -731,7 +611,7 @@ pub impl ToJson for CodexTurnInterruptPayload with fn to_json(self) {
 
 ///|
 pub impl FromJson for CodexStatusReply with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(json, path, "Codex status reply")
+  let object = JsonObject::decode(json, path, "Codex status reply")
   {
     status: object.required_string("status"),
     message: object.optional_string("message"),
@@ -749,7 +629,7 @@ pub impl ToJson for CodexStatusReply with fn to_json(self) {
 
 ///|
 pub impl FromJson for CodexDraftOpenReply with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(json, path, "Codex draft open reply")
+  let object = JsonObject::decode(json, path, "Codex draft open reply")
   {
     draft_id: object.required_string("draftId"),
     cwd: object.required_string("cwd"),
@@ -768,7 +648,7 @@ pub impl ToJson for CodexDraftOpenReply with fn to_json(self) {
 
 ///|
 pub impl FromJson for CodexDataReply with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(json, path, "Codex data reply")
+  let object = JsonObject::decode(json, path, "Codex data reply")
   {
     data: object.required_array("data"),
     next_cursor: object.optional_string("nextCursor"),
@@ -786,9 +666,7 @@ pub impl ToJson for CodexDataReply with fn to_json(self) {
 
 ///|
 pub impl FromJson for CodexServerRequestsReply with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(
-    json, path, "Codex server requests reply",
-  )
+  let object = JsonObject::decode(json, path, "Codex server requests reply")
   {
     data: object.required_array("data"),
     generation: object.required_int("generation"),
@@ -802,7 +680,7 @@ pub impl ToJson for CodexServerRequestsReply with fn to_json(self) {
 
 ///|
 pub impl FromJson for CodexAccountReply with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(json, path, "Codex account reply")
+  let object = JsonObject::decode(json, path, "Codex account reply")
   {
     account: object.optional_json("account"),
     requires_openai_auth: object.required_bool("requiresOpenaiAuth"),
@@ -822,7 +700,7 @@ pub impl ToJson for CodexAccountReply with fn to_json(self) {
 
 ///|
 pub impl FromJson for CodexLoginStartReply with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(json, path, "Codex login start reply")
+  let object = JsonObject::decode(json, path, "Codex login start reply")
   {
     login_id: object.required_string("loginId"),
     auth_url: object.required_string("authUrl"),
@@ -839,7 +717,7 @@ pub impl ToJson for CodexLoginStartReply with fn to_json(self) {
 
 ///|
 pub impl FromJson for CodexThreadReply with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(json, path, "Codex thread reply")
+  let object = JsonObject::decode(json, path, "Codex thread reply")
   { thread: object.required_json("thread") }
 }
 
@@ -874,7 +752,7 @@ pub impl[Reply : ToJson] ToJson for CodexCommandReply[Reply] with fn to_json(
 
 ///|
 pub impl FromJson for CodexThreadResumeReply with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(json, path, "Codex thread resume reply")
+  let object = JsonObject::decode(json, path, "Codex thread resume reply")
   {
     thread: object.optional_json("thread"),
     status: object.optional_string("status"),
@@ -895,7 +773,7 @@ pub impl ToJson for CodexThreadResumeReply with fn to_json(self) {
 
 ///|
 pub impl FromJson for CodexTurnReply with fn from_json(json, path) {
-  let object = CodexJsonObject::decode(json, path, "Codex turn reply")
+  let object = JsonObject::decode(json, path, "Codex turn reply")
   {
     turn: object.optional_json("turn"),
     turn_id: object.optional_string("turnId"),
