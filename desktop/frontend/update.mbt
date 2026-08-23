@@ -1115,10 +1115,11 @@ fn apply_engine_event(
       let normalized = content.trim().to_owned()
       if normalized.is_empty() {
         // Remote delivery strips the complete payload because the durable
-        // session event carries it. The empty event is still the settlement
-        // boundary: preserve the accumulated deltas and switch them to the
-        // completed Markdown presentation.
-        (None, conv.complete_reasoning())
+        // session event carries it. A remote client may have joined midway
+        // through the stream, so its accumulated deltas can be only a suffix;
+        // discard that provisional text at settlement and let the canonical
+        // commit supply the complete Markdown card.
+        (None, { ..conv, turn: { ..conv.turn, live_reasoning: None } })
       } else {
         (
           None,
@@ -7453,7 +7454,7 @@ test "reasoning deltas accumulate and answer output closes the live stream" {
 }
 
 ///|
-test "an empty remote reasoning settlement seals the accumulated preview" {
+test "an empty remote reasoning settlement clears the partial preview" {
   let dispatch = test_dispatch()
   let (_, partial) = update_dev(
     dispatch,
@@ -7465,11 +7466,8 @@ test "an empty remote reasoning settlement seals the accumulated preview" {
     Engine(Some("r7"), ReasoningMessage(""), session=None),
     partial,
   )
-  assert_eq(
-    settled.active().turn.live_reasoning,
-    Some({ content: "first line", complete: true }),
-  )
-  assert_eq(settled.active().reasoning_for_render(), (Some("first line"), true))
+  assert_eq(settled.active().turn.live_reasoning, None)
+  assert_eq(settled.active().reasoning_for_render(), (None, false))
 }
 
 ///|
