@@ -530,39 +530,98 @@ button.row-twisty:hover {
   color: var(--color-accent-strong);
 }
 
-/* The in-app folder picker behind "Add a workspace" (extends the
-   confirmation-modal styles). */
-.picker-modal {
-  width: min(520px, calc(100vw - 48px));
+/* The host-backed project picker: location bar, directory browser, and
+   inline folder creation. */
+.modal.picker-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(600px, calc(100vw - 48px));
+  max-height: min(680px, calc(100vh - 48px));
+  padding: 0;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+}
+.picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 20px 16px;
+}
+.picker-header-copy {
+  min-width: 0;
+}
+.picker-header .modal-title {
+  font-size: 18px;
+  line-height: 1.25;
+}
+.picker-subtitle {
+  margin-top: 3px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+}
+.picker-close {
+  --icon-size: var(--icon-md);
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.picker-close:hover {
+  background: var(--color-hover-subtle);
+  color: var(--color-text-primary);
+}
+.picker-location-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--color-border-subtle);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-subtle);
 }
 .picker-crumbs {
   display: flex;
-  flex-wrap: wrap;
+  flex: 1 1 auto;
   align-items: center;
+  min-width: 0;
+  overflow-x: auto;
   gap: 1px;
-  margin-top: 12px;
-  padding: 4px 6px;
+  min-height: 36px;
+  padding: 4px 7px;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-subtle);
-  min-height: 20px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  box-shadow: var(--shadow-surface);
+  scrollbar-width: none;
+}
+.picker-crumbs::-webkit-scrollbar {
+  display: none;
 }
 .picker-crumb {
-  padding: 2px 6px;
+  flex: none;
+  padding: 4px 7px;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text-secondary);
   font: inherit;
-  font-size: var(--font-size-md);
+  font-size: var(--font-size-sm);
   cursor: pointer;
-  max-width: 160px;
+  max-width: 180px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.picker-crumb:hover {
-  background: var(--color-bg-surface);
+.picker-crumb:not(:disabled):hover {
+  background: var(--color-hover-subtle);
   color: var(--color-text-primary);
 }
 .picker-crumb.current {
@@ -574,40 +633,217 @@ button.row-twisty:hover {
   font-size: var(--font-size-sm);
   user-select: none;
 }
+.picker-new-folder {
+  --icon-size: var(--icon-sm);
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 11px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  box-shadow: var(--shadow-surface);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+.picker-new-folder:not(:disabled):hover {
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-soft);
+  color: var(--color-accent-strong);
+}
+.picker-browser {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 16px;
+}
 .picker-list {
-  margin-top: 10px;
-  height: 280px;
+  flex: 1 1 320px;
+  min-height: 0;
   overflow-y: auto;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-canvas);
+  box-shadow: inset 0 1px 0 var(--color-border-subtle);
 }
 .picker-row {
+  --icon-size: var(--icon-lg);
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
+  gap: 10px;
+  width: 100%;
+  min-height: 46px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+  border-radius: 0;
+  background: transparent;
+  font: inherit;
   font-size: var(--font-size-md);
   color: var(--color-text-primary);
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
+  text-align: left;
 }
-.picker-row:hover {
-  background: var(--color-bg-subtle);
+.picker-row:not(:disabled):hover,
+.picker-row:not(:disabled):focus-visible {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-strong);
 }
 .picker-row-icon {
-  display: inline-flex;
+  display: grid;
+  place-items: center;
   flex: none;
+  width: 22px;
   color: var(--color-text-secondary);
 }
+.picker-row:not(:disabled):hover .picker-row-icon,
+.picker-row:not(:disabled):focus-visible .picker-row-icon {
+  color: var(--color-accent-strong);
+}
 .picker-row-name {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.picker-empty {
-  padding: 10px;
-  font-size: var(--font-size-md);
+.picker-create-row {
+  --icon-size: var(--icon-md);
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 54px;
+  padding: 7px 8px 7px 12px;
+  border-bottom: 1px solid var(--color-accent-border);
+  background: var(--color-accent-soft);
+}
+.picker-create-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: var(--color-accent-strong);
+}
+.picker-create-row input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  outline: 0;
+  background: var(--color-bg-surface);
+  color: var(--color-text-primary);
+  font: inherit;
+}
+.picker-create-cancel,
+.picker-create-submit {
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-surface);
   color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+.picker-create-submit {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+.picker-create-cancel:not(:disabled):hover {
+  color: var(--color-text-primary);
+}
+.picker-create-submit:not(:disabled):hover {
+  border-color: var(--color-accent-strong);
+  background: var(--color-accent-strong);
+}
+.picker-empty {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  min-height: 100%;
+  padding: 32px;
+  text-align: center;
+}
+.picker-empty-title {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+}
+.picker-empty-detail {
+  max-width: 320px;
+  margin-top: 4px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-normal);
+}
+.picker-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 12px 16px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-subtle);
+}
+.picker-footer .modal-actions {
+  margin-top: 0;
+}
+.picker-modal button:disabled,
+.picker-modal input:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+@media (max-width: 600px) {
+  .modal.picker-modal {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+  }
+  .picker-header {
+    padding: 16px;
+  }
+  .picker-location-bar {
+    flex-wrap: wrap;
+  }
+  .picker-crumbs {
+    flex-basis: 100%;
+  }
+  .picker-new-folder {
+    margin-left: auto;
+  }
+  .picker-list {
+    flex-basis: min(42vh, 320px);
+  }
+  .picker-create-row {
+    grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .picker-create-row input {
+    grid-column: 2 / 4;
+  }
+  .picker-create-cancel,
+  .picker-create-submit {
+    grid-row: 2;
+    width: 100%;
+  }
+  .picker-create-cancel {
+    grid-column: 2;
+  }
+  .picker-create-submit {
+    grid-column: 3;
+  }
+  .picker-footer .modal-actions,
+  .picker-footer .modal-actions button {
+    flex: 1 1 0;
+  }
 }
 
 .sidebar-icon {
