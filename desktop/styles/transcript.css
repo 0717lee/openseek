@@ -762,6 +762,39 @@
   background: var(--color-danger-soft);
 }
 
+/* ---------- run_moonbit ----------
+   The call is a whole `.mbtx` program, so the card shows it as program text
+   rather than as an escaped JSON string, with the arguments that shaped the
+   run as chips above it. The program block needs no rule of its own: the
+   shared `.tool-call pre` already gives it the padding and background, and its
+   `pre-wrap` keeps the listing's indentation while wrapping the overflow —
+   so a long line grows the page rather than adding a nested scrollbar. */
+.run-moonbit-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.run-moonbit-chip {
+  padding: 0 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
+}
+/* The payload as the model sent it, so the card above is a reading of the
+   call and never the only account of it. A fourth disclosure altitude, so it
+   keeps the same muted line the three above it use. */
+.run-moonbit-original-summary {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+.run-moonbit-original-summary:hover {
+  color: var(--color-text-secondary);
+}
+
 /* ---------- plan ----------
    One checklist, rendered at three altitudes: a meter riding a folded run's
    summary line, the full card inside an expanded `plan` call, and the
