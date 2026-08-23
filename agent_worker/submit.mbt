@@ -24,17 +24,7 @@ fn submit_result_tool(
 
 ///|
 fn parse_submission(args : Json) -> Result[WorkerReport, Array[String]] {
-  match WorkerReport::parse(args) {
-    Err(msg) => Err([msg])
-    Ok(report) => {
-      let problems = report.validate()
-      if problems.length() > 0 {
-        Err(problems)
-      } else {
-        Ok(report)
-      }
-    }
-  }
+  @agent_subrun.validated(WorkerReport::parse(args), WorkerReport::validate)
 }
 
 ///|
