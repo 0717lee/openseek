@@ -656,38 +656,18 @@ async fn run_serve(
       (goal.map(goal => goal.text()), session.current_goal_baseline())
     }
 
-    let extra_tools = resolve_mcp_tools(matches, scope, workspace_root~) +
-      [
-        @agent_explore.definition(
-          self_exe=exe,
-          model~,
-          workspace_root~,
-          budget=subrun_budget,
-          api_url?,
-          child_session?,
-        ),
-        review_tool_definition(
-          self_exe=exe,
-          model~,
-          workspace_root~,
-          budget=subrun_budget,
-          context=review_context,
-          api_url?,
-          child_session?,
-        ),
-        subtask_tool_definition(
-          self_exe=exe,
-          model~,
-          workspace_root~,
-          budget=subrun_budget,
-          api_url?,
-          child_session?,
-        ),
-      ]
-    if web_search_api_key(model, api_key, api_url, matches)
-      is Some(web_search_key) {
-      extra_tools.push(@web_search.definition(api_key=web_search_key))
-    }
+    let extra_tools = build_extra_tools(
+      matches,
+      scope,
+      self_exe=exe,
+      model~,
+      api_key~,
+      workspace_root~,
+      budget=subrun_budget,
+      review_context~,
+      api_url?,
+      child_session?,
+    )
     // The advisory goal-met gate (--review-gate): built once, shared by
     // every turn; engine-initiated, so it runs on its own allowance
     // rather than the model's per-turn subrun budget.
