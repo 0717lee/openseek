@@ -36,6 +36,7 @@ pub fn subrun_parent(String) -> String?
 pub(all) enum EngineEvent {
   AgentStep(Int?)
   AssistantDelta(String)
+  ReasoningDelta(String)
   ReasoningMessage(String)
   AssistantMessage(String)
   RuntimeUpdate(String)
@@ -64,11 +65,15 @@ pub(all) enum GoalMarker {
   GoalBlocked(String)
   GoalUnblocked
 } derive(Eq)
+pub fn GoalMarker::equal(Self, Self) -> Bool
+pub fn GoalMarker::not_equal(Self, Self) -> Bool
 
 pub(all) struct GoalStanding {
   text : String
   blocked : String?
 } derive(Eq)
+pub fn GoalStanding::equal(Self, Self) -> Bool
+pub fn GoalStanding::not_equal(Self, Self) -> Bool
 
 pub(all) enum ItemKind {
   User
@@ -77,12 +82,16 @@ pub(all) enum ItemKind {
   Tool(call_id~ : String, name~ : String, arguments~ : String?, has_result~ : Bool, is_error~ : Bool, brief~ : String?)
   Summary
 } derive(Eq)
+pub fn ItemKind::equal(Self, Self) -> Bool
+pub fn ItemKind::not_equal(Self, Self) -> Bool
 
 pub(all) struct LauncherAppItem {
   id : String
   name : String
   icon : String
 } derive(Eq)
+pub fn LauncherAppItem::equal(Self, Self) -> Bool
+pub fn LauncherAppItem::not_equal(Self, Self) -> Bool
 
 pub struct RuntimeUpdateView {
   status : String?
@@ -96,6 +105,8 @@ pub(all) struct SessionListItem {
   workspace_name : String
   updated_at_ms : Double?
 } derive(Eq)
+pub fn SessionListItem::equal(Self, Self) -> Bool
+pub fn SessionListItem::not_equal(Self, Self) -> Bool
 
 pub struct SessionLoadView {
   items : Array[TranscriptItem]
@@ -108,6 +119,8 @@ pub struct SessionTreeRow {
   item : SessionListItem
   children : Array[SessionListItem]
 } derive(Eq)
+pub fn SessionTreeRow::equal(Self, Self) -> Bool
+pub fn SessionTreeRow::not_equal(Self, Self) -> Bool
 
 pub(all) struct TranscriptItem {
   kind : ItemKind
@@ -115,6 +128,8 @@ pub(all) struct TranscriptItem {
   ts : Double?
   sequence : Int?
 } derive(Eq)
+pub fn TranscriptItem::equal(Self, Self) -> Bool
+pub fn TranscriptItem::not_equal(Self, Self) -> Bool
 
 // Type aliases
 

@@ -23,18 +23,24 @@ pub(all) struct Actions {
 }
 
 type Input derive(Eq)
-pub fn Input::Input(source~ : Source, focused~ : @interop.ChannelId, active_session~ : String, root~ : @common.Uri?, submission_generation~ : Int, items~ : Array[VisibleRow], streaming_response~ : String?, streaming_identity~ : String) -> Self
+pub fn Input::Input(source~ : Source, focused~ : @interop.ChannelId, active_session~ : String, root~ : @common.Uri?, submission_generation~ : Int, items~ : Array[VisibleRow], streaming_response~ : String?, streaming_reasoning? : String, reasoning_complete? : Bool, streaming_identity~ : String) -> Self
+pub fn Input::equal(Self, Self) -> Bool
+pub fn Input::not_equal(Self, Self) -> Bool
 
 pub(all) enum Source {
   OpenSeek
   Codex
 } derive(Eq)
+pub fn Source::equal(Self, Self) -> Bool
+pub fn Source::not_equal(Self, Self) -> Bool
 
 pub(all) struct VisibleRow {
   item : @transcript.TranscriptItem
   identity : String
 } derive(Eq)
+pub fn VisibleRow::equal(Self, Self) -> Bool
 pub fn VisibleRow::history(Array[@transcript.TranscriptItem]) -> Array[Self]
+pub fn VisibleRow::not_equal(Self, Self) -> Bool
 
 // Type aliases
 
