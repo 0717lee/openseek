@@ -564,6 +564,15 @@ test "a picker message with no picker open is dropped" {
 }
 
 ///|
+/// Test-only: the request fence currently expected by an open picker.
+fn picker_generation(model : Model) -> Int raise {
+  guard model.project_picker is Some(picker) else {
+    fail("expected an open project picker")
+  }
+  picker.request_generation()
+}
+
+///|
 test "a failed navigation keeps the listing and pops a toast" {
   let dispatch = test_dispatch()
   let (_, opened) = update(
@@ -580,7 +589,7 @@ test "a failed navigation keeps the listing and pops a toast" {
           @interop.ChannelId::Local.test_resource("/home/u"),
         ),
         entries=["proj"],
-        generation=1,
+        generation=picker_generation(opened),
       ),
     ),
     opened,
@@ -591,7 +600,7 @@ test "a failed navigation keeps the listing and pops a toast" {
       @project_picker.Msg::Failed(
         channel=Local,
         message="no such directory: /gone",
-        generation=1,
+        generation=picker_generation(loaded),
       ),
     ),
     loaded,
@@ -615,7 +624,11 @@ test "a failed navigation keeps the listing and pops a toast" {
   let (_, stale) = update(
     dispatch,
     ProjectPicker(
-      @project_picker.Msg::Failed(channel=Local, message="stale", generation=99),
+      @project_picker.Msg::Failed(
+        channel=Local,
+        message="stale",
+        generation=picker_generation(failed) + 1,
+      ),
     ),
     failed,
   )
@@ -639,7 +652,7 @@ test "confirming registers the browsed directory and closes the picker" {
           @interop.ChannelId::Local.test_resource("/home/u/proj"),
         ),
         entries=[],
-        generation=1,
+        generation=picker_generation(opened),
       ),
     ),
     opened,
@@ -692,7 +705,7 @@ test "the add-project chord opens the picker once and never restarts it" {
           @interop.ChannelId::Local.test_resource("/home/u"),
         ),
         entries=["proj"],
-        generation=1,
+        generation=picker_generation(opened),
       ),
     ),
     opened,
@@ -722,7 +735,7 @@ fn confirmed_add(
         channel=Local,
         location=@project_picker.Location::Directory(picked),
         entries=[],
-        generation=1,
+        generation=picker_generation(opened),
       ),
     ),
     opened,
@@ -888,7 +901,7 @@ test "a superseded confirm's reply cannot resolve the newer pending" {
         channel=Local,
         location=@project_picker.Location::Directory(second),
         entries=[],
-        generation=1,
+        generation=picker_generation(reopened),
       ),
     ),
     reopened,
@@ -956,7 +969,7 @@ test "a resolved add wins over the detach fallback in one snapshot" {
         channel=Local,
         location=@project_picker.Location::Directory(picked),
         entries=[],
-        generation=1,
+        generation=picker_generation(opened),
       ),
     ),
     opened,
@@ -996,7 +1009,7 @@ test "confirm waits for an in-flight navigation" {
         channel=Local,
         location=@project_picker.Location::Directory(picked),
         entries=[],
-        generation=1,
+        generation=picker_generation(opened),
       ),
     ),
     opened,

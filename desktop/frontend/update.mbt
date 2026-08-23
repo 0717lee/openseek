@@ -3445,13 +3445,9 @@ fn update_msg(
           let model = { ..model, project_picker: next }
           match outcome {
             None => (cmd, model)
-            // The failure pops as a toast — mainly a pasted path that names
-            // no directory — while the previous listing stays usable.
+            // A failed browse or create leaves the previous listing usable.
             Some(@project_picker.Outcome::Failed(message)) => {
-              let (toast, model) = model.notify_error(
-                dispatch,
-                "Cannot open folder: \{message}",
-              )
+              let (toast, model) = model.notify_error(dispatch, message)
               (@cmd.batch([cmd, toast]), model)
             }
             // Confirm registers the directory the host last listed — always

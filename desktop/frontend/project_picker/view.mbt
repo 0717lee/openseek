@@ -1,18 +1,14 @@
-// The picker's modal, shaped like a system chooser: a clickable breadcrumb
-// for the current directory (each segment navigates up to that level —
-// there is no ".." row) and a folder list that navigates on click. On a
-// Windows host the trail roots at "This PC", whose listing is the drive
-// letters — the way to another drive. The keyboard surface lives in the
-// document-level capture pair (`keys.mbt`): Enter adds the browsed
-// directory, Escape closes, and a pasted path jumps straight to that
-// location (a path that names no directory pops a toast). It renders the
-// host machine's directories whichever gateway serves the page, so desktop
-// and browser share the one flow. Clicks inside must not bubble to the
-// backdrop, whose click closes the picker.
+// A compact, host-backed folder chooser. The location bar behaves like a
+// system picker, while the inline composer can create and enter a folder
+// without leaving the add-project flow. Keyboard capture lives in `keys.mbt`;
+// focused controls keep their own Enter and Escape behavior here.
 
 ///|
 pub fn view(emit : @cmd.Emit[Msg], picker : State) -> @html.Html {
   let rows : Array[@html.Html] = []
+  if picker.new_folder is Some(name) {
+    rows.push(new_folder_row(emit, picker, name))
+  }
   for name in picker.entries {
     let target = match picker.location {
       Some(Directory(path)) => path.picker_child_path(name)
@@ -22,56 +18,171 @@ pub fn view(emit : @cmd.Emit[Msg], picker : State) -> @html.Html {
       None => name
     }
     rows.push(
-      @html.div(class="picker-row", on_click=emit(Navigate(target)), [
-        @html.span(class="picker-row-icon", @icons.icon(@icons.icon_folder)),
-        @html.span(class="picker-row-name", name),
-      ]),
-    )
-  }
-  if picker.entries.length() == 0 {
-    rows.push(
-      @html.div(
-        class="picker-empty",
-        if picker.loading {
-          "Loading…"
-        } else {
-          "No subfolders"
-        },
-      ),
-    )
-  }
-  let children : Array[@html.Html] = [
-    @html.div(class="modal-title", "Add a project"),
-    picker_breadcrumbs(emit, picker),
-  ]
-  children.push(@html.div(class="picker-list", rows))
-  children.push(
-    @html.div(class="modal-actions", [
-      @html.button(on_click=emit(Close), "Cancel"),
       @html.button(
-        class="primary",
-        // While a navigation is in flight the shown listing is stale, and
-        // the drive list is not a directory anyone can register; `handle`
-        // refuses the confirm too, this just says so visually.
-        disabled=picker.loading || !(picker.location is Some(Directory(_))),
-        on_click=emit(Confirm),
-        match picker.location {
-          Some(Directory(path)) =>
-            "Add \u{201c}\{@resource.label(path)}\u{201d}"
-          _ => "Add this folder"
-        },
+        class="picker-row",
+        type_="button",
+        disabled=picker.loading,
+        on_click=emit(Navigate(target)),
+        attrs=@html.Attrs::build().aria_label("Open folder \{name}"),
+        [
+          @html.span(class="picker-row-icon", @icons.icon(@icons.icon_folder)),
+          @html.span(class="picker-row-name", name),
+        ],
       ),
-    ]),
-  )
+    )
+  }
+  if picker.entries.is_empty() && picker.new_folder is None {
+    rows.push(empty_view(picker))
+  }
+  let can_create = !picker.loading &&
+    picker.location is Some(Directory(_)) &&
+    picker.new_folder is None
   @html.div(class="modal-backdrop", on_click=emit(Close), [
     @html.div(
       class="modal picker-modal",
-      attrs=@html.Attrs::build().on_click(event => {
-        event.stop_propagation()
-        @cmd.none
-      }),
-      children,
+      attrs=@html.Attrs::build()
+        .role("dialog")
+        .aria_modal("true")
+        .aria_labelledby("project-picker-title")
+        .on_click(event => {
+          event.stop_propagation()
+          @cmd.none
+        }),
+      [
+        @html.div(class="picker-header", [
+          @html.div(class="picker-header-copy", [
+            @html.div(
+              id="project-picker-title",
+              class="modal-title",
+              "Add a project",
+            ),
+            @html.div(
+              class="picker-subtitle",
+              "Choose a folder, or create a new one for this project.",
+            ),
+          ]),
+          @html.button(
+            class="picker-close",
+            type_="button",
+            title="Close",
+            on_click=emit(Close),
+            attrs=@html.Attrs::build().aria_label("Close project picker"),
+            @icons.icon(@icons.icon_close),
+          ),
+        ]),
+        @html.div(class="picker-location-bar", [
+          picker_breadcrumbs(emit, picker),
+          @html.button(
+            class="picker-new-folder",
+            type_="button",
+            disabled=!can_create,
+            on_click=emit(BeginCreateFolder),
+            [@icons.icon(@icons.icon_add), @html.span("New folder")],
+          ),
+        ]),
+        @html.div(class="picker-browser", [
+          @html.div(
+            class="picker-list",
+            attrs=@html.Attrs::build().aria_busy(picker.loading.to_string()),
+            rows,
+          ),
+        ]),
+        picker_footer(emit, picker),
+      ],
     ),
+  ])
+}
+
+///|
+fn new_folder_row(
+  emit : @cmd.Emit[Msg],
+  picker : State,
+  name : String,
+) -> @html.Html {
+  let valid = !name.trim().is_empty()
+  @html.div(class="picker-create-row", [
+    @html.span(class="picker-create-icon", @icons.icon(@icons.icon_folder)),
+    @html.input(
+      input_type=@html.InputType::Text,
+      value=name,
+      autofocus=true,
+      placeholder="New folder name",
+      on_input=emit.map(value => NewFolderNameChanged(value)),
+      attrs=@html.Attrs::build()
+        .aria_label("New folder name")
+        .data_set("focus-owner", "")
+        .disabled(picker.loading)
+        .on_keydown(event => {
+          if event.is_composing() {
+            return @cmd.none
+          }
+          match event.key() {
+            "Enter" => {
+              event.prevent_default()
+              if valid {
+                emit(CreateFolder)
+              } else {
+                @cmd.none
+              }
+            }
+            "Escape" => {
+              event.prevent_default()
+              emit(CancelCreateFolder)
+            }
+            _ => @cmd.none
+          }
+        }),
+    ),
+    @html.button(
+      class="picker-create-cancel",
+      type_="button",
+      disabled=picker.loading,
+      on_click=emit(CancelCreateFolder),
+      "Cancel",
+    ),
+    @html.button(
+      class="picker-create-submit",
+      type_="button",
+      disabled=picker.loading || !valid,
+      on_click=emit(CreateFolder),
+      if picker.loading {
+        "Creating…"
+      } else {
+        "Create"
+      },
+    ),
+  ])
+}
+
+///|
+fn empty_view(picker : State) -> @html.Html {
+  let (title, detail) = if picker.loading {
+    ("Loading folders…", "This should only take a moment.")
+  } else {
+    ("No folders here", "Create a folder here, or add this location as-is.")
+  }
+  @html.div(class="picker-empty", attrs=@html.Attrs::build().role("status"), [
+    @html.div(class="picker-empty-title", title),
+    @html.div(class="picker-empty-detail", detail),
+  ])
+}
+
+///|
+fn picker_footer(emit : @cmd.Emit[Msg], picker : State) -> @html.Html {
+  let can_confirm = !picker.loading &&
+    picker.location is Some(Directory(_)) &&
+    picker.new_folder is None
+  @html.div(class="picker-footer", [
+    @html.div(class="modal-actions", [
+      @html.button(type_="button", on_click=emit(Close), "Cancel"),
+      @html.button(
+        class="primary",
+        type_="button",
+        disabled=!can_confirm,
+        on_click=emit(Confirm),
+        "Add project",
+      ),
+    ]),
   ])
 }
 
@@ -88,10 +199,11 @@ fn picker_breadcrumbs(emit : @cmd.Emit[Msg], picker : State) -> @html.Html {
     return @html.div(class="picker-crumbs", crumbs)
   }
   guard location is Directory(resource) else {
-    // The drive list is the trail's whole content while it is shown.
     crumbs.push(
       @html.button(
         class="picker-crumb current",
+        type_="button",
+        disabled=picker.loading,
         on_click=emit(Navigate("/")),
         "This PC",
       ),
@@ -99,7 +211,6 @@ fn picker_breadcrumbs(emit : @cmd.Emit[Msg], picker : State) -> @html.Html {
     return @html.div(class="picker-crumbs", crumbs)
   }
   let path = resource.path
-
   let segments : Array[String] = []
   for part in path.split("/") {
     if !part.is_empty() {
@@ -112,11 +223,13 @@ fn picker_breadcrumbs(emit : @cmd.Emit[Msg], picker : State) -> @html.Html {
   }
   crumbs.push(
     @html.button(
-      class=if segments.length() == 0 {
+      class=if segments.is_empty() {
         "picker-crumb current"
       } else {
         "picker-crumb"
       },
+      type_="button",
+      disabled=picker.loading,
       on_click=emit(Navigate("/")),
       if drive_root is Some(_) {
         "This PC"
@@ -134,9 +247,13 @@ fn picker_breadcrumbs(emit : @cmd.Emit[Msg], picker : State) -> @html.Html {
     } else {
       prefix + "/" + segment
     }
-    if crumbs.length() > 0 {
-      crumbs.push(@html.span(class="picker-crumb-sep", "›"))
-    }
+    crumbs.push(
+      @html.span(
+        class="picker-crumb-sep",
+        attrs=@html.Attrs::build().aria_hidden("true"),
+        "›",
+      ),
+    )
     crumbs.push(
       @html.button(
         class=if index == segments.length() - 1 {
@@ -144,6 +261,8 @@ fn picker_breadcrumbs(emit : @cmd.Emit[Msg], picker : State) -> @html.Html {
         } else {
           "picker-crumb"
         },
+        type_="button",
+        disabled=picker.loading,
         on_click=emit(Navigate(prefix)),
         segment,
       ),

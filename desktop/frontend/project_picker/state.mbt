@@ -8,8 +8,8 @@
 ///|
 /// The in-app folder picker's state: the host location currently shown and
 /// the rows inside it — a directory's subdirectories, or the Windows drive
-/// list's drives. `loading` marks a browse in flight; a failed
-/// navigation pops a toast while the previous listing stays usable.
+/// list's drives. `loading` marks a browse or folder creation in flight; a
+/// failed operation pops a toast while the previous listing stays usable.
 /// `channel` owns every browse and the eventual project mutation;
 /// `generation` numbers that picker's latest request. Both ride on replies,
 /// so neither a superseded navigation nor a closed picker from another
@@ -25,11 +25,21 @@ struct State {
   location : Location?
   entries : Array[String]
   loading : Bool
+  // `Some` renders the inline new-folder composer. Its value stays present
+  // across a failed create so the user can correct it without retyping.
+  new_folder : String?
   generation : Int
 } derive(Eq)
 
 ///|
 pub extend State with Eq::{equal, not_equal}
+
+///|
+/// The fence expected by the current host reply. Exposed with the otherwise
+/// opaque state so black-box adapters can drive the state machine directly.
+pub fn State::request_generation(self : State) -> Int {
+  self.generation
+}
 
 ///|
 /// Where the picker's current listing was taken: a real host directory —
@@ -57,9 +67,15 @@ pub(all) enum Msg {
     entries~ : Array[String],
     generation~ : Int
   )
-  // A navigation failed; the shell pops the message as a toast and the
+  // A browse or create failed; the shell pops the message as a toast and the
   // previous listing stays usable.
   Failed(channel~ : @interop.ChannelId, message~ : String, generation~ : Int)
+  // Open, edit, cancel, and submit the inline new-folder composer. Creation
+  // enters the new directory by delivering the same `Loaded` reply as browse.
+  BeginCreateFolder
+  NewFolderNameChanged(String)
+  CancelCreateFolder
+  CreateFolder
   // Register the picker's current directory and close it.
   Confirm
   Close
@@ -70,15 +86,23 @@ pub extend Msg with Eq::{equal, not_equal}
 
 ///|
 /// What the shell must do about a handled message: register a confirmed
-/// directory on its owning device, or surface a navigation failure as a
+/// directory on its owning device, or surface a request failure as a
 /// toast. Everything else stays inside the package.
-pub(all) enum Outcome {
+pub enum Outcome {
   Picked(@interop.ChannelId, @common.Uri)
   Failed(String)
-} derive(Eq)
+}
 
 ///|
-pub extend Outcome with Eq::{equal, not_equal}
+/// One process-wide sequence keeps replies from a closed picker from matching
+/// a later picker opened on the same channel.
+let next_request_generation : Ref[Int] = Ref(0)
+
+///|
+fn fresh_request_generation() -> Int {
+  next_request_generation.val += 1
+  next_request_generation.val
+}
 
 ///|
 /// Open a fresh picker against one device's host, browsing from that host's
@@ -87,14 +111,16 @@ pub fn State::open(
   channel : @interop.ChannelId,
   emit : @cmd.Emit[Msg],
 ) -> (@cmd.Cmd, State) {
+  let generation = fresh_request_generation()
   let picker : State = {
     channel,
     location: None,
     entries: [],
     loading: true,
-    generation: 1,
+    new_folder: None,
+    generation,
   }
-  (browse(emit, channel, "", generation=1), picker)
+  (browse(emit, channel, "", generation~), picker)
 }
 
 ///|
@@ -108,10 +134,10 @@ pub fn State::handle(
 ) -> (@cmd.Cmd, State?, Outcome?) {
   match msg {
     Navigate(path) => {
-      let generation = self.generation + 1
+      let generation = fresh_request_generation()
       (
         browse(emit, self.channel, path, generation~),
-        Some({ ..self, loading: true, generation }),
+        Some({ ..self, loading: true, new_folder: None, generation }),
         None,
       )
     }
@@ -121,21 +147,68 @@ pub fn State::handle(
       if channel == self.channel && generation == self.generation {
         (
           @cmd.none,
-          Some({ ..self, location: Some(location), entries, loading: false }),
+          Some({
+            ..self,
+            location: Some(location),
+            entries,
+            loading: false,
+            new_folder: None,
+          }),
           None,
         )
       } else {
         (@cmd.none, Some(self), None)
       }
     Failed(channel~, message~, generation~) =>
-      // The failure pops as a toast — mainly a pasted path that names no
-      // directory — while the previous listing stays usable. One answering
-      // a superseded navigation stays silent: its toast would describe a
-      // browse the user has already replaced.
+      // The failure pops as a toast while the previous listing stays usable.
+      // One answering a superseded request stays silent: its toast would
+      // describe an operation the user has already replaced.
       if channel == self.channel && generation == self.generation {
+        let message = if self.new_folder is Some(_) {
+          "Cannot create folder: \{message}"
+        } else {
+          "Cannot open folder: \{message}"
+        }
         (@cmd.none, Some({ ..self, loading: false }), Some(Failed(message)))
       } else {
         (@cmd.none, Some(self), None)
+      }
+    BeginCreateFolder =>
+      if self.location is Some(Directory(_)) && !self.loading {
+        (@cmd.none, Some({ ..self, new_folder: Some("") }), None)
+      } else {
+        (@cmd.none, Some(self), None)
+      }
+    NewFolderNameChanged(name) =>
+      if self.new_folder is Some(_) && !self.loading {
+        (@cmd.none, Some({ ..self, new_folder: Some(name) }), None)
+      } else {
+        (@cmd.none, Some(self), None)
+      }
+    CancelCreateFolder =>
+      if self.loading {
+        (@cmd.none, Some(self), None)
+      } else {
+        (@cmd.none, Some({ ..self, new_folder: None }), None)
+      }
+    CreateFolder =>
+      match (self.location, self.new_folder) {
+        (Some(Directory(parent)), Some(name)) if !self.loading &&
+          !name.trim().is_empty() => {
+          let generation = fresh_request_generation()
+          (
+            create_folder(
+              emit,
+              self.channel,
+              parent,
+              name.trim().to_owned(),
+              generation~,
+            ),
+            Some({ ..self, loading: true, generation }),
+            None,
+          )
+        }
+        _ => (@cmd.none, Some(self), None)
       }
     Confirm =>
       // Register the directory the host last listed — always something it
@@ -144,7 +217,9 @@ pub fn State::handle(
       // is stale, so Enter must wait: confirming then would attach the
       // previous directory, not the destination. The Windows drive list is
       // not a directory and cannot be registered.
-      if self.location is Some(Directory(path)) && !self.loading {
+      if self.location is Some(Directory(path)) &&
+        !self.loading &&
+        self.new_folder is None {
         (@cmd.none, None, Some(Picked(self.channel, path)))
       } else {
         (@cmd.none, Some(self), None)

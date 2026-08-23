@@ -72,8 +72,8 @@ fn capture_subscription(emit : @cmd.Emit[Msg]) -> @sub.Sub {
 /// folder row's buttons) keeps its own Enter — swallowing it there would
 /// turn "activate the focused button" into "add this directory" for
 /// keyboard users. Focus anywhere behind the backdrop still yields to the
-/// picker. Paste is claimed wholesale — while the modal is up there is no
-/// other legitimate paste target on the page.
+/// picker. The inline new-folder input keeps Enter, Escape, and paste so it can
+/// submit, cancel, and edit normally; every other paste is a direct path jump.
 extern "js" fn add_project_picker_capture(
   on_confirm : () -> Unit,
   on_close : () -> Unit,
@@ -90,12 +90,16 @@ extern "js" fn add_project_picker_capture(
   #|       event.stopPropagation();
   #|       onConfirm();
   #|     } else if (event.key === "Escape") {
+  #|       const editor = event.target?.closest?.("input, textarea");
+  #|       if (editor && editor.closest(".picker-modal")) return;
   #|       event.preventDefault();
   #|       event.stopPropagation();
   #|       onClose();
   #|     }
   #|   };
   #|   const paste = (event) => {
+  #|     const control = event.target?.closest?.("input, textarea");
+  #|     if (control && control.closest(".picker-modal")) return;
   #|     event.preventDefault();
   #|     event.stopPropagation();
   #|     onPaste(event.clipboardData?.getData("text/plain") ?? "");

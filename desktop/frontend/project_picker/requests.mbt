@@ -39,36 +39,102 @@ fn browse(
           return
         }
       }
-      let message = match reply {
-        Listing(path~, entries~, ..) => {
-          if @resource.of_path(channel, path) is Some(path) {
-            let entries = entries.filter(name => !name.is_empty())
-            scheduler.add(
-              emit(
-                Loaded(
-                  channel~,
-                  location=Directory(path),
-                  entries~,
-                  generation~,
-                ),
-              ),
-            )
-            return
+      scheduler.add(
+        emit(reply_message(channel, reply, generation~, drives=true)),
+      )
+    })
+  })
+}
+
+///|
+/// Ask the host to create one child of the current directory. A successful
+/// reply is the new directory's listing, so creation and navigation share the
+/// state machine's existing channel/generation fence.
+fn create_folder(
+  emit : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  parent : @common.Uri,
+  name : String,
+  generation~ : Int,
+) -> @cmd.Cmd {
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      let reply = @interop.bridge_request(
+        channel,
+        @commands.fs_create_directory,
+        { parent: parent.path, name },
+      ) catch {
+        error if @interop.bridge_failure(error) is Unknown => {
+          // The host may have created the folder before the reply was lost.
+          // Re-listing the intended target makes that outcome converge while
+          // an explicit "already exists" reply remains a normal refusal.
+          let message = @interop.bridge_error_text(error)
+          @interop.bridge_request(channel, @commands.fs_browse, {
+            path: Some(parent.picker_child_path(name)),
+          }) catch {
+            _ => {
+              scheduler.add(emit(Failed(channel~, message~, generation~)))
+              return
+            }
           }
-          "malformed directory listing"
         }
-        Drives(entries~) => {
-          let entries = entries.filter(name => !name.is_empty())
+        error => {
           scheduler.add(
-            emit(Loaded(channel~, location=DriveList, entries~, generation~)),
+            emit(
+              Failed(
+                channel~,
+                message=@interop.bridge_error_text(error),
+                generation~,
+              ),
+            ),
           )
           return
         }
-        BrowseError(message) => message
       }
-      scheduler.add(emit(Failed(channel~, message~, generation~)))
+      scheduler.add(
+        emit(reply_message(channel, reply, generation~, drives=false)),
+      )
     })
   })
+}
+
+///|
+/// Turn either browse-shaped host reply into the one state-machine result
+/// path. Only an ordinary browse may return the Windows drive list.
+fn reply_message(
+  channel : @interop.ChannelId,
+  reply : @protocol.BrowseDirectoryReply,
+  generation~ : Int,
+  drives~ : Bool,
+) -> Msg {
+  match reply {
+    Listing(path~, entries~, ..) =>
+      match @resource.of_path(channel, path) {
+        Some(path) =>
+          Loaded(
+            channel~,
+            location=Directory(path),
+            entries=entries.filter(name => !name.is_empty()),
+            generation~,
+          )
+        None =>
+          Failed(channel~, message="malformed directory listing", generation~)
+      }
+    Drives(entries~) if drives =>
+      Loaded(
+        channel~,
+        location=DriveList,
+        entries=entries.filter(name => !name.is_empty()),
+        generation~,
+      )
+    Drives(_) =>
+      Failed(
+        channel~,
+        message="created directory returned a drive list",
+        generation~,
+      )
+    BrowseError(message) => Failed(channel~, message~, generation~)
+  }
 }
 
 ///|
