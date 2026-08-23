@@ -20,7 +20,7 @@ pub fn icon(image : () -> @html.Html) -> @html.Html {
 
 ///|
 /// A 16×16 codicon: one filled path tinted by `currentColor`.
-fn codicon(d : String) -> @html.Html {
+pub fn codicon(d : String) -> @html.Html {
   @svg.svg(
     width=16,
     height=16,

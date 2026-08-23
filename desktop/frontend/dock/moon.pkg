@@ -4,6 +4,7 @@ import {
   "moonbit-community/rabbita/svg",
   "openseek_desktop/frontend/pathx",
   "openseek_desktop/frontend/interop",
+  "openseek_desktop/frontend/icons",
 }
 
 import {
