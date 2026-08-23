@@ -626,6 +626,34 @@
 .activity[open] > .activity-summary .activity-text::before {
   content: "▾ ";
 }
+
+/* The model-step ordinal. A quiet accent against the muted summary: enough hue
+   to scan a long run by number, not enough to compete with the failure badge or
+   the plan meter sitting beside it. Mixed toward the muted text rather than
+   faded to transparent, so it keeps the row's weight on either theme. Tabular
+   numerals in a fixed right-aligned column hold every `·` on the same x as the
+   count crosses #9 → #10. */
+.activity-step {
+  display: inline-block;
+  min-width: 3ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in oklab, var(--color-accent) 68%, var(--color-text-muted));
+  transition: color 0.15s ease;
+}
+
+/* The step a reader points at or has opened takes the full accent, and its work
+   log's guide line picks up the same hue — the revealed work is visibly this
+   number's, even with several steps open at once. Nested tool bursts keep the
+   neutral guide, so a step's own spine still reads as the outermost one. */
+.activity-summary:hover .activity-step,
+.activity[open] > .activity-summary .activity-step {
+  color: var(--color-accent);
+}
+.activity:has(> .activity-summary .activity-step) > .activity-body {
+  border-left-color: var(--color-accent-border);
+}
+
 .activity-failed {
   flex: 0 0 auto;
   color: var(--color-danger);

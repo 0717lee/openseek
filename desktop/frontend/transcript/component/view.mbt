@@ -278,15 +278,18 @@ fn activity_view(
   } else {
     summary_label
   }
+  // The step ordinal is its own span so it can carry the accent and a fixed
+  // numeral column: every step's `·` lands on the same x, so a long run reads
+  // as a numbered list rather than a ragged stack of sentences.
   let summary : Array[@html.Html] = [
-    @html.span(
-      class="activity-text",
-      if step_label.is_empty() {
-        activity_label
-      } else {
-        "\{step_label} · \{activity_label}"
-      },
-    ),
+    if step_label.is_empty() {
+      @html.span(class="activity-text", activity_label)
+    } else {
+      @html.span(class="activity-text", [
+        @html.span(class="activity-step", step_label),
+        @html.text(" · \{activity_label}"),
+      ])
+    },
   ]
   if failed > 0 {
     summary.push(failed_badge(failed))

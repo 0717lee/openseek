@@ -20,6 +20,15 @@ fn tool_item(
 }
 
 ///|
+/// A step summary as it reaches the DOM: the ordinal in its own span — it
+/// carries the accent and the fixed numeral column — then the activity label.
+/// The span's opening tag is deliberately left out, so these assertions prove
+/// the ordinal is a separate element without pinning how attributes render.
+fn step_summary(step : Int, label : String) -> String {
+  "#\{step}</span> · \{label}"
+}
+
+///|
 test "capitalize is Unicode-safe on a non-BMP first char" {
   inspect(capitalize("hello world"), content="Hello world")
   // 🎉 = U+1F389, a surrogate pair. The old text[1:] sliced into it — corrupt
@@ -260,10 +269,10 @@ test "durable assistant sequences render as separate foldable steps" {
   let notice_markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(children["activity\u{0}after\u{0}s2\u{0}o1"])
   })
-  assert_true(first_markup.contains("#1 ·"))
+  assert_true(first_markup.contains(step_summary(1, "")))
   assert_true(first_markup.contains("first thought"))
   assert_false(first_markup.contains("second thought"))
-  assert_true(second_markup.contains("#2 ·"))
+  assert_true(second_markup.contains(step_summary(2, "")))
   assert_true(second_markup.contains("second thought"))
   assert_false(second_markup.contains("first thought"))
   assert_true(notice_markup.contains("Goal set"))
@@ -314,14 +323,14 @@ test "live step hands off to its durable assistant card key" {
   let first_markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(live["activity\u{0}after\u{0}s1\u{0}o0"])
   })
-  assert_true(first_markup.contains("#1 · Read moon.mod"))
+  assert_true(first_markup.contains(step_summary(1, "Read moon.mod")))
   assert_true(first_markup.contains("<details class=\"activity\""))
   let handoff_key = "activity\u{0}after\u{0}s2\u{0}o0"
   assert_true(live.get(handoff_key) is Some(_))
   let live_markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(live[handoff_key])
   })
-  assert_true(live_markup.contains("#2 · Thinking…"))
+  assert_true(live_markup.contains(step_summary(2, "Thinking…")))
   assert_true(live_markup.contains("<details class=\"activity\" open"))
 
   let settled_input = {
@@ -355,7 +364,7 @@ test "live step hands off to its durable assistant card key" {
   let settled_markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(settled[handoff_key])
   })
-  assert_true(settled_markup.contains("#2 · Thought"))
+  assert_true(settled_markup.contains(step_summary(2, "Thought")))
   assert_true(settled_markup.contains("next thought"))
   assert_false(settled_markup.contains("<details class=\"activity\" open"))
 }
@@ -444,21 +453,21 @@ test "an ambiguous commit-first prefix keeps live reasoning visible" {
   let markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(children["activity\u{0}after\u{0}s1\u{0}o0"])
   })
-  assert_true(markup.contains("#1 · Read"))
+  assert_true(markup.contains(step_summary(1, "Read")))
   assert_true(markup.contains("complete thought"))
   assert_false(markup.contains("activity-thinking-live"))
   assert_false(markup.contains("#2"))
   let later_markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(children["activity\u{0}after\u{0}s2\u{0}o1"])
   })
-  assert_true(later_markup.contains("#2 · Thought"))
+  assert_true(later_markup.contains(step_summary(2, "Thought")))
   assert_true(later_markup.contains("later thought"))
   assert_false(later_markup.contains("activity-thinking-live"))
   assert_false(later_markup.contains("#3"))
   let live_markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(children["activity\u{0}after\u{0}s3\u{0}o1"])
   })
-  assert_true(live_markup.contains("#3 · Thinking…"))
+  assert_true(live_markup.contains(step_summary(3, "Thinking…")))
   assert_true(live_markup.contains("complete"))
   assert_true(live_markup.contains("activity-thinking-live"))
 }
