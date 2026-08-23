@@ -34,17 +34,7 @@ fn submit_review_tool(
 /// violations both reject, so the model retries instead of finishing with no
 /// report.
 fn parse_submission(args : Json) -> Result[ReviewReport, Array[String]] {
-  match ReviewReport::parse(args) {
-    Err(msg) => Err([msg])
-    Ok(report) => {
-      let problems = report.validate()
-      if problems.length() > 0 {
-        Err(problems)
-      } else {
-        Ok(report)
-      }
-    }
-  }
+  @agent_subrun.validated(ReviewReport::parse(args), ReviewReport::validate)
 }
 
 ///|

@@ -24,17 +24,7 @@ fn submit_answer_tool(
 
 ///|
 fn parse_submission(args : Json) -> Result[ExploreReport, Array[String]] {
-  match ExploreReport::parse(args) {
-    Err(msg) => Err([msg])
-    Ok(report) => {
-      let problems = report.validate()
-      if problems.length() > 0 {
-        Err(problems)
-      } else {
-        Ok(report)
-      }
-    }
-  }
+  @agent_subrun.validated(ExploreReport::parse(args), ExploreReport::validate)
 }
 
 ///|

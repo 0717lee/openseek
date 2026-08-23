@@ -1,4 +1,26 @@
 ///|
+/// The `parse` a capture tool wants, assembled from a report's own decoder
+/// and contract validator: a decode failure becomes a single problem, and a
+/// decoded-but-invalid report becomes the validator's problem list. Both
+/// reject, so the model retries instead of finishing with an unusable report.
+pub fn[T] validated(
+  parsed : Result[T, String],
+  validate : (T) -> Array[String],
+) -> Result[T, Array[String]] {
+  match parsed {
+    Err(message) => Err([message])
+    Ok(report) => {
+      let problems = validate(report)
+      if problems.is_empty() {
+        Ok(report)
+      } else {
+        Err(problems)
+      }
+    }
+  }
+}
+
+///|
 /// Build a submit-style capture tool: the child calls it exactly once with
 /// its structured result; `parse` validates, a valid value is captured into
 /// the runner-owned ref, and the run ends via `Control(Finish)`. Invalid

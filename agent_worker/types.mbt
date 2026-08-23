@@ -121,20 +121,14 @@ test "validate accepts a good report and rejects contract violations" {
 
 ///|
 /// Parse AND validate in one step — the parent tool re-checks the contract
-/// at the trust boundary exactly as the child's capture tool enforced it.
+/// at the trust boundary exactly as the child's capture tool enforced it, so
+/// both go through the same `parse_submission`; only the error shape differs.
 pub fn WorkerReport::parse_validated(
   json : Json,
 ) -> Result[WorkerReport, String] {
-  match WorkerReport::parse(json) {
-    Err(msg) => Err(msg)
-    Ok(report) => {
-      let problems = report.validate()
-      if problems.length() > 0 {
-        Err(problems.join("; "))
-      } else {
-        Ok(report)
-      }
-    }
+  match parse_submission(json) {
+    Err(problems) => Err(problems.join("; "))
+    Ok(report) => Ok(report)
   }
 }
 
