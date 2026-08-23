@@ -3898,6 +3898,11 @@ fn update_msg(
         (@cmd.none, model)
       }
     }
+    // A transcript link naming a session on the device already focused. It
+    // delegates rather than duplicating: the sub-run child this opens is an
+    // ordinary durable session, and `OpenSession` is how one is opened.
+    OpenSessionHere(session_id) =>
+      update_msg(dispatch, OpenSession(model.focused, session_id), model)
     OpenSession(channel, session_id) =>
       // Selecting a conversation always returns to the chat — including
       // re-selecting the active one from the Skills page. The explicit channel
@@ -4829,33 +4834,81 @@ fn update_device_msg(
       } else {
         (@cmd.none, model)
       }
-    // A running sub-run advanced: refresh its lane in place. An id with no
-    // lane is a push that outraced (or outlived) its brackets — dropped, not
-    // resurrected, since only a bracket knows a sub-run exists.
+    // A running sub-run advanced. Two independent readers care: the PARENT's
+    // dock lane, and — when the reader is looking at the child itself — the
+    // CHILD's transcript. Neither is a precondition for the other. A lane
+    // whose parent conversation is gone must not suppress the refresh of a
+    // child on screen, and a child nobody is viewing must not suppress the
+    // lane.
     SubrunProgressed(id~, session~, steps~, activity~) => {
       // Route by the CHILD session id, not by the sub-run id: `sr-N` is only
       // unique within its parent engine, so two conversations can both have
       // an `sr-1` in flight. The conversation on screen is not necessarily
       // the one that launched this child either — a background turn keeps
       // running while the user reads something else.
-      guard @transcript.subrun_parent(session) is Some(parent) &&
-        model.find_conversation(channel, parent) is Some(conv) else {
+      //
+      // An id with no lane is a push that outraced (or outlived) its
+      // brackets — dropped, not resurrected, since only a bracket knows a
+      // sub-run exists.
+      let model = if @transcript.subrun_parent(session) is Some(parent) &&
+        model.find_conversation(channel, parent) is Some(conv) {
+        let subruns = conv.turn.subruns.map(lane => {
+          if lane.id == id {
+            { ..lane, steps, activity }
+          } else {
+            lane
+          }
+        })
+        if subruns == conv.turn.subruns {
+          model
+        } else {
+          model.replace_conversation({ ..conv, turn: { ..conv.turn, subruns, } })
+        }
+      } else {
+        model
+      }
+      // The child writes its record in a process the host manages no writer
+      // for, so no follower broadcasts its commits (`internal/engine/follower`
+      // runs one per host-managed writer) and `session.load` answered it with
+      // a one-shot read. Without this, a transcript opened mid-run sits frozen
+      // at the snapshot it arrived with. This probe push is the only signal
+      // the host has that the child moved, so it is also the only thing that
+      // can drive the catch-up.
+      //
+      // `active_session` alone does not mean visible: a reader on Skills or
+      // Settings has one, and reloading behind those screens would be work
+      // nobody can see.
+      guard model.screen is Chat &&
+        channel == model.focused &&
+        session == model.active_session &&
+        model.find_conversation(channel, session) is Some(child) &&
+        model.can_reload_transcript(child) else {
         return (@cmd.none, model)
       }
-      let subruns = conv.turn.subruns.map(lane => {
-        if lane.id == id {
-          { ..lane, steps, activity }
-        } else {
-          lane
-        }
-      })
-      if subruns == conv.turn.subruns {
-        (@cmd.none, model)
-      } else {
-        (
-          @cmd.none,
-          model.replace_conversation({ ..conv, turn: { ..conv.turn, subruns, } }),
-        )
+      // Coalesce rather than drop. `begin_transcript_reload` is single-flight
+      // and answers a signal arriving mid-read with `None`, which is right for
+      // a user re-selecting a row and wrong here: the probe publishes only
+      // when the child ADVANCED, so a dropped signal can be the last one ever
+      // sent — a child that then finishes would strand this transcript one
+      // step short with nothing left to correct it.
+      let (next, generation) = model.ensure_transcript_reload_after_current(
+        child,
+      )
+      match generation {
+        // A background refresh, never `activate_on_success`: the foreground
+        // path pulls the UI to Chat, calls `Model::activate` (pruning other
+        // conversations and clearing their unseen-finish marks), and remounts
+        // the transcript component — which is what preserves a reader's scroll
+        // and open disclosures. None of that belongs on a progress tick.
+        Some(generation) =>
+          (
+            session_snapshot_command(
+              dispatch, channel, next, session, generation, false,
+            ),
+            next,
+          )
+        // Already reloading; the follow-up generation is now armed.
+        None => (@cmd.none, next)
       }
     }
     SkillsChanged =>
@@ -18309,4 +18362,149 @@ test "full-screen modals hide the native view and closing restores it" {
   )
   assert_true(searching.quick_open.is_open())
   assert_true(searching.browser_pane.shown is None)
+}
+
+///|
+/// Test-only: a page whose parent conversation owns one sub-run lane and whose
+/// store also holds that sub-run's child transcript.
+fn subrun_page(active~ : String, child_sync? : TranscriptSync) -> Model {
+  let lane : @subrun.Lane = {
+    id: "sr-1",
+    kind: "explore",
+    label: "where is X",
+    steps: 0,
+    activity: "",
+    run: Some("r7"),
+  }
+  let base = running_conversation()
+  let parent = { ..base, turn: { ..base.turn, subruns: [lane] } }
+  let child = {
+    ..empty_conversation(
+      @interop.ChannelId::Local,
+      "desktop-test-sr-1",
+      @interop.ChannelId::Local.test_project(),
+    )
+    // A child already read once. The positive watermark is what proves a
+    // durable record exists, which is `can_reload_transcript`'s gate.
+    ,
+    watermark: 4,
+    sync: child_sync.unwrap_or(Synced),
+  }
+  {
+    ..test_model().replace_conversation(parent).replace_conversation(child),
+    active_session: active,
+  }
+}
+
+///|
+fn subrun_child_of(model : Model) -> Conversation raise {
+  guard model.find_conversation(@interop.ChannelId::Local, "desktop-test-sr-1")
+    is Some(child) else {
+    fail("expected the sub-run's child conversation")
+  }
+  child
+}
+
+///|
+test "a sub-run's progress refreshes the child transcript on screen" {
+  // No follower broadcasts a child's commits, so this probe push is the only
+  // thing that can move a transcript the reader opened mid-run.
+  let (_, next) = update_dev(
+    test_dispatch(),
+    SubrunProgressed(
+      id="sr-1",
+      session="desktop-test-sr-1",
+      steps=3,
+      activity="shell",
+    ),
+    subrun_page(active="desktop-test-sr-1"),
+  )
+  guard subrun_child_of(next).sync is Reloading(reload_after_current=false, ..) else {
+    fail("expected the viewed child to start a background reload")
+  }
+  // The parent's lane still advances: the two readers are independent.
+  guard next.find_conversation(@interop.ChannelId::Local, "desktop-test")
+    is Some(parent) else {
+    fail("expected the parent conversation to survive")
+  }
+  assert_eq(parent.turn.subruns[0].steps, 3)
+  assert_eq(parent.turn.subruns[0].activity, "shell")
+}
+
+///|
+test "a sub-run's progress leaves a child nobody is viewing alone" {
+  // Reading the parent while its child works is the ordinary case; re-reading
+  // a record no one is looking at is work with no reader.
+  let (_, next) = update_dev(
+    test_dispatch(),
+    SubrunProgressed(
+      id="sr-1",
+      session="desktop-test-sr-1",
+      steps=3,
+      activity="shell",
+    ),
+    subrun_page(active="desktop-test"),
+  )
+  assert_true(subrun_child_of(next).sync is Synced)
+  guard next.find_conversation(@interop.ChannelId::Local, "desktop-test")
+    is Some(parent) else {
+    fail("expected the parent conversation to survive")
+  }
+  assert_eq(parent.turn.subruns[0].steps, 3)
+}
+
+///|
+test "progress during an in-flight read is coalesced, not dropped" {
+  // `begin_transcript_reload` would answer this with `None` and lose the
+  // signal. The probe publishes only when the child ADVANCED, so a dropped
+  // signal can be the last one ever sent — the transcript would then sit one
+  // step short with nothing left to correct it.
+  let (_, next) = update_dev(
+    test_dispatch(),
+    SubrunProgressed(
+      id="sr-1",
+      session="desktop-test-sr-1",
+      steps=3,
+      activity="shell",
+    ),
+    subrun_page(
+      active="desktop-test-sr-1",
+      child_sync=Reloading(
+        generation=1,
+        attempt=1,
+        buffered=[],
+        reload_after_current=false,
+      ),
+    ),
+  )
+  guard subrun_child_of(next).sync
+    is Reloading(generation=1, reload_after_current=true, ..) else {
+    fail("expected the in-flight read to be followed by one fresh generation")
+  }
+}
+
+///|
+test "a lane whose parent is gone still refreshes the child on screen" {
+  // The lane update must not be a precondition for the refresh: they answer
+  // to different conversations.
+  let page = subrun_page(active="desktop-test-sr-1")
+  let orphaned = {
+    ..page,
+    conversations: page.conversations.filter(conv => {
+      conv.session_id != "desktop-test"
+    }),
+  }
+  let (_, next) = update_dev(
+    test_dispatch(),
+    SubrunProgressed(
+      id="sr-1",
+      session="desktop-test-sr-1",
+      steps=3,
+      activity="shell",
+    ),
+    orphaned,
+  )
+  guard subrun_child_of(next).sync is Reloading(..) else {
+    fail("expected the viewed child to reload without its parent")
+  }
 }

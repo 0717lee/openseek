@@ -64,6 +64,7 @@ test "transcript markup exposes conversation identity" {
     overview_emit=@cmd.Emit(_ => @cmd.none),
     _ => @cmd.none,
     _ => @cmd.none,
+    _ => @cmd.none,
     on_jump_latest=@cmd.none,
   )
   let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
@@ -112,6 +113,7 @@ test "transcript stream children use stable typed keys in display order" {
     input,
     on_open: _ => @cmd.none,
     on_jump: _ => @cmd.none,
+    on_open_session: _ => @cmd.none,
   }
   let keys = renderer.stream_children().to_array().map(pair => pair.0)
   assert_eq(keys, [
@@ -252,6 +254,7 @@ test "durable assistant sequences render as separate foldable steps" {
     input,
     on_open: _ => @cmd.none,
     on_jump: _ => @cmd.none,
+    on_open_session: _ => @cmd.none,
   }
   let children = renderer.stream_children()
   let keys = children.to_array().map(pair => pair.0)
@@ -318,6 +321,7 @@ test "live step hands off to its durable assistant card key" {
     input: live_input,
     on_open: _ => @cmd.none,
     on_jump: _ => @cmd.none,
+    on_open_session: _ => @cmd.none,
   }
   let live = live_renderer.stream_children()
   let first_markup = @rabbita.render_to_string(() => {
@@ -442,8 +446,12 @@ test "an ambiguous commit-first prefix keeps live reasoning visible" {
     streaming_identity="r7",
   )
   let children = (
-    { input, on_open: _ => @cmd.none, on_jump: _ => @cmd.none } :
-    TranscriptRenderer).stream_children()
+    {
+      input,
+      on_open: _ => @cmd.none,
+      on_jump: _ => @cmd.none,
+      on_open_session: _ => @cmd.none,
+    } : TranscriptRenderer).stream_children()
   let keys = children.to_array().map(pair => pair.0)
   assert_eq(keys, [
     "row\u{0}s1\u{0}o0", "rule\u{0}s1\u{0}o0", "activity\u{0}after\u{0}s1\u{0}o0",
@@ -494,6 +502,7 @@ test "live reasoning is plain text and keeps the durable activity key" {
     input: live_input,
     on_open: _ => @cmd.none,
     on_jump: _ => @cmd.none,
+    on_open_session: _ => @cmd.none,
   }
   let live_children = live_renderer.stream_children()
   assert_true(live_children.get("activity\u{0}after\u{0}s1\u{0}o0") is Some(_))
@@ -1266,4 +1275,121 @@ test "tool output truncation keeps the head and tail around a skip marker" {
   assert_true(bounded.has_prefix("x".repeat(12_000)))
   assert_true(bounded.has_suffix("x".repeat(8_000)))
   assert_true(bounded.contains("10000 UTF-16 code units skipped"))
+}
+
+///|
+/// One durable model step whose only tool call is a sub-run result.
+fn subrun_step(session~ : String, source~ : Source) -> Map[String, @html.Html] {
+  let rows : Array[VisibleRow] = [
+    {
+      item: { kind: User, content: "find it", ts: None, sequence: Some(1) },
+      identity: "s1\u{0}o0",
+    },
+    {
+      item: {
+        kind: Tool(
+          call_id="c1",
+          name="explore",
+          arguments=Some("{}"),
+          has_result=true,
+          is_error=false,
+          brief=Some("explore sr-2 (1 citation(s), 7 step(s))"),
+        ),
+        content: "report",
+        ts: None,
+        sequence: Some(2),
+      },
+      identity: "s2\u{0}o0",
+    },
+  ]
+  let input = Input(
+    source~,
+    focused=@interop.ChannelId::Local,
+    active_session=session,
+    root=None,
+    submission_generation=1,
+    items=rows,
+    streaming_response=None,
+    streaming_identity="idle",
+  )
+  (
+    {
+      input,
+      on_open: _ => @cmd.none,
+      on_jump: _ => @cmd.none,
+      on_open_session: _ => @cmd.none,
+    } : TranscriptRenderer).stream_children()
+}
+
+///|
+#warnings("-alert_unstable")
+test "a sub-run card links the child transcript it names" {
+  let children = subrun_step(session="run", source=OpenSeek)
+  let markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(children["activity\u{0}after\u{0}s1\u{0}o0"])
+  })
+  assert_true(markup.contains("subrun-chip"))
+  // The child id is the parent's plus the brief's `sr-N`, and it reaches the
+  // reader as the button's title — the chip's own text names no session.
+  assert_true(markup.contains("run-sr-2"))
+}
+
+///|
+#warnings("-alert_unstable")
+test "only an OpenSeek transcript can name a sub-run child" {
+  // Codex writes no `<parent>-sr-N` records, so a brief that happens to read
+  // like one must not offer a link to a session that cannot exist.
+  let children = subrun_step(session="run", source=Codex)
+  let markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(children["activity\u{0}after\u{0}s1\u{0}o0"])
+  })
+  assert_false(markup.contains("subrun-chip"))
+}
+
+///|
+#warnings("-alert_unstable")
+test "an ordinary tool card carries no sub-run link" {
+  let rows : Array[VisibleRow] = [
+    {
+      item: { kind: User, content: "read it", ts: None, sequence: Some(1) },
+      identity: "s1\u{0}o0",
+    },
+    {
+      item: {
+        kind: Tool(
+          call_id="c1",
+          name="read",
+          arguments=Some("{}"),
+          has_result=true,
+          is_error=false,
+          brief=Some("read moon.mod"),
+        ),
+        content: "result",
+        ts: None,
+        sequence: Some(2),
+      },
+      identity: "s2\u{0}o0",
+    },
+  ]
+  let input = Input(
+    source=OpenSeek,
+    focused=@interop.ChannelId::Local,
+    active_session="run",
+    root=None,
+    submission_generation=1,
+    items=rows,
+    streaming_response=None,
+    streaming_identity="idle",
+  )
+  let children = (
+    {
+      input,
+      on_open: _ => @cmd.none,
+      on_jump: _ => @cmd.none,
+      on_open_session: _ => @cmd.none,
+    } : TranscriptRenderer).stream_children()
+  let markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(children["activity\u{0}after\u{0}s1\u{0}o0"])
+  })
+  assert_false(markup.contains("subrun-chip"))
 }

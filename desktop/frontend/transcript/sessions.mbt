@@ -167,6 +167,36 @@ pub fn subrun_parent(id : String) -> String? {
 }
 
 ///|
+/// The child session a sub-run tool result names, or `None` for every other
+/// result. `parent` is the session the result was recorded in, because an
+/// `sr-N` is only unique within its own engine.
+///
+/// The contract is the brief the `explore`/`review`/`subtask` tools stamp:
+/// `"<tool> sr-N (…)"` (see `agent_explore/tool.mbt`). A brief is display-only
+/// metadata — the model never sees one — so reading it here cannot change what
+/// a run did, and a brief that does not match simply yields no link.
+///
+/// This is the inverse of `subrun_label`: that turns a child session id into
+/// the `sr-N` a sidebar row shows, this turns the `sr-N` a brief shows back
+/// into the child session id that row opens.
+pub fn subrun_child_session(
+  tool_name : String,
+  brief : String,
+  parent~ : String,
+) -> String? {
+  guard tool_name is ("explore" | "review" | "subtask") else { return None }
+  guard !parent.is_empty() else { return None }
+  let tokens = brief.split(" ").collect()
+  guard tokens.get(1) is Some(token) else { return None }
+  guard token.has_prefix("sr-") else { return None }
+  let digits = token.view(start_offset=3)
+  guard !digits.is_empty() && digits.iter().all(c => c.is_ascii_digit()) else {
+    return None
+  }
+  Some("\{parent}-\{token}")
+}
+
+///|
 /// Order two sub-run ordinal paths: by ordinal at the first position they
 /// differ, then by depth, so `sr-2` precedes `sr-10` and a child precedes
 /// its own grandchildren.
@@ -789,6 +819,58 @@ test "a sub-run's progress routes by its child session, not its bare id" {
   assert_eq(subrun_parent("desktop-b-sr-1"), Some("desktop-b"))
   // An ordinary session is nobody's child, so nothing routes to it.
   assert_eq(subrun_parent("desktop-a"), None)
+}
+
+///|
+test "a sub-run brief names the child session its card links to" {
+  // The stamp `agent_explore` writes: `"<tool> sr-N (…)"`.
+  assert_eq(
+    subrun_child_session(
+      "explore",
+      "explore sr-2 (1 citation(s), 7 step(s))",
+      parent="run",
+    ),
+    Some("run-sr-2"),
+  )
+  assert_eq(
+    subrun_child_session("review", "review sr-11 (ok)", parent="desktop-a"),
+    Some("desktop-a-sr-11"),
+  )
+  // Round-trips with the inverse: the id this yields is the id whose row is
+  // labelled with the `sr-N` the brief carried.
+  assert_eq(subrun_label("run-sr-2"), Some("sr-2"))
+  assert_eq(subrun_parent("run-sr-2"), Some("run"))
+}
+
+///|
+test "a brief that does not name a sub-run yields no link" {
+  // Not a sub-run tool, however the brief happens to read.
+  assert_eq(subrun_child_session("read", "read sr-2", parent="run"), None)
+  // The tool is right but the brief is not the stamped shape.
+  assert_eq(subrun_child_session("explore", "explore", parent="run"), None)
+  assert_eq(
+    subrun_child_session("explore", "explore (budget exhausted)", parent="run"),
+    None,
+  )
+  // `sr-` with nothing, or with something that is not an ordinal, is not a
+  // sub-run id — linking on it would offer a session that cannot exist.
+  assert_eq(
+    subrun_child_session("explore", "explore sr- (x)", parent="run"),
+    None,
+  )
+  assert_eq(
+    subrun_child_session("explore", "explore sr-x (x)", parent="run"),
+    None,
+  )
+  assert_eq(
+    subrun_child_session("explore", "explore sr-2x (x)", parent="run"),
+    None,
+  )
+  // An unsaved conversation has no id to hang a child off.
+  assert_eq(
+    subrun_child_session("explore", "explore sr-2 (x)", parent=""),
+    None,
+  )
 }
 
 ///|

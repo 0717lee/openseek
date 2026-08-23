@@ -24,6 +24,8 @@ pub fn session_tree(Array[SessionListItem]) -> Array[SessionTreeRow]
 
 pub fn sessions_from_reply(@protocol.SessionsReply, @interop.ChannelId) -> Array[SessionListItem]
 
+pub fn subrun_child_session(String, String, parent~ : String) -> String?
+
 pub fn subrun_label(String) -> String?
 
 pub fn subrun_parent(String) -> String?

@@ -104,6 +104,20 @@ priv struct TranscriptRenderer {
   input : Input
   on_open : (String) -> @cmd.Cmd
   on_jump : (@mention_context.Target) -> @cmd.Cmd
+  on_open_session : (String) -> @cmd.Cmd
+}
+
+///|
+/// The context a sub-run tool card needs to link to its child transcript, or
+/// `None` when this transcript can hold no sub-run.
+///
+/// Only OpenSeek writes `<parent>-sr-N` child records; a Codex or legacy
+/// transcript with a coincidentally-shaped brief must not be given a link to a
+/// session that does not exist. An unsaved conversation has no parent id to
+/// hang a child off, and `subrun_child_session` rejects the empty parent.
+fn TranscriptRenderer::subrun_link(self : TranscriptRenderer) -> SubrunLink? {
+  guard self.input.source is OpenSeek else { return None }
+  Some({ parent: self.input.active_session, open: self.on_open_session })
 }
 
 ///|
@@ -208,7 +222,12 @@ fn TranscriptRenderer::stream_children(
         if !activity.is_empty() {
           items.set(
             TranscriptRenderKey::activity_after(left_boundary).wire(),
-            activity_view(activity, self.on_open, step_label="#\{step_number}"),
+            activity_view(
+              activity,
+              self.on_open,
+              step_label="#\{step_number}",
+              subrun?=self.subrun_link(),
+            ),
           )
         }
         // Assistant narration and final answers remain visible. The activity
@@ -254,7 +273,7 @@ fn TranscriptRenderer::stream_children(
       }
       items.set(
         TranscriptRenderKey::activity_after(left_boundary).wire(),
-        activity_view(run, self.on_open),
+        activity_view(run, self.on_open, subrun?=self.subrun_link()),
       )
       left_boundary = Some(visible[index - 1].identity)
     }

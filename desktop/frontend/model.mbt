@@ -1725,6 +1725,11 @@ priv enum Msg {
   // Open a conversation on one device's explicit channel, selecting that
   // channel first when it differs from the current one.
   OpenSession(@interop.ChannelId, String)
+  // Open a conversation on the channel already focused. A transcript link has
+  // only a session id to go on — the child session a sub-run tool card names
+  // belongs to the same device as the transcript that names it — and the
+  // component is built once, before any model exists to read a channel from.
+  OpenSessionHere(String)
   // Open a row from the archived index. Its workspace is part of the row's
   // durable placement and selects the archived twin without restoring it.
   OpenArchivedSession(

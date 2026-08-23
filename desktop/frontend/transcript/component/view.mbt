@@ -206,11 +206,12 @@ fn activity_view(
   live_reasoning? : String,
   reasoning_complete? : Bool = false,
   step_label? : String = "",
+  subrun? : SubrunLink,
 ) -> @html.Html {
   if step_label.is_empty() &&
     live_reasoning is None &&
     flatten_tool_activity(items) {
-    return @html.div(class="activity-row", [tool_line_view(items)])
+    return @html.div(class="activity-row", [tool_line_view(items, subrun?)])
   }
   let inline_tool = inline_singleton_tool(
     items,
@@ -226,13 +227,13 @@ fn activity_view(
         index = index + 1
       }
       if inline_tool is Some(tool) && tools.length() == 1 {
-        log.push(inline_tool_call_view(tool))
+        log.push(inline_tool_call_view(tool, subrun?))
       } else if !step_label.is_empty() {
         // The outer disclosure already groups this model step. Show each call
         // directly rather than adding a redundant second burst disclosure.
-        log.append(tools.map(tool_call_view))
+        log.append(tools.map(tool => tool_call_view(tool, subrun?)))
       } else {
-        log.push(tool_line_view(tools))
+        log.push(tool_line_view(tools, subrun?))
       }
     } else {
       // Reasoning; callers never pass user messages, assistant prose, or
@@ -329,9 +330,12 @@ fn activity_view(
 /// expands to the per-call arguments and outputs. A singleton is already one
 /// call disclosure, so it does not get a redundant burst disclosure around it.
 /// A burst with a failure starts open — the failure is what the reader came for.
-fn tool_line_view(tools : Array[@transcript.TranscriptItem]) -> @html.Html {
+fn tool_line_view(
+  tools : Array[@transcript.TranscriptItem],
+  subrun? : SubrunLink,
+) -> @html.Html {
   if tools.length() == 1 {
-    return tool_call_view(tools[0])
+    return tool_call_view(tools[0], subrun?)
   }
   let failed = count_failed(tools)
   let summary : Array[@html.Html] = [
@@ -342,7 +346,10 @@ fn tool_line_view(tools : Array[@transcript.TranscriptItem]) -> @html.Html {
   }
   @html.details(class="tool-line", open=failed > 0, [
     @html.summary(class="tool-line-summary", summary),
-    @html.div(class="tool-line-body", tools.map(tool_call_view)),
+    @html.div(
+      class="tool-line-body",
+      tools.map(tool => tool_call_view(tool, subrun?)),
+    ),
   ])
 }
 
@@ -352,20 +359,60 @@ fn tool_line_view(tools : Array[@transcript.TranscriptItem]) -> @html.Html {
 /// and the later result. Failed calls start open and read red. Calls from older
 /// sessions may have no recorded arguments; unmatched results keep their old
 /// output-only presentation.
-fn tool_call_view(item : @transcript.TranscriptItem) -> @html.Html {
-  tool_call_view_mode(item, show_label=true)
+fn tool_call_view(
+  item : @transcript.TranscriptItem,
+  subrun? : SubrunLink,
+) -> @html.Html {
+  tool_call_view_mode(item, show_label=true, subrun?)
 }
 
 ///|
 /// The enclosing activity summary already names this singleton tool.
-fn inline_tool_call_view(item : @transcript.TranscriptItem) -> @html.Html {
-  tool_call_view_mode(item, show_label=false)
+fn inline_tool_call_view(
+  item : @transcript.TranscriptItem,
+  subrun? : SubrunLink,
+) -> @html.Html {
+  tool_call_view_mode(item, show_label=false, subrun?)
+}
+
+///|
+/// What a sub-run tool card needs to offer its child transcript: the session
+/// this card is being rendered under (an `sr-N` is only unique within its own
+/// engine, so the child id cannot be derived without it), and the way to open
+/// another session.
+///
+/// Absent for every transcript source that has no sub-runs, which is also what
+/// keeps the chip out of the rendering tests that do not supply one.
+priv struct SubrunLink {
+  parent : String
+  open : (String) -> @cmd.Cmd
+}
+
+///|
+/// The chip linking a sub-run's tool card to the child's own transcript.
+///
+/// It leads the card body rather than sitting in the summary: the common
+/// shape for a sub-run is a step whose single tool call is inlined
+/// (`inline_tool_call_view`), which has no summary of its own, and a button
+/// inside a `<summary>` would have to fight that element's toggle activation.
+/// Leading the body puts it in the same place in both shapes.
+fn subrun_chip(child : String, open : (String) -> @cmd.Cmd) -> @html.Html {
+  @html.div(class="tool-call-section", [
+    @html.button(
+      class="subrun-chip",
+      type_="button",
+      title="Open this subagent's own transcript (\{child})",
+      on_click=open(child),
+      "↳ subagent transcript",
+    ),
+  ])
 }
 
 ///|
 fn tool_call_view_mode(
   item : @transcript.TranscriptItem,
   show_label~ : Bool,
+  subrun? : SubrunLink,
 ) -> @html.Html {
   guard item.kind is Tool(call_id~, name~, arguments~, is_error~, brief~, ..) else {
     return @html.text("")
@@ -380,6 +427,16 @@ fn tool_call_view_mode(
   let error_class = if is_error { " error" } else { "" }
   let body : Array[@html.Html] = []
   let mut content_in_tabs = false
+  // A sub-run result names the child session it spawned in its brief. The
+  // child's transcript is the only account of what the subagent actually did —
+  // this card holds its report, not its work — so the card leads with the way
+  // to go and read it.
+  if subrun is Some(link) &&
+    brief is Some(brief) &&
+    @transcript.subrun_child_session(name, brief, parent=link.parent)
+    is Some(child) {
+    body.push(subrun_chip(child, link.open))
+  }
   // A `plan` call shows the checklist it recorded rather than its JSON, in
   // every state where that checklist is what the model asked for. A pending
   // call qualifies: the card is a record of the call, and the missing Output
@@ -924,9 +981,15 @@ fn transcript_view(
   overview_emit~ : @cmd.Emit[@transcript_overview.Msg],
   on_open : (String) -> @cmd.Cmd,
   on_jump : (@mention_context.Target) -> @cmd.Cmd,
+  on_open_session : (String) -> @cmd.Cmd,
   on_jump_latest~ : @cmd.Cmd,
 ) -> @html.Html {
-  let renderer : TranscriptRenderer = { input, on_open, on_jump }
+  let renderer : TranscriptRenderer = {
+    input,
+    on_open,
+    on_jump,
+    on_open_session,
+  }
   let children = renderer.section_children(
     pinned, overview, overview_emit, on_jump_latest,
   )
