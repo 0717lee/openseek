@@ -1,6 +1,3 @@
-// Deliberate exports with no in-repo production consumer (see
-// shrink_package.md): test seams for the command mains' argument tests.
-
 ///|
 /// First parsed occurrence of option `name`. Command tables give every
 /// looked-up option a default, so a missing entry is a wiring bug in the

@@ -1,44 +1,30 @@
 ///|
 fn config_from_matches(matches : @argparse.Matches) -> @harness.Config raise {
-  let runs = parse_positive_int(value(matches, "runs"), "--runs")
-  let min_successes = parse_positive_int(
-    value(matches, "min-successes"),
+  let runs = @cli.parse_positive_int(@cli.value(matches, "runs"), "--runs")
+  let min_successes = @cli.parse_positive_int(
+    @cli.value(matches, "min-successes"),
     "--min-successes",
   )
   guard min_successes <= runs else { fail("--min-successes must be <= --runs") }
   Config(
-    api_key=value(matches, "api-key"),
-    model=@deepseek.Model::parse(value(matches, "model")),
+    api_key=@cli.value(matches, "api-key"),
+    model=@deepseek.Model::parse(@cli.value(matches, "model")),
     runs~,
-    concurrency=parse_positive_int(
-      value(matches, "concurrency"),
+    concurrency=@cli.parse_positive_int(
+      @cli.value(matches, "concurrency"),
       "--concurrency",
     ),
     min_successes~,
-    max_steps=parse_positive_int(value(matches, "max-steps"), "--max-steps"),
-    out_dir=value(matches, "out"),
-    repo_root=value(matches, "repo-root"),
-    prompt_label=value(matches, "prompt-label"),
-    system_prompt_file=value(matches, "system-prompt-file"),
-    system_prompt_addendum_file=value(matches, "system-prompt-addendum-file"),
+    max_steps=@cli.parse_positive_int(
+      @cli.value(matches, "max-steps"),
+      "--max-steps",
+    ),
+    out_dir=@cli.value(matches, "out"),
+    repo_root=@cli.value(matches, "repo-root"),
+    prompt_label=@cli.value(matches, "prompt-label"),
+    system_prompt_file=@cli.value(matches, "system-prompt-file"),
+    system_prompt_addendum_file=@cli.value(
+      matches, "system-prompt-addendum-file",
+    ),
   )
-}
-
-///|
-fn value(matches : @argparse.Matches, name : String) -> String raise {
-  match matches.values.get(name) {
-    Some([first, ..]) => first
-    _ => fail("missing parsed argument: \{name}")
-  }
-}
-
-///|
-fn parse_positive_int(input : String, label : String) -> Int raise {
-  let parsed = @string.parse_int(input) catch {
-    _ => fail("\{label} must be a positive integer, got: \{input}")
-  }
-  guard parsed > 0 else {
-    fail("\{label} must be a positive integer, got: \{input}")
-  }
-  parsed
 }

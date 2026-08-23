@@ -2,7 +2,7 @@
 async fn main {
   let matches = @argparse.parse(cli_command())
   if flag(matches, "analyze-only") {
-    let out_dir = value(matches, "out")
+    let out_dir = @cli.value(matches, "out")
     if @harness.suite_manifest_exists(out_dir) {
       let report = @harness.analyze_suite(out_dir)
       println(report.markdown())
@@ -18,7 +18,7 @@ async fn main {
     }
     return
   }
-  if value(matches, "suite-file") != "" {
+  if @cli.value(matches, "suite-file") != "" {
     let config = suite_config_from_matches(matches)
     let manifest = @harness.run_suite(config)
     println(
@@ -166,7 +166,7 @@ test "cli parses prompt and task options" {
 test "analyze-only mode does not require an api key" {
   let matches = cli_command().parse(argv=["--analyze-only", "--out", "existing"])
   assert_true(flag(matches, "analyze-only"))
-  assert_eq(value(matches, "out"), "existing")
+  assert_eq(@cli.value(matches, "out"), "existing")
 }
 
 ///|
@@ -174,8 +174,8 @@ test "cli parses suite file option" {
   let matches = cli_command().parse(argv=[
     "--api-key", "test-key", "--suite-file", "suite.json", "--out", "runs",
   ])
-  assert_eq(value(matches, "suite-file"), "suite.json")
-  assert_eq(value(matches, "out"), "runs")
+  assert_eq(@cli.value(matches, "suite-file"), "suite.json")
+  assert_eq(@cli.value(matches, "out"), "runs")
 }
 
 ///|
