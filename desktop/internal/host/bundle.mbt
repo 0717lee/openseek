@@ -8,6 +8,9 @@ const ProtonPackageFrontendEntryPath = "target/proton-package-input/assets/index
 const ProtonPackageRipgrepPath = "target/proton-package-input/bin/rg"
 
 ///|
+const ProtonPackageMoongrepPath = "target/proton-package-input/bin/moongrep"
+
+///|
 /// The installed directory containing the Desktop's packaged command-line
 /// tools. The value exists only when the pinned ripgrep asset is present, so
 /// an incomplete installed bundle cannot shadow the user's PATH with an empty
@@ -112,6 +115,36 @@ async fn ripgrep_command(executable : String?) -> String? {
   } else {
     None
   }
+}
+
+///|
+/// Locate the semantic-search provider beside the installed Host. A packaged
+/// `moongrep` binary serves installed bundles, mirroring the ripgrep layout;
+/// otherwise the provider resolves through `moonx` from PATH with a pinned
+/// mooncakes registry coordinate.
+///
+/// This is deliberately not fail-closed like ripgrep: moongrep ships no
+/// upstream release binaries, so a trial build has no asset to fail back on. A
+/// real bundle with a staged `moongrep` binary always wins; the `moonx` PATH
+/// fallback stays a documented interim provider until the package vendors a
+/// moongrep binary (or a bundled `moongrep.wasm` run through the packaged
+/// moonrun). The pinned coordinate keeps the version deterministic instead of
+/// silently running an arbitrary machine binary.
+async fn moongrep_command(executable : String?) -> String? {
+  guard executable is Some(executable) else { return Some("moonx") }
+  let command_dir = @pathx.Path(executable).dirname().resolve()
+  let candidates = [
+    command_dir.join("..").join("Resources").join(ProtonPackageMoongrepPath),
+    command_dir.join("moongrep.exe"),
+    command_dir.join("moongrep"),
+  ]
+  for candidate in candidates {
+    let path = candidate.normalize().to_string()
+    if @fs.exists(path) {
+      return Some(path)
+    }
+  }
+  Some("moonx")
 }
 
 ///|

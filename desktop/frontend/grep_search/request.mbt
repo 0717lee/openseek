@@ -1,26 +1,68 @@
 ///|
 priv suberror SearchRequestSub {
-  SearchRequest(
-    @interop.ConversationKey,
-    @protocol.SearchTextPayload,
-    Int,
-    @cmd.Emit[Msg]
-  )
+  SearchRequest(@interop.ConversationKey, SearchRequest, Int, @cmd.Emit[Msg])
 }
 
 ///|
-fn cancel_text_search(
+/// One armed search request, routed by mode. Text carries the ripgrep payload;
+/// Semantic carries the moongrep payload. Both share the session/generation
+/// fence so one panel owns both engines without replaying a stale reply of the
+/// other mode.
+priv enum SearchRequest {
+  Text(@protocol.SearchTextPayload)
+  Semantic(@protocol.SearchSemanticPayload)
+}
+
+///|
+fn SearchRequest::root_string(self : SearchRequest) -> String {
+  match self {
+    Text(payload) => payload.root
+    Semantic(payload) => payload.root
+  }
+}
+
+///|
+fn SearchRequest::generation(self : SearchRequest) -> Int {
+  match self {
+    Text(payload) => payload.generation
+    Semantic(payload) => payload.generation
+  }
+}
+
+///|
+priv enum LoadedReply {
+  TextLoaded(@protocol.SearchTextReply)
+  SemanticLoaded(@protocol.SearchSemanticReply)
+  RequestFailed(String)
+}
+
+///|
+fn cancel_search(
   owner : @interop.ConversationKey,
-  payload : @protocol.SearchTextPayload,
+  request : SearchRequest,
 ) -> Unit {
   @js.async_run(() => {
-    ignore(
-      @interop.bridge_request(owner.channel, @commands.fs_cancel_search_text, {
-        session_key: payload.session_key,
-        generation: payload.generation,
-      }),
-    ) catch {
-      _ => ()
+    match request {
+      Text(payload) =>
+        ignore(
+          @interop.bridge_request(
+            owner.channel,
+            @commands.fs_cancel_search_text,
+            { session_key: payload.session_key, generation: payload.generation },
+          ),
+        ) catch {
+          _ => ()
+        }
+      Semantic(payload) =>
+        ignore(
+          @interop.bridge_request(
+            owner.channel,
+            @commands.fs_cancel_search_semantic,
+            { session_key: payload.session_key, generation: payload.generation },
+          ),
+        ) catch {
+          _ => ()
+        }
     }
   })
 }
@@ -37,6 +79,8 @@ fn search_request_loader(
   let mut emit = emit
   let mut active = true
   let mut settled = false
+  let request_root = request.root_string()
+  let request_generation = request.generation()
   let timer = @dom.window().set_timeout(
     () => {
       guard active else { return }
@@ -44,48 +88,74 @@ fn search_request_loader(
         emit(
           RequestStarted(
             owner~,
-            root=request.root,
-            generation=request.generation,
+            root=request_root,
+            generation=request_generation,
           ),
         ),
       )
       @js.async_run(() => {
-        let reply = @interop.bridge_request(
-          owner.channel,
-          @commands.fs_search_text,
-          request,
-        ) catch {
-          error => {
-            settled = true
-            if active {
-              let message = @interop.bridge_error_text(error)
+        let loaded : LoadedReply = match request {
+          Text(payload) =>
+            LoadedReply::TextLoaded(
+              @interop.bridge_request(
+                owner.channel,
+                @commands.fs_search_text,
+                payload,
+              ),
+            ) catch {
+              error =>
+                LoadedReply::RequestFailed(@interop.bridge_error_text(error))
+            }
+          Semantic(payload) =>
+            LoadedReply::SemanticLoaded(
+              @interop.bridge_request(
+                owner.channel,
+                @commands.fs_search_semantic,
+                payload,
+              ),
+            ) catch {
+              error =>
+                LoadedReply::RequestFailed(@interop.bridge_error_text(error))
+            }
+        }
+        settled = true
+        if active {
+          match loaded {
+            LoadedReply::RequestFailed(message) =>
               scheduler.add(
                 emit(
                   RequestFailed(
                     owner~,
-                    root=request.root,
-                    generation=request.generation,
+                    root=request_root,
+                    generation=request_generation,
                     code="request_failed",
                     message~,
                   ),
                 ),
               )
-            }
-            return
+            LoadedReply::TextLoaded(reply) =>
+              scheduler.add(
+                emit(
+                  Loaded(
+                    owner~,
+                    root=request_root,
+                    generation=request_generation,
+                    reply~,
+                  ),
+                ),
+              )
+            LoadedReply::SemanticLoaded(reply) =>
+              scheduler.add(
+                emit(
+                  SemanticLoaded(
+                    owner~,
+                    root=request_root,
+                    generation=request_generation,
+                    reply~,
+                  ),
+                ),
+              )
           }
-        }
-        settled = true
-        if active {
-          scheduler.add(
-            emit(
-              Loaded(
-                owner~,
-                root=request.root,
-                generation=request.generation,
-                reply~,
-              ),
-            ),
-          )
         }
       })
     },
@@ -96,7 +166,7 @@ fn search_request_loader(
       active = false
       @dom.window().clear_timeout(timer)
       if !settled {
-        cancel_text_search(owner, request)
+        cancel_search(owner, request)
       }
     },
     update_tagger: payload => {
@@ -111,8 +181,9 @@ fn search_request_loader(
 ///|
 /// Declare the request owned by the file editor's current Search inventory.
 /// Presentation changes do not unload it: switching Explorer modes, hiding the
-/// tree, or opening a Browser tab may leave an issued search running. Query and
-/// checkout generations still replace the subscription and cancel its child.
+/// tree, or opening a Browser tab may leave an issued search running. Query,
+/// mode, and checkout generations still replace the subscription and cancel
+/// its child.
 pub fn State::subscription(
   self : State,
   input : Input,
@@ -120,15 +191,26 @@ pub fn State::subscription(
 ) -> @sub.Sub {
   let page = self.page
   guard (page.phase is Debouncing || page.phase is Loading) &&
-    page.request_payload(input) is Some(payload) &&
     input.root is Some(root) &&
     @resource.belongs_to(root, input.owner.channel) else {
     return @sub.none
   }
+  let request = match page.mode {
+    Text =>
+      page
+      .text_request_payload(input)
+      .map(payload => SearchRequest::Text(payload))
+    Semantic =>
+      page
+      .semantic_request_payload(input)
+      .map(payload => SearchRequest::Semantic(payload))
+  }
+  guard request is Some(request) else { return @sub.none }
+  let request_root = request.root_string()
   @sub.custom_sub(
-    "grep-search:\{input.owner.channel.uri_authority()}:\{input.owner.session}:\{payload.root}:\{payload.generation}",
+    "grep-search:\{input.owner.channel.uri_authority()}:\{input.owner.session}:\{request_root}:\{request.generation()}:\{match page.mode { Text => "text"; Semantic => "semantic" }}",
     Local,
-    SearchRequestSub::SearchRequest(input.owner, payload, page.delay_ms, emit),
+    SearchRequestSub::SearchRequest(input.owner, request, page.delay_ms, emit),
     @sub.SubLoader(search_request_loader),
   )
 }

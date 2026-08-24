@@ -3,6 +3,8 @@
 // missing, null, malformed, and encoded behavior.
 
 ///|
+
+///|
 fn require_text_search_non_negative(
   value : Int,
   path : @json.JsonPath,
@@ -176,7 +178,8 @@ pub impl FromJson for SearchTextReply with fn from_json(json, path) {
           (path.add_key("error_message"), "expected non-empty error message"),
         )
       }
-      Some({ code, message })
+      let pair : TextSearchError = { code, message }
+      Some(pair)
     }
     _ =>
       raise JsonDecodeError(
