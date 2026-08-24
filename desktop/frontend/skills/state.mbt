@@ -161,9 +161,9 @@ pub fn State::handle(
       }
     }
     PreviewLoaded(request~, target~, content~) => {
-      guard self.preview is Loading(request=current, target~) &&
+      guard self.preview is Loading(request=current, target=current_target) &&
         current == request &&
-        preview_target_matches(self.preview, target) else {
+        current_target == target else {
         return (@cmd.none, self, None)
       }
       let cache = self.preview_cache.copy()
@@ -179,9 +179,9 @@ pub fn State::handle(
       )
     }
     PreviewFailed(request~, target~, message~) => {
-      guard self.preview is Loading(request=current, target~) &&
+      guard self.preview is Loading(request=current, target=current_target) &&
         current == request &&
-        preview_target_matches(self.preview, target) else {
+        current_target == target else {
         return (@cmd.none, self, None)
       }
       (
@@ -259,14 +259,6 @@ fn preview_request_id(preview : Preview) -> Int {
     Closed => 0
     Loading(request~, ..) | Ready(request~, ..) | Failed(request~, ..) =>
       request
-  }
-}
-
-///|
-fn preview_target_matches(preview : Preview, target : PreviewTarget) -> Bool {
-  match preview {
-    Loading(target=current, ..) => current == target
-    _ => false
   }
 }
 
