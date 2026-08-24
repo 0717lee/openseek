@@ -10,7 +10,7 @@ const DefaultRegistry = "https://mooncakes.io"
 ///|
 /// Keep preview parsing bounded so a malformed or unexpectedly large registry
 /// document cannot stall the frontend renderer.
-const MaxPreviewBytes = 512 * 1024
+const MaxPreviewBytes : Int = 512 * 1024
 
 ///|
 /// A registry or library failure with a user-facing message; the host's op
@@ -165,7 +165,7 @@ pub async fn fetch_skill_content(
   guard code == 200 else {
     raise SkillMarketError("SKILL.md request returned HTTP \{code}")
   }
-  guard data.length() <= MaxPreviewBytes else {
+  guard data.binary().length() <= MaxPreviewBytes else {
     raise SkillMarketError("SKILL.md is too large to preview")
   }
   data.text() catch {
