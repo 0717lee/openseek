@@ -16,11 +16,17 @@ fn fetch_catalog(
         @protocol.EmptyPayload::NoPayload,
       ) catch {
         error => {
-          scheduler.add(emit(CatalogFailed(@interop.bridge_error_text(error))))
+          scheduler.add(
+            emit(
+              CatalogFailed(channel~, message=@interop.bridge_error_text(error)),
+            ),
+          )
           return
         }
       }
-      scheduler.add(emit(CatalogLoaded(catalog_from_reply(reply))))
+      scheduler.add(
+        emit(CatalogLoaded(channel~, items=catalog_from_reply(reply))),
+      )
     })
   })
 }

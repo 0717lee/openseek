@@ -178,7 +178,7 @@ fn page(state : State, input : Input, emit : @cmd.Emit[Msg]) -> @html.Html {
   sections.push(group(icon_extensions, "Installed", installed_rows))
   let market_rows : Array[@html.Html] = []
   match state.catalog {
-    Idle | Loading =>
+    Idle | Loading(_) =>
       market_rows.push(
         @html.div(class="skills-empty", "Loading the skill catalog…"),
       )
@@ -204,7 +204,29 @@ fn page(state : State, input : Input, emit : @cmd.Emit[Msg]) -> @html.Html {
       }
     }
   }
-  sections.push(group(icon_package, "Mooncakes registry", market_rows))
+  let catalog_loading = match state.catalog {
+    Loading(channel~) => channel == input.channel
+    _ => false
+  }
+  sections.push(
+    @html.div(class="settings-group", [
+      @html.div(class="settings-group-head", [
+        icon(icon_package),
+        @html.h2("Mooncakes registry"),
+        @html.button(
+          class="secondary skills-refresh",
+          disabled=catalog_loading,
+          on_click=emit(RefreshCatalog),
+          if catalog_loading {
+            "Refreshing…"
+          } else {
+            "Refresh"
+          },
+        ),
+      ]),
+      @html.div(class="settings-group-card", market_rows),
+    ]),
+  )
   @html.section(class="skills-page", [
     @html.div(class="skills-page-inner", sections),
   ])
