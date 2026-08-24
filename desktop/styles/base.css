@@ -66,7 +66,8 @@ samp,
 }
 
 /* Every app-owned select uses the same popup surface and option semantics.
-   Individual pages only choose trigger geometry and menu placement. */
+   Individual pages only choose trigger geometry; the component measures the
+   visible room above and below before choosing menu placement. */
 .custom-select {
   position: relative;
   min-width: 0;
@@ -87,7 +88,11 @@ samp,
   position: absolute;
   z-index: var(--z-menu);
   display: grid;
-  max-height: min(360px, calc(100vh - 140px));
+  max-height: min(
+    360px,
+    calc(100vh - 140px),
+    var(--custom-select-available-height, 360px)
+  );
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -96,6 +101,16 @@ samp,
   border-radius: var(--radius-md);
   background: var(--color-bg-surface);
   box-shadow: var(--shadow-surface);
+}
+
+.custom-select-menu[data-placement="down"] {
+  top: calc(100% + 6px);
+  bottom: auto;
+}
+
+.custom-select-menu[data-placement="up"] {
+  top: auto;
+  bottom: calc(100% + 6px);
 }
 
 .custom-select-group + .custom-select-group {

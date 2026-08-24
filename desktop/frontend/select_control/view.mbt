@@ -72,6 +72,16 @@ fn Presentation::menu_class(self : Presentation) -> String {
 }
 
 ///|
+/// The initial direction prevents a misplaced first frame before the opened
+/// menu has been measured. Its AfterRender command may flip this value.
+fn Presentation::initial_placement(self : Presentation) -> String {
+  match self {
+    Composer(_, _) => "up"
+    Setting => "down"
+  }
+}
+
+///|
 fn Presentation::trigger_contents(
   self : Presentation,
   selected_label : String,
@@ -134,6 +144,79 @@ fn Control::focus(
 }
 
 ///|
+/// Place an opened menu on the side with more visible room. The viewport is
+/// intersected with every clipping ancestor, so a select inside the scrolling
+/// Settings page or setup modal reacts to that surface rather than assuming
+/// the whole window is available.
+fn Control::position_menu(self : Control) -> @cmd.Cmd {
+  @cmd.custom_cmd(
+    _ => {
+      guard @dom.document().get_element_by_id(self.root_id()).to_option()
+        is Some(root) &&
+        @dom.document().get_element_by_id(self.id).to_option() is Some(trigger) &&
+        @dom.document().get_element_by_id(self.menu_id()).to_option()
+        is Some(menu) else {
+        return
+      }
+      let window = @dom.window()
+      let mut visible_top = 0.0
+      let mut visible_bottom = window.inner_height().to_double()
+      if window.get_visual_viewport() is Some(viewport) {
+        visible_top = viewport.get_offset_top()
+        visible_bottom = visible_top + viewport.get_height()
+      }
+      let mut parent = root.get_parent_element()
+      while parent is Some(ancestor) {
+        let overflow = window
+          .get_computed_style(ancestor)
+          .get_property_value("overflow-y")
+        if overflow == "auto" ||
+          overflow == "scroll" ||
+          overflow == "hidden" ||
+          overflow == "clip" {
+          let rect = ancestor.get_bounding_client_rect()
+          let top = rect.get_top() + ancestor.get_client_top()
+          let bottom = top + ancestor.get_client_height()
+          if top > visible_top {
+            visible_top = top
+          }
+          if bottom < visible_bottom {
+            visible_bottom = bottom
+          }
+        }
+        parent = ancestor.get_parent_element()
+      }
+      let trigger_rect = trigger.get_bounding_client_rect()
+      let gap = 6.0
+      let above = trigger_rect.get_top() - visible_top - gap
+      let below = visible_bottom - trigger_rect.get_bottom() - gap
+      let (placement, available) = if below >= above {
+        ("down", below)
+      } else {
+        ("up", above)
+      }
+      menu.set_attribute("data-placement", placement)
+      let height = if available > 0.0 { available } else { 0.0 }
+      let style : @js.Value = @js.Value::cast_from(menu).get_with_string(
+        "style",
+      )
+      let _ : @js.Value = style.apply_with_string("setProperty", [
+        @js.Value::cast_from("--custom-select-available-height"),
+        @js.Value::cast_from("\{height.to_int()}px"),
+      ])
+    },
+    kind=@cmd.after_render,
+  )
+}
+
+///|
+/// Toggling changes whether the menu exists, so placement is measured only
+/// after Rabbita has committed that render.
+fn Control::toggle_menu(self : Control) -> @cmd.Cmd {
+  @cmd.batch([self.toggle, self.position_menu()])
+}
+
+///|
 /// Keep the menu open while Tab moves between its trigger and options. Once
 /// focus leaves the whole control (including a null target when the document
 /// loses focus), dismiss without moving focus back to the trigger.
@@ -184,7 +267,7 @@ fn Control::trigger_attrs(
         if self.open {
           self.focus(Some(index), false)
         } else {
-          @cmd.batch([self.toggle, self.focus(Some(index), true)])
+          @cmd.batch([self.toggle_menu(), self.focus(Some(index), true)])
         }
       }
       _ => @cmd.none
@@ -244,7 +327,7 @@ pub fn Control::render(self : Control) -> @html.Html {
       type_="button",
       title=self.title,
       disabled=self.disabled,
-      on_click=self.toggle,
+      on_click=self.toggle_menu(),
       attrs=self.trigger_attrs(selected_index, option_count),
       self.presentation.trigger_contents(selected_label),
     ),
@@ -311,7 +394,8 @@ pub fn Control::render(self : Control) -> @html.Html {
         attrs=@html.Attrs::build()
           .id(self.menu_id())
           .role("listbox")
-          .aria_label(self.aria_label),
+          .aria_label(self.aria_label)
+          .data_set("placement", self.presentation.initial_placement()),
         menu,
       ),
     )
