@@ -42,7 +42,11 @@ fn installed_row(
   )
   let children : Array[@html.Html] = [
     @html.div(class="skill-avatar", icon(icon_extensions)),
-    @html.div(class="skill-info", info),
+    @html.div(
+      class="skill-info skill-summary",
+      on_click=emit(PreviewInstalled(skill)),
+      info,
+    ),
   ]
   if skill.source.is_empty() {
     children.push(
@@ -76,6 +80,11 @@ fn installed_row(
         ),
       ]),
     )
+  }
+  if preview_matches(state, Installed(skill)) {
+    if preview_panel(state, emit) is Some(preview) {
+      children.push(preview)
+    }
   }
   @html.div(class="skill-row", children)
 }
@@ -132,11 +141,21 @@ fn market_row(
       ),
     ])
   }
-  @html.div(class="skill-row", title=item.repository, [
+  let children = [
     @html.div(class="skill-avatar", icon(icon_extensions)),
-    @html.div(class="skill-info", info),
+    @html.div(
+      class="skill-info skill-summary",
+      on_click=emit(PreviewMarket(item)),
+      info,
+    ),
     action,
-  ])
+  ]
+  if preview_matches(state, Market(item)) {
+    if preview_panel(state, emit) is Some(preview) {
+      children.push(preview)
+    }
+  }
+  @html.div(class="skill-row", title=item.repository, children)
 }
 
 ///|
@@ -196,6 +215,16 @@ fn preview_name(target : PreviewTarget) -> String {
   match target {
     Market(item) => item.name
     Installed(item) => item.name
+  }
+}
+
+///|
+fn preview_matches(state : State, target : PreviewTarget) -> Bool {
+  match state.preview {
+    Loading(target=current, ..)
+    | Ready(target=current, ..)
+    | Failed(target=current, ..) => current == target
+    Closed => false
   }
 }
 
@@ -317,9 +346,6 @@ fn page(state : State, input : Input, emit : @cmd.Emit[Msg]) -> @html.Html {
       @html.div(class="settings-group-card", market_rows),
     ]),
   )
-  if preview_panel(state, emit) is Some(preview) {
-    sections.push(preview)
-  }
   @html.section(class="skills-page", [
     @html.div(class="skills-page-inner", sections),
   ])
