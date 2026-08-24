@@ -75,7 +75,7 @@ samp,
 }
 
 ::selection {
-  background: var(--color-accent-soft);
+  background: var(--color-text-selection);
 }
 
 /* quiet scrollbars */

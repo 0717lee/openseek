@@ -13,7 +13,10 @@
   background: var(--color-bg-surface);
   border-top: 1px solid var(--color-separator);
 }
-.terminal-panel.open {
+/* The state remains open while Settings, Skills, or workspace settings are on
+   screen. Require the root layout's page-aware class too, so those pages hide
+   the persistent emulator without tearing down its tab or PTY. */
+.content.terminal-open > .terminal-panel.open {
   display: flex;
 }
 

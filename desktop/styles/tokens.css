@@ -60,6 +60,9 @@
   --color-on-accent-strong: #fff;
   --color-accent-soft: #eef2fe;
   --color-accent-border: #d6e0fd;
+  /* Text selection is shared by normal DOM text, the editor, and xterm.
+     xterm paints it on a canvas, so keep this opaque in both themes. */
+  --color-text-selection: #eef2fe;
 
   /* Status colors */
   --color-success: #1f8a5b;
@@ -175,6 +178,7 @@
     --color-on-accent-strong: #10131a;
     --color-accent-soft: #1e2740;
     --color-accent-border: #2f3e63;
+    --color-text-selection: #344a78;
 
     --color-success: #3fd089;
     --color-danger: #ff8a80;
@@ -211,6 +215,7 @@
   --color-on-accent-strong: #fff;
   --color-accent-soft: #eef2fe;
   --color-accent-border: #d6e0fd;
+  --color-text-selection: #eef2fe;
 
   --color-success: #1f8a5b;
   --color-danger: #c0453b;
@@ -242,6 +247,7 @@
   --color-on-accent-strong: #10131a;
   --color-accent-soft: #1e2740;
   --color-accent-border: #2f3e63;
+  --color-text-selection: #344a78;
 
   --color-success: #3fd089;
   --color-danger: #ff8a80;

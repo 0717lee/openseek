@@ -19,6 +19,16 @@ priv struct TermEntry {
 }
 
 ///|
+/// Live app typography and colors resolved into values xterm accepts.
+priv struct TerminalStyle {
+  font_family : String
+  font_size : Double
+  background : String
+  foreground : String
+  selection : String
+}
+
+///|
 /// The emulators' imperative state, keyed by tab key. `pending` buffers
 /// output chunks that arrived before any tab claimed their session id (the
 /// host streams from spawn, so a session's first output can beat the
@@ -58,8 +68,7 @@ fn xterm_module() -> @js.Value? {
 /// typography and palette through Rabbita's DOM package before crossing the
 /// xterm object boundary.
 fn terminal_style() -> @js.Value {
-  let (font_family, font_size, background, foreground) = match
-    @dom.document().get_document_element() {
+  let resolved : TerminalStyle = match @dom.document().get_document_element() {
     Some(root) => {
       let style = @dom.window().get_computed_style(root)
       let font_size_text = style
@@ -70,22 +79,45 @@ fn terminal_style() -> @js.Value {
         Some(value) => @string.parse_double(value) catch { _ => 13.0 }
         None => 13.0
       }
-      (
-        style.get_property_value("--font-family-mono").trim().to_owned(),
-        font_size,
-        style.get_property_value("--color-bg-surface").trim().to_owned(),
-        style.get_property_value("--color-text-primary").trim().to_owned(),
-      )
+      let font_family = style
+        .get_property_value("--font-family-mono")
+        .trim()
+        .to_owned()
+      let background = style
+        .get_property_value("--color-bg-surface")
+        .trim()
+        .to_owned()
+      let foreground = style
+        .get_property_value("--color-text-primary")
+        .trim()
+        .to_owned()
+      let selection = style
+        .get_property_value("--color-text-selection")
+        .trim()
+        .to_owned()
+      { font_family, font_size, background, foreground, selection }
     }
-    None => ("monospace", 13.0, "#ffffff", "#16171a")
+    None =>
+      {
+        font_family: "monospace",
+        font_size: 13.0,
+        background: "#ffffff",
+        foreground: "#16171a",
+        selection: "#eef2fe",
+      }
   }
   let theme = @js.Object::new()
-  theme["background"] = background
-  theme["foreground"] = foreground
-  theme["cursor"] = foreground
+  theme["background"] = resolved.background
+  theme["foreground"] = resolved.foreground
+  theme["cursor"] = resolved.foreground
+  // xterm's default selection is translucent white, which disappears against
+  // OpenSeek's white light-theme surface. Use the app's text-selection token
+  // so normal text, the editor, and the terminal stay visually consistent.
+  theme["selectionBackground"] = resolved.selection
+  theme["selectionInactiveBackground"] = resolved.selection
   let result = @js.Object::new()
-  result["fontFamily"] = font_family
-  result["fontSize"] = font_size
+  result["fontFamily"] = resolved.font_family
+  result["fontSize"] = resolved.font_size
   result["theme"] = theme.to_value()
   result.to_value()
 }
