@@ -1,7 +1,7 @@
 // One file location for Desktop language operations. The frontend supplies
 // the exact editor root and a path relative to it; the host keeps both the
 // lexical spelling used by Viewer resources and the physical spelling used
-// to contain symlinks before invoking MoonBit tooling.
+// when invoking MoonBit tooling through a symlinked root.
 
 ///|
 priv struct LanguagePath {
@@ -11,52 +11,15 @@ priv struct LanguagePath {
 }
 
 ///|
-/// Confirm that an explicit editor root is the checkout currently owned by
-/// `session`. Registered project roots, OpenSeek worktrees, and app-server
-/// authorized Codex cwd values all cross the same engine authority boundary.
-async fn LanguagePath::authorized_root(
-  session : String,
-  root : String,
-) -> @pathx.Absolute {
-  guard @pathx.Absolute::from_uri_path(root) is Some(lexical_root) else {
-    raise PayloadError("root must be absolute")
-  }
-  let lexical_root = lexical_root.normalize()
-  let authorized = match
-    @work_dir.resolve_in_workspace(
-      session,
-      "",
-      workspace=lexical_root.to_string(),
-    ) {
-    Some(root) => Some(root)
-    None => @work_dir.resolve_in_workspace(session, "")
-  }
-  guard authorized is Some(authorized) && authorized.normalize() == lexical_root else {
-    raise HostError("root is not authorized for this conversation")
-  }
-  lexical_root
-}
-
-///|
-/// Resolve one host-authorized editor root and relative file path. The
-/// physical containment check also rejects a symlink target leaving it.
-async fn LanguagePath::resolve(
-  session : String,
-  root : String,
-  path : String,
-) -> LanguagePath {
-  let lexical_root = LanguagePath::authorized_root(session, root)
-  guard @pathx.Path(path).to_absolute() is None else {
+/// Resolve the explicit editor root and relative file path to the physical
+/// spellings passed to Moon. Relative components keep their ordinary meaning:
+/// `..` and symlinks may address a file outside `root`.
+async fn LanguagePath::resolve(root : String, path : String) -> LanguagePath {
+  let lexical_root = WirePath::parse(root).absolute
+  guard @pathx.Path(path).to_relative() is Some(relative) else {
     raise PayloadError("path must be relative to root")
   }
-  let relative = @pathx.Relative(path).normalize()
-  guard !relative.is_root() else {
-    raise PayloadError("path must name a file below root")
-  }
   let lexical_file = lexical_root.join(relative).normalize()
-  guard lexical_root.contains(lexical_file) else {
-    raise HostError("path is outside root")
-  }
   let physical_root_text = @fs.realpath(lexical_root.to_string()) catch {
     error if @async.is_being_cancelled() => raise error
     _ => raise HostError("root is unavailable")
@@ -69,21 +32,28 @@ async fn LanguagePath::resolve(
     @pathx.Path(physical_file_text).to_absolute() is Some(physical_file) else {
     raise HostError("root or path is not a host absolute path")
   }
-  guard physical_file.relative_to(root=physical_root) is Some(physical_relative) &&
-    !physical_relative.is_root() else {
-    raise HostError("path is outside root")
+  guard physical_file
+    .to_path()
+    .relative(base=physical_root.to_path())
+    .to_relative()
+    is Some(physical_relative) else {
+    raise HostError("path cannot be addressed relative to root")
   }
-  { lexical_root, physical_root, physical_relative }
+  {
+    lexical_root,
+    physical_root,
+    physical_relative: physical_relative.normalize(),
+  }
 }
 
 ///|
-async test "language paths accept explicit roots and reject escapes" {
-  let root = @fs.tmpdir(prefix="openseek-language-root-")
-  let outside = @fs.tmpdir(prefix="openseek-language-outside-")
-  defer (@fs.rmdir(outside, recursive=true) catch { _ => () })
-  defer (@fs.rmdir(root, recursive=true) catch { _ => () })
-  defer (@work_dir.revoke_host_workspace("language-test") catch { _ => () })
+async test "language paths keep traversal and symlink targets relative to root" {
+  let fixture = @fs.tmpdir(prefix="openseek-language-path-")
+  let root = "\{fixture}/root"
+  let outside = "\{fixture}/outside"
+  defer (@fs.rmdir(fixture, recursive=true) catch { _ => () })
   @fs.mkdir("\{root}/src", recursive=true)
+  @fs.mkdir(outside, recursive=true)
   @fs.write_file(
     "\{root}/src/main.mbt",
     "fn main {}",
@@ -95,34 +65,10 @@ async test "language paths accept explicit roots and reject escapes" {
     create_mode=CreateOrTruncate,
   )
   @fs.symlink(target="\{outside}/secret.mbt", "\{root}/src/link.mbt")
-  let unauthorized_rejected = try {
-    ignore(LanguagePath::resolve("unbound", root, "src/main.mbt"))
-    false
-  } catch {
-    _ => true
-  } noraise {
-    rejected => rejected
-  }
-  @work_dir.authorize_host_workspace("language-test", root)
-  let resolved = LanguagePath::resolve("language-test", root, "src/main.mbt")
-  let traversal_rejected = try {
-    ignore(LanguagePath::resolve("language-test", root, "../outside.mbt"))
-    false
-  } catch {
-    _ => true
-  } noraise {
-    rejected => rejected
-  }
-  let symlink_rejected = try {
-    ignore(LanguagePath::resolve("language-test", root, "src/link.mbt"))
-    false
-  } catch {
-    _ => true
-  } noraise {
-    rejected => rejected
-  }
+  let resolved = LanguagePath::resolve(root, "src/main.mbt")
+  let traversal = LanguagePath::resolve(root, "../outside/secret.mbt")
+  let symlink = LanguagePath::resolve(root, "src/link.mbt")
   assert_eq(resolved.physical_relative, Relative("src/main.mbt"))
-  assert_true(unauthorized_rejected)
-  assert_true(traversal_rejected)
-  assert_true(symlink_rejected)
+  assert_eq(traversal.physical_relative, Relative("../outside/secret.mbt"))
+  assert_eq(symlink.physical_relative, Relative("../outside/secret.mbt"))
 }

@@ -35,8 +35,8 @@ fn MoonIdeQuery::subcommand(self : MoonIdeQuery) -> String {
 
 ///|
 /// The argv handed directly to the process API — never a shell string. `path`
-/// has already been reduced to a workspace-relative address, so an absolute
-/// client path cannot choose cwd or escape through the CLI.
+/// is relative to the supplied root and keeps ordinary `..` semantics without
+/// acquiring shell interpretation.
 fn MoonIdeQuery::args(
   self : MoonIdeQuery,
   path : String,
@@ -58,10 +58,9 @@ fn MoonIdeQuery::args(
 }
 
 ///|
-/// Resolve an already-absolute physical path below `workspace` to the CLI's
-/// normalized relative form. Normalizing before the containment check closes
-/// lexical `..` escapes; the async owner additionally canonicalizes both paths
-/// with `realpath` before calling this helper.
+/// Resolve an already-absolute physical path below `workspace` to its
+/// normalized relative form. This is used only to preserve a symlinked root's
+/// lexical spelling; paths elsewhere continue with their canonical spelling.
 fn moonide_relative_path(
   workspace : @pathx.Absolute,
   absolute : String,
@@ -80,18 +79,14 @@ fn moonide_relative_path(
 ///|
 /// Establish both root identities from the explicit editor root: the lexical
 /// spelling used by existing client models, and the canonical physical root
-/// used for CLI cwd, relative locations, and symlink containment.
+/// used for CLI cwd and relative locations.
 async fn resolve_moonide_request(
   payload : MoonIdeNavigationPayload,
 ) -> MoonIdeRequest {
   guard payload.line > 0 && payload.column > 0 else {
     raise PayloadError("line and column must be positive one-based integers")
   }
-  let location = LanguagePath::resolve(
-    payload.session,
-    payload.root,
-    payload.path,
-  )
+  let location = LanguagePath::resolve(payload.root, payload.path)
   {
     lexical_workspace: location.lexical_root,
     physical_workspace: location.physical_root,
@@ -244,26 +239,30 @@ fn parse_moonide_output(
 }
 
 ///|
-/// Map one already-canonical result from the physical security identity back
-/// to the supplied root's lexical spelling. This keeps model URIs aligned with
-/// `fs.read_file` even when that root itself is a symlink.
+/// Map an in-root canonical result back to the supplied root's lexical
+/// spelling so it stays aligned with existing file models. A result outside
+/// that root keeps its canonical host path.
 fn moonide_client_path(
   lexical_workspace : @pathx.Absolute,
   physical_workspace : @pathx.Absolute,
   physical_result : String,
 ) -> String? raise HostError {
-  guard moonide_relative_path(physical_workspace, physical_result)
-    is Some(relative) else {
+  if moonide_relative_path(physical_workspace, physical_result)
+    is Some(relative) {
+    return Some(
+      lexical_workspace.join(Relative(relative)).normalize().resource_path(),
+    )
+  }
+  guard @pathx.Path(physical_result).to_absolute() is Some(result) else {
     return None
   }
-  Some(lexical_workspace.join(Relative(relative)).normalize().resource_path())
+  Some(result.normalize().resource_path())
 }
 
 ///|
-/// Follow result symlinks and retain only files physically beneath the exact
-/// canonical workspace that owned the request. A safe result is mapped back
-/// to the lexical attached root before crossing the wire. Unreadable/stale
-/// paths are dropped, while line and column numbers pass through unchanged.
+/// Follow result symlinks and map files beneath the physical root back to its
+/// lexical spelling. Results elsewhere retain their canonical paths;
+/// unreadable or stale paths are dropped, while positions pass through.
 async fn canonical_moonide_locations(
   reply : MoonIdeLocationsReply,
   lexical_workspace : @pathx.Absolute,
@@ -365,7 +364,7 @@ test "Moon IDE commands use relative one-based locations without a shell" {
 }
 
 ///|
-test "Moon IDE relative paths normalize in-root paths and reject escapes" {
+test "Moon IDE relative paths identify files beneath a root" {
   let workspace = @pathx.Path("/workspace").resolve()
   assert_eq(
     moonide_relative_path(workspace, "/workspace/src/../main.mbt"),
@@ -380,7 +379,7 @@ test "Moon IDE relative paths normalize in-root paths and reject escapes" {
 }
 
 ///|
-test "Moon IDE parser expands ranges before physical security filtering" {
+test "Moon IDE parser expands valid ranges" {
   let workspace = @pathx.Path("/workspace").resolve()
   let reply = parse_moonide_output(
     (
@@ -432,7 +431,7 @@ test "Moon IDE parser expands ranges before physical security filtering" {
 }
 
 ///|
-test "physical Moon IDE results keep the supplied lexical root identity" {
+test "physical Moon IDE results keep in-root lexical identity" {
   let lexical = @pathx.Path("/attached/project-link").resolve()
   let physical = @pathx.Path("/private/projects/project").resolve()
   assert_eq(
@@ -441,11 +440,12 @@ test "physical Moon IDE results keep the supplied lexical root identity" {
     ),
     Some("/attached/project-link/src/main.mbt"),
   )
-  assert_true(
-    moonide_client_path(lexical, physical, "/private/projects/other/main.mbt")
-    is None,
+  assert_eq(
+    moonide_client_path(lexical, physical, "/private/projects/other/main.mbt"),
+    Some("/private/projects/other/main.mbt"),
   )
-  assert_true(
-    moonide_client_path(lexical, physical, "/private/projects/project") is None,
+  assert_eq(
+    moonide_client_path(lexical, physical, "/private/projects/project"),
+    Some("/private/projects/project"),
   )
 }
