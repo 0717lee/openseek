@@ -1406,8 +1406,8 @@ fn covering_overlay(model : Model) -> Bool {
 /// the pane is actually visible and uncovered. Native views z-order above
 /// all HTML, so anything the frontend draws over the pane area — the `+`
 /// launcher popup, the narrow layout's sidebar drawer, the topbar app
-/// launcher, the composer's git popover, and every `covering_overlay` — must
-/// hide the view rather than fight it.
+/// launcher, the composer's custom settings or Git popover, and every
+/// `covering_overlay` — must hide the view rather than fight it.
 fn desired_browser_view(model : Model) -> Int? {
   let conversation_screen = model.screen is Chat || model.screen is Codex
   let git_details_open = match model.screen {
@@ -1420,6 +1420,7 @@ fn desired_browser_view(model : Model) -> Int? {
     model.right_panel_open &&
     !model.right_panel_menu_open &&
     !model.launcher.open &&
+    model.composer_menu is None &&
     !git_details_open &&
     !(model.narrow && model.sidebar_open) &&
     !covering_overlay(model) else {
@@ -1588,6 +1589,7 @@ fn update(
     {
       ..model,
       composer_context_generation: previous.composer_context_generation + 1,
+      composer_menu: None,
     }
   } else {
     model
@@ -2437,10 +2439,28 @@ fn update_msg(
     }
     QuickOpenOpen(provider) => open_quick_open(dispatch, model, provider)
     QuickOpen(msg) => update_quick_open(dispatch, model, msg)
+    ToggleComposerMenu(menu) => {
+      let composer_menu = if model.composer_menu == Some(menu) {
+        None
+      } else {
+        Some(menu)
+      }
+      (
+        @cmd.none,
+        {
+          ..model,
+          composer_menu,
+          git_details_open: false,
+          codex: model.codex.with_git_details_closed(),
+        },
+      )
+    }
+    CloseComposerMenu => (@cmd.none, { ..model, composer_menu: None })
     ModelPicked(value) => {
       guard ModelChoice::parse(value) is Some(choice) else {
         return (@cmd.none, model)
       }
+      let model = { ..model, composer_menu: None }
       match choice {
         OpenSeekModel(engine_model) =>
           if model.screen is Codex {
@@ -2571,6 +2591,7 @@ fn update_msg(
       }
     }
     CodexEffortPicked(value) => {
+      let model = { ..model, composer_menu: None }
       let (effort_cmd, codex) = @codex.update(
         dispatch.map(msg => Codex(channel=model.focused, msg)),
         @codex.Msg::effort_changed(value),
@@ -2587,7 +2608,10 @@ fn update_msg(
       guard OpenSeekReasoning::parse(value) is Some(reasoning) else {
         return (@cmd.none, model)
       }
-      (reasoning.save(), { ..model, openseek_reasoning: reasoning })
+      (
+        reasoning.save(),
+        { ..model, openseek_reasoning: reasoning, composer_menu: None },
+      )
     }
     MaxStepsChanged(value) => (@cmd.none, { ..model, max_steps: value })
     SetupApiKeyChanged(value) => {
@@ -13097,6 +13121,71 @@ test "a refresh during a lookup is run afterwards, not dropped" {
   )
   assert_eq(elsewhere.active().pull_request, Some(probing_for("feature/x")))
   assert_eq(elsewhere.active().pull_request_generation, 2)
+}
+
+///|
+test "the composer's custom menus switch and dismiss deterministically" {
+  let dispatch = test_dispatch()
+  let base = test_model()
+  let (_, opened) = update(
+    dispatch,
+    ToggleComposerMenu(OpenSeekModelMenu),
+    base,
+  )
+  assert_true(opened.composer_menu == Some(OpenSeekModelMenu))
+  // The transition is pure: replaying the same message against the same
+  // model produces the same open menu rather than consulting DOM state.
+  let (_, replayed) = update(
+    dispatch,
+    ToggleComposerMenu(OpenSeekModelMenu),
+    base,
+  )
+  assert_true(replayed.composer_menu == opened.composer_menu)
+  let (_, switched) = update(
+    dispatch,
+    ToggleComposerMenu(OpenSeekReasoningMenu),
+    opened,
+  )
+  assert_true(switched.composer_menu == Some(OpenSeekReasoningMenu))
+  let (_, closed) = update(dispatch, CloseComposerMenu, switched)
+  assert_true(closed.composer_menu is None)
+  let (_, closed_again) = update(dispatch, CloseComposerMenu, closed)
+  assert_true(closed_again.composer_menu is None)
+  // Selecting a valid row closes the popup in the same state transition that
+  // applies the value; no native menu is left to close itself afterwards.
+  let (_, reopened) = update(
+    dispatch,
+    ToggleComposerMenu(OpenSeekModelMenu),
+    closed_again,
+  )
+  let (_, picked) = update(
+    dispatch,
+    ModelPicked("openseek:deepseek-v4-flash"),
+    reopened,
+  )
+  assert_true(picked.composer_menu is None)
+  let (_, reasoning_open) = update(
+    dispatch,
+    ToggleComposerMenu(OpenSeekReasoningMenu),
+    picked,
+  )
+  let (_, effort_picked) = update(
+    dispatch,
+    OpenSeekEffortPicked("high"),
+    reasoning_open,
+  )
+  assert_true(effort_picked.composer_menu is None)
+  let (_, open_before_switch) = update(
+    dispatch,
+    ToggleComposerMenu(OpenSeekModelMenu),
+    effort_picked,
+  )
+  let (_, context_switched) = update(
+    dispatch,
+    SessionRotated({ channel: Local, session: "desktop-other" }),
+    open_before_switch,
+  )
+  assert_true(context_switched.composer_menu is None)
 }
 
 ///|
