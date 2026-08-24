@@ -100,6 +100,11 @@ fn Control::menu_id(self : Control) -> String {
 }
 
 ///|
+fn Control::root_id(self : Control) -> String {
+  self.id + "-control"
+}
+
+///|
 fn Control::option_id(self : Control, index : Int) -> String {
   "\{self.id}-option-\{index}"
 }
@@ -129,6 +134,27 @@ fn Control::focus(
 }
 
 ///|
+/// Keep the menu open while Tab moves between its trigger and options. Once
+/// focus leaves the whole control (including a null target when the document
+/// loses focus), dismiss without moving focus back to the trigger.
+fn Control::dismiss_on_blur(
+  self : Control,
+  event : @dom.FocusEvent,
+) -> @cmd.Cmd {
+  if !self.open {
+    return @cmd.none
+  }
+  if event.related_target() is Some(target) &&
+    target.to_node() is Some(next) &&
+    @dom.document().get_element_by_id(self.root_id()).to_option() is Some(root) &&
+    root.contains(next) {
+    @cmd.none
+  } else {
+    self.dismiss
+  }
+}
+
+///|
 fn Control::trigger_attrs(
   self : Control,
   selected_index : Int,
@@ -141,6 +167,7 @@ fn Control::trigger_attrs(
   .aria_controls(self.menu_id())
   .aria_expanded(self.open.to_string())
   .data_set("focus-owner", "")
+  .on_blur(event => self.dismiss_on_blur(event))
   .on_keydown(event => {
     match event.key() {
       "Escape" if self.open => {
@@ -176,6 +203,7 @@ fn Control::option_attrs(
   .id(self.option_id(index))
   .role("option")
   .aria_selected(selected.to_string())
+  .on_blur(event => self.dismiss_on_blur(event))
   .on_keydown(event => {
     let next = match event.key() {
       "ArrowDown" => Some(if index + 1 < option_count { index + 1 } else { 0 })
@@ -283,5 +311,9 @@ pub fn Control::render(self : Control) -> @html.Html {
       ),
     )
   }
-  @html.div(class=self.presentation.root_class(), children)
+  @html.div(
+    class=self.presentation.root_class(),
+    attrs=@html.Attrs::build().id(self.root_id()),
+    children,
+  )
 }
