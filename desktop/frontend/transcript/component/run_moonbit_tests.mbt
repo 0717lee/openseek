@@ -27,8 +27,8 @@ test "run_moonbit chips read in a fixed order, whatever the payload's is" {
     fail("expected a readable run_moonbit call")
   }
   // A null is the tool's own spelling of "unset", and a nested value cannot be
-  // stated in one line: neither gets a chip, and the Original JSON disclosure
-  // is what carries them.
+  // stated in one line: neither gets a chip, and the Original JSON view is
+  // what carries them.
   assert_eq(call.chips, [
     "target: wasm", "warning: on", "run_in_background: true", "aaa: x", "zzz: 1",
   ])
@@ -89,11 +89,18 @@ test "a failed run_moonbit row still reads as a program, not escaped JSON" {
   assert_true(markup.contains("target: js"))
   // The program reads as lines rather than as one JSON-escaped string.
   assert_true(markup.contains("println(1 / 0)"))
-  // The payload as the model sent it stays available, one disclosure away.
+  // The three large views share one tab set, with Program selected first.
+  assert_true(markup.contains("class=\"tool-call-tabs\""))
+  assert_eq(markup.split("class=\"tool-call-tab-input\"").length(), 4)
+  assert_true(markup.contains(">Program</label>"))
+  assert_true(markup.contains(">Original JSON</label>"))
+  assert_true(markup.contains(">Output</label>"))
+  // The payload as the model sent it stays available in its own tab.
   assert_true(markup.contains("Original JSON"))
   assert_true(markup.contains("\\n"))
-  // The run's own output still gets its section.
+  // The run's own output stays present without adding a stacked section.
   assert_true(markup.contains("boom"))
+  assert_false(markup.contains("tool-call-section-label\">Output"))
 }
 
 ///|
