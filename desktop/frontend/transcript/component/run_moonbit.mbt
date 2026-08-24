@@ -7,9 +7,9 @@
 // and states the call's remaining arguments as chips above it.
 //
 // Nothing is hidden by that: the payload as the model actually sent it stays a
-// click away under the shared Original JSON disclosure. So the card is free to
-// show only what it can state plainly — an argument it cannot chip (a nested
-// value, which this tool's schema has none of) is left to the original.
+// click away in the neighboring Original JSON tab. So the card is free to show
+// only what it can state plainly — an argument it cannot chip (a nested value,
+// which this tool's schema has none of) is left to the original.
 //
 // Unlike the `plan` card this is not gated on the result: a snippet that
 // compiled and then failed is exactly when its source matters, and for this
@@ -51,10 +51,10 @@ fn decode_run_moonbit(arguments : String) -> RunMoonbitCall? {
 }
 
 ///|
-/// The card body for a `run_moonbit` tool call: the program it asked to run,
-/// verbatim, under a row of chips for the arguments that shaped the run, with
-/// the recorded payload itself behind a closed disclosure. `None` when the
-/// payload is not a readable call, which keeps the generic JSON rendering.
+/// The program view for a `run_moonbit` tool call: the source it asked to run,
+/// verbatim, under a row of chips for the arguments that shaped the run.
+/// `None` when the payload is not a readable call, which keeps the generic
+/// JSON rendering.
 fn run_moonbit_card(arguments : String) -> @html.Html? {
   guard decode_run_moonbit(arguments) is Some(call) else { return None }
   Some(
@@ -63,7 +63,31 @@ fn run_moonbit_card(arguments : String) -> @html.Html? {
       @html.pre(class="run-moonbit-source", [
         @syntax_html.moonbit_source_code(truncate_output(call.source)),
       ]),
-      original_json_view(arguments),
     ]),
   )
+}
+
+///|
+/// A `run_moonbit` call is the one tool whose three large views are routinely
+/// useful together: its source, the exact recorded payload, and the compiler
+/// or program output. Put those views at one altitude so only the selected one
+/// consumes transcript height. Program is the initial view, including for a
+/// failed run; that preserves the source-first reading the stacked card had.
+fn run_moonbit_tabs(
+  key : String,
+  arguments : String,
+  output : String,
+) -> @html.Html? {
+  guard run_moonbit_card(arguments) is Some(program) else { return None }
+  let tabs : Array[ToolCallTab] = [
+    { label: "Program", body: program },
+    { label: "Original JSON", body: original_json_content(arguments) },
+  ]
+  if !output.is_blank() {
+    tabs.push({
+      label: "Output",
+      body: @html.pre(class="tool-call-output", truncate_output(output)),
+    })
+  }
+  Some(tool_call_tabs(key, tabs))
 }

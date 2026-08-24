@@ -1,11 +1,12 @@
 // The pieces a custom tool card is built from.
 //
-// A custom card renders one tool's arguments in the shape a reader wants —
-// `run_moonbit` as a program, `edit` as a diff — instead of the pretty-printed
-// JSON the generic path shows. Every one of them needs the same two things
-// around that shape: a row of chips for the arguments it did not dramatize,
-// and the recorded payload itself, so the card is a reading of the call and
-// never the only account of it.
+// A custom card renders one tool's arguments in the shape a reader wants — an
+// `edit` as a diff instead of the pretty-printed JSON the generic path shows.
+// Every card needs the same two things around that shape: a row of chips for
+// the arguments it did not dramatize, and the recorded payload itself, so the
+// card is a reading of the call and never the only account of it.
+// `run_moonbit` uses the same pieces in its tabbed Program / Original JSON /
+// Output presentation.
 
 ///|
 /// The custom card for a tool whose arguments have a shape the recorded JSON
@@ -14,7 +15,6 @@
 /// so a card never has to invent a reading of a call it does not understand.
 fn custom_card(name : String, arguments : String) -> (String, @html.Html)? {
   match name {
-    "run_moonbit" => run_moonbit_card(arguments).map(card => ("Program", card))
     "edit" => edit_card(arguments).map(card => ("Change", card))
     "multi_edit" => multi_edit_card(arguments).map(card => ("Changes", card))
     _ => None
@@ -101,16 +101,23 @@ fn chip_row(chips : Array[String]) -> @html.Html {
 /// wants without becoming the only account of what was actually sent. Its open
 /// state is the browser's, like every other disclosure in the transcript.
 fn original_json_view(arguments : String) -> @html.Html {
+  @html.details(class="tool-card-original", [
+    @html.summary(class="tool-card-original-summary", "Original JSON"),
+    original_json_content(arguments),
+  ])
+}
+
+///|
+/// Pretty-printed recorded arguments, shared by the disclosure on ordinary
+/// cards and the dedicated Original JSON tab on `run_moonbit`.
+fn original_json_content(arguments : String) -> @html.Html {
   let bounded = truncate_output(arguments)
   let pretty = truncate_output(
     @json.parse(bounded).stringify(indent=2) catch {
       _ => bounded
     },
   )
-  @html.details(class="tool-card-original", [
-    @html.summary(class="tool-card-original-summary", "Original JSON"),
-    @html.pre(class="tool-card-original-json", pretty),
-  ])
+  @html.pre(class="tool-card-original-json", pretty)
 }
 
 ///|

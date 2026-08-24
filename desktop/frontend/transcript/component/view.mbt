@@ -367,7 +367,7 @@ fn tool_call_view_mode(
   item : @transcript.TranscriptItem,
   show_label~ : Bool,
 ) -> @html.Html {
-  guard item.kind is Tool(name~, arguments~, is_error~, brief~, ..) else {
+  guard item.kind is Tool(call_id~, name~, arguments~, is_error~, brief~, ..) else {
     return @html.text("")
   }
   let label = capitalize(
@@ -379,6 +379,7 @@ fn tool_call_view_mode(
   )
   let error_class = if is_error { " error" } else { "" }
   let body : Array[@html.Html] = []
+  let mut content_in_tabs = false
   // A `plan` call shows the checklist it recorded rather than its JSON, in
   // every state where that checklist is what the model asked for. A pending
   // call qualifies: the card is a record of the call, and the missing Output
@@ -387,13 +388,25 @@ fn tool_call_view_mode(
   // checklist would report a plan that never took effect.
   if @plan.classify(item) is Some(Applied(steps) | Pending(steps)) {
     body.push(@html.div(class="tool-call-section", [@plan.card(steps)]))
+  } else if name == "run_moonbit" &&
+    arguments is Some(arguments) &&
+    run_moonbit_tabs(
+      match item.sequence {
+        Some(sequence) => "sequence-\{sequence}"
+        None => "call-\{call_id.hash()}"
+      },
+      arguments,
+      item.content,
+    )
+    is Some(tabs) {
+    content_in_tabs = true
+    body.push(@html.div(class="tool-call-section", [tabs]))
   } else if arguments is Some(arguments) &&
     custom_card(name, arguments) is Some((label, card)) {
-    // Some tools' arguments have a shape JSON hides: a `run_moonbit` program
-    // escaped onto one line, an `edit` split across two blobs whose difference
-    // is the whole point. Those get a card. A payload the card cannot read
-    // falls through to the generic rendering below, so nothing is ever shown
-    // as a program or a change that is not one.
+    // Some tools' arguments have a shape JSON hides, such as an `edit` split
+    // across two blobs whose difference is the whole point. Those get a card.
+    // A payload the card cannot read falls through to the generic rendering
+    // below, so nothing is ever shown as a change that is not one.
     body.push(
       @html.div(class="tool-call-section", [
         @html.div(class="tool-call-section-label", label),
@@ -411,7 +424,7 @@ fn tool_call_view_mode(
       )
     }
   }
-  if !item.content.is_blank() {
+  if !content_in_tabs && !item.content.is_blank() {
     let content = truncate_output(item.content)
     let output = match (name, arguments) {
       ("read", Some(arguments)) =>
