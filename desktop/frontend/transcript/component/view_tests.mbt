@@ -1031,6 +1031,50 @@ test "a MoonBit read highlights source without coloring its gutter or footer" {
 }
 
 ///|
+/// Several calls emitted by one durable assistant event share its sequence.
+/// Their unique call ids must still produce independent radio groups, or the
+/// browser unchecks every tabbed read except one and their panels disappear.
+#warnings("-alert_unstable")
+test "tabbed reads from one event keep independent radio groups" {
+  let output = "1 |fn main {}\n<system>start_line=1 shown_lines=1 total_lines=1 truncated=false</system>"
+  let rendered = tool_line_view([
+    {
+      kind: Tool(
+        call_id="read-a",
+        name="read",
+        arguments=Some("{\"path\":\"a.mbt\"}"),
+        has_result=true,
+        is_error=false,
+        brief=Some("read a.mbt"),
+      ),
+      content: output,
+      ts: None,
+      sequence: Some(21),
+    },
+    {
+      kind: Tool(
+        call_id="read-b",
+        name="read",
+        arguments=Some("{\"path\":\"b.mbt\"}"),
+        has_result=true,
+        is_error=false,
+        brief=Some("read b.mbt"),
+      ),
+      content: output,
+      ts: None,
+      sequence: Some(21),
+    },
+  ])
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  let first_group = "tool-call-tabs-call-\{"read-a".hash()}"
+  let second_group = "tool-call-tabs-call-\{"read-b".hash()}"
+  assert_true(first_group != second_group)
+  // Four tabs per read, all belonging to that read and no other one.
+  assert_eq(markup.split("name=\"\{first_group}\"").length(), 5)
+  assert_eq(markup.split("name=\"\{second_group}\"").length(), 5)
+}
+
+///|
 #warnings("-alert_unstable")
 test "a plan row renders its checklist instead of the arguments JSON" {
   let arguments = "{\"steps\":[{\"title\":\"fix the parser\",\"status\":\"in_progress\"},{\"title\":\"run moon test\",\"status\":\"pending\"}]}"
