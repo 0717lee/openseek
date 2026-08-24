@@ -12368,8 +12368,20 @@ test "a settled host save that completes the setup closes the modal" {
     api_provider: Custom,
     custom_api_url: "https://ok.example/chat",
     settings_saves: 1,
+    select_menu: Some(ApiProviderMenu),
   }
-  assert_true(!typing.flush_host_settings().api_setup_open)
+  let closed = typing.flush_host_settings()
+  assert_true(!closed.api_setup_open)
+  assert_true(closed.select_menu is None)
+  // The same host reconciliation must not close the API selector when it is
+  // owned by the Settings page rather than an open setup modal.
+  let page = {
+    ..typing,
+    screen: Settings,
+    api_setup_open: false,
+    select_menu: Some(ApiProviderMenu),
+  }.flush_host_settings()
+  assert_true(page.select_menu == Some(ApiProviderMenu))
   // A flush that leaves the endpoint unusable keeps the modal up.
   let still = {
     ..test_model(),

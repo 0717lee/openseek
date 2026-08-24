@@ -2608,10 +2608,14 @@ fn Model::settle_api_setup(self : Model) -> Model {
   // a flush with nothing applied (a failed save before any snapshot) must
   // not announce them.
   guard self.host_settings_loaded() else { return self }
+  // A menu rendered inside the modal cannot outlive that modal. Preserve a
+  // Settings-page menu when no modal is being retired; both surfaces reuse
+  // the same select component and global menu identity.
+  let select_menu = if self.api_setup_open { None } else { self.select_menu }
   if self.api_ready() {
-    { ..self, api_setup_open: false, api_setup_dismissed: false }
+    { ..self, api_setup_open: false, api_setup_dismissed: false, select_menu }
   } else if self.api_setup_dismissed || self.screen is Settings {
-    { ..self, api_setup_open: false }
+    { ..self, api_setup_open: false, select_menu }
   } else {
     { ..self, api_setup_open: true }
   }
