@@ -204,7 +204,25 @@ fn page(state : State, input : Input, emit : @cmd.Emit[Msg]) -> @html.Html {
       }
     }
   }
-  sections.push(group(icon_package, "Mooncakes registry", market_rows))
+  sections.push(
+    @html.div(class="settings-group", [
+      @html.div(class="settings-group-head", [
+        icon(icon_package),
+        @html.h2("Mooncakes registry"),
+        @html.button(
+          class="secondary skills-refresh",
+          disabled=state.catalog is Loading,
+          on_click=emit(RefreshCatalog),
+          if state.catalog is Loading {
+            "Refreshing…"
+          } else {
+            "Refresh"
+          },
+        ),
+      ]),
+      @html.div(class="settings-group-card", market_rows),
+    ]),
+  )
   @html.section(class="skills-page", [
     @html.div(class="skills-page-inner", sections),
   ])

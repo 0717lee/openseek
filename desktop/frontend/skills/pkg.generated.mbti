@@ -25,6 +25,8 @@ pub(all) struct Input {
   channel : @interop.ChannelId
   installed : Array[InstalledItem]
 } derive(Eq)
+pub fn Input::equal(Self, Self) -> Bool
+pub fn Input::not_equal(Self, Self) -> Bool
 
 pub(all) struct InstalledItem {
   id : String
@@ -32,6 +34,8 @@ pub(all) struct InstalledItem {
   description : String
   source : String
 } derive(Eq)
+pub fn InstalledItem::equal(Self, Self) -> Bool
+pub fn InstalledItem::not_equal(Self, Self) -> Bool
 
 pub(all) struct MarketItem {
   name : String
@@ -42,9 +46,12 @@ pub(all) struct MarketItem {
   author : String
   repository : String
 } derive(Eq)
+pub fn MarketItem::equal(Self, Self) -> Bool
+pub fn MarketItem::not_equal(Self, Self) -> Bool
 
 pub(all) enum Msg {
   QueryChanged(String)
+  RefreshCatalog
   CatalogLoaded(Array[MarketItem])
   CatalogFailed(String)
   Install(MarketItem)
@@ -55,10 +62,14 @@ pub(all) enum Msg {
 pub enum Outcome {
   LibraryChanged(channel~ : @interop.ChannelId)
 } derive(Eq)
+pub fn Outcome::equal(Self, Self) -> Bool
+pub fn Outcome::not_equal(Self, Self) -> Bool
 
 type State derive(Eq)
 pub fn State::empty() -> Self
+pub fn State::equal(Self, Self) -> Bool
 pub fn State::handle(Self, @cmd.Emit[Msg], Msg, Input) -> (@cmd.Cmd, Self, Outcome?)
+pub fn State::not_equal(Self, Self) -> Bool
 pub fn State::opening(Self, @cmd.Emit[Msg], Input) -> (@cmd.Cmd, Self)
 pub fn State::with_notice(Self, String) -> Self
 

@@ -13,9 +13,9 @@ priv enum Catalog {
 
 ///|
 /// Everything the page alone can see. The catalog is fetched when the page
-/// opens and kept for the app run; `busy` holds the entries with an
-/// install or uninstall in flight, keyed by the catalog entry's source label
-/// or the installed entry's id; `notice` is the last failure to show.
+/// opens and kept until the user refreshes it; `busy` holds the entries with
+/// an install or uninstall in flight, keyed by the catalog entry's source
+/// label or the installed entry's id; `notice` is the last failure to show.
 struct State {
   catalog : Catalog
   query : String
@@ -33,6 +33,7 @@ pub fn State::empty() -> State {
 ///|
 pub(all) enum Msg {
   QueryChanged(String)
+  RefreshCatalog
   CatalogLoaded(Array[MarketItem])
   CatalogFailed(String)
   Install(MarketItem)
@@ -77,6 +78,18 @@ pub fn State::handle(
 ) -> (@cmd.Cmd, State, Outcome?) {
   match msg {
     QueryChanged(value) => (@cmd.none, { ..self, query: value }, None)
+    RefreshCatalog =>
+      match self.catalog {
+        // The rendered button is disabled while loading, and this guard also
+        // makes programmatic duplicate messages harmless.
+        Loading => (@cmd.none, self, None)
+        _ =>
+          (
+            fetch_catalog(emit, input.channel),
+            { ..self, catalog: Loading },
+            None,
+          )
+      }
     CatalogLoaded(items) => (@cmd.none, { ..self, catalog: Ready(items) }, None)
     CatalogFailed(message) =>
       (@cmd.none, { ..self, catalog: Failed(message) }, None)

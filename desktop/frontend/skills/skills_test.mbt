@@ -49,7 +49,7 @@ fn markup(state : @skills.State, input : @skills.Input) -> String {
 }
 
 ///|
-test "the catalog is fetched once per app run" {
+test "opening caches the catalog until failure or a manual refresh" {
   let (_, opened) = @skills.State::empty().opening(emit(), input())
   assert_true(markup(opened, input()).contains("Loading the skill catalog…"))
 
@@ -74,6 +74,20 @@ test "the catalog is fetched once per app run" {
   let retried_markup = markup(retried, input())
   assert_true(retried_markup.contains("Loading the skill catalog…"))
   assert_false(retried_markup.contains("library unreadable"))
+
+  // A successful catalog is otherwise kept, but the page exposes an explicit
+  // refresh that returns it to loading and suppresses duplicate requests.
+  assert_true(markup(ready, input()).contains(">Refresh</button>"))
+  let (_, refreshed, _) = ready.handle(emit(), @skills.RefreshCatalog, input())
+  let refreshed_markup = markup(refreshed, input())
+  assert_true(refreshed_markup.contains("Loading the skill catalog…"))
+  assert_true(refreshed_markup.contains("Refreshing…"))
+  let (_, duplicate, _) = refreshed.handle(
+    emit(),
+    @skills.RefreshCatalog,
+    input(),
+  )
+  assert_true(duplicate == refreshed)
 }
 
 ///|

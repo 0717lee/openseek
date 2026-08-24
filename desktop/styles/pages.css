@@ -454,6 +454,11 @@ h2 {
   flex-shrink: 0;
 }
 
+.skills-refresh {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
 .skills-empty,
 .skills-notice {
   color: var(--color-text-muted);
