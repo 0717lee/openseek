@@ -7,3 +7,8 @@ import {
 }
 
 supported_targets = "js"
+
+import {
+  "moonbit-community/rabbita/cmd",
+  "moonbitlang/core/debug",
+} for "test"

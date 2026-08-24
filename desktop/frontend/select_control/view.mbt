@@ -257,6 +257,14 @@ pub fn Control::render(self : Control) -> @html.Html {
       let rows : Array[@html.Html] = []
       for option in group.options {
         let selected = option.value == self.selected
+        // Clicking a row completes the single-choice interaction even when it
+        // is already selected. Close in both cases, but only a new value may
+        // reach caller update logic as a change.
+        let choose = if selected {
+          @cmd.batch([self.dismiss, self.focus(None, true)])
+        } else {
+          @cmd.batch([(self.change)(option.value), self.focus(None, true)])
+        }
         rows.push(
           @html.button(
             class=if selected {
@@ -266,10 +274,7 @@ pub fn Control::render(self : Control) -> @html.Html {
             },
             type_="button",
             title=option.label,
-            on_click=@cmd.batch([
-              (self.change)(option.value),
-              self.focus(None, true),
-            ]),
+            on_click=choose,
             attrs=self.option_attrs(index, option_count, selected),
             [
               @html.span(class="custom-select-option-label", option.label),
