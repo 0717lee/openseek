@@ -3,8 +3,17 @@
 // The session keeps the model's original payload, but an object is much easier
 // to scan as labeled fields: string leaves can lose their JSON quotes and a
 // multiline command or file body can become real preformatted text. Nested
-// objects and arrays retain their shape through indentation. The original JSON
-// remains immediately below the friendly view for debugging.
+// objects and arrays retain their shape through indentation. When that
+// friendly view differs from the recording, the caller gives the original
+// JSON its own neighboring tab.
+
+///|
+/// One generic arguments view, and whether the recorded JSON says something
+/// materially different enough to deserve a separate view.
+priv struct JsonArgumentsContent {
+  body : @html.Html
+  has_distinct_original : Bool
+}
 
 ///|
 /// A collapsed transcript row is still built, so compact but pathological JSON
@@ -18,30 +27,39 @@ const MAX_FRIENDLY_ARGUMENT_DEPTH = 6
 ///|
 /// Render a generic argument payload. Non-object, malformed, truncated, or
 /// unusually complex payloads retain the existing pretty-printed JSON/text
-/// block. Ordinary objects become readable fields plus an Original JSON
-/// disclosure.
-fn json_arguments_view(arguments : String) -> @html.Html {
+/// block, which is already the original view. Ordinary objects become
+/// readable fields and flag that the exact JSON should be offered separately.
+fn json_arguments_content(arguments : String) -> JsonArgumentsContent {
   let bounded = truncate_output(arguments)
   let parsed = @json.parse(bounded) catch {
-    _ => return @html.pre(class="tool-call-arguments", bounded)
+    _ =>
+      return {
+        body: @html.pre(class="tool-call-arguments", bounded),
+        has_distinct_original: false,
+      }
   }
   guard parsed is Object(fields) &&
     !fields.is_empty() &&
     friendly_argument_cost(parsed, 0) <= MAX_FRIENDLY_ARGUMENT_NODES else {
-    return @html.pre(
-      class="tool-call-arguments",
-      truncate_output(parsed.stringify(indent=2)),
-    )
+    return {
+      body: @html.pre(
+        class="tool-call-arguments",
+        truncate_output(parsed.stringify(indent=2)),
+      ),
+      has_distinct_original: false,
+    }
   }
-  @html.div(class="tool-call-arguments-friendly", [
-    @html.div(
-      class="tool-argument-fields",
-      [
-        for key, value in fields => argument_field(key, value)
-      ],
-    ),
-    original_json_view(arguments),
-  ])
+  {
+    body: @html.div(class="tool-call-arguments-friendly", [
+      @html.div(
+        class="tool-argument-fields",
+        [
+          for key, value in fields => argument_field(key, value)
+        ],
+      ),
+    ]),
+    has_distinct_original: true,
+  }
 }
 
 ///|
