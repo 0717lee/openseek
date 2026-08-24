@@ -52,8 +52,8 @@ pub fn MarketItem::not_equal(Self, Self) -> Bool
 pub(all) enum Msg {
   QueryChanged(String)
   RefreshCatalog
-  CatalogLoaded(Array[MarketItem])
-  CatalogFailed(String)
+  CatalogLoaded(channel~ : @interop.ChannelId, items~ : Array[MarketItem])
+  CatalogFailed(channel~ : @interop.ChannelId, message~ : String)
   Install(MarketItem)
   Uninstall(String)
   ActionDone(channel~ : @interop.ChannelId, key~ : String, error~ : String)

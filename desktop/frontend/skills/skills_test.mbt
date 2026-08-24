@@ -56,7 +56,9 @@ test "opening caches the catalog until failure or a manual refresh" {
   // Reopening with a loaded catalog keeps it instead of asking again.
   let (_, ready, _) = opened.handle(
     emit(),
-    @skills.CatalogLoaded([market_item()]),
+    @skills.CatalogLoaded(channel=@interop.ChannelId::Local, items=[
+      market_item(),
+    ]),
     input(),
   )
   let (_, reopened) = ready.opening(emit(), input())
@@ -65,7 +67,7 @@ test "opening caches the catalog until failure or a manual refresh" {
   // Only a failure refetches — and reopening drops the stale notice with it.
   let (_, failed, _) = ready.handle(
     emit(),
-    @skills.CatalogFailed("offline"),
+    @skills.CatalogFailed(channel=@interop.ChannelId::Local, message="offline"),
     input(),
   )
   let stale = failed.with_notice("library unreadable")
@@ -91,13 +93,53 @@ test "opening caches the catalog until failure or a manual refresh" {
 }
 
 ///|
+test "catalog completions cannot cross a device focus switch" {
+  let (_, local_loading) = @skills.State::empty().opening(emit(), input())
+  let remote_input : @skills.Input = { channel: other_device(), installed: [] }
+  // Before the page is reopened, the old device's loading state does not
+  // disable the new device's Refresh action.
+  assert_true(markup(local_loading, remote_input).contains(">Refresh</button>"))
+  let (_, remote_loading) = local_loading.opening(emit(), remote_input)
+
+  // Opening on the new device replaces the loading owner and issues that
+  // device's request; neither kind of completion from the old device lands.
+  assert_false(remote_loading == local_loading)
+  let (_, ignored_loaded, _) = remote_loading.handle(
+    emit(),
+    @skills.CatalogLoaded(channel=@interop.ChannelId::Local, items=[
+      market_item(),
+    ]),
+    remote_input,
+  )
+  assert_true(ignored_loaded == remote_loading)
+  let (_, ignored_failed, _) = ignored_loaded.handle(
+    emit(),
+    @skills.CatalogFailed(
+      channel=@interop.ChannelId::Local,
+      message="old host offline",
+    ),
+    remote_input,
+  )
+  assert_true(ignored_failed == remote_loading)
+
+  let (_, ready, _) = ignored_failed.handle(
+    emit(),
+    @skills.CatalogLoaded(channel=other_device(), items=[market_item()]),
+    remote_input,
+  )
+  assert_true(markup(ready, remote_input).contains("acme/widget"))
+}
+
+///|
 test "the search query filters both lists" {
   let installed : Array[@skills.InstalledItem] = [
     { id: "gadget", name: "gadget", description: "", source: "" },
   ]
   let (_, ready, _) = @skills.State::empty().handle(
     emit(),
-    @skills.CatalogLoaded([market_item()]),
+    @skills.CatalogLoaded(channel=@interop.ChannelId::Local, items=[
+      market_item(),
+    ]),
     input(installed~),
   )
   let (_, typed, _) = ready.handle(
@@ -123,7 +165,9 @@ test "the search query filters both lists" {
 test "an install marks its entry busy exactly once" {
   let (_, ready, _) = @skills.State::empty().handle(
     emit(),
-    @skills.CatalogLoaded([market_item()]),
+    @skills.CatalogLoaded(channel=@interop.ChannelId::Local, items=[
+      market_item(),
+    ]),
     input(),
   )
   let (_, busy, outcome) = ready.handle(
@@ -147,7 +191,9 @@ test "an install marks its entry busy exactly once" {
 test "a settled install releases its entry and asks for a library re-read" {
   let (_, ready, _) = @skills.State::empty().handle(
     emit(),
-    @skills.CatalogLoaded([market_item()]),
+    @skills.CatalogLoaded(channel=@interop.ChannelId::Local, items=[
+      market_item(),
+    ]),
     input(),
   )
   let (_, busy, _) = ready.handle(
@@ -193,7 +239,9 @@ test "a settled install releases its entry and asks for a library re-read" {
 test "a result that outlived a focus switch speaks for nothing on screen" {
   let (_, ready, _) = @skills.State::empty().handle(
     emit(),
-    @skills.CatalogLoaded([market_item()]),
+    @skills.CatalogLoaded(channel=@interop.ChannelId::Local, items=[
+      market_item(),
+    ]),
     input(),
   )
   let (_, busy, _) = ready.handle(
@@ -254,7 +302,9 @@ test "the library decides which catalog rows still offer an install" {
   ]
   let (_, ready, _) = @skills.State::empty().handle(
     emit(),
-    @skills.CatalogLoaded([market_item()]),
+    @skills.CatalogLoaded(channel=@interop.ChannelId::Local, items=[
+      market_item(),
+    ]),
     input(installed~),
   )
   assert_true(markup(ready, input(installed~)).contains("✓ Installed"))
@@ -262,7 +312,9 @@ test "the library decides which catalog rows still offer an install" {
   // An older install keeps the button alive as the upgrade path.
   let (_, newer, _) = @skills.State::empty().handle(
     emit(),
-    @skills.CatalogLoaded([market_item(version="2.0.0")]),
+    @skills.CatalogLoaded(channel=@interop.ChannelId::Local, items=[
+      market_item(version="2.0.0"),
+    ]),
     input(installed~),
   )
   assert_true(markup(newer, input(installed~)).contains(">Install<"))

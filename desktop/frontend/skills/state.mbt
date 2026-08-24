@@ -3,10 +3,12 @@
 
 ///|
 /// The mooncakes.io skill catalog as the page sees it. One enum, so
-/// "loading", "loaded empty" and "failed" cannot be conflated.
+/// "loading", "loaded empty" and "failed" cannot be conflated. Loading keeps
+/// the source device so opening the page on another device starts its own
+/// request instead of inheriting an in-flight request it cannot settle.
 priv enum Catalog {
   Idle
-  Loading
+  Loading(channel~ : @interop.ChannelId)
   Ready(Array[MarketItem])
   Failed(String)
 } derive(Eq)
@@ -34,8 +36,8 @@ pub fn State::empty() -> State {
 pub(all) enum Msg {
   QueryChanged(String)
   RefreshCatalog
-  CatalogLoaded(Array[MarketItem])
-  CatalogFailed(String)
+  CatalogLoaded(channel~ : @interop.ChannelId, items~ : Array[MarketItem])
+  CatalogFailed(channel~ : @interop.ChannelId, message~ : String)
   Install(MarketItem)
   // Uninstall by library entry id; only registry installs get the button.
   Uninstall(String)
@@ -47,15 +49,23 @@ pub(all) enum Msg {
 
 ///|
 /// Open the page. The catalog is fetched once per app run (and again after a
-/// failure); a notice left over from the previous visit is dropped. The
-/// installed library is refreshed by the root, which owns it.
+/// failure, a manual refresh, or a device switch during loading); a notice
+/// left over from the previous visit is dropped. The installed library is
+/// refreshed by the root, which owns it.
 pub fn State::opening(
   self : State,
   emit : @cmd.Emit[Msg],
   input : Input,
 ) -> (@cmd.Cmd, State) {
   let (cmd, catalog) = match self.catalog {
-    Idle | Failed(_) => (fetch_catalog(emit, input.channel), Loading)
+    Idle | Failed(_) =>
+      (fetch_catalog(emit, input.channel), Loading(channel=input.channel))
+    Loading(channel~) =>
+      if channel == input.channel {
+        (@cmd.none, self.catalog)
+      } else {
+        (fetch_catalog(emit, input.channel), Loading(channel=input.channel))
+      }
     current => (@cmd.none, current)
   }
   (cmd, { ..self, catalog, notice: "" })
@@ -82,17 +92,25 @@ pub fn State::handle(
       match self.catalog {
         // The rendered button is disabled while loading, and this guard also
         // makes programmatic duplicate messages harmless.
-        Loading => (@cmd.none, self, None)
+        Loading(channel~) if channel == input.channel => (@cmd.none, self, None)
         _ =>
           (
             fetch_catalog(emit, input.channel),
-            { ..self, catalog: Loading },
+            { ..self, catalog: Loading(channel=input.channel) },
             None,
           )
       }
-    CatalogLoaded(items) => (@cmd.none, { ..self, catalog: Ready(items) }, None)
-    CatalogFailed(message) =>
+    CatalogLoaded(channel~, items~) => {
+      // Catalog requests belong to the device that issued them. A completion
+      // that outlived a focus switch must not overwrite the focused device's
+      // catalog or its newer in-flight request.
+      guard channel == input.channel else { return (@cmd.none, self, None) }
+      (@cmd.none, { ..self, catalog: Ready(items) }, None)
+    }
+    CatalogFailed(channel~, message~) => {
+      guard channel == input.channel else { return (@cmd.none, self, None) }
       (@cmd.none, { ..self, catalog: Failed(message) }, None)
+    }
     Install(item) => {
       let key = source_label(item)
       if self.busy.contains(key) {
