@@ -118,6 +118,30 @@ async fn moonide_spawn_config(state : HostState) -> MoonIdeSpawnConfig {
 }
 
 ///|
+/// Run a Moon command with stdin already at EOF. SeekMoon is a Windows GUI
+/// process and may have no standard-input handle; leaving stdin unspecified
+/// makes the process library inherit that missing handle and fail before the
+/// child starts.
+async fn MoonIdeSpawnConfig::collect_output(
+  self : MoonIdeSpawnConfig,
+  args : ArrayView[String],
+  cwd : @pathx.Absolute,
+  no_console_window~ : Bool,
+) -> (Int, &@io.Data, &@io.Data) {
+  let (stdin_reader, stdin_writer) = @process.write_to_process()
+  stdin_writer.close()
+  @process.collect_output(
+    self.executable,
+    args,
+    extra_env?=self.extra_env,
+    inherit_env=self.extra_env is None,
+    stdin=stdin_reader,
+    cwd=cwd.to_string(),
+    no_console_window~,
+  )
+}
+
+///|
 /// Build Moon's semantic index when this checkout has never been checked.
 /// `moon ide` currently reports only the missing `packages.json` when its
 /// implicit check cannot prepare the workspace. Running that first check
@@ -132,12 +156,10 @@ async fn MoonIdeSpawnConfig::ensure_index(
   if @fs.exists(index.to_string()) {
     return false
   }
-  let (code, stdout, stderr) = @process.collect_output(
-    self.executable,
+  let (code, stdout, stderr) = self.collect_output(
     ["check"],
-    extra_env?=self.extra_env,
-    inherit_env=self.extra_env is None,
-    cwd=workspace.to_string(),
+    workspace,
+    no_console_window=false,
   ) catch {
     error if @async.is_being_cancelled() => raise error
     error => raise HostError("could not run moon check: \{error}")
@@ -304,12 +326,9 @@ async fn moonide_navigation_op(
     request.column,
     indexed,
   )
-  let (code, stdout, stderr) = @process.collect_output(
-    config.executable,
+  let (code, stdout, stderr) = config.collect_output(
     args,
-    extra_env?=config.extra_env,
-    inherit_env=config.extra_env is None,
-    cwd=request.physical_workspace.to_string(),
+    request.physical_workspace,
     no_console_window=true,
   ) catch {
     error if @async.is_being_cancelled() => raise error
