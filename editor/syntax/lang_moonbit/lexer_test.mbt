@@ -236,6 +236,19 @@ test "word classification distinguishes keywords from identifiers" {
 }
 
 ///|
+test "extend and var are keywords without matching identifier prefixes" {
+  inspect(
+    render_tokens("extend extended var variable"),
+    content=(
+      #|0-6 Keyword extend
+      #|7-15 Identifier extended
+      #|16-19 Keyword var
+      #|20-28 Identifier variable
+    ),
+  )
+}
+
+///|
 test "fallback punctuation preserves UTF-16 offsets" {
   inspect(
     render_tokens("🌟"),

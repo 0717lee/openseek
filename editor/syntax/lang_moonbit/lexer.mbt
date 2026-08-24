@@ -39,6 +39,7 @@ fn classify_word(word : StringView) -> @syntax.HighlightTag {
     | "enum"
     | "trait"
     | "impl"
+    | "extend"
     | "with"
     | "derive"
     | "type"
@@ -71,7 +72,8 @@ fn classify_word(word : StringView) -> @syntax.HighlightTag {
     | "extern"
     | "declare"
     | "where"
-    | "nobreak" => Keyword
+    | "nobreak"
+    | "var" => Keyword
     "true" | "false" => Constant
     _ => if @syntax.is_capitalized(word) { Type } else { Identifier }
   }
