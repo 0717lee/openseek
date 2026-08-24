@@ -7,11 +7,12 @@
 ///|
 /// The active root needed by cross-resource navigation: either the explicit
 /// checkout root supplied by `Ctx`, or the root reconstructed from the
-/// absolute/relative pair returned by `fs.read_file`.
+/// absolute/relative pair returned by `fs.read_file`. Opening a result may
+/// leave this root; issuing another IDE request may not.
 priv struct NavigationContext {
   owner : @interop.ConversationKey
   root : @common.Uri
-} derive(Debug, Eq)
+} derive(Eq)
 
 ///|
 /// Express one Viewer model URI relative to this editor root. `..` segments
@@ -29,6 +30,22 @@ fn NavigationContext::relative_path(
     return None
   }
   Some(Relative(relative))
+}
+
+///|
+/// Return the path only when `absolute` is a source file inside this IDE
+/// root. Definition results may point outside it and remain openable through
+/// `relative_path`, but an external file must not become a new Moon IDE input.
+fn NavigationContext::ide_path(
+  self : NavigationContext,
+  absolute : @common.Uri,
+) -> @pathx.Relative? {
+  guard model_uri_channel(absolute) == Some(self.owner.channel) &&
+    @resource.relative_to(absolute, self.root) is Some(relative) &&
+    !relative.is_root() else {
+    return None
+  }
+  Some(relative)
 }
 
 ///|
@@ -50,10 +67,11 @@ fn navigation_root_from_file(
 }
 
 ///|
-/// Choose the root for the document now on screen. An explicit root is
-/// accepted only when it maps the absolute file back to the exact relative
-/// name; otherwise the host-returned file pair wins (important for canonical
-/// paths behind symlinked workspace hints).
+/// Choose the IDE root for the document now on screen. An explicit root is
+/// accepted only when the file is inside it and maps back to the exact
+/// relative name; otherwise the host-returned file pair wins (important for
+/// canonical paths behind symlinked workspace hints). An external `../` path
+/// therefore opens as a file but deliberately receives no navigation context.
 fn navigation_context_for_file(
   owner : @interop.ConversationKey,
   root_hint : @common.Uri?,
@@ -61,11 +79,30 @@ fn navigation_context_for_file(
   relative : @pathx.Relative,
 ) -> NavigationContext? {
   let root = match root_hint {
-    Some(root) if @resource.belongs_to(root, owner.channel) &&
-      @resource.join_relative(root, relative) == absolute => Some(root)
+    Some(root) if @resource.relative_to(absolute, root) ==
+      Some(relative.normalize()) => Some(root)
     _ => navigation_root_from_file(absolute, relative)
   }
   root.map(root => { owner, root })
+}
+
+///|
+/// The normalized Moon IDE path for one loaded document in this checkout.
+/// Filesystem reads may use `..`; this method is the shared boundary used by
+/// providers, diagnostics, and the visible out-of-workspace notice.
+fn Ctx::ide_path(
+  self : Ctx,
+  absolute : @common.Uri,
+  relative : @pathx.Relative,
+) -> @pathx.Relative? {
+  guard self.root() is Some(root) &&
+    navigation_context_for_file(self.owner, Some(root), absolute, relative)
+    is Some(context) &&
+    context.ide_path(absolute) is Some(path) &&
+    path == relative.normalize() else {
+    return None
+  }
+  Some(path)
 }
 
 ///|
@@ -90,7 +127,7 @@ impl @language.DefinitionProvider for MoonIdeNavigationProvider with fn provide_
   }
   guard viewer_state.navigation is Some(context) &&
     model_uri_path(model.uri) is Some(absolute) &&
-    context.relative_path(absolute) is Some(path) else {
+    context.ide_path(absolute) is Some(path) else {
     return []
   }
   let locations = request_moon_ide_locations(
@@ -131,7 +168,7 @@ impl @language.ReferencesProvider for MoonIdeNavigationProvider with fn provide_
   }
   guard viewer_state.navigation is Some(context) &&
     model_uri_path(model.uri) is Some(absolute) &&
-    context.relative_path(absolute) is Some(path) else {
+    context.ide_path(absolute) is Some(path) else {
     return []
   }
   let locations = request_moon_ide_locations(
@@ -334,6 +371,7 @@ test "navigation root follows resource and workspace-relative paths" {
     root,
   }
   assert_eq(context.relative_path(file), Some(Relative("src/main.mbt")))
+  assert_eq(context.ide_path(file), Some(Relative("src/main.mbt")))
   guard @resource.of_path(@interop.ChannelId::Local, "/other/src/main.mbt")
     is Some(outside) else {
     fail("test outside resource was not absolute")
@@ -343,16 +381,23 @@ test "navigation root follows resource and workspace-relative paths" {
   )
   let outside_relative = @pathx.Relative("../../other/src/main.mbt")
   assert_eq(context.relative_path(outside), Some(outside_relative))
+  assert_true(context.ide_path(outside) is None)
   assert_eq(@resource.join_relative(root, outside_relative), outside)
-  assert_eq(
+  assert_true(
     navigation_context_for_file(
       context.owner,
       Some(root),
       outside,
       outside_relative,
-    ),
-    Some(context),
+    )
+    is None,
   )
+  let ctx = { ..test_ctx(), placement: Some(@interop.WorkspaceRoot(root~)) }
+  assert_eq(
+    ctx.ide_path(file, Relative("src/main.mbt")),
+    Some(Relative("src/main.mbt")),
+  )
+  assert_true(ctx.ide_path(outside, outside_relative) is None)
   guard @resource.of_path(
       @interop.ChannelId::Remote("device"),
       "/other/src/main.mbt",

@@ -5,6 +5,50 @@ fn render_review_html(node : @html.Html) -> String {
 }
 
 ///|
+test "external MoonBit source keeps the viewer and explains its IDE scope" {
+  let path = @pathx.Relative("../shared/lib.mbt")
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  let docs = owned_state().docs.copy()
+  docs[path] = {
+    name: "lib.mbt",
+    state: TabLoaded(
+      content="pub fn answer() -> Int { 42 }",
+      absolute=ctx.test_resource("/shared/lib.mbt"),
+      sig="1:0",
+    ),
+    review: None,
+    stale: false,
+  }
+  let external = render_review_html(
+    body_view(test_emit(), { ..owned_state(), docs, }, ctx),
+  )
+  assert_true(external.contains("class=\"ide-scope-notice\""))
+  assert_true(
+    external.contains(
+      "This file is outside the workspace. MoonBit IDE features are unavailable.",
+    ),
+  )
+  assert_true(external.contains("id=\"viewer-host\""))
+
+  let internal_path = @pathx.Relative("src/main.mbt")
+  let internal_ctx = {
+    ..test_ctx(),
+    open_files: [internal_path],
+    active_file: Some(internal_path),
+  }
+  let internal_docs = owned_state().docs.copy()
+  internal_docs[internal_path] = loaded_doc(internal_path.0)
+  let internal = render_review_html(
+    body_view(
+      test_emit(),
+      { ..owned_state(), docs: internal_docs },
+      internal_ctx,
+    ),
+  )
+  assert_true(internal.contains("class=\"ide-scope-notice hidden\""))
+}
+
+///|
 test "desktop review keeps sibling hosts stable across source and diff modes" {
   let path = @pathx.Relative("src/main.mbt")
   let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }

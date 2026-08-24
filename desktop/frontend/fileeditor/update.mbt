@@ -229,7 +229,8 @@ fn show_tab_impl(
       )
       if sync_diagnostics &&
         language_id(doc.name) == "moonbit" &&
-        ctx.root() is Some(root) {
+        ctx.root() is Some(root) &&
+        ctx.ide_path(absolute, path) is Some(ide_path) {
         @cmd.batch([
           show,
           request_diagnostics(
@@ -237,7 +238,7 @@ fn show_tab_impl(
             ctx.owner,
             ctx.request_epoch,
             root,
-            path,
+            ide_path,
             absolute,
           ),
         ])
@@ -1222,23 +1223,31 @@ fn FileChange::moonbit_relevant(self : FileChange) -> Bool {
 
 ///|
 /// The diagnostics request for the active file when it is a loaded MoonBit
-/// document, or `None` when it is anything else — the shared trigger behind
-/// the stats, watcher, and run-finish re-check paths.
-fn active_moonbit_diagnostics(
+/// document inside the current checkout, or `None` when it is anything else.
+/// This is the shared scope gate behind the stats, watcher, and run-finish
+/// re-check paths, so an external tab never acquires diagnostics later.
+fn Ctx::active_moonbit_diagnostics(
+  self : Ctx,
   dispatch : @cmd.Emit[Msg],
-  owner : @interop.ConversationKey,
-  epoch : Int,
-  root : @common.Uri?,
   docs : Map[@pathx.Relative, Doc],
-  active : @pathx.Relative?,
 ) -> @cmd.Cmd? {
-  guard root is Some(root) &&
-    active is Some(active) &&
+  guard self.root() is Some(root) &&
+    self.active_file is Some(active) &&
     docs.get(active) is Some({ name, state: TabLoaded(absolute~, ..), .. }) &&
-    language_id(name) == "moonbit" else {
+    language_id(name) == "moonbit" &&
+    self.ide_path(absolute, active) is Some(ide_path) else {
     return None
   }
-  Some(request_diagnostics(dispatch, owner, epoch, root, active, absolute))
+  Some(
+    request_diagnostics(
+      dispatch,
+      self.owner,
+      self.request_epoch,
+      root,
+      ide_path,
+      absolute,
+    ),
+  )
 }
 
 ///|
@@ -3086,7 +3095,9 @@ pub fn update(
                 diff?=next_doc.visible_diff(),
                 search_highlights?=state.editor_search_highlights(path),
               )
-              if language_id(name) == "moonbit" && ctx.root() is Some(root) {
+              if language_id(name) == "moonbit" &&
+                ctx.root() is Some(root) &&
+                ctx.ide_path(absolute, path) is Some(ide_path) {
                 @cmd.batch([
                   show,
                   request_diagnostics(
@@ -3094,7 +3105,7 @@ pub fn update(
                     ctx.owner,
                     ctx.request_epoch,
                     root,
-                    path,
+                    ide_path,
                     absolute,
                   ),
                 ])
@@ -3139,14 +3150,7 @@ pub fn update(
           @cmd.none
         }
         let diagnostics = match
-          active_moonbit_diagnostics(
-            dispatch,
-            owner,
-            state.request_epoch,
-            ctx.root(),
-            state.docs,
-            ctx.active_file,
-          ) {
+          ctx.active_moonbit_diagnostics(dispatch, state.docs) {
           Some(recheck) => recheck
           None => @cmd.none
         }
@@ -3257,15 +3261,7 @@ pub fn update(
             ),
           )
         } else if moonbit_changed &&
-          active_moonbit_diagnostics(
-            dispatch,
-            owner,
-            state.request_epoch,
-            ctx.root(),
-            state.docs,
-            ctx.active_file,
-          )
-          is Some(recheck) {
+          ctx.active_moonbit_diagnostics(dispatch, state.docs) is Some(recheck) {
           // A MoonBit change that touched no open tab still moves the
           // module's diagnostics (a sibling file's edit can break or fix the
           // active file), and without a stat round there is no `StatsLoaded`
@@ -3439,15 +3435,7 @@ pub fn update(
         // only an active file the stats left untouched needs the explicit
         // refresh. Its check's pushes update the other open tabs too.
         if !active_reloading &&
-          active_moonbit_diagnostics(
-            dispatch,
-            owner,
-            state.request_epoch,
-            ctx.root(),
-            docs,
-            ctx.active_file,
-          )
-          is Some(recheck) {
+          ctx.active_moonbit_diagnostics(dispatch, docs) is Some(recheck) {
           cmds.push(recheck)
         }
         (@cmd.batch(cmds), { ..state, docs, review_generation })
@@ -3664,6 +3652,33 @@ fn loaded_doc(path : String) -> Doc raise {
     review: None,
     stale: false,
   }
+}
+
+///|
+test "external MoonBit source does not request diagnostics" {
+  let external = @pathx.Relative("../shared/lib.mbt")
+  let ctx = { ..test_ctx(), active_file: Some(external) }
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[external] = {
+    name: "lib.mbt",
+    state: TabLoaded(
+      content="pub fn answer() -> Int { 42 }",
+      absolute=ctx.test_resource("/shared/lib.mbt"),
+      sig="1:0",
+    ),
+    review: None,
+    stale: false,
+  }
+  assert_true(ctx.active_moonbit_diagnostics(test_emit(), docs) is None)
+
+  let internal = @pathx.Relative("src/main.mbt")
+  let internal_ctx = { ..test_ctx(), active_file: Some(internal) }
+  let internal_docs : Map[@pathx.Relative, Doc] = Map([])
+  internal_docs[internal] = loaded_doc(internal.0)
+  assert_true(
+    internal_ctx.active_moonbit_diagnostics(test_emit(), internal_docs)
+    is Some(_),
+  )
 }
 
 ///|

@@ -148,19 +148,44 @@ button.panel-toggle:not(:disabled):hover {
   min-height: 0;
 }
 
-/* The viewer plus its notice overlay. The overlay covers the viewer
-   while the active tab has no document (deleted / binary / oversized
-   file) — panel chrome, not a synthesized source document. */
+/* The optional IDE-scope notice and the viewer surfaces beneath it. Both
+   remain mounted so changing file scope never re-keys an imperative host. */
 .viewer-stack {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+.ide-scope-notice {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 5px 12px;
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--color-warning) 35%, var(--color-border));
+  color: var(--color-text-secondary);
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-normal);
+}
+.ide-scope-notice.hidden {
+  display: none;
+}
+.viewer-surfaces {
   position: relative;
   display: flex;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
 }
-.viewer-stack > .viewer-host {
+.viewer-surfaces > .viewer-host {
   flex: 1 1 auto;
 }
+/* The overlay covers the viewer while the active tab has no document
+   (deleted / binary / oversized file) — panel chrome, not a synthesized
+   source document. */
 .viewer-notice {
   position: absolute;
   inset: 0;

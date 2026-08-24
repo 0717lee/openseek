@@ -376,12 +376,39 @@ pub fn body_view(
       .data_set("theme", if ctx.dark_mode { "dark" } else { "light" }),
     ([] : Array[@html.Html]),
   )
+  // Keep the source readable when navigation opens a definition outside the
+  // checkout, but make the missing Moon IDE scope explicit. The element is
+  // always present so toggling it cannot shift or re-key the imperative
+  // Viewer hosts below it.
+  let ide_scope_unavailable = match ctx.active_file {
+    Some(path) =>
+      match state.docs.get(path) {
+        Some({ name, state: TabLoaded(absolute~, ..), .. }) =>
+          language_id(name) == "moonbit" &&
+          ctx.root() is Some(_) &&
+          ctx.ide_path(absolute, path) is None
+        _ => false
+      }
+    None => false
+  }
+  let ide_scope_notice = @html.div(
+    class=if ide_scope_unavailable {
+      "ide-scope-notice"
+    } else {
+      "ide-scope-notice hidden"
+    },
+    attrs=@html.Attrs::build().role("status"),
+    "This file is outside the workspace. MoonBit IDE features are unavailable.",
+  )
   @html.div(class="editor-body", [
     @html.div(class="viewer-stack", [
-      viewer_host,
-      markdown_viewer_host,
-      diff_editor_host,
-      viewer_notice(state, ctx),
+      ide_scope_notice,
+      @html.div(class="viewer-surfaces", [
+        viewer_host,
+        markdown_viewer_host,
+        diff_editor_host,
+        viewer_notice(state, ctx),
+      ]),
     ]),
     tree_pane(dispatch, state, ctx),
   ])

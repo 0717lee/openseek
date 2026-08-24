@@ -1167,6 +1167,16 @@ fn show_file_in_viewer(
     // Commenting (select → inline input → composer chip) is for real files;
     // a notice document has nothing behind it to comment on.
     if viewer_state.services is Some(services) {
+      // A file outside the checkout remains a normal readable document, but
+      // it must not inherit diagnostics cached under the same absolute URI
+      // from an earlier in-workspace spelling (for example through a symlink).
+      if absolute is Some(absolute) && viewer_state.navigation is None {
+        services.markers.set_diagnostics(
+          DiagnosticsOwner,
+          model_uri_of(absolute),
+          [],
+        )
+      }
       // Only the displayed resource needs a stored baseline. Retire the
       // outgoing URI before publishing the incoming one so tab switches and
       // conversation changes cannot accumulate up-to-1-MiB HEAD blobs.
@@ -1399,6 +1409,8 @@ fn apply_diagnostics(
     if @resource.belongs_to(absolute, channel) &&
       viewer_state.absolute is Some(current) &&
       current == absolute &&
+      viewer_state.navigation is Some(context) &&
+      context.ide_path(absolute) is Some(_) &&
       viewer_state.services is Some(services) {
       let uri = model_uri_of(absolute)
       services.markers.set_diagnostics(

@@ -71,7 +71,8 @@ impl @language.HoverProvider for LspHoverProvider with fn provide_hover(
   guard model_uri_path(model.uri) is Some(absolute) &&
     viewer_state.absolute == Some(absolute) &&
     viewer_state.navigation is Some(context) &&
-    viewer_state.relative is Some(path) else {
+    context.ide_path(absolute) is Some(path) &&
+    viewer_state.relative == Some(path) else {
     return None
   }
   let reply = request_hover(
