@@ -3731,7 +3731,14 @@ fn update_msg(
     ColorSchemeChanged(dark) => {
       let model = { ..model, system_dark: dark }
       match model.theme {
-        System => (System.apply(dark), model)
+        System =>
+          (
+            @cmd.batch([
+              System.apply(dark),
+              browser_set_theme_for_pages(dispatch, model, dark),
+            ]),
+            model,
+          )
         Light | Dark => (@cmd.none, model)
       }
     }
@@ -3741,7 +3748,15 @@ fn update_msg(
         (@cmd.none, model)
       } else {
         (
-          @cmd.batch([theme.apply(model.system_dark), theme.save()]),
+          @cmd.batch([
+            theme.apply(model.system_dark),
+            browser_set_theme_for_pages(
+              dispatch,
+              model,
+              theme.is_dark(model.system_dark),
+            ),
+            theme.save(),
+          ]),
           { ..model, theme, },
         )
       }
@@ -4266,8 +4281,32 @@ fn update_msg(
           }
       }
     }
-    Preview(msg) =>
-      (@cmd.none, { ..model, preview: @preview.update(msg, model.preview) })
+    Preview(msg) => {
+      // A navigation replaces the page realm, so reapply the app theme both
+      // at commit time and after loading settles. The first call minimizes a
+      // mismatched flash; the second covers engines whose document element
+      // did not exist at the earlier event.
+      let theme_cmd = match msg {
+        @preview.Msg::Navigated(id~, ..) =>
+          browser_set_theme(
+            dispatch,
+            id,
+            model.theme.is_dark(model.system_dark),
+          )
+        @preview.Msg::LoadingChanged(id~, loading~) =>
+          if loading {
+            @cmd.none
+          } else {
+            browser_set_theme(
+              dispatch,
+              id,
+              model.theme.is_dark(model.system_dark),
+            )
+          }
+        _ => @cmd.none
+      }
+      (theme_cmd, { ..model, preview: @preview.update(msg, model.preview) })
+    }
     BrowserTabRequested => {
       let model = model.begin_editor_navigation()
       let (preview, id) = @preview.open_page(model.preview)
@@ -4313,13 +4352,26 @@ fn update_msg(
         // never existed; forgetting it has the next sync measure and place
         // whatever the host actually has now.
         (
-          browser_navigate(dispatch, id, url),
+          browser_navigate(
+            dispatch,
+            id,
+            url,
+            model.theme.is_dark(model.system_dark),
+          ),
           { shown: None, rect: None, geo: None },
         )
       } else {
         // The blank tab's own placement is already absent (a page without a
         // URL is never the desired view), so the create needs no reset.
-        (browser_open(dispatch, id, url), model.browser_pane)
+        (
+          browser_open(
+            dispatch,
+            id,
+            url,
+            model.theme.is_dark(model.system_dark),
+          ),
+          model.browser_pane,
+        )
       }
       (
         cmd,
@@ -4462,7 +4514,12 @@ fn update_msg(
             let (preview, id) = @preview.open_page(model.preview, url~)
             let dock = @dock.open_browser(model.dock, id)
             (
-              browser_open(dispatch, id, url),
+              browser_open(
+                dispatch,
+                id,
+                url,
+                model.theme.is_dark(model.system_dark),
+              ),
               {
                 ..model,
                 preview,

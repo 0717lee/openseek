@@ -119,6 +119,60 @@ fn allowed_page_url(url : String) -> Bool {
 }
 
 ///|
+/// The native view's initial paint follows the app canvas instead of flashing
+/// the opposite palette while the first document is loading.
+fn browser_background(dark : Bool) -> String {
+  if dark {
+    "#16181D"
+  } else {
+    "#FBFBF9"
+  }
+}
+
+///|
+/// Best-effort page theme bridge. `color-scheme` covers browser-owned controls;
+/// the attributes cover sites that already declare a theme convention (GitHub
+/// uses `data-color-mode`). Attributes a page did not opt into are left alone,
+/// so this does not invent framework semantics on unrelated sites.
+fn browser_theme_script(dark : Bool) -> String {
+  let theme = if dark { "dark" } else { "light" }
+  let opposite = if dark { "light" } else { "dark" }
+  let script =
+    $|(() => {
+    $|  const theme = "\{theme}";
+    $|  const opposite = "\{opposite}";
+    $|  const apply = () => {
+    $|    const root = document.documentElement;
+    $|    if (!root) return;
+    $|    root.style.colorScheme = theme;
+    $|    for (const attribute of ["data-color-mode", "data-theme", "data-bs-theme"]) {
+    $|      if (root.hasAttribute(attribute)) root.setAttribute(attribute, theme);
+    $|    }
+    $|    if (root.classList.contains(theme) || root.classList.contains(opposite)) {
+    $|      root.classList.remove(opposite);
+    $|      root.classList.add(theme);
+    $|    }
+    $|  };
+    $|  apply();
+    $|  if (!document.documentElement) {
+    $|    document.addEventListener("DOMContentLoaded", apply, { once: true });
+    $|  }
+    $|})();
+  script
+}
+
+///|
+/// Theme injection is advisory: a view can be between JavaScript realms while
+/// a navigation commits. The later navigated/loading events retry it, so a
+/// transient evaluation failure must never turn a successful navigation into
+/// a failed browser command.
+fn apply_browser_theme(view : @proton.ViewHandle, dark : Bool) -> Unit {
+  view.eval(browser_theme_script(dark)) catch {
+    _ => ()
+  }
+}
+
+///|
 fn BrowserViews::attached_window(
   self : BrowserViews,
 ) -> @proton.WindowHandle raise BrowserViewError {
@@ -152,16 +206,24 @@ fn BrowserViews::open(
 ) -> @protocol.EmptyReply raise {
   guard allowed_page_url(payload.url) else { raise BlockedURL(payload.url) }
   let window = self.attached_window()
-  match window.view(view_name(payload.id)) {
-    Some(view) => view.load_url(payload.url)
+  let view = match window.view(view_name(payload.id)) {
+    Some(view) => {
+      view.load_url(payload.url)
+      view
+    }
     None =>
-      ignore(
-        window.add_view(
-          view_name(payload.id),
-          @proton.view(payload.url, width=800, height=600, visible=false),
+      window.add_view(
+        view_name(payload.id),
+        @proton.view(
+          payload.url,
+          width=800,
+          height=600,
+          visible=false,
+          background_color=browser_background(payload.dark),
         ),
       )
   }
+  apply_browser_theme(view, payload.dark)
   Acknowledged
 }
 
@@ -189,6 +251,15 @@ fn BrowserViews::reload(
   payload : @protocol.BrowserIdPayload,
 ) -> @protocol.EmptyReply raise {
   self.view(payload.id).reload()
+  Acknowledged
+}
+
+///|
+fn BrowserViews::set_theme(
+  self : BrowserViews,
+  payload : @protocol.BrowserThemePayload,
+) -> @protocol.EmptyReply raise {
+  apply_browser_theme(self.view(payload.id), payload.dark)
   Acknowledged
 }
 
@@ -263,6 +334,9 @@ fn browser_endpoints(views : BrowserViews) -> Array[@endpoint.Endpoint] {
     @endpoint.Endpoint::window(@commands.browser_reload, (_, payload) => {
       views.reload(payload)
     }),
+    @endpoint.Endpoint::window(@commands.browser_set_theme, (_, payload) => {
+      views.set_theme(payload)
+    }),
     @endpoint.Endpoint::window(@commands.app_open_devtools, (_, _) => {
       views.open_app_devtools()
     }),
@@ -299,10 +373,11 @@ test "browser ops refuse to run without a window; close tolerates it" {
   }
 
   let views = BrowserViews::new()
-  assert_true(raises(() => views.open({ id: 1, url: "http://x/" })))
+  assert_true(raises(() => views.open({ id: 1, url: "http://x/", dark: true })))
   assert_true(raises(() => views.back({ id: 1 })))
   assert_true(raises(() => views.forward({ id: 1 })))
   assert_true(raises(() => views.reload({ id: 1 })))
+  assert_true(raises(() => views.set_theme({ id: 1, dark: true })))
   assert_true(raises(() => views.open_app_devtools()))
   assert_true(
     raises(() => views.set_bounds({ id: 1, x: 0, y: 0, width: 10, height: 10 })),
@@ -311,6 +386,19 @@ test "browser ops refuse to run without a window; close tolerates it" {
   // Closing with no window (or no view) is deliberately not an error:
   // the close raced a page reload's `close_all`.
   assert_true(views.close({ id: 1 }) is Acknowledged)
+}
+
+///|
+test "browser page theme bridge uses app palettes and opted-in conventions" {
+  assert_eq(browser_background(true), "#16181D")
+  assert_eq(browser_background(false), "#FBFBF9")
+  let dark = browser_theme_script(true)
+  assert_true(dark.contains("const theme = \"dark\";"))
+  assert_true(dark.contains("const opposite = \"light\";"))
+  assert_true(dark.contains("\"data-color-mode\""))
+  let light = browser_theme_script(false)
+  assert_true(light.contains("const theme = \"light\";"))
+  assert_true(light.contains("const opposite = \"dark\";"))
 }
 
 ///|

@@ -637,6 +637,12 @@ pub let browser_reload : Command[
 ] = Command("browser.reload")
 
 ///|
+pub let browser_set_theme : Command[
+  @protocol.BrowserThemePayload,
+  @protocol.EmptyReply,
+] = Command("browser.set_theme")
+
+///|
 pub let app_open_devtools : Command[
   @protocol.EmptyPayload,
   @protocol.EmptyReply,

@@ -51,6 +51,8 @@ pub let browser_reload : Command[@protocol.BrowserIdPayload, @protocol.EmptyRepl
 
 pub let browser_set_bounds : Command[@protocol.BrowserBoundsPayload, @protocol.EmptyReply]
 
+pub let browser_set_theme : Command[@protocol.BrowserThemePayload, @protocol.EmptyReply]
+
 pub let browser_set_visible : Command[@protocol.BrowserVisiblePayload, @protocol.EmptyReply]
 
 pub let codex_account_login_cancel : Command[@protocol.CodexAccountLoginCancelPayload, @protocol.CodexCommandReply[@protocol.EmptyReply]]
