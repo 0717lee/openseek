@@ -25,10 +25,8 @@ test "inner diff decorations use VS Code className semantics" {
 ///|
 test "a changed empty model line still has an inclusive decoration range" {
   assert_eq(
-    changed_line_range(LineRange(1, 2), @model.TextSnapshot("")),
+    changed_line_range(LineRange(1, 2), TextSnapshot("")),
     Some(Range(1, 1, 1, 1)),
   )
-  assert_true(
-    changed_line_range(LineRange(1, 1), @model.TextSnapshot("")) is None,
-  )
+  assert_true(changed_line_range(LineRange(1, 1), TextSnapshot("")) is None)
 }

@@ -348,11 +348,11 @@ fn compute_range_alignments(
         (original_item, modified_item)
       }
       result.push({
-        original_range: @base_common.LineRange(
+        original_range: LineRange(
           original_item.line_number,
           original_item.line_number + 1,
         ),
-        modified_range: @base_common.LineRange(
+        modified_range: LineRange(
           modified_item.line_number,
           modified_item.line_number + 1,
         ),

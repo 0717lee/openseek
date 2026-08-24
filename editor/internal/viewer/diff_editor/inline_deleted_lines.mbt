@@ -87,7 +87,7 @@ fn inline_deleted_view_zone_specs(
         )
         let zone_id : Ref[String?] = Ref(None)
         specs.push(
-          @code_widget.ManagedCodeEditorViewZoneSpec(
+          ManagedCodeEditorViewZoneSpec(
             inline_deleted_zone_anchor(change),
             rendered.height_in_px(),
             rendered.dom_node(),

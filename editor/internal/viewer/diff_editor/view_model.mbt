@@ -344,7 +344,7 @@ fn normalize_range_mapping(
     modified.get_line_max_column(modified_range.end_line_number) &&
     original_range.end_line_number < original.line_count() &&
     modified_range.end_line_number < modified.line_count() {
-    @diff.RangeMapping(
+    RangeMapping(
       original_range.set_end_position(original_range.end_line_number + 1, 1),
       modified_range.set_end_position(modified_range.end_line_number + 1, 1),
     )
@@ -361,7 +361,7 @@ fn normalize_document_diff(
 ) -> @diff.DocumentDiff {
   {
     changes: result.changes.map(change => {
-      @diff.DetailedLineRangeMapping(
+      DetailedLineRangeMapping(
         change.original,
         change.modified,
         change.inner_changes.map(inner_changes => {
