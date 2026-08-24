@@ -519,6 +519,16 @@ priv struct RecoveredSettlement {
 }
 
 ///|
+/// One standing permission question, routed back to its conversation. The
+/// question itself is the same value the live event produces; only the session
+/// it belongs to has to travel beside it, since `PendingApproval` lives inside
+/// a conversation and does not name one.
+priv struct RecoveredApproval {
+  session : String
+  approval : PendingApproval
+}
+
+///|
 /// The exact per-session lifecycle state at the instant an `agent.runs`
 /// request starts. An unversioned positive row is safe to replay only while
 /// the session still has this state; a live Started or Finished received
@@ -537,6 +547,12 @@ priv struct RunSnapshotFrontier {
   // Their submission id is still an exact owner and must survive the
   // lifecycle's transition to SnapshotIdle for reconnect settlement lookup.
   initial_ids : Array[String]
+  // The permission question this page was showing when the request began, if
+  // any. A snapshot that does not list it proves it was answered while this
+  // page was away — but only for THIS id: a question asked after the request
+  // went out is not in the reply either, and clearing that one would take a
+  // live card off screen and leave the turn blocked with nothing to press.
+  pending_approval_id : String?
 }
 
 ///|
@@ -753,6 +769,14 @@ priv struct Conversation {
   // they belong to. Canonical User text never claims ownership, so identical
   // steers from multiple clients cannot collide.
   pending_steers : Array[PendingSteer]
+  // The permission question this conversation's engine is blocked on, if any.
+  //
+  // A field rather than a queue because the engine can only be blocked on one
+  // at a time: the tool that asks is not `concurrent_safe`, so no second tool
+  // is running beside it to ask a second question. If that ever changes, this
+  // becomes a queue and the composer has to decide what showing two at once
+  // means.
+  pending_approval : PendingApproval?
   // The one prompt in flight: submitted, no answer yet. There is at most one
   // — Send is refused while a run is open — so this is a field, not a queue.
   //
@@ -902,6 +926,32 @@ priv struct PendingSteer {
   content : String
   draft : String
   mentions : Array[Mention]
+} derive(Eq)
+
+///|
+/// A permission question the engine announced and is blocked on. `detail` is
+/// the permission, `body` the program it would be spent on; both are shown
+/// verbatim, since a client that paraphrases a permission can get it wrong.
+///
+/// `run_id` is the run this question belongs to. It rides the answer so a
+/// decision the user takes a while over cannot settle a question in a later
+/// run that happens to reuse the id sequence.
+priv struct PendingApproval {
+  /// The id the decision carries back. Reused verbatim across a replay: a
+  /// rejoining page answers the same question, not a new one.
+  id : String
+  run_id : String?
+  tool_name : String
+  detail : String
+  /// What would actually run, verbatim. The card shows it: `detail` names the
+  /// permission, and a permission with its subject off screen is not something
+  /// anyone can decide on.
+  body : String?
+  // Set once the answer has been handed to the host, so a second click cannot
+  // send a second decision for the same question. The card stays on screen
+  // until the engine's `approval_resolved` retires it, because until then the
+  // answer has not demonstrably arrived.
+  answered : Bool
 } derive(Eq)
 
 ///|
@@ -1673,6 +1723,20 @@ priv enum Msg {
   Skills(@skills.Msg)
   Send
   Stop
+  // The user answered the active conversation's permission question. `allow`
+  // grants the one action it asked about; the card stays until the engine's
+  // settlement retires it.
+  ApprovalAnswered(allow~ : Bool)
+  // A decision that never reached the engine: the bridge call failed, or the
+  // host had no live engine to hand it to. Restores the card's buttons, since
+  // nothing else will — a settlement only follows a decision that arrived, and
+  // the question behind it has no deadline. Addressed exactly, so a stale
+  // failure cannot unlock a newer question.
+  ApprovalAnswerFailed(
+    channel~ : @interop.ChannelId,
+    session~ : String,
+    id~ : String
+  )
   NewChat
   // The channel is captured when rotation is requested, so a focus move can
   // fence the delayed id instead of activating it on the newly focused host.
@@ -2125,6 +2189,12 @@ priv enum DeviceMsg {
   RunsLoaded(
     runs~ : Array[RecoveredRun],
     settled~ : Array[RecoveredSettlement],
+    // Permission questions the host's engines are still blocked on. A card
+    // this page rendered before a reload is gone with the page, and nothing
+    // in the durable record can bring it back — so a rejoining client is
+    // handed the standing question rather than watching a run that never
+    // moves.
+    approvals~ : Array[RecoveredApproval],
     live~ : Array[String],
     frontier~ : Array[RunSnapshotFrontier],
     connection_generation~ : Int
@@ -2260,6 +2330,7 @@ fn empty_conversation(
     watcher_status: None,
     turn: RunState::empty(),
     pending_steers: [],
+    pending_approval: None,
     pending_prompt: None,
     messages: [],
     watermark: 0,
@@ -2715,7 +2786,12 @@ fn Model::run_snapshot_frontier(
     if conv.pending_prompt is Some(pending) {
       initial_ids.push(pending.submission_id)
     }
-    { session: conv.session_id, state, initial_ids }
+    {
+      session: conv.session_id,
+      state,
+      initial_ids,
+      pending_approval_id: conv.pending_approval.map(pending => pending.id),
+    }
   })
 }
 

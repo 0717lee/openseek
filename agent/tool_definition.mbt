@@ -102,7 +102,21 @@ pub async fn[X] build_tools(
       @remove.definition(workspace_root~, file_state~),
       @plan.definition(),
       @goal.definition(),
-      @run_moonbit.definition(workspace_root~, bg_runtime~, job_dir?=spill_dir),
+      // The escalation argument exists for this registry only when the runtime
+      // has somewhere to send the question — and the channel IS that fact, so
+      // it is passed straight through rather than tested and rebuilt. What the
+      // tool package receives is the channel and nothing else: it can ask, and
+      // knows nothing about who answers.
+      @run_moonbit.definition(
+        workspace_root~,
+        bg_runtime~,
+        job_dir?=spill_dir,
+        approval?=runtime.approval_channel(),
+      ),
+      // Deliberately NOT told about escalation. It reports a job that already
+      // ran — a policy refusal reaches it after minutes of real work — and the
+      // sanctioned retry is worded for a run that did not happen. Offering it
+      // here would misdescribe the state the job left behind.
       @job_output.definition(bg_runtime),
       @job_stop.definition(bg_runtime),
       @finish.definition(),
@@ -396,5 +410,41 @@ async test "a finished background job queues a notice and wakes the controller" 
     assert_true(woke)
     let steers = runtime.drain_steers()
     assert_true(steers.any(s => s is Notice(_)))
+  })
+}
+
+///|
+/// A turn built by `run_turn_with_append` offers `escalated` only when the
+/// caller hands it a channel — which is the plumbing best-of-N runs were
+/// missing. `openseek run --concurrency N --approval always` parsed the flag,
+/// discarded it, and built every attempt's runtime without one, so the
+/// argument was never advertised and the option was silently inert.
+///
+/// The registry is what proves it: the field's presence in `run_moonbit`'s
+/// schema is decided by the runtime's channel, so asserting on the schema
+/// asserts the whole chain from this parameter down.
+async test "a turn advertises escalation exactly when it is given a channel" {
+  @async.with_task_group(group => {
+    let confined = build_tools(AgentRuntime(), AgentTaskScope(group))
+    guard confined.find("run_moonbit") is Some(tool) else {
+      fail("run_moonbit tool missing")
+    }
+    let JsonSchema(schema) = tool.schema
+    guard schema is { "properties": Object(properties), .. } else {
+      fail("expected an object schema")
+    }
+    assert_false(properties.contains("escalated"))
+    let asking = build_tools(
+      AgentRuntime(approval=ApprovalChannel(_ => Rejected)),
+      AgentTaskScope(group),
+    )
+    guard asking.find("run_moonbit") is Some(tool) else {
+      fail("run_moonbit tool missing")
+    }
+    let JsonSchema(schema) = tool.schema
+    guard schema is { "properties": Object(properties), .. } else {
+      fail("expected an object schema")
+    }
+    assert_true(properties.contains("escalated"))
   })
 }

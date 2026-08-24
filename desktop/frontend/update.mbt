@@ -1198,11 +1198,44 @@ fn apply_engine_event(
     // The turn loop records this as an error `tool_result`; its commit is the
     // one canonical transcript source, just like a successful tool result.
     ToolCallDecodeError(..) => (None, conv)
+    // A turn cannot end while a tool inside it is still blocked, so a terminal
+    // event means the question died with the turn — the engine settles it as
+    // cancelled on its way out. Clearing here is what stops a card from
+    // outliving the run it belongs to and offering to answer nothing.
     AgentFinished(_)
     | ContextYield(_)
     | AgentAborted(_)
-    | AgentSetupFailed(_) => (None, conv.clear_streams())
-    MaxStepsExhausted => (None, conv.clear_streams())
+    | AgentSetupFailed(_) =>
+      (None, { ..conv.clear_streams(), pending_approval: None })
+    MaxStepsExhausted =>
+      (None, { ..conv.clear_streams(), pending_approval: None })
+    // A tool is blocked until this is answered. It replaces whatever card was
+    // showing: the engine asks one question at a time, so an unretired older
+    // one is a card this client failed to clear, not a second live question.
+    ApprovalRequested(id~, tool_name~, detail~, body~) =>
+      (
+        None,
+        {
+          ..conv,
+          pending_approval: Some({
+            id,
+            run_id: event_run_id,
+            tool_name,
+            detail,
+            body,
+            answered: false,
+          }),
+        },
+      )
+    // Settled — by this client, by another one, or by the engine's deadline.
+    // Matched by id so a late settlement for an older question cannot retire
+    // the card for a newer one.
+    ApprovalResolved(id~) =>
+      if conv.pending_approval is Some(pending) && pending.id == id {
+        (None, { ..conv, pending_approval: None })
+      } else {
+        (None, conv)
+      }
     // The steer took effect at a step boundary. Its durable user item arrives
     // through `session.event`; the live event only settles pending UI.
     SteerApplied(content~, submission_id~) => {
@@ -3254,6 +3287,45 @@ fn update_msg(
       } else {
         (@cmd.none, model)
       }
+    }
+    // Answering is refused once already answered, so a double click cannot
+    // send two decisions for one question. The card is marked rather than
+    // removed: it comes off screen when the engine says the question settled,
+    // which is the only evidence the answer arrived.
+    ApprovalAnswered(allow~) => {
+      guard model.active_conversation() is Some(conv) &&
+        conv.pending_approval is Some(pending) &&
+        !pending.answered else {
+        return (@cmd.none, model)
+      }
+      (
+        approve_openseek(
+          dispatch,
+          model.focused,
+          conv.session_id,
+          pending.id,
+          pending.run_id,
+          allow~,
+        ),
+        model.replace_conversation({
+          ..conv,
+          pending_approval: Some({ ..pending, answered: true }),
+        }),
+      )
+    }
+    ApprovalAnswerFailed(channel~, session~, id~) => {
+      guard model.find_conversation(channel, session) is Some(conv) &&
+        conv.pending_approval is Some(pending) &&
+        pending.id == id else {
+        return (@cmd.none, model)
+      }
+      (
+        @cmd.none,
+        model.replace_conversation({
+          ..conv,
+          pending_approval: Some({ ..pending, answered: false }),
+        }),
+      )
     }
     NewChat =>
       // A fresh conversation can start at any time: the current one keeps
@@ -6327,7 +6399,14 @@ fn update_device_msg(
         (@cmd.batch(commands), updated)
       }
     }
-    RunsLoaded(runs~, settled~, live~, frontier~, connection_generation~) => {
+    RunsLoaded(
+      runs~,
+      settled~,
+      approvals~,
+      live~,
+      frontier~,
+      connection_generation~
+    ) => {
       guard connection_generation == dev.connection_generation else {
         return (@cmd.none, model)
       }
@@ -6447,7 +6526,84 @@ fn update_device_msg(
         next,
       )
       commands.push(settled_cmd)
-      (@cmd.batch(commands), settled)
+      // Standing questions land last, once every conversation in this snapshot
+      // has the run phase the snapshot gives it.
+      //
+      // Two passes, because they answer two different questions of two
+      // different sets. Seeding asks what the reply says exists, so it iterates
+      // the REPLY — a fresh page captures an empty frontier (`BridgeReady`
+      // issues this alongside `session.list`, before any conversation exists),
+      // and iterating the frontier would drop every question on the one path
+      // the replay was built for. Retiring asks what this page was showing that
+      // the reply lacks, which only the frontier knows.
+      let captured_by_session : Map[String, RunSnapshotFrontier] = Map([])
+      for row in frontier {
+        captured_by_session[row.session] = row
+      }
+      let mut seeded = settled
+      for recovered in approvals {
+        guard seeded.find_conversation(channel, recovered.session) is Some(conv) else {
+          continue
+        }
+        let showing = conv.pending_approval.map(pending => pending.id)
+        // Unchanged since the request went out — a session absent from the
+        // frontier captured nothing, so it must be showing nothing now.
+        // Anything else is newer truth than the reply, live events having
+        // landed meanwhile.
+        let captured = match captured_by_session.get(recovered.session) {
+          Some(row) => row.pending_approval_id
+          None => None
+        }
+        guard showing == captured else { continue }
+        // And the question must belong to the run this conversation has open.
+        // The check above compares two endpoints, so it cannot see a value
+        // that changed and changed back: with nothing captured, one question
+        // asked and resolved in flight, and its run replaced by a successor,
+        // both endpoints read `None` and this dead question would be seeded
+        // onto the new run — where answering it is rejected and the failure
+        // handler puts the buttons back, leaving a prompt that can never be
+        // dismissed. A question only exists inside a turn, so a conversation
+        // with no open run has none to restore.
+        guard conv.run is Open(run_id~, ..) &&
+          recovered.approval.run_id == Some(run_id) else {
+          continue
+        }
+        // Already on screen unchanged: leave it, answered flag and all. This
+        // resync runs on every reconnect, not only after a reload, so handing
+        // the buttons back to a card the user has already answered would be
+        // one question with two decisions.
+        if showing is Some(id) && id == recovered.approval.id {
+          continue
+        }
+        seeded = seeded.replace_conversation({
+          ..conv,
+          pending_approval: Some(recovered.approval),
+        })
+      }
+      // Retire: a question this page was showing that the reply lacks was
+      // answered while the page was away — by another client, or by the run
+      // ending. Its `approval_resolved` is gone for good (reconnect is resync;
+      // transients are not replayed), so nothing else will ever take that card
+      // down, and pressing it sends a decision the engine's desk discards.
+      //
+      for captured in frontier {
+        guard captured.pending_approval_id is Some(captured_id) else {
+          continue
+        }
+        if approvals.iter().any(item => item.approval.id == captured_id) {
+          continue
+        }
+        guard seeded.find_conversation(channel, captured.session) is Some(conv) else {
+          continue
+        }
+        if conv.pending_approval is Some(current) && current.id == captured_id {
+          seeded = seeded.replace_conversation({
+            ..conv,
+            pending_approval: None,
+          })
+        }
+      }
+      (@cmd.batch(commands), seeded)
     }
     RunsSettled(live~, frontier~) => {
       // A conversation still showing an open run the host no longer has: the
@@ -6861,6 +7017,18 @@ fn update_device_msg(
         // Whether each submission reached the store is the record's question;
         // the transcript answers it without a local placeholder.
         let settled_inputs = conv.clear_streams().forget_steers_for_run(run_id)
+        // A question belonging to this run goes with it. The engine settles
+        // its own on the way out, so what reaches here is the engine that
+        // could not — a killed process emits no `approval_resolved` — and
+        // nothing else would ever retire the card, there being no deadline
+        // behind the question. The host drops its copy on the same evidence.
+        let settled_inputs = if settled_inputs.pending_approval
+          is Some({ run_id: Some(owner), .. }) &&
+          owner == run_id {
+          { ..settled_inputs, pending_approval: None }
+        } else {
+          settled_inputs
+        }
         let base = {
           ..settled_inputs,
           run: NoRun(ended=Some(RunFinished(RunOutcome::parse(status)))),
@@ -10511,11 +10679,13 @@ test "runs settled closes runs the host no longer has, sparing live and starting
         session: "desktop-test",
         state: SnapshotOpen(run_id="r7"),
         initial_ids: [],
+        pending_approval_id: None,
       },
       {
         session: "desktop-stale",
         state: SnapshotOpen(run_id="r9"),
         initial_ids: [],
+        pending_approval_id: None,
       },
     ]),
     model,
@@ -10672,6 +10842,7 @@ test "a stale runs snapshot cannot replay a foreign run after BridgeReady" {
       },
     ],
     settled=[],
+    approvals=[],
     live=["old-run"],
     frontier=generation_one.run_snapshot_frontier(@interop.ChannelId::Local),
     connection_generation=generation_one.dev().connection_generation,
@@ -10684,6 +10855,7 @@ test "a stale runs snapshot cannot replay a foreign run after BridgeReady" {
     RunsLoaded(
       runs=[],
       settled=[],
+      approvals=[],
       live=[],
       frontier=generation_two.run_snapshot_frontier(@interop.ChannelId::Local),
       connection_generation=generation_two.dev().connection_generation,
@@ -10731,6 +10903,7 @@ test "a settlement captured for an older Starting owner cannot close its success
           status: "failed",
         },
       ],
+      approvals=[],
       live=[],
       frontier~,
       connection_generation=model.dev().connection_generation,
@@ -10777,6 +10950,7 @@ test "an older positive runs row cannot replace a newer Started" {
         },
       ],
       settled=[],
+      approvals=[],
       live=["r7"],
       frontier~,
       connection_generation=0,
@@ -10811,6 +10985,7 @@ test "an older positive runs row cannot resurrect a finished run" {
         },
       ],
       settled=[],
+      approvals=[],
       live=["r7"],
       frontier~,
       connection_generation=0,

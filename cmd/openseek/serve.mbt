@@ -7,6 +7,14 @@ priv enum ServeCommand {
   Compact
   Cancel
   Goal(GoalAction)
+  /// The answer to an `approval_requested` event: which question, and whether
+  /// it is granted. Both labelled, because a bare positional pair reads as
+  /// nothing at a call site and the second field is the decision itself.
+  ///
+  /// Unlike every other command here it does not schedule work. It releases a
+  /// tool that is already running and blocked, which is why it is dispatched
+  /// from the loop but never queues behind active work.
+  Approval(id~ : String, allow~ : Bool)
 }
 
 ///|
@@ -177,6 +185,7 @@ fn decode_serve_command(json : Json) -> Result[ServeCommand, String] {
         Ok(Goal(SetGoal(text, auto~)))
       }
     GoalClear => Ok(Goal(ClearGoal))
+    ApprovalDecision(id~, allow~) => Ok(Approval(id~, allow~))
   }
 }
 
@@ -216,6 +225,14 @@ test "serve commands decode and reject with actionable errors" {
   )
   assert_true(decode_serve_command({ "command": "compact" }) is Ok(Compact))
   assert_true(decode_serve_command({ "command": "cancel" }) is Ok(Cancel))
+  assert_true(
+    decode_serve_command({ "command": "approval", "id": "ap-1", "allow": true })
+    is Ok(Approval(id="ap-1", allow=true)),
+  )
+  assert_true(
+    decode_serve_command({ "command": "approval", "id": "ap-1", "allow": false })
+    is Ok(Approval(id="ap-1", allow=false)),
+  )
   guard decode_serve_command({ "command": "steer" }) is Err(message) else {
     fail("textless steer accepted")
   }
@@ -542,6 +559,13 @@ test "auto-continue requires a finished idle serving turn with budget" {
 /// did not ask for. `cancel` interrupts the current active work but never the
 /// process. stdin EOF is the shutdown signal: the running work finishes
 /// first, then the loop drains and exits.
+///
+/// `approval` is the one command that answers the engine rather than
+/// instructing it, and the one whose absence stalls a turn: under
+/// `--approval ask` a tool that asks to run outside its sandbox blocks until
+/// the decision arrives, with no deadline behind it. A controller that cannot
+/// answer must not ask to be asked — the flag defaults to `never`, and under
+/// it the argument that asks is not offered to the model at all.
 /// Session-server skeleton — one steps queue, three producers, one pump;
 /// `active_work` is the only mode state (turn │ compact │ idle):
 ///
@@ -555,6 +579,7 @@ test "auto-continue requires a finished idle serving turn with budget" {
 ///     ├─ Wire(Cancel)          ── cancel active work; disarm auto-continue
 ///     ├─ Wire(Compact)         ── idle? start compact : queue
 ///     ├─ Wire(Goal)            ── durable marker; auto=true arms auto-continue
+///     ├─ Wire(Approval)        ── release a tool blocked INSIDE the active turn
 ///     ├─ BackgroundNotice      ── idle? drain queued context to the log
 ///     ├─ TurnDone              ── drain context ── start next pending work
 ///     │                           └─ armed goal(auto) unmet ⇒ auto-continue
@@ -610,8 +635,18 @@ async fn run_serve(
   // event, so even a turn that raises leaves `session` reflecting all the
   // events it recorded before failing.
   let mut session = initial_session
+  // The desk outlives every turn: a question is asked by a tool inside one
+  // turn's task and answered by the loop below, which is the process's single
+  // command consumer. Both close over this one value.
+  let approval_desk = ApprovalDesk::new(
+    now_ms=@env.now().reinterpret_as_int64(),
+  )
+  let approval = approval_channel(
+    approval_policy(matches, interactive=true),
+    approval_desk,
+  )
   @async.with_task_group(group => {
-    let runtime = @agent_runtime.AgentRuntime(workspace_root~)
+    let runtime = @agent_runtime.AgentRuntime(workspace_root~, approval?)
     let scope = @agent_runtime.AgentTaskScope(group)
     // All scheduling flows through one ordered queue with one consumer:
     // wire commands from the reader, plus the internal turn-completion and
@@ -1073,6 +1108,11 @@ async fn run_serve(
               remove_next_pending_prompt(pending)
           }
         }
+        // Never queued behind active work, and never queued at all: the tool
+        // it answers is ALREADY running, inside the active turn, blocked on
+        // this reply. Deferring it the way a prompt is deferred would wait for
+        // the very turn the answer is needed to finish.
+        Wire(Approval(id~, allow~)) => approval_desk.settle(id, allow)
         Wire(Compact) =>
           if active_work is Some(_) {
             pending.push(PendingCompact)
@@ -1217,6 +1257,12 @@ async fn run_serve(
         }
         Shutdown => {
           shutting_down = true
+          // The reader that would have answered them is what just died, so
+          // every standing question is now unanswerable. Active work is
+          // allowed to finish on EOF rather than being cancelled, which only
+          // terminates if each wait inside it can still end — and an
+          // approval's is the one with no clock behind it.
+          approval_desk.withdraw_all()
           if active_work is None && pending.length() == 0 {
             break serve~
           }

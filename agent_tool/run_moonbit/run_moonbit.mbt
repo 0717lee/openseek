@@ -87,6 +87,11 @@ fn native_escape(source : String) -> String? {
 /// such program. A read-only subrun is the exception, and the one role that
 /// still takes a `sandbox-exec` profile: holding no editing tool is what defines
 /// it, so `read_only=true` puts "may not write source" in the kernel.
+///
+/// `approval` is where a request to run OUTSIDE the sandbox goes. Its presence
+/// is what advertises the `escalated` argument at all — the same rule
+/// `bg_runtime` follows for `run_in_background`: a build with nobody to ask
+/// does not offer an argument whose every use would come back refused.
 pub fn definition(
   workspace_root~ : String,
   read_only? : Bool = false,
@@ -95,6 +100,7 @@ pub fn definition(
   scratch_dir? : String,
   worker_sandbox? : WorkerSandbox,
   run_timeout_ms? : Int = RunTimeoutMs,
+  approval? : @agent_runtime.ApprovalChannel,
 ) -> @agent_tool.AgentToolDefinition {
   // Background snippet directories are numbered inside the caller's scratch
   // dir rather than created as fresh system temp dirs: a detached job outlives
@@ -103,8 +109,13 @@ pub fn definition(
   let next_background = Ref(0)
   AgentToolDefinition(
     name="run_moonbit",
-    description=description(background=bg_runtime is Some(_)),
-    schema=JsonSchema(schema(background=bg_runtime is Some(_))),
+    description=description(
+      background=bg_runtime is Some(_),
+      escalation=approval is Some(_),
+    ),
+    schema=JsonSchema(
+      schema(background=bg_runtime is Some(_), escalation=approval is Some(_)),
+    ),
     execute=Async(arguments => {
       execute(
         workspace_root,
@@ -116,9 +127,46 @@ pub fn definition(
         worker_sandbox?,
         run_timeout_ms~,
         next_background~,
+        approval?,
       )
     }),
   )
+}
+
+///|
+/// What the model is told when an escalation did not become a run.
+///
+/// One text per outcome, and they are deliberately different sentences rather
+/// than one "escalation denied": what the model should do next differs for
+/// each, and a single text makes all three look like the same wall. A refusal
+/// by a person is final for this task; a withdrawn request is not a decision
+/// at all; an absent channel means the argument itself is unusable here and
+/// the snippet should simply be retried without it.
+///
+/// `AllowedOnce` is not a refusal, so it has no text — it is unreachable here,
+/// and answering it would be a fourth sentence nobody ever reads.
+fn escalation_refused(outcome : @agent_runtime.ApprovalOutcome) -> String {
+  match outcome {
+    Rejected =>
+      "run_moonbit: the user declined to run this snippet outside the sandbox. That is an answer, not an obstacle to route around: do not ask again for this task — solve it within the spawn allowlist and the write-root bound, or say plainly what that makes impossible."
+    Cancelled =>
+      "run_moonbit: the request to run outside the sandbox was withdrawn before anyone answered it, so NOTHING RAN. This is not a refusal — but do not ask a second time unless something has changed; retry the snippet without `escalated` instead."
+    Unavailable =>
+      "run_moonbit: this session has no approval channel, so running outside the sandbox cannot be granted here at all. Retry this exact snippet without `escalated`; the spawn allowlist and the write-root bound are what you have."
+    // Unreachable: the caller only builds a refusal after the grant failed.
+    AllowedOnce => "run_moonbit: escalation was granted."
+  }
+}
+
+///|
+/// The outcome word for the display-only brief.
+fn escalation_brief(outcome : @agent_runtime.ApprovalOutcome) -> String {
+  match outcome {
+    AllowedOnce => "allowed"
+    Rejected => "refused"
+    Cancelled => "withdrawn"
+    Unavailable => "unavailable"
+  }
 }
 
 ///|
@@ -134,6 +182,7 @@ async fn execute(
   // without waiting out the real one.
   run_timeout_ms~ : Int,
   next_background~ : Ref[Int],
+  approval? : @agent_runtime.ApprovalChannel,
 ) -> @agent_tool.ToolAction {
   let input = @decode.decode(arguments) catch {
     error =>
@@ -180,6 +229,51 @@ async fn execute(
       "error: run_in_background is not available in this context",
       is_error=true,
     )
+  }
+  // Escalation only means something on the backend the policy binds. The other
+  // targets never had `--wasm-policy` passed to them in the first place — they
+  // cannot spawn or touch files at all — so asking here would spend a person's
+  // attention on a grant that changes nothing about the run.
+  if input.escalated && input.target != "wasm" {
+    return @agent_tool.ToolAction::respond(
+      "run_moonbit: `escalated` applies to the wasm target, which is the one the sandbox policy binds; `\{input.target}` runs no policy to lift and cannot spawn or touch files anyway. Drop `escalated`, or drop `target` to use wasm.",
+      is_error=true,
+    )
+  }
+  // Resolve the escalation request before anything is created or spawned, and
+  // after every cheap check above: a snippet with a typo'd `cwd` must fail on
+  // the typo rather than spend a person's attention on a prompt for a call
+  // that was never going to run.
+  //
+  // A granted escalation is consumed by THIS call and nothing else. There is
+  // no session-scoped grant and no rule to remember, so the next escalating
+  // call asks again.
+  let escalated = if input.escalated {
+    let outcome = match approval {
+      Some(channel) =>
+        // The program goes with the question. It is what the user is actually
+        // deciding about, and `detail` — which is a constant — describes only
+        // the permission. Passed as the exact string this call was made with,
+        // so what is approved and what runs cannot differ.
+        channel.ask({
+          tool_name: "run_moonbit",
+          detail: "run this snippet with no sandbox policy: no spawn allowlist, and writes anywhere",
+          body: Some(input.source),
+        })
+      // The argument was not advertised in this build's schema, so reaching
+      // here means the model asked for a field it was never offered.
+      None => Unavailable
+    }
+    guard outcome is AllowedOnce else {
+      return @agent_tool.ToolAction::respond(
+        escalation_refused(outcome),
+        is_error=true,
+        brief="run_moonbit (escalation \{escalation_brief(outcome)})",
+      )
+    }
+    true
+  } else {
+    false
   }
   // A directory a job may take over must outlive this call, so it is numbered
   // inside the caller's job dir — reclaimed when the session's scope ends —
@@ -297,7 +391,13 @@ async fn execute(
     input.target,
     "--target-dir",
     dir,
-    ..if input.target == "wasm" {
+    // An approved escalation is exactly this: the policy file is still
+    // written, and simply not passed. Widening the document instead was not
+    // available — its `fs.write` roots are canonicalized existing paths with
+    // no wildcard, and "any program" has no spelling in `process.allow` short
+    // of enumerating one — so "no policy" is both the honest description of
+    // what was approved and the only one the runtime can express.
+    ..if input.target == "wasm" && !escalated {
       ["--wasm-policy", policy_path]
     },
     ..if !input.warning {
@@ -486,7 +586,11 @@ async fn execute(
     // session temp dir) has no such file, and there the head is all there is.
     let denial_scan_source = exec.spill_path()
     let sandbox_denied = refusal_guidance(
-      sandboxed_command, denial_scan_source, raw,
+      sandboxed_command,
+      denial_scan_source,
+      raw,
+      escalation=approval is Some(_),
+      escalated~,
     )
     exec.discard()
     let text = rewrite_temp_paths(raw, [real, dir])
@@ -538,7 +642,13 @@ async fn execute(
   // failed even if the snippet swallowed the error and exited 0 — a swallowed
   // denial still means the access it needed did not happen. It runs for the
   // timeout arm too: a snippet can print a caught denial and then hang.
-  let sandbox_denied = refusal_guidance(sandboxed_command, Some(log), "")
+  let sandbox_denied = refusal_guidance(
+    sandboxed_command,
+    Some(log),
+    "",
+    escalation=approval is Some(_),
+    escalated~,
+  )
   let action = match result {
     Some((exit_code, raw)) => {
       // Rewrite the throwaway temp path to `source` so the model reads
@@ -610,6 +720,8 @@ async fn refusal_guidance(
   sandboxed_command : @sandbox.SandboxedCommand?,
   log_path : String?,
   head : String,
+  escalation~ : Bool,
+  escalated~ : Bool,
 ) -> String? {
   async fn shows(reports : (String) -> Bool) -> Bool {
     match log_path {
@@ -618,8 +730,22 @@ async fn refusal_guidance(
     }
   }
 
-  if shows(@sandbox.output_reports_policy_refusal) {
-    return Some(@sandbox.policy_refusal_feedback)
+  // An escalated run was given no policy, so nothing it prints can be this
+  // tool's policy refusing something. The spawn marker is only the guest's own
+  // `EPERM` text, which an unsandboxed child can produce for its own reasons —
+  // scanning for it here would report a successful run as an error and tell
+  // the model to ask for the escalation it was already granted.
+  if !escalated && shows(@sandbox.output_reports_policy_refusal) {
+    // The escalating variant only where a channel exists AND this is a
+    // foreground report: its wording assumes nothing ran, which is true here
+    // and false of `job_output`, whose job worked before it was refused.
+    return Some(
+      if escalation {
+        @sandbox.policy_refusal_with_escalation
+      } else {
+        @sandbox.policy_refusal_feedback
+      },
+    )
   }
   guard sandboxed_command is Some(command) else { return None }
   if shows(output => command.output_reports_denial(output)) {
@@ -781,8 +907,11 @@ async fn read_capped(path : String) -> String {
 ///|
 /// The `run_moonbit` argument schema. `background` adds `run_in_background`,
 /// which a definition without a job runtime must not advertise — the model
-/// would only get an error from a call it cannot execute.
-fn schema(background~ : Bool) -> Json {
+/// would only get an error from a call it cannot execute. `escalation` adds
+/// `escalated` on the same rule: with no approval channel wired, every use of
+/// it would come back refused, and the cheapest way to not waste a turn on
+/// that is for the argument not to exist.
+fn schema(background~ : Bool, escalation~ : Bool) -> Json {
   let properties : Map[String, Json] = {
     "source": { "type": "string" },
     "target": {
@@ -815,6 +944,19 @@ fn schema(background~ : Bool) -> Json {
       ),
     }
   }
+  if escalation {
+    properties["escalated"] = {
+      "type": "boolean",
+      "description": (
+        #|Ask the user to run this snippet with NO sandbox policy — any program may
+        #|be spawned and the snippet may write anywhere. The call blocks on a
+        #|person's answer, and a refusal or an unanswered request means nothing ran.
+        #|Use it only when the allowed programs genuinely cannot do the job, and say
+        #|in the snippet's own code what it needs the extra reach for: the user is
+        #|shown this program, and decides on it.
+      ),
+    }
+  }
   {
     "type": "object",
     "properties": Json::object(properties),
@@ -837,8 +979,45 @@ fn schema(background~ : Bool) -> Json {
 ///
 /// `background` is conditional because without a job runtime the tool must not
 /// advertise `run_in_background`: the model would only get an error.
-fn description(background~ : Bool) -> String {
-  let base =
+/// `escalation` is conditional for the same reason, and matters more: the
+/// refused-command paragraph above tells the model to say so rather than work
+/// around a refusal, and where escalation IS available that advice would be
+/// wrong — there is a sanctioned way to ask. The paragraph that says so must
+/// appear exactly where the way exists.
+fn description(background~ : Bool, escalation~ : Bool) -> String {
+  // The one sentence here that depends on what this build can actually do.
+  //
+  // Without an approval channel a refusal really is the end of the road, and
+  // "say so" is the whole of the advice. With one there is a sanctioned door,
+  // and a description that does not name it leaves the model to do what it did
+  // in practice: quietly reconstruct the refused command out of allowed parts
+  // and never mention that asking was an option. Reading the justfile and
+  // running the three `moon` commands it expands to is a fine outcome — being
+  // unable to weigh it against asking is not.
+  //
+  // Both spellings keep the same stance. Routing AROUND a refusal is still the
+  // thing not to do; what changes is whether there is a third answer beside
+  // "find the replacement" and "give up".
+  let refusal_advice = if escalation {
+    (
+      #|Anything else is REFUSED, including the obvious ones. When a refused command
+      #|is genuinely what the task needs, two answers are legitimate: reach for the
+      #|MoonBit replacement below, or — when no replacement is faithful and the
+      #|refused program IS the task — retry that one snippet with escalated=true and
+      #|let the user decide. Reconstructing the refused command out of allowed parts
+      #|without saying so is the answer that is not. Read the table rather than
+      #|finding this out one command at a time — each is a line of MoonBit that also
+      #|works on Windows, where these binaries do not exist:
+    )
+  } else {
+    (
+      #|Anything else is REFUSED, including the obvious ones; if a refused command is
+      #|genuinely what the task needs, say so rather than working around it. Reach for
+      #|the replacement rather than finding this out one command at a time — each is a
+      #|line of MoonBit that also works on Windows, where these binaries do not exist:
+    )
+  }
+  let base_head =
     #|Compile and run a self-contained MoonBit program and return its merged
     #|stdout/stderr and exit status. This is BOTH your command runner and your
     #|scripting surface: there is no shell tool, so commands are spawned from MoonBit
@@ -951,12 +1130,7 @@ fn description(background~ : Bool) -> String {
     #|  (`-c`, `-C`, `--git-dir`, `--work-tree`) is refused.
     #|- `gh` — pr, issue, run, `repo view`, api, `auth status`.
     #|- `rg` and `diff`.
-    #|
-    #|Anything else is REFUSED, including the obvious ones; if a refused command is
-    #|genuinely what the task needs, say so rather than working around it. Reach for
-    #|the replacement rather than finding this out one command at a time — each is a
-    #|line of MoonBit that also works on Windows, where these binaries do not exist:
-    #|
+  let base_tail =
     #|    ls          → @fs.readdir(dir)
     #|    find        → rg --files, or recurse @fs.readdir + @fs.kind
     #|    cat         → @fs.read_file(p).text()
@@ -992,6 +1166,35 @@ fn description(background~ : Bool) -> String {
     #|- Bounded to 300s. For independent commands or probes, emit SEVERAL
     #|  `run_moonbit` calls in the SAME assistant turn — they run and come back
     #|  together, saving a model round-trip each.
+  // Three raw pieces joined at the seam, rather than one interpolating block:
+  // the tail carries `\{@fs.tmpdir()}` inside a code sample, which a `$|` block
+  // would try to evaluate.
+  let base =
+    $|\{base_head}
+    $|
+    $|\{refusal_advice}
+    $|
+    $|\{base_tail}
+  // The escalation paragraph goes BEFORE the background one so it sits next to
+  // the refusal rules it qualifies.
+  let base = if !escalation {
+    base
+  } else {
+    (
+      $|\{base}
+      $|
+      $|## When the allowlist genuinely is not enough
+      $|
+      $|Set escalated=true to ask the user to run one snippet with NO policy: any
+      $|program, and writes anywhere. The call then BLOCKS until a person answers, so
+      $|it costs their attention — spend it only when the allowed programs cannot do
+      $|the job, never as a first attempt or to skip reading a refusal. A refusal is
+      $|final for the task; a withdrawn request decided nothing and ran nothing. Either way
+      $|the snippet did not run, and the reply says which happened. The user sees this
+      $|program and decides on it, so write it to be read: no extra reach beyond what
+      $|the task needs, and the reason evident in the code itself.
+    )
+  }
   if !background {
     return base
   }

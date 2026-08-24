@@ -381,6 +381,86 @@
   background: var(--color-bg-subtle);
 }
 
+/* A permission question the turn is blocked on: an ordinary composer notice,
+   no louder than its neighbours. What marks it out is the pair of decisions on
+   its right. Blue is reserved for selection, so the container takes no accent
+   of its own. */
+.composer-approval-tool {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+/* With a program attached the card stops being a one-line row: the question
+   and its decisions keep the row, and the code sits under them. */
+.composer-approval-full {
+  display: block;
+}
+.composer-approval-question {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* The program the decision is actually about, highlighted by the same helper
+   the transcript's run_moonbit card uses. Token colours come from the
+   `--vscode-token-*` bindings in `viewer_theme.css`, which is why this class
+   is named in that file's theme-bridge selector; nothing here sets `color`,
+   or it would override them.
+
+   Bounded and SCROLLABLE, not truncated and not behind a disclosure. The
+   transcript trims a long program because it is reading material; this is the
+   subject of a permission prompt, and hiding any part of what someone is about
+   to allow is exactly the failure this block was added to fix. */
+.composer-approval-body {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  max-height: 220px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-surface);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-relaxed);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* The decisions wear the composer chip's shape, not a dialog button's: no
+   border, a plain fill that lifts on hover. The chips they match sit one row
+   below this card, which is the comparison a reader actually makes.
+
+   The fill is `--color-bg-surface` rather than the chips' own
+   `--color-control-surface`. That token is `--color-bg-subtle` at 74% alpha,
+   which separates against the composer card it was made for and vanishes here,
+   where the notice background IS `--color-bg-subtle`. Same intent — a control
+   that reads as raised — spelled for the surface it actually sits on.
+
+   The global `button` rule already supplies the transparent border, the
+   radius, and the cursor. */
+.composer-approval-action {
+  flex: none;
+  padding: 4px 10px;
+  background: var(--color-bg-surface);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+}
+.composer-approval-action:not(:disabled):hover {
+  background: var(--color-bg-subtle);
+  color: var(--color-text-primary);
+}
+/* Told apart by emphasis, never by hue: the grant carries the primary colour
+   and weight, the refusal recedes. Deliberately NOT red — refusing is the
+   conservative answer here, and dressing it as the destructive one gets the
+   stakes backwards. */
+.composer-approval-allow {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+.composer-approval-state {
+  flex: none;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+}
+
 /* steering input not yet folded into the running turn: a panel docked
    above the composer until the engine settles it */
 .pending-steers {

@@ -6,6 +6,8 @@ pub fn output_reports_policy_refusal(String) -> Bool
 
 pub let policy_refusal_feedback : String
 
+pub let policy_refusal_with_escalation : String
+
 // Errors
 
 // Types and methods

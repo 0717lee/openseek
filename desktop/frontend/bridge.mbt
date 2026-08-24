@@ -753,11 +753,34 @@ fn fetch_runs(
           recovered_settlements.push(settlement)
         }
       }
+      // Standing questions come back unfiltered: unlike a settlement, which is
+      // history only its owner wants, a blocked turn is stopped right now and
+      // whoever is looking at that session should be able to unblock it.
+      let recovered_approvals : Array[RecoveredApproval] = []
+      for item in reply.approvals {
+        recovered_approvals.push({
+          session: item.session,
+          approval: {
+            id: item.id,
+            run_id: item.run_id,
+            tool_name: item.tool_name,
+            detail: item.detail,
+            body: item.body,
+            // Replayed to a page that never sent a decision for it, so the
+            // card comes back answerable. A decision this page sent before it
+            // reloaded either reached the engine — and the question is gone
+            // from the host, so there is nothing here to replay — or it did
+            // not, and offering it again is the point.
+            answered: false,
+          },
+        })
+      }
       scheduler.add(
         dispatch(
           RunsLoaded(
             runs=recovered,
             settled=recovered_settlements,
+            approvals=recovered_approvals,
             live~,
             frontier~,
             connection_generation~,
@@ -1547,6 +1570,65 @@ fn cancel_openseek(
           )
           return
         }
+      }
+    })
+  })
+}
+
+///|
+/// Answer the permission question `id`, which a tool in `run_id` is blocked
+/// on.
+///
+/// A successful send does not retire the card. What retires it is the engine's
+/// own `approval_resolved`, which is the only evidence the decision actually
+/// reached the tool — a reply saying the host wrote the line is not the same as
+/// the engine having read it.
+///
+/// A FAILED send must put the card back, though, and that is not symmetric with
+/// the above. The decision never left this page, so no settlement is coming for
+/// it, and there is no deadline behind the question either: leaving the card
+/// marked answered would strand it reading "Sending…" forever with the engine
+/// still blocked, and cancelling the run would be the only way out.
+fn approve_openseek(
+  dispatch : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  session : String,
+  id : String,
+  run_id : String?,
+  allow~ : Bool,
+) -> @cmd.Cmd {
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      let reply : @protocol.ApprovalReply = @interop.bridge_request(
+        channel,
+        @commands.agent_approval,
+        { id, allow, run_id },
+      ) catch {
+        error => {
+          scheduler.add(dispatch(ApprovalAnswerFailed(channel~, session~, id~)))
+          scheduler.add(
+            dispatch(
+              HostActionFailed(
+                "Failed to answer the approval request: " +
+                @interop.bridge_error_text(error),
+              ),
+            ),
+          )
+          return
+        }
+      }
+      if !reply.delivered {
+        // The host had no live engine to hand it to. Restore it anyway: being
+        // refused a second time is a better end than a card that cannot be
+        // pressed at all.
+        scheduler.add(dispatch(ApprovalAnswerFailed(channel~, session~, id~)))
+        scheduler.add(
+          dispatch(
+            HostActionFailed(
+              "That approval request is no longer waiting — the turn it belonged to has ended.",
+            ),
+          ),
+        )
       }
     })
   })

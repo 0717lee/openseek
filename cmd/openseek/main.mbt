@@ -118,6 +118,12 @@ async fn run_task_command(matches : @argparse.Matches) -> Unit {
   with_jsonl_stdout(() => {
     // --no-session contradicts an explicit --session; reject up front.
     reject_session_contradiction(matches)
+    // So is `--approval ask` on a command that reads no commands. Rejected
+    // HERE, before a session directory exists and before the model is
+    // contacted: resolving it at the first turn instead left a run that
+    // announced `session_started` and only then refused, which is a failure
+    // the caller pays for in artifacts on disk.
+    approval_policy(matches, interactive=false) |> ignore
     // Best-of-N fleet mode owns its own workspace materialization and session
     // creation, so it branches before prepare_workspace_root (which would
     // create a single --dir).
@@ -262,7 +268,15 @@ async fn run_task_turn(
   child_session? : @agent_subrun.ChildSession,
 ) -> Unit {
   @async.with_task_group() <| group => {
-    let runtime = @agent_runtime.AgentRuntime(workspace_root~)
+    // `run` reads no commands, so there is nobody to ask: `--approval ask` is
+    // refused at parse time (see parse_approval_policy) and the surviving
+    // policies need no pending desk of their own — `always` answers from the
+    // channel itself, `never` wires none.
+    let approval = approval_channel(
+      approval_policy(matches, interactive=false),
+      ApprovalDesk::new(now_ms=@env.now().reinterpret_as_int64()),
+    )
+    let runtime = @agent_runtime.AgentRuntime(workspace_root~, approval?)
     let scope = @agent_runtime.AgentTaskScope(group)
     // One-shot = one turn, so a fresh per-turn subrun budget needs no reset.
     let subrun_budget = @agent_subrun.SubrunBudget()
@@ -344,6 +358,10 @@ async fn run_serve_command(matches : @argparse.Matches) -> Unit {
 /// `base…HEAD`; stdout carries exactly one JSON ReviewReport, so progress logging
 /// is discarded rather than drained.
 async fn run_review_command(matches : @argparse.Matches) -> Unit {
+  // No `--approval` check here: review does not declare the option, so argparse
+  // refuses it outright. Review builds its runtime with no approval channel, so
+  // `escalated` is not offered to its model either — a read-only audit has
+  // nothing to escalate.
   @xlog.global().set_handler(DiscardLog::{  })
   // Review runs a fixed built-in tool set; say so rather than silently ignoring
   // an accepted option. Straight to stderr: review's stdout carries exactly one
@@ -655,6 +673,11 @@ fn root_command() -> @argparse.Command {
         about="Run one task headlessly; stream JSONL events on stdout.",
         options=[
           ..agent_options(),
+          // Only `run` and `serve` build an approval channel. On the shared
+          // bundle this also reached `mcp`, `review` and `subrun`, where it
+          // parses and then does nothing — and where an exported
+          // OPENSEEK_APPROVAL would have bound commands that cannot honour it.
+          approval_option(),
           OptionArg(
             "concurrency",
             long="concurrency",
@@ -682,7 +705,7 @@ fn root_command() -> @argparse.Command {
       Command(
         "serve",
         about="Session server: read JSONL commands (prompt/steer/cancel/compact/goal) from stdin.",
-        options=agent_options(),
+        options=[..agent_options(), approval_option()],
         flags=[
           FlagArg(
             "no-session",

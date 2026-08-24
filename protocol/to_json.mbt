@@ -57,6 +57,16 @@ pub fn Event::to_json(self : Event) -> Json {
         "tool_name": tool_name,
         "error": error,
       }
+    ApprovalRequested(id~, tool_name~, detail~, body~) =>
+      {
+        "event": "approval_requested",
+        "id": id,
+        "tool_name": tool_name,
+        "detail": detail,
+        "body": or_null(body),
+      }
+    ApprovalResolved(id~, outcome~) =>
+      { "event": "approval_resolved", "id": id, "outcome": outcome }
     SteerApplied(kind~, content~) =>
       { "event": "steer_applied", "kind": kind, "content": content }
     SteerDropped(content~) => { "event": "steer_dropped", "content": content }
