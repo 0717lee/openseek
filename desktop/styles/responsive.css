@@ -117,9 +117,8 @@
      zoom the whole page when a field takes focus. */
   input,
   textarea,
-  select,
   .setting-control input,
-  .setting-control select,
+  .setting-select-button,
   .composer textarea {
     font-size: var(--font-size-lg);
   }

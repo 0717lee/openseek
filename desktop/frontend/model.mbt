@@ -1147,14 +1147,23 @@ type ComposerEntryReplacement = @composer.Replacement
 type ComposerActionIdentity = @composer.Identity
 
 ///|
-/// The one custom settings menu currently open in the visible composer.
-/// Agent-specific variants keep the two mounted composer instances from
-/// sharing an open flag while the shell switches between them.
-priv enum ComposerMenu {
+/// The one custom select menu currently open in the desktop. Explicit
+/// variants keep mutually exclusive menus deterministic across composer,
+/// app-settings, and workspace-settings views.
+priv enum SelectMenu {
   OpenSeekModelMenu
   OpenSeekReasoningMenu
   CodexModelMenu
   CodexReasoningMenu
+  ApiProviderMenu
+  ThemeMenu
+  FontMenu
+  FontSizeMenu
+  NotificationCornerMenu
+  TreeLayoutMenu
+  WorkspaceDefaultModeMenu
+  WorkspaceSubmodulesMenu
+  WorkspaceSubmoduleTimeoutMenu
 } derive(Eq)
 
 ///|
@@ -1321,9 +1330,9 @@ priv struct Model {
   // each conversation's unsent draft; textarea edits never touch this field or
   // any other part of the root Model.
   composer_context_generation : Int
-  // Transient presentation for the visible composer's custom model/reasoning
-  // menu. It closes on context changes, selection, and click-away dismissal.
-  composer_menu : ComposerMenu?
+  // Transient presentation for the visible custom select. It closes on
+  // context changes, selection, and click-away dismissal.
+  select_menu : SelectMenu?
   // Every archive rotation appends its identity handoff. Component-local draft
   // text remains in the component; this ordered page-lifetime log keeps two
   // rotations between subscription ticks from overwriting each other.
@@ -1553,11 +1562,11 @@ priv enum Msg {
   QuickOpenOpen(@quick_open.Provider)
   // Everything the open palette does to itself.
   QuickOpen(@quick_open.Msg)
-  // The model and reasoning chips share one custom popup state. A toggle can
-  // switch directly between chips; dismissal is separate and idempotent so a
-  // click can close the menu and continue to its original target.
-  ToggleComposerMenu(ComposerMenu)
-  CloseComposerMenu
+  // Every custom select shares one popup state. A toggle can switch directly
+  // between controls; dismissal is separate and idempotent so a click can
+  // close the menu and continue to its original target.
+  ToggleSelectMenu(SelectMenu)
+  CloseSelectMenu
   // A pick in the unified model chip, as a `ModelChoice` wire value. Within
   // the visible conversation's own agent it selects that conversation's
   // model; on a composing conversation a cross-agent pick hands the fresh
@@ -2367,7 +2376,7 @@ fn initial_model() -> Model {
     skills: @skills.State::empty(),
     installed_skills: [],
     composer_context_generation: 0,
-    composer_menu: None,
+    select_menu: None,
     composer_entry_replacements: [],
     composer_entry_retirements: [],
     quick_open: @quick_open.State::empty(),

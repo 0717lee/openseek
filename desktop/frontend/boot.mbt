@@ -391,12 +391,12 @@ pub fn boot() -> Unit {
             ),
           )
         }
-        if model.composer_menu is Some(_) {
+        if model.select_menu is Some(_) {
           subs.push(
             dismiss_subscription(
-              "composer-picker-dismiss",
-              trigger=".composer-picker-button",
-              emit.map((_ : Unit) => CloseComposerMenu),
+              "custom-select-dismiss",
+              trigger=".custom-select-button",
+              emit.map((_ : Unit) => CloseSelectMenu),
             ),
           )
         }

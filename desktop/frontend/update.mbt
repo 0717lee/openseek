@@ -1406,7 +1406,7 @@ fn covering_overlay(model : Model) -> Bool {
 /// the pane is actually visible and uncovered. Native views z-order above
 /// all HTML, so anything the frontend draws over the pane area — the `+`
 /// launcher popup, the narrow layout's sidebar drawer, the topbar app
-/// launcher, the composer's custom settings or Git popover, and every
+/// launcher, a custom select or the composer's Git popover, and every
 /// `covering_overlay` — must hide the view rather than fight it.
 fn desired_browser_view(model : Model) -> Int? {
   let conversation_screen = model.screen is Chat || model.screen is Codex
@@ -1420,7 +1420,7 @@ fn desired_browser_view(model : Model) -> Int? {
     model.right_panel_open &&
     !model.right_panel_menu_open &&
     !model.launcher.open &&
-    model.composer_menu is None &&
+    model.select_menu is None &&
     !git_details_open &&
     !(model.narrow && model.sidebar_open) &&
     !covering_overlay(model) else {
@@ -1589,7 +1589,7 @@ fn update(
     {
       ..model,
       composer_context_generation: previous.composer_context_generation + 1,
-      composer_menu: None,
+      select_menu: None,
     }
   } else {
     model
@@ -2439,8 +2439,8 @@ fn update_msg(
     }
     QuickOpenOpen(provider) => open_quick_open(dispatch, model, provider)
     QuickOpen(msg) => update_quick_open(dispatch, model, msg)
-    ToggleComposerMenu(menu) => {
-      let composer_menu = if model.composer_menu == Some(menu) {
+    ToggleSelectMenu(menu) => {
+      let select_menu = if model.select_menu == Some(menu) {
         None
       } else {
         Some(menu)
@@ -2449,18 +2449,18 @@ fn update_msg(
         @cmd.none,
         {
           ..model,
-          composer_menu,
+          select_menu,
           git_details_open: false,
           codex: model.codex.with_git_details_closed(),
         },
       )
     }
-    CloseComposerMenu => (@cmd.none, { ..model, composer_menu: None })
+    CloseSelectMenu => (@cmd.none, { ..model, select_menu: None })
     ModelPicked(value) => {
       guard ModelChoice::parse(value) is Some(choice) else {
         return (@cmd.none, model)
       }
-      let model = { ..model, composer_menu: None }
+      let model = { ..model, select_menu: None }
       match choice {
         OpenSeekModel(engine_model) =>
           if model.screen is Codex {
@@ -2591,7 +2591,7 @@ fn update_msg(
       }
     }
     CodexEffortPicked(value) => {
-      let model = { ..model, composer_menu: None }
+      let model = { ..model, select_menu: None }
       let (effort_cmd, codex) = @codex.update(
         dispatch.map(msg => Codex(channel=model.focused, msg)),
         @codex.Msg::effort_changed(value),
@@ -2610,7 +2610,7 @@ fn update_msg(
       }
       (
         reasoning.save(),
-        { ..model, openseek_reasoning: reasoning, composer_menu: None },
+        { ..model, openseek_reasoning: reasoning, select_menu: None },
       )
     }
     MaxStepsChanged(value) => (@cmd.none, { ..model, max_steps: value })
@@ -2636,6 +2636,7 @@ fn update_msg(
         api_provider: provider,
         setup_api_key: "",
         settings_saves: model.settings_saves + 1,
+        select_menu: None,
       }
       // The switch can move the endpoint between usable and not. Inside the
       // setup modal the form simply re-renders for the new provider; a
@@ -2663,7 +2664,7 @@ fn update_msg(
       let corner = NotificationCorner::parse(value)
       (
         save_notification_corner(corner),
-        { ..model, notification_corner: corner },
+        { ..model, notification_corner: corner, select_menu: None },
       )
     }
     TreeLayoutChanged(value) => {
@@ -2676,7 +2677,7 @@ fn update_msg(
           save_tree_layout(layout),
           @fileeditor.mount_cmds(dispatch.map(msg => FileEditor(msg))),
         ]),
-        { ..model, tree_layout: layout },
+        { ..model, tree_layout: layout, select_menu: None },
       )
     }
     NotificationExpired(id) | DismissNotification(id) =>
@@ -3545,6 +3546,7 @@ fn update_msg(
         return (@cmd.none, model)
       }
       let worktree_mode = value == "worktree"
+      let model = { ..model, select_menu: None }
       // Apply optimistically under a fresh token, so a slower list reply
       // cannot roll the page's select back; the commit broadcast lands on a
       // newer token still. The failure path re-reads the disk state.
@@ -3571,6 +3573,7 @@ fn update_msg(
         "skip" => false
         _ => return (@cmd.none, model)
       }
+      let model = { ..model, select_menu: None }
       // Preserve the workspace's launch mode locally and patch only the
       // submodule field on disk. The generation fence has the same job as
       // the launch-mode edit above: an older read cannot undo this choice.
@@ -3605,6 +3608,7 @@ fn update_msg(
         "60" => 60
         _ => return (@cmd.none, model)
       }
+      let model = { ..model, select_menu: None }
       // Patch only the timeout and keep both neighboring workspace choices.
       // A fresh generation prevents an older read from undoing this select.
       let request_generation = dev.workspace_settings_request_generation + 1
@@ -3769,6 +3773,7 @@ fn update_msg(
     }
     ThemeChanged(value) => {
       let theme = Theme::parse(value, model.theme)
+      let model = { ..model, select_menu: None }
       if theme == model.theme {
         (@cmd.none, model)
       } else {
@@ -3788,6 +3793,7 @@ fn update_msg(
     }
     FontChanged(value) => {
       let app_font = AppFont::parse(value, model.app_font)
+      let model = { ..model, select_menu: None }
       if app_font == model.app_font {
         (@cmd.none, model)
       } else {
@@ -3799,6 +3805,7 @@ fn update_msg(
     }
     FontSizeChanged(value) => {
       let app_font_size = AppFontSize::parse(value, model.app_font_size)
+      let model = { ..model, select_menu: None }
       if app_font_size == model.app_font_size {
         (@cmd.none, model)
       } else {
@@ -13124,38 +13131,34 @@ test "a refresh during a lookup is run afterwards, not dropped" {
 }
 
 ///|
-test "the composer's custom menus switch and dismiss deterministically" {
+test "custom select menus switch and dismiss deterministically" {
   let dispatch = test_dispatch()
   let base = test_model()
-  let (_, opened) = update(
-    dispatch,
-    ToggleComposerMenu(OpenSeekModelMenu),
-    base,
-  )
-  assert_true(opened.composer_menu == Some(OpenSeekModelMenu))
+  let (_, opened) = update(dispatch, ToggleSelectMenu(OpenSeekModelMenu), base)
+  assert_true(opened.select_menu == Some(OpenSeekModelMenu))
   // The transition is pure: replaying the same message against the same
   // model produces the same open menu rather than consulting DOM state.
   let (_, replayed) = update(
     dispatch,
-    ToggleComposerMenu(OpenSeekModelMenu),
+    ToggleSelectMenu(OpenSeekModelMenu),
     base,
   )
-  assert_true(replayed.composer_menu == opened.composer_menu)
+  assert_true(replayed.select_menu == opened.select_menu)
   let (_, switched) = update(
     dispatch,
-    ToggleComposerMenu(OpenSeekReasoningMenu),
+    ToggleSelectMenu(OpenSeekReasoningMenu),
     opened,
   )
-  assert_true(switched.composer_menu == Some(OpenSeekReasoningMenu))
-  let (_, closed) = update(dispatch, CloseComposerMenu, switched)
-  assert_true(closed.composer_menu is None)
-  let (_, closed_again) = update(dispatch, CloseComposerMenu, closed)
-  assert_true(closed_again.composer_menu is None)
+  assert_true(switched.select_menu == Some(OpenSeekReasoningMenu))
+  let (_, closed) = update(dispatch, CloseSelectMenu, switched)
+  assert_true(closed.select_menu is None)
+  let (_, closed_again) = update(dispatch, CloseSelectMenu, closed)
+  assert_true(closed_again.select_menu is None)
   // Selecting a valid row closes the popup in the same state transition that
   // applies the value; no native menu is left to close itself afterwards.
   let (_, reopened) = update(
     dispatch,
-    ToggleComposerMenu(OpenSeekModelMenu),
+    ToggleSelectMenu(OpenSeekModelMenu),
     closed_again,
   )
   let (_, picked) = update(
@@ -13163,10 +13166,10 @@ test "the composer's custom menus switch and dismiss deterministically" {
     ModelPicked("openseek:deepseek-v4-flash"),
     reopened,
   )
-  assert_true(picked.composer_menu is None)
+  assert_true(picked.select_menu is None)
   let (_, reasoning_open) = update(
     dispatch,
-    ToggleComposerMenu(OpenSeekReasoningMenu),
+    ToggleSelectMenu(OpenSeekReasoningMenu),
     picked,
   )
   let (_, effort_picked) = update(
@@ -13174,18 +13177,27 @@ test "the composer's custom menus switch and dismiss deterministically" {
     OpenSeekEffortPicked("high"),
     reasoning_open,
   )
-  assert_true(effort_picked.composer_menu is None)
+  assert_true(effort_picked.select_menu is None)
+  let (_, settings_open) = update(
+    dispatch,
+    ToggleSelectMenu(ThemeMenu),
+    effort_picked,
+  )
+  assert_true(settings_open.select_menu == Some(ThemeMenu))
+  let (_, theme_picked) = update(dispatch, ThemeChanged("dark"), settings_open)
+  assert_true(theme_picked.theme is Dark)
+  assert_true(theme_picked.select_menu is None)
   let (_, open_before_switch) = update(
     dispatch,
-    ToggleComposerMenu(OpenSeekModelMenu),
-    effort_picked,
+    ToggleSelectMenu(OpenSeekModelMenu),
+    theme_picked,
   )
   let (_, context_switched) = update(
     dispatch,
     SessionRotated({ channel: Local, session: "desktop-other" }),
     open_before_switch,
   )
-  assert_true(context_switched.composer_menu is None)
+  assert_true(context_switched.select_menu is None)
 }
 
 ///|

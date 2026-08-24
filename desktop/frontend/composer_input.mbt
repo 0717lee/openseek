@@ -252,9 +252,9 @@ fn Model::codex_composer_input(
       // pick on a composing draft leaves the Codex package entirely.
       model_chip: self.codex_model_chip(dispatch),
       reasoning_chip: self.codex.reasoning_effort_chip(
-        self.composer_menu == Some(CodexReasoningMenu),
-        dispatch(ToggleComposerMenu(CodexReasoningMenu)),
-        dispatch(CloseComposerMenu),
+        self.select_menu == Some(CodexReasoningMenu),
+        dispatch(ToggleSelectMenu(CodexReasoningMenu)),
+        dispatch(CloseSelectMenu),
         dispatch.map(value => CodexEffortPicked(value)),
       ),
       file_candidates: search.candidates,

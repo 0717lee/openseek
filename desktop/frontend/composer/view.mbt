@@ -25,254 +25,12 @@ pub fn ActionButton::render(self : ActionButton) -> @html.Html {
 }
 
 ///|
-/// One option in the composer's model selector.
-/// The owning source keeps the wire value; the composer owns its presentation.
-pub(all) struct ModelOption {
-  value : String
-  label : String
-}
+/// Composer callers keep their existing names while the shared control owns
+/// the option and group representation used by every custom select.
+pub type ModelOption = @select_control.Option
 
 ///|
-/// One provider's options in the composer's model selector. A single-group
-/// menu renders flat; several groups retain their provider headings inside
-/// the shared custom popup.
-pub(all) struct ModelGroup {
-  label : String
-  options : Array[ModelOption]
-}
-
-///|
-/// A compact custom selector for one caller-owned setting. The caller owns
-/// open/close state; this value owns the shared popup, keyboard behavior, and
-/// accessible relationship between its button and option list.
-priv struct CompactSelect {
-  id : String
-  groups : Array[ModelGroup]
-  selected : String
-  disabled : Bool
-  open : Bool
-  toggle : @cmd.Cmd
-  dismiss : @cmd.Cmd
-  change : @cmd.Emit[String]
-  title : String
-  glyph : String
-  aria_label : String
-  kind_class : String
-}
-
-///|
-fn CompactSelect::menu_id(self : CompactSelect) -> String {
-  self.id + "-menu"
-}
-
-///|
-fn CompactSelect::option_id(self : CompactSelect, index : Int) -> String {
-  "\{self.id}-option-\{index}"
-}
-
-///|
-/// Focus writes stay inside an event command. `after_render=true` is used
-/// when opening or closing changes which option nodes exist.
-fn CompactSelect::focus(
-  self : CompactSelect,
-  option : Int?,
-  after_render : Bool,
-) -> @cmd.Cmd {
-  let id = match option {
-    Some(index) => self.option_id(index)
-    None => self.id
-  }
-  let focus = _ => {
-    if @dom.document().get_element_by_id(id).to_option() is Some(element) {
-      let _ : @js.Value = @js.Value::cast_from(element).apply_with_string(
-        "focus",
-        ([] : Array[@js.Value]),
-      )
-    }
-  }
-  if after_render {
-    @cmd.custom_cmd(focus, kind=@cmd.after_render)
-  } else {
-    @cmd.custom_cmd(focus)
-  }
-}
-
-///|
-fn CompactSelect::trigger_attrs(
-  self : CompactSelect,
-  selected_index : Int,
-  option_count : Int,
-) -> @html.Attrs {
-  @html.Attrs::build()
-  .id(self.id)
-  .aria_label(self.aria_label)
-  .aria_controls(self.menu_id())
-  .aria_expanded(self.open.to_string())
-  .data_set("focus-owner", "")
-  .on_keydown(event => {
-    match event.key() {
-      "Escape" if self.open => {
-        event.prevent_default()
-        self.dismiss
-      }
-      "ArrowDown" | "ArrowUp" if option_count > 0 => {
-        event.prevent_default()
-        let index = if event.key() == "ArrowUp" {
-          if self.open {
-            option_count - 1
-          } else {
-            selected_index
-          }
-        } else {
-          selected_index
-        }
-        if self.open {
-          self.focus(Some(index), false)
-        } else {
-          @cmd.batch([self.toggle, self.focus(Some(index), true)])
-        }
-      }
-      _ => @cmd.none
-    }
-  })
-}
-
-///|
-fn CompactSelect::option_attrs(
-  self : CompactSelect,
-  index : Int,
-  option_count : Int,
-  selected : Bool,
-) -> @html.Attrs {
-  @html.Attrs::build()
-  .id(self.option_id(index))
-  .role("option")
-  .aria_selected(selected.to_string())
-  .on_keydown(event => {
-    let next = match event.key() {
-      "ArrowDown" => Some(if index + 1 < option_count { index + 1 } else { 0 })
-      "ArrowUp" => Some(if index > 0 { index - 1 } else { option_count - 1 })
-      "Home" => Some(0)
-      "End" => Some(option_count - 1)
-      _ => None
-    }
-    if next is Some(next) {
-      event.prevent_default()
-      self.focus(Some(next), false)
-    } else if event.key() == "Escape" {
-      event.prevent_default()
-      @cmd.batch([self.dismiss, self.focus(None, true)])
-    } else {
-      @cmd.none
-    }
-  })
-}
-
-///|
-fn CompactSelect::render(self : CompactSelect) -> @html.Html {
-  let mut selected_label = self.selected
-  let mut selected_index = 0
-  let mut option_count = 0
-  for group in self.groups {
-    for option in group.options {
-      if option.value == self.selected {
-        selected_label = option.label
-        selected_index = option_count
-      }
-      option_count += 1
-    }
-  }
-  let children : Array[@html.Html] = [
-    @html.button(
-      class=if self.disabled {
-        "composer-model composer-picker-button disabled"
-      } else if self.open {
-        "composer-model composer-picker-button open"
-      } else {
-        "composer-model composer-picker-button"
-      },
-      type_="button",
-      title=self.title,
-      disabled=self.disabled,
-      on_click=self.toggle,
-      attrs=self.trigger_attrs(selected_index, option_count),
-      [
-        @html.span(class="composer-model-glyph", self.glyph),
-        @html.span(class="composer-model-label", selected_label),
-        @html.span(class="composer-model-chevron", ""),
-      ],
-    ),
-  ]
-  if self.open && !self.disabled {
-    let menu : Array[@html.Html] = []
-    let flat = self.groups.length() <= 1
-    let mut index = 0
-    for group in self.groups {
-      let rows : Array[@html.Html] = []
-      for option in group.options {
-        let selected = option.value == self.selected
-        rows.push(
-          @html.button(
-            class=if selected {
-              "composer-picker-option selected"
-            } else {
-              "composer-picker-option"
-            },
-            type_="button",
-            title=option.label,
-            on_click=@cmd.batch([
-              (self.change)(option.value),
-              self.focus(None, true),
-            ]),
-            attrs=self.option_attrs(index, option_count, selected),
-            [
-              @html.span(class="composer-picker-option-label", option.label),
-              @html.span(
-                class="composer-picker-option-check",
-                if selected {
-                  "✓"
-                } else {
-                  ""
-                },
-              ),
-            ],
-          ),
-        )
-        index += 1
-      }
-      if flat {
-        for row in rows {
-          menu.push(row)
-        }
-      } else {
-        menu.push(
-          @html.div(
-            class="composer-picker-group",
-            attrs=@html.Attrs::build().role("group").aria_label(group.label),
-            [
-              @html.div(class="composer-picker-group-label", group.label),
-              ..rows,
-            ],
-          ),
-        )
-      }
-    }
-    children.push(
-      @html.div(
-        class="composer-picker-menu",
-        attrs=@html.Attrs::build()
-          .id(self.menu_id())
-          .role("listbox")
-          .aria_label(self.aria_label),
-        menu,
-      ),
-    )
-  }
-  @html.div(
-    class="composer-picker composer-picker-\{self.kind_class}",
-    children,
-  )
-}
+pub type ModelGroup = @select_control.Group
 
 ///|
 /// A compact model pill backed by the composer's custom popup.
@@ -290,7 +48,7 @@ pub(all) struct ModelSelect {
 
 ///|
 pub fn ModelSelect::render(self : ModelSelect) -> @html.Html {
-  CompactSelect::{
+  @select_control.Control::{
     id: self.id,
     groups: self.groups,
     selected: self.selected,
@@ -300,9 +58,8 @@ pub fn ModelSelect::render(self : ModelSelect) -> @html.Html {
     dismiss: self.dismiss,
     change: self.change,
     title: self.title,
-    glyph: "✦",
     aria_label: "Model",
-    kind_class: "model",
+    presentation: Composer("✦", false),
   }.render()
 }
 
@@ -324,7 +81,7 @@ pub(all) struct ReasoningSelect {
 
 ///|
 pub fn ReasoningSelect::render(self : ReasoningSelect) -> @html.Html {
-  CompactSelect::{
+  @select_control.Control::{
     id: self.id,
     groups: [{ label: "Reasoning effort", options: self.options }],
     selected: self.selected,
@@ -334,9 +91,8 @@ pub fn ReasoningSelect::render(self : ReasoningSelect) -> @html.Html {
     dismiss: self.dismiss,
     change: self.change,
     title: self.title,
-    glyph: "◐",
     aria_label: "Reasoning effort",
-    kind_class: "reasoning",
+    presentation: Composer("◐", true),
   }.render()
 }
 

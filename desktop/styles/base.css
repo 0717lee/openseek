@@ -35,8 +35,7 @@ body {
 
 button,
 input,
-textarea,
-select {
+textarea {
   font: inherit;
 }
 
@@ -64,6 +63,93 @@ samp,
 /* Composite targets leave all focus drawing to their owner. */
 [data-focus-target]:focus {
   outline: none;
+}
+
+/* Every app-owned select uses the same popup surface and option semantics.
+   Individual pages only choose trigger geometry and menu placement. */
+.custom-select {
+  position: relative;
+  min-width: 0;
+}
+
+.custom-select-button {
+  margin: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.custom-select-button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.custom-select-menu {
+  position: absolute;
+  z-index: var(--z-menu);
+  display: grid;
+  max-height: min(360px, calc(100vh - 140px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 5px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  box-shadow: var(--shadow-overlay);
+}
+
+.custom-select-group + .custom-select-group {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.custom-select-group-label {
+  padding: 5px 9px 4px;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+.custom-select-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 0;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-normal);
+  text-align: left;
+  cursor: pointer;
+}
+
+.custom-select-option:hover,
+.custom-select-option.selected {
+  background: var(--color-bg-subtle);
+}
+
+.custom-select-option:focus-visible {
+  outline: 1px solid var(--color-focus-ring);
+  outline-offset: -1px;
+}
+
+.custom-select-option-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.custom-select-option-check {
+  color: var(--color-accent-strong);
+  font-size: var(--font-size-md);
+  line-height: 1;
+  text-align: center;
 }
 
 /* The transcript's tab radios are visually clipped, so their visible labels
