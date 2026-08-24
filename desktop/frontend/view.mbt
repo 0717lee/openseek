@@ -45,14 +45,33 @@ fn settings_group(
 }
 
 ///|
-/// A native select with the Settings page's own chevron. The browser-drawn
-/// indicator ignores the control's right padding, so it cannot line up with
-/// the selected text's left inset reliably across desktop webviews.
-fn setting_select(control : @html.Html) -> @html.Html {
-  @html.div(class="setting-select", [
-    control,
-    @html.span(class="setting-select-chevron", icon(icon_chevron_down)),
-  ])
+/// Build one full-width settings select from the shared custom control. Menu
+/// identity and open state stay in the root model, while the component owns
+/// the DOM, keyboard behavior, and focus restoration used everywhere.
+fn SelectMenu::setting_control(
+  self : SelectMenu,
+  dispatch : @cmd.Emit[Msg],
+  model : Model,
+  id~ : String,
+  options~ : Array[@select_control.Option],
+  selected~ : String,
+  aria_label~ : String,
+  change~ : @cmd.Emit[String],
+  disabled? : Bool = false,
+) -> @html.Html {
+  @select_control.Control::{
+    id,
+    groups: [{ label: aria_label, options }],
+    selected,
+    disabled,
+    open: model.select_menu == Some(self),
+    toggle: dispatch(ToggleSelectMenu(self)),
+    dismiss: dispatch(CloseSelectMenu),
+    change,
+    title: aria_label,
+    aria_label,
+    presentation: Setting,
+  }.render()
 }
 
 ///|
@@ -669,88 +688,6 @@ fn Conversation::archived_read_only_view(
 }
 
 ///|
-fn provider_select(
-  dispatch : @cmd.Emit[Msg],
-  selected : ApiProvider,
-  disabled~ : Bool,
-) -> @html.Html {
-  let control = @html.select(
-    disabled~,
-    on_change=dispatch.map(value => ProviderChanged(value)),
-    attrs=@html.Attrs::build()
-      .aria_label("API endpoint")
-      .data_set("focus-owner", ""),
-    [
-      @html.option(
-        value="deepseek",
-        selected=selected is Deepseek,
-        "DeepSeek official (your API key)",
-      ),
-      @html.option(value="custom", selected=selected is Custom, "Custom URL"),
-    ],
-  )
-  setting_select(control)
-}
-
-///|
-fn corner_select(
-  dispatch : @cmd.Emit[Msg],
-  selected : NotificationCorner,
-) -> @html.Html {
-  let control = @html.select(
-    on_change=dispatch.map(value => NotificationCornerChanged(value)),
-    attrs=@html.Attrs::build()
-      .aria_label("Notification corner")
-      .data_set("focus-owner", ""),
-    [
-      @html.option(
-        value="bottom-right",
-        selected=selected is BottomRight,
-        "Bottom right",
-      ),
-      @html.option(
-        value="bottom-left",
-        selected=selected is BottomLeft,
-        "Bottom left",
-      ),
-      @html.option(
-        value="top-right",
-        selected=selected is TopRight,
-        "Top right",
-      ),
-      @html.option(value="top-left", selected=selected is TopLeft, "Top left"),
-    ],
-  )
-  setting_select(control)
-}
-
-///|
-fn tree_layout_select(
-  dispatch : @cmd.Emit[Msg],
-  selected : @fileeditor.TreeLayout,
-) -> @html.Html {
-  let control = @html.select(
-    on_change=dispatch.map(value => TreeLayoutChanged(value)),
-    attrs=@html.Attrs::build()
-      .aria_label("File tree layout")
-      .data_set("focus-owner", ""),
-    [
-      @html.option(
-        value="right-sidebar",
-        selected=selected is RightSidebar,
-        "Right sidebar",
-      ),
-      @html.option(
-        value="bottom-panel",
-        selected=selected is BottomPanel,
-        "Bottom panel",
-      ),
-    ],
-  )
-  setting_select(control)
-}
-
-///|
 /// The Codex group's rows: connection and account state, and the account
 /// actions themselves. Sign-in and sign-out live here rather than on the
 /// Codex conversation topbar — Settings is where the desktop manages every
@@ -1115,7 +1052,21 @@ fn api_settings_rows(
     },
     setting_row(
       "API endpoint",
-      [provider_select(dispatch, model.api_provider, disabled=!settings_loaded)],
+      [
+        ApiProviderMenu.setting_control(
+          dispatch,
+          model,
+          id="api-provider-select",
+          options=[
+            { value: "deepseek", label: "DeepSeek official (your API key)" },
+            { value: "custom", label: "Custom URL" },
+          ],
+          selected=model.api_provider.wire(),
+          aria_label="API endpoint",
+          change=dispatch.map(value => ProviderChanged(value)),
+          disabled=!settings_loaded,
+        ),
+      ],
       desc=provider_hint(model.api_provider),
     ),
   ]
@@ -1228,26 +1179,18 @@ fn settings_page(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
       setting_row(
         "Theme",
         [
-          setting_select(
-            @html.select(
-              on_change=dispatch.map(value => ThemeChanged(value)),
-              attrs=@html.Attrs::build()
-                .aria_label("Theme")
-                .data_set("focus-owner", ""),
-              [
-                @html.option(
-                  value="system",
-                  selected=model.theme is System,
-                  "System",
-                ),
-                @html.option(
-                  value="light",
-                  selected=model.theme is Light,
-                  "Light",
-                ),
-                @html.option(value="dark", selected=model.theme is Dark, "Dark"),
-              ],
-            ),
+          ThemeMenu.setting_control(
+            dispatch,
+            model,
+            id="theme-select",
+            options=[
+              { value: "system", label: "System" },
+              { value: "light", label: "Light" },
+              { value: "dark", label: "Dark" },
+            ],
+            selected=model.theme.wire(),
+            aria_label="Theme",
+            change=dispatch.map(value => ThemeChanged(value)),
           ),
         ],
         desc="Used by the app, editor, and terminal. System follows the OS appearance.",
@@ -1255,30 +1198,18 @@ fn settings_page(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
       setting_row(
         "Monospace font",
         [
-          setting_select(
-            @html.select(
-              on_change=dispatch.map(value => FontChanged(value)),
-              attrs=@html.Attrs::build()
-                .aria_label("Monospace font")
-                .data_set("focus-owner", ""),
-              [
-                @html.option(
-                  value="system-mono",
-                  selected=model.app_font is SystemMono,
-                  "System monospace",
-                ),
-                @html.option(
-                  value="geist-mono",
-                  selected=model.app_font is GeistMono,
-                  "Geist Mono",
-                ),
-                @html.option(
-                  value="menlo",
-                  selected=model.app_font is Menlo,
-                  "Menlo",
-                ),
-              ],
-            ),
+          FontMenu.setting_control(
+            dispatch,
+            model,
+            id="font-select",
+            options=[
+              { value: "system-mono", label: "System monospace" },
+              { value: "geist-mono", label: "Geist Mono" },
+              { value: "menlo", label: "Menlo" },
+            ],
+            selected=model.app_font.wire(),
+            aria_label="Monospace font",
+            change=dispatch.map(value => FontChanged(value)),
           ),
         ],
         desc="Used by code, the editor, and the terminal.",
@@ -1286,42 +1217,58 @@ fn settings_page(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
       setting_row(
         "Font size",
         [
-          setting_select(
-            @html.select(
-              on_change=dispatch.map(value => FontSizeChanged(value)),
-              attrs=@html.Attrs::build()
-                .aria_label("Font size")
-                .data_set("focus-owner", ""),
-              [
-                @html.option(
-                  value="small",
-                  selected=model.app_font_size is Small,
-                  "Small (13px)",
-                ),
-                @html.option(
-                  value="medium",
-                  selected=model.app_font_size is Medium,
-                  "Medium (14px)",
-                ),
-                @html.option(
-                  value="large",
-                  selected=model.app_font_size is Large,
-                  "Large (15px)",
-                ),
-              ],
-            ),
+          FontSizeMenu.setting_control(
+            dispatch,
+            model,
+            id="font-size-select",
+            options=[
+              { value: "small", label: "Small (13px)" },
+              { value: "medium", label: "Medium (14px)" },
+              { value: "large", label: "Large (15px)" },
+            ],
+            selected=model.app_font_size.wire(),
+            aria_label="Font size",
+            change=dispatch.map(value => FontSizeChanged(value)),
           ),
         ],
         desc="Scales app text; code uses a visually matched monospace size.",
       ),
       setting_row(
         "Notification corner",
-        [corner_select(dispatch, model.notification_corner)],
+        [
+          NotificationCornerMenu.setting_control(
+            dispatch,
+            model,
+            id="notification-corner-select",
+            options=[
+              { value: "bottom-right", label: "Bottom right" },
+              { value: "bottom-left", label: "Bottom left" },
+              { value: "top-right", label: "Top right" },
+              { value: "top-left", label: "Top left" },
+            ],
+            selected=model.notification_corner.wire(),
+            aria_label="Notification corner",
+            change=dispatch.map(value => NotificationCornerChanged(value)),
+          ),
+        ],
         desc="Where error notifications pop up.",
       ),
       setting_row(
         "File tree layout",
-        [tree_layout_select(dispatch, model.tree_layout)],
+        [
+          TreeLayoutMenu.setting_control(
+            dispatch,
+            model,
+            id="tree-layout-select",
+            options=[
+              { value: "right-sidebar", label: "Right sidebar" },
+              { value: "bottom-panel", label: "Bottom panel" },
+            ],
+            selected=model.tree_layout.wire(),
+            aria_label="File tree layout",
+            change=dispatch.map(value => TreeLayoutChanged(value)),
+          ),
+        ],
         desc="Where the editor panel docks its file tree.",
       ),
     ]),
@@ -1401,20 +1348,20 @@ fn workspace_settings_page(
     setting_row(
       "New chats",
       [
-        setting_select(
-          @html.select(
-            on_change=dispatch.map(value => {
-              WorkspaceDefaultModeChosen(channel, workspace, value)
-            }),
-            attrs=@html.Attrs::build()
-              .aria_label("New chats")
-              .data_set("focus-owner", "")
-              .disabled(row is None),
-            [
-              @html.option(value="local", selected=!worktree_mode, "Local"),
-              @html.option(value="worktree", selected=worktree_mode, "Worktree"),
-            ],
-          ),
+        WorkspaceDefaultModeMenu.setting_control(
+          dispatch,
+          model,
+          id="workspace-default-mode-select",
+          options=[
+            { value: "local", label: "Local" },
+            { value: "worktree", label: "Worktree" },
+          ],
+          selected=if worktree_mode { "worktree" } else { "local" },
+          aria_label="New chats",
+          change=dispatch.map(value => {
+            WorkspaceDefaultModeChosen(channel, workspace, value)
+          }),
+          disabled=row is None,
         ),
       ],
       desc="Where a new chat starts: the workspace itself, or a fresh git worktree bound to that chat. The composer's chip still changes a single chat.",
@@ -1424,28 +1371,20 @@ fn workspace_settings_page(
     setting_row(
       "Submodules",
       [
-        setting_select(
-          @html.select(
-            on_change=dispatch.map(value => {
-              WorkspaceSubmodulesChosen(channel, workspace, value)
-            }),
-            attrs=@html.Attrs::build()
-              .aria_label("Submodules in worktrees")
-              .data_set("focus-owner", "")
-              .disabled(row is None),
-            [
-              @html.option(
-                value="checkout",
-                selected=checkout_submodules,
-                "Initialize",
-              ),
-              @html.option(
-                value="skip",
-                selected=!checkout_submodules,
-                "Leave uninitialized",
-              ),
-            ],
-          ),
+        WorkspaceSubmodulesMenu.setting_control(
+          dispatch,
+          model,
+          id="workspace-submodules-select",
+          options=[
+            { value: "checkout", label: "Initialize" },
+            { value: "skip", label: "Leave uninitialized" },
+          ],
+          selected=if checkout_submodules { "checkout" } else { "skip" },
+          aria_label="Submodules in worktrees",
+          change=dispatch.map(value => {
+            WorkspaceSubmodulesChosen(channel, workspace, value)
+          }),
+          disabled=row is None,
         ),
       ],
       desc="For new or repaired worktrees in this workspace, mirror the top-level submodules already initialized in its main checkout.",
@@ -1453,38 +1392,22 @@ fn workspace_settings_page(
     setting_row(
       "Checkout timeout",
       [
-        setting_select(
-          @html.select(
-            on_change=dispatch.map(value => {
-              WorkspaceSubmoduleTimeoutChosen(channel, workspace, value)
-            }),
-            attrs=@html.Attrs::build()
-              .aria_label("Submodule checkout timeout")
-              .data_set("focus-owner", "")
-              .disabled(row is None),
-            [
-              @html.option(
-                value="5",
-                selected=submodule_checkout_timeout_seconds == 5,
-                "5 seconds",
-              ),
-              @html.option(
-                value="10",
-                selected=submodule_checkout_timeout_seconds == 10,
-                "10 seconds",
-              ),
-              @html.option(
-                value="30",
-                selected=submodule_checkout_timeout_seconds == 30,
-                "30 seconds",
-              ),
-              @html.option(
-                value="60",
-                selected=submodule_checkout_timeout_seconds == 60,
-                "60 seconds",
-              ),
-            ],
-          ),
+        WorkspaceSubmoduleTimeoutMenu.setting_control(
+          dispatch,
+          model,
+          id="workspace-submodule-timeout-select",
+          options=[
+            { value: "5", label: "5 seconds" },
+            { value: "10", label: "10 seconds" },
+            { value: "30", label: "30 seconds" },
+            { value: "60", label: "60 seconds" },
+          ],
+          selected=submodule_checkout_timeout_seconds.to_string(),
+          aria_label="Submodule checkout timeout",
+          change=dispatch.map(value => {
+            WorkspaceSubmoduleTimeoutChosen(channel, workspace, value)
+          }),
+          disabled=row is None,
         ),
       ],
       desc="Stop initializing submodules if Git has not finished within this time.",
@@ -1512,6 +1435,13 @@ test "settings and the browser address bar declare form focus ownership" {
   let settings_markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(settings_page(dispatch, test_model()))
   })
+  // Settings use the same app-owned button/listbox control as the composer;
+  // no platform select may reintroduce a native popup on one page only.
+  assert_false(settings_markup.contains("<select"))
+  assert_true(
+    settings_markup.contains("class=\"custom-select setting-select\""),
+  )
+  assert_true(settings_markup.contains("aria-haspopup=\"listbox\""))
   // Settings fields own their existing borders directly; there is no nested
   // target that could draw a second frame.
   assert_true(settings_markup.contains("data-focus-owner=\"\""))
@@ -1538,7 +1468,7 @@ test "settings and the browser address bar declare form focus ownership" {
   // composite also has a separate owner on its wrapper, which is why counting
   // markers alone would not prove that the nested control was marked.
   for markup in [settings_markup, address_markup] {
-    for tag in ["<input", "<textarea", "<select"] {
+    for tag in ["<input", "<textarea"] {
       let parts = markup.split(tag).collect()
       for index, part in parts {
         if index > 0 {
@@ -1552,6 +1482,25 @@ test "settings and the browser address bar declare form focus ownership" {
         }
       }
     }
+  }
+}
+
+///|
+#warnings("-alert_unstable")
+test "workspace settings render only custom selects" {
+  let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/proj")
+  let markup = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(
+      workspace_settings_page(dispatch, test_model(), Local, workspace),
+    )
+  })
+  assert_false(markup.contains("<select"))
+  for
+    id in [
+      "workspace-default-mode-select", "workspace-submodules-select", "workspace-submodule-timeout-select",
+    ] {
+    assert_true(markup.contains("id=\"\{id}\""))
   }
 }
 

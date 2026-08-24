@@ -391,6 +391,15 @@ pub fn boot() -> Unit {
             ),
           )
         }
+        if model.select_menu is Some(_) {
+          subs.push(
+            dismiss_subscription(
+              "custom-select-dismiss",
+              trigger=".custom-select-button",
+              emit.map((_ : Unit) => CloseSelectMenu),
+            ),
+          )
+        }
         if model.launcher.open {
           subs.push(
             dismiss_subscription(

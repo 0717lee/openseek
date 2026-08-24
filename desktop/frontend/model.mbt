@@ -1147,6 +1147,26 @@ type ComposerEntryReplacement = @composer.Replacement
 type ComposerActionIdentity = @composer.Identity
 
 ///|
+/// The one custom select menu currently open in the desktop. Explicit
+/// variants keep mutually exclusive menus deterministic across composer,
+/// app-settings, and workspace-settings views.
+priv enum SelectMenu {
+  OpenSeekModelMenu
+  OpenSeekReasoningMenu
+  CodexModelMenu
+  CodexReasoningMenu
+  ApiProviderMenu
+  ThemeMenu
+  FontMenu
+  FontSizeMenu
+  NotificationCornerMenu
+  TreeLayoutMenu
+  WorkspaceDefaultModeMenu
+  WorkspaceSubmodulesMenu
+  WorkspaceSubmoduleTimeoutMenu
+} derive(Eq)
+
+///|
 priv struct Model {
   // Connected device channels in stable order: the desktop window's one
   // Local host, or a browser console's roster devices — empty there until
@@ -1310,6 +1330,9 @@ priv struct Model {
   // each conversation's unsent draft; textarea edits never touch this field or
   // any other part of the root Model.
   composer_context_generation : Int
+  // Transient presentation for the visible custom select. It closes on
+  // context changes, selection, and click-away dismissal.
+  select_menu : SelectMenu?
   // Every archive rotation appends its identity handoff. Component-local draft
   // text remains in the component; this ordered page-lifetime log keeps two
   // rotations between subscription ticks from overwriting each other.
@@ -1539,6 +1562,11 @@ priv enum Msg {
   QuickOpenOpen(@quick_open.Provider)
   // Everything the open palette does to itself.
   QuickOpen(@quick_open.Msg)
+  // Every custom select shares one popup state. A toggle can switch directly
+  // between controls; dismissal is separate and idempotent so a click can
+  // close the menu and continue to its original target.
+  ToggleSelectMenu(SelectMenu)
+  CloseSelectMenu
   // A pick in the unified model chip, as a `ModelChoice` wire value. Within
   // the visible conversation's own agent it selects that conversation's
   // model; on a composing conversation a cross-agent pick hands the fresh
@@ -2348,6 +2376,7 @@ fn initial_model() -> Model {
     skills: @skills.State::empty(),
     installed_skills: [],
     composer_context_generation: 0,
+    select_menu: None,
     composer_entry_replacements: [],
     composer_entry_retirements: [],
     quick_open: @quick_open.State::empty(),
@@ -2579,10 +2608,14 @@ fn Model::settle_api_setup(self : Model) -> Model {
   // a flush with nothing applied (a failed save before any snapshot) must
   // not announce them.
   guard self.host_settings_loaded() else { return self }
+  // A menu rendered inside the modal cannot outlive that modal. Preserve a
+  // Settings-page menu when no modal is being retired; both surfaces reuse
+  // the same select component and global menu identity.
+  let select_menu = if self.api_setup_open { None } else { self.select_menu }
   if self.api_ready() {
-    { ..self, api_setup_open: false, api_setup_dismissed: false }
+    { ..self, api_setup_open: false, api_setup_dismissed: false, select_menu }
   } else if self.api_setup_dismissed || self.screen is Settings {
-    { ..self, api_setup_open: false }
+    { ..self, api_setup_open: false, select_menu }
   } else {
     { ..self, api_setup_open: true }
   }

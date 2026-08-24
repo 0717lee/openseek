@@ -306,9 +306,9 @@ h2 {
 /* Settings, Skills, and the API-setup modal own these form defaults. Keep
    them scoped to those shells so later-loaded app CSS cannot restyle inputs
    inside the Viewer. */
-.settings-page :where(input, textarea, select),
-.skills-page :where(input, textarea, select),
-.setup-modal :where(input, textarea, select) {
+.settings-page :where(input, textarea),
+.skills-page :where(input, textarea),
+.setup-modal :where(input, textarea) {
   width: 100%;
   min-width: 0;
   border: 1px solid var(--color-border);
@@ -320,32 +320,58 @@ h2 {
   letter-spacing: -0.01em;
 }
 
-.setting-control select,
 .setting-control input {
   padding: 7px 10px;
   font-size: var(--font-size-md);
 }
 
 .setting-select {
-  position: relative;
   width: 100%;
 }
 
-.setting-select select {
-  -webkit-appearance: none;
-  appearance: none;
-  padding-right: 32px;
+.setting-select-button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-subtle);
+  color: var(--color-text-primary);
+  padding: 7px 8px 7px 10px;
+  font-size: var(--font-size-md);
+  letter-spacing: -0.01em;
+  text-align: left;
+}
+
+.setting-select-button:hover:not(:disabled),
+.setting-select-button.open {
+  background: var(--color-control-surface);
+}
+
+.setting-select-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .setting-select-chevron {
-  position: absolute;
-  top: 50%;
-  /* The codicon path ends 3px before its 16px view box edge. */
-  right: 7px;
   display: inline-flex;
+  justify-self: end;
   color: var(--color-text-primary);
   pointer-events: none;
-  transform: translateY(-50%);
+}
+
+/* Settings menus retain the row's exact width while shared select placement
+   prefers below and flips when needed. */
+.setting-select-menu {
+  right: 0;
+  left: 0;
+  width: 100%;
+  min-width: min(220px, 100%);
 }
 
 /* ---------- skills page ---------- */

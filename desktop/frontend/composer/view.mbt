@@ -25,137 +25,74 @@ pub fn ActionButton::render(self : ActionButton) -> @html.Html {
 }
 
 ///|
-/// One option in the composer's model selector.
-/// The owning source keeps the wire value; the composer owns its presentation.
-pub(all) struct ModelOption {
-  value : String
-  label : String
-}
+/// Composer callers keep their existing names while the shared control owns
+/// the option and group representation used by every custom select.
+pub type ModelOption = @select_control.Option
 
 ///|
-/// One provider's options in the composer's model selector. A single-group
-/// select renders flat; several groups become native `optgroup`s, so the
-/// platform menu shows the provider boundaries itself.
-pub(all) struct ModelGroup {
-  label : String
-  options : Array[ModelOption]
-}
+pub type ModelGroup = @select_control.Group
 
 ///|
-/// A compact native-select pill for one caller-owned setting. The transparent
-/// select preserves platform menu behavior while the visible label stays
-/// sized to the current choice instead of the longest available option.
-priv struct CompactSelect {
-  groups : Array[ModelGroup]
-  selected : String
-  disabled : Bool
-  change : @cmd.Emit[String]
-  title : String
-  glyph : String
-  aria_label : String
-}
-
-///|
-fn CompactSelect::render(self : CompactSelect) -> @html.Html {
-  let choices : Array[@html.Html] = []
-  let mut selected_label = self.selected
-  let flat = self.groups.length() <= 1
-  for group in self.groups {
-    let options : Array[@html.Html] = []
-    for option in group.options {
-      if option.value == self.selected {
-        selected_label = option.label
-      }
-      options.push(
-        @html.option(
-          value=option.value,
-          selected=option.value == self.selected,
-          option.label,
-        ),
-      )
-    }
-    if flat {
-      for option in options {
-        choices.push(option)
-      }
-    } else {
-      choices.push(@html.optgroup(label=group.label, options))
-    }
-  }
-  @html.div(
-    // These class names predate the generic pill. Keeping them preserves the
-    // shared model/reasoning geometry without duplicating its CSS contract.
-    class=if self.disabled {
-      "composer-model disabled"
-    } else {
-      "composer-model"
-    },
-    title=self.title,
-    attrs=@html.Attrs::build().data_set("focus-owner", ""),
-    [
-      @html.span(class="composer-model-glyph", self.glyph),
-      @html.span(class="composer-model-label", selected_label),
-      @html.span(class="composer-model-chevron", ""),
-      @html.select(
-        class="composer-model-native",
-        disabled=self.disabled,
-        on_change=self.change,
-        attrs=@html.Attrs::build()
-          .aria_label(self.aria_label)
-          .data_set("focus-target", ""),
-        choices,
-      ),
-    ],
-  )
-}
-
-///|
-/// A compact model pill. A transparent native select covers the visible label,
-/// preserving platform menu behavior without letting the longest option
-/// determine the pill's width.
+/// A compact model pill backed by the composer's custom popup.
 pub(all) struct ModelSelect {
+  id : String
   groups : Array[ModelGroup]
   selected : String
   disabled : Bool
+  open : Bool
+  toggle : @cmd.Cmd
+  dismiss : @cmd.Cmd
   change : @cmd.Emit[String]
   title : String
 }
 
 ///|
 pub fn ModelSelect::render(self : ModelSelect) -> @html.Html {
-  CompactSelect::{
+  @select_control.Control::{
+    id: self.id,
     groups: self.groups,
     selected: self.selected,
     disabled: self.disabled,
+    open: self.open,
+    toggle: self.toggle,
+    dismiss: self.dismiss,
     change: self.change,
     title: self.title,
-    glyph: "✦",
     aria_label: "Model",
+    presentation: Composer("✦", false),
   }.render()
 }
 
 ///|
 /// The shared reasoning selector used by both OpenSeek and Codex composers.
 /// Each caller owns its supported values; this type owns their identical
-/// placement, accessibility label, and compact native-menu presentation.
+/// placement, accessibility label, and custom-menu presentation.
 pub(all) struct ReasoningSelect {
+  id : String
   options : Array[ModelOption]
   selected : String
   disabled : Bool
+  open : Bool
+  toggle : @cmd.Cmd
+  dismiss : @cmd.Cmd
   change : @cmd.Emit[String]
   title : String
 }
 
 ///|
 pub fn ReasoningSelect::render(self : ReasoningSelect) -> @html.Html {
-  CompactSelect::{
+  @select_control.Control::{
+    id: self.id,
     groups: [{ label: "Reasoning effort", options: self.options }],
     selected: self.selected,
     disabled: self.disabled,
+    open: self.open,
+    toggle: self.toggle,
+    dismiss: self.dismiss,
     change: self.change,
     title: self.title,
-    glyph: "◐",
     aria_label: "Reasoning effort",
+    presentation: Composer("◐", true),
   }.render()
 }
 

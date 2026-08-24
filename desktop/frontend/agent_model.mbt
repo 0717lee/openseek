@@ -182,9 +182,13 @@ fn Model::openseek_model_chip(
     groups.push(self.codex_model_group())
   }
   @composer.ModelSelect::{
+    id: "openseek-model-picker",
     groups,
     selected: ModelChoice::OpenSeekModel(conv.engine_model).wire(),
     disabled: false,
+    open: self.select_menu == Some(OpenSeekModelMenu),
+    toggle: dispatch(ToggleSelectMenu(OpenSeekModelMenu)),
+    dismiss: dispatch(CloseSelectMenu),
     change: dispatch.map(value => ModelPicked(value)),
     title: "Model: \{conv.engine_model.label()}",
   }.render()
@@ -202,15 +206,19 @@ fn Model::openseek_reasoning_chip(
 ) -> @html.Html? {
   guard conv.engine_model.supports_reasoning() else { return None }
   let options : Array[@composer.ModelOption] = [
-    { value: ReasoningOff.wire(), label: "Reasoning · Off" },
-    { value: ReasoningHigh.wire(), label: "Reasoning · High" },
-    { value: ReasoningMax.wire(), label: "Reasoning · Max" },
+    { value: ReasoningOff.wire(), label: "Off" },
+    { value: ReasoningHigh.wire(), label: "High" },
+    { value: ReasoningMax.wire(), label: "Max" },
   ]
   Some(
     @composer.ReasoningSelect::{
+      id: "openseek-reasoning-picker",
       options,
       selected: self.openseek_reasoning.wire(),
       disabled: false,
+      open: self.select_menu == Some(OpenSeekReasoningMenu),
+      toggle: dispatch(ToggleSelectMenu(OpenSeekReasoningMenu)),
+      dismiss: dispatch(CloseSelectMenu),
       change: dispatch.map(value => OpenSeekEffortPicked(value)),
       title: "Reasoning effort: \{self.openseek_reasoning.label()}",
     }.render(),
@@ -235,9 +243,13 @@ fn Model::codex_model_chip(
     CodexModelsUnavailable(_) => CodexUnavailableChoiceWire
   }
   @composer.ModelSelect::{
+    id: "codex-model-picker",
     groups,
     selected,
     disabled: false,
+    open: self.select_menu == Some(CodexModelMenu),
+    toggle: dispatch(ToggleSelectMenu(CodexModelMenu)),
+    dismiss: dispatch(CloseSelectMenu),
     change: dispatch.map(value => ModelPicked(value)),
     title: "Codex model",
   }.render()

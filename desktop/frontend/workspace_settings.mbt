@@ -363,9 +363,10 @@ test "the settings page select applies optimistically" {
   let (_, chosen) = update(
     dispatch,
     WorkspaceDefaultModeChosen(Local, workspace, "worktree"),
-    loaded,
+    { ..loaded, select_menu: Some(WorkspaceDefaultModeMenu) },
   )
   assert_true(chosen.default_worktree_mode(Local, workspace))
+  assert_true(chosen.select_menu is None)
   // The optimistic write spent a fresh token, so a pre-edit reply still in
   // flight cannot flip the select back under the user.
   let (_, raced) = update_dev(
@@ -409,13 +410,14 @@ test "the workspace submodule select preserves its launch mode" {
   let (_, chosen) = update(
     dispatch,
     WorkspaceSubmodulesChosen(Local, workspace, "skip"),
-    loaded,
+    { ..loaded, select_menu: Some(WorkspaceSubmodulesMenu) },
   )
   guard chosen.dev().workspace_settings_row(workspace) is Some(row) else {
     fail("expected the workspace settings row")
   }
   assert_true(row.worktree_mode)
   assert_false(row.checkout_submodules)
+  assert_true(chosen.select_menu is None)
   // Unknown select values are ignored and cannot mutate either field.
   let (_, unknown) = update(
     dispatch,
@@ -449,7 +451,7 @@ test "the workspace submodule timeout select preserves neighboring settings" {
   let (_, chosen) = update(
     dispatch,
     WorkspaceSubmoduleTimeoutChosen(Local, workspace, "30"),
-    loaded,
+    { ..loaded, select_menu: Some(WorkspaceSubmoduleTimeoutMenu) },
   )
   guard chosen.dev().workspace_settings_row(workspace) is Some(row) else {
     fail("expected the workspace settings row")
@@ -457,6 +459,7 @@ test "the workspace submodule timeout select preserves neighboring settings" {
   assert_true(row.worktree_mode)
   assert_false(row.checkout_submodules)
   assert_eq(row.submodule_checkout_timeout_seconds, 30)
+  assert_true(chosen.select_menu is None)
   let (_, unknown) = update(
     dispatch,
     WorkspaceSubmoduleTimeoutChosen(Local, workspace, "600"),

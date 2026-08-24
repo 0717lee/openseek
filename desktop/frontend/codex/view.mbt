@@ -36,6 +36,9 @@ pub fn State::account_label(self : State) -> String {
 /// render and ordinary turns keep inheriting Codex's own configuration.
 pub fn State::reasoning_effort_chip(
   self : State,
+  open : Bool,
+  toggle : @cmd.Cmd,
+  dismiss : @cmd.Cmd,
   change : @cmd.Emit[String],
 ) -> @html.Html? {
   guard self.selected_model_option() is Some(model) &&
@@ -46,7 +49,7 @@ pub fn State::reasoning_effort_chip(
   guard !selected.is_empty() else { return None }
   let options : Array[@composer.ModelOption] = []
   for option in model.reasoning_efforts {
-    options.push({ value: option.value, label: "Reasoning · " + option.value })
+    options.push({ value: option.value, label: option.value })
   }
   let description = model.reasoning_efforts
     .iter()
@@ -55,9 +58,13 @@ pub fn State::reasoning_effort_chip(
     .unwrap_or("")
   Some(
     @composer.ReasoningSelect::{
+      id: "codex-reasoning-picker",
       options,
       selected,
       disabled: options.length() <= 1,
+      open,
+      toggle,
+      dismiss,
       change,
       title: if description.is_empty() {
         "Reasoning effort: " + selected
