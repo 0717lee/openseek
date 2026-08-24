@@ -372,7 +372,7 @@ test('navigates deletion and insertion anchors across side-by-side and Inline la
     .toBe(true);
 });
 
-test('virtualizes a 2600-line Inline deletion through the viewport', async ({ page }) => {
+test('renders a 2600-line Inline deletion eagerly like VS Code', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await page.goto('/embed.html');
   await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
@@ -389,66 +389,28 @@ test('virtualizes a 2600-line Inline deletion through the viewport', async ({ pa
 
   await page.locator('[data-action="toggle-diff-layout"]').click();
   await expect(diff).toHaveAttribute('data-render-mode', 'inline');
-  const block = modifiedPane.locator(
-    '.diff-editor-inline-deleted-block[data-virtualized-render-lines="true"]',
-  );
+  const block = modifiedPane.locator('.diff-editor-inline-deleted-block');
   await expect(block).toHaveCount(1);
   await expect(block).toHaveAttribute('data-original-line-start', '1');
   await expect(block).toHaveAttribute('data-original-line-end-exclusive', '2601');
 
-  // Installing a leading Inline zone preserves the raw viewport origin. It
-  // must not restore modified line 1 below the new 46,800px deletion.
-  await expect
-    .poll(() => block.getAttribute('data-render-window-start-model-line'))
-    .toBe('1');
-
   const top = await inlineDeletedWindowEvidence(modifiedPane);
-  expect(top.rowCount).toBeLessThan(200);
+  expect(top.rowCount).toBe(2600);
   expect(top.firstLine).toBe(1);
+  expect(top.lastLine).toBe(2600);
   expect(top.validText).toBeTruthy();
   expect(top.validLineNumbers).toBeTruthy();
   expect(top.hasTokens).toBeTruthy();
 
-  // The editor's Monaco-shaped wheel path multiplies pixel deltas by 1.25.
-  // 18,720px therefore lands at 23,400px, the middle of the 46,800px zone.
-  await wheelInlinePane(modifiedPane, 18_720);
-  await expect
-    .poll(() => block.getAttribute('data-render-window-start-model-line'))
-    .not.toBe('1');
-  const middle = await inlineDeletedWindowEvidence(modifiedPane);
-  expect(middle.rowCount).toBeLessThan(200);
-  expect(middle.firstLine).toBeGreaterThan(1_000);
-  expect(middle.lastLine).toBeLessThan(1_800);
-  expect(middle.validText).toBeTruthy();
-  expect(middle.validLineNumbers).toBeTruthy();
-  expect(middle.hasTokens).toBeTruthy();
-
-  // A geometry-only Inline reconcile replaces the rendering context but
-  // preserves the current model-line anchor once the projection already
-  // exists. Resizing in the middle must not fall back to the raw/topology
-  // installation behavior.
+  // A geometry refresh recreates the eager detached rendering and keeps the
+  // complete source range, matching VS Code's renderLines behavior.
   await page.setViewportSize({ width: 1360, height: 900 });
   await expect
-    .poll(async () => (await inlineDeletedWindowEvidence(modifiedPane)).firstLine)
-    .toBe(middle.firstLine);
-  expect(await diff.locator('.view-line').count()).toBeLessThan(200);
-
-  // Another movement keeps the zone intersecting the viewport while
-  // exposing its final original row rather than overshooting into insertions.
-  await wheelInlinePane(modifiedPane, 18_500);
-  await expect
-    .poll(() => block.getAttribute('data-render-window-end-model-line'))
-    .toBe('2600');
-  const tail = await inlineDeletedWindowEvidence(modifiedPane);
-  expect(tail.rowCount).toBeLessThan(200);
-  expect(tail.lastLine).toBe(2600);
-  expect(tail.validText).toBeTruthy();
-  expect(tail.validLineNumbers).toBeTruthy();
-  expect(tail.hasTokens).toBeTruthy();
-  expect(await diff.locator('.view-line').count()).toBeLessThan(200);
+    .poll(async () => (await inlineDeletedWindowEvidence(modifiedPane)).rowCount)
+    .toBe(2600);
 });
 
-test('shares the Inline DOM budget across twenty 130-line deletions', async ({ page }) => {
+test('eagerly renders every row across fragmented Inline deletions', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await page.goto('/embed.html');
   await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
@@ -459,54 +421,27 @@ test('shares the Inline DOM budget across twenty 130-line deletions', async ({ p
 
   const diff = page.locator(diffEditor);
   const modifiedPane = diff.locator('.moonbit-diff-editor-modified');
-  const blocks = modifiedPane.locator(
-    '.diff-editor-inline-deleted-block[data-virtualized-render-lines="true"]',
-  );
+  const blocks = modifiedPane.locator('.diff-editor-inline-deleted-block');
   await expect(diff).toHaveAttribute('data-render-mode', 'inline');
   await expect(blocks).toHaveCount(20);
 
-  // F7 on a deletion-only Inline hunk reveals the ViewZone top itself, not
-  // the retained modified line after its 130 deleted rows. This also gives
-  // the fragmented budget test a deterministic content-space origin even if
-  // SideBySide alignment had retained a non-zero raw scroll offset.
+  // F7 on a deletion-only Inline hunk reveals the ViewZone top itself.
   await modifiedPane.locator('.monaco-editor').click({ position: { x: 120, y: 80 } });
   await page.keyboard.press('F7');
   await expect
     .poll(async () => (await fragmentedInlineEvidence(modifiedPane)).activeFragments)
     .toContain(0);
   const top = await fragmentedInlineEvidence(modifiedPane);
-  expect(top.rowCount).toBeLessThan(100);
-  expect(top.activeBlockCount).toBeLessThanOrEqual(2);
+  expect(top.rowCount).toBe(2600);
+  expect(top.activeBlockCount).toBe(20);
   expect(top.validText).toBeTruthy();
   expect(top.validLineNumbers).toBeTruthy();
   expect(top.hasTokens).toBeTruthy();
   expect(top.activeOriginalLines).toContain(1);
-  expect(await diff.locator('.view-line').count()).toBeLessThan(200);
-
-  await wheelInlinePane(modifiedPane, 18_720);
-  await expect
-    .poll(async () => (await fragmentedInlineEvidence(modifiedPane)).activeFragments)
-    .toContain(10);
-  const middle = await fragmentedInlineEvidence(modifiedPane);
-  expect(middle.rowCount).toBeLessThan(100);
-  expect(middle.activeBlockCount).toBeLessThanOrEqual(2);
-  expect(middle.validText).toBeTruthy();
-  expect(middle.validLineNumbers).toBeTruthy();
-  expect(await diff.locator('.view-line').count()).toBeLessThan(200);
-
-  await wheelInlinePane(modifiedPane, 18_700);
-  await expect
-    .poll(async () => (await fragmentedInlineEvidence(modifiedPane)).activeFragments)
-    .toContain(19);
-  const tail = await fragmentedInlineEvidence(modifiedPane);
-  expect(tail.rowCount).toBeLessThan(100);
-  expect(tail.activeBlockCount).toBeLessThanOrEqual(2);
   // The twentieth 130-line deletion spans original lines 2490..2619;
   // original line 2620 is its retained anchor and belongs to the code model.
-  expect(tail.activeOriginalLines).toContain(2619);
-  expect(tail.validText).toBeTruthy();
-  expect(tail.validLineNumbers).toBeTruthy();
-  expect(await diff.locator('.view-line').count()).toBeLessThan(200);
+  expect(top.activeOriginalLines).toContain(2619);
+  expect(top.activeFragments).toHaveLength(20);
 });
 
 test('renders character changes in the side-by-side code kernels', async ({ page }) => {
@@ -522,8 +457,24 @@ test('renders character changes in the side-by-side code kernels', async ({ page
   const originalPane = diff.locator('.moonbit-diff-editor-original');
   const modifiedPane = diff.locator('.moonbit-diff-editor-modified');
   await expect(diff).toHaveAttribute('data-render-mode', 'side-by-side');
-  await expect(originalPane.locator('.diff-editor-char-delete')).toHaveText('1');
-  await expect(modifiedPane.locator('.diff-editor-char-insert')).toHaveText('2');
+  const deletedCharacter = originalPane.locator('.diff-editor-char-delete');
+  const insertedCharacter = modifiedPane.locator('.diff-editor-char-insert');
+  await expect(originalPane.locator('.view-lines')).toContainText('41');
+  await expect(modifiedPane.locator('.view-lines')).toContainText('42');
+  // VS Code renders `className` decorations as text-free DecorationsOverlay
+  // rectangles (`cdr`), rather than wrapping the changed text in a span.
+  await expect(deletedCharacter).toHaveCount(1);
+  await expect(insertedCharacter).toHaveCount(1);
+  await expect(deletedCharacter).toHaveClass(/\bcdr\b/);
+  await expect(insertedCharacter).toHaveClass(/\bcdr\b/);
+  const [deletedBox, insertedBox] = await Promise.all([
+    deletedCharacter.boundingBox(),
+    insertedCharacter.boundingBox(),
+  ]);
+  expect(deletedBox?.width).toBeGreaterThan(0);
+  expect(deletedBox?.height).toBeGreaterThan(0);
+  expect(insertedBox?.width).toBeGreaterThan(0);
+  expect(insertedBox?.height).toBeGreaterThan(0);
   await expect(originalPane.locator('.diff-editor-line-delete')).toHaveCount(1);
   await expect(modifiedPane.locator('.diff-editor-line-insert')).toHaveCount(1);
 });
@@ -577,19 +528,6 @@ test('drops a stale host-ready rAF after a rapid code-model swap', async ({ page
 
 function workspaceItem(path) {
   return workspaceSelector(path, { root: 'memory://workspace' });
-}
-
-async function wheelInlinePane(pane, deltaY) {
-  await pane.locator('.overflow-guard').evaluate((node, wheelDelta) => {
-    node.dispatchEvent(
-      new WheelEvent('wheel', {
-        deltaY: wheelDelta,
-        deltaMode: 0,
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
-  }, deltaY);
 }
 
 async function inlineDeletedWindowEvidence(pane) {

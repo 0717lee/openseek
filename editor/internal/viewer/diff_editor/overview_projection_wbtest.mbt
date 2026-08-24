@@ -1,51 +1,51 @@
 ///|
-test "overview projection uses modified geometry and excludes alignments" {
-  let insert = projection_change(1, 1, 1, 2)
-  let modify = projection_change(2, 3, 2, 3)
-  let delete = projection_change(4, 5, 4, 4)
-  let projection = DiffFeatureProjection(
-    {
-      changes: [delete, insert, modify],
-      additional_alignments: [
-        LineRangeMapping(LineRange(3, 3), LineRange(3, 3)),
-      ],
-    },
-    TextSnapshot("old\nchanged\nkeep\ndeleted"),
-    TextSnapshot("new\nchanged\nkeep\ntail"),
+test "overview rulers keep original and modified model coordinates separate" {
+  let insert = @diff.DetailedLineRangeMapping(
+    LineRange(1, 1),
+    LineRange(1, 2),
+    None,
   )
-  let entries = diff_overview_ruler_entries(projection, 4)
-  assert_eq(entries, [
+  let modify = @diff.DetailedLineRangeMapping(
+    LineRange(2, 3),
+    LineRange(2, 3),
+    None,
+  )
+  let delete = @diff.DetailedLineRangeMapping(
+    LineRange(4, 5),
+    LineRange(4, 4),
+    None,
+  )
+  let diff_state = DiffState::from_diff_result({
+    changes: [insert, modify, delete],
+    additional_alignments: [LineRangeMapping(LineRange(6, 6), LineRange(6, 7))],
+  })
+
+  assert_eq(original_diff_overview_ruler_entries(diff_state), [
     {
       id: 1,
       range: LineRange(2, 3),
       color: diff_overview_removed_color,
-      lane: Left,
+      lane: Full,
     },
     {
       id: 2,
       range: LineRange(4, 5),
       color: diff_overview_removed_color,
-      lane: Left,
+      lane: Full,
     },
+  ])
+  assert_eq(modified_diff_overview_ruler_entries(diff_state), [
     {
       id: 0,
       range: LineRange(1, 2),
       color: diff_overview_inserted_color,
-      lane: Right,
+      lane: Full,
     },
     {
       id: 1,
       range: LineRange(2, 3),
       color: diff_overview_inserted_color,
-      lane: Right,
+      lane: Full,
     },
   ])
-}
-
-///|
-test "deletion-only overview anchors clamp to the modified model" {
-  let before_start = projection_change(1, 2, 0, 0)
-  let after_end = projection_change(8, 9, 9, 9)
-  assert_eq(modified_overview_range(before_start, 4), LineRange(1, 2))
-  assert_eq(modified_overview_range(after_end, 4), LineRange(4, 5))
 }

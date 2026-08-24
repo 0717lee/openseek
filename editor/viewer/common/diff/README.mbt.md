@@ -77,7 +77,12 @@ test "trim whitespace can ignore re-indentation" {
 External providers implement `DocumentDiffProvider` and may fill
 `additional_alignments` for ignored source rows. `LineRangeMapping`,
 `DetailedLineRangeMapping`, and `RangeMapping` are public constructible values,
-so no viewer-layer adapter is required.
+so no viewer-layer adapter is required. As in VS Code's
+`lineRangeMappingFromRangeMappings`, touching changed rows must be grouped into
+one hunk. Consecutive hunks are strictly separated, ordered on both sides, and
+have equal unchanged gaps. The ViewModel normalizes full-line inner ranges and
+rejects results that violate these invariants instead of repairing them in the
+renderer.
 
 ```sh
 moon test --target js viewer/common/diff

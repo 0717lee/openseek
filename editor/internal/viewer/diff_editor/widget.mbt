@@ -18,16 +18,16 @@ pub struct DiffEditorWidget {
   pointer_monitor : @base_browser.GlobalPointerMoveMonitor
   lifetime : Array[@base_common.Disposable]
   mut resize_observer : @base_common.Disposable?
-  mut overview_ruler : @code_widget.CodeEditorOverviewRuler?
+  mut original_overview_ruler : @code_widget.CodeEditorOverviewRuler?
+  mut modified_overview_ruler : @code_widget.CodeEditorOverviewRuler?
   mut original_decoration_ids : Array[String]
   mut modified_decoration_ids : Array[String]
   mut original_alignment_zone_ids : Array[String]
   mut modified_alignment_zone_ids : Array[String]
-  mut inline_deleted_render_context : @code_widget.VirtualizedCodeEditorRenderLinesContext?
-  mut inline_deleted_renderers : Array[InlineDeletedRenderer]
+  mut inline_deleted_zones : Array[InlineDeletedZone]
   mut original_alignment_geometry : PaneGeometrySnapshot?
   mut modified_alignment_geometry : PaneGeometrySnapshot?
-  mut projection : DiffFeatureProjection?
+  mut diff_state : DiffState?
   mut navigation_index : Int?
   mut reconciling_generation : Int
   mut is_reconciling : Bool
@@ -45,7 +45,6 @@ pub struct DiffEditorWidget {
   mut dispose_pass_count : Int
   mut resize_observer_disposed : Bool
   mut overview_ruler_disposed : Bool
-  mut inline_render_context_disposed : Bool
   mut disposed : Bool
 }
 
@@ -62,22 +61,6 @@ fn diff_whole_line_decorations(
       line_class,
       is_whole_line=true,
       lines_decorations_class_name=gutter_class,
-      description~,
-    ),
-  })
-}
-
-///|
-fn diff_inner_decorations(
-  ranges : Array[@base_common.Range],
-  inline_class : String,
-  description : String,
-) -> Array[@model.ModelDeltaDecoration] {
-  ranges.map(range => {
-    range,
-    options: ModelDecorationOptions(
-      "",
-      inline_class_name=inline_class,
       description~,
     ),
   })
@@ -155,16 +138,16 @@ pub fn DiffEditorWidget::create(
     pointer_monitor: GlobalPointerMoveMonitor(),
     lifetime: [],
     resize_observer: None,
-    overview_ruler: None,
+    original_overview_ruler: None,
+    modified_overview_ruler: None,
     original_decoration_ids: [],
     modified_decoration_ids: [],
     original_alignment_zone_ids: [],
     modified_alignment_zone_ids: [],
-    inline_deleted_render_context: None,
-    inline_deleted_renderers: [],
+    inline_deleted_zones: [],
     original_alignment_geometry: None,
     modified_alignment_geometry: None,
-    projection: None,
+    diff_state: None,
     navigation_index: None,
     reconciling_generation: 0,
     is_reconciling: false,
@@ -176,7 +159,6 @@ pub fn DiffEditorWidget::create(
     dispose_pass_count: 0,
     resize_observer_disposed: false,
     overview_ruler_disposed: false,
-    inline_render_context_disposed: false,
     disposed: false,
   }
   widget.install_event_bridges()
@@ -441,56 +423,148 @@ fn DiffEditorWidget::clear_decorations(self : DiffEditorWidget) -> Unit {
 }
 
 ///|
-fn DiffEditorWidget::dispose_inline_deleted_renderers(
-  self : DiffEditorWidget,
-) -> Unit {
-  match self.inline_deleted_render_context {
-    Some(context) => {
-      context.dispose()
-      self.inline_render_context_disposed = context.is_disposed()
-    }
-    None =>
-      for entry in self.inline_deleted_renderers {
-        entry.renderer.dispose()
-      }
+fn changed_line_range(
+  line_range : @base_common.LineRange,
+  snapshot : @model.TextSnapshot,
+) -> @base_common.Range? {
+  if line_range.is_empty() {
+    return None
   }
-  self.inline_deleted_renderers.clear()
-  self.inline_deleted_render_context = None
+  let end_line_number = line_range.end_line_number_exclusive - 1
+  Some(
+    Range(
+      line_range.start_line_number,
+      1,
+      end_line_number,
+      snapshot.get_line_max_column(end_line_number),
+    ),
+  )
 }
 
 ///|
-fn DiffEditorWidget::apply_projection_decorations(
+fn whole_line_character_decoration(
+  range : @base_common.Range,
+  class_name : String,
+  description : String,
+) -> @model.ModelDeltaDecoration {
+  {
+    range,
+    options: ModelDecorationOptions(
+      class_name,
+      is_whole_line=true,
+      description~,
+    ),
+  }
+}
+
+///|
+fn inner_character_decoration(
+  range : @base_common.Range,
+  class_name : String,
+  description : String,
+) -> @model.ModelDeltaDecoration {
+  let is_empty = range.is_empty()
+  {
+    range,
+    options: ModelDecorationOptions(
+      if is_empty {
+        class_name + " diff-range-empty"
+      } else {
+        class_name
+      },
+      should_fill_line_on_line_break=!is_empty,
+      description~,
+    ),
+  }
+}
+
+///|
+// Direct port of the non-move branches in DiffEditorDecorations. The renderer
+// iterates DiffState mappings themselves; no second feature-projection model
+// can reorder or reinterpret a change.
+fn DiffEditorWidget::apply_diff_state_decorations(
   self : DiffEditorWidget,
-  projection : DiffFeatureProjection,
+  diff_state : DiffState,
+  model : DiffEditorModelData,
 ) -> Unit {
-  let original_projection = projection.original_decorations()
-  let modified_projection = projection.modified_decorations()
-  let original_decorations = diff_whole_line_decorations(
-    original_projection.whole_line_ranges(),
-    "diff-editor-line-delete",
-    "diff-editor-gutter-delete",
-    "diff-editor-original-line",
-  )
-  original_decorations.append(
-    diff_inner_decorations(
-      original_projection.inner_ranges(),
-      "diff-editor-char-delete",
-      "diff-editor-original-character",
-    ),
-  )
-  let modified_decorations = diff_whole_line_decorations(
-    modified_projection.whole_line_ranges(),
-    "diff-editor-line-insert",
-    "diff-editor-gutter-insert",
-    "diff-editor-modified-line",
-  )
-  modified_decorations.append(
-    diff_inner_decorations(
-      modified_projection.inner_ranges(),
-      "diff-editor-char-insert",
-      "diff-editor-modified-character",
-    ),
-  )
+  let original_snapshot = model.original.snapshot()
+  let modified_snapshot = model.modified.snapshot()
+  let original_decorations : Array[@model.ModelDeltaDecoration] = []
+  let modified_decorations : Array[@model.ModelDeltaDecoration] = []
+  for mapping in diff_state.mappings {
+    let change = mapping.line_range_mapping
+    let original_range = changed_line_range(change.original, original_snapshot)
+    let modified_range = changed_line_range(change.modified, modified_snapshot)
+    match original_range {
+      Some(range) =>
+        original_decorations.append(
+          diff_whole_line_decorations(
+            [range],
+            "diff-editor-line-delete",
+            "diff-editor-gutter-delete",
+            "diff-editor-original-line",
+          ),
+        )
+      None => ()
+    }
+    match modified_range {
+      Some(range) =>
+        modified_decorations.append(
+          diff_whole_line_decorations(
+            [range],
+            "diff-editor-line-insert",
+            "diff-editor-gutter-insert",
+            "diff-editor-modified-line",
+          ),
+        )
+      None => ()
+    }
+    if change.modified.is_empty() || change.original.is_empty() {
+      match original_range {
+        Some(range) =>
+          original_decorations.push(
+            whole_line_character_decoration(
+              range, "diff-editor-char-delete", "diff-editor-original-character",
+            ),
+          )
+        None => ()
+      }
+      match modified_range {
+        Some(range) =>
+          modified_decorations.push(
+            whole_line_character_decoration(
+              range, "diff-editor-char-insert", "diff-editor-modified-character",
+            ),
+          )
+        None => ()
+      }
+    } else {
+      match change.inner_changes {
+        Some(inner_changes) =>
+          for inner in inner_changes {
+            if change.original.contains(inner.original.start_line_number) {
+              original_decorations.push(
+                inner_character_decoration(
+                  inner.original,
+                  "diff-editor-char-delete",
+                  "diff-editor-original-character",
+                ),
+              )
+            }
+            if change.modified.contains(inner.modified.start_line_number) {
+              modified_decorations.push(
+                inner_character_decoration(
+                  inner.modified,
+                  "diff-editor-char-insert",
+                  "diff-editor-modified-character",
+                ),
+              )
+            }
+          }
+        None => ()
+      }
+    }
+  }
   self.original_decoration_ids = self.editors.original.delta_decorations(
     self.original_decoration_ids,
     original_decorations,
@@ -577,24 +651,35 @@ fn DiffEditorWidget::clear_overview_ruler(
   self : DiffEditorWidget,
   generation : Int,
 ) -> Unit {
-  match self.overview_ruler {
+  match self.original_overview_ruler {
+    Some(ruler) => ruler.clear(generation)
+    None => ()
+  }
+  match self.modified_overview_ruler {
     Some(ruler) => ruler.clear(generation)
     None => ()
   }
 }
 
 ///|
-fn DiffEditorWidget::apply_overview_projection(
+fn DiffEditorWidget::apply_overview_diff_state(
   self : DiffEditorWidget,
-  projection : DiffFeatureProjection,
-  model : DiffEditorModelData,
+  diff_state : DiffState,
   generation : Int,
 ) -> Unit {
-  match self.overview_ruler {
+  match self.original_overview_ruler {
     Some(ruler) =>
       ruler.set_entries(
         generation,
-        diff_overview_ruler_entries(projection, model.modified.get_line_count()),
+        original_diff_overview_ruler_entries(diff_state),
+      )
+    None => ()
+  }
+  match self.modified_overview_ruler {
+    Some(ruler) =>
+      ruler.set_entries(
+        generation,
+        modified_diff_overview_ruler_entries(diff_state),
       )
     None => ()
   }
@@ -605,31 +690,43 @@ fn DiffEditorWidget::sync_overview_ruler_option(
   self : DiffEditorWidget,
 ) -> Unit {
   if !self.options.overview_ruler {
-    match self.overview_ruler {
+    match self.original_overview_ruler {
       Some(ruler) => {
         ruler.dispose()
         self.overview_ruler_disposed = ruler.is_disposed()
       }
       None => ()
     }
-    self.overview_ruler = None
+    match self.modified_overview_ruler {
+      Some(ruler) => {
+        ruler.dispose()
+        self.overview_ruler_disposed = self.overview_ruler_disposed &&
+          ruler.is_disposed()
+      }
+      None => ()
+    }
+    self.original_overview_ruler = None
+    self.modified_overview_ruler = None
     return
   }
-  if self.overview_ruler is None {
-    self.overview_ruler = Some(
+  if self.original_overview_ruler is None {
+    self.original_overview_ruler = Some(
+      self.editors.original.create_overview_ruler(on_select=change_index => {
+        self.reveal_overview_change(change_index) |> ignore
+      }),
+    )
+  }
+  if self.modified_overview_ruler is None {
+    self.modified_overview_ruler = Some(
       self.editors.modified.create_overview_ruler(on_select=change_index => {
         self.reveal_overview_change(change_index) |> ignore
       }),
     )
-    self.overview_ruler_disposed = false
   }
-  match (self.projection, self.view_model.get_model()) {
-    (Some(projection), Some(model)) =>
-      self.apply_overview_projection(
-        projection,
-        model,
-        self.reconciling_generation,
-      )
+  self.overview_ruler_disposed = false
+  match self.diff_state {
+    Some(diff_state) =>
+      self.apply_overview_diff_state(diff_state, self.reconciling_generation)
     _ => self.clear_overview_ruler(self.reconciling_generation)
   }
 }
@@ -650,43 +747,34 @@ fn DiffEditorWidget::commit_empty_diff_features(
   } else {
     None
   }
-  commit_diff_reconcile_generation(
+  self.clear_decorations()
+  self.original_alignment_zone_ids = replace_alignment_zones(
+    self.editors.original,
+    self.original_alignment_zone_ids,
+    [],
     generation,
-    () => self.clear_decorations(),
-    generation => {
-      self.original_alignment_zone_ids = replace_alignment_zones(
-        self.editors.original,
-        self.original_alignment_zone_ids,
-        [],
-        generation,
-      )
-    },
-    generation => {
-      self.dispose_inline_deleted_renderers()
-      self.modified_alignment_zone_ids = replace_alignment_zones(
-        self.editors.modified,
-        self.modified_alignment_zone_ids,
-        [],
-        generation,
-      )
-    },
-    () => {
-      self.restore_stable_viewports(
-        original_viewport, modified_viewport, inline_modified_viewport,
-      )
-    },
-    generation => self.clear_overview_ruler(generation),
   )
+  self.inline_deleted_zones.clear()
+  self.modified_alignment_zone_ids = replace_alignment_zones(
+    self.editors.modified,
+    self.modified_alignment_zone_ids,
+    [],
+    generation,
+  )
+  self.restore_stable_viewports(
+    original_viewport, modified_viewport, inline_modified_viewport,
+  )
+  self.clear_overview_ruler(generation)
   self.original_alignment_geometry = None
   self.modified_alignment_geometry = None
-  self.projection = None
+  self.diff_state = None
   self.live_region.set_inner_html("")
 }
 
 ///|
-fn DiffEditorWidget::commit_projection(
+fn DiffEditorWidget::commit_diff_state(
   self : DiffEditorWidget,
-  projection : DiffFeatureProjection,
+  diff_state : DiffState,
   model : DiffEditorModelData,
   generation : Int,
   preserve_inline_model_anchor? : Bool = false,
@@ -707,16 +795,11 @@ fn DiffEditorWidget::commit_projection(
     None
   }
   let (original_geometry, modified_geometry) = self.capture_alignment_geometry()
-  let (
-    original_specs,
-    modified_specs,
-    next_inline_deleted_render_context,
-    next_inline_deleted_renderers,
-  ) = match
+  let (original_specs, modified_specs, next_inline_deleted_zones) = match
     (self.layout_state.actual_layout, original_geometry, modified_geometry) {
     (SideBySide, Some(original_geometry), Some(modified_geometry)) => {
       let spacers = compute_managed_alignment_spacers(
-        projection, original_geometry, modified_geometry,
+        diff_state, original_geometry, modified_geometry,
       )
       (
         alignment_view_zone_specs(
@@ -727,7 +810,6 @@ fn DiffEditorWidget::commit_projection(
           spacers.modified(),
           "moonbit-diff-editor-modified-alignment-spacer",
         ),
-        None,
         [],
       )
     }
@@ -735,17 +817,11 @@ fn DiffEditorWidget::commit_projection(
       let inline_zones = inline_deleted_view_zone_specs(
         self.editors.modified,
         model.original,
-        projection,
-        generation,
+        diff_state,
       )
-      (
-        [],
-        inline_zones.specs,
-        inline_zones.render_context,
-        inline_zones.virtualized_renderers,
-      )
+      ([], inline_zones.specs, inline_zones.zones)
     }
-    _ => ([], [], None, [])
+    _ => ([], [], [])
   }
   self.original_alignment_geometry = if self.layout_state.actual_layout ==
     SideBySide {
@@ -759,39 +835,26 @@ fn DiffEditorWidget::commit_projection(
   } else {
     modified_geometry
   }
-  commit_diff_reconcile_generation(
+  self.apply_diff_state_decorations(diff_state, model)
+  self.original_alignment_zone_ids = replace_alignment_zones(
+    self.editors.original,
+    self.original_alignment_zone_ids,
+    original_specs,
     generation,
-    () => self.apply_projection_decorations(projection),
-    generation => {
-      self.original_alignment_zone_ids = replace_alignment_zones(
-        self.editors.original,
-        self.original_alignment_zone_ids,
-        original_specs,
-        generation,
-      )
-    },
-    generation => {
-      self.dispose_inline_deleted_renderers()
-      self.modified_alignment_zone_ids = replace_alignment_zones(
-        self.editors.modified,
-        self.modified_alignment_zone_ids,
-        modified_specs,
-        generation,
-      )
-      self.inline_deleted_render_context = next_inline_deleted_render_context
-      self.inline_deleted_renderers = next_inline_deleted_renderers
-      if self.inline_deleted_render_context is Some(_) {
-        self.inline_render_context_disposed = false
-      }
-    },
-    () => {
-      self.restore_stable_viewports(
-        original_viewport, modified_viewport, inline_modified_viewport,
-      )
-    },
-    generation => self.apply_overview_projection(projection, model, generation),
   )
-  self.projection = Some(projection)
+  self.inline_deleted_zones.clear()
+  self.modified_alignment_zone_ids = replace_alignment_zones(
+    self.editors.modified,
+    self.modified_alignment_zone_ids,
+    modified_specs,
+    generation,
+  )
+  self.inline_deleted_zones = next_inline_deleted_zones
+  self.restore_stable_viewports(
+    original_viewport, modified_viewport, inline_modified_viewport,
+  )
+  self.apply_overview_diff_state(diff_state, generation)
+  self.diff_state = Some(diff_state)
 }
 
 ///|
@@ -801,7 +864,7 @@ fn DiffEditorWidget::reconcile_geometry_if_changed(
   if self.disposed ||
     self.editors.is_committing_model_pair() ||
     self.is_reconciling ||
-    self.projection is None ||
+    self.diff_state is None ||
     self.view_model.get_diff() is None {
     return
   }
@@ -847,8 +910,7 @@ fn DiffEditorWidget::reconcile_view_model(
   if !self.editors.same_model(self.view_model.get_model()) {
     return
   }
-  // Keep the pair commit as the outer boundary even if future projection
-  // construction gains a synchronous callback seam.
+  // Keep the pair commit as the outer boundary while constructing DiffState.
   if self.editors.is_committing_model_pair() ||
     self.editors.committed_model_generation() != committed_model_generation {
     return
@@ -865,17 +927,13 @@ fn DiffEditorWidget::reconcile_view_model(
     self.commit_empty_diff_features(generation)
     return
   }
-  let projection = DiffFeatureProjection(
-    document_diff,
-    model.original.snapshot(),
-    model.modified.snapshot(),
-  )
-  self.commit_projection(
-    projection,
+  let diff_state = DiffState::from_diff_result(document_diff)
+  self.commit_diff_state(
+    diff_state,
     model,
     generation,
     preserve_inline_model_anchor=geometry_refresh &&
-      self.inline_deleted_render_context is Some(_),
+      !self.inline_deleted_zones.is_empty(),
   )
 }
 
@@ -886,12 +944,12 @@ fn DiffEditorWidget::clear_diff_features_for_transition(
   if self.editors.is_committing_model_pair() ||
     self.is_reconciling ||
     (
-      self.projection is None &&
+      self.diff_state is None &&
       self.original_decoration_ids.is_empty() &&
       self.modified_decoration_ids.is_empty() &&
       self.original_alignment_zone_ids.is_empty() &&
       self.modified_alignment_zone_ids.is_empty() &&
-      self.inline_deleted_renderers.is_empty()
+      self.inline_deleted_zones.is_empty()
     ) {
     return
   }
@@ -1116,10 +1174,16 @@ fn DiffEditorWidget::reveal_inline_deleted_zone(
   if self.layout_state.actual_layout != Inline {
     return false
   }
-  for entry in self.inline_deleted_renderers {
-    if entry.change_index == change_index && entry.renderer.reveal_zone_top() {
-      self.editors.modified.focus()
-      return true
+  for entry in self.inline_deleted_zones {
+    if entry.change_index == change_index {
+      match entry.zone_id.val {
+        Some(zone_id) =>
+          if self.editors.modified.reveal_managed_view_zone_top(zone_id) {
+            self.editors.modified.focus()
+            return true
+          }
+        None => ()
+      }
     }
   }
   false
@@ -1168,8 +1232,8 @@ fn DiffEditorWidget::reveal_overview_change(
   change_index : Int,
 ) -> Bool {
   guard !self.disposed &&
-    self.projection is Some(projection) &&
-    projection.change_at(change_index) is Some(change) &&
+    self.diff_state is Some(diff_state) &&
+    diff_state.mapping_at(change_index) is Some(change) &&
     self.view_model.get_model() is Some(model) else {
     return false
   }
@@ -1179,7 +1243,7 @@ fn DiffEditorWidget::reveal_overview_change(
     self.reveal_inline_deleted_zone(change_index) {
     self.announce_navigation_target({
       change_index,
-      change_count: projection.change_count(),
+      change_count: diff_state.mapping_count(),
       change,
     })
     return true
@@ -1203,7 +1267,7 @@ fn DiffEditorWidget::reveal_overview_change(
   self.editors.modified.focus()
   self.announce_navigation_target({
     change_index,
-    change_count: projection.change_count(),
+    change_count: diff_state.mapping_count(),
     change,
   })
   true
@@ -1211,8 +1275,8 @@ fn DiffEditorWidget::reveal_overview_change(
 
 ///|
 pub fn DiffEditorWidget::reveal_next_change(self : DiffEditorWidget) -> Bool {
-  guard self.projection is Some(projection) &&
-    projection.next_change(self.navigation_index) is Some(target) else {
+  guard self.diff_state is Some(diff_state) &&
+    diff_state.next_change(self.navigation_index) is Some(target) else {
     return false
   }
   self.reveal_navigation_target(target)
@@ -1222,8 +1286,8 @@ pub fn DiffEditorWidget::reveal_next_change(self : DiffEditorWidget) -> Bool {
 pub fn DiffEditorWidget::reveal_previous_change(
   self : DiffEditorWidget,
 ) -> Bool {
-  guard self.projection is Some(projection) &&
-    projection.previous_change(self.navigation_index) is Some(target) else {
+  guard self.diff_state is Some(diff_state) &&
+    diff_state.previous_change(self.navigation_index) is Some(target) else {
     return false
   }
   self.reveal_navigation_target(target)
@@ -1335,23 +1399,32 @@ pub fn DiffEditorWidget::dispose(self : DiffEditorWidget) -> Unit {
   }
   self.lifetime.clear()
   self.view_model.dispose()
-  match self.overview_ruler {
+  match self.original_overview_ruler {
     Some(ruler) => {
       ruler.dispose()
       self.overview_ruler_disposed = ruler.is_disposed()
     }
     None => ()
   }
-  self.overview_ruler = None
+  match self.modified_overview_ruler {
+    Some(ruler) => {
+      ruler.dispose()
+      self.overview_ruler_disposed = self.overview_ruler_disposed &&
+        ruler.is_disposed()
+    }
+    None => ()
+  }
+  self.original_overview_ruler = None
+  self.modified_overview_ruler = None
   self.editors.dispose()
   self.original_decoration_ids.clear()
   self.modified_decoration_ids.clear()
   self.original_alignment_zone_ids.clear()
   self.modified_alignment_zone_ids.clear()
-  self.dispose_inline_deleted_renderers()
+  self.inline_deleted_zones.clear()
   self.original_alignment_geometry = None
   self.modified_alignment_geometry = None
-  self.projection = None
+  self.diff_state = None
   self.navigation_index = None
   self.reconciling_generation = 0
   self.is_reconciling = false

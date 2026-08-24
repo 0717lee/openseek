@@ -31,14 +31,13 @@ fn inline_deleted_zone_anchor(change : @diff.DetailedLineRangeMapping) -> Int {
 ///|
 priv struct InlineDeletedViewZones {
   specs : Array[@code_widget.ManagedCodeEditorViewZoneSpec]
-  render_context : @code_widget.VirtualizedCodeEditorRenderLinesContext?
-  virtualized_renderers : Array[InlineDeletedRenderer]
+  zones : Array[InlineDeletedZone]
 }
 
 ///|
-pub struct InlineDeletedRenderer {
+struct InlineDeletedZone {
   change_index : Int
-  renderer : @code_widget.VirtualizedCodeEditorRenderedLines
+  zone_id : Ref[String?]
 }
 
 ///|
@@ -63,26 +62,18 @@ fn configure_inline_deleted_roots(
 fn inline_deleted_view_zone_specs(
   renderer : @code_widget.CodeEditorWidget,
   original_model : @model.TextModel,
-  projection : DiffFeatureProjection,
-  generation : Int,
+  diff_state : DiffState,
 ) -> InlineDeletedViewZones {
   let specs : Array[@code_widget.ManagedCodeEditorViewZoneSpec] = []
-  let virtualized_renderers : Array[InlineDeletedRenderer] = []
-  let mut render_context : @code_widget.VirtualizedCodeEditorRenderLinesContext? = None
-  for change_index in 0..<projection.change_count() {
-    guard projection.change_at(change_index) is Some(change) else { continue }
+  let zones : Array[InlineDeletedZone] = []
+  for change_index in 0..<diff_state.mapping_count() {
+    guard diff_state.mapping_at(change_index) is Some(change) else { continue }
     if change.original.is_empty() {
       continue
     }
-    if render_context is None {
-      render_context = renderer.create_render_lines_context(
-        original_model,
-        owner_generation=generation,
-      )
-    }
-    guard render_context is Some(context) else { continue }
     match
-      context.render_lines(
+      renderer.render_lines(
+        original_model,
         change.original,
         decorations=inline_original_decorations(change),
         line_class_name="diff-editor-inline-deleted-line",
@@ -94,17 +85,23 @@ fn inline_deleted_view_zone_specs(
           rendered.margin_dom_node(),
           change,
         )
+        let zone_id : Ref[String?] = Ref(None)
         specs.push(
-          rendered.managed_view_zone_spec(
+          ManagedCodeEditorViewZoneSpec(
             inline_deleted_zone_anchor(change),
+            rendered.height_in_px(),
+            rendered.dom_node(),
+            margin_dom_node=rendered.margin_dom_node(),
+            min_width_in_px=rendered.min_width_in_px(),
             ordinal=change_index,
             suppress_mouse_down=false,
+            on_zone_registered=(id, _zone) => zone_id.val = Some(id),
           ),
         )
-        virtualized_renderers.push({ change_index, renderer: rendered })
+        zones.push({ change_index, zone_id })
       }
       None => ()
     }
   }
-  { specs, render_context, virtualized_renderers }
+  { specs, zones }
 }

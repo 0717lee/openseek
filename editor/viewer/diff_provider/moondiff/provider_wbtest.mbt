@@ -82,6 +82,20 @@ test "Token provider exposes UTF-16 inner mappings" {
 }
 
 ///|
+test "specialized providers group touching rows into VS Code hunks" {
+  for mode in [Token, Tree] {
+    let provider = MoonDocumentDiffProvider(mode~)
+    let result = compute_with_provider(
+      provider, "fn value() {\n  let first = 1\n  let second = 2\n}", "fn value() {\n  let first = 10\n  let second = 20\n}",
+    )
+    assert_eq(result.changes.length(), 1)
+    assert_eq(result.changes[0].original, LineRange(2, 4))
+    assert_eq(result.changes[0].modified, LineRange(2, 4))
+    provider.dispose()
+  }
+}
+
+///|
 test "Tree parse failure reports Token fallback" {
   let provider = MoonDocumentDiffProvider(mode=Tree)
   let result = compute_with_provider(provider, "fn broken( {", "fn okay() {}")

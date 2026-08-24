@@ -142,15 +142,6 @@ pub fn PaneGeometrySnapshot::foreign_zone_heights(
 }
 
 ///|
-fn PaneGeometrySnapshot::pixels_after_line(
-  self : PaneGeometrySnapshot,
-  after_line_number : Int,
-) -> Double {
-  let boundary = after_line_number.clamp(min=0, max=self.line_count())
-  self.cumulative_pixels[boundary]
-}
-
-///|
 fn PaneGeometrySnapshot::max_column(
   self : PaneGeometrySnapshot,
   line_number : Int,
@@ -161,14 +152,6 @@ fn PaneGeometrySnapshot::max_column(
   } else {
     Some(columns[line_number - 1])
   }
-}
-
-///|
-fn PaneGeometrySnapshot::has_top_foreign_zone(
-  self : PaneGeometrySnapshot,
-) -> Bool {
-  !self.foreign_zone_heights.is_empty() &&
-  self.foreign_zone_heights[0].after_line_number == 0
 }
 
 ///|
@@ -221,126 +204,103 @@ fn append_managed_spacer(
 }
 
 ///|
-fn canonical_change_for_anchor(
-  projection : DiffFeatureProjection,
-  anchor : @diff.LineRangeMapping,
-) -> @diff.DetailedLineRangeMapping? {
-  for index in 0..<projection.change_count() {
-    guard projection.change_at(index) is Some(change) else { continue }
-    if change.line_mapping() == anchor {
-      return Some(change)
+priv struct AdditionalLineHeight {
+  line_number : Int
+  height_in_px : Double
+}
+
+///|
+fn compare_additional_line_height(
+  left : AdditionalLineHeight,
+  right : AdditionalLineHeight,
+) -> Int {
+  left.line_number - right.line_number
+}
+
+///|
+// Exact counterpart of VS Code's getAdditionalLineHeights: only wrapping
+// beyond the base line height and non-owned ViewZones are alignment events.
+// Hidden-line compensation and per-line boundary events were local extensions
+// and intentionally do not participate here.
+fn additional_line_heights(
+  geometry : PaneGeometrySnapshot,
+) -> Array[AdditionalLineHeight] {
+  let raw : Array[AdditionalLineHeight] = []
+  for index, height in geometry.line_heights {
+    let additional = height - geometry.line_height
+    if additional > 0.01 {
+      raw.push({ line_number: index + 1, height_in_px: additional })
     }
   }
-  None
+  for zone in geometry.foreign_zone_heights {
+    if zone.height_in_px > 0.01 {
+      raw.push({
+        line_number: zone.after_line_number,
+        height_in_px: zone.height_in_px,
+      })
+    }
+  }
+  raw.sort_by(compare_additional_line_height)
+  let result : Array[AdditionalLineHeight] = []
+  for item in raw {
+    if !result.is_empty() &&
+      result[result.length() - 1].line_number == item.line_number {
+      let previous = result[result.length() - 1]
+      result[result.length() - 1] = {
+        line_number: previous.line_number,
+        height_in_px: previous.height_in_px + item.height_in_px,
+      }
+    } else {
+      result.push(item)
+    }
+  }
+  result
 }
 
 ///|
-priv struct AlignmentBoundaryState {
-  mut original_boundary : Int
-  mut modified_boundary : Int
-  mut original_pixels : Double
-  mut modified_pixels : Double
-  mut original_event_index : Int
-  mut modified_event_index : Int
+priv struct LineRangeAlignment {
+  original_range : @base_common.LineRange
+  modified_range : @base_common.LineRange
+  original_height_in_px : Double
+  modified_height_in_px : Double
 }
 
 ///|
-fn alignment_event_boundaries(geometry : PaneGeometrySnapshot) -> Array[Int] {
-  let boundaries : Array[Int] = []
-  if geometry.has_top_foreign_zone() {
-    boundaries.push(0)
-  }
-  // Every model-line boundary is a synchronization candidate. This makes
-  // arbitrary wrapping, hidden lines, and even differing base line heights
-  // exact without storing callbacks in the geometry snapshot.
-  for line_number in 1..<=geometry.line_count() {
-    boundaries.push(line_number)
-  }
-  boundaries
-}
-
-///|
-fn drop_consumed_events(
-  state : AlignmentBoundaryState,
-  original_events : Array[Int],
-  modified_events : Array[Int],
-) -> Unit {
-  while state.original_event_index < original_events.length() &&
-        original_events[state.original_event_index] <= state.original_boundary {
-    state.original_event_index += 1
-  }
-  while state.modified_event_index < modified_events.length() &&
-        modified_events[state.modified_event_index] <= state.modified_boundary {
-    state.modified_event_index += 1
-  }
-}
-
-///|
-/// Computes managed spacers from the projection's canonical changes and
-/// geometry-only anchors. Additional alignments participate because they are
-/// present in `alignment_anchors`, but they have no path to visual features.
-pub fn compute_managed_alignment_spacers(
-  projection : DiffFeatureProjection,
+// Direct port of VS Code's computeRangeAlignment. The only addition is that
+// DiffState::alignments also yields geometry-only `additional_alignments` with
+// `diff=None`; the algorithm itself is otherwise shared.
+fn compute_range_alignments(
+  diff_state : DiffState,
   original_geometry : PaneGeometrySnapshot,
   modified_geometry : PaneGeometrySnapshot,
   inner_hunk_alignment? : Bool = true,
-) -> ManagedAlignmentSpacers {
-  let original_spacers : Array[ManagedAlignmentSpacer] = []
-  let modified_spacers : Array[ManagedAlignmentSpacer] = []
-  let original_events = alignment_event_boundaries(original_geometry)
-  let modified_events = alignment_event_boundaries(modified_geometry)
-  let state : AlignmentBoundaryState = {
-    original_boundary: 0,
-    modified_boundary: 0,
-    original_pixels: 0.0,
-    modified_pixels: 0.0,
-    original_event_index: 0,
-    modified_event_index: 0,
-  }
+) -> Array[LineRangeAlignment] {
+  let original_overrides = additional_line_heights(original_geometry)
+  let modified_overrides = additional_line_heights(modified_geometry)
+  let mut original_override_index = 0
+  let mut modified_override_index = 0
+  let mut last_original_line_number = 0
+  let mut last_modified_line_number = 0
+  let result : Array[LineRangeAlignment] = []
 
-  let emit_alignment = fn(original_boundary : Int, modified_boundary : Int) {
-    if original_boundary < state.original_boundary ||
-      modified_boundary < state.modified_boundary ||
-      original_boundary > original_geometry.line_count() ||
-      modified_boundary > modified_geometry.line_count() {
-      return
-    }
-    let original_end_pixels = original_geometry.pixels_after_line(
-      original_boundary,
-    )
-    let modified_end_pixels = modified_geometry.pixels_after_line(
-      modified_boundary,
-    )
-    let original_height = original_end_pixels - state.original_pixels
-    let modified_height = modified_end_pixels - state.modified_pixels
-    let delta = modified_height - original_height
-    if delta > 0.01 {
-      append_managed_spacer(original_spacers, original_boundary, delta)
-    } else if delta < -0.01 {
-      append_managed_spacer(modified_spacers, modified_boundary, -delta)
-    }
-    state.original_boundary = original_boundary
-    state.modified_boundary = modified_boundary
-    state.original_pixels = original_end_pixels
-    state.modified_pixels = modified_end_pixels
-  }
-
-  let handle_outside_anchors = fn(
-    until_original_boundary : Int,
-    until_modified_boundary : Int,
+  let handle_alignments_outside_diffs = fn(
+    until_original_line_number_exclusive : Int,
+    until_modified_line_number_exclusive : Int,
   ) {
     while true {
-      let original_next = if state.original_event_index <
-        original_events.length() &&
-        original_events[state.original_event_index] <= until_original_boundary {
-        Some(original_events[state.original_event_index])
+      let original_next = if original_override_index <
+        original_overrides.length() &&
+        original_overrides[original_override_index].line_number <
+        until_original_line_number_exclusive {
+        Some(original_overrides[original_override_index])
       } else {
         None
       }
-      let modified_next = if state.modified_event_index <
-        modified_events.length() &&
-        modified_events[state.modified_event_index] <= until_modified_boundary {
-        Some(modified_events[state.modified_event_index])
+      let modified_next = if modified_override_index <
+        modified_overrides.length() &&
+        modified_overrides[modified_override_index].line_number <
+        until_modified_line_number_exclusive {
+        Some(modified_overrides[modified_override_index])
       } else {
         None
       }
@@ -348,51 +308,127 @@ pub fn compute_managed_alignment_spacers(
         break
       }
       let original_distance = match original_next {
-        Some(boundary) => boundary - state.original_boundary
+        Some(item) => item.line_number - last_original_line_number
         None => 2147483647
       }
       let modified_distance = match modified_next {
-        Some(boundary) => boundary - state.modified_boundary
+        Some(item) => item.line_number - last_modified_line_number
         None => 2147483647
       }
-      let (original_boundary, modified_boundary) = if original_distance <
+      let (original_item, modified_item) = if original_distance <
         modified_distance {
-        guard original_next is Some(boundary) else { break }
-        state.original_event_index += 1
-        (boundary, state.modified_boundary + original_distance)
+        guard original_next is Some(original_item) else { break }
+        original_override_index += 1
+        (
+          original_item,
+          (
+            {
+              line_number: last_modified_line_number + original_distance,
+              height_in_px: 0.0,
+            } : AdditionalLineHeight),
+        )
       } else if original_distance > modified_distance {
-        guard modified_next is Some(boundary) else { break }
-        state.modified_event_index += 1
-        (state.original_boundary + modified_distance, boundary)
+        guard modified_next is Some(modified_item) else { break }
+        modified_override_index += 1
+        (
+          (
+            {
+              line_number: last_original_line_number + modified_distance,
+              height_in_px: 0.0,
+            } : AdditionalLineHeight),
+          modified_item,
+        )
       } else {
-        guard (original_next, modified_next) is (Some(original), Some(modified)) else {
+        guard (original_next, modified_next)
+          is (Some(original_item), Some(modified_item)) else {
           break
         }
-        state.original_event_index += 1
-        state.modified_event_index += 1
-        (original, modified)
+        original_override_index += 1
+        modified_override_index += 1
+        (original_item, modified_item)
       }
-      emit_alignment(original_boundary, modified_boundary)
+      result.push({
+        original_range: LineRange(
+          original_item.line_number,
+          original_item.line_number + 1,
+        ),
+        modified_range: LineRange(
+          modified_item.line_number,
+          modified_item.line_number + 1,
+        ),
+        original_height_in_px: original_geometry.line_height +
+        original_item.height_in_px,
+        modified_height_in_px: modified_geometry.line_height +
+        modified_item.height_in_px,
+      })
     }
   }
 
-  for anchor in projection.alignment_anchors() {
-    let original_start_boundary = anchor.original.start_line_number - 1
-    let modified_start_boundary = anchor.modified.start_line_number - 1
-    let original_end_boundary = anchor.original.end_line_number_exclusive - 1
-    let modified_end_boundary = anchor.modified.end_line_number_exclusive - 1
-    if original_start_boundary < state.original_boundary ||
-      modified_start_boundary < state.modified_boundary ||
-      original_end_boundary < original_start_boundary ||
-      modified_end_boundary < modified_start_boundary {
-      continue
+  for alignment in diff_state.alignments() {
+    let mapping = alignment.line_range_mapping
+    handle_alignments_outside_diffs(
+      mapping.original.start_line_number,
+      mapping.modified.start_line_number,
+    )
+    let mut first = true
+    let mut last_original_in_hunk = mapping.original.start_line_number
+    let mut last_modified_in_hunk = mapping.modified.start_line_number
+    let emit_alignment = fn(
+      original_line_number_exclusive : Int,
+      modified_line_number_exclusive : Int,
+      force_alignment : Bool,
+    ) {
+      if original_line_number_exclusive < last_original_in_hunk ||
+        modified_line_number_exclusive < last_modified_in_hunk {
+        return
+      }
+      if first {
+        first = false
+      } else if !force_alignment &&
+        (
+          original_line_number_exclusive == last_original_in_hunk ||
+          modified_line_number_exclusive == last_modified_in_hunk
+        ) {
+        return
+      }
+      let original_range = @base_common.LineRange(
+        last_original_in_hunk, original_line_number_exclusive,
+      )
+      let modified_range = @base_common.LineRange(
+        last_modified_in_hunk, modified_line_number_exclusive,
+      )
+      if original_range.is_empty() && modified_range.is_empty() {
+        return
+      }
+      let mut original_additional_height = 0.0
+      while original_override_index < original_overrides.length() &&
+            original_overrides[original_override_index].line_number <
+            original_line_number_exclusive {
+        original_additional_height += original_overrides[original_override_index].height_in_px
+        original_override_index += 1
+      }
+      let mut modified_additional_height = 0.0
+      while modified_override_index < modified_overrides.length() &&
+            modified_overrides[modified_override_index].line_number <
+            modified_line_number_exclusive {
+        modified_additional_height += modified_overrides[modified_override_index].height_in_px
+        modified_override_index += 1
+      }
+      result.push({
+        original_range,
+        modified_range,
+        original_height_in_px: original_range.length().to_double() *
+        original_geometry.line_height +
+        original_additional_height,
+        modified_height_in_px: modified_range.length().to_double() *
+        modified_geometry.line_height +
+        modified_additional_height,
+      })
+      last_original_in_hunk = original_line_number_exclusive
+      last_modified_in_hunk = modified_line_number_exclusive
     }
-    handle_outside_anchors(original_start_boundary, modified_start_boundary)
-    // If sparse geometry had no event at the start, establish the unchanged
-    // prefix checkpoint before entering the hunk/alignment range.
-    emit_alignment(original_start_boundary, modified_start_boundary)
     if inner_hunk_alignment {
-      match canonical_change_for_anchor(projection, anchor) {
+      match alignment.diff {
         Some(change) =>
           match change.inner_changes {
             Some(inner_changes) =>
@@ -400,16 +436,18 @@ pub fn compute_managed_alignment_spacers(
                 if inner.original.start_column > 1 &&
                   inner.modified.start_column > 1 {
                   emit_alignment(
-                    inner.original.start_line_number - 1,
-                    inner.modified.start_line_number - 1,
+                    inner.original.start_line_number,
+                    inner.modified.start_line_number,
+                    false,
                   )
                 }
                 match
                   original_geometry.max_column(inner.original.end_line_number) {
                   Some(max_column) if inner.original.end_column < max_column =>
                     emit_alignment(
-                      inner.original.end_line_number - 1,
-                      inner.modified.end_line_number - 1,
+                      inner.original.end_line_number,
+                      inner.modified.end_line_number,
+                      false,
                     )
                   _ => ()
                 }
@@ -419,19 +457,50 @@ pub fn compute_managed_alignment_spacers(
         None => ()
       }
     }
-    emit_alignment(original_end_boundary, modified_end_boundary)
-    drop_consumed_events(state, original_events, modified_events)
+    emit_alignment(
+      mapping.original.end_line_number_exclusive,
+      mapping.modified.end_line_number_exclusive,
+      true,
+    )
+    last_original_line_number = mapping.original.end_line_number_exclusive
+    last_modified_line_number = mapping.modified.end_line_number_exclusive
   }
+  handle_alignments_outside_diffs(2147483647, 2147483647)
+  result
+}
 
-  // The final model-line boundary is handled by the same geometry transaction
-  // as every other unchanged boundary. A wrapped/hidden/foreign-zone delta on
-  // the final line therefore produces an ordinary managed spacer, not a
-  // residual content-height correction.
-  handle_outside_anchors(
-    original_geometry.line_count(),
-    modified_geometry.line_count(),
+///|
+fn compute_managed_alignment_spacers(
+  diff_state : DiffState,
+  original_geometry : PaneGeometrySnapshot,
+  modified_geometry : PaneGeometrySnapshot,
+  inner_hunk_alignment? : Bool = true,
+) -> ManagedAlignmentSpacers {
+  let original_spacers : Array[ManagedAlignmentSpacer] = []
+  let modified_spacers : Array[ManagedAlignmentSpacer] = []
+  let alignments = compute_range_alignments(
+    diff_state,
+    original_geometry,
+    modified_geometry,
+    inner_hunk_alignment~,
   )
-  emit_alignment(original_geometry.line_count(), modified_geometry.line_count())
+  for alignment in alignments {
+    let delta = alignment.modified_height_in_px -
+      alignment.original_height_in_px
+    if delta > 0.01 {
+      append_managed_spacer(
+        original_spacers,
+        alignment.original_range.end_line_number_exclusive - 1,
+        delta,
+      )
+    } else if delta < -0.01 {
+      append_managed_spacer(
+        modified_spacers,
+        alignment.modified_range.end_line_number_exclusive - 1,
+        -delta,
+      )
+    }
+  }
   { original: original_spacers, modified: modified_spacers }
 }
 

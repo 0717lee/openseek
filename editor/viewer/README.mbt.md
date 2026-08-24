@@ -111,15 +111,23 @@ reads immutable snapshots and commits only when model identity, version,
 provider/options generation, and disposal state still match. A raised provider
 or invalid mapping clears stale artifacts and enters `Failed`.
 
-Each reconcile commits in one direction:
+Before rendering, the ViewModel applies VS Code's inner-range normalization and
+constructs the same `DiffState`/`DiffMapping` boundary used by VS Code. Each
+feature reads those mappings directly:
 
 ```text
 DocumentDiff
-  -> Decorations
-  -> managed ViewZones
-  -> stable scroll restoration
-  -> Overview
+  -> normalizeDocumentDiff
+  -> DiffState / DiffMapping
+       -> Decorations
+       -> alignment / Inline ViewZones
+       -> original + modified Overview rulers
+       -> navigation
 ```
+
+`additional_alignments` is the only renderer-state extension. It is injected
+only into alignment computation and cannot create decorations, overview
+markers, Inline deleted blocks, or navigation targets.
 
 The kernel exposes stable geometry, managed-zone, viewport-state, render, and
 scroll adapters for this work. Diff features do not access raw `View`,

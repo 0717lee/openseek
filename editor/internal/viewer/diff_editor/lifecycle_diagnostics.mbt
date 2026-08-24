@@ -17,10 +17,7 @@ pub(all) struct DiffEditorWidgetLifecycleSnapshot {
   committed_model_generation : Int
   overview_ruler_present : Bool
   overview_ruler_disposed : Bool
-  inline_render_context_present : Bool
-  inline_render_context_disposed : Bool
-  inline_render_live_handle_count : Int
-  inline_render_registered_zone_count : Int
+  inline_deleted_zone_count : Int
   resize_observer_present : Bool
   resize_observer_disposed : Bool
   after_render_waiter_count : Int
@@ -35,22 +32,12 @@ pub fn DiffEditorWidget::lifecycle_snapshot(
 ) -> DiffEditorWidgetLifecycleSnapshot {
   let original_kernel_id = self.editors.original.get_id()
   let modified_kernel_id = self.editors.modified.get_id()
-  let overview_ruler_disposed = match self.overview_ruler {
-    Some(ruler) => ruler.is_disposed()
-    None => self.overview_ruler_disposed
-  }
-  let (
-    inline_render_context_disposed,
-    inline_render_live_handle_count,
-    inline_render_registered_zone_count,
-  ) = match self.inline_deleted_render_context {
-    Some(context) =>
-      (
-        context.is_disposed(),
-        context.live_handle_count(),
-        context.registered_zone_count(),
-      )
-    None => (self.inline_render_context_disposed, 0, 0)
+  let overview_ruler_disposed = match
+    (self.original_overview_ruler, self.modified_overview_ruler) {
+    (Some(original), Some(modified)) =>
+      original.is_disposed() && modified.is_disposed()
+    (None, None) => self.overview_ruler_disposed
+    _ => false
   }
   let view_model_pending_scheduler_count = (if self.view_model.immediate.is_scheduled() {
       1
@@ -71,12 +58,10 @@ pub fn DiffEditorWidget::lifecycle_snapshot(
     view_model_disposed: self.view_model.disposed,
     model_pair_is_committing: self.editors.is_committing_model_pair(),
     committed_model_generation: self.editors.committed_model_generation(),
-    overview_ruler_present: self.overview_ruler is Some(_),
+    overview_ruler_present: self.original_overview_ruler is Some(_) &&
+    self.modified_overview_ruler is Some(_),
     overview_ruler_disposed,
-    inline_render_context_present: self.inline_deleted_render_context is Some(_),
-    inline_render_context_disposed,
-    inline_render_live_handle_count,
-    inline_render_registered_zone_count,
+    inline_deleted_zone_count: self.inline_deleted_zones.length(),
     resize_observer_present: self.resize_observer is Some(_),
     resize_observer_disposed: self.resize_observer_disposed,
     after_render_waiter_count: self.layout_render_waiters.length(),

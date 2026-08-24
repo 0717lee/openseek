@@ -8,9 +8,7 @@ test('owns and tears down exactly two kernels and one shared diff view model', a
   await expect(root).toHaveCount(1);
   await expect(root.locator('.moonbit-diff-editor-pane > .monaco-editor')).toHaveCount(2);
   await expect(
-    root.locator(
-      '.diff-editor-inline-deleted-block[data-virtualized-render-lines="true"]',
-    ),
+    root.locator('.diff-editor-inline-deleted-block'),
   ).toHaveCount(1);
 
   await expect
@@ -32,8 +30,7 @@ test('owns and tears down exactly two kernels and one shared diff view model', a
       committedModelGeneration: 1,
       overviewRulerPresent: true,
       overviewRulerDisposed: false,
-      inlineRenderContextPresent: true,
-      inlineRenderContextDisposed: false,
+      inlineDeletedZoneCount: 1,
       resizeObserverPresent: true,
       resizeObserverDisposed: false,
       afterRenderWaiterCount: 0,
@@ -45,8 +42,7 @@ test('owns and tears down exactly two kernels and one shared diff view model', a
     globalThis.__diffEditorLifecycleControls.snapshot(),
   );
   expect(before.originalKernelId).not.toBe(before.modifiedKernelId);
-  expect(before.inlineRenderLiveHandleCount).toBeGreaterThan(0);
-  expect(before.inlineRenderRegisteredZoneCount).toBeGreaterThan(0);
+  expect(before.inlineDeletedZoneCount).toBeGreaterThan(0);
 
   await page.evaluate(() => globalThis.__diffEditorLifecycleControls.dispose());
   await expect(root).toHaveCount(0);
@@ -67,10 +63,7 @@ test('owns and tears down exactly two kernels and one shared diff view model', a
     modelPairIsCommitting: false,
     overviewRulerPresent: false,
     overviewRulerDisposed: true,
-    inlineRenderContextPresent: false,
-    inlineRenderContextDisposed: true,
-    inlineRenderLiveHandleCount: 0,
-    inlineRenderRegisteredZoneCount: 0,
+    inlineDeletedZoneCount: 0,
     resizeObserverPresent: false,
     resizeObserverDisposed: true,
     afterRenderWaiterCount: 0,

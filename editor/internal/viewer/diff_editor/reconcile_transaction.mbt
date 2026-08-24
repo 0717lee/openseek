@@ -1,5 +1,4 @@
-// The synchronous commit seam for one diff generation. Projection is produced
-// before this seam; every visual feature commits in the same fixed order.
+// Adapters from kernel-owned geometry to the VS Code-shaped alignment engine.
 
 ///|
 fn pane_geometry_from_code_editor_parts(
@@ -79,17 +78,3 @@ fn alignment_geometry_pair_changed(
 }
 
 ///|
-fn commit_diff_reconcile_generation(
-  generation : Int,
-  apply_decorations : () -> Unit,
-  apply_original_view_zones : (Int) -> Unit,
-  apply_modified_view_zones : (Int) -> Unit,
-  restore_stable_viewports : () -> Unit,
-  apply_overview_ruler : (Int) -> Unit,
-) -> Unit {
-  apply_decorations()
-  apply_original_view_zones(generation)
-  apply_modified_view_zones(generation)
-  restore_stable_viewports()
-  apply_overview_ruler(generation)
-}

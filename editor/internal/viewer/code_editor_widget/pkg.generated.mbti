@@ -16,7 +16,6 @@ import {
   "moonbitlang/editor/viewer/common/model",
   "moonbitlang/editor/viewer/common/navigation_api",
   "moonbitlang/editor/viewer/common/quick_diff_api",
-  "moonbitlang/editor/viewer/common/view_model",
 }
 
 // Values
@@ -184,7 +183,6 @@ pub fn CodeEditorWidget::change_view_zones(Self, (@moonbitlang/editor/viewer/bro
 pub fn CodeEditorWidget::create(@dom.Element, services? : CodeEditorServices, options? : CodeEditorOptions, contributions~ : CodeEditorContributionDescriptors) -> Self
 pub fn CodeEditorWidget::create_decorations_collection(Self, decorations? : Array[@model.ModelDeltaDecoration]) -> EditorDecorationsCollection
 pub fn CodeEditorWidget::create_overview_ruler(Self, minimum_marker_height? : Double, on_select? : (Int) -> Unit) -> CodeEditorOverviewRuler
-pub fn CodeEditorWidget::create_render_lines_context(Self, @model.TextModel, owner_generation? : Int) -> VirtualizedCodeEditorRenderLinesContext?
 pub fn CodeEditorWidget::delta_decorations(Self, Array[String], Array[@model.ModelDeltaDecoration]) -> Array[String]
 pub fn CodeEditorWidget::dispose(Self) -> Unit
 pub fn CodeEditorWidget::focus(Self) -> Unit
@@ -304,61 +302,6 @@ pub struct StableCodeEditorViewportState {
 pub fn StableCodeEditorViewportState::anchor_line_number(Self) -> Int
 pub fn StableCodeEditorViewportState::anchor_viewport_offset(Self) -> Double
 pub fn StableCodeEditorViewportState::scroll_left(Self) -> Double
-
-pub struct VirtualizedCodeEditorRenderLinesContext {
-  editor : CodeEditorWidget
-  source_model : @model.TextModel
-  source_version : Int
-  detached_view_model : @view_model.ViewModel
-  configuration_options : CodeEditorOptions
-  configuration_font_info : @config.FontInfo
-  configuration_width : Double
-  configuration_content_width : Double
-  configuration_height : Double
-  configuration_soft_wrap_column : Int
-  owner_generation : Int
-  handles : Array[VirtualizedCodeEditorRenderedLines]
-  mut created_handle_count : Int
-  mut live_handle_count : Int
-  mut registered_zone_count : Int
-  mut disposed : Bool
-}
-pub fn VirtualizedCodeEditorRenderLinesContext::created_handle_count(Self) -> Int
-pub fn VirtualizedCodeEditorRenderLinesContext::dispose(Self) -> Unit
-pub fn VirtualizedCodeEditorRenderLinesContext::is_disposed(Self) -> Bool
-pub fn VirtualizedCodeEditorRenderLinesContext::live_handle_count(Self) -> Int
-pub fn VirtualizedCodeEditorRenderLinesContext::owner_generation(Self) -> Int
-pub fn VirtualizedCodeEditorRenderLinesContext::registered_zone_count(Self) -> Int
-pub fn VirtualizedCodeEditorRenderLinesContext::render_lines(Self, @common.LineRange, decorations? : Array[CodeEditorRenderLinesDecoration], line_class_name? : String, margin_line_class_name? : String) -> VirtualizedCodeEditorRenderedLines?
-
-pub struct VirtualizedCodeEditorRenderedLines {
-  context : VirtualizedCodeEditorRenderLinesContext
-  decorations : Array[CodeEditorRenderLinesDecoration]
-  line_class_name : String
-  margin_line_class_name : String
-  dom_node : @dom.Element
-  margin_dom_node : @dom.Element
-  range_view_start : Int
-  range_view_end_exclusive : Int
-  line_height : Double
-  height_in_px : Double
-  mut discovered_min_width_in_px : Double
-  mut zone_id : String?
-  mut zone_delegate : @moonbitlang/editor/viewer/browser.ViewZone?
-  mut rendered_start_offset : Int
-  mut rendered_end_offset_exclusive : Int
-  mut rendered_visible : Bool
-  mut disposed : Bool
-}
-pub fn VirtualizedCodeEditorRenderedLines::dispose(Self) -> Unit
-pub fn VirtualizedCodeEditorRenderedLines::dom_node(Self) -> @dom.Element
-pub fn VirtualizedCodeEditorRenderedLines::height_in_px(Self) -> Double
-pub fn VirtualizedCodeEditorRenderedLines::is_disposed(Self) -> Bool
-pub fn VirtualizedCodeEditorRenderedLines::managed_view_zone_spec(Self, Int, ordinal? : Int, suppress_mouse_down? : Bool) -> ManagedCodeEditorViewZoneSpec
-pub fn VirtualizedCodeEditorRenderedLines::margin_dom_node(Self) -> @dom.Element
-pub fn VirtualizedCodeEditorRenderedLines::min_width_in_px(Self) -> Double
-pub fn VirtualizedCodeEditorRenderedLines::reveal_zone_top(Self) -> Bool
-pub fn VirtualizedCodeEditorRenderedLines::view_line_count(Self) -> Int
 
 // Type aliases
 
