@@ -50,3 +50,106 @@ fn tool_call_tabs(key : String, tabs : Array[ToolCallTab]) -> @html.Html {
   )
   @html.fieldset(class="tool-call-tabs", children)
 }
+
+///|
+/// Stable radio group identity for one recorded call. Durable items have a
+/// sequence; transient/test items fall back to the call id's stable hash.
+fn tool_call_tabs_key(call_id : String, sequence : Int?) -> String {
+  match sequence {
+    Some(sequence) => "sequence-\{sequence}"
+    None => "call-\{call_id.hash()}"
+  }
+}
+
+///|
+/// Build the compact detail tabs shared by every ordinary tool call. A custom
+/// card supplies the first semantic view for tools such as `run_moonbit` and
+/// `edit`; other tools use the readable generic arguments view. Exact JSON is
+/// a separate tab only when the first view is a derived reading rather than
+/// the recording itself.
+///
+/// `None` when there is only one useful view: the existing labeled fallback is
+/// clearer than a one-entry tab strip.
+fn tool_call_tabbed_view(
+  key : String,
+  name : String,
+  arguments : String?,
+  output : String,
+) -> @html.Html? {
+  let tabs : Array[ToolCallTab] = []
+  if arguments is Some(arguments) {
+    let trimmed = arguments.trim()
+    if !trimmed.is_empty() && trimmed != "{}" {
+      match custom_card(name, arguments) {
+        Some((label, card)) => {
+          tabs.push({ label, body: card })
+          tabs.push({
+            label: "Original JSON",
+            body: original_json_content(arguments),
+          })
+        }
+        None => {
+          let content = json_arguments_content(arguments)
+          tabs.push({ label: "Arguments", body: content.body })
+          if content.has_distinct_original {
+            tabs.push({
+              label: "Original JSON",
+              body: original_json_content(arguments),
+            })
+          }
+        }
+      }
+    }
+  }
+  for tab in tool_output_tabs(name, arguments, output) {
+    tabs.push(tab)
+  }
+  if tabs.length() < 2 {
+    return None
+  }
+  Some(tool_call_tabs(key, tabs))
+}
+
+///|
+/// Result views for a tool call. A decoded MoonBit `read` gets a readable,
+/// highlighted Output plus the exact numbered protocol in Original output;
+/// every other result is already its own faithful display.
+fn tool_output_tabs(
+  name : String,
+  arguments : String?,
+  output : String,
+) -> Array[ToolCallTab] {
+  if output.is_blank() {
+    return []
+  }
+  match (name, arguments) {
+    ("read", Some(arguments)) =>
+      match @read_html.moonbit_output(arguments, output) {
+        Some(rendered) =>
+          [
+            {
+              label: "Output",
+              body: @html.pre(class="tool-call-output", [rendered]),
+            },
+            {
+              label: "Original output",
+              body: @html.pre(class="tool-card-original-json", output),
+            },
+          ]
+        None =>
+          [
+            {
+              label: "Output",
+              body: @html.pre(class="tool-call-output", truncate_output(output)),
+            },
+          ]
+      }
+    _ =>
+      [
+        {
+          label: "Output",
+          body: @html.pre(class="tool-call-output", truncate_output(output)),
+        },
+      ]
+  }
+}

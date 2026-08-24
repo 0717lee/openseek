@@ -388,13 +388,9 @@ fn tool_call_view_mode(
   // checklist would report a plan that never took effect.
   if @plan.classify(item) is Some(Applied(steps) | Pending(steps)) {
     body.push(@html.div(class="tool-call-section", [@plan.card(steps)]))
-  } else if name == "run_moonbit" &&
-    arguments is Some(arguments) &&
-    run_moonbit_tabs(
-      match item.sequence {
-        Some(sequence) => "sequence-\{sequence}"
-        None => "call-\{call_id.hash()}"
-      },
+  } else if tool_call_tabbed_view(
+      tool_call_tabs_key(call_id, item.sequence),
+      name,
       arguments,
       item.content,
     )
@@ -419,7 +415,7 @@ fn tool_call_view_mode(
       body.push(
         @html.div(class="tool-call-section", [
           @html.div(class="tool-call-section-label", "Arguments"),
-          json_arguments_view(arguments),
+          json_arguments_content(arguments).body,
         ]),
       )
     }

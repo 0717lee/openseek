@@ -66,28 +66,3 @@ fn run_moonbit_card(arguments : String) -> @html.Html? {
     ]),
   )
 }
-
-///|
-/// A `run_moonbit` call is the one tool whose three large views are routinely
-/// useful together: its source, the exact recorded payload, and the compiler
-/// or program output. Put those views at one altitude so only the selected one
-/// consumes transcript height. Program is the initial view, including for a
-/// failed run; that preserves the source-first reading the stacked card had.
-fn run_moonbit_tabs(
-  key : String,
-  arguments : String,
-  output : String,
-) -> @html.Html? {
-  guard run_moonbit_card(arguments) is Some(program) else { return None }
-  let tabs : Array[ToolCallTab] = [
-    { label: "Program", body: program },
-    { label: "Original JSON", body: original_json_content(arguments) },
-  ]
-  if !output.is_blank() {
-    tabs.push({
-      label: "Output",
-      body: @html.pre(class="tool-call-output", truncate_output(output)),
-    })
-  }
-  Some(tool_call_tabs(key, tabs))
-}

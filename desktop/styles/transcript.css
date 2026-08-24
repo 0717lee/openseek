@@ -805,10 +805,10 @@
   background: var(--color-danger-soft);
 }
 
-/* The source, exact payload, and output of a `run_moonbit` call share one
-   compact radio-backed tab set. Native radios retain keyboard arrow
-   navigation and keep the viewing choice out of conversation state; only the
-   selected panel participates in layout. */
+/* A tool's readable arguments/card, exact payload, and output share one compact
+   radio-backed tab set. Native radios retain keyboard arrow navigation and
+   keep the viewing choice out of conversation state; only the selected panel
+   participates in layout. */
 .tool-call-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -858,14 +858,17 @@
   > .tool-call-tab-panel:nth-child(2),
 .tool-call-tab-input:nth-of-type(3):checked
   ~ .tool-call-tab-panels
-  > .tool-call-tab-panel:nth-child(3) {
+  > .tool-call-tab-panel:nth-child(3),
+.tool-call-tab-input:nth-of-type(4):checked
+  ~ .tool-call-tab-panels
+  > .tool-call-tab-panel:nth-child(4) {
   display: block;
 }
 
 /* Generic JSON arguments follow viz's human-readable form: one labeled field
    per object member, decoded strings shown verbatim, and nested collections
-   retaining their hierarchy. The recorded payload remains under Original JSON
-   for exact debugging. */
+   retaining their hierarchy. The exact recorded payload remains in the
+   neighboring Original JSON tab for debugging. */
 .tool-call-arguments-friendly {
   margin: 6px 0 8px;
   padding: 10px 12px;
@@ -920,16 +923,11 @@
   padding-left: 10px;
   border-left: 2px solid var(--color-border);
 }
-.tool-call-arguments-friendly .tool-card-original {
-  margin-top: 6px;
-}
-
 /* ---------- custom tool cards ----------
    One tool's arguments rendered in the shape a reader wants — a `run_moonbit`
    call as its program, an `edit` as the change it describes — instead of the
-   escaped JSON the generic path shows. Every such card carries the same two
-   pieces around that shape: a chip row for the arguments it did not
-   dramatize, and the recorded payload behind a disclosure. */
+   escaped JSON the generic path shows. A chip row carries arguments the card
+   does not dramatize; the shared tab set carries the exact payload. */
 .tool-card-meta {
   display: flex;
   flex-wrap: wrap;
@@ -944,9 +942,8 @@
   font-size: var(--font-size-xs);
   overflow-wrap: anywhere;
 }
-/* The payload as the model sent it, so a card is a reading of the call and
-   never the only account of it. A fourth disclosure altitude, so it keeps the
-   same muted line the three above it use. */
+/* The rare single-view read fallback still exposes its original protocol as a
+   disclosure. In the usual multi-view path, that protocol has its own tab. */
 .tool-card-original-summary {
   color: var(--color-text-muted);
   font-size: var(--font-size-xs);

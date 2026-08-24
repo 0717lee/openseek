@@ -5,8 +5,7 @@
 // Every card needs the same two things around that shape: a row of chips for
 // the arguments it did not dramatize, and the recorded payload itself, so the
 // card is a reading of the call and never the only account of it.
-// `run_moonbit` uses the same pieces in its tabbed Program / Original JSON /
-// Output presentation.
+// `run_moonbit` uses the same pieces for its Program view.
 
 ///|
 /// The custom card for a tool whose arguments have a shape the recorded JSON
@@ -15,6 +14,7 @@
 /// so a card never has to invent a reading of a call it does not understand.
 fn custom_card(name : String, arguments : String) -> (String, @html.Html)? {
   match name {
+    "run_moonbit" => run_moonbit_card(arguments).map(card => ("Program", card))
     "edit" => edit_card(arguments).map(card => ("Change", card))
     "multi_edit" => multi_edit_card(arguments).map(card => ("Changes", card))
     _ => None
@@ -59,7 +59,7 @@ fn scalar_chips(
 
 ///|
 /// One argument as chip text, or `None` for a value the chip row cannot state
-/// in one line, which the Original JSON disclosure carries instead. A JSON
+/// in one line, which the Original JSON view carries instead. A JSON
 /// null is a tool's own spelling of "unset", so it gets no chip either:
 /// `target: null` would report a choice the model did not make.
 fn chip_text(key : String, value : Json) -> String? {
@@ -96,20 +96,7 @@ fn chip_row(chips : Array[String]) -> @html.Html {
 }
 
 ///|
-/// The recorded arguments as the model sent them, pretty-printed behind a
-/// closed disclosure — so a card can render the call in the shape a reader
-/// wants without becoming the only account of what was actually sent. Its open
-/// state is the browser's, like every other disclosure in the transcript.
-fn original_json_view(arguments : String) -> @html.Html {
-  @html.details(class="tool-card-original", [
-    @html.summary(class="tool-card-original-summary", "Original JSON"),
-    original_json_content(arguments),
-  ])
-}
-
-///|
-/// Pretty-printed recorded arguments, shared by the disclosure on ordinary
-/// cards and the dedicated Original JSON tab on `run_moonbit`.
+/// Pretty-printed recorded arguments for a tool's Original JSON tab.
 fn original_json_content(arguments : String) -> @html.Html {
   let bounded = truncate_output(arguments)
   let pretty = truncate_output(
