@@ -159,6 +159,31 @@ select {
   display: none;
 }
 
+/* Proton's overlay titlebar lets the page palette paint the native chrome,
+   but macOS keeps its traffic-light controls in the top-left corner. Reserve
+   that native hit area only in the Apple desktop shell. The four rules cover
+   the same sidebar toggle in each place it can live: open sidebar, ordinary
+   collapsed topbar, Settings/Skills fallback, and expanded editor overlay. */
+.app.native-apple-titlebar {
+  --native-titlebar-leading-inset: 88px;
+}
+.app.native-apple-titlebar .sidebar-header,
+.app.native-apple-titlebar.sidebar-collapsed .topbar {
+  padding-left: var(--native-titlebar-leading-inset);
+}
+.app.native-apple-titlebar.sidebar-collapsed .page-sidebar-toggle,
+.app.native-apple-titlebar.sidebar-collapsed
+  .content.panel-expanded
+  .topbar
+  > .topbar-toggle {
+  left: var(--native-titlebar-leading-inset);
+}
+.app.native-apple-titlebar.sidebar-collapsed
+  .content.panel-expanded
+  .editor-tabsbar {
+  padding-left: calc(var(--native-titlebar-leading-inset) + 40px);
+}
+
 /* The conversation (left) and the editor (right) live side by side as two
    independent parts. The editor track is zero-width until the panel
    opens, so the viewer host element stays in the DOM but takes no
