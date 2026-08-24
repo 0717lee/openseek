@@ -55,6 +55,14 @@ select {
   outline: none;
 }
 
+/* The transcript's tab radios are visually clipped, so their visible labels
+   carry the keyboard focus indicator. Form-control focus remains centralized
+   here even though the labels' geometry belongs to transcript.css. */
+.tool-call-tab-input:focus-visible + .tool-call-tab-label {
+  outline: 1px solid var(--color-focus-ring);
+  outline-offset: -1px;
+}
+
 ::selection {
   background: var(--color-accent-soft);
 }
