@@ -224,12 +224,20 @@ async fn main {
         let tasks = context.task_group()
         match runtime_dir {
           Some(dir) =>
-            tasks.spawn_bg(allow_failure=true, () => @instance.hold(dir))
+            // The sweep is the claim's continuation, not a task beside it.
+            // Winning the election does not yet mean owning the directory:
+            // a host started on the stopped-owner path holds the claim
+            // without ever entering one, and until it exits, the staging
+            // directory and the relaunch marker are still its own.
+            tasks.spawn_bg(allow_failure=true, () => {
+              @instance.hold(dir, on_claimed=async fn() {
+                state.host_state().sweep_update_leftovers()
+              })
+            })
+          // Without a runtime directory there is nothing to own: no claim to
+          // hold, and no leftovers of ours anywhere to sweep.
           None => ()
         }
-        tasks.spawn_bg(allow_failure=true, () => {
-          state.host_state().sweep_update_leftovers()
-        })
       },
       // The claim needs no shutdown of its own: the kernel releases it when
       // the process dies, however it dies.

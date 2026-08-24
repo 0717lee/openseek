@@ -133,12 +133,26 @@ pub async fn can_hand_off_to(runtime_dir : @pathx.Path) -> Bool {
 /// is handed to — with no heartbeat at all, and a launch reading the other
 /// host's fresh stamp would go on handing itself to this one however stuck it
 /// became. Waiting costs nothing and ends the moment that host exits.
+///
+/// That wait is why `on_claimed` exists. Anything else this host does to the
+/// runtime directory's shared state has to run inside it rather than beside
+/// it: a task spawned alongside this one would act on the directory during
+/// the wait — while it still belongs to the host being waited out. Passing
+/// the work here is what makes "we own this" its precondition. It runs once,
+/// in this task, so a failure there stops the heartbeat too; give it
+/// something that handles its own errors.
 pub async fn hold(
   runtime_dir : @pathx.Path,
   retry_interval_ms? : Int = HeartbeatIntervalMs,
+  on_claimed? : async () -> Unit,
 ) -> Unit {
   for ;; {
     if claim(runtime_dir) is Some(held) {
+      // `claim` has already stamped, so the delay this adds before the first
+      // restamp costs nothing a reader can observe.
+      if on_claimed is Some(claimed) {
+        claimed()
+      }
       return held.run()
     }
     @async.sleep(retry_interval_ms)
@@ -267,6 +281,32 @@ async test "a live owner with a stopped stamp cannot be handed to" {
   @fsx.write_text_atomic(heartbeat_file(root), "1")
   assert_false(can_hand_off_to(root))
   owner.lock.release()
+  @fs.rmdir(root.to_string(), recursive=true)
+}
+
+///|
+/// Work that acts on the runtime directory belongs after the claim, not
+/// beside it. A primary can reach its lifecycle hook while a bypass host
+/// still owns the directory, and an update sweep running there would clear
+/// that host's staging directory or the relaunch marker it is about to act
+/// on.
+async test "owner-only work waits until the claim is taken" {
+  let root : @pathx.Path = @fs.tmpdir(prefix="openseek-instance-claimed-")
+  guard claim(root) is Some(other) else { fail("expected the first claim") }
+  let swept : Ref[Bool] = Ref(false)
+  @async.with_task_group(group => {
+    group.spawn_bg(allow_failure=true, () => {
+      hold(root, retry_interval_ms=10, on_claimed=fn() { swept.val = true })
+    })
+    // Many retries' worth of waiting, all of it while the directory is still
+    // the other host's.
+    @async.sleep(50)
+    assert_false(swept.val)
+    other.lock.release()
+    @async.sleep(50)
+    assert_true(swept.val)
+    group.return_immediately(())
+  })
   @fs.rmdir(root.to_string(), recursive=true)
 }
 

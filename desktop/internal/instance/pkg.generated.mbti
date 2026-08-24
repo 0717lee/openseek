@@ -8,7 +8,7 @@ import {
 // Values
 pub async fn can_hand_off_to(@pathx.Path) -> Bool
 
-pub async fn hold(@pathx.Path, retry_interval_ms? : Int) -> Unit
+pub async fn hold(@pathx.Path, retry_interval_ms? : Int, on_claimed? : async () -> Unit) -> Unit
 
 pub async fn identity(@pathx.Path) -> String
 
