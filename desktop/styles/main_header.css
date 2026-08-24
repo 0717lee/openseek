@@ -28,7 +28,7 @@ main {
   gap: 10px;
   height: var(--topbar-height);
   padding: 0 18px;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-separator);
   background: var(--color-bg-surface);
 }
 
@@ -116,9 +116,9 @@ main {
   gap: 3px;
   height: 28px;
   padding: 0 7px;
-  border: 1px solid var(--color-border);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background: var(--color-bg-surface);
+  background: var(--color-control-surface);
   color: var(--color-text-muted);
   font-size: var(--font-size-md);
   line-height: var(--line-height-tight);

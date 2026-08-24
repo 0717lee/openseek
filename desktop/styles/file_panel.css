@@ -37,7 +37,7 @@ button.panel-toggle:not(:disabled):hover {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  border-left: 1px solid var(--color-border);
+  border-left: 1px solid var(--color-separator);
   background: var(--color-bg-surface);
   /* Own stacking context so the opaque editor always paints above the
      conversation column, never the other way around. */
@@ -58,7 +58,7 @@ button.panel-toggle:not(:disabled):hover {
   flex: 0 0 auto;
   height: 46px;
   padding: 0 18px 0 12px;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-separator);
   background: var(--color-bg-surface);
 }
 
@@ -196,7 +196,7 @@ button.panel-toggle:not(:disabled):hover {
   flex: 0 0 clamp(96px, var(--tree-height, 32%), calc(100% - 120px));
   min-height: 0;
   overflow: hidden;
-  border-top: 1px solid var(--color-border);
+  border-top: 1px solid var(--color-separator);
   background: var(--color-bg-surface);
 }
 .editor:not(.tree-open) .file-tree-pane {
@@ -215,7 +215,7 @@ button.panel-toggle:not(:disabled):hover {
   flex: 0 0 clamp(180px, var(--tree-width, 260px), calc(100% - 240px));
   min-width: 0;
   border-top: none;
-  border-left: 1px solid var(--color-border);
+  border-left: 1px solid var(--color-separator);
 }
 
 /* Drag-to-resize handle on the panel's viewer-facing seam — the
@@ -418,7 +418,7 @@ html.is-resizing * {
   gap: 6px;
   flex: 0 0 auto;
   padding: 7px 10px;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-separator);
 }
 .browser-nav-button {
   flex: 0 0 auto;
@@ -770,7 +770,7 @@ html.is-resizing * {
   flex: 0 0 auto;
   gap: 2px;
   padding: 7px 4px 4px;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-separator);
 }
 
 .explorer-tab {
@@ -928,7 +928,7 @@ button.review-section-header:hover,
 .review-split-handle {
   position: relative;
   flex: 0 0 5px;
-  border-top: 1px solid var(--color-border);
+  border-top: 1px solid var(--color-separator);
   border-bottom: 1px solid transparent;
   cursor: row-resize;
 }
@@ -1543,7 +1543,7 @@ button.git-history-file:focus-visible {
 }
 
 .change-row.reviewed .change-action {
-  border-color: color-mix(in srgb, var(--color-success) 35%, var(--color-border));
+  border-color: transparent;
   color: var(--color-success);
   background: color-mix(in srgb, var(--color-success) 8%, transparent);
 }
@@ -1589,22 +1589,22 @@ button.git-history-file:focus-visible {
 .change-action {
   flex: 0 0 auto;
   padding: 1px 6px;
-  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, var(--color-border));
+  border: 1px solid transparent;
   border-radius: var(--radius-pill);
   color: var(--color-accent-strong);
-  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  background: var(--color-control-surface);
   font-size: var(--font-size-xs);
   line-height: 16px;
 }
 
 .change-row:hover .change-action:not(.unavailable),
 .change-row:focus-visible .change-action:not(.unavailable) {
-  border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-border));
+  border-color: transparent;
   background: color-mix(in srgb, var(--color-accent) 15%, transparent);
 }
 
 .change-action.unavailable {
-  border-color: var(--color-border);
+  border-color: transparent;
   color: var(--color-text-muted);
   background: transparent;
 }
@@ -1643,7 +1643,7 @@ button.git-history-file:focus-visible {
   flex: 0 0 auto;
   height: 34px;
   padding: 0 18px 0 12px;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-separator);
   font-size: var(--font-size-sm);
   color: var(--color-text-muted);
   white-space: nowrap;
@@ -1843,10 +1843,10 @@ button.git-history-file:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   padding: 2px 7px;
-  border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-border));
+  border: 1px solid transparent;
   border-radius: var(--radius-pill);
-  color: var(--color-accent-strong);
-  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  color: var(--color-text-secondary);
+  background: var(--color-control-surface);
   font-size: var(--font-size-xs);
   line-height: 16px;
 }
@@ -1878,7 +1878,7 @@ button.git-history-file:focus-visible {
   cursor: pointer;
 }
 .review-nav-button:hover:not(:disabled) {
-  border-color: var(--color-border);
+  border-color: transparent;
   color: var(--color-text-primary);
   background: var(--color-bg-subtle);
 }
@@ -1899,7 +1899,8 @@ button.git-history-file:focus-visible {
   cursor: pointer;
 }
 .review-badge-action:hover {
-  border-color: var(--color-accent);
+  border-color: transparent;
+  color: var(--color-accent-strong);
   background: color-mix(in srgb, var(--color-accent) 18%, transparent);
 }
 
@@ -1921,7 +1922,8 @@ button.git-history-file:focus-visible {
 }
 
 .review-diff-mode-toolbar .review-badge.active {
-  border-color: var(--color-accent);
+  border-color: transparent;
+  color: var(--color-accent-strong);
   background: color-mix(in srgb, var(--color-accent) 20%, transparent);
 }
 
@@ -1982,7 +1984,7 @@ button.git-history-file:focus-visible {
   cursor: pointer;
 }
 .review-progress.reviewed {
-  border-color: color-mix(in srgb, var(--color-success) 45%, var(--color-border));
+  border-color: transparent;
   color: var(--color-success);
   background: color-mix(in srgb, var(--color-success) 10%, transparent);
 }

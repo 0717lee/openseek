@@ -36,6 +36,20 @@
   --color-border: #e9e8e3;
   --color-border-subtle: #f0efea;
 
+  /* Structural seams should recede behind content. Persistent control
+     grouping comes from a quiet fill; the stronger border remains available
+     for fields, overlays, focus, and actions whose boundary carries meaning. */
+  --color-separator: color-mix(
+    in srgb,
+    var(--color-border-subtle) 68%,
+    transparent
+  );
+  --color-control-surface: color-mix(
+    in srgb,
+    var(--color-bg-subtle) 74%,
+    transparent
+  );
+
   --color-accent: #3b6ef5;
   --color-accent-strong: #2a55cc;
   --color-on-accent: #fff;
