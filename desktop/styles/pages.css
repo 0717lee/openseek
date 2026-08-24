@@ -365,12 +365,11 @@ h2 {
   pointer-events: none;
 }
 
-/* Settings rows have room above their controls and can sit near the bottom of
-   the scrolling page, so the popup follows the native menu's upward direction
-   shown by the desktop while retaining the row's exact width. */
+/* Settings controls read top-to-bottom like the rest of the form, so their
+   menus open downward while retaining the row's exact width. */
 .setting-select-menu {
+  top: calc(100% + 6px);
   right: 0;
-  bottom: calc(100% + 6px);
   left: 0;
   width: 100%;
   min-width: min(220px, 100%);
