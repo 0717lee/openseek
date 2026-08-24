@@ -95,7 +95,7 @@ main {
   white-space: nowrap;
 }
 .run-status.accent .run-text {
-  color: var(--color-accent-strong);
+  color: var(--color-text-secondary);
 }
 
 .run-text {
@@ -220,7 +220,7 @@ main {
   background: var(--color-danger);
 }
 .run-dot.accent {
-  background: var(--color-accent);
+  background: var(--color-text-secondary);
 }
 .run-dot.pulse {
   animation: pulseDot 1.6s ease-out infinite;

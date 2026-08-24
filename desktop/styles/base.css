@@ -112,7 +112,7 @@ select {
 
 @keyframes pulseDot {
   0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 45%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-text-secondary) 45%, transparent);
   }
   70% {
     box-shadow: 0 0 0 6px transparent;
