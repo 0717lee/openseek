@@ -137,33 +137,28 @@ fn browser_background(dark : Bool) -> String {
 fn browser_theme_script(dark : Bool) -> String {
   let theme = if dark { "dark" } else { "light" }
   let opposite = if dark { "light" } else { "dark" }
-  let script = StringBuilder()
-  script.write_string("(() => {")
-  script.write_string("\n  const theme = \"")
-  script.write_string(theme)
-  script.write_string("\";\n  const opposite = \"")
-  script.write_string(opposite)
-  let suffix =
-    #|";
-    #|  const apply = () => {
-    #|    const root = document.documentElement;
-    #|    if (!root) return;
-    #|    root.style.colorScheme = theme;
-    #|    for (const attribute of ["data-color-mode", "data-theme", "data-bs-theme"]) {
-    #|      if (root.hasAttribute(attribute)) root.setAttribute(attribute, theme);
-    #|    }
-    #|    if (root.classList.contains(theme) || root.classList.contains(opposite)) {
-    #|      root.classList.remove(opposite);
-    #|      root.classList.add(theme);
-    #|    }
-    #|  };
-    #|  apply();
-    #|  if (!document.documentElement) {
-    #|    document.addEventListener("DOMContentLoaded", apply, { once: true });
-    #|  }
-    #|})();
-  script.write_string(suffix)
-  script.to_string()
+  let script =
+    $|(() => {
+    $|  const theme = "\{theme}";
+    $|  const opposite = "\{opposite}";
+    $|  const apply = () => {
+    $|    const root = document.documentElement;
+    $|    if (!root) return;
+    $|    root.style.colorScheme = theme;
+    $|    for (const attribute of ["data-color-mode", "data-theme", "data-bs-theme"]) {
+    $|      if (root.hasAttribute(attribute)) root.setAttribute(attribute, theme);
+    $|    }
+    $|    if (root.classList.contains(theme) || root.classList.contains(opposite)) {
+    $|      root.classList.remove(opposite);
+    $|      root.classList.add(theme);
+    $|    }
+    $|  };
+    $|  apply();
+    $|  if (!document.documentElement) {
+    $|    document.addEventListener("DOMContentLoaded", apply, { once: true });
+    $|  }
+    $|})();
+  script
 }
 
 ///|
@@ -211,13 +206,13 @@ fn BrowserViews::open(
 ) -> @protocol.EmptyReply raise {
   guard allowed_page_url(payload.url) else { raise BlockedURL(payload.url) }
   let window = self.attached_window()
-  match window.view(view_name(payload.id)) {
+  let view = match window.view(view_name(payload.id)) {
     Some(view) => {
       view.load_url(payload.url)
-      apply_browser_theme(view, payload.dark)
+      view
     }
-    None => {
-      let view = window.add_view(
+    None =>
+      window.add_view(
         view_name(payload.id),
         @proton.view(
           payload.url,
@@ -227,9 +222,8 @@ fn BrowserViews::open(
           background_color=browser_background(payload.dark),
         ),
       )
-      apply_browser_theme(view, payload.dark)
-    }
   }
+  apply_browser_theme(view, payload.dark)
   Acknowledged
 }
 

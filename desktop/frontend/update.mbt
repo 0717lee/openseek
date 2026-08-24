@@ -1822,11 +1822,6 @@ fn update_msg(
       (
         @cmd.batch([
           theme.apply(model.system_dark),
-          browser_set_theme_for_pages(
-            dispatch,
-            model,
-            theme.is_dark(model.system_dark),
-          ),
           app_font.apply(),
           app_font_size.apply(),
           codex_cmd,
