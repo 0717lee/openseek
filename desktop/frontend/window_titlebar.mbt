@@ -7,12 +7,37 @@
 const WindowTitlebarSelector = ".sidebar-header, .topbar, .editor-tabsbar"
 
 ///|
-const WindowTitlebarInteractiveSelector = "button, a, input, textarea, select, [role=button], .editor-tab"
+const WindowTitlebarPageSelector = ".window-titlebar-page"
 
 ///|
-fn is_window_titlebar_double_click_target(element : @dom.Element) -> Bool {
-  element.closest(WindowTitlebarSelector) is Some(_) &&
-  element.closest(WindowTitlebarInteractiveSelector) is None
+const WindowTitlebarExcludedSelector = "button, a, input, textarea, select, [role=button], .editor-tab, .launcher-menu, .dock-menu"
+
+///|
+const WindowTitlebarPageHeight = 46
+
+///|
+fn window_titlebar_platform_supports_overlay(platform : String) -> Bool {
+  browser_platform_is_apple(platform) || platform.to_lower().has_prefix("win")
+}
+
+///|
+fn window_titlebar_overlay_supported() -> Bool {
+  window_titlebar_platform_supports_overlay(app_shortcut_browser_platform())
+}
+
+///|
+fn is_window_titlebar_double_click_target(
+  element : @dom.Element,
+  client_y : Int,
+) -> Bool {
+  if element.closest(WindowTitlebarExcludedSelector) is Some(_) {
+    return false
+  }
+  element.closest(WindowTitlebarSelector) is Some(_) ||
+  (
+    client_y < WindowTitlebarPageHeight &&
+    element.closest(WindowTitlebarPageSelector) is Some(_)
+  )
 }
 
 ///|
@@ -33,7 +58,7 @@ fn window_titlebar_sub_loader(
         guard event.to_mouse_event() is Some(mouse) &&
           mouse.get_button() == 0 &&
           event.target().to_element() is Some(element) &&
-          is_window_titlebar_double_click_target(element) else {
+          is_window_titlebar_double_click_target(element, mouse.get_client_y()) else {
           return
         }
         // A title or workspace label is text in the DOM, but within window
@@ -61,8 +86,8 @@ fn window_titlebar_sub_loader(
 }
 
 ///|
-/// Install only in the desktop personality. Browser consoles render the same
-/// top chrome but do not own a native application window to resize.
+/// Install only after the caller has established that this is a desktop page
+/// on a platform where Proton overlays web content into the native titlebar.
 fn window_titlebar_subscription(emit : @cmd.Emit[Unit]) -> @sub.Sub {
   @sub.custom_sub(
     "window-titlebar-double-click",

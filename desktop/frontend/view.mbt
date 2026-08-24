@@ -2053,6 +2053,14 @@ fn view(
     )
   let terminal_panel_visible = model.terminal.is_open() &&
     (!(model.screen is Codex) || codex_active)
+  // Pages without their own topbar still paint beneath the native overlay.
+  // Mark their main element so the document-level double-click gesture can
+  // treat only its otherwise-empty top edge as window chrome.
+  let window_titlebar_page = match model.screen {
+    Chat => model.active_conversation() is None
+    Skills | Settings | WorkspaceSettings(..) => true
+    Codex => false
+  }
   let content = match model.screen {
     // The one fork that decides what the conversation column is. A chat needs
     // a conversation, and a conversation needs a project to work in, so with
@@ -2122,7 +2130,10 @@ fn view(
   let children : Array[@html.Html] = [
     sidebar_html,
     @html.div(class=content_class, [
-      @html.main_(content),
+      @html.main_(
+        class=if window_titlebar_page { "window-titlebar-page" } else { "" },
+        content,
+      ),
       right_panel_html,
       terminal_html,
     ]),

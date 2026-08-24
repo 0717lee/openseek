@@ -84,12 +84,17 @@ fn app_shortcut_browser_platform() -> String {
 }
 
 ///|
-fn app_shortcut_platform_is_apple() -> Bool {
-  let platform = app_shortcut_browser_platform().to_lower()
+fn browser_platform_is_apple(platform : String) -> Bool {
+  let platform = platform.to_lower()
   platform.contains("mac") ||
   platform.contains("iphone") ||
   platform.contains("ipad") ||
   platform.contains("ipod")
+}
+
+///|
+fn app_shortcut_platform_is_apple() -> Bool {
+  browser_platform_is_apple(app_shortcut_browser_platform())
 }
 
 ///|
@@ -404,14 +409,16 @@ pub fn boot() -> Unit {
             ),
           )
         }
-        // These gestures address native-window capabilities, so the browser
-        // console must not install them even though it shares the same DOM.
         if model.is_desktop {
-          subs.push(
-            window_titlebar_subscription(
-              emit.map((_ : Unit) => AppToggleMaximizedRequested),
-            ),
-          )
+          // Only overlay titlebars turn the page's top chrome into native
+          // window chrome; Linux keeps its separate system titlebar.
+          if window_titlebar_overlay_supported() {
+            subs.push(
+              window_titlebar_subscription(
+                emit.map((_ : Unit) => AppToggleMaximizedRequested),
+              ),
+            )
+          }
           // Rabbita captures its own `@html.a` nodes. The embedded Viewer owns
           // foreign DOM below `.viewer-host`, so its anchors need the adjacent
           // document subscription to reach the same root URL policy.
