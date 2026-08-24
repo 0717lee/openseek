@@ -1996,6 +1996,21 @@ fn console_gate_view(
 }
 
 ///|
+/// Root shell classes keep platform chrome geometry explicit in CSS. Only the
+/// native Apple window uses Proton's left-side traffic-light overlay; browser
+/// pages and non-Apple desktop shells retain the ordinary header insets.
+fn app_shell_class(sidebar_open : Bool, native_apple_titlebar : Bool) -> String {
+  let classes : Array[String] = ["app"]
+  if !sidebar_open {
+    classes.push("sidebar-collapsed")
+  }
+  if native_apple_titlebar {
+    classes.push("native-apple-titlebar")
+  }
+  classes.join(" ")
+}
+
+///|
 fn view(
   dispatch : @cmd.Emit[Msg],
   toggle_terminal : @cmd.Cmd,
@@ -2168,7 +2183,10 @@ fn view(
     children.push(bridge_lost_overlay(message))
   }
   @html.div(
-    class=if model.sidebar_open { "app" } else { "app sidebar-collapsed" },
+    class=app_shell_class(
+      model.sidebar_open,
+      model.is_desktop && app_shortcut_platform_is_apple(),
+    ),
     children,
   )
 }
