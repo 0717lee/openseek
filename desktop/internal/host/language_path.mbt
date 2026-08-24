@@ -12,8 +12,12 @@ priv struct LanguagePath {
 
 ///|
 /// Confirm that an explicit editor root is the checkout currently owned by
-/// `session`. Registered project roots, OpenSeek worktrees, and app-server
-/// authorized Codex cwd values all cross the same engine authority boundary.
+/// `session`. Keep `root` in its frontend resource form for the authorization
+/// lookup: on Windows, converting `/C:/work` to `C:\work` first would make the
+/// registered-workspace lookup reject the fresh conversation's first request.
+/// The registry may return a canonical spelling with different case or after
+/// resolving a junction, so compare physical directory identity while keeping
+/// the client's lexical root for Viewer resources.
 async fn LanguagePath::authorized_root(
   session : String,
   root : String,
@@ -23,16 +27,40 @@ async fn LanguagePath::authorized_root(
   }
   let lexical_root = lexical_root.normalize()
   let authorized = match
-    @work_dir.resolve_in_workspace(
-      session,
-      "",
-      workspace=lexical_root.to_string(),
-    ) {
+    @work_dir.resolve_in_workspace(session, "", workspace=root) {
     Some(root) => Some(root)
     None => @work_dir.resolve_in_workspace(session, "")
   }
-  guard authorized is Some(authorized) && authorized.normalize() == lexical_root else {
-    raise HostError("root is not authorized for this conversation")
+  guard authorized is Some(authorized) else {
+    @xlog.warn(category="language") <?
+      {
+        "event": "language_root_ownership_missing",
+        "session": session,
+        "requested_root": root,
+      }
+    raise HostError("root has no directory ownership for this conversation")
+  }
+  let requested_physical = @fs.realpath(lexical_root.to_string()) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => raise HostError("requested language root is unavailable")
+  }
+  let authorized_physical = @fs.realpath(authorized.to_string()) catch {
+    error if @async.is_being_cancelled() => raise error
+    _ => raise HostError("authorized language root is unavailable")
+  }
+  guard @pathx.Path(requested_physical).to_absolute()
+    is Some(requested_physical) &&
+    @pathx.Path(authorized_physical).to_absolute() is Some(authorized_physical) &&
+    requested_physical.relative_to(root=authorized_physical) is Some(relative) &&
+    relative.is_root() else {
+    @xlog.warn(category="language") <?
+      {
+        "event": "language_root_ownership_mismatch",
+        "session": session,
+        "requested_root": requested_physical,
+        "authorized_root": authorized_physical,
+      }
+    raise HostError("root does not match the conversation checkout")
   }
   lexical_root
 }
@@ -77,7 +105,7 @@ async fn LanguagePath::resolve(
 }
 
 ///|
-async test "language paths accept explicit roots and reject escapes" {
+async test "language paths accept frontend resource roots and reject escapes" {
   let root = @fs.tmpdir(prefix="openseek-language-root-")
   let outside = @fs.tmpdir(prefix="openseek-language-outside-")
   defer (@fs.rmdir(outside, recursive=true) catch { _ => () })
@@ -95,8 +123,12 @@ async test "language paths accept explicit roots and reject escapes" {
     create_mode=CreateOrTruncate,
   )
   @fs.symlink(target="\{outside}/secret.mbt", "\{root}/src/link.mbt")
+  guard @pathx.Path(root).to_absolute() is Some(root_absolute) &&
+    root_absolute.to_uri_path() is Some(root_resource) else {
+    fail("test root could not be represented as a frontend resource")
+  }
   let unauthorized_rejected = try {
-    ignore(LanguagePath::resolve("unbound", root, "src/main.mbt"))
+    ignore(LanguagePath::resolve("unbound", root_resource, "src/main.mbt"))
     false
   } catch {
     _ => true
@@ -104,9 +136,13 @@ async test "language paths accept explicit roots and reject escapes" {
     rejected => rejected
   }
   @work_dir.authorize_host_workspace("language-test", root)
-  let resolved = LanguagePath::resolve("language-test", root, "src/main.mbt")
+  let resolved = LanguagePath::resolve(
+    "language-test", root_resource, "src/main.mbt",
+  )
   let traversal_rejected = try {
-    ignore(LanguagePath::resolve("language-test", root, "../outside.mbt"))
+    ignore(
+      LanguagePath::resolve("language-test", root_resource, "../outside.mbt"),
+    )
     false
   } catch {
     _ => true
@@ -114,7 +150,9 @@ async test "language paths accept explicit roots and reject escapes" {
     rejected => rejected
   }
   let symlink_rejected = try {
-    ignore(LanguagePath::resolve("language-test", root, "src/link.mbt"))
+    ignore(
+      LanguagePath::resolve("language-test", root_resource, "src/link.mbt"),
+    )
     false
   } catch {
     _ => true

@@ -25,11 +25,10 @@ impl Show for GitError with fn output(self, logger) {
 /// the leading status-space and NUL separators intact; ordinary callers trim
 /// this value in `run` below.
 pub async fn output(dir : @pathx.Absolute, args : Array[String]) -> String {
-  let (code, stdout, stderr) = @process.collect_output(
+  let (code, stdout, stderr) = @processx.collect_output_no_stdin(
     "git",
     args,
     cwd=dir.to_string(),
-    no_console_window=true,
   ) catch {
     error if @async.is_being_cancelled() => raise error
     error => raise GitError("failed to run git: \{error}")
@@ -62,11 +61,10 @@ pub async fn run(dir : @pathx.Absolute, args : Array[String]) -> String {
 /// fails, for questions where failure itself is the answer (is this a
 /// repository? does this branch exist?).
 pub async fn probe(dir : @pathx.Absolute, args : Array[String]) -> String? {
-  let (code, stdout, _) = @process.collect_output(
+  let (code, stdout, _) = @processx.collect_output_no_stdin(
     "git",
     args,
     cwd=dir.to_string(),
-    no_console_window=true,
   ) catch {
     error if @async.is_being_cancelled() => raise error
     _ => return None
@@ -82,12 +80,7 @@ pub async fn probe(dir : @pathx.Absolute, args : Array[String]) -> String? {
 /// `@async.protect_from_cancel` — no cancellation error can surface there —
 /// and are already propagating the failure that triggered the rollback.
 pub async fn rollback(dir : @pathx.Absolute, args : Array[String]) -> Unit {
-  let _ = @process.collect_output(
-    "git",
-    args,
-    cwd=dir.to_string(),
-    no_console_window=true,
-  ) catch {
+  let _ = @processx.collect_output_no_stdin("git", args, cwd=dir.to_string()) catch {
     _ => return
   }
 }

@@ -308,13 +308,12 @@ async fn gh_json(
   dir : @pathx.Absolute,
   args : Array[String],
 ) -> Json? {
-  let (code, stdout, _) = @process.collect_output(
+  let (code, stdout, _) = @processx.collect_output_no_stdin(
     gh.0,
     args,
     cwd=dir.0,
     extra_env=git_environment(),
     inherit_env=false,
-    no_console_window=true,
   ) catch {
     error if @async.is_being_cancelled() => raise error
     _ => return None
