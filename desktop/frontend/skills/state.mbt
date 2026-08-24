@@ -24,6 +24,7 @@ struct State {
   busy : Array[String]
   notice : String
   preview : Preview
+  preview_cache : Map[String, String]
 } derive(Eq)
 
 ///|
@@ -44,7 +45,14 @@ enum PreviewTarget {
 /// A page that has never been opened: no catalog, no filter, nothing in
 /// flight.
 pub fn State::empty() -> State {
-  { catalog: Idle, query: "", busy: [], notice: "", preview: Closed }
+  {
+    catalog: Idle,
+    query: "",
+    busy: [],
+    notice: "",
+    preview: Closed,
+    preview_cache: Map([]),
+  }
 }
 
 ///|
@@ -115,20 +123,42 @@ pub fn State::handle(
   match msg {
     QueryChanged(value) => (@cmd.none, { ..self, query: value }, None)
     PreviewMarket(item) => {
-      let request = preview_request_id(self.preview) + 1
-      (
-        fetch_content(emit, input.channel, request, Market(item)),
-        { ..self, preview: Loading(target=Market(item), request~) },
-        None,
-      )
+      let target = preview_target_for_market(input.installed, item)
+      match self.preview_cache.get(preview_cache_key(target)) {
+        Some(content) =>
+          (
+            @cmd.none,
+            { ..self, preview: Ready(target~, request=0, content~) },
+            None,
+          )
+        None => {
+          let request = preview_request_id(self.preview) + 1
+          (
+            fetch_content(emit, input.channel, request, target),
+            { ..self, preview: Loading(target~, request~) },
+            None,
+          )
+        }
+      }
     }
     PreviewInstalled(item) => {
-      let request = preview_request_id(self.preview) + 1
-      (
-        fetch_installed_content(emit, input.channel, request, item),
-        { ..self, preview: Loading(target=Installed(item), request~) },
-        None,
-      )
+      let target = Installed(item)
+      match self.preview_cache.get(preview_cache_key(target)) {
+        Some(content) =>
+          (
+            @cmd.none,
+            { ..self, preview: Ready(target~, request=0, content~) },
+            None,
+          )
+        None => {
+          let request = preview_request_id(self.preview) + 1
+          (
+            fetch_installed_content(emit, input.channel, request, item),
+            { ..self, preview: Loading(target~, request~) },
+            None,
+          )
+        }
+      }
     }
     PreviewLoaded(request~, target~, content~) => {
       guard self.preview is Loading(request=current, target~) &&
@@ -136,7 +166,17 @@ pub fn State::handle(
         preview_target_matches(self.preview, target) else {
         return (@cmd.none, self, None)
       }
-      (@cmd.none, { ..self, preview: Ready(target~, request~, content~) }, None)
+      let cache = self.preview_cache.copy()
+      cache[preview_cache_key(target)] = content
+      (
+        @cmd.none,
+        {
+          ..self,
+          preview: Ready(target~, request~, content~),
+          preview_cache: cache,
+        },
+        None,
+      )
     }
     PreviewFailed(request~, target~, message~) => {
       guard self.preview is Loading(request=current, target~) &&
@@ -228,6 +268,27 @@ fn preview_target_matches(preview : Preview, target : PreviewTarget) -> Bool {
     Loading(target=current, ..) => current == target
     _ => false
   }
+}
+
+///|
+fn preview_cache_key(target : PreviewTarget) -> String {
+  match target {
+    Market(item) => "market:\{source_label(item)}"
+    Installed(item) => "installed:\{item.id}"
+  }
+}
+
+///|
+fn preview_target_for_market(
+  installed : Array[InstalledItem],
+  item : MarketItem,
+) -> PreviewTarget {
+  for skill in installed {
+    if !skill.source.is_empty() && skill.source == source_label(item) {
+      return Installed(skill)
+    }
+  }
+  Market(item)
 }
 
 ///|
