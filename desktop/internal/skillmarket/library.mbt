@@ -289,6 +289,9 @@ pub async fn read_skill_content(
   guard @fsx.try_read_text(path) is Some(content) else {
     raise SkillMarketError("skill \{id} has no readable SKILL.md")
   }
+  guard content.length() <= MaxPreviewBytes else {
+    raise SkillMarketError("SKILL.md is too large to preview")
+  }
   content
 }
 

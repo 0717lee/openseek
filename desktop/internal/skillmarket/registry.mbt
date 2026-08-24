@@ -8,6 +8,11 @@
 const DefaultRegistry = "https://mooncakes.io"
 
 ///|
+/// Keep preview parsing bounded so a malformed or unexpectedly large registry
+/// document cannot stall the frontend renderer.
+const MaxPreviewBytes = 512 * 1024
+
+///|
 /// A registry or library failure with a user-facing message; the host's op
 /// boundary unwraps it into the error the webview displays.
 pub(all) suberror SkillMarketError {
@@ -159,6 +164,9 @@ pub async fn fetch_skill_content(
   let (code, data) = fetch_response(url)
   guard code == 200 else {
     raise SkillMarketError("SKILL.md request returned HTTP \{code}")
+  }
+  guard data.length() <= MaxPreviewBytes else {
+    raise SkillMarketError("SKILL.md is too large to preview")
   }
   data.text() catch {
     _ => raise SkillMarketError("skill registry returned unreadable SKILL.md")
