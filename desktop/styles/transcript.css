@@ -227,9 +227,9 @@
   width: 52px;
   height: 52px;
   border-radius: var(--radius-lg);
-  background: var(--color-accent-soft);
-  border: 1px solid var(--color-accent-border);
-  color: var(--color-accent);
+  background: var(--color-control-surface);
+  border: 1px solid var(--color-border-subtle);
+  color: var(--color-text-secondary);
 }
 .empty-title {
   font-size: var(--font-size-lg);
@@ -402,7 +402,7 @@
   --vscode-editorWidget-border: var(--color-border);
   --vscode-editor-background: var(--color-bg-surface);
   --vscode-editorHoverWidget-background: var(--color-bg-subtle);
-  --vscode-focusBorder: var(--color-accent);
+  --vscode-focusBorder: var(--color-focus-ring);
   --vscode-icon-foreground: var(--color-text-secondary);
   --vscode-toolbar-hoverBackground: var(--color-accent-soft);
   --vscode-toolbar-activeBackground: var(--color-accent-soft);
@@ -509,7 +509,7 @@
 .msg.streaming .msg-content::after {
   content: "▍";
   margin-left: 2px;
-  color: var(--color-accent);
+  color: var(--color-text-secondary);
   animation: caretBlink 1s steps(1) infinite;
 }
 
@@ -627,10 +627,8 @@
   content: "▾ ";
 }
 
-/* The model-step ordinal. A quiet accent against the muted summary: enough hue
-   to scan a long run by number, not enough to compete with the failure badge or
-   the plan meter sitting beside it. Mixed toward the muted text rather than
-   faded to transparent, so it keeps the row's weight on either theme. Tabular
+/* The model-step ordinal stays in the transcript's neutral hierarchy so step
+   status does not compete with selection, primary actions, or failures. Tabular
    numerals in a fixed right-aligned column hold every `·` on the same x as the
    count crosses #9 → #10. */
 .activity-step {
@@ -638,20 +636,17 @@
   min-width: 3ch;
   text-align: right;
   font-variant-numeric: tabular-nums;
-  color: color-mix(in oklab, var(--color-accent) 68%, var(--color-text-muted));
+  color: var(--color-text-muted);
   transition: color 0.15s ease;
 }
 
-/* The step a reader points at or has opened takes the full accent, and its work
-   log's guide line picks up the same hue — the revealed work is visibly this
-   number's, even with several steps open at once. Nested tool bursts keep the
-   neutral guide, so a step's own spine still reads as the outermost one. */
+/* Hover and disclosure raise contrast without introducing another blue state. */
 .activity-summary:hover .activity-step,
 .activity[open] > .activity-summary .activity-step {
-  color: var(--color-accent);
+  color: var(--color-text-secondary);
 }
 .activity:has(> .activity-summary .activity-step) > .activity-body {
-  border-left-color: var(--color-accent-border);
+  border-left-color: var(--color-border);
 }
 
 .activity-failed {
@@ -1001,7 +996,7 @@
   color: var(--color-success);
 }
 .plan-step.in_progress .step-icon {
-  color: var(--color-accent);
+  color: var(--color-text-secondary);
 }
 /* a status this build does not know reads as its literal word: disguising it
    as a pending ring would misreport e.g. a blocked step as untouched */
@@ -1052,11 +1047,11 @@
   flex: none;
   width: var(--plan-progress-width, 0%);
   height: 100%;
-  background: var(--color-accent);
+  background: var(--color-text-secondary);
   transition: width 0.2s ease;
 }
 .plan-progress-fill.active {
-  background: var(--color-accent-border);
+  background: var(--color-border);
 }
 .plan-progress-fill.complete {
   background: var(--color-success);

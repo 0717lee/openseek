@@ -366,7 +366,7 @@ aside {
   place-items: center;
   width: 20px;
   height: 20px;
-  color: var(--color-accent);
+  color: var(--color-text-muted);
 }
 /* The composer's launch-mode chip: Local ⇄ Worktree while the conversation
    can still choose; fixed to the worktree's name once bound. */
@@ -457,7 +457,7 @@ button.composer-worktree:hover {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--color-accent);
+  background: var(--color-text-secondary);
   animation: lane-pulse 1.6s ease-in-out infinite;
 }
 /* `lane-pulse` is defined in base.css — shared with the composer's running
@@ -851,7 +851,7 @@ button.row-twisty:hover {
   display: grid;
   place-items: center;
   width: 20px;
-  color: var(--color-accent);
+  color: var(--color-text-muted);
   font-size: 14px;
   line-height: var(--line-height-tight);
 }

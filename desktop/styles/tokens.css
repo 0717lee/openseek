@@ -67,8 +67,13 @@
 
   --color-code: #20242b;
 
-  /* Interaction colors derive from the active palette automatically. */
-  --color-focus-ring: var(--color-accent);
+  /* Keyboard focus must be obvious without turning every interactive surface
+     into another accent claim. Blue remains for selection and primary action. */
+  --color-focus-ring: color-mix(
+    in srgb,
+    var(--color-text-primary) 62%,
+    transparent
+  );
   --color-hover-subtle: color-mix(
     in srgb,
     var(--color-text-primary) 10%,

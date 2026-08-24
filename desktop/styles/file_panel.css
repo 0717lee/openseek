@@ -850,14 +850,30 @@ html.is-resizing * {
 }
 
 .git-graph-section {
-  --git-graph-current: #0063d3;
-  --git-graph-upstream: #652d90;
-  --git-graph-base: #ea5c00;
-  --git-graph-foreground-1: #ffb000;
-  --git-graph-foreground-2: #dc267f;
-  --git-graph-foreground-3: #994f00;
-  --git-graph-foreground-4: #40b0a6;
-  --git-graph-foreground-5: #b66dff;
+  --git-graph-current: var(--color-text-secondary);
+  --git-graph-upstream: color-mix(
+    in srgb,
+    var(--color-text-secondary) 72%,
+    var(--color-text-muted)
+  );
+  --git-graph-base: var(--color-text-muted);
+  --git-graph-foreground-1: var(--color-text-secondary);
+  --git-graph-foreground-2: color-mix(
+    in srgb,
+    var(--color-text-secondary) 72%,
+    var(--color-text-muted)
+  );
+  --git-graph-foreground-3: color-mix(
+    in srgb,
+    var(--color-text-secondary) 46%,
+    var(--color-text-muted)
+  );
+  --git-graph-foreground-4: var(--color-text-muted);
+  --git-graph-foreground-5: color-mix(
+    in srgb,
+    var(--color-text-secondary) 82%,
+    var(--color-text-muted)
+  );
   flex: 1 1 auto;
 }
 
@@ -1458,14 +1474,22 @@ button.git-history-file:focus-visible {
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .git-graph-section {
-    --git-graph-current: #59a4f9;
-    --git-graph-upstream: #b180d7;
+    --git-graph-current: var(--color-text-secondary);
+    --git-graph-upstream: color-mix(
+      in srgb,
+      var(--color-text-secondary) 72%,
+      var(--color-text-muted)
+    );
   }
 }
 
 :root[data-theme="dark"] .git-graph-section {
-  --git-graph-current: #59a4f9;
-  --git-graph-upstream: #b180d7;
+  --git-graph-current: var(--color-text-secondary);
+  --git-graph-upstream: color-mix(
+    in srgb,
+    var(--color-text-secondary) 72%,
+    var(--color-text-muted)
+  );
 }
 
 .history-commit-crumb {
@@ -1591,7 +1615,7 @@ button.git-history-file:focus-visible {
   padding: 1px 6px;
   border: 1px solid transparent;
   border-radius: var(--radius-pill);
-  color: var(--color-accent-strong);
+  color: var(--color-text-secondary);
   background: var(--color-control-surface);
   font-size: var(--font-size-xs);
   line-height: 16px;
@@ -1600,7 +1624,8 @@ button.git-history-file:focus-visible {
 .change-row:hover .change-action:not(.unavailable),
 .change-row:focus-visible .change-action:not(.unavailable) {
   border-color: transparent;
-  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  color: var(--color-text-primary);
+  background: var(--color-bg-subtle);
 }
 
 .change-action.unavailable {
@@ -1803,7 +1828,7 @@ button.git-history-file:focus-visible {
 }
 
 .breadcrumb-picker-icon.folder {
-  color: var(--color-accent-strong);
+  color: var(--color-text-muted);
 }
 
 .breadcrumb-picker-name {
@@ -1900,8 +1925,8 @@ button.git-history-file:focus-visible {
 }
 .review-badge-action:hover {
   border-color: transparent;
-  color: var(--color-accent-strong);
-  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  color: var(--color-text-primary);
+  background: var(--color-bg-subtle);
 }
 
 .review-diff-mode-toolbar {

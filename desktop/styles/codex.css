@@ -4,7 +4,7 @@
    root sidebar row renderers as OpenSeek. */
 
 .codex-connection {
-  color: var(--color-accent-strong);
+  color: var(--color-text-secondary);
 }
 
 .codex-writer-status {
@@ -315,9 +315,9 @@
   display: grid;
   gap: 9px;
   padding: 12px;
-  border: 1px solid var(--color-accent-border);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  background: var(--color-accent-soft);
+  background: var(--color-bg-subtle);
 }
 
 .codex-request-title {
