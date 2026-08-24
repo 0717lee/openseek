@@ -50,12 +50,8 @@ pub async fn FileLock::acquire(path : @pathx.Path, kind : @fs.Lock) -> FileLock 
   let file = open_lock_file(lock_file(path).to_string())
   // A wait interrupted by cancellation leaves the descriptor ours to close;
   // leaking it would also leak the lock for as long as the process lives.
-  file.lock(kind) catch {
-    error => {
-      file.close()
-      raise error
-    }
-  }
+  errdefer file.close()
+  file.lock(kind)
   { file, }
 }
 
@@ -100,6 +96,28 @@ async fn open_lock_file(sidecar : String) -> @fs.File {
 }
 
 ///|
+/// Take the lock only if nothing holds it right now.
+///
+/// For the caller that is asking *whether* someone holds it rather than
+/// waiting for a turn — blocking there would mean waiting on the very
+/// process the question is about. `None` means someone else holds it.
+pub async fn FileLock::try_acquire(
+  path : @pathx.Path,
+  kind : @fs.Lock,
+) -> FileLock? {
+  ensure_dir(path.dirname())
+  let file = open_lock_file(lock_file(path).to_string())
+  errdefer file.close()
+  // Not an error: someone holds it, which is the answer the caller wanted.
+  // The descriptor still has to go, and `errdefer` does not cover a return.
+  guard file.try_lock(kind) else {
+    file.close()
+    return None
+  }
+  Some({ file, })
+}
+
+///|
 pub fn FileLock::release(self : FileLock) -> Unit {
   self.file.unlock()
   self.file.close()
@@ -133,20 +151,9 @@ pub async fn write_text_atomic(
   // task, a full disk), which would otherwise leave one abandoned file per
   // attempt, holding whatever the caller was saving. Cancellation is among
   // those failures, hence the shield around the removal.
-  try {
-    @fs.write_file(
-      temp.to_string(),
-      content,
-      create_mode=CreateNew,
-      permission~,
-    )
-    commit_temp_file(temp, target)
-  } catch {
-    error => {
-      @async.protect_from_cancel(() => discard_temp_file(temp))
-      raise error
-    }
-  }
+  errdefer @async.protect_from_cancel(() => discard_temp_file(temp))
+  @fs.write_file(temp.to_string(), content, create_mode=CreateNew, permission~)
+  commit_temp_file(temp, target)
 }
 
 ///|
