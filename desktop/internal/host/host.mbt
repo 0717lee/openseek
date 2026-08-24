@@ -295,6 +295,14 @@ pub fn endpoints(
     @endpoint.Endpoint::remote(@commands.skills_catalog, async fn(_) {
       skills_catalog_op()
     }),
+    @endpoint.Endpoint::remote(@commands.skills_content, async fn(payload) {
+      skills_content_op(payload)
+    }),
+    @endpoint.Endpoint::remote(@commands.skills_installed_content, async fn(
+      payload,
+    ) {
+      installed_skill_content_op(payload)
+    }),
     @endpoint.Endpoint::remote(@commands.skills_installed, async fn(_) {
       installed_skills_op()
     }),

@@ -516,6 +516,18 @@ pub let skills_catalog : Command[
 ] = Command("skills.catalog")
 
 ///|
+pub let skills_content : Command[
+  @protocol.InstallSkillPayload,
+  @protocol.ReadFileReply,
+] = Command("skills.content")
+
+///|
+pub let skills_installed_content : Command[
+  @protocol.UninstallSkillPayload,
+  @protocol.ReadFileReply,
+] = Command("skills.installed_content")
+
+///|
 pub let skills_installed : Command[
   @protocol.EmptyPayload,
   @protocol.InstalledSkillsReply,

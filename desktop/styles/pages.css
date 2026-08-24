@@ -479,6 +479,40 @@ h2 {
   flex-shrink: 0;
 }
 
+.skill-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.skill-preview {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+}
+
+.skill-preview-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.skill-preview-head h2 {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.skill-preview-markdown {
+  min-width: 0;
+  max-height: min(62vh, 720px);
+  overflow: auto;
+}
+
 .skills-refresh {
   margin-left: auto;
   white-space: nowrap;

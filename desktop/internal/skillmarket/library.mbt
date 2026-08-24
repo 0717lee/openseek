@@ -271,6 +271,28 @@ pub async fn installed_skills(
 }
 
 ///|
+/// Read an installed skill without exposing the library root to the frontend.
+pub async fn read_skill_content(
+  id : String,
+  library_dir? : @pathx.Path = library_dir_from_env(),
+) -> String {
+  guard valid_slug(id) else {
+    raise SkillMarketError("invalid skill id: \{id}")
+  }
+  let directory_file = library_dir.join(id).join("SKILL.md")
+  let flat_file = library_dir.join("\{id}.md")
+  let path = if @fsx.exists(directory_file) {
+    directory_file
+  } else {
+    flat_file
+  }
+  guard @fsx.try_read_text(path) is Some(content) else {
+    raise SkillMarketError("skill \{id} has no readable SKILL.md")
+  }
+  content
+}
+
+///|
 /// Remove one installed skill. Only entries carrying our provenance sidecar
 /// are removable — a hand-written skill is the user's file, not ours to
 /// delete. `on_committed` runs after the live directory moves under `.trash`,

@@ -28,6 +28,30 @@ async fn skills_catalog_op() -> SkillsCatalogReply {
 }
 
 ///|
+async fn skills_content_op(payload : InstallSkillPayload) -> ReadFileReply {
+  let content = @skillmarket.fetch_skill_content(
+    module_name=payload.module_name,
+    version=payload.version,
+    package_path=payload.package_path.unwrap_or(""),
+  ) catch {
+    @skillmarket.SkillMarketError(message) => raise HostError(message)
+    error => raise error
+  }
+  Content(content~, absolute="", sig="")
+}
+
+///|
+async fn installed_skill_content_op(
+  payload : UninstallSkillPayload,
+) -> ReadFileReply {
+  let content = @skillmarket.read_skill_content(payload.id) catch {
+    @skillmarket.SkillMarketError(message) => raise HostError(message)
+    error => raise error
+  }
+  Content(content~, absolute="", sig="")
+}
+
+///|
 async fn install_skill_op(
   payload : InstallSkillPayload,
   on_committed : () -> Unit,

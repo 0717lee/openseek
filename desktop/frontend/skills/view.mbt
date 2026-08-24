@@ -45,20 +45,36 @@ fn installed_row(
     @html.div(class="skill-info", info),
   ]
   if skill.source.is_empty() {
-    children.push(@html.span(class="skill-check ok", "✓"))
+    children.push(
+      @html.div(class="skill-actions", [
+        @html.button(
+          class="secondary skill-action",
+          on_click=emit(PreviewInstalled(skill)),
+          "View",
+        ),
+        @html.span(class="skill-check ok", "✓"),
+      ]),
+    )
   } else {
     let busy = state.busy.contains(skill.id)
     children.push(
-      @html.button(
-        class="secondary skill-action",
-        disabled=busy,
-        on_click=emit(Uninstall(skill.id)),
-        if busy {
-          "Removing…"
-        } else {
-          "Uninstall"
-        },
-      ),
+      @html.div(class="skill-actions", [
+        @html.button(
+          class="secondary skill-action",
+          on_click=emit(PreviewInstalled(skill)),
+          "View",
+        ),
+        @html.button(
+          class="secondary skill-action",
+          disabled=busy,
+          on_click=emit(Uninstall(skill.id)),
+          if busy {
+            "Removing…"
+          } else {
+            "Uninstall"
+          },
+        ),
+      ]),
     )
   }
   @html.div(class="skill-row", children)
@@ -89,24 +105,98 @@ fn market_row(
   }
   info.push(@html.div(class="skill-meta", meta))
   let action = if installed {
-    @html.span(class="skill-check ok", "✓ Installed")
+    @html.div(class="skill-actions", [
+      @html.button(
+        class="secondary skill-action",
+        on_click=emit(PreviewMarket(item)),
+        "View",
+      ),
+      @html.span(class="skill-check ok", "✓ Installed"),
+    ])
   } else {
-    @html.button(
-      class="secondary skill-action",
-      disabled=busy,
-      on_click=emit(Install(item)),
-      if busy {
-        "Installing…"
-      } else {
-        "Install"
-      },
-    )
+    @html.div(class="skill-actions", [
+      @html.button(
+        class="secondary skill-action",
+        on_click=emit(PreviewMarket(item)),
+        "View",
+      ),
+      @html.button(
+        class="secondary skill-action",
+        disabled=busy,
+        on_click=emit(Install(item)),
+        if busy {
+          "Installing…"
+        } else {
+          "Install"
+        },
+      ),
+    ])
   }
   @html.div(class="skill-row", title=item.repository, [
     @html.div(class="skill-avatar", icon(icon_extensions)),
     @html.div(class="skill-info", info),
     action,
   ])
+}
+
+///|
+fn preview_panel(state : State, emit : @cmd.Emit[Msg]) -> @html.Html? {
+  match state.preview {
+    Closed => None
+    Loading(target~, ..) =>
+      Some(
+        @html.div(class="skill-preview", [
+          @html.div(class="skill-preview-head", [
+            @html.h2(preview_name(target)),
+            @html.button(
+              class="secondary",
+              on_click=emit(ClosePreview),
+              "Close",
+            ),
+          ]),
+          @html.div(class="skills-empty", "Loading SKILLS.md…"),
+        ]),
+      )
+    Ready(target~, content~, ..) =>
+      Some(
+        @html.div(class="skill-preview", [
+          @html.div(class="skill-preview-head", [
+            @html.h2(preview_name(target)),
+            @html.button(
+              class="secondary",
+              on_click=emit(ClosePreview),
+              "Close",
+            ),
+          ]),
+          @html.div(
+            class="skill-preview-markdown",
+            @markdown.markdown_nodes(content),
+          ),
+        ]),
+      )
+    Failed(target~, message~, ..) =>
+      Some(
+        @html.div(class="skill-preview", [
+          @html.div(class="skill-preview-head", [
+            @html.h2(preview_name(target)),
+            @html.button(
+              class="secondary",
+              on_click=emit(ClosePreview),
+              "Close",
+            ),
+          ]),
+          @html.div(class="skills-empty danger", message),
+        ]),
+      )
+  }
+}
+
+///|
+fn preview_name(target : PreviewTarget) -> String {
+  match target {
+    Market(item) => item.name
+    Installed(item) => item.name
+  }
 }
 
 ///|
@@ -227,6 +317,9 @@ fn page(state : State, input : Input, emit : @cmd.Emit[Msg]) -> @html.Html {
       @html.div(class="settings-group-card", market_rows),
     ]),
   )
+  if preview_panel(state, emit) is Some(preview) {
+    sections.push(preview)
+  }
   @html.section(class="skills-page", [
     @html.div(class="skills-page-inner", sections),
   ])

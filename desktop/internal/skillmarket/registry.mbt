@@ -144,6 +144,27 @@ async fn skill_md_url(registry : String, entry : String) -> String {
   "\{registry}/assets/\{entry}/SKILL.md"
 }
 
+///|
+/// Fetch the published instructions without changing the local library.
+pub async fn fetch_skill_content(
+  module_name~ : String,
+  version~ : String,
+  package_path~ : String,
+  registry? : String = DefaultRegistry,
+) -> String {
+  let url = skill_md_url(
+    registry,
+    entry_path(module_name, version, package_path),
+  )
+  let (code, data) = fetch_response(url)
+  guard code == 200 else {
+    raise SkillMarketError("SKILL.md request returned HTTP \{code}")
+  }
+  data.text() catch {
+    _ => raise SkillMarketError("skill registry returned unreadable SKILL.md")
+  }
+}
+
 // The pure halves of the registry client and the library: wire decoding,
 // digest and slug checks, frontmatter parsing.
 

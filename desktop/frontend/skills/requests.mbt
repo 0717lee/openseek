@@ -32,6 +32,94 @@ fn fetch_catalog(
 }
 
 ///|
+fn fetch_content(
+  emit : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  request : Int,
+  target : PreviewTarget,
+) -> @cmd.Cmd {
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      match target {
+        Market(item) => {
+          let reply = @interop.bridge_request(
+            channel,
+            @commands.skills_content,
+            {
+              module_name: item.module_name,
+              version: item.version,
+              package_path: if item.package_path.is_empty() {
+                None
+              } else {
+                Some(item.package_path)
+              },
+            },
+          ) catch {
+            error => {
+              scheduler.add(
+                emit(
+                  PreviewFailed(
+                    request~,
+                    target~,
+                    message=@interop.bridge_error_text(error),
+                  ),
+                ),
+              )
+              return
+            }
+          }
+          scheduler.add(emit(preview_reply(request, target, reply)))
+        }
+        Installed(item) => {
+          let reply = @interop.bridge_request(
+            channel,
+            @commands.skills_installed_content,
+            { id: item.id },
+          ) catch {
+            error => {
+              scheduler.add(
+                emit(
+                  PreviewFailed(
+                    request~,
+                    target~,
+                    message=@interop.bridge_error_text(error),
+                  ),
+                ),
+              )
+              return
+            }
+          }
+          scheduler.add(emit(preview_reply(request, target, reply)))
+        }
+      }
+    })
+  })
+}
+
+///|
+fn preview_reply(
+  request : Int,
+  target : PreviewTarget,
+  reply : @protocol.ReadFileReply,
+) -> Msg {
+  match reply {
+    @protocol.ReadFileReply::Content(content~, ..) =>
+      PreviewLoaded(request~, target~, content~)
+    _ => PreviewFailed(request~, target~, message="SKILL.md is not readable")
+  }
+}
+
+///|
+fn fetch_installed_content(
+  emit : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  request : Int,
+  item : InstalledItem,
+) -> @cmd.Cmd {
+  fetch_content(emit, channel, request, Installed(item))
+}
+
+///|
 /// Install one catalog entry into the global skills library. Settles with an
 /// `ActionDone` either way; the busy key is the entry's source label.
 fn install(

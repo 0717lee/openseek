@@ -23,13 +23,28 @@ struct State {
   query : String
   busy : Array[String]
   notice : String
+  preview : Preview
+} derive(Eq)
+
+///|
+enum Preview {
+  Closed
+  Loading(target~ : PreviewTarget, request~ : Int)
+  Ready(target~ : PreviewTarget, request~ : Int, content~ : String)
+  Failed(target~ : PreviewTarget, request~ : Int, message~ : String)
+} derive(Eq)
+
+///|
+enum PreviewTarget {
+  Market(MarketItem)
+  Installed(InstalledItem)
 } derive(Eq)
 
 ///|
 /// A page that has never been opened: no catalog, no filter, nothing in
 /// flight.
 pub fn State::empty() -> State {
-  { catalog: Idle, query: "", busy: [], notice: "" }
+  { catalog: Idle, query: "", busy: [], notice: "", preview: Closed }
 }
 
 ///|
@@ -45,6 +60,11 @@ pub(all) enum Msg {
   // a non-empty `error` becomes the page's notice (a success reports the
   // library change to the root instead).
   ActionDone(channel~ : @interop.ChannelId, key~ : String, error~ : String)
+  PreviewMarket(MarketItem)
+  PreviewInstalled(InstalledItem)
+  PreviewLoaded(request~ : Int, target~ : PreviewTarget, content~ : String)
+  PreviewFailed(request~ : Int, target~ : PreviewTarget, message~ : String)
+  ClosePreview
 }
 
 ///|
@@ -59,12 +79,18 @@ pub fn State::opening(
 ) -> (@cmd.Cmd, State) {
   let (cmd, catalog) = match self.catalog {
     Idle | Failed(_) =>
-      (fetch_catalog(emit, input.channel), Loading(channel=input.channel))
+      (
+        fetch_catalog(emit, input.channel),
+        Catalog::Loading(channel=input.channel),
+      )
     Loading(channel~) =>
       if channel == input.channel {
         (@cmd.none, self.catalog)
       } else {
-        (fetch_catalog(emit, input.channel), Loading(channel=input.channel))
+        (
+          fetch_catalog(emit, input.channel),
+          Catalog::Loading(channel=input.channel),
+        )
       }
     current => (@cmd.none, current)
   }
@@ -88,6 +114,43 @@ pub fn State::handle(
 ) -> (@cmd.Cmd, State, Outcome?) {
   match msg {
     QueryChanged(value) => (@cmd.none, { ..self, query: value }, None)
+    PreviewMarket(item) => {
+      let request = preview_request_id(self.preview) + 1
+      (
+        fetch_content(emit, input.channel, request, Market(item)),
+        { ..self, preview: Loading(target=Market(item), request~) },
+        None,
+      )
+    }
+    PreviewInstalled(item) => {
+      let request = preview_request_id(self.preview) + 1
+      (
+        fetch_installed_content(emit, input.channel, request, item),
+        { ..self, preview: Loading(target=Installed(item), request~) },
+        None,
+      )
+    }
+    PreviewLoaded(request~, target~, content~) => {
+      guard self.preview is Loading(request=current, target~) &&
+        current == request &&
+        preview_target_matches(self.preview, target) else {
+        return (@cmd.none, self, None)
+      }
+      (@cmd.none, { ..self, preview: Ready(target~, request~, content~) }, None)
+    }
+    PreviewFailed(request~, target~, message~) => {
+      guard self.preview is Loading(request=current, target~) &&
+        current == request &&
+        preview_target_matches(self.preview, target) else {
+        return (@cmd.none, self, None)
+      }
+      (
+        @cmd.none,
+        { ..self, preview: Failed(target~, request~, message~) },
+        None,
+      )
+    }
+    ClosePreview => (@cmd.none, { ..self, preview: Closed }, None)
     RefreshCatalog =>
       match self.catalog {
         // The rendered button is disabled while loading, and this guard also
@@ -96,7 +159,7 @@ pub fn State::handle(
         _ =>
           (
             fetch_catalog(emit, input.channel),
-            { ..self, catalog: Loading(channel=input.channel) },
+            { ..self, catalog: Catalog::Loading(channel=input.channel) },
             None,
           )
       }
@@ -147,6 +210,23 @@ pub fn State::handle(
         (@cmd.none, { ..self, busy, notice: error }, None)
       }
     }
+  }
+}
+
+///|
+fn preview_request_id(preview : Preview) -> Int {
+  match preview {
+    Closed => 0
+    Loading(request~, ..) | Ready(request~, ..) | Failed(request~, ..) =>
+      request
+  }
+}
+
+///|
+fn preview_target_matches(preview : Preview, target : PreviewTarget) -> Bool {
+  match preview {
+    Loading(target=current, ..) => current == target
+    _ => false
   }
 }
 
