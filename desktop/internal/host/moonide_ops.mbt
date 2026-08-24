@@ -35,8 +35,8 @@ fn MoonIdeQuery::subcommand(self : MoonIdeQuery) -> String {
 
 ///|
 /// The argv handed directly to the process API — never a shell string. `path`
-/// is relative to the supplied root and keeps ordinary `..` semantics without
-/// acquiring shell interpretation.
+/// keeps the spelling from Moon's package index, including symlinks below the
+/// supplied root, and acquires no shell interpretation.
 fn MoonIdeQuery::args(
   self : MoonIdeQuery,
   path : String,
@@ -90,7 +90,7 @@ async fn resolve_moonide_request(
   {
     lexical_workspace: location.lexical_root,
     physical_workspace: location.physical_root,
-    relative_path: location.physical_relative.0,
+    relative_path: location.relative_path.0,
     line: payload.line,
     column: payload.column,
   }
@@ -213,8 +213,8 @@ fn parse_moonide_range(text : String) -> (Int, Int, Int, Int)? {
 ///|
 /// Normalize one CLI result into an absolute candidate. Current Moon IDE emits
 /// absolute paths, but accepting relative output against the physical cwd is
-/// harmless. This helper deliberately makes no security decision: the owner
-/// follows `realpath` and checks the physical workspace afterwards.
+/// harmless. This deliberately preserves Moon's indexed spelling; a later
+/// projection only replaces the canonical root with the client's root alias.
 fn moonide_result_path(
   physical_workspace : @pathx.Absolute,
   raw : String,
@@ -261,9 +261,9 @@ fn parse_moonide_output(
 }
 
 ///|
-/// Map an in-root canonical result back to the supplied root's lexical
-/// spelling so it stays aligned with existing file models. A result outside
-/// that root keeps its canonical host path.
+/// Map an in-root result back to the supplied root's lexical spelling so it
+/// stays aligned with existing file models. A result outside that root keeps
+/// the normalized path reported by Moon.
 fn moonide_client_path(
   lexical_workspace : @pathx.Absolute,
   physical_workspace : @pathx.Absolute,
@@ -282,21 +282,21 @@ fn moonide_client_path(
 }
 
 ///|
-/// Follow result symlinks and map files beneath the physical root back to its
-/// lexical spelling. Results elsewhere retain their canonical paths;
-/// unreadable or stale paths are dropped, while positions pass through.
-async fn canonical_moonide_locations(
+/// Preserve Moon's indexed file spelling while replacing a canonical root with
+/// the lexical root used by the client. Following a result symlink here would
+/// turn a valid package source into an unrelated external file.
+fn moonide_client_locations(
   reply : MoonIdeLocationsReply,
   lexical_workspace : @pathx.Absolute,
   physical_workspace : @pathx.Absolute,
-) -> MoonIdeLocationsReply {
+) -> MoonIdeLocationsReply raise HostError {
   let locations : Array[MoonIdeLocation] = []
   for location in reply.locations {
-    let canonical = @fs.realpath(location.path) catch {
-      error if @async.is_being_cancelled() => raise error
-      _ => continue
-    }
-    guard moonide_client_path(lexical_workspace, physical_workspace, canonical)
+    guard moonide_client_path(
+        lexical_workspace,
+        physical_workspace,
+        location.path,
+      )
       is Some(path) else {
       continue
     }
@@ -349,7 +349,7 @@ async fn moonide_navigation_op(
   let output = stdout.text() catch {
     _ => raise HostError("moon ide returned non-text output")
   }
-  canonical_moonide_locations(
+  moonide_client_locations(
     parse_moonide_output(output, request.physical_workspace),
     request.lexical_workspace,
     request.physical_workspace,
@@ -450,7 +450,7 @@ test "Moon IDE parser expands valid ranges" {
 }
 
 ///|
-test "physical Moon IDE results keep in-root lexical identity" {
+test "Moon IDE results keep indexed paths and the client's root identity" {
   let lexical = @pathx.Path("/attached/project-link").resolve()
   let physical = @pathx.Path("/private/projects/project").resolve()
   assert_eq(
@@ -467,4 +467,21 @@ test "physical Moon IDE results keep in-root lexical identity" {
     moonide_client_path(lexical, physical, "/private/projects/project"),
     Some("/private/projects/project"),
   )
+  let reply = moonide_client_locations(
+    {
+      locations: [
+        {
+          path: "/private/projects/project/src/link.mbt",
+          start_line: 2,
+          start_column: 3,
+          end_line: 2,
+          end_column: 7,
+        },
+      ],
+    },
+    lexical,
+    physical,
+  )
+  assert_eq(reply.locations.length(), 1)
+  assert_eq(reply.locations[0].path, "/attached/project-link/src/link.mbt")
 }
