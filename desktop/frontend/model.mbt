@@ -1737,13 +1737,15 @@ priv enum Msg {
   // The host's dark-mode preference changed. It updates the palette only while
   // no explicit Light/Dark choice has been saved.
   ColorSchemeChanged(Bool)
-  // A local path in the transcript was clicked. Files and directories in the
-  // conversation checkout stay in the right panel; other existing paths may
-  // use the system opener. Each click spends a generation before the
-  // asynchronous request, so only the newest click may steer the panel.
+  // A local path in the transcript was clicked. Viewer-sized text stays in the
+  // right panel even outside the conversation checkout; checkout directories
+  // stay in its Files tree, and other existing paths may use the system opener.
+  // Each click spends a generation before the asynchronous request, so only
+  // the newest click may steer the panel.
   OpenFile(String)
-  // The host resolved this text file and optional position inside the
-  // checkout. Owner and generation fence replies that arrive after a
+  // The host resolved this text file and optional position. An external target
+  // arrives as an absolute resource path; an internal one stays checkout-
+  // relative. Owner and generation fence replies that arrive after a
   // conversation change or a newer transcript file-link click.
   OpenFileAt(
     owner~ : @interop.ConversationKey,

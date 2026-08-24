@@ -373,11 +373,16 @@ test "open-path replies distinguish system, editor, and directory targets" {
     line: Some(2738),
     column: Some(17),
   })
+  let external : @protocol.OpenPathReply = Editor({
+    path: "/tmp/hello_world.mbt",
+    line: None,
+    column: None,
+  })
   let directory : @protocol.OpenPathReply = Directory({ path: "src" })
   let refused : @protocol.OpenPathReply = Refused(
     "File does not exist: nope.mbt",
   )
-  for reply in [system, ordinary, positioned, directory, refused] {
+  for reply in [system, ordinary, positioned, external, directory, refused] {
     let decoded : @protocol.OpenPathReply = @json.from_json(reply.to_json())
     @debug.assert_eq(decoded, reply)
   }

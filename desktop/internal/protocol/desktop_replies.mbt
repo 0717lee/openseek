@@ -782,7 +782,9 @@ pub impl FromJson for WorktreeCreateResult with fn from_json(json, path) {
 
 ///|
 pub(all) struct OpenPathEditorTarget {
-  // Slash-separated path relative to the conversation's resolved checkout.
+  // Slash-separated checkout-relative path for a file below the checkout, or
+  // an absolute resource path for a text file outside it. The frontend turns
+  // the latter into a relative editor-tab address on the same device.
   path : String
   // Absent for an ordinary file reference; present for a parsed
   // `:line[:column]` or `#Lline` suffix.
@@ -805,17 +807,17 @@ pub(all) struct OpenPathDirectoryTarget {
 /// fields the previous struct used, so older bundled hosts and frontends keep
 /// decoding every reply.
 pub(all) enum OpenPathReply {
-  // The host handed a non-text path (or any path outside the checkout's
-  // built-in text/directory policy) to the system opener.
+  // The host handed a non-text path (or a directory outside the checkout's
+  // built-in Files-tree policy) to the system opener.
   Opened
-  // A viewer-sized UTF-8 file inside the checkout, with optional position.
+  // A viewer-sized UTF-8 file, with optional position.
   Editor(OpenPathEditorTarget)
   // A literal directory inside the conversation checkout, for the built-in
   // Files tree.
   Directory(OpenPathDirectoryTarget)
-  // The open was refused: the user-facing reason (missing path, text file
-  // outside the checkout, opener failure). The frontend shows this message
-  // instead of the bridge's generic `op … failed` text.
+  // The open was refused: the user-facing reason (missing or unsupported path,
+  // opener failure). The frontend shows this message instead of the bridge's
+  // generic `op … failed` text.
   Refused(String)
 } derive(Debug, Eq)
 

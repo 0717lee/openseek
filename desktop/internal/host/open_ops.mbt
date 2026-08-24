@@ -1,7 +1,7 @@
-// Opening a transcript-referenced path: viewer-sized UTF-8 files inside the
-// conversation checkout go to the built-in editor, checkout-local directories
-// go to its Files tree, and other existing paths go to the platform opener.
-// Position suffixes apply only to built-in text files.
+// Opening a transcript-referenced path: viewer-sized UTF-8 files go to the
+// built-in editor, checkout-local directories go to its Files tree, and other
+// existing paths go to the platform opener. Position suffixes apply only to
+// built-in text files.
 
 ///|
 /// Refusals travel inside the reply as `Refused(message)` rather than as a
@@ -35,30 +35,22 @@ async fn open_path_op(payload : OpenPathPayload) -> OpenPathReply {
     guard base is Some(root) else {
       return refusal("This conversation has no working directory")
     }
-    // The built-in editor is checkout-rooted. Return the relative path we
-    // already proved belongs to this exact cwd. Check both the lexical path
-    // and its real target so an in-checkout symlink cannot expose text outside
-    // the checkout through the editor reader.
-    guard @pathx.Path(path).to_absolute() is Some(absolute) &&
-      absolute.relative_to(root~) is Some(relative) &&
-      !relative.is_root() else {
-      return refusal("Text file is outside the conversation checkout: \{path}")
+    guard @pathx.Path(path).to_absolute() is Some(absolute) else {
+      return refusal("Text file is not an absolute host path: \{path}")
     }
-    let real_root_text = @fs.realpath(root.to_string()) catch {
-      error if @async.is_being_cancelled() => raise error
-      error => return refusal("Could not resolve working directory: \{error}")
+    // Keep the lexical spelling for files below the checkout, including a
+    // symlink that points elsewhere. An external file has no checkout-relative
+    // name on every host (notably across Windows drives), so send its absolute
+    // resource path and let the frontend express it relative to the active
+    // resource URI. This address choice does not grant Moon IDE or root-watcher
+    // coverage to the external file.
+    if absolute.relative_to(root~) is Some(relative) && !relative.is_root() {
+      return Editor({ path: relative.0, line, column })
     }
-    let real_path_text = @fs.realpath(path) catch {
-      error if @async.is_being_cancelled() => raise error
-      error => return refusal("Could not resolve file: \{error}")
+    guard absolute.normalize().to_uri_path() is Some(resource_path) else {
+      return refusal("Text file path is not supported by the editor: \{path}")
     }
-    guard @pathx.Path(real_root_text).to_absolute() is Some(real_root) &&
-      @pathx.Path(real_path_text).to_absolute() is Some(real_path) &&
-      real_path.relative_to(root=real_root) is Some(real_relative) &&
-      !real_relative.is_root() else {
-      return refusal("Text file is outside the conversation checkout: \{path}")
-    }
-    return Editor({ path: relative.0, line, column })
+    return Editor({ path: resource_path, line, column })
   }
   guard resolution is SystemPath(system_path) else {
     return refusal("Could not resolve path")
@@ -202,7 +194,7 @@ async test "open_path returns workspace editor positions without a system open" 
 }
 
 ///|
-async test "open_path rejects missing and outside text files" {
+async test "open_path rejects missing files and opens external text" {
   let root = @fs.tmpdir(prefix="openseek-host-open-boundary-")
   let dir = "\{root}/workspace"
   @fs.mkdir(dir)
@@ -222,15 +214,32 @@ async test "open_path rejects missing and outside text files" {
   let outside = "\{root}/outside.txt"
   @fs.write_file(outside, "outside", create_mode=CreateOrTruncate)
   let outside = @fs.realpath(outside)
-  let escaped = open_path_op({
+  let external = open_path_op({
     session: "unused-for-explicit-cwd",
     cwd: Some(cwd),
     path: outside,
   })
-  assert_true(
-    escaped is Refused(message) &&
-    message.has_prefix("Text file is outside the conversation checkout:"),
+  let outside_resource = @pathx.Path(outside)
+    .to_absolute()
+    .unwrap()
+    .normalize()
+    .to_uri_path()
+    .unwrap()
+  assert_eq(
+    external,
+    Editor({ path: outside_resource, line: None, column: None }),
   )
+  // A link keeps its checkout spelling even when its physical target is the
+  // same external file. That spelling is what Moon indexes and what the
+  // editor tab must retain.
+  let link = "\{dir}/linked.txt"
+  @fs.symlink(target=outside, link)
+  let linked = open_path_op({
+    session: "unused-for-explicit-cwd",
+    cwd: Some(cwd),
+    path: "linked.txt",
+  })
+  assert_eq(linked, Editor({ path: "linked.txt", line: None, column: None }))
 }
 
 ///|

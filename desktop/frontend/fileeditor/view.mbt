@@ -377,9 +377,9 @@ pub fn body_view(
     ([] : Array[@html.Html]),
   )
   // Keep the source readable when navigation opens a definition outside the
-  // checkout, but make the missing Moon IDE scope explicit. The element is
-  // always present so toggling it cannot shift or re-key the imperative
-  // Viewer hosts below it.
+  // checkout, but make the missing Moon IDE and root-watcher scopes explicit.
+  // The element is always present so toggling it cannot shift or re-key the
+  // imperative Viewer hosts below it.
   let ide_scope_unavailable = match ctx.active_file {
     Some(path) =>
       match state.docs.get(path) {
@@ -398,7 +398,7 @@ pub fn body_view(
       "ide-scope-notice hidden"
     },
     attrs=@html.Attrs::build().role("status"),
-    "This file is outside the workspace. MoonBit IDE features are unavailable.",
+    "This file is outside the workspace. MoonBit IDE features are unavailable. File watching is also unavailable, so changes on disk will not refresh automatically.",
   )
   @html.div(class="editor-body", [
     @html.div(class="viewer-stack", [

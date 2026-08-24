@@ -25,7 +25,7 @@ test "external MoonBit source keeps the viewer and explains its IDE scope" {
   assert_true(external.contains("class=\"ide-scope-notice\""))
   assert_true(
     external.contains(
-      "This file is outside the workspace. MoonBit IDE features are unavailable.",
+      "This file is outside the workspace. MoonBit IDE features are unavailable. File watching is also unavailable, so changes on disk will not refresh automatically.",
     ),
   )
   assert_true(external.contains("id=\"viewer-host\""))

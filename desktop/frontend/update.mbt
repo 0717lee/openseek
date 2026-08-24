@@ -716,12 +716,11 @@ fn is_steer_receipt(event : @transcript.EngineEvent) -> Bool {
 
 ///|
 /// A chip's raw jump path as the root-relative form the panel and the host's
-/// rooted ops speak. The steady state is the identity: chips
-/// minted since the panel started recording relative names are already
-/// relative. An older envelope can still carry an absolute path; those are
-/// brought back inside against the conversation root, and `None` — an
-/// absolute path outside anything this
-/// conversation knows — means there is nothing the panel could open.
+/// rooted ops speak. The steady state is the identity: chips minted since the
+/// panel started recording relative names are already relative. An absolute
+/// path on the conversation's device is expressed from the conversation root;
+/// `..` segments keep an external file addressable without placing it inside
+/// the workspace's Moon IDE or file-watcher scope.
 fn conversation_relative(
   model : Model,
   conv : Conversation,
@@ -733,9 +732,9 @@ fn conversation_relative(
     return Some(Relative(path))
   }
   if model.conversation_root(conv) is Some(root) &&
-    @resource.relative_to(absolute, root) is Some(rest) &&
-    !rest.is_root() {
-    return Some(rest)
+    @common.ext_uri.relative_path(root, absolute) is Some(rest) &&
+    !rest.is_empty() {
+    return Some(Relative(rest))
   }
   None
 }
@@ -830,9 +829,10 @@ fn reveal_local_directory(
 }
 
 ///|
-/// Bring a path into the workspace shown on screen. Codex file mentions come
+/// Express a path from the workspace shown on screen. Codex file mentions come
 /// from app-server's fuzzy search and are normally already relative; an
-/// absolute value is accepted only inside the selected Codex thread's cwd.
+/// absolute value on the selected thread's device may use `..` to remain
+/// addressable outside its cwd.
 fn Model::active_relative_path(self : Model, path : String) -> @pathx.Relative? {
   if self.screen is Codex {
     guard self.active_checkout() is Some(active) &&
@@ -841,11 +841,11 @@ fn Model::active_relative_path(self : Model, path : String) -> @pathx.Relative? 
       return None
     }
     if @resource.of_path(self.focused, path) is Some(absolute) {
-      guard @resource.relative_to(absolute, workspace) is Some(rest) &&
-        !rest.is_root() else {
+      guard @common.ext_uri.relative_path(workspace, absolute) is Some(rest) &&
+        !rest.is_empty() else {
         return None
       }
-      return Some(rest)
+      return Some(Relative(rest))
     }
     return Some(Relative(path))
   }
@@ -3770,8 +3770,8 @@ fn update_msg(
     }
     OpenFile(path) => {
       // A relative path is taken against the active conversation's projected
-      // checkout root. The host keeps text editor targets inside that root;
-      // non-text paths may still use the system opener.
+      // checkout root. Viewer-sized text may stay in the editor outside that
+      // root; non-text paths may still use the system opener.
       guard model.active_checkout() is Some(active) &&
         active.placement is Some(placement) &&
         placement.checkout_root() is Some(cwd) else {
@@ -14865,6 +14865,30 @@ test "resolved transcript files and directories stay in the right panel" {
   assert_true(file.right_panel_open)
   assert_true(@dock.active_file(file.dock) is Some(Relative("src/main.mbt")))
 
+  let (_, external_pending) = update(
+    dispatch,
+    OpenFile("/tmp/hello_world.mbt"),
+    model,
+  )
+  let (_, external) = update(
+    dispatch,
+    OpenFileAt(
+      owner~,
+      generation=1,
+      path="/tmp/hello_world.mbt",
+      line=None,
+      column=None,
+    ),
+    external_pending,
+  )
+  assert_true(external.right_panel_open)
+  assert_true(
+    @dock.active_file(external.dock) is Some(Relative("../tmp/hello_world.mbt")),
+  )
+  assert_true(
+    external.file_panel.docs.contains(Relative("../tmp/hello_world.mbt")),
+  )
+
   let (_, directory_pending) = update(dispatch, OpenFile("src"), model)
   let directory_msg = OpenDirectoryAt(owner~, generation=1, path="src")
   let (_, directory) = update(dispatch, directory_msg, directory_pending)
@@ -15399,7 +15423,7 @@ test "Codex editor comments use annotation context, not textarea text or OpenSee
 }
 
 ///|
-test "chip jumps relativize legacy absolute paths against the roots" {
+test "chip jumps relativize absolute paths inside and outside the roots" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/work/project")
   // A project conversation uses its project root.
@@ -15467,8 +15491,8 @@ test "chip jumps relativize legacy absolute paths against the roots" {
     model,
   )
   assert_true(@dock.active_file(next.dock) is Some(Relative("src/main.mbt")))
-  // An absolute path outside every root cannot be opened; the panel says so
-  // instead of sending the host a bogus read.
+  // External text remains addressable from the root. Its `..` spelling keeps
+  // the reader on the same device while IDE and watcher scope stay in-root.
   let (_, outside) = update(
     dispatch,
     JumpToLocation(
@@ -15478,8 +15502,10 @@ test "chip jumps relativize legacy absolute paths against the roots" {
     ),
     model,
   )
-  assert_true(outside.dock.active is None)
-  assert_true(outside.file_panel.error is Some(_))
+  assert_true(
+    @dock.active_file(outside.dock) is Some(Relative("../../elsewhere/note.md")),
+  )
+  assert_true(outside.file_panel.error is None)
 }
 
 ///|

@@ -1626,10 +1626,10 @@ fn open_codex_config(
 
 ///|
 /// Ask the host to route a transcript-referenced path. Viewer-sized UTF-8 text
-/// inside the checkout returns an editor target, checkout-local directories
-/// return a Files-tree target, and other existing paths use the system default
-/// app. A relative path is taken against the conversation's working directory.
-/// Missing paths and outside text surface as errors.
+/// returns an editor target even outside the checkout, checkout-local
+/// directories return a Files-tree target, and other existing paths use the
+/// system default app. A relative path is taken against the conversation's
+/// working directory. Missing or unsupported paths surface as errors.
 fn open_file(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
