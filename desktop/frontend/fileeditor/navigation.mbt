@@ -11,25 +11,24 @@
 priv struct NavigationContext {
   owner : @interop.ConversationKey
   root : @common.Uri
-} derive(Eq)
+} derive(Debug, Eq)
 
 ///|
-/// Reconstruct the request root from one file's resource URI and its
-/// root-relative name. URI paths already use slash separators. This is
-/// lexical only; both values came from the same successful read request.
-/// Bring one Viewer model URI back into this editor root. The root is the
-/// exact main checkout, linked worktree, or Codex cwd reconstructed when the
-/// file was read; a model from another host or outside that root is unrelated.
+/// Express one Viewer model URI relative to this editor root. `..` segments
+/// deliberately keep definitions in symlinked or sibling dependencies
+/// addressable; only a URI owned by another host is unrelated.
 fn NavigationContext::relative_path(
   self : NavigationContext,
   absolute : @common.Uri,
 ) -> @pathx.Relative? {
-  guard model_uri_channel(absolute) == Some(self.owner.channel) &&
-    @resource.relative_to(absolute, self.root) is Some(relative) &&
-    !relative.is_root() else {
+  guard model_uri_channel(absolute) == Some(self.owner.channel) else {
     return None
   }
-  Some(relative)
+  guard @common.ext_uri.relative_path(self.root, absolute) is Some(relative) &&
+    !relative.is_empty() else {
+    return None
+  }
+  Some(Relative(relative))
 }
 
 ///|
@@ -62,8 +61,8 @@ fn navigation_context_for_file(
   relative : @pathx.Relative,
 ) -> NavigationContext? {
   let root = match root_hint {
-    Some(root) if @resource.relative_to(absolute, root) == Some(relative) =>
-      Some(root)
+    Some(root) if @resource.belongs_to(root, owner.channel) &&
+      @resource.join_relative(root, relative) == absolute => Some(root)
     _ => navigation_root_from_file(absolute, relative)
   }
   root.map(root => { owner, root })
@@ -269,10 +268,12 @@ fn navigation_text_model_resolver() -> @navigation_api.TextModelResolverHandle {
 }
 
 ///|
-/// Resolve one cross-file Peek model through OpenSeek's existing safe
-/// workspace read. Each request owns one fresh readonly model; the returned
-/// reference disposes it when Viewer's last use of that request ends. No LSP
-/// document cache or development-shell protocol is involved.
+/// Resolve one cross-file Peek model through OpenSeek's existing same-host
+/// file read. The root-relative address may contain `..` for an external
+/// dependency, but URI routing still fixes the request to the owning channel.
+/// Each request owns one fresh readonly model; the returned reference disposes
+/// it when Viewer's last use of that request ends. No LSP document cache or
+/// development-shell protocol is involved.
 async fn resolve_navigation_preview(
   resource : @common.Uri,
   token : @language.CancellationToken,
@@ -281,10 +282,8 @@ async fn resolve_navigation_preview(
     return None
   }
   guard viewer_state.navigation is Some(context) else { return None }
-  guard model_uri_channel(resource) == Some(context.owner.channel) &&
-    model_uri_path(resource) is Some(absolute) &&
-    @resource.relative_to(absolute, context.root) is Some(relative) &&
-    !relative.is_root() else {
+  guard model_uri_path(resource) is Some(absolute) &&
+    context.relative_path(absolute) is Some(relative) else {
     return None
   }
   let file = read_file_snapshot(
@@ -342,7 +341,26 @@ test "navigation root follows resource and workspace-relative paths" {
   assert_true(
     navigation_root_from_file(outside, Relative("lib/main.mbt")) is None,
   )
-  assert_true(context.relative_path(outside) is None)
+  let outside_relative = @pathx.Relative("../../other/src/main.mbt")
+  assert_eq(context.relative_path(outside), Some(outside_relative))
+  assert_eq(@resource.join_relative(root, outside_relative), outside)
+  assert_eq(
+    navigation_context_for_file(
+      context.owner,
+      Some(root),
+      outside,
+      outside_relative,
+    ),
+    Some(context),
+  )
+  guard @resource.of_path(
+      @interop.ChannelId::Remote("device"),
+      "/other/src/main.mbt",
+    )
+    is Some(other_host) else {
+    fail("test cross-host resource was not absolute")
+  }
+  assert_true(context.relative_path(other_host) is None)
 }
 
 ///|
