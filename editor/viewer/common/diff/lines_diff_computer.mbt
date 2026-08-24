@@ -13,7 +13,9 @@ pub(all) struct DocumentDiffOptions {
 /// A complete document diff. `changes` drive decorations, overview markers,
 /// navigation, and alignment. `additional_alignments` affect geometry only;
 /// providers use them for source rows deliberately omitted from the visible
-/// diff, such as ignored comments.
+/// diff, such as ignored comments. `changes` follow VS Code's canonical hunk
+/// invariants: touching rows are grouped, mappings are ordered on both sides,
+/// and consecutive hunks have equal unchanged gaps.
 pub(all) struct DocumentDiff {
   changes : Array[DetailedLineRangeMapping]
   additional_alignments : Array[LineRangeMapping]

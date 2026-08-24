@@ -1,6 +1,6 @@
-// Diff-specific projection into the generic CodeEditorWidget overview-ruler
-// contract. Every range is expressed in modified-model coordinates because
-// the managed ruler and pointer navigation both belong to that kernel.
+// VS Code renders original and modified overview data against their own
+// editor/model coordinates. Keeping the two streams separate avoids inventing
+// a modified-side anchor for deletion-only changes.
 
 ///|
 let diff_overview_removed_color = "var(--vscode-diffEditorOverview-removedForeground, var(--vscode-diffEditor-removedLineBackground, rgba(255, 0, 0, 0.6)))"
@@ -9,46 +9,39 @@ let diff_overview_removed_color = "var(--vscode-diffEditorOverview-removedForegr
 let diff_overview_inserted_color = "var(--vscode-diffEditorOverview-insertedForeground, var(--vscode-diffEditor-insertedLineBackground, rgba(155, 185, 85, 0.6)))"
 
 ///|
-fn modified_overview_range(
-  change : @diff.DetailedLineRangeMapping,
-  modified_line_count : Int,
-) -> @base_common.LineRange {
-  if !change.modified.is_empty() {
-    return change.modified
+fn original_diff_overview_ruler_entries(
+  diff_state : DiffState,
+) -> Array[@code_widget.CodeEditorOverviewRulerEntry] {
+  let entries : Array[@code_widget.CodeEditorOverviewRulerEntry] = []
+  for change_index, mapping in diff_state.mappings {
+    let range = mapping.line_range_mapping.original
+    if !range.is_empty() {
+      entries.push({
+        id: change_index,
+        range,
+        color: diff_overview_removed_color,
+        lane: Full,
+      })
+    }
   }
-  // Deletion-only changes have no physical modified line. Give their removed
-  // lane a one-line anchor in the modified document so the generic ruler can
-  // use the same geometry and reveal API as every other entry.
-  let line_count = modified_line_count.max(1)
-  let anchor = change.modified.start_line_number.clamp(min=1, max=line_count)
-  LineRange(anchor, anchor + 1)
+  entries
 }
 
 ///|
-fn diff_overview_ruler_entries(
-  projection : DiffFeatureProjection,
-  modified_line_count : Int,
+fn modified_diff_overview_ruler_entries(
+  diff_state : DiffState,
 ) -> Array[@code_widget.CodeEditorOverviewRulerEntry] {
   let entries : Array[@code_widget.CodeEditorOverviewRulerEntry] = []
-  for entry in projection.original_overview_entries() {
-    match projection.change_at(entry.change_index) {
-      Some(change) =>
-        entries.push({
-          id: entry.change_index,
-          range: modified_overview_range(change, modified_line_count),
-          color: diff_overview_removed_color,
-          lane: Left,
-        })
-      None => ()
+  for change_index, mapping in diff_state.mappings {
+    let range = mapping.line_range_mapping.modified
+    if !range.is_empty() {
+      entries.push({
+        id: change_index,
+        range,
+        color: diff_overview_inserted_color,
+        lane: Full,
+      })
     }
-  }
-  for entry in projection.modified_overview_entries() {
-    entries.push({
-      id: entry.change_index,
-      range: entry.range,
-      color: diff_overview_inserted_color,
-      lane: Right,
-    })
   }
   entries
 }

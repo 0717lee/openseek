@@ -427,6 +427,66 @@ test "validator accepts Core inner anchors on empty hunk sides" {
 }
 
 ///|
+test "ViewModel normalizes full-line inner mappings like VS Code" {
+  let original = @model.TextSnapshot("old\nkeep")
+  let modified = @model.TextSnapshot("new\nkeep")
+  let result : @diff.DocumentDiff = {
+    changes: [
+      DetailedLineRangeMapping(
+        LineRange(1, 2),
+        LineRange(1, 2),
+        Some([RangeMapping(Range(1, 1, 1, 4), Range(1, 1, 1, 4))]),
+      ),
+    ],
+    additional_alignments: [],
+  }
+  let normalized = normalize_document_diff(result, original, modified)
+  guard normalized.changes[0].inner_changes is Some([inner]) else {
+    fail("expected normalized inner mapping")
+  }
+  assert_eq(inner.original, Range(1, 1, 2, 1))
+  assert_eq(inner.modified, Range(1, 1, 2, 1))
+  assert_true(valid_document_diff(normalized, original, modified))
+}
+
+///|
+test "ViewModel rejects touching provider rows that were not grouped" {
+  let original = @model.TextSnapshot("old one\nold two\nkeep")
+  let modified = @model.TextSnapshot("new one\nnew two\nkeep")
+  let fragmented : @diff.DocumentDiff = {
+    changes: [
+      DetailedLineRangeMapping(LineRange(1, 2), LineRange(1, 2), None),
+      DetailedLineRangeMapping(LineRange(2, 3), LineRange(2, 3), None),
+    ],
+    additional_alignments: [],
+  }
+  assert_false(valid_document_diff(fragmented, original, modified))
+  let grouped : @diff.DocumentDiff = {
+    changes: [DetailedLineRangeMapping(LineRange(1, 3), LineRange(1, 3), None)],
+    additional_alignments: [],
+  }
+  assert_true(valid_document_diff(grouped, original, modified))
+}
+
+///|
+test "normalization leaves invalid provider coordinates for validation" {
+  let original = @model.TextSnapshot("old\nkeep")
+  let modified = @model.TextSnapshot("new\nkeep")
+  let invalid : @diff.DocumentDiff = {
+    changes: [
+      DetailedLineRangeMapping(
+        LineRange(1, 2),
+        LineRange(1, 2),
+        Some([RangeMapping(Range(1, 1, 99, 1), Range(1, 1, 99, 1))]),
+      ),
+    ],
+    additional_alignments: [],
+  }
+  let normalized = normalize_document_diff(invalid, original, modified)
+  assert_false(valid_document_diff(normalized, original, modified))
+}
+
+///|
 test "DiffEditorViewModel rejects a result made stale by reentrant provider change" {
   let timer = DiffViewModelFakeTimer::new()
   let provider = FakeDocumentDiffProvider::new(result=OneChange)

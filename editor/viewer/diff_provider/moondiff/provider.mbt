@@ -271,6 +271,69 @@ fn new_only_change(
 }
 
 ///|
+fn line_ranges_intersect_or_touch(
+  left : @base_common.LineRange,
+  right : @base_common.LineRange,
+) -> Bool {
+  left.end_line_number_exclusive >= right.start_line_number &&
+  right.end_line_number_exclusive >= left.start_line_number
+}
+
+///|
+// MoonDiff exposes changed rows. VS Code's renderer consumes grouped
+// DetailedLineRangeMappings, so touching rows must be joined before the
+// provider result crosses that boundary.
+fn append_coalesced_change(
+  changes : Array[@diff.DetailedLineRangeMapping],
+  change : @diff.DetailedLineRangeMapping,
+) -> Unit {
+  if changes.is_empty() {
+    changes.push(change)
+    return
+  }
+  let previous = changes[changes.length() - 1]
+  if !line_ranges_intersect_or_touch(previous.original, change.original) &&
+    !line_ranges_intersect_or_touch(previous.modified, change.modified) {
+    changes.push(change)
+    return
+  }
+  let inner_changes = match (previous.inner_changes, change.inner_changes) {
+    (Some(previous_inner), Some(change_inner)) => {
+      let joined = previous_inner.copy()
+      joined.append(change_inner)
+      Some(joined)
+    }
+    _ => None
+  }
+  changes[changes.length() - 1] = DetailedLineRangeMapping(
+    previous.original.join(change.original),
+    previous.modified.join(change.modified),
+    inner_changes,
+  )
+}
+
+///|
+fn append_coalesced_alignment(
+  alignments : Array[@diff.LineRangeMapping],
+  alignment : @diff.LineRangeMapping,
+) -> Unit {
+  if alignments.is_empty() {
+    alignments.push(alignment)
+    return
+  }
+  let previous = alignments[alignments.length() - 1]
+  if !line_ranges_intersect_or_touch(previous.original, alignment.original) &&
+    !line_ranges_intersect_or_touch(previous.modified, alignment.modified) {
+    alignments.push(alignment)
+    return
+  }
+  alignments[alignments.length() - 1] = LineRangeMapping(
+    previous.original.join(alignment.original),
+    previous.modified.join(alignment.modified),
+  )
+}
+
+///|
 fn append_rows(
   rows : Array[@tokdiff.DiffRow],
   render_changes : Bool,
@@ -291,7 +354,7 @@ fn append_rows(
           return None
         }
         if render_changes {
-          changes.push(paired_change(original, modified))
+          append_coalesced_change(changes, paired_change(original, modified))
         }
         old_cursor += 1
         new_cursor += 1
@@ -302,9 +365,9 @@ fn append_rows(
         }
         let mapping = old_only_change(original, new_cursor)
         if render_changes {
-          changes.push(mapping)
+          append_coalesced_change(changes, mapping)
         } else {
-          alignments.push(mapping.line_mapping())
+          append_coalesced_alignment(alignments, mapping.line_mapping())
         }
         old_cursor += 1
       }
@@ -314,9 +377,9 @@ fn append_rows(
         }
         let mapping = new_only_change(modified, old_cursor)
         if render_changes {
-          changes.push(mapping)
+          append_coalesced_change(changes, mapping)
         } else {
-          alignments.push(mapping.line_mapping())
+          append_coalesced_alignment(alignments, mapping.line_mapping())
         }
         new_cursor += 1
       }

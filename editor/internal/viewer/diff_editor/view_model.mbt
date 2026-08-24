@@ -321,14 +321,82 @@ fn position_le(
 }
 
 ///|
+// Port of VS Code's normalizeRangeMapping. A full-line character mapping is
+// extended through the following newline so decoration and alignment features
+// all observe the same canonical range.
+fn normalize_range_mapping(
+  range_mapping : @diff.RangeMapping,
+  original : @model.TextSnapshot,
+  modified : @model.TextSnapshot,
+) -> @diff.RangeMapping {
+  let original_range = range_mapping.original
+  let modified_range = range_mapping.modified
+  if original_range.end_line_number >= 1 &&
+    original_range.end_line_number <= original.line_count() &&
+    modified_range.end_line_number >= 1 &&
+    modified_range.end_line_number <= modified.line_count() &&
+    original_range.start_column == 1 &&
+    modified_range.start_column == 1 &&
+    (original_range.end_column != 1 || modified_range.end_column != 1) &&
+    original_range.end_column ==
+    original.get_line_max_column(original_range.end_line_number) &&
+    modified_range.end_column ==
+    modified.get_line_max_column(modified_range.end_line_number) &&
+    original_range.end_line_number < original.line_count() &&
+    modified_range.end_line_number < modified.line_count() {
+    @diff.RangeMapping(
+      original_range.set_end_position(original_range.end_line_number + 1, 1),
+      modified_range.set_end_position(modified_range.end_line_number + 1, 1),
+    )
+  } else {
+    range_mapping
+  }
+}
+
+///|
+fn normalize_document_diff(
+  result : @diff.DocumentDiff,
+  original : @model.TextSnapshot,
+  modified : @model.TextSnapshot,
+) -> @diff.DocumentDiff {
+  {
+    changes: result.changes.map(change => {
+      @diff.DetailedLineRangeMapping(
+        change.original,
+        change.modified,
+        change.inner_changes.map(inner_changes => {
+          inner_changes.map(inner => {
+            normalize_range_mapping(inner, original, modified)
+          })
+        }),
+      )
+    }),
+    additional_alignments: result.additional_alignments.copy(),
+  }
+}
+
+///|
 fn line_range_contains_range(
   parent : @base_common.LineRange,
   child : @base_common.Range,
   snapshot : @model.TextSnapshot,
 ) -> Bool {
   if !parent.is_empty() {
-    return child.start_line_number >= parent.start_line_number &&
-      child.end_line_number < parent.end_line_number_exclusive
+    let start_is_inside = child.start_line_number >= parent.start_line_number &&
+      (
+        child.start_line_number < parent.end_line_number_exclusive ||
+        (
+          child.is_empty() &&
+          child.start_line_number == parent.end_line_number_exclusive &&
+          child.start_column == 1
+        )
+      )
+    let end_is_inside = child.end_line_number < parent.end_line_number_exclusive ||
+      (
+        child.end_line_number == parent.end_line_number_exclusive &&
+        child.end_column == 1
+      )
+    return start_is_inside && end_is_inside
   }
   if !child.is_empty() {
     return false
@@ -374,6 +442,79 @@ fn valid_inner_changes(
 }
 
 ///|
+priv struct IndexedValidationAlignment {
+  source_index : Int
+  mapping : @diff.LineRangeMapping
+  is_change : Bool
+}
+
+///|
+fn compare_validation_alignment(
+  left : IndexedValidationAlignment,
+  right : IndexedValidationAlignment,
+) -> Int {
+  if left.mapping.original.start_line_number !=
+    right.mapping.original.start_line_number {
+    return left.mapping.original.start_line_number -
+      right.mapping.original.start_line_number
+  }
+  if left.mapping.modified.start_line_number !=
+    right.mapping.modified.start_line_number {
+    return left.mapping.modified.start_line_number -
+      right.mapping.modified.start_line_number
+  }
+  left.source_index - right.source_index
+}
+
+///|
+fn valid_combined_alignment_sequence(
+  result : @diff.DocumentDiff,
+  original_line_count : Int,
+  modified_line_count : Int,
+) -> Bool {
+  let indexed : Array[IndexedValidationAlignment] = []
+  for change in result.changes {
+    indexed.push({
+      source_index: indexed.length(),
+      mapping: change.line_mapping(),
+      is_change: true,
+    })
+  }
+  for alignment in result.additional_alignments {
+    indexed.push({
+      source_index: indexed.length(),
+      mapping: alignment,
+      is_change: false,
+    })
+  }
+  indexed.sort_by(compare_validation_alignment)
+  if indexed.is_empty() {
+    return original_line_count == modified_line_count
+  }
+  let first = indexed[0].mapping
+  if first.original.start_line_number != first.modified.start_line_number {
+    return false
+  }
+  for index in 1..<indexed.length() {
+    let previous = indexed[index - 1]
+    let current = indexed[index]
+    let original_gap = current.mapping.original.start_line_number -
+      previous.mapping.original.end_line_number_exclusive
+    let modified_gap = current.mapping.modified.start_line_number -
+      previous.mapping.modified.end_line_number_exclusive
+    if original_gap < 0 ||
+      modified_gap < 0 ||
+      original_gap != modified_gap ||
+      (previous.is_change && current.is_change && original_gap == 0) {
+      return false
+    }
+  }
+  let last = indexed[indexed.length() - 1].mapping
+  original_line_count - last.original.end_line_number_exclusive ==
+  modified_line_count - last.modified.end_line_number_exclusive
+}
+
+///|
 fn valid_document_diff(
   result : @diff.DocumentDiff,
   original : @model.TextSnapshot,
@@ -416,7 +557,11 @@ fn valid_document_diff(
     original_end = alignment.original.end_line_number_exclusive
     modified_end = alignment.modified.end_line_number_exclusive
   }
-  true
+  valid_combined_alignment_sequence(
+    result,
+    original.line_count(),
+    modified.line_count(),
+  )
 }
 
 ///|
@@ -452,7 +597,14 @@ fn DiffEditorViewModel::compute_current(self : DiffEditorViewModel) -> Unit {
     return
   }
   match computed {
-    Some(result) if valid_document_diff(result, original, modified) => {
+    Some(result) => {
+      let result = normalize_document_diff(result, original, modified)
+      if !valid_document_diff(result, original, modified) {
+        self.current_diff = None
+        self.state = Failed
+        self.did_update.fire(())
+        return
+      }
       self.current_diff = Some(result)
       self.state = Ready
     }

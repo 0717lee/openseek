@@ -1,39 +1,4 @@
 ///|
-test "reconcile commit uses one generation and fixed synchronous order" {
-  let events : Array[String] = ["document-diff"]
-  let mut original_generation = -1
-  let mut modified_generation = -1
-  let mut overview_generation = -1
-  commit_diff_reconcile_generation(
-    17,
-    () => events.push("decorations"),
-    generation => {
-      original_generation = generation
-      events.push("original-view-zones")
-    },
-    generation => {
-      modified_generation = generation
-      events.push("modified-view-zones")
-    },
-    () => events.push("stable-restore"),
-    generation => {
-      overview_generation = generation
-      events.push("overview-ruler")
-    },
-  )
-  assert_eq(original_generation, 17)
-  assert_eq(modified_generation, 17)
-  assert_eq(overview_generation, 17)
-  assert_true(
-    events ==
-    [
-      "document-diff", "decorations", "original-view-zones", "modified-view-zones",
-      "stable-restore", "overview-ruler",
-    ],
-  )
-}
-
-///|
 test "kernel geometry adapter preserves wrap hidden columns and foreign zones" {
   let geometry = pane_geometry_from_code_editor_parts(
     18.0,
@@ -98,18 +63,4 @@ test "owned-zone-excluded geometry does not self-trigger another reconcile" {
       Some(modified),
     ),
   )
-}
-
-///|
-test "reconcile commit has only the synchronous overview lane after restore" {
-  let mut calls = 0
-  commit_diff_reconcile_generation(
-    3,
-    () => calls += 1,
-    _generation => calls += 1,
-    _generation => calls += 1,
-    () => calls += 1,
-    _generation => calls += 1,
-  )
-  assert_eq(calls, 5)
 }
