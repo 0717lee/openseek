@@ -623,11 +623,18 @@ pub(all) struct ExternalLinkPayload {
 pub(all) struct BrowserOpenPayload {
   id : Int
   url : String
+  dark : Bool
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
 pub(all) struct BrowserIdPayload {
   id : Int
+} derive(Debug, Eq, FromJson, ToJson)
+
+///|
+pub(all) struct BrowserThemePayload {
+  id : Int
+  dark : Bool
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|

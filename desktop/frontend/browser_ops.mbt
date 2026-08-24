@@ -48,8 +48,13 @@ fn[Payload : ToJson] browser_op(
 ///|
 /// Create page `id`'s native view loading `url`. The view starts hidden;
 /// the pane sync shows and places it after the next measurement.
-fn browser_open(dispatch : @cmd.Emit[Msg], id : Int, url : String) -> @cmd.Cmd {
-  browser_op(dispatch, @commands.browser_open, { id, url }, quiet=false)
+fn browser_open(
+  dispatch : @cmd.Emit[Msg],
+  id : Int,
+  url : String,
+  dark : Bool,
+) -> @cmd.Cmd {
+  browser_op(dispatch, @commands.browser_open, { id, url, dark }, quiet=false)
 }
 
 ///|
@@ -57,8 +62,43 @@ fn browser_navigate(
   dispatch : @cmd.Emit[Msg],
   id : Int,
   url : String,
+  dark : Bool,
 ) -> @cmd.Cmd {
-  browser_op(dispatch, @commands.browser_navigate, { id, url }, quiet=false)
+  browser_op(
+    dispatch,
+    @commands.browser_navigate,
+    { id, url, dark },
+    quiet=false,
+  )
+}
+
+///|
+/// Apply the app's effective light/dark choice to one page. Web pages still
+/// own their palettes, so the host expresses this through standard browser
+/// color-scheme hints and theme attributes the page already opted into.
+fn browser_set_theme(
+  dispatch : @cmd.Emit[Msg],
+  id : Int,
+  dark : Bool,
+) -> @cmd.Cmd {
+  browser_op(dispatch, @commands.browser_set_theme, { id, dark }, quiet=true)
+}
+
+///|
+/// Theme every native page, including pages in parked conversation strips.
+/// A page without a URL has no native view yet and is deliberately skipped.
+fn browser_set_theme_for_pages(
+  dispatch : @cmd.Emit[Msg],
+  model : Model,
+  dark : Bool,
+) -> @cmd.Cmd {
+  let commands : Array[@cmd.Cmd] = []
+  for id, page in model.preview.pages {
+    if page.url is Some(_) {
+      commands.push(browser_set_theme(dispatch, id, dark))
+    }
+  }
+  @cmd.batch(commands)
 }
 
 ///|

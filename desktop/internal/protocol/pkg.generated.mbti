@@ -203,12 +203,18 @@ pub fn BrowserIdPayload::to_repr(Self) -> @debug.Repr
 pub(all) struct BrowserOpenPayload {
   id : Int
   url : String
+  dark : Bool
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 pub fn BrowserOpenPayload::equal(Self, Self) -> Bool
 pub fn BrowserOpenPayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
 pub fn BrowserOpenPayload::not_equal(Self, Self) -> Bool
 pub fn BrowserOpenPayload::to_json(Self) -> Json
 pub fn BrowserOpenPayload::to_repr(Self) -> @debug.Repr
+
+pub(all) struct BrowserThemePayload {
+  id : Int
+  dark : Bool
+} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
 
 pub(all) struct BrowserVisiblePayload {
   id : Int
