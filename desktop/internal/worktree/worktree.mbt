@@ -1297,10 +1297,12 @@ async test "failed worktree registry staging preserves every live row" {
     codex_thread: None,
   }
   write_worktrees(root, [retained])
-  // A directory at the candidate path makes the next file write fail before
-  // publication, modeling an interrupted or rejected staging write.
-  let temp = @workspaces.store_root(root).join(WorktreesFile + ".tmp")
-  @fs.mkdir(temp.to_string())
+  // An unwritable store makes the staging file impossible to create,
+  // modeling an interrupted or rejected staging write. A leftover at a
+  // guessable `.tmp` name no longer models it: the save names its temporary
+  // file randomly, precisely so that one crash cannot block every later save.
+  let store = @workspaces.store_root(root).to_string()
+  @fs.chmod(store, 0o555)
   let failed = try {
     write_worktrees(root, [])
     false
@@ -1308,6 +1310,7 @@ async test "failed worktree registry staging preserves every live row" {
     error if @async.is_being_cancelled() => raise error
     _ => true
   }
+  @fs.chmod(store, 0o755)
   assert_true(failed)
   guard read_worktrees_unlocked(root) is [after] else {
     fail("the previous worktree registry must remain readable")
