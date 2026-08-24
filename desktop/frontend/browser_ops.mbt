@@ -12,13 +12,12 @@
 const BrowserPaneId = "browser-pane"
 
 ///|
-/// One bridge-local browser op. Geometry calls (`quiet=true`) fail silently
-/// — they are continuous best-effort placement, and a failure just means
-/// the view is gone or not yet created; the next sync pass reconverges.
-/// Ordered on purpose: Proton may dispatch two fire-and-forget requests
-/// into the host in either order, while browser ops are sequences —
-/// create-then-place, bounds-before-visibility — whose inversion shows on
-/// screen.
+/// One bridge-local native-window op. Geometry calls (`quiet=true`) fail
+/// silently — they are continuous best-effort placement, and a failure just
+/// means the view is gone or not yet created; the next sync pass reconverges.
+/// Ordered on purpose: Proton may dispatch two fire-and-forget requests into
+/// the host in either order, while browser ops are sequences — create-then-
+/// place, bounds-before-visibility — whose inversion shows on screen.
 fn[Payload : ToJson] browser_op(
   dispatch : @cmd.Emit[Msg],
   command : @commands.Command[Payload, @protocol.EmptyReply],
