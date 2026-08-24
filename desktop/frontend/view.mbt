@@ -2011,6 +2011,21 @@ fn app_shell_class(sidebar_open : Bool, native_apple_titlebar : Bool) -> String 
 }
 
 ///|
+/// Whether the root layout should expose its persistent terminal row. Page
+/// navigation never closes terminal state or PTYs, but non-conversation pages
+/// have no active workspace surface to place the panel under.
+fn Model::terminal_panel_visible(self : Model) -> Bool {
+  self.terminal.is_open() &&
+  (
+    self.screen is Chat ||
+    (
+      self.screen is Codex &&
+      self.codex.active_placement(self.focused) is Some(_)
+    )
+  )
+}
+
+///|
 fn view(
   dispatch : @cmd.Emit[Msg],
   toggle_terminal : @cmd.Cmd,
@@ -2037,7 +2052,6 @@ fn view(
     return console_gate_view(dispatch, console)
   }
   let active_file_ctx = file_ctx(model)
-  let codex_active = model.codex.active_placement(model.focused) is Some(_)
   // Panel state survives page switches, but a Codex page only exposes it
   // after a real task supplies the identity (and, for files, a cwd) needed by
   // the host operation. Selecting a task makes an already-open panel reappear
@@ -2051,8 +2065,7 @@ fn view(
         placement.checkout_root() is Some(_)
       )
     )
-  let terminal_panel_visible = model.terminal.is_open() &&
-    (!(model.screen is Codex) || codex_active)
+  let terminal_panel_visible = model.terminal_panel_visible()
   // Pages without their own topbar still paint beneath the native overlay.
   // Mark their main element so the document-level double-click gesture can
   // treat only its otherwise-empty top edge as window chrome.

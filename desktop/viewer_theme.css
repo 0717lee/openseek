@@ -51,11 +51,7 @@
   --vscode-editorLineNumber-foreground: var(--color-text-muted);
   --vscode-editorLineNumber-activeForeground: var(--color-text-secondary);
   --vscode-editorCursor-foreground: var(--color-text-primary);
-  --vscode-editor-selectionBackground: color-mix(
-    in srgb,
-    var(--color-accent) 22%,
-    transparent
-  );
+  --vscode-editor-selectionBackground: var(--color-text-selection);
   --vscode-editor-hoverHighlightBackground: color-mix(
     in srgb,
     var(--color-accent) 12%,
