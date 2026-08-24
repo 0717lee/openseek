@@ -1919,6 +1919,41 @@ fn update_msg(
       }
     CodexComposerAction(action) =>
       match action {
+        @composer.ModelMenuToggled(identity~) => {
+          guard model.screen is Codex &&
+            model.codex.accepts_composer_identity(identity, model.focused) else {
+            return (@cmd.none, model)
+          }
+          update_msg(dispatch, ToggleSelectMenu(CodexModelMenu), model)
+        }
+        @composer.ReasoningMenuToggled(identity~) => {
+          guard model.screen is Codex &&
+            model.codex.accepts_composer_identity(identity, model.focused) else {
+            return (@cmd.none, model)
+          }
+          update_msg(dispatch, ToggleSelectMenu(CodexReasoningMenu), model)
+        }
+        @composer.SelectMenuDismissed(identity~) => {
+          guard model.screen is Codex &&
+            model.codex.accepts_composer_identity(identity, model.focused) else {
+            return (@cmd.none, model)
+          }
+          update_msg(dispatch, CloseSelectMenu, model)
+        }
+        @composer.ModelSelected(identity~, value~) => {
+          guard model.screen is Codex &&
+            model.codex.accepts_composer_identity(identity, model.focused) else {
+            return (@cmd.none, model)
+          }
+          update_msg(dispatch, ModelPicked(value), model)
+        }
+        @composer.ReasoningSelected(identity~, value~) => {
+          guard model.screen is Codex &&
+            model.codex.accepts_composer_identity(identity, model.focused) else {
+            return (@cmd.none, model)
+          }
+          update_msg(dispatch, CodexEffortPicked(value), model)
+        }
         @composer.MentionOpened(identity~, mention~) => {
           guard model.screen is Codex &&
             model.codex.accepts_composer_identity(identity, model.focused) else {
@@ -1961,6 +1996,70 @@ fn update_msg(
       }
     ComposerAction(action) =>
       match action {
+        @composer.ModelMenuToggled(..)
+        | @composer.ReasoningMenuToggled(..)
+        | @composer.SelectMenuDismissed(..)
+        | @composer.ModelSelected(..)
+        | @composer.ReasoningSelected(..)
+        | @composer.ApprovalAnswered(..)
+        | @composer.PermissionMenuToggled(..)
+        | @composer.PermissionMenuDismissed(..)
+        | @composer.PermissionSelected(..)
+        | @composer.GitDetailsToggled(..)
+        | @composer.WorktreeModeToggled(..)
+        | @composer.ApiSetupRequested(..)
+        | @composer.ArchivedInputDismissed(..)
+        | @composer.WorktreePlacementRetried(..)
+        | @composer.MissingWorktreeRebuildRequested(..)
+        | @composer.MissingWorktreeArchiveRequested(..) => {
+          let identity = action.identity()
+          guard model.screen is Chat &&
+            model.conversation_for_composer_action(identity) is Some(conv) &&
+            conv.device == model.focused &&
+            conv.session_id == model.active_session else {
+            return (@cmd.none, model)
+          }
+          match action {
+            @composer.ModelMenuToggled(..) =>
+              update_msg(dispatch, ToggleSelectMenu(OpenSeekModelMenu), model)
+            @composer.ReasoningMenuToggled(..) =>
+              update_msg(
+                dispatch,
+                ToggleSelectMenu(OpenSeekReasoningMenu),
+                model,
+              )
+            @composer.SelectMenuDismissed(..) =>
+              update_msg(dispatch, CloseSelectMenu, model)
+            @composer.ModelSelected(value~, ..) =>
+              update_msg(dispatch, ModelPicked(value), model)
+            @composer.ReasoningSelected(value~, ..) =>
+              update_msg(dispatch, OpenSeekEffortPicked(value), model)
+            @composer.ApprovalAnswered(allow~, ..) =>
+              update_msg(dispatch, ApprovalAnswered(allow~), model)
+            @composer.GitDetailsToggled(..) =>
+              update_msg(dispatch, ToggleGitDetails, model)
+            @composer.WorktreeModeToggled(..) =>
+              update_msg(dispatch, ToggleWorktreeMode, model)
+            @composer.ApiSetupRequested(..) =>
+              update_msg(dispatch, OpenApiSetup, model)
+            @composer.ArchivedInputDismissed(..) =>
+              update_msg(dispatch, DismissArchivedPendingInput, model)
+            @composer.WorktreePlacementRetried(..) =>
+              update_msg(dispatch, RetryWorktreePlacement, model)
+            @composer.MissingWorktreeRebuildRequested(..) =>
+              update_msg(dispatch, RepairWorktree, model)
+            @composer.MissingWorktreeArchiveRequested(..) =>
+              update_msg(
+                dispatch,
+                ArchiveSession(conv.device, conv.session_id),
+                model,
+              )
+            @composer.PermissionMenuToggled(..)
+            | @composer.PermissionMenuDismissed(..)
+            | @composer.PermissionSelected(..) => (@cmd.none, model)
+            _ => (@cmd.none, model)
+          }
+        }
         @composer.DraftSubmitted(identity~, draft~) => {
           guard model.conversation_for_composer_action(identity) is Some(conv) else {
             return (@cmd.none, model)

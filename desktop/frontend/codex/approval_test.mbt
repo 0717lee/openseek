@@ -38,17 +38,23 @@ test "command approval renders facts and advertised decisions" {
     @interop.ChannelId::Local,
     _ => @cmd.none,
   )
-  let input = requested.composer_input(dispatch, {
-    channel: @interop.ChannelId::Local,
-    model_chip: @html.nothing,
-    reasoning_chip: None,
-    file_candidates: [],
-    open_files: [],
-    active_file: None,
-    file_index: @composer.FileIndexReady(epoch=0, truncated=false),
-  })
+  let page = requested.page(
+    dispatch,
+    @interop.ChannelId::Local,
+    false,
+    false,
+    false,
+    {
+      toggle_sidebar: @cmd.none,
+      toggle_terminal: @cmd.none,
+      toggle_files: @cmd.none,
+      workspace_label: workspace => workspace.path,
+      transcript: @html.nothing,
+      composer: @html.nothing,
+    },
+  )
   let markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(@html.div(input.presentation.context))
+    @rabbita.Val::constant(@html.div(page))
   })
   assert_true(markup.contains("Command approval"))
   assert_true(markup.contains("Generate package interface metadata"))
@@ -106,17 +112,23 @@ test "network approval uses its destination instead of a command preview" {
     @interop.ChannelId::Local,
     _ => @cmd.none,
   )
-  let input = requested.composer_input(dispatch, {
-    channel: @interop.ChannelId::Local,
-    model_chip: @html.nothing,
-    reasoning_chip: None,
-    file_candidates: [],
-    open_files: [],
-    active_file: None,
-    file_index: @composer.FileIndexReady(epoch=0, truncated=false),
-  })
+  let page = requested.page(
+    dispatch,
+    @interop.ChannelId::Local,
+    false,
+    false,
+    false,
+    {
+      toggle_sidebar: @cmd.none,
+      toggle_terminal: @cmd.none,
+      toggle_files: @cmd.none,
+      workspace_label: workspace => workspace.path,
+      transcript: @html.nothing,
+      composer: @html.nothing,
+    },
+  )
   let markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(@html.div(input.presentation.context))
+    @rabbita.Val::constant(@html.div(page))
   })
   assert_true(markup.contains("Network access approval"))
   assert_true(markup.contains("Network destination"))

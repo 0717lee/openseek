@@ -6,10 +6,7 @@
 /// The component stays mounted while onboarding is on screen — the root view
 /// simply does not place it — so a model with no conversation projects a
 /// dormant composer rather than inventing one to draft against.
-fn Model::composer_input(
-  self : Model,
-  dispatch : @cmd.Emit[Msg],
-) -> @composer.Input {
+fn Model::composer_input(self : Model) -> @composer.Input {
   guard self.active_conversation() is Some(conv) else {
     return self.dormant_composer_input()
   }
@@ -39,26 +36,37 @@ fn Model::composer_input(
   } else {
     @composer.Send(available=root_ready && conv.compaction is NotCompacting)
   }
-  let status : Array[@html.Html] = [self.openseek_model_chip(dispatch, conv)]
-  if self.openseek_reasoning_chip(dispatch, conv) is Some(chip) {
-    status.push(chip)
+  let status : Array[@composer.StatusComponent] = [
+    @composer.ModelStatus(self.openseek_model_chip(conv)),
+  ]
+  if self.openseek_reasoning_chip(conv) is Some(control) {
+    status.push(@composer.ReasoningStatus(control))
   }
-  if git_chip(dispatch, self, conv) is Some(chip) {
-    status.push(chip)
+  if conv.git_presentation() is Some(presentation) {
+    status.push(
+      @composer.GitStatus({ presentation, open: self.git_details_open }),
+    )
   }
-  if worktree_mode_chip(dispatch, self, conv) is Some(chip) {
-    status.push(chip)
+  if self.worktree_control(conv) is Some(control) {
+    status.push(@composer.WorktreeStatus(control))
   }
-  // The composer owns the stable container and goal row. These root-owned
-  // panels are supplied as one ordered view slot so their internal commands
-  // stay in the application package.
-  let context : Array[@html.Html] = [
-    connection_banner(self),
+  // The composer owns the stable container and every context view. The root
+  // projects only typed state, so no caller-owned DOM or command can alter
+  // the component's child ordering.
+  let context : Array[@composer.ContextComponent] = [
+    @composer.ConnectionBanner(
+      device_name=if self.console is Some(_) &&
+        self.bridge_state() is BridgeLost(_) {
+        Some(self.focused_device_name())
+      } else {
+        None
+      },
+    ),
     // Sub-runs dock here rather than at the transcript's tail: a child turn's
     // progress is live run status that no durable event describes, and the
     // scroller shows only what the record can place. The plan is the mirror
     // image: it is durable, so it stays in the transcript.
-    @subrun.dock(conv.visible_subruns()),
+    @composer.SubrunDock(lanes=conv.visible_subruns()),
   ]
   // The BYOK reminder: readiness is otherwise folded silently into Send's
   // availability, and the top-bar status is owned by the run state — without
@@ -70,91 +78,49 @@ fn Model::composer_input(
     } else {
       "No DeepSeek API key configured — Send is disabled."
     }
-    context.push(
-      @html.div(class="composer-notice", [
-        @html.span(class="composer-notice-text", text),
-        @html.button(
-          class="composer-notice-btn",
-          type_="button",
-          title="Configure the API endpoint",
-          on_click=dispatch(OpenApiSetup),
-          "Set up",
-        ),
-      ]),
-    )
+    context.push(@composer.ApiSetupNotice(text~))
   }
   // First among the notices, because it is the only one the turn is waiting
   // on: everything else here is advice, and this is a question with a tool
   // blocked behind it.
   if conv.pending_approval is Some(pending) {
-    context.push(approval_card(dispatch, pending))
+    context.push(
+      @composer.ApprovalRequest({
+        tool_name: pending.tool_name,
+        detail: pending.detail,
+        body: pending.body,
+        answered: pending.answered,
+      }),
+    )
   }
   // Advice about the draft this composer is now holding, so it belongs to the
   // composer. It stands until the user acts on it: whether the archived record
   // got the prompt is a question only that record answers, and a toast would
   // be gone before they could go and look.
   if conv.archived_pending_input {
-    context.push(
-      @html.div(class="composer-notice", [
-        @html.span(class="composer-notice-text", ArchivedPendingInputNotice),
-        @html.button(
-          class="composer-notice-btn",
-          type_="button",
-          title="Dismiss this notice",
-          on_click=dispatch(DismissArchivedPendingInput),
-          "Got it",
-        ),
-      ]),
-    )
+    context.push(@composer.ArchivedInputNotice(text=ArchivedPendingInputNotice))
   }
   if !conv.pending_steers.is_empty() {
-    context.push(pending_steers_panel(conv))
+    context.push(
+      @composer.PendingSteerPanel(
+        items=conv.pending_steers.map(steer => user_display_text(steer.content)),
+      ),
+    )
   }
   match conv.compaction {
     Requested | Compacting =>
-      context.push(
-        @html.div(class="composer-notice", [
-          @html.span(class="composer-notice-icon", icon(icon_fold)),
-          @html.span(class="composer-notice-text", "Compacting context…"),
-        ]),
-      )
-    Queued =>
-      context.push(
-        @html.div(class="composer-notice", [
-          @html.span(class="composer-notice-icon", icon(icon_fold)),
-          @html.span(
-            class="composer-notice-text",
-            "Compaction queued — starts when the current turn ends",
-          ),
-        ]),
-      )
+      context.push(@composer.CompactionNotice(queued=false))
+    Queued => context.push(@composer.CompactionNotice(queued=true))
     NotCompacting => ()
   }
   match checkout {
-    None =>
-      context.push(
-        @html.div(class="composer-notice", [
-          @html.span(
-            class="composer-notice-text",
-            "Waiting for workspace placement…",
-          ),
-          @html.button(
-            class="composer-notice-btn",
-            type_="button",
-            title="Request this workspace's worktree list again",
-            on_click=dispatch(RetryWorktreePlacement),
-            "Retry",
-          ),
-        ]),
-      )
+    None => context.push(@composer.WorktreePlacementNotice)
     Some(@interop.MissingWorktree(name~, ..)) =>
       context.push(
-        @composer.MissingWorktreeNotice::{
+        @composer.MissingWorktreeNoticeComponent({
           name,
           conversation_noun: "chat",
-          rebuild: dispatch(RepairWorktree),
-          archive: dispatch(ArchiveSession(conv.device, conv.session_id)),
-        }.render(),
+        }),
       )
     Some(_) => ()
   }
@@ -168,9 +134,9 @@ fn Model::composer_input(
   {
     identity,
     draft: { task: conv.task, mentions: conv.mentions },
-    // Sub-run lanes stay in the transcript tail: they are activity *inside*
-    // this turn, and drawing both in one place put the outer run on the same
-    // footing as the children it spawned.
+    // The outer run heartbeat and child-run lanes are both typed live status,
+    // rendered by the composer above the draft rather than persisted into the
+    // transcript.
     run: conv.run_heartbeat(),
     goal: {
       draft: conv.goal_edit.map(edit => edit.draft),
@@ -235,10 +201,7 @@ fn Model::composer_file_index(self : Model) -> @composer.FileIndex {
 ///|
 /// Project the selected Codex task into a second instance of the same
 /// package-owned composer component used by OpenSeek conversations.
-fn Model::codex_composer_input(
-  self : Model,
-  dispatch : @cmd.Emit[Msg],
-) -> @composer.Input {
+fn Model::codex_composer_input(self : Model) -> @composer.Input {
   // The two component instances stay mounted across page switches. Supply
   // workspace-file facts only while Codex owns the visible, resolved checkout
   // so its hidden draft can never offer paths indexed for an OpenSeek chat.
@@ -250,37 +213,32 @@ fn Model::codex_composer_input(
   } else {
     @files.Search([], [], None)
   }
-  self.codex.composer_input(
-    dispatch.map(msg => Codex(channel=self.focused, msg)),
-    {
-      channel: self.focused,
-      // The chip is root-built with the root's own dispatch: a cross-agent
-      // pick on a composing draft leaves the Codex package entirely.
-      model_chip: self.codex_model_chip(dispatch),
-      reasoning_chip: self.codex.reasoning_effort_chip(
-        self.select_menu == Some(CodexReasoningMenu),
-        dispatch(ToggleSelectMenu(CodexReasoningMenu)),
-        dispatch(CloseSelectMenu),
-        dispatch.map(value => CodexEffortPicked(value)),
-      ),
-      file_candidates: search.candidates,
-      open_files: if workspace_ready {
-        self.live_editor_files()
-      } else {
-        []
-      },
-      active_file: if workspace_ready {
-        @dock.active_file(self.dock)
-      } else {
-        None
-      },
-      file_index: if workspace_ready {
-        self.composer_file_index()
-      } else {
-        @composer.FileIndexEmpty(epoch=self.file_panel.request_epoch)
-      },
+  self.codex.composer_input({
+    channel: self.focused,
+    // The model state is root-built because a cross-agent pick on a
+    // composing draft leaves the Codex package entirely. The resulting
+    // action still returns through the shared composer's typed route.
+    model_control: self.codex_model_chip(),
+    reasoning_control: self.codex.reasoning_effort_chip(
+      self.select_menu == Some(CodexReasoningMenu),
+    ),
+    file_candidates: search.candidates,
+    open_files: if workspace_ready {
+      self.live_editor_files()
+    } else {
+      []
     },
-  )
+    active_file: if workspace_ready {
+      @dock.active_file(self.dock)
+    } else {
+      None
+    },
+    file_index: if workspace_ready {
+      self.composer_file_index()
+    } else {
+      @composer.FileIndexEmpty(epoch=self.file_panel.request_epoch)
+    },
+  })
 }
 
 ///|

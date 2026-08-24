@@ -615,103 +615,6 @@ fn Model::sidebar_component_input(self : Model) -> @sidebar.Input {
 }
 
 ///|
-/// Steering input the engine has not settled yet, shown as a panel docked
-/// above the composer: the submission is acknowledged immediately, but it
-/// only joins the transcript when the engine folds it into the turn
-/// (`steer_applied` commits it as a real user message).
-fn pending_steers_panel(conv : Conversation) -> @html.Html {
-  let rows : Array[@html.Html] = []
-  for steer in conv.pending_steers {
-    let shown = user_display_text(steer.content)
-    rows.push(
-      @html.div(class="pending-steer-row", title=shown, [
-        @html.span(class="pending-steer-icon", "⤷"),
-        @html.span(class="pending-steer-text", shown),
-        @html.span(class="pending-steer-state", "steering…"),
-      ]),
-    )
-  }
-  @html.div(class="pending-steers", rows)
-}
-
-///|
-/// The permission question the engine is blocked on, docked above the
-/// composer.
-///
-/// The program is shown here rather than left to the transcript: this card is
-/// detached from a tool-call row that is collapsed by default and may be
-/// scrolled away. `detail` is the engine's sentence, shown verbatim.
-///
-/// Once answered the decisions are replaced by a waiting line, but the card
-/// stays until the engine's settlement retires it — that event is the only
-/// proof the answer reached the blocked tool.
-///
-/// The two decisions are told apart by emphasis, not hue. Refusing is the
-/// conservative answer, so it is deliberately not the red one.
-fn approval_card(
-  dispatch : @cmd.Emit[Msg],
-  pending : PendingApproval,
-) -> @html.Html {
-  let actions : Array[@html.Html] = if pending.answered {
-    [@html.span(class="composer-approval-state", "Sending…")]
-  } else {
-    [
-      @html.button(
-        class="composer-approval-action composer-approval-deny",
-        type_="button",
-        title="Refuse this request; the tool reports the refusal and keeps working inside the sandbox",
-        on_click=dispatch(ApprovalAnswered(allow=false)),
-        "Deny",
-      ),
-      @html.button(
-        class="composer-approval-action composer-approval-allow",
-        type_="button",
-        title="Allow this one run; nothing beyond it is granted",
-        on_click=dispatch(ApprovalAnswered(allow=true)),
-        "Allow once",
-      ),
-    ]
-  }
-  let question = @html.div(
-    class="composer-approval-question",
-    [
-      @html.span(class="composer-notice-icon", icon(icon_key)),
-      @html.span(class="composer-notice-text", [
-        // A tool name is code, so it is a `code` element and picks up the
-        // monospace stack from `base.css` — not a bare span styled to look
-        // like one. No `inline-code` pill: that draws a subtle-on-subtle box
-        // that vanishes against this card's own background.
-        @html.code(class="composer-approval-tool", pending.tool_name),
-        @html.span(" wants to \{pending.detail}"),
-      ]),
-      ..actions,
-    ],
-  )
-  // The program itself, under the question. `detail` names the permission;
-  // this is what the permission would be spent on, and deciding without it is
-  // not deciding. It is the exact string the call was made with, so what is
-  // approved and what runs cannot differ.
-  guard pending.body is Some(body) else {
-    return @html.div(class="composer-notice composer-approval", [question])
-  }
-  @html.div(class="composer-notice composer-approval composer-approval-full", [
-    question,
-    // Highlighted with the same helper the transcript's `mbtx` card
-    // uses, so the program a reader approves here and the program they see
-    // recorded there are rendered identically. The class is on the theme
-    // bridge in `viewer_theme.css`, which is where the highlighter's
-    // `--vscode-token-*` colours come from.
-    //
-    // Never truncated. The transcript trims a long program because it is
-    // reading material; this is the subject of a permission prompt, and
-    // hiding part of what someone is about to allow defeats the card.
-    @html.pre(class="composer-approval-body", [
-      @syntax_html.moonbit_source_code(body),
-    ]),
-  ])
-}
-
-///|
 /// The one-line display form of a submitted prompt (steer bubbles, sidebar
 /// titles): a submission that carried chips is shown as its typed text plus
 /// `$name`/`#name` markers rather than the raw `<user_mentions>` envelope the
@@ -719,24 +622,6 @@ fn approval_card(
 fn user_display_text(text : String) -> String {
   guard @mention_context.parse(text) is Some(parsed) else { return text }
   parsed.display_text()
-}
-
-///|
-/// The console's connection banner: a permanent first child of the composer's
-/// context row whose class flips visibility. Keeping that row stable preserves
-/// the plan panel's DOM state while the connection changes. Desktop keeps the
-/// full-screen overlay instead and renders this hidden.
-fn connection_banner(model : Model) -> @html.Html {
-  let visible = model.console is Some(_) &&
-    model.bridge_state() is BridgeLost(_)
-  if visible {
-    @html.div(
-      class="composer-banner",
-      "Can't reach \{model.focused_device_name()} — reconnecting…",
-    )
-  } else {
-    @html.div(class="composer-banner hidden", "")
-  }
 }
 
 ///|

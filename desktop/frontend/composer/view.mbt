@@ -2,7 +2,7 @@
 /// The primary action at the right edge of a conversation composer. The caller
 /// decides whether the action sends, steers, or stops; this package
 /// owns the button DOM so those states retain identical geometry.
-pub(all) struct ActionButton {
+priv struct ActionButton {
   id : String
   class_name : String
   title : String
@@ -12,7 +12,7 @@ pub(all) struct ActionButton {
 }
 
 ///|
-pub fn ActionButton::render(self : ActionButton) -> @html.Html {
+fn ActionButton::render(self : ActionButton) -> @html.Html {
   @html.button(
     id=self.id,
     class=self.class_name,
@@ -25,12 +25,33 @@ pub fn ActionButton::render(self : ActionButton) -> @html.Html {
 }
 
 ///|
-/// Composer callers keep their existing names while the shared control owns
-/// the option and group representation used by every custom select.
-pub type ModelOption = @select_control.Option
+/// One option in the composer's model selector. The value remains protocol
+/// data; the label is the text the shared custom menu presents.
+pub(all) struct ModelOption {
+  value : String
+  label : String
+} derive(Eq)
 
 ///|
-pub type ModelGroup = @select_control.Group
+/// One provider's model options. This typed composer state stays comparable
+/// even though the lower-level menu component intentionally has no Eq API.
+pub(all) struct ModelGroup {
+  label : String
+  options : Array[ModelOption]
+} derive(Eq)
+
+///|
+/// Convert at the package boundary; callers never depend on select-control
+/// representation and the composer contract remains plain comparable data.
+fn ModelGroup::select_group(self : ModelGroup) -> @select_control.Group {
+  {
+    label: self.label,
+    options: self.options.map(option => {
+      value: option.value,
+      label: option.label,
+    }),
+  }
+}
 
 ///|
 /// A compact model pill backed by the composer's custom popup.
@@ -40,23 +61,24 @@ pub(all) struct ModelSelect {
   selected : String
   disabled : Bool
   open : Bool
-  toggle : @cmd.Cmd
-  dismiss : @cmd.Cmd
-  change : @cmd.Emit[String]
   title : String
-}
+} derive(Eq)
 
 ///|
-pub fn ModelSelect::render(self : ModelSelect) -> @html.Html {
+fn ModelSelect::render(
+  self : ModelSelect,
+  identity : Identity,
+  action_emit : @cmd.Emit[Action],
+) -> @html.Html {
   @select_control.Control::{
     id: self.id,
-    groups: self.groups,
+    groups: self.groups.map(group => group.select_group()),
     selected: self.selected,
     disabled: self.disabled,
     open: self.open,
-    toggle: self.toggle,
-    dismiss: self.dismiss,
-    change: self.change,
+    toggle: action_emit(ModelMenuToggled(identity~)),
+    dismiss: action_emit(SelectMenuDismissed(identity~)),
+    change: action_emit.map(value => ModelSelected(identity~, value~)),
     title: self.title,
     aria_label: "Model",
     presentation: Composer("✦", false),
@@ -73,23 +95,32 @@ pub(all) struct ReasoningSelect {
   selected : String
   disabled : Bool
   open : Bool
-  toggle : @cmd.Cmd
-  dismiss : @cmd.Cmd
-  change : @cmd.Emit[String]
   title : String
-}
+} derive(Eq)
 
 ///|
-pub fn ReasoningSelect::render(self : ReasoningSelect) -> @html.Html {
+fn ReasoningSelect::render(
+  self : ReasoningSelect,
+  identity : Identity,
+  action_emit : @cmd.Emit[Action],
+) -> @html.Html {
   @select_control.Control::{
     id: self.id,
-    groups: [{ label: "Reasoning effort", options: self.options }],
+    groups: [
+      {
+        label: "Reasoning effort",
+        options: self.options.map(option => {
+          value: option.value,
+          label: option.label,
+        }),
+      },
+    ],
     selected: self.selected,
     disabled: self.disabled,
     open: self.open,
-    toggle: self.toggle,
-    dismiss: self.dismiss,
-    change: self.change,
+    toggle: action_emit(ReasoningMenuToggled(identity~)),
+    dismiss: action_emit(SelectMenuDismissed(identity~)),
+    change: action_emit.map(value => ReasoningSelected(identity~, value~)),
     title: self.title,
     aria_label: "Reasoning effort",
     presentation: Composer("◐", true),
@@ -124,15 +155,17 @@ pub fn WorktreeChoice::wants_fresh(self : WorktreeChoice) -> Bool {
 pub(all) struct WorktreeControl {
   choice : WorktreeChoice
   enabled : Bool
-  command : @cmd.Cmd
-  content : @html.Html
-}
+} derive(Eq)
 
 ///|
 /// Render a Local/Worktree chip. `enabled=false`
 /// keeps the selected mode visible while its first operation is in flight,
 /// but turns it into a statement so a click cannot disagree with that work.
-pub fn WorktreeControl::render(self : WorktreeControl) -> @html.Html {
+fn WorktreeControl::render(
+  self : WorktreeControl,
+  identity : Identity,
+  action_emit : @cmd.Emit[Action],
+) -> @html.Html {
   let (class_name, label, title) = match self.choice {
     LocalCheckout =>
       (
@@ -145,13 +178,13 @@ pub fn WorktreeControl::render(self : WorktreeControl) -> @html.Html {
     BoundWorktree(name) =>
       ("composer-worktree on", name, "This chat runs in worktree \{name}")
   }
-  let body = [self.content, @html.span(label)]
+  let body = [@icons.icon(@icons.icon_worktree), @html.span(label)]
   if self.enabled && !(self.choice is BoundWorktree(_)) {
     @html.button(
       class=class_name,
       type_="button",
       title~,
-      on_click=self.command,
+      on_click=action_emit(WorktreeModeToggled(identity~)),
       body,
     )
   } else {
@@ -166,13 +199,13 @@ pub fn WorktreeControl::render(self : WorktreeControl) -> @html.Html {
 pub(all) struct MissingWorktreeNotice {
   name : String
   conversation_noun : String
-  rebuild : @cmd.Cmd
-  archive : @cmd.Cmd
-}
+} derive(Eq)
 
 ///|
-pub fn MissingWorktreeNotice::render(
+fn MissingWorktreeNotice::render(
   self : MissingWorktreeNotice,
+  identity : Identity,
+  action_emit : @cmd.Emit[Action],
 ) -> @html.Html {
   @html.div(class="composer-notice", [
     @html.span(
@@ -183,17 +216,324 @@ pub fn MissingWorktreeNotice::render(
       class="composer-notice-btn",
       type_="button",
       title="Check the branch out again at .worktrees/\{self.name}",
-      on_click=self.rebuild,
+      on_click=action_emit(MissingWorktreeRebuildRequested(identity~)),
       "Rebuild it",
     ),
     @html.button(
       class="composer-notice-btn",
       type_="button",
       title="Archive this \{self.conversation_noun} without rebuilding its worktree",
-      on_click=self.archive,
+      on_click=action_emit(MissingWorktreeArchiveRequested(identity~)),
       "Archive \{self.conversation_noun}",
     ),
   ])
+}
+
+///|
+/// Render the permission question the engine is blocked on. The root sends
+/// only the verbatim question state; this package owns its DOM and returns an
+/// identity-scoped decision, so arbitrary HTML and commands never cross the
+/// composer boundary.
+fn ApprovalNotice::render(
+  self : ApprovalNotice,
+  identity : Identity,
+  action_emit : @cmd.Emit[Action],
+) -> @html.Html {
+  let actions : Array[@html.Html] = if self.answered {
+    [@html.span(class="composer-approval-state", "Sending…")]
+  } else {
+    [
+      @html.button(
+        class="composer-approval-action composer-approval-deny",
+        type_="button",
+        title="Refuse this request; the tool reports the refusal and keeps working inside the sandbox",
+        on_click=action_emit(ApprovalAnswered(identity~, allow=false)),
+        "Deny",
+      ),
+      @html.button(
+        class="composer-approval-action composer-approval-allow",
+        type_="button",
+        title="Allow this one run; nothing beyond it is granted",
+        on_click=action_emit(ApprovalAnswered(identity~, allow=true)),
+        "Allow once",
+      ),
+    ]
+  }
+  let question = @html.div(
+    class="composer-approval-question",
+    [
+      @html.span(class="composer-notice-icon", @icons.icon(@icons.icon_key)),
+      @html.span(class="composer-notice-text", [
+        // A tool name is code, not a decorative text pill.
+        @html.code(class="composer-approval-tool", self.tool_name),
+        @html.span(" wants to \{self.detail}"),
+      ]),
+      ..actions,
+    ],
+  )
+  if self.body is Some(body) {
+    @html.div(
+      class="composer-notice composer-approval composer-approval-full",
+      [
+        question,
+        // Never truncate the exact program whose one-shot permission is being
+        // decided. The shared syntax renderer keeps it identical to its later
+        // transcript representation.
+        @html.pre(class="composer-approval-body", [
+          @syntax_html.moonbit_source_code(body),
+        ]),
+      ],
+    )
+  } else {
+    @html.div(class="composer-notice composer-approval", [question])
+  }
+}
+
+///|
+/// Render one caller-supplied context state. Keeping this method in the
+/// composer package prevents callers from smuggling arbitrary DOM into the
+/// stable context column. It is public so callers and tests can render the
+/// typed component without reaching through the stateful composer shell.
+pub fn ContextComponent::render(
+  self : ContextComponent,
+  identity : Identity,
+  action_emit : @cmd.Emit[Action],
+) -> @html.Html {
+  match self {
+    ConnectionBanner(device_name~) =>
+      match device_name {
+        Some(name) =>
+          @html.div(
+            class="composer-banner",
+            "Can't reach \{name} — reconnecting…",
+          )
+        None => @html.div(class="composer-banner hidden", "")
+      }
+    SubrunDock(lanes~) => @subrun.dock(lanes)
+    ApiSetupNotice(text~) =>
+      @html.div(class="composer-notice", [
+        @html.span(class="composer-notice-text", text),
+        @html.button(
+          class="composer-notice-btn",
+          type_="button",
+          title="Configure the API endpoint",
+          on_click=action_emit(ApiSetupRequested(identity~)),
+          "Set up",
+        ),
+      ])
+    ApprovalRequest(approval) => approval.render(identity, action_emit)
+    ArchivedInputNotice(text~) =>
+      @html.div(class="composer-notice", [
+        @html.span(class="composer-notice-text", text),
+        @html.button(
+          class="composer-notice-btn",
+          type_="button",
+          title="Dismiss this notice",
+          on_click=action_emit(ArchivedInputDismissed(identity~)),
+          "Got it",
+        ),
+      ])
+    PendingSteerPanel(items~) => {
+      let rows : Array[@html.Html] = []
+      for shown in items {
+        rows.push(
+          @html.div(class="pending-steer-row", title=shown, [
+            @html.span(class="pending-steer-icon", "⤷"),
+            @html.span(class="pending-steer-text", shown),
+            @html.span(class="pending-steer-state", "steering…"),
+          ]),
+        )
+      }
+      @html.div(class="pending-steers", rows)
+    }
+    CompactionNotice(queued~) =>
+      @html.div(class="composer-notice", [
+        @html.span(class="composer-notice-icon", @icons.icon(@icons.icon_fold)),
+        @html.span(
+          class="composer-notice-text",
+          if queued {
+            "Compaction queued — starts when the current turn ends"
+          } else {
+            "Compacting context…"
+          },
+        ),
+      ])
+    WorktreePlacementNotice =>
+      @html.div(class="composer-notice", [
+        @html.span(
+          class="composer-notice-text",
+          "Waiting for workspace placement…",
+        ),
+        @html.button(
+          class="composer-notice-btn",
+          type_="button",
+          title="Request this workspace's worktree list again",
+          on_click=action_emit(WorktreePlacementRetried(identity~)),
+          "Retry",
+        ),
+      ])
+    MissingWorktreeNoticeComponent(notice) =>
+      notice.render(identity, action_emit)
+  }
+}
+
+///|
+fn @protocol.CodexPermissionMode::short_label(
+  self : @protocol.CodexPermissionMode,
+) -> String {
+  match self {
+    @protocol.RequestApproval => "Ask"
+    @protocol.AutoReview => "Approve for me"
+    @protocol.FullAccess => "Full access"
+  }
+}
+
+///|
+fn @protocol.CodexPermissionMode::title(
+  self : @protocol.CodexPermissionMode,
+) -> String {
+  match self {
+    @protocol.RequestApproval => "Request approval"
+    @protocol.AutoReview => "Approve for me"
+    @protocol.FullAccess => "Full access"
+  }
+}
+
+///|
+fn @protocol.CodexPermissionMode::description(
+  self : @protocol.CodexPermissionMode,
+) -> String {
+  match self {
+    @protocol.RequestApproval =>
+      "Always ask before editing outside the workspace or using the internet"
+    @protocol.AutoReview =>
+      "Ask only when the reviewer detects a risky operation"
+    @protocol.FullAccess =>
+      "Unrestricted internet access and access to any file on this computer"
+  }
+}
+
+///|
+fn @protocol.CodexPermissionMode::glyph(
+  self : @protocol.CodexPermissionMode,
+) -> String {
+  match self {
+    @protocol.RequestApproval => "✋"
+    @protocol.AutoReview => ">_"
+    @protocol.FullAccess => "!"
+  }
+}
+
+///|
+fn @protocol.CodexPermissionMode::render_option(
+  self : @protocol.CodexPermissionMode,
+  selected : @protocol.CodexPermissionMode,
+  identity : Identity,
+  action_emit : @cmd.Emit[Action],
+) -> @html.Html {
+  let class_name = if self is @protocol.FullAccess {
+    "codex-permission-option danger"
+  } else {
+    "codex-permission-option"
+  }
+  @html.button(
+    class=if self == selected { class_name + " selected" } else { class_name },
+    type_="button",
+    on_click=action_emit(PermissionSelected(identity~, mode=self)),
+    [
+      @html.span(class="codex-permission-option-glyph", self.glyph()),
+      @html.span(class="codex-permission-copy", [
+        @html.span(class="codex-permission-option-title", self.title()),
+        @html.span(class="codex-permission-option-desc", self.description()),
+      ]),
+      @html.span(
+        class="codex-permission-check",
+        if self == selected {
+          "✓"
+        } else {
+          ""
+        },
+      ),
+    ],
+  )
+}
+
+///|
+fn PermissionControl::render(
+  self : PermissionControl,
+  identity : Identity,
+  action_emit : @cmd.Emit[Action],
+) -> @html.Html {
+  let class_name = if self.mode is @protocol.FullAccess {
+    "codex-permission-control danger"
+  } else {
+    "codex-permission-control"
+  }
+  let children : Array[@html.Html] = [
+    @html.button(
+      class="codex-permission-button",
+      type_="button",
+      disabled=!self.enabled,
+      title=if self.enabled {
+        "Choose how Codex handles approval requests"
+      } else {
+        "Permission mode cannot change while Codex is running"
+      },
+      on_click=action_emit(PermissionMenuToggled(identity~)),
+      [
+        @html.span(class="codex-permission-button-glyph", self.mode.glyph()),
+        @html.span(
+          class="codex-permission-button-label",
+          self.mode.short_label(),
+        ),
+        @html.span(class="codex-permission-chevron", "⌄"),
+      ],
+    ),
+  ]
+  if self.open {
+    children.push(
+      @html.div(
+        class="codex-permission-dismiss",
+        on_click=action_emit(PermissionMenuDismissed(identity~)),
+        ([] : Array[@html.Html]),
+      ),
+    )
+    children.push(
+      @html.div(class="codex-permission-menu", [
+        @html.div(
+          class="codex-permission-menu-title",
+          "How should Codex approve operations?",
+        ),
+        @protocol.RequestApproval.render_option(
+          self.mode,
+          identity,
+          action_emit,
+        ),
+        @protocol.AutoReview.render_option(self.mode, identity, action_emit),
+        @protocol.FullAccess.render_option(self.mode, identity, action_emit),
+      ]),
+    )
+  }
+  @html.div(class=class_name, children)
+}
+
+///|
+fn StatusComponent::render(
+  self : StatusComponent,
+  identity : Identity,
+  action_emit : @cmd.Emit[Action],
+) -> @html.Html {
+  match self {
+    ModelStatus(control) => control.render(identity, action_emit)
+    ReasoningStatus(control) => control.render(identity, action_emit)
+    PermissionStatus(control) => control.render(identity, action_emit)
+    GitStatus(control) =>
+      control.presentation.render(
+        open=control.open,
+        toggle=action_emit(GitDetailsToggled(identity~)),
+      )
+    WorktreeStatus(control) => control.render(identity, action_emit)
+  }
 }
 
 ///|
@@ -243,7 +583,7 @@ pub fn WorktreeArchiveDialog::render(
 ///|
 /// One removable context chip. The caller supplies meaning and commands; this
 /// package owns the exact DOM shape.
-pub(all) struct MentionChip {
+priv struct MentionChip {
   glyph : String
   label : String
   title : String
@@ -252,7 +592,7 @@ pub(all) struct MentionChip {
 }
 
 ///|
-pub fn MentionChip::render(self : MentionChip) -> @html.Html {
+fn MentionChip::render(self : MentionChip) -> @html.Html {
   let glyph = @html.span(class="mention-glyph", self.glyph)
   let label = @html.span(class="mention-label", self.label)
   let body = match self.jump {
@@ -282,11 +622,10 @@ pub fn MentionChip::render(self : MentionChip) -> @html.Html {
 }
 
 ///|
-/// A reusable input composer. The caller owns its draft, completion results,
-/// model control, and commands; this view-only
-/// value owns the textarea, mention tray, toolbar, primary action, stable DOM
-/// order, and all surrounding chrome.
-pub(all) struct View {
+/// The component's final renderer-local view. It owns the textarea, mention
+/// tray, toolbar, primary action, stable DOM order, and surrounding chrome;
+/// callers cannot construct it or pass rendered fragments through it.
+priv struct View {
   before_inner : Array[@html.Html]
   mentions : Array[@html.Html]
   value : String
@@ -300,7 +639,7 @@ pub(all) struct View {
 }
 
 ///|
-pub fn View::render(self : View) -> @html.Html {
+fn View::render(self : View) -> @html.Html {
   let inner : Array[@html.Html] = [
     // Keep the input wrapper and its two children permanently mounted. Rabbita
     // diffs array children by position, so chips appearing must not replace
@@ -417,7 +756,7 @@ fn elapsed_label(span_ms : Double) -> String {
 /// One caller-owned completion row rendered inside the composer popup. The
 /// caller keeps the row's action and payload; this view-only value contains
 /// only its two visible strings.
-pub(all) struct CompletionRow {
+priv struct CompletionRow {
   label : String
   detail : String
 }
@@ -425,7 +764,7 @@ pub(all) struct CompletionRow {
 ///|
 /// A reusable completion popup. `empty` describes a caller-specific
 /// empty/loading state such as "Searching..." or "No files".
-pub(all) struct CompletionView {
+priv struct CompletionView {
   rows : Array[CompletionRow]
   selected : Int
   hint : String
@@ -435,7 +774,7 @@ pub(all) struct CompletionView {
 ///|
 /// Render one completion popup. A row uses `mousedown` so choosing it keeps
 /// focus in the textarea while the owning source updates its draft.
-pub fn CompletionView::render(
+fn CompletionView::render(
   self : CompletionView,
   pick : (Int) -> @cmd.Cmd,
 ) -> @html.Html {
@@ -472,7 +811,7 @@ pub fn CompletionView::render(
 /// Caller-owned commands for a composer's keyboard behavior.
 /// When the menu is open it captures navigation and acceptance; otherwise
 /// Enter follows the ordinary submit rule below.
-pub(all) struct KeyboardActions {
+priv struct KeyboardActions {
   menu_open : Bool
   navigate : (Int) -> @cmd.Cmd
   accept : @cmd.Cmd

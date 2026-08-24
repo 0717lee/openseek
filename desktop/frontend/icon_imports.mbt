@@ -7,7 +7,6 @@ using @icons {
   icon_chat_export,
   icon_close,
   icon_extensions,
-  icon_fold,
   icon_folder,
   icon_key,
   icon_layout,

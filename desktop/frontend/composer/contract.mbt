@@ -80,11 +80,65 @@ pub(all) enum PrimaryAction {
 } derive(Eq, @debug.Debug)
 
 ///|
-/// Root-owned presentation surrounding the editable composer. These are
-/// deliberately view values, not fields retained by the component Model.
+/// The exact permission question currently blocking an OpenSeek tool. This is
+/// plain state: the composer owns its presentation and emits a typed answer.
+pub(all) struct ApprovalNotice {
+  tool_name : String
+  detail : String
+  body : String?
+  answered : Bool
+} derive(Eq)
+
+///|
+/// One typed component in the context column above the editable composer.
+/// Callers provide only canonical state; this package owns the DOM and maps
+/// every interactive affordance back to an identity-scoped `Action`.
+pub(all) enum ContextComponent {
+  ConnectionBanner(device_name~ : String?)
+  SubrunDock(lanes~ : Array[@subrun.Lane])
+  ApiSetupNotice(text~ : String)
+  ApprovalRequest(ApprovalNotice)
+  ArchivedInputNotice(text~ : String)
+  PendingSteerPanel(items~ : Array[String])
+  CompactionNotice(queued~ : Bool)
+  WorktreePlacementNotice
+  MissingWorktreeNoticeComponent(MissingWorktreeNotice)
+} derive(Eq)
+
+///|
+/// The state of one Git control in the composer's status row.
+pub(all) struct GitControl {
+  presentation : GitPresentation
+  open : Bool
+} derive(Eq)
+
+///|
+/// The state of Codex's approval-mode control. Confirmation remains in the
+/// Codex page because it is a page-level modal, while this compact selector
+/// is rendered and operated by the shared composer.
+pub(all) struct PermissionControl {
+  mode : @protocol.CodexPermissionMode
+  open : Bool
+  enabled : Bool
+} derive(Eq)
+
+///|
+/// One typed component in the toolbar's status row. No caller-rendered HTML,
+/// command, or emit callback crosses the shared component boundary.
+pub(all) enum StatusComponent {
+  ModelStatus(ModelSelect)
+  ReasoningStatus(ReasoningSelect)
+  PermissionStatus(PermissionControl)
+  GitStatus(GitControl)
+  WorktreeStatus(WorktreeControl)
+} derive(Eq)
+
+///|
+/// Root-owned presentation surrounding the editable composer. Presentation
+/// state is plain data and is never retained by the component Model.
 pub(all) struct Presentation {
-  context : Array[@html.Html]
-  status : Array[@html.Html]
+  context : Array[ContextComponent]
+  status : Array[StatusComponent]
   placeholder : String
   // A read-only Codex task still renders its transcript and status, but its
   // textarea must not accept edits that can never be submitted.
@@ -165,6 +219,60 @@ pub(all) enum Action {
   GoalSubmitted(identity~ : Identity, draft~ : String, prompt_present~ : Bool)
   StopRequested(identity~ : Identity)
   FileIndexEnsured(identity~ : Identity)
+  ModelMenuToggled(identity~ : Identity)
+  ReasoningMenuToggled(identity~ : Identity)
+  SelectMenuDismissed(identity~ : Identity)
+  ModelSelected(identity~ : Identity, value~ : String)
+  ReasoningSelected(identity~ : Identity, value~ : String)
+  ApprovalAnswered(identity~ : Identity, allow~ : Bool)
+  PermissionMenuToggled(identity~ : Identity)
+  PermissionMenuDismissed(identity~ : Identity)
+  PermissionSelected(
+    identity~ : Identity,
+    mode~ : @protocol.CodexPermissionMode
+  )
+  GitDetailsToggled(identity~ : Identity)
+  WorktreeModeToggled(identity~ : Identity)
+  ApiSetupRequested(identity~ : Identity)
+  ArchivedInputDismissed(identity~ : Identity)
+  WorktreePlacementRetried(identity~ : Identity)
+  MissingWorktreeRebuildRequested(identity~ : Identity)
+  MissingWorktreeArchiveRequested(identity~ : Identity)
+}
+
+///|
+/// Every public operation is scoped to the exact composer entry that emitted
+/// it. Owners validate this identity before interpreting the operation.
+pub fn Action::identity(self : Action) -> Identity {
+  match self {
+    DraftSubmitted(identity~, ..)
+    | DraftPresenceChanged(identity~, ..)
+    | RootMentionRemoved(identity~, ..)
+    | SlashCommand(identity~, ..)
+    | MentionOpened(identity~, ..)
+    | GoalEditStarted(identity~)
+    | GoalCancelled(identity~)
+    | GoalCleared(identity~)
+    | GoalSubmitted(identity~, ..)
+    | StopRequested(identity~)
+    | FileIndexEnsured(identity~)
+    | ModelMenuToggled(identity~)
+    | ReasoningMenuToggled(identity~)
+    | SelectMenuDismissed(identity~)
+    | ModelSelected(identity~, ..)
+    | ReasoningSelected(identity~, ..)
+    | ApprovalAnswered(identity~, ..)
+    | PermissionMenuToggled(identity~)
+    | PermissionMenuDismissed(identity~)
+    | PermissionSelected(identity~, ..)
+    | GitDetailsToggled(identity~)
+    | WorktreeModeToggled(identity~)
+    | ApiSetupRequested(identity~)
+    | ArchivedInputDismissed(identity~)
+    | WorktreePlacementRetried(identity~)
+    | MissingWorktreeRebuildRequested(identity~)
+    | MissingWorktreeArchiveRequested(identity~) => identity
+  }
 }
 
 ///|

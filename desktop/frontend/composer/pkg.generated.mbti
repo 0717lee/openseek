@@ -11,6 +11,7 @@ import {
   "openseek_desktop/frontend/mention_context",
   "openseek_desktop/frontend/pathx",
   "openseek_desktop/frontend/skills",
+  "openseek_desktop/frontend/subrun",
   "openseek_desktop/frontend/transcript",
   "openseek_desktop/internal/protocol",
 }
@@ -33,30 +34,31 @@ pub(all) enum Action {
   GoalSubmitted(identity~ : Identity, draft~ : String, prompt_present~ : Bool)
   StopRequested(identity~ : Identity)
   FileIndexEnsured(identity~ : Identity)
+  ModelSelected(identity~ : Identity, value~ : String)
+  ReasoningSelected(identity~ : Identity, value~ : String)
+  PermissionMenuToggled(identity~ : Identity)
+  PermissionMenuDismissed(identity~ : Identity)
+  PermissionSelected(identity~ : Identity, mode~ : @protocol.CodexPermissionMode)
+  GitDetailsToggled(identity~ : Identity)
+  WorktreeModeToggled(identity~ : Identity)
+  ApiSetupRequested(identity~ : Identity)
+  ArchivedInputDismissed(identity~ : Identity)
+  WorktreePlacementRetried(identity~ : Identity)
+  MissingWorktreeRebuildRequested(identity~ : Identity)
+  MissingWorktreeArchiveRequested(identity~ : Identity)
 }
+pub fn Action::identity(Self) -> Identity
 
-pub(all) struct ActionButton {
-  id : String
-  class_name : String
-  title : String
-  disabled : Bool
-  command : @cmd.Cmd
-  content : @html.Html
-}
-pub fn ActionButton::render(Self) -> @html.Html
-
-pub(all) struct CompletionRow {
-  label : String
-  detail : String
-}
-
-pub(all) struct CompletionView {
-  rows : Array[CompletionRow]
-  selected : Int
-  hint : String
-  empty : String
-}
-pub fn CompletionView::render(Self, (Int) -> @cmd.Cmd) -> @html.Html
+pub(all) enum ContextComponent {
+  ConnectionBanner(device_name~ : String?)
+  SubrunDock(lanes~ : Array[@subrun.Lane])
+  ApiSetupNotice(text~ : String)
+  ArchivedInputNotice(text~ : String)
+  PendingSteerPanel(items~ : Array[String])
+  CompactionNotice(queued~ : Bool)
+  WorktreePlacementNotice
+  MissingWorktreeNoticeComponent(MissingWorktreeNotice)
+} derive(Eq)
 
 pub(all) struct Draft {
   task : String
@@ -90,12 +92,16 @@ pub fn GitChecks::not_equal(Self, Self) -> Bool
 pub fn GitChecks::summary(Self) -> String
 pub fn GitChecks::tone(Self) -> String
 
+pub(all) struct GitControl {
+  presentation : GitPresentation
+  open : Bool
+} derive(Eq)
+
 type GitPresentation derive(Eq)
 pub fn GitPresentation::GitPresentation(branch~ : String, changes? : GitChanges, pull_request? : GitPullRequest, compare_url? : String, missing_pull_request? : String) -> Self
 pub fn GitPresentation::equal(Self, Self) -> Bool
 pub fn GitPresentation::label(Self) -> String
 pub fn GitPresentation::not_equal(Self, Self) -> Bool
-pub fn GitPresentation::render(Self, open~ : Bool, toggle~ : @cmd.Cmd) -> @html.Html
 pub fn GitPresentation::summary(Self) -> String
 pub fn GitPresentation::tone(Self) -> String
 
@@ -150,15 +156,6 @@ pub(all) struct Input {
 pub fn Input::equal(Self, Self) -> Bool
 pub fn Input::not_equal(Self, Self) -> Bool
 
-pub(all) struct KeyboardActions {
-  menu_open : Bool
-  navigate : (Int) -> @cmd.Cmd
-  accept : @cmd.Cmd
-  dismiss : @cmd.Cmd
-  submit : @cmd.Cmd
-  cancel : @cmd.Cmd?
-}
-
 pub(all) struct Mention {
   ref_ : @mention_context.MentionRef
   range : @common.Range?
@@ -166,15 +163,6 @@ pub(all) struct Mention {
 pub fn Mention::equal(Self, Self) -> Bool
 pub fn Mention::not_equal(Self, Self) -> Bool
 pub fn Mention::to_repr(Self) -> @debug.Repr
-
-pub(all) struct MentionChip {
-  glyph : String
-  label : String
-  title : String
-  jump : @cmd.Cmd?
-  remove : (@cmd.Cmd, @html.Html)?
-}
-pub fn MentionChip::render(Self) -> @html.Html
 
 type Menu[T] derive(Eq)
 pub fn[T] Menu::Menu(Array[T], loading~ : Bool, draft_without_token~ : String) -> Self[T]
@@ -187,33 +175,34 @@ pub fn[T] Menu::shifted(Self[T], Int) -> Self[T]
 pub(all) struct MissingWorktreeNotice {
   name : String
   conversation_noun : String
-  rebuild : @cmd.Cmd
-  archive : @cmd.Cmd
-}
-pub fn MissingWorktreeNotice::render(Self) -> @html.Html
+} derive(Eq)
 
 pub(all) struct ModelGroup {
   label : String
   options : Array[ModelOption]
-}
+} derive(Eq)
 
 pub(all) struct ModelOption {
   value : String
   label : String
-}
+} derive(Eq)
 
 pub(all) struct ModelSelect {
   groups : Array[ModelGroup]
   selected : String
   disabled : Bool
-  change : @cmd.Emit[String]
   title : String
-}
-pub fn ModelSelect::render(Self) -> @html.Html
+} derive(Eq)
+
+pub(all) struct PermissionControl {
+  mode : @protocol.CodexPermissionMode
+  open : Bool
+  enabled : Bool
+} derive(Eq)
 
 pub(all) struct Presentation {
-  context : Array[@html.Html]
-  status : Array[@html.Html]
+  context : Array[ContextComponent]
+  status : Array[StatusComponent]
   placeholder : String
   disabled : Bool
   primary_action : PrimaryAction
@@ -233,10 +222,8 @@ pub(all) struct ReasoningSelect {
   options : Array[ModelOption]
   selected : String
   disabled : Bool
-  change : @cmd.Emit[String]
   title : String
-}
-pub fn ReasoningSelect::render(Self) -> @html.Html
+} derive(Eq)
 
 pub(all) struct Replacement {
   archived : @interop.ConversationKey
@@ -276,6 +263,14 @@ pub fn SlashCommand::equal(Self, Self) -> Bool
 pub fn SlashCommand::not_equal(Self, Self) -> Bool
 pub fn SlashCommand::to_repr(Self) -> @debug.Repr
 
+pub(all) enum StatusComponent {
+  ModelStatus(ModelSelect)
+  ReasoningStatus(ReasoningSelect)
+  PermissionStatus(PermissionControl)
+  GitStatus(GitControl)
+  WorktreeStatus(WorktreeControl)
+} derive(Eq)
+
 type Trigger derive(Eq)
 pub fn Trigger::draft_without_token(Self) -> String
 pub fn Trigger::equal(Self, Self) -> Bool
@@ -284,20 +279,6 @@ pub fn Trigger::matches(Self, Array[String]) -> Bool
 pub fn Trigger::not_equal(Self, Self) -> Bool
 pub fn Trigger::parse(String, inline_markers~ : String) -> Self?
 pub fn Trigger::query(Self) -> String
-
-pub(all) struct View {
-  before_inner : Array[@html.Html]
-  mentions : Array[@html.Html]
-  value : String
-  placeholder : String
-  disabled : Bool
-  input : @cmd.Emit[String]
-  keyboard : KeyboardActions
-  status : Array[@html.Html]
-  action : ActionButton
-  overlay : @html.Html?
-}
-pub fn View::render(Self) -> @html.Html
 
 pub(all) struct WorktreeArchiveDialog {
   refusal : @protocol.ArchiveNeedsForceReply
@@ -322,10 +303,7 @@ pub fn WorktreeChoice::wants_fresh(Self) -> Bool
 pub(all) struct WorktreeControl {
   choice : WorktreeChoice
   enabled : Bool
-  command : @cmd.Cmd
-  content : @html.Html
-}
-pub fn WorktreeControl::render(Self) -> @html.Html
+} derive(Eq)
 
 // Type aliases
 

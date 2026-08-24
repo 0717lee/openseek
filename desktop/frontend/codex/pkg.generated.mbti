@@ -31,8 +31,8 @@ pub(all) struct CodexProjectRow {
 
 pub(all) struct ComposerContext {
   channel : @interop.ChannelId
-  model_chip : @html.Html
-  reasoning_chip : @html.Html?
+  model_control : @composer.ModelSelect
+  reasoning_control : @composer.ReasoningSelect?
   file_candidates : Array[@pathx.Relative]
   open_files : Array[@pathx.Relative]
   active_file : @pathx.Relative?
@@ -80,7 +80,7 @@ pub fn State::active_id(Self) -> String?
 pub fn State::active_placement(Self, @interop.ChannelId) -> @interop.CheckoutPlacement?
 pub fn State::archived_sidebar_entries(Self, @interop.ChannelId) -> Array[@section.Entry]
 pub fn State::can_start_thread(Self) -> Bool
-pub fn State::composer_input(Self, @cmd.Emit[Msg], ComposerContext) -> @composer.Input
+pub fn State::composer_input(Self, ComposerContext) -> @composer.Input
 pub fn State::composing_draft(Self) -> Bool
 pub fn State::connection_label(Self) -> String
 pub fn State::draft_text(Self) -> String
@@ -98,7 +98,7 @@ pub fn State::pending_auth_url(Self) -> String?
 pub fn State::project_activation(Self, SidebarContext, String) -> String?
 pub fn State::project_conversations(Self, SidebarContext, String) -> Array[CodexProjectRow]
 pub fn State::project_draft(Self, SidebarContext, String) -> @conversation.Input?
-pub fn State::reasoning_effort_chip(Self, @cmd.Emit[String]) -> @html.Html?
+pub fn State::reasoning_effort_chip(Self) -> @composer.ReasoningSelect?
 pub fn State::refresh(Self, @cmd.Emit[Msg], @interop.ChannelId) -> (@cmd.Cmd, Self)
 pub fn State::sign_in_required(Self) -> Bool
 pub fn State::signed_in(Self) -> Bool

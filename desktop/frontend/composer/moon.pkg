@@ -8,6 +8,7 @@ import {
   "openseek_desktop/frontend/symbols",
   "moonbitlang/core/debug",
   "moonbitlang/editor/base/common",
+  "moonbitlang/editor/viewer/html" @syntax_html,
   "openseek_desktop/frontend/files",
   "openseek_desktop/frontend/icons",
   "openseek_desktop/frontend/labels",
@@ -16,6 +17,7 @@ import {
   "openseek_desktop/frontend/pathx",
   "openseek_desktop/frontend/transcript",
   "openseek_desktop/frontend/skills",
+  "openseek_desktop/frontend/subrun",
   "openseek_desktop/internal/protocol",
 }
 

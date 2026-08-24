@@ -37,10 +37,7 @@ pub fn State::account_label(self : State) -> String {
 pub fn State::reasoning_effort_chip(
   self : State,
   open : Bool,
-  toggle : @cmd.Cmd,
-  dismiss : @cmd.Cmd,
-  change : @cmd.Emit[String],
-) -> @html.Html? {
+) -> @composer.ReasoningSelect? {
   guard self.selected_model_option() is Some(model) &&
     !model.reasoning_efforts.is_empty() else {
     return None
@@ -56,23 +53,18 @@ pub fn State::reasoning_effort_chip(
     .find_first(option => option.value == selected)
     .map(option => option.description)
     .unwrap_or("")
-  Some(
-    @composer.ReasoningSelect::{
-      id: "codex-reasoning-picker",
-      options,
-      selected,
-      disabled: options.length() <= 1,
-      open,
-      toggle,
-      dismiss,
-      change,
-      title: if description.is_empty() {
-        "Reasoning effort: " + selected
-      } else {
-        "Reasoning effort: \{selected} — \{description}"
-      },
-    }.render(),
-  )
+  Some({
+    id: "codex-reasoning-picker",
+    options,
+    selected,
+    disabled: options.length() <= 1,
+    open,
+    title: if description.is_empty() {
+      "Reasoning effort: " + selected
+    } else {
+      "Reasoning effort: \{selected} — \{description}"
+    },
+  })
 }
 
 ///|
@@ -791,6 +783,25 @@ fn CodexGitStatus::presentation(
 }
 
 ///|
+/// Reverse requests are Codex page state, not composer presentation. Keeping
+/// this dedicated component next to the shared composer preserves the visual
+/// placement without reopening an arbitrary-HTML slot in `@composer.Input`.
+fn State::pending_request_component(
+  self : State,
+  dispatch : @cmd.Emit[Msg],
+) -> @html.Html {
+  let pending : Array[@html.Html] = []
+  if self.active_thread() is Some(active) {
+    for request in self.pending_requests {
+      if request.thread_id == active.id {
+        pending.push(request.view(dispatch))
+      }
+    }
+  }
+  @html.div(class="codex-pending", pending)
+}
+
+///|
 /// Shell-owned controls embedded in the Codex topbar. Passing commands keeps
 /// terminal, file-editor, sidebar, and external-link policy in the root shell.
 pub(all) struct PageActions {
@@ -914,7 +925,10 @@ pub fn State::page(
   let page : Array[@html.Html] = [
     @html.div(class="topbar codex-topbar", topbar),
     actions.transcript,
-    actions.composer,
+    @html.div(class="codex-composer-stack", [
+      self.pending_request_component(dispatch),
+      actions.composer,
+    ]),
   ]
   if self.archive_confirm is Some(confirm) {
     page.push(

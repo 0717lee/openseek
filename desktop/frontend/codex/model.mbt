@@ -258,6 +258,31 @@ priv struct CodexPendingRequest {
 } derive(Eq)
 
 ///|
+/// A display-only receipt for input submitted through `turn/steer`.
+///
+/// App-server owns the durable `userMessage` item and its id. This local value
+/// is never inserted into `CodexTurn.items`, never used to retry a request, and
+/// disappears only on a definite request failure or when the corresponding
+/// canonical item is observed under the single-client FIFO rule documented in
+/// `State::with_observed_steer_item`.
+priv struct CodexSteerReceipt {
+  submission_id : Int
+  turn_id : String
+  submitted : @composer.Draft
+  known_user_item_ids : Array[String]
+  delivery : CodexSteerDelivery
+} derive(Eq)
+
+///|
+/// RPC acceptance and transcript durability are separate facts. A successful
+/// `turn/steer` reply advances Sending to Accepted, but only the later
+/// app-server item notification removes the receipt from the display.
+priv enum CodexSteerDelivery {
+  CodexSteerSending
+  CodexSteerAccepted
+} derive(Eq)
+
+///|
 /// The typed operation associated with one app-server reply.
 priv enum CodexReplyKind {
   CodexStatusReply
@@ -550,6 +575,12 @@ struct State {
   // request construction continues to read `draft` and `mentions`, and no
   // retry or history read is derived from this field.
   submitted_first_prompt : @composer.Draft?
+  // Later inputs sent into an in-progress turn get the same immediate visual
+  // receipt as the first prompt. These receipts remain separate from canonical
+  // turn items because app-server does not return the new user item id from
+  // `turn/steer`.
+  pending_steers : Array[CodexSteerReceipt]
+  next_steer_submission_id : Int
   // The shared component advances only after app-server accepts a submission.
   // Failed sends therefore keep the local draft.
   submission_sequence : Int
@@ -593,6 +624,8 @@ pub fn State::State(loading? : Bool = false) -> State {
     draft: "",
     mentions: [],
     submitted_first_prompt: None,
+    pending_steers: [],
+    next_steer_submission_id: 1,
     submission_sequence: 0,
     skills: CodexSkillsEmpty,
     placement: @composer.LocalCheckout,
@@ -1119,6 +1152,7 @@ fn State::select_draft(self : State, id : String, cwd : String) -> State {
     draft: "",
     mentions: [],
     submitted_first_prompt: None,
+    pending_steers: [],
     skills: CodexSkillsEmpty,
     placement: @composer.LocalCheckout,
     archive_confirm: None,
@@ -1630,6 +1664,14 @@ fn State::with_thread_reply(
     } else {
       self.submitted_first_prompt
     },
+    // A selected-history snapshot is authoritative for its visible transcript
+    // and owns none of the previous task's local receipts. Thread creation has
+    // no steer receipts yet and may preserve only the first-prompt preview.
+    pending_steers: if requested_thread is Some(_) {
+      []
+    } else {
+      self.pending_steers
+    },
     git_status: Some({
       thread_id: active.id,
       branch: active.branch,
@@ -1806,6 +1848,11 @@ fn State::without_thread(self : State, thread_id : String) -> State {
       None
     } else {
       self.submitted_first_prompt
+    },
+    pending_steers: if removing_active {
+      []
+    } else {
+      self.pending_steers
     },
     loading: if removing_foreground {
       false
@@ -2598,6 +2645,14 @@ pub fn State::transcript_items(
         if !(transcript_item.kind is @transcript.Reasoning) ||
           !transcript_item.content.is_blank() {
           items.push(transcript_item)
+        }
+      }
+      // A receipt belongs after the canonical items already observed in the
+      // same turn. The app-server User item removes it before the next render,
+      // so this projection never shows both representations of one steer.
+      for receipt in self.pending_steers {
+        if receipt.turn_id == turn.id {
+          items.push(receipt.transcript_item())
         }
       }
       if turn.error is Some(message) {

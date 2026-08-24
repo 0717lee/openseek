@@ -150,6 +150,7 @@ pub fn update(
           draft: "",
           mentions: [],
           submitted_first_prompt: None,
+          pending_steers: [],
           placement: @composer.LocalCheckout,
           foreground: None,
           loading: false,
@@ -187,6 +188,7 @@ pub fn update(
             draft: "",
             mentions: [],
             submitted_first_prompt: None,
+            pending_steers: [],
             notice: "",
           }.begin_foreground(CodexThreadReply(thread_id)),
         )
@@ -422,6 +424,8 @@ pub fn update(
         match kind {
           CodexWorktreeTurnReply(_, worktree) =>
             state.with_created_worktree(worktree).settle_foreground(kind)
+          CodexTurnReply(thread_id) =>
+            state.without_sending_steer(thread_id).settle_foreground(kind)
           _ => state.settle_foreground(kind)
         }
       } else {
@@ -469,7 +473,11 @@ pub fn update(
       (cmd, current)
     }
     Notification(method_~, params~, generation~) => {
-      let mut next = state.with_notification(method_, params, generation)
+      // Receipt reconciliation must inspect the pre-notification item set;
+      // applying the item first would make every new id look like a duplicate.
+      let mut next = state
+        .with_observed_steer_item(method_, params)
+        .with_notification(method_, params, generation)
       if !next.can_choose_permission() {
         next = { ..next, permission_picker: next.permission_picker.close() }
       }
@@ -519,13 +527,18 @@ pub fn update(
 /// while `turn/steer` may return only its id; notifications remain the
 /// authoritative item lifecycle in both cases.
 fn State::with_turn_reply(self : State, value : Json) -> State {
+  let accepted = self.with_accepted_steer(value)
   let next = if value is Object(fields) &&
     fields.get("turn") is Some(turn) &&
     CodexTurn::decode(turn) is Some(turn) &&
-    self.active_thread() is Some(active) {
-    { ..self, selection: CodexStoredTask(active.with_turn(turn)), draft: "" }
+    accepted.active_thread() is Some(active) {
+    {
+      ..accepted,
+      selection: CodexStoredTask(active.with_turn(turn)),
+      draft: "",
+    }
   } else {
-    { ..self, draft: "" }
+    { ..accepted, draft: "" }
   }
   { ..next, mentions: [], submission_sequence: next.submission_sequence + 1 }.with_observed_first_prompt()
 }
@@ -647,6 +660,24 @@ test "Codex project add stays local until the first prompt" {
   assert_true(acknowledged.waiting_for_first_user_item())
   assert_eq(acknowledged.transcript_items().length(), 1)
 
+  // A fast follow-up may steer as soon as the start RPC exposes the running
+  // turn, before the first prompt's canonical User item reaches this client.
+  // FIFO reserves the next unseen User item for that older first-prompt receipt
+  // and must not consume this steer receipt prematurely.
+  let (_, early_steer) = update(
+    dispatch,
+    ComposerAction(
+      @composer.DraftSubmitted(
+        identity=acknowledged.composer_identity(@interop.ChannelId::Local),
+        draft={ task: "steer early", mentions: [] },
+      ),
+    ),
+    acknowledged,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  assert_eq(early_steer.pending_steers.length(), 1)
+
   let (_, observed) = update(
     dispatch,
     Notification(
@@ -662,15 +693,201 @@ test "Codex project add stays local until the first prompt" {
       },
       generation=1,
     ),
-    acknowledged,
+    early_steer,
     @interop.ChannelId::Local,
     open_external,
   )
   assert_false(observed.waiting_for_first_user_item())
   let observed_items = observed.transcript_items()
-  assert_eq(observed_items.length(), 1)
+  assert_eq(observed.pending_steers.length(), 1)
+  assert_eq(observed_items.length(), 2)
   assert_true(observed_items[0].kind is @transcript.User)
   assert_eq(observed_items[0].content, "inspect this")
+  assert_true(observed_items[1].kind is @transcript.User)
+  assert_eq(observed_items[1].content, "steer early")
+
+  let (_, steered) = update(
+    dispatch,
+    Notification(
+      method_="item/started",
+      params={
+        "threadId": "thread-real-1",
+        "turnId": "turn-1",
+        "item": {
+          "id": "user-steer-1",
+          "type": "userMessage",
+          "content": [{ "type": "text", "text": "steer early" }],
+        },
+      },
+      generation=2,
+    ),
+    observed,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  assert_true(steered.pending_steers.is_empty())
+  assert_eq(steered.transcript_items().length(), 2)
+}
+
+///|
+test "Codex steer receipts reconcile duplicate text by item id and FIFO" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let open_external = (_ : String) => @cmd.none
+  let state = {
+    ..State::from_thread_snapshot({
+      "thread": {
+        "id": "thread-1",
+        "turns": [
+          {
+            "id": "turn-1",
+            "status": "inProgress",
+            "items": [
+              {
+                "id": "initial-user",
+                "type": "userMessage",
+                "content": [{ "type": "text", "text": "same text" }],
+              },
+            ],
+          },
+        ],
+      },
+    }),
+    connection: CodexReady,
+  }
+  let submit = ComposerAction(
+    @composer.DraftSubmitted(
+      identity=state.composer_identity(@interop.ChannelId::Local),
+      draft={ task: "same text", mentions: [] },
+    ),
+  )
+  let (_, sending_first) = update(
+    dispatch,
+    submit,
+    state,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  assert_eq(sending_first.pending_steers.length(), 1)
+  assert_eq(sending_first.pending_steers[0].submission_id, 1)
+  assert_true(sending_first.pending_steers[0].delivery is CodexSteerSending)
+  assert_eq(sending_first.transcript_items().length(), 2)
+
+  let (_, accepted_first) = update(
+    dispatch,
+    Reply(kind=CodexTurnReply("thread-1"), value={ "turnId": "turn-1" }),
+    sending_first,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  assert_true(accepted_first.pending_steers[0].delivery is CodexSteerAccepted)
+  let (_, sending_second) = update(
+    dispatch,
+    ComposerAction(
+      @composer.DraftSubmitted(
+        identity=accepted_first.composer_identity(@interop.ChannelId::Local),
+        draft={ task: "same text", mentions: [] },
+      ),
+    ),
+    accepted_first,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  assert_eq(sending_second.pending_steers.length(), 2)
+  assert_eq(sending_second.pending_steers[1].submission_id, 2)
+  assert_eq(sending_second.transcript_items().length(), 3)
+
+  let (_, failed_second) = update(
+    dispatch,
+    Failed(kind=CodexTurnReply("thread-1"), message="steer rejected"),
+    sending_second,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  assert_eq(failed_second.pending_steers.length(), 1)
+  assert_eq(failed_second.pending_steers[0].submission_id, 1)
+  assert_true(failed_second.pending_steers[0].delivery is CodexSteerAccepted)
+  assert_eq(failed_second.draft_text(), "same text")
+
+  let first_started = Notification(
+    method_="item/started",
+    params={
+      "threadId": "thread-1",
+      "turnId": "turn-1",
+      "item": {
+        "id": "steer-user-1",
+        "type": "userMessage",
+        "content": [{ "type": "text", "text": "same text" }],
+      },
+    },
+    generation=1,
+  )
+  let (_, observed_first) = update(
+    dispatch,
+    first_started,
+    sending_second,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  let (_, observed_first_again) = update(
+    dispatch,
+    first_started,
+    sending_second,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  assert_true(observed_first == observed_first_again)
+  assert_eq(observed_first.pending_steers.length(), 1)
+  assert_eq(observed_first.pending_steers[0].submission_id, 2)
+  assert_eq(observed_first.transcript_items().length(), 3)
+
+  // `item/completed` repeats the same canonical id after `item/started`; it
+  // updates that item and must not consume the second identical local receipt.
+  let (_, completed_first) = update(
+    dispatch,
+    Notification(
+      method_="item/completed",
+      params={
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "item": {
+          "id": "steer-user-1",
+          "type": "userMessage",
+          "content": [{ "type": "text", "text": "same text" }],
+        },
+      },
+      generation=2,
+    ),
+    observed_first,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  assert_eq(completed_first.pending_steers.length(), 1)
+  assert_eq(completed_first.pending_steers[0].submission_id, 2)
+
+  let (_, observed_second) = update(
+    dispatch,
+    Notification(
+      method_="item/started",
+      params={
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "item": {
+          "id": "steer-user-2",
+          "type": "userMessage",
+          "content": [{ "type": "text", "text": "same text" }],
+        },
+      },
+      generation=3,
+    ),
+    completed_first,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  assert_true(observed_second.pending_steers.is_empty())
+  let items = observed_second.transcript_items()
+  assert_eq(items.length(), 3)
+  assert_true(items.iter().all(item => item.kind is @transcript.User))
+  assert_true(items.iter().all(item => item.content == "same text"))
 }
 
 ///|
