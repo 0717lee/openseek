@@ -853,7 +853,7 @@ test "user message URLs are clickable but inline code stays inert" {
 
 ///|
 #warnings("-alert_unstable")
-test "a tool row renders recorded arguments before its result" {
+test "an ordinary tool tabs readable arguments, the recording, and its result" {
   let rendered = tool_call_view({
     kind: Tool(
       call_id="c1",
@@ -868,13 +868,15 @@ test "a tool row renders recorded arguments before its result" {
     sequence: None,
   })
   let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
-  guard markup.split_once("Arguments") is Some((_, after_arguments)) else {
-    fail("expected an arguments section")
-  }
-  assert_true(after_arguments.contains("cmd"))
-  assert_true(after_arguments.contains("moon test"))
-  assert_true(after_arguments.contains("Output"))
+  assert_true(markup.contains("class=\"tool-call-tabs\""))
+  assert_eq(markup.split("class=\"tool-call-tab-input\"").length(), 4)
+  assert_true(markup.contains(">Arguments</label>"))
+  assert_true(markup.contains(">Original JSON</label>"))
+  assert_true(markup.contains(">Output</label>"))
+  assert_true(markup.contains("cmd"))
+  assert_true(markup.contains("moon test"))
   assert_true(markup.contains("test failed"))
+  assert_false(markup.contains("tool-call-section-label\">Output"))
   assert_true(markup.contains("<details class=\"tool-call error\" open>"))
 }
 
@@ -897,6 +899,10 @@ test "JSON tool arguments render as readable fields with the original preserved"
     sequence: None,
   })
   let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  assert_true(markup.contains("class=\"tool-call-tabs\""))
+  assert_eq(markup.split("class=\"tool-call-tab-input\"").length(), 3)
+  assert_true(markup.contains(">Arguments</label>"))
+  assert_true(markup.contains(">Original JSON</label>"))
   assert_true(markup.contains("class=\"tool-call-arguments-friendly\""))
   assert_true(markup.contains("class=\"tool-argument-key\">path</span>"))
   assert_true(
@@ -940,6 +946,10 @@ test "nested JSON arguments retain their object and array hierarchy" {
     sequence: None,
   })
   let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  assert_true(markup.contains("class=\"tool-call-tabs\""))
+  assert_eq(markup.split("class=\"tool-call-tab-input\"").length(), 3)
+  assert_true(markup.contains(">Arguments</label>"))
+  assert_true(markup.contains(">Original JSON</label>"))
   assert_true(markup.contains("class=\"tool-argument-object\""))
   assert_true(markup.contains("class=\"tool-argument-array\""))
   assert_eq(markup.split("class=\"tool-argument-item\"").length(), 3)
@@ -975,6 +985,7 @@ test "non-object and malformed arguments keep the preformatted fallback" {
     assert_true(markup.contains("<pre class=\"tool-call-arguments\">"))
     assert_false(markup.contains("tool-call-arguments-friendly"))
     assert_false(markup.contains("Original JSON"))
+    assert_false(markup.contains("tool-call-tabs"))
   }
 }
 
@@ -1002,6 +1013,12 @@ test "a MoonBit read highlights source without coloring its gutter or footer" {
     sequence: None,
   })
   let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  assert_true(markup.contains("class=\"tool-call-tabs\""))
+  assert_eq(markup.split("class=\"tool-call-tab-input\"").length(), 5)
+  assert_true(markup.contains(">Arguments</label>"))
+  assert_true(markup.contains(">Original JSON</label>"))
+  assert_true(markup.contains(">Output</label>"))
+  assert_true(markup.contains(">Original output</label>"))
   assert_true(markup.contains("read-moonbit-output"))
   assert_true(markup.contains("class=\"read-moonbit-gutter\">1</span>"))
   assert_true(markup.contains("<span class=\"mtk3\">let</span>"))
@@ -1010,6 +1027,7 @@ test "a MoonBit read highlights source without coloring its gutter or footer" {
   assert_false(markup.contains("lines skipped"))
   assert_true(markup.contains("Original output"))
   assert_true(markup.contains("1 |let value_0 = 0"))
+  assert_false(markup.contains("<details class=\"tool-card-original\""))
 }
 
 ///|
@@ -1033,6 +1051,7 @@ test "a plan row renders its checklist instead of the arguments JSON" {
   assert_true(markup.contains("plan-steps"))
   assert_true(markup.contains("plan-progress-count\">0/2"))
   assert_false(markup.contains("Arguments"))
+  assert_false(markup.contains("tool-call-tabs"))
   // A call the tool rejected keeps the raw payload: what the model actually
   // sent is the point, and a checklist would report a plan that never applied.
   let failed = tool_call_view({

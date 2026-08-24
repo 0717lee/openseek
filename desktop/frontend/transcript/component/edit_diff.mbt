@@ -12,7 +12,7 @@
 // what the tool wrote to the file. Whether the edit applied at all is the
 // paired result — a rejected call still renders, because the change it asked
 // for is what a reader is trying to see. The recorded payload stays a click
-// away under the shared Original JSON disclosure.
+// away in the shared Original JSON tab.
 
 ///|
 /// One edit's rendering: the chips that anchor it and the diff it describes.
@@ -36,11 +36,7 @@ fn edit_card(arguments : String) -> @html.Html? {
   guard card_fields(arguments) is Some(fields) else { return None }
   guard decode_edit(fields, path_key="path") is Some(edit) else { return None }
   Some(
-    @html.div(class="edit-args", [
-      chip_row(edit.chips),
-      diff_block(edit.diff),
-      original_json_view(arguments),
-    ]),
+    @html.div(class="edit-args", [chip_row(edit.chips), diff_block(edit.diff)]),
   )
 }
 
@@ -97,7 +93,6 @@ fn multi_edit_card(arguments : String) -> @html.Html? {
       ),
     )
   }
-  body.push(original_json_view(arguments))
   Some(@html.div(class="edit-args", body))
 }
 

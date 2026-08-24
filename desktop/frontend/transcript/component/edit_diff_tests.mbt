@@ -83,7 +83,7 @@ test "a payload with no readable change decodes to nothing" {
 
 ///|
 #warnings("-alert_unstable")
-test "an edit row reads as a diff, with the payload one disclosure away" {
+test "an edit row tabs its change, payload, and result" {
   let arguments =
     #|{"path":"lib/parser.mbt","start_line":12,"old_string":"args.length()","new_string":"args.len()"}
   let rendered = tool_call_view({
@@ -95,7 +95,7 @@ test "an edit row reads as a diff, with the payload one disclosure away" {
       is_error=false,
       brief=Some("edit lib/parser.mbt"),
     ),
-    content: "",
+    content: "edited 1 occurrence",
     ts: None,
     sequence: None,
   })
@@ -104,14 +104,20 @@ test "an edit row reads as a diff, with the payload one disclosure away" {
   assert_true(markup.contains("diff-del\">- args.length()"))
   assert_true(markup.contains("diff-add\">+ args.len()"))
   assert_true(markup.contains("tool-card-chip\">path: lib/parser.mbt"))
-  assert_true(markup.contains("Original JSON"))
+  assert_true(markup.contains("class=\"tool-call-tabs\""))
+  assert_eq(markup.split("class=\"tool-call-tab-input\"").length(), 4)
+  assert_true(markup.contains(">Change</label>"))
+  assert_true(markup.contains(">Original JSON</label>"))
+  assert_true(markup.contains(">Output</label>"))
+  assert_true(markup.contains("edited 1 occurrence"))
   // The synthesized diff stands in for the arguments dump, not beside it.
   assert_false(markup.contains("tool-call-arguments"))
+  assert_false(markup.contains("tool-call-section-label\">Output"))
 }
 
 ///|
 #warnings("-alert_unstable")
-test "a multi_edit row reads as one anchored diff per edit" {
+test "a multi_edit row tabs its anchored changes, payload, and result" {
   let arguments =
     #|{"edits":[{"file":"a.mbt","start_line":3,"old_string":"one","new_string":"1"},{"file":"b.mbt","start_line":9,"old_string":"two","new_string":"2"}],"revert_when_errors_above":0}
   let rendered = tool_call_view({
@@ -123,7 +129,7 @@ test "a multi_edit row reads as one anchored diff per edit" {
       is_error=false,
       brief=Some("multi_edit 2 edits"),
     ),
-    content: "",
+    content: "applied 2 edits",
     ts: None,
     sequence: None,
   })
@@ -133,6 +139,12 @@ test "a multi_edit row reads as one anchored diff per edit" {
   assert_true(markup.contains("tool-card-chip\">revert_when_errors_above: 0"))
   assert_true(markup.contains("diff-add\">+ 1"))
   assert_true(markup.contains("diff-add\">+ 2"))
+  assert_true(markup.contains("class=\"tool-call-tabs\""))
+  assert_eq(markup.split("class=\"tool-call-tab-input\"").length(), 4)
+  assert_true(markup.contains(">Changes</label>"))
+  assert_true(markup.contains(">Original JSON</label>"))
+  assert_true(markup.contains(">Output</label>"))
+  assert_true(markup.contains("applied 2 edits"))
   assert_false(markup.contains("tool-call-arguments"))
 }
 
@@ -153,9 +165,9 @@ test "a long multi_edit batch states what it did not render" {
   let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(card))
   assert_true(markup.contains("⋯ 3 more edits, in the original ⋯"))
   assert_true(markup.contains("tool-card-chip\">file: f0.mbt"))
-  // Exactly the bound, as entries. The dropped ones are still in the card's
-  // Original JSON — that is where the note says they are — so counting their
-  // file names would count that copy too.
+  // Exactly the bound, as entries. The full tool row places the dropped ones
+  // in its neighboring Original JSON tab; this direct card rendering contains
+  // only the readable change view.
   let entries = [..markup.split("class=\"edit-entry\"")].length() - 1
   assert_eq(entries, MAX_RENDERED_EDITS)
   assert_false(
