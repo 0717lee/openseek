@@ -1811,6 +1811,9 @@ priv enum Msg {
   BrowserForward
   BrowserReload
   BrowserOpenExternal
+  // A double-click on non-interactive top chrome asks the native window to
+  // maximize, or to restore when it is already maximized.
+  AppToggleMaximizedRequested
   // The native Developer menu always inspects the SeekMoon frontend page.
   // Embedded Browser views can receive their own explicit action later.
   AppDeveloperToolsRequested

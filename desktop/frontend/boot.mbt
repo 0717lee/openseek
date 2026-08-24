@@ -404,10 +404,17 @@ pub fn boot() -> Unit {
             ),
           )
         }
-        // Rabbita captures its own `@html.a` nodes. The embedded Viewer owns
-        // foreign DOM below `.viewer-host`, so its anchors need the adjacent
-        // document subscription to reach the same root URL policy.
+        // These gestures address native-window capabilities, so the browser
+        // console must not install them even though it shares the same DOM.
         if model.is_desktop {
+          subs.push(
+            window_titlebar_subscription(
+              emit.map((_ : Unit) => AppToggleMaximizedRequested),
+            ),
+          )
+          // Rabbita captures its own `@html.a` nodes. The embedded Viewer owns
+          // foreign DOM below `.viewer-host`, so its anchors need the adjacent
+          // document subscription to reach the same root URL policy.
           subs.push(
             @sub.on_url_request(
               emit.map(request => {

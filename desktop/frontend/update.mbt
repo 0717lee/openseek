@@ -4405,6 +4405,20 @@ fn update_msg(
       }
       (open_external_link(dispatch, url), model)
     }
+    AppToggleMaximizedRequested =>
+      if model.is_desktop {
+        (
+          browser_op(
+            dispatch,
+            @commands.app_toggle_maximized,
+            @protocol.NoPayload,
+            quiet=false,
+          ),
+          model,
+        )
+      } else {
+        (@cmd.none, model)
+      }
     AppDeveloperToolsRequested =>
       (
         browser_op(

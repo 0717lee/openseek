@@ -649,6 +649,14 @@ pub let app_open_devtools : Command[
 ] = Command("app.open_devtools")
 
 ///|
+/// Toggle this native desktop window between its maximized and restored
+/// bounds. Window-only: a relay browser has no local application window.
+pub let app_toggle_maximized : Command[
+  @protocol.EmptyPayload,
+  @protocol.EmptyReply,
+] = Command("app.toggle_maximized")
+
+///|
 pub let browser_set_bounds : Command[
   @protocol.BrowserBoundsPayload,
   @protocol.EmptyReply,

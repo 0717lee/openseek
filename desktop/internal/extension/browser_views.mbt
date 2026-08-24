@@ -273,6 +273,22 @@ fn BrowserViews::open_app_devtools(
 }
 
 ///|
+/// Match the native titlebar's double-click convention. Reading and applying
+/// the state in one window-side command keeps the frontend from mirroring a
+/// value that can also change through the operating system's window controls.
+fn BrowserViews::toggle_app_maximized(
+  self : BrowserViews,
+) -> @protocol.EmptyReply raise {
+  let window = self.attached_window()
+  if window.state().maximized {
+    window.restore()
+  } else {
+    window.maximize()
+  }
+  Acknowledged
+}
+
+///|
 fn BrowserViews::set_bounds(
   self : BrowserViews,
   payload : @protocol.BrowserBoundsPayload,
@@ -312,12 +328,11 @@ fn BrowserViews::close(
 }
 
 ///|
-/// The dock's browser-tab endpoints, kept beside their handlers so the two
-/// cannot drift. All of them are window-only like `shell.open_external`:
-/// the native web contents views live in this window, so a relay browser
-/// has nothing to command. `browser.navigate` deliberately binds the same
-/// create-if-missing handler as `browser.open`.
-fn browser_endpoints(views : BrowserViews) -> Array[@endpoint.Endpoint] {
+/// The desktop-window endpoints, kept beside the window and native-view
+/// handlers they use. A relay browser owns neither, so none of these commands
+/// enters the shared remote catalog. `browser.navigate` deliberately binds
+/// the same create-if-missing handler as `browser.open`.
+fn window_endpoints(views : BrowserViews) -> Array[@endpoint.Endpoint] {
   [
     @endpoint.Endpoint::window(@commands.browser_open, (_, payload) => {
       views.open(payload)
@@ -340,6 +355,9 @@ fn browser_endpoints(views : BrowserViews) -> Array[@endpoint.Endpoint] {
     @endpoint.Endpoint::window(@commands.app_open_devtools, (_, _) => {
       views.open_app_devtools()
     }),
+    @endpoint.Endpoint::window(@commands.app_toggle_maximized, (_, _) => {
+      views.toggle_app_maximized()
+    }),
     @endpoint.Endpoint::window(@commands.browser_set_bounds, (_, payload) => {
       views.set_bounds(payload)
     }),
@@ -353,11 +371,17 @@ fn browser_endpoints(views : BrowserViews) -> Array[@endpoint.Endpoint] {
 }
 
 ///|
-test "browser ops are absent from the relay method catalog" {
+test "native window ops are absent from the relay method catalog" {
   let state = @api.ApiState::new(engine="unused")
   let connection = @host.HostConnection::new()
   let catalog = @api.endpoints(state, connection)
-  for endpoint in browser_endpoints(BrowserViews::new()) {
+  let window_only = window_endpoints(BrowserViews::new())
+  assert_true(
+    window_only
+    .iter()
+    .any(endpoint => endpoint.name() == @commands.app_toggle_maximized.name()),
+  )
+  for endpoint in window_only {
     let name = endpoint.name()
     assert_false(catalog.iter().any(shared => shared.name() == name))
   }
@@ -379,6 +403,7 @@ test "browser ops refuse to run without a window; close tolerates it" {
   assert_true(raises(() => views.reload({ id: 1 })))
   assert_true(raises(() => views.set_theme({ id: 1, dark: true })))
   assert_true(raises(() => views.open_app_devtools()))
+  assert_true(raises(() => views.toggle_app_maximized()))
   assert_true(
     raises(() => views.set_bounds({ id: 1, x: 0, y: 0, width: 10, height: 10 })),
   )

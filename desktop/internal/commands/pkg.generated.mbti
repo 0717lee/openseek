@@ -29,6 +29,8 @@ pub let app_list : Command[@protocol.EmptyPayload, @protocol.ListAppsReply]
 
 pub let app_open_devtools : Command[@protocol.EmptyPayload, @protocol.EmptyReply]
 
+pub let app_toggle_maximized : Command[@protocol.EmptyPayload, @protocol.EmptyReply]
+
 pub let auth_cancel : Command[@protocol.EmptyPayload, @protocol.AuthStatusPayload]
 
 pub let auth_connect : Command[@protocol.EmptyPayload, @protocol.AuthStatusPayload]

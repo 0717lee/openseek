@@ -314,7 +314,7 @@ pub fn openseek_extension(
       open_external(payload)
     }),
   )
-  for endpoint in browser_endpoints(views) {
+  for endpoint in window_endpoints(views) {
     endpoints.push(endpoint)
   }
   @proton_extension.typed(
