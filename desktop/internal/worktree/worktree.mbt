@@ -1129,6 +1129,17 @@ pub async fn remove(
   if entry.session is Some(bound) {
     (host.drain_sessions)([bound])
   }
+  // Both locks precede the deletion, and in the order `create` takes them.
+  // Acquiring the file lock afterwards meant a sidecar this process may
+  // refuse to open — a symlink or a non-regular file the workspace carries —
+  // raised only once the checkout was already gone, reporting failure while
+  // leaving the registry row behind (and, under `force`, after the
+  // uncommitted work it discarded). The drain stays outside them: it re-enters
+  // the engine, which has registry paths of its own.
+  worktree_registry_lock.acquire()
+  defer worktree_registry_lock.release()
+  let shared = @fsx.FileLock::acquire(worktrees_file(dir).to_path(), Exclusive)
+  defer shared.release()
   let target = worktree_dir(dir, name)
   let present = @fsx.is_dir(target.to_path()) catch {
     error if @async.is_being_cancelled() => raise error
@@ -1148,13 +1159,9 @@ pub async fn remove(
     // The checkout is already gone; drop git's stale bookkeeping for it.
     ignore(@gitx.probe(dir, ["worktree", "prune"]))
   }
-  worktree_registry_lock.acquire()
-  defer worktree_registry_lock.release()
-  let shared = @fsx.FileLock::acquire(worktrees_file(dir).to_path(), Exclusive)
-  defer shared.release()
-  // Re-read: another worktree may have been created while the checkout was
-  // being removed — by this process, which takes only the registry lock for
-  // that, or by another one, which this file lock has just been waiting on.
+  // Re-read: the lookup above ran before the drain and before these locks,
+  // so a create — this process's or another instance's — may have landed a
+  // row since. Nothing can land one from here on: both locks are held.
   let remaining = read_worktrees_unlocked(dir).filter(entry => {
     entry.name != name
   })
