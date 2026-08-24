@@ -52,9 +52,14 @@ fn tool_call_tabs(key : String, tabs : Array[ToolCallTab]) -> @html.Html {
 }
 
 ///|
-/// Stable radio group identity for one recorded call. Durable items have a
-/// sequence; transient/test items fall back to the call id's stable hash.
+/// Stable radio group identity for one recorded call. The call id takes
+/// priority because one durable assistant event can emit several calls that
+/// all share its sequence. Legacy calls without an id fall back to that
+/// sequence; transient/test items use the empty id's stable hash last.
 fn tool_call_tabs_key(call_id : String, sequence : Int?) -> String {
+  if !call_id.is_empty() {
+    return "call-\{call_id.hash()}"
+  }
   match sequence {
     Some(sequence) => "sequence-\{sequence}"
     None => "call-\{call_id.hash()}"
