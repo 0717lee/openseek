@@ -244,3 +244,22 @@ test "fallback punctuation preserves UTF-16 offsets" {
     ),
   )
 }
+
+///|
+test "extend and var classify as keywords" {
+  inspect(
+    render_tokens("extend trait Show for Int; var total = 0"),
+    content=(
+      #|0-6 Keyword extend
+      #|7-12 Keyword trait
+      #|13-17 Type Show
+      #|18-21 Keyword for
+      #|22-25 Type Int
+      #|25-26 Delimiter ;
+      #|27-30 Keyword var
+      #|31-36 Identifier total
+      #|37-38 Operator =
+      #|39-40 Number 0
+    ),
+  )
+}
