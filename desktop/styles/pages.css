@@ -366,7 +366,7 @@ h2 {
 }
 
 /* Settings menus retain the row's exact width while shared select placement
-   chooses the larger visible side of the control. */
+   prefers below and flips when needed. */
 .setting-select-menu {
   right: 0;
   left: 0;

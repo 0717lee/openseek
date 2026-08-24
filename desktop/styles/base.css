@@ -67,7 +67,7 @@ samp,
 
 /* Every app-owned select uses the same popup surface and option semantics.
    Individual pages only choose trigger geometry; the component measures the
-   visible room above and below before choosing menu placement. */
+   visible room and flips upward only when the menu cannot fit below. */
 .custom-select {
   position: relative;
   min-width: 0;

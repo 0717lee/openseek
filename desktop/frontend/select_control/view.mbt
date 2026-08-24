@@ -144,10 +144,11 @@ fn Control::focus(
 }
 
 ///|
-/// Place an opened menu on the side with more visible room. The viewport is
-/// intersected with every clipping ancestor, so a select inside the scrolling
-/// Settings page or setup modal reacts to that surface rather than assuming
-/// the whole window is available.
+/// Prefer placing an opened menu below its trigger. It flips upward only when
+/// the rendered menu does not fit below and the upper side has more room. The
+/// viewport is intersected with every clipping ancestor, so a select inside
+/// the scrolling Settings page or setup modal reacts to that surface rather
+/// than assuming the whole window is available.
 fn Control::position_menu(self : Control) -> @cmd.Cmd {
   @cmd.custom_cmd(
     _ => {
@@ -190,7 +191,8 @@ fn Control::position_menu(self : Control) -> @cmd.Cmd {
       let gap = 6.0
       let above = trigger_rect.get_top() - visible_top - gap
       let below = visible_bottom - trigger_rect.get_bottom() - gap
-      let (placement, available) = if below >= above {
+      let menu_height = menu.get_bounding_client_rect().get_height()
+      let (placement, available) = if below >= menu_height || below >= above {
         ("down", below)
       } else {
         ("up", above)

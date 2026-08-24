@@ -697,7 +697,7 @@
 }
 
 /* Container units keep the menu inside a chat column narrowed by the editor
-   panel. Shared select placement opens it toward the larger visible side. */
+   panel. Shared select placement prefers below and flips when needed. */
 .composer-picker-menu {
   left: 0;
   width: max-content;
