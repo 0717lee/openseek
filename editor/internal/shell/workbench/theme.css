@@ -149,7 +149,6 @@
   --vscode-scrollbarSlider-background: #79797966;
   --vscode-scrollbarSlider-hoverBackground: #646464b3;
   --vscode-scrollbarSlider-activeBackground: #bfbfbf66;
-  --vscode-scrollbar-shadow: rgb(0 0 0 / 50%);
 
   --vscode-token-keyword: #569cd6;
   --vscode-token-variable: #9cdcfe;
@@ -284,7 +283,6 @@
   --vscode-scrollbarSlider-background: #64646466;
   --vscode-scrollbarSlider-hoverBackground: #646464b3;
   --vscode-scrollbarSlider-activeBackground: #00000099;
-  --vscode-scrollbar-shadow: rgb(0 0 0 / 20%);
 
   --vscode-token-keyword: #0000ff;
   --vscode-token-variable: #001080;

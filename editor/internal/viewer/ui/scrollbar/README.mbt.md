@@ -31,8 +31,7 @@ scrollbar.dispose()
 ## Contract
 
 - `ScrollableElementDom` owns the wrapper/content nodes, horizontal and
-  vertical tracks/sliders, shadows, reveal/fade state, and two
-  `ScrollbarState` values.
+  vertical tracks/sliders, reveal/fade state, and two `ScrollbarState` values.
 - `update_from_model` paints editor scroll dimensions/position;
   `update_from_native_content` reads a native scrolling element.
   `native_scroll_to`/`native_scroll_by` drive the latter.

@@ -21,7 +21,9 @@ test.afterAll(async () => {
   await fs.rm(largeFixture, { force: true });
 });
 
-test('reveals editor scrollbar for wheel input then fades it after idle', async ({ page }) => {
+test('reveals the editor scrollbar without scroll shadows then fades it after idle', async ({
+  page,
+}) => {
   const events = collectReadonlyEvents(page);
   await page.goto('/');
   await openWorkspaceFile(page, 'src/generated_scroll.mbt', { waitForActiveReveal: false });
@@ -38,6 +40,7 @@ test('reveals editor scrollbar for wheel input then fades it after idle', async 
     .poll(() => lastScrollTop(events), { timeout: 3_000 })
     .toBeGreaterThan(0);
   expect(events.count('view:scroll')).toBeGreaterThan(scrollEventsBefore);
+  await expect(editorScrollable.locator('> .shadow')).toHaveCount(0);
   await expect(verticalBar).toHaveClass(/(^|\s)visible(\s|$)/);
 
   await page.mouse.move(4, 4);
