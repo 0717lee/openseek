@@ -1146,6 +1146,49 @@ async test "application stylesheet assembles without development imports" {
 }
 
 ///|
+async test "application stylesheet preserves pinned VS Code Git graph palette" {
+  let ws = locate_workspace()
+  let css = assembled_app_stylesheet(ws)
+  for
+    declaration in [
+      "--git-graph-current: #1A5CFF;", "--git-graph-upstream: #652D90;", "--git-graph-base: #EA5C00;",
+      "--git-graph-foreground-1: #FFB000;", "--git-graph-foreground-2: #DC267F;",
+      "--git-graph-foreground-3: #994F00;", "--git-graph-foreground-4: #40B0A6;",
+      "--git-graph-foreground-5: #B66DFF;",
+    ] {
+    assert_eq(css.split(declaration).length(), 2)
+  }
+  assert_true(
+    css.contains(
+      "@media (prefers-color-scheme: dark) {\n" +
+      "  :root:not([data-theme=\"light\"]) .git-graph-section {\n" +
+      "    --git-graph-current: #57A3F8;\n" +
+      "    --git-graph-upstream: #AD80D7;\n" +
+      "  }\n" +
+      "}",
+    ),
+  )
+  assert_true(
+    css.contains(
+      ":root[data-theme=\"dark\"] .git-graph-section {\n" +
+      "  --git-graph-current: #57A3F8;\n" +
+      "  --git-graph-upstream: #AD80D7;\n" +
+      "}",
+    ),
+  )
+  for property in ["--git-graph-current:", "--git-graph-upstream:"] {
+    assert_eq(css.split(property).length(), 4)
+  }
+  for
+    property in [
+      "--git-graph-base:", "--git-graph-foreground-1:", "--git-graph-foreground-2:",
+      "--git-graph-foreground-3:", "--git-graph-foreground-4:", "--git-graph-foreground-5:",
+    ] {
+    assert_eq(css.split(property).length(), 2)
+  }
+}
+
+///|
 async test "form field focus styling stays in the base stylesheet" {
   let ws = locate_workspace()
   let base = @asyncfs.read_file(ws.at("styles/base.css")).text()
