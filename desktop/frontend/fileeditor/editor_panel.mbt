@@ -496,16 +496,18 @@ fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
           provider=viewer_state.diff_provider,
         )
         diff_editor.on_did_update_diff(() => {
-          let status = viewer_state.diff_provider.get_status()
-          scheduler.add(
-            dispatch(
-              ReviewDiffStatusChanged({
-                requested: review_diff_mode(status.requested),
-                effective: review_diff_mode(status.effective),
-                fell_back: status.fell_back,
-              }),
-            ),
-          )
+          if diff_editor.is_diff_up_to_date() {
+            let status = viewer_state.diff_provider.get_status()
+            scheduler.add(
+              dispatch(
+                ReviewDiffStatusChanged({
+                  requested: review_diff_mode(status.requested),
+                  effective: review_diff_mode(status.effective),
+                  fell_back: status.fell_back,
+                }),
+              ),
+            )
+          }
         })
         |> ignore
         viewer_state.diff_editor = Some(diff_editor)
