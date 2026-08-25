@@ -949,31 +949,17 @@ html.is-resizing * {
   flex: 0 0 clamp(96px, var(--review-changes-height, 40%), calc(100% - 96px));
 }
 
+/* Mirrors the pinned VS Code `scmGraph.*` registry and the effective
+   Light/Dark 2026 `charts.blue` and `charts.purple` theme overrides. */
 .git-graph-section {
-  --git-graph-current: var(--color-text-secondary);
-  --git-graph-upstream: color-mix(
-    in srgb,
-    var(--color-text-secondary) 72%,
-    var(--color-text-muted)
-  );
-  --git-graph-base: var(--color-text-muted);
-  --git-graph-foreground-1: var(--color-text-secondary);
-  --git-graph-foreground-2: color-mix(
-    in srgb,
-    var(--color-text-secondary) 72%,
-    var(--color-text-muted)
-  );
-  --git-graph-foreground-3: color-mix(
-    in srgb,
-    var(--color-text-secondary) 46%,
-    var(--color-text-muted)
-  );
-  --git-graph-foreground-4: var(--color-text-muted);
-  --git-graph-foreground-5: color-mix(
-    in srgb,
-    var(--color-text-secondary) 82%,
-    var(--color-text-muted)
-  );
+  --git-graph-current: #1A5CFF;
+  --git-graph-upstream: #652D90;
+  --git-graph-base: #EA5C00;
+  --git-graph-foreground-1: #FFB000;
+  --git-graph-foreground-2: #DC267F;
+  --git-graph-foreground-3: #994F00;
+  --git-graph-foreground-4: #40B0A6;
+  --git-graph-foreground-5: #B66DFF;
   flex: 1 1 auto;
 }
 
@@ -1574,22 +1560,14 @@ button.git-history-file:focus-visible {
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .git-graph-section {
-    --git-graph-current: var(--color-text-secondary);
-    --git-graph-upstream: color-mix(
-      in srgb,
-      var(--color-text-secondary) 72%,
-      var(--color-text-muted)
-    );
+    --git-graph-current: #57A3F8;
+    --git-graph-upstream: #AD80D7;
   }
 }
 
 :root[data-theme="dark"] .git-graph-section {
-  --git-graph-current: var(--color-text-secondary);
-  --git-graph-upstream: color-mix(
-    in srgb,
-    var(--color-text-secondary) 72%,
-    var(--color-text-muted)
-  );
+  --git-graph-current: #57A3F8;
+  --git-graph-upstream: #AD80D7;
 }
 
 .history-commit-crumb {
