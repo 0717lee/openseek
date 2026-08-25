@@ -37,6 +37,11 @@ pub struct DiffEditorWidget {
   mut original_alignment_geometry : PaneGeometrySnapshot?
   mut modified_alignment_geometry : PaneGeometrySnapshot?
   mut diff_state : DiffState?
+  /// One VS Code-style `revealFirstDiff` request, bound to the model-pair
+  /// generation that was current when the host made it. The request survives
+  /// asynchronous diff computation and hidden/layout render barriers, but a
+  /// replacement pair makes it stale instead of moving the new document.
+  mut pending_reveal_first_diff_generation : Int?
   mut reconciling_generation : Int
   mut is_reconciling : Bool
   /// Cancellable paint barrier for the latest outer layout transaction.
@@ -199,6 +204,7 @@ pub fn DiffEditorWidget::create(
     original_alignment_geometry: None,
     modified_alignment_geometry: None,
     diff_state: None,
+    pending_reveal_first_diff_generation: None,
     reconciling_generation: 0,
     is_reconciling: false,
     layout_render_waiters: [],
@@ -1255,10 +1261,12 @@ fn DiffEditorWidget::reconcile_view_model(self : DiffEditorWidget) -> Unit {
   guard self.view_model.get_diff() is Some(document_diff) &&
     self.view_model.get_model() is Some(model) else {
     self.commit_empty_diff_features(generation)
+    self.try_reveal_first_diff()
     return
   }
   let diff_state = DiffState::from_diff_result(document_diff)
   self.commit_diff_state(diff_state, model, generation)
+  self.try_reveal_first_diff()
 }
 
 ///|
@@ -1293,6 +1301,7 @@ pub fn DiffEditorWidget::set_model(
   if self.disposed || same_model_pair(self.view_model.get_model(), model) {
     return None
   }
+  self.pending_reveal_first_diff_generation = None
   self.pending_layout_modified_viewport = None
   self.clear_pending_scroll_echoes()
   self.clear_diff_features_for_transition()
@@ -1501,16 +1510,33 @@ fn DiffEditorWidget::reveal_navigation_target(
   self : DiffEditorWidget,
   target : DiffNavigationTarget,
 ) -> Bool {
-  let change = target.change
+  guard self.reveal_change(
+    target.change,
+    source="diffEditor.accessibleDiffViewer",
+  ) else {
+    return false
+  }
+  self.announce_navigation_target(target)
+  true
+}
+
+///|
+/// Shared exact-mapping reveal used by both raw first-diff navigation and the
+/// Accessible Diff Viewer projection. Programmatic navigation supersedes a
+/// viewport captured for an in-flight layout; otherwise that layout's final
+/// restore could immediately undo this reveal.
+fn DiffEditorWidget::reveal_change(
+  self : DiffEditorWidget,
+  change : @diff.DetailedLineRangeMapping,
+  source~ : String,
+) -> Bool {
   guard self.view_model.get_model() is Some(model) else { return false }
+  self.pending_layout_modified_viewport = None
   let modified_anchor = change.modified.start_line_number.clamp(
     min=1,
     max=model.modified.get_line_count().max(1),
   )
-  self.editors.modified.set_position(
-    Position(modified_anchor, 1),
-    source="diffEditor.accessibleDiffViewer",
-  )
+  self.editors.modified.set_position(Position(modified_anchor, 1), source~)
   guard diff_navigation_reveal_plan(
       self.layout_state.actual_layout,
       change,
@@ -1524,8 +1550,56 @@ fn DiffEditorWidget::reveal_navigation_target(
     ModifiedNavigationPane =>
       self.editors.modified.reveal_range_in_center(plan.range)
   }
-  self.announce_navigation_target(target)
   true
+}
+
+///|
+/// Consume a deferred first-diff request only after the exact requested pair
+/// has both a ready diff and committed renderer state. This is the callback
+/// equivalent of pinned VS Code's `waitForDiff().then(_goTo(mappings[0]))`,
+/// with the additional layout barrier required by this widget's two kernels.
+fn DiffEditorWidget::try_reveal_first_diff(self : DiffEditorWidget) -> Unit {
+  guard self.pending_reveal_first_diff_generation is Some(generation) else {
+    return
+  }
+  if self.editors.committed_model_generation() != generation ||
+    !self.editors.same_model(self.view_model.get_model()) {
+    self.pending_reveal_first_diff_generation = None
+    return
+  }
+  match self.view_model.get_state() {
+    Pending => return
+    NoModel | Failed => {
+      self.pending_reveal_first_diff_generation = None
+      return
+    }
+    Ready => ()
+  }
+  guard self.diff_state is Some(diff_state) else { return }
+  self.pending_reveal_first_diff_generation = None
+  if !diff_state.mappings.is_empty() {
+    self.reveal_change(
+      diff_state.mappings[0].line_range_mapping,
+      source="diffEditor.revealFirstDiff",
+    )
+    |> ignore
+  }
+}
+
+///|
+/// Request a one-shot reveal of the current comparison's first raw mapping.
+/// Unlike F7 navigation this is not cursor-relative and does not merge nearby
+/// mappings into Accessible Diff Viewer groups.
+pub fn DiffEditorWidget::reveal_first_diff(self : DiffEditorWidget) -> Unit {
+  if self.disposed || self.view_model.get_model() is None {
+    return
+  }
+  self.pending_reveal_first_diff_generation = Some(
+    self.editors.committed_model_generation(),
+  )
+  // A host can request the reveal after an already-ready pair is installed.
+  // Pending/hidden pairs retain the request until reconciliation completes.
+  self.try_reveal_first_diff()
 }
 
 ///|
@@ -1709,6 +1783,7 @@ pub fn DiffEditorWidget::dispose(self : DiffEditorWidget) -> Unit {
   self.original_alignment_geometry = None
   self.modified_alignment_geometry = None
   self.diff_state = None
+  self.pending_reveal_first_diff_generation = None
   self.reconciling_generation = 0
   self.is_reconciling = false
   self.layout_render_generation = 0

@@ -237,6 +237,7 @@ fn compile_external_viewer_api_contract(
   let diff_subscription = diff_editor.on_did_update_diff(() => ())
   let diff_model = @viewer.DiffEditorModel(model, model)
   diff_editor.set_model(Some(diff_model)) |> ignore
+  diff_editor.reveal_first_diff()
   // Exact same pair returns None; callers therefore never dispose active
   // models while handling a no-op replacement.
   diff_editor.set_model(Some(diff_model)) |> ignore
