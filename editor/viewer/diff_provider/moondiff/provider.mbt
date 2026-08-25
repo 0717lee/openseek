@@ -72,6 +72,7 @@ pub fn MoonDocumentDiffProvider::set_ignore_comments(
     return
   }
   self.ignore_comments = ignore_comments
+  self.status = { requested: self.mode, effective: self.mode, fell_back: false }
   self.did_change.fire(())
 }
 
@@ -346,6 +347,11 @@ fn append_rows(
 ) -> (Int, Int)? {
   let mut old_cursor = original_cursor
   let mut new_cursor = modified_cursor
+  // A ChangeBlock or IgnoredBlock is a coalescing boundary. Keeping its rows
+  // local prevents an empty-side anchor from joining mappings across the other
+  // block kind and making a geometry-only alignment overlap a real change.
+  let block_changes = []
+  let block_alignments = []
   for row in rows {
     match row {
       Paired(original, modified) => {
@@ -354,7 +360,10 @@ fn append_rows(
           return None
         }
         if render_changes {
-          append_coalesced_change(changes, paired_change(original, modified))
+          append_coalesced_change(
+            block_changes,
+            paired_change(original, modified),
+          )
         }
         old_cursor += 1
         new_cursor += 1
@@ -365,9 +374,9 @@ fn append_rows(
         }
         let mapping = old_only_change(original, new_cursor)
         if render_changes {
-          append_coalesced_change(changes, mapping)
+          append_coalesced_change(block_changes, mapping)
         } else {
-          append_coalesced_alignment(alignments, mapping.line_mapping())
+          append_coalesced_alignment(block_alignments, mapping.line_mapping())
         }
         old_cursor += 1
       }
@@ -377,14 +386,16 @@ fn append_rows(
         }
         let mapping = new_only_change(modified, old_cursor)
         if render_changes {
-          append_coalesced_change(changes, mapping)
+          append_coalesced_change(block_changes, mapping)
         } else {
-          append_coalesced_alignment(alignments, mapping.line_mapping())
+          append_coalesced_alignment(block_alignments, mapping.line_mapping())
         }
         new_cursor += 1
       }
     }
   }
+  changes.append(block_changes)
+  alignments.append(block_alignments)
   Some((old_cursor, new_cursor))
 }
 
@@ -532,6 +543,33 @@ fn specialized_diff(
 }
 
 ///|
+fn MoonDocumentDiffProvider::settle_specialized_or_core(
+  self : MoonDocumentDiffProvider,
+  requested : MoonDiffMode,
+  specialized : (@diff.DocumentDiff, MoonDiffMode, Bool)?,
+  core_fallback : @diff.DocumentDiff,
+  original : @model.TextSnapshot,
+  modified : @model.TextSnapshot,
+) -> @diff.DocumentDiff {
+  match specialized {
+    Some((candidate, effective, fell_back)) =>
+      match
+        @diff.normalize_and_validate_document_diff(
+          candidate, original, modified,
+        ) {
+        Some(result) => {
+          self.status = { requested, effective, fell_back }
+          return result
+        }
+        None => ()
+      }
+    None => ()
+  }
+  self.status = { requested, effective: Core, fell_back: requested != Core }
+  core_fallback
+}
+
+///|
 pub impl @diff.DocumentDiffProvider for MoonDocumentDiffProvider with fn compute_diff(
   self,
   original,
@@ -552,20 +590,22 @@ pub impl @diff.DocumentDiffProvider for MoonDocumentDiffProvider with fn compute
       self.status = { requested, effective: Core, fell_back: true }
       return if options.ignore_trim_whitespace { lenient } else { strict }
     }
-    match
-      specialized_diff(requested, self.ignore_comments, original, modified) {
-      Some((result, effective, fell_back)) => {
-        self.status = { requested, effective, fell_back }
-        return result
-      }
-      None => ()
-    }
+    return self.settle_specialized_or_core(
+      requested,
+      specialized_diff(requested, self.ignore_comments, original, modified),
+      if options.ignore_trim_whitespace {
+        lenient
+      } else {
+        strict
+      },
+      original,
+      modified,
+    )
   }
-  let result = @diff.CoreDocumentDiffProvider().compute_diff(
+  let core = @diff.CoreDocumentDiffProvider().compute_diff(
     original, modified, options,
   )
-  self.status = { requested, effective: Core, fell_back: requested != Core }
-  result
+  self.settle_specialized_or_core(requested, None, core, original, modified)
 }
 
 ///|

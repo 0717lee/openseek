@@ -106,9 +106,12 @@ External providers implement `DocumentDiffProvider` and may fill
 so no viewer-layer adapter is required. As in VS Code's
 `lineRangeMappingFromRangeMappings`, touching changed rows must be grouped into
 one hunk. Consecutive hunks are strictly separated, ordered on both sides, and
-have equal unchanged gaps. The ViewModel normalizes full-line inner ranges and
-rejects results that violate these invariants instead of repairing them in the
-renderer.
+have equal unchanged gaps. `normalize_and_validate_document_diff` is the shared
+contract boundary: optional providers can reject a specialized candidate and
+fall back before publishing their effective mode, while the ViewModel invokes
+the same helper again before rendering any provider result. Invalid generic
+providers still enter the ViewModel's `Failed` state rather than being repaired
+in the renderer.
 
 ```sh
 moon test --target js viewer/common/diff

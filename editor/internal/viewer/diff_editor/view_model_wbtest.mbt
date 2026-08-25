@@ -402,7 +402,10 @@ test "validator accepts Core inner anchors on empty hunk sides" {
   assert_eq(result.changes.length(), 2)
   assert_true(result.changes[0].modified.is_empty())
   assert_true(result.changes[1].original.is_empty())
-  assert_true(valid_document_diff(result, original, modified))
+  assert_true(
+    @diff.normalize_and_validate_document_diff(result, original, modified)
+    is Some(_),
+  )
 
   let fragmented_original = StringBuilder()
   let fragmented_modified = StringBuilder()
@@ -425,7 +428,10 @@ test "validator accepts Core inner anchors on empty hunk sides" {
   )
   assert_eq(fragmented.changes.length(), 20)
   assert_true(
-    valid_document_diff(fragmented, fragmented_original, fragmented_modified),
+    @diff.normalize_and_validate_document_diff(
+      fragmented, fragmented_original, fragmented_modified,
+    )
+    is Some(_),
   )
 }
 
@@ -506,14 +512,10 @@ test "validator rejects newline anchor over non-empty empty-hunk line" {
     additional_alignments: [],
   }
 
-  assert_false(
-    line_range_contains_range(
-      invalid.changes[0].modified,
-      invalid.changes[0].inner_changes.unwrap()[0].modified,
-      modified,
-    ),
+  assert_true(
+    @diff.normalize_and_validate_document_diff(invalid, original, modified)
+    is None,
   )
-  assert_false(valid_document_diff(invalid, original, modified))
 }
 
 ///|
@@ -530,13 +532,19 @@ test "ViewModel normalizes full-line inner mappings like VS Code" {
     ],
     additional_alignments: [],
   }
-  let normalized = normalize_document_diff(result, original, modified)
+  guard @diff.normalize_and_validate_document_diff(result, original, modified)
+    is Some(normalized) else {
+    fail("expected a valid normalized document diff")
+  }
   guard normalized.changes[0].inner_changes is Some([inner]) else {
     fail("expected normalized inner mapping")
   }
   assert_eq(inner.original, Range(1, 1, 2, 1))
   assert_eq(inner.modified, Range(1, 1, 2, 1))
-  assert_true(valid_document_diff(normalized, original, modified))
+  assert_eq(
+    @diff.normalize_and_validate_document_diff(normalized, original, modified),
+    Some(normalized),
+  )
 }
 
 ///|
@@ -553,13 +561,19 @@ test "normalization extends an empty-line anchor only with its full-line peer" {
     ],
     additional_alignments: [],
   }
-  let normalized = normalize_document_diff(raw, original, modified)
+  guard @diff.normalize_and_validate_document_diff(raw, original, modified)
+    is Some(normalized) else {
+    fail("expected a valid normalized deletion mapping")
+  }
   guard normalized.changes[0].inner_changes is Some([inner]) else {
     fail("expected normalized deletion mapping")
   }
   assert_eq(inner.original, Range(1, 1, 2, 1))
   assert_eq(inner.modified, Range(1, 1, 2, 1))
-  assert_true(valid_document_diff(normalized, original, modified))
+  assert_eq(
+    @diff.normalize_and_validate_document_diff(normalized, original, modified),
+    Some(normalized),
+  )
 }
 
 ///|
@@ -573,12 +587,18 @@ test "ViewModel rejects touching provider rows that were not grouped" {
     ],
     additional_alignments: [],
   }
-  assert_false(valid_document_diff(fragmented, original, modified))
+  assert_true(
+    @diff.normalize_and_validate_document_diff(fragmented, original, modified)
+    is None,
+  )
   let grouped : @diff.DocumentDiff = {
     changes: [DetailedLineRangeMapping(LineRange(1, 3), LineRange(1, 3), None)],
     additional_alignments: [],
   }
-  assert_true(valid_document_diff(grouped, original, modified))
+  assert_true(
+    @diff.normalize_and_validate_document_diff(grouped, original, modified)
+    is Some(_),
+  )
 }
 
 ///|
@@ -595,8 +615,10 @@ test "normalization leaves invalid provider coordinates for validation" {
     ],
     additional_alignments: [],
   }
-  let normalized = normalize_document_diff(invalid, original, modified)
-  assert_false(valid_document_diff(normalized, original, modified))
+  assert_true(
+    @diff.normalize_and_validate_document_diff(invalid, original, modified)
+    is None,
+  )
 }
 
 ///|
