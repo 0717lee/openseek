@@ -162,6 +162,27 @@ test "the search query filters both lists" {
 }
 
 ///|
+test "a skill opens as a detail page and returns to the list" {
+  let item = market_item()
+  let (_, ready, _) = @skills.State::empty().handle(
+    emit(),
+    @skills.CatalogLoaded(channel=@interop.ChannelId::Local, items=[item]),
+    input(),
+  )
+  let (_, loading, _) = ready.handle(
+    emit(),
+    @skills.PreviewMarket(item),
+    input(),
+  )
+  assert_true(markup(loading, input()).contains("← Back to skills"))
+  assert_true(markup(loading, input()).contains("SKILL.md"))
+  assert_true(markup(loading, input()).contains("Loading SKILLS.md…"))
+
+  let (_, listed, _) = loading.handle(emit(), @skills.BackToList, input())
+  assert_true(markup(listed, input()).contains("Mooncakes registry"))
+}
+
+///|
 test "an install marks its entry busy exactly once" {
   let (_, ready, _) = @skills.State::empty().handle(
     emit(),

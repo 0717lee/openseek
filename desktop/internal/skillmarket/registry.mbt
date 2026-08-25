@@ -8,6 +8,11 @@
 const DefaultRegistry = "https://mooncakes.io"
 
 ///|
+/// Keep preview parsing bounded so a malformed or unexpectedly large registry
+/// document cannot stall the frontend renderer.
+const MaxPreviewBytes : Int = 512 * 1024
+
+///|
 /// A registry or library failure with a user-facing message; the host's op
 /// boundary unwraps it into the error the webview displays.
 pub(all) suberror SkillMarketError {
@@ -142,6 +147,30 @@ async fn skill_md_url(registry : String, entry : String) -> String {
     raise SkillMarketError("skill lookup for \{entry} returned HTTP \{code}")
   }
   "\{registry}/assets/\{entry}/SKILL.md"
+}
+
+///|
+/// Fetch the published instructions without changing the local library.
+pub async fn fetch_skill_content(
+  module_name~ : String,
+  version~ : String,
+  package_path~ : String,
+  registry? : String = DefaultRegistry,
+) -> String {
+  let url = skill_md_url(
+    registry,
+    entry_path(module_name, version, package_path),
+  )
+  let (code, data) = fetch_response(url)
+  guard code == 200 else {
+    raise SkillMarketError("SKILL.md request returned HTTP \{code}")
+  }
+  guard data.binary().length() <= MaxPreviewBytes else {
+    raise SkillMarketError("SKILL.md is too large to preview")
+  }
+  data.text() catch {
+    _ => raise SkillMarketError("skill registry returned unreadable SKILL.md")
+  }
 }
 
 // The pure halves of the registry client and the library: wire decoding,

@@ -23,13 +23,38 @@ struct State {
   query : String
   busy : Array[String]
   notice : String
+  preview : Preview
+  preview_cache : Map[String, String]
+  list_scroll_top : Double
+} derive(Eq)
+
+///|
+enum Preview {
+  Closed
+  Loading(target~ : PreviewTarget, request~ : Int)
+  Ready(target~ : PreviewTarget, request~ : Int, content~ : String)
+  Failed(target~ : PreviewTarget, request~ : Int, message~ : String)
+} derive(Eq)
+
+///|
+enum PreviewTarget {
+  Market(MarketItem)
+  Installed(InstalledItem)
 } derive(Eq)
 
 ///|
 /// A page that has never been opened: no catalog, no filter, nothing in
 /// flight.
 pub fn State::empty() -> State {
-  { catalog: Idle, query: "", busy: [], notice: "" }
+  {
+    catalog: Idle,
+    query: "",
+    busy: [],
+    notice: "",
+    preview: Closed,
+    preview_cache: Map([]),
+    list_scroll_top: 0.0,
+  }
 }
 
 ///|
@@ -45,6 +70,12 @@ pub(all) enum Msg {
   // a non-empty `error` becomes the page's notice (a success reports the
   // library change to the root instead).
   ActionDone(channel~ : @interop.ChannelId, key~ : String, error~ : String)
+  PreviewMarket(MarketItem)
+  PreviewInstalled(InstalledItem)
+  PreviewLoaded(request~ : Int, target~ : PreviewTarget, content~ : String)
+  PreviewFailed(request~ : Int, target~ : PreviewTarget, message~ : String)
+  BackToList
+  SkillsScrolled(Double)
 }
 
 ///|
@@ -59,12 +90,18 @@ pub fn State::opening(
 ) -> (@cmd.Cmd, State) {
   let (cmd, catalog) = match self.catalog {
     Idle | Failed(_) =>
-      (fetch_catalog(emit, input.channel), Loading(channel=input.channel))
+      (
+        fetch_catalog(emit, input.channel),
+        Catalog::Loading(channel=input.channel),
+      )
     Loading(channel~) =>
       if channel == input.channel {
         (@cmd.none, self.catalog)
       } else {
-        (fetch_catalog(emit, input.channel), Loading(channel=input.channel))
+        (
+          fetch_catalog(emit, input.channel),
+          Catalog::Loading(channel=input.channel),
+        )
       }
     current => (@cmd.none, current)
   }
@@ -88,6 +125,82 @@ pub fn State::handle(
 ) -> (@cmd.Cmd, State, Outcome?) {
   match msg {
     QueryChanged(value) => (@cmd.none, { ..self, query: value }, None)
+    PreviewMarket(item) => {
+      let target = preview_target_for_market(input.installed, item)
+      match self.preview_cache.get(preview_cache_key(target)) {
+        Some(content) =>
+          (
+            @cmd.none,
+            { ..self, preview: Ready(target~, request=0, content~) },
+            None,
+          )
+        None => {
+          let request = preview_request_id(self.preview) + 1
+          (
+            fetch_content(emit, input.channel, request, target),
+            { ..self, preview: Loading(target~, request~) },
+            None,
+          )
+        }
+      }
+    }
+    PreviewInstalled(item) => {
+      let target = Installed(item)
+      match self.preview_cache.get(preview_cache_key(target)) {
+        Some(content) =>
+          (
+            @cmd.none,
+            { ..self, preview: Ready(target~, request=0, content~) },
+            None,
+          )
+        None => {
+          let request = preview_request_id(self.preview) + 1
+          (
+            fetch_installed_content(emit, input.channel, request, item),
+            { ..self, preview: Loading(target~, request~) },
+            None,
+          )
+        }
+      }
+    }
+    PreviewLoaded(request~, target~, content~) => {
+      guard self.preview is Loading(request=current, target=current_target) &&
+        current == request &&
+        current_target == target else {
+        return (@cmd.none, self, None)
+      }
+      let cache = self.preview_cache.copy()
+      cache[preview_cache_key(target)] = content
+      (
+        @cmd.none,
+        {
+          ..self,
+          preview: Ready(target~, request~, content~),
+          preview_cache: cache,
+        },
+        None,
+      )
+    }
+    PreviewFailed(request~, target~, message~) => {
+      guard self.preview is Loading(request=current, target=current_target) &&
+        current == request &&
+        current_target == target else {
+        return (@cmd.none, self, None)
+      }
+      (
+        @cmd.none,
+        { ..self, preview: Failed(target~, request~, message~) },
+        None,
+      )
+    }
+    BackToList =>
+      (
+        restore_list_scroll(self.list_scroll_top),
+        { ..self, preview: Closed },
+        None,
+      )
+    SkillsScrolled(scroll_top) =>
+      (@cmd.none, { ..self, list_scroll_top: scroll_top }, None)
     RefreshCatalog =>
       match self.catalog {
         // The rendered button is disabled while loading, and this guard also
@@ -96,7 +209,7 @@ pub fn State::handle(
         _ =>
           (
             fetch_catalog(emit, input.channel),
-            { ..self, catalog: Loading(channel=input.channel) },
+            { ..self, catalog: Catalog::Loading(channel=input.channel) },
             None,
           )
       }
@@ -148,6 +261,36 @@ pub fn State::handle(
       }
     }
   }
+}
+
+///|
+fn preview_request_id(preview : Preview) -> Int {
+  match preview {
+    Closed => 0
+    Loading(request~, ..) | Ready(request~, ..) | Failed(request~, ..) =>
+      request
+  }
+}
+
+///|
+fn preview_cache_key(target : PreviewTarget) -> String {
+  match target {
+    Market(item) => "market:\{source_label(item)}"
+    Installed(item) => "installed:\{item.id}"
+  }
+}
+
+///|
+fn preview_target_for_market(
+  installed : Array[InstalledItem],
+  item : MarketItem,
+) -> PreviewTarget {
+  for skill in installed {
+    if !skill.source.is_empty() && skill.source == source_label(item) {
+      return Installed(skill)
+    }
+  }
+  Market(item)
 }
 
 ///|

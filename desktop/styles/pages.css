@@ -446,6 +446,7 @@ h2 {
 
 .skill-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 13px;
   align-items: center;
   padding: 13px 0;
@@ -477,6 +478,202 @@ h2 {
 .skill-action {
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+.skill-summary {
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background-color 120ms ease;
+  position: relative;
+}
+
+.skill-summary:hover {
+  background: var(--color-bg-subtle);
+}
+
+.skill-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.skill-preview {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+  flex: 1 0 100%;
+}
+
+.skill-preview-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.skill-preview-head h2 {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.skill-preview-markdown {
+  min-width: 0;
+  max-height: min(62vh, 720px);
+  overflow: auto;
+  white-space: normal;
+  color: var(--color-text-secondary);
+  line-height: var(--line-height-relaxed);
+}
+
+.skill-detail-page {
+  max-width: 840px;
+}
+
+.skill-back {
+  justify-self: start;
+}
+
+.skill-detail-header {
+  display: grid;
+  gap: 8px;
+}
+
+.skill-detail-header h1 {
+  overflow-wrap: anywhere;
+}
+
+.skill-detail-meta {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.skill-detail-action {
+  justify-self: start;
+  margin-top: 4px;
+}
+
+.skill-detail-card {
+  min-width: 0;
+  padding: 22px 24px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
+}
+
+.skill-file-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
+  margin: -22px -24px 18px;
+  padding: 6px 10px 6px 16px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-subtle);
+}
+
+.skill-file-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-copy-button {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-size: var(--font-size-xs);
+}
+
+.skill-file-status {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.skill-preview-markdown > :first-child {
+  margin-top: 0;
+}
+
+.skill-preview-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.skill-preview-markdown h1,
+.skill-preview-markdown h2,
+.skill-preview-markdown h3,
+.skill-preview-markdown h4,
+.skill-preview-markdown h5,
+.skill-preview-markdown h6 {
+  margin: 0.95em 0 0.45em;
+  line-height: 1.35;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.skill-preview-markdown h1 { font-size: 1.3em; }
+.skill-preview-markdown h2 { font-size: 1.18em; }
+.skill-preview-markdown h3 { font-size: 1.08em; }
+
+.skill-preview-markdown p { margin: 0.55em 0; }
+
+.skill-preview-markdown ul,
+.skill-preview-markdown ol {
+  margin: 0.45em 0;
+  padding-left: 1.5em;
+}
+
+.skill-preview-markdown li { margin: 0.2em 0; }
+
+.skill-preview-markdown pre {
+  margin: 0.55em 0;
+  padding: 10px 13px;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-subtle);
+  color: var(--color-code);
+  white-space: pre;
+}
+
+.skill-preview-markdown pre code {
+  padding: 0;
+  border: none;
+  background: none;
+}
+
+.skill-preview-markdown blockquote {
+  margin: 0.55em 0;
+  padding: 2px 12px;
+  border-left: 3px solid var(--color-border-subtle);
+  color: var(--color-text-secondary);
+}
+
+.skill-preview-markdown table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0.55em 0;
+  border-collapse: collapse;
+}
+
+.skill-preview-markdown th,
+.skill-preview-markdown td {
+  padding: 4px 10px;
+  border: 1px solid var(--color-border);
+}
+
+.skill-preview-markdown th {
+  background: var(--color-bg-subtle);
+  color: var(--color-text-primary);
 }
 
 .skills-refresh {

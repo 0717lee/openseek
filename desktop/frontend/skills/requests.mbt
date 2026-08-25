@@ -3,6 +3,36 @@
 // on the engine-host bridge, and each settles as one `Msg`.
 
 ///|
+extern "js" fn copy_text_to_clipboard(text : String) -> Unit =
+  #| (text) => {
+  #|   try {
+  #|     const clipboard = globalThis.navigator?.clipboard;
+  #|     if (clipboard && typeof clipboard.writeText === "function") {
+  #|       clipboard.writeText(text).catch(() => {});
+  #|     }
+  #|   } catch {
+  #|   }
+  #| }
+
+///|
+fn copy_content(content : String) -> @cmd.Cmd {
+  @cmd.custom_cmd(_ => copy_text_to_clipboard(content))
+}
+
+///|
+fn restore_list_scroll(scroll_top : Double) -> @cmd.Cmd {
+  @cmd.custom_cmd(
+    _ => {
+      if @dom.document().query_selector(".skills-page").to_option()
+        is Some(page) {
+        page.set_scroll_top(scroll_top)
+      }
+    },
+    kind=@cmd.after_render,
+  )
+}
+
+///|
 /// Fetch the registry's catalog of installable skills.
 fn fetch_catalog(
   emit : @cmd.Emit[Msg],
@@ -29,6 +59,94 @@ fn fetch_catalog(
       )
     })
   })
+}
+
+///|
+fn fetch_content(
+  emit : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  request : Int,
+  target : PreviewTarget,
+) -> @cmd.Cmd {
+  @cmd.custom_cmd(scheduler => {
+    @js.async_run(() => {
+      match target {
+        Market(item) => {
+          let reply = @interop.bridge_request(
+            channel,
+            @commands.skills_content,
+            {
+              module_name: item.module_name,
+              version: item.version,
+              package_path: if item.package_path.is_empty() {
+                None
+              } else {
+                Some(item.package_path)
+              },
+            },
+          ) catch {
+            error => {
+              scheduler.add(
+                emit(
+                  PreviewFailed(
+                    request~,
+                    target~,
+                    message=@interop.bridge_error_text(error),
+                  ),
+                ),
+              )
+              return
+            }
+          }
+          scheduler.add(emit(preview_reply(request, target, reply)))
+        }
+        Installed(item) => {
+          let reply = @interop.bridge_request(
+            channel,
+            @commands.skills_installed_content,
+            { id: item.id },
+          ) catch {
+            error => {
+              scheduler.add(
+                emit(
+                  PreviewFailed(
+                    request~,
+                    target~,
+                    message=@interop.bridge_error_text(error),
+                  ),
+                ),
+              )
+              return
+            }
+          }
+          scheduler.add(emit(preview_reply(request, target, reply)))
+        }
+      }
+    })
+  })
+}
+
+///|
+fn preview_reply(
+  request : Int,
+  target : PreviewTarget,
+  reply : @protocol.ReadFileReply,
+) -> Msg {
+  match reply {
+    @protocol.ReadFileReply::Content(content~, ..) =>
+      PreviewLoaded(request~, target~, content~)
+    _ => PreviewFailed(request~, target~, message="SKILL.md is not readable")
+  }
+}
+
+///|
+fn fetch_installed_content(
+  emit : @cmd.Emit[Msg],
+  channel : @interop.ChannelId,
+  request : Int,
+  item : InstalledItem,
+) -> @cmd.Cmd {
+  fetch_content(emit, channel, request, Installed(item))
 }
 
 ///|
