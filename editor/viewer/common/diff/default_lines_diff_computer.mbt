@@ -1,10 +1,11 @@
-// Built-in synchronous document diff provider. It delegates line and scalar
-// matching to moonbitlang/core/diff's Myers implementation. This is an
-// intentional local algorithm choice, not an emulation of Monaco's advanced
-// refinement or timeout/move protocol.
+// Built-in synchronous document diff provider. Its renderer-neutral contract
+// stays local, while its readability pipeline follows the pinned VS Code
+// Advanced diff's weighted short-sequence alignment and heuristic refinement.
+// moonbitlang/core/diff's Myers implementation remains the large-sequence
+// fallback; timeout and move protocols remain outside this contract.
 
 ///|
-/// Stateless Core-Myers document diff provider.
+/// Stateless built-in document diff provider.
 pub struct CoreDocumentDiffProvider {
   _unit : Unit
 } derive(Eq, Debug)
@@ -84,74 +85,35 @@ fn CoreDocumentDiffProvider::compute_lines_diff(
     }
   }
 
-  let d = @core_diff.Diff::Diff(
-    old=old_input[:],
-    new=new_input[:],
-    algorithm=Myers,
+  let line_diffs = include_strict_whitespace_line_diffs(
+    original_lines,
+    modified_lines,
+    compute_advanced_line_diffs(original_lines, modified_lines),
+    options.ignore_trim_whitespace,
   )
-
-  // Convert the flat edit script into hunks: each maximal run of
-  // consecutive `Delete`/`Insert` edits (separated by `Equal` runs) is one
-  // `DetailedLineRangeMapping`. Core diff emits at most one `Delete` followed
-  // by at most one `Insert` per hunk, but the converter tolerates any run.
-  let edits = d.edits()
   let changes : Array[DetailedLineRangeMapping] = []
-  let mut i = 0
-  while i < edits.length() {
-    match edits[i] {
-      Equal(..) => i += 1
-      _ => {
-        let mut old_start = 0x7FFFFFFF // 0-based, inclusive
-        let mut old_end = -1 // 0-based, exclusive
-        let mut new_start = 0x7FFFFFFF
-        let mut new_end = -1
-        // Where the hunk sits on the side that has no edits: an insert
-        // carries the original position it lands after (`old_index`), a
-        // delete carries the modified position the gap follows
-        // (`new_index`).
-        let mut anchor_old = 0
-        let mut anchor_new = 0
-        while i < edits.length() {
-          match edits[i] {
-            Equal(..) => break
-            Delete(old_index~, old_len~, new_index~) => {
-              old_start = old_start.min(old_index)
-              old_end = old_end.max(old_index + old_len)
-              anchor_new = new_index
-            }
-            Insert(old_index~, new_index~, new_len~) => {
-              new_start = new_start.min(new_index)
-              new_end = new_end.max(new_index + new_len)
-              anchor_old = old_index
-            }
-          }
-          i += 1
-        }
-        let original = if old_end >= 0 {
-          @base_common.LineRange(old_start + 1, old_end + 1)
-        } else {
-          LineRange(anchor_old + 1, anchor_old + 1)
-        }
-        let modified = if new_end >= 0 {
-          @base_common.LineRange(new_start + 1, new_end + 1)
-        } else {
-          LineRange(anchor_new + 1, anchor_new + 1)
-        }
-        changes.push(
-          DetailedLineRangeMapping(
-            original,
-            modified,
-            compute_inner_changes(
-              original_lines,
-              modified_lines,
-              original,
-              modified,
-              options.ignore_trim_whitespace,
-            ),
-          ),
-        )
-      }
-    }
+  for diff in line_diffs {
+    let original = @base_common.LineRange(
+      diff.original.start + 1,
+      diff.original.end_exclusive + 1,
+    )
+    let modified = @base_common.LineRange(
+      diff.modified.start + 1,
+      diff.modified.end_exclusive + 1,
+    )
+    changes.push(
+      DetailedLineRangeMapping(
+        original,
+        modified,
+        compute_inner_changes(
+          original_lines,
+          modified_lines,
+          original,
+          modified,
+          options.ignore_trim_whitespace,
+        ),
+      ),
+    )
   }
   { changes, additional_alignments: [] }
 }

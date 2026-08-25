@@ -17,6 +17,92 @@
   overflow: hidden;
 }
 
+.moonbit-diff-editor[data-overview-ruler="true"]
+  .moonbit-diff-editor-panes {
+  margin-inline-end: 30px;
+}
+
+.moonbit-diff-overview {
+  position: absolute;
+  z-index: 9;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 30px;
+  overflow: hidden;
+  contain: strict;
+  cursor: default;
+  touch-action: none;
+  background: var(--vscode-diffEditorOverview-background, #ffffff03);
+}
+
+.moonbit-diff-overview[hidden] {
+  display: none;
+}
+
+.moonbit-diff-overview-viewport {
+  position: absolute;
+  z-index: 10;
+  left: 0;
+  width: 30px;
+  box-sizing: border-box;
+  background: var(--vscode-scrollbarSlider-background, #79797966);
+}
+
+.moonbit-diff-overview-viewport:hover {
+  background: var(--vscode-scrollbarSlider-hoverBackground, #646464b3);
+}
+
+.moonbit-diff-overview-viewport:active {
+  background: var(--vscode-scrollbarSlider-activeBackground, #bfbfbf66);
+}
+
+.moonbit-diff-editor
+  .moonbit-diff-overview
+  .moonbit-code-overview-ruler {
+  position: absolute;
+  z-index: 9;
+  top: 0;
+  right: auto;
+  width: 15px;
+  height: 100%;
+  contain: strict;
+  pointer-events: none;
+}
+
+.moonbit-diff-editor
+  .moonbit-diff-overview
+  .moonbit-code-overview-ruler.original {
+  left: 0;
+}
+
+.moonbit-diff-editor
+  .moonbit-diff-overview
+  .moonbit-code-overview-ruler.modified {
+  left: 15px;
+}
+
+.moonbit-diff-editor-status {
+  position: absolute;
+  z-index: 30;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: var(--vscode-descriptionForeground, var(--vscode-foreground));
+  background: var(--vscode-editor-background);
+  pointer-events: none;
+}
+
+.moonbit-diff-editor[data-overview-ruler="true"]
+  .moonbit-diff-editor-status {
+  right: 30px;
+}
+
+.moonbit-diff-editor-status[hidden] {
+  display: none;
+}
+
 .moonbit-diff-editor-pane {
   position: relative;
   flex: 1 1 50%;
@@ -27,6 +113,18 @@
 
 .moonbit-diff-editor-inline .moonbit-diff-editor-modified {
   flex-basis: 100%;
+}
+
+/* Keep the non-interactive Inline original measurable for its external
+   overview track. Author CSS intentionally overrides the HTML hidden rule;
+   visibility still keeps it absent from paint, hit testing, and accessibility. */
+.moonbit-diff-editor-inline .moonbit-diff-editor-original[hidden] {
+  position: absolute;
+  inset: 0 auto 0 0;
+  display: block;
+  width: 5px;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .moonbit-diff-editor-sash {
@@ -78,42 +176,93 @@
 }
 
 .moonbit-diff-editor .diff-editor-line-delete {
-  background: var(--vscode-diffEditor-removedLineBackground, #ff000033);
+  background: var(
+    --vscode-diffEditor-removedLineBackground,
+    var(--vscode-diffEditor-removedTextBackground, #ff000033)
+  );
 }
 
 .moonbit-diff-editor .diff-editor-line-insert {
-  background: var(--vscode-diffEditor-insertedLineBackground, #9bb95533);
+  background: var(
+    --vscode-diffEditor-insertedLineBackground,
+    var(--vscode-diffEditor-insertedTextBackground, #9ccc2c33)
+  );
 }
 
 .moonbit-diff-editor .diff-editor-char-delete {
-  background: var(--vscode-diffEditor-removedTextBackground, #ff000066);
+  background: var(--vscode-diffEditor-removedTextBackground, #ff000033);
 }
 
 .moonbit-diff-editor .diff-editor-char-insert {
-  background: var(--vscode-diffEditor-insertedTextBackground, #9bb95566);
+  background: var(--vscode-diffEditor-insertedTextBackground, #9ccc2c33);
 }
 
 .moonbit-diff-editor .diff-editor-char-delete.diff-range-empty {
   margin-left: -1px;
   border-left: solid
-    var(--vscode-diffEditor-removedTextBackground, #ff000066) 3px;
+    var(--vscode-diffEditor-removedTextBackground, #ff000033) 3px;
 }
 
 .moonbit-diff-editor .diff-editor-char-insert.diff-range-empty {
   border-left: solid
-    var(--vscode-diffEditor-insertedTextBackground, #9bb95566) 3px;
+    var(--vscode-diffEditor-insertedTextBackground, #9ccc2c33) 3px;
 }
 
 .moonbit-diff-editor .diff-editor-gutter-delete {
-  background: var(--vscode-diffEditor-removedLineBackground, #ff000055);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--vscode-editor-foreground);
+  background: var(
+    --vscode-diffEditorGutter-removedLineBackground,
+    var(
+      --vscode-diffEditor-removedLineBackground,
+      var(--vscode-diffEditor-removedTextBackground, #ff000033)
+    )
+  );
 }
 
 .moonbit-diff-editor .diff-editor-gutter-insert {
-  background: var(--vscode-diffEditor-insertedLineBackground, #9bb95555);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--vscode-editor-foreground);
+  background: var(
+    --vscode-diffEditorGutter-insertedLineBackground,
+    var(
+      --vscode-diffEditor-insertedLineBackground,
+      var(--vscode-diffEditor-insertedTextBackground, #9ccc2c33)
+    )
+  );
 }
 
-.moonbit-diff-editor .diff-editor-alignment-zone {
-  background: var(--vscode-diffEditor-diagonalFill, transparent);
+.moonbit-diff-editor .diff-editor-gutter-delete::before,
+.moonbit-diff-editor .diff-editor-gutter-insert::before {
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0.7;
+}
+
+.moonbit-diff-editor .diff-editor-gutter-delete::before {
+  content: "−";
+}
+
+.moonbit-diff-editor .diff-editor-gutter-insert::before {
+  content: "+";
+}
+
+.moonbit-diff-editor .moonbit-diff-editor-alignment-spacer {
+  background-image: linear-gradient(
+    -45deg,
+    var(--vscode-diffEditor-diagonalFill, #cccccc33) 12.5%,
+    #0000 12.5%,
+    #0000 50%,
+    var(--vscode-diffEditor-diagonalFill, #cccccc33) 50%,
+    var(--vscode-diffEditor-diagonalFill, #cccccc33) 62.5%,
+    #0000 62.5%,
+    #0000 100%
+  );
+  background-size: 8px 8px;
 }
 
 .moonbit-diff-editor .diff-editor-inline-deleted-block,
@@ -121,7 +270,10 @@
   box-sizing: border-box;
   overflow: hidden;
   color: var(--vscode-editor-foreground);
-  background: var(--vscode-diffEditor-removedLineBackground, #ff000033);
+  background: var(
+    --vscode-diffEditor-removedLineBackground,
+    var(--vscode-diffEditor-removedTextBackground, #ff000033)
+  );
 }
 
 .moonbit-diff-editor .diff-editor-inline-deleted-line,
@@ -137,7 +289,7 @@
 }
 
 .moonbit-diff-editor .diff-editor-inline-char-delete {
-  background: var(--vscode-diffEditor-removedTextBackground, #ff000066);
+  background: var(--vscode-diffEditor-removedTextBackground, #ff000033);
 }
 
 .moonbit-diff-editor .diff-editor-inline-deleted-line-number {

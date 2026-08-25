@@ -120,42 +120,84 @@ priv struct DiffNavigationTarget {
 }
 
 ///|
-fn DiffState::next_change(
+// Pinned behavior oracle: vscode@07c20d96cf3f2cbc8142ac7079ba9048cf7f6134,
+// `accessibleDiffViewer.ts::computeViewElementGroups`. Its three context lines
+// on each side merge adjacent mappings while the gap is strictly less than
+// six lines. `commands.ts` binds F7/Shift+F7 to these groups.
+const DiffNavigationGroupLineMargin = 3
+
+///|
+fn DiffState::navigation_changes(
   self : DiffState,
-  current_change_index : Int?,
-) -> DiffNavigationTarget? {
-  let count = self.mapping_count()
-  if count == 0 {
-    return None
+) -> Array[@diff.DetailedLineRangeMapping] {
+  let result : Array[@diff.DetailedLineRangeMapping] = []
+  for mapping in self.mappings {
+    let change = mapping.line_range_mapping
+    if result.is_empty() {
+      result.push(change)
+      continue
+    }
+    let last_index = result.length() - 1
+    let previous = result[last_index]
+    if change.modified.start_line_number -
+      previous.modified.end_line_number_exclusive <
+      2 * DiffNavigationGroupLineMargin {
+      result[last_index] = DetailedLineRangeMapping(
+        previous.original.join(change.original),
+        previous.modified.join(change.modified),
+        None,
+      )
+    } else {
+      result.push(change)
+    }
   }
-  let index = match current_change_index {
-    Some(current) if current >= 0 && current < count => (current + 1) % count
-    _ => 0
-  }
-  Some({
-    change_index: index,
-    change_count: count,
-    change: self.mappings[index].line_range_mapping,
-  })
+  result
 }
 
 ///|
-fn DiffState::previous_change(
+// Keep navigation relative to the modified editor cursor rather than an
+// independent last-navigation index. Only the projected group list affects
+// navigation; renderer mappings remain canonical and ungrouped.
+fn DiffState::next_change_from_modified_line(
   self : DiffState,
-  current_change_index : Int?,
+  current_line_number : Int,
+  modified_line_count : Int,
 ) -> DiffNavigationTarget? {
-  let count = self.mapping_count()
+  let changes = self.navigation_changes()
+  let count = changes.length()
   if count == 0 {
     return None
   }
-  let index = match current_change_index {
-    Some(current) if current >= 0 && current < count =>
-      (current - 1 + count) % count
-    _ => count - 1
+  let mut index = 0
+  if current_line_number != modified_line_count {
+    while index < count &&
+          changes[index].modified.start_line_number <= current_line_number {
+      index += 1
+    }
   }
-  Some({
-    change_index: index,
-    change_count: count,
-    change: self.mappings[index].line_range_mapping,
-  })
+  if index == count {
+    index = 0
+  }
+  Some({ change_index: index, change_count: count, change: changes[index] })
+}
+
+///|
+fn DiffState::previous_change_from_modified_line(
+  self : DiffState,
+  current_line_number : Int,
+) -> DiffNavigationTarget? {
+  let changes = self.navigation_changes()
+  let count = changes.length()
+  if count == 0 {
+    return None
+  }
+  let mut index = count - 1
+  while index >= 0 &&
+        changes[index].modified.start_line_number >= current_line_number {
+    index -= 1
+  }
+  if index < 0 {
+    index = count - 1
+  }
+  Some({ change_index: index, change_count: count, change: changes[index] })
 }

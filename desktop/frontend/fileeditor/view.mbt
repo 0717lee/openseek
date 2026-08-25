@@ -1696,6 +1696,7 @@ pub fn breadcrumb_view(
       ]),
       review_diff_mode_toolbar(dispatch, state, ctx),
       review_diff_layout_toggle(dispatch, state, ctx),
+      review_diff_hide_unchanged_toggle(dispatch, state, ctx),
       @html.button(
         class="panel-toggle",
         title=if state.tree_open { "Hide file tree" } else { "Show file tree" },
@@ -1740,6 +1741,7 @@ pub fn breadcrumb_view(
     review_badge(dispatch, state, ctx),
     review_diff_mode_toolbar(dispatch, state, ctx),
     review_diff_layout_toggle(dispatch, state, ctx),
+    review_diff_hide_unchanged_toggle(dispatch, state, ctx),
     review_progress(dispatch, state, ctx),
     @html.button(
       class="panel-toggle",
@@ -1929,6 +1931,47 @@ fn review_diff_layout_toggle(
       },
       "",
     ),
+  )
+}
+
+///|
+/// Hide Unchanged is available for every complete full comparison, including
+/// history and non-MoonBit files. The option is independent of diff layout.
+fn review_diff_hide_unchanged_toggle(
+  dispatch : @cmd.Emit[Msg],
+  state : State,
+  ctx : Ctx,
+) -> @html.Html {
+  let review_ready = ctx.active_file is Some(path) &&
+    state.docs.get(path) is Some(doc) &&
+    doc.review is Some({ view_mode: ReviewDiff, .. }) &&
+    doc.diff_content() is Some(_)
+  let history_ready = ctx.active_history_diff is Some(diff) &&
+    state.history_docs.get(history_diff_key(diff)) is Some(history) &&
+    history.original.text() is Some(_) &&
+    history.modified.text() is Some(_)
+  guard review_ready || history_ready else {
+    return @html.span(class="review-badge hidden", "")
+  }
+  let enabled = state.review_diff_hide_unchanged_regions
+  @html.button(
+    type_="button",
+    class=if enabled {
+      "review-badge review-badge-action active"
+    } else {
+      "review-badge review-badge-action"
+    },
+    title=if enabled {
+      "Show all unchanged lines"
+    } else {
+      "Hide unchanged regions"
+    },
+    on_click=dispatch(ToggleReviewDiffHideUnchangedRegions),
+    attrs=@html.Attrs::build()
+      .data_set("hide-unchanged", enabled.to_string())
+      .aria_label("Hide unchanged regions")
+      .aria_pressed(enabled.to_string()),
+    "Hide unchanged",
   )
 }
 

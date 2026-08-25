@@ -23,6 +23,7 @@ pub(all) struct DiffEditorWidgetLifecycleSnapshot {
   after_render_waiter_count : Int
   after_render_remaining : Int
   view_model_pending_scheduler_count : Int
+  diff_up_to_date : Bool
   lifetime_subscription_count : Int
 }
 
@@ -67,6 +68,7 @@ pub fn DiffEditorWidget::lifecycle_snapshot(
     after_render_waiter_count: self.layout_render_waiters.length(),
     after_render_remaining: self.layout_render_remaining,
     view_model_pending_scheduler_count,
+    diff_up_to_date: self.view_model.is_diff_up_to_date(),
     lifetime_subscription_count: self.lifetime.length(),
   }
 }

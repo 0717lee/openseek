@@ -15,6 +15,15 @@ pub(all) enum DiffEditorViewModelState {
 } derive(Eq, Debug)
 
 ///|
+/// Internal diagnostic for the otherwise intentionally coarse public
+/// `Failed` state. Keeping it private distinguishes provider execution from
+/// rejected provider output without widening the DiffEditor API.
+priv enum DiffEditorViewModelFailure {
+  ProviderError
+  ValidationRejected
+}
+
+///|
 /// DOM-free owner of one model pair and its synchronous provider result.
 /// Browser timing is injected through RunOnceScheduler so white-box tests can
 /// drive the 0/200ms lanes without sleeping.
@@ -26,6 +35,7 @@ pub struct DiffEditorViewModel {
   mut options : @diff.DocumentDiffOptions
   mut state : DiffEditorViewModelState
   mut current_diff : @diff.DocumentDiff?
+  priv mut failure : DiffEditorViewModelFailure?
   mut generation : Int
   immediate : @base_browser.RunOnceScheduler
   content_debounce : @base_browser.RunOnceScheduler
@@ -48,6 +58,7 @@ pub fn DiffEditorViewModel::DiffEditorViewModel(
     options,
     state: NoModel,
     current_diff: None,
+    failure: None,
     generation: 0,
     immediate: @base_browser.RunOnceScheduler::new_with_timer(
       0, schedule_timeout,
@@ -107,6 +118,7 @@ pub fn DiffEditorViewModel::set_model(
   self.dispose_model_subscriptions()
   self.model = model
   self.current_diff = None
+  self.failure = None
   match model {
     None => self.state = NoModel
     Some(model) => {
@@ -174,6 +186,7 @@ fn DiffEditorViewModel::clear_model_pair_on_will_dispose(
   self.dispose_model_subscriptions()
   self.model = None
   self.current_diff = None
+  self.failure = None
   self.state = NoModel
   // Models are caller-owned. The disposing member and its still-live sibling
   // are only detached here; neither is disposed and no ownership transfer is
@@ -221,6 +234,7 @@ pub fn DiffEditorViewModel::update_options(
 fn DiffEditorViewModel::begin_pending(self : DiffEditorViewModel) -> Unit {
   self.generation += 1
   self.current_diff = None
+  self.failure = None
   self.state = if self.model is Some(_) { Pending } else { NoModel }
   self.did_update.fire(())
 }
@@ -399,7 +413,18 @@ fn line_range_contains_range(
     return start_is_inside && end_is_inside
   }
   if !child.is_empty() {
-    return false
+    let anchor_line = parent.start_line_number
+    // `normalize_range_mapping` extends both sides together. When one hunk
+    // side is empty, that can turn its collapsed anchor on an empty logical
+    // line into the canonical range covering exactly that line's newline.
+    // No other non-empty range belongs to an empty line-range parent.
+    return anchor_line >= 1 &&
+      anchor_line < snapshot.line_count() &&
+      snapshot.get_line_max_column(anchor_line) == 1 &&
+      child.start_line_number == anchor_line &&
+      child.start_column == 1 &&
+      child.end_line_number == anchor_line + 1 &&
+      child.end_column == 1
   }
   let anchor = if parent.start_line_number <= snapshot.line_count() {
     @base_common.Position(parent.start_line_number.max(1), 1)
@@ -572,6 +597,7 @@ fn DiffEditorViewModel::compute_current(self : DiffEditorViewModel) -> Unit {
   guard self.model is Some(model) else {
     self.state = NoModel
     self.current_diff = None
+    self.failure = None
     return
   }
   let generation = self.generation
@@ -601,19 +627,35 @@ fn DiffEditorViewModel::compute_current(self : DiffEditorViewModel) -> Unit {
       let result = normalize_document_diff(result, original, modified)
       if !valid_document_diff(result, original, modified) {
         self.current_diff = None
+        self.failure = Some(ValidationRejected)
         self.state = Failed
         self.did_update.fire(())
         return
       }
       self.current_diff = Some(result)
+      self.failure = None
       self.state = Ready
     }
     _ => {
       self.current_diff = None
+      self.failure = Some(ProviderError)
       self.state = Failed
     }
   }
   self.did_update.fire(())
+}
+
+///|
+/// Internal-package failure detail for diagnostics. The public Viewer facade
+/// keeps its coarse `Failed` state and does not forward this accessor.
+pub fn DiffEditorViewModel::get_failure_diagnostic(
+  self : DiffEditorViewModel,
+) -> String? {
+  match self.failure {
+    Some(ProviderError) => Some("provider error")
+    Some(ValidationRejected) => Some("validator rejection")
+    None => None
+  }
 }
 
 ///|
@@ -677,6 +719,7 @@ pub fn DiffEditorViewModel::dispose(self : DiffEditorViewModel) -> Unit {
   self.provider_subscription = None
   self.model = None
   self.current_diff = None
+  self.failure = None
   self.state = NoModel
   self.did_change_model.dispose()
   self.did_update.dispose()

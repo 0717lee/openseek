@@ -36,8 +36,7 @@ priv struct InlineDeletedViewZones {
 
 ///|
 struct InlineDeletedZone {
-  change_index : Int
-  zone_id : Ref[String?]
+  _unit : Unit
 }
 
 ///|
@@ -85,7 +84,6 @@ fn inline_deleted_view_zone_specs(
           rendered.margin_dom_node(),
           change,
         )
-        let zone_id : Ref[String?] = Ref(None)
         specs.push(
           ManagedCodeEditorViewZoneSpec(
             inline_deleted_zone_anchor(change),
@@ -95,10 +93,9 @@ fn inline_deleted_view_zone_specs(
             min_width_in_px=rendered.min_width_in_px(),
             ordinal=change_index,
             suppress_mouse_down=false,
-            on_zone_registered=(id, _zone) => zone_id.val = Some(id),
           ),
         )
-        zones.push({ change_index, zone_id })
+        zones.push({ _unit: () })
       }
       None => ()
     }

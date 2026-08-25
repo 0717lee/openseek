@@ -111,6 +111,39 @@ fn CodeEditorWidget::hook_view_input(
 }
 
 ///|
+/// Delegates an external vertical rail gesture to the current code view's
+/// retained scrollbar. Diff overview rails use this seam so track clicks and
+/// thumb drags keep the editor's canonical scrollbar geometry and pointer
+/// capture behavior.
+pub fn CodeEditorWidget::delegate_vertical_scrollbar_pointer_down(
+  self : CodeEditorWidget,
+  event : @rdom.Event,
+) -> Unit {
+  guard self.current_code_browser_data() is Some(browser) else { return }
+  browser.mouse_handler.delegate_vertical_scrollbar_pointer_down(event)
+}
+
+///|
+/// Delegates wheel input from an external rail to the current code view. The
+/// editor's normal wheel classifier, smooth-scroll policy, bounds, and event
+/// consumption remain authoritative.
+pub fn CodeEditorWidget::delegate_scroll_from_mouse_wheel_event(
+  self : CodeEditorWidget,
+  event : @rdom.Event,
+) -> Bool {
+  guard self.current_code_browser_data() is Some(browser) &&
+    event.to_wheel_event() is Some(wheel) else {
+    return false
+  }
+  let consumed = browser.mouse_handler.handle_editor_wheel(event, wheel)
+  if consumed {
+    event.prevent_default()
+    event.stop_propagation()
+  }
+  consumed
+}
+
+///|
 /// Registers one DOM listener in the per-model View lifetime store. The same
 /// closure identity is used for removal, and a late registration is disposed
 /// immediately by `View::add_disposable`.

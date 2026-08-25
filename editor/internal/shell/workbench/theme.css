@@ -63,6 +63,19 @@
   --vscode-editorError-foreground: #f14c4c;
   --vscode-editorInfo-foreground: #59a4f9;
   --vscode-editorHint-foreground: #eeeeeeb3;
+  /* Diff editor registry defaults and fallback hierarchy. */
+  --vscode-diffEditor-removedTextBackground: #ff000033;
+  --vscode-diffEditor-insertedTextBackground: #9ccc2c33;
+  --vscode-diffEditor-removedLineBackground: #ff000033;
+  --vscode-diffEditor-insertedLineBackground: #9bb95533;
+  --vscode-diffEditorGutter-removedLineBackground: var(
+    --vscode-diffEditor-removedLineBackground
+  );
+  --vscode-diffEditorGutter-insertedLineBackground: var(
+    --vscode-diffEditor-insertedLineBackground
+  );
+  --vscode-diffEditor-diagonalFill: #cccccc33;
+  --vscode-diffEditorOverview-background: #ffffff03;
   --vscode-peekView-border: #59a4f9;
   --vscode-peekViewTitle-background: #252526;
   --vscode-peekViewTitleLabel-foreground: #ffffff;
@@ -205,6 +218,9 @@
   --vscode-editorError-foreground: #e51400;
   --vscode-editorInfo-foreground: #0063d3;
   --vscode-editorHint-foreground: #6c6c6c;
+  --vscode-diffEditor-insertedTextBackground: #9ccc2c40;
+  --vscode-diffEditor-diagonalFill: #22222233;
+  --vscode-diffEditorOverview-background: #00000008;
   --vscode-peekView-border: #0063d3;
   --vscode-peekViewTitle-background: #f3f3f3;
   --vscode-peekViewTitleLabel-foreground: #000000;

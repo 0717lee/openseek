@@ -103,6 +103,23 @@
      fallback and is correctly inert (this viewer has no high-contrast
      theme). */
 
+  /* Diff hierarchy follows VS Code's normal-theme registry defaults. Text
+     highlights sit above a separate 20%-alpha whole-line wash; the gutter
+     inherits that line color rather than introducing a stronger third fill. */
+  --vscode-diffEditor-removedTextBackground: #ff000033;
+  --vscode-diffEditor-insertedTextBackground: #9ccc2c33;
+  --vscode-diffEditor-removedLineBackground: #ff000033;
+  --vscode-diffEditor-insertedLineBackground: #9bb95533;
+  --vscode-diffEditorGutter-removedLineBackground: var(
+    --vscode-diffEditor-removedLineBackground
+  );
+  --vscode-diffEditorGutter-insertedLineBackground: var(
+    --vscode-diffEditor-insertedLineBackground
+  );
+  --vscode-diffEditor-diagonalFill: #cccccc33;
+  --vscode-diffEditor-border: var(--color-border);
+  --vscode-diffEditorOverview-background: #ffffff03;
+
   /* References/definition peek. The tinted peek editor keeps VS Code's
      intent through the app's accent-soft wash. */
   --vscode-peekView-border: var(--color-accent);
@@ -237,6 +254,11 @@
      light values differ; the token-bound variables above follow the app
      theme by themselves. */
   --vscode-editor-rangeHighlightBackground: #fdff0033;
+  /* Light Modern raises only inserted inline text to 25%; deletion and both
+     whole-line washes remain at 20%. */
+  --vscode-diffEditor-insertedTextBackground: #9ccc2c40;
+  --vscode-diffEditor-diagonalFill: #22222233;
+  --vscode-diffEditorOverview-background: #00000008;
   --vscode-peekViewEditor-matchHighlightBackground: #f5d802de;
   --vscode-widget-shadow: rgb(0 0 0 / 16%);
   --vscode-shadow-hover: rgb(0 0 0 / 16%);

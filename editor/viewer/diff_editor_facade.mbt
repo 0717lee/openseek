@@ -39,6 +39,9 @@ struct DiffEditorOptions {
   diff_word_wrap : DiffWordWrap
   overview_ruler : Bool
   ignore_trim_whitespace : Bool
+  hide_unchanged_regions : Bool
+  hide_unchanged_regions_context_line_count : Int
+  hide_unchanged_regions_minimum_line_count : Int
 }
 
 ///|
@@ -54,6 +57,9 @@ pub fn DiffEditorOptions::DiffEditorOptions(
   diff_word_wrap? : DiffWordWrap = Inherit,
   overview_ruler? : Bool = true,
   ignore_trim_whitespace? : Bool = true,
+  hide_unchanged_regions? : Bool = false,
+  hide_unchanged_regions_context_line_count? : Int = 3,
+  hide_unchanged_regions_minimum_line_count? : Int = 3,
 ) -> DiffEditorOptions {
   {
     editor_options,
@@ -65,6 +71,13 @@ pub fn DiffEditorOptions::DiffEditorOptions(
     diff_word_wrap,
     overview_ruler,
     ignore_trim_whitespace,
+    hide_unchanged_regions,
+    hide_unchanged_regions_context_line_count: hide_unchanged_regions_context_line_count.max(
+      0,
+    ),
+    hide_unchanged_regions_minimum_line_count: hide_unchanged_regions_minimum_line_count.max(
+      0,
+    ),
   }
 }
 
@@ -87,6 +100,16 @@ pub fn DiffEditorOptions::with_editor_options(
   editor_options : ViewerOptions,
 ) -> DiffEditorOptions {
   { ..self, editor_options, }
+}
+
+///|
+/// Enables or disables collapsing sufficiently large unchanged regions while
+/// retaining the configured context and minimum-hidden-line thresholds.
+pub fn DiffEditorOptions::with_hide_unchanged_regions(
+  self : DiffEditorOptions,
+  hide_unchanged_regions : Bool,
+) -> DiffEditorOptions {
+  { ..self, hide_unchanged_regions, }
 }
 
 ///|
@@ -125,6 +148,9 @@ fn DiffEditorOptions::internal(
     diff_word_wrap=self.diff_word_wrap.internal(),
     overview_ruler=self.overview_ruler,
     ignore_trim_whitespace=self.ignore_trim_whitespace,
+    hide_unchanged_regions=self.hide_unchanged_regions,
+    hide_unchanged_regions_context_line_count=self.hide_unchanged_regions_context_line_count,
+    hide_unchanged_regions_minimum_line_count=self.hide_unchanged_regions_minimum_line_count,
   )
 }
 

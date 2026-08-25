@@ -197,6 +197,7 @@ test "historical tabs use only the inert diff surface and history breadcrumb" {
   assert_true(breadcrumb.contains("11111111"))
   assert_true(breadcrumb.contains("src/main.mbt"))
   assert_true(breadcrumb.contains("aria-label=\"Inline diff layout\""))
+  assert_true(breadcrumb.contains("aria-label=\"Hide unchanged regions\""))
   assert_false(breadcrumb.contains("Mark reviewed"))
   assert_false(breadcrumb.contains("View file"))
 }
