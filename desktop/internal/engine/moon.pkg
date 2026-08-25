@@ -18,6 +18,7 @@ import {
   "moonbitlang/async",
   "moonbitlang/async/fs",
   "moonbitlang/async/process",
+  "moonbitlang/core/debug",
   "moonbitlang/core/env" @sys,
   "moonbitlang/core/json",
   "moonbitlang/core/string",

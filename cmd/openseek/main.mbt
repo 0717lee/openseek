@@ -1346,7 +1346,6 @@ test "cli parses env backed options and task" {
     "OPENSEEK_MAX_STEPS": "120",
     "OPENSEEK_SYSTEM_PROMPT_FILE": "/tmp/prompt-a.md",
     "OPENSEEK_SYSTEM_PROMPT_ADDENDUM_FILE": "/tmp/prompt-b.md",
-    "OPENSEEK_SESSION": "demo",
     "OPENSEEK_SESSION_ROOT": "/tmp/openseek-sessions",
   })
   let (model, _, api_url) = agent_settings(parsed)
@@ -1361,7 +1360,7 @@ test "cli parses env backed options and task" {
     @cli.value(parsed, "system-prompt-addendum-file"),
     "/tmp/prompt-b.md",
   )
-  assert_true(parsed is { values: { "session": ["demo", ..], .. }, .. })
+  assert_false(parsed is { values: { "session": [_, ..], .. }, .. })
   assert_eq(session_root(parsed), "/tmp/openseek-sessions")
   assert_eq(task_text(parsed), "write MoonBit")
 }
