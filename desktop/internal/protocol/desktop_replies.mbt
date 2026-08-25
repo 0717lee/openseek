@@ -933,24 +933,6 @@ pub(all) struct ApplyUpdateReply {
   applied : Bool
 } derive(Debug, Eq, FromJson, ToJson)
 
-///|
-pub(all) struct AppEntry {
-  id : String
-  name : String
-  icon : String
-} derive(Debug, Eq, FromJson, ToJson)
-
-///|
-pub(all) struct ListAppsReply {
-  apps : Array[AppEntry]
-} derive(Debug, Eq, FromJson, ToJson)
-
-///|
-pub(all) struct LaunchAppReply {
-  launched : Bool
-} derive(Debug, Eq, FromJson, ToJson)
-
-///|
 pub(all) struct MarketSkill {
   name : String
   module_name : String
@@ -1716,19 +1698,6 @@ pub extend AgentStreamEvent with Eq::{equal, not_equal}
 ///|
 pub extend AgentStreamEvent with ToJson::{to_json}
 
-///|
-pub extend AppEntry with Debug::{to_repr}
-
-///|
-pub extend AppEntry with FromJson::{from_json}
-
-///|
-pub extend AppEntry with Eq::{equal, not_equal}
-
-///|
-pub extend AppEntry with ToJson::{to_json}
-
-///|
 pub extend ApplyUpdateReply with Debug::{to_repr}
 
 ///|
@@ -2100,31 +2069,6 @@ pub extend InstalledSkillsReply with Eq::{equal, not_equal}
 ///|
 pub extend InstalledSkillsReply with ToJson::{to_json}
 
-///|
-pub extend LaunchAppReply with Debug::{to_repr}
-
-///|
-pub extend LaunchAppReply with FromJson::{from_json}
-
-///|
-pub extend LaunchAppReply with Eq::{equal, not_equal}
-
-///|
-pub extend LaunchAppReply with ToJson::{to_json}
-
-///|
-pub extend ListAppsReply with Debug::{to_repr}
-
-///|
-pub extend ListAppsReply with FromJson::{from_json}
-
-///|
-pub extend ListAppsReply with Eq::{equal, not_equal}
-
-///|
-pub extend ListAppsReply with ToJson::{to_json}
-
-///|
 pub extend LoadSessionReply with Debug::{to_repr}
 
 ///|

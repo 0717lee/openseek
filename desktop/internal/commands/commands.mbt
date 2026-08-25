@@ -551,18 +551,6 @@ pub let update_apply : Command[
   @protocol.ApplyUpdateReply,
 ] = Command("update.apply")
 
-///|
-pub let app_list : Command[@protocol.EmptyPayload, @protocol.ListAppsReply] = Command(
-  "app.list",
-)
-
-///|
-pub let app_launch : Command[
-  @protocol.LaunchAppPayload,
-  @protocol.LaunchAppReply,
-] = Command("app.launch")
-
-///|
 pub let git_branch : Command[
   @protocol.GitBranchPayload,
   @protocol.GitBranchReply,
