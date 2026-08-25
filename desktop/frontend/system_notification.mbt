@@ -14,6 +14,32 @@ priv struct FinishedSystemNotification {
 }
 
 ///|
+/// One live permission question shown by the local desktop host. Recovered
+/// pending approvals never construct this value, so reconnecting does not
+/// replay an old system notification.
+priv struct ApprovalSystemNotification {
+  run_id : String
+  tool_name : String
+  detail : String
+}
+
+///|
+/// Keep a Unicode character boundary while fitting a system banner.
+fn truncate_notification_body(body : String) -> String {
+  let out = StringBuilder()
+  let mut count = 0
+  for ch in body.trim() {
+    if count >= NotificationBodyMaxChars {
+      out.write_string("…")
+      break
+    }
+    out.write_char(ch)
+    count += 1
+  }
+  out.to_string()
+}
+
+///|
 /// Cancellation is user-initiated and stays quiet. Other terminal statuses
 /// preserve the titles used by the former direct native notification path.
 fn FinishedSystemNotification::title(
@@ -28,34 +54,25 @@ fn FinishedSystemNotification::title(
 }
 
 ///|
-/// Keep a Unicode character boundary while fitting the system banner.
+/// Use the final answer when present and keep the existing fallback otherwise.
 fn FinishedSystemNotification::body(
   self : FinishedSystemNotification,
 ) -> String {
   guard self.answer is Some(answer) && !answer.is_blank() else {
     return "The conversation is ready for you."
   }
-  let out = StringBuilder()
-  let mut count = 0
-  for ch in answer.trim() {
-    if count >= NotificationBodyMaxChars {
-      out.write_string("…")
-      break
-    }
-    out.write_char(ch)
-    count += 1
-  }
-  out.to_string()
+  truncate_notification_body(answer)
 }
 
 ///|
-/// Post the terminal notification through `__MoonBit__.notification.show`.
+/// Post one notification through `__MoonBit__.notification.show`.
 /// A missing extension, denied permission, or rejected promise is deliberately
 /// silent because the transcript remains the authoritative result.
-fn FinishedSystemNotification::command(
-  self : FinishedSystemNotification,
+fn show_system_notification(
+  title : String,
+  body : String,
+  run_id : String,
 ) -> @cmd.Cmd {
-  guard self.title() is Some(title) else { return @cmd.none }
   @cmd.custom_cmd(_scheduler => {
     guard @interop.moonbit_bridge_root() is Some(root) &&
       @interop.js_prop(root, "notification") is Some(notification) &&
@@ -64,8 +81,8 @@ fn FinishedSystemNotification::command(
     }
     let payload = @js.Object::new()
     payload["title"] = title
-    payload["body"] = self.body()
-    payload["payload"] = self.run_id
+    payload["body"] = body
+    payload["payload"] = run_id
     @js.async_run(() => {
       let _ : @js.Value = @interop.js_method_promise(
         notification,
@@ -79,6 +96,55 @@ fn FinishedSystemNotification::command(
 }
 
 ///|
+fn FinishedSystemNotification::command(
+  self : FinishedSystemNotification,
+) -> @cmd.Cmd {
+  guard self.title() is Some(title) else { return @cmd.none }
+  show_system_notification(title, self.body(), self.run_id)
+}
+
+///|
+fn ApprovalSystemNotification::title(
+  _self : ApprovalSystemNotification,
+) -> String {
+  "Permission required"
+}
+
+///|
+fn ApprovalSystemNotification::body(
+  self : ApprovalSystemNotification,
+) -> String {
+  truncate_notification_body(
+    "\{self.tool_name} is asking permission to \{self.detail}",
+  )
+}
+
+///|
+fn ApprovalSystemNotification::command(
+  self : ApprovalSystemNotification,
+) -> @cmd.Cmd {
+  show_system_notification(self.title(), self.body(), self.run_id)
+}
+
+///|
+/// Select only live approval events from the embedded local desktop. Remote
+/// pages cannot post Proton notifications, and approval recovery does not pass
+/// through the live engine-event arm that calls this function.
+fn approval_system_notification(
+  channel : @interop.ChannelId,
+  run_id : String?,
+  event : @transcript.EngineEvent,
+) -> ApprovalSystemNotification? {
+  guard channel is Local else { return None }
+  guard run_id is Some(run_id) else { return None }
+  match event {
+    ApprovalRequested(tool_name~, detail~, ..) =>
+      Some({ run_id, tool_name, detail })
+    _ => None
+  }
+}
+
+///|
 test "finished system notifications preserve status titles and fallback body" {
   let completed = FinishedSystemNotification::{
     run_id: "r1",
@@ -89,4 +155,35 @@ test "finished system notifications preserve status titles and fallback body" {
   assert_eq(completed.body(), "The conversation is ready for you.")
   let cancelled = { ..completed, status: "cancelled" }
   assert_eq(cancelled.title(), None)
+}
+
+///|
+test "only live local approval events create system notifications" {
+  let event = @transcript.ApprovalRequested(
+    id="ap-1",
+    tool_name="run_moonbit",
+    detail="run this snippet with no sandbox policy",
+    body=None,
+  )
+  guard approval_system_notification(Local, Some("r1"), event)
+    is Some(notification) else {
+    fail("expected a local approval notification")
+  }
+  assert_eq(notification.title(), "Permission required")
+  assert_eq(
+    notification.body(),
+    "run_moonbit is asking permission to run this snippet with no sandbox policy",
+  )
+  assert_true(
+    approval_system_notification(Remote("device-1"), Some("r1"), event)
+    is None,
+  )
+  assert_true(approval_system_notification(Local, None, event) is None)
+  assert_true(
+    approval_system_notification(
+      Local,
+      Some("r1"),
+      @transcript.ApprovalResolved(id="ap-1"),
+    ) is None,
+  )
 }
