@@ -332,11 +332,41 @@
   white-space: pre-wrap;
 }
 
-.msg-content.danger {
-  border-left: 2px solid var(--color-danger);
-  border-radius: var(--radius-xs);
-  background: var(--color-danger-soft);
-  padding: 8px 12px;
+/* A failed/aborted terminal is durable run status, not assistant prose. Keep
+   it in transcript order as an unboxed status row. Semantic color on the icon
+   and exact diagnostic text carries the state without adding another surface
+   to the transcript. */
+.msg.transcript-error {
+  /* The stream's 20px gap was sized for surfaced cards and prose blocks. A
+     naked status row needs a tighter relationship with both adjacent rows. */
+  margin-block: -8px;
+}
+
+.transcript-error-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 4px 0;
+}
+
+.transcript-error-icon {
+  --icon-size: var(--icon-sm);
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  color: var(--color-danger);
+}
+
+.transcript-error-message {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  color: var(--color-danger);
+  line-height: var(--line-height-normal);
 }
 
 /* markdown-rendered assistant content: block elements own the spacing,

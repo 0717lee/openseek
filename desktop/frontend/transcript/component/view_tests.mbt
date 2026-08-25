@@ -809,6 +809,30 @@ test "every message names its speaker to assistive technology" {
 
 ///|
 #warnings("-alert_unstable")
+test "transcript errors use the unboxed status row" {
+  let rendered = transcript_item_view(
+    {
+      kind: Assistant(is_danger=true),
+      content: "agent failed: `ConnectionClosed`",
+      ts: None,
+      sequence: Some(2),
+    },
+    _ => @cmd.none,
+  )
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  assert_true(markup.contains("class=\"msg transcript-error\""))
+  assert_true(markup.contains("class=\"transcript-error-row\""))
+  assert_true(markup.contains("class=\"transcript-error-icon\""))
+  assert_true(markup.contains("class=\"msg-content transcript-error-message\""))
+  assert_true(markup.contains("agent failed: "))
+  assert_true(
+    markup.contains("<code class=\"inline-code\">ConnectionClosed</code>"),
+  )
+  assert_false(markup.contains("msg-content danger"))
+}
+
+///|
+#warnings("-alert_unstable")
 test "assistant UML exposes the shared diagram viewport marker" {
   let rendered = transcript_item_view(
     {
