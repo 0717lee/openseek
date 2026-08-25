@@ -810,17 +810,25 @@ fn assistant_message_view(
   assistant_name : String,
   is_danger~ : Bool,
 ) -> @html.Html {
-  // Errors and abort notices are plain text; only real assistant replies are
-  // markdown. Finished-terminal answers share this exact presentation.
+  // Errors and abort notices are durable run status rather than assistant
+  // prose. Keep their exact text and inline code readable in an unboxed status
+  // row; only real assistant replies use markdown. Finished-terminal answers
+  // share the ordinary assistant presentation.
   let body = if is_danger {
-    @html.div(class="msg-content danger", inline_code_nodes(content))
+    @html.div(class="transcript-error-row", [
+      @html.span(class="transcript-error-icon", @icons.icon(@icons.icon_close)),
+      @html.div(
+        class="msg-content transcript-error-message",
+        inline_code_nodes(content),
+      ),
+    ])
   } else {
     @html.div(
       class="msg-content markdown",
       @markdown.markdown_nodes(content, open_file=on_open),
     )
   }
-  @html.div(class="msg", [
+  @html.div(class=if is_danger { "msg transcript-error" } else { "msg" }, [
     @html.div(class="msg-body", [speaker_label(assistant_name), body]),
   ])
 }
