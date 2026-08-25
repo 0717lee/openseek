@@ -15,7 +15,8 @@
 /// so a card never has to invent a reading of a call it does not understand.
 fn custom_card(name : String, arguments : String) -> (String, @html.Html)? {
   match name {
-    "mbtx" | "run_moonbit" => mbtx_card(arguments).map(card => ("Program", card))
+    "mbtx" | "run_moonbit" =>
+      mbtx_card(arguments).map(card => ("Program", card))
     "edit" => edit_card(arguments).map(card => ("Change", card))
     "multi_edit" => multi_edit_card(arguments).map(card => ("Changes", card))
     _ => None
