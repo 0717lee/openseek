@@ -3,16 +3,13 @@
 
 ///|
 /// Where durable sessions live when a run names a session: the payload's
-/// explicit root, then the OPENSEEK_SESSION_ROOT environment, then a stable
-/// absolute default under the user's home directory. The absolute fallback
-/// matters because a packaged app can run with `/` as its working directory,
-/// where the engine's relative `.openseek` default could never be created.
+/// explicit root, then a stable absolute default under the user's home
+/// directory. The absolute fallback matters because a packaged app can run
+/// with `/` as its working directory, where the engine's relative `.openseek`
+/// default could never be created.
 pub fn global_store_root(payload_root? : @pathx.Path) -> @pathx.Absolute? {
   if payload_root is Some(root) {
     return Some(root.resolve())
-  }
-  if @env.get("OPENSEEK_SESSION_ROOT") is Some(root) {
-    return Some(@pathx.Path(root).resolve())
   }
   home_session_root()
 }

@@ -122,6 +122,25 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
   )
   assert_true(fallback_breadcrumb.contains("aria-live=\"polite\""))
 
+  let core_fallback_breadcrumb = render_review_html(
+    breadcrumb_view(
+      test_emit(),
+      {
+        ..diff_state,
+        review_diff_mode: ReviewDiffToken,
+        review_diff_status: Some({
+          requested: ReviewDiffToken,
+          effective: ReviewDiffCore,
+          fell_back: true,
+        }),
+      },
+      ctx,
+    ),
+  )
+  assert_true(
+    core_fallback_breadcrumb.contains("Token unavailable — showing Core diff"),
+  )
+
   let inline_breadcrumb = render_review_html(
     breadcrumb_view(
       test_emit(),

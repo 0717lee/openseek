@@ -1,5 +1,5 @@
 ///|
-test "trial environment pins workspace-local session root" {
+test "trial environment configures model and isolated skills" {
   let config = Config(
     api_key="key",
     model=Deepseek(V4Flash),
@@ -25,10 +25,6 @@ test "trial environment pins workspace-local session root" {
   )
   assert_true(kimi_env.get("KIMI") == Some("key"))
   assert_true(kimi_env.get("DEEPSEEK") is None)
-  guard env.get("OPENSEEK_SESSION_ROOT") is Some(root) else {
-    fail("expected OPENSEEK_SESSION_ROOT")
-  }
-  assert_eq(root, ".openseek")
   guard env.get("OPENSEEK_GLOBAL_SKILLS_DIR") is Some(skills_dir) else {
     fail("expected OPENSEEK_GLOBAL_SKILLS_DIR")
   }

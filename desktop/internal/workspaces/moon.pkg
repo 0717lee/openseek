@@ -1,5 +1,4 @@
 import {
-  "openseek_desktop/internal/env",
   "openseek_desktop/internal/fsx",
   "openseek_desktop/internal/gitx",
   "openseek_desktop/internal/home",

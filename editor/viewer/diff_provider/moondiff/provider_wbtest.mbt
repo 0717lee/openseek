@@ -109,6 +109,34 @@ test "Tree parse failure reports Token fallback" {
 }
 
 ///|
+test "invalid Tree geometry falls back to strict Core" {
+  let original = "fn stable() { 0 }"
+  let modified = "fn inserted() { 1 }\nfn stable() { 2 }"
+  let options : @diff.DocumentDiffOptions = { ignore_trim_whitespace: false }
+  let expected = @diff.CoreDocumentDiffProvider().compute_diff(
+    TextSnapshot(original),
+    TextSnapshot(modified),
+    options,
+  )
+  for ignore_comments in [false, true] {
+    let provider = MoonDocumentDiffProvider(mode=Tree, ignore_comments~)
+    let result = compute_with_provider(
+      provider,
+      original,
+      modified,
+      ignore_trim_whitespace=false,
+    )
+    assert_eq(result, expected)
+    assert_eq(provider.get_status(), {
+      requested: Tree,
+      effective: Core,
+      fell_back: true,
+    })
+    provider.dispose()
+  }
+}
+
+///|
 test "ignored-only rows become geometry-only additional alignments" {
   let provider = MoonDocumentDiffProvider(mode=Token, ignore_comments=true)
   let result = compute_with_provider(
@@ -130,6 +158,134 @@ test "equal-length ignored-only edit is a valid empty specialized result" {
   assert_eq(provider.get_status().effective, Token)
   assert_false(provider.get_status().fell_back)
   provider.dispose()
+}
+
+///|
+test "Token keeps ignored inserted comments separate from code insertions" {
+  let provider = MoonDocumentDiffProvider(mode=Token, ignore_comments=true)
+  let result = compute_with_provider(
+    provider, "fn stable() {}", "/// ignored before\nfn inserted() {}\n/// ignored after\nfn stable() {}",
+  )
+  guard result.changes is [change] else {
+    fail("expected one inserted code change")
+  }
+  assert_eq(change.original, LineRange(1, 1))
+  assert_eq(change.modified, LineRange(2, 3))
+  assert_eq(result.additional_alignments, [
+    LineRangeMapping(LineRange(1, 1), LineRange(1, 2)),
+    LineRangeMapping(LineRange(1, 1), LineRange(3, 4)),
+  ])
+  assert_eq(provider.get_status(), {
+    requested: Token,
+    effective: Token,
+    fell_back: false,
+  })
+  provider.dispose()
+}
+
+///|
+test "Token keeps ignored deleted comments separate from code deletions" {
+  let provider = MoonDocumentDiffProvider(mode=Token, ignore_comments=true)
+  let result = compute_with_provider(
+    provider, "/// ignored before\nfn deleted() {}\n/// ignored after\nfn stable() {}",
+    "fn stable() {}",
+  )
+  guard result.changes is [change] else {
+    fail("expected one deleted code change")
+  }
+  assert_eq(change.original, LineRange(2, 3))
+  assert_eq(change.modified, LineRange(1, 1))
+  assert_eq(result.additional_alignments, [
+    LineRangeMapping(LineRange(1, 2), LineRange(1, 1)),
+    LineRangeMapping(LineRange(3, 4), LineRange(1, 1)),
+  ])
+  assert_eq(provider.get_status(), {
+    requested: Token,
+    effective: Token,
+    fell_back: false,
+  })
+  provider.dispose()
+}
+
+///|
+test "Token does not join inserted code across an ignored comment" {
+  let provider = MoonDocumentDiffProvider(mode=Token, ignore_comments=true)
+  let result = compute_with_provider(
+    provider, "fn stable() {}", "fn inserted_before() {}\n/// ignored\nfn inserted_after() {}\nfn stable() {}",
+  )
+  assert_eq(result.changes.map(change => (change.original, change.modified)), [
+    (LineRange(1, 1), LineRange(1, 2)),
+    (LineRange(1, 1), LineRange(3, 4)),
+  ])
+  assert_eq(result.additional_alignments, [
+    LineRangeMapping(LineRange(1, 1), LineRange(2, 3)),
+  ])
+  assert_eq(provider.get_status().effective, Token)
+  provider.dispose()
+}
+
+///|
+test "Token does not join deleted code across an ignored comment" {
+  let provider = MoonDocumentDiffProvider(mode=Token, ignore_comments=true)
+  let result = compute_with_provider(
+    provider, "fn deleted_before() {}\n/// ignored\nfn deleted_after() {}\nfn stable() {}",
+    "fn stable() {}",
+  )
+  assert_eq(result.changes.map(change => (change.original, change.modified)), [
+    (LineRange(1, 2), LineRange(1, 1)),
+    (LineRange(3, 4), LineRange(1, 1)),
+  ])
+  assert_eq(result.additional_alignments, [
+    LineRangeMapping(LineRange(2, 3), LineRange(1, 1)),
+  ])
+  assert_eq(provider.get_status().effective, Token)
+  provider.dispose()
+}
+
+///|
+test "invalid specialized candidates settle to Core without reentrant changes" {
+  let original = @model.TextSnapshot("fn stable() {}")
+  let modified = @model.TextSnapshot(
+    "/// ignored before\nfn inserted() {}\n/// ignored after\nfn stable() {}",
+  )
+  let invalid : @diff.DocumentDiff = {
+    changes: [DetailedLineRangeMapping(LineRange(1, 1), LineRange(2, 3), None)],
+    additional_alignments: [LineRangeMapping(LineRange(1, 1), LineRange(1, 4))],
+  }
+  let options : @diff.DocumentDiffOptions = { ignore_trim_whitespace: true }
+  let expected = @diff.CoreDocumentDiffProvider().compute_diff(
+    original, modified, options,
+  )
+  for configuration in [(Token, Token, false), (Tree, Token, true)] {
+    let (requested, specialized_effective, specialized_fell_back) = configuration
+    let provider = MoonDocumentDiffProvider(mode=requested)
+    let provider_object : &@diff.DocumentDiffProvider = provider
+    let updates = Ref(0)
+    let subscription = provider_object.on_did_change(() => updates.val += 1)
+    let result = provider.settle_specialized_or_core(
+      requested,
+      Some((invalid, specialized_effective, specialized_fell_back)),
+      expected,
+      original,
+      modified,
+    )
+    assert_eq(result, expected)
+    assert_eq(provider.get_status(), {
+      requested,
+      effective: Core,
+      fell_back: true,
+    })
+    assert_eq(updates.val, 0)
+    provider.set_ignore_comments(false)
+    assert_eq(provider.get_status(), {
+      requested,
+      effective: requested,
+      fell_back: false,
+    })
+    assert_eq(updates.val, 1)
+    subscription.dispose()
+    provider.dispose()
+  }
 }
 
 ///|

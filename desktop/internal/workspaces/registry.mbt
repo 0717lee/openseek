@@ -115,9 +115,7 @@ pub async fn registered() -> Array[@pathx.Absolute] {
 ///|
 async fn write_registry(registry : Registry) -> Unit {
   guard global_store_root() is Some(root) else {
-    raise WorkspaceError(
-      "cannot determine a session root; set OPENSEEK_SESSION_ROOT",
-    )
+    raise WorkspaceError("cannot determine a session root: HOME is unavailable")
   }
   @fsx.ensure_dir(root.to_path()) catch {
     error if @async.is_being_cancelled() => raise error

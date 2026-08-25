@@ -45,9 +45,8 @@ generates a `desktop-YYYYMMDD-HHMMSS-mmm` session id at launch and sends it
 with every `start`, so the conversation survives the engine process and the
 app. The sidebar's **New chat** button rotates to a fresh id — usable at any
 time; a conversation that is still running keeps going in the background.
-Sessions are stored under the first
-of: the `session_root` start-payload field, `OPENSEEK_SESSION_ROOT`, or
-`~/.openseek` (absolute, so a packaged app whose working directory is `/`
+Sessions are stored under the `session_root` start-payload field, falling back
+to `~/.openseek` (absolute, so a packaged app whose working directory is `/`
 still works). They are interoperable with the CLI/TUI stores: resume one with
 `openseek tui --session-root ~/.openseek --session <id>`.
 
