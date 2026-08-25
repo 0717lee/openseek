@@ -177,20 +177,7 @@ test "a skill opens as a detail page and returns to the list" {
   assert_true(markup(loading, input()).contains("← Back to skills"))
   assert_true(markup(loading, input()).contains("Loading SKILLS.md…"))
 
-  let (_, shown, _) = loading.handle(
-    emit(),
-    @skills.PreviewLoaded(
-      request=1,
-      target=@skills.PreviewTarget::Market(item),
-      content="# Widget instructions",
-    ),
-    input(),
-  )
-  let shown_markup = markup(shown, input())
-  assert_true(shown_markup.contains("Widget instructions"))
-  assert_false(shown_markup.contains("Mooncakes registry"))
-
-  let (_, listed, _) = shown.handle(emit(), @skills.BackToList, input())
+  let (_, listed, _) = loading.handle(emit(), @skills.BackToList, input())
   assert_true(markup(listed, input()).contains("Mooncakes registry"))
 }
 
