@@ -1457,7 +1457,6 @@ async fn engine_process_env(
   env["OPENSEEK_MODEL"] = config.model
   env["OPENSEEK_THINKING"] = config.thinking.wire()
   env["OPENSEEK_MAX_STEPS"] = config.max_steps.to_string()
-  env["OPENSEEK_DIR"] = "."
   if resolved_global_skills_dir() is Some(dir) {
     env["OPENSEEK_GLOBAL_SKILLS_DIR"] = dir.to_string()
   }
