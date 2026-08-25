@@ -1140,7 +1140,7 @@ async test "viewer stylesheet assembles from the editor workspace member" {
   let ws = locate_workspace()
   let css = assembled_viewer_stylesheet(ws)
   assert_true(css.contains("/* viewer_theme.css */"))
-  assert_true(css.contains(":root[data-theme=\"light\"] .run-moonbit-source"))
+  assert_true(css.contains(":root[data-theme=\"light\"] .mbtx-source"))
   assert_true(
     css.contains(
       "/* viewer/contrib/markdown_comments/browser/markdown_comments.css */",

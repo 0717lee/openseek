@@ -42,7 +42,7 @@ pub fn output_reports_policy_refusal(output : String) -> Bool {
 /// anyone. The one door it may name is the sanctioned one, and only where that
 /// door exists — see `policy_refusal_with_escalation`.
 pub let policy_refusal_feedback : String =
-  #|run_moonbit sandbox: that failure is this tool's policy refusing something, not a
+  #|mbtx sandbox: that failure is this tool's policy refusing something, not a
   #|filesystem problem to debug — either the program is not on the spawn allowlist, or
   #|the snippet tried to write outside its own `@fs.tmpdir()`. Reach for the
   #|MoonBit replacement of the utility you wanted rather than another program, and

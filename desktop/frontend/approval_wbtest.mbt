@@ -19,7 +19,7 @@ test "a permission question becomes the conversation's pending approval" {
     running_conversation(),
     ApprovalRequested(
       id="ap-1",
-      tool_name="run_moonbit",
+      tool_name="mbtx",
       detail="run this snippet with no sandbox policy",
       body=Some("fn main { @myshell.Cmd(\"npm\", [\"ci\"]) }"),
     ),
@@ -28,7 +28,7 @@ test "a permission question becomes the conversation's pending approval" {
     fail("expected a pending approval")
   }
   assert_eq(pending.id, "ap-1")
-  assert_eq(pending.tool_name, "run_moonbit")
+  assert_eq(pending.tool_name, "mbtx")
   // The engine's sentence is kept verbatim: a client that paraphrases a
   // permission is a client that can get it wrong.
   assert_eq(pending.detail, "run this snippet with no sandbox policy")
@@ -47,7 +47,7 @@ test "settlement retires the matching question and nothing else" {
     running_conversation(),
     ApprovalRequested(
       id="ap-1",
-      tool_name="run_moonbit",
+      tool_name="mbtx",
       detail="escalate",
       body=Some("fn main { println(1) }"),
     ),
@@ -67,7 +67,7 @@ test "a finished turn takes its unanswered question with it" {
     running_conversation(),
     ApprovalRequested(
       id="ap-1",
-      tool_name="run_moonbit",
+      tool_name="mbtx",
       detail="escalate",
       body=Some("fn main { println(1) }"),
     ),
@@ -91,7 +91,7 @@ test "answering is recorded once and does not retire the card" {
     running_conversation(),
     ApprovalRequested(
       id="ap-1",
-      tool_name="run_moonbit",
+      tool_name="mbtx",
       detail="escalate",
       body=Some("fn main { println(1) }"),
     ),
@@ -138,7 +138,7 @@ test "the card shows the question and both answers" {
     running_conversation(),
     ApprovalRequested(
       id="ap-1",
-      tool_name="run_moonbit",
+      tool_name="mbtx",
       detail="run this snippet with no sandbox policy",
       body=Some("fn main { @myshell.Cmd(\"npm\", [\"ci\"]) }"),
     ),
@@ -156,7 +156,7 @@ test "the card shows the question and both answers" {
   // A tool name is code, so it is a `code` element — that is where the app's
   // monospace stack comes from now that the UI itself is sans.
   assert_true(
-    markup.contains("<code class=\"composer-approval-tool\">run_moonbit</code>"),
+    markup.contains("<code class=\"composer-approval-tool\">mbtx</code>"),
   )
   // The borderless chip shape, with only an emphasis modifier on top. Nothing
   // else here can tell a chip from a dialog button, so the class pair is what
@@ -180,7 +180,7 @@ test "the card shows the question and both answers" {
   // disclosure: a permission prompt whose subject takes a click to see is the
   // thing this card exists to prevent.
   assert_true(markup.contains("<pre class=\"composer-approval-body\">"))
-  // Highlighted by the same helper the transcript's run_moonbit card uses, so
+  // Highlighted by the same helper the transcript's mbtx card uses, so
   // the program reads identically in the place it is approved and the place it
   // is recorded. That helper emits `code.language-moonbit` with per-token
   // spans, which is why the assertions below look for fragments rather than
@@ -199,7 +199,7 @@ test "an answered card offers no second decision" {
     running_conversation(),
     ApprovalRequested(
       id="ap-1",
-      tool_name="run_moonbit",
+      tool_name="mbtx",
       detail="escalate",
       body=Some("fn main { println(1) }"),
     ),
@@ -241,7 +241,7 @@ test "a rejoining page is handed the question it lost" {
         approval: {
           id: "ap-1",
           run_id: Some(run_id),
-          tool_name: "run_moonbit",
+          tool_name: "mbtx",
           detail: "run this snippet with no sandbox policy",
           body: Some("fn main { println(1) }"),
           answered: false,
@@ -274,7 +274,7 @@ test "a resync does not re-offer a question already answered here" {
     conv,
     ApprovalRequested(
       id="ap-1",
-      tool_name="run_moonbit",
+      tool_name="mbtx",
       detail="escalate",
       body=Some("fn main { println(1) }"),
     ),
@@ -294,7 +294,7 @@ test "a resync does not re-offer a question already answered here" {
         approval: {
           id: "ap-1",
           run_id: Some(run_id),
-          tool_name: "run_moonbit",
+          tool_name: "mbtx",
           detail: "escalate",
           body: Some("fn main { println(1) }"),
           answered: false,
@@ -354,7 +354,7 @@ test "a decision that never left the page restores the card" {
     running_conversation(),
     ApprovalRequested(
       id="ap-1",
-      tool_name="run_moonbit",
+      tool_name="mbtx",
       detail="escalate",
       body=Some("fn main { println(1) }"),
     ),
@@ -404,12 +404,7 @@ test "a decision that never left the page restores the card" {
 test "a failure for an older question leaves the current one alone" {
   let asked = fold_engine(
     running_conversation(),
-    ApprovalRequested(
-      id="ap-2",
-      tool_name="run_moonbit",
-      detail="escalate",
-      body=None,
-    ),
+    ApprovalRequested(id="ap-2", tool_name="mbtx", detail="escalate", body=None),
   )
   let model = test_model().replace_conversation(asked)
   let (_, answered) = update(
@@ -441,12 +436,7 @@ test "a failure for an older question leaves the current one alone" {
 test "a resync retires a question the host no longer has" {
   let asked = fold_engine(
     running_conversation(),
-    ApprovalRequested(
-      id="ap-1",
-      tool_name="run_moonbit",
-      detail="escalate",
-      body=None,
-    ),
+    ApprovalRequested(id="ap-1", tool_name="mbtx", detail="escalate", body=None),
   )
   let model = test_model().replace_conversation(asked)
   let (_, resynced) = update(
@@ -478,7 +468,7 @@ test "a resync leaves a question asked after the request went out" {
       conv,
       ApprovalRequested(
         id="ap-9",
-        tool_name="run_moonbit",
+        tool_name="mbtx",
         detail="escalate",
         body=None,
       ),
@@ -505,12 +495,7 @@ test "a resync leaves a question asked after the request went out" {
 test "a stale snapshot does not overwrite a newer question" {
   let asked = fold_engine(
     running_conversation(),
-    ApprovalRequested(
-      id="ap-1",
-      tool_name="run_moonbit",
-      detail="escalate",
-      body=None,
-    ),
+    ApprovalRequested(id="ap-1", tool_name="mbtx", detail="escalate", body=None),
   )
   guard asked.run is Open(run_id~, ..) else { fail("expected an open run") }
   let model = test_model().replace_conversation(asked)
@@ -522,7 +507,7 @@ test "a stale snapshot does not overwrite a newer question" {
       approval: {
         id: "ap-1",
         run_id: Some(run_id),
-        tool_name: "run_moonbit",
+        tool_name: "mbtx",
         detail: "escalate",
         body: None,
         answered: false,
@@ -535,7 +520,7 @@ test "a stale snapshot does not overwrite a newer question" {
       fold_engine(asked, ApprovalResolved(id="ap-1")),
       ApprovalRequested(
         id="ap-2",
-        tool_name="run_moonbit",
+        tool_name="mbtx",
         detail="escalate again",
         body=None,
       ),
@@ -569,7 +554,7 @@ test "a question from a finished run is not seeded onto its successor" {
       approval: {
         id: "ap-1",
         run_id: Some(run_id),
-        tool_name: "run_moonbit",
+        tool_name: "mbtx",
         detail: "escalate",
         body: None,
         answered: false,
@@ -616,7 +601,7 @@ test "a session missing from the frontier still gets its question" {
             approval: {
               id: "ap-1",
               run_id: Some(run_id),
-              tool_name: "run_moonbit",
+              tool_name: "mbtx",
               detail: "escalate",
               body: Some("fn main { println(1) }"),
               answered: false,
@@ -650,12 +635,7 @@ test "a question survives a run handoff inside one snapshot" {
   guard conv.run is Open(run_id~, ..) else { fail("expected an open run") }
   let asked = fold_engine(
     conv,
-    ApprovalRequested(
-      id="ap-1",
-      tool_name="run_moonbit",
-      detail="escalate",
-      body=None,
-    ),
+    ApprovalRequested(id="ap-1", tool_name="mbtx", detail="escalate", body=None),
   )
   let model = test_model().replace_conversation(asked)
   let (_, resynced) = update(
@@ -687,7 +667,7 @@ test "a question survives a run handoff inside one snapshot" {
             approval: {
               id: "ap-2",
               run_id: Some("r-successor"),
-              tool_name: "run_moonbit",
+              tool_name: "mbtx",
               detail: "escalate again",
               body: None,
               answered: false,
@@ -736,7 +716,7 @@ test "a finished run takes its unanswered question with it" {
     pending_approval: Some({
       id: "ap-1",
       run_id: Some(run_id),
-      tool_name: "run_moonbit",
+      tool_name: "mbtx",
       detail: "escalate",
       body: None,
       answered: false,
@@ -764,7 +744,7 @@ test "a finished run leaves a question belonging to another run" {
     pending_approval: Some({
       id: "ap-2",
       run_id: Some("r-successor"),
-      tool_name: "run_moonbit",
+      tool_name: "mbtx",
       detail: "escalate",
       body: None,
       answered: false,

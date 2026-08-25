@@ -9,7 +9,7 @@ fn reports(subjects : Array[String], text : String) -> Bool {
 
 ///|
 test "source-write denial detection in command output" {
-  // run_moonbit's shape: a MoonBit runtime error for a denied source write.
+  // mbtx's shape: a MoonBit runtime error for a denied source write.
   assert_true(
     reports(
       [],

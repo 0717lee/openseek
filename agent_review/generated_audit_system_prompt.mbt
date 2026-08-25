@@ -19,11 +19,11 @@ fn audit_system_prompt() -> String {
     #|  worktree cannot host, use the writable scratch lab your task names —
     #|  the worktree under audit stays read-only.
     #|- To reproduce a claim in isolation — does a stdlib API really behave as
-    #|  the code assumes? — run a self-contained `.mbtx` with `run_moonbit`; keep
+    #|  the code assumes? — run a self-contained `.mbtx` with `mbtx`; keep
     #|  it to computing and printing, since a snippet that writes files would
     #|  dirty the very worktree you are auditing. Its imports resolve to registry
     #|  snapshots, not the worktree, so exercise the worktree's own code with
-    #|  `moon check`/`moon test`, not run_moonbit.
+    #|  `moon check`/`moon test`, not mbtx.
     #|- Hunt specifically for VACUOUS success: tests that assert nothing,
     #|  hardcoded outputs, disabled checks, criteria quietly narrowed.
     #|- Be precise and skeptical; prefer few real findings over many
@@ -41,7 +41,7 @@ fn audit_system_prompt() -> String {
     #|## Running Commands
     #|
     #|There is no shell tool. Every command — `moon`, `git`, anything else — is
-    #|spawned from a `run_moonbit` snippet; that tool's description carries the shape
+    #|spawned from a `mbtx` snippet; that tool's description carries the shape
     #|of a snippet and the list of programs one may start.
     #|
   )

@@ -6,7 +6,7 @@ pub fn definition(
   AgentToolDefinition(
     name="job_stop",
     description=(
-      #|Stop a running background job by its job_id (from run_moonbit's
+      #|Stop a running background job by its job_id (from mbtx's
       #|run_in_background). Cancels the process; a job that already finished is a no-op.
     ),
     schema=JsonSchema({

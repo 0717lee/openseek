@@ -1,7 +1,7 @@
 # agent_tool/internal/sandbox
 
 The source-write sandbox as one prepared-command capability. `shell`,
-`run_moonbit`, `bgjobs`, and `shell_output` share one macOS `sandbox-exec`
+`mbtx`, `bgjobs`, and `shell_output` share one macOS `sandbox-exec`
 integration: describe command intent with the `Shell` or `Exec` variants of
 `Command`,
 prepare an opaque `SandboxedCommand`, run its program and arguments, then ask
@@ -58,13 +58,13 @@ command runs.
 
 `Shell(cmd)` runs shell text through the platform shell under the profile.
 `Exec(program, args)` prepares a pre-tokenized argv with no
-shell involved — the shape `run_moonbit` uses to run `moon` directly. Both
+shell involved — the shape `mbtx` uses to run `moon` directly. Both
 produce the same opaque `SandboxedCommand`. Its executable, arguments, and
 denial subjects travel together because classification is meaningful only for
 output produced by that prepared invocation.
 
 `writable_subtree` re-allows one directory tree — a scratch lab for a
-read-only subagent, `run_moonbit`'s throwaway build dir — via a
+read-only subagent, `mbtx`'s throwaway build dir — via a
 last-match-wins SBPL allow rule. A subtree covering the workspace root is
 rejected outright: it would re-allow every write the profile exists to deny.
 
@@ -122,4 +122,4 @@ boundary:
 - filesystem aliasing and directory operations can exceed purely path-based
   policy assumptions;
 - `shell` supplements the runtime profile with static command preflight,
-  while arbitrary code run by `run_moonbit` cannot receive the same analysis.
+  while arbitrary code run by `mbtx` cannot receive the same analysis.

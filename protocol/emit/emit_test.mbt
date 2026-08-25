@@ -103,13 +103,13 @@ fn all_events() -> Array[@protocol.Event] {
     ),
     ApprovalRequested(
       id="ap-1",
-      tool_name="run_moonbit",
+      tool_name="mbtx",
       detail="run without the sandbox policy",
       body=Some("fn main { println(1) }"),
     ),
     ApprovalRequested(
       id="ap-2",
-      tool_name="run_moonbit",
+      tool_name="mbtx",
       detail="run without the sandbox policy",
       body=None,
     ),

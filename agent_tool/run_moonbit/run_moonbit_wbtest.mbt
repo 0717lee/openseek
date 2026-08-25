@@ -5,7 +5,7 @@
 /// scanned region is found; one buried in the skipped middle is (by design)
 /// not; a log within budget is scanned whole.
 async test "denial scan is bounded to the log's head and tail" {
-  @vfs.with_tmpdir(prefix="run-moonbit-denial-scan-", dir => {
+  @vfs.with_tmpdir(prefix="mbtx-denial-scan-", dir => {
     let denial = "sh: main.mbt: Operation not permitted\n"
     let filler_line = "\{String::make(63, 'x')}\n"
     fn filler(lines : Int) -> String {

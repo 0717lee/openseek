@@ -18,7 +18,7 @@ To rename an API, add the new name, make the old one a deprecated alias,
 and fix the deprecations the compiler then flags — far more reliable than a regex sweep.
 Use command runs only to analyze diagnostics, never to rewrite source.
 
-Run `moon check` through `run_moonbit` (see Running Commands below) as the primary fast feedback loop;
+Run `moon check` through `mbtx` (see Running Commands below) as the primary fast feedback loop;
 add `--diagnostic-limit 5` for focused diagnostics. It skips code
 generation, so it is way faster than `moon build` or `moon test`. Use
 `moon build` or `moon test` only when you need artifacts or test results.
@@ -32,7 +32,7 @@ full diagnostics.
 ## Running Commands
 
 There is no shell tool. Every command — `moon`, `git`, anything else — is
-spawned from a `run_moonbit` snippet; that tool's description carries the shape
+spawned from a `mbtx` snippet; that tool's description carries the shape
 of a snippet and the list of programs one may start.
 
 Make your own source edits with `edit`/`multi_edit`/`write`, which are
@@ -43,7 +43,7 @@ tools that rewrite source as their job (`moon fmt`, `moon info`,
 ## Tool Protocol
 
 - Do not emit JSON action plans as assistant text, such as
-  `{"tool":"run_moonbit"}`. Use the actual tool call interface.
+  `{"tool":"mbtx"}`. Use the actual tool call interface.
   For a task with several distinct steps,
   record the plan with the `plan` tool (the complete step list each call, at
   most one step `"in_progress"`) and update it as steps finish: mark steps
@@ -77,7 +77,7 @@ tools that rewrite source as their job (`moon fmt`, `moon info`,
     matter in MoonBit, and an append cannot mismatch an anchor. The result
     reports the actual inclusive line range the new code landed on. Insert
     mid-file only when grouping related code.
-  - `run_moonbit` with `@myshell.Cmd` for all Moon commands, including
+  - `mbtx` with `@myshell.Cmd` for all Moon commands, including
     `moon check` for compiler feedback; pass `cwd="dir"` on the `Cmd` when a
     command is package- or directory-scoped. If a run reports that source file
     writes are blocked, retry compiler feedback fixes with line-anchored `edit`
@@ -98,7 +98,7 @@ tools that rewrite source as their job (`moon fmt`, `moon info`,
     of the repository, not only the one you made. Keep worktree paths under
     `.worktrees/` inside the workspace so their source files get the same tool
     handling as the rest of the tree.
-  - For long-running work, set `run_moonbit`'s `run_in_background: true`: it
+  - For long-running work, set `mbtx`'s `run_in_background: true`: it
     returns a job id immediately and a notice is pushed to you when the job
     finishes. Never wait with a sleep loop or by polling; keep working and act
     on the notice. `job_output` reads a job's recent output; `job_stop` cancels
@@ -139,11 +139,11 @@ Common `moon` subcommands:
 - `moon run`: executable package and CLI probes; package path goes before
   `--`, program arguments go after `--`. Example:
   `moon run --target native cmd/tomljson -- /tmp/input.toml`.
-- `run_moonbit` tool: BOTH your command runner (via `@myshell.Cmd`) and your
+- `mbtx` tool: BOTH your command runner (via `@myshell.Cmd`) and your
   scripting surface (read and transform files, parse JSON, compute, quick
   language/API probes) — it keeps automation in MoonBit. Its own description is
   the full contract. When probing, emit several independent
-  `run_moonbit` calls in the SAME turn — one small program per hypothesis —
+  `mbtx` calls in the SAME turn — one small program per hypothesis —
   rather than one probe per turn or one mega-program: batched probes come back
   together, cost one round-trip, and a failing hypothesis never blocks the
   others from answering.
@@ -375,7 +375,7 @@ options(
   `moon ide peek-def Symbol --loc file.mbt:line:col` for definitions,
   `moon ide find-references Symbol`, and `moon ide hover Symbol --loc
   file.mbt:line:col` for types.
-- Use the `run_moonbit` tool for quick core-language probes and MoonBit
+- Use the `mbtx` tool for quick core-language probes and MoonBit
   automation; there is no `python`/`node` to fall back to.
 - MoonBit has no `await`; async functions/tests are marked with `async`, and
   async calls are written normally.
@@ -673,7 +673,7 @@ When referencing a real local file, prefer a clickable markdown link.
 
 Before finishing code work:
 
-1. Run `moon check` through `run_moonbit` and confirm it is clean or the
+1. Run `moon check` through `mbtx` and confirm it is clean or the
    remaining diagnostics are understood.
 2. Run targeted `moon test`.
 3. Run `moon info` and `moon fmt` when interfaces or formatting may have

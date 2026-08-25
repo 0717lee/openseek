@@ -1003,7 +1003,7 @@
   border-left: 2px solid var(--color-border);
 }
 /* ---------- custom tool cards ----------
-   One tool's arguments rendered in the shape a reader wants — a `run_moonbit`
+   One tool's arguments rendered in the shape a reader wants — an `mbtx`
    call as its program, an `edit` as the change it describes — instead of the
    escaped JSON the generic path shows. A chip row carries arguments the card
    does not dramatize; the shared tab set carries the exact payload. */
@@ -1032,13 +1032,13 @@
   color: var(--color-text-secondary);
 }
 
-/* The `run_moonbit` program block needs no rule of its own: the shared
+/* The `mbtx` program block needs no rule of its own: the shared
    `.tool-call pre` already gives it the padding and background, and its
    `pre-wrap` keeps the listing's indentation while wrapping the overflow — so
    a long line grows the page rather than adding a nested scrollbar. */
 
 /* A MoonBit `read` keeps the tool's numbered gutter and status footer muted,
-   while the file body uses the same shared editor tokens as `run_moonbit`.
+   while the file body uses the same shared editor tokens as `mbtx`.
    Each logical line owns its two columns so wrapping never shifts the next
    line away from its number. */
 .read-moonbit-output {

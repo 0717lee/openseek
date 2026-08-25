@@ -590,7 +590,7 @@ test "a tool group's summary recognizes every cmd/openseek built-in" {
       tool_item("remove"),
       tool_item("shell"),
       tool_item("moon_cmd"),
-      tool_item("run_moonbit"),
+      tool_item("mbtx"),
       tool_item("shell_output"),
       tool_item("shell_stop"),
       tool_item("plan"),

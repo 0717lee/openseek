@@ -53,7 +53,7 @@ async fn run_review_cli(
     return
   }
   // The same lab every subrun kind gets: without it `run_review` wires
-  // `run_moonbit` with no kernel profile at all, and the reviewer has nowhere
+  // `mbtx` with no kernel profile at all, and the reviewer has nowhere
   // it may legitimately write.
   let scratch_dir = new_scratch_lab("openseek-review-lab-")
   // `defer` covers the paths that unwind — a normal finish and a cancelled

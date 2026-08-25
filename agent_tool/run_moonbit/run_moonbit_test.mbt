@@ -2,9 +2,7 @@
 /// Run `source` in a fresh, auto-cleaned workspace, which is also the default
 /// working directory the program runs in.
 async fn run(source : String) -> @agent_tool.ToolOutput {
-  @vfs.with_tmpdir(prefix="run-moonbit-ws-", ws => {
-    run_in(ws, { "source": source })
-  })
+  @vfs.with_tmpdir(prefix="mbtx-ws-", ws => run_in(ws, { "source": source }))
 }
 
 ///|
@@ -16,7 +14,7 @@ async fn run_in(
 ) -> @agent_tool.ToolOutput {
   let action = match @run_moonbit.definition(workspace_root~).execute {
     Async(execute) => execute(arguments)
-    Sync(_) => fail("run_moonbit should be async")
+    Sync(_) => fail("mbtx should be async")
   }
   guard action is Respond(output) else { fail("expected Respond") }
   output
@@ -87,7 +85,7 @@ async test "cwd argument overrides the working directory" {
 async test "a non-existent cwd is reported, not run" {
   let out = run_in(".", {
     "source": "fn main { println(1) }",
-    "cwd": "/no/such/run-moonbit/dir",
+    "cwd": "/no/such/mbtx/dir",
   })
   assert_true(out.is_error)
   assert_true(out.content.contains("does not exist"))
@@ -99,9 +97,7 @@ async test "a non-existent cwd is reported, not run" {
 /// root so no real workspace is scanned.
 async fn sandbox_enforcement_available() -> Bool {
   // A host where even tmpdir fails must skip (as the old probe did), not raise.
-  let dir = @fs.tmpdir(prefix="openseek-run-moonbit-gate-") catch {
-    _ => return false
-  }
+  let dir = @fs.tmpdir(prefix="openseek-mbtx-gate-") catch { _ => return false }
   let available = @sandbox.SandboxedCommand::create_if_available(
       dir,
       Shell(":"),
@@ -404,7 +400,7 @@ async test "network allows outbound use and localhost-only binds" {
 /// is the shape this pins against.
 async test "read_only denies source writes with no scratch lab wired" {
   guard sandbox_enforcement_available() else { return }
-  @vfs.with_tmpdir(prefix="run-moonbit-ro-", ws => {
+  @vfs.with_tmpdir(prefix="mbtx-ro-", ws => {
     @fs.write_file(
       "\{ws}/keep.mbt",
       "fn main {  }\n",
@@ -426,7 +422,7 @@ async test "read_only denies source writes with no scratch lab wired" {
             #|}
           ),
         })
-      Sync(_) => fail("run_moonbit should be async")
+      Sync(_) => fail("mbtx should be async")
     }
     guard action is Respond(output) else { fail("expected Respond") }
     assert_true(output.content.contains("workspace=false"))
@@ -441,8 +437,8 @@ async test "read_only denies source writes with no scratch lab wired" {
 /// work or is a hole in the read-only posture.
 async test "a scratch lab is writable while workspace source stays denied" {
   guard sandbox_enforcement_available() else { return }
-  @vfs.with_tmpdir(prefix="run-moonbit-lab-ws-", ws => {
-    @vfs.with_tmpdir(prefix="run-moonbit-lab-", lab => {
+  @vfs.with_tmpdir(prefix="mbtx-lab-ws-", ws => {
+    @vfs.with_tmpdir(prefix="mbtx-lab-", lab => {
       @fs.write_file(
         "\{ws}/keep.mbt",
         "fn main {  }\n",
@@ -472,7 +468,7 @@ async test "a scratch lab is writable while workspace source stays denied" {
       ).replace_all(old="LAB_DIR", new=lab)
       let action = match definition.execute {
         Async(execute) => execute({ "source": source })
-        Sync(_) => fail("run_moonbit should be async")
+        Sync(_) => fail("mbtx should be async")
       }
       guard action is Respond(output) else { fail("expected Respond") }
       assert_true(output.content.contains("lab=true"))
@@ -495,7 +491,7 @@ async test "a scratch lab is writable while workspace source stays denied" {
 /// profile still governs what those CHILD processes may touch; that is pinned
 /// in `internal/sandbox/worker_profile_test.mbt`.
 async test "a worker's snippet writes neither its own tree nor a sibling's" {
-  @vfs.with_tmpdir(prefix="run-moonbit-worker-repo-", repo => {
+  @vfs.with_tmpdir(prefix="mbtx-worker-repo-", repo => {
     let common_git = "\{repo}/.git"
     let worker = "\{repo}/wt-1"
     let sibling = "\{repo}/wt-2"
@@ -540,7 +536,7 @@ async test "a worker's snippet writes neither its own tree nor a sibling's" {
     ).replace_all(old="SIBLING", new=sibling)
     let action = match definition.execute {
       Async(execute) => execute({ "source": source })
-      Sync(_) => fail("run_moonbit should be async")
+      Sync(_) => fail("mbtx should be async")
     }
     guard action is Respond(output) else { fail("expected Respond") }
     assert_true(output.content.contains("mine=false"))
@@ -631,7 +627,7 @@ async test "an uncaught sandbox denial is explained, not left as a bare EPERM" {
       assert_true(out.content.contains("Sandbox policy blocked file write"))
       assert_true(out.content.contains("Permission denied"))
       // ...now followed by the sandbox explanation
-      assert_true(out.content.contains("run_moonbit sandbox"))
+      assert_true(out.content.contains("mbtx sandbox"))
       // The guidance describes the policy's rules — the snippet's own roots and
       // the spawn allowlist — not the source-write rule this run does not carry.
       assert_true(out.content.contains("write outside its own"))
@@ -687,7 +683,7 @@ async test "a denial past the display cap is still detected and explained" {
       assert_true(out.content.contains("output truncated"))
       assert_false(out.content.contains("OSError"))
       // ...yet the guidance still lands, from the full-log scan
-      assert_true(out.content.contains("run_moonbit sandbox"))
+      assert_true(out.content.contains("mbtx sandbox"))
       assert_false(@fs.exists("\{outside}/escape.txt"))
     })
   })
@@ -711,14 +707,14 @@ async test "warning off keeps error-state diagnostics failing (partial_match)" {
 async test "rejects an unknown warning value" {
   let out = run_in(".", { "source": "fn main {  }", "warning": "loud" })
   assert_true(out.is_error)
-  assert_true(out.content.contains("run_moonbit requires"))
+  assert_true(out.content.contains("mbtx requires"))
 }
 
 ///|
 async test "rejects non-string source arguments" {
   let out = run_in(".", { "code": "x" })
   assert_true(out.is_error)
-  assert_true(out.content.contains("run_moonbit requires"))
+  assert_true(out.content.contains("mbtx requires"))
 }
 
 ///|
@@ -737,9 +733,9 @@ async test "runs a pure snippet on a non-native target" {
 async test "error diagnostics name `source`, not the throwaway temp path" {
   let out = run("fn main {\n  let _x : Int = \"nope\"\n}")
   assert_true(out.is_error)
-  // the model reads a path about its own input, not /tmp/openseek-run-moonbit-*
+  // the model reads a path about its own input, not /tmp/openseek-mbtx-*
   assert_true(out.content.contains("source:"))
-  assert_false(out.content.contains("openseek-run-moonbit-"))
+  assert_false(out.content.contains("openseek-mbtx-"))
   assert_false(out.content.contains("snippet.mbt"))
 }
 
@@ -814,7 +810,7 @@ async fn run_escalating(
   answer : @agent_runtime.ApprovalOutcome,
   asked~ : Array[@agent_runtime.ApprovalAsk],
 ) -> @agent_tool.ToolOutput {
-  @vfs.with_tmpdir(prefix="run-moonbit-escalate-", ws => {
+  @vfs.with_tmpdir(prefix="mbtx-escalate-", ws => {
     let definition = @run_moonbit.definition(
       workspace_root=ws,
       approval=ApprovalChannel(ask => {
@@ -824,7 +820,7 @@ async fn run_escalating(
     )
     let action = match definition.execute {
       Async(execute) => execute({ "source": source, "escalated": true })
-      Sync(_) => fail("run_moonbit should be async")
+      Sync(_) => fail("mbtx should be async")
     }
     guard action is Respond(output) else { fail("expected Respond") }
     output
@@ -884,7 +880,7 @@ async test "an approved escalation runs outside the spawn allowlist" {
   // The question names the tool, states what would be granted, and carries the
   // program itself — the thing the user is actually deciding about.
   assert_eq(asked.length(), 1)
-  assert_eq(asked[0].tool_name, "run_moonbit")
+  assert_eq(asked[0].tool_name, "mbtx")
   assert_true(asked[0].detail.contains("no sandbox policy"))
 }
 
@@ -923,7 +919,7 @@ async test "each way of not being granted says a different thing" {
   assert_true(withdrawn.content.contains("not a refusal"))
   // Asking where the argument was never advertised: the model sent a field it
   // was not offered, and is told to drop it rather than to try again.
-  let unavailable = @vfs.with_tmpdir(prefix="run-moonbit-unasked-", ws => {
+  let unavailable = @vfs.with_tmpdir(prefix="mbtx-unasked-", ws => {
     run_in(ws, { "source": "fn main {  }", "escalated": true })
   })
   assert_true(unavailable.content.contains("no approval channel"))
@@ -940,7 +936,7 @@ async test "each way of not being granted says a different thing" {
 /// anyone a prompt.
 async test "an ordinary call never asks for approval" {
   let asked : Array[@agent_runtime.ApprovalAsk] = []
-  @vfs.with_tmpdir(prefix="run-moonbit-noask-", ws => {
+  @vfs.with_tmpdir(prefix="mbtx-noask-", ws => {
     let definition = @run_moonbit.definition(
       workspace_root=ws,
       approval=ApprovalChannel(ask => {
@@ -950,7 +946,7 @@ async test "an ordinary call never asks for approval" {
     )
     let action = match definition.execute {
       Async(execute) => execute({ "source": "fn main { println(6 * 7) }" })
-      Sync(_) => fail("run_moonbit should be async")
+      Sync(_) => fail("mbtx should be async")
     }
     guard action is Respond(output) else { fail("expected Respond") }
     assert_true(output.content.contains("42"))
@@ -971,14 +967,14 @@ async test "a refusal names escalation when a channel is wired" {
     #|async fn main {
     #|  @myshell.Cmd("chmod", ["644", "/tmp"]).output() |> ignore
     #|}
-  let asking = @vfs.with_tmpdir(prefix="run-moonbit-hint-", ws => {
+  let asking = @vfs.with_tmpdir(prefix="mbtx-hint-", ws => {
     let definition = @run_moonbit.definition(
       workspace_root=ws,
       approval=ApprovalChannel(_ => Rejected),
     )
     let action = match definition.execute {
       Async(execute) => execute({ "source": source })
-      Sync(_) => fail("run_moonbit should be async")
+      Sync(_) => fail("mbtx should be async")
     }
     guard action is Respond(output) else { fail("expected Respond") }
     output
@@ -990,7 +986,7 @@ async test "a refusal names escalation when a channel is wired" {
   assert_true(asking.content.contains("this exact snippet ONCE"))
   // The same refusal without a channel must not advertise a field the schema
   // does not carry — that would cost a whole call to discover.
-  let plain = @vfs.with_tmpdir(prefix="run-moonbit-hint-plain-", ws => {
+  let plain = @vfs.with_tmpdir(prefix="mbtx-hint-plain-", ws => {
     run_in(ws, { "source": source })
   })
   assert_true(plain.is_error)
@@ -1027,7 +1023,7 @@ test "the description offers asking as an answer where it exists" {
 /// person's attention. Refused before anyone is asked.
 async test "escalation is refused on a target that carries no policy" {
   let asked : Array[@agent_runtime.ApprovalAsk] = []
-  let out = @vfs.with_tmpdir(prefix="run-moonbit-target-", ws => {
+  let out = @vfs.with_tmpdir(prefix="mbtx-target-", ws => {
     let definition = @run_moonbit.definition(
       workspace_root=ws,
       approval=ApprovalChannel(ask => {
@@ -1042,7 +1038,7 @@ async test "escalation is refused on a target that carries no policy" {
           "target": "js",
           "escalated": true,
         })
-      Sync(_) => fail("run_moonbit should be async")
+      Sync(_) => fail("mbtx should be async")
     }
     guard action is Respond(output) else { fail("expected Respond") }
     output
@@ -1061,7 +1057,7 @@ async test "escalation is refused on a target that carries no policy" {
 /// and told the model to ask for the escalation it had just been granted.
 #cfg(not(platform="windows"))
 async test "an escalated run is not read as a policy refusal" {
-  let out = @vfs.with_tmpdir(prefix="run-moonbit-escalated-scan-", ws => {
+  let out = @vfs.with_tmpdir(prefix="mbtx-escalated-scan-", ws => {
     let definition = @run_moonbit.definition(
       workspace_root=ws,
       approval=ApprovalChannel(_ => AllowedOnce),
@@ -1083,7 +1079,7 @@ async test "an escalated run is not read as a policy refusal" {
       #|}
     let action = match definition.execute {
       Async(execute) => execute({ "source": source, "escalated": true })
-      Sync(_) => fail("run_moonbit should be async")
+      Sync(_) => fail("mbtx should be async")
     }
     guard action is Respond(output) else { fail("expected Respond") }
     output
