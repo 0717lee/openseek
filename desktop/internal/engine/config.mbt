@@ -328,12 +328,12 @@ async test "run config ignores OPENSEEK_API_URL in favor of the settings" {
   } else {
     @sys.unset_env_var("OPENSEEK_API_URL")
   })
-  let previous_session_root = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  defer restore_session_root_env(previous_session_root)
+  let previous_home = @sys.get_env_var(test_home_env_name())
+  defer restore_home_env(previous_home)
   // A run needs a workspace before the endpoint matters; attach one so this
   // test fails only for the reason it is named after.
   let root : @pathx.Path = Path(@fs.tmpdir(prefix="openseek-config-endpoint-"))
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
+  set_test_home(root.join("home").to_string())
   let workspace = attach_run_workspace(root)
   let manager = new_engine_manager("openseek", runtime_dir=root)
   // The BYOK configuration: the official provider with its key.
@@ -387,7 +387,7 @@ async test "run config rejects a blank session" {
 async test "host chooses durable placement from workspace state" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  let previous_home = @sys.get_env_var(test_home_env_name())
   // BYOK: the default provider needs a key. Set one here so placement — not
   // endpoint resolution — is what this test can fail for, regardless of the
   // ambient environment.
@@ -401,14 +401,15 @@ async test "host chooses durable placement from workspace state" {
   // The registry canonicalizes workspace paths, so build the fixture from
   // the tmpdir's physical spelling (`/tmp` is a symlink on macOS).
   let dir = @fs.realpath(@fs.tmpdir(prefix="openseek-config-workspace-"))
-  let global_root = dir + "/global"
+  let home = dir + "/home"
+  let global_root = home + "/.openseek"
   let workspace = dir + "/workspace"
   let workspace_resource = @pathx.Path(workspace).resolve().resource_path()
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", global_root)
-  defer (if previous is Some(value) {
-    @sys.set_env_var("OPENSEEK_SESSION_ROOT", value)
+  set_test_home(home)
+  defer (if previous_home is Some(value) {
+    @sys.set_env_var(test_home_env_name(), value)
   } else {
-    @sys.unset_env_var("OPENSEEK_SESSION_ROOT")
+    @sys.unset_env_var(test_home_env_name())
   })
   @fsx.ensure_dir(Path(global_root))
   @fsx.ensure_dir(Path(workspace + "/.openseek/sessions/s-workspace"))

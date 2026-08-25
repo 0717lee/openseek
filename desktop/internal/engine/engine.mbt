@@ -1469,9 +1469,6 @@ async fn engine_process_env(
   } else {
     env.remove("OPENSEEK_API_URL")
   }
-  // The session root travels in argv. Remove the trusted host's configuration
-  // input so custom engines and their descendants cannot observe it.
-  env.remove("OPENSEEK_SESSION_ROOT")
   add_moonbit_path_for_native_engine(env, config, runtime_dir)
   env
 }
@@ -2755,7 +2752,6 @@ async test "native engine env has one authoritative bundled moon path" {
   }
   let env = engine_process_env(config, Some(runtime))
   assert_eq(env["OPENSEEK_THINKING"], "high")
-  assert_true(env.get("OPENSEEK_SESSION_ROOT") is None)
   @debug.assert_eq(engine_process_args(config), [
     "serve", "--session=s-env", "--dir", ".", "--approval", "ask",
   ])

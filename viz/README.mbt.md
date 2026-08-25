@@ -67,11 +67,11 @@ also be passed directly as `--session-root`. The scanner skips `.git`,
 several trees, and use `--session-root-name` when a different marker such as
 `.openroot` should be treated as the session root.
 
-`--session-root`, `--search-dir`, `--session-root-name`, `--port`,
-`--web-dir`, and `--bundle` all have env-var fallbacks
-(`OPENSEEK_SESSION_ROOT`, `OPENSEEK_VIZ_SEARCH_DIR`,
-`OPENSEEK_VIZ_SESSION_ROOT_NAME`, `OPENSEEK_VIZ_PORT`, …); run with `--help`
-for the full list.
+`--search-dir`, `--session-root-name`, `--port`, `--web-dir`, and `--bundle`
+have env-var fallbacks (`OPENSEEK_VIZ_SEARCH_DIR`,
+`OPENSEEK_VIZ_SESSION_ROOT_NAME`, `OPENSEEK_VIZ_PORT`, …). Pass
+`--session-root` explicitly when selecting a compatibility root; run with
+`--help` for the full list.
 
 ## Resilient parsing
 

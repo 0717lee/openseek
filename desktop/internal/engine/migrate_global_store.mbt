@@ -26,7 +26,7 @@ pub async fn migrate_global_store() -> Int {
   guard @workspaces.global_store_root() is Some(global) else { return 0 }
   guard @workspaces.default_workspace() is Some(workspace) else { return 0 }
   let destination = @workspaces.store_root(workspace)
-  // A hand-set OPENSEEK_SESSION_ROOT can name the destination store itself.
+  // An explicitly resolved global root can name the destination store itself.
   // Moving records onto themselves is not a migration.
   guard global != destination else { return 0 }
   // Where a record copied across filesystems waits until it is whole. It sits

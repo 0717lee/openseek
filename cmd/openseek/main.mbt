@@ -25,9 +25,6 @@ async fn dispatch() -> Unit {
   let argv = @env.args()[1:]
   let env = @env.get_env_vars()
   let matches = root_command().parse(argv~, env~)
-  // The root remains a trusted-host configuration input, but agent processes
-  // receive it through argv. Do not expose an inherited value to child tools.
-  @env.unset_env_var("OPENSEEK_SESSION_ROOT")
   match matches.subcommand {
     Some(("tui", m)) => @tui.run(m)
     Some(("run", m)) => run_task_command(m)
@@ -1363,16 +1360,6 @@ test "cli parses env backed options and task" {
   assert_false(parsed is { values: { "session": [_, ..], .. }, .. })
   assert_eq(session_root(parsed), ".openseek")
   assert_eq(task_text(parsed), "write MoonBit")
-}
-
-///|
-test "cli does not bind the session root environment variable" {
-  let parsed = run_matches(argv=["write", "MoonBit"], env={
-    "DEEPSEEK": "test-key",
-    "OPENSEEK_SESSION_ROOT": "/tmp/parent-sessions",
-  })
-  assert_false(parsed is { values: { "session": [_, ..], .. }, .. })
-  assert_eq(session_root(parsed), ".openseek")
 }
 
 ///|

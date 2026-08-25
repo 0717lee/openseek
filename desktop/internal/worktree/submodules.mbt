@@ -125,10 +125,10 @@ async test "submodule checkout stops at its hard timeout" {
 async test "worktree lifecycle mirrors initialized submodules" {
   worktree_env_test_lock.acquire()
   defer worktree_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  let previous = @sys.get_env_var("HOME")
   let root = worktree_test_root("openseek-worktree-submodules-")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
-  defer restore_session_root_env(previous)
+  @sys.set_env_var("HOME", root.join("global").to_string())
+  defer restore_home_env(previous)
   let required = root.join("required")
   let optional = root.join("optional")
   prepare_git_repo(required)

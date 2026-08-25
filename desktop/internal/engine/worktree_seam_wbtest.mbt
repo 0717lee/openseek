@@ -68,10 +68,10 @@ async fn stage_worktree_placements(
 async test "session workspace dir follows the worktree mapping while it exists" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  let previous = @sys.get_env_var("HOME")
   let root = worktree_test_root("openseek-worktree-seam-")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
-  defer restore_session_root_env(previous)
+  @sys.set_env_var("HOME", root.join("global").to_string())
+  defer restore_home_env(previous)
   let ws = root.join("ws")
   @fsx.ensure_dir(ws.join(".openseek/sessions/s-wt").to_path())
   @fsx.ensure_dir(ws.join(".openseek/sessions/s-plain").to_path())
@@ -135,10 +135,10 @@ async test "session workspace dir follows the worktree mapping while it exists" 
 async test "attached workspace dir resolves registered worktree paths" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  let previous = @sys.get_env_var("HOME")
   let root = worktree_test_root("openseek-worktree-attached-")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
-  defer restore_session_root_env(previous)
+  @sys.set_env_var("HOME", root.join("global").to_string())
+  defer restore_home_env(previous)
   let ws = root.join("ws")
   @fsx.ensure_dir(ws.to_path())
   ignore(@workspaces.add(ws.to_string(), fn(_) {  }))
@@ -190,10 +190,10 @@ async test "attached workspace dir resolves registered worktree paths" {
 async test "a bound session routes every start through its checkout" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  let previous = @sys.get_env_var("HOME")
   let root = worktree_test_root("openseek-worktree-route-")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
-  defer restore_session_root_env(previous)
+  @sys.set_env_var("HOME", root.join("global").to_string())
+  defer restore_home_env(previous)
   // BYOK: the default provider needs a key. Set one here so worktree
   // routing — not endpoint resolution — is what this test can fail for.
   let previous_key = @sys.get_env_var("DEEPSEEK")
@@ -254,12 +254,12 @@ async test "a bound session routes every start through its checkout" {
 async test "worktree remove refuses a running conversation without unmapping it" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  let previous = @sys.get_env_var("HOME")
   let root = worktree_test_root("openseek-worktree-busy-")
   let engine = root.join("bin/engine.sh")
   let runtime = root.join("runtime")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
-  defer restore_session_root_env(previous)
+  @sys.set_env_var("HOME", root.join("global").to_string())
+  defer restore_home_env(previous)
   let ws = root.join("ws")
   @fsx.ensure_dir(ws.join(".worktrees/wt").to_path())
   prepare_fake_moonbit_seed(
@@ -343,10 +343,10 @@ async test "worktree remove refuses a running conversation without unmapping it"
 async test "a checkout deleted outside the app refuses runs and is repairable" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  let previous = @sys.get_env_var("HOME")
   let root = worktree_test_root("openseek-worktree-vanished-")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
-  defer restore_session_root_env(previous)
+  @sys.set_env_var("HOME", root.join("global").to_string())
+  defer restore_home_env(previous)
   // BYOK: the default provider needs a key. Set one here so the vanished
   // checkout's refusal — not endpoint resolution — is what this test can
   // fail for.
@@ -502,10 +502,10 @@ async test "a checkout deleted outside the app refuses runs and is repairable" {
 async test "archive keeps worktree placement for explicit repair after unarchive" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  let previous = @sys.get_env_var("HOME")
   let root = worktree_test_root("openseek-worktree-archive-")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
-  defer restore_session_root_env(previous)
+  @sys.set_env_var("HOME", root.join("global").to_string())
+  defer restore_home_env(previous)
   @fsx.ensure_dir(root.join("global").to_path())
   let repo = root.join("repo")
   prepare_git_repo(repo)
@@ -659,12 +659,12 @@ async test "archive keeps worktree placement for explicit repair after unarchive
 async test "permanent archived deletion drops placement but keeps files and branch" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  defer restore_session_root_env(previous)
+  let previous = @sys.get_env_var("HOME")
+  defer restore_home_env(previous)
   let root = worktree_test_root("openseek-archive-delete-worktree-")
   let global = root.join("global")
   let workspace = root.join("workspace")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", global.to_string())
+  @sys.set_env_var("HOME", global.to_string())
   prepare_git_repo(workspace)
   ignore(@gitx.run(workspace, ["branch", "openseek/chat"]))
   ignore(@workspaces.add(workspace.to_string(), fn(_) {  }))
