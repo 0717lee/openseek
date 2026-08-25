@@ -72,7 +72,7 @@ pub(all) enum Msg {
   PreviewInstalled(InstalledItem)
   PreviewLoaded(request~ : Int, target~ : PreviewTarget, content~ : String)
   PreviewFailed(request~ : Int, target~ : PreviewTarget, message~ : String)
-  ClosePreview
+  BackToList
 }
 
 ///|
@@ -190,7 +190,7 @@ pub fn State::handle(
         None,
       )
     }
-    ClosePreview => (@cmd.none, { ..self, preview: Closed }, None)
+    BackToList => (@cmd.none, { ..self, preview: Closed }, None)
     RefreshCatalog =>
       match self.catalog {
         // The rendered button is disabled while loading, and this guard also

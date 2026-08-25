@@ -81,11 +81,6 @@ fn installed_row(
       ]),
     )
   }
-  if preview_matches(state, Installed(skill)) {
-    if preview_panel(state, emit) is Some(preview) {
-      children.push(preview)
-    }
-  }
   @html.div(class="skill-row", children)
 }
 
@@ -150,64 +145,71 @@ fn market_row(
     ),
     action,
   ]
-  if preview_matches(state, Market(item)) {
-    if preview_panel(state, emit) is Some(preview) {
-      children.push(preview)
-    }
-  }
   @html.div(class="skill-row", title=item.repository, children)
 }
 
 ///|
-fn preview_panel(state : State, emit : @cmd.Emit[Msg]) -> @html.Html? {
+fn detail_page(
+  state : State,
+  input : Input,
+  emit : @cmd.Emit[Msg],
+) -> @html.Html {
   match state.preview {
-    Closed => None
+    Closed => list_page(state, input, emit)
     Loading(target~, ..) =>
-      Some(
-        @html.div(class="skill-preview", [
-          @html.div(class="skill-preview-head", [
-            @html.h2(preview_name(target)),
-            @html.button(
-              class="secondary",
-              on_click=emit(ClosePreview),
-              "Close",
-            ),
-          ]),
-          @html.div(class="skills-empty", "Loading SKILLS.md…"),
-        ]),
+      detail_shell(
+        target,
+        @html.div(class="skills-empty", "Loading SKILLS.md…"),
+        input,
+        state,
+        emit,
       )
     Ready(target~, content~, ..) =>
-      Some(
-        @html.div(class="skill-preview", [
-          @html.div(class="skill-preview-head", [
-            @html.h2(preview_name(target)),
-            @html.button(
-              class="secondary",
-              on_click=emit(ClosePreview),
-              "Close",
-            ),
-          ]),
-          @html.div(
-            class="skill-preview-markdown",
-            @markdown.markdown_nodes(content),
-          ),
-        ]),
+      detail_shell(
+        target,
+        @html.div(
+          class="skill-preview-markdown msg-content markdown",
+          @markdown.markdown_nodes(content),
+        ),
+        input,
+        state,
+        emit,
       )
     Failed(target~, message~, ..) =>
-      Some(
-        @html.div(class="skill-preview", [
-          @html.div(class="skill-preview-head", [
-            @html.h2(preview_name(target)),
-            @html.button(
-              class="secondary",
-              on_click=emit(ClosePreview),
-              "Close",
-            ),
-          ]),
-          @html.div(class="skills-empty danger", message),
-        ]),
+      detail_shell(
+        target,
+        @html.div(class="skills-empty danger", message),
+        input,
+        state,
+        emit,
       )
   }
+}
+
+///|
+fn detail_shell(
+  target : PreviewTarget,
+  content : @html.Html,
+  input : Input,
+  state : State,
+  emit : @cmd.Emit[Msg],
+) -> @html.Html {
+  @html.section(class="skills-page", [
+    @html.div(class="skills-page-inner skill-detail-page", [
+      @html.button(
+        class="secondary skill-back",
+        on_click=emit(BackToList),
+        "← Back to skills",
+      ),
+      @html.div(class="skill-detail-header", [
+        @html.div(class="page-eyebrow", "Skill details"),
+        @html.h1(preview_name(target)),
+        @html.div(class="skill-detail-meta", preview_meta(target)),
+        detail_action(target, state, input, emit),
+      ]),
+      @html.div(class="skill-detail-card", content),
+    ]),
+  ])
 }
 
 ///|
@@ -219,12 +221,65 @@ fn preview_name(target : PreviewTarget) -> String {
 }
 
 ///|
-fn preview_matches(state : State, target : PreviewTarget) -> Bool {
-  match state.preview {
-    Loading(target=current, ..)
-    | Ready(target=current, ..)
-    | Failed(target=current, ..) => current == target
-    Closed => false
+fn preview_meta(target : PreviewTarget) -> String {
+  match target {
+    Market(item) =>
+      if item.author.is_empty() {
+        "v\{item.version}"
+      } else {
+        "v\{item.version} · \{item.author}"
+      }
+    Installed(item) =>
+      if item.source.is_empty() {
+        "hand-written"
+      } else {
+        item.source
+      }
+  }
+}
+
+///|
+fn detail_action(
+  target : PreviewTarget,
+  state : State,
+  input : Input,
+  emit : @cmd.Emit[Msg],
+) -> @html.Html {
+  match target {
+    Market(item) => {
+      let key = source_label(item)
+      let busy = state.busy.contains(key)
+      if input.has_installed(key) {
+        @html.span(class="skill-check ok", "✓ Installed")
+      } else {
+        @html.button(
+          class="primary skill-detail-action",
+          disabled=busy,
+          on_click=emit(Install(item)),
+          if busy {
+            "Installing…"
+          } else {
+            "Install skill"
+          },
+        )
+      }
+    }
+    Installed(item) =>
+      if item.source.is_empty() {
+        @html.span(class="skill-check ok", "hand-written skill")
+      } else {
+        let busy = state.busy.contains(item.id)
+        @html.button(
+          class="secondary skill-detail-action",
+          disabled=busy,
+          on_click=emit(Uninstall(item.id)),
+          if busy {
+            "Removing…"
+          } else {
+            "Uninstall"
+          },
+        )
+      }
   }
 }
 
@@ -248,7 +303,7 @@ fn matches(query : String, fields : Array[String]) -> Bool {
 ///|
 /// The Skills page, shown in the main area in place of the conversation:
 /// header, search, the local library, then the mooncakes.io catalog.
-fn page(state : State, input : Input, emit : @cmd.Emit[Msg]) -> @html.Html {
+fn list_page(state : State, input : Input, emit : @cmd.Emit[Msg]) -> @html.Html {
   let sections : Array[@html.Html] = [
     @html.div(class="skills-header", [
       @html.div(class="page-eyebrow", "Library"),
@@ -349,4 +404,12 @@ fn page(state : State, input : Input, emit : @cmd.Emit[Msg]) -> @html.Html {
   @html.section(class="skills-page", [
     @html.div(class="skills-page-inner", sections),
   ])
+}
+
+///|
+fn page(state : State, input : Input, emit : @cmd.Emit[Msg]) -> @html.Html {
+  match state.preview {
+    Closed => list_page(state, input, emit)
+    _ => detail_page(state, input, emit)
+  }
 }
