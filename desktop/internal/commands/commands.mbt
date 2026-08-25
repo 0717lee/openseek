@@ -551,6 +551,7 @@ pub let update_apply : Command[
   @protocol.ApplyUpdateReply,
 ] = Command("update.apply")
 
+///|
 pub let git_branch : Command[
   @protocol.GitBranchPayload,
   @protocol.GitBranchReply,

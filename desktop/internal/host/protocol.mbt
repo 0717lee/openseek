@@ -31,6 +31,7 @@ type OpenPathReply = @protocol.OpenPathReply
 /// Reply to `apply_update`: the swap succeeded and the window may close.
 type ApplyUpdateReply = @protocol.ApplyUpdateReply
 
+///|
 /// Reply to `skills_catalog`: the registry's installable skills.
 type SkillsCatalogReply = @protocol.SkillsCatalogReply
 

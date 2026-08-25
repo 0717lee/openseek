@@ -370,6 +370,7 @@ pub(all) struct GitOriginalFilePayload {
   revision : String?
 } derive(Debug, Eq, FromJson, ToJson)
 
+///|
 pub(all) struct ReadDirPayload {
   path : String
 } derive(Debug, Eq, FromJson, ToJson)
@@ -1497,6 +1498,7 @@ pub extend KnownRunPayload with Eq::{equal, not_equal}
 ///|
 pub extend KnownRunPayload with ToJson::{to_json}
 
+///|
 pub extend LoadSessionPayload with Debug::{to_repr}
 
 ///|

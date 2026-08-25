@@ -933,6 +933,7 @@ pub(all) struct ApplyUpdateReply {
   applied : Bool
 } derive(Debug, Eq, FromJson, ToJson)
 
+///|
 pub(all) struct MarketSkill {
   name : String
   module_name : String
@@ -1698,6 +1699,7 @@ pub extend AgentStreamEvent with Eq::{equal, not_equal}
 ///|
 pub extend AgentStreamEvent with ToJson::{to_json}
 
+///|
 pub extend ApplyUpdateReply with Debug::{to_repr}
 
 ///|
@@ -2069,6 +2071,7 @@ pub extend InstalledSkillsReply with Eq::{equal, not_equal}
 ///|
 pub extend InstalledSkillsReply with ToJson::{to_json}
 
+///|
 pub extend LoadSessionReply with Debug::{to_repr}
 
 ///|

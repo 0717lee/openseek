@@ -1679,6 +1679,7 @@ fn session_tooltip(model : Model, conv : Conversation) -> String {
   }
 }
 
+///|
 /// Top bar: conversation identity on the left (session id and workspace in
 /// the tooltip), live run state on the right — these are per-conversation
 /// runtime facts, not settings, so they live here rather than in the

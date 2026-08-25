@@ -1466,6 +1466,7 @@ priv struct RemoteAccess {
   device_url : String?
 } derive(Eq)
 
+///|
 /// The host-side presentation of the active Browser tab's native view, as
 /// last commanded: `shown`/`rect` echo the `browser.set_visible`/
 /// `browser.set_bounds` already sent, and `geo` is the model-geometry
@@ -1516,6 +1517,7 @@ priv struct ProjectAdoption {
   resolved : @common.Uri?
 } derive(Eq)
 
+///|
 /// One `settings.get`/`settings.set` reply (or `settings.changed`
 /// broadcast), decoded: the host's engine endpoint settings, with key
 /// material reduced to presence.
