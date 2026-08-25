@@ -53,8 +53,8 @@ exists.
 `--system-prompt-file` and `--system-prompt-addendum-file` can also be supplied
 with `OPENSEEK_SYSTEM_PROMPT_FILE` and
 `OPENSEEK_SYSTEM_PROMPT_ADDENDUM_FILE`. `--session` explicitly creates or
-resumes that session under `--session-root` / `OPENSEEK_SESSION_ROOT` (default
-`.openseek`). Relative session roots are resolved under `--dir`.
+resumes that session under `--session-root` (default `.openseek`). Relative
+session roots are resolved under `--dir`.
 
 Every run records a durable session: without `--session`, a generated
 `cli-YYYYMMDD-HHMMSS-mmm` id is used and announced by a `session_started` event

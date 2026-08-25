@@ -40,7 +40,7 @@ Options:
   --max-steps <max-steps>        Maximum agent steps per turn; omit to bound turns by the model's context window instead (a checkpoint summary carries each turn into the next). [env: OPENSEEK_MAX_STEPS]
   --thinking <thinking>          DeepSeek thinking mode: no, high, or max. [env: OPENSEEK_THINKING] [default: max]
   --session <session>            Create or resume this durable session id.
-  --session-root <session-root>  Directory containing durable OpenSeek sessions. [env: OPENSEEK_SESSION_ROOT] [default: .openseek]
+  --session-root <session-root>  Directory containing durable OpenSeek sessions. [default: .openseek]
 ```
 
 The root carries only the options shared with the engine (`--api-key`, `--model`,
@@ -136,7 +136,7 @@ Options:
   --max-steps <max-steps>                                      Maximum agent steps per turn; omit to bound turns by the model's context window instead (a checkpoint summary carries each turn into the next). [env: OPENSEEK_MAX_STEPS]
   --thinking <thinking>                                        DeepSeek thinking mode: no, high, or max. [env: OPENSEEK_THINKING] [default: max]
   --session <session>                                          Create or resume this durable session id.
-  --session-root <session-root>                                Directory containing durable OpenSeek sessions. [env: OPENSEEK_SESSION_ROOT] [default: .openseek]
+  --session-root <session-root>                                Directory containing durable OpenSeek sessions. [default: .openseek]
   --no-session                                                 Run ephemerally: do not record this run to a durable session.
   --review-gate                                                On goal(met), audit the worktree against the goal with a review subagent and inject the findings as an advisory notice.
   --dir <dir>                                                  Workspace directory for relative paths; creates only the final path component if its parent exists. [env: OPENSEEK_DIR] [default: .]

@@ -812,8 +812,8 @@ fn has_finished_run(events : Array[EngineEvent], run_id : String) -> Bool {
 /// follower a real record to tail, so a fixture exercises both halves the way
 /// a live engine does.
 ///
-/// The child reads its store location from the environment and its identity
-/// from the explicit `--session` argument, so this needs no paths baked in. The
+/// The child reads its store location and identity from explicit arguments, so
+/// this needs no paths baked in. The
 /// next sequence is the record's line count: the header occupies line one, so
 /// the first turn commits sequence 1 and each later one advances.
 #cfg(not(platform="windows"))
@@ -823,13 +823,15 @@ fn commit_terminal_sh() -> String {
   let newline = "\\n"
   let script =
     $|session=""
+    $|session_root=""
     $|for argument in "$@"; do
     $|  case "$argument" in
-    $|    --session=*) session="${argument#--session=}"; break ;;
+    $|    --session=*) session="${argument#--session=}" ;;
+    $|    --session-root=*) session_root="${argument#--session-root=}" ;;
     $|  esac
     $|done
-    $|record="$OPENSEEK_SESSION_ROOT/sessions/$session/openseek_session-$session.jsonl"
-    $|mkdir -p "$OPENSEEK_SESSION_ROOT/sessions/$session"
+    $|record="$session_root/sessions/$session/openseek_session-$session.jsonl"
+    $|mkdir -p "$session_root/sessions/$session"
     $|if [ ! -f "$record" ]; then
     $|  printf '{"version":1,"id":"%s","system_prompt":""}\{newline}' "$session" > "$record"
     $|fi
