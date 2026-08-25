@@ -73,6 +73,7 @@ pub fn CodeEditorOptions::equal(Self, Self) -> Bool
 pub fn CodeEditorOptions::line_height(Self) -> Double
 pub fn CodeEditorOptions::not_equal(Self, Self) -> Bool
 pub fn CodeEditorOptions::soft_wrap(Self) -> Bool
+pub fn CodeEditorOptions::with_folding(Self, Bool) -> Self
 pub fn CodeEditorOptions::with_font_family(Self, String) -> Self
 pub fn CodeEditorOptions::with_font_size(Self, Double) -> Self
 pub fn CodeEditorOptions::with_line_decorations_width(Self, Int) -> Self
@@ -232,6 +233,7 @@ pub fn CodeEditorWidget::on_did_change_model(Self, (@editor_api.ModelChangedEven
 pub fn CodeEditorWidget::on_did_change_model_content(Self, (@model.ModelContentChangedEvent) -> Unit) -> @common.Disposable
 pub fn CodeEditorWidget::on_did_change_view_zones(Self, () -> Unit) -> @common.Disposable
 pub fn CodeEditorWidget::on_did_dispose(Self, () -> Unit) -> @common.Disposable
+pub fn CodeEditorWidget::on_did_layout_change(Self, (@config.EditorLayoutInfo) -> Unit) -> @common.Disposable
 pub fn CodeEditorWidget::on_did_scroll_change(Self, (@editor_api.ScrollEvent) -> Unit) -> @common.Disposable
 pub fn CodeEditorWidget::on_mouse_down(Self, (@moonbitlang/editor/viewer/browser.EditorMouseEvent) -> Unit) -> @common.Disposable
 pub fn CodeEditorWidget::on_mouse_leave(Self, (@moonbitlang/editor/viewer/browser.PartialEditorMouseEvent) -> Unit) -> @common.Disposable
@@ -239,7 +241,7 @@ pub fn CodeEditorWidget::on_mouse_move(Self, (@moonbitlang/editor/viewer/browser
 pub fn CodeEditorWidget::on_mouse_up(Self, (@moonbitlang/editor/viewer/browser.EditorMouseEvent) -> Unit) -> @common.Disposable
 pub fn CodeEditorWidget::remove_decorations(Self, Array[String]) -> Unit
 pub fn CodeEditorWidget::remove_overlay_widget(Self, @moonbitlang/editor/viewer/browser.OverlayWidget) -> Unit
-pub fn CodeEditorWidget::render_lines(Self, @model.TextModel, @common.LineRange, decorations? : Array[CodeEditorRenderLinesDecoration], line_class_name? : String, margin_line_class_name? : String) -> CodeEditorRenderedLines?
+pub fn CodeEditorWidget::render_lines(Self, @model.TextModel, @common.LineRange, decorations? : Array[CodeEditorRenderLinesDecoration], line_class_name? : String, margin_line_class_name? : String, render_margin_line_numbers? : Bool) -> CodeEditorRenderedLines?
 pub fn CodeEditorWidget::restore_stable_viewport_state(Self, StableCodeEditorViewportState) -> Bool
 pub fn CodeEditorWidget::restore_view_state(Self, CodeEditorViewState?) -> Unit
 pub fn CodeEditorWidget::reveal_line(Self, Int) -> Unit
@@ -263,6 +265,7 @@ pub fn CodeEditorWidget::reveal_range_near_top(Self, @common.Range) -> Unit
 pub fn CodeEditorWidget::reveal_range_near_top_if_outside_viewport(Self, @common.Range) -> Unit
 pub fn CodeEditorWidget::save_view_state(Self) -> CodeEditorViewState?
 pub fn CodeEditorWidget::set_hidden_areas(Self, Array[@common.Range], source? : String, force_update? : Bool) -> Unit
+pub fn CodeEditorWidget::set_markdown_comment_presentation_enabled(Self, Bool) -> Unit
 pub fn CodeEditorWidget::set_model(Self, @model.TextModel?) -> Unit
 pub fn CodeEditorWidget::set_position(Self, @common.Position, source? : String) -> Unit
 pub fn CodeEditorWidget::set_scroll_left(Self, Double) -> Unit
@@ -299,7 +302,7 @@ pub fn ManagedCodeEditorViewZoneSpec::ManagedCodeEditorViewZoneSpec(Int, Double,
 
 pub struct StableCodeEditorViewportState {
   model : @model.TextModel
-  anchor_line_number : Int
+  anchor_position : @common.Position
   anchor_viewport_offset : Double
   scroll_left : Double
 }

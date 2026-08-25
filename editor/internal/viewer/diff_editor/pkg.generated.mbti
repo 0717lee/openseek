@@ -12,7 +12,6 @@ import {
 }
 
 // Values
-pub fn project_hidden_unchanged_regions(Array[@diff.DetailedLineRangeMapping], Int, Int, Int, Int) -> Array[@diff.LineRangeMapping]
 
 // Errors
 
@@ -56,12 +55,10 @@ pub(all) struct DiffEditorOptions {
   split_ratio : Double
   diff_word_wrap : DiffWordWrap
   overview_ruler : Bool
+  render_indicators : Bool
   ignore_trim_whitespace : Bool
-  hide_unchanged_regions : Bool
-  hide_unchanged_regions_context_line_count : Int
-  hide_unchanged_regions_minimum_line_count : Int
 }
-pub fn DiffEditorOptions::DiffEditorOptions(layout? : DiffEditorLayout, automatic_inline? : Bool, automatic_inline_width? : Double, sash_enabled? : Bool, split_ratio? : Double, diff_word_wrap? : DiffWordWrap, overview_ruler? : Bool, ignore_trim_whitespace? : Bool, hide_unchanged_regions? : Bool, hide_unchanged_regions_context_line_count? : Int, hide_unchanged_regions_minimum_line_count? : Int) -> Self
+pub fn DiffEditorOptions::DiffEditorOptions(layout? : DiffEditorLayout, automatic_inline? : Bool, automatic_inline_width? : Double, sash_enabled? : Bool, split_ratio? : Double, diff_word_wrap? : DiffWordWrap, overview_ruler? : Bool, render_indicators? : Bool, ignore_trim_whitespace? : Bool) -> Self
 pub fn DiffEditorOptions::default() -> Self
 
 pub struct DiffEditorViewModel {
@@ -136,8 +133,13 @@ pub struct DiffEditorWidget {
   layout_render_waiters : Array[@common.Disposable]
   mut layout_render_generation : Int
   mut layout_render_remaining : Int
+  mut pending_layout_modified_viewport : @code_editor_widget.StableCodeEditorViewportState?
   mut has_valid_layout_box : Bool
-  mut is_syncing_scroll : Bool
+  mut inline_original_strip_width : Double
+  mut pending_original_scroll_top_echo : Double?
+  mut pending_original_scroll_left_echo : Double?
+  mut pending_modified_scroll_top_echo : Double?
+  mut pending_modified_scroll_left_echo : Double?
   mut dispose_pass_count : Int
   mut resize_observer_disposed : Bool
   mut overview_ruler_disposed : Bool

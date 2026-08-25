@@ -129,9 +129,9 @@ fn run_diff_editor_lifecycle_test() -> Unit {
   let widget = @diff_editor.DiffEditorWidget::create(
     host,
     provider_object,
-    editor_options=@code_widget.CodeEditorOptions::default().with_soft_wrap(
-      true,
-    ),
+    editor_options=@code_widget.CodeEditorOptions::default()
+      .with_soft_wrap(true)
+      .with_line_numbers_min_chars(1),
     options=DiffEditorOptions(layout=Inline, automatic_inline=false),
   )
   let original = diff_editor_lifecycle_model(
@@ -144,17 +144,58 @@ fn run_diff_editor_lifecycle_test() -> Unit {
     "modified",
     "shared tail\n".repeat(120) + "end",
   )
+  let digit_original = diff_editor_lifecycle_model(
+    "digit-original",
+    "digit line\n".repeat(8) + "digit line",
+  )
+  let digit_modified = diff_editor_lifecycle_model(
+    "digit-modified",
+    "digit line\n".repeat(8) + "digit line",
+  )
+  let indicator_original = diff_editor_lifecycle_model(
+    "indicator-original", "shared head\nold value\nshared tail",
+  )
+  let indicator_modified = diff_editor_lifecycle_model(
+    "indicator-modified", "shared head\nnew value\nshared tail",
+  )
+  let identical_original = diff_editor_lifecycle_model(
+    "identical-original", "identical 1\nidentical 2\nidentical 3\nidentical 4\nidentical 5\nidentical 6\nidentical 7\nidentical 8",
+  )
+  let identical_modified = diff_editor_lifecycle_model(
+    "identical-modified", "identical 1\nidentical 2\nidentical 3\nidentical 4\nidentical 5\nidentical 6\nidentical 7\nidentical 8",
+  )
   widget.set_model(Some({ original, modified })) |> ignore
   install_diff_editor_lifecycle_controls(
     () => diff_editor_lifecycle_snapshot_json(widget),
-    hide_unchanged_regions => {
+    fixture => {
+      let pair : @diff_editor.DiffEditorModelData = match fixture {
+        "digits" => { original: digit_original, modified: digit_modified }
+        "indicators" =>
+          { original: indicator_original, modified: indicator_modified }
+        "identical" =>
+          { original: identical_original, modified: identical_modified }
+        _ => { original, modified }
+      }
+      widget.set_model(Some(pair)) |> ignore
+    },
+    line_count => {
+      let content = "digit line\n".repeat((line_count - 1).max(0)) +
+        "digit line"
+      digit_original.set_value(content)
+      digit_modified.set_value(content)
+    },
+    (layout_name, render_indicators, font_size) => {
+      let layout : @diff_editor.DiffEditorLayout = if layout_name == "split" {
+        SideBySide
+      } else {
+        Inline
+      }
       widget.update_options(
-        @code_widget.CodeEditorOptions::default().with_soft_wrap(true),
-        DiffEditorOptions(
-          layout=Inline,
-          automatic_inline=false,
-          hide_unchanged_regions~,
-        ),
+        @code_widget.CodeEditorOptions::default()
+        .with_soft_wrap(true)
+        .with_line_numbers_min_chars(1)
+        .with_font_size(font_size),
+        DiffEditorOptions(layout~, automatic_inline=false, render_indicators~),
       )
     },
     provider_kind => {
@@ -178,6 +219,12 @@ fn run_diff_editor_lifecycle_test() -> Unit {
     () => {
       original.dispose()
       modified.dispose()
+      digit_original.dispose()
+      digit_modified.dispose()
+      indicator_original.dispose()
+      indicator_modified.dispose()
+      identical_original.dispose()
+      identical_modified.dispose()
     },
   )
 }
@@ -185,16 +232,20 @@ fn run_diff_editor_lifecycle_test() -> Unit {
 ///|
 extern "js" fn install_diff_editor_lifecycle_controls(
   snapshot : () -> String,
-  set_hide_unchanged : (Bool) -> Unit,
+  set_fixture : (String) -> Unit,
+  set_digit_line_count : (Int) -> Unit,
+  set_options : (String, Bool, Double) -> Unit,
   set_provider : (String) -> Unit,
   set_model_attached : (Bool) -> Unit,
   dispose : () -> Unit,
   dispose_models : () -> Unit,
 ) -> Unit =
-  #| (snapshot, setHideUnchanged, setProvider, setModelAttached, dispose, disposeModels) => {
+  #| (snapshot, setFixture, setDigitLineCount, setOptions, setProvider, setModelAttached, dispose, disposeModels) => {
   #|   globalThis.__diffEditorLifecycleControls = Object.freeze({
   #|     snapshot() { return JSON.parse(snapshot()); },
-  #|     set_hide_unchanged: setHideUnchanged,
+  #|     set_fixture: setFixture,
+  #|     set_digit_line_count: setDigitLineCount,
+  #|     set_options: setOptions,
   #|     set_provider: setProvider,
   #|     set_model_attached: setModelAttached,
   #|     dispose,

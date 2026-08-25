@@ -27,6 +27,16 @@
 }
 
 /* codiconsLibrary.ts codepoints for the icons the viewer renders. */
+.codicon-add:before,
+.codicon-diff-insert:before {
+  content: "\ea60";
+}
+
+.codicon-remove:before,
+.codicon-diff-remove:before {
+  content: "\eb3b";
+}
+
 .codicon-chevron-down:before {
   content: "\eab4";
 }

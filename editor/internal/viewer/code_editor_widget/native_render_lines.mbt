@@ -177,6 +177,7 @@ fn render_detached_view_line_window(
   decorations : Array[CodeEditorRenderLinesDecoration],
   line_class_name : String,
   margin_line_class_name : String,
+  render_margin_line_numbers : Bool,
 ) -> DetachedRenderedLineWindow {
   let converter = detached_view_model.coordinates_converter()
   let line_height = configuration.font_info.line_height
@@ -225,7 +226,7 @@ fn render_detached_view_line_window(
       ).line_number
     margin_html <+
       "<div class=\"\{margin_line_class}\" data-model-line=\"\{model_line_number}\" data-rendered-view-line=\"\{view_line_number}\" style=\"top:\{top}px;height:\{line_height}px;line-height:\{line_height}px;right:0;width:100%;\">"
-    if model_view_start == view_line_number {
+    if render_margin_line_numbers && model_view_start == view_line_number {
       margin_html.write_string(model_line_number.to_string())
     }
     margin_html.write_string("</div>")
@@ -257,6 +258,7 @@ pub fn CodeEditorWidget::render_lines(
   decorations? : Array[CodeEditorRenderLinesDecoration] = [],
   line_class_name? : String = "",
   margin_line_class_name? : String = "",
+  render_margin_line_numbers? : Bool = true,
 ) -> CodeEditorRenderedLines? {
   if self.disposed {
     return None
@@ -302,6 +304,7 @@ pub fn CodeEditorWidget::render_lines(
     decorations,
     line_class_name,
     margin_line_class_name,
+    render_margin_line_numbers,
   )
   for model_line_number in rendered_window.model_line_numbers {
     model_line_view_counts[model_line_number - start_line_number] += 1

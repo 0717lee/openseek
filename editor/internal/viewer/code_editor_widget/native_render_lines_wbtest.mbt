@@ -111,6 +111,29 @@ test "native render_lines uses editor wrapping and exact model-line heights" {
 }
 
 ///|
+test "native render_lines can keep marker rows while suppressing numbers" {
+  with_native_render_lines_test_dom(() => {
+    let source = test_model("deleted\nrows")
+    defer source.dispose()
+    with_test_viewer("host", viewer => {
+      let rendered = viewer
+        .render_lines(
+          source,
+          LineRange(1, 3),
+          margin_line_class_name="delete-sign codicon codicon-diff-remove",
+          render_margin_line_numbers=false,
+        )
+        .unwrap()
+      let html = native_render_lines_test_html(rendered.margin_dom_node())
+      assert_true(html.contains("delete-sign codicon codicon-diff-remove"))
+      assert_false(html.contains(">1</div>"))
+      assert_false(html.contains(">2</div>"))
+      assert_eq(rendered.view_line_count(), 2)
+    })
+  })
+}
+
+///|
 test "native render_lines preserves tab CJK emoji and RTL source" {
   with_native_render_lines_test_dom(() => {
     let source = test_model("\t中😀 אבג")

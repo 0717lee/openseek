@@ -83,6 +83,25 @@ test "digit-band transition preserves outer width and reset stays model-scoped" 
 }
 
 ///|
+test "default five-slot line-number band widens at 99999 to 100000" {
+  let state = test_configuration_state(
+    options=CodeEditorOptions(line_numbers_min_chars=5, folding=false),
+  )
+  let initial_font = state.snapshot().font_info
+  state.commit_font_info({ ..initial_font, max_digit_width: 10.0 }) |> ignore
+  state.commit_measured_size(800.0, 180.0)
+  state.set_line_counts(99999, 99999)
+  let before = state.snapshot()
+  let outer_width = before.gutter_width(99999) + before.content_width
+  assert_eq(before.line_numbers_width(99999), 50.0)
+
+  assert_true(state.adjust_content_width_for_model_line_count(100000))
+  let after = state.snapshot()
+  assert_eq(after.line_numbers_width(100000), 60.0)
+  assert_eq(after.gutter_width(100000) + after.content_width, outer_width)
+}
+
+///|
 test "event identity observes committed layout counts" {
   let state = test_configuration_state()
   let previous = state.event_snapshot()

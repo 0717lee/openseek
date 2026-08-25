@@ -259,6 +259,16 @@ pub fn CodeEditorOptions::with_soft_wrap(
 }
 
 ///|
+/// Returns a copy with Monaco's folding option changed. Diff panes use this
+/// to keep their shared line-decoration lane free of folding controls.
+pub fn CodeEditorOptions::with_folding(
+  self : CodeEditorOptions,
+  folding : Bool,
+) -> CodeEditorOptions {
+  { ..self, folding, }
+}
+
+///|
 /// Returns a copy with the minimum line-number digit count changed, normalized
 /// to at least one.
 pub fn CodeEditorOptions::with_line_numbers_min_chars(

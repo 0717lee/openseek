@@ -523,6 +523,9 @@ fn CodeEditorWidget::on_line_mapping_changed(
     )
   }
   end_view_event_batch(event_batch)
+  if notify_configuration {
+    self.emit_layout_change_if_needed(previous_layout_identity)
+  }
   let fresh = match self.pending_rendered {
     Some(pending) => pending.fresh
     None => false

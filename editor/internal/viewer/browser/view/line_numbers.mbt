@@ -5,9 +5,10 @@
 // number renders on the model line's first view line, and a soft-wrap
 // continuation renders nothing (`modelPosition.column !== 1` → no output,
 // the source's `:168-176` + empty-output skip `:181-184`). The
-// relative/interval custom renderers, the active-line class (no blinking
-// cursor here), and the final-newline dimming are out of scope. Preparation is
-// wired from `view_overlays_lifecycle.mbt`.
+// relative/interval custom renderers and final-newline dimming are out of
+// scope. The active model line follows the primary cursor independently of
+// whether the blinking cursor itself is visible. Preparation is wired from
+// `view_overlays_lifecycle.mbt`.
 
 ///|
 /// The package-private line-numbers dynamic overlay state: the prepared
@@ -29,10 +30,10 @@ fn LineNumbersOverlay::LineNumbersOverlay() -> LineNumbersOverlay {
 fn prepare_line_numbers_render(
   viewport : @view_layout.ViewportData,
   view_model : @view_model.ViewModel?,
+  active_model_line_number : Int?,
   left~ : Double,
   width~ : Double,
 ) -> Array[String] {
-  let common = "<div class=\"line-numbers\" style=\"left:\{left.to_string()}px;width:\{width.to_string()}px;\">"
   let output : Array[String] = []
   for index in 0..<viewport.lines.length() {
     let view_line = viewport.start_line_number + index
@@ -49,7 +50,15 @@ fn prepare_line_numbers_render(
       output.push("")
       continue
     }
-    output.push("\{common}\{model_position.line_number.to_string()}</div>")
+    let class_name = if active_model_line_number ==
+      Some(model_position.line_number) {
+      "line-numbers active-line-number"
+    } else {
+      "line-numbers"
+    }
+    output.push(
+      "<div class=\"\{class_name}\" style=\"left:\{left.to_string()}px;width:\{width.to_string()}px;\">\{model_position.line_number.to_string()}</div>",
+    )
   }
   output
 }

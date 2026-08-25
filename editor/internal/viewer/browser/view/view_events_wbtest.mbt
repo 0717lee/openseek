@@ -335,6 +335,7 @@ fn dynamic_overlay_handle_test_name(
     Selections(_) => "selections"
     Decorations(_) => "decorations"
     CurrentLineMargin(_) => "current-line-margin"
+    MarginDecorations(_) => "margin-decorations"
     LinesDecorations(_) => "lines-decorations"
     LineNumbers(_) => "line-numbers"
   }
@@ -350,6 +351,7 @@ fn DynamicViewOverlayHandle::set_test_render_result(
     Selections(overlay) => overlay.render_result = result
     Decorations(overlay) => overlay.render_result = result
     CurrentLineMargin(overlay) => overlay.render_result = result
+    MarginDecorations(overlay) => overlay.render_result = result
     LinesDecorations(overlay) => overlay.render_result = result
     LineNumbers(overlay) => overlay.render_result = result
   }
@@ -367,14 +369,17 @@ test "dynamic overlay subsets preserve registration order and line slicing" {
   )
   assert_true(
     margin.overlays.dynamic_overlays.map(dynamic_overlay_handle_test_name) ==
-    ["current-line-margin", "lines-decorations", "line-numbers"],
+    [
+      "current-line-margin", "margin-decorations", "lines-decorations", "line-numbers",
+    ],
   )
   content.overlays.dynamic_overlays[0].set_test_render_result(["c10", "c11"])
   content.overlays.dynamic_overlays[1].set_test_render_result(["s10", "s11"])
   content.overlays.dynamic_overlays[2].set_test_render_result(["d10", "d11"])
   margin.overlays.dynamic_overlays[0].set_test_render_result(["m10", "m11"])
-  margin.overlays.dynamic_overlays[1].set_test_render_result(["g10", "g11"])
-  margin.overlays.dynamic_overlays[2].set_test_render_result(["n10", "n11"])
+  margin.overlays.dynamic_overlays[1].set_test_render_result(["d10", "d11"])
+  margin.overlays.dynamic_overlays[2].set_test_render_result(["g10", "g11"])
+  margin.overlays.dynamic_overlays[3].set_test_render_result(["n10", "n11"])
   assert_eq(
     [
       for overlay in content.overlays.dynamic_overlays => overlay.render(10, 11)
@@ -385,7 +390,7 @@ test "dynamic overlay subsets preserve registration order and line slicing" {
     [
       for overlay in margin.overlays.dynamic_overlays => overlay.render(10, 10)
     ].join("|"),
-    "m10|g10|n10",
+    "m10|d10|g10|n10",
   )
   for overlay in content.overlays.dynamic_overlays {
     assert_eq(overlay.render(10, 9), "")

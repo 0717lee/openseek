@@ -58,10 +58,8 @@ pub fn lines_decorations_to_render(
 /// `DedupOverlay._render`: expands the decorations into one class-name list
 /// per visible line, skipping a class name already emitted on a line by an
 /// earlier decoration of the same class. Sorting groups equal class names so
-/// the previous-decoration dedup window works; MoonBit's `String` compare is
-/// length-first rather than lexicographic, which only permutes the order of
-/// *different* class names on a line (absolute-positioned same-lane pieces),
-/// never the dedup result.
+/// the previous-decoration dedup window works; `@base_common.compare` also
+/// preserves JavaScript's UTF-16 lexicographic order for different classes.
 pub fn dedup_margin_decorations(
   visible_start_line_number : Int,
   visible_end_line_number : Int,
@@ -84,7 +82,7 @@ pub fn dedup_margin_decorations(
         a.start_line_number - b.start_line_number
       }
     } else {
-      a.class_name.compare(b.class_name)
+      @base_common.compare(a.class_name, b.class_name)
     }
   })
   let mut prev_class_name : String? = None

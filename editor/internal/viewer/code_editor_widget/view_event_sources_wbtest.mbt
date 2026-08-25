@@ -263,6 +263,11 @@ test "set_value synchronizes a decimal line-count band into layout identity" {
   assert_eq(viewer.configuration.model_line_count, 9)
   assert_eq(viewer.configuration.view_line_count, 9)
   let before = viewer.configuration.event_snapshot().layout
+  let layout_widths : Array[Double] = []
+  let layout_listener = viewer.on_did_layout_change(info => {
+    layout_widths.push(info.line_numbers_width)
+  })
+  defer layout_listener.dispose()
   viewer.set_value(
     ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"].join("\n"),
   )
@@ -271,6 +276,14 @@ test "set_value synchronizes a decimal line-count band into layout identity" {
   let after = viewer.configuration.event_snapshot().layout
   assert_true(after.line_numbers_width > before.line_numbers_width)
   assert_true(after != before)
+  assert_true(!layout_widths.is_empty())
+  assert_eq(layout_widths[layout_widths.length() - 1], after.line_numbers_width)
+
+  let before_font_width = after.line_numbers_width
+  viewer.update_options(
+    CodeEditorOptions(line_numbers_min_chars=1, folding=false, font_size=24),
+  )
+  assert_true(layout_widths[layout_widths.length() - 1] > before_font_width)
   viewer.dispose()
   nine.dispose()
 }

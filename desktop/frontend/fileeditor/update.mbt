@@ -1891,7 +1891,6 @@ pub fn sync(
         search: state.search.reset_checkout(),
         review_view_mode: state.review_view_mode,
         review_diff_layout: state.review_diff_layout,
-        review_diff_hide_unchanged_regions: state.review_diff_hide_unchanged_regions,
         review_diff_mode: state.review_diff_mode,
         review_diff_ignore_comments: state.review_diff_ignore_comments,
         changes_collapsed: state.changes_collapsed,
@@ -2256,24 +2255,6 @@ pub fn update(
       (
         apply_review_diff_layout(review_diff_layout),
         { ..state, review_diff_layout, },
-      )
-    }
-    ToggleReviewDiffHideUnchangedRegions => {
-      let review_ready = ctx.active_file is Some(path) &&
-        state.docs.get(path) is Some(doc) &&
-        doc.review is Some({ view_mode: ReviewDiff, .. }) &&
-        doc.diff_content() is Some(_)
-      let history_ready = ctx.active_history_diff is Some(diff) &&
-        state.history_docs.get(history_diff_key(diff)) is Some(history) &&
-        history.original.text() is Some(_) &&
-        history.modified.text() is Some(_)
-      guard review_ready || history_ready else { return (@cmd.none, state) }
-      let review_diff_hide_unchanged_regions = !state.review_diff_hide_unchanged_regions
-      (
-        apply_review_diff_hide_unchanged_regions(
-          review_diff_hide_unchanged_regions,
-        ),
-        { ..state, review_diff_hide_unchanged_regions, },
       )
     }
     ReviewDiffModeSelected(mode) => {

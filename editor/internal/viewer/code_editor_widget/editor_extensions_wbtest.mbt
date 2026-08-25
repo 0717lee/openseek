@@ -68,18 +68,14 @@ test "contributions instantiate centrally in the reviewed order and expose every
 }
 
 ///|
-test "diff pane descriptors keep code navigation but exclude nested rich and diff contributions" {
+test "diff pane descriptors keep markdown comments and navigation but exclude folding and nested diff" {
   let viewer = CodeEditorWidget::CodeEditorWidget(
     contributions=CodeEditorContributionDescriptors::diff_pane(),
   )
   let expected = [
-    "agentFeedback.editorInputContribution",
-    "agentFeedback.editorWidgetContribution",
-    @folding_browser.FOLDING_CONTROLLER_ID,
-    "editor.contrib.contentHover",
-    context_menu_contribution_id,
-    definition_contribution_id,
-    references_contribution_id,
+    "agentFeedback.editorInputContribution", "agentFeedback.editorWidgetContribution",
+    markdown_comment_contribution_id, "editor.contrib.contentHover", context_menu_contribution_id,
+    definition_contribution_id, references_contribution_id,
   ]
   let actual : Array[String] = []
   for id, _ in viewer.contributions.instances {
@@ -88,12 +84,12 @@ test "diff pane descriptors keep code navigation but exclude nested rich and dif
   assert_eq(actual, expected)
   assert_true(viewer.agent_feedback_input_contribution() is Some(_))
   assert_true(viewer.agent_feedback_widget_contribution() is Some(_))
-  assert_true(viewer.folding_controller() is Some(_))
+  assert_true(viewer.folding_controller() is None)
   assert_true(viewer.content_hover_controller() is Some(_))
   assert_true(viewer.context_menu_contribution() is Some(_))
   assert_true(viewer.definition_contribution() is Some(_))
   assert_true(viewer.references_contribution() is Some(_))
-  assert_true(viewer.markdown_comment_contribution() is None)
+  assert_true(viewer.markdown_comment_contribution() is Some(_))
   assert_true(viewer.quick_diff_contribution() is None)
 
   viewer.dispose()

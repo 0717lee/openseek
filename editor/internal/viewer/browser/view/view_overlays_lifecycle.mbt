@@ -140,6 +140,24 @@ fn prepare_lines_decorations_overlay(
 }
 
 ///|
+fn prepare_margin_decorations_overlay(
+  part : MarginDecorationsOverlay,
+  context : RenderingContext,
+) -> Unit {
+  let self = part
+  let decorations = context.input.view_model
+    .decorations()
+    .get_decorations_viewport_data(context.viewport.visible_range).decorations
+  let to_render = margin_decorations_to_render(decorations)
+  let class_names_per_line = dedup_whole_margin_decorations(
+    context.viewport.start_line_number,
+    context.viewport.start_line_number + context.viewport.lines.length() - 1,
+    to_render,
+  )
+  self.render_result = prepare_margin_decorations_render(class_names_per_line)
+}
+
+///|
 fn prepare_line_numbers_overlay(
   part : LineNumbersOverlay,
   context : RenderingContext,
@@ -149,9 +167,19 @@ fn prepare_line_numbers_overlay(
   // line-decorations lane.
   let line_numbers_width = context.gutter_width -
     context.input.line_decorations_width
+  let active_model_line_number = match context.input.view_selection {
+    Some(selection) =>
+      Some(
+        context.input.view_model
+        .coordinates_converter()
+        .view_position_to_model_position(selection.get_position()).line_number,
+      )
+    None => None
+  }
   self.render_result = prepare_line_numbers_render(
     context.viewport,
     Some(context.input.view_model),
+    active_model_line_number,
     left=0.0,
     width=line_numbers_width,
   )
