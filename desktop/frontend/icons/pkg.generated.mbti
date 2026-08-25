@@ -6,6 +6,8 @@ import {
 }
 
 // Values
+pub fn codicon(String) -> @html.Html
+
 pub fn icon(() -> @html.Html) -> @html.Html
 
 pub fn icon_add() -> @html.Html
@@ -19,6 +21,8 @@ pub fn icon_arrow_up() -> @html.Html
 pub fn icon_chevron_down() -> @html.Html
 
 pub fn icon_close() -> @html.Html
+
+pub fn icon_copy() -> @html.Html
 
 pub fn icon_debug_stop() -> @html.Html
 

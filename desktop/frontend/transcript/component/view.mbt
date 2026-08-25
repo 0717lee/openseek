@@ -793,6 +793,8 @@ fn transcript_item_view(
         on_open,
         assistant_name,
         is_danger=false,
+        completed_at?=item.ts,
+        show_actions=true,
       )
     // Unreachable in practice — the transcript loop batches every reasoning
     // and tool item into a run and builds the activity card itself — but the
@@ -809,6 +811,8 @@ fn assistant_message_view(
   on_open : (String) -> @cmd.Cmd,
   assistant_name : String,
   is_danger~ : Bool,
+  completed_at? : Double,
+  show_actions? : Bool = false,
 ) -> @html.Html {
   // Errors and abort notices are durable run status rather than assistant
   // prose. Keep their exact text and inline code readable in an unboxed status
@@ -828,8 +832,41 @@ fn assistant_message_view(
       @markdown.markdown_nodes(content, open_file=on_open),
     )
   }
+  let children = [speaker_label(assistant_name), body]
+  // Only an answer confirmed by the durable Finished terminal gets this row.
+  // Tool-prefacing Assistant prose, checkpoint replays, danger notices, and
+  // the separate streaming view are not turn-ending answers.
+  if show_actions {
+    let actions = [
+      @html.button(
+        class="assistant-message-copy",
+        type_="button",
+        title="Copy Markdown",
+        on_click=@clipboard.copy(@clipboard.Text(content)),
+        attrs=@html.Attrs::build().aria_label(
+          "Copy assistant message as Markdown",
+        ),
+        @icons.icon(@icons.icon_copy),
+      ),
+    ]
+    // The durable row is committed only after its complete message becomes
+    // available. Its store timestamp is therefore the completion instant; old
+    // or client-local rows without a usable stamp simply omit the label.
+    if completed_at is Some(ts) {
+      let label = clock_label(ts)
+      if !label.is_empty() {
+        actions.push(
+          @html.span(class="assistant-message-time", [
+            speaker_label("Completed "),
+            @html.text(label),
+          ]),
+        )
+      }
+    }
+    children.push(@html.div(class="assistant-message-actions", actions))
+  }
   @html.div(class=if is_danger { "msg transcript-error" } else { "msg" }, [
-    @html.div(class="msg-body", [speaker_label(assistant_name), body]),
+    @html.div(class="msg-body", children),
   ])
 }
 

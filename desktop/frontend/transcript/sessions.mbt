@@ -495,7 +495,11 @@ pub fn apply_session_item(
       }
     }
     @desktop_protocol.Terminal(terminal) =>
-      SessionTerminalProjection(terminal).append_to(items, ts?, sequence?)
+      updated_existing = SessionTerminalProjection(terminal).append_to(
+        items,
+        ts?,
+        sequence?,
+      )
     @desktop_protocol.UnknownTerminal(_) => ()
     @desktop_protocol.Unknown(_) => ()
   }
@@ -512,7 +516,7 @@ fn SessionTerminalProjection::append_to(
   items : Array[TranscriptItem],
   ts? : Double,
   sequence? : Int,
-) -> Unit {
+) -> Bool {
   let (kind, message) = match self.0 {
     @desktop_protocol.Finished(message) => ("finished", message)
     @desktop_protocol.Aborted(message) => ("aborted", message)
@@ -521,14 +525,30 @@ fn SessionTerminalProjection::append_to(
   }
   let message = message.trim().to_owned()
   match kind {
-    // A current no-tool final is already the last assistant message; only a
-    // differing terminal message, such as a completion-tool answer, adds a
-    // bubble.
+    // A current no-tool final is already the last assistant message. Promote
+    // that row instead of duplicating it, and replace its model-step stamp
+    // with the later terminal stamp that marks when the whole turn ended.
     "finished" =>
-      if !message.is_empty() && !ends_with_assistant(items, message) {
-        items.push({ kind: TerminalAnswer, content: message, ts, sequence })
+      if !message.is_empty() &&
+        items is [.., last] &&
+        last.kind is Assistant(is_danger=false) &&
+        last.content == message {
+        items[items.length() - 1] = {
+          kind: TerminalAnswer,
+          content: message,
+          ts,
+          sequence,
+        }
+        true
+      } else {
+        if !message.is_empty() {
+          // A differing terminal message, such as a completion-tool answer,
+          // remains a new final bubble.
+          items.push({ kind: TerminalAnswer, content: message, ts, sequence })
+        }
+        false
       }
-    "aborted" =>
+    "aborted" => {
       items.push({
         kind: Assistant(is_danger=true),
         content: if message.is_empty() {
@@ -539,7 +559,9 @@ fn SessionTerminalProjection::append_to(
         ts,
         sequence,
       })
-    "interrupted" =>
+      false
+    }
+    "interrupted" => {
       items.push({
         kind: Assistant(is_danger=true),
         content: if message.is_empty() {
@@ -550,7 +572,9 @@ fn SessionTerminalProjection::append_to(
         ts,
         sequence,
       })
-    "failed" =>
+      false
+    }
+    "failed" => {
       items.push({
         kind: Assistant(is_danger=true),
         content: if message.is_empty() {
@@ -561,13 +585,10 @@ fn SessionTerminalProjection::append_to(
         ts,
         sequence,
       })
-    _ => ()
+      false
+    }
+    _ => false
   }
-}
-
-///|
-fn ends_with_assistant(items : Array[TranscriptItem], content : String) -> Bool {
-  items is [.., item] && item.kind is Assistant(_) && item.content == content
 }
 
 ///|
@@ -870,8 +891,8 @@ test "transcript mapping replays a finished conversation" {
   let events =
     #|{"sequence":1,"item":{"kind":"user","payload":{"content":"  question  "}}},
     #|{"sequence":2,"item":{"kind":"tool_result","payload":{"tool_call_id":"c1","tool_name":"shell","content":"output","is_error":true,"brief":"ran ls → exit 1"}}},
-    #|{"sequence":3,"item":{"kind":"assistant","payload":{"content":"answer","tool_calls":[],"reasoning_content":"thought"}}},
-    #|{"sequence":4,"item":{"kind":"terminal","payload":{"kind":"finished","message":"answer"}}}
+    #|{"sequence":3,"ts":1000,"item":{"kind":"assistant","payload":{"content":"answer","tool_calls":[],"reasoning_content":"thought"}}},
+    #|{"sequence":4,"ts":2000,"item":{"kind":"terminal","payload":{"kind":"finished","message":"answer"}}}
   let items = transcript_from_session(session_reply(events))
   inspect(items.length(), content="4")
   guard items[0].kind is User else { fail("expected user item") }
@@ -884,10 +905,33 @@ test "transcript mapping replays a finished conversation" {
   inspect(items[1].content, content="output")
   guard items[2].kind is Reasoning else { fail("expected reasoning item") }
   inspect(items[2].content, content="thought")
-  guard items[3].kind is Assistant(is_danger=false) else {
-    fail("expected assistant")
+  guard items[3].kind is TerminalAnswer else {
+    fail("expected terminal-confirmed answer")
   }
   inspect(items[3].content, content="answer")
+  assert_true(items[3].ts is Some(2000))
+  assert_true(items[3].sequence is Some(4))
+}
+
+///|
+test "a finished turn marks only its last assistant message as final" {
+  let events =
+    #|{"sequence":1,"item":{"kind":"user","payload":{"content":"question"}}},
+    #|{"sequence":2,"ts":1000,"item":{"kind":"assistant","payload":{"content":"I will inspect it.","tool_calls":[{"id":"c1","name":"read","arguments":"{}"}]}}},
+    #|{"sequence":3,"item":{"kind":"tool_result","payload":{"tool_call_id":"c1","tool_name":"read","content":"result","is_error":false}}},
+    #|{"sequence":4,"ts":2000,"item":{"kind":"assistant","payload":{"content":"Done.","tool_calls":[]}}},
+    #|{"sequence":5,"ts":3000,"item":{"kind":"terminal","payload":{"kind":"finished","message":"Done."}}}
+  let items = transcript_from_session(session_reply(events))
+  inspect(items.length(), content="4")
+  guard items[1].kind is Assistant(is_danger=false) else {
+    fail("expected tool-prefacing narration to stay non-final")
+  }
+  inspect(items[1].content, content="I will inspect it.")
+  guard items[3].kind is TerminalAnswer else {
+    fail("expected only the last answer to be terminal-confirmed")
+  }
+  inspect(items[3].content, content="Done.")
+  assert_true(items[3].ts is Some(3000))
 }
 
 ///|

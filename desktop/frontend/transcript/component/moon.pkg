@@ -2,6 +2,7 @@ import {
   "bobzhang/openseek/agent_tool/edit_diff",
   "bobzhang/openseek/agent_tool/read/html" @read_html,
   "moonbit-community/rabbita",
+  "moonbit-community/rabbita/clipboard",
   "moonbit-community/rabbita/cmd",
   "moonbit-community/rabbita/dom",
   "moonbit-community/rabbita/html",

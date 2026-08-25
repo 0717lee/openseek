@@ -321,6 +321,44 @@
   min-width: 0;
 }
 
+/* A completed assistant answer closes with a left-aligned metadata row: the
+   raw-Markdown action first, followed by the durable event's completion time.
+   The icon stays visible instead of relying on hover so touch and keyboard
+   users can discover it. */
+.assistant-message-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  margin-top: 4px;
+}
+.assistant-message-copy {
+  --icon-size: var(--icon-md);
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.assistant-message-time {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+.assistant-message-copy:hover {
+  background: var(--color-hover-subtle);
+  color: var(--color-text-primary);
+}
+.assistant-message-copy:focus-visible {
+  outline: 1px solid var(--color-focus-ring);
+  outline-offset: 1px;
+}
+
 .msg-content {
   /* Let the content box shrink so a wide child (a <pre>) scrolls
      internally rather than widening the message. */
