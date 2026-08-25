@@ -46,6 +46,23 @@ priv struct EditorLayoutIdentity {
 } derive(Eq)
 
 ///|
+/// Equality of the facts exposed by `EditorLayoutInfo`. `view_line_count` is
+/// retained in the configuration-event identity for wrapping invalidation, but
+/// it is not part of public layout info and must not create layout callbacks by
+/// itself.
+fn EditorLayoutIdentity::same_layout_info(
+  self : EditorLayoutIdentity,
+  other : EditorLayoutIdentity,
+) -> Bool {
+  self.width == other.width &&
+  self.line_numbers_width == other.line_numbers_width &&
+  self.decorations_width == other.decorations_width &&
+  self.content_left == other.content_left &&
+  self.content_width == other.content_width &&
+  self.height == other.height
+}
+
+///|
 /// Exact before/after inputs for one ViewConfigurationChanged event. Capturing
 /// this value before a transition preserves the source event's comparison
 /// boundary even when ViewModel reflow mutates the final view-line count.

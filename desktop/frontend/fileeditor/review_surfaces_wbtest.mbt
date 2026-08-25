@@ -53,9 +53,6 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
   assert_true(source_breadcrumb.contains("aria-pressed=\"false\""))
   assert_true(source_breadcrumb.contains(">View full diff</button>"))
   assert_false(source_breadcrumb.contains("aria-label=\"Inline diff layout\""))
-  assert_false(
-    source_breadcrumb.contains("aria-label=\"Hide unchanged regions\""),
-  )
   assert_true(source_breadcrumb.contains(">Mark reviewed</button>"))
   assert_true(
     source_breadcrumb.contains("aria-label=\"Changed file navigation\""),
@@ -93,9 +90,6 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
   assert_true(diff_breadcrumb.contains("aria-pressed=\"false\""))
   assert_true(diff_breadcrumb.contains("data-layout=\"side-by-side\""))
   assert_true(diff_breadcrumb.contains("review-layout-icon split"))
-  assert_true(diff_breadcrumb.contains("aria-label=\"Hide unchanged regions\""))
-  assert_true(diff_breadcrumb.contains("data-hide-unchanged=\"false\""))
-  assert_true(diff_breadcrumb.contains(">Hide unchanged</button>"))
   assert_true(diff_breadcrumb.contains("aria-label=\"Comparison algorithm\""))
   assert_true(diff_breadcrumb.contains("data-diff-mode=\"core\""))
   assert_true(diff_breadcrumb.contains("data-diff-mode=\"token\""))
@@ -152,21 +146,6 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
   assert_true(inline_breadcrumb.contains("aria-pressed=\"true\""))
   assert_true(inline_breadcrumb.contains("data-layout=\"inline\""))
   assert_true(inline_breadcrumb.contains("review-layout-icon inline"))
-
-  let hidden_breadcrumb = render_review_html(
-    breadcrumb_view(
-      test_emit(),
-      { ..diff_state, review_diff_hide_unchanged_regions: true },
-      ctx,
-    ),
-  )
-  assert_true(hidden_breadcrumb.contains("data-hide-unchanged=\"true\""))
-  assert_true(hidden_breadcrumb.contains("title=\"Show all unchanged lines\""))
-  assert_true(
-    hidden_breadcrumb.contains(
-      "aria-label=\"Hide unchanged regions\" aria-pressed=\"true\"",
-    ),
-  )
 
   let reviewed_state = { ..diff_state, reviewed_changes: [selected] }
   let reviewed_breadcrumb = render_review_html(
@@ -259,7 +238,6 @@ test "non-MoonBit full diff omits specialized provider controls" {
     ),
   )
   assert_false(breadcrumb.contains("aria-label=\"Comparison algorithm\""))
-  assert_true(breadcrumb.contains("aria-label=\"Hide unchanged regions\""))
 }
 
 ///|

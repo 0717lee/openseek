@@ -24,6 +24,7 @@ priv enum DynamicViewOverlayHandle {
   Selections(SelectionsOverlay)
   Decorations(DecorationsOverlay)
   CurrentLineMargin(CurrentLineMarginHighlightOverlay)
+  MarginDecorations(MarginDecorationsOverlay)
   LinesDecorations(LinesDecorationsOverlay)
   LineNumbers(LineNumbersOverlay)
 }
@@ -39,6 +40,8 @@ fn DynamicViewOverlayHandle::prepare_render(
     Decorations(overlay) => prepare_decorations_overlay(overlay, context)
     CurrentLineMargin(overlay) =>
       prepare_current_line_margin_overlay(overlay, context)
+    MarginDecorations(overlay) =>
+      prepare_margin_decorations_overlay(overlay, context)
     LinesDecorations(overlay) =>
       prepare_lines_decorations_overlay(overlay, context)
     LineNumbers(overlay) => prepare_line_numbers_overlay(overlay, context)
@@ -59,6 +62,8 @@ fn DynamicViewOverlayHandle::render(
     Decorations(overlay) =>
       render_result_slice(overlay.render_result, start_line_number, line_number)
     CurrentLineMargin(overlay) =>
+      render_result_slice(overlay.render_result, start_line_number, line_number)
+    MarginDecorations(overlay) =>
       render_result_slice(overlay.render_result, start_line_number, line_number)
     LinesDecorations(overlay) =>
       render_result_slice(overlay.render_result, start_line_number, line_number)

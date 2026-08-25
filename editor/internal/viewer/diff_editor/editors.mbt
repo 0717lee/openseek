@@ -33,6 +33,7 @@ fn DiffEditorEditors::create(
   services? : @code_widget.CodeEditorServices,
   editor_options : @code_widget.CodeEditorOptions,
   diff_word_wrap : DiffWordWrap,
+  layout : DiffEditorLayout,
 ) -> DiffEditorEditors {
   let (shared_services, owned_services) = match services {
     Some(services) => (services, None)
@@ -42,10 +43,10 @@ fn DiffEditorEditors::create(
     }
   }
   let pane_options = match diff_word_wrap {
-    Inherit => editor_options
-    Off => editor_options.with_soft_wrap(false)
+    Inherit => editor_options.with_folding(false)
+    Off => editor_options.with_soft_wrap(false).with_folding(false)
   }
-  {
+  let editors : DiffEditorEditors = {
     original: @code_widget.CodeEditorWidget::create(
       original_host,
       services=shared_services,
@@ -62,6 +63,11 @@ fn DiffEditorEditors::create(
     model_pair_commit: new_diff_editor_model_pair_commit_barrier(),
     disposed: false,
   }
+  // Apply the initial policy before either kernel ever receives a model. This
+  // also covers explicit Inline widgets mounted under display:none, where no
+  // positive-size layout transaction will run until much later.
+  editors.sync_markdown_comment_presentations(layout)
+  editors
 }
 
 ///|
@@ -165,12 +171,12 @@ fn DiffEditorEditors::update_options(
     return
   }
   let pane_options = match diff_word_wrap {
-    Inherit => editor_options
-    Off => editor_options.with_soft_wrap(false)
+    Inherit => editor_options.with_folding(false)
+    Off => editor_options.with_soft_wrap(false).with_folding(false)
   }
-  // Pinned DiffEditorEditors always updates both kernels. Inline's hidden
-  // original must never wrap because its external overview track still reads
-  // the original view geometry.
+  // Pinned DiffEditorEditors always updates both kernels. Inline's clipped
+  // original must never wrap: deleted text wraps with the modified editor and
+  // paired original ViewZones supply the continuation height.
   let original_options = if layout == Inline {
     pane_options.with_soft_wrap(false)
   } else {
@@ -178,6 +184,21 @@ fn DiffEditorEditors::update_options(
   }
   self.original.update_options(original_options)
   self.modified.update_options(pane_options)
+}
+
+///|
+/// Rich Markdown comments are ordinary pane contributions in SideBySide. In
+/// Inline the modified pane remains the presentation surface, while the
+/// clipped original stays a real source/line-number editor with no rich DOM.
+fn DiffEditorEditors::sync_markdown_comment_presentations(
+  self : DiffEditorEditors,
+  layout : DiffEditorLayout,
+) -> Unit {
+  if self.disposed {
+    return
+  }
+  self.original.set_markdown_comment_presentation_enabled(layout == SideBySide)
+  self.modified.set_markdown_comment_presentation_enabled(true)
 }
 
 ///|

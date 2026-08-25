@@ -301,7 +301,7 @@ pub fn CodeEditorWidget::apply_managed_view_zones(
 /// to the coordinator.
 pub struct StableCodeEditorViewportState {
   model : @model.TextModel
-  anchor_line_number : Int
+  anchor_position : @base_common.Position
   anchor_viewport_offset : Double
   scroll_left : Double
 }
@@ -310,7 +310,7 @@ pub struct StableCodeEditorViewportState {
 pub fn StableCodeEditorViewportState::anchor_line_number(
   self : StableCodeEditorViewportState,
 ) -> Int {
-  self.anchor_line_number
+  self.anchor_position.line_number
 }
 
 ///|
@@ -328,9 +328,10 @@ pub fn StableCodeEditorViewportState::scroll_left(
 }
 
 ///|
-/// Captures the model line intersecting the current scroll top and that line's
-/// viewport-relative top. A wrapped continuation stays anchored to its model
-/// line, so a later zone replacement cannot turn view-line coordinates stale.
+/// Captures the model position intersecting the current scroll top and that
+/// wrapped segment's viewport-relative top. Keeping the column is essential:
+/// after a width change the same model line can project to different wrapped
+/// continuations while the source position remains stable.
 pub fn CodeEditorWidget::capture_stable_viewport_state(
   self : CodeEditorWidget,
 ) -> StableCodeEditorViewportState? {
@@ -347,14 +348,16 @@ pub fn CodeEditorWidget::capture_stable_viewport_state(
   let anchor_model_position = view_model
     .coordinates_converter()
     .view_position_to_model_position(Position(anchor_view_line, 1))
-  let anchor_line_number = anchor_model_position.line_number
-  let anchor_top = self.get_top_for_line_number(anchor_line_number)
+  let anchor_top = self.get_top_for_position(
+    anchor_model_position.line_number,
+    anchor_model_position.column,
+  )
   if anchor_top < 0.0 {
     return None
   }
   Some({
     model,
-    anchor_line_number,
+    anchor_position: anchor_model_position,
     anchor_viewport_offset: anchor_top - position.scroll_top,
     scroll_left: position.scroll_left,
   })
@@ -374,11 +377,11 @@ pub fn CodeEditorWidget::restore_stable_viewport_state(
   guard self.get_model() is Some(model) && model.same(state.model) else {
     return false
   }
-  let anchor_line_number = state.anchor_line_number.clamp(
-    min=1,
-    max=model.get_line_count(),
+  let anchor_position = model.validate_position(state.anchor_position)
+  let anchor_top = self.get_top_for_position(
+    anchor_position.line_number,
+    anchor_position.column,
   )
-  let anchor_top = self.get_top_for_line_number(anchor_line_number)
   if anchor_top < 0.0 {
     return false
   }

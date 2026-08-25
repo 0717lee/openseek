@@ -6,7 +6,7 @@
 /// `MarginViewOverlays` (`viewOverlays.ts:236`): the margin-side rows
 /// container, hosting the current-line-margin, lines-decorations, and
 /// line-number overlays in Monaco's margin registration order
-/// (`view.ts:225-231`; the glyph-margin overlay between them is unported).
+/// (`view.ts:224-231`; the glyph-margin overlay between them is unported).
 /// The viewer keeps Monaco's separate `Margin` part (`margin.ts` — the
 /// `.margin` background/clip container) merged onto this struct: the
 /// readonly margin has no glyph lane to justify the split.
@@ -30,9 +30,11 @@ fn MarginViewOverlays::MarginViewOverlays(
   dom_node.set_attribute("aria-hidden", "true")
   let overlays = ViewOverlays::ViewOverlays(document, "margin-view-overlays")
   let current_line_margin = CurrentLineMarginHighlightOverlay::CurrentLineMarginHighlightOverlay()
+  let margin_decorations = MarginDecorationsOverlay::MarginDecorationsOverlay()
   let lines_decorations = LinesDecorationsOverlay::LinesDecorationsOverlay()
   let line_numbers = LineNumbersOverlay::LineNumbersOverlay()
   overlays.add_dynamic_overlay(CurrentLineMargin(current_line_margin))
+  overlays.add_dynamic_overlay(MarginDecorations(margin_decorations))
   overlays.add_dynamic_overlay(LinesDecorations(lines_decorations))
   overlays.add_dynamic_overlay(LineNumbers(line_numbers))
   dom_node.append_child(overlays.dom_node.element().as_node())

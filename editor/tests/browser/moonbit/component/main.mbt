@@ -1,6 +1,8 @@
 ///|
 fn main {
-  if diff_editor_lifecycle_requested() {
+  if diff_markdown_comments_requested() {
+    run_diff_markdown_comments_test()
+  } else if diff_editor_lifecycle_requested() {
     run_diff_editor_lifecycle_test()
   } else if initial_size_requested() {
     run_initial_size_test()
@@ -24,6 +26,10 @@ fn main {
     run_viewer_api_test()
   }
 }
+
+///|
+extern "js" fn diff_markdown_comments_requested() -> Bool =
+  #| () => new URLSearchParams(location.search).has('diffMarkdownComments')
 
 ///|
 extern "js" fn diff_editor_lifecycle_requested() -> Bool =

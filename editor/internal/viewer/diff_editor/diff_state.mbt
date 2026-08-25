@@ -23,23 +23,6 @@ fn DiffState::from_diff_result(result : @diff.DocumentDiff) -> DiffState {
 }
 
 ///|
-fn DiffState::mapping_count(self : DiffState) -> Int {
-  self.mappings.length()
-}
-
-///|
-fn DiffState::mapping_at(
-  self : DiffState,
-  index : Int,
-) -> @diff.DetailedLineRangeMapping? {
-  if index < 0 || index >= self.mappings.length() {
-    None
-  } else {
-    Some(self.mappings[index].line_range_mapping)
-  }
-}
-
-///|
 priv struct IndexedDiffAlignment {
   source_index : Int
   line_range_mapping : @diff.LineRangeMapping

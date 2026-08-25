@@ -412,9 +412,6 @@ pub(all) struct State {
   // document state. The imperative DiffEditor retains both models while
   // applying it.
   review_diff_layout : ReviewDiffLayout
-  // Collapsing unchanged regions is opt-in and remains a panel preference
-  // across files, layouts, and conversation switches.
-  review_diff_hide_unchanged_regions : Bool
   // The requested MoonBit-aware algorithm and comment policy are desktop
   // preferences. The provider is forced to Core for other file types while
   // these values remain parked for the next `.mbt` comparison.
@@ -534,7 +531,6 @@ pub fn State::empty() -> State {
     search: @grep_search.State::empty(),
     review_view_mode: ReviewDiff,
     review_diff_layout: ReviewSideBySide,
-    review_diff_hide_unchanged_regions: false,
     review_diff_mode: ReviewDiffCore,
     review_diff_ignore_comments: true,
     review_diff_status: None,
@@ -602,7 +598,6 @@ pub fn State::prepare_owner(
     search: self.search.reset_checkout(),
     review_view_mode: self.review_view_mode,
     review_diff_layout: self.review_diff_layout,
-    review_diff_hide_unchanged_regions: self.review_diff_hide_unchanged_regions,
     review_diff_mode: self.review_diff_mode,
     review_diff_ignore_comments: self.review_diff_ignore_comments,
     changes_generation: self.changes_generation,
@@ -831,9 +826,6 @@ pub(all) enum Msg {
   // rows.
   // Source mode and unavailable/loading comparisons ignore the action.
   ToggleReviewDiffLayout
-  // Collapse or reveal unchanged regions in a visible full comparison.
-  // Source mode and unavailable/loading comparisons ignore the action.
-  ToggleReviewDiffHideUnchangedRegions
   // Select the desktop-owned comparison provider mode. Token and Tree are
   // accepted only for a visible `.mbt` comparison; other files keep the
   // preference parked while their provider is forced to Core.

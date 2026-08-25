@@ -218,19 +218,44 @@ fn compare_additional_line_height(
 }
 
 ///|
-// Exact counterpart of VS Code's getAdditionalLineHeights: only wrapping
-// beyond the base line height and non-owned ViewZones are alignment events.
-// Hidden-line compensation and per-line boundary events were local extensions
-// and intentionally do not participate here.
+// Exact counterpart of VS Code's getAdditionalLineHeights for wrapping and
+// non-owned ViewZones, extended for an atomic hidden-source projection such as
+// a rich Markdown comment. Consecutive zero-height source lines become one
+// negative delta at the run's final model boundary. Its replacement ViewZone
+// is anchored at that same boundary, so the pair contributes exactly
+// `replacementHeight - hiddenSourceHeight` and never one blank spacer per
+// hidden line.
 fn additional_line_heights(
   geometry : PaneGeometrySnapshot,
 ) -> Array[AdditionalLineHeight] {
   let raw : Array[AdditionalLineHeight] = []
+  let mut hidden_source_height = 0.0
+  let mut hidden_source_end_line = 0
   for index, height in geometry.line_heights {
-    let additional = height - geometry.line_height
-    if additional > 0.01 {
-      raw.push({ line_number: index + 1, height_in_px: additional })
+    let line_number = index + 1
+    if height <= 0.01 && geometry.line_height > 0.01 {
+      hidden_source_height += geometry.line_height
+      hidden_source_end_line = line_number
+      continue
     }
+    if hidden_source_height > 0.01 {
+      raw.push({
+        line_number: hidden_source_end_line,
+        height_in_px: -hidden_source_height,
+      })
+      hidden_source_height = 0.0
+      hidden_source_end_line = 0
+    }
+    let delta = height - geometry.line_height
+    if delta.abs() > 0.01 {
+      raw.push({ line_number, height_in_px: delta })
+    }
+  }
+  if hidden_source_height > 0.01 {
+    raw.push({
+      line_number: hidden_source_end_line,
+      height_in_px: -hidden_source_height,
+    })
   }
   for zone in geometry.foreign_zone_heights {
     if zone.height_in_px > 0.01 {
@@ -263,6 +288,10 @@ priv struct LineRangeAlignment {
   modified_range : @base_common.LineRange
   original_height_in_px : Double
   modified_height_in_px : Double
+  /// The canonical diff that produced this alignment. Geometry-only
+  /// alignments (wrapping, foreign ViewZones, and additional alignments) keep
+  /// this empty so Inline projection never mistakes them for deleted code.
+  diff : @diff.DetailedLineRangeMapping?
 }
 
 ///|
@@ -360,6 +389,7 @@ fn compute_range_alignments(
         original_item.height_in_px,
         modified_height_in_px: modified_geometry.line_height +
         modified_item.height_in_px,
+        diff: None,
       })
     }
   }
@@ -423,6 +453,7 @@ fn compute_range_alignments(
         modified_height_in_px: modified_range.length().to_double() *
         modified_geometry.line_height +
         modified_additional_height,
+        diff: alignment.diff,
       })
       last_original_in_hunk = original_line_number_exclusive
       last_modified_in_hunk = modified_line_number_exclusive
@@ -467,6 +498,23 @@ fn compute_range_alignments(
   }
   handle_alignments_outside_diffs(2147483647, 2147483647)
   result
+}
+
+///|
+/// Inline uses one alignment per canonical hunk. This is the same
+/// `computeRangeAlignment(..., innerHunkAlignment=false)` projection as the
+/// pinned VS Code DiffEditor.
+fn compute_inline_range_alignments(
+  diff_state : DiffState,
+  original_geometry : PaneGeometrySnapshot,
+  modified_geometry : PaneGeometrySnapshot,
+) -> Array[LineRangeAlignment] {
+  compute_range_alignments(
+    diff_state,
+    original_geometry,
+    modified_geometry,
+    inner_hunk_alignment=false,
+  )
 }
 
 ///|

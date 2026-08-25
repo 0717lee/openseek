@@ -111,20 +111,12 @@
   overflow: hidden;
 }
 
+.moonbit-diff-editor-inline .moonbit-diff-editor-original,
 .moonbit-diff-editor-inline .moonbit-diff-editor-modified {
-  flex-basis: 100%;
-}
-
-/* Keep the non-interactive Inline original measurable for its external
-   overview track. Author CSS intentionally overrides the HTML hidden rule;
-   visibility still keeps it absent from paint, hit testing, and accessibility. */
-.moonbit-diff-editor-inline .moonbit-diff-editor-original[hidden] {
   position: absolute;
-  inset: 0 auto 0 0;
-  display: block;
-  width: 5px;
-  visibility: hidden;
-  pointer-events: none;
+  top: 0;
+  bottom: 0;
+  flex: none;
 }
 
 .moonbit-diff-editor-sash {
@@ -197,6 +189,61 @@
   background: var(--vscode-diffEditor-insertedTextBackground, #9ccc2c33);
 }
 
+/* Keep VS Code's border tokens on the ordinary rules. In light/dark themes
+   these variables are normally unset, so the declaration paints nothing;
+   high-contrast themes provide the token or use the pinned theme default
+   below. */
+.moonbit-diff-editor .diff-editor-line-delete,
+.moonbit-diff-editor .diff-editor-char-delete,
+.moonbit-diff-editor .diff-editor-inline-deleted-line,
+.moonbit-diff-editor .diff-editor-inline-char-delete {
+  box-sizing: border-box;
+  border: 1px solid var(--vscode-diffEditor-removedTextBorder);
+}
+
+.moonbit-diff-editor .diff-editor-line-insert,
+.moonbit-diff-editor .diff-editor-char-insert {
+  box-sizing: border-box;
+  border: 1px solid var(--vscode-diffEditor-insertedTextBorder);
+}
+
+.moonbit-diff-editor .monaco-editor[data-theme="hc-black"]
+  :is(
+    .diff-editor-line-delete,
+    .diff-editor-char-delete,
+    .diff-editor-inline-deleted-line,
+    .diff-editor-inline-char-delete
+  ) {
+  border: 1px dashed
+    var(--vscode-diffEditor-removedTextBorder, #ff008f);
+}
+
+.moonbit-diff-editor .monaco-editor[data-theme="hc-black"]
+  :is(.diff-editor-line-insert, .diff-editor-char-insert) {
+  border: 1px dashed
+    var(--vscode-diffEditor-insertedTextBorder, #33ff2e);
+}
+
+.moonbit-diff-editor .monaco-editor[data-theme="hc-light"]
+  :is(
+    .diff-editor-line-delete,
+    .diff-editor-char-delete,
+    .diff-editor-inline-deleted-line,
+    .diff-editor-inline-char-delete
+  ) {
+  border: 1px dashed
+    var(--vscode-diffEditor-removedTextBorder, #ad0707);
+}
+
+.moonbit-diff-editor .monaco-editor[data-theme="hc-light"]
+  :is(
+    .diff-editor-line-insert,
+    .diff-editor-char-insert
+  ) {
+  border: 1px dashed
+    var(--vscode-diffEditor-insertedTextBorder, #374e06);
+}
+
 .moonbit-diff-editor .diff-editor-char-delete.diff-range-empty {
   margin-left: -1px;
   border-left: solid
@@ -209,10 +256,6 @@
 }
 
 .moonbit-diff-editor .diff-editor-gutter-delete {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--vscode-editor-foreground);
   background: var(
     --vscode-diffEditorGutter-removedLineBackground,
     var(
@@ -223,10 +266,6 @@
 }
 
 .moonbit-diff-editor .diff-editor-gutter-insert {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--vscode-editor-foreground);
   background: var(
     --vscode-diffEditorGutter-insertedLineBackground,
     var(
@@ -236,19 +275,22 @@
   );
 }
 
-.moonbit-diff-editor .diff-editor-gutter-delete::before,
-.moonbit-diff-editor .diff-editor-gutter-insert::before {
+.moonbit-diff-editor :is(.delete-sign, .insert-sign) {
+  display: flex;
+  align-items: center;
+  color: var(--vscode-editor-foreground);
+}
+
+.moonbit-diff-editor :is(.delete-sign, .insert-sign)::before {
   font-size: 11px;
   line-height: 1;
   opacity: 0.7;
 }
 
-.moonbit-diff-editor .diff-editor-gutter-delete::before {
-  content: "−";
-}
-
-.moonbit-diff-editor .diff-editor-gutter-insert::before {
-  content: "+";
+.moonbit-diff-editor
+  .monaco-editor:is([data-theme="hc-black"], [data-theme="hc-light"])
+  :is(.delete-sign, .insert-sign)::before {
+  opacity: 1;
 }
 
 .moonbit-diff-editor .moonbit-diff-editor-alignment-spacer {
@@ -276,8 +318,12 @@
   );
 }
 
+.moonbit-diff-editor .diff-editor-inline-deleted-margin {
+  text-align: right;
+}
+
 .moonbit-diff-editor .diff-editor-inline-deleted-line,
-.moonbit-diff-editor .diff-editor-inline-deleted-line-number {
+.moonbit-diff-editor .diff-editor-inline-delete-sign {
   box-sizing: border-box;
   height: var(--editor-line-height);
   line-height: var(--editor-line-height);
@@ -292,19 +338,102 @@
   background: var(--vscode-diffEditor-removedTextBackground, #ff000033);
 }
 
-.moonbit-diff-editor .diff-editor-inline-deleted-line-number {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-  padding-right: 12px;
-  color: var(--vscode-editorLineNumber-foreground);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+/* VS Code registers all four diff line/text backgrounds as `null` in both
+   high-contrast themes. The editor shell's normal light/dark tokens are
+   inherited by a nested editor, so explicitly resolve the HC defaults here
+   instead of accidentally retaining the red/green fill. Downstream HC themes
+   can opt back into a fill through these presentation-only overrides. */
+.moonbit-diff-editor
+  .monaco-editor:is([data-theme="hc-black"], [data-theme="hc-light"])
+  :is(
+    .diff-editor-line-delete,
+    .diff-editor-inline-deleted-block,
+    .diff-editor-inline-deleted-margin
+  ) {
+  background: var(
+    --moonbit-diff-editor-hc-removed-line-background,
+    transparent
+  );
 }
 
-.moonbit-diff-editor .diff-editor-inline-deleted-line-number::before {
-  color: var(--vscode-editorGutter-deletedBackground, #c84a4a);
-  font-weight: 700;
-  content: "−";
+.moonbit-diff-editor
+  .monaco-editor:is([data-theme="hc-black"], [data-theme="hc-light"])
+  :is(.diff-editor-char-delete, .diff-editor-inline-char-delete) {
+  background: var(
+    --moonbit-diff-editor-hc-removed-text-background,
+    transparent
+  );
+}
+
+.moonbit-diff-editor
+  .monaco-editor:is([data-theme="hc-black"], [data-theme="hc-light"])
+  .diff-editor-line-insert {
+  background: var(
+    --moonbit-diff-editor-hc-inserted-line-background,
+    transparent
+  );
+}
+
+.moonbit-diff-editor
+  .monaco-editor:is([data-theme="hc-black"], [data-theme="hc-light"])
+  .diff-editor-char-insert {
+  background: var(
+    --moonbit-diff-editor-hc-inserted-text-background,
+    transparent
+  );
+}
+
+.moonbit-diff-editor
+  .monaco-editor:is([data-theme="hc-black"], [data-theme="hc-light"])
+  .diff-editor-gutter-delete {
+  background: var(
+    --moonbit-diff-editor-hc-removed-gutter-background,
+    var(--moonbit-diff-editor-hc-removed-line-background, transparent)
+  );
+}
+
+.moonbit-diff-editor
+  .monaco-editor:is([data-theme="hc-black"], [data-theme="hc-light"])
+  .diff-editor-gutter-insert {
+  background: var(
+    --moonbit-diff-editor-hc-inserted-gutter-background,
+    var(--moonbit-diff-editor-hc-inserted-line-background, transparent)
+  );
+}
+
+/* The normal empty-range rule uses the text background as a three-pixel solid
+   caret. That token is absent in HC, so VS Code falls back to the ordinary
+   one-pixel dashed character border instead. */
+.moonbit-diff-editor
+  .monaco-editor[data-theme="hc-black"]
+  .diff-editor-char-delete.diff-range-empty {
+  border-left: 1px dashed
+    var(--vscode-diffEditor-removedTextBorder, #ff008f);
+}
+
+.moonbit-diff-editor
+  .monaco-editor[data-theme="hc-light"]
+  .diff-editor-char-delete.diff-range-empty {
+  border-left: 1px dashed
+    var(--vscode-diffEditor-removedTextBorder, #ad0707);
+}
+
+.moonbit-diff-editor
+  .monaco-editor[data-theme="hc-black"]
+  .diff-editor-char-insert.diff-range-empty {
+  border-left: 1px dashed
+    var(--vscode-diffEditor-insertedTextBorder, #33ff2e);
+}
+
+.moonbit-diff-editor
+  .monaco-editor[data-theme="hc-light"]
+  .diff-editor-char-insert.diff-range-empty {
+  border-left: 1px dashed
+    var(--vscode-diffEditor-insertedTextBorder, #374e06);
+}
+
+.moonbit-diff-editor .diff-editor-inline-delete-sign {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }

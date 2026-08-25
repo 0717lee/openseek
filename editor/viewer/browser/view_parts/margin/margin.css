@@ -17,6 +17,14 @@
   will-change: transform;
 }
 
+/* Monaco `marginDecorations.css`: full-width margin decoration pieces. */
+.margin-view-overlays .cmdr {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
 /* Monaco `lineNumbers.css` (`.monaco-editor .margin-view-overlays
    .line-numbers`) merged with the viewer's number styling (var()-based
    theming): one absolutely positioned div per model-line-starting row,
@@ -34,4 +42,8 @@
   font: var(--editor-font-size) / var(--editor-line-height)
     var(--editor-font-family);
   user-select: none;
+}
+
+.margin-view-overlays .line-numbers.active-line-number {
+  color: var(--vscode-editorLineNumber-activeForeground);
 }

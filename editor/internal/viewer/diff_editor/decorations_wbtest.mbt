@@ -30,3 +30,37 @@ test "a changed empty model line still has an inclusive decoration range" {
   )
   assert_true(changed_line_range(LineRange(1, 1), TextSnapshot("")) is None)
 }
+
+///|
+test "render indicators only controls the narrow glyph lane" {
+  let with_indicator = diff_whole_line_decorations(
+      [Range(2, 1, 2, 4)],
+      "diff-editor-line-delete",
+      "delete-sign codicon codicon-diff-remove",
+      "diff-editor-gutter-delete",
+      true,
+      "diff-editor-original-line",
+    )[0].options
+  assert_true(
+    with_indicator.lines_decorations_class_name ==
+    Some("delete-sign codicon codicon-diff-remove"),
+  )
+  assert_true(
+    with_indicator.margin_class_name == Some("diff-editor-gutter-delete"),
+  )
+  assert_eq(with_indicator.class_name, "diff-editor-line-delete")
+
+  let without_indicator = diff_whole_line_decorations(
+      [Range(2, 1, 2, 4)],
+      "diff-editor-line-delete",
+      "delete-sign codicon codicon-diff-remove",
+      "diff-editor-gutter-delete",
+      false,
+      "diff-editor-original-line",
+    )[0].options
+  assert_true(without_indicator.lines_decorations_class_name is None)
+  assert_true(
+    without_indicator.margin_class_name == Some("diff-editor-gutter-delete"),
+  )
+  assert_eq(without_indicator.class_name, "diff-editor-line-delete")
+}

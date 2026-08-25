@@ -1,5 +1,77 @@
 import { expect, test } from '../support/test.js';
 
+const diffLifecycleRoot =
+  '.diff-lifecycle-host > .moonbit-diff-editor';
+
+async function openDiffLifecycle(page) {
+  await page.goto('/browser-tests/component.html?diffLifecycle=1');
+  await page.waitForFunction(() =>
+    Boolean(globalThis.__diffEditorLifecycleControls),
+  );
+  const root = page.locator(diffLifecycleRoot);
+  await expect(root).toHaveCount(1);
+  return root;
+}
+
+async function waitForAnimationFrames(page, count = 2) {
+  await page.evaluate((frameCount) => new Promise((resolve) => {
+    let remaining = frameCount;
+    const advance = () => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        resolve();
+      } else {
+        requestAnimationFrame(advance);
+      }
+    };
+    requestAnimationFrame(advance);
+  }), count);
+}
+
+async function waitForDiffLifecycleIdle(page) {
+  await waitForAnimationFrames(page);
+  await expect
+    .poll(() => page.evaluate(() =>
+      globalThis.__diffEditorLifecycleControls.snapshot(),
+    ))
+    .toMatchObject({
+      modelPairIsCommitting: false,
+      afterRenderWaiterCount: 0,
+      afterRenderRemaining: 0,
+      viewModelPendingSchedulerCount: 0,
+      diffUpToDate: true,
+    });
+}
+
+async function setDiffLifecycleFixture(page, fixture) {
+  await page.evaluate((value) =>
+    globalThis.__diffEditorLifecycleControls.set_fixture(value), fixture,
+  );
+}
+
+async function setDiffLifecycleOptions(
+  page,
+  { layout, renderIndicators, fontSize = 12 },
+) {
+  await page.evaluate(({ nextLayout, nextRenderIndicators, nextFontSize }) =>
+    globalThis.__diffEditorLifecycleControls.set_options(
+      nextLayout,
+      nextRenderIndicators,
+      nextFontSize,
+    ), {
+    nextLayout: layout,
+    nextRenderIndicators: renderIndicators,
+    nextFontSize: fontSize,
+  });
+}
+
+async function disposeDiffLifecycle(page) {
+  await page.evaluate(() => {
+    globalThis.__diffEditorLifecycleControls.dispose();
+    globalThis.__diffEditorLifecycleControls.dispose_models();
+  });
+}
+
 test('owns and tears down exactly two kernels and one shared diff view model', async ({ page }) => {
   await page.goto('/browser-tests/component.html?diffLifecycle=1');
   await page.waitForFunction(() => Boolean(globalThis.__diffEditorLifecycleControls));
@@ -44,11 +116,14 @@ test('owns and tears down exactly two kernels and one shared diff view model', a
   const originalScrollHeight = Number(await originalOverview.getAttribute(
     'data-overview-ruler-scroll-height',
   ));
-  // In Inline mode the hidden original editor is the geometry source for its
-  // overview ruler. It must stay laid out with wrapping disabled, just like
-  // VS Code, even when the visible modified editor wraps long deleted lines.
+  const initialModifiedScrollHeight = Number(await modifiedOverview.getAttribute(
+    'data-overview-ruler-scroll-height',
+  ));
+  // The original kernel itself stays unwrapped, but paired continuation
+  // spacers make every wrapped deleted visual row consume equal geometry on
+  // both sides.
   expect(originalScrollHeight).toBeGreaterThan(6000);
-  expect(originalScrollHeight).toBeLessThan(8000);
+  expect(Math.abs(originalScrollHeight - initialModifiedScrollHeight)).toBeLessThanOrEqual(20);
   await page.locator('.diff-lifecycle-host').evaluate((node) => {
     node.style.width = '520px';
   });
@@ -56,26 +131,16 @@ test('owns and tears down exactly two kernels and one shared diff view model', a
     .poll(async () => Number(await originalOverview.getAttribute(
         'data-overview-ruler-scroll-height',
       )))
-    .toBe(originalScrollHeight);
-  const expandedScrollHeight = Number(await modifiedOverview.getAttribute(
+    .toBeGreaterThan(originalScrollHeight);
+  const resizedModifiedScrollHeight = Number(await modifiedOverview.getAttribute(
     'data-overview-ruler-scroll-height',
   ));
-  await page.evaluate(() =>
-    globalThis.__diffEditorLifecycleControls.set_hide_unchanged(true),
-  );
-  await expect
-    .poll(async () => Number(await modifiedOverview.getAttribute(
-      'data-overview-ruler-scroll-height',
-    )))
-    .toBeLessThan(expandedScrollHeight - 1000);
-  await page.evaluate(() =>
-    globalThis.__diffEditorLifecycleControls.set_hide_unchanged(false),
-  );
-  await expect
-    .poll(async () => Number(await modifiedOverview.getAttribute(
-      'data-overview-ruler-scroll-height',
-    )))
-    .toBeGreaterThanOrEqual(expandedScrollHeight);
+  expect(
+    Math.abs(
+      Number(await originalOverview.getAttribute('data-overview-ruler-scroll-height')) -
+        resizedModifiedScrollHeight,
+    ),
+  ).toBeLessThanOrEqual(20);
   const initialScrollTop = Number(await modifiedOverview.getAttribute(
     'data-overview-ruler-scroll-top',
   ));
@@ -259,4 +324,241 @@ test('owns and tears down exactly two kernels and one shared diff view model', a
   await page.evaluate(() =>
     globalThis.__diffEditorLifecycleControls.dispose_models(),
   );
+});
+
+test('inline original strip follows decimal digit bands and font metrics without a render loop', async ({ page }) => {
+  const root = await openDiffLifecycle(page);
+  await setDiffLifecycleFixture(page, 'digits');
+  await setDiffLifecycleOptions(page, {
+    layout: 'inline',
+    renderIndicators: true,
+    fontSize: 12,
+  });
+  await expect(root).toHaveAttribute('data-render-mode', 'inline');
+  await waitForDiffLifecycleIdle(page);
+
+  const readGeometry = () => root.evaluate((node) => {
+    const original = node.querySelector('.moonbit-diff-editor-original');
+    const modified = node.querySelector('.moonbit-diff-editor-modified');
+    const originalRect = original.getBoundingClientRect();
+    const modifiedRect = modified.getBoundingClientRect();
+    return {
+      attributeWidth: Number(node.getAttribute('data-inline-original-width')),
+      originalWidth: originalRect.width,
+      originalRight: originalRect.right,
+      modifiedLeft: modifiedRect.left,
+      overviewGenerations: Array.from(
+        node.querySelectorAll('.diffOverviewRuler'),
+        (ruler) => Number(ruler.getAttribute('data-overview-ruler-generation')),
+      ),
+    };
+  });
+  const expectJoinedGeometry = (geometry) => {
+    expect(Math.abs(geometry.attributeWidth - geometry.originalWidth))
+      .toBeLessThanOrEqual(1);
+    expect(Math.abs(geometry.originalRight - geometry.modifiedLeft))
+      .toBeLessThanOrEqual(1);
+  };
+
+  const nineLineGeometry = await readGeometry();
+  expectJoinedGeometry(nineLineGeometry);
+  await expect(
+    root.locator('.moonbit-diff-editor-original .line-numbers').last(),
+  ).toHaveText('9');
+
+  await page.evaluate(() =>
+    globalThis.__diffEditorLifecycleControls.set_digit_line_count(10),
+  );
+  await waitForDiffLifecycleIdle(page);
+  await expect(
+    root.locator('.moonbit-diff-editor-original .line-numbers').last(),
+  ).toHaveText('10');
+  const tenLineGeometry = await readGeometry();
+  expectJoinedGeometry(tenLineGeometry);
+  expect(tenLineGeometry.attributeWidth)
+    .toBeGreaterThan(nineLineGeometry.attributeWidth);
+
+  await setDiffLifecycleOptions(page, {
+    layout: 'inline',
+    renderIndicators: true,
+    fontSize: 24,
+  });
+  await waitForDiffLifecycleIdle(page);
+  const largeFontGeometry = await readGeometry();
+  expectJoinedGeometry(largeFontGeometry);
+  expect(largeFontGeometry.attributeWidth)
+    .toBeGreaterThan(tenLineGeometry.attributeWidth);
+
+  // The paired render barrier must reach a fixed generation after the strip
+  // relayout. Sampling several later animation frames catches self-triggering
+  // layout-info/strip feedback loops.
+  await waitForAnimationFrames(page, 4);
+  const stableGeometry = await readGeometry();
+  expect(stableGeometry.attributeWidth).toBe(largeFontGeometry.attributeWidth);
+  expect(stableGeometry.overviewGenerations)
+    .toEqual(largeFontGeometry.overviewGenerations);
+  await waitForDiffLifecycleIdle(page);
+
+  await disposeDiffLifecycle(page);
+});
+
+test('renderIndicators removes only split and inline glyphs while retaining diff backgrounds', async ({ page }) => {
+  const root = await openDiffLifecycle(page);
+  const originalPane = root.locator('.moonbit-diff-editor-original');
+  const modifiedPane = root.locator('.moonbit-diff-editor-modified');
+  const expectBackgrounds = async () => {
+    await expect
+      .poll(() => originalPane.locator(
+        '.cmdr.diff-editor-gutter-delete',
+      ).count())
+      .toBeGreaterThan(0);
+    await expect
+      .poll(() => modifiedPane.locator(
+        '.cmdr.diff-editor-gutter-insert',
+      ).count())
+      .toBeGreaterThan(0);
+    await expect
+      .poll(() => originalPane.locator('.diff-editor-line-delete').count())
+      .toBeGreaterThan(0);
+    await expect
+      .poll(() => modifiedPane.locator('.diff-editor-line-insert').count())
+      .toBeGreaterThan(0);
+  };
+  const expectLaneIndicators = async () => {
+    await expect
+      .poll(() => originalPane.locator(
+        '.cldr.delete-sign.codicon-diff-remove',
+      ).count())
+      .toBeGreaterThan(0);
+    await expect
+      .poll(() => modifiedPane.locator(
+        '.cldr.insert-sign.codicon-diff-insert',
+      ).count())
+      .toBeGreaterThan(0);
+  };
+
+  await setDiffLifecycleFixture(page, 'indicators');
+  await setDiffLifecycleOptions(page, {
+    layout: 'split',
+    renderIndicators: true,
+  });
+  await expect(root).toHaveAttribute('data-render-mode', 'side-by-side');
+  await waitForDiffLifecycleIdle(page);
+  await expectBackgrounds();
+  await expectLaneIndicators();
+
+  await setDiffLifecycleOptions(page, {
+    layout: 'split',
+    renderIndicators: false,
+  });
+  await waitForDiffLifecycleIdle(page);
+  await expect(root.locator('.cldr.delete-sign, .cldr.insert-sign')).toHaveCount(0);
+  await expect(root.locator('.diff-editor-inline-delete-sign')).toHaveCount(0);
+  await expectBackgrounds();
+
+  await setDiffLifecycleOptions(page, {
+    layout: 'inline',
+    renderIndicators: true,
+  });
+  await expect(root).toHaveAttribute('data-render-mode', 'inline');
+  await waitForDiffLifecycleIdle(page);
+  await expectLaneIndicators();
+  await expect
+    .poll(() => root.locator('.diff-editor-inline-delete-sign').count())
+    .toBeGreaterThan(0);
+  await expectBackgrounds();
+
+  await setDiffLifecycleOptions(page, {
+    layout: 'inline',
+    renderIndicators: false,
+  });
+  await waitForDiffLifecycleIdle(page);
+  await expect(root.locator('.cldr.delete-sign, .cldr.insert-sign')).toHaveCount(0);
+  await expect(root.locator('.diff-editor-inline-delete-sign')).toHaveCount(0);
+  await expect(root.locator('.diff-editor-inline-deleted-block')).not.toHaveCount(0);
+  await expectBackgrounds();
+
+  await disposeDiffLifecycle(page);
+});
+
+test('identical pairs remain fully visible and decoration-free in split and inline layouts', async ({ page }) => {
+  const root = await openDiffLifecycle(page);
+  const status = root.locator('.moonbit-diff-editor-status');
+  const diffArtifacts = root.locator([
+    '.diff-editor-line-delete',
+    '.diff-editor-line-insert',
+    '.diff-editor-char-delete',
+    '.diff-editor-char-insert',
+    '.cmdr.diff-editor-gutter-delete',
+    '.cmdr.diff-editor-gutter-insert',
+    '.cldr.delete-sign',
+    '.cldr.insert-sign',
+    '.diff-editor-inline-deleted-block',
+  ].join(','));
+  const expectedLines = [1, 2, 3, 4, 5, 6, 7, 8];
+  const expectIdenticalSurface = async (layout) => {
+    await expect(root).toHaveAttribute('data-render-mode', layout);
+    await waitForDiffLifecycleIdle(page);
+    await expect(status).toBeHidden();
+    await expect(root).not.toHaveAttribute('data-diff-failure');
+    await expect(diffArtifacts).toHaveCount(0);
+    const rulers = root.locator('.diffOverviewRuler');
+    await expect(rulers).toHaveCount(2);
+    await expect(rulers.nth(0)).toHaveAttribute(
+      'data-overview-ruler-band-count',
+      '0',
+    );
+    await expect(rulers.nth(1)).toHaveAttribute(
+      'data-overview-ruler-band-count',
+      '0',
+    );
+    const rendered = await root.evaluate((node) => {
+      const paneEvidence = (selector) => {
+        const pane = node.querySelector(selector);
+        const rows = Array.from(
+          pane.querySelectorAll(
+            '.view-lines[data-view-part="view-lines"] > .view-line',
+          ),
+        );
+        const lineNumbers = Array.from(
+          pane.querySelectorAll('.margin-view-overlays .line-numbers'),
+        );
+        return {
+          lines: Array.from(new Set(lineNumbers.map((lineNumber) =>
+            Number(lineNumber.textContent),
+          ))).sort((a, b) => a - b),
+          rowCount: rows.length,
+          text: rows.map((row) =>
+            row.textContent.replaceAll('\u00a0', ' '),
+          ).join('\n'),
+        };
+      };
+      return {
+        original: paneEvidence('.moonbit-diff-editor-original'),
+        modified: paneEvidence('.moonbit-diff-editor-modified'),
+      };
+    });
+    expect(rendered.original.lines).toEqual(expectedLines);
+    expect(rendered.modified.lines).toEqual(expectedLines);
+    expect(rendered.original.rowCount).toBe(expectedLines.length);
+    expect(rendered.modified.rowCount).toBe(expectedLines.length);
+    expect(rendered.original.text).toContain('identical 1');
+    expect(rendered.original.text).toContain('identical 8');
+    expect(rendered.modified.text).toContain('identical 1');
+    expect(rendered.modified.text).toContain('identical 8');
+  };
+
+  await setDiffLifecycleFixture(page, 'identical');
+  await setDiffLifecycleOptions(page, {
+    layout: 'split',
+    renderIndicators: true,
+  });
+  await expectIdenticalSurface('side-by-side');
+  await setDiffLifecycleOptions(page, {
+    layout: 'inline',
+    renderIndicators: true,
+  });
+  await expectIdenticalSurface('inline');
+
+  await disposeDiffLifecycle(page);
 });

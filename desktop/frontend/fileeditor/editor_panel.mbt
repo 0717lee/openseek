@@ -137,9 +137,6 @@ let viewer_state : ViewerHost = {
     layout=@viewer.SideBySide,
     automatic_inline=false,
     diff_word_wrap=@viewer.Inherit,
-    hide_unchanged_regions=false,
-    hide_unchanged_regions_context_line_count=3,
-    hide_unchanged_regions_minimum_line_count=3,
   ),
   diff_provider: @moon_diff_provider.MoonDocumentDiffProvider(),
   diff_mode: ReviewDiffCore,
@@ -527,19 +524,6 @@ fn apply_review_diff_layout(layout : ReviewDiffLayout) -> @cmd.Cmd {
       ReviewInline => @viewer.Inline
     }
     let options = viewer_state.diff_options.with_layout(editor_layout)
-    viewer_state.diff_options = options
-    if viewer_state.diff_editor is Some(diff_editor) {
-      diff_editor.update_options(options)
-    }
-  })
-}
-
-///|
-/// Retain and apply the panel's unchanged-region preference without replacing
-/// the comparison models or either code kernel.
-fn apply_review_diff_hide_unchanged_regions(enabled : Bool) -> @cmd.Cmd {
-  @cmd.custom_cmd(_scheduler => {
-    let options = viewer_state.diff_options.with_hide_unchanged_regions(enabled)
     viewer_state.diff_options = options
     if viewer_state.diff_editor is Some(diff_editor) {
       diff_editor.update_options(options)

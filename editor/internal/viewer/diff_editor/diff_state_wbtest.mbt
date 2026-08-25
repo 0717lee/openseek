@@ -34,7 +34,7 @@ test "Accessible F7 groups mappings whose three-line contexts overlap" {
     additional_alignments: [],
   })
   let groups = state.navigation_changes()
-  assert_eq(state.mapping_count(), 2)
+  assert_eq(state.mappings.length(), 2)
   assert_eq(groups.length(), 1)
   assert_eq(groups[0].original, LineRange(2, 8))
   assert_eq(groups[0].modified, LineRange(2, 8))
@@ -146,7 +146,7 @@ test "real-widget-sized navigation projection groups fifty-seven mappings into t
     }
   }
   let state = DiffState::from_diff_result({ changes, additional_alignments: [] })
-  assert_eq(state.mapping_count(), 57)
+  assert_eq(state.mappings.length(), 57)
   assert_eq(state.navigation_changes().length(), 31)
   assert_eq(
     state.next_change_from_modified_line(1, line).unwrap().change_count,
@@ -172,7 +172,7 @@ test "additional alignments enter geometry only" {
     changes: [change],
     additional_alignments: [additional],
   })
-  assert_eq(state.mapping_count(), 1)
+  assert_eq(state.mappings.length(), 1)
   assert_eq(state.alignments().length(), 2)
   assert_eq(state.alignments()[0].diff, Some(change))
   assert_eq(state.alignments()[1].line_range_mapping, additional)

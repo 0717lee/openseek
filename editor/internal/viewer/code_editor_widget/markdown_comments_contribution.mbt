@@ -11,6 +11,7 @@ let markdown_comment_hidden_source : String = "markdown-comments"
 
 ///|
 priv struct MarkdownCommentContributionState {
+  mut presentation_enabled : Bool
   mut generation : Int
   rendered : Map[String, RenderedMarkdownComment]
   listeners : Array[@base_common.Disposable]
@@ -21,6 +22,7 @@ priv struct MarkdownCommentContributionState {
 ///|
 fn MarkdownCommentContributionState::MarkdownCommentContributionState() -> MarkdownCommentContributionState {
   {
+    presentation_enabled: true,
     generation: 0,
     rendered: Map([]),
     listeners: [],
@@ -505,10 +507,11 @@ fn CodeEditorWidget::refresh_markdown_comments(
   force_update~ : Bool,
 ) -> Unit {
   guard !self.disposed else { return }
-  // Construction policy omits this contribution from embedded Peek previews
-  // and diff panes. Runtime availability is therefore represented solely by
-  // the installed typed contribution, not by a second editor-role branch.
+  // Construction policy omits this contribution from embedded Peek previews.
+  // Diff panes install it and use `presentation_enabled` as their one runtime
+  // layout policy; no editor-role branch is duplicated in the renderer.
   guard self.markdown_comment_contribution() is Some(state) else { return }
+  guard state.presentation_enabled else { return }
   guard self.get_model() is Some(model) else { return }
   // A headless CodeEditorWidget has no replacement DOM and must keep source visible.
   guard self.current_code_browser_data() is Some(browser) else { return }
@@ -701,6 +704,30 @@ fn CodeEditorWidget::refresh_markdown_comments(
     force_update~,
   )
   self.schedule_render()
+}
+
+///|
+/// Enables or suppresses rich Markdown-comment replacement for this kernel.
+/// DiffEditor uses this internal seam to keep both SideBySide panes rich while
+/// leaving the clipped Inline original as ordinary source geometry. Disabling
+/// retires both the external ViewZones and their source-specific hidden areas;
+/// re-enabling rebuilds them from the current model through the same provider
+/// path as a normal model refresh.
+pub fn CodeEditorWidget::set_markdown_comment_presentation_enabled(
+  self : CodeEditorWidget,
+  enabled : Bool,
+) -> Unit {
+  guard !self.disposed else { return }
+  guard self.markdown_comment_contribution() is Some(state) else { return }
+  if state.presentation_enabled == enabled {
+    return
+  }
+  state.presentation_enabled = enabled
+  if enabled {
+    self.refresh_markdown_comments(force_update=true)
+  } else {
+    self.clear_markdown_comment_model_state()
+  }
 }
 
 ///|

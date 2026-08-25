@@ -209,6 +209,27 @@ test "stable viewport restore keeps a model-line anchor synchronously" {
 }
 
 ///|
+test "stable viewport restore keeps the wrapped continuation model column" {
+  with_test_viewer(
+    "abcdefghijklmnopqrstuvwxyz\nnext",
+    viewer => {
+      viewer.test_set_viewport(width=180.0, height=36.0)
+      viewer.test_set_soft_wrap_column(6)
+      viewer.set_scroll_top(36.0)
+      let state = viewer.capture_stable_viewport_state().unwrap()
+      assert_eq(state.anchor_position.line_number, 1)
+      assert_eq(state.anchor_position.column, 13)
+      assert_eq(state.anchor_viewport_offset(), 0.0)
+
+      viewer.test_set_soft_wrap_column(4)
+      assert_true(viewer.restore_stable_viewport_state(state))
+      assert_eq(viewer.get_scroll_top(), 54.0)
+    },
+    options=CodeEditorOptions(soft_wrap=true, font_size=12, line_height=18),
+  )
+}
+
+///|
 test "managed zone reveal uses the exact ordinal-aware zone top" {
   with_test_viewer(long_document(100), viewer => {
     viewer.test_set_viewport(width=800.0, height=180.0)

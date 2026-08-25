@@ -71,8 +71,10 @@ fn memory_workspace() -> MemoryWorkspace {
     memory_file("fragmented-large.mbt", "fragmented-large.mbt"),
     memory_file("large.mbt", "large.mbt"),
     memory_file("navigation-anchors.mbt", "navigation-anchors.mbt"),
+    memory_file("scroll-sync.mbt", "scroll-sync.mbt"),
     memory_file("tabbed-deletion.mbt", "tabbed-deletion.mbt"),
     memory_file("oversized-line.mbt", "oversized-line.mbt"),
+    memory_file("identical.mbt", "identical.mbt"),
     memory_file("README.md", "README.md"),
     memory_file("Guide.MD", "Guide.MD"),
     memory_file("tour.MBT.MD", "tour.MBT.MD"),
@@ -107,8 +109,10 @@ fn memory_workspace() -> MemoryWorkspace {
     "  let stable_middle_five = 6", "  let stable_middle_six = 7", "  let inserted_only = 8",
     "  let stable_tail = 9", "}",
   ].join("\n")
+  documents["\{memory_root}/scroll-sync.mbt"] = scroll_sync_document(false)
   documents["\{memory_root}/tabbed-deletion.mbt"] = "let retained = 1\n"
   documents["\{memory_root}/oversized-line.mbt"] = oversized_diff_line("m")
+  documents["\{memory_root}/identical.mbt"] = identical_diff_document()
   documents["\{memory_root}/README.md"] = (
     #|# Embedded Markdown document
     #|
@@ -165,11 +169,15 @@ fn memory_workspace() -> MemoryWorkspace {
     "  let stable_middle_four = 5", "  let stable_middle_five = 6", "  let stable_middle_six = 7",
     "  let stable_tail = 9", "}",
   ].join("\n")
+  original_documents["\{memory_root}/scroll-sync.mbt"] = scroll_sync_document(
+    true,
+  )
   original_documents["\{memory_root}/tabbed-deletion.mbt"] = "\t".repeat(160) +
     "deleted_tail\n"
   original_documents["\{memory_root}/oversized-line.mbt"] = oversized_diff_line(
     "o",
   )
+  original_documents["\{memory_root}/identical.mbt"] = identical_diff_document()
   original_documents["\{memory_root}/README.md"] = (
     #|# Embedded document
     #|
@@ -360,6 +368,29 @@ impl @language.MarkdownCommentProvider for EmbeddedAlignmentMarkdownProvider wit
 /// limit, while their combined UTF-16 size exceeds the legacy eager-diff budget.
 fn oversized_diff_line(fill : String) -> String {
   fill.repeat(524289)
+}
+
+///|
+/// Both panes overflow horizontally at ordinary split widths, but the
+/// original has a much larger maximum. The shared stable tail also provides a
+/// model-relative vertical anchor for two-way scroll and layout transitions.
+fn scroll_sync_document(original : Bool) -> String {
+  let content = StringBuilder()
+  let wide = if original { "o".repeat(1800) } else { "m".repeat(700) }
+  content.write_string("fn scroll_sync_fixture() {\n")
+  content.write_string("  let wide = \"" + wide + "\"\n")
+  for index in 0..<700 {
+    content.write_string("  let scroll_stable_\{index} = \{index}\n")
+  }
+  content.write_string("}\n")
+  content.to_string()
+}
+
+///|
+fn identical_diff_document() -> String {
+  [
+    "fn identical_fixture() -> Int {", "  let unchanged = 42", "  unchanged", "}",
+  ].join("\n")
 }
 
 ///|
@@ -644,7 +675,11 @@ fn replace_embed_diff_model(
 }
 
 ///|
-fn set_embed_diff_visible(visible : Bool) -> @rabbita.Cmd {
+fn set_embed_diff_visible(
+  visible : Bool,
+  inline_layout : Bool,
+  sash_enabled : Bool,
+) -> @rabbita.Cmd {
   @cmd.custom_cmd(
     _ => {
       if !visible {
@@ -660,6 +695,19 @@ fn set_embed_diff_visible(visible : Bool) -> @rabbita.Cmd {
         return
       }
       let diff_editor = embed_diff_editor()
+      diff_editor.update_options(
+        DiffEditorOptions(
+          layout=if inline_layout { Inline } else { SideBySide },
+          sash_enabled~,
+          // This fixture deliberately exercises horizontal synchronization;
+          // every other embedded diff keeps the production default.
+          diff_word_wrap=if model.uri.path.has_suffix("/scroll-sync.mbt") {
+            Off
+          } else {
+            Inherit
+          },
+        ),
+      )
       let version = next_embed_model_version()
       let original_uri = @base_common.Uri::from(
         scheme="memory-original",
@@ -756,7 +804,7 @@ fn update_embed(
     OpenFile(uri) =>
       (
         @rabbita.batch([
-          set_embed_diff_visible(false),
+          set_embed_diff_visible(false, model.inline_layout, model.sash_enabled),
           open_embed_document_cmd(uri),
         ]),
         {
@@ -770,7 +818,7 @@ fn update_embed(
       (embed_tree().set_active(uri), { ..model, status: "ready" })
     ViewerFailed =>
       (
-        set_embed_diff_visible(false),
+        set_embed_diff_visible(false, model.inline_layout, model.sash_enabled),
         { ..model, status: "error", diff_visible: false },
       )
     ToggleDiff =>
@@ -778,7 +826,14 @@ fn update_embed(
         (@rabbita.none, model)
       } else {
         let visible = !model.diff_visible
-        (set_embed_diff_visible(visible), { ..model, diff_visible: visible })
+        (
+          set_embed_diff_visible(
+            visible,
+            model.inline_layout,
+            model.sash_enabled,
+          ),
+          { ..model, diff_visible: visible },
+        )
       }
     ToggleDiffLayout =>
       if model.status != "ready" || !model.diff_visible {

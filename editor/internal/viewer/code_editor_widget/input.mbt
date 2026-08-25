@@ -309,6 +309,7 @@ fn CodeEditorWidget::measure(self : CodeEditorWidget) -> Unit {
     None => ()
   }
   end_view_event_batch(event_batch)
+  self.emit_layout_change_if_needed(previous_configuration.layout)
 }
 
 ///|

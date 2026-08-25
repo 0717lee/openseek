@@ -52,6 +52,10 @@ struct CodeEditorWidget {
     @viewer_testing.ViewModelBuiltObservation,
   ]
   did_scroll : @base_common.Emitter[@editor_api.ScrollEvent]
+  /// Internal `onDidLayoutChange` counterpart. DiffEditor consumes the complete
+  /// layout info so its clipped original line-number strip follows model digit
+  /// bands and asynchronously refreshed font metrics.
+  did_change_layout_info : @base_common.Emitter[@config.EditorLayoutInfo]
   /// Public `onDidChangeViewZones`. The source emitter participates in a
   /// widget-wide delivery queue; that cross-event queue remains the explicit
   /// CEW-001 deferral, while this dedicated emitter preserves the event's own
@@ -179,6 +183,7 @@ fn CodeEditorWidget::CodeEditorWidget(
     cursor_delivery: CursorEventDelivery(),
     did_build_view_model: Emitter(),
     did_scroll: Emitter(),
+    did_change_layout_info: Emitter(),
     did_change_view_zones: Emitter(),
     did_change_hidden_areas: Emitter(),
     did_dispose: Emitter(),
@@ -389,6 +394,32 @@ pub fn CodeEditorWidget::on_did_scroll_change(
 }
 
 ///|
+/// Fires whenever the computed editor layout identity changes. The payload is
+/// the same reduced layout info returned by `get_layout_info`; callers do not
+/// need to infer gutter changes from outer container resize events.
+pub fn CodeEditorWidget::on_did_layout_change(
+  self : CodeEditorWidget,
+  listener : (@config.EditorLayoutInfo) -> Unit,
+) -> @base_common.Disposable {
+  self.did_change_layout_info.event(listener)
+}
+
+///|
+fn CodeEditorWidget::emit_layout_change_if_needed(
+  self : CodeEditorWidget,
+  previous : EditorLayoutIdentity,
+) -> Unit {
+  let current = self.configuration.event_snapshot().layout
+  if !previous.same_layout_info(current) {
+    self.did_change_layout_info.fire(
+      self.configuration
+      .snapshot()
+      .layout_info(self.configuration.model_line_count),
+    )
+  }
+}
+
+///|
 /// Fires after a successful ViewZones whitespace transaction. Internal View
 /// delivery has completed before the ViewModel outgoing arm reaches this
 /// emitter.
@@ -473,6 +504,7 @@ pub fn CodeEditorWidget::update_options(
     None => ()
   }
   end_view_event_batch(event_batch)
+  self.emit_layout_change_if_needed(previous_configuration.layout)
   self.refresh_managed_overview_rulers()
   self.schedule_render()
 }
@@ -590,6 +622,7 @@ pub fn CodeEditorWidget::set_model(
   }
   let had_text_focus = self.has_text_focus()
   let had_definition_peek_focus = self.definition_peek_contains_focus()
+  let previous_layout_identity = self.configuration.event_snapshot().layout
   let detached_model = self.detach_model()
   match model {
     Some(model) => self.attach_model(model)
@@ -619,6 +652,7 @@ pub fn CodeEditorWidget::set_model(
       detached.remove_all_decorations_with_owner_id(self.editor_id)
     None => ()
   }
+  self.emit_layout_change_if_needed(previous_layout_identity)
 }
 
 ///|
@@ -878,6 +912,7 @@ pub fn CodeEditorWidget::dispose(self : CodeEditorWidget) -> Unit {
   self.did_change_cursor_selection.dispose()
   self.did_build_view_model.dispose()
   self.did_scroll.dispose()
+  self.did_change_layout_info.dispose()
   self.did_change_view_zones.dispose()
   self.did_change_hidden_areas.dispose()
   self.did_render.dispose()
