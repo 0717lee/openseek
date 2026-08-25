@@ -25,6 +25,9 @@ async fn dispatch() -> Unit {
   let argv = @env.args()[1:]
   let env = @env.get_env_vars()
   let matches = root_command().parse(argv~, env~)
+  // The root remains a trusted-host configuration input, but agent processes
+  // receive it through argv. Do not expose an inherited value to child tools.
+  @env.unset_env_var("OPENSEEK_SESSION_ROOT")
   match matches.subcommand {
     Some(("tui", m)) => @tui.run(m)
     Some(("run", m)) => run_task_command(m)
@@ -935,9 +938,7 @@ fn session_root(
     { values: { "session-root": [root, ..], .. }, .. } => root.trim().to_owned()
     _ => fail("missing parsed argument: session-root")
   }
-  guard !root.is_empty() else {
-    fail("--session-root or OPENSEEK_SESSION_ROOT must not be empty")
-  }
+  guard !root.is_empty() else { fail("--session-root must not be empty") }
   @workspace_path.resolve(workspace_root, root)
 }
 
@@ -1346,7 +1347,6 @@ test "cli parses env backed options and task" {
     "OPENSEEK_MAX_STEPS": "120",
     "OPENSEEK_SYSTEM_PROMPT_FILE": "/tmp/prompt-a.md",
     "OPENSEEK_SYSTEM_PROMPT_ADDENDUM_FILE": "/tmp/prompt-b.md",
-    "OPENSEEK_SESSION_ROOT": "/tmp/openseek-sessions",
   })
   let (model, _, api_url) = agent_settings(parsed)
   assert_true(model is Deepseek(V4Pro))
@@ -1361,8 +1361,18 @@ test "cli parses env backed options and task" {
     "/tmp/prompt-b.md",
   )
   assert_false(parsed is { values: { "session": [_, ..], .. }, .. })
-  assert_eq(session_root(parsed), "/tmp/openseek-sessions")
+  assert_eq(session_root(parsed), ".openseek")
   assert_eq(task_text(parsed), "write MoonBit")
+}
+
+///|
+test "cli does not bind the session root environment variable" {
+  let parsed = run_matches(argv=["write", "MoonBit"], env={
+    "DEEPSEEK": "test-key",
+    "OPENSEEK_SESSION_ROOT": "/tmp/parent-sessions",
+  })
+  assert_false(parsed is { values: { "session": [_, ..], .. }, .. })
+  assert_eq(session_root(parsed), ".openseek")
 }
 
 ///|

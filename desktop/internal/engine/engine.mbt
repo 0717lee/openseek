@@ -1469,21 +1469,24 @@ async fn engine_process_env(
   } else {
     env.remove("OPENSEEK_API_URL")
   }
-  if config.session_root is Some(root) {
-    env["OPENSEEK_SESSION_ROOT"] = root.to_string()
-  } else {
-    env.remove("OPENSEEK_SESSION_ROOT")
-  }
+  // The session root travels in argv. Remove the trusted host's configuration
+  // input so custom engines and their descendants cannot observe it.
+  env.remove("OPENSEEK_SESSION_ROOT")
   add_moonbit_path_for_native_engine(env, config, runtime_dir)
   env
 }
 
 ///|
 fn engine_process_args(config : RunConfig) -> Array[String] {
-  // Desktop engines always run in durable-session mode. Passing the identity
+  // Desktop engines always run in durable-session mode. Passing placement
   // explicitly keeps it out of the ambient environment inherited by tools.
-  // Attach the value so a leading `-` remains part of the session id.
-  ["serve", "--session=\{config.session}", "--dir", ".", "--approval", "ask"]
+  // Attach values so a leading `-` remains part of the value.
+  let args = ["serve", "--session=\{config.session}"]
+  if config.session_root is Some(root) {
+    args.push("--session-root=\{root.to_string()}")
+  }
+  args.append(["--dir", ".", "--approval", "ask"])
+  args
 }
 
 ///|
@@ -2759,6 +2762,19 @@ async test "native engine env has one authoritative bundled moon path" {
   @debug.assert_eq(engine_process_args({ ..config, session: "--resume" }), [
     "serve", "--session=--resume", "--dir", ".", "--approval", "ask",
   ])
+  let explicit_root = root.join("sessions").resolve()
+  @debug.assert_eq(
+    engine_process_args({ ..config, session_root: Some(explicit_root) }),
+    [
+      "serve",
+      "--session=s-env",
+      "--session-root=\{explicit_root.to_string()}",
+      "--dir",
+      ".",
+      "--approval",
+      "ask",
+    ],
+  )
   let moon_bin = moon_home.join("bin").to_string()
   let expected_path = if ambient_path is Some(path) && !path.is_empty() {
     "\{moon_bin}\{@env.path_sep}\{path}"
