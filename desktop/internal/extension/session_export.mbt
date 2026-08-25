@@ -41,13 +41,10 @@ async fn SessionExportDialog::destination(
         if path.is_empty() {
           return None
         }
-        return Some(
-          if path.to_lower().has_suffix(".html") {
-            path
-          } else {
-            "\{path}.html"
-          },
-        )
+        // Preserve the exact destination confirmed by the native dialog. The
+        // suggested name already carries `.html`; changing the returned path
+        // here would bypass the dialog's overwrite confirmation for that path.
+        return Some(path)
       }
       Pending => context.wait_for_wake(revision)
     }
@@ -77,6 +74,8 @@ async fn export_session(
   guard dialog.destination(context) is Some(path) else {
     return { path: None, opened: false }
   }
+  // The native dialog has already confirmed replacement for this exact path.
+  // `CreateNew` would incorrectly reject an overwrite the user approved.
   @fs.write_file(path, html, create_mode=CreateOrTruncate) catch {
     error =>
       raise @host.HostError("could not save the conversation export: \{error}")
