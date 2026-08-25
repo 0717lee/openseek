@@ -25,6 +25,7 @@ struct State {
   notice : String
   preview : Preview
   preview_cache : Map[String, String]
+  list_scroll_top : Double
 } derive(Eq)
 
 ///|
@@ -52,6 +53,7 @@ pub fn State::empty() -> State {
     notice: "",
     preview: Closed,
     preview_cache: Map([]),
+    list_scroll_top: 0.0,
   }
 }
 
@@ -73,6 +75,7 @@ pub(all) enum Msg {
   PreviewLoaded(request~ : Int, target~ : PreviewTarget, content~ : String)
   PreviewFailed(request~ : Int, target~ : PreviewTarget, message~ : String)
   BackToList
+  SkillsScrolled(Double)
 }
 
 ///|
@@ -190,7 +193,14 @@ pub fn State::handle(
         None,
       )
     }
-    BackToList => (@cmd.none, { ..self, preview: Closed }, None)
+    BackToList =>
+      (
+        restore_list_scroll(self.list_scroll_top),
+        { ..self, preview: Closed },
+        None,
+      )
+    SkillsScrolled(scroll_top) =>
+      (@cmd.none, { ..self, list_scroll_top: scroll_top }, None)
     RefreshCatalog =>
       match self.catalog {
         // The rendered button is disabled while loading, and this guard also

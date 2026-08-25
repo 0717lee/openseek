@@ -3,6 +3,19 @@
 // on the engine-host bridge, and each settles as one `Msg`.
 
 ///|
+fn restore_list_scroll(scroll_top : Double) -> @cmd.Cmd {
+  @cmd.custom_cmd(
+    _ => {
+      if @dom.document().query_selector(".skills-page").to_option()
+        is Some(page) {
+        page.set_scroll_top(scroll_top)
+      }
+    },
+    kind=@cmd.after_render,
+  )
+}
+
+///|
 /// Fetch the registry's catalog of installable skills.
 fn fetch_catalog(
   emit : @cmd.Emit[Msg],

@@ -484,6 +484,7 @@ h2 {
   cursor: pointer;
   border-radius: var(--radius-sm);
   transition: background-color 120ms ease;
+  position: relative;
 }
 
 .skill-summary:hover {

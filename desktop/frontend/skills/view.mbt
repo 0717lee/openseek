@@ -51,11 +51,6 @@ fn installed_row(
   if skill.source.is_empty() {
     children.push(
       @html.div(class="skill-actions", [
-        @html.button(
-          class="secondary skill-action",
-          on_click=emit(PreviewInstalled(skill)),
-          "View",
-        ),
         @html.span(class="skill-check ok", "✓"),
       ]),
     )
@@ -63,11 +58,6 @@ fn installed_row(
     let busy = state.busy.contains(skill.id)
     children.push(
       @html.div(class="skill-actions", [
-        @html.button(
-          class="secondary skill-action",
-          on_click=emit(PreviewInstalled(skill)),
-          "View",
-        ),
         @html.button(
           class="secondary skill-action",
           disabled=busy,
@@ -110,20 +100,10 @@ fn market_row(
   info.push(@html.div(class="skill-meta", meta))
   let action = if installed {
     @html.div(class="skill-actions", [
-      @html.button(
-        class="secondary skill-action",
-        on_click=emit(PreviewMarket(item)),
-        "View",
-      ),
       @html.span(class="skill-check ok", "✓ Installed"),
     ])
   } else {
     @html.div(class="skill-actions", [
-      @html.button(
-        class="secondary skill-action",
-        on_click=emit(PreviewMarket(item)),
-        "View",
-      ),
       @html.button(
         class="secondary skill-action",
         disabled=busy,
@@ -401,9 +381,16 @@ fn list_page(state : State, input : Input, emit : @cmd.Emit[Msg]) -> @html.Html 
       @html.div(class="settings-group-card", market_rows),
     ]),
   )
-  @html.section(class="skills-page", [
-    @html.div(class="skills-page-inner", sections),
-  ])
+  @html.section(
+    class="skills-page",
+    attrs=@html.Attrs::build().on_scroll(event => {
+      guard event.target().to_element() is Some(element) else {
+        return @cmd.none
+      }
+      emit(SkillsScrolled(element.get_scroll_top()))
+    }),
+    [@html.div(class="skills-page-inner", sections)],
+  )
 }
 
 ///|
