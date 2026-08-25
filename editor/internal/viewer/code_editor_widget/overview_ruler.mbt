@@ -207,6 +207,7 @@ fn closest_code_editor_overview_ruler_entry(
 pub struct CodeEditorOverviewRuler {
   editor : CodeEditorWidget
   root : @rdom.Element
+  external_host : @rdom.Element?
   minimum_marker_height : Double
   on_select : ((Int) -> Unit)?
   listeners : Array[@base_common.Disposable]
@@ -222,9 +223,27 @@ fn CodeEditorOverviewRuler::attach_to_current_view(
   self : CodeEditorOverviewRuler,
 ) -> Unit {
   @base_browser.remove_element(self.root)
-  match self.editor.get_dom_node() {
-    Some(root) => root.append_child(self.root.as_node())
-    None => ()
+  match self.external_host {
+    Some(host) => host.append_child(self.root.as_node())
+    None =>
+      match self.editor.get_dom_node() {
+        Some(root) => root.append_child(self.root.as_node())
+        None => ()
+      }
+  }
+}
+
+///|
+fn code_editor_overview_ruler_end_offset(
+  start_offset : Double,
+  converted_end_offset : Double,
+  view_line_count : Int,
+  line_height : Int,
+) -> Double {
+  if view_line_count == 0 {
+    converted_end_offset + line_height.to_double()
+  } else {
+    start_offset + view_line_count.max(0).to_double() * line_height.to_double()
   }
 }
 
@@ -232,7 +251,10 @@ fn CodeEditorOverviewRuler::attach_to_current_view(
 fn CodeEditorOverviewRuler::model_offset_entries(
   self : CodeEditorOverviewRuler,
 ) -> Array[CodeEditorOverviewRulerOffsetEntry] {
-  guard self.editor.get_model() is Some(model) else { return [] }
+  guard (self.editor.get_model(), self.editor.get_view_model())
+    is (Some(model), Some(view_model)) else {
+    return []
+  }
   let line_count = model.get_line_count()
   let result : Array[CodeEditorOverviewRulerOffsetEntry] = []
   for entry in self.entries {
@@ -240,18 +262,27 @@ fn CodeEditorOverviewRuler::model_offset_entries(
       continue
     }
     let start_line = entry.range.start_line_number.clamp(min=1, max=line_count)
-    let end_line = (entry.range.end_line_number_exclusive - 1).clamp(
-      min=start_line,
-      max=line_count,
-    )
-    let start_offset = self.editor.get_top_for_line_number(
-      start_line,
+    let start_view_line = view_model
+      .coordinates_converter()
+      .model_position_to_view_position(Position(start_line, 1)).line_number
+    let end_view_line = view_model
+      .coordinates_converter()
+      .model_position_to_view_position(
+        Position(entry.range.end_line_number_exclusive, 1),
+      ).line_number
+    let start_offset = view_model.view_layout.get_vertical_offset_for_line_number(
+      start_view_line,
       include_view_zones=false,
     )
-    let end_offset = self.editor.get_vertical_offset_after_position(
-      end_line,
-      model.get_line_max_column(end_line),
+    let converted_end_offset = view_model.view_layout.get_vertical_offset_for_line_number(
+      end_view_line,
       include_view_zones=false,
+    )
+    let end_offset = code_editor_overview_ruler_end_offset(
+      start_offset,
+      converted_end_offset,
+      end_view_line - start_view_line,
+      view_model.view_layout.line_height(),
     )
     result.push({
       id: entry.id,
@@ -401,6 +432,7 @@ fn code_editor_overview_ruler_accepts_generation(
 ///|
 pub fn CodeEditorWidget::create_overview_ruler(
   self : CodeEditorWidget,
+  external_host? : @rdom.Element,
   minimum_marker_height? : Double = 4.0,
   on_select? : (Int) -> Unit,
 ) -> CodeEditorOverviewRuler {
@@ -409,6 +441,7 @@ pub fn CodeEditorWidget::create_overview_ruler(
   let ruler : CodeEditorOverviewRuler = {
     editor: self,
     root,
+    external_host,
     minimum_marker_height: minimum_marker_height.max(1.0),
     on_select,
     listeners: [],

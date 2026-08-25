@@ -14,6 +14,72 @@ fn diff_editor_lifecycle_model(
 }
 
 ///|
+priv suberror DiffLifecycleProviderError {
+  ComputeFailed
+}
+
+///|
+priv struct FailingDiffLifecycleProvider {
+  marker : Unit
+}
+
+///|
+fn FailingDiffLifecycleProvider::new() -> FailingDiffLifecycleProvider {
+  { marker: () }
+}
+
+///|
+impl @diff.DocumentDiffProvider for FailingDiffLifecycleProvider with fn compute_diff(
+  self,
+  _original,
+  _modified,
+  _options,
+) {
+  self.marker |> ignore
+  raise DiffLifecycleProviderError::ComputeFailed
+}
+
+///|
+impl @diff.DocumentDiffProvider for FailingDiffLifecycleProvider with fn on_did_change(
+  _self,
+  _listener,
+) {
+  @base_common.Disposable::from(() => ())
+}
+
+///|
+priv struct InvalidDiffLifecycleProvider {
+  marker : Unit
+}
+
+///|
+fn InvalidDiffLifecycleProvider::new() -> InvalidDiffLifecycleProvider {
+  { marker: () }
+}
+
+///|
+impl @diff.DocumentDiffProvider for InvalidDiffLifecycleProvider with fn compute_diff(
+  self,
+  _original,
+  _modified,
+  _options,
+) {
+  self.marker |> ignore
+  {
+    changes: [DetailedLineRangeMapping(LineRange(0, 2), LineRange(1, 2), None)],
+    additional_alignments: [],
+  }
+}
+
+///|
+impl @diff.DocumentDiffProvider for InvalidDiffLifecycleProvider with fn on_did_change(
+  _self,
+  _listener,
+) {
+  @base_common.Disposable::from(() => ())
+}
+
+///|
 fn diff_editor_lifecycle_snapshot_json(
   widget : @diff_editor.DiffEditorWidget,
 ) -> String {
@@ -39,6 +105,7 @@ fn diff_editor_lifecycle_snapshot_json(
     "afterRenderWaiterCount": snapshot.after_render_waiter_count.to_json(),
     "afterRenderRemaining": snapshot.after_render_remaining.to_json(),
     "viewModelPendingSchedulerCount": snapshot.view_model_pending_scheduler_count.to_json(),
+    "diffUpToDate": snapshot.diff_up_to_date.to_json(),
     "lifetimeSubscriptionCount": snapshot.lifetime_subscription_count.to_json(),
   }).stringify()
 }
@@ -55,20 +122,58 @@ fn run_diff_editor_lifecycle_test() -> Unit {
   app.append_child(host.as_node())
   let provider = @diff.CoreDocumentDiffProvider()
   let provider_object : &@diff.DocumentDiffProvider = provider
+  let failing_provider = FailingDiffLifecycleProvider::new()
+  let failing_provider_object : &@diff.DocumentDiffProvider = failing_provider
+  let invalid_provider = InvalidDiffLifecycleProvider::new()
+  let invalid_provider_object : &@diff.DocumentDiffProvider = invalid_provider
   let widget = @diff_editor.DiffEditorWidget::create(
     host,
     provider_object,
-    editor_options=@code_widget.CodeEditorOptions::default(),
+    editor_options=@code_widget.CodeEditorOptions::default().with_soft_wrap(
+      true,
+    ),
     options=DiffEditorOptions(layout=Inline, automatic_inline=false),
   )
   let original = diff_editor_lifecycle_model(
     "original",
-    "deleted line\n".repeat(260) + "shared tail",
+    ("deleted line " + "x".repeat(400) + "\n").repeat(260) +
+    "shared tail\n".repeat(120) +
+    "end",
   )
-  let modified = diff_editor_lifecycle_model("modified", "shared tail")
+  let modified = diff_editor_lifecycle_model(
+    "modified",
+    "shared tail\n".repeat(120) + "end",
+  )
   widget.set_model(Some({ original, modified })) |> ignore
   install_diff_editor_lifecycle_controls(
     () => diff_editor_lifecycle_snapshot_json(widget),
+    hide_unchanged_regions => {
+      widget.update_options(
+        @code_widget.CodeEditorOptions::default().with_soft_wrap(true),
+        DiffEditorOptions(
+          layout=Inline,
+          automatic_inline=false,
+          hide_unchanged_regions~,
+        ),
+      )
+    },
+    provider_kind => {
+      match provider_kind {
+        "provider" => widget.set_diff_provider(failing_provider_object)
+        "validator" => widget.set_diff_provider(invalid_provider_object)
+        _ => widget.set_diff_provider(provider_object)
+      }
+    },
+    attached => {
+      widget.set_model(
+        if attached {
+          Some({ original, modified })
+        } else {
+          None
+        },
+      )
+      |> ignore
+    },
     () => widget.dispose(),
     () => {
       original.dispose()
@@ -80,12 +185,18 @@ fn run_diff_editor_lifecycle_test() -> Unit {
 ///|
 extern "js" fn install_diff_editor_lifecycle_controls(
   snapshot : () -> String,
+  set_hide_unchanged : (Bool) -> Unit,
+  set_provider : (String) -> Unit,
+  set_model_attached : (Bool) -> Unit,
   dispose : () -> Unit,
   dispose_models : () -> Unit,
 ) -> Unit =
-  #| (snapshot, dispose, disposeModels) => {
+  #| (snapshot, setHideUnchanged, setProvider, setModelAttached, dispose, disposeModels) => {
   #|   globalThis.__diffEditorLifecycleControls = Object.freeze({
   #|     snapshot() { return JSON.parse(snapshot()); },
+  #|     set_hide_unchanged: setHideUnchanged,
+  #|     set_provider: setProvider,
+  #|     set_model_attached: setModelAttached,
   #|     dispose,
   #|     dispose_models: disposeModels,
   #|   });

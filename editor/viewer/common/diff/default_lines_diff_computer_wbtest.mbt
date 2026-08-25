@@ -1,9 +1,8 @@
 // White-box behavior tests for `CoreDocumentDiffProvider`.
 //
-// The engine deviates from Monaco's by design (see the impl file header), so
-// unlike the `*_reference_test.mbt` suites these do NOT byte-compare against
-// Monaco's outputs: hunk boundaries may legally differ by tie-breaking among
-// equal adjacent lines. Instead every case asserts
+// These local contract/property cases complement the traceable Advanced-diff
+// cases in `advanced_diff_reference_wbtest.mbt`. They do not byte-compare every
+// ambiguous repeated-line tie against VS Code. Instead every case asserts
 // - the invariants Monaco's own assertion harness enforces on any valid
 //   result (sorted, strictly separated hunks with equal line deltas), and
 // - a reconstruction round-trip: applying `changes` to the original must
@@ -86,6 +85,69 @@ test "character refinement anchors pure insertions and deletions" {
   let (deleted, empty_modified) = deletions[0]
   assert_eq(deleted, Range(1, 3, 1, 5))
   assert_eq(empty_modified, Range(1, 3, 1, 3))
+}
+
+///|
+test "blank-line insertion refines the canonical newline boundary" {
+  let result = compute(["a", "b"], ["a", "", "b"])
+  guard result.changes is [change] && change.inner_changes is Some(inner) else {
+    fail("expected one refined blank-line insertion")
+  }
+  assert_eq(change.original, LineRange(2, 2))
+  assert_eq(change.modified, LineRange(2, 3))
+  guard inner is [mapping] else { fail("expected one newline mapping") }
+  assert_eq(mapping.original, Range(2, 1, 2, 1))
+  assert_eq(mapping.modified, Range(2, 1, 3, 1))
+}
+
+///|
+test "whole-line insertion and deletion keep pinned newline anchors" {
+  let leading_insert = compute(["b", "c"], ["x", "b", "c"])
+  guard leading_insert.changes is [{ inner_changes: Some([leading]), .. }] else {
+    fail("expected leading insertion refinement")
+  }
+  assert_eq(leading.original, Range(1, 1, 1, 1))
+  assert_eq(leading.modified, Range(1, 1, 2, 1))
+
+  let leading_delete = compute(["x", "b", "c"], ["b", "c"])
+  guard leading_delete.changes is [{ inner_changes: Some([leading]), .. }] else {
+    fail("expected leading deletion refinement")
+  }
+  assert_eq(leading.original, Range(1, 1, 2, 1))
+  assert_eq(leading.modified, Range(1, 1, 1, 1))
+
+  let trailing_insert = compute(["a"], ["a", "x"])
+  guard trailing_insert.changes is [{ inner_changes: Some([trailing]), .. }] else {
+    fail("expected trailing insertion refinement")
+  }
+  assert_eq(trailing.original, Range(1, 2, 1, 2))
+  assert_eq(trailing.modified, Range(1, 2, 2, 2))
+
+  let trailing_delete = compute(["a", "x"], ["a"])
+  guard trailing_delete.changes is [{ inner_changes: Some([trailing]), .. }] else {
+    fail("expected trailing deletion refinement")
+  }
+  assert_eq(trailing.original, Range(1, 2, 2, 2))
+  assert_eq(trailing.modified, Range(1, 2, 1, 2))
+}
+
+///|
+test "final newline and trimmed successor keep column-one boundaries" {
+  let final_newline = compute(["a"], ["a", ""])
+  guard final_newline.changes is [{ inner_changes: Some([mapping]), .. }] else {
+    fail("expected final-newline refinement")
+  }
+  assert_eq(mapping.original, Range(1, 2, 1, 2))
+  assert_eq(mapping.modified, Range(1, 2, 2, 1))
+
+  let trimmed = compute(["a", "  b"], ["a", "x", "  b"], options={
+    ignore_trim_whitespace: true,
+  })
+  guard trimmed.changes is [{ inner_changes: Some([mapping]), .. }] else {
+    fail("expected trimmed-successor refinement")
+  }
+  assert_eq(mapping.original, Range(2, 1, 2, 1))
+  assert_eq(mapping.modified, Range(2, 1, 3, 1))
 }
 
 ///|
@@ -193,15 +255,27 @@ test "repeated equal lines still yield a valid separated script" {
 }
 
 ///|
-test "large Core Myers calculation still yields a correct script" {
+test "line sequence at the 1700 threshold uses a valid Myers fallback script" {
   let original : Array[String] = []
   let modified : Array[String] = []
-  for i in 0..<200 {
+  for i in 0..<850 {
     original.push("line \{i}")
     modified.push(if i % 7 == 0 { "line \{i} changed" } else { "line \{i}" })
   }
   let result = compute(original, modified)
   assert_valid(original, modified, result)
+}
+
+///|
+test "scalar sequence at the 500 threshold keeps a precise Myers refinement" {
+  let original = "ab".repeat(130) + " OLD " + "cd".repeat(130)
+  let modified = "ab".repeat(130) + " NEW " + "cd".repeat(130)
+  let result = compute([original], [modified])
+  guard result.changes is [{ inner_changes: Some([inner]), .. }] else {
+    fail("expected one precise scalar fallback refinement")
+  }
+  assert_eq(inner.original, Range(1, 262, 1, 265))
+  assert_eq(inner.modified, Range(1, 262, 1, 265))
 }
 
 ///|

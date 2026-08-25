@@ -13,19 +13,155 @@ fn diff_state_test_change(
 }
 
 ///|
-test "DiffState preserves canonical provider order and cycles navigation" {
+test "DiffState preserves canonical provider order" {
   let first = diff_state_test_change(1, 1, 1, 2)
   let second = diff_state_test_change(3, 4, 4, 5)
   let state = DiffState::from_diff_result({
     changes: [first, second],
     additional_alignments: [],
   })
-  assert_eq(state.mapping_at(0), Some(first))
-  assert_eq(state.mapping_at(1), Some(second))
-  assert_eq(state.next_change(None).unwrap().change_index, 0)
-  assert_eq(state.next_change(Some(1)).unwrap().change_index, 0)
-  assert_eq(state.previous_change(None).unwrap().change_index, 1)
-  assert_eq(state.previous_change(Some(0)).unwrap().change_index, 1)
+  assert_eq(state.mappings[0].line_range_mapping, first)
+  assert_eq(state.mappings[1].line_range_mapping, second)
+}
+
+///|
+test "Accessible F7 groups mappings whose three-line contexts overlap" {
+  let state = DiffState::from_diff_result({
+    changes: [
+      diff_state_test_change(2, 3, 2, 3),
+      diff_state_test_change(7, 8, 7, 8),
+    ],
+    additional_alignments: [],
+  })
+  let groups = state.navigation_changes()
+  assert_eq(state.mapping_count(), 2)
+  assert_eq(groups.length(), 1)
+  assert_eq(groups[0].original, LineRange(2, 8))
+  assert_eq(groups[0].modified, LineRange(2, 8))
+  assert_true(groups[0].inner_changes is None)
+  let target = state.next_change_from_modified_line(1, 10).unwrap()
+  assert_eq(target.change_index, 0)
+  assert_eq(target.change_count, 1)
+  assert_eq(target.change, groups[0])
+}
+
+///|
+test "Accessible F7 keeps mappings separate at an exact six-line gap" {
+  let state = DiffState::from_diff_result({
+    changes: [
+      diff_state_test_change(2, 3, 2, 3),
+      diff_state_test_change(9, 10, 9, 10),
+    ],
+    additional_alignments: [],
+  })
+  assert_eq(state.navigation_changes().length(), 2)
+  assert_eq(
+    state.next_change_from_modified_line(2, 12).unwrap().change_index,
+    1,
+  )
+}
+
+///|
+test "grouped F7 navigation starts at the modified cursor and wraps" {
+  let state = DiffState::from_diff_result({
+    changes: [
+      diff_state_test_change(2, 3, 2, 3),
+      diff_state_test_change(6, 7, 6, 6),
+      diff_state_test_change(12, 13, 12, 13),
+      diff_state_test_change(19, 20, 19, 20),
+    ],
+    additional_alignments: [],
+  })
+  // The first two mappings form one group; the later exact-six-line gaps do
+  // not. Selection remains relative to each group's modified start line.
+  assert_eq(
+    state.next_change_from_modified_line(1, 20).unwrap().change_index,
+    0,
+  )
+  assert_eq(
+    state.next_change_from_modified_line(2, 20).unwrap().change_index,
+    1,
+  )
+  assert_eq(
+    state.next_change_from_modified_line(19, 20).unwrap().change_index,
+    0,
+  )
+  assert_eq(
+    state.previous_change_from_modified_line(19).unwrap().change_index,
+    1,
+  )
+  assert_eq(
+    state.previous_change_from_modified_line(2).unwrap().change_index,
+    2,
+  )
+  let first_group = state.previous_change_from_modified_line(7).unwrap()
+  assert_eq(first_group.change_index, 0)
+  assert_eq(first_group.change.modified, LineRange(2, 6))
+}
+
+///|
+test "next F7 at the last modified line wraps before an EOF deletion anchor" {
+  let state = DiffState::from_diff_result({
+    changes: [
+      diff_state_test_change(2, 3, 2, 3),
+      diff_state_test_change(11, 12, 11, 11),
+    ],
+    additional_alignments: [],
+  })
+  assert_eq(
+    state.next_change_from_modified_line(10, 10).unwrap().change_index,
+    0,
+  )
+}
+
+///|
+test "standalone deletion navigation retains an empty modified anchor" {
+  let state = DiffState::from_diff_result({
+    changes: [
+      diff_state_test_change(2, 3, 2, 3),
+      diff_state_test_change(9, 10, 9, 9),
+    ],
+    additional_alignments: [],
+  })
+  let deletion = state.next_change_from_modified_line(2, 10).unwrap()
+  assert_eq(deletion.change_index, 1)
+  assert_eq(deletion.change_count, 2)
+  assert_eq(deletion.change.original, LineRange(9, 10))
+  assert_eq(deletion.change.modified, LineRange(9, 9))
+}
+
+///|
+test "real-widget-sized navigation projection groups fifty-seven mappings into thirty-one" {
+  let changes : Array[@diff.DetailedLineRangeMapping] = []
+  let mut line = 1
+  for group_index in 0..<31 {
+    changes.push(diff_state_test_change(line, line + 1, line, line + 1))
+    if group_index < 26 {
+      changes.push(
+        diff_state_test_change(line + 3, line + 4, line + 3, line + 4),
+      )
+      line += 10
+    } else {
+      line += 7
+    }
+  }
+  let state = DiffState::from_diff_result({ changes, additional_alignments: [] })
+  assert_eq(state.mapping_count(), 57)
+  assert_eq(state.navigation_changes().length(), 31)
+  assert_eq(
+    state.next_change_from_modified_line(1, line).unwrap().change_count,
+    31,
+  )
+}
+
+///|
+test "cursor-relative navigation has no target for an empty diff" {
+  let state = DiffState::from_diff_result({
+    changes: [],
+    additional_alignments: [],
+  })
+  assert_true(state.next_change_from_modified_line(1, 1) is None)
+  assert_true(state.previous_change_from_modified_line(1) is None)
 }
 
 ///|

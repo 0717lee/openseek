@@ -340,12 +340,14 @@ test "DiffEditorViewModel converts provider errors and invalid mappings to Faile
   assert_true(view_model.get_state() == Failed)
   assert_false(view_model.is_diff_up_to_date())
   assert_true(view_model.get_diff() is None)
+  assert_eq(view_model.get_failure_diagnostic(), Some("provider error"))
 
   provider.result.val = InvalidLineMapping
   provider.signal_change()
   timer.fire_next(0)
   assert_true(view_model.get_state() == Failed)
   assert_true(view_model.get_diff() is None)
+  assert_eq(view_model.get_failure_diagnostic(), Some("validator rejection"))
 
   provider.result.val = InvalidInnerMapping
   provider.signal_change()
@@ -370,6 +372,7 @@ test "DiffEditorViewModel converts provider errors and invalid mappings to Faile
   timer.fire_next(0)
   assert_true(view_model.get_state() == Ready)
   assert_eq(view_model.get_diff().unwrap().changes.length(), 1)
+  assert_true(view_model.get_failure_diagnostic() is None)
 
   view_model.dispose()
   original.dispose()
@@ -427,6 +430,93 @@ test "validator accepts Core inner anchors on empty hunk sides" {
 }
 
 ///|
+test "ViewModel accepts pinned newline mapping for a pure deletion" {
+  let timer = DiffViewModelFakeTimer::new()
+  let provider = @diff.get_core_document_diff_provider()
+  let view_model = new_diff_view_model_for_test(provider, timer)
+  let original = diff_view_model_test_model(
+    "newline-deletion-original", "deleted\n\nkeep",
+  )
+  let modified = diff_view_model_test_model(
+    "newline-deletion-modified", "\nkeep",
+  )
+
+  view_model.set_model(Some({ original, modified })) |> ignore
+  timer.fire_next(0)
+
+  assert_true(view_model.get_state() == Ready)
+  assert_true(view_model.get_failure_diagnostic() is None)
+  guard view_model.get_diff() is Some({ changes: [change], .. }) &&
+    change.inner_changes is Some([inner]) else {
+    fail("expected one normalized pure-deletion mapping")
+  }
+  assert_eq(change.original, LineRange(1, 2))
+  assert_eq(change.modified, LineRange(1, 1))
+  assert_eq(inner.original, Range(1, 1, 2, 1))
+  assert_eq(inner.modified, Range(1, 1, 1, 1))
+
+  view_model.dispose()
+  original.dispose()
+  modified.dispose()
+}
+
+///|
+test "ViewModel accepts pinned newline mapping for a pure insertion" {
+  let timer = DiffViewModelFakeTimer::new()
+  let provider = @diff.get_core_document_diff_provider()
+  let view_model = new_diff_view_model_for_test(provider, timer)
+  let original = diff_view_model_test_model(
+    "newline-insertion-original", "\nkeep",
+  )
+  let modified = diff_view_model_test_model(
+    "newline-insertion-modified", "inserted\n\nkeep",
+  )
+
+  view_model.set_model(Some({ original, modified })) |> ignore
+  timer.fire_next(0)
+
+  assert_true(view_model.get_state() == Ready)
+  assert_true(view_model.get_failure_diagnostic() is None)
+  guard view_model.get_diff() is Some({ changes: [change], .. }) &&
+    change.inner_changes is Some([inner]) else {
+    fail("expected one normalized pure-insertion mapping")
+  }
+  assert_eq(change.original, LineRange(1, 1))
+  assert_eq(change.modified, LineRange(1, 2))
+  assert_eq(inner.original, Range(1, 1, 1, 1))
+  assert_eq(inner.modified, Range(1, 1, 2, 1))
+
+  view_model.dispose()
+  original.dispose()
+  modified.dispose()
+}
+
+///|
+test "validator rejects newline anchor over non-empty empty-hunk line" {
+  let original = @model.TextSnapshot("deleted\nnot empty\nkeep")
+  let modified = @model.TextSnapshot("not empty\nkeep")
+  let invalid : @diff.DocumentDiff = {
+    changes: [
+      DetailedLineRangeMapping(
+        LineRange(1, 2),
+        LineRange(1, 1),
+        Some([RangeMapping(Range(1, 1, 2, 1), Range(1, 1, 2, 1))]),
+      ),
+    ],
+    additional_alignments: [],
+  }
+
+  assert_false(
+    line_range_contains_range(
+      invalid.changes[0].modified,
+      invalid.changes[0].inner_changes.unwrap()[0].modified,
+      modified,
+    ),
+  )
+  assert_false(valid_document_diff(invalid, original, modified))
+}
+
+///|
 test "ViewModel normalizes full-line inner mappings like VS Code" {
   let original = @model.TextSnapshot("old\nkeep")
   let modified = @model.TextSnapshot("new\nkeep")
@@ -443,6 +533,29 @@ test "ViewModel normalizes full-line inner mappings like VS Code" {
   let normalized = normalize_document_diff(result, original, modified)
   guard normalized.changes[0].inner_changes is Some([inner]) else {
     fail("expected normalized inner mapping")
+  }
+  assert_eq(inner.original, Range(1, 1, 2, 1))
+  assert_eq(inner.modified, Range(1, 1, 2, 1))
+  assert_true(valid_document_diff(normalized, original, modified))
+}
+
+///|
+test "normalization extends an empty-line anchor only with its full-line peer" {
+  let original = @model.TextSnapshot("deleted\n\nkeep")
+  let modified = @model.TextSnapshot("\nkeep")
+  let raw : @diff.DocumentDiff = {
+    changes: [
+      DetailedLineRangeMapping(
+        LineRange(1, 2),
+        LineRange(1, 1),
+        Some([RangeMapping(Range(1, 1, 1, 8), Range(1, 1, 1, 1))]),
+      ),
+    ],
+    additional_alignments: [],
+  }
+  let normalized = normalize_document_diff(raw, original, modified)
+  guard normalized.changes[0].inner_changes is Some([inner]) else {
+    fail("expected normalized deletion mapping")
   }
   assert_eq(inner.original, Range(1, 1, 2, 1))
   assert_eq(inner.modified, Range(1, 1, 2, 1))

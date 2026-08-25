@@ -168,24 +168,25 @@ fn DiffEditorEditors::update_options(
     Inherit => editor_options
     Off => editor_options.with_soft_wrap(false)
   }
-  // Inline's original pane is display:none. Keep its last valid geometry and
-  // apply the latest options when it becomes visible again instead of letting
-  // a hidden kernel consume a fallback measurement.
-  if layout == SideBySide {
-    self.original.update_options(pane_options)
+  // Pinned DiffEditorEditors always updates both kernels. Inline's hidden
+  // original must never wrap because its external overview track still reads
+  // the original view geometry.
+  let original_options = if layout == Inline {
+    pane_options.with_soft_wrap(false)
+  } else {
+    pane_options
   }
+  self.original.update_options(original_options)
   self.modified.update_options(pane_options)
 }
 
 ///|
 fn DiffEditorEditors::layout(
   self : DiffEditorEditors,
-  layout : DiffEditorLayout,
+  _layout : DiffEditorLayout,
 ) -> Unit {
   if !self.disposed {
-    if layout == SideBySide {
-      self.original.layout()
-    }
+    self.original.layout()
     self.modified.layout()
   }
 }

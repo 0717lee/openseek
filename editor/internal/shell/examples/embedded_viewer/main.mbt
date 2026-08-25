@@ -103,8 +103,9 @@ fn memory_workspace() -> MemoryWorkspace {
   )
   documents["\{memory_root}/navigation-anchors.mbt"] = [
     "fn navigation_anchors() {", "  let stable_head = 0", "  let stable_middle_one = 2",
-    "  let stable_middle_two = 3", "  let inserted_only = 4", "  let stable_tail = 5",
-    "}",
+    "  let stable_middle_two = 3", "  let stable_middle_three = 4", "  let stable_middle_four = 5",
+    "  let stable_middle_five = 6", "  let stable_middle_six = 7", "  let inserted_only = 8",
+    "  let stable_tail = 9", "}",
   ].join("\n")
   documents["\{memory_root}/tabbed-deletion.mbt"] = "let retained = 1\n"
   documents["\{memory_root}/oversized-line.mbt"] = oversized_diff_line("m")
@@ -160,8 +161,9 @@ fn memory_workspace() -> MemoryWorkspace {
   )
   original_documents["\{memory_root}/navigation-anchors.mbt"] = [
     "fn navigation_anchors() {", "  let stable_head = 0", "  let deleted_only = 1",
-    "  let stable_middle_one = 2", "  let stable_middle_two = 3", "  let stable_tail = 5",
-    "}",
+    "  let stable_middle_one = 2", "  let stable_middle_two = 3", "  let stable_middle_three = 4",
+    "  let stable_middle_four = 5", "  let stable_middle_five = 6", "  let stable_middle_six = 7",
+    "  let stable_tail = 9", "}",
   ].join("\n")
   original_documents["\{memory_root}/tabbed-deletion.mbt"] = "\t".repeat(160) +
     "deleted_tail\n"

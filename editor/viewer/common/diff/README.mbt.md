@@ -1,7 +1,7 @@
 # viewer/common/diff
 
-Renderer-neutral document-diff contracts and the built-in synchronous Core
-Myers provider. The package has no DOM or editor-widget dependency.
+Renderer-neutral document-diff contracts and the built-in synchronous diff
+provider. The package has no DOM or editor-widget dependency.
 
 ```mermaid
 flowchart LR
@@ -52,6 +52,32 @@ test "insertions keep half-open line-range semantics" {
   assert_eq(inserted.changes[0].modified, LineRange(2, 3))
 }
 ```
+
+## Advanced readability core
+
+`CoreDocumentDiffProvider` keeps its established public name and
+`DocumentDiff` contract, but its private pipeline ports the readability-critical
+parts of VS Code's Advanced diff from pinned revision
+`07c20d96cf3f2cbc8142ac7079ba9048cf7f6134`. The port mode is
+**algorithm-fidelity**: thresholds, score/tie order, shift bounds, repeated
+join order, and short-match constants are preserved; MoonBit-native concrete
+records and closures replace TypeScript interfaces.
+
+| Behavior or invariant | Pinned source | Disposition | Evidence |
+|---|---|---|---|
+| Weighted DP for short line/scalar sequences; Myers fallback | `defaultLinesDiffComputer.ts:67-94,221-225`; `dynamicProgrammingDiffing.ts` | Implemented with `<1700` and `<500` thresholds | `advanced_diff_reference_wbtest.mbt`; all existing reconstruction tests |
+| Two-pass join, boundary-scored shift, `100` shift cap | `heuristicSequenceOptimizations.ts:12-180` | Implemented for line and Unicode-scalar sequences | `shifting-parameters` and `ts-diff-word-split` reference cases |
+| Merge substantial hunks around at most four non-whitespace UTF-16 units; merge scalar matches of length at most two | `heuristicSequenceOptimizations.ts:183-206,321-369` | Implemented | deterministic structural-refactor reference case |
+| Whole-word refinement without splitting shared identifiers | `heuristicSequenceOptimizations.ts:208-319`; `linesSliceCharSequence.ts:104-129` | Implemented over Unicode-scalar storage and ASCII word classification | `word-shared-letters` reference case; `Array` to `FixedArray` regression case |
+| Coalesce tiny one-line matches between long changes and absorb short line trim | `heuristicSequenceOptimizations.ts:372-472` | Implemented with UTF-16 thresholds over scalar offsets | exact `20/21` and `100/101` boundary reference cases |
+| Canonical newline mappings for whole-line additions and deletions | `rangeMapping.ts:132-170`; `linesSliceCharSequence.ts:20-49,101-117` | Implemented with separate right/left offset boundaries | leading, middle, trailing, final-newline, and trimmed-successor reference cases |
+
+The following upstream clusters are deliberately deferred: option-controlled
+subword forcing (`extendToSubwords`) because the frozen local
+`DocumentDiffOptions` has no such policy field; timeouts; moved block detection;
+and external/wasm providers. Unicode scalar values remain atomic locally
+(unlike upstream UTF-16 code-unit storage), while behavior thresholds and
+emitted columns remain UTF-16 based.
 
 ## Whitespace and provider policy
 

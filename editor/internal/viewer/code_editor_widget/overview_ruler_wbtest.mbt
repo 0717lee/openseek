@@ -19,6 +19,68 @@ test "overview ruler scales ranges and enforces its minimum marker height" {
 }
 
 ///|
+test "overview ruler hunk height excludes an alignment zone inside the range" {
+  // Three wrapped view lines at 18px occupy 54px. A bottom-position lookup
+  // would also include the hypothetical 72px alignment ViewZone; the pinned
+  // diff overview contract deliberately derives the end from line count.
+  assert_eq(code_editor_overview_ruler_end_offset(90.0, 234.0, 3, 18), 144.0)
+}
+
+///|
+fn overview_ruler_eof_offset_entry(
+  viewer : CodeEditorWidget,
+  range : @base_common.LineRange,
+) -> CodeEditorOverviewRulerOffsetEntry {
+  let ruler : CodeEditorOverviewRuler = {
+    editor: viewer,
+    root: headless_test_element(),
+    external_host: None,
+    minimum_marker_height: 4.0,
+    on_select: None,
+    listeners: [],
+    resize_observer: None,
+    entries: [{ id: 1, range, color: "red", lane: Full }],
+    bands: [],
+    generation: 0,
+    disposed: false,
+  }
+  ruler.model_offset_entries()[0]
+}
+
+///|
+test "overview ruler validates an unwrapped EOF hunk endpoint through the converter" {
+  let model = test_model("head\nfinal")
+  defer model.dispose()
+  let viewer = CodeEditorWidget::CodeEditorWidget(
+    options=CodeEditorOptions(font_size=12, line_height=18),
+  )
+  defer viewer.dispose()
+  viewer.set_model(Some(model))
+  let entry = overview_ruler_eof_offset_entry(viewer, LineRange(2, 3))
+  assert_eq(entry.start_offset, 18.0)
+  // Position(3, 1) validates to the end of model line 2. Like pinned
+  // OverviewZoneManager, a zero view-line delta falls back to one line.
+  assert_eq(entry.end_offset, 36.0)
+}
+
+///|
+test "overview ruler validates a wrapped EOF hunk endpoint through the converter" {
+  let model = test_model("head\nabcdefghijklm")
+  defer model.dispose()
+  let viewer = CodeEditorWidget::CodeEditorWidget(
+    options=CodeEditorOptions(font_size=12, line_height=18, soft_wrap=true),
+  )
+  defer viewer.dispose()
+  viewer.set_model(Some(model))
+  viewer.test_set_soft_wrap_column(6)
+  let entry = overview_ruler_eof_offset_entry(viewer, LineRange(2, 3))
+  assert_eq(entry.start_offset, 18.0)
+  // The validated EOF lands on the third wrapped segment. Pinned computes
+  // height from the two-line view delta instead of adding an inclusive line.
+  assert_eq(entry.end_offset, 54.0)
+}
+
+///|
 test "overview ruler clamps marker bands to both canvas edges" {
   let bands = resolve_code_editor_overview_ruler_bands(
     [
@@ -144,6 +206,7 @@ fn overview_ruler_disposal_test_handle(
   {
     editor,
     root,
+    external_host: None,
     minimum_marker_height: 4.0,
     on_select: None,
     listeners,

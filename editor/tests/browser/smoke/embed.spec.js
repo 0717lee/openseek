@@ -61,6 +61,16 @@ test('runs the independent viewer surfaces and tree without a server', async ({ 
   );
   await expect(originalPane.locator('.diff-editor-line-delete')).toHaveCount(1);
   await expect(modifiedPane.locator('.diff-editor-line-insert')).toHaveCount(1);
+  const deleteSign = originalPane.locator('.diff-editor-gutter-delete').first();
+  const insertSign = modifiedPane.locator('.diff-editor-gutter-insert').first();
+  await expect(deleteSign).toBeVisible();
+  await expect(insertSign).toBeVisible();
+  expect(
+    await deleteSign.evaluate((node) => getComputedStyle(node, '::before').content),
+  ).toBe('"−"');
+  expect(
+    await insertSign.evaluate((node) => getComputedStyle(node, '::before').content),
+  ).toBe('"+"');
 
   // Algorithm controls are a host/provider concern. DiffEditor itself contains
   // neither the removed toolbar nor the host-owned layout action.
@@ -135,7 +145,7 @@ test('runs the independent viewer surfaces and tree without a server', async ({ 
   expect(websockets).toEqual([]);
 });
 
-test('switches at the 900/901 boundary and keeps explicit Inline above it', async ({ page }) => {
+test('reserves the overview rail and switches at the outer 930/931 boundary', async ({ page }) => {
   await page.setViewportSize({ width: 1500, height: 900 });
   await page.goto('/embed.html');
   await expect(page.locator('.editor-shell')).toHaveAttribute('data-status', 'ready');
@@ -147,7 +157,7 @@ test('switches at the 900/901 boundary and keeps explicit Inline above it', asyn
   const sash = diff.getByRole('separator', { name: 'Resize diff panes' });
   const layoutToggle = page.locator('[data-action="toggle-diff-layout"]');
 
-  await setViewerStackWidth(stack, diff, 901);
+  await setViewerStackWidth(stack, diff, 931);
   await expect(diff).toHaveAttribute('data-render-mode', 'side-by-side');
   await expect(originalPane).toBeVisible();
   await expect(sash).toBeVisible();
@@ -155,14 +165,14 @@ test('switches at the 900/901 boundary and keeps explicit Inline above it', asyn
   await expect(sash).toHaveAttribute('aria-valuemax', '90');
   await expect(sash).toHaveAttribute('aria-valuenow', '50');
 
-  await setViewerStackWidth(stack, diff, 900);
+  await setViewerStackWidth(stack, diff, 930);
   await expect(diff).toHaveAttribute('data-render-mode', 'inline');
   await expect(originalPane).toBeHidden();
   await expect(sash).toBeHidden();
 
   // Responsive fallback never mutates the requested SideBySide preference.
   await expect(layoutToggle).toHaveAttribute('aria-pressed', 'false');
-  await setViewerStackWidth(stack, diff, 901);
+  await setViewerStackWidth(stack, diff, 931);
   await expect(diff).toHaveAttribute('data-render-mode', 'side-by-side');
 
   // Explicit Inline remains Inline even when the host grows above the boundary.
@@ -236,9 +246,13 @@ test('moves original focus into Inline and keeps F7 navigation live', async ({ p
       modifiedPane.evaluate((node) => node.contains(document.activeElement)),
     )
     .toBe(true);
+  // VS Code resolves the accessible F7 group from the modified cursor, not
+  // from a separate navigation index. The fixture keeps the groups at the
+  // exact six-line non-merging boundary.
+  await modifiedPane.locator('.monaco-editor').click({ position: { x: 120, y: 80 } });
   await page.keyboard.press('F7');
   await expect(liveRegion).toHaveText(
-    'Change 1 of 2; original lines 3 through 3; modified deletion anchor at line 3',
+    'Change 2 of 2; original insertion anchor at line 10; modified lines 9 through 9',
   );
 });
 
@@ -253,6 +267,16 @@ test('reconciles height-only and Inline-to-side layouts after fresh pane renders
   const diff = page.locator(diffEditor);
   const spacers = diff.locator('.moonbit-diff-editor-alignment-spacer[monaco-view-zone]');
   await expect.poll(() => spacers.count()).toBeGreaterThan(0);
+  const spacerPaint = await spacers.first().evaluate((node) => {
+    const style = getComputedStyle(node);
+    return {
+      backgroundImage: style.backgroundImage,
+      backgroundSize: style.backgroundSize,
+    };
+  });
+  expect(spacerPaint.backgroundImage).toContain('linear-gradient');
+  expect(spacerPaint.backgroundImage).not.toBe('none');
+  expect(spacerPaint.backgroundSize).toBe('8px 8px');
   const beforeIds = await spacers.evaluateAll((nodes) =>
     nodes.map((node) => node.getAttribute('monaco-view-zone')),
   );
@@ -297,7 +321,7 @@ test('navigates deletion and insertion anchors across side-by-side and Inline la
   const deletionAnnouncement =
     'Change 1 of 2; original lines 3 through 3; modified deletion anchor at line 3';
   const insertionAnnouncement =
-    'Change 2 of 2; original insertion anchor at line 6; modified lines 5 through 5';
+    'Change 2 of 2; original insertion anchor at line 10; modified lines 9 through 9';
   await expect(liveRegion).toHaveAttribute('aria-live', 'polite');
   await expect(liveRegion).toHaveAttribute('aria-atomic', 'true');
   await expect(originalPane.locator('.diff-editor-line-delete')).toHaveCount(1);
@@ -305,21 +329,21 @@ test('navigates deletion and insertion anchors across side-by-side and Inline la
 
   await modifiedPane.locator('.monaco-editor').click({ position: { x: 120, y: 80 } });
 
-  // Side-by-side navigates to the pane that owns physical changed lines.
+  // Cursor-relative navigation starts with the hunk after the clicked line.
   await page.keyboard.press('F7');
-  await expect(liveRegion).toHaveText(deletionAnnouncement);
+  await expect(liveRegion).toHaveText(insertionAnnouncement);
   await expect
     .poll(() =>
       page.evaluate(() =>
         document
-          .querySelector('.moonbit-diff-editor-original')
+          .querySelector('.moonbit-diff-editor-modified')
           ?.contains(document.activeElement),
       ),
     )
     .toBe(true);
 
   await page.keyboard.press('F7');
-  await expect(liveRegion).toHaveText(insertionAnnouncement);
+  await expect(liveRegion).toHaveText(deletionAnnouncement);
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -336,18 +360,6 @@ test('navigates deletion and insertion anchors across side-by-side and Inline la
   await expect(diff).toHaveAttribute('data-render-mode', 'inline');
   await modifiedPane.locator('.monaco-editor').click({ position: { x: 120, y: 80 } });
   await page.keyboard.press('F7');
-  await expect(liveRegion).toHaveText(deletionAnnouncement);
-  await expect
-    .poll(() =>
-      page.evaluate(() =>
-        document
-          .querySelector('.moonbit-diff-editor-modified')
-          ?.contains(document.activeElement),
-      ),
-    )
-    .toBe(true);
-
-  await page.keyboard.press('F7');
   await expect(liveRegion).toHaveText(insertionAnnouncement);
   await expect
     .poll(() =>
@@ -359,8 +371,20 @@ test('navigates deletion and insertion anchors across side-by-side and Inline la
     )
     .toBe(true);
 
-  await page.keyboard.press('Shift+F7');
+  await page.keyboard.press('F7');
   await expect(liveRegion).toHaveText(deletionAnnouncement);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        document
+          .querySelector('.moonbit-diff-editor-modified')
+          ?.contains(document.activeElement),
+      ),
+    )
+    .toBe(true);
+
+  await page.keyboard.press('Shift+F7');
+  await expect(liveRegion).toHaveText(insertionAnnouncement);
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -425,7 +449,7 @@ test('eagerly renders every row across fragmented Inline deletions', async ({ pa
   await expect(diff).toHaveAttribute('data-render-mode', 'inline');
   await expect(blocks).toHaveCount(20);
 
-  // F7 on a deletion-only Inline hunk reveals the ViewZone top itself.
+  // F7 follows VS Code's modified empty-anchor reveal without lazy rendering.
   await modifiedPane.locator('.monaco-editor').click({ position: { x: 120, y: 80 } });
   await page.keyboard.press('F7');
   await expect
@@ -467,6 +491,15 @@ test('renders character changes in the side-by-side code kernels', async ({ page
   await expect(insertedCharacter).toHaveCount(1);
   await expect(deletedCharacter).toHaveClass(/\bcdr\b/);
   await expect(insertedCharacter).toHaveClass(/\bcdr\b/);
+  await page.locator('.editor-shell').evaluate((node) => {
+    node.setAttribute('data-theme', 'light');
+  });
+  const [deletedBackground, insertedBackground] = await Promise.all([
+    deletedCharacter.evaluate((node) => getComputedStyle(node).backgroundColor),
+    insertedCharacter.evaluate((node) => getComputedStyle(node).backgroundColor),
+  ]);
+  expect(deletedBackground).toBe('rgba(255, 0, 0, 0.2)');
+  expect(insertedBackground).toBe('rgba(156, 204, 44, 0.25)');
   const [deletedBox, insertedBox] = await Promise.all([
     deletedCharacter.boundingBox(),
     insertedCharacter.boundingBox(),

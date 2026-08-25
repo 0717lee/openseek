@@ -61,10 +61,11 @@ pub(all) struct DiffEditorModel {
 pub fn DiffEditorModel::DiffEditorModel(@model.TextModel, @model.TextModel) -> Self
 
 type DiffEditorOptions
-pub fn DiffEditorOptions::DiffEditorOptions(editor_options? : ViewerOptions, layout? : DiffEditorLayout, automatic_inline? : Bool, automatic_inline_width? : Double, sash_enabled? : Bool, split_ratio? : Double, diff_word_wrap? : DiffWordWrap, overview_ruler? : Bool, ignore_trim_whitespace? : Bool) -> Self
+pub fn DiffEditorOptions::DiffEditorOptions(editor_options? : ViewerOptions, layout? : DiffEditorLayout, automatic_inline? : Bool, automatic_inline_width? : Double, sash_enabled? : Bool, split_ratio? : Double, diff_word_wrap? : DiffWordWrap, overview_ruler? : Bool, ignore_trim_whitespace? : Bool, hide_unchanged_regions? : Bool, hide_unchanged_regions_context_line_count? : Int, hide_unchanged_regions_minimum_line_count? : Int) -> Self
 pub fn DiffEditorOptions::default() -> Self
 pub fn DiffEditorOptions::layout(Self) -> DiffEditorLayout
 pub fn DiffEditorOptions::with_editor_options(Self, ViewerOptions) -> Self
+pub fn DiffEditorOptions::with_hide_unchanged_regions(Self, Bool) -> Self
 pub fn DiffEditorOptions::with_layout(Self, DiffEditorLayout) -> Self
 
 pub(all) enum DiffWordWrap {

@@ -27,6 +27,9 @@ pub(all) struct DiffEditorOptions {
   diff_word_wrap : DiffWordWrap
   overview_ruler : Bool
   ignore_trim_whitespace : Bool
+  hide_unchanged_regions : Bool
+  hide_unchanged_regions_context_line_count : Int
+  hide_unchanged_regions_minimum_line_count : Int
 }
 
 ///|
@@ -39,6 +42,9 @@ pub fn DiffEditorOptions::DiffEditorOptions(
   diff_word_wrap? : DiffWordWrap = Inherit,
   overview_ruler? : Bool = true,
   ignore_trim_whitespace? : Bool = true,
+  hide_unchanged_regions? : Bool = false,
+  hide_unchanged_regions_context_line_count? : Int = 3,
+  hide_unchanged_regions_minimum_line_count? : Int = 3,
 ) -> DiffEditorOptions {
   {
     layout,
@@ -49,6 +55,13 @@ pub fn DiffEditorOptions::DiffEditorOptions(
     diff_word_wrap,
     overview_ruler,
     ignore_trim_whitespace,
+    hide_unchanged_regions,
+    hide_unchanged_regions_context_line_count: hide_unchanged_regions_context_line_count.max(
+      0,
+    ),
+    hide_unchanged_regions_minimum_line_count: hide_unchanged_regions_minimum_line_count.max(
+      0,
+    ),
   }
 }
 

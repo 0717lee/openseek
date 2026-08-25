@@ -5,6 +5,7 @@ test "new reviews default to the full diff" {
   let state = owned_state()
   assert_true(state.review_view_mode is ReviewDiff)
   assert_true(state.review_diff_layout is ReviewSideBySide)
+  assert_false(state.review_diff_hide_unchanged_regions)
   let (_, opened) = open_changed_document(
     test_emit(),
     state,
@@ -56,6 +57,53 @@ test "full diff layout toggles independently and source mode preserves it" {
     ctx,
   )
   assert_true(unchanged.review_diff_layout is ReviewInline)
+}
+
+///|
+test "hide unchanged toggle is reversible and source mode preserves it" {
+  let path = @pathx.Relative("src/main.mbt")
+  let selected = test_modified_change(path)
+  let docs = owned_state().docs.copy()
+  docs[path] = {
+    ..loaded_doc(path.0),
+    review: Some({
+      generation: 1,
+      working_generation: 1,
+      baseline: ReviewContent("old source"),
+      view_mode: ReviewDiff,
+      selected,
+    }),
+  }
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  let (_, hidden) = update(
+    test_emit(),
+    ToggleReviewDiffHideUnchangedRegions,
+    { ..owned_state(), docs, },
+    ctx,
+  )
+  assert_true(hidden.review_diff_hide_unchanged_regions)
+  let (_, visible) = update(
+    test_emit(),
+    ToggleReviewDiffHideUnchangedRegions,
+    hidden,
+    ctx,
+  )
+  assert_false(visible.review_diff_hide_unchanged_regions)
+  let source_docs = hidden.docs.copy()
+  source_docs[path] = {
+    ..source_docs.get(path).unwrap(),
+    review: source_docs.get(path).unwrap().review.map(review => {
+      ..review,
+      view_mode: ReviewSource,
+    }),
+  }
+  let (_, unchanged) = update(
+    test_emit(),
+    ToggleReviewDiffHideUnchangedRegions,
+    { ..hidden, docs: source_docs },
+    ctx,
+  )
+  assert_true(unchanged.review_diff_hide_unchanged_regions)
 }
 
 ///|

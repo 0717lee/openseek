@@ -9,7 +9,7 @@
 /// merge rather than clobber each other. A changed view-line mapping
 /// re-flushes the layout and emits Monaco's typed `ViewFlushedEvent`/
 /// `ViewLineMappingChangedEvent` fan-out at the source.
-fn CodeEditorWidget::set_hidden_areas(
+pub fn CodeEditorWidget::set_hidden_areas(
   self : CodeEditorWidget,
   ranges : Array[@base_common.Range],
   source? : String = "",

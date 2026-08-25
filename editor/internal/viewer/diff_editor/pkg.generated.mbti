@@ -12,6 +12,7 @@ import {
 }
 
 // Values
+pub fn project_hidden_unchanged_regions(Array[@diff.DetailedLineRangeMapping], Int, Int, Int, Int) -> Array[@diff.LineRangeMapping]
 
 // Errors
 
@@ -56,8 +57,11 @@ pub(all) struct DiffEditorOptions {
   diff_word_wrap : DiffWordWrap
   overview_ruler : Bool
   ignore_trim_whitespace : Bool
+  hide_unchanged_regions : Bool
+  hide_unchanged_regions_context_line_count : Int
+  hide_unchanged_regions_minimum_line_count : Int
 }
-pub fn DiffEditorOptions::DiffEditorOptions(layout? : DiffEditorLayout, automatic_inline? : Bool, automatic_inline_width? : Double, sash_enabled? : Bool, split_ratio? : Double, diff_word_wrap? : DiffWordWrap, overview_ruler? : Bool, ignore_trim_whitespace? : Bool) -> Self
+pub fn DiffEditorOptions::DiffEditorOptions(layout? : DiffEditorLayout, automatic_inline? : Bool, automatic_inline_width? : Double, sash_enabled? : Bool, split_ratio? : Double, diff_word_wrap? : DiffWordWrap, overview_ruler? : Bool, ignore_trim_whitespace? : Bool, hide_unchanged_regions? : Bool, hide_unchanged_regions_context_line_count? : Int, hide_unchanged_regions_minimum_line_count? : Int) -> Self
 pub fn DiffEditorOptions::default() -> Self
 
 pub struct DiffEditorViewModel {
@@ -74,10 +78,12 @@ pub struct DiffEditorViewModel {
   did_change_model : @common.Emitter[Unit]
   did_update : @common.Emitter[Unit]
   mut disposed : Bool
+  // private fields
 }
 pub fn DiffEditorViewModel::DiffEditorViewModel(&@diff.DocumentDiffProvider, options? : @diff.DocumentDiffOptions, schedule_timeout? : (() -> Unit, Int) -> @common.Disposable) -> Self
 pub fn DiffEditorViewModel::dispose(Self) -> Unit
 pub fn DiffEditorViewModel::get_diff(Self) -> @diff.DocumentDiff?
+pub fn DiffEditorViewModel::get_failure_diagnostic(Self) -> String?
 pub fn DiffEditorViewModel::get_model(Self) -> DiffEditorModelData?
 pub fn DiffEditorViewModel::get_state(Self) -> DiffEditorViewModelState
 pub fn DiffEditorViewModel::is_diff_up_to_date(Self) -> Bool
@@ -103,6 +109,9 @@ pub struct DiffEditorWidget {
   original_host : @dom.Element
   modified_host : @dom.Element
   sash : @dom.Element
+  overview_root : @dom.Element
+  overview_viewport : @dom.Element
+  status : @dom.Element
   live_region : @dom.Element
   editors : DiffEditorEditors
   view_model : DiffEditorViewModel
@@ -122,7 +131,6 @@ pub struct DiffEditorWidget {
   mut original_alignment_geometry : PaneGeometrySnapshot?
   mut modified_alignment_geometry : PaneGeometrySnapshot?
   mut diff_state : DiffState?
-  mut navigation_index : Int?
   mut reconciling_generation : Int
   mut is_reconciling : Bool
   layout_render_waiters : Array[@common.Disposable]
@@ -172,6 +180,7 @@ pub(all) struct DiffEditorWidgetLifecycleSnapshot {
   after_render_waiter_count : Int
   after_render_remaining : Int
   view_model_pending_scheduler_count : Int
+  diff_up_to_date : Bool
   lifetime_subscription_count : Int
 }
 

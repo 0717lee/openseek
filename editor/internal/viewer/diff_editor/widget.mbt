@@ -9,6 +9,9 @@ pub struct DiffEditorWidget {
   original_host : @rdom.Element
   modified_host : @rdom.Element
   sash : @rdom.Element
+  overview_root : @rdom.Element
+  overview_viewport : @rdom.Element
+  status : @rdom.Element
   live_region : @rdom.Element
   editors : DiffEditorEditors
   view_model : DiffEditorViewModel
@@ -28,7 +31,6 @@ pub struct DiffEditorWidget {
   mut original_alignment_geometry : PaneGeometrySnapshot?
   mut modified_alignment_geometry : PaneGeometrySnapshot?
   mut diff_state : DiffState?
-  mut navigation_index : Int?
   mut reconciling_generation : Int
   mut is_reconciling : Bool
   /// Cancellable paint barrier for the latest outer layout transaction.
@@ -104,11 +106,25 @@ pub fn DiffEditorWidget::create(
   panes.append_child(original_host.as_node())
   panes.append_child(sash.as_node())
   panes.append_child(modified_host.as_node())
+  let overview_root = document.create_element("div")
+  overview_root.set_attribute("class", "moonbit-diff-overview diffOverview")
+  overview_root.set_attribute("aria-hidden", "true")
+  overview_root.set_attribute("hidden", "")
+  let overview_viewport = document.create_element("div")
+  overview_viewport.set_attribute(
+    "class", "moonbit-diff-overview-viewport diffViewport",
+  )
+  overview_root.append_child(overview_viewport.as_node())
+  let status = document.create_element("div")
+  status.set_attribute("class", "moonbit-diff-editor-status")
+  status.set_attribute("hidden", "")
   let live_region = document.create_element("div")
   live_region.set_attribute("class", "moonbit-diff-editor-live-region")
   live_region.set_attribute("aria-live", "polite")
   live_region.set_attribute("aria-atomic", "true")
   root.append_child(panes.as_node())
+  root.append_child(overview_root.as_node())
+  root.append_child(status.as_node())
   root.append_child(live_region.as_node())
   host.append_child(root.as_node())
 
@@ -129,6 +145,9 @@ pub fn DiffEditorWidget::create(
     original_host,
     modified_host,
     sash,
+    overview_root,
+    overview_viewport,
+    status,
     live_region,
     editors,
     view_model,
@@ -148,7 +167,6 @@ pub fn DiffEditorWidget::create(
     original_alignment_geometry: None,
     modified_alignment_geometry: None,
     diff_state: None,
-    navigation_index: None,
     reconciling_generation: 0,
     is_reconciling: false,
     layout_render_waiters: [],
@@ -230,6 +248,7 @@ fn DiffEditorWidget::complete_layout_pane_render(
   // Every outer layout, including height-only resizes, gets exactly one
   // reconcile using geometry from the completed pane render(s).
   self.reconcile_view_model(geometry_refresh=true)
+  self.refresh_overview_viewport()
 }
 
 ///|
@@ -288,6 +307,7 @@ fn DiffEditorWidget::install_event_bridges(self : DiffEditorWidget) -> Unit {
   )
   self.lifetime.push(
     self.editors.modified.on_did_scroll_change(event => {
+      self.refresh_overview_viewport()
       if self.layout_state.actual_layout == SideBySide &&
         event.scroll_top_changed {
         self.sync_scroll_top_to(self.editors.original, event.scroll_top)
@@ -328,6 +348,17 @@ fn DiffEditorWidget::install_event_bridges(self : DiffEditorWidget) -> Unit {
       } else {
         self.reveal_next_change() |> ignore
       }
+    }
+  })
+  self.listen(self.overview_root.as_event_target(), "pointerdown", event => {
+    if self.options.overview_ruler {
+      self.editors.modified.delegate_vertical_scrollbar_pointer_down(event)
+    }
+  })
+  self.listen(self.overview_root.as_event_target(), "wheel", event => {
+    if self.options.overview_ruler {
+      self.editors.modified.delegate_scroll_from_mouse_wheel_event(event)
+      |> ignore
     }
   })
   self.listen(self.sash.as_event_target(), "pointerdown", event => {
@@ -686,10 +717,48 @@ fn DiffEditorWidget::apply_overview_diff_state(
 }
 
 ///|
+fn DiffEditorWidget::refresh_overview_viewport(self : DiffEditorWidget) -> Unit {
+  if self.disposed || !self.options.overview_ruler {
+    return
+  }
+  let viewport_height = self.overview_root
+    .get_bounding_client_rect()
+    .get_height()
+    .max(0.0)
+  let layout_info = self.editors.modified.get_layout_info()
+  let geometry = diff_overview_viewport_geometry(
+    viewport_height,
+    self.editors.modified.get_scroll_height().max(viewport_height),
+    self.editors.modified.get_scroll_top().max(0.0),
+    layout_info.vertical_scrollbar_width,
+  )
+  @base_browser.set_style_property(
+    self.overview_viewport,
+    "top",
+    "\{geometry.top}px",
+  )
+  @base_browser.set_style_property(
+    self.overview_viewport,
+    "height",
+    "\{geometry.height}px",
+  )
+  self.overview_viewport.set_attribute(
+    "data-diff-viewport-top",
+    geometry.top.to_string(),
+  )
+  self.overview_viewport.set_attribute(
+    "data-diff-viewport-height",
+    geometry.height.to_string(),
+  )
+}
+
+///|
 fn DiffEditorWidget::sync_overview_ruler_option(
   self : DiffEditorWidget,
 ) -> Unit {
   if !self.options.overview_ruler {
+    self.root.remove_attribute("data-overview-ruler")
+    self.overview_root.set_attribute("hidden", "")
     match self.original_overview_ruler {
       Some(ruler) => {
         ruler.dispose()
@@ -709,19 +778,31 @@ fn DiffEditorWidget::sync_overview_ruler_option(
     self.modified_overview_ruler = None
     return
   }
+  self.root.set_attribute("data-overview-ruler", "true")
+  self.overview_root.remove_attribute("hidden")
   if self.original_overview_ruler is None {
-    self.original_overview_ruler = Some(
-      self.editors.original.create_overview_ruler(on_select=change_index => {
-        self.reveal_overview_change(change_index) |> ignore
-      }),
+    let ruler = self.editors.original.create_overview_ruler(
+      external_host=self.overview_root,
     )
+    ruler
+    .get_dom_node()
+    .set_attribute(
+      "class", "decorationsOverviewRuler moonbit-code-overview-ruler original diffOverviewRuler",
+    )
+    ruler.get_dom_node().set_attribute("data-diff-overview-side", "original")
+    self.original_overview_ruler = Some(ruler)
   }
   if self.modified_overview_ruler is None {
-    self.modified_overview_ruler = Some(
-      self.editors.modified.create_overview_ruler(on_select=change_index => {
-        self.reveal_overview_change(change_index) |> ignore
-      }),
+    let ruler = self.editors.modified.create_overview_ruler(
+      external_host=self.overview_root,
     )
+    ruler
+    .get_dom_node()
+    .set_attribute(
+      "class", "decorationsOverviewRuler moonbit-code-overview-ruler modified diffOverviewRuler",
+    )
+    ruler.get_dom_node().set_attribute("data-diff-overview-side", "modified")
+    self.modified_overview_ruler = Some(ruler)
   }
   self.overview_ruler_disposed = false
   match self.diff_state {
@@ -729,6 +810,75 @@ fn DiffEditorWidget::sync_overview_ruler_option(
       self.apply_overview_diff_state(diff_state, self.reconciling_generation)
     _ => self.clear_overview_ruler(self.reconciling_generation)
   }
+  self.refresh_overview_viewport()
+}
+
+///|
+fn DiffEditorWidget::sync_failure_diagnostic(self : DiffEditorWidget) -> Unit {
+  match self.view_model.get_failure_diagnostic() {
+    Some(diagnostic) => {
+      let message = if diagnostic == "provider error" {
+        "Unable to compute this diff."
+      } else {
+        "The diff provider returned an invalid result."
+      }
+      self.root.set_attribute("data-diff-failure", diagnostic)
+      self.status.remove_attribute("hidden")
+      self.status.set_inner_html(message)
+      self.live_region.set_inner_html(message)
+    }
+    None => {
+      self.root.remove_attribute("data-diff-failure")
+      self.status.set_attribute("hidden", "")
+      self.status.set_inner_html("")
+      self.live_region.set_inner_html("")
+    }
+  }
+}
+
+///|
+let diff_unchanged_hidden_area_source : String = "diff-editor-unchanged"
+
+///|
+fn hidden_area_ranges(
+  regions : Array[@diff.LineRangeMapping],
+  original : Bool,
+) -> Array[@base_common.Range] {
+  regions.map(region => {
+    let lines = if original { region.original } else { region.modified }
+    Range(lines.start_line_number, 1, lines.end_line_number_exclusive - 1, 1)
+  })
+}
+
+///|
+fn DiffEditorWidget::apply_hidden_unchanged_regions(
+  self : DiffEditorWidget,
+  diff_state : DiffState?,
+  model : DiffEditorModelData?,
+) -> Unit {
+  let regions = match (diff_state, model) {
+    (Some(diff_state), Some(model)) if self.options.hide_unchanged_regions => {
+      let changes = diff_state.mappings.map(mapping => {
+        mapping.line_range_mapping
+      })
+      project_hidden_unchanged_regions(
+        changes,
+        model.original.get_line_count(),
+        model.modified.get_line_count(),
+        self.options.hide_unchanged_regions_minimum_line_count,
+        self.options.hide_unchanged_regions_context_line_count,
+      )
+    }
+    _ => []
+  }
+  self.editors.original.set_hidden_areas(
+    hidden_area_ranges(regions, true),
+    source=diff_unchanged_hidden_area_source,
+  )
+  self.editors.modified.set_hidden_areas(
+    hidden_area_ranges(regions, false),
+    source=diff_unchanged_hidden_area_source,
+  )
 }
 
 ///|
@@ -747,6 +897,7 @@ fn DiffEditorWidget::commit_empty_diff_features(
   } else {
     None
   }
+  self.apply_hidden_unchanged_regions(None, None)
   self.clear_decorations()
   self.original_alignment_zone_ids = replace_alignment_zones(
     self.editors.original,
@@ -768,7 +919,7 @@ fn DiffEditorWidget::commit_empty_diff_features(
   self.original_alignment_geometry = None
   self.modified_alignment_geometry = None
   self.diff_state = None
-  self.live_region.set_inner_html("")
+  self.sync_failure_diagnostic()
 }
 
 ///|
@@ -794,6 +945,7 @@ fn DiffEditorWidget::commit_diff_state(
   } else {
     None
   }
+  self.apply_hidden_unchanged_regions(Some(diff_state), Some(model))
   let (original_geometry, modified_geometry) = self.capture_alignment_geometry()
   let (original_specs, modified_specs, next_inline_deleted_zones) = match
     (self.layout_state.actual_layout, original_geometry, modified_geometry) {
@@ -855,6 +1007,8 @@ fn DiffEditorWidget::commit_diff_state(
   )
   self.apply_overview_diff_state(diff_state, generation)
   self.diff_state = Some(diff_state)
+  self.sync_failure_diagnostic()
+  self.refresh_overview_viewport()
 }
 
 ///|
@@ -921,7 +1075,6 @@ fn DiffEditorWidget::reconcile_view_model(
   }
   self.reconciling_generation += 1
   let generation = self.reconciling_generation
-  self.navigation_index = None
   guard self.view_model.get_diff() is Some(document_diff) &&
     self.view_model.get_model() is Some(model) else {
     self.commit_empty_diff_features(generation)
@@ -975,6 +1128,10 @@ pub fn DiffEditorWidget::set_model(
   // model event mirrors the committed pair into both kernels before the diff
   // update event clears or rebuilds feature artifacts.
   let previous = self.view_model.set_model(model)
+  // A model transaction clears a previous provider/validator failure
+  // synchronously. Reconciliation can be held behind the render barrier, so
+  // do not leave the old diagnostic painted until the next pane render.
+  self.sync_failure_diagnostic()
   match model {
     Some(_) if !self.editors.is_committing_model_pair() => {
       self.editors.original.handle_initialized()
@@ -998,6 +1155,7 @@ pub fn DiffEditorWidget::set_diff_provider(
   provider : &@diff.DocumentDiffProvider,
 ) -> Unit {
   self.view_model.set_provider(provider)
+  self.sync_failure_diagnostic()
 }
 
 ///|
@@ -1018,10 +1176,20 @@ pub fn DiffEditorWidget::update_options(
     self.cancel_layout_render_barrier()
   }
   let original_had_focus = self.editors.original.has_text_focus()
-  let layout_changed = self.layout_state.update_options(
+  let layout_changed_from_options = self.layout_state.update_options(
     options,
-    recompute_layout=valid_layout_box,
+    recompute_layout=false,
   )
+  let available_width = if options.overview_ruler {
+    (self.host.get_bounding_client_rect().get_width() - 30.0).max(0.0)
+  } else {
+    self.host.get_bounding_client_rect().get_width().max(0.0)
+  }
+  let layout_changed = if valid_layout_box {
+    self.layout_state.layout(available_width) || layout_changed_from_options
+  } else {
+    layout_changed_from_options
+  }
   if valid_layout_box {
     self.has_valid_layout_box = true
     self.apply_layout_dom()
@@ -1077,7 +1245,6 @@ pub fn DiffEditorWidget::on_did_update_diff(
 
 ///|
 priv enum DiffNavigationPane {
-  OriginalNavigationPane
   ModifiedNavigationPane
 }
 
@@ -1099,40 +1266,28 @@ fn navigation_reveal_range(
     let anchor = range.start_line_number.clamp(min=1, max=line_count.max(1))
     return Range(anchor, 1, anchor, 1)
   }
-  Range(range.start_line_number, 1, range.end_line_number_exclusive - 1, 1)
+  // Match `LineRange.toExclusiveRange()`: the end line stays exclusive. The
+  // reveal path validates the resulting EOF position against the model.
+  Range(range.start_line_number, 1, range.end_line_number_exclusive, 1)
 }
 
 ///|
 fn diff_navigation_reveal_plan(
-  layout : DiffEditorLayout,
+  _layout : DiffEditorLayout,
   change : @diff.DetailedLineRangeMapping,
-  original_line_count : Int,
+  _original_line_count : Int,
   modified_line_count : Int,
 ) -> DiffNavigationRevealPlan? {
-  match layout {
-    Inline =>
-      // Inline has only one interactive code surface. In particular, a
-      // deletion-only hunk must reveal its empty modified-side anchor instead
-      // of moving focus into the hidden original kernel.
-      Some({
-        pane: ModifiedNavigationPane,
-        range: navigation_reveal_range(change.modified, modified_line_count),
-      })
-    SideBySide =>
-      if !change.modified.is_empty() {
-        Some({
-          pane: ModifiedNavigationPane,
-          range: navigation_reveal_range(change.modified, modified_line_count),
-        })
-      } else if !change.original.is_empty() {
-        Some({
-          pane: OriginalNavigationPane,
-          range: navigation_reveal_range(change.original, original_line_count),
-        })
-      } else {
-        None
-      }
+  if change.modified.is_empty() && change.original.is_empty() {
+    return None
   }
+  // F7 is bound through pinned `commands.ts` to the Accessible Diff Viewer.
+  // This editor-return adaptation always stays in the modified pane, using a
+  // valid collapsed modified coordinate for a deletion-only group.
+  Some({
+    pane: ModifiedNavigationPane,
+    range: navigation_reveal_range(change.modified, modified_line_count),
+  })
 }
 
 ///|
@@ -1167,42 +1322,20 @@ fn DiffEditorWidget::announce_navigation_target(
 }
 
 ///|
-fn DiffEditorWidget::reveal_inline_deleted_zone(
-  self : DiffEditorWidget,
-  change_index : Int,
-) -> Bool {
-  if self.layout_state.actual_layout != Inline {
-    return false
-  }
-  for entry in self.inline_deleted_zones {
-    if entry.change_index == change_index {
-      match entry.zone_id.val {
-        Some(zone_id) =>
-          if self.editors.modified.reveal_managed_view_zone_top(zone_id) {
-            self.editors.modified.focus()
-            return true
-          }
-        None => ()
-      }
-    }
-  }
-  false
-}
-
-///|
 fn DiffEditorWidget::reveal_navigation_target(
   self : DiffEditorWidget,
   target : DiffNavigationTarget,
 ) -> Bool {
   let change = target.change
   guard self.view_model.get_model() is Some(model) else { return false }
-  self.navigation_index = Some(target.change_index)
-  if change.modified.is_empty() &&
-    !change.original.is_empty() &&
-    self.reveal_inline_deleted_zone(target.change_index) {
-    self.announce_navigation_target(target)
-    return true
-  }
+  let modified_anchor = change.modified.start_line_number.clamp(
+    min=1,
+    max=model.modified.get_line_count().max(1),
+  )
+  self.editors.modified.set_position(
+    Position(modified_anchor, 1),
+    source="diffEditor.accessibleDiffViewer",
+  )
   guard diff_navigation_reveal_plan(
       self.layout_state.actual_layout,
       change,
@@ -1213,70 +1346,25 @@ fn DiffEditorWidget::reveal_navigation_target(
     return false
   }
   match plan.pane {
-    OriginalNavigationPane => {
-      self.editors.original.reveal_range_in_center(plan.range)
-      self.editors.original.focus()
-    }
-    ModifiedNavigationPane => {
+    ModifiedNavigationPane =>
       self.editors.modified.reveal_range_in_center(plan.range)
-      self.editors.modified.focus()
-    }
   }
   self.announce_navigation_target(target)
   true
 }
 
 ///|
-fn DiffEditorWidget::reveal_overview_change(
-  self : DiffEditorWidget,
-  change_index : Int,
-) -> Bool {
-  guard !self.disposed &&
-    self.diff_state is Some(diff_state) &&
-    diff_state.mapping_at(change_index) is Some(change) &&
-    self.view_model.get_model() is Some(model) else {
-    return false
-  }
-  self.navigation_index = Some(change_index)
-  if change.modified.is_empty() &&
-    !change.original.is_empty() &&
-    self.reveal_inline_deleted_zone(change_index) {
-    self.announce_navigation_target({
-      change_index,
-      change_count: diff_state.mapping_count(),
-      change,
-    })
-    return true
-  }
-  if !change.modified.is_empty() {
-    self.editors.modified.reveal_range_in_center(
-      Range(
-        change.modified.start_line_number,
-        1,
-        change.modified.end_line_number_exclusive - 1,
-        1,
-      ),
-    )
-  } else {
-    let line_number = change.modified.start_line_number.clamp(
-      min=1,
-      max=model.modified.get_line_count().max(1),
-    )
-    self.editors.modified.reveal_line_in_center(line_number)
-  }
-  self.editors.modified.focus()
-  self.announce_navigation_target({
-    change_index,
-    change_count: diff_state.mapping_count(),
-    change,
-  })
-  true
-}
-
-///|
 pub fn DiffEditorWidget::reveal_next_change(self : DiffEditorWidget) -> Bool {
+  guard self.view_model.get_model() is Some(model) else { return false }
+  let current_line = self.editors.modified
+    .get_position()
+    .map_or(1, position => position.line_number)
   guard self.diff_state is Some(diff_state) &&
-    diff_state.next_change(self.navigation_index) is Some(target) else {
+    diff_state.next_change_from_modified_line(
+      current_line,
+      model.modified.get_line_count(),
+    )
+    is Some(target) else {
     return false
   }
   self.reveal_navigation_target(target)
@@ -1286,8 +1374,11 @@ pub fn DiffEditorWidget::reveal_next_change(self : DiffEditorWidget) -> Bool {
 pub fn DiffEditorWidget::reveal_previous_change(
   self : DiffEditorWidget,
 ) -> Bool {
+  let current_line = self.editors.modified
+    .get_position()
+    .map_or(1, position => position.line_number)
   guard self.diff_state is Some(diff_state) &&
-    diff_state.previous_change(self.navigation_index) is Some(target) else {
+    diff_state.previous_change_from_modified_line(current_line) is Some(target) else {
     return false
   }
   self.reveal_navigation_target(target)
@@ -1356,7 +1447,12 @@ pub fn DiffEditorWidget::layout(self : DiffEditorWidget) -> Unit {
   }
   self.has_valid_layout_box = true
   let original_had_focus = self.editors.original.has_text_focus()
-  let layout_changed = self.layout_state.layout(width)
+  let layout_width = if self.options.overview_ruler {
+    (width - 30.0).max(0.0)
+  } else {
+    width
+  }
+  let layout_changed = self.layout_state.layout(layout_width)
   self.apply_layout_dom()
   if layout_changed &&
     self.layout_state.actual_layout == Inline &&
@@ -1425,7 +1521,6 @@ pub fn DiffEditorWidget::dispose(self : DiffEditorWidget) -> Unit {
   self.original_alignment_geometry = None
   self.modified_alignment_geometry = None
   self.diff_state = None
-  self.navigation_index = None
   self.reconciling_generation = 0
   self.is_reconciling = false
   self.layout_render_generation = 0

@@ -91,6 +91,7 @@ pub fn CodeEditorOptions::with_theme(Self, String) -> Self
 pub struct CodeEditorOverviewRuler {
   editor : CodeEditorWidget
   root : @dom.Element
+  external_host : @dom.Element?
   minimum_marker_height : Double
   on_select : ((Int) -> Unit)?
   listeners : Array[@common.Disposable]
@@ -182,7 +183,9 @@ pub fn CodeEditorWidget::capture_stable_viewport_state(Self) -> StableCodeEditor
 pub fn CodeEditorWidget::change_view_zones(Self, (@moonbitlang/editor/viewer/browser.ViewZoneChangeAccessor) -> Unit raise) -> Unit
 pub fn CodeEditorWidget::create(@dom.Element, services? : CodeEditorServices, options? : CodeEditorOptions, contributions~ : CodeEditorContributionDescriptors) -> Self
 pub fn CodeEditorWidget::create_decorations_collection(Self, decorations? : Array[@model.ModelDeltaDecoration]) -> EditorDecorationsCollection
-pub fn CodeEditorWidget::create_overview_ruler(Self, minimum_marker_height? : Double, on_select? : (Int) -> Unit) -> CodeEditorOverviewRuler
+pub fn CodeEditorWidget::create_overview_ruler(Self, external_host? : @dom.Element, minimum_marker_height? : Double, on_select? : (Int) -> Unit) -> CodeEditorOverviewRuler
+pub fn CodeEditorWidget::delegate_scroll_from_mouse_wheel_event(Self, @dom.Event) -> Bool
+pub fn CodeEditorWidget::delegate_vertical_scrollbar_pointer_down(Self, @dom.Event) -> Unit
 pub fn CodeEditorWidget::delta_decorations(Self, Array[String], Array[@model.ModelDeltaDecoration]) -> Array[String]
 pub fn CodeEditorWidget::dispose(Self) -> Unit
 pub fn CodeEditorWidget::focus(Self) -> Unit
@@ -259,6 +262,7 @@ pub fn CodeEditorWidget::reveal_range_in_center_if_outside_viewport(Self, @commo
 pub fn CodeEditorWidget::reveal_range_near_top(Self, @common.Range) -> Unit
 pub fn CodeEditorWidget::reveal_range_near_top_if_outside_viewport(Self, @common.Range) -> Unit
 pub fn CodeEditorWidget::save_view_state(Self) -> CodeEditorViewState?
+pub fn CodeEditorWidget::set_hidden_areas(Self, Array[@common.Range], source? : String, force_update? : Bool) -> Unit
 pub fn CodeEditorWidget::set_model(Self, @model.TextModel?) -> Unit
 pub fn CodeEditorWidget::set_position(Self, @common.Position, source? : String) -> Unit
 pub fn CodeEditorWidget::set_scroll_left(Self, Double) -> Unit
