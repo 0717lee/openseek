@@ -676,6 +676,39 @@ pub(all) struct LoadSessionReply {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+/// The destination selected by the native save dialog. `None` means the user
+/// closed the dialog without saving. `opened` reports whether the saved file
+/// was handed to the platform opener; it stays false when nothing was saved.
+pub(all) struct SessionExportReply {
+  path : String?
+  opened : Bool
+} derive(Debug, Eq)
+
+///|
+/// Missing and null paths both mean that the save dialog was cancelled.
+/// `opened` is required because omitting it would make a saved-but-not-opened
+/// result indistinguishable from an incomplete reply. Unknown fields are
+/// ignored for forward evolution.
+pub impl FromJson for SessionExportReply with fn from_json(json, path) {
+  let object = JsonObject::decode(json, path, "session export reply")
+  {
+    path: object.optional_string("path"),
+    opened: object.required_bool("opened"),
+  }
+}
+
+///|
+/// An absent path is omitted rather than encoded as null, matching the other
+/// optional Desktop reply fields.
+pub impl ToJson for SessionExportReply with fn to_json(self) {
+  let fields : Map[String, Json] = { "opened": Json::boolean(self.opened) }
+  if self.path is Some(path) {
+    fields["path"] = Json::string(path)
+  }
+  Json::object(fields)
+}
+
+///|
 /// A workspace list, or a mutation's refusal reason with the registry left
 /// unchanged. Success keeps the legacy `{workspaces:[...]}` shape; the
 /// refusal rides in the reply body as `{error:"..."}` because the local
@@ -2102,6 +2135,18 @@ pub extend LoadSessionReply with Eq::{equal, not_equal}
 
 ///|
 pub extend LoadSessionReply with ToJson::{to_json}
+
+///|
+pub extend SessionExportReply with Debug::{to_repr}
+
+///|
+pub extend SessionExportReply with FromJson::{from_json}
+
+///|
+pub extend SessionExportReply with Eq::{equal, not_equal}
+
+///|
+pub extend SessionExportReply with ToJson::{to_json}
 
 ///|
 pub extend LspDiagnostic with Debug::{to_repr}

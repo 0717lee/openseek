@@ -4572,6 +4572,11 @@ fn update_msg(
       (cmd, { ..model, terminal, })
     }
     HostActionFailed(message) => model.notify_error(dispatch, message)
+    SessionExportOpenFailed(path~) =>
+      model.notify_error(
+        dispatch,
+        "Saved to \{path}, but couldn't open it automatically.",
+      )
     OpenFileFailed(owner~, generation~, message~) =>
       if model.active_checkout() is Some(active) &&
         owner == active.owner &&
@@ -9753,6 +9758,30 @@ test "a host action failure pops a toast" {
   )
   inspect(next.notifications.length(), content="1")
   inspect(next.notifications[0].message, content="open path failed: no opener")
+}
+
+///|
+test "a saved export that could not open pops a toast" {
+  let dispatch = test_dispatch()
+  let model = test_model()
+  let (_, first) = update(
+    dispatch,
+    SessionExportOpenFailed(path="/exports/conversation.html"),
+    model,
+  )
+  let (_, second) = update(
+    dispatch,
+    SessionExportOpenFailed(path="/exports/conversation.html"),
+    model,
+  )
+  inspect(first.notifications.length(), content="1")
+  inspect(
+    first.notifications[0].message,
+    content="Saved to /exports/conversation.html, but couldn't open it automatically.",
+  )
+  assert_eq(first.notification_seq, second.notification_seq)
+  assert_eq(first.notifications.length(), second.notifications.length())
+  assert_eq(first.notifications[0].message, second.notifications[0].message)
 }
 
 ///|

@@ -402,31 +402,22 @@ async fn build_export_html(
     shell, "index.html shell (build with `moon build` or pass --web-dir)",
   )
   let bundle_js = read_text_lossy(bundle_path)
-  // Bake the two live endpoints the frontend fetches: the sidebar listing and
-  // one envelope per session, keyed exactly as the frontend requests them.
-  let data : Map[String, Json] = Map([])
-  data["/api/sessions"] = Json::string(session_list_json(rows).stringify())
+  let sessions : Array[@viz_export.Session] = []
   for row in rows {
-    data["/api/sessions/\{row.key}"] = Json::string(
-      session_envelope_body(row.path).stringify(),
+    sessions.push(
+      @viz_export.Session(
+        key=row.key,
+        id=row.id,
+        root=row.root,
+        root_label=row.root_label,
+        is_marker=row.is_marker,
+        last_active=row.last_active.map(seconds => seconds.to_double()),
+        first_prompt=row.first_prompt,
+        events=read_text_lossy(row.path),
+      ),
     )
   }
-  // Escape every `<` in the data to its JSON unicode escape so no `<!--`,
-  // `<script`, or `</script` in session text can drive HTML's script-data
-  // tokenizer out of the inline block — the `<!--`+`<script` double-escape trap
-  // would otherwise swallow the following bundle and blank the page. The escape
-  // decodes back to `<` in the JS/JSON parser, so the data round-trips unchanged.
-  let blob = escape_json_for_html(data.to_json().stringify())
-  let bundle_inline = escape_script_close(bundle_js)
-  let scripts = "<script>window.__OPENSEEK_DATA__ = \{blob};</script>\n<script>\n\{bundle_inline}\n</script>"
-  let marker = "<script src=\"/viz_app.js\"></script>"
-  match shell_html.split_once(marker) {
-    Some((before, after)) => "\{before}\{scripts}\{after}"
-    None =>
-      fail(
-        "index.html shell is missing the \{marker} tag; cannot inline the bundle",
-      )
-  }
+  @viz_export.StandaloneExport(shell_html, bundle_js).render(sessions)
 }
 
 ///|
@@ -500,70 +491,6 @@ async fn first_existing(candidates : Array[String]) -> String? {
     }
   }
   None
-}
-
-///|
-/// Rewrite every `<` in a stringified JSON payload to its `<` escape, so an
-/// inline `<script>…</script>` data block carrying it cannot be pushed out of
-/// HTML's script-data state. Every state transition there begins with `<`, so
-/// escaping `<` alone defeats `<!--`, `<script`, and `</script` (including the
-/// `<!--`+`<script` double-escape trap). The escape decodes back to `<` in the
-/// JS/JSON parser, so the embedded data is unchanged. A `<` only ever appears
-/// inside a string value here (keys and structure have none), so this is safe.
-fn escape_json_for_html(json : String) -> String {
-  let builder = StringBuilder()
-  for c in json {
-    if c == '<' {
-      builder <+ "\\u003c"
-    } else {
-      builder.write_char(c)
-    }
-  }
-  builder.to_string()
-}
-
-///|
-/// Neutralise any literal `</script` in inlined JavaScript so it cannot close
-/// the enclosing `<script>` block early. The match is case-insensitive because
-/// an HTML parser closes the tag on `</script` in any letter case; a backslash
-/// after `<` yields `<\/script`, the same token to a JS parser (a backslash
-/// before `/` is a no-op outside a regex/string, and legal inside both), so the
-/// bundle's behaviour is unchanged.
-fn escape_script_close(js : String) -> String {
-  let chars = js.to_array()
-  let builder = StringBuilder()
-  let n = chars.length()
-  let mut i = 0
-  while i < n {
-    if chars[i] == '<' && is_script_close_tail(chars, i + 1) {
-      builder <+ "<\\/"
-      i += 2
-    } else {
-      builder.write_char(chars[i])
-      i += 1
-    }
-  }
-  builder.to_string()
-}
-
-///|
-/// Whether `chars[at..]` begins with `/script` case-insensitively — the tail of
-/// a `</script` close tag once the leading `<` has matched. HTML matches the tag
-/// name in any case, so `</SCRIPT` and `</Script` must be caught too.
-fn is_script_close_tail(chars : Array[Char], at : Int) -> Bool {
-  let tail = ['/', 's', 'c', 'r', 'i', 'p', 't']
-  guard at + tail.length() <= chars.length() else { return false }
-  for k in 0..<tail.length() {
-    let actual = chars[at + k]
-    let want = tail[k]
-    // Uppercase of an ASCII letter is its lowercase minus 32; `/` has no case.
-    let matches = actual == want ||
-      (want >= 'a' && want <= 'z' && actual.to_int() == want.to_int() - 32)
-    if !matches {
-      return false
-    }
-  }
-  true
 }
 
 ///|

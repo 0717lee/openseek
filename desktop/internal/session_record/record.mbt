@@ -223,6 +223,26 @@ pub async fn read_document(
 }
 
 ///|
+/// The complete committed JSONL record, including its header line.
+///
+/// Standalone visualizer exports need the original text because their bundled
+/// parser must see exactly what the live `/api/sessions/<key>` endpoint would
+/// serve. The shared store lock spans the whole read, so the returned text
+/// cannot include an append whose durability sync has not completed.
+pub async fn read_text(root : @pathx.Absolute, session : String) -> String {
+  let path = record_path(root, session)
+  let lock = lock_path(root, session)
+  with_shared_record_lock(lock, async fn() {
+    @fs.read_file(path.to_string()).text() catch {
+      error if @async.is_being_cancelled() => raise error
+      @os_error.OSError(_) as error if error.is_ENOENT() =>
+        raise Absent("no durable record at \{path}")
+      error => raise Unreadable("cannot read the session record: \{error}")
+    }
+  })
+}
+
+///|
 /// Read from the offset to the end of the file, folding in every complete line
 /// on the way. Mutates as it goes; `poll` owns the reset that a failure needs.
 async fn Tail::read_forward(self : Tail) -> Array[@protocol.SessionEvent] {

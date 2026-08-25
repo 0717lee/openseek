@@ -1,0 +1,37 @@
+///|
+test "@viz_export renders standalone data and neutralizes script endings" {
+  let session = @viz_export.Session(
+    key="session-key",
+    id="session-id",
+    root="/workspace/.openseek",
+    root_label="workspace",
+    is_marker=true,
+    last_active=Some(42.0),
+    first_prompt="show <script>alert(1)</script>",
+    events="{\"message\":\"<!-- <script>unsafe</script>\"}\n",
+  )
+  let html = @viz_export.StandaloneExport(
+    "<html><body><script src=\"/viz_app.js\"></script></body></html>", "globalThis.ready = true; /* </SCRIPT> */",
+  ).render([session])
+  assert_true(html.contains("window.__OPENSEEK_DATA__"))
+  assert_true(html.contains("session-key"))
+  assert_true(html.contains("session-id"))
+  assert_true(html.contains("\\u003cscript"))
+  assert_true(html.contains("<\\/SCRIPT>"))
+  assert_false(html.contains("<script src=\"/viz_app.js\"></script>"))
+  assert_false(html.contains("unsafe</script>"))
+}
+
+///|
+test "@viz_export requires the visualizer bundle marker" {
+  let mut rejected = false
+  ignore(
+    @viz_export.StandaloneExport("<html></html>", "bundle").render([]) catch {
+      _ => {
+        rejected = true
+        ""
+      }
+    },
+  )
+  assert_true(rejected)
+}

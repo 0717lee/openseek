@@ -1,0 +1,8 @@
+import {
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/json",
+}
+
+supported_targets = "all"
+
+warnings = "+missing_doc+unnecessary_view_op+test_unqualified_package+unused_default_value"

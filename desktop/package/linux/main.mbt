@@ -107,6 +107,7 @@ async fn copy_bundle_files(
   )
   @packaging.copy_tree(ws.mermaid_assets(), ws.at(AppAssetDir + "/mermaid"))
   @packaging.copy_tree(ws.at("fonts"), ws.at(AppAssetDir + "/fonts"))
+  ws.stage_viz_assets(ws.at(AppAssetDir + "/viz"), release~)
   let target = @moonbit.moonbit_linux_x64_toolchain()
   @moonbit.stage_moonbit_toolchain_seed(
     ws,

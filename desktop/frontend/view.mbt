@@ -1597,6 +1597,30 @@ test "an archived transcript renders no live composer controls" {
 }
 
 ///|
+#warnings("-alert_unstable")
+test "the topbar exports only a durable local conversation" {
+  let dispatch = test_dispatch()
+  fn markup(model : Model, conv : Conversation) {
+    @rabbita.render_to_string(() => {
+      @rabbita.Val::constant(
+        topbar_view(dispatch, @cmd.none, @cmd.none, model, conv),
+      )
+    })
+  }
+
+  let model = { ..test_model(), is_desktop: true }
+  let empty = test_conversation()
+  assert_false(markup(model, empty).contains("title=\"Export conversation\""))
+  let durable = {
+    ..empty,
+    messages: [
+      { kind: User, content: "Export me", ts: None, sequence: Some(1) },
+    ],
+  }
+  assert_true(markup(model, durable).contains("title=\"Export conversation\""))
+}
+
+///|
 /// The two halves of the top-level fork, from the model each one stands for.
 #warnings("-alert_unstable")
 test "onboarding stands in for the chat until a project holds one" {
@@ -1801,6 +1825,25 @@ fn topbar_view(
   // browser the launched app would appear on a screen the user is not at.
   if model.is_desktop {
     items.push(launcher_view(dispatch, model, conv))
+  }
+  // Export is a native-window operation and the visualizer consumes durable
+  // OpenSeek JSONL. Remote-device conversations and fresh drafts therefore do
+  // not offer a button that their host cannot fulfill.
+  if model.is_desktop && conv.device is Local && !conv.messages.is_empty() {
+    items.push(
+      @html.button(
+        class="panel-toggle",
+        title="Export conversation",
+        on_click=SessionExport::{
+          channel: conv.device,
+          session: conv.session_id,
+          workspace,
+          title: conversation_title(conv),
+          archived: conv.is_archived_read_only(),
+        }.command(dispatch),
+        icon(icon_chat_export),
+      ),
+    )
   }
   // A browser terminal is rendered locally but its PTY lives on the focused
   // remote device, reached through that device's WebSocket channel.

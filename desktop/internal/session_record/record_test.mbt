@@ -43,6 +43,14 @@ async test "a record's header names the document its events belong to" {
 }
 
 ///|
+async test "read_text preserves the complete JSONL record" {
+  let (root, path) = record_fixture("s-export")
+  let text = header_line("s-export") + event_line(1, "one")
+  write_record(path, text)
+  assert_eq(@session_record.read_text(root, "s-export"), text)
+}
+
+///|
 async test "a poll reports only what was appended since the last one" {
   let (root, path) = record_fixture("s-2")
   write_record(path, header_line("s-2") + event_line(1, "one"))

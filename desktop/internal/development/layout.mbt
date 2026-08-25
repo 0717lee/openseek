@@ -34,6 +34,25 @@ pub fn Layout::frontend_entry(self : Layout) -> String {
 }
 
 ///|
+/// Return the checked-in HTML shell used by the session visualizer.
+pub fn Layout::viz_shell(self : Layout) -> String {
+  self.checkout_root.join("web/index.html").normalize().to_string()
+}
+
+///|
+/// Return the visualizer bundle built in the JS profile matching this host.
+pub fn Layout::viz_bundle(self : Layout) -> String {
+  let profile = self.build_root.dirname().basename()
+  self.checkout_root
+  .join("_build")
+  .join("js")
+  .join(Path(profile.to_owned()))
+  .join("build/bobzhang/openseek-viz-app/openseek-viz-app.js")
+  .normalize()
+  .to_string()
+}
+
+///|
 /// Return the engine output directory in the same native profile as the host.
 pub fn Layout::engine_dir(self : Layout) -> String {
   self.build_root.join("bobzhang/openseek/cmd/openseek").normalize().to_string()

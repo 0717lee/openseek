@@ -22,6 +22,8 @@ pub async fn build_native_host(Workspace, release~ : Bool, extra_args? : Array[S
 
 pub async fn build_viewer_stylesheet(Workspace) -> Unit
 
+pub async fn build_viz_frontend(Workspace, release~ : Bool) -> Unit
+
 pub async fn copy_file(String, String) -> Unit
 
 pub async fn copy_tree(String, String) -> Unit
@@ -65,6 +67,9 @@ pub fn Workspace::native_binary(Self, release~ : Bool) -> String
 pub async fn Workspace::proton_version(Self) -> String
 pub fn Workspace::repo(Self) -> String
 pub fn Workspace::repo_at(Self, String) -> String
+pub async fn Workspace::stage_viz_assets(Self, String, release~ : Bool) -> Unit
+pub fn Workspace::viz_bundle(Self, release~ : Bool) -> String
+pub fn Workspace::viz_shell(Self) -> String
 
 // Type aliases
 

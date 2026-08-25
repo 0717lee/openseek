@@ -169,6 +169,8 @@ pub let session_archive : Command[@protocol.SessionPayload, @protocol.ArchiveRep
 
 pub let session_delete_archived : Command[@protocol.ArchivedSessionPayload, @protocol.SessionsReply]
 
+pub let session_export : Command[@protocol.SessionExportPayload, @protocol.SessionExportReply]
+
 pub let session_list : Command[@protocol.EmptyPayload, @protocol.SessionsReply]
 
 pub let session_list_archived : Command[@protocol.EmptyPayload, @protocol.SessionsReply]
