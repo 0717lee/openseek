@@ -123,7 +123,7 @@ fn run_diff_markdown_comments_test() -> Unit {
   let diff_editor = @viewer.DiffEditor::create(
     host,
     services~,
-    options=@viewer.DiffEditorOptions(
+    options=DiffEditorOptions(
       editor_options~,
       layout=Inline,
       automatic_inline=false,
@@ -154,7 +154,7 @@ fn run_diff_markdown_comments_test() -> Unit {
     diff_markdown_comment_partial_modified_source(),
   )
   diff_editor.set_model(
-    Some(@viewer.DiffEditorModel(unchanged_original, unchanged_modified)),
+    Some(DiffEditorModel(unchanged_original, unchanged_modified)),
   )
   |> ignore
   let initial_hidden_original_comments = @support.query_count(
@@ -166,11 +166,11 @@ fn run_diff_markdown_comments_test() -> Unit {
   install_diff_markdown_comments_controls(
     initial_hidden_original_comments,
     fixture => {
-      let pair = match fixture {
+      let pair : @viewer.DiffEditorModel = match fixture {
         "replacement" =>
-          @viewer.DiffEditorModel(replacement_original, replacement_modified)
-        "partial" => @viewer.DiffEditorModel(partial_original, partial_modified)
-        _ => @viewer.DiffEditorModel(unchanged_original, unchanged_modified)
+          DiffEditorModel(replacement_original, replacement_modified)
+        "partial" => DiffEditorModel(partial_original, partial_modified)
+        _ => DiffEditorModel(unchanged_original, unchanged_modified)
       }
       diff_editor.set_model(Some(pair)) |> ignore
     },
@@ -181,11 +181,7 @@ fn run_diff_markdown_comments_test() -> Unit {
         SideBySide
       }
       diff_editor.update_options(
-        @viewer.DiffEditorOptions(
-          editor_options~,
-          layout~,
-          automatic_inline=false,
-        ),
+        DiffEditorOptions(editor_options~, layout~, automatic_inline=false),
       )
     },
     width => {

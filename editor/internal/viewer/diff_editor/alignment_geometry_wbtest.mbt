@@ -196,7 +196,7 @@ test "character mappings add synchronization points inside a real hunk" {
 ///|
 test "Inline alignment keeps one canonical diff per hunk" {
   let change = alignment_test_change(2, 6, 2, 8, inner_changes=[
-    RangeMapping(@base_common.Range(2, 5, 3, 4), @base_common.Range(2, 5, 4, 4)),
+    RangeMapping(Range(2, 5, 3, 4), Range(2, 5, 4, 4)),
   ])
   let additional = @diff.LineRangeMapping(LineRange(9, 9), LineRange(11, 12))
   let alignments = compute_inline_range_alignments(
