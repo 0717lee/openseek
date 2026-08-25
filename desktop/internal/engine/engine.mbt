@@ -1469,9 +1469,6 @@ async fn engine_process_env(
   } else {
     env.remove("OPENSEEK_API_URL")
   }
-  // Desktop engines always run in durable-session mode, so the conversation
-  // survives the process and is shared with the CLI/TUI.
-  env["OPENSEEK_SESSION"] = config.session
   if config.session_root is Some(root) {
     env["OPENSEEK_SESSION_ROOT"] = root.to_string()
   } else {
@@ -1479,6 +1476,14 @@ async fn engine_process_env(
   }
   add_moonbit_path_for_native_engine(env, config, runtime_dir)
   env
+}
+
+///|
+fn engine_process_args(config : RunConfig) -> Array[String] {
+  // Desktop engines always run in durable-session mode. Passing the identity
+  // explicitly keeps it out of the ambient environment inherited by tools.
+  // Attach the value so a leading `-` remains part of the session id.
+  ["serve", "--session=\{config.session}", "--dir", ".", "--approval", "ask"]
 }
 
 ///|
@@ -1535,7 +1540,7 @@ async fn[G] start_serve_engine(
   // a controller with a person behind it from a script reading its stdout.
   // Saying so here is what makes the escalation argument exist for this
   // session's model at all.
-  let args = ["serve", "--dir", ".", "--approval", "ask"]
+  let args = engine_process_args(config)
   let graceful_cancel = @process.graceful_cancel(timeout=1000)
   @xlog.debug() <?
     {
@@ -2746,9 +2751,14 @@ async test "native engine env has one authoritative bundled moon path" {
     session_root: None,
   }
   let env = engine_process_env(config, Some(runtime))
-  assert_eq(env["OPENSEEK_SESSION"], "s-env")
   assert_eq(env["OPENSEEK_THINKING"], "high")
   assert_true(env.get("OPENSEEK_SESSION_ROOT") is None)
+  @debug.assert_eq(engine_process_args(config), [
+    "serve", "--session=s-env", "--dir", ".", "--approval", "ask",
+  ])
+  @debug.assert_eq(engine_process_args({ ..config, session: "--resume" }), [
+    "serve", "--session=--resume", "--dir", ".", "--approval", "ask",
+  ])
   let moon_bin = moon_home.join("bin").to_string()
   let expected_path = if ambient_path is Some(path) && !path.is_empty() {
     "\{moon_bin}\{@env.path_sep}\{path}"

@@ -812,20 +812,26 @@ fn has_finished_run(events : Array[EngineEvent], run_id : String) -> Bool {
 /// follower a real record to tail, so a fixture exercises both halves the way
 /// a live engine does.
 ///
-/// The child reads its own store location and identity from the environment
-/// the host gave it, so this needs no paths baked in. The next sequence is
-/// the record's line count: the header occupies line one, so the first turn
-/// commits sequence 1 and each later one advances.
+/// The child reads its store location from the environment and its identity
+/// from the explicit `--session` argument, so this needs no paths baked in. The
+/// next sequence is the record's line count: the header occupies line one, so
+/// the first turn commits sequence 1 and each later one advances.
 #cfg(not(platform="windows"))
 fn commit_terminal_sh() -> String {
   // `\{newline}` is the two characters a shell `printf` format needs, not an
   // actual line break.
   let newline = "\\n"
   let script =
-    $|record="$OPENSEEK_SESSION_ROOT/sessions/$OPENSEEK_SESSION/openseek_session-$OPENSEEK_SESSION.jsonl"
-    $|mkdir -p "$OPENSEEK_SESSION_ROOT/sessions/$OPENSEEK_SESSION"
+    $|session=""
+    $|for argument in "$@"; do
+    $|  case "$argument" in
+    $|    --session=*) session="${argument#--session=}"; break ;;
+    $|  esac
+    $|done
+    $|record="$OPENSEEK_SESSION_ROOT/sessions/$session/openseek_session-$session.jsonl"
+    $|mkdir -p "$OPENSEEK_SESSION_ROOT/sessions/$session"
     $|if [ ! -f "$record" ]; then
-    $|  printf '{"version":1,"id":"%s","system_prompt":""}\{newline}' "$OPENSEEK_SESSION" > "$record"
+    $|  printf '{"version":1,"id":"%s","system_prompt":""}\{newline}' "$session" > "$record"
     $|fi
     $|printf '{"sequence":%s,"item":{"kind":"terminal","payload":{"kind":"finished","message":"ok"}}}\{newline}' "$(grep -c '' "$record")" >> "$record"
     $|
