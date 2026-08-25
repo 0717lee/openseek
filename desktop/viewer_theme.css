@@ -218,7 +218,6 @@
   --vscode-widget-shadow: rgb(0 0 0 / 36%);
   --vscode-shadow-hover: rgb(0 0 0 / 36%);
   --vscode-shadow-lg: var(--shadow-overlay);
-  --vscode-scrollbar-shadow: rgb(0 0 0 / 50%);
   --vscode-editorUnnecessaryCode-opacity: 0.67;
 
   --vscode-token-keyword: #569cd6;
@@ -262,7 +261,6 @@
   --vscode-peekViewEditor-matchHighlightBackground: #f5d802de;
   --vscode-widget-shadow: rgb(0 0 0 / 16%);
   --vscode-shadow-hover: rgb(0 0 0 / 16%);
-  --vscode-scrollbar-shadow: rgb(0 0 0 / 20%);
   --vscode-editorUnnecessaryCode-opacity: 0.47;
 
   --vscode-token-keyword: #0000ff;

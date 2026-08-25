@@ -10,9 +10,6 @@ struct ScrollableElementDom {
   vertical_slider : @rdom.Element
   horizontal_bar : @rdom.Element
   horizontal_slider : @rdom.Element
-  left_shadow : @rdom.Element
-  top_shadow : @rdom.Element
-  top_left_shadow : @rdom.Element
   vertical_size : Double
   horizontal_size : Double
   vertical_state : @view_layout.ScrollbarState
@@ -97,18 +94,9 @@ pub fn ScrollableElementDom::ScrollableElementDom(
   let vertical_slider = document.create_element("div")
   vertical_slider.set_attribute("class", "slider")
   vertical_bar.append_child(vertical_slider.as_node())
-  let left_shadow = document.create_element("div")
-  left_shadow.set_attribute("class", "shadow")
-  let top_shadow = document.create_element("div")
-  top_shadow.set_attribute("class", "shadow")
-  let top_left_shadow = document.create_element("div")
-  top_left_shadow.set_attribute("class", "shadow")
   wrapper.append_child(content.as_node())
   wrapper.append_child(horizontal_bar.as_node())
   wrapper.append_child(vertical_bar.as_node())
-  wrapper.append_child(left_shadow.as_node())
-  wrapper.append_child(top_shadow.as_node())
-  wrapper.append_child(top_left_shadow.as_node())
   {
     wrapper,
     content,
@@ -116,9 +104,6 @@ pub fn ScrollableElementDom::ScrollableElementDom(
     vertical_slider,
     horizontal_bar,
     horizontal_slider,
-    left_shadow,
-    top_shadow,
-    top_left_shadow,
     vertical_size,
     horizontal_size,
     vertical_state: ScrollbarState(scrollbar_size=vertical_size),
@@ -187,7 +172,6 @@ pub fn ScrollableElementDom::update_from_model(
   self.horizontal_state.set_scroll_size(dimensions.scroll_width) |> ignore
   self.horizontal_state.set_scroll_position(position.scroll_left) |> ignore
   self.write_horizontal_bar(horizontal_left?)
-  self.write_shadows(position)
 }
 
 ///|
@@ -447,42 +431,6 @@ pub fn ScrollableElementDom::drag_ended(self : ScrollableElementDom) -> Unit {
   }
   self.is_dragging = false
   self.hide_scrollbars_if_idle()
-}
-
-///|
-fn ScrollableElementDom::write_shadows(
-  self : ScrollableElementDom,
-  position : @view_layout.ScrollPosition,
-) -> Unit {
-  let top = position.scroll_top > 0.0
-  let left = position.scroll_left > 0.0
-  self.top_shadow.set_attribute(
-    "class",
-    if top {
-      "shadow top"
-    } else {
-      "shadow"
-    },
-  )
-  self.left_shadow.set_attribute(
-    "class",
-    if left {
-      "shadow left"
-    } else {
-      "shadow"
-    },
-  )
-  let mut top_left = "shadow"
-  if top || left {
-    top_left = "\{top_left} top-left-corner"
-  }
-  if top {
-    top_left = "\{top_left} top"
-  }
-  if left {
-    top_left = "\{top_left} left"
-  }
-  self.top_left_shadow.set_attribute("class", top_left)
 }
 
 ///|
