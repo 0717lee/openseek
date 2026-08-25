@@ -842,15 +842,17 @@ fn commit_terminal_sh() -> String {
 
 ///|
 /// A workspace fixture for the run tests: `<root>/ws` attached as the only
-/// registered workspace, with the registry itself under `<root>/global`.
+/// registered workspace, with the registry under the test's disposable HOME.
 /// Every run belongs to a workspace now, so a test that starts one registers
 /// a real directory rather than relying on the removed scratch fallback.
 /// Returns the path to send as the start payload's workspace hint.
 async fn attach_run_workspace(root : @pathx.Path) -> String {
   let workspace = root.join("ws")
   @fsx.ensure_dir(workspace)
-  let global = root.join("global")
-  @fsx.ensure_dir(global)
+  guard @workspaces.global_store_root() is Some(global) else {
+    fail("expected a global store under HOME")
+  }
+  @fsx.ensure_dir(global.to_path())
   @fs.write_file(
     global.join("workspaces.json").to_string(),
     ({ "workspaces": [workspace.to_string()] } : Json).stringify(),
@@ -871,9 +873,6 @@ async test "start echoes the client submission id in Started" {
   let previous_home = @sys.get_env_var("HOME")
   @sys.set_env_var("HOME", root.join("home").to_string())
   defer restore_home_env(previous_home)
-  let previous_session_root = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
-  defer restore_session_root_env(previous_session_root)
   let workspace = attach_run_workspace(root)
   let engine = root.join("bin/engine.sh")
   let seed = root.join("bin/toolchains/moonbit/macos-arm64")
@@ -950,9 +949,6 @@ async test "a goal is delivered only once its command is on the wire" {
   let previous_home = @sys.get_env_var("HOME")
   @sys.set_env_var("HOME", root.join("home").to_string())
   defer restore_home_env(previous_home)
-  let previous_session_root = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
-  defer restore_session_root_env(previous_session_root)
   let workspace = attach_run_workspace(root)
   let engine = root.join("bin/engine.sh")
   let seed = root.join("bin/toolchains/moonbit/macos-arm64")
@@ -1078,9 +1074,6 @@ async test "setup failure retires the writer before an immediate next start" {
   let previous_home = @sys.get_env_var("HOME")
   @sys.set_env_var("HOME", root.join("home").to_string())
   defer restore_home_env(previous_home)
-  let previous_session_root = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
-  defer restore_session_root_env(previous_session_root)
   let workspace = attach_run_workspace(root)
   let engine = root.join("bin/engine.sh")
   let seed = root.join("bin/toolchains/moonbit/macos-arm64")
@@ -1193,9 +1186,6 @@ async test "a prompt bigger than the pipe still settles exactly once" {
   let previous_home = @sys.get_env_var("HOME")
   @sys.set_env_var("HOME", root.join("home").to_string())
   defer restore_home_env(previous_home)
-  let previous_session_root = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
-  defer restore_session_root_env(previous_session_root)
   let workspace = attach_run_workspace(root)
   let engine = root.join("bin/engine.sh")
   let seed = root.join("bin/toolchains/moonbit/macos-arm64")
@@ -1289,9 +1279,6 @@ async test "named session retries after its first prompt creates no record" {
   let engine = root.join("bin/engine.sh")
   let seed = root.join("bin/toolchains/moonbit/macos-arm64")
   let runtime = root.join("runtime")
-  let previous_session_root = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
-  defer restore_session_root_env(previous_session_root)
   let workspace = attach_run_workspace(root)
   // The conversation's record lives in its workspace's in-project store.
   let store = root.join("ws/.openseek")
@@ -1409,10 +1396,10 @@ async test "named session retries after its first prompt creates no record" {
 async test "session load preserves a future item without hiding known events" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  let previous = @sys.get_env_var("HOME")
   let dir = @fs.tmpdir(prefix="openseek-load-future-item-")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", dir + "/global")
-  defer restore_session_root_env(previous)
+  @sys.set_env_var("HOME", dir + "/global")
+  defer restore_home_env(previous)
   // A hint-less load resolves the store from where the record actually
   // lives, so the record goes in an attached workspace's own store.
   ignore(attach_run_workspace(Path(dir)))
@@ -1445,10 +1432,10 @@ async test "session load preserves a future item without hiding known events" {
 async test "archived session load reads without restoring the record" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  let previous = @sys.get_env_var("HOME")
   let dir = @fs.tmpdir(prefix="openseek-load-archived-")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", dir + "/global")
-  defer restore_session_root_env(previous)
+  @sys.set_env_var("HOME", dir + "/global")
+  defer restore_home_env(previous)
   // A hint-less load resolves the store from where the record actually
   // lives, so the record goes in an attached workspace's own store.
   ignore(attach_run_workspace(Path(dir)))
@@ -1482,12 +1469,12 @@ async test "archived session load reads without restoring the record" {
 async test "load rejects a detached workspace hint instead of probing global" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  let previous = @sys.get_env_var("HOME")
   let dir = @fs.tmpdir(prefix="openseek-load-detached-")
   let marker = dir + "/engine-ran"
   let engine = dir + "/engine.sh"
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", dir)
-  defer restore_session_root_env(previous)
+  @sys.set_env_var("HOME", dir)
+  defer restore_home_env(previous)
   @fsx.ensure_dir(Path(dir + "/sessions/s-detached"))
   @fs.write_file(
     engine,
@@ -1519,7 +1506,7 @@ async test "load rejects a detached workspace hint instead of probing global" {
 async test "workspace detach refuses a running conversation without hiding it" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  let previous = @sys.get_env_var("HOME")
   // The registry canonicalizes workspace paths, so build the fixture from
   // the tmpdir's physical spelling (`/tmp` is a symlink on macOS).
   let root : @pathx.Path = Path(
@@ -1529,8 +1516,8 @@ async test "workspace detach refuses a running conversation without hiding it" {
   let workspace = root.join("workspace")
   let engine = root.join("bin/engine.sh")
   let runtime = root.join("runtime")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", global_store.to_string())
-  defer restore_session_root_env(previous)
+  @sys.set_env_var("HOME", global_store.to_string())
+  defer restore_home_env(previous)
   @fsx.ensure_dir(workspace)
   prepare_fake_moonbit_seed(
     root.join("bin/toolchains/moonbit/macos-arm64"),
@@ -1604,7 +1591,7 @@ async test "workspace detach refuses a running conversation without hiding it" {
 async test "workspace detach drains an idle writer and its follower first" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  let previous = @sys.get_env_var("HOME")
   // The registry canonicalizes workspace paths, so build the fixture from
   // the tmpdir's physical spelling (`/tmp` is a symlink on macOS).
   let root : @pathx.Path = Path(
@@ -1615,8 +1602,8 @@ async test "workspace detach drains an idle writer and its follower first" {
   let engine = root.join("bin/engine.sh")
   let runtime = root.join("runtime")
   let exited = root.join("writer-exited")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", global_store.to_string())
-  defer restore_session_root_env(previous)
+  @sys.set_env_var("HOME", global_store.to_string())
+  defer restore_home_env(previous)
   @fsx.ensure_dir(workspace)
   prepare_fake_moonbit_seed(
     root.join("bin/toolchains/moonbit/macos-arm64"),

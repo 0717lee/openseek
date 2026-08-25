@@ -1049,15 +1049,15 @@ async test "abrupt EOF leaves a failed drain for a later caller to retry" {
 async test "workspace detach drains an orphaned pending follower before commit" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  let previous = @sys.get_env_var("HOME")
   let dir = @fs.tmpdir(prefix="openseek-detach-orphan-follower-")
   let global_root : @pathx.Absolute = @pathx.Path(dir + "/global").resolve()
   let workspace : @pathx.Absolute = @pathx.Path(dir + "/workspace").resolve()
   let root = @workspaces.store_root(workspace)
   let engine_path = dir + "/engine.sh"
   let session = "s-detach-orphan"
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", global_root.to_string())
-  defer restore_session_root_env(previous)
+  @sys.set_env_var("HOME", global_root.to_string())
+  defer restore_home_env(previous)
   @fsx.ensure_dir(workspace.to_path())
   ignore(attach_workspace(workspace.to_string(), fn(_) { () }))
   write_session_record(root, session, [])

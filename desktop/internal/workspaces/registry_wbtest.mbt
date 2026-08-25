@@ -1,7 +1,6 @@
-// Tests for the registry's one-time setup. They redirect both HOME (which
-// decides where the default workspace lands) and OPENSEEK_SESSION_ROOT (which
-// decides where the registry file lands), so they take one lock between them
-// rather than racing each other's environment.
+// Tests for the registry's one-time setup. They redirect HOME, which decides
+// both where the default workspace and the registry file land, so they take
+// one lock rather than racing each other's environment.
 
 ///|
 #cfg(not(platform="windows"))
@@ -28,10 +27,7 @@ async test "the default workspace is attached once and never re-attached" {
   let dir = @fs.tmpdir(prefix="openseek-default-workspace-")
   let root : @pathx.Path = Path(dir)
   let previous_home = @sys.get_env_var("HOME")
-  let previous_session_root = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
   @sys.set_env_var("HOME", root.join("home").to_string())
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
-  defer restore_env("OPENSEEK_SESSION_ROOT", previous_session_root)
   defer restore_env("HOME", previous_home)
   // A fresh install: no registry at all. Setup creates the directory and
   // attaches it, so the first client already has somewhere to work.
@@ -66,12 +62,9 @@ async test "a registry without the marker still receives the default workspace" 
   let dir = @fs.tmpdir(prefix="openseek-legacy-registry-")
   let root : @pathx.Path = Path(dir)
   let previous_home = @sys.get_env_var("HOME")
-  let previous_session_root = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
   @sys.set_env_var("HOME", root.join("home").to_string())
-  let global_root = root.join("global")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", global_root.to_string())
-  defer restore_env("OPENSEEK_SESSION_ROOT", previous_session_root)
   defer restore_env("HOME", previous_home)
+  let global_root = root.join("home/.openseek")
   let existing = root.join("project")
   @fsx.ensure_dir(existing)
   @fsx.ensure_dir(global_root)

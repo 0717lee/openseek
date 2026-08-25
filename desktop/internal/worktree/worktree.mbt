@@ -1169,7 +1169,7 @@ pub async fn remove(
 
 // Tests. The lifecycle tests exercise the real git binary (like the CLI's
 // subtask lifecycle tests); the environment-dependent ones serialize on
-// `worktree_env_test_lock` because they redirect OPENSEEK_SESSION_ROOT.
+// `worktree_env_test_lock` because they redirect HOME.
 
 ///|
 /// A fixture root in the tmpdir's physical spelling. The workspace registry
@@ -1181,18 +1181,18 @@ async fn worktree_test_root(prefix : String) -> @pathx.Absolute {
 }
 
 ///|
-/// Tests that redirect OPENSEEK_SESSION_ROOT share the process environment,
+/// Tests that redirect HOME share the process environment,
 /// so they run one at a time.
 #cfg(not(platform="windows"))
 let worktree_env_test_lock : @async.Mutex = Mutex()
 
 ///|
 #cfg(not(platform="windows"))
-fn restore_session_root_env(previous : String?) -> Unit {
+fn restore_home_env(previous : String?) -> Unit {
   if previous is Some(value) {
-    @sys.set_env_var("OPENSEEK_SESSION_ROOT", value)
+    @sys.set_env_var("HOME", value)
   } else {
-    @sys.unset_env_var("OPENSEEK_SESSION_ROOT")
+    @sys.unset_env_var("HOME")
   }
 }
 
@@ -1337,10 +1337,10 @@ async fn prepare_git_repo(dir : @pathx.Absolute) -> Unit {
 async test "attach refuses a linked worktree, keeps main and non-git attachable" {
   worktree_env_test_lock.acquire()
   defer worktree_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  let previous = @sys.get_env_var("HOME")
   let root = worktree_test_root("openseek-worktree-attach-")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
-  defer restore_session_root_env(previous)
+  @sys.set_env_var("HOME", root.join("global").to_string())
+  defer restore_home_env(previous)
   let repo = root.join("repo")
   prepare_git_repo(repo)
   ignore(
@@ -1373,10 +1373,10 @@ async test "attach refuses a linked worktree, keeps main and non-git attachable"
 async test "worktree create provisions checkout, branch, registry, exclusion" {
   worktree_env_test_lock.acquire()
   defer worktree_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  let previous = @sys.get_env_var("HOME")
   let root = worktree_test_root("openseek-worktree-create-")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
-  defer restore_session_root_env(previous)
+  @sys.set_env_var("HOME", root.join("global").to_string())
+  defer restore_home_env(previous)
   let repo = root.join("repo")
   prepare_git_repo(repo)
   ignore(@workspaces.add(repo.to_string(), fn(_) {  }))
@@ -1431,10 +1431,10 @@ async test "worktree create provisions checkout, branch, registry, exclusion" {
 async test "explicit registry removal can prune a vanished worktree" {
   worktree_env_test_lock.acquire()
   defer worktree_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  let previous = @sys.get_env_var("HOME")
   let root = worktree_test_root("openseek-worktree-release-")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
-  defer restore_session_root_env(previous)
+  @sys.set_env_var("HOME", root.join("global").to_string())
+  defer restore_home_env(previous)
   let repo = root.join("repo")
   prepare_git_repo(repo)
   ignore(@workspaces.add(repo.to_string(), fn(_) {  }))
@@ -1464,10 +1464,10 @@ async test "explicit registry removal can prune a vanished worktree" {
 async test "worktree names are host-generated and skip surviving branches" {
   worktree_env_test_lock.acquire()
   defer worktree_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  let previous = @sys.get_env_var("HOME")
   let root = worktree_test_root("openseek-worktree-autoname-")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
-  defer restore_session_root_env(previous)
+  @sys.set_env_var("HOME", root.join("global").to_string())
+  defer restore_home_env(previous)
   let repo = root.join("repo")
   prepare_git_repo(repo)
   ignore(@workspaces.add(repo.to_string(), fn(_) {  }))
@@ -1562,10 +1562,10 @@ async fn create_refusal(
 async test "worktree create names the holder in every refusal" {
   worktree_env_test_lock.acquire()
   defer worktree_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  let previous = @sys.get_env_var("HOME")
   let root = worktree_test_root("openseek-worktree-refuse-")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
-  defer restore_session_root_env(previous)
+  @sys.set_env_var("HOME", root.join("global").to_string())
+  defer restore_home_env(previous)
   let repo = root.join("repo")
   prepare_git_repo(repo)
   ignore(@workspaces.add(repo.to_string(), fn(_) {  }))
@@ -1596,7 +1596,10 @@ async test "worktree create names the holder in every refusal" {
   // The session must be new EVERYWHERE: history in the global store, a
   // binding in another workspace's registry, and an in-flight first turn
   // all refuse — any of them would fork the conversation's routing.
-  @fsx.ensure_dir(root.join("global/sessions/s-global").to_path())
+  guard @workspaces.global_store_root() is Some(global) else {
+    fail("expected a global store under HOME")
+  }
+  @fsx.ensure_dir(global.join("sessions/s-global").to_path())
   assert_true(
     create_refusal(host, repo.to_string(), "s-global", "x").contains(
       "already has history",
@@ -1698,10 +1701,10 @@ async fn remove_refusal(
 async test "worktree remove enforces the dirty check and keeps the branch" {
   worktree_env_test_lock.acquire()
   defer worktree_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  let previous = @sys.get_env_var("HOME")
   let root = worktree_test_root("openseek-worktree-remove-")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
-  defer restore_session_root_env(previous)
+  @sys.set_env_var("HOME", root.join("global").to_string())
+  defer restore_home_env(previous)
   let repo = root.join("repo")
   prepare_git_repo(repo)
   ignore(@workspaces.add(repo.to_string(), fn(_) {  }))
@@ -1770,10 +1773,10 @@ async test "worktree remove enforces the dirty check and keeps the branch" {
 async test "worktree remove prunes an externally deleted checkout" {
   worktree_env_test_lock.acquire()
   defer worktree_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
+  let previous = @sys.get_env_var("HOME")
   let root = worktree_test_root("openseek-worktree-prune-")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
-  defer restore_session_root_env(previous)
+  @sys.set_env_var("HOME", root.join("global").to_string())
+  defer restore_home_env(previous)
   let repo = root.join("repo")
   prepare_git_repo(repo)
   ignore(@workspaces.add(repo.to_string(), fn(_) {  }))

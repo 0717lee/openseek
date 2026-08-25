@@ -720,12 +720,12 @@ async test "run config resolves the endpoint from the stored provider" {
   with_settings_dir(async fn(dir, manager) {
     // A run needs a workspace before it can resolve anything else. This test
     // is about the endpoint the stored provider yields, so any attached
-    // directory serves; the env root only locates the registry. Save and
-    // restore inside the body: the fixture holds the ambient-environment
-    // lock, so this is the only scope where the variable is ours.
-    let previous_session_root = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-    defer restore_session_root_env(previous_session_root)
-    @sys.set_env_var("OPENSEEK_SESSION_ROOT", dir.join("global").to_string())
+    // directory serves; HOME locates the registry. Save and restore inside
+    // the body: the fixture holds the ambient-environment lock, so this is the
+    // only scope where the variable is ours.
+    let previous_home = @sys.get_env_var(test_home_env_name())
+    defer restore_home_env(previous_home)
+    set_test_home(dir.join("global").to_string())
     let workspace = attach_run_workspace(dir)
     let _ = update_settings(manager, {
       provider: Some("deepseek"),

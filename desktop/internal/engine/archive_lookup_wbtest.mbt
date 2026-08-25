@@ -9,12 +9,13 @@
 async test "archive names the missing store after a workspace detach" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  defer restore_session_root_env(previous)
+  let previous = @sys.get_env_var("HOME")
+  defer restore_home_env(previous)
   let dir = @fs.tmpdir(prefix="openseek-archive-detach-")
   let workspace = dir + "/ws"
-  let global_root = dir + "/global"
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", global_root)
+  let home = dir + "/home"
+  let global_root = home + "/.openseek"
+  @sys.set_env_var("HOME", home)
   @fsx.ensure_dir(Path(global_root))
   @fsx.ensure_dir(Path(workspace + "/.openseek/sessions/s-ws"))
   @fs.write_file(
@@ -74,12 +75,13 @@ async test "archive names the missing store after a workspace detach" {
 async test "archive reports a workspace record whose directory vanished" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  defer restore_session_root_env(previous)
+  let previous = @sys.get_env_var("HOME")
+  defer restore_home_env(previous)
   let dir = @fs.tmpdir(prefix="openseek-archive-gone-")
   let workspace = dir + "/ws"
-  let global_root = dir + "/global"
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", global_root)
+  let home = dir + "/home"
+  let global_root = home + "/.openseek"
+  @sys.set_env_var("HOME", home)
   @fsx.ensure_dir(Path(global_root))
   @fsx.ensure_dir(Path(workspace + "/.openseek/sessions/s-ws"))
   @fs.write_file(
@@ -114,12 +116,13 @@ async test "archive reports a workspace record whose directory vanished" {
 async test "loading a conversation from a detached workspace names that state" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  defer restore_session_root_env(previous)
+  let previous = @sys.get_env_var("HOME")
+  defer restore_home_env(previous)
   let dir = @fs.tmpdir(prefix="openseek-load-detached-")
   let workspace = dir + "/ws"
-  let global_root = dir + "/global"
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", global_root)
+  let home = dir + "/home"
+  let global_root = home + "/.openseek"
+  @sys.set_env_var("HOME", home)
   @fsx.ensure_dir(Path(global_root))
   @fsx.ensure_dir(Path(workspace + "/.openseek/sessions/s-ws"))
   @fs.write_file(
@@ -156,10 +159,10 @@ async test "loading a conversation from a detached workspace names that state" {
 async test "archiving an already-archived conversation names that state" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  defer restore_session_root_env(previous)
+  let previous = @sys.get_env_var("HOME")
+  defer restore_home_env(previous)
   let dir = @fs.tmpdir(prefix="openseek-archive-again-")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", dir + "/global")
+  @sys.set_env_var("HOME", dir + "/global")
   ignore(attach_run_workspace(Path(dir)))
   let store = dir + "/ws/.openseek"
   @fsx.ensure_dir(Path(store + "/archived/sessions/s-done"))

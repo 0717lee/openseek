@@ -168,9 +168,7 @@ async fn EngineManager::claim_session_family_move(
       raise EngineError("this conversation is already archived")
     }
     guard @workspaces.global_store_root() is Some(_) else {
-      raise EngineError(
-        "cannot determine a session root; set OPENSEEK_SESSION_ROOT",
-      )
+      raise EngineError("cannot determine a session root: HOME is unavailable")
     }
     raise EngineError(
       "no durable record for this conversation in the global store or any attached workspace",
@@ -619,13 +617,10 @@ async fn move_session_record(
 }
 
 ///|
-/// Serializes every test that reads or writes the two process-global
-/// variables deciding where a conversation lives: `OPENSEEK_SESSION_ROOT`
-/// (the registry, and the global store records migrate out of) and `HOME`
-/// (where the default workspace lands, and so where a run works). Both are
-/// process-wide, so a test that moves either is not isolated from a test that
-/// merely reads it — and a test that starts a run reads `HOME`, whether or not
-/// it mentions it.
+/// Serializes every test that reads or writes `HOME`, which decides where the
+/// registry, the legacy global store, the default workspace, and global skills
+/// live. It is process-wide, so a test that moves it is not isolated from a
+/// test that merely reads it.
 ///
 /// Holding this lock is also how a test gets a disposable `HOME`, so the
 /// default workspace it attaches lands in its own temporary tree instead of
@@ -638,21 +633,28 @@ async fn move_session_record(
 let ambient_env_test_lock : @async.Mutex = Mutex()
 
 ///|
-fn restore_session_root_env(previous : String?) -> Unit {
-  if previous is Some(value) {
-    @sys.set_env_var("OPENSEEK_SESSION_ROOT", value)
-  } else {
-    @sys.unset_env_var("OPENSEEK_SESSION_ROOT")
-  }
+#cfg(platform="windows")
+fn test_home_env_name() -> String {
+  "USERPROFILE"
 }
 
 ///|
 #cfg(not(platform="windows"))
+fn test_home_env_name() -> String {
+  "HOME"
+}
+
+///|
+fn set_test_home(value : String) -> Unit {
+  @sys.set_env_var(test_home_env_name(), value)
+}
+
+///|
 fn restore_home_env(previous : String?) -> Unit {
   if previous is Some(value) {
-    @sys.set_env_var("HOME", value)
+    @sys.set_env_var(test_home_env_name(), value)
   } else {
-    @sys.unset_env_var("HOME")
+    @sys.unset_env_var(test_home_env_name())
   }
 }
 
@@ -661,10 +663,10 @@ fn restore_home_env(previous : String?) -> Unit {
 async test "archive refuses a durable record while the pump is stopped" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  defer restore_session_root_env(previous)
+  let previous = @sys.get_env_var("HOME")
+  defer restore_home_env(previous)
   let dir = @fs.tmpdir(prefix="openseek-archive-stopped-")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", dir + "/global")
+  @sys.set_env_var("HOME", dir + "/global")
   ignore(attach_run_workspace(Path(dir)))
   let store = dir + "/ws/.openseek"
   @fsx.ensure_dir(Path(store + "/sessions/s-stopped"))
@@ -694,8 +696,8 @@ async test "archive refuses a durable record while the pump is stopped" {
 async test "archive publishes its move before a cancelled listing reply" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  defer restore_session_root_env(previous)
+  let previous = @sys.get_env_var("HOME")
+  defer restore_home_env(previous)
   let dir = @fs.tmpdir(prefix="openseek-archive-commit-")
   let root : @pathx.Path = Path(dir)
   let marker = dir + "/listing-started"
@@ -703,7 +705,7 @@ async test "archive publishes its move before a cancelled listing reply" {
   // The listing this test cancels is per registered workspace, so the
   // conversation needs a real attached one; the env root now only locates the
   // registry that `attach_run_workspace` writes.
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
+  @sys.set_env_var("HOME", root.join("global").to_string())
   ignore(attach_run_workspace(root))
   let store = root.join("ws/.openseek")
   @fsx.ensure_dir(store.join("sessions/s-commit"))
@@ -747,10 +749,10 @@ async test "archive publishes its move before a cancelled listing reply" {
 async test "archive and restore move a subagent session family together" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  defer restore_session_root_env(previous)
+  let previous = @sys.get_env_var("HOME")
+  defer restore_home_env(previous)
   let dir = @fs.tmpdir(prefix="openseek-archive-family-")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", dir + "/global")
+  @sys.set_env_var("HOME", dir + "/global")
   ignore(attach_run_workspace(Path(dir)))
   let store = dir + "/ws/.openseek"
   let live = store + "/sessions/"
@@ -801,14 +803,16 @@ async test "archive and restore move a subagent session family together" {
 async test "permanent deletion removes one archived session family only" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  defer restore_session_root_env(previous)
+  let previous = @sys.get_env_var("HOME")
+  defer restore_home_env(previous)
   let dir = @fs.tmpdir(prefix="openseek-archive-delete-family-")
+  let home = dir + "/home"
+  let global_root = home + "/.openseek"
   let workspace = dir + "/workspace"
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", dir + "/global")
-  @fsx.ensure_dir(Path(dir + "/global"))
+  @sys.set_env_var("HOME", home)
+  @fsx.ensure_dir(Path(global_root))
   @fs.write_file(
-    dir + "/global/workspaces.json",
+    global_root + "/workspaces.json",
     ({ "workspaces": [workspace] } : Json).stringify(),
     create_mode=CreateOrTruncate,
   )
@@ -849,12 +853,13 @@ async test "permanent deletion removes one archived session family only" {
 async test "permanent deletion uses the selected archived store" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  defer restore_session_root_env(previous)
+  let previous = @sys.get_env_var("HOME")
+  defer restore_home_env(previous)
   let dir = @fs.tmpdir(prefix="openseek-archive-delete-selected-store-")
-  let global_root = dir + "/global"
+  let home = dir + "/home"
+  let global_root = home + "/.openseek"
   let workspace = dir + "/workspace"
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", global_root)
+  @sys.set_env_var("HOME", home)
   @fsx.ensure_dir(Path(global_root + "/sessions/chat"))
   @fsx.ensure_dir(Path(global_root + "/archived/sessions/chat"))
   @fsx.ensure_dir(Path(workspace + "/.openseek/archived/sessions/chat"))
@@ -886,12 +891,13 @@ async test "permanent deletion uses the selected archived store" {
 async test "permanent deletion refuses a live twin in the selected store" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  defer restore_session_root_env(previous)
+  let previous = @sys.get_env_var("HOME")
+  defer restore_home_env(previous)
   let dir = @fs.tmpdir(prefix="openseek-archive-delete-live-twin-")
-  let global_root = dir + "/global"
+  let home = dir + "/home"
+  let global_root = home + "/.openseek"
   let workspace = dir + "/workspace"
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", global_root)
+  @sys.set_env_var("HOME", home)
   @fsx.ensure_dir(Path(global_root))
   @fsx.ensure_dir(Path(workspace + "/.openseek/sessions/chat"))
   @fsx.ensure_dir(Path(workspace + "/.openseek/archived/sessions/chat"))
@@ -928,10 +934,10 @@ async test "permanent deletion refuses a live twin in the selected store" {
 async test "startup sweep erases condemned records" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  defer restore_session_root_env(previous)
+  let previous = @sys.get_env_var("HOME")
+  defer restore_home_env(previous)
   let dir = @fs.tmpdir(prefix="openseek-archive-delete-sweep-")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", dir + "/global")
+  @sys.set_env_var("HOME", dir + "/global")
   ignore(attach_run_workspace(Path(dir)))
   let store = dir + "/ws/.openseek"
   // A leading dot is a valid session id; the sweep must include hidden
@@ -952,12 +958,13 @@ async test "startup sweep erases condemned records" {
 async test "selected archived store is revalidated after detachment" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  defer restore_session_root_env(previous)
+  let previous = @sys.get_env_var("HOME")
+  defer restore_home_env(previous)
   let dir = @fs.tmpdir(prefix="openseek-archive-delete-detached-selection-")
-  let global_root = dir + "/global"
+  let home = dir + "/home"
+  let global_root = home + "/.openseek"
   let workspace = @pathx.Path(dir + "/workspace").resolve()
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", global_root)
+  @sys.set_env_var("HOME", home)
   @fsx.ensure_dir(Path(global_root))
   @fsx.ensure_dir(workspace.join(".openseek/archived/sessions/chat").to_path())
   @fs.write_file(
@@ -995,10 +1002,10 @@ async test "selected archived store is revalidated after detachment" {
 async test "a claimed child prevents a partial family archive" {
   ambient_env_test_lock.acquire()
   defer ambient_env_test_lock.release()
-  let previous = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
-  defer restore_session_root_env(previous)
+  let previous = @sys.get_env_var("HOME")
+  defer restore_home_env(previous)
   let dir = @fs.tmpdir(prefix="openseek-archive-family-busy-")
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", dir + "/global")
+  @sys.set_env_var("HOME", dir + "/global")
   ignore(attach_run_workspace(Path(dir)))
   let store = dir + "/ws/.openseek"
   @fsx.ensure_dir(Path(store + "/sessions/chat"))

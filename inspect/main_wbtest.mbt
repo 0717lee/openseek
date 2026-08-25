@@ -161,11 +161,6 @@ test "explicit --session-root drops the default cwd scan" {
     env=Map([]),
   )
   @debug.debug_inspect(effective_search_dirs(flag_root), content="[]")
-  // The env var counts as explicit too.
-  let env_root = cli_command().parse(argv=[], env={
-    "OPENSEEK_SESSION_ROOT": "/srv/app/.openseek",
-  })
-  @debug.debug_inspect(effective_search_dirs(env_root), content="[]")
   // An explicit --search-dir always wins: both flags means root plus scans.
   let both = cli_command().parse(
     argv=["--session-root", "/srv/app/.openseek", "--search-dir", "/srv/lib"],

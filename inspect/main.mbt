@@ -66,7 +66,7 @@ fn viz_config_from_matches(matches : @argparse.Matches) -> VizConfig raise {
   }
   let session_root = session_root.trim()
   guard !session_root.is_empty() else {
-    fail("--session-root or OPENSEEK_SESSION_ROOT must not be empty")
+    fail("--session-root must not be empty")
   }
   let session_root_name = session_root_name.trim()
   guard !session_root_name.is_empty() else {
@@ -1225,7 +1225,6 @@ fn cli_command() -> @argparse.Command {
       OptionArg(
         "session-root",
         long="session-root",
-        env="OPENSEEK_SESSION_ROOT",
         default_values=[".openseek"],
         about="Compatibility session root to serve in addition to discovered roots.",
       ),
@@ -1305,7 +1304,7 @@ test "in_export_scope keeps the parent and exactly its own children" {
 
 ///|
 /// The directories to scan recursively for session roots. An explicit
-/// `--session-root` (flag or env) narrows serving to that root, so the
+/// `--session-root` narrows serving to that root, so the
 /// default `.` scan is dropped — pointing the server at another project's
 /// sessions must not also pull in whatever tree it was started from. An
 /// explicit `--search-dir` always wins: giving both flags means "that root,
@@ -1314,7 +1313,7 @@ fn effective_search_dirs(matches : @argparse.Matches) -> Array[String] {
   match matches {
     {
       values: { "search-dir": _, .. },
-      sources: { "session-root": Argv | Env, "search-dir": Default, .. },
+      sources: { "session-root": Argv, "search-dir": Default, .. },
       ..,
     } => []
     { values: { "search-dir": values, .. }, .. } =>

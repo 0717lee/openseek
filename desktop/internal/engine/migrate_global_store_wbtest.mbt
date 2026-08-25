@@ -1,8 +1,7 @@
-// Tests for the one-time relocation out of the global store. They redirect
-// HOME (which decides where the default workspace lands) and
-// OPENSEEK_SESSION_ROOT (which decides where the global store lands), so they
-// take `ambient_env_test_lock` alongside every other environment-mutating
-// test in this package.
+// Tests for the one-time relocation out of the global store. HOME decides
+// where both the default workspace and the global store land, so they take
+// `ambient_env_test_lock` alongside every other environment-mutating test in
+// this package.
 
 ///|
 #cfg(not(platform="windows"))
@@ -24,10 +23,7 @@ async test "the migration relocates live and archived records one by one" {
   let dir = @fs.tmpdir(prefix="openseek-migrate-global-")
   let root : @pathx.Path = Path(dir)
   let previous_home = @sys.get_env_var("HOME")
-  let previous_session_root = @sys.get_env_var("OPENSEEK_SESSION_ROOT")
   @sys.set_env_var("HOME", root.join("home").to_string())
-  @sys.set_env_var("OPENSEEK_SESSION_ROOT", root.join("global").to_string())
-  defer restore_session_root_env(previous_session_root)
   defer restore_home_env(previous_home)
   guard @workspaces.initialize() is Some(workspace) else {
     fail("expected the default workspace to be attached")
