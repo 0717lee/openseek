@@ -1038,7 +1038,7 @@
    a long line grows the page rather than adding a nested scrollbar. */
 
 /* A MoonBit `read` keeps the tool's numbered gutter and status footer muted,
-   while the file body uses the same shared editor tokens as `mbtx`.
+   while the file body uses the same shared `moonbit-source` editor tokens.
    Each logical line owns its two columns so wrapping never shifts the next
    line away from its number. */
 .read-moonbit-output {
