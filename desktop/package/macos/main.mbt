@@ -230,6 +230,7 @@ async fn @packaging.Workspace::stage_package_inputs(
     self.at(PackageAssetDir + "/mermaid"),
   )
   @packaging.copy_tree(self.at("fonts"), self.at(PackageAssetDir + "/fonts"))
+  self.stage_viz_assets(self.at(PackageAssetDir + "/viz"), release~)
   @packaging.copy_file(
     self.engine_binary(release~),
     self.at(PackageBinDir + "/openseek"),

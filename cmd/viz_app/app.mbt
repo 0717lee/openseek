@@ -123,8 +123,8 @@ fn initial_view_mode(standalone : Bool) -> @viz.ViewMode {
 }
 
 ///|
-/// Whether the freshly fetched session list should auto-open its only entry:
-/// standalone exports only, exactly one session, and nothing already on
+/// Whether the freshly fetched session list should auto-open its first entry:
+/// standalone exports only, at least one session, and nothing already on
 /// screen (a selection in flight or a dropped file must not be clobbered).
 fn should_auto_open(
   standalone : Bool,
@@ -132,7 +132,7 @@ fn should_auto_open(
   selected~ : String?,
   dropped~ : String?,
 ) -> Bool {
-  standalone && sessions.length() == 1 && selected is None && dropped is None
+  standalone && !sessions.is_empty() && selected is None && dropped is None
 }
 
 ///|
@@ -205,9 +205,9 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
           }
           // A refresh restores the session named in the URL hash — in the
           // live viewer and in exports alike. Otherwise a standalone export
-          // holding exactly one session opens it immediately; live servers
-          // keep the explicit click, since their list refreshes must never
-          // yank the user off a session.
+          // opens the first row immediately. Desktop session-family exports
+          // put the parent first; live servers keep the explicit click, since
+          // their list refreshes must never yank the user off a session.
           let untouched = model.selected is None && model.dropped is None
           match model.pending_restore_key {
             Some(key) if untouched &&
@@ -2193,17 +2193,15 @@ test "the hash view mode wins over the defaults" {
 }
 
 ///|
-/// Only a standalone export with exactly one session and an untouched pane
-/// auto-opens; a live server list, several sessions, an existing selection,
-/// or a dropped file all keep the explicit click.
-test "single-session standalone exports auto-open their session" {
+/// A non-empty standalone export with an untouched pane auto-opens its first
+/// row. Live server lists, empty exports, an existing selection, or a dropped
+/// file all keep the explicit click.
+test "standalone exports auto-open their first session" {
   let row = direct_row("k1", "s1", "")
   let other = { ..row, key: "k2", id: "s2" }
   assert_true(should_auto_open(true, [row], selected=None, dropped=None))
+  assert_true(should_auto_open(true, [row, other], selected=None, dropped=None))
   assert_false(should_auto_open(false, [row], selected=None, dropped=None))
-  assert_false(
-    should_auto_open(true, [row, other], selected=None, dropped=None),
-  )
   assert_false(should_auto_open(true, [], selected=None, dropped=None))
   assert_false(should_auto_open(true, [row], selected=Some("k1"), dropped=None))
   assert_false(

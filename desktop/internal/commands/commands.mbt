@@ -90,6 +90,12 @@ pub let session_load_archived : Command[
 ] = Command("session.load_archived")
 
 ///|
+pub let session_export : Command[
+  @protocol.SessionExportPayload,
+  @protocol.SessionExportReply,
+] = Command("session.export")
+
+///|
 pub let session_list_archived : Command[
   @protocol.EmptyPayload,
   @protocol.SessionsReply,

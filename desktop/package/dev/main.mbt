@@ -39,6 +39,7 @@ fn Development::cef_helper_name() -> String {
 /// The checked-in development HTML references every file in place.
 async fn Development::prepare_frontend(self : Development) -> Unit {
   @packaging.build_frontend(self.workspace, release=false)
+  @packaging.build_viz_frontend(self.workspace, release=false)
   let mermaid_entry = (self.workspace.mermaid_assets() : @path.Path)
     .join("mermaid.esm.min.mjs")
     .to_string()

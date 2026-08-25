@@ -133,6 +133,41 @@ pub(all) struct LoadSessionPayload {
 } derive(Debug, Eq, FromJson, ToJson)
 
 ///|
+/// Export one exact conversation from one registered workspace. The native
+/// window chooses the destination; no filesystem destination crosses this
+/// protocol boundary.
+pub(all) struct SessionExportPayload {
+  session : String
+  workspace : String
+  title : String
+  archived : Bool
+} derive(Debug, Eq)
+
+///|
+/// Decode the exact store identity and display metadata needed by an export.
+/// Every field is required and typed; unknown fields are ignored so a newer
+/// frontend can add metadata without breaking an older host.
+pub impl FromJson for SessionExportPayload with fn from_json(json, path) {
+  let object = JsonObject::decode(json, path, "session export payload")
+  {
+    session: object.required_string("session"),
+    workspace: object.required_string("workspace"),
+    title: object.required_string("title"),
+    archived: object.required_bool("archived"),
+  }
+}
+
+///|
+pub impl ToJson for SessionExportPayload with fn to_json(self) {
+  {
+    "session": self.session,
+    "workspace": self.workspace,
+    "title": self.title,
+    "archived": self.archived,
+  }
+}
+
+///|
 /// `session.archive` / `session.unarchive` address a conversation by its
 /// durable session id. Archiving takes the conversation's worktree with
 /// it; `force` (archive only) discards that checkout's uncommitted
@@ -1493,6 +1528,18 @@ pub extend LoadSessionPayload with Eq::{equal, not_equal}
 
 ///|
 pub extend LoadSessionPayload with ToJson::{to_json}
+
+///|
+pub extend SessionExportPayload with Debug::{to_repr}
+
+///|
+pub extend SessionExportPayload with FromJson::{from_json}
+
+///|
+pub extend SessionExportPayload with Eq::{equal, not_equal}
+
+///|
+pub extend SessionExportPayload with ToJson::{to_json}
 
 ///|
 pub extend LspHoverPayload with Debug::{to_repr}

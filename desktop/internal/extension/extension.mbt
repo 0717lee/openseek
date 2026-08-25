@@ -314,6 +314,14 @@ pub fn openseek_extension(
       open_external(payload)
     }),
   )
+  endpoints.push(
+    @endpoint.Endpoint::window(@commands.session_export, async fn(
+      context,
+      payload,
+    ) {
+      export_session(context, state, payload)
+    }),
+  )
   for endpoint in window_endpoints(views) {
     endpoints.push(endpoint)
   }

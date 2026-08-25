@@ -4,6 +4,7 @@
 ///|
 using @icons {
   icon,
+  icon_chat_export,
   icon_chevron_down,
   icon_close,
   icon_extensions,

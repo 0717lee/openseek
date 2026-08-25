@@ -8,6 +8,13 @@ async test "Moon native host layout identifies checkout-local development paths"
     fail("expected the Moon native host layout to be detected")
   }
   assert_eq(layout.frontend_entry(), root.join("desktop-dev.html").to_string())
+  assert_eq(layout.viz_shell(), root.join("web/index.html").to_string())
+  assert_eq(
+    layout.viz_bundle(),
+    root
+    .join("_build/js/debug/build/bobzhang/openseek-viz-app/openseek-viz-app.js")
+    .to_string(),
+  )
   assert_eq(
     layout.engine_dir(),
     root

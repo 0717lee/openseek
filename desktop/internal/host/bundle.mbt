@@ -11,6 +11,61 @@ const ProtonPackageRipgrepPath = "target/proton-package-input/bin/rg"
 const ProtonPackageMoongrepPath = "target/proton-package-input/bin/moongrep"
 
 ///|
+/// The visualizer shell and compiled bundle used for a standalone export.
+pub struct VizAssets {
+  shell : String
+  bundle : String
+}
+
+///|
+/// Locate the visualizer assets belonging to this exact host build.
+///
+/// Development uses the recognized Moon build layout. Installed applications
+/// load the `viz` directory beside their packaged frontend, so a missing
+/// package input fails instead of silently embedding a checkout artifact.
+pub async fn HostState::viz_assets(self : HostState) -> VizAssets {
+  guard self.executable is Some(executable) else {
+    raise HostError(
+      "cannot locate session visualizer assets without the host executable",
+    )
+  }
+  let assets = match @development.Layout::detect(executable) {
+    Some(layout) => { shell: layout.viz_shell(), bundle: layout.viz_bundle() }
+    None => {
+      let frontend = frontend_entry_path(executable)
+      let viz = @pathx.Path(frontend).dirname().join("viz")
+      {
+        shell: viz.join("index.html").normalize().to_string(),
+        bundle: viz.join("viz_app.js").normalize().to_string(),
+      }
+    }
+  }
+  guard @fs.exists(assets.shell) else {
+    raise HostError("session visualizer shell does not exist: \{assets.shell}")
+  }
+  guard @fs.exists(assets.bundle) else {
+    raise HostError(
+      "session visualizer bundle does not exist: \{assets.bundle}",
+    )
+  }
+  assets
+}
+
+///|
+/// Read the visualizer shell and bundle selected by `HostState::viz_assets`.
+pub async fn VizAssets::read(self : VizAssets) -> (String, String) {
+  let shell = @fs.read_file(self.shell).text() catch {
+    error =>
+      raise HostError("could not read session visualizer shell: \{error}")
+  }
+  let bundle = @fs.read_file(self.bundle).text() catch {
+    error =>
+      raise HostError("could not read session visualizer bundle: \{error}")
+  }
+  (shell, bundle)
+}
+
+///|
 /// The installed directory containing the Desktop's packaged command-line
 /// tools. The value exists only when the pinned ripgrep asset is present, so
 /// an incomplete installed bundle cannot shadow the user's PATH with an empty

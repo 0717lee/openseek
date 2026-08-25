@@ -12,6 +12,14 @@ const FrontendBundleArtifact : String = "build/openseek_desktop/frontend/desktop
 const FrontendBundleOutput : String = "frontend.js"
 
 ///|
+/// The standalone session visualizer package in the monorepo root module.
+const VizFrontendPackage : String = "cmd/viz_app"
+
+///|
+/// The visualizer bundle's path below MoonBit's JS target/profile directory.
+const VizBundleArtifact : String = "build/bobzhang/openseek-viz-app/openseek-viz-app.js"
+
+///|
 /// The generated application stylesheet staged by production packagers.
 /// Development keeps loading the checked-in `app.css` import manifest, while
 /// packaged layouts receive this single concatenated file under that name.
@@ -213,6 +221,19 @@ pub fn Workspace::engine_binary(self : Workspace, release~ : Bool) -> String {
 pub fn Workspace::frontend_binary(self : Workspace, release~ : Bool) -> String {
   let mode = if release { "release" } else { "debug" }
   self.repo_at("_build/js/\{mode}/\{FrontendBundleArtifact}")
+}
+
+///|
+/// Return the selected-mode standalone visualizer bundle emitted by Moon.
+pub fn Workspace::viz_bundle(self : Workspace, release~ : Bool) -> String {
+  let mode = if release { "release" } else { "debug" }
+  self.repo_at("_build/js/\{mode}/\{VizBundleArtifact}")
+}
+
+///|
+/// Return the checked-in standalone visualizer HTML shell.
+pub fn Workspace::viz_shell(self : Workspace) -> String {
+  self.repo_at("web/index.html")
 }
 
 ///|
@@ -653,11 +674,40 @@ pub async fn build_frontend(ws : Workspace, release~ : Bool) -> Unit {
 }
 
 ///|
+/// Build the standalone visualizer bundle that Desktop embeds into exported
+/// conversation documents.
+pub async fn build_viz_frontend(ws : Workspace, release~ : Bool) -> Unit {
+  let release_args = if release { ["--release"] } else { [] }
+  run_checked(
+    "moon",
+    ["build", VizFrontendPackage, "--target", "js", ..release_args],
+    dir=ws.repo(),
+  )
+  let bundle = ws.viz_bundle(release~)
+  if !@asyncfs.exists(bundle) {
+    raise PackageError("session visualizer artifact not found: \{bundle}")
+  }
+}
+
+///|
+/// Copy the visualizer shell and bundle into one package asset directory.
+pub async fn Workspace::stage_viz_assets(
+  self : Workspace,
+  destination : String,
+  release~ : Bool,
+) -> Unit {
+  ensure_dir(destination)
+  copy_file(self.viz_shell(), join_path(destination, "index.html"))
+  copy_file(self.viz_bundle(release~), join_path(destination, "viz_app.js"))
+}
+
+///|
 /// Build the frontend package and copy the generated JS bundle to the stable
 /// `frontend.js` path consumed by packaged layouts. Development calls
 /// `build_frontend` directly and serves Moon's artifact in place.
 pub async fn build_frontend_bundle(ws : Workspace, release~ : Bool) -> Unit {
   build_frontend(ws, release~)
+  build_viz_frontend(ws, release~)
   copy_file(ws.frontend_binary(release~), ws.at(FrontendBundleOutput))
   build_app_stylesheet(ws)
   build_viewer_stylesheet(ws)

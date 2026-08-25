@@ -1814,6 +1814,32 @@ pub fn SessionEvent::not_equal(Self, Self) -> Bool
 pub fn SessionEvent::to_json(Self) -> Json
 pub fn SessionEvent::to_repr(Self) -> @debug.Repr
 
+pub(all) struct SessionExportPayload {
+  session : String
+  workspace : String
+  title : String
+  archived : Bool
+} derive(Eq, @debug.Debug)
+pub fn SessionExportPayload::equal(Self, Self) -> Bool
+pub fn SessionExportPayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn SessionExportPayload::not_equal(Self, Self) -> Bool
+pub fn SessionExportPayload::to_json(Self) -> Json
+pub fn SessionExportPayload::to_repr(Self) -> @debug.Repr
+pub impl ToJson for SessionExportPayload
+pub impl @json.FromJson for SessionExportPayload
+
+pub(all) struct SessionExportReply {
+  path : String?
+  opened : Bool
+} derive(Eq, @debug.Debug)
+pub fn SessionExportReply::equal(Self, Self) -> Bool
+pub fn SessionExportReply::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn SessionExportReply::not_equal(Self, Self) -> Bool
+pub fn SessionExportReply::to_json(Self) -> Json
+pub fn SessionExportReply::to_repr(Self) -> @debug.Repr
+pub impl ToJson for SessionExportReply
+pub impl @json.FromJson for SessionExportReply
+
 pub(all) struct SessionGroup {
   workspace : String
   name : String

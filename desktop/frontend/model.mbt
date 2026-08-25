@@ -1759,6 +1759,9 @@ priv enum Msg {
   // path in the system app, opening an external URL, launching an app) failed:
   // pops an error toast.
   HostActionFailed(String)
+  // The export is already durable, but its default system application could
+  // not be opened. The saved path remains useful in the transient toast.
+  SessionExportOpenFailed(path~ : String)
   // A transcript file link's host lookup failed. Unlike other host actions,
   // this carries the click identity so a slower older failure cannot surface
   // after a newer editor navigation has already taken precedence.
