@@ -7,12 +7,27 @@
 /// the parsed result. Engine stdout-JSONL logging is installed per subcommand in
 /// the run/serve handlers, never on the UI path.
 async fn main {
+  discard_retired_workspace_override_from_process()
   dispatch() catch {
     error => {
       @stdio.stderr.write("error: \{failure_message("\{error}")}\n") catch {
         _ => ()
       }
       @sys.exit(1)
+    }
+  }
+}
+
+///|
+/// Remove the retired ambient workspace selector before any command can spawn
+/// a tool or a nested OpenSeek process. Matching is case-insensitive because
+/// Windows preserves environment-key spelling while comparing names without
+/// case.
+fn discard_retired_workspace_override_from_process() -> Unit {
+  let retired = ["OPENSEEK", "DIR"].join("_")
+  for name, _ in @env.get_env_vars() {
+    if name.to_upper() == retired {
+      @env.unset_env_var(name)
     }
   }
 }
@@ -587,6 +602,26 @@ test "tui is an explicit subcommand" {
     is Some(("tui", _)) else {
     fail("expected tui subcommand")
   }
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "retired workspace override does not reach inherited subprocesses" {
+  let name = ["OpenSeek", "Dir"].join("_")
+  let previous = @env.get_env_var(name)
+  @env.set_env_var(name, "/tmp/retired-workspace")
+  defer (match previous {
+    Some(value) => @env.set_env_var(name, value)
+    None => @env.unset_env_var(name)
+  })
+  discard_retired_workspace_override_from_process()
+  let (code, output) = @process.collect_output_merged(
+    "env",
+    [],
+    inherit_env=true,
+  )
+  assert_eq(code, 0)
+  assert_false(output.text().contains("\{name}="))
 }
 
 ///|
