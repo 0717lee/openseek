@@ -187,7 +187,22 @@ fn detail_shell(
         @html.div(class="skill-detail-meta", preview_meta(target)),
         detail_action(target, state, input, emit),
       ]),
-      @html.div(class="skill-detail-card", content),
+      @html.div(class="skill-detail-card", [
+        @html.div(class="skill-file-bar", [
+          @html.span(class="skill-file-name", "SKILL.md"),
+          match state.preview {
+            Ready(content~, ..) =>
+              @html.button(
+                class="secondary skill-copy-button",
+                attrs=@html.Attrs::build().aria_label("Copy SKILL.md"),
+                on_click=copy_content(content),
+                "Copy",
+              )
+            _ => @html.span(class="skill-file-status", "Loading…")
+          },
+        ]),
+        content,
+      ]),
     ]),
   ])
 }

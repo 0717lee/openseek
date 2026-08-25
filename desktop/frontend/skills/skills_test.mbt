@@ -175,6 +175,7 @@ test "a skill opens as a detail page and returns to the list" {
     input(),
   )
   assert_true(markup(loading, input()).contains("← Back to skills"))
+  assert_true(markup(loading, input()).contains("SKILL.md"))
   assert_true(markup(loading, input()).contains("Loading SKILLS.md…"))
 
   let (_, listed, _) = loading.handle(emit(), @skills.BackToList, input())

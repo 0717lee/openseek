@@ -3,6 +3,23 @@
 // on the engine-host bridge, and each settles as one `Msg`.
 
 ///|
+extern "js" fn copy_text_to_clipboard(text : String) -> Unit =
+  #| (text) => {
+  #|   try {
+  #|     const clipboard = globalThis.navigator?.clipboard;
+  #|     if (clipboard && typeof clipboard.writeText === "function") {
+  #|       clipboard.writeText(text).catch(() => {});
+  #|     }
+  #|   } catch {
+  #|   }
+  #| }
+
+///|
+fn copy_content(content : String) -> @cmd.Cmd {
+  @cmd.custom_cmd(_ => copy_text_to_clipboard(content))
+}
+
+///|
 fn restore_list_scroll(scroll_top : Double) -> @cmd.Cmd {
   @cmd.custom_cmd(
     _ => {
