@@ -103,7 +103,7 @@ calls `@agent.run`, but that decision lives outside the `agent` package.
 
 `build_tools(runtime, scope)` returns the standard local tool registry:
 
-- `run_moonbit`: compile and run a self-contained MoonBit program — both the
+- `mbtx`: compile and run a self-contained MoonBit program — both the
   scripting surface (transform files, parse JSON, compute, probe the language)
   and the command runner, since processes are spawned from the program through
   the shell-free `bobzhang/myshell` EDSL. Supports `run_in_background`;
@@ -147,7 +147,7 @@ async test "standard tools are registered in dispatch order" {
         #|  "remove",
         #|  "plan",
         #|  "goal",
-        #|  "run_moonbit",
+        #|  "mbtx",
         #|  "job_output",
         #|  "job_stop",
         #|  "finish",
@@ -283,7 +283,7 @@ answer, `finish`, `abort`, cancellation, unexpected failure, or exhausted
 
 ## Operational Notes
 
-This package is intended for trusted local automation. `run_moonbit` can run
+This package is intended for trusted local automation. `mbtx` can run
 arbitrary commands (its snippets spawn processes), while `edit` and `write` can
 modify files visible to the process. Use the CLI package for application-level policy,
 session storage, logging configuration, and serve-mode wire handling.
@@ -314,7 +314,7 @@ improving:
 - Current MoonBit projects use `moon.mod`; `moon.mod.json` is legacy. Manifest
   or package-import edits should be followed quickly by a `moon check` or
   another explicit validation command.
-- Use `run_moonbit` for exact end-to-end MoonBit command validation beyond
+- Use `mbtx` for exact end-to-end MoonBit command validation beyond
   compiler feedback, especially `moon test`, `moon run`, and README command
   checks. Source-writing commands (`moon fmt`, `moon info`) are denied by the
   snippet sandbox and belong to the caller, not the agent.

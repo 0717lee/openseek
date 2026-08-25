@@ -22,8 +22,8 @@ fn background_notice_text(snapshot : @bgjobs.BgJobSnapshot) -> String {
 /// Build the agent's standard tool registry bound to `runtime` and `scope`.
 ///
 /// The returned registry contains the built-in local tools: `read`, `edit`,
-/// `multi_edit`, `write`, `remove`, `plan`, `goal`, `run_moonbit`, `job_output`,
-/// `job_stop`, and `finish`. Commands are `run_moonbit`'s job — it compiles and
+/// `multi_edit`, `write`, `remove`, `plan`, `goal`, `mbtx`, `job_output`,
+/// `job_stop`, and `finish`. Commands are `mbtx`'s job — it compiles and
 /// runs a MoonBit program that spawns processes through the shell-free
 /// `bobzhang/myshell` EDSL, so there is no shell tool and no shell parsing
 /// anywhere in the registry. A snippet that would outlast the foreground bound
@@ -59,7 +59,7 @@ pub async fn[X] build_tools(
   // pre-existing one.
   let file_state = @agent_tool.FileStateMap::new()
   // One session temp dir, shared by the job runtime (which spills large job
-  // output to disk) and run_moonbit (whose detached snippets outlive the call
+  // output to disk) and mbtx (whose detached snippets outlive the call
   // that started them, so their directories cannot be reclaimed there).
   let spill_dir : String? = Some(@fs.tmpdir(prefix="openseek-jobs-")) catch {
     _ => None
@@ -141,7 +141,7 @@ async test "agent registers the expected tool names" {
     assert_true(names.contains("remove"))
     assert_true(names.contains("plan"))
     assert_true(names.contains("goal"))
-    assert_true(names.contains("run_moonbit"))
+    assert_true(names.contains("mbtx"))
     assert_true(names.contains("finish"))
     assert_false(names.contains("moon_check"))
     assert_false(names.contains("moon_cmd"))
@@ -150,7 +150,7 @@ async test "agent registers the expected tool names" {
 }
 
 ///|
-/// Commands go through `run_moonbit`, so the registry must not carry a shell
+/// Commands go through `mbtx`, so the registry must not carry a shell
 /// tool family — nor the background-job tools that only ever served it.
 async test "the registry has no shell tool family" {
   @async.with_task_group() <| group => {
@@ -159,15 +159,13 @@ async test "the registry has no shell tool family" {
     assert_false(names.contains("shell"))
     assert_false(names.contains("shell_output"))
     assert_false(names.contains("shell_stop"))
-    guard tools.find("run_moonbit") is Some(run_moonbit) else {
-      fail("run_moonbit tool missing")
-    }
+    guard tools.find("mbtx") is Some(mbtx) else { fail("mbtx tool missing") }
     // The command surface teaches the process EDSL rather than deferring to a
     // shell tool that is no longer there.
-    assert_true(run_moonbit.description.contains("bobzhang/myshell"))
+    assert_true(mbtx.description.contains("bobzhang/myshell"))
     // A job runtime is wired here, so the background argument must be OFFERED:
     // the schema is what decides whether the model can make the call at all.
-    let JsonSchema(schema) = run_moonbit.schema
+    let JsonSchema(schema) = mbtx.schema
     guard schema is { "properties": Object(properties), .. } else {
       fail("expected an object schema")
     }
@@ -186,16 +184,14 @@ async test "the registry has no shell tool family" {
 async test "a background run that fails to compile reports the error inline" {
   @async.with_task_group(group => {
     let tools = build_tools(AgentRuntime(), AgentTaskScope(group))
-    guard tools.find("run_moonbit") is Some(run_moonbit) else {
-      fail("run_moonbit tool missing")
-    }
-    let action = match run_moonbit.execute {
+    guard tools.find("mbtx") is Some(mbtx) else { fail("mbtx tool missing") }
+    let action = match mbtx.execute {
       Async(execute) =>
         execute({
           "source": "fn main { let _x : Int = \"nope\" }",
           "run_in_background": true,
         })
-      Sync(_) => fail("run_moonbit should be async")
+      Sync(_) => fail("mbtx should be async")
     }
     guard action is Respond(output) else { fail("expected Respond") }
     assert_true(output.is_error)
@@ -218,9 +214,7 @@ async test "a background snippet reads EOF on stdin, not the engine's channel" {
     let tools = build_tools(runtime, AgentTaskScope(group), on_background_wake=() => {
       woke = true
     })
-    guard tools.find("run_moonbit") is Some(run_moonbit) else {
-      fail("run_moonbit tool missing")
-    }
+    guard tools.find("mbtx") is Some(mbtx) else { fail("mbtx tool missing") }
     let source =
       #|import { "moonbitlang/async", "moonbitlang/async/stdio" }
       #|
@@ -228,9 +222,9 @@ async test "a background snippet reads EOF on stdin, not the engine's channel" {
       #|  let line = @stdio.stdin.read_until("\n")
       #|  @stdio.stdout.write("got=\{line is Some(_)}\n")
       #|}
-    let action = match run_moonbit.execute {
+    let action = match mbtx.execute {
       Async(execute) => execute({ "source": source, "run_in_background": true })
-      Sync(_) => fail("run_moonbit should be async")
+      Sync(_) => fail("mbtx should be async")
     }
     guard action is Respond(output) else { fail("expected Respond") }
     assert_false(output.is_error)
@@ -270,7 +264,7 @@ async test "a foreground run past its deadline becomes a job instead of dying" {
     let scope = @agent_runtime.AgentTaskScope(group)
     let spill_dir = @fs.tmpdir(prefix="openseek-jobs-test-")
     let bg_runtime = @bgjobs.BgJobRuntime::new(scope, spill_dir~)
-    let run_moonbit = @run_moonbit.definition(
+    let mbtx = @run_moonbit.definition(
       workspace_root=".",
       bg_runtime~,
       job_dir=spill_dir,
@@ -283,9 +277,9 @@ async test "a foreground run past its deadline becomes a job instead of dying" {
       #|  println("started")
       #|  @async.sleep(60_000)
       #|}
-    let action = match run_moonbit.execute {
+    let action = match mbtx.execute {
       Async(execute) => execute({ "source": source })
-      Sync(_) => fail("run_moonbit should be async")
+      Sync(_) => fail("mbtx should be async")
     }
     guard action is Respond(output) else { fail("expected Respond") }
     // Not an error, and not a corpse: it is a job the model can still watch.
@@ -309,9 +303,7 @@ async test "a foreground run past its deadline becomes a job instead of dying" {
 async test "binary output waits for the real exit instead of abandoning it" {
   @async.with_task_group(group => {
     let tools = build_tools(AgentRuntime(), AgentTaskScope(group))
-    guard tools.find("run_moonbit") is Some(run_moonbit) else {
-      fail("run_moonbit tool missing")
-    }
+    guard tools.find("mbtx") is Some(mbtx) else { fail("mbtx tool missing") }
     // Emit an invalid UTF-8 byte, then keep working briefly before exiting 3.
     let source =
       #|import { "moonbitlang/async", "moonbitlang/async/stdio", "moonbitlang/x/sys" }
@@ -322,9 +314,9 @@ async test "binary output waits for the real exit instead of abandoning it" {
       #|  println("done")
       #|  @sys.exit(3)
       #|}
-    let action = match run_moonbit.execute {
+    let action = match mbtx.execute {
       Async(execute) => execute({ "source": source })
-      Sync(_) => fail("run_moonbit should be async")
+      Sync(_) => fail("mbtx should be async")
     }
     guard action is Respond(output) else { fail("expected Respond") }
     assert_true(output.is_error)
@@ -345,7 +337,7 @@ async test "binary output does not escape the deadline" {
     let scope = @agent_runtime.AgentTaskScope(group)
     let spill_dir = @fs.tmpdir(prefix="openseek-jobs-binary-")
     let bg_runtime = @bgjobs.BgJobRuntime::new(scope, spill_dir~)
-    let run_moonbit = @run_moonbit.definition(
+    let mbtx = @run_moonbit.definition(
       workspace_root=".",
       bg_runtime~,
       job_dir=spill_dir,
@@ -358,9 +350,9 @@ async test "binary output does not escape the deadline" {
       #|  @stdio.stdout.write(b"\xff\xfe")
       #|  @async.sleep(60_000)
       #|}
-    let action = match run_moonbit.execute {
+    let action = match mbtx.execute {
       Async(execute) => execute({ "source": source })
-      Sync(_) => fail("run_moonbit should be async")
+      Sync(_) => fail("mbtx should be async")
     }
     guard action is Respond(output) else { fail("expected Respond") }
     assert_true(output.content.contains("moved to the background as job"))
@@ -374,7 +366,7 @@ async test "binary output does not escape the deadline" {
 
 ///|
 /// Background jobs survived the move off the shell tool: a detached
-/// `run_moonbit` snippet still queues a completion notice and wakes an idle
+/// `mbtx` snippet still queues a completion notice and wakes an idle
 /// controller when it exits.
 async test "a finished background job queues a notice and wakes the controller" {
   @async.with_task_group(group => {
@@ -383,16 +375,14 @@ async test "a finished background job queues a notice and wakes the controller" 
     let tools = build_tools(runtime, AgentTaskScope(group), on_background_wake=() => {
       woke = true
     })
-    guard tools.find("run_moonbit") is Some(run_moonbit) else {
-      fail("run_moonbit tool missing")
-    }
-    let action = match run_moonbit.execute {
+    guard tools.find("mbtx") is Some(mbtx) else { fail("mbtx tool missing") }
+    let action = match mbtx.execute {
       Async(execute) =>
         execute({
           "source": "fn main { println(1) }",
           "run_in_background": true,
         })
-      Sync(_) => fail("run_moonbit should be async")
+      Sync(_) => fail("mbtx should be async")
     }
     guard action is Respond(output) else { fail("expected the job to start") }
     assert_false(output.is_error)
@@ -420,15 +410,13 @@ async test "a finished background job queues a notice and wakes the controller" 
 /// discarded it, and built every attempt's runtime without one, so the
 /// argument was never advertised and the option was silently inert.
 ///
-/// The registry is what proves it: the field's presence in `run_moonbit`'s
+/// The registry is what proves it: the field's presence in `mbtx`'s
 /// schema is decided by the runtime's channel, so asserting on the schema
 /// asserts the whole chain from this parameter down.
 async test "a turn advertises escalation exactly when it is given a channel" {
   @async.with_task_group(group => {
     let confined = build_tools(AgentRuntime(), AgentTaskScope(group))
-    guard confined.find("run_moonbit") is Some(tool) else {
-      fail("run_moonbit tool missing")
-    }
+    guard confined.find("mbtx") is Some(tool) else { fail("mbtx tool missing") }
     let JsonSchema(schema) = tool.schema
     guard schema is { "properties": Object(properties), .. } else {
       fail("expected an object schema")
@@ -438,9 +426,7 @@ async test "a turn advertises escalation exactly when it is given a channel" {
       AgentRuntime(approval=ApprovalChannel(_ => Rejected)),
       AgentTaskScope(group),
     )
-    guard asking.find("run_moonbit") is Some(tool) else {
-      fail("run_moonbit tool missing")
-    }
+    guard asking.find("mbtx") is Some(tool) else { fail("mbtx tool missing") }
     let JsonSchema(schema) = tool.schema
     guard schema is { "properties": Object(properties), .. } else {
       fail("expected an object schema")

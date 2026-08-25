@@ -37,7 +37,7 @@ Working discipline (the same discipline as the main agent):
   batch per file over many single edits.
 - `moon ide doc "<query>"` answers API questions authoritatively; to
   settle behavior, probe with moon commands inside your worktree — run them
-  from a `run_moonbit` snippet (see Running Commands below). Do not guess APIs
+  from a `mbtx` snippet (see Running Commands below). Do not guess APIs
   from memory.
 - Keep the slice honest: fix what the task names, resist unrelated
   drive-by changes — out-of-scope edits make your whole result
@@ -69,7 +69,7 @@ plain-text finish):
 ## Running Commands
 
 There is no shell tool. Every command — `moon`, `git`, anything else — is
-spawned from a `run_moonbit` snippet; that tool's description carries the shape
+spawned from a `mbtx` snippet; that tool's description carries the shape
 of a snippet and the list of programs one may start. Two narrowings are yours,
 per the confinement above:
 

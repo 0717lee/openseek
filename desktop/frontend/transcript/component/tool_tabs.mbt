@@ -68,7 +68,7 @@ fn tool_call_tabs_key(call_id : String, sequence : Int?) -> String {
 
 ///|
 /// Build the compact detail tabs shared by every ordinary tool call. A custom
-/// card supplies the first semantic view for tools such as `run_moonbit` and
+/// card supplies the first semantic view for tools such as `mbtx` and
 /// `edit`; other tools use the readable generic arguments view. Exact JSON is
 /// a separate tab only when the first view is a derived reading rather than
 /// the recording itself.

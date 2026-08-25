@@ -400,7 +400,7 @@
   gap: 8px;
 }
 /* The program the decision is actually about, highlighted by the same helper
-   the transcript's run_moonbit card uses. Token colours come from the
+   the transcript's mbtx card uses. Token colours come from the
    `--vscode-token-*` bindings in `viewer_theme.css`, which is why this class
    is named in that file's theme-bridge selector; nothing here sets `color`,
    or it would override them.

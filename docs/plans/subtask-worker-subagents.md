@@ -111,7 +111,7 @@ Static guard (better messages + non-macOS floor): admit a mutating git/moon
 command only when EVERY candidate cwd/target interpretation (cd chains, -C,
 scaffold destinations) is inside the worker root; unknown or mixed →
 blocked with a worker-scope message. Extend denial_output subjects with the
-worker paths so kernel denials self-explain. run_moonbit: worker rooting +
+worker paths so kernel denials self-explain. mbtx: worker rooting +
 absolute-cwd outside worker root rejected at decode + worker profile for
 its sandbox. Auto-check stays on; residual stated plainly: auto-check/moon
 prebuild is repository build code running unsandboxed in the child engine,
@@ -194,7 +194,7 @@ cancellation reconciliation.
 Naming (tool `subtask`, kind `worker`, pkg `agent_worker`, branch
 `openseek/<name>--<nonce>`); schema {name, task ≤4000, allowed_paths,
 context? ≤2000} concurrent_safe; child toolset (read unrestricted, worker
-shell, WriteScope file tools, run_moonbit, versioned submit_result; no
+shell, WriteScope file tools, mbtx, versioned submit_result; no
 subrun tools); substantial worker system prompt (.mbt.md + dev_build; "do
 not run git commit/worktree — the harness commits; permission errors on
 those are expected"); report v1 {status, summary, verification}; child
@@ -210,11 +210,11 @@ scope-violation error; final verdict from the checker).
 - PR0' scratch_dir launch-gap hotfix (now).
 - PR1 WriteScope + file-tool wiring (independently landable).
 - PR2 worker sandbox mode: profile builder + force-sandbox propagation +
-  static guard + run_moonbit rooting + denial subjects. Test matrix per
+  static guard + mbtx rooting + denial subjects. Test matrix per
   subal: linked-origin lifecycle, suffixed admin dirs, external
   siblings denied, moon check ok, status/diff ok under GIT_OPTIONAL_LOCKS=0,
   commit/ref/config/worktree mutations fail, common state unchanged
-  (before/after snapshot), fg/bg/trusted/untrusted/run_moonbit paths,
+  (before/after snapshot), fg/bg/trusted/untrusted/mbtx paths,
   no-sandbox platform fallback, e2e lab regression (through
   execute_with_workspace, not agent_shell_launch).
 - PR3 agent_worker child kind (prompt, capture, dispatch, lifecycle tests).

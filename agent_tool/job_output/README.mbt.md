@@ -1,7 +1,7 @@
 # Job Output Tool
 
 `job_output` reads a background job's recent output and status by its
-`job_id` — the id `run_moonbit` returns when called with
+`job_id` — the id `mbtx` returns when called with
 `run_in_background=true`.
 
 The primary consumption path for job results is the **pushed completion

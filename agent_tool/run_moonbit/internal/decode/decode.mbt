@@ -1,5 +1,5 @@
 ///|
-/// Decoded arguments of the `run_moonbit` tool: a self-contained MoonBit
+/// Decoded arguments of the `mbtx` tool: a self-contained MoonBit
 /// program (`.mbtx` single-file script) to compile and run, the backend
 /// `target` to run it on, and an optional `cwd` (the working directory the
 /// program runs in; `None` means the workspace root).
@@ -33,7 +33,7 @@ fn valid_target(target : String) -> Bool {
 }
 
 ///|
-/// Decode `run_moonbit` tool-call arguments. `source` is a required string
+/// Decode `mbtx` tool-call arguments. `source` is a required string
 /// holding a full `.mbtx` program (an optional leading `import { … }` block,
 /// then the program including its own `main`). `target` is an optional backend
 /// name defaulting to `wasm`, which is the backend moonrun's policy sandbox

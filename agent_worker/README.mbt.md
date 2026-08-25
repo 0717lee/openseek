@@ -5,7 +5,7 @@ worktree, completing one assigned slice of work. The CHILD half lives here —
 `run_child` decodes the controller-provided geometry (worktree root, denied
 roots, private git admin dir, allowed paths, base commit), assembles the
 confined toolset (WriteScope'd file tools sharing one FileStateMap, the
-worker-sandboxed shell, worker-rooted `run_moonbit`, and the `submit_result`
+worker-sandboxed shell, worker-rooted `mbtx`, and the `submit_result`
 capture tool), and runs the slice to a bounded `WorkerReport`. The parent
 side — worktree provisioning, launch, scope validation, commit, and
 integration — is the subtask controller's job (see

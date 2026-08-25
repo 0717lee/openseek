@@ -696,7 +696,7 @@ fn approval_card(
   }
   @html.div(class="composer-notice composer-approval composer-approval-full", [
     question,
-    // Highlighted with the same helper the transcript's `run_moonbit` card
+    // Highlighted with the same helper the transcript's `mbtx` card
     // uses, so the program a reader approves here and the program they see
     // recorded there are rendered identically. The class is on the theme
     // bridge in `viewer_theme.css`, which is where the highlighter's

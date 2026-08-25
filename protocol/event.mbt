@@ -52,7 +52,7 @@ pub(all) enum Event {
   /// somebody cancels it.
   ///
   /// `id` is minted by the engine and is unique within one engine process.
-  /// `body` is what would actually RUN, verbatim — the `run_moonbit` program —
+  /// `body` is what would actually RUN, verbatim — the `mbtx` program —
   /// while `detail` describes only what would be granted. A controller that
   /// renders one without the other is asking someone to approve a permission
   /// without showing them what it is for.

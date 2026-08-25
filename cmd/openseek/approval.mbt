@@ -300,7 +300,7 @@ async test "an answered question resolves to the controller's decision" {
   @async.with_task_group(group => {
     let asked = group.spawn(() => {
       desk.ask({
-        tool_name: "run_moonbit",
+        tool_name: "mbtx",
         detail: "run without the sandbox policy",
         body: Some("fn main { println(1) }"),
       })
@@ -326,7 +326,7 @@ async test "a refused question resolves to rejected" {
   @async.with_task_group(group => {
     let asked = group.spawn(() => {
       desk.ask({
-        tool_name: "run_moonbit",
+        tool_name: "mbtx",
         detail: "run without the sandbox policy",
         body: Some("fn main { println(1) }"),
       })
@@ -352,7 +352,7 @@ async test "a decision for a settled question is discarded" {
   let desk = ApprovalDesk::new(now_ms=0)
   @async.with_task_group(group => {
     let asking = group.spawn(() => {
-      desk.ask({ tool_name: "run_moonbit", detail: "escalate", body: None })
+      desk.ask({ tool_name: "mbtx", detail: "escalate", body: None })
     })
     for _ in 0..<200 {
       if desk.pending.length() > 0 {
@@ -393,7 +393,7 @@ async test "an interrupted wait still retires its question" {
   @async.with_task_group(group => {
     let asking = group.spawn(() => {
       desk.ask({
-        tool_name: "run_moonbit",
+        tool_name: "mbtx",
         detail: "run without the sandbox policy",
         body: Some("fn main { println(1) }"),
       })
@@ -424,7 +424,7 @@ async test "closing the command stream withdraws a standing question" {
   let desk = ApprovalDesk::new(now_ms=0)
   @async.with_task_group(group => {
     let asking = group.spawn(() => {
-      desk.ask({ tool_name: "run_moonbit", detail: "escalate", body: None })
+      desk.ask({ tool_name: "mbtx", detail: "escalate", body: None })
     })
     for _ in 0..<200 {
       if desk.pending.length() > 0 {
@@ -447,11 +447,7 @@ async test "a question asked after the stream closed does not wait" {
   let desk = ApprovalDesk::new(now_ms=0)
   desk.withdraw_all()
   @async.with_task_group(_ => {
-    let outcome = desk.ask({
-      tool_name: "run_moonbit",
-      detail: "escalate",
-      body: None,
-    })
+    let outcome = desk.ask({ tool_name: "mbtx", detail: "escalate", body: None })
     assert_true(outcome is Cancelled)
   })
   assert_eq(desk.pending.length(), 0)

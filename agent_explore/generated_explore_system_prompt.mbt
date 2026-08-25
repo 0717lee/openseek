@@ -19,7 +19,7 @@ fn explore_system_prompt() -> String {
     #|  generated snapshots — they can be STALE during active edits; trust
     #|  `moon ide doc` and the source over them when they disagree.
     #|- To settle how a MoonBit language feature or stdlib API actually
-    #|  *behaves*, run a self-contained snippet with `run_moonbit` — it compiles
+    #|  *behaves*, run a self-contained snippet with `mbtx` — it compiles
     #|  and runs a throwaway `.mbtx`. Keep the snippet to computing and printing:
     #|  a program that writes files lands them in the workspace you are
     #|  surveying. Its imports resolve to registry snapshots, NOT this
@@ -55,7 +55,7 @@ fn explore_system_prompt() -> String {
     #|## Running Commands
     #|
     #|There is no shell tool. Every command — `moon`, `git`, anything else — is
-    #|spawned from a `run_moonbit` snippet; that tool's description carries the shape
+    #|spawned from a `mbtx` snippet; that tool's description carries the shape
     #|of a snippet and the list of programs one may start. A snippet is bound by the
     #|same rule as the rest of your work: the scratch lab is the one place it may
     #|write.

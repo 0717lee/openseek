@@ -27,7 +27,7 @@ let max_hints_chars : Int = 2_000
 /// The scout runs in a DEDICATED CHILD PROCESS: `self_exe` (the parent's
 /// own executable — never PATH, so parent and child are the same binary and
 /// the report's derived JSON codecs cannot drift) invoked as
-/// `subrun explore`. The child's toolset is `read`, `run_moonbit` (both its
+/// `subrun explore`. The child's toolset is `read`, `mbtx` (both its
 /// instrument for `moon ide doc` and friends and its way to check
 /// language/stdlib behavior with a self-contained snippet; a per-child
 /// scratch lab is the one writable place, where the scout may scaffold
