@@ -142,7 +142,7 @@ fn DiffState::navigation_changes(
     if change.modified.start_line_number -
       previous.modified.end_line_number_exclusive <
       2 * DiffNavigationGroupLineMargin {
-      result[last_index] = @diff.DetailedLineRangeMapping(
+      result[last_index] = DetailedLineRangeMapping(
         previous.original.join(change.original),
         previous.modified.join(change.modified),
         None,
