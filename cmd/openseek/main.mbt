@@ -594,7 +594,6 @@ fn dir_option() -> @argparse.OptionArg {
   OptionArg(
     "dir",
     long="dir",
-    env="OPENSEEK_DIR",
     default_values=["."],
     about="Workspace directory for relative paths; creates only the final path component if its parent exists.",
   )
@@ -876,7 +875,7 @@ async fn prepare_workspace_root(
   }
   let dir = trim_trailing_path_separators("\{dir_input.trim()}")
   if dir.is_empty() {
-    fail("--dir or OPENSEEK_DIR must not be empty")
+    fail("--dir must not be empty")
   }
   if @fs.exists(dir) {
     if @fs.kind(dir) != Directory {
@@ -1340,7 +1339,6 @@ test "cli parses env backed options and task" {
     "DEEPSEEK": "test-key",
     "OPENSEEK_MODEL": "deepseek-v4-pro",
     "OPENSEEK_API_URL": "https://proxy.example/v1/chat/completions",
-    "OPENSEEK_DIR": "/tmp/openseek-workspace",
     "OPENSEEK_MAX_STEPS": "120",
     "OPENSEEK_SYSTEM_PROMPT_FILE": "/tmp/prompt-a.md",
     "OPENSEEK_SYSTEM_PROMPT_ADDENDUM_FILE": "/tmp/prompt-b.md",
@@ -1350,7 +1348,7 @@ test "cli parses env backed options and task" {
   assert_eq(model.api_key(parsed.values), Some("test-key"))
   guard api_url is Some(url) else { fail("expected api url") }
   assert_eq(url, "https://proxy.example/v1/chat/completions")
-  assert_eq(@cli.value(parsed, "dir"), "/tmp/openseek-workspace")
+  assert_eq(@cli.value(parsed, "dir"), ".")
   assert_true(max_steps(parsed) is Some(120))
   assert_eq(@cli.value(parsed, "system-prompt-file"), "/tmp/prompt-a.md")
   assert_eq(
