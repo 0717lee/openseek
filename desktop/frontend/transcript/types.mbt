@@ -14,9 +14,10 @@ pub(all) enum ItemKind {
   // A durable checkpoint copy of an answer already owned by an earlier model
   // step. It renders as normal assistant prose but never starts another step.
   AssistantReplay
-  // A visible answer carried by a durable Finished terminal rather than an
-  // Assistant event. It renders like ordinary assistant prose, while keeping
-  // the source event kind available for exact model-step attribution.
+  // The final visible answer confirmed by a durable Finished terminal. The
+  // terminal may carry new text or confirm that the preceding Assistant text
+  // is final; either shape becomes this kind so the view can distinguish a
+  // turn-ending answer from tool-prefacing assistant narration.
   TerminalAnswer
   Reasoning
   // One tool call in its original assistant-message order. `call_id` pairs the

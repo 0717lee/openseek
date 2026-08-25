@@ -833,6 +833,59 @@ test "transcript errors use the unboxed status row" {
 
 ///|
 #warnings("-alert_unstable")
+test "only a terminal-confirmed assistant answer ends with actions" {
+  let render = item => {
+    @rabbita.render_to_string(() => {
+      @rabbita.Val::constant(transcript_item_view(item, _ => @cmd.none))
+    })
+  }
+  let kinds_without_actions : Array[@transcript.ItemKind] = [
+    Assistant(is_danger=false),
+    AssistantReplay,
+    Assistant(is_danger=true),
+  ]
+  for kind in kinds_without_actions {
+    let markup = render({
+      kind,
+      content: "**answer**",
+      ts: None,
+      sequence: None,
+    })
+    assert_false(markup.contains("assistant-message-actions"))
+  }
+  let stamped = render({
+    kind: TerminalAnswer,
+    content: "**answer**",
+    ts: Some(1781144351123),
+    sequence: Some(2),
+  })
+  assert_true(stamped.contains("<strong>answer</strong>"))
+  assert_true(stamped.contains("class=\"assistant-message-actions\""))
+  assert_true(stamped.contains("title=\"Copy Markdown\""))
+  assert_true(
+    stamped.contains("aria-label=\"Copy assistant message as Markdown\""),
+  )
+  assert_true(stamped.contains("assistant-message-time"))
+  assert_true(stamped.contains("Completed "))
+  assert_true(stamped.contains(":"))
+  let after_copy = stamped.split("assistant-message-copy").to_array()[1]
+  assert_true(after_copy.contains("assistant-message-time"))
+  assert_false(
+    render({
+      kind: TerminalAnswer,
+      content: "answer",
+      ts: Some(0),
+      sequence: Some(2),
+    }).contains("assistant-message-time"),
+  )
+  let streaming = @rabbita.render_to_string(() => {
+    @rabbita.Val::constant(streaming_response_view("partial", _ => @cmd.none))
+  })
+  assert_false(streaming.contains("assistant-message-copy"))
+}
+
+///|
+#warnings("-alert_unstable")
 test "assistant UML exposes the shared diagram viewport marker" {
   let rendered = transcript_item_view(
     {
