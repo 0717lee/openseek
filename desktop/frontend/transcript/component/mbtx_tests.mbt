@@ -81,7 +81,7 @@ test "a failed mbtx row still reads as a program, not escaped JSON" {
     sequence: None,
   })
   let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
-  assert_true(markup.contains("mbtx-source"))
+  assert_true(markup.contains("moonbit-source"))
   assert_true(markup.contains("language-moonbit"))
   assert_true(markup.contains("<span class=\"mtk3\">fn</span>"))
   assert_true(markup.contains("<span class=\"mtk6\">1</span>"))
@@ -122,6 +122,32 @@ test "another tool's arguments keep the generic JSON rendering" {
     sequence: None,
   })
   let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
-  assert_false(markup.contains("mbtx-source"))
+  assert_false(markup.contains("moonbit-source"))
   assert_true(markup.contains("tool-call-arguments"))
+}
+
+///|
+/// Archived sessions recorded calls under the tool's retired name; those
+/// replays still get the program card rather than the escaped-JSON fallback.
+#warnings("-alert_unstable")
+test "a recorded call under the retired name still shows its program" {
+  let arguments =
+    #|{"source":"fn main {\n  println(1)\n}"}
+  let rendered = tool_call_view({
+    kind: Tool(
+      call_id="c1",
+      name="run_moonbit",
+      arguments=Some(arguments),
+      has_result=true,
+      is_error=false,
+      brief=Some("mbtx (exit=0)"),
+    ),
+    content: "1\n",
+    ts: None,
+    sequence: None,
+  })
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  assert_true(markup.contains("moonbit-source"))
+  assert_true(markup.contains("println(1)"))
+  assert_true(markup.contains(">Program</label>"))
 }

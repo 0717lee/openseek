@@ -6,12 +6,12 @@ import {
 }
 
 // Values
-pub fn decode(Json) -> RunMoonbitInput raise
+pub fn decode(Json) -> MbtxInput raise
 
 // Errors
 
 // Types and methods
-pub struct RunMoonbitInput {
+pub struct MbtxInput {
   source : String
   target : String
   cwd : String?
@@ -19,7 +19,7 @@ pub struct RunMoonbitInput {
   run_in_background : Bool
   escalated : Bool
 } derive(@debug.Debug)
-pub fn RunMoonbitInput::to_repr(Self) -> @debug.Repr
+pub fn MbtxInput::to_repr(Self) -> @debug.Repr
 
 // Type aliases
 

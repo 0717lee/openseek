@@ -29,7 +29,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      # Pre-release, to match CI: `run_moonbit`'s policy states its spawn
+      # Pre-release, to match CI: `mbtx`'s policy states its spawn
       # allowlist with `process.allow`, which stable's moonrun rejects outright,
       # so an agent working here on stable would find every snippet refused.
       - name: Set up MoonBit

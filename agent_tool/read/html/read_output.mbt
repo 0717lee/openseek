@@ -67,7 +67,7 @@ fn moonbit_output_for_path(path : String, content : String) -> @rhtml.Html? {
     )
   }
   children.push(@rhtml.span(class="read-moonbit-status", status))
-  Some(@rhtml.span(class="read-moonbit-output mbtx-source", children))
+  Some(@rhtml.span(class="read-moonbit-output moonbit-source", children))
 }
 
 ///|
