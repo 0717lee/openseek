@@ -261,11 +261,14 @@ visible to `sessions list`, `sessions show`, the viz server, and `--session
 This example stays offline by pointing `--api-url` at a closed local port: the
 engine names its session, durably records the user prompt, and only then fails
 to reach the API. The generated id's timestamp is normalized for determinism.
+The shell clears inherited session selectors so running this cram from a live
+OpenSeek agent cannot append its fixture prompts to the parent conversation.
 
 ```mooncram
 $ sh <<'EOF'
 > tmp=$(mktemp -d)
 > cd "$tmp"
+> unset OPENSEEK_SESSION OPENSEEK_SESSION_ROOT
 > if env DEEPSEEK=test-key openseek.exe run --api-url "http://127.0.0.1:9/chat/completions" "say hi" > out.jsonl 2>/dev/null; then echo exit-zero; else echo exit-non-zero; fi
 > grep -c '"event":"session_started"' out.jsonl
 > env -u DEEPSEEK openseek.exe sessions list | cut -f1 | sed -E 's/cli-[0-9]{8}-[0-9]{6}-[0-9]{3}(-[A-Za-z0-9]+)?/cli-<stamp>/'
@@ -286,6 +289,7 @@ explain it. The engine pins its own level instead.
 $ sh <<'EOF'
 > tmp=$(mktemp -d)
 > cd "$tmp"
+> unset OPENSEEK_SESSION OPENSEEK_SESSION_ROOT
 > for level in warn error; do
 >   env DEEPSEEK=test-key MOON_XLOG=$level openseek.exe run --api-url "http://127.0.0.1:9/chat/completions" --dir "$tmp/$level" "say hi" > "out-$level.jsonl" 2>/dev/null
 >   echo "$level: $(grep -c '"event":"agent_step"' "out-$level.jsonl")"
@@ -303,6 +307,7 @@ behind.
 $ sh <<'EOF'
 > tmp=$(mktemp -d)
 > cd "$tmp"
+> unset OPENSEEK_SESSION OPENSEEK_SESSION_ROOT
 > env DEEPSEEK=test-key openseek.exe run --no-session --api-url "http://127.0.0.1:9/chat/completions" "say hi" >/dev/null 2>&1
 > if test -d .openseek; then echo recorded; else echo ephemeral; fi
 > rm -rf "$tmp"
@@ -321,6 +326,7 @@ it.
 $ sh <<'EOF'
 > tmp=$(mktemp -d)
 > mkdir -p "$tmp/parent"
+> unset OPENSEEK_SESSION OPENSEEK_SESSION_ROOT
 > if env DEEPSEEK=test-key openseek.exe run --dir "$tmp/parent/new" --api-url "http://127.0.0.1:9/chat/completions" "say hi" > "$tmp/out.jsonl" 2>/dev/null; then echo exit-zero; else echo exit-non-zero; fi
 > if test -d "$tmp/parent/new"; then echo dir-created; else echo dir-missing; fi
 > grep -c '"event":"workspace_created"' "$tmp/out.jsonl"
