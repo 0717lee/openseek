@@ -64,6 +64,7 @@ fn install_markdown_dom(
     options.base_uri,
     options.allow_remote_images,
   )
+  postprocess_markdown_image_paragraphs(content)
   lifetime.postprocess_anchors(
     content,
     options.base_uri,
@@ -122,6 +123,19 @@ fn MarkdownDomLifetime::postprocess_images(
           }
         })
       None => ()
+    }
+  }
+}
+
+///|
+/// Marks the two image-only paragraph shapes emitted by cmark. This runs after
+/// image policy so a removed image cannot leave behind a wide empty paragraph.
+fn postprocess_markdown_image_paragraphs(
+  content : MarkdownParsedContent,
+) -> Unit {
+  for paragraph in markdown_content_query_all(content, "p") {
+    if markdown_is_image_only_paragraph(paragraph) {
+      paragraph.set_attribute("data-markdown-image-only", "true")
     }
   }
 }

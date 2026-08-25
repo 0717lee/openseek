@@ -693,6 +693,59 @@ test "remote images are opt-in and load callbacks become inert after dispose" {
 }
 
 ///|
+test "image-only paragraph markers exclude adjacent prose" {
+  install_markdown_test_dom()
+  let target = markdown_test_target()
+  ignore(
+    render_markdown(
+      (
+        #|![plain](image.png)
+        #|
+        #|![mixed](image.png) caption
+        #|
+        #|[![linked](image.png)](https://docs.example.test/)
+        #|
+        #|[![linked mixed](image.png)](https://docs.example.test/) caption
+      ),
+      options=MarkdownRenderOptions(
+        base_uri=try! @base_common.Uri::parse("https://img.example.test/docs/"),
+        allow_remote_images=true,
+      ),
+      target~,
+    ),
+  )
+  assert_eq(markdown_test_count(target, "p"), 4)
+  assert_eq(
+    markdown_test_attribute(
+      markdown_test_at(target, "p", 0),
+      "data-markdown-image-only",
+    ),
+    "true",
+  )
+  assert_eq(
+    markdown_test_attribute(
+      markdown_test_at(target, "p", 1),
+      "data-markdown-image-only",
+    ),
+    "",
+  )
+  assert_eq(
+    markdown_test_attribute(
+      markdown_test_at(target, "p", 2),
+      "data-markdown-image-only",
+    ),
+    "true",
+  )
+  assert_eq(
+    markdown_test_attribute(
+      markdown_test_at(target, "p", 3),
+      "data-markdown-image-only",
+    ),
+    "",
+  )
+}
+
+///|
 test "postprocess removes non-checkbox inputs and disables task checkboxes" {
   install_markdown_test_dom()
   let target = markdown_test_target()
