@@ -118,27 +118,6 @@ extern "js" fn disable_markdown_input(element : @rdom.Element) -> Unit =
   #| }
 
 ///|
-/// CSS child selectors cannot distinguish text nodes. Keep that small DOM
-/// classification at the renderer boundary and let MoonBit own the marker.
-extern "js" fn markdown_is_image_only_paragraph(
-  paragraph : @rdom.Element,
-) -> Bool =
-  #| (paragraph) => {
-  #|   const meaningfulChildren = (node) => Array.from(node.childNodes).filter(
-  #|     (child) => child.nodeType !== 3 || String(child.textContent || "").trim() !== "",
-  #|   );
-  #|   const children = meaningfulChildren(paragraph);
-  #|   if (children.length !== 1 || children[0].nodeType !== 1) return false;
-  #|   const child = children[0];
-  #|   if (child.nodeName === "IMG") return true;
-  #|   if (child.nodeName !== "A") return false;
-  #|   const linkChildren = meaningfulChildren(child);
-  #|   return linkChildren.length === 1 &&
-  #|     linkChildren[0].nodeType === 1 &&
-  #|     linkChildren[0].nodeName === "IMG";
-  #| }
-
-///|
 /// URL parsing and base resolution are browser capabilities. MoonBit decides
 /// which returned protocols are allowed for links and images.
 extern "js" fn with_resolved_markdown_uri(
