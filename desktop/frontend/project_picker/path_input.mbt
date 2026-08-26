@@ -1,25 +1,15 @@
-// Pure path-input projection for the project picker. Typing never reaches the
-// Host: it narrows the already loaded directory rows, ranks prefix matches
-// first, and turns the selected row back into the same path `Navigate` uses.
+// Path-input projection for the project picker. Ordinary typing narrows the
+// already loaded directory rows and ranks prefix matches first. A separator
+// after an exact loaded child commits that child immediately, avoiding a stale
+// parent listing while still issuing at most one Host request per directory.
 
 ///|
 fn State::editable_path(self : State) -> String {
   match self.location {
-    Some(Directory(resource)) => resource.path
+    Some(Directory(path)) => path
     Some(DriveList) => "/"
     None => ""
   }
-}
-
-///|
-/// Protocol paths encode a Windows drive as `/c:/...`. Only those paths use
-/// case-insensitive parent matching; POSIX directory names remain exact.
-fn is_windows_drive_resource_path(path : String) -> Bool {
-  guard path.length() >= 3 && path[0] == '/' && path[2] == ':' else {
-    return false
-  }
-  let drive = path[1]
-  (drive >= 'A' && drive <= 'Z') || (drive >= 'a' && drive <= 'z')
 }
 
 ///|
@@ -30,33 +20,12 @@ fn State::path_filter(self : State) -> String {
   guard self.path_draft is Some(raw) else { return "" }
   let draft = raw.trim().to_owned()
   match self.location {
-    Some(Directory(resource)) => {
-      let base = if resource.path.has_suffix("/") {
-        resource.path
-      } else {
-        resource.path + "/"
-      }
-      let case_insensitive = is_windows_drive_resource_path(resource.path)
-      let comparable_draft = if case_insensitive {
-        draft.to_lower()
-      } else {
-        draft
-      }
-      let comparable_path = if case_insensitive {
-        resource.path.to_lower()
-      } else {
-        resource.path
-      }
-      let comparable_base = if case_insensitive {
-        base.to_lower()
-      } else {
-        base
-      }
-      if comparable_draft == comparable_path ||
-        comparable_draft == comparable_base {
+    Some(Directory(path)) => {
+      let base = if path.has_suffix("/") { path } else { path + "/" }
+      if draft == path || draft == base {
         return ""
       }
-      match comparable_draft.strip_prefix(comparable_base) {
+      match draft.strip_prefix(base) {
         Some(suffix) => {
           let suffix = "\{suffix}".to_lower()
           if suffix.contains("/") {
@@ -84,9 +53,12 @@ fn State::path_filter(self : State) -> String {
 }
 
 ///|
-/// Stable local filtering: directory order is preserved inside two buckets,
-/// with prefix matches before looser contains matches.
+/// Hide stale rows during a browse; otherwise preserve directory order inside
+/// prefix and looser-contains buckets.
 fn State::visible_entries(self : State) -> Array[String] {
+  if self.loading && self.new_folder is None {
+    return []
+  }
   let query = self.path_filter()
   if query.is_empty() {
     return self.entries
@@ -110,10 +82,37 @@ fn State::visible_entries(self : State) -> Array[String] {
 ///|
 fn State::entry_target(self : State, name : String) -> String {
   match self.location {
-    Some(Directory(resource)) => resource.picker_child_path(name)
+    Some(Directory(path)) => path.picker_child_path(name)
     Some(DriveList) => "/" + name + "/"
     None => name
   }
+}
+
+///|
+/// A trailing separator commits one child from the Host-validated listing.
+/// Other paths remain editable and require Enter.
+fn State::committed_child_path(self : State, raw : String) -> String? {
+  let draft = raw.trim().to_owned()
+  guard draft.has_suffix("/") else { return None }
+  // DriveList proves Windows semantics. A directory shaped like `/c:/...`
+  // may instead be a legal POSIX path, so its identity stays case-sensitive.
+  let case_insensitive = self.location is Some(DriveList)
+  let key = fn(path : String) -> String {
+    if case_insensitive {
+      path.to_lower()
+    } else {
+      path
+    }
+  }
+  let draft = key(draft)
+  for name in self.entries {
+    let target = self.entry_target(name)
+    let path = if target.has_suffix("/") { target } else { target + "/" }
+    if draft == key(path) || draft == key(name + "/") {
+      return Some(path)
+    }
+  }
+  None
 }
 
 ///|

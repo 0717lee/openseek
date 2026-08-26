@@ -29,8 +29,8 @@ struct State {
   // across a failed create so the user can correct it without retyping.
   new_folder : String?
   // `Some` replaces the breadcrumb with an editable path. Suggestions are
-  // derived locally from `entries`; no extra Host request is issued while the
-  // user types.
+  // derived locally from `entries`; typing a separator after an exact child
+  // commits that directory without waiting for a separate Enter press.
   path_draft : String?
   path_selection : Int
   generation : Int
@@ -47,11 +47,12 @@ pub fn State::request_generation(self : State) -> Int {
 }
 
 ///|
-/// Where the picker's current listing was taken: a real host directory —
-/// the only thing Confirm can register — or the Windows-only virtual level
-/// above the drive roots, whose rows are the drives themselves.
+/// Where the picker's current listing was taken: the raw protocol path of a
+/// real host directory — the only thing Confirm can register — or the
+/// Windows-only virtual level above the drive roots. Keeping the host path
+/// here avoids conflating distinct POSIX paths through URI canonicalization.
 pub(all) enum Location {
-  Directory(@common.Uri)
+  Directory(String)
   DriveList
 } derive(Eq)
 
@@ -75,14 +76,17 @@ pub(all) enum Msg {
   // A browse or create failed; the shell pops the message as a toast and the
   // previous listing stays usable.
   Failed(channel~ : @interop.ChannelId, message~ : String, generation~ : Int)
-  // Edit and submit a path in place of the breadcrumb. Matching rows come
-  // only from the directory listing already held by this state.
+  // Edit and submit a path in place of the breadcrumb. Matching rows and
+  // separator-committed children come only from the directory listing already
+  // held by this state.
   EditPath
   PathChanged(String)
   MovePathSelection(Int)
   CompletePath
   SubmitPath
   CancelPathEdit
+  // Keyboard Escape cancels an active path edit; otherwise it closes.
+  Escape
   // Open, edit, cancel, and submit the inline new-folder composer. Creation
   // enters the new directory by delivering the same `Loaded` reply as browse.
   BeginCreateFolder
@@ -102,7 +106,7 @@ pub extend Msg with Eq::{equal, not_equal}
 /// directory on its owning device, or surface a request failure as a
 /// toast. Everything else stays inside the package.
 pub enum Outcome {
-  Picked(@interop.ChannelId, @common.Uri)
+  Picked(@interop.ChannelId, String)
   Failed(String)
 }
 
@@ -115,6 +119,15 @@ let next_request_generation : Ref[Int] = Ref(0)
 fn fresh_request_generation() -> Int {
   next_request_generation.val += 1
   next_request_generation.val
+}
+
+///|
+fn State::resume_path_edit_after_render(self : State) -> @cmd.Cmd {
+  if self.path_draft is Some(_) {
+    focus_path_after_render(false)
+  } else {
+    @cmd.none
+  }
 }
 
 ///|
@@ -154,14 +167,23 @@ pub fn State::handle(
       // a navigation that has since been superseded — is dropped.
       if channel == self.channel && generation == self.generation {
         (
-          @cmd.none,
+          self.resume_path_edit_after_render(),
           Some({
             ..self,
             location: Some(location),
             entries,
             loading: false,
             new_folder: None,
-            path_draft: None,
+            // A separator-committed browse keeps editing with the canonical
+            // path the host actually listed, avoiding a second request when
+            // the user immediately presses Enter.
+            path_draft: self.path_draft.map(_ => {
+              match location {
+                Directory(path) =>
+                  path + (if path.has_suffix("/") { "" } else { "/" })
+                DriveList => "/"
+              }
+            }),
             path_selection: 0,
           }),
           None,
@@ -179,14 +201,18 @@ pub fn State::handle(
         } else {
           "Cannot open folder: \{message}"
         }
-        (@cmd.none, Some({ ..self, loading: false }), Some(Failed(message)))
+        (
+          self.resume_path_edit_after_render(),
+          Some({ ..self, loading: false }),
+          Some(Failed(message)),
+        )
       } else {
         (@cmd.none, Some(self), None)
       }
     EditPath =>
       if !self.loading && self.new_folder is None && self.path_draft is None {
         (
-          select_path_after_render(),
+          focus_path_after_render(true),
           Some({
             ..self,
             path_draft: Some(self.editable_path()),
@@ -197,17 +223,17 @@ pub fn State::handle(
       } else if !self.loading &&
         self.new_folder is None &&
         self.path_draft is Some(_) {
-        (select_path_after_render(), Some(self), None)
+        (focus_path_after_render(true), Some(self), None)
       } else {
         (@cmd.none, Some(self), None)
       }
     PathChanged(value) =>
       if !self.loading && self.path_draft is Some(_) {
-        (
-          @cmd.none,
-          Some({ ..self, path_draft: Some(value), path_selection: 0 }),
-          None,
-        )
+        let changed = { ..self, path_draft: Some(value), path_selection: 0 }
+        match changed.committed_child_path(value) {
+          Some(path) => changed.navigate_to(emit, path, path_draft=path)
+          None => (@cmd.none, Some(changed), None)
+        }
       } else {
         (@cmd.none, Some(self), None)
       }
@@ -239,15 +265,51 @@ pub fn State::handle(
       }
     SubmitPath =>
       match self.path_destination() {
-        Some(path) if !self.loading => self.navigate_to(emit, path)
+        Some(path) if !self.loading => {
+          let already_loaded = match self.location {
+            // A trailing separator does not change a directory. Everything
+            // else stays exact; the host decides whether alternate casing is
+            // equivalent on its platform.
+            Some(Directory(current)) =>
+              current == path ||
+              (
+                current != "/" &&
+                current.trim_end(chars="/") == path.trim_end(chars="/")
+              )
+            Some(DriveList) => path.trim() == "/"
+            None => false
+          }
+          if already_loaded {
+            (
+              @cmd.none,
+              Some({ ..self, path_draft: None, path_selection: 0 }),
+              None,
+            )
+          } else {
+            self.navigate_to(emit, path)
+          }
+        }
         _ => (@cmd.none, Some(self), None)
       }
-    CancelPathEdit =>
-      if !self.loading && self.path_draft is Some(_) {
-        (@cmd.none, Some({ ..self, path_draft: None, path_selection: 0 }), None)
-      } else {
-        (@cmd.none, Some(self), None)
-      }
+    CancelPathEdit | Escape if self.path_draft is Some(_) => {
+      // Separator completion may have started a browse while the editor is
+      // still visible. Cancelling must also fence that request; otherwise its
+      // late reply would move the picker after the edit was discarded.
+      let generation = fresh_request_generation()
+      (
+        @cmd.none,
+        Some({
+          ..self,
+          loading: false,
+          path_draft: None,
+          path_selection: 0,
+          generation,
+        }),
+        None,
+      )
+    }
+    CancelPathEdit => (@cmd.none, Some(self), None)
+    Escape => (@cmd.none, None, None)
     BeginCreateFolder =>
       if self.location is Some(Directory(_)) &&
         !self.loading &&
@@ -307,13 +369,14 @@ pub fn State::handle(
 }
 
 ///|
-/// Start every path transition through one fence and clear transient input.
-/// Direct row clicks, breadcrumb navigation, pasted paths, and manual path
-/// submission therefore have identical loading and stale-reply behavior.
+/// Start every path transition through one stale-reply fence. Ordinary
+/// navigation clears the editor; separator completion passes the host-returned
+/// protocol path back as the next draft so editing can continue after reply.
 fn State::navigate_to(
   self : State,
   emit : @cmd.Emit[Msg],
   path : String,
+  path_draft? : String,
 ) -> (@cmd.Cmd, State?, Outcome?) {
   let generation = fresh_request_generation()
   (
@@ -322,7 +385,7 @@ fn State::navigate_to(
       ..self,
       loading: true,
       new_folder: None,
-      path_draft: None,
+      path_draft,
       path_selection: 0,
       generation,
     }),

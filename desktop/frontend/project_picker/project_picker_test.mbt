@@ -9,19 +9,6 @@ fn emit() -> @cmd.Emit[@project_picker.Msg] {
 }
 
 ///|
-/// A resource fixture with the same validation as protocol input, mirroring
-/// the shell's test helper for tests that live outside it.
-fn test_resource(
-  channel : @interop.ChannelId,
-  path : String,
-) -> @common.Uri raise {
-  guard @resource.of_path(channel, path) is Some(resource) else {
-    fail("test resource path was invalid: \{path}")
-  }
-  resource
-}
-
-///|
 /// Open the picker on `channel` and land one listing at `location`.
 fn listed(
   channel~ : @interop.ChannelId,
@@ -61,7 +48,7 @@ test "a picker refuses to confirm before any listing" {
 
 ///|
 test "confirm picks the browsed directory and closes the picker" {
-  let home = test_resource(@interop.ChannelId::Local, "/home/u/proj")
+  let home = "/home/u/proj"
   let picker = listed(
     channel=@interop.ChannelId::Local,
     location=@project_picker.Location::Directory(home),
@@ -84,9 +71,7 @@ test "confirm picks the browsed directory and closes the picker" {
 test "a listing for another channel is dropped" {
   let picker = listed(
     channel=@interop.ChannelId::Local,
-    location=@project_picker.Location::Directory(
-      test_resource(@interop.ChannelId::Local, "/home/u"),
-    ),
+    location=@project_picker.Location::Directory("/home/u"),
     entries=["proj"],
   )
   let (_, foreign, outcome) = @project_picker.State::handle(
@@ -94,9 +79,7 @@ test "a listing for another channel is dropped" {
     emit(),
     @project_picker.Msg::Loaded(
       channel=@interop.ChannelId::Remote("d_b"),
-      location=@project_picker.Location::Directory(
-        test_resource(@interop.ChannelId::Remote("d_b"), "/from-b"),
-      ),
+      location=@project_picker.Location::Directory("/from-b"),
       entries=["wrong"],
       generation=picker.request_generation(),
     ),
@@ -110,7 +93,7 @@ test "a listing for another channel is dropped" {
 
 ///|
 test "a stale listing leaves the picker untouched" {
-  let home = test_resource(@interop.ChannelId::Local, "/home/u")
+  let home = "/home/u"
   let picker = listed(
     channel=@interop.ChannelId::Local,
     location=@project_picker.Location::Directory(home),
@@ -131,9 +114,7 @@ test "a stale listing leaves the picker untouched" {
     emit(),
     @project_picker.Msg::Loaded(
       channel=@interop.ChannelId::Local,
-      location=@project_picker.Location::Directory(
-        test_resource(@interop.ChannelId::Local, "/elsewhere"),
-      ),
+      location=@project_picker.Location::Directory("/elsewhere"),
       entries=["wrong"],
       generation=picker.request_generation(),
     ),
@@ -145,7 +126,7 @@ test "a stale listing leaves the picker untouched" {
 
 ///|
 test "a failed navigation reports the failure and keeps the picker" {
-  let home = test_resource(@interop.ChannelId::Local, "/home/u")
+  let home = "/home/u"
   let picker = listed(
     channel=@interop.ChannelId::Local,
     location=@project_picker.Location::Directory(home),

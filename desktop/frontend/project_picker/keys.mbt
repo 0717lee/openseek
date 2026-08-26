@@ -1,7 +1,8 @@
 // The project picker's keyboard and clipboard surface. The modal has no
 // focused input of its own, so a document-level capture pair serves it for
 // exactly as long as it is open: Enter registers the browsed directory,
-// Escape closes, and a pasted path navigates straight to that location.
+// Escape cancels path editing or closes, and a pasted path navigates straight
+// to that location.
 // Capture-phase registration beats the composer and embedded editors, which
 // may still hold focus behind the modal backdrop; the handled events are
 // swallowed so those surfaces never also act on them.
@@ -32,7 +33,7 @@ fn project_picker_capture_loader(
       let mut emit = emit
       let listeners = add_project_picker_capture(
         () => scheduler.add(emit(Confirm)),
-        () => scheduler.add(emit(Close)),
+        () => scheduler.add(emit(Escape)),
         () => scheduler.add(emit(EditPath)),
         text => {
           // `getData` answers "" when the clipboard holds no text; an empty
@@ -78,11 +79,11 @@ fn capture_subscription(emit : @cmd.Emit[Msg]) -> @sub.Sub {
 /// submit, cancel, and edit normally; every other paste is a direct path jump.
 extern "js" fn add_project_picker_capture(
   on_confirm : () -> Unit,
-  on_close : () -> Unit,
+  on_escape : () -> Unit,
   on_edit_path : () -> Unit,
   on_paste : (String) -> Unit,
 ) -> @js.Value =
-  #| (onConfirm, onClose, onEditPath, onPaste) => {
+  #| (onConfirm, onEscape, onEditPath, onPaste) => {
   #|   const keydown = (event) => {
   #|     if (event.isComposing || event.repeat) return;
   #|     const editPath = (event.metaKey || event.ctrlKey) &&
@@ -105,7 +106,7 @@ extern "js" fn add_project_picker_capture(
   #|       if (editor && editor.closest(".picker-modal")) return;
   #|       event.preventDefault();
   #|       event.stopPropagation();
-  #|       onClose();
+  #|       onEscape();
   #|     }
   #|   };
   #|   const paste = (event) => {

@@ -53,7 +53,7 @@ fn browse(
 fn create_folder(
   emit : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
-  parent : @common.Uri,
+  parent : String,
   name : String,
   generation~ : Int,
 ) -> @cmd.Cmd {
@@ -62,7 +62,7 @@ fn create_folder(
       let reply = @interop.bridge_request(
         channel,
         @commands.fs_create_directory,
-        { parent: parent.path, name },
+        { parent, name },
       ) catch {
         error if @interop.bridge_failure(error) is Unknown => {
           // The host may have created the folder before the reply was lost.
@@ -109,17 +109,12 @@ fn reply_message(
 ) -> Msg {
   match reply {
     Listing(path~, entries~, ..) =>
-      match @resource.of_path(channel, path) {
-        Some(path) =>
-          Loaded(
-            channel~,
-            location=Directory(path),
-            entries=entries.filter(name => !name.is_empty()),
-            generation~,
-          )
-        None =>
-          Failed(channel~, message="malformed directory listing", generation~)
-      }
+      Loaded(
+        channel~,
+        location=Directory(path),
+        entries=entries.filter(name => !name.is_empty()),
+        generation~,
+      )
     Drives(entries~) if drives =>
       Loaded(
         channel~,
@@ -141,10 +136,10 @@ fn reply_message(
 /// The protocol path for one child of a directory the picker already
 /// loaded. Resource URI paths always use `/`, including Windows drive
 /// resources such as `/C:/code`.
-fn @common.Uri::picker_child_path(self : @common.Uri, name : String) -> String {
-  if self.path.has_suffix("/") {
-    self.path + name
+fn String::picker_child_path(self : String, name : String) -> String {
+  if self.has_suffix("/") {
+    self + name
   } else {
-    self.path + "/" + name
+    self + "/" + name
   }
 }

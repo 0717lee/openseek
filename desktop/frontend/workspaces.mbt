@@ -551,9 +551,7 @@ test "a picker message with no picker open is dropped" {
     ProjectPicker(
       @project_picker.Msg::Loaded(
         channel=Local,
-        location=@project_picker.Location::Directory(
-          @interop.ChannelId::Local.test_resource("/home/u"),
-        ),
+        location=@project_picker.Location::Directory("/home/u"),
         entries=[],
         generation=1,
       ),
@@ -585,9 +583,7 @@ test "a failed navigation keeps the listing and pops a toast" {
     ProjectPicker(
       @project_picker.Msg::Loaded(
         channel=Local,
-        location=@project_picker.Location::Directory(
-          @interop.ChannelId::Local.test_resource("/home/u"),
-        ),
+        location=@project_picker.Location::Directory("/home/u"),
         entries=["proj"],
         generation=picker_generation(opened),
       ),
@@ -648,9 +644,7 @@ test "confirming registers the browsed directory and closes the picker" {
     ProjectPicker(
       @project_picker.Msg::Loaded(
         channel=Local,
-        location=@project_picker.Location::Directory(
-          @interop.ChannelId::Local.test_resource("/home/u/proj"),
-        ),
+        location=@project_picker.Location::Directory("/home/u/proj"),
         entries=[],
         generation=picker_generation(opened),
       ),
@@ -701,9 +695,7 @@ test "the add-project chord opens the picker once and never restarts it" {
     ProjectPicker(
       @project_picker.Msg::Loaded(
         channel=Local,
-        location=@project_picker.Location::Directory(
-          @interop.ChannelId::Local.test_resource("/home/u"),
-        ),
+        location=@project_picker.Location::Directory("/home/u"),
         entries=["proj"],
         generation=picker_generation(opened),
       ),
@@ -722,7 +714,9 @@ test "the add-project chord opens the picker once and never restarts it" {
 fn confirmed_add(
   dispatch : @cmd.Emit[Msg],
   picked : @common.Uri,
+  requested? : String,
 ) -> Model raise {
+  let requested = requested.unwrap_or(picked.path)
   let (_, opened) = update(
     dispatch,
     PickProject(@interop.ChannelId::Local),
@@ -733,7 +727,7 @@ fn confirmed_add(
     ProjectPicker(
       @project_picker.Msg::Loaded(
         channel=Local,
-        location=@project_picker.Location::Directory(picked),
+        location=@project_picker.Location::Directory(requested),
         entries=[],
         generation=picker_generation(opened),
       ),
@@ -747,6 +741,20 @@ fn confirmed_add(
   )
   assert_true(confirmed.project_picker is None)
   confirmed
+}
+
+///|
+test "a confirmed add keeps the raw host path for reply correlation" {
+  let dispatch = test_dispatch()
+  let picked = @interop.ChannelId::Local.test_resource("/C:/project")
+  let confirmed = confirmed_add(dispatch, picked, requested="/C:/project")
+  let (_, resolved) = update_dev(
+    dispatch,
+    ProjectAddCommitted(added="/C:/project", paths=[picked]),
+    confirmed,
+  )
+  let (_, focused) = update_dev(dispatch, ProjectsChanged([picked]), resolved)
+  assert_eq(focused.dev().active_project, Some(picked))
 }
 
 ///|
@@ -899,7 +907,7 @@ test "a superseded confirm's reply cannot resolve the newer pending" {
     ProjectPicker(
       @project_picker.Msg::Loaded(
         channel=Local,
-        location=@project_picker.Location::Directory(second),
+        location=@project_picker.Location::Directory(second.path),
         entries=[],
         generation=picker_generation(reopened),
       ),
@@ -967,7 +975,7 @@ test "a resolved add wins over the detach fallback in one snapshot" {
     ProjectPicker(
       @project_picker.Msg::Loaded(
         channel=Local,
-        location=@project_picker.Location::Directory(picked),
+        location=@project_picker.Location::Directory(picked.path),
         entries=[],
         generation=picker_generation(opened),
       ),
@@ -1007,7 +1015,7 @@ test "confirm waits for an in-flight navigation" {
     ProjectPicker(
       @project_picker.Msg::Loaded(
         channel=Local,
-        location=@project_picker.Location::Directory(picked),
+        location=@project_picker.Location::Directory(picked.path),
         entries=[],
         generation=picker_generation(opened),
       ),
