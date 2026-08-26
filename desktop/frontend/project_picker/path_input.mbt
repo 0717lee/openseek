@@ -85,9 +85,12 @@ fn State::path_filter(self : State) -> String {
 }
 
 ///|
-/// Stable local filtering: directory order is preserved inside two buckets,
-/// with prefix matches before looser contains matches.
+/// Hide stale rows during a browse; otherwise preserve directory order inside
+/// prefix and looser-contains buckets.
 fn State::visible_entries(self : State) -> Array[String] {
+  if self.loading && self.new_folder is None {
+    return []
+  }
   let query = self.path_filter()
   if query.is_empty() {
     return self.entries
@@ -118,12 +121,9 @@ fn State::entry_target(self : State, name : String) -> String {
 }
 
 ///|
-/// A trailing separator is an explicit request to continue inside a folder.
-/// Commit only a child from the listing the Host already validated: partial,
-/// misspelled, and unrelated absolute paths remain editable and require Enter.
-/// Resource paths use `/` on every host; Windows resource locations compare
-/// case-insensitively, just like their local completion filter.
-fn State::committed_child_path(self : State, raw : String) -> (String, String)? {
+/// A trailing separator commits one child from the Host-validated listing.
+/// Other paths remain editable and require Enter.
+fn State::committed_child_path(self : State, raw : String) -> String? {
   let draft = raw.trim().to_owned()
   guard draft.has_suffix("/") else { return None }
   let case_insensitive = match self.location {
@@ -131,24 +131,19 @@ fn State::committed_child_path(self : State, raw : String) -> (String, String)? 
     Some(DriveList) => true
     None => false
   }
-  let comparable_draft = if case_insensitive { draft.to_lower() } else { draft }
+  let key = fn(path : String) -> String {
+    if case_insensitive {
+      path.to_lower()
+    } else {
+      path
+    }
+  }
+  let draft = key(draft)
   for name in self.entries {
     let target = self.entry_target(name)
-    let committed = if target.has_suffix("/") { target } else { target + "/" }
-    let child_draft = name + "/"
-    let comparable_committed = if case_insensitive {
-      committed.to_lower()
-    } else {
-      committed
-    }
-    let comparable_child_draft = if case_insensitive {
-      child_draft.to_lower()
-    } else {
-      child_draft
-    }
-    if comparable_draft == comparable_committed ||
-      comparable_draft == comparable_child_draft {
-      return Some((target, committed))
+    let path = if target.has_suffix("/") { target } else { target + "/" }
+    if draft == key(path) || draft == key(name + "/") {
+      return Some(path)
     }
   }
   None

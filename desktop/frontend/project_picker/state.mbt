@@ -119,6 +119,15 @@ fn fresh_request_generation() -> Int {
 }
 
 ///|
+fn State::resume_path_edit_after_render(self : State) -> @cmd.Cmd {
+  if self.path_draft is Some(_) {
+    focus_path_after_render(false)
+  } else {
+    @cmd.none
+  }
+}
+
+///|
 /// Open a fresh picker against one device's host, browsing from that host's
 /// home directory.
 pub fn State::open(
@@ -154,13 +163,8 @@ pub fn State::handle(
       // A listing for a picker the user already closed — or one answering
       // a navigation that has since been superseded — is dropped.
       if channel == self.channel && generation == self.generation {
-        let command = if self.path_draft is Some(_) {
-          focus_path_end_after_render()
-        } else {
-          @cmd.none
-        }
         (
-          command,
+          self.resume_path_edit_after_render(),
           Some({
             ..self,
             location: Some(location),
@@ -184,19 +188,18 @@ pub fn State::handle(
         } else {
           "Cannot open folder: \{message}"
         }
-        let command = if self.path_draft is Some(_) {
-          focus_path_end_after_render()
-        } else {
-          @cmd.none
-        }
-        (command, Some({ ..self, loading: false }), Some(Failed(message)))
+        (
+          self.resume_path_edit_after_render(),
+          Some({ ..self, loading: false }),
+          Some(Failed(message)),
+        )
       } else {
         (@cmd.none, Some(self), None)
       }
     EditPath =>
       if !self.loading && self.new_folder is None && self.path_draft is None {
         (
-          select_path_after_render(),
+          focus_path_after_render(true),
           Some({
             ..self,
             path_draft: Some(self.editable_path()),
@@ -207,7 +210,7 @@ pub fn State::handle(
       } else if !self.loading &&
         self.new_folder is None &&
         self.path_draft is Some(_) {
-        (select_path_after_render(), Some(self), None)
+        (focus_path_after_render(true), Some(self), None)
       } else {
         (@cmd.none, Some(self), None)
       }
@@ -215,12 +218,7 @@ pub fn State::handle(
       if !self.loading && self.path_draft is Some(_) {
         let changed = { ..self, path_draft: Some(value), path_selection: 0 }
         match changed.committed_child_path(value) {
-          Some((path, committed)) =>
-            { ..changed, path_draft: Some(committed) }.navigate_to(
-              emit,
-              path,
-              keep_path_edit=true,
-            )
+          Some(path) => changed.navigate_to(emit, path, path_draft=path)
           None => (@cmd.none, Some(changed), None)
         }
       } else {
@@ -258,7 +256,7 @@ pub fn State::handle(
         _ => (@cmd.none, Some(self), None)
       }
     CancelPathEdit =>
-      if !self.loading && self.path_draft is Some(_) {
+      if self.path_draft is Some(_) {
         (@cmd.none, Some({ ..self, path_draft: None, path_selection: 0 }), None)
       } else {
         (@cmd.none, Some(self), None)
@@ -322,17 +320,14 @@ pub fn State::handle(
 }
 
 ///|
-/// Start every path transition through one fence and clear transient input.
-/// Direct row clicks, breadcrumb navigation, pasted paths, and manual path
-/// submission therefore have identical loading and stale-reply behavior. A
-/// separator committed from the path editor keeps that draft visible during
-/// the request, so the loading view names the destination instead of jumping
-/// back to the previous breadcrumb.
+/// Start every path transition through one stale-reply fence. Ordinary
+/// navigation clears the editor; separator completion passes its canonical
+/// path back as the next draft so editing can continue after the reply.
 fn State::navigate_to(
   self : State,
   emit : @cmd.Emit[Msg],
   path : String,
-  keep_path_edit? : Bool = false,
+  path_draft? : String,
 ) -> (@cmd.Cmd, State?, Outcome?) {
   let generation = fresh_request_generation()
   (
@@ -341,11 +336,7 @@ fn State::navigate_to(
       ..self,
       loading: true,
       new_folder: None,
-      path_draft: if keep_path_edit {
-        self.path_draft
-      } else {
-        None
-      },
+      path_draft,
       path_selection: 0,
       generation,
     }),

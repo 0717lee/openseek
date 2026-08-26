@@ -15,34 +15,19 @@ fn path_row_id(index : Int) -> String {
 }
 
 ///|
-/// Entering path mode replaces an existing breadcrumb node, so focus and the
-/// native Cmd/Ctrl+L-style full selection happen after that render.
-fn select_path_after_render() -> @cmd.Cmd {
-  @cmd.custom_cmd(_ => select_path_input(), kind=@cmd.after_render)
+/// Focus the path after rendering it. Opening the editor selects the whole
+/// value; resuming after a browse leaves the caret at the end.
+fn focus_path_after_render(select_all : Bool) -> @cmd.Cmd {
+  @cmd.custom_cmd(_ => focus_path_input(select_all), kind=@cmd.after_render)
 }
 
 ///|
-extern "js" fn select_path_input() -> Unit =
-  #| () => {
-  #|   const input = document.getElementById("project-picker-path-input");
-  #|   input?.focus();
-  #|   input?.select();
-  #| }
-
-///|
-/// A separator-triggered browse temporarily disables the path input. Restore
-/// focus at the end once its listing arrives so typing can continue into the
-/// next child without reopening path mode.
-fn focus_path_end_after_render() -> @cmd.Cmd {
-  @cmd.custom_cmd(_ => focus_path_input_end(), kind=@cmd.after_render)
-}
-
-///|
-extern "js" fn focus_path_input_end() -> Unit =
-  #| () => {
+extern "js" fn focus_path_input(select_all : Bool) -> Unit =
+  #| (selectAll) => {
   #|   const input = document.getElementById("project-picker-path-input");
   #|   if (!input) return;
   #|   input.focus();
+  #|   if (selectAll) return input.select();
   #|   const end = input.value.length;
   #|   input.setSelectionRange(end, end);
   #| }
@@ -62,13 +47,9 @@ extern "js" fn scroll_path_row(id : String) -> Unit =
 
 ///|
 pub fn view(emit : @cmd.Emit[Msg], picker : State) -> @html.Html {
-  // Keep the previous listing in state so a failed request can restore it,
-  // but never render those rows as if they belonged to the pending location.
-  let browsing = picker.loading && picker.new_folder is None
-  let visible_entries = if browsing { [] } else { picker.visible_entries() }
-  let filter_active = !browsing && !picker.path_filter().is_empty()
-  let suggestion_active = !browsing &&
-    picker.selected_path_suggestion() is Some(_)
+  let visible_entries = picker.visible_entries()
+  let filter_active = !picker.path_filter().is_empty()
+  let suggestion_active = picker.selected_path_suggestion() is Some(_)
   let path_editing = picker.path_draft is Some(_)
   let rows : Array[@html.Html] = []
   if picker.new_folder is Some(name) {
@@ -277,7 +258,6 @@ fn path_editor(
     @html.button(
       class="picker-path-editor-cancel",
       type_="button",
-      disabled=picker.loading,
       title="Cancel path editing",
       on_click=emit(CancelPathEdit),
       attrs=@html.Attrs::build().aria_label("Cancel path editing"),
