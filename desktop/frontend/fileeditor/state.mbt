@@ -412,11 +412,12 @@ pub(all) struct State {
   // document state. The imperative DiffEditor retains both models while
   // applying it.
   review_diff_layout : ReviewDiffLayout
-  // The requested MoonBit-aware algorithm and comment policy are desktop
+  // The requested MoonBit-aware algorithm and filtering policy are desktop
   // preferences. The provider is forced to Core for other file types while
   // these values remain parked for the next `.mbt` comparison.
   review_diff_mode : ReviewDiffMode
   review_diff_ignore_comments : Bool
+  review_diff_ignore_tests : Bool
   // Updated from DiffEditor's completed provider transaction. `None` means a
   // new model/options calculation has not yet produced host-visible status.
   review_diff_status : ReviewDiffStatus?
@@ -536,6 +537,7 @@ pub fn State::empty() -> State {
     review_diff_layout: ReviewSideBySide,
     review_diff_mode: ReviewDiffCore,
     review_diff_ignore_comments: true,
+    review_diff_ignore_tests: true,
     review_diff_status: None,
     review_diff_navigation_available: false,
     changes: ChangeListIdle,
@@ -604,6 +606,7 @@ pub fn State::prepare_owner(
     review_diff_layout: self.review_diff_layout,
     review_diff_mode: self.review_diff_mode,
     review_diff_ignore_comments: self.review_diff_ignore_comments,
+    review_diff_ignore_tests: self.review_diff_ignore_tests,
     changes_generation: self.changes_generation,
     request_epoch: self.request_epoch + 1,
     file_link_generation: self.file_link_generation,
@@ -835,6 +838,7 @@ pub(all) enum Msg {
   // preference parked while their provider is forced to Core.
   ReviewDiffModeSelected(ReviewDiffMode)
   ToggleReviewDiffIgnoreComments
+  ToggleReviewDiffIgnoreTests
   // Provider completion is asynchronous with respect to the Rabbita update
   // loop. This message republishes the requested/effective mode so the host
   // toolbar can announce Tree→Token and specialized→Core fallbacks.

@@ -1861,9 +1861,7 @@ fn review_diff_mode_toolbar(
   let fallback = review_diff_fallback_text(state)
   @html.div(
     class="review-diff-mode-toolbar",
-    attrs=@html.Attrs::build()
-      .role("toolbar")
-      .aria_label("Comparison algorithm"),
+    attrs=@html.Attrs::build().role("toolbar").aria_label("Comparison options"),
     [
       review_diff_mode_button(dispatch, state.review_diff_mode, ReviewDiffCore),
       review_diff_mode_button(dispatch, state.review_diff_mode, ReviewDiffToken),
@@ -1871,9 +1869,9 @@ fn review_diff_mode_toolbar(
       @html.button(
         type_="button",
         class=if state.review_diff_ignore_comments {
-          "review-badge review-badge-action active"
+          "review-badge review-badge-action review-filter-toggle active"
         } else {
-          "review-badge review-badge-action"
+          "review-badge review-badge-action review-filter-toggle"
         },
         title=if state.review_diff_mode == ReviewDiffCore {
           "Available in Token and Tree diff"
@@ -1887,7 +1885,34 @@ fn review_diff_mode_toolbar(
         attrs=@html.Attrs::build()
           .aria_label("Ignore comments")
           .aria_pressed(state.review_diff_ignore_comments.to_string()),
-        "Ignore comments",
+        [
+          @html.span(class="review-filter-icon", "//"),
+          @html.span(class="review-filter-label", "Ignore comments"),
+        ],
+      ),
+      @html.button(
+        type_="button",
+        class=if state.review_diff_ignore_tests {
+          "review-badge review-badge-action review-filter-toggle active"
+        } else {
+          "review-badge review-badge-action review-filter-toggle"
+        },
+        title=if state.review_diff_mode == ReviewDiffCore {
+          "Available in Token and Tree diff"
+        } else if state.review_diff_ignore_tests {
+          "Include tests in the comparison"
+        } else {
+          "Ignore MoonBit test blocks"
+        },
+        disabled=state.review_diff_mode == ReviewDiffCore,
+        on_click=dispatch(ToggleReviewDiffIgnoreTests),
+        attrs=@html.Attrs::build()
+          .aria_label("Ignore tests")
+          .aria_pressed(state.review_diff_ignore_tests.to_string()),
+        [
+          @html.span(class="review-filter-icon", "T"),
+          @html.span(class="review-filter-label", "Ignore tests"),
+        ],
       ),
       @html.span(
         class=if fallback.is_empty() {

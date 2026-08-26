@@ -115,11 +115,49 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
     enabled_navigation.contains("aria-label=\"Diff change navigation\""),
   )
   assert_false(enabled_navigation.contains("disabled"))
-  assert_true(diff_breadcrumb.contains("aria-label=\"Comparison algorithm\""))
+  assert_true(diff_breadcrumb.contains("aria-label=\"Comparison options\""))
   assert_true(diff_breadcrumb.contains("data-diff-mode=\"core\""))
   assert_true(diff_breadcrumb.contains("data-diff-mode=\"token\""))
   assert_true(diff_breadcrumb.contains("data-diff-mode=\"tree\""))
   assert_true(diff_breadcrumb.contains("aria-label=\"Ignore comments\""))
+  assert_true(diff_breadcrumb.contains("aria-label=\"Ignore tests\""))
+  assert_true(diff_breadcrumb.contains("class=\"review-filter-icon\">T"))
+  let include_tests_toolbar = render_review_html(
+    review_diff_mode_toolbar(
+      test_emit(),
+      { ..diff_state, review_diff_mode: ReviewDiffToken },
+      ctx,
+    ),
+  )
+  assert_false(include_tests_toolbar.contains("disabled"))
+  assert_true(
+    include_tests_toolbar.contains("title=\"Include tests in the comparison\""),
+  )
+  assert_true(
+    include_tests_toolbar.contains(
+      "aria-label=\"Ignore tests\" aria-pressed=\"true\"",
+    ),
+  )
+  let compare_tests_toolbar = render_review_html(
+    review_diff_mode_toolbar(
+      test_emit(),
+      {
+        ..diff_state,
+        review_diff_mode: ReviewDiffTree,
+        review_diff_ignore_tests: false,
+      },
+      ctx,
+    ),
+  )
+  assert_false(compare_tests_toolbar.contains("disabled"))
+  assert_true(
+    compare_tests_toolbar.contains("title=\"Ignore MoonBit test blocks\""),
+  )
+  assert_true(
+    compare_tests_toolbar.contains(
+      "aria-label=\"Ignore tests\" aria-pressed=\"false\"",
+    ),
+  )
 
   let fallback_breadcrumb = render_review_html(
     breadcrumb_view(
@@ -262,7 +300,7 @@ test "non-MoonBit full diff omits specialized provider controls" {
       ctx,
     ),
   )
-  assert_false(breadcrumb.contains("aria-label=\"Comparison algorithm\""))
+  assert_false(breadcrumb.contains("aria-label=\"Comparison options\""))
   assert_true(breadcrumb.contains("aria-label=\"Diff change navigation\""))
   assert_true(breadcrumb.contains("data-action=\"previous-diff-change\""))
   assert_true(breadcrumb.contains("data-action=\"next-diff-change\""))

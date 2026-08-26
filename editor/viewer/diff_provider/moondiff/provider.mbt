@@ -24,6 +24,7 @@ pub(all) struct MoonDiffStatus {
 pub struct MoonDocumentDiffProvider {
   mut mode : MoonDiffMode
   mut ignore_comments : Bool
+  mut ignore_tests : Bool
   mut status : MoonDiffStatus
   did_change : @base_common.Emitter[Unit]
   mut disposed : Bool
@@ -33,10 +34,12 @@ pub struct MoonDocumentDiffProvider {
 pub fn MoonDocumentDiffProvider::MoonDocumentDiffProvider(
   mode? : MoonDiffMode = Core,
   ignore_comments? : Bool = true,
+  ignore_tests? : Bool = true,
 ) -> MoonDocumentDiffProvider {
   {
     mode,
     ignore_comments,
+    ignore_tests,
     status: { requested: mode, effective: mode, fell_back: false, },
     did_change: Emitter(),
     disposed: false,
@@ -85,6 +88,26 @@ pub fn MoonDocumentDiffProvider::get_ignore_comments(
   self : MoonDocumentDiffProvider,
 ) -> Bool {
   self.ignore_comments
+}
+
+///|
+pub fn MoonDocumentDiffProvider::set_ignore_tests(
+  self : MoonDocumentDiffProvider,
+  ignore_tests : Bool,
+) -> Unit {
+  if self.disposed || self.ignore_tests == ignore_tests {
+    return
+  }
+  self.ignore_tests = ignore_tests
+  self.status = { requested: self.mode, effective: self.mode, fell_back: false }
+  self.did_change.fire(())
+}
+
+///|
+pub fn MoonDocumentDiffProvider::get_ignore_tests(
+  self : MoonDocumentDiffProvider,
+) -> Bool {
+  self.ignore_tests
 }
 
 ///|
@@ -193,7 +216,7 @@ fn valid_hunk_range(start : Int, len : Int, total : Int) -> Bool {
 
 ///|
 fn valid_line(
-  line : @tokdiff.DiffLine,
+  line : @mbtdiff.DiffLine,
   expected_index : Int,
   source : Array[String],
 ) -> Bool {
@@ -204,7 +227,7 @@ fn valid_line(
 }
 
 ///|
-fn changed_ranges(line : @tokdiff.DiffLine) -> Array[@base_common.Range] {
+fn changed_ranges(line : @mbtdiff.DiffLine) -> Array[@base_common.Range] {
   let ranges = []
   let mut column = 1
   for segment in line.segments {
@@ -221,8 +244,8 @@ fn changed_ranges(line : @tokdiff.DiffLine) -> Array[@base_common.Range] {
 
 ///|
 fn paired_inner_changes(
-  original : @tokdiff.DiffLine,
-  modified : @tokdiff.DiffLine,
+  original : @mbtdiff.DiffLine,
+  modified : @mbtdiff.DiffLine,
 ) -> Array[@diff.RangeMapping]? {
   let original_ranges = changed_ranges(original)
   let modified_ranges = changed_ranges(modified)
@@ -241,8 +264,8 @@ fn paired_inner_changes(
 
 ///|
 fn paired_change(
-  original : @tokdiff.DiffLine,
-  modified : @tokdiff.DiffLine,
+  original : @mbtdiff.DiffLine,
+  modified : @mbtdiff.DiffLine,
 ) -> @diff.DetailedLineRangeMapping {
   DetailedLineRangeMapping(
     LineRange(original.index + 1, original.index + 2),
@@ -253,7 +276,7 @@ fn paired_change(
 
 ///|
 fn old_only_change(
-  original : @tokdiff.DiffLine,
+  original : @mbtdiff.DiffLine,
   modified_cursor : Int,
 ) -> @diff.DetailedLineRangeMapping {
   DetailedLineRangeMapping(
@@ -265,7 +288,7 @@ fn old_only_change(
 
 ///|
 fn new_only_change(
-  modified : @tokdiff.DiffLine,
+  modified : @mbtdiff.DiffLine,
   original_cursor : Int,
 ) -> @diff.DetailedLineRangeMapping {
   DetailedLineRangeMapping(
@@ -282,6 +305,17 @@ fn line_ranges_intersect_or_touch(
 ) -> Bool {
   left.end_line_number_exclusive >= right.start_line_number &&
   right.end_line_number_exclusive >= left.start_line_number
+}
+
+///|
+fn line_ranges_intersect(
+  left : @base_common.LineRange,
+  right : @base_common.LineRange,
+) -> Bool {
+  !left.is_empty() &&
+  !right.is_empty() &&
+  left.start_line_number < right.end_line_number_exclusive &&
+  right.start_line_number < left.end_line_number_exclusive
 }
 
 ///|
@@ -339,8 +373,135 @@ fn append_coalesced_alignment(
 }
 
 ///|
+fn mapping_overlaps_document(
+  mapping : @diff.LineRangeMapping,
+  changes : Array[@diff.DetailedLineRangeMapping],
+  alignments : Array[@diff.LineRangeMapping],
+) -> Bool {
+  for change in changes {
+    if (
+        !mapping.original.is_empty() &&
+        line_ranges_intersect(mapping.original, change.original)
+      ) ||
+      (
+        !mapping.modified.is_empty() &&
+        line_ranges_intersect(mapping.modified, change.modified)
+      ) {
+      return true
+    }
+  }
+  for alignment in alignments {
+    if (
+        !mapping.original.is_empty() &&
+        line_ranges_intersect(mapping.original, alignment.original)
+      ) ||
+      (
+        !mapping.modified.is_empty() &&
+        line_ranges_intersect(mapping.modified, alignment.modified)
+      ) {
+      return true
+    }
+  }
+  false
+}
+
+///|
+// moondiff 0.0.3 can place a filtered one-sided row in a top-level section
+// outside the visible hunk that explains the adjacent code change. Recover
+// only disjoint one-sided rows as geometry; overlapping rows are already
+// represented by a visible change or an IgnoredBlock alignment.
+fn append_unrepresented_one_sided_alignments(
+  unfiltered : @diff.DocumentDiff,
+  changes : Array[@diff.DetailedLineRangeMapping],
+  alignments : Array[@diff.LineRangeMapping],
+) -> Unit {
+  for change in unfiltered.changes {
+    let mapping = change.line_mapping()
+    if (
+        (mapping.original.is_empty() && !mapping.modified.is_empty()) ||
+        (mapping.modified.is_empty() && !mapping.original.is_empty())
+      ) &&
+      !mapping_overlaps_document(mapping, changes, alignments) {
+      alignments.push(mapping)
+    }
+  }
+}
+
+///|
+fn append_layout_gap(
+  old_start : Int,
+  old_len : Int,
+  new_start : Int,
+  new_len : Int,
+  changes : Array[@diff.DetailedLineRangeMapping],
+  alignments : Array[@diff.LineRangeMapping],
+) -> Unit {
+  if old_len == new_len {
+    return
+  }
+  let mapping = @diff.LineRangeMapping(
+    @base_common.LineRange(old_start + 1, old_start + old_len + 1),
+    @base_common.LineRange(new_start + 1, new_start + new_len + 1),
+  )
+  if !mapping_overlaps_document(mapping, changes, alignments) {
+    alignments.push(mapping)
+  }
+}
+
+///|
+// Test filtering removes whole top-level sections before hunk calculation.
+// Their line spans remain observable as gaps in DiffLayout, so preserve only
+// their height difference as neutral alignment geometry.
+fn append_layout_gap_alignments(
+  layout : @mbtdiff.DiffLayout,
+  original_line_count : Int,
+  modified_line_count : Int,
+  changes : Array[@diff.DetailedLineRangeMapping],
+  alignments : Array[@diff.LineRangeMapping],
+) -> Unit {
+  guard layout is @mbtdiff.DiffLayout::TopLevelSections(sections) else {
+    return
+  }
+  let mut old_cursor = 0
+  let mut new_cursor = 0
+  for section in sections {
+    let old_start = section.old.map(range => range.start).unwrap_or(old_cursor)
+    let new_start = section.new.map(range => range.start).unwrap_or(new_cursor)
+    if old_start < old_cursor || new_start < new_cursor {
+      return
+    }
+    append_layout_gap(
+      old_cursor,
+      old_start - old_cursor,
+      new_cursor,
+      new_start - new_cursor,
+      changes,
+      alignments,
+    )
+    match section.old {
+      Some(range) => old_cursor = range.start + range.len
+      None => ()
+    }
+    match section.new {
+      Some(range) => new_cursor = range.start + range.len
+      None => ()
+    }
+  }
+  if old_cursor <= original_line_count && new_cursor <= modified_line_count {
+    append_layout_gap(
+      old_cursor,
+      original_line_count - old_cursor,
+      new_cursor,
+      modified_line_count - new_cursor,
+      changes,
+      alignments,
+    )
+  }
+}
+
+///|
 fn append_rows(
-  rows : Array[@tokdiff.DiffRow],
+  rows : ArrayView[@mbtdiff.DiffRow],
   render_changes : Bool,
   original_lines : Array[String],
   modified_lines : Array[String],
@@ -405,7 +566,7 @@ fn append_rows(
 
 ///|
 fn adapt_document(
-  document : @tokdiff.DiffDocument,
+  document : @mbtdiff.DiffDocument,
   original_lines : Array[String],
   modified_lines : Array[String],
 ) -> @diff.DocumentDiff? {
@@ -468,64 +629,77 @@ fn adapt_document(
 }
 
 ///|
+fn unfiltered_lexical_diff(
+  original : @model.TextSnapshot,
+  modified : @model.TextSnapshot,
+  original_lines : Array[String],
+  modified_lines : Array[String],
+) -> @diff.DocumentDiff? {
+  let document = @mbtdiff.diff(
+    original.get_value(),
+    modified.get_value(),
+    options=@mbtdiff.DiffOptions(
+      context_lines=0,
+      ignore_comments=false,
+      ignore_tests=false,
+      mode=@mbtdiff.DiffMode::Lexical,
+    ),
+  ).document()
+  adapt_document(document, original_lines, modified_lines)
+}
+
+///|
 fn specialized_diff(
   mode : MoonDiffMode,
   ignore_comments : Bool,
+  ignore_tests : Bool,
   original : @model.TextSnapshot,
   modified : @model.TextSnapshot,
 ) -> (@diff.DocumentDiff, MoonDiffMode, Bool)? {
   let original_lines = snapshot_lines(original)
   let modified_lines = snapshot_lines(modified)
-  let (document, effective, fell_back) = match mode {
+  let diff_mode = match mode {
     Core => return None
-    Token =>
-      (
-        @tokdiff.diff(
-          old=original_lines,
-          new=modified_lines,
-          context=0,
-          line_cleanup=true,
-          ignore_comments~,
-        ),
-        Token,
-        false,
-      )
-    Tree => {
-      let result = @mbtdiff.diff(
-        original.get_value(),
-        modified.get_value(),
-        options=@mbtdiff.DiffOptions::new(context_lines=0, ignore_comments~),
-      )
-      (
-        result.document(),
-        if result.has_fallback() {
-          Token
-        } else {
-          Tree
-        },
-        result.has_fallback(),
-      )
-    }
+    Token => @mbtdiff.DiffMode::Lexical
+    Tree => @mbtdiff.DiffMode::Ast
   }
+  let result = @mbtdiff.diff(
+    original.get_value(),
+    modified.get_value(),
+    options=@mbtdiff.DiffOptions(
+      context_lines=0,
+      ignore_comments~,
+      ignore_tests~,
+      mode=diff_mode,
+    ),
+  )
+  let fell_back = mode == Tree && !result.fallbacks().is_empty()
+  let effective = if fell_back { Token } else { mode }
+  let document = result.document()
   guard adapt_document(document, original_lines, modified_lines) is Some(diff) else {
     return None
   }
-  // Token has no typed failure channel. A differing source cannot silently
-  // become an empty comparison unless ignored rows explain the geometry.
+  if ignore_tests {
+    append_layout_gap_alignments(
+      result.layout(),
+      original_lines.length(),
+      modified_lines.length(),
+      diff.changes,
+      diff.additional_alignments,
+    )
+  }
+  // A differing source cannot silently become an empty comparison unless the
+  // active filter classified every change as ignored.
   if original_lines != modified_lines &&
     diff.changes.is_empty() &&
     diff.additional_alignments.is_empty() {
-    if !ignore_comments {
+    if !(ignore_comments || ignore_tests) ||
+      !(result.status() is @mbtdiff.DiffStatus::IgnoredOnly) {
       return None
     }
-    let unfiltered = @tokdiff.diff(
-      old=original_lines,
-      new=modified_lines,
-      context=0,
-      line_cleanup=true,
-      ignore_comments=false,
-    )
-    guard adapt_document(unfiltered, original_lines, modified_lines)
+    guard unfiltered_lexical_diff(
+        original, modified, original_lines, modified_lines,
+      )
       is Some(unfiltered_diff) &&
       !unfiltered_diff.changes.is_empty() else {
       return None
@@ -542,6 +716,19 @@ fn specialized_diff(
       additional_alignments: ignored_alignments,
     }
     return Some((result, effective, fell_back))
+  }
+  if (ignore_comments || ignore_tests) &&
+    @diff.normalize_and_validate_document_diff(diff, original, modified) is None {
+    if unfiltered_lexical_diff(
+        original, modified, original_lines, modified_lines,
+      )
+      is Some(unfiltered_diff) {
+      append_unrepresented_one_sided_alignments(
+        unfiltered_diff,
+        diff.changes,
+        diff.additional_alignments,
+      )
+    }
   }
   Some((diff, effective, fell_back))
 }
@@ -596,7 +783,13 @@ pub impl @diff.DocumentDiffProvider for MoonDocumentDiffProvider with fn compute
     }
     return self.settle_specialized_or_core(
       requested,
-      specialized_diff(requested, self.ignore_comments, original, modified),
+      specialized_diff(
+        requested,
+        self.ignore_comments,
+        self.ignore_tests,
+        original,
+        modified,
+      ),
       if options.ignore_trim_whitespace {
         lenient
       } else {

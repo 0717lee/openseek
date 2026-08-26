@@ -161,6 +161,126 @@ test "equal-length ignored-only edit is a valid empty specialized result" {
 }
 
 ///|
+test "Token and Tree ignore MoonBit test-only edits" {
+  for mode in [Token, Tree] {
+    let provider = MoonDocumentDiffProvider(
+      mode~,
+      ignore_comments=false,
+      ignore_tests=true,
+    )
+    let ignored = compute_with_provider(
+      provider, "test \"sample\" { old_value() }", "test \"sample\" { new_value() }",
+    )
+    assert_true(ignored.changes.is_empty())
+    assert_true(ignored.additional_alignments.is_empty())
+    assert_eq(provider.get_status(), {
+      requested: mode,
+      effective: mode,
+      fell_back: false,
+    })
+    provider.set_ignore_tests(false)
+    let visible = compute_with_provider(
+      provider, "test \"sample\" { old_value() }", "test \"sample\" { new_value() }",
+    )
+    assert_false(visible.changes.is_empty())
+    provider.dispose()
+  }
+}
+
+///|
+test "ignored inserted tests become geometry-only additional alignments" {
+  for mode in [Token, Tree] {
+    let provider = MoonDocumentDiffProvider(
+      mode~,
+      ignore_comments=false,
+      ignore_tests=true,
+    )
+    let result = compute_with_provider(
+      provider, "fn stable() {}", "test \"sample\" { new_value() }\nfn stable() {}",
+    )
+    assert_true(result.changes.is_empty())
+    assert_eq(result.additional_alignments, [
+      LineRangeMapping(LineRange(1, 1), LineRange(1, 2)),
+    ])
+    assert_eq(provider.get_status().effective, mode)
+    let deleted = compute_with_provider(
+      provider, "test \"sample\" { old_value() }\nfn stable() {}", "fn stable() {}",
+    )
+    assert_true(deleted.changes.is_empty())
+    assert_eq(deleted.additional_alignments, [
+      LineRangeMapping(LineRange(1, 2), LineRange(1, 1)),
+    ])
+    assert_eq(provider.get_status().effective, mode)
+    provider.dispose()
+  }
+}
+
+///|
+test "test filtering composes with visible production changes" {
+  for mode in [Token, Tree] {
+    let provider = MoonDocumentDiffProvider(
+      mode~,
+      ignore_comments=false,
+      ignore_tests=true,
+    )
+    let result = compute_with_provider(
+      provider, "fn production() { old_value() }\nfn stable() {}", "fn production() { new_value() }\ntest \"sample\" { new_test() }\nfn stable() {}",
+    )
+    assert_eq(
+      result.changes.map(change => (change.original, change.modified)),
+      [(LineRange(1, 2), LineRange(1, 2))],
+    )
+    assert_eq(result.additional_alignments, [
+      LineRangeMapping(LineRange(2, 2), LineRange(2, 3)),
+    ])
+    assert_eq(provider.get_status().effective, mode)
+    provider.dispose()
+  }
+}
+
+///|
+test "test and comment filters remain independent" {
+  for mode in [Token, Tree] {
+    let provider = MoonDocumentDiffProvider(
+      mode~,
+      ignore_comments=false,
+      ignore_tests=true,
+    )
+    let visible = compute_with_provider(
+      provider, "fn value() { // old\n}", "fn value() { // new\n}",
+    )
+    assert_false(visible.changes.is_empty())
+    provider.set_ignore_comments(true)
+    let ignored = compute_with_provider(
+      provider, "fn value() { // old\n}", "fn value() { // new\n}",
+    )
+    assert_true(ignored.changes.is_empty())
+    provider.dispose()
+  }
+}
+
+///|
+test "parse failure keeps test changes visible" {
+  for mode in [Token, Tree] {
+    let provider = MoonDocumentDiffProvider(
+      mode~,
+      ignore_comments=false,
+      ignore_tests=true,
+    )
+    let result = compute_with_provider(
+      provider, "test \"sample\" { old_value( }", "test \"sample\" { new_value( }",
+    )
+    assert_false(result.changes.is_empty())
+    assert_eq(provider.get_status(), {
+      requested: mode,
+      effective: Token,
+      fell_back: mode is Tree,
+    })
+    provider.dispose()
+  }
+}
+
+///|
 test "Token keeps ignored inserted comments separate from code insertions" {
   let provider = MoonDocumentDiffProvider(mode=Token, ignore_comments=true)
   let result = compute_with_provider(
@@ -291,13 +411,16 @@ test "invalid specialized candidates settle to Core without reentrant changes" {
 ///|
 test "provider options notify through the standard provider contract" {
   let provider = MoonDocumentDiffProvider()
+  assert_true(provider.get_ignore_tests())
   let object : &@diff.DocumentDiffProvider = provider
   let updates = Ref(0)
   let subscription = object.on_did_change(() => updates.val += 1)
   provider.set_mode(Token)
   provider.set_ignore_comments(false)
   provider.set_ignore_comments(false)
-  assert_eq(updates.val, 2)
+  provider.set_ignore_tests(false)
+  provider.set_ignore_tests(false)
+  assert_eq(updates.val, 3)
   subscription.dispose()
   provider.dispose()
 }

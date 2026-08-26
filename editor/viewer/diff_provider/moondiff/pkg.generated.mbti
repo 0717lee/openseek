@@ -34,17 +34,20 @@ pub fn MoonDiffStatus::to_repr(Self) -> @debug.Repr
 pub struct MoonDocumentDiffProvider {
   mut mode : MoonDiffMode
   mut ignore_comments : Bool
+  mut ignore_tests : Bool
   mut status : MoonDiffStatus
   did_change : @common.Emitter[Unit]
   mut disposed : Bool
 }
-pub fn MoonDocumentDiffProvider::MoonDocumentDiffProvider(mode? : MoonDiffMode, ignore_comments? : Bool) -> Self
+pub fn MoonDocumentDiffProvider::MoonDocumentDiffProvider(mode? : MoonDiffMode, ignore_comments? : Bool, ignore_tests? : Bool) -> Self
 pub fn MoonDocumentDiffProvider::as_document_diff_provider(Self) -> &@diff.DocumentDiffProvider
 pub fn MoonDocumentDiffProvider::dispose(Self) -> Unit
 pub fn MoonDocumentDiffProvider::get_ignore_comments(Self) -> Bool
+pub fn MoonDocumentDiffProvider::get_ignore_tests(Self) -> Bool
 pub fn MoonDocumentDiffProvider::get_mode(Self) -> MoonDiffMode
 pub fn MoonDocumentDiffProvider::get_status(Self) -> MoonDiffStatus
 pub fn MoonDocumentDiffProvider::set_ignore_comments(Self, Bool) -> Unit
+pub fn MoonDocumentDiffProvider::set_ignore_tests(Self, Bool) -> Unit
 pub fn MoonDocumentDiffProvider::set_mode(Self, MoonDiffMode) -> Unit
 pub impl @diff.DocumentDiffProvider for MoonDocumentDiffProvider
 

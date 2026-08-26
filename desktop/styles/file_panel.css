@@ -1779,6 +1779,7 @@ button.git-history-file:focus-visible {
   white-space: nowrap;
   overflow: visible;
   background: var(--color-bg-surface);
+  container: review-breadcrumb / inline-size;
 }
 
 /* The path crumbs grow and ellipsize. */
@@ -2069,6 +2070,30 @@ button.git-history-file:focus-visible {
 .review-diff-mode-toolbar .review-badge:disabled {
   cursor: default;
   opacity: 0.5;
+}
+
+.review-filter-icon {
+  display: none;
+  font-family: var(--font-family-mono);
+  font-weight: 600;
+}
+
+@container review-breadcrumb (max-width: 600px) {
+  .review-diff-mode-toolbar .review-filter-toggle {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    min-width: 26px;
+    padding-inline: 0;
+  }
+
+  .review-filter-icon {
+    display: inline;
+  }
+
+  .review-filter-label {
+    display: none;
+  }
 }
 
 .review-diff-mode-status {

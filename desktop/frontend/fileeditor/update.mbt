@@ -1900,6 +1900,7 @@ pub fn sync(
         review_diff_layout: state.review_diff_layout,
         review_diff_mode: state.review_diff_mode,
         review_diff_ignore_comments: state.review_diff_ignore_comments,
+        review_diff_ignore_tests: state.review_diff_ignore_tests,
         changes_collapsed: state.changes_collapsed,
         git_graph_collapsed: state.git_graph_collapsed,
         // Request tokens must outlive the per-conversation cache. Resetting
@@ -2267,7 +2268,11 @@ pub fn update(
     ReviewDiffModeSelected(mode) => {
       guard moon_diff_ready(state, ctx) else { return (@cmd.none, state) }
       (
-        apply_review_diff_provider(mode, state.review_diff_ignore_comments),
+        apply_review_diff_provider(
+          mode,
+          state.review_diff_ignore_comments,
+          state.review_diff_ignore_tests,
+        ),
         { ..state, review_diff_mode: mode, review_diff_status: None, },
       )
     }
@@ -2278,10 +2283,33 @@ pub fn update(
       }
       let ignore_comments = !state.review_diff_ignore_comments
       (
-        apply_review_diff_provider(state.review_diff_mode, ignore_comments),
+        apply_review_diff_provider(
+          state.review_diff_mode,
+          ignore_comments,
+          state.review_diff_ignore_tests,
+        ),
         {
           ..state,
           review_diff_ignore_comments: ignore_comments,
+          review_diff_status: None,
+        },
+      )
+    }
+    ToggleReviewDiffIgnoreTests => {
+      guard moon_diff_ready(state, ctx) &&
+        state.review_diff_mode != ReviewDiffCore else {
+        return (@cmd.none, state)
+      }
+      let ignore_tests = !state.review_diff_ignore_tests
+      (
+        apply_review_diff_provider(
+          state.review_diff_mode,
+          state.review_diff_ignore_comments,
+          ignore_tests,
+        ),
+        {
+          ..state,
+          review_diff_ignore_tests: ignore_tests,
           review_diff_status: None,
         },
       )
