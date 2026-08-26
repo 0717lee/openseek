@@ -277,7 +277,7 @@ test "typing a separator after an exact child navigates immediately" {
   assert_false(loading_html.contains("Open folder go"))
 
   let git = test_resource(@interop.ChannelId::Local, "/Users/dii/git")
-  let cancelled = updated(navigating, CancelPathEdit)
+  let cancelled = updated(navigating, Escape)
   assert_true(cancelled.loading)
   assert_eq(cancelled.path_draft, None)
   let loaded_after_cancel = updated(

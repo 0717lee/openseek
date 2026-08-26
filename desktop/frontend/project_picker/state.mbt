@@ -84,6 +84,8 @@ pub(all) enum Msg {
   CompletePath
   SubmitPath
   CancelPathEdit
+  // Keyboard Escape cancels an active path edit; otherwise it closes.
+  Escape
   // Open, edit, cancel, and submit the inline new-folder composer. Creation
   // enters the new directory by delivering the same `Loaded` reply as browse.
   BeginCreateFolder
@@ -255,12 +257,10 @@ pub fn State::handle(
         Some(path) if !self.loading => self.navigate_to(emit, path)
         _ => (@cmd.none, Some(self), None)
       }
-    CancelPathEdit =>
-      if self.path_draft is Some(_) {
-        (@cmd.none, Some({ ..self, path_draft: None, path_selection: 0 }), None)
-      } else {
-        (@cmd.none, Some(self), None)
-      }
+    CancelPathEdit | Escape if self.path_draft is Some(_) =>
+      (@cmd.none, Some({ ..self, path_draft: None, path_selection: 0 }), None)
+    CancelPathEdit => (@cmd.none, Some(self), None)
+    Escape => (@cmd.none, None, None)
     BeginCreateFolder =>
       if self.location is Some(Directory(_)) &&
         !self.loading &&
