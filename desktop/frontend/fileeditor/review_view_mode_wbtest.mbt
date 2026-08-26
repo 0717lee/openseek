@@ -5,6 +5,7 @@ test "new reviews default to the full diff" {
   let state = owned_state()
   assert_true(state.review_view_mode is ReviewDiff)
   assert_true(state.review_diff_layout is ReviewSideBySide)
+  assert_false(state.review_diff_navigation_available)
   let (_, opened) = open_changed_document(
     test_emit(),
     state,
@@ -16,6 +17,99 @@ test "new reviews default to the full diff" {
     opened.docs.get(path)
     is Some({ review: Some({ view_mode: ReviewDiff, .. }), .. }),
   )
+}
+
+///|
+test "full diff change navigation is enabled only after a nonempty diff" {
+  let path = @pathx.Relative("src/main.mbt")
+  let selected = test_modified_change(path)
+  let docs = owned_state().docs.copy()
+  docs[path] = {
+    ..loaded_doc(path.0),
+    review: Some({
+      generation: 1,
+      working_generation: 1,
+      baseline: ReviewContent("old source"),
+      view_mode: ReviewDiff,
+      selected,
+    }),
+  }
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  let state = { ..owned_state(), docs, }
+  let (_, available) = update(
+    test_emit(),
+    ReviewDiffNavigationAvailabilityChanged(true),
+    state,
+    ctx,
+  )
+  assert_true(available.review_diff_navigation_available)
+
+  // Commands are opaque Rabbita effects, so reducer tests assert that each
+  // accepted direction preserves all business state. The command bridge maps
+  // these two messages to DiffEditor's previous/next APIs respectively.
+  let (_, after_previous) = update(
+    test_emit(),
+    RevealPreviousReviewDiffChange,
+    available,
+    ctx,
+  )
+  assert_true(after_previous == available)
+  let (_, after_next) = update(
+    test_emit(),
+    RevealNextReviewDiffChange,
+    available,
+    ctx,
+  )
+  assert_true(after_next == available)
+
+  let unavailable = { ..available, review_diff_navigation_available: false }
+  let (_, previous_rejected) = update(
+    test_emit(),
+    RevealPreviousReviewDiffChange,
+    unavailable,
+    ctx,
+  )
+  let (_, next_rejected) = update(
+    test_emit(),
+    RevealNextReviewDiffChange,
+    unavailable,
+    ctx,
+  )
+  assert_true(previous_rejected == unavailable)
+  assert_true(next_rejected == unavailable)
+
+  let source_docs = docs.copy()
+  source_docs[path] = {
+    ..source_docs.get(path).unwrap(),
+    review: source_docs.get(path).unwrap().review.map(review => {
+      ..review,
+      view_mode: ReviewSource,
+    }),
+  }
+  let (_, parked) = update(
+    test_emit(),
+    ReviewDiffNavigationAvailabilityChanged(true),
+    { ..state, docs: source_docs },
+    ctx,
+  )
+  // Source mode parks the completed DiffEditor pair. Retain its availability
+  // so returning to the same full diff does not require a provider rerun;
+  // full_diff_ready still hides the controls and rejects clicks meanwhile.
+  assert_true(parked.review_diff_navigation_available)
+  let (_, hidden_previous_rejected) = update(
+    test_emit(),
+    RevealPreviousReviewDiffChange,
+    parked,
+    ctx,
+  )
+  let (_, hidden_next_rejected) = update(
+    test_emit(),
+    RevealNextReviewDiffChange,
+    parked,
+    ctx,
+  )
+  assert_true(hidden_previous_rejected == parked)
+  assert_true(hidden_next_rejected == parked)
 }
 
 ///|

@@ -420,6 +420,9 @@ pub(all) struct State {
   // Updated from DiffEditor's completed provider transaction. `None` means a
   // new model/options calculation has not yet produced host-visible status.
   review_diff_status : ReviewDiffStatus?
+  // Whether DiffEditor's current (possibly source-mode parked) comparison has
+  // at least one completed change for cyclic previous/next navigation.
+  review_diff_navigation_available : Bool
   changes : ChangeList
   // Git graph state is conversation/workspace scoped like Changes, but is
   // refreshed only at meaningful repository boundaries rather than on the
@@ -534,6 +537,7 @@ pub fn State::empty() -> State {
     review_diff_mode: ReviewDiffCore,
     review_diff_ignore_comments: true,
     review_diff_status: None,
+    review_diff_navigation_available: false,
     changes: ChangeListIdle,
     git_graph: GitGraphIdle,
     git_graph_generation: 0,
@@ -835,6 +839,11 @@ pub(all) enum Msg {
   // loop. This message republishes the requested/effective mode so the host
   // toolbar can announce Tree→Token and specialized→Core fallbacks.
   ReviewDiffStatusChanged(ReviewDiffStatus)
+  // DiffEditor's provider transaction also controls whether its existing
+  // cyclic change-navigation commands have a target.
+  ReviewDiffNavigationAvailabilityChanged(Bool)
+  RevealPreviousReviewDiffChange
+  RevealNextReviewDiffChange
   // Mark the active changed-file review as reviewed, or return it to the
   // unreviewed queue. Ordinary file tabs ignore the action.
   ToggleReviewProgress

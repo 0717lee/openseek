@@ -197,6 +197,25 @@ test "historical tabs use only the inert diff surface and history breadcrumb" {
   assert_true(breadcrumb.contains("11111111"))
   assert_true(breadcrumb.contains("src/main.mbt"))
   assert_true(breadcrumb.contains("aria-label=\"Inline diff layout\""))
+  assert_true(breadcrumb.contains("aria-label=\"Diff change navigation\""))
+  assert_true(breadcrumb.contains("title=\"Previous change (Shift+F7)\""))
+  assert_true(breadcrumb.contains("data-action=\"previous-diff-change\""))
+  assert_true(breadcrumb.contains("aria-keyshortcuts=\"Shift+F7\""))
+  assert_true(breadcrumb.contains("title=\"Next change (F7)\""))
+  assert_true(breadcrumb.contains("data-action=\"next-diff-change\""))
+  assert_true(breadcrumb.contains("aria-keyshortcuts=\"F7\""))
+  let disabled_navigation = render_review_html(
+    review_diff_navigation(test_emit(), state, ctx),
+  )
+  assert_true(disabled_navigation.contains("disabled"))
+  let enabled_navigation = render_review_html(
+    review_diff_navigation(
+      test_emit(),
+      { ..state, review_diff_navigation_available: true },
+      ctx,
+    ),
+  )
+  assert_false(enabled_navigation.contains("disabled"))
   assert_false(breadcrumb.contains("Mark reviewed"))
   assert_false(breadcrumb.contains("View file"))
 }

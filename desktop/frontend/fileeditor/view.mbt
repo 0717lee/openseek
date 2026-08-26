@@ -1695,6 +1695,7 @@ pub fn breadcrumb_view(
         @html.span(class="crumb crumb-file", diff.path.0),
       ]),
       review_diff_mode_toolbar(dispatch, state, ctx),
+      review_diff_navigation(dispatch, state, ctx),
       review_diff_layout_toggle(dispatch, state, ctx),
       @html.button(
         class="panel-toggle",
@@ -1739,6 +1740,7 @@ pub fn breadcrumb_view(
     review_navigation(dispatch, state, ctx),
     review_badge(dispatch, state, ctx),
     review_diff_mode_toolbar(dispatch, state, ctx),
+    review_diff_navigation(dispatch, state, ctx),
     review_diff_layout_toggle(dispatch, state, ctx),
     review_progress(dispatch, state, ctx),
     @html.button(
@@ -1759,6 +1761,19 @@ pub fn breadcrumb_view(
     },
     children,
   )
+}
+
+///|
+fn full_diff_ready(state : State, ctx : Ctx) -> Bool {
+  let review_ready = ctx.active_file is Some(path) &&
+    state.docs.get(path) is Some(doc) &&
+    doc.review is Some({ view_mode: ReviewDiff, .. }) &&
+    doc.diff_content() is Some(_)
+  let history_ready = ctx.active_history_diff is Some(diff) &&
+    state.history_docs.get(history_diff_key(diff)) is Some(history) &&
+    history.original.text() is Some(_) &&
+    history.modified.text() is Some(_)
+  review_ready || history_ready
 }
 
 ///|
@@ -1888,6 +1903,52 @@ fn review_diff_mode_toolbar(
 }
 
 ///|
+/// Previous/next controls for walking the DiffEditor's computed change groups.
+/// They share the same command path as Shift+F7/F7, including wrapping at the
+/// ends; the buttons therefore stay enabled at the first and last change.
+fn review_diff_navigation(
+  dispatch : @cmd.Emit[Msg],
+  state : State,
+  ctx : Ctx,
+) -> @html.Html {
+  guard full_diff_ready(state, ctx) else {
+    return @html.span(class="review-diff-navigation hidden", "")
+  }
+  @html.div(
+    class="review-diff-navigation",
+    attrs=@html.Attrs::build()
+      .role("group")
+      .aria_label("Diff change navigation"),
+    [
+      @html.button(
+        type_="button",
+        class="review-nav-button",
+        title="Previous change (Shift+F7)",
+        disabled=!state.review_diff_navigation_available,
+        on_click=dispatch(RevealPreviousReviewDiffChange),
+        attrs=@html.Attrs::build()
+          .data_set("action", "previous-diff-change")
+          .aria_label("Previous change")
+          .aria_keyshortcuts("Shift+F7"),
+        @icons.icon(@icons.icon_arrow_up),
+      ),
+      @html.button(
+        type_="button",
+        class="review-nav-button",
+        title="Next change (F7)",
+        disabled=!state.review_diff_navigation_available,
+        on_click=dispatch(RevealNextReviewDiffChange),
+        attrs=@html.Attrs::build()
+          .data_set("action", "next-diff-change")
+          .aria_label("Next change")
+          .aria_keyshortcuts("F7"),
+        @icons.icon(@icons.icon_arrow_down),
+      ),
+    ],
+  )
+}
+
+///|
 /// The full comparison keeps its two models mounted while this compact control
 /// changes only their layout. Source mode hides the control but preserves the
 /// panel preference for the next full-diff reveal.
@@ -1896,15 +1957,7 @@ fn review_diff_layout_toggle(
   state : State,
   ctx : Ctx,
 ) -> @html.Html {
-  let review_ready = ctx.active_file is Some(path) &&
-    state.docs.get(path) is Some(doc) &&
-    doc.review is Some({ view_mode: ReviewDiff, .. }) &&
-    doc.diff_content() is Some(_)
-  let history_ready = ctx.active_history_diff is Some(diff) &&
-    state.history_docs.get(history_diff_key(diff)) is Some(history) &&
-    history.original.text() is Some(_) &&
-    history.modified.text() is Some(_)
-  guard review_ready || history_ready else {
+  guard full_diff_ready(state, ctx) else {
     return @html.span(class="review-badge hidden", "")
   }
   let inline = state.review_diff_layout == ReviewInline

@@ -1965,6 +1965,15 @@ button.git-history-file:focus-visible {
 .review-navigation.hidden {
   display: none;
 }
+.review-diff-navigation {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+.review-diff-navigation.hidden {
+  display: none;
+}
 .review-nav-button {
   display: grid;
   place-items: center;

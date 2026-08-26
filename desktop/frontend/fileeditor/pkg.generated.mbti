@@ -23,6 +23,8 @@ pub fn apply_font_family(String) -> @cmd.Cmd
 
 pub fn apply_font_size(Double) -> @cmd.Cmd
 
+pub fn apply_theme(String) -> @cmd.Cmd
+
 pub fn basename(@pathx.Relative) -> String
 
 pub fn body_view(@cmd.Emit[Msg], State, Ctx) -> @html.Html
@@ -246,6 +248,9 @@ pub(all) enum Msg {
   ReviewDiffModeSelected(ReviewDiffMode)
   ToggleReviewDiffIgnoreComments
   ReviewDiffStatusChanged(ReviewDiffStatus)
+  ReviewDiffNavigationAvailabilityChanged(Bool)
+  RevealPreviousReviewDiffChange
+  RevealNextReviewDiffChange
   ToggleReviewProgress
   GitOriginalLoaded(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, generation~ : Int, background~ : Bool, original~ : @protocol.GitOriginalFileReply)
   GitOriginalFailed(owner~ : @interop.ConversationKey, path~ : @pathx.Relative, generation~ : Int, background~ : Bool, message~ : String)
@@ -334,6 +339,7 @@ pub(all) struct State {
   review_diff_mode : ReviewDiffMode
   review_diff_ignore_comments : Bool
   review_diff_status : ReviewDiffStatus?
+  review_diff_navigation_available : Bool
   changes : ChangeList
   git_graph : GitGraphState
   git_graph_generation : Int

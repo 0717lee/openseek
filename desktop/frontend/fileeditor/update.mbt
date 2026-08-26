@@ -2286,6 +2286,22 @@ pub fn update(
       } else {
         (@cmd.none, state)
       }
+    ReviewDiffNavigationAvailabilityChanged(available) =>
+      (@cmd.none, { ..state, review_diff_navigation_available: available })
+    RevealPreviousReviewDiffChange => {
+      guard full_diff_ready(state, ctx) &&
+        state.review_diff_navigation_available else {
+        return (@cmd.none, state)
+      }
+      (reveal_previous_review_diff_change(), state)
+    }
+    RevealNextReviewDiffChange => {
+      guard full_diff_ready(state, ctx) &&
+        state.review_diff_navigation_available else {
+        return (@cmd.none, state)
+      }
+      (reveal_next_review_diff_change(), state)
+    }
     ToggleReviewProgress => {
       guard ctx.active_file is Some(path) &&
         state.docs.get(path) is Some({ review: Some(review), .. }) &&

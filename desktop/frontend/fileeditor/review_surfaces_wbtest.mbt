@@ -53,6 +53,9 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
   assert_true(source_breadcrumb.contains("aria-pressed=\"false\""))
   assert_true(source_breadcrumb.contains(">View full diff</button>"))
   assert_false(source_breadcrumb.contains("aria-label=\"Inline diff layout\""))
+  assert_false(
+    source_breadcrumb.contains("aria-label=\"Diff change navigation\""),
+  )
   assert_true(source_breadcrumb.contains(">Mark reviewed</button>"))
   assert_true(
     source_breadcrumb.contains("aria-label=\"Changed file navigation\""),
@@ -90,6 +93,28 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
   assert_true(diff_breadcrumb.contains("aria-pressed=\"false\""))
   assert_true(diff_breadcrumb.contains("data-layout=\"side-by-side\""))
   assert_true(diff_breadcrumb.contains("review-layout-icon split"))
+  assert_true(diff_breadcrumb.contains("aria-label=\"Diff change navigation\""))
+  assert_true(diff_breadcrumb.contains("title=\"Previous change (Shift+F7)\""))
+  assert_true(diff_breadcrumb.contains("aria-label=\"Previous change\""))
+  assert_true(diff_breadcrumb.contains("aria-keyshortcuts=\"Shift+F7\""))
+  assert_true(diff_breadcrumb.contains("data-action=\"previous-diff-change\""))
+  assert_true(diff_breadcrumb.contains("title=\"Next change (F7)\""))
+  assert_true(diff_breadcrumb.contains("aria-label=\"Next change\""))
+  assert_true(diff_breadcrumb.contains("aria-keyshortcuts=\"F7\""))
+  assert_true(diff_breadcrumb.contains("data-action=\"next-diff-change\""))
+  assert_true(diff_breadcrumb.contains("class=\"icon\""))
+  assert_true(diff_breadcrumb.contains("disabled"))
+  let enabled_navigation = render_review_html(
+    review_diff_navigation(
+      test_emit(),
+      { ..diff_state, review_diff_navigation_available: true },
+      ctx,
+    ),
+  )
+  assert_true(
+    enabled_navigation.contains("aria-label=\"Diff change navigation\""),
+  )
+  assert_false(enabled_navigation.contains("disabled"))
   assert_true(diff_breadcrumb.contains("aria-label=\"Comparison algorithm\""))
   assert_true(diff_breadcrumb.contains("data-diff-mode=\"core\""))
   assert_true(diff_breadcrumb.contains("data-diff-mode=\"token\""))
@@ -238,6 +263,9 @@ test "non-MoonBit full diff omits specialized provider controls" {
     ),
   )
   assert_false(breadcrumb.contains("aria-label=\"Comparison algorithm\""))
+  assert_true(breadcrumb.contains("aria-label=\"Diff change navigation\""))
+  assert_true(breadcrumb.contains("data-action=\"previous-diff-change\""))
+  assert_true(breadcrumb.contains("data-action=\"next-diff-change\""))
 }
 
 ///|
@@ -271,6 +299,12 @@ test "pending full diff never reveals the source surface" {
   )
   assert_false(pending.contains("Loading diff for main.mbt…"))
   assert_true(pending.contains("viewer-notice diff-transition-shield"))
+  let pending_breadcrumb = render_review_html(
+    breadcrumb_view(test_emit(), pending_state, ctx),
+  )
+  assert_false(
+    pending_breadcrumb.contains("aria-label=\"Diff change navigation\""),
+  )
 
   let (_, delayed_state) = update(
     test_emit(),
