@@ -109,17 +109,12 @@ fn reply_message(
 ) -> Msg {
   match reply {
     Listing(path~, entries~, ..) =>
-      match @resource.of_path(channel, path) {
-        Some(_) =>
-          Loaded(
-            channel~,
-            location=Directory(path),
-            entries=entries.filter(name => !name.is_empty()),
-            generation~,
-          )
-        None =>
-          Failed(channel~, message="malformed directory listing", generation~)
-      }
+      Loaded(
+        channel~,
+        location=Directory(path),
+        entries=entries.filter(name => !name.is_empty()),
+        generation~,
+      )
     Drives(entries~) if drives =>
       Loaded(
         channel~,
