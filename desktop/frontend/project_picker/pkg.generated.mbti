@@ -34,6 +34,7 @@ pub(all) enum Msg {
   CompletePath
   SubmitPath
   CancelPathEdit
+  Escape
   BeginCreateFolder
   NewFolderNameChanged(String)
   CancelCreateFolder
