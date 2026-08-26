@@ -3781,8 +3781,7 @@ fn update_msg(
       // Proton notifications are emitted only for the embedded local host. A
       // finished run usually matches by last run id; a permission request
       // still owns the active run while its tool waits for the answer.
-      let conv = if model.conversation_by_last_run(Local, run_id)
-        is Some(conv) {
+      let conv = if model.conversation_by_last_run(Local, run_id) is Some(conv) {
         Some(conv)
       } else {
         model.conversation_by_run(Local, run_id)
@@ -6648,9 +6647,7 @@ fn update_device_msg(
       }
       if conv is Some(conv) {
         let approval_notification = approval_system_notification(
-          channel,
-          run_id,
-          event,
+          channel, run_id, event,
         )
         let (report, next) = apply_engine_event(conv, event, run_id)
         let updated = model.replace_conversation(next)

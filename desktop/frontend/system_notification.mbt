@@ -175,8 +175,7 @@ test "only live local approval events create system notifications" {
     "run_moonbit is asking permission to run this snippet with no sandbox policy",
   )
   assert_true(
-    approval_system_notification(Remote("device-1"), Some("r1"), event)
-    is None,
+    approval_system_notification(Remote("device-1"), Some("r1"), event) is None,
   )
   assert_true(approval_system_notification(Local, None, event) is None)
   assert_true(
@@ -184,6 +183,7 @@ test "only live local approval events create system notifications" {
       Local,
       Some("r1"),
       @transcript.ApprovalResolved(id="ap-1"),
-    ) is None,
+    )
+    is None,
   )
 }
