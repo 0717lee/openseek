@@ -40,18 +40,13 @@ struct Page {
   details_open : Bool
   include_glob : String
   exclude_glob : String
-  // Semantic-mode settings. `rules_dir` points at a moongrep YAML rules
-  // directory; `use_builtin_rules` enables moongrep's embedded rules.
-  rules_dir : String
-  use_builtin_rules : Bool
+  patterns : Array[String]
   matches : Array[@protocol.TextSearchMatch]
   semantic_hits : Array[@protocol.SemanticSearchHit]
   match_count : Int
   file_count : Int
   limit_hit : Bool
   partial : Bool
-  error_code : String?
-  error_message : String?
   collapsed : Map[String, Bool]
   visible_lines : Int
   phase : Phase
@@ -109,8 +104,9 @@ pub(all) enum Msg {
   IncludeChanged(String)
   ExcludeChanged(String)
   // Semantic-mode settings, mirroring the text-mode toggles.
-  RulesDirChanged(String)
-  ToggleBuiltinRules
+  PatternChanged(Int, String)
+  AddPattern
+  RemovePattern(Int)
   Submit
   Refresh
   ClearResults

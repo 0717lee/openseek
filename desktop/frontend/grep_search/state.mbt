@@ -15,16 +15,13 @@ fn fresh_page() -> Page {
     details_open: false,
     include_glob: "",
     exclude_glob: "",
-    rules_dir: "",
-    use_builtin_rules: false,
+    patterns: [""],
     matches: [],
     semantic_hits: [],
     match_count: 0,
     file_count: 0,
     limit_hit: false,
     partial: false,
-    error_code: None,
-    error_message: None,
     collapsed: Map([]),
     visible_lines: InitialVisibleSearchLines,
     phase: Idle,
@@ -45,8 +42,7 @@ pub fn State::reset_checkout(self : State) -> State {
       ..fresh_page(),
       generation,
       mode: self.page.mode,
-      rules_dir: self.page.rules_dir,
-      use_builtin_rules: self.page.use_builtin_rules,
+      patterns: self.page.patterns,
     },
     generation,
   }
@@ -65,7 +61,11 @@ fn State::schedule(
   immediate~ : Bool,
 ) -> State {
   let generation = self.generation + 1
-  let page = if page.query.is_empty() || input.root is None {
+  let has_query = match page.mode {
+    Text => !page.query.is_empty()
+    Semantic => page.patterns.any(pattern => !pattern.trim().is_empty())
+  }
+  let page = if !has_query || input.root is None {
     {
       ..page,
       matches: [],
@@ -74,8 +74,6 @@ fn State::schedule(
       file_count: 0,
       limit_hit: false,
       partial: false,
-      error_code: None,
-      error_message: None,
       visible_lines: InitialVisibleSearchLines,
       phase: Idle,
       generation,
@@ -122,11 +120,10 @@ pub fn State::handle(self : State, msg : Msg, input : Input) -> State {
         {
           ..page,
           mode,
+          details_open: page.details_open,
           matches: [],
           semantic_hits: [],
           partial: false,
-          error_code: None,
-          error_message: None,
           collapsed: Map([]),
         },
         input,
@@ -152,14 +149,21 @@ pub fn State::handle(self : State, msg : Msg, input : Input) -> State {
       self.schedule({ ..page, include_glob, }, input, immediate=false)
     ExcludeChanged(exclude_glob) =>
       self.schedule({ ..page, exclude_glob, }, input, immediate=false)
-    RulesDirChanged(rules_dir) =>
-      self.schedule({ ..page, rules_dir, }, input, immediate=false)
-    ToggleBuiltinRules =>
-      self.schedule(
-        { ..page, use_builtin_rules: !page.use_builtin_rules },
-        input,
-        immediate=false,
-      )
+    PatternChanged(index, value) => {
+      let patterns = page.patterns.copy()
+      if index < patterns.length() {
+        patterns[index] = value
+      }
+      self.schedule({ ..page, patterns, }, input, immediate=false)
+    }
+    AddPattern => { ..self, page: { ..page, patterns: page.patterns + [""] } }
+    RemovePattern(index) => {
+      let patterns = page.patterns.copy()
+      if index < patterns.length() && patterns.length() > 1 {
+        let _ = patterns.remove(index)
+      }
+      self.schedule({ ..page, patterns, }, input, immediate=false)
+    }
     Submit | Refresh => self.schedule(page, input, immediate=true)
     ClearResults => {
       let generation = self.generation + 1
@@ -173,8 +177,6 @@ pub fn State::handle(self : State, msg : Msg, input : Input) -> State {
           file_count: 0,
           limit_hit: false,
           partial: false,
-          error_code: None,
-          error_message: None,
           visible_lines: InitialVisibleSearchLines,
           phase: Idle,
           generation,
@@ -246,8 +248,6 @@ pub fn State::handle(self : State, msg : Msg, input : Input) -> State {
           file_count: reply.file_count,
           limit_hit: reply.limit_hit,
           partial: false,
-          error_code: None,
-          error_message: None,
           visible_lines: InitialVisibleSearchLines.min(reply.matches.length()),
           phase,
         },
@@ -269,10 +269,6 @@ pub fn State::handle(self : State, msg : Msg, input : Input) -> State {
         None => Ready
         Some(error) => Failed(code=error.code, message=error.message)
       }
-      let (error_code, error_message) = match reply.error {
-        Some(error) => (Some(error.code), Some(error.message))
-        None => (None, None)
-      }
       {
         ..self,
         page: {
@@ -283,8 +279,6 @@ pub fn State::handle(self : State, msg : Msg, input : Input) -> State {
           file_count: reply.file_count,
           limit_hit: reply.limit_hit,
           partial: reply.partial,
-          error_code,
-          error_message,
           visible_lines: InitialVisibleSearchLines.min(reply.matches.length()),
           phase,
         },
@@ -304,8 +298,6 @@ pub fn State::handle(self : State, msg : Msg, input : Input) -> State {
             file_count: 0,
             limit_hit: false,
             partial: false,
-            error_code: None,
-            error_message: None,
             visible_lines: InitialVisibleSearchLines,
             phase: Failed(code~, message~),
           },
@@ -396,12 +388,12 @@ fn Page::semantic_request_payload(
   input : Input,
 ) -> @protocol.SearchSemanticPayload? {
   guard self.mode is Semantic else { return None }
-  guard input.root is Some(root) && !self.query.is_empty() else { return None }
+  guard input.root is Some(root) else { return None }
+  let patterns = self.patterns.filter(pattern => !pattern.trim().is_empty())
+  guard !patterns.is_empty() else { return None }
   Some({
     root: root.path,
-    query: self.query,
-    rules_dir: self.rules_dir,
-    enable_builtin_rules: self.use_builtin_rules,
+    patterns,
     exclude_glob: self.exclude_glob,
     session_key: "semantic-search:\{input.owner.channel.uri_authority()}:\{input.owner.session}:\{root.path}",
     generation: self.generation,
@@ -422,6 +414,28 @@ test "checkout reset clears results while preserving the generation fence" {
   assert_true(reset.page.matches.is_empty())
   assert_true(reset.page.phase is Idle)
   assert_true(reset.page.generation > old_generation)
+}
+
+///|
+test "mode changes preserve each search input and shared details" {
+  let input : Input = {
+    owner: { channel: @interop.ChannelId::Local, session: "mode-state" },
+    root: Some(@common.Uri::parse("file:///work")),
+  }
+  let state = State::empty()
+    .handle(QueryChanged("text query"), input)
+    .handle(IncludeChanged("src/**"), input)
+    .handle(ExcludeChanged("generated/**"), input)
+    .handle(ModeChanged(Semantic), input)
+    .handle(PatternChanged(0, "inspect($(x:arg))"), input)
+    .handle(AddPattern, input)
+    .handle(PatternChanged(1, "match($x)"), input)
+  let switched_back = state.handle(ModeChanged(Text), input)
+  assert_eq(switched_back.page.query, "text query")
+  assert_eq(switched_back.page.patterns, ["inspect($(x:arg))", "match($x)"])
+  assert_eq(switched_back.page.include_glob, "src/**")
+  assert_eq(switched_back.page.exclude_glob, "generated/**")
+  assert_false(switched_back.page.details_open)
 }
 
 ///|

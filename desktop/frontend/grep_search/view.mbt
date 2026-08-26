@@ -196,9 +196,7 @@ fn mode_control(mode : Mode, emit : @cmd.Emit[Msg]) -> @html.Html {
 }
 
 ///|
-/// The mode-specific query options. Text mode offers ripgrep's case /
-/// whole-word / regex toggles; semantic mode offers moongrep's embedded-rule
-/// toggle, mirroring semgrep's per-mode pattern options.
+/// The mode-specific query options.
 fn mode_options(page : Page, emit : @cmd.Emit[Msg]) -> @html.Html {
   if page.mode is Text {
     @html.div(class="search-mode-options", [
@@ -221,14 +219,7 @@ fn mode_options(page : Page, emit : @cmd.Emit[Msg]) -> @html.Html {
       ),
     ])
   } else {
-    @html.div(class="search-mode-options", [
-      toggle_button(
-        "♯",
-        "Use Built-in Rules",
-        page.use_builtin_rules,
-        emit(ToggleBuiltinRules),
-      ),
-    ])
+    @html.nothing
   }
 }
 
@@ -668,69 +659,58 @@ fn page_view(
   open_match : (String, @common.Range) -> @cmd.Cmd,
 ) -> @html.Html {
   let details = if page.details_open {
-    match page.mode {
-      Text => {
-        let text_details : Array[@html.Html] = [
-          @html.label([
-            @html.span("files to include"),
-            @html.input(
-              input_type=@html.InputType::Text,
-              value=page.include_glob,
-              placeholder="e.g. src/**, tests/**",
-              on_input=emit.map(value => IncludeChanged(value)),
-              attrs=@html.Attrs::build()
-                .aria_label("files to include")
-                .data_set("focus-owner", ""),
-            ),
-          ]),
-          @html.label([
-            @html.span("files to exclude"),
-            @html.input(
-              input_type=@html.InputType::Text,
-              value=page.exclude_glob,
-              placeholder="e.g. **/*.snap, generated/**",
-              on_input=emit.map(value => ExcludeChanged(value)),
-              attrs=@html.Attrs::build()
-                .aria_label("files to exclude")
-                .data_set("focus-owner", ""),
-            ),
-          ]),
-        ]
-        @html.div(class="search-details", text_details)
-      }
-      Semantic =>
-        @html.div(class="search-details", [
-          @html.label([
-            @html.span("moongrep rules directory"),
-            @html.input(
-              input_type=@html.InputType::Text,
-              value=page.rules_dir,
-              placeholder="e.g. .moongrep/rules, rules/**",
-              on_input=emit.map(value => RulesDirChanged(value)),
-              attrs=@html.Attrs::build()
-                .aria_label("moongrep rules directory")
-                .data_set("focus-owner", ""),
-            ),
-          ]),
-        ])
-    }
+    let details : Array[@html.Html] = [
+      @html.label([
+        @html.span("files to include"),
+        @html.input(
+          input_type=@html.InputType::Text,
+          value=page.include_glob,
+          placeholder="e.g. src/**, tests/**",
+          on_input=emit.map(value => IncludeChanged(value)),
+          attrs=@html.Attrs::build()
+            .aria_label("files to include")
+            .data_set("focus-owner", ""),
+        ),
+      ]),
+      @html.label([
+        @html.span("files to exclude"),
+        @html.input(
+          input_type=@html.InputType::Text,
+          value=page.exclude_glob,
+          placeholder="e.g. **/*.snap, generated/**",
+          on_input=emit.map(value => ExcludeChanged(value)),
+          attrs=@html.Attrs::build()
+            .aria_label("files to exclude")
+            .data_set("focus-owner", ""),
+        ),
+      ]),
+    ]
+    @html.div(class="search-details", details)
   } else {
     @html.nothing
   }
   @html.div(class="workspace-search", [
     @html.div(class="search-query-row", [
-      @html.input(
-        input_type=@html.InputType::Text,
-        value=page.query,
-        placeholder=if page.mode is Text {
-          "Search"
-        } else {
-          "Code pattern (e.g. inspect($(x:arg)))"
-        },
-        on_input=emit.map(value => QueryChanged(value)),
-        attrs=query_key_attrs(emit),
-      ),
       mode_control(page.mode, emit),
+      if page.mode is Text {
+        @html.input(
+          input_type=@html.InputType::Text,
+          value=page.query,
+          placeholder="Search",
+          on_input=emit.map(value => QueryChanged(value)),
+          attrs=query_key_attrs(emit),
+        )
+      } else {
+        @html.input(
+          input_type=@html.InputType::Text,
+          value=page.patterns[0],
+          placeholder="inspect($(x:arg))",
+          on_input=emit.map(value => PatternChanged(0, value)),
+          attrs=@html.Attrs::build()
+            .aria_label("pattern")
+            .data_set("focus-owner", ""),
+        )
+      },
       mode_options(page, emit),
       @html.button(
         class=if page.details_open {
@@ -745,6 +725,31 @@ fn page_view(
         "…",
       ),
     ]),
+    if page.mode is Semantic {
+      let patterns : Array[@html.Html] = []
+      for index, pattern in page.patterns {
+        if index > 0 {
+          patterns.push(
+            @html.div(class="search-semantic-source", [
+              @html.input(
+                input_type=@html.InputType::Text,
+                value=pattern,
+                placeholder="inspect($(x:arg))",
+                on_input=emit.map(value => PatternChanged(index, value)),
+                attrs=@html.Attrs::build()
+                  .aria_label("pattern")
+                  .data_set("focus-owner", ""),
+              ),
+              @html.button(on_click=emit(RemovePattern(index)), "−"),
+            ]),
+          )
+        }
+      }
+      patterns.push(@html.button(on_click=emit(AddPattern), "+ Add pattern"))
+      @html.div(class="search-code-patterns", patterns)
+    } else {
+      @html.nothing
+    },
     details,
     @html.div(class="search-toolbar", [
       @html.button(title="Refresh", on_click=emit(Refresh), "Refresh"),
