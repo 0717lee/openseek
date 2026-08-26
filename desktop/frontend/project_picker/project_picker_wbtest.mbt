@@ -303,6 +303,11 @@ test "typing a separator after an exact child navigates immediately" {
     ),
   )
   assert_eq(loaded.path_draft, Some("/Users/dii/git/"))
+  let submitted = updated(loaded, SubmitPath)
+  assert_false(submitted.loading)
+  assert_eq(submitted.path_draft, None)
+  assert_eq(submitted.generation, loaded.generation)
+  assert_true(submitted.location == loaded.location)
   let nested = updated(loaded, PathChanged("/Users/dii/git/openseek/"))
   assert_true(nested.loading)
   assert_eq(nested.path_draft, Some("/Users/dii/git/openseek/"))

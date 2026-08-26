@@ -254,7 +254,29 @@ pub fn State::handle(
       }
     SubmitPath =>
       match self.path_destination() {
-        Some(path) if !self.loading => self.navigate_to(emit, path)
+        Some(path) if !self.loading => {
+          let destination = if path == "/" {
+            path
+          } else {
+            path.trim_end(chars="/").to_owned()
+          }
+          let already_loaded = match
+            (self.location, @resource.of_path(self.channel, destination)) {
+            (Some(Directory(current)), Some(destination)) =>
+              current == destination
+            (Some(DriveList), _) => path.trim() == "/"
+            _ => false
+          }
+          if already_loaded {
+            (
+              @cmd.none,
+              Some({ ..self, path_draft: None, path_selection: 0 }),
+              None,
+            )
+          } else {
+            self.navigate_to(emit, path)
+          }
+        }
         _ => (@cmd.none, Some(self), None)
       }
     CancelPathEdit | Escape if self.path_draft is Some(_) =>
