@@ -3581,17 +3581,24 @@ fn update_msg(
             // navigates (and validates) first. The pending adoption later
             // focuses the project the add committed.
             Some(@project_picker.Outcome::Picked(channel, path)) => {
+              guard @resource.of_path(channel, path) is Some(picked) else {
+                let (toast, model) = model.notify_error(
+                  dispatch, "The selected folder returned an invalid path.",
+                )
+                return (@cmd.batch([cmd, toast]), model)
+              }
               let known = match model.device_state(channel) {
                 Some(dev) => dev.projects.copy()
                 None => []
               }
               (
-                @cmd.batch([cmd, add_project(dispatch, channel, path.path)]),
+                @cmd.batch([cmd, add_project(dispatch, channel, path)]),
                 {
                   ..model,
                   pending_project_adoption: Some({
                     channel,
-                    picked: path,
+                    requested: path,
+                    picked,
                     known,
                     resolved: None,
                   }),
@@ -5226,7 +5233,7 @@ fn update_device_msg(
       // current confirm's own reply is still on its way.
       guard model.pending_project_adoption is Some(pending) &&
         pending.channel == channel &&
-        pending.picked.path == added else {
+        pending.requested == added else {
         return (@cmd.none, model)
       }
       let target = if paths.contains(pending.picked) {

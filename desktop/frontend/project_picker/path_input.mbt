@@ -6,21 +6,10 @@
 ///|
 fn State::editable_path(self : State) -> String {
   match self.location {
-    Some(Directory(resource)) => resource.path
+    Some(Directory(path)) => path
     Some(DriveList) => "/"
     None => ""
   }
-}
-
-///|
-/// Protocol paths encode a Windows drive as `/c:/...`. Only those paths use
-/// case-insensitive parent matching; POSIX directory names remain exact.
-fn is_windows_drive_resource_path(path : String) -> Bool {
-  guard path.length() >= 3 && path[0] == '/' && path[2] == ':' else {
-    return false
-  }
-  let drive = path[1]
-  (drive >= 'A' && drive <= 'Z') || (drive >= 'a' && drive <= 'z')
 }
 
 ///|
@@ -31,33 +20,12 @@ fn State::path_filter(self : State) -> String {
   guard self.path_draft is Some(raw) else { return "" }
   let draft = raw.trim().to_owned()
   match self.location {
-    Some(Directory(resource)) => {
-      let base = if resource.path.has_suffix("/") {
-        resource.path
-      } else {
-        resource.path + "/"
-      }
-      let case_insensitive = is_windows_drive_resource_path(resource.path)
-      let comparable_draft = if case_insensitive {
-        draft.to_lower()
-      } else {
-        draft
-      }
-      let comparable_path = if case_insensitive {
-        resource.path.to_lower()
-      } else {
-        resource.path
-      }
-      let comparable_base = if case_insensitive {
-        base.to_lower()
-      } else {
-        base
-      }
-      if comparable_draft == comparable_path ||
-        comparable_draft == comparable_base {
+    Some(Directory(path)) => {
+      let base = if path.has_suffix("/") { path } else { path + "/" }
+      if draft == path || draft == base {
         return ""
       }
-      match comparable_draft.strip_prefix(comparable_base) {
+      match draft.strip_prefix(base) {
         Some(suffix) => {
           let suffix = "\{suffix}".to_lower()
           if suffix.contains("/") {
@@ -114,7 +82,7 @@ fn State::visible_entries(self : State) -> Array[String] {
 ///|
 fn State::entry_target(self : State, name : String) -> String {
   match self.location {
-    Some(Directory(resource)) => resource.picker_child_path(name)
+    Some(Directory(path)) => path.picker_child_path(name)
     Some(DriveList) => "/" + name + "/"
     None => name
   }

@@ -5,7 +5,6 @@ import {
   "moonbit-community/rabbita/cmd",
   "moonbit-community/rabbita/html",
   "moonbit-community/rabbita/sub",
-  "moonbitlang/editor/base/common",
   "openseek_desktop/frontend/interop",
 }
 
@@ -18,7 +17,7 @@ pub fn view(@cmd.Emit[Msg], State) -> @html.Html
 
 // Types and methods
 pub(all) enum Location {
-  Directory(@common.Uri)
+  Directory(String)
   DriveList
 } derive(Eq)
 pub fn Location::equal(Self, Self) -> Bool
@@ -46,7 +45,7 @@ pub fn Msg::equal(Self, Self) -> Bool
 pub fn Msg::not_equal(Self, Self) -> Bool
 
 pub enum Outcome {
-  Picked(@interop.ChannelId, @common.Uri)
+  Picked(@interop.ChannelId, String)
   Failed(String)
 }
 

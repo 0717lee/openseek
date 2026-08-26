@@ -370,7 +370,7 @@ fn picker_footer(emit : @cmd.Emit[Msg], picker : State) -> @html.Html {
 /// last successful location while the primary action is disabled.
 fn current_location(picker : State) -> @html.Html {
   let (label, path) = match picker.location {
-    Some(Directory(resource)) => ("Current folder", resource.path)
+    Some(Directory(path)) => ("Current folder", path)
     Some(DriveList) => ("Location", "This PC")
     None => ("Location", "Loading…")
   }
@@ -389,16 +389,16 @@ fn current_location(picker : State) -> @html.Html {
 ///|
 /// The current location as a clickable trail: every ancestor is a button
 /// that navigates back up to it, the way a system chooser's path bar works.
-/// POSIX paths root at `/`; Windows resource paths keep `/C:/` as their
-/// drive root and root at the drive list ("This PC"), which is how another
-/// drive letter is reached. UNC never reaches this UI because the backend
-/// rejects it.
+/// All protocol paths root at `/`. The host interprets that as the POSIX
+/// filesystem root or the Windows drive list, so the frontend never needs to
+/// guess a platform from a drive-shaped path. UNC never reaches this UI
+/// because the backend rejects it.
 fn picker_breadcrumbs(emit : @cmd.Emit[Msg], picker : State) -> @html.Html {
   let crumbs : Array[@html.Html] = []
   guard picker.location is Some(location) else {
     return @html.div(class="picker-crumbs", crumbs)
   }
-  guard location is Directory(resource) else {
+  guard location is Directory(path) else {
     crumbs.push(
       @html.button(
         class="picker-crumb current",
@@ -412,16 +412,11 @@ fn picker_breadcrumbs(emit : @cmd.Emit[Msg], picker : State) -> @html.Html {
     )
     return @html.div(class="picker-crumbs", crumbs)
   }
-  let path = resource.path
   let segments : Array[String] = []
   for part in path.split("/") {
     if !part.is_empty() {
       segments.push("\{part}")
     }
-  }
-  let drive_root = match segments {
-    [drive, ..] if drive.length() == 2 && drive.has_suffix(":") => Some(drive)
-    _ => None
   }
   crumbs.push(
     @html.button(
@@ -443,16 +438,14 @@ fn picker_breadcrumbs(emit : @cmd.Emit[Msg], picker : State) -> @html.Html {
       } else {
         @html.Attrs::build().aria_label("Open root folder")
       },
-      if drive_root is Some(_) {
-        "This PC"
-      } else {
-        "/"
-      },
+      "/",
     ),
   )
   let mut prefix = ""
   for index, segment in segments {
-    prefix = if drive_root is Some(_) && index == 0 {
+    // A trailing slash is equivalent on POSIX and is required by the host's
+    // reversible Windows drive-root protocol spelling.
+    prefix = if index == 0 && segment.has_suffix(":") {
       "/" + segment + "/"
     } else if prefix.has_suffix("/") {
       prefix + segment

@@ -1,28 +1,25 @@
-// The row-target path joining the view uses, exercised directly: resource
-// URI paths always use `/`, including Windows drive resources.
-
 ///|
-fn test_resource(
-  channel : @interop.ChannelId,
-  path : String,
-) -> @common.Uri raise {
-  guard @resource.of_path(channel, path) is Some(resource) else {
-    fail("test resource path was invalid: \{path}")
-  }
-  resource
+test "picker paths join with URI separators" {
+  inspect("/home/u".picker_child_path("proj"), content="/home/u/proj")
+  inspect("/".picker_child_path("etc"), content="/etc")
+  inspect("/C:/code".picker_child_path("app"), content="/C:/code/app")
 }
 
 ///|
-test "picker paths join with URI separators" {
-  let channel = @interop.ChannelId::Local
-  inspect(
-    test_resource(channel, "/home/u").picker_child_path("proj"),
-    content="/home/u/proj",
-  )
-  inspect(test_resource(channel, "/").picker_child_path("etc"), content="/etc")
-  inspect(
-    test_resource(channel, "/C:/code").picker_child_path("app"),
-    content="/c:/code/app",
+test "a listing keeps its raw protocol path" {
+  assert_true(
+    reply_message(
+      @interop.ChannelId::Local,
+      @protocol.Listing(path="/C:/project", parent=Some("/C:/"), entries=[]),
+      generation=7,
+      drives=true,
+    )
+    is Loaded(
+      channel=@interop.ChannelId::Local,
+      location=Directory("/C:/project"),
+      entries=[],
+      generation=7
+    ),
   )
 }
 
@@ -65,7 +62,7 @@ fn updated(picker : State, msg : Msg) -> State raise {
 
 ///|
 test "the picker opens loading and adopts the first listing" {
-  let home = test_resource(@interop.ChannelId::Local, "/home/u")
+  let home = "/home/u"
   let (_, opening) = State::open(@interop.ChannelId::Local, emit())
   assert_true(opening.loading)
   assert_true(opening.location is None)
@@ -81,7 +78,7 @@ test "the picker opens loading and adopts the first listing" {
   )
   guard loaded is Some(picker) else { fail("picker closed by its own listing") }
   assert_true(
-    picker.location is Some(Location::Directory(path)) && path.path == "/home/u",
+    picker.location is Some(Location::Directory(path)) && path == "/home/u",
   )
   inspect(picker.entries.length(), content="1")
   assert_true(!picker.loading)
@@ -89,21 +86,14 @@ test "the picker opens loading and adopts the first listing" {
 
 ///|
 test "a listing for another channel or generation is dropped" {
-  let opening = opened(
-    location=Location::Directory(
-      test_resource(@interop.ChannelId::Local, "/home/u"),
-    ),
-    entries=["proj"],
-  )
+  let opening = opened(location=Location::Directory("/home/u"), entries=["proj"])
   // A different device's listing cannot replace this picker's.
   let (_, foreign, _) = State::handle(
     opening,
     emit(),
     Msg::Loaded(
       channel=@interop.ChannelId::Remote("d_b"),
-      location=Location::Directory(
-        test_resource(@interop.ChannelId::Remote("d_b"), "/from-b"),
-      ),
+      location=Location::Directory("/from-b"),
       entries=["wrong"],
       generation=opening.generation,
     ),
@@ -122,17 +112,14 @@ test "a listing for another channel or generation is dropped" {
   guard navigated is Some(browsing) else { fail("picker closed by navigation") }
   assert_true(browsing.loading)
   assert_true(
-    browsing.location is Some(Location::Directory(path)) &&
-    path.path == "/home/u",
+    browsing.location is Some(Location::Directory(path)) && path == "/home/u",
   )
   let (_, stale, _) = State::handle(
     browsing,
     emit(),
     Msg::Loaded(
       channel=@interop.ChannelId::Local,
-      location=Location::Directory(
-        test_resource(@interop.ChannelId::Local, "/elsewhere"),
-      ),
+      location=Location::Directory("/elsewhere"),
       entries=["wrong"],
       generation=opening.generation,
     ),
@@ -143,12 +130,7 @@ test "a listing for another channel or generation is dropped" {
 
 ///|
 test "a failed navigation keeps the listing" {
-  let opening = opened(
-    location=Location::Directory(
-      test_resource(@interop.ChannelId::Local, "/home/u"),
-    ),
-    entries=["proj"],
-  )
+  let opening = opened(location=Location::Directory("/home/u"), entries=["proj"])
   let (_, failed, outcome) = State::handle(
     opening,
     emit(),
@@ -162,7 +144,7 @@ test "a failed navigation keeps the listing" {
     fail("picker closed by a failed navigation")
   }
   assert_true(
-    picker.location is Some(Location::Directory(path)) && path.path == "/home/u",
+    picker.location is Some(Location::Directory(path)) && path == "/home/u",
   )
   inspect(picker.entries.length(), content="1")
   assert_true(!picker.loading)
@@ -181,7 +163,7 @@ test "reopened pickers do not reuse request generations" {
 
 ///|
 test "confirm waits for an in-flight navigation" {
-  let home = test_resource(@interop.ChannelId::Local, "/home/u")
+  let home = "/home/u"
   let opening = opened(location=Location::Directory(home))
   let (_, browsing, _) = State::handle(
     opening,
@@ -200,10 +182,9 @@ test "confirm waits for an in-flight navigation" {
 
 ///|
 test "path editing filters the loaded rows and ranks prefixes first" {
-  let picker = opened(
-    location=Directory(test_resource(@interop.ChannelId::Local, "/home/u")),
-    entries=["alphabet", "Beryl", "beta", "coda"],
-  )
+  let picker = opened(location=Directory("/home/u"), entries=[
+    "alphabet", "Beryl", "beta", "coda",
+  ])
   let editing = updated(picker, EditPath)
   assert_eq(editing.path_draft, Some("/home/u"))
   assert_eq(editing.visible_entries(), picker.entries)
@@ -225,22 +206,18 @@ test "path editing filters the loaded rows and ranks prefixes first" {
   let different_case = updated(filtered, PathChanged("/HOME/u/be"))
   assert_eq(different_case.path_filter(), "")
   assert_eq(different_case.path_destination(), Some("/HOME/u/be"))
-  let windows = opened(
-    location=Directory(test_resource(@interop.ChannelId::Local, "/C:/Code")),
-    entries=["Project"],
-  )
+  let windows = opened(location=Directory("/C:/Code"), entries=["Project"])
   let windows_editing = updated(windows, EditPath)
-  let windows_filtered = updated(windows_editing, PathChanged("/C:/CODE/pro"))
+  let windows_filtered = updated(windows_editing, PathChanged("/C:/Code/pro"))
   assert_eq(windows_filtered.path_filter(), "pro")
   assert_eq(windows_filtered.selected_path_suggestion(), Some("Project"))
 }
 
 ///|
 test "path keyboard selection wraps and completion remains local" {
-  let picker = opened(
-    location=Directory(test_resource(@interop.ChannelId::Local, "/home/u")),
-    entries=["alpha", "betterment", "better"],
-  )
+  let picker = opened(location=Directory("/home/u"), entries=[
+    "alpha", "betterment", "better",
+  ])
   let editing = updated(picker, EditPath)
   let filtered = updated(editing, PathChanged("/home/u/be"))
   let moved = updated(filtered, MovePathSelection(-1))
@@ -257,10 +234,7 @@ test "path keyboard selection wraps and completion remains local" {
 
 ///|
 test "typing a separator after an exact child navigates immediately" {
-  let picker = opened(
-    location=Directory(test_resource(@interop.ChannelId::Local, "/Users/dii")),
-    entries=["git", "go"],
-  )
+  let picker = opened(location=Directory("/Users/dii"), entries=["git", "go"])
   let editing = updated(picker, EditPath)
   let navigating = updated(editing, PathChanged("git/"))
   assert_true(navigating.loading)
@@ -276,7 +250,7 @@ test "typing a separator after an exact child navigates immediately" {
   assert_false(loading_html.contains("Open folder git"))
   assert_false(loading_html.contains("Open folder go"))
 
-  let git = test_resource(@interop.ChannelId::Local, "/Users/dii/git")
+  let git = "/Users/dii/git"
   let cancelled = updated(navigating, Escape)
   assert_false(cancelled.loading)
   assert_eq(cancelled.path_draft, None)
@@ -316,7 +290,7 @@ test "typing a separator after an exact child navigates immediately" {
   let navigating_drive = updated(updated(drives, EditPath), PathChanged("/c:/"))
   assert_true(navigating_drive.loading)
   assert_eq(navigating_drive.path_draft, Some("/C:/"))
-  let drive = test_resource(@interop.ChannelId::Local, "/C:/")
+  let drive = "/C:/"
   let loaded_drive = updated(
     navigating_drive,
     Loaded(
@@ -326,16 +300,13 @@ test "typing a separator after an exact child navigates immediately" {
       generation=navigating_drive.generation,
     ),
   )
-  assert_eq(loaded_drive.path_draft, Some("/c:/"))
+  assert_eq(loaded_drive.path_draft, Some("/C:/"))
   let submitted_drive = updated(loaded_drive, SubmitPath)
   assert_false(submitted_drive.loading)
   assert_eq(submitted_drive.path_draft, None)
   assert_eq(submitted_drive.generation, loaded_drive.generation)
 
-  let code = opened(
-    location=Directory(test_resource(@interop.ChannelId::Local, "/C:/Code")),
-    entries=["src"],
-  )
+  let code = opened(location=Directory("/C:/Code"), entries=["src"])
   let mixed_case = updated(updated(code, EditPath), PathChanged("/c:/CODE/"))
   let submitted_mixed_case = updated(mixed_case, SubmitPath)
   assert_true(submitted_mixed_case.loading)
@@ -350,9 +321,7 @@ test "typing a separator after an exact child navigates immediately" {
 
   // A drive-shaped prefix is not proof that the host is Windows. These are
   // distinct legal POSIX paths, so the alternate spelling must be validated.
-  let drive_shaped = opened(
-    location=Directory(test_resource(@interop.ChannelId::Local, "/c:/project")),
-  )
+  let drive_shaped = opened(location=Directory("/c:/project"))
   let alternate = updated(
     updated(drive_shaped, EditPath),
     PathChanged("/C:/project"),
@@ -360,14 +329,19 @@ test "typing a separator after an exact child navigates immediately" {
   let validating = updated(alternate, SubmitPath)
   assert_true(validating.loading)
   assert_true(validating.generation != alternate.generation)
+
+  let upper = opened(location=Directory("/C:/project"))
+  let upper_editing = updated(upper, EditPath)
+  assert_eq(upper_editing.path_draft, Some("/C:/project"))
+  let upper_submitted = updated(upper_editing, SubmitPath)
+  assert_false(upper_submitted.loading)
+  assert_eq(upper_submitted.generation, upper_editing.generation)
+  assert_true(upper_submitted.location == upper.location)
 }
 
 ///|
 test "submitting or cancelling a path keeps one navigation path" {
-  let picker = opened(
-    location=Directory(test_resource(@interop.ChannelId::Local, "/home/u")),
-    entries=["project"],
-  )
+  let picker = opened(location=Directory("/home/u"), entries=["project"])
   let editing = updated(picker, EditPath)
   let typed = updated(editing, PathChanged("/home/u/pro"))
   let navigating = updated(typed, SubmitPath)
@@ -393,10 +367,7 @@ test "the Windows drive list shows its drives and refuses a confirm" {
 
 ///|
 test "new folder creation enters the created directory" {
-  let opening = opened(
-    location=Directory(test_resource(@interop.ChannelId::Local, "/home/u")),
-    entries=["existing"],
-  )
+  let opening = opened(location=Directory("/home/u"), entries=["existing"])
   let (_, composing, _) = State::handle(opening, emit(), BeginCreateFolder)
   guard composing is Some(composing) else {
     fail("picker closed while opening the new-folder composer")
@@ -420,7 +391,7 @@ test "new folder creation enters the created directory" {
   assert_true(creating.loading)
   assert_true(creating.generation != named.generation)
   assert_eq(creating.new_folder, Some("new project"))
-  let created = test_resource(@interop.ChannelId::Local, "/home/u/new project")
+  let created = "/home/u/new project"
   let (_, loaded, outcome) = State::handle(
     creating,
     emit(),
@@ -440,9 +411,7 @@ test "new folder creation enters the created directory" {
 
 ///|
 test "a failed folder create keeps its name editable" {
-  let opening = opened(
-    location=Directory(test_resource(@interop.ChannelId::Local, "/home/u")),
-  )
+  let opening = opened(location=Directory("/home/u"))
   let (_, composing, _) = State::handle(opening, emit(), BeginCreateFolder)
   guard composing is Some(composing) else { fail("composer did not open") }
   let (_, named, _) = State::handle(
@@ -474,10 +443,7 @@ test "a failed folder create keeps its name editable" {
 ///|
 #warnings("-alert_unstable")
 test "picker view exposes the folder controls" {
-  let picker = opened(
-    location=Directory(test_resource(@interop.ChannelId::Local, "/home/u")),
-    entries=["alpha", "beta"],
-  )
+  let picker = opened(location=Directory("/home/u"), entries=["alpha", "beta"])
   let html = markup(picker)
   assert_true(html.contains("role=\"dialog\""))
   assert_false(html.contains("role=\"listbox\""))

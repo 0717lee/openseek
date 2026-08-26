@@ -47,11 +47,12 @@ pub fn State::request_generation(self : State) -> Int {
 }
 
 ///|
-/// Where the picker's current listing was taken: a real host directory —
-/// the only thing Confirm can register — or the Windows-only virtual level
-/// above the drive roots, whose rows are the drives themselves.
+/// Where the picker's current listing was taken: the raw protocol path of a
+/// real host directory — the only thing Confirm can register — or the
+/// Windows-only virtual level above the drive roots. Keeping the host path
+/// here avoids conflating distinct POSIX paths through URI canonicalization.
 pub(all) enum Location {
-  Directory(@common.Uri)
+  Directory(String)
   DriveList
 } derive(Eq)
 
@@ -105,7 +106,7 @@ pub extend Msg with Eq::{equal, not_equal}
 /// directory on its owning device, or surface a request failure as a
 /// toast. Everything else stays inside the package.
 pub enum Outcome {
-  Picked(@interop.ChannelId, @common.Uri)
+  Picked(@interop.ChannelId, String)
   Failed(String)
 }
 
@@ -178,9 +179,8 @@ pub fn State::handle(
             // the user immediately presses Enter.
             path_draft: self.path_draft.map(_ => {
               match location {
-                Directory(resource) =>
-                  resource.path +
-                  (if resource.path.has_suffix("/") { "" } else { "/" })
+                Directory(path) =>
+                  path + (if path.has_suffix("/") { "" } else { "/" })
                 DriveList => "/"
               }
             }),
@@ -266,17 +266,16 @@ pub fn State::handle(
     SubmitPath =>
       match self.path_destination() {
         Some(path) if !self.loading => {
-          let destination = if path == "/" ||
-            (path.length() == 4 && is_windows_drive_resource_path(path)) {
-            path
-          } else {
-            path.trim_end(chars="/").to_owned()
-          }
           let already_loaded = match self.location {
-            // Compare the protocol path itself. URI construction lower-cases
-            // drive-shaped prefixes, but `/C:/...` and `/c:/...` may be two
-            // distinct POSIX paths; alternate spellings must reach the host.
-            Some(Directory(current)) => current.path == destination
+            // A trailing separator does not change a directory. Everything
+            // else stays exact; the host decides whether alternate casing is
+            // equivalent on its platform.
+            Some(Directory(current)) =>
+              current == path ||
+              (
+                current != "/" &&
+                current.trim_end(chars="/") == path.trim_end(chars="/")
+              )
             Some(DriveList) => path.trim() == "/"
             None => false
           }
@@ -371,8 +370,8 @@ pub fn State::handle(
 
 ///|
 /// Start every path transition through one stale-reply fence. Ordinary
-/// navigation clears the editor; separator completion passes its canonical
-/// path back as the next draft so editing can continue after the reply.
+/// navigation clears the editor; separator completion passes the host-returned
+/// protocol path back as the next draft so editing can continue after reply.
 fn State::navigate_to(
   self : State,
   emit : @cmd.Emit[Msg],
