@@ -120,11 +120,7 @@ pub fn State::handle(self : State, msg : Msg, input : Input) -> State {
         {
           ..page,
           mode,
-          details_open: if mode is Semantic {
-            true
-          } else {
-            false
-          },
+          details_open: page.details_open,
           matches: [],
           semantic_hits: [],
           partial: false,
@@ -418,6 +414,28 @@ test "checkout reset clears results while preserving the generation fence" {
   assert_true(reset.page.matches.is_empty())
   assert_true(reset.page.phase is Idle)
   assert_true(reset.page.generation > old_generation)
+}
+
+///|
+test "mode changes preserve each search input and shared details" {
+  let input : Input = {
+    owner: { channel: @interop.ChannelId::Local, session: "mode-state" },
+    root: Some(@common.Uri::parse("file:///work")),
+  }
+  let state = State::empty()
+    .handle(QueryChanged("text query"), input)
+    .handle(IncludeChanged("src/**"), input)
+    .handle(ExcludeChanged("generated/**"), input)
+    .handle(ModeChanged(Semantic), input)
+    .handle(PatternChanged(0, "inspect($(x:arg))"), input)
+    .handle(AddPattern, input)
+    .handle(PatternChanged(1, "match($x)"), input)
+  let switched_back = state.handle(ModeChanged(Text), input)
+  assert_eq(switched_back.page.query, "text query")
+  assert_eq(switched_back.page.patterns, ["inspect($(x:arg))", "match($x)"])
+  assert_eq(switched_back.page.include_glob, "src/**")
+  assert_eq(switched_back.page.exclude_glob, "generated/**")
+  assert_false(switched_back.page.details_open)
 }
 
 ///|
