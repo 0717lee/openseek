@@ -272,14 +272,13 @@ pub fn State::handle(
           } else {
             path.trim_end(chars="/").to_owned()
           }
-          let already_loaded = match
-            (self.location, @resource.of_path(self.channel, destination)) {
-            (Some(Directory(current)), Some(destination)) =>
-              // `/c:/...` is also legal on POSIX, so only exact frontend
-              // identity is safe here; the host validates alternate casing.
-              current == destination
-            (Some(DriveList), _) => path.trim() == "/"
-            _ => false
+          let already_loaded = match self.location {
+            // Compare the protocol path itself. URI construction lower-cases
+            // drive-shaped prefixes, but `/C:/...` and `/c:/...` may be two
+            // distinct POSIX paths; alternate spellings must reach the host.
+            Some(Directory(current)) => current.path == destination
+            Some(DriveList) => path.trim() == "/"
+            None => false
           }
           if already_loaded {
             (
@@ -293,8 +292,23 @@ pub fn State::handle(
         }
         _ => (@cmd.none, Some(self), None)
       }
-    CancelPathEdit | Escape if self.path_draft is Some(_) =>
-      (@cmd.none, Some({ ..self, path_draft: None, path_selection: 0 }), None)
+    CancelPathEdit | Escape if self.path_draft is Some(_) => {
+      // Separator completion may have started a browse while the editor is
+      // still visible. Cancelling must also fence that request; otherwise its
+      // late reply would move the picker after the edit was discarded.
+      let generation = fresh_request_generation()
+      (
+        @cmd.none,
+        Some({
+          ..self,
+          loading: false,
+          path_draft: None,
+          path_selection: 0,
+          generation,
+        }),
+        None,
+      )
+    }
     CancelPathEdit => (@cmd.none, Some(self), None)
     Escape => (@cmd.none, None, None)
     BeginCreateFolder =>

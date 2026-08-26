@@ -278,8 +278,9 @@ test "typing a separator after an exact child navigates immediately" {
 
   let git = test_resource(@interop.ChannelId::Local, "/Users/dii/git")
   let cancelled = updated(navigating, Escape)
-  assert_true(cancelled.loading)
+  assert_false(cancelled.loading)
   assert_eq(cancelled.path_draft, None)
+  assert_true(cancelled.generation != navigating.generation)
   let loaded_after_cancel = updated(
     cancelled,
     Loaded(
@@ -289,8 +290,7 @@ test "typing a separator after an exact child navigates immediately" {
       generation=navigating.generation,
     ),
   )
-  assert_eq(loaded_after_cancel.path_draft, None)
-  assert_true(loaded_after_cancel.location == Some(Directory(git)))
+  assert_true(loaded_after_cancel == cancelled)
 
   let navigating = updated(editing, PathChanged("/Users/dii/git/"))
   let loaded = updated(
@@ -347,6 +347,19 @@ test "typing a separator after an exact child navigates immediately" {
     PathChanged("/c:/CODE/src/"),
   )
   assert_false(mixed_case_child.loading)
+
+  // A drive-shaped prefix is not proof that the host is Windows. These are
+  // distinct legal POSIX paths, so the alternate spelling must be validated.
+  let drive_shaped = opened(
+    location=Directory(test_resource(@interop.ChannelId::Local, "/c:/project")),
+  )
+  let alternate = updated(
+    updated(drive_shaped, EditPath),
+    PathChanged("/C:/project"),
+  )
+  let validating = updated(alternate, SubmitPath)
+  assert_true(validating.loading)
+  assert_true(validating.generation != alternate.generation)
 }
 
 ///|
