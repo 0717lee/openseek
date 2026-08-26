@@ -126,11 +126,9 @@ fn State::entry_target(self : State, name : String) -> String {
 fn State::committed_child_path(self : State, raw : String) -> String? {
   let draft = raw.trim().to_owned()
   guard draft.has_suffix("/") else { return None }
-  let case_insensitive = match self.location {
-    Some(Directory(resource)) => is_windows_drive_resource_path(resource.path)
-    Some(DriveList) => true
-    None => false
-  }
+  // DriveList proves Windows semantics. A directory shaped like `/c:/...`
+  // may instead be a legal POSIX path, so its identity stays case-sensitive.
+  let case_insensitive = self.location is Some(DriveList)
   let key = fn(path : String) -> String {
     if case_insensitive {
       path.to_lower()

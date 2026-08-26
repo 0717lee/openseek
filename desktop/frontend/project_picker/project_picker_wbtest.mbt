@@ -326,6 +326,7 @@ test "typing a separator after an exact child navigates immediately" {
       generation=navigating_drive.generation,
     ),
   )
+  assert_eq(loaded_drive.path_draft, Some("/c:/"))
   let submitted_drive = updated(loaded_drive, SubmitPath)
   assert_false(submitted_drive.loading)
   assert_eq(submitted_drive.path_draft, None)
@@ -337,10 +338,15 @@ test "typing a separator after an exact child navigates immediately" {
   )
   let mixed_case = updated(updated(code, EditPath), PathChanged("/c:/CODE/"))
   let submitted_mixed_case = updated(mixed_case, SubmitPath)
-  assert_false(submitted_mixed_case.loading)
+  assert_true(submitted_mixed_case.loading)
   assert_eq(submitted_mixed_case.path_draft, None)
-  assert_eq(submitted_mixed_case.generation, mixed_case.generation)
+  assert_true(submitted_mixed_case.generation != mixed_case.generation)
   assert_true(submitted_mixed_case.location == code.location)
+  let mixed_case_child = updated(
+    updated(code, EditPath),
+    PathChanged("/c:/CODE/src/"),
+  )
+  assert_false(mixed_case_child.loading)
 }
 
 ///|

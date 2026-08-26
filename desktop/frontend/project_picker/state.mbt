@@ -173,6 +173,17 @@ pub fn State::handle(
             entries,
             loading: false,
             new_folder: None,
+            // A separator-committed browse keeps editing with the canonical
+            // path the host actually listed, avoiding a second request when
+            // the user immediately presses Enter.
+            path_draft: self.path_draft.map(_ => {
+              match location {
+                Directory(resource) =>
+                  resource.path +
+                  (if resource.path.has_suffix("/") { "" } else { "/" })
+                DriveList => "/"
+              }
+            }),
             path_selection: 0,
           }),
           None,
@@ -264,14 +275,9 @@ pub fn State::handle(
           let already_loaded = match
             (self.location, @resource.of_path(self.channel, destination)) {
             (Some(Directory(current)), Some(destination)) =>
-              current == destination ||
-              (
-                is_windows_drive_resource_path(current.path) &&
-                @common.ext_uri_ignore_path_case.is_equal(
-                  Some(current),
-                  Some(destination),
-                )
-              )
+              // `/c:/...` is also legal on POSIX, so only exact frontend
+              // identity is safe here; the host validates alternate casing.
+              current == destination
             (Some(DriveList), _) => path.trim() == "/"
             _ => false
           }
