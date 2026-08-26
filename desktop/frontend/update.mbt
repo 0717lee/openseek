@@ -3778,14 +3778,13 @@ fn update_msg(
       )
     }
     NotificationClicked(run_id~) => {
-      // The run has finished by the time its notification is clicked, so the
-      // owner usually matches by last run id; a still-running owner (steered
-      // runs re-notify per turn) matches by active run.
-      let conv = if model.conversation_by_last_run(model.focused, run_id)
-        is Some(conv) {
+      // Proton notifications are emitted only for the embedded local host. A
+      // finished run usually matches by last run id; a permission request
+      // still owns the active run while its tool waits for the answer.
+      let conv = if model.conversation_by_last_run(Local, run_id) is Some(conv) {
         Some(conv)
       } else {
-        model.conversation_by_run(model.focused, run_id)
+        model.conversation_by_run(Local, run_id)
       }
       if conv is Some(conv) {
         update_msg(dispatch, OpenSession(conv.device, conv.session_id), model)
@@ -6647,12 +6646,19 @@ fn update_device_msg(
         None
       }
       if conv is Some(conv) {
+        let approval_notification = approval_system_notification(
+          channel, run_id, event,
+        )
         let (report, next) = apply_engine_event(conv, event, run_id)
         let updated = model.replace_conversation(next)
         if report is Some(text) {
           updated.notify_error(dispatch, text)
         } else {
-          (@cmd.none, updated)
+          let command = match approval_notification {
+            Some(notification) => notification.command()
+            None => @cmd.none
+          }
+          (command, updated)
         }
       } else {
         (@cmd.none, model)
@@ -7367,6 +7373,25 @@ fn archived_loaded(
 ///|
 fn running_model() -> Model {
   test_model().replace_conversation(running_conversation())
+}
+
+///|
+test "an approval notification click opens its local conversation" {
+  let dispatch = test_dispatch()
+  let remote : @interop.ChannelId = Remote("d-remote")
+  let home = running_model()
+  let model = {
+    ..home,
+    devices: [
+      home.devices[0],
+      { ..empty_device_state(remote), bridge: Connected },
+    ],
+    focused: remote,
+    active_session: "",
+  }
+  let (_, opened) = update(dispatch, NotificationClicked(run_id="r7"), model)
+  assert_true(opened.focused is Local)
+  assert_eq(opened.active_session, "desktop-test")
 }
 
 ///|
