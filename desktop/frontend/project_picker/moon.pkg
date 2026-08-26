@@ -3,20 +3,16 @@ import {
   "moonbit-community/rabbita/html",
   "moonbit-community/rabbita/js",
   "moonbit-community/rabbita/sub",
-  "moonbitlang/editor/base/common",
   "openseek_desktop/internal/commands",
   "openseek_desktop/internal/protocol",
   "openseek_desktop/frontend/icons",
   "openseek_desktop/frontend/interop",
-  "openseek_desktop/frontend/resource",
 }
 
 import {
   "moonbit-community/rabbita/cmd",
   "moonbitlang/core/debug",
-  "moonbitlang/editor/base/common",
   "openseek_desktop/frontend/interop",
-  "openseek_desktop/frontend/resource",
 } for "test"
 
 import {

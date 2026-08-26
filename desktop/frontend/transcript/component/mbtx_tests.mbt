@@ -1,9 +1,9 @@
 ///|
-test "a run_moonbit call decodes to its program and its arguments" {
+test "an mbtx call decodes to its program and its arguments" {
   let arguments =
     #|{"source":"fn main {\n  println(\"hi\")\n}","target":"js","cwd":"sub/dir"}
-  guard decode_run_moonbit(arguments) is Some(call) else {
-    fail("expected a readable run_moonbit call")
+  guard decode_mbtx_call(arguments) is Some(call) else {
+    fail("expected a readable mbtx call")
   }
   assert_eq(
     call.source,
@@ -20,11 +20,11 @@ test "a run_moonbit call decodes to its program and its arguments" {
 /// The chip row is built from a fixed key order rather than the recorded
 /// JSON's, which is whatever the model emitted and is not preserved by the
 /// parsed map — otherwise two identical calls could chip in different orders.
-test "run_moonbit chips read in a fixed order, whatever the payload's is" {
+test "mbtx chips read in a fixed order, whatever the payload's is" {
   let arguments =
     #|{"zzz":1,"run_in_background":true,"cwd":null,"source":"fn main {  }","warning":"on","target":"wasm","aaa":"x","extra":{"k":1}}
-  guard decode_run_moonbit(arguments) is Some(call) else {
-    fail("expected a readable run_moonbit call")
+  guard decode_mbtx_call(arguments) is Some(call) else {
+    fail("expected a readable mbtx call")
   }
   // A null is the tool's own spelling of "unset", and a nested value cannot be
   // stated in one line: neither gets a chip, and the Original JSON view is
@@ -35,10 +35,10 @@ test "run_moonbit chips read in a fixed order, whatever the payload's is" {
 }
 
 ///|
-test "a run_moonbit chip clamps one oversized argument" {
+test "an mbtx chip clamps one oversized argument" {
   let arguments = "{\"source\":\"fn main {  }\",\"cwd\":\"\{"d/".repeat(200)}\"}"
-  guard decode_run_moonbit(arguments) is Some(call) else {
-    fail("expected a readable run_moonbit call")
+  guard decode_mbtx_call(arguments) is Some(call) else {
+    fail("expected a readable mbtx call")
   }
   assert_eq(call.chips.length(), 1)
   assert_true(call.chips[0].has_suffix("…"))
@@ -49,39 +49,39 @@ test "a run_moonbit chip clamps one oversized argument" {
 /// A payload this card cannot read keeps the generic arguments rendering,
 /// which clamps before parsing — nothing is ever shown as a program that is
 /// not one.
-test "an unreadable run_moonbit payload decodes to nothing" {
-  assert_true(decode_run_moonbit("not json") is None)
-  assert_true(decode_run_moonbit("[1, 2]") is None)
-  assert_true(decode_run_moonbit("{\"target\":\"js\"}") is None)
-  assert_true(decode_run_moonbit("{\"source\":42}") is None)
-  assert_true(decode_run_moonbit("{\"source\":\"  \\n \"}") is None)
+test "an unreadable mbtx payload decodes to nothing" {
+  assert_true(decode_mbtx_call("not json") is None)
+  assert_true(decode_mbtx_call("[1, 2]") is None)
+  assert_true(decode_mbtx_call("{\"target\":\"js\"}") is None)
+  assert_true(decode_mbtx_call("{\"source\":42}") is None)
+  assert_true(decode_mbtx_call("{\"source\":\"  \\n \"}") is None)
   let oversized = "{\"source\":\"\{"x".repeat(200_000)}\"}"
-  assert_true(decode_run_moonbit(oversized) is None)
+  assert_true(decode_mbtx_call(oversized) is None)
 }
 
 ///|
 #warnings("-alert_unstable")
-test "a failed run_moonbit row still reads as a program, not escaped JSON" {
+test "a failed mbtx row still reads as a program, not escaped JSON" {
   let arguments =
     #|{"source":"fn main {\n  println(1 / 0)\n}","target":"js"}
   let rendered = tool_call_view({
     kind: Tool(
       call_id="c1",
-      name="run_moonbit",
+      name="mbtx",
       arguments=Some(arguments),
       has_result=true,
       // For this tool an error is a run that failed, which is exactly when its
       // source matters — the card is not gated on the result the way `plan`'s
       // is, where an error means the arguments were refused.
       is_error=true,
-      brief=Some("run_moonbit (exit=1)"),
+      brief=Some("mbtx (exit=1)"),
     ),
     content: "boom",
     ts: None,
     sequence: None,
   })
   let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
-  assert_true(markup.contains("run-moonbit-source"))
+  assert_true(markup.contains("moonbit-source"))
   assert_true(markup.contains("language-moonbit"))
   assert_true(markup.contains("<span class=\"mtk3\">fn</span>"))
   assert_true(markup.contains("<span class=\"mtk6\">1</span>"))
@@ -122,6 +122,32 @@ test "another tool's arguments keep the generic JSON rendering" {
     sequence: None,
   })
   let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
-  assert_false(markup.contains("run-moonbit-source"))
+  assert_false(markup.contains("moonbit-source"))
   assert_true(markup.contains("tool-call-arguments"))
+}
+
+///|
+/// Archived sessions recorded calls under the tool's retired name; those
+/// replays still get the program card rather than the escaped-JSON fallback.
+#warnings("-alert_unstable")
+test "a recorded call under the retired name still shows its program" {
+  let arguments =
+    #|{"source":"fn main {\n  println(1)\n}"}
+  let rendered = tool_call_view({
+    kind: Tool(
+      call_id="c1",
+      name="run_moonbit",
+      arguments=Some(arguments),
+      has_result=true,
+      is_error=false,
+      brief=Some("mbtx (exit=0)"),
+    ),
+    content: "1\n",
+    ts: None,
+    sequence: None,
+  })
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  assert_true(markup.contains("moonbit-source"))
+  assert_true(markup.contains("println(1)"))
+  assert_true(markup.contains(">Program</label>"))
 }

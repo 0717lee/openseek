@@ -161,7 +161,7 @@ test "finished system notifications preserve status titles and fallback body" {
 test "only live local approval events create system notifications" {
   let event = @transcript.ApprovalRequested(
     id="ap-1",
-    tool_name="run_moonbit",
+    tool_name="mbtx",
     detail="run this snippet with no sandbox policy",
     body=None,
   )
@@ -172,7 +172,7 @@ test "only live local approval events create system notifications" {
   assert_eq(notification.title(), "Permission required")
   assert_eq(
     notification.body(),
-    "run_moonbit is asking permission to run this snippet with no sandbox policy",
+    "mbtx is asking permission to run this snippet with no sandbox policy",
   )
   assert_true(
     approval_system_notification(Remote("device-1"), Some("r1"), event) is None,

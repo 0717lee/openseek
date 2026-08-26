@@ -1,4 +1,6 @@
-# run_moonbit
+# mbtx
+
+The `mbtx` tool lives in the `agent_tool/run_moonbit` package.
 
 Compile and run a **self-contained MoonBit program** and return its merged
 stdout/stderr and exit status. It is the agent's way to *script in MoonBit* —
@@ -48,7 +50,7 @@ Only **dependency resolution** is isolated: a local-package import resolves to
 the **published registry snapshot** (not your uncommitted edits), and a
 third-party import resolves to its **latest** registry version, which can differ
 from your workspace's pinned versions — so verify dependency-API probes against
-the workspace, not run_moonbit. Use it for self-contained scripts; to exercise
+the workspace, not mbtx. Use it for self-contained scripts; to exercise
 your working-tree code, add a `*_test.mbt` to that package and run `moon test`
 via shell.
 
@@ -105,7 +107,7 @@ argument is unusable here and the snippet should be retried without it.
 
 ```mbt check
 ///|
-async test "run_moonbit escalation is refused without a grant" {
+async test "mbtx escalation is refused without a grant" {
   let asked = []
   let definition = @run_moonbit.definition(
     workspace_root=".",
@@ -123,7 +125,7 @@ async test "run_moonbit escalation is refused without a grant" {
   let action = match definition.execute {
     Async(execute) =>
       execute({ "source": "fn main { println(1) }", "escalated": true })
-    Sync(_) => fail("run_moonbit is async")
+    Sync(_) => fail("mbtx is async")
   }
   guard action is Respond(output) else { fail("expected Respond") }
   assert_true(output.is_error)
@@ -142,11 +144,11 @@ A quick language probe — no imports, pure core:
 
 ```mbt check
 ///|
-async test "run_moonbit runs a pure-core probe" {
+async test "mbtx runs a pure-core probe" {
   let action = match @run_moonbit.definition(workspace_root=".").execute {
     Async(execute) =>
       execute({ "source": "fn main { println([1, 2, 3].map(x => x * x)) }" })
-    Sync(_) => fail("run_moonbit is async")
+    Sync(_) => fail("mbtx is async")
   }
   debug_inspect(
     action,
@@ -155,7 +157,7 @@ async test "run_moonbit runs a pure-core probe" {
       #|  {
       #|    content: "[1, 4, 9]\n",
       #|    is_error: false,
-      #|    brief: Some("run_moonbit (exit=0)"),
+      #|    brief: Some("mbtx (exit=0)"),
       #|  },
       #|)
     ),
@@ -168,8 +170,8 @@ checked example can exercise real file IO through a relative path:
 
 ```mbt check
 ///|
-async test "run_moonbit reads a workspace file" {
-  @vfs.with_tmpdir(prefix="run-moonbit-readme-io-", workspace => {
+async test "mbtx reads a workspace file" {
+  @vfs.with_tmpdir(prefix="mbtx-readme-io-", workspace => {
     @fs.write_file(
       workspace + "/data.txt",
       "Ada\nGrace\n",
@@ -186,7 +188,7 @@ async test "run_moonbit reads a workspace file" {
     let action = match
       @run_moonbit.definition(workspace_root=workspace).execute {
       Async(execute) => execute({ "source": source })
-      Sync(_) => fail("run_moonbit is async")
+      Sync(_) => fail("mbtx is async")
     }
     debug_inspect(
       action,
@@ -195,7 +197,7 @@ async test "run_moonbit reads a workspace file" {
         #|  {
         #|    content: "lines=2\n",
         #|    is_error: false,
-        #|    brief: Some("run_moonbit (exit=0)"),
+        #|    brief: Some("mbtx (exit=0)"),
         #|  },
         #|)
       ),
@@ -208,22 +210,16 @@ Pure snippets can select another supported backend explicitly:
 
 ```mbt check
 ///|
-async test "run_moonbit accepts an explicit target" {
+async test "mbtx accepts an explicit target" {
   let action = match @run_moonbit.definition(workspace_root=".").execute {
     Async(execute) =>
       execute({ "source": "fn main { println(6 * 7) }", "target": "js" })
-    Sync(_) => fail("run_moonbit is async")
+    Sync(_) => fail("mbtx is async")
   }
   debug_inspect(
     action,
     content=(
-      #|Respond(
-      #|  {
-      #|    content: "42\n",
-      #|    is_error: false,
-      #|    brief: Some("run_moonbit (exit=0)"),
-      #|  },
-      #|)
+      #|Respond({ content: "42\n", is_error: false, brief: Some("mbtx (exit=0)") })
     ),
   )
 }
@@ -233,12 +229,12 @@ Warnings are quiet by default and can be restored for diagnostic probes:
 
 ```mbt check
 ///|
-async test "run_moonbit can show compiler warnings" {
-  @vfs.with_tmpdir(prefix="run-moonbit-readme-warning-", workspace => {
+async test "mbtx can show compiler warnings" {
+  @vfs.with_tmpdir(prefix="mbtx-readme-warning-", workspace => {
     let execute = match
       @run_moonbit.definition(workspace_root=workspace).execute {
       Async(execute) => execute
-      Sync(_) => fail("run_moonbit is async")
+      Sync(_) => fail("mbtx is async")
     }
     let source = "fn main { let unused = 1; println(\"done\") }"
     let quiet = execute({ "source": source })

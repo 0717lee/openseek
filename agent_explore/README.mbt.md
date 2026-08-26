@@ -12,8 +12,8 @@ spot-check — conclusions enter the parent's context, never file dumps.
 
 Contract highlights:
 
-- Child toolset: `read` + `run_moonbit` + `submit_answer` — no edit tools, no
-  nested subagent tools. Commands run from a `run_moonbit` snippet through the
+- Child toolset: `read` + `mbtx` + `submit_answer` — no edit tools, no
+  nested subagent tools. Commands run from a `mbtx` snippet through the
   shell-free `bobzhang/myshell` EDSL, and the source-write sandbox denies
   writes to the workspace's own sources. A per-child scratch lab (temp dir) is
   the one writable place: the scout may scaffold throwaway projects and run any

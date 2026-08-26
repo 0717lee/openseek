@@ -9,14 +9,14 @@
 /// Names the way forward without naming ways around it, for the same reason as
 /// `policy_refusal_feedback`.
 let source_write_denial_feedback : String =
-  #|run_moonbit sandbox: the "Operation not permitted" failure above is this tool's
+  #|mbtx sandbox: the "Operation not permitted" failure above is this tool's
   #|sandbox denying a write to a protected MoonBit source file (`*.mbt`, `*.mbti`,
   #|`*.mbt.md`, `moon.mod`/`moon.pkg`/`moon.work`) — not a filesystem or permissions
   #|problem to debug. Snippets run source-write-readonly by design; writing non-source
   #|files (data, logs, reports) stays allowed, and source-writing moon commands
   #|(`moon fmt`, `moon info`, `moon add`, `moon test --update`) are denied here by the
   #|same rule. Make source changes with the line-anchored `edit` tool, and keep
-  #|run_moonbit for commands, compute, probing, and non-source IO.
+  #|mbtx for commands, compute, probing, and non-source IO.
 
 ///|
 /// The same guidance for the WORKER profile, which denies a different thing: a
@@ -24,7 +24,7 @@ let source_write_denial_feedback : String =
 /// the boundary around its worktree. Told the source-write text instead, it
 /// would go looking for an `edit` tool to do what it may already do directly.
 let worker_write_denial_feedback : String =
-  #|run_moonbit sandbox: the "Operation not permitted" failure above is this tool's
+  #|mbtx sandbox: the "Operation not permitted" failure above is this tool's
   #|sandbox denying a write OUTSIDE your worktree — a sibling worktree, the parent
   #|checkout, or the repository's shared git state — not a filesystem or permissions
   #|problem to debug. Your own worktree stays fully writable, source included. This
@@ -97,7 +97,7 @@ fn source_write_denied_in_text(
     line.contains("\{subject}\"") ||
     // MoonBit's own OSError Show output escapes the quotes around the path
     // (`@fs.open(): \"keep.mbt\": Operation not permitted`), so the subject is
-    // followed by `\"`, not a bare quote — run_moonbit's denial shape.
+    // followed by `\"`, not a bare quote — mbtx's denial shape.
     line.contains("\{subject}\\\"") ||
     line.contains("\{subject}`") ||
     (

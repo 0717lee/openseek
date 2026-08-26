@@ -54,7 +54,7 @@ async fn scenario_overlap(engine : Engine) -> Unit {
     event is { "event": String("tool_result"), "content": String(content), .. } &&
     content.contains("started background job")
   })
-  // The marker inside a plain `run_moonbit` result means the slow program ran
+  // The marker inside a plain `mbtx` result means the slow program ran
   // (and blocked) in the foreground.
   let blocked_foreground = seen
     .iter()
@@ -62,7 +62,7 @@ async fn scenario_overlap(engine : Engine) -> Unit {
       event
       is {
         "event": String("tool_result"),
-        "tool_name": String("run_moonbit"),
+        "tool_name": String("mbtx"),
         "content": String(content),
         ..
       } &&

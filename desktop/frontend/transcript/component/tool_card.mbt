@@ -5,7 +5,8 @@
 // Every card needs the same two things around that shape: a row of chips for
 // the arguments it did not dramatize, and the recorded payload itself, so the
 // card is a reading of the call and never the only account of it.
-// `run_moonbit` uses the same pieces for its Program view.
+// `mbtx` uses the same pieces for its Program view, as does a recorded call
+// under its retired `run_moonbit` name.
 
 ///|
 /// The custom card for a tool whose arguments have a shape the recorded JSON
@@ -14,7 +15,8 @@
 /// so a card never has to invent a reading of a call it does not understand.
 fn custom_card(name : String, arguments : String) -> (String, @html.Html)? {
   match name {
-    "run_moonbit" => run_moonbit_card(arguments).map(card => ("Program", card))
+    "mbtx" | "run_moonbit" =>
+      mbtx_card(arguments).map(card => ("Program", card))
     "edit" => edit_card(arguments).map(card => ("Change", card))
     "multi_edit" => multi_edit_card(arguments).map(card => ("Changes", card))
     _ => None

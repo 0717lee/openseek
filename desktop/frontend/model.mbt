@@ -1512,6 +1512,10 @@ priv struct GoalEdit {
 /// a snapshot actually contains the resolved row.
 priv struct ProjectAdoption {
   channel : @interop.ChannelId
+  // The exact host path sent to `workspace.add`, used to pair its causal
+  // reply without routing through URI canonicalization.
+  requested : String
+  // Frontend identity for matching the canonical registry snapshot.
   picked : @common.Uri
   known : Array[@common.Uri]
   resolved : @common.Uri?

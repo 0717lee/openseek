@@ -12,9 +12,9 @@ let default_review_max_steps : Int = 120
 
 ///|
 /// Run a code review of the changes between `base` and HEAD and return the
-/// structured report. The toolset is `read`, `run_moonbit`, and
+/// structured report. The toolset is `read`, `mbtx`, and
 /// `submit_review` — no edit/multi_edit/write — so the review reports rather
-/// than edits. Read-only is best-effort: `run_moonbit` runs under the "may not
+/// than edits. Read-only is best-effort: `mbtx` runs under the "may not
 /// write source" profile on macOS, but `moon check`/`moon test` may still
 /// trigger pre-build source generation and a snippet can write non-source
 /// files, so the checkout is not guaranteed byte-for-byte unchanged. Off macOS

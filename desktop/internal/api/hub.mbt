@@ -577,7 +577,7 @@ test "a standing question is replayed until it is answered" {
     approval_event("s1", Some("r1"), {
       event: ApprovalRequested(
         id="ap-1",
-        tool_name="run_moonbit",
+        tool_name="mbtx",
         detail="run with no sandbox policy",
         body=Some("fn main { println(1) }"),
       ),
@@ -615,7 +615,7 @@ test "a question does not outlive the engine that asked it" {
   let ask = approval_event("s1", Some("r1"), {
     event: ApprovalRequested(
       id="ap-1",
-      tool_name="run_moonbit",
+      tool_name="mbtx",
       detail="run with no sandbox policy",
       body=None,
     ),
@@ -662,7 +662,7 @@ test "questions from two engines are kept and retired independently" {
       approval_event(session, Some("r-" + session), {
         event: ApprovalRequested(
           id="ap-" + session,
-          tool_name="run_moonbit",
+          tool_name="mbtx",
           detail="run with no sandbox policy",
           body=Some("// " + session),
         ),
@@ -699,7 +699,7 @@ test "a resolution for a superseded id leaves the standing question" {
     approval_event("s1", Some("r1"), {
       event: ApprovalRequested(
         id="ap-7",
-        tool_name="run_moonbit",
+        tool_name="mbtx",
         detail="run with no sandbox policy",
         body=None,
       ),

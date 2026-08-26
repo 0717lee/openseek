@@ -42,7 +42,7 @@ fn native_escape(source : String) -> String? {
 }
 
 ///|
-/// Tool definition for `run_moonbit`: compile and run a self-contained MoonBit
+/// Tool definition for `mbtx`: compile and run a self-contained MoonBit
 /// program and return its merged stdout/stderr and exit status.
 ///
 /// The program is a `.mbtx` single-file script — it may open with an inline
@@ -60,7 +60,7 @@ fn native_escape(source : String) -> String? {
 /// self-contained scripts; use a `*_test.mbt` + `moon test` for working-tree
 /// code), and third-party imports resolve to their LATEST registry version,
 /// which can differ from your workspace's pinned versions — verify
-/// dependency-API probes against the workspace, not run_moonbit.
+/// dependency-API probes against the workspace, not mbtx.
 ///
 /// Compiler warnings are suppressed by default: snippets are throwaway
 /// scripts, so unused-value style noise would only pollute the output.
@@ -108,7 +108,7 @@ pub fn definition(
   // removed here — the caller's scratch dir is what eventually reclaims them.
   let next_background = Ref(0)
   AgentToolDefinition(
-    name="run_moonbit",
+    name="mbtx",
     description=description(
       background=bg_runtime is Some(_),
       escalation=approval is Some(_),
@@ -148,13 +148,13 @@ pub fn definition(
 fn escalation_refused(outcome : @agent_runtime.ApprovalOutcome) -> String {
   match outcome {
     Rejected =>
-      "run_moonbit: the user declined to run this snippet outside the sandbox. That is an answer, not an obstacle to route around: do not ask again for this task — solve it within the spawn allowlist and the write-root bound, or say plainly what that makes impossible."
+      "mbtx: the user declined to run this snippet outside the sandbox. That is an answer, not an obstacle to route around: do not ask again for this task — solve it within the spawn allowlist and the write-root bound, or say plainly what that makes impossible."
     Cancelled =>
-      "run_moonbit: the request to run outside the sandbox was withdrawn before anyone answered it, so NOTHING RAN. This is not a refusal — but do not ask a second time unless something has changed; retry the snippet without `escalated` instead."
+      "mbtx: the request to run outside the sandbox was withdrawn before anyone answered it, so NOTHING RAN. This is not a refusal — but do not ask a second time unless something has changed; retry the snippet without `escalated` instead."
     Unavailable =>
-      "run_moonbit: this session has no approval channel, so running outside the sandbox cannot be granted here at all. Retry this exact snippet without `escalated`; the spawn allowlist and the write-root bound are what you have."
+      "mbtx: this session has no approval channel, so running outside the sandbox cannot be granted here at all. Retry this exact snippet without `escalated`; the spawn allowlist and the write-root bound are what you have."
     // Unreachable: the caller only builds a refusal after the grant failed.
-    AllowedOnce => "run_moonbit: escalation was granted."
+    AllowedOnce => "mbtx: escalation was granted."
   }
 }
 
@@ -187,13 +187,13 @@ async fn execute(
   let input = @decode.decode(arguments) catch {
     error =>
       return @agent_tool.ToolAction::respond(
-        "error: run_moonbit requires \{@tool_error.failure_message("\{error}")}",
+        "error: mbtx requires \{@tool_error.failure_message("\{error}")}",
         is_error=true,
       )
   }
   if native_escape(input.source) is Some(reason) {
     return @agent_tool.ToolAction::respond(
-      "run_moonbit refuses this program: it \{reason}. run_moonbit is the compute/IO surface; deeper containment arrives with the wasm backend.",
+      "mbtx refuses this program: it \{reason}. mbtx is the compute/IO surface; deeper containment arrives with the wasm backend.",
       is_error=true,
     )
   }
@@ -204,13 +204,13 @@ async fn execute(
   if run_cwd is Some(c) {
     guard @fs.exists(c) else {
       return @agent_tool.ToolAction::respond(
-        "error: run_moonbit cwd does not exist: \{c}",
+        "error: mbtx cwd does not exist: \{c}",
         is_error=true,
       )
     }
     guard @fs.kind(c) is Directory else {
       return @agent_tool.ToolAction::respond(
-        "error: run_moonbit cwd is not a directory: \{c}",
+        "error: mbtx cwd is not a directory: \{c}",
         is_error=true,
       )
     }
@@ -236,7 +236,7 @@ async fn execute(
   // attention on a grant that changes nothing about the run.
   if input.escalated && input.target != "wasm" {
     return @agent_tool.ToolAction::respond(
-      "run_moonbit: `escalated` applies to the wasm target, which is the one the sandbox policy binds; `\{input.target}` runs no policy to lift and cannot spawn or touch files anyway. Drop `escalated`, or drop `target` to use wasm.",
+      "mbtx: `escalated` applies to the wasm target, which is the one the sandbox policy binds; `\{input.target}` runs no policy to lift and cannot spawn or touch files anyway. Drop `escalated`, or drop `target` to use wasm.",
       is_error=true,
     )
   }
@@ -256,7 +256,7 @@ async fn execute(
         // the permission. Passed as the exact string this call was made with,
         // so what is approved and what runs cannot differ.
         channel.ask({
-          tool_name: "run_moonbit",
+          tool_name: "mbtx",
           detail: "run this snippet with no sandbox policy: no spawn allowlist, and writes anywhere",
           body: Some(input.source),
         })
@@ -268,7 +268,7 @@ async fn execute(
       return @agent_tool.ToolAction::respond(
         escalation_refused(outcome),
         is_error=true,
-        brief="run_moonbit (escalation \{escalation_brief(outcome)})",
+        brief="mbtx (escalation \{escalation_brief(outcome)})",
       )
     }
     true
@@ -289,7 +289,7 @@ async fn execute(
       error if @async.is_being_cancelled() => raise error
       _ =>
         return @agent_tool.ToolAction::respond(
-          "run_moonbit: could not create a working directory for the background job.",
+          "mbtx: could not create a working directory for the background job.",
           is_error=true,
         )
     }
@@ -298,25 +298,25 @@ async fn execute(
     // With a lab wired, the snippet builds INSIDE it: the profile re-allows
     // exactly one subtree, and pointing it at the lab then covers both the
     // lab writes the caller sanctioned and moon's own build output.
-    let dir = "\{lab}/run-moonbit-\{next_background.val}"
+    let dir = "\{lab}/mbtx-\{next_background.val}"
     next_background.val += 1
     @fs.mkdir(dir, recursive=true) catch {
       error if @async.is_being_cancelled() => raise error
       _ =>
         return @agent_tool.ToolAction::respond(
-          "run_moonbit: could not create a working directory in the scratch lab.",
+          "mbtx: could not create a working directory in the scratch lab.",
           is_error=true,
         )
     }
     dir
   } else {
-    @fs.tmpdir(prefix="openseek-run-moonbit-") catch {
+    @fs.tmpdir(prefix="openseek-mbtx-") catch {
       // Let a cancellation propagate to the loop's Interrupted terminal instead of
       // swallowing it into an ordinary tool error.
       error if @async.is_being_cancelled() => raise error
       _ =>
         return @agent_tool.ToolAction::respond(
-          "run_moonbit: could not create a temporary working directory.",
+          "mbtx: could not create a temporary working directory.",
           is_error=true,
         )
     }
@@ -504,23 +504,23 @@ async fn execute(
     guard build_exit is Some(build_exit) else {
       let text = rewrite_temp_paths(read_capped(build_log), [real, dir])
       return @agent_tool.ToolAction::respond(
-        "run_moonbit: the build did not finish within \{run_timeout_ms / 1000}s, so no background job was started.\n\{text}",
+        "mbtx: the build did not finish within \{run_timeout_ms / 1000}s, so no background job was started.\n\{text}",
         is_error=true,
-        brief="run_moonbit (build timeout)",
+        brief="mbtx (build timeout)",
       )
     }
     if build_exit != 0 {
       let text = rewrite_temp_paths(read_capped(build_log), [real, dir])
       return @agent_tool.ToolAction::respond(
-        "[run_moonbit: the program did not compile, so no background job was started]\n\{text}",
+        "[mbtx: the program did not compile, so no background job was started]\n\{text}",
         is_error=true,
-        brief="run_moonbit (build failed)",
+        brief="mbtx (build failed)",
       )
     }
     let id = runtime.start(
       program=prog,
       args=argv,
-      command="run_moonbit: \{@agent_tool.brief_line(input.source, limit=64)}",
+      command="mbtx: \{@agent_tool.brief_line(input.source, limit=64)}",
       cwd?=run_cwd,
       sandboxed_command?,
       // Same EOF-on-stdin contract as a foreground run: a detached snippet
@@ -531,7 +531,7 @@ async fn execute(
     job_owns_dir.val = true
     return @agent_tool.ToolAction::respond(
       "started background job \{id} (the program compiled). Read its output with job_output (job_id=\"\{id}\") and stop it with job_stop (job_id=\"\{id}\").",
-      brief="run_moonbit → bg \{id}",
+      brief="mbtx → bg \{id}",
     )
   }
   // With a job runtime wired the foreground run happens ON it, so the
@@ -565,14 +565,14 @@ async fn execute(
       let _ = exec.background()
       let id = runtime.adopt(
         exec,
-        command="run_moonbit: \{@agent_tool.brief_line(input.source, limit=64)}",
+        command="mbtx: \{@agent_tool.brief_line(input.source, limit=64)}",
         cwd?=run_cwd,
         sandboxed_command?,
       )
       job_owns_dir.val = true
       return @agent_tool.ToolAction::respond(
-        "run_moonbit: still running after \{run_timeout_ms / 1000}s, so it moved to the background as job \{id} (nothing was lost). Read its output with job_output (job_id=\"\{id}\") and stop it with job_stop (job_id=\"\{id}\").",
-        brief="run_moonbit → bg \{id}",
+        "mbtx: still running after \{run_timeout_ms / 1000}s, so it moved to the background as job \{id} (nothing was lost). Read its output with job_output (job_id=\"\{id}\") and stop it with job_stop (job_id=\"\{id}\").",
+        brief="mbtx → bg \{id}",
       )
     }
     let raw = exec.head()
@@ -595,19 +595,19 @@ async fn execute(
     exec.discard()
     let text = rewrite_temp_paths(raw, [real, dir])
     let body = if text.is_blank() {
-      "run_moonbit: program exited \{exit_code} with no output"
+      "mbtx: program exited \{exit_code} with no output"
     } else if exit_code != 0 {
-      "[run_moonbit: exited \{exit_code}]\n\{text}"
+      "[mbtx: exited \{exit_code}]\n\{text}"
     } else {
       text
     }
     let body = if output_limit_reached {
-      "\{body}\n[run_moonbit: output passed \{OutputCapBytes} bytes, so the program was STOPPED and this is only what it printed first. Redirect bulky output with `stdout=ToFile(path)` and read the file instead.]"
+      "\{body}\n[mbtx: output passed \{OutputCapBytes} bytes, so the program was STOPPED and this is only what it printed first. Redirect bulky output with `stdout=ToFile(path)` and read the file instead.]"
     } else {
       body
     }
     let body = if saw_binary {
-      "\{body}\n[run_moonbit: the program emitted non-UTF-8 bytes; the text above is a lossy rendering.]"
+      "\{body}\n[mbtx: the program emitted non-UTF-8 bytes; the text above is a lossy rendering.]"
     } else {
       body
     }
@@ -621,7 +621,7 @@ async fn execute(
       is_error=exit_code != 0 ||
         sandbox_denied is Some(_) ||
         output_limit_reached,
-      brief="run_moonbit (exit=\{exit_code})",
+      brief="mbtx (exit=\{exit_code})",
     )
   }
   let result = @async.with_timeout_opt(run_timeout_ms, () => {
@@ -658,9 +658,9 @@ async fn execute(
       // result clamp (which cuts the tail); the output cap is below 60k so
       // both the status line and the body are retained.
       let body = if text.is_blank() {
-        "run_moonbit: program exited \{exit_code} with no output"
+        "mbtx: program exited \{exit_code} with no output"
       } else if exit_code != 0 {
-        "[run_moonbit: exited \{exit_code}]\n\{text}"
+        "[mbtx: exited \{exit_code}]\n\{text}"
       } else {
         text
       }
@@ -672,7 +672,7 @@ async fn execute(
       @agent_tool.ToolAction::respond(
         body,
         is_error=exit_code != 0 || sandbox_denied is Some(_),
-        brief="run_moonbit (exit=\{exit_code})",
+        brief="mbtx (exit=\{exit_code})",
       )
     }
     None => {
@@ -681,7 +681,7 @@ async fn execute(
       // instead of discarding it behind a generic timeout message. The status
       // line stays first so it survives the outer result clamp.
       let partial = rewrite_temp_paths(read_capped(log), [real, dir])
-      let head = "run_moonbit: timed out after \{run_timeout_ms / 1000}s and was cancelled — the program did not finish (an infinite loop, or a build that never completed)."
+      let head = "mbtx: timed out after \{run_timeout_ms / 1000}s and was cancelled — the program did not finish (an infinite loop, or a build that never completed)."
       let body = if partial.is_blank() {
         head
       } else {
@@ -695,7 +695,7 @@ async fn execute(
       @agent_tool.ToolAction::respond(
         body,
         is_error=true,
-        brief="run_moonbit (timeout)",
+        brief="mbtx (timeout)",
       )
     }
   }
@@ -898,14 +898,14 @@ async fn read_capped(path : String) -> String {
   let text = @utf8.decode_lossy(Bytes::from_array(buf[:filled]))
   // If we filled the cap there may be more; note the truncation.
   if filled == OutputCapBytes {
-    "\{text}\n[run_moonbit: output truncated at \{OutputCapBytes} bytes]"
+    "\{text}\n[mbtx: output truncated at \{OutputCapBytes} bytes]"
   } else {
     text
   }
 }
 
 ///|
-/// The `run_moonbit` argument schema. `background` adds `run_in_background`,
+/// The `mbtx` argument schema. `background` adds `run_in_background`,
 /// which a definition without a job runtime must not advertise — the model
 /// would only get an error from a call it cannot execute. `escalation` adds
 /// `escalated` on the same rule: with no approval channel wired, every use of
@@ -965,7 +965,7 @@ fn schema(background~ : Bool, escalation~ : Bool) -> Json {
 }
 
 ///|
-/// The `run_moonbit` tool description.
+/// The `mbtx` tool description.
 ///
 /// Holds the whole command surface: every role that registers this tool gets it
 /// and nothing else does. The five system prompts carried this text for one
@@ -1022,6 +1022,9 @@ fn description(background~ : Bool, escalation~ : Bool) -> String {
     #|stdout/stderr and exit status. This is BOTH your command runner and your
     #|scripting surface: there is no shell tool, so commands are spawned from MoonBit
     #|with the `bobzhang/myshell` EDSL.
+    #|
+    #|This tool was previously named `run_moonbit` — a resumed session's older
+    #|history may still call it that.
     #|
     #|`source` is the whole program. Diagnostics are rewritten to `source:LINE:COL`
     #|about your input; `target` defaults to wasm, the sandboxed backend.
@@ -1118,9 +1121,9 @@ fn description(background~ : Bool, escalation~ : Bool) -> String {
     #|
     #|These, and nothing else:
     #|
-    #|- `moon` — check, test, build, run, fmt, info, add, remove, update, install,
-    #|  tree, clean, new, ide, doc, explain, coverage, cram, package, version,
-    #|  plus `publish --dry-run`. (Not plain `publish`, `login` or `register`.)
+    #|- `moon` — check, test, build, bench, run, fmt, info, add, remove, update,
+    #|  install, tree, clean, new, ide, doc, explain, coverage, cram, package,
+    #|  version, plus `publish --dry-run`. (Not plain `publish`, `login` or `register`.)
     #|- `proton_cli` — `--version`, `--help`, new, dev, build, package, doctor,
     #|  cef, and updater. Set `Cmd.cwd` for the project directory; the global
     #|  `-C`/`--cwd` options before the subcommand are refused.
@@ -1167,7 +1170,7 @@ fn description(background~ : Bool, escalation~ : Bool) -> String {
     #|- Compiler warnings for the snippet are suppressed; pass `warning: "on"` to
     #|  see them.
     #|- Bounded to 300s. For independent commands or probes, emit SEVERAL
-    #|  `run_moonbit` calls in the SAME assistant turn — they run and come back
+    #|  `mbtx` calls in the SAME assistant turn — they run and come back
     #|  together, saving a model round-trip each.
   // Three raw pieces joined at the seam, rather than one interpolating block:
   // the tail carries `\{@fs.tmpdir()}` inside a code sample, which a `$|` block

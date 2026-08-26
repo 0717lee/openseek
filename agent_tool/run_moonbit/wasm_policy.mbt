@@ -27,6 +27,10 @@ let spawnable_commands : Array[(String, Array[String])] = [
   ("moon", ["check"]),
   ("moon", ["test"]),
   ("moon", ["build"]),
+  // Benchmarks compile and run workspace code natively, exactly like `test`:
+  // admitting one while refusing the other would guard nothing, and
+  // performance work is a recurring task shape.
+  ("moon", ["bench"]),
   // `moon run` is how a turn exercises a binary it just built: a freshly
   // compiled executable can never be on this list — its name did not exist
   // when the list was written — so without `moon run` the whole shape of task

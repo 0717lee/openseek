@@ -293,11 +293,11 @@ test "tool args render verbatim, keeping the raw JSON for debugging" {
 }
 
 ///|
-test "run_moonbit source uses editor token classes and keeps original JSON" {
+test "mbtx source uses editor token classes and keeps original JSON" {
   let arguments =
     #|{"source":"fn main {\n  let greeting = \"<hello>\"\n}","target":"js"}
-  let html = render_tool_call("run_moonbit", arguments)
-  assert_true(html.contains("class=\"arg-value run-moonbit-source\""))
+  let html = render_tool_call("mbtx", arguments)
+  assert_true(html.contains("class=\"arg-value moonbit-source\""))
   assert_true(html.contains("class=\"language-moonbit\""))
   assert_true(html.contains("<span class=\"mtk3\">fn</span>"))
   assert_true(html.contains("<span class=\"mtk3\">let</span>"))
@@ -308,6 +308,9 @@ test "run_moonbit source uses editor token classes and keeps original JSON" {
   // Viz's global Rendered / Original toggle keeps the raw payload in the DOM.
   assert_true(html.contains("tool-call-args-original"))
   assert_true(html.contains("target"))
+  // The retired tool name still renders the program view in archived logs.
+  let legacy = render_tool_call("run_moonbit", arguments)
+  assert_true(legacy.contains("class=\"arg-value moonbit-source\""))
 }
 
 ///|

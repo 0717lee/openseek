@@ -1,9 +1,9 @@
 ///|
-/// Decoded arguments of the `run_moonbit` tool: a self-contained MoonBit
+/// Decoded arguments of the `mbtx` tool: a self-contained MoonBit
 /// program (`.mbtx` single-file script) to compile and run, the backend
 /// `target` to run it on, and an optional `cwd` (the working directory the
 /// program runs in; `None` means the workspace root).
-pub struct RunMoonbitInput {
+pub struct MbtxInput {
   source : String
   target : String
   cwd : String?
@@ -33,7 +33,7 @@ fn valid_target(target : String) -> Bool {
 }
 
 ///|
-/// Decode `run_moonbit` tool-call arguments. `source` is a required string
+/// Decode `mbtx` tool-call arguments. `source` is a required string
 /// holding a full `.mbtx` program (an optional leading `import { … }` block,
 /// then the program including its own `main`). `target` is an optional backend
 /// name defaulting to `wasm`, which is the backend moonrun's policy sandbox
@@ -41,7 +41,7 @@ fn valid_target(target : String) -> Bool {
 /// compute-only backends are the only alternatives offered. `cwd` is an
 /// optional working directory for the program (defaults to the workspace
 /// root). Failures name the offending field.
-pub fn decode(arguments : Json) -> RunMoonbitInput raise {
+pub fn decode(arguments : Json) -> MbtxInput raise {
   match arguments {
     { "source": String(source), .. } => {
       let target = match arguments {
@@ -186,4 +186,4 @@ test "decode rejects non-object arguments" {
 }
 
 ///|
-pub extend RunMoonbitInput with Debug::{to_repr}
+pub extend MbtxInput with Debug::{to_repr}

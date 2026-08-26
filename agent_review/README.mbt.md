@@ -11,7 +11,7 @@ dispatch a review to OpenSeek.
 
 `run_review(base, …)` reviews the diff between `base` and `HEAD`:
 
-1. drives a model over a **read-only** toolset (`read`, `run_moonbit`, and
+1. drives a model over a **read-only** toolset (`read`, `mbtx`, and
    `submit_review`) — no `edit`/`multi_edit`/`write`, so it reports rather than
    rewrites;
 2. instructs the model to ground every finding in the compiler — run
@@ -69,7 +69,7 @@ instead of finishing.
 ## Read-only stance (best-effort, not airtight)
 
 The review has no edit/write tools, and the commands it runs through
-`run_moonbit` inherit the source-write sandbox, which denies writes to the
+`mbtx` inherit the source-write sandbox, which denies writes to the
 workspace's sources — including the bulk source-rewriters (`moon fmt` /
 `moon info` / `moon test --update`). It is **not** an airtight guarantee: the
 profile is best-effort (a program can still smuggle sources via directory

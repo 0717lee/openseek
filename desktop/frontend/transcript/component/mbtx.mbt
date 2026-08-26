@@ -1,4 +1,4 @@
-// The `run_moonbit` tool's arguments, read back out of the transcript.
+// The `mbtx` tool's arguments, read back out of the transcript.
 //
 // A call to it is a whole `.mbtx` program, and the generic arguments rendering
 // shows the recorded JSON: the program arrives as one long line with every
@@ -16,8 +16,8 @@
 // tool `is_error` means the run failed, not that the arguments were refused.
 
 ///|
-/// A recorded `run_moonbit` call, decoded for display.
-priv struct RunMoonbitCall {
+/// A recorded `mbtx` call, decoded for display.
+priv struct MbtxCall {
   /// The `.mbtx` program, exactly as the model sent it.
   source : String
   /// The call's other scalar arguments, as `key: value` chip text.
@@ -25,7 +25,7 @@ priv struct RunMoonbitCall {
 }
 
 ///|
-/// Decode recorded `run_moonbit` arguments, or `None` when they are not a call
+/// Decode recorded `mbtx` arguments, or `None` when they are not a call
 /// this card can show: past the shared payload bound, not JSON, not an object,
 /// or carrying no program to display.
 ///
@@ -35,7 +35,7 @@ priv struct RunMoonbitCall {
 /// second copy of the validation would only drift from the one that matters.
 /// An argument with an unexpected value therefore still shows, as its own
 /// chip, which is what a reader looking at a rejected call needs to see.
-fn decode_run_moonbit(arguments : String) -> RunMoonbitCall? {
+fn decode_mbtx_call(arguments : String) -> MbtxCall? {
   guard card_fields(arguments) is Some(fields) &&
     fields.get("source") is Some(String(source)) &&
     !source.is_blank() else {
@@ -51,16 +51,16 @@ fn decode_run_moonbit(arguments : String) -> RunMoonbitCall? {
 }
 
 ///|
-/// The program view for a `run_moonbit` tool call: the source it asked to run,
+/// The program view for a `mbtx` tool call: the source it asked to run,
 /// verbatim, under a row of chips for the arguments that shaped the run.
 /// `None` when the payload is not a readable call, which keeps the generic
 /// JSON rendering.
-fn run_moonbit_card(arguments : String) -> @html.Html? {
-  guard decode_run_moonbit(arguments) is Some(call) else { return None }
+fn mbtx_card(arguments : String) -> @html.Html? {
+  guard decode_mbtx_call(arguments) is Some(call) else { return None }
   Some(
-    @html.div(class="run-moonbit-args", [
+    @html.div(class="mbtx-args", [
       chip_row(call.chips),
-      @html.pre(class="run-moonbit-source", [
+      @html.pre(class="moonbit-source", [
         @syntax_html.moonbit_source_code(truncate_output(call.source)),
       ]),
     ]),

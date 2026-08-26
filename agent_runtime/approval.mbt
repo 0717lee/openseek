@@ -29,7 +29,7 @@ pub(all) enum ApprovalOutcome {
 /// decided on.
 ///
 /// No field names the tool CALL. Only one asking call can be in flight at a
-/// time — escalation belongs to `run_moonbit`, which is not `concurrent_safe`
+/// time — escalation belongs to `mbtx`, which is not `concurrent_safe`
 /// — so nothing needs pairing. A tool family that asks and admits adjacent
 /// concurrency would need the call id here.
 pub(all) struct ApprovalAsk {
@@ -91,13 +91,13 @@ async test "a wired channel is handed over intact" {
     fail("expected a channel")
   }
   let outcome = channel.ask({
-    tool_name: "run_moonbit",
+    tool_name: "mbtx",
     detail: "run without the sandbox",
     body: Some("fn main { println(1) }"),
   })
   assert_true(outcome is AllowedOnce)
   assert_eq(asked.length(), 1)
-  assert_eq(asked[0].tool_name, "run_moonbit")
+  assert_eq(asked[0].tool_name, "mbtx")
   // The subject reaches the channel verbatim: it is the string the tool was
   // called with, not a rendering of it, so there is nothing for it to drift
   // from.

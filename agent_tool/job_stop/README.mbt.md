@@ -1,7 +1,7 @@
 # Job Stop Tool
 
 `job_stop` cancels a running background job by its `job_id` — the id
-`run_moonbit` returns when called with `run_in_background=true`.
+`mbtx` returns when called with `run_in_background=true`.
 
 Stopping is a request against the job's shared execution: the child process is
 cancelled and the job lands on the `Stopped` status, which `job_output`

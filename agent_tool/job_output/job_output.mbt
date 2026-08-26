@@ -1,6 +1,6 @@
 ///|
 /// Tool `job_output`: read a background job's output and status by id.
-/// The id comes from `run_moonbit run_in_background`, or from a foreground command that
+/// The id comes from `mbtx run_in_background`, or from a foreground command that
 /// was moved to the background when it exceeded its `timeout_ms`.
 pub fn definition(
   bg_runtime : @bgjobs.BgJobRuntime,
@@ -9,7 +9,7 @@ pub fn definition(
     name="job_output",
     description=(
       #|Read a background job's recent output and status by its job_id (returned by
-      #|run_moonbit run_in_background, or by a command moved to the background on timeout).
+      #|mbtx run_in_background, or by a command moved to the background on timeout).
       #|Returns the most recent window of captured output (with truncation metadata naming
       #|the total size when output exceeds the window) and whether the job is still
       #|running. If you need the job's result before you can continue and have no other
