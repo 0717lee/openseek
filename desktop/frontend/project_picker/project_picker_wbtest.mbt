@@ -330,6 +330,17 @@ test "typing a separator after an exact child navigates immediately" {
   assert_false(submitted_drive.loading)
   assert_eq(submitted_drive.path_draft, None)
   assert_eq(submitted_drive.generation, loaded_drive.generation)
+
+  let code = opened(
+    location=Directory(test_resource(@interop.ChannelId::Local, "/C:/Code")),
+    entries=["src"],
+  )
+  let mixed_case = updated(updated(code, EditPath), PathChanged("/c:/CODE/"))
+  let submitted_mixed_case = updated(mixed_case, SubmitPath)
+  assert_false(submitted_mixed_case.loading)
+  assert_eq(submitted_mixed_case.path_draft, None)
+  assert_eq(submitted_mixed_case.generation, mixed_case.generation)
+  assert_true(submitted_mixed_case.location == code.location)
 }
 
 ///|

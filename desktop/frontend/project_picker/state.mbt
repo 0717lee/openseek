@@ -264,7 +264,14 @@ pub fn State::handle(
           let already_loaded = match
             (self.location, @resource.of_path(self.channel, destination)) {
             (Some(Directory(current)), Some(destination)) =>
-              current == destination
+              current == destination ||
+              (
+                is_windows_drive_resource_path(current.path) &&
+                @common.ext_uri_ignore_path_case.is_equal(
+                  Some(current),
+                  Some(destination),
+                )
+              )
             (Some(DriveList), _) => path.trim() == "/"
             _ => false
           }
