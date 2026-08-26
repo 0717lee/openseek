@@ -72,6 +72,112 @@ async function disposeDiffLifecycle(page) {
   });
 }
 
+async function modifiedScrollTop(root) {
+  return root.evaluate((node) => {
+    const content = node.querySelector(
+      '.moonbit-diff-editor-modified .lines-content',
+    );
+    if (!content) {
+      throw new Error('missing modified diff lines content');
+    }
+    return Math.max(
+      0,
+      -(Number.parseFloat(getComputedStyle(content).top) || 0),
+    );
+  });
+}
+
+test('reveals raw mappings[0] when the first hunk starts on the cursor line', async ({ page }) => {
+  const root = await openDiffLifecycle(page);
+  const modified = root.locator('.moonbit-diff-editor-modified');
+  const scrollable = modified.locator(
+    '.monaco-scrollable-element.editor-scrollable',
+  );
+  await setDiffLifecycleFixture(page, 'first-line');
+  await waitForDiffLifecycleIdle(page);
+
+  // Keep the model cursor at its initial line 1 while moving the viewport.
+  // Cursor-relative `reveal_next_change` would skip that first hunk and land
+  // on line 100; the VS Code API must always reveal raw mappings[0].
+  await scrollable.hover();
+  await page.mouse.wheel(0, 1400);
+  await expect
+    .poll(() => modifiedScrollTop(root))
+    .toBeGreaterThan(500);
+  await page.evaluate(() =>
+    globalThis.__diffEditorLifecycleControls.reveal_first_diff(),
+  );
+
+  await expect(
+    modified.locator('.line-numbers.active-line-number'),
+  ).toHaveText('1');
+  await expect(
+    modified.locator('.view-line').filter({
+      hasText: 'new first hunk at line 1',
+    }),
+  ).toBeVisible();
+  await expect
+    .poll(() => modifiedScrollTop(root))
+    .toBeLessThan(100);
+
+  await disposeDiffLifecycle(page);
+});
+
+test('defers a one-shot first-diff reveal through computation and hidden layout', async ({ page }) => {
+  const root = await openDiffLifecycle(page);
+  const host = page.locator('.diff-lifecycle-host');
+  const modified = root.locator('.moonbit-diff-editor-modified');
+  const scrollable = modified.locator(
+    '.monaco-scrollable-element.editor-scrollable',
+  );
+
+  // Request the VS Code-style reveal while neither diff computation nor a
+  // measurable two-pane layout is ready. Showing the host later must consume
+  // the request for this exact model pair rather than dropping it.
+  await host.evaluate((node) => {
+    node.style.display = 'none';
+  });
+  await page.evaluate(() => {
+    globalThis.__diffEditorLifecycleControls.set_fixture('late');
+    globalThis.__diffEditorLifecycleControls.reveal_first_diff();
+  });
+  await expect
+    .poll(() => page.evaluate(() =>
+      globalThis.__diffEditorLifecycleControls.snapshot().diffUpToDate,
+    ))
+    .toBe(true);
+  await host.evaluate((node) => {
+    node.style.display = 'block';
+  });
+  await waitForDiffLifecycleIdle(page);
+
+  await expect(
+    modified.locator('.line-numbers.active-line-number'),
+  ).toHaveText('121');
+  await expect(
+    modified.locator('.view-line').filter({ hasText: 'new first hunk' }),
+  ).toBeVisible();
+  const revealedScrollTop = await modifiedScrollTop(root);
+  expect(revealedScrollTop).toBeGreaterThan(0);
+
+  // The request is consumed once. A same-pair provider recomputation must not
+  // pull a reviewer who has scrolled onward back to the first hunk.
+  await scrollable.hover();
+  await page.mouse.wheel(0, 1800);
+  await expect
+    .poll(() => modifiedScrollTop(root))
+    .toBeGreaterThan(revealedScrollTop + 500);
+  const reviewerScrollTop = await modifiedScrollTop(root);
+  await page.evaluate(() =>
+    globalThis.__diffEditorLifecycleControls.set_provider('core'),
+  );
+  await waitForDiffLifecycleIdle(page);
+  const recomputedScrollTop = await modifiedScrollTop(root);
+  expect(Math.abs(recomputedScrollTop - reviewerScrollTop)).toBeLessThanOrEqual(1);
+
+  await disposeDiffLifecycle(page);
+});
+
 test('owns and tears down exactly two kernels and one shared diff view model', async ({ page }) => {
   await page.goto('/browser-tests/component.html?diffLifecycle=1');
   await page.waitForFunction(() => Boolean(globalThis.__diffEditorLifecycleControls));

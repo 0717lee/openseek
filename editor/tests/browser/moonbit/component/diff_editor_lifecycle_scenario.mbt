@@ -14,6 +14,15 @@ fn diff_editor_lifecycle_model(
 }
 
 ///|
+fn diff_editor_lifecycle_numbered_lines(start : Int, end : Int) -> String {
+  let lines : Array[String] = []
+  for line in start..<end {
+    lines.push("stable line \{line}")
+  }
+  lines.join("\n")
+}
+
+///|
 priv suberror DiffLifecycleProviderError {
   ComputeFailed
 }
@@ -164,6 +173,43 @@ fn run_diff_editor_lifecycle_test() -> Unit {
   let identical_modified = diff_editor_lifecycle_model(
     "identical-modified", "identical 1\nidentical 2\nidentical 3\nidentical 4\nidentical 5\nidentical 6\nidentical 7\nidentical 8",
   )
+  let late_prefix = diff_editor_lifecycle_numbered_lines(1, 121) + "\n"
+  let late_middle = "\n" + diff_editor_lifecycle_numbered_lines(122, 190) + "\n"
+  let late_suffix = "\n" + diff_editor_lifecycle_numbered_lines(191, 241)
+  let late_original = diff_editor_lifecycle_model(
+    "late-original",
+    late_prefix +
+    "old first hunk" +
+    late_middle +
+    "old second hunk" +
+    late_suffix,
+  )
+  let late_modified = diff_editor_lifecycle_model(
+    "late-modified",
+    late_prefix +
+    "new first hunk" +
+    late_middle +
+    "new second hunk" +
+    late_suffix,
+  )
+  let first_line_middle = "\n" +
+    diff_editor_lifecycle_numbered_lines(2, 100) +
+    "\n"
+  let first_line_suffix = "\n" + diff_editor_lifecycle_numbered_lines(101, 141)
+  let first_line_original = diff_editor_lifecycle_model(
+    "first-line-original",
+    "old first hunk at line 1" +
+    first_line_middle +
+    "old second hunk at line 100" +
+    first_line_suffix,
+  )
+  let first_line_modified = diff_editor_lifecycle_model(
+    "first-line-modified",
+    "new first hunk at line 1" +
+    first_line_middle +
+    "new second hunk at line 100" +
+    first_line_suffix,
+  )
   widget.set_model(Some({ original, modified })) |> ignore
   install_diff_editor_lifecycle_controls(
     () => diff_editor_lifecycle_snapshot_json(widget),
@@ -174,6 +220,9 @@ fn run_diff_editor_lifecycle_test() -> Unit {
           { original: indicator_original, modified: indicator_modified }
         "identical" =>
           { original: identical_original, modified: identical_modified }
+        "late" => { original: late_original, modified: late_modified }
+        "first-line" =>
+          { original: first_line_original, modified: first_line_modified }
         _ => { original, modified }
       }
       widget.set_model(Some(pair)) |> ignore
@@ -215,6 +264,7 @@ fn run_diff_editor_lifecycle_test() -> Unit {
       )
       |> ignore
     },
+    () => widget.reveal_first_diff(),
     () => widget.dispose(),
     () => {
       original.dispose()
@@ -225,6 +275,10 @@ fn run_diff_editor_lifecycle_test() -> Unit {
       indicator_modified.dispose()
       identical_original.dispose()
       identical_modified.dispose()
+      late_original.dispose()
+      late_modified.dispose()
+      first_line_original.dispose()
+      first_line_modified.dispose()
     },
   )
 }
@@ -237,10 +291,11 @@ extern "js" fn install_diff_editor_lifecycle_controls(
   set_options : (String, Bool, Double) -> Unit,
   set_provider : (String) -> Unit,
   set_model_attached : (Bool) -> Unit,
+  reveal_first_diff : () -> Unit,
   dispose : () -> Unit,
   dispose_models : () -> Unit,
 ) -> Unit =
-  #| (snapshot, setFixture, setDigitLineCount, setOptions, setProvider, setModelAttached, dispose, disposeModels) => {
+  #| (snapshot, setFixture, setDigitLineCount, setOptions, setProvider, setModelAttached, revealFirstDiff, dispose, disposeModels) => {
   #|   globalThis.__diffEditorLifecycleControls = Object.freeze({
   #|     snapshot() { return JSON.parse(snapshot()); },
   #|     set_fixture: setFixture,
@@ -248,6 +303,7 @@ extern "js" fn install_diff_editor_lifecycle_controls(
   #|     set_options: setOptions,
   #|     set_provider: setProvider,
   #|     set_model_attached: setModelAttached,
+  #|     reveal_first_diff: revealFirstDiff,
   #|     dispose,
   #|     dispose_models: disposeModels,
   #|   });

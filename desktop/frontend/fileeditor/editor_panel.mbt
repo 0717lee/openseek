@@ -759,6 +759,11 @@ fn show_diff_comparison(
   let previous = diff_editor.set_model(
     Some(@viewer.DiffEditorModel(original_model, modified_model)),
   )
+  // Match VS Code's TextDiffEditor host policy: a genuinely new comparison
+  // with no restored view state starts at its first raw diff mapping. The
+  // equality guard above deliberately keeps Source/Diff toggles and unchanged
+  // review refreshes at the reviewer's existing position.
+  diff_editor.reveal_first_diff()
   services.feedback.set_feedback_enabled(original_uri, relative is Some(_))
   if previous is Some(previous) {
     dispose_diff_comparison_models(previous)
@@ -847,6 +852,10 @@ fn show_history_diff_in_viewer(
     let previous = diff_editor.set_model(
       Some(@viewer.DiffEditorModel(original_model, modified_model)),
     )
+    // Historical comparisons are fresh DiffEditor inputs too. Equal pairs
+    // return above, preserving the reader's position just like a restored VS
+    // Code diff view state.
+    diff_editor.reveal_first_diff()
     services.feedback.set_feedback_enabled(original_uri, false)
     services.feedback.set_feedback_enabled(modified_uri, false)
     viewer_state.absolute = None

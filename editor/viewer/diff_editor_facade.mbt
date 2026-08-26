@@ -250,6 +250,14 @@ pub fn DiffEditor::on_did_update_diff(
 }
 
 ///|
+/// Reveal the first raw diff mapping once the current comparison is ready.
+/// The request is one-shot and model-bound, matching VS Code's
+/// `IDiffEditor.revealFirstDiff` rather than cursor-relative F7 navigation.
+pub fn DiffEditor::reveal_first_diff(self : DiffEditor) -> Unit {
+  self.widget.reveal_first_diff()
+}
+
+///|
 pub fn DiffEditor::reveal_next_change(self : DiffEditor) -> Bool {
   self.widget.reveal_next_change()
 }

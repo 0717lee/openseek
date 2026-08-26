@@ -40,6 +40,7 @@ pub fn DiffEditor::get_model(Self) -> DiffEditorModel?
 pub fn DiffEditor::is_diff_up_to_date(Self) -> Bool
 pub fn DiffEditor::layout(Self) -> Unit
 pub fn DiffEditor::on_did_update_diff(Self, () -> Unit) -> @common.Disposable
+pub fn DiffEditor::reveal_first_diff(Self) -> Unit
 pub fn DiffEditor::reveal_next_change(Self) -> Bool
 pub fn DiffEditor::reveal_previous_change(Self) -> Bool
 pub fn DiffEditor::set_diff_provider(Self, &@diff.DocumentDiffProvider) -> Unit
