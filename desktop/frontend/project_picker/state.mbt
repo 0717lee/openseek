@@ -255,7 +255,8 @@ pub fn State::handle(
     SubmitPath =>
       match self.path_destination() {
         Some(path) if !self.loading => {
-          let destination = if path == "/" {
+          let destination = if path == "/" ||
+            (path.length() == 4 && is_windows_drive_resource_path(path)) {
             path
           } else {
             path.trim_end(chars="/").to_owned()

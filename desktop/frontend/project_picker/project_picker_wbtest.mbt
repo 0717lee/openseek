@@ -316,6 +316,20 @@ test "typing a separator after an exact child navigates immediately" {
   let navigating_drive = updated(updated(drives, EditPath), PathChanged("/c:/"))
   assert_true(navigating_drive.loading)
   assert_eq(navigating_drive.path_draft, Some("/C:/"))
+  let drive = test_resource(@interop.ChannelId::Local, "/C:/")
+  let loaded_drive = updated(
+    navigating_drive,
+    Loaded(
+      channel=@interop.ChannelId::Local,
+      location=Directory(drive),
+      entries=["Users"],
+      generation=navigating_drive.generation,
+    ),
+  )
+  let submitted_drive = updated(loaded_drive, SubmitPath)
+  assert_false(submitted_drive.loading)
+  assert_eq(submitted_drive.path_draft, None)
+  assert_eq(submitted_drive.generation, loaded_drive.generation)
 }
 
 ///|
