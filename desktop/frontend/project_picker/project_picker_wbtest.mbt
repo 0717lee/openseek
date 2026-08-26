@@ -291,6 +291,18 @@ test "typing a separator after an exact child navigates immediately" {
   )
   let (_, editing, _) = State::handle(picker, emit(), EditPath)
   guard editing is Some(editing) else { fail("path editor did not open") }
+  let (_, bare_exact, _) = State::handle(editing, emit(), PathChanged("git"))
+  guard bare_exact is Some(bare_exact) else { fail("bare child closed picker") }
+  let (_, bare_navigating, _) = State::handle(
+    bare_exact,
+    emit(),
+    PathChanged("git/"),
+  )
+  guard bare_navigating is Some(bare_navigating) else {
+    fail("bare child separator navigation closed picker")
+  }
+  assert_true(bare_navigating.loading)
+  assert_eq(bare_navigating.path_draft, Some("/Users/dii/git/"))
   let (_, exact, _) = State::handle(
     editing,
     emit(),
@@ -394,7 +406,7 @@ test "typing a separator after an exact child navigates immediately" {
     fail("drive separator navigation closed picker")
   }
   assert_true(navigating_drive.loading)
-  assert_eq(navigating_drive.path_draft, Some("/c:/"))
+  assert_eq(navigating_drive.path_draft, Some("/C:/"))
 }
 
 ///|

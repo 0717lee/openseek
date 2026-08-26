@@ -215,7 +215,12 @@ pub fn State::handle(
       if !self.loading && self.path_draft is Some(_) {
         let changed = { ..self, path_draft: Some(value), path_selection: 0 }
         match changed.committed_child_path(value) {
-          Some(path) => changed.navigate_to(emit, path, keep_path_edit=true)
+          Some((path, committed)) =>
+            { ..changed, path_draft: Some(committed) }.navigate_to(
+              emit,
+              path,
+              keep_path_edit=true,
+            )
           None => (@cmd.none, Some(changed), None)
         }
       } else {

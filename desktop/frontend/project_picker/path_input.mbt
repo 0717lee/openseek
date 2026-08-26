@@ -123,7 +123,7 @@ fn State::entry_target(self : State, name : String) -> String {
 /// misspelled, and unrelated absolute paths remain editable and require Enter.
 /// Resource paths use `/` on every host; Windows resource locations compare
 /// case-insensitively, just like their local completion filter.
-fn State::committed_child_path(self : State, raw : String) -> String? {
+fn State::committed_child_path(self : State, raw : String) -> (String, String)? {
   let draft = raw.trim().to_owned()
   guard draft.has_suffix("/") else { return None }
   let case_insensitive = match self.location {
@@ -135,13 +135,20 @@ fn State::committed_child_path(self : State, raw : String) -> String? {
   for name in self.entries {
     let target = self.entry_target(name)
     let committed = if target.has_suffix("/") { target } else { target + "/" }
+    let child_draft = name + "/"
     let comparable_committed = if case_insensitive {
       committed.to_lower()
     } else {
       committed
     }
-    if comparable_draft == comparable_committed {
-      return Some(target)
+    let comparable_child_draft = if case_insensitive {
+      child_draft.to_lower()
+    } else {
+      child_draft
+    }
+    if comparable_draft == comparable_committed ||
+      comparable_draft == comparable_child_draft {
+      return Some((target, committed))
     }
   }
   None
