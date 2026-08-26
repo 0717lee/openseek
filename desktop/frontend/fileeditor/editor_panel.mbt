@@ -493,6 +493,19 @@ fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
           provider=viewer_state.diff_provider,
         )
         diff_editor.on_did_update_diff(() => {
+          let navigation_available = if diff_editor.is_diff_up_to_date() {
+            match diff_editor.get_diff() {
+              Some(diff) => !diff.changes.is_empty()
+              None => false
+            }
+          } else {
+            false
+          }
+          scheduler.add(
+            dispatch(
+              ReviewDiffNavigationAvailabilityChanged(navigation_available),
+            ),
+          )
           if diff_editor.is_diff_up_to_date() {
             let status = viewer_state.diff_provider.get_status()
             scheduler.add(
@@ -512,6 +525,28 @@ fn request_viewer_mount(dispatch : @cmd.Emit[Msg]) -> @cmd.Cmd {
     },
     kind=@cmd.after_render,
   )
+}
+
+///|
+/// Reveal the previous change through DiffEditor's existing cyclic navigation.
+/// This deliberately leaves focus where it is so toolbar clicks do not change
+/// keyboard ownership beyond the editor's own cursor update.
+fn reveal_previous_review_diff_change() -> @cmd.Cmd {
+  @cmd.custom_cmd(_scheduler => {
+    if viewer_state.diff_editor is Some(diff_editor) {
+      diff_editor.reveal_previous_change() |> ignore
+    }
+  })
+}
+
+///|
+/// Reveal the next change through DiffEditor's existing cyclic navigation.
+fn reveal_next_review_diff_change() -> @cmd.Cmd {
+  @cmd.custom_cmd(_scheduler => {
+    if viewer_state.diff_editor is Some(diff_editor) {
+      diff_editor.reveal_next_change() |> ignore
+    }
+  })
 }
 
 ///|
