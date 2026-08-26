@@ -1729,6 +1729,7 @@ pub fn breadcrumb_view(
           ),
           review_diff_layout_toggle(dispatch, state, ctx),
           review_comments_control(dispatch, state, ctx),
+          review_tests_control(dispatch, state, ctx),
           review_diff_status(state, ctx),
           review_diff_navigation(dispatch, state, ctx),
         ]),
@@ -1796,6 +1797,7 @@ pub fn breadcrumb_view(
         ),
         review_diff_layout_toggle(dispatch, state, ctx),
         review_comments_control(dispatch, state, ctx),
+        review_tests_control(dispatch, state, ctx),
         review_diff_status(state, ctx),
         review_diff_navigation(dispatch, state, ctx),
       ]),
@@ -2081,6 +2083,46 @@ fn review_comments_control(
       "Comments: ignored"
     } else {
       "Comments: included"
+    },
+  )
+}
+
+///|
+fn review_tests_control(
+  dispatch : @cmd.Emit[Msg],
+  state : State,
+  ctx : Ctx,
+) -> @html.Html {
+  guard moon_diff_available(state, ctx) else {
+    return @html.span(class="review-tests-control hidden", "")
+  }
+  let enabled = full_diff_ready(state, ctx) &&
+    state.review_diff_mode != ReviewDiffCore
+  @html.button(
+    type_="button",
+    class=if enabled && state.review_diff_ignore_tests {
+      "review-tests-control active"
+    } else {
+      "review-tests-control"
+    },
+    title=if !full_diff_ready(state, ctx) {
+      "Available in diff view"
+    } else if state.review_diff_mode == ReviewDiffCore {
+      "Available in Token and Tree diff"
+    } else if state.review_diff_ignore_tests {
+      "Include tests in the comparison"
+    } else {
+      "Ignore MoonBit test blocks"
+    },
+    disabled=!enabled,
+    on_click=dispatch(ToggleReviewDiffIgnoreTests),
+    attrs=@html.Attrs::build()
+      .aria_label("Ignore tests")
+      .aria_pressed((enabled && state.review_diff_ignore_tests).to_string()),
+    if state.review_diff_ignore_tests {
+      "Tests: ignored"
+    } else {
+      "Tests: included"
     },
   )
 }

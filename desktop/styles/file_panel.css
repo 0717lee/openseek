@@ -2093,6 +2093,7 @@ button.git-history-file.selected {
 .review-mode-toolbar.hidden,
 .review-layout-control.hidden,
 .review-comments-control.hidden,
+.review-tests-control.hidden,
 .review-control-divider.hidden,
 .review-diff-mode-status.hidden {
   display: none;
@@ -2152,7 +2153,8 @@ button.git-history-file.selected {
   cursor: default;
 }
 
-.review-comments-control {
+.review-comments-control,
+.review-tests-control {
   appearance: none;
   flex: 0 0 auto;
   min-height: 28px;
@@ -2167,17 +2169,20 @@ button.git-history-file.selected {
   cursor: pointer;
 }
 
-.review-comments-control:hover:not(:disabled) {
+.review-comments-control:hover:not(:disabled),
+.review-tests-control:hover:not(:disabled) {
   color: var(--color-text-primary);
   background: var(--color-bg-surface);
 }
 
-.review-comments-control.active {
+.review-comments-control.active,
+.review-tests-control.active {
   color: var(--color-accent-strong);
   background: color-mix(in srgb, var(--color-accent) 20%, transparent);
 }
 
-.review-comments-control:disabled {
+.review-comments-control:disabled,
+.review-tests-control:disabled {
   color: var(--color-text-muted);
   cursor: default;
   opacity: 0.5;

@@ -73,6 +73,7 @@ priv struct ViewerHost {
   diff_provider : @moon_diff_provider.MoonDocumentDiffProvider
   mut diff_mode : ReviewDiffMode
   mut diff_ignore_comments : Bool
+  mut diff_ignore_tests : Bool
   // A positioned transcript link keeps its caret collapsed at the requested
   // column. This persistent whole-line decoration makes the destination visible
   // without turning the line into a selection and opening Comment UI. Symbol
@@ -141,6 +142,7 @@ let viewer_state : ViewerHost = {
   diff_provider: @moon_diff_provider.MoonDocumentDiffProvider(),
   diff_mode: ReviewDiffCore,
   diff_ignore_comments: true,
+  diff_ignore_tests: true,
   point_range_highlight: None,
   search_match_highlights: None,
   services: None,
@@ -339,6 +341,7 @@ fn configure_diff_provider(supports_moonbit : Bool) -> Unit {
   viewer_state.diff_provider.set_ignore_comments(
     viewer_state.diff_ignore_comments,
   )
+  viewer_state.diff_provider.set_ignore_tests(viewer_state.diff_ignore_tests)
   viewer_state.diff_provider.set_mode(provider_mode)
 }
 
@@ -348,10 +351,12 @@ fn configure_diff_provider(supports_moonbit : Bool) -> Unit {
 fn apply_review_diff_provider(
   mode : ReviewDiffMode,
   ignore_comments : Bool,
+  ignore_tests : Bool,
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(_scheduler => {
     viewer_state.diff_mode = mode
     viewer_state.diff_ignore_comments = ignore_comments
+    viewer_state.diff_ignore_tests = ignore_tests
     let supports_moonbit = viewer_state.diff_editor
       .bind(editor => editor.get_model())
       .map(model => supports_moon_diff(model.modified.uri.path))

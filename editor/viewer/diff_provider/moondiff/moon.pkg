@@ -3,5 +3,4 @@ import {
   "moonbitlang/editor/viewer/common/diff",
   "moonbitlang/editor/viewer/common/model",
   "moonbit-community/moondiff/mbtdiff",
-  "moonbit-community/moondiff/tokdiff",
 }

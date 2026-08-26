@@ -100,6 +100,12 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
     ),
   )
   inspect(
+    render_review_control(review_tests_control(test_emit(), source_state, ctx)),
+    content=(
+      #|<button aria-label="Ignore tests" aria-pressed="false" title="Available in diff view" type="button" class="review-tests-control" disabled>Tests: ignored</button>
+    ),
+  )
+  inspect(
     render_review_control(
       review_diff_navigation(test_emit(), source_state, ctx),
     ),
@@ -168,6 +174,40 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
     render_review_control(review_comments_control(test_emit(), diff_state, ctx)),
     content=(
       #|<button aria-label="Ignore comments" aria-pressed="false" title="Available in Token and Tree diff" type="button" class="review-comments-control" disabled>Comments: ignored</button>
+    ),
+  )
+  inspect(
+    render_review_control(review_tests_control(test_emit(), diff_state, ctx)),
+    content=(
+      #|<button aria-label="Ignore tests" aria-pressed="false" title="Available in Token and Tree diff" type="button" class="review-tests-control" disabled>Tests: ignored</button>
+    ),
+  )
+  inspect(
+    render_review_control(
+      review_tests_control(
+        test_emit(),
+        { ..diff_state, review_diff_mode: ReviewDiffToken, },
+        ctx,
+      ),
+    ),
+    content=(
+      #|<button aria-label="Ignore tests" aria-pressed="true" title="Include tests in the comparison" type="button" class="review-tests-control active">Tests: ignored</button>
+    ),
+  )
+  inspect(
+    render_review_control(
+      review_tests_control(
+        test_emit(),
+        {
+          ..diff_state,
+          review_diff_mode: ReviewDiffTree,
+          review_diff_ignore_tests: false,
+        },
+        ctx,
+      ),
+    ),
+    content=(
+      #|<button aria-label="Ignore tests" aria-pressed="false" title="Ignore MoonBit test blocks" type="button" class="review-tests-control">Tests: included</button>
     ),
   )
   inspect(
@@ -362,6 +402,13 @@ test "non-MoonBit review keeps File and Line without specialized controls" {
     render_review_control(review_comments_control(test_emit(), state, ctx)),
     content=(
       #|<span class="review-comments-control hidden">
+      #|</span>
+    ),
+  )
+  inspect(
+    render_review_control(review_tests_control(test_emit(), state, ctx)),
+    content=(
+      #|<span class="review-tests-control hidden">
       #|</span>
     ),
   )
