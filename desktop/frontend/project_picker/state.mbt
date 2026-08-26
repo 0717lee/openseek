@@ -29,8 +29,8 @@ struct State {
   // across a failed create so the user can correct it without retyping.
   new_folder : String?
   // `Some` replaces the breadcrumb with an editable path. Suggestions are
-  // derived locally from `entries`; no extra Host request is issued while the
-  // user types.
+  // derived locally from `entries`; typing a separator after an exact child
+  // commits that directory without waiting for a separate Enter press.
   path_draft : String?
   path_selection : Int
   generation : Int
@@ -75,8 +75,9 @@ pub(all) enum Msg {
   // A browse or create failed; the shell pops the message as a toast and the
   // previous listing stays usable.
   Failed(channel~ : @interop.ChannelId, message~ : String, generation~ : Int)
-  // Edit and submit a path in place of the breadcrumb. Matching rows come
-  // only from the directory listing already held by this state.
+  // Edit and submit a path in place of the breadcrumb. Matching rows and
+  // separator-committed children come only from the directory listing already
+  // held by this state.
   EditPath
   PathChanged(String)
   MovePathSelection(Int)
@@ -203,11 +204,11 @@ pub fn State::handle(
       }
     PathChanged(value) =>
       if !self.loading && self.path_draft is Some(_) {
-        (
-          @cmd.none,
-          Some({ ..self, path_draft: Some(value), path_selection: 0 }),
-          None,
-        )
+        let changed = { ..self, path_draft: Some(value), path_selection: 0 }
+        match changed.committed_child_path(value) {
+          Some(path) => changed.navigate_to(emit, path, keep_path_edit=true)
+          None => (@cmd.none, Some(changed), None)
+        }
       } else {
         (@cmd.none, Some(self), None)
       }
@@ -309,11 +310,15 @@ pub fn State::handle(
 ///|
 /// Start every path transition through one fence and clear transient input.
 /// Direct row clicks, breadcrumb navigation, pasted paths, and manual path
-/// submission therefore have identical loading and stale-reply behavior.
+/// submission therefore have identical loading and stale-reply behavior. A
+/// separator committed from the path editor keeps that draft visible during
+/// the request, so the loading view names the destination instead of jumping
+/// back to the previous breadcrumb.
 fn State::navigate_to(
   self : State,
   emit : @cmd.Emit[Msg],
   path : String,
+  keep_path_edit? : Bool = false,
 ) -> (@cmd.Cmd, State?, Outcome?) {
   let generation = fresh_request_generation()
   (
@@ -322,7 +327,11 @@ fn State::navigate_to(
       ..self,
       loading: true,
       new_folder: None,
-      path_draft: None,
+      path_draft: if keep_path_edit {
+        self.path_draft
+      } else {
+        None
+      },
       path_selection: 0,
       generation,
     }),

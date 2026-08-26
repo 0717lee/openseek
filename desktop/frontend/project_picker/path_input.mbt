@@ -1,6 +1,7 @@
-// Pure path-input projection for the project picker. Typing never reaches the
-// Host: it narrows the already loaded directory rows, ranks prefix matches
-// first, and turns the selected row back into the same path `Navigate` uses.
+// Path-input projection for the project picker. Ordinary typing narrows the
+// already loaded directory rows and ranks prefix matches first. A separator
+// after an exact loaded child commits that child immediately, avoiding a stale
+// parent listing while still issuing at most one Host request per directory.
 
 ///|
 fn State::editable_path(self : State) -> String {
@@ -114,6 +115,36 @@ fn State::entry_target(self : State, name : String) -> String {
     Some(DriveList) => "/" + name + "/"
     None => name
   }
+}
+
+///|
+/// A trailing separator is an explicit request to continue inside a folder.
+/// Commit only a child from the listing the Host already validated: partial,
+/// misspelled, and unrelated absolute paths remain editable and require Enter.
+/// Resource paths use `/` on every host; Windows resource locations compare
+/// case-insensitively, just like their local completion filter.
+fn State::committed_child_path(self : State, raw : String) -> String? {
+  let draft = raw.trim().to_owned()
+  guard draft.has_suffix("/") else { return None }
+  let case_insensitive = match self.location {
+    Some(Directory(resource)) => is_windows_drive_resource_path(resource.path)
+    Some(DriveList) => true
+    None => false
+  }
+  let comparable_draft = if case_insensitive { draft.to_lower() } else { draft }
+  for name in self.entries {
+    let target = self.entry_target(name)
+    let committed = if target.has_suffix("/") { target } else { target + "/" }
+    let comparable_committed = if case_insensitive {
+      committed.to_lower()
+    } else {
+      committed
+    }
+    if comparable_draft == comparable_committed {
+      return Some(target)
+    }
+  }
+  None
 }
 
 ///|

@@ -44,9 +44,13 @@ extern "js" fn scroll_path_row(id : String) -> Unit =
 
 ///|
 pub fn view(emit : @cmd.Emit[Msg], picker : State) -> @html.Html {
-  let visible_entries = picker.visible_entries()
-  let filter_active = !picker.path_filter().is_empty()
-  let suggestion_active = picker.selected_path_suggestion() is Some(_)
+  // Keep the previous listing in state so a failed request can restore it,
+  // but never render those rows as if they belonged to the pending location.
+  let browsing = picker.loading && picker.new_folder is None
+  let visible_entries = if browsing { [] } else { picker.visible_entries() }
+  let filter_active = !browsing && !picker.path_filter().is_empty()
+  let suggestion_active = !browsing &&
+    picker.selected_path_suggestion() is Some(_)
   let path_editing = picker.path_draft is Some(_)
   let rows : Array[@html.Html] = []
   if picker.new_folder is Some(name) {

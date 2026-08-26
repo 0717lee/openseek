@@ -284,6 +284,60 @@ test "path keyboard selection wraps and completion remains local" {
 }
 
 ///|
+test "typing a separator after an exact child navigates immediately" {
+  let picker = opened(
+    location=Directory(test_resource(@interop.ChannelId::Local, "/Users/dii")),
+    entries=["git", "go"],
+  )
+  let (_, editing, _) = State::handle(picker, emit(), EditPath)
+  guard editing is Some(editing) else { fail("path editor did not open") }
+  let (_, exact, _) = State::handle(
+    editing,
+    emit(),
+    PathChanged("/Users/dii/git"),
+  )
+  guard exact is Some(exact) else { fail("exact child closed picker") }
+  assert_false(exact.loading)
+  assert_eq(exact.path_draft, Some("/Users/dii/git"))
+  let (_, navigating, outcome) = State::handle(
+    exact,
+    emit(),
+    PathChanged("/Users/dii/git/"),
+  )
+  guard navigating is Some(navigating) else {
+    fail("separator navigation closed picker")
+  }
+  assert_true(outcome is None)
+  assert_true(navigating.loading)
+  assert_eq(navigating.path_draft, Some("/Users/dii/git/"))
+  assert_true(navigating.generation != exact.generation)
+  assert_true(
+    navigating.location is Some(Directory(path)) && path.path == "/Users/dii",
+  )
+  let loading_html = markup(navigating)
+  assert_true(loading_html.contains("Loading folders…"))
+  assert_true(loading_html.contains("value=\"/Users/dii/git/\""))
+  assert_false(loading_html.contains("Open folder git"))
+  assert_false(loading_html.contains("Open folder go"))
+
+  let drives = opened(location=DriveList, entries=["C:", "D:"])
+  let (_, editing_drive, _) = State::handle(drives, emit(), EditPath)
+  guard editing_drive is Some(editing_drive) else {
+    fail("drive path editor did not open")
+  }
+  let (_, navigating_drive, _) = State::handle(
+    editing_drive,
+    emit(),
+    PathChanged("/c:/"),
+  )
+  guard navigating_drive is Some(navigating_drive) else {
+    fail("drive separator navigation closed picker")
+  }
+  assert_true(navigating_drive.loading)
+  assert_eq(navigating_drive.path_draft, Some("/c:/"))
+}
+
+///|
 test "submitting or cancelling a path keeps one navigation path" {
   let picker = opened(
     location=Directory(test_resource(@interop.ChannelId::Local, "/home/u")),
