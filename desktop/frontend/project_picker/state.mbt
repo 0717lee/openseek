@@ -154,15 +154,19 @@ pub fn State::handle(
       // A listing for a picker the user already closed — or one answering
       // a navigation that has since been superseded — is dropped.
       if channel == self.channel && generation == self.generation {
+        let command = if self.path_draft is Some(_) {
+          focus_path_end_after_render()
+        } else {
+          @cmd.none
+        }
         (
-          @cmd.none,
+          command,
           Some({
             ..self,
             location: Some(location),
             entries,
             loading: false,
             new_folder: None,
-            path_draft: None,
             path_selection: 0,
           }),
           None,
@@ -180,7 +184,12 @@ pub fn State::handle(
         } else {
           "Cannot open folder: \{message}"
         }
-        (@cmd.none, Some({ ..self, loading: false }), Some(Failed(message)))
+        let command = if self.path_draft is Some(_) {
+          focus_path_end_after_render()
+        } else {
+          @cmd.none
+        }
+        (command, Some({ ..self, loading: false }), Some(Failed(message)))
       } else {
         (@cmd.none, Some(self), None)
       }

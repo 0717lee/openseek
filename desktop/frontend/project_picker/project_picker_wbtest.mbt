@@ -317,8 +317,68 @@ test "typing a separator after an exact child navigates immediately" {
   let loading_html = markup(navigating)
   assert_true(loading_html.contains("Loading folders…"))
   assert_true(loading_html.contains("value=\"/Users/dii/git/\""))
+  assert_true(
+    loading_html.contains(
+      "type=\"button\" class=\"picker-path-editor-cancel\" disabled",
+    ),
+  )
   assert_false(loading_html.contains("Open folder git"))
   assert_false(loading_html.contains("Open folder go"))
+  let git = test_resource(@interop.ChannelId::Local, "/Users/dii/git")
+  let (_, loaded, loaded_outcome) = State::handle(
+    navigating,
+    emit(),
+    Loaded(
+      channel=@interop.ChannelId::Local,
+      location=Directory(git),
+      entries=["openseek"],
+      generation=navigating.generation,
+    ),
+  )
+  assert_true(loaded_outcome is None)
+  guard loaded is Some(loaded) else {
+    fail("child listing closed path editing")
+  }
+  assert_false(loaded.loading)
+  assert_true(loaded.location == Some(Directory(git)))
+  assert_eq(loaded.path_draft, Some("/Users/dii/git/"))
+  let loaded_html = markup(loaded)
+  assert_true(loaded_html.contains("value=\"/Users/dii/git/\""))
+  assert_true(loaded_html.contains("Open folder openseek"))
+  let (_, nested_exact, _) = State::handle(
+    loaded,
+    emit(),
+    PathChanged("/Users/dii/git/openseek"),
+  )
+  guard nested_exact is Some(nested_exact) else {
+    fail("nested path typing closed picker")
+  }
+  assert_false(nested_exact.loading)
+  let (_, nested_navigating, _) = State::handle(
+    nested_exact,
+    emit(),
+    PathChanged("/Users/dii/git/openseek/"),
+  )
+  guard nested_navigating is Some(nested_navigating) else {
+    fail("nested separator navigation closed picker")
+  }
+  assert_true(nested_navigating.loading)
+  assert_eq(nested_navigating.path_draft, Some("/Users/dii/git/openseek/"))
+  assert_true(nested_navigating.generation != navigating.generation)
+
+  let (_, failed, failure) = State::handle(
+    navigating,
+    emit(),
+    Failed(
+      channel=@interop.ChannelId::Local,
+      message="not available",
+      generation=navigating.generation,
+    ),
+  )
+  guard failed is Some(failed) else { fail("failed browse closed picker") }
+  assert_false(failed.loading)
+  assert_eq(failed.path_draft, Some("/Users/dii/git/"))
+  assert_true(failure is Some(Outcome::Failed(_)))
 
   let drives = opened(location=DriveList, entries=["C:", "D:"])
   let (_, editing_drive, _) = State::handle(drives, emit(), EditPath)

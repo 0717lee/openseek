@@ -30,6 +30,24 @@ extern "js" fn select_path_input() -> Unit =
   #| }
 
 ///|
+/// A separator-triggered browse temporarily disables the path input. Restore
+/// focus at the end once its listing arrives so typing can continue into the
+/// next child without reopening path mode.
+fn focus_path_end_after_render() -> @cmd.Cmd {
+  @cmd.custom_cmd(_ => focus_path_input_end(), kind=@cmd.after_render)
+}
+
+///|
+extern "js" fn focus_path_input_end() -> Unit =
+  #| () => {
+  #|   const input = document.getElementById("project-picker-path-input");
+  #|   if (!input) return;
+  #|   input.focus();
+  #|   const end = input.value.length;
+  #|   input.setSelectionRange(end, end);
+  #| }
+
+///|
 /// Keep keyboard completion visible while focus stays in the combobox.
 fn scroll_path_row_after_render(index : Int) -> @cmd.Cmd {
   @cmd.custom_cmd(
@@ -259,6 +277,7 @@ fn path_editor(
     @html.button(
       class="picker-path-editor-cancel",
       type_="button",
+      disabled=picker.loading,
       title="Cancel path editing",
       on_click=emit(CancelPathEdit),
       attrs=@html.Attrs::build().aria_label("Cancel path editing"),
