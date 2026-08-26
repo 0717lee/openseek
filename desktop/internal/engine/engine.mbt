@@ -1430,7 +1430,6 @@ async fn engine_process_env(
   // Unix, so overriding PATH with inheritance enabled can leave two PATH
   // entries and let `/bin/sh` observe the original one.
   let env = @sys.get_env_vars()
-  discard_retired_workspace_override(env)
   // The engine reads the key from `DEEPSEEK` but the model from `OPENSEEK_MODEL`
   // (the CLI's `--deepseek-api-key`/`--model` env bindings); the prefixes differ
   // on purpose, so the model must not go into `DEEPSEEK_MODEL` — the engine
@@ -1452,22 +1451,6 @@ async fn engine_process_env(
   }
   add_moonbit_path_for_native_engine(env, config, runtime_dir)
   env
-}
-
-///|
-/// A removed ambient workspace selector must not leak through the desktop
-/// engine into tools or legacy nested commands.
-fn discard_retired_workspace_override(env : Map[String, String]) -> Unit {
-  let retired = ["OPENSEEK", "DIR"].join("_")
-  let remove : Array[String] = []
-  for name, _ in env {
-    if name.to_upper() == retired {
-      remove.push(name)
-    }
-  }
-  for name in remove {
-    env.remove(name)
-  }
 }
 
 ///|
@@ -2775,19 +2758,6 @@ async test "native engine env has one authoritative bundled moon path" {
     moon_bin
   }
   assert_eq(env["PATH"], expected_path)
-}
-
-///|
-test "desktop engine env discards the retired workspace override" {
-  let env = { "PATH": "/bin" }
-  let retired_workspace_override = ["OpenSeek", "Dir"].join("_")
-  let duplicate_retired_override = ["OPENSEEK", "DIR"].join("_")
-  env[retired_workspace_override] = "/tmp/parent-workspace"
-  env[duplicate_retired_override] = "/tmp/duplicate-workspace"
-  discard_retired_workspace_override(env)
-  assert_true(env.get(retired_workspace_override) is None)
-  assert_true(env.get(duplicate_retired_override) is None)
-  assert_eq(env.get("PATH"), Some("/bin"))
 }
 
 ///|
