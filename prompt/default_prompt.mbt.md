@@ -262,6 +262,7 @@ Common `moon` subcommands:
   `moon update`, `moon tree`.
 - `moon clean`: clear `_build` when stale build output is suspected.
   Example: `moon clean`.
+- `moon bench`: run benchmarks, e.g. `moon bench lib/parser`.
 - `moon coverage analyze`: inspect test coverage when coverage matters.
   Example: `moon coverage analyze --package user/project/parser`.
 
