@@ -23,9 +23,8 @@ fn test_actions() -> Actions {
 ///|
 fn test_ctx() -> @fileeditor.Ctx {
   {
-    owner: { channel: @interop.ChannelId::Local, session: "panel-test", },
-    request_epoch: 0,
-    watch_namespace: "panel-test-watch",
+    owner: { channel: @interop.ChannelId::Local, session: "panel-test" },
+    checkout_id: "checkout-0",
     placement: None,
     dark_mode: false,
     tree_layout: @fileeditor.RightSidebar,

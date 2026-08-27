@@ -31,7 +31,7 @@ fn[Payload : ToJson, Response : FromJson + ToJson] CodexReplyKind::request(
 /// old tasks disappear once an account has more than one page.
 priv struct CodexThreadCatalogRequest {
   archived : Bool
-  generation : Int
+  request_id : String
 }
 
 ///|
@@ -55,7 +55,7 @@ fn CodexThreadCatalogRequest::run(
             scheduler.add(
               dispatch(
                 Failed(
-                  kind=CodexThreadsReply(self.archived, self.generation),
+                  kind=CodexThreadsReply(self.archived, self.request_id),
                   message=@interop.bridge_error_text(error),
                 ),
               ),
@@ -75,7 +75,7 @@ fn CodexThreadCatalogRequest::run(
           scheduler.add(
             dispatch(
               Failed(
-                kind=CodexThreadsReply(self.archived, self.generation),
+                kind=CodexThreadsReply(self.archived, self.request_id),
                 message="Codex thread list repeated cursor " + next,
               ),
             ),
@@ -87,7 +87,7 @@ fn CodexThreadCatalogRequest::run(
       }
       scheduler.add(
         dispatch(
-          Reply(kind=CodexThreadsReply(self.archived, self.generation), value={
+          Reply(kind=CodexThreadsReply(self.archived, self.request_id), value={
             "data": rows,
           }),
         ),
@@ -106,18 +106,18 @@ fn State::refresh_catalog(
 ) -> (@cmd.Cmd, State) {
   let next = {
     ..self,
-    live_catalog_generation: self.live_catalog_generation + 1,
-    archived_catalog_generation: self.archived_catalog_generation + 1,
+    live_catalog_request_id: @uuid.mint(),
+    archived_catalog_request_id: @uuid.mint(),
   }
   (
     @cmd.batch([
       CodexThreadCatalogRequest::{
         archived: false,
-        generation: next.live_catalog_generation,
+        request_id: next.live_catalog_request_id,
       }.run(dispatch, channel),
       CodexThreadCatalogRequest::{
         archived: true,
-        generation: next.archived_catalog_generation,
+        request_id: next.archived_catalog_request_id,
       }.run(dispatch, channel),
     ]),
     next,

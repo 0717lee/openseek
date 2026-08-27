@@ -12,15 +12,13 @@
 const DefaultWorkspaceSubmoduleCheckoutTimeoutSeconds : Int = 10
 
 ///|
-/// One project's settings mirror, keyed like `ProjectWorktrees` and fenced
-/// by the same per-project generation rule: a reply carrying an older token
-/// is stale for that project alone.
+/// One project's settings mirror, keyed like `ProjectWorktrees`. Its current
+/// request UUID lives separately on `DeviceState`.
 priv struct ProjectSettings {
   project : @common.Uri
   worktree_mode : Bool
   checkout_submodules : Bool
   submodule_checkout_timeout_seconds : Int
-  generation : Int
 } derive(Eq)
 
 ///|
@@ -28,8 +26,7 @@ fn fetch_workspace_settings(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
   workspace : @common.Uri,
-  connection_generation : Int,
-  request_generation : Int,
+  request_id : String,
 ) -> @cmd.Cmd {
   guard @resource.belongs_to(workspace, channel) else { return @cmd.none }
   let dispatch = dispatch.map((msg : DeviceMsg) => FromDevice(channel, msg))
@@ -52,8 +49,7 @@ fn fetch_workspace_settings(
             worktree_mode=reply.worktree_mode,
             checkout_submodules=reply.checkout_submodules,
             submodule_checkout_timeout_seconds=reply.submodule_checkout_timeout_seconds,
-            connection_generation~,
-            request_generation~,
+            request_id~,
           ),
         ),
       )
@@ -143,7 +139,6 @@ fn DeviceState::with_workspace_settings(
   self : DeviceState,
   project : @common.Uri,
   worktree_mode : Bool,
-  generation~ : Int,
   checkout_submodules? : Bool,
   submodule_checkout_timeout_seconds? : Int,
 ) -> DeviceState {
@@ -166,7 +161,6 @@ fn DeviceState::with_workspace_settings(
     worktree_mode,
     checkout_submodules,
     submodule_checkout_timeout_seconds,
-    generation,
   })
   { ..self, workspace_settings: rows, }
 }
@@ -187,16 +181,41 @@ fn DeviceState::workspace_settings_row(
 }
 
 ///|
-/// The token one project's settings were last applied under; a reply
-/// carrying an older token is stale for that project alone.
-fn DeviceState::workspace_settings_generation(
+/// Start or invalidate one workspace's settings request without disturbing a
+/// sibling workspace's in-flight request.
+fn DeviceState::begin_workspace_settings_request(
   self : DeviceState,
-  project : @common.Uri,
-) -> Int {
-  match self.workspace_settings_row(project) {
-    Some(row) => row.generation
-    None => -1
+  workspace : @common.Uri,
+) -> (String, DeviceState) {
+  let request_id = @uuid.mint()
+  (request_id, self.with_workspace_settings_request_id(workspace, request_id))
+}
+
+///|
+/// Replace the exact settings request UUID accepted for one workspace.
+fn DeviceState::with_workspace_settings_request_id(
+  self : DeviceState,
+  workspace : @common.Uri,
+  request_id : String,
+) -> DeviceState {
+  let request_ids = self.workspace_settings_request_ids.filter(entry => {
+    entry.0 != workspace
+  })
+  request_ids.push((workspace, request_id))
+  { ..self, workspace_settings_request_ids: request_ids }
+}
+
+///|
+fn DeviceState::workspace_settings_request_id(
+  self : DeviceState,
+  workspace : @common.Uri,
+) -> String? {
+  for entry in self.workspace_settings_request_ids {
+    if entry.0 == workspace {
+      return Some(entry.1)
+    }
   }
+  None
 }
 
 ///|
@@ -235,8 +254,14 @@ test "a settings reply lands once and an older token cannot roll it back" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
   let sibling = @interop.ChannelId::Local.test_resource("/other")
+  let sibling_request_id = "00000000-0000-8000-8000-000000000018"
   let attached = test_model().with_dev(dev => {
-    ..dev,
+    ..dev
+    .with_workspace_settings_request_id(
+      workspace,
+      TestWorkspaceSettingsRequestId,
+    )
+    .with_workspace_settings_request_id(sibling, sibling_request_id),
     projects: [workspace, sibling],
   })
   let (_, loaded) = update_dev(
@@ -246,8 +271,7 @@ test "a settings reply lands once and an older token cannot roll it back" {
       worktree_mode=true,
       checkout_submodules=true,
       submodule_checkout_timeout_seconds=10,
-      connection_generation=0,
-      request_generation=1,
+      request_id=TestWorkspaceSettingsRequestId,
     ),
     attached,
   )
@@ -261,8 +285,7 @@ test "a settings reply lands once and an older token cannot roll it back" {
       worktree_mode=false,
       checkout_submodules=true,
       submodule_checkout_timeout_seconds=10,
-      connection_generation=0,
-      request_generation=1,
+      request_id=TestWorkspaceSettingsRequestId,
     ),
     loaded,
   )
@@ -274,8 +297,7 @@ test "a settings reply lands once and an older token cannot roll it back" {
       worktree_mode=true,
       checkout_submodules=false,
       submodule_checkout_timeout_seconds=30,
-      connection_generation=0,
-      request_generation=1,
+      request_id=sibling_request_id,
     ),
     stale,
   )
@@ -296,8 +318,7 @@ test "a settings reply lands once and an older token cannot roll it back" {
       worktree_mode=false,
       checkout_submodules=true,
       submodule_checkout_timeout_seconds=60,
-      connection_generation=7,
-      request_generation=9,
+      request_id=@uuid.mint(),
     ),
     both,
   )
@@ -308,7 +329,13 @@ test "a settings reply lands once and an older token cannot roll it back" {
 test "a settings commit broadcast supersedes list replies" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
-  let attached = test_model().with_dev(dev => { ..dev, projects: [workspace], })
+  let attached = test_model().with_dev(dev => {
+    ..dev.with_workspace_settings_request_id(
+      workspace,
+      TestWorkspaceSettingsRequestId,
+    ),
+    projects: [workspace],
+  })
   let (_, changed) = update_dev(
     dispatch,
     WorkspaceSettingsChanged(
@@ -320,7 +347,11 @@ test "a settings commit broadcast supersedes list replies" {
     attached,
   )
   assert_true(changed.default_worktree_mode(Local, workspace))
-  inspect(changed.dev().workspace_settings_request_generation, content="1")
+  let changed_request_id = changed
+    .dev()
+    .workspace_settings_request_id(workspace)
+    .unwrap()
+  assert_true(changed_request_id != TestWorkspaceSettingsRequestId)
   // A list reply issued before the commit answers on an older token.
   let (_, stale) = update_dev(
     dispatch,
@@ -329,8 +360,7 @@ test "a settings commit broadcast supersedes list replies" {
       worktree_mode=false,
       checkout_submodules=true,
       submodule_checkout_timeout_seconds=30,
-      connection_generation=0,
-      request_generation=1,
+      request_id=TestWorkspaceSettingsRequestId,
     ),
     changed,
   )
@@ -344,9 +374,11 @@ test "the settings page select applies optimistically" {
   // The state the adopt fan-out leaves behind: the mint spent one token on
   // the round and this workspace's reply landed under it.
   let fetched = test_model().with_dev(dev => {
-    ..dev,
+    ..dev.with_workspace_settings_request_id(
+      workspace,
+      TestWorkspaceSettingsRequestId,
+    ),
     projects: [workspace],
-    workspace_settings_request_generation: 1,
   })
   let (_, loaded) = update_dev(
     dispatch,
@@ -355,8 +387,7 @@ test "the settings page select applies optimistically" {
       worktree_mode=false,
       checkout_submodules=true,
       submodule_checkout_timeout_seconds=10,
-      connection_generation=0,
-      request_generation=1,
+      request_id=TestWorkspaceSettingsRequestId,
     ),
     fetched,
   )
@@ -376,8 +407,7 @@ test "the settings page select applies optimistically" {
       worktree_mode=false,
       checkout_submodules=true,
       submodule_checkout_timeout_seconds=10,
-      connection_generation=0,
-      request_generation=1,
+      request_id=TestWorkspaceSettingsRequestId,
     ),
     chosen,
   )
@@ -394,7 +424,13 @@ test "the settings page select applies optimistically" {
 test "the workspace submodule select preserves its launch mode" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
-  let attached = test_model().with_dev(dev => { ..dev, projects: [workspace], })
+  let attached = test_model().with_dev(dev => {
+    ..dev.with_workspace_settings_request_id(
+      workspace,
+      TestWorkspaceSettingsRequestId,
+    ),
+    projects: [workspace],
+  })
   let (_, loaded) = update_dev(
     dispatch,
     WorkspaceSettingsLoaded(
@@ -402,8 +438,7 @@ test "the workspace submodule select preserves its launch mode" {
       worktree_mode=true,
       checkout_submodules=true,
       submodule_checkout_timeout_seconds=10,
-      connection_generation=0,
-      request_generation=1,
+      request_id=TestWorkspaceSettingsRequestId,
     ),
     attached,
   )
@@ -435,7 +470,13 @@ test "the workspace submodule select preserves its launch mode" {
 test "the workspace submodule timeout select preserves neighboring settings" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
-  let attached = test_model().with_dev(dev => { ..dev, projects: [workspace], })
+  let attached = test_model().with_dev(dev => {
+    ..dev.with_workspace_settings_request_id(
+      workspace,
+      TestWorkspaceSettingsRequestId,
+    ),
+    projects: [workspace],
+  })
   let (_, loaded) = update_dev(
     dispatch,
     WorkspaceSettingsLoaded(
@@ -443,8 +484,7 @@ test "the workspace submodule timeout select preserves neighboring settings" {
       worktree_mode=true,
       checkout_submodules=false,
       submodule_checkout_timeout_seconds=10,
-      connection_generation=0,
-      request_generation=1,
+      request_id=TestWorkspaceSettingsRequestId,
     ),
     attached,
   )
@@ -475,13 +515,19 @@ test "the workspace submodule timeout select preserves neighboring settings" {
 test "a failed save pops a toast and re-reads under a fresh token" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
-  let attached = test_model().with_dev(dev => { ..dev, projects: [workspace], })
+  let attached = test_model().with_dev(dev => {
+    ..dev.with_workspace_settings_request_id(
+      workspace,
+      TestWorkspaceSettingsRequestId,
+    ),
+    projects: [workspace],
+  })
   let (_, chosen) = update(
     dispatch,
     WorkspaceDefaultModeChosen(Local, workspace, "worktree"),
     attached,
   )
-  let minted = chosen.dev().workspace_settings_request_generation
+  let minted = chosen.dev().workspace_settings_request_id(workspace).unwrap()
   let (_, failed) = update_dev(
     dispatch,
     WorkspaceSettingsSaveFailed(workspace~, message="disk full"),
@@ -489,10 +535,11 @@ test "a failed save pops a toast and re-reads under a fresh token" {
   )
   inspect(failed.notifications.length(), content="1")
   assert_true(failed.notifications[0].message.contains("disk full"))
-  inspect(
-    failed.dev().workspace_settings_request_generation,
-    content="\{minted + 1}",
-  )
+  let refetch_id = failed
+    .dev()
+    .workspace_settings_request_id(workspace)
+    .unwrap()
+  assert_true(refetch_id != minted)
   // The refetch it issued may answer on the fresh token and correct the
   // optimistic value.
   let (_, corrected) = update_dev(
@@ -502,8 +549,7 @@ test "a failed save pops a toast and re-reads under a fresh token" {
       worktree_mode=false,
       checkout_submodules=true,
       submodule_checkout_timeout_seconds=10,
-      connection_generation=0,
-      request_generation=minted + 1,
+      request_id=refetch_id,
     ),
     failed,
   )
@@ -514,7 +560,13 @@ test "a failed save pops a toast and re-reads under a fresh token" {
 test "a reconnect clears the settings mirror until fresh reads land" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
-  let attached = test_model().with_dev(dev => { ..dev, projects: [workspace], })
+  let attached = test_model().with_dev(dev => {
+    ..dev.with_workspace_settings_request_id(
+      workspace,
+      TestWorkspaceSettingsRequestId,
+    ),
+    projects: [workspace],
+  })
   let (_, loaded) = update_dev(
     dispatch,
     WorkspaceSettingsLoaded(
@@ -522,8 +574,7 @@ test "a reconnect clears the settings mirror until fresh reads land" {
       worktree_mode=true,
       checkout_submodules=true,
       submodule_checkout_timeout_seconds=10,
-      connection_generation=0,
-      request_generation=1,
+      request_id=TestWorkspaceSettingsRequestId,
     ),
     attached,
   )
@@ -541,7 +592,13 @@ test "a reconnect clears the settings mirror until fresh reads land" {
 test "a straggler reply for a detached workspace is rejected" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
-  let attached = test_model().with_dev(dev => { ..dev, projects: [workspace], })
+  let attached = test_model().with_dev(dev => {
+    ..dev.with_workspace_settings_request_id(
+      workspace,
+      TestWorkspaceSettingsRequestId,
+    ),
+    projects: [workspace],
+  })
   let (_, seen) = update_dev(
     dispatch,
     WorkspaceSettingsChanged(
@@ -553,12 +610,11 @@ test "a straggler reply for a detached workspace is rejected" {
     attached,
   )
   assert_true(seen.default_worktree_mode(Local, workspace))
-  // Detach prunes the row — and with it the generation it was applied
-  // under, so the numeric fence alone resets to -1.
+  // Detach prunes both the row and its accepted request UUID.
   let (_, detached) = update_dev(dispatch, ProjectsChanged([]), seen)
   assert_true(detached.dev().workspace_settings.is_empty())
   // A reply issued before the detach answers afterwards: registry
-  // membership, not the reset fence, keeps it from resurrecting a row
+  // registry membership keeps it from resurrecting a row
   // that would outlive a later reattach.
   let (_, straggler) = update_dev(
     dispatch,
@@ -567,8 +623,7 @@ test "a straggler reply for a detached workspace is rejected" {
       worktree_mode=true,
       checkout_submodules=true,
       submodule_checkout_timeout_seconds=10,
-      connection_generation=0,
-      request_generation=1,
+      request_id=TestWorkspaceSettingsRequestId,
     ),
     detached,
   )

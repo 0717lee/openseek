@@ -276,7 +276,9 @@ struct DesktopBridgeActor {
 }
 
 ///|
-pub fn DesktopBridgeActor::new(state : @api.ApiState) -> DesktopBridgeActor {
+pub fn DesktopBridgeActor::new(
+  state : @api.ApiState,
+) -> DesktopBridgeActor raise @host.HostError {
   {
     state,
     host_connection: @host.HostConnection::new(),

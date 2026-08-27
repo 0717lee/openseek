@@ -52,7 +52,10 @@ test "command approval renders facts and advertised decisions" {
     file_candidates: [],
     open_files: [],
     active_file: None,
-    file_index: @composer.FileIndexReady(epoch=0, truncated=false),
+    file_index: @composer.FileIndexReady(
+      checkout_id="checkout-0",
+      truncated=false,
+    ),
   })
   guard input.presentation.context[0] is @composer.CodexRequests(_) else {
     fail("Codex requests must remain the composer's first typed context slot")
@@ -133,7 +136,10 @@ test "network approval uses its destination instead of a command preview" {
     file_candidates: [],
     open_files: [],
     active_file: None,
-    file_index: @composer.FileIndexReady(epoch=0, truncated=false),
+    file_index: @composer.FileIndexReady(
+      checkout_id="checkout-0",
+      truncated=false,
+    ),
   })
   guard input.presentation.context[0] is @composer.CodexRequests(_) else {
     fail("Codex requests must remain the composer's first typed context slot")

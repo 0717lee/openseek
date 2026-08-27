@@ -1362,8 +1362,12 @@ test "Codex update handlers are pure and idempotent" {
       "account": Json::null(),
     }),
     Reply(kind=CodexModelsReply, value={ "data": [] }),
-    Reply(kind=CodexThreadsReply(false, 0), value={ "data": [] }),
-    Reply(kind=CodexThreadsReply(true, 0), value={ "data": [] }),
+    Reply(kind=CodexThreadsReply(false, state.live_catalog_request_id), value={
+      "data": [],
+    }),
+    Reply(kind=CodexThreadsReply(true, state.archived_catalog_request_id), value={
+      "data": [],
+    }),
     Reply(kind=CodexThreadReply("thread-1"), value={
       "thread": { "id": "thread-1", "turns": [] },
     }),
@@ -1434,7 +1438,16 @@ test "Codex update handlers are pure and idempotent" {
       @interop.ChannelId::Local,
       _ => @cmd.none,
     )
-    assert_true(once == twice)
+    // A refresh mints fresh catalog request UUIDs; everything else must
+    // replay identically.
+    assert_true(
+      {
+        ..once,
+        live_catalog_request_id: twice.live_catalog_request_id,
+        archived_catalog_request_id: twice.archived_catalog_request_id,
+      } ==
+      twice,
+    )
   }
 }
 
@@ -1971,7 +1984,16 @@ test "archiving the selected Codex task settles its owned foreground work" {
   assert_false(once.loading)
   assert_true(once.foreground is None)
   assert_true(once.pending_requests.is_empty())
-  assert_true(once == twice)
+  // The catalog refresh mints fresh request UUIDs; everything else replays
+  // identically.
+  assert_true(
+    {
+      ..once,
+      live_catalog_request_id: twice.live_catalog_request_id,
+      archived_catalog_request_id: twice.archived_catalog_request_id,
+    } ==
+    twice,
+  )
 }
 
 ///|
@@ -2113,8 +2135,8 @@ test "Codex composer reverse-request actions keep their task identity" {
     ComposerAction(
       @composer.CodexRequestAnswerChanged(
         identity={
-          owner: { channel: @interop.ChannelId::Local, session: "thread-2", },
-          archive_generation: 0,
+          owner: { channel: @interop.ChannelId::Local, session: "thread-2" },
+          archive_cursor: 0,
         },
         request_key=Json("request-1").stringify(),
         question_id="scope",
@@ -2147,7 +2169,7 @@ test "newer Codex catalog refresh rejects an older pagination result" {
   )
   let (_, stale) = update(
     dispatch,
-    Reply(kind=CodexThreadsReply(false, 1), value={
+    Reply(kind=CodexThreadsReply(false, first.live_catalog_request_id), value={
       "data": [{ "id": "stale", "preview": "Stale" }],
     }),
     second,
@@ -2157,7 +2179,7 @@ test "newer Codex catalog refresh rejects an older pagination result" {
   assert_true(stale == second)
   let (_, current) = update(
     dispatch,
-    Reply(kind=CodexThreadsReply(false, 2), value={
+    Reply(kind=CodexThreadsReply(false, second.live_catalog_request_id), value={
       "data": [{ "id": "current", "preview": "Current" }],
     }),
     stale,
@@ -2173,10 +2195,16 @@ test "archived Codex catalog removes a selected task in either reply order" {
   let selected = State::from_thread_snapshot({
     "thread": { "id": "thread-a", "cwd": "/work/a", "turns": [] },
   }).begin_foreground(CodexThreadReply("thread-a"))
-  let live = Reply(kind=CodexThreadsReply(false, 0), value={ "data": [] })
-  let archived = Reply(kind=CodexThreadsReply(true, 0), value={
-    "data": [{ "id": "thread-a", "cwd": "/work/a", "preview": "Archived A" }],
-  })
+  let live = Reply(
+    kind=CodexThreadsReply(false, selected.live_catalog_request_id),
+    value={ "data": [] },
+  )
+  let archived = Reply(
+    kind=CodexThreadsReply(true, selected.archived_catalog_request_id),
+    value={
+      "data": [{ "id": "thread-a", "cwd": "/work/a", "preview": "Archived A" }],
+    },
+  )
   let (_, live_first) = update(
     dispatch,
     live,

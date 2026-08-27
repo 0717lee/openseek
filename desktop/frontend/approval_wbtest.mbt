@@ -333,7 +333,7 @@ test "a resync does not re-offer a question already answered here" {
 fn runs_loaded_with_approvals(
   model : Model,
   approvals : Array[RecoveredApproval],
-) -> Msg {
+) -> Msg raise {
   let frontier = model.run_snapshot_frontier(@interop.ChannelId::Local)
   let live : Array[String] = []
   for conv in model.conversations {
@@ -349,7 +349,7 @@ fn runs_loaded_with_approvals(
       approvals~,
       live~,
       frontier~,
-      connection_generation=0,
+      connection_id=model.dev().connection_id,
     ),
   )
 }
@@ -624,7 +624,7 @@ test "a session missing from the frontier still gets its question" {
         live=[run_id],
         // Captured before this page knew the conversation.
         frontier=[],
-        connection_generation=0,
+        connection_id=model.dev().connection_id,
       ),
     ),
     model,
@@ -696,7 +696,7 @@ test "a question survives a run handoff inside one snapshot" {
             pending_approval_id: Some("ap-1"),
           },
         ],
-        connection_generation=0,
+        connection_id=model.dev().connection_id,
       ),
     ),
     model,

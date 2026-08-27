@@ -174,7 +174,7 @@ test "historical tabs use only the inert diff surface and history breadcrumb" {
   let history_docs : Map[String, HistoryDiffDoc] = Map([])
   history_docs[key] = {
     diff,
-    generation: 1,
+    request_id: "00000000-0000-8000-8000-000000000051",
     original: HistoryBlobContent("old"),
     modified: HistoryBlobContent("new"),
   }
@@ -221,11 +221,12 @@ test "historical tabs use only the inert diff surface and history breadcrumb" {
 }
 
 ///|
-test "Git history replies are fenced by generation" {
+test "Git history replies are fenced by request UUID" {
+  let request_id = "00000000-0000-8000-8000-000000000052"
   let state = {
     ..graph_fixture_state(),
     git_graph: GitGraphLoading,
-    git_graph_generation: 3,
+    git_graph_request_id: request_id,
   }
   let reply : @protocol.GitHistoryReply = {
     repository: true,
@@ -235,14 +236,19 @@ test "Git history replies are fenced by generation" {
   }
   let (_, stale) = update(
     test_emit(),
-    GitHistoryLoaded(owner=test_ctx().owner, generation=2, append=false, reply~),
+    GitHistoryLoaded(
+      owner=test_ctx().owner,
+      request_id=@uuid.mint(),
+      append=false,
+      reply~,
+    ),
     state,
     test_ctx(),
   )
   assert_true(stale.git_graph is GitGraphLoading)
   let (_, settled) = update(
     test_emit(),
-    GitHistoryLoaded(owner=test_ctx().owner, generation=3, append=false, reply~),
+    GitHistoryLoaded(owner=test_ctx().owner, request_id~, append=false, reply~),
     state,
     test_ctx(),
   )

@@ -802,10 +802,7 @@ fn transcript_view(
         "transcript-root",
         input.root.map(uri => uri.to_string()).unwrap_or(""),
       )
-      .data_set(
-        "transcript-submission",
-        input.submission_generation.to_string(),
-      ),
+      .data_set("transcript-submission", input.submission_sequence.to_string()),
     children,
   )
 }

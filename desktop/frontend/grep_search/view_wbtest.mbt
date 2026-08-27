@@ -35,7 +35,7 @@ test "Search view groups files and marks matching UTF-16 slices" {
   let page = state.page
   let reply : @protocol.SearchTextReply = {
     root: root.path,
-    generation: page.generation,
+    request_id: page.request_id,
     matches: [
       {
         path: "src/main.mbt",
@@ -58,10 +58,7 @@ test "Search view groups files and marks matching UTF-16 slices" {
     cancelled: false,
     error: None,
   }
-  let ready = state.handle(
-    Loaded(owner~, root=root.path, generation=page.generation, reply~),
-    input,
-  )
+  let ready = state.handle(Loaded(request_id=page.request_id, reply~), input)
   let html = render_search(ready, input)
   assert_true(html.contains(">main.mbt</span>"))
   assert_true(html.contains(">src</span>"))
@@ -91,7 +88,7 @@ test "large Search replies render incrementally without changing totals" {
   }
   let reply : @protocol.SearchTextReply = {
     root: root.path,
-    generation: page.generation,
+    request_id: page.request_id,
     matches: Array::make(501, result),
     match_count: 501,
     file_count: 1,
@@ -99,10 +96,7 @@ test "large Search replies render incrementally without changing totals" {
     cancelled: false,
     error: None,
   }
-  let ready = state.handle(
-    Loaded(owner~, root=root.path, generation=page.generation, reply~),
-    input,
-  )
+  let ready = state.handle(Loaded(request_id=page.request_id, reply~), input)
   let initial = render_search(ready, input)
   assert_true(initial.contains("501 results in 1 files"))
   assert_true(initial.contains("Show 1 more matching lines"))

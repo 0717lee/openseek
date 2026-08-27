@@ -286,7 +286,7 @@ priv enum CodexReplyKind {
   CodexRequestsReply
   CodexAccountReply
   CodexModelsReply
-  CodexThreadsReply(Bool, Int)
+  CodexThreadsReply(Bool, String)
   CodexThreadReply(String)
   CodexResumeReply(String)
   CodexDraftOpenReply(String)
@@ -553,11 +553,11 @@ struct State {
   permission_picker : CodexPermissionPicker
   threads : Array[CodexThreadRow]
   archived_threads : Array[CodexThreadRow]
-  // Live and archived pagination are independent requests. Each refresh
-  // advances both generations so a slower older walk cannot overwrite a
+  // Live and archived pagination are independent requests. Each complete
+  // paginated walk owns a UUID, so a slower older walk cannot overwrite a
   // newer catalog after reconnect, archive, or device focus changes.
-  live_catalog_generation : Int
-  archived_catalog_generation : Int
+  live_catalog_request_id : String
+  archived_catalog_request_id : String
   selection : CodexSelection
   // The last sidebar selection awaiting a history snapshot. A reply carries
   // the same id, so an older request can never replace a newer selection.
@@ -614,8 +614,8 @@ pub fn State::State(loading? : Bool = false) -> State {
     permission_picker: CodexPermissionClosed(@protocol.AutoReview),
     threads: [],
     archived_threads: [],
-    live_catalog_generation: 0,
-    archived_catalog_generation: 0,
+    live_catalog_request_id: @uuid.mint(),
+    archived_catalog_request_id: @uuid.mint(),
     selection: CodexNoTask,
     requested_thread: None,
     git_status: None,
@@ -887,10 +887,10 @@ fn State::accepts_thread_reply(self : State, requested_thread : String) -> Bool 
 /// so an overtaken draft/turn reply is inert rather than partly applied.
 fn State::accepts_reply(self : State, kind : CodexReplyKind) -> Bool {
   match kind {
-    CodexThreadsReply(false, generation) =>
-      generation == self.live_catalog_generation
-    CodexThreadsReply(true, generation) =>
-      generation == self.archived_catalog_generation
+    CodexThreadsReply(false, request_id) =>
+      request_id == self.live_catalog_request_id
+    CodexThreadsReply(true, request_id) =>
+      request_id == self.archived_catalog_request_id
     CodexThreadReply(thread_id) => self.accepts_thread_reply(thread_id)
     CodexResumeReply(thread_id) =>
       self

@@ -207,7 +207,7 @@ fn show_tab_impl(
         read_file(
           dispatch,
           ctx.owner,
-          ctx.request_epoch,
+          ctx.checkout_id,
           path,
           doc.name,
           range=None,
@@ -235,7 +235,7 @@ fn show_tab_impl(
           request_diagnostics(
             dispatch,
             ctx.owner,
-            ctx.request_epoch,
+            ctx.checkout_id,
             root,
             path,
             absolute,
@@ -277,7 +277,7 @@ fn show_tab_impl(
       read_file(
         dispatch,
         ctx.owner,
-        ctx.request_epoch,
+        ctx.checkout_id,
         path,
         doc.name,
         review_generation?=doc.review_generation(),
@@ -361,7 +361,7 @@ fn show_activated_tab(
       read_file(
         dispatch,
         ctx.owner,
-        ctx.request_epoch,
+        ctx.checkout_id,
         path,
         doc.name,
         review_generation=working_generation,
@@ -384,10 +384,10 @@ fn show_activated_tab(
 /// already-loaded document shows what the table has, exactly like a
 /// tab-strip click; everything else reads the file — so a jump's
 /// `range`/`annotation` ride the reply to be revealed on arrival. A positioned
-/// Every explicit navigation is echoed through `file_link_generation` so only
+/// Every explicit navigation is echoed through `file_link_request_id` so only
 /// the newest one can apply its position to the Viewer. A transcript link
-/// supplies the generation captured before its host lookup; direct file,
-/// symbol, and mention opens use the current generation. An older reply may
+/// supplies the UUID captured before its host lookup; direct file,
+/// symbol, and mention opens use the current UUID. An older reply may
 /// still finish a loading document, but without its position.
 pub fn open_document(
   dispatch : @cmd.Emit[Msg],
@@ -395,7 +395,7 @@ pub fn open_document(
   ctx : Ctx,
   path : @pathx.Relative,
   name~ : String,
-  file_link_generation? : Int,
+  file_link_request_id? : String,
   range~ : @common.Range?,
   annotation? : String,
   had_active~ : Bool,
@@ -471,19 +471,19 @@ pub fn open_document(
     _ => ()
   }
   // Direct file/symbol/mention opens arrive without a captured transcript
-  // generation, but root already advanced the same navigation token before
+  // request UUID, but root already replaced the same navigation token before
   // calling us. Tag their reads too: a newer ordinary failure must remain
   // authoritative over an older positioned success for this path.
-  let read_generation = Some(
-    file_link_generation.unwrap_or(state.file_link_generation),
+  let read_request_id = Some(
+    file_link_request_id.unwrap_or(state.file_link_request_id),
   )
   let read = read_file(
     dispatch,
     ctx.owner,
-    ctx.request_epoch,
+    ctx.checkout_id,
     path,
     name,
-    file_link_generation?=read_generation,
+    file_link_request_id?=read_request_id,
     range~,
     annotation?,
     root=ctx.root(),
@@ -647,7 +647,7 @@ pub fn open_changed_document(
       read_file(
         dispatch,
         ctx.owner,
-        ctx.request_epoch,
+        ctx.checkout_id,
         path,
         name,
         review_generation=generation,
@@ -806,7 +806,7 @@ fn reconcile_reviews_after_changes(
             read_file(
               dispatch,
               ctx.owner,
-              ctx.request_epoch,
+              ctx.checkout_id,
               path,
               doc.name,
               range=None,
@@ -955,7 +955,7 @@ fn reconcile_reviews_after_changes(
             read_file(
               dispatch,
               ctx.owner,
-              ctx.request_epoch,
+              ctx.checkout_id,
               path,
               doc.name,
               review_generation=generation,
@@ -984,7 +984,7 @@ fn reconcile_reviews_after_changes(
       stat_files(
         dispatch,
         ctx.owner,
-        state.request_epoch,
+        state.checkout_id,
         restat_paths,
         root=ctx.root(),
       ),
@@ -1003,7 +1003,7 @@ pub fn open_file(
   state : State,
   ctx : Ctx,
   path : @pathx.Relative,
-  file_link_generation? : Int,
+  file_link_request_id? : String,
   range~ : @common.Range?,
   annotation? : String,
   had_active~ : Bool,
@@ -1014,7 +1014,7 @@ pub fn open_file(
     ctx,
     path,
     name=basename(path),
-    file_link_generation?,
+    file_link_request_id?,
     range~,
     annotation?,
     had_active~,
@@ -1231,7 +1231,7 @@ fn FileChange::moonbit_relevant(self : FileChange) -> Bool {
 fn active_moonbit_diagnostics(
   dispatch : @cmd.Emit[Msg],
   owner : @interop.ConversationKey,
-  epoch : Int,
+  checkout_id : String,
   root : @common.Uri?,
   docs : Map[@pathx.Relative, Doc],
   active : @pathx.Relative?,
@@ -1242,7 +1242,9 @@ fn active_moonbit_diagnostics(
     language_id(name) == "moonbit" else {
     return None
   }
-  Some(request_diagnostics(dispatch, owner, epoch, root, active, absolute))
+  Some(
+    request_diagnostics(dispatch, owner, checkout_id, root, active, absolute),
+  )
 }
 
 ///|
@@ -1391,13 +1393,6 @@ fn State::watched_paths(self : State, ctx : Ctx) -> WatchedPaths? {
 }
 
 ///|
-/// The opaque token echoed by host watcher notifications. The namespace keeps
-/// the counter unique across frontend reloads.
-fn Ctx::watch_identity(self : Ctx, generation : Int) -> String {
-  self.watch_namespace + ":" + generation.to_string()
-}
-
-///|
 fn with_watch(
   dispatch : @cmd.Emit[Msg],
   state : State,
@@ -1414,8 +1409,7 @@ fn with_watch(
     // by `watched_paths`, so an equivalent Host watcher is never renamed while
     // it is active. A real replacement emits a full baseline before its
     // request succeeds, closing the old-to-new observation gap.
-    let watch_generation = state.watch_generation + 1
-    let watch_identity = ctx.watch_identity(watch_generation)
+    let watch_id = @uuid.mint()
     // A watcher is host-local. Moving across channels must explicitly retire
     // the old host; placing a new watch on another socket cannot replace it.
     if state.watching is Some(current) &&
@@ -1427,7 +1421,7 @@ fn with_watch(
         watch_workspace(
           dispatch,
           channel=current.owner.channel,
-          generation=watch_identity,
+          watch_id~,
           None,
         ),
       )
@@ -1437,13 +1431,13 @@ fn with_watch(
         watch_workspace(
           dispatch,
           channel=next.owner.channel,
-          generation=watch_identity,
+          watch_id~,
           Some(next),
         ),
       )
     }
     (
-      { ..state, watching: want, watch_generation, watch_error: None, },
+      { ..state, watching: want, watch_id, watch_error: None },
       @cmd.batch(commands),
     )
   }
@@ -1456,19 +1450,12 @@ fn with_watch(
 pub fn State::retire_watcher(
   self : State,
   dispatch : @cmd.Emit[Msg],
-  ctx : Ctx,
 ) -> (State, @cmd.Cmd) {
   guard self.watching is Some(current) else { return (self, @cmd.none) }
-  let watch_generation = self.watch_generation + 1
-  let watch_identity = ctx.watch_identity(watch_generation)
+  let watch_id = @uuid.mint()
   (
-    { ..self, watching: None, watch_generation, watch_error: None, },
-    watch_workspace(
-      dispatch,
-      channel=current.owner.channel,
-      generation=watch_identity,
-      None,
-    ),
+    { ..self, watching: None, watch_id, watch_error: None },
+    watch_workspace(dispatch, channel=current.owner.channel, watch_id~, None),
   )
 }
 
@@ -1711,17 +1698,17 @@ fn refresh_changes(
           )
         }
       } else {
-        let generation = state.changes_generation + 1
+        let request_id = @uuid.mint()
         (
           list_changes(
             dispatch,
             ctx.owner,
-            generation,
+            request_id,
             workspace=ctx.workspace(),
           ),
           {
             ..state,
-            changes_generation: generation,
+            changes_request_id: request_id,
             changes: ChangeListReady(
               repository~,
               files~,
@@ -1732,13 +1719,13 @@ fn refresh_changes(
         )
       }
     ChangeListIdle | ChangeListFailed(_) => {
-      let generation = state.changes_generation + 1
+      let request_id = @uuid.mint()
       (
-        list_changes(dispatch, ctx.owner, generation, workspace=ctx.workspace()),
+        list_changes(dispatch, ctx.owner, request_id, workspace=ctx.workspace()),
         {
           ..state,
           changes: ChangeListLoading(refresh_again=false),
-          changes_generation: generation,
+          changes_request_id: request_id,
         },
       )
     }
@@ -1807,26 +1794,25 @@ pub fn sync(
     @cmd.none
   }
   // Every filesystem request in this reconciliation carries the incarnation
-  // it addresses. Compute a boundary's next epoch before scheduling any work;
+  // it addresses. Compute a boundary's next checkout UUID before scheduling any work;
   // the root projection catches up from the returned state on the next pass.
-  let request_epoch = if owner_changed ||
+  let checkout_id = if owner_changed ||
     parking_existing_owner ||
     placement_identity_changed {
-    state.request_epoch + 1
+    @uuid.mint()
   } else {
-    state.request_epoch
+    state.checkout_id
   }
-  let ctx = { ..ctx, request_epoch, }
+  let ctx = { ..ctx, checkout_id, }
   // A placement-driven explicit unwatch can be the final desired state. Spend
-  // its watcher generation here rather than relying on `with_watch` to place
+  // its watcher UUID here rather than relying on `with_watch` to place
   // a successor, which may legitimately have nothing to watch.
-  let reroot_watch_generation = if placement_identity_changed &&
+  let reroot_watch_id = if placement_identity_changed &&
     state.watching is Some(_) {
-    state.watch_generation + 1
+    @uuid.mint()
   } else {
-    state.watch_generation
+    state.watch_id
   }
-  let reroot_watch_identity = ctx.watch_identity(reroot_watch_generation)
   // When the active conversation changes, drop the cached tree *and* the
   // viewer's open document — the viewer is imperative state outside the
   // model, so it would otherwise keep showing the previous conversation's
@@ -1863,7 +1849,7 @@ pub fn sync(
         watch_workspace(
           dispatch,
           channel=current.owner.channel,
-          generation=reroot_watch_identity,
+          watch_id=reroot_watch_id,
           None,
         ),
       )
@@ -1878,7 +1864,7 @@ pub fn sync(
         read_file(
           dispatch,
           ctx.owner,
-          ctx.request_epoch,
+          ctx.checkout_id,
           path,
           basename(path),
           range=None,
@@ -1904,31 +1890,31 @@ pub fn sync(
         git_graph_collapsed: state.git_graph_collapsed,
         // Request tokens must outlive the per-conversation cache. Resetting
         // here would let a late A reply collide after switching A→B→A.
-        changes_generation: if placement_identity_changed {
-          state.changes_generation + 1
+        changes_request_id: if placement_identity_changed {
+          @uuid.mint()
         } else {
-          state.changes_generation
+          state.changes_request_id
         },
-        request_epoch,
+        checkout_id,
         // A late positioned-link reply carries only its owner and this token.
-        // Spend a generation on owner replacement and same-owner placement
+        // Replace the UUID on owner replacement and same-owner placement
         // changes so an A→B→A cycle cannot make the old pair current again.
-        file_link_generation: if owner_replaced || placement_identity_changed {
-          state.file_link_generation + 1
+        file_link_request_id: if owner_replaced || placement_identity_changed {
+          @uuid.mint()
         } else {
-          state.file_link_generation
+          state.file_link_request_id
         },
         review_generation: state.review_generation,
-        git_graph_generation: if owner_changed || placement_identity_changed {
-          state.git_graph_generation + 1
+        git_graph_request_id: if owner_changed || placement_identity_changed {
+          @uuid.mint()
         } else {
-          state.git_graph_generation
+          state.git_graph_request_id
         },
-        git_commit_files_generation: state.git_commit_files_generation,
-        history_generation: state.history_generation,
+        git_commit_files_request_id: state.git_commit_files_request_id,
+        history_request_id: state.history_request_id,
         // Like filesystem request epochs, watcher identities must outlive the
         // per-conversation cache or an A→B→A cycle could reuse one.
-        watch_generation: reroot_watch_generation,
+        watch_id: reroot_watch_id,
         review_recovery_pending: false,
         background_review_requests: Map([]),
         // Preserve the last host configuration long enough for `with_watch`
@@ -1963,7 +1949,7 @@ pub fn sync(
         if doc.state is TabLoading || review.baseline is ReviewLoading {
           review_recovery_pending = true
         }
-        // Git baseline replies do not carry the filesystem epoch. Advance
+        // Git baseline replies do not carry the filesystem checkout_id. Advance
         // every review token so a background legacy refresh is fenced too.
         review_generation = review_generation + 1
         docs[path] = {
@@ -1980,18 +1966,18 @@ pub fn sync(
       index: IndexEmpty,
       error: None,
       search: state.search.park(),
-      changes_generation: state.changes_generation + 1,
+      changes_request_id: @uuid.mint(),
       review_generation,
       review_recovery_pending,
       background_review_requests: Map([]),
       git_graph: GitGraphIdle,
-      git_graph_generation: state.git_graph_generation + 1,
+      git_graph_request_id: @uuid.mint(),
       git_graph_selected: None,
       git_commit_files: GitCommitFilesIdle,
       history_docs: Map([]),
-      history_generation: state.history_generation + 1,
+      history_request_id: @uuid.mint(),
       placement: state.placement.reconcile(ctx.placement),
-      request_epoch,
+      checkout_id,
     }
     match state.changes {
       ChangeListLoading(_) | ChangeListFailed(_) =>
@@ -2153,7 +2139,7 @@ pub fn sync(
       read_directory(
         dispatch,
         ctx.owner,
-        ctx.request_epoch,
+        ctx.checkout_id,
         @pathx.Relative::root(),
         root=ctx.root(),
       ),
@@ -2402,7 +2388,7 @@ pub fn update(
             read_directory(
               dispatch,
               ctx.owner,
-              ctx.request_epoch,
+              ctx.checkout_id,
               path,
               root=ctx.root(),
             ),
@@ -2435,7 +2421,7 @@ pub fn update(
             read_directory(
               dispatch,
               ctx.owner,
-              ctx.request_epoch,
+              ctx.checkout_id,
               path,
               root=ctx.root(),
             ),
@@ -2452,13 +2438,13 @@ pub fn update(
         (@cmd.none, state)
       } else if state.index is IndexEmpty || state.index is IndexFailed {
         (
-          list_files(dispatch, ctx.owner, ctx.request_epoch, root=ctx.root()),
-          { ..state, index: IndexLoading(refresh_again=false), },
+          list_files(dispatch, ctx.owner, ctx.checkout_id, root=ctx.root()),
+          { ..state, index: IndexLoading(refresh_again=false) },
         )
       } else if state.index
         is IndexReady(files~, truncated~, refreshing=false, refresh_again=true) {
         (
-          list_files(dispatch, ctx.owner, ctx.request_epoch, root=ctx.root()),
+          list_files(dispatch, ctx.owner, ctx.checkout_id, root=ctx.root()),
           {
             ..state,
             index: IndexReady(
@@ -2472,9 +2458,9 @@ pub fn update(
       } else {
         (@cmd.none, state)
       }
-    DirLoaded(owner~, epoch~, path~, entries~) =>
+    DirLoaded(owner~, checkout_id~, path~, entries~) =>
       // Drop a reply whose conversation is no longer the panel's.
-      if state.owner != Some(owner) || state.request_epoch != epoch {
+      if state.owner != Some(owner) || state.checkout_id != checkout_id {
         (@cmd.none, state)
       } else {
         let children = state.children.copy()
@@ -2494,8 +2480,8 @@ pub fn update(
           },
         )
       }
-    DirFailed(owner~, epoch~, path~, message~) =>
-      if state.owner != Some(owner) || state.request_epoch != epoch {
+    DirFailed(owner~, checkout_id~, path~, message~) =>
+      if state.owner != Some(owner) || state.checkout_id != checkout_id {
         (@cmd.none, state)
       } else {
         (
@@ -2507,25 +2493,25 @@ pub fn update(
           },
         )
       }
-    FilesIndexed(owner~, epoch~, files~, truncated~) =>
-      if state.owner != Some(owner) || state.request_epoch != epoch {
+    FilesIndexed(owner~, checkout_id~, files~, truncated~) =>
+      if state.owner != Some(owner) || state.checkout_id != checkout_id {
         (@cmd.none, state)
       } else {
         let (index, retry) = state.index.loaded(files, truncated)
         let cmd = if retry {
-          list_files(dispatch, owner, epoch, root=ctx.root())
+          list_files(dispatch, owner, checkout_id, root=ctx.root())
         } else {
           @cmd.none
         }
         (cmd, { ..state, index, })
       }
-    FileIndexFailed(owner~, epoch~) =>
-      if state.owner != Some(owner) || state.request_epoch != epoch {
+    FileIndexFailed(owner~, checkout_id~) =>
+      if state.owner != Some(owner) || state.checkout_id != checkout_id {
         (@cmd.none, state)
       } else {
         let (index, retry) = state.index.failed()
         let cmd = if retry {
-          list_files(dispatch, owner, epoch, root=ctx.root())
+          list_files(dispatch, owner, checkout_id, root=ctx.root())
         } else {
           @cmd.none
         }
@@ -2562,8 +2548,8 @@ pub fn update(
       }
     GitHistoryRefreshRequested => refresh_git_graph(dispatch, state, ctx)
     GitHistoryLoadMoreRequested => load_more_git_history(dispatch, state, ctx)
-    GitHistoryLoaded(owner~, generation~, append~, reply~) =>
-      if state.owner != Some(owner) || state.git_graph_generation != generation {
+    GitHistoryLoaded(owner~, request_id~, append~, reply~) =>
+      if state.owner != Some(owner) || state.git_graph_request_id != request_id {
         (@cmd.none, state)
       } else if append {
         match state.git_graph {
@@ -2609,8 +2595,8 @@ pub fn update(
           },
         )
       }
-    GitHistoryFailed(owner~, generation~, append~, message~) =>
-      if state.owner != Some(owner) || state.git_graph_generation != generation {
+    GitHistoryFailed(owner~, request_id~, append~, message~) =>
+      if state.owner != Some(owner) || state.git_graph_request_id != request_id {
         (@cmd.none, state)
       } else if append {
         match state.git_graph {
@@ -2635,9 +2621,9 @@ pub fn update(
         (@cmd.none, { ..state, git_graph: GitGraphFailed(message), })
       }
     GitCommitSelected(commit) => select_git_commit(dispatch, state, ctx, commit)
-    GitCommitChangesLoaded(owner~, generation~, reply~) =>
+    GitCommitChangesLoaded(owner~, request_id~, reply~) =>
       if state.owner == Some(owner) &&
-        state.git_commit_files_generation == generation &&
+        state.git_commit_files_request_id == request_id &&
         state.git_graph_selected == Some(reply.commit) &&
         state.git_commit_files is GitCommitFilesLoading(commit=loading_commit) &&
         loading_commit == reply.commit {
@@ -2654,9 +2640,9 @@ pub fn update(
       } else {
         (@cmd.none, state)
       }
-    GitCommitChangesFailed(owner~, generation~, commit~, message~) =>
+    GitCommitChangesFailed(owner~, request_id~, commit~, message~) =>
       if state.owner == Some(owner) &&
-        state.git_commit_files_generation == generation &&
+        state.git_commit_files_request_id == request_id &&
         state.git_graph_selected == Some(commit) {
         (
           @cmd.none,
@@ -2670,14 +2656,14 @@ pub fn update(
       }
     GitCommitChangesRetry(commit) =>
       retry_git_commit_changes(dispatch, state, ctx, commit)
-    ChangesLoaded(owner~, generation~, repository~, head~, files~) =>
-      if state.owner != Some(owner) || state.changes_generation != generation {
+    ChangesLoaded(owner~, request_id~, repository~, head~, files~) =>
+      if state.owner != Some(owner) || state.changes_request_id != request_id {
         (@cmd.none, state)
       } else {
         let refresh_again = match state.changes {
           ChangeListLoading(refresh_again~) => refresh_again
           ChangeListReady(refreshing=true, refresh_again~, ..) => refresh_again
-          // The matching generation has already settled. Ignore a duplicate
+          // The matching request has already settled. Ignore a duplicate
           // callback instead of replacing the current inventory.
           _ => return (@cmd.none, state)
         }
@@ -2690,11 +2676,7 @@ pub fn update(
         // performs a fresh full refresh, so do not spend the latch off-screen.
         let follow_up = refresh_again &&
           (explorer_visible(state, ctx) || changes_live(state, ctx))
-        let next_generation = if follow_up {
-          generation + 1
-        } else {
-          generation
-        }
+        let next_request_id = if follow_up { @uuid.mint() } else { request_id }
         // An intermediate coalesced snapshot is not authoritative: a path can
         // disappear briefly and return in the already-scheduled follow-up. On
         // the final reply, clear vanished reviews and refresh every surviving
@@ -2742,7 +2724,7 @@ pub fn update(
           list_changes(
             dispatch,
             owner,
-            next_generation,
+            next_request_id,
             workspace=ctx.workspace(),
           )
         } else {
@@ -2771,7 +2753,7 @@ pub fn update(
             } else {
               true
             },
-            changes_generation: next_generation,
+            changes_request_id: next_request_id,
             review_generation,
             reviewed_changes,
             background_review_requests,
@@ -2789,8 +2771,8 @@ pub fn update(
           },
         )
       }
-    ChangesFailed(owner~, generation~, message~) =>
-      if state.owner != Some(owner) || state.changes_generation != generation {
+    ChangesFailed(owner~, request_id~, message~) =>
+      if state.owner != Some(owner) || state.changes_request_id != request_id {
         (@cmd.none, state)
       } else {
         match state.changes {
@@ -2799,18 +2781,18 @@ pub fn update(
           // consumer hid meanwhile (reopening starts a fresh request).
           ChangeListLoading(refresh_again=true) =>
             if explorer_visible(state, ctx) || changes_live(state, ctx) {
-              let next_generation = generation + 1
+              let next_request_id = @uuid.mint()
               (
                 list_changes(
                   dispatch,
                   owner,
-                  next_generation,
+                  next_request_id,
                   workspace=ctx.workspace(),
                 ),
                 {
                   ..state,
                   changes: ChangeListLoading(refresh_again=false),
-                  changes_generation: next_generation,
+                  changes_request_id: next_request_id,
                 },
               )
             } else {
@@ -2822,17 +2804,17 @@ pub fn update(
           ChangeListReady(repository~, files~, refreshing=true, refresh_again~) =>
             if refresh_again &&
               (explorer_visible(state, ctx) || changes_live(state, ctx)) {
-              let next_generation = generation + 1
+              let next_request_id = @uuid.mint()
               (
                 list_changes(
                   dispatch,
                   owner,
-                  next_generation,
+                  next_request_id,
                   workspace=ctx.workspace(),
                 ),
                 {
                   ..state,
-                  changes_generation: next_generation,
+                  changes_request_id: next_request_id,
                   changes: ChangeListReady(
                     repository~,
                     files~,
@@ -2871,8 +2853,8 @@ pub fn update(
               (@cmd.none, { ..state, changes: ChangeListIdle, })
             }
           // An Idle/Failed state has no active request. This can be a late
-          // same-owner reply after an A→B→A re-root whose generation has not
-          // yet advanced because Changes is hidden; ignore it.
+          // same-owner reply after an A→B→A re-root whose request UUID is no
+          // longer current; ignore it.
           _ => (@cmd.none, state)
         }
       }
@@ -2977,10 +2959,10 @@ pub fn update(
       }
       (cmd, { ..state, docs, background_review_requests, })
     }
-    HistoryBlobLoaded(owner~, key~, generation~, side~, blob~) => {
+    HistoryBlobLoaded(owner~, key~, request_id~, side~, blob~) => {
       guard state.owner == Some(owner) &&
         state.history_docs.get(key) is Some(doc) &&
-        doc.generation == generation else {
+        doc.request_id == request_id else {
         return (@cmd.none, state)
       }
       let settled = match blob {
@@ -3003,10 +2985,10 @@ pub fn update(
       }
       (cmd, { ..state, history_docs, })
     }
-    HistoryBlobFailed(owner~, key~, generation~, side~, message~) => {
+    HistoryBlobFailed(owner~, key~, request_id~, side~, message~) => {
       guard state.owner == Some(owner) &&
         state.history_docs.get(key) is Some(doc) &&
-        doc.generation == generation else {
+        doc.request_id == request_id else {
         return (@cmd.none, state)
       }
       let failed = HistoryBlobError(message)
@@ -3020,23 +3002,23 @@ pub fn update(
     }
     FileLoaded(
       owner~,
-      epoch~,
+      checkout_id~,
       path~,
       name~,
       file~,
-      file_link_generation~,
+      file_link_request_id~,
       review_generation~,
       range~,
       annotation~
     ) => {
-      let stale_file_link = match file_link_generation {
-        Some(generation) => state.file_link_generation != generation
+      let stale_file_link = match file_link_request_id {
+        Some(request_id) => state.file_link_request_id != request_id
         None => false
       }
       // An owner/placement mismatch means the addressed document no longer
       // belongs to this table. A stale positioned reply may finish only the
       // loading document; a newer settled snapshot always wins.
-      if state.owner != Some(owner) || state.request_epoch != epoch {
+      if state.owner != Some(owner) || state.checkout_id != checkout_id {
         (@cmd.none, state)
       } else if state.docs.get(path) is Some(doc) {
         if stale_file_link && !(doc.state is TabLoading) {
@@ -3118,7 +3100,7 @@ pub fn update(
                   request_diagnostics(
                     dispatch,
                     ctx.owner,
-                    ctx.request_epoch,
+                    ctx.checkout_id,
                     root,
                     path,
                     absolute,
@@ -3160,7 +3142,7 @@ pub fn update(
         }
         let state = { ..state, reviewed_changes: [], index, watching, }
         let index_cmd = if start_index_refresh {
-          list_files(dispatch, owner, state.request_epoch, root=ctx.root())
+          list_files(dispatch, owner, state.checkout_id, root=ctx.root())
         } else {
           @cmd.none
         }
@@ -3168,7 +3150,7 @@ pub fn update(
           active_moonbit_diagnostics(
             dispatch,
             owner,
-            state.request_epoch,
+            state.checkout_id,
             ctx.root(),
             state.docs,
             ctx.active_file,
@@ -3201,11 +3183,11 @@ pub fn update(
       } else {
         (@cmd.none, state)
       }
-    FsChanged(root~, generation~, changes~) =>
+    FsChanged(root~, watch_id~, changes~) =>
       if state.owner is Some(owner) &&
         owner.channel == ctx.owner.channel &&
         ctx.root() == Some(root) &&
-        generation == ctx.watch_identity(state.watch_generation) {
+        watch_id == state.watch_id {
         let reviewed_changes = match changes {
           Some(changes) =>
             state.reviewed_changes.filter(change => !change.touched_by(changes))
@@ -3277,7 +3259,7 @@ pub fn update(
             stat_files(
               dispatch,
               owner,
-              state.request_epoch,
+              state.checkout_id,
               stat_paths,
               root=ctx.root(),
             ),
@@ -3286,7 +3268,7 @@ pub fn update(
           active_moonbit_diagnostics(
             dispatch,
             owner,
-            state.request_epoch,
+            state.checkout_id,
             ctx.root(),
             state.docs,
             ctx.active_file,
@@ -3306,7 +3288,7 @@ pub fn update(
             read_directory(
               dispatch,
               owner,
-              state.request_epoch,
+              state.checkout_id,
               directory,
               root=ctx.root(),
             ),
@@ -3324,7 +3306,7 @@ pub fn update(
         }
         if start_refresh {
           cmds.push(
-            list_files(dispatch, owner, state.request_epoch, root=ctx.root()),
+            list_files(dispatch, owner, state.checkout_id, root=ctx.root()),
           )
         }
         let next = { ..state, loading, reviewed_changes, index, }
@@ -3348,8 +3330,8 @@ pub fn update(
       } else {
         (@cmd.none, state)
       }
-    StatsLoaded(owner~, epoch~, stats~) =>
-      if state.owner != Some(owner) || state.request_epoch != epoch {
+    StatsLoaded(owner~, checkout_id~, stats~) =>
+      if state.owner != Some(owner) || state.checkout_id != checkout_id {
         (@cmd.none, state)
       } else {
         let docs = state.docs.copy()
@@ -3441,7 +3423,7 @@ pub fn update(
                 read_file(
                   dispatch,
                   owner,
-                  state.request_epoch,
+                  state.checkout_id,
                   stat.path,
                   doc.name,
                   review_generation?=working_generation,
@@ -3468,7 +3450,7 @@ pub fn update(
           active_moonbit_diagnostics(
             dispatch,
             owner,
-            state.request_epoch,
+            state.checkout_id,
             ctx.root(),
             docs,
             ctx.active_file,
@@ -3478,8 +3460,8 @@ pub fn update(
         }
         (@cmd.batch(cmds), { ..state, docs, review_generation, })
       }
-    DiagnosticsLoaded(owner~, epoch~, absolute~, diagnostics~) =>
-      if state.owner == Some(owner) && state.request_epoch == epoch {
+    DiagnosticsLoaded(owner~, checkout_id~, absolute~, diagnostics~) =>
+      if state.owner == Some(owner) && state.checkout_id == checkout_id {
         (apply_diagnostics(owner.channel, absolute, diagnostics), state)
       } else {
         (@cmd.none, state)
@@ -3497,19 +3479,19 @@ pub fn update(
     LanguageRequestFailed(..) => (@cmd.none, state)
     FileFailed(
       owner~,
-      epoch~,
+      checkout_id~,
       path~,
-      file_link_generation~,
+      file_link_request_id~,
       review_generation~,
       message~
     ) => {
-      let stale_file_link = match file_link_generation {
-        Some(generation) => state.file_link_generation != generation
+      let stale_file_link = match file_link_request_id {
+        Some(request_id) => state.file_link_request_id != request_id
         None => false
       }
-      if state.owner != Some(owner) || state.request_epoch != epoch {
+      if state.owner != Some(owner) || state.checkout_id != checkout_id {
         (@cmd.none, state)
-      } else if file_link_generation is Some(_) {
+      } else if file_link_request_id is Some(_) {
         // A stale positioned failure may finish only the loading document. A
         // current failure is authoritative even if an older success filled
         // the cache first, so it replaces that snapshot with a retryable tab.
@@ -3577,21 +3559,20 @@ pub fn update(
         (@cmd.none, { ..state, error: Some(message), })
       }
     }
-    FileWatchFailed(channel~, root~, generation~, message~) =>
+    FileWatchFailed(root~, watch_id~, message~) =>
       if state.owner is Some(owner) &&
-        owner.channel == channel &&
         ctx.root() == Some(root) &&
-        generation == ctx.watch_identity(state.watch_generation) {
+        watch_id == state.watch_id {
         // The Host reports request-time activation failures through the
         // `fs.watch` reply and reserves this event for a watcher that stopped
         // after it was active. Keep the failed configuration recorded so the
         // ordinary sync pass cannot create an unbounded retry loop. A later
-        // effective configuration change starts a fresh generation.
+        // effective configuration change starts a fresh UUID.
         // Refresh the current snapshot once because the stopped watcher opens
         // an observation gap even though it remains useful for reads.
         let (index, start_index_refresh) = state.index.invalidate()
         let cmd = if start_index_refresh {
-          list_files(dispatch, owner, state.request_epoch, root=ctx.root())
+          list_files(dispatch, owner, state.checkout_id, root=ctx.root())
         } else {
           @cmd.none
         }
@@ -3620,9 +3601,8 @@ fn test_emit() -> @cmd.Emit[Msg] {
 ///|
 fn test_ctx() -> Ctx {
   {
-    owner: { channel: @interop.ChannelId::Local, session: "desktop-test", },
-    request_epoch: 0,
-    watch_namespace: "test-page",
+    owner: { channel: @interop.ChannelId::Local, session: "desktop-test" },
+    checkout_id: "checkout-0",
     placement: @resource.of_path(@interop.ChannelId::Local, "/work").map(root => {
       @interop.WorkspaceRoot(root~)
     }),
@@ -3673,6 +3653,7 @@ fn owned_state_at(ctx : Ctx) -> State {
   {
     ..State::empty(),
     owner: Some(test_ctx().owner),
+    checkout_id: ctx.checkout_id,
     placement: PlacementUnknown.reconcile(ctx.placement),
     explorer_was_visible: true,
   }
@@ -3716,7 +3697,7 @@ test "file index requests retry failures and fence stale replies" {
     emit,
     FilesIndexed(
       owner=ctx.owner,
-      epoch=ctx.request_epoch + 1,
+      checkout_id=@uuid.mint(),
       files=[Relative("stale.mbt")],
       truncated=false,
     ),
@@ -3726,7 +3707,7 @@ test "file index requests retry failures and fence stale replies" {
   assert_true(stale == loading)
   let (_, failed) = update(
     emit,
-    FileIndexFailed(owner=ctx.owner, epoch=ctx.request_epoch),
+    FileIndexFailed(owner=ctx.owner, checkout_id=ctx.checkout_id),
     loading,
     ctx,
   )
@@ -3737,7 +3718,7 @@ test "file index requests retry failures and fence stale replies" {
     emit,
     FilesIndexed(
       owner=ctx.owner,
-      epoch=ctx.request_epoch,
+      checkout_id=ctx.checkout_id,
       files=[Relative("src/main.mbt")],
       truncated=true,
     ),
@@ -3755,7 +3736,7 @@ test "file index requests retry failures and fence stale replies" {
   )
   let (_, refresh_failed) = update(
     emit,
-    FileIndexFailed(owner=ctx.owner, epoch=ctx.request_epoch),
+    FileIndexFailed(owner=ctx.owner, checkout_id=ctx.checkout_id),
     ready,
     ctx,
   )
@@ -3771,7 +3752,7 @@ test "file index requests retry failures and fence stale replies" {
   }
   let (_, stale) = update(
     emit,
-    FileIndexFailed(owner=ctx.owner, epoch=ctx.request_epoch),
+    FileIndexFailed(owner=ctx.owner, checkout_id=ctx.checkout_id),
     refreshing,
     ctx,
   )
@@ -3791,7 +3772,7 @@ test "watcher changes during the initial file index scan schedule one follow-up"
   let (_, loading) = update(emit, EnsureFileIndex, owned_state(), ctx)
   let changed = FsChanged(
     root=ctx.test_root(),
-    generation=ctx.watch_identity(loading.watch_generation),
+    watch_id=loading.watch_id,
     changes=Some([Created(Relative("src/new.mbt"))]),
   )
   let (_, latched) = update(emit, changed, loading, ctx)
@@ -3800,7 +3781,7 @@ test "watcher changes during the initial file index scan schedule one follow-up"
     emit,
     FilesIndexed(
       owner=ctx.owner,
-      epoch=ctx.request_epoch,
+      checkout_id=ctx.checkout_id,
       files=[Relative("src/old.mbt")],
       truncated=false,
     ),
@@ -3814,7 +3795,7 @@ test "watcher changes during the initial file index scan schedule one follow-up"
     emit,
     FilesIndexed(
       owner=ctx.owner,
-      epoch=ctx.request_epoch,
+      checkout_id=ctx.checkout_id,
       files=[Relative("src/old.mbt"), Relative("src/new.mbt")],
       truncated=false,
     ),
@@ -3847,7 +3828,7 @@ test "structural watcher bursts coalesce file index refreshes" {
   }
   let changed = FsChanged(
     root=ctx.test_root(),
-    generation=ctx.watch_identity(ready.watch_generation),
+    watch_id=ready.watch_id,
     changes=Some([Created(Relative("src/new.mbt"))]),
   )
   let (_, refreshing) = update(emit, changed, ready, ctx)
@@ -3862,7 +3843,7 @@ test "structural watcher bursts coalesce file index refreshes" {
     emit,
     FilesIndexed(
       owner=ctx.owner,
-      epoch=ctx.request_epoch,
+      checkout_id=ctx.checkout_id,
       files=[Relative("src/new.mbt")],
       truncated=false,
     ),
@@ -3882,7 +3863,7 @@ test "structural watcher bursts coalesce file index refreshes" {
     emit,
     FilesIndexed(
       owner=ctx.owner,
-      epoch=ctx.request_epoch,
+      checkout_id=ctx.checkout_id,
       files=[Relative("src/new.mbt"), Relative("src/last.mbt")],
       truncated=false,
     ),
@@ -4063,11 +4044,11 @@ test "changed-file review fences paired replies and ordinary opens leave review"
     emit,
     FileLoaded(
       owner=ctx.owner,
-      epoch=0,
+      checkout_id="checkout-0",
       path~,
       name="a.mbt",
       file=Content(content="pre-review working", absolute~, sig="0:18"),
-      file_link_generation=None,
+      file_link_request_id=None,
       review_generation=None,
       range=None,
       annotation=None,
@@ -4089,11 +4070,11 @@ test "changed-file review fences paired replies and ordinary opens leave review"
     emit,
     FileLoaded(
       owner=ctx.owner,
-      epoch=0,
+      checkout_id="checkout-0",
       path~,
       name="a.mbt",
       file=Content(content="stale working", absolute~, sig="1:13"),
-      file_link_generation=None,
+      file_link_request_id=None,
       review_generation=Some(1),
       range=None,
       annotation=None,
@@ -4191,11 +4172,11 @@ test "changed-file review fences paired replies and ordinary opens leave review"
     emit,
     FileLoaded(
       owner=ctx.owner,
-      epoch=0,
+      checkout_id="checkout-0",
       path~,
       name="a.mbt",
       file=Content(content="late review", absolute~, sig="3:11"),
-      file_link_generation=None,
+      file_link_request_id=None,
       review_generation=Some(2),
       range=None,
       annotation=None,
@@ -4396,9 +4377,9 @@ test "review failures settle precisely and missing rename sources stay unavailab
     emit,
     FileFailed(
       owner=ctx.owner,
-      epoch=0,
+      checkout_id="checkout-0",
       path~,
-      file_link_generation=None,
+      file_link_request_id=None,
       review_generation=Some(1),
       message="file disappeared",
     ),
@@ -4526,11 +4507,11 @@ test "deleted changes preview HEAD and working-file loads retain early baselines
     emit,
     FileLoaded(
       owner=live_ctx.owner,
-      epoch=0,
+      checkout_id="checkout-0",
       path=live_path,
       name="live.mbt",
       file=Content(content="new", absolute~, sig="2:3"),
-      file_link_generation=None,
+      file_link_request_id=None,
       review_generation=Some(1),
       range=None,
       annotation=None,
@@ -4607,13 +4588,9 @@ test "narrow ctx: opening or activating a document closes the tree pane" {
 ///|
 test "activate without a document entry is a no-op" {
   let emit = test_emit()
-  let (_, same) = activate(
-    emit,
-    owned_state(),
-    test_ctx(),
-    Relative("gone.mbt"),
-  )
-  assert_true(same == owned_state())
+  let state = owned_state()
+  let (_, same) = activate(emit, state, test_ctx(), Relative("gone.mbt"))
+  assert_true(same == state)
 }
 
 ///|
@@ -4675,11 +4652,11 @@ test "FileLoaded settles content into its document, active or not" {
     emit,
     FileLoaded(
       owner=test_ctx().owner,
-      epoch=0,
+      checkout_id="checkout-0",
       path=Relative("a.mbt"),
       name="a.mbt",
       file=Content(content="fn main {}", absolute~, sig="2:0"),
-      file_link_generation=None,
+      file_link_request_id=None,
       review_generation=None,
       range=None,
       annotation=None,
@@ -4700,11 +4677,11 @@ test "FileLoaded settles content into its document, active or not" {
     emit,
     FileLoaded(
       owner=test_ctx().owner,
-      epoch=0,
+      checkout_id="checkout-0",
       path=Relative("gone.mbt"),
       name="gone.mbt",
       file=Content(content="", absolute=gone_absolute, sig="2:0"),
-      file_link_generation=None,
+      file_link_request_id=None,
       review_generation=None,
       range=None,
       annotation=None,
@@ -4720,11 +4697,11 @@ test "FileLoaded settles content into its document, active or not" {
         channel: @interop.ChannelId::Remote("other"),
         session: "desktop-test",
       },
-      epoch=0,
+      checkout_id="checkout-0",
       path=Relative("a.mbt"),
       name="a.mbt",
       file=Binary,
-      file_link_generation=None,
+      file_link_request_id=None,
       review_generation=None,
       range=None,
       annotation=None,
@@ -4737,11 +4714,11 @@ test "FileLoaded settles content into its document, active or not" {
   )
   // A stat issued before a placement/reroot boundary is stale even when the
   // same conversation is active again. It cannot invalidate a newer live doc.
-  let epoch_state = { ..state, request_epoch: 2, }
+  let epoch_state = { ..state, checkout_id: "checkout-2" }
   let (_, old_epoch) = update(
     emit,
-    StatsLoaded(owner=test_ctx().owner, epoch=1, stats=[
-      { path: Relative("a.mbt"), sig: None, },
+    StatsLoaded(owner=test_ctx().owner, checkout_id="checkout-1", stats=[
+      { path: Relative("a.mbt"), sig: None },
     ]),
     epoch_state,
     ctx,
@@ -4755,11 +4732,11 @@ test "FileLoaded settles content into its document, active or not" {
     emit,
     FileLoaded(
       owner=test_ctx().owner,
-      epoch=1,
+      checkout_id="checkout-1",
       path=Relative("a.mbt"),
       name="a.mbt",
       file=Content(content="stale", absolute~, sig="9:0"),
-      file_link_generation=None,
+      file_link_request_id=None,
       review_generation=None,
       range=None,
       annotation=None,
@@ -4770,7 +4747,12 @@ test "FileLoaded settles content into its document, active or not" {
   assert_true(old_read == epoch_state)
   let (_, old_listing) = update(
     emit,
-    DirLoaded(owner=test_ctx().owner, epoch=1, path=@pathx.Relative::root(), entries=[]),
+    DirLoaded(
+      owner=test_ctx().owner,
+      checkout_id="checkout-1",
+      path=@pathx.Relative::root(),
+      entries=[],
+    ),
     epoch_state,
     ctx,
   )
@@ -4779,7 +4761,7 @@ test "FileLoaded settles content into its document, active or not" {
     emit,
     FilesIndexed(
       owner=test_ctx().owner,
-      epoch=1,
+      checkout_id="checkout-1",
       files=[Relative("stale.mbt")],
       truncated=false,
     ),
@@ -4790,9 +4772,8 @@ test "FileLoaded settles content into its document, active or not" {
   let (_, old_watch_failure) = update(
     emit,
     FileWatchFailed(
-      channel=test_ctx().owner.channel,
       root=test_ctx().test_root(),
-      generation=test_ctx().watch_identity(1),
+      watch_id="stale-watch-id",
       message="stale watcher",
     ),
     epoch_state,
@@ -4857,7 +4838,7 @@ test "a closed panel still re-roots when the conversation switches" {
       directories: [],
       recursive: false,
     }),
-    file_link_generation: 4,
+    file_link_request_id: "00000000-0000-8000-8000-000000000041",
   }
   // The new conversation has nothing open and the panel is closed.
   let other : Ctx = {
@@ -4870,7 +4851,7 @@ test "a closed panel still re-roots when the conversation switches" {
   }
   let (parked, _) = sync(emit, state, other)
   assert_true(parked.owner is Some({ channel: Remote("other"), .. }))
-  assert_eq(parked.file_link_generation, 5)
+  assert_true(parked.file_link_request_id != state.file_link_request_id)
   assert_true(parked.docs.is_empty())
   // Nothing left to track in the new conversation, so the watcher parks.
   assert_true(parked.watching is None)
@@ -4883,7 +4864,7 @@ test "a closed panel still re-roots when the conversation switches" {
     active_file: Some(Relative("a.mbt")),
   }
   let (restored, _) = sync(emit, parked, back)
-  assert_eq(restored.file_link_generation, 6)
+  assert_true(restored.file_link_request_id != parked.file_link_request_id)
   assert_true(
     restored.docs.get(Relative("a.mbt")) is Some({ state: TabLoading, .. }),
   )
@@ -4931,8 +4912,8 @@ test "a resolved placement change reroots documents and fences old replies" {
     ),
     changes_head: Some("root-head"),
     changes_head_known: true,
-    changes_generation: 2,
-    file_link_generation: 6,
+    changes_request_id: "changes-2",
+    file_link_request_id: "00000000-0000-8000-8000-000000000042",
     review_generation: 4,
     docs,
     children: Map([
@@ -4968,9 +4949,9 @@ test "a resolved placement change reroots documents and fences old replies" {
     active_file: Some(path),
   }
   let (moved, _) = sync(emit, state, worktree_ctx)
-  assert_eq(moved.request_epoch, state.request_epoch + 1)
-  assert_eq(moved.changes_generation, state.changes_generation + 1)
-  assert_eq(moved.file_link_generation, state.file_link_generation + 1)
+  assert_true(moved.checkout_id != state.checkout_id)
+  assert_true(moved.changes_request_id != state.changes_request_id)
+  assert_true(moved.file_link_request_id != state.file_link_request_id)
   assert_true(
     moved.placement.identity() is Some(@interop.Worktree(name="wt-1", ..)),
   )
@@ -5006,30 +4987,30 @@ test "a resolved placement change reroots documents and fences old replies" {
     emit,
     FileLoaded(
       owner=worktree_ctx.owner,
-      epoch=state.request_epoch,
+      checkout_id=state.checkout_id,
       path~,
       name="reviewed.mbt",
       file=Content(content="old root reply", absolute=old_absolute, sig="1:1"),
-      file_link_generation=None,
+      file_link_request_id=None,
       review_generation=Some(4),
       range=None,
       annotation=None,
     ),
     moved,
-    { ..worktree_ctx, request_epoch: moved.request_epoch, },
+    { ..worktree_ctx, checkout_id: moved.checkout_id },
   )
   assert_true(after_old_reply == moved)
   let (_, after_old_changes) = update(
     emit,
     ChangesLoaded(
       owner=worktree_ctx.owner,
-      generation=state.changes_generation,
+      request_id=state.changes_request_id,
       repository=true,
       head=Some("root-head"),
       files=[test_modified_change(path)],
     ),
     moved,
-    { ..worktree_ctx, request_epoch: moved.request_epoch, },
+    { ..worktree_ctx, checkout_id: moved.checkout_id },
   )
   assert_true(after_old_changes == moved)
 
@@ -5043,8 +5024,8 @@ test "a resolved placement change reroots documents and fences old replies" {
     ..worktree_ctx,
     placement: Some(@interop.WorkspaceRoot(root=new_workspace)),
   })
-  assert_eq(reassigned.request_epoch, state.request_epoch + 1)
-  assert_eq(reassigned.file_link_generation, state.file_link_generation + 1)
+  assert_true(reassigned.checkout_id != state.checkout_id)
+  assert_true(reassigned.file_link_request_id != state.file_link_request_id)
   assert_true(
     reassigned.placement.identity() is Some(@interop.WorkspaceRoot(..)),
   )
@@ -5110,7 +5091,7 @@ test "a missing checkout parks files and refuses editor actions until repair" {
   assert_true(parked.index is IndexEmpty)
   assert_true(parked.watching is None)
   assert_true(parked.placement.is_parked())
-  assert_eq(parked.request_epoch, state.request_epoch + 1)
+  assert_true(parked.checkout_id != state.checkout_id)
   let (_, refused_index) = update(emit, EnsureFileIndex, parked, missing)
   assert_true(refused_index == parked)
   // Root/dock callers also use these public entry points directly, bypassing
@@ -5184,7 +5165,7 @@ test "a missing checkout parks files and refuses editor actions until repair" {
     is Some({ state: TabLoaded(..), stale: true, .. }),
   )
   assert_false(restored.placement.is_parked())
-  assert_eq(restored.request_epoch, parked.request_epoch)
+  assert_eq(restored.checkout_id, parked.checkout_id)
 }
 
 ///|
@@ -5271,7 +5252,7 @@ test "an unresolved gap retains identity so same-checkout recovery restores" {
   // so the review survives for revalidation instead of a hard reroot.
   let (restored, _) = sync(emit, parked, present)
   assert_false(restored.placement.is_parked())
-  assert_eq(restored.request_epoch, parked.request_epoch)
+  assert_eq(restored.checkout_id, parked.checkout_id)
   assert_true(
     restored.docs.get(path)
     is Some({ review: Some({ working_generation: 4, .. }), stale: true, .. }),
@@ -5315,7 +5296,7 @@ test "recovery from an unresolved gap into another checkout reroots" {
   }
   let (rerooted, _) = sync(emit, parked, recovered)
   assert_true(rerooted.placement is PlacementLive(@interop.WorkspaceRoot(..)))
-  assert_eq(rerooted.request_epoch, parked.request_epoch + 1)
+  assert_true(rerooted.checkout_id != parked.checkout_id)
   assert_true(
     rerooted.docs.get(path)
     is Some({ state: TabLoading, review: None, stale: false, .. }),
@@ -5330,7 +5311,7 @@ test "a missing checkout settles an in-flight Changes request for retry" {
     ..owned_state_at(present),
     explorer_mode: ExplorerChanges,
     changes: ChangeListLoading(refresh_again=true),
-    changes_generation: 1,
+    changes_request_id: "changes-1",
     watching: Some({
       owner: present.owner,
       root: present.test_root(),
@@ -5347,7 +5328,7 @@ test "a missing checkout settles an in-flight Changes request for retry" {
   }
   let (parked, _) = sync(emit, state, missing)
   assert_true(parked.changes is ChangeListIdle)
-  assert_true(parked.changes_generation == 2)
+  assert_true(parked.changes_request_id != state.changes_request_id)
   assert_true(parked.watching is None)
   // The host reply is local state only, but the parked update boundary drops
   // it. The sync above has already removed the liveness hazard.
@@ -5355,7 +5336,7 @@ test "a missing checkout settles an in-flight Changes request for retry" {
     emit,
     ChangesLoaded(
       owner=present.owner,
-      generation=1,
+      request_id=state.changes_request_id,
       repository=true,
       head=None,
       files=[],
@@ -5366,7 +5347,7 @@ test "a missing checkout settles an in-flight Changes request for retry" {
   assert_true(after_reply == parked)
   let (restored, _) = sync(emit, after_reply, present)
   assert_true(restored.changes is ChangeListLoading(refresh_again=false))
-  assert_true(restored.changes_generation == 3)
+  assert_true(restored.changes_request_id != parked.changes_request_id)
 }
 
 ///|
@@ -5402,7 +5383,7 @@ test "checkout recovery restarts a review whose paired replies were parked" {
       refreshing=true,
       refresh_again=false,
     ),
-    changes_generation: 1,
+    changes_request_id: "changes-1",
     changes_head: Some("same-head"),
     changes_head_known: true,
     review_generation: 3,
@@ -5429,7 +5410,7 @@ test "checkout recovery restarts a review whose paired replies were parked" {
   )
   assert_true(parked.review_recovery_pending)
   assert_true(parked.placement.is_parked())
-  assert_eq(parked.request_epoch, state.request_epoch + 1)
+  assert_true(parked.checkout_id != state.checkout_id)
   assert_eq(parked.review_generation, 4)
   let (restored, _) = sync(emit, parked, {
     ..present,
@@ -5440,20 +5421,20 @@ test "checkout recovery restarts a review whose paired replies were parked" {
     restored.changes
     is ChangeListReady(refreshing=true, refresh_again=false, ..),
   )
-  assert_true(restored.changes_generation == 3)
+  assert_true(restored.changes_request_id != parked.changes_request_id)
   assert_true(restored.review_recovery_pending)
   assert_false(restored.placement.is_parked())
-  assert_eq(restored.request_epoch, parked.request_epoch)
+  assert_eq(restored.checkout_id, parked.checkout_id)
   // A second disappearance before the recovery snapshot settles is still a
   // fresh placement boundary: pending review recovery is not the parked flag.
   let (parked_again, _) = sync(emit, restored, missing)
   assert_true(parked_again.placement.is_parked())
-  assert_eq(parked_again.request_epoch, restored.request_epoch + 1)
+  assert_true(parked_again.checkout_id != restored.checkout_id)
   let (_, restarted) = update(
     emit,
     ChangesLoaded(
       owner=present.owner,
-      generation=3,
+      request_id=restored.changes_request_id,
       repository=true,
       head=Some("same-head"),
       files=[change],
@@ -5504,7 +5485,7 @@ test "hidden checkout recovery retries failed Changes once before parking" {
     ..owned_state_at(present),
     tree_open: false,
     changes: ChangeListFailed("transient Git failure"),
-    changes_generation: 1,
+    changes_request_id: "changes-1",
     changes_head: Some("same-head"),
     changes_head_known: true,
     review_generation: 3,
@@ -5524,7 +5505,7 @@ test "hidden checkout recovery retries failed Changes once before parking" {
   let restored_ctx = { ..present, open_files: [path], active_file: Some(path), }
   let (restored, _) = sync(emit, parked, restored_ctx)
   assert_true(restored.changes is ChangeListLoading(refresh_again=false))
-  assert_true(restored.changes_generation == 3)
+  assert_true(restored.changes_request_id != parked.changes_request_id)
   assert_true(restored.review_recovery_pending)
   assert_false(explorer_visible(restored, restored_ctx))
   // The placement transition grants exactly one automatic attempt. If it
@@ -5533,7 +5514,7 @@ test "hidden checkout recovery retries failed Changes once before parking" {
     emit,
     ChangesFailed(
       owner=present.owner,
-      generation=3,
+      request_id=restored.changes_request_id,
       message="Git still unavailable",
     ),
     restored,
@@ -5541,12 +5522,12 @@ test "hidden checkout recovery retries failed Changes once before parking" {
   )
   let (still_failed, _) = sync(emit, failed_again, restored_ctx)
   assert_true(still_failed.changes is ChangeListFailed("Git still unavailable"))
-  assert_true(still_failed.changes_generation == 3)
+  assert_eq(still_failed.changes_request_id, restored.changes_request_id)
   let (_, restarted) = update(
     emit,
     ChangesLoaded(
       owner=present.owner,
-      generation=3,
+      request_id=restored.changes_request_id,
       repository=true,
       head=Some("same-head"),
       files=[change],
@@ -5591,7 +5572,7 @@ test "ordinary Changes polls do not supersede healthy in-flight reviews" {
       refreshing=true,
       refresh_again=false,
     ),
-    changes_generation: 1,
+    changes_request_id: "changes-1",
     changes_head: Some("same-head"),
     changes_head_known: true,
     review_generation: 3,
@@ -5601,7 +5582,7 @@ test "ordinary Changes polls do not supersede healthy in-flight reviews" {
     emit,
     ChangesLoaded(
       owner=present.owner,
-      generation=1,
+      request_id="changes-1",
       repository=true,
       head=Some("same-head"),
       files=[change],
@@ -5853,7 +5834,7 @@ test "reopening Changes latches a follow-up for an in-flight refresh" {
       refreshing=true,
       refresh_again=false,
     ),
-    changes_generation: 1,
+    changes_request_id: "changes-1",
     explorer_was_visible: false,
     watching: Some({
       owner: test_ctx().owner,
@@ -5868,7 +5849,7 @@ test "reopening Changes latches a follow-up for an in-flight refresh" {
     refreshed.changes
     is ChangeListReady(refreshing=true, refresh_again=true, ..),
   )
-  assert_true(refreshed.changes_generation == 1)
+  assert_true(refreshed.changes_request_id == "changes-1")
 }
 
 ///|
@@ -5877,7 +5858,7 @@ test "reopening Changes latches a follow-up for the initial load" {
     ..owned_state(),
     explorer_mode: ExplorerChanges,
     changes: ChangeListLoading(refresh_again=false),
-    changes_generation: 1,
+    changes_request_id: "changes-1",
     explorer_was_visible: false,
     watching: Some({
       owner: test_ctx().owner,
@@ -5889,21 +5870,22 @@ test "reopening Changes latches a follow-up for the initial load" {
   }
   let (refreshed, _) = sync(test_emit(), state, test_ctx())
   assert_true(refreshed.changes is ChangeListLoading(refresh_again=true))
-  assert_true(refreshed.changes_generation == 1)
+  assert_true(refreshed.changes_request_id == "changes-1")
 }
 
 ///|
 test "selecting Changes loads once and coalesces an in-flight refresh" {
   let emit = test_emit()
+  let state = owned_state()
   let (_, loading) = update(
     emit,
     ExplorerModeSelected(ExplorerChanges),
-    owned_state(),
+    state,
     test_ctx(),
   )
   assert_true(loading.explorer_mode is ExplorerChanges)
   assert_true(loading.changes is ChangeListLoading(refresh_again=false))
-  assert_true(loading.changes_generation == 1)
+  assert_true(loading.changes_request_id != state.changes_request_id)
   // Re-selecting while the first request is in flight latches one follow-up,
   // without starting another request before this reply lands.
   let (_, latched) = update(
@@ -5917,7 +5899,7 @@ test "selecting Changes loads once and coalesces an in-flight refresh" {
     emit,
     ChangesLoaded(
       owner=test_ctx().owner,
-      generation=1,
+      request_id=loading.changes_request_id,
       repository=true,
       head=None,
       files=[],
@@ -5929,7 +5911,7 @@ test "selecting Changes loads once and coalesces an in-flight refresh" {
     following_up.changes
     is ChangeListReady(refreshing=true, refresh_again=false, ..),
   )
-  assert_true(following_up.changes_generation == 2)
+  assert_true(following_up.changes_request_id != loading.changes_request_id)
 }
 
 ///|
@@ -5944,7 +5926,7 @@ test "moving focus to a ready Changes snapshot defers its fallback refresh" {
       refreshing=false,
       refresh_again=false,
     ),
-    changes_generation: 4,
+    changes_request_id: "changes-4",
   }
   let (_, selected) = update(
     emit,
@@ -5953,7 +5935,7 @@ test "moving focus to a ready Changes snapshot defers its fallback refresh" {
     test_ctx(),
   )
   assert_true(selected.explorer_mode is ExplorerChanges)
-  assert_true(selected.changes_generation == 4)
+  assert_true(selected.changes_request_id == "changes-4")
   assert_true(selected.changes is ChangeListReady(refreshing=false, ..))
   // Re-selecting the active tab remains the explicit, immediate refresh.
   let (_, refreshing) = update(
@@ -5962,7 +5944,7 @@ test "moving focus to a ready Changes snapshot defers its fallback refresh" {
     selected,
     test_ctx(),
   )
-  assert_true(refreshing.changes_generation == 5)
+  assert_true(refreshing.changes_request_id != state.changes_request_id)
   assert_true(refreshing.changes is ChangeListReady(refreshing=true, ..))
 }
 
@@ -5973,13 +5955,13 @@ test "watcher events latch a follow-up during the initial change load" {
     ..owned_state(),
     explorer_mode: ExplorerChanges,
     changes: ChangeListLoading(refresh_again=false),
-    changes_generation: 1,
+    changes_request_id: "changes-1",
   }
   let (_, latched) = update(
     emit,
     FsChanged(
       root=test_ctx().test_root(),
-      generation=test_ctx().watch_identity(state.watch_generation),
+      watch_id=state.watch_id,
       changes=Some([Modified(Relative("src/main.mbt"))]),
     ),
     state,
@@ -5995,7 +5977,7 @@ test "changed-file replies are owner-and-generation-fenced" {
     ..owned_state(),
     explorer_mode: ExplorerChanges,
     changes: ChangeListLoading(refresh_again=false),
-    changes_generation: 1,
+    changes_request_id: "changes-1",
   }
   let files = [
     {
@@ -6010,7 +5992,7 @@ test "changed-file replies are owner-and-generation-fenced" {
     emit,
     ChangesLoaded(
       owner=test_ctx().owner,
-      generation=1,
+      request_id="changes-1",
       repository=true,
       head=None,
       files~,
@@ -6034,7 +6016,7 @@ test "changed-file replies are owner-and-generation-fenced" {
         channel: @interop.ChannelId::Remote("other"),
         session: "desktop-test",
       },
-      generation=1,
+      request_id="changes-1",
       repository=true,
       head=None,
       files=[],
@@ -6050,18 +6032,18 @@ test "changed-file replies are owner-and-generation-fenced" {
         channel: @interop.ChannelId::Remote("other"),
         session: "desktop-test",
       },
-      generation=1,
+      request_id="changes-1",
       message="stale git failure",
     ),
     ready,
     test_ctx(),
   )
   assert_true(stale_failure == ready)
-  let (_, stale_generation) = update(
+  let (_, stale_result) = update(
     emit,
     ChangesLoaded(
       owner=test_ctx().owner,
-      generation=0,
+      request_id="changes-0",
       repository=true,
       head=None,
       files=[],
@@ -6069,13 +6051,13 @@ test "changed-file replies are owner-and-generation-fenced" {
     ready,
     test_ctx(),
   )
-  assert_true(stale_generation == ready)
-  let idle = { ..owned_state(), changes_generation: 1, }
+  assert_true(stale_result == ready)
+  let idle = { ..owned_state(), changes_request_id: "changes-1" }
   let (_, stale_idle_failure) = update(
     emit,
     ChangesFailed(
       owner=test_ctx().owner,
-      generation=1,
+      request_id="changes-1",
       message="stale git failure",
     ),
     idle,
@@ -6102,7 +6084,7 @@ test "a settled Changes snapshot re-stats loaded reviews whose rows disappeared"
     ..owned_state(),
     explorer_mode: ExplorerChanges,
     changes: ChangeListLoading(refresh_again=false),
-    changes_generation: 1,
+    changes_request_id: "changes-1",
     review_generation: 3,
     docs,
   }
@@ -6111,7 +6093,7 @@ test "a settled Changes snapshot re-stats loaded reviews whose rows disappeared"
     test_emit(),
     ChangesLoaded(
       owner=test_ctx().owner,
-      generation=1,
+      request_id="changes-1",
       repository=true,
       head=None,
       files=[],
@@ -6127,7 +6109,9 @@ test "a settled Changes snapshot re-stats loaded reviews whose rows disappeared"
   // a committed deletion must replace the cached working source.
   let (_, deleted) = update(
     test_emit(),
-    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, sig: None, }]),
+    StatsLoaded(owner=ctx.owner, checkout_id="checkout-0", stats=[
+      { path, sig: None },
+    ]),
     settled,
     ctx,
   )
@@ -6156,14 +6140,18 @@ test "a review that becomes a symlink clears its cached regular-file source" {
   let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path), }
   let (_, unavailable) = update(
     test_emit(),
-    ChangesLoaded(owner=ctx.owner, generation=1, repository=true, head=None, files=[
-      symlink,
-    ]),
+    ChangesLoaded(
+      owner=ctx.owner,
+      request_id="changes-1",
+      repository=true,
+      head=None,
+      files=[symlink],
+    ),
     {
       ..owned_state(),
       explorer_mode: ExplorerChanges,
       changes: ChangeListLoading(refresh_again=false),
-      changes_generation: 1,
+      changes_request_id: "changes-1",
       review_generation: 3,
       docs,
     },
@@ -6176,7 +6164,9 @@ test "a review that becomes a symlink clears its cached regular-file source" {
   )
   let (_, missing_unavailable) = update(
     test_emit(),
-    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, sig: None, }]),
+    StatsLoaded(owner=ctx.owner, checkout_id="checkout-0", stats=[
+      { path, sig: None },
+    ]),
     unavailable,
     ctx,
   )
@@ -6185,7 +6175,9 @@ test "a review that becomes a symlink clears its cached regular-file source" {
   // source that preceded it. An explicit ordinary reopen remains the retry.
   let (_, still_unavailable) = update(
     test_emit(),
-    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, sig: Some("4:0"), }]),
+    StatsLoaded(owner=ctx.owner, checkout_id="checkout-0", stats=[
+      { path, sig: Some("4:0") },
+    ]),
     missing_unavailable,
     ctx,
   )
@@ -6196,11 +6188,11 @@ test "a review that becomes a symlink clears its cached regular-file source" {
   }
   let stale_reply = FileLoaded(
     owner=ctx.owner,
-    epoch=0,
+    checkout_id="checkout-0",
     path~,
     name="replaced.mbt",
     file=Content(content="stale regular source", absolute~, sig="4:0"),
-    file_link_generation=None,
+    file_link_request_id=None,
     review_generation=None,
     range=None,
     annotation=None,
@@ -6211,9 +6203,9 @@ test "a review that becomes a symlink clears its cached regular-file source" {
     test_emit(),
     FileFailed(
       owner=ctx.owner,
-      epoch=0,
+      checkout_id="checkout-0",
       path~,
-      file_link_generation=None,
+      file_link_request_id=None,
       review_generation=None,
       message="late symlink read",
     ),
@@ -6271,7 +6263,9 @@ test "a disappearing review row hands an active reload to an ordinary read" {
   }
   let (_, reloading) = update(
     test_emit(),
-    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, sig: Some("2:1"), }]),
+    StatsLoaded(owner=ctx.owner, checkout_id="checkout-0", stats=[
+      { path, sig: Some("2:1") },
+    ]),
     state,
     ctx,
   )
@@ -6281,11 +6275,17 @@ test "a disappearing review row hands an active reload to an ordinary read" {
   )
   let (_, settled) = update(
     test_emit(),
-    ChangesLoaded(owner=ctx.owner, generation=1, repository=true, head=None, files=[]),
+    ChangesLoaded(
+      owner=ctx.owner,
+      request_id="changes-1",
+      repository=true,
+      head=None,
+      files=[],
+    ),
     {
       ..reloading,
       changes: ChangeListLoading(refresh_again=false),
-      changes_generation: 1,
+      changes_request_id: "changes-1",
     },
     ctx,
   )
@@ -6301,11 +6301,11 @@ test "a disappearing review row hands an active reload to an ordinary read" {
     test_emit(),
     FileLoaded(
       owner=ctx.owner,
-      epoch=0,
+      checkout_id="checkout-0",
       path~,
       name="committed.mbt",
       file=Content(content="stale review read", absolute~, sig="2:7"),
-      file_link_generation=None,
+      file_link_request_id=None,
       review_generation=Some(3),
       range=None,
       annotation=None,
@@ -6318,11 +6318,11 @@ test "a disappearing review row hands an active reload to an ordinary read" {
     test_emit(),
     FileLoaded(
       owner=ctx.owner,
-      epoch=0,
+      checkout_id="checkout-0",
       path~,
       name="committed.mbt",
       file=Content(content="current working", absolute~, sig="2:7"),
-      file_link_generation=None,
+      file_link_request_id=None,
       review_generation=None,
       range=None,
       annotation=None,
@@ -6363,7 +6363,9 @@ test "a newer review reload fences an older working-tree reply" {
   // flight. It receives its own token without invalidating the HEAD request.
   let (_, reloading) = update(
     test_emit(),
-    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, sig: Some("2:0"), }]),
+    StatsLoaded(owner=ctx.owner, checkout_id="checkout-0", stats=[
+      { path, sig: Some("2:0") },
+    ]),
     state,
     ctx,
   )
@@ -6386,11 +6388,11 @@ test "a newer review reload fences an older working-tree reply" {
     test_emit(),
     FileLoaded(
       owner=ctx.owner,
-      epoch=0,
+      checkout_id="checkout-0",
       path~,
       name="racing.mbt",
       file=Content(content="newest working", absolute~, sig="2:0"),
-      file_link_generation=None,
+      file_link_request_id=None,
       review_generation=Some(4),
       range=None,
       annotation=None,
@@ -6413,11 +6415,11 @@ test "a newer review reload fences an older working-tree reply" {
     test_emit(),
     FileLoaded(
       owner=ctx.owner,
-      epoch=0,
+      checkout_id="checkout-0",
       path~,
       name="racing.mbt",
       file=Content(content="older working", absolute~, sig="1:0"),
-      file_link_generation=None,
+      file_link_request_id=None,
       review_generation=Some(3),
       range=None,
       annotation=None,
@@ -6430,7 +6432,9 @@ test "a newer review reload fences an older working-tree reply" {
   // that captured the file just before it disappeared cannot resurrect it.
   let (_, deleted) = update(
     test_emit(),
-    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, sig: None, }]),
+    StatsLoaded(owner=ctx.owner, checkout_id="checkout-0", stats=[
+      { path, sig: None },
+    ]),
     newest,
     ctx,
   )
@@ -6449,11 +6453,11 @@ test "a newer review reload fences an older working-tree reply" {
     test_emit(),
     FileLoaded(
       owner=ctx.owner,
-      epoch=0,
+      checkout_id="checkout-0",
       path~,
       name="racing.mbt",
       file=Content(content="pre-deletion working", absolute~, sig="2:0"),
-      file_link_generation=None,
+      file_link_request_id=None,
       review_generation=Some(4),
       range=None,
       annotation=None,
@@ -6482,7 +6486,7 @@ test "only a final Changes snapshot reconciles reviews and moved HEAD refreshes 
     ..owned_state(),
     explorer_mode: ExplorerChanges,
     changes: ChangeListLoading(refresh_again=true),
-    changes_generation: 1,
+    changes_request_id: "changes-1",
     changes_head: Some("old-head"),
     changes_head_known: true,
     review_generation: 3,
@@ -6495,7 +6499,7 @@ test "only a final Changes snapshot reconciles reviews and moved HEAD refreshes 
     test_emit(),
     ChangesLoaded(
       owner=test_ctx().owner,
-      generation=1,
+      request_id="changes-1",
       repository=true,
       head=Some("new-head"),
       files=[],
@@ -6513,7 +6517,7 @@ test "only a final Changes snapshot reconciles reviews and moved HEAD refreshes 
     ),
   )
   assert_true(following_up.changes_head == Some("old-head"))
-  assert_true(following_up.changes_generation == 2)
+  assert_true(following_up.changes_request_id != state.changes_request_id)
   let files = [
     {
       path,
@@ -6527,7 +6531,7 @@ test "only a final Changes snapshot reconciles reviews and moved HEAD refreshes 
     test_emit(),
     ChangesLoaded(
       owner=test_ctx().owner,
-      generation=2,
+      request_id=following_up.changes_request_id,
       repository=true,
       head=Some("new-head"),
       files~,
@@ -6594,7 +6598,7 @@ test "HEAD refresh restarts the generation-fenced working-tree read" {
   let state = {
     ..owned_state(),
     changes: ChangeListLoading(refresh_again=false),
-    changes_generation: 1,
+    changes_request_id: "changes-1",
     changes_head: Some("old-head"),
     changes_head_known: true,
     review_generation: 3,
@@ -6605,7 +6609,7 @@ test "HEAD refresh restarts the generation-fenced working-tree read" {
     test_emit(),
     ChangesLoaded(
       owner=ctx.owner,
-      generation=1,
+      request_id="changes-1",
       repository=true,
       head=Some("new-head"),
       files=[change],
@@ -6631,11 +6635,11 @@ test "HEAD refresh restarts the generation-fenced working-tree read" {
     test_emit(),
     FileLoaded(
       owner=ctx.owner,
-      epoch=0,
+      checkout_id="checkout-0",
       path~,
       name="paired.mbt",
       file=Content(content="stale working", absolute~, sig="2:13"),
-      file_link_generation=None,
+      file_link_request_id=None,
       review_generation=Some(3),
       range=None,
       annotation=None,
@@ -6670,11 +6674,11 @@ test "HEAD refresh restarts the generation-fenced working-tree read" {
     test_emit(),
     FileLoaded(
       owner=ctx.owner,
-      epoch=0,
+      checkout_id="checkout-0",
       path~,
       name="paired.mbt",
       file=Content(content="current working", absolute~, sig="3:15"),
-      file_link_generation=None,
+      file_link_request_id=None,
       review_generation=Some(4),
       range=None,
       annotation=None,
@@ -6712,7 +6716,7 @@ test "legacy Changes replies without HEAD refresh baseline-bearing reviews" {
   let state = {
     ..owned_state(),
     changes: ChangeListLoading(refresh_again=false),
-    changes_generation: 1,
+    changes_request_id: "changes-1",
     // Legacy hosts decode as `None` even though their repository has a HEAD.
     changes_head: None,
     changes_head_known: true,
@@ -6723,7 +6727,7 @@ test "legacy Changes replies without HEAD refresh baseline-bearing reviews" {
     test_emit(),
     ChangesLoaded(
       owner=test_ctx().owner,
-      generation=1,
+      request_id="changes-1",
       repository=true,
       head=None,
       files=[change],
@@ -6755,12 +6759,12 @@ test "legacy Changes replies without HEAD refresh baseline-bearing reviews" {
   // would fence the first reply forever.
   let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path), }
   let (_, polling) = update(test_emit(), ChangesPollDue, settled, ctx)
-  assert_true(polling.changes_generation == 2)
+  assert_true(polling.changes_request_id != settled.changes_request_id)
   let (_, coalesced) = update(
     test_emit(),
     ChangesLoaded(
       owner=test_ctx().owner,
-      generation=2,
+      request_id=polling.changes_request_id,
       repository=true,
       head=None,
       files=[change],
@@ -6825,7 +6829,7 @@ test "unborn repository polls do not churn untracked reviews" {
   let state = {
     ..owned_state(),
     changes: ChangeListLoading(refresh_again=false),
-    changes_generation: 1,
+    changes_request_id: "changes-1",
     changes_head: None,
     changes_head_known: true,
     review_generation: 3,
@@ -6835,7 +6839,7 @@ test "unborn repository polls do not churn untracked reviews" {
     test_emit(),
     ChangesLoaded(
       owner=test_ctx().owner,
-      generation=1,
+      request_id="changes-1",
       repository=true,
       head=None,
       files=[change],
@@ -6883,7 +6887,7 @@ test "legacy HEAD omission refreshes a missing baseline once tracking is proven"
   let state = {
     ..owned_state(),
     changes: ChangeListLoading(refresh_again=false),
-    changes_generation: 1,
+    changes_request_id: "changes-1",
     changes_head: None,
     changes_head_known: true,
     review_generation: 3,
@@ -6893,7 +6897,7 @@ test "legacy HEAD omission refreshes a missing baseline once tracking is proven"
     test_emit(),
     ChangesLoaded(
       owner=test_ctx().owner,
-      generation=1,
+      request_id="changes-1",
       repository=true,
       head=None,
       files=[deleted, untracked],
@@ -6942,7 +6946,7 @@ test "Changes reconciliation preserves the selected duplicate-path row" {
   let refreshing = {
     ..reviewing,
     changes: ChangeListLoading(refresh_again=false),
-    changes_generation: 1,
+    changes_request_id: "changes-1",
     changes_head: Some("old-head"),
     changes_head_known: true,
   }
@@ -6953,7 +6957,7 @@ test "Changes reconciliation preserves the selected duplicate-path row" {
     test_emit(),
     ChangesLoaded(
       owner=ctx.owner,
-      generation=1,
+      request_id="changes-1",
       repository=true,
       head=Some("new-head"),
       files=[deleted, untracked],
@@ -7009,7 +7013,7 @@ test "moved HEAD normalizes reviewed tabs across the working-file boundary" {
     ..owned_state(),
     explorer_mode: ExplorerChanges,
     changes: ChangeListLoading(refresh_again=false),
-    changes_generation: 1,
+    changes_request_id: "changes-1",
     changes_head: Some("old-head"),
     changes_head_known: true,
     review_generation: 3,
@@ -7019,7 +7023,7 @@ test "moved HEAD normalizes reviewed tabs across the working-file boundary" {
     test_emit(),
     ChangesLoaded(
       owner=ctx.owner,
-      generation=1,
+      request_id="changes-1",
       repository=true,
       head=Some("new-head"),
       files=[deleted],
@@ -7058,7 +7062,7 @@ test "moved HEAD normalizes reviewed tabs across the working-file boundary" {
     test_emit(),
     ChangesLoaded(
       owner=ctx.owner,
-      generation=1,
+      request_id="changes-1",
       repository=true,
       head=Some("new-head"),
       files=[restored],
@@ -7114,7 +7118,7 @@ test "a changed rename source refreshes its review without moving HEAD" {
       refreshing=true,
       refresh_again=false,
     ),
-    changes_generation: 1,
+    changes_request_id: "changes-1",
     changes_head: Some("same-head"),
     changes_head_known: true,
     review_generation: 3,
@@ -7124,7 +7128,7 @@ test "a changed rename source refreshes its review without moving HEAD" {
     test_emit(),
     ChangesLoaded(
       owner=test_ctx().owner,
-      generation=1,
+      request_id="changes-1",
       repository=true,
       head=Some("same-head"),
       files=[current],
@@ -7153,10 +7157,10 @@ test "only a visible settled Changes snapshot accepts its polling fallback" {
       refreshing=false,
       refresh_again=false,
     ),
-    changes_generation: 4,
+    changes_request_id: "changes-4",
   }
   let (_, refreshing) = update(emit, ChangesPollDue, state, test_ctx())
-  assert_true(refreshing.changes_generation == 5)
+  assert_true(refreshing.changes_request_id != state.changes_request_id)
   assert_true(refreshing.changes is ChangeListReady(refreshing=true, ..))
   let (_, stale) = update(emit, ChangesPollDue, refreshing, test_ctx())
   assert_true(stale == refreshing)
@@ -7179,7 +7183,7 @@ test "only a visible settled Changes snapshot accepts its polling fallback" {
     test_ctx(),
   )
   assert_true(files_mode.explorer_mode is ExplorerFiles)
-  assert_true(files_mode.changes_generation == 4)
+  assert_true(files_mode.changes_request_id == "changes-4")
 }
 
 ///|
@@ -7293,7 +7297,7 @@ test "a parked checkout stops the fallback poll until repair" {
       refreshing=false,
       refresh_again=false,
     ),
-    changes_generation: 1,
+    changes_request_id: "changes-1",
     changes_head: Some("same-head"),
     changes_head_known: true,
     review_generation: 3,
@@ -7325,7 +7329,7 @@ test "a parked checkout stops the fallback poll until repair" {
     emit,
     ChangesLoaded(
       owner=present.owner,
-      generation=restored.changes_generation,
+      request_id=restored.changes_request_id,
       repository=true,
       head=Some("same-head"),
       files=[change],
@@ -7348,13 +7352,13 @@ test "hidden explorer drops coalesced follow-ups when requests settle" {
       refreshing=true,
       refresh_again=true,
     ),
-    changes_generation: 4,
+    changes_request_id: "changes-4",
   }
   let (_, loaded) = update(
     emit,
     ChangesLoaded(
       owner=test_ctx().owner,
-      generation=4,
+      request_id="changes-4",
       repository=true,
       head=None,
       files=[],
@@ -7362,17 +7366,21 @@ test "hidden explorer drops coalesced follow-ups when requests settle" {
     refreshing,
     hidden,
   )
-  assert_true(loaded.changes_generation == 4)
+  assert_true(loaded.changes_request_id == "changes-4")
   assert_true(
     loaded.changes is ChangeListReady(refreshing=false, refresh_again=false, ..),
   )
   let (_, failed_refresh) = update(
     emit,
-    ChangesFailed(owner=test_ctx().owner, generation=4, message="git failed"),
+    ChangesFailed(
+      owner=test_ctx().owner,
+      request_id="changes-4",
+      message="git failed",
+    ),
     refreshing,
     hidden,
   )
-  assert_true(failed_refresh.changes_generation == 4)
+  assert_true(failed_refresh.changes_request_id == "changes-4")
   assert_true(
     failed_refresh.changes
     is ChangeListReady(refreshing=false, refresh_again=false, ..),
@@ -7380,28 +7388,36 @@ test "hidden explorer drops coalesced follow-ups when requests settle" {
   let loading = {
     ..owned_state(),
     changes: ChangeListLoading(refresh_again=true),
-    changes_generation: 4,
+    changes_request_id: "changes-4",
   }
   let (_, failed_load) = update(
     emit,
-    ChangesFailed(owner=test_ctx().owner, generation=4, message="git failed"),
+    ChangesFailed(
+      owner=test_ctx().owner,
+      request_id="changes-4",
+      message="git failed",
+    ),
     loading,
     hidden,
   )
-  assert_true(failed_load.changes_generation == 4)
+  assert_true(failed_load.changes_request_id == "changes-4")
   assert_true(failed_load.changes is ChangeListIdle)
   let (_, failed_unlatched_load) = update(
     emit,
-    ChangesFailed(owner=test_ctx().owner, generation=4, message="git failed"),
-    { ..loading, changes: ChangeListLoading(refresh_again=false), },
+    ChangesFailed(
+      owner=test_ctx().owner,
+      request_id="changes-4",
+      message="git failed",
+    ),
+    { ..loading, changes: ChangeListLoading(refresh_again=false) },
     hidden,
   )
-  assert_true(failed_unlatched_load.changes_generation == 4)
+  assert_true(failed_unlatched_load.changes_request_id == "changes-4")
   assert_true(failed_unlatched_load.changes is ChangeListIdle)
 }
 
 ///|
-test "conversation re-roots retain the change request generation" {
+test "conversation re-roots replace the change request UUID" {
   let state = {
     ..owned_state(),
     owner: Some({
@@ -7409,12 +7425,12 @@ test "conversation re-roots retain the change request generation" {
       session: "previous-session",
     }),
     explorer_mode: ExplorerChanges,
-    changes_generation: 7,
+    changes_request_id: "changes-7",
   }
   let (rerooted, _) = sync(test_emit(), state, test_ctx())
   assert_true(rerooted.owner == Some(test_ctx().owner))
   assert_true(rerooted.changes is ChangeListLoading(refresh_again=false))
-  assert_true(rerooted.changes_generation == 8)
+  assert_true(rerooted.changes_request_id != state.changes_request_id)
 }
 
 ///|
@@ -7433,13 +7449,13 @@ test "watcher refresh keeps the ready change snapshot visible" {
     emit,
     FsChanged(
       root=test_ctx().test_root(),
-      generation=test_ctx().watch_identity(state.watch_generation),
+      watch_id=state.watch_id,
       changes=Some([Modified(Relative("src/main.mbt"))]),
     ),
     state,
     test_ctx(),
   )
-  assert_true(refreshing.changes_generation == 1)
+  assert_true(refreshing.changes_request_id != state.changes_request_id)
   assert_true(
     refreshing.changes
     is ChangeListReady(
@@ -7453,7 +7469,7 @@ test "watcher refresh keeps the ready change snapshot visible" {
     emit,
     FsChanged(
       root=test_ctx().test_root(),
-      generation=test_ctx().watch_identity(refreshing.watch_generation),
+      watch_id=refreshing.watch_id,
       changes=Some([Modified(Relative("src/other.mbt"))]),
     ),
     refreshing,
@@ -7474,7 +7490,7 @@ test "watcher refresh keeps the ready change snapshot visible" {
     emit,
     ChangesLoaded(
       owner=test_ctx().owner,
-      generation=1,
+      request_id=refreshing.changes_request_id,
       repository=true,
       head=None,
       files=[],
@@ -7482,7 +7498,7 @@ test "watcher refresh keeps the ready change snapshot visible" {
     latched,
     test_ctx(),
   )
-  assert_true(following_up.changes_generation == 2)
+  assert_true(following_up.changes_request_id != refreshing.changes_request_id)
   assert_true(
     following_up.changes
     is ChangeListReady(
@@ -7496,7 +7512,7 @@ test "watcher refresh keeps the ready change snapshot visible" {
     emit,
     ChangesLoaded(
       owner=test_ctx().owner,
-      generation=2,
+      request_id=following_up.changes_request_id,
       repository=true,
       head=None,
       files=[],
@@ -7526,20 +7542,20 @@ test "hidden explorer parks event-driven change refreshes until reopen" {
       refreshing=false,
       refresh_again=false,
     ),
-    changes_generation: 4,
+    changes_request_id: "changes-4",
   }
   let hidden = { ..test_ctx(), panel_open: false, }
   let (_, after_watch) = update(
     emit,
     FsChanged(
       root=test_ctx().test_root(),
-      generation=test_ctx().watch_identity(state.watch_generation),
+      watch_id=state.watch_id,
       changes=Some([]),
     ),
     state,
     hidden,
   )
-  assert_true(after_watch.changes_generation == 4)
+  assert_true(after_watch.changes_request_id == "changes-4")
   assert_true(after_watch.changes is ChangeListReady(refreshing=false, ..))
   let (_, after_run) = update(
     emit,
@@ -7547,7 +7563,7 @@ test "hidden explorer parks event-driven change refreshes until reopen" {
     after_watch,
     hidden,
   )
-  assert_true(after_run.changes_generation == 4)
+  assert_true(after_run.changes_request_id == "changes-4")
   assert_true(after_run.changes is ChangeListReady(refreshing=false, ..))
 }
 
@@ -7573,7 +7589,7 @@ test "hidden explorer keeps Git refresh live for an open review" {
       refreshing=false,
       refresh_again=false,
     ),
-    changes_generation: 4,
+    changes_request_id: "changes-4",
     docs,
   }
   let hidden = {
@@ -7588,10 +7604,10 @@ test "hidden explorer keeps Git refresh live for an open review" {
     state,
     hidden,
   )
-  assert_true(after_run.changes_generation == 5)
+  assert_true(after_run.changes_request_id != state.changes_request_id)
   assert_true(after_run.changes is ChangeListReady(refreshing=true, ..))
   let (_, after_poll) = update(test_emit(), ChangesPollDue, state, hidden)
-  assert_true(after_poll.changes_generation == 5)
+  assert_true(after_poll.changes_request_id != state.changes_request_id)
   assert_true(after_poll.changes is ChangeListReady(refreshing=true, ..))
 }
 
@@ -7619,7 +7635,7 @@ test "sync refreshes a hidden review after its workspace watch was parked" {
       refreshing=false,
       refresh_again=false,
     ),
-    changes_generation: 4,
+    changes_request_id: "changes-4",
     docs,
   }
   let hidden = {
@@ -7629,7 +7645,7 @@ test "sync refreshes a hidden review after its workspace watch was parked" {
     active_file: Some(path),
   }
   let (refreshed, _) = sync(test_emit(), state, hidden)
-  assert_true(refreshed.changes_generation == 5)
+  assert_true(refreshed.changes_request_id != state.changes_request_id)
   assert_true(refreshed.changes is ChangeListReady(refreshing=true, ..))
 }
 
@@ -7663,7 +7679,7 @@ test "a hidden review accepts its file-only watch without a refresh loop" {
       refreshing=false,
       refresh_again=false,
     ),
-    changes_generation: 4,
+    changes_request_id: "changes-4",
     docs,
   }
   let hidden = {
@@ -7673,7 +7689,7 @@ test "a hidden review accepts its file-only watch without a refresh loop" {
     active_file: Some(path),
   }
   let (settled, _) = sync(test_emit(), state, hidden)
-  assert_true(settled.changes_generation == 4)
+  assert_true(settled.changes_request_id == "changes-4")
   assert_true(
     settled.changes
     is ChangeListReady(refreshing=false, refresh_again=false, ..),
@@ -7700,12 +7716,16 @@ test "change-list failures stay isolated from file errors and watcher retries" {
   let state = {
     ..owned_state(),
     changes: ChangeListLoading(refresh_again=false),
-    changes_generation: 1,
+    changes_request_id: "changes-1",
     error: Some("file read failed"),
   }
   let (_, failed) = update(
     emit,
-    ChangesFailed(owner=test_ctx().owner, generation=1, message="git failed"),
+    ChangesFailed(
+      owner=test_ctx().owner,
+      request_id="changes-1",
+      message="git failed",
+    ),
     state,
     test_ctx(),
   )
@@ -7717,7 +7737,7 @@ test "change-list failures stay isolated from file errors and watcher retries" {
     emit,
     FsChanged(
       root=test_ctx().test_root(),
-      generation=test_ctx().watch_identity(failed.watch_generation),
+      watch_id=failed.watch_id,
       changes=Some([Modified(Relative("src/main.mbt"))]),
     ),
     failed,
@@ -7731,7 +7751,7 @@ test "change-list failures stay isolated from file errors and watcher retries" {
     test_ctx(),
   )
   assert_true(retrying.changes is ChangeListLoading(refresh_again=false))
-  assert_true(retrying.changes_generation == 2)
+  assert_true(retrying.changes_request_id != state.changes_request_id)
 }
 
 ///|
@@ -7749,7 +7769,7 @@ test "StatsLoaded marks deletions, reloads the active change, stales the rest" {
   }
   let (_, next) = update(
     emit,
-    StatsLoaded(owner=test_ctx().owner, epoch=0, stats=[
+    StatsLoaded(owner=test_ctx().owner, checkout_id="checkout-0", stats=[
       // The active file changed: reloaded eagerly, so its document stays
       // loaded (the baseline the scroll-keeping reload compares against).
       { path: Relative("a.mbt"), sig: Some("9:0"), },
@@ -7775,8 +7795,8 @@ test "StatsLoaded marks deletions, reloads the active change, stales the rest" {
   solo[Relative("b.mbt")] = loaded_doc("b.mbt")
   let (_, same) = update(
     emit,
-    StatsLoaded(owner=test_ctx().owner, epoch=0, stats=[
-      { path: Relative("b.mbt"), sig: Some("9:0"), },
+    StatsLoaded(owner=test_ctx().owner, checkout_id="checkout-0", stats=[
+      { path: Relative("b.mbt"), sig: Some("9:0") },
     ]),
     { ..next, docs: solo, },
     { ..ctx, active_file: None, },
@@ -7803,8 +7823,8 @@ test "StatsLoaded marks deletions, reloads the active change, stales the rest" {
   }
   let (_, retryable) = update(
     emit,
-    StatsLoaded(owner=test_ctx().owner, epoch=0, stats=[
-      { path: failed_path, sig: Some("10:0"), },
+    StatsLoaded(owner=test_ctx().owner, checkout_id="checkout-0", stats=[
+      { path: failed_path, sig: Some("10:0") },
     ]),
     { ..owned_state(), docs: failed_docs, },
     { ..ctx, active_file: None, },
@@ -7821,8 +7841,8 @@ test "StatsLoaded marks deletions, reloads the active change, stales the rest" {
         channel: @interop.ChannelId::Remote("other"),
         session: "desktop-test",
       },
-      epoch=0,
-      stats=[{ path: Relative("a.mbt"), sig: None, }],
+      checkout_id="checkout-0",
+      stats=[{ path: Relative("a.mbt"), sig: None }],
     ),
     state,
     ctx,
@@ -7849,7 +7869,9 @@ test "StatsLoaded preserves a settled HEAD preview when its active file disappea
   let docs : Map[@pathx.Relative, Doc] = Map([(path, doc)])
   let (_, next) = update(
     emit,
-    StatsLoaded(owner=test_ctx().owner, epoch=0, stats=[{ path, sig: None, }]),
+    StatsLoaded(owner=test_ctx().owner, checkout_id="checkout-0", stats=[
+      { path, sig: None },
+    ]),
     { ..owned_state(), docs, },
     { ..test_ctx(), open_files: [path], active_file: Some(path), },
   )
@@ -7881,8 +7903,8 @@ test "a deleted document whose file reappears reloads on the next stats" {
   let state = { ..owned_state(), docs, }
   let (_, next) = update(
     emit,
-    StatsLoaded(owner=test_ctx().owner, epoch=0, stats=[
-      { path: Relative("a.mbt"), sig: Some("3:0"), },
+    StatsLoaded(owner=test_ctx().owner, checkout_id="checkout-0", stats=[
+      { path: Relative("a.mbt"), sig: Some("3:0") },
     ]),
     state,
     { ..test_ctx(), open_files: [Relative("a.mbt")], },
@@ -7921,8 +7943,8 @@ test "a selected deletion hands a clean restoration to an ordinary read" {
   let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path), }
   let (_, reviewed) = update(
     emit,
-    StatsLoaded(owner=test_ctx().owner, epoch=0, stats=[
-      { path, sig: Some("3:0"), },
+    StatsLoaded(owner=test_ctx().owner, checkout_id="checkout-0", stats=[
+      { path, sig: Some("3:0") },
     ]),
     { ..owned_state(), docs, },
     ctx,
@@ -7956,7 +7978,7 @@ test "a selected deletion hands a clean restoration to an ordinary read" {
     emit,
     ChangesLoaded(
       owner=ctx.owner,
-      generation=1,
+      request_id="changes-1",
       repository=true,
       head=Some("same-head"),
       files=[],
@@ -7964,7 +7986,7 @@ test "a selected deletion hands a clean restoration to an ordinary read" {
     {
       ..reviewed,
       changes: ChangeListLoading(refresh_again=false),
-      changes_generation: 1,
+      changes_request_id: "changes-1",
       changes_head: Some("same-head"),
       changes_head_known: true,
     },
@@ -7976,7 +7998,9 @@ test "a selected deletion hands a clean restoration to an ordinary read" {
   )
   let (_, reloading) = update(
     emit,
-    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, sig: Some("3:0"), }]),
+    StatsLoaded(owner=ctx.owner, checkout_id="checkout-0", stats=[
+      { path, sig: Some("3:0") },
+    ]),
     ordinary,
     ctx,
   )
@@ -7988,11 +8012,11 @@ test "a selected deletion hands a clean restoration to an ordinary read" {
     emit,
     FileLoaded(
       owner=ctx.owner,
-      epoch=0,
+      checkout_id="checkout-0",
       path~,
       name="recreated.mbt",
       file=Content(content="HEAD source", absolute~, sig="3:0"),
-      file_link_generation=None,
+      file_link_request_id=None,
       review_generation=None,
       range=None,
       annotation=None,
@@ -8038,7 +8062,7 @@ test "a vanished review retries a failed ordinary read" {
     emit,
     ChangesLoaded(
       owner=ctx.owner,
-      generation=1,
+      request_id="changes-1",
       repository=true,
       head=Some("new-head"),
       files=[],
@@ -8047,7 +8071,7 @@ test "a vanished review retries a failed ordinary read" {
       ..owned_state(),
       docs,
       changes: ChangeListLoading(refresh_again=false),
-      changes_generation: 1,
+      changes_request_id: "changes-1",
       changes_head: Some("old-head"),
       changes_head_known: true,
     },
@@ -8059,7 +8083,9 @@ test "a vanished review retries a failed ordinary read" {
   )
   let (_, reloading) = update(
     emit,
-    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, sig: Some("4:0"), }]),
+    StatsLoaded(owner=ctx.owner, checkout_id="checkout-0", stats=[
+      { path, sig: Some("4:0") },
+    ]),
     ordinary,
     ctx,
   )
@@ -8071,11 +8097,11 @@ test "a vanished review retries a failed ordinary read" {
     emit,
     FileLoaded(
       owner=ctx.owner,
-      epoch=0,
+      checkout_id="checkout-0",
       path~,
       name="committed.mbt",
       file=Content(content="committed source", absolute~, sig="4:0"),
-      file_link_generation=None,
+      file_link_request_id=None,
       review_generation=None,
       range=None,
       annotation=None,
@@ -8115,7 +8141,7 @@ test "watcher replacement baseline re-lists directories and refreshes the index"
   }
   let baseline = FsChanged(
     root=test_ctx().test_root(),
-    generation=test_ctx().watch_identity(state.watch_generation),
+    watch_id=state.watch_id,
     changes=None,
   )
   let (_, next) = update(emit, baseline, state, test_ctx())
@@ -8178,7 +8204,7 @@ test "concrete watcher events refresh only affected listed directories" {
   }
   let message = FsChanged(
     root=test_ctx().test_root(),
-    generation=test_ctx().watch_identity(state.watch_generation),
+    watch_id=state.watch_id,
     changes=Some([Created(Relative("src/new.mbt"))]),
   )
   let (_, first) = update(emit, message, state, test_ctx())
@@ -8191,7 +8217,7 @@ test "concrete watcher events refresh only affected listed directories" {
     emit,
     FsChanged(
       root=test_ctx().test_root(),
-      generation=test_ctx().watch_identity(state.watch_generation),
+      watch_id=state.watch_id,
       changes=Some([Created(Relative("docs/new.mbt"))]),
     ),
     state,
@@ -8203,7 +8229,7 @@ test "concrete watcher events refresh only affected listed directories" {
     emit,
     FsChanged(
       root=test_ctx().test_resource("/previous-root"),
-      generation=test_ctx().watch_identity(state.watch_generation),
+      watch_id=state.watch_id,
       changes=Some([Created(Relative("docs/new.md"))]),
     ),
     state,
@@ -8250,7 +8276,7 @@ test "sync reconciles the watcher with the panel and its open files" {
   )
   // Issuing a new watch attempt retires the previous failure.
   assert_true(watched.watch_error is None)
-  let attached_generation = watched.watch_generation
+  let attached_id = watched.watch_id
   // Opening a file or expanding a directory replaces the same conversation's
   // watcher with the new exact selection.
   let selected_ctx = { ..test_ctx(), open_files: [Relative("a.mbt")], }
@@ -8266,13 +8292,12 @@ test "sync reconciles the watcher with the panel and its open files" {
       }
     ),
   )
-  assert_eq(replaced.watch_generation, attached_generation + 1)
+  assert_true(replaced.watch_id != attached_id)
   let (_, after_old_failure) = update(
     emit,
     FileWatchFailed(
-      channel=test_ctx().owner.channel,
       root=test_ctx().test_root(),
-      generation=test_ctx().watch_identity(attached_generation),
+      watch_id=attached_id,
       message="replaced watcher stopped",
     ),
     replaced,
@@ -8292,7 +8317,7 @@ test "sync reconciles the watcher with the panel and its open files" {
       { directories: [Relative(""), Relative("deepseek"), Relative("src")], .. }
     ),
   )
-  assert_eq(picking.watch_generation, attached_generation + 2)
+  assert_true(picking.watch_id != replaced.watch_id)
   // Closed panel with files still open: keep watching (staleness tracking).
   let still_ctx = {
     ..test_ctx(),
@@ -8304,26 +8329,26 @@ test "sync reconciles the watcher with the panel and its open files" {
   assert_true(
     still.watching is Some({ files: [Relative("a.mbt")], directories: [], .. }),
   )
-  assert_eq(still.watch_generation, attached_generation + 3)
+  assert_true(still.watch_id != picking.watch_id)
   // Closed panel, nothing open: park the watcher.
   let (parked, _) = sync(emit, still, { ..test_ctx(), panel_open: false, })
   assert_true(parked.watching is None)
-  assert_eq(parked.watch_generation, attached_generation + 4)
+  assert_true(parked.watch_id != still.watch_id)
 }
 
 ///|
 test "watcher failures are visible only in their owning conversation" {
   let emit = test_emit()
   let owner = test_ctx().owner
+  let state = owned_state()
   let (_, failed) = update(
     emit,
     FileWatchFailed(
-      channel=owner.channel,
       root=test_ctx().test_root(),
-      generation=test_ctx().watch_identity(0),
+      watch_id=state.watch_id,
       message="File watching stopped",
     ),
-    owned_state(),
+    state,
     test_ctx(),
   )
   assert_true(failed.watch_error is Some("File watching stopped"))
@@ -8335,9 +8360,8 @@ test "watcher failures are visible only in their owning conversation" {
   let (_, unchanged) = update(
     emit,
     FileWatchFailed(
-      channel=other.channel,
       root=other_ctx.test_resource("/work"),
-      generation=other_ctx.watch_identity(0),
+      watch_id=failed.watch_id,
       message="stale failure",
     ),
     failed,
@@ -8349,8 +8373,8 @@ test "watcher failures are visible only in their owning conversation" {
 ///|
 test "a recursive watcher failure stops retries and refreshes its index" {
   let emit = test_emit()
-  let ctx = { ..test_ctx(), panel_open: false, }
-  let generation = 5
+  let ctx = { ..test_ctx(), panel_open: false }
+  let watch_id = "watch-5"
   let watched = {
     ..owned_state(),
     index: IndexReady(
@@ -8366,14 +8390,13 @@ test "a recursive watcher failure stops retries and refreshes its index" {
       directories: [],
       recursive: true,
     }),
-    watch_generation: generation,
+    watch_id,
   }
   let (_, failed) = update(
     emit,
     FileWatchFailed(
-      channel=ctx.owner.channel,
       root=ctx.test_root(),
-      generation=ctx.watch_identity(generation),
+      watch_id~,
       message="File watching stopped",
     ),
     watched,
@@ -8387,27 +8410,24 @@ test "a recursive watcher failure stops retries and refreshes its index" {
   let (stopped, _) = sync(emit, failed, ctx)
   // An unchanged desired configuration cannot create a request/failure loop.
   assert_true(stopped.watching is Some({ recursive: true, .. }))
-  assert_eq(stopped.watch_generation, generation)
+  assert_eq(stopped.watch_id, watch_id)
   assert_true(stopped.watch_error is Some("File watching stopped"))
-  // A real policy change starts one fresh concrete watcher generation.
-  let retry_ctx = {
-    ..ctx,
-    open_files: [Relative("node_modules/pkg/index.js")],
-  }
+  // A real policy change starts one fresh concrete watcher UUID.
+  let retry_ctx = { ..ctx, open_files: [Relative("node_modules/pkg/index.js")] }
   let (retried, _) = sync(emit, stopped, retry_ctx)
   assert_true(
     retried.watching
     is Some({ files: [Relative("node_modules/pkg/index.js")], .. }),
   )
-  assert_eq(retried.watch_generation, generation + 1)
+  assert_true(retried.watch_id != watch_id)
   assert_true(retried.watch_error is None)
 }
 
 ///|
 test "a settled run retries one failed watcher activation" {
   let emit = test_emit()
-  let ctx = { ..test_ctx(), panel_open: false, }
-  let generation = 5
+  let ctx = { ..test_ctx(), panel_open: false }
+  let watch_id = "watch-5"
   let watched = {
     ..owned_state(),
     index: IndexReady(
@@ -8423,7 +8443,7 @@ test "a settled run retries one failed watcher activation" {
       directories: [],
       recursive: true,
     }),
-    watch_generation: generation,
+    watch_id,
     watch_error: Some("watch root did not exist"),
   }
   let (_, settled) = update(emit, RunSettled(owner=ctx.owner), watched, ctx)
@@ -8431,14 +8451,14 @@ test "a settled run retries one failed watcher activation" {
   assert_true(settled.watch_error is Some("watch root did not exist"))
   let (retried, _) = sync(emit, settled, ctx)
   assert_true(retried.watching is Some({ recursive: true, .. }))
-  assert_eq(retried.watch_generation, generation + 1)
+  assert_true(retried.watch_id != watch_id)
   assert_true(retried.watch_error is None)
 }
 
 ///|
 test "same-root conversation switch fences every old watcher push" {
   let emit = test_emit()
-  let old_generation = 4
+  let old_id = "watch-4"
   let state = {
     ..owned_state(),
     watching: Some({
@@ -8448,7 +8468,7 @@ test "same-root conversation switch fences every old watcher push" {
       directories: [@pathx.Relative::root()],
       recursive: false,
     }),
-    watch_generation: old_generation,
+    watch_id: old_id,
   }
   let next_owner : @interop.ConversationKey = {
     channel: test_ctx().owner.channel,
@@ -8456,11 +8476,11 @@ test "same-root conversation switch fences every old watcher push" {
   }
   let next_ctx : Ctx = { ..test_ctx(), owner: next_owner, }
   let (switched, _) = sync(emit, state, next_ctx)
-  assert_eq(switched.watch_generation, old_generation + 1)
+  assert_true(switched.watch_id != old_id)
   assert_true(switched.watching is Some({ owner, .. }) && owner == next_owner)
 
   // Both watchers use the same absolute root. Placement epochs fence concrete
-  // change events; per-configuration generations independently fence failures.
+  // change events; per-configuration UUIDs independently fence failures.
   let ready = {
     ..switched,
     children: Map([(@pathx.Relative::root(), [])]),
@@ -8468,38 +8488,27 @@ test "same-root conversation switch fences every old watcher push" {
   }
   let (_, after_old_change) = update(
     emit,
-    FsChanged(
-      root=next_ctx.test_root(),
-      generation=test_ctx().watch_identity(state.watch_generation),
-      changes=None,
-    ),
+    FsChanged(root=next_ctx.test_root(), watch_id=state.watch_id, changes=None),
     ready,
     next_ctx,
   )
   assert_true(after_old_change.loading.is_empty())
   let stale_failure = FileWatchFailed(
-    channel=next_owner.channel,
     root=next_ctx.test_root(),
-    generation=test_ctx().watch_identity(old_generation),
+    watch_id=old_id,
     message="File watching stopped",
   )
   let (_, after_old_failure) = update(
     emit, stale_failure, after_old_change, next_ctx,
   )
   assert_true(after_old_failure.watch_error is None)
-  // The native watcher survives a page reload while the frontend counter
-  // starts over. A page namespace keeps an equal counter from the outgoing
-  // page distinct from this page's current watcher.
-  let previous_page_ctx : Ctx = {
-    ..next_ctx,
-    watch_namespace: "previous-page",
-  }
+  // The native watcher survives a page reload. Its app-global UUID remains
+  // distinct from the replacement page's current watcher.
   let (_, after_previous_page_failure) = update(
     emit,
     FileWatchFailed(
-      channel=next_owner.channel,
       root=next_ctx.test_root(),
-      generation=previous_page_ctx.watch_identity(switched.watch_generation),
+      watch_id="previous-page-watch-id",
       message="previous page watcher stopped",
     ),
     after_old_failure,
@@ -8507,9 +8516,8 @@ test "same-root conversation switch fences every old watcher push" {
   )
   assert_true(after_previous_page_failure.watch_error is None)
   let current_failure = FileWatchFailed(
-    channel=next_owner.channel,
     root=next_ctx.test_root(),
-    generation=next_ctx.watch_identity(switched.watch_generation),
+    watch_id=switched.watch_id,
     message="current watcher stopped",
   )
   let (_, first) = update(
