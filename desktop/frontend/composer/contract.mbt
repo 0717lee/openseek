@@ -90,6 +90,17 @@ pub(all) struct ApprovalNotice {
 } derive(Eq)
 
 ///|
+/// One app-server reverse request shown above the Codex draft. The request is
+/// plain state: callers cannot inject DOM or commands, and every answer comes
+/// back through an identity-scoped composer Action.
+pub(all) struct CodexRequestInput {
+  request_key : String
+  method_ : String
+  params : Json
+  answers : Map[String, String]
+} derive(Eq)
+
+///|
 /// One typed component in the context column above the editable composer.
 /// Callers provide only canonical state; this package owns the DOM and maps
 /// every interactive affordance back to an identity-scoped `Action`.
@@ -98,6 +109,7 @@ pub(all) enum ContextComponent {
   SubrunDock(lanes~ : Array[@subrun.Lane])
   ApiSetupNotice(text~ : String)
   ApprovalRequest(ApprovalNotice)
+  CodexRequests(requests~ : Array[CodexRequestInput])
   ArchivedInputNotice(text~ : String)
   PendingSteerPanel(items~ : Array[String])
   CompactionNotice(queued~ : Bool)
@@ -225,6 +237,17 @@ pub(all) enum Action {
   ModelSelected(identity~ : Identity, value~ : String)
   ReasoningSelected(identity~ : Identity, value~ : String)
   ApprovalAnswered(identity~ : Identity, allow~ : Bool)
+  CodexRequestAnswerChanged(
+    identity~ : Identity,
+    request_key~ : String,
+    question_id~ : String,
+    answer~ : String
+  )
+  CodexRequestResponded(
+    identity~ : Identity,
+    request_key~ : String,
+    decision~ : Json
+  )
   PermissionMenuToggled(identity~ : Identity)
   PermissionMenuDismissed(identity~ : Identity)
   PermissionSelected(
@@ -262,6 +285,8 @@ pub fn Action::identity(self : Action) -> Identity {
     | ModelSelected(identity~, ..)
     | ReasoningSelected(identity~, ..)
     | ApprovalAnswered(identity~, ..)
+    | CodexRequestAnswerChanged(identity~, ..)
+    | CodexRequestResponded(identity~, ..)
     | PermissionMenuToggled(identity~)
     | PermissionMenuDismissed(identity~)
     | PermissionSelected(identity~, ..)

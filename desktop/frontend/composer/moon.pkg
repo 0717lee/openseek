@@ -1,4 +1,5 @@
 import {
+  "moonbitlang/core/json",
   "moonbit-community/rabbita",
   "moonbit-community/rabbita/cmd",
   "moonbit-community/rabbita/dom",
@@ -18,6 +19,7 @@ import {
   "openseek_desktop/frontend/transcript",
   "openseek_desktop/frontend/skills",
   "openseek_desktop/frontend/subrun",
+  "openseek_desktop/internal/jsonx",
   "openseek_desktop/internal/protocol",
 }
 

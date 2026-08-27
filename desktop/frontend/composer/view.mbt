@@ -322,6 +322,13 @@ pub fn ContextComponent::render(
         ),
       ])
     ApprovalRequest(approval) => approval.render(identity, action_emit)
+    CodexRequests(requests~) => {
+      let rendered : Array[@html.Html] = []
+      for request in requests {
+        rendered.push(request.render(identity, action_emit))
+      }
+      @html.div(class="codex-pending", rendered)
+    }
     ArchivedInputNotice(text~) =>
       @html.div(class="composer-notice", [
         @html.span(class="composer-notice-text", text),

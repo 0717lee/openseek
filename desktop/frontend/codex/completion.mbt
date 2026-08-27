@@ -279,7 +279,24 @@ pub fn State::composer_input(
   self : State,
   context : ComposerContext,
 ) -> @composer.Input {
-  let before : Array[@composer.ContextComponent] = []
+  // Keep the same permanent first context slot as main: reverse requests are
+  // typed composer state, so the page needs no extra wrapper around composer.
+  let requests : Array[@composer.CodexRequestInput] = []
+  if self.active_thread() is Some(active) {
+    for request in self.pending_requests {
+      if request.thread_id == active.id {
+        requests.push({
+          request_key: request.request_id.stringify(),
+          method_: request.method_,
+          params: request.params,
+          answers: request.answers,
+        })
+      }
+    }
+  }
+  let before : Array[@composer.ContextComponent] = [
+    @composer.CodexRequests(requests~),
+  ]
   if self.active_thread() is Some(active) &&
     active.worktree is Some(worktree) &&
     !worktree.present {
@@ -473,6 +490,18 @@ fn State::apply_composer_action(
           })
         None => (@cmd.none, self)
       }
+    @composer.CodexRequestAnswerChanged(request_key~, question_id~, answer~, ..) =>
+      update(
+        dispatch,
+        RequestAnswer(request_key~, question_id~, answer~),
+        self,
+        channel,
+        _ => @cmd.none,
+      )
+    @composer.CodexRequestResponded(request_key~, decision~, ..) =>
+      update(dispatch, Respond(request_key~, decision~), self, channel, _ => {
+        @cmd.none
+      })
     @composer.DraftPresenceChanged(..)
     | @composer.MentionOpened(..)
     | @composer.GoalEditStarted(..)

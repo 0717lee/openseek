@@ -2079,6 +2079,59 @@ test "Codex approvals cannot be edited from another thread" {
 }
 
 ///|
+test "Codex composer reverse-request actions keep their task identity" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let state = {
+    ..State::from_thread_snapshot({
+      "thread": { "id": "thread-1", "turns": [] },
+    }),
+    pending_requests: [
+      {
+        request_id: Json::string("request-1"),
+        thread_id: "thread-1",
+        method_: "item/tool/requestUserInput",
+        params: { "threadId": "thread-1", "questions": [{ "id": "scope" }] },
+        answers: Map([]),
+      },
+    ],
+  }
+  let identity = state.composer_identity(@interop.ChannelId::Local)
+  let (_, answered) = update(
+    dispatch,
+    ComposerAction(
+      @composer.CodexRequestAnswerChanged(
+        identity~,
+        request_key=Json::string("request-1").stringify(),
+        question_id="scope",
+        answer="all",
+      ),
+    ),
+    state,
+    @interop.ChannelId::Local,
+    _ => @cmd.none,
+  )
+  assert_eq(answered.pending_requests[0].answers.get("scope"), Some("all"))
+  let (_, unchanged) = update(
+    dispatch,
+    ComposerAction(
+      @composer.CodexRequestAnswerChanged(
+        identity={
+          owner: { channel: @interop.ChannelId::Local, session: "thread-2" },
+          archive_generation: 0,
+        },
+        request_key=Json::string("request-1").stringify(),
+        question_id="scope",
+        answer="other",
+      ),
+    ),
+    answered,
+    @interop.ChannelId::Local,
+    _ => @cmd.none,
+  )
+  assert_eq(unchanged.pending_requests[0].answers.get("scope"), Some("all"))
+}
+
+///|
 test "newer Codex catalog refresh rejects an older pagination result" {
   let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   let (_, first) = update(

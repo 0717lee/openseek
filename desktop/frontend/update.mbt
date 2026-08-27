@@ -2002,6 +2002,8 @@ fn update_msg(
         | @composer.ModelSelected(..)
         | @composer.ReasoningSelected(..)
         | @composer.ApprovalAnswered(..)
+        | @composer.CodexRequestAnswerChanged(..)
+        | @composer.CodexRequestResponded(..)
         | @composer.PermissionMenuToggled(..)
         | @composer.PermissionMenuDismissed(..)
         | @composer.PermissionSelected(..)
@@ -2056,7 +2058,9 @@ fn update_msg(
               )
             @composer.PermissionMenuToggled(..)
             | @composer.PermissionMenuDismissed(..)
-            | @composer.PermissionSelected(..) => (@cmd.none, model)
+            | @composer.PermissionSelected(..)
+            | @composer.CodexRequestAnswerChanged(..)
+            | @composer.CodexRequestResponded(..) => (@cmd.none, model)
             _ => (@cmd.none, model)
           }
         }

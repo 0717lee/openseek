@@ -238,9 +238,6 @@ priv struct CodexGitStatus {
 ///|
 priv struct CodexQuestion {
   id : String
-  header : String
-  question : String
-  options : Array[(String, String)]
 }
 
 ///|
@@ -2232,29 +2229,6 @@ fn CodexPendingRequest::decode(
 }
 
 ///|
-/// Use the server's advertised choices when present. Older app-server builds
-/// omitted `availableDecisions`, so retain their original three-button set as
-/// the compatibility fallback for command and file approvals.
-fn CodexPendingRequest::approval_decisions(
-  self : CodexPendingRequest,
-) -> Array[Json] {
-  if self.params is Object(fields) &&
-    fields.get("availableDecisions") is Some(Array(decisions)) {
-    return decisions
-  }
-  match self.method_ {
-    "item/commandExecution/requestApproval"
-    | "item/fileChange/requestApproval" =>
-      [
-        Json::string("accept"),
-        Json::string("acceptForSession"),
-        Json::string("decline"),
-      ]
-    _ => []
-  }
-}
-
-///|
 fn State::with_request_answer(
   self : State,
   request_key : String,
@@ -2291,23 +2265,7 @@ fn CodexPendingRequest::questions(
       @jsonx.json_text(question, "id") is Some(id) else {
       continue
     }
-    let options : Array[(String, String)] = []
-    if question.get("options") is Some(Array(values)) {
-      for value in values {
-        if value is Object(option) &&
-          @jsonx.json_text(option, "label") is Some(label) {
-          options.push(
-            (label, @jsonx.json_text(option, "description").unwrap_or("")),
-          )
-        }
-      }
-    }
-    questions.push({
-      id,
-      header: @jsonx.json_text(question, "header").unwrap_or("Question"),
-      question: @jsonx.json_text(question, "question").unwrap_or(""),
-      options,
-    })
+    questions.push({ id, })
   }
   questions
 }

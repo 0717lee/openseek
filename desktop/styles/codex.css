@@ -150,42 +150,10 @@
   max-width: 820px;
   width: 100%;
   margin: 0 auto;
-  overflow-y: auto;
 }
 
 .codex-pending:empty {
   display: none;
-}
-
-/* Reverse requests remain Codex page state. This wrapper shares the main
-   column's final grid row with the common composer without injecting their
-   rendered cards into the composer's typed presentation boundary. */
-.codex-composer-stack {
-  min-height: 0;
-  overflow: hidden;
-  background: var(--color-bg-canvas);
-}
-
-.codex-composer-stack > .codex-pending:not(:empty) {
-  max-height: 40cqh;
-  padding: 16px 24px 0;
-  box-sizing: border-box;
-}
-
-.content.terminal-open .codex-composer-stack {
-  display: flex;
-  flex-direction: column;
-  max-height: calc(100cqh - var(--topbar-height));
-}
-
-.content.terminal-open .codex-composer-stack > .codex-pending:not(:empty) {
-  flex: 0 1 auto;
-  padding-top: 4px;
-}
-
-.content.terminal-open .codex-composer-stack > .composer {
-  flex: none;
-  max-height: none;
 }
 
 /* Codex's approval-mode control lives in the shared composer status row, but
@@ -403,11 +371,6 @@
 }
 
 @media (max-width: 720px) {
-  .codex-composer-stack > .codex-pending:not(:empty) {
-    padding-left: 12px;
-    padding-right: 12px;
-  }
-
   .codex-request-action {
     min-height: 44px;
     padding-top: 10px;

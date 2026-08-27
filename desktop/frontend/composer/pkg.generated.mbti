@@ -34,8 +34,14 @@ pub(all) enum Action {
   GoalSubmitted(identity~ : Identity, draft~ : String, prompt_present~ : Bool)
   StopRequested(identity~ : Identity)
   FileIndexEnsured(identity~ : Identity)
+  ModelMenuToggled(identity~ : Identity)
+  ReasoningMenuToggled(identity~ : Identity)
+  SelectMenuDismissed(identity~ : Identity)
   ModelSelected(identity~ : Identity, value~ : String)
   ReasoningSelected(identity~ : Identity, value~ : String)
+  ApprovalAnswered(identity~ : Identity, allow~ : Bool)
+  CodexRequestAnswerChanged(identity~ : Identity, request_key~ : String, question_id~ : String, answer~ : String)
+  CodexRequestResponded(identity~ : Identity, request_key~ : String, decision~ : Json)
   PermissionMenuToggled(identity~ : Identity)
   PermissionMenuDismissed(identity~ : Identity)
   PermissionSelected(identity~ : Identity, mode~ : @protocol.CodexPermissionMode)
@@ -49,16 +55,33 @@ pub(all) enum Action {
 }
 pub fn Action::identity(Self) -> Identity
 
+pub(all) struct ApprovalNotice {
+  tool_name : String
+  detail : String
+  body : String?
+  answered : Bool
+} derive(Eq)
+
+pub(all) struct CodexRequestInput {
+  request_key : String
+  method_ : String
+  params : Json
+  answers : Map[String, String]
+} derive(Eq)
+
 pub(all) enum ContextComponent {
   ConnectionBanner(device_name~ : String?)
   SubrunDock(lanes~ : Array[@subrun.Lane])
   ApiSetupNotice(text~ : String)
+  ApprovalRequest(ApprovalNotice)
+  CodexRequests(requests~ : Array[CodexRequestInput])
   ArchivedInputNotice(text~ : String)
   PendingSteerPanel(items~ : Array[String])
   CompactionNotice(queued~ : Bool)
   WorktreePlacementNotice
   MissingWorktreeNoticeComponent(MissingWorktreeNotice)
 } derive(Eq)
+pub fn ContextComponent::render(Self, Identity, @cmd.Emit[Action]) -> @html.Html
 
 pub(all) struct Draft {
   task : String
@@ -188,9 +211,11 @@ pub(all) struct ModelOption {
 } derive(Eq)
 
 pub(all) struct ModelSelect {
+  id : String
   groups : Array[ModelGroup]
   selected : String
   disabled : Bool
+  open : Bool
   title : String
 } derive(Eq)
 
@@ -219,9 +244,11 @@ pub fn PrimaryAction::not_equal(Self, Self) -> Bool
 pub fn PrimaryAction::to_repr(Self) -> @debug.Repr
 
 pub(all) struct ReasoningSelect {
+  id : String
   options : Array[ModelOption]
   selected : String
   disabled : Bool
+  open : Bool
   title : String
 } derive(Eq)
 
