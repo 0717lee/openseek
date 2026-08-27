@@ -4,6 +4,8 @@ test "client defaults" {
   inspect(client.model, content="deepseek-v4-pro")
   assert_eq(client.api_url, "https://api.deepseek.com/chat/completions")
   assert_true(client.thinking is No)
+  assert_eq(client.retry_attempts, 3)
+  assert_eq(client.connect_retry_window_ms, 65_000)
 }
 
 ///|
@@ -31,6 +33,7 @@ test "client debug redacts api key" {
       #|  thinking: Max,
       #|  retry_attempts: 3,
       #|  retry_backoff_ms: 500,
+      #|  connect_retry_window_ms: 65000,
       #|  idle_timeout_ms: 120000,
       #|}
     ),

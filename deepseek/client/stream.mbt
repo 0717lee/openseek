@@ -235,9 +235,21 @@ async fn read_stream_line(
   idle_timeout_ms : Int,
 ) -> String?? {
   if idle_timeout_ms <= 0 {
-    Some(reader.read_until("\n"))
+    Some(
+      transport_io(
+        "reading SSE stream",
+        () => reader.read_until("\n"),
+        retry_tls_error=true,
+      ),
+    )
   } else {
-    @async.with_timeout_opt(idle_timeout_ms, () => reader.read_until("\n"))
+    @async.with_timeout_opt(idle_timeout_ms, () => {
+      transport_io(
+        "reading SSE stream",
+        () => reader.read_until("\n"),
+        retry_tls_error=true,
+      )
+    })
   }
 }
 

@@ -93,6 +93,7 @@ pub async fn compact_session(
   }
   @emit.emit(CompactionStarted(from_sequence~, to_sequence~))
   let client = @client.Client(api_key~, model~, api_url?, thinking=No)
+  defer client.close()
   let summary = generate_compaction_summary(client~, session)
   let next = append_compaction_summary(
     store?,

@@ -13,12 +13,15 @@ The package depends on `moonbitlang/async/http` and is native-only.
 ## API Shape
 
 - `Client(api_key~, model?, api_url?, thinking?, retry_attempts?,
-  retry_backoff_ms?)`: configure the API key, endpoint, model, thinking mode,
-  and retry budget.
+  retry_backoff_ms?, connect_retry_window_ms?, idle_timeout_ms?)`: configure
+  the API key, endpoint, model, thinking mode, retry budgets, and streaming
+  idle bound.
 - `Client::chat(messages, tools?, response_format?, stream?)`: send a request
   and decode the response as `@deepseek.ChatResponse`. Without `stream`, this
   is a normal JSON response. With `stream=StreamHandler(...)`, it uses SSE and
   still returns the accumulated response.
+- `Client::close()`: close the retained keep-alive connection. Agent turns do
+  this automatically; long-lived direct users should call it when finished.
 - `StreamHandler(on_content_delta~, on_reasoning_delta?)`: receive non-empty
   content and reasoning deltas while a streaming chat request is in progress.
 
@@ -35,7 +38,36 @@ thinking fields when the request body is encoded.
 Retries cover transient failures: transport errors, HTTP 429, and HTTP 5xx.
 Other HTTP 4xx responses fail immediately. `retry_attempts` counts total tries;
 `retry_backoff_ms` is the first exponential-backoff delay, capped internally at
-60 seconds.
+60 seconds. Their defaults remain three total tries and a 500ms initial delay.
+A streaming request stops replaying as soon as the first complete SSE event
+arrives, so partial model output and tool calls are never duplicated
+automatically. The ordinary three-attempt policy still applies when a request
+was sent but no SSE event came back; as with the previous client behavior, an
+upstream that accepted such a request before the connection failed could bill
+more than one completion. Set `retry_attempts=1` if that tradeoff is not
+acceptable.
+
+New streaming connections have a separate 65-second retry-start window,
+`connect_retry_window_ms`. It applies only to DNS/TCP/TLS setup, before any HTTP
+request bytes are sent, so it can cross a short-lived DNS or edge-routing cache
+entry safely. The separate connection window itself never repeats a completion
+because none has been requested yet. Eligible fast failures retry through its
+deadline; an in-progress OS connect may finish after it. An actively refused
+port instead uses the ordinary short `retry_attempts` policy so invalid
+endpoints fail promptly. Pass `0` to disable only the separate long window.
+
+Successful sequential streaming calls on the same `Client` reuse one healthy
+HTTP/1.1 connection, avoiding another DNS lookup, TCP connect, and TLS
+handshake for every tool-call round. A connection is retained only after
+`[DONE]` and the remaining HTTP response framing have both been consumed.
+Transport failures, `Connection: close`, incomplete body framing, and stale
+connections all cause that socket to be discarded; a later retry reconnects.
+
+When transport retries are exhausted, the error includes the attempt count and
+the I/O phase (for example, DNS/TCP/TLS setup or waiting for response headers).
+This turns an otherwise context-free TLS `ConnectionClosed` into a diagnostic
+without claiming that a particular proxy, DNS resolver, or network is always
+responsible.
 
 ```moonbit check
 ///|
@@ -57,6 +89,7 @@ test "construct DeepSeek client configuration" {
       #|  thinking: Max,
       #|  retry_attempts: 5,
       #|  retry_backoff_ms: 200,
+      #|  connect_retry_window_ms: 65000,
       #|  idle_timeout_ms: 120000,
       #|}
     ),
@@ -80,6 +113,7 @@ At runtime:
 ```moonbit nocheck
 ///|
 let client = @client.Client(api_key~, thinking=Max)
+defer client.close()
 
 ///|
 let response = client.chat(

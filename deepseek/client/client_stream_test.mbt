@@ -57,6 +57,7 @@ async test "chat stream handler accumulates SSE content, tool calls, and usage" 
   @async.with_task_group() <| group => {
     guard stream_test_server(group) is Some(url) else { return }
     let client = @client.Client(api_key="test-key", api_url=url)
+    defer client.close()
     let deltas : Array[String] = []
     let reasoning_deltas : Array[String] = []
     let callbacks : Array[String] = []
@@ -94,6 +95,227 @@ async test "chat stream handler accumulates SSE content, tool calls, and usage" 
 }
 
 ///|
+/// Sequential model rounds (especially tool-call loops) should reuse one
+/// healthy HTTP/1.1 connection. Reconnecting every round repeats DNS, TCP, and
+/// TLS setup and needlessly exposes the agent to a transient bad edge route.
+async test "sequential streaming chats reuse a healthy connection" {
+  @async.with_task_group() <| group => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0")) catch {
+      _ => {
+        println("local TCP bind unavailable; skipping stream test")
+        return
+      }
+    }
+    let connections : Ref[Int] = { val: 0 }
+    group.spawn_bg(no_wait=true) <| () => {
+      server.run_forever(
+        (tcp, _peer) => {
+          connections.val = connections.val + 1
+          let conn = @http.ServerConnection::new(tcp)
+          for ;; {
+            let _request = conn.read_request()
+            let _ = conn.read_all()
+            conn.send_response(200, "OK", extra_headers={
+              "Content-Type": "text/event-stream",
+            })
+            conn.write(
+              "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n",
+            )
+            conn.write("data: [DONE]\n\n")
+            conn.end_response()
+          }
+        },
+        max_connections=2,
+      )
+    }
+    let url = "http://127.0.0.1:\{server.addr.port()}/chat/completions"
+    let client = @client.Client(api_key="test-key", api_url=url)
+    defer client.close()
+    for _ in 0..<2 {
+      let response = client.chat(
+        [ChatMessage(User, content="hello")],
+        stream=StreamHandler(on_content_delta=_ => ()),
+      )
+      assert_eq(response.content, "ok")
+    }
+    assert_eq(connections.val, 1)
+  }
+}
+
+///|
+/// A peer's explicit `Connection: close` wins over otherwise valid response
+/// framing. With one retry attempt, the second chat can only succeed if the
+/// first socket was discarded proactively rather than checked back in.
+async test "streaming chats do not retain Connection close responses" {
+  @async.with_task_group() <| group => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0")) catch {
+      _ => {
+        println("local TCP bind unavailable; skipping stream test")
+        return
+      }
+    }
+    let connections : Ref[Int] = { val: 0 }
+    group.spawn_bg(no_wait=true) <| () => {
+      server.run_forever(
+        (tcp, _peer) => {
+          connections.val = connections.val + 1
+          let conn = @http.ServerConnection::new(tcp)
+          let _request = conn.read_request()
+          let _ = conn.read_all()
+          conn.send_response(200, "OK", extra_headers={
+            "Content-Type": "text/event-stream",
+            "Connection": "close",
+          })
+          conn.write("data: [DONE]\n\n")
+          conn.end_response()
+          conn.close()
+        },
+        max_connections=2,
+      )
+    }
+    let url = "http://127.0.0.1:\{server.addr.port()}/chat/completions"
+    let client = @client.Client(
+      api_key="test-key",
+      api_url=url,
+      retry_attempts=1,
+    )
+    defer client.close()
+    for _ in 0..<2 {
+      let response = client.chat(
+        [ChatMessage(User, content="hello")],
+        stream=StreamHandler(on_content_delta=_ => ()),
+      )
+      assert_eq(response.content, "")
+    }
+    assert_eq(connections.val, 2)
+  }
+}
+
+///|
+/// `[DONE]` alone is not enough to pool a socket: the terminating HTTP chunk
+/// must also arrive. The first peer deliberately omits it, so the drain times
+/// out and the next chat opens a fresh connection.
+async test "streaming chats discard incomplete response framing" {
+  @async.with_task_group() <| group => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0")) catch {
+      _ => {
+        println("local TCP bind unavailable; skipping stream test")
+        return
+      }
+    }
+    let connections : Ref[Int] = { val: 0 }
+    group.spawn_bg(no_wait=true) <| () => {
+      server.run_forever(
+        (tcp, _peer) => {
+          connections.val = connections.val + 1
+          let connection_number = connections.val
+          let conn = @http.ServerConnection::new(tcp)
+          let _request = conn.read_request()
+          let _ = conn.read_all()
+          conn.send_response(200, "OK", extra_headers={
+            "Content-Type": "text/event-stream",
+          })
+          conn.write("data: [DONE]\n\n")
+          if connection_number == 1 {
+            conn.flush()
+            @async.sleep(1_500)
+          } else {
+            conn.end_response()
+          }
+          conn.close()
+        },
+        max_connections=2,
+      )
+    }
+    let url = "http://127.0.0.1:\{server.addr.port()}/chat/completions"
+    let client = @client.Client(
+      api_key="test-key",
+      api_url=url,
+      retry_attempts=1,
+    )
+    defer client.close()
+    for _ in 0..<2 {
+      let response = client.chat(
+        [ChatMessage(User, content="hello")],
+        stream=StreamHandler(on_content_delta=_ => ()),
+      )
+      assert_eq(response.content, "")
+    }
+    assert_eq(connections.val, 2)
+  }
+}
+
+///|
+/// A socket can become stale after it was validly pooled. Retrying the next
+/// pre-event request must discard that socket, reconnect, and recover.
+async test "streaming chat reconnects after a pooled socket becomes stale" {
+  @async.with_task_group() <| group => {
+    let server = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0")) catch {
+      _ => {
+        println("local TCP bind unavailable; skipping stream test")
+        return
+      }
+    }
+    let connections : Ref[Int] = { val: 0 }
+    let requests : Ref[Int] = { val: 0 }
+    group.spawn_bg(no_wait=true) <| () => {
+      server.run_forever(
+        (tcp, _peer) => {
+          connections.val = connections.val + 1
+          let conn = @http.ServerConnection::new(tcp)
+          let _request = conn.read_request()
+          let _ = conn.read_all()
+          requests.val = requests.val + 1
+          conn.send_response(200, "OK", extra_headers={
+            "Content-Type": "text/event-stream",
+          })
+          conn.write("data: [DONE]\n\n")
+          conn.end_response()
+          conn.close()
+        },
+        max_connections=2,
+      )
+    }
+    let url = "http://127.0.0.1:\{server.addr.port()}/chat/completions"
+    let client = @client.Client(
+      api_key="test-key",
+      api_url=url,
+      retry_attempts=2,
+      retry_backoff_ms=1,
+    )
+    defer client.close()
+    for _ in 0..<2 {
+      let response = client.chat(
+        [ChatMessage(User, content="hello")],
+        stream=StreamHandler(on_content_delta=_ => ()),
+      )
+      assert_eq(response.content, "")
+    }
+    assert_eq(connections.val, 2)
+    assert_eq(requests.val, 2)
+  }
+}
+
+///|
+/// Closing is idempotent and prevents a new streaming request from opening a
+/// connection. This also makes accidental use-after-close fail locally.
+async test "closed client rejects new streaming chats" {
+  let client = @client.Client(api_key="test-key")
+  client.close()
+  client.close()
+  let _ = client.chat(
+    [ChatMessage(User, content="hello")],
+    stream=StreamHandler(on_content_delta=_ => ()),
+  ) catch {
+    error => {
+      assert_true("\{error}".contains("DeepSeek client is closed"))
+      return
+    }
+  }
+  fail("expected closed client failure")
+}
+
+///|
 async test "chat stream handler accumulates Kimi stream_options usage" {
   @async.with_task_group() <| group => {
     guard stream_test_server(group, kimi_usage=true) is Some(url) else {
@@ -104,6 +326,7 @@ async test "chat stream handler accumulates Kimi stream_options usage" {
       model=Kimi(K27Code),
       api_url=url,
     )
+    defer client.close()
     let response = client.chat(
       [ChatMessage(User, content="hello")],
       stream=StreamHandler(on_content_delta=_ => ()),
@@ -161,6 +384,7 @@ async test "streaming chat retries an idle stall before any event" {
       retry_backoff_ms=1,
       idle_timeout_ms=100,
     )
+    defer client.close()
     let response = client.chat(
       [ChatMessage(User, content="hello")],
       stream=StreamHandler(on_content_delta=_ => ()),

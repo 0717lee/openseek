@@ -255,7 +255,9 @@ pub async fn[X] run_turn_in_scope(
   on_goal_met? : async (String, @agent_session.GoalBaseline?) -> String?,
 ) -> @agent_session.Session {
   let client = @client.Client(api_key~, model~, thinking~, api_url?)
+  defer client.close()
   let summary_client = @client.Client(api_key~, model~, api_url?, thinking=No)
+  defer summary_client.close()
   let session = session |> append_item(User(UserMessage(task, submission_id?)))
   let tools = try {
     match tools {
