@@ -149,7 +149,7 @@ fn State::submit_composer(
       ready.with_pending_steer(turn_id)
     } else {
       ready
-    }).begin_foreground(CodexTurnReply(active.id))
+    }).begin_foreground(CodexTurnSteerReply(active.id))
     (ready.send(dispatch, channel), next)
   } else {
     guard ready.active_thread() is Some(active) else {

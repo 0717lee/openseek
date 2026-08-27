@@ -99,7 +99,7 @@ fn State::without_sending_steer(self : State, thread_id : String) -> State {
 }
 
 ///|
-/// Reconcile one app-server User item with one display-only steer receipt.
+/// Reconcile one previously unseen canonical User item with local receipts.
 ///
 /// The protocol supplies `(threadId, turnId, item.id)`, but neither the steer
 /// reply nor the item identifies the other: there is no returned `itemId`,
@@ -115,6 +115,65 @@ fn State::without_sending_steer(self : State, thread_id : String) -> State {
 /// item yet, FIFO assigns the next unseen item to that prompt rather than to a
 /// later steer. Duplicate started/completed notifications are ignored because
 /// the item id is already present in the pre-notification state.
+fn State::with_observed_user_item(
+  self : State,
+  thread_id : String,
+  turn_id : String,
+  item_id : String,
+) -> State {
+  guard self.active_thread() is Some(active) &&
+    active.id == thread_id &&
+    !active.has_item_id(turn_id, item_id) else {
+    return self
+  }
+  if self.waiting_for_first_user_item() {
+    return self
+  }
+  let mut consumed = false
+  let pending_steers : Array[CodexSteerReceipt] = []
+  for receipt in self.pending_steers {
+    if !consumed &&
+      receipt.turn_id == turn_id &&
+      !receipt.known_user_item_ids.contains(item_id) {
+      consumed = true
+    } else {
+      pending_steers.push(receipt)
+    }
+  }
+  { ..self, pending_steers, }
+}
+
+///|
+/// A full steer reply can install canonical items before their lifecycle
+/// notifications arrive. Reconcile every newly observed User item first so
+/// installing the turn cannot leave its display-only receipt beside it.
+fn State::with_observed_steer_turn(
+  self : State,
+  turn : CodexTurn,
+) -> State {
+  guard self.active_thread() is Some(active) else { return self }
+  let observed_user_item_ids = active.user_item_ids(turn.id)
+  let mut next = self
+  for item in turn.items {
+    if item.kind == "userMessage" &&
+      !observed_user_item_ids.contains(item.id) {
+      if next.waiting_for_first_user_item() {
+        // This decoded turn is installed immediately after reconciliation, so
+        // its first new User item can authoritatively replace the older prompt
+        // receipt. Notifications keep the old install-then-observe ordering.
+        next = { ..next, submitted_first_prompt: None }
+      } else {
+        next = next.with_observed_user_item(active.id, turn.id, item.id)
+      }
+      observed_user_item_ids.push(item.id)
+    }
+  }
+  next
+}
+
+///|
+/// Decode one app-server item lifecycle notification before the canonical item
+/// is installed in the selected turn.
 fn State::with_observed_steer_item(
   self : State,
   method_ : String,
@@ -128,27 +187,10 @@ fn State::with_observed_steer_item(
     @jsonx.json_text(fields, "turnId") is Some(turn_id) &&
     fields.get("item") is Some(value) &&
     CodexItem::decode(value) is Some(item) &&
-    item.kind == "userMessage" &&
-    self.active_thread() is Some(active) &&
-    active.id == thread_id &&
-    !active.has_item_id(turn_id, item.id) else {
+    item.kind == "userMessage" else {
     return self
   }
-  if self.waiting_for_first_user_item() {
-    return self
-  }
-  let mut consumed = false
-  let pending_steers : Array[CodexSteerReceipt] = []
-  for receipt in self.pending_steers {
-    if !consumed &&
-      receipt.turn_id == turn_id &&
-      !receipt.known_user_item_ids.contains(item.id) {
-      consumed = true
-    } else {
-      pending_steers.push(receipt)
-    }
-  }
-  { ..self, pending_steers, }
+  self.with_observed_user_item(thread_id, turn_id, item.id)
 }
 
 ///|

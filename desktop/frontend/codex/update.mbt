@@ -235,7 +235,7 @@ pub fn update(
         let next = {
           ..state.settle_foreground(CodexResumeReply(thread_id)),
           notice: "",
-        }.begin_foreground(CodexTurnReply(thread_id))
+        }.begin_foreground(CodexTurnStartReply(thread_id))
         (next.send(dispatch, channel), next)
       } else {
         (@cmd.none, state)
@@ -312,12 +312,15 @@ pub fn update(
             next.load_skills(dispatch, channel, force_reload=false),
           ])
           if next.active_thread() is Some(active) {
-            next = next.begin_foreground(CodexTurnReply(active.id))
+            next = next.begin_foreground(CodexTurnStartReply(active.id))
           }
         }
-        CodexTurnReply(_) => next = next.with_turn_reply(value)
+        CodexTurnStartReply(_) => next = next.with_turn_start_reply(value)
+        CodexTurnSteerReply(_) => next = next.with_turn_steer_reply(value)
         CodexWorktreeTurnReply(_, worktree) => {
-          next = next.with_created_worktree(worktree).with_turn_reply(value)
+          next = next
+            .with_created_worktree(worktree)
+            .with_turn_start_reply(value)
           let (git, refreshed) = next.refresh_git(dispatch, channel)
           next = refreshed
           cmd = @cmd.batch([
@@ -406,7 +409,9 @@ pub fn update(
         CodexThreadsReply(true, _) => "Archived Codex threads"
         CodexDraftOpenReply(_) => "Codex draft"
         CodexThreadReply(_) | CodexDraftThreadReply(_) => "Codex thread"
-        CodexTurnReply(_) | CodexWorktreeTurnReply(_, _) => "Codex turn"
+        CodexTurnStartReply(_)
+        | CodexTurnSteerReply(_)
+        | CodexWorktreeTurnReply(_, _) => "Codex turn"
         CodexWorktreeRepairReply(_, _) => "Codex worktree rebuild"
         CodexLoginReply => "Codex sign-in"
         CodexArchiveReply(_) => "Codex archive"
@@ -424,7 +429,7 @@ pub fn update(
         match kind {
           CodexWorktreeTurnReply(_, worktree) =>
             state.with_created_worktree(worktree).settle_foreground(kind)
-          CodexTurnReply(thread_id) =>
+          CodexTurnSteerReply(thread_id) =>
             state.without_sending_steer(thread_id).settle_foreground(kind)
           _ => state.settle_foreground(kind)
         }
@@ -437,7 +442,7 @@ pub fn update(
       let settled = if owns_foreground &&
         (
           kind is CodexDraftThreadReply(_) ||
-          kind is CodexTurnReply(_) ||
+          kind is CodexTurnStartReply(_) ||
           kind is CodexWorktreeTurnReply(_, _)
         ) {
         { ..settled, submitted_first_prompt: None }
@@ -523,17 +528,37 @@ pub fn update(
 }
 
 ///|
-/// Settle either source of a turn reply. `turn/start` returns a full turn,
-/// while `turn/steer` may return only its id; notifications remain the
-/// authoritative item lifecycle in both cases.
-fn State::with_turn_reply(self : State, value : Json) -> State {
+/// Settle a `turn/start` reply. Its canonical turn, when present, replaces the
+/// first-input preview through the ordinary observed-item boundary.
+fn State::with_turn_start_reply(self : State, value : Json) -> State {
+  let next = if value is Object(fields) &&
+    fields.get("turn") is Some(turn) &&
+    CodexTurn::decode(turn) is Some(turn) &&
+    self.active_thread() is Some(active) {
+    {
+      ..self,
+      selection: CodexStoredTask(active.with_turn(turn)),
+      draft: "",
+    }
+  } else {
+    { ..self, draft: "" }
+  }
+  { ..next, mentions: [], submission_sequence: next.submission_sequence + 1 }.with_observed_first_prompt()
+}
+
+///|
+/// Settle a `turn/steer` reply. Acceptance keeps the display receipt until a
+/// canonical User item is known. A compatible full-turn reply may already
+/// contain that item, so reconcile its new ids before installing the turn.
+fn State::with_turn_steer_reply(self : State, value : Json) -> State {
   let accepted = self.with_accepted_steer(value)
   let next = if value is Object(fields) &&
     fields.get("turn") is Some(turn) &&
     CodexTurn::decode(turn) is Some(turn) &&
     accepted.active_thread() is Some(active) {
+    let reconciled = accepted.with_observed_steer_turn(turn)
     {
-      ..accepted,
+      ..reconciled,
       selection: CodexStoredTask(active.with_turn(turn)),
       draft: "",
     }
@@ -730,6 +755,203 @@ test "Codex project add stays local until the first prompt" {
 }
 
 ///|
+test "Codex full steer replies replace their local receipt" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let open_external = (_ : String) => @cmd.none
+  let state = {
+    ..State::from_thread_snapshot({
+      "thread": {
+        "id": "thread-1",
+        "turns": [
+          {
+            "id": "turn-1",
+            "status": "inProgress",
+            "items": [
+              {
+                "id": "initial-user",
+                "type": "userMessage",
+                "content": [{ "type": "text", "text": "initial" }],
+              },
+            ],
+          },
+        ],
+      },
+    }),
+    connection: CodexReady,
+  }
+  let (_, sending) = update(
+    dispatch,
+    ComposerAction(
+      @composer.DraftSubmitted(
+        identity=state.composer_identity(@interop.ChannelId::Local),
+        draft={ task: "steer once", mentions: [] },
+      ),
+    ),
+    state,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  assert_eq(sending.pending_steers.length(), 1)
+  let reply = Reply(kind=CodexTurnSteerReply("thread-1"), value={
+    "turn": {
+      "id": "turn-1",
+      "status": "inProgress",
+      "itemsView": "full",
+      "items": [
+        {
+          "id": "initial-user",
+          "type": "userMessage",
+          "content": [{ "type": "text", "text": "initial" }],
+        },
+        {
+          "id": "steer-user-1",
+          "type": "userMessage",
+          "content": [{ "type": "text", "text": "steer once" }],
+        },
+      ],
+    },
+  })
+  let (_, once) = update(
+    dispatch,
+    reply,
+    sending,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  let (_, twice) = update(
+    dispatch,
+    reply,
+    sending,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  assert_true(once == twice)
+  assert_true(once.pending_steers.is_empty())
+  let items = once.transcript_items()
+  assert_eq(items.length(), 2)
+  assert_eq(items[0].content, "initial")
+  assert_eq(items[1].content, "steer once")
+}
+
+///|
+test "Codex steer failure preserves an older first-prompt receipt" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let open_external = (_ : String) => @cmd.none
+  let state = {
+    ..State::from_thread_snapshot({
+      "thread": {
+        "id": "thread-1",
+        "turns": [
+          { "id": "turn-1", "status": "inProgress", "items": [] },
+        ],
+      },
+    }),
+    connection: CodexReady,
+    submitted_first_prompt: Some({ task: "initial", mentions: [] }),
+  }
+  let (_, sending_first) = update(
+    dispatch,
+    ComposerAction(
+      @composer.DraftSubmitted(
+        identity=state.composer_identity(@interop.ChannelId::Local),
+        draft={ task: "accepted steer", mentions: [] },
+      ),
+    ),
+    state,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  let (_, accepted_first) = update(
+    dispatch,
+    Reply(
+      kind=CodexTurnSteerReply("thread-1"),
+      value={ "turnId": "turn-1" },
+    ),
+    sending_first,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  let (_, sending_second) = update(
+    dispatch,
+    ComposerAction(
+      @composer.DraftSubmitted(
+        identity=accepted_first.composer_identity(@interop.ChannelId::Local),
+        draft={ task: "rejected steer", mentions: [] },
+      ),
+    ),
+    accepted_first,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  let failure = Failed(
+    kind=CodexTurnSteerReply("thread-1"),
+    message="steer rejected",
+  )
+  let (_, failed) = update(
+    dispatch,
+    failure,
+    sending_second,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  let (_, failed_again) = update(
+    dispatch,
+    failure,
+    sending_second,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  assert_true(failed == failed_again)
+  assert_true(failed.waiting_for_first_user_item())
+  assert_eq(failed.pending_steers.length(), 1)
+  assert_true(failed.pending_steers[0].delivery is CodexSteerAccepted)
+  assert_eq(failed.draft_text(), "rejected steer")
+
+  let (_, observed_initial) = update(
+    dispatch,
+    Notification(
+      method_="item/started",
+      params={
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "item": {
+          "id": "initial-user",
+          "type": "userMessage",
+          "content": [{ "type": "text", "text": "initial" }],
+        },
+      },
+      generation=1,
+    ),
+    failed,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  assert_false(observed_initial.waiting_for_first_user_item())
+  assert_eq(observed_initial.pending_steers.length(), 1)
+
+  let (_, observed_steer) = update(
+    dispatch,
+    Notification(
+      method_="item/started",
+      params={
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "item": {
+          "id": "steer-user-1",
+          "type": "userMessage",
+          "content": [{ "type": "text", "text": "accepted steer" }],
+        },
+      },
+      generation=2,
+    ),
+    observed_initial,
+    @interop.ChannelId::Local,
+    open_external,
+  )
+  assert_true(observed_steer.pending_steers.is_empty())
+}
+
+///|
 test "Codex steer receipts reconcile duplicate text by item id and FIFO" {
   let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   let open_external = (_ : String) => @cmd.none
@@ -774,7 +996,10 @@ test "Codex steer receipts reconcile duplicate text by item id and FIFO" {
 
   let (_, accepted_first) = update(
     dispatch,
-    Reply(kind=CodexTurnReply("thread-1"), value={ "turnId": "turn-1" }),
+    Reply(
+      kind=CodexTurnSteerReply("thread-1"),
+      value={ "turnId": "turn-1" },
+    ),
     sending_first,
     @interop.ChannelId::Local,
     open_external,
@@ -798,7 +1023,7 @@ test "Codex steer receipts reconcile duplicate text by item id and FIFO" {
 
   let (_, failed_second) = update(
     dispatch,
-    Failed(kind=CodexTurnReply("thread-1"), message="steer rejected"),
+    Failed(kind=CodexTurnSteerReply("thread-1"), message="steer rejected"),
     sending_second,
     @interop.ChannelId::Local,
     open_external,
@@ -1037,10 +1262,13 @@ test "Codex turn connection errors settle immediately without a history read" {
     }),
     draft: "new prompt",
     submitted_first_prompt: Some({ task: "new prompt", mentions: [] }),
-  }.begin_foreground(CodexTurnReply("thread-1"))
+  }.begin_foreground(CodexTurnStartReply("thread-1"))
   let (_, failed) = update(
     dispatch,
-    Failed(kind=CodexTurnReply("thread-1"), message="SeekMoon connection lost"),
+    Failed(
+      kind=CodexTurnStartReply("thread-1"),
+      message="SeekMoon connection lost",
+    ),
     original,
     @interop.ChannelId::Local,
     _ => @cmd.none,
@@ -1157,7 +1385,7 @@ test "Codex update handlers are pure and idempotent" {
     Reply(kind=CodexDraftThreadReply("desktop-test"), value={
       "thread": { "id": "thread-2", "turns": [] },
     }),
-    Reply(kind=CodexTurnReply("thread-1"), value={
+    Reply(kind=CodexTurnStartReply("thread-1"), value={
       "turn": { "id": "turn-2", "status": "inProgress" },
     }),
     Reply(
@@ -1184,7 +1412,7 @@ test "Codex update handlers are pure and idempotent" {
     Reply(kind=CodexUnarchiveReply("thread-archived"), value={}),
     Reply(kind=CodexInterruptReply, value={}),
     Reply(kind=CodexApprovalReply, value={}),
-    Failed(kind=CodexTurnReply("thread-1"), message="test failure"),
+    Failed(kind=CodexTurnStartReply("thread-1"), message="test failure"),
     Failed(
       kind=CodexWorktreeRepairReply("thread-1", {
         name: "wt-1",
@@ -1578,7 +1806,7 @@ test "Codex draft and turn replies stay with their originating task" {
   }
   let (_, stale_turn) = update(
     dispatch,
-    Reply(kind=CodexTurnReply("thread-old"), value={
+    Reply(kind=CodexTurnStartReply("thread-old"), value={
       "turn": { "id": "turn-old", "status": "inProgress", "items": [] },
     }),
     current_thread,
@@ -1620,7 +1848,7 @@ test "Codex draft and turn replies stay with their originating task" {
   assert_true(stale_repair == current_thread)
   let (_, stale_turn_failure) = update(
     dispatch,
-    Failed(kind=CodexTurnReply("thread-old"), message="late failure"),
+    Failed(kind=CodexTurnStartReply("thread-old"), message="late failure"),
     current_thread,
     @interop.ChannelId::Local,
     _ => @cmd.none,
@@ -1646,7 +1874,7 @@ test "Codex observed running task steers without resume" {
     dispatch,
     @interop.ChannelId::Local,
   )
-  assert_true(steering.owns_foreground(CodexTurnReply("thread-1")))
+  assert_true(steering.owns_foreground(CodexTurnSteerReply("thread-1")))
 }
 
 ///|
@@ -1676,7 +1904,7 @@ test "Codex idle stored task resumes before starting a turn" {
     @interop.ChannelId::Local,
     _ => @cmd.none,
   )
-  assert_true(once.owns_foreground(CodexTurnReply("thread-1")))
+  assert_true(once.owns_foreground(CodexTurnStartReply("thread-1")))
   assert_true(once == twice)
 }
 
@@ -1713,7 +1941,7 @@ test "reopening the selected Codex task preserves its foreground state" {
       },
     }),
     draft: "unsent follow-up",
-  }.begin_foreground(CodexTurnReply("thread-a"))
+  }.begin_foreground(CodexTurnSteerReply("thread-a"))
   let message = OpenThread("thread-a")
   let (_, once) = update(dispatch, message, state, @interop.ChannelId::Local, _ => {
     @cmd.none
@@ -1742,7 +1970,7 @@ test "archiving the selected Codex task settles its owned foreground work" {
         answers: Map([]),
       },
     ],
-  }.begin_foreground(CodexTurnReply("thread-a"))
+  }.begin_foreground(CodexTurnStartReply("thread-a"))
   let message = Notification(
     method_="thread/archived",
     params={ "threadId": "thread-a" },
@@ -1783,7 +2011,7 @@ test "Codex approval reply cannot settle an active turn" {
   let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   let state = State::from_thread_snapshot({
     "thread": { "id": "thread-1", "turns": [] },
-  }).begin_foreground(CodexTurnReply("thread-1"))
+  }).begin_foreground(CodexTurnStartReply("thread-1"))
   let (_, after_approval) = update(
     dispatch,
     Reply(kind=CodexApprovalReply, value={}),
@@ -1797,7 +2025,7 @@ test "Codex approval reply cannot settle an active turn" {
   )
   let (_, after_turn) = update(
     dispatch,
-    Reply(kind=CodexTurnReply("thread-1"), value={
+    Reply(kind=CodexTurnStartReply("thread-1"), value={
       "turn": { "id": "turn-1", "status": "inProgress" },
     }),
     after_approval,

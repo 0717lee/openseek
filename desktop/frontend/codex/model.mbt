@@ -294,7 +294,10 @@ priv enum CodexReplyKind {
   CodexResumeReply(String)
   CodexDraftOpenReply(String)
   CodexDraftThreadReply(String)
-  CodexTurnReply(String)
+  // Both requests own the same composer lock, but their failure receipts are
+  // different: start clears the first prompt, while steer clears only Sending.
+  CodexTurnStartReply(String)
+  CodexTurnSteerReply(String)
   CodexWorktreeTurnReply(String, CodexWorktree)
   CodexWorktreeRepairReply(String, CodexWorktree)
   CodexLoginReply
@@ -899,7 +902,9 @@ fn State::accepts_reply(self : State, kind : CodexReplyKind) -> Bool {
       .unwrap_or(false)
     CodexDraftThreadReply(draft_id) =>
       self.active_draft().map(draft => draft.id == draft_id).unwrap_or(false)
-    CodexTurnReply(thread_id) | CodexWorktreeTurnReply(thread_id, _) =>
+    CodexTurnStartReply(thread_id)
+    | CodexTurnSteerReply(thread_id)
+    | CodexWorktreeTurnReply(thread_id, _) =>
       self
       .active_thread()
       .map(thread => thread.id == thread_id)
@@ -923,7 +928,9 @@ fn CodexReplyKind::foreground(self : CodexReplyKind) -> CodexForeground? {
     CodexThreadReply(id) => Some(CodexThreadForeground(id))
     CodexResumeReply(id) => Some(CodexResumeForeground(id))
     CodexDraftThreadReply(id) => Some(CodexDraftStartForeground(id))
-    CodexTurnReply(id) | CodexWorktreeTurnReply(id, _) =>
+    CodexTurnStartReply(id)
+    | CodexTurnSteerReply(id)
+    | CodexWorktreeTurnReply(id, _) =>
       Some(CodexTurnForeground(id))
     CodexWorktreeRepairReply(id, _) => Some(CodexWorktreeRepairForeground(id))
     CodexLoginReply => Some(CodexLoginForeground)
