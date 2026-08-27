@@ -17,12 +17,19 @@ const MaxSemanticSearchStderrBytes : Int = 1000000
 const MaxSemanticSearchErrorMessageUnits : Int = 1000
 
 ///|
+/// Emit a progress notification on the first hit and then every
+/// `SemanticSearchProgressBatch` accumulated hits, so a long scan paints
+/// results before the final reply arrives. The reply stays authoritative;
+/// progress is best-effort.
+const SemanticSearchProgressBatch : Int = 50
+
+///|
 /// The mooncakes coordinate pinned for the interim `moonx` provider. moongrep
 /// publishes no upstream release binaries, so a trial bundle resolves the
 /// provider through `moonx <coordinate> --`; pinning the version keeps the
 /// search deterministic instead of silently running whatever the local
 /// registry index knows as "latest".
-const MoongrepPackageCoordinate : String = "moonbit-community/moongrep@0.1.18"
+const MoongrepPackageCoordinate : String = "moonbit-community/moongrep@0.2.2"
 
 ///|
 priv struct ParsedSemanticContextLine {
@@ -176,7 +183,10 @@ async fn cancel_running_semantic_search(
 }
 
 ///|
-async fn SemanticSearchService::run(self : SemanticSearchService) -> Unit {
+async fn SemanticSearchService::run(
+  self : SemanticSearchService,
+  emit : async (@protocol.Notification) -> Unit,
+) -> Unit {
   @async.with_task_group(group => {
     let running : Map[String, RunningSemanticSearch] = Map([])
     let cancelled_through = SemanticSearchCancellationFrontiers::new()
@@ -221,7 +231,7 @@ async fn SemanticSearchService::run(self : SemanticSearchService) -> Unit {
           let generation = payload.generation
           let task = group.spawn(no_wait=true, allow_failure=true, () => {
             let outcome = SemanticSearchFinished(
-              run_semantic_search(command, root, payload),
+              run_semantic_search(command, root, payload, emit),
             ) catch {
               _ if @async.is_being_cancelled() => return
               error => SemanticSearchFailed("Semantic search failed: \{error}")
@@ -486,10 +496,44 @@ fn bounded_semantic_error_message(message : String) -> String {
 }
 
 ///|
+/// Push one best-effort batch of the hits accumulated so far. The final
+/// reply is authoritative, so a dropped or failed notification must never
+/// fail the search: progress stops silently and the client still receives
+/// everything in `SearchSemanticReply`.
+async fn publish_semantic_progress(
+  emit : async (@protocol.Notification) -> Unit,
+  root : String,
+  session_key : String,
+  generation : Int,
+  matches : Array[SemanticSearchHit],
+  match_count : Int,
+  file_count : Int,
+) -> Unit {
+  emit(
+    SemanticSearchProgress({
+      root,
+      session_key,
+      generation,
+      matches,
+      match_count,
+      file_count,
+    }),
+  ) catch {
+    // Cancellation must keep propagating — the search loop needs to stop
+    // when its task group is torn down. Any other delivery failure
+    // (wedged outbound queue, closed connection) only costs the partial
+    // frames; the authoritative reply still travels the request path.
+    error if @async.is_being_cancelled() => raise error
+    _ => ()
+  }
+}
+
+///|
 async fn run_semantic_search(
   command : String?,
   root : @pathx.Absolute,
   payload : SearchSemanticPayload,
+  emit : async (@protocol.Notification) -> Unit,
 ) -> SearchSemanticReply {
   let reply_root = root.resource_path()
   let native_root = root.to_string()
@@ -573,6 +617,7 @@ async fn run_semantic_search(
     let mut match_count = 0
     let mut limit_hit = false
     let mut first_error_line : String? = None
+    let mut published_hits = 0
     defer stdout_reader.close()
     for ;; {
       let line = stdout_reader.read_until("\n")
@@ -592,6 +637,30 @@ async fn run_semantic_search(
       hits.push(hit)
       files[hit.path] = true
       match_count += 1
+      if match_count == 1 || match_count % SemanticSearchProgressBatch == 0 {
+        let batch = hits[published_hits:].to_owned()
+        publish_semantic_progress(
+          emit,
+          reply_root,
+          payload.session_key,
+          payload.generation,
+          batch,
+          match_count,
+          files.length(),
+        )
+        published_hits = hits.length()
+      }
+    }
+    if published_hits < hits.length() {
+      publish_semantic_progress(
+        emit,
+        reply_root,
+        payload.session_key,
+        payload.generation,
+        hits[published_hits:].to_owned(),
+        match_count,
+        files.length(),
+      )
     }
     let exit_code = process.wait() catch {
       error if @async.is_being_cancelled() => raise error
@@ -670,7 +739,11 @@ test "semantic search builds moonx and bundled moongrep invocations" {
     max_results: 20000,
   }
   assert_eq(semantic_search_args("moonx", pattern), [
-    "moonbit-community/moongrep@0.1.18", "--", "scan", "--pattern", "inspect($(x:arg))",
+    MoongrepPackageCoordinate,
+    "--",
+    "scan",
+    "--pattern",
+    "inspect($(x:arg))",
     "--output-json",
   ])
   let second_pattern : SearchSemanticPayload = {
@@ -729,7 +802,7 @@ async test "semantic search argument validation requires a rule source" {
   }
   // The no-command path returns the same validation refusal before probing the
   // provider, so this does not require a moongrep installation on PATH.
-  let reply = run_semantic_search(None, root, payload)
+  let reply = run_semantic_search(None, root, payload, _ => ())
   guard reply.error is Some(error) else { fail("expected validation error") }
   assert_eq(error.code, "invalid_request")
 }
@@ -738,7 +811,7 @@ async test "semantic search argument validation requires a rule source" {
 async test "cancel-before-semantic-search frontier rejects the stale generation" {
   let service = SemanticSearchService::new()
   @async.with_task_group(group => {
-    group.spawn_bg(() => service.run())
+    group.spawn_bg(() => service.run(_ => ()))
     service.cancel("sem:stale", 7)
     let root = @pathx.Path(".").resolve()
     let resource_root = root.resource_path()
