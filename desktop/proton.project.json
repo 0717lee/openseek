@@ -1,11 +1,11 @@
 {
+  "identifier": "community.moonbit.proton.openseek-desktop",
   "backend": {
     "path": ".",
     "package": "."
   },
   "package": {
     "product_name": "SeekMoon",
-    "identifier": "community.moonbit.proton.openseek-desktop",
     "version": "0.1.5",
     "formats": ["app", "zip"],
     "icons": ["package/macos/AppIcon.icns"],

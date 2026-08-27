@@ -107,6 +107,16 @@ jobs:
             exit 1
           fi
 
+      # Compile checks do not parse proton.project.json. Let the pinned CLI
+      # resolve a package plan so config-schema migrations fail in CI before a
+      # developer or release job reaches `proton_cli dev` or `package`.
+      - name: Validate Proton project config
+        if: matrix.target == 'native'
+        run: |
+          moonx "moonbit-community/proton_cli@${{ steps.proton.outputs.version }}" \
+            -C "$PWD/desktop" package --config proton.project.json \
+            --package . --dry-run
+
       # Proton 0.2 builds its Linux subprocess helper during `cef setup`. Its
       # prebuild asks pkg-config for both gtk+-3.0 and x11, so the runner needs
       # the development packages rather than only the shared runtime libraries.
