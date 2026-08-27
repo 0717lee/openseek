@@ -316,9 +316,57 @@ fn event_card(
       )
     Tool(result) => tool_card(seq, time, result, tags, subrun)
     Runtime(notice) => runtime_card(seq, time, notice.content())
+    ApprovalRequested(request) => approval_request_card(seq, time, request)
+    ApprovalResolved(resolution) =>
+      approval_resolution_card(seq, time, resolution)
     Summary(summary) => summary_card(seq, time, summary)
     Terminal(terminal) => terminal_card(seq, time, terminal, step_label~)
   }
+}
+
+///|
+fn approval_source_label(source : String) -> String {
+  match source {
+    "controller" => "controller"
+    "policy_always" => "always-allow policy"
+    other => other
+  }
+}
+
+///|
+fn approval_request_card(
+  seq : Int,
+  time : String,
+  request : @agent_session.ApprovalRequest,
+) -> @html.Html {
+  let body : Array[@html.Html] = [
+    text_block(
+      "Request: \{request.id}\nTool: \{request.tool_name}\nDecision source: \{approval_source_label(request.source)}\nPermission: \{request.detail}",
+    ),
+  ]
+  if request.body is Some(subject) && !subject.is_blank() {
+    body.push(@html.pre(class="content approval-subject") <| subject)
+  }
+  card("approval approval-requested", "Permission requested", seq, time~, body)
+}
+
+///|
+fn approval_resolution_card(
+  seq : Int,
+  time : String,
+  resolution : @agent_session.ApprovalResolution,
+) -> @html.Html {
+  let (label, kind, outcome) = match resolution.outcome {
+    "allowed_once" => ("Permission approved", "approved", "allow once")
+    "rejected" => ("Permission denied", "rejected", "deny")
+    "cancelled" => ("Permission cancelled", "cancelled", "cancelled")
+    other => ("Permission resolved", "unknown", other)
+  }
+  card("approval approval-resolved \{kind}", label, seq, time~, [
+    text_block(
+      "Request: \{resolution.id}\nDecision source: \{approval_source_label(resolution.source)}\nOutcome: \{outcome}",
+    ),
+  ])
 }
 
 ///|
@@ -1420,6 +1468,7 @@ fn terminal_projects_model_message(
 fn item_projects_model_message(item : @agent_session.SessionItem) -> Bool {
   match item {
     User(_) | Runtime(_) | Summary(_) | Assistant(_) | Tool(_) => true
+    ApprovalRequested(_) | ApprovalResolved(_) => false
     Terminal(terminal) => terminal_projects_model_message(terminal)
   }
 }
@@ -1500,6 +1549,8 @@ fn model_message_labels(
     match event.item() {
       // Labeled above at the start of its covered range.
       Summary(_) => ()
+      // Audit-only events do not close or label the pending model tool call.
+      ApprovalRequested(_) | ApprovalResolved(_) => ()
       Assistant(message) => {
         flush_pending_tool_labels(pending_tool_calls, out)
         out.push(label_of(event))

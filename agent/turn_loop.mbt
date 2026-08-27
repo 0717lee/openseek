@@ -283,11 +283,12 @@ async fn[T] AgentLoop::seal_unwinding_turn(self : Self, error : Error) -> T {
   } else {
     Terminal(Failed("agent failed: \{error}"))
   }
-  // Best-effort: a goal met in the dying batch keeps its durable clear
-  // when the store still accepts appends.
-  let session = self.flush_goal_tombstone(self.last_session) catch {
+  // Best-effort: approval facts already emitted by the runtime and a goal met
+  // in the dying batch stay durable when the store still accepts appends.
+  let session = self.append_approval_events(self.last_session) catch {
     _ => self.last_session
   }
+  let session = self.flush_goal_tombstone(session) catch { _ => session }
   ignore(self.append(session, terminal) catch { _ => session })
   raise error
 }
@@ -301,6 +302,27 @@ async fn AgentLoop::append(
   let next = (self.append_item)(session, item)
   self.last_session = next
   next
+}
+
+///|
+/// Move approval lifecycle facts from the runtime channel into the ordered
+/// durable session. These events are drained before the matching tool result;
+/// on cancellation `seal_unwinding_turn` drains them before the terminal.
+async fn AgentLoop::append_approval_events(
+  self : Self,
+  session : @agent_session.Session,
+) -> @agent_session.Session {
+  for event in self.runtime.drain_approval_events(); session = session {
+    let item : @agent_session.SessionItem = match event {
+      Requested(id~, tool_name~, detail~, body~, source~) =>
+        ApprovalRequested({ id, tool_name, detail, body, source })
+      Resolved(id~, outcome~, source~) =>
+        ApprovalResolved({ id, outcome, source })
+    }
+    continue self.append(session, item)
+  } nobreak {
+    session
+  }
 }
 
 ///|
@@ -674,6 +696,7 @@ async fn AgentLoop::execute_tool_call(
     Some(action) => action
     None => @agent_tool.execute_tool_call(tool_call, self.tools)
   }
+  let session = self.append_approval_events(session)
   match result {
     Control(Finish(answer)) => {
       let session = self.record_tool_result(

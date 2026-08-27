@@ -64,6 +64,7 @@ fn append_item_message(
       messages.push(
         ChatMessage(Tool(result.tool_call_id()), content=result.content()),
       )
+    ApprovalRequested(_) | ApprovalResolved(_) => ()
     Terminal(terminal) =>
       if terminal_model_message(terminal) is Some(content) {
         // Current final answers are stored as a full Assistant payload before
@@ -127,6 +128,7 @@ fn is_covered_by_later_summary(
 ///   emitted where its covered range starts, not where it was appended;
 /// - `Assistant` preserves visible content, tool calls, and reasoning content;
 /// - `Tool` is emitted only when it answers a pending assistant tool call;
+/// - approval audit events are skipped without closing pending tool calls;
 /// - pending tool calls are closed with synthetic tool-error messages before a
 ///   non-tool event or at the end of projection;
 /// - `Terminal(Finished(text))` becomes a final assistant message when `text`
@@ -164,6 +166,9 @@ pub fn Session::chat_messages(self : Session) -> Array[@deepseek.ChatMessage] {
     match event.item() {
       // Already emitted at the start of its covered range.
       Summary(_) => ()
+      // Audit-only events may sit between a call and its result. They must not
+      // close the pending call or enter model context.
+      ApprovalRequested(_) | ApprovalResolved(_) => ()
       Assistant(message) => {
         flush_pending_tool_calls(pending_tool_calls, messages)
         append_item_message(Assistant(message), messages)

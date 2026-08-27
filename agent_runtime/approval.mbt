@@ -44,9 +44,47 @@ pub(all) struct ApprovalAsk {
 } derive(Eq, Debug)
 
 ///|
-/// Where one tool's permission questions go. A caller holding one of these
-/// knows it may ask, and nothing else about who answers.
-pub(all) struct ApprovalChannel(async (ApprovalAsk) -> ApprovalOutcome)
+/// One approval lifecycle event waiting to be persisted by the agent loop.
+///
+/// The channel records these synchronously at the decision seam, while the
+/// agent loop drains them at its ordered session-append seam. `source` is
+/// `controller` or `policy_always`; `outcome` is absent on requests and one of
+/// `allowed_once`, `rejected`, or `cancelled` on resolutions.
+pub(all) enum ApprovalEvent {
+  Requested(
+    id~ : String,
+    tool_name~ : String,
+    detail~ : String,
+    body~ : String?,
+    source~ : String
+  )
+  Resolved(id~ : String, outcome~ : String, source~ : String)
+} derive(Eq, Debug)
+
+///|
+/// Where one tool's permission questions go.
+///
+/// Besides asking, a channel exposes the audit events produced while resolving
+/// the ask. The agent loop drains those events and owns durable ordering; a
+/// channel built by a direct package user has an empty audit stream by default.
+pub struct ApprovalChannel {
+  ask : async (ApprovalAsk) -> ApprovalOutcome
+  drain_events : () -> Array[ApprovalEvent]
+}
+
+///|
+fn no_approval_events() -> Array[ApprovalEvent] {
+  []
+}
+
+///|
+/// Build an approval channel and its audit-event drain.
+pub fn ApprovalChannel::ApprovalChannel(
+  ask : async (ApprovalAsk) -> ApprovalOutcome,
+  drain_events? : () -> Array[ApprovalEvent] = no_approval_events,
+) -> ApprovalChannel {
+  { ask, drain_events }
+}
 
 ///|
 /// Ask, and wait for the answer.
@@ -58,7 +96,15 @@ pub async fn ApprovalChannel::ask(
   self : ApprovalChannel,
   ask : ApprovalAsk,
 ) -> ApprovalOutcome {
-  (self.0)(ask)
+  (self.ask)(ask)
+}
+
+///|
+/// Drain approval lifecycle events in the order the channel produced them.
+pub fn ApprovalChannel::drain_events(
+  self : ApprovalChannel,
+) -> Array[ApprovalEvent] {
+  (self.drain_events)()
 }
 
 ///|
@@ -74,6 +120,14 @@ pub fn AgentRuntime::approval_channel(self : AgentRuntime) -> ApprovalChannel? {
 }
 
 ///|
+/// Drain approval lifecycle events produced since the previous drain.
+pub fn AgentRuntime::drain_approval_events(
+  self : AgentRuntime,
+) -> Array[ApprovalEvent] {
+  self.approval.map(channel => channel.drain_events()).unwrap_or([])
+}
+
+///|
 /// The absent channel is the fail-closed default, and it is the same value the
 /// registry reads to decide whether to advertise the arguments that ask.
 test "a runtime with no approval channel offers none" {
@@ -83,10 +137,12 @@ test "a runtime with no approval channel offers none" {
 ///|
 async test "a wired channel is handed over intact" {
   let asked : Array[ApprovalAsk] = []
-  let runtime = AgentRuntime(approval=ask => {
-    asked.push(ask)
-    AllowedOnce
-  })
+  let runtime = AgentRuntime(
+    approval=ApprovalChannel(ask => {
+      asked.push(ask)
+      AllowedOnce
+    }),
+  )
   guard runtime.approval_channel() is Some(channel) else {
     fail("expected a channel")
   }
@@ -103,3 +159,9 @@ async test "a wired channel is handed over intact" {
   // from.
   assert_eq(asked[0].body, Some("fn main { println(1) }"))
 }
+
+///|
+pub extend ApprovalEvent with Debug::{to_repr}
+
+///|
+pub extend ApprovalEvent with Eq::{equal, not_equal}

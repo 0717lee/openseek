@@ -156,7 +156,7 @@ fn summarize_session(session : @agent_session.Session) -> SessionMetrics {
         terminal_status = "failed"
         terminal_message = message
       }
-      Summary(_) | User(_) => ()
+      ApprovalRequested(_) | ApprovalResolved(_) | Summary(_) | User(_) => ()
     }
   }
   {
@@ -179,7 +179,7 @@ fn append_item_text(
   item : @agent_session.SessionItem,
 ) -> Unit {
   match item {
-    User(_) | Summary(_) => ()
+    User(_) | Summary(_) | ApprovalRequested(_) | ApprovalResolved(_) => ()
     Assistant(message) => {
       if message.reasoning_content() is Some(reasoning) {
         write_line(out, reasoning)

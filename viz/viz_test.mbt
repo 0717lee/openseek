@@ -823,6 +823,71 @@ test "raw view renders each event kind" {
 }
 
 ///|
+test "raw view renders approval audit records and model view hides them" {
+  let session = @agent_session.Session(
+      SessionId("approval-audit"),
+      system_prompt="system",
+    )
+    .append(
+      ApprovalRequested({
+        id: "ap-1",
+        tool_name: "mbtx",
+        detail: "run without the sandbox policy",
+        body: Some("fn main { println(1) }"),
+        source: "controller",
+      }),
+    )
+    .append(
+      ApprovalResolved({
+        id: "ap-1",
+        outcome: "allowed_once",
+        source: "controller",
+      }),
+    )
+  let raw = render(@viz.render_session(session, RawLog))
+  assert_true(raw.contains("class=\"card approval approval-requested\""))
+  assert_true(raw.contains("Permission requested"))
+  assert_true(raw.contains("Request: ap-1"))
+  assert_true(raw.contains("run without the sandbox policy"))
+  assert_true(raw.contains("fn main { println(1) }"))
+  assert_true(
+    raw.contains("class=\"card approval approval-resolved approved\""),
+  )
+  assert_true(raw.contains("Permission approved"))
+  assert_true(raw.contains("Outcome: allow once"))
+  let model = render(@viz.render_session(session, ModelView))
+  assert_false(model.contains("Permission requested"))
+  assert_false(model.contains("Permission approved"))
+}
+
+///|
+test "raw view distinguishes denied and cancelled approval resolutions" {
+  let session = @agent_session.Session(
+      SessionId("approval-outcomes"),
+      system_prompt="system",
+    )
+    .append(
+      ApprovalResolved({
+        id: "ap-denied",
+        outcome: "rejected",
+        source: "controller",
+      }),
+    )
+    .append(
+      ApprovalResolved({
+        id: "ap-cancelled",
+        outcome: "cancelled",
+        source: "controller",
+      }),
+    )
+  let raw = render(@viz.render_session(session, RawLog))
+  assert_true(raw.contains("Permission denied"))
+  assert_true(raw.contains("Outcome: deny"))
+  assert_true(raw.contains("Permission cancelled"))
+  assert_true(raw.contains("Outcome: cancelled"))
+}
+
+///|
 test "model view substitutes a summary for the events it covers" {
   // A session whose summary covers the first two events: the model projection
   // should show the summary text and drop the covered user/assistant content.

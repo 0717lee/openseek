@@ -29,11 +29,12 @@ pub(all) extenum AgentEvent {}
 ///|
 /// Per-agent-loop runtime state shared with side-effectful tools.
 ///
-/// `AgentRuntime` owns three pieces of loop-scoped state:
+/// `AgentRuntime` owns four pieces of loop-scoped state:
 ///
 /// - the raw `workspace_root` used by local tools to resolve relative paths;
 /// - a bounded, lossy event bus for typed background runtime updates;
-/// - an unbounded, lossless queue for typed mid-turn steering input.
+/// - an unbounded, lossless queue for typed mid-turn steering input;
+/// - an optional approval channel whose audit events are drained by the loop.
 ///
 /// It does not own background task lifetime. Tools that need to spawn bounded
 /// background work receive an `AgentTaskScope` alongside the runtime.
@@ -53,9 +54,8 @@ pub struct AgentRuntime {
   /// (see `approval_channel`). `None` is the fail-closed default, and it is
   /// also what tells a tool registry not to advertise the arguments that ask.
   ///
-  /// A bare function rather than a service type, so a tool package asking for
-  /// approval does not acquire a dependency on the protocol, the engine, or
-  /// whichever controller happens to be attached.
+  /// The channel keeps tool packages independent from the protocol, engine,
+  /// and whichever controller happens to be attached.
   priv approval : ApprovalChannel?
 }
 

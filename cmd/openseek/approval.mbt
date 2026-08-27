@@ -94,6 +94,8 @@ priv struct ApprovalDesk {
   /// blocked on it. The queue carries the outcome itself, so withdrawing one
   /// is the same operation as answering it.
   pending : Map[String, @aqueue.Queue[@agent_runtime.ApprovalOutcome]]
+  /// Lossless audit facts waiting for the agent loop's ordered durable append.
+  audit : @aqueue.Queue[@agent_runtime.ApprovalEvent]
   /// Set when the command stream is gone. No answer can arrive after that, so
   /// a question asked from here on is withdrawn without ever being announced.
   mut closed : Bool
@@ -120,7 +122,62 @@ priv struct ApprovalDesk {
 async fn ApprovalDesk::new(now_ms~ : Int64) -> ApprovalDesk {
   let salt = random_salt()
   let nonce = if salt == "" { "\{now_ms}" } else { salt }
-  { pending: {}, next_id: 0, closed: false, nonce }
+  {
+    pending: {},
+    audit: Queue(kind=Unbounded),
+    next_id: 0,
+    closed: false,
+    nonce,
+  }
+}
+
+///|
+fn ApprovalDesk::record_request(
+  self : ApprovalDesk,
+  id : String,
+  ask : @agent_runtime.ApprovalAsk,
+  source : String,
+) -> Unit {
+  ignore(
+    self.audit.try_put(
+      Requested(
+        id~,
+        tool_name=ask.tool_name,
+        detail=ask.detail,
+        body=ask.body,
+        source~,
+      ),
+    ) catch {
+      _ => false
+    },
+  )
+}
+
+///|
+fn ApprovalDesk::record_resolution(
+  self : ApprovalDesk,
+  id : String,
+  outcome : @agent_runtime.ApprovalOutcome,
+  source : String,
+) -> Unit {
+  ignore(
+    self.audit.try_put(
+      Resolved(id~, outcome=approval_outcome_word(outcome), source~),
+    ) catch {
+      _ => false
+    },
+  )
+}
+
+///|
+fn ApprovalDesk::drain_audit(
+  self : ApprovalDesk,
+) -> Array[@agent_runtime.ApprovalEvent] {
+  let events : Array[@agent_runtime.ApprovalEvent] = []
+  while (self.audit.try_get() catch { _ => None }) is Some(event) {
+    events.push(event)
+  }
+  events
 }
 
 ///|
@@ -159,8 +216,10 @@ async fn ApprovalDesk::ask(
   let mut outcome : @agent_runtime.ApprovalOutcome = Cancelled
   defer {
     self.pending.remove(id)
+    self.record_resolution(id, outcome, "controller")
     @emit.emit(ApprovalResolved(id~, outcome=approval_outcome_word(outcome)))
   }
+  self.record_request(id, ask, "controller")
   @emit.emit(
     ApprovalRequested(
       id~,
@@ -222,25 +281,35 @@ fn approval_channel(
 ) -> @agent_runtime.ApprovalChannel? {
   match policy {
     Never => None
-    Ask => Some(ApprovalChannel(ask => desk.ask(ask)))
+    Ask =>
+      Some(
+        ApprovalChannel(ask => desk.ask(ask), drain_events=() => {
+          desk.drain_audit()
+        }),
+      )
     // Announced and settled on the wire like any other question, so an
     // auto-granted escalation is as visible in the stream as an answered one.
     Always =>
       Some(
-        ApprovalChannel(ask => {
-          desk.next_id += 1
-          let id = "ap-\{desk.nonce}-\{desk.next_id}"
-          @emit.emit(
-            ApprovalRequested(
-              id~,
-              tool_name=ask.tool_name,
-              detail=ask.detail,
-              body=ask.body,
-            ),
-          )
-          @emit.emit(ApprovalResolved(id~, outcome="allowed_once"))
-          AllowedOnce
-        }),
+        ApprovalChannel(
+          ask => {
+            desk.next_id += 1
+            let id = "ap-\{desk.nonce}-\{desk.next_id}"
+            desk.record_request(id, ask, "policy_always")
+            @emit.emit(
+              ApprovalRequested(
+                id~,
+                tool_name=ask.tool_name,
+                detail=ask.detail,
+                body=ask.body,
+              ),
+            )
+            desk.record_resolution(id, AllowedOnce, "policy_always")
+            @emit.emit(ApprovalResolved(id~, outcome="allowed_once"))
+            AllowedOnce
+          },
+          drain_events=() => desk.drain_audit(),
+        ),
       )
   }
 }
@@ -318,6 +387,20 @@ async test "an answered question resolves to the controller's decision" {
     assert_true(asked.wait() is AllowedOnce)
   })
   assert_eq(desk.pending.length(), 0)
+  guard desk.drain_audit()
+    is [
+      Requested(
+        id=request_id,
+        tool_name="mbtx",
+        detail="run without the sandbox policy",
+        body=Some("fn main { println(1) }"),
+        source="controller"
+      ),
+      Resolved(id=resolved_id, outcome="allowed_once", source="controller"),
+    ] else {
+    fail("expected a durable controller approval pair")
+  }
+  assert_eq(request_id, resolved_id)
 }
 
 ///|
@@ -341,6 +424,14 @@ async test "a refused question resolves to rejected" {
     desk.settle(id, false)
     assert_true(asked.wait() is Rejected)
   })
+  guard desk.drain_audit()
+    is [
+      Requested(id=request_id, source="controller", ..),
+      Resolved(id=resolved_id, outcome="rejected", source="controller"),
+    ] else {
+    fail("expected a durable rejected approval pair")
+  }
+  assert_eq(request_id, resolved_id)
 }
 
 ///|
@@ -379,6 +470,28 @@ async test "never wires no channel; ask and always do" {
 }
 
 ///|
+async test "always records that policy granted the request" {
+  let desk = ApprovalDesk::new(now_ms=0)
+  guard approval_channel(Always, desk) is Some(channel) else {
+    fail("always should produce an approval channel")
+  }
+  let outcome = channel.ask({
+    tool_name: "mbtx",
+    detail: "run without the sandbox policy",
+    body: Some("fn main { println(1) }"),
+  })
+  assert_true(outcome is AllowedOnce)
+  guard channel.drain_events()
+    is [
+      Requested(id=request_id, source="policy_always", ..),
+      Resolved(id=resolved_id, outcome="allowed_once", source="policy_always"),
+    ] else {
+    fail("expected a durable policy approval pair")
+  }
+  assert_eq(request_id, resolved_id)
+}
+
+///|
 /// The other way a question settles as cancelled, and the one the `defer`
 /// exists for: the turn is interrupted while a tool sits blocked on it.
 ///
@@ -414,6 +527,14 @@ async test "an interrupted wait still retires its question" {
   assert_eq(desk.pending.length(), 0)
   desk.settle("ap-1", true)
   assert_eq(desk.pending.length(), 0)
+  guard desk.drain_audit()
+    is [
+      Requested(id=request_id, source="controller", ..),
+      Resolved(id=resolved_id, outcome="cancelled", source="controller"),
+    ] else {
+    fail("expected a durable cancelled approval pair")
+  }
+  assert_eq(request_id, resolved_id)
 }
 
 ///|

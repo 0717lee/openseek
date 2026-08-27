@@ -380,6 +380,14 @@
     .card.tool { border-left-color: var(--tool); }
     .card.tool.error { border-left-color: var(--error); background: var(--notice-error-bg); }
     .card.runtime { border-left-color: var(--runtime); }
+    .card.approval { border-left-color: var(--accent); }
+    .card.approval.approved { border-left-color: var(--added); }
+    .card.approval.rejected { border-left-color: var(--error); background: var(--notice-error-bg); }
+    .card.approval.cancelled { border-left-color: var(--muted); }
+    .approval-subject {
+      margin-top: 8px; padding: 8px 10px; border: 1px solid var(--border);
+      border-radius: 6px; background: var(--panel-2);
+    }
     /* plan checklists — shared by `plan` tool calls and plan-cadence reminders:
        icon + numbered title rows, statuses as classes, delta chips for what
        changed against the previous plan call, ghost rows for dropped steps. */
