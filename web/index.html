@@ -243,7 +243,7 @@
     .header-meta { color: var(--muted); font-size: 12px; }
 
     /* mode toggle */
-    /* sticky toolbar: keeps the view/args toggles + error bar pinned to the top
+    /* sticky toolbar: keeps the view/args toggles + audit bars pinned to the top
        of the scrolling .main while reading a long log. Negative side margins let
        its background span the .main padding gutter so content can't peek beside it. */
     .sticky-toolbar {
@@ -256,7 +256,8 @@
       border-bottom: 1px solid var(--border);
     }
     .sticky-toolbar .mode-row { margin-bottom: 0; }
-    .sticky-toolbar .error-bar { margin: 10px 0 0; }
+    .sticky-toolbar .error-bar,
+    .sticky-toolbar .approval-bar { margin: 10px 0 0; }
     .mode-row {
       display: flex;
       align-items: center;
@@ -351,6 +352,23 @@
     .session-view.errors-only .card:not(.error):not(.assistant) { display: none; }
     .session-view.errors-only .card.assistant:not(:has(.tool-call-failed)) { display: none; }
     .session-view.errors-only .turn:not(:has(.card.error)) { display: none; }
+
+    /* approval audit bar */
+    .approval-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: -6px 0 16px; }
+    .approval-count { color: var(--accent); font-size: 12px; font-weight: 600; margin-right: 2px; }
+    .approval-toggle, .approval-jump {
+      background: var(--panel); color: var(--text);
+      border: 1px solid var(--border); border-radius: 999px;
+      padding: 4px 12px; cursor: pointer; font-size: 12px;
+    }
+    .approval-jump { padding: 4px 11px; font-family: ui-monospace, monospace; }
+    .approval-toggle:hover, .approval-jump:hover { border-color: var(--accent); }
+    .approval-toggle.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+    .approvals-only-empty { color: var(--muted); margin-top: 24px; }
+    /* approvals-only: keep both sides of every permission decision and the
+       turns that contain them; hide unrelated session activity. */
+    .session-view.approvals-only .card:not(.approval) { display: none; }
+    .session-view.approvals-only .turn:not(:has(.card.approval)) { display: none; }
 
     /* notices */
     .notices { margin-bottom: 16px; }

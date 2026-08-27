@@ -45,6 +45,8 @@ struct Model {
   status : String
   // "Errors only" filter folds the log down to failed tool results.
   errors_only : Bool
+  // "Approvals only" filter folds the raw log down to approval audit events.
+  approvals_only : Bool
   // Tool-call arguments rendering: the human-friendly form (values shown verbatim,
   // no JSON quoting) by default, or the original pretty-printed JSON for debugging.
   show_original_args : Bool
@@ -97,6 +99,8 @@ enum Msg {
   ToggleRoot(String)
   ToggleErrorsOnly
   JumpToError(Int)
+  ToggleApprovalsOnly
+  JumpToApproval(Int)
   UnfoldCurrent
 }
 
@@ -180,6 +184,7 @@ fn init_model() -> Model {
     loading: false,
     status: "loading sessions…",
     errors_only: false,
+    approvals_only: false,
     show_original_args: false,
     subrun_children: Map([]),
   }
@@ -415,13 +420,26 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
           @cmd.effect(() => set_hash_view(value)),
           @cmd.effect(() => restore_scroll_to_hash_seq()),
         ]),
-        { ..model, view_mode: mode },
+        {
+          ..model,
+          view_mode: mode,
+          // Approval audit events intentionally do not project into Model View.
+          // Clear the filter so changing views can never produce a blank pane.
+          approvals_only: if mode == ModelView {
+            false
+          } else {
+            model.approvals_only
+          },
+        },
       )
     }
     SetArgsView(show_original) =>
       (@cmd.none, { ..model, show_original_args: show_original })
     ToggleErrorsOnly =>
-      (@cmd.none, { ..model, errors_only: !model.errors_only })
+      (
+        @cmd.none,
+        { ..model, errors_only: !model.errors_only, approvals_only: false },
+      )
     // Scroll to the next/previous failed-tool card, cycling. The count is
     // recomputed for the active view, while the browser chooses the target
     // relative to the current viewport so manual scrolling is respected.
@@ -430,7 +448,32 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
       if count <= 0 {
         (@cmd.none, model)
       } else {
-        (@cmd.effect(() => scroll_to_error_from_viewport(direction)), model)
+        (
+          @cmd.effect(() => {
+            scroll_to_card_from_viewport(".card.tool.error", direction)
+          }),
+          model,
+        )
+      }
+    }
+    ToggleApprovalsOnly =>
+      (
+        @cmd.none,
+        { ..model, approvals_only: !model.approvals_only, errors_only: false },
+      )
+    // One jump target per logical request; the matching resolution remains
+    // visible beside it when the approval-only filter is active.
+    JumpToApproval(direction) => {
+      let count = current_approval_count(model)
+      if count <= 0 {
+        (@cmd.none, model)
+      } else {
+        (
+          @cmd.effect(() => {
+            scroll_to_card_from_viewport(".card.approval-requested", direction)
+          }),
+          model,
+        )
       }
     }
     UnfoldCurrent => (@cmd.effect(() => unfold_nearest_details()), model)
@@ -755,11 +798,14 @@ extern "js" fn format_unix_ms_utc(milliseconds : Double) -> String =
   #|}
 
 ///|
-/// Scroll to the next/previous failed-tool card relative to the viewport's
-/// centre, not an internal cursor, so manual scrolling changes the jump origin.
-extern "js" fn scroll_to_error_from_viewport(direction : Int) -> Unit =
-  #|(direction) => {
-  #|  const els = Array.from(document.querySelectorAll('.card.tool.error'))
+/// Scroll to the next/previous matching card relative to the viewport's centre,
+/// not an internal cursor, so manual scrolling changes the jump origin.
+extern "js" fn scroll_to_card_from_viewport(
+  selector : String,
+  direction : Int,
+) -> Unit =
+  #|(selector, direction) => {
+  #|  const els = Array.from(document.querySelectorAll(selector))
   #|    .filter((el) => el.getClientRects().length > 0);
   #|  if (!els.length) return;
   #|  const anchor = window.innerHeight / 2;
@@ -1339,6 +1385,7 @@ fn session_pane(
     system_prompt=model.system_prompt,
   )
   let error_count = @viz.rendered_error_count(session, model.view_mode)
+  let approval_count = rendered_approval_count(session, model.view_mode)
   @html.div(class=session_view_class(model)) <| [
     header_strip(model, id, root_label),
     // Pin the view/args toggles and the error bar to the top of the
@@ -1346,9 +1393,10 @@ fn session_pane(
     @html.div(class="sticky-toolbar") <| [
       mode_row(emit, model, parsed, @viz.step_scrubber(session)),
       error_bar(emit, model, error_count),
+      approval_bar(emit, model, approval_count),
     ],
     @viz.render_notices(parsed),
-    session_log_view(model, session, error_count),
+    session_log_view(model, session, error_count, approval_count),
   ]
 }
 
@@ -1550,16 +1598,19 @@ fn format_scaled_size(bytes : Int64, unit : Int64, suffix : String) -> String {
 }
 
 ///|
-/// Add the `errors-only` class so the stylesheet folds the log down to failed
-/// tool cards (and the turns containing them), and `show-original` so it swaps the
-/// friendly tool-argument rendering for the raw JSON.
+/// Add filter and argument-view classes consumed by the viewer stylesheet.
 fn session_view_class(model : Model) -> String {
-  match (model.errors_only, model.show_original_args) {
-    (false, false) => "session-view"
-    (true, false) => "session-view errors-only"
-    (false, true) => "session-view show-original"
-    (true, true) => "session-view errors-only show-original"
+  let classes = ["session-view"]
+  if model.errors_only {
+    classes.push("errors-only")
   }
+  if model.approvals_only {
+    classes.push("approvals-only")
+  }
+  if model.show_original_args {
+    classes.push("show-original")
+  }
+  classes.join(" ")
 }
 
 ///|
@@ -1607,15 +1658,90 @@ fn error_bar(emit : @cmd.Emit[Msg], model : Model, count : Int) -> @html.Html {
 }
 
 ///|
-/// The log, or a hint when the errors-only filter would hide everything (so the
-/// pane never looks empty/broken when a clean view is filtered).
+/// The approval-audit toolbar mirrors the failure controls: request count,
+/// approval-only toggle, and previous/next request jumps. Resolutions remain
+/// visible while filtered but are not double-counted as separate approvals.
+fn approval_bar(
+  emit : @cmd.Emit[Msg],
+  model : Model,
+  count : Int,
+) -> @html.Html {
+  if count == 0 && !model.approvals_only {
+    return @html.nothing
+  }
+  let toggle_class = class_with(
+    "approval-toggle",
+    "active",
+    model.approvals_only,
+  )
+  let children : Array[@html.Html] = []
+  if count > 0 {
+    children.push(
+      @html.span(class="approval-count") <| "🔐 \{count} approval request\{plural_s(count)}",
+    )
+  }
+  children.push(
+    @html.button(
+      class=toggle_class,
+      title="Show only approval requests and decisions",
+      on_click=emit(ToggleApprovalsOnly),
+    ) <| (if model.approvals_only {
+      "Approvals only: on"
+    } else {
+      "Approvals only"
+    }),
+  )
+  if count > 0 {
+    children.push(
+      @html.button(
+        class="approval-jump",
+        title="Scroll to the previous approval request",
+        on_click=emit(JumpToApproval(-1)),
+      ) <| "↑ prev",
+    )
+    children.push(
+      @html.button(
+        class="approval-jump",
+        title="Scroll to the next approval request",
+        on_click=emit(JumpToApproval(1)),
+      ) <| "↓ next",
+    )
+  }
+  @html.div(class="approval-bar") <| children
+}
+
+///|
+/// Number of logical approval requests drawn by the active view. Resolution
+/// records are paired audit details and deliberately do not increase the count.
+fn rendered_approval_count(
+  session : @agent_session.Session,
+  mode : @viz.ViewMode,
+) -> Int {
+  if mode == ModelView {
+    return 0
+  }
+  let mut count = 0
+  for event in session.events() {
+    if event.item() is ApprovalRequested(_) {
+      count += 1
+    }
+  }
+  count
+}
+
+///|
+/// The log, or a hint when an active filter would hide everything, so the pane
+/// never looks empty or broken after selecting a different session.
 fn session_log_view(
   model : Model,
   session : @agent_session.Session,
-  count : Int,
+  error_count : Int,
+  approval_count : Int,
 ) -> @html.Html {
-  if model.errors_only && count == 0 {
+  if model.errors_only && error_count == 0 {
     @html.div(class="errors-only-empty") <| "No failed tool results in this view."
+  } else if model.approvals_only && approval_count == 0 {
+    @html.div(class="approvals-only-empty") <| "No approval requests in this view."
   } else {
     @viz.render_session(
       session,
@@ -1637,6 +1763,18 @@ fn current_error_count(model : Model) -> Int {
     system_prompt=model.system_prompt,
   )
   @viz.rendered_error_count(session, model.view_mode)
+}
+
+///|
+/// Number of approval requests in the currently loaded view.
+fn current_approval_count(model : Model) -> Int {
+  guard model.parsed is Some(parsed) else { return 0 }
+  let session = @viz.session_from_parse(
+    parsed,
+    id="",
+    system_prompt=model.system_prompt,
+  )
+  rendered_approval_count(session, model.view_mode)
 }
 
 ///|
@@ -2046,6 +2184,69 @@ fn direct_row(key : String, id : String, root_label : String) -> SessionRow {
 /// A no-op `Emit` for `update` tests that ignore the emitted commands.
 fn stub_emit() -> @cmd.Emit[Msg] {
   Emit(_ => @cmd.none)
+}
+
+///|
+fn approval_test_session() -> @agent_session.Session {
+  @agent_session.Session(SessionId("approval-test"), system_prompt="")
+  .append(
+    ApprovalRequested({
+      id: "ap-1",
+      tool_name: "shell",
+      detail: "run outside the sandbox",
+      body: Some("moon test"),
+      source: "controller",
+    }),
+  )
+  .append(
+    ApprovalResolved({
+      id: "ap-1",
+      outcome: "allowed_once",
+      source: "controller",
+    }),
+  )
+}
+
+///|
+#warnings("-alert_unstable")
+fn render_html(html : @html.Html) -> String {
+  @rabbita.render_to_string(() => @rabbita.Val::constant(html))
+}
+
+///|
+test "approval controls count requests and stay out of model view" {
+  let session = approval_test_session()
+  inspect(rendered_approval_count(session, RawLog), content="1")
+  inspect(rendered_approval_count(session, ModelView), content="0")
+  let model = { ..init_model(), view_mode: RawLog }
+  let html = render_html(approval_bar(stub_emit(), model, 1))
+  assert_true(html.contains("1 approval request"))
+  assert_true(html.contains("Approvals only"))
+  assert_true(html.contains("↑ prev"))
+  assert_true(html.contains("↓ next"))
+}
+
+///|
+test "approval and error filters are mutually exclusive" {
+  let emit = stub_emit()
+  let errors = { ..init_model(), errors_only: true }
+  let (_, approvals) = update(emit, ToggleApprovalsOnly, errors)
+  assert_true(approvals.approvals_only)
+  assert_false(approvals.errors_only)
+  let (_, errors_again) = update(emit, ToggleErrorsOnly, approvals)
+  assert_true(errors_again.errors_only)
+  assert_false(errors_again.approvals_only)
+  let (_, model_view) = update(emit, SetMode(ModelView), approvals)
+  assert_false(model_view.approvals_only)
+}
+
+///|
+test "session classes expose approval filtering and argument mode" {
+  let model = { ..init_model(), approvals_only: true, show_original_args: true }
+  inspect(
+    session_view_class(model),
+    content="session-view approvals-only show-original",
+  )
 }
 
 ///|
