@@ -2,8 +2,9 @@
 
 A [Proton](https://github.com/moonbit-community/proton) + [Rabbita](https://mooncakes.io/docs/moonbit-community/rabbita) desktop client for the OpenSeek agent, written in MoonBit.
 
-Frontend changes must follow the durable UI constraints in
-[`DESIGN.md`](DESIGN.md).
+Frontend changes must follow the durable interaction principles in
+[`UX_GUIDELINES.md`](UX_GUIDELINES.md) and the visual and component conventions
+in [`DESIGN.md`](DESIGN.md).
 
 - `main.mbt` — entry point: wires the window manifest, the IPC extensions, the per-user runtime directory, and the launch log.
 - `internal/engine/` — the native host: keeps one persistent `openseek serve` engine per conversation, streams its JSONL events to the webview, and owns where conversations live on disk (per-session workspace directories, the durable session store root, and archiving).
