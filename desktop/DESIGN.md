@@ -4,8 +4,10 @@ This document records visual and shared-component constraints that should
 remain true as the Desktop UI grows. A new feature should follow these
 constraints instead of creating a second implementation with similar behavior.
 
-For product-level interaction principles such as feedback, motion, recovery,
-and user control, see [`UX_GUIDELINES.md`](UX_GUIDELINES.md).
+For product-level interaction principles, see
+[`UX_GUIDELINES.md`](UX_GUIDELINES.md). For concrete feedback, motion, timing,
+recovery, and accessibility defaults, see
+[`UX_GUARDRAILS.md`](UX_GUARDRAILS.md).
 
 ## Visual direction
 
