@@ -147,16 +147,12 @@ fn State::with_observed_user_item(
 /// A full steer reply can install canonical items before their lifecycle
 /// notifications arrive. Reconcile every newly observed User item first so
 /// installing the turn cannot leave its display-only receipt beside it.
-fn State::with_observed_steer_turn(
-  self : State,
-  turn : CodexTurn,
-) -> State {
+fn State::with_observed_steer_turn(self : State, turn : CodexTurn) -> State {
   guard self.active_thread() is Some(active) else { return self }
   let observed_user_item_ids = active.user_item_ids(turn.id)
   let mut next = self
   for item in turn.items {
-    if item.kind == "userMessage" &&
-      !observed_user_item_ids.contains(item.id) {
+    if item.kind == "userMessage" && !observed_user_item_ids.contains(item.id) {
       if next.waiting_for_first_user_item() {
         // This decoded turn is installed immediately after reconciliation, so
         // its first new User item can authoritatively replace the older prompt

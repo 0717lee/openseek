@@ -143,15 +143,17 @@ test "the card shows the question and both answers" {
       body=Some("fn main { @myshell.Cmd(\"npm\", [\"ci\"]) }"),
     ),
   )
-  let input = test_model()
-    .replace_conversation(asked)
-    .composer_input()
+  let input = test_model().replace_conversation(asked).composer_input()
   let markup = @rabbita.render_to_string(() => {
     // Approval presentation stays inside its typed composer component. The
     // stateful composer shell itself is not server-renderable in this test.
-    @rabbita.Val::constant(@html.div(input.presentation.context.map(context => {
-      context.render(input.identity, @cmd.Emit(_ => @cmd.none))
-    })))
+    @rabbita.Val::constant(
+      @html.div(
+        input.presentation.context.map(context => {
+          context.render(input.identity, @cmd.Emit(_ => @cmd.none))
+        }),
+      ),
+    )
   })
   assert_true(markup.contains("run this snippet with no sandbox policy"))
   assert_true(markup.contains("Allow once"))
@@ -217,9 +219,13 @@ test "an answered card offers no second decision" {
   let input = answered.composer_input()
   let markup = @rabbita.render_to_string(() => {
     // Exercise the same typed context component used by the application.
-    @rabbita.Val::constant(@html.div(input.presentation.context.map(context => {
-      context.render(input.identity, @cmd.Emit(_ => @cmd.none))
-    })))
+    @rabbita.Val::constant(
+      @html.div(
+        input.presentation.context.map(context => {
+          context.render(input.identity, @cmd.Emit(_ => @cmd.none))
+        }),
+      ),
+    )
   })
   assert_true(markup.contains("Sending…"))
   assert_false(markup.contains("Allow once"))

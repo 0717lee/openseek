@@ -535,11 +535,7 @@ fn State::with_turn_start_reply(self : State, value : Json) -> State {
     fields.get("turn") is Some(turn) &&
     CodexTurn::decode(turn) is Some(turn) &&
     self.active_thread() is Some(active) {
-    {
-      ..self,
-      selection: CodexStoredTask(active.with_turn(turn)),
-      draft: "",
-    }
+    { ..self, selection: CodexStoredTask(active.with_turn(turn)), draft: "" }
   } else {
     { ..self, draft: "" }
   }
@@ -841,9 +837,7 @@ test "Codex steer failure preserves an older first-prompt receipt" {
     ..State::from_thread_snapshot({
       "thread": {
         "id": "thread-1",
-        "turns": [
-          { "id": "turn-1", "status": "inProgress", "items": [] },
-        ],
+        "turns": [{ "id": "turn-1", "status": "inProgress", "items": [] }],
       },
     }),
     connection: CodexReady,
@@ -863,10 +857,7 @@ test "Codex steer failure preserves an older first-prompt receipt" {
   )
   let (_, accepted_first) = update(
     dispatch,
-    Reply(
-      kind=CodexTurnSteerReply("thread-1"),
-      value={ "turnId": "turn-1" },
-    ),
+    Reply(kind=CodexTurnSteerReply("thread-1"), value={ "turnId": "turn-1" }),
     sending_first,
     @interop.ChannelId::Local,
     open_external,
@@ -996,10 +987,7 @@ test "Codex steer receipts reconcile duplicate text by item id and FIFO" {
 
   let (_, accepted_first) = update(
     dispatch,
-    Reply(
-      kind=CodexTurnSteerReply("thread-1"),
-      value={ "turnId": "turn-1" },
-    ),
+    Reply(kind=CodexTurnSteerReply("thread-1"), value={ "turnId": "turn-1" }),
     sending_first,
     @interop.ChannelId::Local,
     open_external,

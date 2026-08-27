@@ -930,8 +930,7 @@ fn CodexReplyKind::foreground(self : CodexReplyKind) -> CodexForeground? {
     CodexDraftThreadReply(id) => Some(CodexDraftStartForeground(id))
     CodexTurnStartReply(id)
     | CodexTurnSteerReply(id)
-    | CodexWorktreeTurnReply(id, _) =>
-      Some(CodexTurnForeground(id))
+    | CodexWorktreeTurnReply(id, _) => Some(CodexTurnForeground(id))
     CodexWorktreeRepairReply(id, _) => Some(CodexWorktreeRepairForeground(id))
     CodexLoginReply => Some(CodexLoginForeground)
     CodexCancelLoginReply(id) => Some(CodexCancelLoginForeground(id))
