@@ -1,8 +1,9 @@
 # bobzhang/openseek
 
-OpenSeek is a small MoonBit foundation for a DeepSeek-backed coding agent. The
-module is split into pure data, HTTP transport, agent orchestration, and a CLI
-entry point so request encoding can be tested without network access.
+OpenSeek is a small MoonBit foundation for an OpenAI-compatible coding agent
+supporting DeepSeek, Kimi, and Z.AI GLM models. The module is split into pure
+data, HTTP transport, agent orchestration, and a CLI entry point so request
+encoding can be tested without network access.
 
 For a picture of how the pieces fit together — module architecture, the core
 data model, and the life of one agent turn — see
@@ -54,8 +55,8 @@ git submodule update --init editor/vscode     # opt-in performance suite
 | Package | Purpose | Docs |
 | --- | --- | --- |
 | `bobzhang/openseek` | Root package and module overview. | `README.mbt.md` |
-| `bobzhang/openseek/deepseek` | Pure DeepSeek chat data, JSON encoding, and response decoding. | `deepseek/README.mbt.md` |
-| `bobzhang/openseek/deepseek/client` | Native-only HTTP transport for DeepSeek chat completions. | `deepseek/client/README.mbt.md` |
+| `bobzhang/openseek/deepseek` | Pure chat data, provider-aware JSON encoding, and response decoding. | `deepseek/README.mbt.md` |
+| `bobzhang/openseek/deepseek/client` | Native-only HTTP transport for supported chat-completions providers. | `deepseek/client/README.mbt.md` |
 | `bobzhang/openseek/agent_runtime` | Native-only agent task-group and extensible runtime event queue. | `agent_runtime/README.mbt.md` |
 | `bobzhang/openseek/agent_session` | Typed durable conversation state and DeepSeek message projection. | `agent_session/README.mbt.md` |
 | `bobzhang/openseek/agent_session/store` | Native filesystem-backed append-only session store. | `agent_session/store/README.mbt.md` |
@@ -149,11 +150,19 @@ export KIMI=sk-...
 moon run cmd/openseek -- --model kimi-k2.7-code-highspeed run "inspect this project"
 ```
 
+For Z.AI GLM models, set `GLM`:
+
+```bash
+export GLM=...
+moon run cmd/openseek -- --model glm-5.3 run "inspect this project"
+```
+
 `OPENSEEK_MODEL` is optional and defaults to `deepseek-v4-pro`.
 `OPENSEEK_MAX_STEPS` is optional; when omitted, turns are bounded by the
 model's context window (a checkpoint summary carries each turn into the
-next) rather than a step count. Pass `--max-steps` to cap steps for one run. `--thinking no|high|max` controls DeepSeek
-thinking mode and effort (default: max).
+next) rather than a step count. Pass `--max-steps` to cap steps for one run.
+`--thinking no|high|max` controls thinking mode and effort (default: max); GLM
+maps `no` to its lowest supported effort because GLM 5.3 always reasons.
 Pass `--dir <workspace>` to run one-shot commands against another workspace
 while still launching from the current shell. The default is `.`; if the final
 directory component is missing and its parent exists, OpenSeek creates it and

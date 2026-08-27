@@ -1,10 +1,11 @@
 # DeepSeek Client
 
-This package is the effectful HTTP transport for DeepSeek chat completions. It
-uses `bobzhang/openseek/deepseek` for typed models, messages, tool definitions,
-request JSON encoding, and response JSON decoding.
+This package is the effectful HTTP transport for DeepSeek-, Kimi-, and
+Z.AI-compatible chat completions. It uses `bobzhang/openseek/deepseek` for typed
+models, messages, tool definitions, request JSON encoding, and response JSON
+decoding.
 
-Use this package when code needs to call the real DeepSeek API. Keep pure
+Use this package when code needs to call a supported provider API. Keep pure
 request/response tests in `bobzhang/openseek/deepseek`; use this package for
 transport behavior such as retries, HTTP errors, and streaming.
 
@@ -31,6 +32,8 @@ model is `deepseek-v4-pro`, and `thinking=No` is sent unless a different mode is
 provided. Kimi K2.7 Code models default to
 `https://api.moonshot.cn/v1/chat/completions` and omit DeepSeek-specific
 thinking fields when the request body is encoded.
+Z.AI GLM models default to `https://api.z.ai/api/paas/v4/chat/completions`;
+GLM 5.3 always reasons, so `thinking=No` maps to `reasoning_effort=low`.
 
 Retries cover transient failures: transport errors, HTTP 429, and HTTP 5xx.
 Other HTTP 4xx responses fail immediately. `retry_attempts` counts total tries;
@@ -71,7 +74,7 @@ Without `stream`, `Client::chat` builds the same JSON body as
 configuration, then posts it to `api_url` with `Content-Type:
 application/json` and bearer authorization.
 
-Use `tools=[...]` when the model may request native DeepSeek function calls.
+Use `tools=[...]` when the model may request native function calls.
 Use `response_format=JsonObject` only when the assistant content itself must be
 a JSON object.
 
@@ -215,5 +218,6 @@ The blackbox test suite includes a real DeepSeek API smoke test when `DEEPSEEK`
 is set. Kimi smoke tests are opt-in: set `KIMI` to a Kimi API key. The normal
 Kimi smoke also uses `OPENSEEK_MODEL` to choose the Kimi model; streaming,
 tool-call, and multi-turn reasoning-content smokes use `kimi-k2.7-code`.
+The GLM streaming tool-call smoke test runs when `GLM` is set.
 Without those environment variables, the smoke tests print skip messages and
 return successfully.

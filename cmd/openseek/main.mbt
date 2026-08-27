@@ -1376,18 +1376,25 @@ test "cli defaults model and max steps" {
 }
 
 ///|
-test "cli uses KIMI only for Kimi models" {
+test "cli uses provider API keys only for their models" {
   let kimi = run_matches(argv=["write", "MoonBit"], env={
     "KIMI": "kimi-key",
     "OPENSEEK_MODEL": "kimi-k2.7-code-highspeed",
   })
   let kimi_model : @deepseek.Model = Kimi(K27CodeHighSpeed)
   assert_eq(kimi_model.api_key(kimi.values), Some("kimi-key"))
+  let glm = run_matches(argv=["write", "MoonBit"], env={
+    "GLM": "glm-key",
+    "OPENSEEK_MODEL": "glm-5.3-flash",
+  })
+  let glm_model : @deepseek.Model = Glm(G53Flash)
+  assert_eq(glm_model.api_key(glm.values), Some("glm-key"))
   let deepseek = run_matches(argv=["write", "MoonBit"], env={
     "KIMI": "kimi-key",
+    "GLM": "glm-key",
   })
-  // KIMI is not a fallback for a DeepSeek model: no arm matches, so the
-  // caller sees `None` and reports it.
+  // Provider keys are not fallbacks for a DeepSeek model: no arm matches, so
+  // the caller sees `None` and reports it.
   let deepseek_model : @deepseek.Model = Deepseek(V4Pro)
   assert_true(deepseek_model.api_key(deepseek.values) is None)
 }

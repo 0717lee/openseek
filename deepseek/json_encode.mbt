@@ -1,12 +1,48 @@
 ///|
+/// Provider-specific thinking fields for a chat-completions request.
+///
+/// GLM-5.3 models cannot disable thinking. Map OpenSeek's lowest setting to
+/// GLM's `low` effort and preserve complete reasoning across agent tool turns.
+fn thinking_json_fields(
+  model : Model,
+  thinking : ThinkingMode?,
+) -> Array[(String, Json)] {
+  match (model, thinking) {
+    (Kimi(_), _) | (_, None) => []
+    (Glm(_), Some(mode)) => {
+      let effort = match mode {
+        No => "low"
+        High => "high"
+        Max => "max"
+      }
+      [
+        ("thinking", ({ "type": "enabled", "clear_thinking": false } : Json)),
+        ("reasoning_effort", Json::string(effort)),
+      ]
+    }
+    (_, Some(No)) => [("thinking", ({ "type": "disabled" } : Json))]
+    (_, Some(High)) =>
+      [
+        ("thinking", ({ "type": "enabled" } : Json)),
+        ("reasoning_effort", Json::string("high")),
+      ]
+    (_, Some(Max)) =>
+      [
+        ("thinking", ({ "type": "enabled" } : Json)),
+        ("reasoning_effort", Json::string("max")),
+      ]
+  }
+}
+
+///|
 /// Encodes a `ChatMessage` as a chat-completions `messages[]` entry.
 ///
 /// Assistant messages whose `content` is empty but carry tool calls are
 /// encoded with JSON `content: null`, as the API requires.
 ///
 /// Assistant `reasoning_content` is always replayed: DeepSeek requires it
-/// when tools are enabled and ignores it otherwise, and Kimi K2.7 Code
-/// always requires it.
+/// when tools are enabled and ignores it otherwise, Kimi K2.7 Code always
+/// requires it, and GLM coding-agent requests use preserved thinking.
 ///
 /// See: https://api-docs.deepseek.com/guides/thinking_mode#thinking-mode-with-tool-calls
 /// See: https://platform.kimi.ai/docs/guide/use-kimi-k2-thinking-model#using-the-kimi-k2-7-code-model
@@ -93,23 +129,7 @@ pub fn encode_chat_request(
         ..if tools.length() > 0 {
           [("tools", ([ for tool in tools => tool ] : Json))]
         },
-        // Kimi K2.7 Code documentation says not to pass `thinking`.
-        // https://platform.kimi.ai/docs/guide/use-kimi-k2-thinking-model#using-the-kimi-k2-7-code-model
-        ..if !(model is Kimi(_)) && thinking is Some(mode) {
-          match mode {
-            No => [("thinking", ({ "type": "disabled" } : Json))]
-            High =>
-              [
-                ("thinking", ({ "type": "enabled" } : Json)),
-                ("reasoning_effort", Json::string("high")),
-              ]
-            Max =>
-              [
-                ("thinking", ({ "type": "enabled" } : Json)),
-                ("reasoning_effort", Json::string("max")),
-              ]
-          }
-        },
+        ..thinking_json_fields(model, thinking),
       ],
     ),
   )
