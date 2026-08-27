@@ -32,10 +32,9 @@ test "Search view groups files and marks matching UTF-16 slices" {
   let state = State::empty()
     .handle(QueryChanged("moon"), input)
     .handle(Submit, input)
-  let page = state
   let reply : @protocol.SearchTextReply = {
     root: root.path,
-    request_id: page.request_id,
+    request_id: state.request_id,
     matches: [
       {
         path: "src/main.mbt",
@@ -58,7 +57,7 @@ test "Search view groups files and marks matching UTF-16 slices" {
     cancelled: false,
     error: None,
   }
-  let ready = state.handle(Loaded(request_id=page.request_id, reply~), input)
+  let ready = state.handle(Loaded(reply~), input)
   let html = render_search(ready, input)
   assert_true(html.contains(">main.mbt</span>"))
   assert_true(html.contains(">src</span>"))
@@ -78,7 +77,6 @@ test "large Search replies render incrementally without changing totals" {
   let state = State::empty()
     .handle(QueryChanged("moon"), input)
     .handle(Submit, input)
-  let page = state
   let result : @protocol.TextSearchMatch = {
     path: "src/main.mbt",
     line_number: 7,
@@ -88,7 +86,7 @@ test "large Search replies render incrementally without changing totals" {
   }
   let reply : @protocol.SearchTextReply = {
     root: root.path,
-    request_id: page.request_id,
+    request_id: state.request_id,
     matches: Array::make(501, result),
     match_count: 501,
     file_count: 1,
@@ -96,7 +94,7 @@ test "large Search replies render incrementally without changing totals" {
     cancelled: false,
     error: None,
   }
-  let ready = state.handle(Loaded(request_id=page.request_id, reply~), input)
+  let ready = state.handle(Loaded(reply~), input)
   let initial = render_search(ready, input)
   assert_true(initial.contains("501 results in 1 files"))
   assert_true(initial.contains("Show 1 more matching lines"))

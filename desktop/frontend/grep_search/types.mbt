@@ -70,12 +70,34 @@ pub fn EditorHighlights::ranges(
 
 ///|
 pub fn State::empty() -> State {
-  State::fresh(@uuid.mint())
+  {
+    mode: Text,
+    query: "",
+    regex: false,
+    case_sensitive: false,
+    whole_word: false,
+    details_open: false,
+    include_glob: "",
+    exclude_glob: "",
+    patterns: [""],
+    matches: [],
+    semantic_hits: [],
+    match_count: 0,
+    file_count: 0,
+    limit_hit: false,
+    partial: false,
+    collapsed: Map([]),
+    visible_lines: InitialVisibleSearchLines,
+    phase: Idle,
+    request_id: @uuid.mint(),
+    delay_ms: SearchDebounceMs,
+  }
 }
 
 ///|
-/// Expose the current request UUID to the owning file-editor package. Replies
-/// use this UUID directly, without echoing the conversation or checkout root.
+/// The UUID the next reply must carry. Production replies arrive through
+/// `subscription`; this exists so the owning file-editor package's tests can
+/// hand the state a `Loaded` reply without reaching into it.
 pub fn State::request_id(self : State) -> String {
   self.request_id
 }
@@ -115,8 +137,9 @@ pub(all) enum Msg {
   ShowMore
   ToggleFile(String)
   RequestStarted(request_id~ : String)
-  Loaded(request_id~ : String, reply~ : @protocol.SearchTextReply)
-  SemanticLoaded(request_id~ : String, reply~ : @protocol.SearchSemanticReply)
+  // The Host echoes the request UUID it answers inside the reply.
+  Loaded(reply~ : @protocol.SearchTextReply)
+  SemanticLoaded(reply~ : @protocol.SearchSemanticReply)
   // One partial batch of a semantic search still in flight. The Host pushes
   // these through the notification channel so a long scan paints hits early;
   // the final `SemanticLoaded` reply replaces them. The request UUID fences

@@ -110,9 +110,9 @@ fn search_request_loader(
                 ),
               )
             LoadedReply::TextLoaded(reply) =>
-              scheduler.add(emit(Loaded(request_id~, reply~)))
+              scheduler.add(emit(Loaded(reply~)))
             LoadedReply::SemanticLoaded(reply) =>
-              scheduler.add(emit(SemanticLoaded(request_id~, reply~)))
+              scheduler.add(emit(SemanticLoaded(reply~)))
           }
         }
       })
@@ -147,19 +147,18 @@ pub fn State::subscription(
   input : Input,
   emit : @cmd.Emit[Msg],
 ) -> @sub.Sub {
-  let state = self
-  guard (state.phase is Debouncing || state.phase is Loading) &&
+  guard (self.phase is Debouncing || self.phase is Loading) &&
     input.root is Some(root) &&
     @resource.belongs_to(root, input.owner.channel) else {
     return @sub.none
   }
-  let request = match state.mode {
+  let request = match self.mode {
     Text =>
-      state
+      self
       .text_request_payload(input)
       .map(payload => SearchRequest::Text(payload))
     Semantic =>
-      state
+      self
       .semantic_request_payload(input)
       .map(payload => SearchRequest::Semantic(payload))
   }
@@ -167,7 +166,7 @@ pub fn State::subscription(
   @sub.custom_sub(
     "grep-search:\{request.request_id()}",
     Local,
-    SearchRequestSub::SearchRequest(input.owner, request, state.delay_ms, emit),
+    SearchRequestSub::SearchRequest(input.owner, request, self.delay_ms, emit),
     @sub.SubLoader(search_request_loader),
   )
 }
