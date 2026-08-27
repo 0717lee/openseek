@@ -51,6 +51,7 @@ test "transcript markup exposes conversation identity" {
     source=OpenSeek,
     focused=@interop.ChannelId::Remote("relay-a"),
     active_session="same-markup-chat",
+    active_run_id="run-a",
     root=Some(root),
     submission_generation=7,
     items=[],
@@ -69,12 +70,15 @@ test "transcript markup exposes conversation identity" {
   let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
   assert_true(markup.contains("data-transcript-channel=\"remote.relay-a\""))
   assert_true(markup.contains("data-transcript-session=\"same-markup-chat\""))
+  assert_true(markup.contains("data-transcript-run=\"run-a\""))
   assert_true(
     markup.contains(
       "data-transcript-root=\"openseek://remote.relay-a/work/project\"",
     ),
   )
   assert_true(markup.contains("data-transcript-submission=\"7\""))
+  assert_true(markup.contains("id=\"live-reasoning-host\""))
+  assert_false(markup.contains("activity-thinking-live"))
 }
 
 ///|
@@ -110,7 +114,6 @@ test "transcript stream children use stable typed keys in display order" {
   )
   let renderer : TranscriptRenderer = {
     input,
-    live_reasoning: None,
     on_open: _ => @cmd.none,
     on_jump: _ => @cmd.none,
   }
@@ -251,7 +254,6 @@ test "durable assistant sequences render as separate foldable steps" {
   )
   let renderer : TranscriptRenderer = {
     input,
-    live_reasoning: None,
     on_open: _ => @cmd.none,
     on_jump: _ => @cmd.none,
   }
@@ -284,7 +286,7 @@ test "durable assistant sequences render as separate foldable steps" {
 
 ///|
 #warnings("-alert_unstable")
-test "live step hands off to its durable assistant card key" {
+test "a committed reasoning step takes the next durable activity key" {
   let user : VisibleRow = {
     item: { kind: User, content: "question", ts: None, sequence: Some(1) },
     identity: "s1\u{0}o0",
@@ -315,26 +317,12 @@ test "live step hands off to its durable assistant card key" {
     streaming_response=None,
     streaming_identity="r7",
   )
-  let live_renderer : TranscriptRenderer = {
+  let renderer : TranscriptRenderer = {
     input: live_input,
-    live_reasoning: Some("next thought"),
     on_open: _ => @cmd.none,
     on_jump: _ => @cmd.none,
   }
-  let live = live_renderer.stream_children()
-  let first_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(live["activity\u{0}after\u{0}s1\u{0}o0"])
-  })
-  assert_true(first_markup.contains(step_summary(1, "Read moon.mod")))
-  assert_true(first_markup.contains("<details class=\"activity\""))
   let handoff_key = "activity\u{0}after\u{0}s2\u{0}o0"
-  assert_true(live.get(handoff_key) is Some(_))
-  let live_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(live[handoff_key])
-  })
-  assert_true(live_markup.contains(step_summary(2, "Thinking…")))
-  assert_true(live_markup.contains("<details class=\"activity\" open"))
-
   let settled_input = {
     ..live_input,
     items: [
@@ -360,11 +348,7 @@ test "live step hands off to its durable assistant card key" {
       },
     ],
   }
-  let settled = {
-    ..live_renderer,
-    input: settled_input,
-    live_reasoning: None,
-  }.stream_children()
+  let settled = { ..renderer, input: settled_input }.stream_children()
   assert_true(settled.get(handoff_key) is Some(_))
   let settled_markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(settled[handoff_key])
@@ -376,7 +360,7 @@ test "live step hands off to its durable assistant card key" {
 
 ///|
 #warnings("-alert_unstable")
-test "commit-first reasoning may temporarily show durable and live cards" {
+test "durable transcript never synthesizes a live reasoning card" {
   let rows : Array[VisibleRow] = [
     {
       item: { kind: User, content: "question", ts: None, sequence: Some(1) },
@@ -446,18 +430,12 @@ test "commit-first reasoning may temporarily show durable and live cards" {
     streaming_identity="r7",
   )
   let children = (
-    {
-      input,
-      live_reasoning: Some("complete"),
-      on_open: _ => @cmd.none,
-      on_jump: _ => @cmd.none,
-    } :
+    { input, on_open: _ => @cmd.none, on_jump: _ => @cmd.none } :
     TranscriptRenderer).stream_children()
   let keys = children.to_array().map(pair => pair.0)
   assert_eq(keys, [
     "row\u{0}s1\u{0}o0", "rule\u{0}s1\u{0}o0", "activity\u{0}after\u{0}s1\u{0}o0",
     "row\u{0}s2\u{0}o1", "activity\u{0}after\u{0}s2\u{0}o1", "row\u{0}s3\u{0}o1",
-    "activity\u{0}after\u{0}s3\u{0}o1",
   ])
   let markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(children["activity\u{0}after\u{0}s1\u{0}o0"])
@@ -473,17 +451,11 @@ test "commit-first reasoning may temporarily show durable and live cards" {
   assert_true(later_markup.contains("later thought"))
   assert_false(later_markup.contains("activity-thinking-live"))
   assert_false(later_markup.contains("#3"))
-  let live_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(children["activity\u{0}after\u{0}s3\u{0}o1"])
-  })
-  assert_true(live_markup.contains(step_summary(3, "Thinking…")))
-  assert_true(live_markup.contains("complete"))
-  assert_true(live_markup.contains("activity-thinking-live"))
 }
 
 ///|
 #warnings("-alert_unstable")
-test "live reasoning is plain text and keeps the durable activity key" {
+test "committed reasoning uses Markdown in its durable activity card" {
   let user : VisibleRow = {
     item: { kind: User, content: "question", ts: None, sequence: Some(1) },
     identity: "s1\u{0}o0",
@@ -498,21 +470,6 @@ test "live reasoning is plain text and keeps the durable activity key" {
     streaming_response=None,
     streaming_identity="r7",
   )
-  let live_renderer : TranscriptRenderer = {
-    input: live_input,
-    live_reasoning: Some("*unfinished*\nnext"),
-    on_open: _ => @cmd.none,
-    on_jump: _ => @cmd.none,
-  }
-  let live_children = live_renderer.stream_children()
-  assert_true(live_children.get("activity\u{0}after\u{0}s1\u{0}o0") is Some(_))
-  let live_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(live_children["activity\u{0}after\u{0}s1\u{0}o0"])
-  })
-  assert_true(live_markup.contains("*unfinished*\nnext"))
-  assert_false(live_markup.contains("<em>unfinished</em>"))
-  assert_true(live_markup.contains("<details class=\"activity\" open"))
-
   let settled = {
     ..live_input,
     items: [
@@ -537,10 +494,10 @@ test "live reasoning is plain text and keeps the durable activity key" {
       },
     ],
   }
-  let settled_renderer = {
-    ..live_renderer,
+  let settled_renderer : TranscriptRenderer = {
     input: settled,
-    live_reasoning: None,
+    on_open: _ => @cmd.none,
+    on_jump: _ => @cmd.none,
   }
   let settled_children = settled_renderer.stream_children()
   assert_true(

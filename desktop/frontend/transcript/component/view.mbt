@@ -908,7 +908,6 @@ fn streaming_response_view(
 ///|
 fn transcript_view(
   input : Input,
-  live_reasoning? : String,
   pinned~ : Bool,
   overview~ : @transcript_overview.State,
   overview_emit~ : @cmd.Emit[@transcript_overview.Msg],
@@ -916,7 +915,7 @@ fn transcript_view(
   on_jump : (@mention_context.Target) -> @cmd.Cmd,
   on_jump_latest~ : @cmd.Cmd,
 ) -> @html.Html {
-  let renderer : TranscriptRenderer = { input, live_reasoning, on_open, on_jump }
+  let renderer : TranscriptRenderer = { input, on_open, on_jump }
   let children = renderer.section_children(
     pinned, overview, overview_emit, on_jump_latest,
   )
@@ -931,6 +930,7 @@ fn transcript_view(
       .data_set("transcript-source", input.source.wire())
       .data_set("transcript-channel", input.focused.uri_authority())
       .data_set("transcript-session", input.active_session)
+      .data_set("transcript-run", input.active_run_id.unwrap_or(""))
       .data_set(
         "transcript-root",
         input.root.map(uri => uri.to_string()).unwrap_or(""),

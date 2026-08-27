@@ -1560,6 +1560,10 @@ fn update(
   dispatch : @cmd.Emit[Msg],
   msg : Msg,
   model : Model,
+  // Production supplies the transcript's component-local controller. Unit
+  // tests exercise the pure model transition without running bridge commands,
+  // so they may omit this command target.
+  live_reasoning? : @transcript_component.LiveReasoning,
 ) -> (@cmd.Cmd, Model) {
   let previous = model
   let (cmd, model) = update_msg(dispatch, msg, model)
@@ -1683,7 +1687,13 @@ fn update(
     terminal_emit,
     terminal_input,
     (channel, websocket_epoch) => {
-      install_bridge(dispatch, terminal_emit, channel, websocket_epoch)
+      match live_reasoning {
+        Some(live_reasoning) =>
+          install_bridge(
+            dispatch, terminal_emit, live_reasoning, channel, websocket_epoch,
+          )
+        None => @cmd.none
+      }
     },
   )
   let model = { ..model, terminal, }

@@ -6,30 +6,79 @@
 // decoders below.
 
 ///|
-/// Decode one host notification into the owner that consumes it. Raw terminal
-/// output goes straight to the terminal package's emulator command: it changes
-/// neither terminal state nor application state, so sending it through either
-/// Rabbita update loop would only redraw unrelated UI. Terminal lifecycle
-/// events still use the terminal emitter because they do change its root-owned
-/// state; everything else uses the app emitter.
+/// Decode one host notification into the owner that consumes it. Terminal
+/// output uses a component command, while live reasoning calls its controller
+/// directly and returns `None`. That distinction matters: Rabbita flushes the
+/// root VDOM after every command added to its scheduler, even when the command
+/// does not update a model. Durable and lifecycle notifications still return a
+/// root command.
 fn host_notification(
   terminal : @cmd.Emit[@terminal.Msg],
   app_emit : @cmd.Emit[Msg],
+  live_reasoning : @transcript_component.LiveReasoning,
   channel : @interop.ChannelId,
+  websocket_epoch : Int,
   notification : @protocol.Notification,
-) -> @cmd.Cmd {
+) -> @cmd.Cmd? {
   match notification {
     TerminalOutput(payload) =>
-      @terminal.output(channel, payload.id, payload.sequence, payload.data)
+      Some(
+        @terminal.output(channel, payload.id, payload.sequence, payload.data),
+      )
     TerminalExit(payload) =>
       match terminal_exit_msg(channel, payload) {
-        Some(msg) => terminal(msg)
-        None => @cmd.none
+        Some(msg) => Some(terminal(msg))
+        None => None
+      }
+    AgentConnected(_) => {
+      live_reasoning.connection_opened(channel, websocket_epoch)
+      Some(app_emit(FromDevice(channel, BridgeReady)))
+    }
+    AgentEvent(payload) =>
+      match engine_msg(payload) {
+        Some(Engine(run_id, ReasoningDelta(content), session=Some(session))) => {
+          live_reasoning.delta(
+            channel~,
+            websocket_epoch~,
+            session~,
+            run_id~,
+            content~,
+          )
+          None
+        }
+        Some(Engine(run_id, ReasoningMessage(_), session=Some(session))) => {
+          live_reasoning.finish(channel~, websocket_epoch~, session~, run_id~)
+          None
+        }
+        Some(Engine(run_id, AgentStep(_), session=Some(session)) as msg) => {
+          live_reasoning.finish(channel~, websocket_epoch~, session~, run_id~)
+          Some(app_emit(FromDevice(channel, msg)))
+        }
+        Some(msg) => Some(app_emit(FromDevice(channel, msg)))
+        None => None
+      }
+    AgentError(payload) =>
+      match error_msg(payload) {
+        Some(Error(run_id=Some(run_id), ..) as msg) => {
+          live_reasoning.finish_run(channel~, websocket_epoch~, run_id~)
+          Some(app_emit(FromDevice(channel, msg)))
+        }
+        Some(msg) => Some(app_emit(FromDevice(channel, msg)))
+        None => None
+      }
+    AgentFinished(payload) =>
+      match finished_msg(payload) {
+        Some(Finished(run_id~, ..) as msg) => {
+          live_reasoning.finish_run(channel~, websocket_epoch~, run_id~)
+          Some(app_emit(FromDevice(channel, msg)))
+        }
+        Some(msg) => Some(app_emit(FromDevice(channel, msg)))
+        None => None
       }
     _ =>
       match bridge_msg(channel, notification) {
-        Some(msg) => app_emit(msg)
-        None => @cmd.none
+        Some(msg) => Some(app_emit(msg))
+        None => None
       }
   }
 }
@@ -40,12 +89,14 @@ fn host_notification(
 fn install_bridge(
   app_emit : @cmd.Emit[Msg],
   terminal : @cmd.Emit[@terminal.Msg],
+  live_reasoning : @transcript_component.LiveReasoning,
   channel : @interop.ChannelId,
   websocket_epoch : Int,
 ) -> @cmd.Cmd {
   match channel {
-    Local => install_proton_bridge(app_emit, terminal, 0)
-    Remote(device) => connect_ws(app_emit, terminal, device, websocket_epoch)
+    Local => install_proton_bridge(app_emit, terminal, live_reasoning, 0)
+    Remote(device) =>
+      connect_ws(app_emit, terminal, live_reasoning, device, websocket_epoch)
   }
 }
 
@@ -291,6 +342,7 @@ let bridge_events_wired : Ref[Bool] = Ref(false)
 fn install_proton_bridge(
   dispatch : @cmd.Emit[Msg],
   terminal : @cmd.Emit[@terminal.Msg],
+  live_reasoning : @transcript_component.LiveReasoning,
   attempt : Int,
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
@@ -311,7 +363,15 @@ fn install_proton_bridge(
         )
       } else {
         scheduler.add(
-          @cmd.delay(install_proton_bridge(dispatch, terminal, attempt + 1), 25),
+          @cmd.delay(
+            install_proton_bridge(
+              dispatch,
+              terminal,
+              live_reasoning,
+              attempt + 1,
+            ),
+            25,
+          ),
         )
       }
       return
@@ -319,7 +379,7 @@ fn install_proton_bridge(
     if !bridge_events_wired.val {
       bridge_events_wired.val = true
       wire_proton_events(
-        scheduler, dispatch, terminal, extension_events, application_events,
+        scheduler, dispatch, terminal, live_reasoning, extension_events, application_events,
       )
       open_host_connection(scheduler, dispatch, request_api)
     }
@@ -584,6 +644,7 @@ fn wire_proton_events(
   scheduler : &@cmd.Scheduler,
   dispatch : @cmd.Emit[Msg],
   terminal : @cmd.Emit[@terminal.Msg],
+  live_reasoning : @transcript_component.LiveReasoning,
   extension_events : @js.Value,
   application_events : @js.Value,
 ) -> Unit {
@@ -607,7 +668,18 @@ fn wire_proton_events(
         is Some(notification) else {
         return
       }
-      scheduler.add(host_notification(terminal, dispatch, Local, notification))
+      match
+        host_notification(
+          terminal,
+          dispatch,
+          live_reasoning,
+          Local,
+          0,
+          notification,
+        ) {
+        Some(command) => scheduler.add(command)
+        None => ()
+      }
     }
     let _ : @js.Value = extension_events.apply_with_string("on", [
       @js.Value::cast_from("openseek." + method_),
@@ -674,6 +746,7 @@ const WsLostAfter = 3
 fn connect_ws(
   dispatch : @cmd.Emit[Msg],
   terminal : @cmd.Emit[@terminal.Msg],
+  live_reasoning : @transcript_component.LiveReasoning,
   device : String,
   websocket_epoch : Int,
 ) -> @cmd.Cmd {
@@ -682,11 +755,16 @@ fn connect_ws(
     @interop.ws_connect(
       device,
       on_notification=notification => {
-        scheduler.add(
-          host_notification(terminal, dispatch, channel, notification),
-        )
+        match
+          host_notification(
+            terminal, dispatch, live_reasoning, channel, websocket_epoch, notification,
+          ) {
+          Some(command) => scheduler.add(command)
+          None => ()
+        }
       },
       on_down=() => {
+        live_reasoning.connection_closed(channel, websocket_epoch)
         scheduler.add(
           dispatch(FromDevice(channel, ChannelDown(websocket_epoch~))),
         )
