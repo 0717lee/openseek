@@ -116,7 +116,7 @@ fn decode_edit(fields : Map[String, Json], path_key~ : String) -> EditDiff? {
     ],
     dramatized=["old_string", "new_string"],
   )
-  Some({ chips, diff: @edit_diff.generate(old, new) })
+  Some({ chips, diff: @edit_diff.generate(old, new), })
 }
 
 ///|

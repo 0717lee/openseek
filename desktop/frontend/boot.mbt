@@ -230,7 +230,7 @@ fn SidebarDispatcher::conversation_delete(
     return self.unroutable("delete", "\{id.source()}@\{id.channel()}")
   }
   self.emit(
-    DeleteArchivedSession(channel, { session: id.conversation(), workspace }),
+    DeleteArchivedSession(channel, { session: id.conversation(), workspace, }),
   )
 }
 

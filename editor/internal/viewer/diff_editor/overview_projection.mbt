@@ -28,7 +28,7 @@ fn diff_overview_viewport_geometry(
   state.set_visible_size(viewport_height) |> ignore
   state.set_scroll_size(scroll_height) |> ignore
   state.set_scroll_position(scroll_top) |> ignore
-  { top: state.slider_position(), height: state.slider_size() }
+  { top: state.slider_position(), height: state.slider_size(), }
 }
 
 ///|

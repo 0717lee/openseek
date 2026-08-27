@@ -55,7 +55,7 @@ fn SessionListItem::tree_key(
   self : SessionListItem,
   session : String,
 ) -> SessionTreeKey {
-  { session, workspace: self.workspace.path }
+  { session, workspace: self.workspace.path, }
 }
 
 ///|
@@ -109,7 +109,7 @@ pub fn session_tree(items : Array[SessionListItem]) -> Array[SessionTreeRow] {
     match item.tree_fold_target(listed) {
       None => {
         row_at[item.tree_key(item.id)] = rows.length()
-        rows.push({ item, children: [] })
+        rows.push({ item, children: [], })
       }
       Some((root, path)) => folded.push((path, root, item))
     }
@@ -136,7 +136,7 @@ pub fn session_tree(items : Array[SessionListItem]) -> Array[SessionTreeRow] {
       // `fold_target` only walks through listed parents, so the root it
       // stops at owns a row. Unreachable, and a row rather than a drop if it
       // ever is reached: a session the store holds stays visible.
-      None => rows.push({ item, children: [] })
+      None => rows.push({ item, children: [], })
     }
   }
   rows
@@ -290,7 +290,7 @@ pub fn apply_session_item(
     @desktop_protocol.User(payload) => {
       let content = payload.content.trim().to_owned()
       if !content.is_empty() {
-        items.push({ kind: User, content, ts, sequence })
+        items.push({ kind: User, content, ts, sequence, })
       }
     }
     @desktop_protocol.Assistant(payload) => {
@@ -303,7 +303,7 @@ pub fn apply_session_item(
       if !is_replay && payload.reasoning_content is Some(reasoning) {
         let reasoning = reasoning.trim().to_owned()
         if !reasoning.is_empty() {
-          items.push({ kind: Reasoning, content: reasoning, ts, sequence })
+          items.push({ kind: Reasoning, content: reasoning, ts, sequence, })
         }
       }
       let content = payload.content.trim().to_owned()
@@ -491,7 +491,7 @@ pub fn apply_session_item(
     @desktop_protocol.Summary(payload) => {
       let content = payload.content.trim().to_owned()
       if !content.is_empty() {
-        items.push({ kind: Summary, content, ts, sequence })
+        items.push({ kind: Summary, content, ts, sequence, })
       }
     }
     @desktop_protocol.Terminal(terminal) =>
@@ -544,7 +544,7 @@ fn SessionTerminalProjection::append_to(
         if !message.is_empty() {
           // A differing terminal message, such as a completion-tool answer,
           // remains a new final bubble.
-          items.push({ kind: TerminalAnswer, content: message, ts, sequence })
+          items.push({ kind: TerminalAnswer, content: message, ts, sequence, })
         }
         false
       }
@@ -627,8 +627,12 @@ test "session list projection preserves grouping and skips empty ids" {
           session_root: "/home/user/first/.openseek",
           error: "",
           sessions: [
-            { id: "desktop-b", title: Some("newest"), updated_at_ms: Some(2.0) },
-            { id: "", title: Some("no id"), updated_at_ms: None },
+            {
+              id: "desktop-b",
+              title: Some("newest"),
+              updated_at_ms: Some(2.0),
+            },
+            { id: "", title: Some("no id"), updated_at_ms: None, },
           ],
         },
         {
@@ -636,7 +640,7 @@ test "session list projection preserves grouping and skips empty ids" {
           name: "proj",
           session_root: "/home/user/proj/.openseek",
           error: "",
-          sessions: [{ id: "tui-a", title: Some(""), updated_at_ms: None }],
+          sessions: [{ id: "tui-a", title: Some(""), updated_at_ms: None, }],
         },
       ],
     },
@@ -666,7 +670,7 @@ test "a group naming no readable workspace contributes no rows" {
           session_root: "/home/user/.openseek",
           error: "",
           sessions: [
-            { id: "desktop-b", title: Some("newest"), updated_at_ms: None },
+            { id: "desktop-b", title: Some("newest"), updated_at_ms: None, },
           ],
         },
       ],
@@ -736,7 +740,7 @@ test "session trees never fold children across stores" {
     workspace: project,
     workspace_name: "project",
   }
-  let project_child : SessionListItem = { ..project_parent, id: "same-sr-1" }
+  let project_child : SessionListItem = { ..project_parent, id: "same-sr-1", }
   let rows = session_tree([other_parent, project_parent, project_child])
   assert_eq(rows.length(), 2)
   assert_eq(rows[0].item.workspace, other_parent.workspace)
@@ -856,7 +860,7 @@ test "an explicit session watermark remains authoritative" {
   let event =
     #|{"sequence":9,"item":{"kind":"user","payload":{"content":"question"}}}
   let reply = session_reply(event)
-  let view = session_from_reply({ ..reply, watermark: Some(7) })
+  let view = session_from_reply({ ..reply, watermark: Some(7), })
   inspect(view.watermark, content="7")
 }
 
@@ -1110,7 +1114,7 @@ test "transcript mapping renders goal markers as cards and reduces the standing 
   inspect(blocked_brief, content="Goal blocked: needs a decision")
   assert_true(
     view.goal
-    is Some({ text: "ship the feature", blocked: Some("needs a decision") }),
+    is Some({ text: "ship the feature", blocked: Some("needs a decision"), }),
   )
   // Every goal marker, with its sequence — not just the newest. A client
   // waiting on that set has to be able to find it here even though a block

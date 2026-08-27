@@ -24,7 +24,7 @@ fn read_directory(
       let reply = @interop.bridge_request(
         owner.channel,
         @commands.fs_read_directory,
-        { path: target.path },
+        { path: target.path, },
       ) catch {
         error => {
           scheduler.add(
@@ -112,7 +112,7 @@ fn read_file(
       let reply = @interop.bridge_request(
         owner.channel,
         @commands.fs_read_file,
-        { path: target.path, root: None },
+        { path: target.path, root: None, },
       ) catch {
         error => {
           scheduler.add(
@@ -266,7 +266,7 @@ fn stat_files(
       let reply = @interop.bridge_request_in_order(
         owner.channel,
         @commands.fs_stat_files,
-        { paths: paths.map(path => @resource.join_relative(root, path).path) },
+        { paths: paths.map(path => @resource.join_relative(root, path).path), },
       ) catch {
         _ => return
       }
@@ -357,7 +357,7 @@ test "a cross-host file read settles through its generation-fenced failure" {
   ignore(
     read_file(
       dispatch,
-      { channel: @interop.ChannelId::Remote("other"), session: "remote-test" },
+      { channel: @interop.ChannelId::Remote("other"), session: "remote-test", },
       0,
       @pathx.Relative("src/main.mbt"),
       "main.mbt",
@@ -407,7 +407,7 @@ test "language_id maps known extensions and falls back to plain text" {
 ///|
 test "typed directory rows build full relative paths" {
   guard FileEntry::from_reply(
-      { name: "src", is_dir: true },
+      { name: "src", is_dir: true, },
       @pathx.Relative::root(),
     )
     is Some(entry) else {
@@ -417,7 +417,7 @@ test "typed directory rows build full relative paths" {
   assert_eq(entry.path.0, "src")
   assert_true(entry.is_dir)
   assert_true(
-    FileEntry::from_reply({ name: "", is_dir: false }, @pathx.Relative::root())
+    FileEntry::from_reply({ name: "", is_dir: false, }, @pathx.Relative::root())
     is None,
   )
 }

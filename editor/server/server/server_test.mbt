@@ -52,7 +52,7 @@ async test "resolves one directory level through the host" {
   let server = test_remote_server("/workspace", host)
 
   let root_uri = expect_uri("readonly-remote://workspace")
-  match server.resolve_directory({ id: "resolve-1", uri: root_uri }) {
+  match server.resolve_directory({ id: "resolve-1", uri: root_uri, }) {
     DirectoryResolved(payload) => {
       assert_eq(payload.id, "resolve-1")
       assert_eq(payload.stat.uri.to_string(), "readonly-remote://workspace")
@@ -71,7 +71,7 @@ async test "resolves one directory level through the host" {
   }
 
   match
-    server.resolve_directory({ id: "resolve-2", uri: expect_remote_uri("src") }) {
+    server.resolve_directory({ id: "resolve-2", uri: expect_remote_uri("src"), }) {
     DirectoryResolved(payload) => {
       assert_eq(payload.stat.name, "src")
       match payload.stat.children {
@@ -102,7 +102,7 @@ async test "maps host read errors to protocol provider errors" {
   let server = test_remote_server("/workspace", host)
   let uri = expect_remote_uri("missing.mbt")
 
-  match server.open_document({ id: "open-1", uri }) {
+  match server.open_document({ id: "open-1", uri, }) {
     RemoteError(error) => {
       assert_true(error.code == ProtocolProviderError)
       assert_eq(error.provider_code, "FileNotFound")
@@ -122,7 +122,7 @@ async test "routes watch events to document changed packets" {
 
   match
     server.watch_document(
-      { id: "watch-1", uri },
+      { id: "watch-1", uri, },
       packet => emitted.push(packet),
       noop_watch_spawner,
     ) {
@@ -160,14 +160,14 @@ async test "server sessions dispose only their own document watches" {
 
   ignore(
     first.watch_document(
-      { id: "watch-first", uri },
+      { id: "watch-first", uri, },
       packet => first_emitted.push(packet),
       noop_watch_spawner,
     ),
   )
   ignore(
     second.watch_document(
-      { id: "watch-second", uri },
+      { id: "watch-second", uri, },
       packet => second_emitted.push(packet),
       noop_watch_spawner,
     ),
@@ -202,12 +202,12 @@ async test "notifies the document sync listener on open and watch change" {
   server.set_document_sync_listener(
     Some(document => synced.push(document.text)),
   )
-  ignore(server.open_document({ id: "open-1", uri }))
+  ignore(server.open_document({ id: "open-1", uri, }))
   assert_eq(synced.length(), 1)
   assert_eq(synced[0], "pub fn main {}\n")
   ignore(
     server.watch_document(
-      { id: "watch-1", uri },
+      { id: "watch-1", uri, },
       _packet => (),
       noop_watch_spawner,
     ),
@@ -225,9 +225,10 @@ async test "answers hover and definition from cached provider state" {
   host.files.set("main.mbt", "pub fn main {}\n")
   let server = test_remote_server("/workspace", host)
   let uri = expect_remote_uri("main.mbt")
-  ignore(server.open_document({ id: "open-1", uri }))
+  ignore(server.open_document({ id: "open-1", uri, }))
 
-  match server.hover({ id: "hover-1", uri, document_revision: "", offset: 7 }) {
+  match
+    server.hover({ id: "hover-1", uri, document_revision: "", offset: 7, }) {
     HoverResult(payload) =>
       match payload.hover {
         Some(hover) => assert_plaintext_hover(hover, "Configured hover")
@@ -237,7 +238,7 @@ async test "answers hover and definition from cached provider state" {
   }
 
   match
-    server.definition({ id: "def-1", uri, document_revision: "", offset: 7 }) {
+    server.definition({ id: "def-1", uri, document_revision: "", offset: 7, }) {
     DefinitionResult(payload) => {
       assert_eq(payload.locations.length(), 2)
       assert_eq(payload.locations[0].uri.to_string(), uri.to_string())
@@ -247,7 +248,7 @@ async test "answers hover and definition from cached provider state" {
   }
 
   match
-    server.references({ id: "refs-1", uri, document_revision: "", offset: 7 }) {
+    server.references({ id: "refs-1", uri, document_revision: "", offset: 7, }) {
     ReferencesResult(payload) => {
       assert_eq(payload.id, "refs-1")
       assert_eq(payload.references.length(), 2)
@@ -270,15 +271,15 @@ async test "hover rejects a same-revision cache replacement during provider awai
   host.revisions.set("main.mbt", "same-revision")
   let started = @async.Semaphore(1, initial_value=0)
   let release_gate = @async.Semaphore(1, initial_value=0)
-  let hover_provider = DelayedHoverProvider::{ started, release_gate }
-  let other_provider = FakeLanguageProvider::{  }
+  let hover_provider = DelayedHoverProvider::{ started, release_gate, }
+  let other_provider = FakeLanguageProvider::{ }
   let server = @server.RemoteServer::with_language_providers(
     "/workspace", host, hover_provider, other_provider, other_provider, other_provider,
   )
   let uri = expect_remote_uri("main.mbt")
   ignore(
     server.watch_document(
-      { id: "watch-1", uri },
+      { id: "watch-1", uri, },
       _packet => (),
       noop_watch_spawner,
     ),
@@ -314,9 +315,9 @@ async test "answers symbols from cached provider state" {
   host.files.set("main.mbt", "pub fn main { // TODO }\n")
   let server = test_remote_server("/workspace", host)
   let uri = expect_remote_uri("main.mbt")
-  ignore(server.open_document({ id: "open-1", uri }))
+  ignore(server.open_document({ id: "open-1", uri, }))
   match
-    server.document_symbols({ id: "symbols-1", uri, document_revision: "" }) {
+    server.document_symbols({ id: "symbols-1", uri, document_revision: "", }) {
     DocumentSymbolsResult(payload) => {
       assert_eq(payload.symbols.length(), 1)
       assert_eq(payload.symbols[0].name, "configured")
@@ -331,9 +332,10 @@ async test "dispatches language requests through configured providers" {
   host.files.set("configured.mbt", "pub fn configured {}\n")
   let server = test_remote_server("/workspace", host)
   let uri = expect_remote_uri("configured.mbt")
-  ignore(server.open_document({ id: "open-1", uri }))
+  ignore(server.open_document({ id: "open-1", uri, }))
 
-  match server.hover({ id: "hover-1", uri, document_revision: "", offset: 7 }) {
+  match
+    server.hover({ id: "hover-1", uri, document_revision: "", offset: 7, }) {
     HoverResult(payload) =>
       match payload.hover {
         Some(hover) => assert_plaintext_hover(hover, "Configured hover")
@@ -343,7 +345,7 @@ async test "dispatches language requests through configured providers" {
   }
 
   match
-    server.definition({ id: "def-1", uri, document_revision: "", offset: 7 }) {
+    server.definition({ id: "def-1", uri, document_revision: "", offset: 7, }) {
     DefinitionResult(payload) => {
       assert_eq(payload.locations.length(), 2)
       assert_eq(payload.locations[0].uri.to_string(), uri.to_string())
@@ -353,7 +355,7 @@ async test "dispatches language requests through configured providers" {
   }
 
   match
-    server.document_symbols({ id: "symbols-1", uri, document_revision: "" }) {
+    server.document_symbols({ id: "symbols-1", uri, document_revision: "", }) {
     DocumentSymbolsResult(payload) =>
       assert_eq(payload.symbols[0].name, "configured")
     _ => fail("expected document symbols result")
@@ -378,7 +380,7 @@ fn test_remote_server(
   root : String,
   host : &@server.ServerHost,
 ) -> @server.RemoteServer {
-  let provider = FakeLanguageProvider::{  }
+  let provider = FakeLanguageProvider::{ }
   @server.RemoteServer::with_language_providers(
     root, host, provider, provider, provider, provider,
   )
@@ -401,7 +403,7 @@ struct FakeWatchListener {
 
 ///|
 fn FakeServerHost::new() -> FakeServerHost {
-  { files: {}, revisions: {}, errors: {}, directories: {}, listeners: {} }
+  { files: {}, revisions: {}, errors: {}, directories: {}, listeners: {}, }
 }
 
 ///|
@@ -467,7 +469,7 @@ impl @server.ServerHost for FakeServerHost with fn watch_text_file(
 ) {
   let key = path.to_string()
   let active = Ref(true)
-  let watch = { listener, active }
+  let watch = { listener, active, }
   match self.listeners.get(key) {
     Some(listeners) => listeners.push(watch)
     None => self.listeners.set(key, [watch])
@@ -583,7 +585,7 @@ impl @language.DocumentSymbolProvider for FakeLanguageProvider with fn provide_d
   _model,
   _token,
 ) {
-  [{ name: "configured", kind: "function", range: Range(1, 8, 1, 18) }]
+  [{ name: "configured", kind: "function", range: Range(1, 8, 1, 18), }]
 }
 
 ///|
@@ -627,16 +629,16 @@ impl @server.ServerHost for RootRecordingHost with fn watch_text_file(
 
 ///|
 async test "workspace root switch redirects existing sessions" {
-  let host = RootRecordingHost::{ roots: [] }
+  let host = RootRecordingHost::{ roots: [], }
   let server = test_remote_server("/old-root/", host)
   assert_eq(server.current_workspace_root(), "/old-root")
   let session = server.new_session()
   let root_uri = expect_uri("readonly-remote://workspace")
-  ignore(session.resolve_directory({ id: "switch-r1", uri: root_uri }))
+  ignore(session.resolve_directory({ id: "switch-r1", uri: root_uri, }))
   server.set_workspace_root("/new-root/")
   // The session created before the switch shares the mutable root.
   assert_eq(session.current_workspace_root(), "/new-root")
-  ignore(session.resolve_directory({ id: "switch-r2", uri: root_uri }))
+  ignore(session.resolve_directory({ id: "switch-r2", uri: root_uri, }))
   assert_eq(host.roots, ["/old-root", "/new-root"])
 }
 
@@ -645,7 +647,7 @@ async test "policy server rejects host browse packets" {
   let host = FakeServerHost::new()
   let server = test_remote_server("/workspace", host)
   let listed = server.handle_client_packet(
-    ListHostDirectory({ id: "list-1", path: "/" }),
+    ListHostDirectory({ id: "list-1", path: "/", }),
     _packet => (),
     noop_watch_spawner,
   )
@@ -657,7 +659,7 @@ async test "policy server rejects host browse packets" {
     _ => fail("expected host browse rejection")
   }
   let switched = server.handle_client_packet(
-    SwitchWorkspace({ id: "switch-1", path: "/elsewhere" }),
+    SwitchWorkspace({ id: "switch-1", path: "/elsewhere", }),
     _packet => (),
     noop_watch_spawner,
   )

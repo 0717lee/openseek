@@ -104,5 +104,5 @@ async fn uninstall_skill_op(
     @skillmarket.SkillMarketError(message) => raise HostError(message)
     error => raise error
   }
-  { removed: true }
+  { removed: true, }
 }

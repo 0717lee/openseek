@@ -1117,7 +1117,7 @@ fn base_prompt() -> String {
     #|
     #|///|
     #|pub fn Point::Point(x~ : Int, y~ : Int) -> Point {
-    #|  { x, y }
+    #|  { x, y, }
     #|}
     #|
     #|///|
@@ -1267,8 +1267,8 @@ fn base_prompt() -> String {
     #|///|
     #|test {
     #|  // Hard to use in call site
-    #|  not_idiomatic({ width: Some(5), height: None }, 10)
-    #|  not_idiomatic({ width: None, height: None }, 10)
+    #|  not_idiomatic({ width: Some(5), height: None, }, 10)
+    #|  not_idiomatic({ width: None, height: None, }, 10)
     #|}
     #|```
     #|

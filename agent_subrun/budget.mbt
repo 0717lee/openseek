@@ -39,7 +39,7 @@ pub struct SubrunBudget {
 pub fn SubrunBudget::SubrunBudget(
   max_calls_per_turn? : Int = 10,
 ) -> SubrunBudget {
-  { max_calls_per_turn, used_calls: 0 }
+  { max_calls_per_turn, used_calls: 0, }
 }
 
 ///|

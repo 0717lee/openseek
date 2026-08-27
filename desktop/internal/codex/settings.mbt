@@ -13,7 +13,7 @@ pub struct CodexSettings {
 ///|
 /// The default settings: the `codex` command with no isolated home.
 pub fn CodexSettings::default() -> CodexSettings {
-  { command: DefaultCodexCommand, home: None }
+  { command: DefaultCodexCommand, home: None, }
 }
 
 ///|
@@ -22,5 +22,5 @@ pub fn CodexSettings::new(
   command~ : String,
   home~ : @pathx.Path?,
 ) -> CodexSettings {
-  { command, home }
+  { command, home, }
 }

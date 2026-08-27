@@ -10,7 +10,7 @@
 // plus exact hunks on fixtures where the minimal diff is unambiguous.
 
 ///|
-let default_options : DocumentDiffOptions = { ignore_trim_whitespace: false }
+let default_options : DocumentDiffOptions = { ignore_trim_whitespace: false, }
 
 ///|
 fn compute(
@@ -283,7 +283,7 @@ test "trim whitespace policy ignores only line edges" {
   let original = ["fn main {", "value + other", "}"]
   let indentation_only = [" fn main { ", "  value + other\t", "}"]
   let interior_change = ["fn main {", "value  + other", "}"]
-  let options : DocumentDiffOptions = { ignore_trim_whitespace: true }
+  let options : DocumentDiffOptions = { ignore_trim_whitespace: true, }
   assert_true(compute(original, indentation_only, options~).changes.is_empty())
   assert_eq(compute(original, interior_change, options~).changes.length(), 1)
 }
@@ -302,8 +302,8 @@ test "trim whitespace is excluded from mixed character refinements" {
 
 ///|
 test "trim whitespace treats whitespace-only and empty documents as equal" {
-  let ignore : DocumentDiffOptions = { ignore_trim_whitespace: true }
-  let preserve : DocumentDiffOptions = { ignore_trim_whitespace: false }
+  let ignore : DocumentDiffOptions = { ignore_trim_whitespace: true, }
+  let preserve : DocumentDiffOptions = { ignore_trim_whitespace: false, }
   assert_true(compute(["   "], [""], options=ignore).changes.is_empty())
   assert_true(compute([""], ["\t"], options=ignore).changes.is_empty())
   assert_eq(compute(["   "], [""], options=preserve).changes.length(), 1)

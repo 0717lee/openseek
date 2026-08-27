@@ -5,7 +5,7 @@ priv struct ReferencesControllerTestTasks {
 
 ///|
 fn ReferencesControllerTestTasks::ReferencesControllerTestTasks() -> ReferencesControllerTestTasks {
-  { tasks: [] }
+  { tasks: [], }
 }
 
 ///|
@@ -237,8 +237,8 @@ async test "controller toggles one surface session and replaces previews in plac
   )
   let anchor = references_controller_test_anchor(model, surface_generation.val)
   let locations : Array[@language.Location] = [
-    { uri: model.uri, range: Range(1, 14, 1, 20) },
-    { uri: model.uri, range: Range(2, 14, 2, 20) },
+    { uri: model.uri, range: Range(1, 14, 1, 20), },
+    { uri: model.uri, range: Range(2, 14, 2, 20), },
   ]
 
   assert_true(controller.toggle_locations(anchor, Definitions, locations))
@@ -406,8 +406,8 @@ async test "resolver leases transfer on preview replacement and release on close
     task => tasks.schedule(task),
   )
   let locations : Array[@language.Location] = [
-    { uri: target_a.uri, range: Range(1, 5, 1, 11) },
-    { uri: target_b.uri, range: Range(2, 5, 2, 11) },
+    { uri: target_a.uri, range: Range(1, 5, 1, 11), },
+    { uri: target_b.uri, range: Range(2, 5, 2, 11), },
   ]
   assert_true(
     controller.toggle_locations(

@@ -465,20 +465,20 @@ fn create_decoration_option(marker : Marker) -> @model.ModelDecorationOptions {
       class_name = "squiggly-info"
       color = Some(overview_ruler_info)
       z_index = 10
-      minimap = Some({ color: minimap_info, position: Inline })
+      minimap = Some({ color: minimap_info, position: Inline, })
     }
     Warning => {
       class_name = "squiggly-warning"
       color = Some(overview_ruler_warning)
       z_index = 20
-      minimap = Some({ color: minimap_warning, position: Inline })
+      minimap = Some({ color: minimap_warning, position: Inline, })
     }
     Error => {
       // default
       class_name = "squiggly-error"
       color = Some(overview_ruler_error)
       z_index = 30
-      minimap = Some({ color: minimap_error, position: Inline })
+      minimap = Some({ color: minimap_error, position: Inline, })
     }
   }
   match marker.tags {
@@ -499,7 +499,7 @@ fn create_decoration_option(marker : Marker) -> @model.ModelDecorationOptions {
     z_index~,
     show_if_collapsed=true,
     stickiness=NeverGrowsWhenTypingAtEdges,
-    overview_ruler={ color, position: Right },
+    overview_ruler={ color, position: Right, },
     minimap?,
     description="marker-decoration",
   )

@@ -2,7 +2,6 @@
 /// White-box language-registry coverage.
 test "public languages facade registers hover providers" {
   let disposable = languages.register_hover_provider(LanguageId("moonbit"), PublicHoverProvider::{
-
   })
   disposable.dispose()
 }
@@ -11,7 +10,7 @@ test "public languages facade registers hover providers" {
 test "public languages facade registers markdown comment providers" {
   let disposable = languages.register_markdown_comment_provider(
     LanguageId("moonbit"),
-    PublicMarkdownCommentProvider::{  },
+    PublicMarkdownCommentProvider::{ },
   )
   disposable.dispose()
 }

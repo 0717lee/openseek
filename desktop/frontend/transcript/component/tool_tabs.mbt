@@ -87,7 +87,7 @@ fn tool_call_tabbed_view(
     if !trimmed.is_empty() && trimmed != "{}" {
       match custom_card(name, arguments) {
         Some((label, card)) => {
-          tabs.push({ label, body: card })
+          tabs.push({ label, body: card, })
           tabs.push({
             label: "Original JSON",
             body: original_json_content(arguments),
@@ -95,7 +95,7 @@ fn tool_call_tabbed_view(
         }
         None => {
           let content = json_arguments_content(arguments)
-          tabs.push({ label: "Arguments", body: content.body })
+          tabs.push({ label: "Arguments", body: content.body, })
           if content.has_distinct_original {
             tabs.push({
               label: "Original JSON",

@@ -139,7 +139,7 @@ fn approval_system_notification(
   guard run_id is Some(run_id) else { return None }
   match event {
     ApprovalRequested(tool_name~, detail~, ..) =>
-      Some({ run_id, tool_name, detail })
+      Some({ run_id, tool_name, detail, })
     _ => None
   }
 }
@@ -153,7 +153,7 @@ test "finished system notifications preserve status titles and fallback body" {
   }
   assert_eq(completed.title(), Some("Task finished"))
   assert_eq(completed.body(), "The conversation is ready for you.")
-  let cancelled = { ..completed, status: "cancelled" }
+  let cancelled = { ..completed, status: "cancelled", }
   assert_eq(cancelled.title(), None)
 }
 

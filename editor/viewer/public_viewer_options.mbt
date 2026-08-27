@@ -67,7 +67,7 @@ pub fn ViewerOptions::ViewerOptions(
 
 ///|
 pub fn ViewerOptions::default() -> ViewerOptions {
-  { inner: @code_widget.CodeEditorOptions::default() }
+  { inner: @code_widget.CodeEditorOptions::default(), }
 }
 
 ///|
@@ -75,7 +75,7 @@ pub fn ViewerOptions::with_placeholder(
   self : ViewerOptions,
   value : String,
 ) -> ViewerOptions {
-  { inner: self.inner.with_placeholder(value) }
+  { inner: self.inner.with_placeholder(value), }
 }
 
 ///|
@@ -83,7 +83,7 @@ pub fn ViewerOptions::with_theme(
   self : ViewerOptions,
   value : String,
 ) -> ViewerOptions {
-  { inner: self.inner.with_theme(value) }
+  { inner: self.inner.with_theme(value), }
 }
 
 ///|
@@ -91,7 +91,7 @@ pub fn ViewerOptions::with_font_family(
   self : ViewerOptions,
   value : String,
 ) -> ViewerOptions {
-  { inner: self.inner.with_font_family(value) }
+  { inner: self.inner.with_font_family(value), }
 }
 
 ///|
@@ -99,7 +99,7 @@ pub fn ViewerOptions::with_font_size(
   self : ViewerOptions,
   value : Double,
 ) -> ViewerOptions {
-  { inner: self.inner.with_font_size(value) }
+  { inner: self.inner.with_font_size(value), }
 }
 
 ///|
@@ -107,7 +107,7 @@ pub fn ViewerOptions::with_render_whitespace(
   self : ViewerOptions,
   value : @editor_api.RenderWhitespace,
 ) -> ViewerOptions {
-  { inner: self.inner.with_render_whitespace(value) }
+  { inner: self.inner.with_render_whitespace(value), }
 }
 
 ///|
@@ -115,7 +115,7 @@ pub fn ViewerOptions::with_render_control_characters(
   self : ViewerOptions,
   value : Bool,
 ) -> ViewerOptions {
-  { inner: self.inner.with_render_control_characters(value) }
+  { inner: self.inner.with_render_control_characters(value), }
 }
 
 ///|
@@ -123,7 +123,7 @@ pub fn ViewerOptions::with_render_line_highlight(
   self : ViewerOptions,
   value : @editor_api.RenderLineHighlight,
 ) -> ViewerOptions {
-  { inner: self.inner.with_render_line_highlight(value) }
+  { inner: self.inner.with_render_line_highlight(value), }
 }
 
 ///|
@@ -131,7 +131,7 @@ pub fn ViewerOptions::with_render_line_highlight_only_when_focus(
   self : ViewerOptions,
   value : Bool,
 ) -> ViewerOptions {
-  { inner: self.inner.with_render_line_highlight_only_when_focus(value) }
+  { inner: self.inner.with_render_line_highlight_only_when_focus(value), }
 }
 
 ///|
@@ -139,7 +139,7 @@ pub fn ViewerOptions::with_render_validation_decorations(
   self : ViewerOptions,
   value : @editor_api.RenderValidationDecorations,
 ) -> ViewerOptions {
-  { inner: self.inner.with_render_validation_decorations(value) }
+  { inner: self.inner.with_render_validation_decorations(value), }
 }
 
 ///|
@@ -147,7 +147,7 @@ pub fn ViewerOptions::with_tab_size(
   self : ViewerOptions,
   value : Int,
 ) -> ViewerOptions {
-  { inner: self.inner.with_tab_size(value) }
+  { inner: self.inner.with_tab_size(value), }
 }
 
 ///|
@@ -155,7 +155,7 @@ pub fn ViewerOptions::with_soft_wrap(
   self : ViewerOptions,
   value : Bool,
 ) -> ViewerOptions {
-  { inner: self.inner.with_soft_wrap(value) }
+  { inner: self.inner.with_soft_wrap(value), }
 }
 
 ///|
@@ -163,7 +163,7 @@ pub fn ViewerOptions::with_line_numbers_min_chars(
   self : ViewerOptions,
   value : Int,
 ) -> ViewerOptions {
-  { inner: self.inner.with_line_numbers_min_chars(value) }
+  { inner: self.inner.with_line_numbers_min_chars(value), }
 }
 
 ///|
@@ -171,7 +171,7 @@ pub fn ViewerOptions::with_line_decorations_width(
   self : ViewerOptions,
   value : Int,
 ) -> ViewerOptions {
-  { inner: self.inner.with_line_decorations_width(value) }
+  { inner: self.inner.with_line_decorations_width(value), }
 }
 
 ///|
@@ -179,7 +179,7 @@ pub fn ViewerOptions::with_line_height(
   self : ViewerOptions,
   value : Double,
 ) -> ViewerOptions {
-  { inner: self.inner.with_line_height(value) }
+  { inner: self.inner.with_line_height(value), }
 }
 
 ///|

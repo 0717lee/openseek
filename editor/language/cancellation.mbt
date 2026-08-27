@@ -35,7 +35,7 @@ fn schedule_cancellation_inline(
 }
 
 ///|
-let cancellation_none : CancellationToken = { state: NeverCancelled }
+let cancellation_none : CancellationToken = { state: NeverCancelled, }
 
 ///|
 let cancellation_cancelled : CancellationToken = {
@@ -46,7 +46,7 @@ let cancellation_cancelled : CancellationToken = {
 fn MutableCancellationToken::new(
   schedule : (() -> Unit) -> @base_common.Disposable,
 ) -> MutableCancellationToken {
-  { cancelled: false, emitter: None, schedule }
+  { cancelled: false, emitter: None, schedule, }
 }
 
 ///|
@@ -228,9 +228,9 @@ fn CancellationTokenSource::dispose_impl(
   }
   match self.token_value {
     None => self.token_value = Some(cancellation_none)
-    Some({ state: SourceMutable(token) }) => token.dispose()
+    Some({ state: SourceMutable(token), }) => token.dispose()
     Some(
-      { state: NeverCancelled | AlreadyCancelled(_) | CompatibilityMutable(_) }
+      { state: NeverCancelled | AlreadyCancelled(_) | CompatibilityMutable(_), }
     ) => ()
   }
 }

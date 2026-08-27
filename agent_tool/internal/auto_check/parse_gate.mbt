@@ -215,18 +215,18 @@ fn decide_parse_gate(
         "context"? : Some(String(context))
         | (_ with context = ""),
         ..
-      } if is_parse_error_code(code) => errors.push({ loc, message, context })
+      } if is_parse_error_code(code) => errors.push({ loc, message, context, })
       _ => ()
     }
   }
   if errors.length() > 0 {
-    Some({ errors, truncated })
+    Some({ errors, truncated, })
   } else if truncated {
     // Over the capture limit with no parse errors caught: the run was cut
     // short, so "clean" would be a certification the gate cannot make.
     None
   } else if exit_code is Some(0) {
-    Some({ errors: [], truncated: false })
+    Some({ errors: [], truncated: false, })
   } else {
     None
   }
@@ -445,9 +445,9 @@ test "format_parse_gate_errors caps at the display limit and handles bad locs" {
   assert_eq(formatted.length(), ParseErrorDisplayLimit)
   // A loc beyond the content and a malformed loc degrade to the bare header.
   let odd = format_parse_gate_errors("a.mbt", "only", [
-    { loc: "9:1-9:2", message: "past the end", context: "" },
-    { loc: "junk", message: "no loc", context: "" },
-    { loc: "", message: "empty loc", context: "" },
+    { loc: "9:1-9:2", message: "past the end", context: "", },
+    { loc: "junk", message: "no loc", context: "", },
+    { loc: "", message: "empty loc", context: "", },
   ])
   assert_eq(odd[0], "a.mbt:9:1-9:2: past the end")
   assert_eq(odd[1], "a.mbt:junk: no loc")

@@ -449,7 +449,7 @@ async test "raw session file route decodes the file segment like the key" {
       User(UserMessage("hi")),
     )
     store.create(session)
-    let catalog : SessionCatalog = { roots: [marker_root(root, ".openseek")] }
+    let catalog : SessionCatalog = { roots: [marker_root(root, ".openseek")], }
     let reply = session_path_reply(
       catalog, "run%201/openseek_session-run%201.jsonl",
     )

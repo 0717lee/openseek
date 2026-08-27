@@ -944,7 +944,7 @@ fn navigation_target_presentation(
       ),
     }
   }
-  { position, decoration, is_transient: !point }
+  { position, decoration, is_transient: !point, }
 }
 
 ///|

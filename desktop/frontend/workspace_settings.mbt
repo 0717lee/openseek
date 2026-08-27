@@ -41,7 +41,7 @@ fn fetch_workspace_settings(
       let reply : @protocol.WorkspaceSettingsPayload = @interop.bridge_request(
         channel,
         @commands.workspace_settings_get,
-        { workspace: workspace.path },
+        { workspace: workspace.path, },
       ) catch {
         _ => return
       }
@@ -168,7 +168,7 @@ fn DeviceState::with_workspace_settings(
     submodule_checkout_timeout_seconds,
     generation,
   })
-  { ..self, workspace_settings: rows }
+  { ..self, workspace_settings: rows, }
 }
 
 ///|
@@ -308,7 +308,7 @@ test "a settings reply lands once and an older token cannot roll it back" {
 test "a settings commit broadcast supersedes list replies" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
-  let attached = test_model().with_dev(dev => { ..dev, projects: [workspace] })
+  let attached = test_model().with_dev(dev => { ..dev, projects: [workspace], })
   let (_, changed) = update_dev(
     dispatch,
     WorkspaceSettingsChanged(
@@ -363,7 +363,7 @@ test "the settings page select applies optimistically" {
   let (_, chosen) = update(
     dispatch,
     WorkspaceDefaultModeChosen(Local, workspace, "worktree"),
-    { ..loaded, select_menu: Some(WorkspaceDefaultModeMenu) },
+    { ..loaded, select_menu: Some(WorkspaceDefaultModeMenu), },
   )
   assert_true(chosen.default_worktree_mode(Local, workspace))
   assert_true(chosen.select_menu is None)
@@ -394,7 +394,7 @@ test "the settings page select applies optimistically" {
 test "the workspace submodule select preserves its launch mode" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
-  let attached = test_model().with_dev(dev => { ..dev, projects: [workspace] })
+  let attached = test_model().with_dev(dev => { ..dev, projects: [workspace], })
   let (_, loaded) = update_dev(
     dispatch,
     WorkspaceSettingsLoaded(
@@ -410,7 +410,7 @@ test "the workspace submodule select preserves its launch mode" {
   let (_, chosen) = update(
     dispatch,
     WorkspaceSubmodulesChosen(Local, workspace, "skip"),
-    { ..loaded, select_menu: Some(WorkspaceSubmodulesMenu) },
+    { ..loaded, select_menu: Some(WorkspaceSubmodulesMenu), },
   )
   guard chosen.dev().workspace_settings_row(workspace) is Some(row) else {
     fail("expected the workspace settings row")
@@ -435,7 +435,7 @@ test "the workspace submodule select preserves its launch mode" {
 test "the workspace submodule timeout select preserves neighboring settings" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
-  let attached = test_model().with_dev(dev => { ..dev, projects: [workspace] })
+  let attached = test_model().with_dev(dev => { ..dev, projects: [workspace], })
   let (_, loaded) = update_dev(
     dispatch,
     WorkspaceSettingsLoaded(
@@ -451,7 +451,7 @@ test "the workspace submodule timeout select preserves neighboring settings" {
   let (_, chosen) = update(
     dispatch,
     WorkspaceSubmoduleTimeoutChosen(Local, workspace, "30"),
-    { ..loaded, select_menu: Some(WorkspaceSubmoduleTimeoutMenu) },
+    { ..loaded, select_menu: Some(WorkspaceSubmoduleTimeoutMenu), },
   )
   guard chosen.dev().workspace_settings_row(workspace) is Some(row) else {
     fail("expected the workspace settings row")
@@ -475,7 +475,7 @@ test "the workspace submodule timeout select preserves neighboring settings" {
 test "a failed save pops a toast and re-reads under a fresh token" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
-  let attached = test_model().with_dev(dev => { ..dev, projects: [workspace] })
+  let attached = test_model().with_dev(dev => { ..dev, projects: [workspace], })
   let (_, chosen) = update(
     dispatch,
     WorkspaceDefaultModeChosen(Local, workspace, "worktree"),
@@ -514,7 +514,7 @@ test "a failed save pops a toast and re-reads under a fresh token" {
 test "a reconnect clears the settings mirror until fresh reads land" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
-  let attached = test_model().with_dev(dev => { ..dev, projects: [workspace] })
+  let attached = test_model().with_dev(dev => { ..dev, projects: [workspace], })
   let (_, loaded) = update_dev(
     dispatch,
     WorkspaceSettingsLoaded(
@@ -541,7 +541,7 @@ test "a reconnect clears the settings mirror until fresh reads land" {
 test "a straggler reply for a detached workspace is rejected" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")
-  let attached = test_model().with_dev(dev => { ..dev, projects: [workspace] })
+  let attached = test_model().with_dev(dev => { ..dev, projects: [workspace], })
   let (_, seen) = update_dev(
     dispatch,
     WorkspaceSettingsChanged(

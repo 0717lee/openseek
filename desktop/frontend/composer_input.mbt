@@ -167,7 +167,7 @@ fn Model::composer_input(
   let file_index = self.composer_file_index()
   {
     identity,
-    draft: { task: conv.task, mentions: conv.mentions },
+    draft: { task: conv.task, mentions: conv.mentions, },
     // Sub-run lanes stay in the transcript tail: they are activity *inside*
     // this turn, and drawing both in one place put the outer run on the same
     // footing as the children it spawned.
@@ -290,12 +290,12 @@ fn Model::codex_composer_input(
 fn Model::dormant_composer_input(self : Model) -> @composer.Input {
   {
     identity: {
-      owner: { channel: self.focused, session: self.active_session },
+      owner: { channel: self.focused, session: self.active_session, },
       archive_generation: self.composer_entry_retirements.length(),
     },
-    draft: { task: "", mentions: [] },
+    draft: { task: "", mentions: [], },
     run: None,
-    goal: { draft: None, standing: None, pending: None },
+    goal: { draft: None, standing: None, pending: None, },
     slash_commands: [],
     root: None,
     installed_skills: self.installed_skills,

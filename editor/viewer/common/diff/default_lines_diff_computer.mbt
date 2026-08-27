@@ -12,7 +12,7 @@ pub struct CoreDocumentDiffProvider {
 
 ///|
 pub fn CoreDocumentDiffProvider::CoreDocumentDiffProvider() -> CoreDocumentDiffProvider {
-  { _unit: () }
+  { _unit: (), }
 }
 
 ///|
@@ -60,7 +60,7 @@ fn CoreDocumentDiffProvider::compute_lines_diff(
     modified_lines
   }
   if old_input == new_input {
-    return { changes: [], additional_alignments: [] }
+    return { changes: [], additional_alignments: [], }
   }
 
   // Preserve Monaco's useful empty-document shape: its one logical empty line
@@ -115,7 +115,7 @@ fn CoreDocumentDiffProvider::compute_lines_diff(
       ),
     )
   }
-  { changes, additional_alignments: [] }
+  { changes, additional_alignments: [], }
 }
 
 ///|

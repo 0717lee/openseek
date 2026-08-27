@@ -23,7 +23,7 @@ let javascript_normal_state : @syntax.TokenizerState = TokenizerState()
 ///|
 /// Creates the JavaScript tokenizer.
 pub fn JavascriptTokenizer::JavascriptTokenizer() -> JavascriptTokenizer {
-  { _unit: () }
+  { _unit: (), }
 }
 
 ///|

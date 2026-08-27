@@ -18,7 +18,7 @@ fn startup_sub(cmd : @cmd.Cmd) -> @sub.Sub {
     StartupSubscription,
     SubLoader((_, scheduler) => {
       scheduler.add(cmd)
-      Some({ unload: _ => (), update_tagger: _ => () })
+      Some({ unload: _ => (), update_tagger: _ => (), })
     }),
   )
 }
@@ -815,11 +815,11 @@ fn update_embed(
         },
       )
     ViewerReady(uri) =>
-      (embed_tree().set_active(uri), { ..model, status: "ready" })
+      (embed_tree().set_active(uri), { ..model, status: "ready", })
     ViewerFailed =>
       (
         set_embed_diff_visible(false, model.inline_layout, model.sash_enabled),
-        { ..model, status: "error", diff_visible: false },
+        { ..model, status: "error", diff_visible: false, },
       )
     ToggleDiff =>
       if model.status != "ready" {
@@ -832,7 +832,7 @@ fn update_embed(
             model.inline_layout,
             model.sash_enabled,
           ),
-          { ..model, diff_visible: visible },
+          { ..model, diff_visible: visible, },
         )
       }
     ToggleDiffLayout =>
@@ -1012,7 +1012,7 @@ fn main {
   let _ = compile_external_viewer_api_contract
   @languages.languages.register_markdown_comment_provider(
     LanguageId("moonbit"),
-    EmbeddedAlignmentMarkdownProvider::{  },
+    EmbeddedAlignmentMarkdownProvider::{ },
   )
   |> ignore
   // Highlighting needs no server: the language package is composed in

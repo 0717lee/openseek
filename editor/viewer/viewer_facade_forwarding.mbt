@@ -262,7 +262,7 @@ pub fn Viewer::create_decorations_collection(
   self : Viewer,
   decorations? : Array[@model.ModelDeltaDecoration] = [],
 ) -> EditorDecorationsCollection {
-  { inner: self.widget.create_decorations_collection(decorations~) }
+  { inner: self.widget.create_decorations_collection(decorations~), }
 }
 
 ///|

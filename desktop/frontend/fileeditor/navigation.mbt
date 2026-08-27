@@ -66,7 +66,7 @@ fn navigation_context_for_file(
       Some(root)
     _ => navigation_root_from_file(absolute, relative)
   }
-  root.map(root => { owner, root })
+  root.map(root => { owner, root, })
 }
 
 ///|
@@ -191,7 +191,7 @@ async fn request_moon_ide_locations(
   payload : @protocol.MoonIdeNavigationPayload,
 ) -> Array[@language.Location] {
   let reply = @interop.bridge_request(channel, command, payload)
-  MoonIdeProjection::{ reply, channel }.to_viewer()
+  MoonIdeProjection::{ reply, channel, }.to_viewer()
 }
 
 ///|
@@ -331,7 +331,7 @@ test "navigation root follows resource and workspace-relative paths" {
   }
   assert_eq(root.path, "/ws/project")
   let context : NavigationContext = {
-    owner: { channel: @interop.ChannelId::Local, session: "test" },
+    owner: { channel: @interop.ChannelId::Local, session: "test", },
     root,
   }
   assert_eq(context.relative_path(file), Some(Relative("src/main.mbt")))

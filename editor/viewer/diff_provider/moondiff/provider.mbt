@@ -37,7 +37,7 @@ pub fn MoonDocumentDiffProvider::MoonDocumentDiffProvider(
   {
     mode,
     ignore_comments,
-    status: { requested: mode, effective: mode, fell_back: false },
+    status: { requested: mode, effective: mode, fell_back: false, },
     did_change: Emitter(),
     disposed: false,
   }
@@ -52,7 +52,7 @@ pub fn MoonDocumentDiffProvider::set_mode(
     return
   }
   self.mode = mode
-  self.status = { requested: mode, effective: mode, fell_back: false }
+  self.status = { requested: mode, effective: mode, fell_back: false, }
   self.did_change.fire(())
 }
 
@@ -72,7 +72,11 @@ pub fn MoonDocumentDiffProvider::set_ignore_comments(
     return
   }
   self.ignore_comments = ignore_comments
-  self.status = { requested: self.mode, effective: self.mode, fell_back: false }
+  self.status = {
+    requested: self.mode,
+    effective: self.mode,
+    fell_back: false,
+  }
   self.did_change.fire(())
 }
 
@@ -460,7 +464,7 @@ fn adapt_document(
       return None
     }
   }
-  Some({ changes, additional_alignments: alignments })
+  Some({ changes, additional_alignments: alignments, })
 }
 
 ///|
@@ -558,14 +562,14 @@ fn MoonDocumentDiffProvider::settle_specialized_or_core(
           candidate, original, modified,
         ) {
         Some(result) => {
-          self.status = { requested, effective, fell_back }
+          self.status = { requested, effective, fell_back, }
           return result
         }
         None => ()
       }
     None => ()
   }
-  self.status = { requested, effective: Core, fell_back: requested != Core }
+  self.status = { requested, effective: Core, fell_back: requested != Core, }
   core_fallback
 }
 
@@ -587,7 +591,7 @@ pub impl @diff.DocumentDiffProvider for MoonDocumentDiffProvider with fn compute
     })
     if !same_line_change_shape(strict, lenient) ||
       paired_change_has_edge_whitespace_difference(strict, original, modified) {
-      self.status = { requested, effective: Core, fell_back: true }
+      self.status = { requested, effective: Core, fell_back: true, }
       return if options.ignore_trim_whitespace { lenient } else { strict }
     }
     return self.settle_specialized_or_core(

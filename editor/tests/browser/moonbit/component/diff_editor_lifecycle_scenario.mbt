@@ -34,7 +34,7 @@ priv struct FailingDiffLifecycleProvider {
 
 ///|
 fn FailingDiffLifecycleProvider::new() -> FailingDiffLifecycleProvider {
-  { marker: () }
+  { marker: (), }
 }
 
 ///|
@@ -63,7 +63,7 @@ priv struct InvalidDiffLifecycleProvider {
 
 ///|
 fn InvalidDiffLifecycleProvider::new() -> InvalidDiffLifecycleProvider {
-  { marker: () }
+  { marker: (), }
 }
 
 ///|
@@ -210,20 +210,20 @@ fn run_diff_editor_lifecycle_test() -> Unit {
     "new second hunk at line 100" +
     first_line_suffix,
   )
-  widget.set_model(Some({ original, modified })) |> ignore
+  widget.set_model(Some({ original, modified, })) |> ignore
   install_diff_editor_lifecycle_controls(
     () => diff_editor_lifecycle_snapshot_json(widget),
     fixture => {
       let pair : @diff_editor.DiffEditorModelData = match fixture {
-        "digits" => { original: digit_original, modified: digit_modified }
+        "digits" => { original: digit_original, modified: digit_modified, }
         "indicators" =>
-          { original: indicator_original, modified: indicator_modified }
+          { original: indicator_original, modified: indicator_modified, }
         "identical" =>
-          { original: identical_original, modified: identical_modified }
-        "late" => { original: late_original, modified: late_modified }
+          { original: identical_original, modified: identical_modified, }
+        "late" => { original: late_original, modified: late_modified, }
         "first-line" =>
-          { original: first_line_original, modified: first_line_modified }
-        _ => { original, modified }
+          { original: first_line_original, modified: first_line_modified, }
+        _ => { original, modified, }
       }
       widget.set_model(Some(pair)) |> ignore
     },
@@ -257,7 +257,7 @@ fn run_diff_editor_lifecycle_test() -> Unit {
     attached => {
       widget.set_model(
         if attached {
-          Some({ original, modified })
+          Some({ original, modified, })
         } else {
           None
         },

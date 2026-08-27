@@ -54,7 +54,7 @@ pub fn ReviewReport::to_json_string(self : ReviewReport) -> String {
 fn sample_report() -> ReviewReport {
   {
     schema_version: 1,
-    scope: { base: "origin/main", head: "HEAD", files: ["a.mbt", "b.mbt"] },
+    scope: { base: "origin/main", head: "HEAD", files: ["a.mbt", "b.mbt"], },
     findings: [
       {
         file: "a.mbt",
@@ -76,7 +76,7 @@ fn sample_report() -> ReviewReport {
       },
     ],
     summary: "two findings",
-    stats: { files_reviewed: 2, findings: 2, build: "pass", tests: "skipped" },
+    stats: { files_reviewed: 2, findings: 2, build: "pass", tests: "skipped", },
   }
 }
 
@@ -124,14 +124,14 @@ test "validate rejects a bad severity" {
 
 ///|
 test "validate rejects a wrong schema version" {
-  let report = { ..sample_report(), schema_version: 2 }
+  let report = { ..sample_report(), schema_version: 2, }
   assert_true(report.validate().length() > 0)
 }
 
 ///|
 test "validate rejects an empty summary" {
-  assert_true({ ..sample_report(), summary: "" }.validate().length() > 0)
-  assert_true({ ..sample_report(), summary: "   " }.validate().length() > 0)
+  assert_true({ ..sample_report(), summary: "", }.validate().length() > 0)
+  assert_true({ ..sample_report(), summary: "   ", }.validate().length() > 0)
 }
 
 ///|

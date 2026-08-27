@@ -15,7 +15,7 @@ pub fn MarkdownViewerModel::MarkdownViewerModel(
   model : @model.TextModel,
   resource_kind : MarkdownResourceKind,
 ) -> MarkdownViewerModel {
-  { model, resource_kind }
+  { model, resource_kind, }
 }
 
 ///|
@@ -31,7 +31,7 @@ pub fn MarkdownViewerOptions::MarkdownViewerOptions(
   placeholder? : String = "",
   show_unused? : Bool = true,
 ) -> MarkdownViewerOptions {
-  { theme, placeholder, show_unused }
+  { theme, placeholder, show_unused, }
 }
 
 ///|

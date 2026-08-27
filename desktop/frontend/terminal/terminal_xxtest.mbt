@@ -73,7 +73,7 @@ test "sync records color-scheme changes even when the shown tab is unchanged" {
   let (light, _) = sync(emit, State::empty(), light_ctx)
   assert_true(light.shown is None)
   assert_true(light.synced_dark_mode is Some(false))
-  let (dark, _) = sync(emit, light, { ..light_ctx, dark_mode: true })
+  let (dark, _) = sync(emit, light, { ..light_ctx, dark_mode: true, })
   assert_true(dark.shown is None)
   assert_true(dark.synced_dark_mode is Some(true))
 }
@@ -337,7 +337,7 @@ test "an unresolved placement cannot reveal or create a project terminal" {
     connected: true,
   }
   let (_, project_opening) = update(emit, ToggleTerminal, State::empty(), main)
-  let unresolved : Ctx = { ..main, session: "restored-chat", placement: None }
+  let unresolved : Ctx = { ..main, session: "restored-chat", placement: None, }
   // The existing project tab stays alive for its owner, but the restored
   // conversation cannot see it or create another tab under the same key.
   let (waiting, _) = sync(emit, project_opening, unresolved)

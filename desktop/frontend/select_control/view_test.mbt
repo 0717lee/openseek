@@ -7,8 +7,8 @@ test "selected option does not request a change command" {
       {
         label: "Provider",
         options: [
-          { value: "deepseek", label: "DeepSeek" },
-          { value: "custom", label: "Custom URL" },
+          { value: "deepseek", label: "DeepSeek", },
+          { value: "custom", label: "Custom URL", },
         ],
       },
     ],

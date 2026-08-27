@@ -58,7 +58,7 @@ async fn open_path_op(payload : OpenPathPayload) -> OpenPathReply {
       !real_relative.is_root() else {
       return refusal("Text file is outside the conversation checkout: \{path}")
     }
-    return Editor({ path: relative.0, line, column })
+    return Editor({ path: relative.0, line, column, })
   }
   guard resolution is SystemPath(system_path) else {
     return refusal("Could not resolve path")
@@ -93,7 +93,7 @@ async fn open_path_op(payload : OpenPathPayload) -> OpenPathReply {
         @pathx.Path(real_root_text).to_absolute() is Some(real_root) &&
         @pathx.Path(real_path_text).to_absolute() is Some(real_path) &&
         real_path.relative_to(root=real_root) is Some(_) {
-        return Directory({ path: relative.0 })
+        return Directory({ path: relative.0, })
       }
     }
   }
@@ -180,7 +180,7 @@ async test "open_path returns workspace editor positions without a system open" 
   })
   assert_eq(
     reply,
-    Editor({ path: "source.mbt", line: Some(2738), column: Some(17) }),
+    Editor({ path: "source.mbt", line: Some(2738), column: Some(17), }),
   )
   let fragment_reply = open_path_op({
     session: "unused-for-explicit-cwd",
@@ -189,7 +189,7 @@ async test "open_path returns workspace editor positions without a system open" 
   })
   assert_eq(
     fragment_reply,
-    Editor({ path: "source.mbt", line: Some(5), column: None }),
+    Editor({ path: "source.mbt", line: Some(5), column: None, }),
   )
   let ordinary_reply = open_path_op({
     session: "unused-for-explicit-cwd",
@@ -198,7 +198,7 @@ async test "open_path returns workspace editor positions without a system open" 
   })
   assert_eq(
     ordinary_reply,
-    Editor({ path: "source.mbt", line: None, column: None }),
+    Editor({ path: "source.mbt", line: None, column: None, }),
   )
   let literal = "\{file}:12"
   @fs.write_file(literal, "literal", create_mode=CreateOrTruncate)
@@ -209,7 +209,7 @@ async test "open_path returns workspace editor positions without a system open" 
   })
   assert_eq(
     literal_reply,
-    Editor({ path: "source.mbt:12", line: None, column: None }),
+    Editor({ path: "source.mbt:12", line: None, column: None, }),
   )
   @fs.mkdir("\{dir}/src")
   let directory_reply = open_path_op({
@@ -217,7 +217,7 @@ async test "open_path returns workspace editor positions without a system open" 
     cwd: Some(cwd),
     path: "src",
   })
-  assert_eq(directory_reply, Directory({ path: "src" }))
+  assert_eq(directory_reply, Directory({ path: "src", }))
 }
 
 ///|

@@ -68,7 +68,7 @@ pub fn decode_args(arguments : Json) -> MultiEditArgs raise {
         { "revert_on_parse_errors": False, .. } => false
         _ => fail("arguments.revert_on_parse_errors to be a boolean")
       }
-      { inline, edits_file, revert_when_errors_above, revert_on_parse_errors }
+      { inline, edits_file, revert_when_errors_above, revert_on_parse_errors, }
     }
     _ => fail("object arguments")
   }
@@ -108,7 +108,7 @@ fn decode_edit_item(item : Json, index : Int) -> MultiEditItem raise {
           "\{prefix}.end_line to be greater than or equal to \{prefix}.start_line",
         )
       }
-      { file, old_string, new_string, start_line, end_line }
+      { file, old_string, new_string, start_line, end_line, }
     }
     _ => fail("arguments.edits[\{index}] to be an object")
   }

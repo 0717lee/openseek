@@ -135,7 +135,7 @@ priv struct ReverseRequestRegistry {
 
 ///|
 fn ReverseRequestRegistry::ReverseRequestRegistry() -> ReverseRequestRegistry {
-  { requests: Map([]), generation: 0 }
+  { requests: Map([]), generation: 0, }
 }
 
 ///|

@@ -83,7 +83,7 @@ pub(all) struct ReasoningSelect {
 pub fn ReasoningSelect::render(self : ReasoningSelect) -> @html.Html {
   @select_control.Control::{
     id: self.id,
-    groups: [{ label: "Reasoning effort", options: self.options }],
+    groups: [{ label: "Reasoning effort", options: self.options, }],
     selected: self.selected,
     disabled: self.disabled,
     open: self.open,

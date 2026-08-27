@@ -104,7 +104,7 @@ fn[X] wire(
 
 ///|
 fn new_transport() -> FakeTransport {
-  { inbound: Queue(kind=Unbounded), outbound: Queue(kind=Unbounded) }
+  { inbound: Queue(kind=Unbounded), outbound: Queue(kind=Unbounded), }
 }
 
 ///|

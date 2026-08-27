@@ -12,7 +12,7 @@ fn render_search(state : State, input : Input) -> String {
 ///|
 test "Search renders VS Code's Whole Word codicon instead of a text label" {
   let input : Input = {
-    owner: { channel: @interop.ChannelId::Local, session: "icons" },
+    owner: { channel: @interop.ChannelId::Local, session: "icons", },
     root: Some(@common.Uri::parse("file:///work")),
   }
   let html = render_search(State::empty(), input)
@@ -28,7 +28,7 @@ test "Search view groups files and marks matching UTF-16 slices" {
     session: "view",
   }
   let root = @common.Uri::parse("file:///work")
-  let input : Input = { owner, root: Some(root) }
+  let input : Input = { owner, root: Some(root), }
   let state = State::empty()
     .handle(QueryChanged("moon"), input)
     .handle(Submit, input)
@@ -42,14 +42,14 @@ test "Search view groups files and marks matching UTF-16 slices" {
         line_number: 7,
         preview: "let moon = 1",
         preview_start_column: 1,
-        ranges: [{ start_column: 5, end_column: 9 }],
+        ranges: [{ start_column: 5, end_column: 9, }],
       },
       {
         path: "src/main.mbt",
         line_number: 9,
         preview: "moon()",
         preview_start_column: 1,
-        ranges: [{ start_column: 1, end_column: 5 }],
+        ranges: [{ start_column: 1, end_column: 5, }],
       },
     ],
     match_count: 2,
@@ -77,7 +77,7 @@ test "large Search replies render incrementally without changing totals" {
     session: "large-view",
   }
   let root = @common.Uri::parse("file:///work")
-  let input : Input = { owner, root: Some(root) }
+  let input : Input = { owner, root: Some(root), }
   let state = State::empty()
     .handle(QueryChanged("moon"), input)
     .handle(Submit, input)
@@ -87,7 +87,7 @@ test "large Search replies render incrementally without changing totals" {
     line_number: 7,
     preview: "moon",
     preview_start_column: 1,
-    ranges: [{ start_column: 1, end_column: 5 }],
+    ranges: [{ start_column: 1, end_column: 5, }],
   }
   let reply : @protocol.SearchTextReply = {
     root: root.path,

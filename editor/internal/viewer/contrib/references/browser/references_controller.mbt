@@ -119,7 +119,7 @@ priv struct ReferencesGroupPreviewOwner {
 fn ReferencesGroupPreviewOwner::ReferencesGroupPreviewOwner(
   group_index : Int,
 ) -> ReferencesGroupPreviewOwner {
-  { group_index, generation: 0, source: None, reference: None }
+  { group_index, generation: 0, source: None, reference: None, }
 }
 
 ///|
@@ -980,7 +980,7 @@ fn ReferencesController::detach_group_resources(
     owner.source = None
     owner.reference = None
   }
-  { sources, references }
+  { sources, references, }
 }
 
 ///|

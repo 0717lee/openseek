@@ -54,11 +54,11 @@ fn Model::notify_error(
   dispatch : @cmd.Emit[Msg],
   message : String,
 ) -> (@cmd.Cmd, Model) {
-  let toast : Notification = { id: self.notification_seq, message }
+  let toast : Notification = { id: self.notification_seq, message, }
   let notifications = self.notifications.copy()
   notifications.push(toast)
   (
     @cmd.delay(dispatch(NotificationExpired(toast.id)), NotificationLifetimeMs),
-    { ..self, notification_seq: toast.id + 1, notifications },
+    { ..self, notification_seq: toast.id + 1, notifications, },
   )
 }

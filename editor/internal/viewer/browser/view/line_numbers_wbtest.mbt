@@ -16,7 +16,7 @@ test "line numbers mark the primary model line and skip wrapped continuations" {
   defer view_model.dispose()
   let viewport = @view_model.viewport_data_from_view_model(
     view_model,
-    { start: 1, end: view_model.line_count() + 1 },
+    { start: 1, end: view_model.line_count() + 1, },
     line_height=20,
   )
   let output = prepare_line_numbers_render(
@@ -47,7 +47,7 @@ test "line numbers leave non-primary model rows inactive" {
   defer view_model.dispose()
   let viewport = @view_model.viewport_data_from_view_model(
     view_model,
-    { start: 1, end: 3 },
+    { start: 1, end: 3, },
     line_height=20,
   )
   let output = prepare_line_numbers_render(

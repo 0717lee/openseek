@@ -78,7 +78,7 @@ async fn agent_shell_launch(
     return match sandboxed {
       Some(command) =>
         {
-          command: { program: command.program(), args: command.args() },
+          command: { program: command.program(), args: command.args(), },
           sandboxed_command: Some(command),
         }
       None =>
@@ -153,7 +153,7 @@ async fn agent_shell_launch(
       }
     (SourceReadOnly, Some(command)) =>
       {
-        command: { program: command.program(), args: command.args() },
+        command: { program: command.program(), args: command.args(), },
         sandboxed_command: Some(command),
       }
   }
@@ -679,7 +679,7 @@ priv struct SourceWriteCwdState {
 
 ///|
 fn source_write_initial_cwd_state(initial_cwd : String) -> SourceWriteCwdState {
-  { active: [Some(initial_cwd)], deferred: [] }
+  { active: [Some(initial_cwd)], deferred: [], }
 }
 
 ///|
@@ -740,20 +740,20 @@ fn source_write_next_cwd_state(
   match next_separator {
     Some("&&") => {
       append_unique_cwd_candidates(state.deferred, failure)
-      { active: success, deferred: state.deferred }
+      { active: success, deferred: state.deferred, }
     }
     Some("||") => {
       append_unique_cwd_candidates(failure, state.deferred)
-      { active: failure, deferred: success }
+      { active: failure, deferred: success, }
     }
     Some("|") => {
       append_unique_cwd_candidates(failure, state.deferred)
-      { active: failure, deferred: [] }
+      { active: failure, deferred: [], }
     }
     _ => {
       append_unique_cwd_candidates(success, failure)
       append_unique_cwd_candidates(success, state.deferred)
-      { active: success, deferred: [] }
+      { active: success, deferred: [], }
     }
   }
 }
@@ -1837,7 +1837,7 @@ fn read_command_word(
   if word == "" {
     None
   } else {
-    Some({ word, next: index })
+    Some({ word, next: index, })
   }
 }
 
@@ -2042,7 +2042,7 @@ fn heredoc_delimiters_in_line(line : String) -> Array[HeredocDelimiter] {
         match read_heredoc_delimiter(rest) {
           Some((marker, after)) => {
             if marker != "" {
-              delimiters.push({ marker, strip_tabs })
+              delimiters.push({ marker, strip_tabs, })
             }
             continue after
           }
@@ -2676,7 +2676,7 @@ async fn powershell_rename_target(
     [] => resolve_source_write_redirect_target(cwd, new_name)
   }
   source_tree_move_target(
-    { sources, dest: Some(dest) },
+    { sources, dest: Some(dest), },
     real_workspace_root,
     cwd,
     predicted_dirs,
@@ -2747,7 +2747,7 @@ fn parse_powershell_path_operands(
     paths.push(arg)
     index += 1
   }
-  Some({ paths, dest, new_name })
+  Some({ paths, dest, new_name, })
 }
 
 ///|
@@ -4846,7 +4846,7 @@ async fn source_tree_install_target(
     return None
   }
   source_tree_copy_destination_target(
-    { sources: operands.sources, dest: operands.dest },
+    { sources: operands.sources, dest: operands.dest, },
     real_workspace_root,
     cwd,
     predicted_dirs,
@@ -4926,11 +4926,11 @@ fn parse_install_operands(
     index += 1
   }
   if directory_mode {
-    Some({ sources: operands, dest: None, directory_mode })
+    Some({ sources: operands, dest: None, directory_mode, })
   } else {
     match operands_with_optional_dest(operands, target_directory) {
       Some(operands) =>
-        Some({ sources: operands.sources, dest: operands.dest, directory_mode })
+        Some({ sources: operands.sources, dest: operands.dest, directory_mode, })
       None => None
     }
   }
@@ -5248,15 +5248,15 @@ fn operands_with_optional_dest(
   target_directory : String?,
 ) -> MvOperands? {
   match target_directory {
-    Some(dest) => Some({ sources: operands, dest: Some(dest) })
+    Some(dest) => Some({ sources: operands, dest: Some(dest), })
     // Without an explicit target, the last operand is the destination and the
     // rest are sources — but only if there IS a rest: a lone operand is a
     // source with nowhere to go, not a destination.
     None =>
       if operands is [.. sources, dest] && !sources.is_empty() {
-        Some({ sources: sources.to_owned(), dest: Some(dest) })
+        Some({ sources: sources.to_owned(), dest: Some(dest), })
       } else {
-        Some({ sources: [], dest: None })
+        Some({ sources: [], dest: None, })
       }
   }
 }

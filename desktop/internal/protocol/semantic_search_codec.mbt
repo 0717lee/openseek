@@ -201,7 +201,7 @@ pub impl FromJson for SemanticSearchError with fn from_json(json, path) {
       (path.add_key("message"), "expected non-empty message"),
     )
   }
-  let result : SemanticSearchError = { code, message }
+  let result : SemanticSearchError = { code, message, }
   result
 }
 
@@ -250,7 +250,7 @@ pub impl FromJson for SearchSemanticReply with fn from_json(json, path) {
           (path.add_key("error_message"), "expected non-empty error message"),
         )
       }
-      let pair : SemanticSearchError = { code, message }
+      let pair : SemanticSearchError = { code, message, }
       Some(pair)
     }
     _ =>

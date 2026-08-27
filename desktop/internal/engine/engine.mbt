@@ -199,7 +199,7 @@ fn ServeEngine::submit(
   failure_reason~ : String,
   ack? : @async.Queue[EngineError?],
 ) -> Bool {
-  self.commands.try_put({ command, failure_reason, ack }) catch {
+  self.commands.try_put({ command, failure_reason, ack, }) catch {
     _ => false
   }
 }
@@ -431,7 +431,7 @@ priv struct SteerRunTracker {
 
 ///|
 fn SteerRunTracker::new() -> SteerRunTracker {
-  { settling_run: None, open_steers: [], settling_steers: [] }
+  { settling_run: None, open_steers: [], settling_steers: [], }
 }
 
 ///|
@@ -445,7 +445,7 @@ fn SteerRunTracker::record_sent(
   text : String,
   submission_id : String?,
 ) -> TrackedSteer {
-  let entry : TrackedSteer = { text, submission_id }
+  let entry : TrackedSteer = { text, submission_id, }
   self.open_steers.push(entry)
   entry
 }
@@ -622,7 +622,7 @@ fn SessionSlot::claim(
       },
     )
   }
-  let claim : PendingClaim = { epoch, session_key, op, active: true }
+  let claim : PendingClaim = { epoch, session_key, op, active: true, }
   self.pending = Some(claim)
   claim
 }
@@ -898,7 +898,7 @@ fn slot_for(sessions : Map[String, SessionSlot], key : String) -> SessionSlot {
   if sessions.get(key) is Some(slot) {
     slot
   } else {
-    let slot : SessionSlot = { pending: None, engine: None }
+    let slot : SessionSlot = { pending: None, engine: None, }
     sessions.set(key, slot)
     slot
   }
@@ -1097,7 +1097,7 @@ pub fn new_engine_actor(
   engine : String,
   runtime_dir? : @pathx.Path,
 ) -> EngineActor {
-  { manager: new_engine_manager(engine, runtime_dir?) }
+  { manager: new_engine_manager(engine, runtime_dir?), }
 }
 
 ///|
@@ -1239,7 +1239,7 @@ async fn EngineActor::run_generation(
 
   manager.pump = Serving(sessions~)
   defer reset()
-  emit(sink, Connected({ stage: Serving }))
+  emit(sink, Connected({ stage: Serving, }))
   @async.with_task_group(group => {
     // A permanent deletion whose physical cleanup failed or was interrupted
     // leaves its condemned records under `archived/deleting`. Erase them once
@@ -1691,7 +1691,7 @@ test "model-step and successful-terminal events are durable barriers" {
   assert_true(event_requires_durable_barrier(AgentFinished("done")))
   assert_true(event_requires_durable_barrier(ContextYield("continue")))
   assert_false(event_requires_durable_barrier(AssistantMessage("live")))
-  assert_false(event_requires_durable_barrier(Usage({ total_tokens: 3 })))
+  assert_false(event_requires_durable_barrier(Usage({ total_tokens: 3, })))
 }
 
 ///|
@@ -1791,7 +1791,7 @@ async fn ServeEngine::consume(
                 StreamEvent({
                   run_id,
                   session: engine.session_key,
-                  event: { event, submission_id },
+                  event: { event, submission_id, },
                 }),
               )
             }
@@ -1841,7 +1841,7 @@ async fn ServeEngine::consume(
               StreamEvent({
                 run_id,
                 session: engine.session_key,
-                event: { event, submission_id },
+                event: { event, submission_id, },
               }),
             )
           None => ()
@@ -2735,12 +2735,12 @@ async test "native engine env has one authoritative bundled moon path" {
   @debug.assert_eq(engine_process_args(config), [
     "serve", "--session=s-env", "--dir", ".", "--approval", "ask",
   ])
-  @debug.assert_eq(engine_process_args({ ..config, session: "--resume" }), [
+  @debug.assert_eq(engine_process_args({ ..config, session: "--resume", }), [
     "serve", "--session=--resume", "--dir", ".", "--approval", "ask",
   ])
   let explicit_root = root.join("sessions").resolve()
   @debug.assert_eq(
-    engine_process_args({ ..config, session_root: Some(explicit_root) }),
+    engine_process_args({ ..config, session_root: Some(explicit_root), }),
     [
       "serve",
       "--session=s-env",
@@ -2826,7 +2826,7 @@ async test "engine startup rolls back follower on pre-spawn failure" {
   assert_eq(@process.run("chmod", ["+x", baseline_engine]), 0)
   let manager = new_engine_manager(baseline_engine)
   let sink = EventSink(fn(_) { () })
-  let slot : SessionSlot = { pending: None, engine: None }
+  let slot : SessionSlot = { pending: None, engine: None, }
   let config : RunConfig = {
     task: "test",
     api_key: "test",

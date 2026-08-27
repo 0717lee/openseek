@@ -25,7 +25,7 @@ pub fn AgentToolCall::AgentToolCall(
   let arguments = @json.parse(call.arguments) catch {
     _ => fail("\{call.name} arguments are not valid JSON")
   }
-  { name: call.name, arguments }
+  { name: call.name, arguments, }
 }
 
 ///|
@@ -80,7 +80,7 @@ pub fn AgentToolDefinition::AgentToolDefinition(
   control? : Bool = false,
   concurrent_safe? : Bool = false,
 ) -> AgentToolDefinition {
-  { name, description, schema, execute, control, concurrent_safe }
+  { name, description, schema, execute, control, concurrent_safe, }
 }
 
 ///|
@@ -138,7 +138,7 @@ fn ToolOutput::ToolOutput(
   is_error? : Bool = false,
   brief? : String,
 ) -> ToolOutput {
-  { content, is_error, brief }
+  { content, is_error, brief, }
 }
 
 ///|

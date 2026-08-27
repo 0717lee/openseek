@@ -25,7 +25,7 @@ priv struct LanguageFeatureSnapshot[T] {
 
 ///|
 fn[T] LanguageFeatureRegistry::new() -> LanguageFeatureRegistry[T] {
-  { entries: [], clock: 0 }
+  { entries: [], clock: 0, }
 }
 
 ///|
@@ -65,7 +65,7 @@ fn[T] LanguageFeatureRegistry::snapshot_matching(
   for entry in self.entries {
     let score = entry.selector.score(model)
     if entry.active.val && score > 0 {
-      result.push({ entry, provider_index: entry.registration_time, score })
+      result.push({ entry, provider_index: entry.registration_time, score, })
     }
   }
   result.sort_by((left, right) => {
@@ -345,7 +345,7 @@ pub fn Languages::register_markdown_comment_provider(
   provider : &@language.MarkdownCommentProvider,
   foldable? : Bool = false,
 ) -> @base_common.Disposable {
-  self.markdown_comment_provider.register(selector, { provider, foldable })
+  self.markdown_comment_provider.register(selector, { provider, foldable, })
 }
 
 ///|
@@ -367,7 +367,7 @@ fn Languages::markdown_comment_provider_result_with_log_handle(
       []
     }
   }
-  Some({ blocks, foldable: captured.entry.provider.foldable })
+  Some({ blocks, foldable: captured.entry.provider.foldable, })
 }
 
 ///|

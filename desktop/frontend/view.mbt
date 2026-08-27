@@ -61,7 +61,7 @@ fn SelectMenu::setting_control(
 ) -> @html.Html {
   @select_control.Control::{
     id,
-    groups: [{ label: aria_label, options }],
+    groups: [{ label: aria_label, options, }],
     selected,
     disabled,
     open: model.select_menu == Some(self),
@@ -485,7 +485,7 @@ fn Model::sidebar_component_sections(
     } else {
       None
     },
-    action: Some({ title: "Add a project", disabled: false }),
+    action: Some({ title: "Add a project", disabled: false, }),
     entries: projects,
   })
   // Archived conversations fold behind a collapsed section at the end of the
@@ -600,7 +600,7 @@ fn Model::sidebar_component_input(self : Model) -> @sidebar.Input {
   // sign-out — with the last account-level failure inline beneath it.
   let account : @sidebar.Account? = match self.console {
     Some(console) if console.auth is AuthSignedIn(login~, avatar~) =>
-      Some({ login, avatar, busy: console.busy, notice: console.notice })
+      Some({ login, avatar, busy: console.busy, notice: console.notice, })
     _ => None
   }
   {
@@ -1135,8 +1135,8 @@ fn api_settings_rows(
           model,
           id="api-provider-select",
           options=[
-            { value: "deepseek", label: "DeepSeek official (your API key)" },
-            { value: "custom", label: "Custom URL" },
+            { value: "deepseek", label: "DeepSeek official (your API key)", },
+            { value: "custom", label: "Custom URL", },
           ],
           selected=model.api_provider.wire(),
           aria_label="API endpoint",
@@ -1261,9 +1261,9 @@ fn settings_page(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
             model,
             id="theme-select",
             options=[
-              { value: "system", label: "System" },
-              { value: "light", label: "Light" },
-              { value: "dark", label: "Dark" },
+              { value: "system", label: "System", },
+              { value: "light", label: "Light", },
+              { value: "dark", label: "Dark", },
             ],
             selected=model.theme.wire(),
             aria_label="Theme",
@@ -1280,9 +1280,9 @@ fn settings_page(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
             model,
             id="font-select",
             options=[
-              { value: "system-mono", label: "System monospace" },
-              { value: "geist-mono", label: "Geist Mono" },
-              { value: "menlo", label: "Menlo" },
+              { value: "system-mono", label: "System monospace", },
+              { value: "geist-mono", label: "Geist Mono", },
+              { value: "menlo", label: "Menlo", },
             ],
             selected=model.app_font.wire(),
             aria_label="Monospace font",
@@ -1299,9 +1299,9 @@ fn settings_page(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
             model,
             id="font-size-select",
             options=[
-              { value: "small", label: "Small (13px)" },
-              { value: "medium", label: "Medium (14px)" },
-              { value: "large", label: "Large (15px)" },
+              { value: "small", label: "Small (13px)", },
+              { value: "medium", label: "Medium (14px)", },
+              { value: "large", label: "Large (15px)", },
             ],
             selected=model.app_font_size.wire(),
             aria_label="Font size",
@@ -1318,10 +1318,10 @@ fn settings_page(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
             model,
             id="notification-corner-select",
             options=[
-              { value: "bottom-right", label: "Bottom right" },
-              { value: "bottom-left", label: "Bottom left" },
-              { value: "top-right", label: "Top right" },
-              { value: "top-left", label: "Top left" },
+              { value: "bottom-right", label: "Bottom right", },
+              { value: "bottom-left", label: "Bottom left", },
+              { value: "top-right", label: "Top right", },
+              { value: "top-left", label: "Top left", },
             ],
             selected=model.notification_corner.wire(),
             aria_label="Notification corner",
@@ -1338,8 +1338,8 @@ fn settings_page(dispatch : @cmd.Emit[Msg], model : Model) -> @html.Html {
             model,
             id="tree-layout-select",
             options=[
-              { value: "right-sidebar", label: "Right sidebar" },
-              { value: "bottom-panel", label: "Bottom panel" },
+              { value: "right-sidebar", label: "Right sidebar", },
+              { value: "bottom-panel", label: "Bottom panel", },
             ],
             selected=model.tree_layout.wire(),
             aria_label="File tree layout",
@@ -1430,8 +1430,8 @@ fn workspace_settings_page(
           model,
           id="workspace-default-mode-select",
           options=[
-            { value: "local", label: "Local" },
-            { value: "worktree", label: "Worktree" },
+            { value: "local", label: "Local", },
+            { value: "worktree", label: "Worktree", },
           ],
           selected=if worktree_mode { "worktree" } else { "local" },
           aria_label="New chats",
@@ -1453,8 +1453,8 @@ fn workspace_settings_page(
           model,
           id="workspace-submodules-select",
           options=[
-            { value: "checkout", label: "Initialize" },
-            { value: "skip", label: "Leave uninitialized" },
+            { value: "checkout", label: "Initialize", },
+            { value: "skip", label: "Leave uninitialized", },
           ],
           selected=if checkout_submodules { "checkout" } else { "skip" },
           aria_label="Submodules in worktrees",
@@ -1474,10 +1474,10 @@ fn workspace_settings_page(
           model,
           id="workspace-submodule-timeout-select",
           options=[
-            { value: "5", label: "5 seconds" },
-            { value: "10", label: "10 seconds" },
-            { value: "30", label: "30 seconds" },
-            { value: "60", label: "60 seconds" },
+            { value: "5", label: "5 seconds", },
+            { value: "10", label: "10 seconds", },
+            { value: "30", label: "30 seconds", },
+            { value: "60", label: "60 seconds", },
           ],
           selected=submodule_checkout_timeout_seconds.to_string(),
           aria_label="Submodule checkout timeout",
@@ -1526,7 +1526,7 @@ test "settings and the browser address bar declare form focus ownership" {
   let address_markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(
       @preview.toolbar_view(
-        { url: None, input: "", title: "", loading: false, failure: None },
+        { url: None, input: "", title: "", loading: false, failure: None, },
         {
           input: dispatch.map(value => BrowserAddressEdited(value)),
           submit: @cmd.none,
@@ -1585,7 +1585,7 @@ test "workspace settings render only custom selects" {
 #warnings("-alert_unstable")
 test "an archived transcript renders no live composer controls" {
   let dispatch = test_dispatch()
-  let conv = { ..test_conversation(), record: ArchivedRecord }
+  let conv = { ..test_conversation(), record: ArchivedRecord, }
   let markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(conv.archived_read_only_view(dispatch))
   })
@@ -1608,13 +1608,13 @@ test "the topbar exports only a durable local conversation" {
     })
   }
 
-  let model = { ..test_model(), is_desktop: true }
+  let model = { ..test_model(), is_desktop: true, }
   let empty = test_conversation()
   assert_false(markup(model, empty).contains("title=\"Export conversation\""))
   let durable = {
     ..empty,
     messages: [
-      { kind: User, content: "Export me", ts: None, sequence: Some(1) },
+      { kind: User, content: "Export me", ts: None, sequence: Some(1), },
     ],
   }
   assert_true(markup(model, durable).contains("title=\"Export conversation\""))
@@ -1633,8 +1633,8 @@ test "onboarding stands in for the chat until a project holds one" {
 
   // Connected with no project: attaching one is the only way forward, so it
   // is the only thing offered.
-  let empty = { ..test_model(), conversations: [], active_session: "" }
-  let bare = empty.with_dev(dev => { ..dev, projects: [], worktrees: [] })
+  let empty = { ..test_model(), conversations: [], active_session: "", }
+  let bare = empty.with_dev(dev => { ..dev, projects: [], worktrees: [], })
   assert_true(bare.active_conversation() is None)
   assert_true(markup(bare).contains("Add a project"))
   // Connected with projects but between conversations: the rotation that
@@ -1644,7 +1644,7 @@ test "onboarding stands in for the chat until a project holds one" {
   assert_false(markup(empty).contains("Add a project"))
   // Before the bridge answers, this page knows nothing about the host's
   // projects and says only that.
-  let connecting = bare.with_dev(dev => { ..dev, bridge: Connecting })
+  let connecting = bare.with_dev(dev => { ..dev, bridge: Connecting, })
   assert_true(markup(connecting).contains("Connecting"))
   assert_false(markup(connecting).contains("Add a project"))
   // With a conversation on screen the fork takes its other branch.

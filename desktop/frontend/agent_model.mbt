@@ -139,7 +139,7 @@ fn openseek_model_group(selected : EngineModel) -> @composer.ModelGroup {
       label: name,
     })
   }
-  { label: "OpenSeek", options }
+  { label: "OpenSeek", options, }
 }
 
 ///|
@@ -155,12 +155,12 @@ fn Model::codex_model_group(self : Model) -> @composer.ModelGroup {
           label: option.label,
         })
       }
-      { label: "Codex", options: prefixed }
+      { label: "Codex", options: prefixed, }
     }
     CodexModelsUnavailable(label) =>
       {
         label: "Codex",
-        options: [{ value: CodexUnavailableChoiceWire, label }],
+        options: [{ value: CodexUnavailableChoiceWire, label, }],
       }
   }
 }
@@ -206,9 +206,9 @@ fn Model::openseek_reasoning_chip(
 ) -> @html.Html? {
   guard conv.engine_model.supports_reasoning() else { return None }
   let options : Array[@composer.ModelOption] = [
-    { value: ReasoningOff.wire(), label: "Off" },
-    { value: ReasoningHigh.wire(), label: "High" },
-    { value: ReasoningMax.wire(), label: "Max" },
+    { value: ReasoningOff.wire(), label: "Off", },
+    { value: ReasoningHigh.wire(), label: "High", },
+    { value: ReasoningMax.wire(), label: "Max", },
   ]
   Some(
     @composer.ReasoningSelect::{

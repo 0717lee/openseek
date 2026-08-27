@@ -68,7 +68,7 @@ test "the project component state owns its compact preview" {
   assert_true(state.conversation_visible(4, false))
   assert_false(state.conversation_visible(5, false))
   assert_true(state.conversation_visible(5, true))
-  let input = { ..test_input(), conversations: test_conversations(20) }
+  let input = { ..test_input(), conversations: test_conversations(20), }
   let shown_once = state.update(input, ShowMore)
   assert_eq(shown_once.preview_limit, 12)
   assert_true(shown_once.conversation_visible(11, false))
@@ -102,7 +102,7 @@ test "folding a project resets its compact preview" {
     preview_limit: PreviewLimit,
     menu_open: false,
   }
-  let input = { ..test_input(), conversations: test_conversations(20) }
+  let input = { ..test_input(), conversations: test_conversations(20), }
   let shown_more = state.update(input, ShowMore)
   assert_true(shown_more.conversation_visible(11, false))
   let folded = shown_more.update(input, ToggleDisclosure)

@@ -234,7 +234,7 @@ pub impl FromJson for WorktreeCreatePayload with fn from_json(json, path) {
       (path, "expected exactly one of session or codex_thread"),
     )
   }
-  { workspace, session, codex_thread }
+  { workspace, session, codex_thread, }
 }
 
 ///|
@@ -309,7 +309,7 @@ pub impl FromJson for GitPullRequestPayload with fn from_json(json, path) {
   let session = object.required_string("session")
   let cwd = object.optional_string("cwd")
   let branch_hint = object.optional_string("branch_hint")
-  { session, cwd, branch_hint }
+  { session, cwd, branch_hint, }
 }
 
 ///|
@@ -518,7 +518,7 @@ pub impl FromJson for CreateDirectoryPayload with fn from_json(json, path) {
   }
   // Unknown fields are intentionally ignored for forward compatibility; the
   // host still validates the two required path components before mutation.
-  { parent, name }
+  { parent, name, }
 }
 
 ///|
@@ -575,7 +575,7 @@ pub impl FromJson for LspOpenPayload with fn from_json(json, path) {
   let session = object.required_string("session")
   let root = object.required_string("root")
   let file_path = object.required_string("path")
-  { session, root, path: file_path }
+  { session, root, path: file_path, }
 }
 
 ///|
@@ -603,7 +603,7 @@ pub impl FromJson for LspHoverPayload with fn from_json(json, path) {
   let file_path = object.required_string("path")
   let line = object.required_int("line")
   let character = object.required_int("character")
-  { session, root, path: file_path, line, character }
+  { session, root, path: file_path, line, character, }
 }
 
 ///|
@@ -633,7 +633,7 @@ pub impl FromJson for WorkspaceSymbolsPayload with fn from_json(json, path) {
   let session = object.required_string("session")
   let root = object.required_string("root")
   let query = object.required_string("query")
-  { session, root, query }
+  { session, root, query, }
 }
 
 ///|
@@ -661,7 +661,7 @@ pub impl FromJson for MoonIdeNavigationPayload with fn from_json(json, path) {
   let file_path = object.required_string("path")
   let line = object.required_int("line")
   let column = object.required_int("column")
-  { session, root, path: file_path, line, column }
+  { session, root, path: file_path, line, column, }
 }
 
 ///|
@@ -776,7 +776,7 @@ pub impl FromJson for ConnectedPayload with fn from_json(json, path) {
   guard fields.get("stage") is Some(stage) else {
     raise JsonDecodeError((path.add_key("stage"), "missing required field"))
   }
-  { stage: @json.from_json(stage, path=path.add_key("stage")) }
+  { stage: @json.from_json(stage, path=path.add_key("stage")), }
 }
 
 ///|

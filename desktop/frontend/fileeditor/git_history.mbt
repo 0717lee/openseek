@@ -412,7 +412,7 @@ pub fn open_history_diff(
       workspace=ctx.workspace(),
     ),
   )
-  (@cmd.batch(cmds), { ..state, history_docs, history_generation: generation })
+  (@cmd.batch(cmds), { ..state, history_docs, history_generation: generation, })
 }
 
 ///|
@@ -570,10 +570,10 @@ fn graph_rows(
           color
         }
       }
-      output_swimlanes.push({ id: parent, color })
+      output_swimlanes.push({ id: parent, color, })
     }
 
-    rows.push({ input_swimlanes, output_swimlanes })
+    rows.push({ input_swimlanes, output_swimlanes, })
     output_from_previous = output_swimlanes
   }
   rows
@@ -608,7 +608,7 @@ test "Git graph matches VS Code linear swimlane transitions" {
       graph_test_commit("d", ["e"]),
       graph_test_commit("e", []),
     ],
-    { head: None, branch: None, refs: [], tips: [] },
+    { head: None, branch: None, refs: [], tips: [], },
   )
   assert_eq(rows.length(), 5)
   assert_eq(graph_lane_signature(rows[0].input_swimlanes), "")
@@ -631,7 +631,7 @@ test "Git graph matches VS Code single-commit topic branch transitions" {
       graph_test_commit("c", ["e"]),
       graph_test_commit("e", ["f"]),
     ],
-    { head: None, branch: None, refs: [], tips: [] },
+    { head: None, branch: None, refs: [], tips: [], },
   )
   assert_eq(graph_lane_signature(rows[0].output_swimlanes), "b:0")
   assert_eq(graph_lane_signature(rows[1].input_swimlanes), "b:0")
@@ -654,7 +654,7 @@ test "Git graph matches VS Code multi-commit topic branch transitions" {
       graph_test_commit("f", ["d"]),
       graph_test_commit("d", ["g"]),
     ],
-    { head: None, branch: None, refs: [], tips: [] },
+    { head: None, branch: None, refs: [], tips: [], },
   )
   assert_eq(graph_lane_signature(rows[0].output_swimlanes), "b:0,c:1")
   assert_eq(graph_lane_signature(rows[1].output_swimlanes), "b:0,d:1")
@@ -691,7 +691,7 @@ test "Git graph lanes retain linear history and connect merge parents" {
         authored_at: "2026-01-01T00:00:00Z",
       },
     ],
-    { head: Some("merge"), branch: None, refs: [], tips: ["merge"] },
+    { head: Some("merge"), branch: None, refs: [], tips: ["merge"], },
   )
   assert_eq(rows.length(), 3)
   assert_eq(rows[0].input_swimlanes.length(), 0)
@@ -708,9 +708,9 @@ test "Git graph semantic colors follow refs through the pagination boundary" {
     head: Some("head"),
     branch: Some("feature/graph"),
     refs: [
-      { name: "feature/graph", revision: "head", kind: "current" },
-      { name: "origin/feature/graph", revision: "remote", kind: "upstream" },
-      { name: "origin/main", revision: "base", kind: "base" },
+      { name: "feature/graph", revision: "head", kind: "current", },
+      { name: "origin/feature/graph", revision: "remote", kind: "upstream", },
+      { name: "origin/main", revision: "base", kind: "base", },
     ],
     tips: ["head", "remote", "base"],
   }

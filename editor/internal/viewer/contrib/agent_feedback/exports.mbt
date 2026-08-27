@@ -29,6 +29,6 @@ pub fn AgentFeedbackService::set_feedback_resolved(
     Submitted
   }
   if existing.state != next_state {
-    self.replace_item(resource, { ..existing, state: next_state })
+    self.replace_item(resource, { ..existing, state: next_state, })
   }
 }

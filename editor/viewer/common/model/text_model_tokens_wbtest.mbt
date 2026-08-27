@@ -25,7 +25,7 @@ fn token_test_harness(lines : Array[String]) -> TokenTestHarness {
     scheduler,
     message => errors.push(message),
   )
-  { model_state, errors }
+  { model_state, errors, }
 }
 
 ///|

@@ -69,7 +69,7 @@ fn visible_file_groups(page : Page) -> Array[FileGroup] {
       guard rows.length() < remaining else { break }
       rows.push(result)
     }
-    visible.push({ ..group, matches: rows })
+    visible.push({ ..group, matches: rows, })
     remaining -= rows.length()
   }
   visible
@@ -471,11 +471,11 @@ fn semantic_grouped_hits(
         let group = groups[index]
         let rows = group.hits
         rows.push(hit)
-        groups[index] = { ..group, hits: rows, count: group.count + 1 }
+        groups[index] = { ..group, hits: rows, count: group.count + 1, }
       }
       None => {
         indexes[hit.path] = groups.length()
-        groups.push({ path: hit.path, hits: [hit], count: 1 })
+        groups.push({ path: hit.path, hits: [hit], count: 1, })
       }
     }
   }
@@ -493,7 +493,7 @@ fn visible_semantic_file_groups(page : Page) -> Array[SemanticFileGroup] {
       guard rows.length() < remaining else { break }
       rows.push(hit)
     }
-    visible.push({ ..group, hits: rows })
+    visible.push({ ..group, hits: rows, })
     remaining -= rows.length()
   }
   visible

@@ -177,7 +177,7 @@ async fn FsWatchRequest::keeps_active_watcher(
 
 ///|
 fn FsWatchActor::new() -> FsWatchActor {
-  { requests: Queue(kind=Blocking(64)) }
+  { requests: Queue(kind=Blocking(64)), }
 }
 
 ///|
@@ -268,7 +268,7 @@ async fn FsWatchTarget::activate(
     events: [],
     generation: self.generation,
   })
-  { target: self, watcher }
+  { target: self, watcher, }
 }
 
 ///|

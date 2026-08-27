@@ -130,7 +130,7 @@ pub fn Ctx::Ctx(
   dark_mode~ : Bool,
   connected~ : Bool,
 ) -> Ctx {
-  { channel, session, placement, dark_mode, connected }
+  { channel, session, placement, dark_mode, connected, }
 }
 
 ///|

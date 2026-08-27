@@ -27,7 +27,7 @@ pub fn RelayActor::new(
   state : @api.ApiState,
   announce~ : (String) -> Unit,
 ) -> RelayActor {
-  { state, announce }
+  { state, announce, }
 }
 
 ///|

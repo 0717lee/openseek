@@ -1219,7 +1219,7 @@ async test "sandbox denial detection ignores masked exit code" {
       }),
     )
     assert_false(
-      agent_output_has_shell_sandbox_denial({ output, sandboxed_command: None }),
+      agent_output_has_shell_sandbox_denial({ output, sandboxed_command: None, }),
     )
     assert_false(
       agent_output_has_shell_sandbox_denial({

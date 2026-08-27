@@ -22,7 +22,7 @@ pub fn update(msg : Msg, state : State) -> State {
   match msg {
     TabActivated(tab) =>
       if tab_index(state, tab) is Some(_) {
-        { ..state, active: Some(tab) }
+        { ..state, active: Some(tab), }
       } else {
         state
       }
@@ -40,7 +40,7 @@ pub fn update(msg : Msg, state : State) -> State {
           } else {
             state.active
           }
-          { ..state, tabs, active }
+          { ..state, tabs, active, }
         }
         None => state
       }
@@ -59,7 +59,7 @@ pub fn open_file(state : State, path : @pathx.Relative) -> State {
     tabs.push(tab)
     tabs
   }
-  { ..state, tabs, active: Some(tab) }
+  { ..state, tabs, active: Some(tab), }
 }
 
 ///|
@@ -74,7 +74,7 @@ pub fn open_history_diff(state : State, diff : GitHistoryDiff) -> State {
     tabs.push(tab)
     tabs
   }
-  { ..state, tabs, active: Some(tab) }
+  { ..state, tabs, active: Some(tab), }
 }
 
 ///|
@@ -90,7 +90,7 @@ pub fn open_browser(state : State, id : Int) -> State {
     tabs.push(tab)
     tabs
   }
-  { ..state, tabs, active: Some(tab) }
+  { ..state, tabs, active: Some(tab), }
 }
 
 ///|
@@ -104,7 +104,7 @@ pub fn open_picker(state : State) -> State {
     tabs.push(FilePicker)
     tabs
   }
-  { ..state, tabs, active: Some(FilePicker) }
+  { ..state, tabs, active: Some(FilePicker), }
 }
 
 ///|
@@ -119,11 +119,11 @@ pub fn resolve_pick(state : State, path : @pathx.Relative) -> State {
   let file = DockTab::File(path~)
   if tab_index(state, file) is Some(_) {
     let tabs = state.tabs.filter(entry => !(entry is FilePicker))
-    { ..state, tabs, active: Some(file) }
+    { ..state, tabs, active: Some(file), }
   } else {
     let tabs = state.tabs.copy()
     tabs[picker_index] = file
-    { ..state, tabs, active: Some(file) }
+    { ..state, tabs, active: Some(file), }
   }
 }
 
@@ -139,11 +139,11 @@ pub fn sync(state : State, owner : @interop.ConversationKey) -> State {
   }
   let remembered = state.remembered.copy()
   if state.owner is Some(previous) && !previous.session.is_empty() {
-    remembered[previous] = { tabs: state.tabs, active: state.active }
+    remembered[previous] = { tabs: state.tabs, active: state.active, }
   }
   let (tabs, active) = match remembered.get(owner) {
     Some(parked) => (parked.tabs.copy(), parked.active)
     None => ([], (None : DockTab?))
   }
-  { owner: Some(owner), tabs, active, remembered }
+  { owner: Some(owner), tabs, active, remembered, }
 }

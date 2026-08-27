@@ -1,6 +1,6 @@
 ///|
 fn lane(id : String, run? : String) -> @subrun.Lane {
-  { id, kind: "task", label: "investigate", steps: 0, activity: "", run }
+  { id, kind: "task", label: "investigate", steps: 0, activity: "", run, }
 }
 
 ///|

@@ -247,7 +247,7 @@ fn decoration(
 fn to_model_delta_decoration(
   dec : LightWeightDecoration,
 ) -> ModelDeltaDecoration {
-  { range: dec.range, options: dec_options(dec.id) }
+  { range: dec.range, options: dec_options(dec.id), }
 }
 
 ///|
@@ -325,16 +325,16 @@ test "issue #16922: Clicking on link doesn't seem to do anything" {
     ["Hello world,", "How are you?", "Fine.", "Good."].join("\n"),
   )
   let _ = model.delta_decorations([], [
-    { range: Range(1, 1, 1, 1), options: dec_options("1") },
-    { range: Range(1, 13, 1, 13), options: dec_options("2") },
-    { range: Range(2, 1, 2, 1), options: dec_options("3") },
-    { range: Range(2, 1, 2, 4), options: dec_options("4") },
-    { range: Range(2, 8, 2, 13), options: dec_options("5") },
-    { range: Range(3, 1, 4, 6), options: dec_options("6") },
-    { range: Range(1, 1, 3, 6), options: dec_options("x1") },
-    { range: Range(2, 5, 2, 8), options: dec_options("x2") },
-    { range: Range(1, 1, 2, 8), options: dec_options("x3") },
-    { range: Range(2, 5, 3, 1), options: dec_options("x4") },
+    { range: Range(1, 1, 1, 1), options: dec_options("1"), },
+    { range: Range(1, 13, 1, 13), options: dec_options("2"), },
+    { range: Range(2, 1, 2, 1), options: dec_options("3"), },
+    { range: Range(2, 1, 2, 4), options: dec_options("4"), },
+    { range: Range(2, 8, 2, 13), options: dec_options("5"), },
+    { range: Range(3, 1, 4, 6), options: dec_options("6"), },
+    { range: Range(1, 1, 3, 6), options: dec_options("x1"), },
+    { range: Range(2, 5, 2, 8), options: dec_options("x2"), },
+    { range: Range(1, 1, 2, 8), options: dec_options("x3"), },
+    { range: Range(2, 5, 3, 1), options: dec_options("x4"), },
   ])
   let in_range = model.get_decorations_in_range(Range(2, 6, 2, 6))
   let in_range_class_names = in_range.map(d => d.options.class_name)

@@ -3,7 +3,7 @@ test "encodes and decodes document client packets" {
   let uri = expect_uri(
     "readonly-remote://workspace/tests/fixtures/workspace/src/main.mbt",
   )
-  let packet = @remote_protocol.OpenDocument({ id: "open-1", uri })
+  let packet = @remote_protocol.OpenDocument({ id: "open-1", uri, })
   let encoded = packet.to_json().stringify()
   assert_true(encoded.contains("\"type\":\"OpenDocument\""))
   assert_true(encoded.contains("\"version\":6"))
@@ -116,7 +116,7 @@ test "encodes and decodes directory resolve packets" {
           kind: File,
           children: None,
         },
-        { uri: src_uri, name: "src", kind: Directory, children: None },
+        { uri: src_uri, name: "src", kind: Directory, children: None, },
       ]),
     },
   })
@@ -150,7 +150,7 @@ test "encodes and decodes directory resolve packets" {
   // unresolved children round-trip as None.
   let empty = @remote_protocol.DirectoryResolved({
     id: "resolve-2",
-    stat: { uri: src_uri, name: "src", kind: Directory, children: Some([]) },
+    stat: { uri: src_uri, name: "src", kind: Directory, children: Some([]), },
   })
   match @remote_protocol.decode_server_packet(empty.to_json().stringify()) {
     DecodedServerPacket(DirectoryResolved(payload)) =>
@@ -171,7 +171,7 @@ test "encodes and decodes server document and language packets" {
   let document = @workspace.DocumentSnapshot(
     uri, "main.mbt", "moonbit", "rev-2", "pub fn main {}\n",
   )
-  let loaded = @remote_protocol.DocumentLoaded({ id: "open-1", document })
+  let loaded = @remote_protocol.DocumentLoaded({ id: "open-1", document, })
   match @remote_protocol.decode_server_packet(loaded.to_json().stringify()) {
     DecodedServerPacket(DocumentLoaded(payload)) => {
       assert_eq(payload.id, "open-1")
@@ -212,7 +212,7 @@ test "encodes and decodes server document and language packets" {
     uri,
     revision: "rev-2",
     locations: [
-      { uri, range: Range(1, 8, 1, 12) },
+      { uri, range: Range(1, 8, 1, 12), },
       {
         uri: expect_uri("readonly-remote://workspace/src/lib.mbt"),
         range: Range(4, 2, 4, 7),
@@ -263,7 +263,13 @@ test "encodes and decodes server document and language packets" {
         column: 8,
         line_text: "pub fn main {}",
       },
-      { uri, range: Range(2, 1, 2, 5), line: 2, column: 1, line_text: "main()" },
+      {
+        uri,
+        range: Range(2, 1, 2, 5),
+        line: 2,
+        column: 1,
+        line_text: "main()",
+      },
     ],
   })
   match
@@ -358,7 +364,7 @@ test "encodes and decodes server document and language packets" {
     id: "symbols-1",
     uri,
     revision: "rev-2",
-    symbols: [{ name: "main", kind: "function", range: Range(1, 8, 1, 12) }],
+    symbols: [{ name: "main", kind: "function", range: Range(1, 8, 1, 12), }],
   })
   match @remote_protocol.decode_server_packet(symbols.to_json().stringify()) {
     DecodedServerPacket(DocumentSymbolsResult(payload)) => {
@@ -380,7 +386,7 @@ test "round-trips document text containing control characters" {
   let document = @workspace.DocumentSnapshot(
     uri, "control.mbt", "moonbit", "rev-1", text,
   )
-  let loaded = @remote_protocol.DocumentLoaded({ id: "open-ctl", document })
+  let loaded = @remote_protocol.DocumentLoaded({ id: "open-ctl", document, })
   match @remote_protocol.decode_server_packet(loaded.to_json().stringify()) {
     DecodedServerPacket(DocumentLoaded(payload)) =>
       assert_eq(payload.document.text, text)
@@ -432,7 +438,10 @@ test "negotiates protocol versions" {
 
 ///|
 test "encodes and decodes host browse client packets" {
-  let list = @remote_protocol.ListHostDirectory({ id: "list-1", path: "/repos" })
+  let list = @remote_protocol.ListHostDirectory({
+    id: "list-1",
+    path: "/repos",
+  })
   let encoded = list.to_json().stringify()
   assert_true(encoded.contains("\"type\":\"ListHostDirectory\""))
   match @remote_protocol.decode_client_packet(encoded) {
@@ -445,7 +454,7 @@ test "encodes and decodes host browse client packets" {
   }
 
   // An empty path means "start from the current workspace root".
-  let start = @remote_protocol.ListHostDirectory({ id: "list-2", path: "" })
+  let start = @remote_protocol.ListHostDirectory({ id: "list-2", path: "", })
   match @remote_protocol.decode_client_packet(start.to_json().stringify()) {
     DecodedClientPacket(ListHostDirectory(request)) =>
       assert_eq(request.path, "")
@@ -474,8 +483,8 @@ test "encodes and decodes host browse server packets" {
       path: "/repos",
       parent: Some("/"),
       entries: [
-        { name: "demo", path: "/repos/demo", is_workspace: true },
-        { name: "notes", path: "/repos/notes", is_workspace: false },
+        { name: "demo", path: "/repos/demo", is_workspace: true, },
+        { name: "notes", path: "/repos/notes", is_workspace: false, },
       ],
     },
   })
@@ -499,7 +508,7 @@ test "encodes and decodes host browse server packets" {
   // The filesystem root omits `parent`.
   let rooted = @remote_protocol.HostDirectoryListed({
     id: "list-2",
-    listing: { path: "/", parent: None, entries: [] },
+    listing: { path: "/", parent: None, entries: [], },
   })
   match @remote_protocol.decode_server_packet(rooted.to_json().stringify()) {
     DecodedServerPacket(HostDirectoryListed(payload)) =>

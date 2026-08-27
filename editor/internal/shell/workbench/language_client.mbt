@@ -45,7 +45,7 @@ priv struct RemoteLanguageFreshness {
 fn RemoteLanguageFreshness::RemoteLanguageFreshness(
   markers : @markers.MarkerService,
 ) -> RemoteLanguageFreshness {
-  { markers, generation: 0, current: None }
+  { markers, generation: 0, current: None, }
 }
 
 ///|
@@ -271,7 +271,7 @@ impl @language.HoverProvider for RemoteLanguageClient with fn provide_hover(
   let response = protocol_request(
     "hover",
     id => {
-      Hover({ id, uri: model.uri, document_revision: model.revision, offset })
+      Hover({ id, uri: model.uri, document_revision: model.revision, offset, })
     },
     token~,
   )
@@ -351,7 +351,10 @@ impl @language.ReferencesProvider for RemoteLanguageClient with fn provide_refer
   match response {
     ReferencesResult(payload) =>
       payload.references.map(item => {
-        let location : @language.Location = { uri: item.uri, range: item.range }
+        let location : @language.Location = {
+          uri: item.uri,
+          range: item.range,
+        }
         location
       })
     packet => {
@@ -388,7 +391,7 @@ impl @language.DocumentSymbolProvider for RemoteLanguageClient with fn provide_d
   let response = protocol_request(
     "symbols",
     id => {
-      DocumentSymbols({ id, uri: model.uri, document_revision: model.revision })
+      DocumentSymbols({ id, uri: model.uri, document_revision: model.revision, })
     },
     token~,
   )

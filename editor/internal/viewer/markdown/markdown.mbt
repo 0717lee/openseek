@@ -175,7 +175,7 @@ fn markdown_conversion_result(
         projection: empty_markdown_document_projection(),
       }
   }
-  { html, has_code_block: saw_code_block.val, projection }
+  { html, has_code_block: saw_code_block.val, projection, }
 }
 
 ///|

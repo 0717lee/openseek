@@ -89,7 +89,7 @@ pub fn[T] Menu::Menu(
   loading~ : Bool,
   draft_without_token~ : String,
 ) -> Menu[T] {
-  { items, selected: 0, loading, draft_without_token }
+  { items, selected: 0, loading, draft_without_token, }
 }
 
 ///|
@@ -130,7 +130,7 @@ pub fn[T] Menu::shifted(self : Menu[T], delta : Int) -> Menu[T] {
   if count == 0 {
     return self
   }
-  { ..self, selected: (self.selected + delta + count) % count }
+  { ..self, selected: (self.selected + delta + count) % count, }
 }
 
 ///|

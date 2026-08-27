@@ -350,7 +350,7 @@ fn parse_search_response(
         { "page_age": String(age), .. } if age != "" => Some(age)
         _ => None
       }
-      sources.push({ url, title, snippet: snippets.get(url), published_at })
+      sources.push({ url, title, snippet: snippets.get(url), published_at, })
     }
   }
   guard found_result_block else {
@@ -365,7 +365,7 @@ fn parse_search_response(
       "DeepSeek native web search failed server-side: \{error_codes.join(", ")}",
     )
   }
-  { sources, truncated: dropped }
+  { sources, truncated: dropped, }
 }
 
 ///|
@@ -552,7 +552,7 @@ test "parse_search_response treats a missing result block as a provider error" {
 
 ///|
 test "format_output renders the empty outcome as no results" {
-  let rendered = format_output({ sources: [], truncated: false })
+  let rendered = format_output({ sources: [], truncated: false, })
   assert_true(rendered.contains("No results found."))
 }
 

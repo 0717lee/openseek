@@ -34,7 +34,7 @@ priv struct MarkdownDocumentHoverHarness {
 
 ///|
 fn MarkdownDocumentHoverHarness::new() -> MarkdownDocumentHoverHarness {
-  { calls: [], next_id: Ref(1) }
+  { calls: [], next_id: Ref(1), }
 }
 
 ///|
@@ -111,7 +111,7 @@ impl @language.HoverProvider for MarkdownDocumentHoverProvider with fn provide_h
       ),
     )
   }
-  Some({ range, contents: [PlainText(outcome)] })
+  Some({ range, contents: [PlainText(outcome)], })
 }
 
 ///|
@@ -309,7 +309,7 @@ fn run_markdown_document_test() -> Unit {
   let languages = @languages.Languages()
   let hover_registration = languages.register_hover_provider(
     LanguageId("moonbit"),
-    MarkdownDocumentHoverProvider::{ harness: hover_harness },
+    MarkdownDocumentHoverProvider::{ harness: hover_harness, },
   )
   let log_service = @log.LogService()
   let log_handle = log_service.log_handle()

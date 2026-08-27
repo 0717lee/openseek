@@ -51,7 +51,7 @@ priv struct CodexDraftThreads {
 
 ///|
 fn CodexDraftThreads::CodexDraftThreads() -> CodexDraftThreads {
-  { entries: Map([]) }
+  { entries: Map([]), }
 }
 
 ///|
@@ -76,7 +76,7 @@ fn CodexDraftThreads::remember(
   reply : @protocol.CodexThreadReply,
 ) -> Unit {
   if request.draft_id is Some(draft_id) {
-    self.entries[draft_id] = { cwd: request.cwd, reply }
+    self.entries[draft_id] = { cwd: request.cwd, reply, }
   }
 }
 
@@ -113,7 +113,7 @@ fn CodexArchiveRequest::decode(params : Json) -> CodexArchiveRequest? {
     !thread_id.trim().is_empty() else {
     return None
   }
-  Some({ thread_id, force: fields.get("force") is Some(True) })
+  Some({ thread_id, force: fields.get("force") is Some(True), })
 }
 
 ///|
@@ -234,7 +234,7 @@ fn CodexWorkspaceBinding::decode_reply(value : Json) -> CodexWorkspaceBinding? {
         _ => None
       }
   }
-  Some({ session, workspace })
+  Some({ session, workspace, })
 }
 
 ///|
@@ -868,7 +868,7 @@ async fn ApiState::open_codex_draft(
     raise @host.PayloadError("invalid Codex draft project")
   }
   @work_dir.authorize_host_workspace(draft_id, project_root)
-  { draft_id, cwd: project_root, project_root }
+  { draft_id, cwd: project_root, project_root, }
 }
 
 ///|
@@ -1160,7 +1160,7 @@ test "Codex workspace bindings decode only authoritative thread replies" {
   })
   assert_true(
     binding
-    is Some({ session: "codex-thread-1", workspace: Some("/work/project") }),
+    is Some({ session: "codex-thread-1", workspace: Some("/work/project"), }),
   )
   let worktree = CodexWorkspaceBinding::decode_reply({
     "thread": {
@@ -1191,7 +1191,7 @@ test "Codex workspace bindings decode only authoritative thread replies" {
       },
     },
   })
-  assert_true(missing is Some({ session: "codex-thread-1", workspace: None }))
+  assert_true(missing is Some({ session: "codex-thread-1", workspace: None, }))
   assert_true(CodexWorkspaceBinding::decode_reply({ "thread": {} }) is None)
   assert_true(CodexWorkspaceBinding::decode_reply({}) is None)
 }
@@ -1214,9 +1214,12 @@ test "Codex draft creation reuses a successful native reply until close" {
   // Model and permission selection belong to the eventual turn. Changing
   // either after an ambiguous thread/start reply must still adopt the one
   // created task; turn/start installs the current selection.
-  assert_eq(drafts.cached({ ..request, model: Some("gpt-other") }), Some(reply))
   assert_eq(
-    drafts.cached({ ..request, permission_mode: FullAccess }),
+    drafts.cached({ ..request, model: Some("gpt-other"), }),
+    Some(reply),
+  )
+  assert_eq(
+    drafts.cached({ ..request, permission_mode: FullAccess, }),
     Some(reply),
   )
   drafts.forget("desktop-draft-1")
@@ -1233,7 +1236,7 @@ fn publish_session_changed(
   session : String,
   workspace : String,
 ) -> Unit {
-  state.hub.publish(SessionChanged({ change, session, workspace }))
+  state.hub.publish(SessionChanged({ change, session, workspace, }))
 }
 
 ///|
@@ -1246,6 +1249,6 @@ fn publish_worktree_changed(
   worktrees : Array[@protocol.WorktreeInfo],
 ) -> Unit {
   state.hub.publish(
-    WorktreeChanged({ workspace: workspace.trim().to_owned(), worktrees }),
+    WorktreeChanged({ workspace: workspace.trim().to_owned(), worktrees, }),
   )
 }

@@ -54,7 +54,7 @@ test "emitter batches one event per deferred bracket; fire() sets all flags" {
   let _ = emitter.actual.event(e => events.push(e))
   emitter.begin_deferred_emit()
   emitter.check_affected_and_fire(
-    wb_options("a", overview_ruler={ color: Some("red"), position: Center }),
+    wb_options("a", overview_ruler={ color: Some("red"), position: Center, }),
   )
   emitter.check_affected_and_fire(wb_options("b"))
   assert_eq(events.length(), 0)
@@ -96,7 +96,7 @@ test "options normalization: cleanClassName, defaults, relaxed range clamp" {
   assert_true(options.stickiness is AlwaysGrowsWhenTypingAtEdges)
   let model = wb_model("short")
   let ids = model.delta_decorations([], [
-    { range: Range(1, 1, 100, 42), options },
+    { range: Range(1, 1, 100, 42), options, },
   ])
   // _validateRangeRelaxedNoAllocations clamps to the document end
   assert_range_opt_eq(

@@ -12,10 +12,10 @@ async fn git_branch_op(payload : GitBranchPayload) -> GitBranchReply {
     Some(cwd) => @pathx.Absolute::from_uri_path(cwd)
     None => @work_dir.session_cwd(payload.session)
   }
-  guard base is Some(base) else { return { branch: None, diffstat: None } }
+  guard base is Some(base) else { return { branch: None, diffstat: None, } }
   guard git_branch(base.0) is Some(branch) else {
     // Not a repository, or no git: there is nothing to count either.
-    return { branch: None, diffstat: None }
+    return { branch: None, diffstat: None, }
   }
   let diffstat = git_diffstat(base, hint?=payload.base_hint)
   // The count takes long enough — a diff, plus one subprocess per untracked
@@ -35,12 +35,12 @@ async fn git_branch_op(payload : GitBranchPayload) -> GitBranchReply {
   // recomputes; a two-checkout round trip inside one count corrects itself at
   // the next one.
   guard git_branch(base.0) is Some(after) else {
-    return { branch: None, diffstat: None }
+    return { branch: None, diffstat: None, }
   }
   if after != branch {
-    return { branch: Some(after), diffstat: None }
+    return { branch: Some(after), diffstat: None, }
   }
-  { branch: Some(branch), diffstat }
+  { branch: Some(branch), diffstat, }
 }
 
 ///|
@@ -304,7 +304,7 @@ async fn git_diffstat_from(
     // The listing itself was unreadable — a filename that is not valid UTF-8
     // defeats the text conversion even though Git succeeded. Every untracked
     // file is then missing from the total, which is a floor, not the whole.
-    return Some({ ..tracked, partial: true })
+    return Some({ ..tracked, partial: true, })
   }
   // `--others` spells its paths from Git's current directory, which is this
   // workspace. Validating each one lexically keeps a path that cannot address
@@ -342,7 +342,7 @@ async fn git_diffstat_from(
       )
     })
     is Some(counts) else {
-    return Some({ ..tracked, partial: true })
+    return Some({ ..tracked, partial: true, })
   }
   let mut added = tracked.added
   let mut files = tracked.files
@@ -356,7 +356,7 @@ async fn git_diffstat_from(
       partial = true
     }
   }
-  Some({ added, removed: tracked.removed, files, base, partial })
+  Some({ added, removed: tracked.removed, files, base, partial, })
 }
 
 ///|
@@ -446,7 +446,7 @@ fn parse_numstat(output : String) -> GitDiffStat {
     added += @string.parse_int(line.view(end_offset=first)) catch { _ => 0 }
     removed += @string.parse_int(rest.view(end_offset=second)) catch { _ => 0 }
   }
-  { added, removed, files, base: None, partial: false }
+  { added, removed, files, base: None, partial: false, }
 }
 
 ///|
@@ -707,7 +707,7 @@ fn git_change_relative_to_workspace(
     Some(original) => git_path_relative_to_workspace(original, workspace_prefix)
     _ => None
   }
-  Some({ ..change, path, original_path })
+  Some({ ..change, path, original_path, })
 }
 
 ///|
@@ -823,10 +823,10 @@ fn git_change_with_path_kind(
   known_symlink : Bool,
 ) -> GitChange {
   match path_kind {
-    SymLink => { ..change, kind: "symlink" }
-    Directory if change.kind != "untracked" => { ..change, kind: "submodule" }
-    Unknown if known_gitlink => { ..change, kind: "submodule" }
-    Unknown if known_symlink => { ..change, kind: "symlink" }
+    SymLink => { ..change, kind: "symlink", }
+    Directory if change.kind != "untracked" => { ..change, kind: "submodule", }
+    Unknown if known_gitlink => { ..change, kind: "submodule", }
+    Unknown if known_symlink => { ..change, kind: "symlink", }
     _ => change
   }
 }
@@ -1152,7 +1152,7 @@ async fn git_changes_op(payload : GitChangesPayload) -> GitChangesReply {
   }
   let dir = root.to_string()
   if git_output(dir, ["rev-parse", "--is-inside-work-tree"]) != "true" {
-    return { repository: false, head: None, baseline: None, changes: [] }
+    return { repository: false, head: None, baseline: None, changes: [], }
   }
   let (prefix_code, prefix_stdout, prefix_stderr) = git_collect(dir, [
     "rev-parse", "--show-prefix",
@@ -1231,7 +1231,7 @@ async fn git_changes_op(payload : GitChangesPayload) -> GitChangesReply {
     ],
     max_concurrent=32,
   )
-  { repository: true, head, baseline, changes }
+  { repository: true, head, baseline, changes, }
 }
 
 ///|
@@ -1242,7 +1242,7 @@ fn push_history_ref(
   revision : String,
   kind : String,
 ) -> Unit {
-  refs.push({ name, revision, kind })
+  refs.push({ name, revision, kind, })
   if !tips.contains(revision) {
     tips.push(revision)
   }
@@ -1327,7 +1327,7 @@ async fn capture_git_history_snapshot(
         push_history_ref(refs, tips, base_ref, base, "base")
       }
   }
-  { head, branch, refs, tips }
+  { head, branch, refs, tips, }
 }
 
 ///|
@@ -1459,7 +1459,7 @@ async fn git_history_op(payload : GitHistoryPayload) -> GitHistoryReply {
     tips: [],
   }
   if git_output(dir, ["rev-parse", "--is-inside-work-tree"]) != "true" {
-    return { repository: false, snapshot: empty, commits: [], has_more: false }
+    return { repository: false, snapshot: empty, commits: [], has_more: false, }
   }
   let recorded_base = @work_dir.session_review_base(
     payload.session,
@@ -1487,7 +1487,7 @@ async fn git_history_op(payload : GitHistoryPayload) -> GitHistoryReply {
     payload.limit
   }
   let (commits, has_more) = git_history_page(dir, snapshot, payload.skip, limit)
-  { repository: true, snapshot, commits, has_more }
+  { repository: true, snapshot, commits, has_more, }
 }
 
 ///|
@@ -1590,7 +1590,7 @@ async fn git_commit_changes_at(
       kind,
     })
   }
-  { commit, parent, changes }
+  { commit, parent, changes, }
 }
 
 ///|
@@ -1794,14 +1794,14 @@ test "Git task-diff parser keeps scored rename sources and untracked rows" {
         path: "src/copy.mbt",
         original_path: Some("src/source.mbt"),
         kind: "copied",
-        ..,
+        ..
       },
       { path: "src/modified.mbt", worktree_status: "M", .. },
       {
         path: "src/new.mbt",
         original_path: Some("src/old.mbt"),
         kind: "renamed",
-        ..,
+        ..
       },
     ],
   )
@@ -2394,12 +2394,12 @@ test "Git non-file changes are classified without following symlinks" {
   })
   assert_eq(
     git_change_with_path_kind(
-      { ..change, index_status: "?", worktree_status: "?", kind: "untracked" },
+      { ..change, index_status: "?", worktree_status: "?", kind: "untracked", },
       Directory,
       false,
       false,
     ),
-    { ..change, index_status: "?", worktree_status: "?", kind: "untracked" },
+    { ..change, index_status: "?", worktree_status: "?", kind: "untracked", },
   )
 }
 
@@ -2495,8 +2495,8 @@ test "bulk deleted-path collection deduplicates in first-seen order" {
   assert_eq(
     deleted_change_paths([
       deleted,
-      { ..deleted, path: "kept.mbt", kind: "modified" },
-      { ..deleted, path: "second.mbt" },
+      { ..deleted, path: "kept.mbt", kind: "modified", },
+      { ..deleted, path: "second.mbt", },
       deleted,
     ]),
     ["first.mbt", "second.mbt"],
@@ -2514,22 +2514,22 @@ test "Git changes are relative to an attached repository subdirectory" {
   }
   assert_eq(
     git_change_relative_to_workspace(renamed, "desktop/"),
-    Some({ ..renamed, path: "src/new.mbt", original_path: Some("src/old.mbt") }),
+    Some({ ..renamed, path: "src/new.mbt", original_path: Some("src/old.mbt"), }),
   )
   assert_eq(git_change_relative_to_workspace(renamed, ""), Some(renamed))
   assert_true(
     git_change_relative_to_workspace(
-      { ..renamed, path: "outside/new.mbt" },
+      { ..renamed, path: "outside/new.mbt", },
       "desktop/",
     )
     is None,
   )
   assert_eq(
     git_change_relative_to_workspace(
-      { ..renamed, original_path: Some("outside/old.mbt") },
+      { ..renamed, original_path: Some("outside/old.mbt"), },
       "desktop/",
     ),
-    Some({ ..renamed, path: "src/new.mbt", original_path: None }),
+    Some({ ..renamed, path: "src/new.mbt", original_path: None, }),
   )
 }
 
@@ -2544,7 +2544,7 @@ test "Numstat sums lines and counts a binary file without any" {
   })
   assert_eq(
     parse_numstat("12\t3\tsrc/a.mbt\n-\t-\tassets/logo.png\n0\t7\tsrc/b.mbt\n"),
-    { added: 12, removed: 10, files: 3, base: None, partial: false },
+    { added: 12, removed: 10, files: 3, base: None, partial: false, },
   )
 }
 

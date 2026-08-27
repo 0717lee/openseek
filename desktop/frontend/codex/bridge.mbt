@@ -49,7 +49,7 @@ fn CodexThreadCatalogRequest::run(
         let page : @protocol.CodexDataReply = @interop.codex_request(
           channel,
           @commands.codex_thread_list,
-          { limit: 100, archived: self.archived, cursor },
+          { limit: 100, archived: self.archived, cursor, },
         ) catch {
           error => {
             scheduler.add(
@@ -147,7 +147,7 @@ pub fn State::refresh(
         dispatch,
         channel,
         @commands.codex_account_read,
-        { refresh_token: false },
+        { refresh_token: false, },
       ),
       CodexRequestsReply.request(
         dispatch,
@@ -184,7 +184,7 @@ fn State::open_draft(
     dispatch,
     channel,
     @commands.codex_draft_open,
-    { draft_id, cwd },
+    { draft_id, cwd, },
   )
 }
 
@@ -388,7 +388,7 @@ fn State::refresh_git(
         let reply : @protocol.GitPullRequestReply = @interop.bridge_request(
           channel,
           @commands.git_pull_request,
-          { session: thread_id, cwd: Some(cwd), branch_hint: active.branch },
+          { session: thread_id, cwd: Some(cwd), branch_hint: active.branch, },
         ) catch {
           // Git/gh decoration never blocks the conversation. Keep app-server's
           // captured branch label when the live lookup is unavailable.
@@ -401,7 +401,7 @@ fn State::refresh_git(
         )
       })
     }),
-    { ..self, git_request_generation: generation },
+    { ..self, git_request_generation: generation, },
   )
 }
 
@@ -421,7 +421,7 @@ fn State::resume_for_send(
       let _reply : @protocol.CodexThreadReply = @interop.codex_request(
         channel,
         @commands.codex_thread_resume,
-        { thread_id, permission_mode: self.permission_mode() },
+        { thread_id, permission_mode: self.permission_mode(), },
       ) catch {
         error => {
           scheduler.add(
@@ -454,7 +454,7 @@ fn State::send(
       dispatch,
       channel,
       @commands.codex_turn_steer,
-      { thread_id: active.id, input: inputs, expected_turn_id: turn_id },
+      { thread_id: active.id, input: inputs, expected_turn_id: turn_id, },
     )
   } else {
     if self.placement.wants_fresh() && active.turns.is_empty() {
@@ -533,7 +533,7 @@ fn State::start_turn_in_new_worktree(
           let result : @protocol.WorktreeCreateResult = @interop.bridge_request(
             channel,
             @commands.worktree_create,
-            { workspace, session: None, codex_thread: Some(thread_id) },
+            { workspace, session: None, codex_thread: Some(thread_id), },
           ) catch {
             error => {
               let message = @interop.bridge_error_text(error)
@@ -706,7 +706,7 @@ fn State::load_skills(
       let reply : @protocol.CodexDataReply = @interop.codex_request(
         channel,
         @commands.codex_skills_list,
-        { thread_id, cwd, force_reload },
+        { thread_id, cwd, force_reload, },
       ) catch {
         _ => {
           scheduler.add(dispatch(SkillsFailed(cwd~)))
@@ -733,7 +733,7 @@ fn State::compact(
     dispatch,
     channel,
     @commands.codex_thread_compact,
-    { thread_id: active.id },
+    { thread_id: active.id, },
   )
 }
 
@@ -749,7 +749,7 @@ fn State::review(
     dispatch,
     channel,
     @commands.codex_review_start,
-    { thread_id: active.id, target: { kind_: "uncommittedChanges" } },
+    { thread_id: active.id, target: { kind_: "uncommittedChanges", }, },
   )
 }
 
@@ -767,7 +767,7 @@ fn State::interrupt(
     dispatch,
     channel,
     @commands.codex_turn_interrupt,
-    { thread_id: active.id, turn_id },
+    { thread_id: active.id, turn_id, },
   )
 }
 
@@ -783,7 +783,7 @@ fn State::archive(
     dispatch,
     channel,
     @commands.codex_thread_archive,
-    { thread_id, force },
+    { thread_id, force, },
   )
 }
 
@@ -823,7 +823,7 @@ fn State::repair_worktree(
       let result : @protocol.WorktreeCreateResult = @interop.bridge_request(
         channel,
         @commands.worktree_create,
-        { workspace, session: None, codex_thread: Some(thread_id) },
+        { workspace, session: None, codex_thread: Some(thread_id), },
       ) catch {
         error => {
           scheduler.add(
@@ -946,6 +946,6 @@ fn State::respond(
     dispatch,
     channel,
     @commands.codex_server_request_respond,
-    { request_id: request.request_id, result },
+    { request_id: request.request_id, result, },
   )
 }

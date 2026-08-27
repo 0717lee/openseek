@@ -44,7 +44,7 @@ pub fn parse_events(text : String) -> ParsedLog {
     if torn {
       partial_tail = true
     } else {
-      errors.push({ line_number, content: line, message })
+      errors.push({ line_number, content: line, message, })
     }
   }
 
@@ -75,7 +75,7 @@ pub fn parse_events(text : String) -> ParsedLog {
     }
     events.push(event)
   }
-  { header, events, errors, partial_tail }
+  { header, events, errors, partial_tail, }
 }
 
 ///|

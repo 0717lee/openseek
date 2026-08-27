@@ -150,7 +150,7 @@ fn register_definition_contribution(
     title=reveal.title(),
     menu_keybinding_label=reveal.keybinding_label().unwrap(),
     menu_placements=[
-      { menu_id: EditorContext, group: "navigation", order: 1.1 },
+      { menu_id: EditorContext, group: "navigation", order: 1.1, },
     ],
   )
   let peek = @goto_symbol.PeekDefinition
@@ -162,7 +162,7 @@ fn register_definition_contribution(
     title=peek.title(),
     menu_keybinding_label=peek.keybinding_label().unwrap(),
     menu_placements=[
-      { menu_id: EditorContext, group: "navigation", order: 1.2 },
+      { menu_id: EditorContext, group: "navigation", order: 1.2, },
     ],
   )
 }
@@ -391,7 +391,7 @@ fn CodeEditorWidget::start_goto_definition_at(
   task(async fn() noraise {
     state.definition_action.run_reserved(
       anchor,
-      { open_to_side: false, open_in_peek: false, mute_message },
+      { open_to_side: false, open_in_peek: false, mute_message, },
       generation,
     )
   })
@@ -511,7 +511,7 @@ fn CodeEditorWidget::start_definition_link_request(
   state.cancel_link()
   self.clear_definition_message()
   let sequence = state.link_generation
-  let stamp : @definition.DefinitionRequestStamp = { sequence, target }
+  let stamp : @definition.DefinitionRequestStamp = { sequence, target, }
   let source = @language.CancellationTokenSource()
   state.link_source = Some(source)
   state.link_state = LinkResolving(stamp)

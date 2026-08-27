@@ -117,7 +117,7 @@ priv struct QuickDiffContributionState {
 fn QuickDiffContributionState::QuickDiffContributionState(
   collection : EditorDecorationsCollection,
 ) -> QuickDiffContributionState {
-  { collection, listeners: [] }
+  { collection, listeners: [], }
 }
 
 ///|
@@ -146,7 +146,7 @@ priv struct EditorContributionEntry {
 fn EditorContributionEntry::EditorContributionEntry(
   instance : EditorContributionInstance,
 ) -> EditorContributionEntry {
-  { instance, listeners: [], lifecycle: ContributionLive }
+  { instance, listeners: [], lifecycle: ContributionLive, }
 }
 
 ///|
@@ -243,7 +243,7 @@ priv struct EditorContributions {
 
 ///|
 fn EditorContributions::EditorContributions() -> EditorContributions {
-  { instances: Map([]), lifecycle: ContributionsLive }
+  { instances: Map([]), lifecycle: ContributionsLive, }
 }
 
 ///|
@@ -341,7 +341,7 @@ fn EditorContributionDescription::EditorContributionDescription(
   ctor : (CodeEditorWidget) -> EditorContributionInstance,
   initialize : (CodeEditorWidget) -> Array[@base_common.Disposable],
 ) -> EditorContributionDescription {
-  { id, kind, instantiation, ctor, initialize }
+  { id, kind, instantiation, ctor, initialize, }
 }
 
 ///|
@@ -733,7 +733,7 @@ priv struct EditorRegistryHolder {
 /// global initializer — the registered ctor/run closures reach `CodeEditorWidget`
 /// methods whose dispatch consults the registry back, which MoonBit's
 /// toplevel-definition cycle check would reject as an initializer cycle.
-let editor_registry_holder : EditorRegistryHolder = { registry: None }
+let editor_registry_holder : EditorRegistryHolder = { registry: None, }
 
 ///|
 /// The singleton (`EditorContributionRegistry.INSTANCE`), populated once.

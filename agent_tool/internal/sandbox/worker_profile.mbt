@@ -96,7 +96,7 @@ fn worker_write_profile_data(
     $|(deny file-write* (literal "\{sbpl_string_escape(gitfile)}"))
     $|
   denial_subjects.push(gitfile)
-  { profile: profile.to_string(), denial_subjects }
+  { profile: profile.to_string(), denial_subjects, }
 }
 
 ///|

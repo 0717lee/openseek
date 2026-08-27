@@ -45,7 +45,7 @@ priv struct ExistingPath {
 /// silently reinterpreted as a different file.
 pub async fn Reference::resolve(self : Reference) -> Resolution {
   if @fs.exists(self.0) {
-    let existing : ExistingPath = { path: self.0, line: None, column: None }
+    let existing : ExistingPath = { path: self.0, line: None, column: None, }
     return existing.resolve()
   }
   guard self.editor_candidate() is Some(candidate) else {
@@ -89,7 +89,7 @@ fn Reference::editor_candidate(self : Reference) -> EditorCandidate? {
   if self.0.rev_split_once("#L") is Some((path, line_text)) {
     let line = @string.parse_int(line_text, base=10) catch { _ => 0 }
     if line > 0 && !path.is_empty() {
-      return Some({ path: path.to_owned(), line, column: None })
+      return Some({ path: path.to_owned(), line, column: None, })
     }
   }
   guard self.0.rev_split_once(":") is Some((before_last, last_text)) else {
@@ -100,10 +100,10 @@ fn Reference::editor_candidate(self : Reference) -> EditorCandidate? {
   if before_last.rev_split_once(":") is Some((path, line_text)) {
     let line = @string.parse_int(line_text, base=10) catch { _ => 0 }
     if line > 0 && !path.is_empty() {
-      return Some({ path: path.to_owned(), line, column: Some(last) })
+      return Some({ path: path.to_owned(), line, column: Some(last), })
     }
   }
-  Some({ path: before_last.to_owned(), line: last, column: None })
+  Some({ path: before_last.to_owned(), line: last, column: None, })
 }
 
 ///|

@@ -83,7 +83,7 @@ async fn git_pull_request_op(
     }
   }
   let branch = head.unwrap_or(checkout)
-  let unanswered : GitPullRequestReply = { ..nothing, branch: Some(branch) }
+  let unanswered : GitPullRequestReply = { ..nothing, branch: Some(branch), }
   // A hash remains useful display text but must never become a gh branch
   // filter when no exact local ref was recovered.
   guard head is Some(head) else { return unanswered }
@@ -129,7 +129,7 @@ async fn branch_pull_request(
   }
   guard listing is Some(Array(candidates)) else { return nothing }
   if pick_pull_request(candidates) is Some(pull_request) {
-    return { ..nothing, pull_request: Some(pull_request) }
+    return { ..nothing, pull_request: Some(pull_request), }
   }
   // The branch has no pull request *in the repository gh resolved*. Which
   // repository that is stays gh's decision — its `repo.default`, the parent it
@@ -258,7 +258,7 @@ fn parse_checks(rollup : Json?) -> GitChecks? {
       Pending => pending += 1
     }
   }
-  Some({ passed, failed, pending })
+  Some({ passed, failed, pending, })
 }
 
 ///|
@@ -498,7 +498,7 @@ test "Check rollup separates running checks from failed and finished ones" {
   ]
   assert_eq(
     parse_checks(Some(rollup)),
-    Some({ passed: 2, failed: 2, pending: 2 }),
+    Some({ passed: 2, failed: 2, pending: 2, }),
   )
   // No checks configured is not the same as checks that have not run.
   assert_eq(parse_checks(Some(Json::array([]))), None)

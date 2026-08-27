@@ -7,7 +7,7 @@ fn item(
   content : String,
   sequence? : Int,
 ) -> @transcript.TranscriptItem {
-  { kind, content, ts: None, sequence }
+  { kind, content, ts: None, sequence, }
 }
 
 ///|
@@ -86,7 +86,7 @@ test "a turn marks failed for any tool error it contains, answered or not" {
 #warnings("-alert_unstable")
 test "a failed turn's tick is marked in class and in words" {
   let entries = two_entries()
-  let flagged = [{ ..entries[0], failed: true }, entries[1]]
+  let flagged = [{ ..entries[0], failed: true, }, entries[1]]
   let markup = render(flagged, @transcript_overview.State::empty())
   assert_true(markup.contains("overview-tick failed"))
   // Colour is never the only carrier: the label says so too.
@@ -209,7 +209,7 @@ test "hover opens on enter, survives a click, and closes on leaving the rail" {
     @transcript_overview.State::empty(),
   )
   // The enter-time flip and anchor measurements ride along with the hover.
-  @debug.assert_eq(state.hover, Some({ key, flip: true, anchor: 132 }))
+  @debug.assert_eq(state.hover, Some({ key, flip: true, anchor: 132, }))
   let clicked = @transcript_overview.update(
     @transcript_overview.Clicked(key),
     state,
@@ -217,7 +217,7 @@ test "hover opens on enter, survives a click, and closes on leaving the rail" {
   // The click highlights eagerly and keeps the popover: the pointer is
   // still on the tick.
   @debug.assert_eq(clicked.active, Some(key))
-  @debug.assert_eq(clicked.hover, Some({ key, flip: true, anchor: 132 }))
+  @debug.assert_eq(clicked.hover, Some({ key, flip: true, anchor: 132, }))
   let left = @transcript_overview.update(@transcript_overview.Left, clicked)
   @debug.assert_eq(left.hover, None)
   @debug.assert_eq(left.active, Some(key))

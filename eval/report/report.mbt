@@ -10,7 +10,7 @@ pub struct Metric {
 /// Build a metric. `value` is display text: format numbers before
 /// constructing so the report layer never guesses precision.
 pub fn Metric::Metric(name~ : String, value~ : String) -> Metric {
-  { name, value }
+  { name, value, }
 }
 
 ///|
@@ -42,7 +42,7 @@ pub fn ReportRow::ReportRow(
   details? : Array[Metric] = [],
   log_path? : String = "",
 ) -> ReportRow {
-  { index, name, success, reason, warnings, metrics, details, log_path }
+  { index, name, success, reason, warnings, metrics, details, log_path, }
 }
 
 ///|
@@ -65,7 +65,7 @@ pub fn Report::Report(
   metric_columns? : Array[String] = [],
   rows? : Array[ReportRow] = [],
 ) -> Report {
-  { title, summary, metric_columns, rows }
+  { title, summary, metric_columns, rows, }
 }
 
 ///|

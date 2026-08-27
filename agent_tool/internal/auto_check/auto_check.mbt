@@ -128,7 +128,7 @@ fn tally_diagnostics(text : String, truncated~ : Bool) -> CheckErrors {
       _ => ()
     }
   }
-  { error_count, warning_count, first_errors, truncated }
+  { error_count, warning_count, first_errors, truncated, }
 }
 
 ///|

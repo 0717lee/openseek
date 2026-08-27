@@ -60,7 +60,7 @@ pub async fn resolve_geometry(
   guard !worktree_roots.is_empty() else {
     return Err("git worktree list reported no worktrees")
   }
-  Ok({ origin_root: toplevel, common_git_dir: common, worktree_roots })
+  Ok({ origin_root: toplevel, common_git_dir: common, worktree_roots, })
 }
 
 ///|

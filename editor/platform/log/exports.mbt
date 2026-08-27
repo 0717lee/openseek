@@ -16,7 +16,7 @@ struct NullLogger {
 ///|
 /// Creates a sink that ignores logs and flushes.
 pub fn NullLogger::NullLogger() -> NullLogger {
-  { _unit: () }
+  { _unit: (), }
 }
 
 ///|
@@ -95,7 +95,7 @@ pub fn LogService::trace(
   message : String,
   details? : Array[(String, String)] = [],
 ) -> Unit {
-  self.log({ level: Trace, category, message, details })
+  self.log({ level: Trace, category, message, details, })
 }
 
 ///|
@@ -106,7 +106,7 @@ pub fn LogService::debug(
   message : String,
   details? : Array[(String, String)] = [],
 ) -> Unit {
-  self.log({ level: Debug, category, message, details })
+  self.log({ level: Debug, category, message, details, })
 }
 
 ///|
@@ -117,7 +117,7 @@ pub fn LogService::info(
   message : String,
   details? : Array[(String, String)] = [],
 ) -> Unit {
-  self.log({ level: Info, category, message, details })
+  self.log({ level: Info, category, message, details, })
 }
 
 ///|

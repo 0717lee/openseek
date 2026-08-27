@@ -12,7 +12,7 @@ struct Skill {
 
 ///|
 fn Skill::Skill(name~ : String, description~ : String, path~ : String) -> Skill {
-  { name, description, path }
+  { name, description, path, }
 }
 
 ///|

@@ -15,7 +15,7 @@ test "overview ruler scales ranges and enforces its minimum marker height" {
     2.0,
     4.0,
   )
-  assert_eq(bands, [{ id: 7, from: 96, to: 104, color: "red", lane: Left }])
+  assert_eq(bands, [{ id: 7, from: 96, to: 104, color: "red", lane: Left, }])
 }
 
 ///|
@@ -39,7 +39,7 @@ fn overview_ruler_eof_offset_entry(
     on_select: None,
     listeners: [],
     resize_observer: None,
-    entries: [{ id: 1, range, color: "red", lane: Full }],
+    entries: [{ id: 1, range, color: "red", lane: Full, }],
     bands: [],
     generation: 0,
     disposed: false,
@@ -84,7 +84,7 @@ test "overview ruler validates a wrapped EOF hunk endpoint through the converter
 test "overview ruler clamps marker bands to both canvas edges" {
   let bands = resolve_code_editor_overview_ruler_bands(
     [
-      { id: 1, start_offset: 0.0, end_offset: 0.0, color: "red", lane: Left },
+      { id: 1, start_offset: 0.0, end_offset: 0.0, color: "red", lane: Left, },
       {
         id: 2,
         start_offset: 1000.0,
@@ -99,23 +99,23 @@ test "overview ruler clamps marker bands to both canvas edges" {
     4.0,
   )
   assert_eq(bands, [
-    { id: 1, from: 0, to: 4, color: "red", lane: Left },
-    { id: 2, from: 96, to: 100, color: "green", lane: Right },
+    { id: 1, from: 0, to: 4, color: "red", lane: Left, },
+    { id: 2, from: 96, to: 100, color: "green", lane: Right, },
   ])
 }
 
 ///|
 test "overview ruler merges only overlapping bands in the same color lane" {
   let merged = merge_code_editor_overview_ruler_bands([
-    { id: 3, from: 2, to: 8, color: "red", lane: Left },
-    { id: 4, from: 7, to: 12, color: "red", lane: Left },
-    { id: 5, from: 7, to: 12, color: "green", lane: Left },
-    { id: 6, from: 7, to: 12, color: "red", lane: Right },
+    { id: 3, from: 2, to: 8, color: "red", lane: Left, },
+    { id: 4, from: 7, to: 12, color: "red", lane: Left, },
+    { id: 5, from: 7, to: 12, color: "green", lane: Left, },
+    { id: 6, from: 7, to: 12, color: "red", lane: Right, },
   ])
   assert_eq(merged, [
-    { id: 3, from: 2, to: 12, color: "red", lane: Left },
-    { id: 5, from: 7, to: 12, color: "green", lane: Left },
-    { id: 6, from: 7, to: 12, color: "red", lane: Right },
+    { id: 3, from: 2, to: 12, color: "red", lane: Left, },
+    { id: 5, from: 7, to: 12, color: "green", lane: Left, },
+    { id: 6, from: 7, to: 12, color: "red", lane: Right, },
   ])
 }
 
@@ -130,9 +130,9 @@ test "overview ruler lane geometry is stable for uneven widths" {
 ///|
 test "overview ruler pointer selection chooses the nearest narrow band" {
   let bands = [
-    { id: 4, from: 20, to: 40, color: "red", lane: Left },
-    { id: 2, from: 28, to: 32, color: "green", lane: Right },
-    { id: 9, from: 70, to: 80, color: "blue", lane: Full },
+    { id: 4, from: 20, to: 40, color: "red", lane: Left, },
+    { id: 2, from: 28, to: 32, color: "green", lane: Right, },
+    { id: 9, from: 70, to: 80, color: "blue", lane: Full, },
   ]
   assert_eq(closest_code_editor_overview_ruler_entry(bands, 30), Some(2))
   assert_eq(closest_code_editor_overview_ruler_entry(bands, 60), Some(9))
@@ -211,8 +211,8 @@ fn overview_ruler_disposal_test_handle(
     on_select: None,
     listeners,
     resize_observer,
-    entries: [{ id: 1, range: LineRange(1, 2), color: "red", lane: Full }],
-    bands: [{ id: 1, from: 0, to: 4, color: "red", lane: Full }],
+    entries: [{ id: 1, range: LineRange(1, 2), color: "red", lane: Full, }],
+    bands: [{ id: 1, from: 0, to: 4, color: "red", lane: Full, }],
     generation: 3,
     disposed: false,
   }

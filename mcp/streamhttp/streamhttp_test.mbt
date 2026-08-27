@@ -287,8 +287,8 @@ async test "tools/list waits for the initialized notification to complete" {
       is Some(server) else {
       return
     }
-    let initialized_done : Ref[Bool] = { val: false }
-    let list_saw_initialized : Ref[Bool] = { val: false }
+    let initialized_done : Ref[Bool] = { val: false, }
+    let list_saw_initialized : Ref[Bool] = { val: false, }
     group.spawn_bg(no_wait=true, allow_failure=true) <| () => {
       server.run_forever(
         (_request, body, conn) => {

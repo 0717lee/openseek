@@ -108,8 +108,8 @@ fn sample_report() -> ExploreReport {
     schema_version: 1,
     answer: "Use @buffer.new(size_hint?) and Buffer::to_bytes.",
     citations: [
-      { file: "protocol/event.mbt", line: Some(14), note: Some("Event enum") },
-      { file: "moonbitlang/core/buffer", line: None, note: None },
+      { file: "protocol/event.mbt", line: Some(14), note: Some("Event enum"), },
+      { file: "moonbitlang/core/buffer", line: None, note: None, },
     ],
     unresolved: Some("did not check the js backend"),
   }
@@ -131,22 +131,22 @@ test "validate accepts a good report" {
 
 ///|
 test "validate rejects empties and oversizes" {
-  assert_true({ ..sample_report(), answer: "  " }.validate().length() > 0)
-  assert_true({ ..sample_report(), schema_version: 2 }.validate().length() > 0)
+  assert_true({ ..sample_report(), answer: "  ", }.validate().length() > 0)
+  assert_true({ ..sample_report(), schema_version: 2, }.validate().length() > 0)
   let long = StringBuilder()
   for _ in 0..<(max_answer_chars + 1) {
     long.write_char('a')
   }
   assert_true(
-    { ..sample_report(), answer: long.to_string() }.validate().length() > 0,
+    { ..sample_report(), answer: long.to_string(), }.validate().length() > 0,
   )
   let many : Array[Citation] = []
   for i in 0..<=max_citations {
-    many.push({ file: "f\{i}.mbt", line: None, note: None })
+    many.push({ file: "f\{i}.mbt", line: None, note: None, })
   }
-  assert_true({ ..sample_report(), citations: many }.validate().length() > 0)
+  assert_true({ ..sample_report(), citations: many, }.validate().length() > 0)
   assert_true(
-    { ..sample_report(), citations: [{ file: "", line: None, note: None }] }
+    { ..sample_report(), citations: [{ file: "", line: None, note: None, }], }
     .validate()
     .length() >
     0,

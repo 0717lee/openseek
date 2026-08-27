@@ -163,7 +163,6 @@ fn BrowserGeometryFixture::new(
 ) -> BrowserGeometryFixture {
   let languages = @languages.Languages()
   languages.register_hover_provider(LanguageId("plaintext"), BrowserGeometryHoverProvider::{
-
   })
   |> ignore
   let log_service = @log.LogService()

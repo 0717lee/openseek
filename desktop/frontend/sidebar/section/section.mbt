@@ -6,7 +6,7 @@ pub(all) struct Id {
 
 ///|
 pub fn Id::Id(source~ : String, channel~ : String) -> Id {
-  { source, channel }
+  { source, channel, }
 }
 
 ///|

@@ -67,7 +67,7 @@ fn drop_tab(state : State, ctx : Ctx, key : Int) -> (Array[@cmd.Cmd], State) {
     active: state.active.filter(entry => entry.1 != key),
   }
   let state = if state.open && state.visible_tabs(ctx).is_empty() {
-    { ..state, open: false }
+    { ..state, open: false, }
   } else {
     state
   }
@@ -137,7 +137,7 @@ fn update(
     ToggleTerminal =>
       if state.open {
         // Hide only — every shell keeps running for the panel's return.
-        (@cmd.none, { ..state, open: false })
+        (@cmd.none, { ..state, open: false, })
       } else if !checkout_ready {
         // An unresolved placement cannot safely choose a terminal group; a
         // missing checkout likewise has no directory in which to start one.
@@ -146,16 +146,16 @@ fn update(
         match state.active_tab(ctx) {
           // This workspace group already has shells; `sync` reveals its
           // tab once `open` flips.
-          Some(_) => (@cmd.none, { ..state, open: true })
+          Some(_) => (@cmd.none, { ..state, open: true, })
           // First open in this workspace: start its first shell.
           None if ctx.connected => {
             let (cmd, state) = open_new_tab(dispatch, state, ctx)
-            (cmd, { ..state, open: true })
+            (cmd, { ..state, open: true, })
           }
           // A remote socket can be between attempts. Keep the panel visible
           // with its disconnected status; `sync` starts a fresh PTY only
           // after this channel reports ready again.
-          None => (@cmd.none, { ..state, open: true })
+          None => (@cmd.none, { ..state, open: true, })
         }
       }
     NewTerminal =>
@@ -231,7 +231,7 @@ fn update(
         tab.status is TabOpening {
         (
           flush_pending(channel, key, id),
-          state.replace_tab({ ..tab, id: Some(id), status: TabRunning }),
+          state.replace_tab({ ..tab, id: Some(id), status: TabRunning, }),
         )
       } else {
         // The tab was closed while the open was in flight; the session
@@ -245,7 +245,7 @@ fn update(
     }
     OpenFailed(key~, message~) =>
       if state.tab_by_key(key) is Some(tab) {
-        (@cmd.none, state.replace_tab({ ..tab, status: TabFailed(message~) }))
+        (@cmd.none, state.replace_tab({ ..tab, status: TabFailed(message~), }))
       } else {
         (@cmd.none, state)
       }
@@ -376,7 +376,7 @@ fn sync(
       commands.push(apply_theme())
     }
     return (
-      { ..state, shown: None, synced_dark_mode: Some(ctx.dark_mode) },
+      { ..state, shown: None, synced_dark_mode: Some(ctx.dark_mode), },
       @cmd.batch(commands),
     )
   }
@@ -391,14 +391,14 @@ fn sync(
       commands.push(apply_theme())
     }
     return (
-      { ..state, synced_dark_mode: Some(ctx.dark_mode) },
+      { ..state, synced_dark_mode: Some(ctx.dark_mode), },
       @cmd.batch(commands),
     )
   }
   if state.open && ctx.connected && state.visible_tabs(ctx).is_empty() {
     let (cmd, state) = open_new_tab(dispatch, state, ctx)
     let theme_changed = state.synced_dark_mode != Some(ctx.dark_mode)
-    let state = { ..state, synced_dark_mode: Some(ctx.dark_mode) }
+    let state = { ..state, synced_dark_mode: Some(ctx.dark_mode), }
     if theme_changed {
       return (state, @cmd.batch([cmd, apply_theme()]))
     }
@@ -411,7 +411,11 @@ fn sync(
   }
   let shown_changed = desired != state.shown
   let theme_changed = state.synced_dark_mode != Some(ctx.dark_mode)
-  let state = { ..state, shown: desired, synced_dark_mode: Some(ctx.dark_mode) }
+  let state = {
+    ..state,
+    shown: desired,
+    synced_dark_mode: Some(ctx.dark_mode),
+  }
   match (shown_changed, theme_changed) {
     (false, false) => (state, @cmd.none)
     (true, false) => (state, apply_shown(desired))

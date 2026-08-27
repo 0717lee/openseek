@@ -146,7 +146,7 @@ pub async fn locate_workspace() -> Workspace {
   for candidate in [".", "desktop"] {
     if @asyncfs.exists(candidate + "/moon.mod") &&
       @asyncfs.exists(candidate + "/frontend") {
-      return { root: absolute_path(candidate) }
+      return { root: absolute_path(candidate), }
     }
   }
   raise PackageError(
@@ -927,7 +927,7 @@ pub async fn remove_path_if_exists(path : String) -> Unit {
 /// absolute and independent of any later working-directory change. These pin
 /// the join/parent math the packagers rely on.
 test "workspace derives absolute paths from an absolute root" {
-  let ws : Workspace = { root: "/abs/repo/desktop" }
+  let ws : Workspace = { root: "/abs/repo/desktop", }
   assert_eq(ws.dir(), "/abs/repo/desktop")
   assert_eq(ws.at("dist/app"), "/abs/repo/desktop/dist/app")
   assert_eq(ws.repo(), "/abs/repo")
@@ -938,7 +938,7 @@ test "workspace derives absolute paths from an absolute root" {
 // The bundle names carry no spaces, but a checkout path still can, so the
 // space this pins is in the workspace root.
 test "workspace path join preserves spaces and nested segments" {
-  let ws : Workspace = { root: "/My Checkouts/w" }
+  let ws : Workspace = { root: "/My Checkouts/w", }
   assert_eq(
     ws.at("dist/SeekMoon.app/Contents/Resources/toolchains/moonbit/macos-arm64"),
     "/My Checkouts/w/dist/SeekMoon.app/Contents/Resources/toolchains/moonbit/macos-arm64",
@@ -947,7 +947,7 @@ test "workspace path join preserves spaces and nested segments" {
 
 ///|
 test "package build paths select debug or release" {
-  let ws : Workspace = { root: "/abs/repo/desktop" }
+  let ws : Workspace = { root: "/abs/repo/desktop", }
   assert_eq(ws.app_stylesheet(), "/abs/repo/desktop/app.generated.css")
   assert_eq(
     ws.native_binary(release=false),
@@ -998,7 +998,7 @@ async fn fixture_workspace(name : String) -> (String, Workspace) {
   let root = @asyncfs.tmpdir(prefix="openseek-\{name}-")
   let workspace = join_path(root, "desktop")
   ensure_dir(workspace)
-  (root, { root: workspace })
+  (root, { root: workspace, })
 }
 
 ///|

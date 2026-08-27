@@ -13,7 +13,7 @@ let json_normal_state : @syntax.TokenizerState = TokenizerState()
 ///|
 /// Creates the strict JSON tokenizer.
 pub fn JsonTokenizer::JsonTokenizer() -> JsonTokenizer {
-  { _unit: () }
+  { _unit: (), }
 }
 
 ///|
@@ -36,37 +36,37 @@ pub impl @syntax.LineTokenizer for JsonTokenizer with fn tokenize_line(
       (re"^[ \t]+" as s, after=rest) => continue at + s.length(), rest
       (re"^\"(?:\\.|[^\"\\])*\"" as s, after=rest) => {
         let end = at + s.length()
-        tokens.push({ start: at, end, tag: String })
+        tokens.push({ start: at, end, tag: String, })
         continue end, rest
       }
       (re"^\"(?:\\.|[^\"\\])*" as s, after=rest) => {
         let end = at + s.length()
-        tokens.push({ start: at, end, tag: String })
+        tokens.push({ start: at, end, tag: String, })
         continue end, rest
       }
       (re"^-?[0-9]+(?:\.[0-9]+)?(?:[eE][+\-]?[0-9]+)?" as s, after=rest) => {
         let end = at + s.length()
-        tokens.push({ start: at, end, tag: Number })
+        tokens.push({ start: at, end, tag: Number, })
         continue end, rest
       }
       (re"^(?:true|false|null)" as s, after=rest) => {
         let end = at + s.length()
-        tokens.push({ start: at, end, tag: Constant })
+        tokens.push({ start: at, end, tag: Constant, })
         continue end, rest
       }
       (re"^[a-zA-Z_][a-zA-Z0-9_]*" as s, after=rest) => {
         let end = at + s.length()
-        tokens.push({ start: at, end, tag: Invalid })
+        tokens.push({ start: at, end, tag: Invalid, })
         continue end, rest
       }
       (re"^[{}\[\],:]", after=rest) => {
         let end = at + 1
-        tokens.push({ start: at, end, tag: Delimiter })
+        tokens.push({ start: at, end, tag: Delimiter, })
         continue end, rest
       }
       (re"^." as c, after=rest) => {
         let end = at + c.utf16_len()
-        tokens.push({ start: at, end, tag: Punctuation })
+        tokens.push({ start: at, end, tag: Punctuation, })
         continue end, rest
       }
     }

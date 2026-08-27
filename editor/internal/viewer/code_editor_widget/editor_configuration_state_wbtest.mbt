@@ -58,7 +58,7 @@ test "digit-band transition preserves outer width and reset stays model-scoped" 
   let options = CodeEditorOptions(line_numbers_min_chars=1, folding=false)
   let state = test_configuration_state(options~)
   let initial_font = state.snapshot().font_info
-  state.commit_font_info({ ..initial_font, max_digit_width: 10.0 }) |> ignore
+  state.commit_font_info({ ..initial_font, max_digit_width: 10.0, }) |> ignore
   state.commit_measured_size(360.0, 180.0)
   state.set_line_counts(9, 9)
   state.request_measure()
@@ -88,7 +88,7 @@ test "default five-slot line-number band widens at 99999 to 100000" {
     options=CodeEditorOptions(line_numbers_min_chars=5, folding=false),
   )
   let initial_font = state.snapshot().font_info
-  state.commit_font_info({ ..initial_font, max_digit_width: 10.0 }) |> ignore
+  state.commit_font_info({ ..initial_font, max_digit_width: 10.0, }) |> ignore
   state.commit_measured_size(800.0, 180.0)
   state.set_line_counts(99999, 99999)
   let before = state.snapshot()

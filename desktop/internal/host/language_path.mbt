@@ -101,7 +101,7 @@ async fn LanguagePath::resolve(
     !physical_relative.is_root() else {
     raise HostError("path is outside root")
   }
-  { lexical_root, physical_root, physical_relative }
+  { lexical_root, physical_root, physical_relative, }
 }
 
 ///|

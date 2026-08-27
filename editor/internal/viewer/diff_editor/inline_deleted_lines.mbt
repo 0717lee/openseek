@@ -206,7 +206,7 @@ fn inline_deleted_view_zone_specs(
               suppress_mouse_down=false,
             ),
           )
-          zones.push({ _unit: () })
+          zones.push({ _unit: (), })
         }
         None => ()
       }
@@ -240,5 +240,5 @@ fn inline_deleted_view_zone_specs(
       )
     }
   }
-  { original_specs, modified_specs, zones }
+  { original_specs, modified_specs, zones, }
 }

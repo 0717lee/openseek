@@ -240,7 +240,7 @@ fn MarkerReadOptions::MarkerReadOptions(
   take? : Int,
   ignore_resource_filters? : Bool = false,
 ) -> MarkerReadOptions {
-  { owner, resource, severities, take, ignore_resource_filters }
+  { owner, resource, severities, take, ignore_resource_filters, }
 }
 
 ///|

@@ -12,7 +12,7 @@ async fn flaky_server(
     is Some(server) else {
     return None
   }
-  let hits : Ref[Int] = { val: 0 }
+  let hits : Ref[Int] = { val: 0, }
   group.spawn_bg(no_wait=true) <| () => {
     server.run_forever(
       (_request, body, conn) => {
@@ -169,7 +169,7 @@ async test "streaming chat retries a pre-delta stream drop" {
       is Some(server) else {
       return
     }
-    let hits : Ref[Int] = { val: 0 }
+    let hits : Ref[Int] = { val: 0, }
     group.spawn_bg(no_wait=true) <| () => {
       server.run_forever(
         (_request, body, conn) => {
@@ -216,7 +216,7 @@ async test "streaming chat never retries after the first delta" {
       is Some(server) else {
       return
     }
-    let hits : Ref[Int] = { val: 0 }
+    let hits : Ref[Int] = { val: 0, }
     group.spawn_bg(no_wait=true) <| () => {
       server.run_forever(
         (_request, body, conn) => {
@@ -267,7 +267,7 @@ async test "streaming chat never retries after a tool-call-only delta" {
       is Some(server) else {
       return
     }
-    let hits : Ref[Int] = { val: 0 }
+    let hits : Ref[Int] = { val: 0, }
     group.spawn_bg(no_wait=true) <| () => {
       server.run_forever(
         (_request, body, conn) => {

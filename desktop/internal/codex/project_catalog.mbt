@@ -15,7 +15,7 @@ struct ProjectCatalog {
 
 ///|
 pub fn ProjectCatalog::ProjectCatalog() -> ProjectCatalog {
-  { roots: Map([]), known_projects: Map([]) }
+  { roots: Map([]), known_projects: Map([]), }
 }
 
 ///|

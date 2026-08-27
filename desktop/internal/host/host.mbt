@@ -146,8 +146,8 @@ pub async fn HostConnection::run(
             )
           }
           Exited(id~, code~) => {
-            let payload : TerminalExitPayload = { id, code }
-            emit(TerminalExit({ id: payload.id, code: payload.code }))
+            let payload : TerminalExitPayload = { id, code, }
+            emit(TerminalExit({ id: payload.id, code: payload.code, }))
           }
         }
       })

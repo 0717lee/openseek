@@ -93,7 +93,7 @@ fn run_markdown_folding_test() -> Unit {
   let languages = @languages.Languages()
   let _hover_registration = languages.register_hover_provider(
     LanguageId("moonbit"),
-    MarkdownDocumentHoverProvider::{ harness: hover_harness },
+    MarkdownDocumentHoverProvider::{ harness: hover_harness, },
   )
   let log_service = @log.LogService()
   let services = @viewer.ViewerServices(

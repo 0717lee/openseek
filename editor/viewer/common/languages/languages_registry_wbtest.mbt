@@ -25,14 +25,12 @@ async test "language handle prebinds logging and forwards the exact capability" 
   let languages = Languages()
   languages.set_language_configuration("moonbit", {
     comments: None,
-    folding_rules: Some({ off_side: true, markers: None }),
+    folding_rules: Some({ off_side: true, markers: None, }),
   })
   languages.register_hover_provider(LanguageId("moonbit"), TestHoverProvider::{
-
   })
   |> ignore
   languages.register_hover_provider(LanguageId("moonbit"), FailingHoverProvider::{
-
   })
   |> ignore
   let handle = languages.language_handle(
@@ -40,7 +38,7 @@ async test "language handle prebinds logging and forwards the exact capability" 
   )
   assert_true(
     handle.get_language_configuration("moonbit").folding_rules
-    is Some({ off_side: true, markers: None }),
+    is Some({ off_side: true, markers: None, }),
   )
   assert_hover_text(handle.hover_at(test_model(), 3), "provider hover")
   let entries = memory.entries()

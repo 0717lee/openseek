@@ -4,7 +4,7 @@
 
 ///|
 fn owner(session : String) -> @interop.ConversationKey {
-  { channel: @interop.ChannelId::Local, session }
+  { channel: @interop.ChannelId::Local, session, }
 }
 
 ///|

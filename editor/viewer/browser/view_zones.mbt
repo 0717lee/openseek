@@ -79,7 +79,7 @@ pub fn ViewZoneChangeAccessor::from_callbacks(
   remove : (String) -> Unit,
   layout : (String) -> Unit,
 ) -> ViewZoneChangeAccessor {
-  { add, remove, layout }
+  { add, remove, layout, }
 }
 
 ///|

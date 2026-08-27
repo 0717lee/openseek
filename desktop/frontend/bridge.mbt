@@ -426,7 +426,7 @@ test "update download notifications control only the local desktop flow" {
   assert_true(
     bridge_msg(
       Local,
-      @protocol.Notification::UpdateDownloaded({ version: "test" }),
+      @protocol.Notification::UpdateDownloaded({ version: "test", }),
     )
     is Some(UpdateDownloaded),
   )
@@ -462,7 +462,7 @@ test "update download notifications control only the local desktop flow" {
   assert_true(
     bridge_msg(
       Remote("d1"),
-      @protocol.Notification::UpdateDownloaded({ version: "test" }),
+      @protocol.Notification::UpdateDownloaded({ version: "test", }),
     )
     is None,
   )
@@ -495,7 +495,7 @@ test "file-panel pushes carry their channel; auth.changed is Local-only" {
         root: "/work/project",
         baseline: false,
         events: [
-          { kind_: "modify", path: "src/main.mbt", old_path: None },
+          { kind_: "modify", path: "src/main.mbt", old_path: None, },
           {
             kind_: "rename",
             path: "src/new.mbt",
@@ -568,7 +568,7 @@ test "file-panel pushes carry their channel; auth.changed is Local-only" {
 
 ///|
 test "terminal lifecycle pushes retain the channel that owns their host session" {
-  let payload : @protocol.TerminalExitPayload = { id: 1, code: 0 }
+  let payload : @protocol.TerminalExitPayload = { id: 1, code: 0, }
   assert_true(
     terminal_exit_msg(Local, payload)
     is Some(SessionExited(channel=Local, id=1, code=0)),
@@ -828,7 +828,7 @@ fn runs_payload(frontier : Array[RunSnapshotFrontier]) -> @protocol.RunsPayload 
       }
     }
   }
-  { known: Some(known) }
+  { known: Some(known), }
 }
 
 ///|
@@ -1612,7 +1612,7 @@ fn cancel_openseek(
       let _ : @protocol.CancelReply = @interop.bridge_request(
         channel,
         @commands.agent_cancel,
-        { run_id: Some(run_id) },
+        { run_id: Some(run_id), },
       ) catch {
         error => {
           scheduler.add(
@@ -1656,7 +1656,7 @@ fn approve_openseek(
       let reply : @protocol.ApprovalReply = @interop.bridge_request(
         channel,
         @commands.agent_approval,
-        { id, allow, run_id },
+        { id, allow, run_id, },
       ) catch {
         error => {
           scheduler.add(dispatch(ApprovalAnswerFailed(channel~, session~, id~)))
@@ -1790,7 +1790,7 @@ fn open_file(
           scheduler.add(
             dispatch(
               OpenFileFailed(
-                owner={ channel, session },
+                owner={ channel, session, },
                 generation~,
                 message=@interop.bridge_error_text(error),
               ),
@@ -1804,7 +1804,7 @@ fn open_file(
           scheduler.add(
             dispatch(
               OpenFileAt(
-                owner={ channel, session },
+                owner={ channel, session, },
                 generation~,
                 path=target.path,
                 line=target.line,
@@ -1816,7 +1816,7 @@ fn open_file(
           scheduler.add(
             dispatch(
               OpenDirectoryAt(
-                owner={ channel, session },
+                owner={ channel, session, },
                 generation~,
                 path=target.path,
               ),
@@ -1825,7 +1825,7 @@ fn open_file(
         Refused(message) =>
           scheduler.add(
             dispatch(
-              OpenFileFailed(owner={ channel, session }, generation~, message~),
+              OpenFileFailed(owner={ channel, session, }, generation~, message~),
             ),
           )
         // The host already handed the path to the system opener.

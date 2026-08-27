@@ -60,7 +60,7 @@ fn decode_host_path_client(
   build : (HostPathRequest) -> ClientPacket,
 ) -> ClientPacketDecodeResult {
   match json_string_field(packet, "path") {
-    Some(path) => DecodedClientPacket(build({ id, path }))
+    Some(path) => DecodedClientPacket(build({ id, path, }))
     None =>
       ClientPacketDecodeError(
         ProtocolError(
@@ -141,7 +141,7 @@ fn parse_host_directory_entry(value : Json) -> HostDirectoryEntry? {
   guard json_string_field(value, "name") is Some(name) else { return None }
   guard json_string_field(value, "path") is Some(path) else { return None }
   let is_workspace = json_field(value, "isWorkspace") is Some(True)
-  Some({ name, path, is_workspace })
+  Some({ name, path, is_workspace, })
 }
 
 ///|

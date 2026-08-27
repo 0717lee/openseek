@@ -25,7 +25,7 @@ pub async fn[T] execute_kind(
   workspace_root? : String = ".",
   append_item? : async (@agent_session.Session, @agent_session.SessionItem) -> @agent_session.Session,
 ) -> T? {
-  let captured : Ref[T?] = { val: None }
+  let captured : Ref[T?] = { val: None, }
   let tools = tools(captured)
   let session = @agent_session.Session(
     @agent_session.SessionId(session_id),

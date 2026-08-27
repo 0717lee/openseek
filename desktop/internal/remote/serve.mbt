@@ -37,7 +37,7 @@ priv struct WsClientActor {
 
 ///|
 fn WsClientActor::new(state : @api.ApiState, url : String) -> WsClientActor {
-  { state, host_connection: @host.HostConnection::new(), url }
+  { state, host_connection: @host.HostConnection::new(), url, }
 }
 
 ///|
@@ -50,8 +50,8 @@ async fn WsClientActor::open_subscription(
   // `agent.connected` as "state may have changed, reload". Queue it before
   // any notification forwarder exists, making it this subscription's first
   // outbound frame even if the hub publishes immediately after subscribe.
-  out.put(Notify(AgentConnected({ stage: Accepted })))
-  { out, notifications }
+  out.put(Notify(AgentConnected({ stage: Accepted, })))
+  { out, notifications, }
 }
 
 ///|
@@ -430,7 +430,7 @@ async test "readiness precedes the first forwarded hub notification" {
       event: {
         sequence: 1,
         ts: None,
-        item: User({ content: "test", submission_id: None }),
+        item: User({ content: "test", submission_id: None, }),
       },
       session_root: "/sessions/global",
     }),
@@ -554,7 +554,7 @@ test "remote delivery omits only canonical transcript duplicates" {
         AgentEvent({
           run_id: None,
           session: "session-1",
-          event: { event, submission_id: None },
+          event: { event, submission_id: None, },
         }),
       )
       is None,
@@ -597,7 +597,7 @@ test "remote delivery retains streaming runtime and error events" {
         AgentEvent({
           run_id: None,
           session: "session-1",
-          event: { event, submission_id: None },
+          event: { event, submission_id: None, },
         }),
       )
       is Some(_),
@@ -611,7 +611,7 @@ test "remote delivery retains streaming runtime and error events" {
         event: {
           sequence: 1,
           ts: None,
-          item: User({ content: "test", submission_id: None }),
+          item: User({ content: "test", submission_id: None, }),
         },
         session_root: "/sessions/global",
       }),
@@ -686,7 +686,7 @@ test "remote lifecycle frames keep state without transcript text" {
         AgentEvent({
           run_id: None,
           session: "session-1",
-          event: { event, submission_id: None },
+          event: { event, submission_id: None, },
         }),
       ),
     )
@@ -728,6 +728,6 @@ test "remote delivery drops notifications without a session" {
       submission_id: None,
     },
   }
-  let notification : @protocol.Notification = AgentEvent({ ..event })
+  let notification : @protocol.Notification = AgentEvent({ ..event, })
   assert_true(notification_for_client(notification) is None)
 }

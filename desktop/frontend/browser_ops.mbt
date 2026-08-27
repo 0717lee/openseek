@@ -53,7 +53,7 @@ fn browser_open(
   url : String,
   dark : Bool,
 ) -> @cmd.Cmd {
-  browser_op(dispatch, @commands.browser_open, { id, url, dark }, quiet=false)
+  browser_op(dispatch, @commands.browser_open, { id, url, dark, }, quiet=false)
 }
 
 ///|
@@ -66,7 +66,7 @@ fn browser_navigate(
   browser_op(
     dispatch,
     @commands.browser_navigate,
-    { id, url, dark },
+    { id, url, dark, },
     quiet=false,
   )
 }
@@ -80,7 +80,7 @@ fn browser_set_theme(
   id : Int,
   dark : Bool,
 ) -> @cmd.Cmd {
-  browser_op(dispatch, @commands.browser_set_theme, { id, dark }, quiet=true)
+  browser_op(dispatch, @commands.browser_set_theme, { id, dark, }, quiet=true)
 }
 
 ///|
@@ -125,7 +125,7 @@ fn browser_set_bounds(
   browser_op(
     dispatch,
     @commands.browser_set_bounds,
-    { id, x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+    { id, x: rect.x, y: rect.y, width: rect.width, height: rect.height, },
     quiet=true,
   )
 }
@@ -139,7 +139,7 @@ fn browser_set_visible(
   browser_op(
     dispatch,
     @commands.browser_set_visible,
-    { id, visible },
+    { id, visible, },
     quiet=true,
   )
 }

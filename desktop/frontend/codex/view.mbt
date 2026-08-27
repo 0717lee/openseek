@@ -49,7 +49,7 @@ pub fn State::reasoning_effort_chip(
   guard !selected.is_empty() else { return None }
   let options : Array[@composer.ModelOption] = []
   for option in model.reasoning_efforts {
-    options.push({ value: option.value, label: option.value })
+    options.push({ value: option.value, label: option.value, })
   }
   let description = model.reasoning_efforts
     .iter()

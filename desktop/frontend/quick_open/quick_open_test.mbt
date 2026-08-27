@@ -9,7 +9,7 @@ fn emit() -> @cmd.Emit[@quick_open.Msg] {
 
 ///|
 fn owner() -> @interop.ConversationKey {
-  { channel: @interop.ChannelId::Local, session: "desktop-test" }
+  { channel: @interop.ChannelId::Local, session: "desktop-test", }
 }
 
 ///|
@@ -141,7 +141,7 @@ test "accepting a row closes the palette and hands back its editor target" {
     @quick_open.Files,
   )
   let (_, _, file_target) = files.handle(emit(), @quick_open.Pick(0), input())
-  assert_eq(file_target, Some({ path: "src/open.mbt", range: None }))
+  assert_eq(file_target, Some({ path: "src/open.mbt", range: None, }))
 }
 
 ///|
@@ -189,7 +189,7 @@ test "a conversation switch retires the run that opened before it" {
     @quick_open.Files,
   )
   let elsewhere = @quick_open.Input(
-    owner={ channel: @interop.ChannelId::Local, session: "desktop-second" },
+    owner={ channel: @interop.ChannelId::Local, session: "desktop-second", },
     root=Some(workspace_root()),
     open_files=[],
     active_file=None,

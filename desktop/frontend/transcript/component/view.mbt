@@ -926,7 +926,7 @@ fn transcript_view(
   on_jump : (@mention_context.Target) -> @cmd.Cmd,
   on_jump_latest~ : @cmd.Cmd,
 ) -> @html.Html {
-  let renderer : TranscriptRenderer = { input, on_open, on_jump }
+  let renderer : TranscriptRenderer = { input, on_open, on_jump, }
   let children = renderer.section_children(
     pinned, overview, overview_emit, on_jump_latest,
   )

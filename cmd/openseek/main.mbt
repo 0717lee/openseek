@@ -104,7 +104,7 @@ fn reject_session_contradiction(matches : @argparse.Matches) -> Unit raise {
     is {
       flags: { "no-session": true, .. },
       values: { "session": [session, ..], .. },
-      ..,
+      ..
     } &&
     !session.is_blank() {
     fail("--no-session contradicts --session; pick one behavior")
@@ -283,7 +283,7 @@ async fn run_task_turn(
     let exe = self_executable()
     // Mirror the latest appended session so the review tool audits against
     // the LIVE standing goal, not the turn-start snapshot.
-    let latest_session : Ref[@agent_session.Session] = { val: session }
+    let latest_session : Ref[@agent_session.Session] = { val: session, }
     let review_context = () => {
       let goal = latest_session.val.current_goal()
       (
@@ -362,7 +362,7 @@ async fn run_review_command(matches : @argparse.Matches) -> Unit {
   // refuses it outright. Review builds its runtime with no approval channel, so
   // `escalated` is not offered to its model either — a read-only audit has
   // nothing to escalate.
-  @xlog.global().set_handler(DiscardLog::{  })
+  @xlog.global().set_handler(DiscardLog::{ })
   // Review runs a fixed built-in tool set; say so rather than silently ignoring
   // an accepted option. Straight to stderr: review's stdout carries exactly one
   // JSON ReviewReport, and the discarded log would swallow a warning.
@@ -433,7 +433,7 @@ async fn sessions_compact(matches : @argparse.Matches) -> Unit {
         "to": [to_input, ..],
         ..
       },
-      ..,
+      ..
     } => (compact_file.trim().to_owned(), from_input, to_input)
     _ => fail("missing parsed session compaction arguments")
   }
@@ -487,7 +487,7 @@ async fn resolved_session_id(
         | (None with no_session = false),
         ..
       },
-      ..,
+      ..
     } => (session.trim(), no_session)
   }
   let session_id = match session {
@@ -827,7 +827,7 @@ fn agent_settings(
         "api-url": [api_url, ..],
         ..
       },
-      ..,
+      ..
     } =>
       (
         @deepseek.Model::parse(model),
@@ -1091,7 +1091,7 @@ async fn configured_system_prompt(
         "global-skills-dir": [global_skills_dir, ..],
         ..
       },
-      ..,
+      ..
     } => (base_path, addendum_path, global_skills_dir)
     _ => fail("missing parsed system-prompt defaults")
   }

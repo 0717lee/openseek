@@ -76,7 +76,7 @@ pub struct State {
 
 ///|
 pub fn State::empty() -> State {
-  { page: fresh_page(), generation: 0 }
+  { page: fresh_page(), generation: 0, }
 }
 
 ///|
@@ -90,7 +90,7 @@ pub fn Input::Input(
   owner~ : @interop.ConversationKey,
   root~ : @common.Uri?,
 ) -> Input {
-  { owner, root }
+  { owner, root, }
 }
 
 ///|

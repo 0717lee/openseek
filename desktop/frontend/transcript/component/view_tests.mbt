@@ -100,10 +100,10 @@ test "transcript stream children use stable typed keys in display order" {
     submission_generation=1,
     items=[
       {
-        item: { kind: User, content: "question", ts: None, sequence: Some(41) },
+        item: { kind: User, content: "question", ts: None, sequence: Some(41), },
         identity: "s41\u{0}o0",
       },
-      { item: first_tool, identity: "s42\u{0}o0" },
+      { item: first_tool, identity: "s42\u{0}o0", },
     ],
     streaming_response=Some("partial answer"),
     streaming_identity="r7",
@@ -133,10 +133,10 @@ test "transcript stream children use stable typed keys in display order" {
         },
         identity: "s42\u{0}o0",
       },
-      { item: first_tool, identity: "s42\u{0}o1" },
+      { item: first_tool, identity: "s42\u{0}o1", },
     ],
   }
-  let extended_renderer = { ..renderer, input: extended }
+  let extended_renderer = { ..renderer, input: extended, }
   let extended_keys = extended_renderer
     .stream_children()
     .to_array()
@@ -148,7 +148,7 @@ test "transcript stream children use stable typed keys in display order" {
 #warnings("-alert_unstable")
 test "durable assistant sequences render as separate foldable steps" {
   let user : VisibleRow = {
-    item: { kind: User, content: "question", ts: None, sequence: Some(1) },
+    item: { kind: User, content: "question", ts: None, sequence: Some(1), },
     identity: "s1\u{0}o0",
   }
   let first_reasoning : VisibleRow = {
@@ -284,7 +284,7 @@ test "durable assistant sequences render as separate foldable steps" {
 #warnings("-alert_unstable")
 test "live step hands off to its durable assistant card key" {
   let user : VisibleRow = {
-    item: { kind: User, content: "question", ts: None, sequence: Some(1) },
+    item: { kind: User, content: "question", ts: None, sequence: Some(1), },
     identity: "s1\u{0}o0",
   }
   let first : VisibleRow = {
@@ -359,7 +359,7 @@ test "live step hands off to its durable assistant card key" {
     ],
     streaming_reasoning: None,
   }
-  let settled = { ..live_renderer, input: settled_input }.stream_children()
+  let settled = { ..live_renderer, input: settled_input, }.stream_children()
   assert_true(settled.get(handoff_key) is Some(_))
   let settled_markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(settled[handoff_key])
@@ -374,7 +374,7 @@ test "live step hands off to its durable assistant card key" {
 test "an ambiguous commit-first prefix keeps live reasoning visible" {
   let rows : Array[VisibleRow] = [
     {
-      item: { kind: User, content: "question", ts: None, sequence: Some(1) },
+      item: { kind: User, content: "question", ts: None, sequence: Some(1), },
       identity: "s1\u{0}o0",
     },
     {
@@ -442,7 +442,7 @@ test "an ambiguous commit-first prefix keeps live reasoning visible" {
     streaming_identity="r7",
   )
   let children = (
-    { input, on_open: _ => @cmd.none, on_jump: _ => @cmd.none } :
+    { input, on_open: _ => @cmd.none, on_jump: _ => @cmd.none, } :
     TranscriptRenderer).stream_children()
   let keys = children.to_array().map(pair => pair.0)
   assert_eq(keys, [
@@ -476,7 +476,7 @@ test "an ambiguous commit-first prefix keeps live reasoning visible" {
 #warnings("-alert_unstable")
 test "live reasoning is plain text and keeps the durable activity key" {
   let user : VisibleRow = {
-    item: { kind: User, content: "question", ts: None, sequence: Some(1) },
+    item: { kind: User, content: "question", ts: None, sequence: Some(1), },
     identity: "s1\u{0}o0",
   }
   let live_input = Input(
@@ -506,7 +506,7 @@ test "live reasoning is plain text and keeps the durable activity key" {
 
   let complete_renderer = {
     ..live_renderer,
-    input: { ..live_input, reasoning_complete: true },
+    input: { ..live_input, reasoning_complete: true, },
   }
   let complete_markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(
@@ -540,7 +540,7 @@ test "live reasoning is plain text and keeps the durable activity key" {
     ],
     streaming_reasoning: None,
   }
-  let settled_renderer = { ..live_renderer, input: settled }
+  let settled_renderer = { ..live_renderer, input: settled, }
   let settled_children = settled_renderer.stream_children()
   assert_true(
     settled_children.get("activity\u{0}after\u{0}s1\u{0}o0") is Some(_),
@@ -743,7 +743,7 @@ test "a step is stamped to the second, from a real stamp only" {
   // recorded", both keep the bare summary.
   assert_false(render([tool_item("read")]).contains("activity-time"))
   assert_false(
-    render([{ ..tool_item("read"), ts: Some(0) }]).contains("activity-time"),
+    render([{ ..tool_item("read"), ts: Some(0), }]).contains("activity-time"),
   )
   // A step still running has no committed instant to report.
   assert_false(

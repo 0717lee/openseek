@@ -142,7 +142,7 @@ async fn project_action_into(
 test "a project new chat rotates into that project" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/home/u/proj")
-  let model = test_model().with_dev(dev => { ..dev, projects: [workspace] })
+  let model = test_model().with_dev(dev => { ..dev, projects: [workspace], })
   let (_, chosen) = update(
     dispatch,
     NewChatIn(@interop.ChannelId::Local, Some(workspace)),
@@ -153,7 +153,10 @@ test "a project new chat rotates into that project" {
   // active workspace, and the next plain "New chat" stays there.
   let (_, rotated) = update(
     dispatch,
-    SessionRotated({ channel: @interop.ChannelId::Local, session: "desktop-ws" }),
+    SessionRotated({
+      channel: @interop.ChannelId::Local,
+      session: "desktop-ws",
+    }),
     chosen,
   )
   assert_eq(rotated.active().workspace, Project(root=workspace))
@@ -166,7 +169,7 @@ test "a rotation lands in the device's active project" {
   let dispatch = test_dispatch()
   let (_, next) = update(
     dispatch,
-    SessionRotated({ channel: @interop.ChannelId::Local, session: "desktop-s" }),
+    SessionRotated({ channel: @interop.ChannelId::Local, session: "desktop-s", }),
     test_model().with_dev(dev => {
       ..dev,
       active_project: Some(@interop.ChannelId::Local.test_project()),
@@ -244,7 +247,7 @@ test "detaching the active workspace opens the newest remaining conversation" {
       ..test_conversation(),
       workspace: Project(root=kept_workspace),
     })
-    .with_dev(dev => { ..dev, active_project: Some(kept_workspace) })
+    .with_dev(dev => { ..dev, active_project: Some(kept_workspace), })
   let (_, kept) = update_dev(
     dispatch,
     ProjectsLoaded(
@@ -354,7 +357,7 @@ test "detaching the last workspace leaves the app on onboarding" {
   // the app stays on onboarding until one is attached.
   let (_, rotated) = update(
     dispatch,
-    SessionRotated({ channel: Local, session: "desktop-fresh" }),
+    SessionRotated({ channel: Local, session: "desktop-fresh", }),
     stale,
   )
   inspect(rotated.active_session, content="")
@@ -366,7 +369,7 @@ test "detaching the last workspace leaves the app on onboarding" {
   assert_true(attached.active_conversation() is None)
   let (_, opened) = update(
     dispatch,
-    SessionRotated({ channel: Local, session: "desktop-attached" }),
+    SessionRotated({ channel: Local, session: "desktop-attached", }),
     attached,
   )
   inspect(opened.active_session, content="desktop-attached")
@@ -427,7 +430,7 @@ test "a workspace commit broadcast supersedes list replies and refreshes session
 test "workspace commit decoder carries the canonical registry list" {
   guard bridge_msg(
       @interop.ChannelId::Local,
-      @protocol.Notification::WorkspaceChanged({ workspaces: ["/one", "/two"] }),
+      @protocol.Notification::WorkspaceChanged({ workspaces: ["/one", "/two"], }),
     )
     is Some(FromDevice(_, ProjectsChanged(paths))) else {
     fail("expected a workspace change")
@@ -467,7 +470,7 @@ test "opening a stored session joins its project and loaded worktree" {
   assert_eq(opening.dev().active_project, Some(workspace))
   assert_true(
     opening.loading_conversation
-    is Some({ channel: Local, session: "desktop-w" }),
+    is Some({ channel: Local, session: "desktop-w", }),
   )
   let (_, loaded) = update_dev(
     dispatch,
@@ -509,14 +512,14 @@ test "opening a stored session joins its project and loaded worktree" {
   assert_eq(worktree_opening.dev().active_project, Some(workspace))
   assert_true(
     worktree_opening.loading_conversation
-    is Some({ channel: Local, session: "desktop-w" }),
+    is Some({ channel: Local, session: "desktop-w", }),
   )
 }
 
 ///|
 test "the two full-screen pickers never share the screen" {
   let dispatch = test_dispatch()
-  let base = { ..test_model(), is_desktop: true }
+  let base = { ..test_model(), is_desktop: true, }
   // The picker's capture-phase keys would claim Enter and Escape from a
   // palette that is painted on top of it, so opening one retires the other.
   let (_, searching) = update(
@@ -964,7 +967,7 @@ test "a resolved add wins over the detach fallback in one snapshot" {
       ..test_conversation(),
       workspace: Project(root=gone),
     })
-    .with_dev(dev => { ..dev, projects: [gone], active_project: Some(gone) })
+    .with_dev(dev => { ..dev, projects: [gone], active_project: Some(gone), })
   let (_, opened) = update(
     dispatch,
     PickProject(@interop.ChannelId::Local),

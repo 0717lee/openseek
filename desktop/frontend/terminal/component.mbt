@@ -23,7 +23,7 @@ pub fn Connection::Connection(
   websocket_epoch~ : Int,
   attempt~ : Int,
 ) -> Connection {
-  { channel, websocket_epoch, attempt }
+  { channel, websocket_epoch, attempt, }
 }
 
 ///|
@@ -32,7 +32,7 @@ pub fn Input::Input(
   live_channels~ : Array[@interop.ChannelId],
   connections~ : Array[Connection],
 ) -> Input {
-  { ctx, live_channels, connections }
+  { ctx, live_channels, connections, }
 }
 
 ///|
@@ -42,7 +42,7 @@ pub fn Input::Input(
 /// reconciliation.
 fn State::close_without_devices(self : State, device_count : Int) -> State {
   if device_count == 0 {
-    { ..self, open: false }
+    { ..self, open: false, }
   } else {
     self
   }
@@ -101,7 +101,7 @@ pub fn component(
 
 ///|
 test "terminal visibility distinguishes disconnect from device removal" {
-  let open = { ..State::empty(), open: true }
+  let open = { ..State::empty(), open: true, }
   let disconnected = open.close_without_devices(1)
   assert_true(disconnected.open)
   let signed_out = open.close_without_devices(0)

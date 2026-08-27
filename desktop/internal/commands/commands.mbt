@@ -20,7 +20,7 @@ struct Command[Payload, Reply] {
 
 ///|
 fn[Payload, Reply] Command::Command(name : String) -> Command[Payload, Reply] {
-  { descriptor: extension_contract.command(name) }
+  { descriptor: extension_contract.command(name), }
 }
 
 ///|

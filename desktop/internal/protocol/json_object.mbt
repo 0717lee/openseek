@@ -26,7 +26,7 @@ fn JsonObject::decode(
   guard json is Object(fields) else {
     raise JsonDecodeError((path, "expected " + expected + " object"))
   }
-  { fields, path }
+  { fields, path, }
 }
 
 ///|
@@ -38,7 +38,7 @@ fn JsonObject::of(
   fields : Map[String, Json],
   path : @json.JsonPath,
 ) -> JsonObject {
-  { fields, path }
+  { fields, path, }
 }
 
 ///|

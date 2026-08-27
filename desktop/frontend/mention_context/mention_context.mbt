@@ -162,7 +162,7 @@ pub fn label(mention : MentionRef) -> String {
 pub fn target(mention : MentionRef) -> Target? {
   match mention {
     Skill(_) => None
-    File(path~) => Some({ file: path, range: None, annotation: None })
+    File(path~) => Some({ file: path, range: None, annotation: None, })
     Symbol(file~, line~, ..) =>
       if file.is_empty() {
         None
@@ -302,7 +302,7 @@ pub fn parse(content : String) -> MentionMessage? {
   guard parse_mention_block(head[open + 1:]) is Some(mentions) else {
     return None
   }
-  Some({ mentions, task: head[:open].join("\n").trim().to_owned() })
+  Some({ mentions, task: head[:open].join("\n").trim().to_owned(), })
 }
 
 ///|

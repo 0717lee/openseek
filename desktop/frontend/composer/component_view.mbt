@@ -8,7 +8,7 @@ fn Completion::view(self : Completion, emit : @cmd.Emit[Msg]) -> @html.Html {
   }
   let rows : Array[CompletionRow] = []
   for _, item in self.menu {
-    rows.push({ label: item.label, detail: item.detail })
+    rows.push({ label: item.label, detail: item.detail, })
   }
   CompletionView::{
     rows,

@@ -44,7 +44,7 @@ struct Emitter[T] {
 ///|
 /// Creates an empty typed emitter.
 pub fn[T] Emitter::Emitter() -> Emitter[T] {
-  { listeners: [], disposed: Ref(false), next_id: Ref(0) }
+  { listeners: [], disposed: Ref(false), next_id: Ref(0), }
 }
 
 ///|
@@ -59,7 +59,7 @@ pub fn[T] Emitter::event(
   let id = self.next_id.val
   self.next_id.val = id + 1
   let active = Ref(true)
-  self.listeners.push({ id, listener, active })
+  self.listeners.push({ id, listener, active, })
   Disposable::from(() => {
     active.val = false
     let retained = self.listeners.filter(cell => cell.id != id)
@@ -133,7 +133,7 @@ pub fn[T] MicrotaskEmitter::MicrotaskEmitter(
   merge? : (Array[T]) -> T,
   schedule? : (() -> Unit) -> Unit = run => run(),
 ) -> MicrotaskEmitter[T] {
-  { inner: Emitter(), queued_events: [], merge_fn: merge, schedule }
+  { inner: Emitter(), queued_events: [], merge_fn: merge, schedule, }
 }
 
 ///|

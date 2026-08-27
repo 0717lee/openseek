@@ -27,7 +27,7 @@ pub fn decode(arguments : Json) -> WriteInput raise {
           fail("arguments.revert_on_parse_errors to be a boolean")
         _ => true
       }
-      { path, content, revert_on_parse_errors }
+      { path, content, revert_on_parse_errors, }
     }
     { "path": String(_), .. } => fail("arguments.content")
     Object(_) => fail("arguments.path")

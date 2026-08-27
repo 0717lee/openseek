@@ -1,18 +1,18 @@
 ///|
 fn line_comments(delimiter : String) -> @languages.CommentRule {
-  { line_comment: Some(LineCommentRule(delimiter)), block_comment: None }
+  { line_comment: Some(LineCommentRule(delimiter)), block_comment: None, }
 }
 
 ///|
 fn block_comments(open : String, close : String) -> @languages.CommentRule {
-  { line_comment: None, block_comment: Some({ open, close }) }
+  { line_comment: None, block_comment: Some({ open, close, }), }
 }
 
 ///|
 fn both_comments() -> @languages.CommentRule {
   {
     line_comment: Some(LineCommentRule("//")),
-    block_comment: Some({ open: "/*", close: "*/" }),
+    block_comment: Some({ open: "/*", close: "*/", }),
   }
 }
 
@@ -224,7 +224,7 @@ test "line and block rules coexist with deterministic line-first precedence" {
   )
   let overlapping : @languages.CommentRule = {
     line_comment: Some(LineCommentRule("/*")),
-    block_comment: Some({ open: "/*", close: "*/" }),
+    block_comment: Some({ open: "/*", close: "*/", }),
   }
   assert_eq(
     detect_markdown_comments_in_snapshot(

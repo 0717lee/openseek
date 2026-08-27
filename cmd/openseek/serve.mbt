@@ -601,7 +601,7 @@ async fn run_serve(
         | (Some([]) | None with session = ""),
         ..
       },
-      ..,
+      ..
     } =>
       match session.trim() {
         "" => None

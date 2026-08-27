@@ -88,7 +88,7 @@ pub impl FromJson for TextSearchRange with fn from_json(json, path) {
       (path.add_key("end_column"), "expected an exclusive end column"),
     )
   }
-  { start_column, end_column }
+  { start_column, end_column, }
 }
 
 ///|
@@ -178,7 +178,7 @@ pub impl FromJson for SearchTextReply with fn from_json(json, path) {
           (path.add_key("error_message"), "expected non-empty error message"),
         )
       }
-      let pair : TextSearchError = { code, message }
+      let pair : TextSearchError = { code, message, }
       Some(pair)
     }
     _ =>

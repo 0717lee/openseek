@@ -173,17 +173,17 @@ pub(all) struct SymbolNavigationActionConfig {
 
 ///|
 pub fn SymbolNavigationActionConfig::goto() -> SymbolNavigationActionConfig {
-  { open_to_side: false, open_in_peek: false, mute_message: false }
+  { open_to_side: false, open_in_peek: false, mute_message: false, }
 }
 
 ///|
 pub fn SymbolNavigationActionConfig::peek() -> SymbolNavigationActionConfig {
-  { open_to_side: false, open_in_peek: true, mute_message: false }
+  { open_to_side: false, open_in_peek: true, mute_message: false, }
 }
 
 ///|
 pub fn SymbolNavigationActionConfig::link() -> SymbolNavigationActionConfig {
-  { open_to_side: false, open_in_peek: false, mute_message: true }
+  { open_to_side: false, open_in_peek: false, mute_message: true, }
 }
 
 ///|

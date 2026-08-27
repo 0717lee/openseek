@@ -24,7 +24,7 @@ pub fn update(msg : Msg, state : State) -> State {
   }
 
   match msg {
-    InputChanged(id~, value~) => patch(id, page => { ..page, input: value })
+    InputChanged(id~, value~) => patch(id, page => { ..page, input: value, })
     // The committed URL replaces the draft: the bar names what the pane
     // shows, exactly like a browser's address bar after a navigation. A
     // navigation the page started itself (a link click, a redirect) arrives
@@ -41,7 +41,7 @@ pub fn update(msg : Msg, state : State) -> State {
     LoadFailed(id~, url~, text~) =>
       patch(id, page => {
         if page.url == Some(url) {
-          { ..page, loading: false, failure: Some("\{url}: \{text}") }
+          { ..page, loading: false, failure: Some("\{url}: \{text}"), }
         } else {
           page
         }

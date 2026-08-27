@@ -40,7 +40,7 @@ fn ArtifactPlan::parse(values : Array[String]) -> ArtifactPlan raise {
         )
     }
   }
-  { dmg, zip }
+  { dmg, zip, }
 }
 
 ///|
@@ -114,7 +114,7 @@ fn PackageOptions::parse(argv? : ArrayView[String]) -> PackageOptions raise {
   }
   {
     artifacts,
-    sign: { identity, notary_profile },
+    sign: { identity, notary_profile, },
     release: matches.flags.get("release").unwrap_or(false),
     open_after_packaging: !matches.flags.get("no-open").unwrap_or(false),
   }
@@ -318,7 +318,7 @@ async fn main {
 ///|
 test "macOS packaging defaults to Proton app output" {
   let options = PackageOptions::parse(argv=[])
-  @debug.assert_eq(options.artifacts, { dmg: false, zip: false })
+  @debug.assert_eq(options.artifacts, { dmg: false, zip: false, })
   assert_true(options.sign.identity is None)
   assert_true(options.sign.notary_profile is None)
   assert_false(options.release)
@@ -346,7 +346,7 @@ test "macOS packaging combines optional archive targets" {
   let options = PackageOptions::parse(argv=[
     "--target", "app", "--target", "zip", "--target", "dmg",
   ])
-  @debug.assert_eq(options.artifacts, { dmg: true, zip: true })
+  @debug.assert_eq(options.artifacts, { dmg: true, zip: true, })
 }
 
 ///|

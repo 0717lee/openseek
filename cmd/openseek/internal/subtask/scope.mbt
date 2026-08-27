@@ -27,11 +27,11 @@ pub fn parse_status_z(output : String) -> Array[Change] {
     }
     let xy = record.view(end_offset=2).to_owned()
     let path = record.view(start_offset=3).to_owned()
-    changes.push({ path, kind: xy.trim().to_owned() })
+    changes.push({ path, kind: xy.trim().to_owned(), })
     // A rename/copy consumes the NEXT field as its source path.
     if xy.contains("R") || xy.contains("C") {
       if index + 1 < fields.length() && fields[index + 1] != "" {
-        changes.push({ path: fields[index + 1], kind: "\{xy.trim()}-source" })
+        changes.push({ path: fields[index + 1], kind: "\{xy.trim()}-source", })
         index += 1
       }
     }
@@ -54,13 +54,13 @@ pub fn parse_diff_name_status_z(output : String) -> Array[Change] {
     }
     if status.has_prefix("R") || status.has_prefix("C") {
       if index + 2 < fields.length() {
-        changes.push({ path: fields[index + 1], kind: "\{status}-source" })
-        changes.push({ path: fields[index + 2], kind: status })
+        changes.push({ path: fields[index + 1], kind: "\{status}-source", })
+        changes.push({ path: fields[index + 2], kind: status, })
       }
       index += 3
     } else {
       if index + 1 < fields.length() {
-        changes.push({ path: fields[index + 1], kind: status })
+        changes.push({ path: fields[index + 1], kind: status, })
       }
       index += 2
     }
@@ -132,10 +132,10 @@ test "status -z parsing keeps renames' both sides" {
   let raw = " M lib/a.txt\u{0}R  lib/renamed.txt\u{0}lib/original.txt\u{0}?? lib/new.txt\u{0}"
   let changes = parse_status_z(raw)
   assert_eq(changes.length(), 4)
-  assert_eq(changes[0], { path: "lib/a.txt", kind: "M" })
-  assert_eq(changes[1], { path: "lib/renamed.txt", kind: "R" })
-  assert_eq(changes[2], { path: "lib/original.txt", kind: "R-source" })
-  assert_eq(changes[3], { path: "lib/new.txt", kind: "??" })
+  assert_eq(changes[0], { path: "lib/a.txt", kind: "M", })
+  assert_eq(changes[1], { path: "lib/renamed.txt", kind: "R", })
+  assert_eq(changes[2], { path: "lib/original.txt", kind: "R-source", })
+  assert_eq(changes[3], { path: "lib/new.txt", kind: "??", })
 }
 
 ///|
@@ -143,19 +143,19 @@ test "diff -z parsing reads the opposite rename order" {
   let raw = "M\u{0}lib/a.txt\u{0}R100\u{0}lib/original.txt\u{0}lib/renamed.txt\u{0}D\u{0}lib/gone.txt\u{0}"
   let changes = parse_diff_name_status_z(raw)
   assert_eq(changes.length(), 4)
-  assert_eq(changes[0], { path: "lib/a.txt", kind: "M" })
-  assert_eq(changes[1], { path: "lib/original.txt", kind: "R100-source" })
-  assert_eq(changes[2], { path: "lib/renamed.txt", kind: "R100" })
-  assert_eq(changes[3], { path: "lib/gone.txt", kind: "D" })
+  assert_eq(changes[0], { path: "lib/a.txt", kind: "M", })
+  assert_eq(changes[1], { path: "lib/original.txt", kind: "R100-source", })
+  assert_eq(changes[2], { path: "lib/renamed.txt", kind: "R100", })
+  assert_eq(changes[3], { path: "lib/gone.txt", kind: "D", })
 }
 
 ///|
 test "scope violations are component-wise over every side" {
   let changes = [
-    ({ path: "lib/a.txt", kind: "M" } : Change),
-    { path: "lib2/b.txt", kind: "M" },
-    { path: "lib/moved.txt", kind: "R" },
-    { path: "other/original.txt", kind: "R-source" },
+    ({ path: "lib/a.txt", kind: "M", } : Change),
+    { path: "lib2/b.txt", kind: "M", },
+    { path: "lib/moved.txt", kind: "R", },
+    { path: "other/original.txt", kind: "R-source", },
   ]
   let violations = scope_violations(changes, ["lib"])
   assert_eq(violations, ["lib2/b.txt", "other/original.txt"])

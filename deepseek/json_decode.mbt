@@ -167,7 +167,7 @@ pub impl FromJson for ChatResponse with fn from_json(
     Some(usage) => FromJson::from_json(usage, path.add_key("usage"))
     None => Usage::empty()
   }
-  { content, reasoning_content, tool_calls, usage }
+  { content, reasoning_content, tool_calls, usage, }
 }
 
 ///|

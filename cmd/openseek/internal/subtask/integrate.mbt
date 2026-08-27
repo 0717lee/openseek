@@ -101,7 +101,7 @@ async fn integrate_locked(
           ],
         }
       }
-    Err(reason) => return { entry, result: "refused", detail: [reason] }
+    Err(reason) => return { entry, result: "refused", detail: [reason], }
   }
   if git_run(
       ["merge-base", "--is-ancestor", entry.base_oid, commit_oid],
@@ -141,9 +141,9 @@ async fn integrate_locked(
   }
   let head_before = match git_require(["rev-parse", "HEAD"], cwd=origin) {
     Ok(output) => output.trim().to_owned()
-    Err(reason) => return { entry, result: "refused", detail: [reason] }
+    Err(reason) => return { entry, result: "refused", detail: [reason], }
   }
-  let entry = { ..entry, origin_head_before: Some(head_before) }
+  let entry = { ..entry, origin_head_before: Some(head_before), }
   let _ = save_entry(geometry.common_git_dir, entry)
   let merge = git_run(
     merge_args(entry, commit_oid),
@@ -171,7 +171,7 @@ async fn integrate_locked(
           files.push(change.path)
         }
       }
-      let entry = { ..entry, state: Conflicted, conflict_paths: files.copy() }
+      let entry = { ..entry, state: Conflicted, conflict_paths: files.copy(), }
       let _ = save_entry(geometry.common_git_dir, entry)
       return {
         entry,
@@ -196,7 +196,7 @@ async fn integrate_locked(
   // No merge in progress: either it completed or it never started.
   let head_after = git_run(["rev-parse", "HEAD"], cwd=origin)
   if head_after.exit_code == 0 && head_after.output.trim() != head_before {
-    let entry = { ..entry, state: Integrated }
+    let entry = { ..entry, state: Integrated, }
     let _ = save_entry(geometry.common_git_dir, entry)
     // The branch's content now lives in origin history: the worktree and
     // branch are provably redundant — the one auto-clean that is safe.
@@ -284,7 +284,7 @@ async fn integrate_continue_locked(
               detail: ["origin HEAD moved during the conflicted window"],
             }
           }
-        Err(reason) => return { entry, result: "refused", detail: [reason] }
+        Err(reason) => return { entry, result: "refused", detail: [reason], }
       }
     None => ()
   }
@@ -333,9 +333,9 @@ async fn integrate_continue_locked(
       cwd=origin,
     ) {
     Ok(_) => ()
-    Err(reason) => return { entry, result: "refused", detail: [reason] }
+    Err(reason) => return { entry, result: "refused", detail: [reason], }
   }
-  let entry = { ..entry, state: Integrated }
+  let entry = { ..entry, state: Integrated, }
   let _ = save_entry(geometry.common_git_dir, entry)
   @fs.rmdir(entry.worker_root, recursive=true) catch {
     error if @async.is_being_cancelled() => raise error
@@ -343,7 +343,7 @@ async fn integrate_continue_locked(
   }
   let _ = git_run(["worktree", "prune"], cwd=origin)
   let _ = git_run(["branch", "-d", entry.branch], cwd=origin)
-  { entry, result: "integrated", detail: ["conflict resolution committed"] }
+  { entry, result: "integrated", detail: ["conflict resolution committed"], }
 }
 
 ///|
@@ -388,9 +388,9 @@ pub async fn integrate_abort(
   }
   match git_require(["merge", "--abort"], cwd=origin) {
     Ok(_) => ()
-    Err(reason) => return { entry, result: "refused", detail: [reason] }
+    Err(reason) => return { entry, result: "refused", detail: [reason], }
   }
-  let entry = { ..entry, state: Committed }
+  let entry = { ..entry, state: Committed, }
   let _ = save_entry(geometry.common_git_dir, entry)
   {
     entry,
@@ -436,7 +436,7 @@ pub async fn discard(
   }
   let _ = git_run(["worktree", "prune"], cwd=origin)
   let _ = git_run(["branch", "-D", entry.branch], cwd=origin)
-  let entry = { ..entry, state: Discarded }
+  let entry = { ..entry, state: Discarded, }
   let _ = save_entry(geometry.common_git_dir, entry)
   Ok(())
 }

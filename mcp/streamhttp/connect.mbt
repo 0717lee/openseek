@@ -61,7 +61,7 @@ pub async fn[X] connect(
     no_wait=true,
     allow_failure=true,
   )
-  let torn_down : Ref[Bool] = { val: false }
+  let torn_down : Ref[Bool] = { val: false, }
   let teardown = () => {
     if !torn_down.val {
       torn_down.val = true
@@ -87,5 +87,5 @@ pub async fn[X] connect(
     teardown()
     return None
   }
-  Some({ client: mcp_client, init, teardown })
+  Some({ client: mcp_client, init, teardown, })
 }

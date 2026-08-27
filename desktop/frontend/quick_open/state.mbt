@@ -39,11 +39,11 @@ pub fn State::open(
     phase: Loading,
     generation,
   }
-  let started = { ..self, open: Some(open), generation }
+  let started = { ..self, open: Some(open), generation, }
   match provider {
     Files => {
       let projected = with_file_candidates(input, open, [], Loading)
-      let next = { ..started, open: Some(projected) }
+      let next = { ..started, open: Some(projected), }
       let (cache_cmd, next) = next.ensure_cache(
         emit, input, projected, true, true,
       )
@@ -158,7 +158,7 @@ pub fn State::reconcile(
   // The run belongs to the conversation focused when it opened. A switch
   // retires it rather than repointing it at data the user did not ask for.
   guard open.owner == input.owner else {
-    return (self.cancel_file_request(open), { ..self, open: None })
+    return (self.cancel_file_request(open), { ..self, open: None, })
   }
   guard open.root != input.root else { return (@cmd.none, self) }
   // Advancing the generation also fences replies already in flight against the
@@ -172,13 +172,13 @@ pub fn State::reconcile(
     phase: Loading,
     generation,
   }
-  let next = { ..self, open: Some(restarted), generation }
+  let next = { ..self, open: Some(restarted), generation, }
   match restarted.provider() {
     Files => {
       // Keep only currently open relative paths as provisional rows; Host
       // results from the previous root must disappear immediately.
       let projected = with_file_candidates(input, restarted, [], Loading)
-      let next = { ..next, open: Some(projected) }
+      let next = { ..next, open: Some(projected), }
       let (cache_cmd, next) = next.ensure_cache(
         emit, input, projected, true, true,
       )
@@ -226,7 +226,7 @@ fn State::change_value(
     selected: 0,
     generation,
   }
-  let started = { ..self, open: Some(next_open), generation }
+  let started = { ..self, open: Some(next_open), generation, }
   match next_open.provider() {
     Files => {
       let projected = with_file_candidates(
@@ -235,7 +235,7 @@ fn State::change_value(
         next_open.result_files(),
         Debouncing,
       )
-      let next = { ..started, open: Some(projected) }
+      let next = { ..started, open: Some(projected), }
       let (cache_cmd, next) = next.ensure_cache(
         emit, input, projected, false, false,
       )
@@ -255,7 +255,7 @@ fn State::change_value(
     }
     Symbols => {
       let query = next_open.query()
-      let next = { ..started, open: Some({ ..next_open, phase: Debouncing }) }
+      let next = { ..started, open: Some({ ..next_open, phase: Debouncing, }), }
       (
         @cmd.batch([
           cancel,
@@ -289,7 +289,7 @@ fn State::begin_file_request(
     open.phase is Debouncing else {
     return (@cmd.none, self)
   }
-  let next = { ..self, open: Some({ ..open, phase: Loading }) }
+  let next = { ..self, open: Some({ ..open, phase: Loading, }), }
   (next.query_active_cache(emit, input, open), next)
 }
 
@@ -315,7 +315,7 @@ fn State::apply_cache_loaded(
   }
   let mut next = {
     ..self,
-    cache: { ..cache, active_key: Some(cache_key), loading_key: None },
+    cache: { ..cache, active_key: Some(cache_key), loading_key: None, },
   }
   // The first picker run has no old cache to query. Once population settles,
   // issue the current query. During a debounce, let the already-scheduled due
@@ -324,7 +324,7 @@ fn State::apply_cache_loaded(
     open.owner == owner &&
     open.provider() is Files &&
     !(open.phase is Debouncing) {
-    next = { ..next, open: Some({ ..open, phase: Loading }) }
+    next = { ..next, open: Some({ ..open, phase: Loading, }), }
     cmds.push(next.query_active_cache(emit, input, open))
   }
   (@cmd.batch(cmds), next)
@@ -341,7 +341,7 @@ fn State::fail_cache_load(
   guard cache.owner == Some(owner) && cache.loading_key == Some(cache_key) else {
     return (@cmd.none, self)
   }
-  let next = { ..self, cache: { ..cache, loading_key: None } }
+  let next = { ..self, cache: { ..cache, loading_key: None, }, }
   let clear = clear_file_cache(owner, cache_key)
   guard cache.active_key is None &&
     next.open is Some(open) &&
@@ -349,7 +349,7 @@ fn State::fail_cache_load(
     open.provider() is Files else {
     return (clear, next)
   }
-  (clear, { ..next, open: Some({ ..open, phase: Failed }) })
+  (clear, { ..next, open: Some({ ..open, phase: Failed, }), })
 }
 
 ///|
@@ -371,7 +371,7 @@ fn State::apply_file_result(
     open.generation == generation else {
     return self
   }
-  { ..self, open: Some(with_file_candidates(input, open, files, Ready)) }
+  { ..self, open: Some(with_file_candidates(input, open, files, Ready)), }
 }
 
 ///|
@@ -390,7 +390,7 @@ fn State::fail_file_request(
     open.generation == generation else {
     return self
   }
-  { ..self, open: Some({ ..open, phase: Failed }) }
+  { ..self, open: Some({ ..open, phase: Failed, }), }
 }
 
 ///|
@@ -414,7 +414,7 @@ fn State::begin_symbol_request(
   }
   (
     symbol_request(emit, input.root, owner, query, generation),
-    { ..self, open: Some({ ..open, phase: Loading }) },
+    { ..self, open: Some({ ..open, phase: Loading, }), },
   )
 }
 
@@ -469,7 +469,7 @@ fn State::fail_symbol_request(
     open.phase is Loading else {
     return self
   }
-  { ..self, open: Some({ ..open, items: [], selected: 0, phase: Failed }) }
+  { ..self, open: Some({ ..open, items: [], selected: 0, phase: Failed, }), }
 }
 
 ///|
@@ -480,7 +480,7 @@ fn State::move_selection(self : State, delta : Int) -> (@cmd.Cmd, State) {
   let selected = (open.selected + delta + count) % count
   (
     scroll_selection_after_render(selected),
-    { ..self, open: Some({ ..open, selected, }) },
+    { ..self, open: Some({ ..open, selected, }), },
   )
 }
 
@@ -489,7 +489,7 @@ fn State::select_row(self : State, index : Int) -> State {
   guard self.open is Some(open) && open.items.get(index) is Some(_) else {
     return self
   }
-  { ..self, open: Some({ ..open, selected: index }) }
+  { ..self, open: Some({ ..open, selected: index, }), }
 }
 
 ///|
@@ -499,7 +499,7 @@ fn State::pick_row(self : State, index : Int) -> (@cmd.Cmd, State, Accepted?) {
   }
   (
     self.cancel_file_request(open),
-    { ..self, open: None },
+    { ..self, open: None, },
     Some(item.accepted()),
   )
 }
@@ -510,7 +510,7 @@ fn State::pick_row(self : State, index : Int) -> (@cmd.Cmd, State, Accepted?) {
 /// so the next run does not pay for it again.
 pub fn State::close(self : State) -> (@cmd.Cmd, State) {
   guard self.open is Some(open) else { return (@cmd.none, self) }
-  (self.cancel_file_request(open), { ..self, open: None })
+  (self.cancel_file_request(open), { ..self, open: None, })
 }
 
 ///|
@@ -589,7 +589,7 @@ fn State::ensure_cache(
   }
   if cache.loading_key is None && (cache.active_key is None || replace_loaded) {
     let cache_key = file_cache_key(open.owner, open.generation)
-    cache = { ..cache, loading_key: Some(cache_key) }
+    cache = { ..cache, loading_key: Some(cache_key), }
     cmds.push(
       file_request(
         emit,

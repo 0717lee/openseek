@@ -198,7 +198,7 @@ pub impl @jsonrpc.Transport for HttpTransport with fn send(self, message) {
   // Whether the exchange task already ran to completion: TaskGroup::spawn's
   // start timing is undefined, so registration below must not resurrect a
   // ticket whose task finished before `spawn` returned.
-  let done : Ref[Bool] = { val: false }
+  let done : Ref[Bool] = { val: false, }
   let task = (self.spawn)(() => {
     // All defers sit at the task-body scope (a defer inside an `if` block
     // would fire at that block's end — i.e. immediately), so they run when the
@@ -483,7 +483,7 @@ const SseCompactAt : Int = 4096
 
 ///|
 fn SseLineReader::new(client : @http.Client) -> SseLineReader {
-  { client, buf: [], start: 0, scan: 0, eof: false }
+  { client, buf: [], start: 0, scan: 0, eof: false, }
 }
 
 ///|

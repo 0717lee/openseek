@@ -203,7 +203,7 @@ test "next and previous navigation wrap through the flat sequence" {
   assert_eq(model.next_reference(third), Some(first))
   assert_eq(model.previous_reference(first), Some(third))
   assert_eq(model.previous_reference(third), Some(second))
-  let foreign = { ..first, range: Range(99, 1, 99, 2) }
+  let foreign = { ..first, range: Range(99, 1, 99, 2), }
   assert_eq(model.next_reference(foreign), None)
   assert_eq(ReferencesModel([]).next_reference(first), None)
 }
@@ -286,7 +286,7 @@ test "valid row preview returns the exact snippet variant" {
   let model = reference_model("file:///target.mbt", "let target = 1")
   assert_eq(
     item.row_preview(Some(model)),
-    Snippet({ before: "let ", matched: "target", after: " = 1" }),
+    Snippet({ before: "let ", matched: "target", after: " = 1", }),
   )
 }
 

@@ -260,7 +260,7 @@ test "status shapes" {
   assert_eq(status.server_url, Some("https://relay.example"))
   assert_eq(
     status.user,
-    Some({ login: "octocat", avatar_url: "https://avatars.example/1" }),
+    Some({ login: "octocat", avatar_url: "https://avatars.example/1", }),
   )
   assert_eq(
     status.device,

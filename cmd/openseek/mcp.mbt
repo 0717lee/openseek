@@ -68,7 +68,7 @@ async fn[X] resolve_mcp_tools(
 /// configuration raises, exiting nonzero — the command is usable as a
 /// validation gate. Logs are discarded: stdout carries only the summary.
 async fn run_mcp_command(matches : @argparse.Matches) -> Unit {
-  @xlog.global().set_handler(DiscardLog::{  })
+  @xlog.global().set_handler(DiscardLog::{ })
   let path = mcp_config_path(matches)
   if path == "" {
     fail(
