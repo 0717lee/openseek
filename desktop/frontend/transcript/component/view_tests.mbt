@@ -110,6 +110,7 @@ test "transcript stream children use stable typed keys in display order" {
   )
   let renderer : TranscriptRenderer = {
     input,
+    live_reasoning: None,
     on_open: _ => @cmd.none,
     on_jump: _ => @cmd.none,
   }
@@ -250,6 +251,7 @@ test "durable assistant sequences render as separate foldable steps" {
   )
   let renderer : TranscriptRenderer = {
     input,
+    live_reasoning: None,
     on_open: _ => @cmd.none,
     on_jump: _ => @cmd.none,
   }
@@ -311,11 +313,11 @@ test "live step hands off to its durable assistant card key" {
     submission_generation=1,
     items=[user, first],
     streaming_response=None,
-    streaming_reasoning="next thought",
     streaming_identity="r7",
   )
   let live_renderer : TranscriptRenderer = {
     input: live_input,
+    live_reasoning: Some("next thought"),
     on_open: _ => @cmd.none,
     on_jump: _ => @cmd.none,
   }
@@ -357,9 +359,12 @@ test "live step hands off to its durable assistant card key" {
         identity: "s4\u{0}o1",
       },
     ],
-    streaming_reasoning: None,
   }
-  let settled = { ..live_renderer, input: settled_input }.stream_children()
+  let settled = {
+    ..live_renderer,
+    input: settled_input,
+    live_reasoning: None,
+  }.stream_children()
   assert_true(settled.get(handoff_key) is Some(_))
   let settled_markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(settled[handoff_key])
@@ -371,7 +376,7 @@ test "live step hands off to its durable assistant card key" {
 
 ///|
 #warnings("-alert_unstable")
-test "an ambiguous commit-first prefix keeps live reasoning visible" {
+test "commit-first reasoning may temporarily show durable and live cards" {
   let rows : Array[VisibleRow] = [
     {
       item: { kind: User, content: "question", ts: None, sequence: Some(1) },
@@ -438,11 +443,15 @@ test "an ambiguous commit-first prefix keeps live reasoning visible" {
     submission_generation=1,
     items=rows,
     streaming_response=None,
-    streaming_reasoning="complete",
     streaming_identity="r7",
   )
   let children = (
-    { input, on_open: _ => @cmd.none, on_jump: _ => @cmd.none } :
+    {
+      input,
+      live_reasoning: Some("complete"),
+      on_open: _ => @cmd.none,
+      on_jump: _ => @cmd.none,
+    } :
     TranscriptRenderer).stream_children()
   let keys = children.to_array().map(pair => pair.0)
   assert_eq(keys, [
@@ -487,11 +496,11 @@ test "live reasoning is plain text and keeps the durable activity key" {
     submission_generation=1,
     items=[user],
     streaming_response=None,
-    streaming_reasoning="*unfinished*\nnext",
     streaming_identity="r7",
   )
   let live_renderer : TranscriptRenderer = {
     input: live_input,
+    live_reasoning: Some("*unfinished*\nnext"),
     on_open: _ => @cmd.none,
     on_jump: _ => @cmd.none,
   }
@@ -503,17 +512,6 @@ test "live reasoning is plain text and keeps the durable activity key" {
   assert_true(live_markup.contains("*unfinished*\nnext"))
   assert_false(live_markup.contains("<em>unfinished</em>"))
   assert_true(live_markup.contains("<details class=\"activity\" open"))
-
-  let complete_renderer = {
-    ..live_renderer,
-    input: { ..live_input, reasoning_complete: true },
-  }
-  let complete_markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(
-      complete_renderer.stream_children()["activity\u{0}after\u{0}s1\u{0}o0"],
-    )
-  })
-  assert_true(complete_markup.contains("<em>unfinished</em>"))
 
   let settled = {
     ..live_input,
@@ -538,9 +536,12 @@ test "live reasoning is plain text and keeps the durable activity key" {
         identity: "s2\u{0}o1",
       },
     ],
-    streaming_reasoning: None,
   }
-  let settled_renderer = { ..live_renderer, input: settled }
+  let settled_renderer = {
+    ..live_renderer,
+    input: settled,
+    live_reasoning: None,
+  }
   let settled_children = settled_renderer.stream_children()
   assert_true(
     settled_children.get("activity\u{0}after\u{0}s1\u{0}o0") is Some(_),

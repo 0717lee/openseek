@@ -204,7 +204,6 @@ fn activity_view(
   items : Array[@transcript.TranscriptItem],
   on_open : (String) -> @cmd.Cmd,
   live_reasoning? : String,
-  reasoning_complete? : Bool = false,
   step_label? : String = "",
 ) -> @html.Html {
   if step_label.is_empty() &&
@@ -247,30 +246,20 @@ fn activity_view(
     }
   }
   if live_reasoning is Some(content) {
-    if reasoning_complete {
-      // The semantic completion supplies one whole document, so Markdown is
-      // safe and cheap now. The durable item will take over the same card.
-      log.push(
-        @html.div(
-          class="msg-content markdown activity-thinking",
-          @markdown.markdown_nodes(content, open_file=on_open),
-        ),
-      )
-    } else {
-      // Do not parse an unfinished Markdown document on every provider token.
-      // Newlines are preserved by CSS while fragments are still arriving.
-      log.push(
-        @html.div(
-          class="msg-content activity-thinking activity-thinking-live",
-          @html.text(content),
-        ),
-      )
-    }
+    // Do not parse an unfinished Markdown document on every provider token.
+    // Newlines are preserved by CSS while fragments are still arriving. The
+    // semantic finish deletes this preview; only the durable row uses Markdown.
+    log.push(
+      @html.div(
+        class="msg-content activity-thinking activity-thinking-live",
+        @html.text(content),
+      ),
+    )
   }
   let failed = count_failed(items)
   let summary_label = tool_activity_summary(items)
   let activity_label = if summary_label.is_empty() {
-    if live_reasoning is Some(_) && !reasoning_complete {
+    if live_reasoning is Some(_) {
       "Thinking…"
     } else {
       "Thought"
@@ -919,6 +908,7 @@ fn streaming_response_view(
 ///|
 fn transcript_view(
   input : Input,
+  live_reasoning? : String,
   pinned~ : Bool,
   overview~ : @transcript_overview.State,
   overview_emit~ : @cmd.Emit[@transcript_overview.Msg],
@@ -926,7 +916,7 @@ fn transcript_view(
   on_jump : (@mention_context.Target) -> @cmd.Cmd,
   on_jump_latest~ : @cmd.Cmd,
 ) -> @html.Html {
-  let renderer : TranscriptRenderer = { input, on_open, on_jump }
+  let renderer : TranscriptRenderer = { input, live_reasoning, on_open, on_jump }
   let children = renderer.section_children(
     pinned, overview, overview_emit, on_jump_latest,
   )
