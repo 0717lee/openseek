@@ -56,6 +56,7 @@ pub fn Msg::server_request(Json, String, Json, Int) -> Self
 pub fn Msg::start_draft(String, String) -> Self
 pub fn Msg::status_changed(Json) -> Self
 pub fn Msg::unarchive_thread(String) -> Self
+pub fn Msg::worktree_changed(String, String, String, String, Bool) -> Self
 
 pub(all) struct PageActions {
   toggle_sidebar : @cmd.Cmd
@@ -98,7 +99,7 @@ pub fn State::pending_auth_url(Self) -> String?
 pub fn State::project_activation(Self, SidebarContext, String) -> String?
 pub fn State::project_conversations(Self, SidebarContext, String) -> Array[CodexProjectRow]
 pub fn State::project_draft(Self, SidebarContext, String) -> @conversation.Input?
-pub fn State::reasoning_effort_chip(Self) -> @composer.ReasoningSelect?
+pub fn State::reasoning_effort_chip(Self, Bool) -> @composer.ReasoningSelect?
 pub fn State::refresh(Self, @cmd.Emit[Msg], @interop.ChannelId) -> (@cmd.Cmd, Self)
 pub fn State::sign_in_required(Self) -> Bool
 pub fn State::signed_in(Self) -> Bool

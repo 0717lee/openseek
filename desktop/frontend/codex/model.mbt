@@ -549,9 +549,10 @@ struct State {
   archived_threads : Array[CodexThreadRow]
   // Live and archived pagination are independent requests. Each complete
   // paginated walk owns a UUID, so a slower older walk cannot overwrite a
-  // newer catalog after reconnect, archive, or device focus changes.
-  live_catalog_request_id : String
-  archived_catalog_request_id : String
+  // newer catalog after reconnect, archive, or device focus changes. `None`
+  // until the first refresh asks.
+  live_catalog_request_id : String?
+  archived_catalog_request_id : String?
   selection : CodexSelection
   // The last sidebar selection awaiting a history snapshot. A reply carries
   // the same id, so an older request can never replace a newer selection.
@@ -607,8 +608,8 @@ pub fn State::State(loading? : Bool = false) -> State {
     permission_picker: CodexPermissionClosed(@protocol.AutoReview),
     threads: [],
     archived_threads: [],
-    live_catalog_request_id: @uuid.mint(),
-    archived_catalog_request_id: @uuid.mint(),
+    live_catalog_request_id: None,
+    archived_catalog_request_id: None,
     selection: CodexNoTask,
     requested_thread: None,
     git_status: None,
@@ -880,9 +881,9 @@ fn State::accepts_thread_reply(self : State, requested_thread : String) -> Bool 
 fn State::accepts_reply(self : State, kind : CodexReplyKind) -> Bool {
   match kind {
     CodexThreadsReply(false, request_id) =>
-      request_id == self.live_catalog_request_id
+      self.live_catalog_request_id == Some(request_id)
     CodexThreadsReply(true, request_id) =>
-      request_id == self.archived_catalog_request_id
+      self.archived_catalog_request_id == Some(request_id)
     CodexThreadReply(thread_id) => self.accepts_thread_reply(thread_id)
     CodexResumeReply(thread_id) =>
       self

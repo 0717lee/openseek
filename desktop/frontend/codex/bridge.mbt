@@ -104,23 +104,24 @@ fn State::refresh_catalog(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,
 ) -> (@cmd.Cmd, State) {
-  let next = {
-    ..self,
-    live_catalog_request_id: @uuid.mint(),
-    archived_catalog_request_id: @uuid.mint(),
-  }
+  let live_catalog_request_id = @uuid.mint()
+  let archived_catalog_request_id = @uuid.mint()
   (
     @cmd.batch([
       CodexThreadCatalogRequest::{
         archived: false,
-        request_id: next.live_catalog_request_id,
+        request_id: live_catalog_request_id,
       }.run(dispatch, channel),
       CodexThreadCatalogRequest::{
         archived: true,
-        request_id: next.archived_catalog_request_id,
+        request_id: archived_catalog_request_id,
       }.run(dispatch, channel),
     ]),
-    next,
+    {
+      ..self,
+      live_catalog_request_id: Some(live_catalog_request_id),
+      archived_catalog_request_id: Some(archived_catalog_request_id),
+    },
   )
 }
 

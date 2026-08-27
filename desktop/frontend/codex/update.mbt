@@ -1296,6 +1296,9 @@ test "Codex update handlers are pure and idempotent" {
     }),
     draft: "inspect this",
     login_id: Some("login-1"),
+    // Catalog replies below name the reads in flight.
+    live_catalog_request_id: Some("live-catalog-current"),
+    archived_catalog_request_id: Some("archived-catalog-current"),
     pending_requests: [
       {
         request_id: Json("request-1"),
@@ -1355,12 +1358,14 @@ test "Codex update handlers are pure and idempotent" {
       "account": Json::null(),
     }),
     Reply(kind=CodexModelsReply, value={ "data": [] }),
-    Reply(kind=CodexThreadsReply(false, state.live_catalog_request_id), value={
-      "data": [],
-    }),
-    Reply(kind=CodexThreadsReply(true, state.archived_catalog_request_id), value={
-      "data": [],
-    }),
+    Reply(
+      kind=CodexThreadsReply(false, state.live_catalog_request_id.unwrap()),
+      value={ "data": [] },
+    ),
+    Reply(
+      kind=CodexThreadsReply(true, state.archived_catalog_request_id.unwrap()),
+      value={ "data": [] },
+    ),
     Reply(kind=CodexThreadReply("thread-1"), value={
       "thread": { "id": "thread-1", "turns": [] },
     }),
@@ -2137,9 +2142,10 @@ test "newer Codex catalog refresh rejects an older pagination result" {
   )
   let (_, stale) = update(
     dispatch,
-    Reply(kind=CodexThreadsReply(false, first.live_catalog_request_id), value={
-      "data": [{ "id": "stale", "preview": "Stale" }],
-    }),
+    Reply(
+      kind=CodexThreadsReply(false, first.live_catalog_request_id.unwrap()),
+      value={ "data": [{ "id": "stale", "preview": "Stale" }] },
+    ),
     second,
     @interop.ChannelId::Local,
     _ => @cmd.none,
@@ -2147,9 +2153,10 @@ test "newer Codex catalog refresh rejects an older pagination result" {
   assert_true(stale == second)
   let (_, current) = update(
     dispatch,
-    Reply(kind=CodexThreadsReply(false, second.live_catalog_request_id), value={
-      "data": [{ "id": "current", "preview": "Current" }],
-    }),
+    Reply(
+      kind=CodexThreadsReply(false, second.live_catalog_request_id.unwrap()),
+      value={ "data": [{ "id": "current", "preview": "Current" }] },
+    ),
     stale,
     @interop.ChannelId::Local,
     _ => @cmd.none,
@@ -2160,15 +2167,20 @@ test "newer Codex catalog refresh rejects an older pagination result" {
 ///|
 test "archived Codex catalog removes a selected task in either reply order" {
   let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
-  let selected = State::from_thread_snapshot({
-    "thread": { "id": "thread-a", "cwd": "/work/a", "turns": [] },
-  }).begin_foreground(CodexThreadReply("thread-a"))
+  // Both catalog reads are in flight when the replies arrive.
+  let selected = {
+    ..State::from_thread_snapshot({
+      "thread": { "id": "thread-a", "cwd": "/work/a", "turns": [] },
+    }).begin_foreground(CodexThreadReply("thread-a")),
+    live_catalog_request_id: Some("live-catalog-current"),
+    archived_catalog_request_id: Some("archived-catalog-current"),
+  }
   let live = Reply(
-    kind=CodexThreadsReply(false, selected.live_catalog_request_id),
+    kind=CodexThreadsReply(false, selected.live_catalog_request_id.unwrap()),
     value={ "data": [] },
   )
   let archived = Reply(
-    kind=CodexThreadsReply(true, selected.archived_catalog_request_id),
+    kind=CodexThreadsReply(true, selected.archived_catalog_request_id.unwrap()),
     value={
       "data": [{ "id": "thread-a", "cwd": "/work/a", "preview": "Archived A" }],
     },
