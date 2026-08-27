@@ -140,9 +140,9 @@ async fn main {
     app
   } else {
     app.menu(
-      @proton.MenuBar::new(menus=[
+      MenuBar(menus=[
         @proton.Menu::role(Edit),
-        @proton.Menu::new("Developer", items=[
+        Menu("Developer", items=[
           @proton.MenuItem::command(
             @commands.app_open_devtools.name(),
             "Open Developer Tools",
@@ -153,12 +153,13 @@ async fn main {
     )
   }
   let app = app
-    // Both command extensions are deliberately exposed to the configured
-    // entry page; registration alone does not grant renderer access.
-    .expose(@extension.openseek_extension(state, bridge, views))
+    // Both command extensions are deliberately granted to the configured
+    // entry page; each capability keeps backend registration and renderer
+    // access together.
+    .capability(@extension.openseek_capability(state, bridge, views))
     // System notifications are an ordinary generated extension now: the
     // frontend posts them and receives `notification.click` with the run id.
-    .expose(@notification.extension())
+    .capability(@notification.capability())
     // The connect request proves the page can issue commands; this paired
     // lifecycle supplies the window-owned event destination that remains
     // valid after that request returns — and the window handle the browser

@@ -980,7 +980,7 @@ async test "proton CLI version follows the moon.mod library pin" {
     ws.proton_cli_package(),
     "moonbit-community/proton_cli@\{ws.proton_version()}",
   )
-  assert_true(ws.proton_version().has_prefix("0.1."))
+  assert_true(ws.proton_version().has_prefix("0.2."))
 }
 
 ///|

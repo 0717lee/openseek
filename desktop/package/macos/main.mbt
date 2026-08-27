@@ -122,8 +122,8 @@ fn PackageOptions::parse(argv? : ArrayView[String]) -> PackageOptions raise {
 
 ///|
 /// Build the exact Proton command arguments for this package selection. The
-/// release flag must reach Proton even with `--no-build`, because Proton uses
-/// it to select the native host from its debug or release target directory.
+/// release flag must reach Proton because Proton 0.2 builds the native host
+/// itself and then packages that mode's executable.
 fn PackageOptions::proton_args(
   self : PackageOptions,
   workspace : @packaging.Workspace,
@@ -134,18 +134,17 @@ fn PackageOptions::proton_args(
     "package",
     "--config",
     "proton.project.json",
-    "--no-build",
-    "--target",
+    "--format",
     "app",
   ]
   if self.release {
     args.push("--release")
   }
   if self.artifacts.zip {
-    args.append(["--target", "zip"])
+    args.append(["--format", "zip"])
   }
   if self.artifacts.dmg {
-    args.append(["--target", "dmg"])
+    args.append(["--format", "dmg"])
   }
   if self.sign.identity is Some(_) {
     args.push("--sign")
@@ -158,19 +157,14 @@ fn PackageOptions::proton_args(
 
 ///|
 /// Build the application-specific inputs Proton cannot infer from
-/// `proton.project.json`. The native host builds into the workspace's
-/// default `_build` tree in the selected mode, which is where
-/// `package --no-build` looks the executable up since lepus #116 removed
-/// the identifier-scoped package target directories.
+/// `proton.project.json`. Proton builds the native host during `package`; this
+/// phase prepares only OpenSeek's generated frontend, embedded tools, and
+/// engine, plus the shared CEF installation that both builds require.
 async fn @packaging.Workspace::build_package_inputs(
   self : @packaging.Workspace,
   release~ : Bool,
 ) -> (@xterm_assets.Assets, @ripgrep_assets.Assets) {
-  let build_env = {
-    "MACOSX_DEPLOYMENT_TARGET": MinMacOSVersion,
-    "PROTON_PACKAGE_RPATH": "@executable_path/../Resources/proton/lib",
-  }
-  @packaging.ensure_cef_runtime(self, extra_env={
+  @packaging.run_proton_cli(self, ["-C", self.repo(), "cef", "setup"], extra_env={
     "MACOSX_DEPLOYMENT_TARGET": MinMacOSVersion,
   })
   @packaging.build_frontend_bundle(self, release~)
@@ -182,7 +176,6 @@ async fn @packaging.Workspace::build_package_inputs(
     self,
     @ripgrep_assets.macos_arm64_target(),
   )
-  @packaging.build_native_host(self, release~, extra_env=build_env)
   @packaging.build_engine(self, release~, extra_env={
     "MACOSX_DEPLOYMENT_TARGET": MinMacOSVersion,
   })
@@ -270,9 +263,9 @@ async fn @packaging.Workspace::package_with_proton(
   let args = options.proton_args(self)
   let package_env : Map[String, String] = {
     "PROTON_MACOS_ENTITLEMENTS": self.at(SigningEntitlementsPath),
-    // The OpenSeek moon.work root is above this embedded Proton checkout, so
-    // package cannot discover the runtime manifest by walking the workspace.
-    "PROTON_NATIVE_DIST": @packaging.proton_runtime_dist(self).0,
+    // Proton builds the host during packaging. Keep its deployment target
+    // aligned with the engine and the bundle metadata.
+    "MACOSX_DEPLOYMENT_TARGET": MinMacOSVersion,
   }
   match options.sign.identity {
     Some(identity) => package_env["PROTON_MACOS_SIGNING_IDENTITY"] = identity
@@ -335,6 +328,8 @@ async test "macOS packaging passes the selected mode to Proton" {
   let workspace = @packaging.locate_workspace()
   let debug_args = PackageOptions::parse(argv=[]).proton_args(workspace)
   assert_false(debug_args.contains("--release"))
+  assert_false(debug_args.contains("--no-build"))
+  assert_true(debug_args.contains("--format"))
   let release_args = PackageOptions::parse(argv=["--release"]).proton_args(
     workspace,
   )
@@ -342,11 +337,15 @@ async test "macOS packaging passes the selected mode to Proton" {
 }
 
 ///|
-test "macOS packaging combines optional archive targets" {
+async test "macOS packaging combines optional archive targets" {
   let options = PackageOptions::parse(argv=[
     "--target", "app", "--target", "zip", "--target", "dmg",
   ])
   @debug.assert_eq(options.artifacts, { dmg: true, zip: true })
+  let args = options.proton_args(@packaging.locate_workspace())
+  assert_false(args.contains("--target"))
+  assert_true(args.contains("zip"))
+  assert_true(args.contains("dmg"))
 }
 
 ///|
