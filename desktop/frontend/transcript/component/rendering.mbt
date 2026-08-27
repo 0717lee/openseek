@@ -112,6 +112,15 @@ priv struct TranscriptRenderer {
 }
 
 ///|
+/// Scope component-owned disclosure state to the stream as well as the row.
+fn TranscriptRenderer::activity_state_key(
+  self : TranscriptRenderer,
+  render_key : String,
+) -> String {
+  TranscriptSectionKey::stream(self.input).wire() + "\u{0}" + render_key
+}
+
+///|
 /// Insert one non-activity transcript row. Activity rows are handled by the
 /// step-aware folding pass below; keeping this path singular ensures user turn
 /// anchors and assistant/error rendering cannot drift between durable steps
@@ -154,6 +163,8 @@ fn TranscriptRenderer::insert_row(
 /// order determines visual order; the strings only determine node identity.
 fn TranscriptRenderer::stream_children(
   self : TranscriptRenderer,
+  expanded_activity_keys? : @vector.Vector[String],
+  on_toggle_activity? : (String) -> @cmd.Cmd,
 ) -> Map[String, @html.Html] {
   let visible = self.input.items
   let items : Map[String, @html.Html] = Map([])
@@ -209,9 +220,19 @@ fn TranscriptRenderer::stream_children(
           index = index + 1
         }
         if !activity.is_empty() {
+          let render_key = TranscriptRenderKey::activity_after(left_boundary).wire()
+          let state_key = self.activity_state_key(render_key)
           items.set(
-            TranscriptRenderKey::activity_after(left_boundary).wire(),
-            activity_view(activity, self.on_open, step_label="#\{step_number}"),
+            render_key,
+            activity_view(
+              activity,
+              self.on_open,
+              step_label="#\{step_number}",
+              expanded?=expanded_activity_keys.map(keys => {
+                keys.contains(state_key)
+              }),
+              on_toggle?=on_toggle_activity.map(toggle => toggle(state_key)),
+            ),
           )
         }
         // Assistant narration and final answers remain visible. The activity
@@ -255,9 +276,16 @@ fn TranscriptRenderer::stream_children(
         run.push(visible[index].item)
         index = index + 1
       }
+      let render_key = TranscriptRenderKey::activity_after(left_boundary).wire()
+      let state_key = self.activity_state_key(render_key)
       items.set(
-        TranscriptRenderKey::activity_after(left_boundary).wire(),
-        activity_view(run, self.on_open),
+        render_key,
+        activity_view(
+          run,
+          self.on_open,
+          expanded?=expanded_activity_keys.map(keys => keys.contains(state_key)),
+          on_toggle?=on_toggle_activity.map(toggle => toggle(state_key)),
+        ),
       )
       left_boundary = Some(visible[index - 1].identity)
     }
@@ -287,6 +315,8 @@ fn TranscriptRenderer::section_children(
   pinned : Bool,
   overview : @transcript_overview.State,
   overview_emit : @cmd.Emit[@transcript_overview.Msg],
+  expanded_activity_keys : @vector.Vector[String],
+  on_toggle_activity : (String) -> @cmd.Cmd,
   on_jump_latest : @cmd.Cmd,
 ) -> Map[String, @html.Html] {
   let visible_items = self.input.items.map(row => row.item)
@@ -310,7 +340,11 @@ fn TranscriptRenderer::section_children(
   )
   children.set(
     TranscriptSectionKey::stream(self.input).wire(),
-    @html.div(id="stream", class="stream", self.stream_children()),
+    @html.div(
+      id="stream",
+      class="stream",
+      self.stream_children(expanded_activity_keys~, on_toggle_activity~),
+    ),
   )
   // Rabbita owns this stable node but deliberately owns no descendants. The
   // live-preview package writes a small activity card beneath it, so frequent

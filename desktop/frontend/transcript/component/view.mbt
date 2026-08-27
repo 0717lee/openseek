@@ -193,9 +193,11 @@ fn failed_badge(failed : Int) -> @html.Html {
 /// reasoning as muted prose — never a labelled "Thinking" row of its own —
 /// each burst of tool calls as a one-line sublist. A stretch that only
 /// thought folds behind a plain "Thought" line. Failures never force the fold
-/// open; they badge the summary instead. The open state is the browser's
-/// (`<details>`), so a reader's toggle survives re-renders and the run
-/// growing while live.
+/// open; they badge the summary instead. The component owns the outer
+/// disclosure state and omits its body while closed. A long session can hide
+/// millions of characters behind these rows; leaving that DOM mounted makes
+/// every pane-width change restyle it even though native `<details>` does not
+/// paint it. Stable activity keys preserve the open body while the run grows.
 ///
 /// Assistant prose is never in here: every assistant message is its own
 /// visible bubble, so a turn reads as narration, work, narration, work,
@@ -205,9 +207,12 @@ fn activity_view(
   on_open : (String) -> @cmd.Cmd,
   live_reasoning? : String,
   step_label? : String = "",
+  expanded? : Bool,
+  on_toggle? : @cmd.Cmd,
 ) -> @html.Html {
   if step_label.is_empty() &&
     live_reasoning is None &&
+    expanded is None &&
     flatten_tool_activity(items) {
     return @html.div(class="activity-row", [tool_line_view(items)])
   }
@@ -226,7 +231,7 @@ fn activity_view(
       }
       if inline_tool is Some(tool) && tools.length() == 1 {
         log.push(inline_tool_call_view(tool))
-      } else if !step_label.is_empty() {
+      } else if !step_label.is_empty() || expanded is Some(_) {
         // The outer disclosure already groups this model step. Show each call
         // directly rather than adding a redundant second burst disclosure.
         log.append(tools.map(tool_call_view))
@@ -304,11 +309,26 @@ fn activity_view(
   // filling up without unfolding anything. A run that touched no plan adds
   // nothing.
   summary.push(@plan.fold_progress(items))
+  let controlled = expanded is Some(_)
+  let open = live_reasoning is Some(_) || expanded.unwrap_or(false)
+  let summary_attrs = match (controlled, on_toggle) {
+    (true, Some(toggle)) =>
+      @html.Attrs::build()
+      .class("activity-summary")
+      .on_click(event => {
+        event.prevent_default()
+        toggle
+      })
+    _ => @html.Attrs::build().class("activity-summary")
+  }
+  let detail_children : Array[@html.Html] = [
+    @html.summary(attrs=summary_attrs, summary),
+  ]
+  if !controlled || open {
+    detail_children.push(@html.div(class="activity-body", log))
+  }
   @html.div(class="activity-row", [
-    @html.details(class="activity", open=live_reasoning is Some(_), [
-      @html.summary(class="activity-summary", summary),
-      @html.div(class="activity-body", log),
-    ]),
+    @html.details(class="activity", open~, detail_children),
   ])
 }
 
@@ -911,13 +931,16 @@ fn transcript_view(
   pinned~ : Bool,
   overview~ : @transcript_overview.State,
   overview_emit~ : @cmd.Emit[@transcript_overview.Msg],
+  expanded_activity_keys? : @vector.Vector[String] = @vector.new(),
+  on_toggle_activity? : (String) -> @cmd.Cmd = _ => @cmd.none,
   on_open : (String) -> @cmd.Cmd,
   on_jump : (@mention_context.Target) -> @cmd.Cmd,
   on_jump_latest~ : @cmd.Cmd,
 ) -> @html.Html {
   let renderer : TranscriptRenderer = { input, on_open, on_jump }
   let children = renderer.section_children(
-    pinned, overview, overview_emit, on_jump_latest,
+    pinned, overview, overview_emit, expanded_activity_keys, on_toggle_activity,
+    on_jump_latest,
   )
   // These identity attributes make conversation and root changes observable
   // even when the rendered children stay identical. The component subscription
