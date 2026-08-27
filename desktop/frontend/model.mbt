@@ -1154,6 +1154,14 @@ priv struct DeviceState {
   projects_request_generation : Int
   worktrees_request_generation : Int
   workspace_settings_request_generation : Int
+  // The connection each cached listing came from. Placement is only legible
+  // from the pair: this connection's live list beside the last connection's
+  // archived one reads a record archived while the page was away as simply
+  // gone, and another project's same-id row then looks like its one true
+  // placement. Both listings are refreshed together at every BridgeReady, so
+  // the wait is the round trip of whichever reply is slower.
+  sessions_connection : Int
+  archived_connection : Int
   // Durable sessions known to the engine's store, newest first, refreshed
   // when the bridge connects and when a run reaches the store. A new
   // conversation appears here once its first turn has been persisted.
@@ -1201,6 +1209,9 @@ fn empty_device_state(channel : @interop.ChannelId) -> DeviceState {
     projects_request_generation: 0,
     worktrees_request_generation: 0,
     workspace_settings_request_generation: 0,
+    // No connection has answered yet, and the first one is generation 1.
+    sessions_connection: 0,
+    archived_connection: 0,
     sessions: [],
     archived: [],
     archive_overrides: [],

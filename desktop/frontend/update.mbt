@@ -123,6 +123,55 @@ fn listed_stores(
 }
 
 ///|
+/// Reconcile every conversation's store against one device's two listings,
+/// and with it the store the sidebar follows for the active id.
+///
+/// A commit or Started broadcast can materialize a conversation before
+/// `session.list` says which durable store owns it, and that provisional
+/// placement is what every later request names — so it has to be reconciled
+/// before the next send. But it may only be reconciled from evidence that is
+/// whole: a record's absence from the live list means it was archived where
+/// it already was, which only the archived list can confirm. Callers therefore
+/// run this once both listings are the current connection's, and leave every
+/// binding alone until then.
+fn reconcile_placements(
+  model : Model,
+  conversations : Array[Conversation],
+  channel : @interop.ChannelId,
+  dev : DeviceState,
+  live : Array[@transcript.SessionListItem],
+  archived : Array[@transcript.SessionListItem],
+) -> (Array[Conversation], @common.Uri?) {
+  let stores = listed_stores(live, archived)
+  let reconciled = conversations.map(conv => {
+    if conv.device == channel {
+      {
+        ..conv,
+        workspace: dev.conversation_workspace(
+          listed_project(stores, conv),
+          conv.session_id,
+          conv.workspace,
+        ),
+      }
+    } else {
+      conv
+    }
+  })
+  // The active conversation's own placement is the store the sidebar should
+  // follow. Only when the page holds no conversation for the active id does
+  // the listing have to answer, under the same rule.
+  let mut active_project = dev.active_project
+  if channel == model.focused {
+    if model.find_conversation(channel, model.active_session) is Some(active) {
+      active_project = Some(listed_project(stores, active))
+    } else if stores.get(model.active_session) is Some(OneStore(store)) {
+      active_project = Some(store)
+    }
+  }
+  (reconciled, active_project)
+}
+
+///|
 /// Where `session.list` says this conversation's record lives.
 ///
 /// The listings are the authority on placement only while they are
@@ -5368,41 +5417,32 @@ fn update_device_msg(
           }
         }
       }
-      // A commit or Started broadcast can materialize a conversation before
-      // session.list tells this page which durable store owns it. Reconcile
-      // that provisional placement from the list before any later send: the
-      // store this page believes in is the one every request names, so a
-      // provisional Scratch placement would send the next prompt to a Scratch
-      // record instead of the project one the conversation came from.
-      let stores = listed_stores(items, dev.archived)
-      let conversations = model.conversations.map(conv => {
-        if conv.device == channel {
-          {
-            ..conv,
-            workspace: dev.conversation_workspace(
-              listed_project(stores, conv),
-              conv.session_id,
-              conv.workspace,
-            ),
-          }
-        } else {
-          conv
-        }
-      })
-      // The active conversation's own placement is the store the sidebar
-      // should follow. Only when the page holds no conversation for the
-      // active id does the listing have to answer, under the same rule.
-      let mut active_project = dev.active_project
-      if channel == model.focused {
-        if model.find_conversation(channel, model.active_session)
-          is Some(active) {
-          active_project = Some(listed_project(stores, active))
-        } else if stores.get(model.active_session) is Some(OneStore(store)) {
-          active_project = Some(store)
-        }
+      // Reconcile provisional placements from the listings — but only once
+      // this connection's archived reply has landed too. Both are requested
+      // together at BridgeReady and race each other; acting on the live one
+      // alone is what rebinds a conversation archived while the page was away
+      // onto another project's same-id record. Whichever reply is second runs
+      // this.
+      let (conversations, active_project) = if dev.archived_connection ==
+        connection_generation {
+        reconcile_placements(
+          model,
+          model.conversations,
+          channel,
+          dev,
+          items,
+          dev.archived,
+        )
+      } else {
+        (model.conversations, dev.active_project)
       }
       let mut next = {
-        ..model.replace_device({ ..dev, sessions: items, active_project }),
+        ..model.replace_device({
+          ..dev,
+          sessions: items,
+          sessions_connection: connection_generation,
+          active_project,
+        }),
         conversations,
       }
       let commands : Array[@cmd.Cmd] = []
@@ -5858,10 +5898,27 @@ fn update_device_msg(
       let sessions = ndev.sessions.filter(item => {
         !archived_now(item.id, item.workspace)
       })
+      // The live reply may have arrived while this one was still in flight,
+      // in which case it left every placement alone. Both listings are this
+      // connection's now, so the reconciliation it deferred runs here.
+      let (conversations, active_project) = if ndev.sessions_connection ==
+        connection_generation {
+        reconcile_placements(
+          next, conversations, channel, ndev, sessions, items,
+        )
+      } else {
+        (conversations, ndev.active_project)
+      }
       (
         @cmd.none,
         {
-          ..next.replace_device({ ..ndev, archived: items, sessions }),
+          ..next.replace_device({
+            ..ndev,
+            archived: items,
+            archived_connection: connection_generation,
+            sessions,
+            active_project,
+          }),
           conversations,
         },
       )
@@ -7578,8 +7635,9 @@ fn Model::with_listed(self : Model, ids : Array[String]) -> Model raise {
 fn sessions_loaded(
   items : Array[@transcript.SessionListItem],
   request_generation? : Int = 0,
+  connection_generation? : Int = 0,
 ) -> Msg {
-  on_home(SessionsLoaded(items, connection_generation=0, request_generation~))
+  on_home(SessionsLoaded(items, connection_generation~, request_generation~))
 }
 
 ///|
@@ -7675,11 +7733,12 @@ test "the narrow drawer closes when navigation lands elsewhere" {
 fn archived_loaded(
   items : Array[@transcript.SessionListItem],
   request_generation? : Int = 0,
+  connection_generation? : Int = 0,
 ) -> Msg {
   on_home(
     ArchivedLoaded(
       items,
-      connection_generation=0,
+      connection_generation~,
       request_generation~,
       fresh_session="desktop-archive-replacement",
     ),
@@ -9820,6 +9879,112 @@ test "an archived twin keeps its conversation from adopting the other store" {
   // conversation stays on its own — where the archived reply can still
   // recognize it — instead of writing through the other project's record.
   assert_eq(conv.workspace, Project(root=mine))
+}
+
+///|
+test "a reconnect's live list alone cannot rebind a conversation" {
+  let dispatch = test_dispatch()
+  let mine = @interop.ChannelId::Local.test_project()
+  let other = @interop.ChannelId::Local.test_resource("/work/alpha")
+  // Mid-reconnect: BridgeReady issued both listing requests, and the live
+  // reply wins the race. The cached archived list is the one from before the
+  // drop, which cannot know about the record archived while the page was away.
+  let model = test_model()
+    .replace_conversation({
+      ..test_conversation(),
+      session_id: "desktop-shared",
+      workspace: Project(root=mine),
+      messages: [
+        { kind: User, content: "my transcript", ts: None, sequence: None },
+      ],
+    })
+    .with_dev(dev => {
+      ..dev,
+      projects: [mine, other],
+      connection_generation: 1,
+      sessions_connection: 0,
+      archived_connection: 0,
+      archived: [],
+    })
+  let (_, listed) = update(
+    dispatch,
+    sessions_loaded(
+      [
+        {
+          id: "desktop-shared",
+          title: Some("their copy"),
+          workspace: other,
+          workspace_name: "alpha",
+          updated_at_ms: None,
+        },
+      ],
+      connection_generation=1,
+    ),
+    model,
+  )
+  guard listed.find_conversation(@interop.ChannelId::Local, "desktop-shared")
+    is Some(conv) else {
+    fail("the open conversation disappeared")
+  }
+  // Half the evidence is no evidence: the other project's row is the only one
+  // in the live list, but this connection has not said yet whether this
+  // conversation's own record is archived. Rebinding here would leave the
+  // open transcript writable through a store that never held it.
+  assert_eq(conv.workspace, Project(root=mine))
+}
+
+///|
+test "the archived reply performs the rebinding the live one deferred" {
+  let dispatch = test_dispatch()
+  let mine = @interop.ChannelId::Local.test_project()
+  let project = @interop.ChannelId::Local.test_resource("/work/alpha")
+  // A commit-first conversation: it exists on the page with a provisional
+  // placement, and only the listings can say which store owns its record.
+  let model = test_model()
+    .replace_conversation({
+      ..test_conversation(),
+      session_id: "desktop-commit-first",
+      workspace: Project(root=mine),
+    })
+    .with_dev(dev => {
+      ..dev,
+      projects: [mine, project],
+      connection_generation: 1,
+      sessions_connection: 0,
+      archived_connection: 0,
+      archived: [],
+    })
+  let (_, listed) = update(
+    dispatch,
+    sessions_loaded(
+      [
+        {
+          id: "desktop-commit-first",
+          title: Some("the record"),
+          workspace: project,
+          workspace_name: "alpha",
+          updated_at_ms: None,
+        },
+      ],
+      connection_generation=1,
+    ),
+    model,
+  )
+  let (_, settled) = update(
+    dispatch,
+    archived_loaded([], connection_generation=1),
+    listed,
+  )
+  guard settled.find_conversation(
+      @interop.ChannelId::Local,
+      "desktop-commit-first",
+    )
+    is Some(conv) else {
+    fail("the open conversation disappeared")
+  }
+  // Deferring is not dropping: with both listings in from this connection,
+  // the id appears in exactly one store and the placement follows it.
+  assert_eq(conv.workspace, Project(root=project))
 }
 
 ///|
