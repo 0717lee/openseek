@@ -1,4 +1,4 @@
-name: CI
+name: Test
 
 on:
   push:
@@ -12,37 +12,25 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  check:
-    name: check (${{ matrix.moonbit-channel }}, ${{ matrix.target }})
+  test:
+    name: test (stable)
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    strategy:
-      # Check stable targets independently (fail-fast: false). Proton 0.2.2's
-      # workspace prebuild needs the Linux CEF installation even for JS tests,
-      # so the runtime-prepared native row owns both test suites below.
-      fail-fast: false
-      matrix:
-        moonbit-channel: [stable]
-        target: [native, js]
-        include:
-          - moonbit-channel: stable
-            # Pinned, not `latest`: stable 0.10.11 (moon 0.1.20260827) crashes
-            # the native backend on moonbit-community/graphviz@0.1.3
-            # ("Machine_of_clam_lower.lower_break: break value is required for
-            # scalar loop"), which the editor pulls in through kokic/uml, so
-            # every `moon test --target native` dies before running. Its
-            # formatter also changed (trailing commas in struct literals), so
-            # unpinning means reformatting the workspace in the same change.
-            moonbit-version: "0.10.10+f8a486b6f"
-            deny-warn: "--deny-warn"
+    env:
+      # Pinned, not `latest`: stable 0.10.11 (moon 0.1.20260827) crashes the
+      # native backend on moonbit-community/graphviz@0.1.3
+      # ("Machine_of_clam_lower.lower_break: break value is required for scalar
+      # loop"), which the editor pulls in through kokic/uml. Its formatter also
+      # changed, so unpinning requires a workspace-wide formatting update.
+      MOONBIT_VERSION: "0.10.10+f8a486b6f"
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Set up MoonBit (${{ matrix.moonbit-channel }})
+      - name: Set up MoonBit (stable)
         run: |
-          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s -- "${{ matrix.moonbit-version }}"
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s -- "$MOONBIT_VERSION"
           echo "$HOME/.moon/bin" >> $GITHUB_PATH
 
       - name: Show MoonBit version
@@ -65,7 +53,6 @@ jobs:
       # Pull requests may restore the default branch's cache, but their own
       # merge-ref caches are private to that PR and cannot warm other branches.
       - name: Restore Proton installation
-        if: matrix.target == 'native'
         id: proton-cache
         uses: actions/cache/restore@v4
         with:
@@ -75,20 +62,18 @@ jobs:
           path: |
             ~/.proton/store
             ~/.proton/helpers
-          key: proton-${{ runner.os }}-${{ runner.arch }}-${{ steps.proton.outputs.version }}-moon-${{ matrix.moonbit-version }}
+          key: proton-${{ runner.os }}-${{ runner.arch }}-${{ steps.proton.outputs.version }}-moon-${{ env.MOONBIT_VERSION }}
 
       - name: Check formatting
-        # Run the repository's one canonical formatter once on stable/native.
-        # A second toolchain channel could require a different committed form.
-        if: matrix.moonbit-channel == 'stable' && matrix.target == 'native'
         run: moon fmt --check
 
-      - name: Check ${{ matrix.target }} target
+      - name: Check native and JS targets
         # This is the local-dependency integration check: desktop must compile
-        # against the editor member from this checkout. Keeping the target
-        # explicit lets the two checks run independently; stable denies
-        # warnings across the complete integrated workspace.
-        run: moon check --target ${{ matrix.target }} ${{ matrix.deny-warn }}
+        # against the editor member from this checkout. Keep both targets
+        # explicit and deny warnings across the complete integrated workspace.
+        run: |
+          moon check --target native --deny-warn
+          moon check --target js --deny-warn
 
       - name: Check generated interfaces
         # Generated interfaces are toolchain-versioned, so compare them only
@@ -96,7 +81,6 @@ jobs:
         # the editor's public interfaces from the same checkout too. Ignore
         # blank-only formatter drift, but still reject content changes and new
         # `.mbti`.
-        if: matrix.target == 'native'
         run: |
           moon info
           untracked_mbti="$(git ls-files --others --exclude-standard -- '*.mbti')"
@@ -113,7 +97,6 @@ jobs:
       # on Linux, so use its host-native appimage format for validation instead
       # of the config's macOS formats; release packaging still uses the config.
       - name: Validate Proton project config
-        if: matrix.target == 'native'
         run: |
           moonx "moonbit-community/proton_cli@${{ steps.proton.outputs.version }}" \
             -C "$PWD/desktop" package --config proton.project.json \
@@ -123,7 +106,6 @@ jobs:
       # prebuild asks pkg-config for both gtk+-3.0 and x11, so the runner needs
       # the development packages rather than only the shared runtime libraries.
       - name: Install Proton Linux build dependencies
-        if: matrix.target == 'native'
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends --yes libgtk-3-dev libx11-dev
@@ -133,18 +115,15 @@ jobs:
       # its subprocess helper under ~/.proton/helpers; it no longer writes the
       # old project-local .proton/runtime.json manifest.
       - name: Set up Proton CEF runtime and helper
-        if: matrix.target == 'native'
         run: |
           moonx "moonbit-community/proton_cli@${{ steps.proton.outputs.version }}" \
             -C "$PWD" cef setup
 
-      # The stable/native main job is the sole Linux writer. PR jobs remain
-      # restore-only, and no second channel races to reserve the same key.
+      # The stable test job is the sole Linux writer. PR jobs remain
+      # restore-only, so no second job races to reserve the same key.
       - name: Save Proton installation
         if: >-
           github.event_name == 'push' &&
-          matrix.moonbit-channel == 'stable' &&
-          matrix.target == 'native' &&
           steps.proton-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
@@ -153,22 +132,16 @@ jobs:
             ~/.proton/helpers
           key: ${{ steps.proton-cache.outputs.cache-primary-key }}
 
-      - name: Test native target
+      - name: Test native and JS targets
         # No Xvfb: nothing here initializes CEF or opens a window. That was
         # Proton's own windowed test suite, which left this workspace when
         # Proton became a registry dependency; loading libproton needs the
         # libraries above, not a display.
-        if: matrix.target == 'native'
-        run: moon test --target native
-
-      - name: Test JS target
-        # Proton 0.2's workspace prebuild resolves its native CEF SDK even for
-        # the JS test target. Reuse the native row's installation instead of
-        # downloading and assembling the 290 MB CEF payload in both rows.
-        # These tests still do not create Proton windows or need Xvfb.
-        if: matrix.target == 'native'
-        run: moon test --target js
+        # Proton 0.2's workspace prebuild also resolves the native CEF SDK for
+        # JS tests, so run both targets after the one shared setup above.
+        run: |
+          moon test --target native
+          moon test --target js
 
       - name: Cram (offline CLI docs)
-        if: matrix.target == 'native'
         run: moon cram test tests/cram
