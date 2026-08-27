@@ -39,6 +39,18 @@ test "Token and Tree honor trim-whitespace options consistently" {
       effective: Core,
       fell_back: true,
     })
+    let mixed = compute_with_provider(
+      provider,
+      "fn answer() {\n  old_value()\n}",
+      "fn answer() {\n  new_value()\n }",
+      ignore_trim_whitespace=true,
+    )
+    assert_false(mixed.changes.is_empty())
+    assert_eq(provider.get_status(), {
+      requested: mode,
+      effective: Core,
+      fell_back: true,
+    })
     provider.dispose()
   }
 }
@@ -137,6 +149,233 @@ test "invalid Tree geometry falls back to strict Core" {
 }
 
 ///|
+test "top-level edits keep specialized global mappings" {
+  let cases = [
+    (
+      "fn stable() { 0 }",
+      "fn inserted() { 1 }\nfn stable() { 2 }",
+      [(@base_common.LineRange(1, 2), @base_common.LineRange(1, 3))],
+    ),
+    (
+      "fn first() {}\nfn last() {}",
+      "fn first() {}\nfn inserted() {}\nfn last() {}",
+      [(@base_common.LineRange(2, 2), @base_common.LineRange(2, 3))],
+    ),
+    (
+      "fn first() {}",
+      "fn first() {}\nfn inserted() {}",
+      [(@base_common.LineRange(2, 2), @base_common.LineRange(2, 3))],
+    ),
+    (
+      "fn deleted() { 1 }\nfn stable() { 0 }",
+      "fn stable() { 2 }",
+      [(@base_common.LineRange(1, 3), @base_common.LineRange(1, 2))],
+    ),
+    (
+      "fn first() {}\nfn deleted() {}\nfn last() {}",
+      "fn first() {}\nfn last() {}",
+      [(@base_common.LineRange(2, 3), @base_common.LineRange(2, 2))],
+    ),
+    (
+      "fn first() {}\nfn deleted() {}",
+      "fn first() {}",
+      [(@base_common.LineRange(2, 3), @base_common.LineRange(2, 2))],
+    ),
+    (
+      "fn first() {}\nfn removed() {}\nfn last() {}",
+      "fn first() {}\nfn inserted() {}\nfn last() {}",
+      [(@base_common.LineRange(2, 3), @base_common.LineRange(2, 3))],
+    ),
+  ]
+  for mode in [Token, Tree] {
+    for case in cases {
+      let (original, modified, expected) = case
+      let provider = MoonDocumentDiffProvider(
+        mode~,
+        ignore_comments=false,
+        ignore_tests=false,
+      )
+      let result = compute_with_provider(provider, original, modified)
+      assert_eq(
+        result.changes.map(change => (change.original, change.modified)),
+        expected,
+      )
+      assert_true(result.additional_alignments.is_empty())
+      assert_eq(provider.get_status(), {
+        requested: mode,
+        effective: mode,
+        fell_back: false,
+      })
+      provider.dispose()
+    }
+  }
+}
+
+///|
+test "test filtering preserves a mixed top-level gap" {
+  let original = "fn first() {}\nfn last() {}"
+  let modified = "fn first() {}\ntest \"sample\" { new_test() }\nfn inserted() {}\nfn last() {}"
+  for mode in [Token, Tree] {
+    let provider = MoonDocumentDiffProvider(
+      mode~,
+      ignore_comments=false,
+      ignore_tests=true,
+    )
+    let result = compute_with_provider(provider, original, modified)
+    assert_eq(
+      result.changes.map(change => (change.original, change.modified)),
+      [(LineRange(2, 2), LineRange(3, 4))],
+    )
+    assert_eq(result.additional_alignments, [
+      LineRangeMapping(LineRange(2, 2), LineRange(2, 3)),
+    ])
+    assert_eq(provider.get_status(), {
+      requested: mode,
+      effective: mode,
+      fell_back: false,
+    })
+    provider.dispose()
+  }
+}
+
+///|
+test "top-level anchors preserve shared gaps and final newlines" {
+  let cases = [
+    (
+      "\nfn last() {}",
+      "fn inserted() {}\n\nfn last() {}",
+      (@base_common.LineRange(1, 1), @base_common.LineRange(1, 2)),
+      None,
+    ),
+    (
+      "fn first() {}\n",
+      "fn first() {}\nfn inserted() {}\n",
+      (@base_common.LineRange(2, 2), @base_common.LineRange(2, 3)),
+      None,
+    ),
+    (
+      "fn first() {}\n",
+      "fn first() {}\ntest \"sample\" { new_test() }\nfn inserted() {}\n",
+      (@base_common.LineRange(2, 2), @base_common.LineRange(3, 4)),
+      Some(
+        @diff.LineRangeMapping(
+          @base_common.LineRange(2, 2),
+          @base_common.LineRange(2, 3),
+        ),
+      ),
+    ),
+    (
+      "test \"sample\" { old_test() }\nfn stable() {}",
+      "test \"sample\" {\n  new_one()\n  new_two()\n}\nfn inserted() {}\nfn stable() {}",
+      (@base_common.LineRange(2, 2), @base_common.LineRange(5, 6)),
+      Some(
+        @diff.LineRangeMapping(
+          @base_common.LineRange(1, 2),
+          @base_common.LineRange(1, 5),
+        ),
+      ),
+    ),
+  ]
+  for mode in [Token, Tree] {
+    for case in cases {
+      let (original, modified, expected_change, expected_alignment) = case
+      let provider = MoonDocumentDiffProvider(
+        mode~,
+        ignore_comments=false,
+        ignore_tests=true,
+      )
+      let result = compute_with_provider(provider, original, modified)
+      guard result.changes is [change] else { fail("expected one insertion") }
+      assert_eq((change.original, change.modified), expected_change)
+      assert_eq(
+        result.additional_alignments,
+        match expected_alignment {
+          Some(alignment) => [alignment]
+          None => []
+        },
+      )
+      assert_eq(provider.get_status(), {
+        requested: mode,
+        effective: mode,
+        fell_back: false,
+      })
+      provider.dispose()
+    }
+  }
+}
+
+///|
+test "Ignore tests does not hide ordinary blank-line changes" {
+  let original = "fn first() {}\nfn last() {}"
+  let modified = "fn first() {}\n\nfn last() {}"
+  let expected = @diff.CoreDocumentDiffProvider().compute_diff(
+    TextSnapshot(original),
+    TextSnapshot(modified),
+    { ignore_trim_whitespace: true },
+  )
+  for mode in [Token, Tree] {
+    let provider = MoonDocumentDiffProvider(
+      mode~,
+      ignore_comments=false,
+      ignore_tests=true,
+    )
+    assert_eq(compute_with_provider(provider, original, modified), expected)
+    assert_eq(provider.get_status(), {
+      requested: mode,
+      effective: Core,
+      fell_back: true,
+    })
+    provider.dispose()
+  }
+}
+
+///|
+test "ignored-only and matched comment height changes retain geometry" {
+  for mode in [Token, Tree] {
+    let tests = MoonDocumentDiffProvider(
+      mode~,
+      ignore_comments=false,
+      ignore_tests=true,
+    )
+    let moved = compute_with_provider(
+      tests, "test \"sample\" {}\nfn stable() {}", "fn stable() {}\ntest \"sample\" {}",
+    )
+    assert_true(moved.changes.is_empty())
+    assert_eq(moved.additional_alignments, [
+      LineRangeMapping(LineRange(1, 2), LineRange(1, 1)),
+      LineRangeMapping(LineRange(3, 3), LineRange(2, 3)),
+    ])
+    assert_eq(tests.get_status().effective, mode)
+    tests.dispose()
+
+    let comments = MoonDocumentDiffProvider(
+      mode~,
+      ignore_comments=true,
+      ignore_tests=false,
+    )
+    let trailing = compute_with_provider(
+      comments, "fn stable() {}", "fn stable() {}\n\n",
+    )
+    assert_true(trailing.changes.is_empty())
+    assert_eq(trailing.additional_alignments, [
+      LineRangeMapping(LineRange(2, 2), LineRange(2, 4)),
+    ])
+    assert_eq(comments.get_status().effective, mode)
+    let mixed = compute_with_provider(
+      comments, "fn first() {\n  // old\n}\nfn last() {}", "fn first() {\n  // new one\n  // new two\n}\nfn inserted() {}\nfn last() {}",
+    )
+    assert_eq(mixed.changes.map(change => (change.original, change.modified)), [
+      (LineRange(4, 4), LineRange(5, 6)),
+    ])
+    assert_eq(mixed.additional_alignments, [
+      LineRangeMapping(LineRange(2, 3), LineRange(2, 4)),
+    ])
+    assert_eq(comments.get_status().effective, mode)
+    comments.dispose()
+  }
+}
+
+///|
 test "ignored-only rows become geometry-only additional alignments" {
   let provider = MoonDocumentDiffProvider(mode=Token, ignore_comments=true)
   let result = compute_with_provider(
@@ -178,11 +417,91 @@ test "Token and Tree ignore MoonBit test-only edits" {
       effective: mode,
       fell_back: false,
     })
+    let reshaped = compute_with_provider(
+      provider, "fn first() {}\nfn second() {}\ntest \"old\" {\n  value()\n}", "fn first() {}\nfn second() {}\ntest \"new one\" { value() }\ntest \"new two\" { value() }\ntest \"new three\" { value() }",
+    )
+    assert_true(reshaped.changes.is_empty())
+    assert_true(reshaped.additional_alignments.is_empty())
+    assert_eq(provider.get_status(), {
+      requested: mode,
+      effective: mode,
+      fell_back: false,
+    })
+    let mixed = compute_with_provider(
+      provider, "fn a() { old() }\ntest \"old\" {\n  value()\n}", "fn a() { new() }\ntest \"n1\" { value() }\ntest \"n2\" { value() }\ntest \"n3\" { value() }",
+    )
+    assert_eq(mixed.changes.map(change => (change.original, change.modified)), [
+      (LineRange(1, 2), LineRange(1, 2)),
+    ])
+    assert_true(mixed.additional_alignments.is_empty())
+    assert_eq(provider.get_status(), {
+      requested: mode,
+      effective: mode,
+      fell_back: false,
+    })
     provider.set_ignore_tests(false)
     let visible = compute_with_provider(
       provider, "test \"sample\" { old_value() }", "test \"sample\" { new_value() }",
     )
     assert_false(visible.changes.is_empty())
+    provider.dispose()
+  }
+}
+
+///|
+test "ignored tests do not consume adjacent ordinary blank lines" {
+  let ownership_source = @model.TextSnapshot(
+    "fn a() {}\ntest \"new\" { new_value() }\n\nfn b() {}",
+  )
+  assert_eq(
+    source_ignored_test_ranges(
+      ownership_source,
+      snapshot_lines(ownership_source),
+      @mbtdiff.DiffMode::Lexical,
+    ),
+    Some([LineRange(2, 3)]),
+  )
+  for mode in [Token, Tree] {
+    let provider = MoonDocumentDiffProvider(
+      mode~,
+      ignore_comments=false,
+      ignore_tests=true,
+    )
+    let result = compute_with_provider(
+      provider, "fn a() {}\nfn b() {}", "fn a() {}\ntest \"new\" { new_value() }\n\nfn b() {}",
+    )
+    assert_eq(provider.get_status(), {
+      requested: mode,
+      effective: Core,
+      fell_back: true,
+    })
+    assert_false(result.changes.is_empty())
+    provider.dispose()
+  }
+}
+
+///|
+test "ignored test reshapes preserve multiple semantic gaps" {
+  for mode in [Token, Tree] {
+    let provider = MoonDocumentDiffProvider(
+      mode~,
+      ignore_comments=false,
+      ignore_tests=true,
+    )
+    let result = compute_with_provider(
+      provider, "test \"o0\" {\n  value()\n}\ntest \"o1\" {\n  value()\n}\nfn a() {}\nfn b() {}",
+      "test \"n0\" { value() }\ntest \"n1\" { value() }\nfn a() {}\ntest \"n2\" {\n  value()\n}\nfn b() {}",
+    )
+    assert_true(result.changes.is_empty())
+    assert_eq(result.additional_alignments, [
+      LineRangeMapping(LineRange(1, 7), LineRange(1, 3)),
+      LineRangeMapping(LineRange(8, 8), LineRange(4, 7)),
+    ])
+    assert_eq(provider.get_status(), {
+      requested: mode,
+      effective: mode,
+      fell_back: false,
+    })
     provider.dispose()
   }
 }
