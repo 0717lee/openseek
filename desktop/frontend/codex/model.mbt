@@ -613,6 +613,19 @@ fn State::permission_mode(self : State) -> @protocol.CodexPermissionMode {
 }
 
 ///|
+/// The cwd override safe to send on an ordinary `turn/start`. Only the native
+/// worktree registry populates `CodexThread::worktree`; an unannotated
+/// app-server cwd must remain `None` here so the browser cannot turn an
+/// arbitrary path into a Desktop-authorized checkout.
+fn State::registry_turn_cwd(self : State) -> String? {
+  guard self.active_thread() is Some(active) else { return None }
+  match active.worktree {
+    Some(worktree) if worktree.present => Some(worktree.path)
+    _ => None
+  }
+}
+
+///|
 /// Permission changes are frozen while an operation is being accepted or a
 /// turn is active, so the visible choice always describes the next request.
 fn State::can_choose_permission(self : State) -> Bool {

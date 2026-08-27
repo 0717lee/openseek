@@ -1019,6 +1019,9 @@ test "Codex worktree broadcasts bind every frontend with the task open" {
       "turns": [],
     },
   })
+  // An ordinary app-server cwd is not a native registry authorization and
+  // therefore remains an omitted turn/start override.
+  assert_true(state.registry_turn_cwd() is None)
   let message = WorktreeChanged(
     thread_id="thread-1",
     project_root="/work/project",
@@ -1041,6 +1044,10 @@ test "Codex worktree broadcasts bind every frontend with the task open" {
     .map(root => root.path),
     Some("/work/project/.worktrees/wt-1"),
   )
+  // If this frontend was already waiting for thread/resume, its subsequent
+  // ordinary turn/start must carry the registry path explicitly rather than
+  // racing another frontend to update app-server's default cwd.
+  assert_eq(once.registry_turn_cwd(), Some("/work/project/.worktrees/wt-1"))
 }
 
 ///|
@@ -1064,6 +1071,9 @@ test "Codex missing worktree waits for rebuild or archive confirmation" {
     state.active_placement(@interop.ChannelId::Local)
     is Some(@interop.MissingWorktree(name="wt-1", ..)),
   )
+  // A retained registry row names the checkout for Repair, but a missing path
+  // is never sent back to app-server as a runnable cwd.
+  assert_true(state.registry_turn_cwd() is None)
   assert_false(state.terminal_available(@interop.ChannelId::Local))
   let (_, confirming) = update(
     dispatch,

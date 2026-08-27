@@ -466,7 +466,11 @@ fn State::send(
         } else {
           Some(effort)
         },
-        cwd: None,
+        // A sibling frontend may have received the host's registry commit
+        // while this send was waiting for thread/resume. Reassert that exact
+        // binding instead of relying on another client's `turn/start` to
+        // update app-server cwd first.
+        cwd: self.registry_turn_cwd(),
         permission_mode: self.permission_mode(),
       },
     )
