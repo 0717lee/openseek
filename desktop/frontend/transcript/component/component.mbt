@@ -439,14 +439,21 @@ fn transcript_sub_loader(
           element.get_property("id").to_option() == Some("transcript") else {
           return
         }
+        let was_pinned = transcript_pinned_watch.val
         let client_height = element.get_client_height()
         let pinned = element.get_scroll_height() -
           element.get_scroll_top() -
           client_height <=
           4.0
-        if pinned != transcript_pinned_watch.val {
+        if pinned != was_pinned {
           transcript_pinned_watch.val = pinned
           scheduler.add(emit(Pinned(pinned)))
+        }
+        // A geometry reconciliation may move a pinned transcript to its new
+        // tail. Its active user turn cannot change, so do not scan the long
+        // transcript again for the resulting programmatic scroll event.
+        if pinned && was_pinned {
+          return
         }
         let anchor = visible_turn_anchor(element)
         if anchor != transcript_turn_anchor.val {
@@ -458,6 +465,7 @@ fn transcript_sub_loader(
       target.add_event_listener_with_options("scroll", listener, capture=true)
       let observers = TranscriptObservers::install(
         mounted => scheduler.add(emit(ContentRendered(mounted~))),
+        active => scheduler.add(emit(Overview(ActiveChanged(active)))),
         path => scheduler.add(emit(ImageRequested(path))),
       )
       Some({
@@ -499,19 +507,19 @@ priv struct TranscriptDomMount {
   mut element : @dom.Element?
   mut diagrams : @diagram_viewport.DiagramViewports?
   images : TranscriptImageObserver
-  on_size_changed : () -> Unit
+  on_active_changed : (@transcript_overview.TurnKey?) -> Unit
 }
 
 ///|
 fn TranscriptDomMount::TranscriptDomMount(
-  on_size_changed : () -> Unit,
+  on_active_changed : (@transcript_overview.TurnKey?) -> Unit,
   on_image : (String) -> Unit,
 ) -> Self {
   {
     element: None,
     diagrams: None,
     images: TranscriptImageObserver::install(on_image),
-    on_size_changed,
+    on_active_changed,
   }
 }
 
@@ -541,10 +549,35 @@ fn TranscriptDomMount::replace(self : Self, next : @dom.Element?) -> Unit {
   self.element = next
   if next is Some(element) {
     self.diagrams = Some(
-      @diagram_viewport.DiagramViewports(element, self.on_size_changed),
+      @diagram_viewport.DiagramViewports(element, () => {
+        self.reconcile_geometry()
+      }),
     )
     self.images.scan(element)
   }
+}
+
+///|
+/// Reconcile geometry owned by the mounted DOM without reporting a content
+/// render to Rabbita. A pinned transcript follows the tail without scanning
+/// every user bubble; an unpinned transcript reports only a changed turn.
+fn TranscriptDomMount::reconcile_geometry(self : Self) -> Unit {
+  guard self.element is Some(element) else { return }
+  if transcript_pinned_watch.val {
+    let bottom = element.get_scroll_height() - element.get_client_height()
+    // Width growth commonly leaves the browser at the new bottom already.
+    // Avoid a same-position write and its captured scroll event; width shrink
+    // still follows the tail once the accumulated gap exceeds pin tolerance.
+    if bottom - element.get_scroll_top() > 4.0 {
+      element.set_scroll_top(bottom)
+    }
+    return
+  }
+  let anchor = visible_turn_anchor(element)
+  guard anchor != transcript_turn_anchor.val else { return }
+  transcript_turn_anchor.val = anchor
+  let active = anchor.bind(@transcript_overview.TurnKey::from_anchor)
+  (self.on_active_changed)(active)
 }
 
 ///|
@@ -594,11 +627,12 @@ fn TranscriptDomMount::dispose(self : Self) -> Unit {
 
 ///|
 fn TranscriptObservers::install(
-  on_change : (Bool) -> Unit,
+  on_content_change : (Bool) -> Unit,
+  on_active_changed : (@transcript_overview.TurnKey?) -> Unit,
   on_image : (String) -> Unit,
 ) -> Self {
-  let mount = TranscriptDomMount(() => on_change(true), on_image)
-  let resize = @dom.ResizeObserver::new((_, _) => on_change(true))
+  let mount = TranscriptDomMount(on_active_changed, on_image)
+  let resize = @dom.ResizeObserver::new((_, _) => mount.reconcile_geometry())
   let content = @dom.MutationObserver::new((_, observer) => {
     // Reconciliation itself moves the SVG and installs toolbar nodes. Pause
     // this same observer while doing that so those owned mutations cannot
@@ -606,7 +640,7 @@ fn TranscriptObservers::install(
     observer.disconnect()
     mount.refresh_content()
     mount.observe_content(observer)
-    on_change(true)
+    on_content_change(true)
   })
   let attach = () => {
     let next = @dom.document().get_element_by_id("transcript").to_option()
@@ -616,7 +650,7 @@ fn TranscriptObservers::install(
     mount.replace(next)
     mount.observe_content(content)
     mount.observe_resize(resize)
-    on_change(next is Some(_))
+    on_content_change(next is Some(_))
   }
   let document = @dom.MutationObserver::new((_, _) => attach())
   if @dom.document().get_document_element() is Some(root) {
