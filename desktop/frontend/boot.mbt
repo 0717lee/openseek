@@ -506,6 +506,7 @@ pub fn boot() -> Unit {
           annotation=target.annotation,
         )
       }),
+      open_session: emit.map(session => OpenSessionHere(session)),
     })
     let composer_input = state.map(model => model.composer_input())
     let composer_html = @composer.component(

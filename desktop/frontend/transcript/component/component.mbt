@@ -102,6 +102,9 @@ pub fn Input::Input(
 pub(all) struct Actions {
   open : @cmd.Emit[String]
   jump : @cmd.Emit[@mention_context.Target]
+  /// Open another session's transcript. Used by a sub-run tool card to reach
+  /// the child transcript it names.
+  open_session : @cmd.Emit[String]
 }
 
 ///|
@@ -265,6 +268,7 @@ pub fn component(
       overview_emit=emit.map(msg => Overview(msg)),
       path => (actions.open)(path),
       target => (actions.jump)(target),
+      session => (actions.open_session)(session),
       on_jump_latest=emit(JumpToLatest),
     )
   })

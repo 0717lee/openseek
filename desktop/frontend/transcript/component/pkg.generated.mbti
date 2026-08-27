@@ -20,6 +20,7 @@ pub fn component(@rabbita.Val[Input], Actions) -> @rabbita.Val[@html.Html]
 pub(all) struct Actions {
   open : @cmd.Emit[String]
   jump : @cmd.Emit[@mention_context.Target]
+  open_session : @cmd.Emit[String]
 }
 
 type Input derive(Eq)

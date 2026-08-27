@@ -167,6 +167,53 @@ pub fn subrun_parent(id : String) -> String? {
 }
 
 ///|
+/// Every child session a sub-run tool result names, in first-appearance order.
+/// `parent` is the session the result was recorded in, because an `sr-N` is
+/// only unique within its own engine.
+///
+/// The contract is the `sr-N` the `explore`/`review`/`subtask` tools stamp into
+/// their briefs. Every position is scanned rather than one fixed token: a
+/// `subtask` launch reports its workers through one brief that leads with a
+/// slice COUNT and carries the per-worker briefs — each with its own `sr-N` —
+/// nested inside it (`cmd/openseek/subtask_tool.mbt::subtask_launch_many`), so
+/// a single result can name several children and none of them at token 1.
+///
+/// A brief is display-only metadata — the model never sees one — so reading it
+/// here cannot change what a run did, and a brief naming nothing yields no
+/// link.
+///
+/// Ordinals are bounded exactly as `@protocol.split_child_session_id` bounds
+/// them, so every id this returns is one that parser reads back: this is the
+/// inverse of `subrun_label`, which turns such an id into the `sr-N` a sidebar
+/// row shows.
+pub fn subrun_child_sessions(
+  tool_name : String,
+  brief : String,
+  parent~ : String,
+) -> Array[String] {
+  guard tool_name is ("explore" | "review" | "subtask") else { return [] }
+  guard !parent.is_empty() else { return [] }
+  let children : Array[String] = []
+  for raw in brief.split(" ") {
+    // A brief carrying several children joins them with punctuation, so a
+    // token can arrive as `sr-3,` or `sr-3)`.
+    let token = raw.trim(chars=",()").to_owned()
+    guard token.has_prefix("sr-") else { continue }
+    let digits = token.view(start_offset=3)
+    guard !digits.is_empty() &&
+      digits.length() <= 9 &&
+      digits.iter().all(c => c.is_ascii_digit()) else {
+      continue
+    }
+    let child = "\{parent}-\{token}"
+    if !children.contains(child) {
+      children.push(child)
+    }
+  }
+  children
+}
+
+///|
 /// Order two sub-run ordinal paths: by ordinal at the first position they
 /// differ, then by depth, so `sr-2` precedes `sr-10` and a child precedes
 /// its own grandchildren.
@@ -789,6 +836,87 @@ test "a sub-run's progress routes by its child session, not its bare id" {
   assert_eq(subrun_parent("desktop-b-sr-1"), Some("desktop-b"))
   // An ordinary session is nobody's child, so nothing routes to it.
   assert_eq(subrun_parent("desktop-a"), None)
+}
+
+///|
+test "a sub-run brief names the child sessions its card links to" {
+  // The stamp `agent_explore` writes: `"<tool> sr-N (…)"`.
+  assert_eq(
+    subrun_child_sessions(
+      "explore",
+      "explore sr-2 (1 citation(s), 7 step(s))",
+      parent="run",
+    ),
+    ["run-sr-2"],
+  )
+  assert_eq(
+    subrun_child_sessions("review", "review sr-11 (ok)", parent="desktop-a"),
+    ["desktop-a-sr-11"],
+  )
+  // Round-trips with the inverse: the id this yields is the id whose row is
+  // labelled with the `sr-N` the brief carried.
+  assert_eq(subrun_label("run-sr-2"), Some("sr-2"))
+  assert_eq(subrun_parent("run-sr-2"), Some("run"))
+}
+
+///|
+test "a subtask launch names every worker it started" {
+  // `subtask_launch_many` leads with a slice COUNT and nests the per-worker
+  // briefs — each with its own `sr-N` — inside one brief. Scanning one fixed
+  // token would find the count and link nothing, even for a single slice.
+  assert_eq(
+    subrun_child_sessions(
+      "subtask",
+      "subtask 1 slices (subtask sr-3 alpha (captured, 7 step(s)))",
+      parent="run",
+    ),
+    ["run-sr-3"],
+  )
+  assert_eq(
+    subrun_child_sessions(
+      "subtask",
+      "subtask 2 slices (subtask sr-3 a (captured), subtask sr-4 b (captured))",
+      parent="run",
+    ),
+    ["run-sr-3", "run-sr-4"],
+  )
+  // The same child named twice is one child.
+  assert_eq(
+    subrun_child_sessions("subtask", "subtask sr-3 a sr-3 b", parent="run"),
+    ["run-sr-3"],
+  )
+}
+
+///|
+test "a brief that does not name a sub-run yields no link" {
+  // Not a sub-run tool, however the brief happens to read.
+  assert_eq(subrun_child_sessions("read", "read sr-2", parent="run"), [])
+  // The tool is right but the brief names no child.
+  assert_eq(subrun_child_sessions("explore", "explore", parent="run"), [])
+  assert_eq(
+    subrun_child_sessions("explore", "explore (budget exhausted)", parent="run"),
+    [],
+  )
+  // `sr-` with nothing, or with something that is not an ordinal, is not a
+  // sub-run id — linking on it would offer a session that cannot exist.
+  assert_eq(subrun_child_sessions("explore", "explore sr- (x)", parent="run"), [])
+  assert_eq(
+    subrun_child_sessions("explore", "explore sr-x (x)", parent="run"),
+    [],
+  )
+  assert_eq(
+    subrun_child_sessions("explore", "explore sr-2x (x)", parent="run"),
+    [],
+  )
+  // Bounded exactly as `split_child_session_id` bounds it, so this never
+  // offers an id that parser refuses to read back.
+  assert_eq(
+    subrun_child_sessions("explore", "explore sr-1234567890 (x)", parent="run"),
+    [],
+  )
+  assert_eq(subrun_parent("run-sr-1234567890"), None)
+  // An unsaved conversation has no id to hang a child off.
+  assert_eq(subrun_child_sessions("explore", "explore sr-2 (x)", parent=""), [])
 }
 
 ///|

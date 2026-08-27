@@ -869,6 +869,33 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+/* The way out of a sub-run's tool card and into the child's own transcript.
+   This card holds the subagent's REPORT; the work behind it is a whole
+   transcript of its own, and until this link that transcript was reachable
+   only by matching an `sr-N` against a sidebar row by eye. Accent-soft rather
+   than a filled button: it is a way to go deeper, not the card's primary
+   action, and it sits above quoted output that must stay the loudest thing
+   in the card. */
+.subrun-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 4px;
+  padding: 3px 9px;
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  font-size: var(--font-size-xs);
+  font-family: inherit;
+  cursor: pointer;
+}
+.subrun-chip:hover {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  border-color: var(--color-accent);
+}
+
 .tool-call pre {
   margin: 6px 0 8px;
   padding: 10px 12px;
