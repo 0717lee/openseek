@@ -260,8 +260,6 @@ pub fn update(
             next.load_skills(dispatch, channel, force_reload=false),
           ])
         }
-        CodexThreadMetaReply(thread_id) =>
-          next = next.with_thread_meta(value, thread_id)
         CodexThreadReply(requested_thread) => {
           next = next.with_thread_reply(value, requested_thread~)
           // A malformed or mismatched snapshot leaves the requested id in
@@ -384,9 +382,7 @@ pub fn update(
         CodexThreadsReply(false, _) => "Codex threads"
         CodexThreadsReply(true, _) => "Archived Codex threads"
         CodexDraftOpenReply(_) => "Codex draft"
-        CodexThreadReply(_)
-        | CodexThreadMetaReply(_)
-        | CodexDraftThreadReply(_) => "Codex thread"
+        CodexThreadReply(_) | CodexDraftThreadReply(_) => "Codex thread"
         CodexTurnReply(_) | CodexWorktreeTurnReply(_, _) => "Codex turn"
         CodexWorktreeRepairReply(_, _) => "Codex worktree rebuild"
         CodexLoginReply => "Codex sign-in"
@@ -478,15 +474,6 @@ pub fn update(
         let (refresh, refreshed) = next.refresh_catalog(dispatch, channel)
         next = refreshed
         refresh
-      } else if method_ == "thread/settings/updated" &&
-        next.active_thread() is Some(active) {
-        // Re-read through the host so a cwd change cannot retarget Files,
-        // Terminal, or language services from an unvalidated notification.
-        // Apply this read metadata-only: the first turn of a fresh thread
-        // fires this notification while it is still streaming, and a full
-        // `open_thread` replacement would blank the transcript with a snapshot
-        // that predates the turn.
-        next.refresh_thread_meta(dispatch, channel, active.id)
       } else if method_ == "turn/completed" {
         // A turn may check out another branch or create a PR. Refresh the same
         // compact status chip OpenSeek updates at its run boundary.
@@ -696,61 +683,6 @@ test "abandoning a draft deselects it and clears its composer state" {
     open_external,
   )
   assert_true(unchanged.active_id() is None)
-}
-
-///|
-test "a settings-updated re-read keeps the streaming turns" {
-  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
-  let open_external = (_ : String) => @cmd.none
-  // A fresh thread's first turn fires `thread/settings/updated` while it is
-  // still streaming; the snapshot read it triggers may predate that turn.
-  let state = State::from_thread_snapshot({
-    "thread": {
-      "id": "thread-1",
-      "cwd": "/work/project",
-      "preview": "hello",
-      "turns": [{ "id": "turn-1", "status": "inProgress", "items": [] }],
-    },
-  })
-  guard state.active_thread() is Some(before) else {
-    fail("fixture thread should be active")
-  }
-  assert_eq(before.turns.length(), 1)
-  let (_, refreshed) = update(
-    dispatch,
-    Reply(kind=CodexThreadMetaReply("thread-1"), value={
-      "thread": {
-        "id": "thread-1",
-        "name": "Renamed",
-        "cwd": "/work/project",
-        "turns": [],
-      },
-    }),
-    state,
-    @interop.ChannelId::Local,
-    open_external,
-  )
-  guard refreshed.active_thread() is Some(after) else {
-    fail("the metadata read must not deselect the thread")
-  }
-  // Metadata adopted, turn history preserved.
-  inspect(after.title, content="Renamed")
-  assert_eq(after.turns.length(), 1)
-  // A read for some other thread changes nothing.
-  let (_, unchanged) = update(
-    dispatch,
-    Reply(kind=CodexThreadMetaReply("thread-other"), value={
-      "thread": { "id": "thread-other", "turns": [] },
-    }),
-    state,
-    @interop.ChannelId::Local,
-    open_external,
-  )
-  guard unchanged.active_thread() is Some(kept) else {
-    fail("a mismatched read must not deselect the thread")
-  }
-  assert_eq(kept.id, "thread-1")
-  assert_eq(kept.turns.length(), 1)
 }
 
 ///|
@@ -1729,7 +1661,7 @@ test "archived Codex catalog removes a selected task in either reply order" {
 }
 
 ///|
-test "Codex cwd notifications wait for an authorized thread read" {
+test "Codex settings notifications do not retarget the selected task" {
   let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   let state = State::from_thread_snapshot({
     "thread": { "id": "thread-1", "cwd": "/work/old", "turns": [] },
@@ -1748,6 +1680,9 @@ test "Codex cwd notifications wait for an authorized thread read" {
     @interop.ChannelId::Local,
     _ => @cmd.none,
   )
+  // OpenSeek already owns every setting it sends with `turn/start`. The
+  // app-server notification is informational and must not change the
+  // Files/Terminal placement.
   assert_eq(
     notified.active_thread().bind(thread => thread.cwd),
     Some("/work/old"),
