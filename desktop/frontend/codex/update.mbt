@@ -80,6 +80,27 @@ pub fn update(
         @cmd.none,
         state.with_git_reply(thread_id, generation, requested_cwd, reply),
       )
+    WorktreeChanged(thread_id~, project_root~, name~, path~, present~) => {
+      let applies = state.active_thread() is Some(active) &&
+        active.id == thread_id
+      let next = state.with_worktree_change(
+        thread_id, project_root, name, path, present,
+      )
+      if present && applies {
+        // Mint the same request fence as every other checkout transition, so
+        // a Git answer for the prior placement cannot decorate this one.
+        let (git, refreshed) = next.refresh_git(dispatch, channel)
+        (
+          @cmd.batch([
+            git,
+            refreshed.load_skills(dispatch, channel, force_reload=false),
+          ]),
+          refreshed,
+        )
+      } else {
+        (@cmd.none, next)
+      }
+    }
     ToggleGitDetails =>
       (
         @cmd.none,
@@ -874,6 +895,13 @@ test "Codex update handlers are pure and idempotent" {
     ChoosePermission(@protocol.FullAccess),
     ConfirmFullAccess,
     CancelFullAccess,
+    WorktreeChanged(
+      thread_id="thread-1",
+      project_root="/work/project",
+      name="wt-1",
+      path="/work/project/.worktrees/wt-1",
+      present=true,
+    ),
     ToggleGitDetails,
     CloseGitDetails,
     ToggleWorktreeMode,
@@ -978,6 +1006,41 @@ test "Codex update handlers are pure and idempotent" {
     )
     assert_true(once == twice)
   }
+}
+
+///|
+test "Codex worktree broadcasts bind every frontend with the task open" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let state = State::from_thread_snapshot({
+    "thread": {
+      "id": "thread-1",
+      "cwd": "/work/project",
+      "projectRoot": "/work/project",
+      "turns": [],
+    },
+  })
+  let message = WorktreeChanged(
+    thread_id="thread-1",
+    project_root="/work/project",
+    name="wt-1",
+    path="/work/project/.worktrees/wt-1",
+    present=true,
+  )
+  let (_, once) = update(dispatch, message, state, @interop.ChannelId::Local, _ => {
+    @cmd.none
+  })
+  let (_, twice) = update(dispatch, message, state, @interop.ChannelId::Local, _ => {
+    @cmd.none
+  })
+  assert_true(once == twice)
+  assert_true(once.placement is @composer.BoundWorktree("wt-1"))
+  assert_eq(
+    once
+    .active_placement(@interop.ChannelId::Local)
+    .bind(placement => placement.checkout_root())
+    .map(root => root.path),
+    Some("/work/project/.worktrees/wt-1"),
+  )
 }
 
 ///|

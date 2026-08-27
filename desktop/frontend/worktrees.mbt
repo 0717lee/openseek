@@ -1508,6 +1508,53 @@ test "a remote removal closes this client's discard dialog" {
 }
 
 ///|
+test "a worktree broadcast updates an open Codex task on every frontend" {
+  let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/work/project")
+  let worktree = @interop.ChannelId::Local.test_resource(
+    "/work/project/.worktrees/wt-1",
+  )
+  let codex = @codex.State::from_thread_snapshot({
+    "thread": {
+      "id": "codex-thread-1",
+      "cwd": "/work/project",
+      "projectRoot": "/work/project",
+      "turns": [],
+    },
+  })
+  let model = { ..test_model(), codex, screen: Codex }
+  let message = WorktreesChanged(
+    [
+      {
+        name: "wt-1",
+        session: None,
+        codex_thread: Some("codex-thread-1"),
+        path: Some(worktree),
+        present: true,
+      },
+    ],
+    workspace~,
+  )
+  let (_, once) = update_dev(dispatch, message, model)
+  let (_, twice) = update_dev(dispatch, message, model)
+  assert_true(once.codex == twice.codex)
+  assert_true(once.dev() == twice.dev())
+  assert_true(once.conversations == twice.conversations)
+  assert_true(once.archive_confirm == twice.archive_confirm)
+  assert_true(
+    once.codex.active_placement(@interop.ChannelId::Local)
+    is Some(@interop.Worktree(name="wt-1", ..)),
+  )
+  assert_eq(
+    once.codex
+    .active_placement(@interop.ChannelId::Local)
+    .bind(placement => placement.checkout_root())
+    .map(root => root.path),
+    Some("/work/project/.worktrees/wt-1"),
+  )
+}
+
+///|
 test "a removed worktree's probes cannot repopulate the composer" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")

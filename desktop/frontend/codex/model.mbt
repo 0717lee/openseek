@@ -329,6 +329,16 @@ enum Msg {
     requested_cwd~ : String,
     reply~ : @protocol.GitPullRequestReply
   )
+  // The native worktree registry has bound this exact task id to one checkout.
+  // This is independent of app-server's settings stream: every frontend sees
+  // the same host commit even though only the creator receives its RPC reply.
+  WorktreeChanged(
+    thread_id~ : String,
+    project_root~ : String,
+    name~ : String,
+    path~ : String,
+    present~ : Bool
+  )
   ToggleGitDetails
   CloseGitDetails
   ToggleWorktreeMode
@@ -461,6 +471,20 @@ pub fn Msg::archive_thread(thread_id : String) -> Msg {
 /// Shell entrypoint for restoring a Codex sidebar row from archived history.
 pub fn Msg::unarchive_thread(thread_id : String) -> Msg {
   UnarchiveThread(thread_id)
+}
+
+///|
+/// Apply one host-authored Codex worktree registry row. The shell has already
+/// matched `thread_id` against the selected task on the event's source device;
+/// this package remains responsible for its thread and placement transition.
+pub fn Msg::worktree_changed(
+  thread_id : String,
+  project_root : String,
+  name : String,
+  path : String,
+  present : Bool,
+) -> Msg {
+  WorktreeChanged(thread_id~, project_root~, name~, path~, present~)
 }
 
 ///|
@@ -1630,6 +1654,48 @@ fn State::with_created_worktree(
     threads: self.threads.map(thread => {
       if thread.id == active.id {
         { ..thread, cwd: Some(worktree.path), worktree: Some(worktree) }
+      } else {
+        thread
+      }
+    }),
+  }
+}
+
+///|
+/// Adopt the native registry's exact owner/path binding in every frontend
+/// that already has this task open. `turn/start` may update app-server cwd,
+/// but that live settings notification is not a synchronization read: the
+/// registry commit itself supplies the authoritative Desktop placement.
+fn State::with_worktree_change(
+  self : State,
+  thread_id : String,
+  project_root : String,
+  name : String,
+  path : String,
+  present : Bool,
+) -> State {
+  guard self.active_thread() is Some(active) && active.id == thread_id else {
+    return self
+  }
+  let worktree : CodexWorktree = { name, path, present }
+  let active = {
+    ..active,
+    cwd: Some(path),
+    project_root: Some(project_root),
+    worktree: Some(worktree),
+  }
+  {
+    ..self,
+    selection: CodexStoredTask(active),
+    placement: @composer.BoundWorktree(name),
+    threads: self.threads.map(thread => {
+      if thread.id == thread_id {
+        {
+          ..thread,
+          cwd: Some(path),
+          project_root: Some(project_root),
+          worktree: Some(worktree),
+        }
       } else {
         thread
       }

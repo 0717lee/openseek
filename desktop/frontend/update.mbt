@@ -5478,7 +5478,37 @@ fn update_device_msg(
           !rows.iter().any(row => row.session == Some(confirm.session)) => None
         other => other
       }
-      (@cmd.none, { ..next, conversations, archive_confirm })
+      let next = { ..next, conversations, archive_confirm }
+      // `worktree.create` commits and broadcasts the owner row before the
+      // initiating frontend receives its turn reply. Feed that host-authored
+      // row to any other frontend already displaying the same Codex task, so
+      // Files, Terminal, language services, Git and skills all move together
+      // without turning `thread/settings/updated` into a history read.
+      let mut command : @cmd.Cmd = @cmd.none
+      let mut codex = next.codex
+      if channel == next.focused && next.codex.active_id() is Some(thread_id) {
+        for row in rows {
+          if row.codex_thread == Some(thread_id) && row.path is Some(path) {
+            let (next_command, next_codex) = @codex.update(
+              dispatch.map(msg => Codex(channel~, msg)),
+              @codex.Msg::worktree_changed(
+                thread_id,
+                workspace.path,
+                row.name,
+                path.path,
+                row.present,
+              ),
+              codex,
+              channel,
+              url => open_external_link(dispatch, url),
+            )
+            command = next_command
+            codex = next_codex
+            break
+          }
+        }
+      }
+      (command, { ..next, codex, })
     }
     WorktreeCreated(workspace~, name~, session~) => {
       // The chain's checkout exists: bind the composing conversation, so
