@@ -141,3 +141,6 @@ pub extend CoreDocumentDiffProvider with Debug::{to_repr}
 
 ///|
 pub extend CoreDocumentDiffProvider with Eq::{equal, not_equal}
+
+///|
+pub extend CoreDocumentDiffProvider with DocumentDiffProvider::{on_did_change}

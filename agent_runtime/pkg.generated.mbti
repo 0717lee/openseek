@@ -20,7 +20,6 @@ pub struct AgentRuntime {
 }
 pub fn AgentRuntime::AgentRuntime(workspace_root? : String, approval? : ApprovalChannel) -> Self
 pub fn AgentRuntime::approval_channel(Self) -> ApprovalChannel?
-pub fn AgentRuntime::drain_approval_events(Self) -> Array[ApprovalEvent]
 pub fn AgentRuntime::drain_events(Self) -> Array[AgentEvent]
 pub fn AgentRuntime::drain_steers(Self) -> Array[SteerInput]
 pub fn AgentRuntime::emit_event(Self, AgentEvent) -> Unit
@@ -38,22 +37,12 @@ pub(all) struct ApprovalAsk {
   detail : String
   body : String?
 } derive(Eq, @debug.Debug)
+pub fn ApprovalAsk::equal(Self, Self) -> Bool
+pub fn ApprovalAsk::not_equal(Self, Self) -> Bool
+pub fn ApprovalAsk::to_repr(Self) -> @debug.Repr
 
-pub struct ApprovalChannel {
-  ask : async (ApprovalAsk) -> ApprovalOutcome
-  drain_events : () -> Array[ApprovalEvent]
-}
-pub fn ApprovalChannel::ApprovalChannel(async (ApprovalAsk) -> ApprovalOutcome, drain_events? : () -> Array[ApprovalEvent]) -> Self
+pub(all) struct ApprovalChannel(async (ApprovalAsk) -> ApprovalOutcome)
 pub async fn ApprovalChannel::ask(Self, ApprovalAsk) -> ApprovalOutcome
-pub fn ApprovalChannel::drain_events(Self) -> Array[ApprovalEvent]
-
-pub(all) enum ApprovalEvent {
-  Requested(id~ : String, tool_name~ : String, detail~ : String, body~ : String?, source~ : String)
-  Resolved(id~ : String, outcome~ : String, source~ : String)
-} derive(Eq, @debug.Debug)
-pub fn ApprovalEvent::equal(Self, Self) -> Bool
-pub fn ApprovalEvent::not_equal(Self, Self) -> Bool
-pub fn ApprovalEvent::to_repr(Self) -> @debug.Repr
 
 pub(all) enum ApprovalOutcome {
   AllowedOnce
@@ -61,6 +50,9 @@ pub(all) enum ApprovalOutcome {
   Cancelled
   Unavailable
 } derive(Eq, @debug.Debug)
+pub fn ApprovalOutcome::equal(Self, Self) -> Bool
+pub fn ApprovalOutcome::not_equal(Self, Self) -> Bool
+pub fn ApprovalOutcome::to_repr(Self) -> @debug.Repr
 
 pub(all) enum SteerInput {
   Prompt(String)

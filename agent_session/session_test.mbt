@@ -85,66 +85,6 @@ test "ToolResult brief round-trips when present" {
 }
 
 ///|
-test "approval audit records round-trip through session JSON" {
-  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
-    .append(
-      ApprovalRequested({
-        id: "ap-1",
-        tool_name: "mbtx",
-        detail: "run without the sandbox policy",
-        body: Some("fn main { println(1) }"),
-        source: "controller",
-      }),
-    )
-    .append(
-      ApprovalResolved({
-        id: "ap-1",
-        outcome: "allowed_once",
-        source: "controller",
-      }),
-    )
-  let encoded = session.to_json()
-  let decoded : @agent_session.Session = @json.from_json(encoded)
-  assert_eq(decoded, session)
-  let text = encoded.stringify()
-  assert_true(text.contains("approval_requested"))
-  assert_true(text.contains("approval_resolved"))
-  assert_true(text.contains("allowed_once"))
-}
-
-///|
-test "approval audit records do not close pending model tool calls" {
-  let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
-    .append(Assistant(AssistantMessage("", tool_calls=[sample_tool_call()])))
-    .append(
-      ApprovalRequested({
-        id: "ap-1",
-        tool_name: "read",
-        detail: "read outside the workspace",
-        body: None,
-        source: "controller",
-      }),
-    )
-    .append(
-      ApprovalResolved({
-        id: "ap-1",
-        outcome: "allowed_once",
-        source: "controller",
-      }),
-    )
-    .append(
-      Tool(
-        ToolResult(tool_call_id="call_1", tool_name="read", content="README"),
-      ),
-    )
-  let messages = session.chat_messages()
-  assert_eq(messages.length(), 3)
-  assert_true(messages[1].role is Assistant)
-  assert_true(messages[2].role is Tool("call_1"))
-  assert_eq(messages[2].content, "README")
-}
-
-///|
 test "session projects to DeepSeek chat messages" {
   let session = @agent_session.Session(SessionId("s1"), system_prompt="system")
     .append(User(UserMessage("inspect")))

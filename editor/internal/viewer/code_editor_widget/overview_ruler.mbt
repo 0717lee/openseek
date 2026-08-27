@@ -646,3 +646,21 @@ extern "js" fn clear_code_editor_overview_ruler_canvas(
   #|   canvas.width = 0;
   #|   canvas.height = 0;
   #| }
+
+///|
+pub extend CodeEditorOverviewRulerBand with Debug::{to_repr}
+
+///|
+pub extend CodeEditorOverviewRulerBand with Eq::{equal, not_equal}
+
+///|
+pub extend CodeEditorOverviewRulerEntry with Debug::{to_repr}
+
+///|
+pub extend CodeEditorOverviewRulerEntry with Eq::{equal, not_equal}
+
+///|
+pub extend CodeEditorOverviewRulerLane with Debug::{to_repr}
+
+///|
+pub extend CodeEditorOverviewRulerLane with Eq::{equal, not_equal}

@@ -326,32 +326,6 @@ pub fn RuntimeNotice::content(self : RuntimeNotice) -> String {
 }
 
 ///|
-/// One durable record that a tool asked for permission.
-///
-/// `source` names the configured decision path (`controller` or
-/// `policy_always`). The request is audit-only: it never projects into model
-/// context. `body` is the exact subject shown to the controller, when one was
-/// supplied.
-pub(all) struct ApprovalRequest {
-  id : String
-  tool_name : String
-  detail : String
-  body : String?
-  source : String
-} derive(Eq, Debug, ToJson, FromJson)
-
-///|
-/// One durable record that a permission request settled.
-///
-/// `outcome` is `allowed_once`, `rejected`, or `cancelled`; `source` matches
-/// the paired request. This is audit-only and never enters model context.
-pub(all) struct ApprovalResolution {
-  id : String
-  outcome : String
-  source : String
-} derive(Eq, Debug, ToJson, FromJson)
-
-///|
 /// Durable compaction record for older session events.
 ///
 /// A summary does not delete the covered raw events. It records that
@@ -410,11 +384,10 @@ pub(all) enum TurnTerminal {
 ///
 /// `User` and `Runtime` project as user-role model messages. `Assistant`
 /// projects as an assistant message and may open pending tool calls. `Tool`
-/// answers a pending assistant tool call. `ApprovalRequested` and
-/// `ApprovalResolved` are durable audit records that never enter model context.
-/// `Summary` is append-only compaction metadata that can replace older events
-/// during projection. `Terminal` records turn completion status and may project
-/// as a final assistant/status message.
+/// answers a pending assistant tool call. `Summary` is append-only compaction
+/// metadata that can replace older events during projection. `Terminal`
+/// records turn completion status and may project as a final assistant/status
+/// message.
 pub(all) enum SessionItem {
   /// User-authored model input, including the initial task and any steering
   /// text. JSON tag: `user`. Projection replays it as a user-role message.
@@ -431,10 +404,6 @@ pub(all) enum SessionItem {
   /// `runtime_notice`. Projection sends it as a user-role message even though it
   /// did not originate from the user's prompt.
   Runtime(RuntimeNotice)
-  /// A tool asked for permission. JSON tag: `approval_requested`.
-  ApprovalRequested(ApprovalRequest)
-  /// A permission request settled. JSON tag: `approval_resolved`.
-  ApprovalResolved(ApprovalResolution)
   /// Append-only compaction metadata for an inclusive event sequence range.
   /// JSON tag: `summary`. Projection skips covered earlier events when a later
   /// summary covers their sequence and emits the summary text instead.
@@ -685,30 +654,6 @@ pub fn Session::compact(
 
 ///|
 pub extend AssistantMessage with Debug::{to_repr}
-
-///|
-pub extend ApprovalRequest with Debug::{to_repr}
-
-///|
-pub extend ApprovalRequest with Eq::{equal, not_equal}
-
-///|
-pub extend ApprovalRequest with FromJson::{from_json}
-
-///|
-pub extend ApprovalRequest with ToJson::{to_json}
-
-///|
-pub extend ApprovalResolution with Debug::{to_repr}
-
-///|
-pub extend ApprovalResolution with Eq::{equal, not_equal}
-
-///|
-pub extend ApprovalResolution with FromJson::{from_json}
-
-///|
-pub extend ApprovalResolution with ToJson::{to_json}
 
 ///|
 pub extend AssistantMessage with FromJson::{from_json}

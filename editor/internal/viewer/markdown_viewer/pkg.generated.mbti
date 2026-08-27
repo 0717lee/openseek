@@ -23,6 +23,9 @@ pub(all) enum MarkdownResourceKind {
   OrdinaryMarkdown
   MoonBitMarkdown
 } derive(Eq, @debug.Debug)
+pub fn MarkdownResourceKind::equal(Self, Self) -> Bool
+pub fn MarkdownResourceKind::not_equal(Self, Self) -> Bool
+pub fn MarkdownResourceKind::to_repr(Self) -> @debug.Repr
 
 type MarkdownViewerServices
 pub fn MarkdownViewerServices::MarkdownViewerServices(languages? : @languages.LanguageHandle, markers? : @markers.MarkerDecorationsSource, location_opener? : @navigation_api.LocationOpenerHandle, text_model_resolver? : @navigation_api.TextModelResolverHandle, preview_factory? : @browser.ReferencesPeekPreviewFactory, launch_async_task? : (async () -> Unit noraise) -> Unit, log_service? : @log.LogHandle) -> Self
@@ -66,18 +69,25 @@ pub(all) struct MarkdownViewerWidgetModel {
   resource_kind : MarkdownResourceKind
 } derive(@debug.Debug)
 pub fn MarkdownViewerWidgetModel::MarkdownViewerWidgetModel(@model.TextModel, MarkdownResourceKind) -> Self
+pub fn MarkdownViewerWidgetModel::to_repr(Self) -> @debug.Repr
 
 type MarkdownViewerWidgetOptions derive(Eq, @debug.Debug)
 pub fn MarkdownViewerWidgetOptions::MarkdownViewerWidgetOptions(theme? : String, placeholder? : String, show_unused? : Bool) -> Self
 pub fn MarkdownViewerWidgetOptions::default() -> Self
+pub fn MarkdownViewerWidgetOptions::equal(Self, Self) -> Bool
+pub fn MarkdownViewerWidgetOptions::not_equal(Self, Self) -> Bool
 pub fn MarkdownViewerWidgetOptions::placeholder(Self) -> String
 pub fn MarkdownViewerWidgetOptions::show_unused(Self) -> Bool
 pub fn MarkdownViewerWidgetOptions::theme(Self) -> String
+pub fn MarkdownViewerWidgetOptions::to_repr(Self) -> @debug.Repr
 pub fn MarkdownViewerWidgetOptions::with_placeholder(Self, String) -> Self
 pub fn MarkdownViewerWidgetOptions::with_show_unused(Self, Bool) -> Self
 pub fn MarkdownViewerWidgetOptions::with_theme(Self, String) -> Self
 
 type MarkdownViewerWidgetViewState derive(Eq, @debug.Debug)
+pub fn MarkdownViewerWidgetViewState::equal(Self, Self) -> Bool
+pub fn MarkdownViewerWidgetViewState::not_equal(Self, Self) -> Bool
+pub fn MarkdownViewerWidgetViewState::to_repr(Self) -> @debug.Repr
 
 // Type aliases
 

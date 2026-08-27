@@ -243,7 +243,7 @@
     .header-meta { color: var(--muted); font-size: 12px; }
 
     /* mode toggle */
-    /* sticky toolbar: keeps the view/args toggles + audit bars pinned to the top
+    /* sticky toolbar: keeps the view/args toggles + filter bars pinned to the top
        of the scrolling .main while reading a long log. Negative side margins let
        its background span the .main padding gutter so content can't peek beside it. */
     .sticky-toolbar {
@@ -257,7 +257,7 @@
     }
     .sticky-toolbar .mode-row { margin-bottom: 0; }
     .sticky-toolbar .error-bar,
-    .sticky-toolbar .approval-bar { margin: 10px 0 0; }
+    .sticky-toolbar .escalated-bar { margin: 10px 0 0; }
     .mode-row {
       display: flex;
       align-items: center;
@@ -353,22 +353,24 @@
     .session-view.errors-only .card.assistant:not(:has(.tool-call-failed)) { display: none; }
     .session-view.errors-only .turn:not(:has(.card.error)) { display: none; }
 
-    /* approval audit bar */
-    .approval-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: -6px 0 16px; }
-    .approval-count { color: var(--accent); font-size: 12px; font-weight: 600; margin-right: 2px; }
-    .approval-toggle, .approval-jump {
+    /* escalated-only: derive the audit view from durable tool-call arguments.
+       Keep each top-level escalated:true call and its unambiguously paired result;
+       hide unrelated calls inside an otherwise retained assistant card. */
+    .escalated-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: -6px 0 16px; }
+    .escalated-count { color: var(--accent); font-size: 12px; font-weight: 600; margin-right: 2px; }
+    .escalated-toggle, .escalated-jump {
       background: var(--panel); color: var(--text);
       border: 1px solid var(--border); border-radius: 999px;
       padding: 4px 12px; cursor: pointer; font-size: 12px;
     }
-    .approval-jump { padding: 4px 11px; font-family: ui-monospace, monospace; }
-    .approval-toggle:hover, .approval-jump:hover { border-color: var(--accent); }
-    .approval-toggle.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
-    .approvals-only-empty { color: var(--muted); margin-top: 24px; }
-    /* approvals-only: keep both sides of every permission decision and the
-       turns that contain them; hide unrelated session activity. */
-    .session-view.approvals-only .card:not(.approval) { display: none; }
-    .session-view.approvals-only .turn:not(:has(.card.approval)) { display: none; }
+    .escalated-jump { padding: 4px 11px; font-family: ui-monospace, monospace; }
+    .escalated-toggle:hover, .escalated-jump:hover { border-color: var(--accent); }
+    .escalated-toggle.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+    .escalated-only-empty { color: var(--muted); margin-top: 24px; }
+    .session-view.escalated-only .card:not(.assistant):not(.tool.escalated) { display: none; }
+    .session-view.escalated-only .card.assistant:not(:has(.tool-call-escalated)) { display: none; }
+    .session-view.escalated-only .card.assistant .tool-call:not(.tool-call-escalated) { display: none; }
+    .session-view.escalated-only .turn:not(:has(.tool-call-escalated)):not(:has(.card.tool.escalated)) { display: none; }
 
     /* notices */
     .notices { margin-bottom: 16px; }
@@ -398,14 +400,6 @@
     .card.tool { border-left-color: var(--tool); }
     .card.tool.error { border-left-color: var(--error); background: var(--notice-error-bg); }
     .card.runtime { border-left-color: var(--runtime); }
-    .card.approval { border-left-color: var(--accent); }
-    .card.approval.approved { border-left-color: var(--added); }
-    .card.approval.rejected { border-left-color: var(--error); background: var(--notice-error-bg); }
-    .card.approval.cancelled { border-left-color: var(--muted); }
-    .approval-subject {
-      margin-top: 8px; padding: 8px 10px; border: 1px solid var(--border);
-      border-radius: 6px; background: var(--panel-2);
-    }
     /* plan checklists — shared by `plan` tool calls and plan-cadence reminders:
        icon + numbered title rows, statuses as classes, delta chips for what
        changed against the previous plan call, ghost rows for dropped steps. */
@@ -597,6 +591,7 @@
     /* a tool call whose result failed: tint its border so it stands out, and let
        errors-only keep the assistant card that holds it. */
     .tool-call-failed { border-color: var(--error); }
+    .tool-call-escalated { border-color: var(--accent); }
 
     /* call <-> result pairing: the same `call N` chip on a tool call and its
        result, each an anchor that jumps to its partner. When one assistant turn

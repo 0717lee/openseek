@@ -34,30 +34,6 @@ pub fn parse_goal_baseline(String) -> GoalBaseline?
 // Errors
 
 // Types and methods
-pub(all) struct ApprovalRequest {
-  id : String
-  tool_name : String
-  detail : String
-  body : String?
-  source : String
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
-pub fn ApprovalRequest::equal(Self, Self) -> Bool
-pub fn ApprovalRequest::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
-pub fn ApprovalRequest::not_equal(Self, Self) -> Bool
-pub fn ApprovalRequest::to_json(Self) -> Json
-pub fn ApprovalRequest::to_repr(Self) -> @debug.Repr
-
-pub(all) struct ApprovalResolution {
-  id : String
-  outcome : String
-  source : String
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
-pub fn ApprovalResolution::equal(Self, Self) -> Bool
-pub fn ApprovalResolution::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
-pub fn ApprovalResolution::not_equal(Self, Self) -> Bool
-pub fn ApprovalResolution::to_json(Self) -> Json
-pub fn ApprovalResolution::to_repr(Self) -> @debug.Repr
-
 pub struct AssistantMessage {
   // private fields
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
@@ -152,8 +128,6 @@ pub(all) enum SessionItem {
   Assistant(AssistantMessage)
   Tool(ToolResult)
   Runtime(RuntimeNotice)
-  ApprovalRequested(ApprovalRequest)
-  ApprovalResolved(ApprovalResolution)
   Summary(SessionSummary)
   Terminal(TurnTerminal)
 } derive(Eq, @debug.Debug)

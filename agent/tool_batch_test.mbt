@@ -200,63 +200,6 @@ async test "max-step exhaustion preserves continued session state" {
 }
 
 ///|
-async test "agent persists approval audit events before the tool result" {
-  @async.with_task_group() <| group => {
-    guard max_step_exhaustion_test_server(group) is Some(url) else { return }
-    let audit : Array[@agent_runtime.ApprovalEvent] = [
-      Requested(
-        id="ap-1",
-        tool_name="continue_test",
-        detail="run without the sandbox policy",
-        body=Some("test body"),
-        source="controller",
-      ),
-      Resolved(id="ap-1", outcome="allowed_once", source="controller"),
-    ]
-    let runtime = @agent_runtime.AgentRuntime(
-      approval=ApprovalChannel(_ => AllowedOnce, drain_events=() => {
-        let drained = audit.copy()
-        audit.clear()
-        drained
-      }),
-    )
-    let scope = @agent_runtime.AgentTaskScope(group)
-    let session = @agent_session.Session(
-      SessionId("approval-audit-test"),
-      system_prompt="system",
-    )
-    let tools = @agent_tool.Tools([
-      AgentToolDefinition(
-        name="continue_test",
-        description="Produce one audited result.",
-        schema=JsonSchema({ "type": "object" }),
-        execute=Sync(_args => @agent_tool.ToolAction::respond("continue-result")),
-      ),
-    ])
-    let result = @agent.run_turn_in_scope(
-      runtime~,
-      scope~,
-      api_key="test-key",
-      model=Deepseek(V4Flash),
-      session~,
-      task="run one audited tool",
-      append_item=(session, item) => session.append(item),
-      max_steps=1,
-      api_url=url,
-      tools~,
-    )
-    let events = result.events()
-    assert_eq(events.length(), 6)
-    assert_true(events[0].item() is User(_))
-    assert_true(events[1].item() is Assistant(_))
-    assert_true(events[2].item() is ApprovalRequested(_))
-    assert_true(events[3].item() is ApprovalResolved(_))
-    assert_true(events[4].item() is Tool(_))
-    assert_true(events[5].item() is Terminal(Failed("max steps exhausted")))
-  }
-}
-
-///|
 async fn append_failure_test_server(group : @async.TaskGroup[Unit]) -> String? {
   guard bind_test_server(
       "local TCP bind unavailable; skipping append failure test",

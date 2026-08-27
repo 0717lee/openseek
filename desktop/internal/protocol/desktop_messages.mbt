@@ -2021,3 +2021,51 @@ pub extend WorktreeRemovePayload with Eq::{equal, not_equal}
 
 ///|
 pub extend WorktreeRemovePayload with ToJson::{to_json}
+
+///|
+pub extend BrowserThemePayload with Debug::{to_repr}
+
+///|
+pub extend BrowserThemePayload with FromJson::{from_json}
+
+///|
+pub extend BrowserThemePayload with Eq::{equal, not_equal}
+
+///|
+pub extend BrowserThemePayload with ToJson::{to_json}
+
+///|
+pub extend CancelSearchSemanticPayload with Debug::{to_repr}
+
+///|
+pub extend CancelSearchSemanticPayload with FromJson::{from_json}
+
+///|
+pub extend CancelSearchSemanticPayload with Eq::{equal, not_equal}
+
+///|
+pub extend CancelSearchSemanticPayload with ToJson::{to_json}
+
+///|
+pub extend CreateDirectoryPayload with Debug::{to_repr}
+
+///|
+pub extend CreateDirectoryPayload with FromJson::{from_json}
+
+///|
+pub extend CreateDirectoryPayload with Eq::{equal, not_equal}
+
+///|
+pub extend CreateDirectoryPayload with ToJson::{to_json}
+
+///|
+pub extend SearchSemanticPayload with Debug::{to_repr}
+
+///|
+pub extend SearchSemanticPayload with FromJson::{from_json}
+
+///|
+pub extend SearchSemanticPayload with Eq::{equal, not_equal}
+
+///|
+pub extend SearchSemanticPayload with ToJson::{to_json}

@@ -138,3 +138,30 @@ pub(all) enum Msg {
     message~ : String
   )
 }
+
+///|
+pub extend EditorHighlights with Debug::{to_repr}
+
+///|
+pub extend EditorHighlights with Eq::{equal, not_equal}
+
+///|
+pub extend Input with Eq::{equal, not_equal}
+
+///|
+pub extend Mode with Debug::{to_repr}
+
+///|
+pub extend Mode with Eq::{equal, not_equal}
+
+///|
+pub extend Page with Eq::{equal, not_equal}
+
+///|
+pub extend Phase with Debug::{to_repr}
+
+///|
+pub extend Phase with Eq::{equal, not_equal}
+
+///|
+pub extend State with Eq::{equal, not_equal}

@@ -823,71 +823,6 @@ test "raw view renders each event kind" {
 }
 
 ///|
-test "raw view renders approval audit records and model view hides them" {
-  let session = @agent_session.Session(
-      SessionId("approval-audit"),
-      system_prompt="system",
-    )
-    .append(
-      ApprovalRequested({
-        id: "ap-1",
-        tool_name: "mbtx",
-        detail: "run without the sandbox policy",
-        body: Some("fn main { println(1) }"),
-        source: "controller",
-      }),
-    )
-    .append(
-      ApprovalResolved({
-        id: "ap-1",
-        outcome: "allowed_once",
-        source: "controller",
-      }),
-    )
-  let raw = render(@viz.render_session(session, RawLog))
-  assert_true(raw.contains("class=\"card approval approval-requested\""))
-  assert_true(raw.contains("Permission requested"))
-  assert_true(raw.contains("Request: ap-1"))
-  assert_true(raw.contains("run without the sandbox policy"))
-  assert_true(raw.contains("fn main { println(1) }"))
-  assert_true(
-    raw.contains("class=\"card approval approval-resolved approved\""),
-  )
-  assert_true(raw.contains("Permission approved"))
-  assert_true(raw.contains("Outcome: allow once"))
-  let model = render(@viz.render_session(session, ModelView))
-  assert_false(model.contains("Permission requested"))
-  assert_false(model.contains("Permission approved"))
-}
-
-///|
-test "raw view distinguishes denied and cancelled approval resolutions" {
-  let session = @agent_session.Session(
-      SessionId("approval-outcomes"),
-      system_prompt="system",
-    )
-    .append(
-      ApprovalResolved({
-        id: "ap-denied",
-        outcome: "rejected",
-        source: "controller",
-      }),
-    )
-    .append(
-      ApprovalResolved({
-        id: "ap-cancelled",
-        outcome: "cancelled",
-        source: "controller",
-      }),
-    )
-  let raw = render(@viz.render_session(session, RawLog))
-  assert_true(raw.contains("Permission denied"))
-  assert_true(raw.contains("Outcome: deny"))
-  assert_true(raw.contains("Permission cancelled"))
-  assert_true(raw.contains("Outcome: cancelled"))
-}
-
-///|
 test "model view substitutes a summary for the events it covers" {
   // A session whose summary covers the first two events: the model projection
   // should show the summary text and drop the covered user/assistant content.
@@ -1620,4 +1555,57 @@ test "nested transcripts namespace their anchors; chip hrefs are encoded" {
   )
   let html = render(@viz.render_session(odd, RawLog))
   assert_true(html.contains("href=\"#s=a%2Bb%20c-sr-4\""))
+}
+
+///|
+/// One real escalated call plus lookalikes that must not enter the filter:
+/// `false`, a string value, a nested value, and malformed JSON.
+fn escalated_tool_session() -> @agent_session.Session {
+  @agent_session.Session(SessionId("escalated"), system_prompt="")
+  .append(User(UserMessage("run it")))
+  .append(
+    Assistant(
+      AssistantMessage("", tool_calls=[
+        ToolCall(
+          id="yes",
+          name="shell",
+          arguments="{\"cmd\":\"make\",\"escalated\":true}",
+        ),
+        ToolCall(
+          id="no",
+          name="shell",
+          arguments="{\"cmd\":\"make\",\"escalated\":false}",
+        ),
+        ToolCall(
+          id="string",
+          name="shell",
+          arguments="{\"escalated\":\"true\"}",
+        ),
+        ToolCall(
+          id="nested",
+          name="shell",
+          arguments="{\"options\":{\"escalated\":true}}",
+        ),
+        ToolCall(id="malformed", name="shell", arguments="{\"escalated\":true"),
+      ]),
+    ),
+  )
+  .append(
+    Tool(ToolResult(tool_call_id="yes", tool_name="shell", content="built")),
+  )
+  .append(
+    Tool(ToolResult(tool_call_id="no", tool_name="shell", content="built")),
+  )
+  .append(Terminal(Finished("done")))
+}
+
+///|
+test "escalated tool calls and their results are tagged in both views" {
+  let session = escalated_tool_session()
+  for mode in [@viz.RawLog, ModelView] {
+    let html = render(@viz.render_session(session, mode))
+    assert_eq(occurrences(html, "tool-call-escalated"), 1)
+    assert_eq(occurrences(html, "card tool escalated"), 1)
+    assert_eq(@viz.rendered_escalated_count(session, mode), 1)
+  }
 }

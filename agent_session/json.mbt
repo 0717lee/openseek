@@ -107,18 +107,13 @@ pub impl FromJson for TurnTerminal with fn from_json(
 ///
 /// The JSON shape is `{ "kind": <tag>, "payload": <variant-json> }`. Tags are
 /// stable storage strings such as `user`, `assistant`, `tool_result`,
-/// `runtime_notice`, `approval_requested`, `approval_resolved`, `summary`, and
-/// `terminal`.
+/// `runtime_notice`, `summary`, and `terminal`.
 impl ToJson for SessionItem with fn to_json(item : SessionItem) -> Json {
   let (kind, payload) = match item {
     User(message) => ("user", ToJson::to_json(message))
     Assistant(message) => ("assistant", ToJson::to_json(message))
     Tool(result) => ("tool_result", ToJson::to_json(result))
     Runtime(notice) => ("runtime_notice", ToJson::to_json(notice))
-    ApprovalRequested(request) =>
-      ("approval_requested", ToJson::to_json(request))
-    ApprovalResolved(resolution) =>
-      ("approval_resolved", ToJson::to_json(resolution))
     Summary(summary) => ("summary", ToJson::to_json(summary))
     Terminal(terminal) => ("terminal", ToJson::to_json(terminal))
   }
@@ -148,10 +143,6 @@ pub impl FromJson for SessionItem with fn from_json(
       Tool(@json.from_json(payload, path=path.add_key("payload")))
     "runtime_notice" =>
       Runtime(@json.from_json(payload, path=path.add_key("payload")))
-    "approval_requested" =>
-      ApprovalRequested(@json.from_json(payload, path=path.add_key("payload")))
-    "approval_resolved" =>
-      ApprovalResolved(@json.from_json(payload, path=path.add_key("payload")))
     "summary" => Summary(@json.from_json(payload, path=path.add_key("payload")))
     "terminal" =>
       Terminal(@json.from_json(payload, path=path.add_key("payload")))

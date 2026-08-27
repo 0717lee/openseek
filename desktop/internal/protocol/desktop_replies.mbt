@@ -2688,3 +2688,51 @@ pub extend WorktreesReply with Eq::{equal, not_equal}
 
 ///|
 pub extend WorktreesReply with ToJson::{to_json}
+
+///|
+pub extend SearchSemanticReply with Debug::{to_repr}
+
+///|
+pub extend SearchSemanticReply with FromJson::{from_json}
+
+///|
+pub extend SearchSemanticReply with Eq::{equal, not_equal}
+
+///|
+pub extend SearchSemanticReply with ToJson::{to_json}
+
+///|
+pub extend SemanticContextLine with Debug::{to_repr}
+
+///|
+pub extend SemanticContextLine with FromJson::{from_json}
+
+///|
+pub extend SemanticContextLine with Eq::{equal, not_equal}
+
+///|
+pub extend SemanticContextLine with ToJson::{to_json}
+
+///|
+pub extend SemanticSearchError with Debug::{to_repr}
+
+///|
+pub extend SemanticSearchError with FromJson::{from_json}
+
+///|
+pub extend SemanticSearchError with Eq::{equal, not_equal}
+
+///|
+pub extend SemanticSearchError with ToJson::{to_json}
+
+///|
+pub extend SemanticSearchHit with Debug::{to_repr}
+
+///|
+pub extend SemanticSearchHit with FromJson::{from_json}
+
+///|
+pub extend SemanticSearchHit with Eq::{equal, not_equal}
+
+///|
+pub extend SemanticSearchHit with ToJson::{to_json}
