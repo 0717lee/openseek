@@ -156,30 +156,66 @@ jobs:
       - name: Test native core
         if: matrix.shard == 'core'
         run: |
-          rg --files -g 'moon.pkg' \
-            -g '!desktop/**' \
-            -g '!editor/**' \
-            -g '!scripts/**' \
-            -g '!eval/swe_agi/tasks/csv/**' \
-            | sed -e 's#/moon.pkg$##' -e 's#^moon.pkg$#.#' \
-            | xargs -r moon test --target native -j "$(nproc)"
+          set -o pipefail
+          packages="$(
+            git ls-files -- 'moon.pkg' '**/moon.pkg' \
+              ':!desktop/**' \
+              ':!editor/**' \
+              ':!scripts/**' \
+              ':!eval/swe_agi/tasks/csv/**' \
+            | sed -e 's#/moon.pkg$##' -e 's#^moon.pkg$#.#'
+          )"
+          test -n "$packages"
+          test_count="$(
+            printf '%s\n' "$packages" \
+              | xargs moon test --target native --outline \
+              | awk 'END { print NR }'
+          )"
+          test "$test_count" -gt 0
+          printf 'Selected %s native core tests\n' "$test_count"
+          printf '%s\n' "$packages" \
+            | xargs moon test --target native -j "$(nproc)"
 
       - name: Test native editor
         if: matrix.shard == 'editor'
         run: |
-          rg --files editor -g 'moon.pkg' \
-            -g '!editor/tests/fixtures/**' \
-            | sed 's#/moon.pkg$##' \
-            | xargs -r moon test --target native -j "$(nproc)"
+          set -o pipefail
+          packages="$(
+            git ls-files -- 'editor/moon.pkg' 'editor/**/moon.pkg' \
+              ':!editor/tests/fixtures/**' \
+            | sed 's#/moon.pkg$##'
+          )"
+          test -n "$packages"
+          test_count="$(
+            printf '%s\n' "$packages" \
+              | xargs moon test --target native --outline \
+              | awk 'END { print NR }'
+          )"
+          test "$test_count" -gt 0
+          printf 'Selected %s native editor tests\n' "$test_count"
+          printf '%s\n' "$packages" \
+            | xargs moon test --target native -j "$(nproc)"
 
       - name: Test native desktop
         if: matrix.shard == 'desktop'
         # No Xvfb: nothing here initializes CEF or opens a window. Loading
         # libproton needs the Linux libraries above, not a display.
         run: |
-          rg --files desktop -g 'moon.pkg' \
-            | sed 's#/moon.pkg$##' \
-            | xargs -r moon test --target native -j "$(nproc)"
+          set -o pipefail
+          packages="$(
+            git ls-files -- 'desktop/moon.pkg' 'desktop/**/moon.pkg' \
+            | sed 's#/moon.pkg$##'
+          )"
+          test -n "$packages"
+          test_count="$(
+            printf '%s\n' "$packages" \
+              | xargs moon test --target native --outline \
+              | awk 'END { print NR }'
+          )"
+          test "$test_count" -gt 0
+          printf 'Selected %s native desktop tests\n' "$test_count"
+          printf '%s\n' "$packages" \
+            | xargs moon test --target native -j "$(nproc)"
 
       - name: Test JS target
         if: matrix.shard == 'desktop'
@@ -189,5 +225,5 @@ jobs:
           moon test --target js
 
       - name: Cram (offline CLI docs)
-        if: matrix.shard == 'core'
+        if: matrix.shard == 'desktop'
         run: moon cram test tests/cram
