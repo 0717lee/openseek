@@ -918,7 +918,7 @@ test "the frontier a goal is sent from counts what is already buffered" {
   inspect(
     {
       ..reloading,
-      sync: ReloadFailed(request_id=TestTranscriptRequestId, buffered=[
+      sync: ReloadFailed(buffered=[
         {
           sequence: 7,
           ts: None,
