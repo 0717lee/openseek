@@ -208,27 +208,6 @@ fn Conversation::settled_probe(self : Conversation) -> PullRequestProbe? {
 }
 
 ///|
-/// The composer's one git affordance: the branch's pull request when it has
-/// one, the branch itself when it does not, tinted by CI — everything else
-/// lives in the popover it opens. The composer shares its row with the send
-/// button and a resizable side panel, so a fact that is not worth a glance
-/// every second belongs behind the click rather than in a fourth chip that
-/// pushes the row off its own edge.
-fn git_chip(
-  dispatch : @cmd.Emit[Msg],
-  model : Model,
-  conv : Conversation,
-) -> @html.Html? {
-  guard conv.git_presentation() is Some(presentation) else { return None }
-  Some(
-    presentation.render(
-      open=model.git_details_open,
-      toggle=dispatch(ToggleGitDetails),
-    ),
-  )
-}
-
-///|
 fn fetch_branch(
   dispatch : @cmd.Emit[Msg],
   channel : @interop.ChannelId,

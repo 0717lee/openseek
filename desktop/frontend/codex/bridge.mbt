@@ -432,7 +432,7 @@ fn State::send(
   guard !self.input_empty() else { return @cmd.none }
   let inputs = self.turn_inputs()
   if self.active_turn_id() is Some(turn_id) {
-    CodexTurnReply(active.id).request(
+    CodexTurnSteerReply(active.id).request(
       dispatch,
       channel,
       @commands.codex_turn_steer,
@@ -449,7 +449,7 @@ fn State::send(
     }
     let model = self.selected_model.trim().to_owned()
     let effort = self.selected_effort.trim().to_owned()
-    CodexTurnReply(active.id).request(
+    CodexTurnStartReply(active.id).request(
       dispatch,
       channel,
       @commands.codex_turn_start,
@@ -524,7 +524,7 @@ fn State::start_turn_in_new_worktree(
             error => {
               let message = @interop.bridge_error_text(error)
               scheduler.add(
-                dispatch(Failed(kind=CodexTurnReply(thread_id), message~)),
+                dispatch(Failed(kind=CodexTurnStartReply(thread_id), message~)),
               )
               return
             }
@@ -535,7 +535,7 @@ fn State::start_turn_in_new_worktree(
               scheduler.add(
                 dispatch(
                   Failed(
-                    kind=CodexTurnReply(thread_id),
+                    kind=CodexTurnStartReply(thread_id),
                     message="worktree setup failed: " + message,
                   ),
                 ),
@@ -548,7 +548,7 @@ fn State::start_turn_in_new_worktree(
             scheduler.add(
               dispatch(
                 Failed(
-                  kind=CodexTurnReply(thread_id),
+                  kind=CodexTurnStartReply(thread_id),
                   message="malformed worktree.create reply",
                 ),
               ),
@@ -605,7 +605,7 @@ fn State::start_turn_in_new_worktree(
           scheduler.add(
             dispatch(
               Failed(
-                kind=CodexTurnReply(thread_id),
+                kind=CodexTurnStartReply(thread_id),
                 message="worktree start failed: \{error}",
               ),
             ),

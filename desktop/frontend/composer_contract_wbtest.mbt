@@ -6,7 +6,7 @@ test "composer input is a projection instead of the root model" {
     task: "local draft",
     mentions: [mention],
   })
-  let input = model.composer_input(test_dispatch())
+  let input = model.composer_input()
   inspect(input.identity.owner.session, content="desktop-test")
   inspect(input.draft.task, content="local draft")
   assert_true(input.draft.mentions == [mention])
@@ -22,12 +22,12 @@ test "the composer is handed the turn's facts, not a rendered row" {
   // Facts only. The wording, the clock, and the tick that advances it belong
   // to the component, so a span that changes every second costs one
   // component's render instead of reprojecting every component's input.
-  guard running.composer_input(test_dispatch()).run
+  guard running.composer_input().run
     is Some({ stage: Thinking, started_ms: None, tokens: 0 }) else {
     fail("expected the open turn's heartbeat facts")
   }
   let idle = running.replace_conversation({ ..conv, run: NoRun(ended=None) })
-  assert_eq(idle.composer_input(test_dispatch()).run, None)
+  assert_eq(idle.composer_input().run, None)
 }
 
 ///|

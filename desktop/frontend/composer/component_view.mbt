@@ -206,7 +206,10 @@ fn Entry::view(
         }
     }
   }
-  let context = input.presentation.context.copy()
+  let context : Array[@html.Html] = []
+  for component in input.presentation.context {
+    context.push(component.render(self.identity(), action_emit))
+  }
   // Closest to the textarea: the turn's own liveness is what the person
   // waiting is watching for, and the wait is spent looking here rather than
   // at the top bar. Both rows are permanent slots, so neither can shift the
@@ -236,7 +239,9 @@ fn Entry::view(
         None
       },
     },
-    status: input.presentation.status,
+    status: input.presentation.status.map(component => {
+      component.render(self.identity(), action_emit)
+    }),
     action,
     overlay: if goal_mode {
       None

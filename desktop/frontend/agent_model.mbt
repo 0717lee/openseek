@@ -172,26 +172,22 @@ fn Model::codex_model_group(self : Model) -> @composer.ModelGroup {
 /// narrows to OpenSeek's tiers.
 fn Model::openseek_model_chip(
   self : Model,
-  dispatch : @cmd.Emit[Msg],
   conv : Conversation,
-) -> @html.Html {
+) -> @composer.ModelSelect {
   let groups : Array[@composer.ModelGroup] = [
     openseek_model_group(conv.engine_model),
   ]
   if self.composing_new_chat() {
     groups.push(self.codex_model_group())
   }
-  @composer.ModelSelect::{
+  {
     id: "openseek-model-picker",
     groups,
     selected: ModelChoice::OpenSeekModel(conv.engine_model).wire(),
     disabled: false,
     open: self.select_menu == Some(OpenSeekModelMenu),
-    toggle: dispatch(ToggleSelectMenu(OpenSeekModelMenu)),
-    dismiss: dispatch(CloseSelectMenu),
-    change: dispatch.map(value => ModelPicked(value)),
     title: "Model: \{conv.engine_model.label()}",
-  }.render()
+  }
 }
 
 ///|
@@ -201,38 +197,29 @@ fn Model::openseek_model_chip(
 /// setting that provider deliberately ignores.
 fn Model::openseek_reasoning_chip(
   self : Model,
-  dispatch : @cmd.Emit[Msg],
   conv : Conversation,
-) -> @html.Html? {
+) -> @composer.ReasoningSelect? {
   guard conv.engine_model.supports_reasoning() else { return None }
   let options : Array[@composer.ModelOption] = [
     { value: ReasoningOff.wire(), label: "Off" },
     { value: ReasoningHigh.wire(), label: "High" },
     { value: ReasoningMax.wire(), label: "Max" },
   ]
-  Some(
-    @composer.ReasoningSelect::{
-      id: "openseek-reasoning-picker",
-      options,
-      selected: self.openseek_reasoning.wire(),
-      disabled: false,
-      open: self.select_menu == Some(OpenSeekReasoningMenu),
-      toggle: dispatch(ToggleSelectMenu(OpenSeekReasoningMenu)),
-      dismiss: dispatch(CloseSelectMenu),
-      change: dispatch.map(value => OpenSeekEffortPicked(value)),
-      title: "Reasoning effort: \{self.openseek_reasoning.label()}",
-    }.render(),
-  )
+  Some({
+    id: "openseek-reasoning-picker",
+    options,
+    selected: self.openseek_reasoning.wire(),
+    disabled: false,
+    open: self.select_menu == Some(OpenSeekReasoningMenu),
+    title: "Reasoning effort: \{self.openseek_reasoning.label()}",
+  })
 }
 
 ///|
 /// The unified model chip on the Codex page. A composing draft may still be
 /// handed back to OpenSeek; a stored thread's transcript is Codex's alone,
 /// so its menu narrows to Codex models.
-fn Model::codex_model_chip(
-  self : Model,
-  dispatch : @cmd.Emit[Msg],
-) -> @html.Html {
+fn Model::codex_model_chip(self : Model) -> @composer.ModelSelect {
   let groups : Array[@composer.ModelGroup] = []
   if self.codex.composing_draft() {
     groups.push(openseek_model_group(self.default_model))
@@ -242,15 +229,12 @@ fn Model::codex_model_chip(
     CodexModels(_, selected~) => ModelChoice::CodexModel(selected).wire()
     CodexModelsUnavailable(_) => CodexUnavailableChoiceWire
   }
-  @composer.ModelSelect::{
+  {
     id: "codex-model-picker",
     groups,
     selected,
     disabled: false,
     open: self.select_menu == Some(CodexModelMenu),
-    toggle: dispatch(ToggleSelectMenu(CodexModelMenu)),
-    dismiss: dispatch(CloseSelectMenu),
-    change: dispatch.map(value => ModelPicked(value)),
     title: "Codex model",
-  }.render()
+  }
 }

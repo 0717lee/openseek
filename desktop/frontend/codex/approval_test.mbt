@@ -38,17 +38,30 @@ test "command approval renders facts and advertised decisions" {
     @interop.ChannelId::Local,
     _ => @cmd.none,
   )
-  let input = requested.composer_input(dispatch, {
+  let input = requested.composer_input({
     channel: @interop.ChannelId::Local,
-    model_chip: @html.nothing,
-    reasoning_chip: None,
+    model_control: {
+      id: "approval-test-model",
+      groups: [],
+      selected: "",
+      disabled: true,
+      open: false,
+      title: "",
+    },
+    reasoning_control: None,
     file_candidates: [],
     open_files: [],
     active_file: None,
     file_index: @composer.FileIndexReady(epoch=0, truncated=false),
   })
+  guard input.presentation.context[0] is @composer.CodexRequests(_) else {
+    fail("Codex requests must remain the composer's first typed context slot")
+  }
+  let action_emit : @cmd.Emit[@composer.Action] = @cmd.Emit(_ => @cmd.none)
   let markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(@html.div(input.presentation.context))
+    @rabbita.Val::constant(
+      input.presentation.context[0].render(input.identity, action_emit),
+    )
   })
   assert_true(markup.contains("Command approval"))
   assert_true(markup.contains("Generate package interface metadata"))
@@ -106,17 +119,30 @@ test "network approval uses its destination instead of a command preview" {
     @interop.ChannelId::Local,
     _ => @cmd.none,
   )
-  let input = requested.composer_input(dispatch, {
+  let input = requested.composer_input({
     channel: @interop.ChannelId::Local,
-    model_chip: @html.nothing,
-    reasoning_chip: None,
+    model_control: {
+      id: "approval-test-model",
+      groups: [],
+      selected: "",
+      disabled: true,
+      open: false,
+      title: "",
+    },
+    reasoning_control: None,
     file_candidates: [],
     open_files: [],
     active_file: None,
     file_index: @composer.FileIndexReady(epoch=0, truncated=false),
   })
+  guard input.presentation.context[0] is @composer.CodexRequests(_) else {
+    fail("Codex requests must remain the composer's first typed context slot")
+  }
+  let action_emit : @cmd.Emit[@composer.Action] = @cmd.Emit(_ => @cmd.none)
   let markup = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(@html.div(input.presentation.context))
+    @rabbita.Val::constant(
+      input.presentation.context[0].render(input.identity, action_emit),
+    )
   })
   assert_true(markup.contains("Network access approval"))
   assert_true(markup.contains("Network destination"))

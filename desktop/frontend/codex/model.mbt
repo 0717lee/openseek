@@ -238,9 +238,6 @@ priv struct CodexGitStatus {
 ///|
 priv struct CodexQuestion {
   id : String
-  header : String
-  question : String
-  options : Array[(String, String)]
 }
 
 ///|
@@ -258,6 +255,31 @@ priv struct CodexPendingRequest {
 } derive(Eq)
 
 ///|
+/// A display-only receipt for input submitted through `turn/steer`.
+///
+/// App-server owns the durable `userMessage` item and its id. This local value
+/// is never inserted into `CodexTurn.items`, never used to retry a request, and
+/// disappears only on a definite request failure or when the corresponding
+/// canonical item is observed under the single-client FIFO rule documented in
+/// `State::with_observed_steer_item`.
+priv struct CodexSteerReceipt {
+  submission_id : Int
+  turn_id : String
+  submitted : @composer.Draft
+  known_user_item_ids : Array[String]
+  delivery : CodexSteerDelivery
+} derive(Eq)
+
+///|
+/// RPC acceptance and transcript durability are separate facts. A successful
+/// `turn/steer` reply advances Sending to Accepted, but only the later
+/// app-server item notification removes the receipt from the display.
+priv enum CodexSteerDelivery {
+  CodexSteerSending
+  CodexSteerAccepted
+} derive(Eq)
+
+///|
 /// The typed operation associated with one app-server reply.
 priv enum CodexReplyKind {
   CodexStatusReply
@@ -269,7 +291,10 @@ priv enum CodexReplyKind {
   CodexResumeReply(String)
   CodexDraftOpenReply(String)
   CodexDraftThreadReply(String)
-  CodexTurnReply(String)
+  // Both requests own the same composer lock, but their failure receipts are
+  // different: start clears the first prompt, while steer clears only Sending.
+  CodexTurnStartReply(String)
+  CodexTurnSteerReply(String)
   CodexWorktreeTurnReply(String, CodexWorktree)
   CodexWorktreeRepairReply(String, CodexWorktree)
   CodexLoginReply
@@ -550,6 +575,12 @@ struct State {
   // request construction continues to read `draft` and `mentions`, and no
   // retry or history read is derived from this field.
   submitted_first_prompt : @composer.Draft?
+  // Later inputs sent into an in-progress turn get the same immediate visual
+  // receipt as the first prompt. These receipts remain separate from canonical
+  // turn items because app-server does not return the new user item id from
+  // `turn/steer`.
+  pending_steers : Array[CodexSteerReceipt]
+  next_steer_submission_id : Int
   // The shared component advances only after app-server accepts a submission.
   // Failed sends therefore keep the local draft.
   submission_sequence : Int
@@ -593,6 +624,8 @@ pub fn State::State(loading? : Bool = false) -> State {
     draft: "",
     mentions: [],
     submitted_first_prompt: None,
+    pending_steers: [],
+    next_steer_submission_id: 1,
     submission_sequence: 0,
     skills: CodexSkillsEmpty,
     placement: @composer.LocalCheckout,
@@ -866,7 +899,9 @@ fn State::accepts_reply(self : State, kind : CodexReplyKind) -> Bool {
       .unwrap_or(false)
     CodexDraftThreadReply(draft_id) =>
       self.active_draft().map(draft => draft.id == draft_id).unwrap_or(false)
-    CodexTurnReply(thread_id) | CodexWorktreeTurnReply(thread_id, _) =>
+    CodexTurnStartReply(thread_id)
+    | CodexTurnSteerReply(thread_id)
+    | CodexWorktreeTurnReply(thread_id, _) =>
       self
       .active_thread()
       .map(thread => thread.id == thread_id)
@@ -890,8 +925,9 @@ fn CodexReplyKind::foreground(self : CodexReplyKind) -> CodexForeground? {
     CodexThreadReply(id) => Some(CodexThreadForeground(id))
     CodexResumeReply(id) => Some(CodexResumeForeground(id))
     CodexDraftThreadReply(id) => Some(CodexDraftStartForeground(id))
-    CodexTurnReply(id) | CodexWorktreeTurnReply(id, _) =>
-      Some(CodexTurnForeground(id))
+    CodexTurnStartReply(id)
+    | CodexTurnSteerReply(id)
+    | CodexWorktreeTurnReply(id, _) => Some(CodexTurnForeground(id))
     CodexWorktreeRepairReply(id, _) => Some(CodexWorktreeRepairForeground(id))
     CodexLoginReply => Some(CodexLoginForeground)
     CodexCancelLoginReply(id) => Some(CodexCancelLoginForeground(id))
@@ -1119,6 +1155,7 @@ fn State::select_draft(self : State, id : String, cwd : String) -> State {
     draft: "",
     mentions: [],
     submitted_first_prompt: None,
+    pending_steers: [],
     skills: CodexSkillsEmpty,
     placement: @composer.LocalCheckout,
     archive_confirm: None,
@@ -1630,6 +1667,14 @@ fn State::with_thread_reply(
     } else {
       self.submitted_first_prompt
     },
+    // A selected-history snapshot is authoritative for its visible transcript
+    // and owns none of the previous task's local receipts. Thread creation has
+    // no steer receipts yet and may preserve only the first-prompt preview.
+    pending_steers: if requested_thread is Some(_) {
+      []
+    } else {
+      self.pending_steers
+    },
     git_status: Some({
       thread_id: active.id,
       branch: active.branch,
@@ -1806,6 +1851,11 @@ fn State::without_thread(self : State, thread_id : String) -> State {
       None
     } else {
       self.submitted_first_prompt
+    },
+    pending_steers: if removing_active {
+      []
+    } else {
+      self.pending_steers
     },
     loading: if removing_foreground {
       false
@@ -2179,29 +2229,6 @@ fn CodexPendingRequest::decode(
 }
 
 ///|
-/// Use the server's advertised choices when present. Older app-server builds
-/// omitted `availableDecisions`, so retain their original three-button set as
-/// the compatibility fallback for command and file approvals.
-fn CodexPendingRequest::approval_decisions(
-  self : CodexPendingRequest,
-) -> Array[Json] {
-  if self.params is Object(fields) &&
-    fields.get("availableDecisions") is Some(Array(decisions)) {
-    return decisions
-  }
-  match self.method_ {
-    "item/commandExecution/requestApproval"
-    | "item/fileChange/requestApproval" =>
-      [
-        Json::string("accept"),
-        Json::string("acceptForSession"),
-        Json::string("decline"),
-      ]
-    _ => []
-  }
-}
-
-///|
 fn State::with_request_answer(
   self : State,
   request_key : String,
@@ -2238,23 +2265,7 @@ fn CodexPendingRequest::questions(
       @jsonx.json_text(question, "id") is Some(id) else {
       continue
     }
-    let options : Array[(String, String)] = []
-    if question.get("options") is Some(Array(values)) {
-      for value in values {
-        if value is Object(option) &&
-          @jsonx.json_text(option, "label") is Some(label) {
-          options.push(
-            (label, @jsonx.json_text(option, "description").unwrap_or("")),
-          )
-        }
-      }
-    }
-    questions.push({
-      id,
-      header: @jsonx.json_text(question, "header").unwrap_or("Question"),
-      question: @jsonx.json_text(question, "question").unwrap_or(""),
-      options,
-    })
+    questions.push({ id, })
   }
   questions
 }
@@ -2598,6 +2609,14 @@ pub fn State::transcript_items(
         if !(transcript_item.kind is @transcript.Reasoning) ||
           !transcript_item.content.is_blank() {
           items.push(transcript_item)
+        }
+      }
+      // A receipt belongs after the canonical items already observed in the
+      // same turn. The app-server User item removes it before the next render,
+      // so this projection never shows both representations of one steer.
+      for receipt in self.pending_steers {
+        if receipt.turn_id == turn.id {
+          items.push(receipt.transcript_item())
         }
       }
       if turn.error is Some(message) {

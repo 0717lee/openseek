@@ -607,25 +607,17 @@ fn Model::can_choose_launch_mode(self : Model, conv : Conversation) -> Bool {
 /// The composer's launch-mode chip: visible while the conversation can
 /// still choose (a workspace conversation that has not begun), fixed to
 /// the worktree's name once the chain has bound one.
-fn worktree_mode_chip(
-  dispatch : @cmd.Emit[Msg],
-  model : Model,
+fn Model::worktree_control(
+  self : Model,
   conv : Conversation,
-) -> @html.Html? {
+) -> @composer.WorktreeControl? {
   guard conv.messages.length() == 0 else { return None }
   let choice = match conv.workspace {
     Worktree(name~, ..) => @composer.BoundWorktree(name)
     Project(_) if conv.worktree_mode => @composer.FreshWorktree
     Project(_) => @composer.LocalCheckout
   }
-  Some(
-    @composer.WorktreeControl::{
-      choice,
-      enabled: model.can_choose_launch_mode(conv),
-      command: dispatch(ToggleWorktreeMode),
-      content: icon(icon_worktree),
-    }.render(),
-  )
+  Some({ choice, enabled: self.can_choose_launch_mode(conv) })
 }
 
 // Tests for the worktree flow's pure pieces: the notification decoder and
@@ -821,18 +813,13 @@ test "the launch mode stops being a choice once a placement is in flight" {
       test_model().replace_conversation(pinned),
     )
     assert_true(kept.active().worktree_mode)
-    // And the chip says which mode is being established rather than offering
-    // a control that cannot do anything.
-    let markup = @rabbita.render_to_string(() => {
-      @rabbita.Val::constant(
-        match worktree_mode_chip(dispatch, test_model(), pinned) {
-          Some(chip) => chip
-          None => @html.div("")
-        },
-      )
-    })
-    assert_true(markup.contains("Worktree"))
-    assert_false(markup.contains("<button"))
+    // And the typed component state says which mode is being established
+    // without offering an action that cannot do anything.
+    guard test_model().worktree_control(pinned) is Some(control) else {
+      fail("expected worktree control state")
+    }
+    assert_true(control.choice is @composer.FreshWorktree)
+    assert_false(control.enabled)
   }
   // Still a choice while nothing is out.
   let (_, free) = update(
@@ -841,15 +828,10 @@ test "the launch mode stops being a choice once a placement is in flight" {
     test_model().replace_conversation(composing),
   )
   assert_false(free.active().worktree_mode)
-  let offered = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(
-      match worktree_mode_chip(dispatch, test_model(), composing) {
-        Some(chip) => chip
-        None => @html.div("")
-      },
-    )
-  })
-  assert_true(offered.contains("<button"))
+  guard test_model().worktree_control(composing) is Some(offered) else {
+    fail("expected worktree control state")
+  }
+  assert_true(offered.enabled)
 }
 
 ///|

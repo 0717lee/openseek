@@ -160,7 +160,7 @@ pub fn GitPresentation::summary(self : GitPresentation) -> String {
 /// Render the complete Git affordance. Conditional popover content is appended
 /// after the stable button so opening it never replaces the node under the
 /// pointer in Rabbita's positional renderer.
-pub fn GitPresentation::render(
+fn GitPresentation::render(
   self : GitPresentation,
   open~ : Bool,
   toggle~ : @cmd.Cmd,

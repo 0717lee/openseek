@@ -145,7 +145,11 @@ fn State::submit_composer(
     guard ready.active_thread() is Some(active) else {
       return (@cmd.none, ready)
     }
-    let next = ready.begin_foreground(CodexTurnReply(active.id))
+    let next = (if ready.active_turn_id() is Some(turn_id) {
+      ready.with_pending_steer(turn_id)
+    } else {
+      ready
+    }).begin_foreground(CodexTurnSteerReply(active.id))
     (ready.send(dispatch, channel), next)
   } else {
     guard ready.active_thread() is Some(active) else {
@@ -196,8 +200,8 @@ fn State::loading_context(self : State, force_skills : Bool) -> State {
 /// offers the other agent's models too.
 pub(all) struct ComposerContext {
   channel : @interop.ChannelId
-  model_chip : @html.Html
-  reasoning_chip : @html.Html?
+  model_control : @composer.ModelSelect
+  reasoning_control : @composer.ReasoningSelect?
   file_candidates : Array[@pathx.Relative]
   open_files : Array[@pathx.Relative]
   active_file : @pathx.Relative?
@@ -226,141 +230,6 @@ pub fn State::accepts_composer_identity(
   channel : @interop.ChannelId,
 ) -> Bool {
   self.has_active() && self.composer_identity(channel) == identity
-}
-
-///|
-fn @protocol.CodexPermissionMode::short_label(
-  self : @protocol.CodexPermissionMode,
-) -> String {
-  match self {
-    @protocol.RequestApproval => "Ask"
-    @protocol.AutoReview => "Approve for me"
-    @protocol.FullAccess => "Full access"
-  }
-}
-
-///|
-fn @protocol.CodexPermissionMode::title(
-  self : @protocol.CodexPermissionMode,
-) -> String {
-  match self {
-    @protocol.RequestApproval => "Request approval"
-    @protocol.AutoReview => "Approve for me"
-    @protocol.FullAccess => "Full access"
-  }
-}
-
-///|
-fn @protocol.CodexPermissionMode::description(
-  self : @protocol.CodexPermissionMode,
-) -> String {
-  match self {
-    @protocol.RequestApproval =>
-      "Always ask before editing outside the workspace or using the internet"
-    @protocol.AutoReview =>
-      "Ask only when the reviewer detects a risky operation"
-    @protocol.FullAccess =>
-      "Unrestricted internet access and access to any file on this computer"
-  }
-}
-
-///|
-fn @protocol.CodexPermissionMode::glyph(
-  self : @protocol.CodexPermissionMode,
-) -> String {
-  match self {
-    @protocol.RequestApproval => "✋"
-    @protocol.AutoReview => ">_"
-    @protocol.FullAccess => "!"
-  }
-}
-
-///|
-fn @protocol.CodexPermissionMode::option(
-  self : @protocol.CodexPermissionMode,
-  dispatch : @cmd.Emit[Msg],
-  selected : @protocol.CodexPermissionMode,
-) -> @html.Html {
-  let class_name = if self is @protocol.FullAccess {
-    "codex-permission-option danger"
-  } else {
-    "codex-permission-option"
-  }
-  @html.button(
-    class=if self == selected { class_name + " selected" } else { class_name },
-    type_="button",
-    on_click=dispatch(ChoosePermission(self)),
-    [
-      @html.span(class="codex-permission-option-glyph", self.glyph()),
-      @html.span(class="codex-permission-copy", [
-        @html.span(class="codex-permission-option-title", self.title()),
-        @html.span(class="codex-permission-option-desc", self.description()),
-      ]),
-      @html.span(
-        class="codex-permission-check",
-        if self == selected {
-          "✓"
-        } else {
-          ""
-        },
-      ),
-    ],
-  )
-}
-
-///|
-/// Render the Codex-only permission menu inside the shared composer's status
-/// row. Its popover anchors to `.composer-inner`, just like the Git menu.
-fn CodexPermissionPicker::control(
-  self : CodexPermissionPicker,
-  dispatch : @cmd.Emit[Msg],
-  enabled : Bool,
-) -> @html.Html {
-  let mode = self.mode()
-  let class_name = if mode is @protocol.FullAccess {
-    "codex-permission-control danger"
-  } else {
-    "codex-permission-control"
-  }
-  let children : Array[@html.Html] = [
-    @html.button(
-      class="codex-permission-button",
-      type_="button",
-      disabled=!enabled,
-      title=if enabled {
-        "Choose how Codex handles approval requests"
-      } else {
-        "Permission mode cannot change while Codex is running"
-      },
-      on_click=dispatch(TogglePermissionMenu),
-      [
-        @html.span(class="codex-permission-button-glyph", mode.glyph()),
-        @html.span(class="codex-permission-button-label", mode.short_label()),
-        @html.span(class="codex-permission-chevron", "⌄"),
-      ],
-    ),
-  ]
-  if self.is_open() {
-    children.push(
-      @html.div(
-        class="codex-permission-dismiss",
-        on_click=dispatch(DismissPermissionMenu),
-        ([] : Array[@html.Html]),
-      ),
-    )
-    children.push(
-      @html.div(class="codex-permission-menu", [
-        @html.div(
-          class="codex-permission-menu-title",
-          "How should Codex approve operations?",
-        ),
-        @protocol.RequestApproval.option(dispatch, mode),
-        @protocol.AutoReview.option(dispatch, mode),
-        @protocol.FullAccess.option(dispatch, mode),
-      ]),
-    )
-  }
-  @html.div(class=class_name, children)
 }
 
 ///|
@@ -408,54 +277,61 @@ fn CodexPermissionPicker::confirmation_dialog(
 /// in this view projection.
 pub fn State::composer_input(
   self : State,
-  dispatch : @cmd.Emit[Msg],
   context : ComposerContext,
 ) -> @composer.Input {
-  let pending : Array[@html.Html] = []
+  // Keep the same permanent first context slot as main: reverse requests are
+  // typed composer state, so the page needs no extra wrapper around composer.
+  let requests : Array[@composer.CodexRequestInput] = []
   if self.active_thread() is Some(active) {
     for request in self.pending_requests {
       if request.thread_id == active.id {
-        pending.push(request.view(dispatch))
+        requests.push({
+          request_key: request.request_id.stringify(),
+          method_: request.method_,
+          params: request.params,
+          answers: request.answers,
+        })
       }
     }
   }
-  let before : Array[@html.Html] = [@html.div(class="codex-pending", pending)]
+  let before : Array[@composer.ContextComponent] = [
+    @composer.CodexRequests(requests~),
+  ]
   if self.active_thread() is Some(active) &&
     active.worktree is Some(worktree) &&
     !worktree.present {
     before.push(
-      @composer.MissingWorktreeNotice::{
+      @composer.MissingWorktreeNoticeComponent({
         name: worktree.name,
         conversation_noun: "task",
-        rebuild: dispatch(RepairWorktree),
-        archive: dispatch(ArchiveThread(active.id)),
-      }.render(),
+      }),
     )
   }
-  let status : Array[@html.Html] = [context.model_chip]
-  if context.reasoning_chip is Some(chip) {
-    status.push(chip)
+  let status : Array[@composer.StatusComponent] = [
+    @composer.ModelStatus(context.model_control),
+  ]
+  if context.reasoning_control is Some(control) {
+    status.push(@composer.ReasoningStatus(control))
   }
   status.push(
-    self.permission_picker.control(dispatch, self.can_choose_permission()),
+    @composer.PermissionStatus({
+      mode: self.permission_picker.mode(),
+      open: self.permission_picker.is_open(),
+      enabled: self.can_choose_permission(),
+    }),
   )
   if self.worktree_launch_workspace(context.channel) is Some(_) &&
     self.active_draft() is Some(_) {
     status.push(
-      @composer.WorktreeControl::{
+      @composer.WorktreeStatus({
         choice: self.placement,
         enabled: self.can_choose_worktree(),
-        command: dispatch(ToggleWorktreeMode),
-        content: icon(icon_worktree),
-      }.render(),
+      }),
     )
   }
   if self.git_status is Some(git) && git.presentation() is Some(presentation) {
     status.push(
-      presentation.render(
-        open=self.git_details_open,
-        toggle=dispatch(ToggleGitDetails),
-      ),
+      @composer.GitStatus({ presentation, open: self.git_details_open }),
     )
   }
   let active_turn = self.active_turn_id()
@@ -555,19 +431,7 @@ fn State::apply_composer_action(
   channel : @interop.ChannelId,
   action : @composer.Action,
 ) -> (@cmd.Cmd, State) {
-  let identity = match action {
-    @composer.DraftSubmitted(identity~, ..)
-    | @composer.DraftPresenceChanged(identity~, ..)
-    | @composer.RootMentionRemoved(identity~, ..)
-    | @composer.SlashCommand(identity~, ..)
-    | @composer.MentionOpened(identity~, ..)
-    | @composer.GoalEditStarted(identity~)
-    | @composer.GoalCancelled(identity~)
-    | @composer.GoalCleared(identity~)
-    | @composer.GoalSubmitted(identity~, ..)
-    | @composer.StopRequested(identity~)
-    | @composer.FileIndexEnsured(identity~) => identity
-  }
+  let identity = action.identity()
   guard self.accepts_composer_identity(identity, channel) else {
     return (@cmd.none, self)
   }
@@ -602,13 +466,56 @@ fn State::apply_composer_action(
     @composer.SlashCommand(command~, ..) =>
       self.run_composer_command(dispatch, channel, command)
     @composer.StopRequested(..) => (self.interrupt(dispatch, channel), self)
+    @composer.ModelSelected(value~, ..) =>
+      (@cmd.none, self.with_selected_model(value))
+    @composer.ReasoningSelected(value~, ..) =>
+      (@cmd.none, self.with_selected_effort(value))
+    @composer.PermissionMenuToggled(..) =>
+      update(dispatch, TogglePermissionMenu, self, channel, _ => @cmd.none)
+    @composer.PermissionMenuDismissed(..) =>
+      update(dispatch, DismissPermissionMenu, self, channel, _ => @cmd.none)
+    @composer.PermissionSelected(mode~, ..) =>
+      update(dispatch, ChoosePermission(mode), self, channel, _ => @cmd.none)
+    @composer.GitDetailsToggled(..) =>
+      update(dispatch, ToggleGitDetails, self, channel, _ => @cmd.none)
+    @composer.WorktreeModeToggled(..) =>
+      update(dispatch, ToggleWorktreeMode, self, channel, _ => @cmd.none)
+    @composer.MissingWorktreeRebuildRequested(..) =>
+      update(dispatch, RepairWorktree, self, channel, _ => @cmd.none)
+    @composer.MissingWorktreeArchiveRequested(..) =>
+      match self.active_thread() {
+        Some(active) =>
+          update(dispatch, ArchiveThread(active.id), self, channel, _ => {
+            @cmd.none
+          })
+        None => (@cmd.none, self)
+      }
+    @composer.CodexRequestAnswerChanged(request_key~, question_id~, answer~, ..) =>
+      update(
+        dispatch,
+        RequestAnswer(request_key~, question_id~, answer~),
+        self,
+        channel,
+        _ => @cmd.none,
+      )
+    @composer.CodexRequestResponded(request_key~, decision~, ..) =>
+      update(dispatch, Respond(request_key~, decision~), self, channel, _ => {
+        @cmd.none
+      })
     @composer.DraftPresenceChanged(..)
     | @composer.MentionOpened(..)
     | @composer.GoalEditStarted(..)
     | @composer.GoalCancelled(..)
     | @composer.GoalCleared(..)
     | @composer.GoalSubmitted(..)
-    | @composer.FileIndexEnsured(..) => (@cmd.none, self)
+    | @composer.FileIndexEnsured(..)
+    | @composer.ModelMenuToggled(..)
+    | @composer.ReasoningMenuToggled(..)
+    | @composer.SelectMenuDismissed(..)
+    | @composer.ApprovalAnswered(..)
+    | @composer.ApiSetupRequested(..)
+    | @composer.ArchivedInputDismissed(..)
+    | @composer.WorktreePlacementRetried(..) => (@cmd.none, self)
   }
 }
 
@@ -654,11 +561,17 @@ test "Codex projects app-server facts into the shared composer contract" {
       "turns": [],
     },
   })
-  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
-  let input = state.composer_input(dispatch, {
+  let input = state.composer_input({
     channel: @interop.ChannelId::Local,
-    model_chip: @html.nothing,
-    reasoning_chip: None,
+    model_control: {
+      id: "codex-model-picker",
+      groups: [],
+      selected: "",
+      disabled: true,
+      open: false,
+      title: "Model",
+    },
+    reasoning_control: None,
     file_candidates: [@pathx.Relative("src/main.mbt")],
     open_files: [],
     active_file: None,

@@ -503,14 +503,12 @@ pub fn boot() -> Unit {
         )
       }),
     })
-    let composer_input = state.map(model => model.composer_input(emit))
+    let composer_input = state.map(model => model.composer_input())
     let composer_html = @composer.component(
       composer_input,
       emit.map(action => ComposerAction(action)),
     )
-    let codex_composer_input = state.map(model => {
-      model.codex_composer_input(emit)
-    })
+    let codex_composer_input = state.map(model => model.codex_composer_input())
     let codex_composer_html = @composer.component(
       codex_composer_input,
       emit.map(action => CodexComposerAction(action)),
