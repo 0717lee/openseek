@@ -1508,6 +1508,79 @@ test "a remote removal closes this client's discard dialog" {
 }
 
 ///|
+test "worktree broadcasts and reconnect snapshots update an open Codex task" {
+  let dispatch = test_dispatch()
+  let workspace = @interop.ChannelId::Local.test_resource("/work/project")
+  let worktree = @interop.ChannelId::Local.test_resource(
+    "/work/project/.worktrees/wt-1",
+  )
+  let codex = @codex.State::from_thread_snapshot({
+    "thread": {
+      "id": "codex-thread-1",
+      "cwd": "/work/project",
+      "projectRoot": "/work/project",
+      "turns": [],
+    },
+  })
+  let model = { ..test_model(), codex, screen: Codex }
+  let rows = [
+    {
+      name: "wt-1",
+      session: None,
+      codex_thread: Some("codex-thread-1"),
+      path: Some(worktree),
+      present: true,
+    },
+  ]
+  let broadcast = WorktreesChanged(rows, workspace~)
+  let (_, once) = update_dev(dispatch, broadcast, model)
+  let (_, twice) = update_dev(dispatch, broadcast, model)
+  assert_true(once.codex == twice.codex)
+  assert_true(once.dev() == twice.dev())
+  assert_true(once.conversations == twice.conversations)
+  assert_true(once.archive_confirm == twice.archive_confirm)
+  assert_true(
+    once.codex.active_placement(@interop.ChannelId::Local)
+    is Some(@interop.Worktree(name="wt-1", ..)),
+  )
+  assert_eq(
+    once.codex
+    .active_placement(@interop.ChannelId::Local)
+    .bind(placement => placement.checkout_root())
+    .map(root => root.path),
+    Some("/work/project/.worktrees/wt-1"),
+  )
+  // A client reconnecting after this broadcast was emitted cannot replay it.
+  // Its accepted `worktree.list` snapshot must produce the same Codex state.
+  let reconnect = WorktreesLoaded(
+    rows,
+    workspace~,
+    connection_generation=0,
+    request_generation=1,
+  )
+  let (_, reconnected_once) = update_dev(dispatch, reconnect, model)
+  let (_, reconnected_twice) = update_dev(dispatch, reconnect, model)
+  assert_true(reconnected_once.codex == reconnected_twice.codex)
+  assert_true(reconnected_once.dev() == reconnected_twice.dev())
+  assert_true(reconnected_once.conversations == reconnected_twice.conversations)
+  assert_true(
+    reconnected_once.archive_confirm == reconnected_twice.archive_confirm,
+  )
+  assert_true(reconnected_once.codex == once.codex)
+  assert_true(
+    reconnected_once.codex.active_placement(@interop.ChannelId::Local)
+    is Some(@interop.Worktree(name="wt-1", ..)),
+  )
+  assert_eq(
+    reconnected_once.codex
+    .active_placement(@interop.ChannelId::Local)
+    .bind(placement => placement.checkout_root())
+    .map(root => root.path),
+    Some("/work/project/.worktrees/wt-1"),
+  )
+}
+
+///|
 test "a removed worktree's probes cannot repopulate the composer" {
   let dispatch = test_dispatch()
   let workspace = @interop.ChannelId::Local.test_resource("/proj")

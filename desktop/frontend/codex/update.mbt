@@ -80,6 +80,27 @@ pub fn update(
         @cmd.none,
         state.with_git_reply(thread_id, generation, requested_cwd, reply),
       )
+    WorktreeChanged(thread_id~, project_root~, name~, path~, present~) => {
+      let applies = state.active_thread() is Some(active) &&
+        active.id == thread_id
+      let next = state.with_worktree_change(
+        thread_id, project_root, name, path, present,
+      )
+      if present && applies {
+        // Mint the same request fence as every other checkout transition, so
+        // a Git answer for the prior placement cannot decorate this one.
+        let (git, refreshed) = next.refresh_git(dispatch, channel)
+        (
+          @cmd.batch([
+            git,
+            refreshed.load_skills(dispatch, channel, force_reload=false),
+          ]),
+          refreshed,
+        )
+      } else {
+        (@cmd.none, next)
+      }
+    }
     ToggleGitDetails =>
       (
         @cmd.none,
@@ -260,8 +281,6 @@ pub fn update(
             next.load_skills(dispatch, channel, force_reload=false),
           ])
         }
-        CodexThreadMetaReply(thread_id) =>
-          next = next.with_thread_meta(value, thread_id)
         CodexThreadReply(requested_thread) => {
           next = next.with_thread_reply(value, requested_thread~)
           // A malformed or mismatched snapshot leaves the requested id in
@@ -384,9 +403,7 @@ pub fn update(
         CodexThreadsReply(false, _) => "Codex threads"
         CodexThreadsReply(true, _) => "Archived Codex threads"
         CodexDraftOpenReply(_) => "Codex draft"
-        CodexThreadReply(_)
-        | CodexThreadMetaReply(_)
-        | CodexDraftThreadReply(_) => "Codex thread"
+        CodexThreadReply(_) | CodexDraftThreadReply(_) => "Codex thread"
         CodexTurnReply(_) | CodexWorktreeTurnReply(_, _) => "Codex turn"
         CodexWorktreeRepairReply(_, _) => "Codex worktree rebuild"
         CodexLoginReply => "Codex sign-in"
@@ -478,15 +495,6 @@ pub fn update(
         let (refresh, refreshed) = next.refresh_catalog(dispatch, channel)
         next = refreshed
         refresh
-      } else if method_ == "thread/settings/updated" &&
-        next.active_thread() is Some(active) {
-        // Re-read through the host so a cwd change cannot retarget Files,
-        // Terminal, or language services from an unvalidated notification.
-        // Apply this read metadata-only: the first turn of a fresh thread
-        // fires this notification while it is still streaming, and a full
-        // `open_thread` replacement would blank the transcript with a snapshot
-        // that predates the turn.
-        next.refresh_thread_meta(dispatch, channel, active.id)
       } else if method_ == "turn/completed" {
         // A turn may check out another branch or create a PR. Refresh the same
         // compact status chip OpenSeek updates at its run boundary.
@@ -699,61 +707,6 @@ test "abandoning a draft deselects it and clears its composer state" {
 }
 
 ///|
-test "a settings-updated re-read keeps the streaming turns" {
-  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
-  let open_external = (_ : String) => @cmd.none
-  // A fresh thread's first turn fires `thread/settings/updated` while it is
-  // still streaming; the snapshot read it triggers may predate that turn.
-  let state = State::from_thread_snapshot({
-    "thread": {
-      "id": "thread-1",
-      "cwd": "/work/project",
-      "preview": "hello",
-      "turns": [{ "id": "turn-1", "status": "inProgress", "items": [] }],
-    },
-  })
-  guard state.active_thread() is Some(before) else {
-    fail("fixture thread should be active")
-  }
-  assert_eq(before.turns.length(), 1)
-  let (_, refreshed) = update(
-    dispatch,
-    Reply(kind=CodexThreadMetaReply("thread-1"), value={
-      "thread": {
-        "id": "thread-1",
-        "name": "Renamed",
-        "cwd": "/work/project",
-        "turns": [],
-      },
-    }),
-    state,
-    @interop.ChannelId::Local,
-    open_external,
-  )
-  guard refreshed.active_thread() is Some(after) else {
-    fail("the metadata read must not deselect the thread")
-  }
-  // Metadata adopted, turn history preserved.
-  inspect(after.title, content="Renamed")
-  assert_eq(after.turns.length(), 1)
-  // A read for some other thread changes nothing.
-  let (_, unchanged) = update(
-    dispatch,
-    Reply(kind=CodexThreadMetaReply("thread-other"), value={
-      "thread": { "id": "thread-other", "turns": [] },
-    }),
-    state,
-    @interop.ChannelId::Local,
-    open_external,
-  )
-  guard unchanged.active_thread() is Some(kept) else {
-    fail("a mismatched read must not deselect the thread")
-  }
-  assert_eq(kept.id, "thread-1")
-  assert_eq(kept.turns.length(), 1)
-}
-
-///|
 test "Codex cwd-less draft remains a Local first prompt" {
   let draft = State().select_draft("desktop-draft-local", "")
   assert_true(draft.can_prompt())
@@ -942,6 +895,13 @@ test "Codex update handlers are pure and idempotent" {
     ChoosePermission(@protocol.FullAccess),
     ConfirmFullAccess,
     CancelFullAccess,
+    WorktreeChanged(
+      thread_id="thread-1",
+      project_root="/work/project",
+      name="wt-1",
+      path="/work/project/.worktrees/wt-1",
+      present=true,
+    ),
     ToggleGitDetails,
     CloseGitDetails,
     ToggleWorktreeMode,
@@ -1049,6 +1009,48 @@ test "Codex update handlers are pure and idempotent" {
 }
 
 ///|
+test "Codex worktree broadcasts bind every frontend with the task open" {
+  let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
+  let state = State::from_thread_snapshot({
+    "thread": {
+      "id": "thread-1",
+      "cwd": "/work/project",
+      "projectRoot": "/work/project",
+      "turns": [],
+    },
+  })
+  // An ordinary app-server cwd is not a native registry authorization and
+  // therefore remains an omitted turn/start override.
+  assert_true(state.registry_turn_cwd() is None)
+  let message = WorktreeChanged(
+    thread_id="thread-1",
+    project_root="/work/project",
+    name="wt-1",
+    path="/work/project/.worktrees/wt-1",
+    present=true,
+  )
+  let (_, once) = update(dispatch, message, state, @interop.ChannelId::Local, _ => {
+    @cmd.none
+  })
+  let (_, twice) = update(dispatch, message, state, @interop.ChannelId::Local, _ => {
+    @cmd.none
+  })
+  assert_true(once == twice)
+  assert_true(once.placement is @composer.BoundWorktree("wt-1"))
+  assert_eq(
+    once
+    .active_placement(@interop.ChannelId::Local)
+    .bind(placement => placement.checkout_root())
+    .map(root => root.path),
+    Some("/work/project/.worktrees/wt-1"),
+  )
+  // If this frontend was already waiting for thread/resume, its subsequent
+  // ordinary turn/start must carry the registry path explicitly rather than
+  // racing another frontend to update app-server's default cwd.
+  assert_eq(once.registry_turn_cwd(), Some("/work/project/.worktrees/wt-1"))
+}
+
+///|
 test "Codex missing worktree waits for rebuild or archive confirmation" {
   let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   let state = State::from_thread_snapshot({
@@ -1069,6 +1071,9 @@ test "Codex missing worktree waits for rebuild or archive confirmation" {
     state.active_placement(@interop.ChannelId::Local)
     is Some(@interop.MissingWorktree(name="wt-1", ..)),
   )
+  // A retained registry row names the checkout for Repair, but a missing path
+  // is never sent back to app-server as a runnable cwd.
+  assert_true(state.registry_turn_cwd() is None)
   assert_false(state.terminal_available(@interop.ChannelId::Local))
   let (_, confirming) = update(
     dispatch,
@@ -1729,7 +1734,7 @@ test "archived Codex catalog removes a selected task in either reply order" {
 }
 
 ///|
-test "Codex cwd notifications wait for an authorized thread read" {
+test "Codex settings notifications do not retarget the selected task" {
   let dispatch : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   let state = State::from_thread_snapshot({
     "thread": { "id": "thread-1", "cwd": "/work/old", "turns": [] },
@@ -1748,6 +1753,9 @@ test "Codex cwd notifications wait for an authorized thread read" {
     @interop.ChannelId::Local,
     _ => @cmd.none,
   )
+  // OpenSeek already owns every setting it sends with `turn/start`. The
+  // app-server notification is informational and must not change the
+  // Files/Terminal placement.
   assert_eq(
     notified.active_thread().bind(thread => thread.cwd),
     Some("/work/old"),

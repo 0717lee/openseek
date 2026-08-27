@@ -350,24 +350,6 @@ fn State::open_thread(
 }
 
 ///|
-/// Re-read one task's metadata after `thread/settings/updated`. The same
-/// snapshot read as `open_thread`, but its reply kind applies metadata-only,
-/// so a read racing a live turn cannot blank the transcript.
-fn State::refresh_thread_meta(
-  _self : State,
-  dispatch : @cmd.Emit[Msg],
-  channel : @interop.ChannelId,
-  thread_id : String,
-) -> @cmd.Cmd {
-  CodexThreadMetaReply(thread_id).request(
-    dispatch,
-    channel,
-    @commands.codex_thread_history_read,
-    { thread_id, },
-  )
-}
-
-///|
 /// Re-read the selected checkout's current branch and pull request. App-server
 /// `gitInfo` is creation-time metadata; this host operation is the same GitHub
 /// lookup used by OpenSeek's composer and therefore follows branch changes
@@ -484,7 +466,11 @@ fn State::send(
         } else {
           Some(effort)
         },
-        cwd: None,
+        // A sibling frontend may have received the host's registry commit
+        // while this send was waiting for thread/resume. Reassert that exact
+        // binding instead of relying on another client's `turn/start` to
+        // update app-server cwd first.
+        cwd: self.registry_turn_cwd(),
         permission_mode: self.permission_mode(),
       },
     )

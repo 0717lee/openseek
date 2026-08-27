@@ -266,10 +266,6 @@ priv enum CodexReplyKind {
   CodexModelsReply
   CodexThreadsReply(Bool, Int)
   CodexThreadReply(String)
-  // The same snapshot read as `CodexThreadReply`, applied metadata-only:
-  // the local turns survive, because this read races turns that the item
-  // notifications are still building.
-  CodexThreadMetaReply(String)
   CodexResumeReply(String)
   CodexDraftOpenReply(String)
   CodexDraftThreadReply(String)
@@ -332,6 +328,16 @@ enum Msg {
     generation~ : Int,
     requested_cwd~ : String,
     reply~ : @protocol.GitPullRequestReply
+  )
+  // The native worktree registry has bound this exact task id to one checkout.
+  // This is independent of app-server's settings stream: every frontend sees
+  // the same host commit even though only the creator receives its RPC reply.
+  WorktreeChanged(
+    thread_id~ : String,
+    project_root~ : String,
+    name~ : String,
+    path~ : String,
+    present~ : Bool
   )
   ToggleGitDetails
   CloseGitDetails
@@ -468,6 +474,20 @@ pub fn Msg::unarchive_thread(thread_id : String) -> Msg {
 }
 
 ///|
+/// Apply one host-authored Codex worktree registry row. The shell has already
+/// matched `thread_id` against the selected task on the event's source device;
+/// this package remains responsible for its thread and placement transition.
+pub fn Msg::worktree_changed(
+  thread_id : String,
+  project_root : String,
+  name : String,
+  path : String,
+  present : Bool,
+) -> Msg {
+  WorktreeChanged(thread_id~, project_root~, name~, path~, present~)
+}
+
+///|
 /// Decode-free boundary for the host's Codex readiness notification.
 pub fn Msg::status_changed(value : Json) -> Msg {
   StatusChanged(value)
@@ -590,6 +610,19 @@ pub fn State::State(loading? : Bool = false) -> State {
 /// full-access warning is currently visible.
 fn State::permission_mode(self : State) -> @protocol.CodexPermissionMode {
   self.permission_picker.mode()
+}
+
+///|
+/// The cwd override safe to send on an ordinary `turn/start`. Only the native
+/// worktree registry populates `CodexThread::worktree`; an unannotated
+/// app-server cwd must remain `None` here so the browser cannot turn an
+/// arbitrary path into a Desktop-authorized checkout.
+fn State::registry_turn_cwd(self : State) -> String? {
+  guard self.active_thread() is Some(active) else { return None }
+  match active.worktree {
+    Some(worktree) if worktree.present => Some(worktree.path)
+    _ => None
+  }
 }
 
 ///|
@@ -826,11 +859,6 @@ fn State::accepts_reply(self : State, kind : CodexReplyKind) -> Bool {
     CodexThreadsReply(true, generation) =>
       generation == self.archived_catalog_generation
     CodexThreadReply(thread_id) => self.accepts_thread_reply(thread_id)
-    CodexThreadMetaReply(thread_id) =>
-      self
-      .active_thread()
-      .map(thread => thread.id == thread_id)
-      .unwrap_or(false)
     CodexResumeReply(thread_id) =>
       self
       .active_thread()
@@ -877,7 +905,6 @@ fn CodexReplyKind::foreground(self : CodexReplyKind) -> CodexForeground? {
     | CodexAccountReply
     | CodexModelsReply
     | CodexThreadsReply(_, _)
-    | CodexThreadMetaReply(_)
     | CodexInterruptReply
     | CodexApprovalReply => None
   }
@@ -1528,29 +1555,6 @@ fn State::with_requests(self : State, value : Json) -> State {
 }
 
 ///|
-/// Adopt a thread snapshot's metadata onto the active selection while
-/// keeping the locally accumulated turns. `thread/settings/updated` only
-/// invalidates settings-derived facts (cwd, worktree, branch, title); the
-/// item notifications remain the authoritative turn lifecycle, and a
-/// snapshot read while the first turn streams may not contain that turn at
-/// all — wholesale replacement would blank the transcript mid-turn.
-fn State::with_thread_meta(
-  self : State,
-  value : Json,
-  thread_id : String,
-) -> State {
-  guard value is Object(fields) &&
-    fields.get("thread") is Some(thread) &&
-    CodexThread::decode(thread) is Some(read) &&
-    read.id == thread_id &&
-    self.active_thread() is Some(active) &&
-    active.id == thread_id else {
-    return self
-  }
-  { ..self, selection: CodexStoredTask({ ..read, turns: active.turns }) }
-}
-
-///|
 fn State::with_thread_reply(
   self : State,
   value : Json,
@@ -1663,6 +1667,48 @@ fn State::with_created_worktree(
     threads: self.threads.map(thread => {
       if thread.id == active.id {
         { ..thread, cwd: Some(worktree.path), worktree: Some(worktree) }
+      } else {
+        thread
+      }
+    }),
+  }
+}
+
+///|
+/// Adopt the native registry's exact owner/path binding in every frontend
+/// that already has this task open. `turn/start` may update app-server cwd,
+/// but that live settings notification is not a synchronization read: the
+/// registry commit itself supplies the authoritative Desktop placement.
+fn State::with_worktree_change(
+  self : State,
+  thread_id : String,
+  project_root : String,
+  name : String,
+  path : String,
+  present : Bool,
+) -> State {
+  guard self.active_thread() is Some(active) && active.id == thread_id else {
+    return self
+  }
+  let worktree : CodexWorktree = { name, path, present }
+  let active = {
+    ..active,
+    cwd: Some(path),
+    project_root: Some(project_root),
+    worktree: Some(worktree),
+  }
+  {
+    ..self,
+    selection: CodexStoredTask(active),
+    placement: @composer.BoundWorktree(name),
+    threads: self.threads.map(thread => {
+      if thread.id == thread_id {
+        {
+          ..thread,
+          cwd: Some(path),
+          project_root: Some(project_root),
+          worktree: Some(worktree),
+        }
       } else {
         thread
       }
@@ -2036,9 +2082,6 @@ fn State::with_notification(
       } else {
         self
       }
-    // The notification's cwd has not crossed the Desktop host's path
-    // authority check. Update reruns `thread/read` before adopting it.
-    "thread/settings/updated" => self
     "turn/started" | "turn/completed" =>
       if fields.get("turn") is Some(value) &&
         CodexTurn::decode(value) is Some(turn) {
