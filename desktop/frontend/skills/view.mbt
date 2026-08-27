@@ -144,7 +144,7 @@ fn detail_page(
         state,
         emit,
       )
-    Ready(target~, content~, ..) =>
+    Ready(target~, content~) =>
       detail_shell(
         target,
         @html.div(
@@ -155,7 +155,7 @@ fn detail_page(
         state,
         emit,
       )
-    Failed(target~, message~, ..) =>
+    Failed(target~, message~) =>
       detail_shell(
         target,
         @html.div(class="skills-empty danger", message),

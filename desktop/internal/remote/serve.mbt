@@ -36,10 +36,7 @@ priv struct WsClientActor {
 }
 
 ///|
-fn WsClientActor::new(
-  state : @api.ApiState,
-  url : String,
-) -> WsClientActor raise @host.HostError {
+fn WsClientActor::new(state : @api.ApiState, url : String) -> WsClientActor {
   { state, host_connection: @host.HostConnection::new(), url }
 }
 

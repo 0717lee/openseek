@@ -31,27 +31,27 @@ enum Mode {
 } derive(Eq, Debug)
 
 ///|
-struct Page {
-  mode : Mode
-  query : String
-  regex : Bool
-  case_sensitive : Bool
-  whole_word : Bool
-  details_open : Bool
-  include_glob : String
-  exclude_glob : String
-  patterns : Array[String]
-  matches : Array[@protocol.TextSearchMatch]
-  semantic_hits : Array[@protocol.SemanticSearchHit]
-  match_count : Int
-  file_count : Int
-  limit_hit : Bool
-  partial : Bool
-  collapsed : Map[String, Bool]
-  visible_lines : Int
-  phase : Phase
-  request_id : String
-  delay_ms : Int
+pub struct State {
+  priv mode : Mode
+  priv query : String
+  priv regex : Bool
+  priv case_sensitive : Bool
+  priv whole_word : Bool
+  priv details_open : Bool
+  priv include_glob : String
+  priv exclude_glob : String
+  priv patterns : Array[String]
+  priv matches : Array[@protocol.TextSearchMatch]
+  priv semantic_hits : Array[@protocol.SemanticSearchHit]
+  priv match_count : Int
+  priv file_count : Int
+  priv limit_hit : Bool
+  priv partial : Bool
+  priv collapsed : Map[String, Bool]
+  priv visible_lines : Int
+  priv phase : Phase
+  priv request_id : String
+  priv delay_ms : Int
 } derive(Eq)
 
 ///|
@@ -69,20 +69,15 @@ pub fn EditorHighlights::ranges(
 }
 
 ///|
-pub struct State {
-  priv page : Page
-} derive(Eq)
-
-///|
 pub fn State::empty() -> State {
-  { page: Page::fresh(@uuid.mint()) }
+  State::fresh(@uuid.mint())
 }
 
 ///|
 /// Expose the current request UUID to the owning file-editor package. Replies
 /// use this UUID directly, without echoing the conversation or checkout root.
 pub fn State::request_id(self : State) -> String {
-  self.page.request_id
+  self.request_id
 }
 
 ///|
@@ -149,9 +144,6 @@ pub extend Mode with Debug::{to_repr}
 
 ///|
 pub extend Mode with Eq::{equal, not_equal}
-
-///|
-pub extend Page with Eq::{equal, not_equal}
 
 ///|
 pub extend Phase with Debug::{to_repr}

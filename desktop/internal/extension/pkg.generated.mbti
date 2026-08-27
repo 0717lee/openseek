@@ -4,7 +4,6 @@ package "openseek_desktop/internal/extension"
 import {
   "moonbit-community/proton",
   "openseek_desktop/internal/api",
-  "openseek_desktop/internal/host",
 }
 
 // Values
@@ -23,7 +22,7 @@ pub fn BrowserViews::window_closed(Self) -> Unit
 pub fn BrowserViews::window_ready(Self, @proton.WindowHandle) -> Unit
 
 type DesktopBridgeActor
-pub fn DesktopBridgeActor::new(@api.ApiState) -> Self raise @host.HostError
+pub fn DesktopBridgeActor::new(@api.ApiState) -> Self
 pub async fn DesktopBridgeActor::notify_browser_event(Self, Json) -> Unit
 pub async fn DesktopBridgeActor::run(Self) -> Unit
 pub async fn DesktopBridgeActor::window_closed(Self) -> Unit

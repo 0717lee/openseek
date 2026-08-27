@@ -32,7 +32,7 @@ test "Search view groups files and marks matching UTF-16 slices" {
   let state = State::empty()
     .handle(QueryChanged("moon"), input)
     .handle(Submit, input)
-  let page = state.page
+  let page = state
   let reply : @protocol.SearchTextReply = {
     root: root.path,
     request_id: page.request_id,
@@ -78,7 +78,7 @@ test "large Search replies render incrementally without changing totals" {
   let state = State::empty()
     .handle(QueryChanged("moon"), input)
     .handle(Submit, input)
-  let page = state.page
+  let page = state
   let result : @protocol.TextSearchMatch = {
     path: "src/main.mbt",
     line_number: 7,

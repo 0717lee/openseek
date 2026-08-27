@@ -174,7 +174,7 @@ test "historical tabs use only the inert diff surface and history breadcrumb" {
   let history_docs : Map[String, HistoryDiffDoc] = Map([])
   history_docs[key] = {
     diff,
-    request_id: "00000000-0000-8000-8000-000000000051",
+    request_id: "history-document-request",
     original: HistoryBlobContent("old"),
     modified: HistoryBlobContent("new"),
   }
@@ -222,7 +222,7 @@ test "historical tabs use only the inert diff surface and history breadcrumb" {
 
 ///|
 test "Git history replies are fenced by request UUID" {
-  let request_id = "00000000-0000-8000-8000-000000000052"
+  let request_id = "git-history-current"
   let state = {
     ..graph_fixture_state(),
     git_graph: GitGraphLoading,

@@ -57,6 +57,12 @@ pub(all) enum Msg {
   Install(MarketItem)
   Uninstall(String)
   ActionDone(channel~ : @interop.ChannelId, key~ : String, error~ : String)
+  PreviewMarket(MarketItem)
+  PreviewInstalled(InstalledItem)
+  PreviewLoaded(request_id~ : String, content~ : String)
+  PreviewFailed(request_id~ : String, message~ : String)
+  BackToList
+  SkillsScrolled(Double)
 }
 
 pub enum Outcome {
@@ -64,6 +70,10 @@ pub enum Outcome {
 } derive(Eq)
 pub fn Outcome::equal(Self, Self) -> Bool
 pub fn Outcome::not_equal(Self, Self) -> Bool
+
+type Preview derive(Eq)
+
+type PreviewTarget derive(Eq)
 
 type State derive(Eq)
 pub fn State::empty() -> Self
