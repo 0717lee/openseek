@@ -429,7 +429,7 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
     ToggleErrorsOnly =>
       (
         @cmd.none,
-        { ..model, errors_only: !model.errors_only, escalated_only: false, },
+        { ..model, errors_only: !model.errors_only, escalated_only: false },
       )
     // Scroll to the next/previous failed-tool card, cycling. The count is
     // recomputed for the active view, while the browser chooses the target
@@ -450,7 +450,7 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
     ToggleEscalatedOnly =>
       (
         @cmd.none,
-        { ..model, escalated_only: !model.escalated_only, errors_only: false, },
+        { ..model, escalated_only: !model.escalated_only, errors_only: false },
       )
     JumpToEscalated(direction) => {
       let count = current_escalated_count(model)
@@ -2333,7 +2333,7 @@ test "escalated toolbar mirrors errors-only controls" {
 ///|
 test "error and escalated filters are mutually exclusive" {
   let emit = stub_emit()
-  let errors = { ..init_model(), errors_only: true, }
+  let errors = { ..init_model(), errors_only: true }
   let (_, escalated) = update(emit, ToggleEscalatedOnly, errors)
   assert_true(escalated.escalated_only)
   assert_false(escalated.errors_only)
