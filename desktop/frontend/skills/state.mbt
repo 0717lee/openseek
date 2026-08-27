@@ -295,3 +295,9 @@ fn preview_target_for_market(
 
 ///|
 pub extend State with Eq::{equal, not_equal}
+
+///|
+pub extend Preview with Eq::{equal, not_equal}
+
+///|
+pub extend PreviewTarget with Eq::{equal, not_equal}

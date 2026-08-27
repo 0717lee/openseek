@@ -659,3 +659,9 @@ pub async fn ReferencesAction::run(
   guard self.begin(anchor) is Some(generation) else { return }
   self.run_reserved(anchor, config, generation)
 }
+
+///|
+pub extend SymbolNavigationCommand with Debug::{to_repr}
+
+///|
+pub extend SymbolNavigationCommand with Eq::{equal, not_equal}

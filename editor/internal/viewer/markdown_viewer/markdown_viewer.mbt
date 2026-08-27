@@ -788,3 +788,24 @@ pub fn MarkdownViewerWidget::dispose(self : MarkdownViewerWidget) -> Unit {
     self.services.dispose()
   }
 }
+
+///|
+pub extend MarkdownResourceKind with Debug::{to_repr}
+
+///|
+pub extend MarkdownResourceKind with Eq::{equal, not_equal}
+
+///|
+pub extend MarkdownViewerWidgetModel with Debug::{to_repr}
+
+///|
+pub extend MarkdownViewerWidgetOptions with Debug::{to_repr}
+
+///|
+pub extend MarkdownViewerWidgetOptions with Eq::{equal, not_equal}
+
+///|
+pub extend MarkdownViewerWidgetViewState with Debug::{to_repr}
+
+///|
+pub extend MarkdownViewerWidgetViewState with Eq::{equal, not_equal}

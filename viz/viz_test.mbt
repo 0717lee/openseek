@@ -1556,3 +1556,56 @@ test "nested transcripts namespace their anchors; chip hrefs are encoded" {
   let html = render(@viz.render_session(odd, RawLog))
   assert_true(html.contains("href=\"#s=a%2Bb%20c-sr-4\""))
 }
+
+///|
+/// One real escalated call plus lookalikes that must not enter the filter:
+/// `false`, a string value, a nested value, and malformed JSON.
+fn escalated_tool_session() -> @agent_session.Session {
+  @agent_session.Session(SessionId("escalated"), system_prompt="")
+  .append(User(UserMessage("run it")))
+  .append(
+    Assistant(
+      AssistantMessage("", tool_calls=[
+        ToolCall(
+          id="yes",
+          name="shell",
+          arguments="{\"cmd\":\"make\",\"escalated\":true}",
+        ),
+        ToolCall(
+          id="no",
+          name="shell",
+          arguments="{\"cmd\":\"make\",\"escalated\":false}",
+        ),
+        ToolCall(
+          id="string",
+          name="shell",
+          arguments="{\"escalated\":\"true\"}",
+        ),
+        ToolCall(
+          id="nested",
+          name="shell",
+          arguments="{\"options\":{\"escalated\":true}}",
+        ),
+        ToolCall(id="malformed", name="shell", arguments="{\"escalated\":true"),
+      ]),
+    ),
+  )
+  .append(
+    Tool(ToolResult(tool_call_id="yes", tool_name="shell", content="built")),
+  )
+  .append(
+    Tool(ToolResult(tool_call_id="no", tool_name="shell", content="built")),
+  )
+  .append(Terminal(Finished("done")))
+}
+
+///|
+test "escalated tool calls and their results are tagged in both views" {
+  let session = escalated_tool_session()
+  for mode in [@viz.RawLog, ModelView] {
+    let html = render(@viz.render_session(session, mode))
+    assert_eq(occurrences(html, "tool-call-escalated"), 1)
+    assert_eq(occurrences(html, "card tool escalated"), 1)
+    assert_eq(@viz.rendered_escalated_count(session, mode), 1)
+  }
+}

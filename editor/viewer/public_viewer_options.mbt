@@ -198,3 +198,9 @@ fn ViewerOptions::code_options(
 ) -> @code_widget.CodeEditorOptions {
   self.inner
 }
+
+///|
+pub extend ViewerOptions with Debug::{to_repr}
+
+///|
+pub extend ViewerOptions with Eq::{equal, not_equal}

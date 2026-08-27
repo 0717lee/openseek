@@ -128,11 +128,15 @@ pub fn MarkdownViewerModel::MarkdownViewerModel(@model.TextModel, MarkdownResour
 type MarkdownViewerOptions derive(Eq, @debug.Debug)
 pub fn MarkdownViewerOptions::MarkdownViewerOptions(theme? : String, placeholder? : String, show_unused? : Bool) -> Self
 pub fn MarkdownViewerOptions::default() -> Self
+pub fn MarkdownViewerOptions::equal(Self, Self) -> Bool
+pub fn MarkdownViewerOptions::not_equal(Self, Self) -> Bool
+pub fn MarkdownViewerOptions::to_repr(Self) -> @debug.Repr
 pub fn MarkdownViewerOptions::with_placeholder(Self, String) -> Self
 pub fn MarkdownViewerOptions::with_show_unused(Self, Bool) -> Self
 pub fn MarkdownViewerOptions::with_theme(Self, String) -> Self
 
 type MarkdownViewerViewState derive(@debug.Debug)
+pub fn MarkdownViewerViewState::to_repr(Self) -> @debug.Repr
 
 type Viewer
 pub fn Viewer::add_overlay_widget(Self, @browser.OverlayWidget) -> Unit
@@ -224,8 +228,11 @@ pub fn Viewer::update_options(Self, ViewerOptions) -> Unit
 type ViewerOptions derive(Eq, @debug.Debug)
 pub fn ViewerOptions::ViewerOptions(soft_wrap? : Bool, tab_size? : Int, wrapping_indent? : @editor_api.WrappingIndent, render_whitespace? : @editor_api.RenderWhitespace, render_control_characters? : Bool, render_line_highlight? : @editor_api.RenderLineHighlight, render_line_highlight_only_when_focus? : Bool, render_validation_decorations? : @editor_api.RenderValidationDecorations, theme? : String, placeholder? : String, line_decorations_width? : Int, line_numbers_min_chars? : Int, folding? : Bool, show_folding_controls? : @editor_api.ShowFoldingControls, folding_highlight? : Bool, folding_maximum_regions? : Int, unfold_on_click_after_end_of_line? : Bool, smooth_scrolling? : Bool, show_unused? : Bool, show_deprecated? : Bool, font_family? : String, font_weight? : String, font_size? : Double, line_height? : Double, letter_spacing? : Double) -> Self
 pub fn ViewerOptions::default() -> Self
+pub fn ViewerOptions::equal(Self, Self) -> Bool
 pub fn ViewerOptions::line_height(Self) -> Double
+pub fn ViewerOptions::not_equal(Self, Self) -> Bool
 pub fn ViewerOptions::soft_wrap(Self) -> Bool
+pub fn ViewerOptions::to_repr(Self) -> @debug.Repr
 pub fn ViewerOptions::with_font_family(Self, String) -> Self
 pub fn ViewerOptions::with_font_size(Self, Double) -> Self
 pub fn ViewerOptions::with_line_decorations_width(Self, Int) -> Self
@@ -246,6 +253,7 @@ pub fn ViewerServices::ViewerServices(languages? : @languages.LanguageHandle, ma
 pub fn ViewerServices::dispose(Self) -> Unit
 
 type ViewerViewState derive(@debug.Debug)
+pub fn ViewerViewState::to_repr(Self) -> @debug.Repr
 
 // Type aliases
 

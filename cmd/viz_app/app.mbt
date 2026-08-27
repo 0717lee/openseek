@@ -45,6 +45,9 @@ struct Model {
   status : String
   // "Errors only" filter folds the log down to failed tool results.
   errors_only : Bool
+  // "Escalated only" keeps tool calls whose durable arguments explicitly carry
+  // top-level `escalated: true`, plus their matching result cards.
+  escalated_only : Bool
   // Tool-call arguments rendering: the human-friendly form (values shown verbatim,
   // no JSON quoting) by default, or the original pretty-printed JSON for debugging.
   show_original_args : Bool
@@ -97,6 +100,8 @@ enum Msg {
   ToggleRoot(String)
   ToggleErrorsOnly
   JumpToError(Int)
+  ToggleEscalatedOnly
+  JumpToEscalated(Int)
   UnfoldCurrent
 }
 
@@ -180,6 +185,7 @@ fn init_model() -> Model {
     loading: false,
     status: "loading sessions…",
     errors_only: false,
+    escalated_only: false,
     show_original_args: false,
     subrun_children: Map([]),
   }
@@ -421,7 +427,10 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
     SetArgsView(show_original) =>
       (@cmd.none, { ..model, show_original_args: show_original })
     ToggleErrorsOnly =>
-      (@cmd.none, { ..model, errors_only: !model.errors_only })
+      (
+        @cmd.none,
+        { ..model, errors_only: !model.errors_only, escalated_only: false },
+      )
     // Scroll to the next/previous failed-tool card, cycling. The count is
     // recomputed for the active view, while the browser chooses the target
     // relative to the current viewport so manual scrolling is respected.
@@ -430,7 +439,30 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
       if count <= 0 {
         (@cmd.none, model)
       } else {
-        (@cmd.effect(() => scroll_to_error_from_viewport(direction)), model)
+        (
+          @cmd.effect(() => {
+            scroll_to_card_from_viewport(".card.tool.error", direction)
+          }),
+          model,
+        )
+      }
+    }
+    ToggleEscalatedOnly =>
+      (
+        @cmd.none,
+        { ..model, escalated_only: !model.escalated_only, errors_only: false },
+      )
+    JumpToEscalated(direction) => {
+      let count = current_escalated_count(model)
+      if count <= 0 {
+        (@cmd.none, model)
+      } else {
+        (
+          @cmd.effect(() => {
+            scroll_to_card_from_viewport(".tool-call-escalated", direction)
+          }),
+          model,
+        )
       }
     }
     UnfoldCurrent => (@cmd.effect(() => unfold_nearest_details()), model)
@@ -755,11 +787,14 @@ extern "js" fn format_unix_ms_utc(milliseconds : Double) -> String =
   #|}
 
 ///|
-/// Scroll to the next/previous failed-tool card relative to the viewport's
+/// Scroll to the next/previous matching visible card relative to the viewport's
 /// centre, not an internal cursor, so manual scrolling changes the jump origin.
-extern "js" fn scroll_to_error_from_viewport(direction : Int) -> Unit =
-  #|(direction) => {
-  #|  const els = Array.from(document.querySelectorAll('.card.tool.error'))
+extern "js" fn scroll_to_card_from_viewport(
+  selector : String,
+  direction : Int,
+) -> Unit =
+  #|(selector, direction) => {
+  #|  const els = Array.from(document.querySelectorAll(selector))
   #|    .filter((el) => el.getClientRects().length > 0);
   #|  if (!els.length) return;
   #|  const anchor = window.innerHeight / 2;
@@ -1339,6 +1374,7 @@ fn session_pane(
     system_prompt=model.system_prompt,
   )
   let error_count = @viz.rendered_error_count(session, model.view_mode)
+  let escalated_count = @viz.rendered_escalated_count(session, model.view_mode)
   @html.div(class=session_view_class(model)) <| [
     header_strip(model, id, root_label),
     // Pin the view/args toggles and the error bar to the top of the
@@ -1346,9 +1382,10 @@ fn session_pane(
     @html.div(class="sticky-toolbar") <| [
       mode_row(emit, model, parsed, @viz.step_scrubber(session)),
       error_bar(emit, model, error_count),
+      escalated_bar(emit, model, escalated_count),
     ],
     @viz.render_notices(parsed),
-    session_log_view(model, session, error_count),
+    session_log_view(model, session, error_count, escalated_count),
   ]
 }
 
@@ -1550,16 +1587,16 @@ fn format_scaled_size(bytes : Int64, unit : Int64, suffix : String) -> String {
 }
 
 ///|
-/// Add the `errors-only` class so the stylesheet folds the log down to failed
-/// tool cards (and the turns containing them), and `show-original` so it swaps the
-/// friendly tool-argument rendering for the raw JSON.
+/// Add the active log-filter class, plus `show-original` when raw tool-call JSON
+/// should replace the friendly argument rendering.
 fn session_view_class(model : Model) -> String {
-  match (model.errors_only, model.show_original_args) {
-    (false, false) => "session-view"
-    (true, false) => "session-view errors-only"
-    (false, true) => "session-view show-original"
-    (true, true) => "session-view errors-only show-original"
-  }
+  let with_errors = class_with("session-view", "errors-only", model.errors_only)
+  let with_escalated = class_with(
+    with_errors,
+    "escalated-only",
+    model.escalated_only,
+  )
+  class_with(with_escalated, "show-original", model.show_original_args)
 }
 
 ///|
@@ -1607,15 +1644,71 @@ fn error_bar(emit : @cmd.Emit[Msg], model : Model, count : Int) -> @html.Html {
 }
 
 ///|
+/// Escalated-call counterpart of `error_bar`: a count, filter toggle, and
+/// viewport-relative prev/next jumps. It stays visible at zero while active so
+/// switching views can never strand the user in an apparently empty pane.
+fn escalated_bar(
+  emit : @cmd.Emit[Msg],
+  model : Model,
+  count : Int,
+) -> @html.Html {
+  if count == 0 && !model.escalated_only {
+    return @html.nothing
+  }
+  let toggle_class = class_with(
+    "escalated-toggle",
+    "active",
+    model.escalated_only,
+  )
+  let children : Array[@html.Html] = []
+  if count > 0 {
+    children.push(
+      @html.span(class="escalated-count") <| "🔓 \{count} escalated tool call\{plural_s(count)}",
+    )
+  }
+  children.push(
+    @html.button(
+      class=toggle_class,
+      title="Show only tool calls with escalated: true and their results",
+      on_click=emit(ToggleEscalatedOnly),
+    ) <| (if model.escalated_only {
+      "Escalated only: on"
+    } else {
+      "Escalated only"
+    }),
+  )
+  if count > 0 {
+    children.push(
+      @html.button(
+        class="escalated-jump",
+        title="Scroll to the previous escalated tool call",
+        on_click=emit(JumpToEscalated(-1)),
+      ) <| "↑ prev",
+    )
+    children.push(
+      @html.button(
+        class="escalated-jump",
+        title="Scroll to the next escalated tool call",
+        on_click=emit(JumpToEscalated(1)),
+      ) <| "↓ next",
+    )
+  }
+  @html.div(class="escalated-bar") <| children
+}
+
+///|
 /// The log, or a hint when the errors-only filter would hide everything (so the
 /// pane never looks empty/broken when a clean view is filtered).
 fn session_log_view(
   model : Model,
   session : @agent_session.Session,
-  count : Int,
+  error_count : Int,
+  escalated_count : Int,
 ) -> @html.Html {
-  if model.errors_only && count == 0 {
+  if model.errors_only && error_count == 0 {
     @html.div(class="errors-only-empty") <| "No failed tool results in this view."
+  } else if model.escalated_only && escalated_count == 0 {
+    @html.div(class="escalated-only-empty") <| "No escalated tool calls in this view."
   } else {
     @viz.render_session(
       session,
@@ -1637,6 +1730,18 @@ fn current_error_count(model : Model) -> Int {
     system_prompt=model.system_prompt,
   )
   @viz.rendered_error_count(session, model.view_mode)
+}
+
+///|
+/// Number of explicitly escalated calls the active projection will render.
+fn current_escalated_count(model : Model) -> Int {
+  guard model.parsed is Some(parsed) else { return 0 }
+  let session = @viz.session_from_parse(
+    parsed,
+    id="",
+    system_prompt=model.system_prompt,
+  )
+  @viz.rendered_escalated_count(session, model.view_mode)
 }
 
 ///|
@@ -2049,6 +2154,12 @@ fn stub_emit() -> @cmd.Emit[Msg] {
 }
 
 ///|
+#warnings("-alert_unstable")
+fn render_html(html : @html.Html) -> String {
+  @rabbita.render_to_string(() => @rabbita.Val::constant(html))
+}
+
+///|
 test "session grouping derives container, row label, and heading" {
   // A nested run workspace (marker store): grouped by container, labelled by
   // workspace name.
@@ -2206,5 +2317,40 @@ test "standalone exports auto-open their first session" {
   assert_false(should_auto_open(true, [row], selected=Some("k1"), dropped=None))
   assert_false(
     should_auto_open(true, [row], selected=None, dropped=Some("f.jsonl")),
+  )
+}
+
+///|
+test "escalated toolbar mirrors errors-only controls" {
+  let model = init_model()
+  let html = render_html(escalated_bar(stub_emit(), model, 2))
+  assert_true(html.contains("2 escalated tool calls"))
+  assert_true(html.contains("Escalated only"))
+  assert_true(html.contains("↑ prev"))
+  assert_true(html.contains("↓ next"))
+}
+
+///|
+test "error and escalated filters are mutually exclusive" {
+  let emit = stub_emit()
+  let errors = { ..init_model(), errors_only: true }
+  let (_, escalated) = update(emit, ToggleEscalatedOnly, errors)
+  assert_true(escalated.escalated_only)
+  assert_false(escalated.errors_only)
+  let (_, errors_again) = update(emit, ToggleErrorsOnly, escalated)
+  assert_true(errors_again.errors_only)
+  assert_false(errors_again.escalated_only)
+}
+
+///|
+test "session view class includes the escalated filter" {
+  let filtered = {
+    ..init_model(),
+    escalated_only: true,
+    show_original_args: true,
+  }
+  inspect(
+    session_view_class(filtered),
+    content="session-view escalated-only show-original",
   )
 }

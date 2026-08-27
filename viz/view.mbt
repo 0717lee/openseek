@@ -69,6 +69,7 @@ fn render_raw(
   let briefs = tool_call_briefs(session)
   let failed = raw_failed_call_ids(session)
   let tags = raw_pair_tags(session)
+  let escalated = raw_escalated_result_ids(session, tags)
   let plans = raw_plan_baselines(session, failed)
   let step_labels = agent_step_labels(session)
   let turns = group_turns(session.events())
@@ -79,6 +80,7 @@ fn render_raw(
         turn,
         briefs,
         failed,
+        escalated,
         tags,
         plans,
         step_labels,
@@ -175,6 +177,7 @@ fn turn_block(
   turn : Array[@agent_session.SessionEvent],
   briefs : Map[String, String],
   failed : Map[String, Unit],
+  escalated : Map[String, Unit],
   tags : Map[String, Int],
   plans : Map[String, Array[@steps.PlanStep]],
   step_labels : Map[Int, String],
@@ -191,6 +194,7 @@ fn turn_block(
         time=offset_label(base, event),
         briefs,
         failed,
+        escalated,
         tags,
         plans,
         step_label=step_labels.get(event.sequence()).unwrap_or(""),
@@ -294,6 +298,7 @@ fn event_card(
   time~ : String,
   briefs : Map[String, String],
   failed : Map[String, Unit],
+  escalated : Map[String, Unit],
   tags : Map[String, Int],
   plans : Map[String, Array[@steps.PlanStep]],
   step_label~ : String,
@@ -314,7 +319,7 @@ fn event_card(
         plans,
         step_label~,
       )
-    Tool(result) => tool_card(seq, time, result, tags, subrun)
+    Tool(result) => tool_card(seq, time, result, escalated, tags, subrun)
     Runtime(notice) => runtime_card(seq, time, notice.content())
     Summary(summary) => summary_card(seq, time, summary)
     Terminal(terminal) => terminal_card(seq, time, terminal, step_label~)
@@ -898,10 +903,11 @@ fn tool_call_view(
     )
   }
   let anchor = pair.map(n => tool_call_anchor(n))
-  let cls = if failed.contains(call.id) {
-    "tool-call tool-call-failed"
-  } else {
-    "tool-call"
+  let cls = match (failed.contains(call.id), tool_call_is_escalated(call)) {
+    (false, false) => "tool-call"
+    (true, false) => "tool-call tool-call-failed"
+    (false, true) => "tool-call tool-call-escalated"
+    (true, true) => "tool-call tool-call-failed tool-call-escalated"
   }
   let original = pretty_json(call.arguments)
   if is_blank_args(original) {
@@ -1127,11 +1133,18 @@ fn tool_card(
   seq : Int,
   time : String,
   result : @agent_session.ToolResult,
+  escalated : Map[String, Unit],
   tags : Map[String, Int],
   subrun : SubrunView,
 ) -> @html.Html {
   let is_error = result.is_error()
-  let kind = if is_error { "tool error" } else { "tool" }
+  let is_escalated = escalated.contains(result.tool_call_id())
+  let kind = match (is_error, is_escalated) {
+    (false, false) => "tool"
+    (true, false) => "tool error"
+    (false, true) => "tool escalated"
+    (true, true) => "tool error escalated"
+  }
   let label = if is_error {
     "Tool error · \{result.tool_name()}"
   } else {
@@ -1304,6 +1317,7 @@ fn render_model(
   // saw. The raw view, which shows every event, uses all briefs.
   let briefs = model_tool_call_briefs(messages, tool_results)
   let tags = model_pair_tags(messages)
+  let escalated = model_escalated_result_ids(messages, tags)
   let plans = model_plan_baselines(messages, failed)
   let anchor_seqs = model_message_anchor_seqs(session)
   let cards : Array[@html.Html] = [
@@ -1318,6 +1332,7 @@ fn render_model(
         message,
         tool_results,
         failed,
+        escalated,
         briefs,
         tags,
         plans,
@@ -1604,6 +1619,59 @@ fn raw_failed_call_ids(session : @agent_session.Session) -> Map[String, Unit] {
   ids
 }
 
+///|
+/// Whether a tool call explicitly carries the top-level JSON boolean
+/// `"escalated": true`. Similar-looking values are deliberately rejected: a
+/// string, nested field, false value, or malformed argument payload did not ask
+/// the runtime for escalation.
+fn tool_call_is_escalated(call : @deepseek.ToolCall) -> Bool {
+  let json = @json.parse(call.arguments) catch { _ => return false }
+  match json {
+    Object(fields) => fields.get("escalated") is Some(True)
+    _ => false
+  }
+}
+
+///|
+/// Escalated call ids whose result can be identified unambiguously in the raw
+/// view. `tags` already contains exactly the 1:1 call/result pairs, so using it
+/// avoids attaching an escalation marker to a result when duplicate ids make
+/// the relationship ambiguous.
+fn raw_escalated_result_ids(
+  session : @agent_session.Session,
+  tags : Map[String, Int],
+) -> Map[String, Unit] {
+  let ids : Map[String, Unit] = Map([])
+  for event in session.events() {
+    if event.item() is Assistant(message) {
+      for call in message.tool_calls() {
+        if tags.contains(call.id) && tool_call_is_escalated(call) {
+          ids.set(call.id, ())
+        }
+      }
+    }
+  }
+  ids
+}
+
+///|
+/// Model-view counterpart of `raw_escalated_result_ids`, based only on calls
+/// and result messages that the model projection actually renders.
+fn model_escalated_result_ids(
+  messages : Array[@deepseek.ChatMessage],
+  tags : Map[String, Int],
+) -> Map[String, Unit] {
+  let ids : Map[String, Unit] = Map([])
+  for message in messages {
+    for call in message.tool_calls {
+      if tags.contains(call.id) && tool_call_is_escalated(call) {
+        ids.set(call.id, ())
+      }
+    }
+  }
+  ids
+}
+
 // ---- tool call ↔ result pairing --------------------------------------------
 
 ///|
@@ -1733,6 +1801,7 @@ fn message_card(
   message : @deepseek.ChatMessage,
   tool_results : Map[String, @agent_session.ToolResult],
   failed : Map[String, Unit],
+  escalated : Map[String, Unit],
   briefs : Map[String, String],
   tags : Map[String, Int],
   plans : Map[String, Array[@steps.PlanStep]],
@@ -1782,6 +1851,7 @@ fn message_card(
       model_tool_card(
         message,
         model_shown_result(message, tool_results),
+        escalated,
         tags,
         subrun,
         time~,
@@ -1838,6 +1908,31 @@ pub fn rendered_error_count(
 }
 
 ///|
+/// How many tool calls rendered in `mode` explicitly request escalation via a
+/// top-level JSON boolean `"escalated": true`. This is derived from the durable
+/// tool-call arguments already stored in the session; no separate approval
+/// event is needed.
+pub fn rendered_escalated_count(
+  session : @agent_session.Session,
+  mode : ViewMode,
+) -> Int {
+  let mut count = 0
+  match mode {
+    RawLog =>
+      for event in session.events() {
+        if event.item() is Assistant(message) {
+          count += message.tool_calls().count_if(tool_call_is_escalated)
+        }
+      }
+    ModelView =>
+      for message in session.chat_messages() {
+        count += message.tool_calls.count_if(tool_call_is_escalated)
+      }
+  }
+  count
+}
+
+///|
 /// Model-view tool result, folded by default like the raw view. `result` is the
 /// durable `ToolResult` looked up by id, which lets this recover the tool name
 /// and red-flag failures even though the projection drops `is_error`. A non-zero
@@ -1851,6 +1946,7 @@ pub fn rendered_error_count(
 fn model_tool_card(
   message : @deepseek.ChatMessage,
   shown : @agent_session.ToolResult?,
+  escalated : Map[String, Unit],
   tags : Map[String, Int],
   subrun : SubrunView,
   time~ : String,
@@ -1861,7 +1957,16 @@ fn model_tool_card(
     Some(r) => r.tool_name()
     None => ""
   }
-  let kind = if is_error { "tool error" } else { "tool" }
+  let is_escalated = match message.role {
+    Tool(id) => escalated.contains(id)
+    _ => false
+  }
+  let kind = match (is_error, is_escalated) {
+    (false, false) => "tool"
+    (true, false) => "tool error"
+    (false, true) => "tool escalated"
+    (true, true) => "tool error escalated"
+  }
   let label = match (is_error, name.is_empty()) {
     (_, true) => "Tool result"
     (true, false) => "Tool error · \{name}"

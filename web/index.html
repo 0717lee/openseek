@@ -243,7 +243,7 @@
     .header-meta { color: var(--muted); font-size: 12px; }
 
     /* mode toggle */
-    /* sticky toolbar: keeps the view/args toggles + error bar pinned to the top
+    /* sticky toolbar: keeps the view/args toggles + filter bars pinned to the top
        of the scrolling .main while reading a long log. Negative side margins let
        its background span the .main padding gutter so content can't peek beside it. */
     .sticky-toolbar {
@@ -256,7 +256,8 @@
       border-bottom: 1px solid var(--border);
     }
     .sticky-toolbar .mode-row { margin-bottom: 0; }
-    .sticky-toolbar .error-bar { margin: 10px 0 0; }
+    .sticky-toolbar .error-bar,
+    .sticky-toolbar .escalated-bar { margin: 10px 0 0; }
     .mode-row {
       display: flex;
       align-items: center;
@@ -351,6 +352,25 @@
     .session-view.errors-only .card:not(.error):not(.assistant) { display: none; }
     .session-view.errors-only .card.assistant:not(:has(.tool-call-failed)) { display: none; }
     .session-view.errors-only .turn:not(:has(.card.error)) { display: none; }
+
+    /* escalated-only: derive the audit view from durable tool-call arguments.
+       Keep each top-level escalated:true call and its unambiguously paired result;
+       hide unrelated calls inside an otherwise retained assistant card. */
+    .escalated-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: -6px 0 16px; }
+    .escalated-count { color: var(--accent); font-size: 12px; font-weight: 600; margin-right: 2px; }
+    .escalated-toggle, .escalated-jump {
+      background: var(--panel); color: var(--text);
+      border: 1px solid var(--border); border-radius: 999px;
+      padding: 4px 12px; cursor: pointer; font-size: 12px;
+    }
+    .escalated-jump { padding: 4px 11px; font-family: ui-monospace, monospace; }
+    .escalated-toggle:hover, .escalated-jump:hover { border-color: var(--accent); }
+    .escalated-toggle.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+    .escalated-only-empty { color: var(--muted); margin-top: 24px; }
+    .session-view.escalated-only .card:not(.assistant):not(.tool.escalated) { display: none; }
+    .session-view.escalated-only .card.assistant:not(:has(.tool-call-escalated)) { display: none; }
+    .session-view.escalated-only .card.assistant .tool-call:not(.tool-call-escalated) { display: none; }
+    .session-view.escalated-only .turn:not(:has(.tool-call-escalated)):not(:has(.card.tool.escalated)) { display: none; }
 
     /* notices */
     .notices { margin-bottom: 16px; }
@@ -571,6 +591,7 @@
     /* a tool call whose result failed: tint its border so it stands out, and let
        errors-only keep the assistant card that holds it. */
     .tool-call-failed { border-color: var(--error); }
+    .tool-call-escalated { border-color: var(--accent); }
 
     /* call <-> result pairing: the same `call N` chip on a tool call and its
        result, each an anchor that jumps to its partner. When one assistant turn

@@ -331,3 +331,12 @@ pub extend MarkdownResourceKind with Eq::{equal, not_equal}
 
 ///|
 pub extend MarkdownResourceKind with Debug::{to_repr}
+
+///|
+pub extend MarkdownViewerOptions with Debug::{to_repr}
+
+///|
+pub extend MarkdownViewerOptions with Eq::{equal, not_equal}
+
+///|
+pub extend MarkdownViewerViewState with Debug::{to_repr}

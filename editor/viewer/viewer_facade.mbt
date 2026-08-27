@@ -88,3 +88,6 @@ pub fn overlay_widget(
 ) -> @editor_browser.OverlayWidget {
   @code_widget.overlay_widget(id, dom_node)
 }
+
+///|
+pub extend ViewerViewState with Debug::{to_repr}

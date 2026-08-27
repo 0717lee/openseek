@@ -83,11 +83,14 @@ pub(all) enum SymbolNavigationCommand {
   GoToReferences
   PeekReferences
 } derive(Eq, @debug.Debug)
+pub fn SymbolNavigationCommand::equal(Self, Self) -> Bool
 pub fn SymbolNavigationCommand::from_id(String) -> Self?
 pub fn SymbolNavigationCommand::id(Self) -> String
 pub fn SymbolNavigationCommand::is_available(Self, @languages.LanguageHandle, @model.TextModel, Bool) -> Bool
 pub fn SymbolNavigationCommand::keybinding_label(Self) -> String?
+pub fn SymbolNavigationCommand::not_equal(Self, Self) -> Bool
 pub fn SymbolNavigationCommand::title(Self) -> String
+pub fn SymbolNavigationCommand::to_repr(Self) -> @debug.Repr
 
 // Type aliases
 

@@ -22,6 +22,7 @@ pub fn CoreDocumentDiffProvider::CoreDocumentDiffProvider() -> Self
 pub fn CoreDocumentDiffProvider::compute_diff(Self, @model.TextSnapshot, @model.TextSnapshot, DocumentDiffOptions) -> DocumentDiff
 pub fn CoreDocumentDiffProvider::equal(Self, Self) -> Bool
 pub fn CoreDocumentDiffProvider::not_equal(Self, Self) -> Bool
+pub fn CoreDocumentDiffProvider::on_did_change(Self, () -> Unit) -> @common.Disposable
 pub fn CoreDocumentDiffProvider::to_repr(Self) -> @debug.Repr
 pub impl DocumentDiffProvider for CoreDocumentDiffProvider
 

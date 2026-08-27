@@ -111,6 +111,9 @@ pub fn CodeEditorOverviewRuler::is_disposed(Self) -> Bool
 pub fn CodeEditorOverviewRuler::set_entries(Self, Int, Array[CodeEditorOverviewRulerEntry]) -> Unit
 
 type CodeEditorOverviewRulerBand derive(Eq, @debug.Debug)
+pub fn CodeEditorOverviewRulerBand::equal(Self, Self) -> Bool
+pub fn CodeEditorOverviewRulerBand::not_equal(Self, Self) -> Bool
+pub fn CodeEditorOverviewRulerBand::to_repr(Self) -> @debug.Repr
 
 pub(all) struct CodeEditorOverviewRulerEntry {
   id : Int
@@ -118,6 +121,9 @@ pub(all) struct CodeEditorOverviewRulerEntry {
   color : String
   lane : CodeEditorOverviewRulerLane
 } derive(Eq, @debug.Debug)
+pub fn CodeEditorOverviewRulerEntry::equal(Self, Self) -> Bool
+pub fn CodeEditorOverviewRulerEntry::not_equal(Self, Self) -> Bool
+pub fn CodeEditorOverviewRulerEntry::to_repr(Self) -> @debug.Repr
 
 pub(all) enum CodeEditorOverviewRulerLane {
   Left
@@ -125,6 +131,9 @@ pub(all) enum CodeEditorOverviewRulerLane {
   Right
   Full
 } derive(Eq, @debug.Debug)
+pub fn CodeEditorOverviewRulerLane::equal(Self, Self) -> Bool
+pub fn CodeEditorOverviewRulerLane::not_equal(Self, Self) -> Bool
+pub fn CodeEditorOverviewRulerLane::to_repr(Self) -> @debug.Repr
 
 pub(all) struct CodeEditorRenderLinesDecoration {
   range : @common.Range

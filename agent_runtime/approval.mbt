@@ -103,3 +103,15 @@ async test "a wired channel is handed over intact" {
   // from.
   assert_eq(asked[0].body, Some("fn main { println(1) }"))
 }
+
+///|
+pub extend ApprovalAsk with Debug::{to_repr}
+
+///|
+pub extend ApprovalAsk with Eq::{equal, not_equal}
+
+///|
+pub extend ApprovalOutcome with Debug::{to_repr}
+
+///|
+pub extend ApprovalOutcome with Eq::{equal, not_equal}

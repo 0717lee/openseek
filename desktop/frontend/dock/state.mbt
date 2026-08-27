@@ -124,3 +124,9 @@ pub extend RememberedStrip with Eq::{equal, not_equal}
 
 ///|
 pub extend State with Eq::{equal, not_equal}
+
+///|
+pub extend GitHistoryDiff with Debug::{to_repr}
+
+///|
+pub extend GitHistoryDiff with Eq::{equal, not_equal}

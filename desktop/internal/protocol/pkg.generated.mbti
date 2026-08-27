@@ -230,6 +230,11 @@ pub(all) struct BrowserThemePayload {
   id : Int
   dark : Bool
 } derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+pub fn BrowserThemePayload::equal(Self, Self) -> Bool
+pub fn BrowserThemePayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn BrowserThemePayload::not_equal(Self, Self) -> Bool
+pub fn BrowserThemePayload::to_json(Self) -> Json
+pub fn BrowserThemePayload::to_repr(Self) -> @debug.Repr
 
 pub(all) struct BrowserVisiblePayload {
   id : Int
@@ -275,6 +280,11 @@ pub(all) struct CancelSearchSemanticPayload {
   session_key : String
   generation : Int
 } derive(Eq, @debug.Debug)
+pub fn CancelSearchSemanticPayload::equal(Self, Self) -> Bool
+pub fn CancelSearchSemanticPayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn CancelSearchSemanticPayload::not_equal(Self, Self) -> Bool
+pub fn CancelSearchSemanticPayload::to_json(Self) -> Json
+pub fn CancelSearchSemanticPayload::to_repr(Self) -> @debug.Repr
 pub impl ToJson for CancelSearchSemanticPayload
 pub impl @json.FromJson for CancelSearchSemanticPayload
 
@@ -745,6 +755,11 @@ pub(all) struct CreateDirectoryPayload {
   parent : String
   name : String
 } derive(Eq, @debug.Debug)
+pub fn CreateDirectoryPayload::equal(Self, Self) -> Bool
+pub fn CreateDirectoryPayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn CreateDirectoryPayload::not_equal(Self, Self) -> Bool
+pub fn CreateDirectoryPayload::to_json(Self) -> Json
+pub fn CreateDirectoryPayload::to_repr(Self) -> @debug.Repr
 pub impl ToJson for CreateDirectoryPayload
 pub impl @json.FromJson for CreateDirectoryPayload
 
@@ -1628,6 +1643,11 @@ pub(all) struct SearchSemanticPayload {
   generation : Int
   max_results : Int
 } derive(Eq, @debug.Debug)
+pub fn SearchSemanticPayload::equal(Self, Self) -> Bool
+pub fn SearchSemanticPayload::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn SearchSemanticPayload::not_equal(Self, Self) -> Bool
+pub fn SearchSemanticPayload::to_json(Self) -> Json
+pub fn SearchSemanticPayload::to_repr(Self) -> @debug.Repr
 pub impl ToJson for SearchSemanticPayload
 pub impl @json.FromJson for SearchSemanticPayload
 
@@ -1642,6 +1662,11 @@ pub(all) struct SearchSemanticReply {
   partial : Bool
   error : SemanticSearchError?
 } derive(Eq, @debug.Debug)
+pub fn SearchSemanticReply::equal(Self, Self) -> Bool
+pub fn SearchSemanticReply::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn SearchSemanticReply::not_equal(Self, Self) -> Bool
+pub fn SearchSemanticReply::to_json(Self) -> Json
+pub fn SearchSemanticReply::to_repr(Self) -> @debug.Repr
 pub impl ToJson for SearchSemanticReply
 pub impl @json.FromJson for SearchSemanticReply
 
@@ -1688,6 +1713,11 @@ pub(all) struct SemanticContextLine {
   text : String
   is_match : Bool
 } derive(Eq, @debug.Debug)
+pub fn SemanticContextLine::equal(Self, Self) -> Bool
+pub fn SemanticContextLine::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn SemanticContextLine::not_equal(Self, Self) -> Bool
+pub fn SemanticContextLine::to_json(Self) -> Json
+pub fn SemanticContextLine::to_repr(Self) -> @debug.Repr
 pub impl ToJson for SemanticContextLine
 pub impl @json.FromJson for SemanticContextLine
 
@@ -1695,6 +1725,11 @@ pub(all) struct SemanticSearchError {
   code : String
   message : String
 } derive(Eq, @debug.Debug)
+pub fn SemanticSearchError::equal(Self, Self) -> Bool
+pub fn SemanticSearchError::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn SemanticSearchError::not_equal(Self, Self) -> Bool
+pub fn SemanticSearchError::to_json(Self) -> Json
+pub fn SemanticSearchError::to_repr(Self) -> @debug.Repr
 pub impl ToJson for SemanticSearchError
 pub impl @json.FromJson for SemanticSearchError
 
@@ -1709,6 +1744,11 @@ pub(all) struct SemanticSearchHit {
   matched_source : String
   source_context : Array[SemanticContextLine]
 } derive(Eq, @debug.Debug)
+pub fn SemanticSearchHit::equal(Self, Self) -> Bool
+pub fn SemanticSearchHit::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn SemanticSearchHit::not_equal(Self, Self) -> Bool
+pub fn SemanticSearchHit::to_json(Self) -> Json
+pub fn SemanticSearchHit::to_repr(Self) -> @debug.Repr
 pub impl ToJson for SemanticSearchHit
 pub impl @json.FromJson for SemanticSearchHit
 
