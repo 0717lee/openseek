@@ -276,6 +276,10 @@ fn browser_event_msg(payload : Map[String, Json]) -> Msg? {
           _ => None
         }
       }
+    // Proton 0.2.3 reports native view closure explicitly. Retire the matching
+    // tab through the normal close transition; a closure initiated by that
+    // same transition is already stale and therefore remains idempotent.
+    "closed" => Some(Dock(TabClosed(@dock.DockTab::Browser(id~))))
     _ => None
   }
 }
@@ -309,5 +313,10 @@ test "browser event decode drops ERR_ABORTED but keeps real failures" {
   assert_true(
     browser_event_msg(navigated)
     is Some(Preview(Navigated(id=2, url="https://www.google.com/"))),
+  )
+  let closed : Map[String, Json] = { "id": Json::number(3), "kind": "closed" }
+  assert_true(
+    browser_event_msg(closed)
+    is Some(Dock(TabClosed(@dock.DockTab::Browser(id=3)))),
   )
 }

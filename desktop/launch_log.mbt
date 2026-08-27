@@ -1,10 +1,12 @@
 // Launch diagnostics for the packaged app: a double-clicked bundle has no
-// terminal, so startup problems would otherwise vanish. Both processes log to
-// `openseek-desktop.log` in the per-user runtime dir — the bundle directory
-// is read-only on end-user installs (App Translocation mounts it so), which
-// is exactly when launch diagnostics matter, so the log lives with the rest
-// of the runtime state. xlog's file handler opens in append mode, so the
-// host and the framework child can share the file safely.
+// terminal, so early startup problems would otherwise vanish. OpenSeek starts
+// with `openseek-desktop.log` in the per-user runtime dir; Proton 0.2.3 then
+// installs its own global xlog handler when the native runtime starts. The
+// native shutdown path keeps this fixed OpenSeek path so its CEF state remains
+// available even after MoonBit has left the app pump. The bundle directory is
+// read-only on end-user installs (App Translocation mounts it so), which is
+// exactly when launch diagnostics matter, so both destinations live outside
+// the bundle.
 
 ///|
 async fn launch_logger(executable : String) -> Unit {
@@ -13,8 +15,8 @@ async fn launch_logger(executable : String) -> Unit {
   }
   let path = dir.join("openseek-desktop.log").to_string()
   // Proton's native shutdown path can run from `atexit`, after MoonBit has
-  // already left the app pump. Give it the same append-only JSONL sink so a
-  // missing MoonBit "end" record and the native CEF state can be correlated.
+  // already left the app pump. Keep its append-only JSONL sink independent of
+  // Proton's later global MoonBit logger configuration.
   @env.set_env_var("OPENSEEK_DESKTOP_LOG", path)
   @xlog.global().set_handler(@xlog.File(path))
   @xlog.global().set_level(Debug)
