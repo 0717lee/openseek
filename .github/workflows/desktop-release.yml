@@ -147,8 +147,10 @@ jobs:
           echo "RELEASE_VERSION=$release_version" >> "$GITHUB_ENV"
           echo "version=$release_version" >> "$GITHUB_OUTPUT"
 
-      # Stamp only this runner's checkout. Proton reads the version from
-      # moon.mod and writes it into Info.plist and proton-package.json.
+      # Stamp only this runner's checkout. Moon uses moon.mod for the module
+      # build, while Proton 0.2 reads package.version from proton.project.json
+      # for Info.plist and proton-package.json. Keep both release identities
+      # equal before any build or package command runs.
       - name: Stamp release version
         shell: bash
         run: |
@@ -156,8 +158,16 @@ jobs:
           RELEASE_VERSION="$RELEASE_VERSION" perl -0pi -e '
             s/^version = "[^"]+"/version = "$ENV{RELEASE_VERSION}"/m
           ' desktop/moon.mod
-          expected="version = \"$RELEASE_VERSION\""
-          grep -Fx "$expected" desktop/moon.mod
+          stamped_config="desktop/proton.project.json.stamped"
+          jq --arg version "$RELEASE_VERSION" \
+            '.package.version = $version' desktop/proton.project.json \
+            > "$stamped_config"
+          mv "$stamped_config" desktop/proton.project.json
+
+          module_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' desktop/moon.mod)"
+          package_version="$(jq -er '.package.version | strings' desktop/proton.project.json)"
+          test "$module_version" = "$RELEASE_VERSION"
+          test "$package_version" = "$RELEASE_VERSION"
 
       # Stable, matching CI. This is the toolchain that BUILDS the app, not
       # the seed it ships (that one is pinned by `desktop/.moonbit-version`), but
