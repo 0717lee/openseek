@@ -313,7 +313,37 @@ pub async fn Actor::run(self : Actor, emit : (String, Json) -> Unit) -> Unit {
     } else {
       Some(self.inputs.get())
     }
-    @async.with_task_group(group => self.run_connection(group, pending, emit))
+    @async.with_task_group(group => self.run_connection(group, pending, emit)) catch {
+      // App shutdown must still cancel the actor and every owned child. A
+      // child-process failure, however, only ends this connection attempt;
+      // keeping the loop alive lets the next API input retry the app-server.
+      error if @async.is_being_cancelled() => raise error
+      error =>
+        self.report_unavailable(
+          "Codex app-server stopped unexpectedly: \{error}",
+          pending,
+          emit,
+        )
+    }
+  }
+}
+
+///|
+/// Publish one failed connection attempt and settle the input that triggered
+/// it. The actor loop calls this only after the connection task group has
+/// unwound, so the next input can safely create a fresh child process.
+fn Actor::report_unavailable(
+  self : Actor,
+  message : String,
+  pending : ActorInput?,
+  emit : (String, Json) -> Unit,
+) -> Unit {
+  let error = CodexError::Unavailable(message)
+  error.log()
+  self.state = Unavailable(message)
+  emit("codex.status_changed", self.status())
+  if pending is Some(input) {
+    input.reject(error)
   }
 }
 
@@ -358,12 +388,7 @@ async fn[G] Actor::run_connection(
     },
   )
   guard connection is Some(connection) else {
-    let message = "Codex app-server is unavailable"
-    self.state = Unavailable(message)
-    emit("codex.status_changed", self.status())
-    if pending is Some(input) {
-      input.reject(Unavailable(message))
-    }
+    self.report_unavailable("Codex app-server is unavailable", pending, emit)
     return
   }
   self.state = Ready
@@ -454,7 +479,6 @@ async fn Actor::next_step(
 
 ///|
 fn ActorInput::reject(self : ActorInput, error : CodexError) -> Unit {
-  error.log()
   match self {
     Call(_, _, reply) | Respond(_, _, reply) | ListRequests(reply) =>
       (reply.try_put(Err(error)) catch { _ => false }) |> ignore
