@@ -626,10 +626,12 @@ pub async fn load_session(
       watermark: Some(session_max_sequence(document)),
     }
   }
-  // Name the missing-record states before spending an engine read that can
-  // only fail with a raw file error: a stale client asks for a conversation
-  // whose record moved to this store's archived twin, and the answer should
-  // say that, not ENOENT.
+  // A record this store does not hold has three different answers, and only
+  // the first two are failures. It may have moved to this store's archived
+  // twin; it may live in another store, which means the request named the
+  // wrong one; or it may simply not be written yet, which is an accepted
+  // conversation whose first turn has not committed — the empty snapshot
+  // below, not an error a client can only retry forever.
   if !@fsx.is_dir(root.join("sessions").join(session).to_path()) {
     if @fsx.is_dir(
         @session_store.archived_root(root)
@@ -639,9 +641,12 @@ pub async fn load_session(
       ) {
       raise EngineError("this conversation is archived; unarchive it first")
     }
-    raise EngineError(
-      "no durable record for this conversation in the selected store",
-    )
+    for holder in @session_store.holders_of(session) {
+      guard holder.store.to_string() != root.to_string() else { continue }
+      raise EngineError(
+        "no durable record for this conversation in the selected store",
+      )
+    }
   }
   let document = @session_record.read_document(root, session) catch {
     error if @async.is_being_cancelled() => raise error

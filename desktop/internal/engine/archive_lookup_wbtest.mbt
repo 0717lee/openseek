@@ -151,26 +151,9 @@ async test "loading a conversation from a detached workspace names that state" {
   )
   let manager = new_engine_manager("unused")
   manager.pump = Serving(sessions=Map([]))
-  let detached = detach_workspace(manager, workspace, fn(_) {  })
-  assert_true(detached is Workspaces([_]))
-  // A stale client's transcript reload still names the store it last saw;
-  // the reply must say that store is gone rather than read the global one or
-  // surface the engine's raw file error.
-  let detail = try {
-    ignore(
-      load_session(manager, {
-        session: "s-ws",
-        workspace: @pathx.Path(workspace).resolve().resource_path(),
-      }),
-    )
-    "no error"
-  } catch {
-    EngineError(detail) => detail
-    error if @async.is_being_cancelled() => raise error
-    error => "\{error}"
-  }
-  assert_true(detail.has_suffix("is not a registered workspace"))
-  // Nor does another attached store answer for the id it never held.
+  // Another attached store never answers for an id it does not hold. The
+  // record is visibly `workspace`'s, so naming `other` is a mis-addressed
+  // request rather than a conversation whose first turn has not committed.
   let other_attempt = try {
     ignore(
       load_session(manager, {
@@ -190,6 +173,60 @@ async test "loading a conversation from a detached workspace names that state" {
       #|"no durable record for this conversation in the selected store"
     ),
   )
+  let detached = detach_workspace(manager, workspace, fn(_) {  })
+  assert_true(detached is Workspaces([_]))
+  // A stale client's transcript reload still names the store it last saw;
+  // the reply must say that store is gone rather than read the global one or
+  // surface the engine's raw file error.
+  let detail = try {
+    ignore(
+      load_session(manager, {
+        session: "s-ws",
+        workspace: @pathx.Path(workspace).resolve().resource_path(),
+      }),
+    )
+    "no error"
+  } catch {
+    EngineError(detail) => detail
+    error if @async.is_being_cancelled() => raise error
+    error => "\{error}"
+  }
+  assert_true(detail.has_suffix("is not a registered workspace"))
+  @fs.rmdir(dir, recursive=true)
+}
+
+///|
+#cfg(not(platform="windows"))
+async test "a conversation whose first turn has not committed loads as empty" {
+  ambient_env_test_lock.acquire()
+  defer ambient_env_test_lock.release()
+  let previous = @sys.get_env_var("HOME")
+  defer restore_home_env(previous)
+  let dir = @fs.tmpdir(prefix="openseek-load-fresh-")
+  let workspace = dir + "/ws"
+  let home = dir + "/home"
+  let global_root = home + "/.openseek"
+  @sys.set_env_var("HOME", home)
+  @fsx.ensure_dir(Path(global_root))
+  @fsx.ensure_dir(Path(workspace + "/.openseek"))
+  @fs.write_file(
+    global_root + "/workspaces.json",
+    ({ "workspaces": [workspace] } : Json).stringify(),
+    create_mode=CreateOrTruncate,
+  )
+  let manager = new_engine_manager("unused")
+  manager.pump = Serving(sessions=Map([]))
+  // `agent.started` precedes the first durable write, so a client that
+  // reconnects in that window asks for a record no store holds yet. That is
+  // this conversation's answer — an empty transcript it will fill — and not
+  // a failure it could only retry forever.
+  let reply = load_session(manager, {
+    session: "s-uncommitted",
+    workspace: @pathx.Path(workspace).resolve().resource_path(),
+  })
+  assert_eq(reply.session.id, Some("s-uncommitted"))
+  assert_true(reply.session.events is Some([]))
+  assert_eq(reply.watermark, Some(0))
   @fs.rmdir(dir, recursive=true)
 }
 
