@@ -62,6 +62,36 @@ pub async fn known_roots() -> Array[@pathx.Absolute] {
 }
 
 ///|
+/// Where a record for `session` already exists, and which half of that store
+/// holds it. A session id names a record only inside one store, so no single
+/// store's answer settles whether an id is new — and an archived record counts,
+/// because it is one unarchive away from standing beside a live one.
+///
+/// This is the population question, asked identically by every rule that has to
+/// decide whether an id is free: `agent.start` before it opens a record, and
+/// `worktree.create` before it binds a checkout to one.
+pub struct RecordHolder {
+  store : @pathx.Absolute
+  archived : Bool
+}
+
+///|
+pub async fn holders_of(session : String) -> Array[RecordHolder] {
+  let holders : Array[RecordHolder] = []
+  guard safe_session_id(session) else { return holders }
+  for root in known_roots() {
+    if @fsx.is_dir(root.join("sessions").join(session).to_path()) {
+      holders.push({ store: root, archived: false })
+    } else if @fsx.is_dir(
+        archived_root(root).join("sessions").join(session).to_path(),
+      ) {
+      holders.push({ store: root, archived: true })
+    }
+  }
+  holders
+}
+
+///|
 /// Whether a session id can serve as a single path component under a store or
 /// the workspace root. Path separators and dot segments could escape the root —
 /// those conversations work in the home directory instead.

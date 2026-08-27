@@ -15,6 +15,8 @@ pub async fn ensure_not_archived(String, @pathx.Absolute?) -> Unit
 
 pub async fn family_in(@pathx.Absolute, String) -> Array[String]
 
+pub async fn holders_of(String) -> Array[RecordHolder]
+
 pub async fn known_roots() -> Array[@pathx.Absolute]
 
 pub async fn root_of(String) -> @pathx.Absolute?
@@ -30,6 +32,11 @@ pub suberror StoreError {
 pub fn StoreError::to_repr(Self) -> @debug.Repr
 
 // Types and methods
+pub struct RecordHolder {
+  store : @pathx.Absolute
+  archived : Bool
+}
+
 pub struct StoreSelection {
   root : @pathx.Absolute
   workspace : @pathx.Absolute

@@ -871,7 +871,12 @@ pub async fn create(
     let global_record : @pathx.Absolute? = @workspaces.global_store_root().map(root => {
       root.join("sessions").join(session)
     })
-    let has_history = if @session_store.workspace_of(session) is Some(_) {
+    // The same population question `agent.start` asks, and for the same
+    // reason: a binding this call commits is worthless if the start that
+    // follows refuses the id. An archived record in another project counts
+    // there, so it has to count here — otherwise a checkout is created and
+    // bound to a conversation that can never run in it.
+    let has_history = if !@session_store.holders_of(session).is_empty() {
       true
     } else if global_record is Some(record) {
       @fsx.is_dir(record.to_path()) catch {
@@ -1656,6 +1661,20 @@ async test "worktree create names the holder in every refusal" {
   let elsewhere = root.join("elsewhere")
   @fsx.ensure_dir(elsewhere.to_path())
   ignore(@workspaces.add(elsewhere.to_string(), fn(_) {  }))
+  // An archived record in another project counts as history, because
+  // `agent.start` counts it: binding a checkout the following start would
+  // refuse leaves a conversation that can never run in the worktree it owns.
+  @fsx.ensure_dir(
+    @session_store.archived_root(@workspaces.store_root(elsewhere))
+    .join("sessions")
+    .join("s-put-away")
+    .to_path(),
+  )
+  assert_true(
+    create_refusal(host, repo.to_string(), "s-put-away", "x").contains(
+      "already has history",
+    ),
+  )
   write_worktrees(elsewhere, [
     {
       name: "wt-e",

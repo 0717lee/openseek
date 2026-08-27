@@ -86,23 +86,15 @@ async fn ensure_new_record_is_unique(
   if @fsx.is_dir(selected.join("sessions").join(session).to_path()) {
     return
   }
-  for root in @session_store.known_roots() {
-    guard root.to_string() != selected.to_string() else { continue }
-    if @fsx.is_dir(root.join("sessions").join(session).to_path()) {
-      raise EngineError(
-        "this conversation already has a record in \{root}; start a new one here",
-      )
-    }
-    if @fsx.is_dir(
-        @session_store.archived_root(root)
-        .join("sessions")
-        .join(session)
-        .to_path(),
-      ) {
-      raise EngineError(
-        "this conversation has an archived record in \{root}; start a new one here",
-      )
-    }
+  for holder in @session_store.holders_of(session) {
+    guard holder.store.to_string() != selected.to_string() else { continue }
+    raise EngineError(
+      if holder.archived {
+        "this conversation has an archived record in \{holder.store}; start a new one here"
+      } else {
+        "this conversation already has a record in \{holder.store}; start a new one here"
+      },
+    )
   }
 }
 
