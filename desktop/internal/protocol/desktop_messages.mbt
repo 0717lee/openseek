@@ -429,7 +429,7 @@ pub(all) struct CancelSearchFilesPayload {
 ///|
 pub impl FromJson for CancelSearchFilesPayload with fn from_json(json, path) {
   let object = JsonObject::decode(json, path, "file search cancellation")
-  { request_id: object.required_string("request_id") }
+  { request_id: object.required_string("request_id"), }
 }
 
 ///|
@@ -632,7 +632,7 @@ pub impl FromJson for TerminalInputPayload with fn from_json(json, path) {
         (path, "exactly one of data and data_base64 must be present"),
       )
   }
-  { id: object.required_string("id"), data, data_base64 }
+  { id: object.required_string("id"), data, data_base64, }
 }
 
 ///|
@@ -697,7 +697,7 @@ pub(all) struct TerminalClosePayload {
 ///|
 pub impl FromJson for TerminalClosePayload with fn from_json(json, path) {
   let object = JsonObject::decode(json, path, "terminal close payload")
-  { id: object.required_string("id") }
+  { id: object.required_string("id"), }
 }
 
 ///|
@@ -856,7 +856,7 @@ pub(all) struct BrowserIdPayload {
 ///|
 pub impl FromJson for BrowserIdPayload with fn from_json(json, path) {
   let object = JsonObject::decode(json, path, "browser id payload")
-  { id: object.required_string("id") }
+  { id: object.required_string("id"), }
 }
 
 ///|
@@ -873,7 +873,7 @@ pub(all) struct BrowserThemePayload {
 ///|
 pub impl FromJson for BrowserThemePayload with fn from_json(json, path) {
   let object = JsonObject::decode(json, path, "browser theme payload")
-  { id: object.required_string("id"), dark: object.required_bool("dark") }
+  { id: object.required_string("id"), dark: object.required_bool("dark"), }
 }
 
 ///|
@@ -922,7 +922,10 @@ pub(all) struct BrowserVisiblePayload {
 ///|
 pub impl FromJson for BrowserVisiblePayload with fn from_json(json, path) {
   let object = JsonObject::decode(json, path, "browser visibility payload")
-  { id: object.required_string("id"), visible: object.required_bool("visible") }
+  {
+    id: object.required_string("id"),
+    visible: object.required_bool("visible"),
+  }
 }
 
 ///|
@@ -1348,7 +1351,7 @@ pub(all) struct TerminalExitPayload {
 ///|
 pub impl FromJson for TerminalExitPayload with fn from_json(json, path) {
   let object = JsonObject::decode(json, path, "terminal exit payload")
-  { id: object.required_string("id"), code: object.required_int("code") }
+  { id: object.required_string("id"), code: object.required_int("code"), }
 }
 
 ///|

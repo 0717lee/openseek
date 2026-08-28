@@ -9,7 +9,7 @@ const MaxSearchResults : Int = 20000
 /// keeps an A -> B -> A transition from making an old reply current again,
 /// while the armed Search mode and semantic settings survive the switch.
 pub fn State::reset_checkout(self : State) -> State {
-  { ..State::empty(), mode: self.mode, patterns: self.patterns }
+  { ..State::empty(), mode: self.mode, patterns: self.patterns, }
 }
 
 ///|
@@ -77,7 +77,7 @@ fn State::schedule(self : State, input : Input, immediate~ : Bool) -> State {
 /// from the Explorer may settle while another inventory or tab is visible.
 pub fn State::park(self : State) -> State {
   guard self.phase is Debouncing || self.phase is Loading else { return self }
-  { ..self, phase: Idle, request_id: @uuid.mint() }
+  { ..self, phase: Idle, request_id: @uuid.mint(), }
 }
 
 ///|
@@ -97,15 +97,15 @@ pub fn State::handle(self : State, msg : Msg, input : Input) -> State {
         collapsed: Map([]),
       }.schedule(input, immediate=false)
     ToggleCaseSensitive =>
-      { ..self, case_sensitive: !self.case_sensitive }.schedule(
+      { ..self, case_sensitive: !self.case_sensitive, }.schedule(
         input,
         immediate=false,
       )
     ToggleWholeWord =>
-      { ..self, whole_word: !self.whole_word }.schedule(input, immediate=false)
+      { ..self, whole_word: !self.whole_word, }.schedule(input, immediate=false)
     ToggleRegex =>
-      { ..self, regex: !self.regex }.schedule(input, immediate=false)
-    ToggleDetails => { ..self, details_open: !self.details_open }
+      { ..self, regex: !self.regex, }.schedule(input, immediate=false)
+    ToggleDetails => { ..self, details_open: !self.details_open, }
     IncludeChanged(include_glob) =>
       { ..self, include_glob, }.schedule(input, immediate=false)
     ExcludeChanged(exclude_glob) =>
@@ -117,7 +117,7 @@ pub fn State::handle(self : State, msg : Msg, input : Input) -> State {
       }
       { ..self, patterns, }.schedule(input, immediate=false)
     }
-    AddPattern => { ..self, patterns: self.patterns + [""] }
+    AddPattern => { ..self, patterns: self.patterns + [""], }
     RemovePattern(index) => {
       let patterns = self.patterns.copy()
       if index < patterns.length() && patterns.length() > 1 {
@@ -170,7 +170,7 @@ pub fn State::handle(self : State, msg : Msg, input : Input) -> State {
     }
     RequestStarted(request_id~) =>
       if self.request_id == request_id && self.phase is Debouncing {
-        { ..self, phase: Loading }
+        { ..self, phase: Loading, }
       } else {
         self
       }
@@ -181,7 +181,7 @@ pub fn State::handle(self : State, msg : Msg, input : Input) -> State {
         return self
       }
       if reply.cancelled {
-        return { ..self, phase: Idle }
+        return { ..self, phase: Idle, }
       }
       let phase = match reply.error {
         None => Ready
@@ -494,7 +494,7 @@ test "semantic progress batches append only new hits" {
     matched_source: "inspect(x)",
     source_context: [{ line: 1, text: "inspect(x)", is_match: true, }],
   }
-  let second = { ..hit, start_line: 2, end_line: 2 }
+  let second = { ..hit, start_line: 2, end_line: 2, }
   let first = state.handle(
     SemanticProgress(
       request_id=page.request_id,

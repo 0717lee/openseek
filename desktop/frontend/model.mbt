@@ -1156,7 +1156,7 @@ fn WorkspaceRequestIds::retain_workspaces(
   self : WorkspaceRequestIds,
   workspaces : Array[@common.Uri],
 ) -> WorkspaceRequestIds {
-  { values: self.values.filter(entry => workspaces.contains(entry.1)) }
+  { values: self.values.filter(entry => workspaces.contains(entry.1)), }
 }
 
 ///|
@@ -3483,7 +3483,7 @@ fn Conversation::complete_reasoning(self : Conversation) -> Conversation {
 ///|
 fn Model::allocate_submission_id(self : Model) -> (Model, String) {
   let sequence = self.submission_sequence + 1
-  ({ ..self, submission_sequence: sequence }, @uuid.mint())
+  ({ ..self, submission_sequence: sequence, }, @uuid.mint())
 }
 
 ///|
@@ -3878,7 +3878,7 @@ fn Conversation::buffer_commit(
     ReloadFailed(buffered~) => {
       let buffered = buffered.copy()
       buffered.push(commit)
-      { ..self, sync: ReloadFailed(buffered~) }
+      { ..self, sync: ReloadFailed(buffered~), }
     }
     Synced => self
   }
@@ -3968,7 +3968,7 @@ fn Conversation::adopt_snapshot(
   if leftover.is_empty() {
     (conv, false)
   } else {
-    ({ ..conv, sync: ReloadFailed(buffered=leftover) }, true)
+    ({ ..conv, sync: ReloadFailed(buffered=leftover), }, true)
   }
 }
 

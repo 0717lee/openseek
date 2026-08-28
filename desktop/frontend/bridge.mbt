@@ -1575,7 +1575,7 @@ fn open_file(
           scheduler.add(
             dispatch(
               OpenFileFailed(
-                owner={ channel, session },
+                owner={ channel, session, },
                 request_id~,
                 message=@interop.bridge_error_text(error),
               ),
@@ -1589,7 +1589,7 @@ fn open_file(
           scheduler.add(
             dispatch(
               OpenFileAt(
-                owner={ channel, session },
+                owner={ channel, session, },
                 request_id~,
                 path=target.path,
                 line=target.line,
@@ -1601,7 +1601,7 @@ fn open_file(
           scheduler.add(
             dispatch(
               OpenDirectoryAt(
-                owner={ channel, session },
+                owner={ channel, session, },
                 request_id~,
                 path=target.path,
               ),
@@ -1610,7 +1610,7 @@ fn open_file(
         Refused(message) =>
           scheduler.add(
             dispatch(
-              OpenFileFailed(owner={ channel, session }, request_id~, message~),
+              OpenFileFailed(owner={ channel, session, }, request_id~, message~),
             ),
           )
         // The host already handed the path to the system opener.

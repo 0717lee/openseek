@@ -116,7 +116,7 @@ fn open_session_on(
       Some(conv) if !(conv.sync is Reloading(..)) &&
         model.can_reload_transcript(conv) => {
         let (next, request_id) = base.begin_transcript_reload(conv)
-        let next = { ..next, loading_conversation: Some(owner) }
+        let next = { ..next, loading_conversation: Some(owner), }
         if request_id is Some(request_id) {
           (
             session_snapshot_command(
@@ -207,7 +207,7 @@ fn open_session_on(
       conversation
     }
     let (model, request_id) = model.begin_transcript_reload(conversation)
-    let next = { ..model, screen: Chat, loading_conversation: Some(owner) }.with_active_project(
+    let next = { ..model, screen: Chat, loading_conversation: Some(owner), }.with_active_project(
       Some(project),
     )
     if request_id is Some(request_id) {
@@ -300,7 +300,7 @@ fn request_sessions_refresh(
   let request_id = @uuid.mint()
   (
     fetch_sessions(dispatch, channel, request_id),
-    model.replace_device({ ..dev, sessions_request_id: Some(request_id) }),
+    model.replace_device({ ..dev, sessions_request_id: Some(request_id), }),
   )
 }
 
@@ -319,7 +319,7 @@ fn request_archived_refresh(
   let request_id = @uuid.mint()
   (
     fetch_archived(dispatch, channel, request_id),
-    model.replace_device({ ..dev, archived_request_id: Some(request_id) }),
+    model.replace_device({ ..dev, archived_request_id: Some(request_id), }),
   )
 }
 
@@ -575,7 +575,7 @@ fn retry_session_snapshot(
       next,
     )
   } else {
-    let failed = { ..conv, sync: ReloadFailed(buffered=buffered.copy()) }
+    let failed = { ..conv, sync: ReloadFailed(buffered=buffered.copy()), }
     let next = model.replace_conversation(failed)
     let scroll = @cmd.none
     let owner : @interop.ConversationKey = { channel, session, }
@@ -733,7 +733,7 @@ fn conversation_relative(
 fn Model::begin_editor_navigation(self : Model) -> Model {
   {
     ..self,
-    file_panel: { ..self.file_panel, file_link_request_id: @uuid.mint() },
+    file_panel: { ..self.file_panel, file_link_request_id: @uuid.mint(), },
   }
 }
 
@@ -1571,7 +1571,7 @@ fn replace_archived_active(
   }
   let fresh = { ..fresh, archived_pending_input: pending_initial, }
   let composer_entry_replacements = model.composer_entry_replacements.copy()
-  let archived_owner : @interop.ConversationKey = { channel, session }
+  let archived_owner : @interop.ConversationKey = { channel, session, }
   let mut archive_cursor = 0
   for index, retired in model.composer_entry_retirements {
     if retired == archived_owner {
@@ -1580,7 +1580,7 @@ fn replace_archived_active(
   }
   composer_entry_replacements.push({
     archived: archived_owner,
-    fresh: { channel, session: fresh_session },
+    fresh: { channel, session: fresh_session, },
     archive_cursor,
   })
   {
@@ -1603,7 +1603,7 @@ fn update(
     model.focused != previous.focused ||
     model.screen != previous.screen
   let model = if composer_context_changed {
-    { ..model, composer_context_id: @uuid.mint(), select_menu: None }
+    { ..model, composer_context_id: @uuid.mint(), select_menu: None, }
   } else {
     model
   }
@@ -3524,7 +3524,7 @@ fn update_msg(
               archived_request_id,
               force=true,
             ),
-            { ..model.replace_device(next_dev), archive_confirm: None },
+            { ..model.replace_device(next_dev), archive_confirm: None, },
           )
         }
         None => (@cmd.none, model)
@@ -3698,7 +3698,7 @@ fn update_msg(
         return (@cmd.none, model)
       }
       let worktree_mode = value == "worktree"
-      let model = { ..model, select_menu: None }
+      let model = { ..model, select_menu: None, }
       // Apply optimistically after retiring the in-flight read, so a slower
       // reply cannot roll the page's select back. The failure path re-reads
       // the disk state under a newly minted request UUID.
@@ -3957,7 +3957,7 @@ fn update_msg(
       let request_id = @uuid.mint()
       let model = {
         ..model,
-        file_panel: { ..model.file_panel, file_link_request_id: request_id },
+        file_panel: { ..model.file_panel, file_link_request_id: request_id, },
       }
       (
         open_file(
@@ -5031,7 +5031,7 @@ fn update_device_msg(
       )
     }
     BridgeUnavailable(message) =>
-      (@cmd.none, model.replace_device({ ..dev, bridge: BridgeLost(message) }))
+      (@cmd.none, model.replace_device({ ..dev, bridge: BridgeLost(message), }))
     ChannelDown(websocket_id~) => {
       // A close callback may already be queued when sign-out retires a
       // device. If the same relay id is later re-added, it owns a new UUID
@@ -5058,7 +5058,7 @@ fn update_device_msg(
     }
     ReconnectDue(websocket_id~) => {
       guard websocket_id == dev.websocket_id else { return (@cmd.none, model) }
-      (@cmd.none, model.replace_device({ ..dev, reconnect_id: @uuid.mint() }))
+      (@cmd.none, model.replace_device({ ..dev, reconnect_id: @uuid.mint(), }))
     }
     FilePanel(msg) => {
       // The file panel serves the focused conversation; a background
@@ -5345,7 +5345,7 @@ fn update_device_msg(
     ProjectsChanged(paths) => {
       // A post-commit broadcast invalidates the exact list request currently
       // in flight, so its reply cannot roll the canonical mutation back.
-      let next = model.replace_device({ ..dev, projects_request_id: None })
+      let next = model.replace_device({ ..dev, projects_request_id: None, })
       adopt_projects(dispatch, channel, next, paths)
     }
     ProjectAddCommitted(added~, paths~) => {
@@ -5502,7 +5502,7 @@ fn update_device_msg(
             conv.workspace,
           )
           if conv.workspace is Worktree(..) && placement is Project(..) {
-            { ..conv.forget_git(), workspace: placement }
+            { ..conv.forget_git(), workspace: placement, }
           } else {
             { ..conv, workspace: placement, }
           }
@@ -5554,7 +5554,7 @@ fn update_device_msg(
             // too. `forget_git` retires probes already in flight for the removed
             // checkout; the enum transition simultaneously makes every file,
             // LSP, terminal and launcher root re-project to the project.
-            { ..conv.forget_git(), workspace: placement }
+            { ..conv.forget_git(), workspace: placement, }
           } else {
             { ..conv, workspace: placement, }
           }
@@ -5732,7 +5732,7 @@ fn update_device_msg(
         dispatch,
         channel,
         ArchivedLoaded(items, request_id~, fresh_session~),
-        { ..tombstoned, conversations, archived_delete_confirm: None },
+        { ..tombstoned, conversations, archived_delete_confirm: None, },
       )
     }
     ArchiveFailed(message) => {
@@ -6124,7 +6124,7 @@ fn update_device_msg(
       guard model.conversation_by_branch_request(request_id) is Some(conv) else {
         return (@cmd.none, model)
       }
-      let conv = { ..conv, branch, diffstat, diffstat_hint: base_hint }
+      let conv = { ..conv, branch, diffstat, diffstat_hint: base_hint, }
       // The pull-request lookup rides on the branch answer rather than on the
       // four places that ask for it: whatever refreshes the branch — a run
       // starting, a session opening, a run finishing — is exactly when the
@@ -7255,7 +7255,7 @@ fn @interop.ChannelId::test_store_root(
 fn @interop.ChannelId::test_worktrees(
   self : @interop.ChannelId,
 ) -> ProjectWorktrees {
-  { project: self.test_project(), rows: [] }
+  { project: self.test_project(), rows: [], }
 }
 
 ///|
@@ -8313,7 +8313,7 @@ test "Finished queues one follow-up behind an older in-flight snapshot" {
     ..running_model().replace_conversation({
       ..running_conversation(),
       sync: test_reloading([]),
-    })
+    }),
   }
   let finish : DeviceMsg = Finished(run_id="r7", status="finished", answer=None)
   let (_, finished) = update_dev(dispatch, finish, model)
@@ -8801,7 +8801,7 @@ test "a background session list updates only its channel's same-id workspace" {
   let model = {
     ..test_model(),
     devices: [
-      { ..empty_device_state(@interop.ChannelId::Local), bridge: Connected },
+      { ..empty_device_state(@interop.ChannelId::Local), bridge: Connected, },
       {
         ..empty_device_state(remote),
         bridge: Connected,
@@ -9210,7 +9210,7 @@ test "device focus retires the outgoing watcher and file index" {
     ..model.file_panel,
     owner: Some(owner),
     placement: @fileeditor.PlacementLive(@interop.WorkspaceRoot(root~)),
-    watching: Some({ owner, root, files: [], directories: [], recursive: true }),
+    watching: Some({ owner, root, files: [], directories: [], recursive: true, }),
     watch_id: "watch-7",
   }
   let model = { ..model, devices, conversations, file_panel: panel, }
@@ -11615,7 +11615,7 @@ test "a foreign background run schedules one causal read after Started" {
     watermark: 1,
     sync: test_reloading([]),
   }
-  let model = { ..test_model().replace_conversation(conv) }
+  let model = { ..test_model().replace_conversation(conv), }
   // This previous-run answer arrived behind a snapshot whose read cut was
   // already taken, but before the next run's lifecycle announcement.
   let (_, buffered_answer) = update_dev(
@@ -14453,7 +14453,7 @@ test "archive broadcast invalidates the active send target before list replies" 
           updated_at_ms: None,
         },
       ],
-      worktrees: [{ project: workspace, rows: [] }],
+      worktrees: [{ project: workspace, rows: [], }],
     })
   let (_, invalidated) = update_dev(
     dispatch,
@@ -14632,7 +14632,7 @@ test "a background archive removes only its channel's same-id conversation" {
   let model = {
     ..test_model(),
     devices: [
-      { ..empty_device_state(@interop.ChannelId::Local), bridge: Connected },
+      { ..empty_device_state(@interop.ChannelId::Local), bridge: Connected, },
       {
         ..empty_device_state(remote),
         bridge: Connected,
@@ -14825,7 +14825,7 @@ test "an older same-connection live list cannot replace a newer reply" {
     workspace_name: "",
     updated_at_ms: None,
   }
-  let current = { ..old, title: Some("current title") }
+  let current = { ..old, title: Some("current title"), }
   let current_request_id = "sessions-list-current"
   let model = test_model().with_dev(dev => {
     ..dev,
@@ -14855,7 +14855,7 @@ test "an older same-connection archived list cannot replace a newer reply" {
     workspace_name: "",
     updated_at_ms: None,
   }
-  let current = { ..old, title: Some("current title") }
+  let current = { ..old, title: Some("current title"), }
   let current_request_id = "archived-list-current"
   let model = test_model().with_dev(dev => {
     ..dev,
@@ -15324,7 +15324,7 @@ test "only synchronous file-open messages suppress panel reactivation" {
     channel: Local,
     session: "desktop-test",
   }
-  let identity : ComposerActionIdentity = { owner, archive_cursor: 0 }
+  let identity : ComposerActionIdentity = { owner, archive_cursor: 0, }
   assert_true(JumpToMention(0).opens_file_before_panel_reconciliation())
   assert_true(
     ComposerAction(
@@ -15777,7 +15777,7 @@ test "update is pure: a resolved transcript position opens its owning file" {
   let (_, stale) = update(
     dispatch,
     OpenFileAt(
-      owner={ ..owner, session: "another-session" },
+      owner={ ..owner, session: "another-session", },
       request_id=latest_request_id,
       path="/work/project/src/main.mbt",
       line=Some(1),
@@ -15958,7 +15958,7 @@ test "chip jumps relativize legacy absolute paths against the roots" {
       ..test_conversation(),
       workspace: Project(root=workspace),
     })
-    .with_dev(dev => { ..dev, worktrees: [{ project: workspace, rows: [] }] })
+    .with_dev(dev => { ..dev, worktrees: [{ project: workspace, rows: [], }], })
   let model = {
     ..model,
     file_panel: {
@@ -15999,7 +15999,7 @@ test "chip jumps relativize legacy absolute paths against the roots" {
       ..test_conversation(),
       workspace: Project(root=workspace),
     })
-    .with_dev(dev => { ..dev, worktrees: [{ project: workspace, rows: [] }] })
+    .with_dev(dev => { ..dev, worktrees: [{ project: workspace, rows: [], }], })
   let (_, next) = update(
     dispatch,
     JumpToLocation(
@@ -17068,7 +17068,9 @@ test "stale and lower-watermark snapshots cannot overwrite current state" {
       goal=None,
       goal_markers=[],
       session="desktop-test",
-      items=[{ kind: User, content: "stale request", ts: None, sequence: None }],
+      items=[
+        { kind: User, content: "stale request", ts: None, sequence: None, },
+      ],
       watermark=9,
       request_id="transcript-request-stale",
     ),
@@ -17750,7 +17752,7 @@ test "file watcher failures toast once and retain lifecycle state" {
     ..model.file_panel,
     owner: Some(owner),
     placement: @fileeditor.PlacementLive(@interop.WorkspaceRoot(root~)),
-    watching: Some({ owner, root, files: [], directories: [], recursive: true }),
+    watching: Some({ owner, root, files: [], directories: [], recursive: true, }),
     watch_id,
   }
   let model = { ..model, file_panel: panel, }
@@ -17924,7 +17926,7 @@ test "same-URL reuse scans this strip, not the global page map" {
     id="foreign-browser",
     url~,
   )
-  let model = { ..desktop_model(), preview: foreign }
+  let model = { ..desktop_model(), preview: foreign, }
   let (_, model) = update(dispatch, ExternalLinkClicked(url), model)
   assert_eq(model.dock.tabs.length(), 1)
   assert_eq(model.preview.pages.length(), 2)
@@ -18003,7 +18005,7 @@ test "navigating an already-placed tab re-places its view" {
     model,
   )
   let browser_id = @dock.active_browser(model.dock).unwrap()
-  let rect : @preview.Rect = { x: 480, y: 46, width: 640, height: 700 }
+  let rect : @preview.Rect = { x: 480, y: 46, width: 640, height: 700, }
   let (_, model) = update(dispatch, BrowserPaneMeasured(rect~), model)
   assert_true(model.browser_pane.shown == Some(browser_id))
   // The host may have rebuilt the view under `browser.navigate` (nothing
@@ -18222,7 +18224,7 @@ test "pane measurements place the active view and idempotently settle" {
     model,
   )
   let browser_id = @dock.active_browser(model.dock).unwrap()
-  let rect : @preview.Rect = { x: 480, y: 46, width: 640, height: 700 }
+  let rect : @preview.Rect = { x: 480, y: 46, width: 640, height: 700, }
   let (_, model) = update(dispatch, BrowserPaneMeasured(rect~), model)
   assert_true(model.browser_pane.shown == Some(browser_id))
   assert_true(model.browser_pane.rect == Some(rect))
@@ -18245,7 +18247,7 @@ test "the launcher popup and final tab close both retire the shown view" {
     model,
   )
   let browser_id = @dock.active_browser(model.dock).unwrap()
-  let rect : @preview.Rect = { x: 480, y: 46, width: 640, height: 700 }
+  let rect : @preview.Rect = { x: 480, y: 46, width: 640, height: 700, }
   let (_, model) = update(dispatch, BrowserPaneMeasured(rect~), model)
   assert_true(model.browser_pane.shown == Some(browser_id))
   // The popup overlaps the pane, so the native view must hide under it.
@@ -18292,7 +18294,7 @@ test "closing a background Browser tab keeps the shown view placement" {
   )
   let first_id = @dock.active_browser(first.dock).unwrap()
   let second_id = @dock.active_browser(second.dock).unwrap()
-  let rect : @preview.Rect = { x: 480, y: 46, width: 640, height: 700 }
+  let rect : @preview.Rect = { x: 480, y: 46, width: 640, height: 700, }
   let (_, shown) = update(dispatch, BrowserPaneMeasured(rect~), second)
   assert_true(shown.browser_pane.shown == Some(second_id))
   let (_, closed) = update(
@@ -18317,7 +18319,7 @@ test "full-screen modals hide the native view and closing restores it" {
     model,
   )
   let browser_id = @dock.active_browser(model.dock).unwrap()
-  let rect : @preview.Rect = { x: 480, y: 46, width: 640, height: 700 }
+  let rect : @preview.Rect = { x: 480, y: 46, width: 640, height: 700, }
   let (_, model) = update(dispatch, BrowserPaneMeasured(rect~), model)
   assert_true(model.browser_pane.shown == Some(browser_id))
   // The workspace picker's modal covers the pane; native views z-order

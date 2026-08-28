@@ -380,7 +380,7 @@ fn State::refresh_git(
         scheduler.add(dispatch(GitLoaded(request_id~, reply~)))
       })
     }),
-    { ..self, git_request_id: Some(request_id) },
+    { ..self, git_request_id: Some(request_id), },
   )
 }
 
