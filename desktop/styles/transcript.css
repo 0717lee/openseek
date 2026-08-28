@@ -841,11 +841,14 @@
 .tool-call-summary:hover {
   color: var(--color-text-secondary);
 }
-/* One line per call, whatever the brief's length: a long brief (a Codex
-   command string, a full shell invocation) truncates with an ellipsis
-   instead of wrapping or forcing the pane wider — the row list stays
-   scannable, and the full text is one click away inside the fold. */
-.tool-call-text {
+/* One line per expandable call, whatever the brief's length: a long brief
+   (a Codex command string, a full shell invocation) truncates with an
+   ellipsis instead of wrapping or forcing the pane wider — the row list
+   stays scannable, and the full text is one click away inside the fold.
+   Only summaries get this: a bodyless `.tool-call-label` row (a goal
+   notice, a pending call) holds the sole copy of its text, so it wraps
+   rather than losing what an ellipsis would clip. */
+.tool-call-summary .tool-call-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
