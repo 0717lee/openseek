@@ -6,9 +6,9 @@ fn tool_item(
 ) -> @transcript.TranscriptItem {
   {
     kind: Tool(
-      call_id="",
+      call_id=name,
       name~,
-      arguments=None,
+      arguments=Some("{\"fixture\":true}"),
       has_result=true,
       is_error~,
       brief~,
@@ -595,7 +595,7 @@ test "transcript stream section key scopes equal session ids by channel" {
 
 ///|
 #warnings("-alert_unstable")
-test "every tool call of a run is on display as its own row" {
+test "every tool request and result of a run is on display as its own row" {
   let rendered = activity_view(
     [
       tool_item("shell", brief="moon test"),
@@ -605,22 +605,91 @@ test "every tool call of a run is on display as its own row" {
     _ => @cmd.none,
   )
   let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
-  // One always-visible row per call, no fold around the run, no synthetic
-  // category sentence standing in for the briefs.
+  // One always-visible request and result row per exchange, no fold around the
+  // run, and no synthetic category sentence standing in for the briefs.
   assert_true(markup.contains("activity-work"))
   assert_true(markup.contains("Moon test"))
   assert_true(markup.contains("Read moon.mod"))
   assert_true(markup.contains("Edit view.mbt"))
   assert_false(markup.contains("activity-summary"))
   assert_false(markup.contains("Ran 1 command"))
-  // The failed call stays folded like every other call, and its state is a
-  // literal word rather than the row's red alone.
+  assert_eq(markup.split("<details class=\"tool-call").length(), 4)
+  assert_eq(markup.split("<details class=\"tool-result").length(), 4)
+  // The failed request and result stay folded like the other expandable rows,
+  // and their state is a literal word rather than the red color alone.
   assert_true(markup.contains("<details class=\"tool-call error\">"))
+  assert_true(markup.contains("<details class=\"tool-result error\">"))
   assert_false(markup.contains("<details class=\"tool-call error\" open"))
   assert_true(markup.contains("<span class=\"tool-call-failed\">failed</span>"))
   // Each summary carries its full label as a tooltip, so a brief the
   // stylesheet ellipsizes on a narrow pane stays reachable.
   assert_true(markup.contains("title=\"Moon test\""))
+}
+
+///|
+/// One Assistant event owns both requests, so its sequence is positive proof
+/// that this is a parallel burst. As in the viz HTML renderer, both call rows
+/// precede either result row.
+#warnings("-alert_unstable")
+test "one assistant event renders its call burst before its results" {
+  let rendered = activity_view(
+    [
+      { ..tool_item("alpha", brief="first request"), sequence: Some(21), },
+      { ..tool_item("beta", brief="second request"), sequence: Some(21), },
+    ],
+    _ => @cmd.none,
+  )
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  guard (
+      markup.find("First request"),
+      markup.find("Second request"),
+      markup.find("Tool result · alpha"),
+      markup.find("Tool result · beta"),
+    )
+    is (
+      Some(first_call),
+      Some(second_call),
+      Some(first_result),
+      Some(second_result),
+    ) else {
+    fail("expected both request and result rows")
+  }
+  assert_true(first_call < second_call)
+  assert_true(second_call < first_result)
+  assert_true(first_result < second_result)
+}
+
+///|
+/// Different Assistant sequences are sequential calls even when a fallback
+/// activity run places them next to each other. Keep each result beside its
+/// request rather than visually turning them into a burst.
+#warnings("-alert_unstable")
+test "different assistant events keep each result beside its request" {
+  let rendered = activity_view(
+    [
+      { ..tool_item("alpha", brief="first request"), sequence: Some(21), },
+      { ..tool_item("beta", brief="second request"), sequence: Some(22), },
+    ],
+    _ => @cmd.none,
+  )
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  guard (
+      markup.find("First request"),
+      markup.find("Tool result · alpha"),
+      markup.find("Second request"),
+      markup.find("Tool result · beta"),
+    )
+    is (
+      Some(first_call),
+      Some(first_result),
+      Some(second_call),
+      Some(second_result),
+    ) else {
+    fail("expected both request and result rows")
+  }
+  assert_true(first_call < first_result)
+  assert_true(first_result < second_call)
+  assert_true(second_call < second_result)
 }
 
 ///|
@@ -648,6 +717,7 @@ test "a mixed activity keeps its call on display beside the thought fold" {
     ),
   )
   assert_true(markup.contains("<pre class=\"tool-call-output\">output</pre>"))
+  assert_true(markup.contains("class=\"tool-result-summary\""))
 }
 
 ///|
@@ -918,7 +988,7 @@ test "user message URLs are clickable but inline code stays inert" {
 
 ///|
 #warnings("-alert_unstable")
-test "an ordinary tool tabs readable arguments, the recording, and its result" {
+test "an ordinary tool keeps its result out of the argument tabs" {
   let rendered = tool_call_view({
     kind: Tool(
       call_id="c1",
@@ -934,15 +1004,16 @@ test "an ordinary tool tabs readable arguments, the recording, and its result" {
   })
   let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
   assert_true(markup.contains("class=\"tool-call-tabs\""))
-  assert_eq(markup.split("class=\"tool-call-tab-input\"").length(), 4)
+  assert_eq(markup.split("class=\"tool-call-tab-input\"").length(), 3)
   assert_true(markup.contains(">Arguments</label>"))
   assert_true(markup.contains(">Original JSON</label>"))
-  assert_true(markup.contains(">Output</label>"))
+  assert_false(markup.contains(">Output</label>"))
   assert_true(markup.contains("cmd"))
   assert_true(markup.contains("moon test"))
   assert_true(markup.contains("test failed"))
-  assert_false(markup.contains("tool-call-section-label\">Output"))
+  assert_true(markup.contains("tool-call-section-label\">Output"))
   assert_true(markup.contains("<details class=\"tool-call error\">"))
+  assert_true(markup.contains("<details class=\"tool-result error\">"))
   assert_false(markup.contains("<details class=\"tool-call error\" open>"))
 }
 
@@ -1138,9 +1209,12 @@ test "tabbed reads from one event keep independent radio groups" {
   let first_group = "tool-call-tabs-call-\{"read-a".hash()}"
   let second_group = "tool-call-tabs-call-\{"read-b".hash()}"
   assert_true(first_group != second_group)
-  // Four tabs per read, all belonging to that read and no other one.
-  assert_eq(markup.split("name=\"\{first_group}\"").length(), 5)
-  assert_eq(markup.split("name=\"\{second_group}\"").length(), 5)
+  // Two request tabs and two result tabs per read, isolated from both the
+  // other call and the other half of this exchange.
+  assert_eq(markup.split("name=\"\{first_group}\"").length(), 3)
+  assert_eq(markup.split("name=\"\{first_group}-result\"").length(), 3)
+  assert_eq(markup.split("name=\"\{second_group}\"").length(), 3)
+  assert_eq(markup.split("name=\"\{second_group}-result\"").length(), 3)
 }
 
 ///|

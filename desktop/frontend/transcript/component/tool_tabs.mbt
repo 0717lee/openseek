@@ -1,4 +1,4 @@
-// A compact, state-free tab set for the large views inside one tool call.
+// A compact, state-free tab set for alternate views of one tool-call payload.
 //
 // Native radio buttons own the selection. Rabbita therefore does not need to
 // lift a transient viewing choice into the conversation model, while the
@@ -67,19 +67,19 @@ fn tool_call_tabs_key(call_id : String, sequence : Int?) -> String {
 }
 
 ///|
-/// Build the compact detail tabs shared by every ordinary tool call. A custom
-/// card supplies the first semantic view for tools such as `mbtx` and
+/// Build the compact argument tabs shared by every ordinary tool call. A
+/// custom card supplies the first semantic view for tools such as `mbtx` and
 /// `edit`; other tools use the readable generic arguments view. Exact JSON is
 /// a separate tab only when the first view is a derived reading rather than
-/// the recording itself.
+/// the recording itself. The result deliberately does not join this tab set:
+/// like the viz HTML renderer, the transcript renders it as its own row.
 ///
 /// `None` when there is only one useful view: the existing labeled fallback is
 /// clearer than a one-entry tab strip.
-fn tool_call_tabbed_view(
+fn tool_arguments_tabbed_view(
   key : String,
   name : String,
   arguments : String?,
-  output : String,
 ) -> @html.Html? {
   let tabs : Array[ToolCallTab] = []
   if arguments is Some(arguments) {
@@ -106,13 +106,27 @@ fn tool_call_tabbed_view(
       }
     }
   }
-  for tab in tool_output_tabs(name, arguments, output) {
-    tabs.push(tab)
-  }
   if tabs.length() < 2 {
     return None
   }
   Some(tool_call_tabs(key, tabs))
+}
+
+///|
+/// Render alternate semantic and original views of one result as tabs. A
+/// result with only one useful view stays a plain labeled section in its own
+/// result row instead of gaining a one-entry tab strip.
+fn tool_result_tabbed_view(
+  key : String,
+  name : String,
+  arguments : String?,
+  output : String,
+) -> @html.Html? {
+  let tabs = tool_output_tabs(name, arguments, output)
+  if tabs.length() < 2 {
+    return None
+  }
+  Some(tool_call_tabs("\{key}-result", tabs))
 }
 
 ///|

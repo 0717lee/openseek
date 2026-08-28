@@ -123,18 +123,20 @@ test "a failed mbtx row still reads as a program, not escaped JSON" {
   assert_true(markup.contains("target: js"))
   // The program reads as lines rather than as one JSON-escaped string.
   assert_true(markup.contains("println(1 / 0)"))
-  // The three large views share one tab set, with Program selected first.
+  // Program and the exact payload share the request's tab set. Output stays in
+  // the distinct result row, matching the viz HTML render.
   assert_true(markup.contains("class=\"tool-call-tabs\""))
-  assert_eq(markup.split("class=\"tool-call-tab-input\"").length(), 4)
+  assert_eq(markup.split("class=\"tool-call-tab-input\"").length(), 3)
   assert_true(markup.contains(">Program</label>"))
   assert_true(markup.contains(">Original JSON</label>"))
-  assert_true(markup.contains(">Output</label>"))
+  assert_false(markup.contains(">Output</label>"))
   // The payload as the model sent it stays available in its own tab.
   assert_true(markup.contains("Original JSON"))
   assert_true(markup.contains("\\n"))
-  // The run's own output stays present without adding a stacked section.
+  // The run's own output stays present in the result row.
   assert_true(markup.contains("boom"))
-  assert_false(markup.contains("tool-call-section-label\">Output"))
+  assert_true(markup.contains("tool-call-section-label\">Output"))
+  assert_true(markup.contains("class=\"tool-result error\""))
 }
 
 ///|
