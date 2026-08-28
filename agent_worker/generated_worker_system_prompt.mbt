@@ -125,7 +125,7 @@ fn worker_system_prompt() -> String {
     #|| Command     | Alternatives     |
     #||-------------|------------------|
     #|| ls          | @fs.readdir(dir) |
-    #|| find        | @shell.glob(pattern) |
+    #|| find        | @shell.glob(pattern), spread into args as `[..files]` |
     #|| cat         | @fs.read_file(p).text() |
     #|| head/tail   | slice the split text; wc -l → count it |
     #|| grep        | rg, or .split("\n").filter(...) on captured output |

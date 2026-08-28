@@ -103,7 +103,7 @@ MoonBit here, which also works on Windows, where the binaries do not exist:
 | Command     | Alternatives     |
 |-------------|------------------|
 | ls          | @fs.readdir(dir) |
-| find        | @shell.glob(pattern) |
+| find        | @shell.glob(pattern), spread into args as `[..files]` |
 | cat         | @fs.read_file(p).text() |
 | head/tail   | slice the split text; wc -l → count it |
 | grep        | rg, or .split("\n").filter(...) on captured output |
