@@ -277,8 +277,10 @@ fn ApprovalNotice::render(
       [
         question,
         // Never truncate the exact program whose one-shot permission is being
-        // decided. The shared syntax renderer keeps it identical to its later
-        // transcript representation.
+        // decided. The shared syntax renderer tokenizes it exactly as its later
+        // transcript representation, but without that card's line numbers:
+        // there are no diagnostics to match yet, and gutter chrome is noise in
+        // a permission prompt.
         @html.pre(class="composer-approval-body", [
           @syntax_html.moonbit_source_code(body),
         ]),

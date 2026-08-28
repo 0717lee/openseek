@@ -32,7 +32,7 @@ test "numbered MoonBit source pads every gutter to the last line's width" {
   }
   let source = lines.join("\n")
   let rendered = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(moonbit_numbered_source(source))
+    @rabbita.Val::constant(moonbit_source_code(source, numbered=true))
   })
   assert_true(rendered.contains("<span class=\"moonbit-gutter\"> 1</span>"))
   assert_true(rendered.contains("<span class=\"moonbit-gutter\">10</span>"))
