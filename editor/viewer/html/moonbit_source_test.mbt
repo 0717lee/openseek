@@ -32,7 +32,7 @@ test "numbered MoonBit source pads every gutter to the last line's width" {
   }
   let source = lines.join("\n")
   let rendered = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(moonbit_source_code(source, numbered=true))
+    @rabbita.Val::constant(moonbit_numbered_source(source))
   })
   assert_true(rendered.contains("<span class=\"moonbit-gutter\"> 1</span>"))
   assert_true(rendered.contains("<span class=\"moonbit-gutter\">10</span>"))
@@ -50,7 +50,7 @@ test "a degenerate numbered line count elides the middle under true numbers" {
     lines.push("let x\{index} = \{index}")
   }
   let rendered = @rabbita.render_to_string(() => {
-    @rabbita.Val::constant(moonbit_source_code(lines.join("\n"), numbered=true))
+    @rabbita.Val::constant(moonbit_numbered_source(lines.join("\n")))
   })
   // Head rows 1..400, one unnumbered skip row, tail rows 501..600 — never a
   // renumbered tail.
@@ -70,7 +70,7 @@ test "one enormous numbered line stays a single honestly numbered row" {
   // renderer bounds, never a line's own length.
   let rendered = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(
-      moonbit_source_code("let x = \"\{"y".repeat(25_000)}\"", numbered=true),
+      moonbit_numbered_source("let x = \"\{"y".repeat(25_000)}\""),
     )
   })
   assert_eq(rendered.split("class=\"moonbit-line\"").length(), 2)

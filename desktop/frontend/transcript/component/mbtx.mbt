@@ -68,7 +68,7 @@ fn mbtx_card(arguments : String) -> @html.Html? {
     @html.div(class="mbtx-args", [
       chip_row(call.chips),
       @html.pre(class="moonbit-source", [
-        @syntax_html.moonbit_source_code(call.source, numbered=true),
+        @syntax_html.moonbit_numbered_source(call.source),
       ]),
     ]),
   )

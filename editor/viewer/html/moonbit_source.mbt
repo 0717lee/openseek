@@ -51,30 +51,9 @@ const NUMBERED_TAIL_LINES = 100
 /// `mtk<n>` token classes. The lexer and the token-to-theme projection both use
 /// the editor's production pipeline, so lightweight HTML hosts render the same
 /// syntax classes as the full viewer without installing source as raw HTML.
-///
-/// With `numbered=true`, each line instead becomes a `moonbit-line` row pairing
-/// a right-aligned 1-based line number with that line's source. Numbers are
-/// space-padded to the width of the last line's number so rows align without
-/// the gutter cells sharing a measured column — each row is its own
-/// `moonbit-line` grid, and `white-space: pre` on the gutter keeps the padding.
-/// The numbers are display chrome for matching diagnostics that cite
-/// `line:column` positions, not part of the program: hosts mark the gutter
-/// `user-select: none` so copied text is the source alone.
-///
-/// A numbered render never lies about a line's position: past the degenerate
-/// line-count bound it keeps the head and tail rows under their true numbers
-/// with an unnumbered `moonbit-skip` row stating what was elided, rather than
-/// renumbering or growing the DOM without bound.
-pub fn moonbit_source_code(
-  source : String,
-  numbered? : Bool = false,
-) -> @rhtml.Html {
-  let lines = moonbit_source_lines(source)
-  if numbered {
-    return numbered_rows(lines)
-  }
+pub fn moonbit_source_code(source : String) -> @rhtml.Html {
   let children : Array[@rhtml.Html] = []
-  for line_number, line in lines {
+  for line_number, line in moonbit_source_lines(source) {
     if line_number > 0 {
       children.push(@rhtml.text("\n"))
     }
@@ -84,10 +63,23 @@ pub fn moonbit_source_code(
 }
 
 ///|
-/// The gutter grid behind `numbered=true`: one `moonbit-line` row per kept
-/// line, with the degenerate line-count bound applied around an unnumbered
-/// `moonbit-skip` row.
-fn numbered_rows(lines : Array[@rhtml.Html]) -> @rhtml.Html {
+/// Renders MoonBit source as numbered lines: each line becomes a
+/// `moonbit-line` row pairing a right-aligned 1-based line number with that
+/// line's source, highlighted by the same token pipeline as
+/// `moonbit_source_code`. Numbers are space-padded to the width of the last
+/// line's number so rows align without the gutter cells sharing a measured
+/// column — each row is its own `moonbit-line` grid, and `white-space: pre`
+/// on the gutter keeps the padding. The numbers are display chrome for
+/// matching diagnostics that cite `line:column` positions, not part of the
+/// program: hosts mark the gutter `user-select: none` so copied text is the
+/// source alone.
+///
+/// A numbered render never lies about a line's position: past the degenerate
+/// line-count bound it keeps the head and tail rows under their true numbers
+/// with an unnumbered `moonbit-skip` row stating what was elided, rather than
+/// renumbering or growing the DOM without bound.
+pub fn moonbit_numbered_source(source : String) -> @rhtml.Html {
+  let lines = moonbit_source_lines(source)
   let width = lines.length().to_string().length()
   let rows : Array[@rhtml.Html] = []
   let push_row = (index : Int) => {
@@ -114,7 +106,10 @@ fn numbered_rows(lines : Array[@rhtml.Html]) -> @rhtml.Html {
     rows.push(
       @rhtml.span(class="moonbit-line", [
         @rhtml.span(class="moonbit-gutter", ""),
-        @rhtml.span(class="moonbit-code moonbit-skip", "⋯ \{skipped} lines skipped ⋯"),
+        @rhtml.span(
+          class="moonbit-code moonbit-skip",
+          "⋯ \{skipped} lines skipped ⋯",
+        ),
       ]),
     )
     for index in (lines.length() - NUMBERED_TAIL_LINES)..<lines.length() {

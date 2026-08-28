@@ -972,7 +972,7 @@ fn arg_field(tool_name : String, key : String, value : Json) -> @html.Html {
     // positions into this source, can be followed without counting lines.
     String(source) if tool_name == "mbtx" && key == "source" =>
       @html.pre(class="arg-value moonbit-source", [
-        @syntax_html.moonbit_source_code(source, numbered=true),
+        @syntax_html.moonbit_numbered_source(source),
       ])
     _ => render_value(value)
   }
