@@ -383,13 +383,41 @@ pub async fn proton_helper_path() -> String {
 }
 
 ///|
-/// Recursively copy a directory tree, replacing the destination. Uses the
-/// host's `cp -R`; packaging runs on the build host so this stays simple.
+/// Recursively copy a directory tree into an existing destination directory.
+/// Windows has no system `cp`, so use the portable async filesystem there.
+async fn copy_tree_windows(source : String, destination : String) -> Unit {
+  if !(@asyncfs.kind(source) is Directory) {
+    copy_file(source, destination)
+    return
+  }
+  ensure_dir(destination)
+  for
+    entry in @asyncfs.readdir(
+      source,
+      include_hidden=true,
+      include_special=false,
+      sort=true,
+    ) {
+    copy_tree_windows(
+      (source : @path.Path).join(entry).to_string(),
+      (destination : @path.Path).join(entry).to_string(),
+    )
+  }
+}
+
+///|
+/// Recursively copy a directory tree, replacing the destination. POSIX keeps
+/// using `cp -R` so executable modes survive; Windows uses async filesystem
+/// operations because a stock installation does not provide `cp`.
 pub async fn copy_tree(source : String, destination : String) -> Unit {
   remove_path_if_exists(destination)
   let parent = (destination : @path.Path).dirname().to_string()
   ensure_dir(parent)
-  run_checked("cp", ["-R", source, destination], dir=parent)
+  if @path.sep == '\\' {
+    copy_tree_windows(source, destination)
+  } else {
+    run_checked("cp", ["-R", source, destination], dir=parent)
+  }
 }
 
 ///|
