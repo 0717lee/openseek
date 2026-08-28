@@ -193,6 +193,7 @@ pub(all) struct SettingsSetPayload {
   provider : String?
   custom_api_url : String?
   deepseek_api_key : String?
+  glm_api_key : String?
   custom_api_key : String?
 } derive(Debug, Eq, FromJson, ToJson)
 
@@ -991,6 +992,7 @@ pub(all) struct SettingsStatusPayload {
   provider : String
   custom_api_url : String?
   has_deepseek_key : Bool
+  has_glm_key : Bool
   has_custom_key : Bool
 } derive(Debug, Eq, FromJson, ToJson)
 

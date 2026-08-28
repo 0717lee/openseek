@@ -3202,11 +3202,12 @@ fn update_msg(
           // modal optimistically; one that leaves it incomplete (Custom
           // with no URL yet) keeps the modal up mid-setup. A failed save
           // comes back as a toast.
-          Deepseek | Custom as provider => {
+          Deepseek | Glm | Custom as provider => {
             let next = {
               ..model,
               deepseek_key_saved: model.deepseek_key_saved ||
               provider is Deepseek,
+              glm_key_saved: model.glm_key_saved || provider is Glm,
               custom_key_saved: model.custom_key_saved || provider is Custom,
               setup_api_key: "",
               settings_saves: model.settings_saves + 1,
@@ -11986,6 +11987,16 @@ test "the official endpoint requires a key, a custom endpoint a URL" {
   assert_false(official.api_ready())
   assert_true(official.display_status() is ApiKeyRequired)
   assert_true({ ..official, deepseek_key_saved: true, }.api_ready())
+  // The GLM provider is gated on its own key, never DeepSeek's.
+  let glm = {
+    ..test_model(),
+    api_provider: Glm,
+    deepseek_key_saved: true,
+    glm_key_saved: false,
+  }
+  assert_false(glm.api_ready())
+  assert_true(glm.display_status() is ApiKeyRequired)
+  assert_true({ ..glm, glm_key_saved: true, }.api_ready())
   let custom = { ..test_model(), api_provider: Custom, custom_api_url: "", }
   assert_false(custom.api_ready())
   assert_true(custom.display_status() is SetupRequired)
@@ -12457,6 +12468,7 @@ fn host_settings(
   provider~ : String,
   revision? : Int = 0,
   has_deepseek_key? : Bool = false,
+  has_glm_key? : Bool = false,
   custom_api_url? : String = "",
 ) -> HostSettings {
   {
@@ -12464,6 +12476,7 @@ fn host_settings(
     provider,
     custom_api_url,
     has_deepseek_key,
+    has_glm_key,
     has_custom_key: false,
   }
 }
@@ -13171,6 +13184,20 @@ test "saving a key marks the active provider credential only" {
   assert_false(saved_custom.deepseek_key_saved)
   assert_true(saved_custom.custom_key_saved)
   assert_true(saved_custom.screen is Settings)
+  // A GLM key lands in the GLM slot alone.
+  let glm = {
+    ..test_model(),
+    api_provider: Glm,
+    deepseek_key_saved: false,
+    glm_key_saved: false,
+    setup_api_key: "  glm-new  ",
+    screen: Settings,
+  }
+  let (_, saved_glm) = update(dispatch, SaveApiKey, glm)
+  assert_true(saved_glm.glm_key_saved)
+  assert_false(saved_glm.deepseek_key_saved)
+  assert_false(saved_glm.custom_key_saved)
+  assert_true(saved_glm.screen is Settings)
 }
 
 ///|

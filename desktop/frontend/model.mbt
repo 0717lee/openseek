@@ -1,12 +1,15 @@
 ///|
 /// Which model a conversation's turns run with. The composer's shared selector
-/// offers the two service tiers; `Other` retains a wire name this build does
-/// not know — a run started with `OPENSEEK_MODEL` set, or a newer engine's
-/// model echoed back by `agent.started` — so the chip reports what the engine
-/// actually ran instead of a tier it never used.
+/// offers the DeepSeek service tiers or the GLM models, following the
+/// configured provider; `Other` retains a wire name this build does not know —
+/// a run started with `OPENSEEK_MODEL` set, or a newer engine's model echoed
+/// back by `agent.started` — so the chip reports what the engine actually ran
+/// instead of a tier it never used.
 priv enum EngineModel {
   High
   Low
+  Glm53
+  Glm53Flash
   Other(String)
 } derive(Eq, Debug)
 
@@ -15,6 +18,8 @@ fn EngineModel::wire(self : EngineModel) -> String {
   match self {
     High => "deepseek-v4-pro"
     Low => "deepseek-v4-flash"
+    Glm53 => "glm-5.3"
+    Glm53Flash => "glm-5.3-flash"
     Other(name) => name
   }
 }
@@ -27,6 +32,8 @@ fn EngineModel::parse(value : String) -> EngineModel? {
   match value.trim().to_owned() {
     "deepseek-v4-pro" => Some(High)
     "deepseek-v4-flash" => Some(Low)
+    "glm-5.3" => Some(Glm53)
+    "glm-5.3-flash" => Some(Glm53Flash)
     "" => None
     name => Some(Other(name))
   }
@@ -39,18 +46,22 @@ fn EngineModel::label(self : EngineModel) -> String {
   match self {
     High => "High"
     Low => "Low"
+    Glm53 => "GLM 5.3"
+    Glm53Flash => "GLM 5.3 Flash"
     Other(name) => name
   }
 }
 
 ///|
-/// Whether this Desktop model is one of OpenSeek's DeepSeek models, whose
-/// request format accepts the `no`/`high`/`max` reasoning setting. Unknown
-/// models include providers such as Kimi, where sending this setting would
-/// claim a capability the model does not expose.
+/// Whether this Desktop model is one whose request format accepts the
+/// `no`/`high`/`max` reasoning setting: the DeepSeek models, and the GLM
+/// models (the engine maps `no` to GLM's lowest supported effort, because
+/// GLM 5.3 always reasons). Unknown models include providers such as Kimi,
+/// where sending this setting would claim a capability the model does not
+/// expose.
 fn EngineModel::supports_reasoning(self : EngineModel) -> Bool {
   match self {
-    High | Low => true
+    High | Low | Glm53 | Glm53Flash => true
     Other(_) => false
   }
 }
@@ -149,6 +160,13 @@ test "engine models round-trip their wire names" {
     EngineModel::parse("deepseek-v4-flash").unwrap().label(),
     content="Low",
   )
+  inspect(EngineModel::parse("glm-5.3").unwrap().label(), content="GLM 5.3")
+  inspect(
+    EngineModel::parse("glm-5.3-flash").unwrap().wire(),
+    content="glm-5.3-flash",
+  )
+  assert_true(EngineModel::parse("glm-5.3") is Some(Glm53))
+  assert_true(EngineModel::Glm53Flash.supports_reasoning())
   inspect(
     EngineModel::parse(" custom-model ").unwrap().wire(),
     content="custom-model",
@@ -401,6 +419,7 @@ fn AppFontSize::pixels(self : AppFontSize) -> Double {
 /// reported.
 priv enum ApiProvider {
   Deepseek
+  Glm
   Custom
 } derive(Eq)
 
@@ -408,6 +427,7 @@ priv enum ApiProvider {
 fn ApiProvider::wire(self : ApiProvider) -> String {
   match self {
     Deepseek => "deepseek"
+    Glm => "glm"
     Custom => "custom"
   }
 }
@@ -419,6 +439,7 @@ fn ApiProvider::wire(self : ApiProvider) -> String {
 fn ApiProvider::parse(value : String) -> ApiProvider {
   match value.trim().to_owned() {
     "openseek" | "openseek-staging" | "deepseek" => Deepseek
+    "glm" => Glm
     "custom" => Custom
     _ => Deepseek
   }
@@ -1257,6 +1278,7 @@ priv struct Model {
   // (placeholder wording, the ready gate); a new key is staged in
   // `setup_api_key` until saved through `settings.set`.
   deepseek_key_saved : Bool
+  glm_key_saved : Bool
   custom_key_saved : Bool
   setup_api_key : String
   // Which endpoint the engine talks to; `custom_api_url` only matters when
@@ -1530,6 +1552,7 @@ priv struct HostSettings {
   provider : String
   custom_api_url : String
   has_deepseek_key : Bool
+  has_glm_key : Bool
   has_custom_key : Bool
 } derive(Eq)
 
@@ -2384,6 +2407,7 @@ fn initial_model() -> Model {
     openseek_reasoning: ReasoningMax,
     max_steps: DefaultMaxSteps,
     deepseek_key_saved: false,
+    glm_key_saved: false,
     custom_key_saved: false,
     setup_api_key: "",
     api_provider: Deepseek,
@@ -2576,6 +2600,7 @@ fn Model::clear_host_settings(self : Model) -> Model {
     api_provider: Deepseek,
     custom_api_url: "",
     deepseek_key_saved: false,
+    glm_key_saved: false,
     custom_key_saved: false,
     setup_api_key: "",
     settings_saves: 0,
@@ -2599,6 +2624,7 @@ fn Model::apply_host_settings(self : Model, settings : HostSettings) -> Model {
     api_provider: ApiProvider::parse(settings.provider),
     custom_api_url: settings.custom_api_url,
     deepseek_key_saved: settings.has_deepseek_key,
+    glm_key_saved: settings.has_glm_key,
     custom_key_saved: settings.has_custom_key,
   }
 }
@@ -2680,6 +2706,7 @@ fn Model::settle_api_setup(self : Model) -> Model {
 fn Model::api_ready(self : Model) -> Bool {
   match self.api_provider {
     Deepseek => self.deepseek_key_saved
+    Glm => self.glm_key_saved
     Custom => plausible_endpoint_url(self.custom_api_url)
   }
 }
@@ -2700,7 +2727,7 @@ fn plausible_endpoint_url(url : String) -> Bool {
 fn Model::settings_status(self : Model) -> Status {
   if self.api_ready() {
     Ready
-  } else if self.api_provider is Deepseek {
+  } else if self.api_provider is (Deepseek | Glm) {
     ApiKeyRequired
   } else {
     SetupRequired

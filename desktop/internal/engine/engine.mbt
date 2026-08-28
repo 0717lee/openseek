@@ -1430,11 +1430,14 @@ async fn engine_process_env(
   // Unix, so overriding PATH with inheritance enabled can leave two PATH
   // entries and let `/bin/sh` observe the original one.
   let env = @sys.get_env_vars()
-  // The engine reads the key from `DEEPSEEK` but the model from `OPENSEEK_MODEL`
-  // (the CLI's `--deepseek-api-key`/`--model` env bindings); the prefixes differ
+  // The engine reads the key from the provider-specific variable the config
+  // resolved (`DEEPSEEK`/`KIMI`/`GLM`; see `key_env_for`) but the model from
+  // `OPENSEEK_MODEL` (the CLI's `--model` env binding); the prefixes differ
   // on purpose, so the model must not go into `DEEPSEEK_MODEL` — the engine
-  // ignores that and falls back to its default model.
-  env["DEEPSEEK"] = config.api_key
+  // ignores that and falls back to its default model. Other providers' shell
+  // exports inherit untouched: the engine reads only its model's variable
+  // for chat, and `web_search` may legitimately use an ambient `DEEPSEEK`.
+  env[config.key_env] = config.api_key
   env["OPENSEEK_MODEL"] = config.model
   env["OPENSEEK_THINKING"] = config.thinking.wire()
   env["OPENSEEK_MAX_STEPS"] = config.max_steps.to_string()
@@ -2721,6 +2724,7 @@ async test "native engine env has one authoritative bundled moon path" {
   let config : RunConfig = {
     task: "t",
     api_key: "k",
+    key_env: "DEEPSEEK",
     api_url: None,
     model: "m",
     thinking: ThinkingHigh,
@@ -2732,6 +2736,14 @@ async test "native engine env has one authoritative bundled moon path" {
   }
   let env = engine_process_env(config, Some(runtime))
   assert_eq(env["OPENSEEK_THINKING"], "high")
+  assert_eq(env["DEEPSEEK"], "k")
+  // A GLM run's key travels in GLM, and the resolved variable — not a
+  // hardcoded DEEPSEEK — is what the process env honors.
+  let glm_env = engine_process_env(
+    { ..config, key_env: "GLM", model: "glm-5.3", },
+    Some(runtime),
+  )
+  assert_eq(glm_env["GLM"], "k")
   @debug.assert_eq(engine_process_args(config), [
     "serve", "--session=s-env", "--dir", ".", "--approval", "ask",
   ])
@@ -2830,6 +2842,7 @@ async test "engine startup rolls back follower on pre-spawn failure" {
   let config : RunConfig = {
     task: "test",
     api_key: "test",
+    key_env: "DEEPSEEK",
     api_url: None,
     model: "test",
     thinking: ThinkingMax,
@@ -2946,6 +2959,7 @@ fn pump_test_config(session : String) -> RunConfig {
   {
     task: "test",
     api_key: "test",
+    key_env: "DEEPSEEK",
     api_url: None,
     model: "test",
     thinking: ThinkingMax,
