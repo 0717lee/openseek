@@ -854,6 +854,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* An open row shows its whole brief: the body carries arguments and output,
+   not the brief, so expansion (with the summary's title tooltip) is what
+   keeps a clipped brief reachable — including where there is no hover. */
+.tool-call[open] > .tool-call-summary .tool-call-text {
+  white-space: normal;
+  overflow: visible;
+}
 /* The trailing marker belongs to rows that own a fold; `.tool-call-label`
    rows have nothing to disclose and stay bare. It is the summary's own last
    flex item rather than part of the text span, so a truncated brief cannot

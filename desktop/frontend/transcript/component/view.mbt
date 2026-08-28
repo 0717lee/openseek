@@ -298,7 +298,14 @@ fn tool_call_view(
     @html.details(
       class="tool-call" + error_class,
       open=is_error,
-      [@html.summary(class="tool-call-summary", line), ..body],
+      [
+        // The full label as the row's tooltip: a brief longer than the pane
+        // is ellipsized by the stylesheet, and the body holds the arguments
+        // and output, not the brief — hover (or opening the row, which the
+        // stylesheet un-clamps) is how the whole text stays reachable.
+        @html.summary(class="tool-call-summary", title=label, line),
+        ..body,
+      ],
     )
   }
 }

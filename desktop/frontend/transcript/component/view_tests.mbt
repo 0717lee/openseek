@@ -617,6 +617,9 @@ test "every tool call of a run is on display as its own row" {
   // the row's red alone.
   assert_true(markup.contains("<details class=\"tool-call error\" open"))
   assert_true(markup.contains("<span class=\"tool-call-failed\">failed</span>"))
+  // Each summary carries its full label as a tooltip, so a brief the
+  // stylesheet ellipsizes on a narrow pane stays reachable.
+  assert_true(markup.contains("title=\"Moon test\""))
 }
 
 ///|
