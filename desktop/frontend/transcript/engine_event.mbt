@@ -190,7 +190,7 @@ fn event_fields(json : Json) -> @desktop_protocol.AgentStreamEvent raise {
     Object(fields) => @jsonx.json_text(fields, "submission_id")
     _ => None
   }
-  { event, submission_id }
+  { event, submission_id, }
 }
 
 ///|

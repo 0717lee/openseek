@@ -1,6 +1,6 @@
 ///|
 fn progress_lane(steps : Int, activity : String) -> Lane {
-  { id: "a", kind: "task", label: "investigate", steps, activity, run: None }
+  { id: "a", kind: "task", label: "investigate", steps, activity, run: None, }
 }
 
 ///|

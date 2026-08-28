@@ -90,7 +90,7 @@ async fn archive_session_into(
     // Archiving removes the conversation's checkout but retains its placement;
     // the retry after the discard-confirmation dialog carries force on the
     // wire.
-    { session, force: if force { Some(true) } else { None } },
+    { session, force: if force { Some(true) } else { None }, },
   ) catch {
     error => {
       scheduler.add(
@@ -129,7 +129,7 @@ fn unarchive_session(
     dispatch,
     channel,
     @commands.session_unarchive,
-    { session, force: None },
+    { session, force: None, },
     connection_generation,
     sessions_request_generation,
     archived_request_generation,
@@ -159,7 +159,7 @@ fn delete_archived_session(
       let reply = @interop.bridge_request(
         channel,
         @commands.session_delete_archived,
-        { session: key.session, workspace },
+        { session: key.session, workspace, },
       ) catch {
         error => {
           scheduler.add(

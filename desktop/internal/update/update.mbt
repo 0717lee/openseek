@@ -148,7 +148,7 @@ fn newer_update(
     )
   }
   if is_newer(version, than=current) {
-    Some({ version, artifact: manifest_artifact(json, platform_key, version~) })
+    Some({ version, artifact: manifest_artifact(json, platform_key, version~), })
   } else {
     None
   }
@@ -184,7 +184,7 @@ fn manifest_artifact(
       reason="the package sha256 is not a hex digest",
     )
   }
-  Some({ url, sha256 })
+  Some({ url, sha256, })
 }
 
 ///|
@@ -275,7 +275,7 @@ test "manifest decode demands a strictly newer version" {
   }
   @debug.assert_eq(
     newer_update(manifest, current="0.1.0", platform_key=None),
-    Some({ version: "0.2.0", artifact: None }),
+    Some({ version: "0.2.0", artifact: None, }),
   )
   @debug.assert_eq(
     newer_update(manifest, current="0.2.0", platform_key=None),
@@ -285,7 +285,7 @@ test "manifest decode demands a strictly newer version" {
   let missing_url : Json = { "version": "0.2.0" }
   @debug.assert_eq(
     newer_update(missing_url, current="0.1.0", platform_key=None),
-    Some({ version: "0.2.0", artifact: None }),
+    Some({ version: "0.2.0", artifact: None, }),
   )
 }
 

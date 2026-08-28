@@ -7,7 +7,7 @@ fn render_review_html(node : @html.Html) -> String {
 ///|
 test "desktop review keeps sibling hosts stable across source and diff modes" {
   let path = @pathx.Relative("src/main.mbt")
-  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path), }
   let selected = test_modified_change(path)
   let source_doc = {
     ..loaded_doc("src/main.mbt"),
@@ -64,11 +64,11 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
 
   let diff_doc = {
     ..source_doc,
-    review: source_doc.review.map(review => { ..review, view_mode: ReviewDiff }),
+    review: source_doc.review.map(review => { ..review, view_mode: ReviewDiff, }),
   }
   let diff_docs = source_docs.copy()
   diff_docs[path] = diff_doc
-  let diff_state = { ..source_state, docs: diff_docs }
+  let diff_state = { ..source_state, docs: diff_docs, }
   let diff = render_review_html(body_view(test_emit(), diff_state, ctx))
   assert_true(
     diff.contains(
@@ -107,7 +107,7 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
   let enabled_navigation = render_review_html(
     review_diff_navigation(
       test_emit(),
-      { ..diff_state, review_diff_navigation_available: true },
+      { ..diff_state, review_diff_navigation_available: true, },
       ctx,
     ),
   )
@@ -163,7 +163,7 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
   let inline_breadcrumb = render_review_html(
     breadcrumb_view(
       test_emit(),
-      { ..diff_state, review_diff_layout: ReviewInline },
+      { ..diff_state, review_diff_layout: ReviewInline, },
       ctx,
     ),
   )
@@ -172,7 +172,7 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
   assert_true(inline_breadcrumb.contains("data-layout=\"inline\""))
   assert_true(inline_breadcrumb.contains("review-layout-icon inline"))
 
-  let reviewed_state = { ..diff_state, reviewed_changes: [selected] }
+  let reviewed_state = { ..diff_state, reviewed_changes: [selected], }
   let reviewed_breadcrumb = render_review_html(
     breadcrumb_view(test_emit(), reviewed_state, ctx),
   )
@@ -188,7 +188,7 @@ test "desktop review keeps sibling hosts stable across source and diff modes" {
 ///|
 test "desktop explicitly routes Markdown source while DiffEditor stays code-only" {
   let path = @pathx.Relative("docs/Guide.MD")
-  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path), }
   let docs = owned_state().docs.copy()
   docs[path] = loaded_doc(path.0)
   let source_state = { ..owned_state(), docs, }
@@ -222,7 +222,7 @@ test "desktop explicitly routes Markdown source while DiffEditor stays code-only
     }),
   }
   let diff = render_review_html(
-    body_view(test_emit(), { ..source_state, docs: diff_docs }, ctx),
+    body_view(test_emit(), { ..source_state, docs: diff_docs, }, ctx),
   )
   assert_true(
     diff.contains(
@@ -242,7 +242,7 @@ test "desktop explicitly routes Markdown source while DiffEditor stays code-only
 ///|
 test "non-MoonBit full diff omits specialized provider controls" {
   let path = @pathx.Relative("README.md")
-  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path), }
   let selected = test_modified_change(path)
   let docs = owned_state().docs.copy()
   docs[path] = {
@@ -258,7 +258,7 @@ test "non-MoonBit full diff omits specialized provider controls" {
   let breadcrumb = render_review_html(
     breadcrumb_view(
       test_emit(),
-      { ..owned_state(), docs, review_diff_mode: ReviewDiffTree },
+      { ..owned_state(), docs, review_diff_mode: ReviewDiffTree, },
       ctx,
     ),
   )
@@ -271,7 +271,7 @@ test "non-MoonBit full diff omits specialized provider controls" {
 ///|
 test "pending full diff never reveals the source surface" {
   let path = @pathx.Relative("src/main.mbt")
-  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path), }
   let selected = test_modified_change(path)
   let pending_doc = {
     ..loaded_doc(path.0),
@@ -285,7 +285,7 @@ test "pending full diff never reveals the source surface" {
   }
   let pending_docs = owned_state().docs.copy()
   pending_docs[path] = pending_doc
-  let pending_state = { ..owned_state(), docs: pending_docs }
+  let pending_state = { ..owned_state(), docs: pending_docs, }
   let pending = render_review_html(body_view(test_emit(), pending_state, ctx))
   assert_true(
     pending.contains(
@@ -327,7 +327,7 @@ test "pending full diff never reveals the source surface" {
     }),
   }
   let unavailable = render_review_html(
-    body_view(test_emit(), { ..delayed_state, docs: unavailable_docs }, ctx),
+    body_view(test_emit(), { ..delayed_state, docs: unavailable_docs, }, ctx),
   )
   assert_true(
     unavailable.contains(

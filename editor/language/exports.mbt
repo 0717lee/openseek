@@ -31,10 +31,10 @@ pub fn CancellationToken::cancel(self : CancellationToken) -> Unit {
 /// listener still has next-turn/disposable delivery semantics.
 pub fn CancellationTokenSource::cancel(self : CancellationTokenSource) -> Unit {
   match self.token_value {
-    None => self.token_value = Some({ state: AlreadyCancelled(self.schedule) })
-    Some({ state: SourceMutable(token) }) => token.cancel()
+    None => self.token_value = Some({ state: AlreadyCancelled(self.schedule), })
+    Some({ state: SourceMutable(token), }) => token.cancel()
     Some(
-      { state: NeverCancelled | AlreadyCancelled(_) | CompatibilityMutable(_) }
+      { state: NeverCancelled | AlreadyCancelled(_) | CompatibilityMutable(_), }
     ) => ()
   }
 }

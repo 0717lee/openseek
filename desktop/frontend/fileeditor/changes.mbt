@@ -308,7 +308,7 @@ test "task baselines win over moving HEAD with a legacy fallback" {
     changes: [],
   }
   assert_eq(git_review_revision(task), Some("task-base"))
-  assert_eq(git_review_revision({ ..task, baseline: None }), Some("new-head"))
+  assert_eq(git_review_revision({ ..task, baseline: None, }), Some("new-head"))
 }
 
 ///|
@@ -339,10 +339,10 @@ test "deleted rows use baseline previews while non-file rows stay inert" {
   assert_true(both_deleted.selectable())
   assert_false(both_deleted.has_working_tree_file())
   assert_false(
-    { ..deleted, worktree_status: "M", kind: ChangeSubmodule }.selectable(),
+    { ..deleted, worktree_status: "M", kind: ChangeSubmodule, }.selectable(),
   )
   assert_false(
-    { ..deleted, worktree_status: "M", kind: ChangeSymlink }.selectable(),
+    { ..deleted, worktree_status: "M", kind: ChangeSymlink, }.selectable(),
   )
   assert_false(
     {
@@ -354,16 +354,31 @@ test "deleted rows use baseline previews while non-file rows stay inert" {
     }.selectable(),
   )
   assert_true(
-    { ..deleted, index_status: "D", worktree_status: "U", kind: ChangeUnmerged }.selectable(),
+    {
+      ..deleted,
+      index_status: "D",
+      worktree_status: "U",
+      kind: ChangeUnmerged,
+    }.selectable(),
   )
   assert_true(
-    { ..deleted, index_status: "D", worktree_status: "U", kind: ChangeUnmerged }.has_working_tree_file(),
+    {
+      ..deleted,
+      index_status: "D",
+      worktree_status: "U",
+      kind: ChangeUnmerged,
+    }.has_working_tree_file(),
   )
   assert_true(
-    { ..deleted, index_status: "U", worktree_status: "D", kind: ChangeUnmerged }.selectable(),
+    {
+      ..deleted,
+      index_status: "U",
+      worktree_status: "D",
+      kind: ChangeUnmerged,
+    }.selectable(),
   )
   assert_true(
-    { ..deleted, worktree_status: "M", kind: ChangeModified }.selectable(),
+    { ..deleted, worktree_status: "M", kind: ChangeModified, }.selectable(),
   )
   assert_eq(
     {

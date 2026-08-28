@@ -95,7 +95,7 @@ pub fn StreamHandler::StreamHandler(
   on_content_delta~ : async (String) -> Unit,
   on_reasoning_delta? : async (String) -> Unit = _ => (),
 ) -> StreamHandler {
-  { on_content_delta, on_reasoning_delta }
+  { on_content_delta, on_reasoning_delta, }
 }
 
 ///|

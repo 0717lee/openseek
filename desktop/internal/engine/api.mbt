@@ -169,7 +169,7 @@ fn emit_error(
   exit_code? : Int,
   diagnostics? : String,
 ) -> Unit {
-  emit(sink, Error({ run_id, message: Some(message), exit_code, diagnostics }))
+  emit(sink, Error({ run_id, message: Some(message), exit_code, diagnostics, }))
 }
 
 ///|
@@ -180,7 +180,7 @@ fn emit_finished(
   answer? : String,
   exit_code? : Int,
 ) -> Unit {
-  emit(sink, Finished({ run_id, status: status.wire(), answer, exit_code }))
+  emit(sink, Finished({ run_id, status: status.wire(), answer, exit_code, }))
 }
 
 ///|

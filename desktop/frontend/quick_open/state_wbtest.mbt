@@ -11,7 +11,7 @@ fn test_emit() -> @cmd.Emit[Msg] {
 
 ///|
 fn test_owner() -> @interop.ConversationKey {
-  { channel: @interop.ChannelId::Local, session: "desktop-test" }
+  { channel: @interop.ChannelId::Local, session: "desktop-test", }
 }
 
 ///|
@@ -29,7 +29,7 @@ fn test_input(
   open_files? : Array[@pathx.Relative] = [],
   active_file? : @pathx.Relative,
 ) -> Input {
-  { owner: owner.unwrap_or(test_owner()), root, open_files, active_file }
+  { owner: owner.unwrap_or(test_owner()), root, open_files, active_file, }
 }
 
 ///|

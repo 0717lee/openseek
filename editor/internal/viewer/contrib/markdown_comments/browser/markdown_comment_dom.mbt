@@ -381,7 +381,7 @@ pub fn MarkdownCommentDom::observe_size(
     pending_frame.val = None
     frame_scheduled.val = false
   })
-  { request_measure_: () => schedule_measure(true), lifetime }
+  { request_measure_: () => schedule_measure(true), lifetime, }
 }
 
 ///|

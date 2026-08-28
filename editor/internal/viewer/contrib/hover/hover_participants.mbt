@@ -259,7 +259,7 @@ struct ContentHoverComputer {
 pub fn ContentHoverComputer::ContentHoverComputer(
   services : HoverParticipantServices,
 ) -> ContentHoverComputer {
-  { participants: hover_participant_registry.build_all(services) }
+  { participants: hover_participant_registry.build_all(services), }
 }
 
 ///|
@@ -298,7 +298,7 @@ pub fn ContentHoverComputer::compute_sync(
   model : @model.TextModel,
   anchor : HoverAnchor,
 ) -> ComputedHover? {
-  let ctx : HoverComputeContext = { model, anchor }
+  let ctx : HoverComputeContext = { model, anchor, }
   let parts : Array[HoverPart] = []
   for participant in self.participants {
     parts.append((participant.compute_sync)(ctx))
@@ -318,7 +318,7 @@ pub async fn ContentHoverComputer::compute_async(
   if token.is_cancellation_requested() || !is_current() {
     return None
   }
-  let ctx : HoverComputeContext = { model, anchor }
+  let ctx : HoverComputeContext = { model, anchor, }
   let parts : Array[HoverPart] = []
   for participant in self.participants {
     match participant.compute_async {
@@ -355,7 +355,7 @@ pub async fn ContentHoverComputer::compute_async_each(
   if token.is_cancellation_requested() || !is_current() {
     return
   }
-  let ctx : HoverComputeContext = { model, anchor }
+  let ctx : HoverComputeContext = { model, anchor, }
   // Package callers use the runtime-neutral sequential runner. The browser
   // host injects its Promise runner, starting every participant concurrently
   // without coupling this multi-target package to the JS or moonbitlang/async
@@ -412,7 +412,7 @@ fn computed_hover_from_parts(
   } nobreak {
     range
   }
-  Some({ range, parts: sorted })
+  Some({ range, parts: sorted, })
 }
 
 ///|

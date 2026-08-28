@@ -64,7 +64,7 @@ priv enum ImageReadResult {
 
 ///|
 fn Input::image_owner(self : Input) -> ImageOwner {
-  { channel: self.focused, session: self.active_session, root: self.root }
+  { channel: self.focused, session: self.active_session, root: self.root, }
 }
 
 ///|
@@ -169,13 +169,13 @@ test "image read targets preserve absolute or rooted-relative paths" {
   }
   assert_eq(
     owner.read_target("../image.png"),
-    Some({ path: "../image.png", root: Some("/work/project") }),
+    Some({ path: "../image.png", root: Some("/work/project"), }),
   )
   assert_eq(
     owner.read_target("/Users/me/image.png"),
-    Some({ path: "/Users/me/image.png", root: None }),
+    Some({ path: "/Users/me/image.png", root: None, }),
   )
-  let unresolved : ImageOwner = { ..owner, root: None }
+  let unresolved : ImageOwner = { ..owner, root: None, }
   assert_eq(unresolved.read_target("../image.png"), None)
 }
 
@@ -203,13 +203,13 @@ fn ImageOwner::read_target(
   path : String,
 ) -> @protocol.ReadFilePayload? {
   if @resource.of_path(self.channel, path) is Some(target) {
-    return Some({ path: target.path, root: None })
+    return Some({ path: target.path, root: None, })
   }
   guard self.root is Some(root) &&
     @resource.path_for(root, self.channel) is Some(root_path) else {
     return None
   }
-  Some({ path, root: Some(root_path) })
+  Some({ path, root: Some(root_path), })
 }
 
 ///|

@@ -65,7 +65,7 @@ fn Match::of_path(path : @pathx.Relative) -> Match {
     [] => path.0
     [.., last] => last.to_owned()
   }
-  { path, name }
+  { path, name, }
 }
 
 ///|

@@ -39,7 +39,7 @@ async test "references presence and query preserve selector and registration pri
   )
   let wildcard_calls = Ref(0)
   let wildcard = languages.register_references_provider(LanguageId("*"), RecordingReferencesProvider::{
-    locations: [{ uri: wildcard_uri, range: Range(7, 1, 7, 5) }],
+    locations: [{ uri: wildcard_uri, range: Range(7, 1, 7, 5), }],
     calls: wildcard_calls,
     observed_tokens: [],
   })
@@ -50,7 +50,7 @@ async test "references presence and query preserve selector and registration pri
   let older_exact = languages.register_references_provider(
     LanguageId("moonbit"),
     RecordingReferencesProvider::{
-      locations: [{ uri: older_exact_uri, range: Range(3, 2, 3, 8) }],
+      locations: [{ uri: older_exact_uri, range: Range(3, 2, 3, 8), }],
       calls: older_exact_calls,
       observed_tokens: [],
     },
@@ -64,8 +64,8 @@ async test "references presence and query preserve selector and registration pri
     LanguageId("moonbit"),
     RecordingReferencesProvider::{
       locations: [
-        { uri: model.uri, range: Range(1, 5, 1, 11) },
-        { uri: newer_exact_uri, range: Range(9, 4, 9, 10) },
+        { uri: model.uri, range: Range(1, 5, 1, 11), },
+        { uri: newer_exact_uri, range: Range(9, 4, 9, 10), },
       ],
       calls: newer_exact_calls,
       observed_tokens,

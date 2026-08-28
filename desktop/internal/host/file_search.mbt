@@ -41,7 +41,7 @@ async fn read_sorted_directory(dir : @pathx.Absolute) -> Array[FileScanEntry] {
       _ => None
     }
     guard entry is Some(entry) else { break }
-    entries.push({ name: entry.name, is_dir: entry.is_dir })
+    entries.push({ name: entry.name, is_dir: entry.is_dir, })
   }
   entries.sort_by((left, right) => left.name.lexical_compare(right.name))
   entries
@@ -96,7 +96,7 @@ async fn scan_directory_tree(
 ///|
 async fn scan_workspace_files(root : @pathx.Absolute) -> FileIndexSnapshot {
   if !@fs.exists(root.to_string()) {
-    return { files: [] }
+    return { files: [], }
   }
   scan_directory_tree(root, read_sorted_directory)
 }
@@ -207,7 +207,7 @@ fn FileSearchService::new() -> FileSearchService {
 fn FileSearchService::new_with_scan(
   scan : async (@pathx.Absolute) -> FileIndexSnapshot,
 ) -> FileSearchService {
-  { requests: Queue(kind=Blocking(64)), scan }
+  { requests: Queue(kind=Blocking(64)), scan, }
 }
 
 ///|
@@ -234,7 +234,7 @@ async fn FileSearchService::search(
   match reply.get() {
     SearchSucceeded(result) => result
     SearchCancelled =>
-      { files: [], from_cache: true, limit_hit: false, cancelled: true }
+      { files: [], from_cache: true, limit_hit: false, cancelled: true, }
     SearchFailed(message) => raise HostError(message)
   }
 }
@@ -323,7 +323,7 @@ async fn compute_file_search(
     }
   }
   best = merge_ranked_chunk(query, best, chunk, max_results)
-  { files: best, limit_hit: matched > max_results, inspected }
+  { files: best, limit_hit: matched > max_results, inspected, }
 }
 
 ///|
@@ -496,7 +496,7 @@ async fn FileSearchService::run(self : FileSearchService) -> Unit {
             }
             // A cache-populating scan deliberately survives cancellation of
             // one query, matching VS Code's preventCancellation cache row.
-            running_scans[cache_key] = { ..running, waiters: kept }
+            running_scans[cache_key] = { ..running, waiters: kept, }
           }
           let affected : Array[Int] = []
           for generation, running in running_ranks {
@@ -518,7 +518,7 @@ async fn FileSearchService::run(self : FileSearchService) -> Unit {
                 running.task.cancel()
                 running_ranks.remove(generation)
               } else {
-                running_ranks[generation] = { ..running, waiters: kept }
+                running_ranks[generation] = { ..running, waiters: kept, }
               }
             }
           }
@@ -569,7 +569,7 @@ async fn FileSearchService::run(self : FileSearchService) -> Unit {
           }
           match outcome {
             ScanSucceeded(snapshot) => {
-              caches[cache_key] = { ..cache, snapshot: Some(snapshot) }
+              caches[cache_key] = { ..cache, snapshot: Some(snapshot), }
               for waiter in waiters {
                 launch_rank(cache_key, waiter)
               }
@@ -650,7 +650,7 @@ async fn clear_file_search_cache_op(
 
 ///|
 fn test_scan_entry(name : String, is_dir : Bool) -> FileScanEntry {
-  { name, is_dir }
+  { name, is_dir, }
 }
 
 ///|
@@ -790,7 +790,7 @@ async test "query cancellation keeps the cache-populating scan alive" {
     let service = FileSearchService::new_with_scan(async fn(_) {
       starts.put(())
       release.get()
-      { files: ["target.mbt"] }
+      { files: ["target.mbt"], }
     })
     group.spawn_bg(() => service.run())
     let root = @pathx.Path("/workspace-cancel").resolve()
@@ -826,7 +826,7 @@ async test "cache keys coalesce scans and clearCache retires one session" {
     })
     @async.pause()
     assert_true(starts.try_get() is None)
-    outcomes.put({ files: ["old.mbt", "other.mbt"] })
+    outcomes.put({ files: ["old.mbt", "other.mbt"], })
     ignore(@async.with_timeout(1000, () => warm.wait()))
     let joined_reply = @async.with_timeout(1000, () => joined.wait())
     assert_true(joined_reply.from_cache)
@@ -837,7 +837,7 @@ async test "cache keys coalesce scans and clearCache retires one session" {
     service.clear_cache("cache-a")
     let fresh = group.spawn(() => service.search(root, "cache-a", "new", 200, 4))
     @async.with_timeout(1000, () => starts.get())
-    outcomes.put({ files: ["new.mbt"] })
+    outcomes.put({ files: ["new.mbt"], })
     let fresh_reply = @async.with_timeout(1000, () => fresh.wait())
     assert_false(fresh_reply.from_cache)
     assert_eq(fresh_reply.files, ["new.mbt"])
@@ -853,7 +853,7 @@ async test "one connection serializes discovery across cache sessions" {
     let service = FileSearchService::new_with_scan(async fn(root) {
       starts.put(root.to_string())
       releases.get()
-      { files: ["file.mbt"] }
+      { files: ["file.mbt"], }
     })
     group.spawn_bg(() => service.run())
     let first_root = @pathx.Path("/workspace-one").resolve()
@@ -891,7 +891,7 @@ async test "a failed cache population is not installed and can retry" {
       if attempts.val == 1 {
         raise HostError("injected discovery failure")
       }
-      { files: ["recovered.mbt"] }
+      { files: ["recovered.mbt"], }
     })
     group.spawn_bg(() => service.run())
     let root = @pathx.Path("/workspace-retry").resolve()
@@ -913,7 +913,7 @@ async test "a failed cache population is not installed and can retry" {
 async test "a cache key cannot cross workspace roots" {
   @async.with_task_group(group => {
     let service = FileSearchService::new_with_scan(fn(_) {
-      { files: ["one.mbt"] }
+      { files: ["one.mbt"], }
     })
     group.spawn_bg(() => service.run())
     let first = @pathx.Path("/workspace-one").resolve()

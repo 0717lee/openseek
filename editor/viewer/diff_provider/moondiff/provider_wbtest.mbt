@@ -112,7 +112,7 @@ test "Tree parse failure reports Token fallback" {
 test "invalid Tree geometry falls back to strict Core" {
   let original = "fn stable() { 0 }"
   let modified = "fn inserted() { 1 }\nfn stable() { 2 }"
-  let options : @diff.DocumentDiffOptions = { ignore_trim_whitespace: false }
+  let options : @diff.DocumentDiffOptions = { ignore_trim_whitespace: false, }
   let expected = @diff.CoreDocumentDiffProvider().compute_diff(
     TextSnapshot(original),
     TextSnapshot(modified),
@@ -252,7 +252,7 @@ test "invalid specialized candidates settle to Core without reentrant changes" {
     changes: [DetailedLineRangeMapping(LineRange(1, 1), LineRange(2, 3), None)],
     additional_alignments: [LineRangeMapping(LineRange(1, 1), LineRange(1, 4))],
   }
-  let options : @diff.DocumentDiffOptions = { ignore_trim_whitespace: true }
+  let options : @diff.DocumentDiffOptions = { ignore_trim_whitespace: true, }
   let expected = @diff.CoreDocumentDiffProvider().compute_diff(
     original, modified, options,
   )

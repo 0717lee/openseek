@@ -294,7 +294,7 @@ test "Decorations leaves every caller handle live after bundle disposal" {
   )
   backings.languages.set_language_configuration("root-test", {
     comments: None,
-    folding_rules: Some({ off_side: true, markers: None }),
+    folding_rules: Some({ off_side: true, markers: None, }),
   })
   guard language_handle.get_language_configuration("root-test").folding_rules
     is Some(folding_rules) else {
@@ -343,7 +343,7 @@ async test "navigation handles stay optional and borrowed after bundle disposal"
   services.dispose()
   let request : @navigation_api.OpenLocationRequest = {
     source_viewer_id: "viewer-navigation-owner",
-    location: { uri: target, range: Range(1, 5, 1, 15) },
+    location: { uri: target, range: Range(1, 5, 1, 15), },
     mode: Current,
   }
   assert_true(opener.open(request))

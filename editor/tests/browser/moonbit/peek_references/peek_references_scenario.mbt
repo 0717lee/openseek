@@ -22,7 +22,7 @@ fn peek_references_location(
   start_column : Int,
   end_column : Int,
 ) -> @language.Location {
-  { uri, range: Range(line, start_column, line, end_column) }
+  { uri, range: Range(line, start_column, line, end_column), }
 }
 
 ///|

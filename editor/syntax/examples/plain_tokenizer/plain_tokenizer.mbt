@@ -9,7 +9,7 @@ struct PlainTokenizer {
 ///|
 /// Creates the example tokenizer.
 pub fn PlainTokenizer::PlainTokenizer() -> PlainTokenizer {
-  { _unit: () }
+  { _unit: (), }
 }
 
 ///|
@@ -33,17 +33,17 @@ pub impl @syntax.LineTokenizer for PlainTokenizer with fn tokenize_line(
     } else if unit == '/' &&
       offset + 1 < line_text.length() &&
       line_text[offset + 1].to_int() == '/' {
-      tokens.push({ start: offset, end: line_text.length(), tag: Comment })
+      tokens.push({ start: offset, end: line_text.length(), tag: Comment, })
       continue line_text.length()
     } else if unit == '"' {
       let start = offset
       let end = consume_string(line_text, offset)
-      tokens.push({ start, end, tag: String })
+      tokens.push({ start, end, tag: String, })
       continue end
     } else if is_digit(unit) {
       let start = offset
       let end = consume_while(line_text, offset, is_digit)
-      tokens.push({ start, end, tag: Number })
+      tokens.push({ start, end, tag: Number, })
       continue end
     } else if is_ident_start(unit) {
       let start = offset
@@ -69,7 +69,7 @@ pub impl @syntax.LineTokenizer for PlainTokenizer with fn tokenize_line(
       } else {
         offset + 1
       }
-      tokens.push({ start, end, tag: Punctuation })
+      tokens.push({ start, end, tag: Punctuation, })
       continue end
     }
   }

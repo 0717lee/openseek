@@ -34,13 +34,13 @@ test "visible tree entries follow expanded directories depth first" {
       (
         Relative(""),
         [
-          { name: "src", path: Relative("src"), is_dir: true },
-          { name: "main.mbt", path: Relative("main.mbt"), is_dir: false },
+          { name: "src", path: Relative("src"), is_dir: true, },
+          { name: "main.mbt", path: Relative("main.mbt"), is_dir: false, },
         ],
       ),
       (
         Relative("src"),
-        [{ name: "lib.mbt", path: Relative("src/lib.mbt"), is_dir: false }],
+        [{ name: "lib.mbt", path: Relative("src/lib.mbt"), is_dir: false, }],
       ),
     ]),
     expanded: [Relative("src")],

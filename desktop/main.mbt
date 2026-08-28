@@ -280,5 +280,5 @@ fn relay_settings() -> @auth.ConnectorConfig? {
     Some(name) => name
     None => "desktop"
   }
-  Some({ relay_url, device_token, device_name })
+  Some({ relay_url, device_token, device_name, })
 }

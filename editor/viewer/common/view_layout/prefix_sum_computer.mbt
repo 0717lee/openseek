@@ -189,7 +189,7 @@ pub fn PrefixSumComputer::get_index_of(
       break
     }
   }
-  { index: mid, remainder: sum - mid_start }
+  { index: mid, remainder: sum - mid_start, }
 }
 
 ///|
@@ -255,11 +255,11 @@ pub fn ConstantTimePrefixSumComputer::get_index_of(
     } else {
       0
     }
-    return { index: last_idx, remainder: sum - last_prefix_sum }
+    return { index: last_idx, remainder: sum - last_prefix_sum, }
   }
   let idx = self.index_by_sum[sum]
   let view_lines_above = if idx > 0 { self.prefix_sum[idx - 1] } else { 0 }
-  { index: idx, remainder: sum - view_lines_above }
+  { index: idx, remainder: sum - view_lines_above, }
 }
 
 ///|

@@ -278,7 +278,7 @@ fn summarize_agent_log(log_text : String) -> AgentLogSummary {
     }
   }
   if has_json_events {
-    { steps, tool_errors, shell_uses }
+    { steps, tool_errors, shell_uses, }
   } else {
     let leading_shell_use = if log_text.has_prefix("tool: exit=") {
       1
@@ -438,7 +438,7 @@ test "trial environment uses selected provider api key env" {
   assert_true(env.get("DEEPSEEK") == Some("key"))
   assert_true(env.get("KIMI") is None)
   let kimi_env = trial_extra_env(
-    { ..config, model: Kimi(K27CodeHighSpeed) },
+    { ..config, model: Kimi(K27CodeHighSpeed), },
     "/tmp/workspace",
   )
   assert_true(kimi_env.get("KIMI") == Some("key"))

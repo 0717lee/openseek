@@ -46,7 +46,7 @@ test "parses document uris" {
 ///|
 async test "filesystem provider reads document snapshots by uri" {
   let uri = expect_uri("file://local/main.mbt")
-  let provider = TestFileSystemProvider::{  }
+  let provider = TestFileSystemProvider::{ }
 
   match @workspace.read_document(provider, uri) {
     DocumentLoaded(document) => {
@@ -65,7 +65,7 @@ async test "filesystem provider reads document snapshots by uri" {
 ///|
 async test "filesystem provider rejects mismatched schemes" {
   let uri = expect_uri("memory://main.mbt")
-  let provider = TestFileSystemProvider::{  }
+  let provider = TestFileSystemProvider::{ }
 
   match @workspace.read_document(provider, uri) {
     DocumentReadFailed(error) => assert_true(error.code == InvalidUri)
@@ -176,5 +176,5 @@ impl @workspace.FileSystemProvider for TestFileSystemProvider with fn watch(
   _options,
   _listener,
 ) {
-  { dispose: () => () }
+  { dispose: () => (), }
 }

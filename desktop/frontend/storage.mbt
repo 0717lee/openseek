@@ -120,7 +120,7 @@ fn parse_conversation_models(text : String) -> Array[StoredConversationModel] {
       !key.is_empty() &&
       fields.get("model") is Some(String(wire)) &&
       EngineModel::parse(wire) is Some(model) {
-      entries.push({ key, model })
+      entries.push({ key, model, })
     }
   }
   entries

@@ -16,7 +16,7 @@ priv struct MarkdownViewerWidgetFoldState {
 
 ///|
 fn MarkdownViewerWidgetFoldState::MarkdownViewerWidgetFoldState() -> MarkdownViewerWidgetFoldState {
-  { source: "", section_keys: [], records: Map([]) }
+  { source: "", section_keys: [], records: Map([]), }
 }
 
 ///|
@@ -64,7 +64,7 @@ fn MarkdownViewerWidgetAttachment::reconcile_folding(
     let fingerprint = markdown_viewer_fold_fingerprint(section, source)
     retained[key] = match self.fold.records.get(key) {
       Some(record) if record.fingerprint == fingerprint => record
-      _ => { collapsed: false, fingerprint }
+      _ => { collapsed: false, fingerprint, }
     }
   }
   self.fold.source = source
@@ -115,7 +115,7 @@ fn MarkdownViewerWidgetAttachment::apply_folding(
     match
       projection.block_anchors[section.heading_anchor_index].rendered_element_index {
       Some(heading_element_index) =>
-        controls.push({ heading_element_index, section_index, collapsed })
+        controls.push({ heading_element_index, section_index, collapsed, })
       None => continue
     }
     if collapsed {

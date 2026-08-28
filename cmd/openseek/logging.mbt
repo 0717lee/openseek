@@ -21,7 +21,7 @@ priv struct FlushedStdout {
 fn FlushedStdout::FlushedStdout(
   format? : @xlog.Format = Jsonl,
 ) -> FlushedStdout {
-  { format, lines: Queue(kind=Unbounded) }
+  { format, lines: Queue(kind=Unbounded), }
 }
 
 ///|

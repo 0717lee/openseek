@@ -26,7 +26,7 @@ pub fn Session::Session(
   first_prompt~ : String,
   events~ : String,
 ) -> Session {
-  { key, id, root, root_label, is_marker, last_active, first_prompt, events }
+  { key, id, root, root_label, is_marker, last_active, first_prompt, events, }
 }
 
 ///|
@@ -70,7 +70,7 @@ pub fn StandaloneExport::StandaloneExport(
   shell_html : String,
   bundle_js : String,
 ) -> StandaloneExport {
-  { shell_html, bundle_js }
+  { shell_html, bundle_js, }
 }
 
 ///|

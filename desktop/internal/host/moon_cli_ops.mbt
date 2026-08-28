@@ -282,11 +282,11 @@ async fn lsp_open_op(
   let request_root = WirePath::parse(payload.root)
   let file = request_root.resolve(payload.path)
   guard moon_module_root(request_root.absolute, file) is Some(root) else {
-    return { diagnostics: Some([]) }
+    return { diagnostics: Some([]), }
   }
   guard state.run_moon(["check", "--output-json"], root)
     is Some((code, stdout, stderr)) else {
-    return { diagnostics: None }
+    return { diagnostics: None, }
   }
   // The pinned toolchain prints diagnostics on stdout (the summary goes to
   // stderr), but the engine's auto-check consumes this command with merged
@@ -298,7 +298,7 @@ async fn lsp_open_op(
   // itself failing (a broken manifest, a plan error): report no data and
   // keep the previous state rather than wrongly clearing every file.
   if current.is_empty() && code != 0 {
-    return { diagnostics: None }
+    return { diagnostics: None, }
   }
   let previous = state.published.get(root).unwrap_or([])
   for push in diagnostics_pushes(request_root.absolute, previous, current) {
@@ -309,7 +309,7 @@ async fn lsp_open_op(
     paths.push(path)
   }
   state.published.set(root, paths)
-  { diagnostics: Some(current.get(file).unwrap_or([])) }
+  { diagnostics: Some(current.get(file).unwrap_or([])), }
 }
 
 ///|
@@ -329,14 +329,14 @@ fn diagnostics_pushes(
     guard path.relative_to(root=request_root) is Some(relative) else {
       continue
     }
-    pushes.push({ root, path: relative.0, diagnostics: items })
+    pushes.push({ root, path: relative.0, diagnostics: items, })
   }
   for path in previous {
     if !current.contains(path) {
       guard path.relative_to(root=request_root) is Some(relative) else {
         continue
       }
-      pushes.push({ root, path: relative.0, diagnostics: [] })
+      pushes.push({ root, path: relative.0, diagnostics: [], })
     }
   }
   pushes
@@ -384,8 +384,8 @@ fn parse_check_output(
     .get_or_init(path, () => [])
     .push({
       range: {
-        start: { line: start_line, character: start_col },
-        end: { line: end_line, character: end_col },
+        start: { line: start_line, character: start_col, },
+        end: { line: end_line, character: end_col, },
       },
       severity: Some(check_severity(level)),
       message,
@@ -593,7 +593,10 @@ test "parse_check_output groups diagnostics per file in LSP shape" {
     fail("expected the loc-less diagnostic to survive")
   }
   assert_eq(anchored, {
-    range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+    range: {
+      start: { line: 0, character: 0, },
+      end: { line: 0, character: 0, },
+    },
     severity: Some(1),
     message: "module-level boom",
     tags: None,
@@ -602,15 +605,18 @@ test "parse_check_output groups diagnostics per file in LSP shape" {
     fail("expected two diagnostics for lib.mbt")
   }
   assert_eq(first, {
-    range: { start: { line: 8, character: 6 }, end: { line: 8, character: 18 } },
+    range: {
+      start: { line: 8, character: 6, },
+      end: { line: 8, character: 18, },
+    },
     severity: Some(2),
     message: "Warning (unused_value): Unused variable 'x'",
     tags: Some([1]),
   })
   assert_eq(second, {
     range: {
-      start: { line: 14, character: 2 },
-      end: { line: 14, character: 14 },
+      start: { line: 14, character: 2, },
+      end: { line: 14, character: 14, },
     },
     severity: Some(1),
     message: "Expr Type Mismatch",
@@ -620,7 +626,10 @@ test "parse_check_output groups diagnostics per file in LSP shape" {
     fail("expected one diagnostic for other.mbt")
   }
   assert_eq(deprecated, {
-    range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+    range: {
+      start: { line: 0, character: 0, },
+      end: { line: 0, character: 1, },
+    },
     severity: Some(2),
     message: "Warning (deprecated): gone",
     tags: Some([2]),
@@ -637,7 +646,10 @@ test "diagnostics_pushes uses root-relative paths and clears dropped files" {
     fail("expected absolute diagnostic fixture paths")
   }
   let boom : @protocol.LspDiagnostic = {
-    range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+    range: {
+      start: { line: 0, character: 0, },
+      end: { line: 0, character: 1, },
+    },
     severity: Some(1),
     message: "boom",
     tags: None,
@@ -758,11 +770,11 @@ fn bare_symbol_name(head : String) -> String? {
 fn symbol_row_range(location : Map[String, Json]) -> SymbolRange {
   guard location.get("range") is Some(String(span)) &&
     parse_span(span) is Some((start_line, start_col, end_line, end_col)) else {
-    return { start: { line: 0, col: 0 }, end: { line: 0, col: 0 } }
+    return { start: { line: 0, col: 0, }, end: { line: 0, col: 0, }, }
   }
   {
-    start: { line: start_line, col: start_col },
-    end: { line: end_line, col: end_col },
+    start: { line: start_line, col: start_col, },
+    end: { line: end_line, col: end_col, },
   }
 }
 

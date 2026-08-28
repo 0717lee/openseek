@@ -99,7 +99,7 @@ fn code_editor_foreign_zone_geometry(
     if excluded_zone_ids.contains(id) {
       excluded_height += height_in_px
     } else if height_in_px > 0.0 {
-      foreign.push({ after_line_number, height_in_px })
+      foreign.push({ after_line_number, height_in_px, })
     }
   }
   (foreign, excluded_height)
@@ -141,7 +141,7 @@ pub fn CodeEditorWidget::geometry_snapshot(
     } else {
       0.0
     }
-    model_line_heights.push({ line_number, height_in_px })
+    model_line_heights.push({ line_number, height_in_px, })
   }
 
   let layout_infos = match self.current_code_browser_data() {

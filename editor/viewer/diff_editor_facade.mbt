@@ -10,7 +10,7 @@ pub fn DiffEditorModel::DiffEditorModel(
   original : @model.TextModel,
   modified : @model.TextModel,
 ) -> DiffEditorModel {
-  { original, modified }
+  { original, modified, }
 }
 
 ///|
@@ -182,7 +182,7 @@ pub fn DiffEditor::create(
         options=options.internal(),
       )
   }
-  { widget, owned_core_provider }
+  { widget, owned_core_provider, }
 }
 
 ///|
@@ -192,16 +192,16 @@ pub fn DiffEditor::set_model(
 ) -> DiffEditorModel? {
   self.widget
   .set_model(
-    model.map(model => { original: model.original, modified: model.modified }),
+    model.map(model => { original: model.original, modified: model.modified, }),
   )
-  .map(previous => { original: previous.original, modified: previous.modified })
+  .map(previous => { original: previous.original, modified: previous.modified, })
 }
 
 ///|
 pub fn DiffEditor::get_model(self : DiffEditor) -> DiffEditorModel? {
   self.widget
   .get_model()
-  .map(model => { original: model.original, modified: model.modified })
+  .map(model => { original: model.original, modified: model.modified, })
 }
 
 ///|

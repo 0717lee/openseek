@@ -1120,7 +1120,7 @@ struct Point {
 
 ///|
 pub fn Point::Point(x~ : Int, y~ : Int) -> Point {
-  { x, y }
+  { x, y, }
 }
 
 ///|
@@ -1270,8 +1270,8 @@ fn not_idiomatic(opts : APIOptions, arg : Int) -> Unit {
 ///|
 test {
   // Hard to use in call site
-  not_idiomatic({ width: Some(5), height: None }, 10)
-  not_idiomatic({ width: None, height: None }, 10)
+  not_idiomatic({ width: Some(5), height: None, }, 10)
+  not_idiomatic({ width: None, height: None, }, 10)
 }
 ```
 

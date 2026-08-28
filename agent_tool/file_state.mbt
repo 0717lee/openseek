@@ -63,7 +63,7 @@ pub struct FileStateMap {
 ///|
 /// A fresh, empty session file-state map.
 pub fn FileStateMap::new() -> FileStateMap {
-  { entries: Map([]) }
+  { entries: Map([]), }
 }
 
 ///|
@@ -83,7 +83,7 @@ pub fn FileStateMap::record_created(
   path : String,
   digest : String,
 ) -> Unit {
-  self.entries[path] = { provenance: Created, digest }
+  self.entries[path] = { provenance: Created, digest, }
 }
 
 ///|
@@ -103,7 +103,7 @@ pub fn FileStateMap::record_modified(
   } else {
     Modified
   }
-  self.entries[path] = { provenance, digest }
+  self.entries[path] = { provenance, digest, }
 }
 
 ///|
@@ -121,13 +121,13 @@ pub fn FileStateMap::record_edited(
   result_digest : String,
 ) -> Unit {
   let provenance = if self.entries.get(path)
-    is Some({ provenance: Created, digest: stored }) &&
+    is Some({ provenance: Created, digest: stored, }) &&
     stored == seen_digest {
     Created
   } else {
     Modified
   }
-  self.entries[path] = { provenance, digest: result_digest }
+  self.entries[path] = { provenance, digest: result_digest, }
 }
 
 ///|
@@ -151,7 +151,7 @@ pub fn FileStateMap::created_and_unchanged(
   path : String,
   current_digest : String,
 ) -> Bool {
-  self.entries.get(path) is Some({ provenance: Created, digest: stored }) &&
+  self.entries.get(path) is Some({ provenance: Created, digest: stored, }) &&
   stored == current_digest
 }
 

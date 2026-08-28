@@ -174,10 +174,10 @@ test "digest is bounded and counts severities" {
   }
   let report : ReviewReport = {
     schema_version: 1,
-    scope: { base: "abc", head: "WORKTREE", files: [] },
+    scope: { base: "abc", head: "WORKTREE", files: [], },
     findings: many,
     summary: "many findings",
-    stats: { files_reviewed: 5, findings: 25, build: "pass", tests: "fail" },
+    stats: { files_reviewed: 5, findings: 25, build: "pass", tests: "fail", },
   }
   let digest = report.digest()
   assert_true(digest.length() <= digest_max_chars)
@@ -192,10 +192,10 @@ test "digest is bounded and counts severities" {
 test "a clean digest is one line of good news" {
   let report : ReviewReport = {
     schema_version: 1,
-    scope: { base: "abc", head: "WORKTREE", files: ["a.mbt"] },
+    scope: { base: "abc", head: "WORKTREE", files: ["a.mbt"], },
     findings: [],
     summary: "goal satisfied; tests pass",
-    stats: { files_reviewed: 3, findings: 0, build: "pass", tests: "pass" },
+    stats: { files_reviewed: 3, findings: 0, build: "pass", tests: "pass", },
   }
   let digest = report.digest()
   assert_true(digest.contains("0 finding(s)"))

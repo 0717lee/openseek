@@ -48,17 +48,17 @@ pub fn apply_goal_marker(
   marker : GoalMarker,
 ) -> GoalStanding? {
   match marker {
-    GoalSet(text) => Some({ text, blocked: None })
+    GoalSet(text) => Some({ text, blocked: None, })
     GoalCleared => None
     GoalBlocked(reason) =>
       if goal is Some(goal) {
-        Some({ ..goal, blocked: Some(reason) })
+        Some({ ..goal, blocked: Some(reason), })
       } else {
         None
       }
     GoalUnblocked =>
       if goal is Some(goal) {
-        Some({ ..goal, blocked: None })
+        Some({ ..goal, blocked: None, })
       } else {
         None
       }
@@ -92,16 +92,16 @@ test "goal markers parse exactly and other goal-family notices never match" {
 ///|
 test "the goal reducer follows last-marker-wins with guarded transitions" {
   let set = apply_goal_marker(None, GoalSet("ship it"))
-  assert_true(set is Some({ text: "ship it", blocked: None }))
+  assert_true(set is Some({ text: "ship it", blocked: None, }))
   let blocked = apply_goal_marker(set, GoalBlocked("needs access"))
   assert_true(
-    blocked is Some({ text: "ship it", blocked: Some("needs access") }),
+    blocked is Some({ text: "ship it", blocked: Some("needs access"), }),
   )
   let resumed = apply_goal_marker(blocked, GoalUnblocked)
-  assert_true(resumed is Some({ text: "ship it", blocked: None }))
+  assert_true(resumed is Some({ text: "ship it", blocked: None, }))
   // A newer set resets a standing block.
   let replaced = apply_goal_marker(blocked, GoalSet("polish it"))
-  assert_true(replaced is Some({ text: "polish it", blocked: None }))
+  assert_true(replaced is Some({ text: "polish it", blocked: None, }))
   assert_true(apply_goal_marker(blocked, GoalCleared) is None)
   // Stray transitions on a goalless record stay goalless.
   assert_true(apply_goal_marker(None, GoalBlocked("orphan")) is None)

@@ -39,7 +39,7 @@ async fn SessionExport::new(
       },
     )
   }
-  { manager, session, workspace, root, title: payload.title }
+  { manager, session, workspace, root, title: payload.title, }
 }
 
 ///|

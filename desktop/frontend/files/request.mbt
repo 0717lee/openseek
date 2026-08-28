@@ -23,7 +23,7 @@ pub fn Request::Request(
   session : String,
   root : @common.Uri?,
 ) -> Request {
-  { channel, session, root }
+  { channel, session, root, }
 }
 
 ///|

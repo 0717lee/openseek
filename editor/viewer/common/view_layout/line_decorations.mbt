@@ -15,7 +15,7 @@ pub fn LineDecoration::LineDecoration(
   class_name : String,
   decoration_type? : InlineDecorationType = Regular,
 ) -> LineDecoration {
-  { start_column, end_column, class_name, decoration_type }
+  { start_column, end_column, class_name, decoration_type, }
 }
 
 ///|
@@ -134,7 +134,7 @@ priv struct DecorationSegmentStack {
 
 ///|
 fn DecorationSegmentStack::new() -> DecorationSegmentStack {
-  { stop_offsets: [], class_names: [], metadata: [], count: 0 }
+  { stop_offsets: [], class_names: [], metadata: [], count: 0, }
 }
 
 ///|

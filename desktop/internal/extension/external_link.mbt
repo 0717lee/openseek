@@ -44,7 +44,7 @@ async fn open_external(
   guard code == 0 else {
     raise OpenExternalError("Could not open external link")
   }
-  { opened: true }
+  { opened: true, }
 }
 
 ///|

@@ -172,8 +172,8 @@ test "delta_decorations replaces one id set with another" {
   let model = doc("alpha\nbeta\ngamma\n")
   let options = @model.ModelDecorationOptions("doc-example")
   let ids = model.delta_decorations([], [
-    { range: Range(1, 1, 1, 6), options },
-    { range: Range(3, 1, 3, 6), options },
+    { range: Range(1, 1, 1, 6), options, },
+    { range: Range(3, 1, 3, 6), options, },
   ])
   let in_line_one = model.get_line_decorations(1).length()
   let after = model.delta_decorations(ids, [])
@@ -199,7 +199,10 @@ decoration ids across a `set_value`.
 test "set_value destroys existing decorations" {
   let model = doc("alpha\nbeta\n")
   let ids = model.delta_decorations([], [
-    { range: Range(1, 1, 1, 6), options: ModelDecorationOptions("doc-example") },
+    {
+      range: Range(1, 1, 1, 6),
+      options: ModelDecorationOptions("doc-example"),
+    },
   ])
   let before = model.get_decoration_range(ids[0]) is Some(_)
   model.set_value("replaced\n")
@@ -220,7 +223,8 @@ Decorations are *tracked*: a query reports the decoration's current range, and
 test "queries report the tracked range, filtered by the queried span" {
   let model = doc("alpha\nbeta\ngamma\n")
   let options = @model.ModelDecorationOptions("doc-example")
-  model.delta_decorations([], [{ range: Range(2, 1, 2, 5), options }]) |> ignore
+  model.delta_decorations([], [{ range: Range(2, 1, 2, 5), options, }])
+  |> ignore
   debug_inspect(
     (
       model.get_decorations_in_range(Range(1, 1, 1, 6)).length(),

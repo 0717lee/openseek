@@ -66,7 +66,7 @@ priv struct LastRenderedData {
 
 ///|
 fn LastRenderedData::LastRenderedData() -> LastRenderedData {
-  { current_visible_range: Range(1, 1, 1, 1) }
+  { current_visible_range: Range(1, 1, 1, 1), }
 }
 
 ///|
@@ -135,7 +135,7 @@ fn ViewLines::ViewLines(
     lines_content,
     text_range_resting_spot: document.create_element("div"),
     // `RenderedLinesCollection` constructs through `_set(1, [])`.
-    window: { start: 1, end: 1 },
+    window: { start: 1, end: 1, },
     lines: [],
     typical_halfwidth_character_width: initial_configuration.typical_halfwidth_character_width,
     is_viewport_wrapping: initial_configuration.is_viewport_wrapping,
@@ -383,7 +383,7 @@ fn ViewLines::line_node_at(
 /// replaces `innerHTML`; only the source's excluded GPU arm removes on flush.
 fn ViewLines::flush_retained_lines(self : ViewLines) -> Unit {
   self.lines = []
-  self.window = { start: 1, end: 1 }
+  self.window = { start: 1, end: 1, }
   self.max_line_width = 0.0
 }
 
@@ -547,7 +547,7 @@ fn viewport_window(
 ) -> @view_layout.LineWindow {
   // ViewportData is a 1-based inclusive range `[start, end]`; the render window
   // is the equivalent 1-based half-open `[start, end + 1)`.
-  { start: viewport.start_line_number, end: viewport.end_line_number + 1 }
+  { start: viewport.start_line_number, end: viewport.end_line_number + 1, }
 }
 
 ///|

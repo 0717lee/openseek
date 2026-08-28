@@ -26,7 +26,7 @@ is stripped from the emitted Markdown.
 ///|
 let moonbit_comments : @languages.CommentRule = {
   line_comment: Some(LineCommentRule("//")),
-  block_comment: Some({ open: "/*", close: "*/" }),
+  block_comment: Some({ open: "/*", close: "*/", }),
 }
 
 ///|
@@ -122,12 +122,12 @@ test "normalization orders blocks and rejects later overlaps" {
   let log = @log.LogService(logger=@log.NullLogger()).log_handle()
   let normalized = normalize_markdown_comment_blocks(
     [
-      { line_range: LineRange(5, 7), markdown: "second" },
-      { line_range: LineRange(1, 3), markdown: "first" },
+      { line_range: LineRange(5, 7), markdown: "second", },
+      { line_range: LineRange(1, 3), markdown: "first", },
       // overlaps the block already accepted at 5..7
-      { line_range: LineRange(6, 8), markdown: "dropped" },
+      { line_range: LineRange(6, 8), markdown: "dropped", },
       // an exactly empty body is dropped
-      { line_range: LineRange(9, 10), markdown: "" },
+      { line_range: LineRange(9, 10), markdown: "", },
     ],
     20,
     log,
@@ -154,8 +154,8 @@ test "a range beyond the document is dropped, not clamped" {
   debug_inspect(
     normalize_markdown_comment_blocks(
       [
-        { line_range: LineRange(1, 2), markdown: "kept" },
-        { line_range: LineRange(90, 95), markdown: "out of range" },
+        { line_range: LineRange(1, 2), markdown: "kept", },
+        { line_range: LineRange(90, 95), markdown: "out of range", },
       ],
       3,
       log,

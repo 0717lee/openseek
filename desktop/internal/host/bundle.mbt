@@ -30,7 +30,7 @@ pub async fn HostState::viz_assets(self : HostState) -> VizAssets {
     )
   }
   let assets = match @development.Layout::detect(executable) {
-    Some(layout) => { shell: layout.viz_shell(), bundle: layout.viz_bundle() }
+    Some(layout) => { shell: layout.viz_shell(), bundle: layout.viz_bundle(), }
     None => {
       let frontend = frontend_entry_path(executable)
       let viz = @pathx.Path(frontend).dirname().join("viz")

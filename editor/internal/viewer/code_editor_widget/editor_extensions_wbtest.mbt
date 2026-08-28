@@ -781,7 +781,7 @@ test "menu resolution orders groups and inserts separators only between visible 
     [],
     title="Second",
     menu_placements=[
-      { menu_id: EditorContext, group: "02_navigation", order: 2.0 },
+      { menu_id: EditorContext, group: "02_navigation", order: 2.0, },
     ],
   )
   registry.register_editor_command(
@@ -791,7 +791,7 @@ test "menu resolution orders groups and inserts separators only between visible 
     [],
     title="First",
     menu_placements=[
-      { menu_id: EditorContext, group: "01_primary", order: 9.0 },
+      { menu_id: EditorContext, group: "01_primary", order: 9.0, },
     ],
   )
   registry.register_editor_command(
@@ -800,7 +800,9 @@ test "menu resolution orders groups and inserts separators only between visible 
     _viewer => (),
     [],
     title="Hidden",
-    menu_placements=[{ menu_id: EditorContext, group: "00_hidden", order: 1.0 }],
+    menu_placements=[
+      { menu_id: EditorContext, group: "00_hidden", order: 1.0, },
+    ],
   )
   let viewer = CodeEditorWidget::CodeEditorWidget()
   defer viewer.dispose()

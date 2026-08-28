@@ -37,7 +37,6 @@ async test "content hover computer separates sync markers from async markdown" {
     },
   ])
   languages.register_hover_provider(LanguageId("moonbit"), ComputerHoverProvider::{
-
   })
   |> ignore
   let services : HoverParticipantServices = {

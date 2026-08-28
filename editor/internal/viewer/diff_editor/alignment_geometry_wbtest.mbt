@@ -7,7 +7,7 @@ fn alignment_test_state(
 ) -> DiffState {
   ignore(original_line_count)
   ignore(modified_line_count)
-  DiffState::from_diff_result({ changes, additional_alignments })
+  DiffState::from_diff_result({ changes, additional_alignments, })
 }
 
 ///|
@@ -43,10 +43,10 @@ test "geometry alignment handles unequal insert delete and replace hunks" {
     PaneGeometrySnapshot(17, 20.0),
   )
   assert_eq(spacers.original(), [
-    { after_line_number: 2, height_in_px: 40.0 },
-    { after_line_number: 15, height_in_px: 40.0 },
+    { after_line_number: 2, height_in_px: 40.0, },
+    { after_line_number: 15, height_in_px: 40.0, },
   ])
-  assert_eq(spacers.modified(), [{ after_line_number: 9, height_in_px: 60.0 }])
+  assert_eq(spacers.modified(), [{ after_line_number: 9, height_in_px: 60.0, }])
 }
 
 ///|
@@ -55,12 +55,12 @@ test "wrapped model lines align from exact per-line pixel heights" {
   let spacers = compute_managed_alignment_spacers(
     diff_state,
     PaneGeometrySnapshot(4, 20.0, model_line_heights=[
-      { line_number: 2, height_in_px: 40.0 },
+      { line_number: 2, height_in_px: 40.0, },
     ]),
     PaneGeometrySnapshot(4, 20.0),
   )
   assert_true(spacers.original().is_empty())
-  assert_eq(spacers.modified(), [{ after_line_number: 2, height_in_px: 20.0 }])
+  assert_eq(spacers.modified(), [{ after_line_number: 2, height_in_px: 20.0, }])
 }
 
 ///|
@@ -69,18 +69,18 @@ test "foreign zones align unmodified spans at their model boundaries" {
   let spacers = compute_managed_alignment_spacers(
     diff_state,
     PaneGeometrySnapshot(10, 20.0, foreign_zone_heights=[
-      { after_line_number: 3, height_in_px: 30.0 },
-      { after_line_number: 8, height_in_px: 5.0 },
+      { after_line_number: 3, height_in_px: 30.0, },
+      { after_line_number: 8, height_in_px: 5.0, },
     ]),
     PaneGeometrySnapshot(10, 20.0, foreign_zone_heights=[
-      { after_line_number: 3, height_in_px: 10.0 },
-      { after_line_number: 6, height_in_px: 25.0 },
+      { after_line_number: 3, height_in_px: 10.0, },
+      { after_line_number: 6, height_in_px: 25.0, },
     ]),
   )
-  assert_eq(spacers.original(), [{ after_line_number: 6, height_in_px: 25.0 }])
+  assert_eq(spacers.original(), [{ after_line_number: 6, height_in_px: 25.0, }])
   assert_eq(spacers.modified(), [
-    { after_line_number: 3, height_in_px: 20.0 },
-    { after_line_number: 8, height_in_px: 5.0 },
+    { after_line_number: 3, height_in_px: 20.0, },
+    { after_line_number: 8, height_in_px: 5.0, },
   ])
 }
 
@@ -93,20 +93,20 @@ test "hidden source projection is one atomic geometry event at its final boundar
     PaneGeometrySnapshot(4, 20.0),
   )
   assert_eq(hidden_only.original(), [
-    { after_line_number: 2, height_in_px: 20.0 },
+    { after_line_number: 2, height_in_px: 20.0, },
   ])
   assert_true(hidden_only.modified().is_empty())
 
   let hidden_with_zone = compute_managed_alignment_spacers(
     diff_state,
     PaneGeometrySnapshot(4, 20.0, hidden_lines=[LineRange(2, 3)], foreign_zone_heights=[
-      { after_line_number: 2, height_in_px: 50.0 },
+      { after_line_number: 2, height_in_px: 50.0, },
     ]),
     PaneGeometrySnapshot(4, 20.0),
   )
   assert_true(hidden_with_zone.original().is_empty())
   assert_eq(hidden_with_zone.modified(), [
-    { after_line_number: 2, height_in_px: 30.0 },
+    { after_line_number: 2, height_in_px: 30.0, },
   ])
 }
 
@@ -117,11 +117,11 @@ test "Markdown comment replacement subtracts the complete hidden source block on
     diff_state,
     PaneGeometrySnapshot(6, 20.0),
     PaneGeometrySnapshot(6, 20.0, hidden_lines=[LineRange(2, 5)], foreign_zone_heights=[
-      { after_line_number: 4, height_in_px: 90.0 },
+      { after_line_number: 4, height_in_px: 90.0, },
     ]),
   )
   assert_eq(taller_rich_comment.original(), [
-    { after_line_number: 4, height_in_px: 30.0 },
+    { after_line_number: 4, height_in_px: 30.0, },
   ])
   assert_true(taller_rich_comment.modified().is_empty())
 
@@ -129,12 +129,12 @@ test "Markdown comment replacement subtracts the complete hidden source block on
     diff_state,
     PaneGeometrySnapshot(6, 20.0),
     PaneGeometrySnapshot(6, 20.0, hidden_lines=[LineRange(2, 5)], foreign_zone_heights=[
-      { after_line_number: 4, height_in_px: 40.0 },
+      { after_line_number: 4, height_in_px: 40.0, },
     ]),
   )
   assert_true(shorter_rich_comment.original().is_empty())
   assert_eq(shorter_rich_comment.modified(), [
-    { after_line_number: 4, height_in_px: 20.0 },
+    { after_line_number: 4, height_in_px: 20.0, },
   ])
 }
 
@@ -149,13 +149,13 @@ test "SideBySide replacement aligns rich comment zones instead of hidden source 
   let spacers = compute_managed_alignment_spacers(
     diff_state,
     PaneGeometrySnapshot(6, 20.0, hidden_lines=[LineRange(2, 5)], foreign_zone_heights=[
-      { after_line_number: 4, height_in_px: 50.0 },
+      { after_line_number: 4, height_in_px: 50.0, },
     ]),
     PaneGeometrySnapshot(7, 20.0, hidden_lines=[LineRange(2, 6)], foreign_zone_heights=[
-      { after_line_number: 5, height_in_px: 80.0 },
+      { after_line_number: 5, height_in_px: 80.0, },
     ]),
   )
-  assert_eq(spacers.original(), [{ after_line_number: 4, height_in_px: 30.0 }])
+  assert_eq(spacers.original(), [{ after_line_number: 4, height_in_px: 30.0, }])
   assert_true(spacers.modified().is_empty())
 }
 
@@ -169,7 +169,7 @@ test "additional alignment can align omitted geometry without a real change" {
     PaneGeometrySnapshot(3, 20.0),
     PaneGeometrySnapshot(4, 20.0),
   )
-  assert_eq(spacers.original(), [{ after_line_number: 1, height_in_px: 20.0 }])
+  assert_eq(spacers.original(), [{ after_line_number: 1, height_in_px: 20.0, }])
   assert_true(spacers.modified().is_empty())
 }
 
@@ -187,8 +187,8 @@ test "character mappings add synchronization points inside a real hunk" {
     PaneGeometrySnapshot(9, 20.0),
   )
   assert_eq(spacers.original(), [
-    { after_line_number: 2, height_in_px: 20.0 },
-    { after_line_number: 5, height_in_px: 20.0 },
+    { after_line_number: 2, height_in_px: 20.0, },
+    { after_line_number: 5, height_in_px: 20.0, },
   ])
   assert_true(spacers.modified().is_empty())
 }
@@ -218,7 +218,7 @@ test "Inline balances a final-line diff inside compact rich Markdown geometry" {
     alignment_test_state([change], [], 8, 8),
     PaneGeometrySnapshot(8, 20.0),
     PaneGeometrySnapshot(8, 20.0, hidden_lines=[LineRange(2, 7)], foreign_zone_heights=[
-      { after_line_number: 6, height_in_px: 20.0 },
+      { after_line_number: 6, height_in_px: 20.0, },
     ]),
   )
   assert_eq(alignments.length(), 1)
@@ -241,15 +241,15 @@ test "final-line geometry is an ordinary boundary not a tail correction" {
   let original = PaneGeometrySnapshot(
     3,
     20.0,
-    model_line_heights=[{ line_number: 3, height_in_px: 60.0 }],
-    foreign_zone_heights=[{ after_line_number: 3, height_in_px: 10.0 }],
+    model_line_heights=[{ line_number: 3, height_in_px: 60.0, }],
+    foreign_zone_heights=[{ after_line_number: 3, height_in_px: 10.0, }],
   )
   let modified = PaneGeometrySnapshot(3, 20.0)
   let spacers = compute_managed_alignment_spacers(
     diff_state, original, modified,
   )
   assert_true(spacers.original().is_empty())
-  assert_eq(spacers.modified(), [{ after_line_number: 3, height_in_px: 50.0 }])
+  assert_eq(spacers.modified(), [{ after_line_number: 3, height_in_px: 50.0, }])
   assert_eq(
     original.content_height(),
     modified.content_height() + spacers.modified()[0].height_in_px,
@@ -259,15 +259,15 @@ test "final-line geometry is an ordinary boundary not a tail correction" {
 ///|
 test "snapshot normalizes duplicate foreign zones and excludes invalid input" {
   let geometry = PaneGeometrySnapshot(3, 20.0, foreign_zone_heights=[
-    { after_line_number: 0, height_in_px: 7.0 },
-    { after_line_number: 2, height_in_px: 8.0 },
-    { after_line_number: 2, height_in_px: 12.0 },
-    { after_line_number: 4, height_in_px: 99.0 },
-    { after_line_number: 1, height_in_px: -3.0 },
+    { after_line_number: 0, height_in_px: 7.0, },
+    { after_line_number: 2, height_in_px: 8.0, },
+    { after_line_number: 2, height_in_px: 12.0, },
+    { after_line_number: 4, height_in_px: 99.0, },
+    { after_line_number: 1, height_in_px: -3.0, },
   ])
   assert_eq(geometry.foreign_zone_heights(), [
-    { after_line_number: 0, height_in_px: 7.0 },
-    { after_line_number: 2, height_in_px: 20.0 },
+    { after_line_number: 0, height_in_px: 7.0, },
+    { after_line_number: 2, height_in_px: 20.0, },
   ])
   assert_eq(geometry.content_height(), 87.0)
 }

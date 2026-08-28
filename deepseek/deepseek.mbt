@@ -175,7 +175,7 @@ pub fn ChatMessage::ChatMessage(
   tool_calls? : Array[ToolCall] = [],
   reasoning_content? : String,
 ) -> ChatMessage {
-  { role, content, tool_calls, reasoning_content }
+  { role, content, tool_calls, reasoning_content, }
 }
 
 ///|

@@ -50,7 +50,7 @@ impl @syntax.LineTokenizer for BlockCommentToy with fn tokenize_line(
 
 ///|
 test "block comment state threads across lines" {
-  let toy : &@syntax.LineTokenizer = BlockCommentToy::{  }
+  let toy : &@syntax.LineTokenizer = BlockCommentToy::{ }
   let (line0, after_open) = toy.tokenize_line("aa /* bb", toy.initial_state())
   debug_inspect(
     line0,
@@ -71,13 +71,13 @@ test "block comment state threads across lines" {
     "\u{10348} /* ok */",
     toy.initial_state(),
   )
-  assert_eq(unicode, [{ start: 3, end: 11, tag: Comment }])
+  assert_eq(unicode, [{ start: 3, end: 11, tag: Comment, }])
   assert_true(after_unicode == toy_code)
 }
 
 ///|
 test "tokenizer state equality detects convergence" {
-  let toy : &@syntax.LineTokenizer = BlockCommentToy::{  }
+  let toy : &@syntax.LineTokenizer = BlockCommentToy::{ }
   let (_, after_open) = toy.tokenize_line("aa /* bb", toy.initial_state())
   assert_true(after_open == toy_comment)
   let (_, after_close) = toy.tokenize_line("cc */ dd", after_open)
@@ -109,7 +109,7 @@ test "tokenizer state stack edits preserve prior snapshots" {
 test "registry lookup resolves registered languages only" {
   let registry = @syntax.TokenizationRegistry()
   assert_true(registry.get("toy") is None)
-  registry.register("toy", BlockCommentToy::{  }) |> ignore
+  registry.register("toy", BlockCommentToy::{ }) |> ignore
   assert_true(registry.get("toy") is Some(_))
   assert_true(registry.get("unknown") is None)
 }
@@ -155,8 +155,8 @@ test "registry replacement makes stale dispose inert and active dispose notifies
   })
   |> ignore
 
-  let stale = registry.register("toy", BlockCommentToy::{  })
-  let active = registry.register("toy", BlockCommentToy::{  })
+  let stale = registry.register("toy", BlockCommentToy::{ })
+  let active = registry.register("toy", BlockCommentToy::{ })
   assert_true(support_visible_when_registered.val)
   assert_eq(changed_languages.length(), 2)
   assert_false(color_flags[0])
@@ -177,7 +177,7 @@ test "registry replacement makes stale dispose inert and active dispose notifies
 test "registry is_resolved is true without lazy factory state" {
   let registry = @syntax.TokenizationRegistry()
   assert_true(registry.is_resolved("missing"))
-  registry.register("toy", BlockCommentToy::{  }) |> ignore
+  registry.register("toy", BlockCommentToy::{ }) |> ignore
   assert_true(registry.is_resolved("toy"))
 }
 
@@ -192,8 +192,8 @@ test "registry color map retains CSS values and emits active languages" {
     color_flags.push(event.changed_color_map)
   })
   |> ignore
-  registry.register("moonbit", BlockCommentToy::{  }) |> ignore
-  registry.register("javascript", BlockCommentToy::{  }) |> ignore
+  registry.register("moonbit", BlockCommentToy::{ }) |> ignore
+  registry.register("javascript", BlockCommentToy::{ }) |> ignore
   changed_languages.clear()
   color_flags.clear()
 

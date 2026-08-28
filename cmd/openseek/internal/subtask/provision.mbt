@@ -100,7 +100,10 @@ async fn provision_locked(
         }
         guard record.split("\t").last() is Some(path) else { continue }
         let gitlink = path.to_owned()
-        if scope_violations([{ path: gitlink, kind: "gitlink" }], allowed_paths).is_empty() {
+        if scope_violations(
+            [{ path: gitlink, kind: "gitlink", }],
+            allowed_paths,
+          ).is_empty() {
           return Err(
             "allowed_paths cover the submodule \{gitlink}; submodule slices are not supported (v1)",
           )
@@ -171,7 +174,7 @@ async fn provision_locked(
       return Err(reason)
     }
   }
-  entry = { ..entry, worker_root, worker_admin_dir: admin, state: Running }
+  entry = { ..entry, worker_root, worker_admin_dir: admin, state: Running, }
   match save_entry(geometry.common_git_dir, entry) {
     Ok(_) => ()
     Err(reason) => {
@@ -183,7 +186,7 @@ async fn provision_locked(
   //    snapshots are immutable, and a worker without them pays a full
   //    re-download before its first moon command.
   copy_mooncakes(origin, worker_root)
-  Ok({ entry, geometry })
+  Ok({ entry, geometry, })
 }
 
 ///|
@@ -248,7 +251,7 @@ pub async fn resume_running(
       "subtask \{name}'s worktree is gone (\{entry.worker_root}); discard it and launch a fresh slice",
     )
   }
-  let entry = { ..entry, state: Running }
+  let entry = { ..entry, state: Running, }
   match save_entry(geometry.common_git_dir, entry) {
     Ok(_) => Ok(entry)
     Err(reason) => Err(reason)

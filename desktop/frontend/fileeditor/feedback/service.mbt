@@ -266,7 +266,7 @@ fn DesktopFeedbackService::update_feedback(
   guard self.feedback_by_id(resource, feedback_id) is Some(existing) else {
     return
   }
-  self.replace_item(resource, { ..existing, text: new_text })
+  self.replace_item(resource, { ..existing, text: new_text, })
 }
 
 ///|
@@ -296,7 +296,7 @@ fn DesktopFeedbackService::mark_feedback_submitted(
   let mut changed = false
   for index, item in items {
     if item.state == @agent_feedback_api.Accepted {
-      items[index] = { ..item, state: @agent_feedback_api.Submitted }
+      items[index] = { ..item, state: @agent_feedback_api.Submitted, }
       changed = true
     }
   }
@@ -342,5 +342,5 @@ fn DesktopFeedbackService::get_navigation_bearing(
     .get(resource.to_string())
     .map(anchor => item_ids.search_by(id => id == anchor).unwrap_or(-1))
     .unwrap_or(-1)
-  { active_idx, total_count: item_ids.length() }
+  { active_idx, total_count: item_ids.length(), }
 }

@@ -149,7 +149,7 @@ async fn create_directory_listing(
     error if @async.is_being_cancelled() => raise error
     error => raise HostError("failed to create folder: \{error}")
   }
-  browse_directory_listing({ path: Some(target.resource_path()) })
+  browse_directory_listing({ path: Some(target.resource_path()), })
 }
 
 ///|
@@ -176,13 +176,14 @@ async test "directory browsing accepts native input and returns URI paths" {
   let dir = @fs.tmpdir(prefix="openseek-browse-path-")
   @fsx.ensure_dir(Path(dir + "/child"))
   let absolute = @pathx.Path(dir).resolve().normalize()
-  guard browse_directory_op({ path: Some(dir) }) is Listing(path~, entries~, ..) else {
+  guard browse_directory_op({ path: Some(dir), })
+    is Listing(path~, entries~, ..) else {
     fail("expected a listing for an existing directory")
   }
   assert_eq(path, absolute.resource_path())
   assert_true(entries.contains("child"))
   // Navigation sends the path from the preceding reply back unchanged.
-  guard browse_directory_op({ path: Some(path) }) is Listing(path=again, ..) else {
+  guard browse_directory_op({ path: Some(path), }) is Listing(path=again, ..) else {
     fail("expected a listing for the resource path")
   }
   assert_eq(again, path)
@@ -196,7 +197,7 @@ async test "the resource root stays a real listing on POSIX hosts" {
   if @sysplatform.win32 || @sysplatform.win64 {
     return
   }
-  guard browse_directory_op({ path: Some("/") }) is Listing(path~, parent~, ..) else {
+  guard browse_directory_op({ path: Some("/"), }) is Listing(path~, parent~, ..) else {
     fail("expected the filesystem root to list")
   }
   assert_eq(path, "/")
@@ -205,7 +206,7 @@ async test "the resource root stays a real listing on POSIX hosts" {
 
 ///|
 async test "a bad browse path reports its refusal in the reply" {
-  guard browse_directory_op({ path: Some("/definitely/not/here-openseek") })
+  guard browse_directory_op({ path: Some("/definitely/not/here-openseek"), })
     is BrowseError(message) else {
     fail("expected a browse refusal")
   }
@@ -241,7 +242,7 @@ async test "directory creation rejects traversal and existing names" {
   let parent = @pathx.Path(dir).resolve().normalize()
   @fs.mkdir(parent.join(("taken" : @pathx.Relative)).to_string())
   for name in ["../outside", "taken"] {
-    guard create_directory_op({ parent: parent.resource_path(), name })
+    guard create_directory_op({ parent: parent.resource_path(), name, })
       is BrowseError(_) else {
       fail("expected folder creation to reject \{name}")
     }

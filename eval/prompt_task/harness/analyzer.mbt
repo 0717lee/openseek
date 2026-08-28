@@ -14,7 +14,7 @@ fn ProbeResult::ProbeResult(
   passed~ : Bool,
   reason~ : String,
 ) -> ProbeResult {
-  { name, passed, reason }
+  { name, passed, reason, }
 }
 
 ///|

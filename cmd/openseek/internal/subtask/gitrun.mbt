@@ -38,11 +38,11 @@ pub async fn git_run(
     )
   }) catch {
     error if @async.is_being_cancelled() => raise error
-    error => return { exit_code: -1, output: "git spawn failed: \{error}" }
+    error => return { exit_code: -1, output: "git spawn failed: \{error}", }
   }
   match outcome {
-    Some((exit_code, data)) => { exit_code, output: data.text() }
-    None => { exit_code: -1, output: "git timed out after \{timeout_ms}ms" }
+    Some((exit_code, data)) => { exit_code, output: data.text(), }
+    None => { exit_code: -1, output: "git timed out after \{timeout_ms}ms", }
   }
 }
 

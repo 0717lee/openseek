@@ -22,7 +22,7 @@ priv struct Lane {
 
 ///|
 fn Lane::Lane() -> Lane {
-  { held: false, waiters: Deque([]) }
+  { held: false, waiters: Deque([]), }
 }
 
 ///|

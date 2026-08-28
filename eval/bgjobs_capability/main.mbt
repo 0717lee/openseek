@@ -207,7 +207,7 @@ async fn[G] Engine::spawn(group : @async.TaskGroup[G]) -> Engine {
     })
     ignore(events.try_put({ "event": "__engine_eof" }) catch { _ => false })
   }
-  { writer, events }
+  { writer, events, }
 }
 
 ///|

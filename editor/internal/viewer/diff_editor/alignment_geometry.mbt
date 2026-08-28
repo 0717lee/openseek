@@ -199,7 +199,7 @@ fn append_managed_spacer(
       height_in_px: previous.height_in_px + height_in_px,
     }
   } else {
-    target.push({ after_line_number, height_in_px })
+    target.push({ after_line_number, height_in_px, })
   }
 }
 
@@ -248,7 +248,7 @@ fn additional_line_heights(
     }
     let delta = height - geometry.line_height
     if delta.abs() > 0.01 {
-      raw.push({ line_number, height_in_px: delta })
+      raw.push({ line_number, height_in_px: delta, })
     }
   }
   if hidden_source_height > 0.01 {
@@ -549,7 +549,7 @@ fn compute_managed_alignment_spacers(
       )
     }
   }
-  { original: original_spacers, modified: modified_spacers }
+  { original: original_spacers, modified: modified_spacers, }
 }
 
 ///|

@@ -396,7 +396,7 @@ pub fn ViewModel::clamp_window(
 ) -> @view_layout.LineWindow {
   let start = window.start.clamp(min=1, max=self.line_count())
   let end = window.end.clamp(min=start + 1, max=self.line_count() + 1)
-  { start, end }
+  { start, end, }
 }
 
 ///|

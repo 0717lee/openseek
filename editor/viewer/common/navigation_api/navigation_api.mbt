@@ -30,7 +30,7 @@ struct LocationOpenerHandle {
 pub fn LocationOpenerHandle::LocationOpenerHandle(
   open~ : async (OpenLocationRequest) -> Bool noraise,
 ) -> LocationOpenerHandle {
-  { open_callback: open }
+  { open_callback: open, }
 }
 
 ///|
@@ -59,7 +59,7 @@ pub fn TextModelReference::TextModelReference(
   model : @model.TextModel,
   release~ : () -> Unit,
 ) -> TextModelReference {
-  { model_value: model, release_callback: release, disposed: false }
+  { model_value: model, release_callback: release, disposed: false, }
 }
 
 ///|
@@ -93,7 +93,7 @@ struct TextModelResolverHandle {
 pub fn TextModelResolverHandle::TextModelResolverHandle(
   resolve~ : async (@base_common.Uri, @language.CancellationToken) -> TextModelReference? noraise,
 ) -> TextModelResolverHandle {
-  { resolve_callback: resolve }
+  { resolve_callback: resolve, }
 }
 
 ///|

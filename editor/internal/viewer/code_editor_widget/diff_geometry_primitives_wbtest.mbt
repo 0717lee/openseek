@@ -31,9 +31,9 @@ test "diff geometry snapshot follows wrap, hidden lines, and model columns" {
       assert_eq(snapshot.line_height(), 18.0)
       let heights = snapshot.model_line_heights()
       assert_eq(heights.length(), 3)
-      assert_eq(heights[0], { line_number: 1, height_in_px: 36.0 })
-      assert_eq(heights[1], { line_number: 2, height_in_px: 0.0 })
-      assert_eq(heights[2], { line_number: 3, height_in_px: 18.0 })
+      assert_eq(heights[0], { line_number: 1, height_in_px: 36.0, })
+      assert_eq(heights[1], { line_number: 2, height_in_px: 0.0, })
+      assert_eq(heights[2], { line_number: 3, height_in_px: 18.0, })
       assert_true(snapshot.line_max_columns() == [11, 7, 4])
       assert_eq(snapshot.foreign_zone_heights().length(), 0)
       assert_eq(snapshot.scroll_content().content_height, 54.0)
@@ -77,8 +77,8 @@ test "diff geometry excludes owned zones but retains foreign zone geometry" {
   assert_true(
     foreign ==
     [
-      { after_line_number: 2, height_in_px: 7.0 },
-      { after_line_number: 8, height_in_px: 13.0 },
+      { after_line_number: 2, height_in_px: 7.0, },
+      { after_line_number: 8, height_in_px: 13.0, },
     ],
   )
 }

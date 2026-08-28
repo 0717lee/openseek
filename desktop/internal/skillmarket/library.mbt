@@ -210,7 +210,7 @@ pub async fn install_skill(
   }
   library_lock.acquire()
   defer library_lock.release()
-  let library : SkillLibrary = { root: library_dir }
+  let library : SkillLibrary = { root: library_dir, }
   library.recover()
   // Re-check ownership only after acquiring the process-wide boundary:
   // another request may have installed this slug while the network fetch ran.
@@ -234,7 +234,7 @@ pub async fn installed_skills(
 ) -> Array[InstalledSkill] {
   library_lock.acquire()
   defer library_lock.release()
-  let library : SkillLibrary = { root: library_dir }
+  let library : SkillLibrary = { root: library_dir, }
   library.recover()
   let entries = if @fsx.Directory::try_open(library_dir) is Some(dir) {
     dir.collect()
@@ -249,7 +249,7 @@ pub async fn installed_skills(
       guard @fsx.try_read_text(path) is Some(text) else { continue }
       let id = id.to_owned()
       let (name, description) = parse_frontmatter(text, id)
-      skills.push({ id, name, description, source: "" })
+      skills.push({ id, name, description, source: "", })
     } else {
       guard @fsx.try_read_text(path.join("SKILL.md")) is Some(text) else {
         continue
@@ -261,7 +261,7 @@ pub async fn installed_skills(
       } else {
         ""
       }
-      skills.push({ id: entry, name, description, source })
+      skills.push({ id: entry, name, description, source, })
     }
   }
   // Sort like the engine's discovery does: readdir order is platform-defined,
@@ -307,7 +307,7 @@ pub async fn uninstall_skill(
 ) -> Unit {
   library_lock.acquire()
   defer library_lock.release()
-  let library : SkillLibrary = { root: library_dir }
+  let library : SkillLibrary = { root: library_dir, }
   library.recover()
   guard valid_slug(id) else {
     raise SkillMarketError("invalid skill id: \{id}")

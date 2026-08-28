@@ -26,7 +26,7 @@ let moon_config_normal_state : @syntax.TokenizerState = TokenizerState()
 ///|
 /// Creates the MoonBit configuration tokenizer.
 pub fn MoonConfigTokenizer::MoonConfigTokenizer() -> MoonConfigTokenizer {
-  { _unit: () }
+  { _unit: (), }
 }
 
 ///|

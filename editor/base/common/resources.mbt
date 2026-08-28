@@ -27,7 +27,7 @@ struct ExtUri {
 
 ///|
 fn ExtUri::ExtUri(ignore_path_casing : (Uri) -> Bool) -> ExtUri {
-  { ignore_path_casing_fn: ignore_path_casing }
+  { ignore_path_casing_fn: ignore_path_casing, }
 }
 
 ///|

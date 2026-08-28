@@ -144,8 +144,8 @@ pub fn ContextMenuWidget::show(
   let rect = self.container.get_bounding_client_rect()
   let viewport = context_menu_viewport_size(self.container)
   let position = fit_root_context_menu(
-    { x: client_x, y: client_y },
-    { width: rect.get_width(), height: rect.get_height() },
+    { x: client_x, y: client_y, },
+    { width: rect.get_width(), height: rect.get_height(), },
     viewport,
   )
   set_context_menu_position(self.container, position)
@@ -515,7 +515,7 @@ fn ContextMenuWidget::open_submenu(
       right: parent.get_right(),
       bottom: parent.get_bottom(),
     },
-    { width: rect.get_width(), height: rect.get_height() },
+    { width: rect.get_width(), height: rect.get_height(), },
     context_menu_viewport_size(submenu.container),
   )
   set_context_menu_position(submenu.container, position)
@@ -903,7 +903,7 @@ fn build_context_menu_item(entry : ContextMenuEntry) -> ContextMenuItemNode {
     ContextMenuSeparator => ()
   }
   wrapper.append_child(action.as_node())
-  { wrapper, action }
+  { wrapper, action, }
 }
 
 ///|

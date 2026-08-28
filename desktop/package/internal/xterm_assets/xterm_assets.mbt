@@ -292,5 +292,5 @@ pub async fn build(
     dir=workspace.dir(),
   )
   @packaging.copy_file(builder.at("work/xterm/css/xterm.css"), stylesheet)
-  { javascript, stylesheet }
+  { javascript, stylesheet, }
 }

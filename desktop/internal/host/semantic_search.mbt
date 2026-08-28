@@ -73,7 +73,7 @@ priv struct SemanticSearchCancellationFrontiers {
 
 ///|
 fn SemanticSearchCancellationFrontiers::new() -> SemanticSearchCancellationFrontiers {
-  { values: Map([]), order: [] }
+  { values: Map([]), order: [], }
 }
 
 ///|
@@ -122,7 +122,7 @@ priv struct SemanticSearchService {
 
 ///|
 fn SemanticSearchService::new() -> SemanticSearchService {
-  { requests: Queue(kind=Blocking(64)) }
+  { requests: Queue(kind=Blocking(64)), }
 }
 
 ///|
@@ -238,7 +238,7 @@ async fn SemanticSearchService::run(
             }
             self.requests.put(Finished(session_key~, generation~, outcome~))
           })
-          running[session_key] = { generation, root: reply_root, reply, task }
+          running[session_key] = { generation, root: reply_root, reply, task, }
         }
         Cancel(session_key~, generation~, reply~) => {
           cancelled_through.record(session_key, generation)
@@ -747,7 +747,7 @@ async fn run_semantic_search(
       })
     }
     let error : SemanticSearchError? = if exit_code != 0 {
-      Some({ code, message })
+      Some({ code, message, })
     } else {
       None
     }

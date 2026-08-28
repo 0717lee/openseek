@@ -10,7 +10,7 @@ pub(all) struct Id {
 
 ///|
 pub fn Id::Id(source~ : String, channel~ : String, root~ : String) -> Id {
-  { source, channel, root }
+  { source, channel, root, }
 }
 
 ///|
@@ -105,7 +105,7 @@ fn State::update(self : State, input : Input, msg : Msg) -> State {
       // Toggle the fold the user sees: a stored fold currently overridden by
       // an activation reveal must fold on click, not silently flip to open.
       if self.folded(input) {
-        { ..self, fold: Open, menu_open: false }
+        { ..self, fold: Open, menu_open: false, }
       } else {
         // Folding ends the current preview session. Opening the project again
         // starts from the compact five-chat view, even after several Show
@@ -116,9 +116,9 @@ fn State::update(self : State, input : Input, msg : Msg) -> State {
           menu_open: false,
         }
       }
-    ShowMore => { ..self, preview_limit: self.next_preview_limit(input) }
-    ToggleMenu => { ..self, menu_open: !self.menu_open }
-    CloseMenu => { ..self, menu_open: false }
+    ShowMore => { ..self, preview_limit: self.next_preview_limit(input), }
+    ToggleMenu => { ..self, menu_open: !self.menu_open, }
+    CloseMenu => { ..self, menu_open: false, }
   }
 }
 
@@ -245,7 +245,10 @@ pub fn component(
   let (state, emit) = @rabbita.create_state_with_input(
     input~,
     init=(_, _) => {
-      ({ fold: Open, preview_limit: PreviewLimit, menu_open: false }, @cmd.none)
+      (
+        { fold: Open, preview_limit: PreviewLimit, menu_open: false, },
+        @cmd.none,
+      )
     },
     update=(state, input, msg, _) => (state.update(input, msg), @cmd.none),
     subscriptions=(state, input, emit) => {

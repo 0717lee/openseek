@@ -48,7 +48,10 @@ fn cancel_search(
           @interop.bridge_request(
             owner.channel,
             @commands.fs_cancel_search_text,
-            { session_key: payload.session_key, generation: payload.generation },
+            {
+              session_key: payload.session_key,
+              generation: payload.generation,
+            },
           ),
         ) catch {
           _ => ()
@@ -58,7 +61,10 @@ fn cancel_search(
           @interop.bridge_request(
             owner.channel,
             @commands.fs_cancel_search_semantic,
-            { session_key: payload.session_key, generation: payload.generation },
+            {
+              session_key: payload.session_key,
+              generation: payload.generation,
+            },
           ),
         ) catch {
           _ => ()

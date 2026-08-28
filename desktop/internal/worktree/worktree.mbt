@@ -254,7 +254,7 @@ async fn read_worktrees_unlocked(
     // A row cannot be owned by both products. Drop a malformed ambiguous row
     // instead of letting whichever lookup happens first claim its checkout.
     guard session is None || codex_thread is None else { continue }
-    entries.push({ name, branch, base, session, codex_thread })
+    entries.push({ name, branch, base, session, codex_thread, })
   }
   entries
 }
@@ -466,7 +466,7 @@ pub async fn WorktreeOwner::archive_check(
     None
   } else {
     let (dirty_paths, dirty_path_count) = archive_dirty_path_preview(status)
-    Some({ worktree: entry.name, dirty_paths, dirty_path_count })
+    Some({ worktree: entry.name, dirty_paths, dirty_path_count, })
   }
 }
 
@@ -498,7 +498,7 @@ pub async fn WorktreeOwner::archive_checkout(
       ])
       if !status.is_empty() {
         let (dirty_paths, dirty_path_count) = archive_dirty_path_preview(status)
-        return Some({ worktree: entry.name, dirty_paths, dirty_path_count })
+        return Some({ worktree: entry.name, dirty_paths, dirty_path_count, })
       }
     }
     delete_worktree_checkout(workspace, entry.name)
@@ -654,7 +654,7 @@ pub async fn list(workspace : String) -> WorktreesReply {
   }
   worktree_registry_lock.acquire()
   defer worktree_registry_lock.release()
-  { worktrees: worktree_infos(dir, read_worktrees_unlocked(dir)) }
+  { worktrees: worktree_infos(dir, read_worktrees_unlocked(dir)), }
 }
 
 ///|
@@ -797,7 +797,7 @@ pub async fn create(
       // `present: false` view instead of returning success invisibly.
       let infos = worktree_infos(dir, entries)
       @async.protect_from_cancel(() => on_committed(infos))
-      return { name: entry.name, worktrees: infos }
+      return { name: entry.name, worktrees: infos, }
     }
     // The repair: presence is what the clients render, so the restored
     // checkout is a registry commit like any other and broadcasts as one.
@@ -809,7 +809,7 @@ pub async fn create(
     )
     let infos = worktree_infos(dir, entries)
     @async.protect_from_cancel(() => on_committed(infos))
-    return { name: entry.name, worktrees: infos }
+    return { name: entry.name, worktrees: infos, }
   }
   // OpenSeek owns its session store and in-flight engine slots, so it can
   // prove that placement is chosen before any durable history. Codex owns its
@@ -919,7 +919,7 @@ pub async fn create(
     infos = worktree_infos(dir, entries)
     on_committed(infos)
   })
-  { name, worktrees: infos }
+  { name, worktrees: infos, }
 }
 
 ///|
@@ -1164,7 +1164,7 @@ pub async fn remove(
     infos = worktree_infos(dir, remaining)
     on_committed(infos)
   })
-  { worktrees: infos }
+  { worktrees: infos, }
 }
 
 // Tests. The lifecycle tests exercise the real git binary (like the CLI's

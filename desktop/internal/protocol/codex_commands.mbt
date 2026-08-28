@@ -220,7 +220,7 @@ pub impl ToJson for CodexDraftOpenPayload with fn to_json(self) {
 ///|
 pub impl FromJson for CodexDraftClosePayload with fn from_json(json, path) {
   let object = JsonObject::decode(json, path, "Codex draft close payload")
-  { draft_id: object.required_string("draft_id") }
+  { draft_id: object.required_string("draft_id"), }
 }
 
 ///|
@@ -288,7 +288,7 @@ pub impl ToJson for CodexSkillsListPayload with fn to_json(self) {
 ///|
 pub impl FromJson for CodexAccountReadPayload with fn from_json(json, path) {
   let object = JsonObject::decode(json, path, "Codex account read payload")
-  { refresh_token: object.required_bool("refreshToken") }
+  { refresh_token: object.required_bool("refreshToken"), }
 }
 
 ///|
@@ -330,7 +330,7 @@ pub impl FromJson for CodexAccountLoginCancelPayload with fn from_json(
   let object = JsonObject::decode(
     json, path, "Codex account login cancel payload",
   )
-  { login_id: object.required_string("loginId") }
+  { login_id: object.required_string("loginId"), }
 }
 
 ///|
@@ -412,7 +412,7 @@ pub impl ToJson for CodexThreadStartPayload with fn to_json(self) {
 ///|
 pub impl FromJson for CodexThreadPayload with fn from_json(json, path) {
   let object = JsonObject::decode(json, path, "Codex thread payload")
-  { thread_id: object.required_string("threadId") }
+  { thread_id: object.required_string("threadId"), }
 }
 
 ///|
@@ -497,7 +497,7 @@ pub impl ToJson for CodexThreadArchivePayload with fn to_json(self) {
 ///|
 pub impl FromJson for CodexReviewTarget with fn from_json(json, path) {
   let object = JsonObject::decode(json, path, "Codex review target")
-  { kind_: object.required_string("type") }
+  { kind_: object.required_string("type"), }
 }
 
 ///|
@@ -696,7 +696,7 @@ pub impl ToJson for CodexLoginStartReply with fn to_json(self) {
 ///|
 pub impl FromJson for CodexThreadReply with fn from_json(json, path) {
   let object = JsonObject::decode(json, path, "Codex thread reply")
-  { thread: object.required_json("thread") }
+  { thread: object.required_json("thread"), }
 }
 
 ///|
@@ -766,7 +766,7 @@ pub impl FromJson for CodexFileSearchReply with fn from_json(json, path) {
   guard json is Object(_) else {
     raise JsonDecodeError((path, "expected Codex file search reply"))
   }
-  { value: json }
+  { value: json, }
 }
 
 ///|
@@ -786,7 +786,7 @@ pub impl FromJson for CodexArchiveReply with fn from_json(json, path) {
   guard json is Object(_) else {
     raise JsonDecodeError((path, "expected Codex archive reply"))
   }
-  { value: json }
+  { value: json, }
 }
 
 ///|

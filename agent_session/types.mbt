@@ -119,7 +119,7 @@ priv struct SessionToolCall {
 
 ///|
 fn SessionToolCall::from_deepseek(call : @deepseek.ToolCall) -> SessionToolCall {
-  { id: call.id, name: call.name, arguments: call.arguments }
+  { id: call.id, name: call.name, arguments: call.arguments, }
 }
 
 ///|
@@ -136,7 +136,7 @@ pub fn UserMessage::UserMessage(
   content : String,
   submission_id? : String,
 ) -> UserMessage {
-  { content, submission_id }
+  { content, submission_id, }
 }
 
 ///|
@@ -270,7 +270,7 @@ pub fn ToolResult::ToolResult(
   is_error? : Bool = false,
   brief? : String,
 ) -> ToolResult {
-  { tool_call_id, tool_name, content, is_error, brief }
+  { tool_call_id, tool_name, content, is_error, brief, }
 }
 
 ///|
@@ -439,7 +439,7 @@ fn SessionEvent::SessionEvent(
   item~ : SessionItem,
   unix_ms? : Int64 = 0,
 ) -> SessionEvent {
-  { sequence, ts: unix_ms.to_double(), item }
+  { sequence, ts: unix_ms.to_double(), item, }
 }
 
 ///|
@@ -520,7 +520,7 @@ pub fn Session::Session(
   let last_sequence = events.fold(init=0, (last_sequence, event) => {
     last_sequence.max(event.sequence)
   })
-  { id, system_prompt, events, last_sequence }
+  { id, system_prompt, events, last_sequence, }
 }
 
 ///|

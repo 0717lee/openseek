@@ -388,7 +388,7 @@ async fn preview_replace_all(
       notes.push(
         "line \{site.first_line}: \{match_count} matches, but the whole-line entry would be too large to emit (line \{line.length()} chars, combined replacement ≈ \{expanded}) — narrow old_string (with more surrounding context) or edit that line manually",
       )
-      sites[sites.length() - 1] = { ..site, match_count, emit: false }
+      sites[sites.length() - 1] = { ..site, match_count, emit: false, }
       return
     }
     sites[sites.length() - 1] = {
@@ -1160,14 +1160,14 @@ test "edit_reject_report pushes smaller edits and names pre-existing errors" {
   let errors = [
     for index in 0..<5 => {
       (
-        { loc: "\{index + 1}:1", message: "e\{index}", context: "" } :
+        { loc: "\{index + 1}:1", message: "e\{index}", context: "", } :
         @auto_check.ParseGateError)
     }
   ]
   let report = edit_reject_report(
     "lib/a.mbt",
     "a\nb\nc\nd\ne",
-    { errors, truncated: false },
+    { errors, truncated: false, },
     introduced=4,
     before_count=1,
   )
@@ -1179,7 +1179,7 @@ test "edit_reject_report pushes smaller edits and names pre-existing errors" {
   let clipped = edit_reject_report(
     "lib/a.mbt",
     "a",
-    { errors: [{ loc: "1:1", message: "e", context: "" }], truncated: true },
+    { errors: [{ loc: "1:1", message: "e", context: "", }], truncated: true, },
     introduced=1,
     before_count=0,
   )

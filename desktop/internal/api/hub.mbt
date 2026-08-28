@@ -251,7 +251,7 @@ fn Hub::runs(
   for _, approval in self.pending_approvals {
     approvals.push(approval)
   }
-  { runs, settled, approvals }
+  { runs, settled, approvals, }
 }
 
 ///|
@@ -333,7 +333,7 @@ test "a real engine connection retires old active runs before readiness" {
   guard hub.runs().runs is [_] else {
     fail("expected one active run before reconnect")
   }
-  hub.engine_connected({ stage: Serving })
+  hub.engine_connected({ stage: Serving, })
   guard hub.runs().runs is [] else {
     fail("old active run survived a new engine pump")
   }
@@ -395,7 +395,7 @@ test "a normal terminal-backed finish is replayable only to a matching caller" {
       submission_id: Some("sub-normal"),
     },
     // A second matching selector must not duplicate the ledger row.
-    { session: "s-normal", run_id: None, submission_id: Some("sub-normal") },
+    { session: "s-normal", run_id: None, submission_id: Some("sub-normal"), },
   ])
   guard reply.runs is [] && reply.settled is [settlement] else {
     fail("matching reconnect identity did not receive one settlement")
@@ -412,7 +412,7 @@ test "a normal terminal-backed finish is replayable only to a matching caller" {
       run_id: Some("r-normal"),
       submission_id: Some("sub-normal"),
     },
-    { session: "s-normal", run_id: Some("other-run"), submission_id: None },
+    { session: "s-normal", run_id: Some("other-run"), submission_id: None, },
     {
       session: "s-normal",
       run_id: None,
@@ -420,7 +420,7 @@ test "a normal terminal-backed finish is replayable only to a matching caller" {
     },
     // A session alone is not an owner selector and must not expose that
     // session's process-lifetime completion history.
-    { session: "s-normal", run_id: None, submission_id: None },
+    { session: "s-normal", run_id: None, submission_id: None, },
   ])
   guard mismatched.settled is [] else {
     fail("a non-matching reconnect identity received a settlement")
@@ -540,7 +540,7 @@ async test "agent.runs keeps old requests compatible and decodes known selectors
   let legacy : @protocol.RunsReply = @json.from_json(
     runs_endpoint.invoke_remote(Json::empty_object()),
   )
-  guard legacy is { runs: [], settled: [], approvals: [] } else {
+  guard legacy is { runs: [], settled: [], approvals: [], } else {
     fail("legacy agent.runs request changed shape")
   }
   let replay : @protocol.RunsReply = @json.from_json(
@@ -563,7 +563,7 @@ fn approval_event(
   run_id : String?,
   event : @protocol.AgentStreamEvent,
 ) -> @protocol.Notification {
-  AgentEvent({ run_id, session, event })
+  AgentEvent({ run_id, session, event, })
 }
 
 ///|
@@ -645,7 +645,7 @@ test "a question does not outlive the engine that asked it" {
   // with the old one, so replaying it would offer an answer with nowhere to
   // go.
   hub.publish(ask)
-  hub.engine_connected({ stage: Serving })
+  hub.engine_connected({ stage: Serving, })
   guard hub.runs().approvals is [] else {
     fail("a question outlived the engine that asked it")
   }

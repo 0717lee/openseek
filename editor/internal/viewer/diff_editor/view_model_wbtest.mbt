@@ -12,7 +12,7 @@ priv struct DiffViewModelFakeTimer {
 
 ///|
 fn DiffViewModelFakeTimer::new() -> DiffViewModelFakeTimer {
-  { tasks: [] }
+  { tasks: [], }
 }
 
 ///|
@@ -22,7 +22,7 @@ fn DiffViewModelFakeTimer::schedule_timeout(
   delay_ms : Int,
 ) -> @base_common.Disposable {
   let active = Ref(true)
-  self.tasks.push({ delay_ms, callback, active })
+  self.tasks.push({ delay_ms, callback, active, })
   @base_common.Disposable::from(() => active.val = false)
 }
 
@@ -122,7 +122,7 @@ impl @diff.DocumentDiffProvider for FakeDocumentDiffProvider with fn compute_dif
     None => ()
   }
   match self.result.val {
-    Empty => { changes: [], additional_alignments: [] }
+    Empty => { changes: [], additional_alignments: [], }
     OneChange => {
       let original_range = @base_common.LineRange(1, 2)
       let modified_range = @base_common.LineRange(1, 2)
@@ -221,7 +221,7 @@ test "DiffEditorViewModel uses immediate and content debounce scheduler lanes" {
   let updates = Ref(0)
   let update_subscription = view_model.on_did_update_diff(() => updates.val += 1)
 
-  view_model.set_model(Some({ original, modified })) |> ignore
+  view_model.set_model(Some({ original, modified, })) |> ignore
   assert_true(view_model.get_state() == Pending)
   assert_true(timer.active_delays() == [0])
   assert_eq(provider.calls.val, 0)
@@ -265,11 +265,11 @@ test "DiffEditorViewModel treats the same model pair as a complete no-op" {
   let updates = Ref(0)
   let update_subscription = view_model.on_did_update_diff(() => updates.val += 1)
 
-  view_model.set_model(Some({ original, modified })) |> ignore
+  view_model.set_model(Some({ original, modified, })) |> ignore
   timer.fire_next(0)
   let generation = view_model.generation
   let task_count = timer.tasks.length()
-  let returned = view_model.set_model(Some({ original, modified }))
+  let returned = view_model.set_model(Some({ original, modified, }))
 
   assert_true(returned is None)
   assert_eq(view_model.generation, generation)
@@ -295,7 +295,7 @@ test "DiffEditorViewModel replaces provider subscription and recomputes immediat
   let original = diff_view_model_test_model("provider-original", "a")
   let modified = diff_view_model_test_model("provider-modified", "b")
 
-  view_model.set_model(Some({ original, modified })) |> ignore
+  view_model.set_model(Some({ original, modified, })) |> ignore
   timer.fire_next(0)
   assert_eq(first.calls.val, 1)
   assert_true(first.did_change.has_listeners())
@@ -335,7 +335,7 @@ test "DiffEditorViewModel converts provider errors and invalid mappings to Faile
   let original = diff_view_model_test_model("failure-original", "abc\nsecond")
   let modified = diff_view_model_test_model("failure-modified", "xyz\nsecond")
 
-  view_model.set_model(Some({ original, modified })) |> ignore
+  view_model.set_model(Some({ original, modified, })) |> ignore
   timer.fire_next(0)
   assert_true(view_model.get_state() == Failed)
   assert_false(view_model.is_diff_up_to_date())
@@ -424,7 +424,7 @@ test "validator accepts Core inner anchors on empty hunk sides" {
   let fragmented = provider.compute_diff(
     fragmented_original,
     fragmented_modified,
-    { ignore_trim_whitespace: true },
+    { ignore_trim_whitespace: true, },
   )
   assert_eq(fragmented.changes.length(), 20)
   assert_true(
@@ -447,7 +447,7 @@ test "ViewModel accepts pinned newline mapping for a pure deletion" {
     "newline-deletion-modified", "\nkeep",
   )
 
-  view_model.set_model(Some({ original, modified })) |> ignore
+  view_model.set_model(Some({ original, modified, })) |> ignore
   timer.fire_next(0)
 
   assert_true(view_model.get_state() == Ready)
@@ -478,7 +478,7 @@ test "ViewModel accepts pinned newline mapping for a pure insertion" {
     "newline-insertion-modified", "inserted\n\nkeep",
   )
 
-  view_model.set_model(Some({ original, modified })) |> ignore
+  view_model.set_model(Some({ original, modified, })) |> ignore
   timer.fire_next(0)
 
   assert_true(view_model.get_state() == Ready)
@@ -631,7 +631,7 @@ test "DiffEditorViewModel rejects a result made stale by reentrant provider chan
   let modified = diff_view_model_test_model("reentrant-modified", "b")
   provider.before_compute.val = Some(() => provider.signal_change())
 
-  view_model.set_model(Some({ original, modified })) |> ignore
+  view_model.set_model(Some({ original, modified, })) |> ignore
   timer.fire_next(0)
   assert_eq(provider.calls.val, 1)
   assert_true(view_model.get_state() == Pending)
@@ -657,7 +657,7 @@ test "DiffEditorViewModel dispose cancels tasks subscriptions and stale callback
   let original = diff_view_model_test_model("dispose-original", "a")
   let modified = diff_view_model_test_model("dispose-modified", "b")
 
-  view_model.set_model(Some({ original, modified })) |> ignore
+  view_model.set_model(Some({ original, modified, })) |> ignore
   assert_true(timer.active_delays() == [0])
   let stale_callback = timer.tasks[0].callback
   assert_true(provider.did_change.has_listeners())
@@ -692,12 +692,12 @@ test "DiffEditorViewModel returns a fully detached old pair for immediate dispos
   let next_modified = diff_view_model_test_model("new-modified", "new right")
 
   view_model.set_model(
-    Some({ original: first_original, modified: first_modified }),
+    Some({ original: first_original, modified: first_modified, }),
   )
   |> ignore
   timer.fire_next(0)
   let returned = view_model.set_model(
-    Some({ original: next_original, modified: next_modified }),
+    Some({ original: next_original, modified: next_modified, }),
   )
   guard returned is Some(returned) else {
     fail("replacing a model pair must return the detached old pair")
@@ -785,7 +785,7 @@ test "one model will-dispose atomically clears the pair and both pane slots" {
     }
   })
 
-  view_model.set_model(Some({ original, modified })) |> ignore
+  view_model.set_model(Some({ original, modified, })) |> ignore
   guard (original_slot.val, modified_slot.val)
     is (Some(installed_original), Some(installed_modified)) else {
     fail("both pane slots must receive the installed pair")
@@ -839,7 +839,7 @@ test "modified model will-dispose invalidates the whole pair too" {
   let original = diff_view_model_test_model("live-original", "left")
   let modified = diff_view_model_test_model("disposed-modified", "right")
 
-  view_model.set_model(Some({ original, modified })) |> ignore
+  view_model.set_model(Some({ original, modified, })) |> ignore
   timer.fire_next(0)
   modified.dispose()
 
@@ -874,12 +874,12 @@ test "replacement owns the only detached-pair return and old disposal is inert" 
   })
 
   view_model.set_model(
-    Some({ original: first_original, modified: first_modified }),
+    Some({ original: first_original, modified: first_modified, }),
   )
   |> ignore
   let stale_first_compute = timer.tasks.last().unwrap().callback
   let returned = view_model.set_model(
-    Some({ original: next_original, modified: next_modified }),
+    Some({ original: next_original, modified: next_modified, }),
   )
   guard returned is Some(returned) else {
     fail("replacement must return exactly the fully detached old pair")

@@ -120,7 +120,7 @@ priv struct ApprovalDesk {
 async fn ApprovalDesk::new(now_ms~ : Int64) -> ApprovalDesk {
   let salt = random_salt()
   let nonce = if salt == "" { "\{now_ms}" } else { salt }
-  { pending: {}, next_id: 0, closed: false, nonce }
+  { pending: {}, next_id: 0, closed: false, nonce, }
 }
 
 ///|
@@ -352,7 +352,7 @@ async test "a decision for a settled question is discarded" {
   let desk = ApprovalDesk::new(now_ms=0)
   @async.with_task_group(group => {
     let asking = group.spawn(() => {
-      desk.ask({ tool_name: "mbtx", detail: "escalate", body: None })
+      desk.ask({ tool_name: "mbtx", detail: "escalate", body: None, })
     })
     for _ in 0..<200 {
       if desk.pending.length() > 0 {
@@ -424,7 +424,7 @@ async test "closing the command stream withdraws a standing question" {
   let desk = ApprovalDesk::new(now_ms=0)
   @async.with_task_group(group => {
     let asking = group.spawn(() => {
-      desk.ask({ tool_name: "mbtx", detail: "escalate", body: None })
+      desk.ask({ tool_name: "mbtx", detail: "escalate", body: None, })
     })
     for _ in 0..<200 {
       if desk.pending.length() > 0 {
@@ -447,7 +447,11 @@ async test "a question asked after the stream closed does not wait" {
   let desk = ApprovalDesk::new(now_ms=0)
   desk.withdraw_all()
   @async.with_task_group(_ => {
-    let outcome = desk.ask({ tool_name: "mbtx", detail: "escalate", body: None })
+    let outcome = desk.ask({
+      tool_name: "mbtx",
+      detail: "escalate",
+      body: None,
+    })
     assert_true(outcome is Cancelled)
   })
   assert_eq(desk.pending.length(), 0)

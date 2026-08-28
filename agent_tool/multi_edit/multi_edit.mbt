@@ -294,7 +294,7 @@ async fn multi_edit_files(
       }
     }
     collect_overlap_failures(group.file, plans, failures)
-    prepared.push({ file: group.file, path: group.path, content, plans })
+    prepared.push({ file: group.file, path: group.path, content, plans, })
   }
   if failures.length() > 0 {
     return @agent_tool.ToolAction::respond(
@@ -810,7 +810,7 @@ fn group_contiguous(edits : Array[ResolvedEdit]) -> Array[FileGroup] {
     if count > 0 && groups[count - 1].path == edit.path {
       groups[count - 1].items.push(edit)
     } else {
-      groups.push({ file: edit.file, path: edit.path, items: [edit] })
+      groups.push({ file: edit.file, path: edit.path, items: [edit], })
     }
   }
   groups
@@ -1007,7 +1007,7 @@ fn select_edit_region(
   }
   let start = start.clamp(min=0, max=content.length())
   let end = end.clamp(min=start, max=content.length())
-  { body: content.unsafe_substring(start~, end~), start_offset: start }
+  { body: content.unsafe_substring(start~, end~), start_offset: start, }
 }
 
 ///|
@@ -1052,7 +1052,7 @@ fn line_range_label(start_line : Int, end_line : Int?) -> String {
 
 ///|
 fn sample_write(path : String, edits : Int) -> PreparedWrite {
-  { path, new_content: "new", original_content: "old", edit_count: edits }
+  { path, new_content: "new", original_content: "old", edit_count: edits, }
 }
 
 ///|

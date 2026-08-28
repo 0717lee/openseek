@@ -35,7 +35,7 @@ async fn run_review_cli(
         "api-url": [api_url, ..],
         ..
       },
-      ..,
+      ..
     } =>
       (
         @deepseek.ThinkingMode::parse(thinking),

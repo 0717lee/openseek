@@ -25,7 +25,7 @@ fn NdjsonTransport::new(
   writer : &@io.Writer,
   on_close~ : () -> Unit,
 ) -> NdjsonTransport {
-  { reader, writer, on_close }
+  { reader, writer, on_close, }
 }
 
 ///|

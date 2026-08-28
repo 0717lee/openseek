@@ -18,7 +18,7 @@ fn new_moon_workspace_language_provider(
   root : Ref[String],
   moon_command? : String = "moon",
 ) -> MoonWorkspaceLanguageProvider {
-  { root, moon_command }
+  { root, moon_command, }
 }
 
 ///|
@@ -120,7 +120,7 @@ fn parse_moon_hover_output_impl(
         position.column + 1,
       )
   }
-  Some({ range, contents })
+  Some({ range, contents, })
 }
 
 ///|
@@ -143,7 +143,7 @@ fn parse_moon_definition_output_impl(
           definition_uri_under_root(root, path),
           parse_moon_definition_range(raw_range),
         ) {
-        (Some(uri), Some(range)) => locations.push({ uri, range })
+        (Some(uri), Some(range)) => locations.push({ uri, range, })
         _ => ()
       }
     }

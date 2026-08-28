@@ -42,7 +42,7 @@ priv struct ManualDefinitionTasks {
 
 ///|
 fn ManualDefinitionTasks::ManualDefinitionTasks() -> ManualDefinitionTasks {
-  { tasks: [] }
+  { tasks: [], }
 }
 
 ///|
@@ -177,8 +177,8 @@ async test "headless multiple definitions retain provider-first fallback" {
   })
   let services = definition_navigation_services(
     [
-      { uri: provider_first, range: Range(8, 2, 8, 6) },
-      { uri: model.uri, range: Range(1, 14, 1, 20) },
+      { uri: provider_first, range: Range(8, 2, 8, 6), },
+      { uri: model.uri, range: Range(1, 14, 1, 20), },
     ],
     opener~,
   )
@@ -201,7 +201,7 @@ async test "headless multiple definitions retain provider-first fallback" {
 async test "F12 sends a cross-resource request and preserves rejection feedback" {
   let model = definition_navigation_test_model("file:///source.mbt")
   let target = try! @base_common.Uri::parse("file:///target.mbt")
-  let location : @language.Location = { uri: target, range: Range(4, 2, 4, 8) }
+  let location : @language.Location = { uri: target, range: Range(4, 2, 4, 8), }
   let requests : Array[@navigation_api.OpenLocationRequest] = []
   let opener = @navigation_api.LocationOpenerHandle(open=request => {
     requests.push(request)
@@ -236,7 +236,7 @@ async test "F12 sends a cross-resource request and preserves rejection feedback"
 async test "a superseded definition opener failure cannot overwrite a newer navigation" {
   let model = definition_navigation_test_model("file:///source.mbt")
   let target = try! @base_common.Uri::parse("file:///target.mbt")
-  let location : @language.Location = { uri: target, range: Range(4, 2, 4, 8) }
+  let location : @language.Location = { uri: target, range: Range(4, 2, 4, 8), }
   let calls = Ref(0)
   let first_started = @async.Semaphore(1, initial_value=0)
   let release_first = @async.Semaphore(1, initial_value=0)
@@ -287,7 +287,7 @@ async test "a superseded definition opener failure cannot overwrite a newer navi
 async test "cursor movement suppresses late definition opener failure" {
   let model = definition_navigation_test_model("file:///source.mbt")
   let target = try! @base_common.Uri::parse("file:///target.mbt")
-  let location : @language.Location = { uri: target, range: Range(4, 2, 4, 8) }
+  let location : @language.Location = { uri: target, range: Range(4, 2, 4, 8), }
   let started = @async.Semaphore(1, initial_value=0)
   let release = @async.Semaphore(1, initial_value=0)
   let opener = @navigation_api.LocationOpenerHandle(open=_request => {
@@ -323,7 +323,7 @@ async test "cursor movement suppresses late definition opener failure" {
 async test "empty and stale definition actions cannot navigate" {
   let model = definition_navigation_test_model("file:///source.mbt")
   let target = try! @base_common.Uri::parse("file:///target.mbt")
-  let location : @language.Location = { uri: target, range: Range(1, 1, 1, 2) }
+  let location : @language.Location = { uri: target, range: Range(1, 1, 1, 2), }
   let opener_calls = Ref(0)
   let opener = @navigation_api.LocationOpenerHandle(open=_request => {
     opener_calls.val += 1
@@ -521,8 +521,8 @@ async test "definition-link caches by word and executes a fresh Definition actio
   let languages = @languages.Languages()
   languages.register_definition_provider(LanguageId("moonbit"), SequencedDefinitionProvider::{
     responses: [
-      [{ uri: preview_uri, range: Range(2, 1, 2, 4) }],
-      [{ uri: action_uri, range: Range(7, 3, 7, 9) }],
+      [{ uri: preview_uri, range: Range(2, 1, 2, 4), }],
+      [{ uri: action_uri, range: Range(7, 3, 7, 9), }],
     ],
     calls,
   })
@@ -779,7 +779,7 @@ async test "plain definition click cancels the previous pointer-anchored action"
     true
   })
   let services = definition_navigation_services(
-    [{ uri: target_uri, range: Range(3, 2, 3, 6) }],
+    [{ uri: target_uri, range: Range(3, 2, 3, 6), }],
     opener~,
   )
   let viewer = CodeEditorWidget(services~)

@@ -267,7 +267,7 @@ fn controlled_diagnostics(
   new_moon_check_diagnostics(
     Ref(root),
     (uri, revision, diagnostics) => {
-      events.push({ uri: uri.to_string(), revision, diagnostics })
+      events.push({ uri: uri.to_string(), revision, diagnostics, })
     },
     () => control.collect(),
   )

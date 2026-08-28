@@ -15,7 +15,7 @@ fn other_device() -> @interop.ChannelId {
 
 ///|
 fn input(installed? : Array[@skills.InstalledItem] = []) -> @skills.Input {
-  { channel: @interop.ChannelId::Local, installed }
+  { channel: @interop.ChannelId::Local, installed, }
 }
 
 ///|
@@ -95,7 +95,7 @@ test "opening caches the catalog until failure or a manual refresh" {
 ///|
 test "catalog completions cannot cross a device focus switch" {
   let (_, local_loading) = @skills.State::empty().opening(emit(), input())
-  let remote_input : @skills.Input = { channel: other_device(), installed: [] }
+  let remote_input : @skills.Input = { channel: other_device(), installed: [], }
   // Before the page is reopened, the old device's loading state does not
   // disable the new device's Refresh action.
   assert_true(markup(local_loading, remote_input).contains(">Refresh</button>"))
@@ -133,7 +133,7 @@ test "catalog completions cannot cross a device focus switch" {
 ///|
 test "the search query filters both lists" {
   let installed : Array[@skills.InstalledItem] = [
-    { id: "gadget", name: "gadget", description: "", source: "" },
+    { id: "gadget", name: "gadget", description: "", source: "", },
   ]
   let (_, ready, _) = @skills.State::empty().handle(
     emit(),
@@ -344,7 +344,7 @@ test "the library decides which catalog rows still offer an install" {
 ///|
 test "hand-written skills are listed but never offered for removal" {
   let installed : Array[@skills.InstalledItem] = [
-    { id: "handmade", name: "handmade", description: "", source: "" },
+    { id: "handmade", name: "handmade", description: "", source: "", },
   ]
   let listed = markup(@skills.State::empty(), input(installed~))
   assert_true(listed.contains("hand-written"))
@@ -437,8 +437,8 @@ test "installed skill replies decode, with name falling back to id" {
         description: "Build widgets fast.",
         source: "acme/widget@1.0.0",
       },
-      { id: "handmade", name: "", description: "", source: "" },
-      { id: "", name: "no-id", description: "", source: "" },
+      { id: "handmade", name: "", description: "", source: "", },
+      { id: "", name: "no-id", description: "", source: "", },
     ],
   })
   guard items is [widget, handmade] else {

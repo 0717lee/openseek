@@ -116,7 +116,7 @@ fn searching_loader(
         let reply : @protocol.WorkspaceSymbolsReply = @interop.bridge_request(
           owner.channel,
           @commands.lsp_workspace_symbols,
-          { session: owner.session, root: root.path, query },
+          { session: owner.session, root: root.path, query, },
         ) catch {
           _ => {
             if active {
@@ -164,7 +164,7 @@ pub fn search(
       let reply : @protocol.WorkspaceSymbolsReply = @interop.bridge_request(
         owner.channel,
         @commands.lsp_workspace_symbols,
-        { session: owner.session, root: root.path, query },
+        { session: owner.session, root: root.path, query, },
       ) catch {
         _ => {
           scheduler.add(failed)

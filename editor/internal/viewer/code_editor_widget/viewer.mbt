@@ -309,7 +309,7 @@ priv struct EditorIdCounter {
 }
 
 ///|
-let editor_id_counter : EditorIdCounter = { value: 0 }
+let editor_id_counter : EditorIdCounter = { value: 0, }
 
 ///|
 fn next_editor_id() -> Int {
@@ -644,7 +644,7 @@ pub fn CodeEditorWidget::set_model(
       Mounted(mounted) => mounted.set_editor_focus(false) |> ignore
     }
   }
-  self.did_change_model.fire({ old_model_url, new_model_url })
+  self.did_change_model.fire({ old_model_url, new_model_url, })
   // `_postDetachModelCleanup` (`cew:2008-2010`): sweep this editor's
   // decorations off the outgoing model by owner id.
   match detached_model {
@@ -838,7 +838,7 @@ pub fn CodeEditorWidget::save_view_state(
   self : CodeEditorWidget,
 ) -> CodeEditorViewState? {
   guard self.active_scroll_position() is Some(position) else { return None }
-  Some({ scroll_top: position.scroll_top, scroll_left: position.scroll_left })
+  Some({ scroll_top: position.scroll_top, scroll_left: position.scroll_left, })
 }
 
 ///|

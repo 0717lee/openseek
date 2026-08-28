@@ -54,7 +54,7 @@ pub fn classify_header(json : Json) -> HeaderParse {
       "id": String(id),
       "system_prompt": String(system_prompt),
       ..
-    } => Header({ id, system_prompt })
+    } => Header({ id, system_prompt, })
     _ => NotHeader
   }
 }

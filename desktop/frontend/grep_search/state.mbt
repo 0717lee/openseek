@@ -118,7 +118,7 @@ fn State::schedule(
       },
     }
   }
-  { page, generation }
+  { page, generation, }
 }
 
 ///|
@@ -129,7 +129,7 @@ pub fn State::park(self : State) -> State {
   let page = self.page
   guard page.phase is Debouncing || page.phase is Loading else { return self }
   let generation = self.generation + 1
-  { generation, page: { ..page, phase: Idle, generation } }
+  { generation, page: { ..page, phase: Idle, generation, }, }
 }
 
 ///|
@@ -156,20 +156,20 @@ pub fn State::handle(self : State, msg : Msg, input : Input) -> State {
       )
     ToggleCaseSensitive =>
       self.schedule(
-        { ..page, case_sensitive: !page.case_sensitive },
+        { ..page, case_sensitive: !page.case_sensitive, },
         input,
         immediate=false,
       )
     ToggleWholeWord =>
       self.schedule(
-        { ..page, whole_word: !page.whole_word },
+        { ..page, whole_word: !page.whole_word, },
         input,
         immediate=false,
       )
     ToggleRegex =>
-      self.schedule({ ..page, regex: !page.regex }, input, immediate=false)
+      self.schedule({ ..page, regex: !page.regex, }, input, immediate=false)
     ToggleDetails =>
-      { ..self, page: { ..page, details_open: !page.details_open } }
+      { ..self, page: { ..page, details_open: !page.details_open, }, }
     IncludeChanged(include_glob) =>
       self.schedule({ ..page, include_glob, }, input, immediate=false)
     ExcludeChanged(exclude_glob) =>
@@ -181,7 +181,7 @@ pub fn State::handle(self : State, msg : Msg, input : Input) -> State {
       }
       self.schedule({ ..page, patterns, }, input, immediate=false)
     }
-    AddPattern => { ..self, page: { ..page, patterns: page.patterns + [""] } }
+    AddPattern => { ..self, page: { ..page, patterns: page.patterns + [""], }, }
     RemovePattern(index) => {
       let patterns = page.patterns.copy()
       if index < patterns.length() && patterns.length() > 1 {
@@ -217,7 +217,7 @@ pub fn State::handle(self : State, msg : Msg, input : Input) -> State {
       for path in active {
         collapsed[path] = true
       }
-      { ..self, page: { ..page, collapsed, } }
+      { ..self, page: { ..page, collapsed, }, }
     }
     ShowMore =>
       {
@@ -236,14 +236,14 @@ pub fn State::handle(self : State, msg : Msg, input : Input) -> State {
       } else {
         collapsed[path] = true
       }
-      { ..self, page: { ..page, collapsed, } }
+      { ..self, page: { ..page, collapsed, }, }
     }
     RequestStarted(owner~, root~, generation~) =>
       if input.owner == owner &&
         input.root_text() == root &&
         page.generation == generation &&
         page.phase is Debouncing {
-        { ..self, page: { ..page, phase: Loading } }
+        { ..self, page: { ..page, phase: Loading, }, }
       } else {
         self
       }
@@ -257,7 +257,7 @@ pub fn State::handle(self : State, msg : Msg, input : Input) -> State {
         return self
       }
       if reply.cancelled {
-        return { ..self, page: { ..page, phase: Idle } }
+        return { ..self, page: { ..page, phase: Idle, }, }
       }
       let phase = match reply.error {
         None => Ready
@@ -468,7 +468,7 @@ fn Page::semantic_request_payload(
 ///|
 test "checkout reset clears results while preserving the generation fence" {
   let input : Input = {
-    owner: { channel: @interop.ChannelId::Local, session: "first" },
+    owner: { channel: @interop.ChannelId::Local, session: "first", },
     root: Some(@common.Uri::parse("file:///work/a")),
   }
   let state = State::empty().handle(QueryChanged("moon"), input)
@@ -483,7 +483,7 @@ test "checkout reset clears results while preserving the generation fence" {
 ///|
 test "mode changes preserve each search input and shared details" {
   let input : Input = {
-    owner: { channel: @interop.ChannelId::Local, session: "mode-state" },
+    owner: { channel: @interop.ChannelId::Local, session: "mode-state", },
     root: Some(@common.Uri::parse("file:///work")),
   }
   let state = State::empty()
@@ -509,7 +509,7 @@ test "query changes debounce and stale replies cannot replace the page" {
     session: "one",
   }
   let root = @common.Uri::parse("file:///work")
-  let input : Input = { owner, root: Some(root) }
+  let input : Input = { owner, root: Some(root), }
   let state = State::empty().handle(QueryChanged("moon"), input)
   let page = state.page
   assert_true(page.phase is Debouncing)
@@ -538,7 +538,7 @@ test "semantic progress streams partial hits and late progress is fenced" {
     session: "semantic-progress",
   }
   let root = @common.Uri::parse("file:///work")
-  let input : Input = { owner, root: Some(root) }
+  let input : Input = { owner, root: Some(root), }
   let state = State::empty()
     .handle(ModeChanged(Semantic), input)
     .handle(PatternChanged(0, "inspect($(x:arg))"), input)
@@ -555,7 +555,7 @@ test "semantic progress streams partial hits and late progress is fenced" {
     end_line: 1,
     end_column: 5,
     matched_source: "inspect(x)",
-    source_context: [{ line: 1, text: "inspect(x)", is_match: true }],
+    source_context: [{ line: 1, text: "inspect(x)", is_match: true, }],
   }
   let streamed = state.handle(
     SemanticProgress(
@@ -593,7 +593,7 @@ test "semantic progress batches append only new hits" {
     session: "semantic-batches",
   }
   let root = @common.Uri::parse("file:///work")
-  let input : Input = { owner, root: Some(root) }
+  let input : Input = { owner, root: Some(root), }
   let state = State::empty()
     .handle(ModeChanged(Semantic), input)
     .handle(PatternChanged(0, "inspect($(x:arg))"), input)
@@ -608,9 +608,9 @@ test "semantic progress batches append only new hits" {
     end_line: 1,
     end_column: 5,
     matched_source: "inspect(x)",
-    source_context: [{ line: 1, text: "inspect(x)", is_match: true }],
+    source_context: [{ line: 1, text: "inspect(x)", is_match: true, }],
   }
-  let second = { ..hit, start_line: 2, end_line: 2 }
+  let second = { ..hit, start_line: 2, end_line: 2, }
   let session_key = input.semantic_session_key()
   let first = state.handle(
     SemanticProgress(
@@ -644,7 +644,7 @@ test "new semantic search clears partial results and cancellation clears them" {
     session: "semantic-clear",
   }
   let root = @common.Uri::parse("file:///work")
-  let input : Input = { owner, root: Some(root) }
+  let input : Input = { owner, root: Some(root), }
   let state = State::empty()
     .handle(ModeChanged(Semantic), input)
     .handle(PatternChanged(0, "inspect($(x:arg))"), input)
@@ -659,7 +659,7 @@ test "new semantic search clears partial results and cancellation clears them" {
     end_line: 1,
     end_column: 5,
     matched_source: "inspect(x)",
-    source_context: [{ line: 1, text: "inspect(x)", is_match: true }],
+    source_context: [{ line: 1, text: "inspect(x)", is_match: true, }],
   }
   let session_key = input.semantic_session_key()
   let streamed = state.handle(
@@ -701,7 +701,7 @@ test "parking a checkout keeps its draft and fences the in-flight reply" {
     session: "suspend",
   }
   let root = @common.Uri::parse("file:///work")
-  let input : Input = { owner, root: Some(root) }
+  let input : Input = { owner, root: Some(root), }
   let running = State::empty()
     .handle(QueryChanged("moon"), input)
     .handle(Submit, input)
@@ -737,7 +737,7 @@ test "refresh is immediate and loaded file groups can collapse and clear" {
     session: "one",
   }
   let root = @common.Uri::parse("file:///work")
-  let input : Input = { owner, root: Some(root) }
+  let input : Input = { owner, root: Some(root), }
   let state = State::empty()
     .handle(QueryChanged("moon"), input)
     .handle(Refresh, input)
@@ -750,8 +750,8 @@ test "refresh is immediate and loaded file groups can collapse and clear" {
     preview: "moon moon",
     preview_start_column: 1,
     ranges: [
-      { start_column: 1, end_column: 5 },
-      { start_column: 6, end_column: 10 },
+      { start_column: 1, end_column: 5, },
+      { start_column: 6, end_column: 10, },
     ],
   }
   let reply : @protocol.SearchTextReply = {
@@ -791,7 +791,7 @@ test "editor highlights include every retained match for the file" {
     session: "editor-highlights",
   }
   let root = @common.Uri::parse("file:///work")
-  let input : Input = { owner, root: Some(root) }
+  let input : Input = { owner, root: Some(root), }
   let state = State::empty()
     .handle(QueryChanged("moon"), input)
     .handle(Submit, input)
@@ -806,8 +806,8 @@ test "editor highlights include every retained match for the file" {
         preview: "moon moon",
         preview_start_column: 1,
         ranges: [
-          { start_column: 1, end_column: 5 },
-          { start_column: 6, end_column: 10 },
+          { start_column: 1, end_column: 5, },
+          { start_column: 6, end_column: 10, },
         ],
       },
       {
@@ -815,14 +815,14 @@ test "editor highlights include every retained match for the file" {
         line_number: 7,
         preview: "moon",
         preview_start_column: 1,
-        ranges: [{ start_column: 1, end_column: 5 }],
+        ranges: [{ start_column: 1, end_column: 5, }],
       },
       {
         path: "src/other.mbt",
         line_number: 1,
         preview: "moon",
         preview_start_column: 1,
-        ranges: [{ start_column: 1, end_column: 5 }],
+        ranges: [{ start_column: 1, end_column: 5, }],
       },
     ],
     match_count: 4,
@@ -859,7 +859,7 @@ test "invalid regex replies retain their actionable Host error" {
     session: "regex",
   }
   let root = @common.Uri::parse("file:///work")
-  let input : Input = { owner, root: Some(root) }
+  let input : Input = { owner, root: Some(root), }
   let state = State::empty()
     .handle(QueryChanged("("), input)
     .handle(ToggleRegex, input)
@@ -873,7 +873,7 @@ test "invalid regex replies retain their actionable Host error" {
     file_count: 0,
     limit_hit: false,
     cancelled: false,
-    error: Some({ code: "invalid_regex", message: "regex parse error" }),
+    error: Some({ code: "invalid_regex", message: "regex parse error", }),
   }
   let failed = state.handle(
     Loaded(owner~, root=root.path, generation=page.generation, reply~),

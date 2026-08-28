@@ -84,7 +84,7 @@ pub struct ViewZonesChangedEvent {
 ///|
 /// Creates one source-shaped ViewZones change event.
 pub fn ViewZonesChangedEvent::ViewZonesChangedEvent() -> ViewZonesChangedEvent {
-  { kind: ViewZonesChanged }
+  { kind: ViewZonesChanged, }
 }
 
 ///|
@@ -104,7 +104,7 @@ pub struct HiddenAreasChangedOutgoingEvent {
 ///|
 /// Creates one source-shaped hidden-area change event.
 pub fn HiddenAreasChangedOutgoingEvent::HiddenAreasChangedOutgoingEvent() -> HiddenAreasChangedOutgoingEvent {
-  { kind: HiddenAreasChanged }
+  { kind: HiddenAreasChanged, }
 }
 
 ///|
@@ -130,7 +130,7 @@ pub struct ModelTokensChangedOutgoingEvent {
 pub fn ModelTokensChangedOutgoingEvent::ModelTokensChangedOutgoingEvent(
   event : @model.ModelTokensChangedEvent,
 ) -> ModelTokensChangedOutgoingEvent {
-  { kind: ModelTokensChanged, event }
+  { kind: ModelTokensChanged, event, }
 }
 
 ///|
@@ -319,7 +319,7 @@ fn CursorEventDispatcher::on_outgoing_event(
     self.listeners_are_array = true
   }
   let active = Ref(true)
-  self.event_listeners.push({ listener, active })
+  self.event_listeners.push({ listener, active, })
   self.listener_count += 1
   @base_common.Disposable::from(() => {
     if active.val {

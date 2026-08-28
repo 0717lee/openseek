@@ -86,7 +86,7 @@ pub fn EventModifiers::EventModifiers(
   meta : Bool,
   alt : Bool,
 ) -> EventModifiers {
-  { ctrl, meta, alt }
+  { ctrl, meta, alt, }
 }
 
 ///|

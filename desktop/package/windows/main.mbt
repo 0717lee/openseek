@@ -34,7 +34,7 @@ priv struct ArtifactPlan {
 ///|
 fn ArtifactPlan::parse(values : ArrayView[String]) -> ArtifactPlan raise {
   if values.is_empty() {
-    return { zip: true, installer: true }
+    return { zip: true, installer: true, }
   }
   let mut zip = false
   let mut installer = false
@@ -49,7 +49,7 @@ fn ArtifactPlan::parse(values : ArrayView[String]) -> ArtifactPlan raise {
         )
     }
   }
-  { zip, installer }
+  { zip, installer, }
 }
 
 ///|
@@ -318,7 +318,7 @@ async fn main {
 test "windows package args default to zip and installer" {
   let matches = package_command().parse(argv=[])
   let artifacts = ArtifactPlan::from_matches(matches)
-  assert_eq(artifacts, { zip: true, installer: true })
+  assert_eq(artifacts, { zip: true, installer: true, })
   assert_false(matches.flags.get("release").unwrap_or(false))
 }
 
@@ -326,7 +326,7 @@ test "windows package args default to zip and installer" {
 test "windows package args accept release" {
   let matches = package_command().parse(argv=["--release", "--target", "app"])
   let artifacts = ArtifactPlan::from_matches(matches)
-  assert_eq(artifacts, { zip: false, installer: false })
+  assert_eq(artifacts, { zip: false, installer: false, })
   assert_true(matches.flags.get("release").unwrap_or(false))
 }
 
@@ -342,13 +342,19 @@ test "windows package target app skips distribution archives" {
 ///|
 test "windows package target zip skips installer" {
   let matches = package_command().parse(argv=["--target", "zip"])
-  assert_eq(ArtifactPlan::from_matches(matches), { zip: true, installer: false })
+  assert_eq(ArtifactPlan::from_matches(matches), {
+    zip: true,
+    installer: false,
+  })
 }
 
 ///|
 test "windows package target installer skips zip" {
   let matches = package_command().parse(argv=["--target", "installer"])
-  assert_eq(ArtifactPlan::from_matches(matches), { zip: false, installer: true })
+  assert_eq(ArtifactPlan::from_matches(matches), {
+    zip: false,
+    installer: true,
+  })
 }
 
 ///|
@@ -356,7 +362,7 @@ test "windows package targets can be repeated" {
   let matches = package_command().parse(argv=[
     "--target", "app", "--target", "zip", "--target", "installer",
   ])
-  assert_eq(ArtifactPlan::from_matches(matches), { zip: true, installer: true })
+  assert_eq(ArtifactPlan::from_matches(matches), { zip: true, installer: true, })
 }
 
 ///|

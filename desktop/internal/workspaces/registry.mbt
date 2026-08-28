@@ -75,7 +75,7 @@ priv struct Registry {
 /// on read, so a registry written before symlink resolution (or edited by
 /// hand) collapses aliases of one physical directory into its first spelling.
 async fn read_registry_unlocked() -> Registry {
-  let uninitialized : Registry = { workspaces: [], initialized: false }
+  let uninitialized : Registry = { workspaces: [], initialized: false, }
   guard workspaces_file() is Some(file) else { return uninitialized }
   let text = @fsx.try_read_text(file.to_path()) catch {
     error if @async.is_being_cancelled() => raise error
@@ -89,7 +89,7 @@ async fn read_registry_unlocked() -> Registry {
   // has never been offered one.
   let initialized = fields.get("initialized") is Some(True)
   guard fields.get("workspaces") is Some(Array(items)) else {
-    return { workspaces: [], initialized }
+    return { workspaces: [], initialized, }
   }
   let paths : Array[@pathx.Absolute] = []
   for item in items {
@@ -102,7 +102,7 @@ async fn read_registry_unlocked() -> Registry {
       paths.push(canonical)
     }
   }
-  { workspaces: paths, initialized }
+  { workspaces: paths, initialized, }
 }
 
 ///|
@@ -201,7 +201,7 @@ pub async fn initialize() -> @pathx.Absolute? {
   // leaves the registry uninitialized, so the next launch simply repeats the
   // whole idempotent step.
   @async.protect_from_cancel(() => {
-    write_registry({ workspaces: paths, initialized: true })
+    write_registry({ workspaces: paths, initialized: true, })
   })
   Some(canonical)
 }
@@ -251,7 +251,7 @@ pub async fn add(
   @async.protect_from_cancel(() => {
     if !paths.contains(canonical) {
       paths.push(canonical)
-      write_registry({ ..registry, workspaces: paths })
+      write_registry({ ..registry, workspaces: paths, })
     }
     on_committed(paths)
   })
@@ -275,7 +275,7 @@ pub async fn remove(
     // `initialized` is rewritten untouched: detaching the default workspace
     // is a decision, not a reset, so the next launch must not attach it
     // again.
-    write_registry({ ..registry, workspaces: paths })
+    write_registry({ ..registry, workspaces: paths, })
     on_committed(paths)
   })
   paths

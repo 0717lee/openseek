@@ -152,7 +152,7 @@ fn update_console_msg(
     MeFailed(message) =>
       (
         @cmd.none,
-        { ..model, console: Some({ ..console, notice: Some(message) }) },
+        { ..model, console: Some({ ..console, notice: Some(message), }), },
       )
     RosterLoaded(metas, generation~) => {
       // A reply that outlived the session, or was overtaken by a later roster
@@ -172,7 +172,7 @@ fn update_console_msg(
         @cmd.none,
         {
           ..model,
-          console: Some({ ..console, roster_sync: RosterFailed(message) }),
+          console: Some({ ..console, roster_sync: RosterFailed(message), }),
         },
       )
     }
@@ -181,14 +181,14 @@ fn update_console_msg(
         fetch_console_me(dispatch),
         {
           ..model,
-          console: Some({ ..console, roster_sync: RosterLoading, notice: None }),
+          console: Some({ ..console, roster_sync: RosterLoading, notice: None, }),
         },
       )
     SignOutClicked => {
       guard !console.busy else { return (@cmd.none, model) }
       (
         sign_out(dispatch),
-        { ..model, console: Some({ ..console, busy: true, notice: None }) },
+        { ..model, console: Some({ ..console, busy: true, notice: None, }), },
       )
     }
     SignOutFailed(message) =>
@@ -196,7 +196,7 @@ fn update_console_msg(
         @cmd.none,
         {
           ..model,
-          console: Some({ ..console, busy: false, notice: Some(message) }),
+          console: Some({ ..console, busy: false, notice: Some(message), }),
         },
       )
     SignOutDone => console_signed_out(model, console)
@@ -272,7 +272,7 @@ fn apply_roster(
     @resource.belongs_to(workspace, focused) {
     for index in 0..<devices.length() {
       if devices[index].channel == focused {
-        devices[index] = { ..devices[index], active_project: Some(workspace) }
+        devices[index] = { ..devices[index], active_project: Some(workspace), }
         break
       }
     }
@@ -330,8 +330,8 @@ fn console_test_model() -> Model {
 ///|
 fn console_test_roster() -> Array[DeviceMeta] {
   [
-    { id: "d_on", name: "Mac", hostname: Some("mac.local"), online: true },
-    { id: "d_off", name: "PC", hostname: None, online: false },
+    { id: "d_on", name: "Mac", hostname: Some("mac.local"), online: true, },
+    { id: "d_off", name: "PC", hostname: None, online: false, },
   ]
 }
 
@@ -439,8 +439,8 @@ test "the page device is the only connection and receives the initial workspace"
     model,
   )
   let metas : Array[DeviceMeta] = [
-    { id: "d_one", name: "One", hostname: None, online: true },
-    { id: "d_two", name: "Two", hostname: None, online: true },
+    { id: "d_one", name: "One", hostname: None, online: true, },
+    { id: "d_two", name: "Two", hostname: None, online: true, },
   ]
   let (_, listed) = update(
     dispatch,
@@ -475,7 +475,7 @@ test "an unavailable page device never falls through to an online device" {
     model,
   )
   let metas : Array[DeviceMeta] = [
-    { id: "online", name: "Online", hostname: None, online: true },
+    { id: "online", name: "Online", hostname: None, online: true, },
   ]
   let (_, listed) = update(
     dispatch,
@@ -504,8 +504,8 @@ test "a revoked page device is retired without connecting a survivor" {
     model,
   )
   let metas : Array[DeviceMeta] = [
-    { id: "d_a", name: "A", hostname: None, online: true },
-    { id: "d_b", name: "B", hostname: None, online: true },
+    { id: "d_a", name: "A", hostname: None, online: true, },
+    { id: "d_b", name: "B", hostname: None, online: true, },
   ]
   let (_, listed) = update(
     dispatch,
@@ -546,7 +546,7 @@ test "a revoked page device is retired without connecting a survivor" {
     ],
   }
   let survivor : Array[DeviceMeta] = [
-    { id: "d_b", name: "B", hostname: None, online: true },
+    { id: "d_b", name: "B", hostname: None, online: true, },
   ]
   let (_, refreshed) = update(
     dispatch,
@@ -588,8 +588,8 @@ test "an older roster reply cannot restore a device removed by a newer one" {
     model,
   )
   let original : Array[DeviceMeta] = [
-    { id: "d_a", name: "A", hostname: None, online: true },
-    { id: "d_b", name: "B", hostname: None, online: true },
+    { id: "d_a", name: "A", hostname: None, online: true, },
+    { id: "d_b", name: "B", hostname: None, online: true, },
   ]
   let (_, listed) = update(
     dispatch,
@@ -604,7 +604,7 @@ test "an older roster reply cannot restore a device removed by a newer one" {
     listed,
   )
   let survivor : Array[DeviceMeta] = [
-    { id: "d_b", name: "B", hostname: None, online: true },
+    { id: "d_b", name: "B", hostname: None, online: true, },
   ]
   let (_, current) = update(
     dispatch,
@@ -637,8 +637,8 @@ test "an action for another roster device cannot move page focus" {
     model,
   )
   let metas : Array[DeviceMeta] = [
-    { id: "d_a", name: "A", hostname: None, online: true },
-    { id: "d_b", name: "B", hostname: None, online: true },
+    { id: "d_a", name: "A", hostname: None, online: true, },
+    { id: "d_b", name: "B", hostname: None, online: true, },
   ]
   let (_, listed) = update(
     dispatch,
@@ -674,8 +674,8 @@ test "new chat and workspace picker reject another roster device" {
     model,
   )
   let metas : Array[DeviceMeta] = [
-    { id: "d_a", name: "A", hostname: None, online: true },
-    { id: "d_b", name: "B", hostname: None, online: true },
+    { id: "d_a", name: "A", hostname: None, online: true, },
+    { id: "d_b", name: "B", hostname: None, online: true, },
   ]
   let (_, listed) = update(
     dispatch,
@@ -709,7 +709,7 @@ test "a row click that raced its device's removal is dropped" {
     model,
   )
   let metas : Array[DeviceMeta] = [
-    { id: "d_a", name: "A", hostname: None, online: true },
+    { id: "d_a", name: "A", hostname: None, online: true, },
   ]
   let (_, listed) = update(
     dispatch,

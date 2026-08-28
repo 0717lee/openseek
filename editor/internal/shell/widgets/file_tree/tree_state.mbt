@@ -124,7 +124,7 @@ fn TreeNode::with_resolved(
   for index in 0..<children.length() {
     let child = children[index]
     if child.with_resolved(uri, stat) is Some(next) {
-      return Some({ ..self, children: Some(children.set(index, next)) })
+      return Some({ ..self, children: Some(children.set(index, next)), })
     }
   }
   None
@@ -141,9 +141,9 @@ fn TreeNode::toggle(
 ) -> (TreeNode, ToggleEffect)? {
   if self.uri == uri {
     if self.expanded {
-      return Some(({ ..self, expanded: false }, ToggleNone))
+      return Some(({ ..self, expanded: false, }, ToggleNone))
     }
-    let next = { ..self, expanded: true, resolve_failed: false }
+    let next = { ..self, expanded: true, resolve_failed: false, }
     let effect = match self.children {
       Some(_) => ToggleNone
       None => ToggleResolve(self.uri)
@@ -155,7 +155,7 @@ fn TreeNode::toggle(
     let child = children[index]
     if child.toggle(uri) is Some((next, effect)) {
       return Some(
-        ({ ..self, children: Some(children.set(index, next)) }, effect),
+        ({ ..self, children: Some(children.set(index, next)), }, effect),
       )
     }
   }
@@ -169,13 +169,13 @@ fn TreeNode::with_resolve_failed(
   uri : @base_common.Uri,
 ) -> TreeNode? {
   if self.uri == uri {
-    return Some({ ..self, resolve_failed: true })
+    return Some({ ..self, resolve_failed: true, })
   }
   guard self.children is Some(children) else { return None }
   for index in 0..<children.length() {
     let child = children[index]
     if child.with_resolve_failed(uri) is Some(next) {
-      return Some({ ..self, children: Some(children.set(index, next)) })
+      return Some({ ..self, children: Some(children.set(index, next)), })
     }
   }
   None
@@ -233,9 +233,12 @@ fn TreeNode::reveal_ancestors(
   for child_index in 0..<children.length() {
     let child = children[child_index]
     if child.uri == ancestors[index] {
-      let expanded = { ..child, expanded: true }
+      let expanded = { ..child, expanded: true, }
       let (next, step) = expanded.reveal_ancestors(ancestors, index + 1)
-      return ({ ..self, children: Some(children.set(child_index, next)) }, step)
+      return (
+        { ..self, children: Some(children.set(child_index, next)), },
+        step,
+      )
     }
   }
   (self, RevealUnreachable)
@@ -277,7 +280,7 @@ fn TreeNode::push_rows(
   rows : Array[TreeRow],
   depth : Int,
 ) -> Unit {
-  rows.push({ node: self, depth })
+  rows.push({ node: self, depth, })
   if self.kind == Directory && self.expanded {
     match self.children {
       Some(children) =>

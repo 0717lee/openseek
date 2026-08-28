@@ -75,7 +75,7 @@ pub fn decode(arguments : String) -> Array[Step]? {
       fields.get("status") is Some(String(status)) else {
       return None
     }
-    steps.push({ title: title.trim().to_owned(), status: parse_status(status) })
+    steps.push({ title: title.trim().to_owned(), status: parse_status(status), })
   }
   Some(steps)
 }

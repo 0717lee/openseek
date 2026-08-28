@@ -128,7 +128,7 @@ pub fn MarkdownDocumentView::semantic_pointer_hit(
       is Some(source_offset) else {
       return None
     }
-    return Some({ line, source_offset, pointer_x: client_x })
+    return Some({ line, source_offset, pointer_x: client_x, })
   }
   None
 }

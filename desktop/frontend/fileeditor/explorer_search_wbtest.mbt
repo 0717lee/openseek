@@ -76,8 +76,8 @@ test "editor Search highlights follow the Search inventory visibility boundary" 
         preview: "needle needle",
         preview_start_column: 1,
         ranges: [
-          { start_column: 1, end_column: 7 },
-          { start_column: 8, end_column: 14 },
+          { start_column: 1, end_column: 7, },
+          { start_column: 8, end_column: 14, },
         ],
       },
     ],
@@ -91,7 +91,7 @@ test "editor Search highlights follow the Search inventory visibility boundary" 
     @grep_search.Loaded(owner=ctx.owner, root=root.path, generation=0, reply~),
     ctx.search_input(),
   )
-  let visible = { ..owned_state(), explorer_mode: ExplorerSearch, search }
+  let visible = { ..owned_state(), explorer_mode: ExplorerSearch, search, }
   guard visible.editor_search_highlights(path) is Some(highlights) else {
     fail("Search inventory should expose active editor matches")
   }
@@ -100,7 +100,7 @@ test "editor Search highlights follow the Search inventory visibility boundary" 
     @common.Range(3, 8, 3, 14),
   ])
   assert_true(
-    { ..visible, explorer_mode: ExplorerFiles }.editor_search_highlights(path)
+    { ..visible, explorer_mode: ExplorerFiles, }.editor_search_highlights(path)
     is None,
   )
 }

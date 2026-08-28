@@ -24,7 +24,7 @@ pub fn Layout::detect(executable : String) -> Layout? {
   guard native.basename() == "native" else { return None }
   let moon_build = native.dirname()
   guard moon_build.basename() == "_build" else { return None }
-  { checkout_root: moon_build.dirname(), build_root } |> Some
+  { checkout_root: moon_build.dirname(), build_root, } |> Some
 }
 
 ///|

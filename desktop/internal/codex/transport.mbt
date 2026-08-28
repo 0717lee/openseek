@@ -15,7 +15,7 @@ fn StdioTransport::StdioTransport(
   writer : &@io.Writer,
   teardown~ : () -> Unit,
 ) -> StdioTransport {
-  { reader, writer, teardown }
+  { reader, writer, teardown, }
 }
 
 ///|

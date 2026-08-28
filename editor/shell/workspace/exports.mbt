@@ -36,7 +36,7 @@ pub fn DocumentContent::DocumentContent(
   language_id? : String = "",
   revision? : String = "",
 ) -> DocumentContent {
-  { text, display_name, language_id, revision }
+  { text, display_name, language_id, revision, }
 }
 
 ///|
@@ -82,7 +82,7 @@ pub fn SourcePath::normalize_root_relative_path(
   } nobreak {
     normalized
   }
-  ParsedSourcePath({ value: normalized })
+  ParsedSourcePath({ value: normalized, })
 }
 
 ///|
@@ -188,7 +188,7 @@ pub(open) trait FileSystemProvider {
 ///|
 /// Default non-recursive watch with no excludes.
 pub fn WatchOptions::default() -> WatchOptions {
-  { recursive: false, excludes: [] }
+  { recursive: false, excludes: [], }
 }
 
 ///|
@@ -203,7 +203,7 @@ pub fn FileWatch::dispose(self : FileWatch) -> Unit {
 pub fn DocumentError::to_file_system_error(
   self : DocumentError,
 ) -> FileSystemProviderError {
-  { code: self.code, message: self.message, uri: self.uri }
+  { code: self.code, message: self.message, uri: self.uri, }
 }
 
 ///|

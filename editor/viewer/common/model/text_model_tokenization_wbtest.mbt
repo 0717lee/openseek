@@ -95,7 +95,7 @@ test "set_value updates shared token state and token_count stays passive" {
   assert_eq(calls.val, 0)
 
   let view = model.on_before_attached()
-  view.set_visible_lines([{ start_line_number: 1, end_line_number: 2 }], true)
+  view.set_visible_lines([{ start_line_number: 1, end_line_number: 2, }], true)
   assert_eq(calls.val, 2)
   let before_count = calls.val
   assert_eq(model.tokenization.token_count(), 3)
@@ -212,7 +212,7 @@ test "TextModel reports a failing tokenizer and remains live for later reset" {
   // an attached visible range can then tokenize normally.
   model.set_value("still\nlive")
   let view = model.on_before_attached()
-  view.set_visible_lines([{ start_line_number: 1, end_line_number: 2 }], true)
+  view.set_visible_lines([{ start_line_number: 1, end_line_number: 2, }], true)
   // One successful reset probes support and then seeds the state store, so
   // the initial-state callback runs twice after the first reported failure.
   assert_eq(attempts.val, 3)

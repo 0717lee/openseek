@@ -24,7 +24,7 @@ pub fn decode(arguments : Json) -> RemoveInput raise {
       guard !reason.all(ch => ch.is_whitespace()) else {
         fail("arguments.reason to be a non-empty explanation")
       }
-      { path, reason }
+      { path, reason, }
     }
     { "path": String(_), .. } => fail("arguments.reason")
     Object(_) => fail("arguments.path")

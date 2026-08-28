@@ -21,7 +21,7 @@ pub fn Input::Input(
   menu_open~ : Bool,
   expanded~ : Bool,
 ) -> Input {
-  { dock, file_panel, preview, file_ctx, is_desktop, menu_open, expanded }
+  { dock, file_panel, preview, file_ctx, is_desktop, menu_open, expanded, }
 }
 
 ///|

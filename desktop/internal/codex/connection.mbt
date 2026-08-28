@@ -125,7 +125,7 @@ pub async fn[X] connect(
       return None
     }
   }
-  let closed : Ref[Bool] = { val: false }
+  let closed : Ref[Bool] = { val: false, }
   let teardown_action : Ref[() -> Unit] = {
     val: () => {
       stderr_reader.close()
@@ -223,5 +223,5 @@ pub async fn[X] connect(
     return None
   }
   rpc.notify(method_="initialized", params=Json::empty_object())
-  Some({ rpc, teardown })
+  Some({ rpc, teardown, })
 }

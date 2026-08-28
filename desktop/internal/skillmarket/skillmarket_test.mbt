@@ -216,7 +216,7 @@ async test "install downloads the SKILL.md, writes the library and lists the ski
 ///|
 async test "concurrent upgrades of one slug are serialized" {
   @async.with_task_group() <| group => {
-    let probe : RegistryProbe = { lock: Mutex(), active: 0, max_active: 0 }
+    let probe : RegistryProbe = { lock: Mutex(), active: 0, max_active: 0, }
     guard fake_registry(group, probe~) is Some(base) else { return }
     let lib = @fs.tmpdir(prefix="skillmarket-")
     let completed : @async.Queue[Unit] = Queue(kind=Blocking(2))

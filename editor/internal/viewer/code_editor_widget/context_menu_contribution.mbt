@@ -14,7 +14,7 @@ priv struct ContextMenuContributionState {
 
 ///|
 fn ContextMenuContributionState::ContextMenuContributionState() -> ContextMenuContributionState {
-  { widget: None, disposed: false }
+  { widget: None, disposed: false, }
 }
 
 ///|

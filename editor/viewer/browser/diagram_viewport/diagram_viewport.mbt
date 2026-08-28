@@ -793,7 +793,7 @@ fn MarkdownDiagramViewport::measure_svg(
     !is_positive_finite(rect.get_height()) {
     return None
   }
-  Some({ width: rect.get_width(), height: rect.get_height() })
+  Some({ width: rect.get_width(), height: rect.get_height(), })
 }
 
 ///|
@@ -1214,7 +1214,7 @@ fn body_cursor_coordinator_for(
       return coordinator
     }
   }
-  let coordinator : DiagramBodyCursorCoordinator = { document, active: false }
+  let coordinator : DiagramBodyCursorCoordinator = { document, active: false, }
   diagram_body_cursor_coordinators.push(coordinator)
   coordinator
 }

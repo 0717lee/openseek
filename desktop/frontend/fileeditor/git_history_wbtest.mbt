@@ -17,9 +17,9 @@ fn graph_fixture_state() -> State {
         head: Some(commit),
         branch: Some("feature/graph"),
         refs: [
-          { name: "feature/graph", revision: commit, kind: "current" },
-          { name: "origin/feature/graph", revision: commit, kind: "upstream" },
-          { name: "origin/main", revision: base, kind: "base" },
+          { name: "feature/graph", revision: commit, kind: "current", },
+          { name: "origin/feature/graph", revision: commit, kind: "upstream", },
+          { name: "origin/main", revision: base, kind: "base", },
         ],
         tips: [commit, base],
       },
@@ -98,7 +98,7 @@ test "Review tree renders VS Code-style Git Graph and inline commit files" {
   let collapsed = render_review_html(
     tree_pane(
       test_emit(),
-      { ..graph_fixture_state(), changes_collapsed: true },
+      { ..graph_fixture_state(), changes_collapsed: true, },
       test_ctx(),
     ),
   )
@@ -111,8 +111,8 @@ test "Git graph SVG ports VS Code merge and duplicate-lane curves" {
   let merge = render_review_html(
     git_graph_cell(
       {
-        input_swimlanes: [{ id: "b", color: 0 }],
-        output_swimlanes: [{ id: "c", color: 0 }, { id: "d", color: 1 }],
+        input_swimlanes: [{ id: "b", color: 0, }],
+        output_swimlanes: [{ id: "c", color: 0, }, { id: "d", color: 1, }],
       },
       graph_test_commit("b", ["c", "d"]),
       false,
@@ -126,8 +126,8 @@ test "Git graph SVG ports VS Code merge and duplicate-lane curves" {
   let converging = render_review_html(
     git_graph_cell(
       {
-        input_swimlanes: [{ id: "c", color: 0 }, { id: "c", color: 1 }],
-        output_swimlanes: [{ id: "e", color: 0 }],
+        input_swimlanes: [{ id: "c", color: 0, }, { id: "c", color: 1, }],
+        output_swimlanes: [{ id: "e", color: 0, }],
       },
       graph_test_commit("c", ["e"]),
       false,
@@ -138,7 +138,7 @@ test "Git graph SVG ports VS Code merge and duplicate-lane curves" {
 
   let placeholder = render_review_html(
     git_graph_placeholder(
-      [{ id: "e", color: 0 }, { id: "d", color: 1 }],
+      [{ id: "e", color: 0, }, { id: "d", color: 1, }],
       Some(1),
     ),
   )
@@ -211,7 +211,7 @@ test "historical tabs use only the inert diff surface and history breadcrumb" {
   let enabled_navigation = render_review_html(
     review_diff_navigation(
       test_emit(),
-      { ..state, review_diff_navigation_available: true },
+      { ..state, review_diff_navigation_available: true, },
       ctx,
     ),
   )
@@ -229,7 +229,7 @@ test "Git history replies are fenced by generation" {
   }
   let reply : @protocol.GitHistoryReply = {
     repository: true,
-    snapshot: { head: None, branch: None, refs: [], tips: [] },
+    snapshot: { head: None, branch: None, refs: [], tips: [], },
     commits: [],
     has_more: false,
   }

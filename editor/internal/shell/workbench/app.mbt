@@ -92,7 +92,7 @@ fn startup_sub(cmd : @cmd.Cmd) -> @sub.Sub {
     StartupSubscription,
     SubLoader((_, scheduler) => {
       scheduler.add(cmd)
-      Some({ unload: _ => (), update_tagger: _ => () })
+      Some({ unload: _ => (), update_tagger: _ => (), })
     }),
   )
 }
@@ -575,7 +575,7 @@ fn workbench_update(
     ConnectProtocol =>
       (
         connect_protocol_cmd(emit),
-        { ..model, status: "loading", status_message: "" },
+        { ..model, status: "loading", status_message: "", },
       )
     ProtocolEvent(event) => protocol_event_update(emit, model, event)
     ProtocolSendFailed(message) => {
@@ -585,7 +585,7 @@ fn workbench_update(
       fail_pending_requests(message)
       (
         dom_mounted_status_cmd("error"),
-        { ..model, status: "error", status_message: message },
+        { ..model, status: "error", status_message: message, },
       )
     }
     SelectWorkspace(uri) => select_workspace_update(model, uri)
@@ -613,7 +613,7 @@ fn workbench_update(
           _ => layout_workbench_presentation(),
           kind=@cmd.after_render,
         ),
-        { ..model, explorer_visible: !model.explorer_visible },
+        { ..model, explorer_visible: !model.explorer_visible, },
       )
     ToggleTheme => {
       let theme = if model.theme == "light" { "dark" } else { "light" }
@@ -637,7 +637,7 @@ fn workbench_update(
     }
     WindowResized => (viewer_cmd(layout_workbench_presentation), model)
     OpenRepoPicker => open_repo_picker_update(emit, model)
-    CloseRepoPicker => (@rabbita.none, { ..model, repo_picker: None })
+    CloseRepoPicker => (@rabbita.none, { ..model, repo_picker: None, })
     BrowseRepoDirectory(path) => browse_repo_directory_update(emit, model, path)
     RepoDirectoryListed(generation, result) =>
       repo_directory_listed_update(model, generation, result)
@@ -656,7 +656,7 @@ fn select_workspace_update(
 ) -> (@rabbita.Cmd, WorkbenchModel) {
   (
     open_active_document_cmd(uri, ResetScroll),
-    { ..model, status: "loading", status_message: "", viewer_has_frame: false },
+    { ..model, status: "loading", status_message: "", viewer_has_frame: false, },
   )
 }
 
@@ -667,7 +667,7 @@ fn open_definition_location_update(
 ) -> (@rabbita.Cmd, WorkbenchModel) {
   (
     open_active_document_cmd(location.uri, RevealDefinition(location)),
-    { ..model, status: "loading", status_message: "", viewer_has_frame: false },
+    { ..model, status: "loading", status_message: "", viewer_has_frame: false, },
   )
 }
 
@@ -986,7 +986,7 @@ fn viewer_event_update(
       emit_scroll_event(event.scroll_top, event.scroll_left)
       (@rabbita.none, model)
     }
-    DidDispose => (@rabbita.none, { ..model, viewer_has_frame: false })
+    DidDispose => (@rabbita.none, { ..model, viewer_has_frame: false, })
   }
 }
 
@@ -1004,7 +1004,7 @@ fn protocol_event_update(
       if model.document is None {
         commands.push(auto_open_first_file_cmd(emit))
       }
-      (@rabbita.batch(commands), { ..model, status_message: "" })
+      (@rabbita.batch(commands), { ..model, status_message: "", })
     }
     Message(raw) => protocol_message_update(emit, model, raw)
     Closed(_) => {
@@ -1105,7 +1105,7 @@ fn protocol_error_update(
   } else {
     (
       dom_mounted_status_cmd("error"),
-      { ..model, status: "error", status_message: error.message },
+      { ..model, status: "error", status_message: error.message, },
     )
   }
 }

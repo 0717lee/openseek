@@ -29,7 +29,7 @@ impl @jsonrpc.Transport for FakeTransport with fn close(self) {
 
 ///|
 fn new_transport() -> FakeTransport {
-  { inbound: Queue(kind=Unbounded), outbound: Queue(kind=Unbounded) }
+  { inbound: Queue(kind=Unbounded), outbound: Queue(kind=Unbounded), }
 }
 
 ///|
@@ -237,7 +237,7 @@ async test "list_tools follows nextCursor pagination" {
     let transport = new_transport()
     let rpc = @jsonrpc.Client::new(transport)
     spawn_client(group, rpc)
-    let calls : Ref[Int] = { val: 0 }
+    let calls : Ref[Int] = { val: 0, }
     let reply = fn(request : Json) -> Json? {
       match method_of(request) {
         "tools/list" => {

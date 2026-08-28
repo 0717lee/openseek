@@ -104,7 +104,7 @@ fn ComboRun::ComboRun(
   out_dir~ : String,
   manifest_path~ : String,
 ) -> ComboRun {
-  { model, problem_id, prompt_label, task_file, out_dir, manifest_path }
+  { model, problem_id, prompt_label, task_file, out_dir, manifest_path, }
 }
 
 ///|
@@ -183,7 +183,7 @@ fn SuiteReport::SuiteReport(
   concurrency~ : Int,
   reports~ : Array[EvalReport],
 ) -> SuiteReport {
-  { name, out_dir, runs_per_combo, concurrency, reports }
+  { name, out_dir, runs_per_combo, concurrency, reports, }
 }
 
 ///|
@@ -371,7 +371,7 @@ fn suite_jobs(config : SuiteConfig) -> Array[SuiteJob] {
     for problem in config.problems {
       let out_dir = combo_out_dir(config.out_dir, model.to_string(), problem.id)
       for repeat in 0..<config.runs_per_combo {
-        jobs.push({ model, problem, repeat_index: repeat, out_dir })
+        jobs.push({ model, problem, repeat_index: repeat, out_dir, })
       }
     }
   }

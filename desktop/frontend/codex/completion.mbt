@@ -38,7 +38,7 @@ fn CodexSkill::decode_list(value : Json, cwd : String) -> Array[CodexSkill]? {
         @jsonx.json_text(skill_fields, "path") is Some(path) else {
         continue
       }
-      decoded.push({ name, description, path })
+      decoded.push({ name, description, path, })
     }
     return Some(decoded)
   }
@@ -61,7 +61,7 @@ fn State::active_context(self : State) -> CodexContext? {
           if cwd.is_empty() {
             None
           } else {
-            Some({ thread_id: draft.id, cwd })
+            Some({ thread_id: draft.id, cwd, })
           }
         }
         None => None
@@ -74,7 +74,7 @@ fn State::active_context(self : State) -> CodexContext? {
       if cwd.is_empty() {
         None
       } else {
-        Some({ thread_id: thread.id, cwd })
+        Some({ thread_id: thread.id, cwd, })
       }
     }
     CodexNoTask => None
@@ -124,7 +124,7 @@ fn State::submit_composer(
   }
   // Once Send begins, the visible choice is frozen into its request payload;
   // close the menu before any asynchronous resume/start transition.
-  let ready = { ..self, permission_picker: self.permission_picker.close() }
+  let ready = { ..self, permission_picker: self.permission_picker.close(), }
   if ready.active_draft() is Some(draft) {
     let next = {
       ..ready
@@ -168,7 +168,7 @@ fn State::with_skills(
   cwd : String,
   skills : Array[CodexSkill],
 ) -> State {
-  { ..self, skills: CodexSkillsReady(cwd, skills) }
+  { ..self, skills: CodexSkillsReady(cwd, skills), }
 }
 
 ///|
@@ -214,7 +214,7 @@ fn State::composer_identity(
   channel : @interop.ChannelId,
 ) -> @composer.Identity {
   {
-    owner: { channel, session: self.active_id().unwrap_or("codex.none") },
+    owner: { channel, session: self.active_id().unwrap_or("codex.none"), },
     archive_generation: 0,
   }
 }
@@ -331,7 +331,7 @@ pub fn State::composer_input(
   }
   if self.git_status is Some(git) && git.presentation() is Some(presentation) {
     status.push(
-      @composer.GitStatus({ presentation, open: self.git_details_open }),
+      @composer.GitStatus({ presentation, open: self.git_details_open, }),
     )
   }
   let active_turn = self.active_turn_id()
@@ -346,16 +346,16 @@ pub fn State::composer_input(
   }
   {
     identity: self.composer_identity(context.channel),
-    draft: { task: self.draft, mentions: self.mentions },
+    draft: { task: self.draft, mentions: self.mentions, },
     // Before the first real User item arrives, the only honest progress fact
     // is that this accepted local submission is starting. Later Codex turns
     // can overlap, so no broader single-turn heartbeat is inferred here.
     run: if self.waiting_for_first_user_item() {
-      Some({ stage: @composer.Starting, started_ms: None, tokens: 0 })
+      Some({ stage: @composer.Starting, started_ms: None, tokens: 0, })
     } else {
       None
     },
-    goal: { draft: None, standing: None, pending: None },
+    goal: { draft: None, standing: None, pending: None, },
     slash_commands: [
       {
         label: "/compact",
@@ -404,7 +404,7 @@ fn State::run_composer_command(
   command : String,
 ) -> (@cmd.Cmd, State) {
   guard self.active_thread() is Some(active) else {
-    return (@cmd.none, { ..self, notice: "" })
+    return (@cmd.none, { ..self, notice: "", })
   }
   match command {
     "compact" =>
@@ -437,7 +437,7 @@ fn State::apply_composer_action(
   }
   match action {
     @composer.DraftSubmitted(draft~, ..) => {
-      let next = { ..self, draft: draft.task, mentions: draft.mentions }
+      let next = { ..self, draft: draft.task, mentions: draft.mentions, }
       next.submit_composer(dispatch, channel)
     }
     @composer.DraftPresenceChanged(
@@ -451,7 +451,7 @@ fn State::apply_composer_action(
       } else {
         self.mentions
       }
-      (@cmd.none, { ..self, draft, mentions })
+      (@cmd.none, { ..self, draft, mentions, })
     }
     @composer.RootMentionRemoved(mention~, ..) =>
       (

@@ -37,7 +37,7 @@ priv struct SymbolCache {
 
 ///|
 fn SymbolCache::SymbolCache() -> SymbolCache {
-  { owner: None, root: None, query: "", items: [] }
+  { owner: None, root: None, query: "", items: [], }
 }
 
 ///|
@@ -159,7 +159,7 @@ fn Draft::reconciled(self : Draft, source~ : Draft, incoming~ : Draft) -> Draft 
     }
     merged.mentions
   }
-  { task, mentions }
+  { task, mentions, }
 }
 
 ///|

@@ -73,7 +73,7 @@ pub fn SimpleMoveArguments::SimpleMoveArguments(
   select : Bool,
   value : Int,
 ) -> SimpleMoveArguments {
-  { direction, unit, select, value }
+  { direction, unit, select, value, }
 }
 
 ///|

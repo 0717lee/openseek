@@ -27,7 +27,7 @@ pub(all) struct State {
 
 ///|
 pub fn State::empty() -> State {
-  { hover: None, active: None }
+  { hover: None, active: None, }
 }
 
 ///|
@@ -50,10 +50,10 @@ pub(all) enum Msg {
 pub fn update(msg : Msg, state : State) -> State {
   match msg {
     Entered(key, flip~, anchor~) =>
-      { ..state, hover: Some({ key, flip, anchor }) }
-    Left => { ..state, hover: None }
-    Clicked(key) => { ..state, active: Some(key) }
-    ActiveChanged(key) => { ..state, active: key }
+      { ..state, hover: Some({ key, flip, anchor, }), }
+    Left => { ..state, hover: None, }
+    Clicked(key) => { ..state, active: Some(key), }
+    ActiveChanged(key) => { ..state, active: key, }
   }
 }
 

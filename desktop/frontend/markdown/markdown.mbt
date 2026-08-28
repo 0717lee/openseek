@@ -27,7 +27,7 @@ pub fn markdown_nodes(
 ) -> Array[@html.Html] {
   @js.Error_::wrap(() => {
     let doc = @cmark.Doc::from_string(source, strict=false)
-    let render = MarkdownRender::{ defs: doc.defs, open_file }
+    let render = MarkdownRender::{ defs: doc.defs, open_file, }
     @js.Value::cast_from(render.block_nodes(doc.block))
   }) catch {
     _ => [@html.pre(class="markdown-fallback", source)]

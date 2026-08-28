@@ -10,7 +10,7 @@ priv struct DesktopQuickDiffService {
 
 ///|
 fn DesktopQuickDiffService::DesktopQuickDiffService() -> DesktopQuickDiffService {
-  { originals: Map([]), did_change_original: @common.Emitter() }
+  { originals: Map([]), did_change_original: @common.Emitter(), }
 }
 
 ///|

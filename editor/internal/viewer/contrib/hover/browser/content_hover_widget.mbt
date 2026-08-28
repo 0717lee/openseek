@@ -323,7 +323,7 @@ fn render_hover_rows(
     row.set_attribute("tabindex", "0")
     fragment.append_child(row.as_node())
   }
-  { fragment, disposables, transferred: false, disposed: false }
+  { fragment, disposables, transferred: false, disposed: false, }
 }
 
 ///|

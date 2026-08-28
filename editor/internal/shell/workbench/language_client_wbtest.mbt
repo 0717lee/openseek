@@ -15,12 +15,12 @@ fn remote_language_test_model(
 
 ///|
 fn remote_language_test_diagnostic(message : String) -> @language.Diagnostic {
-  { range: Range(1, 1, 1, 2), severity: Warning, message, tags: None }
+  { range: Range(1, 1, 1, 2), severity: Warning, message, tags: None, }
 }
 
 ///|
 fn remote_language_test_hover(message : String) -> @language.Hover {
-  { range: Range(1, 1, 1, 2), contents: [PlainText(message)] }
+  { range: Range(1, 1, 1, 2), contents: [PlainText(message)], }
 }
 
 ///|

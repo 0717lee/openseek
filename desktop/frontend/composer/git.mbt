@@ -15,7 +15,7 @@ pub fn GitChecks::GitChecks(
   failed~ : Int,
   pending~ : Int,
 ) -> GitChecks {
-  { passed, failed, pending }
+  { passed, failed, pending, }
 }
 
 ///|
@@ -67,7 +67,7 @@ pub fn GitPullRequest::GitPullRequest(
   url~ : String,
   checks? : GitChecks,
 ) -> GitPullRequest {
-  { number, title, state, draft, url, checks }
+  { number, title, state, draft, url, checks, }
 }
 
 ///|
@@ -98,7 +98,7 @@ pub fn GitChanges::GitChanges(
   partial~ : Bool,
   base? : String,
 ) -> GitChanges {
-  { added, removed, files, partial, base }
+  { added, removed, files, partial, base, }
 }
 
 ///|
@@ -127,7 +127,7 @@ pub fn GitPresentation::GitPresentation(
   compare_url? : String,
   missing_pull_request? : String,
 ) -> GitPresentation {
-  { branch, changes, pull_request, compare_url, missing_pull_request }
+  { branch, changes, pull_request, compare_url, missing_pull_request, }
 }
 
 ///|
@@ -263,7 +263,7 @@ fn GitChanges::render(self : GitChanges) -> @html.Html {
   } else {
     Some("untracked tail uncounted")
   }
-  GitPopoverRow::{ key: "Changes", value, note }.render()
+  GitPopoverRow::{ key: "Changes", value, note, }.render()
 }
 
 ///|

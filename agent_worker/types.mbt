@@ -98,23 +98,23 @@ test "worker report round-trips through json" {
 test "validate accepts a good report and rejects contract violations" {
   assert_eq(sample_worker_report().validate().length(), 0)
   assert_true(
-    { ..sample_worker_report(), status: "excellent" }.validate().length() > 0,
+    { ..sample_worker_report(), status: "excellent", }.validate().length() > 0,
   )
   assert_true(
-    { ..sample_worker_report(), schema_version: 2 }.validate().length() > 0,
+    { ..sample_worker_report(), schema_version: 2, }.validate().length() > 0,
   )
   assert_true(
-    { ..sample_worker_report(), summary: "  " }.validate().length() > 0,
+    { ..sample_worker_report(), summary: "  ", }.validate().length() > 0,
   )
   assert_true(
-    { ..sample_worker_report(), verification: "" }.validate().length() > 0,
+    { ..sample_worker_report(), verification: "", }.validate().length() > 0,
   )
   let long = StringBuilder()
   for _ in 0..<(max_summary_chars + 1) {
     long.write_char('a')
   }
   assert_true(
-    { ..sample_worker_report(), summary: long.to_string() }.validate().length() >
+    { ..sample_worker_report(), summary: long.to_string(), }.validate().length() >
     0,
   )
 }

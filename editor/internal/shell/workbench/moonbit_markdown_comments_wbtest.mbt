@@ -47,7 +47,7 @@ test "MoonBit Markdown comments render separators and ignore detached groups" {
     ),
   )
   assert_eq(blocks, [
-    { line_range: LineRange(1, 2), markdown: "---" },
+    { line_range: LineRange(1, 2), markdown: "---", },
     {
       line_range: LineRange(4, 5),
       markdown: (
@@ -56,7 +56,7 @@ test "MoonBit Markdown comments render separators and ignore detached groups" {
         #|shadow
       ),
     },
-    { line_range: LineRange(5, 6), markdown: "---" },
+    { line_range: LineRange(5, 6), markdown: "---", },
     {
       line_range: LineRange(8, 10),
       markdown: (
@@ -128,8 +128,8 @@ test "MoonBit Markdown comments render consecutive undocumented item separators"
     ),
   )
   assert_eq(blocks, [
-    { line_range: LineRange(1, 2), markdown: "---" },
-    { line_range: LineRange(3, 4), markdown: "---" },
+    { line_range: LineRange(1, 2), markdown: "---", },
+    { line_range: LineRange(3, 4), markdown: "---", },
   ])
 }
 

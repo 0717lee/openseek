@@ -115,7 +115,7 @@ test "model selections become collapsed Simple anchors in source order" {
 ///|
 test "central partial transition covers null model view and full shapes" {
   let model = cursor_controller_test_model()
-  let converter = CursorTestConverter::{ column_delta: 1, range_delta: 1 }
+  let converter = CursorTestConverter::{ column_delta: 1, range_delta: 1, }
   let raw_cursor = Cursor()
   let raw_before = raw_cursor.as_cursor_state()
   assert_false(raw_cursor.set_state(converter.context(), None, None))

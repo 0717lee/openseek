@@ -18,7 +18,7 @@
 /// that emits two canned events and echoes its input as the report — used
 /// by the parent-runner tests and the cram end-to-end doc).
 async fn run_subrun_command(matches : @argparse.Matches) -> Unit {
-  let report : Ref[Json?] = { val: None }
+  let report : Ref[Json?] = { val: None, }
   with_jsonl_stdout(() => {
     let workspace_root = prepare_workspace_root(matches, log_created=false)
     let (model, thinking, api_url) = agent_settings(matches)
@@ -233,7 +233,7 @@ async fn dispatch_kind(
       }
       let baseline : @agent_session.GoalBaseline? = match input {
         { "sha": String(sha), "dirty": dirty, .. } =>
-          Some({ sha, dirty: dirty is True })
+          Some({ sha, dirty: dirty is True, })
         _ => None
       }
       guard model.api_key(matches.values) is Some(api_key) else {

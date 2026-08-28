@@ -2268,7 +2268,7 @@ fn review_badge(
           {
             state: TabDeleted,
             review: Some({ baseline: ReviewContent(_), .. }),
-            ..,
+            ..
           }
         ) =>
           (
@@ -2279,7 +2279,7 @@ fn review_badge(
           {
             state: TabReadFailed(_),
             review: Some({ baseline: ReviewContent(_), .. }),
-            ..,
+            ..
           }
         ) =>
           (
@@ -2302,7 +2302,7 @@ fn review_badge(
           {
             state: TabDeleted,
             review: Some({ baseline: ReviewMissing, .. }),
-            ..,
+            ..
           }
         ) =>
           (

@@ -104,7 +104,7 @@ fn Entry::Entry(input : Input) -> Entry {
 
 ///|
 fn Entry::identity(self : Entry) -> Identity {
-  { owner: self.owner, archive_generation: self.action_generation }
+  { owner: self.owner, archive_generation: self.action_generation, }
 }
 
 ///|
@@ -303,7 +303,7 @@ fn Model::with_retirements_applied(self : Model, input : Input) -> Model {
     let retired = input.retirements[index]
     entries = entries.filter(entry => entry.owner != retired)
   }
-  { ..self, entries, applied_retirements: input.retirements.length() }
+  { ..self, entries, applied_retirements: input.retirements.length(), }
 }
 
 ///|
@@ -329,7 +329,7 @@ fn Model::with_replacements_applied(self : Model, input : Input) -> Model {
       }
     }
   }
-  { ..self, entries, applied_replacements: input.replacements.length() }
+  { ..self, entries, applied_replacements: input.replacements.length(), }
 }
 
 ///|
@@ -425,7 +425,7 @@ fn Entry::edited(
       @cmd.none,
     )
   }
-  let draft = { ..self.draft, task: value }
+  let draft = { ..self.draft, task: value, }
   let (files, files_loading) = input.completion_files(value)
   let file_completion = Local(
     files~,
@@ -449,7 +449,7 @@ fn Entry::edited(
     _ => @cmd.none
   }
   (
-    { ..self, draft, completion, file_completion, pending_submission: None },
+    { ..self, draft, completion, file_completion, pending_submission: None, },
     command,
   )
 }
@@ -461,14 +461,14 @@ fn Entry::accept_completion(
   action_emit : @cmd.Emit[Action],
 ) -> (Entry, @cmd.Cmd) {
   guard self.completion is Some(completion) else {
-    return ({ ..self, completion: None }, @cmd.none)
+    return ({ ..self, completion: None, }, @cmd.none)
   }
   match completion.kind {
     SlashCommands =>
       (
         {
           ..self,
-          draft: { ..self.draft, task: completion.menu.draft_without_token() },
+          draft: { ..self.draft, task: completion.menu.draft_without_token(), },
           completion: None,
         },
         action_emit(
@@ -528,7 +528,7 @@ fn Entry::accept_completion(
           @cmd.none,
         )
       } else {
-        ({ ..self, completion: None }, @cmd.none)
+        ({ ..self, completion: None, }, @cmd.none)
       }
   }
 }
@@ -636,11 +636,11 @@ fn Model::update(
       (self.with_entry(next), @cmd.none)
     }
     CompletionDismiss =>
-      (self.with_entry({ ..entry, completion: None }), @cmd.none)
+      (self.with_entry({ ..entry, completion: None, }), @cmd.none)
     CompletionAccept => {
       guard entry.completion is Some(completion) &&
         completion.menu.current() is Some(item) else {
-        return (self.with_entry({ ..entry, completion: None }), @cmd.none)
+        return (self.with_entry({ ..entry, completion: None, }), @cmd.none)
       }
       let (next, command) = entry.accept_completion(item, action_emit)
       self.commit_entry_change(entry, next, command, action_emit)
@@ -648,7 +648,7 @@ fn Model::update(
     CompletionPick(index) => {
       guard entry.completion is Some(completion) &&
         completion.menu.get(index) is Some(item) else {
-        return (self.with_entry({ ..entry, completion: None }), @cmd.none)
+        return (self.with_entry({ ..entry, completion: None, }), @cmd.none)
       }
       let (next, command) = entry.accept_completion(item, action_emit)
       self.commit_entry_change(entry, next, command, action_emit)
@@ -660,7 +660,7 @@ fn Model::update(
       }
       self.commit_entry_change(
         entry,
-        { ..entry, draft: entry.draft.without_mention(index) },
+        { ..entry, draft: entry.draft.without_mention(index), },
         action_emit(RootMentionRemoved(identity=entry.identity(), mention~)),
         action_emit,
       )

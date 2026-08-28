@@ -776,7 +776,7 @@ test "one resource flattens rows and renders exact snippet parts" {
   )
 
   widget.set_group_previews(0, [
-    Snippet({ before: "let ", matched: "value", after: " = 1" }),
+    Snippet({ before: "let ", matched: "value", after: " = 1", }),
     LocationFallback("a.mbt:4:5"),
   ])
   let rendered_first = references_peek_test_row(tree, "reference", 0)
@@ -1047,7 +1047,7 @@ test "host selection preserves preview focus reveals and rerenders one group" {
   assert_true(references_peek_test_same_element(hidden_second, second))
 
   widget.set_group_previews(1, [
-    Snippet({ before: "let ", matched: "b", after: " = 2" }),
+    Snippet({ before: "let ", matched: "b", after: " = 2", }),
   ])
   let focused_second = references_peek_test_row(tree, "reference", 1)
   assert_false(references_peek_test_same_element(second, focused_second))
@@ -1062,7 +1062,7 @@ test "host selection preserves preview focus reveals and rerenders one group" {
 
   let untouched_second = focused_second
   widget.set_group_previews(0, [
-    Snippet({ before: "let ", matched: "a", after: " = 1" }),
+    Snippet({ before: "let ", matched: "a", after: " = 1", }),
   ])
   let rerendered_first = references_peek_test_row(tree, "reference", 0)
   assert_true(

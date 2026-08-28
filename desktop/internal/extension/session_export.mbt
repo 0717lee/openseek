@@ -72,7 +72,7 @@ async fn export_session(
   )
   let dialog = SessionExportDialog(payload.session)
   guard dialog.destination(context) is Some(path) else {
-    return { path: None, opened: false }
+    return { path: None, opened: false, }
   }
   // The native dialog has already confirmed replacement for this exact path.
   // `CreateNew` would incorrectly reject an overwrite the user approved.
@@ -84,5 +84,5 @@ async fn export_session(
     error if @async.is_being_cancelled() => raise error
     _ => -1
   }
-  { path: Some(path), opened: open_code == 0 }
+  { path: Some(path), opened: open_code == 0, }
 }

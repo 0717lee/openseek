@@ -290,7 +290,7 @@ fn decode_launch(spec : Json) -> Result[LaunchSpec, String] {
     }
     allowed_paths.push(prefix)
   }
-  Ok({ name, task, context, allowed_paths })
+  Ok({ name, task, context, allowed_paths, })
 }
 
 ///|

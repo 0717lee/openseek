@@ -375,13 +375,13 @@ pub fn ChildSession::ChildSession(
   parent~ : String,
   first_free? : Int = 1,
 ) -> ChildSession {
-  { root, parent, first_free }
+  { root, parent, first_free, }
 }
 
 ///|
 /// Per-process monotonic sub-run ids: unique within one engine's stream,
 /// which is all the pairing contract needs.
-let subrun_ids : Ref[Int] = { val: 0 }
+let subrun_ids : Ref[Int] = { val: 0, }
 
 ///|
 fn next_subrun_id() -> String {

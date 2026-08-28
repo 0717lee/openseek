@@ -173,7 +173,7 @@ pub impl ToJson for ApprovalPayload with fn to_json(self) {
 /// still waiting for an answer.
 pub impl FromJson for ApprovalReply with fn from_json(json, path) {
   let object = JsonObject::decode(json, path, "agent.approval reply")
-  { delivered: object.required_bool("delivered") }
+  { delivered: object.required_bool("delivered"), }
 }
 
 ///|
@@ -210,7 +210,7 @@ pub impl FromJson for RunsReply with fn from_json(json, path) {
       @json.from_json(raw, path=path.add_key("approvals").add_index(index)),
     )
   }
-  { runs, settled, approvals }
+  { runs, settled, approvals, }
 }
 
 ///|

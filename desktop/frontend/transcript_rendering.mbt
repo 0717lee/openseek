@@ -37,7 +37,7 @@ fn Conversation::visible_transcript_rows(
       }
       None => LegacyTranscriptRow(index)
     }
-    durable.push({ item, identity: identity.wire() })
+    durable.push({ item, identity: identity.wire(), })
   }
   durable
 }
@@ -91,7 +91,7 @@ test "transcript row identities include event ordinals" {
   let conv = {
     ..test_conversation(),
     messages: [
-      { kind: User, content: "question", ts: None, sequence: Some(41) },
+      { kind: User, content: "question", ts: None, sequence: Some(41), },
       {
         kind: Assistant(is_danger=false),
         content: "answer",

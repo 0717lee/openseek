@@ -58,7 +58,7 @@ fn fetch_worktrees(
       let reply : @protocol.WorktreesReply = @interop.bridge_request(
         channel,
         @commands.worktree_list,
-        { workspace: workspace.path },
+        { workspace: workspace.path, },
       ) catch {
         error => {
           // A failed list is not an empty registry: until a real reply arrives
@@ -363,7 +363,7 @@ fn repair_worktree_cmd(
       let result : @protocol.WorktreeCreateResult = @interop.bridge_request(
         channel,
         @commands.worktree_create,
-        { workspace, session: Some(session), codex_thread: None },
+        { workspace, session: Some(session), codex_thread: None, },
       ) catch {
         _ => {
           scheduler.add(
@@ -538,8 +538,8 @@ fn DeviceState::with_worktrees(
   generation~ : Int,
 ) -> DeviceState {
   let groups = self.worktrees.filter(group => group.project != project)
-  groups.push({ project, rows, generation })
-  { ..self, worktrees: groups }
+  groups.push({ project, rows, generation, })
+  { ..self, worktrees: groups, }
 }
 
 ///|
@@ -617,7 +617,7 @@ fn Model::worktree_control(
     Project(_) if conv.worktree_mode => @composer.FreshWorktree
     Project(_) => @composer.LocalCheckout
   }
-  Some({ choice, enabled: self.can_choose_launch_mode(conv) })
+  Some({ choice, enabled: self.can_choose_launch_mode(conv), })
 }
 
 // Tests for the worktree flow's pure pieces: the notification decoder and
@@ -643,7 +643,7 @@ fn test_archive_refusal(
   dirty_paths? : Array[String] = ["desktop/lepus"],
   dirty_path_count? : Int = 1,
 ) -> @protocol.ArchiveNeedsForceReply {
-  { worktree, dirty_paths, dirty_path_count }
+  { worktree, dirty_paths, dirty_path_count, }
 }
 
 ///|
@@ -703,7 +703,7 @@ test "the launch mode toggles only before the conversation begins" {
   let begun = test_model().replace_conversation({
     ..test_conversation(),
     workspace: Project(root=workspace),
-    messages: [{ kind: User, content: "hi", ts: None, sequence: None }],
+    messages: [{ kind: User, content: "hi", ts: None, sequence: None, }],
   })
   let (_, still) = update(dispatch, ToggleWorktreeMode, begun)
   assert_false(still.active().worktree_mode)
@@ -727,7 +727,7 @@ test "new conversations inherit only their workspace's launch default" {
   })
   let (_, inherited) = update(
     dispatch,
-    SessionRotated({ channel: Local, session: "preferred-chat" }),
+    SessionRotated({ channel: Local, session: "preferred-chat", }),
     preferred_model,
   )
   assert_eq(inherited.active().workspace, Project(root=preferred))
@@ -738,7 +738,7 @@ test "new conversations inherit only their workspace's launch default" {
   })
   let (_, other_chat) = update(
     dispatch,
-    SessionRotated({ channel: Local, session: "other-chat" }),
+    SessionRotated({ channel: Local, session: "other-chat", }),
     other_model,
   )
   assert_eq(other_chat.active().workspace, Project(root=other))
@@ -773,7 +773,7 @@ test "a repeated rotation keeps an existing conversation's launch choice" {
     })
   let (_, replayed) = update(
     dispatch,
-    SessionRotated({ channel: Local, session: "desktop-test" }),
+    SessionRotated({ channel: Local, session: "desktop-test", }),
     model,
   )
   assert_false(replayed.active().worktree_mode)
@@ -798,9 +798,9 @@ test "the launch mode stops being a choice once a placement is in flight" {
     pinned in [
       {
         ..composing,
-        goal_pending: Some({ id: "goal-1", request: Clearing, since: 0 }),
+        goal_pending: Some({ id: "goal-1", request: Clearing, since: 0, }),
       },
-      { ..composing, run: Starting(submission_id="s-1") },
+      { ..composing, run: Starting(submission_id="s-1"), },
     ] {
     let (_, kept) = update(
       dispatch,
@@ -972,7 +972,7 @@ test "a missing checkout stays bound while rebuild and archive remain reachable"
     stale: false,
   }
   let review_dock = @dock.open_file(
-    { ..bound.dock, owner: Some(owner) },
+    { ..bound.dock, owner: Some(owner), },
     review_path,
   )
   let bound = {
@@ -1025,7 +1025,7 @@ test "a missing checkout stays bound while rebuild and archive remain reachable"
     is Some(
       {
         review: Some({ generation: 4, baseline: ReviewContent("HEAD"), .. }),
-        ..,
+        ..
       }
     ),
   )
@@ -1169,7 +1169,7 @@ test "a worktree mode submit opens the run like any other" {
     })
     .with_dev(dev => {
       ..dev,
-      worktrees: [{ project: workspace, rows: [], generation: 1 }],
+      worktrees: [{ project: workspace, rows: [], generation: 1, }],
     })
   let (_, sent) = update(dispatch, Send, model)
   assert_true(sent.active().run is Starting(..))
@@ -1339,7 +1339,7 @@ test "a worktree commit broadcast supersedes lists and unbinds removed names" {
       ..dev,
       projects: [workspace],
       worktrees: [
-        { project: workspace, rows: test_worktree_rows(), generation: 1 },
+        { project: workspace, rows: test_worktree_rows(), generation: 1, },
       ],
       worktrees_request_generation: 1,
     })
@@ -1393,7 +1393,7 @@ test "a failed worktree setup is an actionable toast and keeps retry eligible" {
     })
     .with_dev(dev => {
       ..dev.with_workspace_settings(workspace, true, generation=1),
-      worktrees: [{ project: workspace, rows: [], generation: 1 }],
+      worktrees: [{ project: workspace, rows: [], generation: 1, }],
     })
   let worktrees_generation = model.dev().worktrees_request_generation
   let (_, sent) = update(dispatch, Send, model)
@@ -1456,7 +1456,7 @@ test "a remote removal closes this client's discard dialog" {
       ..dev,
       projects: [workspace],
       worktrees: [
-        { project: workspace, rows: test_worktree_rows(), generation: 1 },
+        { project: workspace, rows: test_worktree_rows(), generation: 1, },
       ],
     })
   let (_, staged) = update_dev(
@@ -1499,7 +1499,7 @@ test "worktree broadcasts and reconnect snapshots update an open Codex task" {
       "turns": [],
     },
   })
-  let model = { ..test_model(), codex, screen: Codex }
+  let model = { ..test_model(), codex, screen: Codex, }
   let rows = [
     {
       name: "wt-1",
@@ -1570,7 +1570,7 @@ test "a removed worktree's probes cannot repopulate the composer" {
       ..dev,
       projects: [workspace],
       worktrees: [
-        { project: workspace, rows: test_worktree_rows(), generation: 1 },
+        { project: workspace, rows: test_worktree_rows(), generation: 1, },
       ],
     })
   // A branch probe answers, which is also what starts the pull-request lookup:

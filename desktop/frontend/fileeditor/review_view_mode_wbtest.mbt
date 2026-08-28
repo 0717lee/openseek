@@ -9,7 +9,7 @@ test "new reviews default to the full diff" {
   let (_, opened) = open_changed_document(
     test_emit(),
     state,
-    { ..test_ctx(), open_files: [path], active_file: Some(path) },
+    { ..test_ctx(), open_files: [path], active_file: Some(path), },
     change,
     had_active=false,
   )
@@ -34,7 +34,7 @@ test "full diff change navigation is enabled only after a nonempty diff" {
       selected,
     }),
   }
-  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path), }
   let state = { ..owned_state(), docs, }
   let (_, available) = update(
     test_emit(),
@@ -62,7 +62,7 @@ test "full diff change navigation is enabled only after a nonempty diff" {
   )
   assert_true(after_next == available)
 
-  let unavailable = { ..available, review_diff_navigation_available: false }
+  let unavailable = { ..available, review_diff_navigation_available: false, }
   let (_, previous_rejected) = update(
     test_emit(),
     RevealPreviousReviewDiffChange,
@@ -89,7 +89,7 @@ test "full diff change navigation is enabled only after a nonempty diff" {
   let (_, parked) = update(
     test_emit(),
     ReviewDiffNavigationAvailabilityChanged(true),
-    { ..state, docs: source_docs },
+    { ..state, docs: source_docs, },
     ctx,
   )
   // Source mode parks the completed DiffEditor pair. Retain its availability
@@ -127,7 +127,7 @@ test "full diff layout toggles independently and source mode preserves it" {
       selected,
     }),
   }
-  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path), }
   let (_, inline) = update(
     test_emit(),
     ToggleReviewDiffLayout,
@@ -146,7 +146,7 @@ test "full diff layout toggles independently and source mode preserves it" {
   let (_, unchanged) = update(
     test_emit(),
     ToggleReviewDiffLayout,
-    { ..inline, docs: source_docs },
+    { ..inline, docs: source_docs, },
     ctx,
   )
   assert_true(unchanged.review_diff_layout is ReviewInline)
@@ -177,7 +177,7 @@ test "full diff remains selected when opening another changed file" {
   let (_, full_diff) = update(
     test_emit(),
     ToggleReviewDiff,
-    { ..owned_state(), docs, review_view_mode: ReviewSource },
+    { ..owned_state(), docs, review_view_mode: ReviewSource, },
     first_ctx,
   )
   assert_true(full_diff.review_view_mode is ReviewDiff)
@@ -217,7 +217,7 @@ test "full diff remains selected when opening another changed file" {
   let (_, source_again) = update(
     test_emit(),
     ToggleReviewDiff,
-    { ..switched, docs: loaded_docs },
+    { ..switched, docs: loaded_docs, },
     second_ctx,
   )
   assert_true(source_again.review_view_mode is ReviewSource)

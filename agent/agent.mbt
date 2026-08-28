@@ -51,7 +51,7 @@ priv struct PlanCadence {
 
 ///|
 fn PlanCadence::PlanCadence(registered~ : Bool) -> PlanCadence {
-  { registered, silent_steps: 0, checklist: None, nagged_without_plan: false }
+  { registered, silent_steps: 0, checklist: None, nagged_without_plan: false, }
 }
 
 ///|

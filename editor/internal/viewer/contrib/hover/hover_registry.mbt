@@ -11,7 +11,7 @@ priv struct HoverParticipantRegistry {
 ///|
 /// Creates an empty hover participant registry.
 fn HoverParticipantRegistry::HoverParticipantRegistry() -> HoverParticipantRegistry {
-  { entries: [] }
+  { entries: [], }
 }
 
 ///|
