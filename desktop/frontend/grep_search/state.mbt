@@ -215,10 +215,7 @@ pub fn State::handle(self : State, msg : Msg, input : Input) -> State {
     Submit | Refresh => self.schedule(page, input, immediate=true)
     ClearResults => {
       let generation = self.generation + 1
-      {
-        generation,
-        page: { ..page.clear_results(), phase: Idle, generation, },
-      }
+      { generation, page: { ..page.clear_results(), phase: Idle, generation } }
     }
     CollapseAll => {
       let collapsed : Map[String, Bool] = Map([])
@@ -783,21 +780,16 @@ test "active result helpers share file grouping and highlight projection" {
     ranges: [{ start_column: 1, end_column: 5 }],
   }
   let loaded = state.handle(
-    Loaded(
-      owner~,
-      root=root.path,
-      generation=page.generation,
-      reply={
-        root: root.path,
-        generation: page.generation,
-        matches: [first, second],
-        match_count: 2,
-        file_count: 1,
-        limit_hit: false,
-        cancelled: false,
-        error: None,
-      },
-    ),
+    Loaded(owner~, root=root.path, generation=page.generation, reply={
+      root: root.path,
+      generation: page.generation,
+      matches: [first, second],
+      match_count: 2,
+      file_count: 1,
+      limit_hit: false,
+      cancelled: false,
+      error: None,
+    }),
     input,
   )
   assert_eq(loaded.page.active_result_count(), 2)
@@ -805,14 +797,11 @@ test "active result helpers share file grouping and highlight projection" {
   guard loaded.editor_highlights("src/main.mbt") is Some(highlights) else {
     fail("expected text highlights")
   }
-  assert_eq(
-    highlights.ranges(),
-    [
-      @common.Range(2, 1, 2, 5),
-      @common.Range(2, 6, 2, 10),
-      @common.Range(4, 1, 4, 5),
-    ],
-  )
+  assert_eq(highlights.ranges(), [
+    @common.Range(2, 1, 2, 5),
+    @common.Range(2, 6, 2, 10),
+    @common.Range(4, 1, 4, 5),
+  ])
 }
 
 ///|
