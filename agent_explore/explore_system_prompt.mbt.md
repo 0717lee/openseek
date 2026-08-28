@@ -67,7 +67,7 @@ snippet may start and its isolation rules. The `source` argument is a whole
 prompt/default_prompt.mbt.md; the comment is stripped from the generated
 prompt. -->
 
-```mbt nocheck
+```mbtx
 ///|
 import {
   "moonbitlang/async",
