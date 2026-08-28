@@ -1778,12 +1778,12 @@ async test "configured system prompt defaults to the flash prompt" {
   })
   assert_true(
     configured_system_prompt(parsed, Deepseek(V4Flash)).contains(
-      "MoonBit coding agent focused on implementing user tasks",
+      "an agent focused on implementing user tasks",
     ),
   )
   assert_true(
     configured_system_prompt(parsed, Deepseek(V4Pro)).contains(
-      "MoonBit coding agent focused on implementing user tasks",
+      "an agent focused on implementing user tasks",
     ),
   )
 }
