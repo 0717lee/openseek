@@ -91,7 +91,7 @@ fn decode_initialize_result(result : Json) -> InitializeResult raise {
     _ => ""
   }
   let instructions = optional_string(result, "instructions")
-  { protocol_version, server_name, server_version, instructions }
+  { protocol_version, server_name, server_version, instructions, }
 }
 
 ///|
@@ -118,7 +118,7 @@ fn decode_tool(entry : Json) -> McpTool raise {
     { "inputSchema": schema, .. } => schema
     _ => default_object_schema()
   }
-  { name, description, input_schema }
+  { name, description, input_schema, }
 }
 
 ///|
@@ -143,7 +143,7 @@ fn decode_call_result(result : Json) -> CallToolResult raise {
     { "isError": True, .. } => true
     _ => false
   }
-  { content, structured_content, is_error }
+  { content, structured_content, is_error, }
 }
 
 ///|

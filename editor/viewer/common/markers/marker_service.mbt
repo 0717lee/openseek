@@ -12,7 +12,7 @@ priv struct DoubleResourceMap {
 
 ///|
 fn DoubleResourceMap::new() -> DoubleResourceMap {
-  { by_resource: Map([]), by_owner: Map([]) }
+  { by_resource: Map([]), by_owner: Map([]), }
 }
 
 ///|

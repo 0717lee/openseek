@@ -31,7 +31,7 @@ pub let is_windows : Bool = host_platform == Windows
 
 ///|
 /// D8 test seam for the URI/path stack: `None` reads the host platform.
-let is_windows_override : Ref[Bool?] = { val: None }
+let is_windows_override : Ref[Bool?] = { val: None, }
 
 ///|
 /// `path.ts:82 platformIsWin32` / the `platform.isWindows` reads inside

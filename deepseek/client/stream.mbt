@@ -7,7 +7,7 @@ priv struct StreamToolCall {
 
 ///|
 fn StreamToolCall::StreamToolCall() -> StreamToolCall {
-  { id: "", name: "", arguments: StringBuilder() }
+  { id: "", name: "", arguments: StringBuilder(), }
 }
 
 ///|

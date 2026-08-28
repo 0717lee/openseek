@@ -681,7 +681,7 @@ async fn MarkdownViewerWidgetDefinitionBridge::open_location(
   }
   match self.viewer.services.location_opener() {
     Some(opener) =>
-      opener.open({ source_viewer_id: self.viewer.get_id(), location, mode })
+      opener.open({ source_viewer_id: self.viewer.get_id(), location, mode, })
     None => false
   }
 }

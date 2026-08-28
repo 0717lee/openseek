@@ -275,7 +275,7 @@ fn AgentFeedbackService::accept_feedback(
     return
   }
   guard existing.state == Created else { return }
-  self.replace_item(resource, { ..existing, state: Accepted })
+  self.replace_item(resource, { ..existing, state: Accepted, })
 }
 
 ///|
@@ -320,7 +320,7 @@ fn AgentFeedbackService::update_feedback(
   guard self.feedback_by_id(resource, feedback_id) is Some(existing) else {
     return
   }
-  self.replace_item(resource, { ..existing, text: new_text })
+  self.replace_item(resource, { ..existing, text: new_text, })
 }
 
 ///|
@@ -426,5 +426,5 @@ fn AgentFeedbackService::get_navigation_bearing(
     Some(anchor) => item_ids.search_by(id => id == anchor).unwrap_or(-1)
     None => -1
   }
-  { active_idx, total_count: item_ids.length() }
+  { active_idx, total_count: item_ids.length(), }
 }

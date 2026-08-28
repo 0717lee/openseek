@@ -34,7 +34,7 @@ pub fn EditorWhitespace::EditorWhitespace(
   height : Int,
   min_width : Int,
 ) -> EditorWhitespace {
-  { id, after_line_number, ordinal, height, min_width, prefix_sum: 0.0 }
+  { id, after_line_number, ordinal, height, min_width, prefix_sum: 0.0, }
 }
 
 ///|
@@ -84,7 +84,7 @@ priv struct PendingChanges {
 
 ///|
 fn PendingChanges::new() -> PendingChanges {
-  { has_pending: false, inserts: [], changes: [], removes: [] }
+  { has_pending: false, inserts: [], changes: [], removes: [], }
 }
 
 ///|

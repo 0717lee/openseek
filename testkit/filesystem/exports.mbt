@@ -13,7 +13,7 @@ pub fn FileSystem::entries(self : FileSystem) -> Array[FileEntry] raise {
     for path in paths => {
       validate_relative_path(path)
       match fields[path] {
-        String(content) => { path, content }
+        String(content) => { path, content, }
         _ => fail("file content for `\{path}` must be a string")
       }
     }

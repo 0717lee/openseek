@@ -104,7 +104,7 @@ fn cancel_file_search(
         @interop.bridge_request(
           owner.channel,
           @commands.fs_cancel_search_files,
-          { cache_key, generation },
+          { cache_key, generation, },
         ),
       ) catch {
         _ => ()

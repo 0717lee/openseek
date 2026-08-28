@@ -105,7 +105,7 @@ pub fn State::opening(
       }
     current => (@cmd.none, current)
   }
-  (cmd, { ..self, catalog, notice: "" })
+  (cmd, { ..self, catalog, notice: "", })
 }
 
 ///|
@@ -113,7 +113,7 @@ pub fn State::opening(
 /// the only such source: the page has no other way to learn that the list
 /// under "Installed" could not be read.
 pub fn State::with_notice(self : State, message : String) -> State {
-  { ..self, notice: message }
+  { ..self, notice: message, }
 }
 
 ///|
@@ -124,21 +124,21 @@ pub fn State::handle(
   input : Input,
 ) -> (@cmd.Cmd, State, Outcome?) {
   match msg {
-    QueryChanged(value) => (@cmd.none, { ..self, query: value }, None)
+    QueryChanged(value) => (@cmd.none, { ..self, query: value, }, None)
     PreviewMarket(item) => {
       let target = preview_target_for_market(input.installed, item)
       match self.preview_cache.get(preview_cache_key(target)) {
         Some(content) =>
           (
             @cmd.none,
-            { ..self, preview: Ready(target~, request=0, content~) },
+            { ..self, preview: Ready(target~, request=0, content~), },
             None,
           )
         None => {
           let request = preview_request_id(self.preview) + 1
           (
             fetch_content(emit, input.channel, request, target),
-            { ..self, preview: Loading(target~, request~) },
+            { ..self, preview: Loading(target~, request~), },
             None,
           )
         }
@@ -150,14 +150,14 @@ pub fn State::handle(
         Some(content) =>
           (
             @cmd.none,
-            { ..self, preview: Ready(target~, request=0, content~) },
+            { ..self, preview: Ready(target~, request=0, content~), },
             None,
           )
         None => {
           let request = preview_request_id(self.preview) + 1
           (
             fetch_installed_content(emit, input.channel, request, item),
-            { ..self, preview: Loading(target~, request~) },
+            { ..self, preview: Loading(target~, request~), },
             None,
           )
         }
@@ -189,18 +189,18 @@ pub fn State::handle(
       }
       (
         @cmd.none,
-        { ..self, preview: Failed(target~, request~, message~) },
+        { ..self, preview: Failed(target~, request~, message~), },
         None,
       )
     }
     BackToList =>
       (
         restore_list_scroll(self.list_scroll_top),
-        { ..self, preview: Closed },
+        { ..self, preview: Closed, },
         None,
       )
     SkillsScrolled(scroll_top) =>
-      (@cmd.none, { ..self, list_scroll_top: scroll_top }, None)
+      (@cmd.none, { ..self, list_scroll_top: scroll_top, }, None)
     RefreshCatalog =>
       match self.catalog {
         // The rendered button is disabled while loading, and this guard also
@@ -209,7 +209,7 @@ pub fn State::handle(
         _ =>
           (
             fetch_catalog(emit, input.channel),
-            { ..self, catalog: Catalog::Loading(channel=input.channel) },
+            { ..self, catalog: Catalog::Loading(channel=input.channel), },
             None,
           )
       }
@@ -218,11 +218,11 @@ pub fn State::handle(
       // that outlived a focus switch must not overwrite the focused device's
       // catalog or its newer in-flight request.
       guard channel == input.channel else { return (@cmd.none, self, None) }
-      (@cmd.none, { ..self, catalog: Ready(items) }, None)
+      (@cmd.none, { ..self, catalog: Ready(items), }, None)
     }
     CatalogFailed(channel~, message~) => {
       guard channel == input.channel else { return (@cmd.none, self, None) }
-      (@cmd.none, { ..self, catalog: Failed(message) }, None)
+      (@cmd.none, { ..self, catalog: Failed(message), }, None)
     }
     Install(item) => {
       let key = source_label(item)
@@ -232,7 +232,11 @@ pub fn State::handle(
       } else {
         let busy = self.busy.copy()
         busy.push(key)
-        (install(emit, input.channel, item), { ..self, busy, notice: "" }, None)
+        (
+          install(emit, input.channel, item),
+          { ..self, busy, notice: "", },
+          None,
+        )
       }
     }
     Uninstall(id) =>
@@ -241,7 +245,11 @@ pub fn State::handle(
       } else {
         let busy = self.busy.copy()
         busy.push(id)
-        (uninstall(emit, input.channel, id), { ..self, busy, notice: "" }, None)
+        (
+          uninstall(emit, input.channel, id),
+          { ..self, busy, notice: "", },
+          None,
+        )
       }
     ActionDone(channel~, key~, error~) => {
       let busy = self.busy.filter(entry => entry != key)
@@ -257,7 +265,7 @@ pub fn State::handle(
         // from a client-side guess.
         (@cmd.none, { ..self, busy, }, Some(LibraryChanged(channel~)))
       } else {
-        (@cmd.none, { ..self, busy, notice: error }, None)
+        (@cmd.none, { ..self, busy, notice: error, }, None)
       }
     }
   }

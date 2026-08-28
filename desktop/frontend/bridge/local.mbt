@@ -13,7 +13,7 @@ priv struct LocalBridgeSub {
 fn LocalBridgeSub::LocalBridgeSub(
   dispatch : @cmd.Emit[Event],
 ) -> LocalBridgeSub {
-  { dispatch, active: true, unsubscribers: [] }
+  { dispatch, active: true, unsubscribers: [], }
 }
 
 ///|

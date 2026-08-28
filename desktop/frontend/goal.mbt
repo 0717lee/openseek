@@ -143,7 +143,7 @@ fn goal_first_line(text : String) -> String {
 /// this client's own sends from each other, so tests that never send twice
 /// can share one.
 fn test_goal_command(request : GoalRequest) -> GoalCommand {
-  { id: "goal-1", request, since: 0 }
+  { id: "goal-1", request, since: 0, }
 }
 
 ///|
@@ -151,7 +151,7 @@ test "the goal slash command opens the editor prefilled from the mirror" {
   let dispatch = test_dispatch()
   let model = test_model().replace_conversation({
     ..test_conversation(),
-    goal: Some({ text: "ship the feature", blocked: None }),
+    goal: Some({ text: "ship the feature", blocked: None, }),
     task: "/goal",
   })
   let (_, opened) = run_slash_command(dispatch, model, "goal")
@@ -168,7 +168,7 @@ test "submit holds the text until its marker lands" {
   let dispatch = test_dispatch()
   let model = test_model().replace_conversation({
     ..test_conversation(),
-    goal_edit: Some({ draft: "   " }),
+    goal_edit: Some({ draft: "   ", }),
   })
   // A blank draft has nothing to set (the button is disabled; this also
   // catches Enter); goal mode stays open for the user to finish.
@@ -233,7 +233,7 @@ test "only the matching set marker settles the pending text" {
   let settled = commit(cleared, 4, "[goal]\nship the feature")
   assert_true(settled.active().goal_pending is None)
   assert_true(
-    settled.active().goal is Some({ text: "ship the feature", blocked: None }),
+    settled.active().goal is Some({ text: "ship the feature", blocked: None, }),
   )
 }
 
@@ -243,7 +243,7 @@ test "the row's Cancel leaves the edit and the prompt draft alone" {
   let model = test_model().replace_conversation({
     ..test_conversation(),
     task: "half-typed prompt",
-    goal_edit: Some({ draft: "a goal being written" }),
+    goal_edit: Some({ draft: "a goal being written", }),
   })
   // The row's ✕ and Escape are the same message: leave goal mode, send
   // nothing, and hand the composer back its prompt draft untouched.
@@ -258,7 +258,7 @@ test "clear sends from goal mode and from the standing row alike" {
   let dispatch = test_dispatch()
   let model = test_model().replace_conversation({
     ..test_conversation(),
-    goal_edit: Some({ draft: "" }),
+    goal_edit: Some({ draft: "", }),
   })
   let (_, cleared) = update(dispatch, ClearGoal, model)
   assert_true(cleared.active().goal_edit is None)
@@ -266,7 +266,7 @@ test "clear sends from goal mode and from the standing row alike" {
   // the durable tombstone commits.
   let standing = test_model().replace_conversation({
     ..test_conversation(),
-    goal: Some({ text: "ship the feature", blocked: None }),
+    goal: Some({ text: "ship the feature", blocked: None, }),
   })
   let (_, from_row) = update(dispatch, ClearGoal, standing)
   assert_true(from_row.active().goal_edit is None)
@@ -282,7 +282,7 @@ test "a clear waits for its tombstone, not for any goal marker" {
   let dispatch = test_dispatch()
   let model = test_model().replace_conversation({
     ..test_conversation(),
-    goal: Some({ text: "ship the feature", blocked: None }),
+    goal: Some({ text: "ship the feature", blocked: None, }),
     goal_pending: Some(test_goal_command(Clearing)),
   })
   fn commit(model, sequence, content) {
@@ -325,14 +325,14 @@ test "each conversation owns its own goal edit" {
       "desktop-other",
       @interop.ChannelId::Local.test_project(),
     ),
-    goal: Some({ text: "the visible goal", blocked: None }),
+    goal: Some({ text: "the visible goal", blocked: None, }),
   }
   let model = {
     ..test_model(),
     conversations: [
       {
         ..test_conversation(),
-        goal_edit: Some({ draft: "an edit left open next door" }),
+        goal_edit: Some({ draft: "an edit left open next door", }),
       },
       neighbour,
     ],
@@ -360,7 +360,7 @@ test "goal marker commits write the mirror and render cards" {
       session="desktop-test",
       sequence=1,
       ts=None,
-      item=@protocol.RuntimeNotice({ content: "[goal]\nship the feature" }),
+      item=@protocol.RuntimeNotice({ content: "[goal]\nship the feature", }),
       session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     test_model(),
@@ -394,7 +394,7 @@ test "goal marker commits write the mirror and render cards" {
       session="desktop-test",
       sequence=3,
       ts=None,
-      item=@protocol.RuntimeNotice({ content: "[goal cleared]" }),
+      item=@protocol.RuntimeNotice({ content: "[goal cleared]", }),
       session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     blocked,
@@ -450,7 +450,7 @@ test "a rejected clear has nothing to restore, and never steals goal mode" {
   // A newer edit belongs to the user, not to this dead request.
   let editing = test_model().replace_conversation({
     ..test_conversation(),
-    goal_edit: Some({ draft: "something newer" }),
+    goal_edit: Some({ draft: "something newer", }),
   })
   let (_, kept) = update_dev(
     dispatch,
@@ -505,16 +505,16 @@ test "the editor opens on the newest text, not on the retired one" {
   // from it would silently revert the user's own sent text.
   let conv : Conversation = {
     ..test_conversation(),
-    goal: Some({ text: "the old goal", blocked: None }),
+    goal: Some({ text: "the old goal", blocked: None, }),
     goal_pending: Some(test_goal_command(Setting("the goal just sent"))),
   }
   inspect(conv.goal_draft_seed(), content="the goal just sent")
   inspect(
-    { ..conv, goal_pending: Some(test_goal_command(Clearing)) }.goal_draft_seed(),
+    { ..conv, goal_pending: Some(test_goal_command(Clearing)), }.goal_draft_seed(),
     content="",
   )
   inspect(
-    { ..conv, goal_pending: None }.goal_draft_seed(),
+    { ..conv, goal_pending: None, }.goal_draft_seed(),
     content="the old goal",
   )
   let dispatch = test_dispatch()
@@ -587,7 +587,7 @@ test "a tombstone over an empty mirror still ends the clear" {
       session="desktop-test",
       sequence=1,
       ts=None,
-      item=@protocol.RuntimeNotice({ content: "[goal cleared]" }),
+      item=@protocol.RuntimeNotice({ content: "[goal cleared]", }),
       session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
@@ -606,7 +606,7 @@ test "re-asserting an unchanged goal waits for its own marker too" {
   // the request with its recovery copy while its own append could still fail.
   let model = test_model().replace_conversation({
     ..test_conversation(),
-    goal: Some({ text: "ship the feature", blocked: None }),
+    goal: Some({ text: "ship the feature", blocked: None, }),
     goal_pending: Some(test_goal_command(Setting("ship the feature"))),
   })
   fn commit(model, sequence, content) {
@@ -637,7 +637,7 @@ test "re-asserting an unchanged goal waits for its own marker too" {
     let (_, next) = update_dev(
       dispatch,
       SessionRefreshed(
-        goal=Some({ text: "ship the feature", blocked: None }),
+        goal=Some({ text: "ship the feature", blocked: None, }),
         goal_markers~,
         session="desktop-test",
         items=[],
@@ -646,7 +646,7 @@ test "re-asserting an unchanged goal waits for its own marker too" {
       ),
       {
         ..model,
-        conversations: [{ ..model.active(), sync: test_reloading([]) }],
+        conversations: [{ ..model.active(), sync: test_reloading([]), }],
       },
     )
     next
@@ -690,7 +690,7 @@ test "a set is recorded even when the record has moved on since" {
   let (_, settled) = update_dev(
     dispatch,
     SessionRefreshed(
-      goal=Some({ text: "ship the feature", blocked: Some("needs a decision") }),
+      goal=Some({ text: "ship the feature", blocked: Some("needs a decision"), }),
       goal_markers=[
         (2, GoalSet("ship the feature")),
         (3, GoalBlocked("needs a decision")),
@@ -718,7 +718,7 @@ test "re-asserting a blocked goal waits for its own marker" {
   // durable item of any kind would retire the request and its recovery copy.
   let model = test_model().replace_conversation({
     ..test_conversation(),
-    goal: Some({ text: "ship the feature", blocked: Some("needs a decision") }),
+    goal: Some({ text: "ship the feature", blocked: Some("needs a decision"), }),
     goal_pending: Some(test_goal_command(Setting("ship the feature"))),
   })
   fn commit(model, sequence, content) {
@@ -746,7 +746,7 @@ test "re-asserting a blocked goal waits for its own marker" {
   let settled = commit(unrelated, 2, "[goal]\nship the feature")
   assert_true(settled.active().goal_pending is None)
   assert_true(
-    settled.active().goal is Some({ text: "ship the feature", blocked: None }),
+    settled.active().goal is Some({ text: "ship the feature", blocked: None, }),
   )
 }
 
@@ -760,9 +760,12 @@ test "archiving carries the goal draft to the replacement" {
     .replace_conversation({
       ..test_conversation(),
       task: "a prompt typed too",
-      goal_edit: Some({ draft: "a goal still being written" }),
+      goal_edit: Some({ draft: "a goal still being written", }),
     })
-    .with_dev(dev => { ..dev, sessions: [placed_archived_item("desktop-test")] })
+    .with_dev(dev => {
+      ..dev,
+      sessions: [placed_archived_item("desktop-test")],
+    })
   let (_, next) = update_dev(
     dispatch,
     SessionsChanged(
@@ -795,7 +798,10 @@ test "archiving carries a goal that was sent but never confirmed" {
       ..test_conversation(),
       goal_pending: Some(test_goal_command(Setting("a goal still in flight"))),
     })
-    .with_dev(dev => { ..dev, sessions: [placed_archived_item("desktop-test")] })
+    .with_dev(dev => {
+      ..dev,
+      sessions: [placed_archived_item("desktop-test")],
+    })
   let (_, next) = update_dev(
     dispatch,
     SessionsChanged(
@@ -825,9 +831,12 @@ test "archiving carries no goal the record already confirmed" {
   let model = test_model()
     .replace_conversation({
       ..test_conversation(),
-      goal: Some({ text: "the goal on record", blocked: None }),
+      goal: Some({ text: "the goal on record", blocked: None, }),
     })
-    .with_dev(dev => { ..dev, sessions: [placed_archived_item("desktop-test")] })
+    .with_dev(dev => {
+      ..dev,
+      sessions: [placed_archived_item("desktop-test")],
+    })
   let (_, next) = update_dev(
     dispatch,
     SessionsChanged(
@@ -856,11 +865,11 @@ test "a kept goal draft is a conversation you can get back to" {
   )
   assert_false(fresh.worth_keeping())
   // A blank editor is not writing: an untouched `/goal` still lets the husk go.
-  assert_false({ ..fresh, goal_edit: Some({ draft: "   " }) }.worth_keeping())
+  assert_false({ ..fresh, goal_edit: Some({ draft: "   ", }), }.worth_keeping())
   for
     holding in [
-      { ..fresh, goal_edit: Some({ draft: "a goal still being written" }) },
-      { ..fresh, goal_pending: Some(test_goal_command(Setting("awaiting"))) },
+      { ..fresh, goal_edit: Some({ draft: "a goal still being written", }), },
+      { ..fresh, goal_pending: Some(test_goal_command(Setting("awaiting"))), },
     ] {
     assert_true(holding.worth_keeping())
     // On screen, with focus somewhere else — the case that decides whether
@@ -900,10 +909,10 @@ test "the frontier a goal is sent from counts what is already buffered" {
       {
         sequence: 7,
         ts: None,
-        item: @protocol.RuntimeNotice({ content: "[goal]\nship the feature" }),
+        item: @protocol.RuntimeNotice({ content: "[goal]\nship the feature", }),
       },
     ]),
-    goal_edit: Some({ draft: "ship the feature" }),
+    goal_edit: Some({ draft: "ship the feature", }),
   }
   inspect(reloading.durable_frontier(), content="7")
   // A read that failed keeps its buffer, and `begin_transcript_reload` carries
@@ -915,7 +924,7 @@ test "the frontier a goal is sent from counts what is already buffered" {
         {
           sequence: 7,
           ts: None,
-          item: @protocol.RuntimeNotice({ content: "[goal]\nship the feature" }),
+          item: @protocol.RuntimeNotice({ content: "[goal]\nship the feature", }),
         },
       ]),
     }.durable_frontier(),
@@ -1033,7 +1042,7 @@ test "a dead request cannot retire the one that replaced it" {
   inspect(stale.notifications.length(), content="1")
   assert_true(
     stale.active().goal_pending
-    is Some({ id: "goal-2", request: Setting("ship the feature"), since: 0 }),
+    is Some({ id: "goal-2", request: Setting("ship the feature"), since: 0, }),
   )
   // Nor does the superseded send's text come back: the user resent it, so
   // restoring it would read as the send still in flight having failed.
@@ -1099,7 +1108,7 @@ test "an undelivered reply goes quiet once its send has been settled" {
       session="desktop-test",
       sequence=1,
       ts=None,
-      item=@protocol.RuntimeNotice({ content: "[goal]\nship the feature" }),
+      item=@protocol.RuntimeNotice({ content: "[goal]\nship the feature", }),
       session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
@@ -1156,7 +1165,7 @@ test "a rejection that arrives after the record has spoken only reports" {
       session="desktop-test",
       sequence=1,
       ts=None,
-      item=@protocol.RuntimeNotice({ content: "[goal]\nthe goal that won" }),
+      item=@protocol.RuntimeNotice({ content: "[goal]\nthe goal that won", }),
       session_root=@interop.ChannelId::Local.test_store_root(),
     ),
     model,
@@ -1175,7 +1184,7 @@ test "a rejection that arrives after the record has spoken only reports" {
   inspect(late.notifications.length(), content="1")
   assert_true(late.active().goal_edit is None)
   assert_true(
-    late.active().goal is Some({ text: "the goal that won", blocked: None }),
+    late.active().goal is Some({ text: "the goal that won", blocked: None, }),
   )
 }
 
@@ -1187,7 +1196,7 @@ test "each goal send gets an identity of its own" {
   // from the first.
   let model = test_model().replace_conversation({
     ..test_conversation(),
-    goal_edit: Some({ draft: "ship the feature" }),
+    goal_edit: Some({ draft: "ship the feature", }),
   })
   let (_, first) = update(dispatch, SubmitGoal, model)
   guard first.active().goal_pending is Some(one) else { fail("nothing sent") }
@@ -1196,7 +1205,7 @@ test "each goal send gets an identity of its own" {
     SubmitGoal,
     first.replace_conversation({
       ..first.active(),
-      goal_edit: Some({ draft: "ship the feature" }),
+      goal_edit: Some({ draft: "ship the feature", }),
     }),
   )
   guard again.active().goal_pending is Some(two) else { fail("nothing sent") }
@@ -1277,7 +1286,10 @@ test "a reload settles a request the transport never answered" {
   }
 
   fn reloading(model : Model) raise {
-    { ..model, conversations: [{ ..model.active(), sync: test_reloading([]) }] }
+    {
+      ..model,
+      conversations: [{ ..model.active(), sync: test_reloading([]), }],
+    }
   }
 
   // A record that does not carry it settles nothing: the append may still be
@@ -1291,7 +1303,7 @@ test "a reload settles a request the transport never answered" {
   // older than the request — that is the record agreeing, not answering.
   let older = refresh(
     reloading(absent),
-    Some({ text: "ship the feature", blocked: None }),
+    Some({ text: "ship the feature", blocked: None, }),
     [(4, GoalSet("ship the feature"))],
   )
   assert_true(
@@ -1300,7 +1312,7 @@ test "a reload settles a request the transport never answered" {
   )
   let landed = refresh(
     reloading(older),
-    Some({ text: "ship the feature", blocked: None }),
+    Some({ text: "ship the feature", blocked: None, }),
     [(5, GoalSet("ship the feature"))],
   )
   assert_true(landed.active().goal_pending is None)
@@ -1321,19 +1333,19 @@ test "a goal on an unbound worktree conversation creates the worktree first" {
   assert_true(unbound.goal_creates_worktree() is Some(_))
   // Already bound: placement is settled, so the goal goes straight out.
   assert_true(
-    { ..unbound, workspace: Worktree(project=workspace, name="wt-1") }.goal_creates_worktree()
+    { ..unbound, workspace: Worktree(project=workspace, name="wt-1"), }.goal_creates_worktree()
     is None,
   )
   // Local mode is a deliberate choice to run in the workspace itself.
   assert_true(
-    { ..unbound, worktree_mode: false }.goal_creates_worktree() is None,
+    { ..unbound, worktree_mode: false, }.goal_creates_worktree() is None,
   )
   // A conversation that has begun cannot still be waiting for placement.
   assert_true(
     {
       ..unbound,
       messages: [
-        { kind: User, content: "already talking", ts: None, sequence: None },
+        { kind: User, content: "already talking", ts: None, sequence: None, },
       ],
     }.goal_creates_worktree()
     is None,
@@ -1352,7 +1364,7 @@ test "a fresh conversation survives on its goal draft alone" {
   )
   assert_true(fresh.draft_empty())
   assert_false(
-    { ..fresh, goal_edit: Some({ draft: "still writing" }) }.draft_empty(),
+    { ..fresh, goal_edit: Some({ draft: "still writing", }), }.draft_empty(),
   )
   assert_false(
     {
@@ -1361,11 +1373,11 @@ test "a fresh conversation survives on its goal draft alone" {
     }.draft_empty(),
   )
   // A blank editor is not a draft: an untouched `/goal` still lets the husk go.
-  assert_true({ ..fresh, goal_edit: Some({ draft: "   " }) }.draft_empty())
+  assert_true({ ..fresh, goal_edit: Some({ draft: "   ", }), }.draft_empty())
   let model = {
     ..test_model(),
     conversations: [
-      { ..fresh, goal_edit: Some({ draft: "a goal still being written" }) },
+      { ..fresh, goal_edit: Some({ draft: "a goal still being written", }), },
       empty_conversation(
         @interop.ChannelId::Local,
         "desktop-other",

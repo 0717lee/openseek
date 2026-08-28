@@ -21,7 +21,7 @@ pub fn MarkdownViewerWidgetModel::MarkdownViewerWidgetModel(
   model : @model.TextModel,
   resource_kind : MarkdownResourceKind,
 ) -> MarkdownViewerWidgetModel {
-  { model, resource_kind }
+  { model, resource_kind, }
 }
 
 ///|
@@ -57,7 +57,7 @@ pub fn MarkdownViewerWidgetOptions::MarkdownViewerWidgetOptions(
   placeholder? : String = "",
   show_unused? : Bool = true,
 ) -> MarkdownViewerWidgetOptions {
-  { theme, placeholder, show_unused }
+  { theme, placeholder, show_unused, }
 }
 
 ///|
@@ -123,7 +123,7 @@ priv struct MarkdownViewerWidgetIdCounter {
 }
 
 ///|
-let markdown_viewer_id_counter : MarkdownViewerWidgetIdCounter = { value: 0 }
+let markdown_viewer_id_counter : MarkdownViewerWidgetIdCounter = { value: 0, }
 
 ///|
 fn next_markdown_viewer_id() -> Int {
@@ -150,7 +150,7 @@ fn MarkdownViewerWidgetPlaceholder::MarkdownViewerWidgetPlaceholder(
   let text = document.create_text_node(options.placeholder)
   message.append_child(text.as_node())
   root.append_child(message.as_node())
-  { root, text }
+  { root, text, }
 }
 
 ///|
@@ -545,7 +545,7 @@ pub fn MarkdownViewerWidget::set_model(
     Some(next) => self.attach_model(next)
     None => ()
   }
-  self.did_change_model.fire({ old_model_url, new_model_url })
+  self.did_change_model.fire({ old_model_url, new_model_url, })
   old
 }
 
@@ -711,7 +711,7 @@ pub fn MarkdownViewerWidget::save_view_state(
   guard self.current is Some(current) && current.view is Some(view) else {
     return None
   }
-  Some({ scroll_top: view.scroll_top(), scroll_left: view.scroll_left() })
+  Some({ scroll_top: view.scroll_top(), scroll_left: view.scroll_left(), })
 }
 
 ///|

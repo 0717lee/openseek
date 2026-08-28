@@ -17,7 +17,7 @@ pub struct DiffState {
 ///|
 fn DiffState::from_diff_result(result : @diff.DocumentDiff) -> DiffState {
   {
-    mappings: result.changes.map(change => { line_range_mapping: change }),
+    mappings: result.changes.map(change => { line_range_mapping: change, }),
     additional_alignments: result.additional_alignments.copy(),
   }
 }
@@ -161,7 +161,7 @@ fn DiffState::next_change_from_modified_line(
   if index == count {
     index = 0
   }
-  Some({ change_index: index, change_count: count, change: changes[index] })
+  Some({ change_index: index, change_count: count, change: changes[index], })
 }
 
 ///|
@@ -182,5 +182,5 @@ fn DiffState::previous_change_from_modified_line(
   if index < 0 {
     index = count - 1
   }
-  Some({ change_index: index, change_count: count, change: changes[index] })
+  Some({ change_index: index, change_count: count, change: changes[index], })
 }

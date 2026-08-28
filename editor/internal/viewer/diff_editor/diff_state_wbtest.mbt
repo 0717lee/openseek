@@ -145,7 +145,10 @@ test "real-widget-sized navigation projection groups fifty-seven mappings into t
       line += 7
     }
   }
-  let state = DiffState::from_diff_result({ changes, additional_alignments: [] })
+  let state = DiffState::from_diff_result({
+    changes,
+    additional_alignments: [],
+  })
   assert_eq(state.mappings.length(), 57)
   assert_eq(state.navigation_changes().length(), 31)
   assert_eq(

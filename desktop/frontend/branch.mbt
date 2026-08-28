@@ -285,7 +285,7 @@ fn probe_branch(
     .map(pull_request => pull_request.base)
   (
     fetch_branch(dispatch, channel, session, cwd, generation~, base_hint?),
-    model.replace_conversation({ ..conv, branch_generation: generation }),
+    model.replace_conversation({ ..conv, branch_generation: generation, }),
   )
 }
 
@@ -296,7 +296,7 @@ fn probe_branch(
 /// probes whose answers are no longer wanted.
 fn Model::mint_git_request(self : Model) -> (Int, Model) {
   let generation = self.git_request_generation + 1
-  (generation, { ..self, git_request_generation: generation })
+  (generation, { ..self, git_request_generation: generation, })
 }
 
 ///|
@@ -342,7 +342,7 @@ test "a settled pull request supplies the baseline the next probe measures from"
   assert_eq(hint_of(answered), Some("feature/x"))
   // An answer describing a branch the checkout has left is not one to measure
   // from either — `settled_probe` withholds it, as it does from the chip.
-  assert_eq(hint_of({ ..answered, branch: Some("feature/z") }), None)
+  assert_eq(hint_of({ ..answered, branch: Some("feature/z"), }), None)
 }
 
 ///|
@@ -350,25 +350,25 @@ test "the chip's tint follows CI, and its label follows the pull request" {
   // Failures outrank running work, which outranks a clean sweep: the chip has
   // one color and it should be the one worth acting on.
   assert_eq(
-    Checks::{ passed: 4, failed: 2, pending: 1 }.composer_checks().tone(),
+    Checks::{ passed: 4, failed: 2, pending: 1, }.composer_checks().tone(),
     "failed",
   )
   assert_eq(
-    Checks::{ passed: 4, failed: 0, pending: 1 }.composer_checks().tone(),
+    Checks::{ passed: 4, failed: 0, pending: 1, }.composer_checks().tone(),
     "pending",
   )
   assert_eq(
-    Checks::{ passed: 4, failed: 0, pending: 0 }.composer_checks().tone(),
+    Checks::{ passed: 4, failed: 0, pending: 0, }.composer_checks().tone(),
     "passed",
   )
   // No checks and no pull request are both "nothing to say", not "passed".
   assert_eq(@composer.GitPresentation(branch="feature").tone(), "none")
   assert_eq(
-    Checks::{ passed: 4, failed: 2, pending: 1 }.composer_checks().summary(),
+    Checks::{ passed: 4, failed: 2, pending: 1, }.composer_checks().summary(),
     "2 failed · 1 running · 4 passed",
   )
   assert_eq(
-    Checks::{ passed: 0, failed: 0, pending: 0 }.composer_checks().summary(),
+    Checks::{ passed: 0, failed: 0, pending: 0, }.composer_checks().summary(),
     "no checks",
   )
   let open : PullRequest = {
@@ -387,15 +387,15 @@ test "the chip's tint follows CI, and its label follows the pull request" {
   // that need one carry it.
   assert_eq(open.composer_pull_request().label(), "#697")
   assert_eq(
-    { ..open, draft: true }.composer_pull_request().label(),
+    { ..open, draft: true, }.composer_pull_request().label(),
     "#697 Draft",
   )
   assert_eq(
-    { ..open, state: PullRequestMerged }.composer_pull_request().label(),
+    { ..open, state: PullRequestMerged, }.composer_pull_request().label(),
     "#697 Merged",
   )
   assert_eq(
-    { ..open, state: PullRequestClosed }.composer_pull_request().label(),
+    { ..open, state: PullRequestClosed, }.composer_pull_request().label(),
     "#697 Closed",
   )
 }
@@ -428,7 +428,7 @@ fn probe_pull_request(
   }
   let probe = match conv.pull_request {
     Some(previous) if previous.branch == branch =>
-      { ..previous, probing: true, stale: false }
+      { ..previous, probing: true, stale: false, }
     _ => fresh
   }
   (
@@ -459,7 +459,7 @@ fn Conversation::forget_pull_request(
   self : Conversation,
   fence~ : Int,
 ) -> Conversation {
-  { ..self, pull_request: None, pull_request_generation: fence }
+  { ..self, pull_request: None, pull_request_generation: fence, }
 }
 
 ///|

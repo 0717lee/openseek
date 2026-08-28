@@ -24,7 +24,7 @@ fn review_progress_state() -> (State, Ctx, ChangedFile) raise {
       refresh_again=false,
     ),
   }
-  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path), }
   (state, ctx, selected)
 }
 
@@ -41,7 +41,7 @@ test "review progress toggles only the active exact change" {
     ..ordinary_docs.get(selected.path).unwrap(),
     review: None,
   }
-  let ordinary = { ..state, docs: ordinary_docs }
+  let ordinary = { ..state, docs: ordinary_docs, }
   let (_, unchanged) = update(test_emit(), ToggleReviewProgress, ordinary, ctx)
   assert_true(unchanged == ordinary)
 }
@@ -50,7 +50,7 @@ test "review progress toggles only the active exact change" {
 test "a final changes refresh invalidates progress when the row changes" {
   let (state, ctx, selected) = review_progress_state()
   let (_, reviewed) = update(test_emit(), ToggleReviewProgress, state, ctx)
-  let changed_again = { ..selected, index_status: "M", worktree_status: " " }
+  let changed_again = { ..selected, index_status: "M", worktree_status: " ", }
   let refreshing = {
     ..reviewed,
     changes: ChangeListReady(

@@ -187,7 +187,7 @@ test "typed operation start covers delayed and every immediate state branch" {
   assert_true(immediate_idle is HoverOperationRunAsyncAndSync(7))
   assert_true(idle_with_options.state is HoverOpSecondWait)
   assert_true(idle_with_options.options == Some(immediate_options))
-  let second_wait = { ..first_wait, state: HoverOpSecondWait }
+  let second_wait = { ..first_wait, state: HoverOpSecondWait, }
   let (immediate_second, second_with_options) = second_wait.start(
     HoverStartImmediate,
     immediate_options,

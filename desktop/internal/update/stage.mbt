@@ -74,7 +74,7 @@ pub async fn stage_update(
       raise UpdateError("the downloaded bundle is not notarized: \{message}")
     error => raise error
   }
-  { version: info.version, app_path }
+  { version: info.version, app_path, }
 }
 
 ///|

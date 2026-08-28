@@ -77,15 +77,15 @@ test "parse environment assignments and redirects" {
   assert_eq(commands.length(), 1)
   assert_true(
     commands[0].env ==
-    [{ name: "FOO", value: "bar" }, { name: "JSON", value: "a=b" }],
+    [{ name: "FOO", value: "bar", }, { name: "JSON", value: "a=b", }],
   )
   assert_true(commands[0].argv == ["moon", "run", "cmd/main"])
   assert_true(
     commands[0].redirects ==
     [
-      { op: ">", target: "out.json" },
-      { op: "2>>", target: "err.log" },
-      { op: "2>&", target: "1" },
+      { op: ">", target: "out.json", },
+      { op: "2>>", target: "err.log", },
+      { op: "2>&", target: "1", },
     ],
   )
 }
@@ -100,20 +100,20 @@ test "parse quoted and escaped environment assignment values" {
   assert_eq(commands.length(), 1)
   assert_true(
     commands[0].env ==
-    [{ name: "FOO", value: "bar baz" }, { name: "PATH", value: "~/bin" }],
+    [{ name: "FOO", value: "bar baz", }, { name: "PATH", value: "~/bin", }],
   )
   assert_true(commands[0].argv == ["moon", "check"])
   guard @shell_parse.parse_for_policy("FOO=bar\\ baz moon check")
     is Simple(escaped) else {
     fail("expected escaped assignment value")
   }
-  assert_true(escaped[0].env == [{ name: "FOO", value: "bar baz" }])
+  assert_true(escaped[0].env == [{ name: "FOO", value: "bar baz", }])
   assert_true(escaped[0].argv == ["moon", "check"])
   guard @shell_parse.parse_for_policy("HOME=\"~\" moon check")
     is Simple(quoted_tilde) else {
     fail("expected quoted tilde assignment value")
   }
-  assert_true(quoted_tilde[0].env == [{ name: "HOME", value: "~" }])
+  assert_true(quoted_tilde[0].env == [{ name: "HOME", value: "~", }])
   assert_true(quoted_tilde[0].argv == ["moon", "check"])
 }
 
@@ -127,7 +127,7 @@ test "parse fd qualified input redirects" {
   assert_true(commands[0].argv == ["cmd"])
   assert_true(
     commands[0].redirects ==
-    [{ op: "0<", target: "input" }, { op: "2<", target: "err.log" }],
+    [{ op: "0<", target: "input", }, { op: "2<", target: "err.log", }],
   )
 }
 
@@ -141,7 +141,7 @@ test "preserve spaced numeric arguments before redirects" {
   assert_true(commands[0].argv == ["cmd", "2", "3"])
   assert_true(
     commands[0].redirects ==
-    [{ op: "<", target: "input" }, { op: ">", target: "out" }],
+    [{ op: "<", target: "input", }, { op: ">", target: "out", }],
   )
   guard @shell_parse.parse_for_policy("cmd 2>out 3>>err") is Simple(attached) else {
     fail("expected attached fd redirects")
@@ -149,7 +149,7 @@ test "preserve spaced numeric arguments before redirects" {
   assert_true(attached[0].argv == ["cmd"])
   assert_true(
     attached[0].redirects ==
-    [{ op: "2>", target: "out" }, { op: "3>>", target: "err" }],
+    [{ op: "2>", target: "out", }, { op: "3>>", target: "err", }],
   )
 }
 
@@ -164,10 +164,10 @@ test "parse append both and fd duplicate redirects" {
   assert_true(
     commands[0].redirects ==
     [
-      { op: "&>>", target: "out" },
-      { op: "<&", target: "3" },
-      { op: ">|", target: "forced" },
-      { op: "4<>", target: "rw" },
+      { op: "&>>", target: "out", },
+      { op: "<&", target: "3", },
+      { op: ">|", target: "forced", },
+      { op: "4<>", target: "rw", },
     ],
   )
 }
@@ -179,7 +179,7 @@ test "keep quoted words out of special shell grammar" {
     fail("expected quoted numeric argument")
   }
   assert_true(commands[0].argv == ["cmd", "2"])
-  assert_true(commands[0].redirects == [{ op: "<", target: "input" }])
+  assert_true(commands[0].redirects == [{ op: "<", target: "input", }])
   assert_true(@shell_parse.parse_for_policy("A\"\"=x env") is TooComplex(_))
   assert_true(@shell_parse.parse_for_policy("A\\=x env") is TooComplex(_))
   assert_true(@shell_parse.parse_for_policy("\"A\"=x env") is TooComplex(_))
@@ -364,7 +364,7 @@ test "parse pipes and conditionals as visible top level commands" {
   }
   assert_eq(commands.length(), 3)
   assert_true(commands[0].argv == ["moon", "check"])
-  assert_true(commands[0].redirects == [{ op: "2>&", target: "1" }])
+  assert_true(commands[0].redirects == [{ op: "2>&", target: "1", }])
   assert_true(commands[1].argv == ["tee", "out.log"])
   assert_true(commands[2].argv == ["true"])
   assert_true(commands[0].separator_before is None)

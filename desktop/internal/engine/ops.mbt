@@ -111,7 +111,7 @@ pub async fn start_run(
       session_root: config.session_root.map(root => root.resource_path()),
     }),
   )
-  { run_id, status: "accepted", exit_code: 0 }
+  { run_id, status: "accepted", exit_code: 0, }
 }
 
 ///|
@@ -143,10 +143,10 @@ pub fn cancel_run(
 ) -> CancelReply raise EngineError {
   guard open_run_engine(manager, run_id?=payload.run_id) is Some(live) &&
     live.phase is Running(run_id~, ..) else {
-    return { run_id: None }
+    return { run_id: None, }
   }
   if payload.run_id is Some(expected) && run_id != expected {
-    return { run_id: None }
+    return { run_id: None, }
   }
   guard live.submit(
     @protocol.cancel(),
@@ -159,7 +159,7 @@ pub fn cancel_run(
   // the dying turn survives too — cancel only aborts the active turn, so the
   // queued command still runs and the phase must still route the terminal
   // event into Compacting.
-  { run_id: Some(run_id) }
+  { run_id: Some(run_id), }
 }
 
 ///|
@@ -293,7 +293,7 @@ pub async fn compact_run(
     raise EngineError("engine changed before compaction was submitted")
   }
   live.phase = compacting_phase
-  { compacting: true }
+  { compacting: true, }
 }
 
 ///|
@@ -403,7 +403,7 @@ pub async fn goal_run(
   if ack.get() is Some(error) {
     raise error
   }
-  { delivered: true }
+  { delivered: true, }
 }
 
 ///|
@@ -418,21 +418,21 @@ pub fn steer_run(
   payload : @protocol.SteerPayload,
 ) -> SteerReply {
   guard !payload.text.is_blank() else {
-    return { steered: false, run_id: None }
+    return { steered: false, run_id: None, }
   }
   guard open_run_engine(manager, run_id?=payload.run_id) is Some(live) &&
     live.phase is Running(run_id~, ..) else {
-    return { steered: false, run_id: None }
+    return { steered: false, run_id: None, }
   }
   if payload.run_id is Some(expected) && run_id != expected {
-    return { steered: false, run_id: None }
+    return { steered: false, run_id: None, }
   }
   let submission_id = normalize_submission_id(payload.submission_id)
   guard live.submit(
     @protocol.steer(payload.text),
     failure_reason="failed to write steering to the engine",
   ) else {
-    return { steered: false, run_id: Some(run_id) }
+    return { steered: false, run_id: Some(run_id), }
   }
   // Recorded in the same synchronous step as the submission, so the entry
   // exists before any event this steer can produce and a terminal event that
@@ -445,7 +445,7 @@ pub fn steer_run(
   // exact-id ownership, and the trailing receipt or Finished/durable recovery
   // settles it without restoring a duplicate draft.
   live.steer_runs.record_sent(payload.text, submission_id) |> ignore
-  { steered: true, run_id: Some(run_id) }
+  { steered: true, run_id: Some(run_id), }
 }
 
 ///|
@@ -462,21 +462,21 @@ pub fn approve_run(
   manager : EngineManager,
   payload : @protocol.ApprovalPayload,
 ) -> ApprovalReply {
-  guard !payload.id.is_blank() else { return { delivered: false } }
+  guard !payload.id.is_blank() else { return { delivered: false, } }
   guard open_run_engine(manager, run_id?=payload.run_id) is Some(live) &&
     live.phase is Running(run_id~, ..) else {
-    return { delivered: false }
+    return { delivered: false, }
   }
   if payload.run_id is Some(expected) && run_id != expected {
-    return { delivered: false }
+    return { delivered: false, }
   }
   guard live.submit(
     @protocol.approval(payload.id, allow=payload.allow),
     failure_reason="failed to write the approval decision to the engine",
   ) else {
-    return { delivered: false }
+    return { delivered: false, }
   }
-  { delivered: true }
+  { delivered: true, }
 }
 
 ///|
@@ -528,7 +528,7 @@ async fn session_group(
   let native_root = root.to_string()
   let root = root.resource_path()
   fn failed(error : String) -> SessionGroup {
-    { workspace, name, session_root: root, sessions: [], error }
+    { workspace, name, session_root: root, sessions: [], error, }
   }
 
   let output = engine_stdout(manager, [
@@ -545,7 +545,7 @@ async fn session_group(
     return failed("engine returned a malformed session list")
   }
   let sessions = @protocol.SessionListEntry::array_from_wire(sessions_json)
-  { workspace, name, session_root: root, sessions, error: "" }
+  { workspace, name, session_root: root, sessions, error: "", }
 }
 
 ///|
@@ -606,7 +606,7 @@ pub async fn load_session(
     @session_record.Absent(_) => return empty_session_reply(session)
     error => raise EngineError("session load failed: \{error}")
   }
-  { session: document, watermark: Some(session_max_sequence(document)) }
+  { session: document, watermark: Some(session_max_sequence(document)), }
 }
 
 ///|
@@ -671,7 +671,7 @@ pub async fn load_archived_session(
     error if @async.is_being_cancelled() => raise error
     error => raise EngineError("archived session load failed: \{error}")
   }
-  { session: document, watermark: Some(session_max_sequence(document)) }
+  { session: document, watermark: Some(session_max_sequence(document)), }
 }
 
 ///|
@@ -1096,7 +1096,7 @@ async test "setup failure retires the writer before an immediate next start" {
     if manager.serving().get(session) is Some(slot) {
       assert_true(slot.live() is None)
     }
-    assert_true(cancel_run(manager, { run_id: Some(first) }).run_id is None)
+    assert_true(cancel_run(manager, { run_id: Some(first), }).run_id is None)
     let second = start_run(sink, manager, {
       task: "second",
       submission_id: None,

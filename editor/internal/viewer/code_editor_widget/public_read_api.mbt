@@ -380,7 +380,7 @@ pub fn CodeEditorWidget::get_scrolled_visible_position(
     content_left -
     view_model.view_layout.get_current_scroll_left()
   let height = self.get_line_height_for_position(position)
-  Some({ top, left, height })
+  Some({ top, left, height, })
 }
 
 ///|

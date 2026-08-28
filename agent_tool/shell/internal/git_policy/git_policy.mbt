@@ -41,7 +41,7 @@ pub fn parse(argv : Array[String], arg_start : Int) -> Invocation? {
     if arg.has_prefix("-") && arg != "-" {
       return None
     }
-    return Some({ subcommand: arg, subcommand_index: index })
+    return Some({ subcommand: arg, subcommand_index: index, })
   }
   None
 }

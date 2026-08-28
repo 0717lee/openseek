@@ -43,7 +43,7 @@ pub fn DocumentError::DocumentError(
   uri? : @base_common.Uri,
 ) -> DocumentError {
   let message = if message == "" { code.to_string() } else { message }
-  { code, message, uri }
+  { code, message, uri, }
 }
 
 ///|
@@ -51,7 +51,7 @@ pub fn DocumentError::DocumentError(
 fn DocumentError::from_file_system_error(
   error : FileSystemProviderError,
 ) -> DocumentError {
-  { code: error.code, message: error.message, uri: error.uri }
+  { code: error.code, message: error.message, uri: error.uri, }
 }
 
 ///|
@@ -168,7 +168,7 @@ fn DocumentSnapshot::position_at_offset_impl(
 ) -> @base_common.Position {
   let offset = offset.clamp(min=0, max=self.length())
   let line = self.line_at_offset(offset)
-  { line_number: line + 1, column: offset - self.line_starts[line] + 1 }
+  { line_number: line + 1, column: offset - self.line_starts[line] + 1, }
 }
 
 ///|

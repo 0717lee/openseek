@@ -6,7 +6,7 @@ fn test_change(
   let changes = @diff.CoreDocumentDiffProvider().compute_diff(
       TextSnapshot(original.join("\n")),
       TextSnapshot(modified.join("\n")),
-      { ignore_trim_whitespace: false },
+      { ignore_trim_whitespace: false, },
     ).changes
   assert_eq(changes.length(), 1)
   changes[0]

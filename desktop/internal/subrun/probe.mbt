@@ -287,7 +287,7 @@ pub async fn follow_progress(
   for ;; {
     @async.sleep(SubrunProbeIntervalMs)
     if state.poll() {
-      publish({ id, session, steps: state.steps, activity: state.activity })
+      publish({ id, session, steps: state.steps, activity: state.activity, })
     }
   }
 }

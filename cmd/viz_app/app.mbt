@@ -304,7 +304,7 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
                   child_id,
                   @viz.session_from_parse(parsed, id=child_id, system_prompt~),
                 )
-                (@cmd.none, { ..model, subrun_children: children })
+                (@cmd.none, { ..model, subrun_children: children, })
               }
               NotFound | Malformed => (@cmd.none, model)
             }
@@ -320,7 +320,7 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
           Err(error) =>
             (
               @cmd.none,
-              { ..model, loading: false, status: "request failed: \{error}" },
+              { ..model, loading: false, status: "request failed: \{error}", },
             )
           Ok(text) =>
             match parse_load(text) {
@@ -421,15 +421,15 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
           @cmd.effect(() => set_hash_view(value)),
           @cmd.effect(() => restore_scroll_to_hash_seq()),
         ]),
-        { ..model, view_mode: mode },
+        { ..model, view_mode: mode, },
       )
     }
     SetArgsView(show_original) =>
-      (@cmd.none, { ..model, show_original_args: show_original })
+      (@cmd.none, { ..model, show_original_args: show_original, })
     ToggleErrorsOnly =>
       (
         @cmd.none,
-        { ..model, errors_only: !model.errors_only, escalated_only: false },
+        { ..model, errors_only: !model.errors_only, escalated_only: false, },
       )
     // Scroll to the next/previous failed-tool card, cycling. The count is
     // recomputed for the active view, while the browser chooses the target
@@ -450,7 +450,7 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
     ToggleEscalatedOnly =>
       (
         @cmd.none,
-        { ..model, escalated_only: !model.escalated_only, errors_only: false },
+        { ..model, escalated_only: !model.escalated_only, errors_only: false, },
       )
     JumpToEscalated(direction) => {
       let count = current_escalated_count(model)
@@ -471,7 +471,7 @@ fn update(emit : @cmd.Emit[Msg], msg : Msg, model : Model) -> (@cmd.Cmd, Model) 
       // variable blocks take over; the model tracks it for button highlighting.
       (apply_theme(theme), { ..model, theme, })
     ToggleSidebar =>
-      (@cmd.none, { ..model, sidebar_visible: !model.sidebar_visible })
+      (@cmd.none, { ..model, sidebar_visible: !model.sidebar_visible, })
     ToggleRoot(root) =>
       (
         @cmd.none,
@@ -1791,7 +1791,7 @@ fn session_row_of(json : Json) -> SessionRow? {
     _ => None
   }
   let is_marker = json is { "is_marker": True, .. }
-  Some({ key, id, root_label, last_active, is_marker, first_prompt })
+  Some({ key, id, root_label, last_active, is_marker, first_prompt, })
 }
 
 ///|
@@ -1976,7 +1976,7 @@ test "apply_dropped_file switches to local-file mode with the header lifted" {
     #|{"version":1,"id":"demo","system_prompt":"SYS"}
     #|{"sequence":1,"ts":0,"item":{"kind":"user","payload":{"content":"hi"}}}
     #|
-  let selected = { ..init_model(), selected: Some("0|remote"), loading: true }
+  let selected = { ..init_model(), selected: Some("0|remote"), loading: true, }
   let model = apply_dropped_file(selected, "run.jsonl", 123L, text)
   debug_inspect(model.selected, content="None")
   debug_inspect(model.dropped, content="Some(\"run.jsonl\")")
@@ -2016,7 +2016,7 @@ test "dropped display id prefers the header identity over the file name" {
 ///|
 test "stale dropped-file reads are discarded" {
   let emit = stub_emit()
-  let model = { ..init_model(), drop_ticket: 2 }
+  let model = { ..init_model(), drop_ticket: 2, }
   // A read issued before the user moved on carries an old ticket: ignored.
   let (_, unchanged) = update(
     emit,
@@ -2057,7 +2057,7 @@ test "a late session list does not clobber the dropped-file status" {
 ///|
 test "selecting a session invalidates an in-flight dropped-file read" {
   let emit = stub_emit()
-  let model = { ..init_model(), drop_ticket: 5 }
+  let model = { ..init_model(), drop_ticket: 5, }
   let (_, selected) = update(emit, Select("0|remote"), model)
   inspect(selected.drop_ticket, content="6")
   debug_inspect(selected.selected, content="Some(\"0|remote\")")
@@ -2139,12 +2139,19 @@ test "sidebar_groups clusters by container, in listing order, no duplicates" {
 
 ///|
 fn marker_row(key : String, id : String, root_label : String) -> SessionRow {
-  { key, id, root_label, last_active: None, is_marker: true, first_prompt: "" }
+  { key, id, root_label, last_active: None, is_marker: true, first_prompt: "", }
 }
 
 ///|
 fn direct_row(key : String, id : String, root_label : String) -> SessionRow {
-  { key, id, root_label, last_active: None, is_marker: false, first_prompt: "" }
+  {
+    key,
+    id,
+    root_label,
+    last_active: None,
+    is_marker: false,
+    first_prompt: "",
+  }
 }
 
 ///|
@@ -2240,8 +2247,8 @@ test "collapsed group helpers toggle and prune stale groups" {
 
 ///|
 test "app class tracks sidebar visibility" {
-  let visible = { ..init_model(), sidebar_visible: true }
-  let hidden = { ..init_model(), sidebar_visible: false }
+  let visible = { ..init_model(), sidebar_visible: true, }
+  let hidden = { ..init_model(), sidebar_visible: false, }
   inspect(app_class(visible), content="app")
   inspect(app_class(hidden), content="app sidebar-hidden")
 }
@@ -2271,12 +2278,12 @@ test "the hash session key restores the selection on the first listing" {
   let emit = stub_emit()
   let listing =
     #|[{"key":"k1","id":"s1"},{"key":"k2","id":"s2"}]
-  let pending = { ..init_model(), pending_restore_key: Some("k2") }
+  let pending = { ..init_model(), pending_restore_key: Some("k2"), }
   let (_, restored) = update(emit, SessionsFetched(Ok(listing)), pending)
   debug_inspect(restored.selected, content="Some(\"k2\")")
   debug_inspect(restored.pending_restore_key, content="None")
   // An unknown key is consumed without selecting anything.
-  let stale = { ..init_model(), pending_restore_key: Some("gone") }
+  let stale = { ..init_model(), pending_restore_key: Some("gone"), }
   let (_, ignored) = update(emit, SessionsFetched(Ok(listing)), stale)
   debug_inspect(ignored.selected, content="None")
   debug_inspect(ignored.pending_restore_key, content="None")
@@ -2309,7 +2316,7 @@ test "the hash view mode wins over the defaults" {
 /// file all keep the explicit click.
 test "standalone exports auto-open their first session" {
   let row = direct_row("k1", "s1", "")
-  let other = { ..row, key: "k2", id: "s2" }
+  let other = { ..row, key: "k2", id: "s2", }
   assert_true(should_auto_open(true, [row], selected=None, dropped=None))
   assert_true(should_auto_open(true, [row, other], selected=None, dropped=None))
   assert_false(should_auto_open(false, [row], selected=None, dropped=None))
@@ -2333,7 +2340,7 @@ test "escalated toolbar mirrors errors-only controls" {
 ///|
 test "error and escalated filters are mutually exclusive" {
   let emit = stub_emit()
-  let errors = { ..init_model(), errors_only: true }
+  let errors = { ..init_model(), errors_only: true, }
   let (_, escalated) = update(emit, ToggleEscalatedOnly, errors)
   assert_true(escalated.escalated_only)
   assert_false(escalated.errors_only)

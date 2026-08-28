@@ -124,11 +124,11 @@ pub fn FoldingModel::toggle_collapse_state(
   let processed : Map[String, Bool] = Map([])
   self.decoration_access.change_decorations(accessor => {
     // index from [0 ... this.regions.length]
-    let k : Ref[Int] = { val: 0 }
+    let k : Ref[Int] = { val: 0, }
     // end of the range where decorations need to be updated
-    let dirty_region_end_line : Ref[Int] = { val: -1 }
+    let dirty_region_end_line : Ref[Int] = { val: -1, }
     // the end of the last hidden lines
-    let last_hidden_line : Ref[Int] = { val: -1 }
+    let last_hidden_line : Ref[Int] = { val: -1, }
     let update_decorations_until = (index : Int) => {
       while k.val < index {
         let end_line_number = self.regions.get_end_line_number(k.val)
@@ -334,14 +334,14 @@ struct RegionFilter {
 pub fn RegionFilter::RegionFilter(
   filter : (FoldingRegion) -> Bool,
 ) -> RegionFilter {
-  { plain: Some(filter), with_level: None }
+  { plain: Some(filter), with_level: None, }
 }
 
 ///|
 fn region_filter_with_level(
   filter : (FoldingRegion, Int) -> Bool,
 ) -> RegionFilter {
-  { plain: None, with_level: Some(filter) }
+  { plain: None, with_level: Some(filter), }
 }
 
 ///|

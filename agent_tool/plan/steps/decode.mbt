@@ -134,7 +134,7 @@ fn decode_step(index : Int, item : Json) -> PlanStep raise {
       fail("arguments.steps[\{index}].status to be a string")
     _ => fail("arguments.steps[\{index}].status to be present")
   }
-  { title, status }
+  { title, status, }
 }
 
 ///|

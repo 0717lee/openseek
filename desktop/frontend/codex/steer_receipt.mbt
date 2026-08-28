@@ -44,7 +44,7 @@ fn State::with_pending_steer(self : State, turn_id : String) -> State {
   pending_steers.push({
     submission_id: self.next_steer_submission_id,
     turn_id,
-    submitted: { task: self.draft, mentions: self.mentions.copy() },
+    submitted: { task: self.draft, mentions: self.mentions.copy(), },
     known_user_item_ids: active.user_item_ids(turn_id),
     delivery: CodexSteerSending,
   })
@@ -75,7 +75,7 @@ fn State::with_accepted_steer(self : State, value : Json) -> State {
       receipt.turn_id == turn_id &&
       receipt.delivery is CodexSteerSending {
       accepted = true
-      { ..receipt, delivery: CodexSteerAccepted }
+      { ..receipt, delivery: CodexSteerAccepted, }
     } else {
       receipt
     }
@@ -157,7 +157,7 @@ fn State::with_observed_steer_turn(self : State, turn : CodexTurn) -> State {
         // This decoded turn is installed immediately after reconciliation, so
         // its first new User item can authoritatively replace the older prompt
         // receipt. Notifications keep the old install-then-observe ordering.
-        next = { ..next, submitted_first_prompt: None }
+        next = { ..next, submitted_first_prompt: None, }
       } else {
         next = next.with_observed_user_item(active.id, turn.id, item.id)
       }

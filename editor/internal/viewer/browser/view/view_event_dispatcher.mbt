@@ -8,7 +8,7 @@ priv struct ViewEventCollector {
 
 ///|
 fn ViewEventCollector::ViewEventCollector() -> ViewEventCollector {
-  { view_events: [] }
+  { view_events: [], }
 }
 
 ///|

@@ -23,7 +23,7 @@ pub struct ResolvedToolchain {
 async fn toolchain_at(bin_dir : @pathx.Absolute) -> ResolvedToolchain? {
   let moon = bin_dir.join("moon" + ExecutableSuffix)
   guard @fsx.is_executable_file(moon.to_path()) else { return None }
-  Some({ bin_dir, moon })
+  Some({ bin_dir, moon, })
 }
 
 ///|

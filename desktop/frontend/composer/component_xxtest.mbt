@@ -5,10 +5,10 @@ fn Input::fixture(task : String) -> Input {
     session: "composer-test",
   }
   {
-    identity: { owner, archive_generation: 0 },
-    draft: { task, mentions: [] },
+    identity: { owner, archive_generation: 0, },
+    draft: { task, mentions: [], },
     run: None,
-    goal: { draft: None, standing: None, pending: None },
+    goal: { draft: None, standing: None, pending: None, },
     slash_commands: [],
     root: Some(@common.Uri::file("/workspace")),
     installed_skills: [],
@@ -70,7 +70,7 @@ test "each conversation keeps an independent local draft" {
   }
   let second = {
     ..first,
-    identity: { owner: second_owner, archive_generation: 0 },
+    identity: { owner: second_owner, archive_generation: 0, },
   }
   let (with_first, _) = Model(first).update(
     first,
@@ -97,7 +97,7 @@ test "background retirement prevents an old draft from reviving" {
     Msg::test_emit(),
     Action::test_emit(),
   )
-  let retired = { ..input, retirements: [input.identity.owner] }
+  let retired = { ..input, retirements: [input.identity.owner], }
   let (without_old, _) = drafted.update(
     retired,
     EntriesRetired,
@@ -126,14 +126,14 @@ test "queued archive replacements preserve every draft handoff" {
   }
   let rotated = {
     ..input,
-    identity: { owner: second_fresh, archive_generation: 2 },
+    identity: { owner: second_fresh, archive_generation: 2, },
     replacements: [
       {
         archived: input.identity.owner,
         fresh: first_fresh,
         archive_generation: 1,
       },
-      { archived: first_fresh, fresh: second_fresh, archive_generation: 2 },
+      { archived: first_fresh, fresh: second_fresh, archive_generation: 2, },
     ],
     retirements: [input.identity.owner, first_fresh],
   }
@@ -180,7 +180,7 @@ test "file completion accepts a local candidate inside the component" {
   inspect(draft.task, content="Inspect ")
   assert_true(
     draft.mentions ==
-    [{ ref_: @mention_context.File(path="src/main.mbt"), range: None }],
+    [{ ref_: @mention_context.File(path="src/main.mbt"), range: None, }],
   )
 }
 
@@ -275,7 +275,7 @@ test "a context switch drops a late symbols reply instead of reopening" {
     Msg::test_emit(),
     Action::test_emit(),
   )
-  let switched = { ..input, context_generation: 1 }
+  let switched = { ..input, context_generation: 1, }
   let (after, _) = typing.update(
     switched,
     SymbolsLoaded(
@@ -342,7 +342,7 @@ test "a remote file reply settles a truncated index menu, stale epochs do not" {
 ///|
 test "goal submission acknowledgement preserves the prompt underneath" {
   let prompt = Input::fixture("waiting prompt")
-  let goal = { ..prompt, goal: { ..prompt.goal, draft: Some("old goal") } }
+  let goal = { ..prompt, goal: { ..prompt.goal, draft: Some("old goal"), }, }
   let (edited, _) = Model(goal).update(
     goal,
     TextChanged("new goal"),
@@ -355,7 +355,7 @@ test "goal submission acknowledgement preserves the prompt underneath" {
     Msg::test_emit(),
     Action::test_emit(),
   )
-  let accepted = { ..prompt, submission_sequence: 1 }
+  let accepted = { ..prompt, submission_sequence: 1, }
   let entry = submitted.active(accepted)
   inspect(entry.draft.task, content="waiting prompt")
   assert_true(entry.goal_draft is None)
@@ -367,7 +367,7 @@ test "draft prompt encoding belongs to composer" {
   let draft : Draft = {
     task: "inspect this",
     mentions: [
-      { ref_: @mention_context.File(path="src/main.mbt"), range: None },
+      { ref_: @mention_context.File(path="src/main.mbt"), range: None, },
     ],
   }
   assert_true(draft.prompt().contains("<user_mentions>"))
@@ -416,24 +416,24 @@ test "the heartbeat reports only the detail it actually has" {
   // A run adopted from a reconnect has no start this page witnessed. Its age
   // is omitted, never guessed from the moment we noticed it.
   assert_eq(
-    { ..full, started_ms: None }.label(clock_ms~),
+    { ..full, started_ms: None, }.label(clock_ms~),
     "Thinking… (12.3k tokens)",
   )
   // Before the first usage event there is no count to report.
-  assert_eq({ ..full, tokens: 0 }.label(clock_ms~), "Thinking… (2m 14s)")
+  assert_eq({ ..full, tokens: 0, }.label(clock_ms~), "Thinking… (2m 14s)")
   // Neither known: the bare stage is still the one thing worth saying.
   assert_eq(
-    { ..full, started_ms: None, tokens: 0 }.label(clock_ms~),
+    { ..full, started_ms: None, tokens: 0, }.label(clock_ms~),
     "Thinking…",
   )
   // A clock that has not advanced past the start — the first render after a
   // submit — reports no span rather than "0s".
   assert_eq(
-    { ..full, started_ms: Some(clock_ms) }.label(clock_ms~),
+    { ..full, started_ms: Some(clock_ms), }.label(clock_ms~),
     "Thinking… (12.3k tokens)",
   )
   let bare = (stage : RunStage) => {
-    ({ stage, started_ms: None, tokens: 0 } : RunHeartbeat).label(clock_ms~)
+    ({ stage, started_ms: None, tokens: 0, } : RunHeartbeat).label(clock_ms~)
   }
   assert_eq(bare(Starting), "Starting…")
   assert_eq(bare(AtStep(3)), "Working · step 3")
@@ -460,9 +460,9 @@ test "an idle tick changes nothing, a running one advances the clock" {
   assert_true(after_idle == mounted)
   let running = {
     ..idle,
-    run: Some({ stage: Thinking, started_ms: None, tokens: 0 }),
+    run: Some({ stage: Thinking, started_ms: None, tokens: 0, }),
   }
-  let stale = { ..mounted, clock_ms: 0.0 }
+  let stale = { ..mounted, clock_ms: 0.0, }
   let (after_running, _) = stale.update(
     running,
     ClockTicked,

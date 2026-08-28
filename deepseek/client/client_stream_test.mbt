@@ -129,7 +129,7 @@ async test "streaming chat retries an idle stall before any event" {
       is Some(server) else {
       return
     }
-    let hits : Ref[Int] = { val: 0 }
+    let hits : Ref[Int] = { val: 0, }
     group.spawn_bg(no_wait=true) <| () => {
       server.run_forever(
         (_request, body, conn) => {
@@ -184,7 +184,7 @@ async test "streaming chat fails an idle stall after a delta without retrying" {
       is Some(server) else {
       return
     }
-    let hits : Ref[Int] = { val: 0 }
+    let hits : Ref[Int] = { val: 0, }
     group.spawn_bg(no_wait=true) <| () => {
       server.run_forever(
         (_request, body, conn) => {
@@ -241,7 +241,7 @@ async test "streaming chat does not retry an idle stall after an unterminated da
       is Some(server) else {
       return
     }
-    let hits : Ref[Int] = { val: 0 }
+    let hits : Ref[Int] = { val: 0, }
     group.spawn_bg(no_wait=true) <| () => {
       server.run_forever(
         (_request, body, conn) => {

@@ -19,7 +19,7 @@ struct TextSnapshot {
 pub fn TextSnapshot::TextSnapshot(text : String) -> TextSnapshot {
   let text = normalize_eol(text)
   let line_starts = build_line_starts(text)
-  { text, line_starts }
+  { text, line_starts, }
 }
 
 ///|
@@ -181,7 +181,7 @@ fn TextSnapshot::get_position_at(
 ) -> @base_common.Position {
   let offset = offset.clamp(min=0, max=self.get_length())
   let line = self.line_at_offset(offset)
-  { line_number: line + 1, column: offset - self.line_starts[line] + 1 }
+  { line_number: line + 1, column: offset - self.line_starts[line] + 1, }
 }
 
 ///|

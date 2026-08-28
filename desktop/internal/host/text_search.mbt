@@ -66,7 +66,7 @@ priv struct TextSearchCancellationFrontiers {
 
 ///|
 fn TextSearchCancellationFrontiers::new() -> TextSearchCancellationFrontiers {
-  { values: Map([]), order: [] }
+  { values: Map([]), order: [], }
 }
 
 ///|
@@ -115,7 +115,7 @@ priv struct TextSearchService {
 
 ///|
 fn TextSearchService::new() -> TextSearchService {
-  { requests: Queue(kind=Blocking(64)) }
+  { requests: Queue(kind=Blocking(64)), }
 }
 
 ///|
@@ -226,7 +226,7 @@ async fn TextSearchService::run(self : TextSearchService) -> Unit {
             }
             self.requests.put(Finished(session_key~, generation~, outcome~))
           })
-          running[session_key] = { generation, root: reply_root, reply, task }
+          running[session_key] = { generation, root: reply_root, reply, task, }
         }
         Cancel(session_key~, generation~, reply~) => {
           cancelled_through.record(session_key, generation)
@@ -841,7 +841,7 @@ fn project_text_match(
       overflow = true
       continue
     }
-    ranges.push({ start_column: start + 1, end_column: end + 1 })
+    ranges.push({ start_column: start + 1, end_column: end + 1, })
   }
   guard !ranges.is_empty() else { return (None, 0, overflow) }
   let first = ranges[0]
@@ -1285,7 +1285,7 @@ test "ripgrep byte ranges become one-based UTF-16 emoji columns" {
   guard projected is Some(projected) else { fail("expected projected match") }
   assert_eq(projected.line_number, 3)
   assert_eq(projected.preview, "a🌙moon")
-  assert_eq(projected.ranges[0], { start_column: 4, end_column: 8 })
+  assert_eq(projected.ranges[0], { start_column: 4, end_column: 8, })
   assert_eq(count, 1)
   assert_false(overflow)
 }
@@ -1329,7 +1329,7 @@ test "literal case-sensitive arguments are deterministic and follow symlinks" {
   assert_true(args.contains("--follow"))
   assert_false(args.contains("--text"))
   assert_eq(args[args.length() - 3:], ["--", "Moon", "."])
-  let override_args = text_search_args({ ..payload, include_glob: "**/*" })
+  let override_args = text_search_args({ ..payload, include_glob: "**/*", })
   let default_exclude = override_args
     .search_by(arg => arg == "!**/.git")
     .unwrap()
@@ -1414,8 +1414,8 @@ test "one CRLF ripgrep line preserves multiple occurrence ranges" {
   let (projected, count, overflow) = project_text_match(parsed, 2000)
   guard projected is Some(projected) else { fail("expected projected match") }
   assert_eq(projected.ranges, [
-    { start_column: 1, end_column: 5 },
-    { start_column: 6, end_column: 10 },
+    { start_column: 1, end_column: 5, },
+    { start_column: 6, end_column: 10, },
   ])
   assert_eq(count, 2)
   assert_false(overflow)
@@ -1433,7 +1433,7 @@ test "ripgrep byte records and empty submatches remain visible" {
   assert_eq(parsed.byte_ranges, [(0, 1)])
   let (projected, count, overflow) = project_text_match(parsed, 20000)
   guard projected is Some(projected) else { fail("expected projected match") }
-  assert_eq(projected.ranges, [{ start_column: 1, end_column: 2 }])
+  assert_eq(projected.ranges, [{ start_column: 1, end_column: 2, }])
   assert_eq(count, 1)
   assert_false(overflow)
 }

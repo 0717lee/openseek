@@ -81,7 +81,7 @@ pub fn decode(arguments : Json) -> MbtxInput raise {
         { "escalated": _, .. } => fail("arguments.escalated to be a boolean")
         _ => false
       }
-      { source, target, cwd, warning, run_in_background, escalated }
+      { source, target, cwd, warning, run_in_background, escalated, }
     }
     Object(_) => fail("arguments.source")
     _ => fail("object arguments")

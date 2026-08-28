@@ -197,7 +197,7 @@ test "a missing excerpt is synthesized from the candidate content" {
   let content = "fn main {\n  let x = 1\nlet y\n"
   debug_inspect(
     @auto_check.format_parse_gate_errors("src/main.mbt", content, [
-      { loc: "3:1-3:6", message: "Parse error", context: "" },
+      { loc: "3:1-3:6", message: "Parse error", context: "", },
     ]),
     content=(
       #|["src/main.mbt:3:1-3:6: Parse error\n  2 |  let x = 1\n  3 |let y"]
@@ -209,7 +209,7 @@ test "a missing excerpt is synthesized from the candidate content" {
 test "a diagnostic with no location renders as a bare header" {
   debug_inspect(
     @auto_check.format_parse_gate_errors("moon.pkg", "", [
-      { loc: "", message: "Invalid configuration", context: "" },
+      { loc: "", message: "Invalid configuration", context: "", },
     ]),
     content=(
       #|["moon.pkg: Invalid configuration"]
@@ -225,7 +225,7 @@ shape of the breakage without dumping pages of noise:
 ///|
 test "the report is capped at five errors" {
   let errors : Array[@auto_check.ParseGateError] = [
-    for i in 0..<8 => { loc: "", message: "e\{i}", context: "" }
+    for i in 0..<8 => { loc: "", message: "e\{i}", context: "", }
   ]
   debug_inspect(
     @auto_check.format_parse_gate_errors("a.mbt", "", errors).length(),

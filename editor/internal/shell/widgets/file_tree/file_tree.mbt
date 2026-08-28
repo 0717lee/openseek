@@ -37,7 +37,7 @@ pub fn FileTree::FileTree(
     (model, cmd)
   })
   let view_value = state.view(model => model.view(emit))
-  { emit, view_value }
+  { emit, view_value, }
 }
 
 ///|
@@ -82,7 +82,7 @@ fn FileTreeModel::update(
         Some(root) =>
           match root.toggle(uri) {
             Some((root, effect)) => {
-              let model = { ..self, root: Some(root) }
+              let model = { ..self, root: Some(root), }
               match effect {
                 ToggleResolve(uri) =>
                   (FileTree::resolve_directory(provider, emit, uri), model)
@@ -94,9 +94,9 @@ fn FileTreeModel::update(
         None => (@rabbita.none, self)
       }
     OpenFile(uri) =>
-      (@cmd.custom_cmd(_ => on_open(uri)), { ..self, selected: Some(uri) })
+      (@cmd.custom_cmd(_ => on_open(uri)), { ..self, selected: Some(uri), })
     SetActive(uri) =>
-      { ..self, selected: Some(uri), pending_reveal: Some(uri) }.continue_reveal(
+      { ..self, selected: Some(uri), pending_reveal: Some(uri), }.continue_reveal(
         provider, emit,
       )
   }
@@ -126,7 +126,7 @@ fn FileTreeModel::with_directory_resolved(
         match self.root {
           Some(root) =>
             match root.with_resolved(uri, stat) {
-              Some(root) => { ..self, root: Some(root) }
+              Some(root) => { ..self, root: Some(root), }
               None => self
             }
           None => self
@@ -140,10 +140,10 @@ fn FileTreeModel::with_directory_resolved(
       let model = match self.root {
         Some(root) =>
           match root.with_resolve_failed(uri) {
-            Some(root) => { ..self, root: Some(root), pending_reveal: None }
-            None => { ..self, pending_reveal: None }
+            Some(root) => { ..self, root: Some(root), pending_reveal: None, }
+            None => { ..self, pending_reveal: None, }
           }
-        None => { ..self, pending_reveal: None }
+        None => { ..self, pending_reveal: None, }
       }
       (@rabbita.none, model)
     }
@@ -159,12 +159,12 @@ fn FileTreeModel::continue_reveal(
   match (self.root, self.pending_reveal) {
     (Some(root), Some(target)) => {
       let (root, step) = root.reveal_step(target)
-      let model = { ..self, root: Some(root) }
+      let model = { ..self, root: Some(root), }
       match step {
         RevealResolve(uri) =>
           (FileTree::resolve_directory(provider, emit, uri), model)
         RevealDone | RevealUnreachable =>
-          (@rabbita.none, { ..model, pending_reveal: None })
+          (@rabbita.none, { ..model, pending_reveal: None, })
       }
     }
     _ => (@rabbita.none, self)

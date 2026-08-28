@@ -49,7 +49,7 @@ fn viz_config_from_matches(matches : @argparse.Matches) -> VizConfig raise {
         "export-session": [export_session, ..],
         ..
       },
-      ..,
+      ..
     } =>
       (
         port, host, session_root, session_root_name, web_dir, bundle, export_path,
@@ -1039,7 +1039,7 @@ async fn asset_reply(path : String, content_type : String) -> Reply {
   if !@fs.exists(path) {
     return text_reply(404, "Not Found", "missing file: \{path}")
   }
-  { code: 200, reason: "OK", content_type, body: read_text_lossy(path) }
+  { code: 200, reason: "OK", content_type, body: read_text_lossy(path), }
 }
 
 ///|
@@ -1073,7 +1073,7 @@ fn json_reply(body : Json) -> Reply {
 
 ///|
 fn text_reply(code : Int, reason : String, message : String) -> Reply {
-  { code, reason, content_type: "text/plain; charset=utf-8", body: message }
+  { code, reason, content_type: "text/plain; charset=utf-8", body: message, }
 }
 
 ///|
@@ -1241,7 +1241,7 @@ fn effective_search_dirs(matches : @argparse.Matches) -> Array[String] {
     {
       values: { "search-dir": _, .. },
       sources: { "session-root": Argv, "search-dir": Default, .. },
-      ..,
+      ..
     } => []
     { values: { "search-dir": values, .. }, .. } =>
       [

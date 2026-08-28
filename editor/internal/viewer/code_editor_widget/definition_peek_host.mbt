@@ -409,7 +409,7 @@ async fn CodeEditorWidget::open_peek_location(
   }
   match self.services.location_opener {
     Some(opener) =>
-      opener.open({ source_viewer_id: self.get_id(), location, mode })
+      opener.open({ source_viewer_id: self.get_id(), location, mode, })
     None => false
   }
 }

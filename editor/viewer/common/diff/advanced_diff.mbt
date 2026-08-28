@@ -32,7 +32,7 @@ fn DiffOffsetRange::delta(
   self : DiffOffsetRange,
   offset : Int,
 ) -> DiffOffsetRange {
-  { start: self.start + offset, end_exclusive: self.end_exclusive + offset }
+  { start: self.start + offset, end_exclusive: self.end_exclusive + offset, }
 }
 
 ///|
@@ -54,7 +54,7 @@ fn DiffOffsetRange::intersect(
   let start = self.start.max(other.start)
   let end_exclusive = self.end_exclusive.min(other.end_exclusive)
   if start <= end_exclusive {
-    Some({ start, end_exclusive })
+    Some({ start, end_exclusive, })
   } else {
     None
   }
@@ -84,7 +84,7 @@ fn SequenceDiff::delta(self : SequenceDiff, offset : Int) -> SequenceDiff {
 
 ///|
 fn SequenceDiff::swap(self : SequenceDiff) -> SequenceDiff {
-  { original: self.modified, modified: self.original }
+  { original: self.modified, modified: self.original, }
 }
 
 ///|
@@ -109,7 +109,7 @@ fn SequenceDiff::intersect(
   guard self.modified.intersect(other.modified) is Some(modified) else {
     return None
   }
-  Some({ original, modified })
+  Some({ original, modified, })
 }
 
 ///|
@@ -147,8 +147,8 @@ fn weighted_sequence_diffs(
   if sequence1.is_empty() || sequence2.is_empty() {
     return [
       {
-        original: { start: 0, end_exclusive: sequence1.length() },
-        modified: { start: 0, end_exclusive: sequence2.length() },
+        original: { start: 0, end_exclusive: sequence1.length(), },
+        modified: { start: 0, end_exclusive: sequence2.length(), },
       },
     ]
   }
@@ -202,8 +202,8 @@ fn weighted_sequence_diffs(
   let report_alignment = fn(s1 : Int, s2 : Int) {
     if s1 + 1 != last_s1 || s2 + 1 != last_s2 {
       reversed.push({
-        original: { start: s1 + 1, end_exclusive: last_s1 },
-        modified: { start: s2 + 1, end_exclusive: last_s2 },
+        original: { start: s1 + 1, end_exclusive: last_s1, },
+        modified: { start: s2 + 1, end_exclusive: last_s2, },
       })
     }
     last_s1 = s1
@@ -266,14 +266,14 @@ fn myers_sequence_diffs(
         }
         changes.push({
           original: if original_end >= 0 {
-            { start: original_start, end_exclusive: original_end }
+            { start: original_start, end_exclusive: original_end, }
           } else {
-            { start: original_anchor, end_exclusive: original_anchor }
+            { start: original_anchor, end_exclusive: original_anchor, }
           },
           modified: if modified_end >= 0 {
-            { start: modified_start, end_exclusive: modified_end }
+            { start: modified_start, end_exclusive: modified_end, }
           } else {
-            { start: modified_anchor, end_exclusive: modified_anchor }
+            { start: modified_anchor, end_exclusive: modified_anchor, }
           },
         })
       }
@@ -558,7 +558,7 @@ fn scalar_trimmed_range(
         values[end_exclusive - 1].unsafe_to_char().is_whitespace() {
     end_exclusive -= 1
   }
-  { start, end_exclusive }
+  { start, end_exclusive, }
 }
 
 ///|
@@ -575,7 +575,7 @@ fn scalar_extend_to_full_lines(
         (end_exclusive == 0 || values[end_exclusive - 1] != '\n'.to_int()) {
     end_exclusive += 1
   }
-  { start, end_exclusive }
+  { start, end_exclusive, }
 }
 
 ///|
@@ -928,8 +928,14 @@ fn include_strict_whitespace_line_diffs(
     let modified_offset = modified_start + offset
     if original_lines[original_offset] != modified_lines[modified_offset] {
       result.push({
-        original: { start: original_offset, end_exclusive: original_offset + 1 },
-        modified: { start: modified_offset, end_exclusive: modified_offset + 1 },
+        original: {
+          start: original_offset,
+          end_exclusive: original_offset + 1,
+        },
+        modified: {
+          start: modified_offset,
+          end_exclusive: modified_offset + 1,
+        },
       })
     }
   }
@@ -1101,7 +1107,7 @@ fn find_word_containing(values : Array[Int], offset : Int) -> DiffOffsetRange? {
         is_ascii_word_scalar(values[end_exclusive]) {
     end_exclusive += 1
   }
-  Some({ start, end_exclusive })
+  Some({ start, end_exclusive, })
 }
 
 ///|
@@ -1115,15 +1121,15 @@ fn invert_sequence_diffs(
   let mut modified_start = 0
   for diff in sequence_diffs {
     result.push({
-      original: { start: original_start, end_exclusive: diff.original.start },
-      modified: { start: modified_start, end_exclusive: diff.modified.start },
+      original: { start: original_start, end_exclusive: diff.original.start, },
+      modified: { start: modified_start, end_exclusive: diff.modified.start, },
     })
     original_start = diff.original.end_exclusive
     modified_start = diff.modified.end_exclusive
   }
   result.push({
-    original: { start: original_start, end_exclusive: original_length },
-    modified: { start: modified_start, end_exclusive: modified_length },
+    original: { start: original_start, end_exclusive: original_length, },
+    modified: { start: modified_start, end_exclusive: modified_length, },
   })
   result
 }
@@ -1185,7 +1191,7 @@ fn scan_parent_for_word_extension(
   guard find_parent(sequence2, pair_modified) is Some(word2) else {
     return (future_index, last_original, last_modified)
   }
-  let mut word : SequenceDiff = { original: word1, modified: word2 }
+  let mut word : SequenceDiff = { original: word1, modified: word2, }
   guard word.intersect(equal_mapping) is Some(equal_part) else {
     return (future_index, last_original, last_modified)
   }

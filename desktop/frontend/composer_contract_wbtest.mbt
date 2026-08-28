@@ -1,6 +1,6 @@
 ///|
 test "composer input is a projection instead of the root model" {
-  let mention : Mention = { ref_: Skill(name="review"), range: None }
+  let mention : Mention = { ref_: Skill(name="review"), range: None, }
   let model = test_model().replace_conversation({
     ..test_conversation(),
     task: "local draft",
@@ -23,10 +23,10 @@ test "the composer is handed the turn's facts, not a rendered row" {
   // to the component, so a span that changes every second costs one
   // component's render instead of reprojecting every component's input.
   guard running.composer_input().run
-    is Some({ stage: Thinking, started_ms: None, tokens: 0 }) else {
+    is Some({ stage: Thinking, started_ms: None, tokens: 0, }) else {
     fail("expected the open turn's heartbeat facts")
   }
-  let idle = running.replace_conversation({ ..conv, run: NoRun(ended=None) })
+  let idle = running.replace_conversation({ ..conv, run: NoRun(ended=None), })
   assert_eq(idle.composer_input().run, None)
 }
 
@@ -44,7 +44,7 @@ test "composer submission stays bound to its originating conversation" {
     conversations: [origin, visible],
   }
   let identity : @composer.Identity = {
-    owner: { channel: @interop.ChannelId::Local, session: origin.session_id },
+    owner: { channel: @interop.ChannelId::Local, session: origin.session_id, },
     archive_generation: 0,
   }
   let (_, submitted) = update(
@@ -148,7 +148,7 @@ test "archive cursor separates transferred actions from a reopened id" {
     ..test_model(),
     conversations: [reopened, replacement],
     composer_entry_retirements: [archived],
-    composer_entry_replacements: [{ archived, fresh, archive_generation: 1 }],
+    composer_entry_replacements: [{ archived, fresh, archive_generation: 1, }],
   }
   let old_identity : @composer.Identity = {
     owner: archived,
@@ -180,11 +180,11 @@ test "a background retirement expires old actions without poisoning a reopened i
     composer_entry_replacements: [],
   }
   assert_true(
-    model.conversation_for_composer_action({ owner, archive_generation: 0 })
+    model.conversation_for_composer_action({ owner, archive_generation: 0, })
     is None,
   )
   assert_true(
-    model.conversation_for_composer_action({ owner, archive_generation: 1 })
+    model.conversation_for_composer_action({ owner, archive_generation: 1, })
     is Some(_),
   )
 }

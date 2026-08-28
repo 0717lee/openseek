@@ -203,7 +203,7 @@ pub fn State::handle(
         }
         (
           self.resume_path_edit_after_render(),
-          Some({ ..self, loading: false }),
+          Some({ ..self, loading: false, }),
           Some(Failed(message)),
         )
       } else {
@@ -229,7 +229,7 @@ pub fn State::handle(
       }
     PathChanged(value) =>
       if !self.loading && self.path_draft is Some(_) {
-        let changed = { ..self, path_draft: Some(value), path_selection: 0 }
+        let changed = { ..self, path_draft: Some(value), path_selection: 0, }
         match changed.committed_child_path(value) {
           Some(path) => changed.navigate_to(emit, path, path_draft=path)
           None => (@cmd.none, Some(changed), None)
@@ -282,7 +282,7 @@ pub fn State::handle(
           if already_loaded {
             (
               @cmd.none,
-              Some({ ..self, path_draft: None, path_selection: 0 }),
+              Some({ ..self, path_draft: None, path_selection: 0, }),
               None,
             )
           } else {
@@ -314,13 +314,13 @@ pub fn State::handle(
       if self.location is Some(Directory(_)) &&
         !self.loading &&
         self.path_draft is None {
-        (@cmd.none, Some({ ..self, new_folder: Some("") }), None)
+        (@cmd.none, Some({ ..self, new_folder: Some(""), }), None)
       } else {
         (@cmd.none, Some(self), None)
       }
     NewFolderNameChanged(name) =>
       if self.new_folder is Some(_) && !self.loading {
-        (@cmd.none, Some({ ..self, new_folder: Some(name) }), None)
+        (@cmd.none, Some({ ..self, new_folder: Some(name), }), None)
       } else {
         (@cmd.none, Some(self), None)
       }
@@ -328,7 +328,7 @@ pub fn State::handle(
       if self.loading {
         (@cmd.none, Some(self), None)
       } else {
-        (@cmd.none, Some({ ..self, new_folder: None }), None)
+        (@cmd.none, Some({ ..self, new_folder: None, }), None)
       }
     CreateFolder =>
       match (self.location, self.new_folder) {
@@ -343,7 +343,7 @@ pub fn State::handle(
               name.trim().to_owned(),
               generation~,
             ),
-            Some({ ..self, loading: true, generation }),
+            Some({ ..self, loading: true, generation, }),
             None,
           )
         }

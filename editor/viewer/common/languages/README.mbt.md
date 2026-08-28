@@ -161,7 +161,7 @@ impl @language.MarkdownCommentProvider for FirstLineComment with fn provide_mark
   _self,
   _model,
 ) {
-  [{ line_range: LineRange(1, 2), markdown: "# Title" }]
+  [{ line_range: LineRange(1, 2), markdown: "# Title", }]
 }
 
 ///|
@@ -182,12 +182,10 @@ test "None, Some([]), and Some(blocks) are three different answers" {
   let unregistered = @languages.Languages()
   let silent = @languages.Languages()
   silent.register_markdown_comment_provider(LanguageId("moonbit"), SilentProvider::{
-
   })
   |> ignore
   let answering = @languages.Languages()
   answering.register_markdown_comment_provider(LanguageId("moonbit"), FirstLineComment::{
-
   })
   |> ignore
   debug_inspect(
@@ -234,13 +232,12 @@ test "the foldable flag travels with the winning registration" {
   let model = doc_model("fn main {}\n")
   let plain = @languages.Languages()
   plain.register_markdown_comment_provider(LanguageId("moonbit"), FirstLineComment::{
-
   })
   |> ignore
   let foldable = @languages.Languages()
   foldable.register_markdown_comment_provider(
     LanguageId("moonbit"),
-    FirstLineComment::{  },
+    FirstLineComment::{ },
     foldable=true,
   )
   |> ignore
@@ -275,9 +272,9 @@ test "configuration round-trips, and an unset language reads back empty" {
   registry.set_language_configuration("moonbit", {
     comments: Some({
       line_comment: Some(LineCommentRule("//")),
-      block_comment: Some({ open: "/*", close: "*/" }),
+      block_comment: Some({ open: "/*", close: "*/", }),
     }),
-    folding_rules: Some({ off_side: false, markers: None }),
+    folding_rules: Some({ off_side: false, markers: None, }),
   })
   debug_inspect(
     (
@@ -328,7 +325,7 @@ test "panic an empty block-comment delimiter aborts registration" {
   @languages.Languages().set_language_configuration("broken", {
     comments: Some({
       line_comment: None,
-      block_comment: Some({ open: "/*", close: "" }),
+      block_comment: Some({ open: "/*", close: "", }),
     }),
     folding_rules: None,
   })

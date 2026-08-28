@@ -30,7 +30,7 @@ fn BrowserContentWidgetDiagnosticWidget::handle(
     },
     self.allow_overflow,
     false,
-    Some(() => Some({ width: 80.0, height: 30.0 })),
+    Some(() => Some({ width: 80.0, height: 30.0, })),
     Some((position, coordinate) => {
       self.after_position = match position {
         Some(Above) => "above"
@@ -123,7 +123,7 @@ fn BrowserContentWidgetsDiagnostic::new(
   widgets.set_widget_position(normal.handle())
   widgets.add_widget(overflow.handle())
   widgets.set_widget_position(overflow.handle())
-  { widgets, normal, overflow, anchor_left, anchor_top }
+  { widgets, normal, overflow, anchor_left, anchor_top, }
 }
 
 ///|

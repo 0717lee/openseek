@@ -52,7 +52,7 @@ struct QuickDiffService {
 
 ///|
 pub fn QuickDiffService::QuickDiffService() -> QuickDiffService {
-  { originals: Map([]), did_change_original: Emitter() }
+  { originals: Map([]), did_change_original: Emitter(), }
 }
 
 ///|

@@ -105,13 +105,13 @@ test "submit_review declares itself a control tool" {
   // The ceiling salvage honors control-declared completions; without this
   // a review hitting the context ceiling on its submitting step would
   // skip-close submit_review and fail with ReviewError.
-  let captured : Ref[ReviewReport?] = { val: None }
+  let captured : Ref[ReviewReport?] = { val: None, }
   assert_true(submit_review_tool(captured).is_control())
 }
 
 ///|
 test "submit captures a valid report and finishes" {
-  let captured : Ref[ReviewReport?] = { val: None }
+  let captured : Ref[ReviewReport?] = { val: None, }
   let action = submit_action(captured, ToJson::to_json(sample_report()))
   guard action is Control(Finish(note)) else { fail("expected Finish") }
   assert_true(note.contains("2 finding(s)"))
@@ -120,7 +120,7 @@ test "submit captures a valid report and finishes" {
 
 ///|
 test "submit rejects an invalid report without capturing" {
-  let captured : Ref[ReviewReport?] = { val: None }
+  let captured : Ref[ReviewReport?] = { val: None, }
   let bad = {
     ..sample_report(),
     findings: [

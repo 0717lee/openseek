@@ -87,7 +87,7 @@ let moonbit_normal_state : @syntax.TokenizerState = TokenizerState()
 ///|
 /// Creates the MoonBit tokenizer.
 pub fn MoonBitTokenizer::MoonBitTokenizer() -> MoonBitTokenizer {
-  { _unit: () }
+  { _unit: (), }
 }
 
 ///|

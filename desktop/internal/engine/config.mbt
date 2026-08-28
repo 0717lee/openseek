@@ -272,14 +272,17 @@ test "a different endpoint cannot reuse a live engine process" {
   assert_true(engine_fingerprint(base) != engine_fingerprint(custom))
   assert_true(
     engine_fingerprint(base) !=
-    engine_fingerprint({ ..base, thinking: ThinkingHigh }),
+    engine_fingerprint({ ..base, thinking: ThinkingHigh, }),
   )
-  assert_eq(engine_fingerprint(base), engine_fingerprint({ ..base, task: "u" }))
+  assert_eq(
+    engine_fingerprint(base),
+    engine_fingerprint({ ..base, task: "u", }),
+  )
   // cwd is part of the fingerprint: a session bound to a worktree can never
   // reuse a serve process rooted elsewhere (and vice versa).
   assert_true(
     engine_fingerprint(base) !=
-    engine_fingerprint({ ..base, cwd: Some(Path("/w/.worktrees/x")) }),
+    engine_fingerprint({ ..base, cwd: Some(Path("/w/.worktrees/x")), }),
   )
 }
 

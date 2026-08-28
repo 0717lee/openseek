@@ -205,12 +205,12 @@ type FileStat = @protocol.FileStat
 
 ///|
 test "file stat keeps the legacy missing-file sentinel on the wire" {
-  assert_eq(ToJson::to_json(({ path: "deleted.mbt", sig: "" } : FileStat)), {
+  assert_eq(ToJson::to_json(({ path: "deleted.mbt", sig: "", } : FileStat)), {
     "path": "deleted.mbt",
     "sig": "",
   })
   assert_eq(
-    ToJson::to_json(({ path: "present.mbt", sig: "12:34" } : FileStat)),
+    ToJson::to_json(({ path: "present.mbt", sig: "12:34", } : FileStat)),
     { "path": "present.mbt", "sig": "12:34" },
   )
 }
@@ -237,7 +237,7 @@ fn WirePath::parse(path : String) -> WirePath raise HostError {
   guard @pathx.Absolute::from_uri_path(path) is Some(absolute) else {
     raise HostError("path is not absolute")
   }
-  { absolute: absolute.normalize() }
+  { absolute: absolute.normalize(), }
 }
 
 ///|
@@ -291,10 +291,10 @@ priv struct FsChangedPayload {
 ///|
 fn FsEventPayload::from_event(event : @fs.FsEvent) -> FsEventPayload {
   match event {
-    Modify(path) => { kind_: "modify", path, old_path: None }
-    Create(path) => { kind_: "create", path, old_path: None }
-    Remove(path) => { kind_: "remove", path, old_path: None }
-    Rename(old~, new~) => { kind_: "rename", path: new, old_path: Some(old) }
+    Modify(path) => { kind_: "modify", path, old_path: None, }
+    Create(path) => { kind_: "create", path, old_path: None, }
+    Remove(path) => { kind_: "remove", path, old_path: None, }
+    Rename(old~, new~) => { kind_: "rename", path: new, old_path: Some(old), }
   }
 }
 
@@ -381,8 +381,11 @@ test "language requests carry roots and lsp_open distinguishes no data" {
   assert_eq(
     ToJson::to_json(
       (
-        { session: "thread-1", root: "/worktree/project", path: "src/main.mbt" } :
-        LspOpenPayload),
+        {
+          session: "thread-1",
+          root: "/worktree/project",
+          path: "src/main.mbt",
+        } : LspOpenPayload),
     ),
     {
       "session": "thread-1",
@@ -429,11 +432,11 @@ test "language requests carry roots and lsp_open distinguishes no data" {
     },
   )
   assert_eq(
-    ToJson::to_json(({ diagnostics: Some([]) } : LspDiagnosticsReply)),
+    ToJson::to_json(({ diagnostics: Some([]), } : LspDiagnosticsReply)),
     { "diagnostics": [] },
   )
   assert_eq(
-    ToJson::to_json(({ diagnostics: None } : LspDiagnosticsReply)),
+    ToJson::to_json(({ diagnostics: None, } : LspDiagnosticsReply)),
     Json::empty_object(),
   )
   // The client reads the same distinction back: an absent field must decode

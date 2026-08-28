@@ -13,7 +13,7 @@ fn pane_geometry_from_code_editor_parts(
     line_height,
     model_line_heights=model_line_heights.map(item => {
       (
-        { line_number: item.line_number, height_in_px: item.height_in_px } :
+        { line_number: item.line_number, height_in_px: item.height_in_px, } :
         PaneModelLineHeight)
     }),
     foreign_zone_heights=foreign_zone_heights.map(item => {

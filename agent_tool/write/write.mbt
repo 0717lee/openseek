@@ -626,7 +626,7 @@ test "write_reject_report pushes smaller parts when parse errors cascade" {
   let errors = [
     for index in 0..<4 => {
       (
-        { loc: "\{index + 1}:1", message: "e\{index}", context: "" } :
+        { loc: "\{index + 1}:1", message: "e\{index}", context: "", } :
         @auto_check.ParseGateError)
     }
   ]
@@ -641,7 +641,7 @@ test "write_reject_report pushes smaller parts when parse errors cascade" {
   )
   // A truncated capture reports a lower bound, never an exact count.
   let clipped = write_reject_report("lib/a.mbt", "x", {
-    errors: [{ loc: "1:1", message: "e", context: "" }],
+    errors: [{ loc: "1:1", message: "e", context: "", }],
     truncated: true,
   })
   assert_true(clipped.contains("has at least 1 parse error(s)"))

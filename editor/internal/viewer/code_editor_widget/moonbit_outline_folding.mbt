@@ -650,7 +650,7 @@ fn moonbit_source_folds(snapshot : @model.TextSnapshot) -> MoonbitSourceFolds {
       end_line_number: snapshot.line_count(),
     })
   }
-  { function_bodies: folds, comment_runs }
+  { function_bodies: folds, comment_runs, }
 }
 
 ///|

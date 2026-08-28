@@ -7,7 +7,7 @@ struct NativeServerHost {
 ///|
 /// Creates the native host with the default file-watch polling interval.
 fn new_native_server_host() -> NativeServerHost {
-  { poll_interval_ms: 500 }
+  { poll_interval_ms: 500, }
 }
 
 ///|
@@ -15,7 +15,7 @@ fn new_native_server_host() -> NativeServerHost {
 fn native_server_host_with_poll_interval(
   poll_interval_ms : Int,
 ) -> NativeServerHost {
-  { poll_interval_ms: poll_interval_ms.max(10) }
+  { poll_interval_ms: poll_interval_ms.max(10), }
 }
 
 ///|
@@ -80,9 +80,9 @@ async fn read_native_directory(
     let disk_kind = Some(@fs.kind("\{dir_path}/\{name}")) catch { _ => None }
     match (disk_kind, @server.remote_document_uri(path)) {
       (Some(Directory), Some(uri)) =>
-        children.push({ uri, name, kind: Directory, children: None })
+        children.push({ uri, name, kind: Directory, children: None, })
       (Some(Regular), Some(uri)) =>
-        children.push({ uri, name, kind: File, children: None })
+        children.push({ uri, name, kind: File, children: None, })
       _ => ()
     }
   }
@@ -256,7 +256,7 @@ priv struct ProtocolSessions {
 
 ///|
 fn ProtocolSessions::new() -> ProtocolSessions {
-  { next_session_id: Ref(0), outboxes: {} }
+  { next_session_id: Ref(0), outboxes: {}, }
 }
 
 ///|
@@ -432,7 +432,7 @@ fn moon_backed_native_workspace(
       diagnostics.schedule(spawn_task)
     }),
   )
-  { root, browse_scope, remote_server, diagnostics, sessions }
+  { root, browse_scope, remote_server, diagnostics, sessions, }
 }
 
 ///|
@@ -441,7 +441,7 @@ fn diagnostics_push_packet(
   revision : String,
   diagnostics : Array[@language.Diagnostic],
 ) -> String {
-  @remote_protocol.ServerPacket::Diagnostics({ uri, revision, diagnostics })
+  @remote_protocol.ServerPacket::Diagnostics({ uri, revision, diagnostics, })
   .to_json()
   .stringify()
 }

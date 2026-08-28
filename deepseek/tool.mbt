@@ -29,7 +29,7 @@ pub fn ToolDefinition::ToolDefinition(
   parameters : Json,
   strict? : Bool = false,
 ) -> ToolDefinition {
-  { name, description, parameters, strict }
+  { name, description, parameters, strict, }
 }
 
 ///|
@@ -62,7 +62,7 @@ pub fn ToolCall::ToolCall(
   name~ : String,
   arguments~ : String,
 ) -> ToolCall {
-  { id, name, arguments }
+  { id, name, arguments, }
 }
 
 ///|

@@ -65,7 +65,7 @@ fn browse_repo_directory_update(
         list_host_directory_cmd(emit, generation, path),
         {
           ..model,
-          repo_picker: Some({ ..picker, generation, loading: true, error: "" }),
+          repo_picker: Some({ ..picker, generation, loading: true, error: "", }),
         },
       )
     }
@@ -95,9 +95,9 @@ fn repo_directory_listed_update(
             loading: false,
             error: "",
           }
-        Err(message) => { ..picker, loading: false, error: message }
+        Err(message) => { ..picker, loading: false, error: message, }
       }
-      (@rabbita.none, { ..model, repo_picker: Some(picker) })
+      (@rabbita.none, { ..model, repo_picker: Some(picker), })
     }
     _ => (@rabbita.none, model)
   }
@@ -118,7 +118,12 @@ fn confirm_repo_picker_update(
           switch_workspace_cmd(emit, generation, picker.path),
           {
             ..model,
-            repo_picker: Some({ ..picker, generation, loading: true, error: "" }),
+            repo_picker: Some({
+              ..picker,
+              generation,
+              loading: true,
+              error: "",
+            }),
           },
         )
       }
@@ -138,7 +143,7 @@ fn repo_switch_failed_update(
         @rabbita.none,
         {
           ..model,
-          repo_picker: Some({ ..picker, loading: false, error: message }),
+          repo_picker: Some({ ..picker, loading: false, error: message, }),
         },
       )
     _ => (@rabbita.none, model)
@@ -160,7 +165,7 @@ fn workspace_announce_update(
   if root == model.workspace_root {
     (@rabbita.none, model)
   } else if model.workspace_root == "" {
-    (@rabbita.none, { ..model, workspace_root: root })
+    (@rabbita.none, { ..model, workspace_root: root, })
   } else {
     workspace_root_switched_update(emit, model, root)
   }
@@ -209,7 +214,7 @@ fn list_host_directory_cmd(
 ) -> @rabbita.Cmd {
   @cmd.perform(result => emit(RepoDirectoryListed(generation, result)), async fn() noraise {
     let response = protocol_request("list-dir", id => {
-      ListHostDirectory({ id, path })
+      ListHostDirectory({ id, path, })
     })
     match response {
       HostDirectoryListed(payload) => Ok(payload.listing)
@@ -234,7 +239,7 @@ fn switch_workspace_cmd(
     },
     async fn() noraise {
       let response = protocol_request("switch", id => {
-        SwitchWorkspace({ id, path })
+        SwitchWorkspace({ id, path, })
       })
       match response {
         WorkspaceSwitched(payload) => Ok(payload.root)

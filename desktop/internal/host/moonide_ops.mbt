@@ -222,7 +222,7 @@ fn parse_moonide_output(
     _ => raise HostError("moon ide returned malformed JSON")
   }
   let items = match json {
-    Null => return { locations: [] }
+    Null => return { locations: [], }
     Array(items) => items
     _ => raise HostError("moon ide returned an unexpected JSON value")
   }
@@ -238,7 +238,7 @@ fn parse_moonide_output(
       continue
     }
     let path = moonide_result_path(physical_workspace, path)
-    locations.push({ path, start_line, start_column, end_line, end_column })
+    locations.push({ path, start_line, start_column, end_line, end_column, })
   }
   { locations, }
 }

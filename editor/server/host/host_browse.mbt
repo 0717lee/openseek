@@ -86,7 +86,7 @@ async fn list_host_directory_packet(
   let packet : @remote_protocol.ServerPacket = match
     resolve_host_directory_listing(workspace.browse_scope, target) {
     HostDirectoryListOk(listing) =>
-      HostDirectoryListed({ id: request.id, listing })
+      HostDirectoryListed({ id: request.id, listing, })
     HostDirectoryListError(code, message) =>
       host_browse_error(request.id, code, message)
   }

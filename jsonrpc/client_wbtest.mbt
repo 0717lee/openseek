@@ -33,7 +33,7 @@ impl Transport for FakeTransport with fn close(self) {
 
 ///|
 fn new_transport() -> FakeTransport {
-  { inbound: Queue(kind=Unbounded), outbound: Queue(kind=Unbounded) }
+  { inbound: Queue(kind=Unbounded), outbound: Queue(kind=Unbounded), }
 }
 
 ///|
@@ -257,7 +257,7 @@ async test "peer notifications reach the installed handler" {
   @async.with_task_group(group => {
     let transport = new_transport()
     let client = Client::new(transport)
-    let seen : Ref[String] = { val: "" }
+    let seen : Ref[String] = { val: "", }
     client.set_notification_handler((method_, _params) => seen.val = method_)
     spawn_client(group, client)
     group.spawn_bg(no_wait=true, allow_failure=true, () => {

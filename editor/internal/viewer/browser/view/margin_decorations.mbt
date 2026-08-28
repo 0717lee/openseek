@@ -17,7 +17,7 @@ priv struct WholeMarginDecoration {
 
 ///|
 fn MarginDecorationsOverlay::MarginDecorationsOverlay() -> MarginDecorationsOverlay {
-  { render_result: [] }
+  { render_result: [], }
 }
 
 ///|

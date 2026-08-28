@@ -14,7 +14,7 @@ priv struct ReferencesContributionState {
 fn ReferencesContributionState::ReferencesContributionState(
   viewer : CodeEditorWidget,
 ) -> ReferencesContributionState {
-  { controller: viewer.create_references_controller(), disposed: false }
+  { controller: viewer.create_references_controller(), disposed: false, }
 }
 
 ///|
@@ -50,7 +50,7 @@ fn register_references_contribution(
     title=goto_references.title(),
     menu_keybinding_label=goto_references.keybinding_label().unwrap(),
     menu_placements=[
-      { menu_id: EditorContext, group: "navigation", order: 1.3 },
+      { menu_id: EditorContext, group: "navigation", order: 1.3, },
     ],
   )
   let peek_references = @goto_symbol.PeekReferences
@@ -61,7 +61,7 @@ fn register_references_contribution(
     [],
     title=peek_references.title(),
     menu_placements=[
-      { menu_id: EditorContext, group: "navigation", order: 1.4 },
+      { menu_id: EditorContext, group: "navigation", order: 1.4, },
     ],
   )
 }

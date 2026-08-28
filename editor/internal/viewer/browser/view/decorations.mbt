@@ -288,7 +288,7 @@ priv struct DecorationsOverlay {
 
 ///|
 fn DecorationsOverlay::DecorationsOverlay() -> DecorationsOverlay {
-  { render_result: [] }
+  { render_result: [], }
 }
 
 ///|

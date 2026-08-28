@@ -197,7 +197,7 @@ struct DidChangeContentEmitter {
 
 ///|
 fn DidChangeContentEmitter::new() -> DidChangeContentEmitter {
-  { emitter: Emitter(), deferred_cnt: 0, deferred_event: None }
+  { emitter: Emitter(), deferred_cnt: 0, deferred_event: None, }
 }
 
 ///|

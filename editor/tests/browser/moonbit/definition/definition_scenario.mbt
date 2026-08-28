@@ -99,8 +99,8 @@ impl @language.ReferencesProvider for BrowserReferencesProvider with fn provide_
     position.column <= definition_reference_end_column() {
     self.calls.val += 1
     [
-      { uri: self.code_uri, range: Range(1, 5, 1, 21) },
-      { uri: self.code_uri, range: Range(2, 11, 2, 27) },
+      { uri: self.code_uri, range: Range(1, 5, 1, 21), },
+      { uri: self.code_uri, range: Range(2, 11, 2, 27), },
     ]
   } else if model.uri.to_string() == self.markdown_uri.to_string() &&
     position.line_number == 2 &&
@@ -108,7 +108,7 @@ impl @language.ReferencesProvider for BrowserReferencesProvider with fn provide_
     position.column <= definition_reference_end_column() {
     self.calls.val += 1
     [
-      { uri: self.markdown_uri, range: Range(2, 11, 2, 27) },
+      { uri: self.markdown_uri, range: Range(2, 11, 2, 27), },
       {
         uri: self.markdown_uri,
         range: Range(
@@ -271,8 +271,8 @@ fn run_definition_browser_test() -> Unit {
   let provider = BrowserDefinitionProvider::{
     calls: provider_calls,
     source_uri: uri,
-    location: { uri, range: Range(1, 5, 1, 21) },
-    alternate_location: Some({ uri, range: Range(3, 1, 3, 14) }),
+    location: { uri, range: Range(1, 5, 1, 21), },
+    alternate_location: Some({ uri, range: Range(3, 1, 3, 14), }),
     redirect_location: None,
     multiple: provider_multiple,
     redirect: Ref(false),
@@ -337,8 +337,8 @@ fn run_definition_browser_test() -> Unit {
         21,
       ),
     },
-    alternate_location: Some({ uri: markdown_uri, range: Range(6, 5, 6, 21) }),
-    redirect_location: Some({ uri: remote_uri, range: Range(1, 5, 1, 28) }),
+    alternate_location: Some({ uri: markdown_uri, range: Range(6, 5, 6, 21), }),
+    redirect_location: Some({ uri: remote_uri, range: Range(1, 5, 1, 28), }),
     multiple: markdown_provider_multiple,
     redirect: markdown_provider_redirect,
     delay: markdown_provider_delay,

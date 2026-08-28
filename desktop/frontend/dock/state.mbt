@@ -63,7 +63,7 @@ pub(all) struct State {
 
 ///|
 pub fn State::empty() -> State {
-  { owner: None, tabs: [], active: None, remembered: Map([]) }
+  { owner: None, tabs: [], active: None, remembered: Map([]), }
 }
 
 ///|

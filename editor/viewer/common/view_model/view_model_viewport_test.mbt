@@ -18,7 +18,7 @@ test "view model produces viewport data from layout window" {
   )
   let viewport = @view_model.viewport_data_from_view_model(
     view_model,
-    { start: 2, end: 4 },
+    { start: 2, end: 4, },
     line_height=18,
   )
   assert_eq(viewport.start_line_number, 2)
@@ -39,7 +39,7 @@ test "view model produces viewport data from layout window" {
   |> ignore
   let displaced = @view_model.viewport_data_from_view_model(
     view_model,
-    { start: 2, end: 4 },
+    { start: 2, end: 4, },
     line_height=18,
     layout~,
   )
@@ -106,7 +106,7 @@ test "viewport line decorations come from model decoration storage" {
   )
   let viewport = @view_model.viewport_data_from_view_model(
     view_model,
-    { start: 1, end: 4 },
+    { start: 1, end: 4, },
     line_height=18,
   )
   // The inline chain feeds the line spans; className decorations render
@@ -137,7 +137,7 @@ test "viewport line decorations come from model decoration storage" {
   )
   let filtered = @view_model.viewport_data_from_view_model(
     filtered_view_model,
-    { start: 1, end: 4 },
+    { start: 1, end: 4, },
     line_height=18,
   )
   assert_eq(filtered.line_decorations[0].length(), 0)

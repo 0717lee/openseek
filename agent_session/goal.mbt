@@ -210,7 +210,7 @@ pub fn parse_goal_baseline(content : String) -> GoalBaseline? {
   if sha.is_empty() {
     return None
   }
-  Some({ sha, dirty })
+  Some({ sha, dirty, })
 }
 
 ///|

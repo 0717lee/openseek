@@ -535,7 +535,7 @@ async fn request_follower_load(follower : SessionFollower) -> FollowerLoadReply 
     return LoadStopped
   }
   let reply : @async.Queue[FollowerLoadReply] = Queue(kind=Blocking(1))
-  let request : FollowerLoadRequest = { reply, active: true }
+  let request : FollowerLoadRequest = { reply, active: true, }
   // The request must be present before its collapsed control signal. A full
   // queue backpressures here; once accepted, either the current Load scan
   // drains it or this caller schedules the next generation.
@@ -588,22 +588,22 @@ test "session_max_sequence is the snapshot's watermark" {
       {
         sequence: 5,
         ts: None,
-        item: User({ content: "five", submission_id: None }),
+        item: User({ content: "five", submission_id: None, }),
       },
       {
         sequence: 9,
         ts: None,
-        item: User({ content: "nine", submission_id: None }),
+        item: User({ content: "nine", submission_id: None, }),
       },
       {
         sequence: 7,
         ts: None,
-        item: User({ content: "seven", submission_id: None }),
+        item: User({ content: "seven", submission_id: None, }),
       },
     ]),
   }
   inspect(session_max_sequence(session), content="9")
-  inspect(session_max_sequence({ ..session, events: Some([]) }), content="0")
+  inspect(session_max_sequence({ ..session, events: Some([]), }), content="0")
 }
 
 ///|
@@ -1302,7 +1302,7 @@ async test "one Load control message answers a bounded request batch" {
     for _ in 0..<8 {
       let reply : @async.Queue[FollowerLoadReply] = Queue(kind=Blocking(1))
       replies.push(reply)
-      follower.load_requests.put({ reply, active: true })
+      follower.load_requests.put({ reply, active: true, })
     }
     follower.load_pending = true
     assert_true(follower.inbox.try_put(Load))
@@ -1349,7 +1349,7 @@ test "startup rollback closes waiters and preserves a successor identity" {
   let manager = new_engine_manager("unused")
   let abandoned = follower_state_fixture("s-startup")
   let reply : @async.Queue[FollowerLoadReply] = Queue(kind=Blocking(1))
-  let request : FollowerLoadRequest = { reply, active: true }
+  let request : FollowerLoadRequest = { reply, active: true, }
   assert_true(abandoned.load_requests.try_put(request))
   manager.followers["s-startup"] = abandoned
   discard_follower_startup(manager, abandoned)
@@ -1374,7 +1374,7 @@ test "pump reset completes every queued follower load" {
   let manager = new_engine_manager("unused")
   let follower = follower_state_fixture("s-reset")
   let reply : @async.Queue[FollowerLoadReply] = Queue(kind=Blocking(1))
-  let request : FollowerLoadRequest = { reply, active: true }
+  let request : FollowerLoadRequest = { reply, active: true, }
   assert_true(follower.load_requests.try_put(request))
   manager.followers["s-reset"] = follower
   manager.pump = Serving(sessions=Map([]))
@@ -1454,7 +1454,7 @@ async test "load request is queued before its collapsed control message" {
     assert_true(request.active)
     request.active = false
     request.reply.put(
-      LoadOk({ version: None, id: None, system_prompt: None, events: Some([]) }),
+      LoadOk({ version: None, id: None, system_prompt: None, events: Some([]), }),
     )
     assert_true(caller.wait() is LoadOk(_))
   })
@@ -1464,7 +1464,7 @@ async test "load request is queued before its collapsed control message" {
 async test "backpressured load schedules the next control generation" {
   let follower = follower_state_fixture("s-backpressure")
   let placeholder : @async.Queue[FollowerLoadReply] = Queue(kind=Blocking(1))
-  follower.load_requests.put({ reply: placeholder, active: false })
+  follower.load_requests.put({ reply: placeholder, active: false, })
   follower.load_pending = true
   @async.with_task_group(group => {
     let caller = group.spawn(() => request_follower_load(follower))
@@ -1478,7 +1478,7 @@ async test "backpressured load schedules the next control generation" {
     assert_true(request.active)
     request.active = false
     request.reply.put(
-      LoadOk({ version: None, id: None, system_prompt: None, events: Some([]) }),
+      LoadOk({ version: None, id: None, system_prompt: None, events: Some([]), }),
     )
     assert_true(caller.wait() is LoadOk(_))
   })

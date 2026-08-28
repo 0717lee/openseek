@@ -14,7 +14,7 @@ fn advanced_compute(original : String, modified : String) -> DocumentDiff {
   get_core_document_diff_provider().compute_diff(
     TextSnapshot(original),
     TextSnapshot(modified),
-    { ignore_trim_whitespace: false },
+    { ignore_trim_whitespace: false, },
   )
 }
 

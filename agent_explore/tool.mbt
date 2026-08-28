@@ -278,7 +278,7 @@ test "parse_child_report re-checks the contract at the trust boundary" {
   guard parse_child_report({ "answer": "no version" }) is Err(_) else {
     fail("expected a parse rejection")
   }
-  guard parse_child_report(ToJson::to_json({ ..sample_report(), answer: "" }))
+  guard parse_child_report(ToJson::to_json({ ..sample_report(), answer: "", }))
     is Err(_) else {
     fail("expected a validation rejection")
   }

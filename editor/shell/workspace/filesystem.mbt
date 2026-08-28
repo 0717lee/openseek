@@ -7,7 +7,7 @@ pub fn FileSystemProviderError::FileSystemProviderError(
   uri? : @base_common.Uri,
 ) -> FileSystemProviderError {
   let message = if message == "" { code.to_string() } else { message }
-  { code, message, uri }
+  { code, message, uri, }
 }
 
 ///|
@@ -47,7 +47,7 @@ fn watch_file_impl(
   if uri.scheme == provider.scheme() {
     provider.watch(uri, WatchOptions::default(), listener)
   } else {
-    { dispose: () => () }
+    { dispose: () => (), }
   }
 }
 

@@ -2288,7 +2288,7 @@ fn encode_hash_component(value : String) -> String {
 /// to parent elements). Rendering is pure and synchronous, and this
 /// package is single-threaded js, so a save/restore around the one
 /// nesting entry point (`subrun_transcript`) is race-free.
-let anchor_namespace : Ref[String] = { val: "" }
+let anchor_namespace : Ref[String] = { val: "", }
 
 ///|
 /// The inline child transcript for an expanded subrun card: the child's
@@ -2308,7 +2308,10 @@ fn subrun_transcript(child : @agent_session.Session) -> @html.Html {
   // parent document's ids.
   let saved = anchor_namespace.val
   anchor_namespace.val = "\{child.id().value()}--"
-  let body = render_raw(child, { parent: child.id().value(), children: Map([]) })
+  let body = render_raw(child, {
+    parent: child.id().value(),
+    children: Map([]),
+  })
   anchor_namespace.val = saved
   @html.details(class="subrun-transcript") <| [
     @html.summary(class="subrun-transcript-label") <| [

@@ -40,7 +40,7 @@ pub fn VisibleRow::history(
       }
       None => "l\{index}"
     }
-    rows.push({ item, identity })
+    rows.push({ item, identity, })
   }
   rows
 }
@@ -144,13 +144,13 @@ fn Model::update(
   let self = if self.image_owner == image_owner {
     self
   } else {
-    { ..self, image_owner, images: ImageCache::empty() }
+    { ..self, image_owner, images: ImageCache::empty(), }
   }
   match msg {
     Pinned(pinned) => ({ ..self, pinned, }, @cmd.none)
     JumpToLatest =>
       (
-        { ..self, pinned: true },
+        { ..self, pinned: true, },
         @cmd.batch([
           scroll_after_render(),
           report_visible_turn_after_render(emit, skip_unchanged=true),
@@ -217,7 +217,7 @@ fn Model::update(
         // The clicked tick is already under the pointer. Revealing it could
         // move the rail beneath the pointer and transfer hover to a neighbor.
         Clicked(key) =>
-          ({ ..next, pinned: false }, scroll_turn_into_view(emit, key))
+          ({ ..next, pinned: false, }, scroll_turn_into_view(emit, key))
         // A transcript scroll may activate a tick outside the rail's visible
         // window. Reveal only an actual active-turn change so rail scrolling
         // itself cannot feed back into another write.
@@ -628,7 +628,7 @@ fn TranscriptObservers::install(
   }
   // The component may already be mounted when its subscription starts.
   attach()
-  { document, content, resize, mount }
+  { document, content, resize, mount, }
 }
 
 ///|
@@ -674,7 +674,7 @@ test "local pinned transitions are pure" {
       ..input,
       items: [
         {
-          item: { kind: User, content: "new turn", ts: None, sequence: None },
+          item: { kind: User, content: "new turn", ts: None, sequence: None, },
           identity: "l0",
         },
       ],
@@ -684,7 +684,7 @@ test "local pinned transitions are pure" {
   )
   assert_false(received.pinned)
   let (submitted, _) = first.update(
-    { ..input, submission_generation: 1 },
+    { ..input, submission_generation: 1, },
     ContentRendered(mounted=true),
     emit,
   )
@@ -692,7 +692,7 @@ test "local pinned transitions are pure" {
   let (jumped, _) = grown.update(input, JumpToLatest, emit)
   assert_true(jumped.pinned)
   let (navigated, _) = grown.update(
-    { ..input, active_session: "another-session" },
+    { ..input, active_session: "another-session", },
     ContentRendered(mounted=true),
     emit,
   )
@@ -761,7 +761,7 @@ test "a conversation switch clears component-owned overview state" {
   }
   let emit : @cmd.Emit[Msg] = @cmd.Emit(_ => @cmd.none)
   let (next, _) = state.update(
-    { ..input, active_session: "desktop-other" },
+    { ..input, active_session: "desktop-other", },
     ContentRendered(mounted=true),
     emit,
   )

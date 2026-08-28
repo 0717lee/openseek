@@ -7,14 +7,14 @@ test "workspace symbols decode once into viewer coordinates" {
         kind: Some(12),
         container: Some("Lsp"),
         path: "a/b.mbt",
-        range: { start: { line: 4, col: 2 }, end: { line: 4, col: 13 } },
+        range: { start: { line: 4, col: 2, }, end: { line: 4, col: 13, }, },
       },
       {
         name: "",
         kind: None,
         container: None,
         path: "ignored.mbt",
-        range: { start: { line: 0, col: 0 }, end: { line: 0, col: 0 } },
+        range: { start: { line: 0, col: 0, }, end: { line: 0, col: 0, }, },
       },
     ],
   })

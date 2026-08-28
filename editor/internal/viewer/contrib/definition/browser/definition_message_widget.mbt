@@ -32,7 +32,7 @@ pub fn DefinitionMessageWidget::DefinitionMessageWidget() -> DefinitionMessageWi
   let anchor_below = document.create_element("div")
   anchor_below.set_attribute("class", "anchor below")
   root.append_child(anchor_below.as_node())
-  { root, message, position: None, disposed: false }
+  { root, message, position: None, disposed: false, }
 }
 
 ///|

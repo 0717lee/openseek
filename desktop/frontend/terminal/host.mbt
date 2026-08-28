@@ -95,7 +95,7 @@ fn terminal_style() -> @js.Value {
         .get_property_value("--color-text-selection")
         .trim()
         .to_owned()
-      { font_family, font_size, background, foreground, selection }
+      { font_family, font_size, background, foreground, selection, }
     }
     None =>
       {
@@ -247,7 +247,7 @@ fn mount_tab(dispatch : @cmd.Emit[Msg], key : Int) -> @cmd.Cmd {
         let _ : @js.Value = term.apply_with_string("onResize", [
           @js.Value::cast_from(on_resize),
         ])
-        term_host.entries[key] = { term, fit, element }
+        term_host.entries[key] = { term, fit, element, }
         if !term_host.resize_wired {
           term_host.resize_wired = true
           // The panel's area changes without any window resize — the editor
@@ -389,11 +389,11 @@ fn TermHost::write_to_tab(
   @cmd.custom_cmd(scheduler => {
     guard self.entries.get(key) is Some(entry) &&
       xterm_module() is Some(module_) else {
-      scheduler.add(TerminalAck::{ channel, id, sequence }.send())
+      scheduler.add(TerminalAck::{ channel, id, sequence, }.send())
       return
     }
     let done = (_ : @js.Value) => {
-      scheduler.add(TerminalAck::{ channel, id, sequence }.send())
+      scheduler.add(TerminalAck::{ channel, id, sequence, }.send())
     }
     let _ : @js.Value = module_.apply_with_string("writeBase64", [
       entry.term,
@@ -425,7 +425,7 @@ pub fn output(
           chunks.push((sequence, data))
           term_host.pending[owner] = chunks
         } else {
-          scheduler.add(TerminalAck::{ channel, id, sequence }.send())
+          scheduler.add(TerminalAck::{ channel, id, sequence, }.send())
         }
     }
   })
@@ -457,7 +457,7 @@ fn drop_pending(channel : @interop.ChannelId, id : Int) -> @cmd.Cmd {
     guard term_host.pending.get(owner) is Some(chunks) else { return }
     term_host.pending.remove(owner)
     for chunk in chunks {
-      scheduler.add(TerminalAck::{ channel, id, sequence: chunk.0 }.send())
+      scheduler.add(TerminalAck::{ channel, id, sequence: chunk.0, }.send())
     }
   })
 }

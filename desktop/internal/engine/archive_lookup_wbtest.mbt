@@ -138,7 +138,7 @@ async test "loading a conversation from a detached workspace names that state" {
   // workspace hint; the reply must say the record is unreachable rather
   // than surface the engine's raw file error.
   let detail = try {
-    ignore(load_session(manager, { session: "s-ws", workspace: None }))
+    ignore(load_session(manager, { session: "s-ws", workspace: None, }))
     "no error"
   } catch {
     EngineError(detail) => detail

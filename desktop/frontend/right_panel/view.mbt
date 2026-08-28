@@ -10,7 +10,7 @@ fn panel_view(input : Input, actions : Actions) -> @html.Html {
           Some(doc) => (doc.name, doc.state is TabDeleted)
           None => (@fileeditor.basename(path), false)
         }
-        { tab, label, title: path.0, missing }
+        { tab, label, title: path.0, missing, }
       }
       GitDiff(diff~) => {
         let short = if diff.commit.length() <= 8 {
@@ -33,7 +33,7 @@ fn panel_view(input : Input, actions : Actions) -> @html.Html {
           }
           None => ("New Tab", "New Tab")
         }
-        { tab, label, title, missing: false }
+        { tab, label, title, missing: false, }
       }
       FilePicker =>
         match input.file_panel.explorer_mode {

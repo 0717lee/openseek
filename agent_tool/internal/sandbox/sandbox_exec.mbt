@@ -5,7 +5,7 @@
 const SandboxExecPath : String = "/usr/bin/sandbox-exec"
 
 ///|
-let sandbox_exec_available_cache : Ref[Bool?] = { val: None }
+let sandbox_exec_available_cache : Ref[Bool?] = { val: None, }
 
 ///|
 /// Build the argument vector passed to `SandboxExecPath` to interpret `cmd`

@@ -32,7 +32,7 @@ fn Viewer::Viewer(
     options=code_options,
     contributions=@code_widget.CodeEditorContributionDescriptors::standalone(),
   )
-  { widget, options }
+  { widget, options, }
 }
 
 ///|

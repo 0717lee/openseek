@@ -287,11 +287,11 @@ test "agent connected names how much of the host is up" {
     is None,
   )
   @debug.assert_eq(
-    ({ stage: Serving } : @protocol.ConnectedPayload).to_json(),
+    ({ stage: Serving, } : @protocol.ConnectedPayload).to_json(),
     { "stage": "serving" },
   )
   @debug.assert_eq(
-    ({ stage: Accepted } : @protocol.ConnectedPayload).to_json(),
+    ({ stage: Accepted, } : @protocol.ConnectedPayload).to_json(),
     { "stage": "accepted" },
   )
 }
@@ -373,7 +373,7 @@ test "open-path replies distinguish system, editor, and directory targets" {
     line: Some(2738),
     column: Some(17),
   })
-  let directory : @protocol.OpenPathReply = Directory({ path: "src" })
+  let directory : @protocol.OpenPathReply = Directory({ path: "src", })
   let refused : @protocol.OpenPathReply = Refused(
     "File does not exist: nope.mbt",
   )
@@ -385,7 +385,7 @@ test "open-path replies distinguish system, editor, and directory targets" {
 
 ///|
 test "archive replies keep success compatible and encode dirty confirmation" {
-  let sessions : @protocol.SessionsReply = { groups: [] }
+  let sessions : @protocol.SessionsReply = { groups: [], }
   let success = @protocol.ArchiveReply::Archived(sessions)
   @debug.assert_eq(success.to_json(), sessions.to_json())
   let decoded_success : @protocol.ArchiveReply = @json.from_json(
@@ -613,7 +613,7 @@ test "text search payload and UTF-16 reply round-trip at the JSON boundary" {
   let error_reply : @protocol.SearchTextReply = @json.from_json(raw_error_reply)
   assert_eq(
     error_reply.error,
-    Some({ code: "invalid_regex", message: "regex parse error" }),
+    Some({ code: "invalid_regex", message: "regex parse error", }),
   )
   @debug.assert_eq(error_reply.to_json(), raw_error_reply)
 }
@@ -1309,12 +1309,12 @@ test "a run's close keeps its outcome and reports only the evidence it has" {
 
 ///|
 test "a cancel reply spells \"nothing was open\" by omission" {
-  let matched : @protocol.CancelReply = { run_id: Some("r1") }
+  let matched : @protocol.CancelReply = { run_id: Some("r1"), }
   @debug.assert_eq(matched.to_json(), { "run_id": "r1" })
 
   // Not `{"run_id": null}`: the key's absence IS the answer, so a reader that
   // only checks for the key agrees with one that inspects its value.
-  let unmatched : @protocol.CancelReply = { run_id: None }
+  let unmatched : @protocol.CancelReply = { run_id: None, }
   @debug.assert_eq(unmatched.to_json(), Json::empty_object())
 
   // Nothing here is worth failing a Stop over: every shape that is not a run

@@ -100,7 +100,7 @@ test "a model lease exposes live markers without owning the store" {
     "let x = 1\n",
   )
   store.set_diagnostics("owner", model.uri, [
-    { range: Range(1, 1, 1, 4), severity: Error, message: "boom", tags: None },
+    { range: Range(1, 1, 1, 4), severity: Error, message: "boom", tags: None, },
   ])
   let handle = decorations.marker_decorations_handle()
   let lease = handle.acquire_model(model)

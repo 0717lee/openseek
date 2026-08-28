@@ -23,7 +23,7 @@ fn test_actions() -> Actions {
 ///|
 fn test_ctx() -> @fileeditor.Ctx {
   {
-    owner: { channel: @interop.ChannelId::Local, session: "panel-test" },
+    owner: { channel: @interop.ChannelId::Local, session: "panel-test", },
     request_epoch: 0,
     watch_namespace: "panel-test-watch",
     placement: None,
@@ -43,7 +43,7 @@ fn test_ctx() -> @fileeditor.Ctx {
 fn render_picker(mode : @fileeditor.ExplorerMode) -> String {
   let input = Input::Input(
     dock=@dock.open_picker(@dock.State::empty()),
-    file_panel={ ..@fileeditor.State::empty(), explorer_mode: mode },
+    file_panel={ ..@fileeditor.State::empty(), explorer_mode: mode, },
     preview=@preview.State::empty(),
     file_ctx=test_ctx(),
     is_desktop=true,

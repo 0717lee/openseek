@@ -104,7 +104,7 @@ fn fetch_content(
           let reply = @interop.bridge_request(
             channel,
             @commands.skills_installed_content,
-            { id: item.id },
+            { id: item.id, },
           ) catch {
             error => {
               scheduler.add(

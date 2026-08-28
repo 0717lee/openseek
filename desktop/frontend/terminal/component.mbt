@@ -16,7 +16,7 @@ pub fn Input::Input(
   live_channels~ : Array[@interop.ChannelId],
   has_devices~ : Bool,
 ) -> Input {
-  { ctx, live_channels, has_devices }
+  { ctx, live_channels, has_devices, }
 }
 
 ///|
@@ -28,7 +28,7 @@ fn State::close_without_devices(self : State, has_devices : Bool) -> State {
   if has_devices {
     self
   } else {
-    { ..self, open: false }
+    { ..self, open: false, }
   }
 }
 
@@ -57,7 +57,7 @@ pub fn State::reconcile(
   // session-to-emulator routing after the low-frequency state transition that
   // can change it. This is a projection of `State`, not a second state owner.
   commands.push(state.sync_host_routes())
-  ({ ..state, live_channels: input.live_channels }, @cmd.batch(commands))
+  ({ ..state, live_channels: input.live_channels, }, @cmd.batch(commands))
 }
 
 ///|
@@ -72,7 +72,7 @@ pub fn component(
 
 ///|
 test "terminal visibility distinguishes disconnect from device removal" {
-  let open = { ..State::empty(), open: true }
+  let open = { ..State::empty(), open: true, }
   let disconnected = open.close_without_devices(true)
   assert_true(disconnected.open)
   let signed_out = open.close_without_devices(false)

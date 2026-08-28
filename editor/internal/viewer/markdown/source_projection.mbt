@@ -110,7 +110,7 @@ pub fn MarkdownCodeBlock::project_source_range(
   let projected : Array[MarkdownProjectedCodeRange] = []
   for line_index, line in self.code_lines {
     match line.project_source_range(source_range) {
-      Some(displayed_range) => projected.push({ line_index, displayed_range })
+      Some(displayed_range) => projected.push({ line_index, displayed_range, })
       None => ()
     }
   }
@@ -119,7 +119,7 @@ pub fn MarkdownCodeBlock::project_source_range(
 
 ///|
 fn empty_markdown_document_projection() -> MarkdownDocumentProjection {
-  { block_anchors: [], code_blocks: [] }
+  { block_anchors: [], code_blocks: [], }
 }
 
 ///|
@@ -174,7 +174,7 @@ fn markdown_document_projection(doc : @cmark.Doc) -> MarkdownDocumentProjection 
   let _ = folder.fold_doc(builder, doc) catch {
     _ => return empty_markdown_document_projection()
   }
-  { block_anchors: builder.block_anchors, code_blocks: builder.code_blocks }
+  { block_anchors: builder.block_anchors, code_blocks: builder.code_blocks, }
 }
 
 ///|

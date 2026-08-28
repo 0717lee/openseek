@@ -8,7 +8,7 @@ fn rotate_session(
 ) -> @cmd.Cmd {
   @cmd.custom_cmd(scheduler => {
     scheduler.add(
-      dispatch(SessionRotated({ channel, session: generated_session_id() })),
+      dispatch(SessionRotated({ channel, session: generated_session_id(), })),
     )
   })
 }

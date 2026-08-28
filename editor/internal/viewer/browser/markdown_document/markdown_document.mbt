@@ -23,7 +23,7 @@ priv struct MarkdownSemanticDomLifetime {
 
 ///|
 fn MarkdownSemanticDomLifetime::empty() -> MarkdownSemanticDomLifetime {
-  { lines: [], listeners: [], disposed: false }
+  { lines: [], listeners: [], disposed: false, }
 }
 
 ///|

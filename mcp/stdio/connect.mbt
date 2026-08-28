@@ -101,7 +101,7 @@ pub async fn[X] connect(
   // server exit on EOF; `process.cancel()` is the backstop. Caveat: cancel signals
   // only the direct child, so a launcher that forks (e.g. `npx`) and ignores
   // stdin EOF may leave descendants running — an upstream group-kill gap.
-  let torn_down : Ref[Bool] = { val: false }
+  let torn_down : Ref[Bool] = { val: false, }
   // Seeded with pipe + process cleanup so teardown is complete even if it fires
   // before the task handles exist; once they exist it is upgraded to also cancel
   // the tasks (which is what unblocks a parked reader/writer).
@@ -162,5 +162,5 @@ pub async fn[X] connect(
     teardown()
     return None
   }
-  Some({ client: mcp_client, init, teardown })
+  Some({ client: mcp_client, init, teardown, })
 }

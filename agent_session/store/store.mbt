@@ -64,7 +64,7 @@ priv struct FileFingerprint {
 /// treat a missing `root/sessions` directory as an empty store where that makes
 /// sense.
 pub fn SessionStore::SessionStore(root : String) -> SessionStore {
-  { root, marks: Map([]) }
+  { root, marks: Map([]), }
 }
 
 ///|
@@ -277,7 +277,7 @@ async fn record_mark(
   let path = store.session_file_path(session.id()) catch { _ => return }
   match file_fingerprint(path) {
     Some(fingerprint) =>
-      store.marks[session.id().value()] = { session, fingerprint }
+      store.marks[session.id().value()] = { session, fingerprint, }
     None => store.marks.remove(session.id().value())
   }
 }
@@ -605,7 +605,11 @@ pub async fn SessionStore::listings(
     let path = self.session_file_path(id) catch { _ => continue }
     let stamp = @fs.mtime(path) catch {
       _ => {
-        unreadable.push({ id, last_active_unix_seconds: None, first_prompt: "" })
+        unreadable.push({
+          id,
+          last_active_unix_seconds: None,
+          first_prompt: "",
+        })
         continue
       }
     }

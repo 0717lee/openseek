@@ -19,7 +19,7 @@ pub fn RunOnceScheduler::new_with_timer(
   delay_ms : Int,
   schedule_timeout : (() -> Unit, Int) -> @base_common.Disposable,
 ) -> RunOnceScheduler {
-  { delay_ms, handle: None, schedule_timeout }
+  { delay_ms, handle: None, schedule_timeout, }
 }
 
 ///|

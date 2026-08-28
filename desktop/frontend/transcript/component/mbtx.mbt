@@ -47,7 +47,7 @@ fn decode_mbtx_call(arguments : String) -> MbtxCall? {
     known=["target", "cwd", "escalated", "warning", "run_in_background"],
     dramatized=["source"],
   )
-  Some({ source, chips })
+  Some({ source, chips, })
 }
 
 ///|

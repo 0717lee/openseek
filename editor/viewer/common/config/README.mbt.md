@@ -199,7 +199,12 @@ test "equals ignores pixel_ratio and trust, while == does not" {
     pixel_ratio=1.0,
   )
   let one = @config.FontInfo::estimated(bare)
-  let retina = { ..one, pixel_ratio: 2.0, is_trusted: true, is_monospace: true }
+  let retina = {
+    ..one,
+    pixel_ratio: 2.0,
+    is_trusted: true,
+    is_monospace: true,
+  }
   debug_inspect(
     (one.equals(retina), one == retina),
     content=(

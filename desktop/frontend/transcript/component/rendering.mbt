@@ -11,12 +11,12 @@ fn TranscriptRenderKey::wire(self : TranscriptRenderKey) -> String {
 
 ///|
 fn TranscriptRenderKey::row(identity : String) -> TranscriptRenderKey {
-  { value: "row\u{0}\{identity}" }
+  { value: "row\u{0}\{identity}", }
 }
 
 ///|
 fn TranscriptRenderKey::turn_rule(identity : String) -> TranscriptRenderKey {
-  { value: "rule\u{0}\{identity}" }
+  { value: "rule\u{0}\{identity}", }
 }
 
 ///|
@@ -27,19 +27,19 @@ fn TranscriptRenderKey::activity_after(
   boundary : String?,
 ) -> TranscriptRenderKey {
   match boundary {
-    Some(identity) => { value: "activity\u{0}after\u{0}\{identity}" }
-    None => { value: "activity\u{0}head" }
+    Some(identity) => { value: "activity\u{0}after\u{0}\{identity}", }
+    None => { value: "activity\u{0}head", }
   }
 }
 
 ///|
 fn TranscriptRenderKey::streaming(identity : String) -> TranscriptRenderKey {
-  { value: "streaming\u{0}\{identity}" }
+  { value: "streaming\u{0}\{identity}", }
 }
 
 ///|
 fn TranscriptRenderKey::empty() -> TranscriptRenderKey {
-  { value: "empty" }
+  { value: "empty", }
 }
 
 ///|
@@ -79,7 +79,7 @@ fn TranscriptSectionKey::wire(self : TranscriptSectionKey) -> String {
 
 ///|
 fn TranscriptSectionKey::overview() -> TranscriptSectionKey {
-  { value: "overview" }
+  { value: "overview", }
 }
 
 ///|
@@ -93,7 +93,7 @@ fn TranscriptSectionKey::stream(input : Input) -> TranscriptSectionKey {
 
 ///|
 fn TranscriptSectionKey::jump_latest() -> TranscriptSectionKey {
-  { value: "jump-latest" }
+  { value: "jump-latest", }
 }
 
 ///|
@@ -117,7 +117,7 @@ priv struct TranscriptRenderer {
 /// hang a child off, and `subrun_child_session` rejects the empty parent.
 fn TranscriptRenderer::subrun_link(self : TranscriptRenderer) -> SubrunLink? {
   guard self.input.source is OpenSeek else { return None }
-  Some({ parent: self.input.active_session, open: self.on_open_session })
+  Some({ parent: self.input.active_session, open: self.on_open_session, })
 }
 
 ///|

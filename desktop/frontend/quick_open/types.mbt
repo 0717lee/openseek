@@ -83,7 +83,7 @@ pub fn State::empty() -> State {
   {
     open: None,
     generation: 0,
-    cache: { owner: None, root: None, active_key: None, loading_key: None },
+    cache: { owner: None, root: None, active_key: None, loading_key: None, },
   }
 }
 
@@ -116,7 +116,7 @@ pub fn Input::Input(
   open_files~ : Array[@pathx.Relative],
   active_file~ : @pathx.Relative?,
 ) -> Input {
-  { owner, root, open_files, active_file }
+  { owner, root, open_files, active_file, }
 }
 
 ///|
@@ -234,8 +234,8 @@ fn Item::detail(self : Item) -> String {
 ///|
 fn Item::accepted(self : Item) -> Accepted {
   match self {
-    FileRow(file) => { path: file.path.0, range: None }
-    SymbolRow(symbol) => { path: symbol.path, range: Some(symbol.range) }
+    FileRow(file) => { path: file.path.0, range: None, }
+    SymbolRow(symbol) => { path: symbol.path, range: Some(symbol.range), }
   }
 }
 

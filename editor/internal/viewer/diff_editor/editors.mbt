@@ -23,7 +23,7 @@ struct DiffEditorModelPairCommitBarrier {
 
 ///|
 fn new_diff_editor_model_pair_commit_barrier() -> DiffEditorModelPairCommitBarrier {
-  { is_committing: false, committed_generation: 0 }
+  { is_committing: false, committed_generation: 0, }
 }
 
 ///|

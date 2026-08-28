@@ -584,7 +584,7 @@ async fn run_agent_shell_with_tree_precheck(
       match collected {
         None => ShellTimedOut
         Some(output) =>
-          ShellExecuted({ output, sandboxed_command: launch.sandboxed_command })
+          ShellExecuted({ output, sandboxed_command: launch.sandboxed_command, })
       }
     }
   }
@@ -836,7 +836,7 @@ fn shell_response(
 ) -> ShellResponse {
   if output.output_limit_reached {
     let footer = "<system>\{exit_header(output.exit_code)} truncated=true output_limit_reached=true shown_chars=\{output.text.char_length()} max_output_chars=\{max_output_chars}</system>"
-    { content: with_system_footer(output.text, footer), is_error: true }
+    { content: with_system_footer(output.text, footer), is_error: true, }
   } else {
     let code = output.exit_code.unwrap_or(0)
     {
@@ -887,7 +887,7 @@ test "shell parses and caps output limit" {
 test "shell formats output limit metadata" {
   assert_eq(
     shell_response(
-      { exit_code: Some(0), text: "abc", output_limit_reached: true },
+      { exit_code: Some(0), text: "abc", output_limit_reached: true, },
       3,
     ).content,
     "abc\n<system>exit=0 truncated=true output_limit_reached=true shown_chars=3 max_output_chars=3</system>",

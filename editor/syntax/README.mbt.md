@@ -53,14 +53,14 @@ impl @syntax.LineTokenizer for KeywordOnly with fn tokenize_line(
   let tokens : Array[@syntax.LineToken] = []
   // Only "let" is claimed; every other column is left as a gap.
   if line_text.has_prefix("let") {
-    tokens.push({ start: 0, end: 3, tag: Keyword })
+    tokens.push({ start: 0, end: 3, tag: Keyword, })
   }
   (tokens, state)
 }
 
 ///|
 test "unclaimed columns stay as gaps rather than forcing a Plain token" {
-  let tokenizer : &@syntax.LineTokenizer = KeywordOnly::{  }
+  let tokenizer : &@syntax.LineTokenizer = KeywordOnly::{ }
   let (tokens, _) = tokenizer.tokenize_line(
     "let x = 1",
     tokenizer.initial_state(),
@@ -98,7 +98,7 @@ test "registration and removal emit exact language-id arrays" {
     events.push((event.changed_languages, event.changed_color_map))
   })
   |> ignore
-  let registration = registry.register("json", KeywordOnly::{  })
+  let registration = registry.register("json", KeywordOnly::{ })
   let found = registry.get("json") is Some(_)
   let missing = registry.get("moonbit") is Some(_)
   registration.dispose()
@@ -121,7 +121,7 @@ is no lazy factory that could still be pending.
 ///|
 test "is_resolved is unconditionally true" {
   let registry = @syntax.TokenizationRegistry()
-  registry.register("json", KeywordOnly::{  }) |> ignore
+  registry.register("json", KeywordOnly::{ }) |> ignore
   debug_inspect(
     (registry.is_resolved("json"), registry.is_resolved("never-registered")),
     content=(
@@ -143,7 +143,7 @@ is greater than 2. No `Color` object behavior or identity is exposed.
 test "the color map is retained verbatim and index 2 is the default background" {
   let registry = @syntax.TokenizationRegistry()
   let before = (registry.get_color_map(), registry.get_default_background())
-  registry.register("json", KeywordOnly::{  }) |> ignore
+  registry.register("json", KeywordOnly::{ }) |> ignore
   let events = []
   registry.on_did_change(event => {
     events.push((event.changed_languages, event.changed_color_map))

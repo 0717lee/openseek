@@ -17,7 +17,7 @@ pub fn Id::Id(
   conversation~ : String,
   root? : String,
 ) -> Id {
-  { source, channel, conversation, root }
+  { source, channel, conversation, root, }
 }
 
 ///|
@@ -145,10 +145,10 @@ pub fn component(
 ) -> @rabbita.Val[Array[(String, @html.Html)]] {
   let (state, emit) = @rabbita.create_state_with_input(
     input~,
-    init=(_, _) => ({ children_open: false }, @cmd.none),
+    init=(_, _) => ({ children_open: false, }, @cmd.none),
     update=(state, _, msg, _) => {
       match msg {
-        ToggleChildren => ({ children_open: !state.children_open }, @cmd.none)
+        ToggleChildren => ({ children_open: !state.children_open, }, @cmd.none)
       }
     },
   )

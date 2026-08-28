@@ -51,16 +51,16 @@ pub async fn capture(
   )
   guard status.exit_code == 0 else {
     defects.push("git status failed: \{status.output.trim()}")
-    return { entry, evidence, defects }
+    return { entry, evidence, defects, }
   }
   let changes = parse_status_z(status.output)
   if changes.is_empty() && !defects.is_empty() {
     // A clean tree with a FAILED validation (e.g. HEAD moved off the base)
     // is abnormal, not a no-op: the worktree may hold the only reference
     // to whatever happened — keep it and report.
-    let entry = { ..entry, state: Captured }
+    let entry = { ..entry, state: Captured, }
     let _ = save_entry(geometry.common_git_dir, entry)
-    return { entry, evidence, defects }
+    return { entry, evidence, defects, }
   }
   if changes.is_empty() && entry.commit_oid is Some(prior) {
     // A resumed worker that added nothing new: the prior capture still
@@ -70,10 +70,10 @@ pub async fn capture(
     // surface now, not as a later integrate refusal.
     match git_require(["rev-parse", "refs/heads/\{entry.branch}"], cwd=worker) {
       Ok(tip) if tip.trim() == prior => {
-        let entry = { ..entry, state: Committed }
+        let entry = { ..entry, state: Committed, }
         let _ = save_entry(geometry.common_git_dir, entry)
         evidence.push("no additional changes since the prior capture \{prior}")
-        return { entry, evidence, defects }
+        return { entry, evidence, defects, }
       }
       Ok(tip) =>
         defects.push(
@@ -81,9 +81,9 @@ pub async fn capture(
         )
       Err(reason) => defects.push(reason)
     }
-    let entry = { ..entry, state: Captured }
+    let entry = { ..entry, state: Captured, }
     let _ = save_entry(geometry.common_git_dir, entry)
-    return { entry, evidence, defects }
+    return { entry, evidence, defects, }
   }
   if changes.is_empty() {
     // Terminal means undiscoverable by lifecycle actions, so the worktree
@@ -94,10 +94,10 @@ pub async fn capture(
     }
     let _ = git_run(["worktree", "prune"], cwd=geometry.origin_root)
     let _ = git_run(["branch", "-D", entry.branch], cwd=geometry.origin_root)
-    let entry = { ..entry, state: NoChanges }
+    let entry = { ..entry, state: NoChanges, }
     let _ = save_entry(geometry.common_git_dir, entry)
     evidence.push("no changes in the worker tree; worktree and branch removed")
-    return { entry, evidence, defects }
+    return { entry, evidence, defects, }
   }
   evidence.push("\{changes.length()} changed path(s)")
   let violations = scope_violations(changes, entry.allowed_paths)
@@ -107,23 +107,23 @@ pub async fn capture(
     )
   }
   if !defects.is_empty() {
-    let entry = { ..entry, state: Captured }
+    let entry = { ..entry, state: Captured, }
     let _ = save_entry(geometry.common_git_dir, entry)
-    return { entry, evidence, defects }
+    return { entry, evidence, defects, }
   }
   // Stage, pin the immutable tree, and validate the TREE OBJECT itself.
   match git_require(["add", "-A"], cwd=worker) {
     Ok(_) => ()
     Err(reason) => {
       defects.push(reason)
-      return { entry, evidence, defects }
+      return { entry, evidence, defects, }
     }
   }
   let tree_oid = match git_require(["write-tree"], cwd=worker) {
     Ok(output) => output.trim().to_owned()
     Err(reason) => {
       defects.push(reason)
-      return { entry, evidence, defects }
+      return { entry, evidence, defects, }
     }
   }
   let staged = git_run(
@@ -132,7 +132,7 @@ pub async fn capture(
   )
   guard staged.exit_code == 0 else {
     defects.push("git diff (tree) failed: \{staged.output.trim()}")
-    return { entry, evidence, defects }
+    return { entry, evidence, defects, }
   }
   let staged_changes = parse_diff_name_status_z(staged.output)
   let staged_violations = scope_violations(staged_changes, entry.allowed_paths)
@@ -153,9 +153,9 @@ pub async fn capture(
     raw => defects.push("git diff --raw failed: \{raw.output.trim()}")
   }
   if !defects.is_empty() {
-    let entry = { ..entry, state: Captured }
+    let entry = { ..entry, state: Captured, }
     let _ = save_entry(geometry.common_git_dir, entry)
-    return { entry, evidence, defects }
+    return { entry, evidence, defects, }
   }
   // Commit EXACTLY the validated tree; then move the branch ref to it,
   // guarded by the expected old value (the pin).
@@ -174,7 +174,7 @@ pub async fn capture(
     Ok(output) => output.trim().to_owned()
     Err(reason) => {
       defects.push(reason)
-      return { entry, evidence, defects }
+      return { entry, evidence, defects, }
     }
   }
   match
@@ -185,7 +185,7 @@ pub async fn capture(
     Ok(_) => ()
     Err(reason) => {
       defects.push(reason)
-      return { entry, evidence, defects }
+      return { entry, evidence, defects, }
     }
   }
   let diffstat = git_run(
@@ -195,8 +195,8 @@ pub async fn capture(
   if diffstat.exit_code == 0 {
     evidence.push(diffstat.output.trim().to_owned())
   }
-  let entry = { ..entry, state: Committed, commit_oid: Some(commit_oid) }
+  let entry = { ..entry, state: Committed, commit_oid: Some(commit_oid), }
   let _ = save_entry(geometry.common_git_dir, entry)
   evidence.push("committed \{commit_oid} on \{entry.branch}")
-  { entry, evidence, defects }
+  { entry, evidence, defects, }
 }

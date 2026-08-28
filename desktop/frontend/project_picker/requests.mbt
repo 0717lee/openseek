@@ -62,7 +62,7 @@ fn create_folder(
       let reply = @interop.bridge_request(
         channel,
         @commands.fs_create_directory,
-        { parent, name },
+        { parent, name, },
       ) catch {
         error if @interop.bridge_failure(error) is Unknown => {
           // The host may have created the folder before the reply was lost.

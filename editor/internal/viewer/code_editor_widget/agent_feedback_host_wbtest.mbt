@@ -131,7 +131,9 @@ test "lines with unresolved feedback refuse the add glyph" {
       viewer.update_agent_feedback_hover_glyph(3)
       assert_eq(viewer.test_feedback_input_contribution().hover_line_number, -1)
       // Resolved feedback frees the line again.
-      service.set_feedback_items(test_model_uri(), [{ ..item, state: Resolved }])
+      service.set_feedback_items(test_model_uri(), [
+        { ..item, state: Resolved, },
+      ])
       viewer.update_agent_feedback_hover_glyph(3)
       assert_eq(viewer.test_feedback_input_contribution().hover_line_number, 3)
     },

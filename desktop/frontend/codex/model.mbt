@@ -697,7 +697,7 @@ fn State::with_selected_model(self : State, id : String) -> State {
   let id = id.trim().to_owned()
   if self.models.is_empty() {
     // Startup restores preferences before model/list settles.
-    return { ..self, selected_model: id }
+    return { ..self, selected_model: id, }
   }
   for model in self.models {
     if model.id == id {
@@ -717,13 +717,13 @@ fn State::with_selected_model(self : State, id : String) -> State {
 fn State::with_selected_effort(self : State, effort : String) -> State {
   let effort = effort.trim().to_owned()
   if self.models.is_empty() {
-    return { ..self, selected_effort: effort }
+    return { ..self, selected_effort: effort, }
   }
   guard self.selected_model_option() is Some(model) &&
     model.reasoning_efforts.iter().any(option => option.value == effort) else {
     return self
   }
-  { ..self, selected_effort: effort }
+  { ..self, selected_effort: effort, }
 }
 
 ///|
@@ -769,7 +769,7 @@ pub fn State::model_listing(self : State) -> CodexModelListing {
   if !self.models.is_empty() {
     let options : Array[@composer.ModelOption] = []
     for model in self.models {
-      options.push({ value: model.id, label: model.label })
+      options.push({ value: model.id, label: model.label, })
     }
     // `with_models` never leaves an empty selection beside a non-empty
     // catalog, so this selected id names a real option.
@@ -992,7 +992,7 @@ fn State::owns_foreground(self : State, kind : CodexReplyKind) -> Bool {
 ///|
 fn State::settle_foreground(self : State, kind : CodexReplyKind) -> State {
   if self.owns_foreground(kind) {
-    { ..self, loading: false, foreground: None }
+    { ..self, loading: false, foreground: None, }
   } else {
     self
   }
@@ -1133,11 +1133,11 @@ fn State::with_open_draft(
     value is Object(fields) &&
     @jsonx.json_text(fields, "draftId") == Some(draft_id) &&
     @jsonx.json_text(fields, "projectRoot") is Some(project_root) else {
-    return { ..self, notice: "Malformed Codex draft workspace reply" }
+    return { ..self, notice: "Malformed Codex draft workspace reply", }
   }
   {
     ..self,
-    selection: CodexDraftTask({ ..draft, project_root: Some(project_root) }),
+    selection: CodexDraftTask({ ..draft, project_root: Some(project_root), }),
     notice: "",
   }
 }
@@ -1148,7 +1148,7 @@ fn State::select_draft(self : State, id : String, cwd : String) -> State {
   let cwd = cwd.trim().to_owned()
   {
     ..self,
-    selection: CodexDraftTask({ id, cwd, project_root: None }),
+    selection: CodexDraftTask({ id, cwd, project_root: None, }),
     requested_thread: None,
     git_status: None,
     git_details_open: false,
@@ -1207,7 +1207,7 @@ fn CodexItem::decode(value : Json) -> CodexItem? {
     @jsonx.json_text(fields, "type") is Some(kind) else {
     return None
   }
-  Some({ id, kind, value, streamed: "" })
+  Some({ id, kind, value, streamed: "", })
 }
 
 ///|
@@ -1245,7 +1245,7 @@ fn CodexWorktree::decode(value : Json) -> CodexWorktree? {
     @jsonx.json_text(fields, "path") is Some(path) else {
     return None
   }
-  Some({ name, path, present: fields.get("present") is Some(True) })
+  Some({ name, path, present: fields.get("present") is Some(True), })
 }
 
 ///|
@@ -1261,7 +1261,7 @@ fn CodexWorktree::from_create_reply(
       info.codex_thread == Some(thread_id) &&
       info.present &&
       !info.path.trim().is_empty() {
-      return Some({ name: info.name, path: info.path, present: true })
+      return Some({ name: info.name, path: info.path, present: true, })
     }
   }
   None
@@ -1371,7 +1371,7 @@ fn CodexThreadRow::branch(fields : Map[String, Json]) -> String? {
 fn State::with_status(self : State, value : Json) -> State {
   guard value is Object(fields) &&
     @jsonx.json_text(fields, "status") is Some(status) else {
-    return { ..self, connection: CodexUnavailable("Malformed status reply") }
+    return { ..self, connection: CodexUnavailable("Malformed status reply"), }
   }
   {
     ..self
@@ -1398,7 +1398,7 @@ fn State::with_status(self : State, value : Json) -> State {
 ///|
 fn State::with_account(self : State, value : Json) -> State {
   guard value is Object(fields) else {
-    return { ..self, notice: "Malformed Codex account reply" }
+    return { ..self, notice: "Malformed Codex account reply", }
   }
   let requires_auth = fields.get("requiresOpenaiAuth") is Some(True)
   let account = match fields.get("account") {
@@ -1411,13 +1411,13 @@ fn State::with_account(self : State, value : Json) -> State {
   }
   // A fresh account snapshot settles both successful and cancelled login
   // attempts. Do not leave an obsolete browser URL actionable afterward.
-  { ..self, account, login_id: None, auth_url: None, notice: "" }
+  { ..self, account, login_id: None, auth_url: None, notice: "", }
 }
 
 ///|
 fn State::with_models(self : State, value : Json) -> State {
   guard value is Object(fields) && fields.get("data") is Some(Array(values)) else {
-    return { ..self, notice: "Malformed Codex model list" }
+    return { ..self, notice: "Malformed Codex model list", }
   }
   let models : Array[CodexModelOption] = []
   let mut default_model = ""
@@ -1467,13 +1467,13 @@ fn State::with_models(self : State, value : Json) -> State {
     .find_first(model => model.id == selected_model)
     .map(model => model.reasoning_effort(self.selected_effort))
     .unwrap_or("")
-  { ..self, models, selected_model, selected_effort, notice: "" }
+  { ..self, models, selected_model, selected_effort, notice: "", }
 }
 
 ///|
 fn State::with_threads(self : State, value : Json, archived : Bool) -> State {
   guard value is Object(fields) && fields.get("data") is Some(Array(values)) else {
-    return { ..self, notice: "Malformed Codex thread list" }
+    return { ..self, notice: "Malformed Codex thread list", }
   }
   let threads : Array[CodexThreadRow] = []
   for value in values {
@@ -1534,7 +1534,7 @@ fn State::with_threads(self : State, value : Json, archived : Bool) -> State {
   } else {
     threads
   }
-  { ..self, threads: visible, notice: "" }
+  { ..self, threads: visible, notice: "", }
 }
 
 ///|
@@ -1562,7 +1562,7 @@ fn State::with_requests(self : State, value : Json) -> State {
   guard value is Object(fields) &&
     @jsonx.json_int(fields, "generation") is Some(generation) &&
     fields.get("data") is Some(Array(values)) else {
-    return { ..self, notice: "Malformed Codex request list" }
+    return { ..self, notice: "Malformed Codex request list", }
   }
   if generation < self.request_generation {
     return self
@@ -1588,7 +1588,7 @@ fn State::with_requests(self : State, value : Json) -> State {
     }
     pending_requests.push({ ..decoded, answers, })
   }
-  { ..self, pending_requests, request_generation: generation }
+  { ..self, pending_requests, request_generation: generation, }
 }
 
 ///|
@@ -1600,7 +1600,7 @@ fn State::with_thread_reply(
   guard value is Object(fields) &&
     fields.get("thread") is Some(thread) &&
     CodexThread::decode(thread) is Some(active) else {
-    return { ..self, notice: "Malformed Codex thread reply" }
+    return { ..self, notice: "Malformed Codex thread reply", }
   }
   if requested_thread is Some(requested) && active.id != requested {
     return {
@@ -1637,7 +1637,7 @@ fn State::with_thread_reply(
         if reply_stamp_ms is Some(_) {
           row
         } else {
-          { ..row, updated_at_ms: existing.updated_at_ms }
+          { ..row, updated_at_ms: existing.updated_at_ms, }
         },
       )
       replaced = true
@@ -1704,14 +1704,14 @@ fn State::with_created_worktree(
   worktree : CodexWorktree,
 ) -> State {
   guard self.active_thread() is Some(active) else { return self }
-  let active = { ..active, cwd: Some(worktree.path), worktree: Some(worktree) }
+  let active = { ..active, cwd: Some(worktree.path), worktree: Some(worktree), }
   {
     ..self,
     selection: CodexStoredTask(active),
     placement: @composer.BoundWorktree(worktree.name),
     threads: self.threads.map(thread => {
       if thread.id == active.id {
-        { ..thread, cwd: Some(worktree.path), worktree: Some(worktree) }
+        { ..thread, cwd: Some(worktree.path), worktree: Some(worktree), }
       } else {
         thread
       }
@@ -1735,7 +1735,7 @@ fn State::with_worktree_change(
   guard self.active_thread() is Some(active) && active.id == thread_id else {
     return self
   }
-  let worktree : CodexWorktree = { name, path, present }
+  let worktree : CodexWorktree = { name, path, present, }
   let active = {
     ..active,
     cwd: Some(path),
@@ -1802,7 +1802,7 @@ pub fn State::git_details_open(self : State) -> Bool {
 ///|
 /// Close the Codex Git details when the shell leaves the Codex screen.
 pub fn State::with_git_details_closed(self : State) -> State {
-  { ..self, git_details_open: false }
+  { ..self, git_details_open: false, }
 }
 
 ///|
@@ -1885,9 +1885,9 @@ fn State::with_login(self : State, value : Json) -> State {
   guard value is Object(fields) &&
     @jsonx.json_text(fields, "loginId") is Some(login_id) &&
     @jsonx.json_text(fields, "authUrl") is Some(auth_url) else {
-    return { ..self, notice: "Malformed Codex login reply" }
+    return { ..self, notice: "Malformed Codex login reply", }
   }
-  { ..self, login_id: Some(login_id), auth_url: Some(auth_url) }
+  { ..self, login_id: Some(login_id), auth_url: Some(auth_url), }
 }
 
 ///|
@@ -1925,7 +1925,7 @@ fn CodexTurn::with_item(
       if completed {
         item
       } else {
-        { ..item, streamed: existing.streamed }
+        { ..item, streamed: existing.streamed, }
       }
     } else {
       existing
@@ -1947,7 +1947,7 @@ fn CodexTurn::with_delta(
     ..self,
     items: self.items.map(item => {
       if item.id == item_id {
-        { ..item, streamed: item.streamed + delta }
+        { ..item, streamed: item.streamed + delta, }
       } else {
         item
       }
@@ -1999,7 +1999,7 @@ fn State::with_observed_first_prompt(self : State) -> State {
     active.has_user_item() else {
     return self
   }
-  { ..self, submitted_first_prompt: None }
+  { ..self, submitted_first_prompt: None, }
 }
 
 ///|
@@ -2128,14 +2128,14 @@ fn State::with_notification(
   let next = match method_ {
     "thread/name/updated" =>
       if @jsonx.json_text(fields, "name") is Some(title) {
-        { ..self, selection: CodexStoredTask({ ..active, title, }) }
+        { ..self, selection: CodexStoredTask({ ..active, title, }), }
       } else {
         self
       }
     "turn/started" | "turn/completed" =>
       if fields.get("turn") is Some(value) &&
         CodexTurn::decode(value) is Some(turn) {
-        { ..self, selection: CodexStoredTask(active.with_turn(turn)) }
+        { ..self, selection: CodexStoredTask(active.with_turn(turn)), }
       } else {
         self
       }
@@ -2174,13 +2174,13 @@ fn State::with_notification(
     "error" =>
       if fields.get("error") is Some(Object(error)) &&
         @jsonx.json_text(error, "message") is Some(message) {
-        { ..self, notice: message }
+        { ..self, notice: message, }
       } else {
         self
       }
     "warning" =>
       if @jsonx.json_text(fields, "message") is Some(message) {
-        { ..self, notice: message }
+        { ..self, notice: message, }
       } else {
         self
       }
@@ -2202,17 +2202,17 @@ fn State::with_pending_request(
   }
   guard CodexPendingRequest::decode(request_id, method_, params)
     is Some(request) else {
-    return { ..self, request_generation: generation }
+    return { ..self, request_generation: generation, }
   }
   let key = request_id.stringify()
   if self.pending_requests
     .iter()
     .any(request => request.request_id.stringify() == key) {
-    return { ..self, request_generation: generation }
+    return { ..self, request_generation: generation, }
   }
   let pending_requests = self.pending_requests.copy()
   pending_requests.push(request)
-  { ..self, pending_requests, request_generation: generation }
+  { ..self, pending_requests, request_generation: generation, }
 }
 
 ///|
@@ -2225,7 +2225,7 @@ fn CodexPendingRequest::decode(
     @jsonx.json_text(fields, "threadId") is Some(thread_id) else {
     return None
   }
-  Some({ request_id, thread_id, method_, params, answers: Map([]) })
+  Some({ request_id, thread_id, method_, params, answers: Map([]), })
 }
 
 ///|

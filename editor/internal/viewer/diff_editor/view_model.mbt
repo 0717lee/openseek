@@ -47,7 +47,7 @@ pub struct DiffEditorViewModel {
 ///|
 pub fn DiffEditorViewModel::DiffEditorViewModel(
   provider : &@diff.DocumentDiffProvider,
-  options? : @diff.DocumentDiffOptions = { ignore_trim_whitespace: true },
+  options? : @diff.DocumentDiffOptions = { ignore_trim_whitespace: true, },
   schedule_timeout? : (() -> Unit, Int) -> @base_common.Disposable = @base_browser.schedule_timeout,
 ) -> DiffEditorViewModel {
   let self : DiffEditorViewModel = {

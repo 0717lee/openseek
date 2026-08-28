@@ -9,7 +9,7 @@ priv struct AsyncFeatureGate {
 
 ///|
 fn AsyncFeatureGate::new() -> AsyncFeatureGate {
-  { resolver: None }
+  { resolver: None, }
 }
 
 ///|

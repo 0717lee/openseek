@@ -153,7 +153,7 @@ fn stabilize_render_lines_tokens(
 ) -> Unit {
   let attached = model.on_before_attached()
   attached.set_visible_lines(
-    [{ start_line_number, end_line_number: end_line_number_exclusive - 1 }],
+    [{ start_line_number, end_line_number: end_line_number_exclusive - 1, }],
     true,
   )
   model.on_before_detached(attached)

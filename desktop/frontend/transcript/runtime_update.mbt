@@ -55,7 +55,7 @@ pub fn parse_runtime_update(content : String) -> RuntimeUpdateView {
       diagnostics.push(line)
     }
   }
-  { status, diagnostics }
+  { status, diagnostics, }
 }
 
 ///|

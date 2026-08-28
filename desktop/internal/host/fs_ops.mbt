@@ -8,7 +8,7 @@ async fn read_directory_op(payload : ReadDirPayload) -> ReadDirReply {
   // A requested root can be created lazily by the engine. Treat a missing
   // directory as empty so the panel can keep its ordinary loading behavior.
   if !@fs.exists(dir.to_string()) {
-    return { entries: [] }
+    return { entries: [], }
   }
   let names = @fs.readdir(dir.to_string()) catch {
     error if @async.is_being_cancelled() => raise error
@@ -26,13 +26,13 @@ async fn read_directory_op(payload : ReadDirPayload) -> ReadDirReply {
         _ => Unknown
       })
       is Directory
-    entries.push({ name, is_dir })
+    entries.push({ name, is_dir, })
   }
   // Directories first, then files; the sort above already orders each
   // group by name, and the partition preserves that order.
   let dirs = entries.filter(entry => entry.is_dir)
   let files = entries.filter(entry => !entry.is_dir)
-  { entries: dirs + files }
+  { entries: dirs + files, }
 }
 
 ///|
@@ -93,7 +93,7 @@ async test "binary file reads expose only recognized raster signatures" {
     .to_uri_path()
     .unwrap()
   assert_eq(
-    read_file_op({ path: absolute, root: None }),
+    read_file_op({ path: absolute, root: None, }),
     BinaryContent(data_base64="iVBORw0KGgpzbWFsbA==", media_type="image/png"),
   )
   let root = @pathx.Path(@fs.realpath(dir))
@@ -102,7 +102,7 @@ async test "binary file reads expose only recognized raster signatures" {
     .to_uri_path()
     .unwrap()
   assert_eq(
-    read_file_op({ path: "image.png", root: Some(root) }),
+    read_file_op({ path: "image.png", root: Some(root), }),
     BinaryContent(data_base64="iVBORw0KGgpzbWFsbA==", media_type="image/png"),
   )
   let disguised = "\{dir}/not-an-image.png"
@@ -112,7 +112,7 @@ async test "binary file reads expose only recognized raster signatures" {
     .unwrap()
     .to_uri_path()
     .unwrap()
-  assert_eq(read_file_op({ path: disguised_absolute, root: None }), Binary)
+  assert_eq(read_file_op({ path: disguised_absolute, root: None, }), Binary)
   @fs.rmdir(dir, recursive=true)
 }
 
@@ -125,7 +125,7 @@ async fn stat_files_op(payload : StatFilesPayload) -> StatFilesReply {
   for path in payload.paths {
     let file = WirePath::parse(path).absolute
     let sig = file_signature(file.to_string())
-    stats.push({ path, sig: sig.unwrap_or("") })
+    stats.push({ path, sig: sig.unwrap_or(""), })
   }
   { stats, }
 }

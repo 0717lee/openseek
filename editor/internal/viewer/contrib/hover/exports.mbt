@@ -36,7 +36,7 @@ pub(all) enum HoverAnchor {
 /// retain and reuse this value across them.
 pub fn HoverParticipantOwner::HoverParticipantOwner() -> HoverParticipantOwner {
   next_hover_participant_owner_id.val += 1
-  { id: next_hover_participant_owner_id.val }
+  { id: next_hover_participant_owner_id.val, }
 }
 
 ///|

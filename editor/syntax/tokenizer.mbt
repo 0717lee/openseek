@@ -11,7 +11,7 @@ pub struct TokenizerState {
 ///|
 /// Creates the canonical normal tokenizer state.
 pub fn TokenizerState::TokenizerState() -> TokenizerState {
-  { modes: @list.new() }
+  { modes: @list.new(), }
 }
 
 ///|
@@ -26,7 +26,7 @@ pub fn TokenizerState::push_mode(
   self : TokenizerState,
   mode : Byte,
 ) -> TokenizerState {
-  { modes: self.modes.prepend(mode) }
+  { modes: self.modes.prepend(mode), }
 }
 
 ///|
@@ -34,7 +34,7 @@ pub fn TokenizerState::push_mode(
 /// The receiver remains unchanged.
 pub fn TokenizerState::pop_mode(self : TokenizerState) -> TokenizerState {
   match self.modes {
-    More(_, tail~) => { modes: tail }
+    More(_, tail~) => { modes: tail, }
     Empty => self
   }
 }
@@ -173,7 +173,7 @@ pub fn TokenizationRegistry::register(
 ) -> @base_common.Disposable {
   let id = self.next_id.val
   self.next_id.val = id + 1
-  self.tokenizers[language_id] = { id, tokenizer }
+  self.tokenizers[language_id] = { id, tokenizer, }
   // The pinned source installs before notification; the disposer returns
   // immediately when a newer registration owns the key.
   self.handle_change_impl([language_id])
@@ -228,7 +228,7 @@ fn TokenizationRegistry::set_color_map_impl(
   let changed_languages = [
     for language_id in self.tokenizers.keys() => language_id
   ]
-  self.did_change.fire({ changed_languages, changed_color_map: true })
+  self.did_change.fire({ changed_languages, changed_color_map: true, })
 }
 
 ///|
@@ -294,10 +294,10 @@ pub fn push_token(
   tag : HighlightTag,
 ) -> Unit {
   if tokens is [.., last] && last.tag == tag && last.end == start {
-    tokens[tokens.length() - 1] = { start: last.start, end, tag }
+    tokens[tokens.length() - 1] = { start: last.start, end, tag, }
     return
   }
-  tokens.push({ start, end, tag })
+  tokens.push({ start, end, tag, })
 }
 
 ///|

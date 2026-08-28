@@ -343,7 +343,7 @@ fn parse_moon_invocation(
       "-q" | "--quiet" | "-v" | "--verbose" | "--trace" => index += 1
       "-V" | "--version" | "-h" | "--help" => return None
       option if option.has_prefix("-") => return None
-      _ => return Some({ subcommand_index: index, cwd, dry_run })
+      _ => return Some({ subcommand_index: index, cwd, dry_run, })
     }
   }
   None

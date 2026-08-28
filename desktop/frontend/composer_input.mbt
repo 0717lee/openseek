@@ -44,7 +44,7 @@ fn Model::composer_input(self : Model) -> @composer.Input {
   }
   if conv.git_presentation() is Some(presentation) {
     status.push(
-      @composer.GitStatus({ presentation, open: self.git_details_open }),
+      @composer.GitStatus({ presentation, open: self.git_details_open, }),
     )
   }
   if self.worktree_control(conv) is Some(control) {
@@ -133,7 +133,7 @@ fn Model::composer_input(self : Model) -> @composer.Input {
   let file_index = self.composer_file_index()
   {
     identity,
-    draft: { task: conv.task, mentions: conv.mentions },
+    draft: { task: conv.task, mentions: conv.mentions, },
     // The outer run heartbeat and child-run lanes are both typed live status,
     // rendered by the composer above the draft rather than persisted into the
     // transcript.
@@ -248,12 +248,12 @@ fn Model::codex_composer_input(self : Model) -> @composer.Input {
 fn Model::dormant_composer_input(self : Model) -> @composer.Input {
   {
     identity: {
-      owner: { channel: self.focused, session: self.active_session },
+      owner: { channel: self.focused, session: self.active_session, },
       archive_generation: self.composer_entry_retirements.length(),
     },
-    draft: { task: "", mentions: [] },
+    draft: { task: "", mentions: [], },
     run: None,
-    goal: { draft: None, standing: None, pending: None },
+    goal: { draft: None, standing: None, pending: None, },
     slash_commands: [],
     root: None,
     installed_skills: self.installed_skills,

@@ -102,7 +102,7 @@ test "headless Markdown contribution never hides source without replacement DOM"
   ])
   let registration = registry.register_markdown_comment_provider(
     LanguageId("plaintext"),
-    MutableMarkdownContributionProvider::{ blocks: provider_blocks },
+    MutableMarkdownContributionProvider::{ blocks: provider_blocks, },
   )
   defer registration.dispose()
   let services = CodeEditorServices(

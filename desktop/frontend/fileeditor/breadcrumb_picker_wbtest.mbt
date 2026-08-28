@@ -12,13 +12,13 @@ test "breadcrumb directory renders a VS Code-style file list" {
     (
       directory,
       [
-        { name: "docs", path: Relative("deepseek/docs"), is_dir: true },
-        { name: "api_key.mbt", path: file, is_dir: false },
+        { name: "docs", path: Relative("deepseek/docs"), is_dir: true, },
+        { name: "api_key.mbt", path: file, is_dir: false, },
       ],
     ),
   ])
-  let state = { ..owned_state(), children, highlighted: Some(directory) }
-  let ctx = { ..test_ctx(), open_files: [file], active_file: Some(file) }
+  let state = { ..owned_state(), children, highlighted: Some(directory), }
+  let ctx = { ..test_ctx(), open_files: [file], active_file: Some(file), }
   let html = render_breadcrumb_html(breadcrumb_view(test_emit(), state, ctx))
   assert_true(html.contains("class=\"breadcrumb-picker\""))
   assert_true(html.contains("aria-label=\"Files in deepseek\""))
@@ -47,7 +47,7 @@ test "breadcrumb directory reports loading and empty folders" {
   )
   assert_true(loading_html.contains("Loading…"))
   let children : Map[@pathx.Relative, Array[FileEntry]] = Map([(directory, [])])
-  let empty = { ..loading, children, loading: [] }
+  let empty = { ..loading, children, loading: [], }
   let empty_html = render_breadcrumb_html(
     breadcrumb_view(test_emit(), empty, ctx),
   )

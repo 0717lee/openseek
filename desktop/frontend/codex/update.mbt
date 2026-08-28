@@ -13,7 +13,7 @@ pub fn update(
   match msg {
     Refresh => {
       let (command, next) = state.refresh(dispatch, channel)
-      (command, { ..next, notice: "" })
+      (command, { ..next, notice: "", })
     }
     ComposerAction(action) =>
       state.apply_composer_action(dispatch, channel, action)
@@ -37,7 +37,7 @@ pub fn update(
     DismissPermissionMenu =>
       (
         @cmd.none,
-        { ..state, permission_picker: state.permission_picker.close() },
+        { ..state, permission_picker: state.permission_picker.close(), },
       )
     ChoosePermission(mode) =>
       if state.can_choose_permission() {
@@ -64,7 +64,7 @@ pub fn update(
       } else {
         (
           @cmd.none,
-          { ..state, permission_picker: state.permission_picker.close() },
+          { ..state, permission_picker: state.permission_picker.close(), },
         )
       }
     CancelFullAccess =>
@@ -113,7 +113,7 @@ pub fn update(
     CloseGitDetails => (@cmd.none, state.with_git_details_closed())
     ToggleWorktreeMode =>
       if state.can_choose_worktree() {
-        (@cmd.none, { ..state, placement: state.placement.toggled() })
+        (@cmd.none, { ..state, placement: state.placement.toggled(), })
       } else {
         (@cmd.none, state)
       }
@@ -196,7 +196,7 @@ pub fn update(
     ArchiveThread(thread_id) =>
       (
         state.archive(dispatch, channel, thread_id, false),
-        { ..state, archive_confirm: None }.begin_foreground(
+        { ..state, archive_confirm: None, }.begin_foreground(
           CodexArchiveReply(thread_id),
         ),
       )
@@ -221,13 +221,13 @@ pub fn update(
         Some(confirm) =>
           (
             state.archive(dispatch, channel, confirm.thread_id, true),
-            { ..state, archive_confirm: None }.begin_foreground(
+            { ..state, archive_confirm: None, }.begin_foreground(
               CodexArchiveReply(confirm.thread_id),
             ),
           )
         None => (@cmd.none, state)
       }
-    CancelArchiveDiscard => (@cmd.none, { ..state, archive_confirm: None })
+    CancelArchiveDiscard => (@cmd.none, { ..state, archive_confirm: None, })
     ResumeSucceeded(thread_id) =>
       if state.active_thread() is Some(active) &&
         active.id == thread_id &&
@@ -357,7 +357,7 @@ pub fn update(
                 return (@cmd.none, next)
               }
             }
-            next = { ..next, archive_confirm: Some({ thread_id, refusal }) }
+            next = { ..next, archive_confirm: Some({ thread_id, refusal, }), }
           } else {
             // App-server has archived the task. A last-second dirty checkout
             // can be retained, but the task still leaves the active catalog.
@@ -383,7 +383,7 @@ pub fn update(
         }
         CodexCompactReply(_, original) | CodexReviewReply(_, original) =>
           if next.draft == original {
-            next = { ..next, draft: "" }
+            next = { ..next, draft: "", }
           }
         CodexInterruptReply | CodexCancelLoginReply(_) | CodexLogoutReply => {
           let (refresh, refreshed) = next.refresh(dispatch, channel)
@@ -445,14 +445,14 @@ pub fn update(
           kind is CodexTurnStartReply(_) ||
           kind is CodexWorktreeTurnReply(_, _)
         ) {
-        { ..settled, submitted_first_prompt: None }
+        { ..settled, submitted_first_prompt: None, }
       } else {
         settled
       }
       let next = if owns_foreground {
-        { ..settled, notice: subject + ": " + message }
+        { ..settled, notice: subject + ": " + message, }
       } else {
-        { ..state, notice: subject + ": " + message }
+        { ..state, notice: subject + ": " + message, }
       }
       (@cmd.none, next)
     }
@@ -484,7 +484,7 @@ pub fn update(
         .with_observed_steer_item(method_, params)
         .with_notification(method_, params, generation)
       if !next.can_choose_permission() {
-        next = { ..next, permission_picker: next.permission_picker.close() }
+        next = { ..next, permission_picker: next.permission_picker.close(), }
       }
       if method_ == "skills/changed" {
         let invalidated = next.loading_context(true)
@@ -499,7 +499,7 @@ pub fn update(
           dispatch,
           channel,
           @commands.codex_account_read,
-          { refresh_token: false },
+          { refresh_token: false, },
         )
       } else if method_ == "thread/archived" ||
         method_ == "thread/unarchived" ||
@@ -535,11 +535,11 @@ fn State::with_turn_start_reply(self : State, value : Json) -> State {
     fields.get("turn") is Some(turn) &&
     CodexTurn::decode(turn) is Some(turn) &&
     self.active_thread() is Some(active) {
-    { ..self, selection: CodexStoredTask(active.with_turn(turn)), draft: "" }
+    { ..self, selection: CodexStoredTask(active.with_turn(turn)), draft: "", }
   } else {
-    { ..self, draft: "" }
+    { ..self, draft: "", }
   }
-  { ..next, mentions: [], submission_sequence: next.submission_sequence + 1 }.with_observed_first_prompt()
+  { ..next, mentions: [], submission_sequence: next.submission_sequence + 1, }.with_observed_first_prompt()
 }
 
 ///|
@@ -559,9 +559,9 @@ fn State::with_turn_steer_reply(self : State, value : Json) -> State {
       draft: "",
     }
   } else {
-    { ..accepted, draft: "" }
+    { ..accepted, draft: "", }
   }
-  { ..next, mentions: [], submission_sequence: next.submission_sequence + 1 }.with_observed_first_prompt()
+  { ..next, mentions: [], submission_sequence: next.submission_sequence + 1, }.with_observed_first_prompt()
 }
 
 ///|
@@ -609,7 +609,7 @@ test "Codex project add stays local until the first prompt" {
   let submit = ComposerAction(
     @composer.DraftSubmitted(
       identity=wants_worktree.composer_identity(@interop.ChannelId::Local),
-      draft={ task: "inspect this", mentions: [] },
+      draft={ task: "inspect this", mentions: [], },
     ),
   )
   let (_, submitting) = update(
@@ -690,7 +690,7 @@ test "Codex project add stays local until the first prompt" {
     ComposerAction(
       @composer.DraftSubmitted(
         identity=acknowledged.composer_identity(@interop.ChannelId::Local),
-        draft={ task: "steer early", mentions: [] },
+        draft={ task: "steer early", mentions: [], },
       ),
     ),
     acknowledged,
@@ -780,7 +780,7 @@ test "Codex full steer replies replace their local receipt" {
     ComposerAction(
       @composer.DraftSubmitted(
         identity=state.composer_identity(@interop.ChannelId::Local),
-        draft={ task: "steer once", mentions: [] },
+        draft={ task: "steer once", mentions: [], },
       ),
     ),
     state,
@@ -841,14 +841,14 @@ test "Codex steer failure preserves an older first-prompt receipt" {
       },
     }),
     connection: CodexReady,
-    submitted_first_prompt: Some({ task: "initial", mentions: [] }),
+    submitted_first_prompt: Some({ task: "initial", mentions: [], }),
   }
   let (_, sending_first) = update(
     dispatch,
     ComposerAction(
       @composer.DraftSubmitted(
         identity=state.composer_identity(@interop.ChannelId::Local),
-        draft={ task: "accepted steer", mentions: [] },
+        draft={ task: "accepted steer", mentions: [], },
       ),
     ),
     state,
@@ -867,7 +867,7 @@ test "Codex steer failure preserves an older first-prompt receipt" {
     ComposerAction(
       @composer.DraftSubmitted(
         identity=accepted_first.composer_identity(@interop.ChannelId::Local),
-        draft={ task: "rejected steer", mentions: [] },
+        draft={ task: "rejected steer", mentions: [], },
       ),
     ),
     accepted_first,
@@ -970,7 +970,7 @@ test "Codex steer receipts reconcile duplicate text by item id and FIFO" {
   let submit = ComposerAction(
     @composer.DraftSubmitted(
       identity=state.composer_identity(@interop.ChannelId::Local),
-      draft={ task: "same text", mentions: [] },
+      draft={ task: "same text", mentions: [], },
     ),
   )
   let (_, sending_first) = update(
@@ -998,7 +998,7 @@ test "Codex steer receipts reconcile duplicate text by item id and FIFO" {
     ComposerAction(
       @composer.DraftSubmitted(
         identity=accepted_first.composer_identity(@interop.ChannelId::Local),
-        draft={ task: "same text", mentions: [] },
+        draft={ task: "same text", mentions: [], },
       ),
     ),
     accepted_first,
@@ -1114,7 +1114,7 @@ test "abandoning a draft deselects it and clears its composer state" {
     @interop.ChannelId::Local,
     open_external,
   )
-  let typed = { ..drafting, draft: "half a prompt" }
+  let typed = { ..drafting, draft: "half a prompt", }
   let (_, dropped) = update(
     dispatch,
     AbandonDraft,
@@ -1249,7 +1249,7 @@ test "Codex turn connection errors settle immediately without a history read" {
       "thread": { "id": "thread-1", "turns": [] },
     }),
     draft: "new prompt",
-    submitted_first_prompt: Some({ task: "new prompt", mentions: [] }),
+    submitted_first_prompt: Some({ task: "new prompt", mentions: [], }),
   }.begin_foreground(CodexTurnStartReply("thread-1"))
   let (_, failed) = update(
     dispatch,
@@ -1901,7 +1901,7 @@ test "Codex task selection clears the adapter submission snapshot" {
       "thread": { "id": "thread-a", "cwd": "/work/a", "turns": [] },
     }),
     draft: "belongs to A",
-    mentions: [{ ref_: @mention_context.File(path="src/a.mbt"), range: None }],
+    mentions: [{ ref_: @mention_context.File(path="src/a.mbt"), range: None, }],
   }
   let (_, next) = update(
     dispatch,
@@ -2113,7 +2113,7 @@ test "Codex composer reverse-request actions keep their task identity" {
     ComposerAction(
       @composer.CodexRequestAnswerChanged(
         identity={
-          owner: { channel: @interop.ChannelId::Local, session: "thread-2" },
+          owner: { channel: @interop.ChannelId::Local, session: "thread-2", },
           archive_generation: 0,
         },
         request_key=Json("request-1").stringify(),

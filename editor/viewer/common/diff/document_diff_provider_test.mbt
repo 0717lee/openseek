@@ -27,13 +27,11 @@ impl @diff.DocumentDiffProvider for ExternalDocumentDiffProvider with fn on_did_
 
 ///|
 test "an external package can implement the provider and construct mappings" {
-  let provider : &@diff.DocumentDiffProvider = ExternalDocumentDiffProvider::{
-
-  }
+  let provider : &@diff.DocumentDiffProvider = ExternalDocumentDiffProvider::{ }
   let result = try! provider.compute_diff(
     TextSnapshot("a"),
     TextSnapshot("bc"),
-    { ignore_trim_whitespace: false },
+    { ignore_trim_whitespace: false, },
   )
   assert_eq(result.changes.length(), 1)
   assert_eq(result.additional_alignments.length(), 1)

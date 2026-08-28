@@ -102,8 +102,9 @@ fn classify_incoming(message : Json) -> Incoming {
     // `id` — even the discouraged `null` — is a request whose reply must echo
     // that id. So any message that carries an `id` member is a peer request.
     match message {
-      { "id": id, "params": params, .. } => PeerRequest({ id, method_, params })
-      { "id": id, .. } => PeerRequest({ id, method_, params: Json::null() })
+      { "id": id, "params": params, .. } =>
+        PeerRequest({ id, method_, params, })
+      { "id": id, .. } => PeerRequest({ id, method_, params: Json::null(), })
       { "params": params, .. } => Notification(method_, params)
       _ => Notification(method_, Json::null())
     }

@@ -24,7 +24,7 @@ pub fn SessionSummary::SessionSummary(
   from_sequence~ : Int,
   to_sequence~ : Int,
 ) -> SessionSummary {
-  { content, from_sequence, to_sequence }
+  { content, from_sequence, to_sequence, }
 }
 
 ///|

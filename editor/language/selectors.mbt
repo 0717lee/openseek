@@ -21,7 +21,7 @@ fn LanguageFilter::new_impl(
   scheme? : String,
   pattern? : String,
 ) -> LanguageFilter {
-  { language, scheme, pattern }
+  { language, scheme, pattern, }
 }
 
 ///|

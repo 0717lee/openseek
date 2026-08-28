@@ -36,7 +36,7 @@ async fn run_fleet(matches : @argparse.Matches, concurrency~ : Int) -> Unit {
         "session-root": [session_root, ..],
         ..
       },
-      ..,
+      ..
     } => (session.trim(), dir, session_root)
     _ => fail("missing parsed fleet defaults")
   }

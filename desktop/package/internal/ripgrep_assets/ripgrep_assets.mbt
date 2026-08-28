@@ -173,7 +173,7 @@ pub async fn build(workspace : @packaging.Workspace, target : Target) -> Assets 
       )
     }
   }
-  { binary, license_mit, unlicense }
+  { binary, license_mit, unlicense, }
 }
 
 ///|

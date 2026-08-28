@@ -130,7 +130,7 @@ async fn source_write_readonly_profile_base(
       denial_subjects,
     }
   }
-  { profile, denial_subjects }
+  { profile, denial_subjects, }
 }
 
 ///|
@@ -224,7 +224,7 @@ async fn collect_protected_source_tree_profile_scan(
       return false
     }
   }
-  state.watched_dirs.push({ path: dir, mtime_s, mtime_ns })
+  state.watched_dirs.push({ path: dir, mtime_s, mtime_ns, })
   let entries = @fs.readdir(dir, include_hidden=true) catch {
     error if @async.is_being_cancelled() => raise error
     _ => {

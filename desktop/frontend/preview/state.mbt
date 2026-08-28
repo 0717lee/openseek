@@ -44,7 +44,7 @@ pub(all) struct State {
 
 ///|
 pub fn State::empty() -> State {
-  { pages: Map([]), next_id: 1 }
+  { pages: Map([]), next_id: 1, }
 }
 
 ///|
@@ -60,7 +60,7 @@ pub fn open_page(state : State, url? : String) -> (State, Int) {
     loading: url is Some(_),
     failure: None,
   }
-  ({ pages, next_id: id + 1 }, id)
+  ({ pages, next_id: id + 1, }, id)
 }
 
 ///|
@@ -90,7 +90,7 @@ fn PageState::commit_url(self : PageState, url : String) -> PageState {
   } else {
     ""
   }
-  { ..self, url: Some(url), input: url, title, failure: None }
+  { ..self, url: Some(url), input: url, title, failure: None, }
 }
 
 ///|
@@ -99,7 +99,7 @@ fn PageState::commit_url(self : PageState, url : String) -> PageState {
 pub fn navigate(state : State, id : Int, url : String) -> State {
   guard state.pages.get(id) is Some(previous) else { return state }
   let pages = state.pages.copy()
-  pages[id] = { ..previous.commit_url(url), loading: true }
+  pages[id] = { ..previous.commit_url(url), loading: true, }
   { ..state, pages, }
 }
 

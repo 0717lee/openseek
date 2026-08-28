@@ -15,7 +15,7 @@ pub fn InjectedText::InjectedText(
   class_name : String,
   source_index? : Int = -1,
 ) -> InjectedText {
-  { position, text, class_name, source_index }
+  { position, text, class_name, source_index, }
 }
 
 ///|
@@ -299,7 +299,7 @@ fn normalize_injected_text(
   for item in injected_text {
     if item.text.length() > 0 {
       let column = item.position.column.clamp(min=0, max=line_text.length())
-      normalized.push({ ..item, position: { ..item.position, column, } })
+      normalized.push({ ..item, position: { ..item.position, column, }, })
     }
   }
   normalized.sort_by((left, right) => {

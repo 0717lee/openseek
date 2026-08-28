@@ -139,7 +139,7 @@ fn State::move_path_selection(self : State, delta : Int) -> State {
   guard !self.path_filter().is_empty() else { return self }
   let count = self.visible_entries().length()
   guard count > 0 else { return self }
-  { ..self, path_selection: (self.path_selection + delta + count) % count }
+  { ..self, path_selection: (self.path_selection + delta + count) % count, }
 }
 
 ///|

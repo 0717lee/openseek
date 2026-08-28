@@ -135,7 +135,7 @@ fn SelfUpdate::start_download(
     self.busy = false
     raise HostError("self-update is unavailable")
   }
-  { accepted: true }
+  { accepted: true, }
 }
 
 ///|
@@ -164,7 +164,7 @@ async fn SelfUpdate::download_package(
     downloaded_bytes,
     total_bytes,
   ) {
-    emit(UpdateDownloadProgress({ downloaded_bytes, total_bytes }))
+    emit(UpdateDownloadProgress({ downloaded_bytes, total_bytes, }))
   }) catch {
     error if @async.is_being_cancelled() => raise error
     error => {
@@ -218,7 +218,7 @@ async fn SelfUpdate::run(
       staged => {
         self.staged = Some(staged)
         self.busy = false
-        emit(UpdateDownloaded({ version: staged.version }))
+        emit(UpdateDownloaded({ version: staged.version, }))
       }
     }
   }
@@ -253,7 +253,7 @@ async fn SelfUpdate::apply(self : SelfUpdate) -> ApplyUpdateReply {
     self.staged = None
     @update.write_relaunch_marker(work_dir=dir, bundle_path=bundle)
   })
-  { applied: true }
+  { applied: true, }
 }
 
 ///|

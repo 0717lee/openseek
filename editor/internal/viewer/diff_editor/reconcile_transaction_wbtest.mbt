@@ -3,11 +3,11 @@ test "kernel geometry adapter preserves wrap hidden columns and foreign zones" {
   let geometry = pane_geometry_from_code_editor_parts(
     18.0,
     [
-      { line_number: 1, height_in_px: 18.0 },
-      { line_number: 2, height_in_px: 36.0 },
-      { line_number: 3, height_in_px: 0.0 },
+      { line_number: 1, height_in_px: 18.0, },
+      { line_number: 2, height_in_px: 36.0, },
+      { line_number: 3, height_in_px: 0.0, },
     ],
-    [{ after_line_number: 1, height_in_px: 7.0 }],
+    [{ after_line_number: 1, height_in_px: 7.0, }],
     [4, 12, 8],
     640.0,
   )
@@ -19,7 +19,7 @@ test "kernel geometry adapter preserves wrap hidden columns and foreign zones" {
   assert_true(geometry.line_max_columns == Some([4, 12, 8]))
   assert_true(
     geometry.foreign_zone_heights() ==
-    [{ after_line_number: 1, height_in_px: 7.0 }],
+    [{ after_line_number: 1, height_in_px: 7.0, }],
   )
 }
 
@@ -28,13 +28,13 @@ test "owned-zone-excluded geometry does not self-trigger another reconcile" {
   let original = PaneGeometrySnapshot(
     3,
     18.0,
-    foreign_zone_heights=[{ after_line_number: 2, height_in_px: 9.0 }],
+    foreign_zone_heights=[{ after_line_number: 2, height_in_px: 9.0, }],
     line_max_columns=[2, 2, 2],
   )
   let same_original = PaneGeometrySnapshot(
     3,
     18.0,
-    foreign_zone_heights=[{ after_line_number: 2, height_in_px: 9.0 }],
+    foreign_zone_heights=[{ after_line_number: 2, height_in_px: 9.0, }],
     line_max_columns=[2, 2, 2],
   )
   let modified = PaneGeometrySnapshot(3, 18.0, line_max_columns=[2, 2, 2])
@@ -52,7 +52,7 @@ test "owned-zone-excluded geometry does not self-trigger another reconcile" {
   let with_new_foreign_zone = PaneGeometrySnapshot(
     3,
     18.0,
-    foreign_zone_heights=[{ after_line_number: 2, height_in_px: 10.0 }],
+    foreign_zone_heights=[{ after_line_number: 2, height_in_px: 10.0, }],
     line_max_columns=[2, 2, 2],
   )
   assert_true(

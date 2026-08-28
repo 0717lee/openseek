@@ -113,7 +113,7 @@ fn flatten_inner_diff_sequence(
 ) -> InnerDiffSequence {
   if range.is_empty() {
     let anchor = empty_line_range_anchor(lines, range.start_line_number)
-    return { values: [], start_boundaries: [anchor], end_boundaries: [anchor] }
+    return { values: [], start_boundaries: [anchor], end_boundaries: [anchor], }
   }
   let line_sequences : Array[InnerDiffLine] = []
   for line_number in range.start_line_number..<range.end_line_number_exclusive {
@@ -169,7 +169,7 @@ fn flatten_inner_diff_sequence(
     start_boundaries.push(next.start_right)
     end_boundaries.push(next.start_left)
   }
-  { values, start_boundaries, end_boundaries }
+  { values, start_boundaries, end_boundaries, }
 }
 
 ///|

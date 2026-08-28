@@ -245,7 +245,7 @@ pub impl FromJson for SessionListEntry with fn from_json(json, path) {
   guard fields.get("id") is Some(String(id)) else {
     raise JsonDecodeError((path, "session list entry needs a string id"))
   }
-  { id, title, updated_at_ms }
+  { id, title, updated_at_ms, }
 }
 
 ///|
@@ -398,7 +398,7 @@ pub impl FromJson for SessionUserMessage with fn from_json(json, path) {
   } else {
     None
   }
-  { content, submission_id }
+  { content, submission_id, }
 }
 
 ///|
@@ -453,7 +453,7 @@ pub impl FromJson for SessionAssistantMessage with fn from_json(json, path) {
     Some(False) => Some(false)
     _ => None
   }
-  { content, tool_calls, reasoning_content, is_replay }
+  { content, tool_calls, reasoning_content, is_replay, }
 }
 
 ///|
@@ -521,7 +521,7 @@ pub impl FromJson for SessionToolResult with fn from_json(json, path) {
   } else {
     None
   }
-  { tool_call_id, tool_name, content, is_error, brief }
+  { tool_call_id, tool_name, content, is_error, brief, }
 }
 
 ///|
@@ -781,7 +781,7 @@ pub impl FromJson for WorktreeInfo with fn from_json(json, path) {
   let object = JsonObject::of(fields, path)
   let checkout_path = object.required_string("path")
   let present = object.required_bool("present")
-  { name, branch, base, session, codex_thread, path: checkout_path, present }
+  { name, branch, base, session, codex_thread, path: checkout_path, present, }
 }
 
 ///|
@@ -1659,7 +1659,7 @@ pub impl FromJson for AgentStreamEvent with fn from_json(json, path) {
   } else {
     None
   }
-  { event, submission_id }
+  { event, submission_id, }
 }
 
 ///|
@@ -1671,9 +1671,9 @@ pub fn AgentStreamEvent::remote_lifecycle(
 ) -> AgentStreamEvent? {
   match self.event {
     ReasoningMessage(..) =>
-      Some({ ..self, event: ReasoningMessage(content="") })
+      Some({ ..self, event: ReasoningMessage(content=""), })
     AssistantMessage(..) =>
-      Some({ ..self, event: AssistantMessage(content="") })
+      Some({ ..self, event: AssistantMessage(content=""), })
     ToolResult(..)
     | AutoCompactionFinished(..)
     | AgentFinished(..)

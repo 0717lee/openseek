@@ -324,7 +324,7 @@ fn resolved_endpoint(
         stored_key?=settings.deepseek_api_key,
         deepseek_env?=@env.get("DEEPSEEK"),
       )
-      { api_key: key, api_url: None }
+      { api_key: key, api_url: None, }
     }
     Custom => {
       guard settings.custom_api_url is Some(url) else {
@@ -334,7 +334,7 @@ fn resolved_endpoint(
         stored_key?=settings.custom_api_key,
         api_url=url,
       )
-      { api_key: key, api_url: Some(url) }
+      { api_key: key, api_url: Some(url), }
     }
   }
 }

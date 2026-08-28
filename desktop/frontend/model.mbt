@@ -1066,7 +1066,7 @@ fn ArchiveRecordKey::from_protocol(
   guard @resource.of_path(channel, workspace) is Some(resource) else {
     return None
   }
-  Some({ session, workspace: resource })
+  Some({ session, workspace: resource, })
 }
 
 ///|
@@ -2373,7 +2373,7 @@ fn initial_model() -> Model {
     // fills `devices` from the fetched roster (`apply_roster`).
     devices: match page_channel {
       Some(channel) =>
-        [{ ..empty_device_state(channel), active_project: preselect_project }]
+        [{ ..empty_device_state(channel), active_project: preselect_project, }]
       None => []
     },
     websocket_epoch: 0,
@@ -2437,7 +2437,7 @@ fn initial_model() -> Model {
     dock: @dock.State::empty(),
     file_panel: @fileeditor.State::empty(),
     preview: @preview.State::empty(),
-    browser_pane: { shown: None, rect: None, geo: None },
+    browser_pane: { shown: None, rect: None, geo: None, },
     notifications: [],
     notification_seq: 0,
     notification_corner: BottomRight,
@@ -2506,7 +2506,7 @@ fn Model::focused_connection_generation(self : Model) -> Int {
 /// Move the focused channel's "New chat" placement.
 fn Model::with_active_project(self : Model, project : @common.Uri?) -> Model {
   guard self.focused_device() is Some(dev) else { return self }
-  self.replace_device({ ..dev, active_project: project })
+  self.replace_device({ ..dev, active_project: project, })
 }
 
 ///|
@@ -2550,7 +2550,7 @@ fn Model::bridge_state(self : Model) -> BridgeState {
 /// What the Skills page draws against: the device it acts on, and that
 /// device's library as the root mirrors it.
 fn Model::skills_input(self : Model) -> @skills.Input {
-  { channel: self.focused, installed: self.installed_skills }
+  { channel: self.focused, installed: self.installed_skills, }
 }
 
 ///|
@@ -2615,7 +2615,7 @@ fn Model::defer_host_settings(self : Model, settings : HostSettings) -> Model {
     Some(current) if current.revision > settings.revision => current
     _ => settings
   }
-  { ..self, deferred_host_settings: Some(deferred) }
+  { ..self, deferred_host_settings: Some(deferred), }
 }
 
 ///|
@@ -2629,7 +2629,7 @@ fn Model::flush_host_settings(self : Model) -> Model {
   let next = match self.deferred_host_settings {
     Some(settings) if settings.revision >= self.host_settings_revision =>
       self.apply_host_settings(settings)
-    _ => { ..self, deferred_host_settings: None }
+    _ => { ..self, deferred_host_settings: None, }
   }
   next.settle_api_setup()
 }
@@ -2664,11 +2664,11 @@ fn Model::settle_api_setup(self : Model) -> Model {
   // the same select component and global menu identity.
   let select_menu = if self.api_setup_open { None } else { self.select_menu }
   if self.api_ready() {
-    { ..self, api_setup_open: false, api_setup_dismissed: false, select_menu }
+    { ..self, api_setup_open: false, api_setup_dismissed: false, select_menu, }
   } else if self.api_setup_dismissed || self.screen is Settings {
-    { ..self, api_setup_open: false, select_menu }
+    { ..self, api_setup_open: false, select_menu, }
   } else {
-    { ..self, api_setup_open: true }
+    { ..self, api_setup_open: true, }
   }
 }
 
@@ -2956,13 +2956,13 @@ fn Model::with_archive_override(
   let newly_retired = !(disposition is ArchiveLive) &&
     dev.archive_override(key) is (None | Some(ArchiveLive))
   let overrides = dev.archive_overrides.filter(item => item.key != key)
-  overrides.push({ key, disposition })
-  let model = self.replace_device({ ..dev, archive_overrides: overrides })
+  overrides.push({ key, disposition, })
+  let model = self.replace_device({ ..dev, archive_overrides: overrides, })
   if !newly_retired {
     return model
   }
   let composer_entry_retirements = model.composer_entry_retirements.copy()
-  composer_entry_retirements.push({ channel, session: key.session })
+  composer_entry_retirements.push({ channel, session: key.session, })
   { ..model, composer_entry_retirements, }
 }
 
@@ -3037,7 +3037,7 @@ fn remembered_with(
   key : String,
   model : EngineModel,
 ) -> Array[StoredConversationModel] {
-  let merged : Array[StoredConversationModel] = [{ key, model }]
+  let merged : Array[StoredConversationModel] = [{ key, model, }]
   for entry in entries {
     if entry.key != key && merged.length() < ConversationModelsLimit {
       merged.push(entry)
@@ -3202,7 +3202,7 @@ fn Model::activate(
     if conv.device == channel && conv.session_id == session_id {
       found = true
       // Opening the conversation is what "seen" means.
-      conversations.push({ ..conv, unseen_finish: false })
+      conversations.push({ ..conv, unseen_finish: false, })
     } else if conv.worth_keeping() {
       conversations.push(conv)
     }
@@ -3221,7 +3221,7 @@ fn Model::activate(
   }
   // Activating a conversation is also what moves the UI's focus to its
   // device — a no-op while the app runs a single channel.
-  { ..self, focused: channel, active_session: session_id, conversations }
+  { ..self, focused: channel, active_session: session_id, conversations, }
 }
 
 ///|
@@ -3367,13 +3367,13 @@ fn Conversation::run_heartbeat(self : Conversation) -> @composer.RunHeartbeat? {
 fn Conversation::clear_streams(self : Conversation) -> Conversation {
   {
     ..self,
-    turn: { ..self.turn, streaming_response: None, live_reasoning: None },
+    turn: { ..self.turn, streaming_response: None, live_reasoning: None, },
   }
 }
 
 ///|
 fn Conversation::clear_response(self : Conversation) -> Conversation {
-  { ..self, turn: { ..self.turn, streaming_response: None } }
+  { ..self, turn: { ..self.turn, streaming_response: None, }, }
 }
 
 ///|
@@ -3384,7 +3384,7 @@ fn Conversation::complete_reasoning(self : Conversation) -> Conversation {
         ..self,
         turn: {
           ..self.turn,
-          live_reasoning: Some({ ..reasoning, complete: true }),
+          live_reasoning: Some({ ..reasoning, complete: true, }),
         },
       }
     _ => self
@@ -3395,7 +3395,7 @@ fn Conversation::complete_reasoning(self : Conversation) -> Conversation {
 fn Model::allocate_submission_id(self : Model) -> (Model, String) {
   let sequence = self.submission_sequence + 1
   (
-    { ..self, submission_sequence: sequence },
+    { ..self, submission_sequence: sequence, },
     self.page_namespace + "-submission-" + sequence.to_string(),
   )
 }
@@ -3506,7 +3506,7 @@ fn Conversation::restore_submission(
   for mention in self.mentions {
     mentions.push(mention)
   }
-  { ..self, task, mentions }
+  { ..self, task, mentions, }
 }
 
 ///|
@@ -3550,7 +3550,7 @@ fn Conversation::archive_salvage(self : Conversation) -> ArchiveSalvage {
   } else {
     None
   }
-  { task: drafts.join("\n\n"), mentions, goal_draft, pending_initial }
+  { task: drafts.join("\n\n"), mentions, goal_draft, pending_initial, }
 }
 
 ///|
@@ -3596,7 +3596,7 @@ fn Conversation::reject_pending_prompt(
     return (self, false)
   }
   (
-    { ..self, pending_prompt: None }.restore_submission(
+    { ..self, pending_prompt: None, }.restore_submission(
       pending.draft,
       pending.mentions,
     ),
@@ -3617,7 +3617,7 @@ fn Conversation::settle_pending_prompt(
     pending.submission_id == submission_id else {
     return (self, false)
   }
-  ({ ..self, pending_prompt: None }, true)
+  ({ ..self, pending_prompt: None, }, true)
 }
 
 ///|
@@ -3635,7 +3635,7 @@ fn Conversation::forget_awaiting_inputs(self : Conversation) -> Conversation {
     return self
   }
   let pending_steers : Array[PendingSteer] = []
-  { ..self, pending_steers, pending_prompt: None }
+  { ..self, pending_steers, pending_prompt: None, }
 }
 
 ///|
@@ -3798,7 +3798,7 @@ fn Conversation::buffer_commit(
     ReloadFailed(generation~, buffered~) => {
       let buffered = buffered.copy()
       buffered.push(commit)
-      { ..self, sync: ReloadFailed(generation~, buffered~) }
+      { ..self, sync: ReloadFailed(generation~, buffered~), }
     }
     Synced => self
   }
@@ -3880,7 +3880,7 @@ fn Conversation::adopt_snapshot(
         commit.item,
         ts?=commit.ts,
       )
-      conv = { ..next, watermark: commit.sequence }
+      conv = { ..next, watermark: commit.sequence, }
     } else {
       leftover.push(commit)
     }
@@ -3888,7 +3888,7 @@ fn Conversation::adopt_snapshot(
   if leftover.is_empty() {
     (conv, false)
   } else {
-    ({ ..conv, sync: ReloadFailed(generation~, buffered=leftover) }, true)
+    ({ ..conv, sync: ReloadFailed(generation~, buffered=leftover), }, true)
   }
 }
 

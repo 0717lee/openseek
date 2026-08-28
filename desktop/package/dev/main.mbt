@@ -141,7 +141,7 @@ async fn Development::run(self : Development, runtime_dist : String) -> Unit {
 /// Build and run the unbundled desktop from paths detected from the current
 /// monorepo checkout.
 async fn main {
-  let development : Development = { workspace: @packaging.locate_workspace() }
+  let development : Development = { workspace: @packaging.locate_workspace(), }
   development.prepare_frontend()
   let runtime_dist = development.prepare_runtime()
   development.build_native(runtime_dist)

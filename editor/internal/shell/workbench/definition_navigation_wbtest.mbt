@@ -131,8 +131,8 @@ async test "remote definition provider preserves ordered locations and cancellat
             uri: request.uri,
             revision: request.document_revision,
             locations: [
-              { uri: first_uri, range: Range(3, 2, 3, 8) },
-              { uri: second_uri, range: Range(9, 1, 9, 5) },
+              { uri: first_uri, range: Range(3, 2, 3, 8), },
+              { uri: second_uri, range: Range(9, 1, 9, 5), },
             ],
           }),
         )
@@ -181,7 +181,7 @@ async test "remote definition provider preserves ordered locations and cancellat
       id: cancelled_request_id.val,
       uri: source_uri,
       revision: "rev-source",
-      locations: [{ uri: first_uri, range: Range(1, 1, 1, 2) }],
+      locations: [{ uri: first_uri, range: Range(1, 1, 1, 2), }],
     }),
   )
   assert_true(late_response_consumed.val)
@@ -244,12 +244,12 @@ async test "remote definition provider preserves ordered locations and cancellat
   let opener = workbench_location_opener()
   let open_request : @navigation_api.OpenLocationRequest = {
     source_viewer_id: "definition-test-viewer",
-    location: { uri: first_uri, range: Range(3, 2, 3, 8) },
+    location: { uri: first_uri, range: Range(3, 2, 3, 8), },
     mode: Current,
   }
   assert_true(opener.open(open_request))
   assert_eq(opened_uri.val, first_uri.to_string())
-  assert_false(opener.open({ ..open_request, mode: Side }))
+  assert_false(opener.open({ ..open_request, mode: Side, }))
   assert_false(unexpected_packet.val)
 
   let shutdown_uri = definition_navigation_test_uri("definition-shutdown")

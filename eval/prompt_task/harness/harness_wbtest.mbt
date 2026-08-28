@@ -20,7 +20,7 @@ test "trial environment configures model and isolated skills" {
   assert_true(env.get("DEEPSEEK") == Some("key"))
   assert_true(env.get("KIMI") is None)
   let kimi_env = trial_extra_env(
-    { ..config, model: Kimi(K27CodeHighSpeed) },
+    { ..config, model: Kimi(K27CodeHighSpeed), },
     "/tmp/workspace",
   )
   assert_true(kimi_env.get("KIMI") == Some("key"))
@@ -56,7 +56,7 @@ test "empty api key leaves provider keys to the inherited environment" {
   assert_true(env.get("DEEPSEEK") is None)
   assert_true(env.get("KIMI") is None)
   let kimi_env = trial_extra_env(
-    { ..config, model: Kimi(K27Code) },
+    { ..config, model: Kimi(K27Code), },
     "/tmp/workspace",
   )
   assert_true(kimi_env.get("KIMI") is None)

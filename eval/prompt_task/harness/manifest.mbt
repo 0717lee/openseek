@@ -70,7 +70,7 @@ fn TrialArtifact::TrialArtifact(
   events_path~ : String,
   exit_code~ : Int,
 ) -> TrialArtifact {
-  { index, workspace, log_path, session_id, events_path, exit_code }
+  { index, workspace, log_path, session_id, events_path, exit_code, }
 }
 
 ///|

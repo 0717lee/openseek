@@ -28,7 +28,7 @@ impl @syntax.LineTokenizer for StatefulMarkdownFenceTokenizer with fn tokenize_l
       Some(index) => index + 2
       None => line_text.length()
     }
-    tokens.push({ start: 0, end, tag: Comment })
+    tokens.push({ start: 0, end, tag: Comment, })
     return (
       tokens,
       if end == line_text.length() {
@@ -40,7 +40,7 @@ impl @syntax.LineTokenizer for StatefulMarkdownFenceTokenizer with fn tokenize_l
   }
   match line_text.find("/*") {
     Some(start) => {
-      tokens.push({ start, end: line_text.length(), tag: Comment })
+      tokens.push({ start, end: line_text.length(), tag: Comment, })
       (tokens, markdown_comment_state)
     }
     None => (tokens, markdown_normal_state)
@@ -264,7 +264,6 @@ test "semantic wrapping keeps astral UTF-16 text and fails closed on isolated su
 ///|
 test "semantic wrapping tokenizes the whole block before splitting lines" {
   let registration = @syntax.tokenization_registry.register("moonbit", StatefulMarkdownFenceTokenizer::{
-
   })
   defer registration.dispose()
   let block = projected_document_code_block(

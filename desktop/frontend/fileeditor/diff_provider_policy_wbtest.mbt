@@ -33,7 +33,7 @@ test "desktop diff provider preferences and fallback status are host state" {
     }),
   }
   let state = { ..owned_state(), docs, }
-  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path), }
   let (_, tree) = update(
     test_emit(),
     ReviewDiffModeSelected(ReviewDiffTree),
@@ -78,8 +78,8 @@ test "non-MoonBit review parks the last Moon provider preference" {
       selected,
     }),
   }
-  let state = { ..owned_state(), docs, review_diff_mode: ReviewDiffTree }
-  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path) }
+  let state = { ..owned_state(), docs, review_diff_mode: ReviewDiffTree, }
+  let ctx = { ..test_ctx(), open_files: [path], active_file: Some(path), }
   let (_, unchanged) = update(
     test_emit(),
     ReviewDiffModeSelected(ReviewDiffToken),

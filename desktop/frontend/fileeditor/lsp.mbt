@@ -84,13 +84,13 @@ impl @language.HoverProvider for LspHoverProvider with fn provide_hover(
   ) catch {
     _ => return None
   }
-  HoverProjection::{ reply, model }.to_viewer()
+  HoverProjection::{ reply, model, }.to_viewer()
 }
 
 ///|
 /// Register the hover provider on the shared language registry.
 fn register_hover_provider() -> Unit {
-  let provider = LspHoverProvider::{  }
+  let provider = LspHoverProvider::{ }
   @languages.languages.register_hover_provider(
     live_moonbit_model_selector(),
     provider,
@@ -134,7 +134,7 @@ fn HoverProjection::to_viewer(self : HoverProjection) -> @language.Hover? {
   } else {
     @language.HoverContent::PlainText(self.reply.value)
   }
-  Some(@language.Hover::{ range: self.range(), contents: [content] })
+  Some(@language.Hover::{ range: self.range(), contents: [content], })
 }
 
 ///|

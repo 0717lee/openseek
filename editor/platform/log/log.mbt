@@ -28,7 +28,7 @@ struct MemoryLogger {
 ///|
 /// Creates an empty in-memory log sink.
 fn MemoryLogger::new_impl() -> MemoryLogger {
-  { entries: [], flush_count: Ref(0) }
+  { entries: [], flush_count: Ref(0), }
 }
 
 ///|
@@ -60,7 +60,7 @@ fn LogService::new_impl(
   level? : LogLevel = Info,
   logger? : &Logger = NullLogger(),
 ) -> LogService {
-  { level, logger }
+  { level, logger, }
 }
 
 ///|
@@ -106,7 +106,7 @@ pub fn LogService::warn(
   message : String,
   details? : Array[(String, String)] = [],
 ) -> Unit {
-  self.log({ level: Warning, category, message, details })
+  self.log({ level: Warning, category, message, details, })
 }
 
 ///|
@@ -139,7 +139,7 @@ fn LogService::error_impl(
   message : String,
   details? : Array[(String, String)] = [],
 ) -> Unit {
-  self.log({ level: Error, category, message, details })
+  self.log({ level: Error, category, message, details, })
 }
 
 ///|

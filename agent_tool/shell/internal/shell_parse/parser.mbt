@@ -35,7 +35,7 @@ fn parse_tokens(tokens : Array[Token]) -> ParseResult {
               let op = "\{word}\{next_op}"
               match parse_redirect_target(tokens, index + 2) {
                 Some((target, next_index)) => {
-                  redirects.push({ op, target })
+                  redirects.push({ op, target, })
                   saw_part = true
                   index = next_index
                   continue
@@ -93,7 +93,7 @@ fn parse_tokens(tokens : Array[Token]) -> ParseResult {
         pending_separator = None
         match parse_redirect_target(tokens, index + 1) {
           Some((target, next_index)) => {
-            redirects.push({ op, target })
+            redirects.push({ op, target, })
             saw_part = true
             index = next_index
           }
@@ -211,7 +211,7 @@ fn split_env_assignment(word : String) -> EnvAssignment? {
   if !is_valid_env_name(name) {
     return None
   }
-  Some({ name, value: values.join("=") })
+  Some({ name, value: values.join("="), })
 }
 
 ///|

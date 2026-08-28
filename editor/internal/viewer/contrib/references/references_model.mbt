@@ -22,7 +22,7 @@ pub(all) struct ReferenceItem {
 ///|
 /// Reconstructs the host-neutral location used by open callbacks.
 pub fn ReferenceItem::location(self : ReferenceItem) -> @language.Location {
-  { uri: self.uri, range: self.range }
+  { uri: self.uri, range: self.range, }
 }
 
 ///|
@@ -149,7 +149,7 @@ pub fn ReferencesModel::ReferencesModel(
     group.references.push(item)
     references.push(item)
   }
-  { groups, references }
+  { groups, references, }
 }
 
 ///|
@@ -326,7 +326,7 @@ fn reference_snippet(
   if before.is_empty() && matched.is_empty() && after.is_empty() {
     None
   } else {
-    Some({ before, matched, after })
+    Some({ before, matched, after, })
   }
 }
 

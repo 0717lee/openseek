@@ -13,7 +13,7 @@ pub fn InlineDecoration::InlineDecoration(
   class_name : String,
   decoration_type? : InlineDecorationType = Regular,
 ) -> InlineDecoration {
-  { range, class_name, decoration_type }
+  { range, class_name, decoration_type, }
 }
 
 ///|
