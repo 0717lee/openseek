@@ -46,6 +46,36 @@ test "an mbtx chip clamps one oversized argument" {
 }
 
 ///|
+/// The card renders the whole program without `truncate_output`: a program
+/// past that helper's 101-line clamp still shows every line under its true
+/// number, with no skip marker — reintroducing the clamp would misnumber the
+/// tail against the result's `line:column` diagnostics.
+#warnings("-alert_unstable")
+test "an mbtx program past the transcript clamp keeps every numbered line" {
+  let lines : Array[String] = []
+  for index in 0..<120 {
+    lines.push("let x\{index} = \{index}")
+  }
+  let arguments : Json = { "source": lines.join("\n"), "target": "js" }
+  let rendered = tool_call_view({
+    kind: Tool(
+      call_id="c1",
+      name="mbtx",
+      arguments=Some(arguments.stringify()),
+      has_result=true,
+      is_error=false,
+      brief=Some("mbtx (exit=0)"),
+    ),
+    content: "ok",
+    ts: None,
+    sequence: None,
+  })
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  assert_true(markup.contains("<span class=\"moonbit-gutter\">120</span>"))
+  assert_false(markup.contains("skipped"))
+}
+
+///|
 /// A payload this card cannot read keeps the generic arguments rendering,
 /// which clamps before parsing — nothing is ever shown as a program that is
 /// not one.
@@ -85,6 +115,10 @@ test "a failed mbtx row still reads as a program, not escaped JSON" {
   assert_true(markup.contains("language-moonbit"))
   assert_true(markup.contains("<span class=\"mtk3\">fn</span>"))
   assert_true(markup.contains("<span class=\"mtk6\">1</span>"))
+  // Each source line carries its number, for matching the result's
+  // `line:column` compiler diagnostics against the program.
+  assert_true(markup.contains("<span class=\"moonbit-gutter\">1</span>"))
+  assert_true(markup.contains("<span class=\"moonbit-gutter\">3</span>"))
   assert_true(markup.contains("tool-card-chip"))
   assert_true(markup.contains("target: js"))
   // The program reads as lines rather than as one JSON-escaped string.

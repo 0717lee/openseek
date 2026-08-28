@@ -549,17 +549,18 @@
     .moonbit-source .mtk12 { color: var(--token-regexp); }
     .moonbit-source .mtk13 { color: var(--token-invalid); }
     .read-moonbit-output { display: block; }
-    .read-moonbit-line {
+    .read-moonbit-line, .moonbit-line {
       display: grid; grid-template-columns: max-content minmax(0, 1fr);
       column-gap: 1ch; align-items: start;
     }
-    .read-moonbit-gutter {
+    .read-moonbit-gutter, .moonbit-gutter {
       color: var(--muted); text-align: right; white-space: pre; user-select: none;
     }
-    .read-moonbit-code {
+    .read-moonbit-code, .moonbit-code {
       min-width: 0; color: var(--text); font: inherit;
       white-space: pre-wrap; word-break: break-word;
     }
+    .moonbit-skip { color: var(--muted); }
     .read-moonbit-status {
       display: block; color: var(--muted);
       white-space: pre-wrap; word-break: break-word;

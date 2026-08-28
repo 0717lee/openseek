@@ -968,9 +968,11 @@ fn arg_field(tool_name : String, key : String, value : Json) -> @html.Html {
   // other field uses the generic recursive rendering.
   let value_html = match value {
     String(text) if key == "generated_diff" => diff_block(text)
+    // Numbered so the run's compiler diagnostics, which cite `line:column`
+    // positions into this source, can be followed without counting lines.
     String(source) if tool_name == "mbtx" && key == "source" =>
       @html.pre(class="arg-value moonbit-source", [
-        @syntax_html.moonbit_source_code(source),
+        @syntax_html.moonbit_numbered_source(source),
       ])
     _ => render_value(value)
   }

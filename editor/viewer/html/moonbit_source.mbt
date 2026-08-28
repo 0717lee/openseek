@@ -6,14 +6,30 @@
 /// is returned, so callers that add gutters or other line chrome do not lose
 /// multiline comments and strings by tokenizing each line independently.
 pub fn moonbit_source_lines(source : String) -> Array[@rhtml.Html] {
+  tokenized_lines(source, _ => true)
+}
+
+///|
+/// The tokenization behind `moonbit_source_lines`, materializing fragments
+/// only for the lines `keep` admits — in order, without placeholders for the
+/// rest. Every line is still lexed so state keeps flowing across a skipped
+/// region; what a dropped line saves is its token inflation and span nodes,
+/// which is what lets the numbered clamp decide before building instead of
+/// building tens of thousands of rows to discard.
+fn tokenized_lines(source : String, keep : (Int) -> Bool) -> Array[@rhtml.Html] {
   let tokenizer : &@syntax.LineTokenizer = @lang_moonbit.MoonBitTokenizer()
   let lines : Array[@rhtml.Html] = []
   let mut state = tokenizer.initial_state()
+  let mut index = -1
   for line_view in source.split("\n") {
+    index += 1
     let line = line_view.to_owned()
-    let children : Array[@rhtml.Html] = []
     let (syntax_tokens, next_state) = tokenizer.tokenize_line(line, state)
     state = next_state
+    if !keep(index) {
+      continue
+    }
+    let children : Array[@rhtml.Html] = []
     let tokens = @model.line_tokens_from_lexer_tokens(
       line, syntax_tokens, @services.language_id_codec,
     ).inflate()
@@ -36,6 +52,17 @@ pub fn moonbit_source_lines(source : String) -> Array[@rhtml.Html] {
 }
 
 ///|
+/// Numbered rendering keeps every row of a real program: the bound exists only
+/// for a degenerate payload (a transcript's argument ceiling still admits tens
+/// of thousands of two-character lines), where it caps the DOM at head + tail
+/// rows around one unnumbered skip marker. Recorded programs top out near 40
+/// lines, so an honest clamp this generous is display-invisible in practice.
+const NUMBERED_HEAD_LINES = 400
+
+///|
+const NUMBERED_TAIL_LINES = 100
+
+///|
 /// Renders MoonBit source as escaped Rabbita text nodes carrying the editor's
 /// `mtk<n>` token classes. The lexer and the token-to-theme projection both use
 /// the editor's production pipeline, so lightweight HTML hosts render the same
@@ -49,4 +76,71 @@ pub fn moonbit_source_code(source : String) -> @rhtml.Html {
     children.push(line)
   }
   @rhtml.code(class="language-moonbit", children)
+}
+
+///|
+/// Renders MoonBit source as numbered lines: each line becomes a
+/// `moonbit-line` row pairing a right-aligned 1-based line number with that
+/// line's source, highlighted by the same token pipeline as
+/// `moonbit_source_code`. Numbers are space-padded to the width of the last
+/// line's number so rows align without the gutter cells sharing a measured
+/// column — each row is its own `moonbit-line` grid, and `white-space: pre`
+/// on the gutter keeps the padding. The numbers are display chrome for
+/// matching diagnostics that cite `line:column` positions, not part of the
+/// program: hosts mark the gutter `user-select: none` so copied text is the
+/// source alone.
+///
+/// A numbered render never lies about a line's position: past the degenerate
+/// line-count bound it keeps the head and tail rows under their true numbers
+/// with an unnumbered `moonbit-skip` row stating what was elided, rather than
+/// renumbering or growing the DOM without bound.
+pub fn moonbit_numbered_source(source : String) -> @rhtml.Html {
+  // Decide what to keep before anything is built: past the bound, only the
+  // head and tail lines ever materialize spans — a degenerate line count must
+  // not construct tens of thousands of rows just to discard the middle.
+  let total = source.split("\n").count()
+  let clamped = total > NUMBERED_HEAD_LINES + NUMBERED_TAIL_LINES + 1
+  let keep = (index : Int) => {
+    !clamped ||
+    index < NUMBERED_HEAD_LINES ||
+    index >= total - NUMBERED_TAIL_LINES
+  }
+  let lines = tokenized_lines(source, keep)
+  let width = total.to_string().length()
+  let rows : Array[@rhtml.Html] = []
+  for position, line in lines {
+    if clamped && position == NUMBERED_HEAD_LINES {
+      let skipped = total - NUMBERED_HEAD_LINES - NUMBERED_TAIL_LINES
+      rows.push(
+        @rhtml.span(class="moonbit-line", [
+          // Padded to the shared gutter width: each row is its own grid, so
+          // an empty cell would collapse its `max-content` column and shove
+          // the marker out from under the code column.
+          @rhtml.span(class="moonbit-gutter", " ".repeat(width)),
+          @rhtml.span(
+            class="moonbit-code moonbit-skip",
+            "⋯ \{skipped} lines skipped ⋯",
+          ),
+        ]),
+      )
+    }
+    // A kept position past the head belongs to the tail, whose true numbers
+    // resume after the skipped middle.
+    let number = if clamped && position >= NUMBERED_HEAD_LINES {
+      total - NUMBERED_TAIL_LINES + position - NUMBERED_HEAD_LINES + 1
+    } else {
+      position + 1
+    }
+    let text = number.to_string()
+    rows.push(
+      @rhtml.span(class="moonbit-line", [
+        @rhtml.span(
+          class="moonbit-gutter",
+          " ".repeat(width - text.length()) + text,
+        ),
+        @rhtml.code(class="language-moonbit moonbit-code", [line]),
+      ]),
+    )
+  }
+  @rhtml.fragment(rows)
 }

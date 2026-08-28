@@ -298,7 +298,11 @@ test "mbtx source uses editor token classes and keeps original JSON" {
     #|{"source":"fn main {\n  let greeting = \"<hello>\"\n}","target":"js"}
   let html = render_tool_call("mbtx", arguments)
   assert_true(html.contains("class=\"arg-value moonbit-source\""))
-  assert_true(html.contains("class=\"language-moonbit\""))
+  assert_true(html.contains("class=\"language-moonbit moonbit-code\""))
+  // Each source line is numbered so the run's `line:column` diagnostics can
+  // be followed without counting lines.
+  assert_true(html.contains("class=\"moonbit-gutter\">1</span>"))
+  assert_true(html.contains("class=\"moonbit-gutter\">3</span>"))
   assert_true(html.contains("<span class=\"mtk3\">fn</span>"))
   assert_true(html.contains("<span class=\"mtk3\">let</span>"))
   assert_true(html.contains("class=\"mtk5\""))
@@ -308,6 +312,21 @@ test "mbtx source uses editor token classes and keeps original JSON" {
   // Viz's global Rendered / Original toggle keeps the raw payload in the DOM.
   assert_true(html.contains("tool-call-args-original"))
   assert_true(html.contains("target"))
+}
+
+///|
+/// The export renders the whole program: a source past the transcript
+/// helper's 101-line clamp still shows every line under its true number,
+/// with no skip marker.
+test "a long mbtx program keeps every numbered line in the export" {
+  let lines : Array[String] = []
+  for index in 0..<120 {
+    lines.push("let x\{index} = \{index}")
+  }
+  let arguments : Json = { "source": lines.join("\n"), "target": "js" }
+  let html = render_tool_call("mbtx", arguments.stringify())
+  assert_true(html.contains("class=\"moonbit-gutter\">120</span>"))
+  assert_false(html.contains("skipped"))
 }
 
 ///|

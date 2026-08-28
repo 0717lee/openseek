@@ -52,16 +52,23 @@ fn decode_mbtx_call(arguments : String) -> MbtxCall? {
 
 ///|
 /// The program view for a `mbtx` tool call: the source it asked to run,
-/// verbatim, under a row of chips for the arguments that shaped the run.
-/// `None` when the payload is not a readable call, which keeps the generic
-/// JSON rendering.
+/// verbatim and line-numbered, under a row of chips for the arguments that
+/// shaped the run. `None` when the payload is not a readable call, which keeps
+/// the generic JSON rendering.
+///
+/// The numbers exist to be matched against the paired result, whose compiler
+/// diagnostics cite `line:column` positions into this source. That is also why
+/// the source skips `truncate_output`: its clamp would misnumber every line
+/// after its skip marker. Cost stays bounded without it — `card_fields`
+/// refuses payloads past the shared card ceiling, and the numbered renderer
+/// clamps a degenerate line count itself, keeping true numbers on the tail.
 fn mbtx_card(arguments : String) -> @html.Html? {
   guard decode_mbtx_call(arguments) is Some(call) else { return None }
   Some(
     @html.div(class="mbtx-args", [
       chip_row(call.chips),
       @html.pre(class="moonbit-source", [
-        @syntax_html.moonbit_source_code(truncate_output(call.source)),
+        @syntax_html.moonbit_numbered_source(call.source),
       ]),
     ]),
   )
