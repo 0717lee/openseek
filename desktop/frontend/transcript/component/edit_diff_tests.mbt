@@ -83,7 +83,7 @@ test "a payload with no readable change decodes to nothing" {
 
 ///|
 #warnings("-alert_unstable")
-test "an edit row tabs its change, payload, and result" {
+test "an edit row tabs its change and payload apart from its result" {
   let arguments =
     #|{"path":"lib/parser.mbt","start_line":12,"old_string":"args.length()","new_string":"args.len()"}
   let rendered = tool_call_view({
@@ -105,19 +105,20 @@ test "an edit row tabs its change, payload, and result" {
   assert_true(markup.contains("diff-add\">+ args.len()"))
   assert_true(markup.contains("tool-card-chip\">path: lib/parser.mbt"))
   assert_true(markup.contains("class=\"tool-call-tabs\""))
-  assert_eq(markup.split("class=\"tool-call-tab-input\"").length(), 4)
+  assert_eq(markup.split("class=\"tool-call-tab-input\"").length(), 3)
   assert_true(markup.contains(">Change</label>"))
   assert_true(markup.contains(">Original JSON</label>"))
-  assert_true(markup.contains(">Output</label>"))
+  assert_false(markup.contains(">Output</label>"))
   assert_true(markup.contains("edited 1 occurrence"))
   // The synthesized diff stands in for the arguments dump, not beside it.
   assert_false(markup.contains("tool-call-arguments"))
-  assert_false(markup.contains("tool-call-section-label\">Output"))
+  assert_true(markup.contains("tool-call-section-label\">Output"))
+  assert_true(markup.contains("class=\"tool-result\""))
 }
 
 ///|
 #warnings("-alert_unstable")
-test "a multi_edit row tabs its anchored changes, payload, and result" {
+test "a multi_edit row tabs its changes and payload apart from its result" {
   let arguments =
     #|{"edits":[{"file":"a.mbt","start_line":3,"old_string":"one","new_string":"1"},{"file":"b.mbt","start_line":9,"old_string":"two","new_string":"2"}],"revert_when_errors_above":0}
   let rendered = tool_call_view({
@@ -140,11 +141,13 @@ test "a multi_edit row tabs its anchored changes, payload, and result" {
   assert_true(markup.contains("diff-add\">+ 1"))
   assert_true(markup.contains("diff-add\">+ 2"))
   assert_true(markup.contains("class=\"tool-call-tabs\""))
-  assert_eq(markup.split("class=\"tool-call-tab-input\"").length(), 4)
+  assert_eq(markup.split("class=\"tool-call-tab-input\"").length(), 3)
   assert_true(markup.contains(">Changes</label>"))
   assert_true(markup.contains(">Original JSON</label>"))
-  assert_true(markup.contains(">Output</label>"))
+  assert_false(markup.contains(">Output</label>"))
   assert_true(markup.contains("applied 2 edits"))
+  assert_true(markup.contains("tool-call-section-label\">Output"))
+  assert_true(markup.contains("class=\"tool-result\""))
   assert_false(markup.contains("tool-call-arguments"))
 }
 

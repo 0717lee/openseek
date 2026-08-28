@@ -97,12 +97,14 @@ fn activity_view(
   let mut index = 0
   while index < items.length() {
     if items[index].kind is Tool(..) {
-      let calls : Array[@html.Html] = []
+      let tools : Array[@transcript.TranscriptItem] = []
       while index < items.length() && items[index].kind is Tool(..) {
-        calls.push(tool_call_view(items[index], subrun?))
+        tools.push(items[index])
         index = index + 1
       }
-      rows.push(@html.div(class="activity-work", calls))
+      rows.push(
+        @html.div(class="activity-work", tool_run_views(tools, subrun?)),
+      )
     } else {
       // Reasoning; callers never pass user messages, assistant prose, or
       // error bubbles.
@@ -151,6 +153,42 @@ fn activity_view(
 }
 
 ///|
+/// Render one consecutive run of tool-shaped transcript items. Calls emitted
+/// by the same durable Assistant event share a sequence: show every request
+/// first and every result after it, exactly as the viz HTML renderer's
+/// Assistant card followed by result cards makes a parallel burst readable.
+/// Different or absent sequences cannot prove a burst, so keep each request
+/// beside its own result instead of implying concurrency.
+fn tool_run_views(
+  items : Array[@transcript.TranscriptItem],
+  subrun? : SubrunLink,
+) -> Array[@html.Html] {
+  let rows : Array[@html.Html] = []
+  let same_assistant_event = match items {
+    [first, ..] if items.length() > 1 && first.sequence is Some(sequence) =>
+      items.all(item => {
+        item.sequence == Some(sequence) &&
+        item.kind is Tool(arguments=Some(_), ..)
+      })
+    _ => false
+  }
+  if same_assistant_event {
+    for item in items {
+      append_tool_request(rows, item)
+    }
+    for item in items {
+      append_tool_result(rows, item, subrun?)
+    }
+  } else {
+    for item in items {
+      append_tool_request(rows, item)
+      append_tool_result(rows, item, subrun?)
+    }
+  }
+  rows
+}
+
+///|
 /// What a sub-run tool card needs to offer its child transcript: the session
 /// this card is being rendered under (an `sr-N` is only unique within its own
 /// engine, so the child id cannot be derived without it), and the way to open
@@ -182,20 +220,47 @@ fn subrun_chip(child : String, open : (String) -> @cmd.Cmd) -> @html.Html {
 }
 
 ///|
-/// One tool call, always on display as its own row: its brief ("Read
-/// moon.mod", or the tool name when the engine sent none), expandable to the
-/// original arguments and the later result. Failed calls stay folded by
-/// default like every other call, read red, and carry a literal `failed`
-/// marker so the state never rests on color alone. A `plan` call's row also
-/// carries the compact progress meter, so the checklist's fill reads without
-/// unfolding anything. Calls from older sessions may have no recorded
-/// arguments; unmatched results keep their old output-only presentation.
+/// A complete tool exchange for focused rendering tests and the unreachable
+/// one-item fallback. Activity runs use `tool_run_views` directly so calls
+/// from one Assistant event can precede all of their distinct result rows.
 fn tool_call_view(
   item : @transcript.TranscriptItem,
   subrun? : SubrunLink,
 ) -> @html.Html {
-  guard item.kind is Tool(call_id~, name~, arguments~, is_error~, brief~, ..) else {
-    return @html.text("")
+  let rows : Array[@html.Html] = []
+  append_tool_request(rows, item)
+  append_tool_result(rows, item, subrun?)
+  @html.div(class="tool-exchange", rows)
+}
+
+///|
+fn append_tool_request(
+  rows : Array[@html.Html],
+  item : @transcript.TranscriptItem,
+) -> Unit {
+  guard item.kind is Tool(arguments=Some(_), ..) else { return }
+  rows.push(tool_request_view(item))
+}
+
+///|
+fn append_tool_result(
+  rows : Array[@html.Html],
+  item : @transcript.TranscriptItem,
+  subrun? : SubrunLink,
+) -> Unit {
+  guard item.kind is Tool(has_result=true, ..) else { return }
+  rows.push(tool_result_view(item, subrun?))
+}
+
+///|
+/// One recorded tool request, always on display as its own row. Its brief is
+/// the result-derived caption the viz renderer also promotes onto the call;
+/// expanding reveals only what the model sent. Failed calls read red and carry
+/// a literal marker, while their separate result row owns the output.
+fn tool_request_view(item : @transcript.TranscriptItem) -> @html.Html {
+  guard item.kind
+    is Tool(call_id~, name~, arguments=Some(arguments), is_error~, brief~, ..) else {
+    return @html.nothing
   }
   let label = capitalize(
     if brief is Some(brief) && !brief.is_blank() {
@@ -209,29 +274,15 @@ fn tool_call_view(
   // the result errored (the row's red must not carry the state alone), and —
   // for an applied `plan` call — the compact progress meter. `fold_progress`
   // renders nothing for every other call.
-  let line : Array[@html.Html] = [@html.span(class="tool-call-text", label)]
+  let line : Array[@html.Html] = [
+    @html.span(class="tool-flow", "→"),
+    @html.span(class="tool-call-text", label),
+  ]
   if is_error {
     line.push(@html.span(class="tool-call-failed", "failed"))
   }
   line.push(@plan.fold_progress([item]))
   let body : Array[@html.Html] = []
-  let mut content_in_tabs = false
-  // A sub-run result names the child session it spawned in its brief. The
-  // child's transcript is the only account of what the subagent actually did —
-  // this card holds its report, not its work — so the card leads with the way
-  // to go and read it.
-  if subrun is Some(link) && brief is Some(brief) {
-    // One launch can start several workers and name them all in one brief, so
-    // this is a chip each rather than a single link.
-    for
-      child in @transcript.subrun_child_sessions(
-        name,
-        brief,
-        parent=link.parent,
-      ) {
-      body.push(subrun_chip(child, link.open))
-    }
-  }
   // A `plan` call shows the checklist it recorded rather than its JSON, in
   // every state where that checklist is what the model asked for. A pending
   // call qualifies: the card is a record of the call, and the missing Output
@@ -240,17 +291,14 @@ fn tool_call_view(
   // checklist would report a plan that never took effect.
   if @plan.classify(item) is Some(Applied(steps) | Pending(steps)) {
     body.push(@html.div(class="tool-call-section", [@plan.card(steps)]))
-  } else if tool_call_tabbed_view(
+  } else if tool_arguments_tabbed_view(
       tool_call_tabs_key(call_id, item.sequence),
       name,
-      arguments,
-      item.content,
+      Some(arguments),
     )
     is Some(tabs) {
-    content_in_tabs = true
     body.push(@html.div(class="tool-call-section", [tabs]))
-  } else if arguments is Some(arguments) &&
-    custom_card(name, arguments) is Some((label, card)) {
+  } else if custom_card(name, arguments) is Some((label, card)) {
     // Some tools' arguments have a shape JSON hides, such as an `edit` split
     // across two blobs whose difference is the whole point. Those get a card.
     // A payload the card cannot read falls through to the generic rendering
@@ -261,7 +309,7 @@ fn tool_call_view(
         card,
       ]),
     )
-  } else if arguments is Some(arguments) {
+  } else {
     let trimmed = arguments.trim()
     if !trimmed.is_empty() && trimmed != "{}" {
       body.push(
@@ -272,27 +320,6 @@ fn tool_call_view(
       )
     }
   }
-  if !content_in_tabs && !item.content.is_blank() {
-    let content = truncate_output(item.content)
-    let output = match (name, arguments) {
-      ("read", Some(arguments)) =>
-        match @read_html.moonbit_output(arguments, item.content) {
-          Some(rendered) =>
-            [
-              @html.pre(class="tool-call-output", [rendered]),
-              original_output_view(item.content),
-            ]
-          None => [@html.pre(class="tool-call-output", content)]
-        }
-      _ => [@html.pre(class="tool-call-output", content)]
-    }
-    body.push(
-      @html.div(
-        class="tool-call-section",
-        [@html.div(class="tool-call-section-label", "Output"), ..output],
-      ),
-    )
-  }
   if body.is_empty() {
     @html.div(class="tool-call-label" + error_class, line)
   } else {
@@ -301,11 +328,75 @@ fn tool_call_view(
       [
         // The full label as the row's tooltip: a brief longer than the pane
         // is ellipsized by the stylesheet, and the body holds the arguments
-        // and output, not the brief — hover (or opening the row, which the
+        // but not the brief — hover (or opening the row, which the
         // stylesheet un-clamps) is how the whole text stays reachable.
         @html.summary(class="tool-call-summary", title=label, line),
         ..body,
       ],
+    )
+  }
+}
+
+///|
+/// One completed tool result, separate from the request that produced it as in
+/// the viz HTML renderer. The row remains visible even for an empty result so
+/// pending and completed calls are distinguishable without opening anything.
+fn tool_result_view(
+  item : @transcript.TranscriptItem,
+  subrun? : SubrunLink,
+) -> @html.Html {
+  guard item.kind
+    is Tool(call_id~, name~, arguments~, has_result=true, is_error~, brief~) else {
+    return @html.nothing
+  }
+  let label = match (arguments, brief) {
+    (None, Some(brief)) if !brief.is_blank() => capitalize(brief)
+    _ if is_error => "Tool error · \{name}"
+    _ => "Tool result · \{name}"
+  }
+  let error_class = if is_error { " error" } else { "" }
+  let line : Array[@html.Html] = [
+    @html.span(class="tool-flow", "←"),
+    @html.span(class="tool-result-text", capitalize(label)),
+  ]
+  if is_error {
+    line.push(@html.span(class="tool-call-failed", "failed"))
+  }
+  let body : Array[@html.Html] = []
+  // A sub-run result names the child session it spawned in its brief. The
+  // result owns the child report and therefore owns the way into its transcript.
+  if subrun is Some(link) && brief is Some(brief) {
+    for
+      child in @transcript.subrun_child_sessions(
+        name,
+        brief,
+        parent=link.parent,
+      ) {
+      body.push(subrun_chip(child, link.open))
+    }
+  }
+  if !item.content.is_blank() {
+    let key = tool_call_tabs_key(call_id, item.sequence)
+    if tool_result_tabbed_view(key, name, arguments, item.content) is Some(tabs) {
+      body.push(@html.div(class="tool-call-section", [tabs]))
+    } else {
+      let output = tool_output_tabs(name, arguments, item.content)
+      if output is [tab] {
+        body.push(
+          @html.div(class="tool-call-section", [
+            @html.div(class="tool-call-section-label", tab.label),
+            tab.body,
+          ]),
+        )
+      }
+    }
+  }
+  if body.is_empty() {
+    @html.div(class="tool-result-label" + error_class, line)
+  } else {
+    @html.details(
+      class="tool-result" + error_class,
+      [@html.summary(class="tool-result-summary", title=label, line), ..body],
     )
   }
 }
