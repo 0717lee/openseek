@@ -85,6 +85,10 @@ test "a failed mbtx row still reads as a program, not escaped JSON" {
   assert_true(markup.contains("language-moonbit"))
   assert_true(markup.contains("<span class=\"mtk3\">fn</span>"))
   assert_true(markup.contains("<span class=\"mtk6\">1</span>"))
+  // Each source line carries its number, for matching the result's
+  // `line:column` compiler diagnostics against the program.
+  assert_true(markup.contains("<span class=\"moonbit-gutter\">1</span>"))
+  assert_true(markup.contains("<span class=\"moonbit-gutter\">3</span>"))
   assert_true(markup.contains("tool-card-chip"))
   assert_true(markup.contains("target: js"))
   // The program reads as lines rather than as one JSON-escaped string.

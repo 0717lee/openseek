@@ -1062,28 +1062,32 @@
 /* The `mbtx` program block needs no rule of its own: the shared
    `.tool-call pre` already gives it the padding and background, and its
    `pre-wrap` keeps the listing's indentation while wrapping the overflow — so
-   a long line grows the page rather than adding a nested scrollbar. */
+   a long line grows the page rather than adding a nested scrollbar. Its
+   numbered lines are the shared `moonbit-line` gutter grid below. */
 
-/* A MoonBit `read` keeps the tool's numbered gutter and status footer muted,
-   while the file body uses the same shared `moonbit-source` editor tokens.
-   Each logical line owns its two columns so wrapping never shifts the next
-   line away from its number. */
+/* Numbered MoonBit lines — a `read` result's protocol gutter and an `mbtx`
+   program's generated one — keep the number muted while the source uses the
+   shared `moonbit-source` editor tokens. Each logical line owns its two
+   columns so wrapping never shifts the next line away from its number. */
 .read-moonbit-output {
   display: block;
 }
-.read-moonbit-line {
+.read-moonbit-line,
+.moonbit-line {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
   column-gap: 1ch;
   align-items: start;
 }
-.read-moonbit-gutter {
+.read-moonbit-gutter,
+.moonbit-gutter {
   color: var(--color-text-muted);
   text-align: right;
   white-space: pre;
   user-select: none;
 }
-.read-moonbit-code {
+.read-moonbit-code,
+.moonbit-code {
   min-width: 0;
   color: var(--color-code);
   font: inherit;
