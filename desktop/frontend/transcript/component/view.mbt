@@ -22,8 +22,9 @@ fn capitalize(text : String) -> String {
 /// disclosure is the browser's (`<details>`), so a reader's toggle survives
 /// re-renders and the run growing while live.
 ///
-/// Failures need no badge up here: a failed call's own row is visible,
-/// starts open, and carries its own literal `failed` marker.
+/// Failures need no badge up here: a failed call's own row is visible and
+/// carries its own literal `failed` marker. Its potentially large arguments
+/// and output stay folded by default, like every other call.
 ///
 /// Assistant prose is never in here: every assistant message is its own
 /// visible bubble, so a turn reads as narration, work, narration, work,
@@ -183,12 +184,12 @@ fn subrun_chip(child : String, open : (String) -> @cmd.Cmd) -> @html.Html {
 ///|
 /// One tool call, always on display as its own row: its brief ("Read
 /// moon.mod", or the tool name when the engine sent none), expandable to the
-/// original arguments and the later result. Failed calls start open, read
-/// red, and carry a literal `failed` marker so the state never rests on
-/// color alone. A `plan` call's row also carries the compact progress meter,
-/// so the checklist's fill reads without unfolding anything. Calls from older
-/// sessions may have no recorded arguments; unmatched results keep their old
-/// output-only presentation.
+/// original arguments and the later result. Failed calls stay folded by
+/// default like every other call, read red, and carry a literal `failed`
+/// marker so the state never rests on color alone. A `plan` call's row also
+/// carries the compact progress meter, so the checklist's fill reads without
+/// unfolding anything. Calls from older sessions may have no recorded
+/// arguments; unmatched results keep their old output-only presentation.
 fn tool_call_view(
   item : @transcript.TranscriptItem,
   subrun? : SubrunLink,
@@ -297,7 +298,6 @@ fn tool_call_view(
   } else {
     @html.details(
       class="tool-call" + error_class,
-      open=is_error,
       [
         // The full label as the row's tooltip: a brief longer than the pane
         // is ellipsized by the stylesheet, and the body holds the arguments

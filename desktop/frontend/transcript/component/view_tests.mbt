@@ -613,9 +613,10 @@ test "every tool call of a run is on display as its own row" {
   assert_true(markup.contains("Edit view.mbt"))
   assert_false(markup.contains("activity-summary"))
   assert_false(markup.contains("Ran 1 command"))
-  // The failed call starts open, and its state is a literal word rather than
-  // the row's red alone.
-  assert_true(markup.contains("<details class=\"tool-call error\" open"))
+  // The failed call stays folded like every other call, and its state is a
+  // literal word rather than the row's red alone.
+  assert_true(markup.contains("<details class=\"tool-call error\">"))
+  assert_false(markup.contains("<details class=\"tool-call error\" open"))
   assert_true(markup.contains("<span class=\"tool-call-failed\">failed</span>"))
   // Each summary carries its full label as a tooltip, so a brief the
   // stylesheet ellipsizes on a narrow pane stays reachable.
@@ -941,7 +942,8 @@ test "an ordinary tool tabs readable arguments, the recording, and its result" {
   assert_true(markup.contains("moon test"))
   assert_true(markup.contains("test failed"))
   assert_false(markup.contains("tool-call-section-label\">Output"))
-  assert_true(markup.contains("<details class=\"tool-call error\" open>"))
+  assert_true(markup.contains("<details class=\"tool-call error\">"))
+  assert_false(markup.contains("<details class=\"tool-call error\" open>"))
 }
 
 ///|
