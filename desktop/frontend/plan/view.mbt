@@ -1,6 +1,7 @@
-// Two renderings of the same checklist, at two altitudes: a meter on a folded
-// run, and the full card inside an expanded `plan` call. They share the row
-// and meter builders below so the two cannot drift apart.
+// Two renderings of the same checklist, at two altitudes: a meter riding
+// the `plan` call's own transcript row, and the full card inside that row
+// once expanded. They share the row and meter builders below so the two
+// cannot drift apart.
 //
 // There is deliberately no third, standing rendering. A plan is a durable
 // tool call and reads as one, in the turn that made it; hoisting the latest
@@ -34,9 +35,10 @@ pub fn card(steps : Array[Step]) -> @html.Html {
 }
 
 ///|
-/// The meter for a folded run of activity, showing the plan as that run left
-/// it — so a collapsed turn still reads as the plan filling up. `nothing`
-/// when the run touched no plan.
+/// The meter for a run of activity, showing the plan as that run left it —
+/// riding the `plan` call's own row, so the checklist reads as it fills up
+/// without unfolding anything. `nothing` when the run carries no applied
+/// plan.
 pub fn fold_progress(items : Array[@transcript.TranscriptItem]) -> @html.Html {
   guard latest(items) is Some(steps) else { return @html.nothing }
   progress_view(steps, mini=true)
@@ -47,8 +49,8 @@ pub fn fold_progress(items : Array[@transcript.TranscriptItem]) -> @html.Html {
 /// step's worth of lighter fill for the step in progress, plus the tally. The
 /// completed fill turns green only once every step is completed, so a finished
 /// plan reads differently from one merely underway. `mini` is the compact form
-/// that rides a folded summary line, where its width must not grow with the
-/// step count.
+/// that rides a one-line row, where its width must not grow with the step
+/// count.
 fn progress_view(steps : Array[Step], mini? : Bool = false) -> @html.Html {
   let total = steps.length()
   let completed = completed_count(steps)

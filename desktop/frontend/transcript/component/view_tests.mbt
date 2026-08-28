@@ -327,8 +327,14 @@ test "live step hands off to its durable assistant card key" {
   let first_markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(live["activity\u{0}after\u{0}s1\u{0}o0"])
   })
-  assert_true(first_markup.contains(step_summary(1, "Read moon.mod")))
-  assert_true(first_markup.contains("<details class=\"activity\""))
+  // A tool-only step has no thought fold: its ordinal sits on a plain heading
+  // line and the call itself is on display as its own row.
+  assert_true(first_markup.contains("activity-heading"))
+  assert_true(first_markup.contains("#1</span>"))
+  assert_true(
+    first_markup.contains("<span class=\"tool-call-text\">Read moon.mod</span>"),
+  )
+  assert_false(first_markup.contains("<details class=\"activity\""))
   let handoff_key = "activity\u{0}after\u{0}s2\u{0}o0"
   assert_true(live.get(handoff_key) is Some(_))
   let live_markup = @rabbita.render_to_string(() => {
@@ -461,7 +467,8 @@ test "an ambiguous commit-first prefix keeps live reasoning visible" {
   let markup = @rabbita.render_to_string(() => {
     @rabbita.Val::constant(children["activity\u{0}after\u{0}s1\u{0}o0"])
   })
-  assert_true(markup.contains(step_summary(1, "Read")))
+  assert_true(markup.contains(step_summary(1, "Thought")))
+  assert_true(markup.contains("<span class=\"tool-call-text\">Read</span>"))
   assert_true(markup.contains("complete thought"))
   assert_false(markup.contains("activity-thinking-live"))
   assert_false(markup.contains("#2"))
@@ -587,89 +594,38 @@ test "transcript stream section key scopes equal session ids by channel" {
 }
 
 ///|
-test "a tool group's summary recognizes every cmd/openseek built-in" {
-  inspect(tool_group_summary([tool_item("read")]), content="Read 1 file")
-  inspect(
-    tool_group_summary([
-      tool_item("read"),
-      tool_item("read"),
-      tool_item("edit"),
-      tool_item("multi_edit"),
-      tool_item("write"),
-      tool_item("remove"),
-      tool_item("shell"),
-      tool_item("moon_cmd"),
-      tool_item("mbtx"),
-      tool_item("shell_output"),
-      tool_item("shell_stop"),
-      tool_item("plan"),
-      tool_item("goal"),
-      tool_item("finish"),
-      tool_item("moon_check compiling"),
-      tool_item("mystery"),
-    ]),
-    content="Read 2 files, wrote 1 file, edited 2 files, removed 1 file, ran 3 commands, checked 1 background job, stopped 1 background job, 1 plan update, 1 goal update, finished, 1 check update, 1 tool call",
-  )
-  inspect(
-    tool_group_summary([
-      tool_item("remove"),
-      tool_item("remove"),
-      tool_item("shell_output"),
-      tool_item("shell_output"),
-      tool_item("shell_stop"),
-      tool_item("shell_stop"),
-      tool_item("plan"),
-      tool_item("plan"),
-      tool_item("goal"),
-      tool_item("goal"),
-      tool_item("finish"),
-      tool_item("finish"),
-    ]),
-    content="Removed 2 files, checked 2 background jobs, stopped 2 background jobs, 2 plan updates, 2 goal updates, 2 finish calls",
-  )
-  inspect(
-    tool_group_summary([tool_item("shell", is_error=true)]),
-    content="Ran 1 command",
-  )
-}
-
-///|
-test "tool activity summaries promote recorded briefs" {
-  inspect(
-    tool_activity_summary([tool_item("shell", brief="moon test → exit 1")]),
-    content="Moon test → exit 1",
-  )
-  inspect(
-    tool_activity_summary([
-      tool_item("read", brief="read moon.mod"),
-      tool_item("edit", brief="edited view.mbt:42"),
+#warnings("-alert_unstable")
+test "every tool call of a run is on display as its own row" {
+  let rendered = activity_view(
+    [
       tool_item("shell", brief="moon test"),
-      tool_item("shell"),
-    ]),
-    content="Read moon.mod · edited view.mbt:42 · +2 more",
+      tool_item("read", brief="read moon.mod"),
+      tool_item("edit", is_error=true, brief="edit view.mbt"),
+    ],
+    _ => @cmd.none,
   )
-  // Older logs and pending calls have no result brief yet.
-  inspect(tool_activity_summary([tool_item("shell")]), content="Ran 1 command")
-}
-
-///|
-#warnings("-alert_unstable")
-test "a completed singleton tool uses one brief disclosure" {
-  let rendered = activity_view([tool_item("shell", brief="moon test")], _ => {
-    @cmd.none
-  })
   let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
-  assert_true(
-    markup.contains("<summary class=\"tool-call-summary\">Moon test</summary>"),
-  )
-  assert_false(markup.contains("Ran 1 command"))
-  assert_false(markup.contains("tool-line-summary"))
+  // One always-visible row per call, no fold around the run, no synthetic
+  // category sentence standing in for the briefs.
+  assert_true(markup.contains("activity-work"))
+  assert_true(markup.contains("Moon test"))
+  assert_true(markup.contains("Read moon.mod"))
+  assert_true(markup.contains("Edit view.mbt"))
   assert_false(markup.contains("activity-summary"))
+  assert_false(markup.contains("Ran 1 command"))
+  // The failed call stays folded like every other call, and its state is a
+  // literal word rather than the row's red alone.
+  assert_true(markup.contains("<details class=\"tool-call error\">"))
+  assert_false(markup.contains("<details class=\"tool-call error\" open"))
+  assert_true(markup.contains("<span class=\"tool-call-failed\">failed</span>"))
+  // Each summary carries its full label as a tooltip, so a brief the
+  // stylesheet ellipsizes on a narrow pane stays reachable.
+  assert_true(markup.contains("title=\"Moon test\""))
 }
 
 ///|
 #warnings("-alert_unstable")
-test "a mixed activity does not repeat its singleton tool disclosure" {
+test "a mixed activity keeps its call on display beside the thought fold" {
   let rendered = activity_view(
     [
       {
@@ -683,10 +639,14 @@ test "a mixed activity does not repeat its singleton tool disclosure" {
     _ => @cmd.none,
   )
   let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  // The fold holds only the thought; the call is its own visible row.
+  assert_true(markup.contains("<span class=\"activity-text\">Thought</span>"))
+  assert_true(markup.contains("checking the diff"))
   assert_true(
-    markup.contains("<span class=\"activity-text\">Moon fmt · git diff</span>"),
+    markup.contains(
+      "<span class=\"tool-call-text\">Moon fmt · git diff</span>",
+    ),
   )
-  assert_false(markup.contains("tool-call-summary"))
   assert_true(markup.contains("<pre class=\"tool-call-output\">output</pre>"))
 }
 
@@ -725,18 +685,37 @@ test "a step is stamped to the second, from a real stamp only" {
   }
   let markup = render([stamped])
   assert_true(markup.contains("activity-time"))
-  // Ordinal, then instant, then the separator introducing the label. The order
-  // is the feature: the instants are read as a column against the rows above
-  // and below, which only works with nothing variable-width before them.
+  // Ordinal, then instant. The order is the feature: the instants are read as
+  // a column against the rows above and below, which only works with nothing
+  // variable-width before them.
   let after_step = markup.split("activity-step").to_array()[1]
   assert_true(after_step.contains("activity-time"))
-  assert_true(after_step.split("activity-time").to_array()[1].contains(" · "))
   // The gap after the ordinal is a real space, so it survives into the
   // accessible name and anything copied out of the row — a CSS margin would
   // have left "#1Committed 14:32:10".
   assert_true(markup.contains("#1</span> <span"))
+  // A step led by reasoning keeps the same columns on its thought fold's
+  // summary, with the separator introducing the label after the instant.
+  let thought_markup = render([
+    {
+      kind: Reasoning,
+      content: "thinking",
+      ts: Some(1781144351123),
+      sequence: Some(2),
+    },
+  ])
+  assert_true(thought_markup.contains("activity-time"))
+  assert_true(
+    thought_markup.split("activity-time").to_array()[1].contains(" · Thought"),
+  )
   // ...and without a stamp there is no stray space before the separator.
-  assert_true(render([tool_item("read")]).contains("#1</span> · "))
+  assert_true(
+    render([
+      { kind: Reasoning, content: "thinking", ts: None, sequence: Some(2), },
+    ]).contains("#1</span> · Thought"),
+  )
+  // A stampless tool-only step keeps the bare ordinal as its heading.
+  assert_true(render([tool_item("read")]).contains("#1</span></div>"))
   // Seconds are there — the property, not its spelling. Counting `:` would
   // have pinned the viewer's locale: fi-FI and da-DK write the same instant
   // as `10.19.11`. Two instants a second apart rendering differently is the
@@ -963,7 +942,8 @@ test "an ordinary tool tabs readable arguments, the recording, and its result" {
   assert_true(markup.contains("moon test"))
   assert_true(markup.contains("test failed"))
   assert_false(markup.contains("tool-call-section-label\">Output"))
-  assert_true(markup.contains("<details class=\"tool-call error\" open>"))
+  assert_true(markup.contains("<details class=\"tool-call error\">"))
+  assert_false(markup.contains("<details class=\"tool-call error\" open>"))
 }
 
 ///|
@@ -1123,34 +1103,37 @@ test "a MoonBit read highlights source without coloring its gutter or footer" {
 #warnings("-alert_unstable")
 test "tabbed reads from one event keep independent radio groups" {
   let output = "1 |fn main {}\n<system>start_line=1 shown_lines=1 total_lines=1 truncated=false</system>"
-  let rendered = tool_line_view([
-    {
-      kind: Tool(
-        call_id="read-a",
-        name="read",
-        arguments=Some("{\"path\":\"a.mbt\"}"),
-        has_result=true,
-        is_error=false,
-        brief=Some("read a.mbt"),
-      ),
-      content: output,
-      ts: None,
-      sequence: Some(21),
-    },
-    {
-      kind: Tool(
-        call_id="read-b",
-        name="read",
-        arguments=Some("{\"path\":\"b.mbt\"}"),
-        has_result=true,
-        is_error=false,
-        brief=Some("read b.mbt"),
-      ),
-      content: output,
-      ts: None,
-      sequence: Some(21),
-    },
-  ])
+  let rendered = activity_view(
+    [
+      {
+        kind: Tool(
+          call_id="read-a",
+          name="read",
+          arguments=Some("{\"path\":\"a.mbt\"}"),
+          has_result=true,
+          is_error=false,
+          brief=Some("read a.mbt"),
+        ),
+        content: output,
+        ts: None,
+        sequence: Some(21),
+      },
+      {
+        kind: Tool(
+          call_id="read-b",
+          name="read",
+          arguments=Some("{\"path\":\"b.mbt\"}"),
+          has_result=true,
+          is_error=false,
+          brief=Some("read b.mbt"),
+        ),
+        content: output,
+        ts: None,
+        sequence: Some(21),
+      },
+    ],
+    _ => @cmd.none,
+  )
   let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
   let first_group = "tool-call-tabs-call-\{"read-a".hash()}"
   let second_group = "tool-call-tabs-call-\{"read-b".hash()}"

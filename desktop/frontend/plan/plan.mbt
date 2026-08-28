@@ -165,7 +165,7 @@ pub fn classify(item : @transcript.TranscriptItem) -> Call? {
 /// unresolved for the moment before its rejection lands, and blanking the
 /// meter there would flicker on every one of them.
 ///
-/// Over one folded run of activity this is the plan as that run left it.
+/// Over one run of activity this is the plan as that run left it.
 pub fn latest(items : Array[@transcript.TranscriptItem]) -> Array[Step]? {
   for item in items.rev_iter() {
     match classify(item) {

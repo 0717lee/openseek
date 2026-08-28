@@ -646,25 +646,27 @@
   color: var(--bg, var(--color-on-accent));
 }
 
-/* One model step's work (thinking + tool calls), folded behind a single
-   summary line. Flush with the agent's prose, not indented: the work is
-   the agent's, and an indent under a user bubble would read as the
-   user's. The summary stays borderless; once opened, a quiet guide line
-   groups the revealed work without turning it into a card. */
+/* One model step's work: a heading (or thought fold) carrying the ordinal
+   and commit instant, then every tool call on display as its own row. Flush
+   with the agent's prose, not indented: the work is the agent's, and an
+   indent under a user bubble would read as the user's. Only reasoning sits
+   behind a fold; a quiet guide line groups the call rows without turning
+   them into a card. */
 .activity-row {
   min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
   animation: riseIn 0.34s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 
 .activity-summary,
-.tool-line-summary,
 .tool-call-summary {
   cursor: pointer;
   list-style: none;
   user-select: none;
 }
 .activity-summary::-webkit-details-marker,
-.tool-line-summary::-webkit-details-marker,
 .tool-call-summary::-webkit-details-marker {
   display: none;
 }
@@ -672,12 +674,10 @@
 /* The visible guide belongs to the body, while this empty part of the native
    summary extends its hit area over the guide. A click therefore toggles only
    the details element that owns that line, including when disclosures nest. */
-.activity,
-.tool-line {
+.activity {
   position: relative;
 }
-.activity[open] > .activity-summary::before,
-.tool-line[open] > .tool-line-summary::before {
+.activity[open] > .activity-summary::before {
   content: "";
   position: absolute;
   z-index: 1;
@@ -733,10 +733,19 @@
   border-left-color: var(--color-border);
 }
 
-.activity-failed {
-  flex: 0 0 auto;
-  color: var(--color-danger);
-  font-size: var(--font-size-xs);
+/* The step heading when the step went straight to tools: the same ordinal and
+   instant columns the thought fold's summary carries, on a plain line — there
+   is nothing to disclose, every call below is already on display. The hidden
+   marker reserves exactly the lead the summary's `▸ ` takes (same font, same
+   text), so `#N` and the instant line up in one column across both header
+   forms; the gap between them is the markup's real space, as in the summary. */
+.activity-heading {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+.activity-heading::before {
+  content: "▸ ";
+  visibility: hidden;
 }
 
 /* When the step committed, in the summary's second fixed column, right after
@@ -809,50 +818,81 @@
   overflow-wrap: anywhere;
 }
 
-/* A burst of consecutive tool calls: a gray one-line summary that
-   expands to the per-call briefs.
+/* A step's tool calls, always on display: one row per call, hanging behind
+   the same quiet guide line an expanded fold used to draw, so the step still
+   reads as one block under its heading or thought fold. */
+.activity-work {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  padding: 2px 0 2px 16px;
+  border-left: 2px solid var(--color-border);
+}
 
-   Same size as `.activity-summary` above it, deliberately: a reader expanding
-   a run sees the same sentence again one level in, so a size step there reads
-   as a change of meaning rather than of depth. Indentation and the guide line
-   carry the nesting. */
-.tool-line-summary {
+/* One tool call's row: its brief, expandable to recorded arguments and the
+   result output. Same muted line treatment as the summaries above it —
+   depth is carried by the guide line, not a size step. */
+.tool-call-label,
+.tool-call-summary {
   display: flex;
   align-items: baseline;
   gap: 10px;
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
 }
-.tool-line-summary:hover {
-  color: var(--color-text-secondary);
-}
-.tool-line-text::after {
-  content: " ▸";
-}
-.tool-line[open] > .tool-line-summary .tool-line-text::after {
-  content: " ▾";
-}
-.tool-line-body {
-  display: grid;
-  gap: 4px;
-  padding: 6px 0 2px 16px;
-  border-left: 2px solid var(--color-border);
-}
-
-/* One call inside a burst: its brief, expandable to recorded arguments and
-   the result output. The third and last disclosure altitude, so it keeps the
-   same muted line treatment as the two above it. */
-.tool-call-label,
-.tool-call-summary {
-  color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
-}
 .tool-call-summary:hover {
   color: var(--color-text-secondary);
+}
+/* One line per expandable call, whatever the brief's length: a long brief
+   (a Codex command string, a full shell invocation) truncates with an
+   ellipsis instead of wrapping or forcing the pane wider — the row list
+   stays scannable, and the full text is one click away inside the fold.
+   Only summaries get this: a bodyless `.tool-call-label` row (a goal
+   notice, a pending call) holds the sole copy of its text, so it wraps
+   rather than losing what an ellipsis would clip. */
+.tool-call-summary .tool-call-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* An open row shows its whole brief: the body carries arguments and output,
+   not the brief, so expansion (with the summary's title tooltip) is what
+   keeps a clipped brief reachable — including where there is no hover.
+   `anywhere` breaks an unbroken token (a Codex command string), so the
+   revealed text wraps instead of painting past the pane. */
+.tool-call[open] > .tool-call-summary .tool-call-text {
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+}
+/* A bodyless label wraps its whole text (see above — it is the sole copy),
+   and the same `anywhere` break keeps an unbroken token, such as a long URL
+   in a one-line goal, from pushing the transcript wide. */
+.tool-call-label .tool-call-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* The trailing marker belongs to rows that own a fold; `.tool-call-label`
+   rows have nothing to disclose and stay bare. It is the summary's own last
+   flex item rather than part of the text span, so a truncated brief cannot
+   ellipsize it away. */
+.tool-call-summary::after {
+  content: "▸";
+}
+.tool-call[open] > .tool-call-summary::after {
+  content: "▾";
 }
 .tool-call-label.error,
 .tool-call.error > .tool-call-summary {
   color: var(--color-danger);
+}
+/* The literal word beside a failed call's brief: the state must not rest on
+   the row's red alone. */
+.tool-call-failed {
+  flex: 0 0 auto;
+  color: var(--color-danger);
+  font-size: var(--font-size-xs);
 }
 
 /* Arguments and output grow the page instead of scrolling in place: the

@@ -122,7 +122,7 @@ fn TranscriptRenderer::subrun_link(self : TranscriptRenderer) -> SubrunLink? {
 
 ///|
 /// Insert one non-activity transcript row. Activity rows are handled by the
-/// step-aware folding pass below; keeping this path singular ensures user turn
+/// step-aware grouping pass below; keeping this path singular ensures user turn
 /// anchors and assistant/error rendering cannot drift between durable steps
 /// and rows from other transcript sources.
 fn TranscriptRenderer::insert_row(
@@ -173,7 +173,7 @@ fn TranscriptRenderer::stream_children(
     Map([])
   }
   // The durable transcript plus client-local notices, rendered through one
-  // folding pass. Live semantic events never synthesize durable-looking
+  // grouping pass. Live semantic events never synthesize durable-looking
   // items here; their store commits populate the transcript.
   if visible.is_empty() &&
     self.input.streaming_reasoning is None &&
@@ -202,10 +202,11 @@ fn TranscriptRenderer::stream_children(
       ]),
     )
   } else {
-    // OpenSeek's durable Assistant sequence is the model-step identity. Fold
-    // each step's reasoning and tools together, while keeping assistant prose
-    // visible beside the fold. Legacy/Codex rows have no OpenSeek step map and
-    // retain the adjacent-activity behavior below.
+    // OpenSeek's durable Assistant sequence is the model-step identity.
+    // Group each step's reasoning and tools under its ordinal — reasoning
+    // folded, every tool call on display — while keeping assistant prose
+    // visible beside the group. Legacy/Codex rows have no OpenSeek step map
+    // and retain the adjacent-activity behavior below.
     let mut index = 0
     while index < visible.length() {
       if visible[index].item.sequence is Some(sequence) &&
