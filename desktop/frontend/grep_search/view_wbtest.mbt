@@ -22,6 +22,53 @@ test "Search renders VS Code's Whole Word codicon instead of a text label" {
 }
 
 ///|
+test "Code search renders the pattern repair placeholder only in semantic mode" {
+  let owner : @interop.ConversationKey = {
+    channel: @interop.ChannelId::Local,
+    session: "pattern-repair",
+  }
+  let root = @common.Uri::parse("file:///work")
+  let input : Input = { owner, root: Some(root) }
+  let text_html = render_search(State::empty(), input)
+  assert_false(text_html.contains("Fix Pattern"))
+  let semantic = State::empty().handle(ModeChanged(Semantic), input)
+  let requested = semantic.handle(FixPattern, input)
+  let requested_html = render_search(requested, input)
+  assert_true(requested_html.contains("Pattern repair is not connected yet."))
+  assert_true(requested_html.contains("aria-label=\"Cancel Pattern Repair\""))
+  let succeeded = requested.handle(
+    PatternRepairSucceeded(
+      root=root.path,
+      generation=requested.page.generation,
+      pattern="inspect($_)",
+      message="Pattern repaired by the local prototype.",
+    ),
+    input,
+  )
+  let succeeded_html = render_search(succeeded, input)
+  assert_true(succeeded.page.semantic.patterns[0] == "inspect($_)")
+  assert_true(
+    succeeded_html.contains("Pattern repaired by the local prototype."),
+  )
+  let failed = semantic
+    .handle(FixPattern, input)
+    .handle(
+      PatternRepairFailed(
+        root=root.path,
+        generation=semantic.page.generation,
+        message="Fake repair failed.",
+      ),
+      input,
+    )
+  let failed_html = render_search(failed, input)
+  assert_true(failed_html.contains("Fake repair failed."))
+  let cancelled = requested.handle(FixPattern, input)
+  let cancelled_html = render_search(cancelled, input)
+  assert_false(cancelled_html.contains("Pattern repair is not connected yet."))
+  assert_true(cancelled_html.contains("aria-label=\"Fix Pattern\""))
+}
+
+///|
 test "Search view groups files and marks matching UTF-16 slices" {
   let owner : @interop.ConversationKey = {
     channel: @interop.ChannelId::Local,
