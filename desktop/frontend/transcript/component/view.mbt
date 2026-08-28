@@ -179,7 +179,7 @@ fn tool_run_views(
       }
     }
     for index, item in items {
-      if item.kind is Tool(has_result=true, ..) {
+      if tool_result_row_is_visible(item) {
         rows[tool_run_row_key(item, index, "result")] = tool_result_view(
           item,
           subrun?,
@@ -191,7 +191,7 @@ fn tool_run_views(
       if item.kind is Tool(arguments=Some(_), ..) {
         rows[tool_run_row_key(item, index, "request")] = tool_request_view(item)
       }
-      if item.kind is Tool(has_result=true, ..) {
+      if tool_result_row_is_visible(item) {
         rows[tool_run_row_key(item, index, "result")] = tool_result_view(
           item,
           subrun?,
@@ -280,8 +280,18 @@ fn append_tool_result(
   item : @transcript.TranscriptItem,
   subrun? : SubrunLink,
 ) -> Unit {
-  guard item.kind is Tool(has_result=true, ..) else { return }
+  guard tool_result_row_is_visible(item) else { return }
   rows.push(tool_result_view(item, subrun?))
+}
+
+///|
+/// A completed result always gets its own row, including an empty one. Codex
+/// command items can also accumulate output while still in progress; surface
+/// that stream immediately, but let `has_result` keep the row labelled pending
+/// until the completed item arrives.
+fn tool_result_row_is_visible(item : @transcript.TranscriptItem) -> Bool {
+  guard item.kind is Tool(has_result~, ..) else { return false }
+  has_result || !item.content.is_blank()
 }
 
 ///|
@@ -370,24 +380,27 @@ fn tool_request_view(item : @transcript.TranscriptItem) -> @html.Html {
 }
 
 ///|
-/// One completed tool result, separate from the request that produced it as in
-/// the viz HTML renderer. The row remains visible even for an empty result so
-/// pending and completed calls are distinguishable without opening anything.
+/// One tool result, separate from the request that produced it as in the viz
+/// HTML renderer. A completed row remains visible even when empty; a pending
+/// Codex command gets a row only after it has streamed output, and its label
+/// deliberately says "output" rather than claiming completion.
 fn tool_result_view(
   item : @transcript.TranscriptItem,
   subrun? : SubrunLink,
 ) -> @html.Html {
   guard item.kind
-    is Tool(call_id~, name~, arguments~, has_result=true, is_error~, brief~) else {
+    is Tool(call_id~, name~, arguments~, has_result~, is_error~, brief~) else {
     return @html.nothing
   }
-  let label = match (arguments, brief) {
-    (None, Some(brief)) if !brief.is_blank() => capitalize(brief)
-    (None, _) => capitalize(name)
+  let label = match (arguments, brief, has_result) {
+    (None, Some(brief), _) if !brief.is_blank() => capitalize(brief)
+    (None, _, _) => capitalize(name)
+    (_, _, false) => "Tool output · \{name}"
     _ if is_error => "Tool error · \{name}"
     _ => "Tool result · \{name}"
   }
   let error_class = if is_error { " error" } else { "" }
+  let pending_class = if has_result { "" } else { " pending" }
   let line : Array[@html.Html] = [
     @html.span(class="tool-flow", "←"),
     @html.span(class="tool-result-text", capitalize(label)),
@@ -427,10 +440,10 @@ fn tool_result_view(
     }
   }
   if body.is_empty() {
-    @html.div(class="tool-result-label" + error_class, line)
+    @html.div(class="tool-result-label" + error_class + pending_class, line)
   } else {
     @html.details(
-      class="tool-result" + error_class,
+      class="tool-result" + error_class + pending_class,
       [@html.summary(class="tool-result-summary", title=label, line), ..body],
     )
   }
