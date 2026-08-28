@@ -218,5 +218,6 @@ The blackbox test suite includes a real DeepSeek API smoke test when `DEEPSEEK`
 is set. Kimi smoke tests are opt-in: set `KIMI` to a Kimi API key. The normal
 Kimi smoke also uses `OPENSEEK_MODEL` to choose the Kimi model; streaming,
 tool-call, and multi-turn reasoning-content smokes use `kimi-k2.7-code`.
+The GLM streaming tool-call smoke test runs when `GLM` is set.
 Without those environment variables, the smoke tests print skip messages and
 return successfully.

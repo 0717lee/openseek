@@ -7,8 +7,8 @@ fn config_from_matches(matches : @argparse.Matches) -> @harness.Config raise {
   )
   guard min_successes <= runs else { fail("--min-successes must be <= --runs") }
   // An empty --api-key is allowed: the harness falls back to the provider's
-  // environment variable (DEEPSEEK/KIMI), which is the only way a cross-provider
-  // run authenticates each model with its own key.
+  // environment variable (DEEPSEEK/KIMI/GLM), which is the only way a
+  // cross-provider run authenticates each model with its own key.
   let api_key = @cli.value(matches, "api-key")
   Config(
     api_key~,

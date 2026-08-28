@@ -36,14 +36,15 @@ moon run cmd/openseek -- run [--api-key sk-...] [--model deepseek-v4-pro] [--api
 ```
 
 Runs require `--api-key` or the provider-specific environment variable:
-`DEEPSEEK` for DeepSeek models and `KIMI` for Kimi models. `--model` can also
-be supplied with `OPENSEEK_MODEL`; it accepts `deepseek-v4-flash`,
-`deepseek-v4-pro`, `kimi-k2.7-code`, and `kimi-k2.7-code-highspeed`, and
-defaults to `deepseek-v4-pro`. `--max-steps` can also be supplied with
+`DEEPSEEK` for DeepSeek models, `KIMI` for Kimi models, and `GLM` for Z.AI GLM
+models. `--model` can also be supplied with `OPENSEEK_MODEL`; it accepts
+`deepseek-v4-flash`, `deepseek-v4-pro`, `kimi-k2.7-code`,
+`kimi-k2.7-code-highspeed`, `glm-5.3`, and `glm-5.3-flash`, and defaults to
+`deepseek-v4-pro`. `--max-steps` can also be supplied with
 `OPENSEEK_MAX_STEPS`; when omitted, turns are bounded by the model's context
 window instead of a step count. `--api-url` can also be supplied
-with `OPENSEEK_API_URL`; when omitted, OpenSeek uses the default DeepSeek chat
-completions endpoint, or the Kimi endpoint for Kimi models.
+with `OPENSEEK_API_URL`; when omitted, OpenSeek uses the official endpoint for
+the model's provider.
 `--dir` defaults to `.` and becomes the workspace root for relative prompt
 files, sessions, workspace skills, and agent tools. If the directory itself is
 missing but its parent exists, OpenSeek creates that final component and logs a
@@ -63,7 +64,7 @@ list` / `openseek sessions show <id>` (or the viz server) and resumable with
 `--session` is rejected.
 
 Without an explicit prompt file, the CLI uses the default built-in prompt
-(`prompt/default_prompt.mbt.md`) for the supported DeepSeek and Kimi model
+(`prompt/default_prompt.mbt.md`) for the supported DeepSeek, Kimi, and GLM model
 names. The older base prompt remains in `prompt/base_prompt.mbt.md` for
 comparison and experiments, but it is not selected by default.
 
