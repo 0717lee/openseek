@@ -369,7 +369,7 @@ async fn session_envelope_body(path : String) -> Json {
   {
     "found": true,
     "events": read_text_lossy(path),
-    "events_bytes": Json::number(file_size(path).to_double()),
+    "events_bytes": Json(file_size(path).to_double()),
   }
 }
 
@@ -527,7 +527,7 @@ priv struct SessionListRow {
 ///|
 fn SessionListRow::to_json(self : SessionListRow) -> Json {
   let last_active : Json = match self.last_active {
-    Some(seconds) => Json::number(seconds.to_double())
+    Some(seconds) => Json(seconds.to_double())
     None => Json::null()
   }
   {

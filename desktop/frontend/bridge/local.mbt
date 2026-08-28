@@ -124,7 +124,7 @@ fn LocalBridgeSub::wire(
     let method_ = kind_.wire_name()
     let handler = (event : @js.Value) => {
       guard event_payload(event) is Some(payload) &&
-        @protocol.Notification::from_wire(method_, Json::object(payload))
+        @protocol.Notification::from_wire(method_, Json(payload))
         is Some(notification) else {
         return
       }

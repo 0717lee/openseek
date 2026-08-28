@@ -1009,7 +1009,7 @@ async fn session_list_json(store : @store.SessionStore) -> Json {
     for listing in store.listings() => {
       let updated_at_ms : Json = match
         session_listing_updated_at_ms(store, listing) {
-        Some(milliseconds) => Json::number(milliseconds.to_double())
+        Some(milliseconds) => Json(milliseconds.to_double())
         None => Json::null()
       }
       {
@@ -1019,7 +1019,7 @@ async fn session_list_json(store : @store.SessionStore) -> Json {
       }
     }
   ]
-  Json::array(entries)
+  Json(entries)
 }
 
 ///|

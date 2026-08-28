@@ -24,15 +24,15 @@ test "agent start preserves all engine settings" {
 
 ///|
 test "OpenSeek thinking values round-trip through their closed codec" {
-  let off : @protocol.OpenSeekThinking = @json.from_json(Json::string("no"))
-  let high : @protocol.OpenSeekThinking = @json.from_json(Json::string("high"))
-  let max : @protocol.OpenSeekThinking = @json.from_json(Json::string("max"))
+  let off : @protocol.OpenSeekThinking = @json.from_json(Json("no"))
+  let high : @protocol.OpenSeekThinking = @json.from_json(Json("high"))
+  let max : @protocol.OpenSeekThinking = @json.from_json(Json("max"))
   assert_eq(off, ThinkingOff)
   assert_eq(high, ThinkingHigh)
   assert_eq(max, ThinkingMax)
-  @debug.assert_eq(off.to_json(), Json::string("no"))
-  @debug.assert_eq(high.to_json(), Json::string("high"))
-  @debug.assert_eq(max.to_json(), Json::string("max"))
+  @debug.assert_eq(off.to_json(), Json("no"))
+  @debug.assert_eq(high.to_json(), Json("high"))
+  @debug.assert_eq(max.to_json(), Json("max"))
 }
 
 ///|
@@ -199,14 +199,12 @@ test "an approval reply requires its one field" {
 test "the runs snapshot requires each of its sections" {
   for missing in ["runs", "settled", "approvals"] {
     let fields : Map[String, Json] = {
-      "runs": Json::array([]),
-      "settled": Json::array([]),
-      "approvals": Json::array([]),
+      "runs": Json(([] : Array[Json])),
+      "settled": Json(([] : Array[Json])),
+      "approvals": Json(([] : Array[Json])),
     }
     fields.remove(missing)
-    let decoded : @protocol.RunsReply? = Some(
-      @json.from_json(Json::object(fields)),
-    ) catch {
+    let decoded : @protocol.RunsReply? = Some(@json.from_json(Json(fields))) catch {
       _ => None
     }
     if decoded is Some(_) {

@@ -72,7 +72,7 @@ test "unknown events are ignored" {
   assert_true(
     @event.decode_event({ "event": "future_event", "value": 1 }) is None,
   )
-  assert_true(@event.decode_event(Json::array([])) is None)
+  assert_true(@event.decode_event(Json(([] : Array[Json]))) is None)
 }
 
 ///|

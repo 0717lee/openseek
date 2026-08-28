@@ -53,12 +53,12 @@ fn StreamAccumulator::response(
   self : StreamAccumulator,
 ) -> @deepseek.ChatResponse raise {
   let reasoning_content = self.reasoning_content.to_string()
-  let message = Json::object(
+  let message = Json(
     Map(
       [
-        ("content", Json::string(self.content.to_string())),
+        ("content", Json(self.content.to_string())),
         ..if reasoning_content != "" {
-          [("reasoning_content", Json::string(reasoning_content))]
+          [("reasoning_content", Json(reasoning_content))]
         },
         ..if self.tool_calls.length() > 0 {
           [
@@ -71,7 +71,7 @@ fn StreamAccumulator::response(
       ],
     ),
   )
-  let envelope = Json::object(
+  let envelope = Json(
     Map(
       [
         ("choices", ([({ "message": message } : Json)] : Json)),

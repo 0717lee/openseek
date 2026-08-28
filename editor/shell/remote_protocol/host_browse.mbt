@@ -50,7 +50,7 @@ pub(all) struct WorkspaceSwitchedPayload {
 fn host_path_request_json(kind : String, request : HostPathRequest) -> Json {
   let fields = packet_fields(kind, request.id)
   fields["path"] = request.path.to_json()
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -81,10 +81,10 @@ fn host_directory_listed_json(payload : HostDirectoryListedPayload) -> Json {
   if payload.listing.parent is Some(parent) {
     fields["parent"] = parent.to_json()
   }
-  fields["entries"] = Json::array(
+  fields["entries"] = Json(
     payload.listing.entries.map(host_directory_entry_json),
   )
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -149,7 +149,7 @@ fn workspace_switched_json(payload : WorkspaceSwitchedPayload) -> Json {
   let fields = packet_fields("WorkspaceSwitched", payload.id)
   fields["root"] = payload.root.to_json()
   fields["name"] = payload.name.to_json()
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|

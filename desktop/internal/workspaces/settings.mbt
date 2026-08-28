@@ -194,18 +194,12 @@ test "workspace settings parse tolerantly and keep unknown fields" {
   )
   fields["checkout_submodules"] = false.to_json()
   assert_false(settings_payload(workspace, fields).checkout_submodules)
-  fields["submodule_checkout_timeout_seconds"] = Json::number(30)
+  fields["submodule_checkout_timeout_seconds"] = Json(30)
   assert_eq(
     settings_payload(workspace, fields).submodule_checkout_timeout_seconds,
     30,
   )
-  for
-    invalid in [
-      Json::number(0),
-      Json::number(15),
-      Json::number(1.5),
-      Json::string("ten"),
-    ] {
+  for invalid in [Json(0), Json(15), Json(1.5), Json("ten")] {
     fields["submodule_checkout_timeout_seconds"] = invalid
     assert_eq(
       settings_payload(workspace, fields).submodule_checkout_timeout_seconds,
@@ -225,15 +219,12 @@ async test "workspace settings survive a write/read round trip independently" {
   let fields = read_settings_unlocked(workspace)
   fields["worktree_mode"] = true.to_json()
   fields["checkout_submodules"] = false.to_json()
-  fields["submodule_checkout_timeout_seconds"] = Json::number(30)
+  fields["submodule_checkout_timeout_seconds"] = Json(30)
   write_settings(workspace, fields)
   let reread = read_settings_unlocked(workspace)
   assert_true(worktree_mode_of(reread))
   assert_eq(reread.get("checkout_submodules"), Some(false.to_json()))
-  assert_eq(
-    reread.get("submodule_checkout_timeout_seconds"),
-    Some(Json::number(30)),
-  )
+  assert_eq(reread.get("submodule_checkout_timeout_seconds"), Some(Json(30)))
   // The file lives below one workspace root, so an adjacent workspace keeps
   // both defaults when only this workspace is edited.
   let sibling_payload = settings_payload(

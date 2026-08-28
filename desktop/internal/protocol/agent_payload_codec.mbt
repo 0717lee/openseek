@@ -49,7 +49,7 @@ pub impl ToJson for StartPayload with fn to_json(self) {
   if self.workspace is Some(workspace) {
     fields["workspace"] = workspace.to_json()
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -79,7 +79,7 @@ pub impl ToJson for CompactPayload with fn to_json(self) {
   if self.workspace is Some(workspace) {
     fields["workspace"] = workspace.to_json()
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -117,7 +117,7 @@ pub impl ToJson for GoalPayload with fn to_json(self) {
   if self.workspace is Some(workspace) {
     fields["workspace"] = workspace.to_json()
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -133,7 +133,7 @@ pub impl FromJson for OpenSeekThinking with fn from_json(json, path) {
 
 ///|
 pub impl ToJson for OpenSeekThinking with fn to_json(self) {
-  Json::string(self.wire())
+  Json(self.wire())
 }
 
 ///|
@@ -164,7 +164,7 @@ pub impl ToJson for ApprovalPayload with fn to_json(self) {
   if self.run_id is Some(run_id) {
     fields["run_id"] = run_id.to_json()
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -216,9 +216,9 @@ pub impl FromJson for RunsReply with fn from_json(json, path) {
 ///|
 pub impl ToJson for RunsReply with fn to_json(self) {
   {
-    "runs": Json::array(self.runs.map(run => run.to_json())),
-    "settled": Json::array(self.settled.map(entry => entry.to_json())),
-    "approvals": Json::array(self.approvals.map(approval => approval.to_json())),
+    "runs": Json(self.runs.map(run => run.to_json())),
+    "settled": Json(self.settled.map(entry => entry.to_json())),
+    "approvals": Json(self.approvals.map(approval => approval.to_json())),
   }
 }
 
@@ -254,5 +254,5 @@ pub impl ToJson for PendingApprovalPayload with fn to_json(self) {
   if self.body is Some(body) {
     fields["body"] = body.to_json()
   }
-  Json::object(fields)
+  Json(fields)
 }

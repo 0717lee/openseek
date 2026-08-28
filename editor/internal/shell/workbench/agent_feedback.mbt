@@ -46,17 +46,14 @@ fn persist_feedback_items(
   for item in services.agent_feedback_handle.get_feedback(resource) {
     items.push(feedback_item_to_json(item))
   }
-  storage_set_item(
-    feedback_storage_key(resource),
-    Json::array(items).stringify(),
-  )
+  storage_set_item(feedback_storage_key(resource), Json(items).stringify())
 }
 
 ///|
 fn feedback_item_to_json(item : @agent_feedback_api.AgentFeedback) -> Json {
   let fields : Map[String, Json] = Map([])
   fields["text"] = item.text.to_json()
-  fields["range"] = Json::array([
+  fields["range"] = Json([
     item.range.start_line_number.to_json(),
     item.range.start_column.to_json(),
     item.range.end_line_number.to_json(),
@@ -73,9 +70,9 @@ fn feedback_item_to_json(item : @agent_feedback_api.AgentFeedback) -> Json {
     Resolved => "resolved"
   }).to_json()
   if !item.replies.is_empty() {
-    fields["replies"] = Json::array(item.replies.map(reply => reply.to_json()))
+    fields["replies"] = Json(item.replies.map(reply => reply.to_json()))
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|

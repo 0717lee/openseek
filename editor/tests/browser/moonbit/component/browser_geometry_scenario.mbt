@@ -257,36 +257,34 @@ fn BrowserGeometryFixture::state_json(
   let visible = match
     self.viewer.get_scrolled_visible_position(Position(line, column)) {
     Some(position) =>
-      Json::object({
-        "top": Json::number(position.top),
-        "left": Json::number(position.left),
-        "height": Json::number(position.height),
+      Json({
+        "top": Json(position.top),
+        "left": Json(position.left),
+        "height": Json(position.height),
       })
     None => Json::null()
   }
-  Json::object({
+  Json({
     "name": self.name.to_json(),
     "softWrap": self.viewer.get_options().soft_wrap().to_json(),
     "modelLines": self.model.get_line_count().to_json(),
     "viewLines": self.view_line_count.val.to_json(),
-    "contentWidth": Json::number(self.viewer.get_content_width()),
-    "scrollWidth": Json::number(self.viewer.get_scroll_width()),
-    "scrollLeft": Json::number(self.viewer.get_scroll_left()),
-    "contentHeight": Json::number(self.viewer.get_content_height()),
-    "scrollHeight": Json::number(self.viewer.get_scroll_height()),
-    "scrollTop": Json::number(self.viewer.get_scroll_top()),
-    "offset": Json::number(self.viewer.get_offset_for_column(line, column)),
-    "lineWidth": Json::number(self.viewer.get_width_of_line(line)),
+    "contentWidth": Json(self.viewer.get_content_width()),
+    "scrollWidth": Json(self.viewer.get_scroll_width()),
+    "scrollLeft": Json(self.viewer.get_scroll_left()),
+    "contentHeight": Json(self.viewer.get_content_height()),
+    "scrollHeight": Json(self.viewer.get_scroll_height()),
+    "scrollTop": Json(self.viewer.get_scroll_top()),
+    "offset": Json(self.viewer.get_offset_for_column(line, column)),
+    "lineWidth": Json(self.viewer.get_width_of_line(line)),
     "visible": visible,
-    "layout": Json::object({
-      "width": Json::number(layout.width),
-      "height": Json::number(layout.height),
-      "contentLeft": Json::number(layout.content_left),
-      "contentWidth": Json::number(layout.content_width),
-      "horizontalScrollbarHeight": Json::number(
-        layout.horizontal_scrollbar_height,
-      ),
-      "verticalScrollbarWidth": Json::number(layout.vertical_scrollbar_width),
+    "layout": Json({
+      "width": Json(layout.width),
+      "height": Json(layout.height),
+      "contentLeft": Json(layout.content_left),
+      "contentWidth": Json(layout.content_width),
+      "horizontalScrollbarHeight": Json(layout.horizontal_scrollbar_height),
+      "verticalScrollbarWidth": Json(layout.vertical_scrollbar_width),
     }),
   }).stringify()
 }

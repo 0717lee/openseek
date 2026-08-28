@@ -77,17 +77,17 @@ priv struct WorktreeEntry {
 /// introduce a second representation for the same ownerless state.
 impl ToJson for WorktreeEntry with fn to_json(self) {
   let fields : Map[String, Json] = {
-    "name": Json::string(self.name),
-    "branch": Json::string(self.branch),
-    "base": Json::string(self.base),
+    "name": Json(self.name),
+    "branch": Json(self.branch),
+    "base": Json(self.base),
   }
   if self.session is Some(session) {
-    fields["session"] = Json::string(session)
+    fields["session"] = Json(session)
   }
   if self.codex_thread is Some(thread_id) {
-    fields["codex_thread"] = Json::string(thread_id)
+    fields["codex_thread"] = Json(thread_id)
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|

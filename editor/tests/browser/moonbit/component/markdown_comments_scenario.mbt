@@ -96,7 +96,7 @@ fn markdown_comments_state_json(viewer : @viewer.Viewer) -> String {
     Some(value) => {
       let anchor = value.get_selection_start()
       let active = value.get_position()
-      Json::object({
+      Json({
         "anchorLine": anchor.line_number.to_json(),
         "anchorColumn": anchor.column.to_json(),
         "activeLine": active.line_number.to_json(),
@@ -105,7 +105,7 @@ fn markdown_comments_state_json(viewer : @viewer.Viewer) -> String {
     }
     None => Json::null()
   }
-  Json::object({
+  Json({
     "selection": selection,
     "softWrap": viewer.get_options().soft_wrap().to_json(),
     "scrollLeft": viewer.get_scroll_left().to_json(),

@@ -187,7 +187,7 @@ fn ReverseRequestRegistry::snapshot(self : ReverseRequestRegistry) -> Json {
   for _, request in self.requests {
     data.push({
       "request_id": request.id(),
-      "method": Json::string(request.method_name()),
+      "method": Json(request.method_name()),
       "params": request.params(),
     })
   }
@@ -410,7 +410,7 @@ async fn[G] Actor::run_connection(
           self.reverse_requests.remove(request_id.stringify())
         }
         emit("codex.notification", {
-          "method": Json::string(method_),
+          "method": Json(method_),
           "params": params,
           "generation": self.reverse_requests.generation,
         })
@@ -443,7 +443,7 @@ async fn[G] Actor::run_connection(
           self.reverse_requests.insert(key, request)
           emit("codex.server_request", {
             "request_id": request_id,
-            "method": Json::string(request.method_name()),
+            "method": Json(request.method_name()),
             "params": request.params(),
             "generation": self.reverse_requests.generation,
           })
@@ -609,7 +609,7 @@ test "Codex reverse-request generations advance only on ownership changes" {
   assert_eq(requests.generation, 1)
   // Resolving an id that this connection no longer owns must not create a
   // phantom generation between the response and resolved notification.
-  requests.remove(Json::string("missing").stringify())
+  requests.remove(Json("missing").stringify())
   assert_eq(requests.generation, 1)
   @debug.assert_eq(requests.snapshot(), { "data": [], "generation": 1 })
 }

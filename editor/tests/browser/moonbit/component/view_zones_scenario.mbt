@@ -182,19 +182,19 @@ fn run_view_zones_test() -> Unit {
     primary_margin,
     () => {
       let layout = viewer.get_layout_info()
-      Json::object({
+      Json({
         "primaryId": primary_id.val.to_json(),
         "suppressId": suppress_id.val.to_json(),
         "omittedId": omitted_id.val.to_json(),
         "mouseEvents": public_mouse_events.val.to_json(),
         "mouseTargetId": public_mouse_target_id.val.to_json(),
         "mouseTargetKind": public_mouse_target_kind.val.to_json(),
-        "primaryLastTop": Json::number(primary_last_top.val),
-        "offscreenLastTop": Json::number(offscreen_last_top.val),
-        "scrollTop": Json::number(viewer.get_scroll_top()),
-        "scrollWidth": Json::number(viewer.get_scroll_width()),
-        "contentWidth": Json::number(viewer.get_content_width()),
-        "contentLeft": Json::number(layout.content_left),
+        "primaryLastTop": Json(primary_last_top.val),
+        "offscreenLastTop": Json(offscreen_last_top.val),
+        "scrollTop": Json(viewer.get_scroll_top()),
+        "scrollWidth": Json(viewer.get_scroll_width()),
+        "contentWidth": Json(viewer.get_content_width()),
+        "contentLeft": Json(layout.content_left),
       }).stringify()
     },
     scroll_top => viewer.set_scroll_top(scroll_top),

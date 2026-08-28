@@ -527,7 +527,7 @@ test "Tools::function_tools preserves description and schema" {
       description: "Echo what comes in.",
       schema: JsonSchema({
         "type": "object",
-        "properties": Json::object(Map([])),
+        "properties": Json((Map([]) : Map[String, Json])),
       }),
       execute: Sync(_args => ToolAction::respond("ok")),
       control: false,

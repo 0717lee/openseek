@@ -148,14 +148,14 @@ fn BrowserContentWidgetsDiagnostic::capture(
   widget : BrowserContentWidgetDiagnosticWidget,
 ) -> Json {
   let rect = widget.node.get_bounding_client_rect()
-  Json::object({
+  Json({
     "position": widget.after_position.to_json(),
-    "top": Json::number(widget.after_top),
-    "left": Json::number(widget.after_left),
-    "rectLeft": Json::number(rect.get_left()),
-    "rectTop": Json::number(rect.get_top()),
-    "rectRight": Json::number(rect.get_right()),
-    "rectBottom": Json::number(rect.get_bottom()),
+    "top": Json(widget.after_top),
+    "left": Json(widget.after_left),
+    "rectLeft": Json(rect.get_left()),
+    "rectTop": Json(rect.get_top()),
+    "rectRight": Json(rect.get_right()),
+    "rectBottom": Json(rect.get_bottom()),
   })
 }
 
@@ -180,7 +180,7 @@ fn BrowserContentWidgetsDiagnostic::run_case(
 fn BrowserContentWidgetsDiagnostic::run_matrix(
   self : BrowserContentWidgetsDiagnostic,
 ) -> String {
-  Json::object({
+  Json({
     "normalExact": self.run_case(self.normal, 20.0, 50.0, [Exact]),
     // Root page-left=40 and owner scrollX=31. These one-pixel overflow inputs
     // clamp the rendered edges to exactly 15px and innerWidth-15px.

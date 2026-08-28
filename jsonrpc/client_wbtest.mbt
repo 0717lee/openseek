@@ -97,7 +97,7 @@ fn error_for(request : Json, code : Int, message : String) -> Json {
   {
     "jsonrpc": "2.0",
     "id": id_of(request),
-    "error": { "code": Json::number(code.to_double()), "message": message },
+    "error": { "code": Json(code.to_double()), "message": message },
   }
 }
 

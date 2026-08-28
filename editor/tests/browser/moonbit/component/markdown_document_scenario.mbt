@@ -11,7 +11,7 @@ priv struct MarkdownDocumentHoverCall {
 
 ///|
 fn MarkdownDocumentHoverCall::to_json(self : MarkdownDocumentHoverCall) -> Json {
-  Json::object({
+  Json({
     "id": self.id.to_json(),
     "modelIdentity": self.model.identity().to_json(),
     "uri": self.model.uri.to_string().to_json(),
@@ -62,7 +62,7 @@ fn MarkdownDocumentHoverHarness::begin(
 fn MarkdownDocumentHoverHarness::calls_json(
   self : MarkdownDocumentHoverHarness,
 ) -> String {
-  Json::array(self.calls.map(call => call.to_json())).stringify()
+  Json(self.calls.map(call => call.to_json())).stringify()
 }
 
 ///|

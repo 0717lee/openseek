@@ -205,12 +205,9 @@ fn definition_state_json(
     }
     None => (-1, -1, -1, -1)
   }
-  Json::object({
-    "position": Json::object({
-      "line": line.to_json(),
-      "column": column.to_json(),
-    }),
-    "selection": Json::object({
+  Json({
+    "position": Json({ "line": line.to_json(), "column": column.to_json() }),
+    "selection": Json({
       "anchorLine": anchor_line.to_json(),
       "anchorColumn": anchor_column.to_json(),
       "activeLine": active_line.to_json(),

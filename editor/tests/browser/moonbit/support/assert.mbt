@@ -62,7 +62,7 @@ pub fn BrowserTestContext::metric_number(
   name : String,
   value : Double,
 ) -> Unit {
-  self.metric(name, Json::number(value))
+  self.metric(name, Json(value))
 }
 
 ///|
@@ -81,8 +81,8 @@ pub fn BrowserTestContext::to_json(self : BrowserTestContext) -> Json {
   {
     "suite": self.suite.to_json(),
     "status": (if self.failures.length() == 0 { "passed" } else { "failed" }).to_json(),
-    "failures": Json::array(self.failures.map(failure => failure.to_json())),
-    "metrics": Json::object(self.metrics),
+    "failures": Json(self.failures.map(failure => failure.to_json())),
+    "metrics": Json(self.metrics),
   }
 }
 

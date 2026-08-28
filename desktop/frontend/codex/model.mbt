@@ -2303,14 +2303,14 @@ fn CodexPendingRequest::response(
         if text.is_empty() {
           return None
         }
-        answers[question.id] = { "answers": [Json::string(text)] }
+        answers[question.id] = { "answers": [Json(text)] }
       }
-      Some({ "answers": Json::object(answers) })
+      Some({ "answers": Json(answers) })
     }
     "mcpServer/elicitation/request" => {
       guard decision is String(decision_name) else { return None }
       if decision_name == "decline" || decision_name == "cancel" {
-        Some({ "action": Json::string(decision_name), "content": Json::null() })
+        Some({ "action": Json(decision_name), "content": Json::null() })
       } else {
         let text = self.answers
           .get("__content")
@@ -2745,7 +2745,7 @@ test "Codex running turn supplies the interrupt target" {
 ///|
 test "Codex request replies preserve structured values" {
   let request : CodexPendingRequest = {
-    request_id: Json::number(7),
+    request_id: Json(7),
     thread_id: "thread-1",
     method_: "item/tool/requestUserInput",
     params: {
@@ -2761,11 +2761,11 @@ test "Codex request replies preserve structured values" {
     answers: { "scope": "Small" },
   }
   assert_eq(
-    request.response(Json::string("accept")),
+    request.response(Json("accept")),
     Some({ "answers": { "scope": { "answers": ["Small"] } } }),
   )
   let command : CodexPendingRequest = {
-    request_id: Json::number(8),
+    request_id: Json(8),
     thread_id: "thread-1",
     method_: "item/commandExecution/requestApproval",
     params: { "threadId": "thread-1" },

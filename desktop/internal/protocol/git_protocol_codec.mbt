@@ -31,7 +31,7 @@ pub impl ToJson for GitHistoryPayload with fn to_json(self) {
   if self.snapshot is Some(snapshot) {
     fields["snapshot"] = ToJson::to_json(snapshot)
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -53,7 +53,7 @@ pub impl ToJson for GitCommitChangesPayload with fn to_json(self) {
   if self.workspace is Some(workspace) {
     fields["workspace"] = workspace.to_json()
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -98,7 +98,7 @@ pub impl ToJson for GitHistorySnapshot with fn to_json(self) {
   if self.branch is Some(branch) {
     fields["branch"] = branch.to_json()
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -176,7 +176,7 @@ pub impl ToJson for GitHistoricalChange with fn to_json(self) {
   if self.original_path is Some(original_path) {
     fields["original_path"] = original_path.to_json()
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -204,5 +204,5 @@ pub impl ToJson for GitCommitChangesReply with fn to_json(self) {
   if self.parent is Some(parent) {
     fields["parent"] = parent.to_json()
   }
-  Json::object(fields)
+  Json(fields)
 }

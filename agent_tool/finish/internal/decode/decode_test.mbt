@@ -31,7 +31,7 @@ test "decode ignores extra fields" {
 ///|
 test "decode falls back to empty answer" {
   debug_inspect(
-    @decode.decode(Json::object(Map([]))),
+    @decode.decode(Json((Map([]) : Map[String, Json]))),
     content=(
       #|{ answer: "" }
     ),

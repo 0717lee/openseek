@@ -177,7 +177,7 @@ test "decode rejects a missing source" {
 ///|
 test "decode rejects non-object arguments" {
   let failed = try {
-    decode(Json::string("x")) |> ignore
+    decode(Json("x")) |> ignore
     false
   } catch {
     _ => true

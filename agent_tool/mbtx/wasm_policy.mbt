@@ -297,12 +297,12 @@ fn wasm_policy_document(
       "connect": ["*:*"],
       "bind": ["127.0.0.1:*", "[::1]:*"],
     },
-    "process": { "allow": Json::array(allow) },
+    "process": { "allow": Json(allow) },
   }
 }
 
 ///|
 /// A JSON array of strings, for the path lists the policy is mostly made of.
 fn json_strings(values : Array[String]) -> Json {
-  Json::array([ for value in values => Json::string(value) ])
+  Json([ for value in values => Json(value) ])
 }

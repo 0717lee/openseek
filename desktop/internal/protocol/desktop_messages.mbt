@@ -239,14 +239,14 @@ pub impl FromJson for WorktreeCreatePayload with fn from_json(json, path) {
 
 ///|
 pub impl ToJson for WorktreeCreatePayload with fn to_json(self) {
-  let fields : Map[String, Json] = { "workspace": Json::string(self.workspace) }
+  let fields : Map[String, Json] = { "workspace": Json(self.workspace) }
   if self.session is Some(session) {
-    fields["session"] = Json::string(session)
+    fields["session"] = Json(session)
   }
   if self.codex_thread is Some(codex_thread) {
-    fields["codex_thread"] = Json::string(codex_thread)
+    fields["codex_thread"] = Json(codex_thread)
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -314,14 +314,14 @@ pub impl FromJson for GitPullRequestPayload with fn from_json(json, path) {
 
 ///|
 pub impl ToJson for GitPullRequestPayload with fn to_json(self) {
-  let fields : Map[String, Json] = { "session": Json::string(self.session) }
+  let fields : Map[String, Json] = { "session": Json(self.session) }
   if self.cwd is Some(cwd) {
-    fields["cwd"] = Json::string(cwd)
+    fields["cwd"] = Json(cwd)
   }
   if self.branch_hint is Some(branch_hint) {
-    fields["branch_hint"] = Json::string(branch_hint)
+    fields["branch_hint"] = Json(branch_hint)
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -870,17 +870,14 @@ pub(all) struct FinishedPayload {
 
 ///|
 pub impl ToJson for FinishedPayload with fn to_json(self) {
-  let fields = {
-    "run_id": Json::string(self.run_id),
-    "status": Json::string(self.status),
-  }
+  let fields = { "run_id": Json(self.run_id), "status": Json(self.status) }
   if self.answer is Some(answer) {
-    fields["answer"] = Json::string(answer)
+    fields["answer"] = Json(answer)
   }
   if self.exit_code is Some(exit_code) {
-    fields["exit_code"] = Json::number(exit_code.to_double())
+    fields["exit_code"] = Json(exit_code.to_double())
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|

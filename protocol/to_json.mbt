@@ -7,7 +7,7 @@
 /// present field into an absent one.
 fn or_null(value : String?) -> Json {
   match value {
-    Some(value) => Json::string(value)
+    Some(value) => Json(value)
     None => Json::null()
   }
 }

@@ -127,11 +127,7 @@ fn CodexRequestInput::approval_decisions(
   match self.method_ {
     "item/commandExecution/requestApproval"
     | "item/fileChange/requestApproval" =>
-      [
-        Json::string("accept"),
-        Json::string("acceptForSession"),
-        Json::string("decline"),
-      ]
+      [Json("accept"), Json("acceptForSession"), Json("decline")]
     _ => []
   }
 }
@@ -360,7 +356,7 @@ fn CodexRequestInput::render(
               CodexRequestResponded(
                 identity~,
                 request_key=self.request_key,
-                decision=Json::string("accept"),
+                decision=Json("accept"),
               ),
             ),
             "Grant for turn",
@@ -371,7 +367,7 @@ fn CodexRequestInput::render(
               CodexRequestResponded(
                 identity~,
                 request_key=self.request_key,
-                decision=Json::string("acceptForSession"),
+                decision=Json("acceptForSession"),
               ),
             ),
             "Grant for session",
@@ -382,7 +378,7 @@ fn CodexRequestInput::render(
               CodexRequestResponded(
                 identity~,
                 request_key=self.request_key,
-                decision=Json::string("decline"),
+                decision=Json("decline"),
               ),
             ),
             "Deny",
@@ -448,7 +444,7 @@ fn CodexRequestInput::render(
               CodexRequestResponded(
                 identity~,
                 request_key=self.request_key,
-                decision=Json::string("accept"),
+                decision=Json("accept"),
               ),
             ),
             "Submit answers",
@@ -481,7 +477,7 @@ fn CodexRequestInput::render(
               CodexRequestResponded(
                 identity~,
                 request_key=self.request_key,
-                decision=Json::string("accept"),
+                decision=Json("accept"),
               ),
             ),
             "Submit JSON",
@@ -492,7 +488,7 @@ fn CodexRequestInput::render(
               CodexRequestResponded(
                 identity~,
                 request_key=self.request_key,
-                decision=Json::string("decline"),
+                decision=Json("decline"),
               ),
             ),
             "Decline",

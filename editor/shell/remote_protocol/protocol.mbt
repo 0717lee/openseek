@@ -842,7 +842,7 @@ fn parse_source_document(value : Json, id : String) -> ProtocolDocumentResult {
 fn document_request_json(kind : String, request : DocumentRequest) -> Json {
   let fields = packet_fields(kind, request.id)
   fields["uri"] = request.uri.to_string().to_json()
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -854,7 +854,7 @@ fn position_request_json(
   fields["uri"] = request.uri.to_string().to_json()
   fields["documentRevision"] = request.document_revision.to_json()
   fields["offset"] = request.offset.to_json()
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -865,21 +865,21 @@ fn revision_request_json(
   let fields = packet_fields(kind, request.id)
   fields["uri"] = request.uri.to_string().to_json()
   fields["documentRevision"] = request.document_revision.to_json()
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
 fn document_payload_json(kind : String, payload : DocumentPayload) -> Json {
   let fields = packet_fields(kind, payload.id)
   fields["document"] = payload.document.to_json()
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
 fn directory_resolved_json(payload : DirectoryResolvedPayload) -> Json {
   let fields = packet_fields("DirectoryResolved", payload.id)
   fields["stat"] = workspace_stat_json(payload.stat)
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -892,9 +892,9 @@ fn workspace_stat_json(stat : @workspace.WorkspaceStat) -> Json {
     "kind": stat.kind.to_string().to_json(),
   }
   if stat.children is Some(children) {
-    fields["children"] = Json::array(children.map(workspace_stat_json))
+    fields["children"] = Json(children.map(workspace_stat_json))
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -933,8 +933,8 @@ fn diagnostics_payload_json(payload : DiagnosticsPayload) -> Json {
   let fields = packet_fields("Diagnostics", "")
   fields["uri"] = payload.uri.to_string().to_json()
   fields["documentRevision"] = payload.revision.to_json()
-  fields["diagnostics"] = Json::array(payload.diagnostics.map(diagnostic_json))
-  Json::object(fields)
+  fields["diagnostics"] = Json(payload.diagnostics.map(diagnostic_json))
+  Json(fields)
 }
 
 ///|
@@ -946,7 +946,7 @@ fn hover_result_json(payload : HoverResultPayload) -> Json {
     Some(hover) => hover_json(hover)
     None => Json::null()
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -954,8 +954,8 @@ fn definition_result_json(payload : DefinitionResultPayload) -> Json {
   let fields = packet_fields("DefinitionResult", payload.id)
   fields["uri"] = payload.uri.to_string().to_json()
   fields["documentRevision"] = payload.revision.to_json()
-  fields["locations"] = Json::array(payload.locations.map(location_json))
-  Json::object(fields)
+  fields["locations"] = Json(payload.locations.map(location_json))
+  Json(fields)
 }
 
 ///|
@@ -963,10 +963,8 @@ fn references_result_json(payload : ReferencesResultPayload) -> Json {
   let fields = packet_fields("ReferencesResult", payload.id)
   fields["uri"] = payload.uri.to_string().to_json()
   fields["documentRevision"] = payload.revision.to_json()
-  fields["references"] = Json::array(
-    payload.references.map(reference_item_json),
-  )
-  Json::object(fields)
+  fields["references"] = Json(payload.references.map(reference_item_json))
+  Json(fields)
 }
 
 ///|
@@ -985,15 +983,15 @@ fn document_symbols_result_json(payload : DocumentSymbolsResultPayload) -> Json 
   let fields = packet_fields("DocumentSymbolsResult", payload.id)
   fields["uri"] = payload.uri.to_string().to_json()
   fields["documentRevision"] = payload.revision.to_json()
-  fields["symbols"] = Json::array(payload.symbols.map(document_symbol_json))
-  Json::object(fields)
+  fields["symbols"] = Json(payload.symbols.map(document_symbol_json))
+  Json(fields)
 }
 
 ///|
 fn error_packet_json(error : ProtocolError) -> Json {
   let fields = packet_fields("Error", error.request_id)
   fields["error"] = ToJson::to_json(error)
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -1007,7 +1005,7 @@ pub impl ToJson for ProtocolError with fn to_json(self) {
   if self.provider_code != "" {
     fields["providerCode"] = self.provider_code.to_json()
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -1030,9 +1028,9 @@ fn diagnostic_json(diagnostic : @language.Diagnostic) -> Json {
     "message": diagnostic.message.to_json(),
   }
   if diagnostic.tags is Some(tags) {
-    fields["tags"] = Json::array(tags.map(tag => tag.label().to_json()))
+    fields["tags"] = Json(tags.map(tag => tag.label().to_json()))
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -1048,17 +1046,15 @@ fn document_symbol_json(symbol : @language.DocumentSymbol) -> Json {
 fn hover_json(hover : @language.Hover) -> Json {
   {
     "range": range_json(hover.range),
-    "contents": Json::array(hover.contents.map(hover_content_json)),
+    "contents": Json(hover.contents.map(hover_content_json)),
   }
 }
 
 ///|
 fn hover_content_json(content : @language.HoverContent) -> Json {
   match content {
-    PlainText(text) =>
-      { "kind": Json::string("plaintext"), "value": text.to_json() }
-    Markdown(text) =>
-      { "kind": Json::string("markdown"), "value": text.to_json() }
+    PlainText(text) => { "kind": Json("plaintext"), "value": text.to_json() }
+    Markdown(text) => { "kind": Json("markdown"), "value": text.to_json() }
   }
 }
 

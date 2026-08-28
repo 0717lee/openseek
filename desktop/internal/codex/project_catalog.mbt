@@ -116,10 +116,10 @@ async fn ProjectCatalog::annotate_thread(
   if thread.get("cwd") is Some(String(cwd)) &&
     !cwd.trim().is_empty() &&
     self.resolve(cwd) is Some(project) {
-    annotated["projectRoot"] = Json::string(project)
+    annotated["projectRoot"] = Json(project)
     self.known_projects[project] = true
   }
-  Json::object(annotated)
+  Json(annotated)
 }
 
 ///|
@@ -141,12 +141,12 @@ pub async fn ProjectCatalog::annotate(
     for thread in threads {
       data.push(self.annotate_thread(thread))
     }
-    annotated["data"] = Json::array(data)
+    annotated["data"] = Json(data)
   }
   if fields.get("thread") is Some(thread) {
     annotated["thread"] = self.annotate_thread(thread)
   }
-  Json::object(annotated)
+  Json(annotated)
 }
 
 ///|
@@ -203,6 +203,6 @@ async test "Codex thread replies retain cwd and receive cached project roots" {
     fields.get("data") is Some(Array([Object(thread)])) else {
     fail("expected annotated thread list")
   }
-  assert_eq(thread.get("projectRoot"), Some(Json::string("/workspace/project")))
-  assert_eq(thread.get("cwd"), Some(Json::string("/worktrees/a/project")))
+  assert_eq(thread.get("projectRoot"), Some(Json("/workspace/project")))
+  assert_eq(thread.get("cwd"), Some(Json("/worktrees/a/project")))
 }

@@ -93,7 +93,7 @@ fn diff_editor_lifecycle_snapshot_json(
   widget : @diff_editor.DiffEditorWidget,
 ) -> String {
   let snapshot = widget.lifecycle_snapshot()
-  Json::object({
+  Json({
     "kernelCount": snapshot.kernel_count.to_json(),
     "originalKernelId": snapshot.original_kernel_id.to_json(),
     "modifiedKernelId": snapshot.modified_kernel_id.to_json(),

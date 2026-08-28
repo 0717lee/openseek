@@ -33,7 +33,7 @@ pub impl Show for ResponseError with fn output(self, logger) {
 fn build_request(id : Int, method_ : String, params : Json) -> Json {
   {
     "jsonrpc": "2.0",
-    "id": Json::number(id.to_double()),
+    "id": Json(id.to_double()),
     "method": method_,
     "params": params,
   }
@@ -62,7 +62,7 @@ fn build_error_reply(id : Json, code : Int, message : String) -> Json {
   {
     "jsonrpc": "2.0",
     "id": id,
-    "error": { "code": Json::number(code.to_double()), "message": message },
+    "error": { "code": Json(code.to_double()), "message": message },
   }
 }
 

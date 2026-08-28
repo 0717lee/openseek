@@ -400,17 +400,17 @@ fn pull_request_json(
   cross? : Bool = false,
 ) -> Json {
   {
-    "number": Json::number(number.to_double()),
+    "number": Json(number.to_double()),
     "title": "Add a changed-files explorer",
     "state": "\{state}",
     "url": "https://github.test/acme/app/pull/\{number}",
-    "isDraft": Json::boolean(draft),
+    "isDraft": Json(draft),
     "baseRefName": "main",
     "additions": 2972,
     "deletions": 287,
     "changedFiles": 18,
     "statusCheckRollup": checks,
-    "isCrossRepository": Json::boolean(cross),
+    "isCrossRepository": Json(cross),
   }
 }
 
@@ -480,7 +480,7 @@ test "A pull request record missing a rendered field is not shown at all" {
         entries[key] = value
       }
     }
-    assert_eq(parse_pull_request(Json::object(entries)), None)
+    assert_eq(parse_pull_request(Json(entries)), None)
   }
 }
 
@@ -501,7 +501,7 @@ test "Check rollup separates running checks from failed and finished ones" {
     Some({ passed: 2, failed: 2, pending: 2 }),
   )
   // No checks configured is not the same as checks that have not run.
-  assert_eq(parse_checks(Some(Json::array([]))), None)
+  assert_eq(parse_checks(Some(Json(([] : Array[Json])))), None)
   assert_eq(parse_checks(None), None)
 }
 

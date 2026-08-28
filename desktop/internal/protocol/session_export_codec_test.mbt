@@ -53,7 +53,7 @@ test "session export payload rejects missing null and malformed fields" {
           "title": "Malformed archive flag",
           "archived": "no",
         },
-        Json::string("not an object"),
+        Json("not an object"),
       ] : Array[Json]) {
     let decoded : @protocol.SessionExportPayload? = Some(@json.from_json(raw)) catch {
       _ => None
@@ -98,7 +98,7 @@ test "session export reply rejects missing null and malformed required fields" {
         { "path": "/tmp/conversation.html", "opened": null },
         { "path": "/tmp/conversation.html", "opened": "yes" },
         { "path": 7, "opened": false },
-        Json::array([]),
+        Json(([] : Array[Json])),
       ] : Array[Json]) {
     let decoded : @protocol.SessionExportReply? = Some(@json.from_json(raw)) catch {
       _ => None

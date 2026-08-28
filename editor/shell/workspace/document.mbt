@@ -208,7 +208,7 @@ pub impl ToJson for DocumentError with fn to_json(self) {
     fields["uri"] = uri.to_string().to_json()
     fields["displayName"] = @base_common.basename_or_authority(uri).to_json()
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|

@@ -33,7 +33,7 @@ fn line(event : @protocol.Event, drop~ : Array[String]) -> Json {
   for key in drop {
     fields.remove(key) |> ignore
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|

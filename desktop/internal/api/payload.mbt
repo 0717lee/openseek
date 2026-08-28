@@ -54,18 +54,18 @@ fn @protocol.CodexPermissionMode::write_app_server_settings(
 ) -> Unit {
   match self {
     RequestApproval => {
-      fields["approvalPolicy"] = Json::string("on-request")
-      fields["approvalsReviewer"] = Json::string("user")
-      fields["permissions"] = Json::string(":workspace")
+      fields["approvalPolicy"] = Json("on-request")
+      fields["approvalsReviewer"] = Json("user")
+      fields["permissions"] = Json(":workspace")
     }
     AutoReview => {
-      fields["approvalPolicy"] = Json::string("on-request")
-      fields["approvalsReviewer"] = Json::string("auto_review")
-      fields["permissions"] = Json::string(":workspace")
+      fields["approvalPolicy"] = Json("on-request")
+      fields["approvalsReviewer"] = Json("auto_review")
+      fields["permissions"] = Json(":workspace")
     }
     FullAccess => {
-      fields["approvalPolicy"] = Json::string("never")
-      fields["permissions"] = Json::string(":danger-full-access")
+      fields["approvalPolicy"] = Json("never")
+      fields["permissions"] = Json(":danger-full-access")
     }
   }
 }
@@ -76,17 +76,15 @@ fn @protocol.CodexPermissionMode::write_app_server_settings(
 fn @protocol.CodexThreadStartPayload::app_server_params(
   self : @protocol.CodexThreadStartPayload,
 ) -> Json {
-  let fields : Map[String, Json] = {
-    "serviceName": Json::string("openseek_desktop"),
-  }
+  let fields : Map[String, Json] = { "serviceName": Json("openseek_desktop") }
   if self.cwd is Some(cwd) {
-    fields["cwd"] = Json::string(cwd)
+    fields["cwd"] = Json(cwd)
   }
   if self.model is Some(model) && !model.trim().is_empty() {
-    fields["model"] = Json::string(model)
+    fields["model"] = Json(model)
   }
   self.permission_mode.write_app_server_settings(fields)
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -95,9 +93,9 @@ fn @protocol.CodexThreadStartPayload::app_server_params(
 fn @protocol.CodexThreadResumePayload::app_server_params(
   self : @protocol.CodexThreadResumePayload,
 ) -> Json {
-  let fields : Map[String, Json] = { "threadId": Json::string(self.thread_id) }
+  let fields : Map[String, Json] = { "threadId": Json(self.thread_id) }
   self.permission_mode.write_app_server_settings(fields)
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -108,20 +106,20 @@ fn @protocol.CodexTurnStartPayload::app_server_params(
   self : @protocol.CodexTurnStartPayload,
 ) -> Json {
   let fields : Map[String, Json] = {
-    "threadId": Json::string(self.thread_id),
-    "input": Json::array(self.input),
+    "threadId": Json(self.thread_id),
+    "input": Json(self.input),
   }
   if self.model is Some(model) {
-    fields["model"] = Json::string(model)
+    fields["model"] = Json(model)
   }
   if self.effort is Some(effort) {
-    fields["effort"] = Json::string(effort)
+    fields["effort"] = Json(effort)
   }
   if self.cwd is Some(cwd) {
-    fields["cwd"] = Json::string(cwd)
+    fields["cwd"] = Json(cwd)
   }
   self.permission_mode.write_app_server_settings(fields)
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
