@@ -864,6 +864,13 @@
   overflow: visible;
   overflow-wrap: anywhere;
 }
+/* A bodyless label wraps its whole text (see above — it is the sole copy),
+   and the same `anywhere` break keeps an unbroken token, such as a long URL
+   in a one-line goal, from pushing the transcript wide. */
+.tool-call-label .tool-call-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 /* The trailing marker belongs to rows that own a fold; `.tool-call-label`
    rows have nothing to disclose and stay bare. It is the summary's own last
    flex item rather than part of the text span, so a truncated brief cannot
