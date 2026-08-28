@@ -11,6 +11,34 @@ const ProtonPackageRipgrepPath = "target/proton-package-input/bin/rg"
 const ProtonPackageMoongrepPath = "target/proton-package-input/bin/moongrep"
 
 ///|
+/// The package resource roots Proton may have placed beside `command_dir`,
+/// in probe order. A macOS bundle keeps `package.resources` below
+/// `Contents/Resources`, next to `Contents/MacOS`; a Windows package keeps
+/// them below a `Resources` directory inside the executable's own directory.
+/// Every packaged lookup shares this order rather than consulting the host
+/// platform, so each layout stays testable on every host.
+fn packaged_resource_roots(
+  command_dir : @pathx.Absolute,
+) -> Array[@pathx.Absolute] {
+  [command_dir.join("..").join("Resources"), command_dir.join("Resources")]
+}
+
+///|
+/// A packaged tool below each resource root, probing the Windows executable
+/// spelling before the bare name so one staged layout serves both hosts.
+fn packaged_tool_candidates(
+  command_dir : @pathx.Absolute,
+  relative : String,
+) -> Array[@pathx.Absolute] {
+  let candidates = []
+  for root in packaged_resource_roots(command_dir) {
+    candidates.push(root.join(Relative(relative + ".exe")))
+    candidates.push(root.join(Relative(relative)))
+  }
+  candidates
+}
+
+///|
 /// The visualizer shell and compiled bundle used for a standalone export.
 pub struct VizAssets {
   shell : String
@@ -76,15 +104,17 @@ struct PackagedTools {
 }
 
 ///|
-/// Resolve the packaged tools installed with `executable`. macOS keeps them
-/// below Contents/Resources; Linux and Windows keep them beside the Host.
+/// Resolve the packaged tools installed with `executable`. Proton packages
+/// keep them below the package resource root (`packaged_resource_roots`);
+/// the Linux AppImage keeps them beside the Host.
 pub async fn PackagedTools::resolve(executable : String) -> PackagedTools? {
   let command_dir = @pathx.Path(executable).dirname().resolve()
-  let candidates = [
-    command_dir.join("..").join("Resources").join(ProtonPackageRipgrepPath),
-    command_dir.join("rg.exe"),
-    command_dir.join("rg"),
-  ]
+  let candidates = packaged_tool_candidates(
+    command_dir,
+    ProtonPackageRipgrepPath,
+  )
+  candidates.push(command_dir.join("rg.exe"))
+  candidates.push(command_dir.join("rg"))
   for candidate in candidates {
     let path = candidate.normalize()
     if @fs.exists(path.to_string()) {
@@ -120,23 +150,24 @@ fn PackagedTools::path_with_precedence(
 }
 
 ///|
-/// Locate the bundled frontend entry relative to the executable. On macOS
-/// the assets live in `Contents/Resources/` — `Contents/MacOS/` may only
-/// hold code, since non-`--deep` codesigning rejects data files there — so
-/// probe `../Resources/` first; the executable-adjacent layout serves the
-/// Linux AppImage and the Windows bundle. If those installed layouts are
-/// absent, a host under Moon's native `_build` layout derives the checked-in
+/// Locate the bundled frontend entry relative to the executable. Proton
+/// packages keep the assets below their resource root — on macOS that is
+/// `Contents/Resources/`, since `Contents/MacOS/` may only hold code and
+/// non-`--deep` codesigning rejects data files there; on Windows it is the
+/// `Resources` directory beside the executable. The executable-adjacent
+/// layout serves the Linux AppImage. If those installed layouts are absent,
+/// a host under Moon's native `_build` layout derives the checked-in
 /// development document from the same checkout.
 pub async fn frontend_entry_path(framework_command : String) -> String {
   let command_dir = @pathx.Path(framework_command).dirname().resolve()
-  let candidates = [
-    command_dir
-    .join("..")
-    .join("Resources")
-    .join(ProtonPackageFrontendEntryPath),
+  let candidates = []
+  for root in packaged_resource_roots(command_dir) {
+    candidates.push(root.join(ProtonPackageFrontendEntryPath))
+  }
+  candidates.push(
     command_dir.join("..").join("Resources").join(FrontendEntryPath),
-    command_dir.join(FrontendEntryPath),
-  ]
+  )
+  candidates.push(command_dir.join(FrontendEntryPath))
   for candidate in candidates {
     let path = candidate.normalize().to_string()
     if @fs.exists(path) {
@@ -154,9 +185,9 @@ pub async fn frontend_entry_path(framework_command : String) -> String {
 }
 
 ///|
-/// Locate the packaged ripgrep beside the installed Host. macOS stores data
-/// below Contents/Resources; Linux and Windows keep the executable beside the
-/// Host. Only a recognized Moon `_build` executable (or an embedding without
+/// Locate the packaged ripgrep installed with the Host: below the Proton
+/// package resource root on macOS and Windows, beside the Host in the Linux
+/// AppImage. Only a recognized Moon `_build` executable (or an embedding without
 /// an executable path, used by development tests) may fall back to `PATH`.
 /// An installed bundle with a missing asset fails closed instead of silently
 /// running a machine-global ripgrep of an unknown version.
@@ -188,11 +219,12 @@ async fn ripgrep_command(executable : String?) -> String? {
 async fn moongrep_command(executable : String?) -> String? {
   guard executable is Some(executable) else { return Some("moonx") }
   let command_dir = @pathx.Path(executable).dirname().resolve()
-  let candidates = [
-    command_dir.join("..").join("Resources").join(ProtonPackageMoongrepPath),
-    command_dir.join("moongrep.exe"),
-    command_dir.join("moongrep"),
-  ]
+  let candidates = packaged_tool_candidates(
+    command_dir,
+    ProtonPackageMoongrepPath,
+  )
+  candidates.push(command_dir.join("moongrep.exe"))
+  candidates.push(command_dir.join("moongrep"))
   for candidate in candidates {
     let path = candidate.normalize().to_string()
     if @fs.exists(path) {
@@ -255,6 +287,33 @@ async test "ripgrep resolution uses only packaged or recognized development layo
 }
 
 ///|
+/// Proton's Windows package keeps `package.resources` in `Resources` beside
+/// the executable, and the staged tools carry their Windows suffix there.
+/// Both lookups must find that shape before any executable-adjacent fallback.
+async test "Proton Windows package tools and frontend are found below Resources" {
+  let root : @pathx.Path = @fs.tmpdir(prefix="openseek-windows-package-")
+  defer (@fs.rmdir(root.to_string(), recursive=true) catch { _ => () })
+  let app = root.join("seekmoon")
+  let host = app.join("seekmoon.exe").to_string()
+  let resources = app.join("Resources")
+  let rg = resources.join(ProtonPackageRipgrepPath + ".exe")
+  @fs.mkdir(rg.dirname().to_string(), recursive=true)
+  @fs.write_file(rg.to_string(), "rg", create_mode=CreateOrTruncate)
+  // Lookups return resolved paths, so compare in that spelling.
+  assert_eq(
+    ripgrep_command(Some(host)),
+    Some(rg.resolve().normalize().to_string()),
+  )
+  let frontend = resources.join(ProtonPackageFrontendEntryPath)
+  @fs.mkdir(frontend.dirname().to_string(), recursive=true)
+  @fs.write_file(frontend.to_string(), "packaged", create_mode=CreateOrTruncate)
+  assert_eq(
+    frontend_entry_path(host),
+    frontend.resolve().normalize().to_string(),
+  )
+}
+
+///|
 async test "packaged frontend wins before the matching checkout document" {
   let root : @pathx.Path = @fs.tmpdir(prefix="openseek-development-frontend-")
   let command_dir = root.join("_build/native/debug/build/openseek_desktop")
@@ -277,13 +336,21 @@ async test "packaged frontend wins before the matching checkout document" {
 /// instead of consulting a second source version constant.
 pub async fn package_version(executable : String) -> String {
   let command_dir = @pathx.Path(executable).dirname().resolve()
-  let manifest = command_dir
-    .join("..")
-    .join("Resources")
-    .join("proton-package.json")
-    .normalize()
-    .to_string()
-  guard @fs.exists(manifest) else { return "development" }
+  // Proton writes the manifest into the macOS bundle's `Contents/Resources`
+  // and directly beside the Windows executable.
+  let candidates = [
+    command_dir.join("..").join("Resources").join("proton-package.json"),
+    command_dir.join("proton-package.json"),
+  ]
+  let mut manifest : String? = None
+  for candidate in candidates {
+    let path = candidate.normalize().to_string()
+    if @fs.exists(path) {
+      manifest = Some(path)
+      break
+    }
+  }
+  guard manifest is Some(manifest) else { return "development" }
   let text = @fs.read_file(manifest).text() catch { _ => return "development" }
   match @json.parse(text) {
     Object(fields) =>

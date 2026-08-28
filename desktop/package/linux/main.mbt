@@ -1,241 +1,142 @@
 ///|
-const AppDirPath : String = "dist/SeekMoon.AppDir"
+const PackageInputRoot : String = "target/proton-package-input"
 
 ///|
-const AppImagePath : String = "dist/SeekMoon-linux-x86_64.AppImage"
+const PackageAssetDir : String = PackageInputRoot + "/assets"
 
 ///|
-const UsrBinPath : String = AppDirPath + "/usr/bin"
+const PackageBinDir : String = PackageInputRoot + "/bin"
 
 ///|
-const AppAssetDir : String = UsrBinPath + "/assets"
+const RipgrepLicenseDir : String = PackageInputRoot + "/licenses/ripgrep"
 
 ///|
-const RipgrepLicenseDir : String = AppDirPath + "/usr/share/licenses/ripgrep"
-
-///|
-/// Where a downloaded appimagetool is cached between runs. Lives outside the
-/// AppDir so reset_bundle_dirs never deletes it.
-const AppImageToolCache : String = "dist/tools/appimagetool"
-
-///|
-const AppImageToolUrl : String = "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
-
-///|
-async fn build_outputs(
-  ws : @packaging.Workspace,
+/// Build the application-specific inputs Proton cannot infer from
+/// `proton.project.json`. Proton builds the native host during `package`; this
+/// phase prepares only OpenSeek's generated frontend, embedded tools, and
+/// engine, plus the shared CEF installation that both builds require.
+async fn @packaging.Workspace::build_package_inputs(
+  self : @packaging.Workspace,
   release~ : Bool,
 ) -> (@xterm_assets.Assets, @ripgrep_assets.Assets) {
-  @packaging.ensure_cef_runtime(ws)
-  @packaging.build_frontend_bundle(ws, release~)
+  @packaging.setup_cef(self)
+  @packaging.build_frontend_bundle(self, release~)
   let terminal_assets = @xterm_assets.build(
-    ws,
+    self,
     @xterm_assets.linux_x64_target(),
   )
   let ripgrep_assets = @ripgrep_assets.build(
-    ws,
+    self,
     @ripgrep_assets.linux_x64_target(),
   )
-  @packaging.build_native_host(ws, release~)
-  @packaging.build_engine(ws, release~)
+  @packaging.build_engine(self, release~)
   (terminal_assets, ripgrep_assets)
 }
 
 ///|
-async fn reset_bundle_dirs(ws : @packaging.Workspace) -> Unit {
-  @packaging.remove_path_if_exists(ws.at(AppDirPath))
-  @packaging.remove_path_if_exists(ws.at(AppImagePath))
-  @packaging.ensure_dir(ws.at(UsrBinPath))
-  @packaging.ensure_dir(ws.at(AppAssetDir))
-  @packaging.ensure_dir(ws.at(RipgrepLicenseDir))
-  @packaging.ensure_dir(ws.at("dist/tools"))
-}
-
-///|
-async fn copy_bundle_files(
-  ws : @packaging.Workspace,
+/// Rebuild the declarative resource tree consumed by `package.resources`.
+/// Proton preserves this project-relative tree below its package resource
+/// directory; the host's runtime lookups deliberately know this one stable
+/// prefix.
+async fn @packaging.Workspace::stage_package_inputs(
+  self : @packaging.Workspace,
   terminal_assets : @xterm_assets.Assets,
   ripgrep_assets : @ripgrep_assets.Assets,
   release~ : Bool,
 ) -> Unit {
-  let native_binary = ws.native_binary(release~)
-  let engine_binary = ws.engine_binary(release~)
-  if !@asyncfs.exists(native_binary) {
-    raise @packaging.PackageError("native binary not found: \{native_binary}")
+  @packaging.remove_path_if_exists(self.at(PackageInputRoot))
+  @packaging.ensure_dir(self.at(PackageAssetDir))
+  @packaging.ensure_dir(self.at(PackageBinDir))
+  @packaging.ensure_dir(self.at(RipgrepLicenseDir))
+  @packaging.copy_file(
+    self.app_stylesheet(),
+    self.at(PackageAssetDir + "/app.css"),
+  )
+  for
+    pair in [
+      ("index.html", PackageAssetDir + "/index.html"),
+      ("frontend.js", PackageAssetDir + "/frontend.js"),
+      ("viewer.css", PackageAssetDir + "/viewer.css"),
+      ("codicon.ttf", PackageAssetDir + "/codicon.ttf"),
+    ] {
+    let (source, destination) = pair
+    @packaging.copy_file(self.at(source), self.at(destination))
   }
-  if !@asyncfs.exists(engine_binary) {
-    raise @packaging.PackageError(
-      "openseek engine binary not found: \{engine_binary}",
-    )
-  }
-  @packaging.copy_file(
-    native_binary,
-    ws.at(UsrBinPath + "/openseek-desktop-bin"),
-  )
-  @packaging.copy_file(engine_binary, ws.at(UsrBinPath + "/openseek"))
-  @packaging.copy_file(ripgrep_assets.binary, ws.at(UsrBinPath + "/rg"))
-  @packaging.copy_file(
-    ripgrep_assets.license_mit,
-    ws.at(RipgrepLicenseDir + "/LICENSE-MIT"),
-  )
-  @packaging.copy_file(
-    ripgrep_assets.unlicense,
-    ws.at(RipgrepLicenseDir + "/UNLICENSE"),
-  )
-  @packaging.copy_file(ws.at("index.html"), ws.at(AppAssetDir + "/index.html"))
-  @packaging.copy_file(ws.app_stylesheet(), ws.at(AppAssetDir + "/app.css"))
-  @packaging.copy_file(
-    ws.at("frontend.js"),
-    ws.at(AppAssetDir + "/frontend.js"),
-  )
-  @packaging.copy_file(ws.at("viewer.css"), ws.at(AppAssetDir + "/viewer.css"))
   // The verified terminal emulator assets generated during this packaging run
   // are loaded by index.html before frontend.js.
   @packaging.copy_file(
     terminal_assets.javascript,
-    ws.at(AppAssetDir + "/xterm.js"),
+    self.at(PackageAssetDir + "/xterm.js"),
   )
   @packaging.copy_file(
     terminal_assets.stylesheet,
-    ws.at(AppAssetDir + "/xterm.css"),
+    self.at(PackageAssetDir + "/xterm.css"),
   )
-  // The codicon font is served at the site root (`/codicon.ttf`), so it sits
-  // next to `viewer.css` rather than under `fonts/`.
-  @packaging.copy_file(
-    ws.at("codicon.ttf"),
-    ws.at(AppAssetDir + "/codicon.ttf"),
-  )
-  @packaging.copy_tree(ws.mermaid_assets(), ws.at(AppAssetDir + "/mermaid"))
-  @packaging.copy_tree(ws.at("fonts"), ws.at(AppAssetDir + "/fonts"))
-  ws.stage_viz_assets(ws.at(AppAssetDir + "/viz"), release~)
-  let target = @moonbit.moonbit_linux_x64_toolchain()
-  @moonbit.stage_moonbit_toolchain_seed(
-    ws,
-    target,
-    UsrBinPath + "/" + target.seed_relative_dir(),
-  )
-  // Best-effort: ship the assembled CEF runtime (lib/libproton.so, the CEF
-  // shared library, bin/cef_process, resources). AppRun adds its lib dir to
-  // LD_LIBRARY_PATH. The exact layout/rpath needs validation on Linux.
   @packaging.copy_tree(
-    @packaging.proton_runtime_dist(ws).0,
-    ws.at(UsrBinPath + "/proton"),
+    self.mermaid_assets(),
+    self.at(PackageAssetDir + "/mermaid"),
   )
-}
-
-///|
-/// The AppRun launcher resolves its own absolute directory and execs the host
-/// binary; every resource lookup in the host derives from the executable's
-/// path, and the engine is found on PATH next to it. Mirrors the macOS
-/// launcher: it deliberately does not `cd` into the AppDir, since the host
-/// keeps its runtime state in absolute per-user paths.
-fn apprun_source() -> String {
-  let source =
-    #|#!/bin/sh
-    #|set -eu
-    #|
-    #|APP_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-    #|export PATH="$APP_DIR/usr/bin:$PATH"
-    #|export LD_LIBRARY_PATH="$APP_DIR/usr/bin/proton/lib:$APP_DIR/usr/bin/proton:${LD_LIBRARY_PATH:-}"
-    #|exec "$APP_DIR/usr/bin/openseek-desktop-bin" "$@"
-    #|
-  source
-}
-
-///|
-fn desktop_entry_source() -> String {
-  let source =
-    #|[Desktop Entry]
-    #|Type=Application
-    #|Name=SeekMoon
-    #|Exec=openseek-desktop-bin
-    #|Icon=openseek-desktop
-    #|Categories=Development;
-    #|Terminal=false
-    #|
-  source
-}
-
-///|
-async fn write_bundle_metadata(ws : @packaging.Workspace) -> Unit {
-  @packaging.write_text(ws.at(AppDirPath + "/AppRun"), apprun_source())
-  @packaging.write_text(
-    ws.at(AppDirPath + "/openseek-desktop.desktop"),
-    desktop_entry_source(),
-  )
-  // Checked-in icon: the design-system mark on the accent squircle (full-bleed
-  // variant; the macOS package carries the margined one).
+  @packaging.copy_tree(self.at("fonts"), self.at(PackageAssetDir + "/fonts"))
+  self.stage_viz_assets(self.at(PackageAssetDir + "/viz"), release~)
   @packaging.copy_file(
-    ws.at("package/linux/appicon.svg"),
-    ws.at(AppDirPath + "/openseek-desktop.svg"),
+    self.engine_binary(release~),
+    self.at(PackageBinDir + "/openseek"),
   )
-  // appimagetool uses .DirIcon as the AppImage's embedded icon.
-  @packaging.run_checked(
-    "ln",
-    ["-sf", "openseek-desktop.svg", AppDirPath + "/.DirIcon"],
-    dir=ws.dir(),
+  @packaging.copy_file(ripgrep_assets.binary, self.at(PackageBinDir + "/rg"))
+  @packaging.copy_file(
+    ripgrep_assets.license_mit,
+    self.at(RipgrepLicenseDir + "/LICENSE-MIT"),
+  )
+  @packaging.copy_file(
+    ripgrep_assets.unlicense,
+    self.at(RipgrepLicenseDir + "/UNLICENSE"),
   )
   @packaging.run_checked(
     "chmod",
-    [
-      "+x",
-      AppDirPath + "/AppRun",
-      UsrBinPath + "/openseek-desktop-bin",
-      UsrBinPath + "/openseek",
-      UsrBinPath + "/rg",
-    ],
-    dir=ws.dir(),
+    ["+x", PackageBinDir + "/openseek", PackageBinDir + "/rg"],
+    dir=self.dir(),
+  )
+  // The read-only MoonBit toolchain seed the host copies into its per-user
+  // runtime directory on first launch.
+  let target = @moonbit.moonbit_linux_x64_toolchain()
+  @moonbit.stage_moonbit_toolchain_seed(
+    self,
+    target,
+    PackageInputRoot + "/" + target.seed_relative_dir(),
   )
 }
 
 ///|
-/// Resolve an appimagetool to run: a previously downloaded copy, then one on
-/// PATH, then a fresh download of the official release.
-async fn ensure_appimagetool(ws : @packaging.Workspace) -> String {
-  if @asyncfs.exists(ws.at(AppImageToolCache)) {
-    return AppImageToolCache
+/// Build the exact Proton command arguments. The release flag must reach
+/// Proton because Proton 0.2 builds the native host itself and then packages
+/// that mode's executable.
+fn proton_args(
+  workspace : @packaging.Workspace,
+  release~ : Bool,
+) -> Array[String] {
+  let args = [
+    "-C",
+    workspace.dir(),
+    "package",
+    "--config",
+    "proton.project.json",
+    "--format",
+    "appimage",
+  ]
+  if release {
+    args.push("--release")
   }
-  let probe = @process.run(
-    "sh",
-    ["-c", "command -v appimagetool >/dev/null 2>&1"],
-    inherit_env=true,
-    cwd=ws.dir().view(),
-  )
-  if probe == 0 {
-    return "appimagetool"
-  }
-  @packaging.run_checked(
-    "curl",
-    ["-fL", "-o", AppImageToolCache, AppImageToolUrl],
-    dir=ws.dir(),
-  )
-  @packaging.run_checked("chmod", ["+x", AppImageToolCache], dir=ws.dir())
-  AppImageToolCache
+  args
 }
 
 ///|
-/// APPIMAGE_EXTRACT_AND_RUN lets the appimagetool AppImage run without FUSE;
-/// ARCH pins the output architecture because the vendored webview lib is
-/// x64-only.
-async fn build_appimage(ws : @packaging.Workspace, tool : String) -> Unit {
-  @packaging.run_checked(
-    "env",
-    [
-      "APPIMAGE_EXTRACT_AND_RUN=1",
-      "ARCH=x86_64",
-      tool,
-      AppDirPath,
-      AppImagePath,
-    ],
-    dir=ws.dir(),
-  )
-}
-
-///|
+/// Hand the prepared resource tree to Proton. From here Proton owns the host
+/// build, the AppDir layout with the CEF runtime, the launcher, the desktop
+/// entry, and the AppImage itself.
 async fn main {
   let matches = @argparse.Command(
     "package/linux",
-    about="Build the Linux AppImage.",
+    about="Prepare OpenSeek inputs and package the Linux AppImage with proton_cli.",
     flags=[
       FlagArg(
         "release",
@@ -245,12 +146,21 @@ async fn main {
   ).parse()
   let release = matches.flags.get("release").unwrap_or(false)
   let ws = @packaging.locate_workspace()
-  let (terminal_assets, ripgrep_assets) = build_outputs(ws, release~)
+  let (terminal_assets, ripgrep_assets) = ws.build_package_inputs(release~)
   println("built openseek engine: \{ws.engine_binary(release~)}")
-  reset_bundle_dirs(ws)
-  copy_bundle_files(ws, terminal_assets, ripgrep_assets, release~)
-  write_bundle_metadata(ws)
-  let tool = ensure_appimagetool(ws)
-  build_appimage(ws, tool)
-  println("generated \{ws.at(AppImagePath)}")
+  ws.stage_package_inputs(terminal_assets, ripgrep_assets, release~)
+  @packaging.run_proton_cli(ws, proton_args(ws, release~))
+  println("generated the Proton AppImage in \{ws.at("dist")}")
+}
+
+///|
+async test "linux packaging requests Proton's AppImage format" {
+  let workspace = @packaging.locate_workspace()
+  let args = proton_args(workspace, release=false)
+  assert_eq(args[0], "-C")
+  assert_eq(args[1], workspace.dir())
+  assert_true(args.contains("package"))
+  assert_true(args.contains("appimage"))
+  assert_false(args.contains("--release"))
+  assert_true(proton_args(workspace, release=true).contains("--release"))
 }

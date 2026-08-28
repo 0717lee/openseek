@@ -4,8 +4,8 @@ target/
 .mooncakes/
 .DS_Store
 
-# Proton native runtime assembled by `proton_cli cef setup` (CEF framework +
-# helpers + libproton); hundreds of MB, downloaded/generated, never committed.
+# Project-local Proton state. The CEF runtime and helper installed by
+# `proton_cli cef setup` live in the user-level `~/.proton` store instead.
 .proton/
 .cef-cache/
 

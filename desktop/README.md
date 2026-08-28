@@ -282,55 +282,62 @@ The scripted Windows path is:
 moon -C desktop run --target native package/windows
 ```
 
-It prepares the Proton/CEF runtime if needed, builds the frontend and native
-host, builds the `openseek` engine from the monorepo root, writes
-`dist/windows-x64/SeekMoon/`, and creates `dist/SeekMoon-windows-x64.zip`.
+It installs the shared Proton CEF runtime and helper if needed, builds the
+frontend, builds the `openseek` engine from the monorepo root, stages the
+application inputs under `target/proton-package-input/`, and then delegates
+the host build, the app directory, the CEF runtime layout, the package
+metadata, the portable zip, and the NSIS installer to `proton_cli package`.
+Proton names its outputs after the lowercase product name: `dist/seekmoon/`
+(containing `seekmoon.exe`), `dist/seekmoon.zip`, and the installer beside
+them.
 
 This development command builds debug MoonBit artifacts. Add `-- --release`
 for an optimized bundle and archives.
 
-Without additional arguments, the command builds every output: the
-`dist/windows-x64/SeekMoon/` bundle directory, the
-`dist/SeekMoon-windows-x64.zip` portable zip, and the
-`dist/SeekMoon-Setup.exe` NSIS installer.
-
-Use repeatable `--target` options to select `app`, `zip`, or `installer`.
-The app bundle is always built; selecting `app` alone skips both distribution
-archives. For example, build only the bundle and portable zip with:
+Without additional arguments, the command builds every output: the app
+directory, the portable zip, and the NSIS installer. Use repeatable `--target`
+options to select `app`, `zip`, or `installer`. The app directory is always
+built; selecting `app` alone skips both distribution archives. For example,
+build only the app directory and portable zip with:
 
 ```powershell
 moon -C desktop run --target native package/windows -- --target zip
 ```
 
-This still builds the bundle directory and portable zip, but does not require
-NSIS and does not create `dist/SeekMoon-Setup.exe`.
+This still builds the app directory and portable zip, but does not require
+NSIS and does not create the installer.
 
-To build the per-user NSIS installer, install NSIS so `makensis.exe` is on
-`PATH`, or extract portable NSIS to
-`desktop/dist/tools/nsis-3.12/makensis.exe`.
+Proton compiles its generated installer script with `makensis`. Install NSIS
+so `makensis.exe` is on `PATH`, or in one of the locations the packager puts
+on `PATH` itself: `C:\Program Files (x86)\NSIS`, `C:\Program Files\NSIS`, or
+portable NSIS extracted to `desktop\dist\tools\nsis-3.12`. The installer is
+Proton's: it installs machine-wide below `%ProgramFiles%\SeekMoon`, registers
+the uninstall entry, creates a Start Menu shortcut, and supports Proton's
+in-app update flow.
 
-The installer installs under
-`%LOCALAPPDATA%\Programs\SeekMoon`, creates Start Menu shortcuts,
-offers optional desktop-shortcut and launch-after-install checkboxes, and
-registers an HKCU uninstall entry, so it does not require administrator
-privileges.
-
-The Windows package also stages a read-only MoonBit toolchain seed under the
-app bundle. At runtime the host copies that seed into the app's per-user
-runtime directory, runs `moon bundle --all` and `moon bundle --target wasm-gc`
-there, and passes the writable copy as `MOON_HOME` to the engine.
+The packaged layout keeps the CEF runtime, `cef_process.exe`, and
+`proton-package.json` beside `seekmoon.exe`, and OpenSeek's inputs below
+`Resources\target\proton-package-input\`: the frontend under `assets\`, the
+engine and ripgrep under `bin\`, and a read-only MoonBit toolchain seed under
+`toolchains\`. The host resolves all of them relative to its own executable.
+At runtime it copies the seed into the app's per-user runtime directory, runs
+`moon bundle --all` and `moon bundle --target wasm-gc` there, and passes the
+writable copy as `MOON_HOME` to the engine.
 
 The manual steps below are useful when debugging the package script.
 
-From the repository root, assemble the Proton/CEF runtime the native host
-links against:
+From the repository root, install the Proton/CEF runtime and the subprocess
+helper the native host needs:
 
 ```powershell
 moonx moonbit-community/proton_cli@<version> -C . cef setup
 ```
 
 `<version>` is whatever `moon.mod` pins `moonbit-community/proton` to; the
-packagers read it from there rather than repeating it.
+packagers read it from there rather than repeating it. Proton compiles the
+helper with `clang` on Windows and archives with `ar`, which LLVM only ships as
+`llvm-ar`; put a copy named `ar.exe` on `PATH` if the setup reports that `ar`
+is missing.
 
 Build the frontend bundle, copy it to `frontend.js`, and build the native host:
 
@@ -451,10 +458,13 @@ ad-hoc signed. Such outputs are not intended for distribution.
 
 ## Package (Linux)
 
-`package/linux` runs the same build steps (including the runtime
-preparation), builds the `openseek` engine from the monorepo's `cmd/openseek`
-source, and produces `dist/SeekMoon-linux-x86_64.AppImage`. It builds debug
-MoonBit artifacts by default:
+`package/linux` runs the same build steps (including the Proton CEF runtime
+and helper installation), builds the `openseek` engine from the monorepo's
+`cmd/openseek` source, stages the application inputs under
+`target/proton-package-input/`, and delegates the AppDir layout, the launcher,
+the desktop entry, and the AppImage itself to `proton_cli package --format
+appimage`, which writes the AppImage below `dist/`. It builds debug MoonBit
+artifacts by default:
 
 ```sh
 moon run --target native package/linux
@@ -468,16 +478,12 @@ For an optimized AppImage, pass the package flag after Moon's `--` separator:
 moon run --target native package/linux -- --release
 ```
 
-Build requirements: `pkg-config` plus the GTK3 and WebKitGTK dev packages
-(`libgtk-3-dev` and `libwebkit2gtk-4.1-dev` on Debian/Ubuntu; `gtk3` and
-`webkit2gtk-4.1` on Arch), and `curl` (used to fetch `appimagetool` on first
-run if it is not already on `PATH`).
+Build requirements: `pkg-config` plus the GTK3 and X11 development packages
+(`libgtk-3-dev` and `libx11-dev` on Debian/Ubuntu), which Proton's CEF host
+links against.
 
-The AppImage bundles the desktop host, the engine, and the frontend assets,
-plus a read-only MoonBit toolchain seed. The first engine run initializes a
-writable toolchain copy under the per-user runtime directory and uses that as
-`MOON_HOME`. The AppImage still links against the system WebKitGTK: running it
-requires GTK3 and
-`libwebkit2gtk-4.1` installed on the host system, which is the standard
-arrangement for webview-based AppImages. If your system lacks FUSE2, run it
-with `APPIMAGE_EXTRACT_AND_RUN=1`.
+The AppImage bundles the desktop host, the CEF runtime, the engine, and the
+frontend assets, plus a read-only MoonBit toolchain seed. The first engine run
+initializes a writable toolchain copy under the per-user runtime directory and
+uses that as `MOON_HOME`. If your system lacks FUSE2, run the AppImage with
+`APPIMAGE_EXTRACT_AND_RUN=1`.

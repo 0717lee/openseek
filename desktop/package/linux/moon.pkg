@@ -4,8 +4,6 @@ import {
   "openseek_desktop/package/internal/ripgrep_assets",
   "openseek_desktop/package/internal/xterm_assets",
   "moonbitlang/async",
-  "moonbitlang/async/fs" @asyncfs,
-  "moonbitlang/async/process",
   "moonbitlang/core/argparse",
 }
 

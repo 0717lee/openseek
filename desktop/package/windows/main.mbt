@@ -1,31 +1,38 @@
 ///|
-const BundleDir : String = "dist/windows-x64/SeekMoon"
+const PackageInputRoot : String = "target/proton-package-input"
 
 ///|
-const ZipPath : String = "dist/SeekMoon-windows-x64.zip"
+const PackageAssetDir : String = PackageInputRoot + "/assets"
 
 ///|
-const InstallerScript : String = "installer/openseek-desktop.nsi"
+const PackageBinDir : String = PackageInputRoot + "/bin"
 
 ///|
-const InstallerPath : String = "dist/SeekMoon-Setup.exe"
+const RipgrepLicenseDir : String = PackageInputRoot + "/licenses/ripgrep"
 
 ///|
-const LocalMakensis : String = "dist/tools/nsis-3.12/makensis.exe"
+/// Proton names its Windows outputs after the lowercase product name from
+/// `proton.project.json`, below that file's `package.output` directory.
+const AppDir : String = "dist/seekmoon"
 
 ///|
-const ProgramFilesX86Makensis : String = "C:/Program Files (x86)/NSIS/makensis.exe"
+const ZipPath : String = "dist/seekmoon.zip"
 
 ///|
-const ProgramFilesMakensis : String = "C:/Program Files/NSIS/makensis.exe"
+/// Portable NSIS extracted beside the other packaging tools, for hosts
+/// without a system-wide NSIS installation.
+const LocalMakensisDir : String = "dist/tools/nsis-3.12"
 
 ///|
-const AppAssetDir : String = BundleDir + "/assets"
+const ProgramFilesX86MakensisDir : String = "C:/Program Files (x86)/NSIS"
 
 ///|
-const RipgrepLicenseDir : String = BundleDir + "/licenses/ripgrep"
+const ProgramFilesMakensisDir : String = "C:/Program Files/NSIS"
 
 ///|
+/// Proton always produces the Windows app directory. Keep only the optional
+/// distribution choices here instead of carrying Proton's string-valued CLI
+/// arguments into the packaging model.
 priv struct ArtifactPlan {
   zip : Bool
   installer : Bool
@@ -56,7 +63,7 @@ fn ArtifactPlan::parse(values : ArrayView[String]) -> ArtifactPlan raise {
 fn package_command() -> @argparse.Command {
   Command(
     "package/windows",
-    about="Build the Windows app bundle, portable zip, and NSIS installer.",
+    about="Prepare OpenSeek inputs and package the Windows app, portable zip, and NSIS installer with proton_cli.",
     flags=[
       FlagArg(
         "release",
@@ -84,208 +91,175 @@ fn ArtifactPlan::from_matches(
 }
 
 ///|
-async fn run_powershell(ws : @packaging.Workspace, script : String) -> Unit {
-  @packaging.run_checked(
-    "powershell",
-    [
-      "-NoProfile",
-      "-ExecutionPolicy",
-      "Bypass",
-      "-Command",
-      "$ErrorActionPreference = 'Stop'; " + script,
-    ],
-    dir=ws.dir(),
-  )
+/// Build the exact Proton command arguments for this artifact selection. The
+/// release flag must reach Proton because Proton 0.2 builds the native host
+/// itself and then packages that mode's executable. `installer` selects
+/// Proton's `nsis` format: Proton generates the installer script and compiles
+/// it with `makensis`.
+fn ArtifactPlan::proton_args(
+  self : ArtifactPlan,
+  workspace : @packaging.Workspace,
+  release~ : Bool,
+) -> Array[String] {
+  let args = [
+    "-C",
+    workspace.dir(),
+    "package",
+    "--config",
+    "proton.project.json",
+    "--format",
+    "app",
+  ]
+  if release {
+    args.push("--release")
+  }
+  if self.zip {
+    args.append(["--format", "zip"])
+  }
+  if self.installer {
+    args.append(["--format", "nsis"])
+  }
+  args
 }
 
 ///|
-/// Build everything the bundle needs. CEF replaces WebView2, so no WebView2
-/// SDK headers are fetched.
-async fn build_outputs(
-  ws : @packaging.Workspace,
+/// Build the application-specific inputs Proton cannot infer from
+/// `proton.project.json`. Proton builds the native host during `package`; this
+/// phase prepares only OpenSeek's generated frontend, embedded tools, and
+/// engine, plus the shared CEF installation that both builds require.
+async fn @packaging.Workspace::build_package_inputs(
+  self : @packaging.Workspace,
   release~ : Bool,
 ) -> (@xterm_assets.Assets, @ripgrep_assets.Assets) {
-  @packaging.ensure_cef_runtime(ws)
-  @packaging.build_frontend_bundle(ws, release~)
+  @packaging.setup_cef(self)
+  @packaging.build_frontend_bundle(self, release~)
   let terminal_assets = @xterm_assets.build(
-    ws,
+    self,
     @xterm_assets.windows_x64_target(),
   )
   let ripgrep_assets = @ripgrep_assets.build(
-    ws,
+    self,
     @ripgrep_assets.windows_x64_target(),
   )
-  @packaging.build_native_host(ws, release~, extra_args=["--warn-list", "-20"])
-  @packaging.build_engine(ws, release~)
+  @packaging.build_engine(self, release~)
   (terminal_assets, ripgrep_assets)
 }
 
 ///|
-async fn reset_bundle_dirs(ws : @packaging.Workspace) -> Unit {
-  @packaging.remove_path_if_exists(ws.at(BundleDir))
-  @packaging.remove_path_if_exists(ws.at(ZipPath))
-  @packaging.remove_path_if_exists(ws.at(InstallerPath))
-  @packaging.ensure_dir(ws.at(AppAssetDir))
-  @packaging.ensure_dir(ws.at(RipgrepLicenseDir))
-}
-
-///|
-async fn copy_bundle_files(
-  ws : @packaging.Workspace,
+/// Rebuild the declarative resource tree consumed by `package.resources`.
+/// Proton preserves this project-relative tree below the `Resources`
+/// directory beside the packaged executable; the host's runtime lookups
+/// deliberately know this one stable prefix.
+async fn @packaging.Workspace::stage_package_inputs(
+  self : @packaging.Workspace,
   terminal_assets : @xterm_assets.Assets,
   ripgrep_assets : @ripgrep_assets.Assets,
   release~ : Bool,
 ) -> Unit {
-  let native_binary = ws.native_binary(release~)
-  let engine_binary = ws.engine_binary(release~)
-  let bundled_engine = BundleDir + "/openseek.exe"
-  if !@asyncfs.exists(native_binary) {
-    raise @packaging.PackageError("native binary not found: \{native_binary}")
+  @packaging.remove_path_if_exists(self.at(PackageInputRoot))
+  @packaging.ensure_dir(self.at(PackageAssetDir))
+  @packaging.ensure_dir(self.at(PackageBinDir))
+  @packaging.ensure_dir(self.at(RipgrepLicenseDir))
+  @packaging.copy_file(
+    self.app_stylesheet(),
+    self.at(PackageAssetDir + "/app.css"),
+  )
+  for
+    pair in [
+      ("index.html", PackageAssetDir + "/index.html"),
+      ("frontend.js", PackageAssetDir + "/frontend.js"),
+      ("viewer.css", PackageAssetDir + "/viewer.css"),
+      ("codicon.ttf", PackageAssetDir + "/codicon.ttf"),
+    ] {
+    let (source, destination) = pair
+    @packaging.copy_file(self.at(source), self.at(destination))
   }
-  if !@asyncfs.exists(engine_binary) {
-    raise @packaging.PackageError(
-      "openseek engine binary not found: \{engine_binary}",
-    )
-  }
-  if !@asyncfs.exists(ws.at("frontend.js")) {
-    raise @packaging.PackageError(
-      "frontend bundle not found: \{ws.at("frontend.js")}",
-    )
-  }
-  @packaging.copy_file(
-    native_binary,
-    ws.at(BundleDir + "/openseek-desktop.exe"),
-  )
-  @packaging.copy_file(engine_binary, ws.at(bundled_engine))
-  @packaging.copy_file(ripgrep_assets.binary, ws.at(BundleDir + "/rg.exe"))
-  @packaging.copy_file(
-    ripgrep_assets.license_mit,
-    ws.at(RipgrepLicenseDir + "/LICENSE-MIT"),
-  )
-  @packaging.copy_file(
-    ripgrep_assets.unlicense,
-    ws.at(RipgrepLicenseDir + "/UNLICENSE"),
-  )
-  @pe.set_windows_gui_subsystem(ws.at(bundled_engine))
-  @packaging.copy_file(ws.at("index.html"), ws.at(AppAssetDir + "/index.html"))
-  @packaging.copy_file(ws.app_stylesheet(), ws.at(AppAssetDir + "/app.css"))
-  @packaging.copy_file(
-    ws.at("frontend.js"),
-    ws.at(AppAssetDir + "/frontend.js"),
-  )
-  @packaging.copy_file(ws.at("viewer.css"), ws.at(AppAssetDir + "/viewer.css"))
   // The verified terminal emulator assets generated during this packaging run
   // are loaded by index.html before frontend.js.
   @packaging.copy_file(
     terminal_assets.javascript,
-    ws.at(AppAssetDir + "/xterm.js"),
+    self.at(PackageAssetDir + "/xterm.js"),
   )
   @packaging.copy_file(
     terminal_assets.stylesheet,
-    ws.at(AppAssetDir + "/xterm.css"),
+    self.at(PackageAssetDir + "/xterm.css"),
   )
-  // The codicon font is served at the site root (`/codicon.ttf`), so it sits
-  // next to `viewer.css` rather than under `fonts/`.
+  @packaging.copy_tree(
+    self.mermaid_assets(),
+    self.at(PackageAssetDir + "/mermaid"),
+  )
+  @packaging.copy_tree(self.at("fonts"), self.at(PackageAssetDir + "/fonts"))
+  self.stage_viz_assets(self.at(PackageAssetDir + "/viz"), release~)
+  let bundled_engine = self.at(PackageBinDir + "/openseek.exe")
+  @packaging.copy_file(self.engine_binary(release~), bundled_engine)
+  @pe.set_windows_gui_subsystem(bundled_engine)
   @packaging.copy_file(
-    ws.at("codicon.ttf"),
-    ws.at(AppAssetDir + "/codicon.ttf"),
+    ripgrep_assets.binary,
+    self.at(PackageBinDir + "/rg.exe"),
   )
-  @packaging.copy_tree(ws.mermaid_assets(), ws.at(AppAssetDir + "/mermaid"))
-  @packaging.copy_tree(ws.at("fonts"), ws.at(AppAssetDir + "/fonts"))
-  ws.stage_viz_assets(ws.at(AppAssetDir + "/viz"), release~)
+  @packaging.copy_file(
+    ripgrep_assets.license_mit,
+    self.at(RipgrepLicenseDir + "/LICENSE-MIT"),
+  )
+  @packaging.copy_file(
+    ripgrep_assets.unlicense,
+    self.at(RipgrepLicenseDir + "/UNLICENSE"),
+  )
+  // The read-only MoonBit toolchain seed the host copies into its per-user
+  // runtime directory on first launch.
   let target = @moonbit.moonbit_windows_x64_toolchain()
   @moonbit.stage_moonbit_toolchain_seed(
-    ws,
+    self,
     target,
-    BundleDir + "/" + target.seed_relative_dir(),
+    PackageInputRoot + "/" + target.seed_relative_dir(),
   )
-  stage_proton_runtime(ws)
 }
 
 ///|
-/// Stage the CEF runtime the way the Windows loader needs it. proton.dll
-/// (and libcef.dll, which it imports) must sit in the executable's own
-/// directory: both are in the import table, and the DLL search never
-/// descends into a subdirectory, so a nested layout fails before any
-/// MoonBit code runs. proton.dll then derives every other path from its
-/// own module directory — cef_process.exe beside itself, `Resources\`
-/// (with `locales\`) under the same root — so flattening `bin\` into the
-/// bundle root keeps those defaults working too.
-async fn stage_proton_runtime(ws : @packaging.Workspace) -> Unit {
-  let dist = @packaging.proton_runtime_dist(ws).0
-  let bin = dist + "/bin"
-  for entry in @asyncfs.readdir(bin, sort=true) {
-    let source = "\{bin}/\{entry}"
-    if @asyncfs.kind(source) is Directory {
-      @packaging.copy_tree(source, ws.at(BundleDir + "/" + entry))
-    } else {
-      @packaging.copy_file(source, ws.at(BundleDir + "/" + entry))
+/// Proton compiles its generated installer with `makensis` from `PATH`. Return
+/// the directory to put first on `PATH` when NSIS lives in one of the known
+/// locations, or `None` when `makensis` already resolves on `PATH`.
+async fn makensis_dir(ws : @packaging.Workspace) -> String? {
+  for
+    dir in [
+      ws.at(LocalMakensisDir),
+      ProgramFilesX86MakensisDir,
+      ProgramFilesMakensisDir,
+    ] {
+    if @asyncfs.exists(dir + "/makensis.exe") {
+      return Some(dir)
     }
   }
-  @packaging.copy_tree(dist + "/Resources", ws.at(BundleDir + "/Resources"))
-}
-
-///|
-async fn zip_bundle(ws : @packaging.Workspace) -> Unit {
-  run_powershell(
-    ws,
-    "Compress-Archive -LiteralPath '\{BundleDir}' -DestinationPath '\{ZipPath}' -Force",
-  )
-}
-
-///|
-async fn ensure_makensis(ws : @packaging.Workspace) -> Unit {
-  if @asyncfs.exists(ws.at(LocalMakensis)) {
-    return
-  }
-  if @asyncfs.exists(ProgramFilesX86Makensis) {
-    return
-  }
-  if @asyncfs.exists(ProgramFilesMakensis) {
-    return
-  }
   let code = @process.run("makensis.exe", ["/VERSION"], inherit_env=true) catch {
+    error if @async.is_being_cancelled() => raise error
     _ => 1
   }
   if code != 0 {
-    let message = "makensis.exe not found. Install NSIS on PATH or extract portable NSIS to \{ws.at(LocalMakensis)}."
-    println(message)
-    raise @packaging.PackageError(message)
-  }
-}
-
-///|
-fn makensis_command(ws : @packaging.Workspace) -> String {
-  if @fs.path_exists(ws.at(LocalMakensis)) {
-    LocalMakensis
-  } else if @fs.path_exists(ProgramFilesX86Makensis) {
-    ProgramFilesX86Makensis
-  } else if @fs.path_exists(ProgramFilesMakensis) {
-    ProgramFilesMakensis
-  } else {
-    "makensis.exe"
-  }
-}
-
-///|
-async fn build_installer(ws : @packaging.Workspace) -> Unit {
-  if !@asyncfs.exists(ws.at(BundleDir + "/openseek-desktop.exe")) {
     raise @packaging.PackageError(
-      "Windows app bundle not found: \{ws.at(BundleDir)}",
+      "makensis.exe not found. Install NSIS on PATH or extract portable NSIS to \{ws.at(LocalMakensisDir)}/makensis.exe.",
     )
   }
-  // `ws.at(...)` is already absolute, so makensis receives unambiguous paths
-  // regardless of the cwd it runs in.
-  let app_version = ws.module_version()
-  @packaging.run_checked(
-    makensis_command(ws),
-    [
-      "/DAPP_VERSION=\{app_version}",
-      "/DSOURCE_DIR=\{ws.at(BundleDir)}",
-      "/DOUTPUT_DIR=\{ws.at("dist")}",
-      ws.at(InstallerScript),
-    ],
-    dir=ws.dir(),
+  None
+}
+
+///|
+/// Hand the prepared resource tree to Proton. From here Proton owns the host
+/// build, the app directory with the CEF runtime beside the executable, the
+/// package manifest, the portable ZIP, and the NSIS installer.
+async fn @packaging.Workspace::package_with_proton(
+  self : @packaging.Workspace,
+  artifacts : ArtifactPlan,
+  release~ : Bool,
+  makensis_dir~ : String?,
+) -> Unit {
+  let package_env = @sys.get_env_vars()
+  if makensis_dir is Some(dir) {
+    @envx.prepend_path_entry(package_env, dir) |> ignore
+  }
+  @packaging.run_proton_cli(
+    self,
+    artifacts.proton_args(self, release~),
+    extra_env=package_env,
   )
 }
 
@@ -296,22 +270,19 @@ async fn main {
   let artifacts = ArtifactPlan::from_matches(matches)
   let release = matches.flags.get("release").unwrap_or(false)
   let ws = @packaging.locate_workspace()
-  if artifacts.installer {
-    ensure_makensis(ws)
-  }
-  let (terminal_assets, ripgrep_assets) = build_outputs(ws, release~)
+  // A missing installer tool must also fail before the build.
+  let makensis_dir = if artifacts.installer { makensis_dir(ws) } else { None }
+  let (terminal_assets, ripgrep_assets) = ws.build_package_inputs(release~)
   println("built openseek engine: \{ws.engine_binary(release~)}")
-  reset_bundle_dirs(ws)
-  copy_bundle_files(ws, terminal_assets, ripgrep_assets, release~)
+  ws.stage_package_inputs(terminal_assets, ripgrep_assets, release~)
+  ws.package_with_proton(artifacts, release~, makensis_dir~)
+  println("generated \{ws.at(AppDir)}")
   if artifacts.zip {
-    zip_bundle(ws)
     println("generated \{ws.at(ZipPath)}")
   }
   if artifacts.installer {
-    build_installer(ws)
-    println("generated \{ws.at(InstallerPath)}")
+    println("generated the NSIS installer in \{ws.at("dist")}")
   }
-  println("generated \{ws.at(BundleDir)}")
 }
 
 ///|
@@ -342,13 +313,19 @@ test "windows package target app skips distribution archives" {
 ///|
 test "windows package target zip skips installer" {
   let matches = package_command().parse(argv=["--target", "zip"])
-  assert_eq(ArtifactPlan::from_matches(matches), { zip: true, installer: false })
+  assert_eq(ArtifactPlan::from_matches(matches), {
+    zip: true,
+    installer: false,
+  })
 }
 
 ///|
 test "windows package target installer skips zip" {
   let matches = package_command().parse(argv=["--target", "installer"])
-  assert_eq(ArtifactPlan::from_matches(matches), { zip: false, installer: true })
+  assert_eq(ArtifactPlan::from_matches(matches), {
+    zip: false,
+    installer: true,
+  })
 }
 
 ///|
@@ -386,4 +363,29 @@ test "windows package args reject removed zip-only flag" {
   } noraise {
     _ => fail("expected removed --zip-only flag to fail")
   }
+}
+
+///|
+/// Proton's formats mirror the artifact selection one to one: the app
+/// directory is always requested, and each distribution choice adds its own
+/// `--format`. The old `--no-build` and `--target` spellings are gone because
+/// Proton 0.2 builds the host and names the formats itself.
+async test "windows packaging maps artifacts to Proton formats" {
+  let workspace = @packaging.locate_workspace()
+  let everything : ArtifactPlan = { zip: true, installer: true }
+  let args = everything.proton_args(workspace, release=false)
+  assert_eq(args[0], "-C")
+  assert_eq(args[1], workspace.dir())
+  assert_true(args.contains("package"))
+  assert_true(args.contains("app"))
+  assert_true(args.contains("zip"))
+  assert_true(args.contains("nsis"))
+  assert_false(args.contains("--release"))
+  assert_false(args.contains("--target"))
+  assert_false(args.contains("--no-build"))
+  let app_only : ArtifactPlan = { zip: false, installer: false }
+  let release_args = app_only.proton_args(workspace, release=true)
+  assert_true(release_args.contains("--release"))
+  assert_false(release_args.contains("zip"))
+  assert_false(release_args.contains("nsis"))
 }

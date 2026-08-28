@@ -164,7 +164,7 @@ async fn @packaging.Workspace::build_package_inputs(
   self : @packaging.Workspace,
   release~ : Bool,
 ) -> (@xterm_assets.Assets, @ripgrep_assets.Assets) {
-  @packaging.run_proton_cli(self, ["-C", self.repo(), "cef", "setup"], extra_env={
+  @packaging.setup_cef(self, extra_env={
     "MACOSX_DEPLOYMENT_TARGET": MinMacOSVersion,
   })
   @packaging.build_frontend_bundle(self, release~)

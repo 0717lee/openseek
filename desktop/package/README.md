@@ -59,14 +59,14 @@ copy the results, and fail when a required source file is absent.
 | Platform | Installed command directory | Packager requirements |
 |---|---|---|
 | macOS | `SeekMoon.app/Contents/Resources/target/proton-package-input/bin/` | Stage under `target/proton-package-input/bin/`, make it executable, include it in Proton resources, and list executable code under `bundle.sign.binaries` in `desktop/proton.project.json`. |
-| Linux | `SeekMoon.AppDir/usr/bin/` | Copy into `usr/bin`, add it to the `chmod +x` list, and ensure AppRun/library paths cover any shipped shared libraries. |
-| Windows | `dist/windows-x64/SeekMoon/` | Copy the `.exe` into the bundle root. Put required DLLs where the Windows loader actually searches, normally beside the executable. The portable ZIP and NSIS installer consume this whole directory. |
+| Linux | `<AppDir>/usr/Resources/target/proton-package-input/bin/` | Stage under `target/proton-package-input/bin/`, add it to the `chmod +x` list, and include it in Proton resources; Proton lays out the AppDir, launcher, and AppImage. |
+| Windows | `seekmoon/Resources/target/proton-package-input/bin/` | Stage the `.exe` under `target/proton-package-input/bin/` and include it in Proton resources. The host puts that directory first on `PATH`; any DLL the tool needs must sit beside it there. Proton's portable ZIP and NSIS installer consume the whole app directory. |
 
 Also stage license and notice files:
 
 - macOS: `target/proton-package-input/licenses/<tool>/`
-- Linux: `SeekMoon.AppDir/usr/share/licenses/<tool>/`
-- Windows: `SeekMoon/licenses/<tool>/`
+- Linux: `target/proton-package-input/licenses/<tool>/`
+- Windows: `target/proton-package-input/licenses/<tool>/`
 
 If the upstream license requires attribution elsewhere, update the product's
 notices as well. Shipping only the executable is not license-complete.
