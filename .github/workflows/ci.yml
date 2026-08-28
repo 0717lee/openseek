@@ -5,25 +5,18 @@ on:
     branches: [main]
   pull_request:
 
-# A newer PR head supersedes its older checks. Keep main runs complete so every
+# A newer PR head supersedes its older check. Keep main runs complete so every
 # merged commit still receives a full CI result.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  test-native:
-    name: test native (${{ matrix.shard }})
+  test-core:
+    name: test native (core)
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        shard:
-          - core
-          - editor
-          - desktop
     env:
       # Pinned, not `latest`: stable 0.10.11 (moon 0.1.20260827) crashes the
       # native backend on moonbit-community/graphviz@0.1.3
@@ -38,61 +31,41 @@ jobs:
       - name: Set up MoonBit (stable)
         run: |
           curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s -- "$MOONBIT_VERSION"
-          echo "$HOME/.moon/bin" >> $GITHUB_PATH
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
 
       - name: Show MoonBit version
-        run: |
-          moon version --all
+        run: moon version --all
 
       - name: Update MoonBit package registry
         run: moon update
 
-      # Proton comes from the registry, so the version it is pinned to lives in
-      # desktop/moon.mod and nowhere else. Read it back here rather than
-      # repeating it, and reuse it for both the CEF cache key and the CLI.
-      - name: Resolve pinned Proton version
-        if: matrix.shard == 'desktop'
-        id: proton
+      # The committed root workspace keeps desktop available to developer
+      # commands such as `moon run ./desktop/package/dev`. This checkout is
+      # disposable, so remove only that member here: core still resolves the
+      # local protocol and editor modules, while desktop's Proton prebuild is
+      # owned by the path-filtered Desktop workflow.
+      - name: Scope workspace to core
         run: |
-          version="$(sed -n 's/.*"moonbit-community\/proton@\([^"]*\)".*/\1/p' desktop/moon.mod)"
-          test -n "$version"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
-      # Pull requests may restore the default branch's cache, but their own
-      # merge-ref caches are private to that PR and cannot warm other branches.
-      - name: Restore Proton installation
-        if: matrix.shard == 'desktop'
-        id: proton-cache
-        uses: actions/cache/restore@v4
-        with:
-          # Proton 0.2 installs an immutable CEF SDK/runtime in the shared store
-          # and its versioned subprocess helper beside it. Include the pinned
-          # MoonBit version because the helper is compiled by that toolchain.
-          path: |
-            ~/.proton/store
-            ~/.proton/helpers
-          key: proton-${{ runner.os }}-${{ runner.arch }}-${{ steps.proton.outputs.version }}-moon-${{ env.MOONBIT_VERSION }}
+          sed -i '/"\.\/desktop",/d' moon.work
+          if grep -Fq '"./desktop"' moon.work; then
+            echo "desktop remains in the core CI workspace" >&2
+            exit 1
+          fi
 
       - name: Check formatting
-        if: matrix.shard == 'core'
         run: moon fmt --check
 
       - name: Check native and JS targets
-        if: matrix.shard == 'core'
-        # This is the local-dependency integration check: desktop must compile
-        # against the editor member from this checkout. Keep both targets
-        # explicit and deny warnings across the complete integrated workspace.
+        # Keep the local-dependency integration check explicit and deny
+        # warnings across the core workspace, including local protocol/editor.
         run: |
           moon check --target native --deny-warn
           moon check --target js --deny-warn
 
       - name: Check generated interfaces
-        if: matrix.shard == 'core'
         # Generated interfaces are toolchain-versioned, so compare them only
-        # with the stable channel that owns the committed `.mbti`. This covers
-        # the editor's public interfaces from the same checkout too. Ignore
-        # blank-only formatter drift, but still reject content changes and new
-        # `.mbti`.
+        # with the stable channel that owns the committed `.mbti`. Ignore
+        # blank-only formatter drift, but reject content changes and new files.
         run: |
           moon info
           untracked_mbti="$(git ls-files --others --exclude-standard -- '*.mbti')"
@@ -103,58 +76,10 @@ jobs:
             exit 1
           fi
 
-      # Compile checks do not parse proton.project.json. Let the pinned CLI
-      # resolve a package plan so config-schema migrations fail in CI before a
-      # developer or release job reaches `proton_cli dev` or `package`. CI runs
-      # on Linux, so use its host-native appimage format for validation instead
-      # of the config's macOS formats; release packaging still uses the config.
-      - name: Validate Proton project config
-        if: matrix.shard == 'desktop'
-        run: |
-          moonx "moonbit-community/proton_cli@${{ steps.proton.outputs.version }}" \
-            -C "$PWD/desktop" package --config proton.project.json \
-            --package . --format appimage --dry-run
-
-      # Proton 0.2 builds its Linux subprocess helper during `cef setup`. Its
-      # prebuild asks pkg-config for both gtk+-3.0 and x11, so the runner needs
-      # the development packages rather than only the shared runtime libraries.
-      - name: Install Proton Linux build dependencies
-        if: matrix.shard == 'desktop'
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes libgtk-3-dev libx11-dev
-
-      # `moon update` only refreshes the registry index. The published CLI
-      # installs Proton 0.2's shared CEF SDK/runtime under ~/.proton/store and
-      # its subprocess helper under ~/.proton/helpers; it no longer writes the
-      # old project-local .proton/runtime.json manifest.
-      - name: Set up Proton CEF runtime and helper
-        if: matrix.shard == 'desktop'
-        run: |
-          moonx "moonbit-community/proton_cli@${{ steps.proton.outputs.version }}" \
-            -C "$PWD" cef setup
-
-      # The desktop shard is the sole Linux writer. PR jobs remain restore-only,
-      # so no second job races to reserve the same key.
-      - name: Save Proton installation
-        if: >-
-          matrix.shard == 'desktop' &&
-          github.event_name == 'push' &&
-          steps.proton-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ~/.proton/store
-            ~/.proton/helpers
-          key: ${{ steps.proton-cache.outputs.cache-primary-key }}
-
-      # Keep the root workspace active so local dependencies such as
-      # openseek_protocol and editor resolve from this checkout. MOON_WORK=off
-      # would silently replace available members with registry releases, or
-      # fail for members that have not been published. Passing package paths
-      # narrows only the tests, without changing dependency resolution.
-      - name: Test native core
-        if: matrix.shard == 'core'
+      # Passing package paths narrows the tests without replacing local
+      # workspace dependencies with registry releases. The outline guard makes
+      # a broken selector fail instead of reporting a fast, empty success.
+      - name: Test core native and JS targets
         run: |
           set -o pipefail
           packages="$(
@@ -166,64 +91,17 @@ jobs:
             | sed -e 's#/moon.pkg$##' -e 's#^moon.pkg$#.#'
           )"
           test -n "$packages"
-          test_count="$(
+          native_test_count="$(
             printf '%s\n' "$packages" \
               | xargs moon test --target native --outline \
               | awk 'END { print NR }'
           )"
-          test "$test_count" -gt 0
-          printf 'Selected %s native core tests\n' "$test_count"
+          test "$native_test_count" -gt 0
+          printf 'Selected %s native core tests\n' "$native_test_count"
           printf '%s\n' "$packages" \
             | xargs moon test --target native -j "$(nproc)"
-
-      - name: Test native editor
-        if: matrix.shard == 'editor'
-        run: |
-          set -o pipefail
-          packages="$(
-            git ls-files -- 'editor/moon.pkg' 'editor/**/moon.pkg' \
-              ':!editor/tests/fixtures/**' \
-            | sed 's#/moon.pkg$##'
-          )"
-          test -n "$packages"
-          test_count="$(
-            printf '%s\n' "$packages" \
-              | xargs moon test --target native --outline \
-              | awk 'END { print NR }'
-          )"
-          test "$test_count" -gt 0
-          printf 'Selected %s native editor tests\n' "$test_count"
           printf '%s\n' "$packages" \
-            | xargs moon test --target native -j "$(nproc)"
-
-      - name: Test native desktop
-        if: matrix.shard == 'desktop'
-        # No Xvfb: nothing here initializes CEF or opens a window. Loading
-        # libproton needs the Linux libraries above, not a display.
-        run: |
-          set -o pipefail
-          packages="$(
-            git ls-files -- 'desktop/moon.pkg' 'desktop/**/moon.pkg' \
-            | sed 's#/moon.pkg$##'
-          )"
-          test -n "$packages"
-          test_count="$(
-            printf '%s\n' "$packages" \
-              | xargs moon test --target native --outline \
-              | awk 'END { print NR }'
-          )"
-          test "$test_count" -gt 0
-          printf 'Selected %s native desktop tests\n' "$test_count"
-          printf '%s\n' "$packages" \
-            | xargs moon test --target native -j "$(nproc)"
-
-      - name: Test JS target
-        if: matrix.shard == 'desktop'
-        # Proton 0.2's workspace prebuild resolves the native CEF SDK for JS
-        # tests too, so keep the complete JS suite after the shared setup.
-        run: |
-          moon test --target js
+            | xargs moon test --target js
 
       - name: Cram (offline CLI docs)
-        if: matrix.shard == 'desktop'
         run: moon cram test tests/cram

@@ -1,0 +1,305 @@
+name: Desktop
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "desktop/**"
+      - "editor/**"
+      - "protocol/**"
+      - "agent*/**"
+      - "cmd/**"
+      - "deepseek/**"
+      - "internal/**"
+      - "jsonrpc/**"
+      - "mcp/**"
+      - "prompt/**"
+      - "scripts/**"
+      - "testkit/**"
+      - "tui/**"
+      - "viz/**"
+      - "viz_export/**"
+      - "moon.mod"
+      - "moon.pkg"
+      - "moon.work"
+      - ".gitmodules"
+      - "justfile"
+      - ".github/workflows/desktop.yml"
+      - ".github/workflows/desktop-release.yml"
+  pull_request:
+    paths:
+      - "desktop/**"
+      - "editor/**"
+      - "protocol/**"
+      - "agent*/**"
+      - "cmd/**"
+      - "deepseek/**"
+      - "internal/**"
+      - "jsonrpc/**"
+      - "mcp/**"
+      - "prompt/**"
+      - "scripts/**"
+      - "testkit/**"
+      - "tui/**"
+      - "viz/**"
+      - "viz_export/**"
+      - "moon.mod"
+      - "moon.pkg"
+      - "moon.work"
+      - ".gitmodules"
+      - "justfile"
+      - ".github/workflows/desktop.yml"
+      - ".github/workflows/desktop-release.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test-desktop:
+    name: test native (desktop, ${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            os: ubuntu-latest
+          - platform: macos
+            os: macos-latest
+          - platform: windows
+            os: windows-latest
+    env:
+      # Keep the same compiler as the core and editor workflows. The next
+      # stable compiler currently ICEs on graphviz and changes formatting.
+      MOONBIT_VERSION: "0.10.10+f8a486b6f"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up MoonBit on Unix
+        if: runner.os != 'Windows'
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s -- "$MOONBIT_VERSION"
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      # The official PowerShell installer reads the same exact version pin from
+      # MOONBIT_INSTALL_VERSION. The MSVC step exposes cl.exe and the Windows SDK
+      # required by Moon's native backend and Proton's helper build.
+      - name: Set up MoonBit on Windows
+        if: runner.os == 'Windows'
+        env:
+          MOONBIT_INSTALL_VERSION: ${{ env.MOONBIT_VERSION }}
+        run: |
+          Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
+          irm https://cli.moonbitlang.com/install/powershell.ps1 | iex
+          "$env:USERPROFILE\.moon\bin" |
+            Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Set up MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Show MoonBit version
+        run: moon version --all
+
+      - name: Update MoonBit package registry
+        run: moon update
+
+      # Use Node for this tiny manifest read because the same command runs in
+      # Bash and PowerShell. The Proton version remains single-sourced.
+      - name: Resolve pinned Proton version
+        id: proton
+        run: >-
+          node -e 'const fs=require("fs");
+          const text=fs.readFileSync("desktop/moon.mod","utf8");
+          const match=text.match(/"moonbit-community\/proton@([^"]+)"/);
+          if(!match)throw new Error("pinned Proton version not found");
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,"version="+match[1]+"\n");'
+
+      - name: Restore Proton installation
+        id: proton-cache
+        uses: actions/cache/restore@v4
+        with:
+          # Proton 0.2 installs an immutable CEF runtime in the shared store and
+          # a compiler-specific helper beside it.
+          path: |
+            ~/.proton/store
+            ~/.proton/helpers
+          key: proton-${{ runner.os }}-${{ runner.arch }}-${{ steps.proton.outputs.version }}-moon-${{ env.MOONBIT_VERSION }}
+
+      # OpenSeek's current package inputs are macOS-specific (`.icns`,
+      # macos-arm64 tools, and `.dylib` files). Keep package-schema validation on
+      # that host; Linux and Windows below validate the desktop code and Proton
+      # runtime integration without pretending release inputs exist for them.
+      - name: Validate Proton project config
+        if: matrix.platform == 'macos'
+        run: |
+          moonx "moonbit-community/proton_cli@${{ steps.proton.outputs.version }}" \
+            -C "$PWD/desktop" package --config proton.project.json \
+            --package . --format app --dry-run
+
+      # Only Linux needs pkg-config development metadata. macOS uses its system
+      # frameworks; Windows uses the MSVC environment configured above.
+      - name: Install Proton Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes libgtk-3-dev libx11-dev
+
+      - name: Set up Proton CEF runtime and helper on Unix
+        if: runner.os != 'Windows'
+        run: |
+          moonx "moonbit-community/proton_cli@${{ steps.proton.outputs.version }}" \
+            -C "$PWD" cef setup
+
+      - name: Set up Proton CEF runtime and helper on Windows
+        if: runner.os == 'Windows'
+        env:
+          _CL_: /utf-8
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          moonx "moonbit-community/proton_cli@${{ steps.proton.outputs.version }}" -C $PWD cef setup
+
+      # Pull requests restore caches but do not publish merge-ref-only entries.
+      # Main is the sole writer; platform-specific keys cannot race each other.
+      - name: Save Proton installation
+        if: >-
+          github.event_name == 'push' &&
+          steps.proton-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.proton/store
+            ~/.proton/helpers
+          key: ${{ steps.proton-cache.outputs.cache-primary-key }}
+
+      # Check only desktop packages after CEF setup because Proton's workspace
+      # prebuild resolves the installed runtime even for compile-only commands.
+      # Imported core, protocol, and editor packages still resolve locally.
+      - name: Check desktop packages on Unix
+        if: runner.os != 'Windows'
+        run: |
+          set -o pipefail
+          packages="$(
+            git ls-files -- 'desktop/moon.pkg' 'desktop/**/moon.pkg' \
+              | sed 's#/moon.pkg$##'
+          )"
+          test -n "$packages"
+          printf '%s\n' "$packages" \
+            | xargs moon check --target native --deny-warn
+          if [ "${{ matrix.platform }}" = linux ]; then
+            printf '%s\n' "$packages" | xargs moon fmt --check
+            printf '%s\n' "$packages" \
+              | xargs moon check --target js --deny-warn
+          fi
+
+      - name: Check desktop packages on Windows
+        if: runner.os == 'Windows'
+        env:
+          _CL_: /utf-8
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          $manifests = @(
+            git ls-files -- "desktop/moon.pkg" "desktop/**/moon.pkg"
+          )
+          $packages = @(
+            $manifests | ForEach-Object { $_ -replace "/moon\.pkg$", "" }
+          )
+          if ($packages.Count -eq 0) {
+            throw "no desktop packages selected"
+          }
+          moon check --target native --deny-warn @packages
+
+      # One platform is enough to own canonical generated interfaces; the
+      # native checks above still compile platform-specific declarations.
+      - name: Check generated desktop interfaces
+        if: matrix.platform == 'linux'
+        run: |
+          set -o pipefail
+          packages="$(
+            git ls-files -- 'desktop/moon.pkg' 'desktop/**/moon.pkg' \
+              | sed 's#/moon.pkg$##'
+          )"
+          test -n "$packages"
+          printf '%s\n' "$packages" | xargs moon info
+          untracked_mbti="$(
+            git ls-files --others --exclude-standard -- 'desktop/**/*.mbti'
+          )"
+          if [ -n "$untracked_mbti" ] ||
+            ! git diff --quiet --ignore-blank-lines -- 'desktop/**/*.mbti'; then
+            git status --short -- 'desktop/**/*.mbti'
+            git diff --ignore-blank-lines -- 'desktop/**/*.mbti'
+            exit 1
+          fi
+
+      # The outline guards prevent a broken selector from becoming an empty
+      # success. Native execution uses every runner CPU on all three hosts.
+      - name: Test desktop native target on Unix
+        if: runner.os != 'Windows'
+        run: |
+          set -o pipefail
+          packages="$(
+            git ls-files -- 'desktop/moon.pkg' 'desktop/**/moon.pkg' \
+              | sed 's#/moon.pkg$##'
+          )"
+          test -n "$packages"
+          native_test_count="$(
+            printf '%s\n' "$packages" \
+              | xargs moon test --target native --outline \
+              | awk 'END { print NR }'
+          )"
+          test "$native_test_count" -gt 0
+          printf 'Selected %s native desktop tests\n' "$native_test_count"
+          printf '%s\n' "$packages" \
+            | xargs moon test --target native -j "$(getconf _NPROCESSORS_ONLN)"
+
+      - name: Test desktop native target on Windows
+        if: runner.os == 'Windows'
+        env:
+          _CL_: /utf-8
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          $manifests = @(
+            git ls-files -- "desktop/moon.pkg" "desktop/**/moon.pkg"
+          )
+          $packages = @(
+            $manifests | ForEach-Object { $_ -replace "/moon\.pkg$", "" }
+          )
+          if ($packages.Count -eq 0) {
+            throw "no desktop packages selected"
+          }
+          $nativeOutline = @(
+            moon test --target native --outline @packages
+          )
+          if ($nativeOutline.Count -eq 0) {
+            throw "no native desktop tests selected"
+          }
+          Write-Output "Selected $($nativeOutline.Count) native desktop tests"
+          $jobs = [Environment]::ProcessorCount
+          moon test --target native -j $jobs @packages
+
+      # JS output is platform-independent, so Linux owns it instead of running
+      # the same 1,000+ tests three times.
+      - name: Test desktop JS target
+        if: matrix.platform == 'linux'
+        run: |
+          set -o pipefail
+          packages="$(
+            git ls-files -- 'desktop/moon.pkg' 'desktop/**/moon.pkg' \
+              | sed 's#/moon.pkg$##'
+          )"
+          test -n "$packages"
+          test_count="$(
+            printf '%s\n' "$packages" \
+              | xargs moon test --target js --outline \
+              | awk 'END { print NR }'
+          )"
+          test "$test_count" -gt 0
+          printf 'Selected %s JS desktop tests\n' "$test_count"
+          printf '%s\n' "$packages" | xargs moon test --target js

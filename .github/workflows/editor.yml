@@ -22,9 +22,10 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # Root CI checks the integrated native/JS workspace on Linux. This job keeps
-  # the editor's own all-target and cross-platform contract, using its scoped
-  # editor/moon.work so Proton setup is not part of an editor-only gate.
+  # Root CI checks the editor as a local core dependency, while desktop.yml
+  # checks it in the downstream desktop. This workflow owns the editor's own
+  # all-target and cross-platform contract, using editor/moon.work so Proton
+  # setup is not part of an editor-only gate.
   moon-gates:
     name: moon (${{ matrix.channel }}, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
