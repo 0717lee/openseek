@@ -16,8 +16,21 @@ function optionalPayloadEnv() {
   }
 }
 
+function findEnvValue(env, name) {
+  if (Object.hasOwn(env, name)) {
+    return env[name];
+  }
+  const normalizedName = name.toLowerCase();
+  for (const [key, value] of Object.entries(env)) {
+    if (key.toLowerCase() === normalizedName) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
 function envValue(env, name) {
-  return env[name] ?? process.env[name] ?? "";
+  return findEnvValue(env, name) ?? findEnvValue(process.env, name) ?? "";
 }
 
 function commandName(command) {
@@ -34,7 +47,8 @@ function pathEntries(env) {
 }
 
 function commandExists(env, command) {
-  const isWindows = process.platform === "win32" || env.OS === "Windows_NT";
+  const isWindows =
+    process.platform === "win32" || envValue(env, "OS") === "Windows_NT";
   const extensions = isWindows
     ? ["", ".exe", ".cmd", ".bat"]
     : [""];
@@ -48,8 +62,8 @@ function commandExists(env, command) {
   return false;
 }
 
-function configuredCompiler(env) {
-  for (const name of ["MOON_CC", "MOONBIT_CC", "MBC_CC", "CC", "CXX"]) {
+function configuredCompiler(env, names) {
+  for (const name of names) {
     const value = envValue(env, name).trim();
     if (value.length > 0) {
       return value;
@@ -129,20 +143,30 @@ function detectedLinkStyle(env) {
     default:
       break;
   }
-  const compiler = configuredCompiler(env);
-  const compilerStyle = linkStyleFromCompiler(compiler);
-  if (compilerStyle.length > 0) {
-    return compilerStyle;
+  const moonCompiler = configuredCompiler(env, [
+    "MOON_CC",
+    "MOONBIT_CC",
+    "MBC_CC",
+  ]);
+  const moonCompilerStyle = linkStyleFromCompiler(moonCompiler);
+  if (moonCompilerStyle.length > 0) {
+    return moonCompilerStyle;
   }
-  const isWindows = process.platform === "win32" || env.OS === "Windows_NT";
+  const isWindows =
+    process.platform === "win32" || envValue(env, "OS") === "Windows_NT";
   if (isWindows && (hasMsvcEnvironment(env) || hasMsvcToolchain(env))) {
+    return "msvc-driver";
+  }
+  const genericCompiler = configuredCompiler(env, ["CC", "CXX"]);
+  const genericCompilerStyle = linkStyleFromCompiler(genericCompiler);
+  if (genericCompilerStyle.length > 0) {
+    return genericCompilerStyle;
+  }
+  if (commandExists(env, "clang-cl") || commandExists(env, "cl")) {
     return "msvc-driver";
   }
   if (commandExists(env, "clang")) {
     return "clang-driver";
-  }
-  if (commandExists(env, "clang-cl") || commandExists(env, "cl")) {
-    return "msvc-driver";
   }
   if (commandExists(env, "gcc") || commandExists(env, "g++")) {
     return "mingw-driver";
@@ -164,7 +188,8 @@ function windowsGuiLinkFlags(env) {
 
 function main() {
   const env = optionalPayloadEnv();
-  const isWindows = process.platform === "win32" || env.OS === "Windows_NT";
+  const isWindows =
+    process.platform === "win32" || envValue(env, "OS") === "Windows_NT";
   if (!isWindows) {
     process.stdout.write(JSON.stringify({ link_configs: [] }));
     return;
