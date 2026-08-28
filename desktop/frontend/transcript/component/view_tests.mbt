@@ -632,13 +632,16 @@ test "every tool request and result of a run is on display as its own row" {
 /// precede either result row.
 #warnings("-alert_unstable")
 test "one assistant event renders its call burst before its results" {
-  let rendered = activity_view(
-    [
-      { ..tool_item("alpha", brief="first request"), sequence: Some(21), },
-      { ..tool_item("beta", brief="second request"), sequence: Some(21), },
-    ],
-    _ => @cmd.none,
-  )
+  let tools = [
+    { ..tool_item("alpha", brief="first request"), sequence: Some(21), },
+    { ..tool_item("beta", brief="second request"), sequence: Some(21), },
+  ]
+  let rows = tool_run_views(tools)
+  assert_eq(rows.to_array().map(entry => entry.0), [
+    "request\u{0}alpha\u{0}0", "request\u{0}beta\u{0}1", "result\u{0}alpha\u{0}0",
+    "result\u{0}beta\u{0}1",
+  ])
+  let rendered = activity_view(tools, _ => @cmd.none)
   let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
   guard (
       markup.find("First request"),
@@ -690,6 +693,29 @@ test "different assistant events keep each result beside its request" {
   assert_true(first_call < first_result)
   assert_true(first_result < second_call)
   assert_true(second_call < second_result)
+}
+
+///|
+/// Background runtime updates are result-shaped for layout, but they are not
+/// responses to model tool calls and must retain their standalone status name.
+#warnings("-alert_unstable")
+test "a synthetic runtime update keeps its notice label" {
+  let rendered = tool_call_view({
+    kind: Tool(
+      call_id="",
+      name="moon_check passed",
+      arguments=None,
+      has_result=true,
+      is_error=false,
+      brief=None,
+    ),
+    content: "Finished.",
+    ts: None,
+    sequence: Some(21),
+  })
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  assert_true(markup.contains("Moon_check passed"))
+  assert_false(markup.contains("Tool result"))
 }
 
 ///|
