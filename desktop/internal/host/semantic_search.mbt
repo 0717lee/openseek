@@ -360,7 +360,11 @@ fn semantic_glob_matches(pattern : String, path : String) -> Bool {
 fn semantic_path_matches_globs(path : String, value : String) -> Bool {
   for glob in expand_text_search_view_globs(value) {
     for expanded in expand_text_search_braces(glob) {
-      if semantic_glob_matches(expanded, path) {
+      if semantic_glob_matches(expanded, path) ||
+        (
+          expanded.has_prefix("**/") &&
+          semantic_glob_matches(expanded[3:].to_owned(), path)
+        ) {
         return true
       }
     }
