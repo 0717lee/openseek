@@ -719,6 +719,33 @@ test "a synthetic runtime update keeps its notice label" {
 }
 
 ///|
+/// Codex command executions stream output before their completed item arrives.
+/// Keep that feedback visible as a distinct pending row without claiming the
+/// tool has produced its final result.
+#warnings("-alert_unstable")
+test "a pending tool keeps its streamed output visible" {
+  let rendered = tool_call_view({
+    kind: Tool(
+      call_id="command-1",
+      name="shell",
+      arguments=Some("{\"command\":\"moon test\"}"),
+      has_result=false,
+      is_error=false,
+      brief=Some("moon test"),
+    ),
+    content: "package core: 12/20 tests passed",
+    ts: None,
+    sequence: None,
+  })
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  assert_true(markup.contains("Moon test"))
+  assert_true(markup.contains("Tool output · shell"))
+  assert_true(markup.contains("package core: 12/20 tests passed"))
+  assert_true(markup.contains("<details class=\"tool-result pending\">"))
+  assert_false(markup.contains("Tool result · shell"))
+}
+
+///|
 #warnings("-alert_unstable")
 test "a mixed activity keeps its call on display beside the thought fold" {
   let rendered = activity_view(
