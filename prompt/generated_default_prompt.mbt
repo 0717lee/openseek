@@ -53,7 +53,7 @@ fn default_prompt() -> String {
     #|
     #|A minimal script can inspect paths without spawning a process:
     #|
-    #|```mbt nocheck
+    #|```mbtx
     #|///|
     #|import {
     #|  "moonbitlang/async",
@@ -135,7 +135,7 @@ fn default_prompt() -> String {
     #|`Output`'s accessor methods — `out.stdout()`, `out.stderr()`, and
     #|`out.exit_code()`:
     #|
-    #|```mbt nocheck
+    #|```mbtx
     #|///|
     #|import {
     #|  "moonbitlang/async",
@@ -166,7 +166,7 @@ fn default_prompt() -> String {
     #|For compiler feedback, stream the line-delimited JSON from one `moon check`
     #|rather than collecting it and parsing it afterward:
     #|
-    #|```mbt nocheck
+    #|```mbtx
     #|///|
     #|import {
     #|  "moonbitlang/async",

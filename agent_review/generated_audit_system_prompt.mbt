@@ -56,7 +56,7 @@ fn audit_system_prompt() -> String {
     #|
     #|
     #|
-    #|```mbt nocheck
+    #|```mbtx
     #|///|
     #|import {
     #|  "moonbitlang/async",
