@@ -202,8 +202,9 @@ let spawnable_commands : Array[(String, Array[String])] = [
   // `xargs`, `python`, `node`, `perl`, `make`). Myshell exists so no shell sits
   // between the agent and a process; what the list buys is that going around
   // it takes intent.  
-  ("moonx",[]),
-  // moonx inherit sandbox policy from the agent, so it is not a security perimeter. 
+  // moonx inherits the sandbox policy from the agent, so it is not a security
+  // perimeter.
+  ("moonx", []),
 ]
 
 ///|
