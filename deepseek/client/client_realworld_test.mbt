@@ -189,3 +189,43 @@ async test "realworld Kimi API multi-turn reasoning-content smoke test" {
   assert_true(second.content.contains("done"))
   assert_true(second.usage.total_tokens > 0)
 }
+
+///|
+async test "realworld GLM streaming tool-call smoke test" {
+  guard @env.get_env_var("GLM") is Some(api_key) && api_key != "" else {
+    println(
+      "GLM environment variable is not set or is empty; skipping realworld GLM streaming tool-call smoke test",
+    )
+    return
+  }
+
+  let client = @client.Client(api_key~, model=Glm(G53), thinking=High)
+  let tool = @deepseek.ToolDefinition(
+    "return_token",
+    "Return the exact token requested by the user.",
+    {
+      "type": "object",
+      "properties": { "token": { "type": "string" } },
+      "required": ["token"],
+    },
+    strict=true,
+  )
+  let response = client.chat(
+    [
+      ChatMessage(
+        System,
+        content=(
+          #|You must call the return_token tool exactly once. Do not answer in text.
+        ),
+      ),
+      ChatMessage(User, content="Call return_token with token pong."),
+    ],
+    tools=[tool],
+    stream=StreamHandler(on_content_delta=_ => ()),
+  )
+  assert_eq(response.tool_calls.length(), 1)
+  assert_eq(response.tool_calls[0].name, "return_token")
+  assert_true(response.tool_calls[0].id != "")
+  assert_true(response.tool_calls[0].arguments.contains("pong"))
+  assert_true(response.usage.total_tokens > 0)
+}
