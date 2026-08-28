@@ -56,7 +56,7 @@ fn markdown_folding_facts_json(
       None => Json::null()
     }
   }
-  Json::object({
+  Json({
     "alpha": offset_of("## Alpha"),
     "beta": offset_of("## Beta"),
     "deep": offset_of("### Deep"),

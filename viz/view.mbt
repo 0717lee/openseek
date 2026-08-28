@@ -1011,7 +1011,7 @@ fn add_edit_diff(json : Json) -> Json {
     return json
   }
   if old != new {
-    fields["generated_diff"] = Json::string(@edit_diff.generate(old, new))
+    fields["generated_diff"] = Json(@edit_diff.generate(old, new))
   }
   json
 }

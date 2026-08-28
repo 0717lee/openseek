@@ -76,9 +76,9 @@ pub(all) struct CancelReply {
 pub impl ToJson for CancelReply with fn to_json(self) {
   let fields : Map[String, Json] = Map([])
   if self.run_id is Some(run_id) {
-    fields["run_id"] = Json::string(run_id)
+    fields["run_id"] = Json(run_id)
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -145,17 +145,17 @@ pub(all) struct RunSettlementPayload {
 ///|
 pub impl ToJson for RunSettlementPayload with fn to_json(self) {
   let fields = {
-    "run_id": Json::string(self.run_id),
-    "session": Json::string(self.session),
-    "status": Json::string(self.status),
+    "run_id": Json(self.run_id),
+    "session": Json(self.session),
+    "status": Json(self.status),
   }
   if self.submission_id is Some(submission_id) {
-    fields["submission_id"] = Json::string(submission_id)
+    fields["submission_id"] = Json(submission_id)
   }
   if self.exit_code is Some(exit_code) {
-    fields["exit_code"] = Json::number(exit_code.to_double())
+    fields["exit_code"] = Json(exit_code.to_double())
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -368,11 +368,11 @@ pub(all) struct SessionUserMessage {
 /// itself writes: an untagged prompt is byte for byte the line every record
 /// held before the field existed.
 pub impl ToJson for SessionUserMessage with fn to_json(self) {
-  let fields = { "content": Json::string(self.content) }
+  let fields = { "content": Json(self.content) }
   if self.submission_id is Some(submission_id) {
-    fields["submission_id"] = Json::string(submission_id)
+    fields["submission_id"] = Json(submission_id)
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -413,17 +413,17 @@ pub(all) struct SessionAssistantMessage {
 /// Preserve the store's compact assistant payload: optional fields are absent
 /// rather than null, and replay provenance appears only on checkpoint copies.
 pub impl ToJson for SessionAssistantMessage with fn to_json(self) {
-  let fields = { "content": Json::string(self.content) }
+  let fields = { "content": Json(self.content) }
   if self.tool_calls is Some(tool_calls) {
     fields["tool_calls"] = ToJson::to_json(tool_calls)
   }
   if self.reasoning_content is Some(reasoning_content) {
-    fields["reasoning_content"] = Json::string(reasoning_content)
+    fields["reasoning_content"] = Json(reasoning_content)
   }
   if self.is_replay is Some(is_replay) {
-    fields["is_replay"] = Json::boolean(is_replay)
+    fields["is_replay"] = Json(is_replay)
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -471,15 +471,15 @@ pub(all) struct SessionToolResult {
 /// owns only the fields this client understands.
 pub impl ToJson for SessionToolResult with fn to_json(self) {
   let fields = {
-    "tool_call_id": Json::string(self.tool_call_id),
-    "tool_name": Json::string(self.tool_name),
-    "content": Json::string(self.content),
-    "is_error": Json::boolean(self.is_error),
+    "tool_call_id": Json(self.tool_call_id),
+    "tool_name": Json(self.tool_name),
+    "content": Json(self.content),
+    "is_error": Json(self.is_error),
   }
   if self.brief is Some(brief) {
-    fields["brief"] = Json::string(brief)
+    fields["brief"] = Json(brief)
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -701,11 +701,11 @@ pub impl FromJson for SessionExportReply with fn from_json(json, path) {
 /// An absent path is omitted rather than encoded as null, matching the other
 /// optional Desktop reply fields.
 pub impl ToJson for SessionExportReply with fn to_json(self) {
-  let fields : Map[String, Json] = { "opened": Json::boolean(self.opened) }
+  let fields : Map[String, Json] = { "opened": Json(self.opened) }
   if self.path is Some(path) {
-    fields["path"] = Json::string(path)
+    fields["path"] = Json(path)
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -787,19 +787,19 @@ pub impl FromJson for WorktreeInfo with fn from_json(json, path) {
 ///|
 pub impl ToJson for WorktreeInfo with fn to_json(self) {
   let fields : Map[String, Json] = {
-    "name": Json::string(self.name),
-    "branch": Json::string(self.branch),
-    "base": Json::string(self.base),
-    "path": Json::string(self.path),
-    "present": Json::boolean(self.present),
+    "name": Json(self.name),
+    "branch": Json(self.branch),
+    "base": Json(self.base),
+    "path": Json(self.path),
+    "present": Json(self.present),
   }
   if self.session is Some(session) {
-    fields["session"] = Json::string(session)
+    fields["session"] = Json(session)
   }
   if self.codex_thread is Some(thread_id) {
-    fields["codex_thread"] = Json::string(thread_id)
+    fields["codex_thread"] = Json(thread_id)
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|
@@ -1397,7 +1397,7 @@ pub impl ToJson for BrowseDirectoryReply with fn to_json(self) {
       if parent is Some(parent) {
         fields["parent"] = parent.to_json()
       }
-      Json::object(fields)
+      Json(fields)
     }
     Drives(entries~) => { "drives": entries.to_json() }
     BrowseError(message) => { "error": message }
@@ -1555,16 +1555,16 @@ pub impl ToJson for CheckUpdateReply with fn to_json(self) {
     UpToDate => { "kind": "up_to_date" }
     Available(version~, installable~, unavailable_reason~) => {
       let fields : Map[String, Json] = Map::from_array([
-        ("kind", Json::string("available")),
-        ("version", Json::string(version)),
-        ("installable", Json::boolean(installable)),
+        ("kind", Json("available")),
+        ("version", Json(version)),
+        ("installable", Json(installable)),
       ])
       if unavailable_reason is Some(reason) {
-        fields["unavailable_reason"] = Json::string(reason)
+        fields["unavailable_reason"] = Json(reason)
       } else {
         fields["unavailable_reason"] = Json::null()
       }
-      Json::object(fields)
+      Json(fields)
     }
     Unreachable(reason~) => { "kind": "unreachable", "reason": reason }
     Malformed(reason~) => { "kind": "malformed", "reason": reason }
@@ -1642,8 +1642,8 @@ pub impl ToJson for AgentStreamEvent with fn to_json(self) {
   guard raw is Object(fields) else { return raw }
   if self.submission_id is Some(submission_id) {
     let fields = fields.copy()
-    fields["submission_id"] = Json::string(submission_id)
-    return Json::object(fields)
+    fields["submission_id"] = Json(submission_id)
+    return Json(fields)
   }
   raw
 }

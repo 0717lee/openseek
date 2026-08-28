@@ -150,10 +150,7 @@ fn finish_perf_report(
   let (best, median, worst) = sample_summary(samples)
   ctx.metric_int("warmupCount", 1)
   ctx.metric_int("sampleCount", samples.length())
-  ctx.metric(
-    "samples",
-    Json::array(samples.map(sample => Json::number(sample))),
-  )
+  ctx.metric("samples", Json(samples.map(sample => Json::number(sample))))
   ctx.metric_number("bestMs", best)
   ctx.metric_number("medianMs", median)
   ctx.metric_number("p95Ms", worst)

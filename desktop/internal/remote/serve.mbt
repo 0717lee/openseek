@@ -308,7 +308,7 @@ async fn Outgoing::write(self : Outgoing, conn : @websocket.Conn) -> Unit {
     Notify(notification) =>
       {
         "jsonrpc": "2.0",
-        "method": Json::string(notification.wire_name()),
+        "method": Json(notification.wire_name()),
         "params": notification.params(),
       }
   }
@@ -415,7 +415,7 @@ fn error_envelope(id : Json, code : Int, message : String) -> Json {
   {
     "jsonrpc": "2.0",
     "id": id,
-    "error": { "code": Json::number(code.to_double()), "message": message },
+    "error": { "code": Json(code.to_double()), "message": message },
   }
 }
 
@@ -477,10 +477,7 @@ test "classify accepts client notifications" {
 test "classify enforces the JSON-RPC 2.0 request envelope" {
   for
     message in [
-      Json::object({
-        "id": Json::number(1),
-        "method": Json::string("session.list"),
-      }),
+      Json({ "id": Json(1), "method": Json("session.list") }),
       { "jsonrpc": "1.0", "id": 1, "method": "session.list" },
       { "jsonrpc": "2.0", "id": true, "method": "session.list" },
       { "jsonrpc": "2.0", "id": {}, "method": "session.list" },
@@ -488,7 +485,7 @@ test "classify enforces the JSON-RPC 2.0 request envelope" {
     ] {
     assert_true(classify(message.stringify()) is Invalid)
   }
-  for id in [Json::string("request-1"), Json::number(1), Json::null()] {
+  for id in [Json("request-1"), Json(1), Json::null()] {
     let message : Json = {
       "jsonrpc": "2.0",
       "id": id,
@@ -514,7 +511,7 @@ test "classify rejects non-object catalog parameters" {
     "params": [],
   }
   match classify(request.stringify()) {
-    InvalidParams(id) => assert_eq(id, Json::string("request-1"))
+    InvalidParams(id) => assert_eq(id, Json("request-1"))
     _ => fail("expected invalid method parameters")
   }
   let notification : Json = {
@@ -698,7 +695,7 @@ test "remote lifecycle frames keep state without transcript text" {
     }
     assert_eq(settled.params(), {
       "session": "session-1",
-      "event": { "event": Json::string(event_name), "content": "" },
+      "event": { "event": Json(event_name), "content": "" },
     })
   }
 }

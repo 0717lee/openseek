@@ -26,9 +26,9 @@ pub fn FileSystem::from_pairs(
     if object.contains(path) {
       fail("duplicate file path: \{path}")
     }
-    object[path] = Json::string(content)
+    object[path] = Json(content)
   }
-  FileSystem(Json::object(object))
+  FileSystem(Json(object))
 }
 
 ///|

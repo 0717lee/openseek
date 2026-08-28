@@ -181,7 +181,7 @@ test "a fractional usage counter is rejected, not truncated" {
 /// A line from a newer engine, or one that is not an event at all, is ignored
 /// rather than failing the reader.
 test "unknown and malformed lines are ignored" {
-  assert_eq(@openseek_protocol.parse(Json::string("not an object")), None)
+  assert_eq(@openseek_protocol.parse(Json("not an object")), None)
   assert_eq(@openseek_protocol.parse({ "level": "INFO" }), None)
   assert_eq(@openseek_protocol.parse({ "event": "from_a_newer_engine" }), None)
   // `agent_step` without its required payload.

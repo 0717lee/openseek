@@ -1341,7 +1341,7 @@ test "a cancel reply spells \"nothing was open\" by omission" {
   // A reply that is not an object at all is a different host speaking a
   // different protocol, and that is worth refusing.
   let refused = try {
-    let _ : @protocol.CancelReply = @json.from_json(Json::string("r1"))
+    let _ : @protocol.CancelReply = @json.from_json(Json("r1"))
     false
   } catch {
     _ => true

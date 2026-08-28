@@ -69,7 +69,7 @@ fn peek_references_state_json(
     Some(position) => (position.line_number, position.column)
     None => (-1, -1)
   }
-  Json::object({
+  Json({
     "resolverCalls": state.resolver_calls.to_json(),
     "resolverAcquires": state.resolver_acquires.to_json(),
     "resolverReleases": state.resolver_releases.to_json(),
@@ -78,7 +78,7 @@ fn peek_references_state_json(
     "openUris": state.open_uris.to_json(),
     "openLines": state.open_lines.to_json(),
     "openColumns": state.open_columns.to_json(),
-    "codePosition": Json::object({
+    "codePosition": Json({
       "line": code_line.to_json(),
       "column": code_column.to_json(),
     }),

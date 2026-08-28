@@ -53,7 +53,7 @@ fn Session::envelope_json(self : Session) -> Json {
   {
     "found": true,
     "events": self.events,
-    "events_bytes": Json::number(@utf8.encode(self.events).length().to_double()),
+    "events_bytes": Json(@utf8.encode(self.events).length().to_double()),
   }
 }
 
@@ -86,9 +86,9 @@ pub fn StandaloneExport::render(
 ) -> String raise {
   let listing = sessions.map(session => session.listing_json()).to_json()
   let data : Map[String, Json] = Map([])
-  data["/api/sessions"] = Json::string(listing.stringify())
+  data["/api/sessions"] = Json(listing.stringify())
   for session in sessions {
-    data["/api/sessions/\{session.key}"] = Json::string(
+    data["/api/sessions/\{session.key}"] = Json(
       session.envelope_json().stringify(),
     )
   }

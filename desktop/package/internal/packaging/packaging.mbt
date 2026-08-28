@@ -1012,10 +1012,7 @@ async test "Proton CEF root follows the active runtime manifest" {
   let manifest = fixture.proton_project_at(".proton/runtime.json")
   ensure_dir((manifest : @path.Path).dirname().to_string())
   let cef_root = fixture.at("shared-cache/cef")
-  write_text(
-    manifest,
-    Json::object({ "cef": Json::string(cef_root) }).stringify(),
-  )
+  write_text(manifest, Json({ "cef": Json(cef_root) }).stringify())
   assert_eq(fixture.proton_cef_root().0, cef_root)
   remove_path_if_exists(fixture_root)
 }
@@ -1033,13 +1030,13 @@ async test "matching Proton runtime is reused without invoking setup" {
   ensure_dir((active_path : @path.Path).dirname().to_string())
   write_text(
     active_path,
-    Json::object({
-      "schema_version": Json::number(1),
-      "platform": Json::string(platform),
-      "proton_version": Json::string(version),
-      "cef_version": Json::string("cef-test"),
-      "cef": Json::string(cef_root),
-      "dist": Json::string(relative_dist),
+    Json({
+      "schema_version": Json(1),
+      "platform": Json(platform),
+      "proton_version": Json(version),
+      "cef_version": Json("cef-test"),
+      "cef": Json(cef_root),
+      "dist": Json(relative_dist),
     }).stringify(),
   )
   let prebuilt_path = fixture.proton_project_at(
@@ -1048,12 +1045,10 @@ async test "matching Proton runtime is reused without invoking setup" {
   ensure_dir((prebuilt_path : @path.Path).dirname().to_string())
   write_text(
     prebuilt_path,
-    Json::object({
-      "platform": Json::string(platform),
-      "proton_version": Json::string(version),
-      "artifacts": Json::object({
-        "header": Json::string("include/proton_native.h"),
-      }),
+    Json({
+      "platform": Json(platform),
+      "proton_version": Json(version),
+      "artifacts": Json({ "header": Json("include/proton_native.h") }),
     }).stringify(),
   )
   let shipped_header = fixture.proton_project_at(
@@ -1085,9 +1080,7 @@ async test "refreshed prebuilt bytes invalidate the assembled runtime" {
   )
   let prebuilt_path = join_path(prebuilt_root, "manifest.json")
   let prebuilt : Map[String, Json] = {
-    "artifacts": Json::object({
-      "header": Json::string("include/proton_native.h"),
-    }),
+    "artifacts": Json({ "header": Json("include/proton_native.h") }),
   }
   let dist = fixture.at("runtime-dist")
   let shipped = join_path(prebuilt_root, "include/proton_native.h")
@@ -1127,10 +1120,7 @@ async test "absolute runtime dist paths pass through unchanged" {
   let dist = fixture.at("user-cache/runtimes/test-platform/test-runtime")
   let active_path = fixture.proton_project_at(".proton/runtime.json")
   ensure_dir((active_path : @path.Path).dirname().to_string())
-  write_text(
-    active_path,
-    Json::object({ "dist": Json::string(dist) }).stringify(),
-  )
+  write_text(active_path, Json({ "dist": Json(dist) }).stringify())
   assert_eq(proton_runtime_dist(fixture).0, dist)
   remove_path_if_exists(fixture_root)
 }

@@ -182,9 +182,9 @@ fn CodexWorktreeCatalog::annotate_thread(
   }
   // The registry retains the owning project even after its checkout is gone;
   // Git cannot recover that relationship from a deleted cwd.
-  annotated["projectRoot"] = Json::string(binding.workspace)
+  annotated["projectRoot"] = Json(binding.workspace)
   annotated["openseekWorktree"] = binding.worktree.to_json()
-  Json::object(annotated)
+  Json(annotated)
 }
 
 ///|
@@ -202,12 +202,12 @@ fn CodexWorktreeCatalog::annotate(
     for thread in threads {
       data.push(self.annotate_thread(thread))
     }
-    annotated["data"] = Json::array(data)
+    annotated["data"] = Json(data)
   }
   if fields.get("thread") is Some(thread) {
     annotated["thread"] = self.annotate_thread(thread)
   }
-  Json::object(annotated)
+  Json(annotated)
 }
 
 ///|
@@ -773,17 +773,17 @@ async fn ApiState::codex_thread_history(
   let mut cursor : String? = None
   for ;; {
     let page_fields : Map[String, Json] = {
-      "threadId": Json::string(thread_id),
-      "limit": Json::number(100.0),
-      "sortDirection": Json::string("asc"),
-      "itemsView": Json::string("full"),
+      "threadId": Json(thread_id),
+      "limit": Json(100.0),
+      "sortDirection": Json("asc"),
+      "itemsView": Json("full"),
     }
     if cursor is Some(cursor) {
-      page_fields["cursor"] = Json::string(cursor)
+      page_fields["cursor"] = Json(cursor)
     }
     let page = self.codex.call(
       method_="thread/turns/list",
-      params=Json::object(page_fields),
+      params=Json(page_fields),
     )
     guard page is Object(page_fields) &&
       page_fields.get("data") is Some(Array(data)) else {
@@ -801,13 +801,13 @@ async fn ApiState::codex_thread_history(
   for key, value in thread_fields {
     thread[key] = value
   }
-  thread["turns"] = Json::array(turns)
+  thread["turns"] = Json(turns)
   let reply : Map[String, Json] = Map([])
   for key, value in reply_fields {
     reply[key] = value
   }
-  reply["thread"] = Json::object(thread)
-  @json.from_json(Json::object(reply))
+  reply["thread"] = Json(thread)
+  @json.from_json(Json(reply))
 }
 
 ///|
@@ -828,7 +828,7 @@ async fn ApiState::codex_file_search(
   }
   let value = self.codex.call(method_="fuzzyFileSearch", params={
     "query": payload.query,
-    "roots": [Json::string(root.to_string())],
+    "roots": [Json(root.to_string())],
   })
   { value, }
 }
@@ -956,8 +956,8 @@ async fn ApiState::codex_worktree_project(
   })
   guard metadata is Object(reply_fields) &&
     reply_fields.get("thread") is Some(Object(thread)) &&
-    thread.get("id") == Some(Json::string(thread_id)) &&
-    thread.get("projectRoot") == Some(Json::string(requested)) else {
+    thread.get("id") == Some(Json(thread_id)) &&
+    thread.get("projectRoot") == Some(Json(requested)) else {
     raise @host.HostError(
       "Codex worktree requires an empty task at its main project root",
     )
@@ -973,7 +973,7 @@ async fn ApiState::codex_worktree_project(
     }) {
     return requested
   }
-  guard thread.get("cwd") == Some(Json::string(requested)) else {
+  guard thread.get("cwd") == Some(Json(requested)) else {
     raise @host.HostError(
       "Codex worktree requires an empty task at its main project root",
     )
@@ -987,7 +987,7 @@ async fn ApiState::codex_worktree_project(
     })
   catch {
     @codex.JsonRpc(..) as error if error.is_unmaterialized_thread_turns() =>
-      Json::object({ "data": Json::array([]) })
+      Json({ "data": Json(([] : Array[Json])) })
     error => raise error
   } noraise {
     value => value
@@ -1020,7 +1020,7 @@ async fn ApiState::codex_skills_list(
   }
   @json.from_json(
     self.codex.call(method_="skills/list", params={
-      "cwds": [Json::string(root.to_string())],
+      "cwds": [Json(root.to_string())],
       "forceReload": payload.force_reload,
     }),
   )
@@ -1085,7 +1085,7 @@ async fn ApiState::codex_request(
       // long-lived Codex home. The Desktop catalog is an interactive state
       // query, so read the app-server state database without that repair pass.
       scoped["useStateDbOnly"] = true
-      Json::object(scoped)
+      Json(scoped)
     }
     ("codex.thread.list", _) => { "useStateDbOnly": true }
     // The dedicated thread/start endpoint has already reduced this object to
@@ -1096,7 +1096,7 @@ async fn ApiState::codex_request(
         scoped[key] = value
       }
       scoped["serviceName"] = "openseek_desktop"
-      Json::object(scoped)
+      Json(scoped)
     }
     ("codex.thread.start", _) => { "serviceName": "openseek_desktop" }
     ("codex.thread.archive", _) => archive.unwrap().app_server_params()

@@ -185,7 +185,7 @@ pub impl ToJson for SemanticSearchHit with fn to_json(self) {
   if self.description is Some(description) {
     fields["description"] = description.to_json()
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 //|
@@ -291,7 +291,7 @@ pub impl ToJson for SearchSemanticReply with fn to_json(self) {
     fields["error_code"] = error.code.to_json()
     fields["error_message"] = error.message.to_json()
   }
-  Json::object(fields)
+  Json(fields)
 }
 
 ///|

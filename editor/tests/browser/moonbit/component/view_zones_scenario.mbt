@@ -182,7 +182,7 @@ fn run_view_zones_test() -> Unit {
     primary_margin,
     () => {
       let layout = viewer.get_layout_info()
-      Json::object({
+      Json({
         "primaryId": primary_id.val.to_json(),
         "suppressId": suppress_id.val.to_json(),
         "omittedId": omitted_id.val.to_json(),

@@ -12,7 +12,7 @@ test "command approval renders facts and advertised decisions" {
   let (_, requested) = @codex.update(
     dispatch,
     @codex.Msg::server_request(
-      Json::string("approval-1"),
+      Json("approval-1"),
       "item/commandExecution/requestApproval",
       {
         "threadId": "thread-1",
@@ -100,7 +100,7 @@ test "network approval uses its destination instead of a command preview" {
   let (_, requested) = @codex.update(
     dispatch,
     @codex.Msg::server_request(
-      Json::string("approval-2"),
+      Json("approval-2"),
       "item/commandExecution/requestApproval",
       {
         "threadId": "thread-1",

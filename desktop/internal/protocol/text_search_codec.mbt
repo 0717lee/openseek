@@ -213,5 +213,5 @@ pub impl ToJson for SearchTextReply with fn to_json(self) {
     fields["error_code"] = error.code.to_json()
     fields["error_message"] = error.message.to_json()
   }
-  Json::object(fields)
+  Json(fields)
 }

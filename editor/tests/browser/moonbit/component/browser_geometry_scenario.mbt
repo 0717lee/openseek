@@ -257,14 +257,14 @@ fn BrowserGeometryFixture::state_json(
   let visible = match
     self.viewer.get_scrolled_visible_position(Position(line, column)) {
     Some(position) =>
-      Json::object({
+      Json({
         "top": Json::number(position.top),
         "left": Json::number(position.left),
         "height": Json::number(position.height),
       })
     None => Json::null()
   }
-  Json::object({
+  Json({
     "name": self.name.to_json(),
     "softWrap": self.viewer.get_options().soft_wrap().to_json(),
     "modelLines": self.model.get_line_count().to_json(),
@@ -278,7 +278,7 @@ fn BrowserGeometryFixture::state_json(
     "offset": Json::number(self.viewer.get_offset_for_column(line, column)),
     "lineWidth": Json::number(self.viewer.get_width_of_line(line)),
     "visible": visible,
-    "layout": Json::object({
+    "layout": Json({
       "width": Json::number(layout.width),
       "height": Json::number(layout.height),
       "contentLeft": Json::number(layout.content_left),

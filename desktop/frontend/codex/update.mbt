@@ -1305,7 +1305,7 @@ test "Codex update handlers are pure and idempotent" {
     login_id: Some("login-1"),
     pending_requests: [
       {
-        request_id: Json::string("request-1"),
+        request_id: Json("request-1"),
         thread_id: "thread-1",
         method_: "item/commandExecution/requestApproval",
         params: { "threadId": "thread-1", "reason": "test" },
@@ -1350,14 +1350,11 @@ test "Codex update handlers are pure and idempotent" {
     CancelLogin,
     Logout,
     RequestAnswer(
-      request_key=Json::string("request-1").stringify(),
+      request_key=Json("request-1").stringify(),
       question_id="question-1",
       answer="yes",
     ),
-    Respond(
-      request_key=Json::string("request-1").stringify(),
-      decision="accept",
-    ),
+    Respond(request_key=Json("request-1").stringify(), decision="accept"),
     Reply(kind=CodexStatusReply, value={ "status": "ready" }),
     Reply(kind=CodexRequestsReply, value={ "data": [], "generation": 0 }),
     Reply(kind=CodexAccountReply, value={
@@ -1416,7 +1413,7 @@ test "Codex update handlers are pure and idempotent" {
       generation=0,
     ),
     ServerRequest(
-      request_id=Json::string("request-2"),
+      request_id=Json("request-2"),
       method_="item/commandExecution/requestApproval",
       params={ "threadId": "thread-1", "reason": "test" },
       generation=1,
@@ -1951,7 +1948,7 @@ test "archiving the selected Codex task settles its owned foreground work" {
     draft: "pending prompt",
     pending_requests: [
       {
-        request_id: Json::string("approval-a"),
+        request_id: Json("approval-a"),
         thread_id: "thread-a",
         method_: "item/commandExecution/requestApproval",
         params: { "threadId": "thread-a" },
@@ -2033,7 +2030,7 @@ test "Codex request generations reject stale snapshots" {
   let (_, notified) = update(
     dispatch,
     ServerRequest(
-      request_id=Json::string("request-new"),
+      request_id=Json("request-new"),
       method_="item/commandExecution/requestApproval",
       params={ "threadId": "thread-1" },
       generation=2,
@@ -2062,7 +2059,7 @@ test "Codex approvals cannot be edited from another thread" {
     }),
     pending_requests: [
       {
-        request_id: Json::string("request-2"),
+        request_id: Json("request-2"),
         thread_id: "thread-2",
         method_: "item/tool/requestUserInput",
         params: { "threadId": "thread-2", "questions": [{ "id": "scope" }] },
@@ -2071,7 +2068,7 @@ test "Codex approvals cannot be edited from another thread" {
     ],
   }
   let unchanged = state.with_request_answer(
-    Json::string("request-2").stringify(),
+    Json("request-2").stringify(),
     "scope",
     "all",
   )
@@ -2087,7 +2084,7 @@ test "Codex composer reverse-request actions keep their task identity" {
     }),
     pending_requests: [
       {
-        request_id: Json::string("request-1"),
+        request_id: Json("request-1"),
         thread_id: "thread-1",
         method_: "item/tool/requestUserInput",
         params: { "threadId": "thread-1", "questions": [{ "id": "scope" }] },
@@ -2101,7 +2098,7 @@ test "Codex composer reverse-request actions keep their task identity" {
     ComposerAction(
       @composer.CodexRequestAnswerChanged(
         identity~,
-        request_key=Json::string("request-1").stringify(),
+        request_key=Json("request-1").stringify(),
         question_id="scope",
         answer="all",
       ),
@@ -2119,7 +2116,7 @@ test "Codex composer reverse-request actions keep their task identity" {
           owner: { channel: @interop.ChannelId::Local, session: "thread-2" },
           archive_generation: 0,
         },
-        request_key=Json::string("request-1").stringify(),
+        request_key=Json("request-1").stringify(),
         question_id="scope",
         answer="other",
       ),

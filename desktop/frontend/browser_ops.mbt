@@ -283,18 +283,18 @@ fn browser_event_msg(payload : Map[String, Json]) -> Msg? {
 ///|
 test "browser event decode drops ERR_ABORTED but keeps real failures" {
   let aborted : Map[String, Json] = {
-    "id": Json::number(1),
+    "id": Json(1),
     "kind": "load_failed",
     "url": "https://www.baidu.com/s?wd=x",
-    "code": Json::number(-3),
+    "code": Json(-3),
     "text": "ERR_ABORTED",
   }
   assert_true(browser_event_msg(aborted) is None)
   let refused : Map[String, Json] = {
-    "id": Json::number(1),
+    "id": Json(1),
     "kind": "load_failed",
     "url": "http://127.0.0.1:5173/",
-    "code": Json::number(-102),
+    "code": Json(-102),
     "text": "ERR_CONNECTION_REFUSED",
   }
   assert_true(
@@ -302,7 +302,7 @@ test "browser event decode drops ERR_ABORTED but keeps real failures" {
     is Some(Preview(LoadFailed(id=1, url="http://127.0.0.1:5173/", ..))),
   )
   let navigated : Map[String, Json] = {
-    "id": Json::number(2),
+    "id": Json(2),
     "kind": "navigated",
     "url": "https://www.google.com/",
   }

@@ -227,7 +227,7 @@ pub async fn update_settings(
     guard ApiProvider::parse(value.trim().to_owned()) is Some(provider) else {
       raise EngineError("unknown API provider '\{value}'")
     }
-    raw["provider"] = Json::string(provider.wire())
+    raw["provider"] = Json(provider.wire())
   }
   apply_text_patch(raw, "custom_api_url", patch.custom_api_url)
   apply_text_patch(raw, "deepseek_api_key", patch.deepseek_api_key)
@@ -235,9 +235,9 @@ pub async fn update_settings(
   // Version 2 retired the WSL engine mode. A settings write also removes the
   // old group so the durable file no longer advertises an ignored capability.
   raw.remove("wsl")
-  raw[LegacyMigrationFence] = Json::boolean(true)
-  raw["version"] = Json::number(EngineSettingsVersion.to_double())
-  write_settings_file(dir, Json::object(raw).stringify(indent=2))
+  raw[LegacyMigrationFence] = Json(true)
+  raw["version"] = Json(EngineSettingsVersion.to_double())
+  write_settings_file(dir, Json(raw).stringify(indent=2))
   // Disk is now committed. Advance the process-local order and publish while
   // still holding the same lock, so two clients can never observe revision 2
   // before revision 1. The API shields this finite commit+broadcast section
@@ -266,7 +266,7 @@ fn apply_text_patch(
   if value.is_empty() {
     fields.remove(key)
   } else {
-    fields[key] = Json::string(value)
+    fields[key] = Json(value)
   }
 }
 

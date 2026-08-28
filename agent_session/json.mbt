@@ -47,7 +47,7 @@ fn int_field(
 /// No escaping beyond normal JSON string encoding is applied, and no filesystem
 /// validation is performed here.
 impl ToJson for SessionId with fn to_json(id : SessionId) -> Json {
-  Json::string(id.value())
+  Json(id.value())
 }
 
 ///|

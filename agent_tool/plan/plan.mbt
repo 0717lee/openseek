@@ -301,7 +301,7 @@ test "plan clears with an empty step list" {
 ///|
 test "plan rejects malformed arguments with a field-naming error" {
   assert_plan_error(
-    Json::object(Map([])),
+    Json::empty_object(),
     "error: plan requires arguments.steps to be an array",
   )
   assert_plan_error(

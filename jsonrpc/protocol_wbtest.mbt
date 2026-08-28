@@ -26,7 +26,7 @@ test "build_notification omits the id" {
 
 ///|
 test "build_error_reply answers a peer request with a method-not-found error" {
-  let reply = build_error_reply(Json::number(5), -32601, "Method not found")
+  let reply = build_error_reply(Json(5), -32601, "Method not found")
   assert_true(
     reply
     is {
@@ -187,7 +187,7 @@ test "classify_incoming accepts an exact integer reply id" {
   match
     classify_incoming({
       "jsonrpc": "2.0",
-      "id": Json::number(3.0),
+      "id": Json(3.0),
       "result": Json::null(),
     }) {
     Reply(3, Ok(_)) => ()
@@ -202,7 +202,7 @@ test "classify_incoming rejects a fractional reply id as unknown" {
   match
     classify_incoming({
       "jsonrpc": "2.0",
-      "id": Json::number(1.5),
+      "id": Json(1.5),
       "result": Json::null(),
     }) {
     Unknown => ()
@@ -216,7 +216,7 @@ test "classify_incoming rejects an out-of-range reply id as unknown" {
   match
     classify_incoming({
       "jsonrpc": "2.0",
-      "id": Json::number(4294967297.0),
+      "id": Json(4294967297.0),
       "result": Json::null(),
     }) {
     Unknown => ()
