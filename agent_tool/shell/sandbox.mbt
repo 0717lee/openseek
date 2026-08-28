@@ -4232,7 +4232,8 @@ async fn source_tree_mv_target(
   cwd : String,
   predicted_dirs : Array[String],
 ) -> String? {
-  guard parse_mv_operands(argv, arg_start) is Some(operands) else {
+  guard parse_copy_move_operands(argv, arg_start, mv_supported_no_arg_option)
+    is Some(operands) else {
     return None
   }
   source_tree_move_target(operands, real_workspace_root, cwd, predicted_dirs)
@@ -4540,7 +4541,14 @@ fn mkdir_supported_no_arg_option(arg : String) -> Bool {
 }
 
 ///|
-fn parse_mv_operands(argv : Array[String], arg_start : Int) -> MvOperands? {
+/// Split a `cp`/`mv`-style argv into sources and a destination. The two tools
+/// share the same operand grammar and the same `-t`/`-S` options, so they
+/// differ only in which flags take no argument.
+fn parse_copy_move_operands(
+  argv : Array[String],
+  arg_start : Int,
+  supported_no_arg_option : (String) -> Bool,
+) -> MvOperands? {
   let operands : Array[String] = []
   let mut index = arg_start
   let mut target_directory : String? = None
@@ -4552,7 +4560,7 @@ fn parse_mv_operands(argv : Array[String], arg_start : Int) -> MvOperands? {
       index += 1
       continue
     }
-    if scanning_options && mv_option_consumes_next(arg) {
+    if scanning_options && copy_move_option_consumes_next(arg) {
       if index + 1 >= argv.length() {
         return None
       }
@@ -4563,7 +4571,7 @@ fn parse_mv_operands(argv : Array[String], arg_start : Int) -> MvOperands? {
       continue
     }
     if scanning_options {
-      match mv_attached_target_directory_option(arg) {
+      match copy_move_attached_target_directory_option(arg) {
         Some(dest) => {
           target_directory = Some(dest)
           index += 1
@@ -4572,7 +4580,7 @@ fn parse_mv_operands(argv : Array[String], arg_start : Int) -> MvOperands? {
         None => ()
       }
     }
-    if scanning_options && mv_supported_no_arg_option(arg) {
+    if scanning_options && supported_no_arg_option(arg) {
       index += 1
       continue
     }
@@ -4586,12 +4594,12 @@ fn parse_mv_operands(argv : Array[String], arg_start : Int) -> MvOperands? {
 }
 
 ///|
-fn mv_option_consumes_next(arg : String) -> Bool {
+fn copy_move_option_consumes_next(arg : String) -> Bool {
   arg == "-t" || arg == "--target-directory" || arg == "-S" || arg == "--suffix"
 }
 
 ///|
-fn mv_attached_target_directory_option(arg : String) -> String? {
+fn copy_move_attached_target_directory_option(arg : String) -> String? {
   if arg.strip_prefix("-t") is Some(target) && !target.is_empty() {
     Some(target.to_owned())
   } else if arg.strip_prefix("--target-directory=") is Some(target) {
@@ -4642,7 +4650,8 @@ async fn source_tree_cp_target(
   cwd : String,
   predicted_dirs : Array[String],
 ) -> String? {
-  guard parse_cp_operands(argv, arg_start) is Some(operands) else {
+  guard parse_copy_move_operands(argv, arg_start, cp_supported_no_arg_option)
+    is Some(operands) else {
     return None
   }
   source_tree_copy_destination_target(
@@ -4701,68 +4710,6 @@ async fn source_tree_copy_destination_target(
         None
       }
     None => None
-  }
-}
-
-///|
-fn parse_cp_operands(argv : Array[String], arg_start : Int) -> MvOperands? {
-  let operands : Array[String] = []
-  let mut index = arg_start
-  let mut target_directory : String? = None
-  let mut scanning_options = true
-  while index < argv.length() {
-    let arg = argv[index]
-    if scanning_options && arg == "--" {
-      scanning_options = false
-      index += 1
-      continue
-    }
-    if scanning_options && cp_option_consumes_next(arg) {
-      if index + 1 >= argv.length() {
-        return None
-      }
-      if arg == "-t" || arg == "--target-directory" {
-        target_directory = Some(argv[index + 1])
-      }
-      index += 2
-      continue
-    }
-    if scanning_options {
-      match cp_attached_target_directory_option(arg) {
-        Some(dest) => {
-          target_directory = Some(dest)
-          index += 1
-          continue
-        }
-        None => ()
-      }
-    }
-    if scanning_options && cp_supported_no_arg_option(arg) {
-      index += 1
-      continue
-    }
-    if scanning_options && arg.has_prefix("-") && arg != "-" {
-      return None
-    }
-    operands.push(arg)
-    index += 1
-  }
-  operands_with_optional_dest(operands, target_directory)
-}
-
-///|
-fn cp_option_consumes_next(arg : String) -> Bool {
-  arg == "-t" || arg == "--target-directory" || arg == "-S" || arg == "--suffix"
-}
-
-///|
-fn cp_attached_target_directory_option(arg : String) -> String? {
-  if arg.strip_prefix("-t") is Some(target) && !target.is_empty() {
-    Some(target.to_owned())
-  } else if arg.strip_prefix("--target-directory=") is Some(target) {
-    Some(target.to_owned())
-  } else {
-    None
   }
 }
 
