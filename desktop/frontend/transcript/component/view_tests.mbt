@@ -711,7 +711,7 @@ test "a step is stamped to the second, from a real stamp only" {
   // ...and without a stamp there is no stray space before the separator.
   assert_true(
     render([
-      { kind: Reasoning, content: "thinking", ts: None, sequence: Some(2) },
+      { kind: Reasoning, content: "thinking", ts: None, sequence: Some(2), },
     ]).contains("#1</span> · Thought"),
   )
   // A stampless tool-only step keeps the bare ordinal as its heading.
