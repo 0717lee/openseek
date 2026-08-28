@@ -655,6 +655,7 @@
 .activity-row {
   min-width: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
   animation: riseIn 0.34s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
@@ -822,6 +823,7 @@
    reads as one block under its heading or thought fold. */
 .activity-work {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 4px;
   padding: 2px 0 2px 16px;
   border-left: 2px solid var(--color-border);
