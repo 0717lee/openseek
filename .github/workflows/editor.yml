@@ -49,9 +49,7 @@ jobs:
           if [ "${{ matrix.channel }}" = "nightly" ]; then
             curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s nightly
           else
-            # Same pin as ci.yml: stable 0.10.11 ICEs on graphviz under
-            # `moon test --target native`.
-            curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s -- '0.10.10+f8a486b6f'
+            curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
           fi
           echo "$HOME/.moon/bin" >> $GITHUB_PATH
 
@@ -90,7 +88,7 @@ jobs:
 
       - name: Install MoonBit (stable)
         run: |
-          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s -- '0.10.10+f8a486b6f'
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
           echo "$HOME/.moon/bin" >> $GITHUB_PATH
 
       - name: Update dependencies
