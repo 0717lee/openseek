@@ -276,14 +276,7 @@ fn stat_files(
           @resource.relative_to(absolute, root) is Some(path) else {
           continue
         }
-        stats.push({
-          path,
-          sig: if stat.sig.is_empty() {
-            None
-          } else {
-            Some(stat.sig)
-          },
-        })
+        stats.push({ path, signature: stat.signature, })
       }
       scheduler.add(dispatch(StatsLoaded(owner~, epoch~, stats~)))
     })

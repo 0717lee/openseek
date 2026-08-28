@@ -154,10 +154,11 @@ pub(all) struct Doc {
 
 ///|
 /// One file's decoded `fs.stat_files` result: its current mtime signature,
-/// absent when the file is missing.
+/// or why the host has none — the file is missing, or it could not be
+/// inspected at all.
 pub(all) struct FileStat {
   path : @pathx.Relative
-  sig : String?
+  signature : @protocol.FileSignature
 }
 
 ///|
@@ -946,9 +947,9 @@ pub(all) enum Msg {
   // the one cheap signal that covers them. `owner` fences a background
   // conversation's finish.
   RunSettled(owner~ : @interop.ConversationKey)
-  // A `stat_files` reply: each open tab's current mtime signature (`""` =
-  // the file is gone). Owner plus request epoch fence a request that outlived
-  // either its conversation or checkout.
+  // A `stat_files` reply: each open tab's current mtime signature, or that
+  // the file is gone or could not be inspected. Owner plus request epoch
+  // fence a request that outlived either its conversation or checkout.
   StatsLoaded(
     owner~ : @interop.ConversationKey,
     epoch~ : Int,

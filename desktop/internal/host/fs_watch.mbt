@@ -559,6 +559,13 @@ test "filesystem payloads carry absolute target paths" {
 }
 
 ///|
-async test "file_signature reads a missing file as absent" {
-  assert_true(file_signature("/nonexistent/openseek-fs-watch-test") is None)
+async test "file_signature reads a missing path as absent, not as a failure" {
+  assert_true(file_signature("/nonexistent/openseek-fs-watch-test") is Missing)
+  // A path through a regular file fails with ENOTDIR rather than ENOENT and
+  // is just as absent.
+  let dir = @fs.tmpdir(prefix="openseek-file-signature-")
+  defer @async.protect_from_cancel(() => @fs.rmdir(dir, recursive=true))
+  @fs.write_file("\{dir}/plain", b"x", create_mode=CreateOrTruncate)
+  assert_true(file_signature("\{dir}/plain/child") is Missing)
+  assert_true(file_signature("\{dir}/plain") is Present(_))
 }

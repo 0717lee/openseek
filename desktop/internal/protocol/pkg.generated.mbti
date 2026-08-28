@@ -824,15 +824,30 @@ pub fn ExternalLinkPayload::not_equal(Self, Self) -> Bool
 pub fn ExternalLinkPayload::to_json(Self) -> Json
 pub fn ExternalLinkPayload::to_repr(Self) -> @debug.Repr
 
+pub(all) enum FileSignature {
+  Missing
+  Present(String)
+  Failed(String)
+} derive(Eq, @debug.Debug)
+pub fn FileSignature::equal(Self, Self) -> Bool
+pub fn FileSignature::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn FileSignature::not_equal(Self, Self) -> Bool
+pub fn FileSignature::to_json(Self) -> Json
+pub fn FileSignature::to_repr(Self) -> @debug.Repr
+pub impl ToJson for FileSignature
+pub impl @json.FromJson for FileSignature
+
 pub(all) struct FileStat {
   path : String
-  sig : String
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+  signature : FileSignature
+} derive(Eq, @debug.Debug)
 pub fn FileStat::equal(Self, Self) -> Bool
 pub fn FileStat::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
 pub fn FileStat::not_equal(Self, Self) -> Bool
 pub fn FileStat::to_json(Self) -> Json
 pub fn FileStat::to_repr(Self) -> @debug.Repr
+pub impl ToJson for FileStat
+pub impl @json.FromJson for FileStat
 
 pub(all) struct FinishedPayload {
   run_id : String
@@ -2077,12 +2092,14 @@ pub fn StatFilesPayload::to_repr(Self) -> @debug.Repr
 
 pub(all) struct StatFilesReply {
   stats : Array[FileStat]
-} derive(Eq, ToJson, @debug.Debug, @json.FromJson)
+} derive(Eq, @debug.Debug)
 pub fn StatFilesReply::equal(Self, Self) -> Bool
 pub fn StatFilesReply::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
 pub fn StatFilesReply::not_equal(Self, Self) -> Bool
 pub fn StatFilesReply::to_json(Self) -> Json
 pub fn StatFilesReply::to_repr(Self) -> @debug.Repr
+pub impl ToJson for StatFilesReply
+pub impl @json.FromJson for StatFilesReply
 
 pub(all) struct SteerPayload {
   text : String

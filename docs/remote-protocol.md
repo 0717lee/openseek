@@ -237,9 +237,7 @@ readiness resync follows the same idempotent, race-tolerant rules.
 
 `params` is always a JSON object; `{}` when a method takes nothing.
 Optional fields (`?`) are absent when unset — the protocol never encodes
-request-side absence as `""`, `0`, or another in-band sentinel. The one
-reply-side compatibility exception is a missing file's
-`fs.stat_files.stats[].sig: ""`.
+absence as `""`, `0`, or another in-band sentinel, on either side.
 
 ### agent.* — runs
 
@@ -496,7 +494,7 @@ picker-specific starting-point behavior.
 | `fs.clear_file_search_cache` | `{cache_key}` | `{}` — retires one search cache session and its outstanding work |
 | `fs.search_text` | `{root, query, regex, case_sensitive, whole_word, include_glob, exclude_glob, session_key, generation, max_results}` (`root` absolute; include/exclude are comma-separated VS Code-style globs) | `{root, generation, matches: [{path, line_number, preview, preview_start_column, ranges: [{start_column, end_column}]}], match_count, file_count, limit_hit, cancelled, error_code?, error_message?}` — bounded workspace grep using bundled ripgrep; paths are root-relative, line/preview columns and exclusive range ends are one-based UTF-16. Success omits both error fields; failures include both, and `error_code` distinguishes `invalid_regex`, `invalid_glob`, `permission_denied`, `rg_unavailable`, `invalid_request`, and `search_failed` |
 | `fs.cancel_search_text` | `{session_key, generation}` | `{}` — cancels that generation and records a bounded recent monotonic cancellation frontier; a newer generation in the same session automatically cancels its predecessor |
-| `fs.stat_files` | `{paths}` (absolute) | `{stats: [{path, sig}]}` — each `path` echoes its absolute input; `sig` is the opaque mtime signature `"{seconds}:{nanos}"`; `""` means the file is missing, retained for client compatibility |
+| `fs.stat_files` | `{paths}` (absolute) | `{stats: [{path, signature}]}` — each `path` echoes its absolute input; `signature` is `{kind: "present", sig}` with the opaque mtime signature `"{seconds}:{nanos}"`, `{kind: "missing"}` when the path no longer resolves to a file, or `{kind: "failed", message}` for any other stat error |
 | `fs.watch` | `{path, files, directories, recursive?, generation}` (`path` absolute; `generation` string) | `{}` — replaces the connection's single watcher; success means the native watcher has scanned its initial tree and emitted its baseline, while setup failure rejects this request; `files` and `directories` are relative to `path`, each directory keeps its immediate children observable, `recursive=true` additionally watches every non-pruned descendant, and clients use a page-unique namespace plus a monotonically increasing counter for `generation` |
 | `fs.unwatch` | `{}` | `{}` — stops watching when the panel is closed and it has no open tabs |
 | `fs.browse` | `{path?}` (absent = home; leading `~` expands) | `{path, parent?, entries}` — subdirectory names, sorted, dotfiles skipped |

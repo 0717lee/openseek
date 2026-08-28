@@ -1407,3 +1407,38 @@ test "a reconnect settlement is refused unless it names run, session and outcome
     assert_true(refused)
   }
 }
+
+///|
+test "file stats keep missing, present, and failed distinct on the wire" {
+  let reply : @protocol.StatFilesReply = {
+    stats: [
+      { path: "/work/gone.mbt", signature: Missing, },
+      { path: "/work/here.mbt", signature: Present("12:34"), },
+      { path: "/work/locked.mbt", signature: Failed("permission denied"), },
+    ],
+  }
+  let wire : Json = {
+    "stats": [
+      { "path": "/work/gone.mbt", "signature": { "kind": "missing" } },
+      {
+        "path": "/work/here.mbt",
+        "signature": { "kind": "present", "sig": "12:34" },
+      },
+      {
+        "path": "/work/locked.mbt",
+        "signature": { "kind": "failed", "message": "permission denied" },
+      },
+    ],
+  }
+  @debug.assert_eq(reply.to_json(), wire)
+  let decoded : @protocol.StatFilesReply = @json.from_json(wire)
+  @debug.assert_eq(decoded, reply)
+  // An empty signature string is not a deleted-file sentinel any more; a
+  // reply spelled that way is malformed rather than silently "deleted".
+  let legacy : @protocol.StatFilesReply = @json.from_json({
+    "stats": [{ "path": "/work/gone.mbt", "sig": "" }],
+  }) catch {
+    _ => return
+  }
+  fail("an empty signature must not decode: \{Repr(legacy)}")
+}

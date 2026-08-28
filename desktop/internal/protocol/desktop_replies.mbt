@@ -1361,15 +1361,96 @@ pub impl FromJson for ReadFileReply with fn from_json(json, path) {
 }
 
 ///|
+/// One `fs.stat_files` outcome. `Present` carries the opaque mtime signature
+/// `"{seconds}:{nanos}"`; `Missing` is a path that does not resolve to a file;
+/// `Failed` is every other stat error with the host's message. The three stay
+/// distinct on the wire so a file the host cannot inspect never reads as one
+/// that is gone.
+pub(all) enum FileSignature {
+  Missing
+  Present(String)
+  Failed(String)
+} derive(Debug, Eq)
+
+///|
+pub impl ToJson for FileSignature with fn to_json(self) {
+  match self {
+    Missing => { "kind": "missing" }
+    Present(sig) => { "kind": "present", "sig": sig }
+    Failed(message) => { "kind": "failed", "message": message }
+  }
+}
+
+///|
+pub impl FromJson for FileSignature with fn from_json(json, path) {
+  guard json is Object(fields) && fields.get("kind") is Some(String(kind_)) else {
+    raise JsonDecodeError((path, "expected file signature"))
+  }
+  match kind_ {
+    "missing" => Missing
+    "present" => {
+      guard fields.get("sig") is Some(String(sig)) else {
+        raise JsonDecodeError((path.add_key("sig"), "expected string"))
+      }
+      Present(sig)
+    }
+    "failed" => {
+      guard fields.get("message") is Some(String(message)) else {
+        raise JsonDecodeError((path.add_key("message"), "expected string"))
+      }
+      Failed(message)
+    }
+    _ =>
+      raise JsonDecodeError(
+        (path.add_key("kind"), "unknown file signature kind"),
+      )
+  }
+}
+
+///|
 pub(all) struct FileStat {
   path : String
-  sig : String
-} derive(Debug, Eq, FromJson, ToJson)
+  signature : FileSignature
+} derive(Debug, Eq)
+
+///|
+pub impl ToJson for FileStat with fn to_json(self) {
+  { "path": self.path, "signature": self.signature.to_json() }
+}
+
+///|
+pub impl FromJson for FileStat with fn from_json(json, path) {
+  let object = JsonObject::decode(json, path, "file stat")
+  {
+    path: object.required_string("path"),
+    signature: @json.from_json(
+      object.required_json("signature"),
+      path=path.add_key("signature"),
+    ),
+  }
+}
 
 ///|
 pub(all) struct StatFilesReply {
   stats : Array[FileStat]
-} derive(Debug, Eq, FromJson, ToJson)
+} derive(Debug, Eq)
+
+///|
+pub impl ToJson for StatFilesReply with fn to_json(self) {
+  { "stats": self.stats }
+}
+
+///|
+pub impl FromJson for StatFilesReply with fn from_json(json, path) {
+  let object = JsonObject::decode(json, path, "stat files reply")
+  let stats : Array[FileStat] = []
+  for index, raw in object.required_array("stats") {
+    stats.push(
+      @json.from_json(raw, path=path.add_key("stats").add_index(index)),
+    )
+  }
+  { stats, }
+}
 
 ///|
 /// One directory listing (`parent` is `None` at a filesystem root), the
@@ -1842,6 +1923,18 @@ pub extend EmptyReply with Eq::{equal, not_equal}
 
 ///|
 pub extend EmptyReply with ToJson::{to_json}
+
+///|
+pub extend FileSignature with Debug::{to_repr}
+
+///|
+pub extend FileSignature with FromJson::{from_json}
+
+///|
+pub extend FileSignature with Eq::{equal, not_equal}
+
+///|
+pub extend FileSignature with ToJson::{to_json}
 
 ///|
 pub extend FileStat with Debug::{to_repr}

@@ -118,27 +118,35 @@ async test "binary file reads expose only recognized raster signatures" {
 
 ///|
 /// The mtime signatures of the open tabs' files (see `StatFilesPayload`).
-/// A path that can no longer be stat'ed reads as missing rather than an error:
-/// to the panel, the file was deleted.
+/// Each path answers for itself: one file the host cannot inspect neither
+/// fails the whole reply nor reads as deleted — it is reported as exactly
+/// that.
 async fn stat_files_op(payload : StatFilesPayload) -> StatFilesReply {
   let stats : Array[FileStat] = []
   for path in payload.paths {
     let file = WirePath::parse(path).absolute
-    let sig = file_signature(file.to_string())
-    stats.push({ path, sig: sig.unwrap_or(""), })
+    stats.push({ path, signature: file_signature(file.to_string()), })
   }
   { stats, }
 }
 
 ///|
-/// `"{seconds}:{nanos}"` of the file's mtime, or None when it cannot be
-/// stat'ed — a missing file, by far the common case; any other stat failure
-/// reads the same way, and the panel's read-on-change then surfaces the real
-/// error if the file actually exists.
-async fn file_signature(absolute : String) -> String? {
+/// `Present("{seconds}:{nanos}")` of the file's mtime. `Missing` is the path
+/// no longer resolving to a file — deleted, or an ancestor that stopped being
+/// a directory — by far the common failure. Every other stat error is
+/// `Failed` with the OS message: the panel then re-reads the file so the
+/// read's own error (or the content) replaces the guess, and the log keeps
+/// the stat's.
+async fn file_signature(absolute : String) -> FileSignature {
   let (seconds, nanos) = @fs.mtime(absolute) catch {
     error if @async.is_being_cancelled() => raise error
-    _ => return None
+    @os_error.OSError(_) as error if error.is_ENOENT() || error.is_ENOTDIR() =>
+      return Missing
+    error => {
+      @xlog.warn(category="filesystem") <?
+        { "event": "stat_failed", "path": absolute, "error": "\{error}" }
+      return Failed("\{error}")
+    }
   }
-  Some("\{seconds}:\{nanos}")
+  Present("\{seconds}:\{nanos}")
 }
