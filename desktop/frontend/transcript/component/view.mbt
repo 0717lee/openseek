@@ -162,8 +162,8 @@ fn activity_view(
 fn tool_run_views(
   items : Array[@transcript.TranscriptItem],
   subrun? : SubrunLink,
-) -> Array[@html.Html] {
-  let rows : Array[@html.Html] = []
+) -> Map[String, @html.Html] {
+  let rows : Map[String, @html.Html] = Map([])
   let same_assistant_event = match items {
     [first, ..] if items.length() > 1 && first.sequence is Some(sequence) =>
       items.all(item => {
@@ -173,19 +173,51 @@ fn tool_run_views(
     _ => false
   }
   if same_assistant_event {
-    for item in items {
-      append_tool_request(rows, item)
+    for index, item in items {
+      if item.kind is Tool(arguments=Some(_), ..) {
+        rows[tool_run_row_key(item, index, "request")] = tool_request_view(item)
+      }
     }
-    for item in items {
-      append_tool_result(rows, item, subrun?)
+    for index, item in items {
+      if item.kind is Tool(has_result=true, ..) {
+        rows[tool_run_row_key(item, index, "result")] = tool_result_view(
+          item,
+          subrun?,
+        )
+      }
     }
   } else {
-    for item in items {
-      append_tool_request(rows, item)
-      append_tool_result(rows, item, subrun?)
+    for index, item in items {
+      if item.kind is Tool(arguments=Some(_), ..) {
+        rows[tool_run_row_key(item, index, "request")] = tool_request_view(item)
+      }
+      if item.kind is Tool(has_result=true, ..) {
+        rows[tool_run_row_key(item, index, "result")] = tool_result_view(
+          item,
+          subrun?,
+        )
+      }
     }
   }
   rows
+}
+
+///|
+/// Stable VDOM identity for one side of a tool exchange. Results can arrive
+/// after later calls are already visible, so keyed children keep browser-owned
+/// disclosure and radio state attached to the same call instead of the same
+/// array position. The index disambiguates malformed logs with duplicate ids;
+/// call order itself is stable in the transcript projection.
+fn tool_run_row_key(
+  item : @transcript.TranscriptItem,
+  index : Int,
+  side : String,
+) -> String {
+  guard item.kind is Tool(call_id~, name~, ..) else {
+    return "\{side}\u{0}\{index}"
+  }
+  let identity = if call_id.is_empty() { name } else { call_id }
+  "\{side}\u{0}\{identity}\u{0}\{index}"
 }
 
 ///|
@@ -351,6 +383,7 @@ fn tool_result_view(
   }
   let label = match (arguments, brief) {
     (None, Some(brief)) if !brief.is_blank() => capitalize(brief)
+    (None, _) => capitalize(name)
     _ if is_error => "Tool error · \{name}"
     _ => "Tool result · \{name}"
   }
@@ -377,18 +410,20 @@ fn tool_result_view(
   }
   if !item.content.is_blank() {
     let key = tool_call_tabs_key(call_id, item.sequence)
-    if tool_result_tabbed_view(key, name, arguments, item.content) is Some(tabs) {
-      body.push(@html.div(class="tool-call-section", [tabs]))
-    } else {
-      let output = tool_output_tabs(name, arguments, item.content)
-      if output is [tab] {
-        body.push(
-          @html.div(class="tool-call-section", [
-            @html.div(class="tool-call-section-label", tab.label),
-            tab.body,
-          ]),
-        )
-      }
+    let output = tool_output_tabs(name, arguments, item.content)
+    if output is [tab] {
+      body.push(
+        @html.div(class="tool-call-section", [
+          @html.div(class="tool-call-section-label", tab.label),
+          tab.body,
+        ]),
+      )
+    } else if output.length() > 1 {
+      body.push(
+        @html.div(class="tool-call-section", [
+          tool_call_tabs("\{key}-result", output),
+        ]),
+      )
     }
   }
   if body.is_empty() {

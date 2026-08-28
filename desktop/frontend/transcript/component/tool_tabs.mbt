@@ -113,23 +113,6 @@ fn tool_arguments_tabbed_view(
 }
 
 ///|
-/// Render alternate semantic and original views of one result as tabs. A
-/// result with only one useful view stays a plain labeled section in its own
-/// result row instead of gaining a one-entry tab strip.
-fn tool_result_tabbed_view(
-  key : String,
-  name : String,
-  arguments : String?,
-  output : String,
-) -> @html.Html? {
-  let tabs = tool_output_tabs(name, arguments, output)
-  if tabs.length() < 2 {
-    return None
-  }
-  Some(tool_call_tabs("\{key}-result", tabs))
-}
-
-///|
 /// Result views for a tool call. A decoded MoonBit `read` gets a readable,
 /// highlighted Output plus the exact numbered protocol in Original output;
 /// every other result is already its own faithful display.
