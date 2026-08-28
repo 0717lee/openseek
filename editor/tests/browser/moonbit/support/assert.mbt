@@ -62,7 +62,7 @@ pub fn BrowserTestContext::metric_number(
   name : String,
   value : Double,
 ) -> Unit {
-  self.metric(name, Json(value))
+  self.metric(name, Json::number(value))
 }
 
 ///|

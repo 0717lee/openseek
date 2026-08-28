@@ -33,7 +33,7 @@ pub fn Session::Session(
 /// Encode the sidebar row consumed by `/api/sessions`.
 fn Session::listing_json(self : Session) -> Json {
   let last_active : Json = match self.last_active {
-    Some(seconds) => Json(seconds)
+    Some(seconds) => Json::number(seconds)
     None => Json::null()
   }
   {

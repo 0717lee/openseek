@@ -771,10 +771,11 @@ fn default_prompt() -> String {
     #|  not write `@string.from_str[:Int](text)` or `@string.from_str[Int](text)`.
     #|- Map lookup `map[key]` can panic if missing. Use `map.get(key)` for `T?`;
     #|  direct indexing is only for keys you already know exist.
-    #|- Build JSON values with helpers: `Json::object(map)`, `Json::array(arr)`,
-    #|  `Json::string(s)`, `Json::number(n)`, `Json::boolean(b)`, and `Json::null()`.
-    #|  Do not create JSON with `Json::Object(...)`, `Json::String(...)`, or
-    #|  `Json::True`; use variants mainly for pattern matching.
+    #|- Build JSON values with the `Json(value)` constructor — it accepts any value
+    #|  whose type implements `ToJson`. Use `Json::null()` for null and
+    #|  `Json::empty_object()` for an empty object. Do not create JSON with
+    #|  `Json::Object(...)`, `Json::String(...)`, or `Json::True`; use variants
+    #|  mainly for pattern matching.
     #|- For integer JSON numbers, use `Json::number(n.to_double(), repr=text.to_owned())`
     #|  when you need output to preserve integer spelling.
     #|- For JSON CLI stdout and tests, use `json.stringify()` or inspect
