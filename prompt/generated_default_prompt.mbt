@@ -82,8 +82,11 @@ fn default_prompt() -> String {
     #|interpolating, or `"\{home}/.moon"` renders as `Some(/Users/me)/.moon`.
     #|
     #|`@shell.glob` expands `*`, `?`, character sets, and `**` without shell
-    #|parsing; its sorted matches are ordinary `Array[String]` values. A pattern
-    #|that matches nothing returns an empty array.
+    #|parsing; it is `async`, and its sorted matches are ordinary `Array[String]`
+    #|values. A pattern that matches nothing returns an empty array. Spread them
+    #|into a command's arguments — `@shell.Cmd("rg", ["-c", "TODO", ..files])`; a
+    #|bare `@shell.glob(...)` in an argument array is an `Array[String]` where a
+    #|`String` is wanted and does not compile.
     #|
     #|Use `@shell.Cmd` to run an external program and capture its output. Only
     #|these programs can be started:
@@ -112,7 +115,7 @@ fn default_prompt() -> String {
     #|| Command     | Alternatives     |
     #||-------------|------------------|
     #|| ls          | @fs.readdir(dir) |
-    #|| find        | @shell.glob(pattern) |
+    #|| find        | @shell.glob(pattern), spread into args as `[..files]` |
     #|| cat         | @fs.read_file(p).text() |
     #|| head/tail   | slice the split text; wc -l → count it |
     #|| grep        | rg, or .split("\n").filter(...) on captured output |
