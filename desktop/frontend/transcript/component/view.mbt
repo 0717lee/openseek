@@ -1,157 +1,4 @@
 ///|
-/// The summary line for a run of consecutive tool cards, counting calls by
-/// what the engine's tools do — "Read 3 files, edited 2 files, ran 1
-/// command". Every built-in `cmd/openseek` tool has a category; unknown and
-/// dynamically registered tools remain generic tool calls. Only the name's
-/// first token matters, so a runtime-update title like "moon_check compiling"
-/// counts as a check update. The retired `moon_cmd` spelling remains readable
-/// when replaying an older session.
-fn tool_group_summary(items : Array[@transcript.TranscriptItem]) -> String {
-  let mut reads = 0
-  let mut writes = 0
-  let mut edits = 0
-  let mut removes = 0
-  let mut runs = 0
-  let mut background_reads = 0
-  let mut background_stops = 0
-  let mut plans = 0
-  let mut goals = 0
-  let mut finishes = 0
-  let mut checks = 0
-  let mut others = 0
-  for item in items {
-    guard item.kind is Tool(name~, ..) else { continue }
-    let head = match name.trim().split(" ").head() {
-      Some(head) => head.to_owned()
-      None => ""
-    }
-    match head {
-      "read" => reads = reads + 1
-      "write" => writes = writes + 1
-      "edit" | "multi_edit" => edits = edits + 1
-      "remove" => removes = removes + 1
-      "shell" | "moon_cmd" | "mbtx" => runs = runs + 1
-      "job_output" | "shell_output" => background_reads = background_reads + 1
-      "job_stop" | "shell_stop" => background_stops = background_stops + 1
-      "plan" => plans = plans + 1
-      "goal" => goals = goals + 1
-      "finish" => finishes = finishes + 1
-      "moon_check" => checks = checks + 1
-      _ => others = others + 1
-    }
-  }
-  let parts : Array[String] = []
-  // Each tuple is one display category in summary order. Keeping singular and
-  // plural text beside its counter makes additions visible in one place.
-  let categories = [
-    (reads, "read 1 file", "read # files"),
-    (writes, "wrote 1 file", "wrote # files"),
-    (edits, "edited 1 file", "edited # files"),
-    (removes, "removed 1 file", "removed # files"),
-    (runs, "ran 1 command", "ran # commands"),
-    (background_reads, "checked 1 background job", "checked # background jobs"),
-    (background_stops, "stopped 1 background job", "stopped # background jobs"),
-    (plans, "1 plan update", "# plan updates"),
-    (goals, "1 goal update", "# goal updates"),
-    (finishes, "finished", "# finish calls"),
-    (checks, "1 check update", "# check updates"),
-    (others, "1 tool call", "# tool calls"),
-  ]
-  for category in categories {
-    let (value, singular, plural) = category
-    if value > 0 {
-      parts.push(
-        if value == 1 {
-          singular
-        } else {
-          plural.replace(old="#", new=value.to_string())
-        },
-      )
-    }
-  }
-  capitalize(parts.join(", "))
-}
-
-///|
-/// The user-facing reading of a tool burst. Completed tools already carry the
-/// concise outcome their executor recorded for `viz_app`; promote those briefs
-/// instead of reducing an exact action such as `moon test` to "ran 1 command".
-/// Show at most two so a large parallel burst remains a single scannable line;
-/// the remainder count includes both unshown briefs and calls still waiting for
-/// a result. Old/briefless sessions keep the category summary above.
-fn tool_activity_summary(items : Array[@transcript.TranscriptItem]) -> String {
-  let briefs : Array[String] = []
-  let mut tools = 0
-  for item in items {
-    guard item.kind is Tool(brief~, ..) else { continue }
-    tools = tools + 1
-    if brief is Some(brief) {
-      let brief = brief.trim()
-      if !brief.is_empty() {
-        briefs.push(brief.to_owned())
-      }
-    }
-  }
-  if briefs.is_empty() {
-    return tool_group_summary(items)
-  }
-  let shown : Array[String] = []
-  for brief in briefs {
-    if shown.length() == 2 {
-      break
-    }
-    shown.push(brief)
-  }
-  let remaining = tools - shown.length()
-  if remaining > 0 {
-    shown.push("+\{remaining} more")
-  }
-  capitalize(shown.join(" · "))
-}
-
-///|
-/// Ordinary tool-only activity needs one disclosure level, not the generic
-/// activity fold wrapped around another tool-burst fold. Keep the outer fold
-/// for failures (its explicit failure badge is accessible without relying on
-/// red alone) and for plan calls (it carries the compact progress meter).
-fn flatten_tool_activity(items : Array[@transcript.TranscriptItem]) -> Bool {
-  !items.is_empty() &&
-  count_failed(items) == 0 &&
-  items.all(item => item.kind is Tool(name~, ..) && name != "plan")
-}
-
-///|
-/// A mixed activity card already promotes its only successful tool's brief to
-/// the outer summary. Return that tool so the expanded body can show its
-/// arguments/output directly instead of repeating the same disclosure label.
-/// Keep failed and plan calls nested: their badge and progress affordances
-/// belong to the ordinary tool-card rendering.
-fn inline_singleton_tool(
-  items : Array[@transcript.TranscriptItem],
-  allow_tool_only? : Bool = false,
-) -> @transcript.TranscriptItem? {
-  let mut tool : @transcript.TranscriptItem? = None
-  let mut has_reasoning = false
-  for item in items {
-    match item.kind {
-      Reasoning => has_reasoning = true
-      Tool(name~, is_error~, ..) if name != "plan" && !is_error =>
-        if tool is Some(_) {
-          return None
-        } else {
-          tool = Some(item)
-        }
-      _ => return None
-    }
-  }
-  if has_reasoning || allow_tool_only {
-    tool
-  } else {
-    None
-  }
-}
-
-///|
 fn capitalize(text : String) -> String {
   // `[first, .. rest]` binds the first Unicode scalar and the true remainder.
   // The old `iter().next()` + `text[1:]` mixed a scalar with a code-unit slice:
@@ -164,38 +11,19 @@ fn capitalize(text : String) -> String {
 }
 
 ///|
-fn count_failed(items : Array[@transcript.TranscriptItem]) -> Int {
-  let mut failed = 0
-  for item in items {
-    if item.kind is Tool(is_error=true, ..) {
-      failed = failed + 1
-    }
-  }
-  failed
-}
-
-///|
-fn failed_badge(failed : Int) -> @html.Html {
-  @html.span(
-    class="activity-failed",
-    if failed == 1 {
-      "1 failed"
-    } else {
-      "\{failed} failed"
-    },
-  )
-}
-
-///|
-/// One durable model step's work, or adjacent activity from another source,
-/// folded behind a single summary line ("#2 · Read moon.mod · moon test").
-/// Expanding shows the work log in order:
-/// reasoning as muted prose — never a labelled "Thinking" row of its own —
-/// each burst of tool calls as a one-line sublist. A stretch that only
-/// thought folds behind a plain "Thought" line. Failures never force the fold
-/// open; they badge the summary instead. The open state is the browser's
-/// (`<details>`), so a reader's toggle survives re-renders and the run
-/// growing while live.
+/// One durable model step's work, or adjacent activity from another source.
+/// Every tool call is always on display as its own one-line row
+/// (`tool_call_view`), expandable to that call's arguments and output — so a
+/// step that ran ten tools reads as ten scannable rows, not one folded line
+/// hiding them. Only reasoning stays behind a fold: a step that opens with a
+/// thought carries the ordinal and commit instant on that fold's summary
+/// ("#2 14:32:10 · Thought"), and a step that goes straight to tools puts
+/// the same columns on a plain heading line instead. The open state of every
+/// disclosure is the browser's (`<details>`), so a reader's toggle survives
+/// re-renders and the run growing while live.
+///
+/// Failures need no badge up here: a failed call's own row is visible,
+/// starts open, and carries its own literal `failed` marker.
 ///
 /// Assistant prose is never in here: every assistant message is its own
 /// visible bubble, so a turn reads as narration, work, narration, work,
@@ -208,171 +36,117 @@ fn activity_view(
   step_label? : String = "",
   subrun? : SubrunLink,
 ) -> @html.Html {
-  if step_label.is_empty() &&
-    live_reasoning is None &&
-    flatten_tool_activity(items) {
-    return @html.div(class="activity-row", [tool_line_view(items, subrun?)])
+  // The step ordinal is its own span so it can carry the accent and a fixed
+  // numeral column, then the instant in a second fixed column: the run reads
+  // as a table. The instant belongs beside the ordinal rather than out at the
+  // row's right edge — the reason to show it at all is the gap to the step
+  // above and below, and comparing a column is the eye's job only when
+  // nothing variable-width sits between its entries and their anchor.
+  let header : Array[@html.Html] = []
+  let stamp = step_stamp(items)
+  if !step_label.is_empty() {
+    header.push(@html.span(class="activity-step", step_label))
+    // A real space, not a CSS margin, and only when the instant follows it: the
+    // gap has to exist in the text as well, or the accessible name and anything
+    // copied out of the row read "#1Committed 14:32:10".
+    if stamp is Some(_) {
+      header.push(@html.text(" "))
+    }
   }
-  let inline_tool = inline_singleton_tool(
-    items,
-    allow_tool_only=!step_label.is_empty(),
-  )
-  let log : Array[@html.Html] = []
+  if stamp is Some(stamp) {
+    header.push(stamp)
+  }
+  // The header rides the leading thought fold's summary when the step opens
+  // with reasoning, keeping the common step's one-line "#2 · Thought" lead. A
+  // step that goes straight to tools gets a plain heading line instead: a
+  // call row's summary belongs to that call alone.
+  let leads_with_thought = match items {
+    [first, ..] => first.kind is Reasoning
+    [] => live_reasoning is Some(_)
+  }
+  let mut pending_header = !header.is_empty()
+  let rows : Array[@html.Html] = []
+  if pending_header && !leads_with_thought {
+    rows.push(@html.div(class="activity-heading", header))
+    pending_header = false
+  }
+  fn thought_fold(
+    label : String,
+    prose : @html.Html,
+    unfolded : Bool,
+  ) -> @html.Html {
+    let text : Array[@html.Html] = []
+    if pending_header {
+      text.append(header)
+      // The separator introduces the label only when something precedes it: a
+      // legacy run with no ordinal and no stamp is the label alone.
+      text.push(@html.text(" · \{label}"))
+      pending_header = false
+    } else {
+      text.push(@html.text(label))
+    }
+    @html.details(class="activity", open=unfolded, [
+      @html.summary(class="activity-summary", [
+        @html.span(class="activity-text", text),
+      ]),
+      @html.div(class="activity-body", [prose]),
+    ])
+  }
+
   let mut index = 0
   while index < items.length() {
     if items[index].kind is Tool(..) {
-      let tools : Array[@transcript.TranscriptItem] = []
+      let calls : Array[@html.Html] = []
       while index < items.length() && items[index].kind is Tool(..) {
-        tools.push(items[index])
+        calls.push(tool_call_view(items[index], subrun?))
         index = index + 1
       }
-      if inline_tool is Some(tool) && tools.length() == 1 {
-        log.push(inline_tool_call_view(tool, subrun?))
-      } else if !step_label.is_empty() {
-        // The outer disclosure already groups this model step. Show each call
-        // directly rather than adding a redundant second burst disclosure.
-        log.append(tools.map(tool => tool_call_view(tool, subrun?)))
-      } else {
-        log.push(tool_line_view(tools, subrun?))
-      }
+      rows.push(@html.div(class="activity-work", calls))
     } else {
       // Reasoning; callers never pass user messages, assistant prose, or
       // error bubbles.
-      log.push(
-        @html.div(
-          class="msg-content markdown activity-thinking",
-          @markdown.markdown_nodes(items[index].content, open_file=on_open),
+      rows.push(
+        thought_fold(
+          "Thought",
+          @html.div(
+            class="msg-content markdown activity-thinking",
+            @markdown.markdown_nodes(items[index].content, open_file=on_open),
+          ),
+          false,
         ),
       )
       index = index + 1
     }
   }
   if live_reasoning is Some(content) {
-    if reasoning_complete {
+    let prose = if reasoning_complete {
       // The semantic completion supplies one whole document, so Markdown is
       // safe and cheap now. The durable item will take over the same card.
-      log.push(
-        @html.div(
-          class="msg-content markdown activity-thinking",
-          @markdown.markdown_nodes(content, open_file=on_open),
-        ),
+      @html.div(
+        class="msg-content markdown activity-thinking",
+        @markdown.markdown_nodes(content, open_file=on_open),
       )
     } else {
       // Do not parse an unfinished Markdown document on every provider token.
       // Newlines are preserved by CSS while fragments are still arriving.
-      log.push(
-        @html.div(
-          class="msg-content activity-thinking activity-thinking-live",
-          @html.text(content),
-        ),
+      @html.div(
+        class="msg-content activity-thinking activity-thinking-live",
+        @html.text(content),
       )
     }
+    rows.push(
+      thought_fold(
+        if reasoning_complete {
+          "Thought"
+        } else {
+          "Thinking…"
+        },
+        prose,
+        true,
+      ),
+    )
   }
-  let failed = count_failed(items)
-  let summary_label = tool_activity_summary(items)
-  let activity_label = if summary_label.is_empty() {
-    if live_reasoning is Some(_) && !reasoning_complete {
-      "Thinking…"
-    } else {
-      "Thought"
-    }
-  } else {
-    summary_label
-  }
-  let stamp = step_stamp(items)
-  // The step ordinal is its own span so it can carry the accent and a fixed
-  // numeral column, then the instant in a second fixed column, then the label:
-  // the run reads as a table. The instant belongs beside the ordinal rather
-  // than out at the row's right edge — the reason to show it at all is the gap
-  // to the step above and below, and comparing a column is the eye's job only
-  // when nothing variable-width sits between its entries and their anchor.
-  let text : Array[@html.Html] = []
-  if !step_label.is_empty() {
-    text.push(@html.span(class="activity-step", step_label))
-    // A real space, not a CSS margin, and only when the instant follows it: the
-    // gap has to exist in the text as well, or the accessible name and anything
-    // copied out of the row read "#1Committed 14:32:10".
-    if stamp is Some(_) {
-      text.push(@html.text(" "))
-    }
-  }
-  if stamp is Some(stamp) {
-    text.push(stamp)
-  }
-  // The separator introduces the label only when something precedes it: a
-  // legacy run with no ordinal and no stamp is the label alone.
-  text.push(
-    if text.is_empty() {
-      @html.text(activity_label)
-    } else {
-      @html.text(" · \{activity_label}")
-    },
-  )
-  let summary : Array[@html.Html] = [@html.span(class="activity-text", text)]
-  if failed > 0 {
-    summary.push(failed_badge(failed))
-  }
-  // The plan as this run left it, so a folded turn reads as the checklist
-  // filling up without unfolding anything. A run that touched no plan adds
-  // nothing.
-  summary.push(@plan.fold_progress(items))
-  @html.div(class="activity-row", [
-    @html.details(class="activity", open=live_reasoning is Some(_), [
-      @html.summary(class="activity-summary", summary),
-      @html.div(class="activity-body", log),
-    ]),
-  ])
-}
-
-///|
-/// A burst of consecutive tool calls: one gray line built from the recorded
-/// briefs (falling back to category counts for old or pending results) that
-/// expands to the per-call arguments and outputs. A singleton is already one
-/// call disclosure, so it does not get a redundant burst disclosure around it.
-/// A burst with a failure starts open — the failure is what the reader came for.
-fn tool_line_view(
-  tools : Array[@transcript.TranscriptItem],
-  subrun? : SubrunLink,
-) -> @html.Html {
-  if tools.length() == 1 {
-    return tool_call_view(tools[0], subrun?)
-  }
-  let failed = count_failed(tools)
-  let summary : Array[@html.Html] = [
-    @html.span(class="tool-line-text", tool_activity_summary(tools)),
-  ]
-  if failed > 0 {
-    summary.push(failed_badge(failed))
-  }
-  @html.details(class="tool-line", open=failed > 0, [
-    @html.summary(class="tool-line-summary", summary),
-    @html.div(
-      class="tool-line-body",
-      tools.map(tool => tool_call_view(tool, subrun?)),
-    ),
-  ])
-}
-
-///|
-/// One tool call inside an expanded burst: its brief ("Read moon.mod", the
-/// tool name when the engine sent none), expandable to the original arguments
-/// and the later result. Failed calls start open and read red. Calls from older
-/// sessions may have no recorded arguments; unmatched results keep their old
-/// output-only presentation.
-fn tool_call_view(
-  item : @transcript.TranscriptItem,
-  subrun? : SubrunLink,
-) -> @html.Html {
-  tool_call_view_mode(item, show_label=true, subrun?)
-}
-
-///|
-/// The enclosing activity summary already names this singleton tool.
-fn inline_tool_call_view(
-  item : @transcript.TranscriptItem,
-  subrun? : SubrunLink,
-) -> @html.Html {
-  tool_call_view_mode(item, show_label=false, subrun?)
+  @html.div(class="activity-row", rows)
 }
 
 ///|
@@ -391,11 +165,9 @@ priv struct SubrunLink {
 ///|
 /// The chip linking a sub-run's tool card to the child's own transcript.
 ///
-/// It leads the card body rather than sitting in the summary: the common
-/// shape for a sub-run is a step whose single tool call is inlined
-/// (`inline_tool_call_view`), which has no summary of its own, and a button
-/// inside a `<summary>` would have to fight that element's toggle activation.
-/// Leading the body puts it in the same place in both shapes.
+/// It leads the card body rather than sitting in the summary: a button
+/// inside a `<summary>` would have to fight that element's toggle activation,
+/// and the body keeps it beside the report it explains.
 fn subrun_chip(child : String, open : (String) -> @cmd.Cmd) -> @html.Html {
   @html.div(class="tool-call-section", [
     @html.button(
@@ -409,9 +181,16 @@ fn subrun_chip(child : String, open : (String) -> @cmd.Cmd) -> @html.Html {
 }
 
 ///|
-fn tool_call_view_mode(
+/// One tool call, always on display as its own row: its brief ("Read
+/// moon.mod", or the tool name when the engine sent none), expandable to the
+/// original arguments and the later result. Failed calls start open, read
+/// red, and carry a literal `failed` marker so the state never rests on
+/// color alone. A `plan` call's row also carries the compact progress meter,
+/// so the checklist's fill reads without unfolding anything. Calls from older
+/// sessions may have no recorded arguments; unmatched results keep their old
+/// output-only presentation.
+fn tool_call_view(
   item : @transcript.TranscriptItem,
-  show_label~ : Bool,
   subrun? : SubrunLink,
 ) -> @html.Html {
   guard item.kind is Tool(call_id~, name~, arguments~, is_error~, brief~, ..) else {
@@ -425,6 +204,15 @@ fn tool_call_view_mode(
     },
   )
   let error_class = if is_error { " error" } else { "" }
+  // The row's always-visible line: the brief, a literal `failed` marker when
+  // the result errored (the row's red must not carry the state alone), and —
+  // for an applied `plan` call — the compact progress meter. `fold_progress`
+  // renders nothing for every other call.
+  let line : Array[@html.Html] = [@html.span(class="tool-call-text", label)]
+  if is_error {
+    line.push(@html.span(class="tool-call-failed", "failed"))
+  }
+  line.push(@plan.fold_progress([item]))
   let body : Array[@html.Html] = []
   let mut content_in_tabs = false
   // A sub-run result names the child session it spawned in its brief. The
@@ -505,19 +293,12 @@ fn tool_call_view_mode(
     )
   }
   if body.is_empty() {
-    if !show_label {
-      return @html.text("")
-    }
-    @html.div(class="tool-call-label" + error_class, label)
-  } else if !show_label {
-    // The enclosing activity disclosure already carries this one tool's
-    // label. Keep the class so the existing section/pre styling still applies.
-    @html.div(class="tool-call" + error_class, body)
+    @html.div(class="tool-call-label" + error_class, line)
   } else {
     @html.details(
       class="tool-call" + error_class,
       open=is_error,
-      [@html.summary(class="tool-call-summary", label), ..body],
+      [@html.summary(class="tool-call-summary", line), ..body],
     )
   }
 }
@@ -936,7 +717,7 @@ fn assistant_message_view(
 ///|
 /// A compaction checkpoint: the turns above it were summarized into this text
 /// and dropped from the context the next prompt carries. Deliberately not an
-/// ItemKind the transcript loop batches into a turn's activity fold — it
+/// ItemKind the transcript loop batches into a turn's activity group — it
 /// stands alone between turns, labeled for what it is, with the summary prose
 /// behind the fold.
 fn summary_card_view(

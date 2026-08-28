@@ -36,9 +36,9 @@ pub(all) enum ItemKind {
   )
   // A compaction checkpoint: the turns before it were summarized into the
   // item's content and dropped from the context. Its own kind so the view
-  // renders it as a standalone card — folded into a turn's activity it
-  // would read as an anonymous tool call and swallow the preceding answer
-  // bubble into the fold.
+  // renders it as a standalone card — batched into a turn's activity it
+  // would read as an anonymous tool call row and swallow the preceding
+  // answer bubble into the step's group.
   Summary
 } derive(Eq)
 
