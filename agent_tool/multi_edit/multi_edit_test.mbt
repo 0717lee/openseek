@@ -590,7 +590,7 @@ async test "multi_edit concatenates inline edits with an edits_file" {
 
 ///|
 async test "multi_edit rejects a call with no edits at all" {
-  let output = run_multi_edit(Json((Map([]) : Map[String, Json])))
+  let output = run_multi_edit(Json::empty_object())
   assert_true(output.is_error)
   assert_true(output.content.contains("edits and/or edits_file"))
   // An explicit empty array is the same combined-empty case.
