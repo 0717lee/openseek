@@ -734,13 +734,17 @@
 
 /* The step heading when the step went straight to tools: the same ordinal and
    instant columns the thought fold's summary carries, on a plain line — there
-   is nothing to disclose, every call below is already on display. */
+   is nothing to disclose, every call below is already on display. The hidden
+   marker reserves exactly the lead the summary's `▸ ` takes (same font, same
+   text), so `#N` and the instant line up in one column across both header
+   forms; the gap between them is the markup's real space, as in the summary. */
 .activity-heading {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
+}
+.activity-heading::before {
+  content: "▸ ";
+  visibility: hidden;
 }
 
 /* When the step committed, in the summary's second fixed column, right after
