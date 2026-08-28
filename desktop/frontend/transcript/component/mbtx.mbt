@@ -58,9 +58,10 @@ fn decode_mbtx_call(arguments : String) -> MbtxCall? {
 ///
 /// The numbers exist to be matched against the paired result, whose compiler
 /// diagnostics cite `line:column` positions into this source. That is also why
-/// the source skips `truncate_output`: a clamp would misnumber every line after
-/// its skip marker, and the payload is already bounded — `card_fields` refuses
-/// anything past the shared card ceiling before this card sees it.
+/// the source skips `truncate_output`: its clamp would misnumber every line
+/// after its skip marker. Cost stays bounded without it — `card_fields`
+/// refuses payloads past the shared card ceiling, and the numbered renderer
+/// clamps a degenerate line count itself, keeping true numbers on the tail.
 fn mbtx_card(arguments : String) -> @html.Html? {
   guard decode_mbtx_call(arguments) is Some(call) else { return None }
   Some(

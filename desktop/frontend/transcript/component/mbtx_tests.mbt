@@ -46,6 +46,36 @@ test "an mbtx chip clamps one oversized argument" {
 }
 
 ///|
+/// The card renders the whole program without `truncate_output`: a program
+/// past that helper's 101-line clamp still shows every line under its true
+/// number, with no skip marker — reintroducing the clamp would misnumber the
+/// tail against the result's `line:column` diagnostics.
+#warnings("-alert_unstable")
+test "an mbtx program past the transcript clamp keeps every numbered line" {
+  let lines : Array[String] = []
+  for index in 0..<120 {
+    lines.push("let x\{index} = \{index}")
+  }
+  let arguments : Json = { "source": lines.join("\n"), "target": "js" }
+  let rendered = tool_call_view({
+    kind: Tool(
+      call_id="c1",
+      name="mbtx",
+      arguments=Some(arguments.stringify()),
+      has_result=true,
+      is_error=false,
+      brief=Some("mbtx (exit=0)"),
+    ),
+    content: "ok",
+    ts: None,
+    sequence: None,
+  })
+  let markup = @rabbita.render_to_string(() => @rabbita.Val::constant(rendered))
+  assert_true(markup.contains("<span class=\"moonbit-gutter\">120</span>"))
+  assert_false(markup.contains("skipped"))
+}
+
+///|
 /// A payload this card cannot read keeps the generic arguments rendering,
 /// which clamps before parsing — nothing is ever shown as a program that is
 /// not one.

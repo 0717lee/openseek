@@ -315,6 +315,21 @@ test "mbtx source uses editor token classes and keeps original JSON" {
 }
 
 ///|
+/// The export renders the whole program: a source past the transcript
+/// helper's 101-line clamp still shows every line under its true number,
+/// with no skip marker.
+test "a long mbtx program keeps every numbered line in the export" {
+  let lines : Array[String] = []
+  for index in 0..<120 {
+    lines.push("let x\{index} = \{index}")
+  }
+  let arguments : Json = { "source": lines.join("\n"), "target": "js" }
+  let html = render_tool_call("mbtx", arguments.stringify())
+  assert_true(html.contains("class=\"moonbit-gutter\">120</span>"))
+  assert_false(html.contains("skipped"))
+}
+
+///|
 test "MoonBit read results highlight source in raw and model views" {
   let session = @agent_session.Session(SessionId("read-mbt"), system_prompt="")
     .append(

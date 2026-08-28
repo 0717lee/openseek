@@ -1094,6 +1094,11 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* The numbered renderer's elision row for a degenerate line count: no number
+   of its own, muted like the gutters whose sequence it interrupts. */
+.moonbit-skip {
+  color: var(--color-text-muted);
+}
 .read-moonbit-status {
   display: block;
   color: var(--color-text-muted);
