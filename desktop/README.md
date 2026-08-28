@@ -341,18 +341,10 @@ Copy-Item ..\_build\js\release\build\openseek_desktop\frontend\desktop\desktop.j
 moon build . --target native --release
 ```
 
-On Windows, `native_link_config.mjs` passes GUI subsystem linker flags to the
-host executable so double-clicking `openseek-desktop.exe` does not open an extra
-terminal window. It detects common compiler driver styles, consulting
-`vswhere` for an installed MSVC toolchain (as Moon does) before assuming a
-`clang` found on `PATH` is the linker:
-
-- `clang`/`clang++`: `-Wl,/SUBSYSTEM:WINDOWS -Wl,/ENTRY:mainCRTStartup`
-- `clang-cl`/`cl`: `/link /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup`
-- MinGW/GCC: `-mwindows`
-
-Set `OPENSEEK_DESKTOP_LINK_STYLE=clang`, `msvc`, or `mingw` to override the
-auto-detection.
+On Windows, the platform native stub embeds the MSVC linker directives that
+select the GUI subsystem while retaining MoonBit's generated C `main` entry.
+The Windows host requires an MSVC-compatible toolchain; MinGW and GCC-style
+Clang are not supported.
 
 Build the `openseek` engine from the monorepo root:
 

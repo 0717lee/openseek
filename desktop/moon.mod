@@ -29,7 +29,6 @@ license = "Apache-2.0"
 description = "SeekMoon — a Proton + Rabbita desktop client for the OpenSeek agent."
 
 options(
-  "--moonbit-unstable-prebuild": "native_link_config.mjs",
   preferred_target: "native",
   supported_targets: "native+js",
 )

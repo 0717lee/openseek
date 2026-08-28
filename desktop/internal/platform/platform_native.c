@@ -13,9 +13,13 @@
 #include <windows.h>
 #include <shellapi.h>
 
-#if defined(_MSC_VER)
-#pragma comment(lib, "shell32.lib")
+#if !defined(_MSC_VER)
+#error "SeekMoon's Windows desktop host requires an MSVC-compatible compiler"
 #endif
+
+#pragma comment(lib, "shell32.lib")
+#pragma comment(linker, "/SUBSYSTEM:WINDOWS")
+#pragma comment(linker, "/ENTRY:mainCRTStartup")
 
 #endif
 
