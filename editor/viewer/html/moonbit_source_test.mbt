@@ -57,6 +57,9 @@ test "a degenerate numbered line count elides the middle under true numbers" {
   assert_eq(rendered.split("class=\"moonbit-line\"").length(), 502)
   assert_true(rendered.contains("<span class=\"moonbit-gutter\">400</span>"))
   assert_true(rendered.contains("⋯ 100 lines skipped ⋯"))
+  // The skip row's gutter is padded to the shared width so its own grid does
+  // not collapse the column and misalign the marker.
+  assert_true(rendered.contains("<span class=\"moonbit-gutter\">   </span>"))
   assert_true(rendered.contains("<span class=\"moonbit-gutter\">501</span>"))
   assert_true(rendered.contains("<span class=\"moonbit-gutter\">600</span>"))
   assert_false(rendered.contains("<span class=\"moonbit-gutter\">401</span>"))
