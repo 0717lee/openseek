@@ -258,6 +258,9 @@ fn paired_inner_changes(
 ) -> Array[@diff.RangeMapping]? {
   let original_ranges = changed_ranges(original)
   let modified_ranges = changed_ranges(modified)
+  if original_ranges.is_empty() && modified_ranges.is_empty() {
+    return Some([])
+  }
   if original_ranges.is_empty() || modified_ranges.is_empty() {
     return None
   }
@@ -269,6 +272,58 @@ fn paired_inner_changes(
     )
   }
   Some(mappings)
+}
+
+///|
+// Convert a between-line cursor into a valid zero-width document range. At
+// EOF, the position belongs to the end of the last model line rather than the
+// non-existent line after it.
+fn cursor_anchor_range(
+  lines : Array[String],
+  cursor : Int,
+) -> @base_common.Range {
+  let line_number = cursor + 1
+  if lines.is_empty() {
+    return Range(1, 1, 1, 1)
+  }
+  if line_number <= lines.length() {
+    let line_number = line_number.max(1)
+    return Range(line_number, 1, line_number, 1)
+  }
+  let last_line_number = lines.length()
+  let column = lines[last_line_number - 1].length() + 1
+  Range(last_line_number, column, last_line_number, column)
+}
+
+///|
+// A one-sided row can still contain token-level Changed segments. Mapping
+// them to the opposite cursor preserves their decoration and hunk geometry;
+// an empty array records a computed pure reflow rather than missing work.
+fn old_only_inner_changes(
+  original : @mbtdiff.DiffLine,
+  modified_cursor : Int,
+  modified_lines : Array[String],
+) -> Array[@diff.RangeMapping]? {
+  let anchor = cursor_anchor_range(modified_lines, modified_cursor)
+  Some(
+    changed_ranges(original).map(original_range => {
+      @diff.RangeMapping(original_range, anchor)
+    }),
+  )
+}
+
+///|
+fn new_only_inner_changes(
+  modified : @mbtdiff.DiffLine,
+  original_cursor : Int,
+  original_lines : Array[String],
+) -> Array[@diff.RangeMapping]? {
+  let anchor = cursor_anchor_range(original_lines, original_cursor)
+  Some(
+    changed_ranges(modified).map(modified_range => {
+      @diff.RangeMapping(anchor, modified_range)
+    }),
+  )
 }
 
 ///|
@@ -287,11 +342,12 @@ fn paired_change(
 fn old_only_change(
   original : @mbtdiff.DiffLine,
   modified_cursor : Int,
+  modified_lines : Array[String],
 ) -> @diff.DetailedLineRangeMapping {
   DetailedLineRangeMapping(
     LineRange(original.index + 1, original.index + 2),
     LineRange(modified_cursor + 1, modified_cursor + 1),
-    None,
+    old_only_inner_changes(original, modified_cursor, modified_lines),
   )
 }
 
@@ -299,11 +355,12 @@ fn old_only_change(
 fn new_only_change(
   modified : @mbtdiff.DiffLine,
   original_cursor : Int,
+  original_lines : Array[String],
 ) -> @diff.DetailedLineRangeMapping {
   DetailedLineRangeMapping(
     LineRange(original_cursor + 1, original_cursor + 1),
     LineRange(modified.index + 1, modified.index + 2),
-    None,
+    new_only_inner_changes(modified, original_cursor, original_lines),
   )
 }
 
@@ -655,77 +712,45 @@ fn raw_range_difference_is_ignored(
 }
 
 ///|
-fn source_ignored_test_ranges(
-  source : @model.TextSnapshot,
-  lines : Array[String],
-  mode : @mbtdiff.DiffMode,
+fn adapt_ignored_test_ranges(
+  ranges : ArrayView[@mbtdiff.LineRange],
+  line_count : Int,
 ) -> Array[@base_common.LineRange]? {
-  if source.get_value().is_empty() {
-    return Some([])
-  }
-  let probe = @model.TextSnapshot(source.get_value() + "\n")
-  let probe_lines = snapshot_lines(probe)
-  let document = @mbtdiff.diff(
-    source.get_value(),
-    probe.get_value(),
-    options=@mbtdiff.DiffOptions(
-      context_lines=0,
-      ignore_comments=false,
-      ignore_tests=false,
-      mode~,
-    ),
-  ).document()
-  guard document is TopLevel(top) &&
-    valid_top_level_orders(
-      top,
-      semantic_line_count(lines),
-      semantic_line_count(probe_lines),
-    ) else {
-    return None
-  }
-  let ranges : Array[@base_common.LineRange] = []
-  for section in top.sections {
-    guard section is Matched(old~, new~, ..) && old == new else { return None }
-    let empty : Array[String] = []
-    if raw_range_difference_is_ignored(
-        lines,
-        old.start,
-        old.len,
-        empty,
-        0,
-        0,
-        false,
-        true,
-        mode,
-      ) {
-      ranges.push(
-        @base_common.LineRange(old.start + 1, old.start + old.len + 1),
-      )
+  let adapted : Array[@base_common.LineRange] = []
+  let mut previous_end = 0
+  for range in ranges {
+    if !valid_hunk_range(range.start, range.len, line_count) ||
+      range.start < previous_end {
+      return None
     }
+    adapted.push(
+      @base_common.LineRange(range.start + 1, range.start + range.len + 1),
+    )
+    previous_end = range.start + range.len
   }
-  Some(ranges)
+  Some(adapted)
 }
 
 ///|
 fn ignored_test_ownership(
-  original : @model.TextSnapshot,
-  modified : @model.TextSnapshot,
+  result : @mbtdiff.DiffResult,
   original_lines : Array[String],
   modified_lines : Array[String],
-  ignore_tests : Bool,
-  mode : @mbtdiff.DiffMode,
 ) -> IgnoredTestOwnership? {
-  if !ignore_tests {
-    return Some({ original: [], modified: [] })
-  }
   match
     (
-      source_ignored_test_ranges(original, original_lines, mode),
-      source_ignored_test_ranges(modified, modified_lines, mode),
+      adapt_ignored_test_ranges(
+        result.ignored_test_ranges(@mbtdiff.DiffSide::Old),
+        semantic_line_count(original_lines),
+      ),
+      adapt_ignored_test_ranges(
+        result.ignored_test_ranges(@mbtdiff.DiffSide::New),
+        semantic_line_count(modified_lines),
+      ),
     ) {
     (Some(original_ranges), Some(modified_ranges)) =>
       Some({ original: original_ranges, modified: modified_ranges })
-    _ => Some({ original: [], modified: [] })
+    _ => None
   }
 }
 
@@ -981,7 +1006,7 @@ fn flatten_top_level_sections(
       new_cursor = new_target
     }
     if has_old && has_new && old_index == new_index {
-      guard top.sections[old_index] is Matched(old~, new~, diff~) else {
+      guard top.sections[old_index] is Matched(old~, new~, diff~, ..) else {
         return None
       }
       if old_cursor != old_target || new_cursor != new_target {
@@ -1024,8 +1049,8 @@ fn flatten_top_level_sections(
       has_new &&
       old_cursor == old_target &&
       new_cursor == new_target &&
-      top.sections[old_index] is Deleted(old~, diff=old_diff) &&
-      top.sections[new_index] is Inserted(new~, diff=new_diff) {
+      top.sections[old_index] is Deleted(old~, diff=old_diff, ..) &&
+      top.sections[new_index] is Inserted(new~, diff=new_diff, ..) {
       sections.push({
         fragment: old_diff,
         old_base: old.start,
@@ -1058,7 +1083,7 @@ fn flatten_top_level_sections(
     }
     if has_old &&
       old_cursor == old_target &&
-      top.sections[old_index] is Deleted(old~, diff~) {
+      top.sections[old_index] is Deleted(old~, diff~, ..) {
       sections.push({
         fragment: diff,
         old_base: old.start,
@@ -1077,7 +1102,7 @@ fn flatten_top_level_sections(
     }
     if has_new &&
       new_cursor == new_target &&
-      top.sections[new_index] is Inserted(new~, diff~) {
+      top.sections[new_index] is Inserted(new~, diff~, ..) {
       sections.push({
         fragment: diff,
         old_base: old_cursor,
@@ -1321,7 +1346,7 @@ fn append_rows(
         if !valid_line(original, old_cursor, original_lines) {
           return None
         }
-        let mapping = old_only_change(original, new_cursor)
+        let mapping = old_only_change(original, new_cursor, modified_lines)
         if render_changes {
           append_coalesced_change(block_changes, mapping)
         } else {
@@ -1333,7 +1358,7 @@ fn append_rows(
         if !valid_line(modified, new_cursor, modified_lines) {
           return None
         }
-        let mapping = new_only_change(modified, old_cursor)
+        let mapping = new_only_change(modified, old_cursor, original_lines)
         if render_changes {
           append_coalesced_change(block_changes, mapping)
         } else {
@@ -1551,12 +1576,22 @@ fn source_range_is_ignored(
   start : Int,
   len : Int,
   ignore_comments : Bool,
-  ignore_tests : Bool,
   mode : @mbtdiff.DiffMode,
+  ignored_tests : Array[@base_common.LineRange],
 ) -> Bool {
+  let range = @base_common.LineRange(start + 1, start + len + 1)
+  if ignored_tests.any(ignored => {
+      ignored.start_line_number <= range.start_line_number &&
+      ignored.end_line_number_exclusive >= range.end_line_number_exclusive
+    }) {
+    return true
+  }
+  if !ignore_comments {
+    return false
+  }
   let empty : Array[String] = []
   raw_range_difference_is_ignored(
-    lines, start, len, empty, 0, 0, ignore_comments, ignore_tests, mode,
+    lines, start, len, empty, 0, 0, true, false, mode,
   )
 }
 
@@ -1598,16 +1633,16 @@ fn ignored_only_semantic_geometry(
           old.start,
           old.len,
           ignore_comments,
-          ignore_tests,
           mode,
+          test_ownership.original,
         )
         let new_ignored = source_range_is_ignored(
           modified_lines,
           new.start,
           new.len,
           ignore_comments,
-          ignore_tests,
           mode,
+          test_ownership.modified,
         )
         if old_ignored != new_ignored {
           return None
@@ -1620,8 +1655,8 @@ fn ignored_only_semantic_geometry(
             old.start,
             old.len,
             ignore_comments,
-            ignore_tests,
             mode,
+            test_ownership.original,
           ) {
           return None
         }
@@ -1631,8 +1666,8 @@ fn ignored_only_semantic_geometry(
             new.start,
             new.len,
             ignore_comments,
-            ignore_tests,
             mode,
+            test_ownership.modified,
           ) {
           return None
         }
@@ -1818,8 +1853,7 @@ fn specialized_diff(
   original : @model.TextSnapshot,
   modified : @model.TextSnapshot,
   strict : @diff.DocumentDiff,
-  test_ownership : IgnoredTestOwnership,
-) -> (@diff.DocumentDiff, MoonDiffMode, Bool)? {
+) -> (@diff.DocumentDiff, MoonDiffMode, Bool, IgnoredTestOwnership)? {
   let original_lines = snapshot_lines(original)
   let modified_lines = snapshot_lines(modified)
   let diff_mode = match mode {
@@ -1838,6 +1872,10 @@ fn specialized_diff(
     ),
   )
   let document = result.document()
+  guard ignored_test_ownership(result, original_lines, modified_lines)
+    is Some(test_ownership) else {
+    return None
+  }
   let fell_back = mode == Tree && document_has_fallback(document)
   let effective = if fell_back { Token } else { mode }
   guard adapt_document(
@@ -1876,7 +1914,7 @@ fn specialized_diff(
         diff_mode, test_ownership,
       )
       is Some(semantic_geometry) {
-      return Some((semantic_geometry, effective, fell_back))
+      return Some((semantic_geometry, effective, fell_back, test_ownership))
     }
     let geometry_changes = match
       unfiltered_lexical_diff(
@@ -1901,7 +1939,9 @@ fn specialized_diff(
       ignored_alignments.is_empty() {
       return None
     }
-    return Some((order_document_mappings(result), effective, fell_back))
+    return Some(
+      (order_document_mappings(result), effective, fell_back, test_ownership),
+    )
   }
   if (ignore_comments || ignore_tests) &&
     @diff.normalize_and_validate_document_diff(diff, original, modified) is None {
@@ -1916,7 +1956,7 @@ fn specialized_diff(
       )
     }
   }
-  Some((order_document_mappings(diff), effective, fell_back))
+  Some((order_document_mappings(diff), effective, fell_back, test_ownership))
 }
 
 ///|
@@ -1964,37 +2004,16 @@ pub impl @diff.DocumentDiffProvider for MoonDocumentDiffProvider with fn compute
     })
     let whitespace_conflict = !same_line_change_shape(strict, lenient) ||
       paired_change_has_edge_whitespace_difference(strict, original, modified)
-    let diff_mode = match requested {
-      Token => @mbtdiff.DiffMode::Lexical
-      Tree => @mbtdiff.DiffMode::Ast
-      Core => @mbtdiff.DiffMode::Lexical
-    }
-    let original_lines = snapshot_lines(original)
-    let modified_lines = snapshot_lines(modified)
-    let test_ownership = ignored_test_ownership(
+    let raw_specialized = specialized_diff(
+      requested,
+      self.ignore_comments,
+      self.ignore_tests,
       original,
       modified,
-      original_lines,
-      modified_lines,
-      self.ignore_tests,
-      diff_mode,
+      strict,
     )
-    let raw_specialized = match test_ownership {
-      Some(ownership) =>
-        specialized_diff(
-          requested,
-          self.ignore_comments,
-          self.ignore_tests,
-          original,
-          modified,
-          strict,
-          ownership,
-        )
-      None => None
-    }
-    let (coverage_valid, coverage_has_ignored) = match
-      (raw_specialized, test_ownership) {
-      (Some((candidate, _, _)), Some(ownership)) =>
+    let (coverage_valid, coverage_has_ignored) = match raw_specialized {
+      Some((candidate, _, _, ownership)) =>
         specialized_source_coverage(
           requested,
           self.ignore_comments,
@@ -2006,7 +2025,15 @@ pub impl @diff.DocumentDiffProvider for MoonDocumentDiffProvider with fn compute
         )
       _ => (false, false)
     }
-    let specialized = if coverage_valid { raw_specialized } else { None }
+    let specialized = if coverage_valid {
+      match raw_specialized {
+        Some((candidate, effective, fell_back, _)) =>
+          Some((candidate, effective, fell_back))
+        None => None
+      }
+    } else {
+      None
+    }
     let whitespace_conflict_is_filtered = coverage_valid && coverage_has_ignored
     if whitespace_conflict && !whitespace_conflict_is_filtered {
       self.status = { requested, effective: Core, fell_back: true, }

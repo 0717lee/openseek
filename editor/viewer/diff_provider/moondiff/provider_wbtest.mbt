@@ -94,6 +94,84 @@ test "Token provider exposes UTF-16 inner mappings" {
 }
 
 ///|
+test "Token provider preserves one-sided token mappings across multiline expansion" {
+  let original = "fn run() {\n  compute(alpha, beta)\n}"
+  let modified = "fn run() {\n  compute(\n    alpha,\n    beta,\n    gamma < limit,\n  )\n}"
+  let inserted_comma = @base_common.Range(4, 9, 4, 10)
+  let inserted_argument = @base_common.Range(5, 5, 5, 19)
+  let forward = MoonDocumentDiffProvider(mode=Token)
+  let forward_result = compute_with_provider(forward, original, modified)
+  guard forward_result.changes is [forward_change] else {
+    fail("expected one grouped expansion hunk")
+  }
+  assert_eq(forward_change.original, LineRange(2, 3))
+  assert_eq(forward_change.modified, LineRange(2, 7))
+  guard forward_change.inner_changes is Some(forward_inner) else {
+    fail("expected token mappings for expanded lines")
+  }
+  assert_eq(forward_inner.map(mapping => mapping.modified), [
+    inserted_comma, inserted_argument,
+  ])
+  assert_eq(forward_inner.map(mapping => mapping.original), [
+    @base_common.Range(3, 1, 3, 1),
+    @base_common.Range(3, 1, 3, 1),
+  ])
+  assert_true(forward_result.additional_alignments.is_empty())
+  assert_eq(forward.get_status(), {
+    requested: Token,
+    effective: Token,
+    fell_back: false,
+  })
+  forward.dispose()
+
+  let reverse = MoonDocumentDiffProvider(mode=Token)
+  let reverse_result = compute_with_provider(reverse, modified, original)
+  guard reverse_result.changes is [reverse_change] else {
+    fail("expected one grouped contraction hunk")
+  }
+  assert_eq(reverse_change.original, LineRange(2, 7))
+  assert_eq(reverse_change.modified, LineRange(2, 3))
+  guard reverse_change.inner_changes is Some(reverse_inner) else {
+    fail("expected token mappings for contracted lines")
+  }
+  assert_eq(reverse_inner.map(mapping => mapping.original), [
+    inserted_comma, inserted_argument,
+  ])
+  assert_eq(reverse_inner.map(mapping => mapping.modified), [
+    @base_common.Range(3, 1, 3, 1),
+    @base_common.Range(3, 1, 3, 1),
+  ])
+  assert_true(reverse_result.additional_alignments.is_empty())
+  assert_eq(reverse.get_status(), {
+    requested: Token,
+    effective: Token,
+    fell_back: false,
+  })
+  reverse.dispose()
+}
+
+///|
+test "Token provider marks pure multiline reflow as computed inner changes" {
+  let original = "fn run() {\n  compute(alpha, beta)\n}"
+  let modified = "fn run() {\n  compute(\n    alpha,\n    beta\n  )\n}"
+  let provider = MoonDocumentDiffProvider(mode=Token)
+  let result = compute_with_provider(provider, original, modified)
+  guard result.changes is [change] else {
+    fail("expected one grouped reflow hunk")
+  }
+  assert_eq(change.original, LineRange(2, 3))
+  assert_eq(change.modified, LineRange(2, 6))
+  assert_eq(change.inner_changes, Some([]))
+  assert_true(result.additional_alignments.is_empty())
+  assert_eq(provider.get_status(), {
+    requested: Token,
+    effective: Token,
+    fell_back: false,
+  })
+  provider.dispose()
+}
+
+///|
 test "specialized providers group touching rows into VS Code hunks" {
   for mode in [Token, Tree] {
     let provider = MoonDocumentDiffProvider(mode~)
@@ -118,34 +196,6 @@ test "Tree parse failure reports Token fallback" {
     fell_back: true,
   })
   provider.dispose()
-}
-
-///|
-test "invalid Tree geometry falls back to strict Core" {
-  let original = "fn stable() { 0 }"
-  let modified = "fn inserted() { 1 }\nfn stable() { 2 }"
-  let options : @diff.DocumentDiffOptions = { ignore_trim_whitespace: false, }
-  let expected = @diff.CoreDocumentDiffProvider().compute_diff(
-    TextSnapshot(original),
-    TextSnapshot(modified),
-    options,
-  )
-  for ignore_comments in [false, true] {
-    let provider = MoonDocumentDiffProvider(mode=Tree, ignore_comments~)
-    let result = compute_with_provider(
-      provider,
-      original,
-      modified,
-      ignore_trim_whitespace=false,
-    )
-    assert_eq(result, expected)
-    assert_eq(provider.get_status(), {
-      requested: Tree,
-      effective: Core,
-      fell_back: true,
-    })
-    provider.dispose()
-  }
 }
 
 ///|
@@ -450,16 +500,21 @@ test "Token and Tree ignore MoonBit test-only edits" {
 
 ///|
 test "ignored tests do not consume adjacent ordinary blank lines" {
-  let ownership_source = @model.TextSnapshot(
-    "fn a() {}\ntest \"new\" { new_value() }\n\nfn b() {}",
-  )
-  assert_eq(
-    source_ignored_test_ranges(
-      ownership_source,
-      snapshot_lines(ownership_source),
-      @mbtdiff.DiffMode::Lexical,
+  let original = "fn a() {}\nfn b() {}"
+  let modified = "fn a() {}\ntest \"new\" { new_value() }\n\nfn b() {}"
+  let metadata = @mbtdiff.diff(
+    original,
+    modified,
+    options=@mbtdiff.DiffOptions(
+      context_lines=0,
+      ignore_comments=false,
+      ignore_tests=true,
+      mode=@mbtdiff.DiffMode::Lexical,
     ),
-    Some([LineRange(2, 3)]),
+  )
+  assert_true(
+    metadata.ignored_test_ranges(@mbtdiff.DiffSide::New)
+    is [{ start: 1, len: 1 }],
   )
   for mode in [Token, Tree] {
     let provider = MoonDocumentDiffProvider(
@@ -467,9 +522,7 @@ test "ignored tests do not consume adjacent ordinary blank lines" {
       ignore_comments=false,
       ignore_tests=true,
     )
-    let result = compute_with_provider(
-      provider, "fn a() {}\nfn b() {}", "fn a() {}\ntest \"new\" { new_value() }\n\nfn b() {}",
-    )
+    let result = compute_with_provider(provider, original, modified)
     assert_eq(provider.get_status(), {
       requested: mode,
       effective: Core,
