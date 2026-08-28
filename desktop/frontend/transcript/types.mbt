@@ -93,4 +93,17 @@ pub extend ItemKind with Eq::{equal, not_equal}
 pub extend SessionListItem with Eq::{equal, not_equal}
 
 ///|
+/// A project whose durable listing the host could not read: its store's
+/// `sessions list` failed, so the group came back with no rows and the
+/// failure text. The sidebar shows that text under the project, so an
+/// unreadable store is not mistaken for one with no conversations.
+pub(all) struct SessionListFailure {
+  workspace : @common.Uri
+  message : String
+} derive(Eq)
+
+///|
+pub extend SessionListFailure with Eq::{equal, not_equal}
+
+///|
 pub extend TranscriptItem with Eq::{equal, not_equal}

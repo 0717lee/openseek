@@ -1136,6 +1136,11 @@ priv struct DeviceState {
   // "Archived" group with an unarchive control. Reported by the host in the
   // same entry shape as the live list.
   archived : Array[@transcript.SessionListItem]
+  // Projects whose durable listing the host could not read in the last
+  // `session.list` reply, replaced with every reply like `sessions`. The
+  // sidebar shows the failure under the project, so an unreadable store is
+  // not mistaken for an empty one.
+  session_list_failures : Array[@transcript.SessionListFailure]
   // Per-session archive facts newer than an unversioned whole-list reply.
   // Cleared only at BridgeReady, immediately before fresh live and archived
   // lists are requested for the new connection.
@@ -1176,6 +1181,7 @@ fn empty_device_state(channel : @interop.ChannelId) -> DeviceState {
     workspace_settings_request_generation: 0,
     sessions: [],
     archived: [],
+    session_list_failures: [],
     archive_overrides: [],
     projects: [],
     worktrees: [],
@@ -1971,6 +1977,7 @@ priv enum DeviceMsg {
   SteerRejected(session~ : String, submission_id~ : String, run_id~ : String)
   SessionsLoaded(
     Array[@transcript.SessionListItem],
+    failures~ : Array[@transcript.SessionListFailure],
     connection_generation~ : Int,
     request_generation~ : Int
   )
@@ -2908,6 +2915,21 @@ fn DeviceState::placement_for_store_root(
   }
   if @common.ext_uri.basename(root) == ".openseek" {
     return Some(@common.ext_uri.dirname(root))
+  }
+  None
+}
+
+///|
+/// Why `workspace` has no durable rows in the last `session.list` reply,
+/// when the host could not read that store.
+fn DeviceState::session_list_failure(
+  self : DeviceState,
+  workspace : @common.Uri,
+) -> String? {
+  for failure in self.session_list_failures {
+    if failure.workspace == workspace {
+      return Some(failure.message)
+    }
   }
   None
 }

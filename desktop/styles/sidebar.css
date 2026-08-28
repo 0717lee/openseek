@@ -429,6 +429,13 @@ button.composer-worktree:hover {
 .conversation-row.placeholder:hover {
   background: transparent;
 }
+/* The host could not list this project's store; the row names why. */
+.conversation-row.placeholder.notice {
+  color: var(--color-danger);
+}
+.conversation-row.placeholder.notice .sidebar-icon {
+  flex: none;
+}
 
 /* A sub-run in flight, docked above the composer: what is running, how far it
    has gotten, and what it is doing right now. It is status, not content — no

@@ -995,6 +995,7 @@ async fn refresh_sessions_into(
     dispatch(
       SessionsLoaded(
         @transcript.sessions_from_reply(reply, channel),
+        failures=@transcript.session_list_failures(reply, channel),
         connection_generation~,
         request_generation~,
       ),

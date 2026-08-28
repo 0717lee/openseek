@@ -463,6 +463,7 @@ fn Model::sidebar_component_sections(
         managed: true,
         conversations,
         empty_label: Some("No chats yet"),
+        notice: dev.session_list_failure(path),
       }),
     )
   }

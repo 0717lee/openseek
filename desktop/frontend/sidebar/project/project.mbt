@@ -53,6 +53,11 @@ pub(all) struct Input {
   managed : Bool
   conversations : Array[@conversation.Input]
   empty_label : String?
+  // Why the host could not list this project's durable conversations, when
+  // it could not. It gets a row of its own ahead of whatever rows this page
+  // still knows, and replaces `empty_label`: a store that could not be read
+  // must not read as one with no chats.
+  notice : String?
 } derive(Debug, Eq)
 
 ///|
@@ -365,7 +370,23 @@ pub fn component(
     if collapsed {
       return rows
     }
-    if conversation_rows.length() == 0 && input.empty_label is Some(label) {
+    if input.notice is Some(notice) {
+      rows.push(
+        (
+          "\{input.id.key()}:notice",
+          @html.div(
+            class="conversation-row placeholder notice nested",
+            title=notice,
+            [
+              @html.span(class="row-twisty spacer", ""),
+              @html.span(class="sidebar-icon", @icons.icon(@icons.icon_warning)),
+              @html.span(class="sidebar-label", notice),
+            ],
+          ),
+        ),
+      )
+    } else if conversation_rows.length() == 0 &&
+      input.empty_label is Some(label) {
       rows.push(
         (
           "\{input.id.key()}:empty",

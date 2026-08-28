@@ -20,6 +20,8 @@ pub fn parse_runtime_update(String) -> RuntimeUpdateView
 
 pub fn session_from_reply(@protocol.LoadSessionReply) -> SessionLoadView
 
+pub fn session_list_failures(@protocol.SessionsReply, @interop.ChannelId) -> Array[SessionListFailure]
+
 pub fn session_tree(Array[SessionListItem]) -> Array[SessionTreeRow]
 
 pub fn sessions_from_reply(@protocol.SessionsReply, @interop.ChannelId) -> Array[SessionListItem]
@@ -93,6 +95,13 @@ pub struct RuntimeUpdateView {
   status : String?
   diagnostics : Array[String]
 }
+
+pub(all) struct SessionListFailure {
+  workspace : @common.Uri
+  message : String
+} derive(Eq)
+pub fn SessionListFailure::equal(Self, Self) -> Bool
+pub fn SessionListFailure::not_equal(Self, Self) -> Bool
 
 pub(all) struct SessionListItem {
   id : String

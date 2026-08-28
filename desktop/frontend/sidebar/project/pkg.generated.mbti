@@ -42,6 +42,7 @@ pub(all) struct Input {
   managed : Bool
   conversations : Array[@conversation.Input]
   empty_label : String?
+  notice : String?
 } derive(Eq, @debug.Debug)
 pub fn Input::id(Self) -> Id
 

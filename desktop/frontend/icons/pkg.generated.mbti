@@ -64,6 +64,8 @@ pub fn icon_target() -> @html.Html
 
 pub fn icon_terminal() -> @html.Html
 
+pub fn icon_warning() -> @html.Html
+
 pub fn icon_worktree() -> @html.Html
 
 // Errors

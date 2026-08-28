@@ -5,8 +5,9 @@
 ///|
 /// Project a `list_sessions` reply into sidebar entries: the host groups
 /// sessions by workspace store, and each entry carries its group's workspace
-/// so the sidebar can section them. Failed groups remain empty; invalid engine
-/// rows have already been dropped at the process adapter.
+/// so the sidebar can section them. A failed group contributes no rows —
+/// `session_list_failures` reports it; invalid engine rows have already been
+/// dropped at the process adapter.
 pub fn sessions_from_reply(
   reply : @desktop_protocol.SessionsReply,
   channel : @interop.ChannelId,
@@ -31,6 +32,27 @@ pub fn sessions_from_reply(
     }
   }
   items
+}
+
+///|
+/// The groups of a `list_sessions` reply whose store could not be listed.
+/// The host answers such a group with no rows and its failure text; binding
+/// that text to the project lets the sidebar say "unreadable" where it would
+/// otherwise say "empty". A blank `error` is the host's spelling of success,
+/// and a failure the sidebar could not place is dropped like its rows.
+pub fn session_list_failures(
+  reply : @desktop_protocol.SessionsReply,
+  channel : @interop.ChannelId,
+) -> Array[SessionListFailure] {
+  let failures : Array[SessionListFailure] = []
+  for group in reply.groups {
+    guard !group.error.is_empty() &&
+      @resource.of_path(channel, group.workspace) is Some(workspace) else {
+      continue
+    }
+    failures.push({ workspace, message: group.error })
+  }
+  failures
 }
 
 ///|
@@ -721,6 +743,47 @@ test "a group naming no readable workspace contributes no rows" {
     @interop.ChannelId::Local,
   )
   assert_true(items.is_empty())
+}
+
+///|
+test "a group whose store could not be listed reports its failure by project" {
+  let reply : @desktop_protocol.SessionsReply = {
+    groups: [
+      {
+        workspace: "/home/user/broken",
+        name: "broken",
+        session_root: "/home/user/broken/.openseek",
+        error: "session list failed: failed to run engine",
+        sessions: [],
+      },
+      {
+        workspace: "/home/user/proj",
+        name: "proj",
+        session_root: "/home/user/proj/.openseek",
+        error: "",
+        sessions: [{ id: "tui-a", title: Some(""), updated_at_ms: None }],
+      },
+      // A failure the sidebar cannot place is dropped like its rows.
+      {
+        workspace: "",
+        name: "",
+        session_root: "/home/user/.openseek",
+        error: "session list failed: engine exited with code 1",
+        sessions: [],
+      },
+    ],
+  }
+  let failures = session_list_failures(reply, @interop.ChannelId::Local)
+  inspect(failures.length(), content="1")
+  inspect(failures[0].workspace.path, content="/home/user/broken")
+  inspect(
+    failures[0].message,
+    content="session list failed: failed to run engine",
+  )
+  // A sibling group's failure leaves the rows that did load untouched.
+  let items = sessions_from_reply(reply, @interop.ChannelId::Local)
+  inspect(items.length(), content="1")
+  inspect(items[0].id, content="tui-a")
 }
 
 ///|

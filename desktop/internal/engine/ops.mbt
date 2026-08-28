@@ -524,10 +524,21 @@ async fn session_group(
   root : @pathx.Absolute,
 ) -> SessionGroup {
   let name = workspace.to_path().basename().to_owned()
+  let native_workspace = workspace.to_string()
   let workspace = workspace.resource_path()
   let native_root = root.to_string()
   let root = root.resource_path()
+  // The reply carries the failure per group so one unreadable store cannot
+  // hide the others' rows. Log it as well: from the sidebar alone, a store
+  // the engine could not list is indistinguishable from an empty one.
   fn failed(error : String) -> SessionGroup {
+    @xlog.error() <?
+      {
+        "event": "desktop_session_list_failed",
+        "workspace": native_workspace,
+        "session_root": native_root,
+        "error": error,
+      }
     { workspace, name, session_root: root, sessions: [], error }
   }
 

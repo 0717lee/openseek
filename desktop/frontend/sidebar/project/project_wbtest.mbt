@@ -25,6 +25,7 @@ fn test_input(activation? : String) -> Input {
     managed: true,
     conversations: [],
     empty_label: None,
+    notice: None,
   }
 }
 

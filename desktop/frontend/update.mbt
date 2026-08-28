@@ -5265,7 +5265,12 @@ fn update_device_msg(
       } else {
         (@cmd.none, model)
       }
-    SessionsLoaded(items, connection_generation~, request_generation~) => {
+    SessionsLoaded(
+      items,
+      failures~,
+      connection_generation~,
+      request_generation~
+    ) => {
       guard connection_generation == dev.connection_generation &&
         request_generation == dev.sessions_request_generation else {
         return (@cmd.none, model)
@@ -5326,7 +5331,12 @@ fn update_device_msg(
         }
       }
       let mut next = {
-        ..model.replace_device({ ..dev, sessions: items, active_project }),
+        ..model.replace_device({
+          ..dev,
+          sessions: items,
+          session_list_failures: failures,
+          active_project,
+        }),
         conversations,
       }
       let commands : Array[@cmd.Cmd] = []
@@ -7497,7 +7507,58 @@ fn sessions_loaded(
   items : Array[@transcript.SessionListItem],
   request_generation? : Int = 0,
 ) -> Msg {
-  on_home(SessionsLoaded(items, connection_generation=0, request_generation~))
+  on_home(
+    SessionsLoaded(
+      items,
+      failures=[],
+      connection_generation=0,
+      request_generation~,
+    ),
+  )
+}
+
+///|
+/// A store the host could not list answers with no rows and a failure. The
+/// sidebar must say so under that project — an unreadable store looks exactly
+/// like an empty one otherwise — and a later clean reply clears the notice.
+test "a project whose store could not be listed shows the failure in its row" {
+  let dispatch = test_dispatch()
+  let failure : @transcript.SessionListFailure = {
+    workspace: @interop.ChannelId::Local.test_project(),
+    message: "session list failed: failed to run engine",
+  }
+  let (_, failed) = update_dev(
+    dispatch,
+    SessionsLoaded(
+      [],
+      failures=[failure],
+      connection_generation=0,
+      request_generation=0,
+    ),
+    test_model(),
+  )
+  assert_true(failed.dev().session_list_failures == [failure])
+  guard failed.sidebar_component_sections(failed.dev())[0].entries[0]
+    is @section.Project(project) else {
+    fail("expected the fixture project's row")
+  }
+  assert_eq(project.notice, Some("session list failed: failed to run engine"))
+  let (_, recovered) = update_dev(
+    dispatch,
+    SessionsLoaded(
+      [],
+      failures=[],
+      connection_generation=0,
+      request_generation=0,
+    ),
+    failed,
+  )
+  assert_true(recovered.dev().session_list_failures.is_empty())
+  guard recovered.sidebar_component_sections(recovered.dev())[0].entries[0]
+    is @section.Project(project) else {
+    fail("expected the fixture project's row")
+  }
+  assert_eq(project.notice, None)
 }
 
 ///|
@@ -8895,6 +8956,7 @@ test "a background session list updates only its channel's same-id workspace" {
             updated_at_ms: None,
           },
         ],
+        failures=[],
         connection_generation=0,
         request_generation=0,
       ),
@@ -14222,6 +14284,7 @@ test "delete response tombstones a family before stale list replies" {
     dispatch,
     SessionsLoaded(
       [parent, child],
+      failures=[],
       connection_generation=0,
       request_generation=0,
     ),
@@ -14794,7 +14857,12 @@ test "BridgeReady replaces archive overrides with fresh-list truth" {
   inspect(ready.dev().archive_overrides.length(), content="0")
   let (_, live) = update_dev(
     dispatch,
-    SessionsLoaded([item], connection_generation=1, request_generation=1),
+    SessionsLoaded(
+      [item],
+      failures=[],
+      connection_generation=1,
+      request_generation=1,
+    ),
     ready,
   )
   guard live.find_conversation(@interop.ChannelId::Local, item.id)
@@ -14835,7 +14903,12 @@ test "BridgeReady replaces archive overrides with fresh-list truth" {
   )
   let (_, live_again) = update_dev(
     dispatch,
-    SessionsLoaded([item], connection_generation=1, request_generation=1),
+    SessionsLoaded(
+      [item],
+      failures=[],
+      connection_generation=1,
+      request_generation=1,
+    ),
     ready,
   )
   guard live_again.find_conversation(@interop.ChannelId::Local, item.id)
@@ -14890,12 +14963,22 @@ test "an older same-connection live list cannot replace a newer reply" {
   })
   let (_, newest) = update_dev(
     dispatch,
-    SessionsLoaded([current], connection_generation=0, request_generation=2),
+    SessionsLoaded(
+      [current],
+      failures=[],
+      connection_generation=0,
+      request_generation=2,
+    ),
     model,
   )
   let (_, stale) = update_dev(
     dispatch,
-    SessionsLoaded([old], connection_generation=0, request_generation=1),
+    SessionsLoaded(
+      [old],
+      failures=[],
+      connection_generation=0,
+      request_generation=1,
+    ),
     newest,
   )
   inspect(stale.dev().sessions.length(), content="1")
