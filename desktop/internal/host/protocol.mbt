@@ -195,25 +195,14 @@ type ReadFileReply = @protocol.ReadFileReply
 type StatFilesPayload = @protocol.StatFilesPayload
 
 ///|
-/// One file's signature: `"{seconds}:{nanos}"` of its mtime, absent internally
-/// when the file is missing (deleted, or the path stopped resolving). The
-/// bundled desktop predates optional signatures and recognizes `""` as its
-/// deleted-file sentinel, so the manual encoder preserves that wire contract.
-/// The frontend only ever compares signatures for equality, so the shape stays
-/// opaque text — no Int64 crossing JSON.
+/// One file's stat outcome: `Present("{seconds}:{nanos}")` of its mtime,
+/// `Missing` when the path no longer resolves to a file, or `Failed` with the
+/// OS error for anything else. The frontend only ever compares signatures for
+/// equality, so the shape stays opaque text — no Int64 crossing JSON.
 type FileStat = @protocol.FileStat
 
 ///|
-test "file stat keeps the legacy missing-file sentinel on the wire" {
-  assert_eq(ToJson::to_json(({ path: "deleted.mbt", sig: "", } : FileStat)), {
-    "path": "deleted.mbt",
-    "sig": "",
-  })
-  assert_eq(
-    ToJson::to_json(({ path: "present.mbt", sig: "12:34", } : FileStat)),
-    { "path": "present.mbt", "sig": "12:34" },
-  )
-}
+type FileSignature = @protocol.FileSignature
 
 ///|
 type StatFilesReply = @protocol.StatFilesReply

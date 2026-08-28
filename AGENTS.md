@@ -24,6 +24,16 @@ You can browse and install extra skills here:
 - Try to keep deprecated blocks in file called `deprecated.mbt` in each
   directory.
 
+- Never encode absence or failure as a sentinel value of the payload's own
+  type: no `""` for "no file", no `0`/`-1` for "unknown", no helper that
+  aborts when a value is missing. Absence is `T?` (or a dedicated enum
+  variant), and every caller handles it as its own branch. This applies on
+  the wire too: a JSON field that can be absent is optional or a tagged
+  variant, never an empty string the decoder has to recognize. Do not fold
+  unrelated errors into the "missing" case either — a stat that fails for any
+  reason other than the file being absent must not read as "deleted"; carry
+  the failure so the UI can tell the two apart.
+
 ## Tooling
 
 - `moon fmt` is used to format your code properly.

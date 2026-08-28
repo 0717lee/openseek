@@ -3360,37 +3360,98 @@ pub fn update(
         let mut active_reloading = false
         for stat in stats {
           guard docs.get(stat.path) is Some(doc) else { continue }
-          guard stat.sig is Some(current_sig) else {
-            // The file is gone. The tab stays as the user's bookmark; the
-            // notice replaces the document if it is the one on screen. A tab
-            // already reviewing a textual HEAD side instead switches to that
-            // deleted-file preview.
-            if !(doc.state is (TabDeleted | TabUnavailable(_))) {
-              let review = match doc.review {
-                Some(review) if review.selected.has_working_tree_file() => {
-                  // The missing signature is newer than any tagged read that
-                  // was already in flight. Advance its token so an older
-                  // successful read cannot resurrect deleted working text.
-                  review_generation = review_generation + 1
-                  Some({ ..review, working_generation: review_generation, })
+          let current_sig = match stat.signature {
+            Missing => {
+              // The file is gone. The tab stays as the user's bookmark; the
+              // notice replaces the document if it is the one on screen. A
+              // tab already reviewing a textual HEAD side instead switches
+              // to that deleted-file preview.
+              if !(doc.state is (TabDeleted | TabUnavailable(_))) {
+                let review = match doc.review {
+                  Some(review) if review.selected.has_working_tree_file() => {
+                    // The missing signature is newer than any tagged read
+                    // that was already in flight. Advance its token so an
+                    // older successful read cannot resurrect deleted working
+                    // text.
+                    review_generation = review_generation + 1
+                    Some({ ..review, working_generation: review_generation, })
+                  }
+                  _ => doc.review
                 }
-                _ => doc.review
+                let deleted = {
+                  ..doc,
+                  state: TabDeleted,
+                  review,
+                  stale: false,
+                }
+                docs[stat.path] = deleted
+                if ctx.active_file == Some(stat.path) {
+                  cmds.push(
+                    show_tab(
+                      dispatch,
+                      ctx,
+                      state.editor_search_highlights(stat.path),
+                      stat.path,
+                      deleted,
+                    ),
+                  )
+                }
               }
-              let deleted = { ..doc, state: TabDeleted, review, stale: false, }
-              docs[stat.path] = deleted
-              if ctx.active_file == Some(stat.path) {
-                cmds.push(
-                  show_tab(
-                    dispatch,
-                    ctx,
-                    state.editor_search_highlights(stat.path),
-                    stat.path,
-                    deleted,
-                  ),
-                )
-              }
+              continue
             }
-            continue
+            Failed(message) => {
+              // The host could not inspect the file — permissions, a sharing
+              // violation, a path it could not resolve. That is not a
+              // deletion, but the text on screen is now of unknown
+              // freshness, so the tab keeps its place and shows the failure
+              // exactly as a failed read would, until a later stat proves
+              // the path readable and the ordinary retry reloads it. A read
+              // still in flight settles the document by itself, withheld
+              // documents have no baseline to invalidate, and a selected
+              // deletion row reviews HEAD rather than whatever now sits at
+              // its path.
+              let affected = match doc.state {
+                TabLoaded(..) | TabReadFailed(_) => true
+                TabDeleted =>
+                  doc.review
+                  .map(review => review.selected.has_working_tree_file())
+                  .unwrap_or(true)
+                TabLoading | TabBinary | TabOversized | TabUnavailable(_) =>
+                  false
+              }
+              if affected {
+                let review = match doc.review {
+                  Some(review) if review.selected.has_working_tree_file() => {
+                    // Like a deletion, the failure is newer than any tagged
+                    // read still in flight: an older success must not settle
+                    // text the host can no longer vouch for.
+                    review_generation = review_generation + 1
+                    Some({ ..review, working_generation: review_generation, })
+                  }
+                  _ => doc.review
+                }
+                let failed = {
+                  ..doc,
+                  state: TabReadFailed(message),
+                  review,
+                  stale: false,
+                }
+                docs[stat.path] = failed
+                if ctx.active_file == Some(stat.path) {
+                  cmds.push(
+                    show_tab(
+                      dispatch,
+                      ctx,
+                      state.editor_search_highlights(stat.path),
+                      stat.path,
+                      failed,
+                    ),
+                  )
+                }
+              }
+              continue
+            }
+            Present(current_sig) => current_sig
           }
           let changed = match doc.state {
             // The loaded baseline says whether the disk moved on.
@@ -4741,7 +4802,7 @@ test "FileLoaded settles content into its document, active or not" {
   let (_, old_epoch) = update(
     emit,
     StatsLoaded(owner=test_ctx().owner, epoch=1, stats=[
-      { path: Relative("a.mbt"), sig: None, },
+      { path: Relative("a.mbt"), signature: Missing, },
     ]),
     epoch_state,
     ctx,
@@ -6127,7 +6188,7 @@ test "a settled Changes snapshot re-stats loaded reviews whose rows disappeared"
   // a committed deletion must replace the cached working source.
   let (_, deleted) = update(
     test_emit(),
-    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, sig: None, }]),
+    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, signature: Missing, }]),
     settled,
     ctx,
   )
@@ -6176,7 +6237,7 @@ test "a review that becomes a symlink clears its cached regular-file source" {
   )
   let (_, missing_unavailable) = update(
     test_emit(),
-    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, sig: None, }]),
+    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, signature: Missing, }]),
     unavailable,
     ctx,
   )
@@ -6185,7 +6246,9 @@ test "a review that becomes a symlink clears its cached regular-file source" {
   // source that preceded it. An explicit ordinary reopen remains the retry.
   let (_, still_unavailable) = update(
     test_emit(),
-    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, sig: Some("4:0"), }]),
+    StatsLoaded(owner=ctx.owner, epoch=0, stats=[
+      { path, signature: Present("4:0"), },
+    ]),
     missing_unavailable,
     ctx,
   )
@@ -6271,7 +6334,9 @@ test "a disappearing review row hands an active reload to an ordinary read" {
   }
   let (_, reloading) = update(
     test_emit(),
-    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, sig: Some("2:1"), }]),
+    StatsLoaded(owner=ctx.owner, epoch=0, stats=[
+      { path, signature: Present("2:1"), },
+    ]),
     state,
     ctx,
   )
@@ -6363,7 +6428,9 @@ test "a newer review reload fences an older working-tree reply" {
   // flight. It receives its own token without invalidating the HEAD request.
   let (_, reloading) = update(
     test_emit(),
-    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, sig: Some("2:0"), }]),
+    StatsLoaded(owner=ctx.owner, epoch=0, stats=[
+      { path, signature: Present("2:0"), },
+    ]),
     state,
     ctx,
   )
@@ -6430,7 +6497,7 @@ test "a newer review reload fences an older working-tree reply" {
   // that captured the file just before it disappeared cannot resurrect it.
   let (_, deleted) = update(
     test_emit(),
-    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, sig: None, }]),
+    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, signature: Missing, }]),
     newest,
     ctx,
   )
@@ -7752,11 +7819,11 @@ test "StatsLoaded marks deletions, reloads the active change, stales the rest" {
     StatsLoaded(owner=test_ctx().owner, epoch=0, stats=[
       // The active file changed: reloaded eagerly, so its document stays
       // loaded (the baseline the scroll-keeping reload compares against).
-      { path: Relative("a.mbt"), sig: Some("9:0"), },
+      { path: Relative("a.mbt"), signature: Present("9:0"), },
       // A background file changed: only marked stale.
-      { path: Relative("b.mbt"), sig: Some("9:0"), },
+      { path: Relative("b.mbt"), signature: Present("9:0"), },
       // Deleted: the document flips to the deleted notice state.
-      { path: Relative("c.mbt"), sig: None, },
+      { path: Relative("c.mbt"), signature: Missing, },
     ]),
     state,
     ctx,
@@ -7776,7 +7843,7 @@ test "StatsLoaded marks deletions, reloads the active change, stales the rest" {
   let (_, same) = update(
     emit,
     StatsLoaded(owner=test_ctx().owner, epoch=0, stats=[
-      { path: Relative("b.mbt"), sig: Some("9:0"), },
+      { path: Relative("b.mbt"), signature: Present("9:0"), },
     ]),
     { ..next, docs: solo, },
     { ..ctx, active_file: None, },
@@ -7804,7 +7871,7 @@ test "StatsLoaded marks deletions, reloads the active change, stales the rest" {
   let (_, retryable) = update(
     emit,
     StatsLoaded(owner=test_ctx().owner, epoch=0, stats=[
-      { path: failed_path, sig: Some("10:0"), },
+      { path: failed_path, signature: Present("10:0"), },
     ]),
     { ..owned_state(), docs: failed_docs, },
     { ..ctx, active_file: None, },
@@ -7822,7 +7889,7 @@ test "StatsLoaded marks deletions, reloads the active change, stales the rest" {
         session: "desktop-test",
       },
       epoch=0,
-      stats=[{ path: Relative("a.mbt"), sig: None, }],
+      stats=[{ path: Relative("a.mbt"), signature: Missing, }],
     ),
     state,
     ctx,
@@ -7830,6 +7897,125 @@ test "StatsLoaded marks deletions, reloads the active change, stales the rest" {
   assert_true(
     other.docs.get(Relative("a.mbt")) is Some({ state: TabLoaded(..), .. }),
   )
+}
+
+///|
+test "a stat the host could not complete reads as a failed read, never a deletion" {
+  let emit = test_emit()
+  let gone_path = @pathx.Relative("gone.mbt")
+  let reviewed_path = @pathx.Relative("reviewed.mbt")
+  let deletion_row : ChangedFile = {
+    path: gone_path,
+    original_path: None,
+    index_status: "D",
+    worktree_status: " ",
+    kind: ChangeDeleted,
+  }
+  let docs : Map[@pathx.Relative, Doc] = Map([])
+  docs[Relative("a.mbt")] = loaded_doc("a.mbt")
+  docs[Relative("b.mbt")] = {
+    name: "b.mbt",
+    state: TabLoading,
+    review: None,
+    stale: false,
+  }
+  docs[Relative("c.mbt")] = {
+    name: "c.mbt",
+    state: TabDeleted,
+    review: None,
+    stale: false,
+  }
+  docs[gone_path] = {
+    name: "gone.mbt",
+    state: TabDeleted,
+    review: Some({
+      generation: 3,
+      working_generation: 3,
+      baseline: ReviewContent("HEAD source"),
+      view_mode: ReviewSource,
+      selected: deletion_row,
+    }),
+    stale: false,
+  }
+  docs[reviewed_path] = {
+    ..loaded_doc("reviewed.mbt"),
+    review: Some({
+      generation: 7,
+      working_generation: 7,
+      baseline: ReviewContent("HEAD source"),
+      view_mode: ReviewSource,
+      selected: test_modified_change(reviewed_path),
+    }),
+  }
+  let ctx = {
+    ..test_ctx(),
+    open_files: [
+      Relative("a.mbt"),
+      Relative("b.mbt"),
+      Relative("c.mbt"),
+      gone_path,
+      reviewed_path,
+    ],
+    active_file: Some(Relative("a.mbt")),
+  }
+  let failed : @protocol.FileSignature = Failed("permission denied")
+  let (_, next) = update(
+    emit,
+    StatsLoaded(owner=test_ctx().owner, epoch=0, stats=[
+      { path: Relative("a.mbt"), signature: failed, },
+      { path: Relative("b.mbt"), signature: failed, },
+      { path: Relative("c.mbt"), signature: failed, },
+      { path: gone_path, signature: failed, },
+      { path: reviewed_path, signature: failed, },
+    ]),
+    { ..owned_state(), docs, review_generation: 7, },
+    ctx,
+  )
+  // A loaded document, active or not, shows the failure where the deleted
+  // notice would otherwise have appeared.
+  assert_true(
+    next.docs.get(Relative("a.mbt"))
+    is Some({ state: TabReadFailed("permission denied"), stale: false, .. }),
+  )
+  // A read in flight settles the document itself.
+  assert_true(
+    next.docs.get(Relative("b.mbt")) is Some({ state: TabLoading, .. }),
+  )
+  // Something the host cannot inspect sits where a deleted file was: that is
+  // a failed read of a present path, not a confirmed deletion.
+  assert_true(
+    next.docs.get(Relative("c.mbt"))
+    is Some({ state: TabReadFailed("permission denied"), .. }),
+  )
+  // A selected deletion row keeps its HEAD preview: the object at the path
+  // belongs to a separate untracked row.
+  assert_true(
+    next.docs.get(gone_path)
+    is Some(
+      { state: TabDeleted, review: Some({ working_generation: 3, .. }), .. }
+    ),
+  )
+  // A reviewed working file fences the tagged read that may still be in
+  // flight, like a deletion does.
+  assert_true(
+    next.docs.get(reviewed_path)
+    is Some(
+      {
+        state: TabReadFailed("permission denied"),
+        review: Some(
+          {
+            generation: 7,
+            working_generation: 8,
+            baseline: ReviewContent("HEAD source"),
+            ..
+          }
+        ),
+        stale: false,
+        ..
+      }
+    ),
+  )
+  assert_eq(next.review_generation, 8)
 }
 
 ///|
@@ -7849,7 +8035,9 @@ test "StatsLoaded preserves a settled HEAD preview when its active file disappea
   let docs : Map[@pathx.Relative, Doc] = Map([(path, doc)])
   let (_, next) = update(
     emit,
-    StatsLoaded(owner=test_ctx().owner, epoch=0, stats=[{ path, sig: None, }]),
+    StatsLoaded(owner=test_ctx().owner, epoch=0, stats=[
+      { path, signature: Missing, },
+    ]),
     { ..owned_state(), docs, },
     { ..test_ctx(), open_files: [path], active_file: Some(path), },
   )
@@ -7882,7 +8070,7 @@ test "a deleted document whose file reappears reloads on the next stats" {
   let (_, next) = update(
     emit,
     StatsLoaded(owner=test_ctx().owner, epoch=0, stats=[
-      { path: Relative("a.mbt"), sig: Some("3:0"), },
+      { path: Relative("a.mbt"), signature: Present("3:0"), },
     ]),
     state,
     { ..test_ctx(), open_files: [Relative("a.mbt")], },
@@ -7922,7 +8110,7 @@ test "a selected deletion hands a clean restoration to an ordinary read" {
   let (_, reviewed) = update(
     emit,
     StatsLoaded(owner=test_ctx().owner, epoch=0, stats=[
-      { path, sig: Some("3:0"), },
+      { path, signature: Present("3:0"), },
     ]),
     { ..owned_state(), docs, },
     ctx,
@@ -7976,7 +8164,9 @@ test "a selected deletion hands a clean restoration to an ordinary read" {
   )
   let (_, reloading) = update(
     emit,
-    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, sig: Some("3:0"), }]),
+    StatsLoaded(owner=ctx.owner, epoch=0, stats=[
+      { path, signature: Present("3:0"), },
+    ]),
     ordinary,
     ctx,
   )
@@ -8059,7 +8249,9 @@ test "a vanished review retries a failed ordinary read" {
   )
   let (_, reloading) = update(
     emit,
-    StatsLoaded(owner=ctx.owner, epoch=0, stats=[{ path, sig: Some("4:0"), }]),
+    StatsLoaded(owner=ctx.owner, epoch=0, stats=[
+      { path, signature: Present("4:0"), },
+    ]),
     ordinary,
     ctx,
   )
