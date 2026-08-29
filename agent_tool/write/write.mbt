@@ -318,22 +318,8 @@ fn is_mbt_source(path : String) -> Bool {
 /// mkdir failure propagates to the caller's `error writing` path rather than
 /// being swallowed — the write would fail anyway, so the real cause is useful.
 async fn create_parent_dirs(path : String) -> Unit {
-  let parent = parent_dir(path)
-  if parent != "" && !@fs.exists(parent) {
+  if @workspace_path.parent_dir(path) is Some(parent) && !@fs.exists(parent) {
     @fs.mkdir(parent, recursive=true)
-  }
-}
-
-///|
-/// The directory portion of `path` (before the last `/` or `\`), or `""` when
-/// the path has no directory component or is at the filesystem root.
-fn parent_dir(path : String) -> String {
-  // Everything before the last `/` or `\` — greedy prefix, then a separator,
-  // then a separator-free tail. No separator (or one at index 0) means no
-  // directory component.
-  lexmatch path {
-    (re"^(.|\n)*" as dir) + re"[/\\][^/\\]*$" => dir.to_owned()
-    _ => ""
   }
 }
 
@@ -347,14 +333,6 @@ async test "write creates missing parent directories" {
     assert_eq(output.content, "ok: wrote 2 lines (10 chars) to \{path}")
     assert_eq(@fs.read_file(path).text(), "import {}\n")
   })
-}
-
-///|
-test "parent_dir returns the directory portion" {
-  assert_eq(parent_dir("/a/b/c.txt"), "/a/b")
-  assert_eq(parent_dir("a/b.txt"), "a")
-  assert_eq(parent_dir("file.txt"), "")
-  assert_eq(parent_dir("C:\\ws\\x.txt"), "C:\\ws")
 }
 
 ///|
