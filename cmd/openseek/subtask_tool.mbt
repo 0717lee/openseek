@@ -13,6 +13,21 @@ let max_active_workers : Int = 4
 let worker_slots : @async.Semaphore = Semaphore(max_active_workers)
 
 ///|
+/// The session plumbing every `subtask` path needs to launch a worker child:
+/// how to re-exec this binary, which model and endpoint the child talks to,
+/// the workspace it operates in, the parent turn's remaining subrun budget,
+/// and the durable child-session seam. Threaded as one value because no path
+/// picks a subset — they all forward the whole bundle.
+priv struct SubtaskEnv {
+  self_exe : String
+  model : @deepseek.Model
+  workspace_root : String
+  budget : @agent_subrun.SubrunBudget
+  api_url : String?
+  child_session : @agent_subrun.ChildSession?
+}
+
+///|
 fn subtask_tool_definition(
   self_exe~ : String,
   model~ : @deepseek.Model,
@@ -21,6 +36,7 @@ fn subtask_tool_definition(
   api_url? : String,
   child_session? : @agent_subrun.ChildSession,
 ) -> @agent_tool.AgentToolDefinition {
+  let env = { self_exe, model, workspace_root, budget, api_url, child_session, }
   AgentToolDefinition(
     name="subtask",
     concurrent_safe=true,
@@ -106,11 +122,7 @@ fn subtask_tool_definition(
         },
       },
     }),
-    execute=Async(arguments => {
-      subtask_execute(
-        self_exe, model, workspace_root, budget, api_url, child_session, arguments,
-      )
-    }),
+    execute=Async(arguments => subtask_execute(env, arguments)),
   )
 }
 
@@ -122,29 +134,21 @@ let max_context_chars : Int = 2_000
 
 ///|
 async fn subtask_execute(
-  self_exe : String,
-  model : @deepseek.Model,
-  workspace_root : String,
-  budget : @agent_subrun.SubrunBudget,
-  api_url : String?,
-  child_session : @agent_subrun.ChildSession?,
+  env : SubtaskEnv,
   arguments : Json,
 ) -> @agent_tool.ToolAction {
   // Lifecycle actions first: exactly one of them may be present.
   match arguments {
     { "continue": String(name), .. } if !name.is_blank() =>
-      return subtask_continue(
-        self_exe, model, workspace_root, budget, api_url, child_session, arguments,
-        name,
-      )
+      return subtask_continue(env, arguments, name)
     { "integrate": String(name), .. } if !name.is_blank() =>
-      return subtask_lifecycle(workspace_root, "integrate", name)
+      return subtask_lifecycle(env.workspace_root, "integrate", name)
     { "integrate_continue": String(name), .. } if !name.is_blank() =>
-      return subtask_lifecycle(workspace_root, "integrate_continue", name)
+      return subtask_lifecycle(env.workspace_root, "integrate_continue", name)
     { "integrate_abort": String(name), .. } if !name.is_blank() =>
-      return subtask_lifecycle(workspace_root, "integrate_abort", name)
+      return subtask_lifecycle(env.workspace_root, "integrate_abort", name)
     { "discard": String(name), .. } if !name.is_blank() =>
-      return subtask_lifecycle(workspace_root, "discard", name)
+      return subtask_lifecycle(env.workspace_root, "discard", name)
     _ => ()
   }
   // `slices` launches several confined workers CONCURRENTLY from one call;
@@ -188,9 +192,7 @@ async fn subtask_execute(
           )
       }
   }
-  subtask_launch_many(
-    self_exe, model, workspace_root, budget, api_url, child_session, specs,
-  )
+  subtask_launch_many(env, specs)
 }
 
 ///|
@@ -301,25 +303,13 @@ fn decode_launch(spec : Json) -> Result[LaunchSpec, String] {
 /// and paid ~2.7x the wall-clock. One call carrying N slices cannot be
 /// serialized by accident.
 async fn subtask_launch_many(
-  self_exe : String,
-  model : @deepseek.Model,
-  workspace_root : String,
-  budget : @agent_subrun.SubrunBudget,
-  api_url : String?,
-  child_session : @agent_subrun.ChildSession?,
+  env : SubtaskEnv,
   specs : Array[LaunchSpec],
 ) -> @agent_tool.ToolAction {
   let results : Map[Int, SliceOutcome] = Map([])
   @async.with_task_group(scope => {
     for index, spec in specs {
-      scope.spawn_bg(() => {
-        results.set(
-          index,
-          subtask_launch_one(
-            self_exe, model, workspace_root, budget, api_url, child_session, spec,
-          ),
-        )
-      })
+      scope.spawn_bg(() => results.set(index, subtask_launch_one(env, spec)))
     }
   })
   // A compact status line PER SLICE comes first: four full reports can
@@ -368,12 +358,7 @@ priv struct SliceOutcome {
 
 ///|
 async fn subtask_launch_one(
-  self_exe : String,
-  model : @deepseek.Model,
-  workspace_root : String,
-  budget : @agent_subrun.SubrunBudget,
-  api_url : String?,
-  child_session : @agent_subrun.ChildSession?,
+  env : SubtaskEnv,
   spec : LaunchSpec,
 ) -> SliceOutcome {
   let name = spec.name
@@ -397,7 +382,7 @@ async fn subtask_launch_one(
   // rest of the process. (The provisioned worktree and its Running registry
   // entry survive a cancel by design: discoverable, discard-able.)
   defer worker_slots.release()
-  guard budget.reserve(@agent_worker.default_worker_max_steps)
+  guard env.budget.reserve(@agent_worker.default_worker_max_steps)
     is Some(granted_steps) else {
     return {
       action: @agent_tool.ToolAction::respond(
@@ -411,11 +396,11 @@ async fn subtask_launch_one(
   let nonce = random_salt()
   let provisioned = match
     @subtask.provision(
-      workspace_root,
+      env.workspace_root,
       name~,
       allowed_paths~,
       nonce=if nonce == "" { "n0" } else { nonce },
-      parent_session?=child_session.map(session => session.parent),
+      parent_session?=env.child_session.map(session => session.parent),
     ) {
     Ok(provisioned) => provisioned
     Err(reason) =>
@@ -429,10 +414,7 @@ async fn subtask_launch_one(
       }
   }
   run_worker_slice(
-    self_exe,
-    model,
-    api_url,
-    child_session,
+    env,
     provisioned.geometry,
     provisioned.entry,
     name,
@@ -452,10 +434,7 @@ async fn subtask_launch_one(
 /// naturally absent); continue passes a fresh resolve with the slice's own
 /// root filtered out.
 async fn run_worker_slice(
-  self_exe : String,
-  model : @deepseek.Model,
-  api_url : String?,
-  child_session : @agent_subrun.ChildSession?,
+  env : SubtaskEnv,
   geometry : @subtask.Geometry,
   entry : @subtask.SubtaskEntry,
   name : String,
@@ -489,16 +468,16 @@ async fn run_worker_slice(
     "subrun",
     "worker",
     "--model",
-    "\{model}",
+    "\{env.model}",
     "--max-steps",
     "\{granted_steps}",
   ]
-  if api_url is Some(url) {
+  if env.api_url is Some(url) {
     args.push("--api-url")
     args.push(url)
   }
   let result = @agent_subrun.run_subrun(
-    command=self_exe,
+    command=env.self_exe,
     args~,
     input~,
     parse_report=@agent_worker.WorkerReport::parse_validated,
@@ -506,7 +485,7 @@ async fn run_worker_slice(
     kind="worker",
     label=@agent_tool.brief_line("\{name}: \{task}", limit=48),
     cwd=entry.worker_root,
-    child_session?,
+    child_session?=env.child_session,
   )
   // Evidence comes from git regardless of how the child ended.
   let captured = @subtask.capture(geometry, entry)
@@ -557,12 +536,7 @@ async fn run_worker_slice(
 /// new child receives the remainder work order and capture() stacks its
 /// validated changes on the same branch.
 async fn subtask_continue(
-  self_exe : String,
-  model : @deepseek.Model,
-  workspace_root : String,
-  budget : @agent_subrun.SubrunBudget,
-  api_url : String?,
-  child_session : @agent_subrun.ChildSession?,
+  env : SubtaskEnv,
   arguments : Json,
   name : String,
 ) -> @agent_tool.ToolAction {
@@ -591,7 +565,7 @@ async fn subtask_continue(
       brief="subtask continue \{name}",
     )
   }
-  let geometry = match @subtask.resolve_geometry(workspace_root) {
+  let geometry = match @subtask.resolve_geometry(env.workspace_root) {
     Ok(geometry) => geometry
     Err(reason) =>
       return @agent_tool.ToolAction::respond(
@@ -608,7 +582,7 @@ async fn subtask_continue(
     )
   }
   defer worker_slots.release()
-  guard budget.reserve(@agent_worker.default_worker_max_steps)
+  guard env.budget.reserve(@agent_worker.default_worker_max_steps)
     is Some(granted_steps) else {
     return @agent_tool.ToolAction::respond(
       "subtask budget exhausted for this turn — do the remaining work yourself or continue next turn.",
@@ -638,7 +612,6 @@ async fn subtask_continue(
     },
   )
   run_worker_slice(
-    self_exe, model, api_url, child_session, geometry, entry, name, task, context,
-    deny_roots, granted_steps,
+    env, geometry, entry, name, task, context, deny_roots, granted_steps,
   ).action
 }
