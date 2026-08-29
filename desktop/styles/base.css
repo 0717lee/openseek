@@ -263,7 +263,14 @@ html {
 
 .app {
   display: grid;
-  grid-template-columns: minmax(220px, 264px) minmax(0, 1fr);
+  /* The sidebar track reads `--sidebar-width`, set as the user drags the
+     handle on the aside's right edge (see frontend/sidebar_resize.mbt); it
+     defaults to the old fixed maximum and is clamped so the sidebar keeps
+     at least 220px while the content column keeps the rest. The clamp also
+     re-fits the panel on window resize without any script. */
+  grid-template-columns:
+    clamp(220px, var(--sidebar-width, 264px), 480px)
+    minmax(0, 1fr);
   /* Track #app's content box (which already accounts for any scrollbar)
      rather than 100vh, so the two height bases can't disagree. */
   height: 100%;

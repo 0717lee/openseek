@@ -88,6 +88,7 @@
     border-left: 0;
   }
   .editor-resize-handle,
+  .sidebar-resize-handle,
   .tree-resize-handle {
     display: none !important;
   }
