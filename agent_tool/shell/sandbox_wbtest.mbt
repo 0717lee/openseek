@@ -1662,7 +1662,7 @@ async test "the lab kernel backstop holds through the background job path" {
   let lab = @fs.realpath(@fs.tmpdir(prefix="openseek-lab-bg-lab-"))
   @fs.symlink(target=ws, "\{lab}/link")
   @async.with_task_group(group => {
-    let bg = @bgjobs.BgJobRuntime::new(AgentTaskScope(group))
+    let bg = @bgjobs.BgJobRuntime::BgJobRuntime(AgentTaskScope(group))
     let action = execute_with_workspace(
       ws,
       { "cmd": "moon new \{lab}/link/probe", "run_in_background": true },

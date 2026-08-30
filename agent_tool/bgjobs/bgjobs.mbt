@@ -35,7 +35,7 @@ let default_hard_timeout_ms : Int = 1_800_000
 /// can leave descendants running after the job is reported terminal.
 ///
 /// One `BgJobRuntime` is created per session and shared by the `shell`
-/// (`run_in_background`), `shell_output`, and `shell_stop` tools. `new` captures
+/// (`run_in_background`), `shell_output`, and `shell_stop` tools. the constructor captures
 /// the session group in a spawn closure, so the runtime is not generic and can be
 /// an optional tool argument.
 pub struct BgJobRuntime {
@@ -136,7 +136,7 @@ pub struct BgJobSnapshot {
 /// `hard_output_cap` bounds any single job's *full* retained output (characters);
 /// the watchdog kills a job that floods past it — production uses the default,
 /// tests shrink it to exercise the watchdog cheaply.
-pub fn[X] BgJobRuntime::new(
+pub fn[X] BgJobRuntime::BgJobRuntime(
   scope : @agent_runtime.AgentTaskScope[X],
   spill_dir? : String,
   hard_output_cap? : Int = @shell_exec.default_hard_cap,
@@ -455,7 +455,7 @@ async fn wait_for_first(notices : Array[BgJobSnapshot]) -> Unit {
 #cfg(not(platform="windows"))
 async test "bg job runs to completion and captures output" {
   @async.with_task_group(group => {
-    let rt = BgJobRuntime::new(AgentTaskScope(group))
+    let rt = BgJobRuntime::BgJobRuntime(AgentTaskScope(group))
     let id = rt.start(
       program="sh",
       args=["-c", "printf hello"],
@@ -474,7 +474,7 @@ async test "bg job runs to completion and captures output" {
 #cfg(not(platform="windows"))
 async test "bg job records a non-zero exit code" {
   @async.with_task_group(group => {
-    let rt = BgJobRuntime::new(AgentTaskScope(group))
+    let rt = BgJobRuntime::BgJobRuntime(AgentTaskScope(group))
     let id = rt.start(program="sh", args=["-c", "exit 3"], command="exit 3")
     let snap = poll_until_terminal(rt, id)
     assert_true(snap.status is Exited(3))
@@ -486,7 +486,7 @@ async test "bg job records a non-zero exit code" {
 #cfg(not(platform="windows"))
 async test "stop terminates a running job" {
   @async.with_task_group(group => {
-    let rt = BgJobRuntime::new(AgentTaskScope(group))
+    let rt = BgJobRuntime::BgJobRuntime(AgentTaskScope(group))
     let id = rt.start(program="sleep", args=["30"], command="sleep 30")
     @async.sleep(50)
     assert_true(rt.snapshot(id).unwrap().status is Running)
@@ -499,7 +499,7 @@ async test "stop terminates a running job" {
 #cfg(not(platform="windows"))
 async test "a large-output job spills; snapshot previews, read_output is full" {
   @async.with_task_group(group => {
-    let rt = BgJobRuntime::new(AgentTaskScope(group), spill_dir="/tmp")
+    let rt = BgJobRuntime::BgJobRuntime(AgentTaskScope(group), spill_dir="/tmp")
     let id = rt.start(
       program="sh",
       args=["-c", "seq 1 5000"],
@@ -523,7 +523,7 @@ async test "a large-output job spills; snapshot previews, read_output is full" {
 async test "adopt registers an already-running execution as a job" {
   @async.with_task_group(group => {
     let scope : @agent_runtime.AgentTaskScope[Unit] = AgentTaskScope(group)
-    let rt = BgJobRuntime::new(scope)
+    let rt = BgJobRuntime::BgJobRuntime(scope)
     let exec = @shell_exec.ShellExecution::start(scope, program="sleep", args=[
       "30",
     ])
@@ -541,7 +541,7 @@ async test "adopt registers an already-running execution as a job" {
 async test "on_job_exit fires once on a natural exit, never on stop" {
   @async.with_task_group(group => {
     let seen : Array[BgJobSnapshot] = []
-    let rt = BgJobRuntime::new(AgentTaskScope(group), on_job_exit=snapshot => {
+    let rt = BgJobRuntime::BgJobRuntime(AgentTaskScope(group), on_job_exit=snapshot => {
       seen.push(snapshot)
     })
     let done = rt.start(
@@ -565,7 +565,7 @@ async test "on_job_exit fires once on a natural exit, never on stop" {
 #cfg(not(platform="windows"))
 async test "snapshot, read_output, and stop handle unknown ids" {
   @async.with_task_group(group => {
-    let rt = BgJobRuntime::new(AgentTaskScope(group))
+    let rt = BgJobRuntime::BgJobRuntime(AgentTaskScope(group))
     assert_true(rt.snapshot("nope") is None)
     assert_true(rt.read_output("nope") is None)
     assert_false(rt.stop("nope"))
@@ -576,7 +576,7 @@ async test "snapshot, read_output, and stop handle unknown ids" {
 #cfg(not(platform="windows"))
 async test "start allocates one id per job (id matches its spill file)" {
   @async.with_task_group(group => {
-    let rt = BgJobRuntime::new(AgentTaskScope(group), spill_dir="/tmp")
+    let rt = BgJobRuntime::BgJobRuntime(AgentTaskScope(group), spill_dir="/tmp")
     // The first started job is bg-1 (not bg-2): start must not reserve an id for
     // the spill path and then allocate a second one for the registry entry.
     let a = rt.start(program="sh", args=["-c", "printf a"], command="a")
@@ -590,7 +590,7 @@ async test "start allocates one id per job (id matches its spill file)" {
 #cfg(not(platform="windows"))
 async test "two jobs run independently with distinct ids" {
   @async.with_task_group(group => {
-    let rt = BgJobRuntime::new(AgentTaskScope(group))
+    let rt = BgJobRuntime::BgJobRuntime(AgentTaskScope(group))
     let a = rt.start(program="sh", args=["-c", "printf aaa"], command="a")
     let b = rt.start(program="sh", args=["-c", "printf bbb"], command="b")
     assert_true(a != b)
@@ -609,9 +609,11 @@ async test "the watchdog kills a background job that floods past the hard cap" {
     let notices : Array[BgJobSnapshot] = []
     // Tiny hard cap so `yes` trips the watchdog immediately instead of running
     // to the 20M default.
-    let rt = BgJobRuntime::new(AgentTaskScope(group), hard_output_cap=200, on_job_exit=snapshot => {
-      notices.push(snapshot)
-    })
+    let rt = BgJobRuntime::BgJobRuntime(
+      AgentTaskScope(group),
+      hard_output_cap=200,
+      on_job_exit=snapshot => notices.push(snapshot),
+    )
     let id = rt.start(program="yes", args=[], command="yes")
     let snapshot = poll_until_terminal(rt, id)
     // Killed by the watchdog — not left running with its output dropped — and
@@ -632,9 +634,11 @@ async test "the watchdog kills a background job that floods past the hard cap" {
 async test "the reaper kills a background job that outlives the time cap" {
   @async.with_task_group(group => {
     let notices : Array[BgJobSnapshot] = []
-    let rt = BgJobRuntime::new(AgentTaskScope(group), hard_timeout_ms=80, on_job_exit=snapshot => {
-      notices.push(snapshot)
-    })
+    let rt = BgJobRuntime::BgJobRuntime(
+      AgentTaskScope(group),
+      hard_timeout_ms=80,
+      on_job_exit=snapshot => notices.push(snapshot),
+    )
     let id = rt.start(program="sh", args=["-c", "sleep 5"], command="sleep 5")
     let snapshot = poll_until_terminal(rt, id)
     assert_true(snapshot.status is Stopped)
@@ -651,7 +655,10 @@ async test "the reaper kills a background job that outlives the time cap" {
 #cfg(not(platform="windows"))
 async test "an adopted job keeps its original wall-clock deadline" {
   @async.with_task_group(group => {
-    let rt = BgJobRuntime::new(AgentTaskScope(group), hard_timeout_ms=150)
+    let rt = BgJobRuntime::BgJobRuntime(
+      AgentTaskScope(group),
+      hard_timeout_ms=150,
+    )
     // The execution starts OUTSIDE the registry (a foreground command) and
     // burns most of its lifetime before being adopted on detach.
     let exec = rt.spawn_foreground_retained("sh", ["-c", "sleep 5"], None, 200)
@@ -669,7 +676,10 @@ async test "an adopted job keeps its original wall-clock deadline" {
 #cfg(not(platform="windows"))
 async test "a requested stop is not blamed on the reaper" {
   @async.with_task_group(group => {
-    let rt = BgJobRuntime::new(AgentTaskScope(group), hard_timeout_ms=60_000)
+    let rt = BgJobRuntime::BgJobRuntime(
+      AgentTaskScope(group),
+      hard_timeout_ms=60_000,
+    )
     let id = rt.start(program="sh", args=["-c", "sleep 5"], command="sleep 5")
     let _ = rt.stop(id)
     guard rt.snapshot(id) is Some(snapshot) else { fail("expected snapshot") }
