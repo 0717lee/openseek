@@ -21,6 +21,7 @@ async fn[X] build_extra_tools(
   workspace_root~ : String,
   budget~ : @agent_subrun.SubrunBudget,
   review_context~ : () -> (String?, @agent_session.GoalBaseline?),
+  review_deadline_ms~ : Int?,
   api_url? : String,
   child_session? : @agent_subrun.ChildSession,
 ) -> Array[@agent_tool.AgentToolDefinition] {
@@ -38,6 +39,7 @@ async fn[X] build_extra_tools(
         self_exe~,
         model~,
         workspace_root~,
+        review_deadline_ms?,
         budget~,
         context=review_context,
         api_url?,
