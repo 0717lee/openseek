@@ -43,7 +43,7 @@ let cancellation_cancelled : CancellationToken = {
 }
 
 ///|
-fn MutableCancellationToken::new(
+fn MutableCancellationToken::MutableCancellationToken(
   schedule : (() -> Unit) -> @base_common.Disposable,
 ) -> MutableCancellationToken {
   { cancelled: false, emitter: None, schedule, }
@@ -196,7 +196,7 @@ fn CancellationTokenSource::token_impl(
     Some(token) => token
     None => {
       let token : CancellationToken = {
-        state: SourceMutable(MutableCancellationToken::new(self.schedule)),
+        state: SourceMutable(MutableCancellationToken(self.schedule)),
       }
       self.token_value = Some(token)
       token

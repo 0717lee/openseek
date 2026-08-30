@@ -29,7 +29,7 @@ fn quick_diff_gutter_decorations(viewer : CodeEditorWidget) -> Array[String] {
 
 ///|
 test "quick diff: stored original decorates the gutter on model attach" {
-  let backings = RootTestServiceBackings::new()
+  let backings = RootTestServiceBackings::RootTestServiceBackings()
   let quick_diff = backings.quick_diff
   let viewer = CodeEditorWidget::CodeEditorWidget(services=backings.services)
   let resource = try! @base_common.Uri::from(
@@ -66,7 +66,7 @@ test "quick diff: stored original decorates the gutter on model attach" {
 
 ///|
 test "quick diff: original arriving after attach updates, clearing removes" {
-  let backings = RootTestServiceBackings::new()
+  let backings = RootTestServiceBackings::RootTestServiceBackings()
   let quick_diff = backings.quick_diff
   let viewer = CodeEditorWidget::CodeEditorWidget(services=backings.services)
   let resource = try! @base_common.Uri::from(
@@ -103,7 +103,7 @@ test "quick diff: original arriving after attach updates, clearing removes" {
 
 ///|
 test "quick diff: an original for another resource does not decorate" {
-  let backings = RootTestServiceBackings::new()
+  let backings = RootTestServiceBackings::RootTestServiceBackings()
   let quick_diff = backings.quick_diff
   let viewer = CodeEditorWidget::CodeEditorWidget(services=backings.services)
   let other = try! @base_common.Uri::from(
@@ -129,7 +129,7 @@ test "quick diff: an original for another resource does not decorate" {
 
 ///|
 test "quick diff: identical original decorates nothing" {
-  let backings = RootTestServiceBackings::new()
+  let backings = RootTestServiceBackings::RootTestServiceBackings()
   let quick_diff = backings.quick_diff
   let viewer = CodeEditorWidget::CodeEditorWidget(services=backings.services)
   let resource = try! @base_common.Uri::from(
@@ -146,7 +146,7 @@ test "quick diff: identical original decorates nothing" {
 
 ///|
 test "quick diff: one central state follows model swap, removal, and reattach" {
-  let backings = RootTestServiceBackings::new()
+  let backings = RootTestServiceBackings::RootTestServiceBackings()
   let quick_diff = backings.quick_diff
   let viewer = CodeEditorWidget::CodeEditorWidget(services=backings.services)
   let state = viewer.quick_diff_contribution().unwrap()
@@ -200,7 +200,7 @@ test "quick diff: one central state follows model swap, removal, and reattach" {
 
 ///|
 test "quick diff: disposal window is live and later service events are silent" {
-  let backings = RootTestServiceBackings::new()
+  let backings = RootTestServiceBackings::RootTestServiceBackings()
   let quick_diff = backings.quick_diff
   let viewer = CodeEditorWidget::CodeEditorWidget(services=backings.services)
   let state = viewer.quick_diff_contribution().unwrap()

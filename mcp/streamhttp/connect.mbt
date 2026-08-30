@@ -45,12 +45,12 @@ pub async fn[X] connect(
   // Each POST exchange runs as its own cancellable task on the connection's
   // group, so the jsonrpc writer is never blocked by a long or stalled response
   // stream — and teardown can cancel an in-flight exchange.
-  let transport = HttpTransport::new(
+  let transport = HttpTransport::HttpTransport(
     url,
     spawn=exchange => group.spawn(exchange, no_wait=true, allow_failure=true),
     extra_headers=headers,
   )
-  let client = @jsonrpc.Client::new(transport)
+  let client = @jsonrpc.Client(transport)
   let pump = group.spawn(
     () => client.run_message_pump(),
     no_wait=true,
@@ -70,7 +70,7 @@ pub async fn[X] connect(
       @jsonrpc.Transport::close(transport)
     }
   }
-  let mcp_client = @mcp.McpClient::new(client)
+  let mcp_client = @mcp.McpClient(client)
   let init = @async.with_timeout_opt(handshake_timeout_ms, () => {
     mcp_client.initialize(client_name~, client_version~)
   }) catch {

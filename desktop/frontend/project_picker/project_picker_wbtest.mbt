@@ -46,7 +46,7 @@ fn opened(
   let (_, loaded, _) = State::handle(
     opening,
     emit(),
-    Msg::Loaded(channel~, location~, entries~, generation=opening.generation),
+    Loaded(channel~, location~, entries~, generation=opening.generation),
   )
   guard loaded is Some(picker) else { fail("picker closed by its own listing") }
   picker
@@ -69,31 +69,29 @@ test "the picker opens loading and adopts the first listing" {
   let (_, loaded, _) = State::handle(
     opening,
     emit(),
-    Msg::Loaded(
+    Loaded(
       channel=@interop.ChannelId::Local,
-      location=Location::Directory(home),
+      location=Directory(home),
       entries=["proj"],
       generation=opening.generation,
     ),
   )
   guard loaded is Some(picker) else { fail("picker closed by its own listing") }
-  assert_true(
-    picker.location is Some(Location::Directory(path)) && path == "/home/u",
-  )
+  assert_true(picker.location is Some(Directory(path)) && path == "/home/u")
   inspect(picker.entries.length(), content="1")
   assert_true(!picker.loading)
 }
 
 ///|
 test "a listing for another channel or generation is dropped" {
-  let opening = opened(location=Location::Directory("/home/u"), entries=["proj"])
+  let opening = opened(location=Directory("/home/u"), entries=["proj"])
   // A different device's listing cannot replace this picker's.
   let (_, foreign, _) = State::handle(
     opening,
     emit(),
-    Msg::Loaded(
+    Loaded(
       channel=@interop.ChannelId::Remote("d_b"),
-      location=Location::Directory("/from-b"),
+      location=Directory("/from-b"),
       entries=["wrong"],
       generation=opening.generation,
     ),
@@ -107,19 +105,17 @@ test "a listing for another channel or generation is dropped" {
   let (_, navigated, _) = State::handle(
     opening,
     emit(),
-    Msg::Navigate("/home/u/proj"),
+    Navigate("/home/u/proj"),
   )
   guard navigated is Some(browsing) else { fail("picker closed by navigation") }
   assert_true(browsing.loading)
-  assert_true(
-    browsing.location is Some(Location::Directory(path)) && path == "/home/u",
-  )
+  assert_true(browsing.location is Some(Directory(path)) && path == "/home/u")
   let (_, stale, _) = State::handle(
     browsing,
     emit(),
-    Msg::Loaded(
+    Loaded(
       channel=@interop.ChannelId::Local,
-      location=Location::Directory("/elsewhere"),
+      location=Directory("/elsewhere"),
       entries=["wrong"],
       generation=opening.generation,
     ),
@@ -130,11 +126,11 @@ test "a listing for another channel or generation is dropped" {
 
 ///|
 test "a failed navigation keeps the listing" {
-  let opening = opened(location=Location::Directory("/home/u"), entries=["proj"])
+  let opening = opened(location=Directory("/home/u"), entries=["proj"])
   let (_, failed, outcome) = State::handle(
     opening,
     emit(),
-    Msg::Failed(
+    Failed(
       channel=@interop.ChannelId::Local,
       message="no such directory: /gone",
       generation=opening.generation,
@@ -143,13 +139,11 @@ test "a failed navigation keeps the listing" {
   guard failed is Some(picker) else {
     fail("picker closed by a failed navigation")
   }
-  assert_true(
-    picker.location is Some(Location::Directory(path)) && path == "/home/u",
-  )
+  assert_true(picker.location is Some(Directory(path)) && path == "/home/u")
   inspect(picker.entries.length(), content="1")
   assert_true(!picker.loading)
   assert_true(
-    outcome is Some(Outcome::Failed(message)) &&
+    outcome is Some(Failed(message)) &&
     message == "Cannot open folder: no such directory: /gone",
   )
 }
@@ -164,18 +158,18 @@ test "reopened pickers do not reuse request generations" {
 ///|
 test "confirm waits for an in-flight navigation" {
   let home = "/home/u"
-  let opening = opened(location=Location::Directory(home))
+  let opening = opened(location=Directory(home))
   let (_, browsing, _) = State::handle(
     opening,
     emit(),
-    Msg::Navigate("/home/u/other"),
+    Navigate("/home/u/other"),
   )
   guard browsing is Some(navigating) else {
     fail("picker closed by navigation")
   }
   // The shown listing is stale while the navigation is in flight: Enter
   // must not attach the previous directory.
-  let (_, held, outcome) = State::handle(navigating, emit(), Msg::Confirm)
+  let (_, held, outcome) = State::handle(navigating, emit(), Confirm)
   assert_true(held is Some(_))
   assert_true(outcome is None)
 }
@@ -356,11 +350,11 @@ test "submitting or cancelling a path keeps one navigation path" {
 
 ///|
 test "the Windows drive list shows its drives and refuses a confirm" {
-  let opening = opened(location=Location::DriveList, entries=["C:", "D:"])
-  assert_true(opening.location is Some(Location::DriveList))
+  let opening = opened(location=DriveList, entries=["C:", "D:"])
+  assert_true(opening.location is Some(DriveList))
   inspect(opening.entries.length(), content="2")
   assert_true(!opening.loading)
-  let (_, held, outcome) = State::handle(opening, emit(), Msg::Confirm)
+  let (_, held, outcome) = State::handle(opening, emit(), Confirm)
   assert_true(held is Some(_))
   assert_true(outcome is None)
 }
@@ -435,7 +429,7 @@ test "a failed folder create keeps its name editable" {
   assert_eq(failed.new_folder, Some("taken"))
   assert_false(failed.loading)
   assert_true(
-    outcome is Some(Outcome::Failed(message)) &&
+    outcome is Some(Failed(message)) &&
     message == "Cannot create folder: already exists",
   )
 }

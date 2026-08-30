@@ -55,7 +55,7 @@ priv struct WrappingCharacterClassifier {
 }
 
 ///|
-fn WrappingCharacterClassifier::new(
+fn WrappingCharacterClassifier::WrappingCharacterClassifier(
   break_before : String,
   break_after : String,
 ) -> WrappingCharacterClassifier {
@@ -97,7 +97,7 @@ pub fn MonospaceLineBreaksComputerFactory::MonospaceLineBreaksComputerFactory(
   break_after_chars : String,
 ) -> MonospaceLineBreaksComputerFactory {
   {
-    classifier: WrappingCharacterClassifier::new(
+    classifier: WrappingCharacterClassifier(
       break_before_chars, break_after_chars,
     ),
   }

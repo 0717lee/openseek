@@ -11,7 +11,7 @@ priv struct DiffViewModelFakeTimer {
 }
 
 ///|
-fn DiffViewModelFakeTimer::new() -> DiffViewModelFakeTimer {
+fn DiffViewModelFakeTimer::DiffViewModelFakeTimer() -> DiffViewModelFakeTimer {
   { tasks: [], }
 }
 
@@ -82,7 +82,7 @@ priv struct FakeDocumentDiffProvider {
 }
 
 ///|
-fn FakeDocumentDiffProvider::new(
+fn FakeDocumentDiffProvider::FakeDocumentDiffProvider(
   result? : FakeDocumentDiffResult = Empty,
 ) -> FakeDocumentDiffProvider {
   {
@@ -212,8 +212,10 @@ fn new_diff_view_model_for_test(
 
 ///|
 test "DiffEditorViewModel uses immediate and content debounce scheduler lanes" {
-  let timer = DiffViewModelFakeTimer::new()
-  let provider = FakeDocumentDiffProvider::new(result=OneChange)
+  let timer = DiffViewModelFakeTimer::DiffViewModelFakeTimer()
+  let provider = FakeDocumentDiffProvider::FakeDocumentDiffProvider(
+    result=OneChange,
+  )
   let provider_object : &@diff.DocumentDiffProvider = provider
   let view_model = new_diff_view_model_for_test(provider_object, timer)
   let original = diff_view_model_test_model("scheduler-original", "before")
@@ -256,8 +258,8 @@ test "DiffEditorViewModel uses immediate and content debounce scheduler lanes" {
 
 ///|
 test "DiffEditorViewModel treats the same model pair as a complete no-op" {
-  let timer = DiffViewModelFakeTimer::new()
-  let provider = FakeDocumentDiffProvider::new()
+  let timer = DiffViewModelFakeTimer::DiffViewModelFakeTimer()
+  let provider = FakeDocumentDiffProvider::FakeDocumentDiffProvider()
   let provider_object : &@diff.DocumentDiffProvider = provider
   let view_model = new_diff_view_model_for_test(provider_object, timer)
   let original = diff_view_model_test_model("same-original", "a")
@@ -286,9 +288,11 @@ test "DiffEditorViewModel treats the same model pair as a complete no-op" {
 
 ///|
 test "DiffEditorViewModel replaces provider subscription and recomputes immediately" {
-  let timer = DiffViewModelFakeTimer::new()
-  let first = FakeDocumentDiffProvider::new()
-  let second = FakeDocumentDiffProvider::new(result=OneChange)
+  let timer = DiffViewModelFakeTimer::DiffViewModelFakeTimer()
+  let first = FakeDocumentDiffProvider::FakeDocumentDiffProvider()
+  let second = FakeDocumentDiffProvider::FakeDocumentDiffProvider(
+    result=OneChange,
+  )
   let first_object : &@diff.DocumentDiffProvider = first
   let second_object : &@diff.DocumentDiffProvider = second
   let view_model = new_diff_view_model_for_test(first_object, timer)
@@ -328,8 +332,10 @@ test "DiffEditorViewModel replaces provider subscription and recomputes immediat
 
 ///|
 test "DiffEditorViewModel converts provider errors and invalid mappings to Failed" {
-  let timer = DiffViewModelFakeTimer::new()
-  let provider = FakeDocumentDiffProvider::new(result=Failure)
+  let timer = DiffViewModelFakeTimer::DiffViewModelFakeTimer()
+  let provider = FakeDocumentDiffProvider::FakeDocumentDiffProvider(
+    result=Failure,
+  )
   let provider_object : &@diff.DocumentDiffProvider = provider
   let view_model = new_diff_view_model_for_test(provider_object, timer)
   let original = diff_view_model_test_model("failure-original", "abc\nsecond")
@@ -437,7 +443,7 @@ test "validator accepts Core inner anchors on empty hunk sides" {
 
 ///|
 test "ViewModel accepts pinned newline mapping for a pure deletion" {
-  let timer = DiffViewModelFakeTimer::new()
+  let timer = DiffViewModelFakeTimer::DiffViewModelFakeTimer()
   let provider = @diff.get_core_document_diff_provider()
   let view_model = new_diff_view_model_for_test(provider, timer)
   let original = diff_view_model_test_model(
@@ -468,7 +474,7 @@ test "ViewModel accepts pinned newline mapping for a pure deletion" {
 
 ///|
 test "ViewModel accepts pinned newline mapping for a pure insertion" {
-  let timer = DiffViewModelFakeTimer::new()
+  let timer = DiffViewModelFakeTimer::DiffViewModelFakeTimer()
   let provider = @diff.get_core_document_diff_provider()
   let view_model = new_diff_view_model_for_test(provider, timer)
   let original = diff_view_model_test_model(
@@ -623,8 +629,10 @@ test "normalization leaves invalid provider coordinates for validation" {
 
 ///|
 test "DiffEditorViewModel rejects a result made stale by reentrant provider change" {
-  let timer = DiffViewModelFakeTimer::new()
-  let provider = FakeDocumentDiffProvider::new(result=OneChange)
+  let timer = DiffViewModelFakeTimer::DiffViewModelFakeTimer()
+  let provider = FakeDocumentDiffProvider::FakeDocumentDiffProvider(
+    result=OneChange,
+  )
   let provider_object : &@diff.DocumentDiffProvider = provider
   let view_model = new_diff_view_model_for_test(provider_object, timer)
   let original = diff_view_model_test_model("reentrant-original", "a")
@@ -650,8 +658,10 @@ test "DiffEditorViewModel rejects a result made stale by reentrant provider chan
 
 ///|
 test "DiffEditorViewModel dispose cancels tasks subscriptions and stale callbacks" {
-  let timer = DiffViewModelFakeTimer::new()
-  let provider = FakeDocumentDiffProvider::new(result=OneChange)
+  let timer = DiffViewModelFakeTimer::DiffViewModelFakeTimer()
+  let provider = FakeDocumentDiffProvider::FakeDocumentDiffProvider(
+    result=OneChange,
+  )
   let provider_object : &@diff.DocumentDiffProvider = provider
   let view_model = new_diff_view_model_for_test(provider_object, timer)
   let original = diff_view_model_test_model("dispose-original", "a")
@@ -682,8 +692,10 @@ test "DiffEditorViewModel dispose cancels tasks subscriptions and stale callback
 
 ///|
 test "DiffEditorViewModel returns a fully detached old pair for immediate disposal" {
-  let timer = DiffViewModelFakeTimer::new()
-  let provider = FakeDocumentDiffProvider::new(result=OneChange)
+  let timer = DiffViewModelFakeTimer::DiffViewModelFakeTimer()
+  let provider = FakeDocumentDiffProvider::FakeDocumentDiffProvider(
+    result=OneChange,
+  )
   let provider_object : &@diff.DocumentDiffProvider = provider
   let view_model = new_diff_view_model_for_test(provider_object, timer)
   let first_original = diff_view_model_test_model("old-original", "old left")
@@ -727,8 +739,10 @@ test "DiffEditorViewModel returns a fully detached old pair for immediate dispos
 
 ///|
 test "one model will-dispose atomically clears the pair and both pane slots" {
-  let timer = DiffViewModelFakeTimer::new()
-  let provider = FakeDocumentDiffProvider::new(result=OneChange)
+  let timer = DiffViewModelFakeTimer::DiffViewModelFakeTimer()
+  let provider = FakeDocumentDiffProvider::FakeDocumentDiffProvider(
+    result=OneChange,
+  )
   let provider_object : &@diff.DocumentDiffProvider = provider
   let view_model = new_diff_view_model_for_test(provider_object, timer)
   let original = diff_view_model_test_model("will-dispose-original", "old left")
@@ -832,8 +846,10 @@ test "one model will-dispose atomically clears the pair and both pane slots" {
 
 ///|
 test "modified model will-dispose invalidates the whole pair too" {
-  let timer = DiffViewModelFakeTimer::new()
-  let provider = FakeDocumentDiffProvider::new(result=OneChange)
+  let timer = DiffViewModelFakeTimer::DiffViewModelFakeTimer()
+  let provider = FakeDocumentDiffProvider::FakeDocumentDiffProvider(
+    result=OneChange,
+  )
   let provider_object : &@diff.DocumentDiffProvider = provider
   let view_model = new_diff_view_model_for_test(provider_object, timer)
   let original = diff_view_model_test_model("live-original", "left")
@@ -856,8 +872,10 @@ test "modified model will-dispose invalidates the whole pair too" {
 
 ///|
 test "replacement owns the only detached-pair return and old disposal is inert" {
-  let timer = DiffViewModelFakeTimer::new()
-  let provider = FakeDocumentDiffProvider::new(result=OneChange)
+  let timer = DiffViewModelFakeTimer::DiffViewModelFakeTimer()
+  let provider = FakeDocumentDiffProvider::FakeDocumentDiffProvider(
+    result=OneChange,
+  )
   let provider_object : &@diff.DocumentDiffProvider = provider
   let view_model = new_diff_view_model_for_test(provider_object, timer)
   let first_original = diff_view_model_test_model("replace-count-original", "a")

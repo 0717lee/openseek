@@ -190,7 +190,7 @@ pub fn DiffEditorWidget::create(
     view_model,
     editor_options,
     options,
-    layout_state: DiffEditorLayoutState::new(options),
+    layout_state: DiffEditorLayoutState(options),
     pointer_monitor: GlobalPointerMoveMonitor(),
     lifetime: [],
     resize_observer: None,

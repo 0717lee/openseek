@@ -12,7 +12,7 @@ test "MarkerDecorations diff: no-op and add/remove" {
     "rev",
     "hello world\nsecond line",
   )
-  let md = MarkerDecorations::new(model)
+  let md = MarkerDecorations::MarkerDecorations(model)
   let m1 = make_marker(Error, 1, 1, 1, 3)
   let m2 = make_marker(Warning, 2, 1, 2, 5)
   // first update adds both
@@ -42,7 +42,7 @@ test "MarkerDecorations diff preserves duplicate multiplicity" {
     "rev",
     "hello world",
   )
-  let md = MarkerDecorations::new(model)
+  let md = MarkerDecorations::MarkerDecorations(model)
   let first = make_marker(Error, 1, 1, 1, 3)
   let second = make_marker(Error, 1, 1, 1, 3)
   assert_true(md.update([first, second]))

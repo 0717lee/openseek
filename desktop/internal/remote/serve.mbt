@@ -36,8 +36,11 @@ priv struct WsClientActor {
 }
 
 ///|
-fn WsClientActor::new(state : @api.ApiState, url : String) -> WsClientActor {
-  { state, host_connection: @host.HostConnection::new(), url, }
+fn WsClientActor::WsClientActor(
+  state : @api.ApiState,
+  url : String,
+) -> WsClientActor {
+  { state, host_connection: HostConnection(), url, }
 }
 
 ///|
@@ -421,8 +424,8 @@ fn error_envelope(id : Json, code : Int, message : String) -> Json {
 
 ///|
 async test "readiness precedes the first forwarded hub notification" {
-  let state = @api.ApiState::new(engine="unused")
-  let subscription = WsClientActor::new(state, "unused").open_subscription()
+  let state = @api.ApiState(engine="unused")
+  let subscription = WsClientActor::WsClientActor(state, "unused").open_subscription()
   defer state.unsubscribe(subscription.notifications)
   state.publish(
     SessionEvent({

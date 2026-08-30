@@ -440,14 +440,8 @@ fn ViewModel::cursor_word_move_result(
     }
   }
   if !in_selection_mode {
-    let anchor = @base_common.Position::Position(
-      model_position.line_number,
-      start_column,
-    )
-    let active = @base_common.Position::Position(
-      model_position.line_number,
-      end_column,
-    )
+    let anchor = @base_common.Position(model_position.line_number, start_column)
+    let active = @base_common.Position(model_position.line_number, end_column)
     return ByModel(SingleCursorState(anchor, active, Word, active))
   }
   let anchor = cursor.model_state.selection_start_start
@@ -558,10 +552,8 @@ pub fn ViewModel::move_cursor_line(
       select_to_line_number = line_count
       select_to_column = self.model.get_line_max_column(select_to_line_number)
     }
-    let start = @base_common.Position::Position(model_position.line_number, 1)
-    let active = @base_common.Position::Position(
-      select_to_line_number, select_to_column,
-    )
+    let start = @base_common.Position(model_position.line_number, 1)
+    let active = @base_common.Position(select_to_line_number, select_to_column)
     ByModel(SingleCursorState(start, active, Line, active))
   } else {
     self.cursor_line_move_result(cursor, model_position, view_position)

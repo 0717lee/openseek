@@ -79,7 +79,7 @@ pub fn ViewModel::with_options(
   let coordinates_converter = lines.create_coordinates_converter()
   // Monaco's member order: `_lines` → `coordinatesConverter` → `_cursor` →
   // `viewLayout` (`viewModelImpl.ts:122-126`) → `_decorations` (`:146`).
-  let cursor_event_dispatcher = CursorEventDispatcher::new()
+  let cursor_event_dispatcher = CursorEventDispatcher::CursorEventDispatcher()
   let cursor = @cursor.CursorsController(
     model,
     coordinates_converter.cursor_context(),
@@ -110,7 +110,7 @@ pub fn ViewModel::with_options(
     view_layout,
     decorations,
     coordinates_converter,
-    hidden_areas_model: HiddenAreasModel::new(),
+    hidden_areas_model: HiddenAreasModel(),
     previous_hidden_areas: [],
     model_registration: None,
   }

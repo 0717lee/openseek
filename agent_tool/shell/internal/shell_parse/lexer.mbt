@@ -10,7 +10,7 @@ priv struct LexerWord {
 }
 
 ///|
-fn LexerWord::new() -> LexerWord {
+fn LexerWord::LexerWord() -> LexerWord {
   {
     text: StringBuilder(),
     empty: true,
@@ -51,7 +51,7 @@ fn LexerWord::flush_and_reset(self : LexerWord, tokens : Array[Token]) -> Unit {
 fn lex(command : String) -> LexResult {
   let chars : Array[Char] = [ for ch in command => ch ]
   let tokens : Array[Token] = []
-  let word = LexerWord::new()
+  let word = LexerWord::LexerWord()
   let mut state = Plain
   let mut index = 0
   while index < chars.length() {

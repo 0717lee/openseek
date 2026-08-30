@@ -103,7 +103,7 @@ struct DidChangeDecorationsEmitter {
 }
 
 ///|
-fn DidChangeDecorationsEmitter::new() -> DidChangeDecorationsEmitter {
+fn DidChangeDecorationsEmitter::DidChangeDecorationsEmitter() -> DidChangeDecorationsEmitter {
   {
     actual: Emitter(),
     deferred_cnt: 0,
@@ -250,7 +250,7 @@ struct DecorationsTrees {
 }
 
 ///|
-fn DecorationsTrees::new() -> DecorationsTrees {
+fn DecorationsTrees::DecorationsTrees() -> DecorationsTrees {
   {
     decorations_tree_0: IntervalTree(),
     decorations_tree_1: IntervalTree(),

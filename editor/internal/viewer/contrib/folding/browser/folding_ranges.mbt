@@ -88,7 +88,7 @@ priv struct BitField {
 }
 
 ///|
-fn BitField::new(size : Int) -> BitField {
+fn BitField::BitField(size : Int) -> BitField {
   { states: FixedArray::make((size + 31) / 32, 0U), }
 }
 
@@ -142,9 +142,9 @@ fn FoldingRegions::FoldingRegions(
   {
     start_indexes,
     end_indexes,
-    collapse_states: BitField::new(start_indexes.length()),
-    user_defined_states: BitField::new(start_indexes.length()),
-    recovered_states: BitField::new(start_indexes.length()),
+    collapse_states: BitField(start_indexes.length()),
+    user_defined_states: BitField(start_indexes.length()),
+    recovered_states: BitField(start_indexes.length()),
     parents_computed: false,
     types,
   }

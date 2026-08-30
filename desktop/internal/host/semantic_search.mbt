@@ -72,7 +72,7 @@ priv struct SemanticSearchCancellationFrontiers {
 }
 
 ///|
-fn SemanticSearchCancellationFrontiers::new() -> SemanticSearchCancellationFrontiers {
+fn SemanticSearchCancellationFrontiers::SemanticSearchCancellationFrontiers() -> SemanticSearchCancellationFrontiers {
   { values: Map([]), order: [], }
 }
 
@@ -121,7 +121,7 @@ priv struct SemanticSearchService {
 }
 
 ///|
-fn SemanticSearchService::new() -> SemanticSearchService {
+fn SemanticSearchService::SemanticSearchService() -> SemanticSearchService {
   { requests: Queue(kind=Blocking(64)), }
 }
 
@@ -189,7 +189,7 @@ async fn SemanticSearchService::run(
 ) -> Unit {
   @async.with_task_group(group => {
     let running : Map[String, RunningSemanticSearch] = Map([])
-    let cancelled_through = SemanticSearchCancellationFrontiers::new()
+    let cancelled_through = SemanticSearchCancellationFrontiers::SemanticSearchCancellationFrontiers()
     for ;; {
       match self.requests.get() {
         Search(command~, root~, payload~, reply~) => {
@@ -884,7 +884,7 @@ async test "semantic search argument validation requires a rule source" {
 
 ///|
 async test "cancel-before-semantic-search frontier rejects the stale generation" {
-  let service = SemanticSearchService::new()
+  let service = SemanticSearchService::SemanticSearchService()
   @async.with_task_group(group => {
     group.spawn_bg(() => service.run(_ => ()))
     service.cancel("sem:stale", 7)

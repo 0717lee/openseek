@@ -96,7 +96,11 @@ pub async fn[X] ShellExecution::start(
   kill_at_hard_cap? : Bool = false,
 ) -> ShellExecution {
   let group = scope.group()
-  let sink = ShellOutputSink::new(inline_cap~, hard_cap~, spill_path?)
+  let sink = ShellOutputSink::ShellOutputSink(
+    inline_cap~,
+    hard_cap~,
+    spill_path?,
+  )
   let (reader, writer) = @process.read_from_process()
   let child_stdin : &@process.ProcessInput = match stdin {
     Some(input) => input

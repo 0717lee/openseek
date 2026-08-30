@@ -20,7 +20,7 @@ async fn run_edit_in_workspace(
 ///|
 async test "edit records the file it changed as Modified" {
   @vfs.with_tmpdir(dir => {
-    let state = @agent_tool.FileStateMap::new()
+    let state = @agent_tool.FileStateMap()
     let path = "\{dir}/lib.mbt"
     @vfs.FileSystem({ "lib.mbt": "pub fn f() -> Int { 1 }\n" }).write_to(dir)
     let run = match @edit.definition(file_state=state).execute {
@@ -45,7 +45,7 @@ async test "edit downgrades a Created file that was rebound before the edit" {
     // is now different content B — as if a `git checkout` rebound it. Editing B
     // must NOT keep `Created`: the result is mostly B, not the agent's file.
     @vfs.FileSystem({ "lib.mbt": "pub fn b() -> Int { 2 }\n" }).write_to(dir)
-    let state = @agent_tool.FileStateMap::new()
+    let state = @agent_tool.FileStateMap()
     state.record_created(
       path,
       @agent_tool.content_digest("pub fn a() -> Int { 1 }\n"),

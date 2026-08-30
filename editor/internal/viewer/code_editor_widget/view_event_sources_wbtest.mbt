@@ -387,7 +387,7 @@ test "scroll source copies consumed width and independent flags" {
 ///|
 test "cursor source carries the committed view selection" {
   with_test_viewer("alpha", viewer => {
-    let position = @base_common.Position::Position(1, 3)
+    let position = @base_common.Position(1, 3)
     viewer.set_position(position, source="source-fact-test")
     let view_model = viewer.test_view_model()
     let event = view_cursor_state_changed_event(view_model)
@@ -408,7 +408,7 @@ test "validation option rotates the headless decoration provider" {
       },
     ])
     let view_model = viewer.test_view_model()
-    let view_range = @base_common.Range::Range(1, 1, 1, 6)
+    let view_range = @base_common.Range(1, 1, 1, 6)
     assert_eq(
       view_model.decorations().get_decorations_viewport_data(view_range).decorations.length(),
       1,

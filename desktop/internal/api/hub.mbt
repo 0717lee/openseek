@@ -40,7 +40,7 @@ priv struct Hub {
 }
 
 ///|
-fn Hub::new() -> Hub {
+fn Hub::Hub() -> Hub {
   {
     subscribers: [],
     active_starts: Map([]),
@@ -325,7 +325,7 @@ fn Hub::sink(
 
 ///|
 test "a real engine connection retires old active runs before readiness" {
-  let hub = Hub::new()
+  let hub = Hub::Hub()
   let subscriber = hub.subscribe()
   hub.publish(
     AgentStarted(@json.from_json({ "run_id": "r-old", "session": "s-old" })),
@@ -349,7 +349,7 @@ test "a real engine connection retires old active runs before readiness" {
 
 ///|
 test "an agent error does not retire a run before its finished boundary" {
-  let hub = Hub::new()
+  let hub = Hub::Hub()
   hub.publish(
     AgentStarted(@json.from_json({ "run_id": "r1", "session": "s1" })),
   )
@@ -369,7 +369,7 @@ test "an agent error does not retire a run before its finished boundary" {
 
 ///|
 test "a normal terminal-backed finish is replayable only to a matching caller" {
-  let hub = Hub::new()
+  let hub = Hub::Hub()
   hub.publish(
     AgentStarted(
       @json.from_json({
@@ -433,7 +433,7 @@ test "a normal terminal-backed finish is replayable only to a matching caller" {
 /// and how much the run wrote is a question the record answers when it is
 /// read — not something the settlement has to prove first.
 test "an abnormal finish is replayable to its own caller" {
-  let hub = Hub::new()
+  let hub = Hub::Hub()
   hub.publish(
     AgentStarted(
       @json.from_json({
@@ -474,7 +474,7 @@ test "an abnormal finish is replayable to its own caller" {
 
 ///|
 test "a duplicate finish never downgrades a settlement" {
-  let hub = Hub::new()
+  let hub = Hub::Hub()
   hub.publish(
     AgentStarted(
       @json.from_json({
@@ -513,8 +513,8 @@ test "a duplicate finish never downgrades a settlement" {
 
 ///|
 async test "agent.runs keeps old requests compatible and decodes known selectors" {
-  let state = ApiState::new(engine="unused")
-  let connection = @host.HostConnection::new()
+  let state = ApiState::ApiState(engine="unused")
+  let connection = @host.HostConnection()
   state.hub.publish(
     AgentStarted(
       @json.from_json({
@@ -572,7 +572,7 @@ fn approval_event(
 /// from anywhere else. The transcript comes back from the durable record; an
 /// approval request was never in it.
 test "a standing question is replayed until it is answered" {
-  let hub = Hub::new()
+  let hub = Hub::Hub()
   hub.publish(
     approval_event("s1", Some("r1"), {
       event: ApprovalRequested(
@@ -611,7 +611,7 @@ test "a standing question is replayed until it is answered" {
 /// Two ways a question dies without an answer, both of which must stop it
 /// being offered to the next client that looks.
 test "a question does not outlive the engine that asked it" {
-  let hub = Hub::new()
+  let hub = Hub::Hub()
   let ask = approval_event("s1", Some("r1"), {
     event: ApprovalRequested(
       id="ap-1",
@@ -656,7 +656,7 @@ test "a question does not outlive the engine that asked it" {
 /// retires exactly one. The hub is host-wide while a question belongs to one
 /// session's engine, so this is the isolation the session key buys.
 test "questions from two engines are kept and retired independently" {
-  let hub = Hub::new()
+  let hub = Hub::Hub()
   for session in ["s1", "s2"] {
     hub.publish(
       approval_event(session, Some("r-" + session), {
@@ -694,7 +694,7 @@ test "questions from two engines are kept and retired independently" {
 /// A resolution names both a session and an id. The id half matters because a
 /// late one must not retire whatever has since taken that session's slot.
 test "a resolution for a superseded id leaves the standing question" {
-  let hub = Hub::new()
+  let hub = Hub::Hub()
   hub.publish(
     approval_event("s1", Some("r1"), {
       event: ApprovalRequested(

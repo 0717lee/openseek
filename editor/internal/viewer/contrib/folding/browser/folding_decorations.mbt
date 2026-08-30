@@ -315,7 +315,7 @@ fn FoldingDecorationProvider::remove_decorations(
 pub fn FoldingDecorationProvider::access(
   self : FoldingDecorationProvider,
 ) -> FoldingDecorationAccess {
-  FoldingDecorationAccess::new(
+  FoldingDecorationAccess(
     (is_collapsed, is_hidden, is_manual, is_outline_body) => {
       self.get_decoration_option(
         is_collapsed, is_hidden, is_manual, is_outline_body,

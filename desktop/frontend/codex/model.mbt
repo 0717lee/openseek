@@ -3222,7 +3222,7 @@ test "Codex editor annotations stay in chips and preserve model context" {
       "turns": [],
     },
   })
-  let range = @common.Range::Range(5, 2, 6, 8)
+  let range = @common.Range(5, 2, 6, 8)
   let once = state.with_editor_comment(
     "src/main.mbt", range, "rename this", "fn parse_hover() {",
   )
@@ -3248,7 +3248,7 @@ test "Codex editor annotations stay in chips and preserve model context" {
   ])
   let original = twice.with_editor_comment(
     "src/main.mbt",
-    @common.Range::Range(3, 1, 3, 11),
+    @common.Range(3, 1, 3, 11),
     "keep this removal",
     "obsolete()",
     side=@mention_context.OriginalRevision,

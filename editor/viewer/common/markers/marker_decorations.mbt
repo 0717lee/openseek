@@ -20,7 +20,9 @@ priv struct MarkerDecorations {
 
 ///|
 /// Builds an empty per-model decoration map bound to `model`.
-fn MarkerDecorations::new(model : @model.TextModel) -> MarkerDecorations {
+fn MarkerDecorations::MarkerDecorations(
+  model : @model.TextModel,
+) -> MarkerDecorations {
   { model, entries: [], disposed: false, generation: 0, }
 }
 

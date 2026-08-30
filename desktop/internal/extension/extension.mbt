@@ -276,10 +276,12 @@ struct DesktopBridgeActor {
 }
 
 ///|
-pub fn DesktopBridgeActor::new(state : @api.ApiState) -> DesktopBridgeActor {
+pub fn DesktopBridgeActor::DesktopBridgeActor(
+  state : @api.ApiState,
+) -> DesktopBridgeActor {
   {
     state,
-    host_connection: @host.HostConnection::new(),
+    host_connection: HostConnection(),
     // A page normally attaches once. A small bounded queue still permits a
     // reload to overlap the old page without allowing abandoned requests to
     // accumulate forever.

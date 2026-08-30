@@ -17,10 +17,10 @@ pub struct PathQuery {
   has_separator : Bool
   matcher : @fuzzy_match.Query
 }
+pub fn PathQuery::PathQuery(String) -> Self
 pub fn PathQuery::is_empty(Self) -> Bool
 pub fn PathQuery::key(Self) -> String
 pub fn PathQuery::matches(Self, String) -> Bool
-pub fn PathQuery::new(String) -> Self
 pub fn PathQuery::rank_paths(Self, Array[String], Int) -> Array[String]
 
 // Type aliases

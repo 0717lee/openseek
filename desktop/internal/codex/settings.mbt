@@ -18,7 +18,7 @@ pub fn CodexSettings::default() -> CodexSettings {
 
 ///|
 /// Explicit settings with the given command and isolated home.
-pub fn CodexSettings::new(
+pub fn CodexSettings::CodexSettings(
   command~ : String,
   home~ : @pathx.Path?,
 ) -> CodexSettings {

@@ -10,7 +10,7 @@ pub struct DiffEditorLayoutState {
 }
 
 ///|
-fn DiffEditorLayoutState::new(
+fn DiffEditorLayoutState::DiffEditorLayoutState(
   options : DiffEditorOptions,
 ) -> DiffEditorLayoutState {
   let state : DiffEditorLayoutState = {

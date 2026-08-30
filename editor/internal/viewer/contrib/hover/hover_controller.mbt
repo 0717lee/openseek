@@ -94,7 +94,7 @@ struct HoverRequestStamp {
 ///|
 /// Captures one immutable request authority at the model's current internal
 /// version. Callers must retain the exact operation generation/token owner.
-fn HoverRequestStamp::new(
+fn HoverRequestStamp::HoverRequestStamp(
   model : @model.TextModel,
   generation : Int,
   cancellation_token : @language.CancellationToken,
@@ -704,7 +704,7 @@ pub fn HoverController::request_stamp(
   model : @model.TextModel,
   cancellation_token : @language.CancellationToken,
 ) -> HoverRequestStamp {
-  HoverRequestStamp::new(model, self.operation.token, cancellation_token)
+  HoverRequestStamp(model, self.operation.token, cancellation_token)
 }
 
 ///|

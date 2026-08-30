@@ -80,7 +80,7 @@ fn create_model_decoration(
   range : @base_common.Range,
   options : ModelDecorationOptions,
 ) -> ReferenceModelDecoration {
-  let model_options = @model.ModelDecorationOptions::ModelDecorationOptions(
+  let model_options = @model.ModelDecorationOptions(
     "",
     inline_class_name?=options.inline_class_name,
     inline_class_name_affects_letter_spacing=options.inline_class_name_affects_letter_spacing,

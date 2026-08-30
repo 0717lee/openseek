@@ -33,7 +33,7 @@ priv struct MarkdownDocumentHoverHarness {
 }
 
 ///|
-fn MarkdownDocumentHoverHarness::new() -> MarkdownDocumentHoverHarness {
+fn MarkdownDocumentHoverHarness::MarkdownDocumentHoverHarness() -> MarkdownDocumentHoverHarness {
   { calls: [], next_id: Ref(1), }
 }
 
@@ -50,7 +50,7 @@ fn MarkdownDocumentHoverHarness::begin(
     position,
     offset: model.get_offset_at(position),
     token,
-    gate: AsyncFeatureGate::new(),
+    gate: AsyncFeatureGate(),
     outcome: "",
   }
   self.next_id.val += 1
@@ -305,7 +305,7 @@ fn run_markdown_document_test() -> Unit {
     "moonbit",
     @lang_moonbit.MoonBitTokenizer(),
   )
-  let hover_harness = MarkdownDocumentHoverHarness::new()
+  let hover_harness = MarkdownDocumentHoverHarness::MarkdownDocumentHoverHarness()
   let languages = @languages.Languages()
   let hover_registration = languages.register_hover_provider(
     LanguageId("moonbit"),

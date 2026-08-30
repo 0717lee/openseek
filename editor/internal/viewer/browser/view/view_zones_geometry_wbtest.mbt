@@ -95,7 +95,7 @@ fn view_zones_geometry_fixture(
   content_zone.set_attribute("data-test-id", "content-zone")
   let margin_zone = document.create_element("div")
   margin_zone.set_attribute("data-test-id", "margin-zone")
-  let delegate = @editor_browser.ViewZone::ViewZone(
+  let delegate = @editor_browser.ViewZone(
     1,
     content_zone,
     height_in_px=17.0,

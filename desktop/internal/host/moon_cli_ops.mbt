@@ -71,7 +71,7 @@ priv struct MoonCliState {
 }
 
 ///|
-fn MoonCliState::new(
+fn MoonCliState::MoonCliState(
   engine : String,
   runtime_dir? : @pathx.Path,
 ) -> MoonCliState {

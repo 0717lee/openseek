@@ -28,7 +28,7 @@ priv struct SelfUpdate {
 }
 
 ///|
-fn SelfUpdate::new(
+fn SelfUpdate::SelfUpdate(
   runtime_dir : @pathx.Path?,
   executable : String?,
   app_version? : String = "development",
@@ -280,7 +280,7 @@ test "self-update accepts one download and rejects a second" {
 
 ///|
 test "self-update rejects downloads unsupported by this build" {
-  let updates = SelfUpdate::new(None, None)
+  let updates = SelfUpdate::SelfUpdate(None, None)
   let mut rejected = false
   ignore(updates.start_download()) catch {
     HostError(message) =>
@@ -293,7 +293,7 @@ test "self-update rejects downloads unsupported by this build" {
 
 ///|
 async test "self-update pump reports download failures" {
-  let updates = SelfUpdate::new(None, None)
+  let updates = SelfUpdate::SelfUpdate(None, None)
   let events : @async.Queue[@protocol.Notification] = Queue(kind=Blocking(1))
   @async.with_task_group(group => {
     group.spawn_bg(allow_failure=true, () => {

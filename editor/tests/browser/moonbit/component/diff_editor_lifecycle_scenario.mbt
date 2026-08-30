@@ -33,7 +33,7 @@ priv struct FailingDiffLifecycleProvider {
 }
 
 ///|
-fn FailingDiffLifecycleProvider::new() -> FailingDiffLifecycleProvider {
+fn FailingDiffLifecycleProvider::FailingDiffLifecycleProvider() -> FailingDiffLifecycleProvider {
   { marker: (), }
 }
 
@@ -62,7 +62,7 @@ priv struct InvalidDiffLifecycleProvider {
 }
 
 ///|
-fn InvalidDiffLifecycleProvider::new() -> InvalidDiffLifecycleProvider {
+fn InvalidDiffLifecycleProvider::InvalidDiffLifecycleProvider() -> InvalidDiffLifecycleProvider {
   { marker: (), }
 }
 
@@ -131,9 +131,9 @@ fn run_diff_editor_lifecycle_test() -> Unit {
   app.append_child(host.as_node())
   let provider = @diff.CoreDocumentDiffProvider()
   let provider_object : &@diff.DocumentDiffProvider = provider
-  let failing_provider = FailingDiffLifecycleProvider::new()
+  let failing_provider = FailingDiffLifecycleProvider::FailingDiffLifecycleProvider()
   let failing_provider_object : &@diff.DocumentDiffProvider = failing_provider
-  let invalid_provider = InvalidDiffLifecycleProvider::new()
+  let invalid_provider = InvalidDiffLifecycleProvider::InvalidDiffLifecycleProvider()
   let invalid_provider_object : &@diff.DocumentDiffProvider = invalid_provider
   let widget = @diff_editor.DiffEditorWidget::create(
     host,

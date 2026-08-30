@@ -1,6 +1,6 @@
 ///|
 test "responsive layout switches exactly at 900/901 without losing preference" {
-  let state = DiffEditorLayoutState::new(DiffEditorOptions())
+  let state = DiffEditorLayoutState::DiffEditorLayoutState(DiffEditorOptions())
   state.layout(900.0) |> ignore
   assert_true(state.actual_layout == Inline)
   state.layout(901.0) |> ignore
@@ -13,7 +13,9 @@ test "responsive layout switches exactly at 900/901 without losing preference" {
 
 ///|
 test "explicit Inline is stable above the responsive boundary" {
-  let state = DiffEditorLayoutState::new(DiffEditorOptions(layout=Inline))
+  let state = DiffEditorLayoutState::DiffEditorLayoutState(
+    DiffEditorOptions(layout=Inline),
+  )
   state.layout(2000.0) |> ignore
   assert_true(state.actual_layout == Inline)
   assert_true(state.pane_widths() == (0.0, 2000.0))
@@ -21,7 +23,7 @@ test "explicit Inline is stable above the responsive boundary" {
 
 ///|
 test "sash ratio is clamped to ten through ninety percent" {
-  let state = DiffEditorLayoutState::new(DiffEditorOptions())
+  let state = DiffEditorLayoutState::DiffEditorLayoutState(DiffEditorOptions())
   state.layout(1000.0) |> ignore
   assert_true(state.pane_widths() == (500.0, 500.0))
   assert_true(state.set_split_from_pointer(-100.0))
@@ -32,7 +34,7 @@ test "sash ratio is clamped to ten through ninety percent" {
 
 ///|
 test "disabled sash ignores pointer updates" {
-  let state = DiffEditorLayoutState::new(
+  let state = DiffEditorLayoutState::DiffEditorLayoutState(
     DiffEditorOptions(sash_enabled=false, split_ratio=0.4),
   )
   state.layout(1000.0) |> ignore
@@ -42,7 +44,7 @@ test "disabled sash ignores pointer updates" {
 
 ///|
 test "interactive sash ratio survives unrelated option and layout updates" {
-  let state = DiffEditorLayoutState::new(DiffEditorOptions())
+  let state = DiffEditorLayoutState::DiffEditorLayoutState(DiffEditorOptions())
   state.layout(1000.0) |> ignore
   assert_true(state.set_split_from_pointer(700.0))
   state.update_options(DiffEditorOptions(overview_ruler=false)) |> ignore

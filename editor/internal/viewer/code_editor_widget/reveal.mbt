@@ -35,7 +35,7 @@ fn CodeEditorWidget::reveal_line_with(
   vertical_type : @view_layout.VerticalRevealType,
 ) -> Unit {
   // Monaco's `_revealLine`: a single-line collapsed range, no horizontal reveal.
-  let range = @base_common.Range::Range(line_number, 1, line_number, 1)
+  let range = @base_common.Range(line_number, 1, line_number, 1)
   self.send_reveal_range(range, vertical_type, reveal_horizontal=false)
 }
 
@@ -47,9 +47,7 @@ fn CodeEditorWidget::reveal_lines_with(
   vertical_type : @view_layout.VerticalRevealType,
 ) -> Unit {
   // Monaco's `_revealLines`: a multi-line range, no horizontal reveal.
-  let range = @base_common.Range::Range(
-    start_line_number, 1, end_line_number, 1,
-  )
+  let range = @base_common.Range(start_line_number, 1, end_line_number, 1)
   self.send_reveal_range(range, vertical_type, reveal_horizontal=false)
 }
 
@@ -61,7 +59,7 @@ fn CodeEditorWidget::reveal_position_with(
 ) -> Unit {
   // Monaco's `_revealPosition`: a collapsed range at the position, with
   // horizontal reveal.
-  let range = @base_common.Range::Range(
+  let range = @base_common.Range(
     position.line_number,
     position.column,
     position.line_number,

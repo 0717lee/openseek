@@ -96,7 +96,7 @@ test "hidden dispatcher merges same-kind facts into their first queue slot" {
     first.attempt_to_merge(ViewZonesEvent(ViewZonesChangedEvent())) is None,
   )
 
-  let dispatcher = CursorEventDispatcher::new()
+  let dispatcher = CursorEventDispatcher::CursorEventDispatcher()
   defer dispatcher.dispose()
   let mut delivered = 0
   dispatcher.on_hidden_areas_changed(_ => delivered += 1) |> ignore
@@ -113,7 +113,7 @@ test "hidden dispatcher merges same-kind facts into their first queue slot" {
 
 ///|
 test "hidden dispatcher reentrancy finishes siblings before nested delivery" {
-  let dispatcher = CursorEventDispatcher::new()
+  let dispatcher = CursorEventDispatcher::CursorEventDispatcher()
   defer dispatcher.dispose()
   let order : Array[String] = []
   let mut first_calls = 0

@@ -2,7 +2,7 @@
 #cfg(not(platform="windows"))
 async test "job_stop cancels a running job" {
   @async.with_task_group(group => {
-    let bg = @bgjobs.BgJobRuntime::BgJobRuntime(AgentTaskScope(group))
+    let bg = @bgjobs.BgJobRuntime(AgentTaskScope(group))
     let id = bg.start(program="sleep", args=["30"], command="sleep 30")
     @async.sleep(50)
     assert_true(bg.snapshot(id).unwrap().status is Running)
@@ -21,7 +21,7 @@ async test "job_stop cancels a running job" {
 #cfg(not(platform="windows"))
 async test "job_stop errors on an unknown job id" {
   @async.with_task_group(group => {
-    let bg = @bgjobs.BgJobRuntime::BgJobRuntime(AgentTaskScope(group))
+    let bg = @bgjobs.BgJobRuntime(AgentTaskScope(group))
     let action = match @job_stop.definition(bg).execute {
       Async(execute) => execute({ "job_id": "nope" })
       Sync(_) => fail("job_stop should be async")

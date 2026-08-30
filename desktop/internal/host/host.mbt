@@ -59,12 +59,12 @@ struct HostConnection {
 }
 
 ///|
-pub fn HostConnection::new() -> HostConnection {
+pub fn HostConnection::HostConnection() -> HostConnection {
   {
-    fs_watch: FsWatchActor::new(),
-    file_search: FileSearchService::new(),
-    text_search: TextSearchService::new(),
-    semantic_search: SemanticSearchService::new(),
+    fs_watch: FsWatchActor(),
+    file_search: FileSearchService(),
+    text_search: TextSearchService(),
+    semantic_search: SemanticSearchService(),
     terminal: @terminal.new_terminal_state(),
   }
 }
@@ -84,8 +84,8 @@ pub fn new_host_state(
     engine,
     executable,
     runtime_dir,
-    moon: MoonCliState::new(engine, runtime_dir?),
-    updates: SelfUpdate::new(runtime_dir, executable, app_version~),
+    moon: MoonCliState(engine, runtime_dir?),
+    updates: SelfUpdate(runtime_dir, executable, app_version~),
   }
 }
 

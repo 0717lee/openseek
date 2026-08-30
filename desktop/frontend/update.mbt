@@ -764,11 +764,7 @@ fn open_explorer(
   mode : @fileeditor.ExplorerMode,
 ) -> (@cmd.Cmd, Model) {
   let model = model.begin_editor_navigation()
-  let screen = if model.screen is Screen::Codex {
-    Screen::Codex
-  } else {
-    Screen::Chat
-  }
+  let screen = if model.screen is Codex { Screen::Codex } else { Chat }
   let next = {
     ..model,
     screen,
@@ -2430,7 +2426,7 @@ fn update_msg(
           let end_column = if quote.is_empty() { 1 } else { quote.length() + 1 }
           (
             line_number,
-            Some(@common.Range::Range(line_number, 1, line_number, end_column)),
+            Some(@common.Range(line_number, 1, line_number, end_column)),
             @mention_context.WorkingRevision,
           )
         }
@@ -2444,7 +2440,7 @@ fn update_msg(
       if model.screen is Codex {
         let end_column = if quote.is_empty() { 1 } else { quote.length() + 1 }
         let comment_range = range.unwrap_or(
-          @common.Range::Range(line_number, 1, line_number, end_column),
+          @common.Range(line_number, 1, line_number, end_column),
         )
         return (
           clear_feedback,
@@ -4118,7 +4114,7 @@ fn update_msg(
       let range = match line {
         Some(line) => {
           let column = column.unwrap_or(1)
-          Some(@common.Range::Range(line, column, line, column))
+          Some(@common.Range(line, column, line, column))
         }
         None => None
       }
@@ -15647,7 +15643,7 @@ test "JumpToMention opens the editor panel and selects the mention's file" {
   let dispatch = test_dispatch()
   let mention : Mention = {
     ref_: Symbol(name="parse_hover", file="src/main.mbt", line=5),
-    range: Some(@common.Range::Range(5, 1, 5, 12)),
+    range: Some(@common.Range(5, 1, 5, 12)),
   }
   let model = test_model().replace_conversation({
     ..test_conversation(),
@@ -15841,7 +15837,7 @@ test "update is pure: a resolved transcript position opens its owning file" {
       @fileeditor.OpenNavigationLocation(
         owner~,
         path=Relative("src/main.mbt"),
-        range=@common.Range::Range(9, 1, 9, 4),
+        range=@common.Range(9, 1, 9, 4),
       ),
     ),
     first,
@@ -15878,7 +15874,7 @@ test "update is pure: a resolved transcript position opens its owning file" {
         file=@fileeditor.Content(content="old", absolute=target, sig="1:3"),
         file_link_generation=Some(2),
         review_generation=None,
-        range=Some(@common.Range::Range(2738, 17, 2738, 17)),
+        range=Some(@common.Range(2738, 17, 2738, 17)),
         annotation=None,
       ),
     ),
@@ -15899,7 +15895,7 @@ test "update is pure: a resolved transcript position opens its owning file" {
         file=@fileeditor.Content(content="old", absolute=target, sig="1:3"),
         file_link_generation=Some(1),
         review_generation=None,
-        range=Some(@common.Range::Range(1, 1, 1, 1)),
+        range=Some(@common.Range(1, 1, 1, 1)),
         annotation=None,
       ),
     ),
@@ -15962,7 +15958,7 @@ test "update is pure: a resolved transcript position opens its owning file" {
         file=@fileeditor.Content(content="new", absolute=target, sig="2:3"),
         file_link_generation=Some(2),
         review_generation=None,
-        range=Some(@common.Range::Range(2738, 17, 2738, 17)),
+        range=Some(@common.Range(2738, 17, 2738, 17)),
         annotation=None,
       ),
     ),
@@ -16084,7 +16080,7 @@ test "EditorCommentAdded attaches a deduplicated annotation chip" {
     EditorCommentAdded(
       resource=@fileeditor.ModelUri::of(absolute),
       file=Relative("src/main.mbt"),
-      range=@common.Range::Range(5, 1, 6, 3),
+      range=@common.Range(5, 1, 6, 3),
       quote="fn parse_hover() {",
       comment="rename this",
       feedback_id="viewer-feedback-0",
@@ -16114,7 +16110,7 @@ test "ApplyAllFeedback queues the attached annotation on a running task" {
           @interop.ChannelId::Local.test_resource("/work/project/src/main.mbt"),
         ),
         file=Relative("src/main.mbt"),
-        range=@common.Range::Range(5, 1, 6, 3),
+        range=@common.Range(5, 1, 6, 3),
         quote="fn parse_hover() {",
         comment="rename this",
         feedback_id="viewer-feedback-immediate",
@@ -16165,7 +16161,7 @@ test "DiffCommentAdded preserves modified and original-only line identity" {
       side=@mention_context.WorkingRevision
     ),
   )
-  assert_eq(added_mentions[0].range, Some(@common.Range::Range(7, 1, 7, 16)))
+  assert_eq(added_mentions[0].range, Some(@common.Range(7, 1, 7, 16)))
   let deleted : Msg = FileEditor(
     DiffCommentAdded(
       file~,
@@ -16290,7 +16286,7 @@ test "Codex editor comments use annotation context, not textarea text or OpenSee
         @interop.ChannelId::Local.test_resource("/work/project/src/main.mbt"),
       ),
       file=Relative("src/main.mbt"),
-      range=@common.Range::Range(5, 1, 6, 3),
+      range=@common.Range(5, 1, 6, 3),
       quote="fn parse_hover() {",
       comment="rename this",
       feedback_id="viewer-feedback-codex",
@@ -16328,7 +16324,7 @@ test "Codex ApplyAllFeedback steers the running task through its composer" {
           @interop.ChannelId::Local.test_resource("/work/project/src/main.mbt"),
         ),
         file=Relative("src/main.mbt"),
-        range=@common.Range::Range(5, 1, 6, 3),
+        range=@common.Range(5, 1, 6, 3),
         quote="fn parse_hover() {",
         comment="rename this",
         feedback_id="viewer-feedback-codex-immediate",
@@ -16383,7 +16379,7 @@ test "chip jumps relativize legacy absolute paths against the roots" {
     dispatch,
     JumpToLocation(
       path="/work/project/src/main.mbt",
-      range=Some(@common.Range::Range(5, 1, 5, 1)),
+      range=Some(@common.Range(5, 1, 5, 1)),
       annotation=None,
     ),
     model,
@@ -16413,7 +16409,7 @@ test "chip jumps relativize legacy absolute paths against the roots" {
     dispatch,
     JumpToLocation(
       path="/work/project/src/main.mbt",
-      range=Some(@common.Range::Range(5, 1, 5, 1)),
+      range=Some(@common.Range(5, 1, 5, 1)),
       annotation=None,
     ),
     model,
@@ -16425,7 +16421,7 @@ test "chip jumps relativize legacy absolute paths against the roots" {
     dispatch,
     JumpToLocation(
       path="/elsewhere/note.md",
-      range=Some(@common.Range::Range(1, 1, 1, 1)),
+      range=Some(@common.Range(1, 1, 1, 1)),
       annotation=None,
     ),
     model,
@@ -18087,7 +18083,7 @@ test "file rows and location jumps cannot open while checkout placement is missi
     dispatch,
     JumpToLocation(
       path="/proj/src/main.mbt",
-      range=Some(@common.Range::Range(1, 1, 1, 1)),
+      range=Some(@common.Range(1, 1, 1, 1)),
       annotation=None,
     ),
     model,
@@ -18100,7 +18096,7 @@ test "file rows and location jumps cannot open while checkout placement is missi
       OpenNavigationLocation(
         owner=file_ctx(model).owner,
         path~,
-        range=@common.Range::Range(1, 1, 1, 1),
+        range=@common.Range(1, 1, 1, 1),
       ),
     ),
     model,

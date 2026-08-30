@@ -68,7 +68,7 @@ async test "definition presence and query aggregate provider and location order"
   assert_true(languages.has_definition_provider(model))
   assert_true(handle.has_definition_provider(model))
 
-  let token = @language.CancellationToken::new()
+  let token = @language.CancellationToken()
   let locations = handle.definition_at(model, 3, token~)
   assert_eq(empty_calls.val, 1)
   assert_eq(result_calls.val, 1)

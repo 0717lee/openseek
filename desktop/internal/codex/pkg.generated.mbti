@@ -45,8 +45,8 @@ pub struct CodexSettings {
   command : String
   home : @pathx.Path?
 }
+pub fn CodexSettings::CodexSettings(command~ : String, home~ : @pathx.Path?) -> Self
 pub fn CodexSettings::default() -> Self
-pub fn CodexSettings::new(command~ : String, home~ : @pathx.Path?) -> Self
 
 type Connection
 pub fn Connection::is_closed(Self) -> Bool

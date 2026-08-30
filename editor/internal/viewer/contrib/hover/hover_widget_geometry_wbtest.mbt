@@ -17,7 +17,7 @@ fn pos_part(
 
 ///|
 test "computeHoverPositions: secondary column is the leftmost part start on the anchor line" {
-  let anchor = @base_common.Range::Range(2, 10, 2, 14)
+  let anchor = @base_common.Range(2, 10, 2, 14)
   let (show_at, show_at_secondary) = compute_hover_positions(
     anchor,
     [
@@ -41,7 +41,7 @@ test "computeHoverPositions: secondary column is the leftmost part start on the 
 
 ///|
 test "computeHoverPositions: secondary column is clamped up to the start-column boundary" {
-  let anchor = @base_common.Range::Range(2, 10, 2, 14)
+  let anchor = @base_common.Range(2, 10, 2, 14)
   // The part starts at column 3, but the view line's minimum model column is 8.
   let (_, show_at_secondary) = compute_hover_positions(
     anchor,
@@ -53,7 +53,7 @@ test "computeHoverPositions: secondary column is clamped up to the start-column 
 
 ///|
 test "computeHoverPositions: no on-anchor-line parts leaves the secondary at the anchor start" {
-  let anchor = @base_common.Range::Range(4, 7, 4, 9)
+  let anchor = @base_common.Range(4, 7, 4, 9)
   // Empty parts, and a part off the anchor line: secondary stays the anchor start column.
   let (_, empty_secondary) = compute_hover_positions(anchor, [], 1)
   assert_eq(empty_secondary.line_number, 4)
@@ -68,7 +68,7 @@ test "computeHoverPositions: no on-anchor-line parts leaves the secondary at the
 
 ///|
 test "computeHoverPositions: forceShowAtRange overrides both positions, last one wins" {
-  let anchor = @base_common.Range::Range(2, 10, 2, 14)
+  let anchor = @base_common.Range(2, 10, 2, 14)
   let (show_at, show_at_secondary) = compute_hover_positions(
     anchor,
     [pos_part(6, 3, 6, 8, force=true), pos_part(7, 2, 7, 5, force=true)],

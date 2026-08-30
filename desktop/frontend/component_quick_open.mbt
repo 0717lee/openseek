@@ -72,11 +72,7 @@ fn update_quick_open(
   // Settings and catalog surfaces return to Chat because they have no editor.
   // Codex keeps its owning surface so the editor resolves the accepted row
   // against that task's checkout instead of the hidden OpenSeek conversation.
-  let screen = if model.screen is Screen::Codex {
-    Screen::Codex
-  } else {
-    Screen::Chat
-  }
+  let screen = if model.screen is Codex { Screen::Codex } else { Chat }
   let (open_cmd, model) = open_editor_at(
     dispatch,
     { ..model, screen, },

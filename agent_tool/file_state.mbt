@@ -62,7 +62,7 @@ pub struct FileStateMap {
 
 ///|
 /// A fresh, empty session file-state map.
-pub fn FileStateMap::new() -> FileStateMap {
+pub fn FileStateMap::FileStateMap() -> FileStateMap {
   { entries: Map([]), }
 }
 
@@ -168,7 +168,7 @@ pub fn FileStateMap::forget(self : FileStateMap, path : String) -> Unit {
 test "record_created marks a path and survives a later overwrite" {
   let a = content_digest("fn a\n")
   let b = content_digest("fn b\n")
-  let state = FileStateMap::new()
+  let state = FileStateMap::FileStateMap()
   state.record_created("lib/new.mbt", a)
   assert_true(state.get("lib/new.mbt") is Some(Created))
   // Overwriting a file the agent created keeps the creation provenance.
@@ -179,14 +179,14 @@ test "record_created marks a path and survives a later overwrite" {
 
 ///|
 test "record_modified marks a pre-existing file" {
-  let state = FileStateMap::new()
+  let state = FileStateMap::FileStateMap()
   state.record_modified("lib/old.mbt", content_digest("x\n"))
   assert_true(state.get("lib/old.mbt") is Some(Modified))
 }
 
 ///|
 test "an untouched path has no recorded state" {
-  let state = FileStateMap::new()
+  let state = FileStateMap::FileStateMap()
   assert_true(state.get("lib/absent.mbt") is None)
 }
 
@@ -194,7 +194,7 @@ test "an untouched path has no recorded state" {
 test "created_and_unchanged holds only for a Created path with a matching digest" {
   let created = content_digest("v1\n")
   let other = content_digest("v2\n")
-  let state = FileStateMap::new()
+  let state = FileStateMap::FileStateMap()
   state.record_created("lib/x.mbt", created)
   assert_true(state.created_and_unchanged("lib/x.mbt", created))
   // Different content means the file was rebound since the agent wrote it.
@@ -208,14 +208,14 @@ test "an edit keeps Created only when it saw the agent's own content" {
   let foreign = content_digest("someone else\n")
   let after_foreign = content_digest("someone else + edit\n")
   // Normal edit: the tool read back the agent's own content, so Created holds.
-  let ok = FileStateMap::new()
+  let ok = FileStateMap::FileStateMap()
   ok.record_created("a.mbt", created)
   ok.record_edited("a.mbt", created, edited)
   assert_true(ok.get("a.mbt") is Some(Created))
   assert_true(ok.created_and_unchanged("a.mbt", edited))
   // Rebound-then-edited: the tool read foreign content (not what the agent
   // wrote), so Created is downgraded and the file is no longer deletable.
-  let rebound = FileStateMap::new()
+  let rebound = FileStateMap::FileStateMap()
   rebound.record_created("a.mbt", created)
   rebound.record_edited("a.mbt", foreign, after_foreign)
   assert_true(rebound.get("a.mbt") is Some(Modified))
@@ -225,7 +225,7 @@ test "an edit keeps Created only when it saw the agent's own content" {
 ///|
 test "created_and_unchanged is false for a modified or untouched path" {
   let d = content_digest("x\n")
-  let state = FileStateMap::new()
+  let state = FileStateMap::FileStateMap()
   state.record_modified("lib/pre.mbt", d)
   assert_false(state.created_and_unchanged("lib/pre.mbt", d))
   assert_false(state.created_and_unchanged("lib/absent.mbt", d))
@@ -233,7 +233,7 @@ test "created_and_unchanged is false for a modified or untouched path" {
 
 ///|
 test "forget drops a path's provenance" {
-  let state = FileStateMap::new()
+  let state = FileStateMap::FileStateMap()
   state.record_created("lib/gone.mbt", content_digest("x\n"))
   state.forget("lib/gone.mbt")
   assert_true(state.get("lib/gone.mbt") is None)
@@ -241,7 +241,7 @@ test "forget drops a path's provenance" {
 
 ///|
 test "handles share one underlying map (no Ref needed)" {
-  let a = FileStateMap::new()
+  let a = FileStateMap::FileStateMap()
   let b = a
   b.record_created("lib/shared.mbt", content_digest("x\n"))
   assert_true(a.get("lib/shared.mbt") is Some(Created))
@@ -252,7 +252,7 @@ test "distinct path spellings are distinct keys (a safe under-approximation)" {
   // The map keys verbatim — it never canonicalizes — so an equivalent spelling
   // reads as unknown rather than risk reporting a different file as
   // agent-created. Canonicalization (realpath) is the deletion consumer's job.
-  let state = FileStateMap::new()
+  let state = FileStateMap::FileStateMap()
   state.record_created("./note.txt", content_digest("x\n"))
   assert_true(state.get("./note.txt") is Some(Created))
   assert_true(state.get("note.txt") is None)

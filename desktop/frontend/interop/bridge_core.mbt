@@ -238,7 +238,7 @@ test "an ordered request failure releases its channel lane" {
     @js.async_run(() => {
       ignore(
         bridge_request_in_order(
-          ChannelId::Local,
+          Local,
           @commands.fs_unwatch,
           @protocol.EmptyPayload::NoPayload,
         ),

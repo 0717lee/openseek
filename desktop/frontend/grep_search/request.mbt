@@ -102,32 +102,30 @@ fn search_request_loader(
       @js.async_run(() => {
         let loaded : LoadedReply = match request {
           Text(payload) =>
-            LoadedReply::TextLoaded(
+            TextLoaded(
               @interop.bridge_request(
                 owner.channel,
                 @commands.fs_search_text,
                 payload,
               ),
             ) catch {
-              error =>
-                LoadedReply::RequestFailed(@interop.bridge_error_text(error))
+              error => RequestFailed(@interop.bridge_error_text(error))
             }
           Semantic(payload) =>
-            LoadedReply::SemanticLoaded(
+            SemanticLoaded(
               @interop.bridge_request(
                 owner.channel,
                 @commands.fs_search_semantic,
                 payload,
               ),
             ) catch {
-              error =>
-                LoadedReply::RequestFailed(@interop.bridge_error_text(error))
+              error => RequestFailed(@interop.bridge_error_text(error))
             }
         }
         settled = true
         if active {
           match loaded {
-            LoadedReply::RequestFailed(message) =>
+            RequestFailed(message) =>
               scheduler.add(
                 emit(
                   RequestFailed(
@@ -139,7 +137,7 @@ fn search_request_loader(
                   ),
                 ),
               )
-            LoadedReply::TextLoaded(reply) =>
+            TextLoaded(reply) =>
               scheduler.add(
                 emit(
                   Loaded(
@@ -150,7 +148,7 @@ fn search_request_loader(
                   ),
                 ),
               )
-            LoadedReply::SemanticLoaded(reply) =>
+            SemanticLoaded(reply) =>
               scheduler.add(
                 emit(
                   SemanticLoaded(
@@ -207,9 +205,7 @@ pub fn State::subscription(
       .text_request_payload(input)
       .map(payload => SearchRequest::Text(payload))
     Semantic =>
-      page
-      .semantic_request_payload(input)
-      .map(payload => SearchRequest::Semantic(payload))
+      page.semantic_request_payload(input).map(payload => Semantic(payload))
   }
   guard request is Some(request) else { return @sub.none }
   let request_root = request.root_string()

@@ -196,7 +196,7 @@ struct DidChangeContentEmitter {
 }
 
 ///|
-fn DidChangeContentEmitter::new() -> DidChangeContentEmitter {
+fn DidChangeContentEmitter::DidChangeContentEmitter() -> DidChangeContentEmitter {
   { emitter: Emitter(), deferred_cnt: 0, deferred_event: None, }
 }
 

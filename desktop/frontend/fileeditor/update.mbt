@@ -1849,7 +1849,7 @@ pub fn sync(
     for path in ctx.open_files {
       docs[path] = {
         name: basename(path),
-        state: TabState::TabLoading,
+        state: TabLoading,
         review: None,
         stale: false,
       }
@@ -4232,7 +4232,7 @@ test "changed-file review fences paired replies and ordinary opens leave review"
     ctx,
     path,
     name="a.mbt",
-    range=Some(@common.Range::Range(2, 1, 2, 4)),
+    range=Some(@common.Range(2, 1, 2, 4)),
     had_active=true,
   )
   assert_true(

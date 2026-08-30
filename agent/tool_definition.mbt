@@ -57,7 +57,7 @@ pub async fn[X] build_tools(
   // record which paths the agent created vs. modified this session — the record
   // `remove` reads to tell an agent-created file (safe to delete) from a
   // pre-existing one.
-  let file_state = @agent_tool.FileStateMap::new()
+  let file_state = @agent_tool.FileStateMap()
   // One session temp dir, shared by the job runtime (which spills large job
   // output to disk) and mbtx (whose detached snippets outlive the call
   // that started them, so their directories cannot be reclaimed there).
@@ -87,7 +87,7 @@ pub async fn[X] build_tools(
   // loop's lossless steer queue (surfaced to the model at the next step, or
   // persisted while idle) and poke the controller so an idle engine wakes to
   // drain it instead of leaving it until the next prompt.
-  let bg_runtime = @bgjobs.BgJobRuntime::BgJobRuntime(scope, spill_dir?, on_job_exit=snapshot => {
+  let bg_runtime = @bgjobs.BgJobRuntime(scope, spill_dir?, on_job_exit=snapshot => {
     runtime.queue_steer(Notice(background_notice_text(snapshot)))
     if on_background_wake is Some(wake) {
       wake()
@@ -260,7 +260,7 @@ async test "a foreground run past its deadline becomes a job instead of dying" {
   @async.with_task_group(group => {
     let scope = @agent_runtime.AgentTaskScope(group)
     let spill_dir = @fs.tmpdir(prefix="openseek-jobs-test-")
-    let bg_runtime = @bgjobs.BgJobRuntime::BgJobRuntime(scope, spill_dir~)
+    let bg_runtime = @bgjobs.BgJobRuntime(scope, spill_dir~)
     let mbtx = @mbtx.definition(
       workspace_root=".",
       bg_runtime~,
@@ -333,7 +333,7 @@ async test "binary output does not escape the deadline" {
   @async.with_task_group(group => {
     let scope = @agent_runtime.AgentTaskScope(group)
     let spill_dir = @fs.tmpdir(prefix="openseek-jobs-binary-")
-    let bg_runtime = @bgjobs.BgJobRuntime::BgJobRuntime(scope, spill_dir~)
+    let bg_runtime = @bgjobs.BgJobRuntime(scope, spill_dir~)
     let mbtx = @mbtx.definition(
       workspace_root=".",
       bg_runtime~,

@@ -43,7 +43,7 @@
 ///   invalid arguments.
 pub fn definition(
   workspace_root? : String = ".",
-  file_state? : @agent_tool.FileStateMap = @agent_tool.FileStateMap::new(),
+  file_state? : @agent_tool.FileStateMap = FileStateMap(),
   write_scope? : @write_scope.WriteScope,
 ) -> @agent_tool.AgentToolDefinition {
   AgentToolDefinition(

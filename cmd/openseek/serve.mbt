@@ -639,7 +639,7 @@ async fn run_serve(
   // The desk outlives every turn: a question is asked by a tool inside one
   // turn's task and answered by the loop below, which is the process's single
   // command consumer. Both close over this one value.
-  let approval_desk = ApprovalDesk::new(
+  let approval_desk = ApprovalDesk::ApprovalDesk(
     now_ms=@env.now().reinterpret_as_int64(),
   )
   let approval = approval_channel(

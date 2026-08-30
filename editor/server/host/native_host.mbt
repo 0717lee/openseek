@@ -255,7 +255,7 @@ priv struct ProtocolSessions {
 }
 
 ///|
-fn ProtocolSessions::new() -> ProtocolSessions {
+fn ProtocolSessions::ProtocolSessions() -> ProtocolSessions {
   { next_session_id: Ref(0), outboxes: {}, }
 }
 
@@ -327,7 +327,7 @@ pub async fn run_native_editor_server(
     let spawn_task = task => {
       group.spawn_bg(task, no_wait=true, allow_failure=true)
     }
-    let sessions = ProtocolSessions::new()
+    let sessions = ProtocolSessions::ProtocolSessions()
     let workspace = moon_backed_native_workspace(
       root, browse_scope, server_host, moon_command, spawn_task, sessions,
     )

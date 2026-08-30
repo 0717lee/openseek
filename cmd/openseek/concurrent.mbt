@@ -25,7 +25,7 @@ async fn run_fleet(matches : @argparse.Matches, concurrency~ : Int) -> Unit {
   // and then dropped, leaving the flag silently ineffective.
   let approval = approval_channel(
     approval_policy(matches, interactive=false),
-    ApprovalDesk::new(now_ms=@env.now().reinterpret_as_int64()),
+    ApprovalDesk(now_ms=@env.now().reinterpret_as_int64()),
   )
   let (session, dir_input, session_root_input) = match matches {
     {

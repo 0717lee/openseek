@@ -77,7 +77,7 @@ pub fn LineDecorationsNormalizer::normalize(
     return []
   }
   let result : Array[DecorationSegment] = []
-  let stack = DecorationSegmentStack::new()
+  let stack = DecorationSegmentStack::DecorationSegmentStack()
   let line_length = line_content.length()
   let mut next_start_offset = 0
   for decoration in line_decorations {
@@ -133,7 +133,7 @@ priv struct DecorationSegmentStack {
 }
 
 ///|
-fn DecorationSegmentStack::new() -> DecorationSegmentStack {
+fn DecorationSegmentStack::DecorationSegmentStack() -> DecorationSegmentStack {
   { stop_offsets: [], class_names: [], metadata: [], count: 0, }
 }
 

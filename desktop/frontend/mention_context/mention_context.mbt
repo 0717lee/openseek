@@ -170,7 +170,7 @@ pub fn target(mention : MentionRef) -> Target? {
         Some({
           file,
           range: if line >= 1 {
-            Some(@common.Range::Range(line, 1, line, 1))
+            Some(@common.Range(line, 1, line, 1))
           } else {
             None
           },
@@ -189,7 +189,7 @@ pub fn target(mention : MentionRef) -> Target? {
       Some({
         file,
         range: Some(
-          @common.Range::Range(
+          @common.Range(
             start_line,
             1,
             if end_line >= start_line {

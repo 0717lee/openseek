@@ -199,7 +199,7 @@ priv struct FileSearchService {
 }
 
 ///|
-fn FileSearchService::new() -> FileSearchService {
+fn FileSearchService::FileSearchService() -> FileSearchService {
   FileSearchService::new_with_scan(root => scan_workspace_files(root))
 }
 
@@ -293,7 +293,7 @@ async fn compute_file_search(
   query_text : String,
   max_results : Int,
 ) -> FileSearchComputation {
-  let query = @file_search_score.PathQuery::new(query_text)
+  let query = @file_search_score.PathQuery(query_text)
   if query.is_empty() {
     return {
       files: snapshot.files[:snapshot.files.length().min(max_results)].to_owned(),
@@ -352,7 +352,7 @@ async fn FileSearchService::run(self : FileSearchService) -> Unit {
         waiter.reply.put(SearchFailed("file search cache is not ready"))
         return
       }
-      let prepared = @file_search_score.PathQuery::new(waiter.query)
+      let prepared = @file_search_score.PathQuery(waiter.query)
       if prepared.is_empty() {
         let computed : FileSearchComputation = {
           files: snapshot.files[:snapshot.files.length().min(waiter.max_results)].to_owned(),

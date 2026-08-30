@@ -134,7 +134,7 @@ test "model-token outgoing retains identity and never no-ops or merges" {
 
 ///|
 test "model-token outgoing typed listener receives every event in FIFO order" {
-  let dispatcher = CursorEventDispatcher::new()
+  let dispatcher = CursorEventDispatcher::CursorEventDispatcher()
   let delivered : Array[Int] = []
   dispatcher.on_model_tokens_changed(event => {
     delivered.push(event.event.ranges[0].from_line_number)
@@ -157,7 +157,7 @@ test "model-token outgoing typed listener receives every event in FIFO order" {
 
 ///|
 test "empty model-token outgoing event remains observable" {
-  let dispatcher = CursorEventDispatcher::new()
+  let dispatcher = CursorEventDispatcher::CursorEventDispatcher()
   let mut delivered = 0
   let observed_range_count = Ref(-1)
   dispatcher.on_model_tokens_changed(event => {
@@ -177,7 +177,7 @@ test "empty model-token outgoing event remains observable" {
 
 ///|
 test "model-token outgoing reentrant delivery preserves event identity order" {
-  let dispatcher = CursorEventDispatcher::new()
+  let dispatcher = CursorEventDispatcher::CursorEventDispatcher()
   let delivered : Array[String] = []
   let mut reentered = false
   dispatcher.on_model_tokens_changed(event => {
@@ -216,7 +216,7 @@ test "cursor outgoing merge ORs the reached-max source flag" {
 
 ///|
 test "cursor outgoing queue merges into first same-kind slot and drops no-ops" {
-  let dispatcher = CursorEventDispatcher::new()
+  let dispatcher = CursorEventDispatcher::CursorEventDispatcher()
   let delivered : Array[String] = []
   dispatcher.on_event(event => {
     delivered.push(
@@ -238,7 +238,7 @@ test "cursor outgoing queue merges into first same-kind slot and drops no-ops" {
 
 ///|
 test "cursor outgoing different-kind slots retain FIFO position around merge" {
-  let dispatcher = CursorEventDispatcher::new()
+  let dispatcher = CursorEventDispatcher::CursorEventDispatcher()
   let one = dispatcher_selection(1)
   dispatcher.add_outgoing_event(ViewZonesEvent(ViewZonesChangedEvent()))
   dispatcher.add_outgoing_event(
@@ -270,7 +270,7 @@ test "cursor outgoing different-kind slots retain FIFO position around merge" {
 
 ///|
 test "heterogeneous queue delivers cursor and ViewZones facts in FIFO order" {
-  let dispatcher = CursorEventDispatcher::new()
+  let dispatcher = CursorEventDispatcher::CursorEventDispatcher()
   let delivered : Array[String] = []
   dispatcher.on_event(event => {
     delivered.push("cursor:\{event.selections[0].get_position().column}")
@@ -285,7 +285,7 @@ test "heterogeneous queue delivers cursor and ViewZones facts in FIFO order" {
 
 ///|
 test "reentrant cross-kind fire uses the shared outgoing listener delivery" {
-  let dispatcher = CursorEventDispatcher::new()
+  let dispatcher = CursorEventDispatcher::CursorEventDispatcher()
   let delivered : Array[String] = []
   dispatcher.on_event(_event => {
     delivered.push("cursor:before")
@@ -300,7 +300,7 @@ test "reentrant cross-kind fire uses the shared outgoing listener delivery" {
 
 ///|
 test "standalone no-op drains before a later live cursor event" {
-  let dispatcher = CursorEventDispatcher::new()
+  let dispatcher = CursorEventDispatcher::CursorEventDispatcher()
   let delivered : Array[Int] = []
   dispatcher.on_event(event => {
     delivered.push(event.selections[0].get_position().column)
@@ -320,7 +320,7 @@ test "standalone no-op drains before a later live cursor event" {
 
 ///|
 test "cursor outgoing FIFO continues through reentrant delivery" {
-  let dispatcher = CursorEventDispatcher::new()
+  let dispatcher = CursorEventDispatcher::CursorEventDispatcher()
   let delivered : Array[Int] = []
   let mut reentered = false
   dispatcher.on_event(event => {
@@ -347,7 +347,7 @@ test "cursor outgoing FIFO continues through reentrant delivery" {
 
 ///|
 test "single cursor listener receives a reentrant event recursively" {
-  let dispatcher = CursorEventDispatcher::new()
+  let dispatcher = CursorEventDispatcher::CursorEventDispatcher()
   let delivered : Array[String] = []
   let mut reentered = false
   dispatcher.on_event(event => {
@@ -376,7 +376,7 @@ test "single cursor listener receives a reentrant event recursively" {
 
 ///|
 test "reentrant cursor event drains current listeners then nests before return" {
-  let dispatcher = CursorEventDispatcher::new()
+  let dispatcher = CursorEventDispatcher::CursorEventDispatcher()
   let delivered : Array[String] = []
   let mut reentered = false
   dispatcher.on_event(event => {
@@ -415,7 +415,7 @@ test "reentrant cursor event drains current listeners then nests before return" 
 
 ///|
 test "reentrant cursor delivery retains array semantics after sibling disposal" {
-  let dispatcher = CursorEventDispatcher::new()
+  let dispatcher = CursorEventDispatcher::CursorEventDispatcher()
   let delivered : Array[String] = []
   let mut reentered = false
   let sibling = Ref(@base_common.Disposable::from(() => ()))
@@ -452,7 +452,7 @@ test "reentrant cursor delivery retains array semantics after sibling disposal" 
 
 ///|
 test "disposing the cursor dispatcher drops listeners pending facts and later emissions" {
-  let dispatcher = CursorEventDispatcher::new()
+  let dispatcher = CursorEventDispatcher::CursorEventDispatcher()
   let mut delivered = 0
   dispatcher.on_event(_ => delivered += 1) |> ignore
   let selection = dispatcher_selection(1)

@@ -1,10 +1,10 @@
 ///|
 /// Creates a directly cancellable token for compatibility. New request owners
 /// should create a `CancellationTokenSource` and pass its token instead.
-pub fn CancellationToken::new() -> CancellationToken {
+pub fn CancellationToken::CancellationToken() -> CancellationToken {
   {
     state: CompatibilityMutable(
-      MutableCancellationToken::new(schedule_cancellation_inline),
+      MutableCancellationToken(schedule_cancellation_inline),
     ),
   }
 }

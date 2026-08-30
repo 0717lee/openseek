@@ -45,10 +45,10 @@ pub fn InitializeResult::not_equal(Self, Self) -> Bool
 pub fn InitializeResult::to_repr(Self) -> @debug.Repr
 
 type McpClient
+pub fn McpClient::McpClient(@jsonrpc.Client) -> Self
 pub async fn McpClient::call_tool(Self, name~ : String, arguments~ : Json) -> CallToolResult
 pub async fn McpClient::initialize(Self, client_name~ : String, client_version~ : String) -> InitializeResult
 pub async fn McpClient::list_tools(Self) -> Array[McpTool]
-pub fn McpClient::new(@jsonrpc.Client) -> Self
 
 pub struct McpTool {
   name : String

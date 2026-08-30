@@ -137,7 +137,7 @@ pub fn LineTokens::slice_and_inflate(
   end_offset : Int,
   delta_offset : Int,
 ) -> ViewLineTokens {
-  Slice(SliceLineTokens::new(self, start_offset, end_offset, delta_offset))
+  Slice(SliceLineTokens(self, start_offset, end_offset, delta_offset))
 }
 
 ///|
@@ -289,7 +289,7 @@ priv struct SliceLineTokens {
 }
 
 ///|
-fn SliceLineTokens::new(
+fn SliceLineTokens::SliceLineTokens(
   source : LineTokens,
   start_offset : Int,
   end_offset : Int,

@@ -33,7 +33,7 @@ async fn run_shell_wired(
 #cfg(not(platform="windows"))
 async test "run_in_background starts a job and returns its id" {
   @async.with_task_group(group => {
-    let bg = @bgjobs.BgJobRuntime::BgJobRuntime(AgentTaskScope(group))
+    let bg = @bgjobs.BgJobRuntime(AgentTaskScope(group))
     let output = run_shell_wired(bg, {
       "cmd": "printf hi",
       "run_in_background": true,
@@ -48,7 +48,7 @@ async test "run_in_background starts a job and returns its id" {
 #cfg(not(platform="windows"))
 async test "run_in_background rejects timeout_ms" {
   @async.with_task_group(group => {
-    let bg = @bgjobs.BgJobRuntime::BgJobRuntime(AgentTaskScope(group))
+    let bg = @bgjobs.BgJobRuntime(AgentTaskScope(group))
     let output = run_shell_wired(bg, {
       "cmd": "printf hi",
       "run_in_background": true,
@@ -63,7 +63,7 @@ async test "run_in_background rejects timeout_ms" {
 #cfg(not(platform="windows"))
 async test "foreground runs through the execution model" {
   @async.with_task_group(group => {
-    let bg = @bgjobs.BgJobRuntime::BgJobRuntime(AgentTaskScope(group))
+    let bg = @bgjobs.BgJobRuntime(AgentTaskScope(group))
     let output = run_shell_wired(bg, { "cmd": "printf hi" })
     assert_false(output.is_error)
     assert_true(output.content.contains("hi"))
@@ -75,7 +75,7 @@ async test "foreground runs through the execution model" {
 #cfg(not(platform="windows"))
 async test "wired foreground reports binary output as lossy text with encoding warning" {
   @async.with_task_group(group => {
-    let bg = @bgjobs.BgJobRuntime::BgJobRuntime(AgentTaskScope(group))
+    let bg = @bgjobs.BgJobRuntime(AgentTaskScope(group))
     // Non-UTF-8 output is no longer a hard tool error: the platform shell
     // sets UTF-8 encoding (Windows: chcp 65001), so remaining binary output
     // is returned as lossy-decoded text with an encoding warning.
@@ -88,7 +88,7 @@ async test "wired foreground reports binary output as lossy text with encoding w
 #cfg(not(platform="windows"))
 async test "foreground enforces max_output_chars with an output-limit error" {
   @async.with_task_group(group => {
-    let bg = @bgjobs.BgJobRuntime::BgJobRuntime(AgentTaskScope(group))
+    let bg = @bgjobs.BgJobRuntime(AgentTaskScope(group))
     // `yes` exceeds the tiny budget; the shared foreground path must report the
     // output-limit error, not silently drop output as a success.
     let output = run_shell_wired(bg, { "cmd": "yes", "max_output_chars": 100 })
@@ -102,10 +102,7 @@ async test "foreground enforces max_output_chars with an output-limit error" {
 async test "a timed command that floods output is an output-limit error, not detached" {
   @async.with_task_group(group => {
     let dir = @fs.tmpdir(prefix="openseek-test-")
-    let bg = @bgjobs.BgJobRuntime::BgJobRuntime(
-      AgentTaskScope(group),
-      spill_dir=dir,
-    )
+    let bg = @bgjobs.BgJobRuntime(AgentTaskScope(group), spill_dir=dir)
     // A long timeout, but the runaway must be killed at the output limit promptly
     // (not run to the timeout and then backgrounded).
     let output = run_shell_wired(bg, {
@@ -126,10 +123,7 @@ async test "a timed command that floods output is an output-limit error, not det
 async test "a detached foreground job retains full output past the inline cap" {
   @async.with_task_group(group => {
     let dir = @fs.tmpdir(prefix="openseek-test-")
-    let bg = @bgjobs.BgJobRuntime::BgJobRuntime(
-      AgentTaskScope(group),
-      spill_dir=dir,
-    )
+    let bg = @bgjobs.BgJobRuntime(AgentTaskScope(group), spill_dir=dir)
     // Under the output limit at the timeout (still sleeping) → cleanly detached;
     // then it floods output, which a detached job retains (the output-limit kill
     // is cleared on detach).
@@ -162,7 +156,7 @@ async test "a detached foreground job retains full output past the inline cap" {
 #cfg(not(platform="windows"))
 async test "a foreground command that times out is detached to the background" {
   @async.with_task_group(group => {
-    let bg = @bgjobs.BgJobRuntime::BgJobRuntime(AgentTaskScope(group))
+    let bg = @bgjobs.BgJobRuntime(AgentTaskScope(group))
     let output = run_shell_wired(bg, { "cmd": "sleep 2", "timeout_ms": 100 })
     assert_false(output.is_error)
     assert_true(output.content.contains("moved to the background"))
@@ -318,7 +312,7 @@ async test "shell description teaches background jobs only when a runtime is wir
   // Wired: guide the model to background long-running work and to rely on the
   // pushed completion notice instead of blocking on sleeps or polling.
   @async.with_task_group(group => {
-    let bg = @bgjobs.BgJobRuntime::BgJobRuntime(AgentTaskScope(group))
+    let bg = @bgjobs.BgJobRuntime(AgentTaskScope(group))
     let wired = @shell.definition(bg_runtime=bg).description
     assert_true(wired.contains("run_in_background"))
     assert_true(wired.contains("notice"))
@@ -2146,7 +2140,7 @@ async test "an omitted timeout gets a default that kills on the unwired path" {
 #cfg(not(platform="windows"))
 async test "an omitted timeout detaches at the default on the wired path" {
   @async.with_task_group() <| group => {
-    let bg = @bgjobs.BgJobRuntime::BgJobRuntime(AgentTaskScope(group))
+    let bg = @bgjobs.BgJobRuntime(AgentTaskScope(group))
     let output = exec_shell(
       @shell.definition(bg_runtime=bg, default_timeout_ms=50),
       { "cmd": "sleep 2" },
@@ -2174,7 +2168,7 @@ async test "an explicit timeout above the ceiling is an error, not a clamp" {
 #cfg(not(platform="windows"))
 async test "run_in_background without timeout_ms is unaffected by defaults" {
   @async.with_task_group() <| group => {
-    let bg = @bgjobs.BgJobRuntime::BgJobRuntime(AgentTaskScope(group))
+    let bg = @bgjobs.BgJobRuntime(AgentTaskScope(group))
     let output = exec_shell(
       @shell.definition(bg_runtime=bg, default_timeout_ms=50),
       { "cmd": "sleep 1", "run_in_background": true },

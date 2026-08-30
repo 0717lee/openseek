@@ -253,7 +253,7 @@ async fn CodexWorkspaceBinding::authorize(self : CodexWorkspaceBinding) -> Unit 
 /// binary, which self-update uses to locate the running .app bundle (absent
 /// or non-bundle layouts only lose the in-app install, never the
 /// announcement).
-pub fn ApiState::new(
+pub fn ApiState::ApiState(
   engine~ : String,
   codex? : @codex.CodexSettings = @codex.CodexSettings::default(),
   runtime_dir? : @pathx.Path,
@@ -270,7 +270,7 @@ pub fn ApiState::new(
     engine: engine_actor,
     manager: engine_actor.manager(),
     host: @host.new_host_state(engine, runtime_dir?, executable?, app_version~),
-    hub: Hub::new(),
+    hub: Hub(),
     auth: match auth {
       Some(store) => store
       None => @auth.AuthStore::empty(app_version~)
@@ -687,8 +687,8 @@ fn[Payload : FromJson + ToJson, Reply : FromJson + ToJson] ApiState::codex_endpo
 
 ///|
 test "remote endpoint catalog has one entry per command name" {
-  let state = ApiState::new(engine="unused")
-  let connection = @host.HostConnection::new()
+  let state = ApiState::ApiState(engine="unused")
+  let connection = @host.HostConnection()
   let names : Array[String] = []
   for endpoint in endpoints(state, connection) {
     let name = endpoint.name()

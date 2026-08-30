@@ -53,7 +53,7 @@ fn BrowserContentWidgetDiagnosticWidget::handle(
 }
 
 ///|
-fn BrowserContentWidgetDiagnosticWidget::new(
+fn BrowserContentWidgetDiagnosticWidget::BrowserContentWidgetDiagnosticWidget(
   document : @rdom.Document,
   id : String,
   allow_overflow : Bool,
@@ -93,7 +93,7 @@ priv struct BrowserContentWidgetsDiagnostic {
 }
 
 ///|
-fn BrowserContentWidgetsDiagnostic::new(
+fn BrowserContentWidgetsDiagnostic::BrowserContentWidgetsDiagnostic(
   document : @rdom.Document,
   root : @rdom.Element,
 ) -> BrowserContentWidgetsDiagnostic {
@@ -113,10 +113,10 @@ fn BrowserContentWidgetsDiagnostic::new(
   widgets.install_live_view_context(() => (0.0, 430.0), position => {
     Some(position)
   })
-  let normal = BrowserContentWidgetDiagnosticWidget::new(
+  let normal = BrowserContentWidgetDiagnosticWidget::BrowserContentWidgetDiagnosticWidget(
     document, "normal", false,
   )
-  let overflow = BrowserContentWidgetDiagnosticWidget::new(
+  let overflow = BrowserContentWidgetDiagnosticWidget::BrowserContentWidgetDiagnosticWidget(
     document, "overflow", true,
   )
   widgets.add_widget(normal.handle())
@@ -200,7 +200,9 @@ fn run_browser_content_widgets_diagnostic(
   document : @rdom.Document,
   root : @rdom.Element,
 ) -> String {
-  BrowserContentWidgetsDiagnostic::new(document, root).run_matrix()
+  BrowserContentWidgetsDiagnostic::BrowserContentWidgetsDiagnostic(
+    document, root,
+  ).run_matrix()
 }
 
 ///|

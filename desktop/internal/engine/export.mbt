@@ -12,7 +12,7 @@ priv struct SessionExport {
 /// Validate a window request and bind it to one registered live or archived
 /// store. The workspace path comes from a host-produced conversation row, but
 /// is still checked against the current registry before any file is read.
-async fn SessionExport::new(
+async fn SessionExport::SessionExport(
   manager : EngineManager,
   payload : @protocol.SessionExportPayload,
 ) -> SessionExport {
@@ -106,6 +106,6 @@ pub async fn export_session_html(
   shell_html : String,
   bundle_js : String,
 ) -> String {
-  let request = SessionExport::new(manager, payload)
+  let request = SessionExport::SessionExport(manager, payload)
   @viz_export.StandaloneExport(shell_html, bundle_js).render(request.sessions())
 }

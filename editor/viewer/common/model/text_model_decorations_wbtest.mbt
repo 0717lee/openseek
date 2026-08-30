@@ -49,7 +49,7 @@ fn assert_range_opt_eq(
 
 ///|
 test "emitter batches one event per deferred bracket; fire() sets all flags" {
-  let emitter = DidChangeDecorationsEmitter::new()
+  let emitter = DidChangeDecorationsEmitter::DidChangeDecorationsEmitter()
   let events : Array[ModelDecorationsChangedEvent] = []
   let _ = emitter.actual.event(e => events.push(e))
   emitter.begin_deferred_emit()

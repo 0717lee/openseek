@@ -49,7 +49,7 @@ struct ManualHoverScheduler {
 }
 
 ///|
-fn ManualHoverScheduler::new() -> ManualHoverScheduler {
+fn ManualHoverScheduler::ManualHoverScheduler() -> ManualHoverScheduler {
   { now_ms: 0, tasks: [], }
 }
 
@@ -149,7 +149,7 @@ struct AsyncModelFeatureTestServices {
 }
 
 ///|
-fn AsyncModelFeatureTestServices::new() -> AsyncModelFeatureTestServices {
+fn AsyncModelFeatureTestServices::AsyncModelFeatureTestServices() -> AsyncModelFeatureTestServices {
   let log_service = @log.LogService()
   let languages = @languages.Languages()
   let services = CodeEditorServices(
@@ -175,10 +175,10 @@ fn AsyncModelFeatureTestServices::dispose(
 
 ///|
 test "live hover timers follow 150 300 900ms and cancel stale generations" {
-  let backings = AsyncModelFeatureTestServices::new()
+  let backings = AsyncModelFeatureTestServices::AsyncModelFeatureTestServices()
   let viewer = CodeEditorWidget(services=backings.services)
   let model = async_test_model("/hover-timers.mbt", "hover")
-  let scheduler = ManualHoverScheduler::new()
+  let scheduler = ManualHoverScheduler::ManualHoverScheduler()
   viewer.set_hover_host_for_test(
     (callback, delay_ms) => scheduler.schedule(callback, delay_ms),
     _ => (),
@@ -217,11 +217,11 @@ test "live hover timers follow 150 300 900ms and cancel stale generations" {
 
 ///|
 test "content and model invalidation clear a pending mouse-react handle" {
-  let backings = AsyncModelFeatureTestServices::new()
+  let backings = AsyncModelFeatureTestServices::AsyncModelFeatureTestServices()
   let viewer = CodeEditorWidget(services=backings.services)
   let first = async_test_model("/hover-react-first.mbt", "hover")
   let replacement = async_test_model("/hover-react-second.mbt", "hover")
-  let scheduler = ManualHoverScheduler::new()
+  let scheduler = ManualHoverScheduler::ManualHoverScheduler()
   viewer.set_hover_host_for_test(
     (callback, delay_ms) => scheduler.schedule(callback, delay_ms),
     _ => (),
@@ -264,7 +264,7 @@ test "content and model invalidation clear a pending mouse-react handle" {
 
 ///|
 test "hover widget mouseleave hides when the editor DOM is missing" {
-  let backings = AsyncModelFeatureTestServices::new()
+  let backings = AsyncModelFeatureTestServices::AsyncModelFeatureTestServices()
   let viewer = CodeEditorWidget(services=backings.services)
   viewer.set_model(Some(async_test_model("/hover-no-dom.mbt", "hover")))
   let hc = viewer.content_hover_controller().unwrap()
@@ -283,7 +283,7 @@ test "hover widget mouseleave hides when the editor DOM is missing" {
 
 ///|
 test "programmatic hover forwards immediate mode source focus and mouse state" {
-  let backings = AsyncModelFeatureTestServices::new()
+  let backings = AsyncModelFeatureTestServices::AsyncModelFeatureTestServices()
   let viewer = CodeEditorWidget(services=backings.services)
   viewer.set_model(Some(async_test_model("/programmatic-hover.mbt", "hover")))
   viewer.set_hover_host_for_test(
@@ -376,7 +376,7 @@ fn hover_scroll_change(
 
 ///|
 test "hover scroll handling covers neither top left both and ignored input" {
-  let backings = AsyncModelFeatureTestServices::new()
+  let backings = AsyncModelFeatureTestServices::AsyncModelFeatureTestServices()
   let viewer = CodeEditorWidget(services=backings.services)
   viewer.set_model(Some(async_test_model("/hover-scroll.mbt", "hover")))
   let hc = viewer.content_hover_controller().unwrap()
@@ -440,7 +440,7 @@ fn shown_hover_controller() -> @hover.HoverController {
 
 ///|
 test "invisible hover dismissal cancels work idempotently" {
-  let backings = AsyncModelFeatureTestServices::new()
+  let backings = AsyncModelFeatureTestServices::AsyncModelFeatureTestServices()
   let viewer = CodeEditorWidget(services=backings.services)
   viewer.set_model(
     Some(async_test_model("/hover-invisible-dismiss.mbt", "hover")),
@@ -473,7 +473,7 @@ test "invisible hover dismissal cancels work idempotently" {
 
 ///|
 test "visible hover dismissal clears the shown view" {
-  let backings = AsyncModelFeatureTestServices::new()
+  let backings = AsyncModelFeatureTestServices::AsyncModelFeatureTestServices()
   let viewer = CodeEditorWidget(services=backings.services)
   viewer.set_model(
     Some(async_test_model("/hover-visible-dismiss.mbt", "hover")),
@@ -492,7 +492,7 @@ test "visible hover dismissal clears the shown view" {
 
 ///|
 test "content invalidation cancels hover request but preserves shown view" {
-  let backings = AsyncModelFeatureTestServices::new()
+  let backings = AsyncModelFeatureTestServices::AsyncModelFeatureTestServices()
   let viewer = CodeEditorWidget(services=backings.services)
   let model = async_test_model("/hover-content.mbt", "content")
   viewer.set_model(Some(model))
@@ -516,7 +516,7 @@ test "content invalidation cancels hover request but preserves shown view" {
 
 ///|
 test "content invalidation removes loading visibility and permits same-anchor restart" {
-  let backings = AsyncModelFeatureTestServices::new()
+  let backings = AsyncModelFeatureTestServices::AsyncModelFeatureTestServices()
   let viewer = CodeEditorWidget(services=backings.services)
   let model = async_test_model("/hover-loading-content.mbt", "content")
   viewer.set_model(Some(model))

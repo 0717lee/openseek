@@ -76,7 +76,7 @@ struct HttpTransport {
 /// runs one POST exchange as a cancellable task on the connection's group
 /// (`connect` wires it); `extra_headers` (e.g. `Authorization`) are added to
 /// every request.
-fn HttpTransport::new(
+fn HttpTransport::HttpTransport(
   url : String,
   spawn~ : (async () -> Unit) -> @async.Task[Unit],
   extra_headers~ : Map[String, String],
@@ -291,7 +291,7 @@ async fn delete_session(url : String, headers : @http.Headers) -> Unit {
     }
     None => (url, "/")
   }
-  let client = @http.Client::Client(origin) catch {
+  let client = @http.Client(origin) catch {
     error if @async.is_being_cancelled() => raise error
     _ => return
   }
@@ -421,7 +421,7 @@ async fn read_sse_stream(
 ) -> Unit {
   let data = StringBuilder()
   let mut has_data = false
-  let lines = SseLineReader::new(client)
+  let lines = SseLineReader::SseLineReader(client)
   for ;; {
     guard lines.next_line() is Some(line) else { break }
     if line == "" {
@@ -482,7 +482,7 @@ priv struct SseLineReader {
 const SseCompactAt : Int = 4096
 
 ///|
-fn SseLineReader::new(client : @http.Client) -> SseLineReader {
+fn SseLineReader::SseLineReader(client : @http.Client) -> SseLineReader {
   { client, buf: [], start: 0, scan: 0, eof: false, }
 }
 
