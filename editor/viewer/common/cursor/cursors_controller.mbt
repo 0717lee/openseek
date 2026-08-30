@@ -101,11 +101,11 @@ fn CursorsController::validate_model_state(
       state.selection_start_end.column,
     ),
   )
-  let validated_start = @base_common.Position::Position(
+  let validated_start = @base_common.Position(
     validated_range.start_line_number,
     validated_range.start_column,
   )
-  let validated_end = @base_common.Position::Position(
+  let validated_end = @base_common.Position(
     validated_range.end_line_number,
     validated_range.end_column,
   )

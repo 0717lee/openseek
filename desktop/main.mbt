@@ -47,10 +47,7 @@ async fn main {
     Some(dir) => @codex.prepared_home(dir)
     None => None
   }
-  let codex = @codex.CodexSettings::CodexSettings(
-    command=@codex.command(),
-    home=codex_home,
-  )
+  let codex = @codex.CodexSettings(command=@codex.command(), home=codex_home)
   @xlog.info() <?
     {
       "message": "codex home",
@@ -105,7 +102,7 @@ async fn main {
     env_override?=relay_settings(),
     app_version~,
   )
-  let state = @api.ApiState::ApiState(
+  let state = @api.ApiState(
     engine~,
     codex~,
     runtime_dir?,
@@ -113,11 +110,11 @@ async fn main {
     auth~,
     app_version~,
   )
-  let bridge = @extension.DesktopBridgeActor::DesktopBridgeActor(state)
+  let bridge = @extension.DesktopBridgeActor(state)
   // The dock's browser tabs: native web contents views, owned by the
   // window and commanded over bridge-local `browser.*` ops.
-  let views = @extension.BrowserViews::BrowserViews()
-  let relay = @remote.RelayActor::RelayActor(state, announce=device => {
+  let views = @extension.BrowserViews()
+  let relay = @remote.RelayActor(state, announce=device => {
     @xlog.info() <? { "message": "relay registered", "device": device }
   })
   // Proton exposes the `__MoonBit__` bridge — both the ops and the event

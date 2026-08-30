@@ -242,7 +242,7 @@ pub fn LinesLayout::LinesLayout(
     instance_id: @base_common.single_letter_hash(
       lines_layout_instance_count.val,
     ),
-    pending_changes: PendingChanges::PendingChanges(),
+    pending_changes: PendingChanges(),
     last_whitespace_id: 0,
     arr: [],
     prefix_sum_valid_index: -1,

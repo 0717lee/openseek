@@ -231,7 +231,7 @@ fn MoonIdeProjection::to_viewer(
     }
     result.push(@language.Location::{
       uri: model_uri_of(absolute),
-      range: @common.Range::Range(
+      range: @common.Range(
         location.start_line,
         location.start_column,
         location.end_line,
@@ -380,6 +380,6 @@ test "moon ide locations stay one based and channel routed" {
     model_uri_channel(locations[0].uri) == Some(Remote("device")) &&
     model_uri_path(locations[0].uri) is Some(resource) &&
     resource.path == "/ws/lib.mbt" &&
-    locations[0].range == @common.Range::Range(2, 3, 2, 9),
+    locations[0].range == @common.Range(2, 3, 2, 9),
   )
 }

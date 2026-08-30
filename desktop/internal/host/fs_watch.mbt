@@ -258,7 +258,7 @@ async fn FsWatchTarget::activate(
   self : FsWatchTarget,
   emit : async (FsChangedPayload) -> Unit,
 ) -> FsWatchActive {
-  let watcher = @fs.Watcher::Watcher(self.root.to_string(), ignored_paths=path => {
+  let watcher = @fs.Watcher(self.root.to_string(), ignored_paths=path => {
     self.interest.ignores(@pathx.Relative(path).normalize())
   })
   errdefer watcher.close()

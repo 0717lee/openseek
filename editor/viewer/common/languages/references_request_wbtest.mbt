@@ -74,7 +74,7 @@ async test "references presence and query preserve selector and registration pri
   assert_true(languages.has_references_provider(model))
   assert_true(handle.has_references_provider(model))
 
-  let token = @language.CancellationToken::CancellationToken()
+  let token = @language.CancellationToken()
   let locations = handle.references_at(model, 3, token~)
   assert_eq(locations.length(), 4)
   assert_eq(locations[0].uri.to_string(), model.uri.to_string())

@@ -548,11 +548,11 @@ fn SelectAllCommand::as_core_editor_command(
       guard viewer.get_model() is Some(model) else { return false }
       let snapshot = model.snapshot
       let last_line = snapshot.line_count() - 1
-      let end = @base_common.Position::Position(
+      let end = @base_common.Position(
         last_line + 1,
         snapshot.line_text(last_line).length() + 1,
       )
-      let origin = @base_common.Position::Position(1, 1)
+      let origin = @base_common.Position(1, 1)
       view_model.set_cursor_state(
         Some(
           @cursor.CursorState::from_model_state(

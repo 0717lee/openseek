@@ -179,7 +179,7 @@ test "pointer converts a wrapped injected position across a hidden model line" {
       viewer.test_set_soft_wrap_column(6)
       let view_model = viewer.test_view_model()
       let converter = view_model.coordinates_converter()
-      let target = @base_common.Position::Position(3, 12)
+      let target = @base_common.Position(3, 12)
       let unprojected = converter.model_position_to_view_position(target)
 
       assert_true(view_model.set_hidden_areas([Range(2, 1, 2, 1)]))

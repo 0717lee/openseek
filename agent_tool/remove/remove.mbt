@@ -219,7 +219,7 @@ async test "remove deletes a file the agent created this session, recording why"
     )
     let path = "\{dir}/scratch.mbt"
     // The map records the create, as `write` would have.
-    let state = @agent_tool.FileStateMap::FileStateMap()
+    let state = @agent_tool.FileStateMap()
     state.record_created(path, recorded_digest(path))
     let result = run_remove(state, {
       "path": path,
@@ -241,7 +241,7 @@ async test "remove keeps deleting a created file it later edited" {
   @vfs.with_tmpdir(dir => {
     @vfs.FileSystem({ "grown.mbt": "pub fn f() -> Int { 1 }\n" }).write_to(dir)
     let path = "\{dir}/grown.mbt"
-    let state = @agent_tool.FileStateMap::FileStateMap()
+    let state = @agent_tool.FileStateMap()
     // Created then modified this session: record_modified must not downgrade it.
     state.record_created(path, recorded_digest(path))
     state.record_modified(path, recorded_digest(path))
@@ -259,7 +259,7 @@ async test "remove deletes a non-source file the agent created" {
     // (and this path is gated, unlike a bare shell `rm`).
     @vfs.FileSystem({ "notes.txt": "scratch" }).write_to(dir)
     let path = "\{dir}/notes.txt"
-    let state = @agent_tool.FileStateMap::FileStateMap()
+    let state = @agent_tool.FileStateMap()
     state.record_created(path, recorded_digest(path))
     let result = run_remove(state, { "path": path, "reason": "temp file" })
     guard result is Respond(output) else { fail("expected Respond") }
@@ -274,7 +274,7 @@ async test "remove refuses a pre-existing file it did not create" {
     @vfs.FileSystem({ "lib.mbt": "pub fn g() -> Int { 0 }\n" }).write_to(dir)
     let path = "\{dir}/lib.mbt"
     // Empty state: the agent did not create this file this session.
-    let state = @agent_tool.FileStateMap::FileStateMap()
+    let state = @agent_tool.FileStateMap()
     let result = run_remove(state, { "path": path, "reason": "cleanup" })
     guard result is Respond(output) else { fail("expected Respond") }
     assert_true(output.is_error)
@@ -290,7 +290,7 @@ async test "remove refuses a file the agent only modified" {
   @vfs.with_tmpdir(dir => {
     @vfs.FileSystem({ "edited.mbt": "pub fn h() -> Int { 2 }\n" }).write_to(dir)
     let path = "\{dir}/edited.mbt"
-    let state = @agent_tool.FileStateMap::FileStateMap()
+    let state = @agent_tool.FileStateMap()
     state.record_modified(path, recorded_digest(path))
     let result = run_remove(state, { "path": path, "reason": "cleanup" })
     guard result is Respond(output) else { fail("expected Respond") }
@@ -307,7 +307,7 @@ async test "remove refuses a created file whose identity no longer matches" {
   @vfs.with_tmpdir(dir => {
     @vfs.FileSystem({ "lib.mbt": "pub fn f() -> Int { 1 }\n" }).write_to(dir)
     let path = "\{dir}/lib.mbt"
-    let state = @agent_tool.FileStateMap::FileStateMap()
+    let state = @agent_tool.FileStateMap()
     // Record a digest that cannot match the file's actual content, standing in
     // for a path rebound to a DIFFERENT file since the agent wrote it (e.g. a
     // `git checkout` restoring a tracked file). The gate must refuse rather than
@@ -328,7 +328,7 @@ async test "remove refuses a created file whose identity no longer matches" {
 async test "remove reports a missing file" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/ghost.mbt"
-    let state = @agent_tool.FileStateMap::FileStateMap()
+    let state = @agent_tool.FileStateMap()
     state.record_created(path, recorded_digest(path))
     let result = run_remove(state, { "path": path, "reason": "cleanup" })
     guard result is Respond(output) else { fail("expected Respond") }
@@ -342,7 +342,7 @@ async test "remove refuses a directory" {
   @vfs.with_tmpdir(dir => {
     let path = "\{dir}/pkg.mbt"
     @fs.mkdir(path, recursive=true)
-    let state = @agent_tool.FileStateMap::FileStateMap()
+    let state = @agent_tool.FileStateMap()
     state.record_created(path, recorded_digest(path))
     let result = run_remove(state, { "path": path, "reason": "cleanup" })
     guard result is Respond(output) else { fail("expected Respond") }
@@ -357,7 +357,7 @@ async test "remove refuses a path recreated after an earlier removal" {
   @vfs.with_tmpdir(dir => {
     @vfs.FileSystem({ "redo.mbt": "pub fn a() -> Int { 1 }\n" }).write_to(dir)
     let path = "\{dir}/redo.mbt"
-    let state = @agent_tool.FileStateMap::FileStateMap()
+    let state = @agent_tool.FileStateMap()
     state.record_created(path, recorded_digest(path))
     // The first removal succeeds and drops the provenance.
     let first = run_remove(state, { "path": path, "reason": "undo" })
@@ -385,7 +385,7 @@ async test "remove refuses a path replaced by a symlink" {
     // The path the agent created is now a symlink to another file.
     let link = "\{dir}/alias.mbt"
     @fs.symlink(target~, link)
-    let state = @agent_tool.FileStateMap::FileStateMap()
+    let state = @agent_tool.FileStateMap()
     state.record_created(link, recorded_digest(link))
     let result = run_remove(state, { "path": link, "reason": "cleanup" })
     guard result is Respond(output) else { fail("expected Respond") }
@@ -400,7 +400,7 @@ async test "remove refuses a path replaced by a symlink" {
 
 ///|
 async test "remove rejects missing path" {
-  let state = @agent_tool.FileStateMap::FileStateMap()
+  let state = @agent_tool.FileStateMap()
   let result = run_remove(state, { "reason": "cleanup" })
   guard result is Respond(output) else { fail("expected Respond") }
   assert_eq(output.content, "error: remove requires arguments.path")
@@ -412,7 +412,7 @@ async test "remove rejects a missing reason" {
   @vfs.with_tmpdir(dir => {
     @vfs.FileSystem({ "x.mbt": "pub fn x() -> Int { 0 }\n" }).write_to(dir)
     let path = "\{dir}/x.mbt"
-    let state = @agent_tool.FileStateMap::FileStateMap()
+    let state = @agent_tool.FileStateMap()
     state.record_created(path, recorded_digest(path))
     // A destructive action must carry a rationale — no delete without one.
     let result = run_remove(state, { "path": path })
@@ -428,7 +428,7 @@ async test "remove rejects a blank reason" {
   @vfs.with_tmpdir(dir => {
     @vfs.FileSystem({ "y.mbt": "pub fn y() -> Int { 0 }\n" }).write_to(dir)
     let path = "\{dir}/y.mbt"
-    let state = @agent_tool.FileStateMap::FileStateMap()
+    let state = @agent_tool.FileStateMap()
     state.record_created(path, recorded_digest(path))
     // A whitespace-only rationale would produce an empty audit entry, so it is
     // rejected just like a missing one. Includes Unicode whitespace (a
@@ -454,7 +454,7 @@ async test "a write scope confines remove to its allowed paths" {
       dir,
     )
     // Both files carry agent-created provenance, so only the scope decides.
-    let state = @agent_tool.FileStateMap::FileStateMap()
+    let state = @agent_tool.FileStateMap()
     state.record_created(
       "\{dir}/lib/mine.txt",
       recorded_digest("\{dir}/lib/mine.txt"),

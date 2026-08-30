@@ -296,7 +296,7 @@ fn request_test_model(path : String, text : String) -> @model.TextModel {
 test "request stamp requires stable model identity, internal version, generation, and live token" {
   let current = request_test_model("/stamp.mbt", "one")
   let same_uri_version = request_test_model("/stamp.mbt", "one")
-  let token = @language.CancellationToken::CancellationToken()
+  let token = @language.CancellationToken()
   let stamp = HoverRequestStamp::HoverRequestStamp(current, 11, token)
   assert_true(stamp.is_current(Some(current), 11))
   assert_false(stamp.is_current(Some(same_uri_version), 11))
@@ -322,7 +322,7 @@ test "request stamp requires stable model identity, internal version, generation
   assert_false(disposed_stamp.is_current(Some(disposed_model), 13))
 
   let live = request_test_model("/cancel.mbt", "one")
-  let canceled_token = @language.CancellationToken::CancellationToken()
+  let canceled_token = @language.CancellationToken()
   let canceled = HoverRequestStamp::HoverRequestStamp(live, 12, canceled_token)
   canceled_token.cancel()
   assert_false(canceled.is_current(Some(live), 12))
@@ -332,7 +332,7 @@ test "request stamp requires stable model identity, internal version, generation
 test "request-aware transitions reject cancellation and stale generations" {
   let model = request_test_model("/transition.mbt", "one")
   let (_, armed) = HoverController::empty().start_delayed(3, 7)
-  let token = @language.CancellationToken::CancellationToken()
+  let token = @language.CancellationToken()
   let request = armed.request_stamp(model, token)
   let (proceed, second_wait) = armed.op_trigger_async_request(
     request,

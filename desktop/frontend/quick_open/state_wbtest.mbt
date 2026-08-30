@@ -39,7 +39,7 @@ fn test_symbol(name : String, path : String) -> @symbols.Symbol {
     kind: Some(12),
     container: Some("Parser"),
     path,
-    range: @common.Range::Range(5, 2, 5, 13),
+    range: @common.Range(5, 2, 5, 13),
   }
 }
 

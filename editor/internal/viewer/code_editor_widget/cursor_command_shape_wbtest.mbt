@@ -122,7 +122,7 @@ test "registered model line start and end commands preserve selection mode" {
       )
     }
     let install = fn(column, residue) {
-      let position = @base_common.Position::Position(2, column)
+      let position = @base_common.Position(2, column)
       view_model.set_model_cursor_state(
         SingleCursorState(
           position,

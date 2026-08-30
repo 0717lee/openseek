@@ -97,7 +97,7 @@ test "annotation-only composer submission starts its conversation" {
       comment="inspect this selection",
       side=@mention_context.WorkingRevision,
     ),
-    range: Some(@common.Range::Range(69, 1, 69, 1)),
+    range: Some(@common.Range(69, 1, 69, 1)),
   }
   let (_, submitted) = update(
     test_dispatch(),

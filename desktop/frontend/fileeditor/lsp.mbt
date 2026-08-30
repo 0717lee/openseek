@@ -225,7 +225,7 @@ fn DiagnosticProjection::to_viewer(
 ) -> @language.Diagnostic {
   let diagnostic = self.0
   @language.Diagnostic::{
-    range: @common.Range::Range(
+    range: @common.Range(
       diagnostic.range.start.line + 1,
       diagnostic.range.start.character + 1,
       diagnostic.range.end.line + 1,

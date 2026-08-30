@@ -59,12 +59,12 @@ async test "the MCP stack runs a handshake, list, and call over an ndjson pipe" 
     group.spawn_bg(no_wait=true, allow_failure=true, () => {
       pipe_mcp_server(server_transport)
     })
-    let rpc = @jsonrpc.Client::Client(client_transport)
+    let rpc = @jsonrpc.Client(client_transport)
     group.spawn_bg(no_wait=true, allow_failure=true, () => {
       rpc.run_message_pump()
     })
     group.spawn_bg(no_wait=true, allow_failure=true, () => rpc.run_writer())
-    let client = @mcp.McpClient::McpClient(rpc)
+    let client = @mcp.McpClient(rpc)
     let init = client.initialize(client_name="openseek", client_version="0.1")
     assert_eq(init.server_name, "pipe")
     assert_eq(init.protocol_version, "2025-11-25")

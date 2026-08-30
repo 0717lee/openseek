@@ -531,7 +531,7 @@ test "ViewZones hidden-source precedence uses declared anchors and covers EOF" {
       height_in_px=23.0,
     ),
   )
-  let eof_ignore_other_zone = @editor_browser.ViewZone::ViewZone(
+  let eof_ignore_other_zone = @editor_browser.ViewZone(
     4,
     @rdom.document().create_element("div"),
     ignore_hidden_area_source="folding",
@@ -744,7 +744,7 @@ test "ViewZones layoutZone rereads geometry and width but retains ordinal and no
   let original_callback_count = Ref(0)
   let replacement_callback_count = Ref(0)
   let replacement_callback_height = Ref(-1.0)
-  let zone = @editor_browser.ViewZone::ViewZone(
+  let zone = @editor_browser.ViewZone(
     1,
     original_node,
     after_column=1,
@@ -1073,21 +1073,21 @@ test "ViewZones recompute freezes keys but reads future delegates live" {
   let future_callbacks : Array[Double] = []
   let added_callbacks : Array[Double] = []
   let did_reenter = Ref(false)
-  let future_zone = @editor_browser.ViewZone::ViewZone(
+  let future_zone = @editor_browser.ViewZone(
     0,
     @rdom.document().create_element("div"),
     ordinal=1,
     height_in_lines=2.0,
     on_computed_height=height => future_callbacks.push(height),
   )
-  let added_zone = @editor_browser.ViewZone::ViewZone(
+  let added_zone = @editor_browser.ViewZone(
     0,
     @rdom.document().create_element("div"),
     ordinal=2,
     height_in_lines=1.0,
     on_computed_height=height => added_callbacks.push(height),
   )
-  let first_zone = @editor_browser.ViewZone::ViewZone(
+  let first_zone = @editor_browser.ViewZone(
     0,
     @rdom.document().create_element("div"),
     ordinal=0,
@@ -1162,21 +1162,21 @@ test "ViewZones render freezes keys, writes after callback, and reads live value
   let live_future_top_callbacks = Ref(0)
   let added_top_callbacks = Ref(0)
   let did_reenter = Ref(false)
-  let future_zone = @editor_browser.ViewZone::ViewZone(
+  let future_zone = @editor_browser.ViewZone(
     0,
     future_node,
     ordinal=1,
     height_in_px=11.0,
     on_dom_node_top=_ => old_future_top_callbacks.val += 1,
   )
-  let added_zone = @editor_browser.ViewZone::ViewZone(
+  let added_zone = @editor_browser.ViewZone(
     0,
     added_node,
     ordinal=2,
     height_in_px=12.0,
     on_dom_node_top=_ => added_top_callbacks.val += 1,
   )
-  let current_zone = @editor_browser.ViewZone::ViewZone(
+  let current_zone = @editor_browser.ViewZone(
     0,
     current_node,
     ordinal=0,

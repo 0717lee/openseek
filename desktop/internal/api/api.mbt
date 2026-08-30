@@ -688,7 +688,7 @@ fn[Payload : FromJson + ToJson, Reply : FromJson + ToJson] ApiState::codex_endpo
 ///|
 test "remote endpoint catalog has one entry per command name" {
   let state = ApiState::ApiState(engine="unused")
-  let connection = @host.HostConnection::HostConnection()
+  let connection = @host.HostConnection()
   let names : Array[String] = []
   for endpoint in endpoints(state, connection) {
     let name = endpoint.name()

@@ -762,7 +762,7 @@ async test "write rejects non-object arguments" {
 ///|
 async test "write records a new file as Created and keeps it on overwrite" {
   @vfs.with_tmpdir(dir => {
-    let state = @agent_tool.FileStateMap::FileStateMap()
+    let state = @agent_tool.FileStateMap()
     let run = match definition(file_state=state).execute {
       Async(run) => run
       Sync(_) => fail("write tool should be async")
@@ -780,7 +780,7 @@ async test "write records a new file as Created and keeps it on overwrite" {
 ///|
 async test "write records an overwrite of a pre-existing file as Modified" {
   @vfs.with_tmpdir(dir => {
-    let state = @agent_tool.FileStateMap::FileStateMap()
+    let state = @agent_tool.FileStateMap()
     let path = "\{dir}/pre.txt"
     // The file exists before the agent touches it this session.
     @vfs.FileSystem({ "pre.txt": "old" }).write_to(dir)

@@ -146,7 +146,7 @@ pub async fn run_child(
   // One provenance map across every file tool, as the main registry wires
   // it: remove's created-only gate and edit's rebind detection only work
   // when all four tools share the record.
-  let file_state = @agent_tool.FileStateMap::FileStateMap()
+  let file_state = @agent_tool.FileStateMap()
   let report = @agent_subrun.execute_kind(
     session_id~,
     append_item?,

@@ -133,7 +133,7 @@ fn InlineModelDecorationsComputer::get_inline_decorations(
   self : InlineModelDecorationsComputer,
   model_line_number : Int,
 ) -> Array[Array[InlineDecoration]] {
-  let model_range = @base_common.Range::Range(
+  let model_range = @base_common.Range(
     model_line_number,
     1,
     model_line_number,
@@ -323,7 +323,7 @@ fn InlineModelDecorationsComputer::get_or_create_view_model_decoration(
           ),
           affinity=Right,
         )
-        @base_common.Range::Range(
+        @base_common.Range(
           start.line_number,
           start.column,
           end.line_number,

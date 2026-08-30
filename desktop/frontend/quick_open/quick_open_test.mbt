@@ -64,7 +64,7 @@ fn symbol_run(name : String, path : String) -> @quick_open.State raise {
         kind: Some(12),
         container: Some("Parser"),
         path,
-        range: @common.Range::Range(5, 2, 5, 13),
+        range: @common.Range(5, 2, 5, 13),
       },
     ]),
     input,
@@ -129,10 +129,7 @@ test "accepting a row closes the palette and hands back its editor target" {
   assert_false(accepted.is_open())
   assert_eq(
     target,
-    Some({
-      path: "src/main.mbt",
-      range: Some(@common.Range::Range(5, 2, 5, 13)),
-    }),
+    Some({ path: "src/main.mbt", range: Some(@common.Range(5, 2, 5, 13)), }),
   )
   // A file row opens without a range: the whole document is the destination.
   let (_, files) = @quick_open.State::empty().open(

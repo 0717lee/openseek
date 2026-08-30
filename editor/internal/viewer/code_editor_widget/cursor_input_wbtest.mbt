@@ -476,10 +476,7 @@ test "line drag keeps wrapped injected-text view position authoritative" {
       let target_view = converter.model_position_to_view_position(
         Position(2, 2),
       )
-      let next_view = @base_common.Position::Position(
-        target_view.line_number + 1,
-        1,
-      )
+      let next_view = @base_common.Position(target_view.line_number + 1, 1)
       assert_eq(
         converter.view_position_to_model_position(next_view).line_number,
         2,

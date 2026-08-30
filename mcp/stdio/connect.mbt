@@ -123,7 +123,7 @@ pub async fn[X] connect(
     stdin_writer,
     on_close=teardown,
   )
-  let client = @jsonrpc.Client::Client(transport)
+  let client = @jsonrpc.Client(transport)
   // Cancellable (so teardown stops them) and `no_wait` (so they do not hold the
   // group open); a failed send / EOF still closes the client via the transport.
   let pump = group.spawn(
@@ -143,7 +143,7 @@ pub async fn[X] connect(
     stdin_writer.close()
     process.cancel()
   }
-  let mcp_client = @mcp.McpClient::McpClient(client)
+  let mcp_client = @mcp.McpClient(client)
   let init = @async.with_timeout_opt(handshake_timeout_ms, () => {
     mcp_client.initialize(client_name~, client_version~)
   }) catch {

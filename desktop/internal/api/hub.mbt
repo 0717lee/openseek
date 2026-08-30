@@ -514,7 +514,7 @@ test "a duplicate finish never downgrades a settlement" {
 ///|
 async test "agent.runs keeps old requests compatible and decodes known selectors" {
   let state = ApiState::ApiState(engine="unused")
-  let connection = @host.HostConnection::HostConnection()
+  let connection = @host.HostConnection()
   state.hub.publish(
     AgentStarted(
       @json.from_json({

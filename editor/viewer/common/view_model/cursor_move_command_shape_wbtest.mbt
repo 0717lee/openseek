@@ -77,7 +77,7 @@ test "supplied injected-text interior keeps normalization residue" {
     @base_common.Position,
   )? = None
   for column in 1..<=view_model.get_line_max_column(1) {
-    let supplied = @base_common.Position::Position(1, column)
+    let supplied = @base_common.Position(1, column)
     let normalized = view_model.normalize_position(supplied, None)
     if candidate is None && supplied != normalized {
       candidate = Some(

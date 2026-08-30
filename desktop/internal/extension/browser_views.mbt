@@ -372,8 +372,8 @@ fn window_endpoints(views : BrowserViews) -> Array[@endpoint.Endpoint] {
 
 ///|
 test "native window ops are absent from the relay method catalog" {
-  let state = @api.ApiState::ApiState(engine="unused")
-  let connection = @host.HostConnection::HostConnection()
+  let state = @api.ApiState(engine="unused")
+  let connection = @host.HostConnection()
   let catalog = @api.endpoints(state, connection)
   let window_only = window_endpoints(BrowserViews())
   assert_true(

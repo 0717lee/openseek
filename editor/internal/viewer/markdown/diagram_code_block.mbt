@@ -52,7 +52,7 @@ pub fn render_uml_diagram_svg(source : String) -> String? {
   let muted = "var(--vscode-descriptionForeground, #6e7781)"
   let surface = "var(--vscode-editorWidget-background, var(--vscode-editor-background, #ffffff))"
   let note_surface = "var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background, #fff8c5))"
-  let color_scheme = @uml_style.ColorScheme::ColorScheme(
+  let color_scheme = @uml_style.ColorScheme(
     foreground,
     foreground,
     canvas="none",

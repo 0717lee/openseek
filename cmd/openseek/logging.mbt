@@ -81,7 +81,7 @@ fn configure_logging() -> FlushedStdout {
     @xlog.global().set_handler(stdout)
     return stdout
   }
-  let file = @xlog.File::File(path) catch {
+  let file = @xlog.File(path) catch {
     _ => {
       @xlog.global().set_handler(stdout)
       return stdout

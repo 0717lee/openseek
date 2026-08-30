@@ -291,7 +291,7 @@ async fn delete_session(url : String, headers : @http.Headers) -> Unit {
     }
     None => (url, "/")
   }
-  let client = @http.Client::Client(origin) catch {
+  let client = @http.Client(origin) catch {
     error if @async.is_being_cancelled() => raise error
     _ => return
   }

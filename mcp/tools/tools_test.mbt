@@ -111,9 +111,9 @@ fn new_transport() -> FakeTransport {
 async test "tools_for_client bridges tools with namespaced names and schemas" {
   @async.with_task_group(group => {
     let transport = new_transport()
-    let rpc = @jsonrpc.Client::Client(transport)
+    let rpc = @jsonrpc.Client(transport)
     wire(group, transport, rpc)
-    let client = @mcp.McpClient::McpClient(rpc)
+    let client = @mcp.McpClient(rpc)
     let tools = @tools.tools_for_client("srv", client)
     assert_eq(tools.length(), 1)
     assert_eq(tools[0].name, "mcp__srv__echo")
@@ -131,9 +131,9 @@ async test "tools_for_client bridges tools with namespaced names and schemas" {
 async test "a bridged tool proxies tools/call and returns the result" {
   @async.with_task_group(group => {
     let transport = new_transport()
-    let rpc = @jsonrpc.Client::Client(transport)
+    let rpc = @jsonrpc.Client(transport)
     wire(group, transport, rpc)
-    let client = @mcp.McpClient::McpClient(rpc)
+    let client = @mcp.McpClient(rpc)
     let tools = @tools.tools_for_client("srv", client)
     guard tools[0].execute is @agent_tool.Async(exec) else {
       fail("expected an async executor")

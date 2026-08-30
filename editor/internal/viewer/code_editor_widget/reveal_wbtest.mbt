@@ -86,7 +86,7 @@ test "reveal_range over multiple lines resets horizontal scroll" {
       viewer.test_view_model().view_layout.position().scroll_left,
       500.0,
     )
-    let range = @base_common.Range::Range(50, 1, 52, 1)
+    let range = @base_common.Range(50, 1, 52, 1)
     viewer.reveal_range(range)
     let position = viewer.test_view_model().view_layout.position()
     // Vertical: box_start=49*18=882, box_end=51*18+18+18=954; below viewport →
@@ -105,7 +105,7 @@ test "headless single-line reveal retains no browser request" {
     viewer.test_set_viewport(width=800.0, height=180.0)
     viewer.test_view_model().view_layout.set_content_width(2000.0) |> ignore
     viewer.set_scroll_position(scroll_top=0.0, scroll_left=500.0)
-    let range = @base_common.Range::Range(50, 3, 50, 8)
+    let range = @base_common.Range(50, 3, 50, 8)
     viewer.reveal_range(range)
     guard viewer.model_slot.current is Some(model_data) else {
       fail("headless model data missing")
