@@ -130,10 +130,12 @@ fn browser_background(dark : Bool) -> String {
 }
 
 ///|
-/// Best-effort page theme bridge. `color-scheme` covers browser-owned controls;
-/// the attributes cover sites that already declare a theme convention (GitHub
-/// uses `data-color-mode`). Attributes a page did not opt into are left alone,
-/// so this does not invent framework semantics on unrelated sites.
+/// Best-effort page theme bridge for sites that already expose a conventional
+/// light/dark hook (GitHub uses `data-color-mode`). Do not force the root CSS
+/// `color-scheme`: it changes the browser canvas and native controls without
+/// changing a site's authored foreground colors, which can produce dark-on-dark
+/// pages when the site does not support the requested scheme or later restores
+/// its own preference.
 fn browser_theme_script(dark : Bool) -> String {
   let theme = if dark { "dark" } else { "light" }
   let opposite = if dark { "light" } else { "dark" }
@@ -144,9 +146,11 @@ fn browser_theme_script(dark : Bool) -> String {
     $|  const apply = () => {
     $|    const root = document.documentElement;
     $|    if (!root) return;
-    $|    root.style.colorScheme = theme;
     $|    for (const attribute of ["data-color-mode", "data-theme", "data-bs-theme"]) {
-    $|      if (root.hasAttribute(attribute)) root.setAttribute(attribute, theme);
+    $|      const current = root.getAttribute(attribute);
+    $|      if (current !== null && [theme, opposite, "auto", "system"].includes(current.toLowerCase())) {
+    $|        root.setAttribute(attribute, theme);
+    $|      }
     $|    }
     $|    if (root.classList.contains(theme) || root.classList.contains(opposite)) {
     $|      root.classList.remove(opposite);
@@ -416,13 +420,15 @@ test "browser ops refuse to run without a window; close tolerates it" {
 }
 
 ///|
-test "browser page theme bridge uses app palettes and opted-in conventions" {
+test "browser page theme bridge uses only opted-in theme conventions" {
   assert_eq(browser_background(true), "#16181D")
   assert_eq(browser_background(false), "#FBFBF9")
   let dark = browser_theme_script(true)
   assert_true(dark.contains("const theme = \"dark\";"))
   assert_true(dark.contains("const opposite = \"light\";"))
   assert_true(dark.contains("\"data-color-mode\""))
+  assert_true(dark.contains("current.toLowerCase()"))
+  assert_false(dark.contains("style.colorScheme"))
   let light = browser_theme_script(false)
   assert_true(light.contains("const theme = \"light\";"))
   assert_true(light.contains("const opposite = \"dark\";"))
