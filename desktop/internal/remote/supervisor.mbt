@@ -23,7 +23,7 @@ struct RelayActor {
 }
 
 ///|
-pub fn RelayActor::new(
+pub fn RelayActor::RelayActor(
   state : @api.ApiState,
   announce~ : (String) -> Unit,
 ) -> RelayActor {

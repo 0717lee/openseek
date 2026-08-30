@@ -4,7 +4,7 @@ priv struct ComponentHoverProvider {
 }
 
 ///|
-fn ComponentHoverProvider::new() -> ComponentHoverProvider {
+fn ComponentHoverProvider::ComponentHoverProvider() -> ComponentHoverProvider {
   { hover_text: "wrapped component hover", }
 }
 
@@ -91,7 +91,7 @@ fn run_viewer_api_test() -> Unit {
       )
       languages.set_tokens_provider("moonbit", @lang_moonbit.MoonBitTokenizer())
       |> ignore
-      let provider = ComponentHoverProvider::new()
+      let provider = ComponentHoverProvider::ComponentHoverProvider()
       languages.register_hover_provider(LanguageId("moonbit"), provider)
       |> ignore
       let viewer = @viewer.Viewer::create(

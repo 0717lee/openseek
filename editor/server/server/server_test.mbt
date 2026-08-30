@@ -26,7 +26,7 @@ test "validates readonly remote workspace uris" {
 
 ///|
 async test "resolves one directory level through the host" {
-  let host = FakeServerHost::new()
+  let host = FakeServerHost::FakeServerHost()
   host.directories.set("", [
     {
       uri: expect_remote_uri("moon.mod"),
@@ -97,7 +97,7 @@ async test "resolves one directory level through the host" {
 
 ///|
 async test "maps host read errors to protocol provider errors" {
-  let host = FakeServerHost::new()
+  let host = FakeServerHost::FakeServerHost()
   host.errors.set("missing.mbt", (FileNotFound, "missing file"))
   let server = test_remote_server("/workspace", host)
   let uri = expect_remote_uri("missing.mbt")
@@ -114,7 +114,7 @@ async test "maps host read errors to protocol provider errors" {
 
 ///|
 async test "routes watch events to document changed packets" {
-  let host = FakeServerHost::new()
+  let host = FakeServerHost::FakeServerHost()
   host.files.set("main.mbt", "pub fn main {}\n")
   let server = test_remote_server("/workspace/", host)
   let uri = expect_remote_uri("main.mbt")
@@ -149,7 +149,7 @@ async test "routes watch events to document changed packets" {
 
 ///|
 async test "server sessions dispose only their own document watches" {
-  let host = FakeServerHost::new()
+  let host = FakeServerHost::FakeServerHost()
   host.files.set("main.mbt", "pub fn main {}\n")
   let template = test_remote_server("/workspace/", host)
   let first = template.new_session()
@@ -194,7 +194,7 @@ async test "server sessions dispose only their own document watches" {
 
 ///|
 async test "notifies the document sync listener on open and watch change" {
-  let host = FakeServerHost::new()
+  let host = FakeServerHost::FakeServerHost()
   host.files.set("main.mbt", "pub fn main {}\n")
   let server = test_remote_server("/workspace/", host)
   let uri = expect_remote_uri("main.mbt")
@@ -221,7 +221,7 @@ async test "notifies the document sync listener on open and watch change" {
 
 ///|
 async test "answers hover and definition from cached provider state" {
-  let host = FakeServerHost::new()
+  let host = FakeServerHost::FakeServerHost()
   host.files.set("main.mbt", "pub fn main {}\n")
   let server = test_remote_server("/workspace", host)
   let uri = expect_remote_uri("main.mbt")
@@ -266,7 +266,7 @@ async test "answers hover and definition from cached provider state" {
 
 ///|
 async test "hover rejects a same-revision cache replacement during provider await" {
-  let host = FakeServerHost::new()
+  let host = FakeServerHost::FakeServerHost()
   host.files.set("main.mbt", "pub fn old {}\n")
   host.revisions.set("main.mbt", "same-revision")
   let started = @async.Semaphore(1, initial_value=0)
@@ -311,7 +311,7 @@ async test "hover rejects a same-revision cache replacement during provider awai
 
 ///|
 async test "answers symbols from cached provider state" {
-  let host = FakeServerHost::new()
+  let host = FakeServerHost::FakeServerHost()
   host.files.set("main.mbt", "pub fn main { // TODO }\n")
   let server = test_remote_server("/workspace", host)
   let uri = expect_remote_uri("main.mbt")
@@ -328,7 +328,7 @@ async test "answers symbols from cached provider state" {
 
 ///|
 async test "dispatches language requests through configured providers" {
-  let host = FakeServerHost::new()
+  let host = FakeServerHost::FakeServerHost()
   host.files.set("configured.mbt", "pub fn configured {}\n")
   let server = test_remote_server("/workspace", host)
   let uri = expect_remote_uri("configured.mbt")
@@ -402,7 +402,7 @@ struct FakeWatchListener {
 }
 
 ///|
-fn FakeServerHost::new() -> FakeServerHost {
+fn FakeServerHost::FakeServerHost() -> FakeServerHost {
   { files: {}, revisions: {}, errors: {}, directories: {}, listeners: {}, }
 }
 
@@ -644,7 +644,7 @@ async test "workspace root switch redirects existing sessions" {
 
 ///|
 async test "policy server rejects host browse packets" {
-  let host = FakeServerHost::new()
+  let host = FakeServerHost::FakeServerHost()
   let server = test_remote_server("/workspace", host)
   let listed = server.handle_client_packet(
     ListHostDirectory({ id: "list-1", path: "/", }),

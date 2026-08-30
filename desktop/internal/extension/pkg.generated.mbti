@@ -17,12 +17,12 @@ pub fn view_event_json(Int, @proton.ViewEvent) -> Json
 
 // Types and methods
 type BrowserViews
-pub fn BrowserViews::new() -> Self
+pub fn BrowserViews::BrowserViews() -> Self
 pub fn BrowserViews::window_closed(Self) -> Unit
 pub fn BrowserViews::window_ready(Self, @proton.WindowHandle) -> Unit
 
 type DesktopBridgeActor
-pub fn DesktopBridgeActor::new(@api.ApiState) -> Self
+pub fn DesktopBridgeActor::DesktopBridgeActor(@api.ApiState) -> Self
 pub async fn DesktopBridgeActor::notify_browser_event(Self, Json) -> Unit
 pub async fn DesktopBridgeActor::run(Self) -> Unit
 pub async fn DesktopBridgeActor::window_closed(Self) -> Unit

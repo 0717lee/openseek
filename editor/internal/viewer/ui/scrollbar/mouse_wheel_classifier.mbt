@@ -11,7 +11,7 @@ priv struct MouseWheelClassifierItem {
 }
 
 ///|
-fn MouseWheelClassifierItem::new(
+fn MouseWheelClassifierItem::MouseWheelClassifierItem(
   timestamp : Double,
   delta_x : Double,
   delta_y : Double,
@@ -84,7 +84,9 @@ fn MouseWheelClassifier::accept(
   delta_x : Double,
   delta_y : Double,
 ) -> Unit {
-  let item = MouseWheelClassifierItem::new(timestamp, delta_x, delta_y)
+  let item = MouseWheelClassifierItem::MouseWheelClassifierItem(
+    timestamp, delta_x, delta_y,
+  )
   let previous_item : MouseWheelClassifierItem? = if self.front == -1 &&
     self.rear == -1 {
     self.memory.push(item)

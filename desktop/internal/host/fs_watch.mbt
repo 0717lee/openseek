@@ -176,7 +176,7 @@ async fn FsWatchRequest::keeps_active_watcher(
 }
 
 ///|
-fn FsWatchActor::new() -> FsWatchActor {
+fn FsWatchActor::FsWatchActor() -> FsWatchActor {
   { requests: Queue(kind=Blocking(64)), }
 }
 
@@ -433,8 +433,8 @@ test "recursive watch interest ignores shallow non-pruned selections" {
 
 ///|
 test "host connections keep filesystem watch request mailboxes isolated" {
-  let first = HostConnection::new()
-  let second = HostConnection::new()
+  let first = HostConnection::HostConnection()
+  let second = HostConnection::HostConnection()
   let reply : @async.Queue[String?] = Queue(kind=Blocking(1))
   assert_true(first.fs_watch.requests.try_put(Unwatch(reply~)))
   assert_true(first.fs_watch.requests.try_get() is Some(Unwatch(..)))
@@ -450,7 +450,7 @@ async test "watch activation fails through its request and can be retried" {
     })
     let file = "\{dir}/not-a-directory"
     @fs.write_file(file, "", create_mode=CreateOrTruncate)
-    let actor = FsWatchActor::new()
+    let actor = FsWatchActor::FsWatchActor()
     let changes : @async.Queue[FsChangedPayload] = Queue(kind=Blocking(2))
     let failures : @async.Queue[FsWatchFailedPayload] = Queue(kind=Blocking(2))
     group.spawn_bg(() => {
@@ -497,7 +497,7 @@ async test "only an identical generation retains its active watcher" {
     group.add_defer(() => {
       @async.protect_from_cancel(() => @fs.rmdir(dir, recursive=true))
     })
-    let actor = FsWatchActor::new()
+    let actor = FsWatchActor::FsWatchActor()
     let changes : @async.Queue[FsChangedPayload] = Queue(kind=Blocking(2))
     group.spawn_bg(() => actor.run(change => changes.put(change), _ => ()))
     let payload : WatchWorkspacePayload = {

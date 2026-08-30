@@ -261,7 +261,7 @@ test "repeated dispose is harmless and detaches the parent" {
 
 ///|
 test "compatibility token remains directly cancellable" {
-  let token = CancellationToken::new()
+  let token = CancellationToken::CancellationToken()
   let count = Ref(0)
   token.on_cancellation_requested(() => count.val += 1) |> ignore
   token.cancel()

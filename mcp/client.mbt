@@ -31,7 +31,7 @@ struct McpClient {
 ///|
 /// Wrap a connected JSON-RPC client. Its message pump must already be running
 /// (spawned by the transport/connect layer) so replies are routed.
-pub fn McpClient::new(rpc : @jsonrpc.Client) -> McpClient {
+pub fn McpClient::McpClient(rpc : @jsonrpc.Client) -> McpClient {
   { rpc, }
 }
 

@@ -142,7 +142,7 @@ pub async fn[X] connect(
     }
   }
   let transport = StdioTransport(stdout_reader, stdin_writer, teardown~)
-  let rpc = @jsonrpc.Client::new(transport)
+  let rpc = @jsonrpc.Client::Client(transport)
   rpc.set_notification_handler(notification_handler)
   rpc.set_request_handler(request_handler)
   group.spawn_bg(() => rpc.run_message_pump(), no_wait=true, allow_failure=true)

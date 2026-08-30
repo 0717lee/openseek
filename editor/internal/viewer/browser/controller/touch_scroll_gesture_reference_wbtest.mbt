@@ -13,7 +13,7 @@ priv struct TouchScrollTestHarness {
 }
 
 ///|
-fn TouchScrollTestHarness::new() -> TouchScrollTestHarness {
+fn TouchScrollTestHarness::TouchScrollTestHarness() -> TouchScrollTestHarness {
   {
     now: 0.0,
     next_handle: 1,
@@ -47,7 +47,7 @@ fn TouchScrollTestHarness::runtime(
 fn TouchScrollTestHarness::gesture(
   self : TouchScrollTestHarness,
 ) -> TouchScrollGesture {
-  TouchScrollGesture::new(self.runtime(), (x, y) => {
+  TouchScrollGesture::TouchScrollGesture(self.runtime(), (x, y) => {
     self.translations.push((x, y))
   })
 }
@@ -74,7 +74,7 @@ test "pointerHandler touch change preserves translation signs and ViewLayout eve
   layout.set_max_line_width(400.0) |> ignore
   let changes : Array[@view_layout.ScrollChange] = []
   let subscription = layout.on_did_scroll(change => changes.push(change))
-  let gesture = TouchScrollGesture::new(
+  let gesture = TouchScrollGesture::TouchScrollGesture(
     {
       now: () => 0.0,
       schedule_at_next_animation_frame: _ => {
@@ -100,7 +100,7 @@ test "pointerHandler touch change preserves translation signs and ViewLayout eve
 
 ///|
 test "touch.ts rolling window and friction retain source arithmetic" {
-  let harness = TouchScrollTestHarness::new()
+  let harness = TouchScrollTestHarness::TouchScrollTestHarness()
   let gesture = harness.gesture()
   gesture.begin_touch_event()
   gesture.start_touch(7, 100.0, 100.0, 0.0)
@@ -131,7 +131,7 @@ test "touch.ts rolling window and friction retain source arithmetic" {
 
 ///|
 test "touch inertia exclusions and cancellation close every gesture lifetime" {
-  let harness = TouchScrollTestHarness::new()
+  let harness = TouchScrollTestHarness::TouchScrollTestHarness()
   let gesture = harness.gesture()
 
   // Sub-30px movement scrolls during the gesture but does not coast.

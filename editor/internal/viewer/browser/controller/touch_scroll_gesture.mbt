@@ -53,7 +53,7 @@ priv struct TouchScrollGesture {
 }
 
 ///|
-fn TouchScrollGesture::new(
+fn TouchScrollGesture::TouchScrollGesture(
   runtime : TouchScrollRuntime,
   on_translation : (Double, Double) -> Unit,
 ) -> TouchScrollGesture {
@@ -259,10 +259,12 @@ fn MouseHandler::install_touch_scroll_gesture(self : MouseHandler) -> Unit {
   if self.disposed || !touch_input_supported() {
     return
   }
-  let gesture = TouchScrollGesture::new(browser_touch_scroll_runtime(), (
-    translation_x,
-    translation_y,
-  ) => self.apply_touch_scroll_translation(translation_x, translation_y))
+  let gesture = TouchScrollGesture::TouchScrollGesture(
+    browser_touch_scroll_runtime(),
+    (translation_x, translation_y) => {
+      self.apply_touch_scroll_translation(translation_x, translation_y)
+    },
+  )
   self.touch_scroll_gesture = Some(gesture)
   let target = self.view_helper.lines_content_dom_node
   self.add_non_passive_touch_listener(target, "touchstart", event => {

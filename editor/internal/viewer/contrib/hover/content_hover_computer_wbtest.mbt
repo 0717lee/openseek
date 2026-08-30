@@ -141,7 +141,7 @@ async test "caller cancellation token reaches the language provider unchanged" {
     initial_mouse_pos_x=None,
     initial_mouse_pos_y=None,
   )
-  let token = @language.CancellationToken::new()
+  let token = @language.CancellationToken::CancellationToken()
   assert_true(computer.compute_async(model, anchor, token~) is Some(_))
   assert_eq(calls.val, 1)
   match seen_token.val {
@@ -176,7 +176,7 @@ async test "pre-canceled async computation never launches a participant provider
     initial_mouse_pos_x=None,
     initial_mouse_pos_y=None,
   )
-  let token = @language.CancellationToken::new()
+  let token = @language.CancellationToken::CancellationToken()
   token.cancel()
   assert_true(computer.compute_async(model, anchor, token~) is None)
   assert_eq(calls.val, 0)

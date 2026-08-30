@@ -13,10 +13,10 @@ import {
 
 // Types and methods
 type CancellationToken
+pub fn CancellationToken::CancellationToken() -> Self
 pub fn CancellationToken::cancel(Self) -> Unit
 pub fn CancellationToken::cancelled() -> Self
 pub fn CancellationToken::is_cancellation_requested(Self) -> Bool
-pub fn CancellationToken::new() -> Self
 pub fn CancellationToken::none() -> Self
 pub fn CancellationToken::on_cancellation_requested(Self, () -> Unit, disposables? : Array[@common.Disposable]) -> @common.Disposable
 

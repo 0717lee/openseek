@@ -54,7 +54,7 @@ pub struct ShellOutputSink {
 ///|
 /// Create an empty sink. Non-positive caps are clamped to 1. With `spill_path`
 /// set, output past `inline_cap` spills there; without it the sink is memory-only.
-fn ShellOutputSink::new(
+fn ShellOutputSink::ShellOutputSink(
   inline_cap~ : Int,
   hard_cap? : Int = default_hard_cap,
   spill_path? : String,
@@ -399,7 +399,7 @@ fn continuation_range(lead : Int, j : Int) -> (Int, Int) {
 
 ///|
 async test "small output stays in memory, no file" {
-  let sink = ShellOutputSink::new(inline_cap=100)
+  let sink = ShellOutputSink::ShellOutputSink(inline_cap=100)
   sink.append_text("hello")
   assert_eq(sink.head(), "hello")
   assert_eq(sink.read_all(), "hello")
@@ -412,7 +412,11 @@ async test "small output stays in memory, no file" {
 ///|
 async test "output over the inline cap spills; read_all returns everything, head previews" {
   let path = "/tmp/openseek-sink-spill-1.out"
-  let sink = ShellOutputSink::new(inline_cap=4, hard_cap=1000, spill_path=path)
+  let sink = ShellOutputSink::ShellOutputSink(
+    inline_cap=4,
+    hard_cap=1000,
+    spill_path=path,
+  )
   sink.append_text("abcdefghij")
   assert_true(sink.over_inline_cap())
   assert_true(sink.spill_path() is Some(_))
@@ -426,7 +430,11 @@ async test "output over the inline cap spills; read_all returns everything, head
 ///|
 async test "the spill file is seeded with output buffered before the spill" {
   let path = "/tmp/openseek-sink-spill-2.out"
-  let sink = ShellOutputSink::new(inline_cap=4, hard_cap=1000, spill_path=path)
+  let sink = ShellOutputSink::ShellOutputSink(
+    inline_cap=4,
+    hard_cap=1000,
+    spill_path=path,
+  )
   sink.append_text("ab") // total 2, under inline cap: memory only, no file yet
   assert_false(sink.over_inline_cap())
   sink.append_text("cdef") // total 6 > 4: spill, seeding the file with "ab"
@@ -437,7 +445,7 @@ async test "the spill file is seeded with output buffered before the spill" {
 
 ///|
 async test "memory-only (no spill path) keeps the head and drops the rest" {
-  let sink = ShellOutputSink::new(inline_cap=4, hard_cap=1000)
+  let sink = ShellOutputSink::ShellOutputSink(inline_cap=4, hard_cap=1000)
   sink.append_text("abcdefghij")
   assert_true(sink.over_inline_cap())
   assert_true(sink.spill_path() is None)
@@ -448,7 +456,7 @@ async test "memory-only (no spill path) keeps the head and drops the rest" {
 
 ///|
 async test "output over the hard cap truncates" {
-  let sink = ShellOutputSink::new(inline_cap=2, hard_cap=5)
+  let sink = ShellOutputSink::ShellOutputSink(inline_cap=2, hard_cap=5)
   sink.append_text("abc")
   sink.append_text("defgh") // total 8 > 5
   assert_true(sink.truncated())
@@ -460,7 +468,7 @@ async test "output over the hard cap truncates" {
 
 ///|
 async test "append_chunk decodes utf-8 across a chunk boundary" {
-  let sink = ShellOutputSink::new(inline_cap=100)
+  let sink = ShellOutputSink::ShellOutputSink(inline_cap=100)
   // "café" = 63 61 66 C3 A9, split between é's lead and continuation byte.
   sink.append_chunk(([0x63, 0x61, 0x66, 0xC3] : Bytes))
   sink.append_chunk(([0xA9] : Bytes))
@@ -469,7 +477,7 @@ async test "append_chunk decodes utf-8 across a chunk boundary" {
 
 ///|
 async test "finish flushes an incomplete trailing sequence lossily" {
-  let sink = ShellOutputSink::new(inline_cap=100)
+  let sink = ShellOutputSink::ShellOutputSink(inline_cap=100)
   sink.append_chunk(([0x68, 0x69, 0xC3] : Bytes))
   assert_eq(sink.head(), "hi")
   sink.finish()

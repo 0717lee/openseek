@@ -65,7 +65,7 @@ priv struct TextSearchCancellationFrontiers {
 }
 
 ///|
-fn TextSearchCancellationFrontiers::new() -> TextSearchCancellationFrontiers {
+fn TextSearchCancellationFrontiers::TextSearchCancellationFrontiers() -> TextSearchCancellationFrontiers {
   { values: Map([]), order: [], }
 }
 
@@ -114,7 +114,7 @@ priv struct TextSearchService {
 }
 
 ///|
-fn TextSearchService::new() -> TextSearchService {
+fn TextSearchService::TextSearchService() -> TextSearchService {
   { requests: Queue(kind=Blocking(64)), }
 }
 
@@ -177,7 +177,7 @@ async fn cancel_running_text_search(
 async fn TextSearchService::run(self : TextSearchService) -> Unit {
   @async.with_task_group(group => {
     let running : Map[String, RunningTextSearch] = Map([])
-    let cancelled_through = TextSearchCancellationFrontiers::new()
+    let cancelled_through = TextSearchCancellationFrontiers::TextSearchCancellationFrontiers()
     for ;; {
       match self.requests.get() {
         Search(command~, root~, payload~, reply~) => {
@@ -1505,7 +1505,7 @@ async test "text search replies echo resource-form workspace roots" {
 
 ///|
 async test "cancel-before-search frontier rejects the stale generation" {
-  let service = TextSearchService::new()
+  let service = TextSearchService::TextSearchService()
   @async.with_task_group(group => {
     group.spawn_bg(() => service.run())
     service.cancel("search:stale", 7)
@@ -1533,7 +1533,7 @@ async test "cancel-before-search frontier rejects the stale generation" {
 
 ///|
 test "cancellation frontiers stay bounded across long-lived connections" {
-  let frontiers = TextSearchCancellationFrontiers::new()
+  let frontiers = TextSearchCancellationFrontiers::TextSearchCancellationFrontiers()
   for index in 0..<(MaxTextSearchCancellationFrontiers + 5) {
     frontiers.record("session:\{index}", index)
   }

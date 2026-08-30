@@ -40,11 +40,15 @@ async test "the MCP stack runs a handshake, list, and call over an ndjson pipe" 
     // client -> server and server -> client byte pipes.
     let (server_reads, client_writes) = @io.pipe()
     let (client_reads, server_writes) = @io.pipe()
-    let client_transport = NdjsonTransport::new(client_reads, client_writes, on_close=() => {
-      client_reads.close()
-      client_writes.close()
-    })
-    let server_transport : &@jsonrpc.Transport = NdjsonTransport::new(
+    let client_transport = NdjsonTransport::NdjsonTransport(
+      client_reads,
+      client_writes,
+      on_close=() => {
+        client_reads.close()
+        client_writes.close()
+      },
+    )
+    let server_transport : &@jsonrpc.Transport = NdjsonTransport::NdjsonTransport(
       server_reads,
       server_writes,
       on_close=() => {
@@ -55,12 +59,12 @@ async test "the MCP stack runs a handshake, list, and call over an ndjson pipe" 
     group.spawn_bg(no_wait=true, allow_failure=true, () => {
       pipe_mcp_server(server_transport)
     })
-    let rpc = @jsonrpc.Client::new(client_transport)
+    let rpc = @jsonrpc.Client::Client(client_transport)
     group.spawn_bg(no_wait=true, allow_failure=true, () => {
       rpc.run_message_pump()
     })
     group.spawn_bg(no_wait=true, allow_failure=true, () => rpc.run_writer())
-    let client = @mcp.McpClient::new(rpc)
+    let client = @mcp.McpClient::McpClient(rpc)
     let init = client.initialize(client_name="openseek", client_version="0.1")
     assert_eq(init.server_name, "pipe")
     assert_eq(init.protocol_version, "2025-11-25")
@@ -95,7 +99,7 @@ async test "recv reads a JSON-RPC line from a real subprocess" {
         return
       }
     }
-    let transport : &@jsonrpc.Transport = NdjsonTransport::new(
+    let transport : &@jsonrpc.Transport = NdjsonTransport::NdjsonTransport(
       stdout_reader,
       stdin_writer,
       on_close=() => {

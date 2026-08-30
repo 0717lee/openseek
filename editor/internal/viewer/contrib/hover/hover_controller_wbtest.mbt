@@ -296,8 +296,8 @@ fn request_test_model(path : String, text : String) -> @model.TextModel {
 test "request stamp requires stable model identity, internal version, generation, and live token" {
   let current = request_test_model("/stamp.mbt", "one")
   let same_uri_version = request_test_model("/stamp.mbt", "one")
-  let token = @language.CancellationToken::new()
-  let stamp = HoverRequestStamp::new(current, 11, token)
+  let token = @language.CancellationToken::CancellationToken()
+  let stamp = HoverRequestStamp::HoverRequestStamp(current, 11, token)
   assert_true(stamp.is_current(Some(current), 11))
   assert_false(stamp.is_current(Some(same_uri_version), 11))
   assert_false(stamp.is_current(Some(current), 10))
@@ -308,18 +308,22 @@ test "request stamp requires stable model identity, internal version, generation
   assert_false(stamp.is_current(Some(current), 11))
 
   let equal_content = request_test_model("/equal.mbt", "same")
-  let equal_stamp = HoverRequestStamp::new(equal_content, 12, token)
+  let equal_stamp = HoverRequestStamp::HoverRequestStamp(
+    equal_content, 12, token,
+  )
   equal_content.set_value("same")
   assert_false(equal_stamp.is_current(Some(equal_content), 12))
 
   let disposed_model = request_test_model("/disposed.mbt", "live")
-  let disposed_stamp = HoverRequestStamp::new(disposed_model, 13, token)
+  let disposed_stamp = HoverRequestStamp::HoverRequestStamp(
+    disposed_model, 13, token,
+  )
   disposed_model.dispose()
   assert_false(disposed_stamp.is_current(Some(disposed_model), 13))
 
   let live = request_test_model("/cancel.mbt", "one")
-  let canceled_token = @language.CancellationToken::new()
-  let canceled = HoverRequestStamp::new(live, 12, canceled_token)
+  let canceled_token = @language.CancellationToken::CancellationToken()
+  let canceled = HoverRequestStamp::HoverRequestStamp(live, 12, canceled_token)
   canceled_token.cancel()
   assert_false(canceled.is_current(Some(live), 12))
 }
@@ -328,7 +332,7 @@ test "request stamp requires stable model identity, internal version, generation
 test "request-aware transitions reject cancellation and stale generations" {
   let model = request_test_model("/transition.mbt", "one")
   let (_, armed) = HoverController::empty().start_delayed(3, 7)
-  let token = @language.CancellationToken::new()
+  let token = @language.CancellationToken::CancellationToken()
   let request = armed.request_stamp(model, token)
   let (proceed, second_wait) = armed.op_trigger_async_request(
     request,

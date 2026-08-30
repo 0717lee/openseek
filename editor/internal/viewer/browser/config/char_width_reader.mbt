@@ -20,7 +20,7 @@ priv struct CharWidthRequest {
 }
 
 ///|
-fn CharWidthRequest::new(
+fn CharWidthRequest::CharWidthRequest(
   chr : String,
   request_type : CharWidthRequestType,
 ) -> CharWidthRequest {

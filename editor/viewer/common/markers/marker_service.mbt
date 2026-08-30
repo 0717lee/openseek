@@ -11,7 +11,7 @@ priv struct DoubleResourceMap {
 }
 
 ///|
-fn DoubleResourceMap::new() -> DoubleResourceMap {
+fn DoubleResourceMap::DoubleResourceMap() -> DoubleResourceMap {
   { by_resource: Map([]), by_owner: Map([]), }
 }
 
@@ -178,7 +178,7 @@ pub fn MarkerService::MarkerService(
   }
   let service : MarkerService = {
     did_change_markers,
-    data: DoubleResourceMap::new(),
+    data: DoubleResourceMap::DoubleResourceMap(),
     filtered_resources: Map([]),
   }
   service

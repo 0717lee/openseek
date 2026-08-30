@@ -13,7 +13,7 @@ struct BrowserViews {
 }
 
 ///|
-pub fn BrowserViews::new() -> BrowserViews {
+pub fn BrowserViews::BrowserViews() -> BrowserViews {
   { window: None, }
 }
 
@@ -372,10 +372,10 @@ fn window_endpoints(views : BrowserViews) -> Array[@endpoint.Endpoint] {
 
 ///|
 test "native window ops are absent from the relay method catalog" {
-  let state = @api.ApiState::new(engine="unused")
-  let connection = @host.HostConnection::new()
+  let state = @api.ApiState::ApiState(engine="unused")
+  let connection = @host.HostConnection::HostConnection()
   let catalog = @api.endpoints(state, connection)
-  let window_only = window_endpoints(BrowserViews::new())
+  let window_only = window_endpoints(BrowserViews())
   assert_true(
     window_only
     .iter()
@@ -396,7 +396,7 @@ test "browser ops refuse to run without a window; close tolerates it" {
     false
   }
 
-  let views = BrowserViews::new()
+  let views = BrowserViews::BrowserViews()
   assert_true(
     raises(() => views.open({ id: 1, url: "http://x/", dark: true, })),
   )

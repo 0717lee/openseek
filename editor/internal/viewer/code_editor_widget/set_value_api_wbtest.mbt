@@ -126,7 +126,7 @@ test "set_value resets the cursor to the origin" {
 
 ///|
 test "quick diff re-renders its gutter decorations after a flush (Track E)" {
-  let backings = RootTestServiceBackings::new()
+  let backings = RootTestServiceBackings::RootTestServiceBackings()
   let viewer = CodeEditorWidget::CodeEditorWidget(services=backings.services)
   let model = test_model("alpha\nbravo")
   backings.quick_diff.set_original_content(model.uri, Some("alpha\nbravo"))
@@ -143,7 +143,7 @@ test "quick diff re-renders its gutter decorations after a flush (Track E)" {
 
 ///|
 test "marker decorations re-seed after a flush (Track E)" {
-  let backings = RootTestServiceBackings::new()
+  let backings = RootTestServiceBackings::RootTestServiceBackings()
   let viewer = CodeEditorWidget::CodeEditorWidget(services=backings.services)
   let model = test_model("alpha\nbravo")
   // Host diagnostics may predate attachment. Acquiring the model seeds them;

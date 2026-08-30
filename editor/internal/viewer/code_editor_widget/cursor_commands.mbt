@@ -18,7 +18,7 @@ priv struct CursorMoveCommandArgs {
 }
 
 ///|
-fn CursorMoveCommandArgs::new(
+fn CursorMoveCommandArgs::CursorMoveCommandArgs(
   source? : String = "",
   position? : @base_common.Position,
   view_position? : @base_common.Position,
@@ -29,7 +29,7 @@ fn CursorMoveCommandArgs::new(
 
 ///|
 fn CursorMoveCommandArgs::empty() -> CursorMoveCommandArgs {
-  CursorMoveCommandArgs::new()
+  CursorMoveCommandArgs::CursorMoveCommandArgs()
 }
 
 ///|
@@ -39,7 +39,7 @@ priv struct CursorBaseCommandOptions {
 }
 
 ///|
-fn CursorBaseCommandOptions::new(
+fn CursorBaseCommandOptions::CursorBaseCommandOptions(
   source? : String = "keyboard",
 ) -> CursorBaseCommandOptions {
   { source, }
@@ -54,7 +54,7 @@ priv struct CursorMoveCommandOptions {
 }
 
 ///|
-fn CursorMoveCommandOptions::new(
+fn CursorMoveCommandOptions::CursorMoveCommandOptions(
   source? : String = "keyboard",
   page_size? : Int,
 ) -> CursorMoveCommandOptions {
@@ -69,7 +69,7 @@ priv struct EndCommandOptions {
 }
 
 ///|
-fn EndCommandOptions::new(
+fn EndCommandOptions::EndCommandOptions(
   source? : String = "keyboard",
   sticky? : Bool,
 ) -> EndCommandOptions {
@@ -86,7 +86,7 @@ priv struct SetSelectionCommandOptions {
 }
 
 ///|
-fn SetSelectionCommandOptions::new(
+fn SetSelectionCommandOptions::SetSelectionCommandOptions(
   selection : @core.Selection,
   source? : String = "",
 ) -> SetSelectionCommandOptions {
@@ -101,7 +101,7 @@ priv struct CursorSetSelectionCommandArgs {
 }
 
 ///|
-fn CursorSetSelectionCommandArgs::new(
+fn CursorSetSelectionCommandArgs::CursorSetSelectionCommandArgs(
   source? : String = "",
   selection? : @core.Selection,
 ) -> CursorSetSelectionCommandArgs {
@@ -136,7 +136,7 @@ priv struct BaseMoveToCommand {
 }
 
 ///|
-fn BaseMoveToCommand::new(
+fn BaseMoveToCommand::BaseMoveToCommand(
   id : String,
   in_selection_mode~ : Bool,
 ) -> BaseMoveToCommand {
@@ -197,7 +197,7 @@ priv struct CursorMoveBasedCommand {
 }
 
 ///|
-fn CursorMoveBasedCommand::new(
+fn CursorMoveBasedCommand::CursorMoveBasedCommand(
   id : String,
   args : @view_model.SimpleMoveArguments,
 ) -> CursorMoveBasedCommand {
@@ -211,7 +211,9 @@ fn CursorMoveBasedCommand::as_core_editor_command(
   {
     id: self.id,
     precondition: None,
-    default_args: SimpleMoveCommandArguments(CursorMoveCommandOptions::new()),
+    default_args: SimpleMoveCommandArguments(
+      CursorMoveCommandOptions::CursorMoveCommandOptions(),
+    ),
     run_core_editor_command: (viewer, view_model, args) => {
       self.run(viewer, view_model, args)
     },
@@ -227,7 +229,7 @@ fn CursorMoveBasedCommand::run(
 ) -> Bool {
   let dynamic_args = match core_args {
     SimpleMoveCommandArguments(args) => args
-    _ => CursorMoveCommandOptions::new()
+    _ => CursorMoveCommandOptions::CursorMoveCommandOptions()
   }
   if self.static_args.value == -1 {
     let page_size = dynamic_args.page_size.unwrap_or(-1)
@@ -255,7 +257,10 @@ priv struct HomeCommand {
 }
 
 ///|
-fn HomeCommand::new(id : String, in_selection_mode~ : Bool) -> HomeCommand {
+fn HomeCommand::HomeCommand(
+  id : String,
+  in_selection_mode~ : Bool,
+) -> HomeCommand {
   { id, in_selection_mode, }
 }
 
@@ -264,11 +269,13 @@ fn HomeCommand::as_core_editor_command(self : HomeCommand) -> CoreEditorCommand 
   {
     id: self.id,
     precondition: None,
-    default_args: BaseCommandArguments(CursorBaseCommandOptions::new()),
+    default_args: BaseCommandArguments(
+      CursorBaseCommandOptions::CursorBaseCommandOptions(),
+    ),
     run_core_editor_command: (viewer, view_model, args) => {
       let options = match args {
         BaseCommandArguments(options) => options
-        _ => CursorBaseCommandOptions::new()
+        _ => CursorBaseCommandOptions::CursorBaseCommandOptions()
       }
       ignore(view_model)
       viewer.run_cursor_home(self.in_selection_mode, source=options.source)
@@ -286,7 +293,7 @@ priv struct LineStartCommand {
 }
 
 ///|
-fn LineStartCommand::new(
+fn LineStartCommand::LineStartCommand(
   id : String,
   in_selection_mode~ : Bool,
 ) -> LineStartCommand {
@@ -312,11 +319,13 @@ fn LineStartCommand::as_core_editor_command(
   {
     id: self.id,
     precondition: None,
-    default_args: BaseCommandArguments(CursorBaseCommandOptions::new()),
+    default_args: BaseCommandArguments(
+      CursorBaseCommandOptions::CursorBaseCommandOptions(),
+    ),
     run_core_editor_command: (viewer, view_model, args) => {
       let options = match args {
         BaseCommandArguments(options) => options
-        _ => CursorBaseCommandOptions::new()
+        _ => CursorBaseCommandOptions::CursorBaseCommandOptions()
       }
       let changed = view_model.set_cursor_state(
         Some(
@@ -340,7 +349,7 @@ priv struct EndCommand {
 }
 
 ///|
-fn EndCommand::new(id : String, in_selection_mode~ : Bool) -> EndCommand {
+fn EndCommand::EndCommand(id : String, in_selection_mode~ : Bool) -> EndCommand {
   { id, in_selection_mode, }
 }
 
@@ -349,11 +358,13 @@ fn EndCommand::as_core_editor_command(self : EndCommand) -> CoreEditorCommand {
   {
     id: self.id,
     precondition: None,
-    default_args: EndCommandArguments(EndCommandOptions::new(sticky=false)),
+    default_args: EndCommandArguments(
+      EndCommandOptions::EndCommandOptions(sticky=false),
+    ),
     run_core_editor_command: (viewer, view_model, args) => {
       let options = match args {
         EndCommandArguments(options) => options
-        _ => EndCommandOptions::new()
+        _ => EndCommandOptions::EndCommandOptions()
       }
       let sticky = options.sticky.unwrap_or(false)
       ignore(view_model)
@@ -374,7 +385,7 @@ priv struct LineEndCommand {
 }
 
 ///|
-fn LineEndCommand::new(
+fn LineEndCommand::LineEndCommand(
   id : String,
   in_selection_mode~ : Bool,
 ) -> LineEndCommand {
@@ -402,11 +413,13 @@ fn LineEndCommand::as_core_editor_command(
   {
     id: self.id,
     precondition: None,
-    default_args: BaseCommandArguments(CursorBaseCommandOptions::new()),
+    default_args: BaseCommandArguments(
+      CursorBaseCommandOptions::CursorBaseCommandOptions(),
+    ),
     run_core_editor_command: (viewer, view_model, args) => {
       let options = match args {
         BaseCommandArguments(options) => options
-        _ => CursorBaseCommandOptions::new()
+        _ => CursorBaseCommandOptions::CursorBaseCommandOptions()
       }
       let changed = view_model.set_cursor_state(
         Some(
@@ -430,7 +443,10 @@ priv struct WordCommand {
 }
 
 ///|
-fn WordCommand::new(id : String, in_selection_mode~ : Bool) -> WordCommand {
+fn WordCommand::WordCommand(
+  id : String,
+  in_selection_mode~ : Bool,
+) -> WordCommand {
   { id, in_selection_mode, }
 }
 
@@ -471,7 +487,10 @@ priv struct LineCommand {
 }
 
 ///|
-fn LineCommand::new(id : String, in_selection_mode~ : Bool) -> LineCommand {
+fn LineCommand::LineCommand(
+  id : String,
+  in_selection_mode~ : Bool,
+) -> LineCommand {
   { id, in_selection_mode, }
 }
 
@@ -513,7 +532,7 @@ priv struct SelectAllCommand {
 }
 
 ///|
-fn SelectAllCommand::new() -> SelectAllCommand {
+fn SelectAllCommand::SelectAllCommand() -> SelectAllCommand {
   { id: "editor.action.selectAll", }
 }
 
@@ -554,7 +573,7 @@ priv struct SetSelectionCommand {
 }
 
 ///|
-fn SetSelectionCommand::new() -> SetSelectionCommand {
+fn SetSelectionCommand::SetSelectionCommand() -> SetSelectionCommand {
   { id: "setSelection", }
 }
 
@@ -566,12 +585,12 @@ fn SetSelectionCommand::as_core_editor_command(
     id: self.id,
     precondition: None,
     default_args: SetSelectionCommandArguments(
-      CursorSetSelectionCommandArgs::new(),
+      CursorSetSelectionCommandArgs::CursorSetSelectionCommandArgs(),
     ),
     run_core_editor_command: (_, view_model, core_args) => {
       let args = match core_args {
         SetSelectionCommandArguments(args) => args
-        _ => CursorSetSelectionCommandArgs::new()
+        _ => CursorSetSelectionCommandArgs::CursorSetSelectionCommandArgs()
       }
       guard args.selection is Some(selection) else { return false }
       view_model.set_cursor_state(
@@ -668,7 +687,10 @@ fn CodeEditorWidget::set_selection_from_view_controller(
   self : CodeEditorWidget,
   selection : @core.Selection,
 ) -> Bool {
-  let options = SetSelectionCommandOptions::new(selection, source="keyboard")
+  let options = SetSelectionCommandOptions::SetSelectionCommandOptions(
+    selection,
+    source="keyboard",
+  )
   self.run_set_selection_core_command(
     Some(CursorSetSelectionCommandArgs::from_options(options)),
   )
@@ -681,7 +703,10 @@ fn CodeEditorWidget::select_from_view_controller(
   self : CodeEditorWidget,
   selection : @core.Selection,
 ) -> Bool {
-  let options = SetSelectionCommandOptions::new(selection, source="mouse")
+  let options = SetSelectionCommandOptions::SetSelectionCommandOptions(
+    selection,
+    source="mouse",
+  )
   self.run_set_selection_core_command(
     Some(CursorSetSelectionCommandArgs::from_options(options)),
   )
@@ -706,55 +731,67 @@ fn register_cursor_navigation_commands(
 ) -> Unit {
   register_unbound_cursor_core_command(
     registry,
-    BaseMoveToCommand::new("_moveTo", in_selection_mode=false).as_core_editor_command(),
+    BaseMoveToCommand::BaseMoveToCommand("_moveTo", in_selection_mode=false).as_core_editor_command(),
   )
   register_unbound_cursor_core_command(
     registry,
-    BaseMoveToCommand::new("_moveToSelect", in_selection_mode=true).as_core_editor_command(),
+    BaseMoveToCommand::BaseMoveToCommand(
+      "_moveToSelect",
+      in_selection_mode=true,
+    ).as_core_editor_command(),
   )
   register_unbound_cursor_core_command(
     registry,
-    WordCommand::new("_wordSelect", in_selection_mode=false).as_core_editor_command(),
+    WordCommand::WordCommand("_wordSelect", in_selection_mode=false).as_core_editor_command(),
   )
   register_unbound_cursor_core_command(
     registry,
-    WordCommand::new("_wordSelectDrag", in_selection_mode=true).as_core_editor_command(),
+    WordCommand::WordCommand("_wordSelectDrag", in_selection_mode=true).as_core_editor_command(),
   )
   register_unbound_cursor_core_command(
     registry,
-    LineCommand::new("_lineSelect", in_selection_mode=false).as_core_editor_command(),
+    LineCommand::LineCommand("_lineSelect", in_selection_mode=false).as_core_editor_command(),
   )
   register_unbound_cursor_core_command(
     registry,
-    LineCommand::new("_lineSelectDrag", in_selection_mode=true).as_core_editor_command(),
+    LineCommand::LineCommand("_lineSelectDrag", in_selection_mode=true).as_core_editor_command(),
   )
   register_unbound_cursor_core_command(
     registry,
-    SelectAllCommand::new().as_core_editor_command(),
+    SelectAllCommand::SelectAllCommand().as_core_editor_command(),
   )
   register_unbound_cursor_core_command(
     registry,
-    SetSelectionCommand::new().as_core_editor_command(),
+    SetSelectionCommand::SetSelectionCommand().as_core_editor_command(),
   )
   register_unbound_cursor_core_command(
     registry,
-    LineStartCommand::new("cursorLineStart", in_selection_mode=false).as_core_editor_command(),
+    LineStartCommand::LineStartCommand(
+      "cursorLineStart",
+      in_selection_mode=false,
+    ).as_core_editor_command(),
   )
   register_unbound_cursor_core_command(
     registry,
-    LineStartCommand::new("cursorLineStartSelect", in_selection_mode=true).as_core_editor_command(),
+    LineStartCommand::LineStartCommand(
+      "cursorLineStartSelect",
+      in_selection_mode=true,
+    ).as_core_editor_command(),
   )
   register_unbound_cursor_core_command(
     registry,
-    LineEndCommand::new("cursorLineEnd", in_selection_mode=false).as_core_editor_command(),
+    LineEndCommand::LineEndCommand("cursorLineEnd", in_selection_mode=false).as_core_editor_command(),
   )
   register_unbound_cursor_core_command(
     registry,
-    LineEndCommand::new("cursorLineEndSelect", in_selection_mode=true).as_core_editor_command(),
+    LineEndCommand::LineEndCommand(
+      "cursorLineEndSelect",
+      in_selection_mode=true,
+    ).as_core_editor_command(),
   )
   register_cursor_key_command(
     registry,
-    CursorMoveBasedCommand::new(
+    CursorMoveBasedCommand::CursorMoveBasedCommand(
       "cursorLeft",
       SimpleMoveArguments(Left, None, false, 1),
     ).as_core_editor_command(),
@@ -763,7 +800,7 @@ fn register_cursor_navigation_commands(
   )
   register_cursor_key_command(
     registry,
-    CursorMoveBasedCommand::new(
+    CursorMoveBasedCommand::CursorMoveBasedCommand(
       "cursorLeftSelect",
       SimpleMoveArguments(Left, None, true, 1),
     ).as_core_editor_command(),
@@ -772,7 +809,7 @@ fn register_cursor_navigation_commands(
   )
   register_cursor_key_command(
     registry,
-    CursorMoveBasedCommand::new(
+    CursorMoveBasedCommand::CursorMoveBasedCommand(
       "cursorRight",
       SimpleMoveArguments(Right, None, false, 1),
     ).as_core_editor_command(),
@@ -781,7 +818,7 @@ fn register_cursor_navigation_commands(
   )
   register_cursor_key_command(
     registry,
-    CursorMoveBasedCommand::new(
+    CursorMoveBasedCommand::CursorMoveBasedCommand(
       "cursorRightSelect",
       SimpleMoveArguments(Right, None, true, 1),
     ).as_core_editor_command(),
@@ -790,7 +827,7 @@ fn register_cursor_navigation_commands(
   )
   register_cursor_key_command(
     registry,
-    CursorMoveBasedCommand::new(
+    CursorMoveBasedCommand::CursorMoveBasedCommand(
       "cursorUp",
       SimpleMoveArguments(Up, WrappedLine, false, 1),
     ).as_core_editor_command(),
@@ -799,7 +836,7 @@ fn register_cursor_navigation_commands(
   )
   register_cursor_key_command(
     registry,
-    CursorMoveBasedCommand::new(
+    CursorMoveBasedCommand::CursorMoveBasedCommand(
       "cursorUpSelect",
       SimpleMoveArguments(Up, WrappedLine, true, 1),
     ).as_core_editor_command(),
@@ -808,7 +845,7 @@ fn register_cursor_navigation_commands(
   )
   register_cursor_key_command(
     registry,
-    CursorMoveBasedCommand::new(
+    CursorMoveBasedCommand::CursorMoveBasedCommand(
       "cursorPageUp",
       SimpleMoveArguments(Up, WrappedLine, false, -1),
     ).as_core_editor_command(),
@@ -817,7 +854,7 @@ fn register_cursor_navigation_commands(
   )
   register_cursor_key_command(
     registry,
-    CursorMoveBasedCommand::new(
+    CursorMoveBasedCommand::CursorMoveBasedCommand(
       "cursorPageUpSelect",
       SimpleMoveArguments(Up, WrappedLine, true, -1),
     ).as_core_editor_command(),
@@ -826,7 +863,7 @@ fn register_cursor_navigation_commands(
   )
   register_cursor_key_command(
     registry,
-    CursorMoveBasedCommand::new(
+    CursorMoveBasedCommand::CursorMoveBasedCommand(
       "cursorDown",
       SimpleMoveArguments(Down, WrappedLine, false, 1),
     ).as_core_editor_command(),
@@ -835,7 +872,7 @@ fn register_cursor_navigation_commands(
   )
   register_cursor_key_command(
     registry,
-    CursorMoveBasedCommand::new(
+    CursorMoveBasedCommand::CursorMoveBasedCommand(
       "cursorDownSelect",
       SimpleMoveArguments(Down, WrappedLine, true, 1),
     ).as_core_editor_command(),
@@ -844,7 +881,7 @@ fn register_cursor_navigation_commands(
   )
   register_cursor_key_command(
     registry,
-    CursorMoveBasedCommand::new(
+    CursorMoveBasedCommand::CursorMoveBasedCommand(
       "cursorPageDown",
       SimpleMoveArguments(Down, WrappedLine, false, -1),
     ).as_core_editor_command(),
@@ -853,7 +890,7 @@ fn register_cursor_navigation_commands(
   )
   register_cursor_key_command(
     registry,
-    CursorMoveBasedCommand::new(
+    CursorMoveBasedCommand::CursorMoveBasedCommand(
       "cursorPageDownSelect",
       SimpleMoveArguments(Down, WrappedLine, true, -1),
     ).as_core_editor_command(),
@@ -862,25 +899,25 @@ fn register_cursor_navigation_commands(
   )
   register_cursor_key_command(
     registry,
-    HomeCommand::new("cursorHome", in_selection_mode=false).as_core_editor_command(),
+    HomeCommand::HomeCommand("cursorHome", in_selection_mode=false).as_core_editor_command(),
     "Home",
     shift=false,
   )
   register_cursor_key_command(
     registry,
-    HomeCommand::new("cursorHomeSelect", in_selection_mode=true).as_core_editor_command(),
+    HomeCommand::HomeCommand("cursorHomeSelect", in_selection_mode=true).as_core_editor_command(),
     "Home",
     shift=true,
   )
   register_cursor_key_command(
     registry,
-    EndCommand::new("cursorEnd", in_selection_mode=false).as_core_editor_command(),
+    EndCommand::EndCommand("cursorEnd", in_selection_mode=false).as_core_editor_command(),
     "End",
     shift=false,
   )
   register_cursor_key_command(
     registry,
-    EndCommand::new("cursorEndSelect", in_selection_mode=true).as_core_editor_command(),
+    EndCommand::EndCommand("cursorEndSelect", in_selection_mode=true).as_core_editor_command(),
     "End",
     shift=true,
   )

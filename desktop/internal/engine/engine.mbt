@@ -430,7 +430,7 @@ priv struct SteerRunTracker {
 }
 
 ///|
-fn SteerRunTracker::new() -> SteerRunTracker {
+fn SteerRunTracker::SteerRunTracker() -> SteerRunTracker {
   { settling_run: None, open_steers: [], settling_steers: [], }
 }
 
@@ -1585,7 +1585,7 @@ async fn[G] start_serve_engine(
     phase: Idle(last_run=None),
     pending_failure: None,
     condemned: false,
-    steer_runs: SteerRunTracker::new(),
+    steer_runs: SteerRunTracker(),
   }
   startup_engine = Some(engine)
   // Spawned before the handle is reachable from any request, so stdin has an
@@ -2093,7 +2093,7 @@ fn test_serve_engine(
     phase,
     pending_failure: None,
     condemned,
-    steer_runs: SteerRunTracker::new(),
+    steer_runs: SteerRunTracker(),
   }
 }
 
@@ -2527,7 +2527,7 @@ test "terminal closure preserves a queued compaction" {
 
 ///|
 test "trailing steer settle events keep the terminal run id" {
-  let tracker = SteerRunTracker::new()
+  let tracker = SteerRunTracker::SteerRunTracker()
   tracker.begin_run()
   ignore(tracker.record_sent("old steer", Some("submission-old")))
   tracker.record_terminal("r41")
@@ -2547,7 +2547,7 @@ test "trailing steer settle events keep the terminal run id" {
 
 ///|
 test "equal steer text receipts retain writer-order submission ids" {
-  let tracker = SteerRunTracker::new()
+  let tracker = SteerRunTracker::SteerRunTracker()
   tracker.begin_run()
   ignore(tracker.record_sent("same", Some("submission-a")))
   ignore(tracker.record_sent("same", Some("submission-b")))
@@ -2586,7 +2586,7 @@ test "equal steer text receipts retain writer-order submission ids" {
 
 ///|
 test "legacy steer receipt does not gain a submission field" {
-  let tracker = SteerRunTracker::new()
+  let tracker = SteerRunTracker::SteerRunTracker()
   tracker.begin_run()
   ignore(tracker.record_sent("legacy", None))
   let decoded : @event.AgentEvent? = Some(SteerApplied("legacy"))
@@ -2639,7 +2639,7 @@ test "started payload omits a missing submission id" {
 
 ///|
 test "new turn events clear stale settling state" {
-  let tracker = SteerRunTracker::new()
+  let tracker = SteerRunTracker::SteerRunTracker()
   tracker.begin_run()
   ignore(tracker.record_sent("old steer", Some("submission-old")))
   tracker.record_terminal("r7")
@@ -2656,7 +2656,7 @@ test "new turn events clear stale settling state" {
 
 ///|
 test "background events do not clear trailing steer receipts" {
-  let tracker = SteerRunTracker::new()
+  let tracker = SteerRunTracker::SteerRunTracker()
   tracker.begin_run()
   ignore(tracker.record_sent("first", Some("submission-first")))
   ignore(tracker.record_sent("second", Some("submission-second")))
@@ -2678,7 +2678,7 @@ test "background events do not clear trailing steer receipts" {
 
 ///|
 test "only prompt steer_applied consumes a desktop steer" {
-  let tracker = SteerRunTracker::new()
+  let tracker = SteerRunTracker::SteerRunTracker()
   tracker.begin_run()
   ignore(tracker.record_sent("same", Some("submission-prompt")))
   let decoded : @event.AgentEvent? = Some(SteerApplied("same"))

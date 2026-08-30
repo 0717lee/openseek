@@ -40,7 +40,7 @@ struct RootTestServiceBackings {
 }
 
 ///|
-fn RootTestServiceBackings::new() -> RootTestServiceBackings {
+fn RootTestServiceBackings::RootTestServiceBackings() -> RootTestServiceBackings {
   let log_output = @log.MemoryLogger()
   let log_service = @log.LogService(level=Trace, logger=log_output)
   let languages = @languages.Languages()
@@ -115,7 +115,7 @@ test "model slot generation and browser shape follow headless lifecycle" {
 
 ///|
 test "preloaded markers survive detach and seed again on reattach" {
-  let backings = RootTestServiceBackings::new()
+  let backings = RootTestServiceBackings::RootTestServiceBackings()
   let viewer = CodeEditorWidget::CodeEditorWidget(services=backings.services)
   let model = test_model("alpha")
   seed_lifecycle_marker(backings.markers, model)
@@ -135,7 +135,7 @@ test "preloaded markers survive detach and seed again on reattach" {
 
 ///|
 test "set_value refresh does not acquire another shared-model lease" {
-  let backings = RootTestServiceBackings::new()
+  let backings = RootTestServiceBackings::RootTestServiceBackings()
   let first = CodeEditorWidget::CodeEditorWidget(services=backings.services)
   let second = CodeEditorWidget::CodeEditorWidget(services=backings.services)
   let model = test_model("alpha")
@@ -159,7 +159,7 @@ test "set_value refresh does not acquire another shared-model lease" {
 
 ///|
 test "distinct same-URI models retain independent decoration owners" {
-  let backings = RootTestServiceBackings::new()
+  let backings = RootTestServiceBackings::RootTestServiceBackings()
   let first_viewer = CodeEditorWidget::CodeEditorWidget(
     services=backings.services,
   )
@@ -188,7 +188,7 @@ test "distinct same-URI models retain independent decoration owners" {
 
 ///|
 test "model disposal detaches two Viewers sharing one registration" {
-  let backings = RootTestServiceBackings::new()
+  let backings = RootTestServiceBackings::RootTestServiceBackings()
   let first = CodeEditorWidget::CodeEditorWidget(services=backings.services)
   let second = CodeEditorWidget::CodeEditorWidget(services=backings.services)
   let model = test_model("alpha")
@@ -207,7 +207,7 @@ test "model disposal detaches two Viewers sharing one registration" {
 
 ///|
 test "explicit services stay borrowed after CodeEditorWidget disposal" {
-  let backings = RootTestServiceBackings::new()
+  let backings = RootTestServiceBackings::RootTestServiceBackings()
   let viewer = CodeEditorWidget::CodeEditorWidget(services=backings.services)
   assert_false(viewer.owns_services)
   viewer.dispose()
@@ -224,7 +224,7 @@ test "explicit services stay borrowed after CodeEditorWidget disposal" {
 
 ///|
 test "MarkerStore makes only its generated decorations bundle-owned" {
-  let backings = RootTestServiceBackings::new()
+  let backings = RootTestServiceBackings::RootTestServiceBackings()
   let services = CodeEditorServices(
     languages=backings.languages.language_handle(
       backings.log_service.log_handle(),
@@ -262,7 +262,7 @@ test "MarkerStore makes only its generated decorations bundle-owned" {
 
 ///|
 test "Decorations leaves every caller handle live after bundle disposal" {
-  let backings = RootTestServiceBackings::new()
+  let backings = RootTestServiceBackings::RootTestServiceBackings()
   let log_handle = backings.log_service.log_handle()
   let language_handle = backings.languages.language_handle(log_handle)
   let marker_handle = backings.marker_decorations.marker_decorations_handle()
@@ -441,7 +441,7 @@ test "omitted services are owned and CodeEditorWidget disposal is idempotent" {
 
 ///|
 test "disposed headless CodeEditorWidget ignores later model and callback work" {
-  let backings = RootTestServiceBackings::new()
+  let backings = RootTestServiceBackings::RootTestServiceBackings()
   let viewer = CodeEditorWidget::CodeEditorWidget(services=backings.services)
   let model = test_model("alpha")
   viewer.set_model(Some(model))

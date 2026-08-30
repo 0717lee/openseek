@@ -186,7 +186,7 @@ fn create_request(
   all : Array[CharWidthRequest],
   monospace : Array[CharWidthRequest]?,
 ) -> CharWidthRequest {
-  let result = CharWidthRequest::new(chr, request_type)
+  let result = CharWidthRequest::CharWidthRequest(chr, request_type)
   all.push(result)
   match monospace {
     Some(monospace) => monospace.push(result)

@@ -18,7 +18,7 @@ struct FoldingDecorationAccess {
 }
 
 ///|
-fn FoldingDecorationAccess::new(
+fn FoldingDecorationAccess::FoldingDecorationAccess(
   get_decoration_option : (Bool, Bool, Bool, Bool) -> @model.ModelDecorationOptions,
   change_decorations : ((@model.ModelDecorationsChangeAccessor) -> Unit) -> Unit,
   remove_decorations : (Array[String]) -> Unit,

@@ -77,7 +77,7 @@ fn TestDecorationProvider::remove_decorations(
 fn TestDecorationProvider::access(
   self : TestDecorationProvider,
 ) -> FoldingDecorationAccess {
-  FoldingDecorationAccess::new(
+  FoldingDecorationAccess::FoldingDecorationAccess(
     (is_collapsed, is_hidden, is_manual, is_outline_body) => {
       self.get_decoration_option(
         is_collapsed, is_hidden, is_manual, is_outline_body,

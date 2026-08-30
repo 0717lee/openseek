@@ -24,7 +24,9 @@ priv struct LanguageFeatureSnapshot[T] {
 }
 
 ///|
-fn[T] LanguageFeatureRegistry::new() -> LanguageFeatureRegistry[T] {
+fn[T] LanguageFeatureRegistry::LanguageFeatureRegistry() -> LanguageFeatureRegistry[
+  T,
+] {
   { entries: [], clock: 0, }
 }
 
@@ -141,11 +143,11 @@ struct LanguageHandle {
 /// Creates an isolated language registry.
 pub fn Languages::Languages() -> Languages {
   {
-    hover_provider: LanguageFeatureRegistry::new(),
-    definition_provider: LanguageFeatureRegistry::new(),
-    references_provider: LanguageFeatureRegistry::new(),
-    document_symbol_provider: LanguageFeatureRegistry::new(),
-    markdown_comment_provider: LanguageFeatureRegistry::new(),
+    hover_provider: LanguageFeatureRegistry::LanguageFeatureRegistry(),
+    definition_provider: LanguageFeatureRegistry::LanguageFeatureRegistry(),
+    references_provider: LanguageFeatureRegistry::LanguageFeatureRegistry(),
+    document_symbol_provider: LanguageFeatureRegistry::LanguageFeatureRegistry(),
+    markdown_comment_provider: LanguageFeatureRegistry::LanguageFeatureRegistry(),
     language_configurations: Map([]),
   }
 }

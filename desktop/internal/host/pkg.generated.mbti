@@ -41,8 +41,8 @@ pub fn PayloadError::to_repr(Self) -> @debug.Repr
 
 // Types and methods
 type HostConnection
+pub fn HostConnection::HostConnection() -> Self
 pub fn HostConnection::close_terminals(Self) -> Unit
-pub fn HostConnection::new() -> Self
 pub async fn HostConnection::run(Self, async (@protocol.Notification) -> Unit, async (@protocol.Notification) -> Unit) -> Unit
 
 type HostState

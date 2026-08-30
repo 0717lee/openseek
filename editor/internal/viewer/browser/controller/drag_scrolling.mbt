@@ -58,7 +58,7 @@ fn DragScrolling::set_dispatch(
 }
 
 ///|
-fn DragScrolling::new(
+fn DragScrolling::DragScrolling(
   direction : DragScrollingDirection,
   view_helper : PointerHandlerHelper,
   mouse_target_factory : MouseTargetFactory,
@@ -94,7 +94,7 @@ fn DragScrolling::start(
     Some(operation) => operation.set_position(position, mouse_event)
     None =>
       self.operation = Some(
-        DragScrollingOperation::new(
+        DragScrollingOperation::DragScrollingOperation(
           self.direction,
           self.view_helper,
           self.mouse_target_factory,
@@ -137,7 +137,7 @@ priv struct DragScrollingOperation {
 }
 
 ///|
-fn DragScrollingOperation::new(
+fn DragScrollingOperation::DragScrollingOperation(
   direction : DragScrollingDirection,
   view_helper : PointerHandlerHelper,
   mouse_target_factory : MouseTargetFactory,

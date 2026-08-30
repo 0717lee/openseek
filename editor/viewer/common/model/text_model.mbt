@@ -176,15 +176,15 @@ fn new_text_model(
     on_will_dispose: Emitter(),
     is_disposed: false,
     version_id: 1,
-    event_emitter: DidChangeContentEmitter::new(),
+    event_emitter: DidChangeContentEmitter::DidChangeContentEmitter(),
     view_models: [],
     identity,
     decoration_id_namespace,
     delta_decoration_call_cnt: 0,
     last_decoration_id: 0,
     decorations: Map([]),
-    decorations_tree: DecorationsTrees::new(),
-    on_did_change_decorations: DidChangeDecorationsEmitter::new(),
+    decorations_tree: DecorationsTrees::DecorationsTrees(),
+    on_did_change_decorations: DidChangeDecorationsEmitter::DidChangeDecorationsEmitter(),
   }
 }
 
@@ -699,7 +699,7 @@ fn TextModel::set_value_from_snapshot(
 
   // Destroy all my decorations
   self.decorations = Map([])
-  self.decorations_tree = DecorationsTrees::new()
+  self.decorations_tree = DecorationsTrees::DecorationsTrees()
   self.emit_content_changed_event(
     {
       changes: [ModelRawFlush],

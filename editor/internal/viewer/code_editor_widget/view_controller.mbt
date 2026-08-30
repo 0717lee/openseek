@@ -24,7 +24,7 @@ fn CodeEditorWidget::dispatch_mouse(
   guard self.get_view_model() is Some(view_model) else { return }
   let old_cursor_state = view_model.cursor.get_primary_cursor_state()
   let position = validate_mouse_view_position(view_model, data.position)
-  let command_args = CursorMoveCommandArgs::new(
+  let command_args = CursorMoveCommandArgs::CursorMoveCommandArgs(
     source="mouse",
     position=self.view_to_model(position),
     view_position=position,
@@ -143,7 +143,7 @@ fn CodeEditorWidget::run_select_all_core_command(
     view_model,
     "editor.action.selectAll",
     args=BaseCommandArguments(
-      CursorBaseCommandOptions::new(source=nominal_source),
+      CursorBaseCommandOptions::CursorBaseCommandOptions(source=nominal_source),
     ),
   )
 }

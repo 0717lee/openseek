@@ -57,7 +57,7 @@ pub async fn[X] build_tools(
   // record which paths the agent created vs. modified this session — the record
   // `remove` reads to tell an agent-created file (safe to delete) from a
   // pre-existing one.
-  let file_state = @agent_tool.FileStateMap::new()
+  let file_state = @agent_tool.FileStateMap::FileStateMap()
   // One session temp dir, shared by the job runtime (which spills large job
   // output to disk) and mbtx (whose detached snippets outlive the call
   // that started them, so their directories cannot be reclaimed there).

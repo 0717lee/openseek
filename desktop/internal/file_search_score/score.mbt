@@ -40,7 +40,7 @@ impl Compare for RankedPath with fn compare(self, other) {
 /// accepting `\\` in the input makes pasted Windows paths behave identically.
 /// `*` is only a fuzzy-search decoration (as in VS Code), not a literal file
 /// character that should eliminate every candidate.
-pub fn PathQuery::new(raw : String) -> PathQuery {
+pub fn PathQuery::PathQuery(raw : String) -> PathQuery {
   let text = raw
     .trim()
     .to_owned()
@@ -173,7 +173,7 @@ pub fn rank_paths(
   paths : Array[String],
   limit : Int,
 ) -> Array[String] {
-  PathQuery::new(query).rank_paths(paths, limit)
+  PathQuery::PathQuery(query).rank_paths(paths, limit)
 }
 
 ///|
@@ -216,7 +216,7 @@ test "file path ranking retains only the requested best rows" {
 
 ///|
 test "prepared queries normalize separators and fuzzy wildcards" {
-  let query = PathQuery::new("  src\\*main  ")
+  let query = PathQuery::PathQuery("  src\\*main  ")
   assert_eq(query.key(), "src/main")
   assert_true(query.matches("src/main.mbt"))
   assert_false(query.matches("examples/main.mbt"))

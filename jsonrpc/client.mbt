@@ -99,7 +99,7 @@ struct Client {
 /// The caller must spawn `run_message_pump` and `run_writer` before issuing
 /// requests (see the module comment). Closing the transport makes in-flight and
 /// later requests fail with `Closed`.
-pub fn[T : Transport] Client::new(transport : T) -> Client {
+pub fn[T : Transport] Client::Client(transport : T) -> Client {
   {
     transport: transport as &Transport,
     pending: Map([]),

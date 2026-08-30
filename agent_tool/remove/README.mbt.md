@@ -107,7 +107,7 @@ async test "remove deletes an agent-created file through the registry" {
     )
     // The session recorded that the agent created this file, as `write` would,
     // capturing its content digest so the delete gate can revalidate it.
-    let file_state = @agent_tool.FileStateMap::new()
+    let file_state = @agent_tool.FileStateMap::FileStateMap()
     file_state.record_created(
       path,
       @agent_tool.content_digest(@fs.read_file(path).text()),

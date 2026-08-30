@@ -57,7 +57,7 @@ fn with_feedback_test_viewer(
   text : String,
   body : (CodeEditorWidget, @agent_feedback.AgentFeedbackService) -> Unit raise,
 ) -> Unit raise {
-  let backings = RootTestServiceBackings::new()
+  let backings = RootTestServiceBackings::RootTestServiceBackings()
   let viewer = CodeEditorWidget::CodeEditorWidget(
     services=backings.services,
     options=CodeEditorOptions(font_size=12, line_height=18),
@@ -184,7 +184,7 @@ test "selection changes without editor focus never open the input" {
 
 ///|
 test "feedback content flush preserves central owners and refreshes model state" {
-  let backings = RootTestServiceBackings::new()
+  let backings = RootTestServiceBackings::RootTestServiceBackings()
   let service = backings.agent_feedback
   let handle = service.agent_feedback_handle()
   let viewer = CodeEditorWidget::CodeEditorWidget(services=backings.services)
@@ -252,7 +252,7 @@ test "feedback content flush preserves central owners and refreshes model state"
 
 ///|
 test "feedback model swap removal and reattach preserve only CodeEditorWidget-lifetime state" {
-  let backings = RootTestServiceBackings::new()
+  let backings = RootTestServiceBackings::RootTestServiceBackings()
   let service = backings.agent_feedback
   let handle = service.agent_feedback_handle()
   let viewer = CodeEditorWidget::CodeEditorWidget(services=backings.services)
@@ -343,7 +343,7 @@ test "feedback model swap removal and reattach preserve only CodeEditorWidget-li
 
 ///|
 test "feedback disposal drains entries tears down model state and silences services" {
-  let backings = RootTestServiceBackings::new()
+  let backings = RootTestServiceBackings::RootTestServiceBackings()
   let service = backings.agent_feedback
   let handle = service.agent_feedback_handle()
   let viewer = CodeEditorWidget::CodeEditorWidget(services=backings.services)

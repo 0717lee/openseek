@@ -89,7 +89,7 @@ fn run_markdown_folding_test() -> Unit {
     "moonbit",
     @lang_moonbit.MoonBitTokenizer(),
   )
-  let hover_harness = MarkdownDocumentHoverHarness::new()
+  let hover_harness = MarkdownDocumentHoverHarness::MarkdownDocumentHoverHarness()
   let languages = @languages.Languages()
   let _hover_registration = languages.register_hover_provider(
     LanguageId("moonbit"),

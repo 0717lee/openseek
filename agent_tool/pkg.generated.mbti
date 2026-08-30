@@ -56,10 +56,10 @@ pub fn FileState::to_repr(Self) -> @debug.Repr
 pub struct FileStateMap {
   // private fields
 }
+pub fn FileStateMap::FileStateMap() -> Self
 pub fn FileStateMap::created_and_unchanged(Self, String, String) -> Bool
 pub fn FileStateMap::forget(Self, String) -> Unit
 pub fn FileStateMap::get(Self, String) -> FileState?
-pub fn FileStateMap::new() -> Self
 pub fn FileStateMap::record_created(Self, String, String) -> Unit
 pub fn FileStateMap::record_edited(Self, String, String, String) -> Unit
 pub fn FileStateMap::record_modified(Self, String, String) -> Unit

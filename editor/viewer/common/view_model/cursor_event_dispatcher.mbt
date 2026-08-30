@@ -271,7 +271,7 @@ priv struct OutgoingEventListenerCell {
 
 ///|
 /// Creates an empty dispatcher.
-fn CursorEventDispatcher::new() -> CursorEventDispatcher {
+fn CursorEventDispatcher::CursorEventDispatcher() -> CursorEventDispatcher {
   {
     event_listeners: [],
     outgoing_events: [],

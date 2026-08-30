@@ -156,7 +156,7 @@ fn browser_geometry_model(name : String) -> @model.TextModel {
 }
 
 ///|
-fn BrowserGeometryFixture::new(
+fn BrowserGeometryFixture::BrowserGeometryFixture(
   name : String,
   family : String,
   host : @rdom.Element,
@@ -335,10 +335,10 @@ fn run_browser_geometry_test() -> Unit {
       return
     }
     install_browser_geometry_private_probe()
-    let mono = BrowserGeometryFixture::new(
+    let mono = BrowserGeometryFixture::BrowserGeometryFixture(
       "monospace", "Geometry Mono", mono_host,
     )
-    let proportional = BrowserGeometryFixture::new(
+    let proportional = BrowserGeometryFixture::BrowserGeometryFixture(
       "proportional", "Geometry Proportional", proportional_host,
     )
     let iframe_document = browser_geometry_create_owner_iframe()

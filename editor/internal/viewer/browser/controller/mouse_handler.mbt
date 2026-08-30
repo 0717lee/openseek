@@ -166,7 +166,7 @@ pub fn MouseHandler::MouseHandler(
   let handler : MouseHandler = {
     view_helper,
     mouse_target_factory,
-    mouse_down_operation: MouseDownOperation::new(
+    mouse_down_operation: MouseDownOperation::MouseDownOperation(
       view_helper, mouse_target_factory,
     ),
     scrollbar_drag_monitor: GlobalPointerMoveMonitor(),
@@ -477,7 +477,7 @@ priv struct MouseDownOperation {
 }
 
 ///|
-fn MouseDownOperation::new(
+fn MouseDownOperation::MouseDownOperation(
   view_helper : PointerHandlerHelper,
   mouse_target_factory : MouseTargetFactory,
 ) -> MouseDownOperation {
@@ -487,13 +487,13 @@ fn MouseDownOperation::new(
     mouse_move_monitor: GlobalEditorPointerMoveMonitor(
       view_helper.view_dom_node,
     ),
-    top_bottom_drag_scrolling: DragScrolling::new(
+    top_bottom_drag_scrolling: DragScrolling::DragScrolling(
       TopBottom,
       view_helper,
       mouse_target_factory,
       (_position, _in_selection_mode, _reveal_type) => (),
     ),
-    left_right_drag_scrolling: DragScrolling::new(
+    left_right_drag_scrolling: DragScrolling::DragScrolling(
       LeftRight,
       view_helper,
       mouse_target_factory,

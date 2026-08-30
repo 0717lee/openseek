@@ -57,7 +57,7 @@ priv struct GeometryTimerSpy {
 }
 
 ///|
-fn GeometryTimerSpy::new() -> GeometryTimerSpy {
+fn GeometryTimerSpy::GeometryTimerSpy() -> GeometryTimerSpy {
   { next_handle: 0, tasks: [], cleared: [], }
 }
 
@@ -497,7 +497,7 @@ test "ViewLines width sweep preserves one ceil monotonic and full-document reset
 
 ///|
 test "ViewLines scheduler debounces fires the latest callback and disposes pending work" {
-  let spy = GeometryTimerSpy::new()
+  let spy = GeometryTimerSpy::GeometryTimerSpy()
   let scheduler = @base_browser.RunOnceScheduler::new_with_timer(200, (
     callback,
     delay_ms,
@@ -533,7 +533,7 @@ test "ViewLines scheduler debounces fires the latest callback and disposes pendi
 
 ///|
 test "ViewLines 200ms scheduler guards and cancel-before-slow ordering" {
-  let spy = GeometryTimerSpy::new()
+  let spy = GeometryTimerSpy::GeometryTimerSpy()
   let scheduler = @base_browser.RunOnceScheduler::new_with_timer(200, (
     callback,
     delay_ms,
